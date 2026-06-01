@@ -118,7 +118,7 @@ async fn run_trial(
   let task = task_template.replace_all(old="{{WORKSPACE}}", new=real_workspace)
   let args = [
     "run",
-    "cmd/main",
+    "cmd/openseek",
     "--",
     "--max-steps",
     config.max_steps.to_string(),
@@ -146,7 +146,7 @@ async fn run_trial(
     cwd=config.repo_root,
   )
   let log_text = output.text()
-  let log_path = config.out_dir + "/logs/" + padded_index(index + 1) + ".log"
+  let log_path = config.out_dir + "/logs/" + padded_index(index + 1) + ".jsonl"
   @fs.write_file(log_path, log_text, create_mode=CreateOrTruncate)
   let validation = validate_toml_workspace(real_workspace)
   evaluate_trial(
@@ -170,7 +170,7 @@ fn evaluate_trial(
   log_text : String,
   validation : ValidationResult,
 ) -> TrialResult {
-  let finished = log_text.contains("=== finished ===")
+  let finished = log_text.contains("\"event\":\"finish\"")
   let reasons : Array[String] = []
   if exit_code != 0 {
     reasons.push("agent process exited \{exit_code}")
@@ -182,7 +182,9 @@ fn evaluate_trial(
     reasons.push(validation.reason)
   }
   let warnings : Array[String] = []
-  let shell_uses = count_lines_containing_all(log_text, ["tool: exit="])
+  let shell_uses = count_lines_containing_all(log_text, [
+    "\"event\":\"tool\"", "exit=",
+  ])
   if shell_uses > 0 {
     warnings.push("shell output observed \{shell_uses} time(s)")
   }
@@ -199,8 +201,8 @@ fn evaluate_trial(
     workspace,
     log_path,
     exit_code,
-    steps: count_occurrences(log_text, "--- step "),
-    tool_errors: count_occurrences(log_text, "tool error:"),
+    steps: count_occurrences(log_text, "\"event\":\"step\""),
+    tool_errors: count_occurrences(log_text, "\"is_error\":true"),
     finished,
     validation,
     moon_check_uses: count_lines_containing_all(log_text, ["command=moon check"]),

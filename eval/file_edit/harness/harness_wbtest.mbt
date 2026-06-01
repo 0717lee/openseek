@@ -12,10 +12,9 @@ async test "dry run exact replacement oracle" {
   @fs.write_file(
     log_path,
     (
-      $|--- step 1 ---
-      $|tool: ok: replaced 1 occurrence
-      $|=== finished ===
-      $|file-edit-eval:\{case.id}
+      $|{"level":"INFO","event":"step","step":1}
+      $|{"level":"INFO","event":"tool","is_error":false,"content":"ok: replaced 1 occurrence"}
+      $|{"level":"INFO","event":"finish","answer":"file-edit-eval:\{case.id}"}
     ),
     create_mode=CreateOrTruncate,
   )
@@ -62,24 +61,12 @@ async test "indexed runner honors concurrency and preserves order" {
 ///|
 test "log monitor counts prompt-sensitive moon commands" {
   let log_text =
-    #|tool: cwd=.
-    #|command=moon run -e fn main { println("ok") }
-    #|exit=0
-    #|tool error: cwd=.
-    #|command=moon run -c fn main { println("old") }
-    #|exit=1
-    #|tool: cwd=.
-    #|command=moon check
-    #|exit=0
-    #|tool: cwd=.
-    #|command=moon test
-    #|exit=0
-    #|tool: cwd=.
-    #|command=moon info
-    #|exit=0
-    #|tool: cwd=.
-    #|command=moon fmt
-    #|exit=0
+    #|{"event":"tool","content":"cwd=.\ncommand=moon run -e fn main { println(\"ok\") }\nexit=0"}
+    #|{"event":"tool","is_error":true,"content":"cwd=.\ncommand=moon run -c fn main { println(\"old\") }\nexit=1"}
+    #|{"event":"tool","content":"cwd=.\ncommand=moon check\nexit=0"}
+    #|{"event":"tool","content":"cwd=.\ncommand=moon test\nexit=0"}
+    #|{"event":"tool","content":"cwd=.\ncommand=moon info\nexit=0"}
+    #|{"event":"tool","content":"cwd=.\ncommand=moon fmt\nexit=0"}
   assert_eq(count_lines_containing_all(log_text, ["command=moon "]), 6)
   assert_eq(count_lines_containing_all(log_text, ["moon run", " -e"]), 1)
   assert_eq(count_lines_containing_all(log_text, ["moon run", " -c"]), 1)

@@ -1,22 +1,16 @@
 # Logger
 
-This package provides a tiny native-only async logger for OpenSeek. It wraps an
-`@stdio.Output`, applies a minimum severity level, and exposes `<+`-compatible
-sinks.
+This package provides a tiny native-only async JSONL logger for OpenSeek. It
+wraps an `@stdio.Output` and writes one JSON object per line.
 
 ## API Shape
 
-- `Level`: `TRACE`, `DEBUG`, `INFO`, `WARN`, and `ERROR`.
-- `stdout(min_level?)`: build a stdout logger.
-- `Logger::at(level)`: get a level-filtered sink.
-- `Logger::trace/debug/info/warn/error()`: convenience sinks.
-- `Logger` itself supports `<+` as an `INFO` sink.
+- `stdout()`: build a stdout logger.
+- `Logger::write(record)`: write a `Map[String, Json]` as one JSONL record.
 
 ```moonbit check
 ///|
-test "logger filters by severity" {
-  let logger = @logger.Logger(@stdio.stdout, min_level=WARN)
-  assert_false(logger.enabled(INFO))
-  assert_true(logger.enabled(ERROR))
+test "logger can be constructed" {
+  let _logger = @logger.Logger(@stdio.stdout)
 }
 ```

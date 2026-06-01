@@ -7,7 +7,7 @@ variables, and calls `bobzhang/openseek/agent.run`.
 ## Command
 
 ```bash
-moon run cmd/main -- [--api-key sk-...] [--model deepseek-v4-pro] [--max-steps 1000] [--system-prompt-file prompt.md] [--system-prompt-addendum-file addendum.md] "task text"
+moon run cmd/openseek -- [--api-key sk-...] [--model deepseek-v4-pro] [--max-steps 1000] [--system-prompt-file prompt.md] [--system-prompt-addendum-file addendum.md] "task text"
 ```
 
 `--api-key` can also be supplied with `DEEPSEEK`. `--model` can also be supplied
@@ -25,15 +25,24 @@ Without an explicit prompt file, the CLI selects the built-in prompt by model:
 
 ```bash
 export DEEPSEEK=sk-...
-moon run cmd/main -- "run moon test and summarize the result"
+moon run cmd/openseek -- "run moon test and summarize the result"
 ```
 
 ```bash
-DEEPSEEK_MODEL=deepseek-v4-flash moon run cmd/main -- "inspect the package docs"
+DEEPSEEK_MODEL=deepseek-v4-flash moon run cmd/openseek -- "inspect the package docs"
 ```
 
 ```bash
-moon run cmd/main -- --max-steps 200 "write tests, fix failures, and summarize"
+moon run cmd/openseek -- --max-steps 200 "write tests, fix failures, and summarize"
+```
+
+JSONL logs are the default so long runs can be queried while they are running.
+Because each record is complete on one line, another shell can run `jq` against
+`run.jsonl` while `tee` is still appending:
+
+```bash
+moon run cmd/openseek -- "inspect the package docs" | tee run.jsonl
+jq -r 'select(.event == "finish") | .answer' run.jsonl
 ```
 
 ## Package Boundary
@@ -46,5 +55,13 @@ definitions and the execution loop.
 Run the package tests with:
 
 ```bash
-moon test cmd/main
+moon test cmd/openseek
+```
+
+Run the real-world CLI cram tests with MoonBit nightly and a DeepSeek key:
+
+```bash
+work_dir="$(mktemp -d)"
+printf 'export DEEPSEEK=%q\n' "$DEEPSEEK" > "$work_dir/.deepseek_env"
+moon cram test --work-directory "$work_dir" tests/cram/realworld.md
 ```
