@@ -24,6 +24,72 @@ test "json stdout probe accepts valid json only" {
 }
 
 ///|
+test "agent log summary reads jsonl events and ignores process noise" {
+  let summary = summarize_agent_log(
+    (
+      #|Blocking waiting for file lock /tmp/.moon-lock ...
+      #|{"event":"agent_step","step":1}
+      #|{"event":"tool_result","tool_name":"write","is_error":true,"content":"failed"}
+      #|{"event":"tool_result","tool_name":"shell","is_error":false,"content":"exit=0"}
+      #|{"event":"agent_finished","answer":"ok"}
+    ),
+  )
+  assert_true(summary.finished)
+  assert_eq(summary.steps, 1)
+  assert_eq(summary.tool_errors, 1)
+  assert_eq(summary.shell_uses, 1)
+}
+
+///|
+test "agent log summary falls back to legacy text markers" {
+  let summary = summarize_agent_log(
+    (
+      #|tool: exit=0
+      #|--- step 1 ---
+      #|tool error: failed
+      #|=== finished ===
+    ),
+  )
+  assert_true(summary.finished)
+  assert_eq(summary.steps, 1)
+  assert_eq(summary.tool_errors, 1)
+  assert_eq(summary.shell_uses, 1)
+}
+
+///|
+test "trial evaluation uses jsonl finish and counters" {
+  let validation : ValidationResult = {
+    passed: true,
+    reason: "ok",
+    moon_check: true,
+    moon_test: true,
+    file_probe: true,
+    stdin_probe: true,
+    duplicate_probe: true,
+  }
+  let result = evaluate_trial(
+    "flash",
+    0,
+    "ws",
+    "log",
+    0,
+    (
+      #|not json
+      #|{"event":"agent_step","step":1}
+      #|{"event":"tool_result","tool_name":"shell","is_error":false,"content":"exit=0"}
+      #|{"event":"agent_finished","answer":"ok"}
+    ),
+    validation,
+  )
+  assert_true(result.success)
+  assert_true(result.finished)
+  assert_eq(result.reason, "ok")
+  assert_eq(result.steps, 1)
+  assert_eq(result.tool_errors, 0)
+  assert_eq(result.warnings, "shell output observed 1 time(s)")
+}
+
+///|
 test "markdown report includes concurrency and prompt label" {
   let report : EvalReport = {
     model: "deepseek-v4-flash",

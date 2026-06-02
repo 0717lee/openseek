@@ -37,6 +37,47 @@ async test "dry run exact replacement oracle" {
 }
 
 ///|
+async test "dry run exact replacement oracle with jsonl agent log" {
+  let case = @cases.case_for_trial(0)
+  let root = @fs.tmpdir(prefix="openseek-file-edit-harness-jsonl")
+  let workspace = root + "/workspace"
+  let log_path = root + "/trial.log"
+  @fs.mkdir(workspace, recursive=true)
+  write_fixture(workspace, case)
+  @vfs.FileSystem({ "src/note.txt": "alpha\ndelta\ngamma\n" }).write_to(
+    workspace,
+  )
+  @fs.write_file(
+    log_path,
+    (
+      $|not json
+      $|{"event":"agent_step","step":1}
+      $|{"event":"tool_result","tool_name":"edit","is_error":false,"content":"ok: replaced 1 occurrence"}
+      $|{"event":"tool_result","tool_name":"shell","is_error":false,"content":"exit=0"}
+      $|{"event":"agent_finished","answer":"file-edit-eval:\{case.id}"}
+    ),
+    create_mode=CreateOrTruncate,
+  )
+  let result = evaluate_trial(
+    "builtin",
+    0,
+    case,
+    workspace,
+    log_path,
+    0,
+    @fs.read_file(log_path).text(),
+  )
+  assert_true(result.success)
+  assert_eq(result.steps, 1)
+  assert_eq(result.tool_errors, 0)
+  assert_eq(result.shell_uses, 1)
+  assert_eq(result.edit_successes, 1)
+  assert_true(result.marker_present)
+  assert_eq(result.warnings, "shell tool used 1 time(s)")
+  let _ = @fs.rmdir(root, recursive=true) catch { _ => () }
+}
+
+///|
 test "count_occurrences counts non-overlapping markers" {
   assert_eq(count_occurrences("tool error: a\ntool error: b", "tool error:"), 2)
   assert_eq(count_occurrences("abc", "z"), 0)
