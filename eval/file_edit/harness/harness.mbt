@@ -38,6 +38,13 @@ pub struct EvalReport {
 }
 
 ///|
+priv struct AgentLogSummary {
+  steps : Int
+  tool_errors : Int
+  shell_uses : Int
+}
+
+///|
 pub async fn run_suite(config : Config) -> EvalReport {
   prepare_output_dir(config.out_dir)
   let results = run_indexed_with_concurrency(config.runs, config.concurrency, index => {
@@ -160,9 +167,8 @@ async fn evaluate_trial(
 ) -> TrialResult {
   let state_reason = check_expected_state(workspace, case)
   let validation_reason = run_validation(workspace, case.validation)
-  let leading_shell_use = if log_text.has_prefix("tool: exit=") { 1 } else { 0 }
-  let shell_uses = count_occurrences(log_text, "\ntool: exit=") +
-    leading_shell_use
+  let log_summary = summarize_agent_log(log_text)
+  let shell_uses = log_summary.shell_uses
   let marker = "file-edit-eval:\{case.id}"
   let marker_ok = log_text.contains(marker)
   let validation_passed = validation_reason == ""
@@ -197,8 +203,8 @@ async fn evaluate_trial(
     workspace,
     log_path,
     exit_code,
-    steps: count_occurrences(log_text, "--- step "),
-    tool_errors: count_occurrences(log_text, "tool error:"),
+    steps: log_summary.steps,
+    tool_errors: log_summary.tool_errors,
     shell_uses,
     moon_cmd_uses: count_lines_containing_all(log_text, ["command=moon "]),
     moon_run_e_mentions: count_lines_containing_all(log_text, [
@@ -220,6 +226,56 @@ async fn evaluate_trial(
     } else {
       warnings.join("; ")
     },
+  }
+}
+
+///|
+fn summarize_agent_log(log_text : String) -> AgentLogSummary {
+  let mut has_json_events = false
+  let mut steps = 0
+  let mut tool_errors = 0
+  let mut shell_uses = 0
+  for line in log_text.split("\n") {
+    let json = @json.parse(line.trim()) catch { _ => continue }
+    match json {
+      { "event": String("agent_step"), .. } => {
+        has_json_events = true
+        steps += 1
+      }
+      {
+        "event": String("tool_result"),
+        "tool_name": String(tool_name),
+        "is_error": is_error,
+        ..
+      } => {
+        has_json_events = true
+        if tool_name == "shell" {
+          shell_uses += 1
+        }
+        match is_error {
+          True => tool_errors += 1
+          _ => ()
+        }
+      }
+      { "event": String(_), .. } => has_json_events = true
+      _ => ()
+    }
+  }
+  if has_json_events {
+    { steps, tool_errors, shell_uses }
+  } else {
+    let leading_shell_use = if log_text.has_prefix("tool: exit=") {
+      1
+    } else {
+      0
+    }
+    let shell_uses = count_occurrences(log_text, "\ntool: exit=") +
+      leading_shell_use
+    {
+      steps: count_occurrences(log_text, "--- step "),
+      tool_errors: count_occurrences(log_text, "tool error:"),
+      shell_uses,
+    }
   }
 }
 

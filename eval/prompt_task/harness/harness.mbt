@@ -58,6 +58,14 @@ pub struct EvalReport {
 }
 
 ///|
+priv struct AgentLogSummary {
+  finished : Bool
+  steps : Int
+  tool_errors : Int
+  shell_uses : Int
+}
+
+///|
 pub async fn run_suite(config : Config) -> EvalReport {
   prepare_output_dir(config.out_dir)
   let task_template = @fs.read_file(config.task_file).text()
@@ -170,7 +178,8 @@ fn evaluate_trial(
   log_text : String,
   validation : ValidationResult,
 ) -> TrialResult {
-  let finished = log_text.contains("=== finished ===")
+  let log_summary = summarize_agent_log(log_text)
+  let finished = log_summary.finished
   let reasons : Array[String] = []
   if exit_code != 0 {
     reasons.push("agent process exited \{exit_code}")
@@ -182,9 +191,8 @@ fn evaluate_trial(
     reasons.push(validation.reason)
   }
   let warnings : Array[String] = []
-  let shell_uses = count_lines_containing_all(log_text, ["tool: exit="])
-  if shell_uses > 0 {
-    warnings.push("shell output observed \{shell_uses} time(s)")
+  if log_summary.shell_uses > 0 {
+    warnings.push("shell output observed \{log_summary.shell_uses} time(s)")
   }
   let success = reasons.length() == 0
   {
@@ -199,8 +207,8 @@ fn evaluate_trial(
     workspace,
     log_path,
     exit_code,
-    steps: count_occurrences(log_text, "--- step "),
-    tool_errors: count_occurrences(log_text, "tool error:"),
+    steps: log_summary.steps,
+    tool_errors: log_summary.tool_errors,
     finished,
     validation,
     moon_check_uses: count_lines_containing_all(log_text, ["command=moon check"]),
@@ -236,6 +244,62 @@ fn evaluate_trial(
     } else {
       warnings.join("; ")
     },
+  }
+}
+
+///|
+fn summarize_agent_log(log_text : String) -> AgentLogSummary {
+  let mut has_json_events = false
+  let mut finished = false
+  let mut steps = 0
+  let mut tool_errors = 0
+  let mut shell_uses = 0
+  for line in log_text.split("\n") {
+    let json = @json.parse(line.trim()) catch { _ => continue }
+    match json {
+      { "event": String("agent_step"), .. } => {
+        has_json_events = true
+        steps += 1
+      }
+      { "event": String("agent_finished"), .. } => {
+        has_json_events = true
+        finished = true
+      }
+      {
+        "event": String("tool_result"),
+        "tool_name": String(tool_name),
+        "is_error": is_error,
+        ..
+      } => {
+        has_json_events = true
+        if tool_name == "shell" {
+          shell_uses += 1
+        }
+        match is_error {
+          True => tool_errors += 1
+          _ => ()
+        }
+      }
+      { "event": String(_), .. } => has_json_events = true
+      _ => ()
+    }
+  }
+  if has_json_events {
+    { finished, steps, tool_errors, shell_uses }
+  } else {
+    let leading_shell_use = if log_text.has_prefix("tool: exit=") {
+      1
+    } else {
+      0
+    }
+    let shell_uses = count_occurrences(log_text, "\ntool: exit=") +
+      leading_shell_use
+    {
+      finished: log_text.contains("=== finished ==="),
+      steps: count_occurrences(log_text, "--- step "),
+      tool_errors: count_occurrences(log_text, "tool error:"),
+      shell_uses,
+    }
   }
 }
 
