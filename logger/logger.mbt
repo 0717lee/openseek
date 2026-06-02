@@ -107,13 +107,9 @@ pub async fn[A : Show] LogSink::write(self : LogSink, value : A) -> Unit {
 ///|
 pub async fn LogSink::write_object(
   self : LogSink,
-  fields : Map[String, String],
+  fields : Map[String, Json],
 ) -> Unit {
-  let object : Map[String, Json] = Map([])
-  for key, value in fields {
-    object.set(key, Json::string(value))
-  }
-  self.write_string(Json::object(object).stringify() + "\n")
+  self.write_string(Json::object(fields).stringify() + "\n")
 }
 
 ///|

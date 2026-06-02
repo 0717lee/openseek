@@ -12,7 +12,7 @@ sinks.
   `None`.
 - `Logger::trace/debug/info/warn/error()`: convenience optional sinks.
 - `LogSink` supports `<+` and can write JSON object lines with
-  `write_object(Map[String, String])`.
+  `write_object(Map[String, Json])`.
 
 ```moonbit check
 ///|

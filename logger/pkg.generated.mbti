@@ -25,7 +25,7 @@ pub struct LogSink {
   // private fields
 }
 pub async fn[A : Show] LogSink::write(Self, A) -> Unit
-pub async fn LogSink::write_object(Self, Map[String, String]) -> Unit
+pub async fn LogSink::write_object(Self, Map[String, Json]) -> Unit
 pub async fn LogSink::write_string(Self, String) -> Unit
 
 pub struct Logger {
