@@ -30,7 +30,7 @@ pub async fn run(
   )
   let tools = tool_definitions() catch {
     error => {
-      if log.error() is Some(error_log) {
+      if log.at(ERROR) is Some(error_log) {
         error_log.write_object({
           "event": "agent_setup_failed",
           "error": "\{error}",
@@ -44,12 +44,12 @@ pub async fn run(
     ChatMessage(User, content=task),
   ]
   for step in 0..<max_steps {
-    if log.info() is Some(info_log) {
+    if log.at(INFO) is Some(info_log) {
       info_log.write_object({ "event": "agent_step", "step": step + 1 })
     }
     let response = client.chat(messages, tools=tools.function_tools())
     if response.content != "" {
-      if log.info() is Some(info_log) {
+      if log.at(INFO) is Some(info_log) {
         info_log.write_object({
           "event": "assistant_message",
           "content": response.content,
@@ -58,7 +58,7 @@ pub async fn run(
     }
     print_usage(response.usage)
     if response.tool_calls.length() == 0 {
-      if log.info() is Some(info_log) {
+      if log.at(INFO) is Some(info_log) {
         info_log.write_object({
           "event": "agent_finished",
           "answer": response.content,
@@ -80,7 +80,7 @@ pub async fn run(
     for native_call in response.tool_calls {
       let tool_call = @agent_tool.AgentToolCall(native_call) catch {
         error => {
-          if log.error() is Some(error_log) {
+          if log.at(ERROR) is Some(error_log) {
             error_log.write_object({
               "event": "tool_call_decode_error",
               "tool_call_id": native_call.id,
@@ -97,7 +97,7 @@ pub async fn run(
       let result = @agent_tool.execute_tool_call(tool_call, tools)
       let output = match result {
         Control(Finish(answer)) => {
-          if log.info() is Some(info_log) {
+          if log.at(INFO) is Some(info_log) {
             info_log.write_object({
               "event": "agent_finished",
               "answer": answer,
@@ -106,14 +106,14 @@ pub async fn run(
           return
         }
         Control(Abort(reason)) => {
-          if log.warn() is Some(warn_log) {
+          if log.at(WARN) is Some(warn_log) {
             warn_log.write_object({ "event": "agent_aborted", "reason": reason })
           }
           return
         }
         Respond(output) => output
       }
-      if log.info() is Some(info_log) {
+      if log.at(INFO) is Some(info_log) {
         info_log.write_object({
           "event": "tool_result",
           "tool_call_id": native_call.id,
@@ -125,7 +125,7 @@ pub async fn run(
       messages.push(ChatMessage(Tool(native_call.id), content=output.content))
     }
   }
-  if log.warn() is Some(warn_log) {
+  if log.at(WARN) is Some(warn_log) {
     warn_log.write_object({ "event": "max_steps_exhausted" })
   }
 }
@@ -135,7 +135,7 @@ let log : @logger.Logger = @logger.stdout(min_level=INFO)
 
 ///|
 async fn print_usage(usage : @deepseek.Usage) -> Unit {
-  if log.info() is Some(info_log) {
+  if log.at(INFO) is Some(info_log) {
     info_log.write_object({
       "event": "usage",
       "prompt_tokens": usage.prompt_tokens,
