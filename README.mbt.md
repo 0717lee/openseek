@@ -14,7 +14,7 @@ entry point so request encoding can be tested without network access.
 | `bobzhang/openseek/logger` | Native-only async JSONL logger with severity-filtered optional sinks. | `logger/README.mbt.md` |
 | `bobzhang/openseek/agent_tool` | Tool registry, executor, output, and control-action types. | `agent_tool/README.mbt.md` |
 | `bobzhang/openseek/agent` | Native-only OpenSeek agent loop and local tool dispatch. | `agent/README.mbt.md` |
-| `bobzhang/openseek/cmd/main` | Native-only command-line entry point. | `cmd/main/README.md` |
+| `bobzhang/openseek/cmd/openseek` | Native-only command-line entry point. | `cmd/openseek/README.md` |
 | `bobzhang/openseek/testkit/filesystem` | JSON-backed virtual filesystem for tests and eval fixtures. | `testkit/filesystem/README.mbt.md` |
 | `bobzhang/openseek/eval/report` | Shared Markdown/JSON report primitive for deterministic and model evals. | `eval/report/README.mbt.md` |
 | `bobzhang/openseek/eval/tool_harness` | Deterministic host-side harness that dispatches every built-in tool. | `eval/tool_harness/README.mbt.md` |
@@ -50,14 +50,14 @@ filesystem, and process APIs.
 
 ## Agent CLI
 
-The `cmd/main` package is the CLI entry point. It parses arguments and runs the
-agent package. The agent sends DeepSeek native function tools and supports
+The `cmd/openseek` package is the CLI entry point. It parses arguments and runs
+the agent package. The agent sends DeepSeek native function tools and supports
 seven local tools: `shell`, `read`, `edit`, `write`, `moon_check`, `moon_cmd`,
 and `finish`.
 
 ```bash
 export DEEPSEEK=sk-...
-moon run cmd/main -- "inspect this project and finish with a short summary"
+moon run cmd/openseek -- "inspect this project and finish with a short summary"
 ```
 
 `DEEPSEEK_MODEL` is optional and defaults to `deepseek-v4-pro`.
@@ -66,6 +66,22 @@ the CLI to override it for one run.
 
 See each package README for API boundaries, examples, and package-specific test
 notes.
+
+## Verified CLI Documentation (cram)
+
+The CLI behaviour is documented as executable cram tests under `tests/`, built
+and run with `moon cram test`. The wrapper compiles `cmd/openseek` and exposes it
+on `PATH` as `openseek.exe`.
+
+- [`tests/cram/cli.md`](tests/cram/cli.md) — offline examples (the full help
+  banner and the missing-API-key error). They make no network calls, use no
+  output-processing tools, and run in CI via `moon cram test tests/cram`.
+- [`tests/live/deepseek.md`](tests/live/deepseek.md) — a real, non-mock DeepSeek
+  round trip. It is opt-in (`DEEPSEEK=sk-... moon cram test tests/live`) and
+  parses the agent's JSONL log with MoonBit itself: a `moon run -e` script reads
+  the stream through the published [`bobzhang/jsonl`](https://mooncakes.io/docs/bobzhang/jsonl)
+  package and asserts on typed `Json` values — no `jq` — without pinning
+  nondeterministic content such as token counts or model phrasing.
 
 For the evaluation-backed roadmap, see
 [`agent-improvement-guide.md`](agent-improvement-guide.md). It explains why the

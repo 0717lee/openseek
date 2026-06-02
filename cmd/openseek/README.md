@@ -7,7 +7,7 @@ variables, and calls `bobzhang/openseek/agent.run`.
 ## Command
 
 ```bash
-moon run cmd/main -- [--api-key sk-...] [--model deepseek-v4-pro] [--max-steps 1000] [--system-prompt-file prompt.md] [--system-prompt-addendum-file addendum.md] "task text"
+moon run cmd/openseek -- [--api-key sk-...] [--model deepseek-v4-pro] [--max-steps 1000] [--system-prompt-file prompt.md] [--system-prompt-addendum-file addendum.md] "task text"
 ```
 
 `--api-key` can also be supplied with `DEEPSEEK`. `--model` can also be supplied
@@ -25,15 +25,15 @@ Without an explicit prompt file, the CLI selects the built-in prompt by model:
 
 ```bash
 export DEEPSEEK=sk-...
-moon run cmd/main -- "run moon test and summarize the result"
+moon run cmd/openseek -- "run moon test and summarize the result"
 ```
 
 ```bash
-DEEPSEEK_MODEL=deepseek-v4-flash moon run cmd/main -- "inspect the package docs"
+DEEPSEEK_MODEL=deepseek-v4-flash moon run cmd/openseek -- "inspect the package docs"
 ```
 
 ```bash
-moon run cmd/main -- --max-steps 200 "write tests, fix failures, and summarize"
+moon run cmd/openseek -- --max-steps 200 "write tests, fix failures, and summarize"
 ```
 
 ## Package Boundary
@@ -46,5 +46,5 @@ definitions and the execution loop.
 Run the package tests with:
 
 ```bash
-moon test cmd/main
+moon test cmd/openseek
 ```

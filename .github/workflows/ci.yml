@@ -32,3 +32,6 @@ jobs:
 
       - name: Test
         run: moon test
+
+      - name: Cram (offline CLI docs)
+        run: moon cram test tests/cram
