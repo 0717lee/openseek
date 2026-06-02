@@ -24,6 +24,8 @@ test "system prompt includes moonbit guide" {
   assert_true(prompt.contains("acceptance probes"))
   assert_true(prompt.contains("file arguments are read as files"))
   assert_true(prompt.contains("OpenSeek DeepSeek Addendum"))
+  assert_false(prompt.contains("try?"))
+  assert_false(prompt.contains("try!"))
 }
 
 ///|

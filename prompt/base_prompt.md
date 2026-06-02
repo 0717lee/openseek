@@ -297,7 +297,7 @@ Use snapshot tests as it is easy to update when behavior changes.
 - Black-box by default: Call only public APIs via `@package.fn`. Use white-box tests only when private members matter.
 - Grouping: Combine related checks in one `test "..." { ... }` block for speed and clarity.
 - Panics: Name tests with prefix `test "panic ..." {...}`; if the call returns a value, wrap it with `ignore(...)` to silence warnings.
-- Errors: Use `try? f()` to get `Result[...]` and `inspect` it when a function may raise.
+- Errors: Use `try { ... } catch { ... } noraise { ... }` when a test needs to inspect a function that may raise.
 
 ### Docstring tests
 
@@ -744,7 +744,7 @@ async test "sleep completes" {
 MoonBit uses checked error-throwing functions, not unchecked exceptions. All errors are a subtype of `Error` and you can declare your own error types using `suberror`.
 Use `raise` in signatures to declare error types and let errors propagate by
 default.  `try { } catch { }`
-to handle errors explicitly. Use `try!` to abort if it does raise. Occasionally, use `try?` to convert to `Result[...]` in tests for inspection.
+to handle errors explicitly. In tests, use `try { ... } catch { ... } noraise { ... }` when you need to inspect the raised error.
 
 ```mbt check
 ///|
@@ -787,13 +787,18 @@ fn div(x : Int, y : Int) -> Int raise {
 
 ///|
 test "inspect raise function" {
-  let result : Result[Int, Error] = try? div(1, 0)
-  guard result is Err(Failure::Failure(msg)) && msg.contains("Division by zero") else {
-    fail("Expected error")
+  try {
+    ignore(div(1, 0))
+  } catch {
+    error => {
+      inspect(error)
+    }
+  } noraise {
+    _ => fail("Expected error")
   }
 }
 
-// Three ways to handle errors:
+// Two common ways to handle errors:
 
 ///|
 /// Propagate automatically
@@ -803,13 +808,6 @@ fn use_parse(s : String, position~ : Position) -> Int raise ParseError {
   // Unlike Swift, you do not need to mark `try` for functions that can raise
   // errors; the compiler infers it automatically. This keeps error handling
   // explicit but concise.
-  x * 2
-}
-
-///|
-/// Use try! to abort if it raises, no raise in the signature
-fn use_parse2(position~ : Position) -> Int {
-  let x = try! parse_int("123", position~) // label punning
   x * 2
 }
 
@@ -1030,10 +1028,10 @@ test "map literals and common operations" {
 - `Array[T]`, `FixedArray[T]`, `ReadOnlyArray[T] → `ArrayView[T]` via `a[:]` or `a[start:end]`, etc.
 
 **Important**: StringView slice is slightly different due to unicode safety:
-`s[a:b]` may raise an error at surrogate boundaries (UTF-16 encoding edge case). You have two options:
+`s[a:b]` may raise an error at surrogate boundaries (UTF-16 encoding edge case). Use one of these patterns:
 
-- Use `try! s[a:b]` if you're certain the boundaries are valid (crashes on invalid boundaries)
-- Let the error propagate to the caller for proper handling
+- Let the error propagate from a raising caller when boundaries are valid by construction
+- Catch the slice error locally when invalid boundaries need fallback handling
 
 **When to use views**:
 
