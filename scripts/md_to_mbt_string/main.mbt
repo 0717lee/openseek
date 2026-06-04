@@ -77,20 +77,30 @@ fn generated_source(
   function_name~ : String,
   markdown~ : String,
 ) -> String {
-  let sb = StringBuilder()
-  sb <+ "// Generated from \{base} by moon dev_build. DO NOT EDIT.\n"
-  sb <+ "///|\n"
-  sb <+ "fn \{function_name}() -> String {\n"
-  sb <+ "  (\n"
   let lines = markdown.split("\n").to_array()
   let skip_final_empty = markdown.has_suffix("\n")
+  let sb = StringBuilder()
+  sb <+
+    $|// Generated from \{base} by moon dev_build. DO NOT EDIT.
+    $|///|
+    $|fn \{function_name}() -> String {
+    $|  (
+    $|\{out => write_markdown_lines(out, lines, skip_final_empty)}  )
+    $|}
+    $|
+  sb.to_string()
+}
+
+///|
+fn write_markdown_lines(
+  out : StringBuilder,
+  lines : Array[StringView],
+  skip_final_empty : Bool,
+) -> Unit {
   for index, line in lines {
     if skip_final_empty && index == lines.length() - 1 {
       continue
     }
-    sb <+ "    #|\{line}\n"
+    out <+ "    #|\{line}\n"
   }
-  sb <+ "  )\n"
-  sb <+ "}\n"
-  sb.to_string()
 }
