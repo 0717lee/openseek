@@ -139,7 +139,7 @@ async test "edit rejects missing match" {
 ///|
 async test "edit rejects ambiguous match without replace_all" {
   let path = "/tmp/openseek-edit-ambiguous.txt"
-  @fs.write_file(path, "alpha beta beta", create_mode=CreateOrTruncate)
+  @fs.write_file(path, "alpha beta\nmiddle\nbeta", create_mode=CreateOrTruncate)
   let result = run_edit({
     "path": path,
     "old_string": "beta",
@@ -148,10 +148,24 @@ async test "edit rejects ambiguous match without replace_all" {
   guard result is Respond(output) else { fail("expected Respond") }
   assert_eq(
     output.content,
-    "error editing \{path}: old_string matched 2 times; set replace_all=true to replace all occurrences",
+    "error editing \{path}: old_string matched 2 times on lines 1, 3; set replace_all=true to replace all occurrences",
   )
   assert_true(output.is_error)
-  assert_eq(@fs.read_file(path).text(), "alpha beta beta")
+  assert_eq(@fs.read_file(path).text(), "alpha beta\nmiddle\nbeta")
+}
+
+///|
+async test "edit reports first ambiguous match lines only" {
+  let path = "/tmp/openseek-edit-many-matches.txt"
+  @fs.write_file(path, "x\nx\nx\nx\nx\nx\n", create_mode=CreateOrTruncate)
+  let result = run_edit({ "path": path, "old_string": "x", "new_string": "y" })
+  guard result is Respond(output) else { fail("expected Respond") }
+  assert_eq(
+    output.content,
+    "error editing \{path}: old_string matched 6 times on lines 1, 2, 3, 4, 5, ...; set replace_all=true to replace all occurrences",
+  )
+  assert_true(output.is_error)
+  assert_eq(@fs.read_file(path).text(), "x\nx\nx\nx\nx\nx\n")
 }
 
 ///|

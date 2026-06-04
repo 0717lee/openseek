@@ -9,7 +9,10 @@ code changes where overwriting the whole file would be unnecessarily broad.
 the host can validate the change with simple, deterministic rules. The default
 single-match requirement prevents ambiguous edits in files that contain repeated
 snippets. `replace_all=true` is explicit so broad changes show up in the tool
-call rather than being an accidental consequence of a loose match.
+call rather than being an accidental consequence of a loose match. When a
+single-match edit is ambiguous, the error reports the first matching line
+numbers so the caller can add enough surrounding context to make `old_string`
+unique.
 
 Rejecting empty `old_string` and identical replacements protects against
 no-op or explosive edits. The tool is designed for small surgical changes; if a
@@ -61,7 +64,7 @@ has one of these shapes:
 
 - `"ok: replaced <n> occurrence(s) in <path>"` on success.
 - `"error editing <path>: old_string not found"` — no exact match was found.
-- `"error editing <path>: old_string matched <n> times; set replace_all=true to replace all occurrences"` — the edit was ambiguous.
+- `"error editing <path>: old_string matched <n> times on lines <line>, ...; set replace_all=true to replace all occurrences"` — the edit was ambiguous.
 - `"error editing <path>: moon.pkg content is suspiciously small"` or similar
   manifest-guard messages — the replacement would likely break MoonBit package
   discovery.

@@ -15,7 +15,7 @@
 ///   success.
 /// - `Respond(ToolOutput("error editing <path>: ...", is_error=true))` for
 ///   filesystem failures, empty/no-op edits, missing matches, or ambiguous
-///   matches.
+///   matches. Ambiguous-match errors include the first matching line numbers.
 /// - `Respond(ToolOutput("error: edit requires ...", is_error=true))` for
 ///   invalid arguments.
 pub fn definition() -> @agent_tool.AgentToolDefinition {
@@ -84,7 +84,7 @@ async fn edit_file(input : @decode.EditInput) -> @agent_tool.ToolAction {
   }
   if occurrences > 1 && !input.replace_all {
     return @agent_tool.ToolAction::respond(
-      "error editing \{input.path}: old_string matched \{occurrences} times; set replace_all=true to replace all occurrences",
+      ambiguous_match_message(input.path, occurrences, parts, input.old_string),
       is_error=true,
     )
   }
@@ -114,6 +114,48 @@ async fn edit_file(input : @decode.EditInput) -> @agent_tool.ToolAction {
         is_error=true,
       )
   }
+}
+
+///|
+fn ambiguous_match_message(
+  path : String,
+  occurrences : Int,
+  parts : Array[String],
+  old_string : String,
+) -> String {
+  let lines = occurrence_line_labels(parts, old_string, 5)
+  let line_detail = if lines.length() == 0 {
+    ""
+  } else if occurrences > lines.length() {
+    " on lines " + lines.join(", ") + ", ..."
+  } else {
+    " on lines " + lines.join(", ")
+  }
+  "error editing \{path}: old_string matched \{occurrences} times\{line_detail}; set replace_all=true to replace all occurrences"
+}
+
+///|
+fn occurrence_line_labels(
+  parts : Array[String],
+  old_string : String,
+  max : Int,
+) -> Array[String] {
+  let labels : Array[String] = []
+  let mut current_line = 1
+  let occurrence_count = parts.length() - 1
+  for index in 0..<occurrence_count {
+    current_line = current_line + newline_count(parts[index])
+    if labels.length() < max {
+      labels.push("\{current_line}")
+    }
+    current_line = current_line + newline_count(old_string)
+  }
+  labels
+}
+
+///|
+fn newline_count(text : String) -> Int {
+  text.split("\n").collect().length() - 1
 }
 
 ///|
