@@ -155,7 +155,7 @@ fn occurrence_line_labels(
 
 ///|
 fn newline_count(text : String) -> Int {
-  text.split("\n").collect().length() - 1
+  text.split("\n").count() - 1
 }
 
 ///|
