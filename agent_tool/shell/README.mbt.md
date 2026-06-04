@@ -14,10 +14,11 @@ environment variables, and existing scripts all work without inventing a custom
 argument schema for every possible operation.
 
 stdout and stderr are merged so diagnostics appear in the same order a terminal
-would show them. Output is capped because commands can accidentally emit
-generated artifacts, dependency listings, or compiler invocations large enough
-to damage the model context. Truncation is treated as a tool error so the agent
-knows it did not receive the full command output.
+would show them. Output is capped while the process pipe is being read because
+commands can accidentally emit generated artifacts, dependency listings, or
+compiler invocations large enough to damage the model context. When reading
+proves the output exceeds the cap, the tool cancels the child process and treats
+the result as a tool error so the agent knows it received only an output prefix.
 
 Callers may also set `timeout_ms` for commands that could wait indefinitely.
 When the timeout expires, the in-flight process collection is cancelled and the
@@ -47,7 +48,7 @@ features such as pipes.
 | `cmd` | string | yes | Passed as the single argument to `sh -c`. |
 | `cwd` | string | no  | Working directory. An empty string is treated as missing. |
 | `timeout_ms` | number | no | Positive timeout in milliseconds. Timed-out commands are cancelled and reported as tool errors. |
-| `max_output_chars` | number | no | Defaults to 12000, capped at 50000. Truncated output is a tool error. |
+| `max_output_chars` | number | no | Defaults to 12000, capped at 50000. The retained output prefix is bounded while reading; exceeding the limit cancels the command and returns a tool error. |
 
 ## Action
 
@@ -58,8 +59,10 @@ arguments, non-zero shell exit codes, and output truncation. The string body
 has one of these shapes:
 
 - `"exit=<code>\n<stdout/stderr merged>"` — normal completion.
-- `"exit=<code>\ntruncated=true\noutput_chars=<n>\nshown_chars=<n>\n<output-prefix>"` —
-  the process completed but output was capped before sending it to the model.
+- `"exit=<code-or-cancelled>\ntruncated=true\noutput_limit_reached=true\nshown_chars=<n>\nmax_output_chars=<n>\n<output-prefix>"` —
+  output exceeded `max_output_chars` while the process pipe was being read. The
+  command is cancelled if it has not already exited; no full output length is
+  reported because the full output was intentionally not collected.
 - `"error: shell command timed out after <n>ms"` — `timeout_ms` elapsed before
   the command completed.
 - `"error running shell: <error>"` — `sh -c` failed to launch (rare; usually
@@ -68,7 +71,7 @@ has one of these shapes:
   `cmd` field.
 - `"error: shell requires object arguments"` — payload was not a JSON object.
 
-`stderr` is merged into `stdout` via `@process.collect_output_merged` so the
+`stderr` is redirected into the same process output pipe as `stdout` so the
 model sees the same interleaving a developer would see in a terminal.
 
 ## Example

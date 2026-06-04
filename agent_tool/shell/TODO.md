@@ -8,9 +8,9 @@ Review target: `agent_tool/shell`.
   - Current behavior awaits `@process.collect_output_merged`, so a hung command blocks the whole agent loop.
   - A timeout should cancel the child process and return a tool error with elapsed time.
 
-- [ ] Enforce output limits while reading, not after full collection.
-  - Current `max_output_chars` caps only after the whole process output has been collected.
-  - Commands such as `yes`, `tail -f`, or huge finite output can still hang or allocate too much before truncation.
+- [x] Enforce output limits while reading, not after full collection.
+  - `max_output_chars` is enforced on the retained output prefix while the process pipe is read.
+  - Commands such as `yes`, `tail -f`, or huge finite output are cancelled once the limit is reached.
 
 - [ ] Harden MoonBit command policy bypass detection.
   - Current guard is based on simple space splitting and a few string fragments.

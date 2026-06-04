@@ -8,8 +8,8 @@
 /// - `cwd` (string, optional): working directory the command runs in.
 ///   An empty string is treated the same as a missing field.
 /// - `max_output_chars` (number, optional): defaults to 12000 and is capped at
-///   50000. Truncated output is reported as a tool error even when the process
-///   exits zero.
+///   50000. Once the retained output prefix exceeds this limit, the child
+///   process is cancelled and the result is reported as a tool error.
 /// - `timeout_ms` (number, optional): positive timeout in milliseconds. If the
 ///   command is still running after the timeout, the process is cancelled and
 ///   reported as a tool error.
@@ -18,6 +18,9 @@
 /// - `Respond(ToolOutput("exit=<code>\n<output>", is_error=<code != 0>))`
 ///   when `sh -c` runs. Non-zero exit codes are typed as tool errors while
 ///   preserving the full output for the model.
+/// - `Respond(ToolOutput("exit=<code-or-cancelled>\ntruncated=true\noutput_limit_reached=true\nshown_chars=<n>\nmax_output_chars=<n>\n<output-prefix>", is_error=true))`
+///   when output exceeds `max_output_chars`. The command may be cancelled before
+///   its natural exit code is available.
 /// - `Respond(ToolOutput("error running shell: ...", is_error=true))` when
 ///   launching the process raises.
 /// - `Respond(ToolOutput("error: shell requires ...", is_error=true))` for
@@ -86,11 +89,12 @@ async fn shell(input : @decode.ShellInput) -> @agent_tool.ToolAction {
   let result = match input.timeout_ms {
     Some(timeout_ms) =>
       @async.with_timeout_opt(timeout_ms, () => {
-        collect_shell_output(input.cmd, input.cwd)
+        collect_shell_output(input.cmd, input.cwd, input.max_output_chars)
       })
-    None => Some(collect_shell_output(input.cmd, input.cwd))
+    None =>
+      Some(collect_shell_output(input.cmd, input.cwd, input.max_output_chars))
   }
-  let (code, output) = match result {
+  let output = match result {
     Some(result) => result
     None => {
       let timeout_ms = match input.timeout_ms {
@@ -103,43 +107,162 @@ async fn shell(input : @decode.ShellInput) -> @agent_tool.ToolAction {
       )
     }
   }
-  let body = output.text()
-  let capped = cap_text(body, input.max_output_chars)
-  let truncation = truncation_header(body, input.max_output_chars)
-  @agent_tool.ToolAction::respond(
-    "exit=\{code}\{truncation}\n\{capped}",
-    is_error=code != 0 || is_truncated(body, input.max_output_chars),
-  )
+  let response = shell_response(output, input.max_output_chars)
+  @agent_tool.ToolAction::respond(response.content, is_error=response.is_error)
 }
 
 ///|
-async fn collect_shell_output(cmd : String, cwd : String?) -> (Int, &@io.Data) {
-  match cwd {
-    Some(cwd) => @process.collect_output_merged("sh", ["-c", cmd], cwd~)
-    None => @process.collect_output_merged("sh", ["-c", cmd])
+priv struct ShellOutput {
+  exit_code : Int?
+  text : String
+  output_limit_reached : Bool
+}
+
+///|
+priv struct ShellResponse {
+  content : String
+  is_error : Bool
+}
+
+///|
+async fn collect_shell_output(
+  cmd : String,
+  cwd : String?,
+  max_output_chars : Int,
+) -> ShellOutput {
+  let (reader, writer) = @process.read_from_process()
+  @async.with_task_group() <| group => {
+    defer reader.close()
+    let process = match cwd {
+      Some(cwd) =>
+        @process.spawn(
+          group,
+          "sh",
+          ["-c", cmd],
+          stdout=writer,
+          stderr=writer,
+          cwd~,
+          cancel_handler=@process.hard_cancel(),
+        )
+      None =>
+        @process.spawn(
+          group,
+          "sh",
+          ["-c", cmd],
+          stdout=writer,
+          stderr=writer,
+          cancel_handler=@process.hard_cancel(),
+        )
+    }
+    let prefix = read_output_prefix(reader, max_output_chars)
+    if prefix.output_limit_reached {
+      let exit_code = process.try_wait() catch { _ => None }
+      if exit_code is None {
+        process.cancel()
+        let _ = process.wait() catch { _ => 0 }
+      }
+      { exit_code, text: prefix.text, output_limit_reached: true }
+    } else {
+      {
+        exit_code: Some(process.wait()),
+        text: prefix.text,
+        output_limit_reached: false,
+      }
+    }
   }
 }
 
 ///|
-fn cap_text(content : String, max_chars : Int) -> String {
-  if content.length() <= max_chars {
-    content
-  } else {
-    content[:max_chars].to_owned()
+priv struct OutputPrefix {
+  text : String
+  output_limit_reached : Bool
+}
+
+///|
+async fn read_output_prefix(
+  reader : @process.ReadFromProcess,
+  max_output_chars : Int,
+) -> OutputPrefix {
+  let buffer = Buffer()
+  let byte_budget = max_output_chars * 4 + 4
+  for ;; {
+    let remaining_budget = byte_budget - buffer.length()
+    let chunk_limit = if remaining_budget <= 0 {
+      1
+    } else if remaining_budget < 1024 {
+      remaining_budget
+    } else {
+      1024
+    }
+    match reader.read_some(max_len=chunk_limit) {
+      None =>
+        return {
+          text: @utf8.decode(buffer.to_bytes()),
+          output_limit_reached: false,
+        }
+      Some(chunk) => {
+        buffer.write_bytes(chunk)
+        let text = decode_valid_utf8_prefix(buffer.to_bytes())
+        if text.char_length() > max_output_chars {
+          return {
+            text: text_prefix_by_chars(text, max_output_chars),
+            output_limit_reached: true,
+          }
+        } else {
+          continue
+        }
+      }
+    }
   }
 }
 
 ///|
-fn is_truncated(content : String, max_chars : Int) -> Bool {
-  content.length() > max_chars
+fn text_prefix_by_chars(text : String, max_chars : Int) -> String {
+  match text.offset_of_nth_char(max_chars) {
+    Some(end) => text[:end].to_owned()
+    None => text
+  }
 }
 
 ///|
-fn truncation_header(content : String, max_chars : Int) -> String {
-  if is_truncated(content, max_chars) {
-    "\ntruncated=true\noutput_chars=\{content.length()}\nshown_chars=\{max_chars}"
+fn decode_valid_utf8_prefix(bytes : Bytes) -> String raise {
+  for dropped in 0..<=3 {
+    let end = bytes.length() - dropped
+    if end >= 0 {
+      try {
+        return @utf8.decode(bytes[:end])
+      } catch {
+        _ => ()
+      }
+    }
+  }
+  @utf8.decode(bytes)
+}
+
+///|
+fn shell_response(
+  output : ShellOutput,
+  max_output_chars : Int,
+) -> ShellResponse {
+  if output.output_limit_reached {
+    {
+      content: "\{exit_header(output.exit_code)}\ntruncated=true\noutput_limit_reached=true\nshown_chars=\{output.text.char_length()}\nmax_output_chars=\{max_output_chars}\n\{output.text}",
+      is_error: true,
+    }
   } else {
-    ""
+    let code = match output.exit_code {
+      Some(code) => code
+      None => 0
+    }
+    { content: "exit=\{code}\n\{output.text}", is_error: code != 0 }
+  }
+}
+
+///|
+fn exit_header(exit_code : Int?) -> String {
+  match exit_code {
+    Some(code) => "exit=\{code}"
+    None => "exit=cancelled"
   }
 }
 
@@ -158,11 +281,12 @@ test "shell parses and caps output limit" {
 }
 
 ///|
-test "shell records truncation metadata" {
-  assert_eq(cap_text("abcdef", 3), "abc")
-  assert_true(is_truncated("abcdef", 3))
+test "shell formats output limit metadata" {
   assert_eq(
-    truncation_header("abcdef", 3),
-    "\ntruncated=true\noutput_chars=6\nshown_chars=3",
+    shell_response(
+      { exit_code: Some(0), text: "abc", output_limit_reached: true },
+      3,
+    ).content,
+    "exit=0\ntruncated=true\noutput_limit_reached=true\nshown_chars=3\nmax_output_chars=3\nabc",
   )
 }

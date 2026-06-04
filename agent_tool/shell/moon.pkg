@@ -5,8 +5,8 @@ import {
   "bobzhang/openseek/agent_tool/shell/internal/decode",
   "moonbitlang/async",
   "moonbitlang/async/fs",
-  "moonbitlang/async/io",
   "moonbitlang/async/process",
+  "moonbitlang/core/encoding/utf8",
   "moonbitlang/core/json",
 }
 
