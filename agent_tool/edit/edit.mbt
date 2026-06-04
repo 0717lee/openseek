@@ -127,9 +127,9 @@ fn ambiguous_match_message(
   let line_detail = if lines.length() == 0 {
     ""
   } else if occurrences > lines.length() {
-    " on lines " + lines.join(", ") + ", ..."
+    " on lines \{lines.join(", ")}, ..."
   } else {
-    " on lines " + lines.join(", ")
+    " on lines \{lines.join(", ")}"
   }
   "error editing \{path}: old_string matched \{occurrences} times\{line_detail}; set replace_all=true to replace all occurrences"
 }
