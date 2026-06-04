@@ -1,10 +1,10 @@
 ///|
-/// Tool definition for `shell`: runs `arguments.cmd` through `sh -c`,
-/// optionally in `arguments.cwd`, and returns the exit code plus merged
+/// Tool definition for `shell`: runs `arguments.cmd` through the platform
+/// shell, optionally in `arguments.cwd`, and returns the exit code plus merged
 /// stdout/stderr output.
 ///
 /// ## Arguments
-/// - `cmd` (string, required): shell command line passed to `sh -c`.
+/// - `cmd` (string, required): shell command line passed to the platform shell.
 /// - `cwd` (string, optional): working directory the command runs in.
 ///   An empty string is treated the same as a missing field.
 /// - `max_output_chars` (number, optional): defaults to 12000 and is capped at
@@ -16,8 +16,8 @@
 ///
 /// ## Result
 /// - `Respond(ToolOutput("exit=<code>\n<output>", is_error=<code != 0>))`
-///   when `sh -c` runs. Non-zero exit codes are typed as tool errors while
-///   preserving the full output for the model.
+///   when the platform shell runs. Non-zero exit codes are typed as tool errors
+///   while preserving the full output for the model.
 /// - `Respond(ToolOutput("exit=<code-or-cancelled>\ntruncated=true\noutput_limit_reached=true\nshown_chars=<n>\nmax_output_chars=<n>\n<output-prefix>", is_error=true))`
 ///   when output exceeds `max_output_chars`. The command may be cancelled before
 ///   its natural exit code is available.
@@ -28,7 +28,7 @@
 pub fn definition() -> @agent_tool.AgentToolDefinition {
   AgentToolDefinition(
     name="shell",
-    description="Run arguments.cmd through sh -c, optionally in arguments.cwd, and return exit code plus output.",
+    description=shell_description(),
     schema=JsonSchema({
       "type": "object",
       "properties": {
@@ -41,6 +41,18 @@ pub fn definition() -> @agent_tool.AgentToolDefinition {
     }),
     execute=Async(execute),
   )
+}
+
+///|
+#cfg(platform="windows")
+fn shell_description() -> String {
+  "Run arguments.cmd through PowerShell (pwsh -NoProfile -Command), optionally in arguments.cwd, and return exit code plus output. Use PowerShell syntax and cmdlets in arguments.cmd."
+}
+
+///|
+#cfg(not(platform="windows"))
+fn shell_description() -> String {
+  "Run arguments.cmd through the POSIX shell (sh -c), optionally in arguments.cwd, and return exit code plus output. Use POSIX shell syntax in arguments.cmd."
 }
 
 ///|
@@ -130,6 +142,8 @@ async fn collect_shell_output(
   cwd : String?,
   max_output_chars : Int,
 ) -> ShellOutput {
+  let program = PlatformShellProgram
+  let args = platform_shell_args(cmd)
   let (reader, writer) = @process.read_from_process()
   @async.with_task_group() <| group => {
     defer reader.close()
@@ -137,8 +151,8 @@ async fn collect_shell_output(
       Some(cwd) =>
         @process.spawn(
           group,
-          "sh",
-          ["-c", cmd],
+          program,
+          args,
           stdout=writer,
           stderr=writer,
           cwd~,
@@ -147,8 +161,8 @@ async fn collect_shell_output(
       None =>
         @process.spawn(
           group,
-          "sh",
-          ["-c", cmd],
+          program,
+          args,
           stdout=writer,
           stderr=writer,
           cancel_handler=@process.hard_cancel(),
@@ -170,6 +184,26 @@ async fn collect_shell_output(
       }
     }
   }
+}
+
+///|
+#cfg(platform="windows")
+const PlatformShellProgram : String = "pwsh"
+
+///|
+#cfg(not(platform="windows"))
+const PlatformShellProgram : String = "sh"
+
+///|
+#cfg(platform="windows")
+fn platform_shell_args(cmd : String) -> Array[String] {
+  ["-NoProfile", "-Command", cmd]
+}
+
+///|
+#cfg(not(platform="windows"))
+fn platform_shell_args(cmd : String) -> Array[String] {
+  ["-c", cmd]
 }
 
 ///|
