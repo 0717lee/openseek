@@ -99,23 +99,18 @@ test "read tool advertises the expected schema" {
 ```moonbit check
 ///|
 async test "read tool reads a workspace note through the registry" {
-  let path = "/tmp/openseek-read-readme-task.txt"
+  let dir = @fs.tmpdir(prefix="openseek-read-readme-")
+  let path = dir + "/task.txt"
   let content = "Task: summarize test failures\nStatus: investigating\n"
   @fs.write_file(path, content, create_mode=CreateOrTruncate)
 
   let tools = @agent_tool.Tools([@read.definition()])
+  let arguments : Json = { "path": path }
   let call = @agent_tool.AgentToolCall(
-    ToolCall(
-      id="call_read_note",
-      name="read",
-      arguments=(
-        #|{
-        #|  "path": "/tmp/openseek-read-readme-task.txt"
-        #|}
-      ),
-    ),
+    ToolCall(id="call_read_note", name="read", arguments=arguments.stringify()),
   )
   let result = @agent_tool.execute_tool_call(call, tools)
+  @fs.rmdir(dir, recursive=true)
   guard result is Respond(output) else { fail("expected Respond") }
   assert_eq(output.content, content)
   assert_false(output.is_error)
@@ -125,7 +120,8 @@ async test "read tool reads a workspace note through the registry" {
 ```moonbit check
 ///|
 async test "read tool supports focused range reads" {
-  let path = "/tmp/openseek-read-readme-range.txt"
+  let dir = @fs.tmpdir(prefix="openseek-read-readme-")
+  let path = dir + "/range.txt"
   @fs.write_file(
     path,
     "alpha\nbeta\ngamma\ndelta",
@@ -133,20 +129,12 @@ async test "read tool supports focused range reads" {
   )
 
   let tools = @agent_tool.Tools([@read.definition()])
+  let arguments : Json = { "path": path, "start_line": 2, "max_lines": 2 }
   let call = @agent_tool.AgentToolCall(
-    ToolCall(
-      id="call_read_range",
-      name="read",
-      arguments=(
-        #|{
-        #|  "path": "/tmp/openseek-read-readme-range.txt",
-        #|  "start_line": 2,
-        #|  "max_lines": 2
-        #|}
-      ),
-    ),
+    ToolCall(id="call_read_range", name="read", arguments=arguments.stringify()),
   )
   let result = @agent_tool.execute_tool_call(call, tools)
+  @fs.rmdir(dir, recursive=true)
   guard result is Respond(output) else { fail("expected Respond") }
   assert_true(output.content.contains("start_line=2"))
   assert_true(output.content.contains("shown_lines=2"))

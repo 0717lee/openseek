@@ -1,9 +1,9 @@
 # Moon Cmd Tool
 
 `moon_cmd` runs selected `moon` subcommands directly without going through
-`sh -c`. It is intended for end-to-end validation: run tests, execute CLIs,
-refresh package interfaces, and verify README commands with the same argument
-shape users will run.
+the platform shell. It is intended for end-to-end validation: run tests,
+execute CLIs, refresh package interfaces, and verify README commands with the
+same argument shape users will run.
 
 For raw compiler diagnostics, keep using `moon_check`; it always runs
 `moon check --watch --diagnostic-limit 10` and has a narrow schema
@@ -114,6 +114,6 @@ test "moon_cmd tool advertises run validation fields" {
 ```
 
 Process execution is covered by fixture tests that copy a native-only CLI
-project into `/tmp`, then verify a failing default-target invocation, a passing
-explicit `--target native` CLI run, snapshot output from `moon test`, and a
-failing test reported as a tool error.
+project into a temporary directory, then verify a failing default-target
+invocation, a passing explicit `--target native` CLI run, snapshot output from
+`moon test`, and a failing test reported as a tool error.

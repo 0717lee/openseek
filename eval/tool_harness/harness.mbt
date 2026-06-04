@@ -5,15 +5,25 @@
 /// offline tool smoke test: no model involved, so a failure localizes to
 /// the tool layer itself.
 pub async fn run_harness() -> @report.Report {
-  @async.with_task_group() <| group => {
-    run_harness_with_runtime(AgentRuntime(), AgentTaskScope(group))
+  let deferred_cleanup : Array[String] = []
+  let report = @async.with_task_group() <| group => {
+    run_harness_with_runtime(
+      AgentRuntime(),
+      AgentTaskScope(group),
+      deferred_cleanup,
+    )
   }
+  for root in deferred_cleanup {
+    @fs.rmdir(root, recursive=true)
+  }
+  report
 }
 
 ///|
 async fn run_harness_with_runtime(
   runtime : @agent_runtime.AgentRuntime,
   scope : @agent_runtime.AgentTaskScope[@report.Report],
+  deferred_cleanup : Array[String],
 ) -> @report.Report {
   let tools = tool_definitions(runtime, scope) catch {
     error =>
@@ -32,7 +42,7 @@ async fn run_harness_with_runtime(
   rows.push(run_write_case(2, tools))
   rows.push(run_edit_case(3, tools))
   rows.push(run_shell_case(4, tools))
-  rows.push(run_moon_check_case(5, tools))
+  rows.push(run_moon_check_case(5, tools, deferred_cleanup))
   rows.push(run_moon_cmd_case(6, tools))
   rows.push(run_moon_ide_case(7, tools))
   rows.push(run_finish_case(8, tools))
@@ -157,7 +167,7 @@ async fn run_shell_case(
   tools : @agent_tool.Tools,
 ) -> @report.ReportRow {
   let action = dispatch(tools, "shell", {
-    "cmd": "printf tool-harness-shell",
+    "cmd": "echo 'tool-harness-shell'",
     "max_output_chars": 2000,
   })
   let reason = expect_respond(
@@ -178,8 +188,10 @@ async fn run_shell_case(
 async fn run_moon_check_case(
   index : Int,
   tools : @agent_tool.Tools,
+  deferred_cleanup : Array[String],
 ) -> @report.ReportRow {
   let root = moon_library_fixture(prefix="openseek-tool-moon-check-")
+  deferred_cleanup.push(root)
   let action = dispatch(tools, "moon_check", { "cwd": root, "target": "native" })
   let reason = expect_respond(
     action,
@@ -189,7 +201,6 @@ async fn run_moon_check_case(
     ],
     error=false,
   )
-  @fs.rmdir(root, recursive=true)
   row(
     index~,
     name="moon_check",
@@ -259,7 +270,7 @@ async fn run_finish_case(
 
 ///|
 async fn moon_library_fixture(prefix~ : String) -> String {
-  let root = @fs.tmpdir(prefix~)
+  let root = workspace_tmpdir(prefix~)
   @vfs.FileSystem({
     "moon.mod": (
       #|name = "openseek/tool_harness_fixture"
@@ -289,6 +300,22 @@ async fn moon_library_fixture(prefix~ : String) -> String {
     ),
   }).write_to(root)
   root
+}
+
+///|
+async fn workspace_tmpdir(prefix~ : String) -> String {
+  @fs.mkdir("_build/openseek-tool-harness-tmp", recursive=true) catch {
+    _ => ()
+  }
+  let scratch = @fs.tmpdir(prefix~)
+  let scratch_path : @path.Path = scratch
+  let name = scratch_path.basename().to_owned()
+  @fs.rmdir(scratch, recursive=true)
+  let parent = @fs.realpath("_build/openseek-tool-harness-tmp")
+  let parent_path : @path.Path = parent
+  let target = parent_path.join(name).normalize().to_string()
+  @fs.mkdir(target)
+  target
 }
 
 ///|

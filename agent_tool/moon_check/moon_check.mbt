@@ -483,22 +483,87 @@ fn stable_moon_check_output(
   project : String,
   canonical : String,
 ) -> String {
-  let normalized = content
-    .replace_all(old=canonical, new="<fixture>")
-    .replace_all(old=project, new="<fixture>")
-    .replace_all(
-      old="──────┬─────  \n",
-      new="──────┬─────\n",
-    )
+  let normalized = @test_output.redact_fixture_root(
+    content,
+    root=project,
+    canonical~,
+  ).replace_all(
+    old="──────┬─────  \n",
+    new="──────┬─────\n",
+  )
   let stable_lines : Array[String] = []
   for line in normalized.split("\n") {
     if line.has_prefix("seq=") {
       stable_lines.push("seq=<seq>")
+    } else if line.contains(
+        "Run failed with error error=failed when checking project",
+      ) {
+      stable_lines.push(
+        "ERROR Run failed with error error=failed when checking project",
+      )
     } else if line == "Success, waiting for filesystem changes..." {
       ()
     } else if !line.has_prefix("failed: ") {
-      stable_lines.push(line.to_owned())
+      let stable_line = redact_json_diagnostic_path(
+        line.to_owned(),
+        project,
+        canonical,
+      )
+      stable_lines.push(redact_exit_code(stable_line))
     }
   }
   stable_lines.join("\n").trim().to_owned()
+}
+
+///|
+fn redact_exit_code(line : String) -> String {
+  if line.has_prefix("exit=") && line != "exit=0" {
+    "exit=<non-zero>"
+  } else {
+    line
+  }
+}
+
+///|
+fn redact_json_diagnostic_path(
+  line : String,
+  project : String,
+  canonical : String,
+) -> String {
+  let parsed = @json.parse(line) catch { _ => return line }
+  match parsed {
+    { "path": String(path), .. } => {
+      guard parsed is Object(fields) else { return line }
+      for root in [canonical, project] {
+        let file_path : @path.Path = path
+        let root_path : @path.Path = root
+        let relative = file_path
+          .relative(base=root_path)
+          .normalize()
+          .to_string()
+        let relative_path : @path.Path = relative
+        if relative != "" &&
+          relative != "." &&
+          !relative.has_prefix("..") &&
+          !relative_path.is_absolute() {
+          let stable_path = relative.replace_all(old="\\", new="/")
+          fields["path"] = Json::string("<fixture>/\{stable_path}")
+          return Json::object(fields).stringify()
+        }
+      }
+      let project_path : @path.Path = project
+      let normalized_path = path.replace_all(old="\\", new="/")
+      let marker = "/\{project_path.basename()}/"
+      let pieces = normalized_path.split(marker).collect()
+      if pieces.length() > 1 {
+        let suffix = pieces[pieces.length() - 1]
+        if suffix != "" {
+          fields["path"] = Json::string("<fixture>/\{suffix}")
+          return Json::object(fields).stringify()
+        }
+      }
+      line
+    }
+    _ => line
+  }
 }

@@ -260,9 +260,11 @@ fn read_header(
 
 ///|
 async test "read returns file contents" {
-  let path = "/tmp/openseek-read-test.txt"
+  let dir = @fs.tmpdir(prefix="openseek-read-")
+  let path = dir + "/read-test.txt"
   @fs.write_file(path, "hello read", create_mode=CreateOrTruncate)
   let result = execute({ "path": path })
+  @fs.rmdir(dir, recursive=true)
   guard result is Respond(output) else { fail("expected Respond") }
   assert_eq(output.content, "hello read")
   assert_false(output.is_error)
@@ -289,9 +291,11 @@ async test "read resolves relative paths under the workspace root" {
 
 ///|
 async test "read returns empty string for an empty file" {
-  let path = "/tmp/openseek-read-empty.txt"
+  let dir = @fs.tmpdir(prefix="openseek-read-")
+  let path = dir + "/empty.txt"
   @fs.write_file(path, "", create_mode=CreateOrTruncate)
   let result = execute({ "path": path })
+  @fs.rmdir(dir, recursive=true)
   guard result is Respond(output) else { fail("expected Respond") }
   assert_eq(output.content, "")
   assert_false(output.is_error)
@@ -299,10 +303,12 @@ async test "read returns empty string for an empty file" {
 
 ///|
 async test "read preserves multiline content" {
-  let path = "/tmp/openseek-read-multiline.txt"
+  let dir = @fs.tmpdir(prefix="openseek-read-")
+  let path = dir + "/multiline.txt"
   let content = "line one\nline two\nline three\n"
   @fs.write_file(path, content, create_mode=CreateOrTruncate)
   let result = execute({ "path": path })
+  @fs.rmdir(dir, recursive=true)
   guard result is Respond(output) else { fail("expected Respond") }
   assert_eq(output.content, content)
   assert_false(output.is_error)
@@ -310,16 +316,18 @@ async test "read preserves multiline content" {
 
 ///|
 async test "read returns a requested line range with metadata" {
-  let path = "/tmp/openseek-read-range.txt"
+  let dir = @fs.tmpdir(prefix="openseek-read-")
+  let path = dir + "/range.txt"
   let content = "line one\nline two\nline three\nline four"
   @fs.write_file(path, content, create_mode=CreateOrTruncate)
   let result = execute({ "path": path, "start_line": 2, "max_lines": 2 })
+  @fs.rmdir(dir, recursive=true)
   guard result is Respond(output) else { fail("expected Respond") }
   assert_false(output.is_error)
   inspect(
-    output.content,
+    output.content.replace_all(old=path, new="<path>"),
     content=(
-      #|path=/tmp/openseek-read-range.txt
+      #|path=<path>
       #|start_line=2
       #|end_line=3
       #|total_lines=4
@@ -338,15 +346,17 @@ async test "read returns a requested line range with metadata" {
 
 ///|
 async test "read caps oversized output and marks it as an error" {
-  let path = "/tmp/openseek-read-capped.txt"
+  let dir = @fs.tmpdir(prefix="openseek-read-")
+  let path = dir + "/capped.txt"
   @fs.write_file(path, "abcdef", create_mode=CreateOrTruncate)
   let result = execute({ "path": path, "max_output_chars": 3 })
+  @fs.rmdir(dir, recursive=true)
   guard result is Respond(output) else { fail("expected Respond") }
   assert_true(output.is_error)
   inspect(
-    output.content,
+    output.content.replace_all(old=path, new="<path>"),
     content=(
-      #|path=/tmp/openseek-read-capped.txt
+      #|path=<path>
       #|start_line=1
       #|end_line=1
       #|total_lines=1
@@ -479,7 +489,10 @@ async test "read rejects an empty paths array" {
 
 ///|
 async test "read surfaces filesystem errors" {
-  let result = execute({ "path": "/tmp/openseek-does-not-exist" })
+  let dir = @fs.tmpdir(prefix="openseek-read-")
+  let path = dir + "/does-not-exist"
+  let result = execute({ "path": path })
+  @fs.rmdir(dir, recursive=true)
   guard result is Respond(output) else { fail("expected Respond") }
   assert_true(output.content.contains("error reading"))
   assert_true(output.is_error)
@@ -496,7 +509,7 @@ async test "read rejects missing path" {
 
 ///|
 async test "read rejects invalid limits" {
-  let result = execute({ "path": "/tmp/openseek-read-test.txt", "max_lines": 0 })
+  let result = execute({ "path": "openseek-read-test.txt", "max_lines": 0 })
   guard result is Respond(output) else { fail("expected Respond") }
   assert_true(output.content.contains("error: read requires"))
   assert_true(

@@ -28,8 +28,11 @@ be invoked correctly through the same typed boundary the agent loop uses.
 ///|
 async test "run deterministic tool harness" {
   let report = @tool_harness.run_harness()
-  assert_true(report.all_passed())
-  assert_true(report.markdown().contains("# Tool Harness"))
+  let markdown = report.markdown()
+  if report.all_passed() == false {
+    fail(markdown)
+  }
+  assert_true(markdown.contains("# Tool Harness"))
 }
 ```
 

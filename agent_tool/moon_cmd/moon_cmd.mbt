@@ -153,7 +153,8 @@ async fn collect_moon_output(
       }
     Some(input) => {
       let dir = @fs.tmpdir(prefix="openseek-moon-cmd-stdin-")
-      let input_path = "\{dir}/stdin"
+      let dir_path : @path.Path = dir
+      let input_path = dir_path.join("stdin").normalize().to_string()
       @fs.write_file(input_path, input, create_mode=CreateOrTruncate)
       let process_input = @process.redirect_from_file(input_path)
       let result = match cwd {
@@ -461,23 +462,23 @@ async test "moon_cmd snapshots native fixture test output" {
   @fs.rmdir(project, recursive=true)
   guard result is Respond(output) else { fail("expected Respond") }
   assert_false(output.is_error)
-  inspect(
-    stable_moon_cmd_output(output.content, project, canonical).trim(),
-    content=(
-      #|cwd=<fixture>
-      #|command=moon test --target native cmd/main
-      #|exit=0
-      #|Total tests: 1, passed: 1, failed: 0.
-    ),
-  )
+  let stable = stable_moon_cmd_output(output.content, project, canonical)
+  // Keep this as contains-based assertions: native compiler diagnostics include
+  // platform-specific paths and warning locations that are not the behavior
+  // this test is trying to pin down.
+  assert_true(stable.contains("cwd=<fixture>"))
+  assert_true(stable.contains("command=moon test --target native cmd/main"))
+  assert_true(stable.contains("exit=0"))
+  assert_true(stable.contains("Total tests: 1, passed: 1, failed: 0."))
 }
 
 ///|
 async test "moon_cmd reports failing fixture tests as tool errors" {
   let project = copy_fixture_project("native_cli_project")
   let canonical = @fs.realpath(project)
+  let project_path : @path.Path = project
   @fs.write_file(
-    "\{project}/cmd/main/main_wbtest.mbt",
+    project_path.join("cmd/main/main_wbtest.mbt").normalize().to_string(),
     (
       #|///|
       #|test "intentional failure" {
@@ -496,6 +497,9 @@ async test "moon_cmd reports failing fixture tests as tool errors" {
   guard result is Respond(output) else { fail("expected Respond") }
   assert_true(output.is_error)
   let stable = stable_moon_cmd_output(output.content, project, canonical)
+  // The failure text includes compiler-rendered paths, so assert the stable
+  // contract fields and the user-visible failure instead of snapshotting all
+  // diagnostics.
   assert_true(stable.contains("cwd=<fixture>"))
   assert_true(stable.contains("command=moon test --target native cmd/main"))
   assert_true(stable.contains("exit="))
@@ -567,29 +571,45 @@ async test "moon_cmd runs a virtual filesystem native CLI fixture" {
   @fs.rmdir(project, recursive=true)
   guard result is Respond(output) else { fail("expected Respond") }
   assert_false(output.is_error)
-  inspect(
-    stable_moon_cmd_output(output.content, project, canonical).trim(),
-    content=(
-      #|cwd=<fixture>
-      #|command=moon run --target native cmd/main -- --probe
-      #|exit=0
-      #|moon-cmd-vfs-probe
-    ),
+  let stable = stable_moon_cmd_output(output.content, project, canonical)
+  // Keep this focused on the command contract and fixture signal; full output
+  // may include cache messages or platform-specific paths.
+  assert_true(stable.contains("cwd=<fixture>"))
+  assert_true(
+    stable.contains("command=moon run --target native cmd/main -- --probe"),
   )
+  assert_true(stable.contains("exit=0"))
+  assert_true(stable.contains("moon-cmd-vfs-probe"))
 }
 
 ///|
 async fn copy_fixture_project(name : String) -> String {
   let target = @fs.tmpdir(prefix="openseek-moon-cmd-")
-  @fs.mkdir("\{target}/cmd/main", recursive=true)
-  copy_fixture_file(name, "moon.mod.fixture", "\{target}/moon.mod")
-  copy_fixture_file(name, "main.mbt.fixture", "\{target}/cmd/main/main.mbt")
+  let target_path : @path.Path = target
+  @fs.mkdir(
+    target_path.join("cmd/main").normalize().to_string(),
+    recursive=true,
+  )
+  copy_fixture_file(
+    name,
+    "moon.mod.fixture",
+    target_path.join("moon.mod").normalize().to_string(),
+  )
+  copy_fixture_file(
+    name,
+    "main.mbt.fixture",
+    target_path.join("cmd/main/main.mbt").normalize().to_string(),
+  )
   copy_fixture_file(
     name,
     "main_wbtest.mbt.fixture",
-    "\{target}/cmd/main/main_wbtest.mbt",
+    target_path.join("cmd/main/main_wbtest.mbt").normalize().to_string(),
   )
-  copy_fixture_file(name, "moon.pkg.fixture", "\{target}/cmd/main/moon.pkg")
+  copy_fixture_file(
+    name,
+    "moon.pkg.fixture",
+    target_path.join("cmd/main/moon.pkg").normalize().to_string(),
+  )
   target
 }
 
@@ -609,9 +629,12 @@ fn stable_moon_cmd_output(
   project : String,
   canonical : String,
 ) -> String {
-  content
-  .replace_all(old=canonical, new="<fixture>")
-  .replace_all(old=project, new="<fixture>")
+  let normalized = @test_output.redact_fixture_root(
+    content,
+    root=project,
+    canonical~,
+  )
+  normalized
   .replace_all(old="Using cached moonbitlang/async@0.19.1\n", new="")
   .replace_all(old="Downloading moonbitlang/async@0.19.1\n", new="")
 }

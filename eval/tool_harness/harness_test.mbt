@@ -2,9 +2,10 @@
 async test "deterministic harness exercises every tool" {
   let report = @tool_harness.run_harness()
   assert_eq(report.rows.length(), 8)
-  assert_eq(report.successes(), 8)
-  assert_true(report.all_passed())
   let markdown = report.markdown()
+  if report.successes() != 8 || report.all_passed() == false {
+    fail(markdown)
+  }
   assert_true(markdown.contains("# Tool Harness"))
   assert_false(markdown.contains("`check_daemon`"))
   assert_true(markdown.contains("`moon_ide`"))

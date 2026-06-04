@@ -1,11 +1,6 @@
 import {
-  "moonbitlang/async/fs",
   "moonbitlang/x/path",
 }
-
-import {
-  "moonbitlang/async",
-} for "test"
 
 warnings = "+unnecessary_annotation"
 

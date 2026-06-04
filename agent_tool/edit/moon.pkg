@@ -10,6 +10,7 @@ import {
 
 import {
   "moonbitlang/async",
+  "moonbitlang/x/path",
 } for "test"
 
 warnings = "+unnecessary_annotation"

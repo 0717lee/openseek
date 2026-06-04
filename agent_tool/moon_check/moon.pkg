@@ -5,11 +5,13 @@ import {
   "bobzhang/openseek/agent_tool/moon_check/internal/decode",
   "bobzhang/openseek/internal/workspace_path",
   "bobzhang/openseek/testkit/filesystem" @vfs,
+  "bobzhang/openseek/testkit/output" @test_output,
   "moonbitlang/async",
   "moonbitlang/async/fs",
   "moonbitlang/async/process",
   "moonbitlang/core/encoding/utf8",
   "moonbitlang/core/json",
+  "moonbitlang/x/path",
 }
 
 warnings = "+unnecessary_annotation"

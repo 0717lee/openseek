@@ -92,7 +92,8 @@ test "edit tool advertises the expected schema" {
 ```moonbit check
 ///|
 async test "edit tool applies a focused code change through the registry" {
-  let path = "/tmp/openseek-edit-readme-example.mbt"
+  let dir = @fs.tmpdir(prefix="openseek-edit-readme-")
+  let path = dir + "/example.mbt"
   @fs.write_file(
     path,
     "fn greet() -> String {\n  \"hello\"\n}\n",
@@ -100,26 +101,24 @@ async test "edit tool applies a focused code change through the registry" {
   )
 
   let tools = @agent_tool.Tools([@edit.definition()])
+  let arguments : Json = {
+    "path": path,
+    "old_string": "  \"hello\"",
+    "new_string": "  \"hello, MoonBit\"",
+  }
   let call = @agent_tool.AgentToolCall(
     ToolCall(
       id="call_edit_greeting",
       name="edit",
-      arguments=(
-        #|{
-        #|  "path": "/tmp/openseek-edit-readme-example.mbt",
-        #|  "old_string": "  \"hello\"",
-        #|  "new_string": "  \"hello, MoonBit\""
-        #|}
-      ),
+      arguments=arguments.stringify(),
     ),
   )
   let result = @agent_tool.execute_tool_call(call, tools)
   guard result is Respond(output) else { fail("expected Respond") }
   assert_eq(output.content, "ok: replaced 1 occurrence(s) in \{path}")
   assert_false(output.is_error)
-  assert_eq(
-    @fs.read_file(path).text(),
-    "fn greet() -> String {\n  \"hello, MoonBit\"\n}\n",
-  )
+  let read_back = @fs.read_file(path).text()
+  @fs.rmdir(dir, recursive=true)
+  assert_eq(read_back, "fn greet() -> String {\n  \"hello, MoonBit\"\n}\n")
 }
 ```

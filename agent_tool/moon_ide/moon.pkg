@@ -3,10 +3,12 @@ import {
   "bobzhang/openseek/agent_tool/internal/error" @tool_error,
   "bobzhang/openseek/agent_tool/moon_ide/internal/decode",
   "bobzhang/openseek/testkit/filesystem" @vfs,
+  "bobzhang/openseek/testkit/output" @test_output,
   "moonbitlang/async",
   "moonbitlang/async/fs",
   "moonbitlang/async/process",
   "moonbitlang/core/json",
+  "moonbitlang/x/path",
 }
 
 warnings = "+unnecessary_annotation"

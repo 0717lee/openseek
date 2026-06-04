@@ -121,11 +121,15 @@ fn command_action(input : @decode.MoonIdeInput) -> String {
 ///|
 async fn moon_ide(input : @decode.MoonIdeInput) -> @agent_tool.ToolAction {
   let args = command_args(input)
-  let (code, output) = match input.cwd {
+  let cwd = match input.cwd {
+    Some(cwd) => Some(@fs.realpath(cwd))
+    None => None
+  }
+  let (code, output) = match cwd {
     Some(cwd) => @process.collect_output_merged("moon", args, cwd~)
     None => @process.collect_output_merged("moon", args)
   }
-  let cwd_text = match input.cwd {
+  let cwd_text = match cwd {
     Some(cwd) => cwd
     None => "."
   }
@@ -259,38 +263,54 @@ async test "moon_ide rejects non-object arguments" {
 }
 
 ///|
-async test "moon_ide looks up installed core documentation" {
-  let result = execute({
-    "action": "doc",
-    "query": "String::replace_all",
-    "max_output_chars": 2000,
-    "no_check": true,
-  })
-  guard result is Respond(output) else { fail("expected Respond") }
-  assert_false(output.is_error)
-  let stable = output.content.trim()
-  assert_true(
-    stable.contains("command=moon ide doc --no-check String::replace_all"),
+#cfg(platform="windows")
+async test "moon_ide normalizes fixture paths on Windows" {
+  let project = copy_fixture_project("simple_project")
+  let canonical = @fs.realpath(project)
+  let stable = stable_moon_ide_output(
+    "cwd=\{project}\npath=\{canonical}\\lib.mbt",
+    project,
+    canonical,
   )
-  assert_true(stable.contains("pub fn String::replace_all"))
-  assert_true(stable.contains("Replaces all non-overlapping occurrences"))
+  @fs.rmdir(project, recursive=true)
+  assert_true(stable.contains("cwd=<fixture>"))
+  assert_true(stable.contains("path=<fixture>/lib.mbt"))
+}
+
+///|
+async test "moon_ide looks up fixture documentation" {
+  let project = copy_fixture_project("simple_project")
+  let canonical = @fs.realpath(project)
+  let result = execute({
+    "cwd": project,
+    "action": "doc",
+    "query": "render",
+    "max_output_chars": 2000,
+  })
+  @fs.rmdir(project, recursive=true)
+  guard result is Respond(output) else { fail("expected Respond") }
+  let stable = stable_moon_ide_output(output.content, project, canonical).trim()
+  if output.is_error {
+    fail("moon_ide failed:\n\{stable}")
+  }
+  assert_true(stable.contains("cwd=<fixture>"))
+  assert_true(stable.contains("command=moon ide doc render"))
+  assert_true(stable.contains("pub fn render(Widget) -> String"))
 }
 
 ///|
 async test "moon_ide outlines a real fixture package" {
   let project = copy_fixture_project("simple_project")
   let canonical = @fs.realpath(project)
-  let result = execute({
-    "cwd": project,
-    "action": "outline",
-    "path": ".",
-    "no_check": false,
-  })
+  let result = execute({ "cwd": project, "action": "outline", "path": "." })
   @fs.rmdir(project, recursive=true)
   guard result is Respond(output) else { fail("expected Respond") }
-  assert_false(output.is_error)
+  let stable = stable_moon_ide_output(output.content, project, canonical)
+  if output.is_error {
+    fail("moon_ide failed:\n\{stable}")
+  }
   inspect(
-    stable_moon_ide_output(output.content, project, canonical).trim(),
+    stable.trim(),
     content=(
       #|cwd=<fixture>
       #|command=moon ide outline .
@@ -317,12 +337,13 @@ async test "moon_ide peeks a definition in a real fixture package" {
     "action": "peek_def",
     "query": "render",
     "loc": "lib.mbt",
-    "no_check": false,
   })
   @fs.rmdir(project, recursive=true)
   guard result is Respond(output) else { fail("expected Respond") }
-  assert_false(output.is_error)
   let stable = stable_moon_ide_output(output.content, project, canonical)
+  if output.is_error {
+    fail("moon_ide failed:\n\{stable}")
+  }
   assert_true(stable.contains("cwd=<fixture>"))
   assert_true(stable.contains("command=moon ide peek-def --loc lib.mbt render"))
   assert_true(stable.contains("pub fn render(widget : Widget) -> String"))
@@ -337,12 +358,13 @@ async test "moon_ide hovers a token in a real fixture package" {
     "action": "hover",
     "query": "Widget",
     "loc": "lib.mbt:17:24",
-    "no_check": false,
   })
   @fs.rmdir(project, recursive=true)
   guard result is Respond(output) else { fail("expected Respond") }
-  assert_false(output.is_error)
   let stable = stable_moon_ide_output(output.content, project, canonical)
+  if output.is_error {
+    fail("moon_ide failed:\n\{stable}")
+  }
   assert_true(stable.contains("cwd=<fixture>"))
   assert_true(
     stable.contains("command=moon ide hover --loc lib.mbt:17:24 Widget"),
@@ -359,12 +381,13 @@ async test "moon_ide finds references in a real fixture package" {
     "action": "find_references",
     "query": "Widget::label",
     "loc": "lib.mbt",
-    "no_check": false,
   })
   @fs.rmdir(project, recursive=true)
   guard result is Respond(output) else { fail("expected Respond") }
-  assert_false(output.is_error)
   let stable = stable_moon_ide_output(output.content, project, canonical)
+  if output.is_error {
+    fail("moon_ide failed:\n\{stable}")
+  }
   assert_true(stable.contains("cwd=<fixture>"))
   assert_true(
     stable.contains(
@@ -377,14 +400,12 @@ async test "moon_ide finds references in a real fixture package" {
 
 ///|
 async test "moon_ide outlines a virtual filesystem multi-file package" {
-  let project = @fs.tmpdir(prefix="openseek-moon-ide-vfs-")
+  let project = workspace_tmpdir(prefix="openseek-moon-ide-vfs-")
   @vfs.FileSystem({
     "moon.mod": (
       #|name = "openseek/moon_ide_vfs_fixture"
       #|
       #|version = "0.1.0"
-      #|
-      #|preferred_target = "native"
       #|
     ),
     "moon.pkg": (
@@ -426,17 +447,19 @@ async test "moon_ide outlines a virtual filesystem multi-file package" {
     "cwd": project,
     "action": "outline",
     "path": ".",
-    "target": "native",
     "max_output_chars": 4000,
   })
   @fs.rmdir(project, recursive=true)
   guard result is Respond(output) else { fail("expected Respond") }
-  assert_false(output.is_error)
+  let stable = stable_moon_ide_output(output.content, project, canonical)
+  if output.is_error {
+    fail("moon_ide failed:\n\{stable}")
+  }
   inspect(
-    stable_moon_ide_output(output.content, project, canonical).trim(),
+    stable.trim(),
     content=(
       #|cwd=<fixture>
-      #|command=moon ide outline --target native .
+      #|command=moon ide outline .
       #|exit=0
       #|render.mbt:
       #| L2 | pub fn render_user(user : User) -> String {
@@ -457,10 +480,45 @@ async test "moon_ide outlines a virtual filesystem multi-file package" {
 
 ///|
 async fn copy_fixture_project(name : String) -> String {
-  let target = @fs.tmpdir(prefix="openseek-moon-ide-")
-  copy_fixture_file(name, "moon.mod.fixture", "\{target}/moon.mod")
-  copy_fixture_file(name, "moon.pkg.fixture", "\{target}/moon.pkg")
-  copy_fixture_file(name, "lib.mbt.fixture", "\{target}/lib.mbt")
+  let target = workspace_tmpdir(prefix="openseek-moon-ide-")
+  let target_path : @path.Path = target
+  copy_fixture_file(
+    name,
+    "moon.mod.fixture",
+    target_path.join("moon.mod").normalize().to_string(),
+  )
+  copy_fixture_file(
+    name,
+    "moon.pkg.fixture",
+    target_path.join("moon.pkg").normalize().to_string(),
+  )
+  copy_fixture_file(
+    name,
+    "lib.mbt.fixture",
+    target_path.join("lib.mbt").normalize().to_string(),
+  )
+  target
+}
+
+///|
+async fn workspace_tmpdir(prefix~ : String) -> String {
+  let parent_dir = "_build/openseek-moon-ide-tmp"
+  @fs.mkdir(parent_dir, recursive=true) catch {
+    error =>
+      if @fs.exists(parent_dir) && @fs.kind(parent_dir) == Directory {
+        ()
+      } else {
+        raise error
+      }
+  }
+  let scratch = @fs.tmpdir(prefix~)
+  let scratch_path : @path.Path = scratch
+  let name = scratch_path.basename().to_owned()
+  @fs.rmdir(scratch, recursive=true)
+  let parent = @fs.realpath(parent_dir)
+  let parent_path : @path.Path = parent
+  let target = parent_path.join(name).normalize().to_string()
+  @fs.mkdir(target)
   target
 }
 
@@ -480,7 +538,5 @@ fn stable_moon_ide_output(
   project : String,
   canonical : String,
 ) -> String {
-  content
-  .replace_all(old=canonical, new="<fixture>")
-  .replace_all(old=project, new="<fixture>")
+  @test_output.redact_fixture_root(content, root=project, canonical~)
 }

@@ -1,0 +1,14 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "bobzhang/openseek/testkit/output"
+
+// Values
+pub fn redact_fixture_root(String, root~ : String, canonical? : String, replacement? : String) -> String
+
+// Errors
+
+// Types and methods
+
+// Type aliases
+
+// Traits
+

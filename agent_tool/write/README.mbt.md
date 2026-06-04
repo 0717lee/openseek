@@ -2,7 +2,7 @@
 
 `write` overwrites `arguments.path` with `arguments.content`. Existing files
 are truncated; missing parent directories are **not** created — the agent
-should `shell` a `mkdir -p` first when it needs nested directories.
+should create parent directories explicitly before writing nested paths.
 
 ## Design Rationale
 
@@ -83,29 +83,25 @@ test "write tool advertises the expected schema" {
 ```moonbit check
 ///|
 async test "write tool updates an implementation note through the registry" {
-  let path = "/tmp/openseek-write-readme-note.txt"
+  let dir = @fs.tmpdir(prefix="openseek-write-readme-")
+  let path = dir + "/note.txt"
   @fs.write_file(path, "old note", create_mode=CreateOrTruncate)
 
   let tools = @agent_tool.Tools([@write.definition()])
+  let arguments : Json = { "path": path, "content": "tests green" }
   let call = @agent_tool.AgentToolCall(
     ToolCall(
       id="call_write_note",
       name="write",
-      arguments=(
-        #|{
-        #|  "path": "/tmp/openseek-write-readme-note.txt",
-        #|  "content": "tests green"
-        #|}
-      ),
+      arguments=arguments.stringify(),
     ),
   )
   let result = @agent_tool.execute_tool_call(call, tools)
   guard result is Respond(output) else { fail("expected Respond") }
-  assert_eq(
-    output.content,
-    "ok: wrote 11 chars to /tmp/openseek-write-readme-note.txt",
-  )
+  assert_eq(output.content, "ok: wrote 11 chars to \{path}")
   assert_false(output.is_error)
-  assert_eq(@fs.read_file(path).text(), "tests green")
+  let read_back = @fs.read_file(path).text()
+  @fs.rmdir(dir, recursive=true)
+  assert_eq(read_back, "tests green")
 }
 ```
