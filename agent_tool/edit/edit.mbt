@@ -94,7 +94,7 @@ async fn edit_file(input : @decode.EditInput) -> @agent_tool.ToolAction {
   } else {
     content.replace(old=input.old_string, new=input.new_string)
   }
-  match manifest_write_error(input.path, new_content) {
+  match @manifest_error.write_error(input.path, new_content) {
     Some(message) =>
       return @agent_tool.ToolAction::respond(
         "error editing \{input.path}: \{message}",
@@ -156,49 +156,4 @@ fn occurrence_line_labels(
 ///|
 fn newline_count(text : String) -> Int {
   text.split("\n").count() - 1
-}
-
-///|
-async fn manifest_write_error(path : String, content : String) -> String? {
-  let trimmed = content.trim().to_owned()
-  if is_moon_mod_json_path(path) && !@fs.exists(path) {
-    return Some(
-      "moon.mod.json is legacy; create moon.mod for new MoonBit projects",
-    )
-  }
-  if is_moon_mod_path(path) {
-    if trimmed == "" {
-      return Some("moon.mod must not be empty")
-    }
-    if trimmed.has_prefix("{") || trimmed.contains("\"name\"") {
-      return Some("moon.mod uses current text syntax, not JSON")
-    }
-    if !trimmed.contains("name =") {
-      return Some("moon.mod should include a module `name = ...` entry")
-    }
-  }
-  if is_moon_pkg_path(path) {
-    if trimmed.length() < 8 {
-      return Some("moon.pkg content is suspiciously small")
-    }
-    if trimmed.has_prefix("{") {
-      return Some("moon.pkg uses current text syntax, not JSON")
-    }
-  }
-  None
-}
-
-///|
-fn is_moon_mod_path(path : String) -> Bool {
-  path == "moon.mod" || path.has_suffix("/moon.mod")
-}
-
-///|
-fn is_moon_mod_json_path(path : String) -> Bool {
-  path == "moon.mod.json" || path.has_suffix("/moon.mod.json")
-}
-
-///|
-fn is_moon_pkg_path(path : String) -> Bool {
-  path == "moon.pkg" || path.has_suffix("/moon.pkg")
 }
