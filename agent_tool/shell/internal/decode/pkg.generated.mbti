@@ -18,6 +18,7 @@ pub let hard_max_output_chars : Int
 pub struct ShellInput {
   cmd : String
   cwd : String?
+  timeout_ms : Int?
   max_output_chars : Int
 } derive(@debug.Debug)
 

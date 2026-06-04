@@ -1,13 +1,18 @@
 import {
   "bobzhang/openseek/agent_tool",
   "bobzhang/openseek/agent_tool/internal/error" @tool_error,
+  "bobzhang/openseek/agent_tool/shell/internal/command_policy",
   "bobzhang/openseek/agent_tool/shell/internal/decode",
-  "bobzhang/openseek/testkit/filesystem" @vfs,
   "moonbitlang/async",
   "moonbitlang/async/fs",
+  "moonbitlang/async/io",
   "moonbitlang/async/process",
   "moonbitlang/core/json",
 }
+
+import {
+  "bobzhang/openseek/testkit/filesystem" @vfs,
+} for "test"
 
 warnings = "+unnecessary_annotation"
 

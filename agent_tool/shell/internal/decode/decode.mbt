@@ -8,6 +8,7 @@ pub let hard_max_output_chars : Int = 50000
 pub struct ShellInput {
   cmd : String
   cwd : String?
+  timeout_ms : Int?
   max_output_chars : Int
 } derive(Debug)
 
@@ -23,10 +24,16 @@ pub fn decode(arguments : Json) -> ShellInput raise {
 fn parse_fields(fields : Map[String, Json]) -> ShellInput raise {
   let cmd = required_string(fields, "cmd")
   let cwd = optional_string(fields, "cwd")
-  let max_output_chars = optional_positive_int(
+  let timeout_ms = optional_positive_int(fields, "timeout_ms")
+  let max_output_chars = optional_positive_int_or_default(
     fields, "max_output_chars", default_max_output_chars,
   )
-  { cmd, cwd, max_output_chars: cap_max_output_chars(max_output_chars) }
+  {
+    cmd,
+    cwd,
+    timeout_ms,
+    max_output_chars: cap_max_output_chars(max_output_chars),
+  }
 }
 
 ///|
@@ -49,6 +56,24 @@ fn optional_string(fields : Map[String, Json], name : String) -> String? raise {
 
 ///|
 fn optional_positive_int(
+  fields : Map[String, Json],
+  name : String,
+) -> Int? raise {
+  match fields.get(name) {
+    Some(Number(value, ..)) => {
+      let int_value = value.to_int()
+      if int_value <= 0 {
+        fail("arguments.\{name} to be a positive number")
+      }
+      Some(int_value)
+    }
+    Some(Null) | None => None
+    _ => fail("arguments.\{name} to be a number")
+  }
+}
+
+///|
+fn optional_positive_int_or_default(
   fields : Map[String, Json],
   name : String,
   default : Int,

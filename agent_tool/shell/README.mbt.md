@@ -19,6 +19,10 @@ generated artifacts, dependency listings, or compiler invocations large enough
 to damage the model context. Truncation is treated as a tool error so the agent
 knows it did not receive the full command output.
 
+Callers may also set `timeout_ms` for commands that could wait indefinitely.
+When the timeout expires, the in-flight process collection is cancelled and the
+tool returns an error instead of blocking the agent loop.
+
 ## API Style
 
 Use `cwd` whenever the command is workspace-relative, and keep commands
@@ -42,6 +46,7 @@ features such as pipes.
 | ---- | ------ | -------- | ----- |
 | `cmd` | string | yes | Passed as the single argument to `sh -c`. |
 | `cwd` | string | no  | Working directory. An empty string is treated as missing. |
+| `timeout_ms` | number | no | Positive timeout in milliseconds. Timed-out commands are cancelled and reported as tool errors. |
 | `max_output_chars` | number | no | Defaults to 12000, capped at 50000. Truncated output is a tool error. |
 
 ## Action
@@ -55,6 +60,8 @@ has one of these shapes:
 - `"exit=<code>\n<stdout/stderr merged>"` — normal completion.
 - `"exit=<code>\ntruncated=true\noutput_chars=<n>\nshown_chars=<n>\n<output-prefix>"` —
   the process completed but output was capped before sending it to the model.
+- `"error: shell command timed out after <n>ms"` — `timeout_ms` elapsed before
+  the command completed.
 - `"error running shell: <error>"` — `sh -c` failed to launch (rare; usually
   a process subsystem error).
 - `"error: shell requires arguments.cmd"` — payload was an object but had no
@@ -74,6 +81,7 @@ test "shell tool advertises the expected schema" {
   let JsonSchema(schema) = tool.schema
   let text = schema.stringify()
   assert_true(text.contains("\"cmd\""))
+  assert_true(text.contains("\"timeout_ms\""))
   assert_true(text.contains("\"max_output_chars\""))
   assert_true(text.contains("\"required\""))
 }
@@ -90,7 +98,8 @@ async test "shell tool runs a project-style command through the registry" {
       arguments=(
         #|{
         #|  "cmd": "printf 'alpha beta' | wc -w",
-        #|  "cwd": "/tmp"
+        #|  "cwd": "/tmp",
+        #|  "timeout_ms": 5000
         #|}
       ),
     ),
