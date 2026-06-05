@@ -44,5 +44,5 @@ async test "report writes markdown and json files" {
   let json = @fs.read_file(root + "/report.json").text()
   assert_true(markdown.contains("# Tiny Report"))
   assert_true(json.contains("\"title\":\"Tiny Report\""))
-  let _ = @fs.rmdir(root, recursive=true) catch { _ => () }
+  @fs.rmdir(root, recursive=true)
 }

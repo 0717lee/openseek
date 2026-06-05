@@ -286,7 +286,7 @@ async test "moon_ide outlines a real fixture package" {
     "path": ".",
     "no_check": false,
   })
-  let _ = @fs.rmdir(project, recursive=true) catch { _ => () }
+  @fs.rmdir(project, recursive=true)
   guard result is Respond(output) else { fail("expected Respond") }
   assert_false(output.is_error)
   inspect(
@@ -319,7 +319,7 @@ async test "moon_ide peeks a definition in a real fixture package" {
     "loc": "lib.mbt",
     "no_check": false,
   })
-  let _ = @fs.rmdir(project, recursive=true) catch { _ => () }
+  @fs.rmdir(project, recursive=true)
   guard result is Respond(output) else { fail("expected Respond") }
   assert_false(output.is_error)
   let stable = stable_moon_ide_output(output.content, project, canonical)
@@ -339,7 +339,7 @@ async test "moon_ide hovers a token in a real fixture package" {
     "loc": "lib.mbt:17:24",
     "no_check": false,
   })
-  let _ = @fs.rmdir(project, recursive=true) catch { _ => () }
+  @fs.rmdir(project, recursive=true)
   guard result is Respond(output) else { fail("expected Respond") }
   assert_false(output.is_error)
   let stable = stable_moon_ide_output(output.content, project, canonical)
@@ -361,7 +361,7 @@ async test "moon_ide finds references in a real fixture package" {
     "loc": "lib.mbt",
     "no_check": false,
   })
-  let _ = @fs.rmdir(project, recursive=true) catch { _ => () }
+  @fs.rmdir(project, recursive=true)
   guard result is Respond(output) else { fail("expected Respond") }
   assert_false(output.is_error)
   let stable = stable_moon_ide_output(output.content, project, canonical)
@@ -429,7 +429,7 @@ async test "moon_ide outlines a virtual filesystem multi-file package" {
     "target": "native",
     "max_output_chars": 4000,
   })
-  let _ = @fs.rmdir(project, recursive=true) catch { _ => () }
+  @fs.rmdir(project, recursive=true)
   guard result is Respond(output) else { fail("expected Respond") }
   assert_false(output.is_error)
   inspect(

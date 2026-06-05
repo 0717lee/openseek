@@ -176,7 +176,7 @@ async test "moon_check validates a real fixture project" {
   let project = copy_fixture_project("valid_project")
   let canonical = @fs.realpath(project)
   let result = execute({ "cwd": project })
-  let _ = @fs.rmdir(project, recursive=true) catch { _ => () }
+  @fs.rmdir(project, recursive=true)
   guard result is Respond(output) else { fail("expected Respond") }
   assert_false(output.is_error)
   inspect(
@@ -195,7 +195,7 @@ async test "moon_check reports diagnostics from a broken fixture project" {
   let project = copy_fixture_project("invalid_project")
   let canonical = @fs.realpath(project)
   let result = execute({ "cwd": project })
-  let _ = @fs.rmdir(project, recursive=true) catch { _ => () }
+  @fs.rmdir(project, recursive=true)
   guard result is Respond(output) else { fail("expected Respond") }
   assert_true(output.is_error)
   inspect(
@@ -237,7 +237,7 @@ async test "moon_check validates a virtual filesystem package path" {
   }).write_to(project)
   let canonical = @fs.realpath(project)
   let result = execute({ "cwd": project, "path": "math", "target": "native" })
-  let _ = @fs.rmdir(project, recursive=true) catch { _ => () }
+  @fs.rmdir(project, recursive=true)
   guard result is Respond(output) else { fail("expected Respond") }
   assert_false(output.is_error)
   inspect(

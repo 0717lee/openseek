@@ -172,7 +172,7 @@ async test "configured system prompt can replace and append files" {
     configured_system_prompt(parsed, V4Flash),
     "base prompt\n\n\naddendum\n",
   )
-  let _ = @fs.rmdir(dir, recursive=true) catch { _ => () }
+  @fs.rmdir(dir, recursive=true)
 }
 
 ///|

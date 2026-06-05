@@ -167,7 +167,7 @@ async fn collect_moon_output(
         None =>
           @process.collect_output_merged("moon", args, stdin=process_input)
       }
-      let _ = @fs.rmdir(dir, recursive=true) catch { _ => () }
+      @fs.rmdir(dir, recursive=true)
       result
     }
   }
@@ -366,7 +366,7 @@ async test "moon_cmd validates a native fixture CLI when target is explicit" {
     "path": "cmd/main",
     "program_args": ["input.toml"],
   })
-  let _ = @fs.rmdir(project, recursive=true) catch { _ => () }
+  @fs.rmdir(project, recursive=true)
   guard result is Respond(output) else { fail("expected Respond") }
   assert_false(output.is_error)
   let stable = stable_moon_cmd_output(output.content, project, canonical)
@@ -390,7 +390,7 @@ async test "moon_cmd passes stdin to native fixture CLI" {
     "program_args": ["--stdin"],
     "stdin": "hello\n",
   })
-  let _ = @fs.rmdir(project, recursive=true) catch { _ => () }
+  @fs.rmdir(project, recursive=true)
   guard result is Respond(output) else { fail("expected Respond") }
   assert_false(output.is_error)
   let stable = stable_moon_cmd_output(output.content, project, canonical)
@@ -415,7 +415,7 @@ async test "moon_cmd truncates oversized successful output as a tool error" {
     "program_args": ["input.toml"],
     "max_output_chars": 10,
   })
-  let _ = @fs.rmdir(project, recursive=true) catch { _ => () }
+  @fs.rmdir(project, recursive=true)
   guard result is Respond(output) else { fail("expected Respond") }
   assert_true(output.is_error)
   let stable = stable_moon_cmd_output(output.content, project, canonical)
@@ -438,7 +438,7 @@ async test "moon_cmd catches default-target failure for native-only CLI" {
     "path": "cmd/main",
     "program_args": ["input.toml"],
   })
-  let _ = @fs.rmdir(project, recursive=true) catch { _ => () }
+  @fs.rmdir(project, recursive=true)
   guard result is Respond(output) else { fail("expected Respond") }
   assert_true(output.is_error)
   let stable = stable_moon_cmd_output(output.content, project, canonical)
@@ -458,7 +458,7 @@ async test "moon_cmd snapshots native fixture test output" {
     "target": "native",
     "path": "cmd/main",
   })
-  let _ = @fs.rmdir(project, recursive=true) catch { _ => () }
+  @fs.rmdir(project, recursive=true)
   guard result is Respond(output) else { fail("expected Respond") }
   assert_false(output.is_error)
   inspect(
@@ -492,7 +492,7 @@ async test "moon_cmd reports failing fixture tests as tool errors" {
     "target": "native",
     "path": "cmd/main",
   })
-  let _ = @fs.rmdir(project, recursive=true) catch { _ => () }
+  @fs.rmdir(project, recursive=true)
   guard result is Respond(output) else { fail("expected Respond") }
   assert_true(output.is_error)
   let stable = stable_moon_cmd_output(output.content, project, canonical)
@@ -564,7 +564,7 @@ async test "moon_cmd runs a virtual filesystem native CLI fixture" {
     "path": "cmd/main",
     "program_args": ["--probe"],
   })
-  let _ = @fs.rmdir(project, recursive=true) catch { _ => () }
+  @fs.rmdir(project, recursive=true)
   guard result is Respond(output) else { fail("expected Respond") }
   assert_false(output.is_error)
   inspect(

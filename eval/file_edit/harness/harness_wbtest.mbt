@@ -1,4 +1,14 @@
 ///|
+async test "prepare output dir creates a missing output directory" {
+  let root = @fs.tmpdir(prefix="openseek-file-edit-output")
+  let out_dir = root + "/out"
+  prepare_output_dir(out_dir)
+  assert_true(@fs.exists(out_dir + "/workspaces"))
+  assert_true(@fs.exists(out_dir + "/logs"))
+  @fs.rmdir(root, recursive=true)
+}
+
+///|
 async test "dry run exact replacement oracle" {
   let case = @cases.case_for_trial(0)
   let root = @fs.tmpdir(prefix="openseek-file-edit-harness")
@@ -33,7 +43,7 @@ async test "dry run exact replacement oracle" {
   assert_eq(result.prompt_label, "builtin")
   assert_eq(result.edit_successes, 1)
   assert_true(result.marker_present)
-  let _ = @fs.rmdir(root, recursive=true) catch { _ => () }
+  @fs.rmdir(root, recursive=true)
 }
 
 ///|
@@ -74,7 +84,7 @@ async test "dry run exact replacement oracle with jsonl agent log" {
   assert_eq(result.edit_successes, 1)
   assert_true(result.marker_present)
   assert_eq(result.warnings, "shell tool used 1 time(s)")
-  let _ = @fs.rmdir(root, recursive=true) catch { _ => () }
+  @fs.rmdir(root, recursive=true)
 }
 
 ///|

@@ -23,5 +23,5 @@ async test "harness report can be written for inspection" {
     ),
   )
   assert_true(json.contains("\"title\":\"Tool Harness\""))
-  let _ = @fs.rmdir(root, recursive=true) catch { _ => () }
+  @fs.rmdir(root, recursive=true)
 }

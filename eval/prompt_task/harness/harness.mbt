@@ -89,7 +89,9 @@ pub async fn run_suite(config : Config) -> EvalReport {
 
 ///|
 async fn prepare_output_dir(out_dir : String) -> Unit {
-  let _ = @fs.rmdir(out_dir, recursive=true) catch { _ => () }
+  if @fs.exists(out_dir) {
+    @fs.rmdir(out_dir, recursive=true)
+  }
   @fs.mkdir(out_dir + "/workspaces", recursive=true)
   @fs.mkdir(out_dir + "/logs", recursive=true)
 }

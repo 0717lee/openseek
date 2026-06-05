@@ -153,7 +153,7 @@ async test "write rejects new legacy moon.mod.json" {
   let dir = @fs.tmpdir(prefix="openseek-write-manifest-")
   let path = dir + "/moon.mod.json"
   let result = execute({ "path": path, "content": "{\"name\":\"legacy\"}" })
-  let _ = @fs.rmdir(dir, recursive=true) catch { _ => () }
+  @fs.rmdir(dir, recursive=true)
   guard result is Respond(output) else { fail("expected Respond") }
   assert_true(output.is_error)
   assert_true(output.content.contains("moon.mod.json is legacy"))
@@ -164,7 +164,7 @@ async test "write rejects json style moon.mod" {
   let dir = @fs.tmpdir(prefix="openseek-write-manifest-")
   let path = dir + "/moon.mod"
   let result = execute({ "path": path, "content": "{\"name\":\"bad\"}" })
-  let _ = @fs.rmdir(dir, recursive=true) catch { _ => () }
+  @fs.rmdir(dir, recursive=true)
   guard result is Respond(output) else { fail("expected Respond") }
   assert_true(output.is_error)
   assert_true(output.content.contains("moon.mod uses current text syntax"))
@@ -175,7 +175,7 @@ async test "write rejects suspiciously tiny moon.pkg" {
   let dir = @fs.tmpdir(prefix="openseek-write-manifest-")
   let path = dir + "/moon.pkg"
   let result = execute({ "path": path, "content": "x" })
-  let _ = @fs.rmdir(dir, recursive=true) catch { _ => () }
+  @fs.rmdir(dir, recursive=true)
   guard result is Respond(output) else { fail("expected Respond") }
   assert_true(output.is_error)
   assert_true(output.content.contains("moon.pkg content is suspiciously small"))

@@ -115,7 +115,7 @@ async test "edit rejects suspicious moon.pkg rewrite" {
     "new_string": "x",
   })
   let read_back = @fs.read_file(path).text()
-  let _ = @fs.rmdir(dir, recursive=true) catch { _ => () }
+  @fs.rmdir(dir, recursive=true)
   guard result is Respond(output) else { fail("expected Respond") }
   assert_true(output.is_error)
   assert_true(output.content.contains("moon.pkg content is suspiciously small"))

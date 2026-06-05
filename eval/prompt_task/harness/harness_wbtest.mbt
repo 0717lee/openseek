@@ -1,4 +1,14 @@
 ///|
+async test "prepare output dir creates a missing output directory" {
+  let root = @fs.tmpdir(prefix="openseek-prompt-task-output")
+  let out_dir = root + "/out"
+  prepare_output_dir(out_dir)
+  assert_true(@fs.exists(out_dir + "/workspaces"))
+  assert_true(@fs.exists(out_dir + "/logs"))
+  @fs.rmdir(root, recursive=true)
+}
+
+///|
 async test "indexed runner honors concurrency and preserves order" {
   let mut active = 0
   let mut max_active = 0

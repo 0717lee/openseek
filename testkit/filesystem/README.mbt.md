@@ -81,7 +81,7 @@ async test "materialize and compare a fixture" {
 
   @filesystem.write_text(root, "src/note.txt", "changed\n")
   assert_eq(files.mismatch_on_disk(root), "content mismatch in src/note.txt")
-  let _ = @fs.rmdir(root, recursive=true) catch { _ => () }
+  @fs.rmdir(root, recursive=true)
 }
 ```
 

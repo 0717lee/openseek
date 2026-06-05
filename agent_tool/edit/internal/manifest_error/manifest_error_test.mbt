@@ -8,7 +8,7 @@ async test "manifest error rejects new moon.mod.json" {
   let dir = @fs.tmpdir(prefix="openseek-edit-manifest-error-")
   let path = dir + "/moon.mod.json"
   let error = write_error(path, "{}")
-  let _ = @fs.rmdir(dir, recursive=true) catch { _ => () }
+  @fs.rmdir(dir, recursive=true)
   guard error is Some(message) else { fail("expected manifest error") }
   assert_true(message.contains("moon.mod.json is legacy"))
 }
@@ -19,7 +19,7 @@ async test "manifest error allows existing moon.mod.json" {
   let path = dir + "/moon.mod.json"
   @fs.write_file(path, "{}", create_mode=CreateOrTruncate)
   let error = write_error(path, "{}")
-  let _ = @fs.rmdir(dir, recursive=true) catch { _ => () }
+  @fs.rmdir(dir, recursive=true)
   assert_true(error is None)
 }
 

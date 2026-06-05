@@ -57,7 +57,7 @@ async fn run_read_case(
     "max_lines": 1,
   })
   let reason = expect_respond(action, contains=["hello read"], error=false)
-  let _ = @fs.rmdir(root, recursive=true) catch { _ => () }
+  @fs.rmdir(root, recursive=true)
   row(index~, name="read", mode="filesystem", action="range read", reason~)
 }
 
@@ -79,7 +79,7 @@ async fn run_write_case(
   if reason == "" {
     reason = @vfs.FileSystem({ "created.txt": content }).mismatch_on_disk(root)
   }
-  let _ = @fs.rmdir(root, recursive=true) catch { _ => () }
+  @fs.rmdir(root, recursive=true)
   row(
     index~,
     name="write",
@@ -123,7 +123,7 @@ async fn run_edit_case(
       ),
     }).mismatch_on_disk(root)
   }
-  let _ = @fs.rmdir(root, recursive=true) catch { _ => () }
+  @fs.rmdir(root, recursive=true)
   row(
     index~,
     name="edit",
@@ -168,7 +168,7 @@ async fn run_moon_check_case(
     contains=["command=moon check --output-json --target native", "exit=0"],
     error=false,
   )
-  let _ = @fs.rmdir(root, recursive=true) catch { _ => () }
+  @fs.rmdir(root, recursive=true)
   row(
     index~,
     name="moon_check",
@@ -194,7 +194,7 @@ async fn run_moon_cmd_case(
     contains=["command=moon test --target native", "exit=0"],
     error=false,
   )
-  let _ = @fs.rmdir(root, recursive=true) catch { _ => () }
+  @fs.rmdir(root, recursive=true)
   row(
     index~,
     name="moon_cmd",
@@ -222,7 +222,7 @@ async fn run_moon_ide_case(
     contains=["command=moon ide outline --target native .", "exit=0", "answer"],
     error=false,
   )
-  let _ = @fs.rmdir(root, recursive=true) catch { _ => () }
+  @fs.rmdir(root, recursive=true)
   row(index~, name="moon_ide", mode="moon", action="outline fixture", reason~)
 }
 
