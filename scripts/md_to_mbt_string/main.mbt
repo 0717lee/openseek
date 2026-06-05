@@ -77,30 +77,14 @@ fn generated_source(
   function_name~ : String,
   markdown~ : String,
 ) -> String {
-  let lines = markdown.split("\n").to_array()
-  let skip_final_empty = markdown.has_suffix("\n")
-  let sb = StringBuilder()
-  sb <+
+  let lines = markdown.split("\n")
+  (
     $|// Generated from \{base} by moon dev_build. DO NOT EDIT.
     $|///|
     $|fn \{function_name}() -> String {
     $|  (
-    $|\{out => write_markdown_lines(out, lines, skip_final_empty)}  )
+    $|\{out => for line in lines { out <+ "    #|\{line}\n" }}  )
     $|}
     $|
-  sb.to_string()
-}
-
-///|
-fn write_markdown_lines(
-  out : StringBuilder,
-  lines : Array[StringView],
-  skip_final_empty : Bool,
-) -> Unit {
-  for index, line in lines {
-    if skip_final_empty && index == lines.length() - 1 {
-      continue
-    }
-    out <+ "    #|\{line}\n"
-  }
+  )
 }

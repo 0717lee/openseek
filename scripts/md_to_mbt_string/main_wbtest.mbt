@@ -39,6 +39,7 @@ test "generated source matches dev_build output shape" {
     #|    #|# Title
     #|    #|
     #|    #|body
+    #|    #|
     #|  )
     #|}
     #|
