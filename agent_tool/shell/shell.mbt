@@ -147,41 +147,26 @@ async fn collect_shell_output(
   let (reader, writer) = @process.read_from_process()
   @async.with_task_group() <| group => {
     defer reader.close()
-    let process = match cwd {
-      Some(cwd) =>
-        @process.spawn(
-          group,
-          program,
-          args,
-          stdout=writer,
-          stderr=writer,
-          cwd~,
-          cancel_handler=@process.hard_cancel(),
-        )
-      None =>
-        @process.spawn(
-          group,
-          program,
-          args,
-          stdout=writer,
-          stderr=writer,
-          cancel_handler=@process.hard_cancel(),
-        )
-    }
+    let process = @process.spawn(
+      group,
+      program,
+      args,
+      stdout=writer,
+      stderr=writer,
+      cwd?=cwd.map(cwd => cwd.view()),
+      cancel_handler=@process.hard_cancel(),
+      no_wait=true,
+    )
     let prefix = read_output_prefix(reader, max_output_chars)
-    if prefix.output_limit_reached {
-      let exit_code = process.try_wait() catch { _ => None }
-      if exit_code is None {
-        process.cancel()
-        let _ = process.wait() catch { _ => 0 }
-      }
-      { exit_code, text: prefix.text, output_limit_reached: true }
+    let exit_code = if prefix.output_limit_reached {
+      None
     } else {
-      {
-        exit_code: Some(process.wait()),
-        text: prefix.text,
-        output_limit_reached: false,
-      }
+      Some(process.wait())
+    }
+    {
+      exit_code,
+      text: prefix.text,
+      output_limit_reached: prefix.output_limit_reached,
     }
   }
 }
