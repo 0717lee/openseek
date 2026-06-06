@@ -1,43 +1,6 @@
 ///|
-const FUNCTION_NAME = re"^[a-z_][A-Za-z0-9_]*$"
-
-///|
-struct ProgramArgs {
-  input : String
-  output : String
-}
-
-///|
 async fn main {
-  let args = parse_program_args()
-  let input_path : @path.Path = args.input
-  let base = input_path.basename().to_owned()
-  let function_name = function_name_from_base(base)
-  let markdown = @fs.read_file(args.input).text()
-  let source = generated_source(base~, function_name~, markdown~)
-  if output_matches(args.output, source) {
-    return
-  }
-  let tmp = args.output + ".tmp"
-  @fs.write_file(tmp, source, create_mode=CreateOrTruncate)
-  @fs.rename(tmp, args.output, replace=true)
-}
-
-///|
-async fn output_matches(output : String, source : String) -> Bool {
-  let current = @fs.read_file(output).text() catch { _ => return false }
-  current == source
-}
-
-///|
-fn parse_program_args() -> ProgramArgs raise {
-  let matches = cli_command().parse()
-  { input: value(matches, "input"), output: value(matches, "output") }
-}
-
-///|
-fn cli_command() -> @argparse.Command {
-  Command(
+  let command : @argparse.Command = Command(
     "md_to_mbt_string",
     about="Generate a MoonBit string source file from Markdown.",
     positionals=[
@@ -55,36 +18,44 @@ fn cli_command() -> @argparse.Command {
       ),
     ],
   )
+  guard command.parse().values is { "input": [input, ..], "output": [output, ..], .. } else {
+    fail("missing parsed arguments")
+  }
+  let base = @path.Path(input).basename()
+  let function_name = function_name_from_base(base)
+  let markdown = @fs.read_file(input).text()
+  let source = generated_source(base~, function_name~, markdown~)
+  if output_matches(output, source) {
+    return
+  }
+  let tmp = output + ".tmp"
+  @fs.write_file(tmp, source, create_mode=CreateOrTruncate)
+  @fs.rename(tmp, output, replace=true)
 }
 
 ///|
-fn value(matches : @argparse.Matches, name : String) -> String raise {
-  match matches.values.get(name) {
-    Some([value]) => value
-    Some(values) if values.length() > 0 => values[0]
-    _ => fail("missing parsed argument: \{name}")
-  }
+async fn output_matches(output : StringView, source : StringView) -> Bool {
+  let current = @fs.read_file(output).text() catch { _ => return false }
+  current[:] == source
 }
 
 ///|
-fn function_name_from_base(base : String) -> String raise {
-  let name = match base {
-    [.. stem, .. ".mbt.md"] | [.. stem, .. ".md"] => stem
-    _ => fail("md_to_mbt_string: input must end in .md or .mbt.md: \{base}")
+fn function_name_from_base(base : StringView) -> StringView raise {
+  match base {
+    ([.. stem, .. ".mbt.md"] | [.. stem, .. ".md"]) if stem =~ re"^[a-z_][A-Za-z0-9_]*$" =>
+      stem
+    _ =>
+      fail(
+        "md_to_mbt_string: input must end in .md or .mbt.md with a MoonBit function name basename: \{base}",
+      )
   }
-  guard name =~ FUNCTION_NAME else {
-    fail(
-      "md_to_mbt_string: input basename is not a MoonBit function name: \{name}",
-    )
-  }
-  name.to_owned()
 }
 
 ///|
 fn generated_source(
-  base~ : String,
-  function_name~ : String,
-  markdown~ : String,
+  base~ : StringView,
+  function_name~ : StringView,
+  markdown~ : StringView,
 ) -> String {
   let lines = markdown.split("\n")
   (
