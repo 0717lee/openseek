@@ -65,3 +65,14 @@ test "generated source preserves missing final newline" {
     #|
   assert_eq(source, expected)
 }
+
+///|
+async test "output match detects unchanged generated file" {
+  let path = "/tmp/openseek-md-to-mbt-output-match.mbt"
+  let _ = @fs.remove(path) catch { _ => () }
+  assert_false(output_matches(path, "same"))
+  @fs.write_file(path, "same", create_mode=CreateOrTruncate)
+  assert_true(output_matches(path, "same"))
+  assert_false(output_matches(path, "different"))
+  let _ = @fs.remove(path) catch { _ => () }
+}

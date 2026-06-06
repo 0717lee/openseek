@@ -336,5 +336,6 @@ fn flash_prompt() -> String {
     #|- stdout shape for successful output.
     #|
     #|Report the commands actually run and any remaining caveats.
+    #|
   )
 }

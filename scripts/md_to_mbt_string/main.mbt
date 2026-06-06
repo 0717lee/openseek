@@ -15,9 +15,18 @@ async fn main {
   let function_name = function_name_from_base(base)
   let markdown = @fs.read_file(args.input).text()
   let source = generated_source(base~, function_name~, markdown~)
+  if output_matches(args.output, source) {
+    return
+  }
   let tmp = args.output + ".tmp"
   @fs.write_file(tmp, source, create_mode=CreateOrTruncate)
   @fs.rename(tmp, args.output, replace=true)
+}
+
+///|
+async fn output_matches(output : String, source : String) -> Bool {
+  let current = @fs.read_file(output).text() catch { _ => return false }
+  current == source
 }
 
 ///|
