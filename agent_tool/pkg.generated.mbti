@@ -3,9 +3,13 @@ package "bobzhang/openseek/agent_tool"
 
 import {
   "bobzhang/openseek/deepseek",
+  "moonbitlang/async",
+  "moonbitlang/async/process",
 }
 
 // Values
+pub let default_daemon_event_capacity : Int
+
 pub async fn execute_tool_call(AgentToolCall, Tools) -> ToolAction
 
 // Errors
@@ -15,6 +19,24 @@ pub(all) enum AgentControl {
   Finish(String)
   Abort(String)
 }
+
+pub(all) enum AgentEvent {
+  DaemonUpdate(DaemonEvent)
+}
+
+pub struct AgentRuntime[X] {
+  // private fields
+}
+pub fn[X] AgentRuntime::AgentRuntime(@async.TaskGroup[X]) -> Self[X]
+pub fn[X] AgentRuntime::daemon_event(Self[X], String) -> DaemonEvent?
+pub fn[X] AgentRuntime::drain_events(Self[X]) -> Array[AgentEvent]
+pub fn[X] AgentRuntime::emit(Self[X], DaemonEvent) -> Unit
+pub fn[X] AgentRuntime::group(Self[X]) -> @async.TaskGroup[X]
+pub fn[X] AgentRuntime::mark_daemon_stopped(Self[X], String, Int?) -> DaemonEvent?
+pub fn[X] AgentRuntime::next_daemon_id(Self[X]) -> String
+pub fn[X] AgentRuntime::record_daemon_output(Self[X], String, String) -> DaemonEvent?
+pub fn[X] AgentRuntime::register_daemon(Self[X], id~ : String, name~ : String?, command~ : String, cwd~ : String?, process~ : @process.Process, max_output_chars~ : Int) -> DaemonEvent
+pub fn[X] AgentRuntime::stop_daemon(Self[X], String) -> DaemonEvent?
 
 pub struct AgentToolCall {
   name : String
@@ -29,6 +51,25 @@ pub struct AgentToolDefinition {
   execute : ToolExecutor
 }
 pub fn AgentToolDefinition::AgentToolDefinition(name~ : String, description~ : String, schema~ : JsonSchema, execute~ : ToolExecutor) -> Self
+
+pub struct DaemonEvent {
+  id : String
+  name : String?
+  command : String
+  cwd : String?
+  status : DaemonStatus
+  seq : Int
+  output : String
+  output_truncated : Bool
+  max_output_chars : Int
+  exit_code : Int?
+}
+pub fn DaemonEvent::DaemonEvent(id~ : String, name~ : String?, command~ : String, cwd~ : String?, status~ : DaemonStatus, seq~ : Int, output~ : String, output_truncated~ : Bool, max_output_chars~ : Int, exit_code~ : Int?) -> Self
+
+pub(all) enum DaemonStatus {
+  Running
+  Stopped
+}
 
 pub(all) struct JsonSchema(Json)
 

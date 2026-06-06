@@ -1,0 +1,36 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "bobzhang/openseek/agent_tool/check_daemon/internal/decode"
+
+// Values
+pub fn decode(Json) -> CheckDaemonInput raise
+
+pub let default_initial_wait_ms : Int
+
+pub let default_max_output_chars : Int
+
+pub let hard_initial_wait_ms : Int
+
+pub let hard_max_output_chars : Int
+
+// Errors
+
+// Types and methods
+pub(all) enum CheckDaemonAction {
+  Start
+  Status
+  Stop
+}
+
+pub struct CheckDaemonInput {
+  action : CheckDaemonAction
+  cmd : String?
+  cwd : String?
+  name : String?
+  id : String?
+  max_output_chars : Int
+  initial_wait_ms : Int
+}
+
+// Type aliases
+
+// Traits

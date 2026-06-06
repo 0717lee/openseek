@@ -1,6 +1,8 @@
 import {
   "bobzhang/openseek/deepseek",
   "moonbitlang/async",
+  "moonbitlang/async/aqueue",
+  "moonbitlang/async/process",
   "moonbitlang/core/json",
 }
 

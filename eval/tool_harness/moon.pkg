@@ -1,5 +1,6 @@
 import {
   "bobzhang/openseek/agent_tool",
+  "bobzhang/openseek/agent_tool/check_daemon",
   "bobzhang/openseek/agent_tool/edit",
   "bobzhang/openseek/agent_tool/finish",
   "bobzhang/openseek/agent_tool/moon_check",
@@ -11,13 +12,10 @@ import {
   "bobzhang/openseek/deepseek",
   "bobzhang/openseek/eval/report",
   "bobzhang/openseek/testkit/filesystem" @vfs,
+  "moonbitlang/async",
   "moonbitlang/async/fs",
   "moonbitlang/core/json",
 }
-
-import {
-  "moonbitlang/async",
-} for "test"
 
 warnings = "+unnecessary_annotation"
 

@@ -349,6 +349,33 @@ async test "execute_tool_call dispatches to async executor" {
 }
 
 ///|
+async test "runtime drains queued daemon events" {
+  @async.with_task_group() <| group => {
+    let runtime = AgentRuntime(group)
+    runtime.emit({
+      id: "daemon-1",
+      name: Some("check"),
+      command: "moon check --watch",
+      cwd: None,
+      status: Running,
+      seq: 1,
+      output: "ok",
+      output_truncated: false,
+      max_output_chars: 12000,
+      exit_code: None,
+    })
+    let events = runtime.drain_events()
+    assert_eq(events.length(), 1)
+    guard events[0] is DaemonUpdate(update) else {
+      fail("expected DaemonUpdate")
+    }
+    assert_eq(update.id, "daemon-1")
+    assert_eq(update.output, "ok")
+    assert_eq(runtime.drain_events().length(), 0)
+  }
+}
+
+///|
 test "Tools::function_tools preserves description and schema" {
   let tools = Tools([
     {

@@ -1,6 +1,15 @@
 ///|
 pub async fn run_harness() -> @report.Report {
-  let tools = tool_definitions() catch {
+  @async.with_task_group() <| group => {
+    run_harness_with_runtime(AgentRuntime(group))
+  }
+}
+
+///|
+async fn run_harness_with_runtime(
+  runtime : @agent_tool.AgentRuntime[@report.Report],
+) -> @report.Report {
+  let tools = tool_definitions(runtime) catch {
     error =>
       return build_report([
         row(
@@ -17,25 +26,67 @@ pub async fn run_harness() -> @report.Report {
   rows.push(run_write_case(2, tools))
   rows.push(run_edit_case(3, tools))
   rows.push(run_shell_case(4, tools))
-  rows.push(run_moon_check_case(5, tools))
-  rows.push(run_moon_cmd_case(6, tools))
-  rows.push(run_moon_ide_case(7, tools))
-  rows.push(run_finish_case(8, tools))
+  rows.push(run_check_daemon_case(5, tools))
+  rows.push(run_moon_check_case(6, tools))
+  rows.push(run_moon_cmd_case(7, tools))
+  rows.push(run_moon_ide_case(8, tools))
+  rows.push(run_finish_case(9, tools))
   build_report(rows)
 }
 
 ///|
-fn tool_definitions() -> @agent_tool.Tools raise {
+fn tool_definitions(
+  runtime : @agent_tool.AgentRuntime[@report.Report],
+) -> @agent_tool.Tools raise {
   Tools([
     @read.definition(),
     @write.definition(),
     @edit.definition(),
     @shell.definition(),
+    @check_daemon.definition(runtime),
     @moon_check.definition(),
     @moon_cmd.definition(),
     @moon_ide.definition(),
     @finish.definition(),
   ])
+}
+
+///|
+async fn run_check_daemon_case(
+  index : Int,
+  tools : @agent_tool.Tools,
+) -> @report.ReportRow {
+  let action = dispatch(tools, "check_daemon", {
+    "action": "start",
+    "name": "harness",
+    "cmd": daemon_print_cmd(),
+    "initial_wait_ms": 100,
+    "max_output_chars": 2000,
+  })
+  let reason = expect_respond(
+    action,
+    contains=["check_daemon started", "tool-harness-daemon"],
+    error=false,
+  )
+  row(
+    index~,
+    name="check_daemon",
+    mode="process",
+    action="start background monitor",
+    reason~,
+  )
+}
+
+///|
+#cfg(platform="windows")
+fn daemon_print_cmd() -> String {
+  "[Console]::Out.Write('tool-harness-daemon')"
+}
+
+///|
+#cfg(not(platform="windows"))
+fn daemon_print_cmd() -> String {
+  "printf %s tool-harness-daemon"
 }
 
 ///|

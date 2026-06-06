@@ -10,6 +10,7 @@ Concrete built-in tools live in subpackages:
 - `agent_tool/edit`
 - `agent_tool/write`
 - `agent_tool/shell`
+- `agent_tool/check_daemon`
 - `agent_tool/moon_check`
 - `agent_tool/moon_cmd`
 - `agent_tool/moon_ide`
@@ -45,6 +46,12 @@ return `Respond(ToolOutput(...))`, including failures, so the model can inspect
 the error and recover in the next step. `finish` returns `Control(Finish(...))`
 so ending the run is a host-loop decision rather than another message the model
 has to interpret.
+
+`check_daemon` is the stateful tool shape: it captures the session runtime,
+starts a background monitor process, and posts later output into the agent
+event queue. Its direct tool result still follows the normal
+`Respond(ToolOutput(...))` contract; later updates are injected by the agent
+loop as synthetic user messages.
 
 Each concrete tool is a subpackage to keep the root package focused on the
 shared contract: parsing calls, advertising JSON schemas, dispatching tools,
