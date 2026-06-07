@@ -59,3 +59,58 @@ Options:
 
 [1]
 ```
+
+## MoonBit CLI Argument Parsing Pattern
+
+Native MoonBit CLIs should use `moonbitlang/core/argparse` and call
+`@argparse.parse(...)` on a `Command` instead of hand-rolling argument parsing
+with `@env.args()`. This tiny package verifies the current `FlagArg`,
+`PositionArg`, and `Matches` shape.
+
+```mooncram
+$ sh <<'EOF'
+> tmp=$(mktemp -d)
+> mkdir -p "$tmp/cmd/echoargs"
+> cat > "$tmp/moon.mod" <<'MOD'
+> name = "example/cli"
+> version = "0.1.0"
+> MOD
+> cat > "$tmp/cmd/echoargs/moon.pkg" <<'PKG'
+> import {
+>   "moonbitlang/core/argparse"
+> }
+> warnings = "+unnecessary_annotation"
+> supported_targets = "+native"
+> options(
+>   "is-main": true,
+> )
+> PKG
+> cat > "$tmp/cmd/echoargs/main.mbt" <<'MBT'
+> ///|
+> fn main raise {
+>   let matches = @argparse.parse(
+>     Command(
+>       "echoargs",
+>       about="Tiny argparse example.",
+>       flags=[FlagArg("stdin", long="stdin", about="Read stdin.")],
+>       positionals=[PositionArg("input", default_values=["-"])],
+>     ),
+>   )
+>   let input = match matches.values.get("input") {
+>     Some([value, ..]) => value
+>     _ => fail("missing input")
+>   }
+>   let stdin = match matches.flags.get("stdin") {
+>     Some(value) => value
+>     None => false
+>   }
+>   println("input=\{input}")
+>   println("stdin=\{stdin}")
+> }
+> MBT
+> (cd "$tmp" && moon run --target native cmd/echoargs -- --stdin sample.toml)
+> rm -rf "$tmp"
+> EOF
+input=sample.toml
+stdin=true
+```
