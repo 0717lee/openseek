@@ -81,6 +81,9 @@ pub struct MoonCheckSnapshot {
   output_truncated : Bool
   max_output_chars : Int
   exit_code : Int?
+  restart_count : Int
+  restart_limit : Int
+  restart_reason : String?
 }
 
 ///|
@@ -95,6 +98,9 @@ pub fn MoonCheckSnapshot::MoonCheckSnapshot(
   output_truncated~ : Bool,
   max_output_chars~ : Int,
   exit_code~ : Int?,
+  restart_count~ : Int,
+  restart_limit~ : Int,
+  restart_reason~ : String?,
 ) -> MoonCheckSnapshot {
   {
     id,
@@ -107,6 +113,9 @@ pub fn MoonCheckSnapshot::MoonCheckSnapshot(
     output_truncated,
     max_output_chars,
     exit_code,
+    restart_count,
+    restart_limit,
+    restart_reason,
   }
 }
 
@@ -124,6 +133,9 @@ priv struct MoonCheckRecord {
   mut output_truncated : Bool
   mut exit_code : Int?
   mut run_complete : Bool
+  restart_count : Int
+  restart_limit : Int
+  restart_reason : String?
 }
 
 ///|
@@ -273,6 +285,9 @@ pub fn[X] AgentRuntime::register_moon_check(
   cwd~ : String?,
   process~ : @process.Process,
   max_output_chars~ : Int,
+  restart_count~ : Int,
+  restart_limit~ : Int,
+  restart_reason~ : String?,
 ) -> MoonCheckSnapshot {
   let record = {
     id,
@@ -287,6 +302,9 @@ pub fn[X] AgentRuntime::register_moon_check(
     output_truncated: false,
     exit_code: None,
     run_complete: false,
+    restart_count,
+    restart_limit,
+    restart_reason,
   }
   self.moon_checks[record.key] = record
   record.to_snapshot()
@@ -307,10 +325,12 @@ pub fn[X] AgentRuntime::moon_check_snapshot(
 pub fn[X] AgentRuntime::record_moon_check_output(
   self : AgentRuntime[X],
   key : String,
+  id : String,
   chunk : String,
 ) -> MoonCheckSnapshot? {
   match self.moon_checks.get(key) {
     None => None
+    Some(record) if record.id != id => None
     Some(record) => {
       let segment = if record.run_complete {
         latest_run_segment(chunk)
@@ -329,13 +349,37 @@ pub fn[X] AgentRuntime::record_moon_check_output(
 }
 
 ///|
+pub fn[X] AgentRuntime::replace_moon_check_output(
+  self : AgentRuntime[X],
+  key : String,
+  id : String,
+  output : String,
+) -> MoonCheckSnapshot? {
+  match self.moon_checks.get(key) {
+    None => None
+    Some(record) if record.id != id => None
+    Some(record) => {
+      record.output = retain_output_tail(output, record.max_output_chars)
+      record.output_truncated = output.char_length() > record.max_output_chars
+      record.run_complete = moon_check_run_complete(record.output)
+      record.seq += 1
+      let snapshot = record.to_snapshot()
+      self.emit_moon_check(snapshot)
+      Some(snapshot)
+    }
+  }
+}
+
+///|
 pub fn[X] AgentRuntime::mark_moon_check_stopped(
   self : AgentRuntime[X],
   key : String,
+  id : String,
   exit_code : Int?,
 ) -> MoonCheckSnapshot? {
   match self.moon_checks.get(key) {
     None => None
+    Some(record) if record.id != id => None
     Some(record) => {
       record.status = Stopped
       record.exit_code = exit_code
@@ -357,7 +401,7 @@ pub fn[X] AgentRuntime::stop_moon_check(
     Some(record) =>
       if record.status is Running {
         record.process.cancel()
-        self.mark_moon_check_stopped(key, None)
+        self.mark_moon_check_stopped(key, record.id, None)
       } else {
         Some(record.to_snapshot())
       }
@@ -423,6 +467,9 @@ fn MoonCheckRecord::to_snapshot(self : MoonCheckRecord) -> MoonCheckSnapshot {
     output_truncated: self.output_truncated,
     max_output_chars: self.max_output_chars,
     exit_code: self.exit_code,
+    restart_count: self.restart_count,
+    restart_limit: self.restart_limit,
+    restart_reason: self.restart_reason,
   }
 }
 

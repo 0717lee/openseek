@@ -35,14 +35,15 @@ pub fn[X] AgentRuntime::emit(Self[X], DaemonEvent) -> Unit
 pub fn[X] AgentRuntime::emit_moon_check(Self[X], MoonCheckSnapshot) -> Unit
 pub fn[X] AgentRuntime::group(Self[X]) -> @async.TaskGroup[X]
 pub fn[X] AgentRuntime::mark_daemon_stopped(Self[X], String, Int?) -> DaemonEvent?
-pub fn[X] AgentRuntime::mark_moon_check_stopped(Self[X], String, Int?) -> MoonCheckSnapshot?
+pub fn[X] AgentRuntime::mark_moon_check_stopped(Self[X], String, String, Int?) -> MoonCheckSnapshot?
 pub fn[X] AgentRuntime::moon_check_snapshot(Self[X], String) -> MoonCheckSnapshot?
 pub fn[X] AgentRuntime::next_daemon_id(Self[X]) -> String
 pub fn[X] AgentRuntime::next_moon_check_id(Self[X]) -> String
 pub fn[X] AgentRuntime::record_daemon_output(Self[X], String, String) -> DaemonEvent?
-pub fn[X] AgentRuntime::record_moon_check_output(Self[X], String, String) -> MoonCheckSnapshot?
+pub fn[X] AgentRuntime::record_moon_check_output(Self[X], String, String, String) -> MoonCheckSnapshot?
 pub fn[X] AgentRuntime::register_daemon(Self[X], id~ : String, name~ : String?, command~ : String, cwd~ : String?, process~ : @process.Process, max_output_chars~ : Int) -> DaemonEvent
-pub fn[X] AgentRuntime::register_moon_check(Self[X], key~ : String, id~ : String, command~ : String, cwd~ : String?, process~ : @process.Process, max_output_chars~ : Int) -> MoonCheckSnapshot
+pub fn[X] AgentRuntime::register_moon_check(Self[X], key~ : String, id~ : String, command~ : String, cwd~ : String?, process~ : @process.Process, max_output_chars~ : Int, restart_count~ : Int, restart_limit~ : Int, restart_reason~ : String?) -> MoonCheckSnapshot
+pub fn[X] AgentRuntime::replace_moon_check_output(Self[X], String, String, String) -> MoonCheckSnapshot?
 pub fn[X] AgentRuntime::stop_daemon(Self[X], String) -> DaemonEvent?
 pub fn[X] AgentRuntime::stop_moon_check(Self[X], String) -> MoonCheckSnapshot?
 
@@ -92,8 +93,11 @@ pub struct MoonCheckSnapshot {
   output_truncated : Bool
   max_output_chars : Int
   exit_code : Int?
+  restart_count : Int
+  restart_limit : Int
+  restart_reason : String?
 }
-pub fn MoonCheckSnapshot::MoonCheckSnapshot(id~ : String, key~ : String, command~ : String, cwd~ : String?, status~ : DaemonStatus, seq~ : Int, output~ : String, output_truncated~ : Bool, max_output_chars~ : Int, exit_code~ : Int?) -> Self
+pub fn MoonCheckSnapshot::MoonCheckSnapshot(id~ : String, key~ : String, command~ : String, cwd~ : String?, status~ : DaemonStatus, seq~ : Int, output~ : String, output_truncated~ : Bool, max_output_chars~ : Int, exit_code~ : Int?, restart_count~ : Int, restart_limit~ : Int, restart_reason~ : String?) -> Self
 
 pub(all) enum ToolAction {
   Respond(ToolOutput)

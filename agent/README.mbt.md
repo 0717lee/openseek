@@ -111,7 +111,9 @@ improving:
   fresh compiler feedback. `moon_check` runs `moon check --watch --output-json
   --diagnostic-limit 10`, so broken intermediate states stay compact enough for
   the model to act on. Repeated `moon_check` calls are allowed and reuse the
-  existing watcher for the same cwd/path/options tuple.
+  existing watcher for the same cwd/path/options tuple. If `moon --watch`
+  crashes, the tool compacts the crash output and automatically starts a
+  replacement watcher under a restart budget.
 - Use `shell` for exact end-to-end MoonBit command validation beyond compiler
   feedback, especially `moon test`, `moon run`, `moon info`, `moon fmt`, and
   README command checks. Use shell for `moon ide doc`, `moon ide outline`,

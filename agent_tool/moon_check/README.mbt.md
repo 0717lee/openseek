@@ -16,6 +16,11 @@ human-readable formatter. The diagnostic limit keeps early broken-project
 states from flooding the conversation with a large compiler wall. The first call
 for a given cwd/path/options tuple starts a watcher; later calls with the same
 tuple reuse the existing watcher and return the latest snapshot.
+If the underlying `moon --watch` process exits unexpectedly, `moon_check`
+compacts the crash output and automatically starts a replacement watcher for
+the same tuple, up to a small restart budget. This keeps compiler feedback
+flowing during long agent runs while avoiding repeated crash-banner dumps in
+the model context.
 
 The schema is intentionally narrow. It accepts MoonBit check options that affect
 diagnostics, but it does not expose unrelated `moon` subcommands. That narrow
@@ -37,9 +42,10 @@ after creating or editing a package file:
 
 Use `warn_list` or `deny_warn` when the task requires stricter cleanup. The
 agent may call `moon_check` again to inspect the current watcher state; the call
-does not start a duplicate watcher for the same arguments. Use `shell` for
-one-shot `moon` commands such as `moon test`, `moon run`, `moon info`,
-`moon fmt`, or user-facing command validation.
+does not start a duplicate watcher for the same arguments. If an earlier
+watcher stopped, the next call starts a replacement. Use `shell` for one-shot
+`moon` commands such as `moon test`, `moon run`, `moon info`, `moon fmt`, or
+user-facing command validation.
 
 ## Arguments
 
@@ -61,6 +67,10 @@ latest watcher snapshot has compiler errors, when argument validation fails, or
 when the process cannot be launched. The string body has one of these shapes:
 
 - `"cwd=<cwd>\ncommand=moon check --watch --output-json --diagnostic-limit 10 ...\nwatcher=<started|reused|restarted>\nid=<id>\nstatus=<running|stopped>\nseq=<n>\n<output>"`.
+- Restarted watchers also include `restart_count`, `restart_limit`, and
+  `restart_reason`. Crash summaries use a compact
+  `[moon_check watcher exited]` block instead of forwarding the full `moon`
+  panic banner.
 - `"error running moon_check: <error>"`.
 - `"error: moon_check requires <field description>"`.
 

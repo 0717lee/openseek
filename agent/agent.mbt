@@ -215,12 +215,21 @@ fn moon_check_update_text(update : @agent_tool.MoonCheckSnapshot) -> String {
     None => ""
   }
   let truncated = if update.output_truncated { "\ntruncated=true" } else { "" }
+  let restart = if update.restart_count > 0 || update.restart_reason is Some(_) {
+    let reason = match update.restart_reason {
+      Some(reason) => "\nrestart_reason=\{reason}"
+      None => ""
+    }
+    "\nrestart_count=\{update.restart_count}\nrestart_limit=\{update.restart_limit}\{reason}"
+  } else {
+    ""
+  }
   let output = if update.output == "" {
     "\n(no output yet)"
   } else {
     "\n" + update.output
   }
-  "id=\{update.id}\ncwd=\{cwd}\ncommand=\{update.command}\nstatus=\{daemon_status_label(update.status)}\nseq=\{update.seq}\{exit}\{truncated}\{output}"
+  "id=\{update.id}\ncwd=\{cwd}\ncommand=\{update.command}\nstatus=\{daemon_status_label(update.status)}\nseq=\{update.seq}\{exit}\{truncated}\{restart}\{output}"
 }
 
 ///|
@@ -285,6 +294,9 @@ test "moon_check update message coalesces by watcher key" {
         output_truncated=false,
         max_output_chars=12000,
         exit_code=None,
+        restart_count=0,
+        restart_limit=3,
+        restart_reason=None,
       ),
     ),
     MoonCheckUpdate(
@@ -299,6 +311,9 @@ test "moon_check update message coalesces by watcher key" {
         output_truncated=false,
         max_output_chars=12000,
         exit_code=None,
+        restart_count=0,
+        restart_limit=3,
+        restart_reason=None,
       ),
     ),
   ])

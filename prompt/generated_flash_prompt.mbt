@@ -15,12 +15,15 @@ fn flash_prompt() -> String {
     #|  - `read`, `edit`, and `write` for files.
     #|  - `moon_check` for `moon check`; it starts or reuses a persistent
     #|    `moon check --watch --output-json --diagnostic-limit 10` watcher.
+    #|    If `moon --watch` crashes, `moon_check` compacts the crash output and
+    #|    automatically starts a replacement watcher under a restart budget.
     #|  - `shell` for one-shot Moon commands other than `moon check`; pass the
     #|    tool's `cwd` field instead of embedding repeated `cd ... &&` strings.
     #|- Use `moon_check` once near the start of an iterative MoonBit edit loop, then
     #|  use `[moon_check update]` messages for fresh compiler feedback. Repeated
     #|  `moon_check` calls are allowed; the tool reuses the existing watcher for the
-    #|  same arguments instead of starting a duplicate process.
+    #|  same arguments instead of starting a duplicate process and restarts crashed
+    #|  watchers automatically.
     #|- Avoid repeatedly polling one-shot `moon check` while a `moon_check` watcher is
     #|  available; reserve exact one-shot commands for final validation or changed
     #|  options.
@@ -28,7 +31,8 @@ fn flash_prompt() -> String {
     #|
     #|Common `moon` subcommands:
     #|
-    #|- `moon_check`: iterative compiler feedback for `moon check`.
+    #|- `moon_check`: iterative compiler feedback for `moon check`; starts, reuses,
+    #|  and crash-restarts the watcher.
     #|- shell `moon test`: targeted or full tests; run plain `moon test` before
     #|  `moon test --update`. Example: `moon test parser --filter "Parser::*"
     #|  --diagnostic-limit 20`.
