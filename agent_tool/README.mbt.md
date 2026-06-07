@@ -46,6 +46,29 @@ the error and recover in the next step. `finish` returns `Control(Finish(...))`
 so ending the run is a host-loop decision rather than another message the model
 has to interpret.
 
+`moon_check` is the stateful watcher tool shape: it captures the session
+runtime, starts or reuses a `moon check --watch --output-json
+--diagnostic-limit 10` process, and posts later compiler output into the agent
+event queue. Its direct tool results still follow the normal
+`Respond(ToolOutput(...))` contract; later updates are injected by the agent
+loop as synthetic user messages.
+
+```mermaid
+flowchart LR
+  Model[DeepSeek tool call] --> Agent[agent loop]
+  Agent --> Tools[Tools registry]
+  Tools --> MoonCheck[moon_check executor]
+  Agent --> Runtime[AgentRuntime]
+  MoonCheck --> Runtime
+  MoonCheck --> Watcher[moon check --watch]
+  Watcher --> Monitor[reader task]
+  Monitor --> Runtime
+  Runtime --> Queue[MoonCheckUpdate queue]
+  Agent --> Queue
+  Queue --> Message["[moon_check update] user message"]
+  Message --> Model
+```
+
 Each concrete tool is a subpackage to keep the root package focused on the
 shared contract: parsing calls, advertising JSON schemas, dispatching tools,
 and representing typed output. This also makes it cheap to test or replace one

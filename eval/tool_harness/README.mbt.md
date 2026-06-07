@@ -15,7 +15,9 @@ be invoked correctly through the same typed boundary the agent loop uses.
 - `write`: creates a file and compares disk state with `testkit/filesystem`.
 - `edit`: exact replacement plus final disk-state comparison.
 - `shell`: harmless process execution with exit-code output.
-- `moon_check`: real `moon check --output-json` on a temporary MoonBit package.
+- `moon_check`: real
+  `moon check --watch --output-json --diagnostic-limit 10` on a temporary
+  MoonBit package.
 - `moon_cmd`: real `moon test` on the same style of temporary package.
 - `moon_ide`: real semantic `moon ide outline` on a temporary package.
 - `finish`: verifies the control action returned by the loop terminator.
