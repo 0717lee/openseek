@@ -13,10 +13,15 @@ fn flash_prompt() -> String {
     #|  Use the actual tool call interface.
     #|- Prefer specialized tools over shell:
     #|  - `read`, `edit`, and `write` for files.
+    #|  - `check_daemon` for watch-style feedback such as
+    #|    `moon check --watch --output-json` during longer edit loops.
     #|  - `moon_check` for `moon check`.
     #|  - `moon_cmd` for `moon test`, `moon run`, `moon info`, `moon fmt`, and
     #|    `moon build`.
     #|  - `moon_ide` for API discovery and code navigation.
+    #|- Use daemon update messages or `check_daemon` status instead of repeatedly
+    #|  calling one-shot `moon_check` while a watcher is already running. Stop the
+    #|  daemon before `finish` when it is no longer useful.
     #|- Use shell only when no native tool fits. If `moon_cmd` does not expose a
     #|  needed package-management command such as `moon update`, shell is acceptable.
     #|- Keep reads focused. Use bounded reads for large files and logs.

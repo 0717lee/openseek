@@ -23,6 +23,9 @@ test "system prompt includes moonbit guide" {
   assert_true(prompt.contains("After editing `moon.mod`, `moon.pkg`"))
   assert_true(prompt.contains("acceptance probes"))
   assert_true(prompt.contains("file arguments are read as files"))
+  assert_true(prompt.contains("check_daemon"))
+  assert_true(prompt.contains("moon check --watch --output-json"))
+  assert_true(prompt.contains("without repeatedly calling `moon_check`"))
   assert_true(prompt.contains("OpenSeek DeepSeek Addendum"))
   assert_false(prompt.contains("try?"))
   assert_false(prompt.contains("try!"))
@@ -33,6 +36,11 @@ test "flash prompt includes flash addenda" {
   let prompt = flash_prompt()
   assert_true(prompt.contains("DeepSeek V4 Flash"))
   assert_true(prompt.contains("Do not emit JSON action plans"))
+  assert_true(prompt.contains("check_daemon"))
+  assert_true(prompt.contains("moon check --watch --output-json"))
+  assert_true(
+    prompt.contains("instead of repeatedly\n  calling one-shot `moon_check`"),
+  )
   assert_true(prompt.contains("moon run -e"))
   assert_true(prompt.contains("Do not use `moon run -c`"))
   assert_true(prompt.contains("Do not run\n  `moon run -e`"))
