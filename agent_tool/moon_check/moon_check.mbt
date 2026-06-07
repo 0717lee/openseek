@@ -917,7 +917,10 @@ fn stable_moon_check_output(
   let normalized = content
     .replace_all(old=canonical, new="<fixture>")
     .replace_all(old=project, new="<fixture>")
-    .replace_all(old="──────┬─────  \n", new="──────┬─────\n")
+    .replace_all(
+      old="──────┬─────  \n",
+      new="──────┬─────\n",
+    )
   let stable_lines : Array[String] = []
   for line in normalized.split("\n") {
     if line.has_prefix("seq=") {
