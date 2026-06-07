@@ -12,7 +12,7 @@ fn tool_definitions(
     @edit.definition(),
     @write.definition(),
     @check_daemon.definition(runtime),
-    @moon_check.definition(),
+    @moon_check.definition(runtime),
     @moon_cmd.definition(),
     @moon_ide.definition(),
     @finish.definition(),

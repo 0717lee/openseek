@@ -47,11 +47,13 @@ the error and recover in the next step. `finish` returns `Control(Finish(...))`
 so ending the run is a host-loop decision rather than another message the model
 has to interpret.
 
-`check_daemon` is the stateful tool shape: it captures the session runtime,
-starts a background monitor process, and posts later output into the agent
-event queue. Its direct tool result still follows the normal
-`Respond(ToolOutput(...))` contract; later updates are injected by the agent
-loop as synthetic user messages.
+`check_daemon` and `moon_check` are the stateful tool shapes: they capture the
+session runtime, start or reuse background processes, and post later output into
+the agent event queue. `check_daemon` is the general-purpose monitor for
+commands such as review polling, while `moon_check` specializes this pattern for
+`moon check --watch --output-json`. Their direct tool results still follow the
+normal `Respond(ToolOutput(...))` contract; later updates are injected by the
+agent loop as synthetic user messages.
 
 Each concrete tool is a subpackage to keep the root package focused on the
 shared contract: parsing calls, advertising JSON schemas, dispatching tools,

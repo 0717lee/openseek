@@ -21,7 +21,7 @@ pub fn[X] definition(
 ) -> @agent_tool.AgentToolDefinition {
   AgentToolDefinition(
     name="check_daemon",
-    description="Start, inspect, or stop a session-scoped background monitor command. Use it for long-running watch or polling commands such as `moon check --watch --output-json` or review/status watchers. Do not use it for one-shot `moon check --output-json`; use moon_check for that. Unlike shell, this daemon tool intentionally allows monitored MoonBit commands.",
+    description="Start, inspect, or stop a session-scoped background monitor command. Use it for long-running non-MoonBit watch or polling commands such as review/status watchers. Use moon_check for MoonBit compiler feedback.",
     schema=JsonSchema({
       "type": "object",
       "properties": {

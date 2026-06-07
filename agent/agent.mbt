@@ -60,8 +60,8 @@ async fn run_with_runtime(
     ChatMessage(User, content=task),
   ]
   for step in 0..<max_steps {
-    if daemon_update_message(runtime.drain_events()) is Some(update) {
-      log.at(INFO) <? { "event": "check_daemon_update", "content": update }
+    if runtime_update_message(runtime.drain_events()) is Some(update) {
+      log.at(INFO) <? { "event": "runtime_update", "content": update }
       messages.push(ChatMessage(User, content=update))
     }
     log.at(INFO) <? { "event": "agent_step", "step": step + 1 }
@@ -129,22 +129,55 @@ async fn run_with_runtime(
 }
 
 ///|
-fn daemon_update_message(events : Array[@agent_tool.AgentEvent]) -> String? {
-  let latest : Map[String, @agent_tool.DaemonEvent] = {}
-  let mut count = 0
+fn runtime_update_message(events : Array[@agent_tool.AgentEvent]) -> String? {
+  let latest_daemons : Map[String, @agent_tool.DaemonEvent] = {}
+  let latest_moon_checks : Map[String, @agent_tool.MoonCheckSnapshot] = {}
+  let mut daemon_count = 0
+  let mut moon_check_count = 0
   for event in events {
     match event {
       DaemonUpdate(update) => {
-        latest[update.id] = update
-        count += 1
+        latest_daemons[update.id] = update
+        daemon_count += 1
+      }
+      MoonCheckUpdate(update) => {
+        latest_moon_checks[update.key] = update
+        moon_check_count += 1
       }
     }
   }
+  let count = daemon_count + moon_check_count
   if count == 0 {
     None
+  } else if moon_check_count == 0 {
+    let parts = [
+      for update in latest_daemons.values() => daemon_update_text(update)
+    ]
+    Some("[check_daemon update]\nevents=\{daemon_count}\n" + parts.join("\n\n"))
+  } else if daemon_count == 0 {
+    let parts = [
+      for update in latest_moon_checks.values() => {
+        moon_check_update_text(update)
+      }
+    ]
+    Some(
+      "[moon_check update]\nevents=\{moon_check_count}\n" + parts.join("\n\n"),
+    )
   } else {
-    let parts = [ for update in latest.values() => daemon_update_text(update) ]
-    Some("[check_daemon update]\nevents=\{count}\n" + parts.join("\n\n"))
+    let daemon_parts = [
+      for update in latest_daemons.values() => daemon_update_text(update)
+    ]
+    let moon_check_parts = [
+      for update in latest_moon_checks.values() => {
+        moon_check_update_text(update)
+      }
+    ]
+    Some(
+      "[runtime update]\nevents=\{count}\n\n[check_daemon]\nevents=\{daemon_count}\n" +
+      daemon_parts.join("\n\n") +
+      "\n\n[moon_check]\nevents=\{moon_check_count}\n" +
+      moon_check_parts.join("\n\n"),
+    )
   }
 }
 
@@ -172,6 +205,25 @@ fn daemon_update_text(update : @agent_tool.DaemonEvent) -> String {
 }
 
 ///|
+fn moon_check_update_text(update : @agent_tool.MoonCheckSnapshot) -> String {
+  let cwd = match update.cwd {
+    Some(cwd) => cwd
+    None => "."
+  }
+  let exit = match update.exit_code {
+    Some(code) => "\nexit=\{code}"
+    None => ""
+  }
+  let truncated = if update.output_truncated { "\ntruncated=true" } else { "" }
+  let output = if update.output == "" {
+    "\n(no output yet)"
+  } else {
+    "\n" + update.output
+  }
+  "id=\{update.id}\ncwd=\{cwd}\ncommand=\{update.command}\nstatus=\{daemon_status_label(update.status)}\nseq=\{update.seq}\{exit}\{truncated}\{output}"
+}
+
+///|
 fn daemon_status_label(status : @agent_tool.DaemonStatus) -> String {
   match status {
     Running => "running"
@@ -181,7 +233,7 @@ fn daemon_status_label(status : @agent_tool.DaemonStatus) -> String {
 
 ///|
 test "daemon update message coalesces by daemon id" {
-  let message = daemon_update_message([
+  let message = runtime_update_message([
     DaemonUpdate(
       DaemonEvent(
         id="daemon-1",
@@ -212,6 +264,46 @@ test "daemon update message coalesces by daemon id" {
     ),
   ])
   guard message is Some(text) else { fail("expected message") }
+  assert_true(text.contains("events=2"))
+  assert_true(text.contains("seq=2"))
+  assert_true(text.contains("new"))
+  assert_false(text.contains("old"))
+}
+
+///|
+test "moon_check update message coalesces by watcher key" {
+  let message = runtime_update_message([
+    MoonCheckUpdate(
+      MoonCheckSnapshot(
+        id="moon-check-1",
+        key="cwd=.",
+        command="moon check --watch --output-json",
+        cwd=None,
+        status=Running,
+        seq=1,
+        output="old",
+        output_truncated=false,
+        max_output_chars=12000,
+        exit_code=None,
+      ),
+    ),
+    MoonCheckUpdate(
+      MoonCheckSnapshot(
+        id="moon-check-1",
+        key="cwd=.",
+        command="moon check --watch --output-json",
+        cwd=None,
+        status=Running,
+        seq=2,
+        output="new",
+        output_truncated=false,
+        max_output_chars=12000,
+        exit_code=None,
+      ),
+    ),
+  ])
+  guard message is Some(text) else { fail("expected message") }
+  assert_true(text.contains("[moon_check update]"))
   assert_true(text.contains("events=2"))
   assert_true(text.contains("seq=2"))
   assert_true(text.contains("new"))

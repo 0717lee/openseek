@@ -85,7 +85,7 @@ test "command policy allows non guarded shell commands" {
 When this policy blocks a command, the caller should not try to quote around it
 or rewrite it as a more complex shell string. Use:
 
-- `moon_check` for raw `moon check --output-json` diagnostics.
+- `moon_check` for persistent `moon check --watch --output-json` diagnostics.
 - `moon_cmd` for `moon test`, `moon run`, `moon info`, `moon fmt`, and
   `moon build`.
 - The `cwd` field on those tools instead of `cd ... &&`.

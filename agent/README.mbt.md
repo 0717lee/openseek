@@ -57,8 +57,9 @@ The agent exposes nine local tools to DeepSeek:
 - `write`: overwrites `arguments.path` with `arguments.content`.
 - `check_daemon`: starts, inspects, or stops a session-scoped background
   monitor command and injects later coalesced updates before model turns.
-- `moon_check`: runs `moon check --output-json` directly, optionally in
-  `arguments.cwd`, and returns exit code plus merged output.
+- `moon_check`: starts or reuses a session-scoped
+  `moon check --watch --output-json` watcher, optionally in `arguments.cwd`,
+  and injects later coalesced updates before model turns.
 - `moon_cmd`: runs selected `moon` subcommands directly, optionally in
   `arguments.cwd`, and returns exit code plus merged output.
 - `moon_ide`: runs read-only `moon ide` semantic navigation commands directly,
@@ -111,10 +112,13 @@ improving:
 - Current MoonBit projects use `moon.mod`; `moon.mod.json` is legacy. New
   projects should create `moon.mod`, and manifest or package-import edits
   should be followed immediately by `moon_check` or `moon_cmd check`.
-- MoonBit validation should prefer the `moon_check` tool over shell pipelines
-  when the task only needs `moon check` feedback.
-- Long-lived validation or review feedback should use `check_daemon` so the
-  agent can keep working while background updates are delivered between turns.
+- MoonBit validation should call `moon_check` once near the start of an
+  iterative edit loop and then use background `[moon_check update]` messages for
+  fresh compiler feedback. Repeated `moon_check` calls are allowed and reuse the
+  existing watcher for the same cwd/path/options tuple.
+- Long-lived non-MoonBit validation or review feedback should use
+  `check_daemon` so the agent can keep working while background updates are
+  delivered between turns.
 - Use `moon_cmd` for exact end-to-end MoonBit command validation, especially
   `moon test`, `moon run`, `moon info`, `moon fmt`, and README command checks.
 - Before finishing user-facing CLI work, derive two or three acceptance probes

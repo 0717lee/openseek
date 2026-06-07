@@ -13,17 +13,19 @@ fn flash_prompt() -> String {
     #|  Use the actual tool call interface.
     #|- Prefer specialized tools over shell:
     #|  - `read`, `edit`, and `write` for files.
-    #|  - `check_daemon` for watch-style feedback such as
-    #|    `moon check --watch --output-json` during longer edit loops.
-    #|  - `moon_check` for `moon check`.
+    #|  - `moon_check` for `moon check`; it starts or reuses a persistent
+    #|    `moon check --watch --output-json` watcher.
+    #|  - `check_daemon` for non-MoonBit watch-style feedback such as review polling
+    #|    or other long-running monitor commands.
     #|  - `moon_cmd` for `moon test`, `moon run`, `moon info`, `moon fmt`, and
     #|    `moon build`.
     #|  - `moon_ide` for API discovery and code navigation.
-    #|- Use daemon update messages or `check_daemon` status instead of repeatedly
-    #|  calling one-shot `moon_check` while a watcher is already running. Stop the
-    #|  daemon before `finish` when it is no longer useful.
-    #|- Do not call `check_daemon` with one-shot commands like
-    #|  `moon check --output-json`; use `moon_check` for that.
+    #|- Use `moon_check` once near the start of an iterative MoonBit edit loop, then
+    #|  use `[moon_check update]` messages for fresh compiler feedback. Repeated
+    #|  `moon_check` calls are allowed; the tool reuses the existing watcher for the
+    #|  same arguments instead of starting a duplicate process.
+    #|- Do not call `check_daemon` with `moon check` commands; use `moon_check` for
+    #|  that. Stop generic daemons before `finish` when they are no longer useful.
     #|- Use shell only when no native tool fits. If `moon_cmd` does not expose a
     #|  needed package-management command such as `moon update`, shell is acceptable.
     #|- Keep reads focused. Use bounded reads for large files and logs.

@@ -25,10 +25,9 @@ test "system prompt includes moonbit guide" {
   assert_true(prompt.contains("file arguments are read as files"))
   assert_true(prompt.contains("check_daemon"))
   assert_true(prompt.contains("moon check --watch --output-json"))
-  assert_true(prompt.contains("without repeatedly calling `moon_check`"))
-  assert_true(
-    prompt.contains("Do not call `check_daemon` with one-shot commands"),
-  )
+  assert_true(prompt.contains("`moon_check` starts or reuses a persistent"))
+  assert_true(prompt.contains("Repeated `moon_check` calls are allowed"))
+  assert_true(prompt.contains("Do not call `check_daemon` with `moon check`"))
   assert_true(prompt.contains("OpenSeek DeepSeek Addendum"))
   assert_false(prompt.contains("try?"))
   assert_false(prompt.contains("try!"))
@@ -41,12 +40,9 @@ test "flash prompt includes flash addenda" {
   assert_true(prompt.contains("Do not emit JSON action plans"))
   assert_true(prompt.contains("check_daemon"))
   assert_true(prompt.contains("moon check --watch --output-json"))
-  assert_true(
-    prompt.contains("instead of repeatedly\n  calling one-shot `moon_check`"),
-  )
-  assert_true(
-    prompt.contains("Do not call `check_daemon` with one-shot commands"),
-  )
+  assert_true(prompt.contains("Use `moon_check` once near the start"))
+  assert_true(prompt.contains("Repeated\n  `moon_check` calls are allowed"))
+  assert_true(prompt.contains("Do not call `check_daemon` with `moon check`"))
   assert_true(prompt.contains("moon run -e"))
   assert_true(prompt.contains("Do not use `moon run -c`"))
   assert_true(prompt.contains("Do not run\n  `moon run -e`"))

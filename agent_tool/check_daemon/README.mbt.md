@@ -1,8 +1,9 @@
 # Check Daemon Tool
 
 `check_daemon` starts, inspects, and stops session-scoped background monitor
-commands. It is intended for long-running feedback loops such as
-`moon check --watch --output-json`, test watchers, or review/status monitors.
+commands. It is intended for long-running non-MoonBit feedback loops such as
+test watchers, review polling, or status monitors. Use `moon_check` for
+MoonBit compiler feedback.
 
 The tool returns an immediate result for the original tool call. Later output
 is posted to the agent runtime event queue; the agent coalesces pending daemon
@@ -20,15 +21,14 @@ updates and injects them as synthetic user messages before the next model turn.
 | `max_output_chars` | number | no | Latest retained output cap; default `12000`, hard cap `50000`. |
 | `initial_wait_ms` | number | no | Startup wait for first output; default `500`, hard cap `5000`. |
 
-Unlike the normal `shell` tool, `check_daemon` does not apply the MoonBit
-command-blocking shell policy. It is the intended place for monitored commands
-such as:
+Unlike the normal `shell` tool, `check_daemon` is designed for monitored
+commands that should keep running while the agent works, such as:
 
 ```json
 {
   "action": "start",
-  "name": "moon-check",
-  "cmd": "moon check --watch --output-json",
+  "name": "review-status",
+  "cmd": "gh pr view --json reviewDecision,statusCheckRollup",
   "cwd": "/path/to/project"
 }
 ```

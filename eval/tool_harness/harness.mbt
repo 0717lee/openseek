@@ -44,7 +44,7 @@ fn tool_definitions(
     @edit.definition(),
     @shell.definition(),
     @check_daemon.definition(runtime),
-    @moon_check.definition(),
+    @moon_check.definition(runtime),
     @moon_cmd.definition(),
     @moon_ide.definition(),
     @finish.definition(),
@@ -216,7 +216,10 @@ async fn run_moon_check_case(
   let action = dispatch(tools, "moon_check", { "cwd": root, "target": "native" })
   let reason = expect_respond(
     action,
-    contains=["command=moon check --output-json --target native", "exit=0"],
+    contains=[
+      "command=moon check --watch --output-json --target native", "watcher=started",
+      "status=running",
+    ],
     error=false,
   )
   @fs.rmdir(root, recursive=true)
