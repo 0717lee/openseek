@@ -98,6 +98,29 @@ async test "check_daemon stop marks a running command stopped" {
 }
 
 ///|
+async test "check_daemon stop does not cancel the task group" {
+  @async.with_task_group() <| group => {
+    let runtime = @agent_tool.AgentRuntime(group)
+    ignore(
+      run_check_daemon(runtime, {
+        "action": "start",
+        "cmd": sleep_cmd(),
+        "initial_wait_ms": 1,
+      }),
+    )
+    ignore(run_check_daemon(runtime, { "action": "stop", "id": "daemon-1" }))
+    @async.sleep(10)
+    let result = run_check_daemon(runtime, {
+      "action": "status",
+      "id": "daemon-1",
+    })
+    guard result is Respond(output) else { fail("expected Respond") }
+    assert_false(output.is_error)
+    assert_true(output.content.contains("status=stopped"))
+  }
+}
+
+///|
 async test "check_daemon rejects unknown ids" {
   @async.with_task_group() <| group => {
     let runtime = @agent_tool.AgentRuntime(group)

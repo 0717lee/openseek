@@ -22,6 +22,8 @@ fn flash_prompt() -> String {
     #|- Use daemon update messages or `check_daemon` status instead of repeatedly
     #|  calling one-shot `moon_check` while a watcher is already running. Stop the
     #|  daemon before `finish` when it is no longer useful.
+    #|- Do not call `check_daemon` with one-shot commands like
+    #|  `moon check --output-json`; use `moon_check` for that.
     #|- Use shell only when no native tool fits. If `moon_cmd` does not expose a
     #|  needed package-management command such as `moon update`, shell is acceptable.
     #|- Keep reads focused. Use bounded reads for large files and logs.

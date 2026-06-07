@@ -21,7 +21,7 @@ pub fn[X] definition(
 ) -> @agent_tool.AgentToolDefinition {
   AgentToolDefinition(
     name="check_daemon",
-    description="Start, inspect, or stop a session-scoped background monitor command. Use it for long-running checks such as `moon check --watch --output-json` or review/status watchers. Unlike shell, this daemon tool intentionally allows monitored MoonBit commands.",
+    description="Start, inspect, or stop a session-scoped background monitor command. Use it for long-running watch or polling commands such as `moon check --watch --output-json` or review/status watchers. Do not use it for one-shot `moon check --output-json`; use moon_check for that. Unlike shell, this daemon tool intentionally allows monitored MoonBit commands.",
     schema=JsonSchema({
       "type": "object",
       "properties": {
@@ -106,7 +106,7 @@ async fn[X] start_daemon(
       max_output_chars=input.max_output_chars,
     ),
   )
-  runtime.group().spawn_bg(no_wait=true) <| () => {
+  runtime.group().spawn_bg(no_wait=true, allow_failure=true) <| () => {
     monitor_output(runtime, id, reader, process)
   }
   @async.sleep(input.initial_wait_ms)
@@ -241,7 +241,12 @@ fn daemon_response(action : String, event : @agent_tool.DaemonEvent) -> String {
   } else {
     "\n" + event.output
   }
-  "check_daemon \{action}\nid=\{event.id}\{name}\ncwd=\{cwd}\ncommand=\{event.command}\nstatus=\{daemon_status_label(event.status)}\nseq=\{event.seq}\{exit}\{truncated}\{output}"
+  let note = if action == "started" && event.status is Stopped {
+    "\nnote=command exited during the initial wait; check_daemon is intended for long-running watch or polling commands"
+  } else {
+    ""
+  }
+  "check_daemon \{action}\nid=\{event.id}\{name}\ncwd=\{cwd}\ncommand=\{event.command}\nstatus=\{daemon_status_label(event.status)}\nseq=\{event.seq}\{exit}\{truncated}\{note}\{output}"
 }
 
 ///|
