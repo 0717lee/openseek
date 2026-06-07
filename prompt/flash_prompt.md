@@ -7,15 +7,60 @@ work is needed, call a tool. When the task is complete, call `finish`.
 
 - Do not emit JSON action plans as assistant text, such as `{"tool":"shell"}`.
   Use the actual tool call interface.
-- Prefer specialized tools over shell:
+- Use the right tool for the job:
   - `read`, `edit`, and `write` for files.
-  - `moon_check` for `moon check`.
-  - `moon_cmd` for `moon test`, `moon run`, `moon info`, `moon fmt`, and
-    `moon build`.
-  - `moon_ide` for API discovery and code navigation.
-- Use shell only when no native tool fits. If `moon_cmd` does not expose a
-  needed package-management command such as `moon update`, shell is acceptable.
+  - `moon_check` for `moon check`; it starts or reuses a persistent
+    `moon check --watch --output-json --diagnostic-limit 10` watcher.
+    If `moon --watch` crashes, `moon_check` compacts the crash output and
+    automatically starts a replacement watcher under a restart budget.
+  - `shell` for one-shot Moon commands other than `moon check`; pass the
+    tool's `cwd` field instead of embedding repeated `cd ... &&` strings.
+- Use `moon_check` once near the start of an iterative MoonBit edit loop, then
+  use `[moon_check update]` messages for fresh compiler feedback. Repeated
+  `moon_check` calls are allowed; the tool reuses the existing watcher for the
+  same arguments instead of starting a duplicate process and restarts crashed
+  watchers automatically.
+- Avoid repeatedly polling one-shot `moon check` while a `moon_check` watcher is
+  available; reserve exact one-shot commands for final validation or changed
+  options.
 - Keep reads focused. Use bounded reads for large files and logs.
+
+Common `moon` subcommands:
+
+- `moon_check`: iterative compiler feedback for `moon check`; starts, reuses,
+  and crash-restarts the watcher.
+- shell `moon test`: targeted or full tests; run plain `moon test` before
+  `moon test --update`. Example: `moon test parser --filter "Parser::*"
+  --diagnostic-limit 20`.
+- shell `moon run`: executable package and CLI probes; package path goes before
+  `--`, program arguments go after `--`. Example:
+  `moon run --target native cmd/tomljson -- /tmp/input.toml`.
+- shell `moon run -e` or `moon run -`: quick language/API snippets.
+  Verified examples: `moon run --target native -e 'fn main { println("ok") }'`
+  and `moon run --target native - <<'EOF'`.
+- shell `moon cram test`: durable CLI transcript tests under `tests/cram`;
+  use `mooncram` blocks for stable help, examples, stdout/stderr, and exits.
+  Example: `moon cram test tests/cram`.
+- shell `moon info`: regenerate and inspect `.mbti` interface files.
+- shell `moon fmt`: format MoonBit sources before finishing. Example:
+  `moon fmt --check parser`.
+- shell `moon build`: check build artifacts or backend-specific builds. Example:
+  `moon build --target native cmd/tool --diagnostic-limit 20`.
+- shell `moon doc` and `moon explain`: documentation and diagnostic help.
+- shell `moon ide doc`, `moon ide outline`, `moon ide peek-def`,
+  `moon ide find-references`, and `moon ide hover`: semantic navigation.
+  Verified examples: `moon ide doc "@json.parse"`,
+  `moon ide outline parser`, `moon ide peek-def parse --loc
+  src/parser.mbt:42:9`, `moon ide find-references parse --loc
+  src/parser.mbt:42:9`, and `moon ide hover parse --loc src/parser.mbt:42:9`.
+- shell `moon add`, `moon remove`, `moon update`, and `moon tree`:
+  dependencies and package registry/dependency inspection. Examples:
+  `moon add moonbitlang/async`, `moon remove moonbitlang/async`,
+  `moon update`, `moon tree`.
+- shell `moon clean`: clear `_build` when stale build output is suspected.
+  Example: `moon clean`.
+- shell `moon coverage analyze`: inspect test coverage when coverage matters.
+  Example: `moon coverage analyze --package user/project/parser`.
 
 ## MoonBit Project Setup
 
@@ -72,7 +117,15 @@ options(
 
 ## Syntax And API Discipline
 
-- Use `moon_ide doc` before guessing unfamiliar APIs.
+- Use shell `moon ide doc` before guessing unfamiliar APIs. Query symbols,
+  methods, types, or imported package aliases, not broad English terms:
+  `moon ide doc "StringView::split"` for methods,
+  `moon ide doc "@json.parse"` for package functions, and
+  `moon ide doc "@json"` for package exploration. Use
+  `moon ide outline <dir-or-file>` for package symbols,
+  `moon ide peek-def Symbol --loc file.mbt:line:col` for definitions,
+  `moon ide find-references Symbol`, and `moon ide hover Symbol --loc
+  file.mbt:line:col` for types.
 - Use `moon run -e` for quick core-language probes. Do not use `moon run -c`;
   `-c` is easy to confuse with `-C`.
 - `-e` requires the MoonBit code as the next command argument, for example
@@ -81,7 +134,8 @@ options(
 - One-off `moon run -e` or `moon run -` snippets do not see project `moon.pkg`
   imports by default, but `.mbtx` snippets may include an `import` block for
   quick dependency probes.
-- For multi-line probes, use `moon_cmd run` with path `"-"` and stdin.
+- For multi-line probes, use shell with a heredoc, for example
+  `moon run --target native - <<'EOF'`.
 - MoonBit has no `await`; async functions/tests are marked with `async`, and
   async calls are written normally.
 - Use `let mut` only when rebinding a variable. Mutable maps/arrays can be
@@ -313,16 +367,24 @@ fn config_from_matches(matches : @argparse.Matches) -> Config raise {
   `moon run --target native cmd/tomljson -- /tmp/input.toml`.
 - Example stdin probe:
   `printf 'a.b = 1\n' | moon run --target native cmd/tomljson -- --stdin`.
+- Implement stdin mode with `@stdio.stdin.read_all().text()`, not
+  `/dev/stdin` or C FFI.
 - Validate both file input and stdin input when promised.
 
 ## Validation Before Finish
 
 Before finishing code work, run:
 
-1. `moon_check` or `moon_cmd check`.
-2. Targeted `moon_cmd test`.
-3. `moon_cmd info` and `moon_cmd fmt` when interfaces or formatting may change.
-4. Task-specific acceptance probes with `moon_cmd run`.
+1. `moon_check` for current compiler state.
+2. Targeted shell `moon test`.
+3. Shell `moon info` and `moon fmt` when interfaces or formatting may change.
+4. Task-specific acceptance probes with shell `moon run`.
+
+Use `moon_check` for iterative compiler feedback. Use exact `moon` subcommands
+for final validation: `moon test` for tests, `moon run` for CLI probes,
+`moon cram test tests/cram` for durable CLI transcript fixtures, `moon info`
+for generated interfaces, `moon fmt` for formatting, and `moon build` for
+build artifacts.
 
 For CLI work, run probes that cover:
 
@@ -330,5 +392,9 @@ For CLI work, run probes that cover:
 - stdin mode;
 - invalid input and exit/error behavior;
 - stdout shape for successful output.
+
+When CLI behavior should become a lasting fixture, add `tests/cram/*.md`
+coverage with `mooncram` blocks and run `moon cram test tests/cram`. Keep
+live or networked CLI tests opt-in, for example under `tests/live`.
 
 Report the commands actually run and any remaining caveats.
