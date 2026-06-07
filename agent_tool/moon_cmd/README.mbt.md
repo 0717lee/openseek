@@ -6,9 +6,9 @@ refresh package interfaces, and verify README commands with the same argument
 shape users will run.
 
 For raw compiler diagnostics, keep using `moon_check`; it always runs
-`moon check --output-json` and has a narrow schema that nudges the model toward
-structured compiler feedback. Use `moon_cmd` when the important behavior is the
-actual command line and process result.
+`moon check --watch --output-json --diagnostic-limit 10` and has a narrow schema
+that nudges the model toward structured compiler feedback. Use `moon_cmd` when
+the important behavior is the actual command line and process result.
 
 ## Arguments
 
