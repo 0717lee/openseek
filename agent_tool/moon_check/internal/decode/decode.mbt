@@ -1,7 +1,6 @@
 ///|
 pub struct MoonCheckInput {
   cwd : String?
-  paths : Array[String]
   target : String?
   warn_list : String?
   deny_warn : Bool
@@ -26,10 +25,8 @@ fn parse_fields(fields : Map[String, Json]) -> MoonCheckInput raise {
     None => ()
   }
   let warn_list = optional_string(fields, "warn_list")
-  let paths = parse_paths(fields)
   {
     cwd,
-    paths,
     target,
     warn_list,
     deny_warn: optional_bool(fields, "deny_warn"),
@@ -54,29 +51,6 @@ fn optional_bool(fields : Map[String, Json], name : String) -> Bool raise {
     Some(False) | Some(Null) | None => false
     _ => fail("arguments.\{name} to be a boolean")
   }
-}
-
-///|
-fn parse_paths(fields : Map[String, Json]) -> Array[String] raise {
-  let paths : Array[String] = []
-  match fields.get("path") {
-    Some(String(path)) if path != "" => paths.push(path)
-    Some(String(_)) | Some(Null) | None => ()
-    _ => fail("arguments.path to be a string")
-  }
-  match fields.get("paths") {
-    Some(Array(values)) =>
-      for value in values {
-        match value {
-          String(path) if path != "" => paths.push(path)
-          String(_) | Null => ()
-          _ => fail("arguments.paths to be an array of strings")
-        }
-      }
-    Some(Null) | None => ()
-    _ => fail("arguments.paths to be an array of strings")
-  }
-  paths
 }
 
 ///|

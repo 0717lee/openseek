@@ -177,8 +177,8 @@ async fn run_moon_check_case(
   let reason = expect_respond(
     action,
     contains=[
-      "command=moon check --watch --output-json --diagnostic-limit 10 --target native",
-      "watcher=started", "status=running",
+      "command=moon check --watch --diagnostic-limit 10 --target native", "watcher=started",
+      "status=running",
     ],
     error=false,
   )

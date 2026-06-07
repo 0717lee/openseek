@@ -197,7 +197,7 @@ test "moon_check update message coalesces by watcher key" {
       MoonCheckSnapshot(
         id="moon-check-1",
         key="cwd=.",
-        command="moon check --watch --output-json --diagnostic-limit 10",
+        command="moon check --watch --diagnostic-limit 10",
         cwd=None,
         status=Running,
         seq=1,
@@ -214,7 +214,7 @@ test "moon_check update message coalesces by watcher key" {
       MoonCheckSnapshot(
         id="moon-check-1",
         key="cwd=.",
-        command="moon check --watch --output-json --diagnostic-limit 10",
+        command="moon check --watch --diagnostic-limit 10",
         cwd=None,
         status=Running,
         seq=2,

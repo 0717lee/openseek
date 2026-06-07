@@ -16,7 +16,7 @@ be invoked correctly through the same typed boundary the agent loop uses.
 - `edit`: exact replacement plus final disk-state comparison.
 - `shell`: harmless process execution with exit-code output.
 - `moon_check`: real
-  `moon check --watch --output-json --diagnostic-limit 10` on a temporary
+  `moon check --watch --diagnostic-limit 10` on a temporary
   MoonBit package.
 - `moon_cmd`: real `moon test` on the same style of temporary package.
 - `moon_ide`: real semantic `moon ide outline` on a temporary package.

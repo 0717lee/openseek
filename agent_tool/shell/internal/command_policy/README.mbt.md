@@ -80,7 +80,7 @@ When this policy blocks a command, the caller should not try to quote around it
 or rewrite it as a more complex shell string. Use:
 
 - `moon_check` for persistent
-  `moon check --watch --output-json --diagnostic-limit 10` diagnostics.
+  `moon check --watch --diagnostic-limit 10` diagnostics.
 - Shell for one-shot commands such as `moon test`, `moon run`, `moon info`,
   `moon fmt`, `moon build`, `moon update`, `moon add`, and `moon remove`.
 - The shell tool's `cwd` field instead of `cd ... &&`.

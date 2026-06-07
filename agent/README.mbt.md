@@ -56,7 +56,7 @@ The agent exposes six local tools to DeepSeek by default:
 - `edit`: replaces exact text in `arguments.path`.
 - `write`: overwrites `arguments.path` with `arguments.content`.
 - `moon_check`: starts or reuses a session-scoped
-  `moon check --watch --output-json --diagnostic-limit 10` watcher, optionally
+  `moon check --watch --diagnostic-limit 10` watcher, optionally
   in `arguments.cwd`, and injects later coalesced updates before model turns.
 - `finish`: ends the task with `arguments.answer`.
 
@@ -108,10 +108,11 @@ improving:
   should be followed immediately by starting or inspecting `moon_check`.
 - MoonBit validation should call `moon_check` once near the start of an
   iterative edit loop and then use background `[moon_check update]` messages for
-  fresh compiler feedback. `moon_check` runs `moon check --watch --output-json
-  --diagnostic-limit 10`, so broken intermediate states stay compact enough for
-  the model to act on. Repeated `moon_check` calls are allowed and reuse the
-  existing watcher for the same cwd/path/options tuple. If `moon --watch`
+  fresh compiler feedback. `moon_check` runs
+  `moon check --watch --diagnostic-limit 10`, so broken intermediate states stay
+  compact enough for the model to act on. Repeated `moon_check` calls are
+  allowed and reuse the existing watcher for the same cwd/options tuple. If
+  `moon --watch`
   crashes, the tool compacts the crash output and automatically starts a
   replacement watcher under a restart budget.
 - Use `shell` for exact end-to-end MoonBit command validation beyond compiler

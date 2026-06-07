@@ -1,15 +1,12 @@
 ///|
 /// Tool definition for `moon_check`: starts or reuses a session-scoped
-/// `moon check --watch --output-json --diagnostic-limit 10` watcher for the
-/// given check arguments. Repeated calls with the same arguments return the
+/// `moon check --watch --diagnostic-limit 10` watcher for the given workspace
+/// and check options. Repeated calls with the same arguments return the
 /// latest watcher snapshot instead of starting another process.
 ///
 /// ## Arguments
 /// - `cwd` (string, optional): working directory. Empty means current process
 ///   directory.
-/// - `path` (string, optional): one package path to pass as `--package-path`.
-/// - `paths` (array of strings, optional): additional paths. Watch mode rejects
-///   more than one path because Moon rejects positional paths with `--watch`.
 /// - `target` (string, optional): one of MoonBit's `moon check --target`
 ///   values.
 /// - `warn_list` (string, optional): value for `--warn-list`.
@@ -30,13 +27,11 @@ pub fn[X] definition(
 ) -> @agent_tool.AgentToolDefinition {
   AgentToolDefinition(
     name="moon_check",
-    description="Start or inspect a persistent `moon check --watch --output-json --diagnostic-limit 10` watcher for the given cwd/paths/options. The first call starts the watcher; later calls with the same arguments return the latest snapshot without starting another watcher.",
+    description="Start or inspect a persistent `moon check --watch --diagnostic-limit 10` watcher for the given cwd/options. The first call starts the watcher; later calls with the same arguments return the latest snapshot without starting another watcher.",
     schema=JsonSchema({
       "type": "object",
       "properties": {
         "cwd": { "type": "string" },
-        "path": { "type": "string" },
-        "paths": { "type": "array", "items": { "type": "string" } },
         "target": {
           "type": "string",
           "enum": ["wasm", "wasm-gc", "js", "native", "llvm", "all"],
@@ -93,7 +88,6 @@ fn command_args(input : @decode.MoonCheckInput, watch~ : Bool) -> Array[String] 
   if watch {
     args.push("--watch")
   }
-  args.push("--output-json")
   args.push("--diagnostic-limit")
   args.push(default_diagnostic_limit.to_string())
   match input.target {
@@ -119,16 +113,6 @@ fn command_args(input : @decode.MoonCheckInput, watch~ : Bool) -> Array[String] 
   if input.explain {
     args.push("--explain")
   }
-  if watch {
-    if input.paths.length() == 1 {
-      args.push("--package-path")
-      args.push(input.paths[0])
-    }
-  } else {
-    for path in input.paths {
-      args.push(path)
-    }
-  }
   args
 }
 
@@ -137,12 +121,6 @@ async fn[X] moon_check(
   runtime : @agent_tool.AgentRuntime[X],
   input : @decode.MoonCheckInput,
 ) -> @agent_tool.ToolAction {
-  if input.paths.length() > 1 {
-    return @agent_tool.ToolAction::respond(
-      "error: moon_check watch mode supports at most one package path; `moon check --watch` rejects positional path lists",
-      is_error=true,
-    )
-  }
   let key = moon_check_key(input)
   match runtime.moon_check_snapshot(key) {
     Some(snapshot) if snapshot.status is Running =>
@@ -465,6 +443,10 @@ fn moon_check_snapshot_is_error(
       snapshot.output.contains("Had errors, waiting for filesystem changes...") ||
       snapshot.output.contains("\"level\":\"error\"") ||
       snapshot.output.contains("ERROR Run failed") ||
+      (
+        snapshot.output.contains("Failed with") &&
+        snapshot.output.contains("errors.")
+      ) ||
       snapshot.output.contains("Error: failed when checking project")
   }
 }
@@ -483,7 +465,7 @@ fn moon_check_key(input : @decode.MoonCheckInput) -> String {
     Some(warn_list) => warn_list
     None => ""
   }
-  "cwd=\{cwd}\ntarget=\{target}\nwarn_list=\{warn_list}\ndeny_warn=\{input.deny_warn}\nfmt=\{input.fmt}\nexplain=\{input.explain}\npaths=\{input.paths.join("\n")}"
+  "cwd=\{cwd}\ntarget=\{target}\nwarn_list=\{warn_list}\ndeny_warn=\{input.deny_warn}\nfmt=\{input.fmt}\nexplain=\{input.explain}"
 }
 
 ///|
@@ -494,7 +476,7 @@ fn test_snapshot(
   MoonCheckSnapshot(
     id="moon-check-test",
     key="cwd=.",
-    command="moon check --watch --output-json --diagnostic-limit 10",
+    command="moon check --watch --diagnostic-limit 10",
     cwd=None,
     status=Running,
     seq=1,
@@ -515,8 +497,8 @@ async test "moon_check advertises expected schema" {
     assert_eq(tool.name, "moon_check")
     let JsonSchema(schema) = tool.schema
     let text = schema.stringify()
-    assert_true(text.contains("\"path\""))
-    assert_true(text.contains("\"paths\""))
+    assert_false(text.contains("\"path\""))
+    assert_false(text.contains("\"paths\""))
     assert_true(text.contains("\"target\""))
   }
 }
@@ -525,7 +507,6 @@ async test "moon_check advertises expected schema" {
 test "moon_check builds direct moon command arguments" {
   let input = @decode.decode({
     "cwd": "/tmp",
-    "paths": ["agent", "README.mbt.md"],
     "target": "native",
     "warn_list": "+unnecessary_annotation",
     "deny_warn": true,
@@ -534,26 +515,17 @@ test "moon_check builds direct moon command arguments" {
   })
   assert_eq(
     command_args(input, watch=false).join("|"),
-    "check|--output-json|--diagnostic-limit|10|--target|native|--warn-list|+unnecessary_annotation|--deny-warn|--fmt|--explain|agent|README.mbt.md",
+    "check|--diagnostic-limit|10|--target|native|--warn-list|+unnecessary_annotation|--deny-warn|--fmt|--explain",
   )
 }
 
 ///|
 test "moon_check builds watch command arguments" {
-  let input = @decode.decode({ "target": "native", "path": "agent" })
+  let input = @decode.decode({ "target": "native" })
   assert_eq(
     command_args(input, watch=true).join("|"),
-    "check|--watch|--output-json|--diagnostic-limit|10|--target|native|--package-path|agent",
+    "check|--watch|--diagnostic-limit|10|--target|native",
   )
-}
-
-///|
-test "moon_check parses path and paths together" {
-  let input = @decode.decode({
-    "path": "agent",
-    "paths": ["agent_tool/read", "agent_tool/write"],
-  })
-  assert_eq(input.paths.join("|"), "agent|agent_tool/read|agent_tool/write")
 }
 
 ///|
@@ -612,18 +584,6 @@ test "moon_check auto restart respects exit code and budget" {
       moon_crashed=true,
     ),
   )
-}
-
-///|
-async test "moon_check rejects multiple watch paths" {
-  @async.with_task_group() <| group => {
-    let result = execute(AgentRuntime(group), {
-      "paths": ["agent", "agent_tool"],
-    })
-    guard result is Respond(output) else { fail("expected Respond") }
-    assert_true(output.is_error)
-    assert_true(output.content.contains("supports at most one package path"))
-  }
 }
 
 ///|
@@ -775,7 +735,7 @@ async test "moon_check validates a real fixture project" {
       stable_moon_check_output(output.content, project, canonical),
       content=(
         #|cwd=<fixture>
-        #|command=moon check --watch --output-json --diagnostic-limit 10
+        #|command=moon check --watch --diagnostic-limit 10
         #|watcher=started
         #|id=moon-check-1
         #|status=running
@@ -854,12 +814,20 @@ async test "moon_check reports diagnostics from a broken fixture project" {
       stable_moon_check_output(output.content, project, canonical),
       content=(
         #|cwd=<fixture>
-        #|command=moon check --watch --output-json --diagnostic-limit 10
+        #|command=moon check --watch --diagnostic-limit 10
         #|watcher=started
         #|id=moon-check-1
         #|status=running
         #|seq=<seq>
-        #|{"$message_type":"diagnostic","level":"error","error_code":4014,"path":"<fixture>/lib.mbt","loc":"3:3-3:15","message":"Expr Type Mismatch\n        has type : String\n        wanted   : Int"}
+        #|Error: [4014]
+        #|   ╭─[ <fixture>/lib.mbt:3:3 ]
+        #|   │
+        #| 3 │   "not an int"
+        #|   │   ──────┬─────
+        #|   │         ╰─────── Expr Type Mismatch
+        #|        has type : String
+        #|        wanted   : Int
+        #|───╯
         #|Failed with 0 warnings, 1 errors.
         #|ERROR Run failed with error error=failed when checking project
         #|failed when checking project
@@ -871,7 +839,7 @@ async test "moon_check reports diagnostics from a broken fixture project" {
 }
 
 ///|
-async test "moon_check validates a virtual filesystem package path" {
+async test "moon_check validates a virtual filesystem workspace" {
   let project = @fs.tmpdir(prefix="openseek-moon-check-vfs-")
   @vfs.FileSystem({
     "moon.mod": (
@@ -897,7 +865,7 @@ async test "moon_check validates a virtual filesystem package path" {
   let canonical = @fs.realpath(project)
   @async.with_task_group() <| group => {
     let runtime = @agent_tool.AgentRuntime(group)
-    let args : Json = { "cwd": project, "path": "math", "target": "native" }
+    let args : Json = { "cwd": project, "target": "native" }
     let result = execute(runtime, args)
     ignore(runtime.stop_moon_check(moon_check_key(@decode.decode(args))))
     guard result is Respond(output) else { fail("expected Respond") }
@@ -906,7 +874,7 @@ async test "moon_check validates a virtual filesystem package path" {
       stable_moon_check_output(output.content, project, canonical),
       content=(
         #|cwd=<fixture>
-        #|command=moon check --watch --output-json --diagnostic-limit 10 --target native --package-path math
+        #|command=moon check --watch --diagnostic-limit 10 --target native
         #|watcher=started
         #|id=moon-check-1
         #|status=running
@@ -949,6 +917,7 @@ fn stable_moon_check_output(
   let normalized = content
     .replace_all(old=canonical, new="<fixture>")
     .replace_all(old=project, new="<fixture>")
+    .replace_all(old="──────┬─────  \n", new="──────┬─────\n")
   let stable_lines : Array[String] = []
   for line in normalized.split("\n") {
     if line.has_prefix("seq=") {

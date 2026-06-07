@@ -14,7 +14,7 @@ fn flash_prompt() -> String {
     #|- Use the right tool for the job:
     #|  - `read`, `edit`, and `write` for files.
     #|  - `moon_check` for `moon check`; it starts or reuses a persistent
-    #|    `moon check --watch --output-json --diagnostic-limit 10` watcher.
+    #|    `moon check --watch --diagnostic-limit 10` watcher.
     #|    If `moon --watch` crashes, `moon_check` compacts the crash output and
     #|    automatically starts a replacement watcher under a restart budget.
     #|  - `shell` for one-shot Moon commands other than `moon check`; pass the

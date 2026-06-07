@@ -1,8 +1,8 @@
 # Moon Check Tool
 
 `moon_check` starts or reuses a session-scoped
-`moon check --watch --output-json --diagnostic-limit 10` watcher and returns the
-latest merged stdout/stderr snapshot. It is a focused validation tool for
+`moon check --watch --diagnostic-limit 10` watcher and returns the latest merged
+stdout/stderr snapshot. It is a focused validation tool for
 MoonBit work: use it when the agent needs compiler feedback without going
 through `sh -c` or manually polling one-shot checks.
 
@@ -10,12 +10,12 @@ through `sh -c` or manually polling one-shot checks.
 
 `moon_check` exists separately from `shell` because compiler diagnostics are the
 tightest feedback loop in MoonBit work. It always runs
-`moon check --watch --output-json --diagnostic-limit 10`, which gives the agent
-structured locations and messages without depending on a shell pipeline or a
-human-readable formatter. The diagnostic limit keeps early broken-project
-states from flooding the conversation with a large compiler wall. The first call
-for a given cwd/path/options tuple starts a watcher; later calls with the same
-tuple reuse the existing watcher and return the latest snapshot.
+`moon check --watch --diagnostic-limit 10`, which gives the agent fresh textual
+compiler context without depending on a shell pipeline or manual polling. The
+diagnostic limit keeps early broken-project states from flooding the
+conversation with a large compiler wall. The first call for a given cwd/options
+tuple starts a workspace watcher; later calls with the same tuple reuse the
+existing watcher and return the latest snapshot.
 If the underlying `moon --watch` process exits unexpectedly, `moon_check`
 compacts the crash output and automatically starts a replacement watcher for
 the same tuple, up to a small restart budget. This keeps compiler feedback
@@ -35,13 +35,13 @@ sequenceDiagram
   participant Watcher as moon check --watch
   participant Queue as Update queue
 
-  Agent->>Tool: call with cwd/path/options
+  Agent->>Tool: call with cwd/options
   Tool->>Runtime: lookup watcher key
   alt running watcher exists
     Runtime-->>Tool: latest snapshot
     Tool-->>Agent: watcher=reused
   else no running watcher
-    Tool->>Watcher: spawn --watch --output-json --diagnostic-limit 10
+    Tool->>Watcher: spawn --watch --diagnostic-limit 10
     Tool->>Runtime: register snapshot
     Tool-->>Agent: watcher=started
   end
@@ -65,7 +65,6 @@ after creating or editing a package file:
 ```json
 {
   "cwd": "/tmp/example_project",
-  "path": "src/parser",
   "target": "native"
 }
 ```
@@ -82,8 +81,6 @@ user-facing command validation.
 | Name | Type | Required | Notes |
 | --- | --- | --- | --- |
 | `cwd` | string | no | Working directory. Empty is treated as missing. |
-| `path` | string | no | One package path passed as `--package-path`. |
-| `paths` | string array | no | Additional paths; watch mode rejects more than one total path. |
 | `target` | string | no | `wasm`, `wasm-gc`, `js`, `native`, `llvm`, or `all`. |
 | `warn_list` | string | no | Value passed to `--warn-list`. |
 | `deny_warn` | boolean | no | Adds `--deny-warn` when true. |
@@ -96,7 +93,7 @@ The action is always `Respond(ToolOutput(...))`. `is_error` is true when the
 latest watcher snapshot has compiler errors, when argument validation fails, or
 when the process cannot be launched. The string body has one of these shapes:
 
-- `"cwd=<cwd>\ncommand=moon check --watch --output-json --diagnostic-limit 10 ...\nwatcher=<started|reused|restarted>\nid=<id>\nstatus=<running|stopped>\nseq=<n>\n<output>"`.
+- `"cwd=<cwd>\ncommand=moon check --watch --diagnostic-limit 10 ...\nwatcher=<started|reused|restarted>\nid=<id>\nstatus=<running|stopped>\nseq=<n>\n<output>"`.
 - Restarted watchers also include `restart_count`, `restart_limit`, and
   `restart_reason`. Crash summaries use a compact
   `[moon_check watcher exited]` block instead of forwarding the full `moon`
@@ -114,7 +111,7 @@ async test "moon_check tool advertises the expected schema" {
     assert_eq(tool.name, "moon_check")
     let JsonSchema(schema) = tool.schema
     let text = schema.stringify()
-    assert_true(text.contains("\"path\""))
+    assert_false(text.contains("\"path\""))
     assert_true(text.contains("\"target\""))
   }
 }

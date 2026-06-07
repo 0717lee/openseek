@@ -13,7 +13,6 @@ pub fn decode(Json) -> MoonCheckInput raise
 // Types and methods
 pub struct MoonCheckInput {
   cwd : String?
-  paths : Array[String]
   target : String?
   warn_list : String?
   deny_warn : Bool
