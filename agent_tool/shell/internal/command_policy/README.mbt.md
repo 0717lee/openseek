@@ -3,15 +3,14 @@
 This internal package contains the command-routing policy used by the `shell`
 tool before it runs `sh -c`.
 
-The policy exists for one narrow reason: MoonBit validation commands should use
-the structured MoonBit tools instead of the general shell escape hatch. The
-structured tools preserve arguments, apply MoonBit-specific guardrails, and make
-validation output easier for the agent loop to interpret.
+The policy exists for one narrow reason: iterative `moon check` feedback should
+use `moon_check` instead of the general shell escape hatch. `moon_check` owns a
+persistent watcher and can inject background updates into the agent loop.
 
 This package is not a security sandbox. It is a local automation guardrail for a
 trusted agent. The shell tool can still run arbitrary non-MoonBit commands, and
 this package only decides whether a shell command should be rejected before
-execution because it looks like a MoonBit command that belongs in `moon_cmd`.
+execution because it looks like `moon check`, which belongs in `moon_check`.
 
 ## Enforced Policy
 
@@ -22,20 +21,16 @@ The current policy blocks:
 
 | Command shape | Reason |
 | --- | --- |
-| `moon check` | Use `moon_check` or `moon_cmd` for structured compiler feedback. |
-| `moon test` | Use `moon_cmd` so test output and snapshot-update policy are visible. |
-| `moon run` | Use `moon_cmd` so program args and stdin are structured, not shell-quoted. |
-| `moon info` | Use `moon_cmd` so interface generation is explicit. |
-| `moon fmt` | Use `moon_cmd` so formatting is tracked as a MoonBit command. |
-| `moon build` | Use `moon_cmd` so build output uses the same caps and headers. |
+| `moon check` | Use `moon_check` for persistent compiler feedback. |
 | `moon_cmd ...` | `moon_cmd` is a tool name, not an executable shell command. |
-| `cd dir && moon check` | Use the shell tool's `cwd` field plus `moon_cmd` instead of embedding `cd`. |
+| `cd dir && moon check` | Use the shell tool's `cwd` field plus `moon_check` instead of embedding `cd`. |
 
 The policy allows:
 
 | Command shape | Reason |
 | --- | --- |
 | `moon --version` | Informational `moon` invocations outside the guarded subcommands. |
+| `moon test`, `moon run`, `moon info`, `moon fmt`, `moon build` | One-shot Moon commands run through shell. |
 | `git status --short` | Non-MoonBit commands remain in shell. |
 | `printf hi \| wc -c` | Shell-specific pipelines remain in shell unless they embed a guarded `moon` command. |
 
@@ -47,9 +42,9 @@ knows about:
 - Split the shell command into rough words.
 - Skip simple leading environment assignments such as `DEEPSEEK_MODEL=x`.
 - Reject a leading `moon_cmd`.
-- Reject a leading `moon` followed by one of the guarded subcommands.
-- Reject a few embedded forms such as `&& moon check`, `; moon test`, or a
-  newline followed by `moon run`.
+- Reject a leading `moon check`.
+- Reject a few embedded forms such as `&& moon check`, `; moon check`, or a
+  newline followed by `moon check`.
 
 This is a heuristic parser, not a full POSIX shell parser. It is good enough to
 keep common accidental bypasses from using raw shell, but it does not understand
@@ -62,12 +57,11 @@ every valid shell construct. Known hardening work is tracked in
 ///|
 test "command policy blocks structured MoonBit validation commands" {
   assert_true(moonbit_command_policy_error("moon check") is Some(_))
-  assert_true(moonbit_command_policy_error("moon test --update") is Some(_))
+  assert_true(moonbit_command_policy_error("moon test --update") is None)
   assert_true(
-    moonbit_command_policy_error("DEEPSEEK_MODEL=x moon run cmd/main")
-    is Some(_),
+    moonbit_command_policy_error("DEEPSEEK_MODEL=x moon run cmd/main") is None,
   )
-  assert_true(moonbit_command_policy_error("cd demo && moon info") is Some(_))
+  assert_true(moonbit_command_policy_error("cd demo && moon check") is Some(_))
 }
 ```
 
@@ -85,9 +79,9 @@ test "command policy allows non guarded shell commands" {
 When this policy blocks a command, the caller should not try to quote around it
 or rewrite it as a more complex shell string. Use:
 
-- `moon_check` for raw `moon check --output-json` diagnostics.
-- `moon_cmd` for `moon test`, `moon run`, `moon info`, `moon fmt`, and
-  `moon build`.
-- The `cwd` field on those tools instead of `cd ... &&`.
-- `program_args` and `stdin` on `moon_cmd run` instead of shell quoting,
-  heredocs, or pipes.
+- `moon_check` for persistent
+  `moon check --watch --output-json --diagnostic-limit 10` diagnostics.
+- Shell for one-shot commands such as `moon test`, `moon run`, `moon info`,
+  `moon fmt`, `moon build`, `moon update`, `moon add`, and `moon remove`.
+- The shell tool's `cwd` field instead of `cd ... &&`.
+- Ordinary shell pipes or heredocs for `moon run` stdin probes.

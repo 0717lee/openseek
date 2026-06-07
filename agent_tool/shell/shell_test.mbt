@@ -361,12 +361,12 @@ async test "shell times out long running commands on Unix" {
 }
 
 ///|
-async test "shell rejects moon run and points to moon_cmd" {
-  let result = run_shell({ "cmd": "moon run --target native cmd/main -- .a" })
+async test "shell rejects moon check and points to moon_check" {
+  let result = run_shell({ "cmd": "moon check" })
   guard result is Respond(output) else { fail("expected Respond") }
   assert_true(output.is_error)
-  assert_true(output.content.contains("shell blocked `moon run`"))
-  assert_true(output.content.contains("moon_cmd"))
+  assert_true(output.content.contains("shell blocked `moon check`"))
+  assert_true(output.content.contains("moon_check"))
 }
 
 ///|
@@ -374,7 +374,7 @@ async test "shell rejects moon_cmd as a shell command" {
   let result = run_shell({ "cmd": "moon_cmd run cmd/main" })
   guard result is Respond(output) else { fail("expected Respond") }
   assert_true(output.is_error)
-  assert_true(output.content.contains("moon_cmd is a tool"))
+  assert_true(output.content.contains("moon_cmd is a tool name"))
 }
 
 ///|
