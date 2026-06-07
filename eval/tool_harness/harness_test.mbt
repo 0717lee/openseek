@@ -6,6 +6,7 @@ async test "deterministic harness exercises every tool" {
   assert_true(report.all_passed())
   let markdown = report.markdown()
   assert_true(markdown.contains("# Tool Harness"))
+  assert_false(markdown.contains("`check_daemon`"))
   assert_true(markdown.contains("`moon_ide`"))
   assert_true(markdown.contains("| 8 | `finish` | pass"))
 }

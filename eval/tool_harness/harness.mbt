@@ -1,6 +1,15 @@
 ///|
 pub async fn run_harness() -> @report.Report {
-  let tools = tool_definitions() catch {
+  @async.with_task_group() <| group => {
+    run_harness_with_runtime(AgentRuntime(group))
+  }
+}
+
+///|
+async fn run_harness_with_runtime(
+  runtime : @agent_tool.AgentRuntime[@report.Report],
+) -> @report.Report {
+  let tools = tool_definitions(runtime) catch {
     error =>
       return build_report([
         row(
@@ -25,13 +34,15 @@ pub async fn run_harness() -> @report.Report {
 }
 
 ///|
-fn tool_definitions() -> @agent_tool.Tools raise {
+fn tool_definitions(
+  runtime : @agent_tool.AgentRuntime[@report.Report],
+) -> @agent_tool.Tools raise {
   Tools([
     @read.definition(),
     @write.definition(),
     @edit.definition(),
     @shell.definition(),
-    @moon_check.definition(),
+    @moon_check.definition(runtime),
     @moon_cmd.definition(),
     @moon_ide.definition(),
     @finish.definition(),
@@ -165,7 +176,10 @@ async fn run_moon_check_case(
   let action = dispatch(tools, "moon_check", { "cwd": root, "target": "native" })
   let reason = expect_respond(
     action,
-    contains=["command=moon check --output-json --target native", "exit=0"],
+    contains=[
+      "command=moon check --watch --output-json --diagnostic-limit 10 --target native",
+      "watcher=started", "status=running",
+    ],
     error=false,
   )
   @fs.rmdir(root, recursive=true)

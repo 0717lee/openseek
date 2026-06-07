@@ -11,13 +11,10 @@ import {
   "bobzhang/openseek/deepseek",
   "bobzhang/openseek/eval/report",
   "bobzhang/openseek/testkit/filesystem" @vfs,
+  "moonbitlang/async",
   "moonbitlang/async/fs",
   "moonbitlang/core/json",
 }
-
-import {
-  "moonbitlang/async",
-} for "test"
 
 warnings = "+unnecessary_annotation"
 
