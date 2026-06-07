@@ -14,7 +14,7 @@ Review target: `agent_tool/shell`.
 
 - [ ] Harden MoonBit command policy bypass detection.
   - Current guard is based on simple space splitting and a few string fragments.
-  - Cases to block or route through `moon_cmd`: `env FOO=x moon test`, `PATH=/usr/bin moon check`, `FOO= moon run`, `cd demo;moon test`, subshells, command substitutions, and other executable `moon` tokens.
+  - Cases to block for `moon_check`: `env FOO=x moon check`, `PATH=/usr/bin moon check`, `cd demo;moon check`, subshells, command substitutions, and other executable `moon check` tokens.
 
 - [ ] Add tests for guarded-command bypasses.
   - Include env wrappers, empty env assignments, semicolons without spaces, newlines, subshells, and `moon test --update`.
@@ -27,21 +27,21 @@ Review target: `agent_tool/shell`.
 
 - [ ] Add structured `stdin`.
   - This avoids shell pipes and heredocs for multiline probes and non-MoonBit commands.
-  - `moon_cmd` already has a working pattern for stdin redirection.
+  - This would make shell `moon run -` probes less quoting-sensitive.
 
 - [ ] Add optional `argv` execution mode.
   - Keep `cmd` for shell features such as pipes and redirects.
   - Use `argv` for exact execution when quoting paths, regexes, JSONPath/jq expressions, or generated arguments would be fragile.
 
 - [ ] Echo command context in the result.
-  - Include `cwd=...` and `command=...` like `moon_cmd` so logs remain self-auditing.
+  - Include `cwd=...` and `command=...` so logs remain self-auditing.
 
 ## Nice To Have
 
 - [ ] Consider configurable environment handling.
   - Potential fields: `env`, `inherit_env`, and possibly a denylist for sensitive values in echoed metadata.
 
-- [ ] Document the distinction between `shell`, `moon_cmd`, and `moon_check` in `README.mbt.md` after behavior changes.
+- [x] Document the distinction between `shell` and `moon_check` in `README.mbt.md` after behavior changes.
 
 - [ ] Re-run targeted validation after changes.
   - `moon test agent_tool/shell agent_tool/shell/internal/decode --target native`

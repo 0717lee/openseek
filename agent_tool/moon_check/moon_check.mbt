@@ -1,8 +1,8 @@
 ///|
 /// Tool definition for `moon_check`: starts or reuses a session-scoped
-/// `moon check --watch --output-json` watcher for the given check arguments.
-/// Repeated calls with the same arguments return the latest watcher snapshot
-/// instead of starting another process.
+/// `moon check --watch --output-json --diagnostic-limit 10` watcher for the
+/// given check arguments. Repeated calls with the same arguments return the
+/// latest watcher snapshot instead of starting another process.
 ///
 /// ## Arguments
 /// - `cwd` (string, optional): working directory. Empty means current process
@@ -30,7 +30,7 @@ pub fn[X] definition(
 ) -> @agent_tool.AgentToolDefinition {
   AgentToolDefinition(
     name="moon_check",
-    description="Start or inspect a persistent `moon check --watch --output-json` watcher for the given cwd/paths/options. The first call starts the watcher; later calls with the same arguments return the latest snapshot without starting another watcher.",
+    description="Start or inspect a persistent `moon check --watch --output-json --diagnostic-limit 10` watcher for the given cwd/paths/options. The first call starts the watcher; later calls with the same arguments return the latest snapshot without starting another watcher.",
     schema=JsonSchema({
       "type": "object",
       "properties": {
@@ -82,12 +82,17 @@ let default_initial_wait_ms : Int = 1000
 let default_max_output_chars : Int = 12000
 
 ///|
+let default_diagnostic_limit : Int = 10
+
+///|
 fn command_args(input : @decode.MoonCheckInput, watch~ : Bool) -> Array[String] {
   let args : Array[String] = ["check"]
   if watch {
     args.push("--watch")
   }
   args.push("--output-json")
+  args.push("--diagnostic-limit")
+  args.push(default_diagnostic_limit.to_string())
   match input.target {
     Some(target) => {
       args.push("--target")
@@ -335,7 +340,7 @@ test "moon_check builds direct moon command arguments" {
   })
   assert_eq(
     command_args(input, watch=false).join("|"),
-    "check|--output-json|--target|native|--warn-list|+unnecessary_annotation|--deny-warn|--fmt|--explain|agent|README.mbt.md",
+    "check|--output-json|--diagnostic-limit|10|--target|native|--warn-list|+unnecessary_annotation|--deny-warn|--fmt|--explain|agent|README.mbt.md",
   )
 }
 
@@ -344,7 +349,7 @@ test "moon_check builds watch command arguments" {
   let input = @decode.decode({ "target": "native", "path": "agent" })
   assert_eq(
     command_args(input, watch=true).join("|"),
-    "check|--watch|--output-json|--target|native|--package-path|agent",
+    "check|--watch|--output-json|--diagnostic-limit|10|--target|native|--package-path|agent",
   )
 }
 
@@ -408,7 +413,7 @@ async test "moon_check validates a real fixture project" {
       stable_moon_check_output(output.content, project, canonical),
       content=(
         #|cwd=<fixture>
-        #|command=moon check --watch --output-json
+        #|command=moon check --watch --output-json --diagnostic-limit 10
         #|watcher=started
         #|id=moon-check-1
         #|status=running
@@ -461,7 +466,7 @@ async test "moon_check reports diagnostics from a broken fixture project" {
       stable_moon_check_output(output.content, project, canonical),
       content=(
         #|cwd=<fixture>
-        #|command=moon check --watch --output-json
+        #|command=moon check --watch --output-json --diagnostic-limit 10
         #|watcher=started
         #|id=moon-check-1
         #|status=running
@@ -513,7 +518,7 @@ async test "moon_check validates a virtual filesystem package path" {
       stable_moon_check_output(output.content, project, canonical),
       content=(
         #|cwd=<fixture>
-        #|command=moon check --watch --output-json --target native --package-path math
+        #|command=moon check --watch --output-json --diagnostic-limit 10 --target native --package-path math
         #|watcher=started
         #|id=moon-check-1
         #|status=running

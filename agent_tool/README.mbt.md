@@ -51,9 +51,9 @@ has to interpret.
 session runtime, start or reuse background processes, and post later output into
 the agent event queue. `check_daemon` is the general-purpose monitor for
 commands such as review polling, while `moon_check` specializes this pattern for
-`moon check --watch --output-json`. Their direct tool results still follow the
-normal `Respond(ToolOutput(...))` contract; later updates are injected by the
-agent loop as synthetic user messages.
+`moon check --watch --output-json --diagnostic-limit 10`. Their direct tool
+results still follow the normal `Respond(ToolOutput(...))` contract; later
+updates are injected by the agent loop as synthetic user messages.
 
 Each concrete tool is a subpackage to keep the root package focused on the
 shared contract: parsing calls, advertising JSON schemas, dispatching tools,

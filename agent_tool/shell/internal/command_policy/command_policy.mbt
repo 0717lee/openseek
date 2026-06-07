@@ -8,20 +8,20 @@ pub fn moonbit_command_policy_error(cmd : String) -> String? {
       let first = words[index]
       if first == "moon_cmd" {
         return Some(
-          "error: moon_cmd is a tool, not a shell command; call the moon_cmd tool directly",
+          "error: moon_cmd is a tool name, not a shell command; use `moon ...` through shell, and use moon_check for `moon check`",
         )
       }
       if first == "moon" && index + 1 < words.length() {
         let subcommand = words[index + 1]
         if guarded_moon_subcommands().contains(subcommand) {
           return Some(
-            "error: shell blocked `moon \{subcommand}`; use the moon_cmd tool so MoonBit commands keep structured args, output caps, and guardrails",
+            "error: shell blocked `moon check`; use the moon_check tool for persistent compiler feedback",
           )
         }
       }
       if contains_guarded_moon_fragment(cmd) {
         Some(
-          "error: shell blocked an embedded MoonBit command; use cwd plus moon_cmd instead of `cd ... && moon ...`",
+          "error: shell blocked an embedded `moon check`; use the shell tool's cwd field plus moon_check instead of `cd ... && moon check`",
         )
       } else {
         None
@@ -32,7 +32,7 @@ pub fn moonbit_command_policy_error(cmd : String) -> String? {
 
 ///|
 fn guarded_moon_subcommands() -> Array[String] {
-  ["check", "test", "run", "info", "fmt", "build"]
+  ["check"]
 }
 
 ///|

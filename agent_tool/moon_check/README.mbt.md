@@ -1,20 +1,21 @@
 # Moon Check Tool
 
 `moon_check` starts or reuses a session-scoped
-`moon check --watch --output-json` watcher and returns the latest merged
-stdout/stderr snapshot. It is a focused validation tool for MoonBit work: use
-it when the agent needs compiler feedback without going through `sh -c` or
-manually polling one-shot checks.
+`moon check --watch --output-json --diagnostic-limit 10` watcher and returns the
+latest merged stdout/stderr snapshot. It is a focused validation tool for
+MoonBit work: use it when the agent needs compiler feedback without going
+through `sh -c` or manually polling one-shot checks.
 
 ## Design Rationale
 
-`moon_check` exists separately from `shell` and `moon_cmd` because compiler
-diagnostics are the tightest feedback loop in MoonBit work. It always runs
-`moon check --watch --output-json`, which gives the agent structured locations
-and messages without depending on a shell pipeline or a human-readable
-formatter. The first call for a given cwd/path/options tuple starts a watcher;
-later calls with the same tuple reuse the existing watcher and return the
-latest snapshot.
+`moon_check` exists separately from `shell` because compiler diagnostics are the
+tightest feedback loop in MoonBit work. It always runs
+`moon check --watch --output-json --diagnostic-limit 10`, which gives the agent
+structured locations and messages without depending on a shell pipeline or a
+human-readable formatter. The diagnostic limit keeps early broken-project
+states from flooding the conversation with a large compiler wall. The first call
+for a given cwd/path/options tuple starts a watcher; later calls with the same
+tuple reuse the existing watcher and return the latest snapshot.
 
 The schema is intentionally narrow. It accepts MoonBit check options that affect
 diagnostics, but it does not expose unrelated `moon` subcommands. That narrow
@@ -36,9 +37,9 @@ after creating or editing a package file:
 
 Use `warn_list` or `deny_warn` when the task requires stricter cleanup. The
 agent may call `moon_check` again to inspect the current watcher state; the call
-does not start a duplicate watcher for the same arguments. Use `moon_cmd` for
-`moon test`, `moon run`, `moon info`, `moon fmt`, or user-facing command
-validation.
+does not start a duplicate watcher for the same arguments. Use `shell` for
+one-shot `moon` commands such as `moon test`, `moon run`, `moon info`,
+`moon fmt`, or user-facing command validation.
 
 ## Arguments
 
@@ -59,7 +60,7 @@ The action is always `Respond(ToolOutput(...))`. `is_error` is true when the
 latest watcher snapshot has compiler errors, when argument validation fails, or
 when the process cannot be launched. The string body has one of these shapes:
 
-- `"cwd=<cwd>\ncommand=moon check --watch --output-json ...\nwatcher=<started|reused|restarted>\nid=<id>\nstatus=<running|stopped>\nseq=<n>\n<output>"`.
+- `"cwd=<cwd>\ncommand=moon check --watch --output-json --diagnostic-limit 10 ...\nwatcher=<started|reused|restarted>\nid=<id>\nstatus=<running|stopped>\nseq=<n>\n<output>"`.
 - `"error running moon_check: <error>"`.
 - `"error: moon_check requires <field description>"`.
 

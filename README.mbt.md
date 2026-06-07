@@ -52,8 +52,7 @@ filesystem, and process APIs.
 
 The `cmd/openseek` package is the CLI entry point. It parses arguments and runs
 the agent package. The agent sends DeepSeek native function tools and supports
-seven local tools: `shell`, `read`, `edit`, `write`, `moon_check`, `moon_cmd`,
-and `finish`.
+six local tools: `shell`, `read`, `edit`, `write`, `moon_check`, and `finish`.
 
 ```bash
 export DEEPSEEK=sk-...

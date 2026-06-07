@@ -11,10 +11,7 @@ fn tool_definitions(
     @read.definition(),
     @edit.definition(),
     @write.definition(),
-    @check_daemon.definition(runtime),
     @moon_check.definition(runtime),
-    @moon_cmd.definition(),
-    @moon_ide.definition(),
     @finish.definition(),
   ])
 }
@@ -24,16 +21,16 @@ async test "agent registers the expected tool names" {
   @async.with_task_group() <| group => {
     let tools = tool_definitions(AgentRuntime(group))
     let function_tools = tools.function_tools()
-    assert_eq(function_tools.length(), 9)
+    assert_eq(function_tools.length(), 6)
     let names = [ for t in function_tools => t.name ]
     assert_true(names.contains("shell"))
     assert_true(names.contains("read"))
     assert_true(names.contains("edit"))
     assert_true(names.contains("write"))
-    assert_true(names.contains("check_daemon"))
+    assert_false(names.contains("check_daemon"))
     assert_true(names.contains("moon_check"))
-    assert_true(names.contains("moon_cmd"))
-    assert_true(names.contains("moon_ide"))
+    assert_false(names.contains("moon_cmd"))
+    assert_false(names.contains("moon_ide"))
     assert_true(names.contains("finish"))
   }
 }
