@@ -154,7 +154,7 @@ async test "moon_check rejects non-object arguments" {
 
 ///|
 async test "moon_check validates a real fixture project" {
-  let project = copy_fixture_project("valid_project")
+  let project = valid_project()
   let canonical = @fs.realpath(project)
   @async.with_task_group() <| group => {
     let runtime = MoonCheckRuntime(AgentRuntime(), AgentTaskScope(group))
@@ -184,7 +184,7 @@ async test "moon_check validates a real fixture project" {
 
 ///|
 async test "moon_check reuses a running watcher for the same arguments" {
-  let project = copy_fixture_project("valid_project")
+  let project = valid_project()
   @async.with_task_group() <| group => {
     let runtime = MoonCheckRuntime(AgentRuntime(), AgentTaskScope(group))
     let args : Json = { "cwd": project }
@@ -206,7 +206,7 @@ async test "moon_check reuses a running watcher for the same arguments" {
 
 ///|
 async test "moon_check restarts a stopped watcher on explicit next call" {
-  let project = copy_fixture_project("valid_project")
+  let project = valid_project()
   @async.with_task_group() <| group => {
     let runtime = MoonCheckRuntime(AgentRuntime(), AgentTaskScope(group))
     let args : Json = { "cwd": project }
@@ -232,7 +232,7 @@ async test "moon_check restarts a stopped watcher on explicit next call" {
 
 ///|
 async test "moon_check reports diagnostics from a broken fixture project" {
-  let project = copy_fixture_project("invalid_project")
+  let project = invalid_project()
   let canonical = @fs.realpath(project)
   @async.with_task_group() <| group => {
     let runtime = MoonCheckRuntime(AgentRuntime(), AgentTaskScope(group))
@@ -321,24 +321,51 @@ async test "moon_check validates a virtual filesystem workspace" {
 }
 
 ///|
-async fn copy_fixture_project(name : String) -> String {
+/// Materialize a single-package moon workspace into a fresh temp directory
+/// via `@vfs.FileSystem`. The caller passes in the module name (used as the
+/// `moon.mod` `name`) and the `lib.mbt` body; everything else — `moon.pkg`
+/// warning policy, `moon.mod` version — is shared boilerplate. Returns the
+/// temp directory path so the test can pass it to `moon_check` as `cwd` and
+/// later `@fs.rmdir` it.
+async fn write_fixture_project(
+  module_name~ : String,
+  lib_content~ : String,
+) -> String {
   let target = @fs.tmpdir(prefix="openseek-moon-check-")
-  copy_fixture_file(name, "moon.mod.fixture", target + "/moon.mod")
-  copy_fixture_file(name, "moon.pkg.fixture", target + "/moon.pkg")
-  copy_fixture_file(name, "lib.mbt.fixture", target + "/lib.mbt")
+  @vfs.FileSystem({
+    "moon.mod": "name = \"openseek/\{module_name}\"\n\nversion = \"0.1.0\"\n",
+    "moon.pkg": "warnings = \"+unnecessary_annotation\"\n",
+    "lib.mbt": lib_content,
+  }).write_to(target)
   target
 }
 
 ///|
-async fn copy_fixture_file(
-  fixture : String,
-  file : String,
-  target : String,
-) -> Unit {
-  let content = @fs.read_file(
-    "agent_tool/moon_check/fixtures/\{fixture}/\{file}",
-  ).text()
-  @fs.write_file(target, content, create_mode=CreateOrTruncate)
+async fn valid_project() -> String {
+  write_fixture_project(
+    module_name="moon_check_valid_fixture",
+    lib_content=(
+      #|///|
+      #|pub fn meaning() -> Int {
+      #|  42
+      #|}
+      #|
+    ),
+  )
+}
+
+///|
+async fn invalid_project() -> String {
+  write_fixture_project(
+    module_name="moon_check_invalid_fixture",
+    lib_content=(
+      #|///|
+      #|pub fn meaning() -> Int {
+      #|  "not an int"
+      #|}
+      #|
+    ),
+  )
 }
 
 ///|
