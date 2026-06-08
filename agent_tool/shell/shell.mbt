@@ -101,10 +101,20 @@ async fn shell(input : @decode.ShellInput) -> @agent_tool.ToolAction {
   let result = match input.timeout_ms {
     Some(timeout_ms) =>
       @async.with_timeout_opt(timeout_ms, () => {
-        collect_shell_output(input.cmd, input.cwd, input.max_output_chars)
+        collect_shell_output(
+          input.cmd,
+          cwd?=input.cwd,
+          max_output_chars=input.max_output_chars,
+        )
       })
     None =>
-      Some(collect_shell_output(input.cmd, input.cwd, input.max_output_chars))
+      Some(
+        collect_shell_output(
+          input.cmd,
+          cwd?=input.cwd,
+          max_output_chars=input.max_output_chars,
+        ),
+      )
   }
   let output = match result {
     Some(result) => result
@@ -124,7 +134,11 @@ async fn shell(input : @decode.ShellInput) -> @agent_tool.ToolAction {
 }
 
 ///|
-priv struct ShellOutput {
+/// The result of running a shell command line: the `exit_code` (`None` if the
+/// command was cancelled or killed before it exited), the merged stdout+stderr
+/// `text` (truncated to the character budget), and whether that truncation
+/// happened.
+pub struct ShellOutput {
   exit_code : Int?
   text : String
   output_limit_reached : Bool
@@ -137,10 +151,16 @@ priv struct ShellResponse {
 }
 
 ///|
-async fn collect_shell_output(
+/// Run `cmd` through the platform shell (`sh -c`, or `pwsh -NoProfile -Command`
+/// on Windows), capturing merged stdout+stderr. This is the execution core
+/// behind the `shell` tool, but it applies NO command policy or safety
+/// filtering — so frontends that run explicit user commands (e.g. the TUI's `!`
+/// command) can reuse it directly. Callers that want the agent guardrails go
+/// through `definition()`/`execute` instead.
+pub async fn collect_shell_output(
   cmd : String,
-  cwd : String?,
-  max_output_chars : Int,
+  cwd? : String,
+  max_output_chars? : Int = @decode.default_max_output_chars,
 ) -> ShellOutput {
   let program = PlatformShellProgram
   let args = platform_shell_args(cmd)

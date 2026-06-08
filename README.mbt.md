@@ -72,12 +72,15 @@ notes.
 ## Verified CLI Documentation (cram)
 
 The CLI behaviour is documented as executable cram tests under `tests/`, built
-and run with `moon cram test`. The wrapper compiles `cmd/openseek` and exposes it
-on `PATH` as `openseek.exe`.
+and run with `moon cram test`. The wrapper compiles the native `cmd/*` packages
+and exposes each on `PATH` as `<name>.exe` (e.g. `openseek.exe`, `tui.exe`).
 
-- [`tests/cram/cli.md`](tests/cram/cli.md) — offline examples (the full help
-  banner and the missing-API-key error). They make no network calls, use no
-  output-processing tools, and run in CI via `moon cram test tests/cram`.
+- [`tests/cram/cli.md`](tests/cram/cli.md) — offline `cmd/openseek` examples (the
+  full help banner and the missing-API-key error). They make no network calls,
+  use no output-processing tools, and run in CI via `moon cram test tests/cram`.
+- [`tests/cram/tui.md`](tests/cram/tui.md) — offline `cmd/tui` examples (the help
+  banner and the missing-API-key error). The argument parser runs before the
+  terminal UI starts, so these need no API key and no TTY.
 - [`tests/live/deepseek.md`](tests/live/deepseek.md) — a real, non-mock DeepSeek
   round trip. It is opt-in (`DEEPSEEK=sk-... moon cram test tests/live`) and
   parses the agent's JSONL log with MoonBit itself: a `moon run -e` script reads

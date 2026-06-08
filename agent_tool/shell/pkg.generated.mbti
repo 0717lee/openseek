@@ -6,11 +6,18 @@ import {
 }
 
 // Values
+pub async fn collect_shell_output(String, cwd? : String, max_output_chars? : Int) -> ShellOutput
+
 pub fn definition() -> @agent_tool.AgentToolDefinition
 
 // Errors
 
 // Types and methods
+pub struct ShellOutput {
+  exit_code : Int?
+  text : String
+  output_limit_reached : Bool
+}
 
 // Type aliases
 
