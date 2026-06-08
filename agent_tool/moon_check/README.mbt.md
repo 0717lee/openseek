@@ -48,10 +48,10 @@ sequenceDiagram
   end
   Watcher-->>Tool: stdout/stderr chunks
   Tool->>State: record latest compact output
-  State->>Runtime: emit MoonCheckUpdate
-  Runtime->>Queue: MoonCheckUpdate
+  State->>Runtime: emit internal update event
+  Runtime->>Queue: runtime update
   Agent->>Queue: drain before next model turn
-  Queue-->>Agent: coalesced [moon_check update]
+  Queue-->>Agent: moon_check renders coalesced update
   alt watcher exits unexpectedly
     Tool->>State: compact crash output
     Tool->>Watcher: restart within budget

@@ -18,5 +18,5 @@ group for tools that need bounded background work.
 - `AgentEvent`: open `extenum` extended by concrete tool packages.
 
 Tool packages that need typed background updates extend `AgentEvent` from their
-own package. For example, `agent_tool/moon_check` adds `MoonCheckUpdate` without
-making this package depend on `moon_check`.
+own package. They can keep concrete event constructors internal and expose a
+small rendering/query function for the agent loop.

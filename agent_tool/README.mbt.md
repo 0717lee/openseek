@@ -48,9 +48,9 @@ has to interpret.
 
 Stateful tools use `agent_runtime` directly when they need loop-scoped
 background work or event updates. For example, `moon_check` owns its watcher
-state in its own package and extends the runtime event type with
-`MoonCheckUpdate`; its direct tool results still follow the normal
-`Respond(ToolOutput(...))` contract.
+state, internal runtime events, and event rendering in its own package; its
+direct tool results still follow the normal `Respond(ToolOutput(...))`
+contract.
 
 ```mermaid
 flowchart LR
@@ -63,7 +63,7 @@ flowchart LR
   Watcher --> Monitor[reader task]
   Monitor --> MoonCheck
   MoonCheck --> Runtime
-  Runtime --> Queue[MoonCheckUpdate queue]
+  Runtime --> Queue[Runtime event queue]
   Agent --> Queue
   Queue --> Message["[moon_check update] user message"]
   Message --> Model

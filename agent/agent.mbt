@@ -132,73 +132,7 @@ async fn run_with_runtime(
 
 ///|
 fn runtime_update_message(events : Array[@agent_runtime.AgentEvent]) -> String? {
-  let latest_moon_checks : Map[String, @moon_check.MoonCheckSnapshot] = {}
-  let mut moon_check_count = 0
-  for event in events {
-    match event {
-      @moon_check.MoonCheckUpdate(update) => {
-        latest_moon_checks[update.key] = update
-        moon_check_count += 1
-      }
-      _ => ()
-    }
-  }
-  if moon_check_count == 0 {
-    None
-  } else {
-    let parts = [
-      for update in latest_moon_checks.values() => update.update_text()
-    ]
-    Some(
-      "[moon_check update]\nevents=\{moon_check_count}\n" + parts.join("\n\n"),
-    )
-  }
-}
-
-///|
-test "moon_check update message coalesces by watcher key" {
-  let message = runtime_update_message([
-    @moon_check.MoonCheckUpdate(
-      MoonCheckSnapshot(
-        id="moon-check-1",
-        key="cwd=.",
-        command="moon check --watch --diagnostic-limit 10",
-        cwd=None,
-        status=Running,
-        seq=1,
-        output="old",
-        output_truncated=false,
-        max_output_chars=12000,
-        exit_code=None,
-        restart_count=0,
-        restart_limit=3,
-        restart_reason=None,
-      ),
-    ),
-    @moon_check.MoonCheckUpdate(
-      MoonCheckSnapshot(
-        id="moon-check-1",
-        key="cwd=.",
-        command="moon check --watch --diagnostic-limit 10",
-        cwd=None,
-        status=Running,
-        seq=2,
-        output="new",
-        output_truncated=false,
-        max_output_chars=12000,
-        exit_code=None,
-        restart_count=0,
-        restart_limit=3,
-        restart_reason=None,
-      ),
-    ),
-  ])
-  guard message is Some(text) else { fail("expected message") }
-  assert_true(text.contains("[moon_check update]"))
-  assert_true(text.contains("events=2"))
-  assert_true(text.contains("seq=2"))
-  assert_true(text.contains("new"))
-  assert_false(text.contains("old"))
+  @moon_check.runtime_update_text(events)
 }
 
 ///|
