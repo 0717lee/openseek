@@ -1,5 +1,6 @@
 ///|
 async fn main {
+  configure_logging()
   let matches = cli_command().parse(env=@env.get_env_vars())
   let api_key = value(matches, "api-key")
   let model = @deepseek.Model::parse(value(matches, "model"))
@@ -7,6 +8,25 @@ async fn main {
   let system_prompt_text = configured_system_prompt(matches, model)
   let task = values(matches, "task").join(" ")
   @agent.run(api_key, model, task, max_steps~, system_prompt_text~)
+}
+
+///|
+/// Mirror every JSONL log event to `OPENSEEK_LOG_FILE` in addition to stdout
+/// when that variable is set.
+///
+/// The TUI parses the JSONL the engine writes to stdout, so stdout is left
+/// exactly as it was (the default `Stdout` handler keeps its `Jsonl` format);
+/// this only adds a second handler that appends the same JSONL to the file. The
+/// file handler flushes per entry, so `tail -f $OPENSEEK_LOG_FILE` shows events
+/// live — useful for inspecting a stuck or headless session. Best-effort: if the
+/// file cannot be opened, logging stays stdout-only rather than failing the run.
+fn configure_logging() -> Unit {
+  guard @env.get_env_var("OPENSEEK_LOG_FILE") is Some(path) && path != "" else {
+    return
+  }
+  let file = @xlog.File::File(path) catch { _ => return }
+  let handlers : Array[&@xlog.Handler] = [@xlog.Stdout(), file]
+  @xlog.global().set_handler(@xlog.Multi(handlers))
 }
 
 ///|
