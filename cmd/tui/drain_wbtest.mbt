@@ -5,6 +5,21 @@ fn drain_test_state() -> State {
     model: V4Pro,
     cwd: ".",
     max_steps: 10,
+    session_id: Some(SessionId("test")),
+    session_root: ".openseek",
+    engine: "openseek",
+  })
+}
+
+///|
+fn ephemeral_drain_test_state() -> State {
+  State::new({
+    api_key: "k",
+    model: V4Pro,
+    cwd: ".",
+    max_steps: 10,
+    session_id: None,
+    session_root: ".openseek",
     engine: "openseek",
   })
 }
@@ -40,6 +55,31 @@ fn run_command_count(cmds : Array[Cmd]) -> Int {
     }
   }
   count
+}
+
+///|
+test "agent engine argv stays replay-compatible while session config uses env" {
+  let config = drain_test_state().config
+  let args = engine_args("--literal task")
+  assert_eq(args.length(), 2)
+  assert_eq(args[0], "--")
+  assert_eq(args[1], "--literal task")
+  let env = engine_extra_env(config)
+  guard env.get("OPENSEEK_SESSION") is Some(session_id) else {
+    fail("missing session id env")
+  }
+  guard env.get("OPENSEEK_SESSION_ROOT") is Some(session_root) else {
+    fail("missing session root env")
+  }
+  assert_eq(session_id, "test")
+  assert_eq(session_root, ".openseek")
+}
+
+///|
+test "agent engine env omits session config for fresh runs" {
+  let env = engine_extra_env(ephemeral_drain_test_state().config)
+  assert_true(env.get("OPENSEEK_SESSION") is None)
+  assert_true(env.get("OPENSEEK_SESSION_ROOT") is None)
 }
 
 ///|
