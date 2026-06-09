@@ -1,0 +1,201 @@
+///|
+fn sample_tool_call() -> @deepseek.ToolCall {
+  ToolCall(id="call_1", name="read", arguments="{\"path\":\"README.md\"}")
+}
+
+///|
+test "session append assigns monotonic sequence numbers immutably" {
+  let session = @agent_session.Session(SessionId("s1"), system_prompt="system")
+  let next = session.append(User(UserMessage("hello")))
+  assert_eq(session.events().length(), 0)
+  assert_eq(next.events().length(), 1)
+  assert_eq(next.events()[0].sequence(), 1)
+  let after = next.append(Terminal(Finished("done")))
+  assert_eq(after.events()[1].sequence(), 2)
+  assert_eq(after.last_sequence(), 2)
+}
+
+///|
+test "session projects to DeepSeek chat messages" {
+  let session = @agent_session.Session(SessionId("s1"), system_prompt="system")
+    .append(User(UserMessage("inspect")))
+    .append(
+      Assistant(
+        AssistantMessage(
+          "",
+          tool_calls=[sample_tool_call()],
+          reasoning_content="need file",
+        ),
+      ),
+    )
+    .append(
+      Tool(
+        ToolResult(tool_call_id="call_1", tool_name="read", content="README"),
+      ),
+    )
+    .append(Terminal(Finished("done")))
+  let messages = session.chat_messages()
+  assert_eq(messages.length(), 5)
+  assert_true(messages[0].role is System)
+  assert_eq(messages[0].content, "system")
+  assert_true(messages[1].role is User)
+  assert_eq(messages[1].content, "inspect")
+  assert_true(messages[2].role is Assistant)
+  assert_eq(messages[2].content, "")
+  assert_true(messages[2].reasoning_content is Some("need file"))
+  assert_eq(messages[2].tool_calls.length(), 1)
+  assert_eq(messages[2].tool_calls[0].id, "call_1")
+  assert_eq(messages[2].tool_calls[0].name, "read")
+  assert_eq(messages[2].tool_calls[0].arguments, "{\"path\":\"README.md\"}")
+  assert_true(messages[3].role is Tool("call_1"))
+  assert_eq(messages[3].content, "README")
+  assert_true(messages[4].role is Assistant)
+  assert_eq(messages[4].content, "done")
+}
+
+///|
+test "session JSON round trips typed events" {
+  let session = @agent_session.Session(SessionId("s1"), system_prompt="system")
+    .append(User(UserMessage("hello")))
+    .append(Runtime(RuntimeNotice("[moon_check update]\nok")))
+    .append(
+      Summary(
+        SessionSummary(
+          content="we inspected files",
+          from_sequence=1,
+          to_sequence=2,
+        ),
+      ),
+    )
+    .append(Terminal(Finished("done")))
+  let encoded = session.to_json()
+  let decoded : @agent_session.Session = @json.from_json(encoded)
+  assert_eq(decoded.id().value(), "s1")
+  assert_eq(decoded.system_prompt(), "system")
+  assert_eq(decoded.events().length(), 4)
+  assert_eq(decoded.events()[3].sequence(), 4)
+  guard decoded.events()[2].item() is Summary(summary) else {
+    fail("expected summary")
+  }
+  assert_eq(summary.from_sequence(), 1)
+  assert_eq(summary.to_sequence(), 2)
+  assert_eq(summary.content(), "we inspected files")
+}
+
+///|
+test "projection closes unresolved historical tool calls" {
+  let session = @agent_session.Session(SessionId("s1"), system_prompt="system")
+    .append(Assistant(AssistantMessage("", tool_calls=[sample_tool_call()])))
+    .append(User(UserMessage("continue")))
+  let messages = session.chat_messages()
+  assert_eq(messages.length(), 4)
+  assert_true(messages[1].role is Assistant)
+  assert_eq(messages[1].tool_calls.length(), 1)
+  assert_true(messages[2].role is Tool("call_1"))
+  assert_true(messages[2].content.contains("previous agent process exited"))
+  assert_true(messages[3].role is User)
+  assert_eq(messages[3].content, "continue")
+}
+
+///|
+test "projection skips compacted assistant tool results" {
+  let session = @agent_session.Session(SessionId("s1"), system_prompt="system")
+    .append(User(UserMessage("inspect")))
+    .append(Assistant(AssistantMessage("", tool_calls=[sample_tool_call()])))
+    .append(
+      Tool(
+        ToolResult(tool_call_id="call_1", tool_name="read", content="README"),
+      ),
+    )
+    .append(
+      Summary(
+        SessionSummary(
+          content="assistant inspected README",
+          from_sequence=2,
+          to_sequence=2,
+        ),
+      ),
+    )
+  let messages = session.chat_messages()
+  assert_eq(messages.length(), 3)
+  assert_true(messages[1].role is User)
+  assert_eq(messages[1].content, "inspect")
+  assert_true(messages[2].role is User)
+  assert_true(messages[2].content.contains("assistant inspected README"))
+}
+
+///|
+test "summary events compact covered model context" {
+  let session = @agent_session.Session(SessionId("s1"), system_prompt="system")
+    .append(User(UserMessage("old user")))
+    .append(Assistant(AssistantMessage("old assistant")))
+    .append(User(UserMessage("recent user")))
+    .append(
+      Summary(
+        SessionSummary(
+          content="old user and assistant discussed README",
+          from_sequence=1,
+          to_sequence=2,
+        ),
+      ),
+    )
+  assert_eq(session.events().length(), 4)
+  let messages = session.chat_messages()
+  assert_eq(messages.length(), 3)
+  assert_true(messages[1].role is User)
+  assert_eq(messages[1].content, "recent user")
+  assert_true(messages[2].role is User)
+  assert_true(messages[2].content.contains("[conversation summary]"))
+  assert_false(messages[2].content.contains("old user\n"))
+  assert_true(messages[2].content.contains("old user and assistant"))
+}
+
+///|
+test "later summary supersedes earlier summary in model context" {
+  let session = @agent_session.Session(SessionId("s1"), system_prompt="system")
+    .append(User(UserMessage("first")))
+    .append(
+      Summary(
+        SessionSummary(content="first summary", from_sequence=1, to_sequence=1),
+      ),
+    )
+    .append(
+      Summary(
+        SessionSummary(
+          content="superseding summary",
+          from_sequence=1,
+          to_sequence=2,
+        ),
+      ),
+    )
+  let messages = session.chat_messages()
+  assert_eq(messages.length(), 2)
+  assert_true(messages[1].content.contains("superseding summary"))
+  assert_false(messages[1].content.contains("first summary"))
+}
+
+///|
+test "compact validates and appends summary event" {
+  let session = @agent_session.Session(SessionId("s1"), system_prompt="system")
+    .append(User(UserMessage("first")))
+    .append(Assistant(AssistantMessage("second")))
+  let compacted = session.compact(
+    content="first two events",
+    from_sequence=1,
+    to_sequence=2,
+  )
+  assert_eq(compacted.events().length(), 3)
+  guard compacted.events()[2].item() is Summary(summary) else {
+    fail("expected summary")
+  }
+  assert_eq(summary.content(), "first two events")
+  assert_eq(summary.from_sequence(), 1)
+  assert_eq(summary.to_sequence(), 2)
+  let _ = session.compact(content="", from_sequence=1, to_sequence=2) catch {
+    error => {
+      assert_true("\{error}".contains("content must not be empty"))
+      return
+    }
+  }
+  fail("empty summary accepted")
+}

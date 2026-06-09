@@ -12,6 +12,7 @@ entry point so request encoding can be tested without network access.
 | `bobzhang/openseek/deepseek` | Pure DeepSeek chat data, JSON encoding, and response decoding. | `deepseek/README.mbt.md` |
 | `bobzhang/openseek/deepseek/client` | Native-only HTTP transport for DeepSeek chat completions. | `deepseek/client/README.mbt.md` |
 | `bobzhang/openseek/agent_runtime` | Native-only agent task-group and extensible runtime event queue. | `agent_runtime/README.mbt.md` |
+| `bobzhang/openseek/agent_session` | Typed durable conversation state and DeepSeek message projection. | `agent_session/README.mbt.md` |
 | `bobzhang/openseek/agent_tool` | Tool registry, executor, output, and control-action types. | `agent_tool/README.mbt.md` |
 | `bobzhang/openseek/agent` | Native-only OpenSeek agent loop and local tool dispatch. | `agent/README.mbt.md` |
 | `bobzhang/openseek/cmd/openseek` | Native-only command-line entry point. | `cmd/openseek/README.md` |
@@ -46,6 +47,11 @@ boundary. Tool executors return `ToolAction`: normal tools use
 
 The `agent_runtime` package owns loop-scoped task-group access and an extensible
 event queue used by stateful tools such as `moon_check`.
+
+The `agent_session` package owns typed durable conversation state, append-only
+session events, JSON round-tripping, and projection from a session into
+DeepSeek chat messages. It is separate from TUI transcript rendering so
+resumable sessions can be type-safe and process-independent.
 
 The `agent` subpackage contains the OpenSeek agent loop, native DeepSeek
 tool-call handling, and local tool dispatch. It depends on `deepseek/client`,

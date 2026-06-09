@@ -1,0 +1,100 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "bobzhang/openseek/agent_session"
+
+import {
+  "bobzhang/openseek/deepseek",
+  "moonbitlang/core/debug",
+  "moonbitlang/core/json",
+}
+
+// Values
+
+// Errors
+
+// Types and methods
+pub struct AssistantMessage {
+  // private fields
+} derive(ToJson, @debug.Debug, @json.FromJson)
+pub fn AssistantMessage::AssistantMessage(String, tool_calls? : Array[@deepseek.ToolCall], reasoning_content? : String) -> Self
+pub fn AssistantMessage::content(Self) -> String
+
+pub struct RuntimeNotice {
+  // private fields
+} derive(ToJson, @debug.Debug, @json.FromJson)
+pub fn RuntimeNotice::RuntimeNotice(String) -> Self
+pub fn RuntimeNotice::content(Self) -> String
+
+pub struct Session {
+  // private fields
+} derive(@debug.Debug)
+pub fn Session::Session(SessionId, system_prompt~ : String, events? : Array[SessionEvent]) -> Self
+pub fn Session::append(Self, SessionItem) -> Self
+pub fn Session::chat_messages(Self) -> Array[@deepseek.ChatMessage]
+pub fn Session::compact(Self, content~ : String, from_sequence~ : Int, to_sequence~ : Int) -> Self raise
+pub fn Session::events(Self) -> Array[SessionEvent]
+pub fn Session::id(Self) -> SessionId
+pub fn Session::last_sequence(Self) -> Int
+pub fn Session::system_prompt(Self) -> String
+pub impl ToJson for Session
+pub impl @json.FromJson for Session
+
+pub struct SessionEvent {
+  // private fields
+} derive(ToJson, @debug.Debug, @json.FromJson)
+pub fn SessionEvent::item(Self) -> SessionItem
+pub fn SessionEvent::sequence(Self) -> Int
+
+pub struct SessionId {
+  // private fields
+} derive(@debug.Debug)
+pub fn SessionId::SessionId(String) -> Self
+pub fn SessionId::value(Self) -> String
+pub impl ToJson for SessionId
+pub impl @json.FromJson for SessionId
+
+pub(all) enum SessionItem {
+  User(UserMessage)
+  Assistant(AssistantMessage)
+  Tool(ToolResult)
+  Runtime(RuntimeNotice)
+  Summary(SessionSummary)
+  Terminal(TurnTerminal)
+} derive(@debug.Debug)
+pub impl ToJson for SessionItem
+pub impl @json.FromJson for SessionItem
+
+pub struct SessionSummary {
+  // private fields
+} derive(ToJson, @debug.Debug, @json.FromJson)
+pub fn SessionSummary::SessionSummary(content~ : String, from_sequence~ : Int, to_sequence~ : Int) -> Self
+pub fn SessionSummary::content(Self) -> String
+pub fn SessionSummary::from_sequence(Self) -> Int
+pub fn SessionSummary::to_sequence(Self) -> Int
+
+pub struct ToolResult {
+  // private fields
+} derive(ToJson, @debug.Debug, @json.FromJson)
+pub fn ToolResult::ToolResult(tool_call_id~ : String, tool_name~ : String, content~ : String, is_error? : Bool) -> Self
+pub fn ToolResult::content(Self) -> String
+pub fn ToolResult::is_error(Self) -> Bool
+pub fn ToolResult::tool_name(Self) -> String
+
+pub(all) enum TurnTerminal {
+  Finished(String)
+  Aborted(String)
+  Interrupted(String)
+  Failed(String)
+} derive(@debug.Debug)
+pub impl ToJson for TurnTerminal
+pub impl @json.FromJson for TurnTerminal
+
+pub struct UserMessage {
+  // private fields
+} derive(ToJson, @debug.Debug, @json.FromJson)
+pub fn UserMessage::UserMessage(String) -> Self
+pub fn UserMessage::content(Self) -> String
+
+// Type aliases
+
+// Traits
+
