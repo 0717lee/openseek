@@ -8,10 +8,12 @@ messages, while transcript values are optimized for terminal rendering.
 The package exposes:
 
 - `SessionId` and immutable `Session`
-- append-only `SessionEvent` sequence numbers
+- append-only `SessionEvent` sequence numbers backed by an immutable vector
 - typed `SessionItem` variants for users, assistants, tool results, runtime
   notices, summaries, and turn terminal states
 - JSON round-tripping for durable storage
+- `Session::append_event` for callers that need the new session and appended
+  event without scanning the whole event log
 - `Session::chat_messages` for projecting a session into DeepSeek protocol
   messages
 - `Session::compact` for appending a validated summary that replaces covered

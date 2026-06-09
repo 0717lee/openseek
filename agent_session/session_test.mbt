@@ -16,6 +16,17 @@ test "session append assigns monotonic sequence numbers immutably" {
 }
 
 ///|
+test "session append_event returns the durable event" {
+  let session = @agent_session.Session(SessionId("s1"), system_prompt="system")
+  let (next, event) = session.append_event(User(UserMessage("hello")))
+  assert_eq(session.events().length(), 0)
+  assert_eq(next.events().length(), 1)
+  assert_eq(event.sequence(), 1)
+  assert_true(event.item() is User(_))
+  assert_eq(next.events()[0].sequence(), event.sequence())
+}
+
+///|
 test "session projects to DeepSeek chat messages" {
   let session = @agent_session.Session(SessionId("s1"), system_prompt="system")
     .append(User(UserMessage("inspect")))

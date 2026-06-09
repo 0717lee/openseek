@@ -154,7 +154,7 @@ pub impl ToJson for Session with fn to_json(session : Session) -> Json {
     "version": 1,
     "id": session.id(),
     "system_prompt": session.system_prompt(),
-    "events": ([ for event in session.events() => event ] : Json),
+    "events": session.events().to_json(),
   }
 }
 
@@ -176,7 +176,7 @@ pub impl FromJson for Session with fn from_json(
     Some(id) => @json.from_json(id, path=path.add_key("id"))
     None => json_decode_error(path.add_key("id"), "expected id")
   }
-  let events : Array[SessionEvent] = match fields.get("events") {
+  let events = match fields.get("events") {
     Some(Array(values)) => {
       let decoded : Array[SessionEvent] = []
       for index, value in values {
@@ -184,11 +184,11 @@ pub impl FromJson for Session with fn from_json(
           @json.from_json(value, path=path.add_key("events").add_index(index)),
         )
       }
-      decoded
+      @vector.from_array(decoded)
     }
     Some(_) =>
       json_decode_error(path.add_key("events"), "expected events array")
-    None => []
+    None => @vector.new()
   }
   Session(
     id,

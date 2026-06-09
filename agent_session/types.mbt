@@ -227,21 +227,28 @@ pub fn SessionEvent::item(self : SessionEvent) -> SessionItem {
 
 ///|
 /// Immutable model of an OpenSeek conversation. Mutating operations return a new
-/// `Session` with copied event storage so callers do not share mutable arrays
-/// across package boundaries.
+/// `Session` backed by persistent event storage, so appending does not copy the
+/// whole event log.
 pub struct Session {
   priv id : SessionId
   priv system_prompt : String
-  priv events : Array[SessionEvent]
+  priv events : @vector.Vector[SessionEvent]
+  priv last_sequence : Int
 } derive(Debug)
 
 ///|
 pub fn Session::Session(
   id : SessionId,
   system_prompt~ : String,
-  events? : Array[SessionEvent] = [],
+  events? : @vector.Vector[SessionEvent] = @vector.new(),
 ) -> Session {
-  { id, system_prompt, events: events.copy() }
+  let mut last_sequence = 0
+  for event in events {
+    if event.sequence > last_sequence {
+      last_sequence = event.sequence
+    }
+  }
+  { id, system_prompt, events, last_sequence }
 }
 
 ///|
@@ -255,19 +262,13 @@ pub fn Session::system_prompt(self : Session) -> String {
 }
 
 ///|
-pub fn Session::events(self : Session) -> Array[SessionEvent] {
-  self.events.copy()
+pub fn Session::events(self : Session) -> @vector.Vector[SessionEvent] {
+  self.events
 }
 
 ///|
 pub fn Session::last_sequence(self : Session) -> Int {
-  let mut last = 0
-  for event in self.events {
-    if event.sequence > last {
-      last = event.sequence
-    }
-  }
-  last
+  self.last_sequence
 }
 
 ///|
@@ -277,9 +278,28 @@ fn Session::next_sequence(self : Session) -> Int {
 
 ///|
 pub fn Session::append(self : Session, item : SessionItem) -> Session {
-  let events = self.events.copy()
-  events.push(SessionEvent(sequence=self.next_sequence(), item~))
-  Session(self.id, system_prompt=self.system_prompt, events~)
+  let (next, _) = self.append_event(item)
+  next
+}
+
+///|
+/// Append one item and return both the new session value and the event that was
+/// appended. This lets durable stores write the new event without converting the
+/// whole immutable vector back to an array.
+pub fn Session::append_event(
+  self : Session,
+  item : SessionItem,
+) -> (Session, SessionEvent) {
+  let event = SessionEvent(sequence=self.next_sequence(), item~)
+  (
+    {
+      id: self.id,
+      system_prompt: self.system_prompt,
+      events: self.events.push(event),
+      last_sequence: event.sequence,
+    },
+    event,
+  )
 }
 
 ///|
