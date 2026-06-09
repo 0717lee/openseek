@@ -1,13 +1,62 @@
 ///|
 async fn main {
+  run_cli() catch {
+    error => {
+      @stdio.stderr.write("error: \{failure_message("\{error}")}\n") catch {
+        _ => ()
+      }
+      @sys.exit(1)
+    }
+  }
+}
+
+///|
+async fn run_cli() -> Unit {
   configure_logging()
   let matches = cli_command().parse(env=@env.get_env_vars())
-  let api_key = value(matches, "api-key")
+  if handle_session_command(matches) {
+    return
+  }
+  let api_key = api_key(matches)
   let model = @deepseek.Model::parse(value(matches, "model"))
   let max_steps = max_steps(matches)
   let system_prompt_text = configured_system_prompt(matches, model)
-  let task = values(matches, "task").join(" ")
-  @agent.run(api_key, model, task, max_steps~, system_prompt_text~)
+  let task = task_text(matches)
+  match session_id(matches) {
+    None => @agent.run(api_key, model, task, max_steps~, system_prompt_text~)
+    Some(id) => {
+      let store = @store.SessionStore(session_root(matches))
+      let session = load_or_create_session(store, id, system_prompt_text)
+      ignore(
+        @agent.run_turn_with_append(
+          api_key,
+          model,
+          session,
+          task,
+          append_item=(session, item) => store.append(session, item),
+          max_steps~,
+        ),
+      )
+    }
+  }
+}
+
+///|
+fn failure_message(error_text : String) -> String {
+  let marker = " FAILED: "
+  let pieces : Array[String] = error_text
+    .split(marker)
+    .map(piece => piece.to_owned())
+    .collect()
+  if pieces.length() < 2 {
+    return error_text
+  }
+  let message = pieces[pieces.length() - 1]
+  if message.has_suffix(")") {
+    message[:message.length() - 1].to_owned()
+  } else {
+    message
+  }
 }
 
 ///|
@@ -39,7 +88,7 @@ fn cli_command() -> @argparse.Command {
         "api-key",
         long="api-key",
         env="DEEPSEEK",
-        required=true,
+        default_values=[""],
         about="DeepSeek API key.",
       ),
       OptionArg(
@@ -70,11 +119,55 @@ fn cli_command() -> @argparse.Command {
         default_values=[""],
         about="Append this file to the selected system prompt for prompt experiments.",
       ),
+      OptionArg(
+        "session",
+        long="session",
+        env="OPENSEEK_SESSION",
+        default_values=[""],
+        about="Create or resume this durable session id.",
+      ),
+      OptionArg(
+        "session-root",
+        long="session-root",
+        env="OPENSEEK_SESSION_ROOT",
+        default_values=[".openseek"],
+        about="Directory containing durable OpenSeek sessions.",
+      ),
+      OptionArg(
+        "session-compact-file",
+        long="session-compact-file",
+        default_values=[""],
+        about="Read summary text from this file, append it to --session, and exit.",
+      ),
+      OptionArg(
+        "session-compact-from",
+        long="session-compact-from",
+        default_values=[""],
+        about="First event sequence covered by --session-compact-file.",
+      ),
+      OptionArg(
+        "session-compact-to",
+        long="session-compact-to",
+        default_values=[""],
+        about="Last event sequence covered by --session-compact-file.",
+      ),
+    ],
+    flags=[
+      FlagArg(
+        "session-list",
+        long="session-list",
+        about="List durable session ids and exit.",
+      ),
+      FlagArg(
+        "session-show",
+        long="session-show",
+        about="Print the durable session JSON for --session and exit.",
+      ),
     ],
     positionals=[
       PositionArg(
         "task",
-        num_args=ValueRange(lower=1),
+        num_args=ValueRange(lower=0),
         allow_hyphen_values=true,
         about="Task description.",
       ),
@@ -92,16 +185,132 @@ fn value(matches : @argparse.Matches, name : String) -> String raise {
 }
 
 ///|
-fn values(matches : @argparse.Matches, name : String) -> Array[String] raise {
+fn values(matches : @argparse.Matches, name : String) -> Array[String] {
   match matches.values.get(name) {
     Some(values) => values
-    None => fail("missing parsed argument: \{name}")
+    None => []
   }
+}
+
+///|
+fn flag(matches : @argparse.Matches, name : String) -> Bool {
+  match matches.flags.get(name) {
+    Some(value) => value
+    None => false
+  }
+}
+
+///|
+fn api_key(matches : @argparse.Matches) -> String raise {
+  let key = value(matches, "api-key").trim().to_owned()
+  if key.is_empty() {
+    fail("--api-key or DEEPSEEK is required for agent runs")
+  }
+  key
 }
 
 ///|
 fn max_steps(matches : @argparse.Matches) -> Int raise {
   parse_positive_int(value(matches, "max-steps"), "--max-steps")
+}
+
+///|
+fn task_text(matches : @argparse.Matches) -> String raise {
+  let task = values(matches, "task").join(" ").trim().to_owned()
+  if task.is_empty() {
+    fail("task description is required for agent runs")
+  }
+  task
+}
+
+///|
+fn session_id(matches : @argparse.Matches) -> @agent_session.SessionId? raise {
+  let id = value(matches, "session").trim().to_owned()
+  if id.is_empty() {
+    None
+  } else {
+    Some(SessionId(id))
+  }
+}
+
+///|
+fn session_root(matches : @argparse.Matches) -> String raise {
+  value(matches, "session-root")
+}
+
+///|
+async fn handle_session_command(matches : @argparse.Matches) -> Bool {
+  let list_sessions = flag(matches, "session-list")
+  let show_session = flag(matches, "session-show")
+  let compact_file = value(matches, "session-compact-file").trim().to_owned()
+  let compact_session = !compact_file.is_empty()
+  let command_count = (if list_sessions { 1 } else { 0 }) +
+    (if show_session { 1 } else { 0 }) +
+    (if compact_session { 1 } else { 0 })
+  if command_count == 0 {
+    return false
+  }
+  if command_count > 1 {
+    fail(
+      "choose only one of --session-list, --session-show, or --session-compact-file",
+    )
+  }
+  let store = @store.SessionStore(session_root(matches))
+  if list_sessions {
+    for id in store.list() {
+      println(id.value())
+    }
+    return true
+  }
+  let id = required_session_id(matches)
+  if show_session {
+    println(store.load(id).to_json().stringify())
+    return true
+  }
+  let from_sequence = required_positive_int(
+    value(matches, "session-compact-from"),
+    "--session-compact-from",
+  )
+  let to_sequence = required_positive_int(
+    value(matches, "session-compact-to"),
+    "--session-compact-to",
+  )
+  let summary = @fs.read_file(compact_file).text()
+  let compacted = store.compact(
+    store.load(id),
+    content=summary,
+    from_sequence~,
+    to_sequence~,
+  )
+  println(
+    "compacted session \{id.value()} events \{from_sequence}..\{to_sequence}; last_sequence=\{compacted.last_sequence()}",
+  )
+  true
+}
+
+///|
+fn required_session_id(
+  matches : @argparse.Matches,
+) -> @agent_session.SessionId raise {
+  match session_id(matches) {
+    Some(id) => id
+    None => fail("--session is required for this session management command")
+  }
+}
+
+///|
+async fn load_or_create_session(
+  store : @store.SessionStore,
+  id : @agent_session.SessionId,
+  system_prompt_text : String,
+) -> @agent_session.Session {
+  if store.exists(id) {
+    store.load(id)
+  } else {
+    let session = @agent_session.Session(id, system_prompt=system_prompt_text)
+    store.create(session)
+    session
+  }
 }
 
 ///|
@@ -140,6 +349,15 @@ fn parse_positive_int(input : String, label : String) -> Int raise {
 }
 
 ///|
+fn required_positive_int(input : String, label : String) -> Int raise {
+  let trimmed = input.trim().to_owned()
+  if trimmed.is_empty() {
+    fail("\{label} is required")
+  }
+  parse_positive_int(trimmed, label)
+}
+
+///|
 test "cli parses env backed options and task" {
   let parsed = cli_command().parse(argv=["write", "MoonBit"], env={
     "DEEPSEEK": "test-key",
@@ -147,13 +365,18 @@ test "cli parses env backed options and task" {
     "OPENSEEK_MAX_STEPS": "120",
     "OPENSEEK_SYSTEM_PROMPT_FILE": "/tmp/prompt-a.md",
     "OPENSEEK_SYSTEM_PROMPT_ADDENDUM_FILE": "/tmp/prompt-b.md",
+    "OPENSEEK_SESSION": "demo",
+    "OPENSEEK_SESSION_ROOT": "/tmp/openseek-sessions",
   })
-  assert_eq(value(parsed, "api-key"), "test-key")
+  assert_eq(api_key(parsed), "test-key")
   assert_eq(value(parsed, "model"), "deepseek-v4-pro")
   assert_eq(max_steps(parsed), 120)
   assert_eq(value(parsed, "system-prompt-file"), "/tmp/prompt-a.md")
   assert_eq(value(parsed, "system-prompt-addendum-file"), "/tmp/prompt-b.md")
-  assert_eq(values(parsed, "task").join(" "), "write MoonBit")
+  guard session_id(parsed) is Some(id) else { fail("expected session id") }
+  assert_eq(id.value(), "demo")
+  assert_eq(session_root(parsed), "/tmp/openseek-sessions")
+  assert_eq(task_text(parsed), "write MoonBit")
 }
 
 ///|
@@ -161,8 +384,43 @@ test "cli defaults model and max steps" {
   let parsed = cli_command().parse(argv=["write", "MoonBit"], env={
     "DEEPSEEK": "test-key",
   })
+  assert_eq(api_key(parsed), "test-key")
   assert_eq(value(parsed, "model"), "deepseek-v4-pro")
   assert_eq(max_steps(parsed), 1000)
+  assert_true(session_id(parsed) is None)
+  assert_eq(session_root(parsed), ".openseek")
+}
+
+///|
+test "cli allows session management without api key or task" {
+  let parsed = cli_command().parse(argv=["--session-list"], env={})
+  assert_true(flag(parsed, "session-list"))
+  assert_eq(value(parsed, "api-key"), "")
+  assert_eq(values(parsed, "task").length(), 0)
+}
+
+///|
+test "agent runs require api key" {
+  let parsed = cli_command().parse(argv=["write", "MoonBit"], env={})
+  let _ = api_key(parsed) catch {
+    error => {
+      assert_true("\{error}".contains("--api-key or DEEPSEEK is required"))
+      return
+    }
+  }
+  fail("missing api key accepted")
+}
+
+///|
+test "agent runs require task text" {
+  let parsed = cli_command().parse(argv=[], env={ "DEEPSEEK": "test-key" })
+  let _ = task_text(parsed) catch {
+    error => {
+      assert_true("\{error}".contains("task description is required"))
+      return
+    }
+  }
+  fail("missing task accepted")
 }
 
 ///|
@@ -206,6 +464,66 @@ async test "configured system prompt defaults by model" {
   assert_false(
     configured_system_prompt(parsed, V4Pro).contains("DeepSeek V4 Flash"),
   )
+}
+
+///|
+async test "load_or_create_session creates then reloads existing state" {
+  let root = @fs.tmpdir(prefix="openseek-cli-session-")
+  let store = @store.SessionStore(root)
+  let id : @agent_session.SessionId = SessionId("cli-test")
+  let created = load_or_create_session(store, id, "system")
+  assert_eq(created.system_prompt(), "system")
+  assert_eq(created.events().length(), 0)
+  let with_event = store.append(created, User(UserMessage("hello")))
+  assert_eq(with_event.events().length(), 1)
+  let loaded = load_or_create_session(store, id, "different system")
+  assert_eq(loaded.system_prompt(), "system")
+  assert_eq(loaded.events().length(), 1)
+  @fs.rmdir(root, recursive=true)
+}
+
+///|
+async test "session list command does not require deepseek setup" {
+  let root = @fs.tmpdir(prefix="openseek-cli-session-list-")
+  let store = @store.SessionStore(root)
+  store.create(Session(SessionId("b"), system_prompt="system"))
+  store.create(Session(SessionId("a"), system_prompt="system"))
+  let parsed = cli_command().parse(
+    argv=["--session-root", root, "--session-list"],
+    env={},
+  )
+  assert_true(handle_session_command(parsed))
+  @fs.rmdir(root, recursive=true)
+}
+
+///|
+async test "session compact command appends summary without api key" {
+  let root = @fs.tmpdir(prefix="openseek-cli-session-compact-")
+  let store = @store.SessionStore(root)
+  let session = @agent_session.Session(
+      SessionId("cli-test"),
+      system_prompt="system",
+    )
+    .append(User(UserMessage("hello")))
+    .append(Assistant(AssistantMessage("answer")))
+  store.create(session)
+  let summary_path = root + "/summary.txt"
+  @fs.write_file(summary_path, "summarized turn", create_mode=CreateOrTruncate)
+  let parsed = cli_command().parse(
+    argv=[
+      "--session-root", root, "--session", "cli-test", "--session-compact-file",
+      summary_path, "--session-compact-from", "1", "--session-compact-to", "2",
+    ],
+    env={},
+  )
+  assert_true(handle_session_command(parsed))
+  let loaded = store.load(SessionId("cli-test"))
+  assert_eq(loaded.events().length(), 3)
+  guard loaded.events()[2].item() is Summary(summary) else {
+    fail("expected summary")
+  }
+  assert_eq(summary.content(), "summarized turn")
+  @fs.rmdir(root, recursive=true)
 }
 
 ///|
