@@ -32,6 +32,19 @@ fn cli_command() -> @argparse.Command {
         default_values=["openseek"],
         about="Agent engine binary to spawn; reads its JSONL event stream from stdout.",
       ),
+      OptionArg(
+        "session",
+        long="session",
+        env="OPENSEEK_SESSION",
+        about="Create or resume this durable session id.",
+      ),
+      OptionArg(
+        "session-root",
+        long="session-root",
+        env="OPENSEEK_SESSION_ROOT",
+        default_values=[".openseek"],
+        about="Directory containing durable OpenSeek sessions.",
+      ),
     ],
     positionals=[
       PositionArg(
@@ -78,11 +91,21 @@ fn parse_config(matches : @argparse.Matches) -> AppConfig raise {
     Some(cwd) => cwd
     None => "."
   }
+  let session = match values(matches, "session") {
+    [session, ..] => session.trim().to_owned()
+    [] => ""
+  }
   {
     api_key: value(matches, "api-key"),
     model: @deepseek.Model::parse(value(matches, "model")),
     cwd,
     max_steps: parse_positive_int(value(matches, "max-steps"), "--max-steps"),
+    session_id: if session.is_empty() {
+      None
+    } else {
+      Some(SessionId(session))
+    },
+    session_root: value(matches, "session-root"),
     engine: value(matches, "engine"),
   }
 }
@@ -108,6 +131,7 @@ async fn run_tui(config : AppConfig, initial : String?) -> Unit {
 async fn run_app(config : AppConfig, initial : String?, ui : @ui.Ui) -> Unit {
   let state = State::new(config)
   let messages = @async.Queue(kind=Unbounded)
+  append_session_history(state.config, ui)
   ui.append_item(Response("OpenSeek TUI ready"))
   refresh_ui(ui, state)
   @async.with_task_group(group => {
@@ -172,6 +196,8 @@ test "cli accepts no initial task" {
   assert_eq(config.api_key, "test-key")
   assert_eq(config.max_steps, 1000)
   assert_eq(config.engine, "openseek")
+  assert_true(config.session_id is None)
+  assert_eq(config.session_root, ".openseek")
 }
 
 ///|
@@ -182,6 +208,18 @@ test "cli accepts initial task and max steps" {
   )
   assert_true(initial_task(parsed) == Some("inspect project"))
   assert_eq(parse_config(parsed).max_steps, 5)
+}
+
+///|
+test "cli accepts session configuration" {
+  let parsed = cli_command().parse(
+    argv=["--session", "demo", "--session-root", "/tmp/openseek-sessions"],
+    env={ "DEEPSEEK": "test-key" },
+  )
+  let config = parse_config(parsed)
+  guard config.session_id is Some(id) else { fail("expected session id") }
+  assert_eq(id.value(), "demo")
+  assert_eq(config.session_root, "/tmp/openseek-sessions")
 }
 
 ///|

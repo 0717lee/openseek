@@ -97,6 +97,25 @@ fn is_terminal_event(event : @event.AgentEvent) -> Bool {
 }
 
 ///|
+fn engine_args(task : String) -> Array[String] {
+  ["--", task]
+}
+
+///|
+fn engine_extra_env(config : AppConfig) -> Map[String, String] {
+  let env = {
+    "DEEPSEEK": config.api_key,
+    "DEEPSEEK_MODEL": config.model.to_string(),
+    "OPENSEEK_MAX_STEPS": config.max_steps.to_string(),
+  }
+  if config.session_id is Some(session_id) {
+    env["OPENSEEK_SESSION"] = session_id.value()
+    env["OPENSEEK_SESSION_ROOT"] = config.session_root
+  }
+  env
+}
+
+///|
 /// Spawn the agent engine for one input and stream its JSONL stdout into the
 /// message loop.
 ///
@@ -123,14 +142,12 @@ async fn run_agent_task(
       // can start with `-`/`--` (e.g. the literal text `--help`). Forward it
       // after a `--` delimiter so the engine's argparse treats it as the task
       // positional rather than parsing it as one of its own options (which would
-      // exit/print help and never emit a terminal JSONL event).
-      ["--", task],
+      // exit/print help and never emit a terminal JSONL event). Session settings
+      // go through environment variables so custom replay engines do not need to
+      // accept OpenSeek-specific flags.
+      engine_args(task),
       inherit_env=true,
-      extra_env={
-        "DEEPSEEK": config.api_key,
-        "DEEPSEEK_MODEL": config.model.to_string(),
-        "OPENSEEK_MAX_STEPS": config.max_steps.to_string(),
-      },
+      extra_env=engine_extra_env(config),
       stdout=child_stdout,
       stderr=child_stderr,
     )
