@@ -7,10 +7,6 @@ About this guide: this file (`prompt/flash_prompt.mbt.md`) is itself a MoonBit b
 
 ```
 import {
-  "bobzhang/openseek/deepseek",
-}
-
-import {
   "moonbitlang/core/encoding/utf8",
   "moonbitlang/core/string",
   "moonbitlang/async",

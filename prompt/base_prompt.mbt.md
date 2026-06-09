@@ -5,10 +5,6 @@ About this guide: this file (`prompt/base_prompt.mbt.md`) is itself a MoonBit bl
 
 ```
 import {
-  "bobzhang/openseek/deepseek",
-}
-
-import {
   "moonbitlang/core/encoding/utf8",
   "moonbitlang/core/string",
   "moonbitlang/async",

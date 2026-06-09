@@ -11,10 +11,6 @@ fn flash_prompt() -> String {
     #|
     #|```
     #|import {
-    #|  "bobzhang/openseek/deepseek",
-    #|}
-    #|
-    #|import {
     #|  "moonbitlang/core/encoding/utf8",
     #|  "moonbitlang/core/string",
     #|  "moonbitlang/async",
