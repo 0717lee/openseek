@@ -710,7 +710,7 @@ fn base_prompt() -> String {
     #|} for "test"
     #|```
     #|
-    #|```mbt nocheck
+    #|```mbt check
     #|///|
     #|async test "sleep completes" {
     #|  @async.sleep(1)

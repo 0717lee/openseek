@@ -147,7 +147,7 @@ fn flash_prompt() -> String {
     #|- Empty no-op expression is `()`. Do not write `{ }`; that is an empty map.
     #|- Match arms are separated by newlines or semicolons, not `|`:
     #|
-    #|```mbt nocheck
+    #|```mbt check
     #|///|
     #|test {
     #|  let n : Int = @string.from_str("123")
@@ -261,7 +261,7 @@ fn flash_prompt() -> String {
     #|- Multi-line raw strings use `#|`. Multi-line interpolated strings use `$|` and
     #|  interpolation as `\{...}`:
     #|
-    #|```mbt nocheck
+    #|```mbt check
     #|///|
     #|fn message(name : String, line : Int) -> String {
     #|  (

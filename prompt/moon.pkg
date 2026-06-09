@@ -4,6 +4,8 @@ import {
 
 import {
   "moonbitlang/core/encoding/utf8",
+  "moonbitlang/core/string",
+  "moonbitlang/async",
 } for "test"
 
 dev_build(

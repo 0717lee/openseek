@@ -706,7 +706,7 @@ import {
 } for "test"
 ```
 
-```mbt nocheck
+```mbt check
 ///|
 async test "sleep completes" {
   @async.sleep(1)
