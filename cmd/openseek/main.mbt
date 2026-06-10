@@ -62,21 +62,29 @@ fn failure_message(error_text : String) -> String {
 }
 
 ///|
-/// Mirror every JSONL log event to `OPENSEEK_LOG_FILE` in addition to stdout
-/// when that variable is set.
+/// Write every JSONL log event to stdout with a per-entry flush. When
+/// `OPENSEEK_LOG_FILE` is set, mirror each event there as well.
 ///
-/// The TUI parses the JSONL the engine writes to stdout, so stdout is left
-/// exactly as it was (the default `Stdout` handler keeps its `Jsonl` format);
-/// this only adds a second handler that appends the same JSONL to the file. The
-/// file handler flushes per entry, so `tail -f $OPENSEEK_LOG_FILE` shows events
-/// live — useful for inspecting a stuck or headless session. Best-effort: if the
-/// file cannot be opened, logging stays stdout-only rather than failing the run.
+/// The TUI parses the JSONL the engine writes to stdout through a pipe. Plain
+/// `println` can be block-buffered in that setup, which makes streaming deltas
+/// arrive all at once. `FlushedStdout` preserves the JSONL wire format but calls
+/// `fflush(stdout)` after each line so assistant deltas are visible promptly.
+/// The file handler already flushes per entry, so `tail -f $OPENSEEK_LOG_FILE`
+/// also shows events live. Best-effort: if the file cannot be opened, logging
+/// stays flushed-stdout-only rather than failing the run.
 fn configure_logging() -> Unit {
+  let stdout = FlushedStdout()
   guard @env.get_env_var("OPENSEEK_LOG_FILE") is Some(path) && path != "" else {
+    @xlog.global().set_handler(stdout)
     return
   }
-  let file = @xlog.File::File(path) catch { _ => return }
-  let handlers : Array[&@xlog.Handler] = [@xlog.Stdout(), file]
+  let file = @xlog.File::File(path) catch {
+    _ => {
+      @xlog.global().set_handler(stdout)
+      return
+    }
+  }
+  let handlers : Array[&@xlog.Handler] = [stdout, file]
   @xlog.global().set_handler(@xlog.Multi(handlers))
 }
 
