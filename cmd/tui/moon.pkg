@@ -10,19 +10,17 @@ import {
   "bobzhang/openseek/tui/style",
   "moonbit-community/displaytext",
   "moonbitlang/async",
+  "moonbitlang/async/fs",
   "moonbitlang/async/os_error",
   "moonbitlang/async/process",
   "moonbitlang/core/argparse",
   "moonbitlang/core/encoding/utf8",
   "moonbitlang/core/env",
   "moonbitlang/core/string",
+  "moonbitlang/x/path",
   "moonbitlang/x/sys",
   "moonbitlang/x/time",
 }
-
-import {
-  "moonbitlang/async/fs",
-} for "wbtest"
 
 warnings = "+missing_doc+test_unqualified_package+unnecessary_annotation+unnecessary_view_op+ambiguous_range_direction+unqualified_local_using"
 

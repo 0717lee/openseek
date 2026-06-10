@@ -411,6 +411,21 @@ fn required_session_id(
 }
 
 ///|
+/// A fresh durable session, recording the engine's working directory so a
+/// later resume can re-root the conversation where it started.
+async fn new_session(
+  id : @agent_session.SessionId,
+  matches : @argparse.Matches,
+  model : @deepseek.Model,
+) -> @agent_session.Session {
+  Session(
+    id,
+    system_prompt=configured_system_prompt(matches, model),
+    cwd?=@env.current_dir(),
+  )
+}
+
+///|
 async fn load_or_new_session(
   store : @store.SessionStore,
   id : @agent_session.SessionId,
@@ -420,11 +435,11 @@ async fn load_or_new_session(
   if store.exists(id) {
     store.load(id) catch {
       @os_error.OSError(_) as error if error.is_ENOENT() =>
-        Session(id, system_prompt=configured_system_prompt(matches, model))
+        new_session(id, matches, model)
       error => raise error
     }
   } else {
-    Session(id, system_prompt=configured_system_prompt(matches, model))
+    new_session(id, matches, model)
   }
 }
 
@@ -633,6 +648,8 @@ async test "load_or_new_session defers first durable write until append" {
   let created = load_or_new_session(store, id, parsed, V4Pro)
   assert_eq(created.system_prompt(), "system")
   assert_eq(created.events().length(), 0)
+  // A fresh session records the engine's working directory for later resumes.
+  assert_true(created.cwd() == @env.current_dir())
   assert_false(store.exists(id))
   let with_event = store.append(created, User(UserMessage("hello")))
   assert_eq(with_event.events().length(), 1)
@@ -640,6 +657,7 @@ async test "load_or_new_session defers first durable write until append" {
   let loaded = load_or_new_session(store, id, parsed, V4Pro)
   assert_eq(loaded.system_prompt(), "system")
   assert_eq(loaded.events().length(), 1)
+  assert_true(loaded.cwd() == @env.current_dir())
   @fs.rmdir(root, recursive=true)
 }
 

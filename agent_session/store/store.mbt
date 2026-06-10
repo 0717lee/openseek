@@ -17,6 +17,7 @@ let lock_file_name : String = "session.lock"
 priv struct SessionHeader {
   id : @agent_session.SessionId
   system_prompt : String
+  cwd : String?
   last_sequence : Int
   event_log_length : Int?
   event_log_hash : Int?
@@ -107,15 +108,21 @@ fn session_header_json(
   events_text : String,
   allow_event_log_ahead : Bool,
 ) -> Json {
-  {
-    "version": session_header_version,
-    "id": session.id(),
-    "system_prompt": session.system_prompt(),
-    "last_sequence": session.last_sequence(),
-    "event_log_length": events_text.length(),
-    "event_log_hash": event_log_hash(events_text),
-    "allow_event_log_ahead": allow_event_log_ahead,
+  let fields : Map[String, Json] = {
+    "version": session_header_version.to_json(),
+    "id": session.id().to_json(),
+    "system_prompt": Json::string(session.system_prompt()),
+    "last_sequence": session.last_sequence().to_json(),
+    "event_log_length": events_text.length().to_json(),
+    "event_log_hash": event_log_hash(events_text).to_json(),
+    "allow_event_log_ahead": allow_event_log_ahead.to_json(),
   }
+  // Absent (not `null`) when unrecorded, so legacy headers keep their shape
+  // across rewrites.
+  if session.cwd() is Some(cwd) {
+    fields["cwd"] = Json::string(cwd)
+  }
+  Json::object(fields)
 }
 
 ///|
@@ -166,6 +173,19 @@ fn header_optional_int_field(
 }
 
 ///|
+fn header_optional_string_field(
+  fields : Map[String, Json],
+  path : @json.JsonPath,
+  key : String,
+) -> String? raise @json.JsonDecodeError {
+  match fields.get(key) {
+    Some(String(value)) => Some(value)
+    None | Some(Null) => None
+    Some(_) => json_decode_error(path.add_key(key), "expected string")
+  }
+}
+
+///|
 fn header_optional_bool_field(
   fields : Map[String, Json],
   path : @json.JsonPath,
@@ -203,6 +223,7 @@ fn decode_session_header(
   {
     id,
     system_prompt: header_string_field(fields, path, "system_prompt"),
+    cwd: header_optional_string_field(fields, path, "cwd"),
     last_sequence: header_int_field(fields, path, "last_sequence"),
     event_log_length: header_optional_int_field(
       fields, path, "event_log_length",
@@ -336,7 +357,12 @@ fn session_from_replayed_events(
       "session event log tail mismatch: header last sequence \{header.last_sequence}, replayed last sequence \{replayed_last_sequence}",
     )
   }
-  Session(header.id, system_prompt=header.system_prompt, events~)
+  Session(
+    header.id,
+    system_prompt=header.system_prompt,
+    cwd?=header.cwd,
+    events~,
+  )
 }
 
 ///|
@@ -686,6 +712,22 @@ pub async fn SessionStore::create(
     write_header(self, session, false)
     write_event_log(self, session)
     write_header(self, session, true)
+  })
+}
+
+///|
+/// The working directory recorded in the session's header, or `None` for a
+/// session persisted before directories were recorded. Reads only the header:
+/// resolving a resume directory must not replay a long event log. Raises when
+/// the session does not exist or its header cannot be read.
+pub async fn SessionStore::cwd(
+  self : SessionStore,
+  id : @agent_session.SessionId,
+) -> String? {
+  with_existing_session_lock(self, id, Shared, () => {
+    let header = read_session_header(self, id)
+    validate_loaded_header(header, id)
+    header.cwd
   })
 }
 

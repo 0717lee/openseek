@@ -273,17 +273,22 @@ pub fn SessionEvent::item(self : SessionEvent) -> SessionItem {
 pub struct Session {
   priv id : SessionId
   priv system_prompt : String
+  priv cwd : String?
   priv events : @vector.Vector[SessionEvent]
   priv last_sequence : Int
 } derive(Debug)
 
 ///|
 /// Build a session from its identity, system prompt, and (when loading from
-/// storage) its existing event log. `last_sequence` is recovered from the
-/// highest sequence present, so appending continues where the log left off.
+/// storage) its existing event log. `cwd` records the working directory the
+/// conversation runs in, fixed at creation; omit it only when loading a
+/// session persisted before directories were recorded. `last_sequence` is
+/// recovered from the highest sequence present, so appending continues where
+/// the log left off.
 pub fn Session::Session(
   id : SessionId,
   system_prompt~ : String,
+  cwd? : String,
   events? : @vector.Vector[SessionEvent] = @vector.new(),
 ) -> Session {
   let mut last_sequence = 0
@@ -292,7 +297,7 @@ pub fn Session::Session(
       last_sequence = event.sequence
     }
   }
-  { id, system_prompt, events, last_sequence }
+  { id, system_prompt, cwd, events, last_sequence }
 }
 
 ///|
@@ -305,6 +310,13 @@ pub fn Session::id(self : Session) -> SessionId {
 /// The system prompt this conversation runs under, fixed at creation.
 pub fn Session::system_prompt(self : Session) -> String {
   self.system_prompt
+}
+
+///|
+/// The working directory the conversation runs in, fixed at creation, or
+/// `None` for a session persisted before directories were recorded.
+pub fn Session::cwd(self : Session) -> String? {
+  self.cwd
 }
 
 ///|
@@ -346,6 +358,7 @@ pub fn Session::append_event(
     {
       id: self.id,
       system_prompt: self.system_prompt,
+      cwd: self.cwd,
       events: self.events.push(event),
       last_sequence: event.sequence,
     },

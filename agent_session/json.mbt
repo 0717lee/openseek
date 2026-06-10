@@ -44,6 +44,19 @@ fn int_field(
 }
 
 ///|
+fn optional_string_field(
+  fields : Map[String, Json],
+  path : @json.JsonPath,
+  key : String,
+) -> String? raise @json.JsonDecodeError {
+  match fields.get(key) {
+    Some(String(value)) => Some(value)
+    None | Some(Null) => None
+    Some(_) => json_decode_error(path.add_key(key), "expected string")
+  }
+}
+
+///|
 pub impl ToJson for SessionId with fn to_json(id : SessionId) -> Json {
   Json::string(id.value())
 }
@@ -150,12 +163,18 @@ pub impl FromJson for SessionItem with fn from_json(
 
 ///|
 pub impl ToJson for Session with fn to_json(session : Session) -> Json {
-  {
-    "version": 1,
-    "id": session.id(),
-    "system_prompt": session.system_prompt(),
+  let fields : Map[String, Json] = {
+    "version": Json::number(1),
+    "id": session.id().to_json(),
+    "system_prompt": Json::string(session.system_prompt()),
     "events": session.events().to_json(),
   }
+  // Absent (not `null`) when unrecorded, so legacy sessions round-trip to the
+  // same shape they were written in.
+  if session.cwd() is Some(cwd) {
+    fields["cwd"] = Json::string(cwd)
+  }
+  Json::object(fields)
 }
 
 ///|
@@ -193,6 +212,7 @@ pub impl FromJson for Session with fn from_json(
   Session(
     id,
     system_prompt=string_field(fields, path, "system_prompt"),
+    cwd?=optional_string_field(fields, path, "cwd"),
     events~,
   )
 }

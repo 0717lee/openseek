@@ -106,9 +106,51 @@ fn continue_requested(matches : @argparse.Matches) -> Bool raise {
 /// empty store the generated fresh session stands: there is nothing to
 /// continue, and starting a new conversation beats refusing to launch.
 async fn with_latest_session(config : AppConfig) -> AppConfig {
-  match @store.SessionStore(config.session_root).latest() {
-    Some(id) => { ..config, session_id: id }
-    None => config
+  if @store.SessionStore(config.session_root).latest() is Some(id) {
+    { ..config, session_id: id }
+  } else {
+    config
+  }
+}
+
+///|
+/// The user's home directory: `HOME`, or `USERPROFILE` where `HOME` is unset
+/// (Windows).
+fn home_dir() -> String? {
+  if @env.get_env_var("HOME") is Some(home) && !home.trim().is_empty() {
+    Some(home)
+  } else {
+    @env.get_env_var("USERPROFILE")
+  }
+}
+
+///|
+/// Re-root a resumed conversation in its recorded working directory. A
+/// session persisted before directories were recorded — or whose recorded
+/// directory has since disappeared — falls back to the home directory, so
+/// resuming is deterministic instead of inheriting whatever directory the
+/// relaunch happened to come from. A fresh session keeps the launch
+/// directory (the engine records it on the session's first append), and an
+/// unreadable session or a missing home also keep it rather than failing
+/// the launch.
+async fn with_session_cwd(config : AppConfig) -> AppConfig {
+  // A missing or unreadable session keeps the launch directory rather than
+  // failing the launch: `append_session_history` inspects the same session
+  // right after the UI starts and reports its errors in the transcript, so
+  // swallowing here hides nothing.
+  let stored = @store.SessionStore(config.session_root).cwd(config.session_id) catch {
+    error if @async.is_being_cancelled() => raise error
+    _ => return config
+  }
+  let resolved = if stored is Some(cwd) && @fs.exists(cwd) {
+    Some(cwd)
+  } else {
+    home_dir()
+  }
+  if resolved is Some(cwd) {
+    { ..config, cwd, }
+  } else {
+    config
   }
 }
 
@@ -160,6 +202,34 @@ fn session_root(matches : @argparse.Matches) -> String raise {
     fail("--session-root or OPENSEEK_SESSION_ROOT must not be empty")
   }
   root
+}
+
+///|
+/// Whether `path` names a fixed location on any supported platform: a POSIX
+/// root, a UNC `\\server` path, a Windows rooted `\dir`, or a drive-qualified
+/// `C:/` / `C:\` path. Deliberately broader than `@path.Path::is_absolute`,
+/// whose win32 semantics call a drive-relative `/tmp` not absolute — a root
+/// the user wrote as rooted must pass through verbatim on every platform,
+/// never be re-anchored under the launch directory.
+fn is_rooted_path(path : String) -> Bool {
+  path.has_prefix("/") ||
+  path.has_prefix("\\") ||
+  path is [_, ':', '/' | '\\', ..]
+}
+
+///|
+/// Pin a relative session root to the launch directory. The engine is
+/// spawned in the conversation's directory, which `with_session_cwd` may
+/// re-root away from the launch directory; a relative `--session-root`
+/// passed along as-is would then resolve inside that other directory —
+/// a different store entirely — and the next turn would silently start a
+/// same-named session there instead of continuing this one.
+fn absolute_session_root(root : String, cwd : String) -> String {
+  if is_rooted_path(root) {
+    root
+  } else {
+    @path.Path(cwd).join(Path(root)).0
+  }
 }
 
 ///|
@@ -234,7 +304,7 @@ fn parse_config(matches : @argparse.Matches) -> AppConfig raise {
       Some(id) => id
       None => generated_session_id(@env.now().reinterpret_as_int64())
     },
-    session_root: session_root_value,
+    session_root: absolute_session_root(session_root_value, cwd),
     engine: value(matches, "engine"),
   }
 }
@@ -311,6 +381,7 @@ async fn main {
   if continue_requested(matches) {
     config = with_latest_session(config)
   }
+  config = with_session_cwd(config)
   // Fail before the terminal UI takes over the screen if the engine is unusable,
   // rather than dropping the user into a UI that dies on the first task.
   if !engine_launchable(config.engine) {
@@ -336,7 +407,25 @@ test "cli accepts no initial task" {
   // No --session still converses in a session: a generated per-launch id, so
   // consecutive prompts share context instead of running amnesiac one-shots.
   assert_true(config.session_id.value().has_prefix("tui-"))
-  assert_eq(config.session_root, ".openseek")
+  // The default relative root is pinned to the launch directory so the
+  // engine sees the same store wherever it is spawned.
+  assert_true(config.session_root.has_suffix(".openseek"))
+  assert_eq(config.session_root, absolute_session_root(".openseek", config.cwd))
+}
+
+///|
+test "relative session roots pin to the launch directory" {
+  let pinned = absolute_session_root(".openseek", "/launch")
+  assert_true(pinned.has_prefix("/launch"))
+  assert_true(pinned.has_suffix(".openseek"))
+  // Rooted roots pass through verbatim on every platform.
+  assert_eq(absolute_session_root("/abs/store", "/launch"), "/abs/store")
+  assert_eq(absolute_session_root("C:\\store", "/launch"), "C:\\store")
+  assert_eq(absolute_session_root("C:/store", "/launch"), "C:/store")
+  assert_eq(
+    absolute_session_root("\\\\server\\share", "/launch"),
+    "\\\\server\\share",
+  )
 }
 
 ///|

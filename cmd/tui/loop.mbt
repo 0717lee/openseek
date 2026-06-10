@@ -161,6 +161,9 @@ async fn run_agent_task(
       engine_args(task),
       inherit_env=false,
       extra_env=child_env,
+      // The conversation's directory, not the TUI's: a resumed session runs
+      // where it was created (see `with_session_cwd`).
+      cwd=config.cwd,
       stdout=child_stdout,
       stderr=child_stderr,
     )
@@ -234,11 +237,12 @@ async fn run_agent_task(
 async fn run_shell_command(
   run_id : Int,
   command : String,
+  cwd~ : String,
   messages : @async.Queue[Msg],
 ) -> Unit {
   let item : @ui.TranscriptItem = command_item(
     command,
-    @shell.collect_shell_output(command),
+    @shell.collect_shell_output(command, cwd~),
   ) catch {
     error if @async.is_being_cancelled() || @async.is_cancellation_error(error) => {
       messages.put(AgentCancelled(run_id~))
@@ -503,7 +507,7 @@ async fn[G] run_message_loop(
         RunCommand(run_id~, command) =>
           running_task = Some(
             group.spawn(no_wait=true) <| () => {
-              run_shell_command(run_id, command, messages)
+              run_shell_command(run_id, command, cwd=state.config.cwd, messages)
             },
           )
         CancelAgent => if running_task is Some(task) { task.cancel() }

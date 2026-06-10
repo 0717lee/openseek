@@ -49,6 +49,39 @@ async test "store creates and loads a session from header and event log" {
 }
 
 ///|
+async test "store persists the session working directory in the header" {
+  let store = new_store()
+  let session = @agent_session.Session(
+    SessionId("cwd"),
+    system_prompt="system",
+    cwd="/work/project",
+  ).append(User(UserMessage("hello")))
+  store.create(session)
+  assert_true(store.load(SessionId("cwd")).cwd() is Some("/work/project"))
+  // Appending rewrites the header without losing the recorded directory.
+  let appended = store.append(
+    store.load(SessionId("cwd")),
+    Terminal(Finished("done")),
+  )
+  assert_true(appended.cwd() is Some("/work/project"))
+  assert_true(store.load(SessionId("cwd")).cwd() is Some("/work/project"))
+  // The header-only read agrees with the full load without replaying events.
+  assert_true(store.cwd(SessionId("cwd")) is Some("/work/project"))
+  // A header written before directories were recorded loads as `None`.
+  store.create(Session(SessionId("legacy"), system_prompt="system"))
+  assert_true(store.load(SessionId("legacy")).cwd() is None)
+  assert_true(store.cwd(SessionId("legacy")) is None)
+  // A missing session raises rather than masquerading as "no directory".
+  let _ = store.cwd(SessionId("missing")) catch {
+    _ => {
+      @fs.rmdir(store.root(), recursive=true)
+      return
+    }
+  }
+  fail("missing session yielded a working directory")
+}
+
+///|
 async test "store lists known sessions" {
   let store = new_store()
   assert_eq(store.list().length(), 0)
