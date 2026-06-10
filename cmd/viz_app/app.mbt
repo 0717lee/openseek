@@ -19,8 +19,28 @@ struct Model {
   system_prompt : String
   header_present : Bool
   view_mode : @viz.ViewMode
+  theme : Theme
   loading : Bool
   status : String
+}
+
+///|
+/// Colour theme. `Light` is the default; `System` follows the OS via a CSS
+/// `prefers-color-scheme` media query (so it tracks live OS changes without any
+/// listener). The choice is applied by setting `data-theme` on `<html>`.
+enum Theme {
+  Light
+  Dark
+  System
+} derive(Eq)
+
+///|
+fn Theme::value(self : Theme) -> String {
+  match self {
+    Light => "light"
+    Dark => "dark"
+    System => "system"
+  }
 }
 
 ///|
@@ -33,6 +53,7 @@ enum Msg {
   Select(String)
   SessionFetched(String, Result[String, Error])
   SetMode(@viz.ViewMode)
+  SetTheme(Theme)
 }
 
 ///|
@@ -54,6 +75,7 @@ fn init_model() -> Model {
     system_prompt: "",
     header_present: false,
     view_mode: RawLog,
+    theme: Light,
     loading: false,
     status: "loading sessions…",
   }
@@ -142,7 +164,21 @@ fn update(emit : @cmd.Emit[Msg], msg : Msg, model : Model) -> (@cmd.Cmd, Model) 
         }
       }
     SetMode(mode) => (@cmd.none, { ..model, view_mode: mode })
+    SetTheme(theme) =>
+      // Apply the theme as a side effect (set `data-theme` on <html>) so the CSS
+      // variable blocks take over; the model tracks it for button highlighting.
+      (apply_theme(theme), { ..model, theme, })
   }
+}
+
+///|
+/// Set `data-theme` on the document root. `light`/`dark` pick a fixed palette;
+/// `system` defers to the OS via the stylesheet's `prefers-color-scheme` query.
+extern "js" fn set_document_theme(theme : String) -> Unit = "(t) => document.documentElement.setAttribute('data-theme', t)"
+
+///|
+fn apply_theme(theme : Theme) -> @cmd.Cmd {
+  @cmd.effect(() => set_document_theme(theme.value()))
 }
 
 ///|
@@ -180,12 +216,39 @@ fn events_status(parsed : @viz.ParsedLog) -> String {
 fn view(emit : @cmd.Emit[Msg], model : Model) -> @html.Html {
   @html.div(class="app", [
     @html.aside(class="sidebar", [
-      @html.h1(class="brand", "OpenSeek sessions"),
-      @html.div(class="status", model.status),
+      @html.div(class="sidebar-head", [
+        @html.h1(class="brand", "OpenSeek sessions"),
+        @html.div(class="status", model.status),
+      ]),
       sidebar_list(emit, model),
+      theme_toggle(emit, model),
     ]),
     @html.section(class="main", [main_pane(emit, model)]),
   ])
+}
+
+///|
+fn theme_toggle(emit : @cmd.Emit[Msg], model : Model) -> @html.Html {
+  @html.div(class="theme-toggle", [
+    theme_button(emit, model, Light, "Light"),
+    theme_button(emit, model, Dark, "Dark"),
+    theme_button(emit, model, System, "System"),
+  ])
+}
+
+///|
+fn theme_button(
+  emit : @cmd.Emit[Msg],
+  model : Model,
+  theme : Theme,
+  label : String,
+) -> @html.Html {
+  let classes = if model.theme == theme {
+    "theme-button active"
+  } else {
+    "theme-button"
+  }
+  @html.button(class=classes, on_click=emit(SetTheme(theme)), label)
 }
 
 ///|

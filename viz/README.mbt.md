@@ -10,6 +10,9 @@ toggle:
   summaries replace the events they cover, and tool calls left dangling by a
   crashed process show the synthesized "previous agent process exited…" marker.
 
+A Light / Dark / System theme toggle sits in the sidebar (default Light;
+System follows the OS via `prefers-color-scheme`).
+
 ## Pieces
 
 | Package          | Target | Role                                                                 |

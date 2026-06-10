@@ -65,3 +65,10 @@ test "parse_session_rows distinguishes empty list from a non-array body" {
 test "session_url percent-encodes the id" {
   inspect(session_url("a b/c"), content="/api/sessions/a%20b%2Fc")
 }
+
+///|
+test "theme values map to the data-theme attribute" {
+  inspect(Theme::value(Light), content="light")
+  inspect(Theme::value(Dark), content="dark")
+  inspect(Theme::value(System), content="system")
+}
