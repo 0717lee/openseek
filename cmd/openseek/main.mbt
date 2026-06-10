@@ -12,35 +12,44 @@ async fn main {
 
 ///|
 async fn run_cli() -> Unit {
-  configure_logging()
-  let matches = cli_command().parse(env=@env.get_env_vars())
-  if handle_session_command(matches) {
-    return
-  }
-  let api_key = api_key(matches)
-  let model = @deepseek.Model::parse(value(matches, "model"))
-  let max_steps = max_steps(matches)
-  let task = task_text(matches)
-  match session_id(matches) {
-    None => {
-      let system_prompt_text = configured_system_prompt(matches, model)
-      @agent.run(api_key, model, task, max_steps~, system_prompt_text~)
+  let stdout_log = configure_logging()
+  @async.with_task_group(group => {
+    // The drain owns all stdout JSONL writes for the run. It is spawned
+    // without `no_wait`, so the group only completes once the queue — closed
+    // by the `defer` when this body exits, on success and error alike — has
+    // been written out in full; the terminal event is never lost to an early
+    // process exit.
+    group.spawn_bg() <| () => { stdout_log.drain() }
+    defer stdout_log.close()
+    let matches = cli_command().parse(env=@env.get_env_vars())
+    if handle_session_command(matches) {
+      return
     }
-    Some(id) => {
-      let store = @store.SessionStore(session_root(matches))
-      let session = load_or_new_session(store, id, matches, model)
-      ignore(
-        @agent.run_turn_with_append(
-          api_key,
-          model,
-          session,
-          task,
-          append_item=(session, item) => store.append(session, item),
-          max_steps~,
-        ),
-      )
+    let api_key = api_key(matches)
+    let model = @deepseek.Model::parse(value(matches, "model"))
+    let max_steps = max_steps(matches)
+    let task = task_text(matches)
+    match session_id(matches) {
+      None => {
+        let system_prompt_text = configured_system_prompt(matches, model)
+        @agent.run(api_key, model, task, max_steps~, system_prompt_text~)
+      }
+      Some(id) => {
+        let store = @store.SessionStore(session_root(matches))
+        let session = load_or_new_session(store, id, matches, model)
+        ignore(
+          @agent.run_turn_with_append(
+            api_key,
+            model,
+            session,
+            task,
+            append_item=(session, item) => store.append(session, item),
+            max_steps~,
+          ),
+        )
+      }
     }
-  }
+  })
 }
 
 ///|
@@ -59,33 +68,6 @@ fn failure_message(error_text : String) -> String {
   } else {
     message
   }
-}
-
-///|
-/// Write every JSONL log event to stdout with a per-entry flush. When
-/// `OPENSEEK_LOG_FILE` is set, mirror each event there as well.
-///
-/// The TUI parses the JSONL the engine writes to stdout through a pipe. Plain
-/// `println` can be block-buffered in that setup, which makes streaming deltas
-/// arrive all at once. `FlushedStdout` preserves the JSONL wire format but calls
-/// `fflush(stdout)` after each line so assistant deltas are visible promptly.
-/// The file handler already flushes per entry, so `tail -f $OPENSEEK_LOG_FILE`
-/// also shows events live. Best-effort: if the file cannot be opened, logging
-/// stays flushed-stdout-only rather than failing the run.
-fn configure_logging() -> Unit {
-  let stdout = FlushedStdout()
-  guard @env.get_env_var("OPENSEEK_LOG_FILE") is Some(path) && path != "" else {
-    @xlog.global().set_handler(stdout)
-    return
-  }
-  let file = @xlog.File::File(path) catch {
-    _ => {
-      @xlog.global().set_handler(stdout)
-      return
-    }
-  }
-  let handlers : Array[&@xlog.Handler] = [stdout, file]
-  @xlog.global().set_handler(@xlog.Multi(handlers))
 }
 
 ///|
