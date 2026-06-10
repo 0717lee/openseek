@@ -17,8 +17,12 @@ The HTTP client lives in `bobzhang/openseek/deepseek/client`.
 - `ChatMessage(role, content=..., tool_calls?, reasoning_content?)`: one typed
   chat message constructor. Use `Assistant` with `tool_calls` for the assistant
   message that must be sent back after DeepSeek requests native tool calls.
-- `encode_chat_request(model, messages, tools?, thinking?, reasoning_effort?)`:
-  builds the full DeepSeek chat completions request body. The per-value
+- `ResponseFormat`: optional assistant content constraint. Leave absent for
+  normal text; pass `JsonObject` only when the assistant content must be a JSON
+  object.
+- `encode_chat_request(model, messages, tools?, thinking?, reasoning_effort?,
+  stream?, response_format?)`: builds the full DeepSeek chat completions request
+  body. Streaming requests include usage-bearing stream options. The per-value
   encoders for messages, tool definitions, and tool calls are package-private
   implementation details.
 - `ToolDefinition(name, description, parameters, strict?)`: a native DeepSeek
@@ -68,6 +72,7 @@ test "encode chat request values" {
   let body = @deepseek.encode_chat_request(model, [message]).stringify()
   assert_true(body.contains("\"role\":\"user\""))
   assert_true(body.contains("\"model\":\"deepseek-v4-flash\""))
+  assert_false(body.contains("\"response_format\""))
 }
 ```
 
@@ -94,6 +99,19 @@ test "encode tool-enabled chat request" {
   ).stringify()
   assert_true(body.contains("\"type\":\"function\""))
   assert_true(body.contains("\"tool_calls\""))
+}
+```
+
+```moonbit check
+///|
+test "encode json-object response request" {
+  let body = @deepseek.encode_chat_request(
+    V4Flash,
+    [ChatMessage(User, content="return {\"ok\":true}")],
+    response_format=JsonObject,
+  ).stringify()
+  assert_true(body.contains("\"response_format\""))
+  assert_true(body.contains("\"json_object\""))
 }
 ```
 
