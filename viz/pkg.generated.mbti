@@ -1,0 +1,42 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "bobzhang/openseek/viz"
+
+import {
+  "bobzhang/openseek/agent_session",
+  "moonbit-community/rabbita/html",
+  "moonbitlang/core/debug",
+}
+
+// Values
+pub fn parse_events(String) -> ParsedLog
+
+pub fn render_notices(ParsedLog) -> @html.Html
+
+pub fn render_session(@agent_session.Session, ViewMode) -> @html.Html
+
+pub fn session_from_parse(ParsedLog, id~ : String, system_prompt~ : String) -> @agent_session.Session
+
+// Errors
+
+// Types and methods
+pub(all) struct LineError {
+  line_number : Int
+  content : String
+  message : String
+} derive(@debug.Debug)
+
+pub(all) struct ParsedLog {
+  events : Array[@agent_session.SessionEvent]
+  errors : Array[LineError]
+  partial_tail : Bool
+} derive(@debug.Debug)
+
+pub(all) enum ViewMode {
+  RawLog
+  ModelView
+} derive(Eq, @debug.Debug)
+
+// Type aliases
+
+// Traits
+

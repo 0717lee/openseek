@@ -1,0 +1,16 @@
+import {
+  "bobzhang/openseek/viz",
+  "moonbit-community/rabbita",
+  "moonbit-community/rabbita/html",
+  "moonbit-community/rabbita/cmd",
+  "moonbit-community/rabbita/http",
+  "moonbitlang/core/json",
+}
+
+warnings = "+unnecessary_annotation"
+
+supported_targets = "js"
+
+options(
+  "is-main": true,
+)

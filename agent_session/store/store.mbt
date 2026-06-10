@@ -495,6 +495,28 @@ pub async fn SessionStore::exists(
 }
 
 ///|
+/// Absolute path to a session's append-only `events.jsonl` log. Exposed so a
+/// read-only consumer (such as the visualizer web server) can stream the raw
+/// log without the store reconstructing the on-disk layout for it.
+pub fn SessionStore::event_log_file(
+  self : SessionStore,
+  id : @agent_session.SessionId,
+) -> String raise {
+  self.event_log_path(id)
+}
+
+///|
+/// Absolute path to a session's `session.json` header file. The file may not
+/// exist for a session whose first event has not yet been flushed; callers
+/// should check existence before reading.
+pub fn SessionStore::header_file(
+  self : SessionStore,
+  id : @agent_session.SessionId,
+) -> String raise {
+  self.header_path(id)
+}
+
+///|
 /// List known session ids under this store. Missing stores are treated as empty.
 pub async fn SessionStore::list(
   self : SessionStore,

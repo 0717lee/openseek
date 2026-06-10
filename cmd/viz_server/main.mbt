@@ -1,0 +1,375 @@
+///|
+/// Read-only web server for the events.jsonl visualizer. Serves the static
+/// frontend bundle plus a tiny JSON/raw-file API over a `SessionStore`:
+///
+/// - `GET /`                                  → the viewer shell (web/index.html)
+/// - `GET /viz_app.js`                        → the compiled frontend bundle
+/// - `GET /api/sessions`                      → JSON listing of known sessions
+/// - `GET /api/sessions/<id>`                 → `{found, events, header}` envelope
+/// - `GET /api/sessions/<id>/events.jsonl`    → raw append-only event log
+/// - `GET /api/sessions/<id>/session.json`    → raw header (404 when absent)
+///
+/// It never writes to the store, so pointing it at a live session root is safe.
+async fn main {
+  let matches = cli_command().parse(env=@env.get_env_vars())
+  let port = parse_port(value(matches, "port"))
+  let session_root = value(matches, "session-root").trim().to_owned()
+  if session_root.is_empty() {
+    fail("--session-root or OPENSEEK_SESSION_ROOT must not be empty")
+  }
+  let web_dir = value(matches, "web-dir")
+  let bundle = value(matches, "bundle")
+  let store = @store.SessionStore(session_root)
+  let addr = @socket.Addr::parse("127.0.0.1:\{port}")
+  println("openseek viz: serving sessions under '\{session_root}'")
+  println("openseek viz: shell from '\{web_dir}/index.html'")
+  println("openseek viz: open http://127.0.0.1:\{port}")
+  let server = @http.Server(addr)
+  server.run_forever((request, _body, conn) => {
+    handle(request, conn, store, web_dir, bundle)
+  })
+}
+
+///|
+/// A fully-computed HTTP reply. Building it does no socket I/O, so the single
+/// send in `handle` is the only place a response is written — there is no way to
+/// start a second response (which would panic `send_response`).
+struct Reply {
+  code : Int
+  reason : String
+  content_type : String
+  body : String
+}
+
+///|
+/// Handle one request: compute the reply (catching any failure as a 500), then
+/// send it exactly once. A failure during the send — e.g. the client closed the
+/// connection mid-body — is swallowed: the response was already started, so
+/// retrying would double-send. `run_forever` keeps serving other connections.
+async fn handle(
+  request : @http.Request,
+  conn : @http.ServerConnection,
+  store : @store.SessionStore,
+  web_dir : String,
+  bundle : String,
+) -> Unit {
+  let reply = build_reply(request, store, web_dir, bundle) catch {
+    error => text_reply(500, "Internal Server Error", "error: \{error}")
+  }
+  send_reply(conn, reply) catch {
+    // The send already started, so a mid-body failure (client hung up) must not
+    // trigger a second send_response. Swallow it; run_forever keeps serving.
+    _ => ()
+  }
+}
+
+///|
+async fn send_reply(conn : @http.ServerConnection, reply : Reply) -> Unit {
+  conn.send_response(reply.code, reply.reason, extra_headers={
+    "Content-Type": reply.content_type,
+  })
+  conn.write_string(reply.body)
+  conn.end_response()
+}
+
+///|
+async fn build_reply(
+  request : @http.Request,
+  store : @store.SessionStore,
+  web_dir : String,
+  bundle : String,
+) -> Reply {
+  guard request.meth is Get else {
+    return text_reply(405, "Method Not Allowed", "only GET is supported")
+  }
+  let path = strip_query(request.path)
+  match path {
+    "/" | "/index.html" =>
+      asset_reply(web_dir + "/index.html", "text/html; charset=utf-8")
+    "/viz_app.js" => bundle_reply(web_dir, bundle)
+    "/api/sessions" => session_list_reply(store)
+    _ =>
+      if path.has_prefix("/api/sessions/") {
+        session_path_reply(store, path)
+      } else {
+        text_reply(404, "Not Found", "no route for \{path}")
+      }
+  }
+}
+
+///|
+/// Resolve `/api/sessions/<id>` (envelope) or `/api/sessions/<id>/<file>` (raw).
+/// The `<id>` segment is percent-decoded, so an id containing URL-reserved
+/// characters (spaces, `?`, `#`) still resolves to the right session. The
+/// store's own id validation rejects path separators and `..`, so a crafted id
+/// cannot escape the session directory.
+async fn session_path_reply(
+  store : @store.SessionStore,
+  path : String,
+) -> Reply {
+  let rest = slice_from(path, "/api/sessions/".length())
+  let (id_value, file) = match rest.find("/") {
+    None => (percent_decode(rest), None)
+    Some(index) =>
+      (percent_decode(slice(rest, 0, index)), Some(slice_from(rest, index + 1)))
+  }
+  // Validate the id ourselves so a malformed request is a 400, not a 500 from
+  // the store's path-building assertion. These are the store's own id rules.
+  guard valid_session_id(id_value) else {
+    return text_reply(400, "Bad Request", "invalid session id")
+  }
+  let id = @agent_session.SessionId(id_value)
+  match file {
+    None => session_envelope_reply(store, id)
+    Some("events.jsonl") =>
+      asset_reply(
+        store.event_log_file(id),
+        "application/x-ndjson; charset=utf-8",
+      )
+    Some("session.json") =>
+      asset_reply(store.header_file(id), "application/json; charset=utf-8")
+    Some(other) =>
+      text_reply(404, "Not Found", "no such session file: \{other}")
+  }
+}
+
+///|
+/// Mirror `SessionStore`'s id validation so a bad URL id is rejected as a client
+/// error before any store path is built (which would otherwise raise → 500).
+fn valid_session_id(value : String) -> Bool {
+  value != "" &&
+  !value.contains("/") &&
+  !value.contains("\\") &&
+  value != "." &&
+  value != ".."
+}
+
+///|
+/// Serve one session as a single JSON envelope:
+/// `{ "found": Bool, "events": String, "header": Json|null }`.
+///
+/// The frontend's HTTP client (`rabbita/http`) resolves any completed response
+/// as success regardless of status code, so absence and content must be encoded
+/// in the body rather than signalled by 404. `events` is the raw `events.jsonl`
+/// text; `header` is the parsed `session.json` or `null` when it is absent.
+async fn session_envelope_reply(
+  store : @store.SessionStore,
+  id : @agent_session.SessionId,
+) -> Reply {
+  let events_path = store.event_log_file(id)
+  let header_path = store.header_file(id)
+  let events_exists = @fs.exists(events_path)
+  let header_exists = @fs.exists(header_path)
+  // A session with only a header (e.g. a crash between the first header write
+  // and the empty-log write) is still loadable — `SessionStore::load` treats a
+  // missing log as empty — and `listings()` can surface it, so treat either
+  // file existing as found rather than reporting a listed session as missing.
+  if !events_exists && !header_exists {
+    return json_reply({ "found": false })
+  }
+  let events_text = if events_exists {
+    read_text_lossy(events_path)
+  } else {
+    ""
+  }
+  let header : Json = if header_exists {
+    @json.parse(read_text_lossy(header_path)) catch {
+      _ => Json::null()
+    }
+  } else {
+    Json::null()
+  }
+  json_reply({ "found": true, "events": events_text, "header": header })
+}
+
+///|
+async fn session_list_reply(store : @store.SessionStore) -> Reply {
+  let rows : Array[Json] = []
+  for listing in store.listings() {
+    let last_active : Json = match listing.last_active_unix_seconds() {
+      Some(seconds) => Json::number(seconds.to_double())
+      None => Json::null()
+    }
+    rows.push({
+      "id": listing.id().value(),
+      "last_active": last_active,
+      "first_prompt": listing.first_prompt(),
+    })
+  }
+  json_reply(rows.to_json())
+}
+
+///|
+/// Locate the compiled frontend bundle. Searches, in order: an explicit
+/// `--bundle` path, `<web-dir>/viz_app.js`, then moon's release and debug build
+/// outputs. This lets `moon build cmd/viz_app --target js` followed by
+/// `moon run cmd/viz_server` work with no copy step.
+async fn bundle_reply(web_dir : String, bundle : String) -> Reply {
+  let candidates = [
+    bundle,
+    web_dir + "/viz_app.js",
+    "_build/js/release/build/cmd/viz_app/viz_app.js",
+    "_build/js/debug/build/cmd/viz_app/viz_app.js",
+  ]
+  for candidate in candidates {
+    if candidate != "" && @fs.exists(candidate) {
+      return asset_reply(candidate, "text/javascript; charset=utf-8")
+    }
+  }
+  text_reply(
+    404, "Not Found", "viz_app.js not found; build it with: moon build cmd/viz_app --target js",
+  )
+}
+
+///|
+/// Read a file into a reply, or a 404 reply when it does not exist.
+async fn asset_reply(path : String, content_type : String) -> Reply {
+  if !@fs.exists(path) {
+    return text_reply(404, "Not Found", "missing file: \{path}")
+  }
+  { code: 200, reason: "OK", content_type, body: read_text_lossy(path) }
+}
+
+///|
+/// Read a file as text, decoding invalid UTF-8 lossily rather than raising. A
+/// live `events.jsonl` can be torn mid-codepoint by a concurrent append; strict
+/// decoding would 500 the whole fetch, hiding the valid prefix. Lossy decoding
+/// keeps that prefix, and the torn final line then fails to parse client-side
+/// and is reported as a benign truncated tail.
+async fn read_text_lossy(path : String) -> String {
+  @utf8.decode_lossy(@fs.read_file(path).binary()[:])
+}
+
+///|
+fn json_reply(body : Json) -> Reply {
+  {
+    code: 200,
+    reason: "OK",
+    content_type: "application/json; charset=utf-8",
+    body: body.stringify(),
+  }
+}
+
+///|
+fn text_reply(code : Int, reason : String, message : String) -> Reply {
+  { code, reason, content_type: "text/plain; charset=utf-8", body: message }
+}
+
+///|
+/// The path without any `?query` suffix.
+fn strip_query(path : String) -> String {
+  match path.find("?") {
+    Some(index) => slice(path, 0, index)
+    None => path
+  }
+}
+
+///|
+/// Code-unit slice `s[start:end]` as an owned `String`. Indices here always come
+/// from `find`/`length`, so they are in range.
+fn slice(s : String, start : Int, end : Int) -> String {
+  s[start:end].to_owned()
+}
+
+///|
+/// Code-unit slice `s[start:]` as an owned `String`.
+fn slice_from(s : String, start : Int) -> String {
+  s[start:].to_owned()
+}
+
+///|
+/// Percent-decode a URL path segment (`%XX` → byte), assembling the decoded
+/// bytes and interpreting them as UTF-8. Non-`%` characters pass through as
+/// their own UTF-8 bytes. `+` is left as-is (it is literal in path segments).
+/// A malformed `%` escape is left verbatim, and undecodable bytes fall back to
+/// the original string.
+fn percent_decode(s : String) -> String {
+  let chars = s.to_array()
+  let bytes : Array[Byte] = []
+  let mut i = 0
+  while i < chars.length() {
+    let c = chars[i]
+    if c == '%' &&
+      i + 2 < chars.length() &&
+      hex_val(chars[i + 1]) is Some(high) &&
+      hex_val(chars[i + 2]) is Some(low) {
+      bytes.push(((high * 16 + low) & 0xff).to_byte())
+      i = i + 3
+    } else {
+      for byte in @utf8.encode(c.to_string()) {
+        bytes.push(byte)
+      }
+      i = i + 1
+    }
+  }
+  @utf8.decode(Bytes::from_array(bytes)) catch {
+    _ => s
+  }
+}
+
+///|
+fn hex_val(c : Char) -> Int? {
+  if c >= '0' && c <= '9' {
+    Some(c.to_int() - '0'.to_int())
+  } else if c >= 'a' && c <= 'f' {
+    Some(c.to_int() - 'a'.to_int() + 10)
+  } else if c >= 'A' && c <= 'F' {
+    Some(c.to_int() - 'A'.to_int() + 10)
+  } else {
+    None
+  }
+}
+
+///|
+fn cli_command() -> @argparse.Command {
+  Command(
+    "openseek-viz",
+    about="Read-only web server for the OpenSeek events.jsonl visualizer.",
+    options=[
+      OptionArg(
+        "port",
+        long="port",
+        env="OPENSEEK_VIZ_PORT",
+        default_values=["8080"],
+        about="TCP port to listen on (127.0.0.1).",
+      ),
+      OptionArg(
+        "session-root",
+        long="session-root",
+        env="OPENSEEK_SESSION_ROOT",
+        default_values=[".openseek"],
+        about="Directory containing durable OpenSeek sessions.",
+      ),
+      OptionArg(
+        "web-dir",
+        long="web-dir",
+        env="OPENSEEK_VIZ_WEB_DIR",
+        default_values=["web"],
+        about="Directory holding the index.html shell.",
+      ),
+      OptionArg(
+        "bundle",
+        long="bundle",
+        env="OPENSEEK_VIZ_BUNDLE",
+        default_values=[""],
+        about="Path to the compiled viz_app.js; defaults to auto-locating the moon build output.",
+      ),
+    ],
+  )
+}
+
+///|
+fn value(matches : @argparse.Matches, name : String) -> String raise {
+  match matches.values.get(name) {
+    Some([value]) => value
+    Some(values) if values.length() > 0 => values[0]
+    _ => fail("missing parsed argument: \{name}")
+  }
+}
+
+///|
+fn parse_port(text : String) -> Int raise {
+  @string.parse_int(text) catch {
+    _ => fail("--port or OPENSEEK_VIZ_PORT must be an integer, got: \{text}")
+  }
+}

@@ -9,6 +9,7 @@ import {
   "moonbit-community/displaytext@0.1.5",
   "tonyfettes/xlog@0.4.0",
   "bobzhang/jsonl@0.2.0",
+  "moonbit-community/rabbita@0.12.4",
 }
 
 readme = "README.mbt.md"

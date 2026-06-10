@@ -3,6 +3,7 @@ _build/
 .mooncakes/
 .moonagent/
 .repos/
+web/viz_app.js
 eval/*
 !eval/README.md
 !eval/prompts/

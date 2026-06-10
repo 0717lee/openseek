@@ -1,0 +1,14 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "bobzhang/openseek/cmd/viz_server"
+
+// Values
+
+// Errors
+
+// Types and methods
+type Reply
+
+// Type aliases
+
+// Traits
+

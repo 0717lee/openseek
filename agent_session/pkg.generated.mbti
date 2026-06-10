@@ -18,6 +18,8 @@ pub struct AssistantMessage {
 } derive(ToJson, @debug.Debug, @json.FromJson)
 pub fn AssistantMessage::AssistantMessage(String, tool_calls? : Array[@deepseek.ToolCall], reasoning_content? : String) -> Self
 pub fn AssistantMessage::content(Self) -> String
+pub fn AssistantMessage::reasoning_content(Self) -> String?
+pub fn AssistantMessage::tool_calls(Self) -> Array[@deepseek.ToolCall]
 
 pub struct RuntimeNotice {
   // private fields

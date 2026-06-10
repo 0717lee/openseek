@@ -1,0 +1,20 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "bobzhang/openseek/cmd/viz_app"
+
+// Values
+
+// Errors
+
+// Types and methods
+type LoadOutcome
+
+type Model
+
+type Msg
+
+type SessionRow
+
+// Type aliases
+
+// Traits
+

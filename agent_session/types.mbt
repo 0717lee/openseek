@@ -90,7 +90,9 @@ pub fn AssistantMessage::content(self : AssistantMessage) -> String {
 }
 
 ///|
-fn AssistantMessage::tool_calls(
+/// The native tool calls the model requested this turn, in protocol form
+/// (call id, name, raw argument string). Empty for a text-only response.
+pub fn AssistantMessage::tool_calls(
   self : AssistantMessage,
 ) -> Array[@deepseek.ToolCall] {
   [
@@ -99,7 +101,9 @@ fn AssistantMessage::tool_calls(
 }
 
 ///|
-fn AssistantMessage::reasoning_content(self : AssistantMessage) -> String? {
+/// The thinking-mode reasoning the model returned alongside its answer, or
+/// `None` when the response carried no reasoning content.
+pub fn AssistantMessage::reasoning_content(self : AssistantMessage) -> String? {
   self.reasoning_content
 }
 

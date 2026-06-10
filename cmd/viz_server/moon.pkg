@@ -1,0 +1,19 @@
+import {
+  "bobzhang/openseek/agent_session",
+  "bobzhang/openseek/agent_session/store",
+  "moonbitlang/async",
+  "moonbitlang/async/http",
+  "moonbitlang/async/socket",
+  "moonbitlang/async/fs",
+  "moonbitlang/core/argparse",
+  "moonbitlang/core/encoding/utf8",
+  "moonbitlang/core/env",
+  "moonbitlang/core/json",
+  "moonbitlang/core/string",
+}
+
+supported_targets = "native"
+
+options(
+  "is-main": true,
+)
