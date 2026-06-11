@@ -177,6 +177,10 @@ async fn run_trial(
       "DEEPSEEK": config.api_key,
       "DEEPSEEK_MODEL": config.model.to_string(),
       "OPENSEEK_MAX_STEPS": config.max_steps.to_string(),
+      // Trials inherit the developer's env, so point the global skills
+      // lookup at a workspace path that does not exist — the developer's
+      // own ~/.openseek/skills must never reach a trial prompt.
+      "OPENSEEK_GLOBAL_SKILLS_DIR": real_workspace + "/.no-global-skills",
     },
     inherit_env=true,
     cwd=real_workspace,

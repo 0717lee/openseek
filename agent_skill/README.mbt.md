@@ -22,3 +22,10 @@ out of the prompt until the model decides it is relevant, so a large skill
 library costs a few listing lines per request, not its full text. Missing
 frontmatter falls back to the file stem and an empty description; a missing
 directory is simply an empty library.
+
+Two libraries feed the listing: the user-level (global) one under
+`$HOME/.openseek/skills` (override with `--global-skills-dir` /
+`OPENSEEK_GLOBAL_SKILLS_DIR`) and the workspace one under
+`.openseek/skills`. `merge_skills` combines them with workspace skills
+shadowing same-named global ones, so a project can specialize a shared
+playbook without renaming it.

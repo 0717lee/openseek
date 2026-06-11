@@ -8,6 +8,8 @@ import {
 // Values
 pub async fn discover_skills(String) -> Array[Skill]
 
+pub fn merge_skills(Array[Skill], overrides~ : Array[Skill]) -> Array[Skill]
+
 pub fn skills_prompt_section(Array[Skill]) -> String?
 
 // Errors

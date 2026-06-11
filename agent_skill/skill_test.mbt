@@ -68,6 +68,45 @@ async test "a malformed frontmatter never hides the skill" {
 }
 
 ///|
+async test "workspace skills shadow same-named global skills on merge" {
+  let global_dir = @fs.tmpdir(prefix="openseek-skills-global-")
+  let workspace_dir = @fs.tmpdir(prefix="openseek-skills-workspace-")
+  write_skill(
+    global_dir + "/deploy.md",
+    (
+      #|---
+      #|description: Generic deploy steps.
+      #|---
+    ),
+  )
+  write_skill(global_dir + "/lint.md", "Global lint steps.")
+  write_skill(
+    workspace_dir + "/deploy.md",
+    (
+      #|---
+      #|description: This project's deploy steps.
+      #|---
+    ),
+  )
+  write_skill(workspace_dir + "/triage.md", "Workspace triage steps.")
+  let merged = @agent_skill.merge_skills(
+    @agent_skill.discover_skills(global_dir),
+    overrides=@agent_skill.discover_skills(workspace_dir),
+  )
+  // "deploy" appears once — the workspace copy; "lint" survives from the
+  // global library; everything stays name-sorted across both sources.
+  assert_eq(merged.length(), 3)
+  assert_eq(merged[0].name(), "lint")
+  assert_eq(merged[0].path(), global_dir + "/lint.md")
+  assert_eq(merged[1].name(), "deploy")
+  assert_eq(merged[1].description(), "This project's deploy steps.")
+  assert_eq(merged[1].path(), workspace_dir + "/deploy.md")
+  assert_eq(merged[2].name(), "triage")
+  @fs.rmdir(global_dir, recursive=true)
+  @fs.rmdir(workspace_dir, recursive=true)
+}
+
+///|
 async test "a missing skills directory is an empty library" {
   let skills = @agent_skill.discover_skills("/nonexistent/openseek-skills")
   assert_eq(skills.length(), 0)

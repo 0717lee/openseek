@@ -131,6 +131,31 @@ async fn add_skill_file(skills : Array[Skill], path : String) -> Unit {
 }
 
 ///|
+/// Combine a base skill library with an overriding one: an override skill
+/// shadows a same-named base skill, so a workspace can specialize a
+/// user-level (global) playbook without renaming it. The result is
+/// re-sorted by name, keeping the prompt listing deterministic regardless
+/// of which library each skill came from.
+pub fn merge_skills(
+  base : Array[Skill],
+  overrides~ : Array[Skill],
+) -> Array[Skill] {
+  let merged : Array[Skill] = []
+  let taken : Set[String] = Set([])
+  for skill in overrides {
+    taken.add(skill.name)
+    merged.push(skill)
+  }
+  for skill in base {
+    if !taken.contains(skill.name) {
+      merged.push(skill)
+    }
+  }
+  merged.sort_by((a, b) => a.name.compare(b.name))
+  merged
+}
+
+///|
 /// The prompt block advertising `skills`, or `None` for an empty library so
 /// callers can skip the section entirely. Tells the model exactly how to
 /// use a skill: read the listed file first, then follow it.

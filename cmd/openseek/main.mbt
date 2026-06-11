@@ -157,6 +157,13 @@ fn cli_command() -> @argparse.Command {
         about="Append this file to the selected system prompt for prompt experiments.",
       ),
       OptionArg(
+        "global-skills-dir",
+        long="global-skills-dir",
+        env="OPENSEEK_GLOBAL_SKILLS_DIR",
+        default_values=[""],
+        about="User-level skills directory advertised alongside workspace skills; empty means $HOME/.openseek/skills.",
+      ),
+      OptionArg(
         "session",
         long="session",
         env="OPENSEEK_SESSION",
@@ -484,7 +491,10 @@ async fn configured_system_prompt(
   // section: like the cwd they vary per project (and change when skills are
   // edited), so they must sit after all globally shared text to keep it
   // prefix-cache hittable.
-  match skills_prompt_section_for_cwd() {
+  match
+    skills_prompt_section_for_cwd(
+      global_dir=value(matches, "global-skills-dir"),
+    ) {
     Some(section) =>
       (
         $|\{tail}
@@ -496,12 +506,33 @@ async fn configured_system_prompt(
 }
 
 ///|
-/// The skills directory advertised to the model: `.openseek/skills` under
-/// the working directory, listing `<name>.md` files and `<name>/SKILL.md`
-/// layouts. Empty or absent directories advertise nothing.
-async fn skills_prompt_section_for_cwd() -> String? {
+/// The skills advertised to the model: the user-level library (`global_dir`,
+/// defaulting to `$HOME/.openseek/skills` when empty) merged with the
+/// workspace library under `.openseek/skills`, listing `<name>.md` files and
+/// `<name>/SKILL.md` layouts. Workspace skills shadow same-named global ones
+/// so a project can specialize a shared playbook. Empty or absent
+/// directories advertise nothing — and eval harnesses point `global_dir` at
+/// a path inside the trial workspace so the developer's own library never
+/// leaks into trials.
+async fn skills_prompt_section_for_cwd(global_dir~ : String) -> String? {
+  let resolved_global_dir = if global_dir != "" {
+    global_dir
+  } else {
+    match @env.get_env_var("HOME") {
+      Some(home) if home != "" => home + "/.openseek/skills"
+      _ => ""
+    }
+  }
+  let global_skills = if resolved_global_dir == "" {
+    []
+  } else {
+    @agent_skill.discover_skills(resolved_global_dir)
+  }
   @agent_skill.skills_prompt_section(
-    @agent_skill.discover_skills(".openseek/skills"),
+    @agent_skill.merge_skills(
+      global_skills,
+      overrides=@agent_skill.discover_skills(".openseek/skills"),
+    ),
   )
 }
 
