@@ -29,8 +29,8 @@ pub struct Client {
 /// Transient failures — transport errors, HTTP 429, and 5xx — are retried up
 /// to `retry_attempts` total tries with exponential backoff starting at
 /// `retry_backoff_ms` (doubling per retry, capped at 60s). Client errors
-/// other than 429 never retry, and a streaming call never retries once a
-/// delta has been delivered.
+/// other than 429 never retry, and a streaming call never retries once the
+/// stream has produced any event — text, tool-call, or usage alike.
 pub fn Client::Client(
   api_key~ : String,
   model? : @deepseek.Model = default_model,
@@ -84,8 +84,9 @@ let max_backoff_ms : Int = 60_000
 /// identically every time, before any network I/O) propagate immediately;
 /// anything else is transport-shaped (connect refused, reset, DNS) and
 /// retries within budget. `bail` lets an attempt declare later retries
-/// pointless — chat_stream sets it once deltas were delivered, since
-/// replaying a half-consumed stream would duplicate content downstream.
+/// pointless — chat_stream sets it once the stream has produced any event,
+/// since replaying a half-consumed completion would duplicate content (or
+/// regenerate tool calls) downstream.
 ///
 /// A `RetryableApiError` that survives the budget (or bail) re-raises as a
 /// plain failure carrying the same text a non-retrying client would have
@@ -193,22 +194,20 @@ pub async fn Client::chat_stream(
     stream=true,
     response_format?,
   )
-  // Once any delta reached a callback the consumer has observed partial
-  // output; a retry would replay it from the top. Bail out of the retry
-  // loop at that point and surface the failure instead.
+  // Once the server has produced any complete SSE event the completion is
+  // running and billed — text deltas, tool-call deltas, and usage alike,
+  // even though only text reaches the callbacks. A retry past that point
+  // could duplicate content or generate a different tool call, so the
+  // first event (not just the first text delta) bails the retry loop and
+  // failures surface instead (Codex review).
   let mut streamed = false
   self.with_retries(
     () => {
       self.chat_stream_attempt(
         body,
-        on_content_delta=delta => {
-          streamed = true
-          on_content_delta(delta)
-        },
-        on_reasoning_delta=delta => {
-          streamed = true
-          on_reasoning_delta(delta)
-        },
+        on_stream_event=() => streamed = true,
+        on_content_delta~,
+        on_reasoning_delta~,
       )
     },
     () => streamed,
@@ -219,6 +218,7 @@ pub async fn Client::chat_stream(
 async fn Client::chat_stream_attempt(
   self : Client,
   body : Json,
+  on_stream_event~ : () -> Unit,
   on_content_delta~ : async (String) -> Unit,
   on_reasoning_delta~ : async (String) -> Unit,
 ) -> @deepseek.ChatResponse {
@@ -244,7 +244,12 @@ async fn Client::chat_stream_attempt(
   }
   // The stream reader finalizes malformed SSE payloads at its parse site
   // (see decode_sse_data in stream.mbt), so a mid-stream transport error
-  // reaches the retry loop with its own type and the delivered-delta bail
+  // reaches the retry loop with its own type and the delivered-event bail
   // decides whether retrying is allowed.
-  read_chat_stream(client, on_content_delta~, on_reasoning_delta~)
+  read_chat_stream(
+    client,
+    on_stream_event~,
+    on_content_delta~,
+    on_reasoning_delta~,
+  )
 }

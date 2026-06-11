@@ -196,6 +196,7 @@ fn sse_data_fragment(raw : String) -> String? {
 async fn flush_sse_event(
   acc : StreamAccumulator,
   data_lines : Array[String],
+  on_stream_event~ : () -> Unit,
   on_content_delta~ : async (String) -> Unit,
   on_reasoning_delta~ : async (String) -> Unit,
 ) -> Bool {
@@ -204,6 +205,11 @@ async fn flush_sse_event(
   }
   let data = data_lines.join("\n").trim().to_owned()
   data_lines.clear()
+  // A complete event means the completion is producing output server-side
+  // — text, tool-call deltas, usage, or the terminal marker — even when
+  // nothing reaches the text callbacks. Signal before parsing: the retry
+  // decision must not depend on whether the payload decodes.
+  on_stream_event()
   if data == "[DONE]" {
     return true
   }
@@ -224,6 +230,7 @@ async fn flush_sse_event(
 ///|
 async fn read_chat_stream(
   reader : @http.Client,
+  on_stream_event~ : () -> Unit,
   on_content_delta~ : async (String) -> Unit,
   on_reasoning_delta~ : async (String) -> Unit,
 ) -> @deepseek.ChatResponse {
@@ -235,6 +242,7 @@ async fn read_chat_stream(
         if flush_sse_event(
             acc,
             data_lines,
+            on_stream_event~,
             on_content_delta~,
             on_reasoning_delta~,
           ) {
@@ -252,6 +260,7 @@ async fn read_chat_stream(
           if flush_sse_event(
               acc,
               data_lines,
+              on_stream_event~,
               on_content_delta~,
               on_reasoning_delta~,
             ) {

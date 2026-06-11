@@ -244,3 +244,57 @@ async test "chat_stream never retries after the first delta" {
     fail("expected truncated stream error")
   }
 }
+
+///|
+/// Tool-call deltas carry no text, so the content callbacks never fire —
+/// but they are model output all the same. A stream that emits only a
+/// tool-call delta and then drops must surface the failure rather than
+/// retry: a replay could generate (and bill) a different call. (Codex
+/// review: the bail flag used to track callback-delivered text only.)
+async test "chat_stream never retries after a tool-call-only delta" {
+  @async.with_task_group() <| group => {
+    let server = @http.Server(@socket.Addr::parse("127.0.0.1:0")) catch {
+      error => {
+        let message = "\{error}"
+        if message.contains("Operation not permitted") {
+          println("local TCP bind unavailable; skipping retry test")
+          return
+        }
+        raise error
+      }
+    }
+    let hits : Ref[Int] = { val: 0 }
+    group.spawn_bg(no_wait=true) <| () => {
+      server.run_forever(
+        (_request, body, conn) => {
+          let _ = body.read_all()
+          hits.val = hits.val + 1
+          conn.send_response(200, "OK", extra_headers={
+            "Content-Type": "text/event-stream",
+          })
+          conn.write(
+            "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"function\":{\"name\":\"read\",\"arguments\":\"{}\"}}]}}]}\n\n",
+          )
+        },
+        max_connections=8,
+      )
+    }
+    let url = "http://127.0.0.1:\{server.addr.port()}/chat/completions"
+    let client = @client.Client(
+      api_key="test-key",
+      api_url=url,
+      retry_attempts=3,
+      retry_backoff_ms=1,
+    )
+    let _ = client.chat_stream([ChatMessage(User, content="hello")], on_content_delta=_ => {
+      ()
+    }) catch {
+      error => {
+        assert_true("\{error}".contains("ended before [DONE]"))
+        assert_eq(hits.val, 1)
+        return
+      }
+    }
+    fail("expected truncated stream error")
+  }
+}
