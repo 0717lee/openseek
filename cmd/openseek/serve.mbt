@@ -81,6 +81,7 @@ test "serve commands decode and reject with actionable errors" {
 /// first, then the loop drains and exits.
 async fn run_serve(matches : @argparse.Matches) -> Unit {
   let api_key = api_key(matches)
+  let api_url = api_url(matches)
   let model = @deepseek.Model::parse(value(matches, "model"))
   let max_steps = max_steps(matches)
   let thinking = @deepseek.ThinkingMode::parse(value(matches, "thinking"))
@@ -162,6 +163,7 @@ async fn run_serve(matches : @argparse.Matches) -> Unit {
           max_steps~,
           thinking~,
           reasoning_effort~,
+          api_url?,
           tools~,
         ) catch {
           error => {

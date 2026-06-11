@@ -8,12 +8,14 @@ variables, and calls `bobzhang/openseek/agent.run` for one-shot tasks or
 ## Command
 
 ```bash
-moon run cmd/openseek -- [--api-key sk-...] [--model deepseek-v4-pro] [--max-steps 1000] [--system-prompt-file prompt.md] [--system-prompt-addendum-file addendum.md] [--session session-id] [--session-root .openseek] "task text"
+moon run cmd/openseek -- [--api-key sk-...] [--model deepseek-v4-pro] [--api-url https://api.deepseek.com/chat/completions] [--max-steps 1000] [--system-prompt-file prompt.md] [--system-prompt-addendum-file addendum.md] [--session session-id] [--session-root .openseek] "task text"
 ```
 
 Agent runs require `--api-key` or `DEEPSEEK`. `--model` can also be supplied with
 `DEEPSEEK_MODEL`; it defaults to `deepseek-v4-pro`. `--max-steps` can also be
 supplied with `OPENSEEK_MAX_STEPS`; it defaults to `1000`.
+`--api-url` can also be supplied with `OPENSEEK_API_URL`; when omitted, OpenSeek
+uses the default DeepSeek chat completions endpoint.
 `--system-prompt-file` and `--system-prompt-addendum-file` can also be supplied
 with `OPENSEEK_SYSTEM_PROMPT_FILE` and
 `OPENSEEK_SYSTEM_PROMPT_ADDENDUM_FILE`. `--session` can also be supplied with

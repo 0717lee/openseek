@@ -33,6 +33,7 @@ async fn run_cli() -> Unit {
       return
     }
     let api_key = api_key(matches)
+    let api_url = api_url(matches)
     let model = @deepseek.Model::parse(value(matches, "model"))
     let max_steps = max_steps(matches)
     let thinking = @deepseek.ThinkingMode::parse(value(matches, "thinking"))
@@ -51,6 +52,7 @@ async fn run_cli() -> Unit {
           system_prompt_text~,
           thinking~,
           reasoning_effort~,
+          api_url?,
         )
       }
       Some(id) => {
@@ -66,6 +68,7 @@ async fn run_cli() -> Unit {
             max_steps~,
             thinking~,
             reasoning_effort~,
+            api_url?,
           ),
         )
       }
@@ -110,6 +113,13 @@ fn cli_command() -> @argparse.Command {
         env="DEEPSEEK_MODEL",
         default_values=[@deepseek.V4Pro.to_string()],
         about="DeepSeek model: deepseek-v4-flash or deepseek-v4-pro.",
+      ),
+      OptionArg(
+        "api-url",
+        long="api-url",
+        env="OPENSEEK_API_URL",
+        default_values=[""],
+        about="DeepSeek-compatible chat completions endpoint.",
       ),
       OptionArg(
         "max-steps",
@@ -239,6 +249,16 @@ fn api_key(matches : @argparse.Matches) -> String raise {
     fail("--api-key or DEEPSEEK is required for agent runs")
   }
   key
+}
+
+///|
+fn api_url(matches : @argparse.Matches) -> String? raise {
+  let url = value(matches, "api-url").trim().to_owned()
+  if url.is_empty() {
+    None
+  } else {
+    Some(url)
+  }
 }
 
 ///|
@@ -497,6 +517,7 @@ test "cli parses env backed options and task" {
   let parsed = cli_command().parse(argv=["write", "MoonBit"], env={
     "DEEPSEEK": "test-key",
     "DEEPSEEK_MODEL": "deepseek-v4-pro",
+    "OPENSEEK_API_URL": "https://proxy.example/v1/chat/completions",
     "OPENSEEK_MAX_STEPS": "120",
     "OPENSEEK_SYSTEM_PROMPT_FILE": "/tmp/prompt-a.md",
     "OPENSEEK_SYSTEM_PROMPT_ADDENDUM_FILE": "/tmp/prompt-b.md",
@@ -505,6 +526,8 @@ test "cli parses env backed options and task" {
   })
   assert_eq(api_key(parsed), "test-key")
   assert_eq(value(parsed, "model"), "deepseek-v4-pro")
+  guard api_url(parsed) is Some(url) else { fail("expected api url") }
+  assert_eq(url, "https://proxy.example/v1/chat/completions")
   assert_eq(max_steps(parsed), 120)
   assert_eq(value(parsed, "system-prompt-file"), "/tmp/prompt-a.md")
   assert_eq(value(parsed, "system-prompt-addendum-file"), "/tmp/prompt-b.md")
@@ -521,6 +544,7 @@ test "cli defaults model and max steps" {
   })
   assert_eq(api_key(parsed), "test-key")
   assert_eq(value(parsed, "model"), "deepseek-v4-pro")
+  assert_true(api_url(parsed) is None)
   assert_eq(max_steps(parsed), 1000)
   assert_true(session_id(parsed) is None)
   assert_eq(session_root(parsed), ".openseek")

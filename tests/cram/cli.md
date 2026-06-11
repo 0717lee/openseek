@@ -30,6 +30,7 @@ Options:
   --session-show                                               Print the durable session JSON for --session and exit.
   --api-key <api-key>                                          DeepSeek API key. [env: DEEPSEEK] [default: ]
   --model <model>                                              DeepSeek model: deepseek-v4-flash or deepseek-v4-pro. [env: DEEPSEEK_MODEL] [default: deepseek-v4-pro]
+  --api-url <api-url>                                          DeepSeek-compatible chat completions endpoint. [env: OPENSEEK_API_URL] [default: ]
   --max-steps <max-steps>                                      Maximum number of agent loop steps before stopping. [env: OPENSEEK_MAX_STEPS] [default: 1000]
   --thinking <thinking>                                        DeepSeek thinking mode: enabled or disabled. [env: OPENSEEK_THINKING] [default: enabled]
   --reasoning-effort <reasoning-effort>                        DeepSeek reasoning effort in thinking mode: high or max. [env: OPENSEEK_REASONING_EFFORT] [default: max]
