@@ -10,6 +10,8 @@ eval/*
 !eval/prompts/**
 !eval/prompt_tasks/
 !eval/prompt_tasks/**
+!eval/prompt_addenda/
+!eval/prompt_addenda/**
 !eval/prompt_reports/
 !eval/prompt_reports/**
 !eval/prompt_task/
