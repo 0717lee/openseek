@@ -229,16 +229,9 @@ async fn Client::chat_stream_attempt(
     }
     fail(message)
   }
-  // Same finality rule as chat_attempt: once the server answered 2xx, a
-  // malformed SSE payload must not re-run the completion. Only the JSON
-  // error classes are finalized — a mid-stream transport error keeps its
-  // type so the retry loop can still classify it (and the delivered-delta
-  // bail decides whether retrying is allowed).
-  read_chat_stream(client, on_content_delta~, on_reasoning_delta~) catch {
-    @json.ParseError(_) as error =>
-      fail("DeepSeek stream decode error: \{error}")
-    @json.JsonDecodeError(_) as error =>
-      fail("DeepSeek stream decode error: \{error}")
-    error => raise error
-  }
+  // The stream reader finalizes malformed SSE payloads at its parse site
+  // (see decode_sse_data in stream.mbt), so a mid-stream transport error
+  // reaches the retry loop with its own type and the delivered-delta bail
+  // decides whether retrying is allowed.
+  read_chat_stream(client, on_content_delta~, on_reasoning_delta~)
 }

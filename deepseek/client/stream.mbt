@@ -209,7 +209,12 @@ async fn flush_sse_event(
   }
   apply_stream_json(
     acc,
-    @json.parse(data),
+    // A malformed payload on an established 2xx stream is a final verdict:
+    // the completion already ran (and billed), so the retry loop must not
+    // re-run it. fail() converts the parse error to the non-retryable class.
+    @json.parse(data) catch {
+      error => fail("DeepSeek stream decode error: \{error}; data: \{data}")
+    },
     on_content_delta~,
     on_reasoning_delta~,
   )
