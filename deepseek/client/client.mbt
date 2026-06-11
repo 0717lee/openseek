@@ -92,6 +92,10 @@ async fn[T] Client::with_retries(
       // A plain Failure is one of our own final verdicts (non-retryable
       // status, malformed response body, truncated stream): never retry it.
       Failure::Failure(_) as error => raise error
+      // A malformed api_url fails identically every time, before any
+      // network I/O — retrying only repeats the configuration error.
+      @http.URIParseError::InvalidFormat as error => raise error
+      @http.URIParseError::UnsupportedProtocol(_) as error => raise error
       error if bail() || tries >= self.retry_attempts => raise error
       // Anything else is transport-shaped (connect refused, reset, DNS):
       // retry within budget.
