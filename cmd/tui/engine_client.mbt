@@ -64,6 +64,9 @@ async fn[G] EngineClient::start(
     ["--serve"],
     inherit_env=false,
     extra_env=child_env,
+    // The conversation's directory, not the TUI's: a resumed session runs
+    // where it was created (see `with_session_cwd`).
+    cwd=self.config.cwd,
     stdin=child_stdin,
     stdout=child_stdout,
     stderr=child_stderr,

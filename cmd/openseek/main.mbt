@@ -623,6 +623,30 @@ fn required_session_id(
 }
 
 ///|
+/// A fresh durable session, recording the engine's working directory so a
+/// later resume can re-root the conversation where it started.
+async fn new_session(
+  id : @agent_session.SessionId,
+  matches : @argparse.Matches,
+  model : @deepseek.Model,
+  workspace_root~ : String,
+) -> @agent_session.Session {
+  let cwd = if workspace_root == "." || workspace_root == "" {
+    match @env.current_dir() {
+      Some(cwd) => cwd
+      None => "."
+    }
+  } else {
+    workspace_root
+  }
+  Session(
+    id,
+    system_prompt=configured_system_prompt(matches, model, workspace_root~),
+    cwd~,
+  )
+}
+
+///|
 async fn load_or_new_session(
   store : @store.SessionStore,
   id : @agent_session.SessionId,
@@ -633,21 +657,11 @@ async fn load_or_new_session(
   if store.exists(id) {
     store.load(id) catch {
       @os_error.OSError(_) as error if error.is_ENOENT() =>
-        Session(
-          id,
-          system_prompt=configured_system_prompt(
-            matches,
-            model,
-            workspace_root~,
-          ),
-        )
+        new_session(id, matches, model, workspace_root~)
       error => raise error
     }
   } else {
-    Session(
-      id,
-      system_prompt=configured_system_prompt(matches, model, workspace_root~),
-    )
+    new_session(id, matches, model, workspace_root~)
   }
 }
 
@@ -1221,6 +1235,8 @@ async test "load_or_new_session defers first durable write until append" {
   let grounded_prompt = "system\n\n\{environment_prompt_section()}"
   assert_eq(created.system_prompt(), grounded_prompt)
   assert_eq(created.events().length(), 0)
+  // A fresh session records the engine's working directory for later resumes.
+  assert_true(created.cwd() == @env.current_dir())
   assert_false(store.exists(id))
   let with_event = store.append(created, User(UserMessage("hello")))
   assert_eq(with_event.events().length(), 1)
@@ -1228,6 +1244,7 @@ async test "load_or_new_session defers first durable write until append" {
   let loaded = load_or_new_session(store, id, parsed, V4Pro)
   assert_eq(loaded.system_prompt(), grounded_prompt)
   assert_eq(loaded.events().length(), 1)
+  assert_true(loaded.cwd() == @env.current_dir())
   @fs.rmdir(root, recursive=true)
 }
 

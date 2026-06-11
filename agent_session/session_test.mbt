@@ -119,6 +119,27 @@ test "session JSON round trips typed events" {
 }
 
 ///|
+test "session JSON round trips the working directory" {
+  let session = @agent_session.Session(
+    SessionId("s1"),
+    system_prompt="system",
+    cwd="/work/project",
+  ).append(User(UserMessage("hello")))
+  assert_true(session.cwd() is Some("/work/project"))
+  let decoded : @agent_session.Session = @json.from_json(session.to_json())
+  assert_true(decoded.cwd() is Some("/work/project"))
+  // A session persisted before directories were recorded has no `cwd` key and
+  // decodes to `None` — and re-encodes without inventing one.
+  let legacy : @agent_session.Session = @json.from_json(
+    @json.parse(
+      "{\"version\":1,\"id\":\"s1\",\"system_prompt\":\"system\",\"events\":[]}",
+    ),
+  )
+  assert_true(legacy.cwd() is None)
+  assert_false(legacy.to_json().stringify().contains("cwd"))
+}
+
+///|
 test "projection closes unresolved historical tool calls" {
   let session = @agent_session.Session(SessionId("s1"), system_prompt="system")
     .append(Assistant(AssistantMessage("", tool_calls=[sample_tool_call()])))

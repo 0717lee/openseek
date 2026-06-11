@@ -100,6 +100,67 @@ async test "store validates invalid ids before creating directories" {
 }
 
 ///|
+async test "store persists the session working directory in the header" {
+  let store = new_store()
+  let session = @agent_session.Session(
+    SessionId("cwd"),
+    system_prompt="system",
+    cwd="/work/project",
+  ).append(User(UserMessage("hello")))
+  store.create(session)
+  assert_true(store.load(SessionId("cwd")).cwd() is Some("/work/project"))
+  // Appending rewrites the header without losing the recorded directory.
+  let appended = store.append(
+    store.load(SessionId("cwd")),
+    Terminal(Finished("done")),
+  )
+  assert_true(appended.cwd() is Some("/work/project"))
+  assert_true(store.load(SessionId("cwd")).cwd() is Some("/work/project"))
+  // The header-only read agrees with the full load without replaying events.
+  assert_true(store.cwd(SessionId("cwd")) is Some("/work/project"))
+  // A header written before directories were recorded loads as `None`.
+  store.create(Session(SessionId("legacy"), system_prompt="system"))
+  assert_true(store.load(SessionId("legacy")).cwd() is None)
+  assert_true(store.cwd(SessionId("legacy")) is None)
+  // A missing session raises rather than masquerading as "no directory".
+  let _ = store.cwd(SessionId("missing")) catch {
+    _ => {
+      @fs.rmdir(store.root(), recursive=true)
+      return
+    }
+  }
+  fail("missing session yielded a working directory")
+}
+
+///|
+async test "a snapshot disagreeing on cwd is stale, not a silent rewrite" {
+  let store = new_store()
+  let session = @agent_session.Session(
+    SessionId("cwd-guard"),
+    system_prompt="system",
+    cwd="/work/project",
+  ).append(User(UserMessage("hello")))
+  store.create(session)
+  // Same id, prompt, and events — but rebuilt without the recorded
+  // directory. Appending through it must fail closed instead of rewriting
+  // the header with `cwd` dropped.
+  let forgetful = @agent_session.Session(
+    SessionId("cwd-guard"),
+    system_prompt="system",
+    events=session.events(),
+  )
+  let _ = store.append(forgetful, Terminal(Finished("done"))) catch {
+    error => {
+      assert_true("\{error}".contains("stale session snapshot"))
+      assert_true(store.cwd(SessionId("cwd-guard")) is Some("/work/project"))
+      @fs.rmdir(store.root(), recursive=true)
+      return
+    }
+  }
+  fail("a cwd-less snapshot rewrote the session header")
+}
+
+///|
 async test "store lists known sessions" {
   let store = new_store()
   assert_eq(store.list().length(), 0)

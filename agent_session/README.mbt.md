@@ -44,6 +44,7 @@ test "append leaves the original session unchanged" {
       #|{
       #|  id: { value: "example" },
       #|  system_prompt: "system",
+      #|  cwd: None,
       #|  events: <Vector: [{ sequence: 1, ts: 0, item: User({ content: "hello" }) }]>,
       #|  last_sequence: 1,
       #|}
@@ -176,6 +177,7 @@ test "summary replaces covered events in model projection only" {
       #|{
       #|  id: { value: "s1" },
       #|  system_prompt: "system",
+      #|  cwd: None,
       #|  events: <Vector:
       #|    [
       #|      { sequence: 1, ts: 0, item: User({ content: "old user" }) },
@@ -292,6 +294,7 @@ test "session JSON round-trips events" {
       #|{
       #|  id: { value: "s1" },
       #|  system_prompt: "system",
+      #|  cwd: None,
       #|  events: <Vector:
       #|    [
       #|      { sequence: 1, ts: 0, item: User({ content: "hello" }) },

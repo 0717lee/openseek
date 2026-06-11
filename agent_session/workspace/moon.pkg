@@ -1,0 +1,19 @@
+import {
+  "moonbitlang/async/fs",
+  "moonbitlang/async/os_error",
+  "moonbitlang/core/encoding/utf8",
+  "moonbitlang/core/json",
+}
+
+import {
+  "moonbitlang/async",
+  "moonbitlang/async/fs",
+} for "test"
+
+import {
+  "moonbitlang/async",
+} for "wbtest"
+
+warnings = "+unnecessary_annotation"
+
+supported_targets = "+native"

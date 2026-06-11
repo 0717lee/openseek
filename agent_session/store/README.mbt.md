@@ -99,6 +99,7 @@ async test "create and load a complete session" {
       #|{
       #|  id: { value: "demo" },
       #|  system_prompt: "system",
+      #|  cwd: None,
       #|  events: <Vector:
       #|    [
       #|      { sequence: 1, ts: 0, item: User({ content: "hello" }) },

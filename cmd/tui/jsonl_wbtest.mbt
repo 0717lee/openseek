@@ -23,7 +23,7 @@ async test "a shell command runs locally and posts its output" {
   let messages = @async.Queue(kind=Unbounded)
   // `echo` is the same on POSIX `sh` and Windows `pwsh`, so the platform shell
   // `@shell.collect_shell_output` picks runs this on either.
-  run_shell_command(1, "echo hello", messages)
+  run_shell_command(1, "echo hello", cwd=".", messages)
   // The only message is the local command result: a completed tool item titled
   // with the command, its stdout as a dimmed detail line. Nothing is sent to the
   // engine.

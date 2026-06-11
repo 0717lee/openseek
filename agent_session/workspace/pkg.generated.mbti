@@ -1,0 +1,31 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "bobzhang/openseek/agent_session/workspace"
+
+import {
+  "moonbitlang/core/debug",
+}
+
+// Values
+
+// Errors
+
+// Types and methods
+pub struct Workspace {
+  // private fields
+} derive(@debug.Debug)
+pub fn Workspace::path(Self) -> String
+pub fn Workspace::store_root(Self) -> String
+
+pub(all) struct WorkspaceHome(String) derive(@debug.Debug)
+pub async fn WorkspaceHome::listings(Self) -> Array[WorkspaceListing]
+pub async fn WorkspaceHome::open(Self, String, now_unix~ : Int64) -> Workspace
+
+type WorkspaceListing derive(@debug.Debug)
+pub fn WorkspaceListing::last_opened_unix(Self) -> Int64
+pub fn WorkspaceListing::path(Self) -> String
+pub fn WorkspaceListing::store_root(Self) -> String
+
+// Type aliases
+
+// Traits
+

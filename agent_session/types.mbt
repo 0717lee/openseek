@@ -411,6 +411,7 @@ pub fn SessionEvent::unix_ms(self : SessionEvent) -> Int64 {
 pub struct Session {
   priv id : SessionId
   priv system_prompt : String
+  priv cwd : String?
   priv events : @vector.Vector[SessionEvent]
   priv last_sequence : Int
 } derive(Debug)
@@ -419,13 +420,16 @@ pub struct Session {
 /// Build a session from identity, system prompt, and an optional event log.
 ///
 /// `id` is stored exactly as supplied. `system_prompt` becomes the first system
-/// message in `chat_messages` and is not changed by append operations. `events`
-/// is used as-is; this constructor does not check contiguity or sort events.
-/// `last_sequence` is recovered as the highest sequence number present, so the
-/// next append uses `last_sequence + 1`.
+/// message in `chat_messages` and is not changed by append operations. `cwd`
+/// records the working directory the conversation runs in, fixed at creation;
+/// omit it only when loading a session persisted before directories were
+/// recorded. `events` is used as-is; this constructor does not check contiguity
+/// or sort events. `last_sequence` is recovered as the highest sequence number
+/// present, so the next append uses `last_sequence + 1`.
 pub fn Session::Session(
   id : SessionId,
   system_prompt~ : String,
+  cwd? : String,
   events? : @vector.Vector[SessionEvent] = @vector.new(),
 ) -> Session {
   let mut last_sequence = 0
@@ -434,7 +438,7 @@ pub fn Session::Session(
       last_sequence = event.sequence
     }
   }
-  { id, system_prompt, events, last_sequence }
+  { id, system_prompt, cwd, events, last_sequence }
 }
 
 ///|
@@ -447,6 +451,13 @@ pub fn Session::id(self : Session) -> SessionId {
 /// Return the fixed system prompt for this conversation.
 pub fn Session::system_prompt(self : Session) -> String {
   self.system_prompt
+}
+
+///|
+/// The working directory the conversation runs in, fixed at creation, or
+/// `None` for a session persisted before directories were recorded.
+pub fn Session::cwd(self : Session) -> String? {
+  self.cwd
 }
 
 ///|
@@ -505,6 +516,7 @@ pub fn Session::append_event(
     {
       id: self.id,
       system_prompt: self.system_prompt,
+      cwd: self.cwd,
       events: self.events.push(event),
       last_sequence: event.sequence,
     },

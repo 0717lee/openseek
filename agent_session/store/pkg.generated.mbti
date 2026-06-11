@@ -25,6 +25,7 @@ pub fn SessionStore::SessionStore(String) -> Self
 pub async fn SessionStore::append(Self, @agent_session.Session, @agent_session.SessionItem) -> @agent_session.Session
 pub async fn SessionStore::compact(Self, @agent_session.Session, content~ : String, from_sequence~ : Int, to_sequence~ : Int) -> @agent_session.Session
 pub async fn SessionStore::create(Self, @agent_session.Session) -> Unit
+pub async fn SessionStore::cwd(Self, @agent_session.SessionId) -> String?
 pub fn SessionStore::event_log_file(Self, @agent_session.SessionId) -> String raise
 pub async fn SessionStore::exists(Self, @agent_session.SessionId) -> Bool
 pub fn SessionStore::header_file(Self, @agent_session.SessionId) -> String raise

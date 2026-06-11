@@ -17,18 +17,29 @@ A custom or recorded-stream engine that only speaks the original
 one-process-per-prompt protocol still works with `--engine-mode oneshot`
 (env `OPENSEEK_ENGINE_MODE`); steering is unavailable there.
 
-## Sessions
+## Workspaces and sessions
+
+Launching the TUI in a directory opens that directory's *workspace*, the way
+`code .` does. A workspace's sessions live in the project's own `.openseek/`
+— they travel (and die) with the project — while the global OpenSeek home at
+`~/.openseek` (override with `OPENSEEK_HOME`) only *indexes* which workspaces
+exist, so conversations are found again from anywhere, not only from the
+directory that created them. To open another project's workspace, launch the
+TUI there; `--workspace-list` prints known workspaces, most recently opened
+first.
 
 Every launch converses in a durable session — the engine only carries context
 between prompts through the session store, so without one each prompt would be
 an amnesiac one-shot. A generated id (`tui-YYYYMMDD-HHMMSS-mmm`, named in the
-startup banner) stores the conversation under `--session-root` (default
-`.openseek/`).
+startup banner) stores the conversation in the workspace's store.
 
-- `--continue` resumes the most recently active session.
+- `--continue` resumes the workspace's most recently active session.
 - `--session <id>` resumes (or creates) a specific one; combining it with
   `--continue` is rejected.
-- `openseek --session-list` (on the engine CLI) lists what is resumable.
+- `openseek --session-list --session-root <store>` (on the engine CLI) lists
+  what is resumable.
+- `--session-root <dir>` bypasses the workspace layer entirely and uses the
+  given store as-is (nothing is indexed under the home).
 
 ## Configuration
 

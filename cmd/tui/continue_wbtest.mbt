@@ -10,7 +10,9 @@ async test "--continue resolves the most recently active session" {
     argv=["--continue", "--session-root", root],
     env={ "DEEPSEEK": "test-key" },
   )
-  let config = with_latest_session(parse_config(parsed))
+  let config = with_latest_session(
+    parse_config(parsed, cwd=launch_cwd(), session_root=root),
+  )
   assert_eq(config.session_id.value(), "newer")
   // An empty store keeps the generated fresh session: nothing to continue,
   // so the TUI starts a new conversation instead of refusing to launch.
@@ -19,7 +21,9 @@ async test "--continue resolves the most recently active session" {
     argv=["--continue", "--session-root", empty_root],
     env={ "DEEPSEEK": "test-key" },
   )
-  let fresh = with_latest_session(parse_config(parsed))
+  let fresh = with_latest_session(
+    parse_config(parsed, cwd=launch_cwd(), session_root=empty_root),
+  )
   assert_true(fresh.session_id.value().has_prefix("tui-"))
   @fs.rmdir(root, recursive=true)
   @fs.rmdir(empty_root, recursive=true)
