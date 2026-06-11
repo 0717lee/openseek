@@ -205,10 +205,17 @@ async fn flush_sse_event(
   }
   let data = data_lines.join("\n").trim().to_owned()
   data_lines.clear()
-  // A complete event means the completion is producing output server-side
-  // — text, tool-call deltas, usage, or the terminal marker — even when
-  // nothing reaches the text callbacks. Signal before parsing: the retry
-  // decision must not depend on whether the payload decodes.
+  // A flushed data payload means the completion is producing output
+  // server-side — text, tool-call deltas, usage, or the terminal marker —
+  // even when nothing reaches the text callbacks. Signal before parsing:
+  // the retry decision must not depend on whether the payload decodes.
+  //
+  // Deliberately, this also fires for the EOF flush of an event whose
+  // blank-line terminator never arrived: the data line itself is model
+  // output (a text payload is even delivered to the callbacks below), so
+  // replaying the request would duplicate or regenerate it — the missing
+  // terminator does not change that. Only a drop with no data line at all
+  // (caught by the emptiness guard above) leaves the request retryable.
   on_stream_event()
   if data == "[DONE]" {
     return true
