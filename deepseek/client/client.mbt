@@ -28,9 +28,9 @@ pub struct Client {
 ///
 /// Transient failures — transport errors, HTTP 429, and 5xx — are retried up
 /// to `retry_attempts` total tries with exponential backoff starting at
-/// `retry_backoff_ms` (doubling per retry). Client errors other than 429
-/// never retry, and a streaming call never retries once a delta has been
-/// delivered.
+/// `retry_backoff_ms` (doubling per retry, capped at 60s). Client errors
+/// other than 429 never retry, and a streaming call never retries once a
+/// delta has been delivered.
 pub fn Client::Client(
   api_key~ : String,
   model? : @deepseek.Model = default_model,
@@ -68,42 +68,51 @@ priv suberror RetryableApiError {
 }
 
 ///|
-/// Run `attempt` up to `retry_attempts` times. `RetryableApiError` and
-/// transport errors back off and retry; cancellations and everything else
-/// (including non-retryable HTTP statuses, raised as plain failures by the
-/// attempt) propagate immediately. `bail` lets an attempt declare later
-/// retries pointless — chat_stream sets it once deltas were delivered, since
+/// Ceiling on a single backoff sleep. The doubling sequence from
+/// `retry_backoff_ms` stops growing here, so a generous retry budget cannot
+/// accumulate minutes-long sleeps between attempts.
+let max_backoff_ms : Int = 60_000
+
+///|
+/// Run `attempt` up to `retry_attempts` total tries via `@async.retry`
+/// (exponential backoff doubling from `retry_backoff_ms`, capped at
+/// `max_backoff_ms`; `max_retry` counts restarts, hence the -1).
+///
+/// The `fatal_error` classification: cancellations, plain failures (our own
+/// final verdicts — non-retryable HTTP statuses, malformed response bodies,
+/// truncated streams), and malformed-api_url parse errors (which fail
+/// identically every time, before any network I/O) propagate immediately;
+/// anything else is transport-shaped (connect refused, reset, DNS) and
+/// retries within budget. `bail` lets an attempt declare later retries
+/// pointless — chat_stream sets it once deltas were delivered, since
 /// replaying a half-consumed stream would duplicate content downstream.
+///
+/// A `RetryableApiError` that survives the budget (or bail) re-raises as a
+/// plain failure carrying the same text a non-retrying client would have
+/// produced, so the private marker type never escapes the package.
 async fn[T] Client::with_retries(
   self : Client,
   attempt : async () -> T,
   bail : () -> Bool,
 ) -> T {
-  for tries = 1; ; tries = tries + 1 {
-    return attempt() catch {
-      error if @async.is_being_cancelled() ||
-        @async.is_cancellation_error(error) => raise error
-      RetryableApiError(message) if tries >= self.retry_attempts || bail() =>
-        fail(message)
-      RetryableApiError(_) => {
-        @async.sleep(self.retry_backoff_ms << (tries - 1))
-        continue
-      }
-      // A plain Failure is one of our own final verdicts (non-retryable
-      // status, malformed response body, truncated stream): never retry it.
-      Failure::Failure(_) as error => raise error
-      // A malformed api_url fails identically every time, before any
-      // network I/O — retrying only repeats the configuration error.
-      @http.URIParseError::InvalidFormat as error => raise error
-      @http.URIParseError::UnsupportedProtocol(_) as error => raise error
-      error if bail() || tries >= self.retry_attempts => raise error
-      // Anything else is transport-shaped (connect refused, reset, DNS):
-      // retry within budget.
-      _ => {
-        @async.sleep(self.retry_backoff_ms << (tries - 1))
-        continue
-      }
-    }
+  @async.retry(
+    ExponentialDelay(
+      initial=self.retry_backoff_ms,
+      factor=2.0,
+      maximum=max_backoff_ms,
+    ),
+    max_retry=self.retry_attempts - 1,
+    fatal_error=error => {
+      bail() ||
+      @async.is_cancellation_error(error) ||
+      error is Failure::Failure(_) ||
+      error is @http.URIParseError::InvalidFormat ||
+      error is @http.URIParseError::UnsupportedProtocol(_)
+    },
+    attempt,
+  ) catch {
+    RetryableApiError(message) => fail(message)
+    error => raise error
   }
 }
 
