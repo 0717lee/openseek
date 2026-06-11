@@ -80,7 +80,14 @@ shows where steps and tokens went to waste):
   the agent loop fingerprints each coalesced update — volatile `events=`
   and `seq=` counters stripped — and skips appending when the substance
   matches the previous step's notice.)*
-- [ ] **First-class API-lookup tool (or document the probe recipe).** The
+- [ ] **First-class API-lookup tool (or document the probe recipe).**
+  *A/B result (2026-06-12, 5 flash trials per arm): a prompt addendum
+  teaching query forms, the no-results fallback ladder, multi-query
+  batching, and the probe recipe did NOT help — pass rate 3/5 → 2/5,
+  failed doc queries 11 → 18, zero multi-query adoption. Prompt-tail
+  instruction alone is insufficient for flash; next candidates are a
+  dedicated lookup tool with query rewriting, or folding examples into
+  the base prompt's tool docs rather than an addendum.* The
   model spent ~25 steps probing stdlib APIs: repeated `moon ide doc`
   queries that returned "No results found" (7KB of failed lookups in one
   result), 8 consecutive failed one-liner compile experiments against
