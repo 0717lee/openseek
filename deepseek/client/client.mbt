@@ -143,8 +143,16 @@ async fn Client::chat_attempt(
     }
     fail(message)
   }
-  let parsed = @json.parse(text)
-  @json.from_json(parsed)
+  // A 2xx body that fails to parse or decode is a final verdict, not a
+  // transport error: the completion already ran (and billed), so retrying
+  // would duplicate it for the same bad payload.
+  @json.from_json(
+    @json.parse(text) catch {
+      error => fail("DeepSeek response is not JSON: \{error}; body: \{text}")
+    },
+  ) catch {
+    error => fail("DeepSeek response decode error: \{error}; body: \{text}")
+  }
 }
 
 ///|
@@ -221,5 +229,16 @@ async fn Client::chat_stream_attempt(
     }
     fail(message)
   }
-  read_chat_stream(client, on_content_delta~, on_reasoning_delta~)
+  // Same finality rule as chat_attempt: once the server answered 2xx, a
+  // malformed SSE payload must not re-run the completion. Only the JSON
+  // error classes are finalized — a mid-stream transport error keeps its
+  // type so the retry loop can still classify it (and the delivered-delta
+  // bail decides whether retrying is allowed).
+  read_chat_stream(client, on_content_delta~, on_reasoning_delta~) catch {
+    @json.ParseError(_) as error =>
+      fail("DeepSeek stream decode error: \{error}")
+    @json.JsonDecodeError(_) as error =>
+      fail("DeepSeek stream decode error: \{error}")
+    error => raise error
+  }
 }
