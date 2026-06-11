@@ -476,11 +476,32 @@ async fn configured_system_prompt(
       $|\{addendum}
     )
   }
-  (
+  let tail = (
     $|\{with_addendum}
     $|
     $|\{environment_prompt_section()}
   )
+  // Workspace skills join the per-project tail after the environment
+  // section: like the cwd they vary per project (and change when skills are
+  // edited), so they must sit after all globally shared text to keep it
+  // prefix-cache hittable.
+  match skills_prompt_section_for_cwd() {
+    Some(section) =>
+      (
+        $|\{tail}
+        $|
+        $|\{section}
+      )
+    None => tail
+  }
+}
+
+///|
+/// The skills directory advertised to the model: `.openseek/skills` under
+/// the working directory, listing `<name>.md` files and `<name>/SKILL.md`
+/// layouts. Empty or absent directories advertise nothing.
+async fn skills_prompt_section_for_cwd() -> String? {
+  @agent_skill.skills_prompt_section(@agent_skill.discover_skills(".openseek/skills"))
 }
 
 ///|
