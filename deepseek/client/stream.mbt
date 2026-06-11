@@ -240,7 +240,11 @@ async fn read_chat_stream(
           ) {
           break
         }
-        fail("DeepSeek stream ended before [DONE]")
+        // A connection that dies before [DONE] is transport-shaped; raise
+        // the retryable class so the client's retry loop may re-run the
+        // request — its delivered-delta bail makes this final whenever any
+        // output already reached the consumer.
+        raise RetryableApiError("DeepSeek stream ended before [DONE]")
       }
       Some(raw) => {
         let trimmed = raw.trim()

@@ -140,6 +140,56 @@ async test "chat_stream retries a pre-stream 429 and then streams" {
 }
 
 ///|
+/// A 2xx connection that dies before any event is transport-shaped: with no
+/// delta delivered, the stream call retries and the second connection
+/// serves the full stream.
+async test "chat_stream retries a pre-delta stream drop" {
+  @async.with_task_group() <| group => {
+    let server = @http.Server(@socket.Addr::parse("127.0.0.1:0")) catch {
+      error => {
+        let message = "\{error}"
+        if message.contains("Operation not permitted") {
+          println("local TCP bind unavailable; skipping retry test")
+          return
+        }
+        raise error
+      }
+    }
+    let hits : Ref[Int] = { val: 0 }
+    group.spawn_bg(no_wait=true) <| () => {
+      server.run_forever(
+        (_request, body, conn) => {
+          let _ = body.read_all()
+          hits.val = hits.val + 1
+          conn.send_response(200, "OK", extra_headers={
+            "Content-Type": "text/event-stream",
+          })
+          if hits.val > 1 {
+            conn.write(
+              "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\n",
+            )
+            conn.write("data: [DONE]\n\n")
+          }
+        },
+        max_connections=8,
+      )
+    }
+    let url = "http://127.0.0.1:\{server.addr.port()}/chat/completions"
+    let client = @client.Client(
+      api_key="test-key",
+      api_url=url,
+      retry_attempts=3,
+      retry_backoff_ms=1,
+    )
+    let response = client.chat_stream([ChatMessage(User, content="hello")], on_content_delta=_ => {
+      ()
+    })
+    assert_eq(response.content, "ok")
+    assert_eq(hits.val, 2)
+  }
+}
+
+///|
 /// Once a delta has been delivered, a failure must surface instead of
 /// retrying — replaying the stream would hand the consumer duplicate
 /// content. The server streams one delta then ends without [DONE] on every
