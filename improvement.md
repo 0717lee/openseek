@@ -156,6 +156,21 @@ shows where steps and tokens went to waste):
 - [ ] **Cheapen the engine probe.** `engine_launchable` spawns
   `<engine> --help` on every TUI launch; cache the result per engine path
   (mtime-keyed) or accept the first spawn failing fast instead.
+- [x] **Skills: advertise markdown playbooks, load on demand.** *(Done:
+  workspace `.openseek/skills` plus a user-level library — default
+  `$HOME/.openseek/skills`, override `--global-skills-dir` /
+  `OPENSEEK_GLOBAL_SKILLS_DIR`, workspace shadows global by name — are
+  listed name/description/path in a `## Skills` prompt section; bodies load
+  through the existing `read` tool. Effectiveness A/B (2026-06-11, 5 flash
+  trials per arm, marketplace `anthropics/skills` brand-guidelines skill,
+  "branded landing page" task): skill arm read the skill unprompted 5/5 and
+  shipped the exact brand palette 5/5 (7–36 hex occurrences); no-skill
+  control hit the palette 0/5; negative control — skill advertised, haiku
+  task — read it 0/5, so the listing does not pollute unrelated tasks.
+  Listing cost ~1 line/skill; the matched read added one step. Eval
+  harnesses pin `OPENSEEK_GLOBAL_SKILLS_DIR` into the trial workspace so a
+  developer's personal library never leaks into trials.)* Follow-ups: TUI
+  surfacing of available skills, multi-skill libraries under noisier tasks.
 
 ## DeepSeek client
 

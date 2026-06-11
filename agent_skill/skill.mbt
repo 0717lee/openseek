@@ -165,7 +165,7 @@ pub fn skills_prompt_section(skills : Array[Skill]) -> String? {
   lines.push("## Skills")
   lines.push("")
   lines.push(
-    "This workspace defines reusable skills. When a task matches one, read its file with the read tool BEFORE doing the work, then follow it.",
+    "Reusable skills are available. When a task matches one, read its file with the read tool BEFORE doing the work, then follow it. Listed skill files are pre-approved reads even when they sit outside the working directory.",
   )
   for skill in skills {
     let description = if skill.description() == "" {
