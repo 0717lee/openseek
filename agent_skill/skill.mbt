@@ -112,14 +112,18 @@ pub async fn discover_skills(dir : String) -> Array[Skill] {
 async fn add_skill_file(skills : Array[Skill], path : String) -> Unit {
   let text = @fs.read_file(path).text() catch { _ => return }
   let fallback = match file_stem(path) {
-    "SKILL" =>
-      // For <name>/SKILL.md layouts the directory carries the name.
-      file_stem(
-        match path.rev_find("/") {
-          Some(index) => path[0:index].to_owned()
-          None => path
-        },
-      )
+    "SKILL" => {
+      // For <name>/SKILL.md layouts the directory carries the name — its
+      // full basename, dots included ("node.js" stays "node.js").
+      let parent = match path.rev_find("/") {
+        Some(index) => path[0:index].to_owned()
+        None => path
+      }
+      match parent.rev_find("/") {
+        Some(index) => parent[index + 1:].to_owned()
+        None => parent
+      }
+    }
     stem => stem
   }
   let (name, description) = parse_frontmatter(text, fallback)

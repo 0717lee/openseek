@@ -28,11 +28,14 @@ async test "discovery reads flat files and SKILL.md directories, sorted" {
   )
   // No frontmatter at all: still listed under its file stem.
   write_skill(dir + "/bare.md", "Just instructions, no header.")
+  // A dotted directory name survives intact ("node.js", not "node").
+  @fs.mkdir(dir + "/node.js", recursive=true)
+  write_skill(dir + "/node.js/SKILL.md", "Node skill body.")
   // A non-skill directory and a stray file are ignored.
   @fs.mkdir(dir + "/not-a-skill", recursive=true)
   write_skill(dir + "/notes.txt", "not markdown")
   let skills = @agent_skill.discover_skills(dir)
-  assert_eq(skills.length(), 3)
+  assert_eq(skills.length(), 4)
   // Sorted by name (String order is length-first, so "bare" precedes
   // "alpha"); the SKILL.md layout names itself after its directory.
   assert_eq(skills[0].name(), "bare")
@@ -40,8 +43,9 @@ async test "discovery reads flat files and SKILL.md directories, sorted" {
   assert_eq(skills[1].name(), "alpha")
   assert_eq(skills[1].description(), "Alpha steps.")
   assert_eq(skills[1].path(), dir + "/alpha/SKILL.md")
-  assert_eq(skills[2].name(), "zeta-protocol")
-  assert_eq(skills[2].description(), "How to zeta.")
+  assert_eq(skills[2].name(), "node.js")
+  assert_eq(skills[3].name(), "zeta-protocol")
+  assert_eq(skills[3].description(), "How to zeta.")
   @fs.rmdir(dir, recursive=true)
 }
 
