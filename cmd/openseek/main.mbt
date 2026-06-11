@@ -710,13 +710,53 @@ async test "configured system prompt can replace and append files" {
       "--system-prompt-file", prompt_path, "--system-prompt-addendum-file", addendum_path,
       "write", "MoonBit",
     ],
-    env={ "DEEPSEEK": "test-key" },
+    // The pinned global-skills dir keeps the exact-text assertion below
+    // machine-independent: without it, a developer's ~/.openseek/skills
+    // would append a ## Skills section (Codex review).
+    env={
+      "DEEPSEEK": "test-key",
+      "OPENSEEK_GLOBAL_SKILLS_DIR": dir + "/no-global-skills",
+    },
   )
   // Environment last: base and addendum form the cache-shared prefix; the
   // per-project cwd is the only divergence point.
   assert_eq(
     configured_system_prompt(parsed, V4Flash),
     "base prompt\n\n\naddendum\n\n\n\{environment_prompt_section()}",
+  )
+  @fs.rmdir(dir, recursive=true)
+}
+
+///|
+async test "configured system prompt advertises global skills" {
+  let dir = @fs.tmpdir(prefix="openseek-global-skills-")
+  @fs.mkdir(dir + "/skills", recursive=true)
+  @fs.write_file(
+    dir + "/skills/release.md",
+    (
+      #|---
+      #|name: release
+      #|description: Cut a release.
+      #|---
+      #|steps
+    ),
+    create_mode=CreateOrTruncate,
+  )
+  let prompt_path = dir + "/prompt.md"
+  @fs.write_file(prompt_path, "base\n", create_mode=CreateOrTruncate)
+  let parsed = cli_command().parse(
+    argv=["--system-prompt-file", prompt_path, "write", "MoonBit"],
+    env={
+      "DEEPSEEK": "test-key",
+      "OPENSEEK_GLOBAL_SKILLS_DIR": dir + "/skills",
+    },
+  )
+  let prompt = configured_system_prompt(parsed, V4Flash)
+  assert_true(prompt.contains("## Skills"))
+  assert_true(
+    prompt.contains(
+      "release — Cut a release. (file: \{dir}/skills/release.md)",
+    ),
   )
   @fs.rmdir(dir, recursive=true)
 }
@@ -746,7 +786,11 @@ async test "load_or_new_session defers first durable write until append" {
       "--session-root", root, "--session", "cli-test", "--system-prompt-file", prompt_path,
       "write", "MoonBit",
     ],
-    env={ "DEEPSEEK": "test-key" },
+    // Pinned so the exact-prompt assertions stay machine-independent.
+    env={
+      "DEEPSEEK": "test-key",
+      "OPENSEEK_GLOBAL_SKILLS_DIR": root + "/no-global-skills",
+    },
   )
   let created = load_or_new_session(store, id, parsed, V4Pro)
   let grounded_prompt = "system\n\n\{environment_prompt_section()}"
@@ -780,7 +824,11 @@ async test "load_or_new_session recovers empty interrupted session directory" {
       "write",
       "MoonBit",
     ],
-    env={ "DEEPSEEK": "test-key" },
+    // Pinned so the exact-prompt assertion stays machine-independent.
+    env={
+      "DEEPSEEK": "test-key",
+      "OPENSEEK_GLOBAL_SKILLS_DIR": root + "/no-global-skills",
+    },
   )
   let store = @store.SessionStore(root)
   let session = load_or_new_session(store, id, parsed, V4Pro)
