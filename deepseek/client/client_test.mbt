@@ -21,6 +21,8 @@ test "client debug redacts api key" {
       #|  api_url: "https://api.deepseek.com/chat/completions",
       #|  thinking: Some(Enabled),
       #|  reasoning_effort: Some(Max),
+      #|  retry_attempts: 3,
+      #|  retry_backoff_ms: 500,
       #|}
     ),
   )

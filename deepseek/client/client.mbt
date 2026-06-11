@@ -15,6 +15,8 @@ pub struct Client {
   api_url : String
   thinking : @deepseek.ThinkingMode?
   reasoning_effort : @deepseek.ReasoningEffort?
+  retry_attempts : Int
+  retry_backoff_ms : Int
 } derive(Debug(ignore=API_KEY))
 
 ///|
@@ -23,14 +25,82 @@ pub struct Client {
 /// `model` defaults to `deepseek-v4-pro`; `api_url` defaults to the DeepSeek
 /// chat completions endpoint. Pass `thinking` and `reasoning_effort` to control
 /// DeepSeek V4 thinking mode explicitly.
+///
+/// Transient failures — transport errors, HTTP 429, and 5xx — are retried up
+/// to `retry_attempts` total tries with exponential backoff starting at
+/// `retry_backoff_ms` (doubling per retry). Client errors other than 429
+/// never retry, and a streaming call never retries once a delta has been
+/// delivered.
 pub fn Client::Client(
   api_key~ : String,
   model? : @deepseek.Model = default_model,
   api_url? : String = default_api_url,
   thinking? : @deepseek.ThinkingMode? = None,
   reasoning_effort? : @deepseek.ReasoningEffort? = None,
+  retry_attempts? : Int = 3,
+  retry_backoff_ms? : Int = 500,
 ) -> Client {
-  { api_key, model, api_url, thinking, reasoning_effort }
+  {
+    api_key,
+    model,
+    api_url,
+    thinking,
+    reasoning_effort,
+    retry_attempts,
+    retry_backoff_ms,
+  }
+}
+
+///|
+/// A response status worth retrying: rate limiting or a server-side failure.
+/// Other 4xx are caller errors (bad key, malformed request) that a retry
+/// cannot fix.
+fn retryable_status(code : Int) -> Bool {
+  code == 429 || (code >= 500 && code < 600)
+}
+
+///|
+/// Marks an attempt failure the retry loop may absorb. Carries the
+/// already-formatted public failure message so the final attempt re-raises
+/// the same text a non-retrying client would have produced.
+priv suberror RetryableApiError {
+  RetryableApiError(String)
+}
+
+///|
+/// Run `attempt` up to `retry_attempts` times. `RetryableApiError` and
+/// transport errors back off and retry; cancellations and everything else
+/// (including non-retryable HTTP statuses, raised as plain failures by the
+/// attempt) propagate immediately. `bail` lets an attempt declare later
+/// retries pointless — chat_stream sets it once deltas were delivered, since
+/// replaying a half-consumed stream would duplicate content downstream.
+async fn[T] Client::with_retries(
+  self : Client,
+  attempt : async () -> T,
+  bail : () -> Bool,
+) -> T {
+  for tries = 1; ; tries = tries + 1 {
+    return attempt() catch {
+      error if @async.is_being_cancelled() ||
+        @async.is_cancellation_error(error) => raise error
+      RetryableApiError(message) if tries >= self.retry_attempts || bail() =>
+        fail(message)
+      RetryableApiError(_) => {
+        @async.sleep(self.retry_backoff_ms << (tries - 1))
+        continue
+      }
+      // A plain Failure is one of our own final verdicts (non-retryable
+      // status, malformed response body, truncated stream): never retry it.
+      Failure::Failure(_) as error => raise error
+      error if bail() || tries >= self.retry_attempts => raise error
+      // Anything else is transport-shaped (connect refused, reset, DNS):
+      // retry within budget.
+      _ => {
+        @async.sleep(self.retry_backoff_ms << (tries - 1))
+        continue
+      }
+    }
+  }
 }
 
 ///|
@@ -53,13 +123,25 @@ pub async fn Client::chat(
     reasoning_effort?=self.reasoning_effort,
     response_format?,
   )
+  self.with_retries(() => self.chat_attempt(body), () => false)
+}
+
+///|
+async fn Client::chat_attempt(
+  self : Client,
+  body : Json,
+) -> @deepseek.ChatResponse {
   let (resp, data) = @http.post(self.api_url, body, headers={
     "Content-Type": "application/json",
     "Authorization": "Bearer \{self.api_key}",
   })
   let text = data.text()
   guard resp.code >= 200 && resp.code < 300 else {
-    fail("DeepSeek API error \{resp.code}: \{text}")
+    let message = "DeepSeek API error \{resp.code}: \{text}"
+    if retryable_status(resp.code) {
+      raise RetryableApiError(message)
+    }
+    fail(message)
   }
   let parsed = @json.parse(text)
   @json.from_json(parsed)
@@ -90,6 +172,35 @@ pub async fn Client::chat_stream(
     stream=true,
     response_format?,
   )
+  // Once any delta reached a callback the consumer has observed partial
+  // output; a retry would replay it from the top. Bail out of the retry
+  // loop at that point and surface the failure instead.
+  let mut streamed = false
+  self.with_retries(
+    () => {
+      self.chat_stream_attempt(
+        body,
+        on_content_delta=delta => {
+          streamed = true
+          on_content_delta(delta)
+        },
+        on_reasoning_delta=delta => {
+          streamed = true
+          on_reasoning_delta(delta)
+        },
+      )
+    },
+    () => streamed,
+  )
+}
+
+///|
+async fn Client::chat_stream_attempt(
+  self : Client,
+  body : Json,
+  on_content_delta~ : async (String) -> Unit,
+  on_reasoning_delta~ : async (String) -> Unit,
+) -> @deepseek.ChatResponse {
   let client = @http.post_stream(self.api_url, headers={
     "Content-Type": "application/json",
     "Authorization": "Bearer \{self.api_key}",
@@ -104,7 +215,11 @@ pub async fn Client::chat_stream(
   let resp = client.end_request()
   guard resp.code >= 200 && resp.code < 300 else {
     let text = client.read_all().text()
-    fail("DeepSeek API error \{resp.code}: \{text}")
+    let message = "DeepSeek API error \{resp.code}: \{text}"
+    if retryable_status(resp.code) {
+      raise RetryableApiError(message)
+    }
+    fail(message)
   }
   read_chat_stream(client, on_content_delta~, on_reasoning_delta~)
 }
