@@ -94,6 +94,20 @@ shows where steps and tokens went to waste):
   `@strconv`, and one `moon ide` OCaml assertion crash. Better query
   ergonomics (or a documented snippet-eval recipe) converts that tail of
   failures into one or two steps.
+  *Second A/B (2026-06-12, 5 pro trials per arm, TOML task): verified
+  glob/multi-query/miss-recovery guidance folded into the prompts' tool
+  docs (the placement the first result pointed at) — successes 1/5 →
+  5/5, no 160-step cap overruns (was 2), doc calls 25 → 37 while misses
+  fell 23 → 17 (miss rate 0.92 → 0.46), package-listing exploration up
+  17 → 25. Promoted: every statement is CLI-verified and the trace
+  improved across the board. Attribution caveats recorded: n=5; the
+  taught glob (1 use) and multi-query (0 uses) forms themselves were
+  barely adopted — the absorbed lesson looks like "trust doc lookups,
+  recover by listing the package"; baseline's failures were step-cap
+  finish discipline and project misplacement, not lookup tails. A
+  dedicated lookup tool with query rewriting stays open as the
+  zero-adoption-risk endgame; schema-level cues beat prose (see the
+  multi-path read tool).*
 - [x] **Ground the model in its environment.** The system prompt never
   states the working directory, so models guess on step 1: in a 5-run
   batch, one agent passed `cwd="/workspace"` (rejected: does not exist),
