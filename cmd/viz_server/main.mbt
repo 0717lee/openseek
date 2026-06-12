@@ -299,7 +299,7 @@ async fn asset_reply(path : String, content_type : String) -> Reply {
 /// keeps that prefix, and the torn final line then fails to parse client-side
 /// and is reported as a benign truncated tail.
 async fn read_text_lossy(path : String) -> String {
-  @utf8.decode_lossy(@fs.read_file(path).binary()[:])
+  @utf8.decode_lossy(@fs.read_file(path).binary())
 }
 
 ///|

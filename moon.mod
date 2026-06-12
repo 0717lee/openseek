@@ -24,7 +24,7 @@ description = "DeepSeek-backed MoonBit coding agent"
 
 preferred_target = "native"
 
-warnings = "+missing_doc"
+warnings = "+missing_doc+unnecessary_view_op"
 
 rule(
   name: "md_to_mbt_string",
