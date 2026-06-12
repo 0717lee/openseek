@@ -1,7 +1,7 @@
 ///|
 test "decode direct moon_check arguments" {
   debug_inspect(
-    decode({
+    @decode.decode({
       "cwd": "/tmp",
       "target": "native",
       "warn_list": "+unnecessary_annotation",
@@ -25,7 +25,7 @@ test "decode direct moon_check arguments" {
 ///|
 test "decode ignores empty optional strings and false flags" {
   debug_inspect(
-    decode({ "cwd": "", "deny_warn": false, "fmt": null }),
+    @decode.decode({ "cwd": "", "deny_warn": false, "fmt": null }),
     content=(
       #|{
       #|  cwd: None,
@@ -41,7 +41,7 @@ test "decode ignores empty optional strings and false flags" {
 
 ///|
 test "decode rejects invalid target" {
-  try decode({ "target": "browser" }) catch {
+  try @decode.decode({ "target": "browser" }) catch {
     error => assert_true("\{error}".contains("arguments.target"))
   } noraise {
     _ => fail("invalid target decoded")
@@ -50,7 +50,7 @@ test "decode rejects invalid target" {
 
 ///|
 test "decode rejects non-object arguments" {
-  try decode(Json::null()) catch {
+  try @decode.decode(Json::null()) catch {
     error => assert_true("\{error}".contains("object arguments"))
   } noraise {
     _ => fail("non-object decoded")

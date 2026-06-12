@@ -1,7 +1,7 @@
 ///|
 test "decode doc action arguments" {
   debug_inspect(
-    decode({
+    @decode.decode({
       "action": "doc",
       "cwd": "/tmp",
       "query": "String::replace_all",
@@ -25,7 +25,7 @@ test "decode doc action arguments" {
 ///|
 test "decode loc-aware navigation arguments" {
   debug_inspect(
-    decode({
+    @decode.decode({
       "action": "peek_def",
       "query": "render",
       "loc": "lib.mbt:14:8",
@@ -49,7 +49,7 @@ test "decode loc-aware navigation arguments" {
 ///|
 test "decode outline path" {
   debug_inspect(
-    decode({
+    @decode.decode({
       "action": "outline",
       "path": "agent_tool/moon_ide",
       "max_output_chars": 42,
@@ -72,7 +72,11 @@ test "decode outline path" {
 ///|
 test "decode caps oversized output limit" {
   debug_inspect(
-    decode({ "action": "doc", "query": "String", "max_output_chars": 999999 }),
+    @decode.decode({
+      "action": "doc",
+      "query": "String",
+      "max_output_chars": 999999,
+    }),
     content=(
       #|{
       #|  action: "doc",
@@ -90,7 +94,7 @@ test "decode caps oversized output limit" {
 
 ///|
 test "decode rejects invalid action" {
-  try decode({ "action": "rename", "query": "old_name" }) catch {
+  try @decode.decode({ "action": "rename", "query": "old_name" }) catch {
     error => assert_true("\{error}".contains("arguments.action"))
   } noraise {
     _ => fail("invalid action decoded")
@@ -99,7 +103,7 @@ test "decode rejects invalid action" {
 
 ///|
 test "decode rejects missing required fields" {
-  try decode({ "action": "hover", "query": "Widget" }) catch {
+  try @decode.decode({ "action": "hover", "query": "Widget" }) catch {
     error => assert_true("\{error}".contains("arguments.loc"))
   } noraise {
     _ => fail("hover without loc decoded")
@@ -108,7 +112,7 @@ test "decode rejects missing required fields" {
 
 ///|
 test "decode rejects non-object arguments" {
-  try decode(Json::null()) catch {
+  try @decode.decode(Json::null()) catch {
     error => assert_true("\{error}".contains("object arguments"))
   } noraise {
     _ => fail("non-object decoded")

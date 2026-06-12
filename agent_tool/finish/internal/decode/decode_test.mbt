@@ -1,7 +1,7 @@
 ///|
 test "decode keeps answer" {
   debug_inspect(
-    decode({ "answer": "all done" }),
+    @decode.decode({ "answer": "all done" }),
     content=(
       #|{ answer: "all done" }
     ),
@@ -11,7 +11,7 @@ test "decode keeps answer" {
 ///|
 test "decode preserves multiline answer" {
   debug_inspect(
-    decode({ "answer": "line one\nline two" }),
+    @decode.decode({ "answer": "line one\nline two" }),
     content=(
       #|{ answer: "line one\nline two" }
     ),
@@ -21,7 +21,7 @@ test "decode preserves multiline answer" {
 ///|
 test "decode ignores extra fields" {
   debug_inspect(
-    decode({ "answer": "done", "extra": "ignored" }),
+    @decode.decode({ "answer": "done", "extra": "ignored" }),
     content=(
       #|{ answer: "done" }
     ),
@@ -31,19 +31,19 @@ test "decode ignores extra fields" {
 ///|
 test "decode falls back to empty answer" {
   debug_inspect(
-    decode({}),
+    @decode.decode({}),
     content=(
       #|{ answer: "" }
     ),
   )
   debug_inspect(
-    decode({ "answer": 42 }),
+    @decode.decode({ "answer": 42 }),
     content=(
       #|{ answer: "" }
     ),
   )
   debug_inspect(
-    decode(Json::null()),
+    @decode.decode(Json::null()),
     content=(
       #|{ answer: "" }
     ),

@@ -1,7 +1,11 @@
 ///|
 test "decode valid edit input" {
   debug_inspect(
-    decode({ "path": "file.mbt", "old_string": "old", "new_string": "new" }),
+    @decode.decode({
+      "path": "file.mbt",
+      "old_string": "old",
+      "new_string": "new",
+    }),
     content=(
       #|{
       #|  path: "file.mbt",
@@ -16,7 +20,7 @@ test "decode valid edit input" {
 ///|
 test "decode replace_all flag" {
   debug_inspect(
-    decode({
+    @decode.decode({
       "path": "file.mbt",
       "old_string": "old",
       "new_string": "new",
@@ -36,7 +40,7 @@ test "decode replace_all flag" {
 ///|
 test "decode rejects invalid replace_all" {
   try
-    decode({
+    @decode.decode({
       "path": "file.mbt",
       "old_string": "old",
       "new_string": "new",
@@ -51,12 +55,12 @@ test "decode rejects invalid replace_all" {
 
 ///|
 test "decode rejects missing required fields" {
-  try decode({ "path": "file.mbt" }) catch {
+  try @decode.decode({ "path": "file.mbt" }) catch {
     error => assert_true("\{error}".contains("arguments.old_string"))
   } noraise {
     _ => fail("missing old_string decoded")
   }
-  try decode({ "path": "file.mbt", "old_string": "old" }) catch {
+  try @decode.decode({ "path": "file.mbt", "old_string": "old" }) catch {
     error => assert_true("\{error}".contains("arguments.new_string"))
   } noraise {
     _ => fail("missing new_string decoded")
@@ -65,7 +69,7 @@ test "decode rejects missing required fields" {
 
 ///|
 test "decode rejects non-object arguments" {
-  try decode(Json::null()) catch {
+  try @decode.decode(Json::null()) catch {
     error => assert_true("\{error}".contains("object arguments"))
   } noraise {
     _ => fail("non-object decoded")

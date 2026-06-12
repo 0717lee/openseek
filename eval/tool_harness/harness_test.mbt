@@ -1,6 +1,6 @@
 ///|
 async test "deterministic harness exercises every tool" {
-  let report = run_harness()
+  let report = @tool_harness.run_harness()
   assert_eq(report.rows.length(), 8)
   assert_eq(report.successes(), 8)
   assert_true(report.all_passed())
@@ -14,7 +14,7 @@ async test "deterministic harness exercises every tool" {
 ///|
 async test "harness report can be written for inspection" {
   let root = @fs.tmpdir(prefix="openseek-tool-harness-report-")
-  let report = run_harness()
+  let report = @tool_harness.run_harness()
   report.write_files(root)
   let markdown = @fs.read_file(root + "/report.md").text()
   let json = @fs.read_file(root + "/report.json").text()

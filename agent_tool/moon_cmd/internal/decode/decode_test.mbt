@@ -1,7 +1,7 @@
 ///|
 test "decode direct moon command arguments" {
   debug_inspect(
-    decode({
+    @decode.decode({
       "command": "run",
       "cwd": "/tmp",
       "target": "native",
@@ -30,7 +30,7 @@ test "decode direct moon command arguments" {
 ///|
 test "decode singular and plural argument fields" {
   debug_inspect(
-    decode({
+    @decode.decode({
       "command": "test",
       "arg": "--filter",
       "args": ["parser::*", "--quiet"],
@@ -56,7 +56,7 @@ test "decode singular and plural argument fields" {
 
 ///|
 test "decode rejects invalid command" {
-  try decode({ "command": "new" }) catch {
+  try @decode.decode({ "command": "new" }) catch {
     error => assert_true("\{error}".contains("arguments.command"))
   } noraise {
     _ => fail("invalid command decoded")
@@ -65,7 +65,7 @@ test "decode rejects invalid command" {
 
 ///|
 test "decode rejects program args outside run" {
-  try decode({ "command": "test", "program_args": ["ignored"] }) catch {
+  try @decode.decode({ "command": "test", "program_args": ["ignored"] }) catch {
     error => assert_true("\{error}".contains("arguments.program_args"))
   } noraise {
     _ => fail("invalid program args decoded")
@@ -74,7 +74,7 @@ test "decode rejects program args outside run" {
 
 ///|
 test "decode rejects stdin outside run" {
-  try decode({ "command": "test", "stdin": "input" }) catch {
+  try @decode.decode({ "command": "test", "stdin": "input" }) catch {
     error => assert_true("\{error}".contains("arguments.stdin"))
   } noraise {
     _ => fail("invalid stdin decoded")
@@ -83,7 +83,7 @@ test "decode rejects stdin outside run" {
 
 ///|
 test "decode rejects target for fmt" {
-  try decode({ "command": "fmt", "target": "native" }) catch {
+  try @decode.decode({ "command": "fmt", "target": "native" }) catch {
     error => assert_true("\{error}".contains("arguments.target"))
   } noraise {
     _ => fail("invalid fmt target decoded")
@@ -92,7 +92,7 @@ test "decode rejects target for fmt" {
 
 ///|
 test "decode rejects moon test update without classification" {
-  try decode({ "command": "test", "arg": "--update" }) catch {
+  try @decode.decode({ "command": "test", "arg": "--update" }) catch {
     error => assert_true("\{error}".contains("arguments.test_update_kind"))
   } noraise {
     _ => fail("unclassified test update decoded")
@@ -102,7 +102,7 @@ test "decode rejects moon test update without classification" {
 ///|
 test "decode rejects moon test update without reason" {
   try
-    decode({
+    @decode.decode({
       "command": "test",
       "arg": "--update",
       "test_update_kind": "stale_snapshot",
@@ -117,7 +117,7 @@ test "decode rejects moon test update without reason" {
 ///|
 test "decode accepts classified moon test update" {
   debug_inspect(
-    decode({
+    @decode.decode({
       "command": "test",
       "arg": "--update",
       "test_update_kind": "stale_snapshot",
@@ -143,7 +143,7 @@ test "decode accepts classified moon test update" {
 ///|
 test "decode parses and caps output limit" {
   debug_inspect(
-    decode({ "command": "check", "max_output_chars": 999999 }),
+    @decode.decode({ "command": "check", "max_output_chars": 999999 }),
     content=(
       #|{
       #|  command: "check",
@@ -163,7 +163,7 @@ test "decode parses and caps output limit" {
 
 ///|
 test "decode rejects non-object arguments" {
-  try decode(Json::null()) catch {
+  try @decode.decode(Json::null()) catch {
     error => assert_true("\{error}".contains("object arguments"))
   } noraise {
     _ => fail("non-object decoded")

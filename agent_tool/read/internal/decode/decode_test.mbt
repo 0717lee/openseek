@@ -1,7 +1,7 @@
 ///|
 test "decode valid read input" {
   debug_inspect(
-    decode({
+    @decode.decode({
       "path": "file.mbt",
       "start_line": 3,
       "max_lines": 4,
@@ -21,7 +21,7 @@ test "decode valid read input" {
 ///|
 test "decode defaults optional limits" {
   debug_inspect(
-    decode({ "path": "file.mbt" }),
+    @decode.decode({ "path": "file.mbt" }),
     content=(
       #|{
       #|  paths: ["file.mbt"],
@@ -35,7 +35,7 @@ test "decode defaults optional limits" {
 
 ///|
 test "decode rejects missing path" {
-  try decode({}) catch {
+  try @decode.decode({}) catch {
     error => assert_true("\{error}".contains("arguments.path"))
   } noraise {
     _ => fail("missing path decoded")
@@ -44,7 +44,7 @@ test "decode rejects missing path" {
 
 ///|
 test "decode rejects invalid limits" {
-  try decode({ "path": "file.mbt", "max_lines": 0 }) catch {
+  try @decode.decode({ "path": "file.mbt", "max_lines": 0 }) catch {
     error =>
       assert_true(
         "\{error}".contains("arguments.max_lines to be a positive number"),
@@ -56,7 +56,7 @@ test "decode rejects invalid limits" {
 
 ///|
 test "decode rejects non-object arguments" {
-  try decode(Json::null()) catch {
+  try @decode.decode(Json::null()) catch {
     error => assert_true("\{error}".contains("object arguments"))
   } noraise {
     _ => fail("non-object decoded")

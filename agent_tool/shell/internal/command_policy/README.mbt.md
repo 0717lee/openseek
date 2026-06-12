@@ -56,21 +56,37 @@ every valid shell construct. Known hardening work is tracked in
 ```moonbit check
 ///|
 test "command policy blocks structured MoonBit validation commands" {
-  assert_true(moonbit_command_policy_error("moon check") is Some(_))
-  assert_true(moonbit_command_policy_error("moon test --update") is None)
   assert_true(
-    moonbit_command_policy_error("DEEPSEEK_MODEL=x moon run cmd/main") is None,
+    @command_policy.moonbit_command_policy_error("moon check") is Some(_),
   )
-  assert_true(moonbit_command_policy_error("cd demo && moon check") is Some(_))
+  assert_true(
+    @command_policy.moonbit_command_policy_error("moon test --update") is None,
+  )
+  assert_true(
+    @command_policy.moonbit_command_policy_error(
+      "DEEPSEEK_MODEL=x moon run cmd/main",
+    )
+    is None,
+  )
+  assert_true(
+    @command_policy.moonbit_command_policy_error("cd demo && moon check")
+    is Some(_),
+  )
 }
 ```
 
 ```moonbit check
 ///|
 test "command policy allows non guarded shell commands" {
-  assert_true(moonbit_command_policy_error("moon --version") is None)
-  assert_true(moonbit_command_policy_error("git status --short") is None)
-  assert_true(moonbit_command_policy_error("printf hi | wc -c") is None)
+  assert_true(
+    @command_policy.moonbit_command_policy_error("moon --version") is None,
+  )
+  assert_true(
+    @command_policy.moonbit_command_policy_error("git status --short") is None,
+  )
+  assert_true(
+    @command_policy.moonbit_command_policy_error("printf hi | wc -c") is None,
+  )
 }
 ```
 
