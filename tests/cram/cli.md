@@ -115,7 +115,7 @@ $ sh <<'EOF'
 > cd "$tmp"
 > if env DEEPSEEK=test-key openseek.exe --api-url "http://127.0.0.1:9/chat/completions" "say hi" > out.jsonl 2>/dev/null; then echo exit-zero; else echo exit-non-zero; fi
 > grep -c '"event":"session_started"' out.jsonl
-> env -u DEEPSEEK openseek.exe --session-list | cut -f1 | sed -E 's/cli-[0-9]{8}-[0-9]{6}-[0-9]{3}/cli-<stamp>/'
+> env -u DEEPSEEK openseek.exe --session-list | cut -f1 | sed -E 's/cli-[0-9]{8}-[0-9]{6}-[0-9]{3}(-[A-Za-z0-9]+)?/cli-<stamp>/'
 > rm -rf "$tmp"
 > EOF
 exit-non-zero
@@ -141,6 +141,15 @@ Asking for both behaviors at once is rejected before any work happens.
 
 ```mooncram
 $ env DEEPSEEK=test-key openseek.exe --session demo --no-session "say hi" 2>&1
+error: --no-session contradicts --session; pick one behavior
+[1]
+```
+
+The same contradiction is caught in every mode — including `--serve`, which
+loads its session store on its own code path.
+
+```mooncram
+$ printf '' | env DEEPSEEK=test-key openseek.exe --serve --session demo --no-session 2>&1
 error: --no-session contradicts --session; pick one behavior
 [1]
 ```
