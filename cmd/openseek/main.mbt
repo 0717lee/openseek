@@ -74,19 +74,32 @@ async fn run_cli() -> Unit {
           }
         let store = @store.SessionStore(session_root(matches))
         let session = load_or_new_session(store, id, matches, model)
-        ignore(
-          @agent.run_turn_with_append(
-            api_key,
-            model,
-            session,
-            task,
-            append_item=(session, item) => store.append(session, item),
-            max_steps~,
-            thinking~,
-            reasoning_effort~,
-            api_url?,
-          ),
-        )
+        // Collection runs on success AND failure — failed runs are the
+        // diagnostically interesting ones. `defer` cannot call async
+        // functions, so the turn's outcome is held while the upload runs,
+        // then re-raised.
+        let turn_error : Error? = try {
+          ignore(
+            @agent.run_turn_with_append(
+              api_key,
+              model,
+              session,
+              task,
+              append_item=(session, item) => store.append(session, item),
+              max_steps~,
+              thinking~,
+              reasoning_effort~,
+              api_url?,
+            ),
+          )
+          None
+        } catch {
+          error => Some(error)
+        }
+        upload_session(matches, model, id)
+        if turn_error is Some(error) {
+          raise error
+        }
       }
     }
   })
@@ -243,6 +256,13 @@ fn cli_command() -> @argparse.Command {
         env="OPENSEEK_GLOBAL_SKILLS_DIR",
         default_values=[""],
         about="User-level skills directory advertised alongside workspace skills; empty means $HOME/.openseek/skills.",
+      ),
+      OptionArg(
+        "upload",
+        long="upload",
+        env="OPENSEEK_UPLOAD",
+        default_values=[""],
+        about="Copy the finished run's session for collection: 'local' ($HOME/.openseek/sessions) or a directory. Off by default; failed runs upload too.",
       ),
       OptionArg(
         "session",

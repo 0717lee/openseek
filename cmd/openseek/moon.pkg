@@ -15,6 +15,7 @@ import {
   "moonbitlang/core/argparse",
   "moonbitlang/core/encoding/utf8",
   "moonbitlang/core/env",
+  "moonbitlang/core/json",
   "moonbitlang/core/string",
   "moonbitlang/x/sys",
   "moonbitlang/x/time",

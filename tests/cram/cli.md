@@ -38,6 +38,7 @@ Options:
   --system-prompt-file <system-prompt-file>                    Read the complete system prompt from this file instead of the built-in prompt. [env: OPENSEEK_SYSTEM_PROMPT_FILE] [default: ]
   --system-prompt-addendum-file <system-prompt-addendum-file>  Append this file to the selected system prompt for prompt experiments. [env: OPENSEEK_SYSTEM_PROMPT_ADDENDUM_FILE] [default: ]
   --global-skills-dir <global-skills-dir>                      User-level skills directory advertised alongside workspace skills; empty means $HOME/.openseek/skills. [env: OPENSEEK_GLOBAL_SKILLS_DIR] [default: ]
+  --upload <upload>                                            Copy the finished run's session for collection: 'local' ($HOME/.openseek/sessions) or a directory. Off by default; failed runs upload too. [env: OPENSEEK_UPLOAD] [default: ]
   --session <session>                                          Create or resume this durable session id. [env: OPENSEEK_SESSION] [default: ]
   --session-root <session-root>                                Directory containing durable OpenSeek sessions. [env: OPENSEEK_SESSION_ROOT] [default: .openseek]
   --session-compact-file <session-compact-file>                Read summary text from this file, append it to --session, and exit. [default: ]
@@ -135,6 +136,37 @@ $ sh <<'EOF'
 > rm -rf "$tmp"
 > EOF
 ephemeral
+```
+
+## Collecting Sessions With --upload
+
+For data collection across many runs, `--upload local` copies the finished
+run's session — failed runs included, since those are the diagnostically
+interesting ones — into the central `$HOME/.openseek/sessions/` archive,
+alongside a `meta.json` sidecar recording provenance the session format
+itself does not store: model, thinking/effort settings, source workspace,
+and the run's terminal outcome. Any other value is treated as a target
+directory (`<dir>/sessions/<id>/`), so an experiment can collect all its
+trials into one place; either target then works directly as a
+`--session-root` for the viz server and `--session-list`. Collection is off
+by default and best-effort: an upload problem never fails the run.
+
+```mooncram
+$ sh <<'EOF'
+> tmp=$(mktemp -d)
+> mkdir -p "$tmp/home" "$tmp/ws"
+> cd "$tmp/ws"
+> env HOME="$tmp/home" DEEPSEEK=test-key openseek.exe --api-url "http://127.0.0.1:9/chat/completions" --upload local "say hi" >/dev/null 2>&1
+> ls "$tmp/home/.openseek/sessions" | sed -E 's/cli-[0-9]{8}-[0-9]{6}-[0-9]{3}(-[A-Za-z0-9]+)?/cli-<stamp>/'
+> find "$tmp/home/.openseek/sessions" -type f | sed 's|.*/||' | sort
+> grep -o '"outcome":"[a-z]*"' "$tmp/home/.openseek/sessions"/*/meta.json
+> rm -rf "$tmp"
+> EOF
+cli-<stamp>
+events.jsonl
+meta.json
+session.json
+"outcome":"failed"
 ```
 
 Asking for both behaviors at once is rejected before any work happens.

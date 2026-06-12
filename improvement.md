@@ -163,6 +163,14 @@ shows where steps and tokens went to waste):
 - [ ] **Stale `session.lock` recovery.** Verify what happens when an engine
   crashes while holding the lock, and document (or implement) the recovery
   path.
+- [ ] **Failing runs lose their stdout log tail.** Observed while
+  verifying --upload (2026-06-12): on a turn that raises (e.g. transport
+  failure), stdout JSONL ends at the last agent_step — no error event, no
+  session_uploaded event — although the durable session does record the
+  terminal event. The drain comment claims the close/drain pair never loses
+  the terminal event, but a raising body appears to cancel the drain before
+  the queued tail flushes. The durable session compensates for diagnostics,
+  but the live stream should not go silent exactly when things break.
 - [ ] **Flush the JSONL queue on hard crash.** The stdout drain trades
   crash-tail durability for purity (no C stub): lines queued but unwritten
   when the process aborts are lost. A panic hook that drains synchronously
