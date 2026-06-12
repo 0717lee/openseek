@@ -14,7 +14,6 @@ test "decode valid read input" {
       #|  max_lines: Some(4),
       #|  max_output_chars: 50000,
       #|}
-
     ),
   )
 }
@@ -30,7 +29,6 @@ test "decode defaults optional limits" {
       #|  max_lines: None,
       #|  max_output_chars: 12000,
       #|}
-
     ),
   )
 }

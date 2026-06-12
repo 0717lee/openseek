@@ -106,25 +106,32 @@ async fn read_file(input : @decode.ReadInput) -> @agent_tool.ToolAction {
 /// lines, sharing the call's `max_output_chars` budget in argument order. A
 /// file that fails to read contributes an inline error block — the other
 /// files still return, mirroring how `moon ide doc` reports per-query misses
-/// — and `is_error` only flips when every file failed or the budget
-/// truncated content (so the model knows to re-read the tail individually).
+/// — and `is_error` only flips when every file failed or the budget cut
+/// content (so the model knows to re-read the tail individually).
+///
+/// Every emitted block — header, error text, separators — counts against the
+/// budget, not just file content: otherwise a long paths list of headers or
+/// missing-file errors would outgrow the cap that exists to protect the
+/// context (Codex review). Once the budget is exhausted the unread tail
+/// collapses into a single skipped-files marker, so output stays bounded no
+/// matter how many paths the call names.
 async fn read_files(input : @decode.ReadInput) -> @agent_tool.ToolAction {
   let blocks : Array[String] = []
   let mut remaining = input.max_output_chars
   let mut failures = 0
   let mut truncated_any = false
+  let skipped : Array[String] = []
   for path in input.paths {
     if remaining <= 0 {
-      truncated_any = true
-      blocks.push(
-        "path=\{path}\nskipped=true (max_output_chars budget exhausted; read this file individually)",
-      )
+      skipped.push(path)
       continue
     }
     let content = @fs.read_file(path).text() catch {
       error => {
         failures = failures + 1
-        blocks.push("error reading \{path}: \{error}")
+        let block = "error reading \{path}: \{error}"
+        remaining = remaining - block.length() - 2
+        blocks.push(block)
         continue
       }
     }
@@ -134,9 +141,24 @@ async fn read_files(input : @decode.ReadInput) -> @agent_tool.ToolAction {
     if char_truncated {
       truncated_any = true
     }
-    remaining = remaining - capped.length()
+    let block = read_header(path, content, selection, capped, char_truncated) +
+      capped
+    remaining = remaining - block.length() - 2
+    blocks.push(block)
+  }
+  if skipped.length() > 0 {
+    truncated_any = true
+    // Preview only a handful of names: the marker itself must stay bounded
+    // or a thousand-path call would flood the context through its skip list.
+    let preview_count = if skipped.length() < 5 { skipped.length() } else { 5 }
+    let preview = skipped[0:preview_count].join(", ")
+    let rest = if skipped.length() > 5 {
+      " and \{skipped.length() - 5} more"
+    } else {
+      ""
+    }
     blocks.push(
-      read_header(path, content, selection, capped, char_truncated) + capped,
+      "skipped \{skipped.length()} file(s), max_output_chars budget exhausted — read them individually: \{preview}\{rest}",
     )
   }
   @agent_tool.ToolAction::respond(
@@ -384,8 +406,28 @@ async test "the output budget is shared and exhaustion is reported" {
   guard result is Respond(output) else { fail("expected Respond") }
   assert_true(output.is_error)
   assert_true(output.content.contains("0123456789"))
-  assert_true(output.content.contains("skipped=true"))
+  assert_true(output.content.contains("skipped 1 file(s)"))
+  assert_true(output.content.contains(b))
   assert_false(output.content.contains("abcdefghij"))
+}
+
+///|
+async test "headers and error blocks count against the budget" {
+  // 40 missing paths with a small budget: error blocks consume the budget,
+  // the tail collapses into one bounded marker, and the total output stays
+  // near the cap instead of growing per path (Codex review).
+  let paths : Array[Json] = []
+  for i in 0..<40 {
+    paths.push(Json::string("/tmp/openseek-read-flood-\{i}"))
+  }
+  let result = execute({ "paths": Json::array(paths), "max_output_chars": 300 })
+  guard result is Respond(output) else { fail("expected Respond") }
+  assert_true(output.is_error)
+  assert_true(output.content.contains("skipped"))
+  assert_true(output.content.contains("and"))
+  // Bounded: the budget plus one overshooting block plus the skip marker,
+  // far below what 40 unbudgeted error blocks (~70 chars each) would emit.
+  assert_true(output.content.length() < 1200)
 }
 
 ///|

@@ -23,8 +23,11 @@ one round trip at a time — each a full model turn. `paths` collapses those
 into one call: every file returns as its own headered block, a file that
 fails to read reports inline while the others still land (mirroring how
 `moon ide doc` reports per-query misses), and the `max_output_chars` budget
-is shared across the call in argument order. Line-range options stay
-single-file: a range only means something against one file.
+is shared across the call in argument order — headers, separators, and error
+blocks count against it too, and an exhausted budget collapses the unread
+tail into one bounded skipped-files marker, so output stays near the cap no
+matter how many paths the call names. Line-range options stay single-file: a
+range only means something against one file.
 
 ## API Style
 
