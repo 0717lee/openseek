@@ -20,10 +20,13 @@ dev_build(
   output: "generated_flash_prompt.mbt",
 )
 
+// -unused_default_value: the Label and Optional Parameters section
+// demonstrates the f_misuse anti-pattern on purpose; "fixing" the example
+// would change the prompt text the model sees.
 // -missing_doc: the flagged symbols live in the system prompt's example code
 // blocks; doc comments there would change the prompt text the model sees,
 // which is an eval'd prompt change, not a documentation change.
 
-warnings = "+unnecessary_annotation-unused_value-unused_type_declaration-unused_constructor-unused_field-todo-declaration_unimplemented-missing_doc"
+warnings = "+unnecessary_annotation-unused_value-unused_type_declaration-unused_constructor-unused_field-todo-declaration_unimplemented-missing_doc-unused_default_value"
 
 supported_targets = "+native"
