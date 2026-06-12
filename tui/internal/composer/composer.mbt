@@ -301,9 +301,7 @@ fn Model::set_logical_lines(
   logical_lines~ : Array[LogicLine],
   cursor~ : TextCursor,
   view_start~ : Int,
-  preferred_column? : Int,
   mode~ : Mode,
-  at_wrap_end? : Bool = false,
 ) -> Unit {
   let logical_lines = if logical_lines is [] {
     split_logical_lines("")
@@ -323,10 +321,12 @@ fn Model::set_logical_lines(
   self.logical_lines = logical_lines
   self.visual_rows = visual_rows
   self.cursor = cursor
-  self.preferred_column = preferred_column
+  // No caller steers these two: a wholesale text reset always lands as a
+  // fresh cursor with no remembered column and no wrap-end stickiness.
+  self.preferred_column = None
   self.view_start = if view_start < 0 { 0 } else { view_start }
   self.mode = mode
-  self.at_wrap_end = at_wrap_end
+  self.at_wrap_end = false
   // The text or cursor may have moved; pull the scroll window back over the
   // cursor for the current width.
   self.reclamp_view()
