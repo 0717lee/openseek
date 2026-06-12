@@ -41,7 +41,7 @@ async fn run_cli() -> Unit {
       value(matches, "reasoning-effort"),
     )
     let task = task_text(matches)
-    match session_id(matches) {
+    match resolved_session_id(matches) {
       None => {
         let system_prompt_text = configured_system_prompt(matches, model)
         @agent.run(
@@ -56,6 +56,15 @@ async fn run_cli() -> Unit {
         )
       }
       Some(id) => {
+        // Name the recording up front so a user scanning the event stream —
+        // or its OPENSEEK_LOG_FILE mirror — knows where to find this run
+        // later (--session-show, the viz server, or resuming by id).
+        @xlog.info() <?
+          {
+            "event": "session_started",
+            "session": id.value(),
+            "session_root": session_root(matches),
+          }
         let store = @store.SessionStore(session_root(matches))
         let session = load_or_new_session(store, id, matches, model)
         ignore(
@@ -74,6 +83,35 @@ async fn run_cli() -> Unit {
       }
     }
   })
+}
+
+///|
+/// The session this run records to: the explicit `--session` id, a generated
+/// `cli-<stamp>` id by default, or `None` under `--no-session`.
+///
+/// One-shot runs record by default because "what did the agent actually do?"
+/// is asked after the run, when an unrecorded answer is gone for good; the
+/// recording is a small JSONL directory under --session-root, and the
+/// deferred first write means a run that fails before its first event still
+/// leaves nothing behind. `--no-session` restores the ephemeral behavior for
+/// callers that must not write to the workspace; combining it with an
+/// explicit `--session` is a contradiction and fails fast.
+fn resolved_session_id(
+  matches : @argparse.Matches,
+) -> @agent_session.SessionId? raise {
+  match (session_id(matches), flag(matches, "no-session")) {
+    (Some(_), true) =>
+      fail("--no-session contradicts --session; pick one behavior")
+    (Some(id), false) => Some(id)
+    (None, true) => None
+    (None, false) =>
+      Some(
+        @agent_session.SessionId::generated(
+          prefix="cli",
+          now_ms=@env.now().reinterpret_as_int64(),
+        ),
+      )
+  }
 }
 
 ///|
@@ -201,6 +239,11 @@ fn cli_command() -> @argparse.Command {
         "serve",
         long="serve",
         about="Run as a session server: read JSONL commands (prompt/steer/cancel) from stdin.",
+      ),
+      FlagArg(
+        "no-session",
+        long="no-session",
+        about="Run ephemerally: do not record this run to a durable session.",
       ),
       FlagArg(
         "session-list",
@@ -687,6 +730,52 @@ test "agent runs require task text" {
     }
   }
   fail("missing task accepted")
+}
+
+///|
+test "one-shot runs record to a generated cli session by default" {
+  let parsed = cli_command().parse(argv=["write", "MoonBit"], env={
+    "DEEPSEEK": "test-key",
+  })
+  guard resolved_session_id(parsed) is Some(id) else {
+    fail("expected a generated session id")
+  }
+  assert_true(id.value().has_prefix("cli-"))
+}
+
+///|
+test "--no-session restores the ephemeral one-shot" {
+  let parsed = cli_command().parse(argv=["--no-session", "write", "MoonBit"], env={
+    "DEEPSEEK": "test-key",
+  })
+  assert_true(resolved_session_id(parsed) is None)
+}
+
+///|
+test "an explicit --session id is used verbatim" {
+  let parsed = cli_command().parse(
+    argv=["--session", "demo", "write", "MoonBit"],
+    env={ "DEEPSEEK": "test-key" },
+  )
+  guard resolved_session_id(parsed) is Some(id) else {
+    fail("expected the explicit id")
+  }
+  assert_eq(id.value(), "demo")
+}
+
+///|
+test "--session with --no-session is a contradiction" {
+  let parsed = cli_command().parse(
+    argv=["--session", "demo", "--no-session", "write", "MoonBit"],
+    env={ "DEEPSEEK": "test-key" },
+  )
+  let _ = resolved_session_id(parsed) catch {
+    error => {
+      assert_true("\{error}".contains("--no-session contradicts --session"))
+      return
+    }
+  }
+  fail("expected a contradiction failure")
 }
 
 ///|

@@ -18,6 +18,43 @@ pub fn SessionId::value(self : SessionId) -> String {
 }
 
 ///|
+/// Session id for a run that did not pick one: a UTC wall-clock stamp,
+/// `<prefix>-YYYYMMDD-HHMMSS-mmm` (e.g. `cli-20260612-081500-042`).
+///
+/// The timestamp form keeps generated ids unique per launch, sorted
+/// chronologically in `--session-list`, and valid as a directory name on
+/// every platform. Launchers pass their own `prefix` ("tui", "cli") so a
+/// listing shows where each conversation came from.
+pub fn SessionId::generated(prefix~ : String, now_ms~ : Int64) -> SessionId {
+  fn pad2(value : Int) -> String {
+    if value < 10 {
+      "0\{value}"
+    } else {
+      "\{value}"
+    }
+  }
+
+  fn pad3(value : Int) -> String {
+    if value < 10 {
+      "00\{value}"
+    } else if value < 100 {
+      "0\{value}"
+    } else {
+      "\{value}"
+    }
+  }
+
+  let time = @time.unix(now_ms / 1000) catch {
+    // A wall clock unrepresentable as a date (absurd system time): the raw
+    // millisecond count still yields a unique, valid directory name.
+    _ => return SessionId("\{prefix}-\{now_ms}")
+  }
+  SessionId(
+    "\{prefix}-\{time.year()}\{pad2(time.month())}\{pad2(time.day())}-\{pad2(time.hour())}\{pad2(time.minute())}\{pad2(time.second())}-\{pad3((now_ms % 1000).to_int())}",
+  )
+}
+
+///|
 /// User-authored model input for one conversational turn.
 pub struct UserMessage {
   priv content : String
