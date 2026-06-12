@@ -394,9 +394,20 @@ fn base_prompt() -> String {
     #|  - Example: `moon ide doc "@json"` - explore entire `@json` package
     #|  - Example: `moon ide doc "@encoding/utf8"` - explore nested package
     #|- **Multiple queries**: `moon ide doc "query1" "query2" ...`
-    #|  - Run multiple queries in one invocation and combine results
+    #|  - Run multiple queries in one invocation and combine results; a query that
+    #|    misses reports `No results found` inline while the others still return
     #|  - Example: `moon ide doc "String" "Array" "@json"` to explore multiple types and a package at once
-    #|- **Globbing**: Use `*` wildcard for partial matches, e.g. `moon ide doc "String::*rev*"` to find all String methods with "rev" in their name
+    #|  - When unsure of a name, batch the candidate spellings plus a bare glob in
+    #|    ONE call instead of probing one guess per step:
+    #|    `moon ide doc "parse_float" "*parse*" "@strconv"`
+    #|- **Globbing**: Use `*` wildcard for partial matches, e.g. `moon ide doc "String::*rev*"` to find all String methods with "rev" in their name, or `moon ide doc "*parse*"` to search every package for a partial name
+    #|  - Globs only match in bare-symbol or `Type::method` position; they silently
+    #|    match nothing after a package qualifier — query `"*parse*"`, never
+    #|    `"@strconv.*parse*"`
+    #|- **On `No results found`**: the exact name exists nowhere, so do not retry
+    #|  near-identical spellings one call at a time or fall back to compile-probe
+    #|  guessing. Re-query once with a bare glob (`"*fragment*"`) or list the
+    #|  package (`moon ide doc "@pkg"`) and read the real names
     #|
     #|#### `moon ide doc` Examples
     #|
