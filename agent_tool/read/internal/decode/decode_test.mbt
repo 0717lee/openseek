@@ -9,11 +9,12 @@ test "decode valid read input" {
     }),
     content=(
       #|{
-      #|  path: "file.mbt",
+      #|  paths: ["file.mbt"],
       #|  start_line: 3,
       #|  max_lines: Some(4),
       #|  max_output_chars: 50000,
       #|}
+
     ),
   )
 }
@@ -24,11 +25,12 @@ test "decode defaults optional limits" {
     decode({ "path": "file.mbt" }),
     content=(
       #|{
-      #|  path: "file.mbt",
+      #|  paths: ["file.mbt"],
       #|  start_line: 1,
       #|  max_lines: None,
       #|  max_output_chars: 12000,
       #|}
+
     ),
   )
 }

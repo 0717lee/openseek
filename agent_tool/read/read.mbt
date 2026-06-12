@@ -1,37 +1,49 @@
 ///|
-/// Tool definition for `read`: returns text from `arguments.path`, optionally
-/// restricted to a line range and capped to avoid flooding the agent context.
+/// Tool definition for `read`: returns text from `arguments.path` (or several
+/// files via `arguments.paths`), optionally restricted to a line range and
+/// capped to avoid flooding the agent context.
 ///
 /// ## Arguments
-/// - `path` (string, required): filesystem path to read.
+/// - `path` (string): filesystem path to read. Exactly one of `path`/`paths`
+///   is required.
+/// - `paths` (string array): several files in one call; per-file read errors
+///   report inline while the other files still return.
 /// - `start_line` (number, optional): 1-based first line to return. Defaults
-///   to 1.
+///   to 1. Single-file calls only.
 /// - `max_lines` (number, optional): maximum number of lines to return.
-/// - `max_output_chars` (number, optional): maximum returned content chars.
-///   Defaults to 12000 and is capped at 50000.
+///   Single-file calls only.
+/// - `max_output_chars` (number, optional): maximum returned content chars
+///   for the whole call. Defaults to 12000 and is capped at 50000.
 ///
 /// ## Result
 /// - `Respond(ToolOutput(<file contents>))` on success for uncapped whole-file
-///   reads.
+///   single reads.
 /// - `Respond(ToolOutput(<metadata header + content>))` for ranged reads or
-///   capped reads.
+///   capped reads, and per file for multi-file reads (blocks separated by a
+///   blank line; a failed file contributes an inline `error reading ...`
+///   block and only flips `is_error` when every file failed).
 /// - `Respond(ToolOutput("error reading <path>: <error>", is_error=true))`
-///   if the read fails (missing file, permission denied, invalid UTF-8, etc.).
+///   if a single-file read fails (missing file, permission denied, invalid
+///   UTF-8, etc.).
 /// - `Respond(ToolOutput("error: read requires ...", is_error=true))` for
 ///   invalid arguments.
 pub fn definition() -> @agent_tool.AgentToolDefinition {
   AgentToolDefinition(
     name="read",
-    description="Read arguments.path as text. Supports optional start_line, max_lines, and max_output_chars for focused reads.",
+    description="Read arguments.path as text — or several independent files in ONE call via arguments.paths (per-file errors report inline; cheaper than one call per file). Supports optional start_line, max_lines, and max_output_chars for focused single-file reads.",
     schema=JsonSchema({
       "type": "object",
       "properties": {
         "path": { "type": "string" },
+        "paths": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Read several files in one call instead of one call per file. Exactly one of path/paths is required.",
+        },
         "start_line": { "type": "number" },
         "max_lines": { "type": "number" },
         "max_output_chars": { "type": "number" },
       },
-      "required": ["path"],
     }),
     execute=Async(execute),
   )
@@ -48,7 +60,11 @@ async fn execute(arguments : Json) -> @agent_tool.ToolAction {
       )
     }
   }
-  read_file(input)
+  if input.paths.length() == 1 {
+    read_file(input)
+  } else {
+    read_files(input)
+  }
 }
 
 ///|
@@ -63,10 +79,11 @@ priv struct ReadSelection {
 
 ///|
 async fn read_file(input : @decode.ReadInput) -> @agent_tool.ToolAction {
-  let content = @fs.read_file(input.path).text() catch {
+  let path = input.paths[0]
+  let content = @fs.read_file(path).text() catch {
     error =>
       return @agent_tool.ToolAction::respond(
-        "error reading \{input.path}: \{error}",
+        "error reading \{path}: \{error}",
         is_error=true,
       )
   }
@@ -77,11 +94,55 @@ async fn read_file(input : @decode.ReadInput) -> @agent_tool.ToolAction {
     input.max_lines is Some(_) ||
     char_truncated
   let output = if include_header {
-    read_header(input.path, content, selection, capped, char_truncated) + capped
+    read_header(path, content, selection, capped, char_truncated) + capped
   } else {
     capped
   }
   @agent_tool.ToolAction::respond(output, is_error=char_truncated)
+}
+
+///|
+/// Render a multi-file read: one headered block per file, separated by blank
+/// lines, sharing the call's `max_output_chars` budget in argument order. A
+/// file that fails to read contributes an inline error block — the other
+/// files still return, mirroring how `moon ide doc` reports per-query misses
+/// — and `is_error` only flips when every file failed or the budget
+/// truncated content (so the model knows to re-read the tail individually).
+async fn read_files(input : @decode.ReadInput) -> @agent_tool.ToolAction {
+  let blocks : Array[String] = []
+  let mut remaining = input.max_output_chars
+  let mut failures = 0
+  let mut truncated_any = false
+  for path in input.paths {
+    if remaining <= 0 {
+      truncated_any = true
+      blocks.push(
+        "path=\{path}\nskipped=true (max_output_chars budget exhausted; read this file individually)",
+      )
+      continue
+    }
+    let content = @fs.read_file(path).text() catch {
+      error => {
+        failures = failures + 1
+        blocks.push("error reading \{path}: \{error}")
+        continue
+      }
+    }
+    let selection = select_lines(content, 1, None)
+    let capped = cap_text(selection.content, remaining)
+    let char_truncated = selection.content.length() > remaining
+    if char_truncated {
+      truncated_any = true
+    }
+    remaining = remaining - capped.length()
+    blocks.push(
+      read_header(path, content, selection, capped, char_truncated) + capped,
+    )
+  }
+  @agent_tool.ToolAction::respond(
+    blocks.join("\n\n"),
+    is_error=failures == input.paths.length() || truncated_any,
+  )
 }
 
 ///|
@@ -264,11 +325,91 @@ test "read parses and caps optional limits" {
     "max_lines": 4,
     "max_output_chars": 999999,
   })
-  assert_eq(input.path, "file.mbt")
+  assert_eq(input.paths.length(), 1)
+  assert_eq(input.paths[0], "file.mbt")
   assert_eq(input.start_line, 3)
   guard input.max_lines is Some(max_lines) else { fail("missing max_lines") }
   assert_eq(max_lines, 4)
   assert_eq(input.max_output_chars, @decode.hard_max_output_chars)
+}
+
+///|
+async test "read returns several files as headered blocks" {
+  let a = "/tmp/openseek-read-multi-a.txt"
+  let b = "/tmp/openseek-read-multi-b.txt"
+  @fs.write_file(a, "alpha", create_mode=CreateOrTruncate)
+  @fs.write_file(b, "beta", create_mode=CreateOrTruncate)
+  let result = execute({ "paths": [a, b] })
+  guard result is Respond(output) else { fail("expected Respond") }
+  assert_false(output.is_error)
+  assert_true(output.content.contains("path=\{a}"))
+  assert_true(output.content.contains("alpha"))
+  assert_true(output.content.contains("path=\{b}"))
+  assert_true(output.content.contains("beta"))
+}
+
+///|
+async test "a missing file reports inline while the others return" {
+  let a = "/tmp/openseek-read-multi-ok.txt"
+  @fs.write_file(a, "still here", create_mode=CreateOrTruncate)
+  let result = execute({ "paths": [a, "/tmp/openseek-read-multi-missing.txt"] })
+  guard result is Respond(output) else { fail("expected Respond") }
+  // Partial failure is not a tool error: the good file landed and the bad
+  // path's error block tells the model exactly which read to fix.
+  assert_false(output.is_error)
+  assert_true(output.content.contains("still here"))
+  assert_true(
+    output.content.contains(
+      "error reading /tmp/openseek-read-multi-missing.txt",
+    ),
+  )
+}
+
+///|
+async test "every file missing is a tool error" {
+  let result = execute({
+    "paths": ["/tmp/openseek-read-none-1", "/tmp/openseek-read-none-2"],
+  })
+  guard result is Respond(output) else { fail("expected Respond") }
+  assert_true(output.is_error)
+}
+
+///|
+async test "the output budget is shared and exhaustion is reported" {
+  let a = "/tmp/openseek-read-budget-a.txt"
+  let b = "/tmp/openseek-read-budget-b.txt"
+  @fs.write_file(a, "0123456789", create_mode=CreateOrTruncate)
+  @fs.write_file(b, "abcdefghij", create_mode=CreateOrTruncate)
+  let result = execute({ "paths": [a, b], "max_output_chars": 10 })
+  guard result is Respond(output) else { fail("expected Respond") }
+  assert_true(output.is_error)
+  assert_true(output.content.contains("0123456789"))
+  assert_true(output.content.contains("skipped=true"))
+  assert_false(output.content.contains("abcdefghij"))
+}
+
+///|
+async test "read rejects path and paths together" {
+  let result = execute({ "path": "/tmp/x", "paths": ["/tmp/y"] })
+  guard result is Respond(output) else { fail("expected Respond") }
+  assert_true(output.is_error)
+  assert_true(output.content.contains("not both"))
+}
+
+///|
+async test "read rejects line ranges on multi-file calls" {
+  let result = execute({ "paths": ["/tmp/x", "/tmp/y"], "start_line": 2 })
+  guard result is Respond(output) else { fail("expected Respond") }
+  assert_true(output.is_error)
+  assert_true(output.content.contains("single file"))
+}
+
+///|
+async test "read rejects an empty paths array" {
+  let result = execute({ "paths": [] })
+  guard result is Respond(output) else { fail("expected Respond") }
+  assert_true(output.is_error)
+  assert_true(output.content.contains("non-empty array"))
 }
 
 ///|

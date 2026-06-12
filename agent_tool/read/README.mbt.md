@@ -1,9 +1,9 @@
 # Read Tool
 
-`read` returns text from a file at `arguments.path`. By default it returns the
-whole file when it fits within the output cap. For larger files, or when the
-agent only needs a focused region, pass `start_line`, `max_lines`, or
-`max_output_chars`.
+`read` returns text from a file at `arguments.path`, or from several files in
+one call via `arguments.paths`. By default it returns whole files when they
+fit within the output cap. For larger files, or when the agent only needs a
+focused region, pass `start_line`, `max_lines`, or `max_output_chars`.
 
 ## Design Rationale
 
@@ -17,6 +17,14 @@ Ranged or capped reads include a metadata header so the model knows what it saw
 and what it did not see. Automatic character truncation is marked as a tool
 error even when the file was read successfully; that makes lossy context visible
 to the loop instead of silently pretending the returned prefix is complete.
+
+Multi-file reads exist because agent traces show models reading related files
+one round trip at a time — each a full model turn. `paths` collapses those
+into one call: every file returns as its own headered block, a file that
+fails to read reports inline while the others still land (mirroring how
+`moon ide doc` reports per-query misses), and the `max_output_chars` budget
+is shared across the call in argument order. Line-range options stay
+single-file: a range only means something against one file.
 
 ## API Style
 
@@ -40,10 +48,11 @@ Prefer a range plus a cap over reading a large file and relying on truncation.
 
 | Name | Type | Required | Notes |
 | ---- | ---- | -------- | ----- |
-| `path` | string | yes | Filesystem path. Relative paths resolve against the agent process's current working directory. |
-| `start_line` | number | no | 1-based first line to return. Defaults to `1`. |
-| `max_lines` | number | no | Maximum number of lines to return. |
-| `max_output_chars` | number | no | Maximum content chars to return. Defaults to `12000` and is capped at `50000`. |
+| `path` | string | one of `path`/`paths` | Filesystem path. Relative paths resolve against the agent process's current working directory. |
+| `paths` | string array | one of `path`/`paths` | Several files in one call, each returned as a headered block; per-file errors report inline. |
+| `start_line` | number | no | 1-based first line to return. Defaults to `1`. Single-file calls only. |
+| `max_lines` | number | no | Maximum number of lines to return. Single-file calls only. |
+| `max_output_chars` | number | no | Maximum content chars to return across the call. Defaults to `12000` and is capped at `50000`. |
 
 ## Action
 
@@ -56,11 +65,15 @@ character truncation. The string body has one of these shapes:
 - A metadata header followed by `---` and the selected content for ranged reads
   or capped reads. The header includes line and character counts plus
   `truncated=true` when `max_output_chars` cut the selected content.
-- `"error reading <path>: <error>"` — the read failed. Common causes: the
-  file is missing, the agent doesn't have read permissions, or the bytes
-  aren't valid UTF-8.
-- `"error: read requires arguments.path"` — payload was an object but had no
-  `path` field.
+- Headered blocks separated by blank lines for multi-file reads. A failed
+  file contributes an inline `error reading <path>: <error>` block;
+  `is_error` only flips when every file failed or the shared budget
+  truncated or skipped content.
+- `"error reading <path>: <error>"` — a single-file read failed. Common
+  causes: the file is missing, the agent doesn't have read permissions, or
+  the bytes aren't valid UTF-8.
+- `"error: read requires arguments.path or arguments.paths"` — payload was an
+  object but named no file.
 - `"error: read requires object arguments"` — payload was not a JSON object.
 
 ## Example
@@ -73,10 +86,10 @@ test "read tool advertises the expected schema" {
   let JsonSchema(schema) = tool.schema
   let text = schema.stringify()
   assert_true(text.contains("\"path\""))
+  assert_true(text.contains("\"paths\""))
   assert_true(text.contains("\"start_line\""))
   assert_true(text.contains("\"max_lines\""))
   assert_true(text.contains("\"max_output_chars\""))
-  assert_true(text.contains("\"required\""))
 }
 ```
 
