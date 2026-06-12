@@ -400,14 +400,18 @@ fn base_prompt() -> String {
     #|  - When unsure of a name, batch the candidate spellings plus a bare glob in
     #|    ONE call instead of probing one guess per step:
     #|    `moon ide doc "parse_float" "*parse*" "@strconv"`
-    #|- **Globbing**: Use `*` wildcard for partial matches, e.g. `moon ide doc "String::*rev*"` to find all String methods with "rev" in their name, or `moon ide doc "*parse*"` to search every package for a partial name
-    #|  - Globs only match in bare-symbol or `Type::method` position; they silently
-    #|    match nothing after a package qualifier — query `"*parse*"`, never
-    #|    `"@strconv.*parse*"`
-    #|- **On `No results found`**: the exact name exists nowhere, so do not retry
-    #|  near-identical spellings one call at a time or fall back to compile-probe
-    #|  guessing. Re-query once with a bare glob (`"*fragment*"`) or list the
-    #|  package (`moon ide doc "@pkg"`) and read the real names
+    #|- **Globbing**: Use `*` wildcard for partial matches in any position:
+    #|  `moon ide doc "String::*rev*"` for methods, `moon ide doc "@string.*parse*"`
+    #|  within a package, `moon ide doc "*parse*"` to search every package
+    #|  - Glob results can omit deprecated symbols and aliases that an exact
+    #|    lookup would still show — `"@strconv.*parse*"` returns nothing even
+    #|    though a deprecated `@strconv.parse_double` exists (the live API moved
+    #|    to `@string`). An empty glob within one package does not prove the
+    #|    name exists nowhere: widen to a bare glob across packages
+    #|- **On `No results found`**: do not retry near-identical spellings one call
+    #|  at a time or fall back to compile-probe guessing. Re-query once with a
+    #|  bare glob (`"*fragment*"`) across all packages, or list the package
+    #|  (`moon ide doc "@pkg"`) and read the real names
     #|
     #|#### `moon ide doc` Examples
     #|

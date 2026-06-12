@@ -134,11 +134,13 @@ options(
   `moon ide doc "StringView::split"` for methods,
   `moon ide doc "@json.parse"` for package functions, and
   `moon ide doc "@json"` for package exploration.
-- `moon ide doc` accepts several queries per call and `*` globs in
-  bare-symbol or `Type::method` position (never after `@pkg.`). When unsure
-  of a name, batch candidates with a bare glob in one call —
+- `moon ide doc` accepts several queries per call and `*` globs in any
+  position (`"String::*rev*"`, `"@string.*parse*"`, `"*parse*"`). When
+  unsure of a name, batch candidates with a bare glob in one call —
   `moon ide doc "parse_float" "*parse*" "@strconv"` — misses report
-  `No results found` inline while the others return. On a miss, never retry
+  `No results found` inline while the others return. Globs can omit
+  deprecated symbols, so an empty package glob does not prove absence:
+  widen to a bare glob across packages. On a miss, never retry
   near-identical spellings or compile-probe blindly: re-query once with a
   bare glob or list the package and read the real names. Use
   `moon ide outline <dir-or-file>` for package symbols,
