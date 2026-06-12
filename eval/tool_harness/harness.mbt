@@ -270,7 +270,7 @@ async fn run_finish_case(
 
 ///|
 async fn moon_library_fixture(prefix~ : String) -> String {
-  let root = workspace_tmpdir(prefix~)
+  let root = @fs.tmpdir(prefix~)
   @vfs.FileSystem({
     "moon.mod": (
       #|name = "openseek/tool_harness_fixture"
@@ -300,22 +300,6 @@ async fn moon_library_fixture(prefix~ : String) -> String {
     ),
   }).write_to(root)
   root
-}
-
-///|
-async fn workspace_tmpdir(prefix~ : String) -> String {
-  @fs.mkdir("_build/openseek-tool-harness-tmp", recursive=true) catch {
-    _ => ()
-  }
-  let scratch = @fs.tmpdir(prefix~)
-  let scratch_path : @path.Path = scratch
-  let name = scratch_path.basename().to_owned()
-  @fs.rmdir(scratch, recursive=true)
-  let parent = @fs.realpath("_build/openseek-tool-harness-tmp")
-  let parent_path : @path.Path = parent
-  let target = parent_path.join(name).normalize().to_string()
-  @fs.mkdir(target)
-  target
 }
 
 ///|

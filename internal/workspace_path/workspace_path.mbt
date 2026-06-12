@@ -6,10 +6,62 @@ pub fn resolve(workspace_root : String, path : String) -> String {
   if path == "" ||
     workspace_root == "" ||
     workspace_root == "." ||
-    @path.Path(path).is_absolute() {
+    is_absolute_path(path) {
     path
-  } else {
+  } else if use_native_path_join(workspace_root) {
     @path.Path(workspace_root).join(Path(path)).normalize().to_string()
+  } else {
+    normalize_slash_path("\{workspace_root}/\{path}")
+  }
+}
+
+///|
+fn is_absolute_path(path : String) -> Bool {
+  @path.Path(path).is_absolute() ||
+  path.has_prefix("/") ||
+  path.has_prefix("\\") ||
+  is_windows_drive_absolute(path)
+}
+
+///|
+fn is_windows_drive_absolute(path : String) -> Bool {
+  path.length() >= 3 && path[1] == ':' && (path[2] == '/' || path[2] == '\\')
+}
+
+///|
+fn use_native_path_join(workspace_root : String) -> Bool {
+  workspace_root.contains("\\") || is_windows_drive_absolute(workspace_root)
+}
+
+///|
+fn normalize_slash_path(path : String) -> String {
+  let absolute = path.has_prefix("/")
+  let parts : Array[StringView] = []
+  for part in path.split("/") {
+    if part == "" || part == "." {
+      continue
+    }
+    if part == ".." {
+      match parts.last() {
+        Some("..") => parts.push(part)
+        Some(_) => ignore(parts.pop())
+        None => if !absolute { parts.push(part) }
+      }
+    } else {
+      parts.push(part)
+    }
+  }
+  let body = parts.join("/")
+  if absolute {
+    if body == "" {
+      "/"
+    } else {
+      "/\{body}"
+    }
+  } else if body == "" {
+    "."
+  } else {
+    body
   }
 }
 

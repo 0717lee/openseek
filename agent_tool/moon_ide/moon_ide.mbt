@@ -400,7 +400,7 @@ async test "moon_ide finds references in a real fixture package" {
 
 ///|
 async test "moon_ide outlines a virtual filesystem multi-file package" {
-  let project = workspace_tmpdir(prefix="openseek-moon-ide-vfs-")
+  let project = @fs.tmpdir(prefix="openseek-moon-ide-vfs-")
   @vfs.FileSystem({
     "moon.mod": (
       #|name = "openseek/moon_ide_vfs_fixture"
@@ -480,7 +480,7 @@ async test "moon_ide outlines a virtual filesystem multi-file package" {
 
 ///|
 async fn copy_fixture_project(name : String) -> String {
-  let target = workspace_tmpdir(prefix="openseek-moon-ide-")
+  let target = @fs.tmpdir(prefix="openseek-moon-ide-")
   let target_path : @path.Path = target
   copy_fixture_file(
     name,
@@ -497,28 +497,6 @@ async fn copy_fixture_project(name : String) -> String {
     "lib.mbt.fixture",
     target_path.join("lib.mbt").normalize().to_string(),
   )
-  target
-}
-
-///|
-async fn workspace_tmpdir(prefix~ : String) -> String {
-  let parent_dir = "_build/openseek-moon-ide-tmp"
-  @fs.mkdir(parent_dir, recursive=true) catch {
-    error =>
-      if @fs.exists(parent_dir) && @fs.kind(parent_dir) == Directory {
-        ()
-      } else {
-        raise error
-      }
-  }
-  let scratch = @fs.tmpdir(prefix~)
-  let scratch_path : @path.Path = scratch
-  let name = scratch_path.basename().to_owned()
-  @fs.rmdir(scratch, recursive=true)
-  let parent = @fs.realpath(parent_dir)
-  let parent_path : @path.Path = parent
-  let target = parent_path.join(name).normalize().to_string()
-  @fs.mkdir(target)
   target
 }
 

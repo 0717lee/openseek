@@ -1,4 +1,6 @@
 ///|
+/// Redact a temporary fixture root from command output while preserving stable
+/// fixture-relative suffixes across Windows and Unix path spellings.
 pub fn redact_fixture_root(
   content : String,
   root~ : String,

@@ -635,6 +635,6 @@ fn stable_moon_cmd_output(
     canonical~,
   )
   normalized
-  .replace_all(old="Using cached moonbitlang/async@0.19.1\n", new="")
-  .replace_all(old="Downloading moonbitlang/async@0.19.1\n", new="")
+  .replace_all(old="Using cached moonbitlang/async@0.19.4\n", new="")
+  .replace_all(old="Downloading moonbitlang/async@0.19.4\n", new="")
 }

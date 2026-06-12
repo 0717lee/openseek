@@ -390,11 +390,13 @@ test "read parses and caps optional limits" {
 
 ///|
 async test "read returns several files as headered blocks" {
-  let a = "/tmp/openseek-read-multi-a.txt"
-  let b = "/tmp/openseek-read-multi-b.txt"
+  let dir = @fs.tmpdir(prefix="openseek-read-multi-")
+  let a = dir + "/a.txt"
+  let b = dir + "/b.txt"
   @fs.write_file(a, "alpha", create_mode=CreateOrTruncate)
   @fs.write_file(b, "beta", create_mode=CreateOrTruncate)
   let result = execute({ "paths": [a, b] })
+  @fs.rmdir(dir, recursive=true)
   guard result is Respond(output) else { fail("expected Respond") }
   assert_false(output.is_error)
   assert_true(output.content.contains("path=\{a}"))
@@ -405,37 +407,38 @@ async test "read returns several files as headered blocks" {
 
 ///|
 async test "a missing file reports inline while the others return" {
-  let a = "/tmp/openseek-read-multi-ok.txt"
+  let dir = @fs.tmpdir(prefix="openseek-read-multi-")
+  let a = dir + "/ok.txt"
+  let missing = dir + "/missing.txt"
   @fs.write_file(a, "still here", create_mode=CreateOrTruncate)
-  let result = execute({ "paths": [a, "/tmp/openseek-read-multi-missing.txt"] })
+  let result = execute({ "paths": [a, missing] })
+  @fs.rmdir(dir, recursive=true)
   guard result is Respond(output) else { fail("expected Respond") }
   // Partial failure is not a tool error: the good file landed and the bad
   // path's error block tells the model exactly which read to fix.
   assert_false(output.is_error)
   assert_true(output.content.contains("still here"))
-  assert_true(
-    output.content.contains(
-      "error reading /tmp/openseek-read-multi-missing.txt",
-    ),
-  )
+  assert_true(output.content.contains("error reading \{missing}"))
 }
 
 ///|
 async test "every file missing is a tool error" {
-  let result = execute({
-    "paths": ["/tmp/openseek-read-none-1", "/tmp/openseek-read-none-2"],
-  })
+  let dir = @fs.tmpdir(prefix="openseek-read-none-")
+  let result = execute({ "paths": [dir + "/none-1", dir + "/none-2"] })
+  @fs.rmdir(dir, recursive=true)
   guard result is Respond(output) else { fail("expected Respond") }
   assert_true(output.is_error)
 }
 
 ///|
 async test "the output budget is shared and exhaustion is reported" {
-  let a = "/tmp/openseek-read-budget-a.txt"
-  let b = "/tmp/openseek-read-budget-b.txt"
+  let dir = @fs.tmpdir(prefix="openseek-read-budget-")
+  let a = dir + "/a.txt"
+  let b = dir + "/b.txt"
   @fs.write_file(a, "0123456789", create_mode=CreateOrTruncate)
   @fs.write_file(b, "abcdefghij", create_mode=CreateOrTruncate)
   let result = execute({ "paths": [a, b], "max_output_chars": 10 })
+  @fs.rmdir(dir, recursive=true)
   guard result is Respond(output) else { fail("expected Respond") }
   assert_true(output.is_error)
   assert_true(output.content.contains("0123456789"))
@@ -449,11 +452,13 @@ async test "headers and error blocks count against the budget" {
   // 40 missing paths with a small budget: error blocks consume the budget,
   // the tail collapses into one bounded marker, and the total output stays
   // near the cap instead of growing per path (Codex review).
+  let dir = @fs.tmpdir(prefix="openseek-read-flood-")
   let paths : Array[Json] = []
   for i in 0..<40 {
-    paths.push(Json::string("/tmp/openseek-read-flood-\{i}"))
+    paths.push(Json::string(dir + "/missing-\{i}"))
   }
   let result = execute({ "paths": Json::array(paths), "max_output_chars": 300 })
+  @fs.rmdir(dir, recursive=true)
   guard result is Respond(output) else { fail("expected Respond") }
   assert_true(output.is_error)
   assert_true(output.content.contains("skipped"))
@@ -528,7 +533,9 @@ async test "read rejects non-object arguments" {
 
 ///|
 async test "a huge max_lines returns the remaining lines without overflow" {
-  let path = "/tmp/openseek-read-huge-max.txt"
+  let dir = @fs.tmpdir(prefix="openseek-read-huge-max-")
+  let dir_path : @path.Path = dir
+  let path = dir_path.join("input.txt").normalize().to_string()
   @fs.write_file(path, "a\nb\nc", create_mode=CreateOrTruncate)
   let result = execute({
     "path": path,
@@ -539,4 +546,5 @@ async test "a huge max_lines returns the remaining lines without overflow" {
   assert_false(output.is_error)
   assert_true(output.content.contains("b\nc"))
   assert_true(output.content.contains("shown_lines=2"))
+  @fs.rmdir(dir, recursive=true)
 }

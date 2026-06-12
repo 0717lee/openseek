@@ -15,7 +15,6 @@ import {
   "moonbitlang/async",
   "moonbitlang/async/fs",
   "moonbitlang/core/json",
-  "moonbitlang/x/path",
 }
 
 warnings = "+unnecessary_annotation"

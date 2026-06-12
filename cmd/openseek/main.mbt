@@ -923,7 +923,10 @@ test "--dir trailing separator trim preserves roots" {
 ///|
 async test "--dir rejects missing parents instead of creating recursively" {
   let root = @fs.tmpdir(prefix="openseek-dir-missing-parent-")
-  let child = "\{root}/missing/child"
+  let root_path : @path.Path = root
+  let missing = root_path.join("missing").normalize().to_string()
+  let missing_path : @path.Path = missing
+  let child = missing_path.join("child").normalize().to_string()
   let parsed = cli_command().parse(argv=["--dir", child, "write", "MoonBit"], env={
     "DEEPSEEK": "test-key",
   })
@@ -931,7 +934,7 @@ async test "--dir rejects missing parents instead of creating recursively" {
     error => {
       assert_true(
         "\{error}".contains(
-          "parent directory for --dir does not exist: \{root}/missing",
+          "parent directory for --dir does not exist: \{missing}",
         ),
       )
       @fs.rmdir(root, recursive=true)
@@ -1145,14 +1148,24 @@ async test "configured system prompt advertises global skills" {
 async test "configured system prompt uses the selected workspace root" {
   let workspace = @fs.tmpdir(prefix="openseek-prompt-workspace-")
   let real_workspace = @fs.realpath(workspace)
+  let workspace_path : @path.Path = workspace
+  let prompt_path = workspace_path.join("prompt.md").normalize().to_string()
+  let skills_dir = workspace_path
+    .join(".openseek/skills")
+    .normalize()
+    .to_string()
+  let skill_path = workspace_path
+    .join(".openseek/skills/release.md")
+    .normalize()
+    .to_string()
   @fs.write_file(
-    "\{workspace}/prompt.md",
+    prompt_path,
     "workspace prompt\n",
     create_mode=CreateOrTruncate,
   )
-  @fs.mkdir("\{workspace}/.openseek/skills", recursive=true)
+  @fs.mkdir(skills_dir, recursive=true)
   @fs.write_file(
-    "\{workspace}/.openseek/skills/release.md",
+    skill_path,
     (
       #|---
       #|name: release
@@ -1178,9 +1191,14 @@ async test "configured system prompt uses the selected workspace root" {
   )
   assert_true(prompt.has_prefix("workspace prompt"))
   assert_true(prompt.contains("Working directory: \{real_workspace}"))
+  let real_workspace_path : @path.Path = real_workspace
+  let real_skill_path = real_workspace_path
+    .join(".openseek/skills/release.md")
+    .normalize()
+    .to_string()
   assert_true(
     prompt.contains(
-      "release — Cut a workspace release. (file: \{real_workspace}/.openseek/skills/release.md)",
+      "release — Cut a workspace release. (file: \{real_skill_path})",
     ),
   )
   @fs.rmdir(workspace, recursive=true)
