@@ -144,13 +144,12 @@ async fn random_salt() -> String {
   @fs.rmdir(dir) catch {
     _ => ()
   }
-  let basename = match dir.rev_find("/") {
-    Some(index) => dir[index + 1:].to_owned()
-    None => dir
-  }
-  guard basename.has_prefix(prefix) else { return "" }
+  // Locate the prefix instead of splitting on a path separator: Windows
+  // paths use backslashes, and a `/`-only basename split would drop the
+  // salt there entirely (Codex review).
+  guard dir.rev_find(prefix) is Some(index) else { return "" }
   let salt = StringBuilder()
-  for ch in basename[prefix.length():] {
+  for ch in dir[index + prefix.length():] {
     if ch is ('0'..='9' | 'a'..='z' | 'A'..='Z') {
       salt.write_char(ch)
     }
