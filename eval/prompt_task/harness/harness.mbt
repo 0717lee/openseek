@@ -145,22 +145,26 @@ async fn run_trial(
   @fs.mkdir(workspace, recursive=true)
   let real_workspace = @fs.realpath(workspace)
   let task = task_template.replace_all(old="{{WORKSPACE}}", new=real_workspace)
-  // The engine runs *in* the trial workspace (moon resolves the module from
-  // the absolute package path), so the prompt's environment grounding names
-  // the workspace rather than the OpenSeek checkout — and relative paths in
-  // the model's tool calls land in the right tree. Launcher-relative paths
-  // (the default --repo-root ".", prompt files) must be canonicalized
-  // before the child cwd changes their meaning.
+  // The engine runs *in* the trial workspace, so the prompt's environment
+  // grounding names the workspace rather than the OpenSeek checkout — and
+  // relative paths in the model's tool calls land in the right tree.
+  // Launcher-relative paths (the default --repo-root ".", the engine
+  // binary, prompt files) must be canonicalized before the child cwd
+  // changes their meaning. Prefer a prebuilt --engine binary: `moon run`
+  // resolves the repo's dev_build rule paths against the cwd — the trial
+  // workspace, not the checkout — and fails before the engine starts.
   let repo_root = @fs.realpath(config.repo_root)
-  let args = [
-    "run",
-    repo_root + "/cmd/openseek",
-    "--",
+  let (program, args) = if config.engine != "" {
+    (@fs.realpath(config.engine), [])
+  } else {
+    ("moon", ["run", repo_root + "/cmd/openseek", "--"])
+  }
+  args.append([
     "--max-steps",
     config.max_steps.to_string(),
     "--model",
     config.model.to_string(),
-  ]
+  ])
   if config.system_prompt_file != "" {
     args.push("--system-prompt-file")
     args.push(@fs.realpath(config.system_prompt_file))
@@ -171,7 +175,7 @@ async fn run_trial(
   }
   args.push(task)
   let (exit_code, output) = @process.collect_output_merged(
-    "moon",
+    program,
     args,
     extra_env={
       "DEEPSEEK": config.api_key,

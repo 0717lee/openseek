@@ -18,6 +18,7 @@ fn config_from_matches(matches : @argparse.Matches) -> @harness.Config raise {
     max_steps=parse_positive_int(value(matches, "max-steps"), "--max-steps"),
     out_dir=value(matches, "out"),
     repo_root=value(matches, "repo-root"),
+    engine=value(matches, "engine"),
     prompt_label=value(matches, "prompt-label"),
     task_file=value(matches, "task-file"),
     system_prompt_file=value(matches, "system-prompt-file"),

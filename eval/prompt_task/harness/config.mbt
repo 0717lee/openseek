@@ -4,7 +4,11 @@
 /// `max_steps`), artifact and workspace locations (`out_dir`, `repo_root`),
 /// and the prompt variant under test (`prompt_label`, `task_file`,
 /// `system_prompt_file`, `system_prompt_addendum_file` — empty paths mean
-/// the built-in prompt).
+/// the built-in prompt). A non-empty `engine` is a prebuilt openseek binary
+/// trials exec directly; empty falls back to `moon run <repo>/cmd/openseek`,
+/// which only works when the repo's build rules resolve from the trial
+/// workspace (a dev_build rule path resolves against the cwd, so prefer the
+/// prebuilt binary).
 pub struct Config {
   api_key : String
   model : @deepseek.Model
@@ -14,6 +18,7 @@ pub struct Config {
   max_steps : Int
   out_dir : String
   repo_root : String
+  engine : String
   prompt_label : String
   task_file : String
   system_prompt_file : String
@@ -32,6 +37,7 @@ pub fn Config::Config(
   max_steps~ : Int,
   out_dir~ : String,
   repo_root~ : String,
+  engine? : String = "",
   prompt_label~ : String,
   task_file~ : String,
   system_prompt_file~ : String,
@@ -46,6 +52,7 @@ pub fn Config::Config(
     max_steps,
     out_dir,
     repo_root,
+    engine,
     prompt_label,
     task_file,
     system_prompt_file,
