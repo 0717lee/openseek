@@ -348,20 +348,24 @@ fn slice_from(s : String, start : Int) -> String {
 fn percent_decode(s : String) -> String {
   let chars = s.to_array()
   let bytes : Array[Byte] = []
-  let mut i = 0
-  while i < chars.length() {
-    let c = chars[i]
-    if c == '%' &&
-      i + 2 < chars.length() &&
-      hex_val(chars[i + 1]) is Some(high) &&
-      hex_val(chars[i + 2]) is Some(low) {
-      bytes.push(((high * 16 + low) & 0xff).to_byte())
-      i = i + 3
-    } else {
-      for byte in @utf8.encode(c.to_string()) {
-        bytes.push(byte)
+  for i = 0 {
+    match chars[i:] {
+      [] => break
+      // A complete %XX escape needs two hex digits after the percent: the
+      // view pattern checks the remaining length, the guard checks the
+      // digits, and a truncated or malformed escape falls through to the
+      // verbatim arm.
+      ['%', high, low, ..] if hex_val(high) is Some(h) &&
+        hex_val(low) is Some(l) => {
+        bytes.push(((h * 16 + l) & 0xff).to_byte())
+        continue i + 3
       }
-      i = i + 1
+      [c, ..] => {
+        for byte in @utf8.encode(c.to_string()) {
+          bytes.push(byte)
+        }
+        continue i + 1
+      }
     }
   }
   @utf8.decode(Bytes::from_array(bytes)) catch {
@@ -371,14 +375,11 @@ fn percent_decode(s : String) -> String {
 
 ///|
 fn hex_val(c : Char) -> Int? {
-  if c >= '0' && c <= '9' {
-    Some(c.to_int() - '0'.to_int())
-  } else if c >= 'a' && c <= 'f' {
-    Some(c.to_int() - 'a'.to_int() + 10)
-  } else if c >= 'A' && c <= 'F' {
-    Some(c.to_int() - 'A'.to_int() + 10)
-  } else {
-    None
+  match c {
+    '0'..='9' => Some(c.to_int() - '0')
+    'a'..='f' => Some(c.to_int() - 'a' + 10)
+    'A'..='F' => Some(c.to_int() - 'A' + 10)
+    _ => None
   }
 }
 
