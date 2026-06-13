@@ -90,44 +90,25 @@ fn StreamAccumulator::response(
 }
 
 ///|
-fn json_string_field(fields : Map[String, Json], key : String) -> String? {
-  match fields.get(key) {
-    Some(String(value)) => Some(value)
-    _ => None
-  }
-}
-
-///|
-fn json_int_field(fields : Map[String, Json], key : String) -> Int? {
-  match fields.get(key) {
-    Some(Number(value, ..)) => Some(value.to_int())
-    _ => None
-  }
-}
-
-///|
 fn apply_tool_call_delta(
   acc : StreamAccumulator,
   json : Json,
   fallback_index : Int,
 ) -> Unit {
-  let fields = match json {
-    Object(fields) => fields
-    _ => return
+  guard json is Object(_) else { return }
+  let index = match json {
+    { "index": Number(value, ..), .. } => value.to_int()
+    _ => fallback_index
   }
-  let index = json_int_field(fields, "index").unwrap_or(fallback_index)
-  if index < 0 {
-    return
-  }
+  guard index >= 0 else { return }
   let call = acc.ensure_tool_call(index)
-  if json_string_field(fields, "id") is Some(id) && id != "" {
+  if json is { "id": String(id), .. } && id != "" {
     call.id = id
   }
-  guard fields.get("function") is Some(Object(function)) else { return }
-  if json_string_field(function, "name") is Some(name) && name != "" {
+  if json is { "function": { "name": String(name), .. }, .. } && name != "" {
     call.name = name
   }
-  if json_string_field(function, "arguments") is Some(arguments) &&
+  if json is { "function": { "arguments": String(arguments), .. }, .. } &&
     arguments != "" {
     call.arguments.write_string(arguments)
   }
@@ -140,21 +121,18 @@ async fn apply_stream_delta(
   on_content_delta~ : async (String) -> Unit,
   on_reasoning_delta~ : async (String) -> Unit,
 ) -> Unit {
-  if json_string_field(delta, "content") is Some(content) && content != "" {
+  if delta is { "content": String(content), .. } && content != "" {
     acc.content.write_string(content)
     on_content_delta(content)
   }
-  if json_string_field(delta, "reasoning_content") is Some(reasoning) &&
-    reasoning != "" {
+  if delta is { "reasoning_content": String(reasoning), .. } && reasoning != "" {
     acc.reasoning_content.write_string(reasoning)
     on_reasoning_delta(reasoning)
   }
-  match delta.get("tool_calls") {
-    Some(Array(calls)) =>
-      for index, call in calls {
-        apply_tool_call_delta(acc, call, index)
-      }
-    _ => ()
+  if delta is { "tool_calls": Array(calls), .. } {
+    for index, call in calls {
+      apply_tool_call_delta(acc, call, index)
+    }
   }
 }
 
