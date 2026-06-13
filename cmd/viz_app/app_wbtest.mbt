@@ -86,6 +86,30 @@ test "sidebar_roots preserves listing order without duplicates" {
 }
 
 ///|
+test "collapsed root helpers toggle and prune stale roots" {
+  let rows = [
+    { key: "0|a", id: "a", root_label: "app/.openseek", first_prompt: "" },
+    { key: "1|b", id: "b", root_label: "lib/.openseek", first_prompt: "" },
+  ]
+  let collapsed = toggle_collapsed_root([], "app/.openseek")
+  @debug.debug_inspect(collapsed, content="[\"app/.openseek\"]")
+  let expanded = toggle_collapsed_root(collapsed, "app/.openseek")
+  @debug.debug_inspect(expanded, content="[]")
+  @debug.debug_inspect(
+    prune_collapsed_roots(["app/.openseek", "stale/.openseek"], rows),
+    content="[\"app/.openseek\"]",
+  )
+}
+
+///|
+test "app class tracks sidebar visibility" {
+  let visible = { ..init_model(), sidebar_visible: true }
+  let hidden = { ..init_model(), sidebar_visible: false }
+  inspect(app_class(visible), content="app")
+  inspect(app_class(hidden), content="app sidebar-hidden")
+}
+
+///|
 test "theme values map to the data-theme attribute" {
   inspect(Theme::value(Light), content="light")
   inspect(Theme::value(Dark), content="dark")

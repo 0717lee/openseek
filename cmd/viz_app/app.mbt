@@ -22,6 +22,8 @@ struct Model {
   header_present : Bool
   view_mode : @viz.ViewMode
   theme : Theme
+  sidebar_visible : Bool
+  collapsed_roots : Array[String]
   loading : Bool
   status : String
 }
@@ -56,6 +58,8 @@ enum Msg {
   SessionFetched(String, Result[String, Error])
   SetMode(@viz.ViewMode)
   SetTheme(Theme)
+  ToggleSidebar
+  ToggleRoot(String)
 }
 
 ///|
@@ -78,6 +82,8 @@ fn init_model() -> Model {
     header_present: false,
     view_mode: RawLog,
     theme: Light,
+    sidebar_visible: true,
+    collapsed_roots: [],
     loading: false,
     status: "loading sessions…",
   }
@@ -93,7 +99,15 @@ fn update(emit : @cmd.Emit[Msg], msg : Msg, model : Model) -> (@cmd.Cmd, Model) 
         Some(sessions) =>
           (
             @cmd.none,
-            { ..model, sessions, status: "\{sessions.length()} session(s)" },
+            {
+              ..model,
+              sessions,
+              collapsed_roots: prune_collapsed_roots(
+                model.collapsed_roots,
+                sessions,
+              ),
+              status: "\{sessions.length()} session(s)",
+            },
           )
         None =>
           (@cmd.none, { ..model, status: "could not read the session list" })
@@ -172,6 +186,16 @@ fn update(emit : @cmd.Emit[Msg], msg : Msg, model : Model) -> (@cmd.Cmd, Model) 
       // Apply the theme as a side effect (set `data-theme` on <html>) so the CSS
       // variable blocks take over; the model tracks it for button highlighting.
       (apply_theme(theme), { ..model, theme, })
+    ToggleSidebar =>
+      (@cmd.none, { ..model, sidebar_visible: !model.sidebar_visible })
+    ToggleRoot(root) =>
+      (
+        @cmd.none,
+        {
+          ..model,
+          collapsed_roots: toggle_collapsed_root(model.collapsed_roots, root),
+        },
+      )
   }
 }
 
@@ -236,16 +260,59 @@ fn events_status(parsed : @viz.ParsedLog) -> String {
 
 ///|
 fn view(emit : @cmd.Emit[Msg], model : Model) -> @html.Html {
-  @html.div(class="app", [
-    @html.aside(class="sidebar", [
-      @html.div(class="sidebar-head", [
-        @html.h1(class="brand", "OpenSeek sessions"),
-        @html.div(class="status", model.status),
-      ]),
-      sidebar_list(emit, model),
-      theme_toggle(emit, model),
+  @html.div(class=app_class(model), [
+    sidebar_pane(emit, model),
+    @html.section(class="main", [
+      main_toolbar(emit, model),
+      main_pane(emit, model),
     ]),
-    @html.section(class="main", [main_pane(emit, model)]),
+  ])
+}
+
+///|
+fn app_class(model : Model) -> String {
+  if model.sidebar_visible {
+    "app"
+  } else {
+    "app sidebar-hidden"
+  }
+}
+
+///|
+fn sidebar_pane(emit : @cmd.Emit[Msg], model : Model) -> @html.Html {
+  if !model.sidebar_visible {
+    return @html.nothing
+  }
+  @html.aside(class="sidebar", [
+    @html.div(class="sidebar-head", [
+      @html.div(class="sidebar-title-row", [
+        @html.h1(class="brand", "OpenSeek sessions"),
+        @html.button(
+          class="sidebar-hide-button",
+          title="Hide sessions",
+          on_click=emit(ToggleSidebar),
+          "Hide",
+        ),
+      ]),
+      @html.div(class="status", model.status),
+    ]),
+    sidebar_list(emit, model),
+    theme_toggle(emit, model),
+  ])
+}
+
+///|
+fn main_toolbar(emit : @cmd.Emit[Msg], model : Model) -> @html.Html {
+  if model.sidebar_visible {
+    return @html.nothing
+  }
+  @html.div(class="main-toolbar", [
+    @html.button(
+      class="sidebar-show-button",
+      title="Show sessions",
+      on_click=emit(ToggleSidebar),
+      "Show sessions",
+    ),
   ])
 }
 
@@ -285,14 +352,44 @@ fn sidebar_list(emit : @cmd.Emit[Msg], model : Model) -> @html.Html {
         sidebar_row(emit, model, row)
       }
     ]
+    let collapsed = root_collapsed(model, root)
     sections.push(
-      @html.div(class="session-root", [
-        @html.div(class="session-root-label", root),
-        @html.ul(class="session-root-sessions", rows),
+      @html.div(class=session_root_class(collapsed), [
+        @html.button(
+          class="session-root-toggle",
+          title=if collapsed { "Expand \{root}" } else { "Collapse \{root}" },
+          on_click=emit(ToggleRoot(root)),
+          [
+            @html.span(
+              class="session-root-caret",
+              if collapsed {
+                "▸"
+              } else {
+                "▾"
+              },
+            ),
+            @html.span(class="session-root-name", root),
+            @html.span(class="session-root-count", rows.length().to_string()),
+          ],
+        ),
+        if collapsed {
+          @html.nothing
+        } else {
+          @html.ul(class="session-root-sessions", rows)
+        },
       ]),
     )
   }
   @html.div(class="session-list", sections)
+}
+
+///|
+fn session_root_class(collapsed : Bool) -> String {
+  if collapsed {
+    "session-root collapsed"
+  } else {
+    "session-root"
+  }
 }
 
 ///|
@@ -304,6 +401,31 @@ fn sidebar_roots(rows : Array[SessionRow]) -> Array[String] {
     }
   }
   roots
+}
+
+///|
+fn root_collapsed(model : Model, root : String) -> Bool {
+  model.collapsed_roots.contains(root)
+}
+
+///|
+fn toggle_collapsed_root(roots : Array[String], root : String) -> Array[String] {
+  if roots.contains(root) {
+    roots.filter(value => value != root)
+  } else {
+    let next = roots.copy()
+    next.push(root)
+    next
+  }
+}
+
+///|
+fn prune_collapsed_roots(
+  collapsed_roots : Array[String],
+  rows : Array[SessionRow],
+) -> Array[String] {
+  let roots = sidebar_roots(rows)
+  collapsed_roots.filter(root => roots.contains(root))
 }
 
 ///|
@@ -331,7 +453,11 @@ fn main_pane(emit : @cmd.Emit[Msg], model : Model) -> @html.Html {
     None =>
       @html.div(
         class="placeholder",
-        "Select a session from the left to view it.",
+        if model.sidebar_visible {
+          "Select a session from the left to view it."
+        } else {
+          "Show sessions to select a session."
+        },
       )
     Some(key) =>
       match model.parsed {
