@@ -120,12 +120,11 @@ pub async fn Client::chat(
   response_format? : @deepseek.ResponseFormat,
 ) -> @deepseek.ChatResponse {
   let body = @deepseek.encode_chat_request(
-    self.model,
-    messages,
+    model=self.model,
     tools~,
     thinking?=self.thinking,
     response_format?,
-  )
+  ) <| messages
   self.with_retries(() => self.chat_attempt(body), () => false)
 }
 
@@ -175,13 +174,12 @@ pub async fn Client::chat_stream(
   response_format? : @deepseek.ResponseFormat,
 ) -> @deepseek.ChatResponse {
   let body = @deepseek.encode_chat_request(
-    self.model,
-    messages,
+    model=self.model,
     tools~,
     thinking?=self.thinking,
     stream=true,
     response_format?,
-  )
+  ) <| messages
   // Once the server has produced any complete SSE event the completion is
   // running and billed — text deltas, tool-call deltas, and usage alike,
   // even though only text reaches the callbacks. A retry past that point

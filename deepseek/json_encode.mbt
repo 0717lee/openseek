@@ -69,12 +69,12 @@ impl ToJson for ToolCall with fn to_json(call : ToolCall) -> Json {
 ///
 /// `response_format`, `tools`, and `thinking` are omitted when empty / `None`.
 pub fn encode_chat_request(
-  model : Model,
-  messages : Array[ChatMessage],
   tools? : Array[ToolDefinition] = [],
   thinking? : ThinkingMode,
   stream? : Bool = false,
   response_format? : ResponseFormat,
+  model? : Model = V4Pro,
+  messages : Array[ChatMessage],
 ) -> Json {
   Json::object(
     Map(

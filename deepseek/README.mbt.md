@@ -20,8 +20,8 @@ The HTTP client lives in `bobzhang/openseek/deepseek/client`.
 - `ResponseFormat`: optional assistant content constraint. Leave absent for
   normal text; pass `JsonObject` only when the assistant content must be a JSON
   object.
-- `encode_chat_request(model, messages, tools?, thinking?, stream?,
-  response_format?)`: builds the full DeepSeek chat completions request
+- `encode_chat_request(tools?, thinking?, stream?, response_format?,
+  model?=V4Pro) <| messages`: builds the full DeepSeek chat completions request
   body. Streaming requests include usage-bearing stream options. The per-value
   encoders for messages, tool definitions, and tool calls are package-private
   implementation details.
@@ -64,9 +64,9 @@ The usual sequence is:
 ```moonbit check
 ///|
 test "encode chat request values" {
-  let body = @deepseek.encode_chat_request(V4Flash, [
+  let body = @deepseek.encode_chat_request(model=V4Flash) <| [
     ChatMessage(User, content="write a MoonBit test"),
-  ])
+  ]
   json_inspect(body, content={
     "model": "deepseek-v4-flash",
     "messages": [{ "role": "user", "content": "write a MoonBit test" }],
@@ -79,17 +79,7 @@ test "encode chat request values" {
 ///|
 test "encode tool-enabled chat request" {
   let body = @deepseek.encode_chat_request(
-    V4Flash,
-    [
-      ChatMessage(User, content="read README.mbt.md"),
-      ChatMessage(Assistant, content="", tool_calls=[
-        ToolCall(
-          id="call_1",
-          name="read",
-          arguments="{\"path\":\"README.mbt.md\"}",
-        ),
-      ]),
-    ],
+    model=V4Flash,
     tools=[
       ToolDefinition("read", "Read a file.", {
         "type": "object",
@@ -97,7 +87,16 @@ test "encode tool-enabled chat request" {
         "required": ["path"],
       }),
     ],
-  )
+  ) <| [
+    ChatMessage(User, content="read README.mbt.md"),
+    ChatMessage(Assistant, content="", tool_calls=[
+      ToolCall(
+        id="call_1",
+        name="read",
+        arguments="{\"path\":\"README.mbt.md\"}",
+      ),
+    ]),
+  ]
   json_inspect(body, content={
     "model": "deepseek-v4-flash",
     "messages": [
@@ -140,10 +139,11 @@ test "encode tool-enabled chat request" {
 ///|
 test "encode json-object response request" {
   let body = @deepseek.encode_chat_request(
-    V4Flash,
-    [ChatMessage(User, content="return {\"ok\":true}")],
+    model=V4Flash,
     response_format=JsonObject,
-  )
+  ) <| [
+    ChatMessage(User, content="return {\"ok\":true}"),
+  ]
   json_inspect(body, content={
     "model": "deepseek-v4-flash",
     "messages": [{ "role": "user", "content": "return {\"ok\":true}" }],
@@ -156,13 +156,9 @@ test "encode json-object response request" {
 ```moonbit check
 ///|
 test "decode chat response values" {
-  let response : @deepseek.ChatResponse = @json.from_json(
-    @json.parse(
-      (
-        #|{"choices":[{"message":{"content":"ok"}}]}
-      ),
-    ),
-  )
+  let response : @deepseek.ChatResponse = @json.from_json({
+    "choices": [{ "message": { "content": "ok" } }],
+  })
   debug_inspect(
     response,
     content=(
@@ -186,13 +182,25 @@ test "decode chat response values" {
 ```moonbit check
 ///|
 test "decode native tool call values" {
-  let response : @deepseek.ChatResponse = @json.from_json(
-    @json.parse(
-      (
-        #|{"choices":[{"message":{"content":null,"tool_calls":[{"id":"call_1","type":"function","function":{"name":"read","arguments":"{\"path\":\"README.mbt.md\"}"}}]}}]}
-      ),
-    ),
-  )
+  let response : @deepseek.ChatResponse = @json.from_json({
+    "choices": [
+      {
+        "message": {
+          "content": null,
+          "tool_calls": [
+            {
+              "id": "call_1",
+              "type": "function",
+              "function": {
+                "name": "read",
+                "arguments": "{\"path\":\"README.mbt.md\"}",
+              },
+            },
+          ],
+        },
+      },
+    ],
+  })
   debug_inspect(
     response,
     content=(

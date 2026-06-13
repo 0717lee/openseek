@@ -78,10 +78,11 @@ test "prepare tool-enabled client request values" {
     "required": ["path"],
   })
   let messages = [@deepseek.ChatMessage(User, content="read README.mbt.md")]
-  let body = @deepseek.encode_chat_request(V4Flash, messages, tools=[tool]).stringify()
+  let body = @deepseek.encode_chat_request(model=V4Flash, tools=[tool]) <| messages
+  let text = body.stringify()
   assert_eq(messages.length(), 1)
-  assert_true(body.contains("\"type\":\"function\""))
-  assert_true(body.contains("\"name\":\"read\""))
+  assert_true(text.contains("\"type\":\"function\""))
+  assert_true(text.contains("\"name\":\"read\""))
 }
 ```
 
