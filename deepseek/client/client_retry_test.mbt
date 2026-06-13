@@ -117,7 +117,7 @@ async test "chat never retries a non-429 client error" {
 }
 
 ///|
-async test "chat_stream retries a pre-stream 429 and then streams" {
+async test "streaming chat retries a pre-stream 429 and then streams" {
   @async.with_task_group() <| group => {
     guard flaky_server(group, failures=1, status=429, sse=true)
       is Some((url, hits)) else {
@@ -130,9 +130,10 @@ async test "chat_stream retries a pre-stream 429 and then streams" {
       retry_backoff_ms=1,
     )
     let deltas : Array[String] = []
-    let response = client.chat_stream([ChatMessage(User, content="hello")], on_content_delta=delta => {
-      deltas.push(delta)
-    })
+    let response = client.chat(
+      [ChatMessage(User, content="hello")],
+      stream=StreamHandler(on_content_delta=delta => deltas.push(delta)),
+    )
     assert_eq(response.content, "ok")
     assert_eq(deltas.join("|"), "ok")
     assert_eq(hits.val, 2)
@@ -143,7 +144,7 @@ async test "chat_stream retries a pre-stream 429 and then streams" {
 /// A 2xx connection that dies before any event is transport-shaped: with no
 /// delta delivered, the stream call retries and the second connection
 /// serves the full stream.
-async test "chat_stream retries a pre-delta stream drop" {
+async test "streaming chat retries a pre-delta stream drop" {
   @async.with_task_group() <| group => {
     let server = @http.Server(@socket.Addr::parse("127.0.0.1:0")) catch {
       error => {
@@ -181,9 +182,10 @@ async test "chat_stream retries a pre-delta stream drop" {
       retry_attempts=3,
       retry_backoff_ms=1,
     )
-    let response = client.chat_stream([ChatMessage(User, content="hello")], on_content_delta=_ => {
-      ()
-    })
+    let response = client.chat(
+      [ChatMessage(User, content="hello")],
+      stream=StreamHandler(on_content_delta=_ => ()),
+    )
     assert_eq(response.content, "ok")
     assert_eq(hits.val, 2)
   }
@@ -195,7 +197,7 @@ async test "chat_stream retries a pre-delta stream drop" {
 /// content. The server streams one delta then ends without [DONE] on every
 /// request, so a retry (if one wrongly happened) would be observable as a
 /// second hit.
-async test "chat_stream never retries after the first delta" {
+async test "streaming chat never retries after the first delta" {
   @async.with_task_group() <| group => {
     let server = @http.Server(@socket.Addr::parse("127.0.0.1:0")) catch {
       error => {
@@ -231,9 +233,10 @@ async test "chat_stream never retries after the first delta" {
       retry_backoff_ms=1,
     )
     let deltas : Array[String] = []
-    let _ = client.chat_stream([ChatMessage(User, content="hello")], on_content_delta=delta => {
-      deltas.push(delta)
-    }) catch {
+    let _ = client.chat(
+      [ChatMessage(User, content="hello")],
+      stream=StreamHandler(on_content_delta=delta => deltas.push(delta)),
+    ) catch {
       error => {
         assert_true("\{error}".contains("ended before [DONE]"))
         assert_eq(deltas.join("|"), "partial")
@@ -251,7 +254,7 @@ async test "chat_stream never retries after the first delta" {
 /// tool-call delta and then drops must surface the failure rather than
 /// retry: a replay could generate (and bill) a different call. (Codex
 /// review: the bail flag used to track callback-delivered text only.)
-async test "chat_stream never retries after a tool-call-only delta" {
+async test "streaming chat never retries after a tool-call-only delta" {
   @async.with_task_group() <| group => {
     let server = @http.Server(@socket.Addr::parse("127.0.0.1:0")) catch {
       error => {
@@ -286,9 +289,10 @@ async test "chat_stream never retries after a tool-call-only delta" {
       retry_attempts=3,
       retry_backoff_ms=1,
     )
-    let _ = client.chat_stream([ChatMessage(User, content="hello")], on_content_delta=_ => {
-      ()
-    }) catch {
+    let _ = client.chat(
+      [ChatMessage(User, content="hello")],
+      stream=StreamHandler(on_content_delta=_ => ()),
+    ) catch {
       error => {
         assert_true("\{error}".contains("ended before [DONE]"))
         assert_eq(hits.val, 1)

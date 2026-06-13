@@ -15,20 +15,20 @@ The package depends on `moonbitlang/async/http` and is native-only.
 - `Client(api_key~, model?, api_url?, thinking?, retry_attempts?,
   retry_backoff_ms?)`: configure the API key, endpoint, model, thinking mode,
   and retry budget.
-- `Client::chat(messages, tools?, response_format?)`: send a non-streaming
-  request and decode the response as `@deepseek.ChatResponse`.
-- `Client::chat_stream(messages, on_content_delta~, on_reasoning_delta?,
-  tools?, response_format?)`: send the same request in SSE streaming mode,
-  deliver non-empty content/reasoning deltas through callbacks, and return the
-  fully accumulated `@deepseek.ChatResponse`.
+- `Client::chat(messages, tools?, response_format?, stream?)`: send a request
+  and decode the response as `@deepseek.ChatResponse`. Without `stream`, this
+  is a normal JSON response. With `stream=StreamHandler(...)`, it uses SSE and
+  still returns the accumulated response.
+- `StreamHandler(on_content_delta~, on_reasoning_delta?)`: receive non-empty
+  content and reasoning deltas while a streaming chat request is in progress.
 
 `Client` implements `Debug` with the API key redacted.
 
 ## Configuration
 
 The default endpoint is `https://api.deepseek.com/chat/completions`, the default
-model is `deepseek-v4-pro`, and `thinking=No` is sent unless a different mode is provided. Pass `thinking=Max` for explicit max-effort thinking-mode
-requests.
+model is `deepseek-v4-pro`, and `thinking=No` is sent unless a different mode is
+provided. Pass `thinking=Max` for explicit max-effort thinking-mode requests.
 
 Retries cover transient failures: transport errors, HTTP 429, and HTTP 5xx.
 Other HTTP 4xx responses fail immediately. `retry_attempts` counts total tries;
@@ -63,9 +63,10 @@ test "construct DeepSeek client configuration" {
 
 ## Non-Streaming Chat
 
-`Client::chat` builds the same JSON body as `@deepseek.encode_chat_request`,
-using the client's `model` and `thinking` configuration, then posts it to
-`api_url` with `Content-Type: application/json` and bearer authorization.
+Without `stream`, `Client::chat` builds the same JSON body as
+`@deepseek.encode_chat_request`, using the client's `model` and `thinking`
+configuration, then posts it to `api_url` with `Content-Type:
+application/json` and bearer authorization.
 
 Use `tools=[...]` when the model may request native DeepSeek function calls.
 Use `response_format=JsonObject` only when the assistant content itself must be
@@ -133,10 +134,10 @@ then append one `Tool(call.id)` result message per call before the next request.
 
 ## Streaming Chat
 
-`Client::chat_stream` sends `stream=true` plus
-`stream_options={"include_usage":true}`. The transport pins
-`Accept-Encoding: identity` so a gzip-compressing intermediary cannot buffer and
-re-batch SSE deltas.
+Pass `stream=StreamHandler(...)` to `Client::chat` to send `stream=true` plus
+`stream_options={"include_usage":true}`. The transport pins `Accept-Encoding:
+identity` so a gzip-compressing intermediary cannot buffer and re-batch SSE
+deltas.
 
 The stream reader:
 
@@ -153,10 +154,14 @@ At runtime:
 
 ```moonbit nocheck
 ///|
-let response = client.chat_stream(
+let stream = @client.StreamHandler(on_content_delta=delta => print(delta), on_reasoning_delta=reasoning => {
+  log_reasoning(reasoning)
+})
+
+///|
+let response = client.chat(
   [@deepseek.ChatMessage(User, content="Explain this briefly.")],
-  on_content_delta=delta => print(delta),
-  on_reasoning_delta=reasoning => log_reasoning(reasoning),
+  stream~,
 )
 ```
 
@@ -164,7 +169,7 @@ The request body has this shape:
 
 ```moonbit check
 ///|
-test "Client::chat_stream request body shape" {
+test "Client::chat streaming request body shape" {
   let client = @client.Client(api_key="test-key")
   let body = @deepseek.encode_chat_request(
     model=client.model,

@@ -244,19 +244,21 @@ pub async fn[X] run_turn_in_scope(
         messages.push(ChatMessage(User, content=notice))
       }
       @xlog.info() <? { "event": "agent_step", "step": step + 1 }
-      let response = client.chat_stream(
+      let response = client.chat(
         messages,
         tools=tools.function_tools(),
-        on_content_delta=delta => {
-          if delta != "" {
-            @xlog.info() <? { "event": "assistant_delta", "content": delta }
-          }
-        },
-        on_reasoning_delta=delta => {
-          if delta != "" {
-            @xlog.info() <? { "event": "reasoning_delta", "content": delta }
-          }
-        },
+        stream=StreamHandler(
+          on_content_delta=delta => {
+            if delta != "" {
+              @xlog.info() <? { "event": "assistant_delta", "content": delta }
+            }
+          },
+          on_reasoning_delta=delta => {
+            if delta != "" {
+              @xlog.info() <? { "event": "reasoning_delta", "content": delta }
+            }
+          },
+        ),
       )
       // Reasoning first, so a consumer appending events in order shows the
       // thinking above the answer it led to.

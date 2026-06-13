@@ -49,16 +49,17 @@ async fn stream_test_server(
 }
 
 ///|
-async test "chat_stream accumulates SSE content, tool calls, and usage" {
+async test "chat stream handler accumulates SSE content, tool calls, and usage" {
   @async.with_task_group() <| group => {
     guard stream_test_server(group) is Some(url) else { return }
     let client = @client.Client(api_key="test-key", api_url=url)
     let deltas : Array[String] = []
     let reasoning_deltas : Array[String] = []
-    let response = client.chat_stream(
+    let response = client.chat(
       [ChatMessage(User, content="hello")],
-      on_content_delta=delta => deltas.push(delta),
-      on_reasoning_delta=delta => reasoning_deltas.push(delta),
+      stream=StreamHandler(on_content_delta=delta => deltas.push(delta), on_reasoning_delta=delta => {
+        reasoning_deltas.push(delta)
+      }),
     )
     assert_eq(deltas.join("|"), "Hello| world")
     assert_eq(reasoning_deltas.join("|"), "hidden")
@@ -77,14 +78,15 @@ async test "chat_stream accumulates SSE content, tool calls, and usage" {
 }
 
 ///|
-async test "chat_stream rejects EOF before done" {
+async test "chat stream handler rejects EOF before done" {
   @async.with_task_group() <| group => {
     guard stream_test_server(group, finish=false) is Some(url) else { return }
     let client = @client.Client(api_key="test-key", api_url=url)
     try {
-      let _ = client.chat_stream([ChatMessage(User, content="hello")], on_content_delta=_ => {
-        ()
-      })
+      let _ = client.chat(
+        [ChatMessage(User, content="hello")],
+        stream=StreamHandler(on_content_delta=_ => ()),
+      )
       fail("expected truncated stream to fail")
     } catch {
       error => assert_true("\{error}".contains("ended before [DONE]"))

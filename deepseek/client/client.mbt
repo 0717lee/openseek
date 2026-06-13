@@ -42,6 +42,27 @@ pub fn Client::Client(
 }
 
 ///|
+/// Callback hooks for a streaming DeepSeek chat request.
+///
+/// `on_content_delta` is called for each assistant content fragment as it
+/// arrives; `on_reasoning_delta` likewise for each thinking-mode reasoning
+/// fragment (it is simply not called when thinking is off). `Client::chat`
+/// returns the fully accumulated response after the stream reaches `[DONE]`.
+pub struct StreamHandler {
+  priv on_content_delta : async (String) -> Unit
+  priv on_reasoning_delta : async (String) -> Unit
+}
+
+///|
+/// Constructs callbacks for `Client::chat(..., stream=...)`.
+pub fn StreamHandler::StreamHandler(
+  on_content_delta~ : async (String) -> Unit,
+  on_reasoning_delta? : async (String) -> Unit = _ => (),
+) -> StreamHandler {
+  { on_content_delta, on_reasoning_delta }
+}
+
+///|
 /// A response status worth retrying: rate limiting or a server-side failure.
 /// Other 4xx are caller errors (bad key, malformed request) that a retry
 /// cannot fix.
@@ -74,7 +95,7 @@ let max_backoff_ms : Int = 60_000
 /// identically every time, before any network I/O) propagate immediately;
 /// anything else is transport-shaped (connect refused, reset, DNS) and
 /// retries within budget. `bail` lets an attempt declare later retries
-/// pointless — chat_stream sets it once the stream has produced any event,
+/// pointless — streaming chat sets it once the stream has produced any event,
 /// since replaying a half-consumed completion would duplicate content (or
 /// regenerate tool calls) downstream.
 ///
@@ -112,20 +133,28 @@ async fn[T] Client::with_retries(
 ///
 /// Pass `tools` to enable native DeepSeek function tool calls. Pass
 /// `response_format=JsonObject` only when the assistant content itself should
-/// be constrained to a JSON object.
+/// be constrained to a JSON object. Pass `stream=StreamHandler(...)` to send
+/// the request in SSE streaming mode while still receiving the accumulated
+/// response as the return value.
 pub async fn Client::chat(
   self : Client,
   messages : Array[@deepseek.ChatMessage],
   tools? : Array[@deepseek.ToolDefinition] = [],
   response_format? : @deepseek.ResponseFormat,
+  stream? : StreamHandler,
 ) -> @deepseek.ChatResponse {
+  let is_streaming = stream is Some(_)
   let body = @deepseek.encode_chat_request(
     model=self.model,
     tools~,
     thinking=self.thinking,
+    stream=is_streaming,
     response_format?,
   ) <| messages
-  self.with_retries(() => self.chat_attempt(body), () => false)
+  match stream {
+    None => self.with_retries(() => self.chat_attempt(body), () => false)
+    Some(stream) => self.chat_stream_body(body, stream)
+  }
 }
 
 ///|
@@ -158,28 +187,11 @@ async fn Client::chat_attempt(
 }
 
 ///|
-/// Sends typed chat messages in DeepSeek SSE streaming mode.
-///
-/// `on_content_delta` is called for each assistant content fragment as it
-/// arrives; `on_reasoning_delta` likewise for each thinking-mode reasoning
-/// fragment (it is simply not called when thinking is off). The returned value
-/// is the fully accumulated response, including reasoning, tool calls, and
-/// final token usage when the API sends it.
-pub async fn Client::chat_stream(
+async fn Client::chat_stream_body(
   self : Client,
-  messages : Array[@deepseek.ChatMessage],
-  on_content_delta~ : async (String) -> Unit,
-  on_reasoning_delta? : async (String) -> Unit = _ => (),
-  tools? : Array[@deepseek.ToolDefinition] = [],
-  response_format? : @deepseek.ResponseFormat,
+  body : Json,
+  stream : StreamHandler,
 ) -> @deepseek.ChatResponse {
-  let body = @deepseek.encode_chat_request(
-    model=self.model,
-    tools~,
-    thinking=self.thinking,
-    stream=true,
-    response_format?,
-  ) <| messages
   // Once the server has produced any complete SSE event the completion is
   // running and billed — text deltas, tool-call deltas, and usage alike,
   // even though only text reaches the callbacks. A retry past that point
@@ -192,8 +204,7 @@ pub async fn Client::chat_stream(
       self.chat_stream_attempt(
         body,
         on_stream_event=() => streamed = true,
-        on_content_delta~,
-        on_reasoning_delta~,
+        stream,
       )
     },
     () => streamed,
@@ -205,8 +216,7 @@ async fn Client::chat_stream_attempt(
   self : Client,
   body : Json,
   on_stream_event~ : () -> Unit,
-  on_content_delta~ : async (String) -> Unit,
-  on_reasoning_delta~ : async (String) -> Unit,
+  stream : StreamHandler,
 ) -> @deepseek.ChatResponse {
   let client = @http.post_stream(self.api_url, headers={
     "Content-Type": "application/json",
@@ -235,7 +245,7 @@ async fn Client::chat_stream_attempt(
   read_chat_stream(
     client,
     on_stream_event~,
-    on_content_delta~,
-    on_reasoning_delta~,
+    on_content_delta=stream.on_content_delta,
+    on_reasoning_delta=stream.on_reasoning_delta,
   )
 }
