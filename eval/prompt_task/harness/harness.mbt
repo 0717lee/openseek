@@ -497,7 +497,7 @@ fn count_occurrences(content : String, needle : String) -> Int {
 fn count_lines_containing_all(content : String, needles : Array[String]) -> Int {
   content
   .split("\n")
-  .filter(line => needles.iter().all(needle => line.contains(needle)))
+  .filter(line => needles.all(needle => line.contains(needle)))
   .count()
 }
 
