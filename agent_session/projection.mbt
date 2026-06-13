@@ -60,13 +60,13 @@ fn remove_pending_tool_call(
   pending : Array[@deepseek.ToolCall],
   tool_call_id : String,
 ) -> Bool {
-  for index in 0..<pending.length() {
-    if pending[index].id == tool_call_id {
+  match pending.search_by(call => call.id == tool_call_id) {
+    Some(index) => {
       ignore(pending.remove(index))
-      return true
+      true
     }
+    None => false
   }
-  false
 }
 
 ///|
@@ -98,12 +98,9 @@ fn is_covered_by_later_summary(
   event : SessionEvent,
   events : @vector.Vector[SessionEvent],
 ) -> Bool {
-  for candidate in events {
-    if summary_covers_event(candidate, event.sequence()) {
-      return true
-    }
-  }
-  false
+  events
+  .iter()
+  .any(candidate => summary_covers_event(candidate, event.sequence()))
 }
 
 ///|
