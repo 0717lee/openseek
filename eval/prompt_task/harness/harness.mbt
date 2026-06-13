@@ -481,13 +481,7 @@ fn json_stdout_probe(
 
 ///|
 fn count_successes(results : Array[TrialResult]) -> Int {
-  let mut count = 0
-  for result in results {
-    if result.success {
-      count += 1
-    }
-  }
-  count
+  results.iter().filter(result => result.success).count()
 }
 
 ///|
@@ -501,20 +495,10 @@ fn count_occurrences(content : String, needle : String) -> Int {
 
 ///|
 fn count_lines_containing_all(content : String, needles : Array[String]) -> Int {
-  let mut count = 0
-  for piece in content.split("\n") {
-    let line = piece.to_owned()
-    let mut matched = true
-    for needle in needles {
-      if !line.contains(needle) {
-        matched = false
-      }
-    }
-    if matched {
-      count += 1
-    }
-  }
-  count
+  content
+  .split("\n")
+  .filter(line => needles.iter().all(needle => line.contains(needle)))
+  .count()
 }
 
 ///|
