@@ -7,11 +7,12 @@ fn[X] tool_definitions(
   runtime : @agent_runtime.AgentRuntime,
   scope : @agent_runtime.AgentTaskScope[X],
 ) -> @agent_tool.Tools raise {
+  let workspace_root = runtime.workspace_root()
   Tools([
-    @shell.definition(),
-    @read.definition(),
-    @edit.definition(),
-    @write.definition(),
+    @shell.definition(workspace_root~),
+    @read.definition(workspace_root~),
+    @edit.definition(workspace_root~),
+    @write.definition(workspace_root~),
     @moon_check.definition(runtime, scope),
     @finish.definition(),
   ])

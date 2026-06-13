@@ -1,0 +1,16 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "bobzhang/openseek/internal/workspace_path"
+
+// Values
+pub fn resolve(String, String) -> String
+
+pub fn resolve_cwd(String, String?) -> String?
+
+// Errors
+
+// Types and methods
+
+// Type aliases
+
+// Traits
+

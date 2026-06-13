@@ -7,6 +7,17 @@ async fn run_edit(arguments : Json) -> @agent_tool.ToolAction {
 }
 
 ///|
+async fn run_edit_in_workspace(
+  workspace_root : String,
+  arguments : Json,
+) -> @agent_tool.ToolAction {
+  match @edit.definition(workspace_root~).execute {
+    Async(execute) => execute(arguments)
+    Sync(_) => fail("edit tool should be async")
+  }
+}
+
+///|
 async test "edit replaces a unique exact match" {
   let path = "/tmp/openseek-edit-unique.txt"
   @fs.write_file(path, "alpha\nbeta\ngamma\n", create_mode=CreateOrTruncate)
@@ -19,6 +30,23 @@ async test "edit replaces a unique exact match" {
   assert_eq(output.content, "ok: replaced 1 occurrence(s) in \{path}")
   assert_false(output.is_error)
   assert_eq(@fs.read_file(path).text(), "alpha\ndelta\ngamma\n")
+}
+
+///|
+async test "edit resolves relative paths under the workspace root" {
+  let dir = @fs.tmpdir(prefix="openseek-edit-workspace-")
+  let path = dir + "/note.txt"
+  @fs.write_file(path, "before", create_mode=CreateOrTruncate)
+  let result = run_edit_in_workspace(dir, {
+    "path": "note.txt",
+    "old_string": "before",
+    "new_string": "after",
+  })
+  guard result is Respond(output) else { fail("expected Respond") }
+  assert_false(output.is_error)
+  assert_eq(output.content, "ok: replaced 1 occurrence(s) in \{path}")
+  assert_eq(@fs.read_file(path).text(), "after")
+  @fs.rmdir(dir, recursive=true)
 }
 
 ///|

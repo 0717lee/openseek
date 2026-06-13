@@ -27,7 +27,9 @@
 ///   UTF-8, etc.).
 /// - `Respond(ToolOutput("error: read requires ...", is_error=true))` for
 ///   invalid arguments.
-pub fn definition() -> @agent_tool.AgentToolDefinition {
+pub fn definition(
+  workspace_root? : String = ".",
+) -> @agent_tool.AgentToolDefinition {
   AgentToolDefinition(
     name="read",
     description="Read arguments.path as text — or several independent files in ONE call via arguments.paths (per-file errors report inline; cheaper than one call per file). Supports optional start_line, max_lines, and max_output_chars for focused single-file reads.",
@@ -45,12 +47,20 @@ pub fn definition() -> @agent_tool.AgentToolDefinition {
         "max_output_chars": { "type": "number" },
       },
     }),
-    execute=Async(execute),
+    execute=Async(arguments => execute_with_workspace(workspace_root, arguments)),
   )
 }
 
 ///|
 async fn execute(arguments : Json) -> @agent_tool.ToolAction {
+  execute_with_workspace(".", arguments)
+}
+
+///|
+async fn execute_with_workspace(
+  workspace_root : String,
+  arguments : Json,
+) -> @agent_tool.ToolAction {
   let input = @decode.decode(arguments) catch {
     error => {
       let message = @tool_error.failure_message("\{error}")
@@ -60,10 +70,13 @@ async fn execute(arguments : Json) -> @agent_tool.ToolAction {
       )
     }
   }
-  if input.paths.length() == 1 {
-    read_file(input)
+  let paths = [
+    for path in input.paths => @workspace_path.resolve(workspace_root, path)
+  ]
+  if paths.length() == 1 {
+    read_file(input, path=paths[0])
   } else {
-    read_files(input)
+    read_files(input, paths~)
   }
 }
 
@@ -78,8 +91,10 @@ priv struct ReadSelection {
 }
 
 ///|
-async fn read_file(input : @decode.ReadInput) -> @agent_tool.ToolAction {
-  let path = input.paths[0]
+async fn read_file(
+  input : @decode.ReadInput,
+  path~ : String,
+) -> @agent_tool.ToolAction {
   let content = @fs.read_file(path).text() catch {
     error =>
       return @agent_tool.ToolAction::respond(
@@ -115,13 +130,16 @@ async fn read_file(input : @decode.ReadInput) -> @agent_tool.ToolAction {
 /// context (Codex review). Once the budget is exhausted the unread tail
 /// collapses into a single skipped-files marker, so output stays bounded no
 /// matter how many paths the call names.
-async fn read_files(input : @decode.ReadInput) -> @agent_tool.ToolAction {
+async fn read_files(
+  input : @decode.ReadInput,
+  paths~ : Array[String],
+) -> @agent_tool.ToolAction {
   let blocks : Array[String] = []
   let mut remaining = input.max_output_chars
   let mut failures = 0
   let mut truncated_any = false
   let skipped : Array[String] = []
-  for path in input.paths {
+  for path in paths {
     if remaining <= 0 {
       skipped.push(path)
       continue
@@ -163,7 +181,7 @@ async fn read_files(input : @decode.ReadInput) -> @agent_tool.ToolAction {
   }
   @agent_tool.ToolAction::respond(
     blocks.join("\n\n"),
-    is_error=failures == input.paths.length() || truncated_any,
+    is_error=failures == paths.length() || truncated_any,
   )
 }
 
@@ -249,6 +267,25 @@ async test "read returns file contents" {
   guard result is Respond(output) else { fail("expected Respond") }
   assert_eq(output.content, "hello read")
   assert_false(output.is_error)
+}
+
+///|
+async test "read resolves relative paths under the workspace root" {
+  let dir = @fs.tmpdir(prefix="openseek-read-workspace-")
+  @fs.write_file(
+    dir + "/note.txt",
+    "workspace read",
+    create_mode=CreateOrTruncate,
+  )
+  let tool = definition(workspace_root=dir)
+  let result = match tool.execute {
+    Async(execute) => execute({ "path": "note.txt" })
+    Sync(_) => fail("read tool should be async")
+  }
+  guard result is Respond(output) else { fail("expected Respond") }
+  assert_eq(output.content, "workspace read")
+  assert_false(output.is_error)
+  @fs.rmdir(dir, recursive=true)
 }
 
 ///|

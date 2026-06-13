@@ -18,7 +18,9 @@
 ///   matches. Ambiguous-match errors include the first matching line numbers.
 /// - `Respond(ToolOutput("error: edit requires ...", is_error=true))` for
 ///   invalid arguments.
-pub fn definition() -> @agent_tool.AgentToolDefinition {
+pub fn definition(
+  workspace_root? : String = ".",
+) -> @agent_tool.AgentToolDefinition {
   AgentToolDefinition(
     name="edit",
     description="Replace exact text in arguments.path with arguments.new_string.",
@@ -32,12 +34,15 @@ pub fn definition() -> @agent_tool.AgentToolDefinition {
       },
       "required": ["path", "old_string", "new_string"],
     }),
-    execute=Async(execute),
+    execute=Async(arguments => execute_with_workspace(workspace_root, arguments)),
   )
 }
 
 ///|
-async fn execute(arguments : Json) -> @agent_tool.ToolAction {
+async fn execute_with_workspace(
+  workspace_root : String,
+  arguments : Json,
+) -> @agent_tool.ToolAction {
   let input = @decode.decode(arguments) catch {
     error => {
       let message = @tool_error.failure_message("\{error}")
@@ -47,27 +52,31 @@ async fn execute(arguments : Json) -> @agent_tool.ToolAction {
       )
     }
   }
-  edit_file(input)
+  let path = @workspace_path.resolve(workspace_root, input.path)
+  edit_file(input, path~)
 }
 
 ///|
-async fn edit_file(input : @decode.EditInput) -> @agent_tool.ToolAction {
+async fn edit_file(
+  input : @decode.EditInput,
+  path~ : String,
+) -> @agent_tool.ToolAction {
   if input.old_string == "" {
     return @agent_tool.ToolAction::respond(
-      "error editing \{input.path}: old_string must be non-empty",
+      "error editing \{path}: old_string must be non-empty",
       is_error=true,
     )
   }
   if input.old_string == input.new_string {
     return @agent_tool.ToolAction::respond(
-      "error editing \{input.path}: old_string and new_string are identical",
+      "error editing \{path}: old_string and new_string are identical",
       is_error=true,
     )
   }
-  let content = @fs.read_file(input.path).text() catch {
+  let content = @fs.read_file(path).text() catch {
     error =>
       return @agent_tool.ToolAction::respond(
-        "error editing \{input.path}: error reading file: \{error}",
+        "error editing \{path}: error reading file: \{error}",
         is_error=true,
       )
   }
@@ -78,13 +87,13 @@ async fn edit_file(input : @decode.EditInput) -> @agent_tool.ToolAction {
   let occurrences = parts.length() - 1
   if occurrences == 0 {
     return @agent_tool.ToolAction::respond(
-      "error editing \{input.path}: old_string not found",
+      "error editing \{path}: old_string not found",
       is_error=true,
     )
   }
   if occurrences > 1 && !input.replace_all {
     return @agent_tool.ToolAction::respond(
-      ambiguous_match_message(input.path, occurrences, parts, input.old_string),
+      ambiguous_match_message(path, occurrences, parts, input.old_string),
       is_error=true,
     )
   }
@@ -94,23 +103,23 @@ async fn edit_file(input : @decode.EditInput) -> @agent_tool.ToolAction {
   } else {
     content.replace(old=input.old_string, new=input.new_string)
   }
-  match @manifest_error.write_error(input.path, new_content) {
+  match @manifest_error.write_error(path, new_content) {
     Some(message) =>
       return @agent_tool.ToolAction::respond(
-        "error editing \{input.path}: \{message}",
+        "error editing \{path}: \{message}",
         is_error=true,
       )
     None => ()
   }
   try {
-    @fs.write_file(input.path, new_content, create_mode=CreateOrTruncate)
+    @fs.write_file(path, new_content, create_mode=CreateOrTruncate)
     @agent_tool.ToolAction::respond(
-      "ok: replaced \{replacement_count} occurrence(s) in \{input.path}",
+      "ok: replaced \{replacement_count} occurrence(s) in \{path}",
     )
   } catch {
     error =>
       @agent_tool.ToolAction::respond(
-        "error editing \{input.path}: error writing file: \{error}",
+        "error editing \{path}: error writing file: \{error}",
         is_error=true,
       )
   }

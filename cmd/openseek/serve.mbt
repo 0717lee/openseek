@@ -79,7 +79,10 @@ test "serve commands decode and reject with actionable errors" {
 /// did not ask for. `cancel` interrupts the current turn but never the
 /// process. stdin EOF is the shutdown signal: the running turn finishes
 /// first, then the loop drains and exits.
-async fn run_serve(matches : @argparse.Matches) -> Unit {
+async fn run_serve(
+  matches : @argparse.Matches,
+  workspace_root~ : String,
+) -> Unit {
   let api_key = api_key(matches)
   let api_url = api_url(matches)
   let model = @deepseek.Model::parse(value(matches, "model"))
@@ -87,8 +90,11 @@ async fn run_serve(matches : @argparse.Matches) -> Unit {
   let thinking = @deepseek.ThinkingMode::parse(value(matches, "thinking"))
   let (store, initial_session) = match session_id(matches) {
     Some(id) => {
-      let store = @store.SessionStore(session_root(matches))
-      (Some(store), load_or_new_session(store, id, matches, model))
+      let store = @store.SessionStore(session_root(matches, workspace_root~))
+      (
+        Some(store),
+        load_or_new_session(store, id, matches, model, workspace_root~),
+      )
     }
     // No durable session requested: the conversation still spans every
     // prompt of this process's lifetime, it just leaves nothing behind.
@@ -97,7 +103,11 @@ async fn run_serve(matches : @argparse.Matches) -> Unit {
         None,
         Session(
           SessionId("serve"),
-          system_prompt=configured_system_prompt(matches, model),
+          system_prompt=configured_system_prompt(
+            matches,
+            model,
+            workspace_root~,
+          ),
         ),
       )
   }
@@ -106,7 +116,7 @@ async fn run_serve(matches : @argparse.Matches) -> Unit {
   // events it durably recorded before failing.
   let mut session = initial_session
   @async.with_task_group(group => {
-    let runtime = @agent_runtime.AgentRuntime()
+    let runtime = @agent_runtime.AgentRuntime(workspace_root~)
     let scope = @agent_runtime.AgentTaskScope(group)
     // Built once: stateful tool records live in this registry, and
     // rebuilding it per turn would orphan running watchers (see

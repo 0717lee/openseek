@@ -76,6 +76,10 @@ moon run cmd/openseek -- "inspect this project and finish with a short summary"
 `OPENSEEK_MAX_STEPS` is optional and defaults to `1000`; pass `--max-steps` on
 the CLI to override it for one run. `--thinking no|high|max` controls DeepSeek
 thinking mode and effort (default: max).
+Pass `--dir <workspace>` or set `OPENSEEK_DIR` to run one-shot commands against
+another workspace while still launching from the current shell. The default is
+`.`; if the final directory component is missing and its parent exists,
+OpenSeek creates it and logs `workspace_created`.
 
 ## Terminal UI
 

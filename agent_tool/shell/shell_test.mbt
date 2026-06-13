@@ -7,6 +7,17 @@ async fn run_shell(arguments : Json) -> @agent_tool.ToolAction {
 }
 
 ///|
+async fn run_shell_in_workspace(
+  workspace_root : String,
+  arguments : Json,
+) -> @agent_tool.ToolAction {
+  match @shell.definition(workspace_root~).execute {
+    Async(execute) => execute(arguments)
+    Sync(_) => fail("shell tool should be async")
+  }
+}
+
+///|
 #cfg(platform="windows")
 test "shell description tells models to use PowerShell on Windows" {
   let description = @shell.definition().description
@@ -72,6 +83,20 @@ async test "shell honors cwd when non-empty" {
   assert_false(output.is_error)
   assert_true(output.content.contains("exit=0"))
   assert_eq(marker.trim(), "cwd-ok")
+}
+
+///|
+async test "shell uses the workspace root when cwd is omitted" {
+  let dir = @fs.tmpdir(prefix="openseek-shell-workspace-")
+  let result = run_shell_in_workspace(dir, {
+    "cmd": "echo root-ok > marker.txt",
+  })
+  let marker = @fs.read_file(dir + "/marker.txt").text() catch { _ => "" }
+  @fs.rmdir(dir, recursive=true)
+  guard result is Respond(output) else { fail("expected Respond") }
+  assert_false(output.is_error)
+  assert_true(output.content.contains("exit=0"))
+  assert_eq(marker.trim(), "root-ok")
 }
 
 ///|

@@ -14,7 +14,9 @@
 ///   if the write fails.
 /// - `Respond(ToolOutput("error: write requires ...", is_error=true))` for
 ///   invalid arguments.
-pub fn definition() -> @agent_tool.AgentToolDefinition {
+pub fn definition(
+  workspace_root? : String = ".",
+) -> @agent_tool.AgentToolDefinition {
   AgentToolDefinition(
     name="write",
     description="Overwrite arguments.path with arguments.content.",
@@ -26,12 +28,20 @@ pub fn definition() -> @agent_tool.AgentToolDefinition {
       },
       "required": ["path", "content"],
     }),
-    execute=Async(execute),
+    execute=Async(arguments => execute_with_workspace(workspace_root, arguments)),
   )
 }
 
 ///|
 async fn execute(arguments : Json) -> @agent_tool.ToolAction {
+  execute_with_workspace(".", arguments)
+}
+
+///|
+async fn execute_with_workspace(
+  workspace_root : String,
+  arguments : Json,
+) -> @agent_tool.ToolAction {
   let input = @decode.decode(arguments) catch {
     error => {
       let message = @tool_error.failure_message("\{error}")
@@ -41,28 +51,32 @@ async fn execute(arguments : Json) -> @agent_tool.ToolAction {
       )
     }
   }
-  write_file(input)
+  let path = @workspace_path.resolve(workspace_root, input.path)
+  write_file(input, path~)
 }
 
 ///|
-async fn write_file(input : @decode.WriteInput) -> @agent_tool.ToolAction {
+async fn write_file(
+  input : @decode.WriteInput,
+  path~ : String,
+) -> @agent_tool.ToolAction {
   try {
-    match manifest_write_error(input.path, input.content) {
+    match manifest_write_error(path, input.content) {
       Some(message) =>
         return @agent_tool.ToolAction::respond(
-          "error writing \{input.path}: \{message}",
+          "error writing \{path}: \{message}",
           is_error=true,
         )
       None => ()
     }
-    @fs.write_file(input.path, input.content, create_mode=CreateOrTruncate)
+    @fs.write_file(path, input.content, create_mode=CreateOrTruncate)
     @agent_tool.ToolAction::respond(
-      "ok: wrote \{input.content.length()} chars to \{input.path}",
+      "ok: wrote \{input.content.length()} chars to \{path}",
     )
   } catch {
     error =>
       @agent_tool.ToolAction::respond(
-        "error writing \{input.path}: \{error}",
+        "error writing \{path}: \{error}",
         is_error=true,
       )
   }
@@ -122,6 +136,22 @@ async test "write creates a file with the given content" {
   assert_false(output.is_error)
   let read_back = @fs.read_file(path).text()
   assert_eq(read_back, "hello write")
+}
+
+///|
+async test "write resolves relative paths under the workspace root" {
+  let dir = @fs.tmpdir(prefix="openseek-write-workspace-")
+  let tool = definition(workspace_root=dir)
+  let result = match tool.execute {
+    Async(execute) => execute({ "path": "note.txt", "content": "workspace" })
+    Sync(_) => fail("write tool should be async")
+  }
+  guard result is Respond(output) else { fail("expected Respond") }
+  let path = dir + "/note.txt"
+  assert_false(output.is_error)
+  assert_eq(output.content, "ok: wrote 9 chars to \{path}")
+  assert_eq(@fs.read_file(path).text(), "workspace")
+  @fs.rmdir(dir, recursive=true)
 }
 
 ///|

@@ -59,13 +59,23 @@ pub async fn run(
   system_prompt_text? : String = default_system_prompt_for_model(model),
   thinking? : @deepseek.ThinkingMode = Max,
   api_url? : String,
+  workspace_root? : String = ".",
 ) -> Unit {
   let session = @agent_session.Session(
     SessionId("one-shot"),
     system_prompt=system_prompt_text,
   )
   ignore(
-    run_turn(api_key, model, session, task, max_steps~, thinking~, api_url?),
+    run_turn(
+      api_key,
+      model,
+      session,
+      task,
+      max_steps~,
+      thinking~,
+      api_url?,
+      workspace_root~,
+    ),
   )
 }
 
@@ -81,6 +91,7 @@ pub async fn run_turn(
   max_steps? : Int = default_max_steps,
   thinking? : @deepseek.ThinkingMode = Max,
   api_url? : String,
+  workspace_root? : String = ".",
 ) -> @agent_session.Session {
   run_turn_with_append(
     api_key,
@@ -91,6 +102,7 @@ pub async fn run_turn(
     max_steps~,
     thinking~,
     api_url?,
+    workspace_root~,
   )
 }
 
@@ -107,10 +119,11 @@ pub async fn run_turn_with_append(
   max_steps? : Int = default_max_steps,
   thinking? : @deepseek.ThinkingMode = Max,
   api_url? : String,
+  workspace_root? : String = ".",
 ) -> @agent_session.Session {
   @async.with_task_group() <| group => {
     run_turn_in_scope(
-      AgentRuntime(),
+      AgentRuntime(workspace_root~),
       AgentTaskScope(group),
       api_key,
       model,

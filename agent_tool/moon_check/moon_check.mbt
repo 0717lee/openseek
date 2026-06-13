@@ -27,6 +27,7 @@ pub fn[X] definition(
   scope : @agent_runtime.AgentTaskScope[X],
 ) -> @agent_tool.AgentToolDefinition {
   let moon_runtime = MoonCheckRuntime(runtime, scope)
+  let workspace_root = runtime.workspace_root()
   AgentToolDefinition(
     name="moon_check",
     description="Start or inspect a persistent `moon check --watch --diagnostic-limit 10` watcher for the given cwd. One watcher runs per directory: the first call starts it, later calls with the same arguments return the latest snapshot, and calling with different options replaces the watcher instead of stacking a second one.",
@@ -44,7 +45,9 @@ pub fn[X] definition(
         "explain": { "type": "boolean" },
       },
     }),
-    execute=Async(arguments => execute(moon_runtime, arguments)),
+    execute=Async(arguments => {
+      execute_with_workspace(moon_runtime, workspace_root, arguments)
+    }),
   )
 }
 
@@ -58,6 +61,15 @@ async fn[X] execute(
   runtime : MoonCheckRuntime[X],
   arguments : Json,
 ) -> @agent_tool.ToolAction {
+  execute_with_workspace(runtime, ".", arguments)
+}
+
+///|
+async fn[X] execute_with_workspace(
+  runtime : MoonCheckRuntime[X],
+  workspace_root : String,
+  arguments : Json,
+) -> @agent_tool.ToolAction {
   let input = @decode.decode(arguments) catch {
     error => {
       let message = @tool_error.failure_message("\{error}")
@@ -67,7 +79,8 @@ async fn[X] execute(
       )
     }
   }
-  moon_check(runtime, input) catch {
+  let cwd = @workspace_path.resolve_cwd(workspace_root, input.cwd)
+  moon_check(runtime, input, cwd) catch {
     error if @async.is_being_cancelled() => raise error
     error =>
       @agent_tool.ToolAction::respond(
@@ -91,8 +104,9 @@ async fn[X] execute(
 async fn[X] moon_check(
   runtime : MoonCheckRuntime[X],
   input : @decode.MoonCheckInput,
+  cwd : String?,
 ) -> @agent_tool.ToolAction {
-  let key = moon_check_key(input)
+  let key = moon_check_key_for_cwd(cwd)
   match runtime.moon_check_snapshot(key) {
     Some(snapshot) if snapshot.status is Running =>
       if snapshot.command == moon_check_command_line(input) {
@@ -112,6 +126,7 @@ async fn[X] moon_check(
         start_moon_check(
           runtime,
           input,
+          cwd,
           key,
           action="replaced",
           restart_count=snapshot.restart_count,
@@ -122,6 +137,7 @@ async fn[X] moon_check(
       start_moon_check(
         runtime,
         input,
+        cwd,
         key,
         action="restarted",
         restart_count=snapshot.restart_count,
@@ -131,6 +147,7 @@ async fn[X] moon_check(
       start_moon_check(
         runtime,
         input,
+        cwd,
         key,
         action="started",
         restart_count=0,
@@ -188,6 +205,35 @@ async test "moon_check validates a real fixture project" {
         moon_check_key(@decode.decode({ "cwd": project })),
       ),
     )
+    guard result is Respond(output) else { fail("expected Respond") }
+    assert_false(output.is_error)
+    inspect(
+      stable_moon_check_output(output.content, project, canonical),
+      content=(
+        #|cwd=<fixture>
+        #|command=moon check --watch --diagnostic-limit 10
+        #|watcher=started
+        #|id=moon-check-1
+        #|status=running
+        #|seq=<seq>
+        #|Finished. moon: ran 2 tasks, now up to date
+      ),
+    )
+  }
+  @fs.rmdir(project, recursive=true)
+}
+
+///|
+async test "moon_check uses the runtime workspace root when cwd is omitted" {
+  let project = valid_project()
+  let canonical = @fs.realpath(project)
+  @async.with_task_group() <| group => {
+    let runtime = MoonCheckRuntime(
+      AgentRuntime(workspace_root=project),
+      AgentTaskScope(group),
+    )
+    let result = execute_with_workspace(runtime, project, {})
+    ignore(runtime.stop_moon_check(moon_check_key_for_cwd(Some(project))))
     guard result is Respond(output) else { fail("expected Respond") }
     assert_false(output.is_error)
     inspect(

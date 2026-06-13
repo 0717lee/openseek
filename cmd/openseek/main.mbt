@@ -29,14 +29,15 @@ async fn run_cli() -> Unit {
     if flag(matches, "no-session") && session_id(matches) is Some(_) {
       fail("--no-session contradicts --session; pick one behavior")
     }
-    if handle_session_command(matches) {
+    let workspace_root = prepare_workspace_root(matches)
+    if handle_session_command(matches, workspace_root~) {
       return
     }
     if flag(matches, "serve") {
       if values(matches, "task").length() > 0 {
         fail("--serve reads commands from stdin; it does not take a task")
       }
-      run_serve(matches)
+      run_serve(matches, workspace_root~)
       return
     }
     let api_key = api_key(matches)
@@ -47,7 +48,11 @@ async fn run_cli() -> Unit {
     let task = task_text(matches)
     match resolved_session_id(matches) {
       None => {
-        let system_prompt_text = configured_system_prompt(matches, model)
+        let system_prompt_text = configured_system_prompt(
+          matches,
+          model,
+          workspace_root~,
+        )
         @agent.run(
           api_key,
           model,
@@ -56,6 +61,7 @@ async fn run_cli() -> Unit {
           system_prompt_text~,
           thinking~,
           api_url?,
+          workspace_root~,
         )
       }
       Some(id) => {
@@ -66,10 +72,17 @@ async fn run_cli() -> Unit {
           {
             "event": "session_started",
             "session": id.value(),
-            "session_root": session_root(matches),
+            "session_root": session_root(matches, workspace_root~),
+            "workspace_root": workspace_root,
           }
-        let store = @store.SessionStore(session_root(matches))
-        let session = load_or_new_session(store, id, matches, model)
+        let store = @store.SessionStore(session_root(matches, workspace_root~))
+        let session = load_or_new_session(
+          store,
+          id,
+          matches,
+          model,
+          workspace_root~,
+        )
         ignore(
           @agent.run_turn_with_append(
             api_key,
@@ -80,6 +93,7 @@ async fn run_cli() -> Unit {
             max_steps~,
             thinking~,
             api_url?,
+            workspace_root~,
           ),
         )
       }
@@ -196,6 +210,13 @@ fn cli_command() -> @argparse.Command {
         env="OPENSEEK_API_URL",
         default_values=[""],
         about="DeepSeek-compatible chat completions endpoint.",
+      ),
+      OptionArg(
+        "dir",
+        long="dir",
+        env="OPENSEEK_DIR",
+        default_values=["."],
+        about="Workspace directory for relative paths; creates only the final path component if its parent exists.",
       ),
       OptionArg(
         "max-steps",
@@ -367,12 +388,41 @@ fn session_id(matches : @argparse.Matches) -> @agent_session.SessionId? raise {
 }
 
 ///|
-fn session_root(matches : @argparse.Matches) -> String raise {
+async fn prepare_workspace_root(matches : @argparse.Matches) -> String {
+  let dir = value(matches, "dir").trim().to_owned()
+  if dir.is_empty() {
+    fail("--dir or OPENSEEK_DIR must not be empty")
+  }
+  if @fs.exists(dir) {
+    if @fs.kind(dir) != Directory {
+      fail("--dir is not a directory: \{dir}")
+    }
+    return @fs.realpath(dir)
+  }
+  let parent = @path.Path(dir).dirname().to_string()
+  let parent = if parent == "" { "." } else { parent }
+  if !@fs.exists(parent) {
+    fail("parent directory for --dir does not exist: \{parent}")
+  }
+  if @fs.kind(parent) != Directory {
+    fail("parent path for --dir is not a directory: \{parent}")
+  }
+  @fs.mkdir(dir)
+  let root = @fs.realpath(dir)
+  @xlog.info() <? { "event": "workspace_created", "dir": root }
+  root
+}
+
+///|
+fn session_root(
+  matches : @argparse.Matches,
+  workspace_root? : String = ".",
+) -> String raise {
   let root = value(matches, "session-root").trim().to_owned()
   if root.is_empty() {
     fail("--session-root or OPENSEEK_SESSION_ROOT must not be empty")
   }
-  root
+  @workspace_path.resolve(workspace_root, root)
 }
 
 ///|
@@ -449,7 +499,10 @@ fn format_session_listing(listing : @store.SessionListing) -> String {
 }
 
 ///|
-async fn handle_session_command(matches : @argparse.Matches) -> Bool {
+async fn handle_session_command(
+  matches : @argparse.Matches,
+  workspace_root? : String = ".",
+) -> Bool {
   let list_sessions = flag(matches, "session-list")
   let show_session = flag(matches, "session-show")
   let compact_file = value(matches, "session-compact-file").trim().to_owned()
@@ -469,7 +522,7 @@ async fn handle_session_command(matches : @argparse.Matches) -> Bool {
       "choose only one of --session-list, --session-show, or --session-compact-file",
     )
   }
-  let store = @store.SessionStore(session_root(matches))
+  let store = @store.SessionStore(session_root(matches, workspace_root~))
   if list_sessions {
     for listing in store.listings() {
       println(format_session_listing(listing))
@@ -517,15 +570,26 @@ async fn load_or_new_session(
   id : @agent_session.SessionId,
   matches : @argparse.Matches,
   model : @deepseek.Model,
+  workspace_root? : String = ".",
 ) -> @agent_session.Session {
   if store.exists(id) {
     store.load(id) catch {
       @os_error.OSError(_) as error if error.is_ENOENT() =>
-        Session(id, system_prompt=configured_system_prompt(matches, model))
+        Session(
+          id,
+          system_prompt=configured_system_prompt(
+            matches,
+            model,
+            workspace_root~,
+          ),
+        )
       error => raise error
     }
   } else {
-    Session(id, system_prompt=configured_system_prompt(matches, model))
+    Session(
+      id,
+      system_prompt=configured_system_prompt(matches, model, workspace_root~),
+    )
   }
 }
 
@@ -533,13 +597,14 @@ async fn load_or_new_session(
 async fn configured_system_prompt(
   matches : @argparse.Matches,
   model : @deepseek.Model,
+  workspace_root? : String = ".",
 ) -> String {
   let base_path = value(matches, "system-prompt-file")
   let addendum_path = value(matches, "system-prompt-addendum-file")
   let base = if base_path == "" {
     @prompt.system_prompt_for_model(model)
   } else {
-    @fs.read_file(base_path).text()
+    @fs.read_file(@workspace_path.resolve(workspace_root, base_path)).text()
   }
   // The environment section goes LAST: DeepSeek's context cache matches on
   // request prefixes, and the cwd is the only per-project variable in the
@@ -550,7 +615,9 @@ async fn configured_system_prompt(
   let with_addendum = if addendum_path == "" {
     base
   } else {
-    let addendum = @fs.read_file(addendum_path).text()
+    let addendum = @fs.read_file(
+      @workspace_path.resolve(workspace_root, addendum_path),
+    ).text()
     (
       $|\{base}
       $|
@@ -560,7 +627,7 @@ async fn configured_system_prompt(
   let tail =
     $|\{with_addendum}
     $|
-    $|\{environment_prompt_section()}
+    $|\{environment_prompt_section(workspace_root~)}
   // Workspace skills join the per-project tail after the environment
   // section: like the cwd they vary per project (and change when skills are
   // edited), so they must sit after all globally shared text to keep it
@@ -568,6 +635,7 @@ async fn configured_system_prompt(
   match
     skills_prompt_section_for_cwd(
       global_dir=value(matches, "global-skills-dir"),
+      workspace_root~,
     ) {
     Some(section) =>
       (
@@ -588,9 +656,12 @@ async fn configured_system_prompt(
 /// directories advertise nothing — and eval harnesses point `global_dir` at
 /// a path inside the trial workspace so the developer's own library never
 /// leaks into trials.
-async fn skills_prompt_section_for_cwd(global_dir~ : String) -> String? {
+async fn skills_prompt_section_for_cwd(
+  global_dir~ : String,
+  workspace_root~ : String,
+) -> String? {
   let resolved_global_dir = if global_dir != "" {
-    global_dir
+    @workspace_path.resolve(workspace_root, global_dir)
   } else {
     match @env.get_env_var("HOME") {
       Some(home) if home != "" => home + "/.openseek/skills"
@@ -605,7 +676,9 @@ async fn skills_prompt_section_for_cwd(global_dir~ : String) -> String? {
   @agent_skill.skills_prompt_section(
     @agent_skill.merge_skills(
       global_skills,
-      overrides=@agent_skill.discover_skills(".openseek/skills"),
+      overrides=@agent_skill.discover_skills(
+        @workspace_path.resolve(workspace_root, ".openseek/skills"),
+      ),
     ),
   )
 }
@@ -620,8 +693,16 @@ async fn skills_prompt_section_for_cwd(global_dir~ : String) -> String? {
 /// workspace wholesale. A durable session stores the prompt at creation, so
 /// the recorded directory is where the session was started — resume it from
 /// the same project root.
-async fn environment_prompt_section() -> String {
-  let cwd = @fs.realpath(".") catch { _ => "." }
+async fn environment_prompt_section(workspace_root? : String = ".") -> String {
+  let cwd = if workspace_root == "." || workspace_root == "" {
+    @fs.realpath(".") catch {
+      _ => "."
+    }
+  } else {
+    @fs.realpath(workspace_root) catch {
+      _ => workspace_root
+    }
+  }
   (
     $|## Environment
     $|
@@ -684,6 +765,7 @@ test "cli parses env backed options and task" {
     "DEEPSEEK": "test-key",
     "DEEPSEEK_MODEL": "deepseek-v4-pro",
     "OPENSEEK_API_URL": "https://proxy.example/v1/chat/completions",
+    "OPENSEEK_DIR": "/tmp/openseek-workspace",
     "OPENSEEK_MAX_STEPS": "120",
     "OPENSEEK_SYSTEM_PROMPT_FILE": "/tmp/prompt-a.md",
     "OPENSEEK_SYSTEM_PROMPT_ADDENDUM_FILE": "/tmp/prompt-b.md",
@@ -694,6 +776,7 @@ test "cli parses env backed options and task" {
   assert_eq(value(parsed, "model"), "deepseek-v4-pro")
   guard api_url(parsed) is Some(url) else { fail("expected api url") }
   assert_eq(url, "https://proxy.example/v1/chat/completions")
+  assert_eq(value(parsed, "dir"), "/tmp/openseek-workspace")
   assert_eq(max_steps(parsed), 120)
   assert_eq(value(parsed, "system-prompt-file"), "/tmp/prompt-a.md")
   assert_eq(value(parsed, "system-prompt-addendum-file"), "/tmp/prompt-b.md")
@@ -711,6 +794,7 @@ test "cli defaults model and max steps" {
   assert_eq(api_key(parsed), "test-key")
   assert_eq(value(parsed, "model"), "deepseek-v4-pro")
   assert_true(api_url(parsed) is None)
+  assert_eq(value(parsed, "dir"), ".")
   assert_eq(max_steps(parsed), 1000)
   assert_true(session_id(parsed) is None)
   assert_eq(session_root(parsed), ".openseek")
@@ -722,6 +806,79 @@ test "cli allows session management without api key or task" {
   assert_true(flag(parsed, "session-list"))
   assert_eq(value(parsed, "api-key"), "")
   assert_eq(values(parsed, "task").length(), 0)
+}
+
+///|
+async test "--dir creates a missing final component when its parent exists" {
+  let parent = @fs.tmpdir(prefix="openseek-dir-parent-")
+  let child = parent + "/child"
+  let parsed = cli_command().parse(argv=["--dir", child, "write", "MoonBit"], env={
+    "DEEPSEEK": "test-key",
+  })
+  let root = prepare_workspace_root(parsed)
+  assert_true(@fs.exists(child))
+  assert_eq(root, @fs.realpath(child))
+  @fs.rmdir(parent, recursive=true)
+}
+
+///|
+async test "--dir rejects missing parents instead of creating recursively" {
+  let root = @fs.tmpdir(prefix="openseek-dir-missing-parent-")
+  let child = root + "/missing/child"
+  let parsed = cli_command().parse(argv=["--dir", child, "write", "MoonBit"], env={
+    "DEEPSEEK": "test-key",
+  })
+  let _ = prepare_workspace_root(parsed) catch {
+    error => {
+      assert_true(
+        "\{error}".contains(
+          "parent directory for --dir does not exist: \{root}/missing",
+        ),
+      )
+      @fs.rmdir(root, recursive=true)
+      return
+    }
+  }
+  @fs.rmdir(root, recursive=true)
+  fail("missing parent accepted")
+}
+
+///|
+async test "--dir rejects existing non-directories" {
+  let root = @fs.tmpdir(prefix="openseek-dir-file-")
+  let path = root + "/file"
+  @fs.write_file(path, "not a directory", create_mode=CreateOrTruncate)
+  let parsed = cli_command().parse(argv=["--dir", path, "write", "MoonBit"], env={
+    "DEEPSEEK": "test-key",
+  })
+  let _ = prepare_workspace_root(parsed) catch {
+    error => {
+      assert_true("\{error}".contains("--dir is not a directory: \{path}"))
+      @fs.rmdir(root, recursive=true)
+      return
+    }
+  }
+  @fs.rmdir(root, recursive=true)
+  fail("file path accepted as --dir")
+}
+
+///|
+test "session root resolves relative to workspace root" {
+  let parsed = cli_command().parse(argv=["write", "MoonBit"], env={
+    "DEEPSEEK": "test-key",
+  })
+  assert_eq(
+    session_root(parsed, workspace_root="/tmp/openseek-workspace"),
+    "/tmp/openseek-workspace/.openseek",
+  )
+  let custom = cli_command().parse(
+    argv=["--session-root", "sessions", "write", "MoonBit"],
+    env={ "DEEPSEEK": "test-key" },
+  )
+  assert_eq(
+    session_root(custom, workspace_root="/tmp/openseek-workspace"),
+    "/tmp/openseek-workspace/sessions",
+  )
 }
 
 ///|
@@ -883,6 +1040,51 @@ async test "configured system prompt advertises global skills" {
     ),
   )
   @fs.rmdir(dir, recursive=true)
+}
+
+///|
+async test "configured system prompt uses the selected workspace root" {
+  let workspace = @fs.tmpdir(prefix="openseek-prompt-workspace-")
+  let real_workspace = @fs.realpath(workspace)
+  @fs.write_file(
+    workspace + "/prompt.md",
+    "workspace prompt\n",
+    create_mode=CreateOrTruncate,
+  )
+  @fs.mkdir(workspace + "/.openseek/skills", recursive=true)
+  @fs.write_file(
+    workspace + "/.openseek/skills/release.md",
+    (
+      #|---
+      #|name: release
+      #|description: Cut a workspace release.
+      #|---
+      #|steps
+    ),
+    create_mode=CreateOrTruncate,
+  )
+  let parsed = cli_command().parse(
+    argv=[
+      "--dir", workspace, "--system-prompt-file", "prompt.md", "write", "MoonBit",
+    ],
+    env={
+      "DEEPSEEK": "test-key",
+      "OPENSEEK_GLOBAL_SKILLS_DIR": workspace + "/no-global-skills",
+    },
+  )
+  let prompt = configured_system_prompt(
+    parsed,
+    V4Flash,
+    workspace_root=real_workspace,
+  )
+  assert_true(prompt.has_prefix("workspace prompt"))
+  assert_true(prompt.contains("Working directory: \{real_workspace}"))
+  assert_true(
+    prompt.contains(
+      "release — Cut a workspace release. (file: \{real_workspace}/.openseek/skills/release.md)",
+    ),
+  )
+  @fs.rmdir(workspace, recursive=true)
 }
 
 ///|

@@ -25,7 +25,9 @@
 ///   launching the process raises.
 /// - `Respond(ToolOutput("error: shell requires ...", is_error=true))` for
 ///   invalid arguments.
-pub fn definition() -> @agent_tool.AgentToolDefinition {
+pub fn definition(
+  workspace_root? : String = ".",
+) -> @agent_tool.AgentToolDefinition {
   AgentToolDefinition(
     name="shell",
     description=shell_description(),
@@ -39,7 +41,7 @@ pub fn definition() -> @agent_tool.AgentToolDefinition {
       },
       "required": ["cmd"],
     }),
-    execute=Async(execute),
+    execute=Async(arguments => execute_with_workspace(workspace_root, arguments)),
   )
 }
 
@@ -56,7 +58,10 @@ fn shell_description() -> String {
 }
 
 ///|
-async fn execute(arguments : Json) -> @agent_tool.ToolAction {
+async fn execute_with_workspace(
+  workspace_root : String,
+  arguments : Json,
+) -> @agent_tool.ToolAction {
   let input = @decode.decode(arguments) catch {
     error => {
       let message = @tool_error.failure_message("\{error}")
@@ -71,7 +76,8 @@ async fn execute(arguments : Json) -> @agent_tool.ToolAction {
       return @agent_tool.ToolAction::respond(message, is_error=true)
     None => ()
   }
-  shell(input) catch {
+  let cwd = @workspace_path.resolve_cwd(workspace_root, input.cwd)
+  shell(input, cwd) catch {
     error =>
       @agent_tool.ToolAction::respond(
         "error running shell: \{error}",
@@ -81,8 +87,11 @@ async fn execute(arguments : Json) -> @agent_tool.ToolAction {
 }
 
 ///|
-async fn shell(input : @decode.ShellInput) -> @agent_tool.ToolAction {
-  if input.cwd is Some(cwd) {
+async fn shell(
+  input : @decode.ShellInput,
+  cwd : String?,
+) -> @agent_tool.ToolAction {
+  if cwd is Some(cwd) {
     let exists = @fs.exists(cwd)
     if !exists {
       return @agent_tool.ToolAction::respond(
@@ -103,7 +112,7 @@ async fn shell(input : @decode.ShellInput) -> @agent_tool.ToolAction {
       @async.with_timeout_opt(timeout_ms, () => {
         collect_shell_output(
           input.cmd,
-          cwd?=input.cwd,
+          cwd?,
           max_output_chars=input.max_output_chars,
         )
       })
@@ -111,7 +120,7 @@ async fn shell(input : @decode.ShellInput) -> @agent_tool.ToolAction {
       Some(
         collect_shell_output(
           input.cmd,
-          cwd?=input.cwd,
+          cwd?,
           max_output_chars=input.max_output_chars,
         ),
       )

@@ -359,11 +359,16 @@ fn[X] MoonCheckRuntime::emit_moon_check(
 /// moon's build lock with each other and with the agent's own `moon test`
 /// runs, reported stale results, and a real session ended with the model
 /// running `pkill -9 -f "moon check"` to recover.
-fn moon_check_key(input : @decode.MoonCheckInput) -> String {
-  match input.cwd {
+fn moon_check_key_for_cwd(cwd : String?) -> String {
+  match cwd {
     Some(cwd) => "cwd=\{cwd}"
     None => "cwd=."
   }
+}
+
+///|
+fn moon_check_key(input : @decode.MoonCheckInput) -> String {
+  moon_check_key_for_cwd(input.cwd)
 }
 
 ///|

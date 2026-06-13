@@ -16,6 +16,9 @@ pub(all) extenum AgentEvent {}
 /// `AgentTaskScope` owns structured background task lifetime for tools that
 /// need it.
 pub struct AgentRuntime {
+  /// Workspace root used by local tools when resolving relative paths.
+  /// Defaults to "." so direct package users keep current-directory behavior.
+  priv workspace_root : String
   /// Bounded event bus (`DiscardOldest`, see `default_agent_event_capacity`)
   /// that background tools post updates to; the main loop drains it between
   /// steps to surface fresh tool output into the conversation.
@@ -29,11 +32,20 @@ pub struct AgentRuntime {
 ///|
 /// Create a runtime with an empty event bus of
 /// `default_agent_event_capacity` and an empty steering queue.
-pub fn AgentRuntime::AgentRuntime() -> AgentRuntime {
+pub fn AgentRuntime::AgentRuntime(
+  workspace_root? : String = ".",
+) -> AgentRuntime {
   {
+    workspace_root,
     events: Queue(kind=DiscardOldest(default_agent_event_capacity)),
     steers: Queue(kind=Unbounded),
   }
+}
+
+///|
+/// Workspace root used by local tools when resolving relative paths.
+pub fn AgentRuntime::workspace_root(self : AgentRuntime) -> String {
+  self.workspace_root
 }
 
 ///|
@@ -111,6 +123,7 @@ extenum AgentEvent += {
 ///|
 test "runtime drains queued events" {
   let runtime = AgentRuntime()
+  assert_eq(runtime.workspace_root(), ".")
   runtime.emit_event(RuntimeTestEvent("ok"))
   let events = runtime.drain_events()
   assert_eq(events.length(), 1)
@@ -119,6 +132,12 @@ test "runtime drains queued events" {
   }
   assert_eq(value, "ok")
   assert_eq(runtime.drain_events().length(), 0)
+}
+
+///|
+test "runtime stores an explicit workspace root" {
+  let runtime = AgentRuntime(workspace_root="/tmp/openseek-workspace")
+  assert_eq(runtime.workspace_root(), "/tmp/openseek-workspace")
 }
 
 ///|

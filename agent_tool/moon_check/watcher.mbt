@@ -68,6 +68,7 @@ fn command_args(input : @decode.MoonCheckInput, watch~ : Bool) -> Array[String] 
 async fn[X] start_moon_check(
   runtime : MoonCheckRuntime[X],
   input : @decode.MoonCheckInput,
+  cwd : String?,
   key : String,
   action~ : String,
   restart_count~ : Int,
@@ -76,6 +77,7 @@ async fn[X] start_moon_check(
   let id = spawn_moon_check_watch(
     runtime,
     input,
+    cwd,
     key,
     restart_count~,
     restart_reason~,
@@ -113,6 +115,7 @@ fn moon_check_command_line(input : @decode.MoonCheckInput) -> String {
 async fn[X] spawn_moon_check_watch(
   runtime : MoonCheckRuntime[X],
   input : @decode.MoonCheckInput,
+  cwd : String?,
   key : String,
   restart_count~ : Int,
   restart_reason~ : String?,
@@ -128,7 +131,7 @@ async fn[X] spawn_moon_check_watch(
     args,
     stdout=writer,
     stderr=writer,
-    cwd?=input.cwd.map(cwd => cwd.view()),
+    cwd?=cwd.map(cwd => cwd.view()),
     cancel_handler=@process.hard_cancel(),
     no_wait=true,
   )
@@ -137,7 +140,7 @@ async fn[X] spawn_moon_check_watch(
       key~,
       id~,
       command=moon_check_command_line(input),
-      cwd=input.cwd,
+      cwd~,
       process~,
       max_output_chars=default_max_output_chars,
       restart_count~,
@@ -154,7 +157,7 @@ async fn[X] spawn_moon_check_watch(
     // the time it returns; signal regardless of which path ran so a waiting
     // replacement can never hang.
     defer ignore(exited.try_put(()) catch { _ => false })
-    monitor_moon_check(runtime, input, key, id, reader, process)
+    monitor_moon_check(runtime, input, cwd, key, id, reader, process)
   }
   id
 }
@@ -181,6 +184,7 @@ async fn[X] wait_for_initial_snapshot(
 async fn[X] monitor_moon_check(
   runtime : MoonCheckRuntime[X],
   input : @decode.MoonCheckInput,
+  cwd : String?,
   key : String,
   id : String,
   reader : @process.ReadFromProcess,
@@ -205,7 +209,7 @@ async fn[X] monitor_moon_check(
     match chunk {
       None => {
         let exit_code = process.wait()
-        handle_moon_check_exit(runtime, input, key, id, exit_code)
+        handle_moon_check_exit(runtime, input, cwd, key, id, exit_code)
         return
       }
       Some(bytes) =>
@@ -228,6 +232,7 @@ async fn[X] monitor_moon_check(
 async fn[X] handle_moon_check_exit(
   runtime : MoonCheckRuntime[X],
   input : @decode.MoonCheckInput,
+  cwd : String?,
   key : String,
   id : String,
   exit_code : Int,
@@ -260,6 +265,7 @@ async fn[X] handle_moon_check_exit(
       spawn_moon_check_watch(
         runtime,
         input,
+        cwd,
         key,
         restart_count=stopped_snapshot.restart_count + 1,
         restart_reason=Some("auto restart after exit \{exit_code}"),

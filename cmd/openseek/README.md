@@ -8,7 +8,7 @@ variables, and calls `bobzhang/openseek/agent.run` for one-shot tasks or
 ## Command
 
 ```bash
-moon run cmd/openseek -- [--api-key sk-...] [--model deepseek-v4-pro] [--api-url https://api.deepseek.com/chat/completions] [--max-steps 1000] [--system-prompt-file prompt.md] [--system-prompt-addendum-file addendum.md] [--session session-id] [--session-root .openseek] "task text"
+moon run cmd/openseek -- [--api-key sk-...] [--model deepseek-v4-pro] [--api-url https://api.deepseek.com/chat/completions] [--dir .] [--max-steps 1000] [--system-prompt-file prompt.md] [--system-prompt-addendum-file addendum.md] [--session session-id] [--session-root .openseek] "task text"
 ```
 
 Agent runs require `--api-key` or `DEEPSEEK`. `--model` can also be supplied with
@@ -16,11 +16,18 @@ Agent runs require `--api-key` or `DEEPSEEK`. `--model` can also be supplied wit
 supplied with `OPENSEEK_MAX_STEPS`; it defaults to `1000`.
 `--api-url` can also be supplied with `OPENSEEK_API_URL`; when omitted, OpenSeek
 uses the default DeepSeek chat completions endpoint.
+`--dir` can also be supplied with `OPENSEEK_DIR`; it defaults to `.` and becomes
+the workspace root for relative prompt files, sessions, workspace skills, and
+agent tools. If the directory itself is missing but its parent exists, OpenSeek
+creates that final component and logs a `workspace_created` event. Missing
+parents are rejected, so `--dir a/b/c` creates only `c` when `a/b` already
+exists.
 `--system-prompt-file` and `--system-prompt-addendum-file` can also be supplied
 with `OPENSEEK_SYSTEM_PROMPT_FILE` and
 `OPENSEEK_SYSTEM_PROMPT_ADDENDUM_FILE`. `--session` can also be supplied with
 `OPENSEEK_SESSION`; when set, the CLI creates or resumes that session under
-`--session-root` / `OPENSEEK_SESSION_ROOT` (default `.openseek`).
+`--session-root` / `OPENSEEK_SESSION_ROOT` (default `.openseek`). Relative
+session roots are resolved under `--dir`.
 
 Every run records a durable session: without `--session`, a generated
 `cli-YYYYMMDD-HHMMSS-mmm` id is used and announced by a `session_started`
@@ -61,6 +68,10 @@ DEEPSEEK_MODEL=deepseek-v4-flash moon run cmd/openseek -- "inspect the package d
 
 ```bash
 moon run cmd/openseek -- --max-steps 200 "write tests, fix failures, and summarize"
+```
+
+```bash
+moon run cmd/openseek -- --dir ../another-workspace "run moon test"
 ```
 
 ```bash

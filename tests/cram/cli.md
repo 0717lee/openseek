@@ -32,6 +32,7 @@ Options:
   --api-key <api-key>                                          DeepSeek API key. [env: DEEPSEEK] [default: ]
   --model <model>                                              DeepSeek model: deepseek-v4-flash or deepseek-v4-pro. [env: DEEPSEEK_MODEL] [default: deepseek-v4-pro]
   --api-url <api-url>                                          DeepSeek-compatible chat completions endpoint. [env: OPENSEEK_API_URL] [default: ]
+  --dir <dir>                                                  Workspace directory for relative paths; creates only the final path component if its parent exists. [env: OPENSEEK_DIR] [default: .]
   --max-steps <max-steps>                                      Maximum number of agent loop steps before stopping. [env: OPENSEEK_MAX_STEPS] [default: 1000]
   --thinking <thinking>                                        DeepSeek thinking mode: no, high, or max. [env: OPENSEEK_THINKING] [default: max]
   --system-prompt-file <system-prompt-file>                    Read the complete system prompt from this file instead of the built-in prompt. [env: OPENSEEK_SYSTEM_PROMPT_FILE] [default: ]
@@ -134,6 +135,29 @@ $ sh <<'EOF'
 > rm -rf "$tmp"
 > EOF
 ephemeral
+```
+
+## `--dir` Selects The Workspace Root
+
+`--dir` defaults to `.`, but it can point a one-shot run at another workspace.
+When the final path component is missing and the parent exists, OpenSeek
+creates that one directory, logs `workspace_created`, and resolves the default
+session root under it.
+
+```mooncram
+$ sh <<'EOF'
+> tmp=$(mktemp -d)
+> mkdir -p "$tmp/parent"
+> if env DEEPSEEK=test-key openseek.exe --dir "$tmp/parent/new" --api-url "http://127.0.0.1:9/chat/completions" "say hi" > "$tmp/out.jsonl" 2>/dev/null; then echo exit-zero; else echo exit-non-zero; fi
+> if test -d "$tmp/parent/new"; then echo dir-created; else echo dir-missing; fi
+> grep -c '"event":"workspace_created"' "$tmp/out.jsonl"
+> env -u DEEPSEEK openseek.exe --dir "$tmp/parent/new" --session-list | cut -f1 | sed -E 's/cli-[0-9]{8}-[0-9]{6}-[0-9]{3}(-[A-Za-z0-9]+)?/cli-<stamp>/'
+> rm -rf "$tmp"
+> EOF
+exit-non-zero
+dir-created
+1
+cli-<stamp>
 ```
 
 Asking for both behaviors at once is rejected before any work happens.
