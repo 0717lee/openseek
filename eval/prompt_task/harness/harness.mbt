@@ -481,7 +481,13 @@ fn json_stdout_probe(
 
 ///|
 fn count_successes(results : Array[TrialResult]) -> Int {
-  results.filter(result => result.success).length()
+  for result in results; count = 0 {
+    if result.success {
+      continue count + 1
+    }
+  } nobreak {
+    count
+  }
 }
 
 ///|
