@@ -10,8 +10,8 @@ The HTTP client lives in `bobzhang/openseek/deepseek/client`.
 
 - `Model`: current DeepSeek chat model names, with `Show` for wire strings and
   `Debug` for inspection.
-- `ThinkingMode` and `ReasoningEffort`: typed controls for DeepSeek V4 thinking
-  mode (`enabled`/`disabled`) and effort (`high`/`max`).
+- `ThinkingMode`: typed control for DeepSeek V4 thinking (`No`, `High`, or
+  `Max`).
 - `Role`: `System`, `User`, `Assistant`, and `Tool(tool_call_id)`, with `Show`
   for wire strings and `Debug` for inspection.
 - `ChatMessage(role, content=..., tool_calls?, reasoning_content?)`: one typed
@@ -20,8 +20,8 @@ The HTTP client lives in `bobzhang/openseek/deepseek/client`.
 - `ResponseFormat`: optional assistant content constraint. Leave absent for
   normal text; pass `JsonObject` only when the assistant content must be a JSON
   object.
-- `encode_chat_request(model, messages, tools?, thinking?, reasoning_effort?,
-  stream?, response_format?)`: builds the full DeepSeek chat completions request
+- `encode_chat_request(model, messages, tools?, thinking?, stream?,
+  response_format?)`: builds the full DeepSeek chat completions request
   body. Streaming requests include usage-bearing stream options. The per-value
   encoders for messages, tool definitions, and tool calls are package-private
   implementation details.

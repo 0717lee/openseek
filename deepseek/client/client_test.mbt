@@ -7,11 +7,7 @@ test "client defaults" {
 
 ///|
 test "client debug redacts api key" {
-  let client = @client.Client(
-    api_key="test-key",
-    thinking=Some(Enabled),
-    reasoning_effort=Some(Max),
-  )
+  let client = @client.Client(api_key="test-key", thinking=Some(Max))
   debug_inspect(
     client,
     content=(
@@ -19,8 +15,7 @@ test "client debug redacts api key" {
       #|  api_key: ...,
       #|  model: V4Pro,
       #|  api_url: "https://api.deepseek.com/chat/completions",
-      #|  thinking: Some(Enabled),
-      #|  reasoning_effort: Some(Max),
+      #|  thinking: Some(Max),
       #|  retry_attempts: 3,
       #|  retry_backoff_ms: 500,
       #|}

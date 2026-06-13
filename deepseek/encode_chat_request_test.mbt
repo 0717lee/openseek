@@ -62,20 +62,35 @@ test "encode_chat_request enables usage-bearing stream mode" {
 
 ///|
 test "encode_chat_request encodes thinking controls" {
-  let body = @deepseek.encode_chat_request(
+  let high = @deepseek.encode_chat_request(
     V4Pro,
     [ChatMessage(User, content="solve")],
-    thinking=Enabled,
-    reasoning_effort=Max,
+    thinking=High,
   )
-  let text = body.stringify()
-  assert_true(text.contains("\"thinking\""))
-  assert_true(text.contains("\"type\":\"enabled\""))
-  assert_true(text.contains("\"reasoning_effort\":\"max\""))
+  let high_text = high.stringify()
+  assert_true(high_text.contains("\"thinking\""))
+  assert_true(high_text.contains("\"type\":\"enabled\""))
+  assert_true(high_text.contains("\"reasoning_effort\":\"high\""))
+
+  let max = @deepseek.encode_chat_request(
+    V4Pro,
+    [ChatMessage(User, content="solve")],
+    thinking=Max,
+  )
+  assert_true(max.stringify().contains("\"reasoning_effort\":\"max\""))
+
+  let no = @deepseek.encode_chat_request(
+    V4Pro,
+    [ChatMessage(User, content="solve")],
+    thinking=No,
+  )
+  let no_text = no.stringify()
+  assert_true(no_text.contains("\"type\":\"disabled\""))
+  assert_false(no_text.contains("\"reasoning_effort\""))
 }
 
 ///|
-test "encode_chat_request omits tools, thinking, and reasoning_effort when absent" {
+test "encode_chat_request omits tools and thinking when absent" {
   let body = @deepseek.encode_chat_request(V4Flash, [
     ChatMessage(User, content="hi"),
   ])

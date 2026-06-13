@@ -7,7 +7,7 @@ import {
 }
 
 // Values
-pub fn encode_chat_request(Model, Array[ChatMessage], tools? : Array[ToolDefinition], thinking? : ThinkingMode, reasoning_effort? : ReasoningEffort, stream? : Bool, response_format? : ResponseFormat) -> Json
+pub fn encode_chat_request(Model, Array[ChatMessage], tools? : Array[ToolDefinition], thinking? : ThinkingMode, stream? : Bool, response_format? : ResponseFormat) -> Json
 
 // Errors
 
@@ -35,13 +35,6 @@ pub(all) enum Model {
 pub fn Model::parse(String) -> Self raise
 pub impl Show for Model
 
-pub(all) enum ReasoningEffort {
-  High
-  Max
-} derive(Eq, @debug.Debug)
-pub fn ReasoningEffort::parse(String) -> Self raise
-pub impl Show for ReasoningEffort
-
 pub(all) enum ResponseFormat {
   JsonObject
 } derive(Eq, @debug.Debug)
@@ -56,8 +49,9 @@ pub(all) enum Role {
 pub impl Show for Role
 
 pub(all) enum ThinkingMode {
-  Enabled
-  Disabled
+  No
+  High
+  Max
 } derive(Eq, @debug.Debug)
 pub fn ThinkingMode::parse(String) -> Self raise
 pub impl Show for ThinkingMode

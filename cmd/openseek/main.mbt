@@ -44,9 +44,6 @@ async fn run_cli() -> Unit {
     let model = @deepseek.Model::parse(value(matches, "model"))
     let max_steps = max_steps(matches)
     let thinking = @deepseek.ThinkingMode::parse(value(matches, "thinking"))
-    let reasoning_effort = @deepseek.ReasoningEffort::parse(
-      value(matches, "reasoning-effort"),
-    )
     let task = task_text(matches)
     match resolved_session_id(matches) {
       None => {
@@ -58,7 +55,6 @@ async fn run_cli() -> Unit {
           max_steps~,
           system_prompt_text~,
           thinking~,
-          reasoning_effort~,
           api_url?,
         )
       }
@@ -83,7 +79,6 @@ async fn run_cli() -> Unit {
             append_item=(session, item) => store.append(session, item),
             max_steps~,
             thinking~,
-            reasoning_effort~,
             api_url?,
           ),
         )
@@ -213,15 +208,8 @@ fn cli_command() -> @argparse.Command {
         "thinking",
         long="thinking",
         env="OPENSEEK_THINKING",
-        default_values=["enabled"],
-        about="DeepSeek thinking mode: enabled or disabled.",
-      ),
-      OptionArg(
-        "reasoning-effort",
-        long="reasoning-effort",
-        env="OPENSEEK_REASONING_EFFORT",
         default_values=["max"],
-        about="DeepSeek reasoning effort in thinking mode: high or max.",
+        about="DeepSeek thinking mode: no, high, or max.",
       ),
       OptionArg(
         "system-prompt-file",

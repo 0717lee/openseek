@@ -42,32 +42,25 @@ test "model parsing" {
 
 ///|
 test "thinking controls stringify" {
-  let enabled : @deepseek.ThinkingMode = Enabled
-  let disabled : @deepseek.ThinkingMode = Disabled
-  let high : @deepseek.ReasoningEffort = High
-  let max : @deepseek.ReasoningEffort = Max
-  assert_eq(enabled.to_string(), "enabled")
-  assert_eq(disabled.to_string(), "disabled")
+  let no : @deepseek.ThinkingMode = No
+  let high : @deepseek.ThinkingMode = High
+  let max : @deepseek.ThinkingMode = Max
+  assert_eq(no.to_string(), "no")
   assert_eq(high.to_string(), "high")
   assert_eq(max.to_string(), "max")
 }
 
 ///|
 test "thinking controls parse their wire names and reject others" {
-  assert_true(@deepseek.ThinkingMode::parse("enabled") is Enabled)
-  assert_true(@deepseek.ThinkingMode::parse("disabled") is Disabled)
-  assert_true(@deepseek.ReasoningEffort::parse("high") is High)
-  assert_true(@deepseek.ReasoningEffort::parse("max") is Max)
+  assert_true(@deepseek.ThinkingMode::parse("no") is No)
+  assert_true(@deepseek.ThinkingMode::parse("high") is High)
+  assert_true(@deepseek.ThinkingMode::parse("max") is Max)
+  assert_true(@deepseek.ThinkingMode::parse("disabled") is No)
+  assert_true(@deepseek.ThinkingMode::parse("enabled") is Max)
   let _ = @deepseek.ThinkingMode::parse("on") catch {
     error => {
       assert_true("\{error}".contains("unknown thinking mode"))
-      let _ = @deepseek.ReasoningEffort::parse("ultra") catch {
-        error => {
-          assert_true("\{error}".contains("unknown reasoning effort"))
-          return
-        }
-      }
-      fail("bad reasoning effort accepted")
+      return
     }
   }
   fail("bad thinking mode accepted")

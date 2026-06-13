@@ -57,8 +57,7 @@ pub async fn run(
   task : String,
   max_steps? : Int = default_max_steps,
   system_prompt_text? : String = default_system_prompt_for_model(model),
-  thinking? : @deepseek.ThinkingMode = Enabled,
-  reasoning_effort? : @deepseek.ReasoningEffort = Max,
+  thinking? : @deepseek.ThinkingMode = Max,
   api_url? : String,
 ) -> Unit {
   let session = @agent_session.Session(
@@ -66,16 +65,7 @@ pub async fn run(
     system_prompt=system_prompt_text,
   )
   ignore(
-    run_turn(
-      api_key,
-      model,
-      session,
-      task,
-      max_steps~,
-      thinking~,
-      reasoning_effort~,
-      api_url?,
-    ),
+    run_turn(api_key, model, session, task, max_steps~, thinking~, api_url?),
   )
 }
 
@@ -89,8 +79,7 @@ pub async fn run_turn(
   session : @agent_session.Session,
   task : String,
   max_steps? : Int = default_max_steps,
-  thinking? : @deepseek.ThinkingMode = Enabled,
-  reasoning_effort? : @deepseek.ReasoningEffort = Max,
+  thinking? : @deepseek.ThinkingMode = Max,
   api_url? : String,
 ) -> @agent_session.Session {
   run_turn_with_append(
@@ -101,7 +90,6 @@ pub async fn run_turn(
     append_item=(session, item) => session.append(item),
     max_steps~,
     thinking~,
-    reasoning_effort~,
     api_url?,
   )
 }
@@ -117,8 +105,7 @@ pub async fn run_turn_with_append(
   task : String,
   append_item~ : async (@agent_session.Session, @agent_session.SessionItem) -> @agent_session.Session,
   max_steps? : Int = default_max_steps,
-  thinking? : @deepseek.ThinkingMode = Enabled,
-  reasoning_effort? : @deepseek.ReasoningEffort = Max,
+  thinking? : @deepseek.ThinkingMode = Max,
   api_url? : String,
 ) -> @agent_session.Session {
   @async.with_task_group() <| group => {
@@ -132,7 +119,6 @@ pub async fn run_turn_with_append(
       append_item~,
       max_steps~,
       thinking~,
-      reasoning_effort~,
       api_url?,
     )
   }
@@ -197,8 +183,7 @@ pub async fn[X] run_turn_in_scope(
   task : String,
   append_item~ : async (@agent_session.Session, @agent_session.SessionItem) -> @agent_session.Session,
   max_steps? : Int = default_max_steps,
-  thinking? : @deepseek.ThinkingMode = Enabled,
-  reasoning_effort? : @deepseek.ReasoningEffort = Max,
+  thinking? : @deepseek.ThinkingMode = Max,
   api_url? : String,
   tools? : @agent_tool.Tools,
 ) -> @agent_session.Session {
@@ -206,13 +191,6 @@ pub async fn[X] run_turn_in_scope(
     api_key~,
     model~,
     thinking=Some(thinking),
-    // The API rejects a request that sets reasoning_effort while thinking is
-    // disabled — effort only means something during thinking — so the effort
-    // rides along only when thinking is on.
-    reasoning_effort=match thinking {
-      Enabled => Some(reasoning_effort)
-      Disabled => None
-    },
     api_url?,
   )
   let mut session = append_item(session, User(UserMessage(task)))

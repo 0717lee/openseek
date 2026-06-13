@@ -36,7 +36,7 @@ tool returns `Control(Finish(...))` / `Control(Abort(...))`, or the step limit
 is reached.
 
 The agent client enables DeepSeek V4 thinking mode explicitly with
-`thinking=enabled` and `reasoning_effort=max`. When DeepSeek returns
+`thinking=max`. When DeepSeek returns
 `reasoning_content` with tool calls, the agent preserves it in the assistant
 tool-call message for the next request.
 

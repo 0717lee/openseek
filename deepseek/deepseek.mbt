@@ -25,56 +25,38 @@ pub fn Model::parse(input : String) -> Model raise {
 }
 
 ///|
-/// DeepSeek thinking mode request toggle.
+/// DeepSeek thinking control for V4 models.
+///
+/// `No` disables thinking. `High` and `Max` enable thinking and select the
+/// corresponding reasoning effort.
 pub(all) enum ThinkingMode {
-  Enabled
-  Disabled
-} derive(Eq, Debug)
-
-///|
-/// Returns the DeepSeek wire name for a thinking mode toggle.
-pub impl Show for ThinkingMode with fn to_string(self : ThinkingMode) -> String {
-  match self {
-    Enabled => "enabled"
-    Disabled => "disabled"
-  }
-}
-
-///|
-/// Parses a thinking mode from its wire name (`enabled`/`disabled`), raising
-/// on anything else — the inverse of `Show`, for CLI flags and config.
-pub fn ThinkingMode::parse(input : String) -> ThinkingMode raise {
-  match input {
-    "enabled" => Enabled
-    "disabled" => Disabled
-    other => fail("unknown thinking mode: \{other} (use enabled or disabled)")
-  }
-}
-
-///|
-/// DeepSeek reasoning effort for thinking mode.
-pub(all) enum ReasoningEffort {
+  No
   High
   Max
 } derive(Eq, Debug)
 
 ///|
-/// Returns the DeepSeek wire name for a reasoning effort.
-pub impl Show for ReasoningEffort with fn to_string(self : ReasoningEffort) -> String {
+/// Returns the user-facing name for a thinking mode.
+pub impl Show for ThinkingMode with fn to_string(self : ThinkingMode) -> String {
   match self {
+    No => "no"
     High => "high"
     Max => "max"
   }
 }
 
 ///|
-/// Parses a reasoning effort from its wire name (`high`/`max`), raising on
-/// anything else — the inverse of `Show`, for CLI flags and config.
-pub fn ReasoningEffort::parse(input : String) -> ReasoningEffort raise {
+/// Parses a thinking mode from its user-facing name (`no`/`high`/`max`),
+/// raising on anything else.
+///
+/// The legacy `disabled` and `enabled` names remain accepted as aliases for
+/// `No` and `Max` so existing environment settings keep working.
+pub fn ThinkingMode::parse(input : String) -> ThinkingMode raise {
   match input {
+    "no" | "disabled" => No
     "high" => High
-    "max" => Max
-    other => fail("unknown reasoning effort: \{other} (use high or max)")
+    "max" | "enabled" => Max
+    other => fail("unknown thinking mode: \{other} (use no, high, or max)")
   }
 }
 

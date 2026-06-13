@@ -67,14 +67,12 @@ impl ToJson for ToolCall with fn to_json(call : ToolCall) -> Json {
 ///|
 /// Encodes a DeepSeek chat completions request body.
 ///
-/// `response_format`, `tools`, `thinking`, and `reasoning_effort` are omitted
-/// when empty / `None`.
+/// `response_format`, `tools`, and `thinking` are omitted when empty / `None`.
 pub fn encode_chat_request(
   model : Model,
   messages : Array[ChatMessage],
   tools? : Array[ToolDefinition] = [],
   thinking? : ThinkingMode,
-  reasoning_effort? : ReasoningEffort,
   stream? : Bool = false,
   response_format? : ResponseFormat,
 ) -> Json {
@@ -100,13 +98,17 @@ pub fn encode_chat_request(
           []
         },
         ..match thinking {
-          Some(thinking) =>
-            [("thinking", ({ "type": thinking.to_string() } : Json))]
-          None => []
-        },
-        ..match reasoning_effort {
-          Some(reasoning_effort) =>
-            [("reasoning_effort", Json::string(reasoning_effort.to_string()))]
+          Some(No) => [("thinking", ({ "type": "disabled" } : Json))]
+          Some(High) =>
+            [
+              ("thinking", ({ "type": "enabled" } : Json)),
+              ("reasoning_effort", Json::string("high")),
+            ]
+          Some(Max) =>
+            [
+              ("thinking", ({ "type": "enabled" } : Json)),
+              ("reasoning_effort", Json::string("max")),
+            ]
           None => []
         },
       ],

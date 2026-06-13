@@ -85,9 +85,6 @@ async fn run_serve(matches : @argparse.Matches) -> Unit {
   let model = @deepseek.Model::parse(value(matches, "model"))
   let max_steps = max_steps(matches)
   let thinking = @deepseek.ThinkingMode::parse(value(matches, "thinking"))
-  let reasoning_effort = @deepseek.ReasoningEffort::parse(
-    value(matches, "reasoning-effort"),
-  )
   let (store, initial_session) = match session_id(matches) {
     Some(id) => {
       let store = @store.SessionStore(session_root(matches))
@@ -162,7 +159,6 @@ async fn run_serve(matches : @argparse.Matches) -> Unit {
           },
           max_steps~,
           thinking~,
-          reasoning_effort~,
           api_url?,
           tools~,
         ) catch {

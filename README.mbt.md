@@ -74,9 +74,8 @@ moon run cmd/openseek -- "inspect this project and finish with a short summary"
 
 `DEEPSEEK_MODEL` is optional and defaults to `deepseek-v4-pro`.
 `OPENSEEK_MAX_STEPS` is optional and defaults to `1000`; pass `--max-steps` on
-the CLI to override it for one run. `--thinking enabled|disabled` and
-`--reasoning-effort high|max` control DeepSeek thinking mode (defaults:
-enabled, max).
+the CLI to override it for one run. `--thinking no|high|max` controls DeepSeek
+thinking mode and effort (default: max).
 
 ## Terminal UI
 

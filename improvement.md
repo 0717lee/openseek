@@ -139,12 +139,10 @@ shows where steps and tokens went to waste):
   required field — no external users, so old logs are simply re-created;
   in-memory appends without a clock carry the 0 sentinel).)*
 
-- [x] **Expose thinking controls.** `run_with_runtime` hardcodes
-  `thinking=Enabled, reasoning_effort=Max`; make them engine flags
-  (`--thinking`, `--reasoning-effort`) and TUI pass-throughs. *(Done:
-  `OPENSEEK_THINKING` / `OPENSEEK_REASONING_EFFORT` env-backed flags on both
-  binaries, threaded through `@agent.run*` as optional params with the old
-  hardcoded values as defaults.)*
+- [x] **Expose thinking controls.** `run_with_runtime` hardcoded max-effort
+  thinking; make it an engine flag (`--thinking no|high|max`) and a TUI
+  pass-through. *(Done: `OPENSEEK_THINKING` is env-backed on both binaries and
+  threaded through `@agent.run*` as an optional param with max as the default.)*
 - [ ] **Auto-compaction — deferred, reframed as a context-ceiling guard.**
   Compaction exists only as the manual `--session-compact-*` flow.
   Deliberately deferred (owner decision, 2026-06-12): compaction rewrites
