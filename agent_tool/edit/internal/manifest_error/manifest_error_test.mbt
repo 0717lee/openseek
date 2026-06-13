@@ -52,3 +52,26 @@ async test "manifest error rejects invalid moon.pkg content" {
   }
   assert_eq(json, "moon.pkg uses current text syntax, not JSON")
 }
+
+///|
+async test "manifest error accepts Windows path separators" {
+  guard @manifest_error.write_error(
+      "C:\\workspace\\moon.mod", "{\"name\":\"bad\"}",
+    )
+    is Some(moon_mod) else {
+    fail("expected moon.mod error")
+  }
+  assert_eq(moon_mod, "moon.mod uses current text syntax, not JSON")
+  guard @manifest_error.write_error("C:\\workspace\\moon.pkg", "x")
+    is Some(moon_pkg) else {
+    fail("expected moon.pkg error")
+  }
+  assert_eq(moon_pkg, "moon.pkg content is suspiciously small")
+  guard @manifest_error.write_error("C:\\workspace\\moon.mod.json", "{}")
+    is Some(moon_mod_json) else {
+    fail("expected moon.mod.json error")
+  }
+  assert_eq(
+    moon_mod_json, "moon.mod.json is legacy; create moon.mod for new MoonBit projects",
+  )
+}

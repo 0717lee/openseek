@@ -39,15 +39,18 @@ pub async fn write_error(path : String, content : String) -> String? {
 
 ///|
 fn is_moon_mod_path(path : String) -> Bool {
+  let path = path.replace_all(old="\\", new="/")
   path == "moon.mod" || path.has_suffix("/moon.mod")
 }
 
 ///|
 fn is_moon_mod_json_path(path : String) -> Bool {
+  let path = path.replace_all(old="\\", new="/")
   path == "moon.mod.json" || path.has_suffix("/moon.mod.json")
 }
 
 ///|
 fn is_moon_pkg_path(path : String) -> Bool {
+  let path = path.replace_all(old="\\", new="/")
   path == "moon.pkg" || path.has_suffix("/moon.pkg")
 }

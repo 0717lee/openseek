@@ -114,16 +114,19 @@ async fn manifest_write_error(path : String, content : String) -> String? {
 
 ///|
 fn is_moon_mod_path(path : String) -> Bool {
+  let path = path.replace_all(old="\\", new="/")
   path == "moon.mod" || path.has_suffix("/moon.mod")
 }
 
 ///|
 fn is_moon_mod_json_path(path : String) -> Bool {
+  let path = path.replace_all(old="\\", new="/")
   path == "moon.mod.json" || path.has_suffix("/moon.mod.json")
 }
 
 ///|
 fn is_moon_pkg_path(path : String) -> Bool {
+  let path = path.replace_all(old="\\", new="/")
   path == "moon.pkg" || path.has_suffix("/moon.pkg")
 }
 
@@ -152,6 +155,26 @@ async test "write resolves relative paths under the workspace root" {
   assert_eq(output.content, "ok: wrote 9 chars to \{path}")
   assert_eq(@fs.read_file(path).text(), "workspace")
   @fs.rmdir(dir, recursive=true)
+}
+
+///|
+async test "write manifest guards accept Windows path separators" {
+  guard manifest_write_error("C:\\workspace\\moon.mod", "{\"name\":\"bad\"}")
+    is Some(moon_mod) else {
+    fail("expected moon.mod guard")
+  }
+  assert_eq(moon_mod, "moon.mod uses current text syntax, not JSON")
+  guard manifest_write_error("C:\\workspace\\moon.pkg", "x") is Some(moon_pkg) else {
+    fail("expected moon.pkg guard")
+  }
+  assert_eq(moon_pkg, "moon.pkg content is suspiciously small")
+  guard manifest_write_error("C:\\workspace\\moon.mod.json", "{}")
+    is Some(moon_mod_json) else {
+    fail("expected moon.mod.json guard")
+  }
+  assert_eq(
+    moon_mod_json, "moon.mod.json is legacy; create moon.mod for new MoonBit projects",
+  )
 }
 
 ///|
