@@ -418,11 +418,27 @@ async fn prepare_workspace_root(matches : @argparse.Matches) -> String {
 ///|
 fn trim_trailing_path_separators(path : String) -> String {
   let mut result = path
-  while result.length() > 1 &&
+  while !is_path_root(result) &&
         (result.has_suffix("/") || result.has_suffix("\\")) {
     result = result[:result.length() - 1].to_owned()
   }
   result
+}
+
+///|
+fn is_path_root(path : String) -> Bool {
+  path == "/" ||
+  path == "\\" ||
+  path == "//" ||
+  path == "\\\\" ||
+  is_windows_drive_root(path)
+}
+
+///|
+fn is_windows_drive_root(path : String) -> Bool {
+  path.length() == 3 &&
+  path[1] == ':' &&
+  (path.has_suffix("/") || path.has_suffix("\\"))
 }
 
 ///|
@@ -553,7 +569,8 @@ async fn handle_session_command(
     compact_from, "--session-compact-from",
   )
   let to_sequence = required_positive_int(compact_to, "--session-compact-to")
-  let summary = @fs.read_file(compact_file).text()
+  let summary_path = @workspace_path.resolve(workspace_root, compact_file)
+  let summary = @fs.read_file(summary_path).text()
   let compacted = store.compact(
     store.load(id),
     content=summary,
@@ -845,6 +862,16 @@ async test "--dir creates a missing final component with trailing separator" {
   assert_true(@fs.exists(child))
   assert_eq(root, @fs.realpath(child))
   @fs.rmdir(parent, recursive=true)
+}
+
+///|
+test "--dir trailing separator trim preserves roots" {
+  assert_eq(trim_trailing_path_separators("/"), "/")
+  assert_eq(trim_trailing_path_separators("//"), "//")
+  assert_eq(trim_trailing_path_separators("C:\\"), "C:\\")
+  assert_eq(trim_trailing_path_separators("C:/"), "C:/")
+  assert_eq(trim_trailing_path_separators("C:\\workspace\\"), "C:\\workspace")
+  assert_eq(trim_trailing_path_separators("C:/workspace/"), "C:/workspace")
 }
 
 ///|
@@ -1236,6 +1263,39 @@ async test "session compact command appends summary without api key" {
   }
   assert_eq(summary.content(), "summarized turn")
   @fs.rmdir(root, recursive=true)
+}
+
+///|
+async test "session compact file resolves relative to workspace root" {
+  let workspace = @fs.tmpdir(prefix="openseek-cli-session-compact-workspace-")
+  let session_root = workspace + "/.openseek"
+  let store = @store.SessionStore(session_root)
+  let session = @agent_session.Session(
+      SessionId("cli-test"),
+      system_prompt="system",
+    )
+    .append(User(UserMessage("hello")))
+    .append(Assistant(AssistantMessage("answer")))
+  store.create(session)
+  @fs.write_file(
+    workspace + "/summary.txt",
+    "workspace summary",
+    create_mode=CreateOrTruncate,
+  )
+  let parsed = cli_command().parse(
+    argv=[
+      "--session", "cli-test", "--session-compact-file", "summary.txt", "--session-compact-from",
+      "1", "--session-compact-to", "2",
+    ],
+    env={},
+  )
+  assert_true(handle_session_command(parsed, workspace_root=workspace))
+  let loaded = store.load(SessionId("cli-test"))
+  guard loaded.events()[2].item() is Summary(summary) else {
+    fail("expected summary")
+  }
+  assert_eq(summary.content(), "workspace summary")
+  @fs.rmdir(workspace, recursive=true)
 }
 
 ///|
