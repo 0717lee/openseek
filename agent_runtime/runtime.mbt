@@ -85,13 +85,10 @@ pub fn AgentRuntime::queue_steer(self : AgentRuntime, text : String) -> Unit {
 /// Take every queued steering input, oldest first, leaving the queue empty.
 pub fn AgentRuntime::drain_steers(self : AgentRuntime) -> Array[String] {
   let texts : Array[String] = []
-  for ;; {
-    let next = self.steers.try_get() catch { _ => None }
-    match next {
-      None => return texts
-      Some(text) => texts.push(text)
-    }
+  while (self.steers.try_get() catch { _ => None }) is Some(text) {
+    texts.push(text)
   }
+  texts
 }
 
 ///|
@@ -100,13 +97,10 @@ pub fn AgentRuntime::drain_steers(self : AgentRuntime) -> Array[String] {
 /// output into the conversation.
 pub fn AgentRuntime::drain_events(self : AgentRuntime) -> Array[AgentEvent] {
   let events : Array[AgentEvent] = []
-  for ;; {
-    let next = self.events.try_get() catch { _ => None }
-    match next {
-      None => return events
-      Some(event) => events.push(event)
-    }
+  while (self.events.try_get() catch { _ => None }) is Some(event) {
+    events.push(event)
   }
+  events
 }
 
 ///|
