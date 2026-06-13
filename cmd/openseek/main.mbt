@@ -29,7 +29,11 @@ async fn run_cli() -> Unit {
     if flag(matches, "no-session") && session_id(matches) is Some(_) {
       fail("--no-session contradicts --session; pick one behavior")
     }
-    let workspace_root = prepare_workspace_root(matches)
+    let session_commands = session_command_count(matches)
+    let workspace_root = prepare_workspace_root(
+      matches,
+      log_created=session_commands == 0,
+    )
     if handle_session_command(matches, workspace_root~) {
       return
     }
@@ -388,7 +392,10 @@ fn session_id(matches : @argparse.Matches) -> @agent_session.SessionId? raise {
 }
 
 ///|
-async fn prepare_workspace_root(matches : @argparse.Matches) -> String {
+async fn prepare_workspace_root(
+  matches : @argparse.Matches,
+  log_created? : Bool = true,
+) -> String {
   let dir = trim_trailing_path_separators(
     value(matches, "dir").trim().to_owned(),
   )
@@ -411,7 +418,9 @@ async fn prepare_workspace_root(matches : @argparse.Matches) -> String {
   }
   @fs.mkdir(dir)
   let root = @fs.realpath(dir)
-  @xlog.info() <? { "event": "workspace_created", "dir": root }
+  if log_created {
+    @xlog.info() <? { "event": "workspace_created", "dir": root }
+  }
   root
 }
 
@@ -531,17 +540,7 @@ async fn handle_session_command(
   matches : @argparse.Matches,
   workspace_root? : String = ".",
 ) -> Bool {
-  let list_sessions = flag(matches, "session-list")
-  let show_session = flag(matches, "session-show")
-  let compact_file = value(matches, "session-compact-file").trim().to_owned()
-  let compact_from = value(matches, "session-compact-from").trim().to_owned()
-  let compact_to = value(matches, "session-compact-to").trim().to_owned()
-  let compact_session = !compact_file.is_empty() ||
-    !compact_from.is_empty() ||
-    !compact_to.is_empty()
-  let command_count = (if list_sessions { 1 } else { 0 }) +
-    (if show_session { 1 } else { 0 }) +
-    (if compact_session { 1 } else { 0 })
+  let command_count = session_command_count(matches)
   if command_count == 0 {
     return false
   }
@@ -550,6 +549,11 @@ async fn handle_session_command(
       "choose only one of --session-list, --session-show, or --session-compact-file",
     )
   }
+  let list_sessions = flag(matches, "session-list")
+  let show_session = flag(matches, "session-show")
+  let compact_file = value(matches, "session-compact-file").trim().to_owned()
+  let compact_from = value(matches, "session-compact-from").trim().to_owned()
+  let compact_to = value(matches, "session-compact-to").trim().to_owned()
   let store = @store.SessionStore(session_root(matches, workspace_root~))
   if list_sessions {
     for listing in store.listings() {
@@ -581,6 +585,18 @@ async fn handle_session_command(
     "compacted session \{id.value()} events \{from_sequence}..\{to_sequence}; last_sequence=\{compacted.last_sequence()}",
   )
   true
+}
+
+///|
+fn session_command_count(matches : @argparse.Matches) -> Int raise {
+  let compact_session = !value(matches, "session-compact-file")
+    .trim()
+    .is_empty() ||
+    !value(matches, "session-compact-from").trim().is_empty() ||
+    !value(matches, "session-compact-to").trim().is_empty()
+  (if flag(matches, "session-list") { 1 } else { 0 }) +
+  (if flag(matches, "session-show") { 1 } else { 0 }) +
+  (if compact_session { 1 } else { 0 })
 }
 
 ///|

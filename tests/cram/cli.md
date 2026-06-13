@@ -152,12 +152,17 @@ $ sh <<'EOF'
 > if test -d "$tmp/parent/new"; then echo dir-created; else echo dir-missing; fi
 > grep -c '"event":"workspace_created"' "$tmp/out.jsonl"
 > env -u DEEPSEEK openseek.exe --dir "$tmp/parent/new" --session-list | cut -f1 | sed -E 's/cli-[0-9]{8}-[0-9]{6}-[0-9]{3}(-[A-Za-z0-9]+)?/cli-<stamp>/'
+> env -u DEEPSEEK openseek.exe --dir "$tmp/parent/fresh" --session-list > "$tmp/session-list.out"
+> if test -d "$tmp/parent/fresh"; then echo session-dir-created; else echo session-dir-missing; fi
+> wc -l < "$tmp/session-list.out" | tr -d ' '
 > rm -rf "$tmp"
 > EOF
 exit-non-zero
 dir-created
 1
 cli-<stamp>
+session-dir-created
+0
 ```
 
 Asking for both behaviors at once is rejected before any work happens.
