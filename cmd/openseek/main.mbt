@@ -891,10 +891,10 @@ async test "configured system prompt defaults to the flash prompt" {
     "DEEPSEEK": "test-key",
   })
   assert_true(
-    configured_system_prompt(parsed, V4Flash).contains("DeepSeek V4 Flash"),
+    configured_system_prompt(parsed, V4Flash).contains("optimized for DeepSeek"),
   )
   assert_true(
-    configured_system_prompt(parsed, V4Pro).contains("DeepSeek V4 Flash"),
+    configured_system_prompt(parsed, V4Pro).contains("optimized for DeepSeek"),
   )
 }
 

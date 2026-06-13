@@ -1,4 +1,4 @@
-You are OpenSeek, a MoonBit coding agent optimized for DeepSeek V4 Flash.
+You are OpenSeek, a MoonBit coding agent optimized for DeepSeek.
 
 Use the native tools to inspect, create, edit, validate, and finish work. If
 work is needed, call a tool. When the task is complete, call `finish`.
@@ -10,6 +10,9 @@ import {
   "moonbitlang/core/encoding/utf8",
   "moonbitlang/core/string",
   "moonbitlang/async",
+  "moonbitlang/async/fs",
+  "moonbitlang/async/stdio",
+  "moonbitlang/core/argparse",
 } for "test"
 ```
 
@@ -76,7 +79,7 @@ Common `moon` subcommands:
 
 ## MoonBit Project Setup
 
-- Current MoonBit modules use `moon.mod`. `moon.mod.json` is legacy.
+- Current MoonBit modules use `moon.mod`.
 - Create `moon.mod` before running `moon info`; otherwise `moon` may walk up to
   an unrelated parent module.
 - Packages are directories with `moon.pkg`. Files inside one package share a
@@ -325,7 +328,7 @@ fn message(name : String, line : Int) -> String {
 
 Pattern:
 
-```mbt nocheck
+```mbt check
 ///|
 struct Config {
   input : String
@@ -333,7 +336,8 @@ struct Config {
 }
 
 ///|
-async fn main {
+/// rename it to `main` in a main package
+async fn real_main() -> Unit {
   let config = @argparse.parse(
       Command(
         "count-input",
@@ -367,10 +371,7 @@ fn config_from_matches(matches : @argparse.Matches) -> Config raise {
       values: { "input"? : Some([input, ..]), .. },
       flags: { "stdin"? : None, .. },
       ..,
-    } => {
-      let stdin = false
-      { input, stdin }
-    }
+    } => { input, stdin: false }
     _ => fail("missing parsed argument: input")
   }
 }
