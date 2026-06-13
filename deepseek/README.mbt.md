@@ -45,10 +45,10 @@ tool-call message, execute each local function, then append
 
 `ToolDefinition` and `ToolCall` are opposite sides of the same protocol step:
 
-| Type | Direction | Meaning |
-| --- | --- | --- |
+| Type             | Direction                                                                | Meaning                                                                                                                    |
+| ---------------- | ------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------- |
 | `ToolDefinition` | Your code sends it to DeepSeek through `Client::chat(..., tools=[...])`. | A tool definition: name, description, and JSON Schema for arguments. It advertises a function the model may request later. |
-| `ToolCall` | DeepSeek returns it in `ChatResponse.tool_calls`. | A concrete tool invocation request: generated call id, function name, and raw JSON argument string. |
+| `ToolCall`       | DeepSeek returns it in `ChatResponse.tool_calls`.                        | A concrete tool invocation request: generated call id, function name, and raw JSON argument string.                        |
 
 The usual sequence is:
 
@@ -64,41 +64,75 @@ The usual sequence is:
 ```moonbit check
 ///|
 test "encode chat request values" {
-  let message = @deepseek.ChatMessage(User, content="write a MoonBit test")
-  let model : @deepseek.Model = V4Flash
-  inspect(model, content="deepseek-v4-flash")
-  inspect(message.role, content="user")
-  assert_eq(message.content, "write a MoonBit test")
-  let body = @deepseek.encode_chat_request(model, [message]).stringify()
-  assert_true(body.contains("\"role\":\"user\""))
-  assert_true(body.contains("\"model\":\"deepseek-v4-flash\""))
-  assert_false(body.contains("\"response_format\""))
+  let body = @deepseek.encode_chat_request(V4Flash, [
+    ChatMessage(User, content="write a MoonBit test"),
+  ])
+  json_inspect(body, content={
+    "model": "deepseek-v4-flash",
+    "messages": [{ "role": "user", "content": "write a MoonBit test" }],
+    "stream": false,
+  })
 }
 ```
 
 ```moonbit check
 ///|
 test "encode tool-enabled chat request" {
-  let tool = @deepseek.ToolDefinition("read", "Read a file.", {
-    "type": "object",
-    "properties": { "path": { "type": "string" } },
-    "required": ["path"],
-  })
-  let call = @deepseek.ToolCall(
-    id="call_1",
-    name="read",
-    arguments="{\"path\":\"README.mbt.md\"}",
-  )
   let body = @deepseek.encode_chat_request(
     V4Flash,
     [
       ChatMessage(User, content="read README.mbt.md"),
-      ChatMessage(Assistant, content="", tool_calls=[call]),
+      ChatMessage(Assistant, content="", tool_calls=[
+        ToolCall(
+          id="call_1",
+          name="read",
+          arguments="{\"path\":\"README.mbt.md\"}",
+        ),
+      ]),
     ],
-    tools=[tool],
-  ).stringify()
-  assert_true(body.contains("\"type\":\"function\""))
-  assert_true(body.contains("\"tool_calls\""))
+    tools=[
+      ToolDefinition("read", "Read a file.", {
+        "type": "object",
+        "properties": { "path": { "type": "string" } },
+        "required": ["path"],
+      }),
+    ],
+  )
+  json_inspect(body, content={
+    "model": "deepseek-v4-flash",
+    "messages": [
+      { "role": "user", "content": "read README.mbt.md" },
+      {
+        "role": "assistant",
+        "content": null,
+        "tool_calls": [
+          {
+            "id": "call_1",
+            "type": "function",
+            "function": {
+              "name": "read",
+              "arguments": "{\"path\":\"README.mbt.md\"}",
+            },
+          },
+        ],
+      },
+    ],
+    "stream": false,
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "read",
+          "description": "Read a file.",
+          "parameters": {
+            "type": "object",
+            "properties": { "path": { "type": "string" } },
+            "required": ["path"],
+          },
+        },
+      },
+    ],
+  })
 }
 ```
 
@@ -109,9 +143,13 @@ test "encode json-object response request" {
     V4Flash,
     [ChatMessage(User, content="return {\"ok\":true}")],
     response_format=JsonObject,
-  ).stringify()
-  assert_true(body.contains("\"response_format\""))
-  assert_true(body.contains("\"json_object\""))
+  )
+  json_inspect(body, content={
+    "model": "deepseek-v4-flash",
+    "messages": [{ "role": "user", "content": "return {\"ok\":true}" }],
+    "stream": false,
+    "response_format": { "type": "json_object" },
+  })
 }
 ```
 
@@ -125,8 +163,23 @@ test "decode chat response values" {
       ),
     ),
   )
-  assert_eq(response.content, "ok")
-  assert_eq(response.usage.total_tokens, 0)
+  debug_inspect(
+    response,
+    content=(
+      #|{
+      #|  content: "ok",
+      #|  reasoning_content: "",
+      #|  tool_calls: [],
+      #|  usage: {
+      #|    prompt_tokens: 0,
+      #|    completion_tokens: 0,
+      #|    total_tokens: 0,
+      #|    prompt_cache_hit_tokens: 0,
+      #|    prompt_cache_miss_tokens: 0,
+      #|  },
+      #|}
+    ),
+  )
 }
 ```
 
@@ -140,8 +193,28 @@ test "decode native tool call values" {
       ),
     ),
   )
-  assert_eq(response.tool_calls.length(), 1)
-  assert_eq(response.tool_calls[0].id, "call_1")
-  assert_eq(response.tool_calls[0].name, "read")
+  debug_inspect(
+    response,
+    content=(
+      #|{
+      #|  content: "",
+      #|  reasoning_content: "",
+      #|  tool_calls: [
+      #|    {
+      #|      id: "call_1",
+      #|      name: "read",
+      #|      arguments: "{\"path\":\"README.mbt.md\"}",
+      #|    },
+      #|  ],
+      #|  usage: {
+      #|    prompt_tokens: 0,
+      #|    completion_tokens: 0,
+      #|    total_tokens: 0,
+      #|    prompt_cache_hit_tokens: 0,
+      #|    prompt_cache_miss_tokens: 0,
+      #|  },
+      #|}
+    ),
+  )
 }
 ```
