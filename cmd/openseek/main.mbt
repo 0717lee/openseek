@@ -389,7 +389,9 @@ fn session_id(matches : @argparse.Matches) -> @agent_session.SessionId? raise {
 
 ///|
 async fn prepare_workspace_root(matches : @argparse.Matches) -> String {
-  let dir = value(matches, "dir").trim().to_owned()
+  let dir = trim_trailing_path_separators(
+    value(matches, "dir").trim().to_owned(),
+  )
   if dir.is_empty() {
     fail("--dir or OPENSEEK_DIR must not be empty")
   }
@@ -411,6 +413,16 @@ async fn prepare_workspace_root(matches : @argparse.Matches) -> String {
   let root = @fs.realpath(dir)
   @xlog.info() <? { "event": "workspace_created", "dir": root }
   root
+}
+
+///|
+fn trim_trailing_path_separators(path : String) -> String {
+  let mut result = path
+  while result.length() > 1 &&
+        (result.has_suffix("/") || result.has_suffix("\\")) {
+    result = result[:result.length() - 1].to_owned()
+  }
+  result
 }
 
 ///|
@@ -815,6 +827,20 @@ async test "--dir creates a missing final component when its parent exists" {
   let parsed = cli_command().parse(argv=["--dir", child, "write", "MoonBit"], env={
     "DEEPSEEK": "test-key",
   })
+  let root = prepare_workspace_root(parsed)
+  assert_true(@fs.exists(child))
+  assert_eq(root, @fs.realpath(child))
+  @fs.rmdir(parent, recursive=true)
+}
+
+///|
+async test "--dir creates a missing final component with trailing separator" {
+  let parent = @fs.tmpdir(prefix="openseek-dir-trailing-")
+  let child = parent + "/child"
+  let parsed = cli_command().parse(
+    argv=["--dir", child + "/", "write", "MoonBit"],
+    env={ "DEEPSEEK": "test-key" },
+  )
   let root = prepare_workspace_root(parsed)
   assert_true(@fs.exists(child))
   assert_eq(root, @fs.realpath(child))
