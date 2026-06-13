@@ -1,24 +1,26 @@
 ///|
-async fn main {
-  let command : @argparse.Command = Command(
+fn cli_command() -> @argparse.Command {
+  Command(
     "md_to_mbt_string",
     about="Generate a MoonBit string source file from Markdown.",
     positionals=[
       PositionArg(
         "input",
         num_args=@argparse.ValueRange::single(),
-        allow_hyphen_values=true,
         about="Input Markdown path.",
       ),
       PositionArg(
         "output",
         num_args=@argparse.ValueRange::single(),
-        allow_hyphen_values=true,
         about="Output MoonBit source path.",
       ),
     ],
   )
-  guard command.parse().values is { "input": [input, ..], "output": [output, ..], .. } else {
+}
+
+///|
+async fn main {
+  guard cli_command().parse().values is { "input": [input, ..], "output": [output, ..], .. } else {
     fail("missing parsed arguments")
   }
   let base = @path.Path(input).basename()

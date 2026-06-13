@@ -64,6 +64,43 @@ error: --api-key or DEEPSEEK is required for agent runs
 stdout-empty
 ```
 
+## Unknown Options Are Rejected Before Task Text
+
+The task is free-form after option parsing has stopped, but a leading
+option-looking token is still an option. This catches stale or misspelled flags
+instead of silently turning them into prompt text.
+
+```mooncram
+$ sh <<'EOF'
+> stdout=$(mktemp)
+> stderr=$(mktemp)
+> if env -u DEEPSEEK openseek.exe --xxy he > "$stdout" 2> "$stderr"; then echo exit-zero; else echo exit-non-zero; fi
+> sed -n '1p' "$stderr"
+> if test -s "$stdout"; then echo stdout-not-empty; else echo stdout-empty; fi
+> rm -f "$stdout" "$stderr"
+> EOF
+exit-non-zero
+error: unexpected argument '--xxy' found
+stdout-empty
+```
+
+When the task itself must start with `-`, use the normal option delimiter.
+Here parsing succeeds and the run reaches the later API-key validation.
+
+```mooncram
+$ sh <<'EOF'
+> stdout=$(mktemp)
+> stderr=$(mktemp)
+> if env -u DEEPSEEK openseek.exe -- '--xxy he' > "$stdout" 2> "$stderr"; then echo exit-zero; else echo exit-non-zero; fi
+> cat "$stderr"
+> if test -s "$stdout"; then echo stdout-not-empty; else echo stdout-empty; fi
+> rm -f "$stdout" "$stderr"
+> EOF
+exit-non-zero
+error: --api-key or DEEPSEEK is required for agent runs
+stdout-empty
+```
+
 ## Session Management Is Offline
 
 Session inspection and compaction operate on typed session files and do not

@@ -172,6 +172,10 @@ async fn random_salt() -> String {
 
 ///|
 fn failure_message(error_text : String) -> String {
+  match error_text.strip_prefix("error: ") {
+    Some(message) => return message.to_owned()
+    None => ()
+  }
   let marker = " FAILED: "
   let pieces : Array[String] = error_text
     .split(marker)
@@ -186,6 +190,16 @@ fn failure_message(error_text : String) -> String {
   } else {
     message
   }
+}
+
+///|
+test "failure_message avoids duplicating argparse error prefix" {
+  assert_eq(
+    failure_message(
+      "error: unexpected argument '--xxy' found\n\nUsage: openseek",
+    ),
+    "unexpected argument '--xxy' found\n\nUsage: openseek",
+  )
 }
 
 ///|
@@ -316,7 +330,6 @@ fn cli_command() -> @argparse.Command {
       PositionArg(
         "task",
         num_args=ValueRange(lower=0),
-        allow_hyphen_values=true,
         about="Task description.",
       ),
     ],
@@ -843,6 +856,23 @@ test "cli defaults model and max steps" {
   assert_eq(max_steps(parsed), 1000)
   assert_true(session_id(parsed) is None)
   assert_eq(session_root(parsed), ".openseek")
+}
+
+///|
+test "cli rejects unknown options before task text" {
+  let _ = cli_command().parse(argv=["--xxy", "he"], env={}) catch {
+    error => {
+      assert_true("\{error}".contains("unexpected argument '--xxy' found"))
+      return
+    }
+  }
+  fail("unknown option accepted as task text")
+}
+
+///|
+test "cli accepts hyphen-leading task text after option delimiter" {
+  let parsed = cli_command().parse(argv=["--", "--xxy", "he"], env={})
+  assert_eq(task_text(parsed), "--xxy he")
 }
 
 ///|

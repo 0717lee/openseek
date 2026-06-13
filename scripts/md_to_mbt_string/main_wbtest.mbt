@@ -25,6 +25,25 @@ test "function name rejects invalid MoonBit identifier" {
 }
 
 ///|
+test "cli rejects unknown option-looking input path" {
+  let _ = cli_command().parse(argv=["--xxy", "out.mbt"]) catch {
+    error => {
+      assert_true("\{error}".contains("unexpected argument '--xxy' found"))
+      return
+    }
+  }
+  fail("unknown option accepted as input path")
+}
+
+///|
+test "cli accepts hyphen-leading paths after option delimiter" {
+  let parsed = cli_command().parse(argv=["--", "-input.md", "-output.mbt"])
+  guard parsed.values is { "input": ["-input.md", ..], "output": ["-output.mbt", ..], .. } else {
+    fail("expected delimiter to allow hyphen-leading paths")
+  }
+}
+
+///|
 test "generated source matches dev_build output shape" {
   let source = generated_source(
     base="base_prompt.md",
