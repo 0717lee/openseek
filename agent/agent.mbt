@@ -38,7 +38,7 @@ pub fn[X] build_tools(
 }
 
 ///|
-/// Returns the base built-in system prompt.
+/// Returns the default built-in system prompt.
 pub fn default_system_prompt() -> String {
   @prompt.system_prompt_for_model(V4Pro)
 }

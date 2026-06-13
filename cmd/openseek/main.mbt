@@ -886,14 +886,14 @@ async test "configured system prompt advertises global skills" {
 }
 
 ///|
-async test "configured system prompt defaults by model" {
+async test "configured system prompt defaults to the flash prompt" {
   let parsed = cli_command().parse(argv=["write", "MoonBit"], env={
     "DEEPSEEK": "test-key",
   })
   assert_true(
     configured_system_prompt(parsed, V4Flash).contains("DeepSeek V4 Flash"),
   )
-  assert_false(
+  assert_true(
     configured_system_prompt(parsed, V4Pro).contains("DeepSeek V4 Flash"),
   )
 }

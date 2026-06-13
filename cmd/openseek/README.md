@@ -29,9 +29,10 @@ event on stdout, so the conversation is reviewable afterwards with
 `--session <id>`. Pass `--no-session` to run ephemerally; combining it with
 `--session` is rejected.
 
-Without an explicit prompt file, the CLI selects the built-in prompt by model:
-`deepseek-v4-flash` uses `prompt/flash_prompt.md`; `deepseek-v4-pro` uses
-`prompt/base_prompt.md`.
+Without an explicit prompt file, the CLI uses the Flash built-in prompt for
+both `deepseek-v4-flash` and `deepseek-v4-pro`. The older base prompt remains
+in `prompt/base_prompt.mbt.md` for comparison and experiments, but it is not
+selected by default.
 
 ## Session Management
 

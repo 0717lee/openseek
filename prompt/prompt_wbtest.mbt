@@ -198,8 +198,9 @@ test "flash prompt includes flash addenda" {
 }
 
 ///|
-test "default prompt is selected per model" {
+test "default prompt uses the flash prompt for all DeepSeek V4 models" {
   assert_eq(system_prompt_for_model(V4Flash), flash_prompt())
+  assert_eq(system_prompt_for_model(V4Pro), flash_prompt())
   assert_true(system_prompt_for_model(V4Flash).contains("DeepSeek V4 Flash"))
-  assert_false(system_prompt_for_model(V4Pro).contains("DeepSeek V4 Flash"))
+  assert_true(system_prompt_for_model(V4Pro).contains("DeepSeek V4 Flash"))
 }

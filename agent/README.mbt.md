@@ -11,7 +11,7 @@ The package depends on:
   definitions.
 - `bobzhang/openseek/deepseek/client` for HTTP chat requests.
 - `bobzhang/openseek/logger` for async stdout logging.
-- `bobzhang/openseek/prompt` for built-in prompt text and model-aware prompt
+- `bobzhang/openseek/prompt` for built-in prompt text and default prompt
   selection.
 - `bobzhang/openseek/agent_tool` for tool registries, typed tool output,
   loop-control actions, and session-scoped background daemon events.
@@ -20,13 +20,13 @@ The package depends on:
 
 ## API Shape
 
-- `default_system_prompt()`: return the base built-in prompt.
-- `default_system_prompt_for_model(model)`: return the model-specific built-in
-  prompt from the prompt package.
+- `default_system_prompt()`: return the default built-in prompt.
+- `default_system_prompt_for_model(model)`: return the default built-in prompt
+  from the prompt package for a DeepSeek model.
 - `run(api_key, model, task, max_steps?, system_prompt_text?)`: run the agent
   loop for one natural-language task. `system_prompt_text` defaults to the
-  model-specific built-in prompt so callers can run prompt experiments without
-  rebuilding the package.
+  built-in prompt selected by the prompt package, so callers can run prompt
+  experiments without rebuilding the package.
 
 `run` creates a DeepSeek client, starts a conversation with a system prompt and
 user task, sends native function tool definitions on each turn, executes any
