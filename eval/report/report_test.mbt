@@ -82,9 +82,9 @@ async test "report writes markdown json and html files" {
     ]),
   ])
   report.write_files(root)
-  let markdown = @fs.read_file(root + "/report.md").text()
-  let json = @fs.read_file(root + "/report.json").text()
-  let html = @fs.read_file(root + "/report.html").text()
+  let markdown = @fs.read_file("\{root}/report.md").text()
+  let json = @fs.read_file("\{root}/report.json").text()
+  let html = @fs.read_file("\{root}/report.html").text()
   assert_true(markdown.contains("# Tiny Report"))
   assert_true(json.contains("\"title\":\"Tiny Report\""))
   assert_true(html.contains("<title>Tiny Report</title>"))

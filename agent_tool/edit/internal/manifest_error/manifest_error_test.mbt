@@ -6,7 +6,7 @@ async test "manifest error allows ordinary files" {
 ///|
 async test "manifest error rejects new moon.mod.json" {
   let dir = @fs.tmpdir(prefix="openseek-edit-manifest-error-")
-  let path = dir + "/moon.mod.json"
+  let path = "\{dir}/moon.mod.json"
   let error = @manifest_error.write_error(path, "{}")
   @fs.rmdir(dir, recursive=true)
   guard error is Some(message) else { fail("expected manifest error") }
@@ -16,7 +16,7 @@ async test "manifest error rejects new moon.mod.json" {
 ///|
 async test "manifest error allows existing moon.mod.json" {
   let dir = @fs.tmpdir(prefix="openseek-edit-manifest-error-")
-  let path = dir + "/moon.mod.json"
+  let path = "\{dir}/moon.mod.json"
   @fs.write_file(path, "{}", create_mode=CreateOrTruncate)
   let error = @manifest_error.write_error(path, "{}")
   @fs.rmdir(dir, recursive=true)

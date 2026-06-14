@@ -58,7 +58,7 @@ fn ensure_trailing_newline(output : String) -> String {
   if output == "" || output.has_suffix("\n") {
     output
   } else {
-    output + "\n"
+    "\{output}\n"
   }
 }
 
@@ -139,7 +139,7 @@ fn moon_check_response(
   let output = if snapshot.output == "" {
     "\n(no output yet)"
   } else {
-    "\n" + snapshot.output
+    "\n\{snapshot.output}"
   }
   "cwd=\{cwd_text}\ncommand=\{snapshot.command}\nwatcher=\{watcher}\nid=\{snapshot.id}\nstatus=\{moon_check_status_label(snapshot.status)}\nseq=\{snapshot.seq}\{exit}\{truncated}\{restart}\{output}"
 }
@@ -182,7 +182,7 @@ fn MoonCheckSnapshot::update_text(update : MoonCheckSnapshot) -> String {
   let output = if update.output == "" {
     "\n(no output yet)"
   } else {
-    "\n" + update.output
+    "\n\{update.output}"
   }
   "id=\{update.id}\ncwd=\{cwd}\ncommand=\{update.command}\nstatus=\{moon_check_status_label(update.status)}\nseq=\{update.seq}\{exit}\{truncated}\{restart}\{output}"
 }
@@ -216,7 +216,7 @@ pub fn runtime_update_text(
       for update in latest_moon_checks.values() => update.update_text()
     ]
     Some(
-      "[moon_check update]\nevents=\{moon_check_count}\n" + parts.join("\n\n"),
+      "[moon_check update]\nevents=\{moon_check_count}\n\{parts.join("\n\n")}",
     )
   }
 }

@@ -153,7 +153,7 @@ async fn collect_moon_output(
       }
     Some(input) => {
       let dir = @fs.tmpdir(prefix="openseek-moon-cmd-stdin-")
-      let input_path = dir + "/stdin"
+      let input_path = "\{dir}/stdin"
       @fs.write_file(input_path, input, create_mode=CreateOrTruncate)
       let process_input = @process.redirect_from_file(input_path)
       let result = match cwd {
@@ -477,7 +477,7 @@ async test "moon_cmd reports failing fixture tests as tool errors" {
   let project = copy_fixture_project("native_cli_project")
   let canonical = @fs.realpath(project)
   @fs.write_file(
-    project + "/cmd/main/main_wbtest.mbt",
+    "\{project}/cmd/main/main_wbtest.mbt",
     (
       #|///|
       #|test "intentional failure" {
@@ -581,15 +581,15 @@ async test "moon_cmd runs a virtual filesystem native CLI fixture" {
 ///|
 async fn copy_fixture_project(name : String) -> String {
   let target = @fs.tmpdir(prefix="openseek-moon-cmd-")
-  @fs.mkdir(target + "/cmd/main", recursive=true)
-  copy_fixture_file(name, "moon.mod.fixture", target + "/moon.mod")
-  copy_fixture_file(name, "main.mbt.fixture", target + "/cmd/main/main.mbt")
+  @fs.mkdir("\{target}/cmd/main", recursive=true)
+  copy_fixture_file(name, "moon.mod.fixture", "\{target}/moon.mod")
+  copy_fixture_file(name, "main.mbt.fixture", "\{target}/cmd/main/main.mbt")
   copy_fixture_file(
     name,
     "main_wbtest.mbt.fixture",
-    target + "/cmd/main/main_wbtest.mbt",
+    "\{target}/cmd/main/main_wbtest.mbt",
   )
-  copy_fixture_file(name, "moon.pkg.fixture", target + "/cmd/main/moon.pkg")
+  copy_fixture_file(name, "moon.pkg.fixture", "\{target}/cmd/main/moon.pkg")
   target
 }
 

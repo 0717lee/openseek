@@ -104,18 +104,14 @@ async fn prepare_output_dir(out_dir : String) -> Unit {
   if @fs.exists(out_dir) {
     @fs.rmdir(out_dir, recursive=true)
   }
-  @fs.mkdir(out_dir + "/workspaces", recursive=true)
-  @fs.mkdir(out_dir + "/logs", recursive=true)
+  @fs.mkdir("\{out_dir}/workspaces", recursive=true)
+  @fs.mkdir("\{out_dir}/logs", recursive=true)
 }
 
 ///|
 async fn run_trial(config : Config, index : Int) -> TrialResult {
   let case = @cases.case_for_trial(index)
-  let workspace = config.out_dir +
-    "/workspaces/" +
-    padded_index(index + 1) +
-    "-" +
-    case.id
+  let workspace = "\{config.out_dir}/workspaces/\{padded_index(index + 1)}-\{case.id}"
   @fs.mkdir(workspace, recursive=true)
   write_fixture(workspace, case)
   let real_workspace = @fs.realpath(workspace)
@@ -129,7 +125,7 @@ async fn run_trial(config : Config, index : Int) -> TrialResult {
     "run",
     // cmd/openseek is the engine package (the pre-rename cmd/main no longer
     // exists, so the old invocation could not have launched at all).
-    repo_root + "/cmd/openseek",
+    "\{repo_root}/cmd/openseek",
     "--",
     "--max-steps",
     config.max_steps.to_string(),
@@ -155,18 +151,13 @@ async fn run_trial(config : Config, index : Int) -> TrialResult {
       // Trials inherit the developer's env, so point the global skills
       // lookup at a workspace path that does not exist — the developer's
       // own ~/.openseek/skills must never reach a trial prompt.
-      "OPENSEEK_GLOBAL_SKILLS_DIR": real_workspace + "/.no-global-skills",
+      "OPENSEEK_GLOBAL_SKILLS_DIR": "\{real_workspace}/.no-global-skills",
     },
     inherit_env=true,
     cwd=real_workspace,
   )
   let log_text = output.text()
-  let log_path = config.out_dir +
-    "/logs/" +
-    padded_index(index + 1) +
-    "-" +
-    case.id +
-    ".log"
+  let log_path = "\{config.out_dir}/logs/\{padded_index(index + 1)}-\{case.id}.log"
   @fs.write_file(log_path, log_text, create_mode=CreateOrTruncate)
   evaluate_trial(
     config.prompt_label,
@@ -325,7 +316,7 @@ async fn check_expected_state(
       Some(content) => content
       None => return "no initial fixture for unchanged file \{unchanged}"
     }
-    let path = workspace + "/" + unchanged
+    let path = "\{workspace}/\{unchanged}"
     let content = @fs.read_file(path).text() catch {
       error => return "unchanged file missing \{unchanged}: \{error}"
     }
@@ -399,7 +390,7 @@ fn count_successes(results : Array[TrialResult]) -> Int {
 ///|
 fn padded_index(value : Int) -> String {
   if value < 10 {
-    "0" + value.to_string()
+    "0\{value}"
   } else {
     value.to_string()
   }

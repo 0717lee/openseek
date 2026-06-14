@@ -91,7 +91,7 @@ async test "shell uses the workspace root when cwd is omitted" {
   let result = run_shell_in_workspace(dir, {
     "cmd": "echo root-ok > marker.txt",
   })
-  let marker = @fs.read_file(dir + "/marker.txt").text() catch { _ => "" }
+  let marker = @fs.read_file("\{dir}/marker.txt").text() catch { _ => "" }
   @fs.rmdir(dir, recursive=true)
   guard result is Respond(output) else { fail("expected Respond") }
   assert_false(output.is_error)

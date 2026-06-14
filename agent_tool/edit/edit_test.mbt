@@ -35,7 +35,7 @@ async test "edit replaces a unique exact match" {
 ///|
 async test "edit resolves relative paths under the workspace root" {
   let dir = @fs.tmpdir(prefix="openseek-edit-workspace-")
-  let path = dir + "/note.txt"
+  let path = "\{dir}/note.txt"
   @fs.write_file(path, "before", create_mode=CreateOrTruncate)
   let result = run_edit_in_workspace(dir, {
     "path": "note.txt",
@@ -131,7 +131,7 @@ async test "edit rejects identical replacement" {
 ///|
 async test "edit rejects suspicious moon.pkg rewrite" {
   let dir = @fs.tmpdir(prefix="openseek-edit-manifest-")
-  let path = dir + "/moon.pkg"
+  let path = "\{dir}/moon.pkg"
   @fs.write_file(
     path,
     "warnings = \"+unnecessary_annotation\"",

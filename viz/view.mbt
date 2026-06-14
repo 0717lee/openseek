@@ -132,7 +132,7 @@ fn offset_label(base : Int64, event : @agent_session.SessionEvent) -> String {
   if base == 0 || event.unix_ms() == 0 {
     return ""
   }
-  "+" + format_span_seconds(event.unix_ms() - base)
+  "+\{format_span_seconds(event.unix_ms() - base)}"
 }
 
 ///|
@@ -412,5 +412,5 @@ fn truncate(text : String, limit : Int) -> String {
     kept <+ "\{char}"
     count += 1
   }
-  kept.to_string() + "…"
+  "\{kept.to_string()}…"
 }

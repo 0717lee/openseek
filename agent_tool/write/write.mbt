@@ -150,7 +150,7 @@ async test "write resolves relative paths under the workspace root" {
     Sync(_) => fail("write tool should be async")
   }
   guard result is Respond(output) else { fail("expected Respond") }
-  let path = dir + "/note.txt"
+  let path = "\{dir}/note.txt"
   assert_false(output.is_error)
   assert_eq(output.content, "ok: wrote 9 chars to \{path}")
   assert_eq(@fs.read_file(path).text(), "workspace")
@@ -204,7 +204,7 @@ async test "write accepts empty content" {
 ///|
 async test "write rejects new legacy moon.mod.json" {
   let dir = @fs.tmpdir(prefix="openseek-write-manifest-")
-  let path = dir + "/moon.mod.json"
+  let path = "\{dir}/moon.mod.json"
   let result = execute({ "path": path, "content": "{\"name\":\"legacy\"}" })
   @fs.rmdir(dir, recursive=true)
   guard result is Respond(output) else { fail("expected Respond") }
@@ -215,7 +215,7 @@ async test "write rejects new legacy moon.mod.json" {
 ///|
 async test "write rejects json style moon.mod" {
   let dir = @fs.tmpdir(prefix="openseek-write-manifest-")
-  let path = dir + "/moon.mod"
+  let path = "\{dir}/moon.mod"
   let result = execute({ "path": path, "content": "{\"name\":\"bad\"}" })
   @fs.rmdir(dir, recursive=true)
   guard result is Respond(output) else { fail("expected Respond") }
@@ -226,7 +226,7 @@ async test "write rejects json style moon.mod" {
 ///|
 async test "write rejects suspiciously tiny moon.pkg" {
   let dir = @fs.tmpdir(prefix="openseek-write-manifest-")
-  let path = dir + "/moon.pkg"
+  let path = "\{dir}/moon.pkg"
   let result = execute({ "path": path, "content": "x" })
   @fs.rmdir(dir, recursive=true)
   guard result is Respond(output) else { fail("expected Respond") }

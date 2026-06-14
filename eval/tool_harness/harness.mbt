@@ -70,7 +70,7 @@ async fn run_read_case(
     ),
   }).write_to(root)
   let action = dispatch(tools, "read", {
-    "path": root + "/src/read.txt",
+    "path": "\{root}/src/read.txt",
     "start_line": 1,
     "max_lines": 1,
   })
@@ -90,7 +90,7 @@ async fn run_write_case(
     #|second line
     #|
   let action = dispatch(tools, "write", {
-    "path": root + "/created.txt",
+    "path": "\{root}/created.txt",
     "content": content,
   })
   let mut reason = expect_respond(action, contains=["ok: wrote"], error=false)
@@ -122,7 +122,7 @@ async fn run_edit_case(
     ),
   }).write_to(root)
   let action = dispatch(tools, "edit", {
-    "path": root + "/src/note.txt",
+    "path": "\{root}/src/note.txt",
     "old_string": "beta\n",
     "new_string": "delta\n",
   })
@@ -401,6 +401,6 @@ fn short_text(text : String) -> String {
   if squashed.length() <= 160 {
     squashed
   } else {
-    squashed[:160].to_owned() + "..."
+    "\{squashed[:160]}..."
   }
 }

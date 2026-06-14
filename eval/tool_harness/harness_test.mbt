@@ -16,8 +16,8 @@ async test "harness report can be written for inspection" {
   let root = @fs.tmpdir(prefix="openseek-tool-harness-report-")
   let report = @tool_harness.run_harness()
   report.write_files(root)
-  let markdown = @fs.read_file(root + "/report.md").text()
-  let json = @fs.read_file(root + "/report.json").text()
+  let markdown = @fs.read_file("\{root}/report.md").text()
+  let json = @fs.read_file("\{root}/report.json").text()
   assert_true(
     markdown.contains(
       "| # | Case | Result | Mode | Action | Reason | Warnings |",

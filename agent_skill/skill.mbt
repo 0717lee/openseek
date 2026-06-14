@@ -91,11 +91,11 @@ pub async fn discover_skills(dir : String) -> Array[Skill] {
   let skills : Array[Skill] = []
   let entries = @fs.readdir(dir) catch { _ => return skills }
   for entry in entries {
-    let entry_path = dir + "/" + entry
+    let entry_path = "\{dir}/\{entry}"
     if entry.has_suffix(".md") {
       add_skill_file(skills, entry_path)
     } else {
-      let nested = entry_path + "/SKILL.md"
+      let nested = "\{entry_path}/SKILL.md"
       // exists() raises ENOTDIR when entry_path is a plain file; either way
       // there is no nested skill here.
       let has_nested = @fs.exists(nested) catch { _ => false }

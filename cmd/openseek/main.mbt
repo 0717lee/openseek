@@ -722,7 +722,7 @@ async fn skills_prompt_section_for_cwd(
     @workspace_path.resolve(workspace_root, global_dir)
   } else {
     match @env.get_env_var("HOME") {
-      Some(home) if home != "" => home + "/.openseek/skills"
+      Some(home) if home != "" => "\{home}/.openseek/skills"
       _ => ""
     }
   }
@@ -886,7 +886,7 @@ test "cli allows session management without api key or task" {
 ///|
 async test "--dir creates a missing final component when its parent exists" {
   let parent = @fs.tmpdir(prefix="openseek-dir-parent-")
-  let child = parent + "/child"
+  let child = "\{parent}/child"
   let parsed = cli_command().parse(argv=["--dir", child, "write", "MoonBit"], env={
     "DEEPSEEK": "test-key",
   })
@@ -899,9 +899,9 @@ async test "--dir creates a missing final component when its parent exists" {
 ///|
 async test "--dir creates a missing final component with trailing separator" {
   let parent = @fs.tmpdir(prefix="openseek-dir-trailing-")
-  let child = parent + "/child"
+  let child = "\{parent}/child"
   let parsed = cli_command().parse(
-    argv=["--dir", child + "/", "write", "MoonBit"],
+    argv=["--dir", "\{child}/", "write", "MoonBit"],
     env={ "DEEPSEEK": "test-key" },
   )
   let root = prepare_workspace_root(parsed)
@@ -923,7 +923,7 @@ test "--dir trailing separator trim preserves roots" {
 ///|
 async test "--dir rejects missing parents instead of creating recursively" {
   let root = @fs.tmpdir(prefix="openseek-dir-missing-parent-")
-  let child = root + "/missing/child"
+  let child = "\{root}/missing/child"
   let parsed = cli_command().parse(argv=["--dir", child, "write", "MoonBit"], env={
     "DEEPSEEK": "test-key",
   })
@@ -945,7 +945,7 @@ async test "--dir rejects missing parents instead of creating recursively" {
 ///|
 async test "--dir rejects existing non-directories" {
   let root = @fs.tmpdir(prefix="openseek-dir-file-")
-  let path = root + "/file"
+  let path = "\{root}/file"
   @fs.write_file(path, "not a directory", create_mode=CreateOrTruncate)
   let parsed = cli_command().parse(argv=["--dir", path, "write", "MoonBit"], env={
     "DEEPSEEK": "test-key",
@@ -1081,8 +1081,8 @@ test "cli parses max steps option" {
 ///|
 async test "configured system prompt can replace and append files" {
   let dir = @fs.tmpdir(prefix="openseek-prompt-config-")
-  let prompt_path = dir + "/prompt.md"
-  let addendum_path = dir + "/addendum.md"
+  let prompt_path = "\{dir}/prompt.md"
+  let addendum_path = "\{dir}/addendum.md"
   @fs.write_file(prompt_path, "base prompt\n", create_mode=CreateOrTruncate)
   @fs.write_file(addendum_path, "addendum\n", create_mode=CreateOrTruncate)
   let parsed = cli_command().parse(
@@ -1095,7 +1095,7 @@ async test "configured system prompt can replace and append files" {
     // would append a ## Skills section (Codex review).
     env={
       "DEEPSEEK": "test-key",
-      "OPENSEEK_GLOBAL_SKILLS_DIR": dir + "/no-global-skills",
+      "OPENSEEK_GLOBAL_SKILLS_DIR": "\{dir}/no-global-skills",
     },
   )
   // Environment last: base and addendum form the cache-shared prefix; the
@@ -1110,9 +1110,9 @@ async test "configured system prompt can replace and append files" {
 ///|
 async test "configured system prompt advertises global skills" {
   let dir = @fs.tmpdir(prefix="openseek-global-skills-")
-  @fs.mkdir(dir + "/skills", recursive=true)
+  @fs.mkdir("\{dir}/skills", recursive=true)
   @fs.write_file(
-    dir + "/skills/release.md",
+    "\{dir}/skills/release.md",
     (
       #|---
       #|name: release
@@ -1122,13 +1122,13 @@ async test "configured system prompt advertises global skills" {
     ),
     create_mode=CreateOrTruncate,
   )
-  let prompt_path = dir + "/prompt.md"
+  let prompt_path = "\{dir}/prompt.md"
   @fs.write_file(prompt_path, "base\n", create_mode=CreateOrTruncate)
   let parsed = cli_command().parse(
     argv=["--system-prompt-file", prompt_path, "write", "MoonBit"],
     env={
       "DEEPSEEK": "test-key",
-      "OPENSEEK_GLOBAL_SKILLS_DIR": dir + "/skills",
+      "OPENSEEK_GLOBAL_SKILLS_DIR": "\{dir}/skills",
     },
   )
   let prompt = configured_system_prompt(parsed, V4Flash)
@@ -1146,13 +1146,13 @@ async test "configured system prompt uses the selected workspace root" {
   let workspace = @fs.tmpdir(prefix="openseek-prompt-workspace-")
   let real_workspace = @fs.realpath(workspace)
   @fs.write_file(
-    workspace + "/prompt.md",
+    "\{workspace}/prompt.md",
     "workspace prompt\n",
     create_mode=CreateOrTruncate,
   )
-  @fs.mkdir(workspace + "/.openseek/skills", recursive=true)
+  @fs.mkdir("\{workspace}/.openseek/skills", recursive=true)
   @fs.write_file(
-    workspace + "/.openseek/skills/release.md",
+    "\{workspace}/.openseek/skills/release.md",
     (
       #|---
       #|name: release
@@ -1168,7 +1168,7 @@ async test "configured system prompt uses the selected workspace root" {
     ],
     env={
       "DEEPSEEK": "test-key",
-      "OPENSEEK_GLOBAL_SKILLS_DIR": workspace + "/no-global-skills",
+      "OPENSEEK_GLOBAL_SKILLS_DIR": "\{workspace}/no-global-skills",
     },
   )
   let prompt = configured_system_prompt(
@@ -1204,7 +1204,7 @@ async test "load_or_new_session defers first durable write until append" {
   let root = @fs.tmpdir(prefix="openseek-cli-session-")
   let store = @store.SessionStore(root)
   let id : @agent_session.SessionId = SessionId("cli-test")
-  let prompt_path = root + "/prompt.md"
+  let prompt_path = "\{root}/prompt.md"
   @fs.write_file(prompt_path, "system", create_mode=CreateOrTruncate)
   let parsed = cli_command().parse(
     argv=[
@@ -1214,7 +1214,7 @@ async test "load_or_new_session defers first durable write until append" {
     // Pinned so the exact-prompt assertions stay machine-independent.
     env={
       "DEEPSEEK": "test-key",
-      "OPENSEEK_GLOBAL_SKILLS_DIR": root + "/no-global-skills",
+      "OPENSEEK_GLOBAL_SKILLS_DIR": "\{root}/no-global-skills",
     },
   )
   let created = load_or_new_session(store, id, parsed, V4Pro)
@@ -1235,8 +1235,8 @@ async test "load_or_new_session defers first durable write until append" {
 async test "load_or_new_session recovers empty interrupted session directory" {
   let root = @fs.tmpdir(prefix="openseek-cli-session-empty-dir-")
   let id : @agent_session.SessionId = SessionId("cli-test")
-  @fs.mkdir(root + "/sessions/" + id.value(), recursive=true)
-  let prompt_path = root + "/prompt.md"
+  @fs.mkdir("\{root}/sessions/\{id.value()}", recursive=true)
+  let prompt_path = "\{root}/prompt.md"
   @fs.write_file(prompt_path, "system", create_mode=CreateOrTruncate)
   let parsed = cli_command().parse(
     argv=[
@@ -1252,7 +1252,7 @@ async test "load_or_new_session recovers empty interrupted session directory" {
     // Pinned so the exact-prompt assertion stays machine-independent.
     env={
       "DEEPSEEK": "test-key",
-      "OPENSEEK_GLOBAL_SKILLS_DIR": root + "/no-global-skills",
+      "OPENSEEK_GLOBAL_SKILLS_DIR": "\{root}/no-global-skills",
     },
   )
   let store = @store.SessionStore(root)
@@ -1292,7 +1292,7 @@ async test "session compact command appends summary without api key" {
     .append(User(UserMessage("hello")))
     .append(Assistant(AssistantMessage("answer")))
   store.create(session)
-  let summary_path = root + "/summary.txt"
+  let summary_path = "\{root}/summary.txt"
   @fs.write_file(summary_path, "summarized turn", create_mode=CreateOrTruncate)
   let parsed = cli_command().parse(
     argv=[
@@ -1314,7 +1314,7 @@ async test "session compact command appends summary without api key" {
 ///|
 async test "session compact file resolves relative to workspace root" {
   let workspace = @fs.tmpdir(prefix="openseek-cli-session-compact-workspace-")
-  let session_root = workspace + "/.openseek"
+  let session_root = "\{workspace}/.openseek"
   let store = @store.SessionStore(session_root)
   let session = @agent_session.Session(
       SessionId("cli-test"),
@@ -1324,7 +1324,7 @@ async test "session compact file resolves relative to workspace root" {
     .append(Assistant(AssistantMessage("answer")))
   store.create(session)
   @fs.write_file(
-    workspace + "/summary.txt",
+    "\{workspace}/summary.txt",
     "workspace summary",
     create_mode=CreateOrTruncate,
   )

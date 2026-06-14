@@ -30,7 +30,7 @@ async fn main {
   if output_matches(output, source) {
     return
   }
-  let tmp = output + ".tmp"
+  let tmp = "\{output}.tmp"
   @fs.write_file(tmp, source, create_mode=CreateOrTruncate)
   @fs.rename(tmp, output, replace=true)
 }

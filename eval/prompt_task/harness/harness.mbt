@@ -32,8 +32,8 @@ async fn prepare_output_dir(out_dir : String) -> Unit {
   if @fs.exists(out_dir) {
     @fs.rmdir(out_dir, recursive=true)
   }
-  @fs.mkdir(out_dir + "/workspaces", recursive=true)
-  @fs.mkdir(out_dir + "/logs", recursive=true)
+  @fs.mkdir("\{out_dir}/workspaces", recursive=true)
+  @fs.mkdir("\{out_dir}/logs", recursive=true)
 }
 
 ///|
@@ -63,10 +63,10 @@ async fn run_trial(
   index : Int,
 ) -> TrialArtifact {
   let trial_name = padded_index(index + 1)
-  let workspace = config.out_dir + "/workspaces/" + trial_name
+  let workspace = "\{config.out_dir}/workspaces/\{trial_name}"
   @fs.mkdir(workspace, recursive=true)
   let real_workspace = @fs.realpath(workspace)
-  let session_id = "trial-" + trial_name
+  let session_id = "trial-\{trial_name}"
   let task = task_template.replace_all(old="{{WORKSPACE}}", new=real_workspace)
   // The engine runs from the OpenSeek checkout and receives --dir for the
   // isolated trial workspace. This keeps launcher-relative paths stable while
@@ -75,7 +75,7 @@ async fn run_trial(
   let (program, args) = if config.engine != "" {
     (@fs.realpath(config.engine), [])
   } else {
-    ("moon", ["run", repo_root + "/cmd/openseek", "--"])
+    ("moon", ["run", "\{repo_root}/cmd/openseek", "--"])
   }
   args.append([
     "--max-steps",
@@ -103,15 +103,12 @@ async fn run_trial(
     inherit_env=true,
     cwd=repo_root,
   )
-  let log_path = config.out_dir + "/logs/" + trial_name + ".log"
+  let log_path = "\{config.out_dir}/logs/\{trial_name}.log"
   @fs.write_file(log_path, output.text(), create_mode=CreateOrTruncate)
   let events_path = discover_session_events(
     real_workspace,
     session_id,
-    fallback=real_workspace +
-      "/.openseek/sessions/" +
-      session_id +
-      "/events.jsonl",
+    fallback="\{real_workspace}/.openseek/sessions/\{session_id}/events.jsonl",
   )
   TrialArtifact(
     index=index + 1,
@@ -133,7 +130,7 @@ fn trial_extra_env(
     "DEEPSEEK_MODEL": config.model.to_string(),
     "OPENSEEK_MAX_STEPS": config.max_steps.to_string(),
     "OPENSEEK_SESSION_ROOT": ".openseek",
-    "OPENSEEK_GLOBAL_SKILLS_DIR": real_workspace + "/.no-global-skills",
+    "OPENSEEK_GLOBAL_SKILLS_DIR": "\{real_workspace}/.no-global-skills",
   }
 }
 
@@ -164,11 +161,11 @@ async fn collect_session_events(
     if should_skip_scan_dir(name) {
       continue
     }
-    let path = dir + "/" + name
+    let path = "\{dir}/\{name}"
     if is_directory(path) {
       collect_session_events(path, session_id, matches)
     } else if name == "events.jsonl" &&
-      path.contains("/sessions/" + session_id + "/") {
+      path.contains("/sessions/\{session_id}/") {
       matches.push(path)
     }
   }
@@ -191,7 +188,7 @@ fn should_skip_scan_dir(name : String) -> Bool {
 ///|
 fn padded_index(value : Int) -> String {
   if value < 10 {
-    "0" + value.to_string()
+    "0\{value}"
   } else {
     value.to_string()
   }

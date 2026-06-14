@@ -457,9 +457,9 @@ fn trim_trailing_path_separators(path : String) -> String {
 ///|
 fn join_path(parent : String, child : String) -> String {
   if parent.is_empty() || parent.has_suffix("/") || parent.has_suffix("\\") {
-    parent + child
+    "\{parent}\{child}"
   } else {
-    parent + "/" + child
+    "\{parent}/\{child}"
   }
 }
 
@@ -487,9 +487,9 @@ fn module_root_from_exe(exe : String) -> String? {
 /// checkout's own `web/` derived from the executable path, so running from
 /// another project's directory needs no flags.
 fn shell_candidates(web_dir : String, module_root : String?) -> Array[String] {
-  let candidates = [web_dir + "/index.html"]
+  let candidates = ["\{web_dir}/index.html"]
   if module_root is Some(root) {
-    candidates.push(root + "/web/index.html")
+    candidates.push("\{root}/web/index.html")
   }
   candidates
 }
@@ -508,14 +508,14 @@ fn bundle_candidates(
 ) -> Array[String] {
   let candidates = [
     bundle,
-    web_dir + "/viz_app.js",
+    "\{web_dir}/viz_app.js",
     "_build/js/release/build/cmd/viz_app/viz_app.js",
     "_build/js/debug/build/cmd/viz_app/viz_app.js",
   ]
   if module_root is Some(root) {
-    candidates.push(root + "/web/viz_app.js")
-    candidates.push(root + "/_build/js/release/build/cmd/viz_app/viz_app.js")
-    candidates.push(root + "/_build/js/debug/build/cmd/viz_app/viz_app.js")
+    candidates.push("\{root}/web/viz_app.js")
+    candidates.push("\{root}/_build/js/release/build/cmd/viz_app/viz_app.js")
+    candidates.push("\{root}/_build/js/debug/build/cmd/viz_app/viz_app.js")
   }
   candidates
 }

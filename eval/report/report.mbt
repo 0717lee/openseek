@@ -121,7 +121,7 @@ pub fn Report::markdown(self : Report) -> String {
       lines.push(line)
     }
   }
-  lines.join("\n") + "\n"
+  "\{lines.join("\n")}\n"
 }
 
 ///|
@@ -272,13 +272,13 @@ pub async fn write_files(
 ) -> Unit {
   let _ = @fs.mkdir(out_dir, recursive=true) catch { _ => () }
   @fs.write_file(
-    out_dir + "/report.json",
+    "\{out_dir}/report.json",
     json.stringify(),
     create_mode=CreateOrTruncate,
   )
-  @fs.write_file(out_dir + "/report.md", markdown, create_mode=CreateOrTruncate)
+  @fs.write_file("\{out_dir}/report.md", markdown, create_mode=CreateOrTruncate)
   if html != "" {
-    @fs.write_file(out_dir + "/report.html", html, create_mode=CreateOrTruncate)
+    @fs.write_file("\{out_dir}/report.html", html, create_mode=CreateOrTruncate)
   }
 }
 
@@ -309,7 +309,7 @@ fn table_header(metric_columns : Array[String]) -> String {
   }
   cells.push("Reason")
   cells.push("Warnings")
-  "| " + cells.join(" | ") + " |"
+  "| \{cells.join(" | ")} |"
 }
 
 ///|
@@ -320,7 +320,7 @@ fn table_divider(metric_columns : Array[String]) -> String {
   }
   cells.push("---")
   cells.push("---")
-  "| " + cells.join(" | ") + " |"
+  "| \{cells.join(" | ")} |"
 }
 
 ///|
@@ -342,7 +342,7 @@ fn ReportRow::markdown_row(
   }
   cells.push(escape_table_cell(short_cell(self.reason)))
   cells.push(escape_table_cell(short_cell(self.warnings)))
-  "| " + cells.join(" | ") + " |"
+  "| \{cells.join(" | ")} |"
 }
 
 ///|

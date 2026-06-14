@@ -109,7 +109,7 @@ async fn read_file(
     input.max_lines is Some(_) ||
     char_truncated
   let output = if include_header {
-    read_header(path, content, selection, capped, char_truncated) + capped
+    "\{read_header(path, content, selection, capped, char_truncated)}\{capped}"
   } else {
     capped
   }
@@ -159,8 +159,7 @@ async fn read_files(
     if char_truncated {
       truncated_any = true
     }
-    let block = read_header(path, content, selection, capped, char_truncated) +
-      capped
+    let block = "\{read_header(path, content, selection, capped, char_truncated)}\{capped}"
     remaining = remaining - block.length() - 2
     blocks.push(block)
   }
@@ -273,7 +272,7 @@ async test "read returns file contents" {
 async test "read resolves relative paths under the workspace root" {
   let dir = @fs.tmpdir(prefix="openseek-read-workspace-")
   @fs.write_file(
-    dir + "/note.txt",
+    "\{dir}/note.txt",
     "workspace read",
     create_mode=CreateOrTruncate,
   )

@@ -119,12 +119,12 @@ test "valid_session_id mirrors the store's id rules" {
 ///|
 async test "discover_session_roots scans recursively and skips heavy dirs" {
   let root = @fs.tmpdir(prefix="openseek-viz-scan-")
-  @fs.mkdir(root + "/app/.openseek/sessions", recursive=true)
-  @fs.mkdir(root + "/packages/lib/.openseek/sessions", recursive=true)
-  @fs.mkdir(root + "/.git/ignored/.openseek/sessions", recursive=true)
-  @fs.mkdir(root + "/node_modules/ignored/.openseek/sessions", recursive=true)
-  @fs.mkdir(root + "/.mooncakes/ignored/.openseek/sessions", recursive=true)
-  @fs.mkdir(root + "/_build/ignored/.openseek/sessions", recursive=true)
+  @fs.mkdir("\{root}/app/.openseek/sessions", recursive=true)
+  @fs.mkdir("\{root}/packages/lib/.openseek/sessions", recursive=true)
+  @fs.mkdir("\{root}/.git/ignored/.openseek/sessions", recursive=true)
+  @fs.mkdir("\{root}/node_modules/ignored/.openseek/sessions", recursive=true)
+  @fs.mkdir("\{root}/.mooncakes/ignored/.openseek/sessions", recursive=true)
+  @fs.mkdir("\{root}/_build/ignored/.openseek/sessions", recursive=true)
   let roots = discover_session_roots([root], ".openseek").map(path => {
     path.replace_all(old=root, new="<root>")
   })
@@ -140,8 +140,8 @@ async test "discover_session_roots scans recursively and skips heavy dirs" {
 ///|
 async test "discover_session_roots supports a custom root marker" {
   let root = @fs.tmpdir(prefix="openseek-viz-openroot-")
-  @fs.mkdir(root + "/app/.openroot/sessions", recursive=true)
-  @fs.mkdir(root + "/app/.openseek/sessions", recursive=true)
+  @fs.mkdir("\{root}/app/.openroot/sessions", recursive=true)
+  @fs.mkdir("\{root}/app/.openseek/sessions", recursive=true)
   let roots = discover_session_roots([root], ".openroot").map(path => {
     path.replace_all(old=root, new="<root>")
   })
@@ -190,21 +190,21 @@ test "session catalog lookup supports composite and legacy keys" {
 ///|
 async test "session_list_reply includes root metadata and composite keys" {
   let root = @fs.tmpdir(prefix="openseek-viz-list-")
-  let app_store = @store.SessionStore(root + "/app/.openseek")
-  let lib_store = @store.SessionStore(root + "/lib/.openseek")
+  let app_store = @store.SessionStore("\{root}/app/.openseek")
+  let lib_store = @store.SessionStore("\{root}/lib/.openseek")
   app_store.create(@agent_session.Session(SessionId("same"), system_prompt="a"))
   lib_store.create(@agent_session.Session(SessionId("same"), system_prompt="b"))
   let catalog : SessionCatalog = {
     roots: [
       {
         key: "0",
-        path: root + "/app/.openseek",
+        path: "\{root}/app/.openseek",
         label: "app/.openseek",
         store: app_store,
       },
       {
         key: "1",
-        path: root + "/lib/.openseek",
+        path: "\{root}/lib/.openseek",
         label: "lib/.openseek",
         store: lib_store,
       },

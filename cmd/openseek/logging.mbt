@@ -51,7 +51,7 @@ async fn FlushedStdout::drain(self : FlushedStdout) -> Unit {
       // `QueueAlreadyClosed` in the report the user sees.
       _ => return
     }
-    @stdio.stdout.write(line + "\n")
+    @stdio.stdout.write("\{line}\n")
   }
 }
 
