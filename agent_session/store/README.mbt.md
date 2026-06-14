@@ -50,11 +50,34 @@ agent progress. `append` is the safe save path: it checks that the caller's
 in-memory session still matches disk, appends exactly one timestamped event, and
 updates the header.
 
+`load` takes a `SessionId` because `SessionStore(root)` is a directory-backed
+collection, not a handle to one current session. The id selects
+`<root>/sessions/<id>/session.json` and
+`<root>/sessions/<id>/events.jsonl`; the store intentionally does not keep a
+hidden "current" session. When the caller needs to discover a session first,
+use `list`, `listings`, or `latest`, then pass the chosen id to `load`.
+
 ## Create And Load
 
 `create` writes a complete session. It is useful for new sessions, test
 fixtures, or deliberate rewrites. `load` reads the header, replays the JSONL
-events, validates sequence numbers, and rebuilds the immutable `Session`.
+events for the requested id, validates sequence numbers, and rebuilds the
+immutable `Session`.
+
+More pedantically, `load(id)`:
+
+- validates `id` before using it in a path;
+- takes a shared session lock when the session directory exists;
+- reads `session.json` and checks that the header id equals the requested id;
+- parses every JSON line in `events.jsonl` as a typed `SessionEvent`;
+- checks that event sequence numbers are contiguous;
+- validates the header's event-log fingerprint against the replayed log;
+- returns a rebuilt immutable `Session`;
+- does not create a missing session, choose a latest session, or mutate disk.
+
+Use `exists(id)` when absence is expected. Use `latest()` when implementing a
+default "resume" action. Use `list()` or `listings()` when a human or caller
+must choose the id before loading.
 
 ```mbt check
 ///|

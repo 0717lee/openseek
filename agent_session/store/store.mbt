@@ -712,7 +712,25 @@ pub async fn SessionStore::create(
 }
 
 ///|
-/// Load a session by reading its header and replaying the append-only event log.
+/// Load one persisted session selected by `id`.
+///
+/// A `SessionStore` is a directory-backed collection, not a handle to one
+/// current session. For a store rooted at `root`, the id selects the files under
+/// `root/sessions/<id>/`: `session.json`, `events.jsonl`, and `session.lock`.
+///
+/// `load` validates the id before constructing paths, takes a shared lock when
+/// the session directory already exists, reads `session.json`, checks that the
+/// header id is exactly the requested id, parses and replays every event in
+/// `events.jsonl`, checks that event sequence numbers are contiguous, and
+/// validates the header/log fingerprint. The returned value is a rebuilt
+/// immutable `Session`.
+///
+/// `load` never chooses a session implicitly and never mutates the store. Use
+/// `list` or `listings` when presenting choices, or `latest` when implementing
+/// "resume the newest loadable session", then pass the chosen id to `load`.
+///
+/// The call raises if the id is invalid, the files cannot be read, the JSON is
+/// invalid, or the header and event log do not describe one consistent session.
 pub async fn SessionStore::load(
   self : SessionStore,
   id : @agent_session.SessionId,
