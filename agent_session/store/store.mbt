@@ -451,10 +451,17 @@ async fn write_text_atomic(path : String, text : String) -> Unit {
 
 ///|
 async fn ensure_dir_exists(dir : String) -> Unit {
+  ensure_dir_exists_with_retry(dir, attempts=4)
+}
+
+///|
+async fn ensure_dir_exists_with_retry(dir : String, attempts~ : Int) -> Unit {
   if @fs.exists(dir) {
     return
   }
   @fs.mkdir(dir, recursive=true) catch {
+    @os_error.OSError(_) as error if error.is_EEXIST() && attempts > 0 =>
+      ensure_dir_exists_with_retry(dir, attempts=attempts - 1)
     error => if @fs.exists(dir) { () } else { raise error }
   }
 }
@@ -464,7 +471,6 @@ async fn ensure_session_dir(
   store : SessionStore,
   id : @agent_session.SessionId,
 ) -> Unit {
-  ensure_dir_exists(store.sessions_dir())
   let dir = store.session_dir(id)
   ensure_dir_exists(dir)
 }

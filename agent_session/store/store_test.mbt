@@ -65,6 +65,41 @@ async test "store creates different sessions concurrently under one root" {
 }
 
 ///|
+async test "store creates different sessions concurrently under a missing root" {
+  let parent = @fs.tmpdir(prefix="openseek-session-store-race-")
+  let store : @store.SessionStore = SessionStore("\{parent}/missing-root")
+  ignore(
+    @async.all(
+      [
+        for id in ["a", "b", "c", "d", "e", "f", "g", "h"] => {
+          () => store.create(Session(SessionId(id), system_prompt="system"))
+        }
+      ],
+    ),
+  )
+  let ids = [ for id in store.list() => id.value() ]
+  json_inspect(ids, content=["a", "b", "c", "d", "e", "f", "g", "h"])
+  @fs.rmdir(parent, recursive=true)
+}
+
+///|
+async test "store validates invalid ids before creating directories" {
+  let parent = @fs.tmpdir(prefix="openseek-session-store-invalid-")
+  let root = "\{parent}/missing-root"
+  let store : @store.SessionStore = SessionStore(root)
+  let _ = store.create(Session(SessionId("../bad"), system_prompt="system")) catch {
+    error => {
+      assert_true("\{error}".contains("path separators"))
+      assert_true(!@fs.exists("\{root}/sessions"))
+      @fs.rmdir(parent, recursive=true)
+      return
+    }
+  }
+  @fs.rmdir(parent, recursive=true)
+  fail("invalid session id accepted")
+}
+
+///|
 async test "store lists known sessions" {
   let store = new_store()
   assert_eq(store.list().length(), 0)
