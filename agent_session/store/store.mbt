@@ -450,17 +450,23 @@ async fn write_text_atomic(path : String, text : String) -> Unit {
 }
 
 ///|
-async fn ensure_session_dir(
-  store : SessionStore,
-  id : @agent_session.SessionId,
-) -> Unit {
-  let dir = store.session_dir(id)
+async fn ensure_dir_exists(dir : String) -> Unit {
   if @fs.exists(dir) {
     return
   }
   @fs.mkdir(dir, recursive=true) catch {
     error => if @fs.exists(dir) { () } else { raise error }
   }
+}
+
+///|
+async fn ensure_session_dir(
+  store : SessionStore,
+  id : @agent_session.SessionId,
+) -> Unit {
+  ensure_dir_exists(store.sessions_dir())
+  let dir = store.session_dir(id)
+  ensure_dir_exists(dir)
 }
 
 ///|

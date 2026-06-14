@@ -48,6 +48,23 @@ async test "store creates and loads a session from header and event log" {
 }
 
 ///|
+async test "store creates different sessions concurrently under one root" {
+  let store = new_store()
+  ignore(
+    @async.all(
+      [
+        for id in ["a", "b", "c", "d"] => {
+          () => store.create(Session(SessionId(id), system_prompt="system"))
+        }
+      ],
+    ),
+  )
+  let ids = [ for id in store.list() => id.value() ]
+  json_inspect(ids, content=["a", "b", "c", "d"])
+  @fs.rmdir(store.root(), recursive=true)
+}
+
+///|
 async test "store lists known sessions" {
   let store = new_store()
   assert_eq(store.list().length(), 0)
