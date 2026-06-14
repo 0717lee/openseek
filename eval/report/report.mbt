@@ -25,6 +25,7 @@ pub struct ReportRow {
   reason : String
   warnings : String
   metrics : Array[Metric]
+  details : Array[Metric]
   log_path : String
 }
 
@@ -38,9 +39,10 @@ pub fn ReportRow::ReportRow(
   reason? : String = "ok",
   warnings? : String = "",
   metrics? : Array[Metric] = [],
+  details? : Array[Metric] = [],
   log_path? : String = "",
 ) -> ReportRow {
-  { index, name, success, reason, warnings, metrics, log_path }
+  { index, name, success, reason, warnings, metrics, details, log_path }
 }
 
 ///|
@@ -101,6 +103,15 @@ pub fn Report::markdown(self : Report) -> String {
   for row in self.rows {
     lines.push(row.markdown_row(self.metric_columns))
   }
+  let detail_lines = detail_section_lines(self.rows)
+  if detail_lines.length() > 0 {
+    lines.push("")
+    lines.push("## Trial Details")
+    lines.push("")
+    for line in detail_lines {
+      lines.push(line)
+    }
+  }
   let log_lines = log_section_lines(self.rows)
   if log_lines.length() > 0 {
     lines.push("")
@@ -131,13 +142,16 @@ pub fn Report::to_json(self : Report) -> Json {
 pub fn Report::html(self : Report) -> String {
   let out = StringBuilder::new()
   out.write_string("<!doctype html>\n<html><head><meta charset=\"utf-8\">")
+  out.write_string(
+    "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">",
+  )
   out.write_string("<title>")
   out.write_string(escape_html(self.title))
   out.write_string("</title>")
   out.write_string(
-    "<style>body{font-family:system-ui,sans-serif;margin:24px;color:#202124}table{border-collapse:collapse;width:100%;font-size:13px}th,td{border:1px solid #d0d7de;padding:6px 8px;text-align:left;vertical-align:top}th{background:#f6f8fa}.pass{color:#116329;font-weight:600}.fail{color:#cf222e;font-weight:600}code{background:#f6f8fa;padding:1px 4px;border-radius:4px}.summary{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0 20px}.metric{border:1px solid #d0d7de;border-radius:6px;padding:6px 8px}.metric-name{color:#57606a;font-size:12px}.logs{margin-top:24px}</style>",
+    "<style>:root{color-scheme:light;--bg:#f7f9fb;--panel:#fff;--text:#1f2328;--muted:#59636e;--line:#d0d7de;--line-soft:#eaeef2;--good:#116329;--bad:#cf222e;--accent:#0969da;--warn:#9a6700}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif;font-size:14px;line-height:1.45}main{max-width:1440px;margin:0 auto;padding:28px 24px 44px}h1{margin:0 0 16px;font-size:28px;line-height:1.15}h2{margin:28px 0 12px;font-size:18px}.summary{display:flex;flex-wrap:wrap;align-items:flex-start;gap:10px;margin:12px 0 20px}.metric,.trial-card{background:var(--panel);border:1px solid var(--line);border-radius:8px}.metric{padding:9px 10px;min-width:140px;max-width:420px}.summary>.metric{flex:1 1 150px}.summary>.metric:last-child{flex-basis:320px}.metric-name{color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.04em}.metric code,.detail-list code,td code,.logs code{background:#f6f8fa;border:1px solid var(--line-soft);border-radius:5px;padding:1px 5px;white-space:pre-wrap;overflow-wrap:anywhere}.table-wrap{overflow-x:auto;background:var(--panel);border:1px solid var(--line);border-radius:8px}table{border-collapse:separate;border-spacing:0;width:100%;font-size:13px}th,td{border-bottom:1px solid var(--line-soft);padding:8px 10px;text-align:left;vertical-align:top}th{background:#f6f8fa;color:#3f4852;font-weight:650;white-space:nowrap}tbody tr:last-child td{border-bottom:0}.pass{color:var(--good);font-weight:700}.fail{color:var(--bad);font-weight:700}.reason-cell,.warning-cell{max-width:360px;overflow-wrap:anywhere}.trial-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(360px,1fr));gap:12px}.trial-card{padding:14px}.trial-card header{display:flex;gap:10px;align-items:center;justify-content:space-between;margin-bottom:10px}.trial-card h3{margin:0;font-size:16px}.badge{border-radius:999px;padding:2px 9px;font-size:12px;font-weight:700}.badge.pass{background:#dafbe1}.badge.fail{background:#ffebe9}.detail-list{display:grid;grid-template-columns:minmax(120px,180px) 1fr;gap:6px 12px;margin:0}.detail-list dt{color:var(--muted);font-weight:650}.detail-list dd{margin:0;min-width:0}.detail-list dd.long{white-space:pre-wrap;overflow-wrap:anywhere}.detail-list dd.long code{display:block;max-height:180px;overflow:auto}.logs{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px 16px}.logs ul{margin:8px 0 0;padding-left:20px}@media(max-width:720px){main{padding:20px 14px}.summary>.metric{flex-basis:100%;max-width:none}.trial-grid{grid-template-columns:1fr}.detail-list{grid-template-columns:1fr}.detail-list dt{margin-top:6px}}</style>",
   )
-  out.write_string("</head><body>")
+  out.write_string("</head><body><main>")
   out.write_string("<h1>")
   out.write_string(escape_html(self.title))
   out.write_string("</h1>")
@@ -152,7 +166,7 @@ pub fn Report::html(self : Report) -> String {
     }
     out.write_string("</div>")
   }
-  out.write_string("<table><thead><tr>")
+  out.write_string("<div class=\"table-wrap\"><table><thead><tr>")
   let columns : Array[String] = ["#", "Case", "Result"]
   for column in self.metric_columns {
     columns.push(column)
@@ -180,13 +194,43 @@ pub fn Report::html(self : Report) -> String {
       out.write_string(escape_html(row.metric_value(column)))
       out.write_string("</td>")
     }
-    out.write_string("<td>")
-    out.write_string(escape_html(row.reason))
-    out.write_string("</td><td>")
-    out.write_string(escape_html(row.warnings))
+    out.write_string("<td class=\"reason-cell\">")
+    out.write_string(escape_html(short_cell(row.reason)))
+    out.write_string("</td><td class=\"warning-cell\">")
+    out.write_string(escape_html(short_cell(row.warnings)))
     out.write_string("</td></tr>")
   }
-  out.write_string("</tbody></table>")
+  out.write_string("</tbody></table></div>")
+  if has_detail_section(self.rows) {
+    out.write_string(
+      "<section><h2>Trial Details</h2><div class=\"trial-grid\">",
+    )
+    for row in self.rows {
+      if row.has_details() {
+        out.write_string("<article class=\"trial-card\"><header><h3><code>")
+        out.write_string(escape_html(row.name))
+        out.write_string("</code></h3><span class=\"badge ")
+        out.write_string(if row.success { "pass" } else { "fail" })
+        out.write_string("\">")
+        out.write_string(if row.success { "pass" } else { "fail" })
+        out.write_string("</span></header><dl class=\"detail-list\">")
+        write_html_detail(out, "Reason", row.reason, long=true)
+        if row.warnings != "" {
+          write_html_detail(out, "Warnings", row.warnings, long=true)
+        }
+        for detail in row.details {
+          write_html_detail(
+            out,
+            detail.name,
+            detail.value,
+            long=detail.value.length() > 80,
+          )
+        }
+        out.write_string("</dl></article>")
+      }
+    }
+    out.write_string("</div></section>")
+  }
   let log_lines = log_section_lines(self.rows)
   if log_lines.length() > 0 {
     out.write_string("<section class=\"logs\"><h2>Logs</h2><ul>")
@@ -203,7 +247,7 @@ pub fn Report::html(self : Report) -> String {
     }
     out.write_string("</ul></section>")
   }
-  out.write_string("</body></html>\n")
+  out.write_string("</main></body></html>\n")
   out.to_string()
 }
 
@@ -250,6 +294,7 @@ fn ReportRow::to_json(self : ReportRow) -> Json {
     "reason": self.reason,
     "warnings": self.warnings,
     "metrics": ([ for metric in self.metrics => metric.to_json() ] : Json),
+    "details": ([ for metric in self.details => metric.to_json() ] : Json),
     "log_path": self.log_path,
   }
 }
@@ -293,8 +338,8 @@ fn ReportRow::markdown_row(
   for column in metric_columns {
     cells.push(escape_table_cell(self.metric_value(column)))
   }
-  cells.push(escape_table_cell(self.reason))
-  cells.push(escape_table_cell(self.warnings))
+  cells.push(escape_table_cell(short_cell(self.reason)))
+  cells.push(escape_table_cell(short_cell(self.warnings)))
   "| " + cells.join(" | ") + " |"
 }
 
@@ -317,6 +362,86 @@ fn log_section_lines(rows : Array[ReportRow]) -> Array[String] {
     }
   }
   lines
+}
+
+///|
+fn detail_section_lines(rows : Array[ReportRow]) -> Array[String] {
+  let lines : Array[String] = []
+  for row in rows {
+    if row.has_details() {
+      if lines.length() > 0 {
+        lines.push("")
+      }
+      lines.push("### `\{row.name}`")
+      lines.push("")
+      lines.push("- result: `\{if row.success { "pass" } else { "fail" }}`")
+      lines.push("- reason: \{markdown_text(row.reason)}")
+      if row.warnings != "" {
+        lines.push("- warnings: \{markdown_text(row.warnings)}")
+      }
+      for detail in row.details {
+        lines.push("- \{detail.name}: `\{escape_backticks(detail.value)}`")
+      }
+    }
+  }
+  lines
+}
+
+///|
+fn has_detail_section(rows : Array[ReportRow]) -> Bool {
+  for row in rows {
+    if row.has_details() {
+      return true
+    }
+  }
+  false
+}
+
+///|
+fn ReportRow::has_details(self : ReportRow) -> Bool {
+  self.details.length() > 0 || self.reason != "ok" || self.warnings != ""
+}
+
+///|
+fn write_html_detail(
+  out : StringBuilder,
+  name : String,
+  value : String,
+  long~ : Bool,
+) -> Unit {
+  out.write_string("<dt>")
+  out.write_string(escape_html(name))
+  out.write_string("</dt><dd")
+  if long {
+    out.write_string(" class=\"long\"")
+  }
+  out.write_string("><code>")
+  out.write_string(escape_html(value))
+  out.write_string("</code></dd>")
+}
+
+///|
+fn short_cell(text : String) -> String {
+  let squashed = text
+    .replace_all(old="\r\n", new="\n")
+    .replace_all(old="\n", new=" ")
+    .trim()
+    .to_owned()
+  if squashed.length() <= 96 {
+    squashed
+  } else {
+    squashed.sub(start=0, end=96).to_owned() + "..."
+  }
+}
+
+///|
+fn markdown_text(text : String) -> String {
+  "`\{escape_backticks(short_cell(text))}`"
+}
+
+///|
+fn escape_backticks(text : String) -> String {
+  text.replace_all(old="`", new="\\`")
 }
 
 ///|

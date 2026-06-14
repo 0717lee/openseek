@@ -37,8 +37,15 @@ fn TrialResult::to_json(self : TrialResult) -> Json {
     "events_path": self.events_path,
     "exit_code": self.exit_code,
     "steps": self.steps,
+    "tool_results": self.tool_results,
     "tool_errors": self.tool_errors,
+    "shell_uses": self.shell_uses,
+    "shell_failures": self.shell_failures,
+    "runtime_notices": self.runtime_notices,
     "finished": self.finished,
+    "finish_message": self.finish_message,
+    "terminal_status": self.terminal_status,
+    "terminal_message": self.terminal_message,
     "validation": self.validation.to_json(),
     "parse_errors": self.parse_errors,
     "partial_tail": self.partial_tail,
@@ -111,10 +118,8 @@ fn EvalReport::as_report(self : EvalReport) -> @report.Report {
       Metric(name="output", value=self.out_dir),
     ],
     metric_columns=[
-      "Steps", "Tool Errors", "Finished", "Validation", "Check", "Test", "File Probe",
-      "Stdin Probe", "Dup Probe", "Parse Errors", "Partial Tail", "Run -e", "Run -c",
-      "Bad -e", "from_str", "parse_int", "argparse", "old argparse", "C FFI", "env args",
-      "containers", "try", "Exit Code",
+      "Steps", "Tool Results", "Tool Errors", "Shell Failures", "Finished", "Validation",
+      "Exit Code",
     ],
     rows=[
       for result in self.results => {
@@ -126,53 +131,107 @@ fn EvalReport::as_report(self : EvalReport) -> @report.Report {
           warnings=result.warnings,
           metrics=[
             Metric(name="Steps", value=result.steps.to_string()),
+            Metric(name="Tool Results", value=result.tool_results.to_string()),
             Metric(name="Tool Errors", value=result.tool_errors.to_string()),
+            Metric(
+              name="Shell Failures",
+              value=result.shell_failures.to_string(),
+            ),
             Metric(name="Finished", value=result.finished.to_string()),
             Metric(
               name="Validation",
               value=result.validation.passed.to_string(),
             ),
-            Metric(name="Check", value=result.validation.moon_check.to_string()),
-            Metric(name="Test", value=result.validation.moon_test.to_string()),
-            Metric(
-              name="File Probe",
-              value=result.validation.file_probe.to_string(),
-            ),
-            Metric(
-              name="Stdin Probe",
-              value=result.validation.stdin_probe.to_string(),
-            ),
-            Metric(
-              name="Dup Probe",
-              value=result.validation.duplicate_probe.to_string(),
-            ),
-            Metric(name="Parse Errors", value=result.parse_errors.to_string()),
-            Metric(name="Partial Tail", value=result.partial_tail.to_string()),
-            Metric(name="Run -e", value=result.moon_run_e_mentions.to_string()),
-            Metric(name="Run -c", value=result.moon_run_c_mentions.to_string()),
-            Metric(name="Bad -e", value=result.bad_run_e_mentions.to_string()),
-            Metric(name="from_str", value=result.from_str_mentions.to_string()),
-            Metric(
-              name="parse_int",
-              value=result.parse_int_mentions.to_string(),
-            ),
-            Metric(name="argparse", value=result.argparse_mentions.to_string()),
-            Metric(
-              name="old argparse",
-              value=result.old_argparse_mentions.to_string(),
-            ),
-            Metric(name="C FFI", value=result.c_ffi_mentions.to_string()),
-            Metric(name="env args", value=result.env_args_mentions.to_string()),
-            Metric(
-              name="containers",
-              value=result.result_style_mentions.to_string(),
-            ),
-            Metric(name="try", value=result.try_mentions.to_string()),
             Metric(name="Exit Code", value=result.exit_code.to_string()),
           ],
-          log_path=result.log_path,
+          details=trial_details(result),
+          log_path=relative_artifact_path(self.out_dir, result.log_path),
         )
       }
     ],
   )
+}
+
+///|
+fn trial_details(result : TrialResult) -> Array[@report.Metric] {
+  [
+    Metric(name="Session", value=result.session_id),
+    Metric(name="Workspace", value="workspaces/" + padded_index(result.index)),
+    Metric(
+      name="Events",
+      value="session_store/sessions/" + result.session_id + "/events.jsonl",
+    ),
+    Metric(name="Log", value="logs/" + padded_index(result.index) + ".log"),
+    Metric(name="Terminal Status", value=empty_dash(result.terminal_status)),
+    Metric(
+      name="Terminal Message",
+      value=empty_dash(summarize(result.terminal_message)),
+    ),
+    Metric(name="Validation Reason", value=result.validation.reason),
+    Metric(name="Moon Check", value=result.validation.moon_check.to_string()),
+    Metric(name="Moon Test", value=result.validation.moon_test.to_string()),
+    Metric(name="File Probe", value=result.validation.file_probe.to_string()),
+    Metric(name="Stdin Probe", value=result.validation.stdin_probe.to_string()),
+    Metric(
+      name="Duplicate Probe",
+      value=result.validation.duplicate_probe.to_string(),
+    ),
+    Metric(name="Parse Errors", value=result.parse_errors.to_string()),
+    Metric(name="Partial Tail", value=result.partial_tail.to_string()),
+    Metric(name="Shell Uses", value=result.shell_uses.to_string()),
+    Metric(name="Runtime Notices", value=result.runtime_notices.to_string()),
+    Metric(name="moon check mentions", value=result.moon_check_uses.to_string()),
+    Metric(name="moon test mentions", value=result.moon_test_uses.to_string()),
+    Metric(
+      name="moon run -e mentions",
+      value=result.moon_run_e_mentions.to_string(),
+    ),
+    Metric(
+      name="moon run -c mentions",
+      value=result.moon_run_c_mentions.to_string(),
+    ),
+    Metric(name="bad -e mentions", value=result.bad_run_e_mentions.to_string()),
+    Metric(
+      name="@string.from_str mentions",
+      value=result.from_str_mentions.to_string(),
+    ),
+    Metric(
+      name="@string.parse_int mentions",
+      value=result.parse_int_mentions.to_string(),
+    ),
+    Metric(name="argparse mentions", value=result.argparse_mentions.to_string()),
+    Metric(
+      name="old argparse mentions",
+      value=result.old_argparse_mentions.to_string(),
+    ),
+    Metric(name="C FFI mentions", value=result.c_ffi_mentions.to_string()),
+    Metric(
+      name="@env.args mentions",
+      value=result.env_args_mentions.to_string(),
+    ),
+    Metric(
+      name="Result container mentions",
+      value=result.result_style_mentions.to_string(),
+    ),
+    Metric(name="try mentions", value=result.try_mentions.to_string()),
+  ]
+}
+
+///|
+fn relative_artifact_path(out_dir : String, path : String) -> String {
+  let prefix = out_dir + "/"
+  if path.has_prefix(prefix) {
+    path.sub(start=prefix.length(), end=path.length()).to_owned()
+  } else {
+    path
+  }
+}
+
+///|
+fn empty_dash(value : String) -> String {
+  if value == "" {
+    "-"
+  } else {
+    value
+  }
 }

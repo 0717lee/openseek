@@ -31,8 +31,15 @@ pub struct TrialResult {
   events_path : String
   exit_code : Int
   steps : Int
+  tool_results : Int
   tool_errors : Int
+  shell_uses : Int
+  shell_failures : Int
+  runtime_notices : Int
   finished : Bool
+  finish_message : String
+  terminal_status : String
+  terminal_message : String
   validation : ValidationResult
   parse_errors : Int
   partial_tail : Bool
@@ -69,9 +76,15 @@ pub struct EvalReport {
 ///|
 priv struct SessionMetrics {
   finished : Bool
+  finish_message : String
   steps : Int
+  tool_results : Int
   tool_errors : Int
   shell_uses : Int
+  shell_failures : Int
+  runtime_notices : Int
+  terminal_status : String
+  terminal_message : String
   text : String
 }
 
@@ -132,7 +145,14 @@ async fn analyze_trial(
   if parsed.errors.length() > 0 {
     reasons.push("events decode errors \{parsed.errors.length()}")
   }
-  if !session_summary.finished {
+  if !session_summary.finished && session_summary.terminal_status != "" {
+    reasons.push(
+      "agent terminal " +
+      session_summary.terminal_status +
+      ": " +
+      session_summary.terminal_message,
+    )
+  } else if !session_summary.finished {
     reasons.push("finish marker missing")
   }
   if !validation.passed {
@@ -162,8 +182,15 @@ async fn analyze_trial(
     events_path: trial.events_path,
     exit_code: trial.exit_code,
     steps: session_summary.steps,
+    tool_results: session_summary.tool_results,
     tool_errors: session_summary.tool_errors,
+    shell_uses: session_summary.shell_uses,
+    shell_failures: session_summary.shell_failures,
+    runtime_notices: session_summary.runtime_notices,
     finished: session_summary.finished,
+    finish_message: session_summary.finish_message,
+    terminal_status: session_summary.terminal_status,
+    terminal_message: session_summary.terminal_message,
     validation,
     parse_errors: parsed.errors.length(),
     partial_tail: parsed.partial_tail,
@@ -203,26 +230,77 @@ async fn analyze_trial(
 fn summarize_session(session : @agent_session.Session) -> SessionMetrics {
   let text = StringBuilder::new()
   let mut finished = false
+  let mut finish_message = ""
   let mut steps = 0
+  let mut tool_results = 0
   let mut tool_errors = 0
   let mut shell_uses = 0
+  let mut shell_failures = 0
+  let mut runtime_notices = 0
+  let mut terminal_status = ""
+  let mut terminal_message = ""
   for event in session.events() {
     append_item_text(text, event.item())
     match event.item() {
       Assistant(_) => steps += 1
       Tool(result) => {
+        tool_results += 1
         if result.tool_name() == "shell" {
           shell_uses += 1
+          if shell_result_failed(result.content()) {
+            shell_failures += 1
+          }
         }
         if result.is_error() {
           tool_errors += 1
         }
       }
-      Terminal(Finished(_)) => finished = true
+      Runtime(_) => runtime_notices += 1
+      Terminal(Finished(message)) => {
+        finished = true
+        finish_message = message
+        terminal_status = "finished"
+        terminal_message = message
+      }
+      Terminal(Aborted(message)) => {
+        terminal_status = "aborted"
+        terminal_message = message
+      }
+      Terminal(Interrupted(message)) => {
+        terminal_status = "interrupted"
+        terminal_message = message
+      }
+      Terminal(Failed(message)) => {
+        terminal_status = "failed"
+        terminal_message = message
+      }
       _ => ()
     }
   }
-  { finished, steps, tool_errors, shell_uses, text: text.to_string() }
+  {
+    finished,
+    finish_message,
+    steps,
+    tool_results,
+    tool_errors,
+    shell_uses,
+    shell_failures,
+    runtime_notices,
+    terminal_status,
+    terminal_message,
+    text: text.to_string(),
+  }
+}
+
+///|
+fn shell_result_failed(content : String) -> Bool {
+  for piece in content.split("\n") {
+    let line = piece.to_owned().trim().to_owned()
+    if line.has_prefix("exit=") && line != "exit=0" {
+      return true
+    }
+  }
+  false
 }
 
 ///|
@@ -277,6 +355,18 @@ async fn validate_toml_workspace(workspace : String) -> ValidationResult {
       duplicate_probe: false,
     }
   }
+  let readiness = toml_workspace_readiness(workspace)
+  if !readiness.passed {
+    return {
+      passed: false,
+      reason: readiness.reason,
+      moon_check: false,
+      moon_test: false,
+      file_probe: false,
+      stdin_probe: false,
+      duplicate_probe: false,
+    }
+  }
   let check = run_command(workspace, ["moon", "check", "--target", "native"])
   let test_probe = run_command(workspace, ["moon", "test", "--target", "native"])
   let file_probe = run_file_probe(workspace)
@@ -311,6 +401,20 @@ async fn validate_toml_workspace(workspace : String) -> ValidationResult {
     stdin_probe: stdin_probe.passed,
     duplicate_probe: duplicate_probe.passed,
   }
+}
+
+///|
+async fn toml_workspace_readiness(workspace : String) -> ProbeResult {
+  if !@fs.exists(workspace + "/moon.mod") {
+    return { passed: false, reason: "moon.mod missing" }
+  }
+  if !@fs.exists(workspace + "/cmd/tomljson/moon.pkg") {
+    return {
+      passed: false,
+      reason: "expected CLI package missing: cmd/tomljson/moon.pkg",
+    }
+  }
+  { passed: true, reason: "ok" }
 }
 
 ///|

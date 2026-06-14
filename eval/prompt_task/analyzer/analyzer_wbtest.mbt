@@ -42,8 +42,17 @@ test "session summary counts typed events" {
   let summary = summarize_session(session)
   assert_true(summary.finished)
   assert_eq(summary.steps, 1)
+  assert_eq(summary.tool_results, 1)
   assert_eq(summary.tool_errors, 0)
+  assert_eq(summary.shell_uses, 0)
+  assert_eq(summary.runtime_notices, 0)
   assert_true(summary.text.contains("moon check"))
+}
+
+///|
+test "shell result failure detection reads exit markers" {
+  assert_false(shell_result_failed("exit=0\nok"))
+  assert_true(shell_result_failed("exit=2\nfailed"))
 }
 
 ///|
@@ -77,8 +86,15 @@ test "markdown report includes prompt label and parser metrics" {
         events_path: "events",
         exit_code: 0,
         steps: 1,
+        tool_results: 1,
         tool_errors: 0,
+        shell_uses: 0,
+        shell_failures: 0,
+        runtime_notices: 0,
         finished: true,
+        finish_message: "done",
+        terminal_status: "finished",
+        terminal_message: "done",
         validation: {
           passed: true,
           reason: "ok",
@@ -110,5 +126,7 @@ test "markdown report includes prompt label and parser metrics" {
   let text = report.markdown()
   assert_true(text.contains("flash"))
   assert_true(text.contains("Parse Errors"))
+  assert_true(text.contains("## Trial Details"))
   assert_true(report.html().contains("<html"))
+  assert_true(report.html().contains("trial-card"))
 }

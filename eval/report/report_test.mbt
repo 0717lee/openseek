@@ -8,10 +8,16 @@ test "markdown renders summary metrics and dynamic columns" {
     ],
     metric_columns=["Mode", "Steps"],
     rows=[
-      ReportRow(index=1, name="read", success=true, metrics=[
-        Metric(name="Mode", value="filesystem"),
-        Metric(name="Steps", value="1"),
-      ]),
+      ReportRow(
+        index=1,
+        name="read",
+        success=true,
+        metrics=[
+          Metric(name="Mode", value="filesystem"),
+          Metric(name="Steps", value="1"),
+        ],
+        details=[Metric(name="Log", value="logs/read.log")],
+      ),
       ReportRow(
         index=2,
         name="shell",
@@ -28,6 +34,8 @@ test "markdown renders summary metrics and dynamic columns" {
   assert_true(
     text.contains("| # | Case | Result | Mode | Steps | Reason | Warnings |"),
   )
+  assert_true(text.contains("## Trial Details"))
+  assert_true(text.contains("- Log: `logs/read.log`"))
   assert_true(text.contains("contains \\| pipe and newline"))
   assert_eq(report.successes(), 1)
   assert_false(report.all_passed())
@@ -46,5 +54,6 @@ async test "report writes markdown json and html files" {
   assert_true(markdown.contains("# Tiny Report"))
   assert_true(json.contains("\"title\":\"Tiny Report\""))
   assert_true(html.contains("<title>Tiny Report</title>"))
+  assert_true(html.contains("table-wrap"))
   @fs.rmdir(root, recursive=true)
 }
