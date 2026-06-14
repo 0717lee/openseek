@@ -210,6 +210,12 @@ shows where steps and tokens went to waste):
 - [ ] **Run `moon fmt --check` before push.** Two consecutive PRs hit
   CI-only formatting failures; a pre-push hook or documented `moon` alias
   would catch them locally.
+- [ ] **CI does not exercise the JS packages.** `ci.yml` runs `moon check` /
+  `moon test` on the default (native) target only, so the visualizer's
+  js-only packages (`viz`, `cmd/viz_app`) are silently skipped — they
+  compile and pass locally but a regression there would not fail CI today.
+  Add a `--target js` check/test step (or a target matrix). Their logic is
+  currently covered only by local unit tests + a headless-browser run.
 
 ## Docs / prompts
 
@@ -223,3 +229,74 @@ shows where steps and tokens went to waste):
   gains a Terminal UI section covering default sessions, `--continue`,
   `--session`, and the enriched `--session-list`, plus a `cmd/tui` row in
   the packages table.)*
+
+## Visualizer (viz)
+
+Follow-ups for the `events.jsonl` web viewer (`viz`, `cmd/viz_server`,
+`cmd/viz_app`, `web/`).
+
+- [ ] **Smarter `--session-root` default discovery.** The default is the
+  relative `.openseek`, resolved against the server's cwd; `moon run
+  cmd/viz_server` uses the module root as cwd (no `.openseek` there), so the
+  no-arg case shows nothing. Walk up from cwd to the nearest `.openseek`
+  (like git finds `.git`) so the default "just works" from a subdirectory.
+- [ ] **Optional self-contained binary for distribution.** Today the server
+  serves `web/index.html` from disk and auto-locates the built `viz_app.js`
+  from `_build/`. If we ever want to *ship* the viewer as one binary, embed
+  both via the `md_to_mbt_string`-style `rule` and accept the js→embed→native
+  build order. Not worth it for a local dev tool; embedding only the HTML is
+  a half-measure (the binary still needs the JS), so it is all-or-nothing.
+- [ ] **UI polish.** Sidebar: show the last-active timestamp (the server
+  already returns it; the frontend ignores it). Turn headers: show a per-turn
+  summary (tool count, terminal status) on the collapsed `<details>` line.
+  Tool cards: collapse long output by default with an expand toggle.
+  Navigation: jump-to-errors, text search/filter, expand/collapse all.
+- [ ] **Persist the theme choice.** The Light/Dark/System toggle resets to
+  Light on reload; persist it (localStorage) so the choice sticks.
+
+## MoonBit toolchain & DX
+
+Observations from building the visualizer (native server + JS frontend in
+one module). These are toolchain/language ergonomics — several are likely
+upstream `moon`/MoonBit items rather than openseek changes — but they cost
+real time and are worth tracking.
+
+- [ ] **`moon info` does not generate `.mbti` for js-only packages.** In a
+  module whose canonical backend is native, `moon info` writes no
+  `pkg.generated.mbti` for `supported_targets = "js"` packages — it only
+  prints a perpetual "requested interfaces different from canonical backend
+  Native" diff. I had to hand-copy the generated interface out of `_build/`.
+  A per-package canonical backend (or `moon info --target js` writing the
+  files) would fix it.
+- [ ] **No cross-target build dependency.** `moon build` is per-target, so
+  there is no way to express "build the JS bundle, then embed it into the
+  native binary" in one invocation — it forces a manual two-step. This is
+  the root reason the viz bundle is served from disk rather than embedded.
+- [ ] **Library aborts are invisible and uncontainable.** A second
+  `send_response` on a connection hit a `guard … else`-less panic (abort) in
+  `@async/http` that tore down `run_forever`; neither `catch` (handles
+  `Error`, not panics) nor `allow_failure` contained it. Checked errors are
+  tracked in signatures, but panics/aborts are not — so you cannot tell which
+  library calls can kill the process. Surfacing "can abort", or a task
+  boundary that contains aborts, would make robust server code tractable.
+  *(Worked around in viz by computing each reply before a single send.)*
+- [ ] **Default trait methods are not callable through a trait object.**
+  `@fs.read_file` returns `&@io.Data`; the *required* `binary()`/`text()`
+  dispatch fine, but the *default* `to_bytes()`/`to_bytesview()` fail with
+  `[4039] Cannot use method … of abstract trait`. The required-vs-default
+  rule through `&Trait` is non-obvious and cost compile cycles.
+- [ ] **A `moon fix` autofixer for deprecations.** A lot of small edit cycles
+  came from deprecation warnings with mechanical rewrites: `not(x)`→`!x`,
+  `StringView::to_string`→`to_owned`, `String::substring`→view slicing,
+  `@strconv.parse_int`→`@string.parse_int`, `derive(Show)`→`derive(Debug)`,
+  plus `+unnecessary_annotation` cascading. An autofix (à la `moon fmt`)
+  would erase most of these.
+- [ ] **Lint a `..` cascade that discards a non-unit return.** `session..append(x)`
+  on an immutable builder (where `append` returns a *new* `Session`) compiles
+  and silently no-ops — it caused a real test bug. Warn when `..` drops a
+  non-`Unit` result.
+- [ ] **Surface dependency examples/APIs in `moon ide doc`.** Learning
+  third-party APIs (rabbita's callable `Emit`, `@async/http.Server::Server`,
+  `@utf8.decode_lossy`, `&Data::binary`) meant grepping `.mooncakes`/`.repos`.
+  Examples like `http_file_server` were invaluable once found; surfacing dep
+  docs/examples through `moon ide doc` would shortcut discovery.
