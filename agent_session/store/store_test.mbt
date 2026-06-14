@@ -8,8 +8,7 @@ async fn new_store() -> @store.SessionStore {
 fn session_events_jsonl(session : @agent_session.Session) -> String {
   let builder = StringBuilder::new()
   for event in session.events() {
-    builder.write_string(event.to_json().stringify())
-    builder.write_string("\n")
+    builder.write_string("\{event.to_json().stringify()}\n")
   }
   builder.to_string()
 }
@@ -92,7 +91,7 @@ async test "listings order by recency and keep husk directories visible" {
   store.create(Session(SessionId("newer"), system_prompt="system"))
   // A directory with neither header nor event log — e.g. an interrupted
   // creation — has no stamp to order by but must stay discoverable.
-  @fs.mkdir(store.root() + "/sessions/husk", recursive=true)
+  @fs.mkdir("\{store.root()}/sessions/husk", recursive=true)
   let listings = store.listings()
   assert_eq(listings.length(), 3)
   assert_eq(listings[0].id().value(), "newer")
@@ -114,7 +113,7 @@ async test "latest skips a torn newest session in favor of a loadable one" {
   store.create(Session(SessionId("torn"), system_prompt="system"))
   // Simulate a crash between the event-log write and the header write: the
   // newest directory stats fine but cannot be loaded.
-  @fs.remove(store.root() + "/sessions/torn/session.json")
+  @fs.remove("\{store.root()}/sessions/torn/session.json")
   guard store.latest() is Some(id) else { fail("expected a latest session") }
   assert_eq(id.value(), "valid")
   @fs.rmdir(store.root(), recursive=true)
@@ -124,7 +123,7 @@ async test "latest skips a torn newest session in favor of a loadable one" {
 async test "store propagates non-missing list errors" {
   let store = new_store()
   @fs.write_file(
-    store.root() + "/sessions",
+    "\{store.root()}/sessions",
     "not a directory",
     create_mode=CreateOrTruncate,
   )
@@ -218,7 +217,7 @@ async test "store rejects mixed header and event log from interrupted rewrites" 
   ).append(User(UserMessage("new")))
   store.create(original)
   @fs.write_file(
-    store.root() + "/sessions/s1/session.json",
+    "\{store.root()}/sessions/s1/session.json",
     session_header_jsonl(rewrite),
     create_mode=CreateOrTruncate,
   )
@@ -242,7 +241,7 @@ async test "store rejects stale tails after interrupted prefix rewrites" {
   let rewrite = @agent_session.Session(SessionId("s1"), system_prompt="system")
   store.create(original)
   @fs.write_file(
-    store.root() + "/sessions/s1/session.json",
+    "\{store.root()}/sessions/s1/session.json",
     session_header_jsonl(rewrite, allow_event_log_ahead=false),
     create_mode=CreateOrTruncate,
   )
@@ -335,8 +334,8 @@ async test "store loads when the append-only log is ahead of the header" {
   let (_, event) = session.append_event(User(UserMessage("first")))
   store.create(session)
   @fs.write_file(
-    store.root() + "/sessions/s1/events.jsonl",
-    event.to_json().stringify() + "\n",
+    "\{store.root()}/sessions/s1/events.jsonl",
+    "\{event.to_json().stringify()}\n",
     create_mode=OpenOrCreate,
     append=true,
   )
@@ -351,7 +350,7 @@ async test "store loads when the append-only log is ahead of the header" {
 async test "store loads an empty session when the event log is missing" {
   let store = new_store()
   store.create(Session(SessionId("s1"), system_prompt="system"))
-  @fs.remove(store.root() + "/sessions/s1/events.jsonl")
+  @fs.remove("\{store.root()}/sessions/s1/events.jsonl")
   let loaded = store.load(SessionId("s1"))
   assert_eq(loaded.events().length(), 0)
   @fs.rmdir(store.root(), recursive=true)
@@ -364,7 +363,7 @@ async test "store rejects missing event logs for non-empty sessions" {
     User(UserMessage("hello")),
   )
   store.create(session)
-  @fs.remove(store.root() + "/sessions/s1/events.jsonl")
+  @fs.remove("\{store.root()}/sessions/s1/events.jsonl")
   let _ = store.load(SessionId("s1")) catch {
     error => {
       assert_true("\{error}".contains("fingerprint mismatch"))
@@ -383,7 +382,7 @@ async test "store propagates unreadable event logs instead of dropping history" 
     User(UserMessage("hello")),
   )
   store.create(session)
-  let event_log = store.root() + "/sessions/s1/events.jsonl"
+  let event_log = "\{store.root()}/sessions/s1/events.jsonl"
   @fs.remove(event_log)
   @fs.mkdir(event_log)
   let _ = store.load(SessionId("s1")) catch {

@@ -72,7 +72,7 @@ fn validate_session_id(id : @agent_session.SessionId) -> Unit raise {
 
 ///|
 fn SessionStore::sessions_dir(self : SessionStore) -> String {
-  self.root + "/" + session_dir_name
+  "\{self.root}/\{session_dir_name}"
 }
 
 ///|
@@ -81,7 +81,7 @@ fn SessionStore::session_dir(
   id : @agent_session.SessionId,
 ) -> String raise {
   validate_session_id(id)
-  self.sessions_dir() + "/" + id.value()
+  "\{self.sessions_dir()}/\{id.value()}"
 }
 
 ///|
@@ -89,7 +89,7 @@ fn SessionStore::header_path(
   self : SessionStore,
   id : @agent_session.SessionId,
 ) -> String raise {
-  self.session_dir(id) + "/" + header_file_name
+  "\{self.session_dir(id)}/\{header_file_name}"
 }
 
 ///|
@@ -97,7 +97,7 @@ fn SessionStore::event_log_path(
   self : SessionStore,
   id : @agent_session.SessionId,
 ) -> String raise {
-  self.session_dir(id) + "/" + event_log_file_name
+  "\{self.session_dir(id)}/\{event_log_file_name}"
 }
 
 ///|
@@ -105,7 +105,7 @@ fn SessionStore::lock_path(
   self : SessionStore,
   id : @agent_session.SessionId,
 ) -> String raise {
-  self.session_dir(id) + "/" + lock_file_name
+  "\{self.session_dir(id)}/\{lock_file_name}"
 }
 
 ///|
@@ -238,8 +238,7 @@ impl FromJson for SessionHeader with fn from_json(
 fn events_jsonl(events : @vector.Vector[@agent_session.SessionEvent]) -> String {
   let builder = StringBuilder::new()
   for event in events {
-    builder.write_string(event.to_json().stringify())
-    builder.write_string("\n")
+    builder.write_string("\{event.to_json().stringify()}\n")
   }
   builder.to_string()
 }
@@ -429,7 +428,7 @@ async fn append_event(
 ) -> Unit {
   @fs.write_file(
     store.event_log_path(session.id()),
-    event.to_json().stringify() + "\n",
+    "\{event.to_json().stringify()}\n",
     create_mode=OpenOrCreate,
     append=true,
   )
@@ -445,7 +444,7 @@ async fn read_event_log_text(path : String) -> String {
 
 ///|
 async fn write_text_atomic(path : String, text : String) -> Unit {
-  let tmp_path = path + ".tmp"
+  let tmp_path = "\{path}.tmp"
   @fs.write_file(tmp_path, text, create_mode=CreateOrTruncate)
   @fs.rename(tmp_path, path, replace=true)
 }
