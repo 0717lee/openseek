@@ -1,0 +1,32 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "bobzhang/openseek/agent_session/log"
+
+import {
+  "bobzhang/openseek/agent_session",
+  "moonbitlang/core/debug",
+}
+
+// Values
+pub fn parse_events(String) -> ParsedLog
+
+pub fn session_from_parse(ParsedLog, id~ : String, system_prompt~ : String) -> @agent_session.Session
+
+// Errors
+
+// Types and methods
+pub(all) struct LineError {
+  line_number : Int
+  content : String
+  message : String
+} derive(@debug.Debug)
+
+pub(all) struct ParsedLog {
+  events : Array[@agent_session.SessionEvent]
+  errors : Array[LineError]
+  partial_tail : Bool
+} derive(@debug.Debug)
+
+// Type aliases
+
+// Traits
+
