@@ -1,0 +1,138 @@
+///|
+fn sample_session() -> @agent_session.Session {
+  @agent_session.Session(SessionId("trial-01"), system_prompt="")
+  .append(User(UserMessage("build a toml cli")))
+  .append(
+    Assistant(
+      AssistantMessage("I will run moon check", tool_calls=[
+        ToolCall(
+          id="call_1",
+          name="shell",
+          arguments="{\"cmd\":\"moon check\"}",
+        ),
+      ]),
+    ),
+  )
+  .append(
+    Tool(
+      ToolResult(tool_call_id="call_1", tool_name="shell", content="exit=0\nok"),
+    ),
+  )
+  .append(Runtime(RuntimeNotice("[moon_check update]\nFinished.")))
+  .append(Terminal(Finished("done")))
+}
+
+///|
+test "session analyzer counts typed events" {
+  let result = analyze_session(sample_session())
+  assert_true(result.success)
+  assert_true(result.finished)
+  assert_eq(result.reason, "ok")
+  assert_eq(result.steps, 2)
+  assert_eq(result.tool_results, 1)
+  assert_eq(result.tool_errors, 0)
+  assert_eq(result.shell_uses, 1)
+  assert_eq(result.shell_failures, 0)
+  assert_eq(result.runtime_notices, 1)
+}
+
+///|
+test "latest non-finished terminal determines success" {
+  let session = @agent_session.Session(
+      SessionId("multi-turn"),
+      system_prompt="",
+    )
+    .append(User(UserMessage("first")))
+    .append(Terminal(Finished("done")))
+    .append(User(UserMessage("second")))
+    .append(Terminal(Failed("agent failed")))
+  let result = analyze_session(session)
+  assert_false(result.success)
+  assert_false(result.finished)
+  assert_eq(result.terminal_status, "failed")
+  assert_true(result.reason.contains("agent terminal failed"))
+}
+
+///|
+test "finish tool terminal does not double count a model step" {
+  let session = @agent_session.Session(
+      SessionId("trial-finish"),
+      system_prompt="",
+    )
+    .append(User(UserMessage("finish")))
+    .append(
+      Assistant(
+        AssistantMessage("", tool_calls=[
+          ToolCall(
+            id="call_finish",
+            name="finish",
+            arguments="{\"answer\":\"done\"}",
+          ),
+        ]),
+      ),
+    )
+    .append(
+      Tool(
+        ToolResult(
+          tool_call_id="call_finish",
+          tool_name="finish",
+          content="finished: done",
+        ),
+      ),
+    )
+    .append(Terminal(Finished("done")))
+  let result = analyze_session(session)
+  assert_eq(result.steps, 1)
+  assert_eq(result.tool_results, 1)
+  assert_true(result.finished)
+}
+
+///|
+test "shell result failure detection reads only the exit header" {
+  assert_false(shell_result_failed("exit=0\nok"))
+  assert_false(shell_result_failed("exit=0\nexit=2"))
+  assert_false(shell_result_failed("not a shell header\nexit=2"))
+  assert_true(shell_result_failed("exit=2\nfailed"))
+  assert_true(shell_result_failed("exit=cancelled\ntruncated"))
+}
+
+///|
+test "transcript text ignores user prompts and summaries" {
+  let session = @agent_session.Session(
+      SessionId("prompt-only"),
+      system_prompt="",
+    )
+    .append(
+      User(
+        UserMessage(
+          "run moon check and moon test with @string.from_str and @argparse.command try?",
+        ),
+      ),
+    )
+    .append(
+      Summary(
+        SessionSummary(content="moon test", from_sequence=1, to_sequence=1),
+      ),
+    )
+    .append(Assistant(AssistantMessage("I used @string.parse_int")))
+    .append(Terminal(Finished("done")))
+  let text = transcript_text(session)
+  assert_false(text.contains("@string.from_str"))
+  assert_false(text.contains("@argparse.command"))
+  assert_false(text.contains("moon test"))
+  assert_true(text.contains("@string.parse_int"))
+}
+
+///|
+async test "eval result renders and writes report files" {
+  let dir = @fs.tmpdir(prefix="openseek-session-analyzer-")
+  let result = analyze_session(sample_session())
+  assert_true(result.markdown().contains("Session Eval Result"))
+  assert_true(result.html().contains("<html"))
+  assert_true(result.to_json().stringify().contains("trial-01"))
+  result.write_files(dir)
+  assert_true(@fs.exists(dir + "/report.md"))
+  assert_true(@fs.exists(dir + "/report.html"))
+  assert_true(@fs.exists(dir + "/report.json"))
+  @fs.rmdir(dir, recursive=true)
+}

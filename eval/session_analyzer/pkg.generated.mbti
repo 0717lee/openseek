@@ -1,0 +1,40 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "bobzhang/openseek/eval/session_analyzer"
+
+import {
+  "bobzhang/openseek/agent_session",
+}
+
+// Values
+pub fn analyze_session(@agent_session.Session) -> EvalResult
+
+pub fn transcript_text(@agent_session.Session) -> String
+
+// Errors
+
+// Types and methods
+pub struct EvalResult {
+  session_id : String
+  success : Bool
+  reason : String
+  warnings : String
+  steps : Int
+  tool_results : Int
+  tool_errors : Int
+  shell_uses : Int
+  shell_failures : Int
+  runtime_notices : Int
+  finished : Bool
+  finish_message : String
+  terminal_status : String
+  terminal_message : String
+}
+pub fn EvalResult::html(Self) -> String
+pub fn EvalResult::markdown(Self) -> String
+pub fn EvalResult::to_json(Self) -> Json
+pub async fn EvalResult::write_files(Self, String) -> Unit
+
+// Type aliases
+
+// Traits
+
