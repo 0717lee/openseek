@@ -7,9 +7,12 @@ be regenerated without rerunning model/API trials.
 
 The default task is `eval/prompt_tasks/toml_parser_cli.md`. The runner replaces
 `{{WORKSPACE}}` in the task template with each trial workspace path and starts
-the agent with an explicit per-trial session id. The analyzer loads the run
-manifest and session logs, then independently validates the final TOML project
-with:
+the agent with `openseek --dir <trial-workspace>` and an explicit per-trial
+session id. Each session log stays under the trial workspace's `.openseek`
+directory. The analyzer loads the run manifest, recursively resolves the
+workspace-local session logs, evaluates each loaded agent session independently,
+then combines those eval results into a run-level report. Workspace validation
+for the TOML task checks:
 
 - `moon check --target native`
 - `moon test --target native`
@@ -39,8 +42,6 @@ moon run eval/prompt_task/cmd/main -- \
   --out .moonagent/eval_runs/toml_flash_current_5x
 ```
 
-For the old one-step behavior, add `--run-and-analyze` to the run command.
-
 Run an A/B comparison by using different output directories and prompt labels:
 
 ```bash
@@ -56,7 +57,10 @@ moon run eval/prompt_task/cmd/main -- \
   --out .moonagent/eval_runs/toml_flash_candidate_5x
 ```
 
-The runner writes `run_manifest.json`, `workspaces/`, `logs/`, and
-`session_store/`. The analyzer writes `report.md`, `report.json`, and
-`report.html`; the report records success rate, typed-session metrics,
+The runner writes `run_manifest.json`, `workspaces/`, and `logs/`. Agent
+session logs remain in each workspace at `.openseek/sessions/<session>/`.
+The analyzer writes aggregate `report.md`, `report.json`, and `report.html`
+files under the run output directory. It also writes one independently
+renderable eval result under `eval_results/<trial>/` with its own markdown,
+JSON, and HTML report. The reports record success rate, typed-session metrics,
 validation pass/fail, prompt-sensitive counters, and paths to each raw log.

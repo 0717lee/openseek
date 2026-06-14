@@ -1,9 +1,6 @@
 ///|
 async fn main {
   let matches = @argparse.parse(cli_command())
-  if flag(matches, "analyze-only") && flag(matches, "run-and-analyze") {
-    fail("--analyze-only contradicts --run-and-analyze")
-  }
   if flag(matches, "analyze-only") {
     let report = @analyzer.analyze_run(value(matches, "out"))
     println(report.markdown())
@@ -13,18 +10,10 @@ async fn main {
     return
   }
   let config = config_from_matches(matches)
-  if flag(matches, "run-and-analyze") {
-    let report = @harness.run_suite(config)
-    println(report.markdown())
-    if !report.passed() {
-      fail(report.failure_message())
-    }
-  } else {
-    let manifest = @harness.run_experiments(config)
-    println(
-      "prompt task run manifest: \{@manifest.manifest_path(manifest.out_dir)}",
-    )
-  }
+  let manifest = @harness.run_experiments(config)
+  println(
+    "prompt task run manifest: \{@manifest.manifest_path(manifest.out_dir)}",
+  )
 }
 
 ///|
@@ -117,11 +106,6 @@ fn cli_command() -> @argparse.Command {
         "analyze-only",
         long="analyze-only",
         about="Analyze an existing --out directory without running agent trials.",
-      ),
-      FlagArg(
-        "run-and-analyze",
-        long="run-and-analyze",
-        about="Run trials and immediately analyze them, preserving the old one-shot behavior.",
       ),
     ],
   )

@@ -28,12 +28,11 @@ pub struct TrialArtifact {
   index : Int
   workspace : String
   log_path : String
-  session_root : String
   session_id : String
   events_path : String
   exit_code : Int
 }
-pub fn TrialArtifact::TrialArtifact(index~ : Int, workspace~ : String, log_path~ : String, session_root~ : String, session_id~ : String, events_path~ : String, exit_code~ : Int) -> Self
+pub fn TrialArtifact::TrialArtifact(index~ : Int, workspace~ : String, log_path~ : String, session_id~ : String, events_path~ : String, exit_code~ : Int) -> Self
 
 // Type aliases
 

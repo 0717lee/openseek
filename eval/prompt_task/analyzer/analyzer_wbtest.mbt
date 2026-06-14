@@ -50,6 +50,23 @@ test "session summary counts typed events" {
 }
 
 ///|
+test "eval session produces standalone result" {
+  let parsed = @session_log.parse_events(sample_events())
+  let session = @session_log.session_from_parse(
+    parsed,
+    id="trial-01",
+    system_prompt="",
+  )
+  let result = eval_session(session)
+  assert_true(result.success)
+  assert_eq(result.session_id, "trial-01")
+  assert_eq(result.steps, 1)
+  assert_false(result.validation.ran)
+  assert_true(result.markdown().contains("Prompt Task Eval Result"))
+  assert_true(result.html().contains("<html"))
+}
+
+///|
 test "shell result failure detection reads exit markers" {
   assert_false(shell_result_failed("exit=0\nok"))
   assert_true(shell_result_failed("exit=2\nfailed"))
@@ -96,6 +113,7 @@ test "markdown report includes prompt label and parser metrics" {
         terminal_status: "finished",
         terminal_message: "done",
         validation: {
+          ran: true,
           passed: true,
           reason: "ok",
           moon_check: true,

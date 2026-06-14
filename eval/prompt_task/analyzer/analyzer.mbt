@@ -9,6 +9,7 @@ pub struct ProbeResult {
 ///|
 /// Validation verdict for one trial's finished workspace.
 pub struct ValidationResult {
+  ran : Bool
   passed : Bool
   reason : String
   moon_check : Bool
@@ -19,8 +20,10 @@ pub struct ValidationResult {
 }
 
 ///|
-/// Everything recorded about one analyzed prompt-task trial.
-pub struct TrialResult {
+/// Everything recorded about one analyzed agent session. Harness metadata and
+/// workspace validation are attached when the session came from a prompt-task
+/// trial.
+pub struct EvalResult {
   index : Int
   prompt_label : String
   success : Bool
@@ -70,7 +73,7 @@ pub struct EvalReport {
   min_successes : Int
   successes : Int
   out_dir : String
-  results : Array[TrialResult]
+  results : Array[EvalResult]
 }
 
 ///|
@@ -89,6 +92,21 @@ priv struct SessionMetrics {
 }
 
 ///|
+priv struct EvalContext {
+  index : Int
+  prompt_label : String
+  workspace : String
+  log_path : String
+  events_path : String
+  exit_code : Int
+  validation : ValidationResult
+  parse_errors : Int
+  partial_tail : Bool
+  extra_reasons : Array[String]
+  extra_warnings : Array[String]
+}
+
+///|
 /// Analyze an existing prompt-task run directory.
 pub async fn analyze_run(out_dir : String) -> EvalReport {
   analyze_manifest(@manifest.read_manifest(out_dir))
@@ -97,11 +115,22 @@ pub async fn analyze_run(out_dir : String) -> EvalReport {
 ///|
 /// Analyze a prompt-task run manifest and write report artifacts.
 pub async fn analyze_manifest(manifest : @manifest.RunManifest) -> EvalReport {
-  let results : Array[TrialResult] = []
+  let results : Array[EvalResult] = []
   for trial in manifest.trials {
     results.push(analyze_trial(manifest, trial))
   }
-  let report : EvalReport = {
+  let report = combine_results(manifest, results)
+  write_report_files(report)
+  report
+}
+
+///|
+/// Combine independently evaluated sessions into one run-level report.
+pub fn combine_results(
+  manifest : @manifest.RunManifest,
+  results : Array[EvalResult],
+) -> EvalReport {
+  {
     model: manifest.model,
     prompt_label: manifest.prompt_label,
     task_file: manifest.task_file,
@@ -112,20 +141,39 @@ pub async fn analyze_manifest(manifest : @manifest.RunManifest) -> EvalReport {
     out_dir: manifest.out_dir,
     results,
   }
-  write_report_files(report)
-  report
+}
+
+///|
+/// Evaluate one loaded agent session without depending on the prompt-task
+/// harness. Workspace validation is deliberately not run for this pure
+/// session pass.
+pub fn eval_session(session : @agent_session.Session) -> EvalResult {
+  eval_session_with_context(session, {
+    index: 0,
+    prompt_label: "",
+    workspace: "",
+    log_path: "",
+    events_path: "",
+    exit_code: 0,
+    validation: validation_not_run(),
+    parse_errors: 0,
+    partial_tail: false,
+    extra_reasons: [],
+    extra_warnings: [],
+  })
 }
 
 ///|
 async fn analyze_trial(
   manifest : @manifest.RunManifest,
   trial : @manifest.TrialArtifact,
-) -> TrialResult {
-  let events_missing = !@fs.exists(trial.events_path)
+) -> EvalResult {
+  let events_path = resolve_events_path(trial)
+  let events_missing = !@fs.exists(events_path)
   let events_text = if events_missing {
     ""
   } else {
-    @fs.read_file(trial.events_path).text()
+    @fs.read_file(events_path).text()
   }
   let parsed = @session_log.parse_events(events_text)
   let session = @session_log.session_from_parse(
@@ -133,7 +181,6 @@ async fn analyze_trial(
     id=trial.session_id,
     system_prompt="",
   )
-  let session_summary = summarize_session(session)
   let validation = validate_toml_workspace(trial.workspace)
   let reasons : Array[String] = []
   if trial.exit_code != 0 {
@@ -145,6 +192,35 @@ async fn analyze_trial(
   if parsed.errors.length() > 0 {
     reasons.push("events decode errors \{parsed.errors.length()}")
   }
+  let warnings : Array[String] = []
+  if parsed.partial_tail {
+    warnings.push("trailing partial event ignored")
+  }
+  eval_session_with_context(session, {
+    index: trial.index,
+    prompt_label: manifest.prompt_label,
+    workspace: trial.workspace,
+    log_path: trial.log_path,
+    events_path,
+    exit_code: trial.exit_code,
+    validation,
+    parse_errors: parsed.errors.length(),
+    partial_tail: parsed.partial_tail,
+    extra_reasons: reasons,
+    extra_warnings: warnings,
+  })
+}
+
+///|
+fn eval_session_with_context(
+  session : @agent_session.Session,
+  context : EvalContext,
+) -> EvalResult {
+  let session_summary = summarize_session(session)
+  let reasons : Array[String] = []
+  for reason in context.extra_reasons {
+    reasons.push(reason)
+  }
   if !session_summary.finished && session_summary.terminal_status != "" {
     reasons.push(
       "agent terminal " +
@@ -155,12 +231,12 @@ async fn analyze_trial(
   } else if !session_summary.finished {
     reasons.push("finish marker missing")
   }
-  if !validation.passed {
-    reasons.push(validation.reason)
+  if context.validation.ran && !context.validation.passed {
+    reasons.push(context.validation.reason)
   }
   let warnings : Array[String] = []
-  if parsed.partial_tail {
-    warnings.push("trailing partial event ignored")
+  for warning in context.extra_warnings {
+    warnings.push(warning)
   }
   if session_summary.shell_uses > 0 {
     warnings.push("shell output observed \{session_summary.shell_uses} time(s)")
@@ -168,19 +244,19 @@ async fn analyze_trial(
   let success = reasons.length() == 0
   let text = session_summary.text
   {
-    index: trial.index,
-    prompt_label: manifest.prompt_label,
+    index: context.index,
+    prompt_label: context.prompt_label,
     success,
     reason: if success {
       "ok"
     } else {
       reasons.join("; ")
     },
-    workspace: trial.workspace,
-    log_path: trial.log_path,
-    session_id: trial.session_id,
-    events_path: trial.events_path,
-    exit_code: trial.exit_code,
+    workspace: context.workspace,
+    log_path: context.log_path,
+    session_id: session.id().value(),
+    events_path: context.events_path,
+    exit_code: context.exit_code,
     steps: session_summary.steps,
     tool_results: session_summary.tool_results,
     tool_errors: session_summary.tool_errors,
@@ -191,9 +267,9 @@ async fn analyze_trial(
     finish_message: session_summary.finish_message,
     terminal_status: session_summary.terminal_status,
     terminal_message: session_summary.terminal_message,
-    validation,
-    parse_errors: parsed.errors.length(),
-    partial_tail: parsed.partial_tail,
+    validation: context.validation,
+    parse_errors: context.parse_errors,
+    partial_tail: context.partial_tail,
     moon_check_uses: count_occurrences(text, "moon check"),
     moon_test_uses: count_occurrences(text, "moon test"),
     moon_run_e_mentions: count_lines_containing_all(text, ["moon run", " -e"]),
@@ -343,9 +419,74 @@ fn write_line(out : StringBuilder, value : String) -> Unit {
 }
 
 ///|
+async fn resolve_events_path(trial : @manifest.TrialArtifact) -> String {
+  if trial.events_path != "" && @fs.exists(trial.events_path) {
+    return trial.events_path
+  }
+  let matches : Array[String] = []
+  collect_session_events(trial.workspace, trial.session_id, matches)
+  if matches.length() > 0 {
+    matches[0]
+  } else {
+    trial.events_path
+  }
+}
+
+///|
+async fn collect_session_events(
+  dir : String,
+  session_id : String,
+  matches : Array[String],
+) -> Unit {
+  guard is_directory(dir) else { return }
+  let names = @fs.readdir(dir, sort=true) catch { _ => return }
+  for name in names {
+    if should_skip_scan_dir(name) {
+      continue
+    }
+    let path = dir + "/" + name
+    if is_directory(path) {
+      collect_session_events(path, session_id, matches)
+    } else if name == "events.jsonl" &&
+      path.contains("/sessions/" + session_id + "/") {
+      matches.push(path)
+    }
+  }
+}
+
+///|
+async fn is_directory(path : String) -> Bool {
+  (@fs.kind(path, follow_symlink=false) catch { _ => return false }) ==
+  Directory
+}
+
+///|
+fn should_skip_scan_dir(name : String) -> Bool {
+  name == ".git" ||
+  name == "node_modules" ||
+  name == ".mooncakes" ||
+  name == "_build"
+}
+
+///|
+fn validation_not_run() -> ValidationResult {
+  {
+    ran: false,
+    passed: true,
+    reason: "not run",
+    moon_check: false,
+    moon_test: false,
+    file_probe: false,
+    stdin_probe: false,
+    duplicate_probe: false,
+  }
+}
+
+///|
 async fn validate_toml_workspace(workspace : String) -> ValidationResult {
   if !@fs.exists(workspace) || @fs.kind(workspace) != Directory {
     return {
+      ran: true,
       passed: false,
       reason: "workspace missing: \{workspace}",
       moon_check: false,
@@ -358,6 +499,7 @@ async fn validate_toml_workspace(workspace : String) -> ValidationResult {
   let readiness = toml_workspace_readiness(workspace)
   if !readiness.passed {
     return {
+      ran: true,
       passed: false,
       reason: readiness.reason,
       moon_check: false,
@@ -389,6 +531,7 @@ async fn validate_toml_workspace(workspace : String) -> ValidationResult {
     failures.push("duplicate probe: " + duplicate_probe.reason)
   }
   {
+    ran: true,
     passed: failures.length() == 0,
     reason: if failures.length() == 0 {
       "ok"
@@ -520,7 +663,7 @@ fn json_stdout_probe(
 }
 
 ///|
-fn count_successes(results : Array[TrialResult]) -> Int {
+fn count_successes(results : Array[EvalResult]) -> Int {
   let mut count = 0
   for result in results {
     if result.success {

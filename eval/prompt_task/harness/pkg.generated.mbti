@@ -3,14 +3,11 @@ package "bobzhang/openseek/eval/prompt_task/harness"
 
 import {
   "bobzhang/openseek/deepseek",
-  "bobzhang/openseek/eval/prompt_task/analyzer",
   "bobzhang/openseek/eval/prompt_task/manifest",
 }
 
 // Values
 pub async fn run_experiments(Config) -> @manifest.RunManifest
-
-pub async fn run_suite(Config) -> @analyzer.EvalReport
 
 // Errors
 

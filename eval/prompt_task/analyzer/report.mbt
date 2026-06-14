@@ -6,6 +6,19 @@ async fn write_report_files(report : EvalReport) -> Unit {
     report.to_json(),
     html=report.html(),
   )
+  for result in report.results {
+    write_eval_result_files(report.out_dir, result)
+  }
+}
+
+///|
+async fn write_eval_result_files(out_dir : String, result : EvalResult) -> Unit {
+  @report.write_files(
+    out_dir + "/eval_results/" + eval_result_artifact_name(result),
+    result.markdown(),
+    result.to_json(),
+    html=result.html(),
+  )
 }
 
 ///|
@@ -25,7 +38,7 @@ fn EvalReport::to_json(self : EvalReport) -> Json {
 }
 
 ///|
-fn TrialResult::to_json(self : TrialResult) -> Json {
+fn EvalResult::to_json(self : EvalResult) -> Json {
   {
     "index": self.index,
     "prompt_label": self.prompt_label,
@@ -69,6 +82,7 @@ fn TrialResult::to_json(self : TrialResult) -> Json {
 ///|
 fn ValidationResult::to_json(self : ValidationResult) -> Json {
   {
+    "ran": self.ran,
     "passed": self.passed,
     "reason": self.reason,
     "moon_check": self.moon_check,
@@ -104,6 +118,18 @@ pub fn EvalReport::html(self : EvalReport) -> String {
 }
 
 ///|
+/// Render this single-session eval result as Markdown.
+pub fn EvalResult::markdown(self : EvalResult) -> String {
+  self.as_report(out_dir="").markdown()
+}
+
+///|
+/// Render this single-session eval result as standalone HTML.
+pub fn EvalResult::html(self : EvalResult) -> String {
+  self.as_report(out_dir="").html()
+}
+
+///|
 fn EvalReport::as_report(self : EvalReport) -> @report.Report {
   Report(
     title="Prompt Task Eval",
@@ -123,51 +149,85 @@ fn EvalReport::as_report(self : EvalReport) -> @report.Report {
     ],
     rows=[
       for result in self.results => {
-        ReportRow(
-          index=result.index,
-          name="trial-\{padded_index(result.index)}",
-          success=result.success,
-          reason=result.reason,
-          warnings=result.warnings,
-          metrics=[
-            Metric(name="Steps", value=result.steps.to_string()),
-            Metric(name="Tool Results", value=result.tool_results.to_string()),
-            Metric(name="Tool Errors", value=result.tool_errors.to_string()),
-            Metric(
-              name="Shell Failures",
-              value=result.shell_failures.to_string(),
-            ),
-            Metric(name="Finished", value=result.finished.to_string()),
-            Metric(
-              name="Validation",
-              value=result.validation.passed.to_string(),
-            ),
-            Metric(name="Exit Code", value=result.exit_code.to_string()),
-          ],
-          details=trial_details(result),
-          log_path=relative_artifact_path(self.out_dir, result.log_path),
-        )
+        eval_result_row(result, out_dir=self.out_dir, include_eval_link=true)
       }
     ],
   )
 }
 
 ///|
-fn trial_details(result : TrialResult) -> Array[@report.Metric] {
-  [
+fn EvalResult::as_report(
+  self : EvalResult,
+  out_dir~ : String,
+) -> @report.Report {
+  Report(
+    title="Prompt Task Eval Result: " + eval_result_name(self),
+    summary=[
+      Metric(name="session", value=empty_dash(self.session_id)),
+      Metric(name="prompt", value=empty_dash(self.prompt_label)),
+      Metric(name="result", value=if self.success { "pass" } else { "fail" }),
+      Metric(name="reason", value=self.reason),
+      Metric(name="workspace", value=empty_dash(self.workspace)),
+      Metric(name="events", value=empty_dash(self.events_path)),
+    ],
+    metric_columns=[
+      "Steps", "Tool Results", "Tool Errors", "Shell Failures", "Finished", "Validation",
+      "Exit Code",
+    ],
+    rows=[eval_result_row(self, out_dir~, include_eval_link=false)],
+  )
+}
+
+///|
+fn eval_result_row(
+  result : EvalResult,
+  out_dir~ : String,
+  include_eval_link~ : Bool,
+) -> @report.ReportRow {
+  ReportRow(
+    index=display_index(result),
+    name=eval_result_name(result),
+    success=result.success,
+    reason=result.reason,
+    warnings=result.warnings,
+    metrics=[
+      Metric(name="Steps", value=result.steps.to_string()),
+      Metric(name="Tool Results", value=result.tool_results.to_string()),
+      Metric(name="Tool Errors", value=result.tool_errors.to_string()),
+      Metric(name="Shell Failures", value=result.shell_failures.to_string()),
+      Metric(name="Finished", value=result.finished.to_string()),
+      Metric(name="Validation", value=validation_status(result.validation)),
+      Metric(name="Exit Code", value=result.exit_code.to_string()),
+    ],
+    details=eval_details(result, out_dir~, include_eval_link~),
+    log_path=relative_artifact_path(out_dir, result.log_path),
+  )
+}
+
+///|
+fn eval_details(
+  result : EvalResult,
+  out_dir~ : String,
+  include_eval_link~ : Bool,
+) -> Array[@report.Metric] {
+  let details : Array[@report.Metric] = [
     Metric(name="Session", value=result.session_id),
-    Metric(name="Workspace", value="workspaces/" + padded_index(result.index)),
+    Metric(
+      name="Workspace",
+      value=relative_artifact_path(out_dir, result.workspace),
+    ),
     Metric(
       name="Events",
-      value="session_store/sessions/" + result.session_id + "/events.jsonl",
+      value=relative_artifact_path(out_dir, result.events_path),
     ),
-    Metric(name="Log", value="logs/" + padded_index(result.index) + ".log"),
+    Metric(name="Log", value=relative_artifact_path(out_dir, result.log_path)),
     Metric(name="Terminal Status", value=empty_dash(result.terminal_status)),
     Metric(
       name="Terminal Message",
       value=empty_dash(summarize(result.terminal_message)),
     ),
     Metric(name="Validation Reason", value=result.validation.reason),
+    Metric(name="Validation Ran", value=result.validation.ran.to_string()),
     Metric(name="Moon Check", value=result.validation.moon_check.to_string()),
     Metric(name="Moon Test", value=result.validation.moon_test.to_string()),
     Metric(name="File Probe", value=result.validation.file_probe.to_string()),
@@ -215,15 +275,67 @@ fn trial_details(result : TrialResult) -> Array[@report.Metric] {
     ),
     Metric(name="try mentions", value=result.try_mentions.to_string()),
   ]
+  if include_eval_link {
+    details.push(
+      Metric(
+        name="Eval Result Report",
+        value="eval_results/" +
+          eval_result_artifact_name(result) +
+          "/report.html",
+      ),
+    )
+  }
+  details
 }
 
 ///|
 fn relative_artifact_path(out_dir : String, path : String) -> String {
+  if out_dir == "" || path == "" {
+    return path
+  }
   let prefix = out_dir + "/"
   if path.has_prefix(prefix) {
     path.sub(start=prefix.length(), end=path.length()).to_owned()
   } else {
     path
+  }
+}
+
+///|
+fn eval_result_name(result : EvalResult) -> String {
+  if result.index > 0 {
+    "trial-\{padded_index(result.index)}"
+  } else if result.session_id != "" {
+    result.session_id
+  } else {
+    "session"
+  }
+}
+
+///|
+fn eval_result_artifact_name(result : EvalResult) -> String {
+  eval_result_name(result)
+  .replace_all(old="/", new="_")
+  .replace_all(old="\\", new="_")
+  .replace_all(old=":", new="_")
+  .replace_all(old=" ", new="_")
+}
+
+///|
+fn display_index(result : EvalResult) -> Int {
+  if result.index > 0 {
+    result.index
+  } else {
+    1
+  }
+}
+
+///|
+fn validation_status(validation : ValidationResult) -> String {
+  if !validation.ran {
+    "not run"
+  } else {
+    validation.passed.to_string()
   }
 }
 

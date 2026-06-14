@@ -9,7 +9,6 @@ pub struct TrialArtifact {
   index : Int
   workspace : String
   log_path : String
-  session_root : String
   session_id : String
   events_path : String
   exit_code : Int
@@ -21,20 +20,11 @@ pub fn TrialArtifact::TrialArtifact(
   index~ : Int,
   workspace~ : String,
   log_path~ : String,
-  session_root~ : String,
   session_id~ : String,
   events_path~ : String,
   exit_code~ : Int,
 ) -> TrialArtifact {
-  {
-    index,
-    workspace,
-    log_path,
-    session_root,
-    session_id,
-    events_path,
-    exit_code,
-  }
+  { index, workspace, log_path, session_id, events_path, exit_code }
 }
 
 ///|
@@ -121,7 +111,6 @@ fn TrialArtifact::to_json(self : TrialArtifact) -> Json {
     "index": self.index,
     "workspace": self.workspace,
     "log_path": self.log_path,
-    "session_root": self.session_root,
     "session_id": self.session_id,
     "events_path": self.events_path,
     "exit_code": self.exit_code,
@@ -159,7 +148,6 @@ fn TrialArtifact::from_json(json : Json) -> TrialArtifact raise {
     index: int_field(fields, "index"),
     workspace: string_field(fields, "workspace"),
     log_path: string_field(fields, "log_path"),
-    session_root: string_field(fields, "session_root"),
     session_id: string_field(fields, "session_id"),
     events_path: string_field(fields, "events_path"),
     exit_code: int_field(fields, "exit_code"),

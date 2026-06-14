@@ -5,7 +5,6 @@ async test "prepare output dir creates runner artifact directories" {
   prepare_output_dir(out_dir)
   assert_true(@fs.exists(out_dir + "/workspaces"))
   assert_true(@fs.exists(out_dir + "/logs"))
-  assert_true(@fs.exists(out_dir + "/session_store"))
   @fs.rmdir(root, recursive=true)
 }
 

@@ -1,13 +1,4 @@
 ///|
-/// Run prompt-task experiments and immediately analyze them. This keeps the
-/// previous one-call API available; new callers that want a pure experiment
-/// phase should call `run_experiments` and run the analyzer separately.
-pub async fn run_suite(config : Config) -> @analyzer.EvalReport {
-  let manifest = run_experiments(config)
-  @analyzer.analyze_manifest(manifest)
-}
-
-///|
 /// Run the prompt task `config.runs` times, `config.concurrency` at a time,
 /// writing only durable artifacts: workspaces, raw process logs, recorded
 /// session `events.jsonl` files, and a run manifest. No validation or report
@@ -43,7 +34,6 @@ async fn prepare_output_dir(out_dir : String) -> Unit {
   }
   @fs.mkdir(out_dir + "/workspaces", recursive=true)
   @fs.mkdir(out_dir + "/logs", recursive=true)
-  @fs.mkdir(out_dir + "/session_store", recursive=true)
 }
 
 ///|
@@ -76,17 +66,11 @@ async fn run_trial(
   let workspace = config.out_dir + "/workspaces/" + trial_name
   @fs.mkdir(workspace, recursive=true)
   let real_workspace = @fs.realpath(workspace)
-  let real_out_dir = @fs.realpath(config.out_dir)
-  let session_root = real_out_dir + "/session_store"
   let session_id = "trial-" + trial_name
-  let events_path = session_root + "/sessions/" + session_id + "/events.jsonl"
   let task = task_template.replace_all(old="{{WORKSPACE}}", new=real_workspace)
-  // The engine runs *in* the trial workspace, so the prompt's environment
-  // grounding names the workspace rather than the OpenSeek checkout — and
-  // relative paths in the model's tool calls land in the right tree.
-  // Launcher-relative paths (the default --repo-root ".", the engine
-  // binary, prompt files) must be canonicalized before the child cwd
-  // changes their meaning.
+  // The engine runs from the OpenSeek checkout and receives --dir for the
+  // isolated trial workspace. This keeps launcher-relative paths stable while
+  // ensuring the agent's session store and tool cwd live under the workspace.
   let repo_root = @fs.realpath(config.repo_root)
   let (program, args) = if config.engine != "" {
     (@fs.realpath(config.engine), [])
@@ -98,8 +82,8 @@ async fn run_trial(
     config.max_steps.to_string(),
     "--model",
     config.model.to_string(),
-    "--session-root",
-    session_root,
+    "--dir",
+    real_workspace,
     "--session",
     session_id,
   ])
@@ -122,19 +106,77 @@ async fn run_trial(
       "OPENSEEK_GLOBAL_SKILLS_DIR": real_workspace + "/.no-global-skills",
     },
     inherit_env=true,
-    cwd=real_workspace,
+    cwd=repo_root,
   )
   let log_path = config.out_dir + "/logs/" + trial_name + ".log"
   @fs.write_file(log_path, output.text(), create_mode=CreateOrTruncate)
+  let events_path = discover_session_events(
+    real_workspace,
+    session_id,
+    fallback=real_workspace +
+      "/.openseek/sessions/" +
+      session_id +
+      "/events.jsonl",
+  )
   TrialArtifact(
     index=index + 1,
     workspace=real_workspace,
     log_path~,
-    session_root~,
     session_id~,
     events_path~,
     exit_code~,
   )
+}
+
+///|
+async fn discover_session_events(
+  workspace : String,
+  session_id : String,
+  fallback~ : String,
+) -> String {
+  let matches : Array[String] = []
+  collect_session_events(workspace, session_id, matches)
+  if matches.length() > 0 {
+    matches[0]
+  } else {
+    fallback
+  }
+}
+
+///|
+async fn collect_session_events(
+  dir : String,
+  session_id : String,
+  matches : Array[String],
+) -> Unit {
+  guard is_directory(dir) else { return }
+  let names = @fs.readdir(dir, sort=true) catch { _ => return }
+  for name in names {
+    if should_skip_scan_dir(name) {
+      continue
+    }
+    let path = dir + "/" + name
+    if is_directory(path) {
+      collect_session_events(path, session_id, matches)
+    } else if name == "events.jsonl" &&
+      path.contains("/sessions/" + session_id + "/") {
+      matches.push(path)
+    }
+  }
+}
+
+///|
+async fn is_directory(path : String) -> Bool {
+  (@fs.kind(path, follow_symlink=false) catch { _ => return false }) ==
+  Directory
+}
+
+///|
+fn should_skip_scan_dir(name : String) -> Bool {
+  name == ".git" ||
+  name == "node_modules" ||
+  name == ".mooncakes" ||
+  name == "_build"
 }
 
 ///|

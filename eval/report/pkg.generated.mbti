@@ -36,9 +36,10 @@ pub struct ReportRow {
   reason : String
   warnings : String
   metrics : Array[Metric]
+  details : Array[Metric]
   log_path : String
 }
-pub fn ReportRow::ReportRow(index~ : Int, name~ : String, success~ : Bool, reason? : String, warnings? : String, metrics? : Array[Metric], log_path? : String) -> Self
+pub fn ReportRow::ReportRow(index~ : Int, name~ : String, success~ : Bool, reason? : String, warnings? : String, metrics? : Array[Metric], details? : Array[Metric], log_path? : String) -> Self
 
 // Type aliases
 
