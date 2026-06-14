@@ -23,10 +23,12 @@ fn string_field(
   path : @json.JsonPath,
   key : String,
 ) -> String raise @json.JsonDecodeError {
-  match fields.get(key) {
-    Some(String(value)) => value
-    Some(_) => json_decode_error(path.add_key(key), "expected string")
-    None => json_decode_error(path.add_key(key), "expected string")
+  guard fields.get(key) is Some(json) else {
+    json_decode_error(path.add_key(key), "expected string")
+  }
+  match json {
+    String(value) => value
+    _ => json_decode_error(path.add_key(key), "expected string")
   }
 }
 
@@ -36,10 +38,12 @@ fn int_field(
   path : @json.JsonPath,
   key : String,
 ) -> Int raise @json.JsonDecodeError {
-  match fields.get(key) {
-    Some(Number(value, ..)) => value.to_int()
-    Some(_) => json_decode_error(path.add_key(key), "expected int")
-    None => json_decode_error(path.add_key(key), "expected int")
+  guard fields.get(key) is Some(json) else {
+    json_decode_error(path.add_key(key), "expected int")
+  }
+  match json {
+    Number(value, ..) => value.to_int()
+    _ => json_decode_error(path.add_key(key), "expected int")
   }
 }
 
@@ -202,28 +206,24 @@ pub impl FromJson for Session with fn from_json(
   path : @json.JsonPath,
 ) -> Session {
   let fields = expect_object(json, path)
-  match int_field(fields, path, "version") {
-    1 => ()
-    other =>
-      json_decode_error(
-        path.add_key("version"),
-        "unsupported session version: \{other}",
-      )
+  let version = int_field(fields, path, "version")
+  guard version is 1 else {
+    json_decode_error(
+      path.add_key("version"),
+      "unsupported session version: \{version}",
+    )
   }
   let id : SessionId = match fields.get("id") {
     Some(id) => @json.from_json(id, path=path.add_key("id"))
     None => json_decode_error(path.add_key("id"), "expected id")
   }
   let events = match fields.get("events") {
-    Some(Array(values)) => {
-      let decoded : Array[SessionEvent] = []
-      for index, value in values {
-        decoded.push(
-          @json.from_json(value, path=path.add_key("events").add_index(index)),
-        )
-      }
-      @vector.from_array(decoded)
-    }
+    Some(Array(values)) =>
+      @vector.from_array(
+        values.mapi((index, value) => {
+          @json.from_json(value, path=path.add_key("events").add_index(index))
+        }),
+      )
     Some(_) =>
       json_decode_error(path.add_key("events"), "expected events array")
     None => @vector.new()

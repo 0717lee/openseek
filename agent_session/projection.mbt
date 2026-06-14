@@ -60,13 +60,13 @@ fn remove_pending_tool_call(
   pending : Array[@deepseek.ToolCall],
   tool_call_id : String,
 ) -> Bool {
-  for index in 0..<pending.length() {
-    if pending[index].id == tool_call_id {
+  match pending.search_by(fn(call) { call.id == tool_call_id }) {
+    Some(index) => {
       ignore(pending.remove(index))
-      return true
+      true
     }
+    None => false
   }
-  false
 }
 
 ///|
@@ -140,9 +140,7 @@ pub fn Session::chat_messages(self : Session) -> Array[@deepseek.ChatMessage] {
       Assistant(message) => {
         flush_pending_tool_calls(pending_tool_calls, messages)
         append_item_message(Assistant(message), messages)
-        for call in message.tool_calls() {
-          pending_tool_calls.push(call)
-        }
+        pending_tool_calls.append(message.tool_calls())
       }
       Tool(result) =>
         if remove_pending_tool_call(pending_tool_calls, result.tool_call_id()) {

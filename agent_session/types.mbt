@@ -56,20 +56,17 @@ pub fn SessionId::generated(
   salt? : String = "",
 ) -> SessionId {
   fn pad2(value : Int) -> String {
-    if value < 10 {
-      "0\{value}"
-    } else {
-      "\{value}"
+    match value {
+      0..=9 => "0\{value}"
+      _ => "\{value}"
     }
   }
 
   fn pad3(value : Int) -> String {
-    if value < 10 {
-      "00\{value}"
-    } else if value < 100 {
-      "0\{value}"
-    } else {
-      "\{value}"
+    match value {
+      0..=9 => "00\{value}"
+      10..=99 => "0\{value}"
+      _ => "\{value}"
     }
   }
 
@@ -153,9 +150,7 @@ pub fn AssistantMessage::AssistantMessage(
 ) -> AssistantMessage {
   {
     content,
-    tool_calls: [
-      for call in tool_calls => SessionToolCall::from_deepseek(call)
-    ],
+    tool_calls: tool_calls.map(SessionToolCall::from_deepseek),
     reasoning_content,
   }
 }
@@ -178,9 +173,7 @@ pub fn AssistantMessage::content(self : AssistantMessage) -> String {
 pub fn AssistantMessage::tool_calls(
   self : AssistantMessage,
 ) -> Array[@deepseek.ToolCall] {
-  [
-    for call in self.tool_calls => call.to_deepseek()
-  ]
+  self.tool_calls.map(fn(call) { call.to_deepseek() })
 }
 
 ///|
@@ -428,12 +421,13 @@ pub fn Session::Session(
   system_prompt~ : String,
   events? : @vector.Vector[SessionEvent] = @vector.new(),
 ) -> Session {
-  let mut last_sequence = 0
-  for event in events {
-    if event.sequence > last_sequence {
-      last_sequence = event.sequence
+  let last_sequence = events.fold(init=0, fn(max, event) {
+    if event.sequence > max {
+      event.sequence
+    } else {
+      max
     }
-  }
+  })
   { id, system_prompt, events, last_sequence }
 }
 

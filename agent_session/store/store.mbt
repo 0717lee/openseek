@@ -65,8 +65,9 @@ fn validate_session_id(id : @agent_session.SessionId) -> Unit raise {
   if value.contains("/") || value.contains("\\") {
     fail("session id must not contain path separators: \{value}")
   }
-  if value == "." || value == ".." {
-    fail("session id must not be `.` or `..`")
+  match value {
+    "." | ".." => fail("session id must not be `.` or `..`")
+    _ => ()
   }
 }
 
@@ -144,10 +145,12 @@ fn header_string_field(
   path : @json.JsonPath,
   key : String,
 ) -> String raise @json.JsonDecodeError {
-  match fields.get(key) {
-    Some(String(value)) => value
-    Some(_) => json_decode_error(path.add_key(key), "expected string")
-    None => json_decode_error(path.add_key(key), "expected string")
+  guard fields.get(key) is Some(json) else {
+    json_decode_error(path.add_key(key), "expected string")
+  }
+  match json {
+    String(value) => value
+    _ => json_decode_error(path.add_key(key), "expected string")
   }
 }
 
@@ -157,10 +160,12 @@ fn header_int_field(
   path : @json.JsonPath,
   key : String,
 ) -> Int raise @json.JsonDecodeError {
-  match fields.get(key) {
-    Some(Number(value, ..)) => value.to_int()
-    Some(_) => json_decode_error(path.add_key(key), "expected int")
-    None => json_decode_error(path.add_key(key), "expected int")
+  guard fields.get(key) is Some(json) else {
+    json_decode_error(path.add_key(key), "expected int")
+  }
+  match json {
+    Number(value, ..) => value.to_int()
+    _ => json_decode_error(path.add_key(key), "expected int")
   }
 }
 
@@ -170,10 +175,10 @@ fn header_optional_int_field(
   path : @json.JsonPath,
   key : String,
 ) -> Int? raise @json.JsonDecodeError {
-  match fields.get(key) {
-    Some(Number(value, ..)) => Some(value.to_int())
-    Some(_) => json_decode_error(path.add_key(key), "expected int")
-    None => None
+  guard fields.get(key) is Some(json) else { return None }
+  match json {
+    Number(value, ..) => Some(value.to_int())
+    _ => json_decode_error(path.add_key(key), "expected int")
   }
 }
 
@@ -183,11 +188,11 @@ fn header_optional_bool_field(
   path : @json.JsonPath,
   key : String,
 ) -> Bool? raise @json.JsonDecodeError {
-  match fields.get(key) {
-    Some(True) => Some(true)
-    Some(False) => Some(false)
-    Some(_) => json_decode_error(path.add_key(key), "expected bool")
-    None => None
+  guard fields.get(key) is Some(json) else { return None }
+  match json {
+    True => Some(true)
+    False => Some(false)
+    _ => json_decode_error(path.add_key(key), "expected bool")
   }
 }
 
@@ -200,13 +205,12 @@ fn decode_session_header(
     Object(fields) => fields
     _ => json_decode_error(path, "expected session header object")
   }
-  match header_int_field(fields, path, "version") {
-    1 => ()
-    other =>
-      json_decode_error(
-        path.add_key("version"),
-        "unsupported session header version: \{other}",
-      )
+  let version = header_int_field(fields, path, "version")
+  guard version is 1 else {
+    json_decode_error(
+      path.add_key("version"),
+      "unsupported session header version: \{version}",
+    )
   }
   let id : @agent_session.SessionId = match fields.get("id") {
     Some(id) => @json.from_json(id, path=path.add_key("id"))
@@ -262,16 +266,15 @@ fn parse_events_jsonl(
 fn checked_last_sequence_in_events(
   events : @vector.Vector[@agent_session.SessionEvent],
 ) -> Int raise {
-  let mut expected = 1
-  for event in events {
+  events.fold(init=1, (expected, event) => {
     if event.sequence() != expected {
       fail(
         "session event log sequence mismatch: expected \{expected}, found \{event.sequence()}",
       )
     }
-    expected += 1
-  }
-  expected - 1
+    expected + 1
+  }) -
+  1
 }
 
 ///|
