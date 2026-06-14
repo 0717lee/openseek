@@ -1,10 +1,10 @@
 import {
+  "bobzhang/openseek/eval/prompt_task/analyzer",
+  "bobzhang/openseek/eval/prompt_task/manifest",
   "bobzhang/openseek/deepseek",
-  "bobzhang/openseek/eval/report",
   "moonbitlang/async",
   "moonbitlang/async/fs",
   "moonbitlang/async/process",
-  "moonbitlang/core/json",
 }
 
 warnings = "+unnecessary_annotation"

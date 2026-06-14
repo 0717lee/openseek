@@ -1,6 +1,11 @@
 ///|
 async fn write_report_files(report : EvalReport) -> Unit {
-  @report.write_files(report.out_dir, report.markdown(), report.to_json())
+  @report.write_files(
+    report.out_dir,
+    report.markdown(),
+    report.to_json(),
+    html=report.html(),
+  )
 }
 
 ///|
@@ -28,11 +33,15 @@ fn TrialResult::to_json(self : TrialResult) -> Json {
     "reason": self.reason,
     "workspace": self.workspace,
     "log_path": self.log_path,
+    "session_id": self.session_id,
+    "events_path": self.events_path,
     "exit_code": self.exit_code,
     "steps": self.steps,
     "tool_errors": self.tool_errors,
     "finished": self.finished,
     "validation": self.validation.to_json(),
+    "parse_errors": self.parse_errors,
+    "partial_tail": self.partial_tail,
     "moon_check_uses": self.moon_check_uses,
     "moon_test_uses": self.moon_test_uses,
     "moon_run_e_mentions": self.moon_run_e_mentions,
@@ -64,24 +73,27 @@ fn ValidationResult::to_json(self : ValidationResult) -> Json {
 }
 
 ///|
-/// Whether the run met its success threshold. Thresholded rather than
-/// all-or-nothing because agent trials are stochastic: a prompt is judged on
-/// its success rate, not on a single unlucky trial.
+/// Whether the analysis met its configured success threshold.
 pub fn EvalReport::passed(self : EvalReport) -> Bool {
   self.successes >= self.min_successes
 }
 
 ///|
-/// The one-line failure summary a runner prints (and exits non-zero with)
-/// when the threshold was missed, stating tally and threshold.
+/// One-line failure summary for CLIs that exit non-zero on a missed threshold.
 pub fn EvalReport::failure_message(self : EvalReport) -> String {
   "prompt task eval failed: \{self.successes}/\{self.runs} below threshold \{self.min_successes}/\{self.runs}"
 }
 
 ///|
-/// Render this run as the standard markdown report document.
+/// Render this prompt-task analysis report as Markdown.
 pub fn EvalReport::markdown(self : EvalReport) -> String {
   self.as_report().markdown()
+}
+
+///|
+/// Render this prompt-task analysis report as standalone HTML.
+pub fn EvalReport::html(self : EvalReport) -> String {
+  self.as_report().html()
 }
 
 ///|
@@ -100,8 +112,9 @@ fn EvalReport::as_report(self : EvalReport) -> @report.Report {
     ],
     metric_columns=[
       "Steps", "Tool Errors", "Finished", "Validation", "Check", "Test", "File Probe",
-      "Stdin Probe", "Dup Probe", "Run -e", "Run -c", "Bad -e", "from_str", "parse_int",
-      "argparse", "old argparse", "C FFI", "env args", "containers", "try", "Exit Code",
+      "Stdin Probe", "Dup Probe", "Parse Errors", "Partial Tail", "Run -e", "Run -c",
+      "Bad -e", "from_str", "parse_int", "argparse", "old argparse", "C FFI", "env args",
+      "containers", "try", "Exit Code",
     ],
     rows=[
       for result in self.results => {
@@ -133,6 +146,8 @@ fn EvalReport::as_report(self : EvalReport) -> @report.Report {
               name="Dup Probe",
               value=result.validation.duplicate_probe.to_string(),
             ),
+            Metric(name="Parse Errors", value=result.parse_errors.to_string()),
+            Metric(name="Partial Tail", value=result.partial_tail.to_string()),
             Metric(name="Run -e", value=result.moon_run_e_mentions.to_string()),
             Metric(name="Run -c", value=result.moon_run_c_mentions.to_string()),
             Metric(name="Bad -e", value=result.bad_run_e_mentions.to_string()),

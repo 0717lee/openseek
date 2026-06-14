@@ -1,6 +1,8 @@
 import {
   "bobzhang/openseek/deepseek",
+  "bobzhang/openseek/eval/prompt_task/analyzer",
   "bobzhang/openseek/eval/prompt_task/harness",
+  "bobzhang/openseek/eval/prompt_task/manifest",
   "moonbitlang/async",
   "moonbitlang/core/argparse",
   "moonbitlang/core/string",

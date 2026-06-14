@@ -2,15 +2,13 @@ import {
   "bobzhang/openseek/agent_session",
   "bobzhang/openseek/agent_session/log" @session_log,
   "bobzhang/openseek/deepseek",
-  "moonbit-community/rabbita/html",
-  "moonbitlang/core/immut/vector",
+  "bobzhang/openseek/eval/prompt_task/manifest",
+  "bobzhang/openseek/eval/report",
+  "moonbitlang/async/fs",
+  "moonbitlang/async/process",
   "moonbitlang/core/json",
 }
 
-import {
-  "moonbit-community/rabbita",
-} for "test"
-
 warnings = "+unnecessary_annotation"
 
-supported_targets = "js"
+supported_targets = "+native"

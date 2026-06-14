@@ -14,10 +14,12 @@ types, then convert to `Report` at the output boundary.
   one case/tool row.
 - `Report(title~, summary?, metric_columns?, rows?)`: the renderable report.
 - `Report::markdown()`: Markdown table plus optional log section.
+- `Report::html()`: standalone HTML table plus optional log section.
 - `Report::to_json()`: JSON representation for automated inspection.
-- `Report::write_files(out_dir)`: writes `report.md` and `report.json`.
-- `write_files(out_dir, markdown, json)`: shared writer for harnesses that keep
-  their own richer JSON schema but reuse the Markdown renderer.
+- `Report::write_files(out_dir)`: writes `report.md`, `report.json`, and
+  `report.html`.
+- `write_files(out_dir, markdown, json, html?)`: shared writer for harnesses
+  that keep their own richer JSON schema but reuse the renderers.
 
 ## Example
 

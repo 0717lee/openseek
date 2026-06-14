@@ -24,7 +24,7 @@ pub fn render_session(
 /// Banners for anything the parser flagged: decode failures on individual lines
 /// and a truncated final record. Returns `@html.nothing` for a clean log so the
 /// caller can stack it unconditionally.
-pub fn render_notices(parsed : ParsedLog) -> @html.Html {
+pub fn render_notices(parsed : @session_log.ParsedLog) -> @html.Html {
   let notices : Array[@html.Html] = []
   if parsed.partial_tail {
     notices.push(

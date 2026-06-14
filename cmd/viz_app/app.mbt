@@ -17,7 +17,7 @@ struct SessionRow {
 struct Model {
   sessions : Array[SessionRow]
   selected : String?
-  parsed : @viz.ParsedLog?
+  parsed : @session_log.ParsedLog?
   system_prompt : String
   header_present : Bool
   view_mode : @viz.ViewMode
@@ -67,7 +67,7 @@ enum Msg {
 /// any completed response as `Ok`, so absence and malformed payloads are
 /// distinguished here from the body, not the HTTP status.
 enum LoadOutcome {
-  Loaded(@viz.ParsedLog, String, Bool)
+  Loaded(@session_log.ParsedLog, String, Bool)
   NotFound
   Malformed
 }
@@ -247,7 +247,7 @@ fn session_row(model : Model, key : String) -> SessionRow? {
 }
 
 ///|
-fn events_status(parsed : @viz.ParsedLog) -> String {
+fn events_status(parsed : @session_log.ParsedLog) -> String {
   let base = "\{parsed.events.length()} event(s)"
   if parsed.errors.is_empty() && !parsed.partial_tail {
     base

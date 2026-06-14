@@ -34,7 +34,7 @@ test "markdown renders summary metrics and dynamic columns" {
 }
 
 ///|
-async test "report writes markdown and json files" {
+async test "report writes markdown json and html files" {
   let root = @fs.tmpdir(prefix="openseek-eval-report")
   let report = @report.Report(title="Tiny Report", rows=[
     ReportRow(index=1, name="finish", success=true),
@@ -42,7 +42,9 @@ async test "report writes markdown and json files" {
   report.write_files(root)
   let markdown = @fs.read_file(root + "/report.md").text()
   let json = @fs.read_file(root + "/report.json").text()
+  let html = @fs.read_file(root + "/report.html").text()
   assert_true(markdown.contains("# Tiny Report"))
   assert_true(json.contains("\"title\":\"Tiny Report\""))
+  assert_true(html.contains("<title>Tiny Report</title>"))
   @fs.rmdir(root, recursive=true)
 }

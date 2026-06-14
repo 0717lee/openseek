@@ -127,20 +127,102 @@ pub fn Report::to_json(self : Report) -> Json {
 }
 
 ///|
-/// Write both renderings of this report under `out_dir` — the standard
-/// artifact layout eval runners leave behind.
-pub async fn Report::write_files(self : Report, out_dir : String) -> Unit {
-  write_files(out_dir, self.markdown(), self.to_json())
+/// Render the report as a standalone HTML document for browser inspection.
+pub fn Report::html(self : Report) -> String {
+  let out = StringBuilder::new()
+  out.write_string("<!doctype html>\n<html><head><meta charset=\"utf-8\">")
+  out.write_string("<title>")
+  out.write_string(escape_html(self.title))
+  out.write_string("</title>")
+  out.write_string(
+    "<style>body{font-family:system-ui,sans-serif;margin:24px;color:#202124}table{border-collapse:collapse;width:100%;font-size:13px}th,td{border:1px solid #d0d7de;padding:6px 8px;text-align:left;vertical-align:top}th{background:#f6f8fa}.pass{color:#116329;font-weight:600}.fail{color:#cf222e;font-weight:600}code{background:#f6f8fa;padding:1px 4px;border-radius:4px}.summary{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0 20px}.metric{border:1px solid #d0d7de;border-radius:6px;padding:6px 8px}.metric-name{color:#57606a;font-size:12px}.logs{margin-top:24px}</style>",
+  )
+  out.write_string("</head><body>")
+  out.write_string("<h1>")
+  out.write_string(escape_html(self.title))
+  out.write_string("</h1>")
+  if self.summary.length() > 0 {
+    out.write_string("<div class=\"summary\">")
+    for metric in self.summary {
+      out.write_string("<div class=\"metric\"><div class=\"metric-name\">")
+      out.write_string(escape_html(metric.name))
+      out.write_string("</div><code>")
+      out.write_string(escape_html(metric.value))
+      out.write_string("</code></div>")
+    }
+    out.write_string("</div>")
+  }
+  out.write_string("<table><thead><tr>")
+  let columns : Array[String] = ["#", "Case", "Result"]
+  for column in self.metric_columns {
+    columns.push(column)
+  }
+  columns.push("Reason")
+  columns.push("Warnings")
+  for column in columns {
+    out.write_string("<th>")
+    out.write_string(escape_html(column))
+    out.write_string("</th>")
+  }
+  out.write_string("</tr></thead><tbody>")
+  for row in self.rows {
+    out.write_string("<tr><td>")
+    out.write_string(row.index.to_string())
+    out.write_string("</td><td><code>")
+    out.write_string(escape_html(row.name))
+    out.write_string("</code></td><td class=\"")
+    out.write_string(if row.success { "pass" } else { "fail" })
+    out.write_string("\">")
+    out.write_string(if row.success { "pass" } else { "fail" })
+    out.write_string("</td>")
+    for column in self.metric_columns {
+      out.write_string("<td>")
+      out.write_string(escape_html(row.metric_value(column)))
+      out.write_string("</td>")
+    }
+    out.write_string("<td>")
+    out.write_string(escape_html(row.reason))
+    out.write_string("</td><td>")
+    out.write_string(escape_html(row.warnings))
+    out.write_string("</td></tr>")
+  }
+  out.write_string("</tbody></table>")
+  let log_lines = log_section_lines(self.rows)
+  if log_lines.length() > 0 {
+    out.write_string("<section class=\"logs\"><h2>Logs</h2><ul>")
+    for row in self.rows {
+      if row.log_path != "" {
+        out.write_string("<li><code>")
+        out.write_string(escape_html(row.name))
+        out.write_string("</code> trial ")
+        out.write_string(row.index.to_string())
+        out.write_string(": <code>")
+        out.write_string(escape_html(row.log_path))
+        out.write_string("</code></li>")
+      }
+    }
+    out.write_string("</ul></section>")
+  }
+  out.write_string("</body></html>\n")
+  out.to_string()
 }
 
 ///|
-/// Write already-rendered report artifacts as `report.md` and `report.json`
-/// under `out_dir`, creating it as needed — for runners that build their
-/// renderings separately.
+/// Write both renderings of this report under `out_dir` — the standard
+/// artifact layout eval runners leave behind.
+pub async fn Report::write_files(self : Report, out_dir : String) -> Unit {
+  write_files(out_dir, self.markdown(), self.to_json(), html=self.html())
+}
+
+///|
+/// Write already-rendered report artifacts under `out_dir`, creating it as
+/// needed. `html` is optional for older runners that only render markdown and
+/// JSON.
 pub async fn write_files(
   out_dir : String,
   markdown : String,
   json : Json,
+  html? : String = "",
 ) -> Unit {
   let _ = @fs.mkdir(out_dir, recursive=true) catch { _ => () }
   @fs.write_file(
@@ -149,6 +231,9 @@ pub async fn write_files(
     create_mode=CreateOrTruncate,
   )
   @fs.write_file(out_dir + "/report.md", markdown, create_mode=CreateOrTruncate)
+  if html != "" {
+    @fs.write_file(out_dir + "/report.html", html, create_mode=CreateOrTruncate)
+  }
 }
 
 ///|
@@ -242,4 +327,13 @@ pub fn escape_table_cell(text : String) -> String {
   text
   |> String::replace_all(old="|", new="\\|")
   |> String::replace_all(old="\n", new=" ")
+}
+
+///|
+fn escape_html(text : String) -> String {
+  text
+  |> String::replace_all(old="&", new="&amp;")
+  |> String::replace_all(old="<", new="&lt;")
+  |> String::replace_all(old=">", new="&gt;")
+  |> String::replace_all(old="\"", new="&quot;")
 }
