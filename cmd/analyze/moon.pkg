@@ -1,0 +1,17 @@
+import {
+  "bobzhang/openseek/agent_session",
+  "bobzhang/openseek/agent_session/log" @session_log,
+  "bobzhang/openseek/agent_session/store",
+  "bobzhang/openseek/eval/session_analyzer",
+  "moonbitlang/async",
+  "moonbitlang/async/fs",
+  "moonbitlang/core/argparse",
+}
+
+warnings = "+unnecessary_annotation"
+
+supported_targets = "+native"
+
+options(
+  "is-main": true,
+)
