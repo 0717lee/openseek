@@ -99,12 +99,7 @@ async fn run_trial(
   let (exit_code, output) = @process.collect_output_merged(
     program,
     args,
-    extra_env={
-      "DEEPSEEK": config.api_key,
-      "DEEPSEEK_MODEL": config.model.to_string(),
-      "OPENSEEK_MAX_STEPS": config.max_steps.to_string(),
-      "OPENSEEK_GLOBAL_SKILLS_DIR": real_workspace + "/.no-global-skills",
-    },
+    extra_env=trial_extra_env(config, real_workspace),
     inherit_env=true,
     cwd=repo_root,
   )
@@ -126,6 +121,20 @@ async fn run_trial(
     events_path~,
     exit_code~,
   )
+}
+
+///|
+fn trial_extra_env(
+  config : Config,
+  real_workspace : String,
+) -> Map[String, String] {
+  {
+    "DEEPSEEK": config.api_key,
+    "DEEPSEEK_MODEL": config.model.to_string(),
+    "OPENSEEK_MAX_STEPS": config.max_steps.to_string(),
+    "OPENSEEK_SESSION_ROOT": ".openseek",
+    "OPENSEEK_GLOBAL_SKILLS_DIR": real_workspace + "/.no-global-skills",
+  }
 }
 
 ///|
