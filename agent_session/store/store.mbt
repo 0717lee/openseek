@@ -24,22 +24,34 @@ priv struct SessionHeader {
 }
 
 ///|
-/// Native filesystem-backed store for durable OpenSeek sessions. The store owns
-/// a root directory and keeps each session under `root/sessions/<id>`.
+/// Native filesystem-backed collection of durable OpenSeek sessions.
+///
+/// A `SessionStore` owns only a root path string. Under that root, each session
+/// is stored in `sessions/<id>/` with three files: `session.json`,
+/// `events.jsonl`, and `session.lock`. The store is not a handle to one current
+/// session; APIs that operate on a session either take a `SessionId` or a
+/// `Session` carrying its id.
 pub struct SessionStore {
   priv root : String
 } derive(Debug)
 
 ///|
-/// Open a store rooted at `root`. Nothing is touched on disk until the first
-/// session is created or appended to, so constructing a store is free and
-/// never fails.
+/// Construct a store rooted at `root`.
+///
+/// This does not touch the filesystem and therefore does not validate that the
+/// directory exists, is writable, or is a directory. Files and directories are
+/// created lazily by `create`, `append`, or `compact`. Read-only operations
+/// treat a missing `root/sessions` directory as an empty store where that makes
+/// sense.
 pub fn SessionStore::SessionStore(root : String) -> SessionStore {
   { root, }
 }
 
 ///|
-/// The root directory this store keeps its `sessions/` tree under.
+/// Return the root path passed to `SessionStore(root)`.
+///
+/// The returned string is not canonicalized. It may be relative or absolute,
+/// and no filesystem check is performed by this accessor.
 pub fn SessionStore::root(self : SessionStore) -> String {
   self.root
 }
@@ -485,8 +497,12 @@ async fn[T] with_existing_session_lock(
 }
 
 ///|
-/// Return whether a session directory exists. Invalid session ids raise rather
-/// than being silently treated as absent.
+/// Return whether the directory for `id` exists.
+///
+/// This checks only `root/sessions/<id>/`; it does not require `session.json` or
+/// `events.jsonl` to exist and does not validate that the session is loadable.
+/// Invalid ids raise before any filesystem probe, rather than being silently
+/// treated as absent.
 pub async fn SessionStore::exists(
   self : SessionStore,
   id : @agent_session.SessionId,
@@ -495,9 +511,12 @@ pub async fn SessionStore::exists(
 }
 
 ///|
-/// Absolute path to a session's append-only `events.jsonl` log. Exposed so a
-/// read-only consumer (such as the visualizer web server) can stream the raw
-/// log without the store reconstructing the on-disk layout for it.
+/// Return the absolute or relative path to a session's `events.jsonl` file.
+///
+/// The path is formed from the store root and `id`; the file is not opened and
+/// may not exist. Invalid ids raise. This helper exists for read-only tooling,
+/// such as the visualizer server, that wants to stream the raw append-only log
+/// without duplicating the store layout rules.
 pub fn SessionStore::event_log_file(
   self : SessionStore,
   id : @agent_session.SessionId,
@@ -506,9 +525,11 @@ pub fn SessionStore::event_log_file(
 }
 
 ///|
-/// Absolute path to a session's `session.json` header file. The file may not
-/// exist for a session whose first event has not yet been flushed; callers
-/// should check existence before reading.
+/// Return the absolute or relative path to a session's `session.json` header.
+///
+/// The path is formed from the store root and `id`; the file is not opened and
+/// may not exist. Invalid ids raise. The header is a small snapshot containing
+/// the id, system prompt, last durable sequence, and an event-log fingerprint.
 pub fn SessionStore::header_file(
   self : SessionStore,
   id : @agent_session.SessionId,
@@ -517,7 +538,12 @@ pub fn SessionStore::header_file(
 }
 
 ///|
-/// List known session ids under this store. Missing stores are treated as empty.
+/// List known session ids under `root/sessions`, sorted by directory name.
+///
+/// This is a directory listing only. It does not open headers, parse logs, or
+/// check loadability. A missing `root/sessions` directory returns an empty
+/// array. Other filesystem errors raise. Returned ids are raw directory names
+/// wrapped as `SessionId`.
 pub async fn SessionStore::list(
   self : SessionStore,
 ) -> Array[@agent_session.SessionId] {
@@ -531,8 +557,12 @@ pub async fn SessionStore::list(
 }
 
 ///|
-/// One row of a store listing: a session id plus the metadata a picker or
-/// `--session-list` shows beside it.
+/// Human-facing metadata for one session directory.
+///
+/// A listing row is intentionally lighter than a loaded session. It can be
+/// built without replaying the full event log, so it is suitable for pickers
+/// and `--session-list`. A row can also represent a damaged directory: in that
+/// case timestamp may be `None` and first prompt may be empty.
 pub struct SessionListing {
   priv id : @agent_session.SessionId
   priv last_active_unix_seconds : Int64?
@@ -540,14 +570,21 @@ pub struct SessionListing {
 } derive(Debug)
 
 ///|
-/// The listed session's id.
+/// Return the listed session id.
+///
+/// Pass this id to `load`, `exists`, `header_file`, or `event_log_file` when the
+/// caller chooses this row.
 pub fn SessionListing::id(self : SessionListing) -> @agent_session.SessionId {
   self.id
 }
 
 ///|
-/// When the session last saw activity (event-log mtime, unix seconds), or
-/// `None` for a directory whose session could not be loaded.
+/// Return the listing timestamp in unix seconds.
+///
+/// For normal sessions this is the modification time of `events.jsonl`; if the
+/// log is absent, listing falls back to `session.json`. `None` means neither
+/// file could be stat-ed. The value is for sorting/display and is not a durable
+/// session field.
 pub fn SessionListing::last_active_unix_seconds(
   self : SessionListing,
 ) -> Int64? {
@@ -555,9 +592,11 @@ pub fn SessionListing::last_active_unix_seconds(
 }
 
 ///|
-/// The session's first user prompt — the line that identifies a conversation
-/// to a human — or `""` for a session with no user event (or one that could
-/// not be loaded).
+/// Return the first user prompt found near the start of the event log.
+///
+/// The value is a display label, not a validated session field. It is `""` when
+/// no user event is found within the scan limit, when the log cannot be read,
+/// or when the session directory is damaged.
 pub fn SessionListing::first_prompt(self : SessionListing) -> String {
   self.first_prompt
 }
@@ -595,12 +634,13 @@ async fn first_prompt_in_log(path : String) -> String {
 }
 
 ///|
-/// List sessions with the metadata a picker shows, most recently active
-/// first. Rows reflect what is on disk without validating whole histories
-/// (see `first_prompt_in_log`); a directory whose files cannot even be
-/// stat-ed still appears — with no timestamp, ordered last — because a
-/// listing is where a user finds the husk they may want to clean up.
-/// Loadability is `latest()`'s gate, not the listing's.
+/// List sessions with picker-friendly metadata, most recently active first.
+///
+/// This scans each session directory for timestamps and a first prompt label,
+/// but it does not replay whole histories and does not require loadability.
+/// Damaged directories remain visible with `last_active_unix_seconds=None` and
+/// `first_prompt=""`, ordered after timestamped rows. Use `latest` when the
+/// caller needs the newest session that can actually be loaded.
 pub async fn SessionStore::listings(
   self : SessionStore,
 ) -> Array[SessionListing] {
@@ -695,9 +735,17 @@ pub async fn SessionStore::latest(
 }
 
 ///|
-/// Persist a complete session, replacing any previous header and event log for
-/// the same id. Use this for new sessions or deliberate rewrites; ordinary
-/// agent progress should use `append`.
+/// Persist a complete session snapshot, replacing prior contents for its id.
+///
+/// `create` ensures the session directory exists, takes an exclusive lock,
+/// rewrites `session.json` and `events.jsonl`, and leaves a header fingerprint
+/// that allows normal append-ahead recovery. Use it for new sessions, fixtures,
+/// import tools, or deliberate full rewrites. Do not use it for ordinary agent
+/// progress; `append` preserves stale-snapshot detection and writes only one
+/// new event.
+///
+/// The call raises on invalid ids, filesystem errors, JSON encoding/write
+/// failures, or lock failures.
 pub async fn SessionStore::create(
   self : SessionStore,
   session : @agent_session.Session,
@@ -741,8 +789,18 @@ pub async fn SessionStore::load(
 }
 
 ///|
-/// Append one typed item to the session's event log and update the header.
-/// Returns the new in-memory session value.
+/// Append one item to a durable session and return the new session value.
+///
+/// The input `session` is the caller's current in-memory snapshot. `append`
+/// ensures the directory exists, takes an exclusive lock, loads the durable
+/// snapshot, and verifies that the durable system prompt and event log match the
+/// supplied snapshot. If another writer has already changed the session, this
+/// raises a stale-snapshot error instead of forking the log.
+///
+/// On success the item is assigned the next sequence number and the current
+/// wall-clock timestamp, one JSONL line is appended to `events.jsonl`, the
+/// header is rewritten with the new last sequence and fingerprint, and the new
+/// immutable `Session` is returned. The input session is unchanged.
 pub async fn SessionStore::append(
   self : SessionStore,
   session : @agent_session.Session,
@@ -762,8 +820,17 @@ pub async fn SessionStore::append(
 }
 
 ///|
-/// Append a validated summary event to the durable session log. The raw covered
-/// events remain in `events.jsonl`; model-facing projection compacts them.
+/// Append a validated summary event to a durable session.
+///
+/// This has the same stale-snapshot and locking behavior as `append`, but the
+/// item is created by `Session::compact`. `content` must be non-blank,
+/// `from_sequence` must be positive, `to_sequence` must be at least
+/// `from_sequence`, and the range must already exist in the supplied session.
+///
+/// The covered raw events remain in `events.jsonl`; only
+/// `Session::chat_messages` applies the compaction by skipping covered earlier
+/// events and emitting the summary. On success, the returned session includes
+/// the new `Summary` event with a wall-clock timestamp.
 pub async fn SessionStore::compact(
   self : SessionStore,
   session : @agent_session.Session,

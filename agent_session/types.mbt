@@ -1,34 +1,55 @@
 ///|
-/// Stable identifier for a persisted OpenSeek conversation.
+/// Stable identifier for one OpenSeek conversation.
+///
+/// `SessionId` is stored in every `Session` and is also used by
+/// `agent_session/store` as the directory name under `root/sessions/<id>/`.
+/// This type deliberately stores the raw string without normalizing or
+/// validating it; store APIs validate filesystem safety before constructing
+/// paths. Use `generated` for ids created by OpenSeek itself.
 pub struct SessionId {
   priv value : String
 } derive(Debug)
 
 ///|
-/// Wrap a raw id string. The id doubles as the session's directory name in a
-/// `SessionStore`, so it should be filesystem-safe on every platform.
+/// Wrap a raw id string exactly as supplied.
+///
+/// This constructor does not reject empty strings, path separators, `"."`, or
+/// `".."`. That is intentional: `agent_session` is a pure typed model and does
+/// not know which storage backend will consume the id. Filesystem-backed
+/// callers should expect `SessionStore` methods to raise for ids that are not
+/// safe directory names.
 pub fn SessionId::SessionId(value : String) -> SessionId {
   { value, }
 }
 
 ///|
-/// The raw id string, e.g. for display or for building a store path.
+/// Return the raw id string.
+///
+/// The returned value is suitable for display, CLI flags, JSON, or passing back
+/// to another `SessionId` constructor. It is not escaped for paths or shells.
 pub fn SessionId::value(self : SessionId) -> String {
   self.value
 }
 
 ///|
-/// Session id for a run that did not pick one: a UTC wall-clock stamp,
-/// `<prefix>-YYYYMMDD-HHMMSS-mmm` (e.g. `cli-20260612-081500-042`), plus an
-/// optional `-<salt>` tail.
+/// Generate an id for a new run that did not receive an explicit id.
 ///
-/// The timestamp form keeps generated ids unique per launch, sorted
-/// chronologically in `--session-list`, and valid as a directory name on
-/// every platform. Launchers pass their own `prefix` ("tui", "cli") so a
-/// listing shows where each conversation came from. A launcher that can
-/// start several times in the same millisecond under one session root (the
-/// headless CLI under a parallel driver) supplies `salt` — entropy that
-/// keeps simultaneous runs from appending to each other's session.
+/// The normal format is:
+///
+/// ```text
+/// <prefix>-YYYYMMDD-HHMMSS-mmm[-<salt>]
+/// ```
+///
+/// `now_ms` is interpreted as unix milliseconds and rendered in UTC. The
+/// timestamp keeps generated ids sortable in ordinary string order and readable
+/// in `--session-list`. `prefix` lets launchers identify the source, such as
+/// `"cli"` or `"tui"`. `salt` is appended only when non-empty; use it when a
+/// caller can start multiple sessions in the same millisecond under one store
+/// root.
+///
+/// If `now_ms` cannot be represented as a date, the fallback is
+/// `<prefix>-<now_ms>[-<salt>]`. This preserves uniqueness and directory-name
+/// friendliness even with an absurd system clock.
 pub fn SessionId::generated(
   prefix~ : String,
   now_ms~ : Int64,
@@ -64,7 +85,11 @@ pub fn SessionId::generated(
 }
 
 ///|
-/// User-authored model input for one conversational turn.
+/// User-authored model input for one conversational event.
+///
+/// A `UserMessage` is durable data, not a UI transcript item. It records the
+/// exact text that should be replayed as a user-role message in
+/// `Session::chat_messages`.
 pub struct UserMessage {
   priv content : String
 } derive(Debug, ToJson, FromJson)
@@ -87,21 +112,26 @@ fn SessionToolCall::to_deepseek(self : SessionToolCall) -> @deepseek.ToolCall {
 }
 
 ///|
-/// Wrap one user prompt as it was submitted, verbatim.
+/// Wrap one user prompt exactly as supplied.
+///
+/// The constructor does not trim, normalize, or reject empty content. Empty
+/// messages are preserved because they may be meaningful to a caller or test.
 pub fn UserMessage::UserMessage(content : String) -> UserMessage {
   { content, }
 }
 
 ///|
-/// The prompt text exactly as the user submitted it.
+/// Return the prompt text exactly as stored.
 pub fn UserMessage::content(self : UserMessage) -> String {
   self.content
 }
 
 ///|
-/// Assistant output returned by the model. Native DeepSeek tool calls are kept
-/// in their typed protocol form so replay can preserve call ids and raw
-/// argument strings exactly.
+/// Assistant output returned by the model for one event.
+///
+/// This stores visible assistant text, requested tool calls, and optional
+/// reasoning content. Tool calls are durable because later `ToolResult` events
+/// must match their call ids during `Session::chat_messages` projection.
 pub struct AssistantMessage {
   priv content : String
   priv tool_calls : Array[SessionToolCall]
@@ -109,11 +139,13 @@ pub struct AssistantMessage {
 } derive(Debug, ToJson, FromJson)
 
 ///|
-/// Build an assistant message from the model's response parts: the visible
-/// `content`, any native `tool_calls` it requested, and the thinking-mode
-/// `reasoning_content` when the API returned one. Tool calls are converted to
-/// the session's own storage form so the event log has no wire-type
-/// dependency.
+/// Build an assistant event payload from model response parts.
+///
+/// `content` is the visible assistant text and may be empty when the model only
+/// requested tools. `tool_calls` are copied from DeepSeek protocol values into
+/// the session storage form so ids, names, and raw argument strings survive
+/// JSON round-tripping. `reasoning_content` is stored only when the provider
+/// returned it.
 pub fn AssistantMessage::AssistantMessage(
   content : String,
   tool_calls? : Array[@deepseek.ToolCall] = [],
@@ -129,15 +161,20 @@ pub fn AssistantMessage::AssistantMessage(
 }
 
 ///|
-/// The assistant's visible text — empty for turns that only requested tool
-/// calls.
+/// Return the assistant's visible text.
+///
+/// This may be empty for tool-only responses. Callers should use `tool_calls`
+/// to distinguish a useful tool request from an empty text-only response.
 pub fn AssistantMessage::content(self : AssistantMessage) -> String {
   self.content
 }
 
 ///|
-/// The native tool calls the model requested this turn, in protocol form
-/// (call id, name, raw argument string). Empty for a text-only response.
+/// Return the native tool calls requested by this assistant event.
+///
+/// Each call contains the durable call id, tool name, and raw argument string.
+/// The returned array is rebuilt from the stored representation, so mutating it
+/// does not mutate the `AssistantMessage`.
 pub fn AssistantMessage::tool_calls(
   self : AssistantMessage,
 ) -> Array[@deepseek.ToolCall] {
@@ -147,14 +184,20 @@ pub fn AssistantMessage::tool_calls(
 }
 
 ///|
-/// The thinking-mode reasoning the model returned alongside its answer, or
-/// `None` when the response carried no reasoning content.
+/// Return provider reasoning content, if any.
+///
+/// `None` means the provider did not return reasoning content. `Some("")`
+/// means it returned an explicitly empty reasoning field.
 pub fn AssistantMessage::reasoning_content(self : AssistantMessage) -> String? {
   self.reasoning_content
 }
 
 ///|
 /// Result returned by a local tool for one assistant tool call.
+///
+/// During model projection, a `ToolResult` is emitted only when its
+/// `tool_call_id` matches a pending assistant tool call. Unmatched results are
+/// ignored to keep replay protocol-valid.
 pub struct ToolResult {
   priv tool_call_id : String
   priv tool_name : String
@@ -163,10 +206,13 @@ pub struct ToolResult {
 } derive(Debug, ToJson, FromJson)
 
 ///|
-/// Record the outcome of one tool execution: which assistant call it answers
-/// (`tool_call_id`), which tool ran (`tool_name`), what it returned
-/// (`content`), and whether that content is an error report rather than a
-/// normal result.
+/// Record the outcome of one tool execution.
+///
+/// `tool_call_id` must be the id from the assistant tool call this result
+/// answers. `tool_name` is retained for diagnostics and listing/debug output.
+/// `content` is exactly what will be replayed to the model. `is_error`
+/// classifies the content for callers, but the DeepSeek projection currently
+/// sends the same text shape either way.
 pub fn ToolResult::ToolResult(
   tool_call_id~ : String,
   tool_name~ : String,
@@ -182,48 +228,56 @@ fn ToolResult::tool_call_id(self : ToolResult) -> String {
 }
 
 ///|
-/// Name of the tool that produced this result (e.g. `shell`, `edit`).
+/// Return the tool name that produced this result.
+///
+/// This is metadata; protocol matching uses `tool_call_id`, not `tool_name`.
 pub fn ToolResult::tool_name(self : ToolResult) -> String {
   self.tool_name
 }
 
 ///|
-/// The tool's output as it was fed back to the model — an error description
-/// when `is_error` is true.
+/// Return the tool output that will be replayed to the model.
+///
+/// When `is_error` is true, this string is the error report rather than a
+/// successful result.
 pub fn ToolResult::content(self : ToolResult) -> String {
   self.content
 }
 
 ///|
-/// Whether `content` reports a failure (bad arguments, command error) rather
-/// than a normal result.
+/// Return whether `content` reports a tool failure.
 pub fn ToolResult::is_error(self : ToolResult) -> Bool {
   self.is_error
 }
 
 ///|
-/// Out-of-band runtime update that was surfaced to the model, such as a
-/// `moon_check --watch` diagnostic batch.
+/// Out-of-band runtime update surfaced to the model.
+///
+/// Runtime notices are projected as user-role messages. They are intended for
+/// process state such as watcher diagnostics, steering messages, or other
+/// context that did not originate from the user's prompt text.
 pub struct RuntimeNotice {
   priv content : String
 } derive(Debug, ToJson, FromJson)
 
 ///|
-/// Wrap one runtime update exactly as it was injected into the conversation.
+/// Wrap one runtime update exactly as it should be replayed.
 pub fn RuntimeNotice::RuntimeNotice(content : String) -> RuntimeNotice {
   { content, }
 }
 
 ///|
-/// The update text the model saw, including any watcher metadata preamble.
+/// Return the runtime update text.
 pub fn RuntimeNotice::content(self : RuntimeNotice) -> String {
   self.content
 }
 
 ///|
-/// Durable compaction of older session events. The `event_range` names the
-/// inclusive source range summarized so future refactors can verify what was
-/// compacted without depending on string parsing.
+/// Durable compaction record for older session events.
+///
+/// A summary does not delete the covered raw events. It records that
+/// `from_sequence..to_sequence` can be replaced by `content` when projecting
+/// model context. The durable event log remains append-only.
 pub struct SessionSummary {
   priv content : String
   priv from_sequence : Int
@@ -231,9 +285,12 @@ pub struct SessionSummary {
 } derive(Debug, ToJson, FromJson)
 
 ///|
-/// Build a summary of the events `from_sequence..to_sequence` (inclusive).
-/// Prefer `Session::compact`, which validates the range against the session
-/// before appending.
+/// Build a summary for an inclusive event sequence range.
+///
+/// This constructor stores the values exactly as supplied and does not validate
+/// that the range is non-empty, positive, or present in a session. Prefer
+/// `Session::compact` when creating a summary event for a real session because
+/// it validates content and range before appending.
 pub fn SessionSummary::SessionSummary(
   content~ : String,
   from_sequence~ : Int,
@@ -243,30 +300,31 @@ pub fn SessionSummary::SessionSummary(
 }
 
 ///|
-/// The summary text that stands in for the compacted events in the
-/// model-facing projection.
+/// Return the summary text used in model-facing projection.
 pub fn SessionSummary::content(self : SessionSummary) -> String {
   self.content
 }
 
 ///|
-/// First event sequence (inclusive) this summary covers.
+/// Return the first covered event sequence, inclusive.
 pub fn SessionSummary::from_sequence(self : SessionSummary) -> Int {
   self.from_sequence
 }
 
 ///|
-/// Last event sequence (inclusive) this summary covers.
+/// Return the last covered event sequence, inclusive.
 pub fn SessionSummary::to_sequence(self : SessionSummary) -> Int {
   self.to_sequence
 }
 
 ///|
-/// How a turn ended, with the payload a consumer shows for it: the final
-/// answer for `Finished`, the reason for `Aborted` (the agent's own abort
-/// tool) and `Interrupted` (cancelled from outside), or the failure message
-/// for `Failed`. Every turn closes with exactly one of these, so a session
-/// whose last event is not a `Terminal` was cut off mid-turn.
+/// How an agent turn ended.
+///
+/// `Finished` carries the final assistant answer. `Aborted` carries the
+/// agent's own abort reason. `Interrupted` carries an external cancellation
+/// reason. `Failed` carries the failure message. In a complete turn, the last
+/// event is exactly one `Terminal`; if a session ends without one, replay is
+/// seeing a turn that was cut off mid-flight.
 pub(all) enum TurnTerminal {
   Finished(String)
   Aborted(String)
@@ -275,10 +333,14 @@ pub(all) enum TurnTerminal {
 } derive(Debug)
 
 ///|
-/// One kind of session event payload — the conversation's vocabulary: the
-/// user spoke (`User`), the model answered (`Assistant`), a tool returned
-/// (`Tool`), the runtime injected diagnostics (`Runtime`), older events were
-/// compacted (`Summary`), or the turn ended (`Terminal`).
+/// Payload vocabulary for one `SessionEvent`.
+///
+/// `User` and `Runtime` project as user-role model messages. `Assistant`
+/// projects as an assistant message and may open pending tool calls. `Tool`
+/// answers a pending assistant tool call. `Summary` is append-only compaction
+/// metadata that can replace older events during projection. `Terminal`
+/// records turn completion status and may project as a final assistant/status
+/// message.
 pub(all) enum SessionItem {
   User(UserMessage)
   Assistant(AssistantMessage)
@@ -289,8 +351,13 @@ pub(all) enum SessionItem {
 } derive(Debug)
 
 ///|
-/// One append-only session event. Sequence numbers are one-based and monotonic
-/// within a session.
+/// One append-only event in a session log.
+///
+/// Sequence numbers are one-based within a session and are assigned by
+/// `Session::append_event`. The durable store rejects non-contiguous sequences
+/// when loading from disk. The timestamp is unix milliseconds; in-memory
+/// appends default to `0`, while `SessionStore::append` stamps with the current
+/// wall clock.
 pub struct SessionEvent {
   priv sequence : Int
   // Wall-clock stamp (unix milliseconds) of when the event was appended; 0
@@ -312,29 +379,35 @@ fn SessionEvent::SessionEvent(
 }
 
 ///|
-/// This event's position in the session's append-only log (one-based).
+/// Return this event's one-based position in the session log.
 pub fn SessionEvent::sequence(self : SessionEvent) -> Int {
   self.sequence
 }
 
 ///|
-/// The event's payload.
+/// Return this event's payload.
 pub fn SessionEvent::item(self : SessionEvent) -> SessionItem {
   self.item
 }
 
 ///|
-/// When the event was appended (unix milliseconds), or 0 when it was created
-/// without a clock (purely in-memory sessions; the durable store always
-/// stamps).
+/// Return when the event was appended, as unix milliseconds.
+///
+/// A value of `0` means the event was created without a clock, which is the
+/// default for pure in-memory `Session::append` and `append_event` calls. The
+/// filesystem store always passes a real wall-clock timestamp.
 pub fn SessionEvent::unix_ms(self : SessionEvent) -> Int64 {
   self.ts.to_int64()
 }
 
 ///|
-/// Immutable model of an OpenSeek conversation. Mutating operations return a new
-/// `Session` backed by persistent event storage, so appending does not copy the
-/// whole event log.
+/// Immutable model of one OpenSeek conversation.
+///
+/// A `Session` owns the stable id, fixed system prompt, append-only event log,
+/// and cached `last_sequence`. Operations that add events return a new
+/// `Session`; the receiver is unchanged. Internally the event log is an
+/// immutable vector, so appending shares existing structure instead of copying
+/// the whole history.
 pub struct Session {
   priv id : SessionId
   priv system_prompt : String
@@ -343,9 +416,13 @@ pub struct Session {
 } derive(Debug)
 
 ///|
-/// Build a session from its identity, system prompt, and (when loading from
-/// storage) its existing event log. `last_sequence` is recovered from the
-/// highest sequence present, so appending continues where the log left off.
+/// Build a session from identity, system prompt, and an optional event log.
+///
+/// `id` is stored exactly as supplied. `system_prompt` becomes the first system
+/// message in `chat_messages` and is not changed by append operations. `events`
+/// is used as-is; this constructor does not check contiguity or sort events.
+/// `last_sequence` is recovered as the highest sequence number present, so the
+/// next append uses `last_sequence + 1`.
 pub fn Session::Session(
   id : SessionId,
   system_prompt~ : String,
@@ -361,25 +438,32 @@ pub fn Session::Session(
 }
 
 ///|
-/// The session's stable identifier.
+/// Return this session's stable identifier.
 pub fn Session::id(self : Session) -> SessionId {
   self.id
 }
 
 ///|
-/// The system prompt this conversation runs under, fixed at creation.
+/// Return the fixed system prompt for this conversation.
 pub fn Session::system_prompt(self : Session) -> String {
   self.system_prompt
 }
 
 ///|
-/// The full append-only event log, oldest first.
+/// Return the full append-only event log, oldest first.
+///
+/// The returned immutable vector is the durable source of truth. Model-facing
+/// compaction is applied by `chat_messages`, not by removing events here.
 pub fn Session::events(self : Session) -> @vector.Vector[SessionEvent] {
   self.events
 }
 
 ///|
-/// Sequence of the newest event, or `0` for a session with no events yet.
+/// Return the sequence number that will precede the next append.
+///
+/// This is the highest event sequence present, or `0` when the session has no
+/// events. It is the value used by `SessionStore` to detect stale in-memory
+/// snapshots before appending.
 pub fn Session::last_sequence(self : Session) -> Int {
   self.last_sequence
 }
@@ -390,9 +474,12 @@ fn Session::next_sequence(self : Session) -> Int {
 }
 
 ///|
-/// Append one item as the next event and return the new session value; the
-/// receiver is unchanged. Callers that also need the assigned event (e.g. to
-/// persist it) should use `append_event`.
+/// Append one item as the next event and return the new session value.
+///
+/// The receiver is unchanged. The new event gets sequence
+/// `self.last_sequence() + 1`. `unix_ms` defaults to `0`; pass a wall-clock
+/// value when constructing durable events yourself. Callers that also need the
+/// assigned `SessionEvent` should use `append_event`.
 pub fn Session::append(
   self : Session,
   item : SessionItem,
@@ -403,9 +490,11 @@ pub fn Session::append(
 }
 
 ///|
-/// Append one item and return both the new session value and the event that was
-/// appended. This lets durable stores write the new event without converting the
-/// whole immutable vector back to an array.
+/// Append one item and return both the new session and the assigned event.
+///
+/// The returned event is exactly the event pushed into the returned session.
+/// Durable stores use this to append one JSONL line without reserializing the
+/// whole immutable vector. The receiver is unchanged.
 pub fn Session::append_event(
   self : Session,
   item : SessionItem,
@@ -424,9 +513,13 @@ pub fn Session::append_event(
 }
 
 ///|
-/// Append a validated summary event that compacts a contiguous range of existing
-/// events in model-facing projection while preserving those events in the
-/// durable append-only log.
+/// Append a validated summary event for an existing event range.
+///
+/// `content` must not be blank after trimming. `from_sequence` must be
+/// positive. `to_sequence` must be at least `from_sequence` and must not exceed
+/// the current `last_sequence`. On success, this appends a `Summary` item as the
+/// next event and returns the new session. It does not remove or rewrite any
+/// covered raw events; `chat_messages` applies the compaction during projection.
 pub fn Session::compact(
   self : Session,
   content~ : String,

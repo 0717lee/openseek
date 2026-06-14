@@ -107,10 +107,25 @@ fn is_covered_by_later_summary(
 }
 
 ///|
-/// Project this durable session into the typed DeepSeek chat message array used
-/// by the model client. Summary events compact the model-facing context: any
-/// earlier event in a later summary's source range is skipped, while the raw
-/// event stays in the durable session log.
+/// Project the durable session log into DeepSeek chat messages.
+///
+/// The first returned message is always the session's system prompt. Remaining
+/// messages are derived from events in log order after applying repair and
+/// compaction rules:
+///
+/// - events covered by a later `Summary` are skipped;
+/// - `User`, `Runtime`, and `Summary` become user-role messages;
+/// - `Assistant` preserves visible content, tool calls, and reasoning content;
+/// - `Tool` is emitted only when it answers a pending assistant tool call;
+/// - pending tool calls are closed with synthetic tool-error messages before a
+///   non-tool event or at the end of projection;
+/// - `Terminal(Finished(text))` becomes a final assistant message when `text`
+///   is non-blank;
+/// - `Terminal(Aborted|Interrupted|Failed)` becomes an assistant status
+///   message, preserving any non-blank reason.
+///
+/// This method is a read-only projection. It never mutates the session and never
+/// removes durable events.
 pub fn Session::chat_messages(self : Session) -> Array[@deepseek.ChatMessage] {
   let messages : Array[@deepseek.ChatMessage] = [
     ChatMessage(System, content=self.system_prompt()),

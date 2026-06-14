@@ -44,11 +44,19 @@ fn int_field(
 }
 
 ///|
+/// Encode a `SessionId` as its raw string value.
+///
+/// No escaping beyond normal JSON string encoding is applied, and no filesystem
+/// validation is performed here.
 pub impl ToJson for SessionId with fn to_json(id : SessionId) -> Json {
   Json::string(id.value())
 }
 
 ///|
+/// Decode a `SessionId` from a JSON string.
+///
+/// Non-string JSON raises `JsonDecodeError`. The decoded id is not normalized or
+/// checked for store path safety.
 pub impl FromJson for SessionId with fn from_json(
   json : Json,
   path : @json.JsonPath,
@@ -80,11 +88,20 @@ fn terminal_message(terminal : TurnTerminal) -> String {
 }
 
 ///|
+/// Encode a terminal status as `{ "kind": ..., "message": ... }`.
+///
+/// `kind` is one of `finished`, `aborted`, `interrupted`, or `failed`. The
+/// variant payload is stored in `message`.
 pub impl ToJson for TurnTerminal with fn to_json(terminal : TurnTerminal) -> Json {
   { "kind": terminal_kind(terminal), "message": terminal_message(terminal) }
 }
 
 ///|
+/// Decode a terminal status from `{ "kind": ..., "message": ... }`.
+///
+/// Missing or non-string fields raise `JsonDecodeError`. Unknown `kind` values
+/// also raise, so persisted data cannot silently turn into the wrong terminal
+/// state.
 pub impl FromJson for TurnTerminal with fn from_json(
   json : Json,
   path : @json.JsonPath,
@@ -114,12 +131,22 @@ fn item_payload(item : SessionItem) -> (String, Json) {
 }
 
 ///|
+/// Encode a `SessionItem` as a tagged payload object.
+///
+/// The JSON shape is `{ "kind": <tag>, "payload": <variant-json> }`. Tags are
+/// stable storage strings such as `user`, `assistant`, `tool_result`,
+/// `runtime_notice`, `summary`, and `terminal`.
 pub impl ToJson for SessionItem with fn to_json(item : SessionItem) -> Json {
   let (kind, payload) = item_payload(item)
   { "kind": kind, "payload": payload }
 }
 
 ///|
+/// Decode a tagged `SessionItem`.
+///
+/// The decoder requires both `kind` and `payload`. Unknown tags raise
+/// `JsonDecodeError`; they are not ignored because the event log must replay to
+/// the exact durable event vocabulary understood by this package.
 pub impl FromJson for SessionItem with fn from_json(
   json : Json,
   path : @json.JsonPath,
@@ -149,6 +176,11 @@ pub impl FromJson for SessionItem with fn from_json(
 }
 
 ///|
+/// Encode a complete `Session` snapshot.
+///
+/// The JSON shape is versioned and contains `id`, `system_prompt`, and the
+/// complete `events` vector. `last_sequence` is intentionally not stored; it is
+/// recomputed by `Session::Session` from event sequence numbers when decoded.
 pub impl ToJson for Session with fn to_json(session : Session) -> Json {
   {
     "version": 1,
@@ -159,6 +191,12 @@ pub impl ToJson for Session with fn to_json(session : Session) -> Json {
 }
 
 ///|
+/// Decode a complete `Session` snapshot.
+///
+/// Only version `1` is accepted. Missing `events` is treated as an empty event
+/// log for compatibility with older or minimal snapshots. Event order is kept
+/// exactly as encoded; the constructor recomputes `last_sequence` from the
+/// highest event sequence but does not validate contiguity.
 pub impl FromJson for Session with fn from_json(
   json : Json,
   path : @json.JsonPath,
