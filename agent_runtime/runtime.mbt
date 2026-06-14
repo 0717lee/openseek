@@ -1,37 +1,65 @@
 ///|
-/// Capacity of an `AgentRuntime`'s event bus. The bus discards oldest on
-/// overflow: runtime updates are progress feedback for the model, so when a
-/// noisy watcher outpaces the agent loop, dropping stale updates beats
-/// blocking the tool that posts them.
+/// Maximum number of runtime events kept in one `AgentRuntime` event bus.
+///
+/// The event bus is intentionally lossy. `emit_event` uses nonblocking
+/// `try_put`; when the bus is full, the incoming event is ignored and the
+/// already-retained events stay queued. This is for progress/status feedback
+/// such as watcher output, where losing some updates is preferable to blocking
+/// the tool that posts them.
+///
+/// Steering input does not use this capacity; steers are queued separately in
+/// an unbounded queue.
 pub let default_agent_event_capacity : Int = 32
 
 ///|
-/// Open event type for agent-loop runtime updates. Concrete stateful tool
-/// packages extend this type with their own typed event constructors.
+/// Open event type for typed runtime updates emitted by tools.
+///
+/// `AgentEvent` is an `extenum` so tool packages can add their own event
+/// constructors without making `agent_runtime` depend on those tools. The
+/// runtime stores and drains values opaquely; interpretation belongs to the
+/// agent loop or a tool-specific renderer/query function.
+///
+/// Use this for background state that should be visible at agent step
+/// boundaries, such as `moon_check --watch` snapshots. Do not use it for
+/// mid-turn user steering text; use `queue_steer` for that lossless channel.
 pub(all) extenum AgentEvent {}
 
 ///|
-/// Per-agent-loop state shared between the main chat loop and side-effectful
-/// tools. It owns runtime updates and queued steering input, while
-/// `AgentTaskScope` owns structured background task lifetime for tools that
-/// need it.
+/// Per-agent-loop runtime state shared with side-effectful tools.
+///
+/// `AgentRuntime` owns three pieces of loop-scoped state:
+///
+/// - the raw `workspace_root` used by local tools to resolve relative paths;
+/// - a bounded, lossy event bus for typed background runtime updates;
+/// - an unbounded, lossless queue for mid-turn steering text.
+///
+/// It does not own background task lifetime. Tools that need to spawn bounded
+/// background work receive an `AgentTaskScope` alongside the runtime.
 pub struct AgentRuntime {
   /// Workspace root used by local tools when resolving relative paths.
   /// Defaults to "." so direct package users keep current-directory behavior.
   priv workspace_root : String
-  /// Bounded event bus (`DiscardOldest`, see `default_agent_event_capacity`)
-  /// that background tools post updates to; the main loop drains it between
-  /// steps to surface fresh tool output into the conversation.
+  /// Bounded event bus (see `default_agent_event_capacity`) that background
+  /// tools post updates to; the main loop drains it between steps to surface
+  /// retained tool output into the conversation.
   priv events : @aqueue.Queue[AgentEvent]
   /// Unbounded queue of mid-turn user input. Deliberately separate from the
-  /// lossy event bus: a noisy watcher may flood `events` and push old
-  /// updates out, but a user's steering text must never be the casualty.
+  /// lossy event bus: a noisy watcher may fill `events` and cause later
+  /// runtime updates to be ignored, but a user's steering text must never be
+  /// the casualty.
   priv steers : @aqueue.Queue[String]
 }
 
 ///|
-/// Create a runtime with an empty event bus of
-/// `default_agent_event_capacity` and an empty steering queue.
+/// Create a loop-scoped runtime.
+///
+/// `workspace_root` defaults to `"."` and is stored exactly as supplied; this
+/// constructor does not canonicalize it, check that it exists, or make it
+/// absolute. Local tools decide how to resolve paths against it.
+///
+/// The returned runtime starts with an empty lossy event bus using
+/// `default_agent_event_capacity` and an empty unbounded steering queue. The
+/// constructor does not perform I/O.
 pub fn AgentRuntime::AgentRuntime(
   workspace_root? : String = ".",
 ) -> AgentRuntime {
@@ -43,22 +71,32 @@ pub fn AgentRuntime::AgentRuntime(
 }
 
 ///|
-/// Workspace root used by local tools when resolving relative paths.
+/// Return the workspace root string stored in this runtime.
+///
+/// The value is exactly the constructor argument, or `"."` when omitted. It is
+/// not normalized or validated by `agent_runtime`.
 pub fn AgentRuntime::workspace_root(self : AgentRuntime) -> String {
   self.workspace_root
 }
 
 ///|
-/// Structured-concurrency scope for background work spawned by stateful tools.
-/// The type parameter is the return type of the enclosing `with_task_group`.
+/// Structured-concurrency handle exposed to stateful tools.
+///
+/// `AgentTaskScope[X]` wraps the `@async.TaskGroup[X]` owned by the enclosing
+/// agent loop. Tools use it to spawn background tasks that must terminate when
+/// the loop's task group exits. The type parameter `X` is the return type of
+/// that enclosing task group; it is carried through so MoonBit's task-group type
+/// remains precise.
 pub struct AgentTaskScope[X] {
   priv group : @async.TaskGroup[X]
 }
 
 ///|
-/// Wrap the agent loop's task group so stateful tools can spawn background
-/// work whose lifetime is bounded by the loop, without taking a dependency on
-/// the loop's own types.
+/// Wrap an existing task group for tool-facing use.
+///
+/// This constructor does not create a task group. Call it inside
+/// `@async.with_task_group` and pass the active group. The resulting scope is a
+/// thin capability object: whoever receives it can spawn work in that group.
 pub fn[X] AgentTaskScope::AgentTaskScope(
   group : @async.TaskGroup[X],
 ) -> AgentTaskScope[X] {
@@ -66,8 +104,12 @@ pub fn[X] AgentTaskScope::AgentTaskScope(
 }
 
 ///|
-/// The underlying task group, for spawning background work that must not
-/// outlive the agent loop.
+/// Return the wrapped task group.
+///
+/// Use this to call `spawn` or `spawn_bg` for background tool work. Tasks
+/// spawned through this group follow the normal `@async.with_task_group`
+/// lifetime and failure rules; `AgentTaskScope` does not add its own
+/// cancellation or error handling.
 pub fn[X] AgentTaskScope::group(
   self : AgentTaskScope[X],
 ) -> @async.TaskGroup[X] {
@@ -75,9 +117,16 @@ pub fn[X] AgentTaskScope::group(
 }
 
 ///|
-/// Post one runtime update for the agent loop to pick up on its next step.
-/// Never blocks and never fails: on overflow the oldest queued event is
-/// discarded, because a fresh update is worth more than a stale one.
+/// Post one typed runtime event to the lossy event bus.
+///
+/// The call has no raising effect and ignores queue errors. Under normal use the
+/// queue is open and `try_put` succeeds. If the bus already holds
+/// `default_agent_event_capacity` events, the incoming event is ignored and the
+/// existing queued events are retained.
+///
+/// Use this for background progress that can tolerate loss under pressure. Do
+/// not use it for user steering text or other data that must be delivered
+/// exactly once.
 pub fn AgentRuntime::emit_event(
   self : AgentRuntime,
   event : AgentEvent,
@@ -86,15 +135,23 @@ pub fn AgentRuntime::emit_event(
 }
 
 ///|
-/// Queue mid-turn user input for the loop's next step boundary. Lossless:
-/// the steering queue is unbounded and never closed, so unlike `emit_event`
-/// nothing can push a queued steer out.
+/// Queue one raw steering string for the agent loop.
+///
+/// Steering is the lossless companion channel to `emit_event`: it is stored in
+/// an unbounded queue, so event-bus overflow cannot discard it. The text is
+/// stored exactly as supplied; this method does not trim, deduplicate, or drop
+/// blank strings. The agent loop may apply its own filtering when it drains.
 pub fn AgentRuntime::queue_steer(self : AgentRuntime, text : String) -> Unit {
   ignore(self.steers.try_put(text) catch { _ => false })
 }
 
 ///|
-/// Take every queued steering input, oldest first, leaving the queue empty.
+/// Drain all queued steering strings, oldest first.
+///
+/// The returned array contains exactly the raw strings queued since the previous
+/// drain, unless another caller drained them first. The queue is empty after
+/// this call. This method does not trim or filter; consumers decide how to treat
+/// blank steering text.
 pub fn AgentRuntime::drain_steers(self : AgentRuntime) -> Array[String] {
   let texts : Array[String] = []
   while (self.steers.try_get() catch { _ => None }) is Some(text) {
@@ -104,9 +161,13 @@ pub fn AgentRuntime::drain_steers(self : AgentRuntime) -> Array[String] {
 }
 
 ///|
-/// Take every queued runtime update, oldest first, leaving the bus empty.
-/// The agent loop calls this between steps to fold fresh background tool
-/// output into the conversation.
+/// Drain all currently queued runtime events, oldest retained first.
+///
+/// The returned array contains the events still present in the lossy bus at the
+/// moment of the drain. Events emitted while the bus was already full may have
+/// been ignored before this call. The bus is empty after draining. The agent
+/// loop calls this at step boundaries to fold retained background tool output
+/// into the conversation.
 pub fn AgentRuntime::drain_events(self : AgentRuntime) -> Array[AgentEvent] {
   let events : Array[AgentEvent] = []
   while (self.events.try_get() catch { _ => None }) is Some(event) {
@@ -144,8 +205,8 @@ test "runtime stores an explicit workspace root" {
 test "steering input survives an event-bus flood" {
   let runtime = AgentRuntime()
   runtime.queue_steer("turn left")
-  // Flood the lossy event bus far past its capacity: updates may be
-  // discarded, but the steering queue is a separate lossless channel.
+  // Flood the lossy event bus far past its capacity: later runtime updates may
+  // be ignored, but the steering queue is a separate lossless channel.
   for index in 0..<(default_agent_event_capacity * 3) {
     runtime.emit_event(RuntimeTestEvent("noise \{index}"))
   }
