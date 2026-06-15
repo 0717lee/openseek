@@ -421,7 +421,7 @@ async fn prepare_workspace_root(
     }
     return @fs.realpath(dir)
   }
-  let parent = @path.Path(dir).dirname().to_string()
+  let parent = path_dirname(dir)
   let parent = if parent == "" { "." } else { parent }
   if !@fs.exists(parent) {
     fail("parent directory for --dir does not exist: \{parent}")
@@ -461,6 +461,30 @@ fn is_windows_drive_root(path : String) -> Bool {
   path.length() == 3 &&
   path[1] == ':' &&
   (path.has_suffix("/") || path.has_suffix("\\"))
+}
+
+///|
+fn path_dirname(path : String) -> String {
+  if is_path_root(path) {
+    return path
+  }
+  match last_path_separator(path) {
+    None => ""
+    Some(index) if index == 0 => path[:1].to_owned()
+    Some(index) if index == 2 && is_windows_drive_root(path[:3].to_owned()) =>
+      path[:3].to_owned()
+    Some(index) => path[:index].to_owned()
+  }
+}
+
+///|
+fn last_path_separator(path : String) -> Int? {
+  match (path.rev_find("/"), path.rev_find("\\")) {
+    (Some(a), Some(b)) => Some(if a > b { a } else { b })
+    (Some(a), None) => Some(a)
+    (None, Some(b)) => Some(b)
+    (None, None) => None
+  }
 }
 
 ///|
@@ -921,20 +945,33 @@ test "--dir trailing separator trim preserves roots" {
 }
 
 ///|
+test "path_dirname accepts slash and backslash separators" {
+  assert_eq(path_dirname("child"), "")
+  assert_eq(path_dirname("/child"), "/")
+  assert_eq(path_dirname("relative/child"), "relative")
+  assert_eq(path_dirname("C:\\work/missing/child"), "C:\\work/missing")
+  assert_eq(path_dirname("C:/work\\missing\\child"), "C:/work\\missing")
+  assert_eq(path_dirname("C:/child"), "C:/")
+  assert_eq(path_dirname("C:\\child"), "C:\\")
+}
+
+///|
 async test "--dir rejects missing parents instead of creating recursively" {
   let root = @fs.tmpdir(prefix="openseek-dir-missing-parent-")
-  let missing = @path.Path(root).join("missing").normalize().to_string()
-  let child = @path.Path(missing).join("child").normalize().to_string()
+  let missing = "\{root}/missing"
+  let child = "\{missing}/child"
   let parsed = cli_command().parse(argv=["--dir", child, "write", "MoonBit"], env={
     "DEEPSEEK": "test-key",
   })
   let _ = prepare_workspace_root(parsed) catch {
     error => {
-      assert_true(
-        "\{error}".contains(
-          "parent directory for --dir does not exist: \{missing}",
-        ),
-      )
+      let error_text = "\{error}".replace_all(old="\\", new="/")
+      let missing_text = missing.replace_all(old="\\", new="/")
+      guard error_text.contains(
+        "parent directory for --dir does not exist: \{missing_text}",
+      ) else {
+        fail(error_text)
+      }
       @fs.rmdir(root, recursive=true)
       return
     }
@@ -1146,18 +1183,9 @@ async test "configured system prompt advertises global skills" {
 async test "configured system prompt uses the selected workspace root" {
   let workspace = @fs.tmpdir(prefix="openseek-prompt-workspace-")
   let real_workspace = @fs.realpath(workspace)
-  let prompt_path = @path.Path(workspace)
-    .join("prompt.md")
-    .normalize()
-    .to_string()
-  let skills_dir = @path.Path(workspace)
-    .join(".openseek/skills")
-    .normalize()
-    .to_string()
-  let skill_path = @path.Path(workspace)
-    .join(".openseek/skills/release.md")
-    .normalize()
-    .to_string()
+  let prompt_path = "\{workspace}/prompt.md"
+  let skills_dir = "\{workspace}/.openseek/skills"
+  let skill_path = "\{workspace}/.openseek/skills/release.md"
   @fs.write_file(
     prompt_path,
     "workspace prompt\n",
@@ -1191,10 +1219,7 @@ async test "configured system prompt uses the selected workspace root" {
   )
   assert_true(prompt.has_prefix("workspace prompt"))
   assert_true(prompt.contains("Working directory: \{real_workspace}"))
-  let real_skill_path = @path.Path(real_workspace)
-    .join(".openseek/skills/release.md")
-    .normalize()
-    .to_string()
+  let real_skill_path = "\{real_workspace}/.openseek/skills/release.md"
   assert_true(
     prompt.contains(
       "release — Cut a workspace release. (file: \{real_skill_path})",

@@ -536,22 +536,17 @@ fn redact_json_diagnostic_path(
   match parsed {
     { "path": String(path), .. } => {
       guard parsed is Object(fields) else { return line }
+      let normalized_path = slash_path(path)
       for root in [canonical, project] {
-        let relative = @path.Path(path)
-          .relative(base=Path(root))
-          .normalize()
-          .to_string()
-        if relative != "" &&
-          relative != "." &&
-          !relative.has_prefix("..") &&
-          !@path.Path(relative).is_absolute() {
-          let stable_path = relative.replace_all(old="\\", new="/")
-          fields["path"] = Json::string("<fixture>/\{stable_path}")
-          return Json::object(fields).stringify()
+        match fixture_relative_path(normalized_path, slash_path(root)) {
+          Some(stable_path) if stable_path != "" && stable_path != "." => {
+            fields["path"] = Json::string("<fixture>/\{stable_path}")
+            return Json::object(fields).stringify()
+          }
+          _ => ()
         }
       }
-      let normalized_path = path.replace_all(old="\\", new="/")
-      let marker = "/\{@path.Path(project).basename()}/"
+      let marker = "/\{path_basename(project)}/"
       let pieces = normalized_path.split(marker).collect()
       if pieces.length() > 1 {
         let suffix = pieces[pieces.length() - 1]
@@ -564,4 +559,45 @@ fn redact_json_diagnostic_path(
     }
     _ => line
   }
+}
+
+///|
+fn slash_path(path : String) -> String {
+  path.replace_all(old="\\", new="/")
+}
+
+///|
+fn fixture_relative_path(path : String, root : String) -> String? {
+  let root = trim_trailing_slashes(root)
+  if root == "" {
+    return None
+  }
+  if path == root {
+    return Some("")
+  }
+  let prefix = root + "/"
+  if path.has_prefix(prefix) {
+    Some(path[prefix.length():].to_owned())
+  } else {
+    None
+  }
+}
+
+///|
+fn path_basename(path : String) -> String {
+  let normalized = trim_trailing_slashes(slash_path(path))
+  if normalized == "" {
+    return ""
+  }
+  let pieces = normalized.split("/").collect()
+  pieces[pieces.length() - 1].to_owned()
+}
+
+///|
+fn trim_trailing_slashes(path : String) -> String {
+  let mut result = path
+  while result.length() > 1 && result.has_suffix("/") {
+    result = result[:result.length() - 1].to_owned()
+  }
+  result
 }

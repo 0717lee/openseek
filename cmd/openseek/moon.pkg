@@ -17,7 +17,6 @@ import {
   "moonbitlang/core/encoding/utf8",
   "moonbitlang/core/env",
   "moonbitlang/core/string",
-  "moonbitlang/x/path",
   "moonbitlang/x/sys",
   "moonbitlang/x/time",
   "tonyfettes/xlog",

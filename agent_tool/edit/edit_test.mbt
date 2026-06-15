@@ -20,7 +20,7 @@ async fn run_edit_in_workspace(
 ///|
 async test "edit replaces a unique exact match" {
   let dir = @fs.tmpdir(prefix="openseek-edit-")
-  let path = @path.Path(dir).join("unique.txt").normalize().to_string()
+  let path = "\{dir}/unique.txt"
   @fs.write_file(path, "alpha\nbeta\ngamma\n", create_mode=CreateOrTruncate)
   let result = run_edit({
     "path": path,
@@ -38,7 +38,7 @@ async test "edit replaces a unique exact match" {
 ///|
 async test "edit resolves relative paths under the workspace root" {
   let dir = @fs.tmpdir(prefix="openseek-edit-workspace-")
-  let path = @path.Path(dir).join("note.txt").normalize().to_string()
+  let path = "\{dir}/note.txt"
   @fs.write_file(path, "before", create_mode=CreateOrTruncate)
   let result = run_edit_in_workspace(dir, {
     "path": "note.txt",
@@ -55,7 +55,7 @@ async test "edit resolves relative paths under the workspace root" {
 ///|
 async test "edit preserves surrounding multiline content" {
   let dir = @fs.tmpdir(prefix="openseek-edit-")
-  let path = @path.Path(dir).join("multiline.txt").normalize().to_string()
+  let path = "\{dir}/multiline.txt"
   @fs.write_file(
     path,
     "fn main {\n  println(\"old\")\n}\n",
@@ -100,7 +100,7 @@ async test "edit rejects non-object arguments" {
 ///|
 async test "edit rejects empty old_string" {
   let dir = @fs.tmpdir(prefix="openseek-edit-")
-  let path = @path.Path(dir).join("empty-old.txt").normalize().to_string()
+  let path = "\{dir}/empty-old.txt"
   @fs.write_file(path, "content", create_mode=CreateOrTruncate)
   let result = run_edit({
     "path": path,
@@ -119,7 +119,7 @@ async test "edit rejects empty old_string" {
 ///|
 async test "edit rejects identical replacement" {
   let dir = @fs.tmpdir(prefix="openseek-edit-")
-  let path = @path.Path(dir).join("identical.txt").normalize().to_string()
+  let path = "\{dir}/identical.txt"
   @fs.write_file(path, "content", create_mode=CreateOrTruncate)
   let result = run_edit({
     "path": path,
@@ -138,7 +138,7 @@ async test "edit rejects identical replacement" {
 ///|
 async test "edit rejects suspicious moon.pkg rewrite" {
   let dir = @fs.tmpdir(prefix="openseek-edit-manifest-")
-  let path = @path.Path(dir).join("moon.pkg").normalize().to_string()
+  let path = "\{dir}/moon.pkg"
   @fs.write_file(
     path,
     "warnings = \"+unnecessary_annotation\"",
@@ -160,7 +160,7 @@ async test "edit rejects suspicious moon.pkg rewrite" {
 ///|
 async test "edit rejects missing match" {
   let dir = @fs.tmpdir(prefix="openseek-edit-")
-  let path = @path.Path(dir).join("missing.txt").normalize().to_string()
+  let path = "\{dir}/missing.txt"
   @fs.write_file(path, "alpha", create_mode=CreateOrTruncate)
   let result = run_edit({
     "path": path,
@@ -176,7 +176,7 @@ async test "edit rejects missing match" {
 ///|
 async test "edit rejects ambiguous match without replace_all" {
   let dir = @fs.tmpdir(prefix="openseek-edit-")
-  let path = @path.Path(dir).join("ambiguous.txt").normalize().to_string()
+  let path = "\{dir}/ambiguous.txt"
   @fs.write_file(path, "alpha beta\nmiddle\nbeta", create_mode=CreateOrTruncate)
   let result = run_edit({
     "path": path,
@@ -197,7 +197,7 @@ async test "edit rejects ambiguous match without replace_all" {
 ///|
 async test "edit reports first ambiguous match lines only" {
   let dir = @fs.tmpdir(prefix="openseek-edit-")
-  let path = @path.Path(dir).join("many-matches.txt").normalize().to_string()
+  let path = "\{dir}/many-matches.txt"
   @fs.write_file(path, "x\nx\nx\nx\nx\nx\n", create_mode=CreateOrTruncate)
   let result = run_edit({ "path": path, "old_string": "x", "new_string": "y" })
   guard result is Respond(output) else { fail("expected Respond") }
@@ -214,7 +214,7 @@ async test "edit reports first ambiguous match lines only" {
 ///|
 async test "edit replace_all updates every match" {
   let dir = @fs.tmpdir(prefix="openseek-edit-")
-  let path = @path.Path(dir).join("replace-all.txt").normalize().to_string()
+  let path = "\{dir}/replace-all.txt"
   @fs.write_file(path, "alpha beta beta", create_mode=CreateOrTruncate)
   let result = run_edit({
     "path": path,
@@ -233,7 +233,7 @@ async test "edit replace_all updates every match" {
 ///|
 async test "edit rejects non-boolean replace_all" {
   let dir = @fs.tmpdir(prefix="openseek-edit-")
-  let path = @path.Path(dir).join("bad-replace-all.txt").normalize().to_string()
+  let path = "\{dir}/bad-replace-all.txt"
   @fs.write_file(path, "alpha", create_mode=CreateOrTruncate)
   let result = run_edit({
     "path": path,
@@ -253,7 +253,7 @@ async test "edit rejects non-boolean replace_all" {
 ///|
 async test "edit surfaces read errors" {
   let dir = @fs.tmpdir(prefix="openseek-edit-")
-  let path = @path.Path(dir).join("does-not-exist.txt").normalize().to_string()
+  let path = "\{dir}/does-not-exist.txt"
   let result = run_edit({ "path": path, "old_string": "x", "new_string": "y" })
   @fs.rmdir(dir, recursive=true)
   guard result is Respond(output) else { fail("expected Respond") }

@@ -1,7 +1,3 @@
-import {
-  "moonbitlang/x/path",
-}
-
 warnings = "+unnecessary_annotation"
 
 supported_targets = "+native"

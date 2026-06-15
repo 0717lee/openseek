@@ -8,8 +8,6 @@ pub fn resolve(workspace_root : String, path : String) -> String {
     workspace_root == "." ||
     is_absolute_path(path) {
     path
-  } else if use_native_path_join(workspace_root) {
-    @path.Path(workspace_root).join(Path(path)).normalize().to_string()
   } else {
     normalize_slash_path("\{workspace_root}/\{path}")
   }
@@ -17,7 +15,6 @@ pub fn resolve(workspace_root : String, path : String) -> String {
 
 ///|
 fn is_absolute_path(path : String) -> Bool {
-  @path.Path(path).is_absolute() ||
   path.has_prefix("/") ||
   path.has_prefix("\\") ||
   is_windows_drive_absolute(path)
@@ -26,11 +23,6 @@ fn is_absolute_path(path : String) -> Bool {
 ///|
 fn is_windows_drive_absolute(path : String) -> Bool {
   path.length() >= 3 && path[1] == ':' && (path[2] == '/' || path[2] == '\\')
-}
-
-///|
-fn use_native_path_join(workspace_root : String) -> Bool {
-  workspace_root.contains("\\") || is_windows_drive_absolute(workspace_root)
 }
 
 ///|
@@ -89,5 +81,15 @@ test "workspace path resolves relative paths under a non-default root" {
   assert_true(resolve_cwd("/tmp/work", None) is Some("/tmp/work"))
   assert_true(
     resolve_cwd("/tmp/work", Some("subdir")) is Some("/tmp/work/subdir"),
+  )
+}
+
+///|
+test "workspace path uses forward slashes with Windows roots" {
+  assert_eq(resolve("C:\\work", "src/../README.md"), "C:\\work/README.md")
+  assert_eq(resolve("C:\\work", "C:/other/file"), "C:/other/file")
+  assert_eq(
+    resolve("C:\\work", "\\server\\share\\file"),
+    "\\server\\share\\file",
   )
 }

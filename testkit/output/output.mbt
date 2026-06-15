@@ -36,18 +36,16 @@ fn redact_one_root(
   root : String,
   replacement : String,
 ) -> String {
-  let normalized = @path.Path(root).normalize().to_string()
   let mut output = content
   output = replace_root_spelling(output, root, replacement)
-  output = replace_root_spelling(output, normalized, replacement)
   output = replace_root_spelling(
     output,
-    normalized.replace_all(old="\\", new="/"),
+    root.replace_all(old="\\", new="/"),
     replacement,
   )
   replace_root_spelling(
     output,
-    normalized.replace_all(old="/", new="\\"),
+    root.replace_all(old="/", new="\\"),
     replacement,
   )
 }

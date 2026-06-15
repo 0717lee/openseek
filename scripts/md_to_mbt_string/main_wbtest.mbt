@@ -88,7 +88,7 @@ test "generated source preserves missing final newline" {
 ///|
 async test "output match detects unchanged generated file" {
   let dir = @fs.tmpdir(prefix="openseek-md-to-mbt-")
-  let path = @path.Path(dir).join("output-match.mbt").normalize().to_string()
+  let path = "\{dir}/output-match.mbt"
   assert_false(output_matches(path, "same"))
   @fs.write_file(path, "same", create_mode=CreateOrTruncate)
   assert_true(output_matches(path, "same"))

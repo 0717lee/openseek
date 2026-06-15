@@ -124,7 +124,7 @@ pub async fn FileSystem::mismatch_on_disk(
     error => return "invalid file system: \{error}"
   }
   for entry in entries {
-    let path = @path.Path(root).join(entry.path).normalize().to_string()
+    let path = "\{root}/\{entry.path}"
     let content = @fs.read_file(path).text() catch {
       error => return "missing expected file \{entry.path}: \{error}"
     }
@@ -141,11 +141,7 @@ pub async fn FileSystem::mismatch_on_disk(
 pub async fn write_text(root : String, path : String, content : String) -> Unit {
   validate_relative_path(path)
   ensure_parent_dir(root, path)
-  @fs.write_file(
-    @path.Path(root).join(path).normalize().to_string(),
-    content,
-    create_mode=CreateOrTruncate,
-  )
+  @fs.write_file("\{root}/\{path}", content, create_mode=CreateOrTruncate)
 }
 
 ///|
@@ -179,7 +175,7 @@ async fn ensure_parent_dir(root : String, path : String) -> Unit {
   for index in 0..<(parts.length() - 1) {
     dirs.push(parts[index])
   }
-  let dir = @path.Path(root).join(dirs.join("/")).normalize().to_string()
+  let dir = "\{root}/\{dirs.join("/")}"
   if @fs.exists(dir) {
     if @fs.kind(dir) != Directory {
       fail("parent path is not a directory: \{dir}")

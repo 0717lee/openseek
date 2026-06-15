@@ -1,7 +1,6 @@
 import {
   "moonbitlang/async/fs",
   "moonbitlang/core/json",
-  "moonbitlang/x/path",
 }
 
 import {
