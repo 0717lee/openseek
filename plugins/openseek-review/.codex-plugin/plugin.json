@@ -15,7 +15,6 @@
     "review"
   ],
   "skills": "./skills/",
-  "mcpServers": "./.mcp.json",
   "interface": {
     "displayName": "OpenSeek Review",
     "shortDescription": "Review MoonBit changes with OpenSeek and DeepSeek.",
