@@ -24,13 +24,16 @@ Markdown review report.
 - The target project should be a Git repository for diff-based review targets.
 
 If `openseek` is missing and the user wants you to install it, use the direct
-git install path:
+git install path, or run the bundled `scripts/install-openseek.sh` helper:
 
 ```bash
 moon install https://github.com/moonbitlang/openseek cmd/openseek
 ```
 
 Ask before installing dependencies or downloading from the network.
+Do not auto-install from MCP server startup; Codex starts MCP servers to discover
+tools, and plugin discovery should not download binaries or write to toolchain
+state without an explicit user request.
 
 ## Workflow
 

@@ -23,6 +23,9 @@ const DefaultMaxSteps : Int = 200
 const DefaultAddendumPath : String = "skills/openseek-review/references/review-addendum.md"
 
 ///|
+const InstallCommand : String = "moon install https://github.com/moonbitlang/openseek cmd/openseek"
+
+///|
 const MaxReturnedChars : Int = 60000
 
 ///|
@@ -246,7 +249,7 @@ async fn call_tool(params : Json?) -> Json raise {
     fail("tools/call params.arguments must be an object")
   }
   run_openseek(arguments) catch {
-    error => tool_result("OpenSeek review failed: \{error}", is_error=true)
+    error => tool_result(launch_failure_message(arguments, "\{error}"), is_error=true)
   }
 }
 
@@ -293,7 +296,9 @@ async fn run_openseek(arguments : Json) -> Json raise {
     }
   } else {
     tool_result(
-      "OpenSeek exited with status \{exit_code}.\n\n" + truncate_text(output_text),
+      "OpenSeek exited with status \{exit_code}.\n\n" +
+      truncate_text(output_text) +
+      maybe_install_guidance(arguments, output_text),
       is_error=true,
     )
   }
@@ -317,6 +322,45 @@ fn addendum_file(arguments : Json) -> String {
     Some(path) if !path.trim().is_empty() => path
     _ => default_addendum_file()
   }
+}
+
+///|
+fn launch_failure_message(arguments : Json, error : String) -> String {
+  (
+    $|OpenSeek review failed before the CLI could finish.
+    $|
+    $|\{install_guidance(arguments)}
+    $|
+    $|Raw error: \{error}
+  )
+}
+
+///|
+fn maybe_install_guidance(arguments : Json, output : String) -> String {
+  if output.contains("command not found") ||
+     output.contains("No such file or directory") ||
+     output.contains("not found") {
+    "\n\n" + install_guidance(arguments)
+  } else {
+    ""
+  }
+}
+
+///|
+fn install_guidance(arguments : Json) -> String {
+  let bin = openseek_bin(arguments)
+  let dotenvx = if bool_field(arguments, "use_dotenvx").unwrap_or(false) {
+    "\n- Ensure `dotenvx` is installed and available on PATH."
+  } else {
+    ""
+  }
+  (
+    $|Install OpenSeek or point the tool at an existing binary:
+    $|
+    $|- Install with: `\{InstallCommand}`
+    $|- Or pass `openseek_bin` / set `OPENSEEK_BIN` to the OpenSeek executable.
+    $|- Current executable setting: `\{bin}`\{dotenvx}
+  )
 }
 
 ///|
