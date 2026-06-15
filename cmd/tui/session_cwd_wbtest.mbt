@@ -16,7 +16,7 @@ async test "resume re-roots the conversation in the session's recorded directory
   let config = with_session_cwd(
     parse_config(parsed, cwd=project, session_root=root),
   )
-  assert_eq(config.cwd, recorded)
+  assert_eq(config.cwd, @fs.realpath(recorded))
   @fs.rmdir(root, recursive=true)
   @fs.rmdir(project, recursive=true)
 }
@@ -34,6 +34,30 @@ async test "a recorded directory outside the workspace is ignored" {
   )
   let parsed = cli_command().parse(
     argv=["--session", "outside", "--session-root", root],
+    env={ "DEEPSEEK": "test-key" },
+  )
+  let config = with_session_cwd(
+    parse_config(parsed, cwd=project, session_root=root),
+  )
+  assert_eq(config.cwd, project)
+  @fs.rmdir(root, recursive=true)
+  @fs.rmdir(project, recursive=true)
+  @fs.rmdir(elsewhere, recursive=true)
+}
+
+///|
+async test "a recorded directory that canonicalizes outside the workspace is ignored" {
+  let root = @fs.tmpdir(prefix="openseek-tui-session-cwd-escape-")
+  let project = @fs.tmpdir(prefix="openseek-tui-project-")
+  let elsewhere = project + "-elsewhere"
+  @fs.mkdir(elsewhere)
+  let escaped = "\{project}/../\{@path.Path(elsewhere).basename()}"
+  let store = @store.SessionStore(root)
+  store.create(
+    Session(SessionId("escaped"), system_prompt="system", cwd=escaped),
+  )
+  let parsed = cli_command().parse(
+    argv=["--session", "escaped", "--session-root", root],
     env={ "DEEPSEEK": "test-key" },
   )
   let config = with_session_cwd(

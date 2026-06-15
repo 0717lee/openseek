@@ -167,8 +167,24 @@ async fn with_session_cwd(config : AppConfig) -> AppConfig {
     error if @async.is_being_cancelled() => raise error
     _ => return config
   }
-  if stored is Some(cwd) && within_directory(cwd, config.cwd) && @fs.exists(cwd) {
-    { ..config, cwd, }
+  if stored is Some(cwd) {
+    let workspace = @fs.realpath(config.cwd) catch {
+      error if @async.is_being_cancelled() => raise error
+      _ => return config
+    }
+    let cwd = @fs.realpath(cwd) catch {
+      error if @async.is_being_cancelled() => raise error
+      _ => return config
+    }
+    let kind = @fs.kind(cwd) catch {
+      error if @async.is_being_cancelled() => raise error
+      _ => return config
+    }
+    if within_directory(cwd, workspace) && kind == Directory {
+      { ..config, cwd, }
+    } else {
+      config
+    }
   } else {
     config
   }
