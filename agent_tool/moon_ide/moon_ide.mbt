@@ -481,21 +481,20 @@ async test "moon_ide outlines a virtual filesystem multi-file package" {
 ///|
 async fn copy_fixture_project(name : String) -> String {
   let target = @fs.tmpdir(prefix="openseek-moon-ide-")
-  let target_path : @path.Path = target
   copy_fixture_file(
     name,
     "moon.mod.fixture",
-    target_path.join("moon.mod").normalize().to_string(),
+    @path.Path(target).join("moon.mod").normalize().to_string(),
   )
   copy_fixture_file(
     name,
     "moon.pkg.fixture",
-    target_path.join("moon.pkg").normalize().to_string(),
+    @path.Path(target).join("moon.pkg").normalize().to_string(),
   )
   copy_fixture_file(
     name,
     "lib.mbt.fixture",
-    target_path.join("lib.mbt").normalize().to_string(),
+    @path.Path(target).join("lib.mbt").normalize().to_string(),
   )
   target
 }

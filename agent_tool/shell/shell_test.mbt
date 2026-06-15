@@ -75,8 +75,7 @@ async test "shell follows final successful PowerShell command on Windows" {
 async test "shell honors cwd when non-empty" {
   let dir = @fs.tmpdir(prefix="openseek-shell-cwd-")
   let result = run_shell({ "cmd": "echo cwd-ok > marker.txt", "cwd": dir })
-  let dir_path : @path.Path = dir
-  let marker_path = dir_path.join("marker.txt").normalize().to_string()
+  let marker_path = @path.Path(dir).join("marker.txt").normalize().to_string()
   let marker = @fs.read_file(marker_path).text() catch { _ => "" }
   @fs.rmdir(dir, recursive=true)
   guard result is Respond(output) else { fail("expected Respond") }
@@ -422,8 +421,7 @@ async test "shell rejects non-object arguments" {
 ///|
 async test "shell rejects non-existent cwd" {
   let dir = @fs.tmpdir(prefix="openseek-shell-cwd-")
-  let dir_path : @path.Path = dir
-  let path = dir_path.join("does-not-exist").normalize().to_string()
+  let path = @path.Path(dir).join("does-not-exist").normalize().to_string()
   let result = run_shell({ "cmd": "echo hello", "cwd": path })
   @fs.rmdir(dir, recursive=true)
   guard result is Respond(output) else { fail("expected Respond") }
@@ -434,8 +432,7 @@ async test "shell rejects non-existent cwd" {
 ///|
 async test "shell rejects cwd that is a file not a directory" {
   let dir = @fs.tmpdir(prefix="openseek-shell-cwd-")
-  let dir_path : @path.Path = dir
-  let path = dir_path.join("file.txt").normalize().to_string()
+  let path = @path.Path(dir).join("file.txt").normalize().to_string()
   @fs.write_file(path, "not a directory", create_mode=CreateOrTruncate)
   let result = run_shell({ "cmd": "echo hello", "cwd": path })
   @fs.rmdir(dir, recursive=true)

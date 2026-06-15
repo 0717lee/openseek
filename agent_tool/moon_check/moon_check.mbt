@@ -537,25 +537,21 @@ fn redact_json_diagnostic_path(
     { "path": String(path), .. } => {
       guard parsed is Object(fields) else { return line }
       for root in [canonical, project] {
-        let file_path : @path.Path = path
-        let root_path : @path.Path = root
-        let relative = file_path
-          .relative(base=root_path)
+        let relative = @path.Path(path)
+          .relative(base=Path(root))
           .normalize()
           .to_string()
-        let relative_path : @path.Path = relative
         if relative != "" &&
           relative != "." &&
           !relative.has_prefix("..") &&
-          !relative_path.is_absolute() {
+          !@path.Path(relative).is_absolute() {
           let stable_path = relative.replace_all(old="\\", new="/")
           fields["path"] = Json::string("<fixture>/\{stable_path}")
           return Json::object(fields).stringify()
         }
       }
-      let project_path : @path.Path = project
       let normalized_path = path.replace_all(old="\\", new="/")
-      let marker = "/\{project_path.basename()}/"
+      let marker = "/\{@path.Path(project).basename()}/"
       let pieces = normalized_path.split(marker).collect()
       if pieces.length() > 1 {
         let suffix = pieces[pieces.length() - 1]

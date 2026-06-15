@@ -153,8 +153,7 @@ async fn collect_moon_output(
       }
     Some(input) => {
       let dir = @fs.tmpdir(prefix="openseek-moon-cmd-stdin-")
-      let dir_path : @path.Path = dir
-      let input_path = dir_path.join("stdin").normalize().to_string()
+      let input_path = @path.Path(dir).join("stdin").normalize().to_string()
       @fs.write_file(input_path, input, create_mode=CreateOrTruncate)
       let process_input = @process.redirect_from_file(input_path)
       let result = match cwd {
@@ -476,9 +475,8 @@ async test "moon_cmd snapshots native fixture test output" {
 async test "moon_cmd reports failing fixture tests as tool errors" {
   let project = copy_fixture_project("native_cli_project")
   let canonical = @fs.realpath(project)
-  let project_path : @path.Path = project
   @fs.write_file(
-    project_path.join("cmd/main/main_wbtest.mbt").normalize().to_string(),
+    @path.Path(project).join("cmd/main/main_wbtest.mbt").normalize().to_string(),
     (
       #|///|
       #|test "intentional failure" {
@@ -585,30 +583,29 @@ async test "moon_cmd runs a virtual filesystem native CLI fixture" {
 ///|
 async fn copy_fixture_project(name : String) -> String {
   let target = @fs.tmpdir(prefix="openseek-moon-cmd-")
-  let target_path : @path.Path = target
   @fs.mkdir(
-    target_path.join("cmd/main").normalize().to_string(),
+    @path.Path(target).join("cmd/main").normalize().to_string(),
     recursive=true,
   )
   copy_fixture_file(
     name,
     "moon.mod.fixture",
-    target_path.join("moon.mod").normalize().to_string(),
+    @path.Path(target).join("moon.mod").normalize().to_string(),
   )
   copy_fixture_file(
     name,
     "main.mbt.fixture",
-    target_path.join("cmd/main/main.mbt").normalize().to_string(),
+    @path.Path(target).join("cmd/main/main.mbt").normalize().to_string(),
   )
   copy_fixture_file(
     name,
     "main_wbtest.mbt.fixture",
-    target_path.join("cmd/main/main_wbtest.mbt").normalize().to_string(),
+    @path.Path(target).join("cmd/main/main_wbtest.mbt").normalize().to_string(),
   )
   copy_fixture_file(
     name,
     "moon.pkg.fixture",
-    target_path.join("cmd/main/moon.pkg").normalize().to_string(),
+    @path.Path(target).join("cmd/main/moon.pkg").normalize().to_string(),
   )
   target
 }

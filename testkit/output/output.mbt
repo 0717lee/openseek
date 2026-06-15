@@ -36,8 +36,7 @@ fn redact_one_root(
   root : String,
   replacement : String,
 ) -> String {
-  let root_path : @path.Path = root
-  let normalized = root_path.normalize().to_string()
+  let normalized = @path.Path(root).normalize().to_string()
   let mut output = content
   output = replace_root_spelling(output, root, replacement)
   output = replace_root_spelling(output, normalized, replacement)

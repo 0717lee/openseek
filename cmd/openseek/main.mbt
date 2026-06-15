@@ -923,10 +923,8 @@ test "--dir trailing separator trim preserves roots" {
 ///|
 async test "--dir rejects missing parents instead of creating recursively" {
   let root = @fs.tmpdir(prefix="openseek-dir-missing-parent-")
-  let root_path : @path.Path = root
-  let missing = root_path.join("missing").normalize().to_string()
-  let missing_path : @path.Path = missing
-  let child = missing_path.join("child").normalize().to_string()
+  let missing = @path.Path(root).join("missing").normalize().to_string()
+  let child = @path.Path(missing).join("child").normalize().to_string()
   let parsed = cli_command().parse(argv=["--dir", child, "write", "MoonBit"], env={
     "DEEPSEEK": "test-key",
   })
@@ -1148,13 +1146,15 @@ async test "configured system prompt advertises global skills" {
 async test "configured system prompt uses the selected workspace root" {
   let workspace = @fs.tmpdir(prefix="openseek-prompt-workspace-")
   let real_workspace = @fs.realpath(workspace)
-  let workspace_path : @path.Path = workspace
-  let prompt_path = workspace_path.join("prompt.md").normalize().to_string()
-  let skills_dir = workspace_path
+  let prompt_path = @path.Path(workspace)
+    .join("prompt.md")
+    .normalize()
+    .to_string()
+  let skills_dir = @path.Path(workspace)
     .join(".openseek/skills")
     .normalize()
     .to_string()
-  let skill_path = workspace_path
+  let skill_path = @path.Path(workspace)
     .join(".openseek/skills/release.md")
     .normalize()
     .to_string()
@@ -1191,8 +1191,7 @@ async test "configured system prompt uses the selected workspace root" {
   )
   assert_true(prompt.has_prefix("workspace prompt"))
   assert_true(prompt.contains("Working directory: \{real_workspace}"))
-  let real_workspace_path : @path.Path = real_workspace
-  let real_skill_path = real_workspace_path
+  let real_skill_path = @path.Path(real_workspace)
     .join(".openseek/skills/release.md")
     .normalize()
     .to_string()
