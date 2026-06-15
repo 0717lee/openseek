@@ -100,7 +100,7 @@ test "read tool advertises the expected schema" {
 ///|
 async test "read tool reads a workspace note through the registry" {
   let dir = @fs.tmpdir(prefix="openseek-read-readme-")
-  let path = dir + "/task.txt"
+  let path = @path.Path(dir).join("task.txt").normalize().to_string()
   let content = "Task: summarize test failures\nStatus: investigating\n"
   @fs.write_file(path, content, create_mode=CreateOrTruncate)
 
@@ -121,7 +121,7 @@ async test "read tool reads a workspace note through the registry" {
 ///|
 async test "read tool supports focused range reads" {
   let dir = @fs.tmpdir(prefix="openseek-read-readme-")
-  let path = dir + "/range.txt"
+  let path = @path.Path(dir).join("range.txt").normalize().to_string()
   @fs.write_file(
     path,
     "alpha\nbeta\ngamma\ndelta",

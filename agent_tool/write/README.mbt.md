@@ -84,7 +84,7 @@ test "write tool advertises the expected schema" {
 ///|
 async test "write tool updates an implementation note through the registry" {
   let dir = @fs.tmpdir(prefix="openseek-write-readme-")
-  let path = dir + "/note.txt"
+  let path = @path.Path(dir).join("note.txt").normalize().to_string()
   @fs.write_file(path, "old note", create_mode=CreateOrTruncate)
 
   let tools = @agent_tool.Tools([@write.definition()])

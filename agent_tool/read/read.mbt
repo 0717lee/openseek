@@ -261,7 +261,7 @@ fn read_header(
 ///|
 async test "read returns file contents" {
   let dir = @fs.tmpdir(prefix="openseek-read-")
-  let path = dir + "/read-test.txt"
+  let path = @path.Path(dir).join("read-test.txt").normalize().to_string()
   @fs.write_file(path, "hello read", create_mode=CreateOrTruncate)
   let result = execute({ "path": path })
   @fs.rmdir(dir, recursive=true)
@@ -273,11 +273,8 @@ async test "read returns file contents" {
 ///|
 async test "read resolves relative paths under the workspace root" {
   let dir = @fs.tmpdir(prefix="openseek-read-workspace-")
-  @fs.write_file(
-    "\{dir}/note.txt",
-    "workspace read",
-    create_mode=CreateOrTruncate,
-  )
+  let path = @path.Path(dir).join("note.txt").normalize().to_string()
+  @fs.write_file(path, "workspace read", create_mode=CreateOrTruncate)
   let tool = definition(workspace_root=dir)
   let result = match tool.execute {
     Async(execute) => execute({ "path": "note.txt" })
@@ -292,7 +289,7 @@ async test "read resolves relative paths under the workspace root" {
 ///|
 async test "read returns empty string for an empty file" {
   let dir = @fs.tmpdir(prefix="openseek-read-")
-  let path = dir + "/empty.txt"
+  let path = @path.Path(dir).join("empty.txt").normalize().to_string()
   @fs.write_file(path, "", create_mode=CreateOrTruncate)
   let result = execute({ "path": path })
   @fs.rmdir(dir, recursive=true)
@@ -304,7 +301,7 @@ async test "read returns empty string for an empty file" {
 ///|
 async test "read preserves multiline content" {
   let dir = @fs.tmpdir(prefix="openseek-read-")
-  let path = dir + "/multiline.txt"
+  let path = @path.Path(dir).join("multiline.txt").normalize().to_string()
   let content = "line one\nline two\nline three\n"
   @fs.write_file(path, content, create_mode=CreateOrTruncate)
   let result = execute({ "path": path })
@@ -317,7 +314,7 @@ async test "read preserves multiline content" {
 ///|
 async test "read returns a requested line range with metadata" {
   let dir = @fs.tmpdir(prefix="openseek-read-")
-  let path = dir + "/range.txt"
+  let path = @path.Path(dir).join("range.txt").normalize().to_string()
   let content = "line one\nline two\nline three\nline four"
   @fs.write_file(path, content, create_mode=CreateOrTruncate)
   let result = execute({ "path": path, "start_line": 2, "max_lines": 2 })
@@ -347,7 +344,7 @@ async test "read returns a requested line range with metadata" {
 ///|
 async test "read caps oversized output and marks it as an error" {
   let dir = @fs.tmpdir(prefix="openseek-read-")
-  let path = dir + "/capped.txt"
+  let path = @path.Path(dir).join("capped.txt").normalize().to_string()
   @fs.write_file(path, "abcdef", create_mode=CreateOrTruncate)
   let result = execute({ "path": path, "max_output_chars": 3 })
   @fs.rmdir(dir, recursive=true)
@@ -391,8 +388,8 @@ test "read parses and caps optional limits" {
 ///|
 async test "read returns several files as headered blocks" {
   let dir = @fs.tmpdir(prefix="openseek-read-multi-")
-  let a = dir + "/a.txt"
-  let b = dir + "/b.txt"
+  let a = @path.Path(dir).join("a.txt").normalize().to_string()
+  let b = @path.Path(dir).join("b.txt").normalize().to_string()
   @fs.write_file(a, "alpha", create_mode=CreateOrTruncate)
   @fs.write_file(b, "beta", create_mode=CreateOrTruncate)
   let result = execute({ "paths": [a, b] })
@@ -408,8 +405,8 @@ async test "read returns several files as headered blocks" {
 ///|
 async test "a missing file reports inline while the others return" {
   let dir = @fs.tmpdir(prefix="openseek-read-multi-")
-  let a = dir + "/ok.txt"
-  let missing = dir + "/missing.txt"
+  let a = @path.Path(dir).join("ok.txt").normalize().to_string()
+  let missing = @path.Path(dir).join("missing.txt").normalize().to_string()
   @fs.write_file(a, "still here", create_mode=CreateOrTruncate)
   let result = execute({ "paths": [a, missing] })
   @fs.rmdir(dir, recursive=true)
@@ -424,7 +421,9 @@ async test "a missing file reports inline while the others return" {
 ///|
 async test "every file missing is a tool error" {
   let dir = @fs.tmpdir(prefix="openseek-read-none-")
-  let result = execute({ "paths": [dir + "/none-1", dir + "/none-2"] })
+  let none1 = @path.Path(dir).join("none-1").normalize().to_string()
+  let none2 = @path.Path(dir).join("none-2").normalize().to_string()
+  let result = execute({ "paths": [none1, none2] })
   @fs.rmdir(dir, recursive=true)
   guard result is Respond(output) else { fail("expected Respond") }
   assert_true(output.is_error)
@@ -433,8 +432,8 @@ async test "every file missing is a tool error" {
 ///|
 async test "the output budget is shared and exhaustion is reported" {
   let dir = @fs.tmpdir(prefix="openseek-read-budget-")
-  let a = dir + "/a.txt"
-  let b = dir + "/b.txt"
+  let a = @path.Path(dir).join("a.txt").normalize().to_string()
+  let b = @path.Path(dir).join("b.txt").normalize().to_string()
   @fs.write_file(a, "0123456789", create_mode=CreateOrTruncate)
   @fs.write_file(b, "abcdefghij", create_mode=CreateOrTruncate)
   let result = execute({ "paths": [a, b], "max_output_chars": 10 })
@@ -455,7 +454,9 @@ async test "headers and error blocks count against the budget" {
   let dir = @fs.tmpdir(prefix="openseek-read-flood-")
   let paths : Array[Json] = []
   for i in 0..<40 {
-    paths.push(Json::string(dir + "/missing-\{i}"))
+    paths.push(
+      Json::string(@path.Path(dir).join("missing-\{i}").normalize().to_string()),
+    )
   }
   let result = execute({ "paths": Json::array(paths), "max_output_chars": 300 })
   @fs.rmdir(dir, recursive=true)
@@ -495,7 +496,7 @@ async test "read rejects an empty paths array" {
 ///|
 async test "read surfaces filesystem errors" {
   let dir = @fs.tmpdir(prefix="openseek-read-")
-  let path = dir + "/does-not-exist"
+  let path = @path.Path(dir).join("does-not-exist").normalize().to_string()
   let result = execute({ "path": path })
   @fs.rmdir(dir, recursive=true)
   guard result is Respond(output) else { fail("expected Respond") }
@@ -534,8 +535,7 @@ async test "read rejects non-object arguments" {
 ///|
 async test "a huge max_lines returns the remaining lines without overflow" {
   let dir = @fs.tmpdir(prefix="openseek-read-huge-max-")
-  let dir_path : @path.Path = dir
-  let path = dir_path.join("input.txt").normalize().to_string()
+  let path = @path.Path(dir).join("input.txt").normalize().to_string()
   @fs.write_file(path, "a\nb\nc", create_mode=CreateOrTruncate)
   let result = execute({
     "path": path,

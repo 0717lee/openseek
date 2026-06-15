@@ -498,6 +498,8 @@ fn stable_moon_check_output(
     } else if line.contains(
         "Run failed with error error=failed when checking project",
       ) {
+      // The watcher logs this with timestamp/source metadata; keep only the
+      // stable failure signal for the snapshot.
       stable_lines.push(
         "ERROR Run failed with error error=failed when checking project",
       )

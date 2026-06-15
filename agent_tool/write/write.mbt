@@ -133,8 +133,7 @@ fn is_moon_pkg_path(path : String) -> Bool {
 ///|
 async test "write creates a file with the given content" {
   let dir = @fs.tmpdir(prefix="openseek-write-")
-  let dir_path : @path.Path = dir
-  let path = dir_path.join("write-test.txt").normalize().to_string()
+  let path = @path.Path(dir).join("write-test.txt").normalize().to_string()
   let result = execute({ "path": path, "content": "hello write" })
   guard result is Respond(output) else { fail("expected Respond") }
   assert_eq(output.content, "ok: wrote 11 chars to \{path}")
@@ -147,14 +146,13 @@ async test "write creates a file with the given content" {
 ///|
 async test "write resolves relative paths under the workspace root" {
   let dir = @fs.tmpdir(prefix="openseek-write-workspace-")
-  let dir_path : @path.Path = dir
   let tool = definition(workspace_root=dir)
   let result = match tool.execute {
     Async(execute) => execute({ "path": "note.txt", "content": "workspace" })
     Sync(_) => fail("write tool should be async")
   }
   guard result is Respond(output) else { fail("expected Respond") }
-  let path = dir_path.join("note.txt").normalize().to_string()
+  let path = @path.Path(dir).join("note.txt").normalize().to_string()
   assert_false(output.is_error)
   assert_eq(output.content, "ok: wrote 9 chars to \{path}")
   assert_eq(@fs.read_file(path).text(), "workspace")
@@ -184,7 +182,7 @@ async test "write manifest guards accept Windows path separators" {
 ///|
 async test "write truncates existing files" {
   let dir = @fs.tmpdir(prefix="openseek-write-")
-  let path = dir + "/truncate.txt"
+  let path = @path.Path(dir).join("truncate.txt").normalize().to_string()
   @fs.write_file(path, "long original content", create_mode=CreateOrTruncate)
   let result = execute({ "path": path, "content": "short" })
   guard result is Respond(output) else { fail("expected Respond") }
@@ -198,7 +196,7 @@ async test "write truncates existing files" {
 ///|
 async test "write accepts empty content" {
   let dir = @fs.tmpdir(prefix="openseek-write-")
-  let path = dir + "/empty.txt"
+  let path = @path.Path(dir).join("empty.txt").normalize().to_string()
   @fs.write_file(path, "previous", create_mode=CreateOrTruncate)
   let result = execute({ "path": path, "content": "" })
   guard result is Respond(output) else { fail("expected Respond") }
@@ -212,7 +210,7 @@ async test "write accepts empty content" {
 ///|
 async test "write rejects new legacy moon.mod.json" {
   let dir = @fs.tmpdir(prefix="openseek-write-manifest-")
-  let path = "\{dir}/moon.mod.json"
+  let path = @path.Path(dir).join("moon.mod.json").normalize().to_string()
   let result = execute({ "path": path, "content": "{\"name\":\"legacy\"}" })
   @fs.rmdir(dir, recursive=true)
   guard result is Respond(output) else { fail("expected Respond") }
@@ -223,7 +221,7 @@ async test "write rejects new legacy moon.mod.json" {
 ///|
 async test "write rejects json style moon.mod" {
   let dir = @fs.tmpdir(prefix="openseek-write-manifest-")
-  let path = "\{dir}/moon.mod"
+  let path = @path.Path(dir).join("moon.mod").normalize().to_string()
   let result = execute({ "path": path, "content": "{\"name\":\"bad\"}" })
   @fs.rmdir(dir, recursive=true)
   guard result is Respond(output) else { fail("expected Respond") }
@@ -234,7 +232,7 @@ async test "write rejects json style moon.mod" {
 ///|
 async test "write rejects suspiciously tiny moon.pkg" {
   let dir = @fs.tmpdir(prefix="openseek-write-manifest-")
-  let path = "\{dir}/moon.pkg"
+  let path = @path.Path(dir).join("moon.pkg").normalize().to_string()
   let result = execute({ "path": path, "content": "x" })
   @fs.rmdir(dir, recursive=true)
   guard result is Respond(output) else { fail("expected Respond") }
@@ -245,7 +243,10 @@ async test "write rejects suspiciously tiny moon.pkg" {
 ///|
 async test "write surfaces filesystem errors" {
   let dir = @fs.tmpdir(prefix="openseek-write-")
-  let path = dir + "/missing-dir/does-not-exist.txt"
+  let path = @path.Path(dir)
+    .join("missing-dir/does-not-exist.txt")
+    .normalize()
+    .to_string()
   let result = execute({ "path": path, "content": "x" })
   @fs.rmdir(dir, recursive=true)
   guard result is Respond(output) else { fail("expected Respond") }
