@@ -635,13 +635,13 @@ fn sanitize_artifact_name(name : String) -> String {
 
 ///|
 fn count_successes(results : Array[EvalResult]) -> Int {
-  let mut count = 0
-  for result in results {
+  for result in results; count = 0 {
     if result.success {
-      count += 1
+      continue count + 1
     }
+  } nobreak {
+    count
   }
-  count
 }
 
 ///|
@@ -655,20 +655,17 @@ fn count_occurrences(content : String, needle : String) -> Int {
 
 ///|
 fn count_lines_containing_all(content : String, needles : Array[String]) -> Int {
-  let mut count = 0
-  for piece in content.split("\n") {
-    let line = piece.to_owned()
-    let mut matched = true
+  for line in content.split("\n"); count = 0 {
     for needle in needles {
       if !line.contains(needle) {
-        matched = false
+        break
       }
+    } nobreak {
+      continue count + 1
     }
-    if matched {
-      count += 1
-    }
+  } nobreak {
+    count
   }
-  count
 }
 
 ///|

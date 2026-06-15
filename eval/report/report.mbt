@@ -71,13 +71,13 @@ pub fn Report::Report(
 ///|
 /// How many rows passed.
 pub fn Report::successes(self : Report) -> Int {
-  let mut count = 0
-  for row in self.rows {
+  for row in self.rows; count = 0 {
     if row.success {
-      count += 1
+      continue count + 1
     }
+  } nobreak {
+    count
   }
-  count
 }
 
 ///|

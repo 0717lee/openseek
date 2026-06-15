@@ -131,6 +131,25 @@ test "behavior counters ignore user task prompt" {
 }
 
 ///|
+test "line counter documents all-match behavior" {
+  let text =
+    #|assistant: moon run -e fn main {}
+    #|assistant: moon run -c fn main {}
+    #|assistant: moon test
+    #|user: mention moon run only
+  debug_inspect(
+    [
+      count_lines_containing_all(text, ["assistant:"]),
+      count_lines_containing_all(text, ["moon run", " -e"]),
+      count_lines_containing_all(text, ["moon run", " -c"]),
+      count_lines_containing_all(text, ["assistant:", "missing"]),
+      count_lines_containing_all("a\nb\n", []),
+    ],
+    content="[3, 1, 1, 0, 3]",
+  )
+}
+
+///|
 test "latest non-finished terminal determines success" {
   let session = @agent_session.Session(
       SessionId("multi-turn"),

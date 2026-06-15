@@ -366,13 +366,13 @@ fn build_report(rows : Array[@report.ReportRow]) -> @report.Report {
 
 ///|
 fn count_successes(rows : Array[@report.ReportRow]) -> Int {
-  let mut count = 0
-  for item in rows {
+  for item in rows; count = 0 {
     if item.success {
-      count += 1
+      continue count + 1
     }
+  } nobreak {
+    count
   }
-  count
 }
 
 ///|

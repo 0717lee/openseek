@@ -713,11 +713,12 @@ pub fn SuiteReport::passed(self : SuiteReport) -> Bool {
 ///|
 /// One-line failure summary for CLIs that exit non-zero on missed thresholds.
 pub fn SuiteReport::failure_message(self : SuiteReport) -> String {
-  let mut failed = 0
-  for report in self.reports {
+  let failed = for report in self.reports; count = 0 {
     if !report.passed() {
-      failed += 1
+      continue count + 1
     }
+  } nobreak {
+    count
   }
   "prompt task suite failed: \{failed}/\{self.reports.length()} combos below threshold"
 }
@@ -848,9 +849,10 @@ fn average_result_metric(
   if report.results.length() == 0 {
     return "0.0"
   }
-  let mut total = 0
-  for result in report.results {
-    total += metric(result)
+  let total = for result in report.results; total = 0 {
+    continue total + metric(result)
+  } nobreak {
+    total
   }
   format_average(total, report.results.length())
 }
@@ -866,22 +868,24 @@ fn format_average(total : Int, count : Int) -> String {
 
 ///|
 fn finished_summary(report : EvalReport) -> String {
-  let mut count = 0
-  for result in report.results {
+  let count = for result in report.results; count = 0 {
     if result.finished {
-      count += 1
+      continue count + 1
     }
+  } nobreak {
+    count
   }
   "\{count}/\{report.results.length()}"
 }
 
 ///|
 fn validation_summary(report : EvalReport) -> String {
-  let mut count = 0
-  for result in report.results {
+  let count = for result in report.results; count = 0 {
     if result.validation.passed {
-      count += 1
+      continue count + 1
     }
+  } nobreak {
+    count
   }
   "\{count}/\{report.results.length()}"
 }

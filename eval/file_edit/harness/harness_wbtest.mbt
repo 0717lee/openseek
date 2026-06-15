@@ -94,6 +94,25 @@ test "count_occurrences counts non-overlapping markers" {
 }
 
 ///|
+test "line counter documents all-match behavior" {
+  let log_text =
+    #|command=moon run -e fn main {}
+    #|command=moon run -c fn main {}
+    #|command=moon test
+    #|note=moon run without command prefix
+  debug_inspect(
+    [
+      count_lines_containing_all(log_text, ["command=moon "]),
+      count_lines_containing_all(log_text, ["moon run", " -e"]),
+      count_lines_containing_all(log_text, ["moon run", " -c"]),
+      count_lines_containing_all(log_text, ["command=moon ", "missing"]),
+      count_lines_containing_all("a\nb\n", []),
+    ],
+    content="[3, 1, 1, 0, 3]",
+  )
+}
+
+///|
 async test "indexed runner honors concurrency and preserves order" {
   let mut active = 0
   let mut max_active = 0
