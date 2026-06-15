@@ -1,0 +1,400 @@
+///|
+import {
+  "moonbitlang/async@0.19.4",
+  "moonbitlang/async@0.19.4/process" @process,
+  "moonbitlang/async@0.19.4/stdio" @stdio,
+  "moonbitlang/core/env" @env,
+  "moonbitlang/core/json" @json
+}
+
+///|
+const ProtocolVersion : String = "2025-06-18"
+
+///|
+const ServerName : String = "openseek-review"
+
+///|
+const ToolName : String = "openseek_review"
+
+///|
+const DefaultMaxSteps : Int = 200
+
+///|
+const DefaultAddendumPath : String = "skills/openseek-review/references/review-addendum.md"
+
+///|
+const MaxReturnedChars : Int = 60000
+
+///|
+async fn main {
+  while @stdio.stdin.read_until("\n") is Some(line) {
+    let line = line.trim()
+    if line.is_empty() {
+      continue
+    }
+    let message = @json.parse(line) catch {
+      error => {
+        write_json(error_response(null, -32700, "Parse error: \{error}"))
+        continue
+      }
+    }
+    handle_message(message) catch {
+      error => {
+        write_json(error_response(id_or_null(message), -32603, "\{error}"))
+      }
+    }
+  }
+}
+
+///|
+async fn handle_message(message : Json) -> Unit raise {
+  let id = request_id(message)
+  guard string_field(message, "jsonrpc") == Some("2.0") else {
+    if id is Some(id) {
+      write_json(error_response(id, -32600, "Invalid JSON-RPC request"))
+    }
+    return
+  }
+  match string_field(message, "method") {
+    Some("initialize") =>
+      if id is Some(id) {
+        write_json(ok_response(id, initialize_result()))
+      }
+    Some("notifications/initialized") => ()
+    Some("ping") =>
+      if id is Some(id) {
+        write_json(ok_response(id, {}))
+      }
+    Some("tools/list") =>
+      if id is Some(id) {
+        write_json(ok_response(id, tools_list_result()))
+      }
+    Some("tools/call") =>
+      if id is Some(id) {
+        let result = call_tool(object_field(message, "params"))
+        write_json(ok_response(id, result))
+      }
+    Some(method_name) =>
+      if id is Some(id) {
+        write_json(error_response(id, -32601, "Unknown method: \{method_name}"))
+      }
+    None =>
+      if id is Some(id) {
+        write_json(error_response(id, -32600, "Missing method"))
+      }
+  }
+}
+
+///|
+async fn write_json(message : Json) -> Unit raise {
+  @stdio.stdout.write(message.stringify() + "\n")
+}
+
+///|
+fn request_id(message : Json) -> Json? {
+  object_field(message, "id")
+}
+
+///|
+fn id_or_null(message : Json) -> Json {
+  match request_id(message) {
+    Some(id) => id
+    None => null
+  }
+}
+
+///|
+fn object_field(message : Json, key : String) -> Json? {
+  match message {
+    Object(fields) => fields.get(key)
+    _ => None
+  }
+}
+
+///|
+fn string_field(message : Json, key : String) -> String? {
+  match object_field(message, key) {
+    Some(String(value)) => Some(value)
+    _ => None
+  }
+}
+
+///|
+fn bool_field(message : Json, key : String) -> Bool? {
+  match object_field(message, key) {
+    Some(True) => Some(true)
+    Some(False) => Some(false)
+    _ => None
+  }
+}
+
+///|
+fn int_field(message : Json, key : String) -> Int? {
+  match object_field(message, key) {
+    Some(Number(value, ..)) => Some(value.to_int())
+    _ => None
+  }
+}
+
+///|
+fn ok_response(id : Json, result : Json) -> Json {
+  {
+    "jsonrpc": "2.0",
+    "id": id,
+    "result": result,
+  }
+}
+
+///|
+fn error_response(id : Json, code : Int, message : String) -> Json {
+  {
+    "jsonrpc": "2.0",
+    "id": id,
+    "error": {
+      "code": code,
+      "message": message,
+    },
+  }
+}
+
+///|
+fn initialize_result() -> Json {
+  {
+    "protocolVersion": ProtocolVersion,
+    "capabilities": {
+      "tools": {},
+    },
+    "serverInfo": {
+      "name": ServerName,
+      "version": "0.1.0",
+    },
+  }
+}
+
+///|
+fn tools_list_result() -> Json {
+  {
+    "tools": [
+      {
+        "name": ToolName,
+        "description": "Run the local OpenSeek executable as a DeepSeek-backed code reviewer.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "target": {
+              "type": "string",
+              "enum": ["current", "branch", "commit"],
+              "description": "Review scope to use when task is omitted. Defaults to current.",
+            },
+            "task": {
+              "type": "string",
+              "description": "Full review instruction. When omitted, the wrapper builds one from target, base_branch, and commit.",
+            },
+            "dir": {
+              "type": "string",
+              "description": "Target repository directory. Pass the repository root explicitly from Codex.",
+            },
+            "base_branch": {
+              "type": "string",
+              "description": "Base branch for target=branch. Defaults to main.",
+            },
+            "commit": {
+              "type": "string",
+              "description": "Commit SHA or ref for target=commit.",
+            },
+            "max_steps": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "OpenSeek --max-steps value. Defaults to 200.",
+            },
+            "openseek_bin": {
+              "type": "string",
+              "description": "OpenSeek executable path or name. Defaults to OPENSEEK_BIN or openseek.",
+            },
+            "system_prompt_addendum_file": {
+              "type": "string",
+              "description": "Review addendum file. Defaults to this plugin's bundled addendum.",
+            },
+            "use_dotenvx": {
+              "type": "boolean",
+              "description": "Run OpenSeek through dotenvx run -- so DEEPSEEK can come from the target project.",
+            },
+          },
+          "additionalProperties": false,
+        },
+      },
+    ],
+  }
+}
+
+///|
+async fn call_tool(params : Json?) -> Json raise {
+  guard params is Some(Object(fields)) else {
+    fail("tools/call params must be an object")
+  }
+  guard fields.get("name") is Some(String(name)) else {
+    fail("tools/call params.name must be a string")
+  }
+  guard name == ToolName else {
+    fail("unknown tool: \{name}")
+  }
+  let arguments : Json = match fields.get("arguments") {
+    Some(value) => value
+    None => {}
+  }
+  guard arguments is Object(_) else {
+    fail("tools/call params.arguments must be an object")
+  }
+  run_openseek(arguments) catch {
+    error => tool_result("OpenSeek review failed: \{error}", is_error=true)
+  }
+}
+
+///|
+async fn run_openseek(arguments : Json) -> Json raise {
+  let target_dir = string_field(arguments, "dir").unwrap_or(".")
+  let max_steps = int_field(arguments, "max_steps").unwrap_or(DefaultMaxSteps)
+  guard max_steps > 0 else {
+    fail("max_steps must be positive")
+  }
+  let openseek = openseek_bin(arguments)
+  let use_dotenvx = bool_field(arguments, "use_dotenvx").unwrap_or(false)
+  let task = review_task(arguments)
+  let openseek_args = [
+    "--no-session",
+    "--dir",
+    ".",
+    "--max-steps",
+    "\{max_steps}",
+    "--system-prompt-addendum-file",
+    addendum_file(arguments),
+    task,
+  ]
+  let (command, args) = if use_dotenvx {
+    ("dotenvx", ["run", "--", openseek, ..openseek_args])
+  } else {
+    (openseek, openseek_args)
+  }
+  let (exit_code, output) = @process.collect_output_merged(
+    command,
+    args,
+    cwd=target_dir,
+  )
+  let output_text = output.text()
+  if exit_code == 0 {
+    match agent_finished_answer(output_text) {
+      Some(answer) => tool_result(truncate_text(answer), is_error=false)
+      None =>
+        tool_result(
+          "OpenSeek finished without an agent_finished answer; returning merged output.\n\n" +
+          truncate_text(output_text),
+          is_error=false,
+        )
+    }
+  } else {
+    tool_result(
+      "OpenSeek exited with status \{exit_code}.\n\n" + truncate_text(output_text),
+      is_error=true,
+    )
+  }
+}
+
+///|
+fn openseek_bin(arguments : Json) -> String {
+  match string_field(arguments, "openseek_bin") {
+    Some(bin) if !bin.trim().is_empty() => bin
+    _ =>
+      match @env.get_env_var("OPENSEEK_BIN") {
+        Some(bin) if !bin.trim().is_empty() => bin
+        _ => "openseek"
+      }
+  }
+}
+
+///|
+fn addendum_file(arguments : Json) -> String {
+  match string_field(arguments, "system_prompt_addendum_file") {
+    Some(path) if !path.trim().is_empty() => path
+    _ => default_addendum_file()
+  }
+}
+
+///|
+fn default_addendum_file() -> String {
+  match @env.current_dir() {
+    Some(dir) => dir + "/" + DefaultAddendumPath
+    None => DefaultAddendumPath
+  }
+}
+
+///|
+fn review_task(arguments : Json) -> String raise {
+  match string_field(arguments, "task") {
+    Some(task) if !task.trim().is_empty() => task
+    _ => default_review_task(arguments)
+  }
+}
+
+///|
+fn default_review_task(arguments : Json) -> String raise {
+  let target = string_field(arguments, "target").unwrap_or("current")
+  match target {
+    "current" =>
+      "Review the current code changes (staged, unstaged, and untracked files). Inspect the git diff and relevant files. Do not modify files. Finish with Markdown findings only."
+    "branch" => {
+      let base = string_field(arguments, "base_branch").unwrap_or("main")
+      "Review the code changes against base branch \{base}. Find the merge base if needed, inspect the diff and relevant files. Do not modify files. Finish with Markdown findings only."
+    }
+    "commit" => {
+      guard string_field(arguments, "commit") is Some(commit) &&
+        !commit.trim().is_empty() else {
+        fail("commit is required when target=commit")
+      }
+      "Review the code changes introduced by commit \{commit}. Inspect the commit diff and relevant files. Do not modify files. Finish with Markdown findings only."
+    }
+    _ => fail("target must be current, branch, or commit")
+  }
+}
+
+///|
+fn agent_finished_answer(output : String) -> String? {
+  let mut answer : String? = None
+  for line in output.split("\n") {
+    let line = line.trim()
+    if line.is_empty() {
+      continue
+    }
+    let event = @json.parse(line) catch {
+      _ => continue
+    }
+    if string_field(event, "event") == Some("agent_finished") {
+      if string_field(event, "answer") is Some(text) {
+        answer = Some(text)
+      }
+    }
+  }
+  answer
+}
+
+///|
+fn truncate_text(text : String) -> String {
+  if text.length() <= MaxReturnedChars {
+    text
+  } else {
+    text[:MaxReturnedChars].to_owned() +
+    "\n\n[OpenSeek output truncated by openseek-review MCP wrapper.]"
+  }
+}
+
+///|
+fn tool_result(text : String, is_error~ : Bool) -> Json {
+  {
+    "content": [
+      {
+        "type": "text",
+        "text": text,
+      },
+    ],
+    "isError": is_error,
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "openseek-review": {
+      "command": "moon",
+      "args": [
+        "run",
+        "--target",
+        "native",
+        "--target-dir",
+        ".moon-build/openseek-review-mcp",
+        "mcp/openseek_review.mbtx"
+      ],
+      "cwd": "."
+    }
+  }
+}
