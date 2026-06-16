@@ -20,7 +20,8 @@ fn cli_command() -> @argparse.Command {
 
 ///|
 async fn main {
-  guard cli_command().parse().values is { "input": [input, ..], "output": [output, ..], .. } else {
+  guard cli_command().parse().values
+    is { "input": [input, ..], "output": [output, ..], .. } else {
     fail("missing parsed arguments")
   }
   let base = @path.Path(input).basename()
@@ -42,9 +43,37 @@ async fn output_matches(output : StringView, source : StringView) -> Bool {
 }
 
 ///|
+#warnings("-method_shadowing")
+#cfg(platform="windows")
+fn @path.Path::basename(path : @path.Path) -> StringView {
+  let trimmed = for view = path.0.view() {
+    match view {
+      [] => break view
+      [.. rest, '/' | '\\'] => continue rest
+      _ => break view
+    }
+  }
+  for view = trimmed {
+    match view {
+      [] => break trim_windows_drive_prefix(trimmed)
+      [.., '/' | '\\'] as prefix => break trimmed[prefix.length():]
+      [.. rest, _] => continue rest
+    }
+  }
+}
+
+///|
+fn trim_windows_drive_prefix(path : StringView) -> StringView {
+  match path {
+    ['a'..='z' | 'A'..='Z', ':', .. rest] => rest
+    _ => path
+  }
+}
+
+///|
 fn function_name_from_base(base : StringView) -> StringView raise {
   match base {
-    ([.. stem, .. ".mbt.md"] | [.. stem, .. ".md"]) if stem =~ re"^[a-z_][A-Za-z0-9_]*$" =>
+    [.. stem, .. ".mbt.md"] | [.. stem, .. ".md"] if stem =~ re"^[a-z_][A-Za-z0-9_]*$" =>
       stem
     _ =>
       fail(
