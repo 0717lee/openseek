@@ -34,20 +34,20 @@ fn flash_prompt() -> String {
     #|    automatically starts a replacement watcher under a restart budget.
     #|  - `shell` for one-shot Moon commands other than `moon check`; pass the
     #|    tool's `cwd` field instead of embedding repeated `cd ... &&` strings.
-    #|- Use `moon_check` once near the start of an iterative MoonBit edit loop, then
-    #|  use `[moon_check update]` messages for fresh compiler feedback. Repeated
-    #|  `moon_check` calls are allowed; the tool reuses the existing watcher for the
-    #|  same arguments instead of starting a duplicate process and restarts crashed
-    #|  watchers automatically.
-    #|- Avoid repeatedly polling one-shot `moon check` while a `moon_check` watcher is
-    #|  available; reserve exact one-shot commands for final validation or changed
-    #|  options.
+    #|- Use `moon_check` once per project directory near the start of an iterative
+    #|  MoonBit edit loop, after `moon.mod` and the relevant `moon.pkg` files exist.
+    #|  Then use `[moon_check update]` messages for fresh compiler feedback. Do not
+    #|  call `moon_check` again just to poll the same project state.
+    #|- If a user task asks you to run `moon check`, satisfy that requirement with the
+    #|  single `moon_check` call. Do not run raw `moon check` through `shell`.
+    #|- Only call `moon_check` again when you intentionally change check options or
+    #|  need to recover a stopped watcher.
     #|- Keep reads focused. Use bounded reads for large files and logs.
     #|
     #|Common `moon` subcommands:
     #|
-    #|- `moon_check`: iterative compiler feedback for `moon check`; starts, reuses,
-    #|  and crash-restarts the watcher.
+    #|- `moon_check`: one-time start for iterative compiler feedback from
+    #|  `moon check`; later feedback arrives as `[moon_check update]` messages.
     #|- shell `moon test`: targeted or full tests; run plain `moon test` before
     #|  `moon test --update`. Example: `moon test parser --filter "Parser::*"
     #|  --diagnostic-limit 20`.
@@ -392,18 +392,20 @@ fn flash_prompt() -> String {
     #|
     #|## Validation Before Finish
     #|
-    #|Before finishing code work, run:
+    #|Before finishing code work:
     #|
-    #|1. `moon_check` for current compiler state.
-    #|2. Targeted shell `moon test`.
-    #|3. Shell `moon info` and `moon fmt` when interfaces or formatting may change.
-    #|4. Task-specific acceptance probes with shell `moon run`.
+    #|1. Confirm the single project `moon_check` was started and the latest
+    #|   `[moon_check update]` is clean or understood. Do not call `moon_check` again
+    #|   just for final validation.
+    #|2. Run targeted shell `moon test`.
+    #|3. Run shell `moon info` and `moon fmt` when interfaces or formatting may
+    #|   change.
+    #|4. Run task-specific acceptance probes with shell `moon run`.
     #|
-    #|Use `moon_check` for iterative compiler feedback. Use exact `moon` subcommands
-    #|for final validation: `moon test` for tests, `moon run` for CLI probes,
-    #|`moon cram test tests/cram` for durable CLI transcript fixtures, `moon info`
-    #|for generated interfaces, `moon fmt` for formatting, and `moon build` for
-    #|build artifacts.
+    #|Use exact `moon` subcommands for final validation except raw `moon check`:
+    #|`moon test` for tests, `moon run` for CLI probes, `moon cram test tests/cram`
+    #|for durable CLI transcript fixtures, `moon info` for generated interfaces,
+    #|`moon fmt` for formatting, and `moon build` for build artifacts.
     #|
     #|For CLI work, run probes that cover:
     #|

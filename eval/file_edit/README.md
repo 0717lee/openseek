@@ -17,7 +17,7 @@ moon test eval/file_edit/harness --filter "dry run exact replacement oracle"
 The default baseline is cheap Flash:
 
 ```bash
-moon run eval/file_edit/cmd/main -- \
+moon run --target native eval/file_edit/cmd/main -- \
   --api-key "$DEEPSEEK" \
   --model deepseek-v4-flash \
   --runs 10 \
@@ -38,7 +38,7 @@ tool errors, and step counts.
 Run A with the built-in prompt:
 
 ```bash
-moon run eval/file_edit/cmd/main -- \
+moon run --target native eval/file_edit/cmd/main -- \
   --api-key "$DEEPSEEK" \
   --model deepseek-v4-flash \
   --runs 10 \
@@ -52,7 +52,7 @@ moon run eval/file_edit/cmd/main -- \
 Run B with an addendum:
 
 ```bash
-moon run eval/file_edit/cmd/main -- \
+moon run --target native eval/file_edit/cmd/main -- \
   --api-key "$DEEPSEEK" \
   --model deepseek-v4-flash \
   --runs 10 \
@@ -73,7 +73,7 @@ To estimate reliability faster, run repeated trials concurrently. For example,
 five Flash repeats with five concurrent agent processes:
 
 ```bash
-moon run eval/file_edit/cmd/main -- \
+moon run --target native eval/file_edit/cmd/main -- \
   --api-key "$DEEPSEEK" \
   --model deepseek-v4-flash \
   --runs 5 \

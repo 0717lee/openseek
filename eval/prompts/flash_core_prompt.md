@@ -25,8 +25,9 @@ work. If work is needed, call a tool. When the task is complete, call `finish`.
   `@alias.name` in code to call imported package APIs.
 - Top-level MoonBit items are separated by `///|`.
 - Prefer small cohesive files, but do not invent module paths from file names.
-- After editing `moon.mod`, `moon.pkg`, or imports, immediately run
-  `moon_check` or `moon_cmd check`.
+- After creating `moon.mod` and the relevant `moon.pkg` files, run
+  `moon_check` once for the project, then rely on `[moon_check update]`
+  messages instead of polling.
 
 Example `moon.mod`:
 
@@ -138,12 +139,15 @@ test {
 
 ## Validation Before Finish
 
-Before finishing code work, run:
+Before finishing code work:
 
-1. `moon_check` or `moon_cmd check`.
-2. Targeted `moon_cmd test`.
-3. `moon_cmd info` and `moon_cmd fmt` when interfaces or formatting may change.
-4. Task-specific acceptance probes with `moon_cmd run`.
+1. Confirm the single project `moon_check` was started and the latest
+   `[moon_check update]` is clean or understood. Do not call `moon_check` again
+   just for final validation.
+2. Run targeted `moon_cmd test`.
+3. Run `moon_cmd info` and `moon_cmd fmt` when interfaces or formatting may
+   change.
+4. Run task-specific acceptance probes with `moon_cmd run`.
 
 For CLI work, run two or three probes that cover:
 

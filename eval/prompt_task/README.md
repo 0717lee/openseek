@@ -23,7 +23,7 @@ for the TOML task checks:
 Run five Flash TOML trials concurrently:
 
 ```bash
-moon run eval/prompt_task/cmd/main -- \
+moon run --target native eval/prompt_task/cmd/main -- \
   --api-key "$DEEPSEEK" \
   --model deepseek-v4-flash \
   --runs 5 \
@@ -37,7 +37,7 @@ moon run eval/prompt_task/cmd/main -- \
 Analyze the finished run later:
 
 ```bash
-moon run eval/prompt_task/cmd/main -- \
+moon run --target native eval/prompt_task/cmd/main -- \
   --analyze-only \
   --out .moonagent/eval_runs/toml_flash_current_5x
 ```
@@ -45,7 +45,7 @@ moon run eval/prompt_task/cmd/main -- \
 Run a multi-problem suite:
 
 ```bash
-moon run eval/prompt_task/cmd/main -- \
+moon run --target native eval/prompt_task/cmd/main -- \
   --api-key "$DEEPSEEK" \
   --suite-file .repos/openseek-eval-experiments/suites/moonbit_cli_suite_v1/suite.json \
   --out .repos/openseek-eval-experiments/runs/moonbit_cli_suite_v1_100x \
@@ -62,7 +62,7 @@ and HTML report.
 Run an A/B comparison by using different output directories and prompt labels:
 
 ```bash
-moon run eval/prompt_task/cmd/main -- \
+moon run --target native eval/prompt_task/cmd/main -- \
   --api-key "$DEEPSEEK" \
   --model deepseek-v4-flash \
   --runs 5 \

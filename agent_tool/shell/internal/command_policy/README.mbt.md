@@ -3,9 +3,10 @@
 This internal package contains the command-routing policy used by the `shell`
 tool before it runs `sh -c`.
 
-The policy exists for one narrow reason: iterative `moon check` feedback should
-use `moon_check` instead of the general shell escape hatch. `moon_check` owns a
-persistent watcher and can inject background updates into the agent loop.
+The policy exists for one narrow reason: raw `moon check` should start through
+`moon_check` once per project instead of the general shell escape hatch.
+`moon_check` owns a persistent watcher and can inject background updates into
+the agent loop.
 
 This package is not a security sandbox. It is a local automation guardrail for a
 trusted agent. The shell tool can still run arbitrary non-MoonBit commands, and
@@ -21,9 +22,9 @@ The current policy blocks:
 
 | Command shape | Reason |
 | --- | --- |
-| `moon check` | Use `moon_check` for persistent compiler feedback. |
+| `moon check` | Use `moon_check` once per project for persistent compiler feedback. |
 | `moon_cmd ...` | `moon_cmd` is a tool name, not an executable shell command. |
-| `cd dir && moon check` | Use the shell tool's `cwd` field plus `moon_check` instead of embedding `cd`. |
+| `cd dir && moon check` | Use one `moon_check` call with the target `cwd` instead of embedding `cd`. |
 
 The policy allows:
 
@@ -95,8 +96,9 @@ test "command policy allows non guarded shell commands" {
 When this policy blocks a command, the caller should not try to quote around it
 or rewrite it as a more complex shell string. Use:
 
-- `moon_check` for persistent
-  `moon check --watch --diagnostic-limit 10` diagnostics.
+- `moon_check` once per project for persistent
+  `moon check --watch --diagnostic-limit 10` diagnostics. If it already ran,
+  read `[moon_check update]` messages instead of retrying shell `moon check`.
 - Shell for one-shot commands such as `moon test`, `moon run`, `moon info`,
   `moon fmt`, `moon build`, `moon update`, `moon add`, and `moon remove`.
 - The shell tool's `cwd` field instead of `cd ... &&`.

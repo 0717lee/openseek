@@ -6,11 +6,14 @@ MoonBit Validation Loop Addendum
 - Before adding a new public API, run `moon_ide doc` for nearby standard-library
   or project APIs. Before editing existing code, use `moon_ide outline` or a
   focused read to locate the right symbols.
-- After each small implementation batch, run `moon_check` or `moon_cmd check`
-  in the target workspace. Repair the first concrete diagnostic before adding
-  more code.
-- Use `moon_cmd` for all project validation: `check`, targeted `test`, `run`,
-  `info`, and `fmt`. Keep shell for non-MoonBit commands only.
-- Do not finish from intuition. Before `finish`, run `moon check`, targeted
-  `moon test`, `moon info`, `moon fmt`, and at least two task-specific CLI
-  probes derived from the requested behavior.
+- After creating `moon.mod` and the relevant `moon.pkg` files, run
+  `moon_check` once in the target workspace. Repair the first concrete
+  diagnostic before adding more code, then rely on `[moon_check update]`
+  messages for fresh compiler feedback instead of polling.
+- Use `moon_cmd` for final project validation beyond raw compiler feedback:
+  targeted `test`, `run`, `info`, and `fmt`. Keep shell for non-MoonBit
+  commands only.
+- Do not finish from intuition. Before `finish`, confirm the single
+  `moon_check` watcher is clean or understood, then run targeted `moon test`,
+  `moon info`, `moon fmt`, and at least two task-specific CLI probes derived
+  from the requested behavior.

@@ -295,12 +295,15 @@ fn config_from_matches(matches : @argparse.Matches) -> Config raise {
 
 ## Validation Before Finish
 
-Before finishing code work, run:
+Before finishing code work:
 
-1. `moon_check` or `moon_cmd check`.
-2. Targeted `moon_cmd test`.
-3. `moon_cmd info` and `moon_cmd fmt` when interfaces or formatting may change.
-4. Task-specific acceptance probes with `moon_cmd run`.
+1. Confirm the single project `moon_check` was started and the latest
+   `[moon_check update]` is clean or understood. Do not call `moon_check` again
+   just for final validation.
+2. Run targeted `moon_cmd test`.
+3. Run `moon_cmd info` and `moon_cmd fmt` when interfaces or formatting may
+   change.
+4. Run task-specific acceptance probes with `moon_cmd run`.
 
 For CLI work, run probes that cover:
 

@@ -30,7 +30,7 @@ pub fn[X] definition(
   let workspace_root = runtime.workspace_root()
   AgentToolDefinition(
     name="moon_check",
-    description="Start or inspect a persistent `moon check --watch --diagnostic-limit 10` watcher for the given cwd. One watcher runs per directory: the first call starts it, later calls with the same arguments return the latest snapshot, and calling with different options replaces the watcher instead of stacking a second one.",
+    description="Start a persistent `moon check --watch --diagnostic-limit 10` watcher for the given cwd. Call this once per project directory near the start of MoonBit work, then use `[moon_check update]` messages for fresh diagnostics instead of polling this tool. Later same-argument calls only return the existing snapshot; different options replace the watcher instead of stacking another one.",
     schema=JsonSchema({
       "type": "object",
       "properties": {

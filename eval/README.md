@@ -86,7 +86,7 @@ task is noisy.
 The checked-in prompt-task runner supports five concurrent repeats:
 
 ```bash
-moon run eval/prompt_task/cmd/main -- \
+moon run --target native eval/prompt_task/cmd/main -- \
   --api-key "$DEEPSEEK" \
   --model deepseek-v4-flash \
   --runs 5 \

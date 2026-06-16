@@ -77,7 +77,7 @@ async fn run_trial(
   let (program, args) = if config.engine != "" {
     (@fs.realpath(config.engine), [])
   } else {
-    ("moon", ["run", "\{repo_root}/cmd/openseek", "--"])
+    ("moon", ["run", "--target", "native", "\{repo_root}/cmd/openseek", "--"])
   }
   args.append([
     "--max-steps",

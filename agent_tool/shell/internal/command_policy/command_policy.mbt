@@ -17,20 +17,20 @@ pub fn moonbit_command_policy_error(cmd : String) -> String? {
       let first = words[index]
       if first == "moon_cmd" {
         return Some(
-          "error: moon_cmd is a tool name, not a shell command; use `moon ...` through shell, and use moon_check for `moon check`",
+          "error: moon_cmd is a tool name, not a shell command; use `moon ...` through shell, and use moon_check once per project for `moon check`",
         )
       }
       if first == "moon" && index + 1 < words.length() {
         let subcommand = words[index + 1]
         if guarded_moon_subcommands().contains(subcommand) {
           return Some(
-            "error: shell blocked `moon check`; use the moon_check tool for persistent compiler feedback",
+            "error: shell blocked `moon check`; start moon_check once per project instead. If moon_check already ran for this project, do not retry `moon check`; continue with `moon test`, `moon info`, `moon fmt`, and task probes.",
           )
         }
       }
       if contains_guarded_moon_fragment(cmd) {
         Some(
-          "error: shell blocked an embedded `moon check`; use the shell tool's cwd field plus moon_check instead of `cd ... && moon check`",
+          "error: shell blocked an embedded `moon check`; start moon_check once with the target cwd instead of `cd ... && moon check`. If moon_check already ran for this project, skip the extra check and continue with tests/probes.",
         )
       } else {
         None

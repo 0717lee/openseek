@@ -61,8 +61,8 @@ sequenceDiagram
 
 ## API Style
 
-Use `moon_check` once at the start of an iterative MoonBit edit loop, especially
-after creating or editing a package file:
+Use `moon_check` once per project directory at the start of an iterative
+MoonBit edit loop, especially after creating the module and package files:
 
 ```json
 {
@@ -71,10 +71,11 @@ after creating or editing a package file:
 }
 ```
 
-Use `warn_list` or `deny_warn` when the task requires stricter cleanup. The
-agent may call `moon_check` again to inspect the current watcher state; the call
-does not start a duplicate watcher for the same arguments. If an earlier
-watcher stopped, the next call starts a replacement. Use `shell` for one-shot
+Use `warn_list` or `deny_warn` when the task requires stricter cleanup. After
+the first call, consume `[moon_check update]` runtime messages for fresh
+diagnostics instead of polling `moon_check` again. A later same-argument call
+only inspects the current watcher state and does not start a duplicate watcher;
+reserve that for changed options or a stopped watcher. Use `shell` for one-shot
 `moon` commands such as `moon test`, `moon run`, `moon info`, `moon fmt`, or
 user-facing command validation.
 
