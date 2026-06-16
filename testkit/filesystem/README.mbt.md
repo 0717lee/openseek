@@ -32,9 +32,6 @@ are implicit and created when the fixture is written to disk.
   otherwise a short failure reason.
 - `write_text(root, path, content)`: validated helper for overwriting one text
   file under a fixture root.
-- `with_tmpdir(body, prefix?)`: run `body` with a fresh temporary directory and
-  remove it afterward — even if `body` raises. Prefer this over a hardcoded
-  `/tmp/...` path so tests stay portable (Windows has no `/tmp`) and self-clean.
 
 ## Examples
 
@@ -69,36 +66,22 @@ test "validate paths at construction time" {
 }
 ```
 
-Use `with_tmpdir` to get a self-cleaning scratch directory — no hardcoded
-`/tmp` path and no manual teardown:
-
-```moonbit check
-///|
-async test "write and read back under a temporary directory" {
-  @filesystem.with_tmpdir((dir) => {
-    let path = "\{dir}/note.txt"
-    @fs.write_file(path, "hello", create_mode=CreateOrTruncate)
-    assert_eq(@fs.read_file(path).text(), "hello")
-  })
-}
-```
-
-Use `write_to` and `mismatch_on_disk` for native fixture tests; `with_tmpdir`
-hands the fixture a root that is removed once the body returns:
+Use `write_to` and `mismatch_on_disk` for native fixture tests:
 
 ```moonbit check
 ///|
 async test "materialize and compare a fixture" {
-  @filesystem.with_tmpdir((root) => {
-    let files = @filesystem.FileSystem({
-      "src/note.txt": "alpha\n",
-      "docs/summary.txt": "ready\n",
-    })
-    files.write_to(root)
-    assert_eq(files.mismatch_on_disk(root), "")
-    @filesystem.write_text(root, "src/note.txt", "changed\n")
-    assert_eq(files.mismatch_on_disk(root), "content mismatch in src/note.txt")
+  let root = @fs.tmpdir(prefix="openseek-testkit-readme")
+  let files = @filesystem.FileSystem({
+    "src/note.txt": "alpha\n",
+    "docs/summary.txt": "ready\n",
   })
+  files.write_to(root)
+  assert_eq(files.mismatch_on_disk(root), "")
+
+  @filesystem.write_text(root, "src/note.txt", "changed\n")
+  assert_eq(files.mismatch_on_disk(root), "content mismatch in src/note.txt")
+  @fs.rmdir(root, recursive=true)
 }
 ```
 

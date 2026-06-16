@@ -99,56 +99,58 @@ test "read tool advertises the expected schema" {
 ```moonbit check
 ///|
 async test "read tool reads a workspace note through the registry" {
-  @vfs.with_tmpdir(dir => {
-    let path = "\{dir}/task.txt"
-    let content = "Task: summarize test failures\nStatus: investigating\n"
-    @fs.write_file(path, content, create_mode=CreateOrTruncate)
+  let path = "/tmp/openseek-read-readme-task.txt"
+  let content = "Task: summarize test failures\nStatus: investigating\n"
+  @fs.write_file(path, content, create_mode=CreateOrTruncate)
 
-    let tools = @agent_tool.Tools([@read.definition()])
-    // Stringify a JSON object so a Windows temp path (`C:\Users\...`) survives
-    // round-tripping instead of becoming an invalid `\U` escape.
-    let arguments : Json = { "path": path }
-    let call = @agent_tool.AgentToolCall(
-      ToolCall(
-        id="call_read_note",
-        name="read",
-        arguments=arguments.stringify(),
+  let tools = @agent_tool.Tools([@read.definition()])
+  let call = @agent_tool.AgentToolCall(
+    ToolCall(
+      id="call_read_note",
+      name="read",
+      arguments=(
+        #|{
+        #|  "path": "/tmp/openseek-read-readme-task.txt"
+        #|}
       ),
-    )
-    let result = @agent_tool.execute_tool_call(call, tools)
-    guard result is Respond(output) else { fail("expected Respond") }
-    assert_eq(output.content, content)
-    assert_false(output.is_error)
-  })
+    ),
+  )
+  let result = @agent_tool.execute_tool_call(call, tools)
+  guard result is Respond(output) else { fail("expected Respond") }
+  assert_eq(output.content, content)
+  assert_false(output.is_error)
 }
 ```
 
 ```moonbit check
 ///|
 async test "read tool supports focused range reads" {
-  @vfs.with_tmpdir(prefix="openseek-read-readme-", dir => {
-    let path = "\{dir}/range.txt"
-    @fs.write_file(
-      path,
-      "alpha\nbeta\ngamma\ndelta",
-      create_mode=CreateOrTruncate,
-    )
+  let path = "/tmp/openseek-read-readme-range.txt"
+  @fs.write_file(
+    path,
+    "alpha\nbeta\ngamma\ndelta",
+    create_mode=CreateOrTruncate,
+  )
 
-    let tools = @agent_tool.Tools([@read.definition()])
-    let arguments : Json = { "path": path, "start_line": 2, "max_lines": 2 }
-    let call = @agent_tool.AgentToolCall(
-      ToolCall(
-        id="call_read_range",
-        name="read",
-        arguments=arguments.stringify(),
+  let tools = @agent_tool.Tools([@read.definition()])
+  let call = @agent_tool.AgentToolCall(
+    ToolCall(
+      id="call_read_range",
+      name="read",
+      arguments=(
+        #|{
+        #|  "path": "/tmp/openseek-read-readme-range.txt",
+        #|  "start_line": 2,
+        #|  "max_lines": 2
+        #|}
       ),
-    )
-    let result = @agent_tool.execute_tool_call(call, tools)
-    guard result is Respond(output) else { fail("expected Respond") }
-    assert_true(output.content.contains("start_line=2"))
-    assert_true(output.content.contains("shown_lines=2"))
-    assert_true(output.content.contains("beta\ngamma"))
-    assert_false(output.is_error)
-  })
+    ),
+  )
+  let result = @agent_tool.execute_tool_call(call, tools)
+  guard result is Respond(output) else { fail("expected Respond") }
+  assert_true(output.content.contains("start_line=2"))
+  assert_true(output.content.contains("shown_lines=2"))
+  assert_true(output.content.contains("beta\ngamma"))
+  assert_false(output.is_error)
 }
 ```

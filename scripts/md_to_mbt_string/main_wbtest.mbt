@@ -38,8 +38,7 @@ test "cli rejects unknown option-looking input path" {
 ///|
 test "cli accepts hyphen-leading paths after option delimiter" {
   let parsed = cli_command().parse(argv=["--", "-input.md", "-output.mbt"])
-  guard parsed.values
-    is { "input": ["-input.md", ..], "output": ["-output.mbt", ..], .. } else {
+  guard parsed.values is { "input": ["-input.md", ..], "output": ["-output.mbt", ..], .. } else {
     fail("expected delimiter to allow hyphen-leading paths")
   }
 }
@@ -87,40 +86,12 @@ test "generated source preserves missing final newline" {
 }
 
 ///|
-/// Run `f` in a tmpdir, with best-effort clean up.
-///
-/// We duplicate the `with_tmpdir` implementation here because we need the
-/// dev rules to be ran before type-checking the main openseek repo, and
-/// we cannot import the testkit/filesystem package here.
-async fn[T] with_tmpdir(f : async (String) -> T) -> T {
-  let dir = @fs.tmpdir(prefix="")
-  async fn rmdir() {
-    @fs.rmdir(dir, recursive=true) catch {
-      error if @async.is_being_cancelled() => raise error
-      _ => ()
-    }
-  }
-  try f(dir) catch {
-    error => {
-      rmdir()
-      raise error
-    }
-  } noraise {
-    result => {
-      rmdir()
-      result
-    }
-  }
-}
-
-///|
 async test "output match detects unchanged generated file" {
-  with_tmpdir(dir => {
-    let path = "\{dir}/output-match.mbt"
-    // The fresh directory guarantees the file is absent to start with.
-    assert_false(output_matches(path, "same"))
-    @fs.write_file(path, "same", create_mode=CreateOrTruncate)
-    assert_true(output_matches(path, "same"))
-    assert_false(output_matches(path, "different"))
-  })
+  let path = "/tmp/openseek-md-to-mbt-output-match.mbt"
+  let _ = @fs.remove(path) catch { _ => () }
+  assert_false(output_matches(path, "same"))
+  @fs.write_file(path, "same", create_mode=CreateOrTruncate)
+  assert_true(output_matches(path, "same"))
+  assert_false(output_matches(path, "different"))
+  let _ = @fs.remove(path) catch { _ => () }
 }
