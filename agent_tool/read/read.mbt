@@ -260,12 +260,14 @@ fn read_header(
 
 ///|
 async test "read returns file contents" {
-  let path = "/tmp/openseek-read-test.txt"
-  @fs.write_file(path, "hello read", create_mode=CreateOrTruncate)
-  let result = execute({ "path": path })
-  guard result is Respond(output) else { fail("expected Respond") }
-  assert_eq(output.content, "hello read")
-  assert_false(output.is_error)
+  @vfs.with_tmpdir(dir => {
+    let path = "\{dir}/test.txt"
+    @fs.write_file(path, "hello read", create_mode=CreateOrTruncate)
+    let result = execute({ "path": path })
+    guard result is Respond(output) else { fail("expected Respond") }
+    assert_eq(output.content, "hello read")
+    assert_false(output.is_error)
+  })
 }
 
 ///|
@@ -289,77 +291,87 @@ async test "read resolves relative paths under the workspace root" {
 
 ///|
 async test "read returns empty string for an empty file" {
-  let path = "/tmp/openseek-read-empty.txt"
-  @fs.write_file(path, "", create_mode=CreateOrTruncate)
-  let result = execute({ "path": path })
-  guard result is Respond(output) else { fail("expected Respond") }
-  assert_eq(output.content, "")
-  assert_false(output.is_error)
+  @vfs.with_tmpdir(dir => {
+    let path = "\{dir}/empty.txt"
+    @fs.write_file(path, "", create_mode=CreateOrTruncate)
+    let result = execute({ "path": path })
+    guard result is Respond(output) else { fail("expected Respond") }
+    assert_eq(output.content, "")
+    assert_false(output.is_error)
+  })
 }
 
 ///|
 async test "read preserves multiline content" {
-  let path = "/tmp/openseek-read-multiline.txt"
-  let content = "line one\nline two\nline three\n"
-  @fs.write_file(path, content, create_mode=CreateOrTruncate)
-  let result = execute({ "path": path })
-  guard result is Respond(output) else { fail("expected Respond") }
-  assert_eq(output.content, content)
-  assert_false(output.is_error)
+  @vfs.with_tmpdir(dir => {
+    let path = "\{dir}/multiline.txt"
+    let content = "line one\nline two\nline three\n"
+    @fs.write_file(path, content, create_mode=CreateOrTruncate)
+    let result = execute({ "path": path })
+    guard result is Respond(output) else { fail("expected Respond") }
+    assert_eq(output.content, content)
+    assert_false(output.is_error)
+  })
 }
 
 ///|
 async test "read returns a requested line range with metadata" {
-  let path = "/tmp/openseek-read-range.txt"
-  let content = "line one\nline two\nline three\nline four"
-  @fs.write_file(path, content, create_mode=CreateOrTruncate)
-  let result = execute({ "path": path, "start_line": 2, "max_lines": 2 })
-  guard result is Respond(output) else { fail("expected Respond") }
-  assert_false(output.is_error)
-  inspect(
-    output.content,
-    content=(
-      #|path=/tmp/openseek-read-range.txt
-      #|start_line=2
-      #|end_line=3
-      #|total_lines=4
-      #|shown_lines=2
-      #|file_chars=38
-      #|selected_chars=19
-      #|shown_chars=19
-      #|line_limited=true
-      #|truncated=false
-      #|---
-      #|line two
-      #|line three
-    ),
-  )
+  @vfs.with_tmpdir(dir => {
+    let path = "\{dir}/range.txt"
+    let content = "line one\nline two\nline three\nline four"
+    @fs.write_file(path, content, create_mode=CreateOrTruncate)
+    let result = execute({ "path": path, "start_line": 2, "max_lines": 2 })
+    guard result is Respond(output) else { fail("expected Respond") }
+    assert_false(output.is_error)
+    // The path is a temp dir, so assert the whole block dynamically rather
+    // than snapshotting it with `inspect`.
+    assert_eq(
+      output.content,
+      [
+        "path=\{path}",
+        "start_line=2",
+        "end_line=3",
+        "total_lines=4",
+        "shown_lines=2",
+        "file_chars=38",
+        "selected_chars=19",
+        "shown_chars=19",
+        "line_limited=true",
+        "truncated=false",
+        "---",
+        "line two",
+        "line three",
+      ].join("\n"),
+    )
+  })
 }
 
 ///|
 async test "read caps oversized output and marks it as an error" {
-  let path = "/tmp/openseek-read-capped.txt"
-  @fs.write_file(path, "abcdef", create_mode=CreateOrTruncate)
-  let result = execute({ "path": path, "max_output_chars": 3 })
-  guard result is Respond(output) else { fail("expected Respond") }
-  assert_true(output.is_error)
-  inspect(
-    output.content,
-    content=(
-      #|path=/tmp/openseek-read-capped.txt
-      #|start_line=1
-      #|end_line=1
-      #|total_lines=1
-      #|shown_lines=1
-      #|file_chars=6
-      #|selected_chars=6
-      #|shown_chars=3
-      #|line_limited=false
-      #|truncated=true
-      #|---
-      #|abc
-    ),
-  )
+  @vfs.with_tmpdir(dir => {
+    let path = "\{dir}/capped.txt"
+    @fs.write_file(path, "abcdef", create_mode=CreateOrTruncate)
+    let result = execute({ "path": path, "max_output_chars": 3 })
+    guard result is Respond(output) else { fail("expected Respond") }
+    assert_true(output.is_error)
+    assert_eq(
+      output.content,
+      [
+        "path=\{path}",
+        "start_line=1",
+        "end_line=1",
+        "total_lines=1",
+        "shown_lines=1",
+        "file_chars=6",
+        "selected_chars=6",
+        "shown_chars=3",
+        "line_limited=false",
+        "truncated=true",
+        "---",
+        "abc",
+      ].join("\n"),
+    )
+  })
 }
 
 ///|
@@ -380,58 +392,61 @@ test "read parses and caps optional limits" {
 
 ///|
 async test "read returns several files as headered blocks" {
-  let a = "/tmp/openseek-read-multi-a.txt"
-  let b = "/tmp/openseek-read-multi-b.txt"
-  @fs.write_file(a, "alpha", create_mode=CreateOrTruncate)
-  @fs.write_file(b, "beta", create_mode=CreateOrTruncate)
-  let result = execute({ "paths": [a, b] })
-  guard result is Respond(output) else { fail("expected Respond") }
-  assert_false(output.is_error)
-  assert_true(output.content.contains("path=\{a}"))
-  assert_true(output.content.contains("alpha"))
-  assert_true(output.content.contains("path=\{b}"))
-  assert_true(output.content.contains("beta"))
+  @vfs.with_tmpdir(dir => {
+    let a = "\{dir}/multi-a.txt"
+    let b = "\{dir}/multi-b.txt"
+    @fs.write_file(a, "alpha", create_mode=CreateOrTruncate)
+    @fs.write_file(b, "beta", create_mode=CreateOrTruncate)
+    let result = execute({ "paths": [a, b] })
+    guard result is Respond(output) else { fail("expected Respond") }
+    assert_false(output.is_error)
+    assert_true(output.content.contains("path=\{a}"))
+    assert_true(output.content.contains("alpha"))
+    assert_true(output.content.contains("path=\{b}"))
+    assert_true(output.content.contains("beta"))
+  })
 }
 
 ///|
 async test "a missing file reports inline while the others return" {
-  let a = "/tmp/openseek-read-multi-ok.txt"
-  @fs.write_file(a, "still here", create_mode=CreateOrTruncate)
-  let result = execute({ "paths": [a, "/tmp/openseek-read-multi-missing.txt"] })
-  guard result is Respond(output) else { fail("expected Respond") }
-  // Partial failure is not a tool error: the good file landed and the bad
-  // path's error block tells the model exactly which read to fix.
-  assert_false(output.is_error)
-  assert_true(output.content.contains("still here"))
-  assert_true(
-    output.content.contains(
-      "error reading /tmp/openseek-read-multi-missing.txt",
-    ),
-  )
+  @vfs.with_tmpdir(dir => {
+    let a = "\{dir}/multi-ok.txt"
+    let missing = "\{dir}/multi-missing.txt"
+    @fs.write_file(a, "still here", create_mode=CreateOrTruncate)
+    let result = execute({ "paths": [a, missing] })
+    guard result is Respond(output) else { fail("expected Respond") }
+    // Partial failure is not a tool error: the good file landed and the bad
+    // path's error block tells the model exactly which read to fix.
+    assert_false(output.is_error)
+    assert_true(output.content.contains("still here"))
+    assert_true(output.content.contains("error reading \{missing}"))
+  })
 }
 
 ///|
 async test "every file missing is a tool error" {
-  let result = execute({
-    "paths": ["/tmp/openseek-read-none-1", "/tmp/openseek-read-none-2"],
+  @vfs.with_tmpdir(dir => {
+    let result = execute({ "paths": ["\{dir}/none-1", "\{dir}/none-2"] })
+    guard result is Respond(output) else { fail("expected Respond") }
+    assert_true(output.is_error)
   })
-  guard result is Respond(output) else { fail("expected Respond") }
-  assert_true(output.is_error)
 }
 
 ///|
 async test "the output budget is shared and exhaustion is reported" {
-  let a = "/tmp/openseek-read-budget-a.txt"
-  let b = "/tmp/openseek-read-budget-b.txt"
-  @fs.write_file(a, "0123456789", create_mode=CreateOrTruncate)
-  @fs.write_file(b, "abcdefghij", create_mode=CreateOrTruncate)
-  let result = execute({ "paths": [a, b], "max_output_chars": 10 })
-  guard result is Respond(output) else { fail("expected Respond") }
-  assert_true(output.is_error)
-  assert_true(output.content.contains("0123456789"))
-  assert_true(output.content.contains("skipped 1 file(s)"))
-  assert_true(output.content.contains(b))
-  assert_false(output.content.contains("abcdefghij"))
+  @vfs.with_tmpdir(dir => {
+    let a = "\{dir}/budget-a.txt"
+    let b = "\{dir}/budget-b.txt"
+    @fs.write_file(a, "0123456789", create_mode=CreateOrTruncate)
+    @fs.write_file(b, "abcdefghij", create_mode=CreateOrTruncate)
+    let result = execute({ "paths": [a, b], "max_output_chars": 10 })
+    guard result is Respond(output) else { fail("expected Respond") }
+    assert_true(output.is_error)
+    assert_true(output.content.contains("0123456789"))
+    assert_true(output.content.contains("skipped 1 file(s)"))
+    assert_true(output.content.contains(b))
+    assert_false(output.content.contains("abcdefghij"))
+  })
 }
 
 ///|
@@ -439,34 +454,43 @@ async test "headers and error blocks count against the budget" {
   // 40 missing paths with a small budget: error blocks consume the budget,
   // the tail collapses into one bounded marker, and the total output stays
   // near the cap instead of growing per path (Codex review).
-  let paths : Array[Json] = []
-  for i in 0..<40 {
-    paths.push(Json::string("/tmp/openseek-read-flood-\{i}"))
-  }
-  let result = execute({ "paths": Json::array(paths), "max_output_chars": 300 })
-  guard result is Respond(output) else { fail("expected Respond") }
-  assert_true(output.is_error)
-  assert_true(output.content.contains("skipped"))
-  assert_true(output.content.contains("and"))
-  // Bounded: the budget plus one overshooting block plus the skip marker,
-  // far below what 40 unbudgeted error blocks (~70 chars each) would emit.
-  assert_true(output.content.length() < 1200)
+  @vfs.with_tmpdir(dir => {
+    let paths : Array[Json] = []
+    for i in 0..<40 {
+      paths.push(Json::string("\{dir}/flood-\{i}"))
+    }
+    let result = execute({
+      "paths": Json::array(paths),
+      "max_output_chars": 300,
+    })
+    guard result is Respond(output) else { fail("expected Respond") }
+    assert_true(output.is_error)
+    assert_true(output.content.contains("skipped"))
+    assert_true(output.content.contains("and"))
+    // Bounded: the budget plus one overshooting block plus the skip marker,
+    // far below what 40 unbudgeted error blocks (~70 chars each) would emit.
+    assert_true(output.content.length() < 1200)
+  })
 }
 
 ///|
 async test "read rejects path and paths together" {
-  let result = execute({ "path": "/tmp/x", "paths": ["/tmp/y"] })
-  guard result is Respond(output) else { fail("expected Respond") }
-  assert_true(output.is_error)
-  assert_true(output.content.contains("not both"))
+  @vfs.with_tmpdir(dir => {
+    let result = execute({ "path": "\{dir}/x", "paths": ["\{dir}/y"] })
+    guard result is Respond(output) else { fail("expected Respond") }
+    assert_true(output.is_error)
+    assert_true(output.content.contains("not both"))
+  })
 }
 
 ///|
 async test "read rejects line ranges on multi-file calls" {
-  let result = execute({ "paths": ["/tmp/x", "/tmp/y"], "start_line": 2 })
-  guard result is Respond(output) else { fail("expected Respond") }
-  assert_true(output.is_error)
-  assert_true(output.content.contains("single file"))
+  @vfs.with_tmpdir(dir => {
+    let result = execute({ "paths": ["\{dir}/x", "\{dir}/y"], "start_line": 2 })
+    guard result is Respond(output) else { fail("expected Respond") }
+    assert_true(output.is_error)
+    assert_true(output.content.contains("single file"))
+  })
 }
 
 ///|
@@ -479,10 +503,12 @@ async test "read rejects an empty paths array" {
 
 ///|
 async test "read surfaces filesystem errors" {
-  let result = execute({ "path": "/tmp/openseek-does-not-exist" })
-  guard result is Respond(output) else { fail("expected Respond") }
-  assert_true(output.content.contains("error reading"))
-  assert_true(output.is_error)
+  @vfs.with_tmpdir(dir => {
+    let result = execute({ "path": "\{dir}/does-not-exist" })
+    guard result is Respond(output) else { fail("expected Respond") }
+    assert_true(output.content.contains("error reading"))
+    assert_true(output.is_error)
+  })
 }
 
 ///|
@@ -496,13 +522,15 @@ async test "read rejects missing path" {
 
 ///|
 async test "read rejects invalid limits" {
-  let result = execute({ "path": "/tmp/openseek-read-test.txt", "max_lines": 0 })
-  guard result is Respond(output) else { fail("expected Respond") }
-  assert_true(output.content.contains("error: read requires"))
-  assert_true(
-    output.content.contains("arguments.max_lines to be a positive number"),
-  )
-  assert_true(output.is_error)
+  @vfs.with_tmpdir(dir => {
+    let result = execute({ "path": "\{dir}/test.txt", "max_lines": 0 })
+    guard result is Respond(output) else { fail("expected Respond") }
+    assert_true(output.content.contains("error: read requires"))
+    assert_true(
+      output.content.contains("arguments.max_lines to be a positive number"),
+    )
+    assert_true(output.is_error)
+  })
 }
 
 ///|
@@ -515,15 +543,17 @@ async test "read rejects non-object arguments" {
 
 ///|
 async test "a huge max_lines returns the remaining lines without overflow" {
-  let path = "/tmp/openseek-read-huge-max.txt"
-  @fs.write_file(path, "a\nb\nc", create_mode=CreateOrTruncate)
-  let result = execute({
-    "path": path,
-    "start_line": 2,
-    "max_lines": 2147483647,
+  @vfs.with_tmpdir(dir => {
+    let path = "\{dir}/huge-max.txt"
+    @fs.write_file(path, "a\nb\nc", create_mode=CreateOrTruncate)
+    let result = execute({
+      "path": path,
+      "start_line": 2,
+      "max_lines": 2147483647,
+    })
+    guard result is Respond(output) else { fail("expected Respond") }
+    assert_false(output.is_error)
+    assert_true(output.content.contains("b\nc"))
+    assert_true(output.content.contains("shown_lines=2"))
   })
-  guard result is Respond(output) else { fail("expected Respond") }
-  assert_false(output.is_error)
-  assert_true(output.content.contains("b\nc"))
-  assert_true(output.content.contains("shown_lines=2"))
 }

@@ -145,6 +145,42 @@ pub async fn write_text(root : String, path : String, content : String) -> Unit 
 }
 
 ///|
+/// Run `body` with a freshly created temporary directory, then remove that
+/// directory (and everything under it) once `body` returns or raises.
+///
+/// The path handed to `body` is an existing directory, so callers can write
+/// files directly beneath it without an `@fs.mkdir` first. Prefer this over a
+/// hardcoded `/tmp/...` path: it keeps tests portable (Windows has no `/tmp`),
+/// avoids collisions between concurrent runs, and cleans up after itself even
+/// when `body` fails an assertion.
+pub async fn[T] with_tmpdir(
+  body : async (String) -> T,
+  prefix? : String = "openseek-test-",
+) -> T {
+  let dir = @fs.tmpdir(prefix~)
+  async fn rmdir() {
+    @fs.rmdir(dir, recursive=true) catch {
+      error if @async.is_being_cancelled() => raise error
+      // We sallow other errors here to perform best-effort clean up.
+      _ => ()
+    }
+  }
+  // `defer` cannot run an async call, so clean up on both paths explicitly and
+  // re-raise the body's error after removing the directory.
+  try body(dir) catch {
+    error => {
+      rmdir()
+      raise error
+    }
+  } noraise {
+    result => {
+      rmdir()
+      result
+    }
+  }
+}
+
+///|
 fn validate_relative_path(path : String) -> Unit raise {
   if path == "" {
     fail("file path must not be empty")

@@ -132,13 +132,15 @@ fn is_moon_pkg_path(path : String) -> Bool {
 
 ///|
 async test "write creates a file with the given content" {
-  let path = "/tmp/openseek-write-test.txt"
-  let result = execute({ "path": path, "content": "hello write" })
-  guard result is Respond(output) else { fail("expected Respond") }
-  assert_eq(output.content, "ok: wrote 11 chars to \{path}")
-  assert_false(output.is_error)
-  let read_back = @fs.read_file(path).text()
-  assert_eq(read_back, "hello write")
+  @vfs.with_tmpdir(dir => {
+    let path = "\{dir}/test.txt"
+    let result = execute({ "path": path, "content": "hello write" })
+    guard result is Respond(output) else { fail("expected Respond") }
+    assert_eq(output.content, "ok: wrote 11 chars to \{path}")
+    assert_false(output.is_error)
+    let read_back = @fs.read_file(path).text()
+    assert_eq(read_back, "hello write")
+  })
 }
 
 ///|
@@ -179,26 +181,30 @@ async test "write manifest guards accept Windows path separators" {
 
 ///|
 async test "write truncates existing files" {
-  let path = "/tmp/openseek-write-truncate.txt"
-  @fs.write_file(path, "long original content", create_mode=CreateOrTruncate)
-  let result = execute({ "path": path, "content": "short" })
-  guard result is Respond(output) else { fail("expected Respond") }
-  assert_eq(output.content, "ok: wrote 5 chars to \{path}")
-  assert_false(output.is_error)
-  let read_back = @fs.read_file(path).text()
-  assert_eq(read_back, "short")
+  @vfs.with_tmpdir(dir => {
+    let path = "\{dir}/truncate.txt"
+    @fs.write_file(path, "long original content", create_mode=CreateOrTruncate)
+    let result = execute({ "path": path, "content": "short" })
+    guard result is Respond(output) else { fail("expected Respond") }
+    assert_eq(output.content, "ok: wrote 5 chars to \{path}")
+    assert_false(output.is_error)
+    let read_back = @fs.read_file(path).text()
+    assert_eq(read_back, "short")
+  })
 }
 
 ///|
 async test "write accepts empty content" {
-  let path = "/tmp/openseek-write-empty.txt"
-  @fs.write_file(path, "previous", create_mode=CreateOrTruncate)
-  let result = execute({ "path": path, "content": "" })
-  guard result is Respond(output) else { fail("expected Respond") }
-  assert_eq(output.content, "ok: wrote 0 chars to \{path}")
-  assert_false(output.is_error)
-  let read_back = @fs.read_file(path).text()
-  assert_eq(read_back, "")
+  @vfs.with_tmpdir(dir => {
+    let path = "\{dir}/empty.txt"
+    @fs.write_file(path, "previous", create_mode=CreateOrTruncate)
+    let result = execute({ "path": path, "content": "" })
+    guard result is Respond(output) else { fail("expected Respond") }
+    assert_eq(output.content, "ok: wrote 0 chars to \{path}")
+    assert_false(output.is_error)
+    let read_back = @fs.read_file(path).text()
+    assert_eq(read_back, "")
+  })
 }
 
 ///|
@@ -236,21 +242,26 @@ async test "write rejects suspiciously tiny moon.pkg" {
 
 ///|
 async test "write surfaces filesystem errors" {
-  let result = execute({
-    "path": "/tmp/openseek-missing-dir/does-not-exist.txt",
-    "content": "x",
+  @vfs.with_tmpdir(dir => {
+    // The parent directory does not exist, so the write fails.
+    let result = execute({
+      "path": "\{dir}/missing-dir/does-not-exist.txt",
+      "content": "x",
+    })
+    guard result is Respond(output) else { fail("expected Respond") }
+    assert_true(output.content.contains("error writing"))
+    assert_true(output.is_error)
   })
-  guard result is Respond(output) else { fail("expected Respond") }
-  assert_true(output.content.contains("error writing"))
-  assert_true(output.is_error)
 }
 
 ///|
 async test "write rejects missing content" {
-  let result = execute({ "path": "/tmp/openseek-noop.txt" })
-  guard result is Respond(output) else { fail("expected Respond") }
-  assert_eq(output.content, "error: write requires arguments.content")
-  assert_true(output.is_error)
+  @vfs.with_tmpdir(dir => {
+    let result = execute({ "path": "\{dir}/noop.txt" })
+    guard result is Respond(output) else { fail("expected Respond") }
+    assert_eq(output.content, "error: write requires arguments.content")
+    assert_true(output.is_error)
+  })
 }
 
 ///|

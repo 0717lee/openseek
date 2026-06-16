@@ -60,3 +60,30 @@ async test "fixture writes to disk and reports mismatches" {
   assert_eq(files.mismatch_on_disk(root), "content mismatch in src/note.txt")
   @fs.rmdir(root, recursive=true)
 }
+
+///|
+async test "with_tmpdir hands back a writable dir and removes it afterward" {
+  let captured = @filesystem.with_tmpdir(dir => {
+    let path = "\{dir}/note.txt"
+    @fs.write_file(path, "hello", create_mode=CreateOrTruncate)
+    assert_eq(@fs.read_file(path).text(), "hello")
+    dir
+  })
+  // The directory and its contents are gone once the body returns.
+  assert_false(@fs.exists(captured))
+}
+
+///|
+async test "with_tmpdir cleans up even when the body raises" {
+  let mut leaked = ""
+  @filesystem.with_tmpdir(dir => {
+    leaked = dir
+    @fs.write_file("\{dir}/x", "x", create_mode=CreateOrTruncate)
+    fail("boom")
+  }) catch {
+    error if @async.is_being_cancelled() => raise error
+    _ => ()
+  }
+  assert_true(leaked != "")
+  assert_false(@fs.exists(leaked))
+}

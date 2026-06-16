@@ -2,6 +2,8 @@
 package "bobzhang/openseek/testkit/filesystem"
 
 // Values
+pub async fn[T] with_tmpdir(async (String) -> T, prefix? : String) -> T
+
 pub async fn write_text(String, String, String) -> Unit
 
 // Errors

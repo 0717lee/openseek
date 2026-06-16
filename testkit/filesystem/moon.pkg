@@ -1,11 +1,11 @@
 import {
+  "moonbitlang/async",
   "moonbitlang/async/fs",
   "moonbitlang/core/json",
 }
 
 import {
-  "moonbitlang/async",
-  "moonbitlang/async/fs",
+  "moonbitlang/core/test",
 } for "test"
 
 warnings = "+unnecessary_annotation"
