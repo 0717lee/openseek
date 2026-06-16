@@ -5,6 +5,12 @@ test "function name from markdown basename" {
 }
 
 ///|
+test "input basename handles Unix and Windows separators" {
+  assert_eq(input_basename("./prompt/base_prompt.mbt.md"), "base_prompt.mbt.md")
+  assert_eq(input_basename(".\\prompt\\flash_prompt.mbt.md"), "flash_prompt.mbt.md")
+}
+
+///|
 test "function name rejects unsupported extension" {
   try {
     ignore(function_name_from_base("base_prompt.txt"))

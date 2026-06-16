@@ -23,7 +23,7 @@ async fn main {
   guard cli_command().parse().values is { "input": [input, ..], "output": [output, ..], .. } else {
     fail("missing parsed arguments")
   }
-  let base = @path.Path(input).basename()
+  let base = input_basename(input)
   let function_name = function_name_from_base(base)
   let markdown = @fs.read_file(input).text()
   let source = generated_source(base~, function_name~, markdown~)
@@ -39,6 +39,14 @@ async fn main {
 async fn output_matches(output : StringView, source : StringView) -> Bool {
   let current = @fs.read_file(output).text() catch { _ => return false }
   current[:] == source
+}
+
+///|
+fn input_basename(input : StringView) -> StringView {
+  let unix_parts = input.split("/").collect()
+  let after_unix = unix_parts[unix_parts.length() - 1]
+  let windows_parts = after_unix.split("\\").collect()
+  windows_parts[windows_parts.length() - 1]
 }
 
 ///|
