@@ -227,29 +227,56 @@ fn assistant_card(
 }
 
 ///|
+/// A tool call, with its arguments folded away by default: the row shows only
+/// the tool name and expands to the full argument JSON on click. Calls with no
+/// meaningful arguments render as a plain name (nothing to fold).
 fn tool_call_view(call : @deepseek.ToolCall) -> @html.Html {
-  @html.div(class="tool-call", [
-    @html.div(class="tool-call-name", [
-      @html.text("→ "),
-      @html.strong(call.name),
-    ]),
-    @html.pre(class="tool-call-args", pretty_json(call.arguments)),
+  let name_row : Array[@html.Html] = [@html.text("→ "), @html.strong(call.name)]
+  let args = pretty_json(call.arguments)
+  if is_blank_args(args) {
+    return @html.div(class="tool-call", [
+      @html.div(class="tool-call-name", name_row),
+    ])
+  }
+  @html.details(class="tool-call", [
+    @html.summary(class="tool-call-name", name_row),
+    @html.pre(class="tool-call-args", args),
   ])
 }
 
 ///|
+/// Whether a tool call's (pretty-printed) arguments carry nothing worth folding
+/// away — empty text or an empty object.
+fn is_blank_args(args : String) -> Bool {
+  let trimmed = args.trim().to_owned()
+  trimmed.is_empty() || trimmed == "{}"
+}
+
+///|
+/// Tool output is noisy, so fold it behind the label by default. The summary
+/// keeps the tool name and, on failure, a red flag — both visible while the card
+/// is collapsed — so a failed tool stands out without expanding it.
 fn tool_card(
   seq : Int,
   time : String,
   result : @agent_session.ToolResult,
 ) -> @html.Html {
-  let kind = if result.is_error() { "tool error" } else { "tool" }
-  let label = if result.is_error() {
+  let is_error = result.is_error()
+  let kind = if is_error { "tool error" } else { "tool" }
+  let label = if is_error {
     "Tool error · \{result.tool_name()}"
   } else {
     "Tool result · \{result.tool_name()}"
   }
-  card(kind, label, seq, time~, [text_block(result.content())])
+  let flag = if is_error {
+    @html.span(class="tool-flag", "🚩 failed")
+  } else {
+    @html.nothing
+  }
+  @html.details(class="card \{kind}", [
+    @html.summary(class="card-label", card_head(label, seq, time=time, flag~)),
+    @html.div(class="card-body", [text_block(result.content())]),
+  ])
 }
 
 ///|
@@ -307,8 +334,20 @@ fn message_card(message : @deepseek.ChatMessage) -> @html.Html {
       ])
     User => model_card("user", "User", message)
     Assistant => model_card("assistant", "Assistant", message)
-    Tool(_) => model_card("tool", "Tool result", message)
+    Tool(_) => model_tool_card(message)
   }
+}
+
+///|
+/// Model-view tool result, folded by default like the raw view. The model
+/// projection replays a tool result to the model as plain content and drops the
+/// error flag (see `agent_session` projection), so there is no failure marker
+/// here — the raw log is the view that red-flags errors.
+fn model_tool_card(message : @deepseek.ChatMessage) -> @html.Html {
+  @html.details(class="card tool", [
+    @html.summary(class="card-label", "Tool result"),
+    @html.div(class="card-body", [text_block(message.content)]),
+  ])
 }
 
 ///|
@@ -352,17 +391,32 @@ fn card(
   time~ : String,
   body : Array[@html.Html],
 ) -> @html.Html {
+  @html.section(class="card \{kind}", [
+    @html.div(class="card-label", card_head(label, seq, time~)),
+    @html.div(class="card-body", body),
+  ])
+}
+
+///|
+/// The card header row: a sequence chip, the label, and (when stamped) a
+/// relative-time chip. `flag` sits between the sequence and the label so a
+/// folded card can still surface a status marker (e.g. a failed-tool flag) in
+/// its summary; it defaults to nothing for ordinary cards.
+fn card_head(
+  label : String,
+  seq : Int,
+  time~ : String,
+  flag~ : @html.Html = @html.nothing,
+) -> Array[@html.Html] {
   let head : Array[@html.Html] = [
     @html.span(class="card-seq", "#\{seq}"),
+    flag,
     @html.text(label),
   ]
   if !time.is_empty() {
     head.push(@html.span(class="card-ts", time))
   }
-  @html.section(class="card \{kind}", [
-    @html.div(class="card-label", head),
-    @html.div(class="card-body", body),
-  ])
+  head
 }
 
 ///|

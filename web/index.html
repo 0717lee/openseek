@@ -242,7 +242,7 @@
     .card.user { border-left-color: var(--user); }
     .card.assistant { border-left-color: var(--assistant); }
     .card.tool { border-left-color: var(--tool); }
-    .card.tool.error { border-left-color: var(--error); }
+    .card.tool.error { border-left-color: var(--error); background: var(--notice-error-bg); }
     .card.runtime { border-left-color: var(--runtime); }
     .card.summary { border-left-color: var(--summary); background: var(--summary-bg); }
     .card.terminal { border-left-color: var(--terminal); }
@@ -265,8 +265,18 @@
     .reasoning .content { color: var(--muted); }
     .tool-calls { margin-top: 8px; }
     .tool-call { border: 1px dashed var(--border); border-radius: 6px; padding: 6px 10px; margin-top: 6px; }
-    .tool-call-name { font-size: 13px; margin-bottom: 4px; }
+    .tool-call-name { font-size: 13px; }
+    details.tool-call > summary.tool-call-name { cursor: pointer; }
+    details.tool-call[open] > summary.tool-call-name { margin-bottom: 4px; }
     .tool-call-args { margin: 0; white-space: pre-wrap; font-family: ui-monospace, monospace; font-size: 12px; color: var(--muted); }
+
+    /* folded tool-result cards: the label is the toggle, body hides until clicked */
+    details.card > summary.card-label { cursor: pointer; }
+    details.card > summary.card-label:hover { color: var(--text); }
+    .tool-flag {
+      color: var(--error); font-weight: 700; margin-right: 8px;
+      text-transform: none; letter-spacing: 0;
+    }
 
     /* badges */
     .badge {

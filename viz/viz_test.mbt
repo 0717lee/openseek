@@ -49,6 +49,76 @@ fn render(html : @html.Html) -> String {
 }
 
 ///|
+/// A session whose tool result failed, plus a tool call with arguments and one
+/// without, to exercise the fold/flag rendering.
+fn error_tool_session() -> @agent_session.Session {
+  @agent_session.Session(SessionId("e"), system_prompt="")
+  .append(
+    Assistant(
+      AssistantMessage(
+        "",
+        tool_calls=[
+          ToolCall(id="c1", name="shell", arguments="{\"cmd\":\"ls\"}"),
+          ToolCall(id="c2", name="noop", arguments="{}"),
+        ],
+      ),
+    ),
+  )
+  .append(
+    Tool(
+      ToolResult(
+        tool_call_id="c1",
+        tool_name="shell",
+        content="boom",
+        is_error=true,
+      ),
+    ),
+  )
+}
+
+///|
+test "tool calls fold their arguments, empty args stay flat" {
+  let html = render(@viz.render_session(error_tool_session(), RawLog))
+  // A call with arguments folds: the name becomes a <summary>, args hide in the
+  // collapsed <details> (no `open` attribute) yet are still in the DOM.
+  assert_true(html.contains("<details class=\"tool-call\">"))
+  assert_true(html.contains("<summary class=\"tool-call-name\">"))
+  assert_true(html.contains("shell"))
+  assert_true(html.contains("cmd"))
+  // A call with no meaningful arguments ({}) renders flat — nothing to fold.
+  assert_true(html.contains("<div class=\"tool-call\"><div class=\"tool-call-name\">"))
+}
+
+///|
+test "failed tool result is folded and red-flagged" {
+  let html = render(@viz.render_session(error_tool_session(), RawLog))
+  // Folded by default (a <details> with no `open`), tagged as an error, and the
+  // summary carries the red flag so a collapsed failure still stands out.
+  assert_true(html.contains("<details class=\"card tool error\">"))
+  assert_false(html.contains("<details class=\"card tool error\" open>"))
+  assert_true(html.contains("class=\"tool-flag\">🚩 failed"))
+  assert_true(html.contains("Tool error · shell"))
+  assert_true(html.contains("boom"))
+}
+
+///|
+test "successful tool result folds without a flag" {
+  // sample_session's tool result is a success; it should fold but carry no flag.
+  let session = @viz.session_from_parse(
+    @viz.parse_events(events_jsonl(sample_session())),
+    id="demo",
+    system_prompt="",
+  )
+  let raw = render(@viz.render_session(session, RawLog))
+  assert_true(raw.contains("<details class=\"card tool\">"))
+  assert_false(raw.contains("tool-flag"))
+  // Model view folds its tool result too (no flag — the projection drops it).
+  let model = render(@viz.render_session(session, ModelView))
+  assert_true(model.contains("<details class=\"card tool\">"))
+  assert_true(model.contains("Tool result"))
+}
+
+///|
 test "parse round-trips every event kind" {
   let text = events_jsonl(sample_session())
   let parsed = @viz.parse_events(text)
