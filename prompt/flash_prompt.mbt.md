@@ -26,8 +26,8 @@ Blocks that need a top-level `fn main` (forbidden in a non-main package) or that
   - `read`, `edit`, and `write` for files.
   - `moon_check` for `moon check`; it starts or reuses a persistent
     `moon check --watch --diagnostic-limit 10` watcher.
-    If `moon --watch` crashes, `moon_check` compacts the crash output and
-    automatically starts a replacement watcher under a restart budget.
+    If `moon --watch` crashes, `moon_check` automatically starts a replacement
+    watcher under a restart budget and shows only a short restart notice.
   - `shell` for one-shot Moon commands other than `moon check`; pass the
     tool's `cwd` field instead of embedding repeated `cd ... &&` strings.
 - Use `moon_check` once per project directory near the start of an iterative

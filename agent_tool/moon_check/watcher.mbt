@@ -111,7 +111,7 @@ fn moon_check_command_line(input : @decode.MoonCheckInput) -> String {
 /// Spawn `moon check --watch ...` with combined stdout/stderr piped back to
 /// `monitor_moon_check`. Returns the freshly assigned watcher id. The caller
 /// can pre-populate the recorded output via `initial_output` — used when an
-/// auto-restart wants to carry the previous crash summary forward.
+/// auto-restart wants to carry the previous crash notice forward.
 async fn[X] spawn_moon_check_watch(
   runtime : MoonCheckRuntime[X],
   input : @decode.MoonCheckInput,
@@ -222,10 +222,10 @@ async fn[X] monitor_moon_check(
 
 ///|
 /// React to a watcher exit. Three cases:
-/// - **Crash exit** (non-zero exit code AND output matches the moon crash
-///   banner): replace the output with a compact summary (see
-///   `compact_moon_check_exit_output`), mark stopped, and auto-restart if the
-///   restart budget allows (see `should_auto_restart_moon_check`).
+/// - **Crash exit** (non-zero exit code with a moon crash banner, Rust panic
+///   code, or signal-style code): replace the output with a short crash notice,
+///   mark stopped, and auto-restart if the restart budget allows (see
+///   `should_auto_restart_moon_check`).
 /// - **Non-crash non-zero exit**: mark stopped, no output replacement, no
 ///   auto-restart. The next caller of `moon_check` triggers a manual restart.
 /// - **Clean exit** (exit code 0): mark stopped, no auto-restart.
@@ -242,16 +242,14 @@ async fn[X] handle_moon_check_exit(
     snapshot.status is Running else {
     return
   }
-  let moon_crashed = moon_check_output_is_crash(snapshot.output)
+  let moon_crashed = moon_check_exit_is_crash(snapshot.output, exit_code)
   if exit_code != 0 && moon_crashed {
     let restart_attempt = snapshot.restart_count + 1
     ignore(
       runtime.replace_moon_check_output(
         key,
         id,
-        compact_moon_check_exit_output(
-          snapshot.output,
-          exit_code,
+        moon_check_crash_notice_output(
           restart_attempt~,
           restart_limit=snapshot.restart_limit,
         ),
@@ -268,7 +266,7 @@ async fn[X] handle_moon_check_exit(
         cwd,
         key,
         restart_count=stopped_snapshot.restart_count + 1,
-        restart_reason=Some("auto restart after exit \{exit_code}"),
+        restart_reason=Some("restarted due to crash"),
         initial_output=ensure_trailing_newline(stopped_snapshot.output),
       ),
     )
@@ -276,8 +274,8 @@ async fn[X] handle_moon_check_exit(
 }
 
 ///|
-/// Auto-restart only when moon itself crashed (panic / accidental crash
-/// banner) with a non-zero exit, and we still have restart budget left.
+/// Auto-restart only when moon itself crashed with a non-zero exit, and we
+/// still have restart budget left.
 /// Normal compile errors leave the watcher running, so they never reach this
 /// path — only outright watcher exits do.
 fn should_auto_restart_moon_check(
@@ -341,10 +339,9 @@ test "moon_check builds watch command arguments" {
 test "moon_check auto restart respects exit code and budget" {
   let snapshot = test_snapshot(restart_count=2, restart_limit=3)
   assert_true(should_auto_restart_moon_check(snapshot, 101, moon_crashed=true))
+  assert_true(should_auto_restart_moon_check(snapshot, 134, moon_crashed=true))
   assert_false(should_auto_restart_moon_check(snapshot, 0, moon_crashed=true))
-  assert_false(
-    should_auto_restart_moon_check(snapshot, 101, moon_crashed=false),
-  )
+  assert_false(should_auto_restart_moon_check(snapshot, 1, moon_crashed=false))
   assert_false(
     should_auto_restart_moon_check(
       test_snapshot(restart_count=3, restart_limit=3),

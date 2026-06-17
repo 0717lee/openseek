@@ -54,6 +54,13 @@ fn moon_check_output_is_crash(output : String) -> Bool {
 }
 
 ///|
+/// Treat Rust panics and signal-style exits as watcher crashes even if moon
+/// exits before printing its normal crash banner.
+fn moon_check_exit_is_crash(output : String, exit_code : Int) -> Bool {
+  moon_check_output_is_crash(output) || exit_code == 101 || exit_code >= 128
+}
+
+///|
 fn ensure_trailing_newline(output : String) -> String {
   if output == "" || output.has_suffix("\n") {
     output
@@ -63,46 +70,17 @@ fn ensure_trailing_newline(output : String) -> String {
 }
 
 ///|
-/// Reduce a `moon` panic banner into a few lines the agent can act on:
-/// exit code, crash flag, the `panicked at ...` line, the underlying detail,
-/// and the restart budget. The full upstream "Please report it at ..." block
-/// is dropped to keep the context window clean across restarts.
-fn compact_moon_check_exit_output(
-  output : String,
-  exit_code : Int,
+/// Short notice carried into the replacement watcher's output after a crash.
+/// The underlying panic text is intentionally not surfaced to the user.
+fn moon_check_crash_notice_output(
   restart_attempt~ : Int,
   restart_limit~ : Int,
 ) -> String {
-  let lines : Array[String] = []
-  lines.push("[moon_check watcher exited]")
-  lines.push("exit=\{exit_code}")
-  if moon_check_output_is_crash(output) {
-    lines.push("moon_crash=true")
-  }
-  match first_line_containing(output, "panicked at") {
-    Some(line) => lines.push("panic=\{line}")
-    None => ()
-  }
-  match first_line_containing(output, "called `") {
-    Some(line) => lines.push("detail=\{line}")
-    None => ()
-  }
   if restart_attempt <= restart_limit {
-    lines.push("restart=attempt \{restart_attempt}/\{restart_limit}")
+    "restarted due to crash"
   } else {
-    lines.push("restart=limit reached \{restart_limit}/\{restart_limit}")
+    "stopped after repeated crashes"
   }
-  lines.join("\n")
-}
-
-///|
-fn first_line_containing(content : String, needle : String) -> String? {
-  for line in content.split("\n") {
-    if line.contains(needle) {
-      return Some(line.trim().to_owned())
-    }
-  }
-  None
 }
 
 ///|
@@ -198,27 +176,22 @@ fn MoonCheckSnapshot::update_text(update : MoonCheckSnapshot) -> String {
 pub fn runtime_update_text(
   events : Array[@agent_runtime.AgentEvent],
 ) -> String? {
+  // Single pass: dedup by key (last writer wins, as the in-order overwrite
+  // did) while counting, with the map as the accumulator and no `mut`.
   let latest_moon_checks : Map[String, MoonCheckSnapshot] = {}
-  let mut moon_check_count = 0
-  for event in events {
-    match event {
-      MoonCheckUpdate(update) => {
-        latest_moon_checks[update.key] = update
-        moon_check_count += 1
-      }
-      _ => ()
+  let count = for event in events; count = 0 {
+    if event is MoonCheckUpdate(update) {
+      latest_moon_checks[update.key] = update
+      continue count + 1
     }
+  } nobreak {
+    count
   }
-  if moon_check_count == 0 {
-    None
-  } else {
-    let parts = [
-      for update in latest_moon_checks.values() => update.update_text()
-    ]
-    Some(
-      "[moon_check update]\nevents=\{moon_check_count}\n\{parts.join("\n\n")}",
-    )
-  }
+  guard count > 0 else { return None }
+  let parts = [
+    for update in latest_moon_checks.values() => update.update_text()
+  ]
+  Some("[moon_check update]\nevents=\{count}\n\{parts.join("\n\n")}")
 }
 
 ///|
@@ -392,31 +365,26 @@ test "moon_check update text coalesces by watcher key" {
 }
 
 ///|
-test "moon_check compacts moon watcher crash output" {
-  let summary = compact_moon_check_exit_output(
-    (
-      #|thread 'notify-rs kqueue loop' panicked at /Users/runner/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/kqueue-1.1.1/src/lib.rs:661:86:
-      #|called `Option::unwrap()` on a `None` value
-      #|`moon` has accidentally crashed.
-      #|Please report it at:
-      #|    https://github.com/moonbitlang/moon/issues/new?template=bug_report.md
-      #|
-    ),
-    101,
+test "moon_check crash notice hides crash details" {
+  let summary = moon_check_crash_notice_output(
     restart_attempt=2,
     restart_limit=3,
   )
-  inspect(
-    summary,
-    content=(
-      #|[moon_check watcher exited]
-      #|exit=101
-      #|moon_crash=true
-      #|panic=thread 'notify-rs kqueue loop' panicked at /Users/runner/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/kqueue-1.1.1/src/lib.rs:661:86:
-      #|detail=called `Option::unwrap()` on a `None` value
-      #|restart=attempt 2/3
-    ),
-  )
+  inspect(summary, content="restarted due to crash")
   assert_false(summary.contains("Please report it at"))
   assert_false(summary.contains("github.com/moonbitlang/moon/issues"))
+  assert_false(summary.contains("panicked at"))
+  assert_eq(
+    moon_check_crash_notice_output(restart_attempt=4, restart_limit=3),
+    "stopped after repeated crashes",
+  )
+}
+
+///|
+test "moon_check crash detection handles exits without banner" {
+  assert_true(moon_check_exit_is_crash("", 101))
+  assert_true(moon_check_exit_is_crash("", 134))
+  assert_true(moon_check_exit_is_crash("panicked at watcher", 1))
+  assert_false(moon_check_exit_is_crash("invalid option", 1))
+  assert_false(moon_check_exit_is_crash("", 0))
 }

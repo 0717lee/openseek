@@ -16,11 +16,10 @@ diagnostic limit keeps early broken-project states from flooding the
 conversation with a large compiler wall. The first call for a given cwd/options
 tuple starts a workspace watcher; later calls with the same tuple reuse the
 existing watcher and return the latest snapshot.
-If the underlying `moon --watch` process exits unexpectedly, `moon_check`
-compacts the crash output and automatically starts a replacement watcher for
-the same tuple, up to a small restart budget. This keeps compiler feedback
-flowing during long agent runs while avoiding repeated crash-banner dumps in
-the model context.
+If the underlying `moon --watch` process exits with a likely crash,
+`moon_check` automatically starts a replacement watcher for the same tuple, up
+to a small restart budget. It carries forward only a short
+`restarted due to crash` notice instead of the crash details.
 
 The schema is intentionally narrow. It accepts MoonBit check options that affect
 diagnostics, but it does not expose unrelated `moon` subcommands. That narrow
@@ -53,7 +52,7 @@ sequenceDiagram
   Agent->>Queue: drain before next model turn
   Queue-->>Agent: moon_check renders coalesced update
   alt watcher exits unexpectedly
-    Tool->>State: compact crash output
+    Tool->>State: record short crash notice
     Tool->>Watcher: restart within budget
     Tool->>State: register replacement
   end
@@ -98,9 +97,8 @@ when the process cannot be launched. The string body has one of these shapes:
 
 - `"cwd=<cwd>\ncommand=moon check --watch --diagnostic-limit 10 ...\nwatcher=<started|reused|restarted>\nid=<id>\nstatus=<running|stopped>\nseq=<n>\n<output>"`.
 - Restarted watchers also include `restart_count`, `restart_limit`, and
-  `restart_reason`. Crash summaries use a compact
-  `[moon_check watcher exited]` block instead of forwarding the full `moon`
-  panic banner.
+  `restart_reason`. Crash restarts carry a short `restarted due to crash`
+  notice instead of forwarding the full `moon` panic banner.
 - `"error running moon_check: <error>"`.
 - `"error: moon_check requires <field description>"`.
 

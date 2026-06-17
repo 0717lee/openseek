@@ -442,7 +442,7 @@ async test "moon_check runtime ignores stale watcher id updates" {
 }
 
 ///|
-async test "moon_check keeps crash summary in replacement output" {
+async test "moon_check keeps crash notice in replacement output" {
   @async.with_task_group() <| group => {
     let runtime = MoonCheckRuntime(AgentRuntime(), AgentTaskScope(group))
     let key = "cwd=/tmp"
@@ -465,14 +465,12 @@ async test "moon_check keeps crash summary in replacement output" {
         max_output_chars=12000,
         restart_count=1,
         restart_limit=3,
-        restart_reason=Some("auto restart after exit 101"),
+        restart_reason=Some("restarted due to crash"),
         exited=Queue(kind=Unbounded),
       ),
     )
     let summary =
-      #|[moon_check watcher exited]
-      #|exit=101
-      #|restart=attempt 1/3
+      #|restarted due to crash
       #|
     ignore(runtime.replace_moon_check_output(key, "moon-check-2", summary))
     let first_replacement_output =
@@ -485,8 +483,8 @@ async test "moon_check keeps crash summary in replacement output" {
       is Some(snapshot) else {
       fail("expected replacement watcher output")
     }
-    assert_true(snapshot.output.contains("[moon_check watcher exited]"))
-    assert_true(snapshot.output.contains("restart=attempt 1/3"))
+    assert_true(snapshot.output.contains("restarted due to crash"))
+    assert_false(snapshot.output.contains("panicked at"))
     assert_true(
       snapshot.output.contains("Success, waiting for filesystem changes..."),
     )
