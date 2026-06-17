@@ -231,7 +231,10 @@ fn assistant_card(
 /// the tool name and expands to the full argument JSON on click. Calls with no
 /// meaningful arguments render as a plain name (nothing to fold).
 fn tool_call_view(call : @deepseek.ToolCall) -> @html.Html {
-  let name_row : Array[@html.Html] = [@html.text("→ "), @html.strong(call.name)]
+  let name_row : Array[@html.Html] = [
+    @html.text("→ "),
+    @html.strong(call.name),
+  ]
   let args = pretty_json(call.arguments)
   if is_blank_args(args) {
     return @html.div(class="tool-call", [
@@ -274,7 +277,7 @@ fn tool_card(
     @html.nothing
   }
   @html.details(class="card \{kind}", [
-    @html.summary(class="card-label", card_head(label, seq, time=time, flag~)),
+    @html.summary(class="card-label", card_head(label, seq, time~, flag~)),
     @html.div(class="card-body", [text_block(result.content())]),
   ])
 }
@@ -448,7 +451,7 @@ fn card_head(
   label : String,
   seq : Int,
   time~ : String,
-  flag~ : @html.Html = @html.nothing,
+  flag? : @html.Html = @html.nothing,
 ) -> Array[@html.Html] {
   let head : Array[@html.Html] = [
     @html.span(class="card-seq", "#\{seq}"),

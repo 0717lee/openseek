@@ -55,13 +55,10 @@ fn error_tool_session() -> @agent_session.Session {
   @agent_session.Session(SessionId("e"), system_prompt="")
   .append(
     Assistant(
-      AssistantMessage(
-        "",
-        tool_calls=[
-          ToolCall(id="c1", name="shell", arguments="{\"cmd\":\"ls\"}"),
-          ToolCall(id="c2", name="noop", arguments="{}"),
-        ],
-      ),
+      AssistantMessage("", tool_calls=[
+        ToolCall(id="c1", name="shell", arguments="{\"cmd\":\"ls\"}"),
+        ToolCall(id="c2", name="noop", arguments="{}"),
+      ]),
     ),
   )
   .append(
@@ -86,7 +83,9 @@ test "tool calls fold their arguments, empty args stay flat" {
   assert_true(html.contains("shell"))
   assert_true(html.contains("cmd"))
   // A call with no meaningful arguments ({}) renders flat — nothing to fold.
-  assert_true(html.contains("<div class=\"tool-call\"><div class=\"tool-call-name\">"))
+  assert_true(
+    html.contains("<div class=\"tool-call\"><div class=\"tool-call-name\">"),
+  )
 }
 
 ///|
