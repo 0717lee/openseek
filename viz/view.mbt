@@ -312,9 +312,13 @@ fn terminal_card(
 
 ///|
 fn render_model(session : @agent_session.Session) -> @html.Html {
+  // The projection keys each tool message only by id and drops is_error / tool
+  // name, so recover them from the durable events for display (the messages fed
+  // to the model are unchanged — this is view-only enrichment).
+  let tool_results = tool_results_by_id(session)
   let messages = session.chat_messages()
   let cards : Array[@html.Html] = [
-    for message in messages => message_card(message)
+    for message in messages => message_card(message, tool_results)
   ]
   if cards.is_empty() {
     return empty_state("The model projection is empty.")
@@ -323,7 +327,25 @@ fn render_model(session : @agent_session.Session) -> @html.Html {
 }
 
 ///|
-fn message_card(message : @deepseek.ChatMessage) -> @html.Html {
+/// Index every `ToolResult` event by its `tool_call_id`, so the model view can
+/// recover the error flag and tool name that the projection discards.
+fn tool_results_by_id(
+  session : @agent_session.Session,
+) -> Map[String, @agent_session.ToolResult] {
+  let map : Map[String, @agent_session.ToolResult] = Map([])
+  for event in session.events() {
+    if event.item() is Tool(result) {
+      map.set(result.tool_call_id(), result)
+    }
+  }
+  map
+}
+
+///|
+fn message_card(
+  message : @deepseek.ChatMessage,
+  tool_results : Map[String, @agent_session.ToolResult],
+) -> @html.Html {
   match message.role {
     System =>
       @html.section(class="card system", [
@@ -334,18 +356,38 @@ fn message_card(message : @deepseek.ChatMessage) -> @html.Html {
       ])
     User => model_card("user", "User", message)
     Assistant => model_card("assistant", "Assistant", message)
-    Tool(_) => model_tool_card(message)
+    Tool(id) => model_tool_card(message, tool_results.get(id))
   }
 }
 
 ///|
-/// Model-view tool result, folded by default like the raw view. The model
-/// projection replays a tool result to the model as plain content and drops the
-/// error flag (see `agent_session` projection), so there is no failure marker
-/// here — the raw log is the view that red-flags errors.
-fn model_tool_card(message : @deepseek.ChatMessage) -> @html.Html {
-  @html.details(class="card tool", [
-    @html.summary(class="card-label", "Tool result"),
+/// Model-view tool result, folded by default like the raw view. `result` is the
+/// matching durable `ToolResult` (looked up by id) when available, which lets
+/// this recover the tool name and red-flag failures even though the projection
+/// itself drops `is_error`. A non-zero command exit sets `is_error`, so an
+/// `exit=1` result is flagged here just as it is in the raw log.
+fn model_tool_card(
+  message : @deepseek.ChatMessage,
+  result : @agent_session.ToolResult?,
+) -> @html.Html {
+  let is_error = result is Some(r) && r.is_error()
+  let name = match result {
+    Some(r) => r.tool_name()
+    None => ""
+  }
+  let kind = if is_error { "tool error" } else { "tool" }
+  let label = match (is_error, name.is_empty()) {
+    (_, true) => "Tool result"
+    (true, false) => "Tool error · \{name}"
+    (false, false) => "Tool result · \{name}"
+  }
+  let head : Array[@html.Html] = []
+  if is_error {
+    head.push(@html.span(class="tool-flag", "🚩 failed"))
+  }
+  head.push(@html.text(label))
+  @html.details(class="card \{kind}", [
+    @html.summary(class="card-label", head),
     @html.div(class="card-body", [text_block(message.content)]),
   ])
 }

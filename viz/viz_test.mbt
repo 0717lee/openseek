@@ -102,6 +102,17 @@ test "failed tool result is folded and red-flagged" {
 }
 
 ///|
+test "model view recovers the error flag the projection drops" {
+  // The model projection keys a tool message by id only and drops is_error, but
+  // the view correlates back to the durable ToolResult, so a failed tool (e.g. a
+  // non-zero exit) is red-flagged in the model view too — with its tool name.
+  let model = render(@viz.render_session(error_tool_session(), ModelView))
+  assert_true(model.contains("<details class=\"card tool error\">"))
+  assert_true(model.contains("class=\"tool-flag\">🚩 failed"))
+  assert_true(model.contains("Tool error · shell"))
+}
+
+///|
 test "successful tool result folds without a flag" {
   // sample_session's tool result is a success; it should fold but carry no flag.
   let session = @viz.session_from_parse(

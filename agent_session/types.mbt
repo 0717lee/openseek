@@ -223,7 +223,11 @@ pub fn ToolResult::ToolResult(
 }
 
 ///|
-fn ToolResult::tool_call_id(self : ToolResult) -> String {
+/// Return the id of the assistant tool call this result answers. Protocol
+/// matching uses this to pair a result with its call; consumers (e.g. a
+/// visualizer) can use it to correlate a projected tool message back to its
+/// durable result.
+pub fn ToolResult::tool_call_id(self : ToolResult) -> String {
   self.tool_call_id
 }
 

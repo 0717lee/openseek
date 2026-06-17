@@ -83,6 +83,7 @@ pub struct ToolResult {
 pub fn ToolResult::ToolResult(tool_call_id~ : String, tool_name~ : String, content~ : String, is_error? : Bool) -> Self
 pub fn ToolResult::content(Self) -> String
 pub fn ToolResult::is_error(Self) -> Bool
+pub fn ToolResult::tool_call_id(Self) -> String
 pub fn ToolResult::tool_name(Self) -> String
 
 pub(all) enum TurnTerminal {
