@@ -112,6 +112,23 @@ test "model view recovers the error flag the projection drops" {
 }
 
 ///|
+test "model view does not flag a result the projection skipped" {
+  // Compact away only the tool result (seq 2): the projection then heals the
+  // dangling call c1 with a synthetic error message, so the model never saw the
+  // real "boom" result. The view must not attach that result's flag/name to the
+  // synthetic message — it would misrepresent what the model was fed.
+  let compacted = error_tool_session().compact(
+    content="covered",
+    from_sequence=2,
+    to_sequence=2,
+  )
+  let model = render(@viz.render_session(compacted, ModelView))
+  assert_true(model.contains("previous agent process exited"))
+  assert_false(model.contains("tool-flag"))
+  assert_false(model.contains("Tool error · shell"))
+}
+
+///|
 test "successful tool result folds without a flag" {
   // sample_session's tool result is a success; it should fold but carry no flag.
   let session = @viz.session_from_parse(

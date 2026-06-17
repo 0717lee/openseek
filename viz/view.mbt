@@ -365,16 +365,28 @@ fn message_card(
 
 ///|
 /// Model-view tool result, folded by default like the raw view. `result` is the
-/// matching durable `ToolResult` (looked up by id) when available, which lets
-/// this recover the tool name and red-flag failures even though the projection
-/// itself drops `is_error`. A non-zero command exit sets `is_error`, so an
-/// `exit=1` result is flagged here just as it is in the raw log.
+/// durable `ToolResult` looked up by id, which lets this recover the tool name
+/// and red-flag failures even though the projection drops `is_error`. A non-zero
+/// command exit sets `is_error`, so an `exit=1` result is flagged here just as
+/// in the raw log.
+///
+/// The recovered result is only trusted when its content is exactly what the
+/// projection fed the model for this message. The projection skips results
+/// covered by a later summary and heals a dangling tool call with a synthetic
+/// error message (`flush_pending_tool_calls`); in those cases the looked-up
+/// result is not what the model saw, and attaching its name/flag would
+/// misrepresent the model view — so the content guard falls back to a plain,
+/// unflagged card.
 fn model_tool_card(
   message : @deepseek.ChatMessage,
   result : @agent_session.ToolResult?,
 ) -> @html.Html {
-  let is_error = result is Some(r) && r.is_error()
-  let name = match result {
+  let shown = match result {
+    Some(r) if r.content() == message.content => Some(r)
+    _ => None
+  }
+  let is_error = shown is Some(r) && r.is_error()
+  let name = match shown {
     Some(r) => r.tool_name()
     None => ""
   }
