@@ -1,4 +1,20 @@
 ///|
+/// Environment-dependent (needs a default route), so absence is accepted; but
+/// whatever it returns must be a remotely-reachable IPv4 — never a loopback or
+/// unspecified address, which is the whole point of filtering them out.
+async test "local_lan_ip yields a routable IPv4 or None" {
+  match local_lan_ip() {
+    None => ()
+    Some(ip) => {
+      assert_true(!ip.is_empty())
+      assert_true(ip.contains("."))
+      assert_true(!ip.has_prefix("127."))
+      assert_true(ip != "0.0.0.0")
+    }
+  }
+}
+
+///|
 test "percent_decode passes plain segments through" {
   inspect(
     percent_decode("tui-20260610-124146-251"),

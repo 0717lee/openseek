@@ -27,13 +27,25 @@ Start the server from the repository root:
 moon run --target native cmd/viz_server
 ```
 
-By default it listens on `127.0.0.1:8080`, serves `web/index.html`, and scans
-the current directory recursively for `.openseek` session roots.
+By default it listens on `0.0.0.0:8080` (all interfaces), serves
+`web/index.html`, and scans the current directory recursively for `.openseek`
+session roots. On startup it prints both the loopback URL and this machine's LAN
+URL, so another machine on the same network can open it directly:
+
+```
+openseek viz: open http://127.0.0.1:8080 (this machine)
+openseek viz: open http://192.168.1.42:8080 (LAN, reachable from other machines)
+```
+
+Because the default binds to all interfaces, anything on your network can read
+the served sessions (the server is read-only). To restrict it to this machine,
+bind to loopback with `--host 127.0.0.1` (or set `OPENSEEK_VIZ_HOST`).
 
 Useful options:
 
 ```sh
 moon run --target native cmd/viz_server -- --port 8081
+moon run --target native cmd/viz_server -- --host 127.0.0.1   # local only
 moon run --target native cmd/viz_server -- --search-dir path/to/project
 moon run --target native cmd/viz_server -- --session-root-name .openroot
 ```

@@ -13,6 +13,10 @@
 async fn main {
   let matches = cli_command().parse(env=@env.get_env_vars())
   let port = parse_port(value(matches, "port"))
+  let host = value(matches, "host").trim().to_owned()
+  if host.is_empty() {
+    fail("--host or OPENSEEK_VIZ_HOST must not be empty")
+  }
   let session_root = value(matches, "session-root").trim().to_owned()
   if session_root.is_empty() {
     fail("--session-root or OPENSEEK_SESSION_ROOT must not be empty")
@@ -33,17 +37,74 @@ async fn main {
   let shell = shell_candidates(web_dir, module_root)
   let bundle_paths = bundle_candidates(bundle, web_dir, module_root)
   let catalog = session_catalog(session_root, search_dirs, session_root_name)
-  let addr = @socket.Addr::parse("127.0.0.1:\{port}")
+  let addr = @socket.Addr::parse("\{host}:\{port}") catch {
+    _ => fail("invalid --host/--port: \{host}:\{port}")
+  }
   println("openseek viz: serving \{catalog.roots.length()} session root(s)")
   for root in catalog.roots {
     println("openseek viz: sessions under '\{root.path}'")
   }
   println("openseek viz: shell from '\{shell[0]}'")
-  println("openseek viz: open http://127.0.0.1:\{port}")
+  print_open_urls(host, port)
   let server = @http.Server(addr)
   server.run_forever((request, _body, conn) => {
     handle(request, conn, catalog, shell, bundle_paths)
   })
+}
+
+///|
+/// Print the URL(s) for reaching the server. When bound to the wildcard
+/// `0.0.0.0` (all interfaces), show both the loopback URL for this machine and
+/// the discovered LAN URL a remote host can open; a specific bound host prints
+/// just that one URL. The LAN line is best-effort — if no external address can
+/// be found, say so rather than print a misleading URL.
+async fn print_open_urls(host : String, port : Int) -> Unit {
+  if host != "0.0.0.0" {
+    println("openseek viz: open http://\{host}:\{port}")
+    return
+  }
+  println("openseek viz: open http://127.0.0.1:\{port} (this machine)")
+  match local_lan_ip() {
+    Some(ip) =>
+      println(
+        "openseek viz: open http://\{ip}:\{port} (LAN, reachable from other machines)",
+      )
+    None =>
+      println(
+        "openseek viz: bound to all interfaces; open this machine's LAN IP from another host",
+      )
+  }
+}
+
+///|
+/// Best-effort discovery of this machine's primary LAN IPv4 address, for
+/// printing a URL a remote host can open. Opens a UDP socket "connected" to a
+/// public address and reads back the local address the OS chose for that route.
+/// No packet is sent — a UDP `connect` only fixes the default peer and triggers
+/// source-address selection in the kernel routing table — so this works offline
+/// as long as a route (e.g. a LAN default gateway) exists. Returns `None` when
+/// there is no usable route, or the chosen address is loopback/unspecified and
+/// thus not reachable from another host.
+async fn local_lan_ip() -> String? {
+  let probe = @socket.UdpClient(@socket.Addr::parse("8.8.8.8:53")) catch {
+    _ => return None
+  }
+  let addr = probe.addr
+  probe.close()
+  // The probe forces an IPv4 route, so the local address is IPv4; bail on the
+  // unexpected IPv6 case rather than mis-format it.
+  if addr.is_ipv6() {
+    return None
+  }
+  let ip = addr.ip()
+  let a = (ip >> 24) & 255
+  let b = (ip >> 16) & 255
+  let c = (ip >> 8) & 255
+  let d = ip & 255
+  if a == 127 || ip == 0 {
+    return None
+  }
+  Some("\{a}.\{b}.\{c}.\{d}")
 }
 
 ///|
@@ -655,7 +716,14 @@ fn cli_command() -> @argparse.Command {
         long="port",
         env="OPENSEEK_VIZ_PORT",
         default_values=["8080"],
-        about="TCP port to listen on (127.0.0.1).",
+        about="TCP port to listen on.",
+      ),
+      OptionArg(
+        "host",
+        long="host",
+        env="OPENSEEK_VIZ_HOST",
+        default_values=["0.0.0.0"],
+        about="Interface address to bind. 0.0.0.0 (default) listens on all interfaces and is reachable from other machines; 127.0.0.1 restricts to this machine.",
       ),
       OptionArg(
         "session-root",
