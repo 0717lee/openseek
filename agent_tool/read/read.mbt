@@ -18,13 +18,13 @@
 /// ## Result
 /// - `Respond(ToolOutput(<file contents>))` on success for uncapped whole-file
 ///   single reads.
-/// - `Respond(ToolOutput(<metadata header + content>))` for ranged reads or
-///   capped reads, and per file for multi-file reads (blocks separated by a
-///   blank line; a failed file contributes an inline `error reading ...`
+/// - `Respond(ToolOutput(<metadata header + numbered content>))` for ranged
+///   reads or capped reads, and per file for multi-file reads (blocks separated
+///   by a blank line; a failed file contributes an inline `error reading ...`
 ///   block and only flips `is_error` when every file failed).
 /// - `Respond(ToolOutput("error reading <path>: <error>", is_error=true))`
 ///   if a single-file read fails (missing file, permission denied, invalid
-///   UTF-8, etc.).
+///   UTF-8, directory path, etc.).
 /// - `Respond(ToolOutput("error: read requires ...", is_error=true))` for
 ///   invalid arguments.
 pub fn definition(
@@ -32,7 +32,7 @@ pub fn definition(
 ) -> @agent_tool.AgentToolDefinition {
   AgentToolDefinition(
     name="read",
-    description="Read arguments.path as text — or several independent files in ONE call via arguments.paths (per-file errors report inline; cheaper than one call per file). Supports optional start_line, max_lines, and max_output_chars for focused single-file reads.",
+    description="Read arguments.path as text — or several independent files in ONE call via arguments.paths (per-file errors report inline; cheaper than one call per file). Supports optional start_line, max_lines, and max_output_chars for focused single-file reads. Headered outputs include number<TAB>text line numbers.",
     schema=JsonSchema({
       "type": "object",
       "properties": {
@@ -95,6 +95,11 @@ async fn read_file(
   input : @decode.ReadInput,
   path~ : String,
 ) -> @agent_tool.ToolAction {
+  match directory_read_error(path) {
+    Some(message) =>
+      return @agent_tool.ToolAction::respond(message, is_error=true)
+    None => ()
+  }
   let content = @fs.read_file(path).text() catch {
     error =>
       return @agent_tool.ToolAction::respond(
@@ -110,7 +115,7 @@ async fn read_file(
     input.max_lines is Some(_) ||
     char_truncated
   let output = if include_header {
-    "\{read_header(path, content, selection, capped, char_truncated)}\{capped}"
+    "\{read_header(path, content, selection, capped, char_truncated)}\{numbered_content(selection, capped)}"
   } else {
     capped
   }
@@ -149,6 +154,15 @@ async fn read_files(
       skipped.push(path)
       continue
     }
+    match directory_read_error(path) {
+      Some(block) => {
+        failures = failures + 1
+        remaining = remaining - block.length() - 2
+        blocks.push(block)
+        continue
+      }
+      None => ()
+    }
     let content = @fs.read_file(path).text() catch {
       error => {
         failures = failures + 1
@@ -164,7 +178,7 @@ async fn read_files(
     if char_truncated {
       truncated_any = true
     }
-    let block = "\{read_header(path, content, selection, capped, char_truncated)}\{capped}"
+    let block = "\{read_header(path, content, selection, capped, char_truncated)}\{numbered_content(selection, capped)}"
     remaining = remaining - block.length() - 2
     blocks.push(block)
   }
@@ -232,12 +246,42 @@ fn select_lines(
 }
 
 ///|
+async fn directory_read_error(path : String) -> String? {
+  match (@fs.kind(path, follow_symlink=true) catch { _ => return None }) {
+    Directory =>
+      Some(
+        "error reading \{path}: path is a directory; use the shell tool with `ls` or `tree` to inspect directories, then read specific files.",
+      )
+    _ => None
+  }
+}
+
+///|
 fn cap_text(content : String, max_chars : Int) -> String {
   if content.length() <= max_chars {
     content
   } else {
     "\{content[:max_chars]}"
   }
+}
+
+///|
+fn numbered_content(selection : ReadSelection, capped : String) -> String {
+  if selection.shown_lines == 0 {
+    ""
+  } else {
+    add_line_numbers(capped, selection.start_line)
+  }
+}
+
+///|
+fn add_line_numbers(content : String, start_line : Int) -> String {
+  let lines = [ for line in content.split("\n") => line.to_owned() ]
+  let numbered : Array[String] = []
+  for index in 0..<lines.length() {
+    numbered.push("\{start_line + index}\t\{lines[index]}")
+  }
+  numbered.join("\n")
 }
 
 ///|
@@ -259,6 +303,7 @@ fn read_header(
     "shown_chars=\{capped.length()}",
     "line_limited=\{selection.line_limited}",
     "truncated=\{char_truncated}",
+    "line_format=number<TAB>text",
     "---",
     "",
   ].join("\n")
@@ -344,9 +389,10 @@ async test "read returns a requested line range with metadata" {
         "shown_chars=19",
         "line_limited=true",
         "truncated=false",
+        "line_format=number<TAB>text",
         "---",
-        "line two",
-        "line three",
+        "2\tline two",
+        "3\tline three",
       ].join("\n"),
     )
   })
@@ -373,8 +419,9 @@ async test "read caps oversized output and marks it as an error" {
         "shown_chars=3",
         "line_limited=false",
         "truncated=true",
+        "line_format=number<TAB>text",
         "---",
-        "abc",
+        "1\tabc",
       ].join("\n"),
     )
   })
@@ -518,6 +565,17 @@ async test "read surfaces filesystem errors" {
 }
 
 ///|
+async test "read reports directories with an actionable hint" {
+  @vfs.with_tmpdir(dir => {
+    let result = execute({ "path": dir })
+    guard result is Respond(output) else { fail("expected Respond") }
+    assert_true(output.is_error)
+    assert_true(output.content.contains("path is a directory"))
+    assert_true(output.content.contains("`ls` or `tree`"))
+  })
+}
+
+///|
 async test "read rejects missing path" {
   let result = execute({})
   guard result is Respond(output) else { fail("expected Respond") }
@@ -559,7 +617,7 @@ async test "a huge max_lines returns the remaining lines without overflow" {
     })
     guard result is Respond(output) else { fail("expected Respond") }
     assert_false(output.is_error)
-    assert_true(output.content.contains("b\nc"))
+    assert_true(output.content.contains("2\tb\n3\tc"))
     assert_true(output.content.contains("shown_lines=2"))
   })
 }
