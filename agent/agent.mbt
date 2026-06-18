@@ -523,6 +523,7 @@ pub async fn[X] run_turn_in_scope(
               tool_name=tool_call.name,
               content=output.content,
               is_error=output.is_error,
+              brief?=output.brief,
             ),
           ),
         )

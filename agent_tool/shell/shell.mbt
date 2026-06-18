@@ -139,7 +139,22 @@ async fn shell(
     }
   }
   let response = shell_response(output, input.max_output_chars)
-  @agent_tool.ToolAction::respond(response.content, is_error=response.is_error)
+  @agent_tool.ToolAction::respond(
+    response.content,
+    is_error=response.is_error,
+    brief=shell_brief(input.cmd, output.exit_code),
+  )
+}
+
+///|
+/// One-line brief for a shell call: the command, plus the exit code when the
+/// command failed.
+fn shell_brief(cmd : String, exit_code : Int?) -> String {
+  let head = @agent_tool.brief_line(cmd, limit=64)
+  match exit_code {
+    Some(code) if code != 0 => "\{head} → exit \{code}"
+    _ => head
+  }
 }
 
 ///|
