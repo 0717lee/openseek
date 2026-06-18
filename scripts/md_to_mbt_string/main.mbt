@@ -20,7 +20,8 @@ fn cli_command() -> @argparse.Command {
 
 ///|
 async fn main {
-  guard cli_command().parse().values is { "input": [input, ..], "output": [output, ..], .. } else {
+  guard cli_command().parse().values
+    is { "input": [input, ..], "output": [output, ..], .. } else {
     fail("missing parsed arguments")
   }
   let base = @path.Path(input).basename()
@@ -73,7 +74,7 @@ fn trim_windows_drive_prefix(path : StringView) -> StringView {
 ///|
 fn function_name_from_base(base : StringView) -> StringView raise {
   match base {
-    ([.. stem, .. ".mbt.md"] | [.. stem, .. ".md"]) if stem =~ re"^[a-z_][A-Za-z0-9_]*$" =>
+    [.. stem, .. ".mbt.md"] | [.. stem, .. ".md"] if stem =~ re"^[a-z_][A-Za-z0-9_]*$" =>
       stem
     _ =>
       fail(

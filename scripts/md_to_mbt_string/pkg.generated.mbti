@@ -6,8 +6,8 @@ package "bobzhang/openseek-scripts/md_to_mbt_string"
 // Errors
 
 // Types and methods
-type ProgramArgs
 
 // Type aliases
 
 // Traits
+
