@@ -80,7 +80,8 @@ pub fn SessionSummary::to_sequence(Self) -> Int
 pub struct ToolResult {
   // private fields
 } derive(ToJson, @debug.Debug, @json.FromJson)
-pub fn ToolResult::ToolResult(tool_call_id~ : String, tool_name~ : String, content~ : String, is_error? : Bool) -> Self
+pub fn ToolResult::ToolResult(tool_call_id~ : String, tool_name~ : String, content~ : String, is_error? : Bool, brief? : String) -> Self
+pub fn ToolResult::brief(Self) -> String?
 pub fn ToolResult::content(Self) -> String
 pub fn ToolResult::is_error(Self) -> Bool
 pub fn ToolResult::tool_call_id(Self) -> String

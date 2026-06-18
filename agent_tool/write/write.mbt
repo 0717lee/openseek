@@ -72,6 +72,9 @@ async fn write_file(
     @fs.write_file(path, input.content, create_mode=CreateOrTruncate)
     @agent_tool.ToolAction::respond(
       "ok: wrote \{input.content.length()} chars to \{path}",
+      brief=@agent_tool.brief_line(
+        "wrote \{input.content.length()} chars to \{input.path}",
+      ),
     )
   } catch {
     error =>

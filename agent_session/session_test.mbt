@@ -52,6 +52,31 @@ test "event timestamps round trip through JSON" {
 }
 
 ///|
+test "ToolResult brief is optional and backwards compatible" {
+  // A record written before briefs existed (no `brief` key) must still decode,
+  // with `brief` defaulting to None — old logs keep parsing.
+  let legacy_json =
+    #|{"tool_call_id":"call_1","tool_name":"read","content":"README","is_error":false}
+  let legacy : @agent_session.ToolResult = @json.from_json(
+    @json.parse(legacy_json),
+  )
+  guard legacy.brief() is None else { fail("legacy brief should be None") }
+  assert_eq(legacy.content(), "README")
+  // A brief round-trips when present.
+  let with_brief = @agent_session.ToolResult(
+    tool_call_id="call_2",
+    tool_name="shell",
+    content="exit=0\na\nb",
+    brief="ran ls → 2 files",
+  )
+  let decoded : @agent_session.ToolResult = @json.from_json(
+    with_brief.to_json(),
+  )
+  guard decoded.brief() is Some(text) else { fail("brief should round-trip") }
+  assert_eq(text, "ran ls → 2 files")
+}
+
+///|
 test "session projects to DeepSeek chat messages" {
   let session = @agent_session.Session(SessionId("s1"), system_prompt="system")
     .append(User(UserMessage("inspect")))

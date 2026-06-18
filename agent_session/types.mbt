@@ -203,6 +203,7 @@ pub struct ToolResult {
   priv tool_name : String
   priv content : String
   priv is_error : Bool
+  priv brief : String?
 } derive(Debug, ToJson, FromJson)
 
 ///|
@@ -213,13 +214,20 @@ pub struct ToolResult {
 /// `content` is exactly what will be replayed to the model. `is_error`
 /// classifies the content for callers, but the DeepSeek projection currently
 /// sends the same text shape either way.
+///
+/// `brief` is an optional one-line, human-readable summary of what the call did
+/// (e.g. `ran ls → 12 files`), for display only — it is never replayed to the
+/// model. It is optional so logs written before briefs existed (no `brief` key)
+/// still parse, decoding to `None`, exactly like `AssistantMessage`'s
+/// `reasoning_content`.
 pub fn ToolResult::ToolResult(
   tool_call_id~ : String,
   tool_name~ : String,
   content~ : String,
   is_error? : Bool = false,
+  brief? : String,
 ) -> ToolResult {
-  { tool_call_id, tool_name, content, is_error }
+  { tool_call_id, tool_name, content, is_error, brief }
 }
 
 ///|
@@ -246,6 +254,14 @@ pub fn ToolResult::tool_name(self : ToolResult) -> String {
 /// successful result.
 pub fn ToolResult::content(self : ToolResult) -> String {
   self.content
+}
+
+///|
+/// Return the optional one-line human summary of the call, or `None` for results
+/// recorded before briefs existed (or by tools that supply none). Display only —
+/// never part of what the model is replayed.
+pub fn ToolResult::brief(self : ToolResult) -> String? {
+  self.brief
 }
 
 ///|

@@ -113,7 +113,11 @@ async fn read_file(
   } else {
     capped
   }
-  @agent_tool.ToolAction::respond(output, is_error=char_truncated)
+  @agent_tool.ToolAction::respond(
+    output,
+    is_error=char_truncated,
+    brief="read \{@agent_tool.brief_basename(path)}",
+  )
 }
 
 ///|
@@ -181,6 +185,7 @@ async fn read_files(
   @agent_tool.ToolAction::respond(
     blocks.join("\n\n"),
     is_error=failures == paths.length() || truncated_any,
+    brief="read \{paths.length()} files",
   )
 }
 

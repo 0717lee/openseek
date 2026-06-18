@@ -133,9 +133,12 @@ async fn moon_cmd(input : @decode.MoonCommandInput) -> @agent_tool.ToolAction {
   let body = output.text()
   let capped = cap_text(body, input.max_output_chars)
   let truncation = truncation_header(body, input.max_output_chars)
+  let head = @agent_tool.brief_line("moon \{args.join(" ")}", limit=64)
+  let brief = if code != 0 { "\{head} → exit \{code}" } else { head }
   @agent_tool.ToolAction::respond(
     "cwd=\{cwd_text}\ncommand=moon \{args.join(" ")}\{update_review}\{stdin_review}\nexit=\{code}\{truncation}\n\{capped}",
     is_error=code != 0 || is_truncated(body, input.max_output_chars),
+    brief~,
   )
 }
 

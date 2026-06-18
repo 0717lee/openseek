@@ -115,6 +115,7 @@ async fn edit_file(
     @fs.write_file(path, new_content, create_mode=CreateOrTruncate)
     @agent_tool.ToolAction::respond(
       "ok: replaced \{replacement_count} occurrence(s) in \{path}",
+      brief="edited \{@agent_tool.brief_basename(path)} (\{replacement_count}×)",
     )
   } catch {
     error =>
