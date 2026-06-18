@@ -146,6 +146,36 @@ test "successful tool result folds without a flag" {
 }
 
 ///|
+test "tool call shows the brief its result recorded" {
+  let session = @agent_session.Session(SessionId("b"), system_prompt="")
+    .append(
+      Assistant(
+        AssistantMessage("", tool_calls=[
+          ToolCall(id="c1", name="shell", arguments="{\"cmd\":\"ls\"}"),
+        ]),
+      ),
+    )
+    .append(
+      Tool(
+        ToolResult(
+          tool_call_id="c1",
+          tool_name="shell",
+          content="exit=0\na",
+          brief="ran ls → 1 file",
+        ),
+      ),
+    )
+  let raw = render(@viz.render_session(session, RawLog))
+  assert_true(raw.contains("tool-call-brief"))
+  assert_true(raw.contains("ran ls → 1 file"))
+  let model = render(@viz.render_session(session, ModelView))
+  assert_true(model.contains("ran ls → 1 file"))
+  // A result with no brief produces no brief span on its call.
+  let plain = render(@viz.render_session(error_tool_session(), RawLog))
+  assert_false(plain.contains("tool-call-brief"))
+}
+
+///|
 test "turn header badges failed tools" {
   let html = render(@viz.render_session(error_tool_session(), RawLog))
   assert_true(html.contains("turn-error-badge"))

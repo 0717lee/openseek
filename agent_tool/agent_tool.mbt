@@ -81,16 +81,22 @@ pub struct ToolOutput {
   /// Whether the host should treat this as a tool-level error. The content is
   /// still sent to the model so it can recover or choose another action.
   is_error : Bool
+  /// Optional one-line human summary of what this call did (e.g. `ran ls → 12
+  /// files`). Display-only: persisted on the `ToolResult` for the visualizer and
+  /// never sent to the model. `None` when the tool supplies no brief.
+  brief : String?
 } derive(Debug)
 
 ///|
 /// Constructs typed tool output. `is_error` defaults to `false` for ordinary
-/// successful tool responses.
+/// successful tool responses; `brief` is omitted unless the tool supplies a
+/// one-line summary.
 pub fn ToolOutput::ToolOutput(
   content : String,
   is_error? : Bool = false,
+  brief? : String,
 ) -> ToolOutput {
-  { content, is_error }
+  { content, is_error, brief }
 }
 
 ///|
@@ -113,12 +119,54 @@ pub(all) enum ToolAction {
 } derive(Debug)
 
 ///|
-/// Builds a normal tool response action.
+/// Builds a normal tool response action. `brief` is an optional one-line summary
+/// surfaced in the visualizer (see `ToolOutput::brief`); it never reaches the
+/// model.
 pub fn ToolAction::respond(
   content : String,
   is_error? : Bool = false,
+  brief? : String,
 ) -> ToolAction {
-  Respond(ToolOutput(content, is_error~))
+  Respond(ToolOutput(content, is_error~, brief?))
+}
+
+///|
+/// Build a one-line tool brief: collapse `text` to a single line, trim it, and
+/// cap it to `limit` characters (appending `…` when cut). Iterates by character
+/// so a cap never splits a surrogate pair. Helper for tools assembling a brief.
+pub fn brief_line(text : String, limit? : Int = 72) -> String {
+  let one = text.replace_all(old="\n", new=" ").trim().to_owned()
+  if one.length() <= limit {
+    return one
+  }
+  let kept = StringBuilder()
+  let mut count = 0
+  for ch in one {
+    if count >= limit {
+      break
+    }
+    kept.write_char(ch)
+    count += 1
+  }
+  "\{kept.to_string()}…"
+}
+
+///|
+/// The final path segment of `path` (after the last `/` or `\`), for briefs that
+/// name a file without its directory. Returns `path` unchanged when it has no
+/// separator.
+pub fn brief_basename(path : String) -> String {
+  let cut = match (path.rev_find("/"), path.rev_find("\\")) {
+    (Some(a), Some(b)) => if a > b { a } else { b }
+    (Some(a), None) => a
+    (None, Some(b)) => b
+    (None, None) => -1
+  }
+  if cut < 0 {
+    path
+  } else {
+    path[cut + 1:].to_owned()
+  }
 }
 
 ///|

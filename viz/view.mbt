@@ -58,10 +58,11 @@ pub fn render_notices(parsed : @session_log.ParsedLog) -> @html.Html {
 
 ///|
 fn render_raw(session : @agent_session.Session) -> @html.Html {
+  let briefs = tool_call_briefs(session)
   let turns = group_turns(session.events())
   let blocks : Array[@html.Html] = []
   for index, turn in turns {
-    blocks.push(turn_block(index + 1, turn))
+    blocks.push(turn_block(index + 1, turn, briefs))
   }
   if blocks.is_empty() {
     return empty_state("This session has no events yet.")
@@ -97,13 +98,16 @@ fn group_turns(
 fn turn_block(
   number : Int,
   turn : Array[@agent_session.SessionEvent],
+  briefs : Map[String, String],
 ) -> @html.Html {
   // Offsets are relative to the turn's first stamped event: for reading a
   // log, "how far into the turn" answers latency questions directly, where
   // absolute wall clock would force mental subtraction (and a timezone).
   let base = turn_base_ms(turn)
   let cards : Array[@html.Html] = [
-    for event in turn => event_card(event, time=offset_label(base, event))
+    for event in turn => {
+      event_card(event, time=offset_label(base, event), briefs)
+    }
   ]
   let label = match turn_duration_label(turn) {
     Some(duration) => "Turn \{number} · \{turn_preview(turn)} · \{duration}"
@@ -215,12 +219,13 @@ fn turn_preview(turn : Array[@agent_session.SessionEvent]) -> String {
 fn event_card(
   event : @agent_session.SessionEvent,
   time~ : String,
+  briefs : Map[String, String],
 ) -> @html.Html {
   let seq = event.sequence()
   match event.item() {
     User(message) =>
       card("user", "User", seq, time~, [text_block(message.content())])
-    Assistant(message) => assistant_card(seq, time, message)
+    Assistant(message) => assistant_card(seq, time, message, briefs)
     Tool(result) => tool_card(seq, time, result)
     Runtime(notice) =>
       card("runtime", "Runtime notice", seq, time~, [
@@ -236,6 +241,7 @@ fn assistant_card(
   seq : Int,
   time : String,
   message : @agent_session.AssistantMessage,
+  briefs : Map[String, String],
 ) -> @html.Html {
   let body : Array[@html.Html] = []
   if message.reasoning_content() is Some(reasoning) &&
@@ -253,7 +259,7 @@ fn assistant_card(
   let calls = message.tool_calls()
   if !calls.is_empty() {
     let call_views : Array[@html.Html] = [
-      for call in calls => tool_call_view(call)
+      for call in calls => tool_call_view(call, briefs)
     ]
     body.push(@html.div(class="tool-calls", call_views))
   }
@@ -264,11 +270,17 @@ fn assistant_card(
 /// A tool call, with its arguments folded away by default: the row shows only
 /// the tool name and expands to the full argument JSON on click. Calls with no
 /// meaningful arguments render as a plain name (nothing to fold).
-fn tool_call_view(call : @deepseek.ToolCall) -> @html.Html {
+fn tool_call_view(
+  call : @deepseek.ToolCall,
+  briefs : Map[String, String],
+) -> @html.Html {
   let name_row : Array[@html.Html] = [
     @html.text("→ "),
     @html.strong(call.name),
   ]
+  if briefs.get(call.id) is Some(brief) && !brief.trim().is_empty() {
+    name_row.push(@html.span(class="tool-call-brief", " · \{brief}"))
+  }
   let args = pretty_json(call.arguments)
   if is_blank_args(args) {
     return @html.div(class="tool-call", [
@@ -279,6 +291,20 @@ fn tool_call_view(call : @deepseek.ToolCall) -> @html.Html {
     @html.summary(class="tool-call-name", name_row),
     @html.pre(class="tool-call-args", args),
   ])
+}
+
+///|
+/// Map each tool call's id to the one-line brief its result recorded, for the
+/// folded call line. Only results that carry a brief appear; older logs and
+/// briefless tools simply produce no entry (the call renders as a plain name).
+fn tool_call_briefs(session : @agent_session.Session) -> Map[String, String] {
+  let briefs : Map[String, String] = Map([])
+  for event in session.events() {
+    if event.item() is Tool(result) && result.brief() is Some(brief) {
+      briefs.set(result.tool_call_id(), brief)
+    }
+  }
+  briefs
 }
 
 ///|
@@ -353,9 +379,10 @@ fn render_model(session : @agent_session.Session) -> @html.Html {
   // name, so recover them from the durable events for display (the messages fed
   // to the model are unchanged — this is view-only enrichment).
   let tool_results = tool_results_by_id(session)
+  let briefs = tool_call_briefs(session)
   let messages = session.chat_messages()
   let cards : Array[@html.Html] = [
-    for message in messages => message_card(message, tool_results)
+    for message in messages => message_card(message, tool_results, briefs)
   ]
   if cards.is_empty() {
     return empty_state("The model projection is empty.")
@@ -382,6 +409,7 @@ fn tool_results_by_id(
 fn message_card(
   message : @deepseek.ChatMessage,
   tool_results : Map[String, @agent_session.ToolResult],
+  briefs : Map[String, String],
 ) -> @html.Html {
   match message.role {
     System =>
@@ -391,8 +419,8 @@ fn message_card(
           text_block(message.content),
         ]),
       ])
-    User => model_card("user", "User", message)
-    Assistant => model_card("assistant", "Assistant", message)
+    User => model_card("user", "User", message, briefs)
+    Assistant => model_card("assistant", "Assistant", message, briefs)
     Tool(_) =>
       model_tool_card(message, model_shown_result(message, tool_results))
   }
@@ -490,6 +518,7 @@ fn model_card(
   kind : String,
   label : String,
   message : @deepseek.ChatMessage,
+  briefs : Map[String, String],
 ) -> @html.Html {
   let body : Array[@html.Html] = []
   if message.reasoning_content is Some(reasoning) &&
@@ -506,7 +535,7 @@ fn model_card(
   }
   if !message.tool_calls.is_empty() {
     let call_views : Array[@html.Html] = [
-      for call in message.tool_calls => tool_call_view(call)
+      for call in message.tool_calls => tool_call_view(call, briefs)
     ]
     body.push(@html.div(class="tool-calls", call_views))
   }
