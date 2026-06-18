@@ -30,4 +30,3 @@ pub(all) enum ViewMode {
 // Type aliases
 
 // Traits
-

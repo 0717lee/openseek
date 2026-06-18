@@ -583,10 +583,12 @@ fn session_view_class(model : Model) -> String {
 
 ///|
 /// The "find failures" toolbar: a count, an errors-only filter toggle, and
-/// prev/next jumps. Hidden entirely when the current view has no failures, so a
-/// clean session shows no extra chrome.
+/// prev/next jumps. Hidden when the view has no failures AND the filter is off,
+/// so a clean session shows no chrome — but if the filter is on it stays visible
+/// even at zero failures, otherwise "Errors only" could hide the whole log with
+/// no way to switch it back off.
 fn error_bar(emit : @cmd.Emit[Msg], model : Model, count : Int) -> @html.Html {
-  if count == 0 {
+  if count == 0 && !model.errors_only {
     return @html.nothing
   }
   let toggle_class = if model.errors_only {
@@ -594,11 +596,16 @@ fn error_bar(emit : @cmd.Emit[Msg], model : Model, count : Int) -> @html.Html {
   } else {
     "error-toggle"
   }
-  @html.div(class="error-bar", [
-    @html.span(
-      class="error-count",
-      "🚩 \{count} tool error\{plural_s(count)}",
-    ),
+  let children : Array[@html.Html] = []
+  if count > 0 {
+    children.push(
+      @html.span(
+        class="error-count",
+        "🚩 \{count} tool error\{plural_s(count)}",
+      ),
+    )
+  }
+  children.push(
     @html.button(
       class=toggle_class,
       title="Show only failed tool results",
@@ -609,19 +616,27 @@ fn error_bar(emit : @cmd.Emit[Msg], model : Model, count : Int) -> @html.Html {
         "Errors only"
       },
     ),
-    @html.button(
-      class="error-jump",
-      title="Scroll to the previous failure",
-      on_click=emit(JumpToError(-1)),
-      "↑ prev",
-    ),
-    @html.button(
-      class="error-jump",
-      title="Scroll to the next failure",
-      on_click=emit(JumpToError(1)),
-      "↓ next",
-    ),
-  ])
+  )
+  // Jumps only make sense when there is something to jump to.
+  if count > 0 {
+    children.push(
+      @html.button(
+        class="error-jump",
+        title="Scroll to the previous failure",
+        on_click=emit(JumpToError(-1)),
+        "↑ prev",
+      ),
+    )
+    children.push(
+      @html.button(
+        class="error-jump",
+        title="Scroll to the next failure",
+        on_click=emit(JumpToError(1)),
+        "↓ next",
+      ),
+    )
+  }
+  @html.div(class="error-bar", children)
 }
 
 ///|
