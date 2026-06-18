@@ -15,6 +15,8 @@ pub fn render_notices(@log.ParsedLog) -> @html.Html
 
 pub fn render_session(@agent_session.Session, ViewMode) -> @html.Html
 
+pub fn rendered_error_count(@agent_session.Session, ViewMode) -> Int
+
 pub fn session_from_parse(@log.ParsedLog, id~ : String, system_prompt~ : String) -> @agent_session.Session
 
 // Errors
@@ -28,3 +30,4 @@ pub(all) enum ViewMode {
 // Type aliases
 
 // Traits
+

@@ -109,10 +109,44 @@ fn turn_block(
     Some(duration) => "Turn \{number} · \{turn_preview(turn)} · \{duration}"
     None => "Turn \{number} · \{turn_preview(turn)}"
   }
+  // Surface failed tools in the turn header so a turn carrying errors is
+  // scannable even while its cards are folded or the turn itself is collapsed.
+  let summary : Array[@html.Html] = [@html.text(label)]
+  let errors = count_turn_tool_errors(turn)
+  if errors > 0 {
+    summary.push(
+      @html.span(
+        class="turn-error-badge",
+        " · 🚩 \{errors} error\{plural(errors)}",
+      ),
+    )
+  }
   @html.details(open=true, class="turn", [
-    @html.summary(class="turn-summary", label),
+    @html.summary(class="turn-summary", summary),
     @html.div(class="turn-body", cards),
   ])
+}
+
+///|
+/// Number of failed tool results in a turn, for the turn header's error badge.
+fn count_turn_tool_errors(turn : Array[@agent_session.SessionEvent]) -> Int {
+  let mut count = 0
+  for event in turn {
+    if event.item() is Tool(result) && result.is_error() {
+      count += 1
+    }
+  }
+  count
+}
+
+///|
+/// `""` for one, `"s"` otherwise — for pluralizing a count in a label.
+fn plural(n : Int) -> String {
+  if n == 1 {
+    ""
+  } else {
+    "s"
+  }
 }
 
 ///|
@@ -359,8 +393,59 @@ fn message_card(
       ])
     User => model_card("user", "User", message)
     Assistant => model_card("assistant", "Assistant", message)
-    Tool(id) => model_tool_card(message, tool_results.get(id))
+    Tool(_) =>
+      model_tool_card(message, model_shown_result(message, tool_results))
   }
+}
+
+///|
+/// The durable `ToolResult` the model view is allowed to surface for a projected
+/// tool message: the one looked up by id whose content is exactly what the model
+/// was fed. The projection skips results covered by a later summary and heals a
+/// dangling call with a synthetic message; in those cases the looked-up result
+/// is not what the model saw, so the content guard rejects it (returns `None`)
+/// rather than misrepresent the model view. Shared by `model_tool_card` and
+/// `rendered_error_count` so the on-screen flags and the error count never drift.
+fn model_shown_result(
+  message : @deepseek.ChatMessage,
+  tool_results : Map[String, @agent_session.ToolResult],
+) -> @agent_session.ToolResult? {
+  guard message.role is Tool(id) else { return None }
+  match tool_results.get(id) {
+    Some(result) if result.content() == message.content => Some(result)
+    _ => None
+  }
+}
+
+///|
+/// How many tool-error cards `render_session` draws for `mode` — i.e. failed
+/// tool results actually shown, so it equals the number of `.card.tool.error`
+/// elements on screen. `RawLog` shows every errored `ToolResult`; `ModelView`
+/// shows only those the projection emitted and the view trusts (see
+/// `model_shown_result`). Used to drive the "find failures" controls.
+pub fn rendered_error_count(
+  session : @agent_session.Session,
+  mode : ViewMode,
+) -> Int {
+  let mut count = 0
+  match mode {
+    RawLog =>
+      for event in session.events() {
+        if event.item() is Tool(result) && result.is_error() {
+          count += 1
+        }
+      }
+    ModelView => {
+      let tool_results = tool_results_by_id(session)
+      for message in session.chat_messages() {
+        if model_shown_result(message, tool_results) is Some(result) &&
+          result.is_error() {
+          count += 1
+        }
+      }
+    }
+  }
+  count
 }
 
 ///|
@@ -370,21 +455,14 @@ fn message_card(
 /// command exit sets `is_error`, so an `exit=1` result is flagged here just as
 /// in the raw log.
 ///
-/// The recovered result is only trusted when its content is exactly what the
-/// projection fed the model for this message. The projection skips results
-/// covered by a later summary and heals a dangling tool call with a synthetic
-/// error message (`flush_pending_tool_calls`); in those cases the looked-up
-/// result is not what the model saw, and attaching its name/flag would
-/// misrepresent the model view — so the content guard falls back to a plain,
-/// unflagged card.
+/// `shown` is the durable result the view trusts for this message (see
+/// `model_shown_result`) — `None` when the projection healed/compacted it away,
+/// in which case the card is plain and unflagged so it never misrepresents what
+/// the model saw.
 fn model_tool_card(
   message : @deepseek.ChatMessage,
-  result : @agent_session.ToolResult?,
+  shown : @agent_session.ToolResult?,
 ) -> @html.Html {
-  let shown = match result {
-    Some(r) if r.content() == message.content => Some(r)
-    _ => None
-  }
   let is_error = shown is Some(r) && r.is_error()
   let name = match shown {
     Some(r) => r.tool_name()

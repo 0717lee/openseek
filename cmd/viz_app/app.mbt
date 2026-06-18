@@ -26,6 +26,10 @@ struct Model {
   collapsed_roots : Array[String]
   loading : Bool
   status : String
+  // "Errors only" filter (folds the log down to failed tool results) and the
+  // index of the failure the prev/next jump last scrolled to (-1 = none yet).
+  errors_only : Bool
+  error_focus : Int
 }
 
 ///|
@@ -60,6 +64,8 @@ enum Msg {
   SetTheme(Theme)
   ToggleSidebar
   ToggleRoot(String)
+  ToggleErrorsOnly
+  JumpToError(Int)
 }
 
 ///|
@@ -86,6 +92,8 @@ fn init_model() -> Model {
     collapsed_roots: [],
     loading: false,
     status: "loading sessions…",
+    errors_only: false,
+    error_focus: -1,
   }
 }
 
@@ -129,6 +137,7 @@ fn update(emit : @cmd.Emit[Msg], msg : Msg, model : Model) -> (@cmd.Cmd, Model) 
           header_present: false,
           loading: true,
           status: "loading \{label}…",
+          error_focus: -1,
         },
       )
     }
@@ -181,7 +190,25 @@ fn update(emit : @cmd.Emit[Msg], msg : Msg, model : Model) -> (@cmd.Cmd, Model) 
             }
         }
       }
-    SetMode(mode) => (@cmd.none, { ..model, view_mode: mode })
+    // A view switch changes which (and how many) failures are on screen, so the
+    // jump cursor restarts from the top.
+    SetMode(mode) => (@cmd.none, { ..model, view_mode: mode, error_focus: -1 })
+    ToggleErrorsOnly =>
+      (@cmd.none, { ..model, errors_only: !model.errors_only })
+    // Scroll to the next/previous failed-tool card, cycling. The count is
+    // recomputed for the active view so the cursor matches what is on screen.
+    JumpToError(direction) => {
+      let count = current_error_count(model)
+      if count <= 0 {
+        (@cmd.none, model)
+      } else {
+        let next = wrap_index(model.error_focus, direction, count)
+        (
+          @cmd.effect(() => scroll_to_nth_error(next)),
+          { ..model, error_focus: next },
+        )
+      }
+    }
     SetTheme(theme) =>
       // Apply the theme as a side effect (set `data-theme` on <html>) so the CSS
       // variable blocks take over; the model tracks it for button highlighting.
@@ -222,6 +249,12 @@ fn fetch_text(
 /// Percent-encode the id so session ids containing URL-reserved characters
 /// (spaces, `?`, `#`) reach the server intact; it percent-decodes the segment.
 extern "js" fn encode_uri_component(value : String) -> String = "encodeURIComponent"
+
+///|
+/// Scroll the nth failed-tool card (`.card.tool.error`, document order) into the
+/// centre of the viewport. The selector matches both views, and the indexing
+/// mirrors `rendered_error_count`, so the cursor stays aligned with the count.
+extern "js" fn scroll_to_nth_error(index : Int) -> Unit = "(n) => { const els = document.querySelectorAll('.card.tool.error'); const el = els[n]; if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' }); }"
 
 ///|
 fn session_url(id : String) -> String {
@@ -481,11 +514,13 @@ fn main_pane(emit : @cmd.Emit[Msg], model : Model) -> @html.Html {
             id~,
             system_prompt=model.system_prompt,
           )
-          @html.div(class="session-view", [
+          let error_count = @viz.rendered_error_count(session, model.view_mode)
+          @html.div(class=session_view_class(model), [
             header_strip(model, id, row.map(row => row.root_label)),
             mode_toggle(emit, model),
+            error_bar(emit, model, error_count),
             @viz.render_notices(parsed),
-            @viz.render_session(session, model.view_mode),
+            session_log_view(model, session, error_count),
           ])
         }
       }
@@ -533,6 +568,112 @@ fn mode_button(
     "mode-button"
   }
   @html.button(class=classes, on_click=emit(SetMode(mode)), label)
+}
+
+///|
+/// Add the `errors-only` class so the stylesheet folds the log down to failed
+/// tool cards (and the turns containing them).
+fn session_view_class(model : Model) -> String {
+  if model.errors_only {
+    "session-view errors-only"
+  } else {
+    "session-view"
+  }
+}
+
+///|
+/// The "find failures" toolbar: a count, an errors-only filter toggle, and
+/// prev/next jumps. Hidden entirely when the current view has no failures, so a
+/// clean session shows no extra chrome.
+fn error_bar(emit : @cmd.Emit[Msg], model : Model, count : Int) -> @html.Html {
+  if count == 0 {
+    return @html.nothing
+  }
+  let toggle_class = if model.errors_only {
+    "error-toggle active"
+  } else {
+    "error-toggle"
+  }
+  @html.div(class="error-bar", [
+    @html.span(
+      class="error-count",
+      "🚩 \{count} tool error\{plural_s(count)}",
+    ),
+    @html.button(
+      class=toggle_class,
+      title="Show only failed tool results",
+      on_click=emit(ToggleErrorsOnly),
+      if model.errors_only {
+        "Errors only: on"
+      } else {
+        "Errors only"
+      },
+    ),
+    @html.button(
+      class="error-jump",
+      title="Scroll to the previous failure",
+      on_click=emit(JumpToError(-1)),
+      "↑ prev",
+    ),
+    @html.button(
+      class="error-jump",
+      title="Scroll to the next failure",
+      on_click=emit(JumpToError(1)),
+      "↓ next",
+    ),
+  ])
+}
+
+///|
+/// The log, or a hint when the errors-only filter would hide everything (so the
+/// pane never looks empty/broken when a clean view is filtered).
+fn session_log_view(
+  model : Model,
+  session : @agent_session.Session,
+  count : Int,
+) -> @html.Html {
+  if model.errors_only && count == 0 {
+    @html.div(class="errors-only-empty", "No failed tool results in this view.")
+  } else {
+    @viz.render_session(session, model.view_mode)
+  }
+}
+
+///|
+/// Number of failures the active view will draw, recomputed from the loaded log.
+/// Returns 0 when nothing is loaded.
+fn current_error_count(model : Model) -> Int {
+  guard model.selected is Some(key) else { return 0 }
+  guard model.parsed is Some(parsed) else { return 0 }
+  let id = match session_row(model, key) {
+    Some(row) => row.id
+    None => key
+  }
+  let session = @viz.session_from_parse(
+    parsed,
+    id~,
+    system_prompt=model.system_prompt,
+  )
+  @viz.rendered_error_count(session, model.view_mode)
+}
+
+///|
+/// Step `focus` by `direction` and wrap into `0..<n` (n > 0). A fresh cursor
+/// (`focus < 0`) lands on the first failure going forward and the last going
+/// back, so the very first "next"/"prev" behaves intuitively.
+fn wrap_index(focus : Int, direction : Int, n : Int) -> Int {
+  let base = if focus < 0 { if direction > 0 { -1 } else { 0 } } else { focus }
+  let next = base + direction
+  (next % n + n) % n
+}
+
+///|
+fn plural_s(n : Int) -> String {
+  if n == 1 {
+    ""
+  } else {
+    "s"
+  }
 }
 
 // ---- JSON helpers ----------------------------------------------------------

@@ -216,6 +216,23 @@
     .mode-button:hover { border-color: var(--accent); }
     .mode-button.active { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
 
+    /* find-failures bar */
+    .error-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: -6px 0 16px; }
+    .error-count { color: var(--error); font-size: 12px; font-weight: 600; margin-right: 2px; }
+    .error-toggle, .error-jump {
+      background: var(--panel); color: var(--text);
+      border: 1px solid var(--border); border-radius: 999px;
+      padding: 4px 12px; cursor: pointer; font-size: 12px;
+    }
+    .error-jump { padding: 4px 11px; font-family: ui-monospace, monospace; }
+    .error-toggle:hover, .error-jump:hover { border-color: var(--error); }
+    .error-toggle.active { background: var(--error); color: #fff; border-color: var(--error); }
+    .turn-error-badge { color: var(--error); }
+    .errors-only-empty { color: var(--muted); margin-top: 24px; }
+    /* errors-only: keep only failed tool cards and the turns that contain them */
+    .session-view.errors-only .card:not(.error) { display: none; }
+    .session-view.errors-only .turn:not(:has(.card.error)) { display: none; }
+
     /* notices */
     .notices { margin-bottom: 16px; }
     .notice { border-radius: 8px; padding: 8px 12px; margin-bottom: 8px; font-size: 13px; }

@@ -146,6 +146,40 @@ test "successful tool result folds without a flag" {
 }
 
 ///|
+test "turn header badges failed tools" {
+  let html = render(@viz.render_session(error_tool_session(), RawLog))
+  assert_true(html.contains("turn-error-badge"))
+  assert_true(html.contains("🚩 1 error"))
+}
+
+///|
+test "rendered_error_count matches the failures each view draws" {
+  let failing = error_tool_session()
+  inspect(@viz.rendered_error_count(failing, RawLog), content="1")
+  inspect(@viz.rendered_error_count(failing, ModelView), content="1")
+  let clean = @viz.session_from_parse(
+    @viz.parse_events(events_jsonl(sample_session())),
+    id="demo",
+    system_prompt="",
+  )
+  inspect(@viz.rendered_error_count(clean, RawLog), content="0")
+  inspect(@viz.rendered_error_count(clean, ModelView), content="0")
+}
+
+///|
+test "model error count excludes a compacted-away failure raw still shows" {
+  let compacted = error_tool_session().compact(
+    content="covered",
+    from_sequence=2,
+    to_sequence=2,
+  )
+  // Raw still renders the durable errored result; the model view healed the
+  // dangling call, so it has no error card to count.
+  inspect(@viz.rendered_error_count(compacted, RawLog), content="1")
+  inspect(@viz.rendered_error_count(compacted, ModelView), content="0")
+}
+
+///|
 test "parse round-trips every event kind" {
   let text = events_jsonl(sample_session())
   let parsed = @viz.parse_events(text)
