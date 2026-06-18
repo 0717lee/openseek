@@ -295,8 +295,11 @@ fn tool_call_view(
 
 ///|
 /// Map each tool call's id to the one-line brief its result recorded, for the
-/// folded call line. Only results that carry a brief appear; older logs and
-/// briefless tools simply produce no entry (the call renders as a plain name).
+/// folded call line. Indexes every durable result, which is correct for the raw
+/// view (it shows every event); the model view instead uses
+/// `model_tool_call_briefs` so it never captions a compacted/healed call. Only
+/// results that carry a brief appear; older logs and briefless tools produce no
+/// entry (the call renders as a plain name).
 fn tool_call_briefs(session : @agent_session.Session) -> Map[String, String] {
   let briefs : Map[String, String] = Map([])
   for event in session.events() {
@@ -379,8 +382,12 @@ fn render_model(session : @agent_session.Session) -> @html.Html {
   // name, so recover them from the durable events for display (the messages fed
   // to the model are unchanged — this is view-only enrichment).
   let tool_results = tool_results_by_id(session)
-  let briefs = tool_call_briefs(session)
   let messages = session.chat_messages()
+  // Model-view briefs must come only from results the projection actually
+  // emitted and the view trusts (see `model_shown_result`); using every durable
+  // brief would caption a healed/compacted call with a result the model never
+  // saw. The raw view, which shows every event, uses all briefs.
+  let briefs = model_tool_call_briefs(messages, tool_results)
   let cards : Array[@html.Html] = [
     for message in messages => message_card(message, tool_results, briefs)
   ]
@@ -388,6 +395,26 @@ fn render_model(session : @agent_session.Session) -> @html.Html {
     return empty_state("The model projection is empty.")
   }
   @html.div(class="log model-log", cards)
+}
+
+///|
+/// Briefs for the model view: keyed by call id, but only from the durable result
+/// the projection emitted for that call and whose content the view trusts. A
+/// compacted-away or healed result contributes no brief, so the call line never
+/// shows a summary the model was not actually fed.
+fn model_tool_call_briefs(
+  messages : Array[@deepseek.ChatMessage],
+  tool_results : Map[String, @agent_session.ToolResult],
+) -> Map[String, String] {
+  let briefs : Map[String, String] = Map([])
+  for message in messages {
+    guard message.role is Tool(id) else { continue }
+    if model_shown_result(message, tool_results) is Some(result) &&
+      result.brief() is Some(brief) {
+      briefs.set(id, brief)
+    }
+  }
+  briefs
 }
 
 ///|
