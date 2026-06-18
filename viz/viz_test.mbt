@@ -176,6 +176,46 @@ test "tool call shows the brief its result recorded" {
 }
 
 ///|
+test "model view omits a brief whose result was compacted away" {
+  let session = @agent_session.Session(SessionId("cb"), system_prompt="")
+    .append(
+      Assistant(
+        AssistantMessage("", tool_calls=[
+          ToolCall(id="c1", name="shell", arguments="{\"cmd\":\"ls\"}"),
+        ]),
+      ),
+    )
+    .append(
+      Tool(
+        ToolResult(
+          tool_call_id="c1",
+          tool_name="shell",
+          content="files",
+          brief="ran ls → 3 files",
+        ),
+      ),
+    )
+  // Compact away only the result (seq 2): the model projection heals the call
+  // with a synthetic result, so the model never saw this brief.
+  let compacted = session.compact(
+    content="covered",
+    from_sequence=2,
+    to_sequence=2,
+  )
+  // Raw shows the durable brief on the call; the model view must not.
+  assert_true(
+    render(@viz.render_session(compacted, RawLog)).contains(
+      "ran ls → 3 files",
+    ),
+  )
+  assert_false(
+    render(@viz.render_session(compacted, ModelView)).contains(
+      "ran ls → 3 files",
+    ),
+  )
+}
+
+///|
 test "turn header badges failed tools" {
   let html = render(@viz.render_session(error_tool_session(), RawLog))
   assert_true(html.contains("turn-error-badge"))
