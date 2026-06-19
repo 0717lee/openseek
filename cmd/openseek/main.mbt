@@ -29,6 +29,17 @@ async fn run_cli() -> Unit {
     if flag(matches, "no-session") && session_id(matches) is Some(_) {
       fail("--no-session contradicts --session; pick one behavior")
     }
+    // Best-of-N fleet mode owns its own workspace materialization and session
+    // creation, so it branches before prepare_workspace_root (which would
+    // create a single --dir) and the session/serve handling.
+    let concurrency = parse_positive_int(
+      value(matches, "concurrency"),
+      "--concurrency",
+    )
+    if concurrency >= 2 {
+      run_fleet(matches, concurrency~)
+      return
+    }
     let session_commands = session_command_count(matches)
     let workspace_root = prepare_workspace_root(
       matches,
@@ -242,6 +253,13 @@ fn cli_command() -> @argparse.Command {
         env="OPENSEEK_MAX_STEPS",
         default_values=["1000"],
         about="Maximum number of agent loop steps before stopping.",
+      ),
+      OptionArg(
+        "concurrency",
+        long="concurrency",
+        env="OPENSEEK_CONCURRENCY",
+        default_values=["1"],
+        about="Run the task in N sibling copies of --dir concurrently (best-of-N); 1 means a single run.",
       ),
       OptionArg(
         "thinking",

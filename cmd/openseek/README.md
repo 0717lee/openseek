@@ -86,6 +86,20 @@ moon run cmd/openseek -- --dir ../another-workspace "run moon test"
 moon run cmd/openseek -- --session parser-fix "continue from the last run"
 ```
 
+Best-of-N: run the same task in N sibling copies of `--dir` concurrently, each
+recording its own session, then print a summary. The original `--dir` is never
+written to (a present `--dir` is copied — keeping `.git`, skipping
+`_build`/`node_modules`/`.openseek`; an absent one yields empty workspaces to
+build from scratch). View the results with `openseek viz --dir <parent>`.
+
+```bash
+# 3 attempts at the same fix in dir_run_1 / dir_run_2 / dir_run_3
+moon run cmd/openseek -- --concurrency 3 --dir myproject "fix the failing test"
+```
+
+`--concurrency` (env `OPENSEEK_CONCURRENCY`, default `1`) cannot be combined with
+`--serve`, `--session`, `--no-session`, or the `--session-*` commands.
+
 ## Package Boundary
 
 This package should stay thin: argument parsing, environment-backed defaults,
