@@ -32,13 +32,16 @@ async fn run_fleet(matches : @argparse.Matches, concurrency~ : Int) -> Unit {
     value(matches, "dir").trim().to_owned(),
   )
   let (run_dirs, source) = resolve_run_dirs(dir, concurrency)
+  // Skip the configured session store (not just the default) so a custom
+  // --session-root does not copy stale source sessions into every trial.
+  let sessions_rel = workspace_sessions_rel(value(matches, "session-root"))
   // Materialize each workspace before running. A present --dir is copied; an
   // absent one yields empty workspaces (build-from-scratch best-of-N), mirroring
   // how a single run creates a missing --dir. Copies are sequential to avoid
   // thrashing the disk with N concurrent deep walks.
   for run_dir in run_dirs {
     match source {
-      Some(src) => copy_tree(src, run_dir)
+      Some(src) => copy_tree(src, run_dir, sessions_rel~)
       None => @fs.mkdir(run_dir, recursive=true)
     }
   }
@@ -232,17 +235,22 @@ fn terminal_summary(session : @agent_session.Session) -> (String, String) {
 /// executable bit is preserved heuristically for shebang scripts (the fs API
 /// exposes no source mode); symlinks and special files are skipped. `rel` is the
 /// path within the source, for path-aware skipping. `dst` and parents are made.
-async fn copy_tree(src : String, dst : String, rel? : String = "") -> Unit {
+async fn copy_tree(
+  src : String,
+  dst : String,
+  sessions_rel~ : String,
+  rel? : String = "",
+) -> Unit {
   @fs.mkdir(dst, recursive=true)
   for name in @fs.readdir(src, include_hidden=true, sort=true) {
     let child_rel = if rel == "" { name } else { "\{rel}/\{name}" }
-    if copy_skip(child_rel) {
+    if copy_skip(child_rel, sessions_rel~) {
       continue
     }
     let s = @workspace_path.resolve(src, name)
     let d = @workspace_path.resolve(dst, name)
     match @fs.kind(s, follow_symlink=false) {
-      Directory => copy_tree(s, d, rel=child_rel)
+      Directory => copy_tree(s, d, sessions_rel~, rel=child_rel)
       Regular => {
         // A `.git` file (linked worktree or submodule) points at the original
         // repo; skip it so git in the copy can never write the original.
@@ -265,17 +273,35 @@ async fn copy_tree(src : String, dst : String, rel? : String = "") -> Unit {
 ///|
 /// Paths (relative to the source) never copied into a trial workspace: build
 /// output and vendored deps anywhere, and the durable session store
-/// `.openseek/sessions` (each trial records its own). Workspace skills under
+/// (`sessions_rel`, derived from `--session-root` — `.openseek/sessions` by
+/// default), since each trial records its own. Workspace skills under
 /// `.openseek/skills` are deliberately kept so a trial behaves like a normal run.
-fn copy_skip(rel : String) -> Bool {
+/// `sessions_rel` is `""` when the session store lives outside the workspace.
+fn copy_skip(rel : String, sessions_rel~ : String) -> Bool {
   let base = match rel.rev_find("/") {
     Some(index) => rel[index + 1:].to_owned()
     None => rel
   }
-  base == "_build" ||
-  base == "node_modules" ||
-  rel == ".openseek/sessions" ||
-  rel.has_suffix("/.openseek/sessions")
+  if base == "_build" || base == "node_modules" {
+    return true
+  }
+  sessions_rel != "" &&
+  (rel == sessions_rel || rel.has_suffix("/\{sessions_rel}"))
+}
+
+///|
+/// The workspace-relative session-store path to skip when copying, derived from
+/// the configured `--session-root`. `""` when the store is configured outside the
+/// workspace (an absolute root), so nothing inside the copy needs skipping.
+fn workspace_sessions_rel(session_root_value : String) -> String {
+  let root = trim_trailing_path_separators(session_root_value.trim().to_owned())
+  if root == "" || @path.Path(root).is_absolute() {
+    ""
+  } else if root == "." {
+    "sessions"
+  } else {
+    "\{root}/sessions"
+  }
 }
 
 ///|
@@ -314,7 +340,7 @@ async fn print_fleet_summary(
   }
   lines.push("")
   lines.push(
-    "view: openseek viz --dir <parent>   or   openseek --session-show <id>",
+    "inspect a run:  openseek --dir <run-dir> --session <id> --session-show",
   )
   lines.push("")
   @stdio.stderr.write(lines.join("\n")) catch {

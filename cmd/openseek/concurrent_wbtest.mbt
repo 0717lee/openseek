@@ -7,16 +7,39 @@ test "one_line_brief collapses newlines and caps length" {
 
 ///|
 test "copy_skip drops build/vendor/session data but keeps git, skills, sources" {
-  assert_true(copy_skip("_build"))
-  assert_true(copy_skip("node_modules"))
-  assert_true(copy_skip("a/b/_build"))
-  // Session logs are skipped; the rest of .openseek (skills) is kept.
-  assert_true(copy_skip(".openseek/sessions"))
-  assert_true(copy_skip("sub/.openseek/sessions"))
-  assert_false(copy_skip(".openseek"))
-  assert_false(copy_skip(".openseek/skills"))
-  assert_false(copy_skip(".git"))
-  assert_false(copy_skip("src"))
+  let sr = ".openseek/sessions"
+  assert_true(copy_skip("_build", sessions_rel=sr))
+  assert_true(copy_skip("node_modules", sessions_rel=sr))
+  assert_true(copy_skip("a/b/_build", sessions_rel=sr))
+  // Default session store is skipped; the rest of .openseek (skills) is kept.
+  assert_true(copy_skip(".openseek/sessions", sessions_rel=sr))
+  assert_true(copy_skip("sub/.openseek/sessions", sessions_rel=sr))
+  assert_false(copy_skip(".openseek", sessions_rel=sr))
+  assert_false(copy_skip(".openseek/skills", sessions_rel=sr))
+  assert_false(copy_skip(".git", sessions_rel=sr))
+  assert_false(copy_skip("src", sessions_rel=sr))
+}
+
+///|
+test "copy_skip follows the configured session root" {
+  // A custom --session-root skips its own store, not the default path.
+  assert_true(
+    copy_skip("mysessions/sessions", sessions_rel="mysessions/sessions"),
+  )
+  assert_false(
+    copy_skip(".openseek/sessions", sessions_rel="mysessions/sessions"),
+  )
+  // An absolute/external store (sessions_rel="") skips nothing extra.
+  assert_false(copy_skip("sessions", sessions_rel=""))
+  assert_false(copy_skip(".openseek/sessions", sessions_rel=""))
+}
+
+///|
+test "workspace_sessions_rel derives the store path from --session-root" {
+  assert_eq(workspace_sessions_rel(".openseek"), ".openseek/sessions")
+  assert_eq(workspace_sessions_rel("mysessions"), "mysessions/sessions")
+  assert_eq(workspace_sessions_rel("."), "sessions")
+  assert_eq(workspace_sessions_rel("/abs/root"), "")
 }
 
 ///|
@@ -100,7 +123,7 @@ async test "copy_tree keeps files, .git dir, skills; skips build and sessions" {
     create_mode=CreateOrTruncate,
   )
   let dst = "\{root}/d"
-  copy_tree(src, dst)
+  copy_tree(src, dst, sessions_rel=".openseek/sessions")
   assert_eq(@fs.read_file("\{dst}/a.txt").text(), "hi")
   assert_true(@fs.exists("\{dst}/sub/b.txt"))
   assert_true(@fs.exists("\{dst}/.git/config")) // normal .git dir kept
@@ -123,7 +146,7 @@ async test "copy_tree skips a worktree .git file (never points at the original)"
   )
   @fs.write_file("\{src}/code.mbt", "x", create_mode=CreateOrTruncate)
   let dst = "\{root}/d"
-  copy_tree(src, dst)
+  copy_tree(src, dst, sessions_rel=".openseek/sessions")
   assert_true(@fs.exists("\{dst}/code.mbt"))
   assert_false(@fs.exists("\{dst}/.git")) // worktree pointer not copied
   @fs.rmdir(root, recursive=true)
