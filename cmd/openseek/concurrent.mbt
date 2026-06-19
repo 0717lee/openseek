@@ -225,31 +225,64 @@ fn terminal_summary(session : @agent_session.Session) -> (String, String) {
 }
 
 ///|
-/// Recursively copy `src` into `dst`, keeping hidden files (so `.git` survives)
-/// but skipping heavy/derived directories. Files are copied byte-for-byte;
-/// symlinks and special files are skipped. `dst` and missing parents are created.
-async fn copy_tree(src : String, dst : String) -> Unit {
+/// Recursively copy `src` into `dst`, keeping a normal `.git` directory (so the
+/// copy is a self-contained repo) but never the worktree/submodule `.git` *file*
+/// — that is a pointer back to the original repo, and copying it would let git
+/// in the copy mutate the original. Files are copied byte-for-byte; the
+/// executable bit is preserved heuristically for shebang scripts (the fs API
+/// exposes no source mode); symlinks and special files are skipped. `rel` is the
+/// path within the source, for path-aware skipping. `dst` and parents are made.
+async fn copy_tree(src : String, dst : String, rel? : String = "") -> Unit {
   @fs.mkdir(dst, recursive=true)
   for name in @fs.readdir(src, include_hidden=true, sort=true) {
-    if copy_skip(name) {
+    let child_rel = if rel == "" { name } else { "\{rel}/\{name}" }
+    if copy_skip(child_rel) {
       continue
     }
     let s = @workspace_path.resolve(src, name)
     let d = @workspace_path.resolve(dst, name)
     match @fs.kind(s, follow_symlink=false) {
-      Directory => copy_tree(s, d)
-      Regular =>
-        @fs.write_file(d, @fs.read_file(s), create_mode=CreateOrTruncate)
-      _ => ()
+      Directory => copy_tree(s, d, rel=child_rel)
+      Regular => {
+        // A `.git` file (linked worktree or submodule) points at the original
+        // repo; skip it so git in the copy can never write the original.
+        if name == ".git" {
+          continue
+        }
+        let data = @fs.read_file(s).binary()
+        @fs.write_file(d, data, create_mode=CreateOrTruncate)
+        if has_shebang(data) {
+          @fs.chmod(d, 0o755) catch {
+            _ => ()
+          }
+        }
+      }
+      _ => () // symlinks and special files are skipped
     }
   }
 }
 
 ///|
-/// Directory names never copied into a trial workspace: build output, vendored
-/// dependencies, and prior session logs (each trial records its own).
-fn copy_skip(name : String) -> Bool {
-  name == "_build" || name == "node_modules" || name == ".openseek"
+/// Paths (relative to the source) never copied into a trial workspace: build
+/// output and vendored deps anywhere, and the durable session store
+/// `.openseek/sessions` (each trial records its own). Workspace skills under
+/// `.openseek/skills` are deliberately kept so a trial behaves like a normal run.
+fn copy_skip(rel : String) -> Bool {
+  let base = match rel.rev_find("/") {
+    Some(index) => rel[index + 1:].to_owned()
+    None => rel
+  }
+  base == "_build" ||
+  base == "node_modules" ||
+  rel == ".openseek/sessions" ||
+  rel.has_suffix("/.openseek/sessions")
+}
+
+///|
+/// Whether `data` starts with a `#!` shebang, marking an executable script whose
+/// executable bit should survive the copy.
+fn has_shebang(data : Bytes) -> Bool {
+  data.length() >= 2 && data[0].to_int() == 0x23 && data[1].to_int() == 0x21
 }
 
 ///|
