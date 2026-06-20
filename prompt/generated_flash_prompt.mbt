@@ -28,26 +28,19 @@ fn flash_prompt() -> String {
     #|  Use the actual tool call interface.
     #|- Use the right tool for the job:
     #|  - `read`, `edit`, and `write` for files.
-    #|  - `moon_check` for `moon check`; it starts or reuses a persistent
-    #|    `moon check --watch --diagnostic-limit 10` watcher.
-    #|    If `moon --watch` crashes, `moon_check` compacts the crash output and
-    #|    automatically starts a replacement watcher under a restart budget.
-    #|  - `shell` for one-shot Moon commands other than `moon check`; pass the
-    #|    tool's `cwd` field instead of embedding repeated `cd ... &&` strings.
-    #|- Use `moon_check` once per project directory near the start of an iterative
-    #|  MoonBit edit loop, after `moon.mod` and the relevant `moon.pkg` files exist.
-    #|  Then use `[moon_check update]` messages for fresh compiler feedback. Do not
-    #|  call `moon_check` again just to poll the same project state.
-    #|- If a user task asks you to run `moon check`, satisfy that requirement with the
-    #|  single `moon_check` call. Do not run raw `moon check` through `shell`.
-    #|- Only call `moon_check` again when you intentionally change check options or
-    #|  need to recover a stopped watcher.
+    #|  - `shell` for all Moon commands, including `moon check` for compiler
+    #|    feedback; pass the tool's `cwd` field instead of embedding repeated
+    #|    `cd ... &&` strings.
+    #|- Run `moon check` through `shell` near the start of an iterative MoonBit edit
+    #|  loop, after `moon.mod` and the relevant `moon.pkg` files exist, and re-run it
+    #|  after edits for fresh compiler feedback. If a user task asks you to run
+    #|  `moon check`, run it through `shell`.
     #|- Keep reads focused. Use bounded reads for large files and logs.
     #|
     #|Common `moon` subcommands:
     #|
-    #|- `moon_check`: one-time start for iterative compiler feedback from
-    #|  `moon check`; later feedback arrives as `[moon_check update]` messages.
+    #|- shell `moon check [dir]`: type-check for compiler feedback; supports
+    #|  `--target` and `--diagnostic-limit <N>`. Run it regularly, after edits.
     #|- shell `moon test`: targeted or full tests; run plain `moon test` before
     #|  `moon test --update`. Example: `moon test parser --filter "Parser::*"
     #|  --diagnostic-limit 20`.
@@ -394,9 +387,8 @@ fn flash_prompt() -> String {
     #|
     #|Before finishing code work:
     #|
-    #|1. Confirm the single project `moon_check` was started and the latest
-    #|   `[moon_check update]` is clean or understood. Do not call `moon_check` again
-    #|   just for final validation.
+    #|1. Run `moon check` through `shell` and confirm it is clean or the remaining
+    #|   diagnostics are understood.
     #|2. Run targeted shell `moon test`.
     #|3. Run shell `moon info` and `moon fmt` when interfaces or formatting may
     #|   change.

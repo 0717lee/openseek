@@ -217,9 +217,8 @@ my_module
 - `moon build` - Build project
   (`moon run` and `moon build` both support `--target`)
 - `moon check` - Type check without building, use it REGULARLY, it is fast
-  (`moon check` also supports `--target` and `--diagnostic-limit <N>`). In
-  OpenSeek, prefer the `moon_check` tool for iterative compiler feedback; it
-  starts a watcher with `--diagnostic-limit 10`.
+  (`moon check` also supports `--target` and `--diagnostic-limit <N>`). Run it
+  through `shell` for iterative compiler feedback.
 - `moon info` - Type check and generate `mbti` files.
   Run it to see if any public interfaces changed.
   (`moon info` also supports `--target`.)
@@ -1258,15 +1257,15 @@ These notes come from real DeepSeek V4-Pro coding-agent runs and supplement the 
 - In blackbox tests, prefer `debug_inspect` for values that derive `Debug`; plain `inspect` requires `Show` and often triggers deprecated Show-based output.
 - When an enum type is already known from context, use unqualified constructors such as `Table(value)` instead of over-qualified `@pkg.Value::Table(value)`.
 - Avoid direct map indexing such as `table[key]` unless the key is guaranteed to exist; it can abort at runtime. Use `table.get(key)` when creating nested tables.
-- Current MoonBit uses `moon.mod`; `moon.mod.json` is legacy. For new projects, create `moon.mod`, not `moon.mod.json`. Only preserve `moon.mod.json` when an existing project is deliberately still in legacy mode. After creating `moon.mod` and the relevant `moon.pkg` files, start `moon_check` once for that project before continuing.
+- Current MoonBit uses `moon.mod`; `moon.mod.json` is legacy. For new projects, create `moon.mod`, not `moon.mod.json`. Only preserve `moon.mod.json` when an existing project is deliberately still in legacy mode. After creating `moon.mod` and the relevant `moon.pkg` files, run `moon check` once for that project before continuing.
 - For real workspace tasks, use shell `moon ide doc` before relying on unfamiliar MoonBit APIs. Query symbols, methods, types, or imported package aliases, not broad English terms or full package paths: `moon ide doc "StringView::split"` for methods, `moon ide doc "@json.parse"` for package functions, and `moon ide doc "@json"` for package exploration. Use shell `moon ide outline`, `moon ide peek-def`, `moon ide find-references`, and `moon ide hover` before editing existing MoonBit packages instead of guessing from text search alone.
 - The `read` tool supports `start_line`, `max_lines`, and `max_output_chars`. Use focused ranges for large generated files, dependency source, logs, or files you only need to inspect partially instead of reading the whole file.
 - MoonBit packages are flat like Go packages: all `.mbt` files beside one `moon.pkg` share a single namespace, and file names do not create modules, import paths, or qualified names. Split code into small cohesive files for reviewability, but never refer to a file as a module.
-- Avoid one large generated file or one huge write. Add focused files or blocks, call `moon_check` once per project directory near the start of longer iterative MoonBit work, and only continue once the current package checks. Avoid polling `moon_check` or one-shot `moon check` while a watcher is available.
-- For real workspace tasks, `moon_check` starts or reuses a persistent `moon check --watch --diagnostic-limit 10` workspace watcher. Use the initial `moon_check` result and later `[moon_check update]` messages for fresh compiler feedback. If a user task asks you to run `moon check`, satisfy that requirement with the single project `moon_check` call and do not run raw `moon check` through `shell`. Only call `moon_check` again when intentionally changing check options or recovering a stopped watcher.
+- Avoid one large generated file or one huge write. Add focused files or blocks, run `moon check` near the start of longer iterative MoonBit work, and only continue once the current package checks.
+- For real workspace tasks, run `moon check` through `shell` for compiler feedback (it supports `--target` and `--diagnostic-limit <N>`). Re-run it after edits to confirm the current package still checks; if a user task asks you to run `moon check`, run it through `shell`.
 - Use shell for exact one-shot `moon` commands beyond compiler feedback: `moon test` for tests, `moon run` for CLI probes, `moon info` for generated interfaces, `moon fmt` for formatting, `moon build` for build artifacts, and `moon update`/`moon add`/`moon remove` for dependencies. Use the shell tool's `cwd` argument instead of embedding repeated `cd ... &&` command strings. Run plain `moon test` before `moon test --update`; only update snapshots after reviewing the failure as `stale_snapshot` or `intentional_output_change`, and never for behavior bugs. Shell truncates large output and reports truncation as a tool error; if a CLI smoke test is truncated or emits generated native/C output, fix the CLI or command rather than increasing the output cap.
-- Moon command quick reference. Use shell for these commands unless the command is raw `moon check`, which belongs in the single project `moon_check` call:
-  - `moon_check`: one-time start for iterative compiler feedback from `moon check --watch --diagnostic-limit 10`. Example tool intent: start once for the workspace, then read `[moon_check update]` messages instead of polling shell `moon check`.
+- Moon command quick reference. Use shell for these commands:
+  - `moon check [dir]`: type-check for compiler feedback; supports `--target` and `--diagnostic-limit <N>`. Run it regularly during iterative MoonBit work, after edits.
   - `moon test [dir|file] [--filter "..."]`: targeted or full tests; add `--target native` for native-only packages and run plain `moon test` before `moon test --update`. Example forms: `moon test parser --filter "Parser::*" --diagnostic-limit 20`, `moon test --target native`.
   - `moon run <pkg> -- <args>`: executable packages and CLI probes; the package path goes before `--`, program arguments go after `--`. Example forms: `moon run --target native cmd/tomljson -- /tmp/input.toml`, `printf 'a.b = 1\n' | moon run --target native cmd/tomljson -- --stdin`.
   - `moon run -e '<code>'` and `moon run -`: quick language/API snippets; `-e` takes code as the next argument, while `-` reads source from stdin or a heredoc. Verified forms: `moon run --target native -e 'fn main { println("ok") }'` and `moon run --target native - <<'EOF'`.

@@ -22,7 +22,7 @@ async fn steer_test_server(group : @async.TaskGroup[Unit]) -> String? {
         assert_true(request_body.contains("also rename the file"))
         // The prebuilt registry reached the request: the standard tools ride
         // along even though the caller, not the turn, constructed them.
-        assert_true(request_body.contains("\"name\":\"moon_check\""))
+        assert_true(request_body.contains("\"name\":\"shell\""))
         conn.send_response(200, "OK", extra_headers={
           "Content-Type": "text/event-stream",
         })

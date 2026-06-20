@@ -2,46 +2,23 @@
 /// Policy gate for agent shell commands: returns the error to feed back to
 /// the model when `cmd` must not run, or `None` when it may.
 ///
-/// The blocked commands are not dangerous — they are redirections. `moon
-/// check` (bare, behind `cd`, or embedded in a compound command) is pushed to
-/// the `moon_check` tool so the agent gets persistent watcher feedback
-/// instead of a one-shot run, and the tool name `moon_cmd` typed as a shell
-/// command is pointed back at the real tools. Each error's wording tells the
-/// model what to do instead, because the model is the caller who reads it.
+/// `moon check` (and every other `moon` subcommand) runs through shell; the
+/// only redirection left is the tool name `moon_cmd` typed as a shell command,
+/// which is pointed back at running `moon ...` directly. The error wording tells
+/// the model what to do instead, because the model is the caller who reads it.
 pub fn moonbit_command_policy_error(cmd : String) -> String? {
   let words = shell_words(cmd)
-  let command_index = first_command_word_index(words)
-  match command_index {
+  match first_command_word_index(words) {
     None => None
-    Some(index) => {
-      let first = words[index]
-      if first == "moon_cmd" {
-        return Some(
-          "error: moon_cmd is a tool name, not a shell command; use `moon ...` through shell, and use moon_check once per project for `moon check`",
-        )
-      }
-      if first == "moon" && index + 1 < words.length() {
-        let subcommand = words[index + 1]
-        if guarded_moon_subcommands().contains(subcommand) {
-          return Some(
-            "error: shell blocked `moon check`; start moon_check once per project instead. If moon_check already ran for this project, do not retry `moon check`; continue with `moon test`, `moon info`, `moon fmt`, and task probes.",
-          )
-        }
-      }
-      if contains_guarded_moon_fragment(cmd) {
+    Some(index) =>
+      if words[index] == "moon_cmd" {
         Some(
-          "error: shell blocked an embedded `moon check`; start moon_check once with the target cwd instead of `cd ... && moon check`. If moon_check already ran for this project, skip the extra check and continue with tests/probes.",
+          "error: moon_cmd is not a shell command; run moon subcommands like `moon check` or `moon test` through shell directly",
         )
       } else {
         None
       }
-    }
   }
-}
-
-///|
-fn guarded_moon_subcommands() -> Array[String] {
-  ["check"]
 }
 
 ///|
@@ -78,17 +55,4 @@ fn looks_like_env_assignment(word : String) -> Bool {
   }
   let parts = word.split("=").collect()
   parts.length() == 2 && parts[0] != "" && parts[1] != ""
-}
-
-///|
-fn contains_guarded_moon_fragment(cmd : String) -> Bool {
-  let probes = ["&& moon ", "; moon ", "\nmoon "]
-  for probe in probes {
-    for subcommand in guarded_moon_subcommands() {
-      if cmd.contains(probe + subcommand) {
-        return true
-      }
-    }
-  }
-  false
 }
