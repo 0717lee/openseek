@@ -92,6 +92,7 @@ test "read tool advertises the expected schema" {
   let text = schema.stringify()
   assert_true(text.contains("\"path\""))
   assert_false(text.contains("\"paths\""))
+  assert_true(text.contains("\"required\""))
   assert_true(text.contains("\"start_line\""))
   assert_true(text.contains("\"max_lines\""))
   assert_true(text.contains("\"max_output_chars\""))

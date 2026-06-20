@@ -33,6 +33,7 @@ pub fn definition(
     description="Read arguments.path as text. For several known independent files, batch separate read tool calls in one assistant response when possible. Do not use read for directories: inspect them with `ls` or `tree`, then read specific files. Supports optional start_line, max_lines, and max_output_chars for focused single-file reads. Headered outputs include right-aligned line numbers.",
     schema=JsonSchema({
       "type": "object",
+      "required": ["path"],
       "properties": {
         "path": {
           "type": "string",
@@ -449,6 +450,7 @@ test "read description encourages batched reads and directory inspection" {
   let schema_text = schema.stringify()
   assert_true(schema_text.contains("\"path\""))
   assert_false(schema_text.contains("\"paths\""))
+  assert_true(schema_text.contains("\"required\""))
   assert_true(schema_text.contains("Directories are not supported"))
 }
 
