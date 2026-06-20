@@ -1321,10 +1321,14 @@ async test "configured system prompt defaults to the flash prompt" {
     "DEEPSEEK": "test-key",
   })
   assert_true(
-    configured_system_prompt(parsed, V4Flash).contains("optimized for DeepSeek"),
+    configured_system_prompt(parsed, V4Flash).contains(
+      "MoonBit coding agent focused on implementing user tasks",
+    ),
   )
   assert_true(
-    configured_system_prompt(parsed, V4Pro).contains("optimized for DeepSeek"),
+    configured_system_prompt(parsed, V4Pro).contains(
+      "MoonBit coding agent focused on implementing user tasks",
+    ),
   )
 }
 

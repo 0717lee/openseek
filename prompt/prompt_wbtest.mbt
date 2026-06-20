@@ -1,7 +1,9 @@
 ///|
 test "flash prompt keeps core MoonBit guidance" {
   let prompt = flash_prompt()
-  assert_true(prompt.contains("optimized for DeepSeek"))
+  assert_true(
+    prompt.contains("MoonBit coding agent focused on implementing user tasks"),
+  )
   assert_true(prompt.contains("Do not emit JSON action plans"))
   assert_true(prompt.contains("Run `moon check` through `shell`"))
   assert_true(prompt.contains("much faster than"))
