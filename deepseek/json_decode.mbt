@@ -1,24 +1,25 @@
 ///|
 fn Usage::from_json(json : Json) -> Usage {
+  guard json is Object(fields) else { return Usage::empty() }
   {
-    prompt_tokens: match json {
-      { "prompt_tokens": Number(n, ..), .. } => n.to_int()
+    prompt_tokens: match fields.get("prompt_tokens") {
+      Some(Number(n, ..)) => n.to_int()
       _ => 0
     },
-    completion_tokens: match json {
-      { "completion_tokens": Number(n, ..), .. } => n.to_int()
+    completion_tokens: match fields.get("completion_tokens") {
+      Some(Number(n, ..)) => n.to_int()
       _ => 0
     },
-    total_tokens: match json {
-      { "total_tokens": Number(n, ..), .. } => n.to_int()
+    total_tokens: match fields.get("total_tokens") {
+      Some(Number(n, ..)) => n.to_int()
       _ => 0
     },
-    prompt_cache_hit_tokens: match json {
-      { "prompt_cache_hit_tokens": Number(n, ..), .. } => n.to_int()
+    prompt_cache_hit_tokens: match fields.get("prompt_cache_hit_tokens") {
+      Some(Number(n, ..)) => n.to_int()
       _ => 0
     },
-    prompt_cache_miss_tokens: match json {
-      { "prompt_cache_miss_tokens": Number(n, ..), .. } => n.to_int()
+    prompt_cache_miss_tokens: match fields.get("prompt_cache_miss_tokens") {
+      Some(Number(n, ..)) => n.to_int()
       _ => 0
     },
   }
@@ -148,18 +149,16 @@ pub impl FromJson for ChatResponse with fn from_json(
         path, "ChatResponse::from_json: expected response object",
       )
   }
-  let tool_calls = match message_fields {
-    { "tool_calls": Array(raw_tool_calls), .. } => {
-      let decoded : Array[ToolCall] = []
-      for index, tool_call in raw_tool_calls {
-        let decoded_tool_call : ToolCall = FromJson::from_json(
-          tool_call,
-          message_path.add_key("tool_calls").add_index(index),
-        )
-        decoded.push(decoded_tool_call)
-      }
-      decoded
-    }
+  let tool_calls : Array[ToolCall] = match message_fields {
+    { "tool_calls": Array(raw_tool_calls), .. } =>
+      [
+        for index in 0..<raw_tool_calls.length() => {
+          FromJson::from_json(
+            raw_tool_calls[index],
+            message_path.add_key("tool_calls").add_index(index),
+          )
+        }
+      ]
     { "tool_calls": Null, .. } => []
     { "tool_calls": _, .. } =>
       json_decode_error(

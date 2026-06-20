@@ -247,14 +247,11 @@ fn events_jsonl(events : @vector.Vector[@agent_session.SessionEvent]) -> String 
 fn parse_events_jsonl(
   text : String,
 ) -> @vector.Vector[@agent_session.SessionEvent] raise {
-  let events : Array[@agent_session.SessionEvent] = []
-  for line in text.split("\n") {
-    if line.trim().is_empty() {
-      continue
+  let events : Array[@agent_session.SessionEvent] = [
+    for line in text.split("\n") if !line.trim().is_empty() => {
+      @json.from_json(@json.parse(line))
     }
-    let event : @agent_session.SessionEvent = @json.from_json(@json.parse(line))
-    events.push(event)
-  }
+  ]
   @vector.from_array(events)
 }
 

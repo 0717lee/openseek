@@ -27,15 +27,16 @@ async fn run_harness_with_runtime(
         ),
       ])
   }
-  let rows : Array[@report.ReportRow] = []
-  rows.push(run_read_case(1, tools))
-  rows.push(run_write_case(2, tools))
-  rows.push(run_edit_case(3, tools))
-  rows.push(run_shell_case(4, tools))
-  rows.push(run_moon_check_case(5, tools))
-  rows.push(run_moon_cmd_case(6, tools))
-  rows.push(run_moon_ide_case(7, tools))
-  rows.push(run_finish_case(8, tools))
+  let rows : Array[@report.ReportRow] = [
+    run_read_case(1, tools),
+    run_write_case(2, tools),
+    run_edit_case(3, tools),
+    run_shell_case(4, tools),
+    run_moon_check_case(5, tools),
+    run_moon_cmd_case(6, tools),
+    run_moon_ide_case(7, tools),
+    run_finish_case(8, tools),
+  ]
   build_report(rows)
 }
 

@@ -87,13 +87,14 @@ fn optional_path_array(
       guard items.length() > 0 else {
         fail("arguments.\{name} to be a non-empty array")
       }
-      let paths : Array[String] = []
-      for item in items {
-        guard item is String(value) && value != "" else {
-          fail("arguments.\{name} to be an array of non-empty path strings")
+      let paths : Array[String] = [
+        for item in items => {
+          guard item is String(value) && value != "" else {
+            fail("arguments.\{name} to be an array of non-empty path strings")
+          }
+          value
         }
-        paths.push(value)
-      }
+      ]
       Some(paths)
     }
     Some(Null) | None => None

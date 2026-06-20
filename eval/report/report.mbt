@@ -357,13 +357,11 @@ fn ReportRow::metric_value(self : ReportRow, column : String) -> String {
 
 ///|
 fn log_section_lines(rows : Array[ReportRow]) -> Array[String] {
-  let lines : Array[String] = []
-  for row in rows {
-    if row.log_path != "" {
-      lines.push("- `\{row.name}` trial \{row.index}: `\{row.log_path}`")
+  [
+    for row in rows if row.log_path != "" => {
+      "- `\{row.name}` trial \{row.index}: `\{row.log_path}`"
     }
-  }
-  lines
+  ]
 }
 
 ///|

@@ -216,12 +216,14 @@ pub impl FromJson for Session with fn from_json(
   }
   let events = match fields.get("events") {
     Some(Array(values)) => {
-      let decoded : Array[SessionEvent] = []
-      for index, value in values {
-        decoded.push(
-          @json.from_json(value, path=path.add_key("events").add_index(index)),
-        )
-      }
+      let decoded : Array[SessionEvent] = [
+        for index in 0..<values.length() => {
+          @json.from_json(
+            values[index],
+            path=path.add_key("events").add_index(index),
+          )
+        }
+      ]
       @vector.from_array(decoded)
     }
     Some(_) =>

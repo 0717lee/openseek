@@ -66,15 +66,15 @@ pub fn FileSystem::entries(self : FileSystem) -> Array[FileEntry] raise {
   }
   let paths = fields.keys().collect()
   paths.sort()
-  let entries : Array[FileEntry] = []
-  for path in paths {
-    validate_relative_path(path)
-    match fields[path] {
-      String(content) => entries.push({ path, content })
-      _ => fail("file content for `\{path}` must be a string")
+  [
+    for path in paths => {
+      validate_relative_path(path)
+      match fields[path] {
+        String(content) => { path, content }
+        _ => fail("file content for `\{path}` must be a string")
+      }
     }
-  }
-  entries
+  ]
 }
 
 ///|
@@ -207,10 +207,9 @@ async fn ensure_parent_dir(root : String, path : String) -> Unit {
   if parts.length() <= 1 {
     return
   }
-  let dirs : Array[StringView] = []
-  for index in 0..<(parts.length() - 1) {
-    dirs.push(parts[index])
-  }
+  let dirs : Array[StringView] = [
+    for index in 0..<(parts.length() - 1) => parts[index]
+  ]
   let _ = @fs.mkdir("\{root}/\{dirs.join("/")}", recursive=true) catch {
     _ => ()
   }
