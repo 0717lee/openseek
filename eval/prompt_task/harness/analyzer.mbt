@@ -262,12 +262,9 @@ fn relocate_output_path(
     return path
   }
   let prefix = old_out_dir + "/"
-  if path.has_prefix(prefix) {
-    new_out_dir +
-    "/" +
-    path.sub(start=prefix.length(), end=path.length()).to_owned()
-  } else {
-    path
+  match path.strip_prefix(prefix) {
+    Some(rest) => "\{new_out_dir}/\{rest}"
+    None => path
   }
 }
 

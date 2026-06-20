@@ -171,27 +171,24 @@ async fn build_reply(
       )
     "/api/sessions" => session_list_reply(catalog)
     _ =>
-      if path.has_prefix("/api/sessions/") {
-        session_path_reply(catalog, path)
-      } else {
-        text_reply(404, "Not Found", "no route for \{path}")
+      match path.strip_prefix("/api/sessions/") {
+        Some(rest) => session_path_reply(catalog, "\{rest}")
+        None => text_reply(404, "Not Found", "no route for \{path}")
       }
   }
 }
 
 ///|
-/// Resolve `/api/sessions/<key>` (envelope) or `/api/sessions/<key>/<file>`
-/// (raw). A key is either legacy `<id>` for the first root, or `<root>|<id>`
-/// for a discovered root. The segment is percent-decoded, so ids containing
+/// Resolve `<key>` (envelope) or `<key>/<file>` (raw) after the
+/// `/api/sessions/` route prefix. A key is either legacy `<id>` for the first
+/// root, or `<root>|<id>` for a discovered root. The segment is percent-decoded, so ids containing
 /// URL-reserved characters (spaces, `?`, `#`) still resolve to the right
 /// session. The store's own id validation rejects path separators and `..`, so
 /// a crafted id cannot escape the session directory.
-async fn session_path_reply(catalog : SessionCatalog, path : String) -> Reply {
-  let rest = slice_from(path, "/api/sessions/".length())
-  let (key, file) = match rest.find("/") {
+async fn session_path_reply(catalog : SessionCatalog, rest : String) -> Reply {
+  let (key, file) = match rest.split_once("/") {
     None => (percent_decode(rest), None)
-    Some(index) =>
-      (percent_decode(slice(rest, 0, index)), Some(slice_from(rest, index + 1)))
+    Some((key, file)) => (percent_decode("\{key}"), Some("\{file}"))
   }
   let (root, id_value) = match catalog.lookup(key) {
     Some(found) => found
@@ -457,13 +454,12 @@ fn SessionCatalog::lookup(
   self : SessionCatalog,
   key : String,
 ) -> (SessionRoot, String)? {
-  match key.find("|") {
-    Some(index) => {
-      let root_key = slice(key, 0, index)
-      let id = slice_from(key, index + 1)
+  match key.split_once("|") {
+    Some((root_key, id)) => {
+      let root_key = "\{root_key}"
       for root in self.roots {
         if root.key == root_key {
-          return Some((root, id))
+          return Some((root, "\{id}"))
         }
       }
       None
@@ -536,9 +532,14 @@ fn join_path(parent : String, child : String) -> String {
 /// before the `_build` component locates the checkout and its assets,
 /// wherever the server was started from.
 fn module_root_from_exe(exe : String) -> String? {
-  match exe.find("/_build/") {
-    Some(index) => Some(slice(exe, 0, index))
-    None => if exe.has_prefix("_build/") { Some(".") } else { None }
+  match exe.split_once("/_build/") {
+    Some((root, _)) => Some("\{root}")
+    None =>
+      if exe.strip_prefix("_build/") is Some(_) {
+        Some(".")
+      } else {
+        None
+      }
   }
 }
 
@@ -642,17 +643,10 @@ fn text_reply(code : Int, reason : String, message : String) -> Reply {
 ///|
 /// The path without any `?query` suffix.
 fn strip_query(path : String) -> String {
-  match path.find("?") {
-    Some(index) => slice(path, 0, index)
+  match path.split_once("?") {
+    Some((path, _)) => "\{path}"
     None => path
   }
-}
-
-///|
-/// Code-unit slice `s[start:end]` as an owned `String`. Indices here always come
-/// from `find`/`length`, so they are in range.
-fn slice(s : String, start : Int, end : Int) -> String {
-  s[start:end].to_owned()
 }
 
 ///|

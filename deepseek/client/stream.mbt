@@ -158,15 +158,13 @@ async fn apply_stream_json(
 
 ///|
 fn sse_data_fragment(raw : String) -> String? {
-  let line = if raw.has_suffix("\r") {
-    raw[:raw.length() - 1].to_owned()
-  } else {
-    raw
+  let line = match raw.strip_suffix("\r") {
+    Some(line) => line
+    None => raw
   }
-  if line.has_prefix("data:") {
-    Some("\{line[5:].trim()}")
-  } else {
-    None
+  match line.strip_prefix("data:") {
+    Some(data) => Some("\{data.trim()}")
+    None => None
   }
 }
 

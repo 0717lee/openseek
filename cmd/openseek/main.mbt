@@ -193,11 +193,11 @@ fn failure_message(error_text : String) -> String {
     return error_text
   }
   let message = pieces[pieces.length() - 1]
-  if message.has_suffix(")") {
-    "\{message[:message.length() - 1]}"
-  } else {
-    "\{message}"
+  let message = match message.strip_suffix(")") {
+    Some(trimmed) => trimmed
+    None => message
   }
+  "\{message}"
 }
 
 ///|

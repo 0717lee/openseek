@@ -304,10 +304,9 @@ fn relative_artifact_path(out_dir : String, path : String) -> String {
     return path
   }
   let prefix = out_dir + "/"
-  if path.has_prefix(prefix) {
-    path.sub(start=prefix.length(), end=path.length()).to_owned()
-  } else {
-    path
+  match path.strip_prefix(prefix) {
+    Some(rest) => "\{rest}"
+    None => path
   }
 }
 

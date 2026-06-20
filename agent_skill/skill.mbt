@@ -50,10 +50,10 @@ fn parse_frontmatter(text : String, fallback_name : String) -> (String, String) 
     if line.trim() == "---" {
       break
     }
-    match line.find(":") {
-      Some(index) => {
-        let key = line[0:index].trim()
-        let value = line[index + 1:].trim()
+    match line.split_once(":") {
+      Some((key, value)) => {
+        let key = key.trim()
+        let value = value.trim()
         match key {
           "name" => if value != "" { name = "\{value}" }
           "description" => description = "\{value}"
