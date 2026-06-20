@@ -833,24 +833,6 @@ fn wrap_index(focus : Int, direction : Int, n : Int) -> Int {
 }
 
 ///|
-let project_layout_heading : String = "Project layout (directories; hidden, build, and vendored dirs omitted):"
-
-///|
-fn prompt_with_project_layout(
-  prompt : String,
-  project_layout : String,
-) -> String {
-  let layout = project_layout.trim()
-  if prompt.trim().is_empty() ||
-    layout.is_empty() ||
-    prompt.contains(project_layout_heading) {
-    prompt
-  } else {
-    "\{prompt}\n\n\{project_layout_heading}\n\{layout}"
-  }
-}
-
-///|
 fn plural_s(n : Int) -> String {
   if n == 1 {
     ""
@@ -922,16 +904,11 @@ fn parse_load(text : String) -> LoadOutcome {
     _ => return Malformed
   }
   let parsed = @viz.parse_events(events_text)
-  let project_layout = match fields.get("project_layout") {
-    Some(String(value)) => value
-    _ => ""
-  }
   let (system_prompt, header_present) = match fields.get("header") {
     Some(Object(header)) =>
       (
         match header.get("system_prompt") {
-          Some(String(prompt)) =>
-            prompt_with_project_layout(prompt, project_layout)
+          Some(String(prompt)) => prompt
           _ => ""
         },
         true,

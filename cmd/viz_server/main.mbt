@@ -201,7 +201,7 @@ async fn session_path_reply(catalog : SessionCatalog, rest : String) -> Reply {
   }
   let id = @agent_session.SessionId(id_value)
   match file {
-    None => session_envelope_reply(root, id)
+    None => session_envelope_reply(root.store, id)
     Some("events.jsonl") =>
       asset_reply(
         root.store.event_log_file(id),
@@ -234,10 +234,9 @@ fn valid_session_id(value : String) -> Bool {
 /// in the body rather than signalled by 404. `events` is the raw `events.jsonl`
 /// text; `header` is the parsed `session.json` or `null` when it is absent.
 async fn session_envelope_reply(
-  root : SessionRoot,
+  store : @store.SessionStore,
   id : @agent_session.SessionId,
 ) -> Reply {
-  let store = root.store
   let events_path = store.event_log_file(id)
   let header_path = store.header_file(id)
   let events_exists = @fs.exists(events_path)
@@ -261,19 +260,7 @@ async fn session_envelope_reply(
   } else {
     Json::null()
   }
-  json_reply({
-    "found": true,
-    "events": events_text,
-    "header": header,
-    "project_layout": project_layout_for_root(root),
-  })
-}
-
-///|
-async fn project_layout_for_root(root : SessionRoot) -> String {
-  guard root.is_marker else { return "" }
-  guard parent_path(root.path) is Some(project_root) else { return "" }
-  @vfs.dir_outline(project_root)
+  json_reply({ "found": true, "events": events_text, "header": header })
 }
 
 ///|
@@ -531,16 +518,6 @@ fn path_tail(path : String) -> String {
   match last_path_separator(trimmed) {
     Some(index) => slice_from(trimmed, index + 1)
     None => trimmed
-  }
-}
-
-///|
-fn parent_path(path : String) -> String? {
-  let trimmed = trim_trailing_path_separators(path)
-  match last_path_separator(trimmed) {
-    Some(0) => Some("/")
-    Some(index) => Some(trimmed[:index].to_owned())
-    None => Some(".")
   }
 }
 
