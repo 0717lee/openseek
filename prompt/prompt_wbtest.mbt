@@ -36,6 +36,12 @@ test "flash prompt omits obsolete guidance" {
 }
 
 ///|
+test "prompt markdown comments are stripped from generated prompts" {
+  assert_false(base_prompt().contains("md_to_mbt_string smoke"))
+  assert_false(flash_prompt().contains("md_to_mbt_string smoke"))
+}
+
+///|
 test "default prompt uses the flash prompt for all DeepSeek V4 models" {
   assert_eq(system_prompt_for_model(V4Flash), flash_prompt())
   assert_eq(system_prompt_for_model(V4Pro), flash_prompt())
