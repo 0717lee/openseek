@@ -143,7 +143,7 @@ fn cap_text(content : String, max_chars : Int) -> String {
   if content.length() <= max_chars {
     content
   } else {
-    content[:max_chars].to_owned()
+    "\{content[:max_chars]}"
   }
 }
 

@@ -120,7 +120,7 @@ fn parent_dir(path : String) -> String {
 
 ///|
 async fn manifest_write_error(path : String, content : String) -> String? {
-  let trimmed = content.trim().to_owned()
+  let trimmed = content.trim()
   if is_moon_mod_json_path(path) && !@fs.exists(path) {
     return Some(
       "moon.mod.json is legacy; create moon.mod for new MoonBit projects",

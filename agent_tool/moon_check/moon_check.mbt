@@ -500,5 +500,5 @@ fn stable_moon_check_output(
       stable_lines.push(line.to_owned())
     }
   }
-  stable_lines.join("\n").trim().to_owned()
+  "\{stable_lines.join("\n").trim()}"
 }

@@ -459,17 +459,15 @@ fn append_markdown_code_block(lines : Array[String], text : String) -> Unit {
 
 ///|
 fn markdown_fence(text : String) -> String {
-  let mut current = 0
-  let mut longest = 0
-  for char in text {
+  let longest = for char in text; current = 0, longest = 0 {
     if char == '`' {
-      current += 1
-      if current > longest {
-        longest = current
-      }
+      let next = current + 1
+      continue next, if next > longest { next } else { longest }
     } else {
-      current = 0
+      continue 0, longest
     }
+  } nobreak {
+    longest
   }
   let length = if longest >= 3 { longest + 1 } else { 3 }
   repeat_char('`', length)

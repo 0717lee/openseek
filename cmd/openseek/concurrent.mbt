@@ -28,11 +28,9 @@ async fn run_fleet(matches : @argparse.Matches, concurrency~ : Int) -> Unit {
   let model = @deepseek.Model::parse(value(matches, "model"))
   let max_steps = max_steps(matches)
   let thinking = @deepseek.ThinkingMode::parse(value(matches, "thinking"))
-  let dir = trim_trailing_path_separators(
-    value(matches, "dir").trim().to_owned(),
-  )
+  let dir = trim_trailing_path_separators("\{value(matches, "dir").trim()}")
   let (run_dirs, source) = resolve_run_dirs(dir, concurrency)
-  let session_root_value = value(matches, "session-root").trim().to_owned()
+  let session_root_value = "\{value(matches, "session-root").trim()}"
   // Skip the configured session store (not just the default) so a custom
   // --session-root does not copy stale source sessions into every trial.
   let sessions_rel = workspace_sessions_rel(session_root_value)
@@ -323,7 +321,7 @@ fn copy_skip(rel : String, sessions_rel~ : String) -> Bool {
 /// the configured `--session-root`. `""` when the store is configured outside the
 /// workspace (an absolute root), so nothing inside the copy needs skipping.
 fn workspace_sessions_rel(session_root_value : String) -> String {
-  let root = trim_trailing_path_separators(session_root_value.trim().to_owned())
+  let root = trim_trailing_path_separators("\{session_root_value.trim()}")
   if root == "" || @path.Path(root).is_absolute() {
     ""
   } else if root == "." {
@@ -345,7 +343,7 @@ fn has_shebang(data : Bytes) -> Bool {
 /// is non-default, since each run records its session under that root inside its
 /// run directory, and `--session-show` resolves the root relative to `--dir`.
 fn inspect_hint(session_root_value : String) -> String {
-  let root = session_root_value.trim().to_owned()
+  let root = session_root_value.trim()
   let extra = if root == "" || root == ".openseek" {
     ""
   } else {
