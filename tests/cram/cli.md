@@ -34,6 +34,7 @@ Options:
   --api-url <api-url>                                          DeepSeek-compatible chat completions endpoint. [env: OPENSEEK_API_URL] [default: ]
   --dir <dir>                                                  Workspace directory for relative paths; creates only the final path component if its parent exists. [env: OPENSEEK_DIR] [default: .]
   --max-steps <max-steps>                                      Maximum number of agent loop steps before stopping. [env: OPENSEEK_MAX_STEPS] [default: 1000]
+  --concurrency <concurrency>                                  Run the task in N sibling copies of --dir concurrently (best-of-N); 1 means a single run. [env: OPENSEEK_CONCURRENCY] [default: 1]
   --thinking <thinking>                                        DeepSeek thinking mode: no, high, or max. [env: OPENSEEK_THINKING] [default: max]
   --system-prompt-file <system-prompt-file>                    Read the complete system prompt from this file instead of the built-in prompt. [env: OPENSEEK_SYSTEM_PROMPT_FILE] [default: ]
   --system-prompt-addendum-file <system-prompt-addendum-file>  Append this file to the selected system prompt for prompt experiments. [env: OPENSEEK_SYSTEM_PROMPT_ADDENDUM_FILE] [default: ]
