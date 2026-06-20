@@ -431,15 +431,14 @@ fn short_cell(text : String) -> String {
     .replace_all(old="\r\n", new="\n")
     .replace_all(old="\n", new=" ")
     .trim()
-    .to_owned()
   let out = StringBuilder::new()
-  let mut count = 0
-  for char in squashed {
+  for char in squashed; count = 0 {
     if count >= 96 {
-      return out.to_string() + "..."
+      out.write_string("...")
+      break
     }
     out.write_char(char)
-    count += 1
+    continue count + 1
   }
   out.to_string()
 }

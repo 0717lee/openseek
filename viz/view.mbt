@@ -654,7 +654,8 @@ fn pretty_json(raw : String) -> String {
 
 ///|
 fn one_line(text : String) -> String {
-  text.replace_all(old="\n", new=" ").trim().to_owned()
+  let one = text.replace_all(old="\n", new=" ").trim()
+  "\{one}"
 }
 
 ///|
@@ -662,16 +663,17 @@ fn one_line(text : String) -> String {
 /// Iterates by character so it never splits a surrogate pair.
 fn truncate(text : String, limit : Int) -> String {
   if text.length() <= limit {
-    return text
-  }
-  let kept = StringBuilder()
-  let mut count = 0
-  for char in text {
-    if count >= limit {
-      break
+    text
+  } else {
+    let kept = StringBuilder()
+    for char in text; count = 0 {
+      if count >= limit {
+        break
+      }
+      kept.write_char(char)
+      continue count + 1
     }
-    kept <+ "\{char}"
-    count += 1
+    kept.write_char('…')
+    kept.to_string()
   }
-  "\{kept.to_string()}…"
 }

@@ -394,18 +394,19 @@ async fn print_fleet_summary(
 /// Collapse to a single trimmed line capped at `max` characters (ellipsis when
 /// cut), iterating by character so a cap never splits a surrogate pair.
 fn one_line_brief(text : String, max : Int) -> String {
-  let one = text.replace_all(old="\n", new=" ").trim().to_owned()
+  let one = text.replace_all(old="\n", new=" ").trim()
   if one.length() <= max {
-    return one
-  }
-  let kept = StringBuilder()
-  let mut count = 0
-  for ch in one {
-    if count >= max {
-      break
+    "\{one}"
+  } else {
+    let kept = StringBuilder()
+    for ch in one; count = 0 {
+      if count >= max {
+        break
+      }
+      kept.write_char(ch)
+      continue count + 1
     }
-    kept.write_char(ch)
-    count += 1
+    kept.write_char('…')
+    kept.to_string()
   }
-  "\{kept.to_string()}…"
 }

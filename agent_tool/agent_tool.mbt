@@ -135,20 +135,21 @@ pub fn ToolAction::respond(
 /// cap it to `limit` characters (appending `…` when cut). Iterates by character
 /// so a cap never splits a surrogate pair. Helper for tools assembling a brief.
 pub fn brief_line(text : String, limit? : Int = 72) -> String {
-  let one = text.replace_all(old="\n", new=" ").trim().to_owned()
+  let one = text.replace_all(old="\n", new=" ").trim()
   if one.length() <= limit {
-    return one
-  }
-  let kept = StringBuilder()
-  let mut count = 0
-  for ch in one {
-    if count >= limit {
-      break
+    "\{one}"
+  } else {
+    let kept = StringBuilder()
+    for ch in one; count = 0 {
+      if count >= limit {
+        break
+      }
+      kept.write_char(ch)
+      continue count + 1
     }
-    kept.write_char(ch)
-    count += 1
+    kept.write_char('…')
+    kept.to_string()
   }
-  "\{kept.to_string()}…"
 }
 
 ///|

@@ -674,10 +674,9 @@ fn summarize(text : String) -> String {
     .replace_all(old="\r\n", new="\n")
     .replace_all(old="\n", new=" ")
     .trim()
-    .to_owned()
   if one_line.length() <= 240 {
-    one_line
+    "\{one_line}"
   } else {
-    one_line.sub(start=0, end=240).to_owned() + "..."
+    "\{one_line.sub(start=0, end=240)}..."
   }
 }
