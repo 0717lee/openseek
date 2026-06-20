@@ -7,7 +7,7 @@ fn retain_output_tail(content : String, max_chars : Int) -> String {
   } else {
     let keep_from = content.char_length() - max_chars
     match content.offset_of_nth_char(keep_from) {
-      Some(offset) => content[offset:].to_owned()
+      Some(offset) => "\{content[offset:]}"
       None => content
     }
   }
@@ -35,7 +35,7 @@ fn latest_run_segment(content : String) -> String {
   if segment == "" {
     content
   } else {
-    segment.to_owned()
+    "\{segment}"
   }
 }
 
@@ -99,7 +99,7 @@ fn compact_moon_check_exit_output(
 fn first_line_containing(content : String, needle : String) -> String? {
   for line in content.split("\n") {
     if line.contains(needle) {
-      return Some(line.trim().to_owned())
+      return Some("\{line.trim()}")
     }
   }
   None
@@ -199,15 +199,16 @@ pub fn runtime_update_text(
   events : Array[@agent_runtime.AgentEvent],
 ) -> String? {
   let latest_moon_checks : Map[String, MoonCheckSnapshot] = {}
-  let mut moon_check_count = 0
-  for event in events {
+  let moon_check_count = for event in events; count = 0 {
     match event {
       MoonCheckUpdate(update) => {
         latest_moon_checks[update.key] = update
-        moon_check_count += 1
+        continue count + 1
       }
       _ => ()
     }
+  } nobreak {
+    count
   }
   if moon_check_count == 0 {
     None

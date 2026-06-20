@@ -134,13 +134,13 @@ fn turn_block(
 ///|
 /// Number of failed tool results in a turn, for the turn header's error badge.
 fn count_turn_tool_errors(turn : Array[@agent_session.SessionEvent]) -> Int {
-  let mut count = 0
-  for event in turn {
+  for event in turn; count = 0 {
     if event.item() is Tool(result) && result.is_error() {
-      count += 1
+      continue count + 1
     }
+  } nobreak {
+    count
   }
-  count
 }
 
 ///|
@@ -498,25 +498,27 @@ pub fn rendered_error_count(
   session : @agent_session.Session,
   mode : ViewMode,
 ) -> Int {
-  let mut count = 0
   match mode {
     RawLog =>
-      for event in session.events() {
+      for event in session.events(); count = 0 {
         if event.item() is Tool(result) && result.is_error() {
-          count += 1
+          continue count + 1
         }
+      } nobreak {
+        count
       }
     ModelView => {
       let tool_results = tool_results_by_id(session)
-      for message in session.chat_messages() {
+      for message in session.chat_messages(); count = 0 {
         if model_shown_result(message, tool_results) is Some(result) &&
           result.is_error() {
-          count += 1
+          continue count + 1
         }
+      } nobreak {
+        count
       }
     }
   }
-  count
 }
 
 ///|

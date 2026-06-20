@@ -282,7 +282,7 @@ async fn read_output_prefix(
 ///|
 fn text_prefix_by_chars(text : String, max_chars : Int) -> String {
   match text.offset_of_nth_char(max_chars) {
-    Some(end) => text[:end].to_owned()
+    Some(end) => "\{text[:end]}"
     None => text
   }
 }

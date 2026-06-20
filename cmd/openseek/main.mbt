@@ -184,22 +184,19 @@ async fn random_salt() -> String {
 ///|
 fn failure_message(error_text : String) -> String {
   match error_text.strip_prefix("error: ") {
-    Some(message) => return message.to_owned()
+    Some(message) => return "\{message}"
     None => ()
   }
   let marker = " FAILED: "
-  let pieces : Array[String] = error_text
-    .split(marker)
-    .map(piece => piece.to_owned())
-    .collect()
+  let pieces = error_text.split(marker).collect()
   if pieces.length() < 2 {
     return error_text
   }
   let message = pieces[pieces.length() - 1]
   if message.has_suffix(")") {
-    message[:message.length() - 1].to_owned()
+    "\{message[:message.length() - 1]}"
   } else {
-    message
+    "\{message}"
   }
 }
 
@@ -387,20 +384,20 @@ fn flag(matches : @argparse.Matches, name : String) -> Bool {
 
 ///|
 fn api_key(matches : @argparse.Matches) -> String raise {
-  let key = value(matches, "api-key").trim().to_owned()
+  let key = value(matches, "api-key").trim()
   if key.is_empty() {
     fail("--api-key or DEEPSEEK is required for agent runs")
   }
-  key
+  "\{key}"
 }
 
 ///|
 fn api_url(matches : @argparse.Matches) -> String? raise {
-  let url = value(matches, "api-url").trim().to_owned()
+  let url = value(matches, "api-url").trim()
   if url.is_empty() {
     None
   } else {
-    Some(url)
+    Some("\{url}")
   }
 }
 
@@ -411,20 +408,20 @@ fn max_steps(matches : @argparse.Matches) -> Int raise {
 
 ///|
 fn task_text(matches : @argparse.Matches) -> String raise {
-  let task = values(matches, "task").join(" ").trim().to_owned()
+  let task = values(matches, "task").join(" ").trim()
   if task.is_empty() {
     fail("task description is required for agent runs")
   }
-  task
+  "\{task}"
 }
 
 ///|
 fn session_id(matches : @argparse.Matches) -> @agent_session.SessionId? raise {
-  let id = value(matches, "session").trim().to_owned()
+  let id = value(matches, "session").trim()
   if id.is_empty() {
     None
   } else {
-    Some(SessionId(id))
+    Some(SessionId("\{id}"))
   }
 }
 
@@ -433,9 +430,7 @@ async fn prepare_workspace_root(
   matches : @argparse.Matches,
   log_created? : Bool = true,
 ) -> String {
-  let dir = trim_trailing_path_separators(
-    value(matches, "dir").trim().to_owned(),
-  )
+  let dir = trim_trailing_path_separators("\{value(matches, "dir").trim()}")
   if dir.is_empty() {
     fail("--dir or OPENSEEK_DIR must not be empty")
   }
@@ -492,11 +487,11 @@ fn session_root(
   matches : @argparse.Matches,
   workspace_root? : String = ".",
 ) -> String raise {
-  let root = value(matches, "session-root").trim().to_owned()
+  let root = value(matches, "session-root").trim()
   if root.is_empty() {
     fail("--session-root or OPENSEEK_SESSION_ROOT must not be empty")
   }
-  @workspace_path.resolve(workspace_root, root)
+  @workspace_path.resolve(workspace_root, "\{root}")
 }
 
 ///|
@@ -512,29 +507,26 @@ const PromptLabelMaxChars : Int = 60
 /// without a recorded prompt shows `-` so the column never vanishes.
 fn compact_prompt_label(prompt : String) -> String {
   let out = StringBuilder()
-  let mut last_was_space = false
-  let mut count = 0
-  for ch in prompt.trim() {
+  for ch in prompt.trim(); last_was_space = false, count = 0 {
     if count >= PromptLabelMaxChars {
-      out <+ "…"
+      out.write_char('…')
       break
     }
     if ch is (' ' | '\t' | '\n' | '\r') {
       if !last_was_space {
-        out <+ " "
-        count += 1
+        out.write_char(' ')
+        continue true, count + 1
       }
-      last_was_space = true
+      continue true, count
     } else if ch.to_int() < 0x20 ||
       ch.to_int() == 0x7F ||
       (ch.to_int() >= 0x80 && ch.to_int() <= 0x9F) {
       // C0/C1 controls and DEL: ESC, CSI, OSC and friends render as terminal
       // commands, not text.
-      continue
+      continue last_was_space, count
     } else {
-      out <+ "\{ch}"
-      count += 1
-      last_was_space = false
+      out.write_char(ch)
+      continue false, count + 1
     }
   }
   let label = out.to_string()
@@ -588,9 +580,9 @@ async fn handle_session_command(
   }
   let list_sessions = flag(matches, "session-list")
   let show_session = flag(matches, "session-show")
-  let compact_file = value(matches, "session-compact-file").trim().to_owned()
-  let compact_from = value(matches, "session-compact-from").trim().to_owned()
-  let compact_to = value(matches, "session-compact-to").trim().to_owned()
+  let compact_file = value(matches, "session-compact-file").trim()
+  let compact_from = value(matches, "session-compact-from").trim()
+  let compact_to = value(matches, "session-compact-to").trim()
   let store = @store.SessionStore(session_root(matches, workspace_root~))
   if list_sessions {
     match session_list_format(matches) {
@@ -611,10 +603,14 @@ async fn handle_session_command(
     fail("--session-compact-file is required for session compaction")
   }
   let from_sequence = required_positive_int(
-    compact_from, "--session-compact-from",
+    "\{compact_from}",
+    "--session-compact-from",
   )
-  let to_sequence = required_positive_int(compact_to, "--session-compact-to")
-  let summary_path = @workspace_path.resolve(workspace_root, compact_file)
+  let to_sequence = required_positive_int(
+    "\{compact_to}",
+    "--session-compact-to",
+  )
+  let summary_path = @workspace_path.resolve(workspace_root, "\{compact_file}")
   let summary = @fs.read_file(summary_path).text()
   let compacted = store.compact(
     store.load(id),
@@ -706,7 +702,7 @@ fn session_title(first_prompt : String) -> String {
     Some((line, _)) => line.trim()
     None => content
   }
-  title.to_owned()
+  "\{title}"
 }
 
 ///|
@@ -914,11 +910,11 @@ fn parse_positive_int(input : String, label : String) -> Int raise {
 
 ///|
 fn required_positive_int(input : String, label : String) -> Int raise {
-  let trimmed = input.trim().to_owned()
+  let trimmed = input.trim()
   if trimmed.is_empty() {
     fail("\{label} is required")
   }
-  parse_positive_int(trimmed, label)
+  parse_positive_int("\{trimmed}", label)
 }
 
 ///|

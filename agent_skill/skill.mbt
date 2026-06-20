@@ -52,11 +52,11 @@ fn parse_frontmatter(text : String, fallback_name : String) -> (String, String) 
     }
     match line.find(":") {
       Some(index) => {
-        let key = line[0:index].to_owned().trim().to_owned()
-        let value = line[index + 1:].to_owned().trim().to_owned()
+        let key = line[0:index].trim()
+        let value = line[index + 1:].trim()
         match key {
-          "name" => if value != "" { name = value }
-          "description" => description = value
+          "name" => if value != "" { name = "\{value}" }
+          "description" => description = "\{value}"
           _ => ()
         }
       }
@@ -71,11 +71,11 @@ fn parse_frontmatter(text : String, fallback_name : String) -> (String, String) 
 /// skill name.
 fn file_stem(path : String) -> String {
   let base = match path.rev_find("/") {
-    Some(index) => path[index + 1:].to_owned()
+    Some(index) => "\{path[index + 1:]}"
     None => path
   }
   match base.rev_find(".") {
-    Some(index) => base[0:index].to_owned()
+    Some(index) => "\{base[0:index]}"
     None => base
   }
 }
@@ -116,11 +116,11 @@ async fn add_skill_file(skills : Array[Skill], path : String) -> Unit {
       // For <name>/SKILL.md layouts the directory carries the name — its
       // full basename, dots included ("node.js" stays "node.js").
       let parent = match path.rev_find("/") {
-        Some(index) => path[0:index].to_owned()
+        Some(index) => "\{path[0:index]}"
         None => path
       }
       match parent.rev_find("/") {
-        Some(index) => parent[index + 1:].to_owned()
+        Some(index) => "\{parent[index + 1:]}"
         None => parent
       }
     }

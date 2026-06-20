@@ -164,7 +164,7 @@ fn sse_data_fragment(raw : String) -> String? {
     raw
   }
   if line.has_prefix("data:") {
-    Some(line[5:].trim().to_owned())
+    Some("\{line[5:].trim()}")
   } else {
     None
   }
@@ -181,7 +181,7 @@ async fn flush_sse_event(
   if data_lines.length() == 0 {
     return false
   }
-  let data = data_lines.join("\n").trim().to_owned()
+  let data = "\{data_lines.join("\n").trim()}"
   data_lines.clear()
   // A flushed data payload means the completion is producing output
   // server-side — text, tool-call deltas, usage, or the terminal marker —

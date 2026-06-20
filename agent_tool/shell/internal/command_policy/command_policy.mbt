@@ -58,7 +58,7 @@ fn shell_words(cmd : String) -> Array[String] {
 
 ///|
 fn clean_shell_word(word : String) -> String {
-  word.trim(chars="\t\r\n ").to_owned().trim(chars=";&|()").to_owned()
+  "\{word.trim(chars="\t\r\n ").trim(chars=";&|()")}"
 }
 
 ///|
@@ -76,7 +76,7 @@ fn looks_like_env_assignment(word : String) -> Bool {
   if word.contains("/") || word.contains("-") {
     return false
   }
-  let parts = word.split("=").map(part => part.to_owned()).collect()
+  let parts = word.split("=").collect()
   parts.length() == 2 && parts[0] != "" && parts[1] != ""
 }
 
