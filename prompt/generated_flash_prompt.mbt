@@ -75,6 +75,9 @@ fn flash_prompt() -> String {
     #|  an unrelated parent module.
     #|- Packages are directories with `moon.pkg`. Files inside one package share a
     #|  flat namespace; file names do not create modules.
+    #|- Treat files like Go package files: splitting a package into small focused
+    #|  `.mbt` files does not affect visibility, and is preferred when it avoids
+    #|  large fragile edits.
     #|- Import local packages by their full package path from `moon.mod` plus the
     #|  package directory. For module `name = "user/toml"` and package `lib/moon.pkg`,
     #|  import `"user/toml/lib"` and call it as `@lib.parse(...)`; import
@@ -310,7 +313,25 @@ fn flash_prompt() -> String {
     #|```
     #|- `s[i]` returns a UTF-16 code unit, not a `Char`. Prefer `s.get_char(i)` for
     #|  `Char?` and `for c in s` for Unicode-safe iteration.
-    #|- Use named `StringView` slicing arguments: `s.sub(start=0, end=i).to_owned()`.
+    #|- `s[start:end]`, `s[:end]`, and `s[start:]` create zero-copy `StringView`s.
+    #|  Pass views directly to string APIs and parsers; use `.to_owned()` only when a
+    #|  callee stores or requires an owned `String`.
+    #|- Slice syntax panics for out-of-range indices or invalid UTF-16 boundaries; use
+    #|  `s.get_view(start=..., end=...)` when indices come from untrusted input.
+    #|
+    #|```mbt check
+    #|///|
+    #|test {
+    #|  let s = "name=value"
+    #|  let key : StringView = s[:4]
+    #|  guard s.split_once("=") is Some((prefix, value)) else { fail("missing =") }
+    #|  assert_eq(prefix, key)
+    #|  assert_eq(value, s[5:])
+    #|  let owned : String = value.to_owned()
+    #|  assert_eq(owned, "value")
+    #|}
+    #|```
+    #|
     #|- `String::split` returns an iterator. Use it directly in `for`, or collect
     #|  with `.to_array()` if you need length or random access.
     #|- Prefer typed parsing with `@string.from_str` and an explicit annotation, for
