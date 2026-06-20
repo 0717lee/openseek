@@ -1,5 +1,0 @@
-{
-  "moonbit.inlayHints.forBinderTypes": false,
-  "moonbit.inlayHints.forAnonymousFunctionReturnTypes": false,
-  "moonbit.inlayHints.forFunctionParameterNames": false
-}
