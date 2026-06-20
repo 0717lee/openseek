@@ -1361,6 +1361,60 @@ async test "load_or_new_session defers first durable write until append" {
 }
 
 ///|
+async test "new durable session header persists project layout" {
+  @vfs.with_tmpdir(prefix="openseek-cli-session-layout-", root => {
+    let workspace = "\{root}/workspace"
+    @vfs.FileSystem::from_pairs([
+      ("cmd/tool/main.mbt", "x"),
+      ("toml/parser.mbt", "x"),
+      (".openseek/ignored", "x"),
+      ("_build/out/x", "x"),
+    ]).write_to(workspace)
+    @fs.write_file(
+      "\{workspace}/prompt.md",
+      "system",
+      create_mode=CreateOrTruncate,
+    )
+    let real_workspace = @fs.realpath(workspace)
+    let store = @store.SessionStore("\{real_workspace}/.openseek")
+    let id : @agent_session.SessionId = SessionId("cli-test")
+    let parsed = cli_command().parse(
+      argv=[
+        "--dir",
+        workspace,
+        "--session-root",
+        ".openseek",
+        "--session",
+        id.value(),
+        "--system-prompt-file",
+        "prompt.md",
+        "write",
+        "MoonBit",
+      ],
+      env={
+        "DEEPSEEK": "test-key",
+        "OPENSEEK_GLOBAL_SKILLS_DIR": "\{workspace}/no-global-skills",
+      },
+    )
+    let created = load_or_new_session(
+      store,
+      id,
+      parsed,
+      V4Pro,
+      workspace_root=real_workspace,
+    )
+    let _ = store.append(created, User(UserMessage("hello")))
+    let loaded = store.load(id)
+    let prompt = loaded.system_prompt()
+    assert_true(prompt.contains("Working directory: \{real_workspace}"))
+    assert_true(prompt.contains("Project layout"))
+    assert_true(prompt.contains("cmd/\n  tool/\ntoml/"))
+    assert_false(prompt.contains(".openseek/ignored"))
+    assert_false(prompt.contains("_build/"))
+  })
+}
+
+///|
 async test "load_or_new_session recovers empty interrupted session directory" {
   @vfs.with_tmpdir(prefix="openseek-cli-session-empty-dir-", root => {
     let id : @agent_session.SessionId = SessionId("cli-test")
