@@ -53,19 +53,19 @@ async test "edit replaces a unique exact match" {
 
 ///|
 async test "edit resolves relative paths under the workspace root" {
-  let dir = @fs.tmpdir(prefix="openseek-edit-workspace-")
-  let path = "\{dir}/note.txt"
-  @fs.write_file(path, "before", create_mode=CreateOrTruncate)
-  let result = run_edit_in_workspace(dir, {
-    "path": "note.txt",
-    "old_string": "before",
-    "new_string": "after",
+  @vfs.with_tmpdir(prefix="openseek-edit-workspace-", dir => {
+    let path = "\{dir}/note.txt"
+    @fs.write_file(path, "before", create_mode=CreateOrTruncate)
+    let result = run_edit_in_workspace(dir, {
+      "path": "note.txt",
+      "old_string": "before",
+      "new_string": "after",
+    })
+    guard result is Respond(output) else { fail("expected Respond") }
+    assert_false(output.is_error)
+    assert_eq(output.content, "ok: replaced 1 occurrence(s) in \{path}")
+    assert_eq(@fs.read_file(path).text(), "after")
   })
-  guard result is Respond(output) else { fail("expected Respond") }
-  assert_false(output.is_error)
-  assert_eq(output.content, "ok: replaced 1 occurrence(s) in \{path}")
-  assert_eq(@fs.read_file(path).text(), "after")
-  @fs.rmdir(dir, recursive=true)
 }
 
 ///|
@@ -156,24 +156,26 @@ async test "edit rejects identical replacement" {
 
 ///|
 async test "edit rejects suspicious moon.pkg rewrite" {
-  let dir = @fs.tmpdir(prefix="openseek-edit-manifest-")
-  let path = "\{dir}/moon.pkg"
-  @fs.write_file(
-    path,
-    "warnings = \"+unnecessary_annotation\"",
-    create_mode=CreateOrTruncate,
-  )
-  let result = run_edit({
-    "path": path,
-    "old_string": "warnings = \"+unnecessary_annotation\"",
-    "new_string": "x",
+  @vfs.with_tmpdir(prefix="openseek-edit-manifest-", dir => {
+    let path = "\{dir}/moon.pkg"
+    @fs.write_file(
+      path,
+      "warnings = \"+unnecessary_annotation\"",
+      create_mode=CreateOrTruncate,
+    )
+    let result = run_edit({
+      "path": path,
+      "old_string": "warnings = \"+unnecessary_annotation\"",
+      "new_string": "x",
+    })
+    let read_back = @fs.read_file(path).text()
+    guard result is Respond(output) else { fail("expected Respond") }
+    assert_true(output.is_error)
+    assert_true(
+      output.content.contains("moon.pkg content is suspiciously small"),
+    )
+    assert_eq(read_back, "warnings = \"+unnecessary_annotation\"")
   })
-  let read_back = @fs.read_file(path).text()
-  @fs.rmdir(dir, recursive=true)
-  guard result is Respond(output) else { fail("expected Respond") }
-  assert_true(output.is_error)
-  assert_true(output.content.contains("moon.pkg content is suspiciously small"))
-  assert_eq(read_back, "warnings = \"+unnecessary_annotation\"")
 }
 
 ///|

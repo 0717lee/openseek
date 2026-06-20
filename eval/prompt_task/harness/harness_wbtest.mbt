@@ -1,11 +1,11 @@
 ///|
 async test "prepare output dir creates runner artifact directories" {
-  let root = @fs.tmpdir(prefix="openseek-prompt-task-output")
-  let out_dir = root + "/out"
-  prepare_output_dir(out_dir)
-  assert_true(@fs.exists(out_dir + "/workspaces"))
-  assert_true(@fs.exists(out_dir + "/logs"))
-  @fs.rmdir(root, recursive=true)
+  @vfs.with_tmpdir(prefix="openseek-prompt-task-output", root => {
+    let out_dir = root + "/out"
+    prepare_output_dir(out_dir)
+    assert_true(@fs.exists(out_dir + "/workspaces"))
+    assert_true(@fs.exists(out_dir + "/logs"))
+  })
 }
 
 ///|

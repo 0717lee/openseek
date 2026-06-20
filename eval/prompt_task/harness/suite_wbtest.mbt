@@ -34,72 +34,73 @@ fn suite_config_json() -> Json {
 
 ///|
 async test "suite config parses relative task paths and flattens jobs" {
-  let root = @fs.tmpdir(prefix="openseek-prompt-suite-config")
-  @fs.mkdir(root + "/suite", recursive=true)
-  let suite_file = root + "/suite/suite.json"
-  @fs.write_file(
-    suite_file,
-    suite_config_json().stringify(),
-    create_mode=CreateOrTruncate,
-  )
-  let config = suite_config_from_file(
-    suite_file,
-    api_key="key",
-    out_dir=root + "/runs",
-    repo_root=".",
-    engine="",
-    system_prompt_file="",
-    system_prompt_addendum_file="",
-  )
-  assert_eq(config.name, "mini-suite")
-  assert_eq(config.models.length(), 2)
-  assert_eq(config.problems.length(), 2)
-  assert_eq(config.problems[0].task_file, root + "/suite/tasks/alpha.md")
-  assert_eq(config.problems[1].prompt_label, "Beta Problem")
-  let jobs = suite_jobs(config)
-  assert_eq(jobs.length(), 12)
-  assert_eq(jobs[0].model.to_string(), "deepseek-v4-flash")
-  assert_eq(jobs[0].problem.id, "alpha")
-  assert_eq(jobs[0].repeat_index, 0)
-  assert_eq(jobs[3].problem.id, "beta")
-  assert_eq(jobs[6].model.to_string(), "deepseek-v4-pro")
-  @fs.rmdir(root, recursive=true)
+  @vfs.with_tmpdir(prefix="openseek-prompt-suite-config", root => {
+    @fs.mkdir(root + "/suite", recursive=true)
+    let suite_file = root + "/suite/suite.json"
+    @fs.write_file(
+      suite_file,
+      suite_config_json().stringify(),
+      create_mode=CreateOrTruncate,
+    )
+    let config = suite_config_from_file(
+      suite_file,
+      api_key="key",
+      out_dir=root + "/runs",
+      repo_root=".",
+      engine="",
+      system_prompt_file="",
+      system_prompt_addendum_file="",
+    )
+    assert_eq(config.name, "mini-suite")
+    assert_eq(config.models.length(), 2)
+    assert_eq(config.problems.length(), 2)
+    assert_eq(config.problems[0].task_file, root + "/suite/tasks/alpha.md")
+    assert_eq(config.problems[1].prompt_label, "Beta Problem")
+    let jobs = suite_jobs(config)
+    assert_eq(jobs.length(), 12)
+    assert_eq(jobs[0].model.to_string(), "deepseek-v4-flash")
+    assert_eq(jobs[0].problem.id, "alpha")
+    assert_eq(jobs[0].repeat_index, 0)
+    assert_eq(jobs[3].problem.id, "beta")
+    assert_eq(jobs[6].model.to_string(), "deepseek-v4-pro")
+  })
 }
 
 ///|
 async test "suite manifest round trips combos" {
-  let root = @fs.tmpdir(prefix="openseek-prompt-suite-manifest")
-  let manifest = SuiteManifest(
-    name="mini-suite",
-    out_dir=root,
-    runs_per_combo=1,
-    concurrency=1,
-    min_successes=0,
-    max_steps=20,
-    models=["deepseek-v4-flash"],
-    problems=[
-      ProblemSpec(id="alpha", task_file="tasks/alpha.md", validation_probes=[
-        simple_probe("moon check"),
-      ]),
-    ],
-    combos=[
-      ComboRun(
-        model="deepseek-v4-flash",
-        problem_id="alpha",
-        prompt_label="alpha:deepseek-v4-flash",
-        task_file="tasks/alpha.md",
-        out_dir=root + "/combos/deepseek-v4-flash/alpha",
-        manifest_path=root + "/combos/deepseek-v4-flash/alpha/run_manifest.json",
-      ),
-    ],
-  )
-  write_suite_manifest(manifest)
-  let loaded = read_suite_manifest(root)
-  assert_eq(loaded.name, "mini-suite")
-  assert_eq(loaded.combos.length(), 1)
-  assert_eq(loaded.combos[0].problem_id, "alpha")
-  assert_eq(loaded.problems[0].validation_probes[0].name, "moon check")
-  @fs.rmdir(root, recursive=true)
+  @vfs.with_tmpdir(prefix="openseek-prompt-suite-manifest", root => {
+    let manifest = SuiteManifest(
+      name="mini-suite",
+      out_dir=root,
+      runs_per_combo=1,
+      concurrency=1,
+      min_successes=0,
+      max_steps=20,
+      models=["deepseek-v4-flash"],
+      problems=[
+        ProblemSpec(id="alpha", task_file="tasks/alpha.md", validation_probes=[
+          simple_probe("moon check"),
+        ]),
+      ],
+      combos=[
+        ComboRun(
+          model="deepseek-v4-flash",
+          problem_id="alpha",
+          prompt_label="alpha:deepseek-v4-flash",
+          task_file="tasks/alpha.md",
+          out_dir=root + "/combos/deepseek-v4-flash/alpha",
+          manifest_path=root +
+            "/combos/deepseek-v4-flash/alpha/run_manifest.json",
+        ),
+      ],
+    )
+    write_suite_manifest(manifest)
+    let loaded = read_suite_manifest(root)
+    assert_eq(loaded.name, "mini-suite")
+    assert_eq(loaded.combos.length(), 1)
+    assert_eq(loaded.combos[0].problem_id, "alpha")
+    assert_eq(loaded.problems[0].validation_probes[0].name, "moon check")
+  })
 }
 
 ///|

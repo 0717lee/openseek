@@ -378,50 +378,50 @@ async test "moon_check reports diagnostics from a broken fixture project" {
 
 ///|
 async test "moon_check validates a virtual filesystem workspace" {
-  let project = @fs.tmpdir(prefix="openseek-moon-check-vfs-")
-  @vfs.FileSystem({
-    "moon.mod": (
-      #|name = "openseek/moon_check_vfs_fixture"
-      #|
-      #|version = "0.1.0"
-      #|
-      #|preferred_target = "native"
-      #|
-    ),
-    "math/moon.pkg": (
-      #|warnings = "+unnecessary_annotation"
-      #|
-    ),
-    "math/math.mbt": (
-      #|///|
-      #|pub fn add(left : Int, right : Int) -> Int {
-      #|  left + right
-      #|}
-      #|
-    ),
-  }).write_to(project)
-  let canonical = @fs.realpath(project)
-  @async.with_task_group() <| group => {
-    let runtime = MoonCheckRuntime(AgentRuntime(), AgentTaskScope(group))
-    let args : Json = { "cwd": project, "target": "native" }
-    let result = execute(runtime, args)
-    ignore(runtime.stop_moon_check(moon_check_key(@decode.decode(args))))
-    guard result is Respond(output) else { fail("expected Respond") }
-    assert_false(output.is_error)
-    inspect(
-      stable_moon_check_output(output.content, project, canonical),
-      content=(
-        #|cwd=<fixture>
-        #|command=moon check --watch --diagnostic-limit 10 --target native
-        #|watcher=started
-        #|id=moon-check-1
-        #|status=running
-        #|seq=<seq>
-        #|Finished. moon: ran 2 tasks, now up to date
+  @vfs.with_tmpdir(prefix="openseek-moon-check-vfs-", project => {
+    @vfs.FileSystem({
+      "moon.mod": (
+        #|name = "openseek/moon_check_vfs_fixture"
+        #|
+        #|version = "0.1.0"
+        #|
+        #|preferred_target = "native"
+        #|
       ),
-    )
-  }
-  @fs.rmdir(project, recursive=true)
+      "math/moon.pkg": (
+        #|warnings = "+unnecessary_annotation"
+        #|
+      ),
+      "math/math.mbt": (
+        #|///|
+        #|pub fn add(left : Int, right : Int) -> Int {
+        #|  left + right
+        #|}
+        #|
+      ),
+    }).write_to(project)
+    let canonical = @fs.realpath(project)
+    @async.with_task_group() <| group => {
+      let runtime = MoonCheckRuntime(AgentRuntime(), AgentTaskScope(group))
+      let args : Json = { "cwd": project, "target": "native" }
+      let result = execute(runtime, args)
+      ignore(runtime.stop_moon_check(moon_check_key(@decode.decode(args))))
+      guard result is Respond(output) else { fail("expected Respond") }
+      assert_false(output.is_error)
+      inspect(
+        stable_moon_check_output(output.content, project, canonical),
+        content=(
+          #|cwd=<fixture>
+          #|command=moon check --watch --diagnostic-limit 10 --target native
+          #|watcher=started
+          #|id=moon-check-1
+          #|status=running
+          #|seq=<seq>
+          #|Finished. moon: ran 2 tasks, now up to date
+        ),
+      )
+    }
+  })
 }
 
 ///|

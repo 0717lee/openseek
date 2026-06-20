@@ -73,52 +73,52 @@ async test "shell follows final successful PowerShell command on Windows" {
 
 ///|
 async test "shell honors cwd when non-empty" {
-  let dir = @fs.tmpdir(prefix="openseek-shell-cwd-")
-  let result = run_shell({ "cmd": "echo cwd-ok > marker.txt", "cwd": dir })
-  let dir_path : @path.Path = dir
-  let marker_path = dir_path.join("marker.txt").normalize().to_string()
-  let marker = @fs.read_file(marker_path).text() catch { _ => "" }
-  @fs.rmdir(dir, recursive=true)
-  guard result is Respond(output) else { fail("expected Respond") }
-  assert_false(output.is_error)
-  assert_true(output.content.contains("exit=0"))
-  assert_eq(marker.trim(), "cwd-ok")
+  @vfs.with_tmpdir(prefix="openseek-shell-cwd-", dir => {
+    let result = run_shell({ "cmd": "echo cwd-ok > marker.txt", "cwd": dir })
+    let dir_path : @path.Path = dir
+    let marker_path = dir_path.join("marker.txt").normalize().to_string()
+    let marker = @fs.read_file(marker_path).text() catch { _ => "" }
+    guard result is Respond(output) else { fail("expected Respond") }
+    assert_false(output.is_error)
+    assert_true(output.content.contains("exit=0"))
+    assert_eq(marker.trim(), "cwd-ok")
+  })
 }
 
 ///|
 async test "shell uses the workspace root when cwd is omitted" {
-  let dir = @fs.tmpdir(prefix="openseek-shell-workspace-")
-  let result = run_shell_in_workspace(dir, {
-    "cmd": "echo root-ok > marker.txt",
+  @vfs.with_tmpdir(prefix="openseek-shell-workspace-", dir => {
+    let result = run_shell_in_workspace(dir, {
+      "cmd": "echo root-ok > marker.txt",
+    })
+    let marker = @fs.read_file("\{dir}/marker.txt").text() catch { _ => "" }
+    guard result is Respond(output) else { fail("expected Respond") }
+    assert_false(output.is_error)
+    assert_true(output.content.contains("exit=0"))
+    assert_eq(marker.trim(), "root-ok")
   })
-  let marker = @fs.read_file("\{dir}/marker.txt").text() catch { _ => "" }
-  @fs.rmdir(dir, recursive=true)
-  guard result is Respond(output) else { fail("expected Respond") }
-  assert_false(output.is_error)
-  assert_true(output.content.contains("exit=0"))
-  assert_eq(marker.trim(), "root-ok")
 }
 
 ///|
 async test "shell reads a virtual filesystem fixture from cwd" {
-  let project = @fs.tmpdir(prefix="openseek-shell-vfs-")
-  @vfs.FileSystem({
-    "data/input.txt": (
-      #|shell-vfs
-      #|
-    ),
-  }).write_to(project)
-  let result = run_shell({ "cmd": "cat data/input.txt", "cwd": project })
-  @fs.rmdir(project, recursive=true)
-  guard result is Respond(output) else { fail("expected Respond") }
-  assert_false(output.is_error)
-  inspect(
-    output.content.trim(),
-    content=(
-      #|exit=0
-      #|shell-vfs
-    ),
-  )
+  @vfs.with_tmpdir(prefix="openseek-shell-vfs-", project => {
+    @vfs.FileSystem({
+      "data/input.txt": (
+        #|shell-vfs
+        #|
+      ),
+    }).write_to(project)
+    let result = run_shell({ "cmd": "cat data/input.txt", "cwd": project })
+    guard result is Respond(output) else { fail("expected Respond") }
+    assert_false(output.is_error)
+    inspect(
+      output.content.trim(),
+      content=(
+        #|exit=0
+        #|shell-vfs
+      ),
+    )
+  })
 }
 
 ///|
@@ -421,25 +421,25 @@ async test "shell rejects non-object arguments" {
 
 ///|
 async test "shell rejects non-existent cwd" {
-  let dir = @fs.tmpdir(prefix="openseek-shell-cwd-")
-  let dir_path : @path.Path = dir
-  let path = dir_path.join("does-not-exist").normalize().to_string()
-  let result = run_shell({ "cmd": "echo hello", "cwd": path })
-  @fs.rmdir(dir, recursive=true)
-  guard result is Respond(output) else { fail("expected Respond") }
-  assert_true(output.is_error)
-  assert_true(output.content.contains("cwd does not exist"))
+  @vfs.with_tmpdir(prefix="openseek-shell-cwd-", dir => {
+    let dir_path : @path.Path = dir
+    let path = dir_path.join("does-not-exist").normalize().to_string()
+    let result = run_shell({ "cmd": "echo hello", "cwd": path })
+    guard result is Respond(output) else { fail("expected Respond") }
+    assert_true(output.is_error)
+    assert_true(output.content.contains("cwd does not exist"))
+  })
 }
 
 ///|
 async test "shell rejects cwd that is a file not a directory" {
-  let dir = @fs.tmpdir(prefix="openseek-shell-cwd-")
-  let dir_path : @path.Path = dir
-  let path = dir_path.join("file.txt").normalize().to_string()
-  @fs.write_file(path, "not a directory", create_mode=CreateOrTruncate)
-  let result = run_shell({ "cmd": "echo hello", "cwd": path })
-  @fs.rmdir(dir, recursive=true)
-  guard result is Respond(output) else { fail("expected Respond") }
-  assert_true(output.is_error)
-  assert_true(output.content.contains("cwd is not a directory"))
+  @vfs.with_tmpdir(prefix="openseek-shell-cwd-", dir => {
+    let dir_path : @path.Path = dir
+    let path = dir_path.join("file.txt").normalize().to_string()
+    @fs.write_file(path, "not a directory", create_mode=CreateOrTruncate)
+    let result = run_shell({ "cmd": "echo hello", "cwd": path })
+    guard result is Respond(output) else { fail("expected Respond") }
+    assert_true(output.is_error)
+    assert_true(output.content.contains("cwd is not a directory"))
+  })
 }

@@ -75,20 +75,20 @@ test "markdown details keep full arbitrary text" {
 
 ///|
 async test "report writes markdown json and html files" {
-  let root = @fs.tmpdir(prefix="openseek-eval-report")
-  let report = @report.Report(title="Tiny Report", rows=[
-    ReportRow(index=1, name="finish", success=true, details=[
-      Metric(name="Note", value="ok"),
-    ]),
-  ])
-  report.write_files(root)
-  let markdown = @fs.read_file("\{root}/report.md").text()
-  let json = @fs.read_file("\{root}/report.json").text()
-  let html = @fs.read_file("\{root}/report.html").text()
-  assert_true(markdown.contains("# Tiny Report"))
-  assert_true(json.contains("\"title\":\"Tiny Report\""))
-  assert_true(html.contains("<title>Tiny Report</title>"))
-  assert_true(html.contains("<h3>Trial 1: <code>finish</code></h3>"))
-  assert_true(html.contains("table-wrap"))
-  @fs.rmdir(root, recursive=true)
+  @vfs.with_tmpdir(prefix="openseek-eval-report", root => {
+    let report = @report.Report(title="Tiny Report", rows=[
+      ReportRow(index=1, name="finish", success=true, details=[
+        Metric(name="Note", value="ok"),
+      ]),
+    ])
+    report.write_files(root)
+    let markdown = @fs.read_file("\{root}/report.md").text()
+    let json = @fs.read_file("\{root}/report.json").text()
+    let html = @fs.read_file("\{root}/report.html").text()
+    assert_true(markdown.contains("# Tiny Report"))
+    assert_true(json.contains("\"title\":\"Tiny Report\""))
+    assert_true(html.contains("<title>Tiny Report</title>"))
+    assert_true(html.contains("<h3>Trial 1: <code>finish</code></h3>"))
+    assert_true(html.contains("table-wrap"))
+  })
 }

@@ -278,21 +278,21 @@ async test "read returns file contents" {
 
 ///|
 async test "read resolves relative paths under the workspace root" {
-  let dir = @fs.tmpdir(prefix="openseek-read-workspace-")
-  @fs.write_file(
-    "\{dir}/note.txt",
-    "workspace read",
-    create_mode=CreateOrTruncate,
-  )
-  let tool = definition(workspace_root=dir)
-  let result = match tool.execute {
-    Async(execute) => execute({ "path": "note.txt" })
-    Sync(_) => fail("read tool should be async")
-  }
-  guard result is Respond(output) else { fail("expected Respond") }
-  assert_eq(output.content, "workspace read")
-  assert_false(output.is_error)
-  @fs.rmdir(dir, recursive=true)
+  @vfs.with_tmpdir(prefix="openseek-read-workspace-", dir => {
+    @fs.write_file(
+      "\{dir}/note.txt",
+      "workspace read",
+      create_mode=CreateOrTruncate,
+    )
+    let tool = definition(workspace_root=dir)
+    let result = match tool.execute {
+      Async(execute) => execute({ "path": "note.txt" })
+      Sync(_) => fail("read tool should be async")
+    }
+    guard result is Respond(output) else { fail("expected Respond") }
+    assert_eq(output.content, "workspace read")
+    assert_false(output.is_error)
+  })
 }
 
 ///|

@@ -82,33 +82,33 @@ must choose the id before loading.
 ```mbt check
 ///|
 async test "create and load a complete session" {
-  let root = @fs.tmpdir(prefix="openseek-store-readme-create-")
-  let store = @store.SessionStore(root)
-  let session = @agent_session.Session(
-      SessionId("demo"),
-      system_prompt="system",
-    )
-    .append(User(UserMessage("hello")))
-    .append(Terminal(Finished("done")))
+  @vfs.with_tmpdir(prefix="openseek-store-readme-create-", root => {
+    let store = @store.SessionStore(root)
+    let session = @agent_session.Session(
+        SessionId("demo"),
+        system_prompt="system",
+      )
+      .append(User(UserMessage("hello")))
+      .append(Terminal(Finished("done")))
 
-  store.create(session)
-  let loaded = store.load(SessionId("demo"))
-  debug_inspect(
-    loaded,
-    content=(
-      #|{
-      #|  id: { value: "demo" },
-      #|  system_prompt: "system",
-      #|  events: <Vector:
-      #|    [
-      #|      { sequence: 1, ts: 0, item: User({ content: "hello" }) },
-      #|      { sequence: 2, ts: 0, item: Terminal(Finished("done")) },
-      #|    ]>,
-      #|  last_sequence: 2,
-      #|}
-    ),
-  )
-  @fs.rmdir(root, recursive=true)
+    store.create(session)
+    let loaded = store.load(SessionId("demo"))
+    debug_inspect(
+      loaded,
+      content=(
+        #|{
+        #|  id: { value: "demo" },
+        #|  system_prompt: "system",
+        #|  events: <Vector:
+        #|    [
+        #|      { sequence: 1, ts: 0, item: User({ content: "hello" }) },
+        #|      { sequence: 2, ts: 0, item: Terminal(Finished("done")) },
+        #|    ]>,
+        #|  last_sequence: 2,
+        #|}
+      ),
+    )
+  })
 }
 ```
 
@@ -125,44 +125,44 @@ example stable while still showing the resumed conversation shape.
 ```mbt check
 ///|
 async test "append saves progress and load resumes it" {
-  let root = @fs.tmpdir(prefix="openseek-store-readme-append-")
-  let store = @store.SessionStore(root)
-  let session = @agent_session.Session(
-    SessionId("demo"),
-    system_prompt="system",
-  )
+  @vfs.with_tmpdir(prefix="openseek-store-readme-append-", root => {
+    let store = @store.SessionStore(root)
+    let session = @agent_session.Session(
+      SessionId("demo"),
+      system_prompt="system",
+    )
 
-  store.create(session)
-  let session = store.append(session, User(UserMessage("inspect README")))
-  ignore(store.append(session, Terminal(Finished("done"))))
+    store.create(session)
+    let session = store.append(session, User(UserMessage("inspect README")))
+    ignore(store.append(session, Terminal(Finished("done"))))
 
-  let loaded = store.load(SessionId("demo"))
-  debug_inspect(
-    loaded.chat_messages(),
-    content=(
-      #|[
-      #|  {
-      #|    role: System,
-      #|    content: "system",
-      #|    tool_calls: [],
-      #|    reasoning_content: None,
-      #|  },
-      #|  {
-      #|    role: User,
-      #|    content: "inspect README",
-      #|    tool_calls: [],
-      #|    reasoning_content: None,
-      #|  },
-      #|  {
-      #|    role: Assistant,
-      #|    content: "done",
-      #|    tool_calls: [],
-      #|    reasoning_content: None,
-      #|  },
-      #|]
-    ),
-  )
-  @fs.rmdir(root, recursive=true)
+    let loaded = store.load(SessionId("demo"))
+    debug_inspect(
+      loaded.chat_messages(),
+      content=(
+        #|[
+        #|  {
+        #|    role: System,
+        #|    content: "system",
+        #|    tool_calls: [],
+        #|    reasoning_content: None,
+        #|  },
+        #|  {
+        #|    role: User,
+        #|    content: "inspect README",
+        #|    tool_calls: [],
+        #|    reasoning_content: None,
+        #|  },
+        #|  {
+        #|    role: Assistant,
+        #|    content: "done",
+        #|    tool_calls: [],
+        #|    reasoning_content: None,
+        #|  },
+        #|]
+      ),
+    )
+  })
 }
 ```
 
@@ -173,27 +173,27 @@ forking the log:
 ```mbt check
 ///|
 async test "append rejects a stale in-memory session" {
-  let root = @fs.tmpdir(prefix="openseek-store-readme-stale-")
-  let store = @store.SessionStore(root)
-  let session = @agent_session.Session(
-    SessionId("demo"),
-    system_prompt="system",
-  )
+  @vfs.with_tmpdir(prefix="openseek-store-readme-stale-", root => {
+    let store = @store.SessionStore(root)
+    let session = @agent_session.Session(
+      SessionId("demo"),
+      system_prompt="system",
+    )
 
-  store.create(session)
-  ignore(store.append(session, User(UserMessage("first"))))
-  let result = try store.append(session, User(UserMessage("stale"))) catch {
-    error => "error: \{error}".contains("stale session snapshot")
-  } noraise {
-    _ => false
-  }
-  debug_inspect(
-    result,
-    content=(
-      #|true
-    ),
-  )
-  @fs.rmdir(root, recursive=true)
+    store.create(session)
+    ignore(store.append(session, User(UserMessage("first"))))
+    let result = try store.append(session, User(UserMessage("stale"))) catch {
+      error => "error: \{error}".contains("stale session snapshot")
+    } noraise {
+      _ => false
+    }
+    debug_inspect(
+      result,
+      content=(
+        #|true
+      ),
+    )
+  })
 }
 ```
 
@@ -207,46 +207,46 @@ events are skipped and the later summary message is used instead.
 ```mbt check
 ///|
 async test "compact appends a durable summary" {
-  let root = @fs.tmpdir(prefix="openseek-store-readme-compact-")
-  let store = @store.SessionStore(root)
-  let session = @agent_session.Session(
-      SessionId("demo"),
-      system_prompt="system",
+  @vfs.with_tmpdir(prefix="openseek-store-readme-compact-", root => {
+    let store = @store.SessionStore(root)
+    let session = @agent_session.Session(
+        SessionId("demo"),
+        system_prompt="system",
+      )
+      .append(User(UserMessage("old user")))
+      .append(Assistant(AssistantMessage("old assistant")))
+
+    store.create(session)
+    ignore(
+      store.compact(
+        session,
+        content="old user and assistant discussed README",
+        from_sequence=1,
+        to_sequence=2,
+      ),
     )
-    .append(User(UserMessage("old user")))
-    .append(Assistant(AssistantMessage("old assistant")))
 
-  store.create(session)
-  ignore(
-    store.compact(
-      session,
-      content="old user and assistant discussed README",
-      from_sequence=1,
-      to_sequence=2,
-    ),
-  )
-
-  let loaded = store.load(SessionId("demo"))
-  debug_inspect(
-    loaded.chat_messages(),
-    content=(
-      #|[
-      #|  {
-      #|    role: System,
-      #|    content: "system",
-      #|    tool_calls: [],
-      #|    reasoning_content: None,
-      #|  },
-      #|  {
-      #|    role: User,
-      #|    content: "[conversation summary]\nsource_events=1..2\nold user and assistant discussed README",
-      #|    tool_calls: [],
-      #|    reasoning_content: None,
-      #|  },
-      #|]
-    ),
-  )
-  @fs.rmdir(root, recursive=true)
+    let loaded = store.load(SessionId("demo"))
+    debug_inspect(
+      loaded.chat_messages(),
+      content=(
+        #|[
+        #|  {
+        #|    role: System,
+        #|    content: "system",
+        #|    tool_calls: [],
+        #|    reasoning_content: None,
+        #|  },
+        #|  {
+        #|    role: User,
+        #|    content: "[conversation summary]\nsource_events=1..2\nold user and assistant discussed README",
+        #|    tool_calls: [],
+        #|    reasoning_content: None,
+        #|  },
+        #|]
+      ),
+    )
+  })
 }
 ```
 
@@ -260,20 +260,20 @@ returns the newest loadable session id, skipping torn sessions.
 ```mbt check
 ///|
 async test "list sessions by id" {
-  let root = @fs.tmpdir(prefix="openseek-store-readme-list-")
-  let store = @store.SessionStore(root)
+  @vfs.with_tmpdir(prefix="openseek-store-readme-list-", root => {
+    let store = @store.SessionStore(root)
 
-  store.create(Session(SessionId("b"), system_prompt="system"))
-  store.create(Session(SessionId("a"), system_prompt="system"))
-  debug_inspect(
-    [
-      for id in store.list() => id.value()
-    ],
-    content=(
-      #|["a", "b"]
-    ),
-  )
-  @fs.rmdir(root, recursive=true)
+    store.create(Session(SessionId("b"), system_prompt="system"))
+    store.create(Session(SessionId("a"), system_prompt="system"))
+    debug_inspect(
+      [
+        for id in store.list() => id.value()
+      ],
+      content=(
+        #|["a", "b"]
+      ),
+    )
+  })
 }
 ```
 

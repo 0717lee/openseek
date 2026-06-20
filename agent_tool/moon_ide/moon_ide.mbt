@@ -377,82 +377,82 @@ async test "moon_ide finds references in a real fixture package" {
 
 ///|
 async test "moon_ide outlines a virtual filesystem multi-file package" {
-  let project = @fs.tmpdir(prefix="openseek-moon-ide-vfs-")
-  @vfs.FileSystem({
-    "moon.mod": (
-      #|name = "openseek/moon_ide_vfs_fixture"
-      #|
-      #|version = "0.1.0"
-      #|
-      #|preferred_target = "native"
-      #|
-    ),
-    "moon.pkg": (
-      #|warnings = "+unnecessary_annotation"
-      #|
-    ),
-    "model.mbt": (
-      #|///|
-      #|pub struct User {
-      #|  name : String
-      #|} derive(Debug, Eq)
-      #|
-      #|///|
-      #|pub fn User::new(name : String) -> User {
-      #|  { name }
-      #|}
-      #|
-      #|///|
-      #|pub fn User::label(self : User) -> String {
-      #|  "user:" + self.name
-      #|}
-      #|
-    ),
-    "render.mbt": (
-      #|///|
-      #|pub fn render_user(user : User) -> String {
-      #|  user.label()
-      #|}
-      #|
-      #|///|
-      #|pub fn sample() -> String {
-      #|  render_user(User::new("ada"))
-      #|}
-      #|
-    ),
-  }).write_to(project)
-  let canonical = @fs.realpath(project)
-  let result = execute({
-    "cwd": project,
-    "action": "outline",
-    "path": ".",
-    "target": "native",
-    "max_output_chars": 4000,
+  @vfs.with_tmpdir(prefix="openseek-moon-ide-vfs-", project => {
+    @vfs.FileSystem({
+      "moon.mod": (
+        #|name = "openseek/moon_ide_vfs_fixture"
+        #|
+        #|version = "0.1.0"
+        #|
+        #|preferred_target = "native"
+        #|
+      ),
+      "moon.pkg": (
+        #|warnings = "+unnecessary_annotation"
+        #|
+      ),
+      "model.mbt": (
+        #|///|
+        #|pub struct User {
+        #|  name : String
+        #|} derive(Debug, Eq)
+        #|
+        #|///|
+        #|pub fn User::new(name : String) -> User {
+        #|  { name }
+        #|}
+        #|
+        #|///|
+        #|pub fn User::label(self : User) -> String {
+        #|  "user:" + self.name
+        #|}
+        #|
+      ),
+      "render.mbt": (
+        #|///|
+        #|pub fn render_user(user : User) -> String {
+        #|  user.label()
+        #|}
+        #|
+        #|///|
+        #|pub fn sample() -> String {
+        #|  render_user(User::new("ada"))
+        #|}
+        #|
+      ),
+    }).write_to(project)
+    let canonical = @fs.realpath(project)
+    let result = execute({
+      "cwd": project,
+      "action": "outline",
+      "path": ".",
+      "target": "native",
+      "max_output_chars": 4000,
+    })
+    guard result is Respond(output) else { fail("expected Respond") }
+    assert_false(output.is_error)
+    inspect(
+      stable_moon_ide_output(output.content, project, canonical).trim(),
+      content=(
+        #|cwd=<fixture>
+        #|command=moon ide outline --target native .
+        #|exit=0
+        #|render.mbt:
+        #| L2 | pub fn render_user(user : User) -> String {
+        #|      ...
+        #| L7 | pub fn sample() -> String {
+        #|      ...
+        #|
+        #|model.mbt:
+        #| L02 | pub struct User {
+        #|       ...
+        #| L07 | pub fn User::new(name : String) -> User {
+        #|       ...
+        #| L12 | pub fn User::label(self : User) -> String {
+        #|       ...
+      ),
+    )
   })
-  @fs.rmdir(project, recursive=true)
-  guard result is Respond(output) else { fail("expected Respond") }
-  assert_false(output.is_error)
-  inspect(
-    stable_moon_ide_output(output.content, project, canonical).trim(),
-    content=(
-      #|cwd=<fixture>
-      #|command=moon ide outline --target native .
-      #|exit=0
-      #|render.mbt:
-      #| L2 | pub fn render_user(user : User) -> String {
-      #|      ...
-      #| L7 | pub fn sample() -> String {
-      #|      ...
-      #|
-      #|model.mbt:
-      #| L02 | pub struct User {
-      #|       ...
-      #| L07 | pub fn User::new(name : String) -> User {
-      #|       ...
-      #| L12 | pub fn User::label(self : User) -> String {
-      #|       ...
-    ),
-  )
 }
 
 ///|

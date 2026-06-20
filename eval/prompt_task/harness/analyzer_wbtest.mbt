@@ -235,78 +235,78 @@ test "same output dir preserves absolute workspace paths" {
 
 ///|
 async test "analyze run writes reports to caller output directory" {
-  let root = @fs.tmpdir(prefix="openseek-prompt-analyze-out")
-  let out_dir = root + "/actual"
-  let stale_dir = root + "/stale"
-  @fs.mkdir(out_dir, recursive=true)
-  let actual_events_path = out_dir +
-    "/workspaces/01/.openseek/sessions/trial-01/events.jsonl"
-  let stale_events_path = stale_dir +
-    "/workspaces/01/.openseek/sessions/trial-01/events.jsonl"
-  @fs.mkdir(
-    out_dir + "/workspaces/01/.openseek/sessions/trial-01",
-    recursive=true,
-  )
-  @fs.mkdir(
-    stale_dir + "/workspaces/01/.openseek/sessions/trial-01",
-    recursive=true,
-  )
-  @fs.write_file(
-    actual_events_path,
-    assistant_events("trial-01", "I used @string.parse_int"),
-    create_mode=CreateOrTruncate,
-  )
-  @fs.write_file(
-    stale_events_path,
-    assistant_events("trial-01", "I only used moon test"),
-    create_mode=CreateOrTruncate,
-  )
-  let manifest_json : Json = {
-    "model": "deepseek-v4-flash",
-    "problem_id": "toml_parser_cli",
-    "prompt_label": "flash",
-    "task_file": "eval/prompt_tasks/toml_parser_cli.md",
-    "runs": 0,
-    "concurrency": 1,
-    "min_successes": 0,
-    "max_steps": 160,
-    "out_dir": stale_dir,
-    "validation_probes": (
-      [
-        {
-          "name": "moon check",
-          "command": ["moon", "--version"],
-          "expect_exit": 0,
-        },
-      ] : Json),
-    "trials": (
-      [
-        {
-          "index": 1,
-          "workspace": stale_dir + "/workspaces/01",
-          "log_path": stale_dir + "/logs/01.log",
-          "session_id": "trial-01",
-          "events_path": stale_events_path,
-          "exit_code": 0,
-        },
-      ] : Json),
-  }
-  @fs.write_file(
-    manifest_path(out_dir),
-    manifest_json.stringify(),
-    create_mode=CreateOrTruncate,
-  )
-  let report = analyze_run(out_dir)
-  assert_eq(report.out_dir, out_dir)
-  assert_eq(report.results[0].workspace, out_dir + "/workspaces/01")
-  assert_eq(report.results[0].events_path, actual_events_path)
-  assert_false(report.results[0].workspace.contains(stale_dir))
-  assert_eq(report.results[0].parse_int_mentions, 1)
-  assert_eq(report.results[0].moon_test_uses, 0)
-  assert_true(@fs.exists(out_dir + "/report.md"))
-  assert_true(@fs.exists(out_dir + "/report.html"))
-  assert_false(@fs.exists(stale_dir + "/report.md"))
-  @fs.rmdir(root, recursive=true)
+  @vfs.with_tmpdir(prefix="openseek-prompt-analyze-out", root => {
+    let out_dir = root + "/actual"
+    let stale_dir = root + "/stale"
+    @fs.mkdir(out_dir, recursive=true)
+    let actual_events_path = out_dir +
+      "/workspaces/01/.openseek/sessions/trial-01/events.jsonl"
+    let stale_events_path = stale_dir +
+      "/workspaces/01/.openseek/sessions/trial-01/events.jsonl"
+    @fs.mkdir(
+      out_dir + "/workspaces/01/.openseek/sessions/trial-01",
+      recursive=true,
+    )
+    @fs.mkdir(
+      stale_dir + "/workspaces/01/.openseek/sessions/trial-01",
+      recursive=true,
+    )
+    @fs.write_file(
+      actual_events_path,
+      assistant_events("trial-01", "I used @string.parse_int"),
+      create_mode=CreateOrTruncate,
+    )
+    @fs.write_file(
+      stale_events_path,
+      assistant_events("trial-01", "I only used moon test"),
+      create_mode=CreateOrTruncate,
+    )
+    let manifest_json : Json = {
+      "model": "deepseek-v4-flash",
+      "problem_id": "toml_parser_cli",
+      "prompt_label": "flash",
+      "task_file": "eval/prompt_tasks/toml_parser_cli.md",
+      "runs": 0,
+      "concurrency": 1,
+      "min_successes": 0,
+      "max_steps": 160,
+      "out_dir": stale_dir,
+      "validation_probes": (
+        [
+          {
+            "name": "moon check",
+            "command": ["moon", "--version"],
+            "expect_exit": 0,
+          },
+        ] : Json),
+      "trials": (
+        [
+          {
+            "index": 1,
+            "workspace": stale_dir + "/workspaces/01",
+            "log_path": stale_dir + "/logs/01.log",
+            "session_id": "trial-01",
+            "events_path": stale_events_path,
+            "exit_code": 0,
+          },
+        ] : Json),
+    }
+    @fs.write_file(
+      manifest_path(out_dir),
+      manifest_json.stringify(),
+      create_mode=CreateOrTruncate,
+    )
+    let report = analyze_run(out_dir)
+    assert_eq(report.out_dir, out_dir)
+    assert_eq(report.results[0].workspace, out_dir + "/workspaces/01")
+    assert_eq(report.results[0].events_path, actual_events_path)
+    assert_false(report.results[0].workspace.contains(stale_dir))
+    assert_eq(report.results[0].parse_int_mentions, 1)
+    assert_eq(report.results[0].moon_test_uses, 0)
+    assert_true(@fs.exists(out_dir + "/report.md"))
+    assert_true(@fs.exists(out_dir + "/report.html"))
+    assert_false(@fs.exists(stale_dir + "/report.md"))
+  })
 }
 
 ///|

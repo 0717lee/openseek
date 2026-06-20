@@ -97,25 +97,25 @@ test "shell tool advertises the expected schema" {
 ```moonbit check
 ///|
 async test "shell tool runs a project-style command through the registry" {
-  let dir = @fs.tmpdir(prefix="openseek-shell-readme-")
-  let tools = @agent_tool.Tools([@shell.definition()])
-  let arguments : Json = {
-    "cmd": "echo 'alpha beta'",
-    "cwd": dir,
-    "timeout_ms": 5000,
-  }
-  let call = @agent_tool.AgentToolCall(
-    ToolCall(
-      id="call_shell_count",
-      name="shell",
-      arguments=arguments.stringify(),
-    ),
-  )
-  let result = @agent_tool.execute_tool_call(call, tools)
-  @fs.rmdir(dir, recursive=true)
-  guard result is Respond(output) else { fail("expected Respond") }
-  assert_false(output.is_error)
-  assert_true(output.content.contains("exit=0"))
-  assert_true(output.content.contains("alpha beta"))
+  @vfs.with_tmpdir(prefix="openseek-shell-readme-", dir => {
+    let tools = @agent_tool.Tools([@shell.definition()])
+    let arguments : Json = {
+      "cmd": "echo 'alpha beta'",
+      "cwd": dir,
+      "timeout_ms": 5000,
+    }
+    let call = @agent_tool.AgentToolCall(
+      ToolCall(
+        id="call_shell_count",
+        name="shell",
+        arguments=arguments.stringify(),
+      ),
+    )
+    let result = @agent_tool.execute_tool_call(call, tools)
+    guard result is Respond(output) else { fail("expected Respond") }
+    assert_false(output.is_error)
+    assert_true(output.content.contains("exit=0"))
+    assert_true(output.content.contains("alpha beta"))
+  })
 }
 ```

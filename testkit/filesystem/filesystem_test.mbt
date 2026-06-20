@@ -49,16 +49,16 @@ test "json fixture rejects non-string contents" {
 
 ///|
 async test "fixture writes to disk and reports mismatches" {
-  let root = @fs.tmpdir(prefix="openseek-testkit-fs")
-  let files = @filesystem.FileSystem({
-    "src/note.txt": "alpha\n",
-    "docs/summary.txt": "ready\n",
+  @filesystem.with_tmpdir(prefix="openseek-testkit-fs", root => {
+    let files = @filesystem.FileSystem({
+      "src/note.txt": "alpha\n",
+      "docs/summary.txt": "ready\n",
+    })
+    files.write_to(root)
+    assert_eq(files.mismatch_on_disk(root), "")
+    @filesystem.write_text(root, "src/note.txt", "changed\n")
+    assert_eq(files.mismatch_on_disk(root), "content mismatch in src/note.txt")
   })
-  files.write_to(root)
-  assert_eq(files.mismatch_on_disk(root), "")
-  @filesystem.write_text(root, "src/note.txt", "changed\n")
-  assert_eq(files.mismatch_on_disk(root), "content mismatch in src/note.txt")
-  @fs.rmdir(root, recursive=true)
 }
 
 ///|

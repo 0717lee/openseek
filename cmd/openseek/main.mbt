@@ -1014,29 +1014,30 @@ test "cli allows session management without api key or task" {
 
 ///|
 async test "--dir creates a missing final component when its parent exists" {
-  let parent = @fs.tmpdir(prefix="openseek-dir-parent-")
-  let child = "\{parent}/child"
-  let parsed = cli_command().parse(argv=["--dir", child, "write", "MoonBit"], env={
-    "DEEPSEEK": "test-key",
+  @vfs.with_tmpdir(prefix="openseek-dir-parent-", parent => {
+    let child = "\{parent}/child"
+    let parsed = cli_command().parse(
+      argv=["--dir", child, "write", "MoonBit"],
+      env={ "DEEPSEEK": "test-key" },
+    )
+    let root = prepare_workspace_root(parsed)
+    assert_true(@fs.exists(child))
+    assert_eq(root, @fs.realpath(child))
   })
-  let root = prepare_workspace_root(parsed)
-  assert_true(@fs.exists(child))
-  assert_eq(root, @fs.realpath(child))
-  @fs.rmdir(parent, recursive=true)
 }
 
 ///|
 async test "--dir creates a missing final component with trailing separator" {
-  let parent = @fs.tmpdir(prefix="openseek-dir-trailing-")
-  let child = "\{parent}/child"
-  let parsed = cli_command().parse(
-    argv=["--dir", "\{child}/", "write", "MoonBit"],
-    env={ "DEEPSEEK": "test-key" },
-  )
-  let root = prepare_workspace_root(parsed)
-  assert_true(@fs.exists(child))
-  assert_eq(root, @fs.realpath(child))
-  @fs.rmdir(parent, recursive=true)
+  @vfs.with_tmpdir(prefix="openseek-dir-trailing-", parent => {
+    let child = "\{parent}/child"
+    let parsed = cli_command().parse(
+      argv=["--dir", "\{child}/", "write", "MoonBit"],
+      env={ "DEEPSEEK": "test-key" },
+    )
+    let root = prepare_workspace_root(parsed)
+    assert_true(@fs.exists(child))
+    assert_eq(root, @fs.realpath(child))
+  })
 }
 
 ///|
@@ -1051,43 +1052,42 @@ test "--dir trailing separator trim preserves roots" {
 
 ///|
 async test "--dir rejects missing parents instead of creating recursively" {
-  let root = @fs.tmpdir(prefix="openseek-dir-missing-parent-")
-  let child = "\{root}/missing/child"
-  let parsed = cli_command().parse(argv=["--dir", child, "write", "MoonBit"], env={
-    "DEEPSEEK": "test-key",
-  })
-  let _ = prepare_workspace_root(parsed) catch {
-    error => {
-      assert_true(
-        "\{error}".contains(
-          "parent directory for --dir does not exist: \{root}/missing",
-        ),
-      )
-      @fs.rmdir(root, recursive=true)
-      return
+  @vfs.with_tmpdir(prefix="openseek-dir-missing-parent-", root => {
+    let child = "\{root}/missing/child"
+    let parsed = cli_command().parse(
+      argv=["--dir", child, "write", "MoonBit"],
+      env={ "DEEPSEEK": "test-key" },
+    )
+    let _ = prepare_workspace_root(parsed) catch {
+      error => {
+        assert_true(
+          "\{error}".contains(
+            "parent directory for --dir does not exist: \{root}/missing",
+          ),
+        )
+        return
+      }
     }
-  }
-  @fs.rmdir(root, recursive=true)
-  fail("missing parent accepted")
+    fail("missing parent accepted")
+  })
 }
 
 ///|
 async test "--dir rejects existing non-directories" {
-  let root = @fs.tmpdir(prefix="openseek-dir-file-")
-  let path = "\{root}/file"
-  @fs.write_file(path, "not a directory", create_mode=CreateOrTruncate)
-  let parsed = cli_command().parse(argv=["--dir", path, "write", "MoonBit"], env={
-    "DEEPSEEK": "test-key",
-  })
-  let _ = prepare_workspace_root(parsed) catch {
-    error => {
-      assert_true("\{error}".contains("--dir is not a directory: \{path}"))
-      @fs.rmdir(root, recursive=true)
-      return
+  @vfs.with_tmpdir(prefix="openseek-dir-file-", root => {
+    let path = "\{root}/file"
+    @fs.write_file(path, "not a directory", create_mode=CreateOrTruncate)
+    let parsed = cli_command().parse(argv=["--dir", path, "write", "MoonBit"], env={
+      "DEEPSEEK": "test-key",
+    })
+    let _ = prepare_workspace_root(parsed) catch {
+      error => {
+        assert_true("\{error}".contains("--dir is not a directory: \{path}"))
+        return
+      }
     }
-  }
-  @fs.rmdir(root, recursive=true)
-  fail("file path accepted as --dir")
+    fail("file path accepted as --dir")
+  })
 }
 
 ///|
@@ -1209,110 +1209,110 @@ test "cli parses max steps option" {
 
 ///|
 async test "configured system prompt can replace and append files" {
-  let dir = @fs.tmpdir(prefix="openseek-prompt-config-")
-  let prompt_path = "\{dir}/prompt.md"
-  let addendum_path = "\{dir}/addendum.md"
-  @fs.write_file(prompt_path, "base prompt\n", create_mode=CreateOrTruncate)
-  @fs.write_file(addendum_path, "addendum\n", create_mode=CreateOrTruncate)
-  let parsed = cli_command().parse(
-    argv=[
-      "--system-prompt-file", prompt_path, "--system-prompt-addendum-file", addendum_path,
-      "write", "MoonBit",
-    ],
-    // The pinned global-skills dir keeps the exact-text assertion below
-    // machine-independent: without it, a developer's ~/.openseek/skills
-    // would append a ## Skills section (Codex review).
-    env={
-      "DEEPSEEK": "test-key",
-      "OPENSEEK_GLOBAL_SKILLS_DIR": "\{dir}/no-global-skills",
-    },
-  )
-  // Environment last: base and addendum form the cache-shared prefix; the
-  // per-project cwd is the only divergence point.
-  assert_eq(
-    configured_system_prompt(parsed, V4Flash),
-    "base prompt\n\n\naddendum\n\n\n\{environment_prompt_section()}",
-  )
-  @fs.rmdir(dir, recursive=true)
+  @vfs.with_tmpdir(prefix="openseek-prompt-config-", dir => {
+    let prompt_path = "\{dir}/prompt.md"
+    let addendum_path = "\{dir}/addendum.md"
+    @fs.write_file(prompt_path, "base prompt\n", create_mode=CreateOrTruncate)
+    @fs.write_file(addendum_path, "addendum\n", create_mode=CreateOrTruncate)
+    let parsed = cli_command().parse(
+      argv=[
+        "--system-prompt-file", prompt_path, "--system-prompt-addendum-file", addendum_path,
+        "write", "MoonBit",
+      ],
+      // The pinned global-skills dir keeps the exact-text assertion below
+      // machine-independent: without it, a developer's ~/.openseek/skills
+      // would append a ## Skills section (Codex review).
+      env={
+        "DEEPSEEK": "test-key",
+        "OPENSEEK_GLOBAL_SKILLS_DIR": "\{dir}/no-global-skills",
+      },
+    )
+    // Environment last: base and addendum form the cache-shared prefix; the
+    // per-project cwd is the only divergence point.
+    assert_eq(
+      configured_system_prompt(parsed, V4Flash),
+      "base prompt\n\n\naddendum\n\n\n\{environment_prompt_section()}",
+    )
+  })
 }
 
 ///|
 async test "configured system prompt advertises global skills" {
-  let dir = @fs.tmpdir(prefix="openseek-global-skills-")
-  @fs.mkdir("\{dir}/skills", recursive=true)
-  @fs.write_file(
-    "\{dir}/skills/release.md",
-    (
-      #|---
-      #|name: release
-      #|description: Cut a release.
-      #|---
-      #|steps
-    ),
-    create_mode=CreateOrTruncate,
-  )
-  let prompt_path = "\{dir}/prompt.md"
-  @fs.write_file(prompt_path, "base\n", create_mode=CreateOrTruncate)
-  let parsed = cli_command().parse(
-    argv=["--system-prompt-file", prompt_path, "write", "MoonBit"],
-    env={
-      "DEEPSEEK": "test-key",
-      "OPENSEEK_GLOBAL_SKILLS_DIR": "\{dir}/skills",
-    },
-  )
-  let prompt = configured_system_prompt(parsed, V4Flash)
-  assert_true(prompt.contains("## Skills"))
-  assert_true(
-    prompt.contains(
-      "release — Cut a release. (file: \{dir}/skills/release.md)",
-    ),
-  )
-  @fs.rmdir(dir, recursive=true)
+  @vfs.with_tmpdir(prefix="openseek-global-skills-", dir => {
+    @fs.mkdir("\{dir}/skills", recursive=true)
+    @fs.write_file(
+      "\{dir}/skills/release.md",
+      (
+        #|---
+        #|name: release
+        #|description: Cut a release.
+        #|---
+        #|steps
+      ),
+      create_mode=CreateOrTruncate,
+    )
+    let prompt_path = "\{dir}/prompt.md"
+    @fs.write_file(prompt_path, "base\n", create_mode=CreateOrTruncate)
+    let parsed = cli_command().parse(
+      argv=["--system-prompt-file", prompt_path, "write", "MoonBit"],
+      env={
+        "DEEPSEEK": "test-key",
+        "OPENSEEK_GLOBAL_SKILLS_DIR": "\{dir}/skills",
+      },
+    )
+    let prompt = configured_system_prompt(parsed, V4Flash)
+    assert_true(prompt.contains("## Skills"))
+    assert_true(
+      prompt.contains(
+        "release — Cut a release. (file: \{dir}/skills/release.md)",
+      ),
+    )
+  })
 }
 
 ///|
 async test "configured system prompt uses the selected workspace root" {
-  let workspace = @fs.tmpdir(prefix="openseek-prompt-workspace-")
-  let real_workspace = @fs.realpath(workspace)
-  @fs.write_file(
-    "\{workspace}/prompt.md",
-    "workspace prompt\n",
-    create_mode=CreateOrTruncate,
-  )
-  @fs.mkdir("\{workspace}/.openseek/skills", recursive=true)
-  @fs.write_file(
-    "\{workspace}/.openseek/skills/release.md",
-    (
-      #|---
-      #|name: release
-      #|description: Cut a workspace release.
-      #|---
-      #|steps
-    ),
-    create_mode=CreateOrTruncate,
-  )
-  let parsed = cli_command().parse(
-    argv=[
-      "--dir", workspace, "--system-prompt-file", "prompt.md", "write", "MoonBit",
-    ],
-    env={
-      "DEEPSEEK": "test-key",
-      "OPENSEEK_GLOBAL_SKILLS_DIR": "\{workspace}/no-global-skills",
-    },
-  )
-  let prompt = configured_system_prompt(
-    parsed,
-    V4Flash,
-    workspace_root=real_workspace,
-  )
-  assert_true(prompt.has_prefix("workspace prompt"))
-  assert_true(prompt.contains("Working directory: \{real_workspace}"))
-  assert_true(
-    prompt.contains(
-      "release — Cut a workspace release. (file: \{real_workspace}/.openseek/skills/release.md)",
-    ),
-  )
-  @fs.rmdir(workspace, recursive=true)
+  @vfs.with_tmpdir(prefix="openseek-prompt-workspace-", workspace => {
+    let real_workspace = @fs.realpath(workspace)
+    @fs.write_file(
+      "\{workspace}/prompt.md",
+      "workspace prompt\n",
+      create_mode=CreateOrTruncate,
+    )
+    @fs.mkdir("\{workspace}/.openseek/skills", recursive=true)
+    @fs.write_file(
+      "\{workspace}/.openseek/skills/release.md",
+      (
+        #|---
+        #|name: release
+        #|description: Cut a workspace release.
+        #|---
+        #|steps
+      ),
+      create_mode=CreateOrTruncate,
+    )
+    let parsed = cli_command().parse(
+      argv=[
+        "--dir", workspace, "--system-prompt-file", "prompt.md", "write", "MoonBit",
+      ],
+      env={
+        "DEEPSEEK": "test-key",
+        "OPENSEEK_GLOBAL_SKILLS_DIR": "\{workspace}/no-global-skills",
+      },
+    )
+    let prompt = configured_system_prompt(
+      parsed,
+      V4Flash,
+      workspace_root=real_workspace,
+    )
+    assert_true(prompt.has_prefix("workspace prompt"))
+    assert_true(prompt.contains("Working directory: \{real_workspace}"))
+    assert_true(
+      prompt.contains(
+        "release — Cut a workspace release. (file: \{real_workspace}/.openseek/skills/release.md)",
+      ),
+    )
+  })
 }
 
 ///|
@@ -1330,84 +1330,84 @@ async test "configured system prompt defaults to the flash prompt" {
 
 ///|
 async test "load_or_new_session defers first durable write until append" {
-  let root = @fs.tmpdir(prefix="openseek-cli-session-")
-  let store = @store.SessionStore(root)
-  let id : @agent_session.SessionId = SessionId("cli-test")
-  let prompt_path = "\{root}/prompt.md"
-  @fs.write_file(prompt_path, "system", create_mode=CreateOrTruncate)
-  let parsed = cli_command().parse(
-    argv=[
-      "--session-root", root, "--session", "cli-test", "--system-prompt-file", prompt_path,
-      "write", "MoonBit",
-    ],
-    // Pinned so the exact-prompt assertions stay machine-independent.
-    env={
-      "DEEPSEEK": "test-key",
-      "OPENSEEK_GLOBAL_SKILLS_DIR": "\{root}/no-global-skills",
-    },
-  )
-  let created = load_or_new_session(store, id, parsed, V4Pro)
-  let grounded_prompt = "system\n\n\{environment_prompt_section()}"
-  assert_eq(created.system_prompt(), grounded_prompt)
-  assert_eq(created.events().length(), 0)
-  assert_false(store.exists(id))
-  let with_event = store.append(created, User(UserMessage("hello")))
-  assert_eq(with_event.events().length(), 1)
-  @fs.remove(prompt_path)
-  let loaded = load_or_new_session(store, id, parsed, V4Pro)
-  assert_eq(loaded.system_prompt(), grounded_prompt)
-  assert_eq(loaded.events().length(), 1)
-  @fs.rmdir(root, recursive=true)
+  @vfs.with_tmpdir(prefix="openseek-cli-session-", root => {
+    let store = @store.SessionStore(root)
+    let id : @agent_session.SessionId = SessionId("cli-test")
+    let prompt_path = "\{root}/prompt.md"
+    @fs.write_file(prompt_path, "system", create_mode=CreateOrTruncate)
+    let parsed = cli_command().parse(
+      argv=[
+        "--session-root", root, "--session", "cli-test", "--system-prompt-file",
+        prompt_path, "write", "MoonBit",
+      ],
+      // Pinned so the exact-prompt assertions stay machine-independent.
+      env={
+        "DEEPSEEK": "test-key",
+        "OPENSEEK_GLOBAL_SKILLS_DIR": "\{root}/no-global-skills",
+      },
+    )
+    let created = load_or_new_session(store, id, parsed, V4Pro)
+    let grounded_prompt = "system\n\n\{environment_prompt_section()}"
+    assert_eq(created.system_prompt(), grounded_prompt)
+    assert_eq(created.events().length(), 0)
+    assert_false(store.exists(id))
+    let with_event = store.append(created, User(UserMessage("hello")))
+    assert_eq(with_event.events().length(), 1)
+    @fs.remove(prompt_path)
+    let loaded = load_or_new_session(store, id, parsed, V4Pro)
+    assert_eq(loaded.system_prompt(), grounded_prompt)
+    assert_eq(loaded.events().length(), 1)
+  })
 }
 
 ///|
 async test "load_or_new_session recovers empty interrupted session directory" {
-  let root = @fs.tmpdir(prefix="openseek-cli-session-empty-dir-")
-  let id : @agent_session.SessionId = SessionId("cli-test")
-  @fs.mkdir("\{root}/sessions/\{id.value()}", recursive=true)
-  let prompt_path = "\{root}/prompt.md"
-  @fs.write_file(prompt_path, "system", create_mode=CreateOrTruncate)
-  let parsed = cli_command().parse(
-    argv=[
-      "--session-root",
-      root,
-      "--session",
-      id.value(),
-      "--system-prompt-file",
-      prompt_path,
-      "write",
-      "MoonBit",
-    ],
-    // Pinned so the exact-prompt assertion stays machine-independent.
-    env={
-      "DEEPSEEK": "test-key",
-      "OPENSEEK_GLOBAL_SKILLS_DIR": "\{root}/no-global-skills",
-    },
-  )
-  let store = @store.SessionStore(root)
-  let session = load_or_new_session(store, id, parsed, V4Pro)
-  assert_eq(
-    session.system_prompt(),
-    "system\n\n\{environment_prompt_section()}",
-  )
-  assert_eq(session.events().length(), 0)
-  let with_event = store.append(session, User(UserMessage("hello")))
-  assert_eq(with_event.events().length(), 1)
-  @fs.rmdir(root, recursive=true)
+  @vfs.with_tmpdir(prefix="openseek-cli-session-empty-dir-", root => {
+    let id : @agent_session.SessionId = SessionId("cli-test")
+    @fs.mkdir("\{root}/sessions/\{id.value()}", recursive=true)
+    let prompt_path = "\{root}/prompt.md"
+    @fs.write_file(prompt_path, "system", create_mode=CreateOrTruncate)
+    let parsed = cli_command().parse(
+      argv=[
+        "--session-root",
+        root,
+        "--session",
+        id.value(),
+        "--system-prompt-file",
+        prompt_path,
+        "write",
+        "MoonBit",
+      ],
+      // Pinned so the exact-prompt assertion stays machine-independent.
+      env={
+        "DEEPSEEK": "test-key",
+        "OPENSEEK_GLOBAL_SKILLS_DIR": "\{root}/no-global-skills",
+      },
+    )
+    let store = @store.SessionStore(root)
+    let session = load_or_new_session(store, id, parsed, V4Pro)
+    assert_eq(
+      session.system_prompt(),
+      "system\n\n\{environment_prompt_section()}",
+    )
+    assert_eq(session.events().length(), 0)
+    let with_event = store.append(session, User(UserMessage("hello")))
+    assert_eq(with_event.events().length(), 1)
+  })
 }
 
 ///|
 async test "session list command does not require deepseek setup" {
-  let root = @fs.tmpdir(prefix="openseek-cli-session-list-")
-  let store = @store.SessionStore(root)
-  store.create(Session(SessionId("b"), system_prompt="system"))
-  store.create(Session(SessionId("a"), system_prompt="system"))
-  let parsed = cli_command().parse(
-    argv=["--session-root", root, "--session-list"],
-    env={},
-  )
-  assert_true(handle_session_command(parsed))
-  @fs.rmdir(root, recursive=true)
+  @vfs.with_tmpdir(prefix="openseek-cli-session-list-", root => {
+    let store = @store.SessionStore(root)
+    store.create(Session(SessionId("b"), system_prompt="system"))
+    store.create(Session(SessionId("a"), system_prompt="system"))
+    let parsed = cli_command().parse(
+      argv=["--session-root", root, "--session-list"],
+      env={},
+    )
+    assert_true(handle_session_command(parsed))
+  })
 }
 
 ///|
@@ -1431,43 +1431,43 @@ test "session list format defaults to text and rejects unknown values" {
 
 ///|
 async test "session list json reports titles newest first with husks last" {
-  let root = @fs.tmpdir(prefix="openseek-cli-session-list-json-")
-  let store = @store.SessionStore(root)
-  let older : @agent_session.Session = Session(
-    SessionId("older"),
-    system_prompt="system",
-  )
-  store.create(
-    older.append(User(UserMessage("  first question\nwith detail  "))),
-  )
-  let newer : @agent_session.Session = Session(
-    SessionId("newer"),
-    system_prompt="system",
-  )
-  store.create(newer)
-  // A directory with no session files at all still appears — last, with no
-  // timestamp — matching the human-readable listing's behavior.
-  @fs.mkdir(root + "/sessions/husk", recursive=true)
-  guard session_list_json(store) is Array(entries) else {
-    fail("expected a JSON array")
-  }
-  assert_eq(entries.length(), 3)
-  guard entries[0] is Object(newest) &&
-    entries[1] is Object(oldest) &&
-    entries[2] is Object(husk) else {
-    fail("expected JSON objects")
-  }
-  assert_true(newest.get("id") is Some(String("newer")))
-  assert_true(newest.get("title") is Some(String("")))
-  assert_true(oldest.get("id") is Some(String("older")))
-  assert_true(oldest.get("title") is Some(String("first question")))
-  guard oldest.get("updated_at_ms") is Some(Number(stamp, ..)) else {
-    fail("expected updated_at_ms")
-  }
-  assert_true(stamp > 0)
-  assert_true(husk.get("id") is Some(String("husk")))
-  assert_true(husk.get("updated_at_ms") is Some(Null))
-  @fs.rmdir(root, recursive=true)
+  @vfs.with_tmpdir(prefix="openseek-cli-session-list-json-", root => {
+    let store = @store.SessionStore(root)
+    let older : @agent_session.Session = Session(
+      SessionId("older"),
+      system_prompt="system",
+    )
+    store.create(
+      older.append(User(UserMessage("  first question\nwith detail  "))),
+    )
+    let newer : @agent_session.Session = Session(
+      SessionId("newer"),
+      system_prompt="system",
+    )
+    store.create(newer)
+    // A directory with no session files at all still appears — last, with no
+    // timestamp — matching the human-readable listing's behavior.
+    @fs.mkdir(root + "/sessions/husk", recursive=true)
+    guard session_list_json(store) is Array(entries) else {
+      fail("expected a JSON array")
+    }
+    assert_eq(entries.length(), 3)
+    guard entries[0] is Object(newest) &&
+      entries[1] is Object(oldest) &&
+      entries[2] is Object(husk) else {
+      fail("expected JSON objects")
+    }
+    assert_true(newest.get("id") is Some(String("newer")))
+    assert_true(newest.get("title") is Some(String("")))
+    assert_true(oldest.get("id") is Some(String("older")))
+    assert_true(oldest.get("title") is Some(String("first question")))
+    guard oldest.get("updated_at_ms") is Some(Number(stamp, ..)) else {
+      fail("expected updated_at_ms")
+    }
+    assert_true(stamp > 0)
+    assert_true(husk.get("id") is Some(String("husk")))
+    assert_true(husk.get("updated_at_ms") is Some(Null))
+  })
 }
 
 ///|
@@ -1487,65 +1487,69 @@ test "mtime to unix millis preserves subsecond precision" {
 
 ///|
 async test "session compact command appends summary without api key" {
-  let root = @fs.tmpdir(prefix="openseek-cli-session-compact-")
-  let store = @store.SessionStore(root)
-  let session = @agent_session.Session(
-      SessionId("cli-test"),
-      system_prompt="system",
+  @vfs.with_tmpdir(prefix="openseek-cli-session-compact-", root => {
+    let store = @store.SessionStore(root)
+    let session = @agent_session.Session(
+        SessionId("cli-test"),
+        system_prompt="system",
+      )
+      .append(User(UserMessage("hello")))
+      .append(Assistant(AssistantMessage("answer")))
+    store.create(session)
+    let summary_path = "\{root}/summary.txt"
+    @fs.write_file(
+      summary_path,
+      "summarized turn",
+      create_mode=CreateOrTruncate,
     )
-    .append(User(UserMessage("hello")))
-    .append(Assistant(AssistantMessage("answer")))
-  store.create(session)
-  let summary_path = "\{root}/summary.txt"
-  @fs.write_file(summary_path, "summarized turn", create_mode=CreateOrTruncate)
-  let parsed = cli_command().parse(
-    argv=[
-      "--session-root", root, "--session", "cli-test", "--session-compact-file",
-      summary_path, "--session-compact-from", "1", "--session-compact-to", "2",
-    ],
-    env={},
-  )
-  assert_true(handle_session_command(parsed))
-  let loaded = store.load(SessionId("cli-test"))
-  assert_eq(loaded.events().length(), 3)
-  guard loaded.events()[2].item() is Summary(summary) else {
-    fail("expected summary")
-  }
-  assert_eq(summary.content(), "summarized turn")
-  @fs.rmdir(root, recursive=true)
+    let parsed = cli_command().parse(
+      argv=[
+        "--session-root", root, "--session", "cli-test", "--session-compact-file",
+        summary_path, "--session-compact-from", "1", "--session-compact-to", "2",
+      ],
+      env={},
+    )
+    assert_true(handle_session_command(parsed))
+    let loaded = store.load(SessionId("cli-test"))
+    assert_eq(loaded.events().length(), 3)
+    guard loaded.events()[2].item() is Summary(summary) else {
+      fail("expected summary")
+    }
+    assert_eq(summary.content(), "summarized turn")
+  })
 }
 
 ///|
 async test "session compact file resolves relative to workspace root" {
-  let workspace = @fs.tmpdir(prefix="openseek-cli-session-compact-workspace-")
-  let session_root = "\{workspace}/.openseek"
-  let store = @store.SessionStore(session_root)
-  let session = @agent_session.Session(
-      SessionId("cli-test"),
-      system_prompt="system",
+  @vfs.with_tmpdir(prefix="openseek-cli-session-compact-workspace-", workspace => {
+    let session_root = "\{workspace}/.openseek"
+    let store = @store.SessionStore(session_root)
+    let session = @agent_session.Session(
+        SessionId("cli-test"),
+        system_prompt="system",
+      )
+      .append(User(UserMessage("hello")))
+      .append(Assistant(AssistantMessage("answer")))
+    store.create(session)
+    @fs.write_file(
+      "\{workspace}/summary.txt",
+      "workspace summary",
+      create_mode=CreateOrTruncate,
     )
-    .append(User(UserMessage("hello")))
-    .append(Assistant(AssistantMessage("answer")))
-  store.create(session)
-  @fs.write_file(
-    "\{workspace}/summary.txt",
-    "workspace summary",
-    create_mode=CreateOrTruncate,
-  )
-  let parsed = cli_command().parse(
-    argv=[
-      "--session", "cli-test", "--session-compact-file", "summary.txt", "--session-compact-from",
-      "1", "--session-compact-to", "2",
-    ],
-    env={},
-  )
-  assert_true(handle_session_command(parsed, workspace_root=workspace))
-  let loaded = store.load(SessionId("cli-test"))
-  guard loaded.events()[2].item() is Summary(summary) else {
-    fail("expected summary")
-  }
-  assert_eq(summary.content(), "workspace summary")
-  @fs.rmdir(workspace, recursive=true)
+    let parsed = cli_command().parse(
+      argv=[
+        "--session", "cli-test", "--session-compact-file", "summary.txt", "--session-compact-from",
+        "1", "--session-compact-to", "2",
+      ],
+      env={},
+    )
+    assert_true(handle_session_command(parsed, workspace_root=workspace))
+    let loaded = store.load(SessionId("cli-test"))
+    guard loaded.events()[2].item() is Summary(summary) else {
+      fail("expected summary")
+    }
+    assert_eq(summary.content(), "workspace summary")
+  })
 }
 
 ///|

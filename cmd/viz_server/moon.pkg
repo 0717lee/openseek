@@ -1,4 +1,8 @@
 import {
+  "bobzhang/openseek/testkit/filesystem" @vfs,
+} for "wbtest"
+
+import {
   "bobzhang/openseek/agent_session",
   "bobzhang/openseek/agent_session/store",
   "moonbitlang/async",

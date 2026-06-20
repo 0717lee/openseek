@@ -125,14 +125,14 @@ test "transcript text ignores user prompts and summaries" {
 
 ///|
 async test "eval result renders and writes report files" {
-  let dir = @fs.tmpdir(prefix="openseek-session-analyzer-")
-  let result = analyze_session(sample_session())
-  assert_true(result.markdown().contains("Session Eval Result"))
-  assert_true(result.html().contains("<html"))
-  assert_true(result.to_json().stringify().contains("trial-01"))
-  result.write_files(dir)
-  assert_true(@fs.exists(dir + "/report.md"))
-  assert_true(@fs.exists(dir + "/report.html"))
-  assert_true(@fs.exists(dir + "/report.json"))
-  @fs.rmdir(dir, recursive=true)
+  @vfs.with_tmpdir(prefix="openseek-session-analyzer-", dir => {
+    let result = analyze_session(sample_session())
+    assert_true(result.markdown().contains("Session Eval Result"))
+    assert_true(result.html().contains("<html"))
+    assert_true(result.to_json().stringify().contains("trial-01"))
+    result.write_files(dir)
+    assert_true(@fs.exists(dir + "/report.md"))
+    assert_true(@fs.exists(dir + "/report.html"))
+    assert_true(@fs.exists(dir + "/report.json"))
+  })
 }
