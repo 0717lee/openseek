@@ -2,6 +2,8 @@
 package "bobzhang/openseek/agent_tool/edit/internal/manifest_error"
 
 // Values
+pub fn path_error(String) -> String?
+
 pub async fn write_error(String, String) -> String?
 
 // Errors

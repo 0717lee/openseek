@@ -64,6 +64,15 @@ async fn edit_file(
   // Every failure names the file it tried to edit so the viz can show
   // `→ edit · edit <file> 🚩` on the folded call line.
   let fail_brief = "edit \{@agent_tool.brief_basename(path)}"
+  match @manifest_error.path_error(path) {
+    Some(message) =>
+      return @agent_tool.ToolAction::respond(
+        "error editing \{path}: \{message}",
+        is_error=true,
+        brief=fail_brief,
+      )
+    None => ()
+  }
   if input.old_string == "" {
     return @agent_tool.ToolAction::respond(
       "error editing \{path}: old_string must be non-empty",
