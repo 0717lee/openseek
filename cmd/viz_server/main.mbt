@@ -227,7 +227,7 @@ fn valid_session_id(value : String) -> Bool {
 
 ///|
 /// Serve one session as a single JSON envelope:
-/// `{ "found": Bool, "events": String, "header": Json|null }`.
+/// `{ "found": Bool, "events": String, "events_bytes": Number, "header": Json|null }`.
 ///
 /// The frontend's HTTP client (`rabbita/http`) resolves any completed response
 /// as success regardless of status code, so absence and content must be encoded
@@ -253,6 +253,7 @@ async fn session_envelope_reply(
   } else {
     ""
   }
+  let events_bytes = if events_exists { file_size(events_path) } else { 0L }
   let header : Json = if header_exists {
     @json.parse(read_text_lossy(header_path)) catch {
       _ => Json::null()
@@ -260,7 +261,12 @@ async fn session_envelope_reply(
   } else {
     Json::null()
   }
-  json_reply({ "found": true, "events": events_text, "header": header })
+  json_reply({
+    "found": true,
+    "events": events_text,
+    "events_bytes": Json::number(events_bytes.to_double()),
+    "header": header,
+  })
 }
 
 ///|
@@ -653,6 +659,15 @@ async fn asset_reply(path : String, content_type : String) -> Reply {
 /// and is reported as a benign truncated tail.
 async fn read_text_lossy(path : String) -> String {
   @utf8.decode_lossy(@fs.read_file(path).binary())
+}
+
+///|
+async fn file_size(path : String) -> Int64 {
+  let file = @fs.open(path, mode=ReadOnly) catch { _ => return 0L }
+  defer file.close()
+  file.size() catch {
+    _ => 0L
+  }
 }
 
 ///|

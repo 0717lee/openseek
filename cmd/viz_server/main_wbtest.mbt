@@ -288,3 +288,26 @@ async test "session_list_reply includes root metadata and composite keys" {
     assert_true(text.contains("\"is_marker\":true"))
   })
 }
+
+///|
+async test "session_envelope_reply includes event log byte size" {
+  @vfs.with_tmpdir(prefix="openseek-viz-envelope-", root => {
+    let store = @store.SessionStore("\{root}/.openseek")
+    let session = @agent_session.Session(SessionId("demo"), system_prompt="").append(
+      User(UserMessage("hi")),
+    )
+    store.create(session)
+    let reply = session_envelope_reply(store, SessionId("demo"))
+    guard @json.parse(reply.body) is Object(fields) else {
+      fail("expected JSON object")
+    }
+    guard fields.get("events") is Some(String(events_text)) else {
+      fail("expected events")
+    }
+    guard fields.get("events_bytes") is Some(Number(size, ..)) else {
+      fail("expected events_bytes")
+    }
+    inspect(size.to_int(), content="\{events_text.length()}")
+    assert_true(size.to_int() > 0)
+  })
+}

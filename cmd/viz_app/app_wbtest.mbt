@@ -1,12 +1,13 @@
 ///|
 test "parse_load reads a found envelope with header" {
   let text =
-    #|{"found":true,"events":"{\"sequence\":1,\"ts\":0,\"item\":{\"kind\":\"user\",\"payload\":{\"content\":\"hi\"}}}\n","header":{"version":1,"system_prompt":"SYS"}}
+    #|{"found":true,"events":"{\"sequence\":1,\"ts\":0,\"item\":{\"kind\":\"user\",\"payload\":{\"content\":\"hi\"}}}\n","events_bytes":77,"header":{"version":1,"system_prompt":"SYS"}}
   match parse_load(text) {
-    Loaded(parsed, system_prompt, header_present) => {
+    Loaded(parsed, system_prompt, header_present, log_bytes) => {
       inspect(parsed.events.length(), content="1")
       inspect(system_prompt, content="SYS")
       inspect(header_present, content="true")
+      inspect(log_bytes, content="77")
     }
     _ => fail("expected Loaded")
   }
@@ -17,12 +18,33 @@ test "parse_load treats a null header as events-only" {
   let text =
     #|{"found":true,"events":"","header":null}
   match parse_load(text) {
-    Loaded(_, system_prompt, header_present) => {
+    Loaded(_, system_prompt, header_present, log_bytes) => {
       inspect(system_prompt, content="")
       inspect(header_present, content="false")
+      inspect(log_bytes, content="0")
     }
     _ => fail("expected Loaded")
   }
+}
+
+///|
+test "session metadata counts steps and total runtime" {
+  let text =
+    #|{"found":true,"events":"{\"sequence\":1,\"ts\":100000,\"item\":{\"kind\":\"user\",\"payload\":{\"content\":\"hi\"}}}\n{\"sequence\":2,\"ts\":101500,\"item\":{\"kind\":\"assistant\",\"payload\":{\"content\":\"\",\"tool_calls\":[]}}}\n{\"sequence\":3,\"ts\":170300,\"item\":{\"kind\":\"terminal\",\"payload\":{\"kind\":\"finished\",\"message\":\"done\"}}}\n","events_bytes":307,"header":null}
+  match parse_load(text) {
+    Loaded(parsed, _, _, log_bytes) => {
+      inspect(format_log_size(log_bytes), content="307 B")
+      inspect(assistant_step_count(parsed), content="1")
+      inspect(runtime_label(parsed), content="70.3s")
+    }
+    _ => fail("expected Loaded")
+  }
+}
+
+///|
+test "log size formats larger byte counts" {
+  inspect(format_log_size(554702L), content="541.7 KiB")
+  inspect(format_log_size(2097152L), content="2.0 MiB")
 }
 
 ///|

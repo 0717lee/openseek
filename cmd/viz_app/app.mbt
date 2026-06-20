@@ -24,6 +24,7 @@ struct Model {
   parsed : @session_log.ParsedLog?
   system_prompt : String
   header_present : Bool
+  log_bytes : Int64
   view_mode : @viz.ViewMode
   theme : Theme
   sidebar_visible : Bool
@@ -76,7 +77,7 @@ enum Msg {
 /// any completed response as `Ok`, so absence and malformed payloads are
 /// distinguished here from the body, not the HTTP status.
 enum LoadOutcome {
-  Loaded(@session_log.ParsedLog, String, Bool)
+  Loaded(@session_log.ParsedLog, String, Bool, Int64)
   NotFound
   Malformed
 }
@@ -89,6 +90,7 @@ fn init_model() -> Model {
     parsed: None,
     system_prompt: "",
     header_present: false,
+    log_bytes: 0L,
     view_mode: ModelView,
     theme: Light,
     sidebar_visible: true,
@@ -137,6 +139,7 @@ fn update(emit : @cmd.Emit[Msg], msg : Msg, model : Model) -> (@cmd.Cmd, Model) 
           parsed: None,
           system_prompt: "",
           header_present: false,
+          log_bytes: 0L,
           loading: true,
           status: "loading \{label}…",
         },
@@ -156,7 +159,7 @@ fn update(emit : @cmd.Emit[Msg], msg : Msg, model : Model) -> (@cmd.Cmd, Model) 
             )
           Ok(text) =>
             match parse_load(text) {
-              Loaded(parsed, system_prompt, header_present) =>
+              Loaded(parsed, system_prompt, header_present, log_bytes) =>
                 (
                   @cmd.none,
                   {
@@ -164,6 +167,7 @@ fn update(emit : @cmd.Emit[Msg], msg : Msg, model : Model) -> (@cmd.Cmd, Model) 
                     parsed: Some(parsed),
                     system_prompt,
                     header_present,
+                    log_bytes,
                     loading: false,
                     status: events_status(parsed),
                   },
@@ -716,7 +720,7 @@ fn main_pane(emit : @cmd.Emit[Msg], model : Model) -> @html.Html {
           let error_count = @viz.rendered_error_count(session, model.view_mode)
           @html.div(class=session_view_class(model), [
             header_strip(model, id, row.map(row => row.root_label)),
-            mode_toggle(emit, model),
+            mode_row(emit, model, parsed),
             error_bar(emit, model, error_count),
             @viz.render_notices(parsed),
             session_log_view(model, session, error_count),
@@ -755,6 +759,18 @@ fn mode_toggle(emit : @cmd.Emit[Msg], model : Model) -> @html.Html {
 }
 
 ///|
+fn mode_row(
+  emit : @cmd.Emit[Msg],
+  model : Model,
+  parsed : @session_log.ParsedLog,
+) -> @html.Html {
+  @html.div(class="mode-row", [
+    mode_toggle(emit, model),
+    session_metadata(model, parsed),
+  ])
+}
+
+///|
 fn mode_button(
   emit : @cmd.Emit[Msg],
   model : Model,
@@ -767,6 +783,81 @@ fn mode_button(
     "mode-button"
   }
   @html.button(class=classes, on_click=emit(SetMode(mode)), label)
+}
+
+///|
+fn session_metadata(
+  model : Model,
+  parsed : @session_log.ParsedLog,
+) -> @html.Html {
+  let steps = assistant_step_count(parsed)
+  @html.div(class="session-metadata", [
+    @html.span("log \{format_log_size(model.log_bytes)}"),
+    @html.span("\{steps} step\{plural_s(steps)}"),
+    @html.span("runtime \{runtime_label(parsed)}"),
+  ])
+}
+
+///|
+fn assistant_step_count(parsed : @session_log.ParsedLog) -> Int {
+  for event in parsed.events; count = 0 {
+    if event.item() is Assistant(_) {
+      continue count + 1
+    }
+  } nobreak {
+    count
+  }
+}
+
+///|
+fn runtime_label(parsed : @session_log.ParsedLog) -> String {
+  match running_ms(parsed) {
+    Some(milliseconds) => format_span_total_seconds(milliseconds)
+    None => "n/a"
+  }
+}
+
+///|
+fn running_ms(parsed : @session_log.ParsedLog) -> Int64? {
+  let mut first = 0L
+  let mut last = 0L
+  for event in parsed.events {
+    let stamp = event.unix_ms()
+    if stamp > 0 {
+      if first == 0L {
+        first = stamp
+      }
+      last = stamp
+    }
+  }
+  if first > 0L && last >= first {
+    Some(last - first)
+  } else {
+    None
+  }
+}
+
+///|
+fn format_span_total_seconds(span_ms : Int64) -> String {
+  let tenths = span_ms / 100L
+  "\{tenths / 10L}.\{tenths % 10L}s"
+}
+
+///|
+fn format_log_size(bytes : Int64) -> String {
+  if bytes < 1024L {
+    "\{bytes} B"
+  } else if bytes < 1048576L {
+    format_scaled_size(bytes, 1024L, "KiB")
+  } else {
+    format_scaled_size(bytes, 1048576L, "MiB")
+  }
+}
+
+///|
+fn format_scaled_size(bytes : Int64, unit : Int64, suffix : String) -> String {
+  let tenths = bytes * 10L / unit
+  "\{tenths / 10L}.\{tenths % 10L} \{suffix}"
 }
 
 ///|
@@ -954,5 +1045,9 @@ fn parse_load(text : String) -> LoadOutcome {
       )
     _ => ("", false)
   }
-  Loaded(parsed, system_prompt, header_present)
+  let log_bytes = match fields.get("events_bytes") {
+    Some(Number(value, ..)) => value.to_int64()
+    _ => events_text.length().to_int64()
+  }
+  Loaded(parsed, system_prompt, header_present, log_bytes)
 }

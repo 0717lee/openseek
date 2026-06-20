@@ -30,6 +30,7 @@ no browser needed in CI.
 - `GET /` → the viewer shell (`web/index.html`)
 - `GET /viz_app.js` → the compiled frontend bundle (auto-located from the moon build output)
 - `GET /api/sessions` → `[{key, id, root, root_label, last_active, first_prompt}, …]`, most recent first across all roots
+- `GET /api/sessions/<key>` → `{found, events, events_bytes, header}` envelope for the frontend
 - `GET /api/sessions/<key>/events.jsonl` → raw append-only log
 - `GET /api/sessions/<key>/session.json` → raw header (404 when absent; the frontend degrades to events-only)
 

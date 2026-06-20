@@ -170,7 +170,7 @@ fn offset_label(base : Int64, event : @agent_session.SessionEvent) -> String {
   if base == 0 || event.unix_ms() == 0 {
     return ""
   }
-  "+\{format_span_seconds(event.unix_ms() - base)}"
+  "+\{format_span_total_seconds(event.unix_ms() - base)}"
 }
 
 ///|
@@ -195,29 +195,14 @@ fn turn_duration_label(turn : Array[@agent_session.SessionEvent]) -> String? {
     }
   }
   if last > base {
-    Some(format_span_seconds(last - base))
+    Some(format_span_total_seconds(last - base))
   } else {
     None
   }
 }
 
 ///|
-/// A millisecond span as a compact human duration: `3.4s`, `2m 05.1s`.
-fn format_span_seconds(span_ms : Int64) -> String {
-  let tenths = span_ms / 100
-  if tenths < 600 {
-    "\{tenths / 10}.\{tenths % 10}s"
-  } else {
-    let minutes = tenths / 600
-    let rest = tenths % 600
-    let seconds = rest / 10
-    let pad = if seconds < 10 { "0" } else { "" }
-    "\{minutes}m \{pad}\{seconds}.\{rest % 10}s"
-  }
-}
-
-///|
-/// A millisecond span as total elapsed seconds. Model-view timestamp chips use
+/// A millisecond span as total elapsed seconds. Session-view timestamp chips use
 /// this instead of minute-splitting so `70.3s` cannot read like just `10.3s`.
 fn format_span_total_seconds(span_ms : Int64) -> String {
   let tenths = span_ms / 100

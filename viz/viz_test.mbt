@@ -406,7 +406,7 @@ test "notices surface partial tails and bad lines" {
 ///|
 /// Stamped events render relative offsets and a turn duration; unstamped
 /// events (the 0 sentinel) render no time chips at all.
-test "raw view shows per-event offsets and turn duration from ts" {
+test "raw view shows total-second offsets and turn duration from ts" {
   let stamped = @agent_session.Session(SessionId("t"), system_prompt="")
     .append(User(UserMessage("go")), unix_ms=1781151318110L)
     .append(Runtime(RuntimeNotice("working")), unix_ms=1781151319242L)
@@ -414,8 +414,9 @@ test "raw view shows per-event offsets and turn duration from ts" {
   let html = render(@viz.render_session(stamped, RawLog))
   assert_true(html.contains("+0.0s"))
   assert_true(html.contains("+1.1s"))
-  assert_true(html.contains("+2m 05.5s"))
-  assert_true(html.contains("· 2m 05.5s"))
+  assert_true(html.contains("+125.5s"))
+  assert_true(html.contains("· 125.5s"))
+  assert_false(html.contains("+2m 05.5s"))
   let unstamped = @agent_session.Session(SessionId("u"), system_prompt="")
     .append(User(UserMessage("go")))
     .append(Terminal(Finished("done")))
