@@ -16,7 +16,7 @@ pub let hard_max_output_chars : Int
 
 // Types and methods
 pub struct ReadInput {
-  paths : Array[String]
+  path : String
   start_line : Int
   max_lines : Int?
   max_output_chars : Int

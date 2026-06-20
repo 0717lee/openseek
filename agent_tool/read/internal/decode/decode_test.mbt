@@ -9,7 +9,7 @@ test "decode valid read input" {
     }),
     content=(
       #|{
-      #|  paths: ["file.mbt"],
+      #|  path: "file.mbt",
       #|  start_line: 3,
       #|  max_lines: Some(4),
       #|  max_output_chars: 50000,
@@ -24,7 +24,7 @@ test "decode defaults optional limits" {
     @decode.decode({ "path": "file.mbt" }),
     content=(
       #|{
-      #|  paths: ["file.mbt"],
+      #|  path: "file.mbt",
       #|  start_line: 1,
       #|  max_lines: None,
       #|  max_output_chars: 12000,
@@ -39,6 +39,16 @@ test "decode rejects missing path" {
     error => assert_true("\{error}".contains("arguments.path"))
   } noraise {
     _ => fail("missing path decoded")
+  }
+}
+
+///|
+test "decode rejects paths array" {
+  try @decode.decode({ "paths": ["a.mbt", "b.mbt"] }) catch {
+    error =>
+      assert_true("\{error}".contains("arguments.paths is not supported"))
+  } noraise {
+    _ => fail("paths decoded")
   }
 }
 

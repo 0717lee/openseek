@@ -2,17 +2,11 @@
 /// Tool definition for `read`: returns text from `arguments.path`, optionally
 /// restricted to a line range and capped to avoid flooding the agent context.
 /// When several known independent files are needed, prefer batching several
-/// single-file `read` tool calls in one assistant response. `arguments.paths`
-/// remains available for hosts that cannot batch tool calls or need one shared
-/// output budget.
+/// single-file `read` tool calls in one assistant response.
 ///
 /// ## Arguments
-/// - `path` (string): filesystem path to read. Exactly one of `path`/`paths`
-///   is required. Directories are not supported; use `ls` or `tree` first, then
-///   read specific files.
-/// - `paths` (string array): several files in one call; useful when the host
-///   cannot batch independent read calls. Per-file read errors report inline
-///   while the other files still return.
+/// - `path` (string): filesystem path to read. Required. Directories are not
+///   supported; use `ls` or `tree` first, then read specific files.
 /// - `start_line` (number, optional): 1-based first line to return. Defaults
 ///   to 1. Single-file calls only.
 /// - `max_lines` (number, optional): maximum number of lines to return.
@@ -25,9 +19,7 @@
 /// - `Respond(ToolOutput(<file contents>))` on success for uncapped whole-file
 ///   single reads.
 /// - `Respond(ToolOutput(<metadata header + numbered content>))` for ranged
-///   reads or capped reads, and per file for multi-file reads (blocks separated
-///   by a blank line; a failed file contributes an inline `error reading ...`
-///   block and only flips `is_error` when every file failed).
+///   reads or capped reads.
 /// - `Respond(ToolOutput("error reading <path>: <error>", is_error=true))`
 ///   if a single-file read fails (missing file, permission denied, invalid
 ///   UTF-8, directory path, etc.).
@@ -38,18 +30,13 @@ pub fn definition(
 ) -> @agent_tool.AgentToolDefinition {
   AgentToolDefinition(
     name="read",
-    description="Read arguments.path as text. For several known independent files, batch separate read tool calls in one assistant response when possible; use arguments.paths only when the host cannot batch calls or one shared output budget is desired. Do not use read for directories: inspect them with `ls` or `tree`, then read specific files. Supports optional start_line, max_lines, and max_output_chars for focused single-file reads. Headered outputs include right-aligned line numbers.",
+    description="Read arguments.path as text. For several known independent files, batch separate read tool calls in one assistant response when possible. Do not use read for directories: inspect them with `ls` or `tree`, then read specific files. Supports optional start_line, max_lines, and max_output_chars for focused single-file reads. Headered outputs include right-aligned line numbers.",
     schema=JsonSchema({
       "type": "object",
       "properties": {
         "path": {
           "type": "string",
           "description": "Text file path to read. Directories are not supported; use `ls` or `tree` first, then read specific files.",
-        },
-        "paths": {
-          "type": "array",
-          "items": { "type": "string" },
-          "description": "Read several files in one call when the host cannot batch separate read calls or when one shared max_output_chars budget is desired. Exactly one of path/paths is required.",
         },
         "start_line": { "type": "number" },
         "max_lines": { "type": "number" },
@@ -79,14 +66,7 @@ async fn execute_with_workspace(
       )
     }
   }
-  let paths = [
-    for path in input.paths => @workspace_path.resolve(workspace_root, path)
-  ]
-  if paths.length() == 1 {
-    read_file(input, path=paths[0])
-  } else {
-    read_files(input, paths~)
-  }
+  read_file(input, path=@workspace_path.resolve(workspace_root, input.path))
 }
 
 ///|
@@ -104,12 +84,6 @@ priv struct RenderedSelection {
   end_line : Int
   shown_lines : Int
   shown_chars : Int
-  truncated : Bool
-}
-
-///|
-priv struct RenderedBlock {
-  content : String
   truncated : Bool
 }
 
@@ -149,107 +123,6 @@ async fn read_file(
       brief="read \{@agent_tool.brief_basename(path)}",
     )
   }
-}
-
-///|
-/// Render a multi-file read: one headered block per file, separated by blank
-/// lines, sharing the call's `max_output_chars` budget in argument order. A
-/// file that fails to read contributes an inline error block — the other
-/// files still return, mirroring how `moon ide doc` reports per-query misses
-/// — and `is_error` only flips when every file failed or the budget cut
-/// content (so the model knows to re-read the tail individually).
-///
-/// Every emitted block — header, error text, separators — counts against the
-/// budget, not just file content: otherwise a long paths list of headers or
-/// missing-file errors would outgrow the cap that exists to protect the
-/// context (Codex review). Once the budget is exhausted the unread tail
-/// collapses into a single skipped-files marker, so output stays bounded no
-/// matter how many paths the call names.
-async fn read_files(
-  input : @decode.ReadInput,
-  paths~ : Array[String],
-) -> @agent_tool.ToolAction {
-  let blocks : Array[String] = []
-  let mut remaining = input.max_output_chars
-  let mut failures = 0
-  let mut truncated_any = false
-  let skipped : Array[String] = []
-  for path in paths {
-    let separator_chars = if blocks.length() == 0 { 0 } else { 2 }
-    if remaining <= separator_chars {
-      skipped.push(path)
-      continue
-    }
-    match directory_read_error(path) {
-      Some(block) => {
-        if separator_chars + block.char_length() <= remaining {
-          failures = failures + 1
-          remaining = remaining - separator_chars - block.char_length()
-          blocks.push(block)
-        } else {
-          skipped.push(path)
-          truncated_any = true
-        }
-        continue
-      }
-      None => ()
-    }
-    let content = @fs.read_file(path).text() catch {
-      error => {
-        let block = "error reading \{path}: \{error}"
-        if separator_chars + block.char_length() <= remaining {
-          failures = failures + 1
-          remaining = remaining - separator_chars - block.char_length()
-          blocks.push(block)
-        } else {
-          skipped.push(path)
-          truncated_any = true
-        }
-        continue
-      }
-    }
-    let selection = select_lines(content, 1, None)
-    let block_budget = remaining - separator_chars
-    match render_read_block(path, content, selection, block_budget) {
-      Some(block) => {
-        if block.truncated {
-          truncated_any = true
-        }
-        remaining = remaining - separator_chars - block.content.char_length()
-        blocks.push(block.content)
-      }
-      None => {
-        skipped.push(path)
-        truncated_any = true
-      }
-    }
-  }
-  if skipped.length() > 0 {
-    truncated_any = true
-    // Preview only a handful of names: the marker itself must stay bounded
-    // or a thousand-path call would flood the context through its skip list.
-    let preview_count = if skipped.length() < 5 { skipped.length() } else { 5 }
-    let preview = skipped[0:preview_count].join(", ")
-    let rest = if skipped.length() > 5 {
-      " and \{skipped.length() - 5} more"
-    } else {
-      ""
-    }
-    let separator_chars = if blocks.length() == 0 { 0 } else { 2 }
-    if remaining > separator_chars {
-      let marker_budget = remaining - separator_chars
-      let marker = cap_text(
-        "skipped \{skipped.length()} file(s), max_output_chars budget exhausted — read them individually: \{preview}\{rest}",
-        marker_budget,
-      )
-      blocks.push(marker)
-    }
-  }
-  @agent_tool.ToolAction::respond(
-    blocks.join("\n\n"),
-    is_error=failures == paths.length() || truncated_any,
-    brief="read \{paths.length()} files",
-  )
 }
 
 ///|
@@ -299,17 +172,6 @@ async fn directory_read_error(path : String) -> String? {
 }
 
 ///|
-fn cap_text(content : String, max_chars : Int) -> String {
-  if content.char_length() <= max_chars {
-    content
-  } else if max_chars <= 0 {
-    ""
-  } else {
-    char_prefix(content, max_chars)
-  }
-}
-
-///|
 fn char_prefix(content : String, max_chars : Int) -> String {
   if max_chars <= 0 {
     ""
@@ -317,44 +179,6 @@ fn char_prefix(content : String, max_chars : Int) -> String {
     content
   } else {
     StringView::from_iter(content.iter().take(max_chars)).to_owned()
-  }
-}
-
-///|
-fn render_read_block(
-  path : String,
-  original : String,
-  selection : ReadSelection,
-  max_chars : Int,
-) -> RenderedBlock? {
-  if max_chars <= 0 {
-    return None
-  }
-  let mut body_budget = max_chars
-  for _ in 0..<8 {
-    let rendered = render_numbered_content(selection, body_budget)
-    let header = read_header(path, original, selection, rendered)
-    if header.char_length() > max_chars {
-      return None
-    }
-    let next_body_budget = max_chars - header.char_length()
-    if next_body_budget == body_budget {
-      return Some({
-        content: "\{header}\{rendered.content}",
-        truncated: rendered.truncated,
-      })
-    }
-    body_budget = next_body_budget
-  }
-  let rendered = render_numbered_content(selection, body_budget)
-  let header = read_header(path, original, selection, rendered)
-  if header.char_length() + rendered.content.char_length() > max_chars {
-    None
-  } else {
-    Some({
-      content: "\{header}\{rendered.content}",
-      truncated: rendered.truncated,
-    })
   }
 }
 
@@ -623,8 +447,9 @@ test "read description encourages batched reads and directory inspection" {
   assert_true(tool.description.contains("Do not use read for directories"))
   let JsonSchema(schema) = tool.schema
   let schema_text = schema.stringify()
+  assert_true(schema_text.contains("\"path\""))
+  assert_false(schema_text.contains("\"paths\""))
   assert_true(schema_text.contains("Directories are not supported"))
-  assert_true(schema_text.contains("host cannot batch separate read calls"))
 }
 
 ///|
@@ -635,8 +460,7 @@ test "read parses and caps optional limits" {
     "max_lines": 4,
     "max_output_chars": 999999,
   })
-  assert_eq(input.paths.length(), 1)
-  assert_eq(input.paths[0], "file.mbt")
+  assert_eq(input.path, "file.mbt")
   assert_eq(input.start_line, 3)
   guard input.max_lines is Some(max_lines) else { fail("missing max_lines") }
   assert_eq(max_lines, 4)
@@ -644,111 +468,12 @@ test "read parses and caps optional limits" {
 }
 
 ///|
-async test "read returns several files as headered blocks" {
-  @vfs.with_tmpdir(dir => {
-    let a = "\{dir}/multi-a.txt"
-    let b = "\{dir}/multi-b.txt"
-    @fs.write_file(a, "alpha", create_mode=CreateOrTruncate)
-    @fs.write_file(b, "beta", create_mode=CreateOrTruncate)
-    let result = execute({ "paths": [a, b] })
-    guard result is Respond(output) else { fail("expected Respond") }
-    assert_false(output.is_error)
-    assert_true(output.content.contains("path=\{a}"))
-    assert_true(output.content.contains("alpha"))
-    assert_true(output.content.contains("path=\{b}"))
-    assert_true(output.content.contains("beta"))
-  })
-}
-
-///|
-async test "a missing file reports inline while the others return" {
-  @vfs.with_tmpdir(dir => {
-    let a = "\{dir}/multi-ok.txt"
-    let missing = "\{dir}/multi-missing.txt"
-    @fs.write_file(a, "still here", create_mode=CreateOrTruncate)
-    let result = execute({ "paths": [a, missing] })
-    guard result is Respond(output) else { fail("expected Respond") }
-    // Partial failure is not a tool error: the good file landed and the bad
-    // path's error block tells the model exactly which read to fix.
-    assert_false(output.is_error)
-    assert_true(output.content.contains("still here"))
-    assert_true(output.content.contains("error reading \{missing}"))
-  })
-}
-
-///|
-async test "every file missing is a tool error" {
-  @vfs.with_tmpdir(dir => {
-    let result = execute({ "paths": ["\{dir}/none-1", "\{dir}/none-2"] })
-    guard result is Respond(output) else { fail("expected Respond") }
-    assert_true(output.is_error)
-  })
-}
-
-///|
-async test "the output budget is shared and exhaustion is reported" {
-  @vfs.with_tmpdir(dir => {
-    let a = "\{dir}/budget-a.txt"
-    let b = "\{dir}/budget-b.txt"
-    @fs.write_file(a, "0123456789", create_mode=CreateOrTruncate)
-    @fs.write_file(b, "abcdefghij", create_mode=CreateOrTruncate)
-    let result = execute({ "paths": [a, b], "max_output_chars": 10 })
-    guard result is Respond(output) else { fail("expected Respond") }
-    assert_true(output.is_error)
-    assert_true(output.content.contains("skipped"))
-    assert_true(output.content.length() <= 10)
-    assert_false(output.content.contains("0123456789"))
-    assert_false(output.content.contains("abcdefghij"))
-  })
-}
-
-///|
-async test "headers and error blocks count against the budget" {
-  // 40 missing paths with a small budget: error blocks consume the budget,
-  // the tail collapses into one bounded marker, and the total output stays
-  // near the cap instead of growing per path (Codex review).
-  @vfs.with_tmpdir(dir => {
-    let paths : Array[Json] = []
-    for i in 0..<40 {
-      paths.push(Json::string("\{dir}/flood-\{i}"))
-    }
-    let result = execute({
-      "paths": Json::array(paths),
-      "max_output_chars": 300,
-    })
-    guard result is Respond(output) else { fail("expected Respond") }
-    assert_true(output.is_error)
-    assert_true(output.content.contains("skipped"))
-    assert_true(output.content.length() <= 300)
-  })
-}
-
-///|
-async test "read rejects path and paths together" {
-  @vfs.with_tmpdir(dir => {
-    let result = execute({ "path": "\{dir}/x", "paths": ["\{dir}/y"] })
-    guard result is Respond(output) else { fail("expected Respond") }
-    assert_true(output.is_error)
-    assert_true(output.content.contains("not both"))
-  })
-}
-
-///|
-async test "read rejects line ranges on multi-file calls" {
-  @vfs.with_tmpdir(dir => {
-    let result = execute({ "paths": ["\{dir}/x", "\{dir}/y"], "start_line": 2 })
-    guard result is Respond(output) else { fail("expected Respond") }
-    assert_true(output.is_error)
-    assert_true(output.content.contains("single file"))
-  })
-}
-
-///|
-async test "read rejects an empty paths array" {
-  let result = execute({ "paths": [] })
+async test "read rejects paths array and explains batching" {
+  let result = execute({ "paths": ["a.mbt", "b.mbt"] })
   guard result is Respond(output) else { fail("expected Respond") }
   assert_true(output.is_error)
-  assert_true(output.content.contains("non-empty array"))
+  assert_true(output.content.contains("arguments.paths is not supported"))
+  assert_true(output.content.contains("batch separate read calls"))
 }
 
 ///|

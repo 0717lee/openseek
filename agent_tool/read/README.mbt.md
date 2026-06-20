@@ -6,9 +6,9 @@ only needs a focused region, pass `start_line`, `max_lines`, or
 `max_output_chars`.
 
 When the agent needs several known independent files, prefer batching separate
-single-file `read` tool calls in one assistant response. Use `arguments.paths`
-only when the host cannot batch tool calls or when one shared output budget and
-inline per-file errors are more useful than independent results.
+single-file `read` tool calls in one assistant response. The tool accepts one
+file per call so ranges, errors, and output budgets stay tied to a specific
+file.
 
 Do not use `read` for directories. Inspect directories with `ls` or `tree`, then
 read specific files.
@@ -29,18 +29,9 @@ Automatic character truncation is marked as a tool error even when the file was
 read successfully; that makes lossy context visible to the loop instead of
 silently pretending the returned prefix is complete.
 
-The preferred multi-file pattern is several independent `read` calls in the
-same assistant response. That avoids extra model round trips while preserving
-single-file ranges and independent output budgets. `paths` remains available as
-a fallback for hosts that cannot batch tool calls, or for cases where one shared
-`max_output_chars` budget is desirable: every file returns as its own headered
-block, a file that fails to read reports inline while the others still land
-(mirroring how `moon ide doc` reports per-query misses), and the budget is
-shared across the call in argument order. Headers, separators, and error blocks
-count against it too, and an exhausted budget collapses the unread tail into one
-bounded skipped-files marker, so output stays near the cap no matter how many
-paths the call names. Line-range options stay single-file: a range only means
-something against one file.
+For several known independent files, issue several independent `read` calls in
+the same assistant response. That avoids extra model round trips while
+preserving single-file ranges and independent output budgets.
 
 ## API Style
 
@@ -65,11 +56,10 @@ Prefer a range plus a cap over reading a large file and relying on truncation.
 
 | Name | Type | Required | Notes |
 | ---- | ---- | -------- | ----- |
-| `path` | string | one of `path`/`paths` | Filesystem path. Relative paths resolve against the agent process's current working directory. |
-| `paths` | string array | one of `path`/`paths` | Several files in one call when batching separate read calls is unavailable or a shared budget is desired; per-file errors report inline. |
-| `start_line` | number | no | 1-based first line to return. Defaults to `1`. Single-file calls only. |
-| `max_lines` | number | no | Maximum number of lines to return. Single-file calls only. |
-| `max_output_chars` | number | no | Maximum rendered content chars to return across the call, including line-number gutters when present. Defaults to `12000` and is capped at `50000`. |
+| `path` | string | yes | Filesystem path. Relative paths resolve against the agent process's current working directory. |
+| `start_line` | number | no | 1-based first line to return. Defaults to `1`. |
+| `max_lines` | number | no | Maximum number of lines to return. |
+| `max_output_chars` | number | no | Maximum rendered content chars to return, including line-number gutters when present. Defaults to `12000` and is capped at `50000`. |
 
 ## Action
 
@@ -84,15 +74,11 @@ character truncation. The string body has one of these shapes:
   plus `line_format=right-aligned-number| text`; `shown_chars` counts the
   rendered numbered body, and `truncated=true` when `max_output_chars` cut that
   rendered body.
-- Headered line-numbered blocks separated by blank lines for multi-file reads. A failed
-  file contributes an inline `error reading <path>: <error>` block;
-  `is_error` only flips when every file failed or the shared budget
-  truncated or skipped content.
 - `"error reading <path>: <error>"` — a single-file read failed. Common
   causes: the file is missing, the agent doesn't have read permissions, or
   the bytes aren't valid UTF-8.
-- `"error: read requires arguments.path or arguments.paths"` — payload was an
-  object but named no file.
+- `"error: read requires arguments.path"` — payload was an object but named no
+  file.
 - `"error: read requires object arguments"` — payload was not a JSON object.
 
 ## Example
@@ -105,7 +91,7 @@ test "read tool advertises the expected schema" {
   let JsonSchema(schema) = tool.schema
   let text = schema.stringify()
   assert_true(text.contains("\"path\""))
-  assert_true(text.contains("\"paths\""))
+  assert_false(text.contains("\"paths\""))
   assert_true(text.contains("\"start_line\""))
   assert_true(text.contains("\"max_lines\""))
   assert_true(text.contains("\"max_output_chars\""))
