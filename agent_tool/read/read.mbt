@@ -17,8 +17,9 @@
 ///   to 1. Single-file calls only.
 /// - `max_lines` (number, optional): maximum number of lines to return.
 ///   Single-file calls only.
-/// - `max_output_chars` (number, optional): maximum returned content chars
-///   for the whole call. Defaults to 12000 and is capped at 50000.
+/// - `max_output_chars` (number, optional): maximum rendered content chars
+///   for the whole call, including line-number gutters when present. Defaults
+///   to 12000 and is capped at 50000.
 ///
 /// ## Result
 /// - `Respond(ToolOutput(<file contents>))` on success for uncapped whole-file
@@ -92,10 +93,18 @@ async fn execute_with_workspace(
 priv struct ReadSelection {
   content : String
   start_line : Int
-  end_line : Int
   total_lines : Int
   shown_lines : Int
   line_limited : Bool
+}
+
+///|
+priv struct RenderedSelection {
+  content : String
+  end_line : Int
+  shown_lines : Int
+  shown_chars : Int
+  truncated : Bool
 }
 
 ///|
@@ -117,21 +126,23 @@ async fn read_file(
       )
   }
   let selection = select_lines(content, input.start_line, input.max_lines)
-  let capped = cap_text(selection.content, input.max_output_chars)
-  let char_truncated = selection.content.length() > input.max_output_chars
   let include_header = input.start_line != 1 ||
     input.max_lines is Some(_) ||
-    char_truncated
-  let output = if include_header {
-    "\{read_header(path, content, selection, capped, char_truncated)}\{numbered_content(selection, capped)}"
+    selection.content.length() > input.max_output_chars
+  if include_header {
+    let rendered = render_numbered_content(selection, input.max_output_chars)
+    let output = "\{read_header(path, content, selection, rendered)}\{rendered.content}"
+    @agent_tool.ToolAction::respond(
+      output,
+      is_error=rendered.truncated,
+      brief="read \{@agent_tool.brief_basename(path)}",
+    )
   } else {
-    capped
+    @agent_tool.ToolAction::respond(
+      selection.content,
+      brief="read \{@agent_tool.brief_basename(path)}",
+    )
   }
-  @agent_tool.ToolAction::respond(
-    output,
-    is_error=char_truncated,
-    brief="read \{@agent_tool.brief_basename(path)}",
-  )
 }
 
 ///|
@@ -181,12 +192,11 @@ async fn read_files(
       }
     }
     let selection = select_lines(content, 1, None)
-    let capped = cap_text(selection.content, remaining)
-    let char_truncated = selection.content.length() > remaining
-    if char_truncated {
+    let rendered = render_numbered_content(selection, remaining)
+    if rendered.truncated {
       truncated_any = true
     }
-    let block = "\{read_header(path, content, selection, capped, char_truncated)}\{numbered_content(selection, capped)}"
+    let block = "\{read_header(path, content, selection, rendered)}\{rendered.content}"
     remaining = remaining - block.length() - 2
     blocks.push(block)
   }
@@ -234,11 +244,6 @@ fn select_lines(
   }
   let selected = lines[start_index:end_exclusive].to_owned()
   let shown_lines = selected.length()
-  let end_line = if shown_lines == 0 {
-    start_line - 1
-  } else {
-    start_line + shown_lines - 1
-  }
   let line_limited = match max_lines {
     Some(_) => end_exclusive < total_lines
     None => false
@@ -246,7 +251,6 @@ fn select_lines(
   {
     content: selected.join("\n"),
     start_line,
-    end_line,
     total_lines,
     shown_lines,
     line_limited,
@@ -265,34 +269,66 @@ async fn directory_read_error(path : String) -> String? {
 }
 
 ///|
-fn cap_text(content : String, max_chars : Int) -> String {
-  if content.length() <= max_chars {
-    content
-  } else {
-    "\{content[:max_chars]}"
-  }
-}
-
-///|
-fn numbered_content(selection : ReadSelection, capped : String) -> String {
+fn render_numbered_content(
+  selection : ReadSelection,
+  max_chars : Int,
+) -> RenderedSelection {
   if selection.shown_lines == 0 {
-    ""
-  } else {
-    add_line_numbers(capped, selection.start_line)
+    return {
+      content: "",
+      end_line: selection.start_line - 1,
+      shown_lines: 0,
+      shown_chars: 0,
+      truncated: false,
+    }
   }
-}
-
-///|
-fn add_line_numbers(content : String, start_line : Int) -> String {
-  let lines = [ for line in content.split("\n") => line.to_owned() ]
-  let last_line = start_line + lines.length() - 1
+  if max_chars <= 0 {
+    return {
+      content: "",
+      end_line: selection.start_line - 1,
+      shown_lines: 0,
+      shown_chars: 0,
+      truncated: true,
+    }
+  }
+  let lines = [ for line in selection.content.split("\n") => line.to_owned() ]
+  let last_line = selection.start_line + lines.length() - 1
   let width = "\{last_line}".length()
   let numbered : Array[String] = []
+  let mut remaining = max_chars
+  let mut truncated = false
   for index in 0..<lines.length() {
-    let line_number = "\{start_line + index}".pad_start(width, ' ')
-    numbered.push("\{line_number}| \{lines[index]}")
+    let separator_chars = if numbered.length() == 0 { 0 } else { 1 }
+    let line_number = "\{selection.start_line + index}".pad_start(width, ' ')
+    let prefix = "\{line_number}| "
+    let prefix_budget = separator_chars + prefix.length()
+    if remaining < prefix_budget {
+      truncated = true
+      break
+    }
+    let available = remaining - prefix_budget
+    let line = lines[index]
+    if line.length() <= available {
+      numbered.push("\{prefix}\{line}")
+      remaining = remaining - prefix_budget - line.length()
+    } else {
+      numbered.push("\{prefix}\{line[:available]}")
+      remaining = 0
+      truncated = true
+      break
+    }
   }
-  numbered.join("\n")
+  if numbered.length() < lines.length() {
+    truncated = true
+  }
+  let content = numbered.join("\n")
+  let shown_lines = numbered.length()
+  let end_line = if shown_lines == 0 {
+    selection.start_line - 1
+  } else {
+    selection.start_line + shown_lines - 1
+  }
+  { content, end_line, shown_lines, shown_chars: content.length(), truncated }
 }
 
 ///|
@@ -300,20 +336,19 @@ fn read_header(
   path : String,
   original : String,
   selection : ReadSelection,
-  capped : String,
-  char_truncated : Bool,
+  rendered : RenderedSelection,
 ) -> String {
   [
     "path=\{path}",
     "start_line=\{selection.start_line}",
-    "end_line=\{selection.end_line}",
+    "end_line=\{rendered.end_line}",
     "total_lines=\{selection.total_lines}",
-    "shown_lines=\{selection.shown_lines}",
+    "shown_lines=\{rendered.shown_lines}",
     "file_chars=\{original.length()}",
     "selected_chars=\{selection.content.length()}",
-    "shown_chars=\{capped.length()}",
+    "shown_chars=\{rendered.shown_chars}",
     "line_limited=\{selection.line_limited}",
-    "truncated=\{char_truncated}",
+    "truncated=\{rendered.truncated}",
     "line_format=right-aligned-number| text",
     "---",
     "",
@@ -397,7 +432,7 @@ async test "read returns a requested line range with metadata" {
         "shown_lines=2",
         "file_chars=38",
         "selected_chars=19",
-        "shown_chars=19",
+        "shown_chars=25",
         "line_limited=true",
         "truncated=false",
         "line_format=right-aligned-number| text",
@@ -432,9 +467,25 @@ async test "read caps oversized output and marks it as an error" {
         "truncated=true",
         "line_format=right-aligned-number| text",
         "---",
-        "1| abc",
+        "1| ",
       ].join("\n"),
     )
+  })
+}
+
+///|
+async test "read caps after adding line number gutters" {
+  @vfs.with_tmpdir(dir => {
+    let path = "\{dir}/many-lines.txt"
+    let content = [ for _ in 0..<80 => "x" ].join("\n")
+    @fs.write_file(path, content, create_mode=CreateOrTruncate)
+    let result = execute({ "path": path, "max_output_chars": 20 })
+    guard result is Respond(output) else { fail("expected Respond") }
+    assert_true(output.is_error)
+    assert_true(output.content.contains("shown_chars=17"))
+    assert_true(output.content.contains("truncated=true"))
+    assert_true(output.content.contains(" 1| x\n 2| x\n 3| x"))
+    assert_false(output.content.contains(" 4| x"))
   })
 }
 
@@ -533,7 +584,8 @@ async test "the output budget is shared and exhaustion is reported" {
     let result = execute({ "paths": [a, b], "max_output_chars": 10 })
     guard result is Respond(output) else { fail("expected Respond") }
     assert_true(output.is_error)
-    assert_true(output.content.contains("0123456789"))
+    assert_true(output.content.contains("1| 0123456"))
+    assert_false(output.content.contains("0123456789"))
     assert_true(output.content.contains("skipped 1 file(s)"))
     assert_true(output.content.contains(b))
     assert_false(output.content.contains("abcdefghij"))

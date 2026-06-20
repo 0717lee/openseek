@@ -58,6 +58,7 @@ source where the agent has already identified the relevant region:
 ```
 
 Use `max_output_chars` to protect the transcript when file size is uncertain.
+For headered reads, the cap applies after line-number gutters are rendered.
 Prefer a range plus a cap over reading a large file and relying on truncation.
 
 ## Arguments
@@ -68,7 +69,7 @@ Prefer a range plus a cap over reading a large file and relying on truncation.
 | `paths` | string array | one of `path`/`paths` | Several files in one call when batching separate read calls is unavailable or a shared budget is desired; per-file errors report inline. |
 | `start_line` | number | no | 1-based first line to return. Defaults to `1`. Single-file calls only. |
 | `max_lines` | number | no | Maximum number of lines to return. Single-file calls only. |
-| `max_output_chars` | number | no | Maximum content chars to return across the call. Defaults to `12000` and is capped at `50000`. |
+| `max_output_chars` | number | no | Maximum rendered content chars to return across the call, including line-number gutters when present. Defaults to `12000` and is capped at `50000`. |
 
 ## Action
 
@@ -80,8 +81,9 @@ character truncation. The string body has one of these shapes:
 - The file's text contents on uncapped whole-file success.
 - A metadata header followed by `---` and line-numbered selected content for
   ranged reads or capped reads. The header includes line and character counts
-  plus `line_format=right-aligned-number| text` and `truncated=true` when
-  `max_output_chars` cut the selected content.
+  plus `line_format=right-aligned-number| text`; `shown_chars` counts the
+  rendered numbered body, and `truncated=true` when `max_output_chars` cut that
+  rendered body.
 - Headered line-numbered blocks separated by blank lines for multi-file reads. A failed
   file contributes an inline `error reading <path>: <error>` block;
   `is_error` only flips when every file failed or the shared budget

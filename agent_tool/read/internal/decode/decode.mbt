@@ -1,5 +1,5 @@
 ///|
-/// Characters of file content one `read` call returns when the model does not
+/// Rendered content characters one `read` call returns when the model does not
 /// pick a `max_output_chars` budget itself.
 pub let default_max_output_chars : Int = 12000
 
@@ -12,8 +12,8 @@ pub let hard_max_output_chars : Int = 50000
 /// Decoded arguments of the `read` tool: one or more files (`paths` holds a
 /// single element for a `path` call), starting from the 1-based `start_line`,
 /// at most `max_lines` lines (unbounded when `None`), truncated to
-/// `max_output_chars` characters across the whole call. Line-range options
-/// only combine with a single file.
+/// `max_output_chars` rendered content characters across the whole call.
+/// Line-range options only combine with a single file.
 pub struct ReadInput {
   paths : Array[String]
   start_line : Int
