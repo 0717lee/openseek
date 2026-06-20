@@ -18,6 +18,23 @@ async fn run_edit_in_workspace(
 }
 
 ///|
+async test "a failed edit names the file in its brief" {
+  @vfs.with_tmpdir(dir => {
+    // Editing a missing file fails; the error still briefs the target file so
+    // the viz shows `→ edit · edit ghost.mbt 🚩`.
+    let result = run_edit({
+      "path": "\{dir}/ghost.mbt",
+      "old_string": "a",
+      "new_string": "b",
+    })
+    guard result is Respond(output) else { fail("expected Respond") }
+    assert_true(output.is_error)
+    guard output.brief is Some(brief) else { fail("expected a brief") }
+    assert_eq(brief, "edit ghost.mbt")
+  })
+}
+
+///|
 async test "edit replaces a unique exact match" {
   @vfs.with_tmpdir(dir => {
     let path = "\{dir}/unique.txt"

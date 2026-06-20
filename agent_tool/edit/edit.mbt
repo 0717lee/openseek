@@ -61,16 +61,21 @@ async fn edit_file(
   input : @decode.EditInput,
   path~ : String,
 ) -> @agent_tool.ToolAction {
+  // Every failure names the file it tried to edit so the viz can show
+  // `→ edit · edit <file> 🚩` on the folded call line.
+  let fail_brief = "edit \{@agent_tool.brief_basename(path)}"
   if input.old_string == "" {
     return @agent_tool.ToolAction::respond(
       "error editing \{path}: old_string must be non-empty",
       is_error=true,
+      brief=fail_brief,
     )
   }
   if input.old_string == input.new_string {
     return @agent_tool.ToolAction::respond(
       "error editing \{path}: old_string and new_string are identical",
       is_error=true,
+      brief=fail_brief,
     )
   }
   let content = @fs.read_file(path).text() catch {
@@ -78,6 +83,7 @@ async fn edit_file(
       return @agent_tool.ToolAction::respond(
         "error editing \{path}: error reading file: \{error}",
         is_error=true,
+        brief=fail_brief,
       )
   }
   let parts = content
@@ -89,12 +95,14 @@ async fn edit_file(
     return @agent_tool.ToolAction::respond(
       "error editing \{path}: old_string not found",
       is_error=true,
+      brief=fail_brief,
     )
   }
   if occurrences > 1 && !input.replace_all {
     return @agent_tool.ToolAction::respond(
       ambiguous_match_message(path, occurrences, parts, input.old_string),
       is_error=true,
+      brief=fail_brief,
     )
   }
   let replacement_count = if input.replace_all { occurrences } else { 1 }
@@ -108,6 +116,7 @@ async fn edit_file(
       return @agent_tool.ToolAction::respond(
         "error editing \{path}: \{message}",
         is_error=true,
+        brief=fail_brief,
       )
     None => ()
   }
@@ -122,6 +131,7 @@ async fn edit_file(
       @agent_tool.ToolAction::respond(
         "error editing \{path}: error writing file: \{error}",
         is_error=true,
+        brief=fail_brief,
       )
   }
 }
