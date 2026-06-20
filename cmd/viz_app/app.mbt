@@ -30,10 +30,8 @@ struct Model {
   collapsed_roots : Array[String]
   loading : Bool
   status : String
-  // "Errors only" filter (folds the log down to failed tool results) and the
-  // index of the failure the prev/next jump last scrolled to (-1 = none yet).
+  // "Errors only" filter folds the log down to failed tool results.
   errors_only : Bool
-  error_focus : Int
 }
 
 ///|
@@ -70,6 +68,7 @@ enum Msg {
   ToggleRoot(String)
   ToggleErrorsOnly
   JumpToError(Int)
+  UnfoldCurrent
 }
 
 ///|
@@ -97,7 +96,6 @@ fn init_model() -> Model {
     loading: false,
     status: "loading sessions…",
     errors_only: false,
-    error_focus: -1,
   }
 }
 
@@ -141,7 +139,6 @@ fn update(emit : @cmd.Emit[Msg], msg : Msg, model : Model) -> (@cmd.Cmd, Model) 
           header_present: false,
           loading: true,
           status: "loading \{label}…",
-          error_focus: -1,
         },
       )
     }
@@ -194,25 +191,21 @@ fn update(emit : @cmd.Emit[Msg], msg : Msg, model : Model) -> (@cmd.Cmd, Model) 
             }
         }
       }
-    // A view switch changes which (and how many) failures are on screen, so the
-    // jump cursor restarts from the top.
-    SetMode(mode) => (@cmd.none, { ..model, view_mode: mode, error_focus: -1 })
+    SetMode(mode) => (@cmd.none, { ..model, view_mode: mode })
     ToggleErrorsOnly =>
       (@cmd.none, { ..model, errors_only: !model.errors_only })
     // Scroll to the next/previous failed-tool card, cycling. The count is
-    // recomputed for the active view so the cursor matches what is on screen.
+    // recomputed for the active view, while the browser chooses the target
+    // relative to the current viewport so manual scrolling is respected.
     JumpToError(direction) => {
       let count = current_error_count(model)
       if count <= 0 {
         (@cmd.none, model)
       } else {
-        let next = wrap_index(model.error_focus, direction, count)
-        (
-          @cmd.effect(() => scroll_to_nth_error(next)),
-          { ..model, error_focus: next },
-        )
+        (@cmd.effect(() => scroll_to_error_from_viewport(direction)), model)
       }
     }
+    UnfoldCurrent => (@cmd.effect(() => unfold_nearest_details()), model)
     SetTheme(theme) =>
       // Apply the theme as a side effect (set `data-theme` on <html>) so the CSS
       // variable blocks take over; the model tracks it for button highlighting.
@@ -255,19 +248,70 @@ fn fetch_text(
 extern "js" fn encode_uri_component(value : String) -> String = "encodeURIComponent"
 
 ///|
-/// Scroll the nth failed-tool card (`.card.tool.error`, document order) into the
-/// centre of the viewport. The selector matches both views, and the indexing
-/// mirrors `rendered_error_count`, so the cursor stays aligned with the count.
-extern "js" fn scroll_to_nth_error(index : Int) -> Unit = "(n) => { const els = document.querySelectorAll('.card.tool.error'); const el = els[n]; if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' }); }"
+/// Scroll to the next/previous failed-tool card relative to the viewport's
+/// centre, not an internal cursor, so manual scrolling changes the jump origin.
+extern "js" fn scroll_to_error_from_viewport(direction : Int) -> Unit =
+  #|(direction) => {
+  #|  const els = Array.from(document.querySelectorAll('.card.tool.error'))
+  #|    .filter((el) => el.getClientRects().length > 0);
+  #|  if (!els.length) return;
+  #|  const anchor = window.innerHeight / 2;
+  #|  const epsilon = 1;
+  #|  let index = -1;
+  #|  if (direction >= 0) {
+  #|    index = els.findIndex((el) => el.getBoundingClientRect().top > anchor + epsilon);
+  #|    if (index < 0) index = 0;
+  #|  } else {
+  #|    for (let i = els.length - 1; i >= 0; i--) {
+  #|      if (els[i].getBoundingClientRect().bottom < anchor - epsilon) {
+  #|        index = i;
+  #|        break;
+  #|      }
+  #|    }
+  #|    if (index < 0) index = els.length - 1;
+  #|  }
+  #|  els[index].scrollIntoView({ behavior: 'smooth', block: 'center' });
+  #|}
 
 ///|
-/// Install plain `n` / `p` shortcuts for the existing next/previous failure
-/// jumps. Text-entry targets and modified keys are left alone.
+/// Open the nearest folded details block in the viewport: failed tool cards,
+/// folded tool-call args, reasoning blocks, or a user-collapsed turn.
+extern "js" fn unfold_nearest_details() -> Unit =
+  #|() => {
+  #|  const candidates = Array.from(document.querySelectorAll(
+  #|    'details.card:not([open]), details.tool-call:not([open]), details.reasoning:not([open]), details.turn:not([open])'
+  #|  )).filter((el) => el.getClientRects().length > 0);
+  #|  if (!candidates.length) return;
+  #|  const anchor = window.innerHeight / 2;
+  #|  const visible = candidates.filter((el) => {
+  #|    const rect = el.getBoundingClientRect();
+  #|    return rect.bottom >= 0 && rect.top <= window.innerHeight;
+  #|  });
+  #|  const pool = visible.length ? visible : candidates;
+  #|  let best = pool[0];
+  #|  let bestDistance = Infinity;
+  #|  for (const el of pool) {
+  #|    const rect = el.getBoundingClientRect();
+  #|    const center = rect.top + rect.height / 2;
+  #|    const distance = Math.abs(center - anchor);
+  #|    if (distance < bestDistance) {
+  #|      best = el;
+  #|      bestDistance = distance;
+  #|    }
+  #|  }
+  #|  best.open = true;
+  #|  best.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  #|}
+
+///|
+/// Install plain `n` / `p` failure jumps and `u` unfold. Text-entry targets and
+/// modified keys are left alone.
 extern "js" fn install_error_shortcuts(
   next : () -> Unit,
   previous : () -> Unit,
+  unfold : () -> Unit,
 ) -> Unit =
-  #|(next, previous) => {
+  #|(next, previous, unfold) => {
   #|  document.addEventListener('keydown', (event) => {
   #|    if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) return;
   #|    const target = event.target;
@@ -280,6 +324,9 @@ extern "js" fn install_error_shortcuts(
   #|    } else if (key === 'p') {
   #|      event.preventDefault();
   #|      previous();
+  #|    } else if (key === 'u') {
+  #|      event.preventDefault();
+  #|      unfold();
   #|    }
   #|  });
   #|}
@@ -287,9 +334,11 @@ extern "js" fn install_error_shortcuts(
 ///|
 fn install_shortcuts(emit : @cmd.Emit[Msg]) -> @cmd.Cmd {
   @cmd.custom_cmd(scheduler => {
-    install_error_shortcuts(() => scheduler.add(emit(JumpToError(1))), () => {
-      scheduler.add(emit(JumpToError(-1)))
-    })
+    install_error_shortcuts(
+      () => scheduler.add(emit(JumpToError(1))),
+      () => scheduler.add(emit(JumpToError(-1))),
+      () => scheduler.add(emit(UnfoldCurrent)),
+    )
   })
 }
 
@@ -820,16 +869,6 @@ fn current_error_count(model : Model) -> Int {
     system_prompt=model.system_prompt,
   )
   @viz.rendered_error_count(session, model.view_mode)
-}
-
-///|
-/// Step `focus` by `direction` and wrap into `0..<n` (n > 0). A fresh cursor
-/// (`focus < 0`) lands on the first failure going forward and the last going
-/// back, so the very first "next"/"prev" behaves intuitively.
-fn wrap_index(focus : Int, direction : Int, n : Int) -> Int {
-  let base = if focus < 0 { if direction > 0 { -1 } else { 0 } } else { focus }
-  let next = base + direction
-  (next % n + n) % n
 }
 
 ///|
