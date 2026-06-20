@@ -170,9 +170,52 @@ test "tool call shows the brief its result recorded" {
   assert_true(raw.contains("ran ls → 1 file"))
   let model = render(@viz.render_session(session, ModelView))
   assert_true(model.contains("ran ls → 1 file"))
-  // A result with no brief produces no brief span on its call.
-  let plain = render(@viz.render_session(error_tool_session(), RawLog))
-  assert_false(plain.contains("tool-call-brief"))
+  // A *successful* result with no brief produces no brief span on its call.
+  let clean = @viz.session_from_parse(
+    @viz.parse_events(events_jsonl(sample_session())),
+    id="demo",
+    system_prompt="",
+  )
+  assert_false(
+    render(@viz.render_session(clean, RawLog)).contains("tool-call-brief"),
+  )
+}
+
+///|
+test "a failed tool call is flagged on the folded call line" {
+  // error_tool_session: c1 (shell) failed with no brief -> flagged with 🚩.
+  let raw = render(@viz.render_session(error_tool_session(), RawLog))
+  assert_true(raw.contains("tool-call-brief"))
+  assert_true(raw.contains("🚩"))
+  // A failed result that carries a brief shows the brief and the flag, in both
+  // views.
+  let with_brief = @agent_session.Session(SessionId("fb"), system_prompt="")
+    .append(
+      Assistant(
+        AssistantMessage("", tool_calls=[
+          ToolCall(id="r1", name="read", arguments="{\"path\":\"x.txt\"}"),
+        ]),
+      ),
+    )
+    .append(
+      Tool(
+        ToolResult(
+          tool_call_id="r1",
+          tool_name="read",
+          content="error reading x.txt: missing",
+          is_error=true,
+          brief="read x.txt",
+        ),
+      ),
+    )
+  assert_true(
+    render(@viz.render_session(with_brief, RawLog)).contains("read x.txt 🚩"),
+  )
+  assert_true(
+    render(@viz.render_session(with_brief, ModelView)).contains(
+      "read x.txt 🚩",
+    ),
+  )
 }
 
 ///|
