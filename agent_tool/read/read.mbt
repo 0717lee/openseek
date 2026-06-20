@@ -108,6 +108,12 @@ priv struct RenderedSelection {
 }
 
 ///|
+priv struct RenderedBlock {
+  content : String
+  truncated : Bool
+}
+
+///|
 async fn read_file(
   input : @decode.ReadInput,
   path~ : String,
@@ -169,36 +175,54 @@ async fn read_files(
   let mut truncated_any = false
   let skipped : Array[String] = []
   for path in paths {
-    if remaining <= 0 {
+    let separator_chars = if blocks.length() == 0 { 0 } else { 2 }
+    if remaining <= separator_chars {
       skipped.push(path)
       continue
     }
     match directory_read_error(path) {
       Some(block) => {
-        failures = failures + 1
-        remaining = remaining - block.length() - 2
-        blocks.push(block)
+        if separator_chars + block.length() <= remaining {
+          failures = failures + 1
+          remaining = remaining - separator_chars - block.length()
+          blocks.push(block)
+        } else {
+          skipped.push(path)
+          truncated_any = true
+        }
         continue
       }
       None => ()
     }
     let content = @fs.read_file(path).text() catch {
       error => {
-        failures = failures + 1
         let block = "error reading \{path}: \{error}"
-        remaining = remaining - block.length() - 2
-        blocks.push(block)
+        if separator_chars + block.length() <= remaining {
+          failures = failures + 1
+          remaining = remaining - separator_chars - block.length()
+          blocks.push(block)
+        } else {
+          skipped.push(path)
+          truncated_any = true
+        }
         continue
       }
     }
     let selection = select_lines(content, 1, None)
-    let rendered = render_numbered_content(selection, remaining)
-    if rendered.truncated {
-      truncated_any = true
+    let block_budget = remaining - separator_chars
+    match render_read_block(path, content, selection, block_budget) {
+      Some(block) => {
+        if block.truncated {
+          truncated_any = true
+        }
+        remaining = remaining - separator_chars - block.content.length()
+        blocks.push(block.content)
+      }
+      None => {
+        skipped.push(path)
+        truncated_any = true
+      }
     }
-    let block = "\{read_header(path, content, selection, rendered)}\{rendered.content}"
-    remaining = remaining - block.length() - 2
-    blocks.push(block)
   }
   if skipped.length() > 0 {
     truncated_any = true
@@ -211,9 +235,15 @@ async fn read_files(
     } else {
       ""
     }
-    blocks.push(
-      "skipped \{skipped.length()} file(s), max_output_chars budget exhausted — read them individually: \{preview}\{rest}",
-    )
+    let separator_chars = if blocks.length() == 0 { 0 } else { 2 }
+    if remaining > separator_chars {
+      let marker_budget = remaining - separator_chars
+      let marker = cap_text(
+        "skipped \{skipped.length()} file(s), max_output_chars budget exhausted — read them individually: \{preview}\{rest}",
+        marker_budget,
+      )
+      blocks.push(marker)
+    }
   }
   @agent_tool.ToolAction::respond(
     blocks.join("\n\n"),
@@ -265,6 +295,55 @@ async fn directory_read_error(path : String) -> String? {
         "error reading \{path}: path is a directory; use the shell tool with `ls` or `tree` to inspect directories, then read specific files.",
       )
     _ => None
+  }
+}
+
+///|
+fn cap_text(content : String, max_chars : Int) -> String {
+  if content.length() <= max_chars {
+    content
+  } else if max_chars <= 0 {
+    ""
+  } else {
+    content[:max_chars].to_owned()
+  }
+}
+
+///|
+fn render_read_block(
+  path : String,
+  original : String,
+  selection : ReadSelection,
+  max_chars : Int,
+) -> RenderedBlock? {
+  if max_chars <= 0 {
+    return None
+  }
+  let mut body_budget = max_chars
+  for _ in 0..<8 {
+    let rendered = render_numbered_content(selection, body_budget)
+    let header = read_header(path, original, selection, rendered)
+    if header.length() > max_chars {
+      return None
+    }
+    let next_body_budget = max_chars - header.length()
+    if next_body_budget == body_budget {
+      return Some({
+        content: "\{header}\{rendered.content}",
+        truncated: rendered.truncated,
+      })
+    }
+    body_budget = next_body_budget
+  }
+  let rendered = render_numbered_content(selection, body_budget)
+  let header = read_header(path, original, selection, rendered)
+  if header.length() + rendered.content.length() > max_chars {
+    None
+  } else {
+    Some({
+      content: "\{header}\{rendered.content}",
+      truncated: rendered.truncated,
+    })
   }
 }
 
@@ -584,10 +663,9 @@ async test "the output budget is shared and exhaustion is reported" {
     let result = execute({ "paths": [a, b], "max_output_chars": 10 })
     guard result is Respond(output) else { fail("expected Respond") }
     assert_true(output.is_error)
-    assert_true(output.content.contains("1| 0123456"))
+    assert_true(output.content.contains("skipped"))
+    assert_true(output.content.length() <= 10)
     assert_false(output.content.contains("0123456789"))
-    assert_true(output.content.contains("skipped 1 file(s)"))
-    assert_true(output.content.contains(b))
     assert_false(output.content.contains("abcdefghij"))
   })
 }
@@ -609,10 +687,7 @@ async test "headers and error blocks count against the budget" {
     guard result is Respond(output) else { fail("expected Respond") }
     assert_true(output.is_error)
     assert_true(output.content.contains("skipped"))
-    assert_true(output.content.contains("and"))
-    // Bounded: the budget plus one overshooting block plus the skip marker,
-    // far below what 40 unbudgeted error blocks (~70 chars each) would emit.
-    assert_true(output.content.length() < 1200)
+    assert_true(output.content.length() <= 300)
   })
 }
 
