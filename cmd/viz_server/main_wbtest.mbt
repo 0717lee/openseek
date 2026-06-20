@@ -177,6 +177,40 @@ async test "discover_session_roots supports a custom root marker" {
 }
 
 ///|
+async test "session_catalog scans a container session root for nested stores" {
+  let root = @fs.tmpdir(prefix="openseek-viz-nested-")
+  // A directory of best-of-N run workspaces, each with its own nested store.
+  @fs.mkdir("\{root}/A-1/.openseek/sessions/run", recursive=true)
+  @fs.mkdir("\{root}/B-1/.openseek/sessions/run", recursive=true)
+  let catalog = session_catalog(root, [], ".openseek")
+  let paths = catalog.roots.map(r => r.path.replace_all(old=root, new="<root>"))
+  paths.sort()
+  // The empty container itself is not announced; its nested stores are.
+  @debug.debug_inspect(
+    paths,
+    content=(
+      #|["<root>/A-1/.openseek", "<root>/B-1/.openseek"]
+    ),
+  )
+  @fs.rmdir(root, recursive=true)
+}
+
+///|
+async test "session_catalog serves a direct store named like the root marker" {
+  let root = @fs.tmpdir(prefix="openseek-viz-direct-")
+  @fs.mkdir("\{root}/.openseek/sessions/run", recursive=true)
+  let catalog = session_catalog("\{root}/.openseek", [], ".openseek")
+  let paths = catalog.roots.map(r => r.path.replace_all(old=root, new="<root>"))
+  @debug.debug_inspect(
+    paths,
+    content=(
+      #|["<root>/.openseek"]
+    ),
+  )
+  @fs.rmdir(root, recursive=true)
+}
+
+///|
 test "session catalog lookup supports composite and legacy keys" {
   let catalog : SessionCatalog = {
     roots: [

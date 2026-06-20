@@ -359,8 +359,20 @@ async fn session_catalog(
   session_root_name : String,
 ) -> SessionCatalog {
   let paths : Array[String] = []
-  paths.push(session_root)
-  for root in discover_session_roots(search_dirs, session_root_name) {
+  // Serve the explicit --session-root directly only when it is actually a store
+  // (named like the root marker, or holding a `sessions/` directory). Otherwise
+  // it is a container — e.g. a directory of best-of-N run workspaces, each with
+  // its own nested store — and announcing it as a root would list zero sessions.
+  if is_session_store(session_root, session_root_name) {
+    paths.push(session_root)
+  }
+  // Scan the --session-root as well as the --search-dirs, so nested stores under
+  // a container root are surfaced the same way search-dir trees are.
+  let scan_dirs = [session_root]
+  for dir in search_dirs {
+    scan_dirs.push(dir)
+  }
+  for root in discover_session_roots(scan_dirs, session_root_name) {
     paths.push(root)
   }
   let unique = unique_paths(paths)
@@ -419,6 +431,15 @@ async fn scan_session_roots(
 async fn is_directory(path : String) -> Bool {
   (@fs.kind(path, follow_symlink=false) catch { _ => return false }) ==
   Directory
+}
+
+///|
+/// Whether `path` is itself a session store (servable directly) rather than a
+/// container to scan: it is named like the root marker (e.g. `.openseek`), or it
+/// already holds a `sessions/` directory.
+async fn is_session_store(path : String, session_root_name : String) -> Bool {
+  path_tail(path) == session_root_name ||
+  is_directory(join_path(path, "sessions"))
 }
 
 ///|
