@@ -32,16 +32,17 @@ async fn run_fleet(matches : @argparse.Matches, concurrency~ : Int) -> Unit {
     value(matches, "dir").trim().to_owned(),
   )
   let (run_dirs, source) = resolve_run_dirs(dir, concurrency)
+  let session_root_value = value(matches, "session-root").trim().to_owned()
   // Skip the configured session store (not just the default) so a custom
   // --session-root does not copy stale source sessions into every trial.
-  let sessions_rel = workspace_sessions_rel(value(matches, "session-root"))
+  let sessions_rel = workspace_sessions_rel(session_root_value)
   // Materialize each workspace before running. A present --dir is copied; an
   // absent one yields empty workspaces (build-from-scratch best-of-N), mirroring
   // how a single run creates a missing --dir. Copies are sequential to avoid
   // thrashing the disk with N concurrent deep walks.
   for run_dir in run_dirs {
     match source {
-      Some(src) => copy_tree(src, run_dir, sessions_rel~)
+      Some(src) => copy_tree(src, run_dir, sessions_rel~, root=src)
       None => @fs.mkdir(run_dir, recursive=true)
     }
   }
@@ -74,7 +75,7 @@ async fn run_fleet(matches : @argparse.Matches, concurrency~ : Int) -> Unit {
       )
     }
   })
-  print_fleet_summary(task, outcomes)
+  print_fleet_summary(task, outcomes, session_root_value)
   let mut any_ok = false
   for outcome in outcomes {
     if outcome is Some(result) && result.ok {
@@ -228,17 +229,21 @@ fn terminal_summary(session : @agent_session.Session) -> (String, String) {
 }
 
 ///|
-/// Recursively copy `src` into `dst`, keeping a normal `.git` directory (so the
-/// copy is a self-contained repo) but never the worktree/submodule `.git` *file*
-/// — that is a pointer back to the original repo, and copying it would let git
-/// in the copy mutate the original. Files are copied byte-for-byte; the
-/// executable bit is preserved heuristically for shebang scripts (the fs API
-/// exposes no source mode); symlinks and special files are skipped. `rel` is the
-/// path within the source, for path-aware skipping. `dst` and parents are made.
+/// Recursively copy `src` into `dst`. A normal `.git` directory is copied (so the
+/// copy is a self-contained repo); a worktree/submodule `.git` *file* is dropped
+/// because it points back at the original repo and copying it would let git in
+/// the copy mutate the original — the trade-off is that a copied linked worktree
+/// is not itself a git checkout. Files are copied byte-for-byte, preserving the
+/// executable bit for shebang scripts (the fs API exposes no source mode). A
+/// symlink to a regular file inside the workspace is dereferenced (there is no
+/// readlink to recreate the link); other symlinks and special files are skipped.
+/// `root` is the absolute source root (for the in-workspace check) and `rel` the
+/// path within it (for path-aware skipping). `dst` and parents are made.
 async fn copy_tree(
   src : String,
   dst : String,
   sessions_rel~ : String,
+  root~ : String,
   rel? : String = "",
 ) -> Unit {
   @fs.mkdir(dst, recursive=true)
@@ -250,24 +255,48 @@ async fn copy_tree(
     let s = @workspace_path.resolve(src, name)
     let d = @workspace_path.resolve(dst, name)
     match @fs.kind(s, follow_symlink=false) {
-      Directory => copy_tree(s, d, sessions_rel~, rel=child_rel)
-      Regular => {
-        // A `.git` file (linked worktree or submodule) points at the original
-        // repo; skip it so git in the copy can never write the original.
-        if name == ".git" {
-          continue
-        }
-        let data = @fs.read_file(s).binary()
-        @fs.write_file(d, data, create_mode=CreateOrTruncate)
-        if has_shebang(data) {
-          @fs.chmod(d, 0o755) catch {
-            _ => ()
-          }
-        }
-      }
-      _ => () // symlinks and special files are skipped
+      Directory => copy_tree(s, d, sessions_rel~, root~, rel=child_rel)
+      // A `.git` file is a worktree/submodule pointer at the original repo; skip
+      // it so git in the copy can never write the original.
+      Regular => if name != ".git" { copy_regular(s, d) }
+      SymLink => copy_symlink(s, d, root)
+      _ => () // sockets, pipes, devices skipped
     }
   }
+}
+
+///|
+/// Copy a regular file byte-for-byte, preserving the executable bit for shebang
+/// scripts (the fs API exposes no source mode to copy).
+async fn copy_regular(s : String, d : String) -> Unit {
+  let data = @fs.read_file(s).binary()
+  @fs.write_file(d, data, create_mode=CreateOrTruncate)
+  if has_shebang(data) {
+    @fs.chmod(d, 0o755) catch {
+      _ => ()
+    }
+  }
+}
+
+///|
+/// There is no readlink to recreate a symlink, so dereference one that resolves
+/// to a regular file inside the workspace (e.g. `README.md -> README.mbt.md`),
+/// copying its content. Broken, directory, and out-of-workspace targets are
+/// skipped to avoid loops or escaping `--dir`.
+async fn copy_symlink(s : String, d : String, root : String) -> Unit {
+  let resolved = @fs.realpath(s) catch { _ => return }
+  guard within_root(resolved, root) else { return }
+  let target_kind = @fs.kind(s, follow_symlink=true) catch { _ => return }
+  match target_kind {
+    Regular => copy_regular(s, d)
+    _ => () // directory/other targets skipped (loop-safe)
+  }
+}
+
+///|
+/// Whether absolute `path` is `root` or nested under it.
+fn within_root(path : String, root : String) -> Bool {
+  path == root || path.has_prefix("\{root}/")
 }
 
 ///|
@@ -312,11 +341,26 @@ fn has_shebang(data : Bytes) -> Bool {
 }
 
 ///|
+/// The summary's "inspect a run" command. Includes `--session-root` only when it
+/// is non-default, since each run records its session under that root inside its
+/// run directory, and `--session-show` resolves the root relative to `--dir`.
+fn inspect_hint(session_root_value : String) -> String {
+  let root = session_root_value.trim().to_owned()
+  let extra = if root == "" || root == ".openseek" {
+    ""
+  } else {
+    " --session-root \{root}"
+  }
+  "openseek --dir <run-dir> --session <id> --session-show\{extra}"
+}
+
+///|
 /// Print the fleet summary to stderr (stdout stays the JSONL event stream): a
 /// header line plus one row per attempt, and where to view the results.
 async fn print_fleet_summary(
   task : String,
   outcomes : Array[AttemptOutcome?],
+  session_root_value : String,
 ) -> Unit {
   let total = outcomes.length()
   let mut finished = 0
@@ -339,9 +383,7 @@ async fn print_fleet_summary(
     }
   }
   lines.push("")
-  lines.push(
-    "inspect a run:  openseek --dir <run-dir> --session <id> --session-show",
-  )
+  lines.push("inspect a run:  \{inspect_hint(session_root_value)}")
   lines.push("")
   @stdio.stderr.write(lines.join("\n")) catch {
     _ => ()

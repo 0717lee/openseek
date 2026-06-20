@@ -88,9 +88,14 @@ moon run cmd/openseek -- --session parser-fix "continue from the last run"
 
 Best-of-N: run the same task in N sibling copies of `--dir` concurrently, each
 recording its own session, then print a summary. The original `--dir` is never
-written to (a present `--dir` is copied — keeping `.git`, skipping
-`_build`/`node_modules`/`.openseek`; an absent one yields empty workspaces to
-build from scratch). View the results with `openseek viz --dir <parent>`.
+written to (a present `--dir` is copied — keeping `.git` and `.openseek/skills`,
+skipping `_build`/`node_modules` and the session store; an absent one yields
+empty workspaces to build from scratch).
+
+The copy is a plain filesystem copy: in-workspace file symlinks are dereferenced
+(content copied), and a **linked git worktree/submodule** copy is *not* itself a
+git checkout — its `.git` pointer is dropped so the copy can never write the
+original repo. Each run's session lives under its run directory.
 
 ```bash
 # 3 attempts at the same fix in dir_run_1 / dir_run_2 / dir_run_3

@@ -50,6 +50,34 @@ test "has_shebang detects #! scripts" {
 }
 
 ///|
+test "inspect_hint adds --session-root only when non-default" {
+  assert_eq(
+    inspect_hint(".openseek"),
+    "openseek --dir <run-dir> --session <id> --session-show",
+  )
+  assert_eq(
+    inspect_hint("myroot"),
+    "openseek --dir <run-dir> --session <id> --session-show --session-root myroot",
+  )
+}
+
+///|
+async test "copy_tree dereferences an in-workspace file symlink" {
+  let root = @fs.tmpdir(prefix="openseek-fleet-symlink-")
+  let src = "\{root}/s"
+  @fs.mkdir(src, recursive=true)
+  @fs.write_file("\{src}/real.txt", "content", create_mode=CreateOrTruncate)
+  // A relative, in-workspace symlink (like README.md -> README.mbt.md).
+  @fs.symlink(target="real.txt", "\{src}/link.txt")
+  let dst = "\{root}/d"
+  copy_tree(src, dst, sessions_rel=".openseek/sessions", root=@fs.realpath(src))
+  assert_eq(@fs.read_file("\{dst}/real.txt").text(), "content")
+  // The link is materialized as a regular file with the target's content.
+  assert_eq(@fs.read_file("\{dst}/link.txt").text(), "content")
+  @fs.rmdir(root, recursive=true)
+}
+
+///|
 test "terminal_summary reads the last terminal" {
   let finished = @agent_session.Session(SessionId("t"), system_prompt="")
     .append(User(UserMessage("hi")))
@@ -123,7 +151,7 @@ async test "copy_tree keeps files, .git dir, skills; skips build and sessions" {
     create_mode=CreateOrTruncate,
   )
   let dst = "\{root}/d"
-  copy_tree(src, dst, sessions_rel=".openseek/sessions")
+  copy_tree(src, dst, sessions_rel=".openseek/sessions", root=@fs.realpath(src))
   assert_eq(@fs.read_file("\{dst}/a.txt").text(), "hi")
   assert_true(@fs.exists("\{dst}/sub/b.txt"))
   assert_true(@fs.exists("\{dst}/.git/config")) // normal .git dir kept
@@ -146,7 +174,7 @@ async test "copy_tree skips a worktree .git file (never points at the original)"
   )
   @fs.write_file("\{src}/code.mbt", "x", create_mode=CreateOrTruncate)
   let dst = "\{root}/d"
-  copy_tree(src, dst, sessions_rel=".openseek/sessions")
+  copy_tree(src, dst, sessions_rel=".openseek/sessions", root=@fs.realpath(src))
   assert_true(@fs.exists("\{dst}/code.mbt"))
   assert_false(@fs.exists("\{dst}/.git")) // worktree pointer not copied
   @fs.rmdir(root, recursive=true)
