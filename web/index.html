@@ -207,7 +207,15 @@
     .header-meta { color: var(--muted); font-size: 12px; }
 
     /* mode toggle */
-    .mode-toggle { display: flex; gap: 8px; margin-bottom: 16px; }
+    .mode-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 8px 14px;
+      margin-bottom: 16px;
+    }
+    .mode-toggle { display: flex; gap: 8px; }
     .mode-button {
       background: var(--panel); color: var(--text);
       border: 1px solid var(--border); border-radius: 999px;
@@ -215,6 +223,22 @@
     }
     .mode-button:hover { border-color: var(--accent); }
     .mode-button.active { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+    .session-metadata {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 6px 10px;
+      color: var(--muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 12px;
+    }
+    .session-metadata span {
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 3px 8px;
+      background: var(--panel);
+      white-space: nowrap;
+    }
 
     /* find-failures bar */
     .error-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: -6px 0 16px; }
