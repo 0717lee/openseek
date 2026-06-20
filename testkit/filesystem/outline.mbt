@@ -5,21 +5,21 @@
 /// (`_build`, `target`), and vendored deps (`node_modules`) are omitted.
 ///
 /// Bounded to `max_depth` levels and `max_dirs` entries so it stays small on
-/// large repositories; a trailing `…` line marks truncation. Returns `""` for an
-/// empty or unreadable directory. Symlinks are not followed, so the walk cannot
-/// cycle.
+/// large repositories; a trailing `…` line marks truncation. Returns `None` for
+/// an empty or unreadable directory. Symlinks are not followed, so the walk
+/// cannot cycle.
 pub async fn dir_outline(
   root : String,
   max_depth? : Int = 3,
   max_dirs? : Int = 100,
-) -> String {
+) -> String? {
   let out : Array[String] = []
   collect_dirs(root, 0, max_depth, max_dirs, out)
   if out.is_empty() {
-    return ""
+    return None
   }
   let truncated = if out.length() >= max_dirs { "\n  …" } else { "" }
-  out.join("\n") + truncated
+  Some(out.join("\n") + truncated)
 }
 
 ///|
@@ -98,16 +98,19 @@ fn outline_indent(depth : Int) -> String {
 /// omitted.
 async test "dir_outline lists directories, omitting files and noise" {
   with_tmpdir(root => {
-    FileSystem::from_pairs([
-      ("src/lib.mbt", "x"),
-      ("lib/internal/x.mbt", "x"),
-      ("node_modules/pkg/index.js", "x"),
-      ("_build/out/x", "x"),
-      (".git/objects/o", "x"),
-      ("README.md", "x"),
-    ]).write_to(root)
+    FileSystem({
+      "src/lib.mbt": "x",
+      "lib/internal/x.mbt": "x",
+      "node_modules/pkg/index.js": "x",
+      "_build/out/x": "x",
+      ".git/objects/o": "x",
+      "README.md": "x",
+    }).write_to(root)
+    guard dir_outline(root) is Some(outline) else {
+      fail("expected outline")
+    }
     inspect(
-      dir_outline(root),
+      outline,
       content=(
         #|lib/
         #|  internal/
@@ -119,7 +122,69 @@ async test "dir_outline lists directories, omitting files and noise" {
 
 ///|
 async test "dir_outline is empty for an empty directory" {
-  with_tmpdir(root => inspect(dir_outline(root), content=""))
+  with_tmpdir(root => assert_true(dir_outline(root) is None))
+}
+
+///|
+async test "dir_outline respects max_depth" {
+  with_tmpdir(root => {
+    FileSystem({ "a/b/c/file.txt": "x", "z/file.txt": "x" }).write_to(root)
+    guard dir_outline(root, max_depth=2) is Some(outline) else {
+      fail("expected outline")
+    }
+    inspect(
+      outline,
+      content=(
+        #|a/
+        #|  b/
+        #|z/
+      ),
+    )
+  })
+}
+
+///|
+async test "dir_outline truncates at max_dirs" {
+  with_tmpdir(root => {
+    FileSystem({
+      "a/x.txt": "x",
+      "b/x.txt": "x",
+      "c/x.txt": "x",
+    }).write_to(root)
+    guard dir_outline(root, max_dirs=2) is Some(outline) else {
+      fail("expected outline")
+    }
+    inspect(
+      outline,
+      content=(
+        #|a/
+        #|b/
+        #|  …
+      ),
+    )
+  })
+}
+
+///|
+async test "dir_outline skips hidden and build dirs at nested levels" {
+  with_tmpdir(root => {
+    FileSystem({
+      "src/.cache/tmp.txt": "x",
+      "src/target/out.txt": "x",
+      "src/_build/out.txt": "x",
+      "src/visible/note.txt": "x",
+    }).write_to(root)
+    guard dir_outline(root) is Some(outline) else {
+      fail("expected outline")
+    }
+    inspect(
+      outline,
+      content=(
+        #|src/
+        #|  visible/
+      ),
+    )
+  })
 }
 
 ///|

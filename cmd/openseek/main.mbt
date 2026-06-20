@@ -881,29 +881,174 @@ async fn environment_prompt_section(workspace_root? : String = ".") -> String {
       _ => workspace_root
     }
   }
-  let section =
+  // FIXME(upstream)
+  // " \{sb => f(sb)}"
+  // `f` is not allowed to be async, either fix it or better error message (macro expansion should work)
+  let outline = @vfs.dir_outline(cwd)
+  fn layout(sb : StringBuilder) {
+    match outline {
+      Some(body) => sb <+ "\{body}"
+      None => sb <+ "(empty directory)"
+    }
+  }
+  (
     $|## Environment
     $|
     $|Working directory: \{cwd}
-    $|Relative paths resolve against it; treat it as the workspace root and stay inside it. Parent and sibling directories belong to other projects. Never pass a cwd you have not verified exists.
-  let body = @vfs.dir_outline(cwd)
-  let layout = if body == "" {
-    ""
-  } else {
-    "\n\nProject layout (directories; hidden, build, and vendored dirs omitted):\n\{body}"
-  }
-  "\{section}\{layout}"
+    $|Relative paths resolve against it; treat it as the workspace root and stay inside it.
+    $|Parent and sibling directories belong to other projects. Never pass a cwd you have not verified exists.
+    $|Project layout (directories; hidden, build, and vendored dirs omitted):
+    $|\{sb=>layout(sb)}
+  )
 }
 
 ///|
 async test "environment section names the cwd and appends the layout outline" {
   let section = environment_prompt_section()
   let cwd = @fs.realpath(".")
-  assert_true(section.contains("Working directory: \{cwd}"))
-  assert_true(section.contains("stay inside it"))
-  // The repo root has subdirectories, so the layout outline is appended (its
-  // content is covered by @layout's own snapshot test).
-  assert_true(section.contains("Project layout"))
+  inspect(
+    section,
+    content=(
+      #|## Environment
+      #|
+      #|Working directory: /Users/hongbozhang/git/openseek
+      #|Relative paths resolve against it; treat it as the workspace root and stay inside it.
+      #|Parent and sibling directories belong to other projects. Never pass a cwd you have not verified exists.
+      #|Project layout (directories; hidden, build, and vendored dirs omitted):
+      #|cmd/
+      #|  tui/
+      #|    internal/
+      #|  viz_app/
+      #|  openseek/
+      #|  viz_server/
+      #|tui/
+      #|  doc/
+      #|  core/
+      #|  style/
+      #|  internal/
+      #|    task/
+      #|    text/
+      #|    render/
+      #|    history/
+      #|    surface/
+      #|    composer/
+      #|    geometry/
+      #|    viewport/
+      #|    terminal_size/
+      #|viz/
+      #|web/
+      #|docs/
+      #|  plans/
+      #|eval/
+      #|  report/
+      #|  prompts/
+      #|  file_edit/
+      #|    cmd/
+      #|    cases/
+      #|    harness/
+      #|  prompt_task/
+      #|    cmd/
+      #|    harness/
+      #|  prompt_tasks/
+      #|  tool_harness/
+      #|  prompt_reports/
+      #|  session_analyzer/
+      #|agent/
+      #|shell/
+      #|tests/
+      #|  cram/
+      #|  live/
+      #|prompt/
+      #|harness/
+      #|  toml/
+      #|scripts/
+      #|  internal/
+      #|    markdown_comments/
+      #|  md_to_mbt_string/
+      #|testkit/
+      #|  filesystem/
+      #|deepseek/
+      #|  client/
+      #|internal/
+      #|  workspace_path/
+      #|agent_tool/
+      #|  edit/
+      #|    internal/
+      #|  read/
+      #|    internal/
+      #|  shell/
+      #|    internal/
+      #|  write/
+      #|    internal/
+      #|  finish/
+      #|    internal/
+      #|  internal/
+      #|    error/
+      #|  moon_cmd/
+      #|    fixtures/
+      #|    internal/
+      #|  moon_ide/
+      #|    fixtures/
+      #|    internal/
+      #|  moon_check/
+      #|    internal/
+      #|agent_skill/
+      #|agent_runtime/
+      #|agent_session/
+      #|  log/
+      #|  store/
+    ),
+  )
+
+}
+
+///|
+async test "environment section reports empty directory layout" {
+  @vfs.with_tmpdir(root => {
+    let section = environment_prompt_section(workspace_root=root)
+    let resolved_root = @fs.realpath(root)
+    let replaced = section.replace_all(old=resolved_root, new="{resolved_root}")
+    inspect(
+      replaced,
+      content=(
+        #|## Environment
+        #|
+        #|Working directory: {resolved_root}
+        #|Relative paths resolve against it; treat it as the workspace root and stay inside it.
+        #|Parent and sibling directories belong to other projects. Never pass a cwd you have not verified exists.
+        #|Project layout (directories; hidden, build, and vendored dirs omitted):
+        #|(empty directory)
+      ),
+    )    
+  })
+}
+
+///|
+async test "environment section inline snapshot for deterministic layout" {
+  @vfs.with_tmpdir(root => {
+    @vfs.FileSystem({
+      "a/one.txt": "x",
+      "b/two.txt": "x",
+      ".git/objects/o": "x",
+      "node_modules/pkg/index.js": "x",
+      "_build/out.log": "x",
+    }).write_to(root)
+    let resolved_root = @fs.realpath(root)
+    let section = environment_prompt_section(workspace_root=root)
+    inspect(
+      section,
+      content=(
+        $|## Environment
+        $|
+        $|Working directory: \{resolved_root}
+        $|Relative paths resolve against it; treat it as the workspace root and stay inside it.
+        $|Parent and sibling directories belong to other projects. Never pass a cwd you have not verified exists.
+        $|Project layout (directories; hidden, build, and vendored dirs omitted):
+        $|a/
+        $|b/
+      ),
+    )
+  })
 }
 
 ///|
