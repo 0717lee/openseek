@@ -399,18 +399,155 @@ fn render_model(session : @agent_session.Session) -> @html.Html {
   // to the model are unchanged — this is view-only enrichment).
   let tool_results = tool_results_by_id(session)
   let messages = session.chat_messages()
+  let time_labels = model_message_time_labels(session)
   // Model-view briefs must come only from results the projection actually
   // emitted and the view trusts (see `model_shown_result`); using every durable
   // brief would caption a healed/compacted call with a result the model never
   // saw. The raw view, which shows every event, uses all briefs.
   let briefs = model_tool_call_briefs(messages, tool_results)
   let cards : Array[@html.Html] = [
-    for message in messages => message_card(message, tool_results, briefs)
+    for index, message in messages => {
+      let time = if index < time_labels.length() {
+        time_labels[index]
+      } else {
+        ""
+      }
+      message_card(message, tool_results, briefs, time~)
+    }
   ]
   if cards.is_empty() {
     return empty_state("The model projection is empty.")
   }
   @html.div(class="log model-log", cards)
+}
+
+///|
+/// Relative event-time labels, keyed by durable event sequence. This uses the
+/// same per-turn base as the raw log so model view answers the same latency
+/// question while showing the compacted model-facing messages.
+fn event_time_labels(session : @agent_session.Session) -> Map[Int, String] {
+  let labels : Map[Int, String] = Map([])
+  for turn in group_turns(session.events()) {
+    let base = turn_base_ms(turn)
+    for event in turn {
+      labels.set(event.sequence(), offset_label(base, event))
+    }
+  }
+  labels
+}
+
+///|
+fn model_summary_covers_event(
+  summary_event : @agent_session.SessionEvent,
+  sequence : Int,
+) -> Bool {
+  guard summary_event.item() is Summary(summary) else { return false }
+  summary_event.sequence() > sequence &&
+  summary.from_sequence() <= sequence &&
+  sequence <= summary.to_sequence()
+}
+
+///|
+fn model_event_covered_by_later_summary(
+  event : @agent_session.SessionEvent,
+  events : @vector.Vector[@agent_session.SessionEvent],
+) -> Bool {
+  for candidate in events {
+    if model_summary_covers_event(candidate, event.sequence()) {
+      return true
+    }
+  }
+  false
+}
+
+///|
+fn remove_pending_tool_id(
+  pending : Array[String],
+  tool_call_id : String,
+) -> Bool {
+  for index in 0..<pending.length() {
+    if pending[index] == tool_call_id {
+      ignore(pending.remove(index))
+      return true
+    }
+  }
+  false
+}
+
+///|
+fn flush_pending_tool_time_labels(
+  pending : Array[String],
+  labels : Array[String],
+) -> Unit {
+  for _ in pending {
+    // Synthetic repair messages are not backed by a durable event, so they do
+    // not get a timestamp label.
+    labels.push("")
+  }
+  pending.clear()
+}
+
+///|
+fn terminal_projects_model_message(
+  terminal : @agent_session.TurnTerminal,
+) -> Bool {
+  match terminal {
+    Finished(answer) => !answer.trim().is_empty()
+    Aborted(_) | Interrupted(_) | Failed(_) => true
+  }
+}
+
+///|
+fn item_projects_model_message(item : @agent_session.SessionItem) -> Bool {
+  match item {
+    User(_) | Runtime(_) | Summary(_) | Assistant(_) | Tool(_) => true
+    Terminal(terminal) => terminal_projects_model_message(terminal)
+  }
+}
+
+///|
+fn event_label(
+  labels : Map[Int, String],
+  event : @agent_session.SessionEvent,
+) -> String {
+  labels.get(event.sequence()).unwrap_or("")
+}
+
+///|
+/// Timestamp labels parallel to `Session::chat_messages()`: the first system
+/// prompt has no event stamp, and each projected event-backed message receives
+/// that event's relative turn offset.
+fn model_message_time_labels(session : @agent_session.Session) -> Array[String] {
+  let labels = event_time_labels(session)
+  let times : Array[String] = [""]
+  let pending_tool_calls : Array[String] = []
+  let events = session.events()
+  for event in events {
+    if model_event_covered_by_later_summary(event, events) {
+      continue
+    }
+    match event.item() {
+      Assistant(message) => {
+        flush_pending_tool_time_labels(pending_tool_calls, times)
+        times.push(event_label(labels, event))
+        for call in message.tool_calls() {
+          pending_tool_calls.push(call.id)
+        }
+      }
+      Tool(result) =>
+        if remove_pending_tool_id(pending_tool_calls, result.tool_call_id()) {
+          times.push(event_label(labels, event))
+        }
+      item => {
+        flush_pending_tool_time_labels(pending_tool_calls, times)
+        if item_projects_model_message(item) {
+          times.push(event_label(labels, event))
+        }
+      }
+    }
+  }
+  flush_pending_tool_time_labels(pending_tool_calls, times)
+  times
 }
 
 ///|
@@ -453,19 +590,23 @@ fn message_card(
   message : @deepseek.ChatMessage,
   tool_results : Map[String, @agent_session.ToolResult],
   briefs : Map[String, String],
+  time~ : String,
 ) -> @html.Html {
   match message.role {
     System =>
       @html.section(class="card system", [
         @html.details(open=false, [
-          @html.summary(class="card-label", "System prompt"),
+          @html.summary(
+            class="card-label",
+            model_card_head("System prompt", time~),
+          ),
           text_block(message.content),
         ]),
       ])
-    User => model_card("user", "User", message, briefs)
-    Assistant => model_card("assistant", "Assistant", message, briefs)
+    User => model_card("user", "User", message, briefs, time~)
+    Assistant => model_card("assistant", "Assistant", message, briefs, time~)
     Tool(_) =>
-      model_tool_card(message, model_shown_result(message, tool_results))
+      model_tool_card(message, model_shown_result(message, tool_results), time~)
   }
 }
 
@@ -535,6 +676,7 @@ pub fn rendered_error_count(
 fn model_tool_card(
   message : @deepseek.ChatMessage,
   shown : @agent_session.ToolResult?,
+  time~ : String,
 ) -> @html.Html {
   let is_error = shown is Some(r) && r.is_error()
   let name = match shown {
@@ -547,13 +689,19 @@ fn model_tool_card(
     (true, false) => "Tool error · \{name}"
     (false, false) => "Tool result · \{name}"
   }
-  let head : Array[@html.Html] = []
-  if is_error {
-    head.push(@html.span(class="tool-flag", "🚩 failed"))
-  }
-  head.push(@html.text(label))
   @html.details(class="card \{kind}", [
-    @html.summary(class="card-label", head),
+    @html.summary(
+      class="card-label",
+      model_card_head(
+        label,
+        time~,
+        flag=if is_error {
+          @html.span(class="tool-flag", "🚩 failed")
+        } else {
+          @html.nothing
+        },
+      ),
+    ),
     @html.div(class="card-body", [text_block(message.content)]),
   ])
 }
@@ -564,6 +712,7 @@ fn model_card(
   label : String,
   message : @deepseek.ChatMessage,
   briefs : Map[String, String],
+  time~ : String,
 ) -> @html.Html {
   let body : Array[@html.Html] = []
   if message.reasoning_content is Some(reasoning) &&
@@ -585,12 +734,25 @@ fn model_card(
     body.push(@html.div(class="tool-calls", call_views))
   }
   @html.section(class="card \{kind}", [
-    @html.div(class="card-label", label),
+    @html.div(class="card-label", model_card_head(label, time~)),
     @html.div(class="card-body", body),
   ])
 }
 
 // ---- shared helpers --------------------------------------------------------
+
+///|
+fn model_card_head(
+  label : String,
+  time~ : String,
+  flag? : @html.Html = @html.nothing,
+) -> Array[@html.Html] {
+  let head : Array[@html.Html] = [flag, @html.text(label)]
+  if !time.is_empty() {
+    head.push(@html.span(class="card-ts", time))
+  }
+  head
+}
 
 ///|
 fn card(

@@ -112,6 +112,33 @@ test "model view recovers the error flag the projection drops" {
 }
 
 ///|
+test "model view shows relative event timestamps" {
+  let session = @agent_session.Session(
+      SessionId("time"),
+      system_prompt="system",
+    )
+    .append(User(UserMessage("inspect")), unix_ms=100000L)
+    .append(
+      Assistant(
+        AssistantMessage("", tool_calls=[
+          ToolCall(id="c1", name="shell", arguments="{\"cmd\":\"moon test\"}"),
+        ]),
+      ),
+      unix_ms=101500L,
+    )
+    .append(
+      Tool(ToolResult(tool_call_id="c1", tool_name="shell", content="ok")),
+      unix_ms=103200L,
+    )
+    .append(Terminal(Finished("done")), unix_ms=108900L)
+  let html = render(@viz.render_session(session, ModelView))
+  assert_true(html.contains("class=\"card-ts\">+0.0s"))
+  assert_true(html.contains("class=\"card-ts\">+1.5s"))
+  assert_true(html.contains("class=\"card-ts\">+3.2s"))
+  assert_true(html.contains("class=\"card-ts\">+8.9s"))
+}
+
+///|
 test "model view does not flag a result the projection skipped" {
   // Compact away only the tool result (seq 2): the projection then heals the
   // dangling call c1 with a synthetic error message, so the model never saw the

@@ -261,6 +261,39 @@ extern "js" fn encode_uri_component(value : String) -> String = "encodeURICompon
 extern "js" fn scroll_to_nth_error(index : Int) -> Unit = "(n) => { const els = document.querySelectorAll('.card.tool.error'); const el = els[n]; if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' }); }"
 
 ///|
+/// Install plain `n` / `p` shortcuts for the existing next/previous failure
+/// jumps. Text-entry targets and modified keys are left alone.
+extern "js" fn install_error_shortcuts(
+  next : () -> Unit,
+  previous : () -> Unit,
+) -> Unit =
+  #|(next, previous) => {
+  #|  document.addEventListener('keydown', (event) => {
+  #|    if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) return;
+  #|    const target = event.target;
+  #|    const tag = target && target.tagName ? target.tagName.toLowerCase() : '';
+  #|    if (tag === 'input' || tag === 'textarea' || tag === 'select' || (target && target.isContentEditable)) return;
+  #|    const key = event.key.toLowerCase();
+  #|    if (key === 'n') {
+  #|      event.preventDefault();
+  #|      next();
+  #|    } else if (key === 'p') {
+  #|      event.preventDefault();
+  #|      previous();
+  #|    }
+  #|  });
+  #|}
+
+///|
+fn install_shortcuts(emit : @cmd.Emit[Msg]) -> @cmd.Cmd {
+  @cmd.custom_cmd(scheduler => {
+    install_error_shortcuts(() => scheduler.add(emit(JumpToError(1))), () => {
+      scheduler.add(emit(JumpToError(-1)))
+    })
+  })
+}
+
+///|
 fn session_url(id : String) -> String {
   "/api/sessions/\{encode_uri_component(id)}"
 }

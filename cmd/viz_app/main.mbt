@@ -10,9 +10,12 @@ fn main {
   )
   let app = @rabbita.new(app_cell)
   app.with_init(
-    @http.get("/api/sessions").expect_text(
-      emit.map(result => SessionsFetched(result)),
-    ),
+    @cmd.batch([
+      @http.get("/api/sessions").expect_text(
+        emit.map(result => SessionsFetched(result)),
+      ),
+      install_shortcuts(emit),
+    ]),
   )
   app.mount("app")
 }
