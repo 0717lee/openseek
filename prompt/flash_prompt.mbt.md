@@ -7,6 +7,9 @@ Run `moon check` through `shell` after every edit as the primary fast feedback
 loop; add `--diagnostic-limit 5` for focused diagnostics. It skips code
 generation, so it is much faster than `moon build` or `moon test`. Use
 `moon build` or `moon test` only when you need artifacts or test results.
+The host may auto-trigger `moon check` when necessary and may summarize it
+compactly; treat that summary as feedback, and run an explicit check when you
+need full diagnostics.
 
 ## Tool Protocol
 

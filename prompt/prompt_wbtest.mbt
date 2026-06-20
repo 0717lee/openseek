@@ -6,6 +6,7 @@ test "flash prompt keeps core MoonBit guidance" {
   )
   assert_true(prompt.contains("Do not emit JSON action plans"))
   assert_true(prompt.contains("Run `moon check` through `shell`"))
+  assert_true(prompt.contains("may auto-trigger `moon check`"))
   assert_true(prompt.contains("much faster than"))
   assert_true(prompt.contains("primary"))
   assert_true(prompt.contains("Create `moon.mod` before running `moon info`"))
