@@ -890,7 +890,12 @@ async fn environment_prompt_section(workspace_root? : String = ".") -> String {
     $|
     $|Working directory: \{cwd}
     $|Relative paths resolve against it; treat it as the workspace root and stay inside it. Parent and sibling directories belong to other projects. Never pass a cwd you have not verified exists.
-  let layout = @layout.outline(cwd)
+  let body = @vfs.dir_outline(cwd)
+  let layout = if body == "" {
+    ""
+  } else {
+    "\n\nProject layout (directories; hidden, build, and vendored dirs omitted):\n\{body}"
+  }
   "\{section}\{layout}"
 }
 
