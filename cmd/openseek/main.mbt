@@ -999,7 +999,6 @@ async test "environment section names the cwd and appends the layout outline" {
       #|  store/
     ),
   )
-
 }
 
 ///|
@@ -1019,7 +1018,7 @@ async test "environment section reports empty directory layout" {
         #|Project layout (directories; hidden, build, and vendored dirs omitted):
         #|(empty directory)
       ),
-    )    
+    )
   })
 }
 

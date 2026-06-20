@@ -106,9 +106,7 @@ async test "dir_outline lists directories, omitting files and noise" {
       ".git/objects/o": "x",
       "README.md": "x",
     }).write_to(root)
-    guard dir_outline(root) is Some(outline) else {
-      fail("expected outline")
-    }
+    guard dir_outline(root) is Some(outline) else { fail("expected outline") }
     inspect(
       outline,
       content=(
@@ -146,11 +144,9 @@ async test "dir_outline respects max_depth" {
 ///|
 async test "dir_outline truncates at max_dirs" {
   with_tmpdir(root => {
-    FileSystem({
-      "a/x.txt": "x",
-      "b/x.txt": "x",
-      "c/x.txt": "x",
-    }).write_to(root)
+    FileSystem({ "a/x.txt": "x", "b/x.txt": "x", "c/x.txt": "x" }).write_to(
+      root,
+    )
     guard dir_outline(root, max_dirs=2) is Some(outline) else {
       fail("expected outline")
     }
@@ -174,9 +170,7 @@ async test "dir_outline skips hidden and build dirs at nested levels" {
       "src/_build/out.txt": "x",
       "src/visible/note.txt": "x",
     }).write_to(root)
-    guard dir_outline(root) is Some(outline) else {
-      fail("expected outline")
-    }
+    guard dir_outline(root) is Some(outline) else { fail("expected outline") }
     inspect(
       outline,
       content=(
