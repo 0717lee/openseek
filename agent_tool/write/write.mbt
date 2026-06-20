@@ -89,14 +89,13 @@ async fn write_file(
 ///|
 /// Create the parent directory of `path` (recursively) when it is missing, so a
 /// write to `dir/moon.pkg` works without a separate `mkdir`. The path is already
-/// resolved under the workspace root, so this stays inside the workspace.
-/// Best-effort: a genuine failure surfaces from the write itself.
+/// resolved under the workspace root, so this stays inside the workspace. A
+/// mkdir failure propagates to the caller's `error writing` path rather than
+/// being swallowed — the write would fail anyway, so the real cause is useful.
 async fn create_parent_dirs(path : String) -> Unit {
   let parent = parent_dir(path)
   if parent != "" && !@fs.exists(parent) {
-    @fs.mkdir(parent, recursive=true) catch {
-      _ => ()
-    }
+    @fs.mkdir(parent, recursive=true)
   }
 }
 
