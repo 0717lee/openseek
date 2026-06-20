@@ -36,9 +36,17 @@ test "session metadata counts steps and total runtime" {
       inspect(format_log_size(log_bytes), content="307 B")
       inspect(assistant_step_count(parsed), content="1")
       inspect(runtime_label(parsed), content="70.3s")
+      inspect(end_time_label(parsed), content="1970-01-01 00:02 UTC")
     }
     _ => fail("expected Loaded")
   }
+}
+
+///|
+test "absolute time labels format UTC timestamps" {
+  inspect(absolute_time_label(0L), content="1970-01-01 00:00 UTC")
+  inspect(last_active_label(Some(0L)), content="1970-01-01 00:00 UTC")
+  inspect(last_active_label(None), content="")
 }
 
 ///|
@@ -68,9 +76,11 @@ test "parse_session_rows reads the listing, skipping malformed rows" {
   inspect(rows[0].id, content="a")
   inspect(rows[0].root_label, content="app/.openseek")
   inspect(rows[0].first_prompt, content="hello")
+  debug_inspect(rows[0].last_active, content="Some(1)")
   inspect(rows[1].key, content="b")
   inspect(rows[1].id, content="b")
   inspect(rows[1].root_label, content="lib/.openseek")
+  debug_inspect(rows[1].last_active, content="None")
 }
 
 ///|
@@ -113,7 +123,7 @@ test "sidebar_groups clusters by container, in listing order, no duplicates" {
 
 ///|
 fn marker_row(key : String, id : String, root_label : String) -> SessionRow {
-  { key, id, root_label, is_marker: true, first_prompt: "" }
+  { key, id, root_label, last_active: None, is_marker: true, first_prompt: "" }
 }
 
 ///|
@@ -172,6 +182,7 @@ test "sidebar_groups keeps unrelated direct stores separate" {
       key: "0|a",
       id: "a",
       root_label: "/srv/store-a",
+      last_active: None,
       is_marker: false,
       first_prompt: "",
     },
@@ -179,6 +190,7 @@ test "sidebar_groups keeps unrelated direct stores separate" {
       key: "1|b",
       id: "b",
       root_label: "/srv/store-b",
+      last_active: None,
       is_marker: false,
       first_prompt: "",
     },

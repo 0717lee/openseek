@@ -175,7 +175,17 @@
     .session-item:hover { background: var(--panel-2); }
     .session-item.selected { background: var(--panel-2); border-color: var(--accent); }
     .session-item-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .session-item-id { color: var(--muted); font-size: 11px; font-family: ui-monospace, monospace; }
+    .session-item-meta {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 11px;
+      font-family: ui-monospace, monospace;
+    }
+    .session-item-id { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .session-item-time { flex: 0 0 auto; }
 
     /* theme switcher */
     .theme-toggle { display: flex; gap: 6px; padding: 10px 14px; border-top: 1px solid var(--border); }

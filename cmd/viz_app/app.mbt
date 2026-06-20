@@ -1,11 +1,12 @@
 ///|
 /// One row of the `/api/sessions` listing shown in the sidebar. The server
-/// already returns rows most-recently-active first, so the row only needs an id
-/// and a human label.
+/// already returns rows most-recently-active first; the row keeps `last_active`
+/// so the sidebar can show when an experiment last wrote to disk.
 struct SessionRow {
   key : String
   id : String
   root_label : String
+  last_active : Int64?
   // Whether the server discovered this root as a marker store (a `.openseek`-like
   // directory) rather than a direct `--session-root` store. Drives whether the
   // sidebar strips the last path segment when grouping. Absent → `false`.
@@ -250,6 +251,14 @@ fn fetch_text(
 /// Percent-encode the id so session ids containing URL-reserved characters
 /// (spaces, `?`, `#`) reach the server intact; it percent-decodes the segment.
 extern "js" fn encode_uri_component(value : String) -> String = "encodeURIComponent"
+
+///|
+extern "js" fn format_unix_ms_utc(milliseconds : Double) -> String =
+  #|(milliseconds) => {
+  #|  const date = new Date(milliseconds);
+  #|  if (!Number.isFinite(date.getTime())) return "";
+  #|  return date.toISOString().slice(0, 16).replace("T", " ") + " UTC";
+  #|}
 
 ///|
 /// Scroll to the next/previous failed-tool card relative to the viewport's
@@ -676,10 +685,13 @@ fn sidebar_row(
   let classes = if selected { "session-item selected" } else { "session-item" }
   @html.li(class=classes, on_click=emit(Select(row.key)), [
     @html.div(class="session-item-label", label),
-    @html.div(
-      class="session-item-id",
-      session_row_label(row.root_label, row.id, row.is_marker),
-    ),
+    @html.div(class="session-item-meta", [
+      @html.span(
+        class="session-item-id",
+        session_row_label(row.root_label, row.id, row.is_marker),
+      ),
+      last_active_view(row.last_active),
+    ]),
   ])
 }
 
@@ -795,6 +807,7 @@ fn session_metadata(
     @html.span("log \{format_log_size(model.log_bytes)}"),
     @html.span("\{steps} step\{plural_s(steps)}"),
     @html.span("runtime \{runtime_label(parsed)}"),
+    @html.span("ended \{end_time_label(parsed)}"),
   ])
 }
 
@@ -838,9 +851,56 @@ fn running_ms(parsed : @session_log.ParsedLog) -> Int64? {
 }
 
 ///|
+fn end_time_label(parsed : @session_log.ParsedLog) -> String {
+  match last_event_ms(parsed) {
+    Some(milliseconds) => absolute_time_label(milliseconds)
+    None => "n/a"
+  }
+}
+
+///|
+fn last_event_ms(parsed : @session_log.ParsedLog) -> Int64? {
+  let mut last = 0L
+  for event in parsed.events {
+    let stamp = event.unix_ms()
+    if stamp > 0 {
+      last = stamp
+    }
+  }
+  if last > 0L {
+    Some(last)
+  } else {
+    None
+  }
+}
+
+///|
 fn format_span_total_seconds(span_ms : Int64) -> String {
   let tenths = span_ms / 100L
   "\{tenths / 10L}.\{tenths % 10L}s"
+}
+
+///|
+fn last_active_label(last_active : Int64?) -> String {
+  match last_active {
+    Some(seconds) => absolute_time_label(seconds * 1000L)
+    None => ""
+  }
+}
+
+///|
+fn absolute_time_label(milliseconds : Int64) -> String {
+  format_unix_ms_utc(milliseconds.to_double())
+}
+
+///|
+fn last_active_view(last_active : Int64?) -> @html.Html {
+  let label = last_active_label(last_active)
+  if label.is_empty() {
+    @html.nothing
+  } else {
+    @html.span(class="session-item-time", label)
+  }
 }
 
 ///|
@@ -1010,8 +1070,12 @@ fn session_row_of(json : Json) -> SessionRow? {
     Some(String(value)) => value
     _ => ""
   }
+  let last_active = match fields.get("last_active") {
+    Some(Number(value, ..)) => Some(value.to_int64())
+    _ => None
+  }
   let is_marker = fields.get("is_marker") is Some(True)
-  Some({ key, id, root_label, is_marker, first_prompt })
+  Some({ key, id, root_label, last_active, is_marker, first_prompt })
 }
 
 ///|
