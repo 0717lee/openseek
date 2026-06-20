@@ -66,6 +66,7 @@ async fn write_file(
         return @agent_tool.ToolAction::respond(
           "error writing \{path}: \{message}",
           is_error=true,
+          brief="write \{@agent_tool.brief_basename(path)}",
         )
       None => ()
     }
@@ -81,6 +82,7 @@ async fn write_file(
       @agent_tool.ToolAction::respond(
         "error writing \{path}: \{error}",
         is_error=true,
+        brief="write \{@agent_tool.brief_basename(path)}",
       )
   }
 }

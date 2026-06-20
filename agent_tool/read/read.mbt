@@ -100,6 +100,7 @@ async fn read_file(
       return @agent_tool.ToolAction::respond(
         "error reading \{path}: \{error}",
         is_error=true,
+        brief="read \{@agent_tool.brief_basename(path)}",
       )
   }
   let selection = select_lines(content, input.start_line, input.max_lines)
