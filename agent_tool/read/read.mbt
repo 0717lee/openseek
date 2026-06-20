@@ -134,7 +134,7 @@ async fn read_file(
   let selection = select_lines(content, input.start_line, input.max_lines)
   let include_header = input.start_line != 1 ||
     input.max_lines is Some(_) ||
-    selection.content.length() > input.max_output_chars
+    selection.content.char_length() > input.max_output_chars
   if include_header {
     let rendered = render_numbered_content(selection, input.max_output_chars)
     let output = "\{read_header(path, content, selection, rendered)}\{rendered.content}"
@@ -182,9 +182,9 @@ async fn read_files(
     }
     match directory_read_error(path) {
       Some(block) => {
-        if separator_chars + block.length() <= remaining {
+        if separator_chars + block.char_length() <= remaining {
           failures = failures + 1
-          remaining = remaining - separator_chars - block.length()
+          remaining = remaining - separator_chars - block.char_length()
           blocks.push(block)
         } else {
           skipped.push(path)
@@ -197,9 +197,9 @@ async fn read_files(
     let content = @fs.read_file(path).text() catch {
       error => {
         let block = "error reading \{path}: \{error}"
-        if separator_chars + block.length() <= remaining {
+        if separator_chars + block.char_length() <= remaining {
           failures = failures + 1
-          remaining = remaining - separator_chars - block.length()
+          remaining = remaining - separator_chars - block.char_length()
           blocks.push(block)
         } else {
           skipped.push(path)
@@ -215,7 +215,7 @@ async fn read_files(
         if block.truncated {
           truncated_any = true
         }
-        remaining = remaining - separator_chars - block.content.length()
+        remaining = remaining - separator_chars - block.content.char_length()
         blocks.push(block.content)
       }
       None => {
@@ -300,12 +300,23 @@ async fn directory_read_error(path : String) -> String? {
 
 ///|
 fn cap_text(content : String, max_chars : Int) -> String {
-  if content.length() <= max_chars {
+  if content.char_length() <= max_chars {
     content
   } else if max_chars <= 0 {
     ""
   } else {
-    content[:max_chars].to_owned()
+    char_prefix(content, max_chars)
+  }
+}
+
+///|
+fn char_prefix(content : String, max_chars : Int) -> String {
+  if max_chars <= 0 {
+    ""
+  } else if content.char_length() <= max_chars {
+    content
+  } else {
+    StringView::from_iter(content.iter().take(max_chars)).to_owned()
   }
 }
 
@@ -323,10 +334,10 @@ fn render_read_block(
   for _ in 0..<8 {
     let rendered = render_numbered_content(selection, body_budget)
     let header = read_header(path, original, selection, rendered)
-    if header.length() > max_chars {
+    if header.char_length() > max_chars {
       return None
     }
-    let next_body_budget = max_chars - header.length()
+    let next_body_budget = max_chars - header.char_length()
     if next_body_budget == body_budget {
       return Some({
         content: "\{header}\{rendered.content}",
@@ -337,7 +348,7 @@ fn render_read_block(
   }
   let rendered = render_numbered_content(selection, body_budget)
   let header = read_header(path, original, selection, rendered)
-  if header.length() + rendered.content.length() > max_chars {
+  if header.char_length() + rendered.content.char_length() > max_chars {
     None
   } else {
     Some({
@@ -380,18 +391,19 @@ fn render_numbered_content(
     let separator_chars = if numbered.length() == 0 { 0 } else { 1 }
     let line_number = "\{selection.start_line + index}".pad_start(width, ' ')
     let prefix = "\{line_number}| "
-    let prefix_budget = separator_chars + prefix.length()
+    let prefix_budget = separator_chars + prefix.char_length()
     if remaining < prefix_budget {
       truncated = true
       break
     }
     let available = remaining - prefix_budget
     let line = lines[index]
-    if line.length() <= available {
+    let line_chars = line.char_length()
+    if line_chars <= available {
       numbered.push("\{prefix}\{line}")
-      remaining = remaining - prefix_budget - line.length()
+      remaining = remaining - prefix_budget - line_chars
     } else {
-      numbered.push("\{prefix}\{line[:available]}")
+      numbered.push("\{prefix}\{char_prefix(line, available)}")
       remaining = 0
       truncated = true
       break
@@ -407,7 +419,13 @@ fn render_numbered_content(
   } else {
     selection.start_line + shown_lines - 1
   }
-  { content, end_line, shown_lines, shown_chars: content.length(), truncated }
+  {
+    content,
+    end_line,
+    shown_lines,
+    shown_chars: content.char_length(),
+    truncated,
+  }
 }
 
 ///|
@@ -423,8 +441,8 @@ fn read_header(
     "end_line=\{rendered.end_line}",
     "total_lines=\{selection.total_lines}",
     "shown_lines=\{rendered.shown_lines}",
-    "file_chars=\{original.length()}",
-    "selected_chars=\{selection.content.length()}",
+    "file_chars=\{original.char_length()}",
+    "selected_chars=\{selection.content.char_length()}",
     "shown_chars=\{rendered.shown_chars}",
     "line_limited=\{selection.line_limited}",
     "truncated=\{rendered.truncated}",
@@ -565,6 +583,20 @@ async test "read caps after adding line number gutters" {
     assert_true(output.content.contains("truncated=true"))
     assert_true(output.content.contains(" 1| x\n 2| x\n 3| x"))
     assert_false(output.content.contains(" 4| x"))
+  })
+}
+
+///|
+async test "read caps unicode content on character boundaries" {
+  @vfs.with_tmpdir(dir => {
+    let path = "\{dir}/unicode.txt"
+    @fs.write_file(path, "😀Z", create_mode=CreateOrTruncate)
+    let result = execute({ "path": path, "max_lines": 1, "max_output_chars": 4 })
+    guard result is Respond(output) else { fail("expected Respond") }
+    assert_true(output.is_error)
+    assert_true(output.content.contains("shown_chars=4"))
+    assert_true(output.content.contains("1| 😀"))
+    assert_false(output.content.contains("Z"))
   })
 }
 
