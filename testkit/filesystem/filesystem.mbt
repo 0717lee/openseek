@@ -207,9 +207,7 @@ async fn ensure_parent_dir(root : String, path : String) -> Unit {
   if parts.length() <= 1 {
     return
   }
-  let dirs : Array[StringView] = [
-    for index in 0..<(parts.length() - 1) => parts[index]
-  ]
+  let dirs = parts[:parts.length() - 1]
   let _ = @fs.mkdir("\{root}/\{dirs.join("/")}", recursive=true) catch {
     _ => ()
   }
