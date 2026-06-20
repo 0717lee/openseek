@@ -890,107 +890,19 @@ async fn environment_prompt_section(workspace_root? : String = ".") -> String {
     $|
     $|Working directory: \{cwd}
     $|Relative paths resolve against it; treat it as the workspace root and stay inside it. Parent and sibling directories belong to other projects. Never pass a cwd you have not verified exists.
-  section + project_layout_outline(cwd)
+  let layout = @layout.outline(cwd)
+  "\{section}\{layout}"
 }
 
 ///|
-/// Depth and count caps for the injected project-layout outline, to bound
-/// prompt size on large repositories.
-const LayoutMaxDepth : Int = 3
-
-///|
-const LayoutMaxDirs : Int = 100
-
-///|
-/// A compact directory outline of the workspace (directories only), so the
-/// agent starts with the project's shape without spending a tool call on `ls`
-/// or a `tree` binary that may be missing. Build output, vendored deps, and
-/// hidden dirs are omitted. Returns `""` for an empty/unreadable workspace.
-async fn project_layout_outline(root : String) -> String {
-  let out : Array[String] = []
-  collect_layout_dirs(root, 0, out)
-  if out.is_empty() {
-    return ""
-  }
-  let truncated = if out.length() >= LayoutMaxDirs { "\n  …" } else { "" }
-  let body = out.join("\n")
-  (
-    $|
-    $|
-    $|Project layout (directories; hidden, build, and vendored dirs omitted):
-    $|\{body}\{truncated}
-  )
-}
-
-///|
-/// Append `dir`'s child directories to `out` (depth-first, sorted), recursing
-/// up to `LayoutMaxDepth` levels and `LayoutMaxDirs` entries.
-async fn collect_layout_dirs(
-  dir : String,
-  depth : Int,
-  out : Array[String],
-) -> Unit {
-  guard depth < LayoutMaxDepth && out.length() < LayoutMaxDirs else { return }
-  let names = @fs.readdir(dir, sort=true) catch { _ => return }
-  for name in names {
-    guard out.length() < LayoutMaxDirs else { return }
-    if layout_skip_dir(name) {
-      continue
-    }
-    let child = @workspace_path.resolve(dir, name)
-    let kind = @fs.kind(child, follow_symlink=false) catch { _ => continue }
-    guard kind is Directory else { continue }
-    out.push(layout_indent(depth) + name + "/")
-    collect_layout_dirs(child, depth + 1, out)
-  }
-}
-
-///|
-/// Directories left out of the layout outline: hidden dirs (covers `.git`,
-/// `.mooncakes`, `.openseek`, `.github`, …) plus build output and vendored deps.
-fn layout_skip_dir(name : String) -> Bool {
-  name.has_prefix(".") ||
-  name == "node_modules" ||
-  name == "_build" ||
-  name == "target"
-}
-
-///|
-fn layout_indent(depth : Int) -> String {
-  let sb = StringBuilder()
-  for _ in 0..<depth {
-    sb.write_string("  ")
-  }
-  sb.to_string()
-}
-
-///|
-async test "environment section names the real working directory" {
+async test "environment section names the cwd and appends the layout outline" {
   let section = environment_prompt_section()
   let cwd = @fs.realpath(".")
   assert_true(section.contains("Working directory: \{cwd}"))
   assert_true(section.contains("stay inside it"))
-}
-
-///|
-async test "environment section outlines project dirs, omitting noise" {
-  let dir = @fs.tmpdir(prefix="openseek-layout-")
-  @fs.mkdir("\{dir}/src", recursive=true)
-  @fs.mkdir("\{dir}/lib/internal", recursive=true)
-  @fs.mkdir("\{dir}/node_modules/pkg", recursive=true)
-  @fs.mkdir("\{dir}/.git/objects", recursive=true)
-  @fs.write_file("\{dir}/README.md", "x", create_mode=CreateOrTruncate)
-  let section = environment_prompt_section(workspace_root=dir)
-  // Directories are listed (including one nested level), the README file is not.
+  // The repo root has subdirectories, so the layout outline is appended (its
+  // content is covered by @layout's own snapshot test).
   assert_true(section.contains("Project layout"))
-  assert_true(section.contains("src/"))
-  assert_true(section.contains("lib/"))
-  assert_true(section.contains("internal/"))
-  assert_false(section.contains("README"))
-  // Build output, vendored deps, and hidden dirs are omitted.
-  assert_false(section.contains("node_modules"))
-  assert_false(section.contains(".git"))
-  @fs.rmdir(dir, recursive=true)
 }
 
 ///|
