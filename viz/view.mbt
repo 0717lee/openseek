@@ -174,6 +174,17 @@ fn offset_label(base : Int64, event : @agent_session.SessionEvent) -> String {
 }
 
 ///|
+fn model_offset_label(
+  base : Int64,
+  event : @agent_session.SessionEvent,
+) -> String {
+  if base == 0 || event.unix_ms() == 0 {
+    return ""
+  }
+  "+\{format_span_total_seconds(event.unix_ms() - base)}"
+}
+
+///|
 fn turn_duration_label(turn : Array[@agent_session.SessionEvent]) -> String? {
   let base = turn_base_ms(turn)
   guard base > 0 else { return None }
@@ -203,6 +214,14 @@ fn format_span_seconds(span_ms : Int64) -> String {
     let pad = if seconds < 10 { "0" } else { "" }
     "\{minutes}m \{pad}\{seconds}.\{rest % 10}s"
   }
+}
+
+///|
+/// A millisecond span as total elapsed seconds. Model-view timestamp chips use
+/// this instead of minute-splitting so `70.3s` cannot read like just `10.3s`.
+fn format_span_total_seconds(span_ms : Int64) -> String {
+  let tenths = span_ms / 100
+  "\{tenths / 10}.\{tenths % 10}s"
 }
 
 ///|
@@ -423,14 +442,14 @@ fn render_model(session : @agent_session.Session) -> @html.Html {
 
 ///|
 /// Relative event-time labels, keyed by durable event sequence. This uses the
-/// same per-turn base as the raw log so model view answers the same latency
-/// question while showing the compacted model-facing messages.
+/// same per-turn base as the raw log, but keeps labels in total seconds so
+/// minute-boundary chips stay unambiguous in the compact model projection.
 fn event_time_labels(session : @agent_session.Session) -> Map[Int, String] {
   let labels : Map[Int, String] = Map([])
   for turn in group_turns(session.events()) {
     let base = turn_base_ms(turn)
     for event in turn {
-      labels.set(event.sequence(), offset_label(base, event))
+      labels.set(event.sequence(), model_offset_label(base, event))
     }
   }
   labels

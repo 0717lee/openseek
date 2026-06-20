@@ -130,12 +130,13 @@ test "model view shows relative event timestamps" {
       Tool(ToolResult(tool_call_id="c1", tool_name="shell", content="ok")),
       unix_ms=103200L,
     )
-    .append(Terminal(Finished("done")), unix_ms=108900L)
+    .append(Terminal(Finished("done")), unix_ms=170300L)
   let html = render(@viz.render_session(session, ModelView))
   assert_true(html.contains("class=\"card-ts\">+0.0s"))
   assert_true(html.contains("class=\"card-ts\">+1.5s"))
   assert_true(html.contains("class=\"card-ts\">+3.2s"))
-  assert_true(html.contains("class=\"card-ts\">+8.9s"))
+  assert_true(html.contains("class=\"card-ts\">+70.3s"))
+  assert_false(html.contains("class=\"card-ts\">+1m 10.3s"))
 }
 
 ///|
