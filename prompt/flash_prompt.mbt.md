@@ -159,11 +159,39 @@ test {
 }
 ```
 
-Native dependency probe with `moon run -e`:
+## Multi-Line Strings And Probes
+
+- Raw multi-line strings use `#|`. Each content line starts with `#|`, and
+  text is kept literally.
+- Interpolated multi-line strings use `$|`. Each content line starts with
+  `$|`, and interpolation is written as `\{expr}`.
+- Do not write `\(expr)` for interpolation.
+- Do not use `moon run -e` for multi-line snippets unless there is a strong
+  reason. Shell quoting around newlines, quotes, backslashes, `#|`, `$|`, and
+  `\{...}` is easy to get wrong. Prefer `moon run --target native - <<'EOF'`
+  for anything longer than one short line.
+
+```mbt check
+///|
+test {
+  let raw =
+    #|first line
+    #|second line
+  let name = "MoonBit"
+  let rendered =
+    $|hello \{name}
+    $|lines: \{raw.split("\n").count()}
+  assert_true(raw.contains("second line"))
+  assert_true(rendered.contains("hello MoonBit"))
+}
+```
+
+Native dependency probe with `moon run -` and a heredoc:
 
 ```sh
 printf 'hello' > /tmp/cat.txt
-moon run --target native -e 'import {
+moon run --target native - <<'EOF'
+import {
   "moonbitlang/async@0.19.1",
   "moonbitlang/async/fs",
   "moonbitlang/async/stdio",
@@ -172,7 +200,8 @@ moon run --target native -e 'import {
 async fn main {
   let data = @fs.read_file("/tmp/cat.txt")
   @stdio.stdout.write(data)
-}'
+}
+EOF
 ```
 
 ## Checked Error Handling

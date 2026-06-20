@@ -11,6 +11,9 @@ test "flash prompt keeps core MoonBit guidance" {
   assert_true(prompt.contains("Create `moon.mod` before running `moon info`"))
   assert_true(prompt.contains("moonbitlang/core/argparse"))
   assert_true(prompt.contains("@stdio.stdin.read_all().text()"))
+  assert_true(prompt.contains("Raw multi-line strings use `#|`"))
+  assert_true(prompt.contains("Interpolated multi-line strings use `$|`"))
+  assert_true(prompt.contains("Prefer `moon run --target native - <<'EOF'`"))
   assert_true(prompt.contains("Use checked errors for ordinary parser"))
   assert_true(
     prompt.contains("Json::number(n.to_double(), repr=text.to_owned())"),
