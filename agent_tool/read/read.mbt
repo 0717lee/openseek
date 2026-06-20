@@ -1,13 +1,18 @@
 ///|
-/// Tool definition for `read`: returns text from `arguments.path` (or several
-/// files via `arguments.paths`), optionally restricted to a line range and
-/// capped to avoid flooding the agent context.
+/// Tool definition for `read`: returns text from `arguments.path`, optionally
+/// restricted to a line range and capped to avoid flooding the agent context.
+/// When several known independent files are needed, prefer batching several
+/// single-file `read` tool calls in one assistant response. `arguments.paths`
+/// remains available for hosts that cannot batch tool calls or need one shared
+/// output budget.
 ///
 /// ## Arguments
 /// - `path` (string): filesystem path to read. Exactly one of `path`/`paths`
-///   is required.
-/// - `paths` (string array): several files in one call; per-file read errors
-///   report inline while the other files still return.
+///   is required. Directories are not supported; use `ls` or `tree` first, then
+///   read specific files.
+/// - `paths` (string array): several files in one call; useful when the host
+///   cannot batch independent read calls. Per-file read errors report inline
+///   while the other files still return.
 /// - `start_line` (number, optional): 1-based first line to return. Defaults
 ///   to 1. Single-file calls only.
 /// - `max_lines` (number, optional): maximum number of lines to return.
@@ -32,15 +37,18 @@ pub fn definition(
 ) -> @agent_tool.AgentToolDefinition {
   AgentToolDefinition(
     name="read",
-    description="Read arguments.path as text — or several independent files in ONE call via arguments.paths (per-file errors report inline; cheaper than one call per file). Supports optional start_line, max_lines, and max_output_chars for focused single-file reads. Headered outputs include right-aligned line numbers.",
+    description="Read arguments.path as text. For several known independent files, batch separate read tool calls in one assistant response when possible; use arguments.paths only when the host cannot batch calls or one shared output budget is desired. Do not use read for directories: inspect them with `ls` or `tree`, then read specific files. Supports optional start_line, max_lines, and max_output_chars for focused single-file reads. Headered outputs include right-aligned line numbers.",
     schema=JsonSchema({
       "type": "object",
       "properties": {
-        "path": { "type": "string" },
+        "path": {
+          "type": "string",
+          "description": "Text file path to read. Directories are not supported; use `ls` or `tree` first, then read specific files.",
+        },
         "paths": {
           "type": "array",
           "items": { "type": "string" },
-          "description": "Read several files in one call instead of one call per file. Exactly one of path/paths is required.",
+          "description": "Read several files in one call when the host cannot batch separate read calls or when one shared max_output_chars budget is desired. Exactly one of path/paths is required.",
         },
         "start_line": { "type": "number" },
         "max_lines": { "type": "number" },
@@ -444,6 +452,17 @@ async test "line number gutters align to the widest displayed number" {
     assert_true(output.content.contains("100| line 100"))
     assert_true(output.content.contains("111| line 111"))
   })
+}
+
+///|
+test "read description encourages batched reads and directory inspection" {
+  let tool = definition()
+  assert_true(tool.description.contains("batch separate read tool calls"))
+  assert_true(tool.description.contains("Do not use read for directories"))
+  let JsonSchema(schema) = tool.schema
+  let schema_text = schema.stringify()
+  assert_true(schema_text.contains("Directories are not supported"))
+  assert_true(schema_text.contains("host cannot batch separate read calls"))
 }
 
 ///|

@@ -1,9 +1,17 @@
 # Read Tool
 
-`read` returns text from a file at `arguments.path`, or from several files in
-one call via `arguments.paths`. By default it returns whole files when they
-fit within the output cap. For larger files, or when the agent only needs a
-focused region, pass `start_line`, `max_lines`, or `max_output_chars`.
+`read` returns text from a file at `arguments.path`. By default it returns whole
+files when they fit within the output cap. For larger files, or when the agent
+only needs a focused region, pass `start_line`, `max_lines`, or
+`max_output_chars`.
+
+When the agent needs several known independent files, prefer batching separate
+single-file `read` tool calls in one assistant response. Use `arguments.paths`
+only when the host cannot batch tool calls or when one shared output budget and
+inline per-file errors are more useful than independent results.
+
+Do not use `read` for directories. Inspect directories with `ls` or `tree`, then
+read specific files.
 
 ## Design Rationale
 
@@ -21,16 +29,18 @@ Automatic character truncation is marked as a tool error even when the file was
 read successfully; that makes lossy context visible to the loop instead of
 silently pretending the returned prefix is complete.
 
-Multi-file reads exist because agent traces show models reading related files
-one round trip at a time — each a full model turn. `paths` collapses those
-into one call: every file returns as its own headered block, a file that
-fails to read reports inline while the others still land (mirroring how
-`moon ide doc` reports per-query misses), and the `max_output_chars` budget
-is shared across the call in argument order — headers, separators, and error
-blocks count against it too, and an exhausted budget collapses the unread
-tail into one bounded skipped-files marker, so output stays near the cap no
-matter how many paths the call names. Line-range options stay single-file: a
-range only means something against one file.
+The preferred multi-file pattern is several independent `read` calls in the
+same assistant response. That avoids extra model round trips while preserving
+single-file ranges and independent output budgets. `paths` remains available as
+a fallback for hosts that cannot batch tool calls, or for cases where one shared
+`max_output_chars` budget is desirable: every file returns as its own headered
+block, a file that fails to read reports inline while the others still land
+(mirroring how `moon ide doc` reports per-query misses), and the budget is
+shared across the call in argument order. Headers, separators, and error blocks
+count against it too, and an exhausted budget collapses the unread tail into one
+bounded skipped-files marker, so output stays near the cap no matter how many
+paths the call names. Line-range options stay single-file: a range only means
+something against one file.
 
 ## API Style
 
@@ -55,7 +65,7 @@ Prefer a range plus a cap over reading a large file and relying on truncation.
 | Name | Type | Required | Notes |
 | ---- | ---- | -------- | ----- |
 | `path` | string | one of `path`/`paths` | Filesystem path. Relative paths resolve against the agent process's current working directory. |
-| `paths` | string array | one of `path`/`paths` | Several files in one call, each returned as a headered block; per-file errors report inline. |
+| `paths` | string array | one of `path`/`paths` | Several files in one call when batching separate read calls is unavailable or a shared budget is desired; per-file errors report inline. |
 | `start_line` | number | no | 1-based first line to return. Defaults to `1`. Single-file calls only. |
 | `max_lines` | number | no | Maximum number of lines to return. Single-file calls only. |
 | `max_output_chars` | number | no | Maximum content chars to return across the call. Defaults to `12000` and is capped at `50000`. |
