@@ -386,20 +386,15 @@ async test "shell times out long running commands on Unix" {
 }
 
 ///|
-async test "shell rejects moon check and points to moon_check" {
-  let result = run_shell({ "cmd": "moon check" })
-  guard result is Respond(output) else { fail("expected Respond") }
-  assert_true(output.is_error)
-  assert_true(output.content.contains("shell blocked `moon check`"))
-  assert_true(output.content.contains("moon_check"))
-}
-
-///|
 async test "shell rejects moon_cmd as a shell command" {
+  // `moon check` now runs through shell (no redirect); the only remaining guard
+  // is the bare `moon_cmd` tool name, blocked before execution. We do not
+  // exercise `moon check` here: the shell tool would run a nested `moon` under
+  // `moon test` and deadlock on the build lock.
   let result = run_shell({ "cmd": "moon_cmd run cmd/main" })
   guard result is Respond(output) else { fail("expected Respond") }
   assert_true(output.is_error)
-  assert_true(output.content.contains("moon_cmd is a tool name"))
+  assert_true(output.content.contains("moon_cmd is not a shell command"))
 }
 
 ///|

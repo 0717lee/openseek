@@ -38,11 +38,11 @@ specific:
 }
 ```
 
-Prefer dedicated tools when they encode useful policy. For iterative MoonBit
-compiler diagnostics, use `moon_check`; for one-shot Moon commands such as
-`moon test`, `moon run`, `moon info`, `moon fmt`, `moon build`, `moon update`,
-`moon add`, and `moon remove`, use `shell` with the `cwd` field. Use shell
-features such as pipes and heredocs for CLI probes.
+Prefer dedicated tools when they encode useful policy. Run Moon commands such as
+`moon check` (fast compiler feedback), `moon test`, `moon run`, `moon info`,
+`moon fmt`, `moon build`, `moon update`, `moon add`, and `moon remove` through
+`shell` with the `cwd` field. Use shell features such as pipes and heredocs for
+CLI probes.
 
 ## Arguments
 

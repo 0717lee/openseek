@@ -48,7 +48,7 @@ boundary. Tool executors return `ToolAction`: normal tools use
 `Control(Finish(...))`.
 
 The `agent_runtime` package owns loop-scoped task-group access and an extensible
-event queue used by stateful tools such as `moon_check`.
+event queue available to stateful tools.
 
 The `agent_session` package owns typed durable conversation state, append-only
 session events, JSON round-tripping, and projection from a session into
@@ -65,7 +65,7 @@ filesystem, and process APIs.
 
 The `cmd/openseek` package is the CLI entry point. It parses arguments and runs
 the agent package. The agent sends DeepSeek native function tools and supports
-six local tools: `shell`, `read`, `edit`, `write`, `moon_check`, and `finish`.
+five local tools: `shell`, `read`, `edit`, `write`, and `finish`.
 
 ```bash
 export DEEPSEEK=sk-...

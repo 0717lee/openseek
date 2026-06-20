@@ -78,8 +78,8 @@ model call or tool execution fails.
 
 `run_turn_in_scope` is the long-lived engine API. The caller owns the
 `AgentRuntime`, `AgentTaskScope`, and usually a `Tools` registry built once with
-`build_tools`. This is the API used by serve mode so `moon_check` watchers and
-queued steering can span turns.
+`build_tools`. This is the API used by serve mode so stateful tools and queued
+steering can span turns.
 
 `steer` queues raw user steering text on an `AgentRuntime`. It does not trim or
 filter. The loop drops blank strings when it drains steering at a step boundary.
@@ -113,16 +113,16 @@ calls `@agent.run`, but that decision lives outside the `agent` package.
 
 `build_tools(runtime, scope)` returns the standard local tool registry:
 
-- `shell`: run a command under the workspace root or an explicit cwd;
+- `shell`: run a command under the workspace root or an explicit cwd (including
+  `moon check` for compiler feedback);
 - `read`: read a text file;
 - `edit`: replace exact text in a file;
 - `write`: overwrite a file;
-- `moon_check`: start/reuse a background `moon check --watch` watcher;
 - `finish`: end the task with a final answer.
 
 File-oriented tools capture `runtime.workspace_root()` when the registry is
-built. `moon_check` also captures the runtime and task scope so it can spawn
-bounded watcher tasks and emit runtime updates.
+built. The registry still receives the runtime and task scope for stateful
+tools, though none currently use them.
 
 ```mbt check
 ///|
@@ -136,7 +136,7 @@ async test "standard tools are registered in dispatch order" {
         for tool in tools.function_tools() => tool.name
       ],
       content=(
-        #|["shell", "read", "edit", "write", "moon_check", "finish"]
+        #|["shell", "read", "edit", "write", "finish"]
       ),
     )
   }
@@ -297,8 +297,8 @@ improving:
   logs through async logging so piped runs such as `2>&1 | tee run.log` receive
   step output promptly.
 - Current MoonBit projects use `moon.mod`; `moon.mod.json` is legacy. Manifest
-  or package-import edits should be followed quickly by `moon_check` or an
-  explicit shell validation command.
+  or package-import edits should be followed quickly by a shell `moon check` or
+  another explicit shell validation command.
 - Use `shell` for exact end-to-end MoonBit command validation beyond compiler
   feedback, especially `moon test`, `moon run`, `moon info`, `moon fmt`, and
   README command checks.
