@@ -1,7 +1,7 @@
 ///|
 /// Tool definition for `write`: overwrites `arguments.path` with
 /// `arguments.content`. Existing files are truncated; missing parent
-/// directories are not created.
+/// directories are created (so `dir/moon.pkg` works without a separate mkdir).
 ///
 /// ## Arguments
 /// - `path` (string, required): filesystem path to write.
@@ -69,6 +69,7 @@ async fn write_file(
         )
       None => ()
     }
+    create_parent_dirs(path)
     @fs.write_file(path, input.content, create_mode=CreateOrTruncate)
     @agent_tool.ToolAction::respond(
       "ok: wrote \{input.content.length()} chars to \{path}",
@@ -82,6 +83,37 @@ async fn write_file(
         "error writing \{path}: \{error}",
         is_error=true,
       )
+  }
+}
+
+///|
+/// Create the parent directory of `path` (recursively) when it is missing, so a
+/// write to `dir/moon.pkg` works without a separate `mkdir`. The path is already
+/// resolved under the workspace root, so this stays inside the workspace.
+/// Best-effort: a genuine failure surfaces from the write itself.
+async fn create_parent_dirs(path : String) -> Unit {
+  let parent = parent_dir(path)
+  if parent != "" && !@fs.exists(parent) {
+    @fs.mkdir(parent, recursive=true) catch {
+      _ => ()
+    }
+  }
+}
+
+///|
+/// The directory portion of `path` (before the last `/` or `\`), or `""` when
+/// the path has no directory component or is at the filesystem root.
+fn parent_dir(path : String) -> String {
+  let cut = match (path.rev_find("/"), path.rev_find("\\")) {
+    (Some(a), Some(b)) => if a > b { a } else { b }
+    (Some(a), None) => a
+    (None, Some(b)) => b
+    (None, None) => -1
+  }
+  if cut <= 0 {
+    ""
+  } else {
+    path[:cut].to_owned()
   }
 }
 
@@ -137,6 +169,26 @@ fn is_moon_mod_json_path(path : String) -> Bool {
 fn is_moon_pkg_path(path : String) -> Bool {
   let path = path.replace_all(old="\\", new="/")
   path == "moon.pkg" || path.has_suffix("/moon.pkg")
+}
+
+///|
+async test "write creates missing parent directories" {
+  @vfs.with_tmpdir(dir => {
+    let path = "\{dir}/pkg/sub/moon.pkg"
+    let result = execute({ "path": path, "content": "import {}\n" })
+    guard result is Respond(output) else { fail("expected Respond") }
+    assert_false(output.is_error)
+    assert_eq(output.content, "ok: wrote 10 chars to \{path}")
+    assert_eq(@fs.read_file(path).text(), "import {}\n")
+  })
+}
+
+///|
+test "parent_dir returns the directory portion" {
+  assert_eq(parent_dir("/a/b/c.txt"), "/a/b")
+  assert_eq(parent_dir("a/b.txt"), "a")
+  assert_eq(parent_dir("file.txt"), "")
+  assert_eq(parent_dir("C:\\ws\\x.txt"), "C:\\ws")
 }
 
 ///|
@@ -256,11 +308,10 @@ async test "write rejects suspiciously tiny moon.pkg" {
 ///|
 async test "write surfaces filesystem errors" {
   @vfs.with_tmpdir(dir => {
-    // The parent directory does not exist, so the write fails.
-    let result = execute({
-      "path": "\{dir}/missing-dir/does-not-exist.txt",
-      "content": "x",
-    })
+    // A parent component that is a regular file cannot be created or written
+    // through, so the write fails (missing parent *directories* are created).
+    @fs.write_file("\{dir}/afile", "x", create_mode=CreateOrTruncate)
+    let result = execute({ "path": "\{dir}/afile/child.txt", "content": "x" })
     guard result is Respond(output) else { fail("expected Respond") }
     assert_true(output.content.contains("error writing"))
     assert_true(output.is_error)
