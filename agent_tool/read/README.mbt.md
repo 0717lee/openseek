@@ -15,7 +15,8 @@ useful context out of the model window.
 
 Ranged or capped reads include a metadata header so the model knows what it saw
 and what it did not see. The body of those headered blocks is line-numbered
-(`number<TAB>text`) to make follow-up edits and focused reads less error-prone.
+(`right-aligned-number| text`) to make follow-up edits and focused reads less
+error-prone.
 Automatic character truncation is marked as a tool error even when the file was
 read successfully; that makes lossy context visible to the loop instead of
 silently pretending the returned prefix is complete.
@@ -69,7 +70,7 @@ character truncation. The string body has one of these shapes:
 - The file's text contents on uncapped whole-file success.
 - A metadata header followed by `---` and line-numbered selected content for
   ranged reads or capped reads. The header includes line and character counts
-  plus `line_format=number<TAB>text` and `truncated=true` when
+  plus `line_format=right-aligned-number| text` and `truncated=true` when
   `max_output_chars` cut the selected content.
 - Headered line-numbered blocks separated by blank lines for multi-file reads. A failed
   file contributes an inline `error reading <path>: <error>` block;
@@ -150,7 +151,7 @@ async test "read tool supports focused range reads" {
     guard result is Respond(output) else { fail("expected Respond") }
     assert_true(output.content.contains("start_line=2"))
     assert_true(output.content.contains("shown_lines=2"))
-    assert_true(output.content.contains("2\tbeta\n3\tgamma"))
+    assert_true(output.content.contains("2| beta\n3| gamma"))
     assert_false(output.is_error)
   })
 }

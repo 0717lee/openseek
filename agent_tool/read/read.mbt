@@ -32,7 +32,7 @@ pub fn definition(
 ) -> @agent_tool.AgentToolDefinition {
   AgentToolDefinition(
     name="read",
-    description="Read arguments.path as text — or several independent files in ONE call via arguments.paths (per-file errors report inline; cheaper than one call per file). Supports optional start_line, max_lines, and max_output_chars for focused single-file reads. Headered outputs include number<TAB>text line numbers.",
+    description="Read arguments.path as text — or several independent files in ONE call via arguments.paths (per-file errors report inline; cheaper than one call per file). Supports optional start_line, max_lines, and max_output_chars for focused single-file reads. Headered outputs include right-aligned line numbers.",
     schema=JsonSchema({
       "type": "object",
       "properties": {
@@ -277,9 +277,12 @@ fn numbered_content(selection : ReadSelection, capped : String) -> String {
 ///|
 fn add_line_numbers(content : String, start_line : Int) -> String {
   let lines = [ for line in content.split("\n") => line.to_owned() ]
+  let last_line = start_line + lines.length() - 1
+  let width = "\{last_line}".length()
   let numbered : Array[String] = []
   for index in 0..<lines.length() {
-    numbered.push("\{start_line + index}\t\{lines[index]}")
+    let line_number = "\{start_line + index}".pad_start(width, ' ')
+    numbered.push("\{line_number}| \{lines[index]}")
   }
   numbered.join("\n")
 }
@@ -303,7 +306,7 @@ fn read_header(
     "shown_chars=\{capped.length()}",
     "line_limited=\{selection.line_limited}",
     "truncated=\{char_truncated}",
-    "line_format=number<TAB>text",
+    "line_format=right-aligned-number| text",
     "---",
     "",
   ].join("\n")
@@ -389,10 +392,10 @@ async test "read returns a requested line range with metadata" {
         "shown_chars=19",
         "line_limited=true",
         "truncated=false",
-        "line_format=number<TAB>text",
+        "line_format=right-aligned-number| text",
         "---",
-        "2\tline two",
-        "3\tline three",
+        "2| line two",
+        "3| line three",
       ].join("\n"),
     )
   })
@@ -419,11 +422,27 @@ async test "read caps oversized output and marks it as an error" {
         "shown_chars=3",
         "line_limited=false",
         "truncated=true",
-        "line_format=number<TAB>text",
+        "line_format=right-aligned-number| text",
         "---",
-        "1\tabc",
+        "1| abc",
       ].join("\n"),
     )
+  })
+}
+
+///|
+async test "line number gutters align to the widest displayed number" {
+  @vfs.with_tmpdir(dir => {
+    let path = "\{dir}/aligned.txt"
+    let content = [ for index in 1..<=111 => "line \{index}" ].join("\n")
+    @fs.write_file(path, content, create_mode=CreateOrTruncate)
+    let result = execute({ "path": path, "start_line": 9, "max_lines": 103 })
+    guard result is Respond(output) else { fail("expected Respond") }
+    assert_false(output.is_error)
+    assert_true(output.content.contains("  9| line 9"))
+    assert_true(output.content.contains(" 99| line 99"))
+    assert_true(output.content.contains("100| line 100"))
+    assert_true(output.content.contains("111| line 111"))
   })
 }
 
@@ -617,7 +636,7 @@ async test "a huge max_lines returns the remaining lines without overflow" {
     })
     guard result is Respond(output) else { fail("expected Respond") }
     assert_false(output.is_error)
-    assert_true(output.content.contains("2\tb\n3\tc"))
+    assert_true(output.content.contains("2| b\n3| c"))
     assert_true(output.content.contains("shown_lines=2"))
   })
 }
