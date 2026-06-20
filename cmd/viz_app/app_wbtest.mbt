@@ -26,6 +26,40 @@ test "parse_load treats a null header as events-only" {
 }
 
 ///|
+test "parse_load appends project layout when header prompt predates it" {
+  let text =
+    #|{"found":true,"events":"","project_layout":"cmd/\n  viz_app/\nviz/","header":{"version":1,"system_prompt":"SYS"}}
+  match parse_load(text) {
+    Loaded(_, system_prompt, header_present) => {
+      inspect(header_present, content="true")
+      assert_true(system_prompt.contains("SYS"))
+      assert_true(system_prompt.contains("Project layout"))
+      assert_true(system_prompt.contains("cmd/\n  viz_app/\nviz/"))
+    }
+    _ => fail("expected Loaded")
+  }
+}
+
+///|
+test "parse_load does not duplicate an existing project layout" {
+  let text =
+    #|{"found":true,"events":"","project_layout":"cmd/","header":{"version":1,"system_prompt":"SYS\n\nProject layout (directories; hidden, build, and vendored dirs omitted):\nold/"}}
+  match parse_load(text) {
+    Loaded(_, system_prompt, _) =>
+      inspect(
+        system_prompt,
+        content=(
+          #|SYS
+          #|
+          #|Project layout (directories; hidden, build, and vendored dirs omitted):
+          #|old/
+        ),
+      )
+    _ => fail("expected Loaded")
+  }
+}
+
+///|
 test "parse_load distinguishes not-found from malformed" {
   guard parse_load("{\"found\":false}") is NotFound else {
     fail("expected NotFound")
