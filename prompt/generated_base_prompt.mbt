@@ -39,7 +39,7 @@ fn base_prompt() -> String {
     #|   - Keep changes inside the correct package, use `///|` top-level delimiters, and split code into cohesive files.
     #|
     #|6. **Validate in a tight loop**
-    #|   - Run `moon check` after edits, adding `--warn-list +unnecessary_annotation` to enable warning 73 for redundant annotations and over-qualified constructors (`--warn-list +73` is equivalent).
+    #|   - Run `moon check` after **every** edit. It type-checks without code generation, so it is much faster than `moon build` or `moon test` — make it your primary, high-frequency feedback signal and run it aggressively. Reach for `moon build`/`moon test` only when you actually need build artifacts or test results. Add `--warn-list +unnecessary_annotation` to enable warning 73 for redundant annotations and over-qualified constructors (`--warn-list +73` is equivalent).
     #|   - Run targeted tests with `moon test [dirname|filename] --filter 'glob'` and use `moon test --update` for snapshot changes.
     #|
     #|7. **Finalize before handoff**
@@ -220,9 +220,10 @@ fn base_prompt() -> String {
     #|  ```
     #|- `moon build` - Build project
     #|  (`moon run` and `moon build` both support `--target`)
-    #|- `moon check` - Type check without building, use it REGULARLY, it is fast
-    #|  (`moon check` also supports `--target` and `--diagnostic-limit <N>`). Run it
-    #|  through `shell` for iterative compiler feedback.
+    #|- `moon check` - Type check without building. It skips code generation, so it
+    #|  is much faster than `moon build` or `moon test`; run it through `shell` after
+    #|  every edit as your primary, high-frequency feedback loop (`moon check` also
+    #|  supports `--target` and `--diagnostic-limit <N>`).
     #|- `moon info` - Type check and generate `mbti` files.
     #|  Run it to see if any public interfaces changed.
     #|  (`moon info` also supports `--target`.)

@@ -31,16 +31,19 @@ fn flash_prompt() -> String {
     #|  - `shell` for all Moon commands, including `moon check` for compiler
     #|    feedback; pass the tool's `cwd` field instead of embedding repeated
     #|    `cd ... &&` strings.
-    #|- Run `moon check` through `shell` near the start of an iterative MoonBit edit
-    #|  loop, after `moon.mod` and the relevant `moon.pkg` files exist, and re-run it
-    #|  after edits for fresh compiler feedback. If a user task asks you to run
+    #|- Run `moon check` through `shell` after **every** edit as your primary
+    #|  feedback loop. It skips code generation, so it is much faster than
+    #|  `moon build` or `moon test` — run it aggressively. Start once `moon.mod` and
+    #|  the relevant `moon.pkg` files exist; use `moon build`/`moon test` only when
+    #|  you need artifacts or test results. If a user task asks you to run
     #|  `moon check`, run it through `shell`.
     #|- Keep reads focused. Use bounded reads for large files and logs.
     #|
     #|Common `moon` subcommands:
     #|
-    #|- shell `moon check [dir]`: type-check for compiler feedback; supports
-    #|  `--target` and `--diagnostic-limit <N>`. Run it regularly, after edits.
+    #|- shell `moon check [dir]`: type-check for compiler feedback; much faster than
+    #|  `moon build`/`moon test` (no codegen). Run it after every edit; supports
+    #|  `--target` and `--diagnostic-limit <N>`.
     #|- shell `moon test`: targeted or full tests; run plain `moon test` before
     #|  `moon test --update`. Example: `moon test parser --filter "Parser::*"
     #|  --diagnostic-limit 20`.
@@ -394,10 +397,10 @@ fn flash_prompt() -> String {
     #|   change.
     #|4. Run task-specific acceptance probes with shell `moon run`.
     #|
-    #|Use exact `moon` subcommands for final validation except raw `moon check`:
-    #|`moon test` for tests, `moon run` for CLI probes, `moon cram test tests/cram`
-    #|for durable CLI transcript fixtures, `moon info` for generated interfaces,
-    #|`moon fmt` for formatting, and `moon build` for build artifacts.
+    #|Use exact `moon` subcommands for final validation: `moon check` for fast
+    #|type-checking, `moon test` for tests, `moon run` for CLI probes, `moon cram
+    #|test tests/cram` for durable CLI transcript fixtures, `moon info` for generated
+    #|interfaces, `moon fmt` for formatting, and `moon build` for build artifacts.
     #|
     #|For CLI work, run probes that cover:
     #|
