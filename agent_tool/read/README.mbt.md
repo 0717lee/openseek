@@ -22,9 +22,9 @@ large generated files and dependency sources can flood the transcript and push
 useful context out of the model window.
 
 Ranged or capped reads include a metadata header so the model knows what it saw
-and what it did not see. The body of those headered blocks is line-numbered
-(`right-aligned-number| text`) to make follow-up edits and focused reads less
-error-prone.
+and what it did not see. The body of those headered blocks is line-numbered as
+`<line-number>\t<content>`, matching the common `cat -n` style used by other
+coding agents.
 Automatic character truncation is marked as a tool error even when the file was
 read successfully; that makes lossy context visible to the loop instead of
 silently pretending the returned prefix is complete.
@@ -71,7 +71,7 @@ character truncation. The string body has one of these shapes:
 - The file's text contents on uncapped whole-file success.
 - A metadata header followed by `---` and line-numbered selected content for
   ranged reads or capped reads. The header includes line and character counts
-  plus `line_format=right-aligned-number| text`; `shown_chars` counts the
+  plus `line_format=<line-number>\t<content>`; `shown_chars` counts the
   rendered numbered body, and `truncated=true` when `max_output_chars` cut that
   rendered body.
 - `"error reading <path>: <error>"` — a single-file read failed. Common
@@ -150,7 +150,7 @@ async test "read tool supports focused range reads" {
     guard result is Respond(output) else { fail("expected Respond") }
     assert_true(output.content.contains("start_line=2"))
     assert_true(output.content.contains("shown_lines=2"))
-    assert_true(output.content.contains("2| beta\n3| gamma"))
+    assert_true(output.content.contains("2\tbeta\n3\tgamma"))
     assert_false(output.is_error)
   })
 }

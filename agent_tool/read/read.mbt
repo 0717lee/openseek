@@ -30,7 +30,7 @@ pub fn definition(
 ) -> @agent_tool.AgentToolDefinition {
   AgentToolDefinition(
     name="read",
-    description="Read arguments.path as text. For several known independent files, batch separate read tool calls in one assistant response when possible. Do not use read for directories: inspect them with `ls` or `tree`, then read specific files. Supports optional start_line, max_lines, and max_output_chars for focused single-file reads. Headered outputs include right-aligned line numbers.",
+    description="Read arguments.path as text. For several known independent files, batch separate read tool calls in one assistant response when possible. Do not use read for directories: inspect them with `ls` or `tree`, then read specific files. Supports optional start_line, max_lines, and max_output_chars for focused single-file reads. Headered outputs use `<line-number>\\t<content>` numbered lines.",
     schema=JsonSchema({
       "type": "object",
       "required": ["path"],
@@ -207,15 +207,12 @@ fn render_numbered_content(
     }
   }
   let lines = [ for line in selection.content.split("\n") => line.to_owned() ]
-  let last_line = selection.start_line + lines.length() - 1
-  let width = "\{last_line}".length()
   let numbered : Array[String] = []
   let mut remaining = max_chars
   let mut truncated = false
   for index in 0..<lines.length() {
     let separator_chars = if numbered.length() == 0 { 0 } else { 1 }
-    let line_number = "\{selection.start_line + index}".pad_start(width, ' ')
-    let prefix = "\{line_number}| "
+    let prefix = "\{selection.start_line + index}\t"
     let prefix_budget = separator_chars + prefix.char_length()
     if remaining < prefix_budget {
       truncated = true
@@ -271,7 +268,7 @@ fn read_header(
     "shown_chars=\{rendered.shown_chars}",
     "line_limited=\{selection.line_limited}",
     "truncated=\{rendered.truncated}",
-    "line_format=right-aligned-number| text",
+    "line_format=<line-number>\\t<content>",
     "---",
     "",
   ].join("\n")
@@ -354,13 +351,13 @@ async test "read returns a requested line range with metadata" {
         "shown_lines=2",
         "file_chars=38",
         "selected_chars=19",
-        "shown_chars=25",
+        "shown_chars=23",
         "line_limited=true",
         "truncated=false",
-        "line_format=right-aligned-number| text",
+        "line_format=<line-number>\\t<content>",
         "---",
-        "2| line two",
-        "3| line three",
+        "2\tline two",
+        "3\tline three",
       ].join("\n"),
     )
   })
@@ -387,9 +384,9 @@ async test "read caps oversized output and marks it as an error" {
         "shown_chars=3",
         "line_limited=false",
         "truncated=true",
-        "line_format=right-aligned-number| text",
+        "line_format=<line-number>\\t<content>",
         "---",
-        "1| ",
+        "1\ta",
       ].join("\n"),
     )
   })
@@ -404,10 +401,10 @@ async test "read caps after adding line number gutters" {
     let result = execute({ "path": path, "max_output_chars": 20 })
     guard result is Respond(output) else { fail("expected Respond") }
     assert_true(output.is_error)
-    assert_true(output.content.contains("shown_chars=17"))
+    assert_true(output.content.contains("shown_chars=19"))
     assert_true(output.content.contains("truncated=true"))
-    assert_true(output.content.contains(" 1| x\n 2| x\n 3| x"))
-    assert_false(output.content.contains(" 4| x"))
+    assert_true(output.content.contains("1\tx\n2\tx\n3\tx\n4\tx\n5\tx"))
+    assert_false(output.content.contains("6\tx"))
   })
 }
 
@@ -416,17 +413,17 @@ async test "read caps unicode content on character boundaries" {
   @vfs.with_tmpdir(dir => {
     let path = "\{dir}/unicode.txt"
     @fs.write_file(path, "😀Z", create_mode=CreateOrTruncate)
-    let result = execute({ "path": path, "max_lines": 1, "max_output_chars": 4 })
+    let result = execute({ "path": path, "max_lines": 1, "max_output_chars": 3 })
     guard result is Respond(output) else { fail("expected Respond") }
     assert_true(output.is_error)
-    assert_true(output.content.contains("shown_chars=4"))
-    assert_true(output.content.contains("1| 😀"))
+    assert_true(output.content.contains("shown_chars=3"))
+    assert_true(output.content.contains("1\t😀"))
     assert_false(output.content.contains("Z"))
   })
 }
 
 ///|
-async test "line number gutters align to the widest displayed number" {
+async test "line number gutters use tab-separated cat-n style" {
   @vfs.with_tmpdir(dir => {
     let path = "\{dir}/aligned.txt"
     let content = [ for index in 1..<=111 => "line \{index}" ].join("\n")
@@ -434,10 +431,14 @@ async test "line number gutters align to the widest displayed number" {
     let result = execute({ "path": path, "start_line": 9, "max_lines": 103 })
     guard result is Respond(output) else { fail("expected Respond") }
     assert_false(output.is_error)
-    assert_true(output.content.contains("  9| line 9"))
-    assert_true(output.content.contains(" 99| line 99"))
-    assert_true(output.content.contains("100| line 100"))
-    assert_true(output.content.contains("111| line 111"))
+    assert_true(
+      output.content.contains("line_format=<line-number>\\t<content>"),
+    )
+    assert_true(output.content.contains("9\tline 9"))
+    assert_true(output.content.contains("99\tline 99"))
+    assert_true(output.content.contains("100\tline 100"))
+    assert_true(output.content.contains("111\tline 111"))
+    assert_false(output.content.contains("| line"))
   })
 }
 
@@ -541,7 +542,7 @@ async test "a huge max_lines returns the remaining lines without overflow" {
     })
     guard result is Respond(output) else { fail("expected Respond") }
     assert_false(output.is_error)
-    assert_true(output.content.contains("2| b\n3| c"))
+    assert_true(output.content.contains("2\tb\n3\tc"))
     assert_true(output.content.contains("shown_lines=2"))
   })
 }
