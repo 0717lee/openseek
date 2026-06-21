@@ -21,6 +21,8 @@ import {
   "moonbitlang/async",
   "moonbitlang/async/http",
   "moonbitlang/async/socket",
+  "moonbitlang/core/json",
+  "tonyfettes/xlog",
 } for "test"
 
 warnings = "+unnecessary_annotation"

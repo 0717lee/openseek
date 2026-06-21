@@ -332,18 +332,11 @@ pub async fn[X] run_turn_in_scope(
       let response = client.chat(
         messages,
         tools=tools.function_tools(),
-        stream=StreamHandler(
-          on_content_delta=delta => {
-            if delta != "" {
-              @xlog.info() <? { "event": "assistant_delta", "content": delta }
-            }
-          },
-          on_reasoning_delta=delta => {
-            if delta != "" {
-              @xlog.info() <? { "event": "reasoning_delta", "content": delta }
-            }
-          },
-        ),
+        stream=StreamHandler(on_content_delta=delta => {
+          if delta != "" {
+            @xlog.info() <? { "event": "assistant_delta", "content": delta }
+          }
+        }),
       )
       // Reasoning first, so a consumer appending events in order shows the
       // thinking above the answer it led to.

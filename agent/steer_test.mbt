@@ -195,3 +195,102 @@ async test "blank steering input is dropped at the boundary" {
     assert_eq(result.events().length(), 3)
   }
 }
+
+///|
+struct MemoryLogHandler {
+  entries : Array[Json]
+}
+
+///|
+impl @xlog.Handler for MemoryLogHandler with fn handle(
+  self : MemoryLogHandler,
+  entry : @xlog.Entry,
+) -> Unit {
+  self.entries.push(entry.to_json())
+}
+
+///|
+fn log_event(entry : Json) -> String {
+  match entry {
+    Object(object) =>
+      match object.get("event") {
+        Some(String(event)) => event
+        _ => ""
+      }
+    _ => ""
+  }
+}
+
+///|
+async fn reasoning_log_test_server(group : @async.TaskGroup[Unit]) -> String? {
+  let server = @http.Server(@socket.Addr::parse("127.0.0.1:0")) catch {
+    error => {
+      let message = "\{error}"
+      if message.contains("Operation not permitted") {
+        println("local TCP bind unavailable; skipping reasoning log test")
+        return None
+      }
+      raise error
+    }
+  }
+  group.spawn_bg(no_wait=true) <| () => {
+    server.run_forever(
+      (_request, body, conn) => {
+        let _ = body.read_all()
+        conn.send_response(200, "OK", extra_headers={
+          "Content-Type": "text/event-stream",
+        })
+        conn.write(
+          "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"I\"}}]}\n\n",
+        )
+        conn.write(
+          "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\" think\"}}]}\n\n",
+        )
+        conn.write(
+          "data: {\"choices\":[{\"delta\":{\"content\":\"done\"}}],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":5,\"total_tokens\":8,\"prompt_cache_hit_tokens\":1,\"prompt_cache_miss_tokens\":2}}\n\n",
+        )
+        conn.write("data: [DONE]\n\n")
+      },
+      max_connections=1,
+    )
+  }
+  Some("http://127.0.0.1:\{server.addr.port()}/chat/completions")
+}
+
+///|
+async test "streaming reasoning deltas are skipped in logs" {
+  @async.with_task_group() <| group => {
+    guard reasoning_log_test_server(group) is Some(url) else { return }
+    let entries : Array[Json] = []
+    let logger = @xlog.global()
+    defer {
+      logger.set_handler(@xlog.Stdout())
+      logger.set_config(Config())
+    }
+    logger.set_handler(MemoryLogHandler::{ entries, })
+    logger.set_level(Info)
+    let session = @agent_session.Session(
+      SessionId("reasoning-log-test"),
+      system_prompt="system",
+    )
+    let result = @agent.run_turn(
+      "test-key",
+      V4Flash,
+      session,
+      "do the task",
+      max_steps=1,
+      api_url=url,
+    )
+    let events = result.events()
+    assert_eq(events.length(), 2)
+    assert_true(events[0].item() is User(_))
+    guard events[1].item() is Terminal(Finished("done")) else {
+      fail("expected a completed one-step turn")
+    }
+    let event_names = entries.map(log_event)
+    assert_false(event_names.contains("reasoning_delta"))
+    assert_true(event_names.contains("reasoning_message"))
+    assert_true(event_names.contains("assistant_delta"))
+    assert_true(event_names.contains("assistant_message"))
+  }
+}
