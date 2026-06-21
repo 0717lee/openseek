@@ -151,6 +151,9 @@ async fn manifest_write_error(path : String, content : String) -> String? {
       return Some("moon.pkg uses current text syntax, not JSON")
     }
   }
+  if is_generated_mbti_path(path) {
+    return Some("generated.mbti is an output file, not a source manifest")
+  }
   None
 }
 
@@ -170,6 +173,12 @@ fn is_moon_mod_json_path(path : String) -> Bool {
 fn is_moon_pkg_path(path : String) -> Bool {
   let path = path.replace_all(old="\\", new="/")
   path == "moon.pkg" || path.has_suffix("/moon.pkg")
+}
+
+///|
+fn is_generated_mbti_path(path : String) -> Bool {
+  let path = path.replace_all(old="\\", new="/")
+  path.has_suffix(".generated.mbti")
 }
 
 ///|
@@ -239,6 +248,13 @@ async test "write manifest guards accept Windows path separators" {
   assert_eq(
     moon_mod_json, "moon.mod.json is legacy; create moon.mod for new MoonBit projects",
   )
+  guard manifest_write_error("C:\\workspace\\pkg.generated.mbti", "...")
+    is Some(generated_mbti) else {
+    fail("expected generated.mbti guard")
+  }
+  assert_eq(
+    generated_mbti, "generated.mbti is an output file, not a source manifest",
+  )
 }
 
 ///|
@@ -288,6 +304,23 @@ async test "write rejects json style moon.mod" {
     guard result is Respond(output) else { fail("expected Respond") }
     assert_true(output.is_error)
     assert_true(output.content.contains("moon.mod uses current text syntax"))
+  })
+}
+
+///|
+async test "write rejects generated interfaces" {
+  @vfs.with_tmpdir(prefix="openseek-write-manifest-", dir => {
+    let path = "\{dir}/pkg.generated.mbti"
+    @fs.write_file(path, "old interface", create_mode=CreateOrTruncate)
+    let result = execute({ "path": path, "content": "new interface" })
+    guard result is Respond(output) else { fail("expected Respond") }
+    assert_true(output.is_error)
+    assert_true(
+      output.content.contains(
+        "generated.mbti is an output file, not a source manifest",
+      ),
+    )
+    assert_eq(@fs.read_file(path).text(), "old interface")
   })
 }
 

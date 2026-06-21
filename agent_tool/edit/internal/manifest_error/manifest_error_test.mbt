@@ -1,6 +1,8 @@
 ///|
 async test "manifest error allows ordinary files" {
   assert_true(@manifest_error.write_error("notes.json", "{}") is None)
+  assert_true(@manifest_error.write_error("not-moon.mod", "{}") is None)
+  assert_true(@manifest_error.write_error("not-moon.pkg", "x") is None)
 }
 
 ///|
@@ -73,5 +75,23 @@ async test "manifest error accepts Windows path separators" {
   }
   assert_eq(
     moon_mod_json, "moon.mod.json is legacy; create moon.mod for new MoonBit projects",
+  )
+}
+
+///|
+async test "manifest error rejects generated interfaces" {
+  guard @manifest_error.write_error("pkg.generated.mbti", "...")
+    is Some(root_error) else {
+    fail("expected generated interface error")
+  }
+  assert_eq(
+    root_error, "generated.mbti is an output file, not a source manifest",
+  )
+  guard @manifest_error.write_error("lib\\pkg.generated.mbti", "...")
+    is Some(windows_error) else {
+    fail("expected generated interface error")
+  }
+  assert_eq(
+    windows_error, "generated.mbti is an output file, not a source manifest",
   )
 }

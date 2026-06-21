@@ -34,23 +34,37 @@ pub async fn write_error(path : String, content : String) -> String? {
       return Some("moon.pkg uses current text syntax, not JSON")
     }
   }
+  if is_generated_mbti_path(path) {
+    return Some("generated.mbti is an output file, not a source manifest")
+  }
   None
 }
 
 ///|
 fn is_moon_mod_path(path : String) -> Bool {
-  let path = path.replace_all(old="\\", new="/")
+  let path = normalized_path(path)
   path == "moon.mod" || path.has_suffix("/moon.mod")
 }
 
 ///|
 fn is_moon_mod_json_path(path : String) -> Bool {
-  let path = path.replace_all(old="\\", new="/")
+  let path = normalized_path(path)
   path == "moon.mod.json" || path.has_suffix("/moon.mod.json")
 }
 
 ///|
 fn is_moon_pkg_path(path : String) -> Bool {
-  let path = path.replace_all(old="\\", new="/")
+  let path = normalized_path(path)
   path == "moon.pkg" || path.has_suffix("/moon.pkg")
+}
+
+///|
+fn is_generated_mbti_path(path : String) -> Bool {
+  let path = normalized_path(path)
+  path.has_suffix(".generated.mbti")
+}
+
+///|
+fn normalized_path(path : String) -> String {
+  path.replace_all(old="\\", new="/")
 }

@@ -35,8 +35,10 @@ complete replacement.
 
 MoonBit manifests get a small extra guardrail because bad manifests poison every
 later compiler diagnostic. New projects should write `moon.mod`, not legacy
-`moon.mod.json`; `moon.mod` and `moon.pkg` rewrites that look empty, JSON-style,
-or suspiciously tiny are rejected before the file is changed.
+`moon.mod.json`; `moon.mod` rewrites that look empty or JSON-style are rejected,
+as are `moon.pkg` rewrites that use JSON-style syntax or `#` comments. Generated
+`*.generated.mbti` interface files are rejected too; refresh them with `moon info`
+instead.
 
 ## Arguments
 
