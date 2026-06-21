@@ -18,7 +18,7 @@ The guard is intentionally narrow and only handles MoonBit manifest paths:
 
 - New `moon.mod.json` files are rejected because that manifest is legacy.
 - `moon.mod` is rejected when it is empty, JSON-shaped, or missing `name =`.
-- `moon.pkg` is rejected when it is suspiciously tiny or JSON-shaped.
+- `moon.pkg` is rejected when it is JSON-shaped or uses `#` comments.
 - `*.generated.mbti` files are rejected because they are generated outputs.
 - Other paths are allowed.
 

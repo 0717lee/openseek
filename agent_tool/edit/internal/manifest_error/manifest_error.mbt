@@ -27,8 +27,10 @@ pub async fn write_error(path : String, content : String) -> String? {
     }
   }
   if is_moon_pkg_path(path) {
-    if trimmed.length() < 8 {
-      return Some("moon.pkg content is suspiciously small")
+    // Tiny moon.pkg files are normal for dummy packages; keep guarding syntax
+    // shapes that are known agent mistakes.
+    if trimmed.has_prefix("#") {
+      return Some("moon.pkg use // for comment syntax, not #")
     }
     if trimmed.has_prefix("{") {
       return Some("moon.pkg uses current text syntax, not JSON")

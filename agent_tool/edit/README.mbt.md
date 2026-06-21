@@ -19,8 +19,8 @@ no-op or explosive edits. The tool is designed for small surgical changes; if a
 file needs a complete rewrite, `write` is the clearer API.
 
 MoonBit manifests get the same safety check as `write`: edits that would create
-legacy `moon.mod.json`, JSON-style `moon.mod`, or suspiciously tiny `moon.pkg`
-content are rejected before the original file is overwritten.
+legacy `moon.mod.json`, JSON-style `moon.mod` or `moon.pkg`, or `moon.pkg` with
+`#` comments are rejected before the original file is overwritten.
 
 ## API Style
 
@@ -65,7 +65,7 @@ has one of these shapes:
 - `"ok: replaced <n> occurrence(s) in <path>"` on success.
 - `"error editing <path>: old_string not found"` — no exact match was found.
 - `"error editing <path>: old_string matched <n> times on lines <line>, ...; set replace_all=true to replace all occurrences"` — the edit was ambiguous.
-- `"error editing <path>: moon.pkg content is suspiciously small"` or similar
+- `"error editing <path>: moon.pkg use // for comment syntax, not #"` or similar
   manifest-guard messages — the replacement would likely break MoonBit package
   discovery.
 - `"error editing <path>: <error>"` — reading or writing failed.

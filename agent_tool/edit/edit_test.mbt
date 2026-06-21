@@ -155,7 +155,7 @@ async test "edit rejects identical replacement" {
 }
 
 ///|
-async test "edit rejects suspicious moon.pkg rewrite" {
+async test "edit rejects invalid moon.pkg comment rewrite" {
   @vfs.with_tmpdir(prefix="openseek-edit-manifest-", dir => {
     let path = "\{dir}/moon.pkg"
     @fs.write_file(
@@ -166,13 +166,13 @@ async test "edit rejects suspicious moon.pkg rewrite" {
     let result = run_edit({
       "path": path,
       "old_string": "warnings = \"+unnecessary_annotation\"",
-      "new_string": "x",
+      "new_string": "# comment",
     })
     let read_back = @fs.read_file(path).text()
     guard result is Respond(output) else { fail("expected Respond") }
     assert_true(output.is_error)
     assert_true(
-      output.content.contains("moon.pkg content is suspiciously small"),
+      output.content.contains("moon.pkg use // for comment syntax, not #"),
     )
     assert_eq(read_back, "warnings = \"+unnecessary_annotation\"")
   })

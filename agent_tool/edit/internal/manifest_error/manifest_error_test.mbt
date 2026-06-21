@@ -44,11 +44,12 @@ async test "manifest error rejects invalid moon.mod content" {
 }
 
 ///|
-async test "manifest error rejects invalid moon.pkg content" {
-  guard @manifest_error.write_error("moon.pkg", "x") is Some(tiny) else {
-    fail("expected tiny moon.pkg error")
+async test "manifest error checks invalid moon.pkg content" {
+  assert_true(@manifest_error.write_error("moon.pkg", "x") is None)
+  guard @manifest_error.write_error("moon.pkg", "# comment") is Some(comment) else {
+    fail("expected moon.pkg comment syntax error")
   }
-  assert_eq(tiny, "moon.pkg content is suspiciously small")
+  assert_eq(comment, "moon.pkg use // for comment syntax, not #")
   guard @manifest_error.write_error("moon.pkg", "{\"import\":[]}") is Some(json) else {
     fail("expected JSON moon.pkg error")
   }
@@ -64,11 +65,14 @@ async test "manifest error accepts Windows path separators" {
     fail("expected moon.mod error")
   }
   assert_eq(moon_mod, "moon.mod uses current text syntax, not JSON")
-  guard @manifest_error.write_error("C:\\workspace\\moon.pkg", "x")
+  assert_true(
+    @manifest_error.write_error("C:\\workspace\\moon.pkg", "x") is None,
+  )
+  guard @manifest_error.write_error("C:\\workspace\\moon.pkg", "# comment")
     is Some(moon_pkg) else {
-    fail("expected moon.pkg error")
+    fail("expected moon.pkg comment syntax error")
   }
-  assert_eq(moon_pkg, "moon.pkg content is suspiciously small")
+  assert_eq(moon_pkg, "moon.pkg use // for comment syntax, not #")
   guard @manifest_error.write_error("C:\\workspace\\moon.mod.json", "{}")
     is Some(moon_mod_json) else {
     fail("expected moon.mod.json error")
