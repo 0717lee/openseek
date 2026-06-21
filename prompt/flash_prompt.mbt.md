@@ -27,7 +27,7 @@ Common `moon` subcommands:
   `--target` and `--diagnostic-limit <N>`.
 - shell `moon test`: targeted or full tests; run plain `moon test` before
   `moon test --update`. Example: `moon test parser --filter "Parser::*"
-  --diagnostic-limit 20`. Filters support glob syntax.
+  --diagnostic-limit 5`. Filters support glob syntax.
 - shell `moon run`: executable package and CLI probes; package path goes before
   `--`, program arguments go after `--`. Example:
   `moon run --target native cmd/tomljson -- /tmp/input.toml`.
@@ -47,7 +47,7 @@ Common `moon` subcommands:
 - shell `moon fmt`: format MoonBit sources before finishing. Example:
   `moon fmt --check parser`.
 - shell `moon build`: check build artifacts or backend-specific builds. Example:
-  `moon build --target native cmd/tool --diagnostic-limit 10`.
+  `moon build --target native cmd/tool --diagnostic-limit 5`.
 - shell `moon doc` and `moon explain`: documentation and diagnostic help.
 - shell `moon ide doc`, `moon ide outline`, `moon ide peek-def`,
   `moon ide find-references`, and `moon ide hover`: semantic navigation.
@@ -90,13 +90,13 @@ Common `moon` subcommands:
 
 Example module:
 
-```
+```moon.mod
 name = "username/project"
 version = "0.1.0"
 preferred_target = "native"
 
 import {
-  "moonbitlang/async@0.19.1",
+  "moonbitlang/async@0.19.1", // import modules(`username/modulename`) with version
 }
 warnings = "+test_unqualified_package" // `moon explain --diagnostic test_unqualified_package` to learn more
 ```
@@ -106,10 +106,10 @@ After adding new module dependencies, run `moon update` from the module root if
 
 Example native CLI package:
 
-```
+```moon.pkg
 import {
   "moonbitlang/async",
-  "moonbitlang/async/fs",
+  "moonbitlang/async/fs", // package
   "moonbitlang/async/stdio",
   "moonbitlang/core/argparse",
 }
