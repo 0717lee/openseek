@@ -10,9 +10,10 @@ generation, so it is much faster than `moon build` or `moon test`. Use
 After `edit` or `write` changes `moon.mod`, `moon.pkg`, `.mbt`, or `.mbt.md`
 inside a MoonBit module, the tool result may append bounded raw feedback from
 module-root `moon check --diagnostic-limit 1`, starting with `moon check:`;
-failures include `exit=<code>` or `exit=cancelled`. Treat it as immediate
-compiler feedback, and run an explicit `moon check` when you need full
-diagnostics.
+failures include `exit=<code>` or `exit=cancelled`. It may also append an
+`analysis:` block that groups repeated unbound value identifiers from
+`moon check --output-json`. Treat this as immediate compiler feedback, and run
+an explicit `moon check` when you need full diagnostics.
 
 When missing local functions or unfinished branches cause a huge cascade of
 `moon check` errors, declare the intended function/method with the right

@@ -11,6 +11,8 @@ test "flash prompt keeps core MoonBit guidance" {
   assert_true(prompt.contains("exit=cancelled"))
   assert_true(prompt.contains(".mbt.md"))
   assert_true(prompt.contains("module-root `moon check --diagnostic-limit 1`"))
+  assert_true(prompt.contains("`analysis:` block"))
+  assert_true(prompt.contains("repeated unbound value identifiers"))
   assert_true(prompt.contains("much faster than"))
   assert_true(prompt.contains("primary"))
   assert_true(prompt.contains("`...` body"))
