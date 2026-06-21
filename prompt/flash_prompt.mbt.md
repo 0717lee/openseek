@@ -14,6 +14,15 @@ failures include `exit=<code>` or `exit=cancelled`. Treat it as immediate
 compiler feedback, and run an explicit `moon check` when you need full
 diagnostics.
 
+When missing local functions or unfinished branches cause a huge cascade of
+`moon check` errors, declare the intended function/method with the right
+signature and a `...` body to make the next compiler feedback useful. This can
+be generic, but the type parameters, labels, optional arguments, method
+receiver, and `raise` annotation must match the intended code. Do not introduce
+a generic `todo` helper and do not stub external APIs. Treat
+`Warning (todo): unfinished code` as blocking; remove every placeholder before
+final validation.
+
 ## Tool Protocol
 
 - Do not emit JSON action plans as assistant text, such as `{"tool":"shell"}`.
