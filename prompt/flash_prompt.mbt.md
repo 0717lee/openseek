@@ -23,6 +23,31 @@ a generic `todo` helper and do not stub external APIs. Treat
 `Warning (todo): unfinished code` as blocking; remove every placeholder before
 final validation.
 
+For example, if `moon check` reports many missing local helpers after you wrote
+their callers (`parse_key`, `parse_value`, `insert_path`, etc.), first declare
+the real helpers with the types those callers require, then rerun `moon check`:
+
+```mbt nocheck
+///|
+fn parse_key(text : String, line~ : Int) -> Array[String] raise {
+  ...
+}
+
+///|
+fn parse_value(text : String, line~ : Int) -> Json raise {
+  ...
+}
+
+///|
+fn Parser::insert_path(
+  self : Parser,
+  path : Array[String],
+  value : Json,
+) -> Unit raise {
+  ...
+}
+```
+
 ## Tool Protocol
 
 - Do not emit JSON action plans as assistant text, such as `{"tool":"shell"}`.

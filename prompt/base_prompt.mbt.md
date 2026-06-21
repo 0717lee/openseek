@@ -37,6 +37,28 @@ For fast, reliable task execution, follow this order:
 6. **Validate in a tight loop**
    - Run `moon check` after **every** edit. It type-checks without code generation, so it is much faster than `moon build` or `moon test` — make it your primary, high-frequency feedback signal and run it aggressively. After `edit` or `write` changes `moon.mod`, `moon.pkg`, `.mbt`, or `.mbt.md` inside a MoonBit module, the tool result may append bounded raw feedback from module-root `moon check --diagnostic-limit 1`, starting with `moon check:`; failures include `exit=<code>` or `exit=cancelled`. Treat it as immediate compiler feedback, and run an explicit `moon check` when you need full diagnostics. Reach for `moon build`/`moon test` only when you actually need build artifacts or test results. Add `--warn-list +unnecessary_annotation` to enable warning 73 for redundant annotations and over-qualified constructors (`--warn-list +73` is equivalent).
    - When missing local functions or unfinished branches cause a huge cascade of `moon check` errors, declare the intended function/method with the right signature and a `...` body to make the next compiler feedback useful. This can be generic, but the type parameters, labels, optional arguments, method receiver, and `raise` annotation must match the intended code. Do not introduce a generic `todo` helper and do not stub external APIs. Treat `Warning (todo): unfinished code` as blocking; remove every placeholder before final validation.
+     For example, if `moon check` reports many missing local helpers after you wrote their callers (`parse_key`, `parse_value`, `insert_path`, etc.), first declare the real helpers with the types those callers require, then rerun `moon check`:
+
+     ```mbt nocheck
+     ///|
+     fn parse_key(text : String, line~ : Int) -> Array[String] raise {
+       ...
+     }
+
+     ///|
+     fn parse_value(text : String, line~ : Int) -> Json raise {
+       ...
+     }
+
+     ///|
+     fn Parser::insert_path(
+       self : Parser,
+       path : Array[String],
+       value : Json,
+     ) -> Unit raise {
+       ...
+     }
+     ```
    - Run targeted tests with `moon test [dirname|filename] --filter 'glob'` and use `moon test --update` for snapshot changes.
 
 7. **Finalize before handoff**
