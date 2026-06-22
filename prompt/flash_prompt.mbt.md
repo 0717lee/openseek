@@ -103,7 +103,11 @@ Common `moon` subcommands:
   inspect private helpers.
 - Top-level MoonBit items are separated by `///|`.
 
-Example module:
+When adding registry dependencies, prefer `moon add moonbitlang/async` or
+`moon add moonbitlang/x` from the module root so MoonBit writes a valid current
+version. Do not guess dependency versions by hand.
+
+Example module skeleton:
 
 ```moon.mod
 name = "username/project"
