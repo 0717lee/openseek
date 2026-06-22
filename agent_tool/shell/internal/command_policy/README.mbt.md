@@ -34,14 +34,17 @@ The policy allows:
 
 ## Detection Strategy
 
-The implementation is deliberately small and conservative:
+The implementation is deliberately conservative:
 
-- Split the shell command into rough words.
-- Skip simple leading environment assignments such as `DEEPSEEK_MODEL=x`.
-- Reject a leading `moon_cmd`.
+- Parse the command with the internal shell policy parser.
+- Reject `moon_cmd` when it is a statically visible simple command name,
+  including in flat compounds such as `cd demo && moon_cmd check`.
+- If parsing is too complex, keep a small fallback for the old leading
+  `moon_cmd` typo case.
 
-This is a heuristic parser, not a full POSIX shell parser. Known hardening work
-is tracked in `agent_tool/shell/TODO.md`.
+This is still not a security sandbox and not a full POSIX shell interpreter.
+Commands whose runtime argv cannot be known statically are allowed unless they
+match the narrow fallback typo check.
 
 ## Examples
 

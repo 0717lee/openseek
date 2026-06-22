@@ -7,18 +7,26 @@
 /// which is pointed back at running `moon ...` directly. The error wording tells
 /// the model what to do instead, because the model is the caller who reads it.
 pub fn moonbit_command_policy_error(cmd : String) -> String? {
-  let words = shell_words(cmd)
-  match first_command_word_index(words) {
-    None => None
-    Some(index) =>
-      if words[index] == "moon_cmd" {
-        Some(
-          "error: moon_cmd is not a shell command; run moon subcommands like `moon check` or `moon test` through shell directly",
-        )
-      } else {
-        None
-      }
+  let parsed = @shell_parse.parse_for_policy(cmd)
+  if @shell_parse.contains_command(parsed, "moon_cmd") {
+    Some(moon_cmd_error_message())
+  } else if parsed is Simple(_) {
+    None
+  } else if rough_first_command_name(cmd) == Some("moon_cmd") {
+    Some(moon_cmd_error_message())
+  } else {
+    None
   }
+}
+
+///|
+fn moon_cmd_error_message() -> String {
+  "error: moon_cmd is not a shell command; run moon subcommands like `moon check` or `moon test` through shell directly"
+}
+
+///|
+fn rough_first_command_name(cmd : String) -> String? {
+  first_command_word(shell_words(cmd))
 }
 
 ///|
@@ -39,10 +47,10 @@ fn clean_shell_word(word : String) -> String {
 }
 
 ///|
-fn first_command_word_index(words : Array[String]) -> Int? {
-  for index, word in words {
+fn first_command_word(words : Array[String]) -> String? {
+  for word in words {
     if !looks_like_env_assignment(word) {
-      return Some(index)
+      return Some(word)
     }
   }
   None
