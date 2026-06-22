@@ -127,7 +127,8 @@ test "tool calls fold their arguments, empty args stay flat" {
   let html = render(@viz.render_session(error_tool_session(), RawLog))
   // A call with arguments folds: the name becomes a <summary>, args hide in the
   // collapsed <details> (no `open` attribute) yet are still in the DOM.
-  assert_true(html.contains("<details class=\"tool-call\">"))
+  // c1 (shell) has args and its result failed, so its fold carries the failed tag.
+  assert_true(html.contains("<details class=\"tool-call tool-call-failed\">"))
   assert_true(html.contains("<summary class=\"tool-call-name\">"))
   assert_true(html.contains("shell"))
   assert_true(html.contains("cmd"))
@@ -183,6 +184,26 @@ test "non-object tool args fall back to JSON in both forms" {
   assert_true(html.contains("class=\"tool-call-args tool-call-args-rendered\""))
   assert_true(html.contains("tool-call-args-original"))
   assert_false(html.contains("arg-key"))
+}
+
+///|
+test "a failed tool call is tagged so errors-only keeps its call card" {
+  // error_tool_session: c1 (shell) failed. Its call gets `tool-call-failed`, the
+  // hook the errors-only stylesheet uses to keep the assistant card holding the
+  // call — so the call cell and the error result cell both stay (not merged).
+  let raw = render(@viz.render_session(error_tool_session(), RawLog))
+  assert_true(raw.contains("tool-call-failed"))
+  let model = render(@viz.render_session(error_tool_session(), ModelView))
+  assert_true(model.contains("tool-call-failed"))
+  // A clean session tags no call as failed.
+  let clean = @viz.session_from_parse(
+    @viz.parse_events(events_jsonl(sample_session())),
+    id="demo",
+    system_prompt="",
+  )
+  assert_false(
+    render(@viz.render_session(clean, RawLog)).contains("tool-call-failed"),
+  )
 }
 
 ///|

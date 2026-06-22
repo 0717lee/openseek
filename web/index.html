@@ -283,8 +283,11 @@
     .error-toggle.active { background: var(--error); color: #fff; border-color: var(--error); }
     .turn-error-badge { color: var(--error); }
     .errors-only-empty { color: var(--muted); margin-top: 24px; }
-    /* errors-only: keep only failed tool cards and the turns that contain them */
-    .session-view.errors-only .card:not(.error) { display: none; }
+    /* errors-only: keep failed tool-result cards AND the assistant card holding the
+       failing call (so the call and its result stay as two cells), plus the turns
+       containing an error; hide everything else. */
+    .session-view.errors-only .card:not(.error):not(.assistant) { display: none; }
+    .session-view.errors-only .card.assistant:not(:has(.tool-call-failed)) { display: none; }
     .session-view.errors-only .turn:not(:has(.card.error)) { display: none; }
 
     /* notices */
@@ -365,6 +368,10 @@
     .tool-call-args-original { display: none; }
     .session-view.show-original .tool-call-args-original { display: block; }
     .session-view.show-original .tool-call-args-rendered { display: none; }
+
+    /* a tool call whose result failed: tint its border so it stands out, and let
+       errors-only keep the assistant card that holds it. */
+    .tool-call-failed { border-color: var(--error); }
 
     /* folded tool-result cards: the label is the toggle, body hides until clicked */
     details.card > summary.card-label { cursor: pointer; }
