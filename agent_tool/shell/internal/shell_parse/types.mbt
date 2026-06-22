@@ -46,8 +46,8 @@ pub(all) struct Redirect {
 ///|
 /// Internal lexer token used by the shell policy parser.
 priv enum Token {
-  Word(String)
-  Op(String)
+  Word(String, Bool)
+  Op(String, Bool)
 }
 
 ///|

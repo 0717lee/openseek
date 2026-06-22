@@ -24,11 +24,13 @@ fn parse_tokens(tokens : Array[Token]) -> ParseResult {
   let mut index = 0
   while index < tokens.length() {
     match tokens[index] {
-      Word(word) => {
+      Word(word, has_quote_or_escape) => {
         pending_separator = None
-        if is_fd_word(word) && index + 1 < tokens.length() {
+        if !has_quote_or_escape &&
+          is_fd_word(word) &&
+          index + 1 < tokens.length() {
           match tokens[index + 1] {
-            Op(next_op) if is_fd_redirect_op(next_op) => {
+            Op(next_op, true) if is_fd_redirect_op(next_op) => {
               let op = "\{word}\{next_op}"
               match parse_redirect_target(tokens, index + 2) {
                 Some((target, next_index)) => {
@@ -45,6 +47,9 @@ fn parse_tokens(tokens : Array[Token]) -> ParseResult {
           }
         }
         if argv.length() == 0 && is_env_assignment_word(word) {
+          if has_quote_or_escape {
+            return TooComplex("quoted environment assignment is not supported")
+          }
           match split_env_assignment(word) {
             Some(assignment) => {
               if assignment_value_may_expand_tilde(assignment.value) {
@@ -65,7 +70,7 @@ fn parse_tokens(tokens : Array[Token]) -> ParseResult {
         saw_part = true
         index += 1
       }
-      Op(op) if is_separator(op) => {
+      Op(op, _) if is_separator(op) => {
         if !saw_part {
           return SyntaxError("operator \{op} has no preceding command")
         }
@@ -77,7 +82,7 @@ fn parse_tokens(tokens : Array[Token]) -> ParseResult {
         pending_separator = Some(op)
         index += 1
       }
-      Op(op) if is_redirect_op(op) => {
+      Op(op, _) if is_redirect_op(op) => {
         pending_separator = None
         match parse_redirect_target(tokens, index + 1) {
           Some((target, next_index)) => {
@@ -88,7 +93,7 @@ fn parse_tokens(tokens : Array[Token]) -> ParseResult {
           None => return SyntaxError("redirection \{op} requires a target")
         }
       }
-      Op(op) => return TooComplex("unsupported shell operator: \{op}")
+      Op(op, _) => return TooComplex("unsupported shell operator: \{op}")
     }
   }
   if !saw_part {
@@ -108,8 +113,8 @@ fn parse_redirect_target(tokens : Array[Token], index : Int) -> (String, Int)? {
     None
   } else {
     match tokens[index] {
-      Word(target) => Some((target, index + 1))
-      Op(_) => None
+      Word(target, _) => Some((target, index + 1))
+      Op(_, _) => None
     }
   }
 }

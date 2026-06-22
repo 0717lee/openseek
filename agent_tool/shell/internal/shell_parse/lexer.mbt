@@ -7,6 +7,7 @@ fn lex(command : String) -> LexResult {
   let tokens : Array[Token] = []
   let mut word = StringBuilder()
   let mut word_empty = true
+  let mut word_has_quote_or_escape = false
   let mut state = Plain
   let mut index = 0
   while index < chars.length() {
@@ -14,9 +15,10 @@ fn lex(command : String) -> LexResult {
     match state {
       Plain => {
         if is_shell_space(ch) {
-          push_word(tokens, word, word_empty)
+          push_word(tokens, word, word_empty, word_has_quote_or_escape)
           word = StringBuilder()
           word_empty = true
+          word_has_quote_or_escape = false
           index += 1
           continue
         }
@@ -24,11 +26,13 @@ fn lex(command : String) -> LexResult {
           '\'' => {
             state = SingleQuoted
             word_empty = false
+            word_has_quote_or_escape = true
             index += 1
           }
           '"' => {
             state = DoubleQuoted
             word_empty = false
+            word_has_quote_or_escape = true
             index += 1
           }
           '\\' => {
@@ -40,6 +44,7 @@ fn lex(command : String) -> LexResult {
             }
             word.write_char(chars[index + 1])
             word_empty = false
+            word_has_quote_or_escape = true
             index += 2
           }
           '$' | '`' => return LexTooComplex("shell expansion is not supported")
@@ -54,68 +59,80 @@ fn lex(command : String) -> LexResult {
           '~' if word_empty =>
             return LexTooComplex("tilde expansion is not supported")
           '&' => {
-            push_word(tokens, word, word_empty)
+            let attached = !word_empty
+            push_word(tokens, word, word_empty, word_has_quote_or_escape)
             word = StringBuilder()
             word_empty = true
+            word_has_quote_or_escape = false
             if peek_char(chars, index + 1) == Some('&') {
-              tokens.push(Op("&&"))
+              tokens.push(Op("&&", attached))
               index += 2
             } else if peek_char(chars, index + 1) == Some('>') {
-              tokens.push(Op("&>"))
+              tokens.push(Op("&>", attached))
               index += 2
             } else {
               return LexTooComplex("background operator is not supported")
             }
           }
           '|' => {
-            push_word(tokens, word, word_empty)
+            let attached = !word_empty
+            push_word(tokens, word, word_empty, word_has_quote_or_escape)
             word = StringBuilder()
             word_empty = true
+            word_has_quote_or_escape = false
             if peek_char(chars, index + 1) == Some('|') {
-              tokens.push(Op("||"))
+              tokens.push(Op("||", attached))
               index += 2
             } else {
-              tokens.push(Op("|"))
+              tokens.push(Op("|", attached))
               index += 1
             }
           }
           ';' => {
-            push_word(tokens, word, word_empty)
+            let attached = !word_empty
+            push_word(tokens, word, word_empty, word_has_quote_or_escape)
             word = StringBuilder()
             word_empty = true
-            tokens.push(Op(";"))
+            word_has_quote_or_escape = false
+            tokens.push(Op(";", attached))
             index += 1
           }
           '>' => {
-            push_word(tokens, word, word_empty)
+            let attached = !word_empty
+            push_word(tokens, word, word_empty, word_has_quote_or_escape)
             word = StringBuilder()
             word_empty = true
+            word_has_quote_or_escape = false
             if peek_char(chars, index + 1) == Some('&') {
-              tokens.push(Op(">&"))
+              tokens.push(Op(">&", attached))
               index += 2
             } else if peek_char(chars, index + 1) == Some('>') {
-              tokens.push(Op(">>"))
+              tokens.push(Op(">>", attached))
               index += 2
             } else {
-              tokens.push(Op(">"))
+              tokens.push(Op(">", attached))
               index += 1
             }
           }
           '<' => {
-            push_word(tokens, word, word_empty)
+            let attached = !word_empty
+            push_word(tokens, word, word_empty, word_has_quote_or_escape)
             word = StringBuilder()
             word_empty = true
+            word_has_quote_or_escape = false
             if peek_char(chars, index + 1) == Some('<') {
               return LexTooComplex("here documents are not supported")
             }
-            tokens.push(Op("<"))
+            tokens.push(Op("<", attached))
             index += 1
           }
           '\n' | '\r' => {
-            push_word(tokens, word, word_empty)
+            let attached = !word_empty
+            push_word(tokens, word, word_empty, word_has_quote_or_escape)
             word = StringBuilder()
             word_empty = true
-            tokens.push(Op(";"))
+            word_has_quote_or_escape = false
+            tokens.push(Op(";", attached))
             index += 1
           }
           _ => {
@@ -155,6 +172,7 @@ fn lex(command : String) -> LexResult {
             if next == '"' || next == '\\' || next == '$' || next == '`' {
               word.write_char(next)
               word_empty = false
+              word_has_quote_or_escape = true
               index += 2
             } else {
               word.write_char(ch)
@@ -174,16 +192,21 @@ fn lex(command : String) -> LexResult {
     SingleQuoted => LexSyntaxError("unterminated single quote")
     DoubleQuoted => LexSyntaxError("unterminated double quote")
     Plain => {
-      push_word(tokens, word, word_empty)
+      push_word(tokens, word, word_empty, word_has_quote_or_escape)
       LexOk(tokens)
     }
   }
 }
 
 ///|
-fn push_word(tokens : Array[Token], word : StringBuilder, empty : Bool) -> Unit {
+fn push_word(
+  tokens : Array[Token],
+  word : StringBuilder,
+  empty : Bool,
+  has_quote_or_escape : Bool,
+) -> Unit {
   if !empty {
-    tokens.push(Word(word.to_string()))
+    tokens.push(Word(word.to_string(), has_quote_or_escape))
   }
 }
 

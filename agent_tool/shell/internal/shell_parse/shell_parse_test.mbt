@@ -79,7 +79,7 @@ test "parse environment assignments and redirects" {
 
 ///|
 test "parse fd qualified input redirects" {
-  guard @shell_parse.parse_for_policy("cmd 0<input 2< err.log")
+  guard @shell_parse.parse_for_policy("cmd 0<input 2<err.log")
     is Simple(commands) else {
     fail("expected fd qualified input redirects")
   }
@@ -89,6 +89,39 @@ test "parse fd qualified input redirects" {
     commands[0].redirects ==
     [{ op: "0<", target: "input" }, { op: "2<", target: "err.log" }],
   )
+}
+
+///|
+test "preserve spaced numeric arguments before redirects" {
+  guard @shell_parse.parse_for_policy("cmd 2 < input 3 > out")
+    is Simple(commands) else {
+    fail("expected spaced numeric arguments and redirects")
+  }
+  assert_eq(commands.length(), 1)
+  assert_true(commands[0].argv == ["cmd", "2", "3"])
+  assert_true(
+    commands[0].redirects ==
+    [{ op: "<", target: "input" }, { op: ">", target: "out" }],
+  )
+  guard @shell_parse.parse_for_policy("cmd 2>out 3>>err") is Simple(attached) else {
+    fail("expected attached fd redirects")
+  }
+  assert_true(attached[0].argv == ["cmd"])
+  assert_true(
+    attached[0].redirects ==
+    [{ op: "2>", target: "out" }, { op: "3>>", target: "err" }],
+  )
+}
+
+///|
+test "keep quoted words out of special shell grammar" {
+  guard @shell_parse.parse_for_policy("cmd \"2\"<input") is Simple(commands) else {
+    fail("expected quoted numeric argument")
+  }
+  assert_true(commands[0].argv == ["cmd", "2"])
+  assert_true(commands[0].redirects == [{ op: "<", target: "input" }])
+  assert_true(@shell_parse.parse_for_policy("A\"\"=x env") is TooComplex(_))
+  assert_true(@shell_parse.parse_for_policy("A\\=x env") is TooComplex(_))
 }
 
 ///|
