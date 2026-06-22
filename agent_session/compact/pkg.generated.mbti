@@ -1,0 +1,20 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "bobzhang/openseek/agent_session/compact"
+
+import {
+  "bobzhang/openseek/agent_session",
+  "bobzhang/openseek/agent_session/store",
+  "bobzhang/openseek/deepseek",
+}
+
+// Values
+pub async fn compact_session(store? : @store.SessionStore, @agent_session.Session, api_key~ : String, model~ : @deepseek.Model, api_url? : String) -> @agent_session.Session
+
+// Errors
+
+// Types and methods
+
+// Type aliases
+
+// Traits
+

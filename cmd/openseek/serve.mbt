@@ -4,17 +4,34 @@
 priv enum ServeCommand {
   Prompt(String)
   Steer(String)
+  Compact
   Cancel
 }
 
 ///|
+/// A queued serve-mode operation that must wait for active work to finish.
+priv enum PendingWork {
+  PendingPrompt(String)
+  PendingCompact
+}
+
+///|
+/// The one operation currently occupying the serve loop. Compaction is a
+/// non-steerable active operation, but it is still cancellable like a turn.
+priv enum ActiveWork {
+  ActiveTurn(@async.Task[Unit])
+  ActiveCompact(@async.Task[Unit])
+}
+
+///|
 /// One unit of work for the serve loop's single consumer: a wire command in
-/// arrival order, the completion of the active turn, or the stdin-EOF
-/// shutdown marker. Funneling all three through one queue is what makes
+/// arrival order, the completion of active work, or the stdin-EOF shutdown
+/// marker. Funneling all three through one queue is what makes
 /// command handling race-free against turn lifecycle.
 priv enum ServeStep {
   Wire(ServeCommand)
   TurnDone
+  CompactDone(@agent_session.Session)
   Shutdown
 }
 
@@ -22,15 +39,18 @@ priv enum ServeStep {
 /// Decode one JSONL command line from the controller.
 ///
 /// `prompt` starts a turn, `steer` injects input into the running one,
-/// `cancel` interrupts it. Anything else is an `Err` whose text is emitted
-/// as a `command_error` event — a controller bug must be visible on the
-/// wire, not silently swallowed, but it must not kill the session either.
+/// `compact` summarizes the current conversation once no work is active, and
+/// `cancel` interrupts the active or next queued prompt. Anything else is an
+/// `Err` whose text is emitted as a `command_error` event — a controller bug
+/// must be visible on the wire, not silently swallowed, but it must not kill
+/// the session either.
 fn decode_serve_command(json : Json) -> Result[ServeCommand, String] {
   match json {
     { "command": "prompt", "text": String(text), .. } => Ok(Prompt(text))
     { "command": "steer", "text": String(text), .. } => Ok(Steer(text))
     { "command": "prompt", .. } | { "command": "steer", .. } =>
       Err("expected a string \"text\" field")
+    { "command": "compact", .. } => Ok(Compact)
     { "command": "cancel", .. } => Ok(Cancel)
     { "command": String(other), .. } => Err("unknown command: \{other}")
     _ => Err("expected a {\"command\": ...} object")
@@ -47,6 +67,7 @@ test "serve commands decode and reject with actionable errors" {
     decode_serve_command({ "command": "steer", "text": "left" })
     is Ok(Steer("left")),
   )
+  assert_true(decode_serve_command({ "command": "compact" }) is Ok(Compact))
   assert_true(decode_serve_command({ "command": "cancel" }) is Ok(Cancel))
   guard decode_serve_command({ "command": "prompt" }) is Err(message) else {
     fail("textless prompt accepted")
@@ -63,6 +84,40 @@ test "serve commands decode and reject with actionable errors" {
 }
 
 ///|
+fn remove_next_pending_prompt(pending : Array[PendingWork]) -> Unit {
+  for index, work in pending {
+    if work is PendingPrompt(_) {
+      ignore(pending.remove(index))
+      return
+    }
+  }
+}
+
+///|
+fn has_pending_prompt(pending : Array[PendingWork]) -> Bool {
+  for work in pending {
+    if work is PendingPrompt(_) {
+      return true
+    }
+  }
+  false
+}
+
+///|
+test "pending prompt helpers ignore queued compactions" {
+  let pending : Array[PendingWork] = []
+  assert_false(has_pending_prompt(pending))
+  pending.push(PendingCompact)
+  assert_false(has_pending_prompt(pending))
+  pending.push(PendingPrompt("next"))
+  assert_true(has_pending_prompt(pending))
+  remove_next_pending_prompt(pending)
+  assert_false(has_pending_prompt(pending))
+  assert_eq(pending.length(), 1)
+  assert_true(pending[0] is PendingCompact)
+}
+
+///|
 /// Run the engine as a long-lived session server: read JSONL commands from
 /// stdin, run turns sequentially against one shared session, and write the
 /// usual JSONL event stream to stdout. This is the engine half of the
@@ -76,8 +131,8 @@ test "serve commands decode and reject with actionable errors" {
 /// submitted) turn; with no turn to land in it is rejected with a
 /// `steer_dropped` event — that only happens by racing the terminal event
 /// through the pipes, and an engine must never start a turn the controller
-/// did not ask for. `cancel` interrupts the current turn but never the
-/// process. stdin EOF is the shutdown signal: the running turn finishes
+/// did not ask for. `cancel` interrupts the current active work but never the
+/// process. stdin EOF is the shutdown signal: the running work finishes
 /// first, then the loop drains and exits.
 async fn run_serve(
   matches : @argparse.Matches,
@@ -113,7 +168,7 @@ async fn run_serve(
   }
   // The live conversation value. `append_item` updates it on every appended
   // event, so even a turn that raises leaves `session` reflecting all the
-  // events it durably recorded before failing.
+  // events it recorded before failing.
   let mut session = initial_session
   @async.with_task_group(group => {
     let runtime = @agent_runtime.AgentRuntime(workspace_root~)
@@ -147,9 +202,21 @@ async fn run_serve(
       }
       steps.try_put(Shutdown) |> ignore
     }
-    let pending : Array[String] = []
-    let mut active_turn : @async.Task[Unit]? = None
+    let pending : Array[PendingWork] = []
+    let mut active_work : ActiveWork? = None
     let mut shutting_down = false
+    async fn compact_and_report(
+      current : @agent_session.Session,
+    ) -> @agent_session.Session {
+      @compact.compact_session(store?, current, api_key~, model~, api_url?) catch {
+        error if @async.is_being_cancelled() ||
+          @async.is_cancellation_error(error) => raise error
+        error => {
+          @xlog.error() <? { "event": "compaction_failed", "error": "\{error}" }
+          current
+        }
+      }
+    }
     fn start_turn(task_text : String) -> @async.Task[Unit] {
       group.spawn() <| () => {
         let _ = @agent.run_turn_in_scope(
@@ -192,6 +259,43 @@ async fn run_serve(
       }
     }
 
+    fn start_compaction(current : @agent_session.Session) -> @async.Task[Unit] {
+      group.spawn() <| () => {
+        let next = compact_and_report(current) catch {
+          error if @async.is_being_cancelled() ||
+            @async.is_cancellation_error(error) => {
+            @xlog.warn() <?
+              { "event": "compaction_failed", "error": "cancelled" }
+            current
+          }
+          error => {
+            @xlog.error() <?
+              { "event": "compaction_failed", "error": "\{error}" }
+            current
+          }
+        }
+        ignore(steps.try_put(CompactDone(next)) catch { _ => false })
+      }
+    }
+
+    fn start_next_pending() -> Unit {
+      pending_loop~: for ;; {
+        if active_work is Some(_) || pending.length() == 0 {
+          break pending_loop~
+        }
+        match pending.remove(0) {
+          PendingPrompt(text) => {
+            active_work = Some(ActiveTurn(start_turn(text)))
+            break pending_loop~
+          }
+          PendingCompact => {
+            active_work = Some(ActiveCompact(start_compaction(session)))
+            break pending_loop~
+          }
+        }
+      }
+    }
+
     serve~: for ;; {
       let step = steps.get() catch {
         error if @async.is_being_cancelled() ||
@@ -200,34 +304,37 @@ async fn run_serve(
       }
       match step {
         Wire(Prompt(text)) =>
-          match active_turn {
+          match active_work {
             // One turn at a time: extra prompts wait their wire-order turn.
-            Some(_) => pending.push(text)
-            None => active_turn = Some(start_turn(text))
+            Some(_) => pending.push(PendingPrompt(text))
+            None => active_work = Some(ActiveTurn(start_turn(text)))
           }
         Wire(Steer(text)) =>
-          if active_turn is Some(_) || pending.length() > 0 {
-            // A turn is running or already submitted ahead of this steer:
-            // the lossless steering queue delivers it at that turn's next
-            // step boundary (or its first, if it has not started yet).
-            @agent.steer(runtime, text)
-          } else {
-            // An idle engine never converts a steer into a prompt: the only
-            // way a steer arrives idle is racing the turn's terminal event
-            // through the pipes, and silently starting a turn the controller
-            // never asked for would mutate the session behind its back.
-            // Reject it on the wire so the controller can ask for a resubmit.
-            @xlog.warn() <? { "event": "steer_dropped", "content": text }
+          match active_work {
+            Some(ActiveTurn(_)) => @agent.steer(runtime, text)
+            Some(ActiveCompact(_)) | None =>
+              if has_pending_prompt(pending) {
+                @agent.steer(runtime, text)
+              } else {
+                @xlog.warn() <? { "event": "steer_dropped", "content": text }
+              }
           }
         Wire(Cancel) =>
-          match active_turn {
-            Some(task) => task.cancel()
+          match active_work {
+            Some(ActiveTurn(task)) => task.cancel()
+            Some(ActiveCompact(task)) => task.cancel()
             None =>
-              // No active turn: in wire order the cancel targets the next
+              // No active work: in wire order the cancel targets the next
               // submitted prompt, so withdraw it before it starts.
               if pending.length() > 0 {
-                let _ = pending.remove(0)
+                remove_next_pending_prompt(pending)
               }
+          }
+        Wire(Compact) =>
+          if active_work is Some(_) {
+            pending.push(PendingCompact)
+          } else {
+            active_work = Some(ActiveCompact(start_compaction(session)))
           }
         TurnDone => {
           // A steer that raced the turn's end (or was queued while it was
@@ -237,16 +344,23 @@ async fn run_serve(
           for text in runtime.drain_steers() {
             @xlog.warn() <? { "event": "steer_dropped", "content": text }
           }
-          active_turn = None
-          if pending.length() > 0 {
-            active_turn = Some(start_turn(pending.remove(0)))
-          } else if shutting_down {
+          active_work = None
+          start_next_pending()
+          if active_work is None && pending.length() == 0 && shutting_down {
+            break serve~
+          }
+        }
+        CompactDone(next) => {
+          session = next
+          active_work = None
+          start_next_pending()
+          if active_work is None && pending.length() == 0 && shutting_down {
             break serve~
           }
         }
         Shutdown => {
           shutting_down = true
-          if active_turn is None && pending.length() == 0 {
+          if active_work is None && pending.length() == 0 {
             break serve~
           }
         }
