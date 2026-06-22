@@ -59,11 +59,12 @@ pub fn render_notices(parsed : @session_log.ParsedLog) -> @html.Html {
 ///|
 fn render_raw(session : @agent_session.Session) -> @html.Html {
   let briefs = tool_call_briefs(session)
+  let failed = raw_failed_call_ids(session)
   let step_labels = agent_step_labels(session)
   let turns = group_turns(session.events())
   let blocks : Array[@html.Html] = []
   for index, turn in turns {
-    blocks.push(turn_block(index + 1, turn, briefs, step_labels))
+    blocks.push(turn_block(index + 1, turn, briefs, failed, step_labels))
   }
   if blocks.is_empty() {
     return empty_state("This session has no events yet.")
@@ -160,6 +161,7 @@ fn turn_block(
   number : Int,
   turn : Array[@agent_session.SessionEvent],
   briefs : Map[String, String],
+  failed : Map[String, Unit],
   step_labels : Map[Int, String],
 ) -> @html.Html {
   // Offsets are relative to the turn's first stamped event: for reading a
@@ -172,6 +174,7 @@ fn turn_block(
         event,
         time=offset_label(base, event),
         briefs,
+        failed,
         step_label=step_labels.get(event.sequence()).unwrap_or(""),
       )
     }
@@ -291,6 +294,7 @@ fn event_card(
   event : @agent_session.SessionEvent,
   time~ : String,
   briefs : Map[String, String],
+  failed : Map[String, Unit],
   step_label~ : String,
 ) -> @html.Html {
   let seq = event.sequence()
@@ -298,7 +302,7 @@ fn event_card(
     User(message) =>
       card("user", "User", seq, time~, [text_block(message.content())])
     Assistant(message) =>
-      assistant_card(seq, time, message, briefs, step_label~)
+      assistant_card(seq, time, message, briefs, failed, step_label~)
     Tool(result) => tool_card(seq, time, result)
     Runtime(notice) =>
       card("runtime", "Runtime notice", seq, time~, [
@@ -315,6 +319,7 @@ fn assistant_card(
   time : String,
   message : @agent_session.AssistantMessage,
   briefs : Map[String, String],
+  failed : Map[String, Unit],
   step_label~ : String,
 ) -> @html.Html {
   let body : Array[@html.Html] = []
@@ -333,7 +338,7 @@ fn assistant_card(
   let calls = message.tool_calls()
   if !calls.is_empty() {
     let call_views : Array[@html.Html] = [
-      for call in calls => tool_call_view(call, briefs)
+      for call in calls => tool_call_view(call, briefs, failed)
     ]
     body.push(@html.div(class="tool-calls", call_views))
   }
@@ -351,9 +356,14 @@ fn assistant_card(
 /// JSON. Only one is visible at a time — the stylesheet shows the friendly form by
 /// default and swaps to the original under `.show-original`, so the raw arguments
 /// stay one toggle away for debugging without re-rendering.
+///
+/// A call whose result failed is tagged `tool-call-failed`, which flags it in the
+/// full view and lets the "errors only" stylesheet keep its assistant card — so a
+/// failure shows the originating call cell alongside the error result cell.
 fn tool_call_view(
   call : @deepseek.ToolCall,
   briefs : Map[String, String],
+  failed : Map[String, Unit],
 ) -> @html.Html {
   let name_row : Array[@html.Html] = [
     @html.text("→ "),
@@ -362,13 +372,16 @@ fn tool_call_view(
   if briefs.get(call.id) is Some(brief) && !brief.trim().is_empty() {
     name_row.push(@html.span(class="tool-call-brief", " · \{brief}"))
   }
+  let cls = if failed.contains(call.id) {
+    "tool-call tool-call-failed"
+  } else {
+    "tool-call"
+  }
   let original = pretty_json(call.arguments)
   if is_blank_args(original) {
-    return @html.div(class="tool-call", [
-      @html.div(class="tool-call-name", name_row),
-    ])
+    return @html.div(class=cls, [@html.div(class="tool-call-name", name_row)])
   }
-  @html.details(class="tool-call", [
+  @html.details(class=cls, [
     @html.summary(class="tool-call-name", name_row),
     render_args_friendly(call.arguments),
     @html.pre(class="tool-call-args tool-call-args-original", original),
@@ -548,6 +561,7 @@ fn render_model(session : @agent_session.Session) -> @html.Html {
   // to the model are unchanged — this is view-only enrichment).
   let tool_results = tool_results_by_id(session)
   let messages = session.chat_messages()
+  let failed = model_failed_call_ids(messages, tool_results)
   let time_labels = model_message_time_labels(session)
   let step_labels = model_message_step_labels(session)
   // Model-view briefs must come only from results the projection actually
@@ -567,7 +581,7 @@ fn render_model(session : @agent_session.Session) -> @html.Html {
       } else {
         ""
       }
-      message_card(message, tool_results, briefs, time~, step_label~)
+      message_card(message, tool_results, failed, briefs, time~, step_label~)
     }
   ]
   if cards.is_empty() {
@@ -789,9 +803,43 @@ fn tool_results_by_id(
 }
 
 ///|
+/// Ids of tool calls whose durable result errored — used to tag the call in the
+/// raw view so "errors only" keeps its assistant card next to the error result.
+fn raw_failed_call_ids(session : @agent_session.Session) -> Map[String, Unit] {
+  let ids : Map[String, Unit] = Map([])
+  for event in session.events() {
+    if event.item() is Tool(result) && result.is_error() {
+      ids.set(result.tool_call_id(), ())
+    }
+  }
+  ids
+}
+
+///|
+/// Ids of tool calls whose result the model view both showed and saw fail (see
+/// `model_shown_result`). Mirrors the model view's error cards so a tagged call
+/// always has a matching error result on screen — a compacted-away failure tags
+/// nothing, just as it draws no error card.
+fn model_failed_call_ids(
+  messages : Array[@deepseek.ChatMessage],
+  tool_results : Map[String, @agent_session.ToolResult],
+) -> Map[String, Unit] {
+  let ids : Map[String, Unit] = Map([])
+  for message in messages {
+    guard message.role is Tool(id) else { continue }
+    if model_shown_result(message, tool_results) is Some(result) &&
+      result.is_error() {
+      ids.set(id, ())
+    }
+  }
+  ids
+}
+
+///|
 fn message_card(
   message : @deepseek.ChatMessage,
   tool_results : Map[String, @agent_session.ToolResult],
+  failed : Map[String, Unit],
   briefs : Map[String, String],
   time~ : String,
   step_label~ : String,
@@ -807,9 +855,18 @@ fn message_card(
           text_block(message.content),
         ]),
       ])
-    User => model_card("user", "User", message, briefs, time~, step_label~)
+    User =>
+      model_card("user", "User", message, briefs, failed, time~, step_label~)
     Assistant =>
-      model_card("assistant", "Assistant", message, briefs, time~, step_label~)
+      model_card(
+        "assistant",
+        "Assistant",
+        message,
+        briefs,
+        failed,
+        time~,
+        step_label~,
+      )
     Tool(_) =>
       model_tool_card(message, model_shown_result(message, tool_results), time~)
   }
@@ -917,6 +974,7 @@ fn model_card(
   label : String,
   message : @deepseek.ChatMessage,
   briefs : Map[String, String],
+  failed : Map[String, Unit],
   time~ : String,
   step_label~ : String,
 ) -> @html.Html {
@@ -935,7 +993,7 @@ fn model_card(
   }
   if !message.tool_calls.is_empty() {
     let call_views : Array[@html.Html] = [
-      for call in message.tool_calls => tool_call_view(call, briefs)
+      for call in message.tool_calls => tool_call_view(call, briefs, failed)
     ]
     body.push(@html.div(class="tool-calls", call_views))
   }
