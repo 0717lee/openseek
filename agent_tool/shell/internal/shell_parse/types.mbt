@@ -46,8 +46,15 @@ pub(all) struct Redirect {
 ///|
 /// Internal lexer token used by the shell policy parser.
 priv enum Token {
-  Word(String, Bool)
+  Word(String, WordMeta)
   Op(String, Bool)
+}
+
+///|
+priv struct WordMeta {
+  has_quote_or_escape : Bool
+  quote_or_escape_before_equals : Bool
+  has_assignment_tilde_expansion : Bool
 }
 
 ///|

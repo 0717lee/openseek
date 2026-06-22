@@ -78,6 +78,32 @@ test "parse environment assignments and redirects" {
 }
 
 ///|
+test "parse quoted and escaped environment assignment values" {
+  guard @shell_parse.parse_for_policy("FOO=\"bar baz\" PATH=\\~/bin moon check")
+    is Simple(commands) else {
+    fail("expected quoted assignment values")
+  }
+  assert_eq(commands.length(), 1)
+  assert_true(
+    commands[0].env ==
+    [{ name: "FOO", value: "bar baz" }, { name: "PATH", value: "~/bin" }],
+  )
+  assert_true(commands[0].argv == ["moon", "check"])
+  guard @shell_parse.parse_for_policy("FOO=bar\\ baz moon check")
+    is Simple(escaped) else {
+    fail("expected escaped assignment value")
+  }
+  assert_true(escaped[0].env == [{ name: "FOO", value: "bar baz" }])
+  assert_true(escaped[0].argv == ["moon", "check"])
+  guard @shell_parse.parse_for_policy("HOME=\"~\" moon check")
+    is Simple(quoted_tilde) else {
+    fail("expected quoted tilde assignment value")
+  }
+  assert_true(quoted_tilde[0].env == [{ name: "HOME", value: "~" }])
+  assert_true(quoted_tilde[0].argv == ["moon", "check"])
+}
+
+///|
 test "parse fd qualified input redirects" {
   guard @shell_parse.parse_for_policy("cmd 0<input 2<err.log")
     is Simple(commands) else {
@@ -122,6 +148,7 @@ test "keep quoted words out of special shell grammar" {
   assert_true(commands[0].redirects == [{ op: "<", target: "input" }])
   assert_true(@shell_parse.parse_for_policy("A\"\"=x env") is TooComplex(_))
   assert_true(@shell_parse.parse_for_policy("A\\=x env") is TooComplex(_))
+  assert_true(@shell_parse.parse_for_policy("\"A\"=x env") is TooComplex(_))
 }
 
 ///|
@@ -219,6 +246,9 @@ test "return too complex for runtime expansion and shell structures" {
   assert_true(@shell_parse.parse_for_policy("HOME=~ cmd") is TooComplex(_))
   assert_true(
     @shell_parse.parse_for_policy("PATH=/bin:~/bin cmd") is TooComplex(_),
+  )
+  assert_true(
+    @shell_parse.parse_for_policy("HOME=~/\"quoted\" cmd") is TooComplex(_),
   )
 }
 

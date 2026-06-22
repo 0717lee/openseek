@@ -8,6 +8,10 @@ fn lex(command : String) -> LexResult {
   let mut word = StringBuilder()
   let mut word_empty = true
   let mut word_has_quote_or_escape = false
+  let mut word_quote_or_escape_before_equals = false
+  let mut word_seen_unquoted_equals = false
+  let mut word_assignment_tilde_candidate = false
+  let mut word_has_assignment_tilde_expansion = false
   let mut state = Plain
   let mut index = 0
   while index < chars.length() {
@@ -15,10 +19,17 @@ fn lex(command : String) -> LexResult {
     match state {
       Plain => {
         if is_shell_space(ch) {
-          push_word(tokens, word, word_empty, word_has_quote_or_escape)
+          push_word(
+            tokens, word, word_empty, word_has_quote_or_escape, word_quote_or_escape_before_equals,
+            word_has_assignment_tilde_expansion,
+          )
           word = StringBuilder()
           word_empty = true
           word_has_quote_or_escape = false
+          word_quote_or_escape_before_equals = false
+          word_seen_unquoted_equals = false
+          word_assignment_tilde_candidate = false
+          word_has_assignment_tilde_expansion = false
           index += 1
           continue
         }
@@ -27,12 +38,20 @@ fn lex(command : String) -> LexResult {
             state = SingleQuoted
             word_empty = false
             word_has_quote_or_escape = true
+            if !word_seen_unquoted_equals {
+              word_quote_or_escape_before_equals = true
+            }
+            word_assignment_tilde_candidate = false
             index += 1
           }
           '"' => {
             state = DoubleQuoted
             word_empty = false
             word_has_quote_or_escape = true
+            if !word_seen_unquoted_equals {
+              word_quote_or_escape_before_equals = true
+            }
+            word_assignment_tilde_candidate = false
             index += 1
           }
           '\\' => {
@@ -45,6 +64,10 @@ fn lex(command : String) -> LexResult {
             word.write_char(chars[index + 1])
             word_empty = false
             word_has_quote_or_escape = true
+            if !word_seen_unquoted_equals {
+              word_quote_or_escape_before_equals = true
+            }
+            word_assignment_tilde_candidate = false
             index += 2
           }
           '$' | '`' => return LexTooComplex("shell expansion is not supported")
@@ -60,10 +83,17 @@ fn lex(command : String) -> LexResult {
             return LexTooComplex("tilde expansion is not supported")
           '&' => {
             let attached = !word_empty
-            push_word(tokens, word, word_empty, word_has_quote_or_escape)
+            push_word(
+              tokens, word, word_empty, word_has_quote_or_escape, word_quote_or_escape_before_equals,
+              word_has_assignment_tilde_expansion,
+            )
             word = StringBuilder()
             word_empty = true
             word_has_quote_or_escape = false
+            word_quote_or_escape_before_equals = false
+            word_seen_unquoted_equals = false
+            word_assignment_tilde_candidate = false
+            word_has_assignment_tilde_expansion = false
             if peek_char(chars, index + 1) == Some('&') {
               tokens.push(Op("&&", attached))
               index += 2
@@ -76,10 +106,17 @@ fn lex(command : String) -> LexResult {
           }
           '|' => {
             let attached = !word_empty
-            push_word(tokens, word, word_empty, word_has_quote_or_escape)
+            push_word(
+              tokens, word, word_empty, word_has_quote_or_escape, word_quote_or_escape_before_equals,
+              word_has_assignment_tilde_expansion,
+            )
             word = StringBuilder()
             word_empty = true
             word_has_quote_or_escape = false
+            word_quote_or_escape_before_equals = false
+            word_seen_unquoted_equals = false
+            word_assignment_tilde_candidate = false
+            word_has_assignment_tilde_expansion = false
             if peek_char(chars, index + 1) == Some('|') {
               tokens.push(Op("||", attached))
               index += 2
@@ -90,19 +127,33 @@ fn lex(command : String) -> LexResult {
           }
           ';' => {
             let attached = !word_empty
-            push_word(tokens, word, word_empty, word_has_quote_or_escape)
+            push_word(
+              tokens, word, word_empty, word_has_quote_or_escape, word_quote_or_escape_before_equals,
+              word_has_assignment_tilde_expansion,
+            )
             word = StringBuilder()
             word_empty = true
             word_has_quote_or_escape = false
+            word_quote_or_escape_before_equals = false
+            word_seen_unquoted_equals = false
+            word_assignment_tilde_candidate = false
+            word_has_assignment_tilde_expansion = false
             tokens.push(Op(";", attached))
             index += 1
           }
           '>' => {
             let attached = !word_empty
-            push_word(tokens, word, word_empty, word_has_quote_or_escape)
+            push_word(
+              tokens, word, word_empty, word_has_quote_or_escape, word_quote_or_escape_before_equals,
+              word_has_assignment_tilde_expansion,
+            )
             word = StringBuilder()
             word_empty = true
             word_has_quote_or_escape = false
+            word_quote_or_escape_before_equals = false
+            word_seen_unquoted_equals = false
+            word_assignment_tilde_candidate = false
+            word_has_assignment_tilde_expansion = false
             if peek_char(chars, index + 1) == Some('&') {
               tokens.push(Op(">&", attached))
               index += 2
@@ -116,10 +167,17 @@ fn lex(command : String) -> LexResult {
           }
           '<' => {
             let attached = !word_empty
-            push_word(tokens, word, word_empty, word_has_quote_or_escape)
+            push_word(
+              tokens, word, word_empty, word_has_quote_or_escape, word_quote_or_escape_before_equals,
+              word_has_assignment_tilde_expansion,
+            )
             word = StringBuilder()
             word_empty = true
             word_has_quote_or_escape = false
+            word_quote_or_escape_before_equals = false
+            word_seen_unquoted_equals = false
+            word_assignment_tilde_candidate = false
+            word_has_assignment_tilde_expansion = false
             if peek_char(chars, index + 1) == Some('<') {
               return LexTooComplex("here documents are not supported")
             }
@@ -128,16 +186,34 @@ fn lex(command : String) -> LexResult {
           }
           '\n' | '\r' => {
             let attached = !word_empty
-            push_word(tokens, word, word_empty, word_has_quote_or_escape)
+            push_word(
+              tokens, word, word_empty, word_has_quote_or_escape, word_quote_or_escape_before_equals,
+              word_has_assignment_tilde_expansion,
+            )
             word = StringBuilder()
             word_empty = true
             word_has_quote_or_escape = false
+            word_quote_or_escape_before_equals = false
+            word_seen_unquoted_equals = false
+            word_assignment_tilde_candidate = false
+            word_has_assignment_tilde_expansion = false
             tokens.push(Op(";", attached))
             index += 1
           }
           _ => {
+            if word_assignment_tilde_candidate && ch == '~' {
+              word_has_assignment_tilde_expansion = true
+            }
             word.write_char(ch)
             word_empty = false
+            if ch == '=' && !word_seen_unquoted_equals {
+              word_seen_unquoted_equals = true
+              word_assignment_tilde_candidate = true
+            } else if word_seen_unquoted_equals && ch == ':' {
+              word_assignment_tilde_candidate = true
+            } else {
+              word_assignment_tilde_candidate = false
+            }
             index += 1
           }
         }
@@ -173,6 +249,10 @@ fn lex(command : String) -> LexResult {
               word.write_char(next)
               word_empty = false
               word_has_quote_or_escape = true
+              if !word_seen_unquoted_equals {
+                word_quote_or_escape_before_equals = true
+              }
+              word_assignment_tilde_candidate = false
               index += 2
             } else {
               word.write_char(ch)
@@ -192,7 +272,10 @@ fn lex(command : String) -> LexResult {
     SingleQuoted => LexSyntaxError("unterminated single quote")
     DoubleQuoted => LexSyntaxError("unterminated double quote")
     Plain => {
-      push_word(tokens, word, word_empty, word_has_quote_or_escape)
+      push_word(
+        tokens, word, word_empty, word_has_quote_or_escape, word_quote_or_escape_before_equals,
+        word_has_assignment_tilde_expansion,
+      )
       LexOk(tokens)
     }
   }
@@ -204,9 +287,17 @@ fn push_word(
   word : StringBuilder,
   empty : Bool,
   has_quote_or_escape : Bool,
+  quote_or_escape_before_equals : Bool,
+  has_assignment_tilde_expansion : Bool,
 ) -> Unit {
   if !empty {
-    tokens.push(Word(word.to_string(), has_quote_or_escape))
+    tokens.push(
+      Word(word.to_string(), {
+        has_quote_or_escape,
+        quote_or_escape_before_equals,
+        has_assignment_tilde_expansion,
+      }),
+    )
   }
 }
 

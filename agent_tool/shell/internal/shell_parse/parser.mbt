@@ -24,9 +24,9 @@ fn parse_tokens(tokens : Array[Token]) -> ParseResult {
   let mut index = 0
   while index < tokens.length() {
     match tokens[index] {
-      Word(word, has_quote_or_escape) => {
+      Word(word, meta) => {
         pending_separator = None
-        if !has_quote_or_escape &&
+        if !meta.has_quote_or_escape &&
           is_fd_word(word) &&
           index + 1 < tokens.length() {
           match tokens[index + 1] {
@@ -47,12 +47,14 @@ fn parse_tokens(tokens : Array[Token]) -> ParseResult {
           }
         }
         if argv.length() == 0 && is_env_assignment_word(word) {
-          if has_quote_or_escape {
-            return TooComplex("quoted environment assignment is not supported")
+          if meta.quote_or_escape_before_equals {
+            return TooComplex(
+              "quoted environment assignment name is not supported",
+            )
           }
           match split_env_assignment(word) {
             Some(assignment) => {
-              if assignment_value_may_expand_tilde(assignment.value) {
+              if meta.has_assignment_tilde_expansion {
                 return TooComplex(
                   "tilde expansion in environment assignment is not supported",
                 )
@@ -198,11 +200,6 @@ fn split_env_assignment(word : String) -> EnvAssignment? {
     }
   }
   Some({ name, value: values.join("=") })
-}
-
-///|
-fn assignment_value_may_expand_tilde(value : String) -> Bool {
-  value.has_prefix("~") || value.contains(":~")
 }
 
 ///|
