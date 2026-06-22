@@ -23,10 +23,12 @@ fn lex(command : String) -> LexResult {
         match ch {
           '\'' => {
             state = SingleQuoted
+            word_empty = false
             index += 1
           }
           '"' => {
             state = DoubleQuoted
+            word_empty = false
             index += 1
           }
           '\\' => {

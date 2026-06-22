@@ -28,7 +28,7 @@ fn parse_tokens(tokens : Array[Token]) -> ParseResult {
         pending_separator = None
         if is_fd_word(word) && index + 1 < tokens.length() {
           match tokens[index + 1] {
-            Op(next_op) if next_op == ">" || next_op == ">>" || next_op == ">&" => {
+            Op(next_op) if is_fd_redirect_op(next_op) => {
               let op = "\{word}\{next_op}"
               match parse_redirect_target(tokens, index + 2) {
                 Some((target, next_index)) => {
@@ -46,7 +46,14 @@ fn parse_tokens(tokens : Array[Token]) -> ParseResult {
         }
         if argv.length() == 0 && is_env_assignment_word(word) {
           match split_env_assignment(word) {
-            Some(assignment) => env.push(assignment)
+            Some(assignment) => {
+              if assignment_value_may_expand_tilde(assignment.value) {
+                return TooComplex(
+                  "tilde expansion in environment assignment is not supported",
+                )
+              }
+              env.push(assignment)
+            }
             None => argv.push(word)
           }
         } else {
@@ -152,6 +159,11 @@ fn is_redirect_op(op : String) -> Bool {
 }
 
 ///|
+fn is_fd_redirect_op(op : String) -> Bool {
+  op == ">" || op == ">>" || op == ">&" || op == "<"
+}
+
+///|
 fn is_fd_word(word : String) -> Bool {
   if word == "" {
     return false
@@ -181,6 +193,11 @@ fn split_env_assignment(word : String) -> EnvAssignment? {
     }
   }
   Some({ name, value: values.join("=") })
+}
+
+///|
+fn assignment_value_may_expand_tilde(value : String) -> Bool {
+  value.has_prefix("~") || value.contains(":~")
 }
 
 ///|

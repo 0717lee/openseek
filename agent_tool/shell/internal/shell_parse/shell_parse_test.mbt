@@ -40,6 +40,20 @@ test "parse quotes and backslash escapes without expansion" {
 }
 
 ///|
+test "preserve empty quoted words" {
+  guard @shell_parse.parse_for_policy("cmd \"\" '' arg") is Simple(commands) else {
+    fail("expected empty quoted words")
+  }
+  assert_eq(commands.length(), 1)
+  assert_true(commands[0].argv == ["cmd", "", "", "arg"])
+  guard @shell_parse.parse_for_policy("\"\" moon") is Simple(empty_name) else {
+    fail("expected empty command word")
+  }
+  assert_true(empty_name[0].argv == ["", "moon"])
+  assert_true(!@shell_parse.contains_command(Simple(empty_name), "moon"))
+}
+
+///|
 test "parse environment assignments and redirects" {
   guard @shell_parse.parse_for_policy(
       "FOO=bar JSON=a=b moon run cmd/main > out.json 2>> err.log 2>&1",
@@ -60,6 +74,20 @@ test "parse environment assignments and redirects" {
       { op: "2>>", target: "err.log" },
       { op: "2>&", target: "1" },
     ],
+  )
+}
+
+///|
+test "parse fd qualified input redirects" {
+  guard @shell_parse.parse_for_policy("cmd 0<input 2< err.log")
+    is Simple(commands) else {
+    fail("expected fd qualified input redirects")
+  }
+  assert_eq(commands.length(), 1)
+  assert_true(commands[0].argv == ["cmd"])
+  assert_true(
+    commands[0].redirects ==
+    [{ op: "0<", target: "input" }, { op: "2<", target: "err.log" }],
   )
 }
 
@@ -154,6 +182,10 @@ test "return too complex for runtime expansion and shell structures" {
   assert_true(@shell_parse.parse_for_policy("moon \\\ncheck") is TooComplex(_))
   assert_true(
     @shell_parse.parse_for_policy("eval 'moon check'") is TooComplex(_),
+  )
+  assert_true(@shell_parse.parse_for_policy("HOME=~ cmd") is TooComplex(_))
+  assert_true(
+    @shell_parse.parse_for_policy("PATH=/bin:~/bin cmd") is TooComplex(_),
   )
 }
 
