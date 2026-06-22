@@ -1,0 +1,28 @@
+{
+  "name": "compaction_resume_recall",
+  "models": [
+    "deepseek-v4-flash"
+  ],
+  "runs_per_combo": 5,
+  "concurrency": 5,
+  "min_successes": 5,
+  "max_steps": 160,
+  "problems": [
+    {
+      "id": "compaction_resume_recall",
+      "prompt_label": "compaction-resume",
+      "task_file": "../../prompt_tasks/compaction_resume_recall.md",
+      "validation_probes": [
+        {
+          "name": "compaction recall answer",
+          "command": [
+            "cat",
+            ".openseek-compaction-answer.txt"
+          ],
+          "expect_exit": 0,
+          "stdout_contains": "ORCHID-742"
+        }
+      ]
+    }
+  ]
+}

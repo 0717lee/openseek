@@ -380,7 +380,7 @@ async fn run_suite_job(
   suite : SuiteConfig,
   job : SuiteJob,
 ) -> SuiteTrialArtifact {
-  let task_template = @fs.read_file(job.problem.task_file).text()
+  let task = parse_trial_task(@fs.read_file(job.problem.task_file).text())
   let config = Config(
     api_key=suite.api_key,
     model=job.model,
@@ -401,7 +401,7 @@ async fn run_suite_job(
   {
     model: job.model.to_string(),
     problem_id: job.problem.id,
-    artifact: run_trial(config, task_template, job.repeat_index),
+    artifact: run_trial(config, task, job.repeat_index),
   }
 }
 

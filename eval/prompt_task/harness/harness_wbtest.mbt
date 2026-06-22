@@ -26,6 +26,53 @@ async test "indexed runner honors concurrency and preserves order" {
 }
 
 ///|
+test "trial task parser keeps single-stage tasks unchanged" {
+  match parse_trial_task("hello\nworld\n") {
+    Single(task) => assert_eq(task, "hello\nworld\n")
+    Compact(_) => fail("unexpected compact task")
+  }
+}
+
+///|
+test "trial task parser splits one compact delimiter" {
+  match parse_trial_task(" phase 1 \n--COMPACT--\n phase 2 ") {
+    Compact(phases) => json_inspect(phases, content=["phase 1", "phase 2"])
+    Single(_) => fail("expected compact task")
+  }
+}
+
+///|
+test "trial task parser accepts multiple compact delimiters" {
+  match
+    parse_trial_task(
+      " phase 1 \n--COMPACT--\n phase 2 \n--COMPACT--\n phase 3 ",
+    ) {
+    Compact(phases) =>
+      json_inspect(phases, content=["phase 1", "phase 2", "phase 3"])
+    Single(_) => fail("expected compact task")
+  }
+}
+
+///|
+fn assert_empty_compact_phase_rejected(input : String) -> Unit raise {
+  let _ = parse_trial_task(input) catch {
+    Failure::Failure(message) => {
+      assert_true(message.contains("empty phase"))
+      return
+    }
+    _ => fail("unexpected error")
+  }
+  fail("accepted empty compact phase")
+}
+
+///|
+test "trial task parser rejects empty compact phases" {
+  assert_empty_compact_phase_rejected("--COMPACT--\nphase")
+  assert_empty_compact_phase_rejected("phase\n--COMPACT--")
+  assert_empty_compact_phase_rejected("a\n--COMPACT--\n\n--COMPACT--\nb")
+}
+
+///|
 test "trial environment pins workspace-local session root" {
   let config = Config(
     api_key="key",

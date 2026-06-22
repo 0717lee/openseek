@@ -42,6 +42,25 @@ moon run --target native eval/prompt_task/cmd/main -- \
   --out .moonagent/eval_runs/toml_flash_current_5x
 ```
 
+Run the compaction resume benchmark:
+
+```bash
+moon run --target native eval/prompt_task/cmd/main -- \
+  --api-key "$DEEPSEEK" \
+  --suite-file eval/prompt_task/suites/compaction_resume_recall.json \
+  --out .moonagent/eval_runs/compaction_resume_recall \
+  --repo-root .
+```
+
+If a task file contains one or more `--COMPACT--` delimiter lines, the runner
+splits it into phases, executes each phase in the same durable session, and
+sends `{"command":"compact"}` through `openseek --serve` between adjacent
+phases. Empty phases are rejected. Task files without that delimiter keep the
+regular single-prompt behavior. Completed runs can be reanalyzed with the
+existing `--analyze-only` command. The suite above supplies the recall-specific
+validation probe; direct `--task-file` runs keep the runner's existing default
+TOML validation.
+
 Run a multi-problem suite:
 
 ```bash

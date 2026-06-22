@@ -1,4 +1,78 @@
 ///|
+const CompactDelimiter : String = "\n--COMPACT--\n"
+
+///|
+priv enum TrialTask {
+  Single(String)
+  Compact(Array[String])
+}
+
+///|
+fn parse_trial_task(task_template : String) -> TrialTask raise {
+  let bounded = "\n\{task_template}\n"
+  if !bounded.contains(CompactDelimiter) {
+    return Single(task_template)
+  }
+  let phases = [
+    for part in bounded.split(CompactDelimiter) => {
+      let phase = part.trim().to_owned()
+      if phase.is_empty() {
+        fail("task file contains an empty phase around --COMPACT--")
+      }
+      phase
+    }
+  ]
+  Compact(phases)
+}
+
+///|
+async fn run_compact_task(
+  config : Config,
+  phases : Array[String],
+  session_id~ : String,
+  workspace~ : String,
+  repo_root~ : String,
+  log_path~ : String,
+) -> Int {
+  let log = StringBuilder::new()
+  let mut exit_code = 0
+  let phase_count = phases.length()
+  for index, phase in phases {
+    let phase_prompt = replace_workspace(phase, workspace)
+    let phase_result = run_openseek_turn(
+      config,
+      phase_prompt,
+      session_id~,
+      workspace~,
+      repo_root~,
+    )
+    append_log_section(log, "phase\{index + 1}", phase_result)
+    if exit_code == 0 && phase_result.0 != 0 {
+      exit_code = phase_result.0
+    }
+    if index + 1 < phase_count {
+      let compact_result = run_compaction(
+        config,
+        session_id~,
+        workspace~,
+        repo_root~,
+      )
+      let label = if phase_count == 2 {
+        "compact"
+      } else {
+        "compact\{index + 1}"
+      }
+      append_log_section(log, label, compact_result)
+      if exit_code == 0 && compact_result.0 != 0 {
+        exit_code = compact_result.0
+      }
+    }
+  }
+  @fs.write_file(log_path, log.to_string(), create_mode=CreateOrTruncate)
+  exit_code
+}
+
+///|
 /// Run the prompt task `config.runs` times, `config.concurrency` at a time,
 /// writing only durable artifacts: workspaces, raw process logs, recorded
 /// session `events.jsonl` files, and a run manifest. No validation or report
@@ -7,10 +81,10 @@ pub async fn run_experiments(config : Config) -> RunManifest {
   if config.api_key == "" {
     fail("api_key is required for running trials")
   }
+  let task = parse_trial_task(@fs.read_file(config.task_file).text())
   prepare_output_dir(config.out_dir)
-  let task_template = @fs.read_file(config.task_file).text()
   let trials = run_indexed_with_concurrency(config.runs, config.concurrency, index => {
-    run_trial(config, task_template, index)
+    run_trial(config, task, index)
   })
   let manifest = RunManifest(
     model=config.model.to_string(),
@@ -61,7 +135,7 @@ async fn[X] run_indexed_with_concurrency(
 ///|
 async fn run_trial(
   config : Config,
-  task_template : String,
+  task : TrialTask,
   index : Int,
 ) -> TrialArtifact {
   let trial_name = padded_index(index + 1)
@@ -69,44 +143,19 @@ async fn run_trial(
   @fs.mkdir(workspace, recursive=true)
   let real_workspace = @fs.realpath(workspace)
   let session_id = "trial-\{trial_name}"
-  let task = task_template.replace_all(old="{{WORKSPACE}}", new=real_workspace)
   // The engine runs from the OpenSeek checkout and receives --dir for the
   // isolated trial workspace. This keeps launcher-relative paths stable while
   // ensuring the agent's session store and tool cwd live under the workspace.
   let repo_root = @fs.realpath(config.repo_root)
-  let (program, args) = if config.engine != "" {
-    (@fs.realpath(config.engine), [])
-  } else {
-    ("moon", ["run", "--target", "native", "\{repo_root}/cmd/openseek", "--"])
-  }
-  args.append([
-    "--max-steps",
-    config.max_steps.to_string(),
-    "--model",
-    config.model.to_string(),
-    "--dir",
-    real_workspace,
-    "--session",
-    session_id,
-  ])
-  if config.system_prompt_file != "" {
-    args.push("--system-prompt-file")
-    args.push(@fs.realpath(config.system_prompt_file))
-  }
-  if config.system_prompt_addendum_file != "" {
-    args.push("--system-prompt-addendum-file")
-    args.push(@fs.realpath(config.system_prompt_addendum_file))
-  }
-  args.push(task)
-  let (exit_code, output) = @process.collect_output_merged(
-    program,
-    args,
-    extra_env=trial_extra_env(config, real_workspace),
-    inherit_env=true,
-    cwd=repo_root,
-  )
   let log_path = "\{config.out_dir}/logs/\{trial_name}.log"
-  @fs.write_file(log_path, output.text(), create_mode=CreateOrTruncate)
+  let exit_code = run_trial_task(
+    config,
+    task,
+    session_id~,
+    workspace=real_workspace,
+    repo_root~,
+    log_path~,
+  )
   let events_path = discover_session_events(
     real_workspace,
     session_id,
@@ -120,6 +169,145 @@ async fn run_trial(
     events_path~,
     exit_code~,
   )
+}
+
+///|
+async fn run_trial_task(
+  config : Config,
+  task : TrialTask,
+  session_id~ : String,
+  workspace~ : String,
+  repo_root~ : String,
+  log_path~ : String,
+) -> Int {
+  match task {
+    Single(task_template) => {
+      let prompt = replace_workspace(task_template, workspace)
+      let (exit_code, output) = run_openseek_turn(
+        config,
+        prompt,
+        session_id~,
+        workspace~,
+        repo_root~,
+      )
+      @fs.write_file(log_path, output, create_mode=CreateOrTruncate)
+      exit_code
+    }
+    Compact(phases) =>
+      run_compact_task(
+        config,
+        phases,
+        session_id~,
+        workspace~,
+        repo_root~,
+        log_path~,
+      )
+  }
+}
+
+///|
+async fn run_openseek_turn(
+  config : Config,
+  prompt : String,
+  session_id~ : String,
+  workspace~ : String,
+  repo_root~ : String,
+) -> (Int, String) {
+  let (program, args) = openseek_command(config, repo_root~)
+  append_common_openseek_args(args, config, session_id~, workspace~)
+  args.push(prompt)
+  let (exit_code, output) = @process.collect_output_merged(
+    program,
+    args,
+    extra_env=trial_extra_env(config, workspace),
+    inherit_env=true,
+    cwd=repo_root,
+  )
+  (exit_code, output.text())
+}
+
+///|
+async fn run_compaction(
+  config : Config,
+  session_id~ : String,
+  workspace~ : String,
+  repo_root~ : String,
+) -> (Int, String) {
+  let command_path = workspace + "/.openseek-compact-command.jsonl"
+  @fs.write_file(
+    command_path,
+    "{\"command\":\"compact\"}\n",
+    create_mode=CreateOrTruncate,
+  )
+  let stdin = @process.redirect_from_file(command_path)
+  let (program, args) = openseek_command(config, repo_root~)
+  append_common_openseek_args(args, config, session_id~, workspace~)
+  args.push("--serve")
+  let (exit_code, output) = @process.collect_output_merged(
+    program,
+    args,
+    stdin~,
+    extra_env=trial_extra_env(config, workspace),
+    inherit_env=true,
+    cwd=repo_root,
+  )
+  (exit_code, output.text())
+}
+
+///|
+async fn openseek_command(
+  config : Config,
+  repo_root~ : String,
+) -> (String, Array[String]) {
+  if config.engine != "" {
+    (@fs.realpath(config.engine), [])
+  } else {
+    ("moon", ["run", "--target", "native", "\{repo_root}/cmd/openseek", "--"])
+  }
+}
+
+///|
+async fn append_common_openseek_args(
+  args : Array[String],
+  config : Config,
+  session_id~ : String,
+  workspace~ : String,
+) -> Unit {
+  args.append([
+    "--max-steps",
+    config.max_steps.to_string(),
+    "--model",
+    config.model.to_string(),
+    "--dir",
+    workspace,
+    "--session",
+    session_id,
+  ])
+  if config.system_prompt_file != "" {
+    args.push("--system-prompt-file")
+    args.push(@fs.realpath(config.system_prompt_file))
+  }
+  if config.system_prompt_addendum_file != "" {
+    args.push("--system-prompt-addendum-file")
+    args.push(@fs.realpath(config.system_prompt_addendum_file))
+  }
+}
+
+///|
+fn append_log_section(
+  log : StringBuilder,
+  label : String,
+  result : (Int, String),
+) -> Unit {
+  log.write_string("===== ")
+  log.write_string(label)
+  log.write_string(" exit=")
+  log.write_string(result.0.to_string())
+  log.write_string(" =====\n")
+  log.write_string(result.1)
+  if !result.1.has_suffix("\n") {
+    log.write_char('\n')
+  }
 }
 
 ///|
