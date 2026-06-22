@@ -79,8 +79,14 @@ fn flash_prompt() -> String {
     #|- Current MoonBit modules use `moon.mod`.
     #|- Create `moon.mod` before running `moon info`; otherwise `moon` may walk up to
     #|  an unrelated parent module.
+    #|- `moon.mod` is the module manifest: keep module `name`, `version`,
+    #|  module-level dependency versions, `warnings`, and module options there.
     #|- Packages are directories with `moon.pkg`. Files inside one package share a
     #|  flat namespace; file names do not create modules.
+    #|- `moon.pkg` is the package manifest: keep package imports, import aliases,
+    #|  test/wbtest imports, `supported_targets`, and package options such as
+    #|  `"is-main"` there. Do not put package imports or aliases in `moon.mod`; do
+    #|  not put module dependency versions in `moon.pkg`.
     #|- Treat files like Go package files: splitting a package into small focused
     #|  `.mbt` files does not affect visibility, and is preferred when it avoids
     #|  large fragile edits.
@@ -96,6 +102,9 @@ fn flash_prompt() -> String {
     #|  `moonbitlang/core/string` for typed `@string.from_str` parsing,
     #|  `moonbitlang/core/argparse` for CLI parsing, or `moonbitlang/core/json` for
     #|  `@json.parse`.
+    #|- Use `pub fn` for APIs called from another package. Plain `fn` is private.
+    #|- `_test.mbt` files are black-box tests. Use `_wbtest.mbt` only when tests must
+    #|  inspect private helpers.
     #|- Top-level MoonBit items are separated by `///|`.
     #|
     #|Example module:
@@ -164,8 +173,12 @@ fn flash_prompt() -> String {
     #|  native-only APIs.
     #|- MoonBit has no `await`; async functions/tests are marked with `async`, and
     #|  async calls are written normally.
-    #|- Use `let mut` only when rebinding a variable. Mutable maps/arrays can be
-    #|  updated without rebinding.
+    #|- Parameter and receiver bindings cannot be `mut`: write `fn f(x : Int)` and
+    #|  `fn T::m(self : T)`, not `fn f(mut x : Int)` or
+    #|  `fn T::m(mut self : T)`.
+    #|- Use `let mut x = ...` only for local rebinding. Mutable maps/arrays can be
+    #|  updated without rebinding. Use `mut field : T` only on struct fields that you
+    #|  assign, e.g. `self.field = value`.
     #|- Empty no-op expression is `()`. Do not write `{ }`; that is an empty map.
     #|- Match arms are separated by newlines or semicolons, not `|`:
     #|
@@ -270,6 +283,11 @@ fn flash_prompt() -> String {
     #|  helpers in user-facing CLI code because they can print panic/debug stacks.
     #|- For one-off internal failures use `fail("message")`; for clean user-facing
     #|  parser errors, use a small `suberror`.
+    #|- Use `suberror` for custom errors. Pattern matching error constructors is
+    #|  valid. When matching errors from another package, qualify constructors, for
+    #|  example `catch { @pkga.A => ...; @pkga.B => ... }`. If another package needs
+    #|  stable classification or display, decide whether constructor patterns are
+    #|  part of the public API or expose helper functions.
     #|
     #|Checked-error pattern:
     #|
@@ -317,8 +335,12 @@ fn flash_prompt() -> String {
     #|  )
     #|}
     #|```
-    #|- `s[i]` returns a UTF-16 code unit, not a `Char`. Prefer `s.get_char(i)` for
-    #|  `Char?` and `for c in s` for Unicode-safe iteration.
+    #|- `s[i]` returns a UTF-16 code unit, not a `Char`. Integer and char literals
+    #|  overload by expected type, so `let x : UInt16 = 0` and `s[i] == '='` are
+    #|  valid. Do not write constructor-style casts such as `UInt16(92)`. For a
+    #|  variable `ch : Char`, compare without allocating `Some(ch)`:
+    #|  `s.get_char(i) is Some(c) && c == ch`. Do not write `is Some(ch)` to compare
+    #|  an existing variable; lowercase names in patterns bind a new variable.
     #|- `s[start:end]`, `s[:end]`, and `s[start:]` create zero-copy `StringView`s.
     #|  Pass views directly to string APIs and parsers; use `.to_owned()` only when a
     #|  callee stores or requires an owned `String`.
@@ -343,14 +365,12 @@ fn flash_prompt() -> String {
     #|- Prefer typed parsing with `@string.from_str` and an explicit annotation, for
     #|  example `let n : Int = @string.from_str(text)` in normal code or tests. Do
     #|  not write `@string.from_str[:Int](text)` or `@string.from_str[Int](text)`.
-    #|- Map lookup `map[key]` can panic if missing. Check `map.contains(key)` first
-    #|  when input is user-controlled.
-    #|- JSON constructors are `Json::Null`, `Json::True`, `Json::False`,
-    #|  `Json::Number(n, ..)`, `Json::String(s)`, `Json::Array(a)`, and
-    #|  `Json::Object(m)`.
-    #|- Prefer JSON builder helpers for creating values: `Json::object(map)`,
-    #|  `Json::array(arr)`, `Json::string(s)`, `Json::number(n)`, and
-    #|  `Json::boolean(b)`.
+    #|- Map lookup `map[key]` can panic if missing. Use `map.get(key)` for `T?`;
+    #|  direct indexing is only for keys you already know exist.
+    #|- Build JSON values with helpers: `Json::object(map)`, `Json::array(arr)`,
+    #|  `Json::string(s)`, `Json::number(n)`, `Json::boolean(b)`, and `Json::null()`.
+    #|  Do not create JSON with `Json::Object(...)`, `Json::String(...)`, or
+    #|  `Json::True`; use variants mainly for pattern matching.
     #|- For integer JSON numbers, use `Json::number(n.to_double(), repr=text.to_owned())`
     #|  when you need output to preserve integer spelling.
     #|- For JSON CLI stdout and tests, use `json.stringify()` or inspect
@@ -370,6 +390,9 @@ fn flash_prompt() -> String {
     #|- Do not implement ordinary file/stdin IO with C FFI. Use `moonbitlang/async/fs`
     #|  and `moonbitlang/async/stdio`.
     #|- A native CLI that reads either a path or stdin usually needs `async fn main`.
+    #|- For custom CLI diagnostics, write to stderr with `@stdio.stderr.write(...)`.
+    #|  For a nonzero exit, add the `moonbitlang/x` module, import
+    #|  `"moonbitlang/x/sys"` in `moon.pkg`, and call `@sys.exit(1)`.
     #|
     #|Pattern:
     #|
