@@ -63,6 +63,20 @@ like the human-readable listing).
 events from `events.jsonl`; `agent_session.Session::chat_messages` uses the
 summary to compact model context on replay.
 
+In `--serve` mode, controllers can ask the engine to generate and append a
+summary without using a temporary file:
+
+```jsonl
+{"command":"compact"}
+```
+
+The engine handles this in command order, waits for any active turn to finish,
+generates the summary with the configured model endpoint, appends a `Summary`
+event covering the current session, and emits `compaction_started`,
+`compaction_finished`, or `compaction_failed` JSONL events. With `--session`,
+the summary is persisted to the durable session log. With `--no-session`, it
+only updates the live in-memory session for the current serve process.
+
 ## Examples
 
 ```bash
