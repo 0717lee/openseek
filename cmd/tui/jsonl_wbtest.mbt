@@ -1,4 +1,17 @@
 ///|
+fn update_event(state : State, event : @event.AgentEvent) -> Array[Cmd] {
+  update(state, AgentProgress(run_id=state.run_id, event))
+}
+
+///|
+fn update_json(state : State, value : Json) -> Array[Cmd] {
+  match @event.decode_event(value) {
+    Some(event) => update_event(state, event)
+    None => []
+  }
+}
+
+///|
 /// Decode one engine event and run it through `update`, appending any resulting
 /// transcript items to `items`. Accumulating into a caller-owned array lets a
 /// test replay a whole session and snapshot the rendered transcript at the end.
@@ -7,15 +20,16 @@ fn append_items(
   value : Json,
   items : Array[@ui.TranscriptItem],
 ) -> Unit {
-  match @event.decode_event(value) {
-    Some(event) =>
-      for cmd in update(state, AgentProgress(run_id=state.run_id, event)) {
-        if cmd is AppendItem(item) {
-          items.push(item)
-        }
-      }
-    None => ()
+  for cmd in update_json(state, value) {
+    if cmd is AppendItem(item) {
+      items.push(item)
+    }
   }
+}
+
+///|
+fn spans_text(spans : Array[@doc.Span]) -> String {
+  @doc.Text::Text(spans).split_lines().map(text => text.text()).join("|")
 }
 
 ///|
@@ -258,179 +272,218 @@ test "parse_runtime_update aggregates status across watcher sections" {
 }
 
 ///|
-test "assistant_delta accumulates live text and commits only the final message" {
+test "assistant_delta opens a live response item and final message finishes it" {
   let state = drain_test_state()
   let _ = update(state, UiInput(Steer(Prompt("do it"))))
   let items : Array[@ui.TranscriptItem] = []
-  append_items(
-    state,
-    Json::object({ "event": "assistant_delta", "content": "Hel" }),
-    items,
-  )
-  append_items(
-    state,
-    Json::object({ "event": "assistant_delta", "content": "lo" }),
-    items,
-  )
+  let first = update_event(state, AssistantDelta("Hel"))
+  guard first is [BeginStreamingItem(Response), WriteStreamingItem(spans)] else {
+    fail("expected stream begin and write")
+  }
+  inspect(spans_text(spans), content="Hel")
+  assert_true(state.stream_phase is ResponseStreaming)
+  let second = update_event(state, AssistantDelta("lo"))
+  guard second is [WriteStreamingItem(spans)] else {
+    fail("expected another stream write")
+  }
+  inspect(spans_text(spans), content="lo")
   assert_eq(items.length(), 0)
-  assert_true(state.streaming_response is Some("Hello"))
   assert_true(state.step_response is None)
-  append_items(
-    state,
-    Json::object({ "event": "assistant_message", "content": "Hello" }),
-    items,
-  )
-  assert_true(state.streaming_response is None)
+  let final_message = update_event(state, AssistantMessage("Hello"))
+  guard final_message is [FinishStreamingItem] else {
+    fail("expected stream finish")
+  }
+  assert_true(state.stream_phase is ResponseDone)
   assert_true(state.step_response is Some("Hello"))
-  append_items(
-    state,
-    Json::object({ "event": "agent_finished", "answer": "Hello" }),
-    items,
-  )
-  debug_inspect(items, content="[Response(\"Hello\")]")
+  for cmd in update_event(state, AgentFinished("Hello")) {
+    if cmd is AppendItem(item) {
+      items.push(item)
+    }
+  }
+  assert_eq(items.length(), 0)
 }
 
 ///|
-test "assistant_message clears live streaming text while tools continue" {
+test "assistant_message finishes live stream while tools continue" {
   let state = drain_test_state()
   let _ = update(state, UiInput(Steer(Prompt("do it"))))
   let items : Array[@ui.TranscriptItem] = []
-  append_items(
-    state,
-    Json::object({ "event": "assistant_delta", "content": "Need tool" }),
-    items,
-  )
-  assert_true(state.streaming_response is Some("Need tool"))
-  append_items(
-    state,
-    Json::object({ "event": "assistant_message", "content": "Need tool" }),
-    items,
-  )
+  let _ = update_event(state, AssistantDelta("Need tool"))
+  assert_true(state.stream_phase is ResponseStreaming)
+  let cmds = update_event(state, AssistantMessage("Need tool"))
+  guard cmds is [FinishStreamingItem] else { fail("expected stream finish") }
   assert_true(state.run is Running(_))
-  assert_true(state.streaming_response is None)
+  assert_true(state.stream_phase is ResponseDone)
   assert_true(state.step_response is Some("Need tool"))
-  assert_eq(items.length(), 1)
-}
-
-///|
-test "assistant_delta live preview keeps the newest tail within the cap" {
-  let state = drain_test_state()
-  let _ = update(state, UiInput(Steer(Prompt("do it"))))
-  let items : Array[@ui.TranscriptItem] = []
-  append_items(
-    state,
-    Json::object({
-      "event": "assistant_delta",
-      "content": String::make(StreamingPreviewMaxColumns * 4, 'x'),
-    }),
-    items,
-  )
-  guard state.streaming_response is Some(first) else {
-    fail("expected streaming preview")
-  }
-  assert_true(
-    @displaytext.DisplayText(first).width() <= StreamingPreviewMaxColumns,
-  )
-  assert_true(first.has_prefix("…"))
-  // The preview is a tail window: new deltas keep showing up at its end
-  // (instead of freezing once the cap is reached, as a head truncation would).
-  append_items(
-    state,
-    Json::object({ "event": "assistant_delta", "content": "more" }),
-    items,
-  )
-  guard state.streaming_response is Some(second) else {
-    fail("expected streaming preview")
-  }
-  assert_true(second.has_suffix("more"))
-  assert_true(
-    @displaytext.DisplayText(second).width() <= StreamingPreviewMaxColumns,
-  )
   assert_eq(items.length(), 0)
 }
 
 ///|
-test "streamed newlines collapse so the preview stays one line" {
+test "agent_finished closes live response stream without duplicating answer" {
   let state = drain_test_state()
   let _ = update(state, UiInput(Steer(Prompt("do it"))))
-  let items : Array[@ui.TranscriptItem] = []
-  append_items(
-    state,
-    Json::object({ "event": "assistant_delta", "content": "fn main {\n" }),
-    items,
-  )
-  append_items(
-    state,
-    Json::object({ "event": "assistant_delta", "content": "  println(1)\n}" }),
-    items,
-  )
-  // The run of newline + indentation spanning the two deltas collapses to a
-  // single space; the preview holds no control characters.
-  assert_true(state.streaming_response is Some("fn main { println(1) }"))
+  let _ = update_event(state, AssistantDelta("done"))
+  assert_true(state.stream_phase is ResponseStreaming)
+  let cmds = update_event(state, AgentFinished("done"))
+  guard cmds is [FinishStreamingItem] else {
+    fail("expected only stream finish")
+  }
+  assert_true(state.run is Idle)
+  assert_true(state.stream_phase is StreamNotStarted)
 }
 
 ///|
-test "reasoning_message commits a thought item and clears the preview" {
+test "assistant_delta writes raw spans without activity-line truncation" {
   let state = drain_test_state()
   let _ = update(state, UiInput(Steer(Prompt("do it"))))
-  let items : Array[@ui.TranscriptItem] = []
-  append_items(
-    state,
-    Json::object({ "event": "reasoning_delta", "content": "Let me think" }),
-    items,
-  )
-  assert_true(state.streaming_reasoning is Some("Let me think"))
-  // The full reasoning lands as one `✻` thought item, and the live preview
-  // is finished with.
-  append_items(
-    state,
-    Json::object({
-      "event": "reasoning_message",
-      "content": "Let me think about names.\nThe user said Hongbo.",
-    }),
-    items,
-  )
-  assert_true(state.streaming_reasoning is None)
-  guard items is [Thought(_)] else { fail("expected a single Thought item") }
-  // Blank reasoning never appends an empty aside.
-  append_items(
-    state,
-    Json::object({ "event": "reasoning_message", "content": "  " }),
-    items,
-  )
-  assert_eq(items.length(), 1)
+  let long = String::make(300, 'x')
+  let cmds = update_event(state, AssistantDelta(long))
+  guard cmds is [BeginStreamingItem(Response), WriteStreamingItem(spans)] else {
+    fail("expected stream write")
+  }
+  assert_eq(spans_text(spans).length(), long.length())
 }
 
 ///|
-test "reasoning_delta drives the thinking preview until content arrives" {
+test "assistant_delta preserves hard newlines for the item writer" {
+  let state = drain_test_state()
+  let _ = update(state, UiInput(Steer(Prompt("do it"))))
+  let first = update_event(state, AssistantDelta("fn main {\n"))
+  guard first is [BeginStreamingItem(Response), WriteStreamingItem(spans)] else {
+    fail("expected stream write")
+  }
+  inspect(spans_text(spans), content="fn main {|")
+  let second = update_event(state, AssistantDelta("  println(1)\n}"))
+  guard second is [WriteStreamingItem(spans)] else {
+    fail("expected stream write")
+  }
+  inspect(spans_text(spans), content="  println(1)|}")
+}
+
+///|
+test "reasoning_delta streams a thought item and final reasoning closes it" {
   let state = drain_test_state()
   let _ = update(state, UiInput(Steer(Prompt("do it"))))
   let items : Array[@ui.TranscriptItem] = []
-  append_items(
+  let start = update_event(state, ReasoningDelta("Let me think"))
+  guard start is [BeginStreamingItem(Thought), WriteStreamingItem(spans)] else {
+    fail("expected thought stream start")
+  }
+  inspect(spans_text(spans), content="Let me think")
+  assert_true(state.stream_phase is ReasoningStreaming)
+  // The full reasoning only closes the streamed thought item. It must not append
+  // the old compact `✻ thought` block.
+  let finish = update_event(
     state,
-    Json::object({ "event": "reasoning_delta", "content": "Let me think" }),
-    items,
+    ReasoningMessage("Let me think about names.\nThe user said Hongbo."),
   )
-  assert_true(state.streaming_reasoning is Some("Let me think"))
-  assert_true(state.streaming_response is None)
+  guard finish is [FinishStreamingItem] else {
+    fail("expected thought stream finish")
+  }
+  assert_true(state.stream_phase is ReasoningDone)
   assert_eq(items.length(), 0)
-  // The first content delta ends the thinking phase: the content preview
-  // replaces the reasoning one.
-  append_items(
+  // A later blank reasoning message does not append an empty aside.
+  for cmd in update_event(state, ReasoningMessage("  ")) {
+    if cmd is AppendItem(item) {
+      items.push(item)
+    }
+  }
+  assert_eq(items.length(), 0)
+}
+
+///|
+test "reasoning_message falls back to a thought stream when no deltas arrived" {
+  let state = drain_test_state()
+  let _ = update(state, UiInput(Steer(Prompt("do it"))))
+  let cmds = update_event(state, ReasoningMessage("final thought"))
+  guard cmds
+    is [
+      BeginStreamingItem(Thought),
+      WriteStreamingItem(spans),
+      FinishStreamingItem,
+    ] else {
+    fail("expected fallback thought stream")
+  }
+  inspect(spans_text(spans), content="final thought")
+  assert_true(state.stream_phase is ReasoningDone)
+}
+
+///|
+test "late reasoning_message does not open a thought stream over response" {
+  let state = drain_test_state()
+  let _ = update(state, UiInput(Steer(Prompt("do it"))))
+  let first = update_event(state, AssistantDelta("answer"))
+  guard first is [BeginStreamingItem(Response), WriteStreamingItem(_)] else {
+    fail("expected response stream start")
+  }
+  assert_true(state.stream_phase is ResponseStreaming)
+  // Some engines only expose final reasoning after content has already
+  // streamed. That final reasoning is too late to preserve thought-before-answer
+  // order, so it must not try to open a nested thought writer.
+  assert_eq(update_event(state, ReasoningMessage("late thought")).length(), 0)
+  assert_true(state.stream_phase is ResponseStreaming)
+  let finish = update_event(state, AssistantMessage("answer"))
+  guard finish is [FinishStreamingItem] else {
+    fail("expected response stream finish")
+  }
+  assert_true(state.stream_phase is ResponseDone)
+}
+
+///|
+test "late reasoning_message stays ignored after response is closed" {
+  let state = drain_test_state()
+  let _ = update(state, UiInput(Steer(Prompt("do it"))))
+  let _ = update_event(state, AssistantMessage("answer"))
+  assert_true(state.stream_phase is ResponseDone)
+  assert_eq(update_event(state, ReasoningMessage("late thought")).length(), 0)
+  assert_true(state.stream_phase is ResponseDone)
+}
+
+///|
+test "reasoning stream finishes before response stream starts" {
+  let state = drain_test_state()
+  let _ = update(state, UiInput(Steer(Prompt("do it"))))
+  let cmds = update_event(state, ReasoningDelta("Let me think"))
+  guard cmds is [BeginStreamingItem(Thought), WriteStreamingItem(_)] else {
+    fail("expected thought stream start")
+  }
+  assert_true(state.stream_phase is ReasoningStreaming)
+  // The first content delta finishes the thought stream before opening the
+  // response stream, so no compact thought item is inserted in the middle.
+  let response = update_event(state, AssistantDelta("Answer"))
+  guard response
+    is [
+      FinishStreamingItem,
+      BeginStreamingItem(Response),
+      WriteStreamingItem(_),
+    ] else {
+    fail("expected thought finish then response stream start")
+  }
+  assert_true(state.stream_phase is ResponseStreaming)
+  // The final full reasoning message is ignored because deltas already produced
+  // the thought item.
+  assert_eq(update_event(state, ReasoningMessage("Let me think")).length(), 0)
+  // The committed message closes the response stream.
+  let finish = update_event(state, AssistantMessage("Answer"))
+  guard finish is [FinishStreamingItem] else { fail("expected stream finish") }
+  assert_true(state.stream_phase is ResponseDone)
+}
+
+///|
+test "run failure closes a live response stream before appending error" {
+  let state = drain_test_state()
+  let _ = update(state, UiInput(Steer(Prompt("do it"))))
+  let _ = update_event(state, AssistantDelta("partial"))
+  assert_true(state.stream_phase is ResponseStreaming)
+  let cmds = update(
     state,
-    Json::object({ "event": "assistant_delta", "content": "Answer" }),
-    items,
+    AgentFailed(run_id=state.run_id, Failure::Failure("boom")),
   )
-  assert_true(state.streaming_reasoning is None)
-  assert_true(state.streaming_response is Some("Answer"))
-  // The committed message clears both previews.
-  append_items(
-    state,
-    Json::object({ "event": "assistant_message", "content": "Answer" }),
-    items,
-  )
-  assert_true(state.streaming_response is None)
-  assert_true(state.streaming_reasoning is None)
+  guard cmds is [FinishStreamingItem, AppendItem(Error(_))] else {
+    fail("expected stream finish before error")
+  }
+  assert_true(state.stream_phase is StreamNotStarted)
+  assert_true(state.run is Idle)
 }
 
 ///|

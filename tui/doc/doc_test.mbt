@@ -90,3 +90,17 @@ test "doc constructors copy mutable arrays" {
   texts.push(@doc.Text::plain("b"))
   inspect(doc.layout(width=20).map(line => line.text()).join("|"), content="a")
 }
+
+///|
+test "text appends inline spans and exposes plain text" {
+  let text = @doc.Text::Text([@doc.Span::plain("hello")]).append_spans([
+    @doc.Span::plain("\nworld"),
+  ])
+  inspect(text.text(), content="hello\nworld")
+  inspect(
+    text.split_lines().map(block => block.text()).join("|"),
+    content="hello|world",
+  )
+  assert_true(@doc.Text::Text([]).is_empty())
+  assert_false(text.is_empty())
+}

@@ -1,10 +1,10 @@
 // Lay the live composer area out into a render-data `@surface.Surface`.
 //
 // Given the editing `@composer.Model` plus styled status/activity text and any
-// pre-rendered queued-input rows, `composer_surface` stacks the queued rows, an
-// optional activity block, the bordered composer body, and the status line into
-// one surface, and places the cursor on the active input row. It is the view
-// layer for the composer: pure, terminal-agnostic, and performs no IO.
+// pre-rendered live transcript / queued-input rows, `composer_surface` stacks
+// the optional rows above the bordered composer body and status line into one
+// surface, and places the cursor on the active input row. It is the view layer
+// for the composer: pure, terminal-agnostic, and performs no IO.
 //
 // Queued follow-up inputs are rendered into their preview block here (see
 // queued.mbt); the editing model and the doc vocabulary cover the rest.
@@ -59,6 +59,20 @@ fn indent_line(line : @surface.Line, indent~ : Int) -> @surface.Line {
 }
 
 ///|
+fn tail_rows(
+  rows : Array[@surface.Line],
+  max_rows~ : Int,
+) -> Array[@surface.Line] {
+  let out : Array[@surface.Line] = []
+  guard max_rows > 0 else { return out }
+  let start = (rows.length() - max_rows).max(0)
+  for index in start..<rows.length() {
+    out.push(rows[index])
+  }
+  out
+}
+
+///|
 /// The shortest terminal the live area fits in without clipping: a spacer, two
 /// separators, one composer row, and the status line.
 const MinLiveRows : Int = 5
@@ -88,11 +102,11 @@ fn too_small_surface(cols~ : Int) -> @surface.Surface {
 ///|
 /// Lay the composer area out for `cols` columns.
 ///
-/// `activity` is an optional in-progress block ("Working …") for the current
-/// task; `queued_inputs` are the follow-ups that run after it. They render as one
-/// group above the composer — activity first (present), then the queue (next) —
-/// in temporal order. `status`/`notice` form the bottom status line, with
-/// `notice` taking precedence when present.
+/// `live_transcript_rows` is the unfinished transcript item currently being
+/// redrawn in place; `activity` is an optional in-progress block ("Working …")
+/// for the current task; `queued_inputs` are the follow-ups that run after it.
+/// They render above the composer in temporal order. `status`/`notice` form the
+/// bottom status line, with `notice` taking precedence when present.
 ///
 /// `max_rows` is the live area's row budget (the terminal height). The queued
 /// preview is bounded to whatever rows remain after the composer and its chrome,
@@ -100,6 +114,7 @@ fn too_small_surface(cols~ : Int) -> @surface.Surface {
 /// into; the overflow collapses into a `… N more` line.
 pub fn composer_surface(
   composer : @composer.Model,
+  live_transcript_rows? : Array[@surface.Line] = [],
   activity~ : @doc.Text?,
   queued_inputs~ : Array[@core.Input],
   status~ : @doc.Text,
@@ -126,9 +141,12 @@ pub fn composer_surface(
   // two separators, the composer itself, and the status line. The composer wins
   // the row budget; the activity line and queue get whatever is left over.
   let fixed = 1 + composer_rows + 2 + 1
+  let optional_budget = max_rows - fixed
+  let live_rows = tail_rows(live_transcript_rows, max_rows=optional_budget)
+  let live_extra = live_rows.length()
   // Show the activity line only if it plus its trailing blank still fit, so a
   // very short terminal drops "Working …" rather than clipping the prompt.
-  let show_activity = activity is Some(_) && max_rows >= fixed + 2
+  let show_activity = activity is Some(_) && max_rows >= fixed + live_extra + 2
   // Reserve the activity line + its bracketing blanks (between + trailing) when
   // shown, otherwise just the queue's trailing blank.
   let chrome = if show_activity { 3 } else { 1 }
@@ -136,14 +154,21 @@ pub fn composer_surface(
     queued_inputs,
     cols~,
     indent~,
-    max_rows=max_rows - fixed - chrome,
+    max_rows=max_rows - fixed - live_extra - chrome,
   )
   let has_queue = queued.length() > 0
+  let has_live_rows = live_rows.length() > 0
   let rows : Array[@surface.Line] = []
   // A blank spacer above the live area so the committed transcript does not butt
   // directly against the composer's top border — matching the blank that
   // precedes each transcript item.
-  rows.push(@surface.Line::new([]))
+  if has_live_rows {
+    for row in live_rows {
+      rows.push(row)
+    }
+  } else {
+    rows.push(@surface.Line::new([]))
+  }
   if show_activity && activity is Some(activity) {
     rows.push(indent_line(activity.first_line(width=cols - indent), indent~))
   }
@@ -155,7 +180,7 @@ pub fn composer_surface(
     rows.push(row)
   }
   // Set the live-status group off from the composer border with a blank.
-  if show_activity || has_queue {
+  if show_activity || has_queue || has_live_rows {
     rows.push(@surface.Line::new([]))
   }
   let composer_top = rows.length()

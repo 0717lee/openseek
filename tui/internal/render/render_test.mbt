@@ -240,6 +240,33 @@ test "composer surface renders the input viewport" {
 }
 
 ///|
+test "composer surface renders live transcript rows above composer" {
+  let surface = @render.composer_surface(
+    @composer.Model::new(""),
+    live_transcript_rows=[
+      @surface.Line::new([]),
+      @surface.Line::new([Span(DisplayText("⏺ hello"))]),
+    ],
+    activity=None,
+    queued_inputs=[],
+    status=@doc.Text::plain("ready"),
+    notice=None,
+    cols=40,
+    max_rows=24,
+  )
+  inspect(surface.height(), content="7")
+  inspect(surface.line_at(0).text(), content="")
+  inspect(surface.line_at(1).text(), content="⏺ hello")
+  inspect(surface.line_at(2).text(), content="")
+  inspect(
+    surface.line_at(3).text(),
+    content="────────────────────────────────────────",
+  )
+  inspect(display_prefix(surface.line_at(4).text(), 1), content="❯")
+  inspect(surface.cursor().row(), content="4")
+}
+
+///|
 test "composer surface renders activity above separator" {
   let surface = @render.composer_surface(
     @composer.Model::new(""),

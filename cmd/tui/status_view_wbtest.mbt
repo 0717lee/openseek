@@ -1,37 +1,30 @@
 ///|
-/// The preview budget is measured from the actual label, not a fixed
-/// reserve: label width + chrome columns + preview width never exceeds the
-/// terminal width, and the kept text is the tail (newest characters).
-test "streaming activity line fits the label and preview to the row" {
-  let long = "\{String::make(300, 'x')} tail-end"
-  for label in ["Streaming ", "Thinking "] {
-    let cols = 60
-    let line : @doc.Text = Text(
-      streaming_activity_spans(
-        label,
-        long,
-        cols~,
-        dim_preview=false,
-        reserved=0,
-      ),
-    )
-    let rendered = line.split_lines()
-    assert_eq(rendered.length(), 1)
-    // Reconstruct the row's display width from its spans: label + preview.
-    let label_width = @displaytext.DisplayText(label).width()
-    let budget = cols - ActivityChromeColumns - label_width
-    let preview = tail_columns(long, budget)
-    assert_true(@displaytext.DisplayText(preview).width() <= budget)
-    assert_true(preview.has_prefix("…"))
-    assert_true(preview.has_suffix("tail-end"))
+fn activity_line_text(state : State) -> String raise {
+  guard format_activity_text(state) is Some(text) else {
+    fail("expected activity text")
   }
+  text.text()
 }
 
 ///|
-test "streaming activity preview keeps a floor on absurdly narrow rows" {
-  // Below the floor the preview clamps to 16 columns rather than vanishing,
-  // matching the renderer's own too-small handling.
-  let preview = tail_columns(String::make(100, 'y'), 16)
+test "activity labels streaming and thinking without model text" {
+  let state = drain_test_state()
+  state.run = Running(@async.now())
+
+  inspect(activity_line_text(state), content="Working (0s)")
+
+  state.stream_phase = ReasoningStreaming
+  inspect(activity_line_text(state), content="Thinking (0s)")
+
+  state.stream_phase = ResponseStreaming
+  inspect(activity_line_text(state), content="Streaming (0s)")
+}
+
+///|
+test "pending steer activity segment keeps newest tail" {
+  let long = "\{String::make(100, 'y')} tail-end"
+  let preview = tail_columns(long, 16)
   assert_true(@displaytext.DisplayText(preview).width() <= 16)
   assert_true(preview.has_prefix("…"))
+  assert_true(preview.has_suffix("tail-end"))
 }

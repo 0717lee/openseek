@@ -38,6 +38,37 @@ pub fn Text::Text(spans : Array[Span]) -> Text {
 }
 
 ///|
+/// A copy of this block with `spans` appended after its existing spans.
+///
+/// This is used by streaming transcript writers: each write supplies inline
+/// styled fragments, while `Text` remains the logical block that can later be
+/// split on hard line breaks or wrapped for the current terminal width.
+pub fn Text::append_spans(self : Text, spans : Array[Span]) -> Text {
+  Text(self.spans + spans)
+}
+
+///|
+/// Whether this block contains no text in any span.
+pub fn Text::is_empty(self : Text) -> Bool {
+  for span in self.spans {
+    if span.display.text() != "" {
+      return false
+    }
+  }
+  true
+}
+
+///|
+/// Plain text content of this block with styling stripped.
+pub fn Text::text(self : Text) -> String {
+  let builder = StringBuilder()
+  for span in self.spans {
+    builder <+ "\{span.display.text()}"
+  }
+  builder.to_string()
+}
+
+///|
 /// Build a text block containing one unstyled span.
 pub fn Text::plain(text : String) -> Text {
   Text([Span::plain(text)])

@@ -54,6 +54,16 @@ pub(all) enum TranscriptItem {
 } derive(Debug)
 
 ///|
+/// A transcript item shape that can be built incrementally by an `ItemWriter`.
+///
+/// The item writer owns the content and line lifecycle, while this kind chooses
+/// the transcript marker.
+pub(all) enum StreamingItemKind {
+  Response
+  Thought
+} derive(Eq, Debug)
+
+///|
 /// Prefix each split line of `text` with a bullet/continuation marker in
 /// `style`, producing one `@doc.Text` block per line.
 fn bulleted_lines(

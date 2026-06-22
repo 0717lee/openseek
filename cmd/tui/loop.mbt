@@ -275,15 +275,6 @@ async fn run_shell_command(
 }
 
 ///|
-// The live streaming line is only a transient status preview: it keeps the
-// *tail* of the stream (the newest text) so the line visibly moves while the
-// model types. The final assistant text is committed later by
-// `assistant_message`, so the buffer only needs to cover the widest plausible
-// terminal row; the bound keeps per-delta work constant during long
-// code-generation streams.
-const StreamingPreviewMaxColumns : Int = 240
-
-///|
 /// Keep the last `max_cols` display columns of `text`, marking an elided front
 /// with a leading `…`. The inverse of `DisplayText::truncate`, which keeps the
 /// front — a streaming preview must keep the end, where the new text arrives.
@@ -322,18 +313,30 @@ fn collapse_preview_whitespace(text : String) -> String {
 }
 
 ///|
-fn append_streaming_preview(current : String?, delta : String) -> String {
-  let combined = match current {
-    Some(text) => "\{text}\{delta}"
-    None => delta
+fn finish_response_stream(state : State, cmds : Array[Cmd]) -> Unit {
+  if state.stream_phase is ResponseStreaming {
+    cmds.push(FinishStreamingItem)
+    state.stream_phase = ResponseDone
   }
-  // Re-collapsing the bounded buffer keeps a whitespace run that spans two
-  // deltas collapsed too; the buffer is at most a few hundred chars, so the
-  // rescan is constant work per delta.
-  tail_columns(
-    collapse_preview_whitespace(combined),
-    StreamingPreviewMaxColumns,
-  )
+}
+
+///|
+fn finish_reasoning_stream(state : State, cmds : Array[Cmd]) -> Unit {
+  if state.stream_phase is ReasoningStreaming {
+    cmds.push(FinishStreamingItem)
+    state.stream_phase = ReasoningDone
+  }
+}
+
+///|
+fn finish_open_streams(state : State, cmds : Array[Cmd]) -> Unit {
+  finish_reasoning_stream(state, cmds)
+  finish_response_stream(state, cmds)
+}
+
+///|
+fn reasoning_span(text : String) -> @doc.Span {
+  Span(DisplayText(text), style=@style.dim)
 }
 
 ///|
@@ -347,33 +350,61 @@ fn handle_agent_event(
 ) -> Unit {
   match event {
     AgentStep => {
+      finish_open_streams(state, cmds)
       state.step_response = None
-      state.streaming_response = None
-      state.streaming_reasoning = None
+      state.stream_phase = StreamNotStarted
     }
     AssistantDelta(text) =>
       if text != "" {
-        state.streaming_response = Some(
-          append_streaming_preview(state.streaming_response, text),
-        )
+        match state.stream_phase {
+          StreamNotStarted | ReasoningDone => {
+            cmds.push(BeginStreamingItem(Response))
+            state.stream_phase = ResponseStreaming
+          }
+          ReasoningStreaming => {
+            finish_reasoning_stream(state, cmds)
+            cmds.push(BeginStreamingItem(Response))
+            state.stream_phase = ResponseStreaming
+          }
+          ResponseStreaming => ()
+          ResponseDone => ()
+        }
+        if state.stream_phase is ResponseStreaming {
+          cmds.push(WriteStreamingItem([@doc.Span::plain(text)]))
+        }
         // Content starting means the thinking phase is over; the content
-        // preview replaces the reasoning one.
-        state.streaming_reasoning = None
+        // stream replaces the generic reasoning label.
       }
     ReasoningDelta(text) =>
       if text != "" {
-        state.streaming_reasoning = Some(
-          append_streaming_preview(state.streaming_reasoning, text),
-        )
+        match state.stream_phase {
+          StreamNotStarted => {
+            cmds.push(BeginStreamingItem(Thought))
+            state.stream_phase = ReasoningStreaming
+            cmds.push(WriteStreamingItem([reasoning_span(text)]))
+          }
+          ReasoningStreaming =>
+            cmds.push(WriteStreamingItem([reasoning_span(text)]))
+          ReasoningDone | ResponseStreaming | ResponseDone => ()
+        }
       }
-    // The turn's full reasoning, emitted once streaming ends and before the
-    // assistant message commits — so the transcript reads thought → answer.
-    ReasoningMessage(text) => {
-      state.streaming_reasoning = None
-      if !text.trim().is_empty() {
-        cmds.push(AppendItem(reasoning_item(text)))
+    // The final full reasoning arrives after the model call completes. If
+    // deltas already built the thought item, only close it; otherwise use the
+    // final message as a fallback thought item only while no response writer is
+    // open. Once content has streamed, opening a late thought writer would nest
+    // live transcript items and reorder the transcript.
+    ReasoningMessage(text) =>
+      match state.stream_phase {
+        ReasoningStreaming => finish_reasoning_stream(state, cmds)
+        StreamNotStarted =>
+          if !text.trim().is_empty() {
+            cmds.push(BeginStreamingItem(Thought))
+            cmds.push(WriteStreamingItem([reasoning_span(text)]))
+            cmds.push(FinishStreamingItem)
+            state.stream_phase = ReasoningDone
+          }
+        ReasoningDone | ResponseStreaming | ResponseDone => ()
       }
-    }
     // A steer took effect at the engine's step boundary: echo the input into
     // the transcript at its true conversational position, the way the model
     // actually saw it.
@@ -391,10 +422,22 @@ fn handle_agent_event(
     }
     AssistantMessage(text) => {
       state.step_response = Some(text)
-      state.streaming_response = None
-      state.streaming_reasoning = None
-      if !text.trim().is_empty() {
-        cmds.push(AppendItem(Response(text)))
+      match state.stream_phase {
+        ResponseStreaming => finish_response_stream(state, cmds)
+        StreamNotStarted | ReasoningDone => {
+          if !text.trim().is_empty() {
+            cmds.push(AppendItem(Response(text)))
+          }
+          state.stream_phase = ResponseDone
+        }
+        ReasoningStreaming => {
+          finish_reasoning_stream(state, cmds)
+          if !text.trim().is_empty() {
+            cmds.push(AppendItem(Response(text)))
+          }
+          state.stream_phase = ResponseDone
+        }
+        ResponseDone => ()
       }
     }
     // Out-of-band runtime diagnostics (e.g. `moon check --watch`) the engine fed
@@ -415,6 +458,7 @@ fn handle_agent_event(
     Usage(usage) => state.usage = Some(usage)
     ToolResult(result) => cmds.push(AppendItem(tool_item(result)))
     AgentFinished(answer) => {
+      let had_response_stream = state.stream_phase is ResponseStreaming
       let already_appended = if state.step_response is Some(response) {
         response == answer
       } else {
@@ -422,20 +466,24 @@ fn handle_agent_event(
       }
       // `AgentFinished` follows `AssistantMessage` for normal chat responses,
       // but tool-controlled finish results may arrive without one.
-      if !already_appended && !answer.trim().is_empty() {
+      finish_open_streams(state, cmds)
+      if !had_response_stream && !already_appended && !answer.trim().is_empty() {
         cmds.push(AppendItem(Response(answer)))
       }
       state.finish_run()
     }
     AgentAborted(reason) => {
+      finish_open_streams(state, cmds)
       cmds.push(AppendItem(Error("aborted: \{reason}")))
       state.finish_run()
     }
     MaxStepsExhausted => {
+      finish_open_streams(state, cmds)
       cmds.push(AppendItem(Error("max steps exhausted")))
       state.finish_run()
     }
     AgentError(message) => {
+      finish_open_streams(state, cmds)
       cmds.push(AppendItem(Error(message)))
       state.finish_run()
     }
@@ -543,14 +591,17 @@ fn update(state : State, message : Msg) -> Array[Cmd] {
       }
     AgentProgress(event, ..) => handle_agent_event(state, event, cmds)
     AgentCancelled(..) => {
+      finish_open_streams(state, cmds)
       cmds.push(AppendItem(Error("interrupted")))
       state.finish_run()
     }
     AgentFailed(error, ..) => {
+      finish_open_streams(state, cmds)
       cmds.push(AppendItem(Error("agent failed: \{error}")))
       state.finish_run()
     }
     CommandResult(item, ..) => {
+      finish_open_streams(state, cmds)
       cmds.push(AppendItem(item))
       state.finish_run()
     }
@@ -605,11 +656,24 @@ async fn[G] run_message_loop(
   // `running_task` so an interrupt can cancel it directly.
   let engine = EngineClient(state.config, messages)
   let mut running_task : @async.Task[Unit]? = None
+  let mut item_writer : @ui.ItemWriter? = None
   outer~: for ;; {
     let message = messages.get()
     for cmd in update(state, message) {
       match cmd {
         AppendItem(item) => ui.append_item(item)
+        BeginStreamingItem(kind) =>
+          item_writer = Some(ui.append_streaming_item(kind))
+        WriteStreamingItem(spans) =>
+          if item_writer is Some(writer) {
+            writer.write(spans)
+          }
+        FinishStreamingItem => {
+          if item_writer is Some(writer) {
+            writer.finish()
+          }
+          item_writer = None
+        }
         StartAgent(run_id~, task) =>
           match state.config.engine_mode {
             Serve => {

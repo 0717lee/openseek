@@ -85,15 +85,8 @@ fn elapsed_seconds(started_ms : Int64, now_ms : Int64) -> Int64 {
 }
 
 ///|
-/// Columns of the activity row not available to the label or preview: the
-/// composer indent the renderer prepends (2) and one column of slack so the
-/// preview's newest characters are never cut by the renderer's own width
-/// clip, which keeps the line's *front* — the oldest text — on overflow.
-const ActivityChromeColumns : Int = 3
-
-///|
 /// Most columns the pending-steer acknowledgment may take on the activity
-/// row, so it never starves the streaming preview it shares the line with.
+/// row, so it never starves the main task label it shares the line with.
 const SteerSegmentMaxColumns : Int = 44
 
 ///|
@@ -121,78 +114,23 @@ fn pending_steer_segment(steers : Array[String]) -> Array[@doc.Span] {
 }
 
 ///|
-/// A streaming activity line: the dim `label` followed by the tail of `text`
-/// clipped to the columns the label (and any pending-steer acknowledgment)
-/// leaves free, so the newest characters always fit the row. The preview
-/// dims with `dim_preview` (reasoning reads as an aside; content reads at
-/// full strength).
-fn streaming_activity_spans(
-  label : String,
-  text : String,
-  cols~ : Int,
-  dim_preview~ : Bool,
-  reserved~ : Int,
-) -> Array[@doc.Span] {
-  let budget = cols -
-    ActivityChromeColumns -
-    reserved -
-    @displaytext.DisplayText(label).width()
-  let preview = tail_columns(text, if budget < 16 { 16 } else { budget })
-  [
-    Span(DisplayText(label), style=@style.dim),
-    if dim_preview {
-      Span(DisplayText(preview), style=@style.dim)
-    } else {
-      @doc.Span::plain(preview)
-    },
-  ]
-}
-
-///|
-fn format_activity_text(state : State, cols~ : Int) -> @doc.Text? {
+fn format_activity_text(state : State) -> @doc.Text? {
   let started_ms = match state.run {
     Idle => return None
     Running(started_ms) => started_ms
     Interrupting(started_ms) => started_ms
   }
   let steer_segment = pending_steer_segment(state.pending_steers)
-  // The acknowledgment sits at the row's end, where the renderer clips on
-  // overflow — so the preview must cede exactly its width to keep it
-  // visible.
-  let reserved = if steer_segment.length() > 0 {
-    SteerSegmentMaxColumns
-  } else {
-    0
-  }
-  if state.streaming_response is Some(response) && !response.trim().is_empty() {
-    let spans = streaming_activity_spans(
-      "Streaming ",
-      response,
-      cols~,
-      dim_preview=false,
-      reserved~,
-    )
-    return Some(Text(spans + steer_segment))
-  }
-  // Thinking-mode runs spend their first (often long) stretch emitting only
-  // reasoning deltas; show their tail dimmed so the line moves from the first
-  // token rather than sitting on "Working (Ns)" until content starts.
-  if state.streaming_reasoning is Some(reasoning) &&
-    !reasoning.trim().is_empty() {
-    let spans = streaming_activity_spans(
-      "Thinking ",
-      reasoning,
-      cols~,
-      dim_preview=true,
-      reserved~,
-    )
-    return Some(Text(spans + steer_segment))
-  }
   let elapsed = format_elapsed_compact(
     elapsed_seconds(started_ms, @async.now()),
   )
+  let label = match state.stream_phase {
+    ResponseStreaming => "Streaming"
+    ReasoningStreaming => "Thinking"
+    StreamNotStarted | ReasoningDone | ResponseDone => "Working"
+  }
   let spans : Array[@doc.Span] = [
-    @doc.Span::plain("Working"),
+    @doc.Span::plain(label),
     Span(DisplayText(" (\{elapsed})"), style=@style.dim),
   ]
   Some(Text(spans + steer_segment))
@@ -202,7 +140,7 @@ fn format_activity_text(state : State, cols~ : Int) -> @doc.Text? {
 async fn refresh_ui(ui : @ui.Ui, state : State) -> Unit {
   ui.set_live_view(
     status=format_status_bar_text(state),
-    activity=format_activity_text(state, cols=ui.columns()),
+    activity=format_activity_text(state),
     queued_inputs=state.queued,
   )
 }

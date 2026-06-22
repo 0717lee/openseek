@@ -8,6 +8,7 @@ struct Ui {
   composer : @composer.Model
   history : @history.History
   transcript : Array[@doc.Doc]
+  mut live_item : LiveTranscriptItem?
   mut activity : @doc.Text?
   mut queued_inputs : Array[Input]
   mut status : @doc.Text
@@ -29,6 +30,7 @@ fn Ui::new(tty : @tty.Tty, config : Config) -> Ui {
     composer,
     history: @history.History::new(),
     transcript: [],
+    live_item: None,
     activity: None,
     queued_inputs: [],
     status: @doc.Text::plain(""),

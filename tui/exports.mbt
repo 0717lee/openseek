@@ -3,4 +3,10 @@
 // inputs and transcript items.
 
 ///|
-pub using @core {type Input, type Event, type ToolStatus, type TranscriptItem}
+pub using @core {
+  type Input,
+  type Event,
+  type StreamingItemKind,
+  type ToolStatus,
+  type TranscriptItem,
+}

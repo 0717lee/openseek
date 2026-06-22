@@ -48,6 +48,15 @@ priv enum RunState {
 }
 
 ///|
+priv enum StepStreamPhase {
+  StreamNotStarted
+  ReasoningStreaming
+  ReasoningDone
+  ResponseStreaming
+  ResponseDone
+}
+
+///|
 priv struct State {
   config : AppConfig
   queued : Array[@ui.Input]
@@ -64,14 +73,11 @@ priv struct State {
   // Final assistant text for the current step, used to avoid appending the same
   // answer again when `AgentFinished` follows `AssistantMessage`.
   mut step_response : String?
-  // Incremental assistant text currently arriving from `assistant_delta`
-  // events. Cleared once the final assistant message is committed.
-  mut streaming_response : String?
-  // Incremental thinking-mode text arriving from `reasoning_delta` events.
-  // Shown only until the first content delta arrives, so the activity line
-  // moves during the (often long) reasoning phase instead of sitting on
-  // "Working (Ns)".
-  mut streaming_reasoning : String?
+  // Transcript writer/content phase for the current agent step. Reasoning and
+  // response share one phase so the state cannot represent two simultaneous
+  // live item writers, and so "response not started" remains distinct from
+  // "response already closed".
+  mut stream_phase : StepStreamPhase
   // Steering input sent to the engine but not yet confirmed (no
   // steer_applied/steer_dropped back). Shown on the activity line so the
   // moment of pressing Enter is acknowledged immediately — the transcript
@@ -96,8 +102,7 @@ fn State::new(config : AppConfig) -> State {
     run_is_command: false,
     pending_steers: [],
     step_response: None,
-    streaming_response: None,
-    streaming_reasoning: None,
+    stream_phase: StreamNotStarted,
     usage: None,
     watcher_status: "",
   }
@@ -111,8 +116,7 @@ fn State::start_run(self : State, started_ms : Int64) -> Int {
   self.run_id = self.run_id + 1
   self.run = Running(started_ms)
   self.step_response = None
-  self.streaming_response = None
-  self.streaming_reasoning = None
+  self.stream_phase = StreamNotStarted
   self.run_id
 }
 
@@ -140,8 +144,7 @@ fn State::finish_run(self : State) -> Unit {
   // arrives untagged and renders its own resubmit notice.
   self.pending_steers.clear()
   self.step_response = None
-  self.streaming_response = None
-  self.streaming_reasoning = None
+  self.stream_phase = StreamNotStarted
   if self.config.engine_mode is OneShot {
     self.watcher_status = ""
   }
@@ -197,6 +200,9 @@ fn Msg::run_id(self : Msg) -> Int? {
 ///|
 priv enum Cmd {
   AppendItem(@ui.TranscriptItem)
+  BeginStreamingItem(@ui.StreamingItemKind)
+  WriteStreamingItem(Array[@doc.Span])
+  FinishStreamingItem
   // Start the agent / a local command for a run; carries the run id to tag that
   // task's messages with.
   StartAgent(run_id~ : Int, String)

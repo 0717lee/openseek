@@ -6,6 +6,7 @@ fn Ui::composer_surface(
 ) -> @surface.Surface {
   @render.composer_surface(
     self.composer,
+    live_transcript_rows=self.live_transcript_rows(cols~),
     activity=self.activity,
     queued_inputs=self.queued_inputs,
     status=self.status,
@@ -52,6 +53,13 @@ fn Ui::transcript_rows(self : Self, cols~ : Int) -> Array[@surface.Line] {
   for doc in self.transcript {
     for row in item_rows(doc, cols~) {
       rows.push(row)
+    }
+  }
+  if self.live_item is Some(item) {
+    if item.completed_doc() is Some(doc) {
+      for row in item_rows(doc, cols~) {
+        rows.push(row)
+      }
     }
   }
   rows

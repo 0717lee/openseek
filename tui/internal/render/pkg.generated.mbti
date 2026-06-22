@@ -9,7 +9,7 @@ import {
 }
 
 // Values
-pub fn composer_surface(@composer.Model, activity~ : @doc.Text?, queued_inputs~ : Array[@core.Input], status~ : @doc.Text, notice~ : @doc.Text?, cols~ : Int, max_rows~ : Int) -> @surface.Surface
+pub fn composer_surface(@composer.Model, live_transcript_rows? : Array[@surface.Line], activity~ : @doc.Text?, queued_inputs~ : Array[@core.Input], status~ : @doc.Text, notice~ : @doc.Text?, cols~ : Int, max_rows~ : Int) -> @surface.Surface
 
 // Errors
 

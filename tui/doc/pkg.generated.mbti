@@ -24,10 +24,13 @@ pub fn Span::plain(String) -> Self
 
 type Text derive(@debug.Debug)
 pub fn Text::Text(Array[Span]) -> Self
+pub fn Text::append_spans(Self, Array[Span]) -> Self
 pub fn Text::first_line(Self, width~ : Int) -> @surface.Line
+pub fn Text::is_empty(Self) -> Bool
 pub fn Text::plain(String) -> Self
 pub fn Text::prepend_span(Self, Span) -> Self
 pub fn Text::split_lines(Self) -> Array[Self]
+pub fn Text::text(Self) -> String
 
 // Type aliases
 
