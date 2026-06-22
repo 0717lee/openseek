@@ -1,0 +1,241 @@
+///|
+/// Conservatively parse a shell command for policy decisions.
+///
+/// The parser only accepts a subset where argv can be known statically. It is a
+/// parser for agent policy, not a shell interpreter. Commands using expansion,
+/// command substitution, subshells, command groups, heredocs, or glob expansion
+/// return `TooComplex`.
+pub fn parse_for_policy(command : String) -> ParseResult {
+  match lex(command) {
+    LexOk(tokens) => parse_tokens(tokens)
+    LexTooComplex(reason) => TooComplex(reason)
+    LexSyntaxError(message) => SyntaxError(message)
+  }
+}
+
+///|
+fn parse_tokens(tokens : Array[Token]) -> ParseResult {
+  let commands : Array[SimpleCommand] = []
+  let mut env : Array[EnvAssignment] = []
+  let mut argv : Array[String] = []
+  let mut redirects : Array[Redirect] = []
+  let mut saw_part = false
+  let mut pending_separator : String? = None
+  let mut index = 0
+  while index < tokens.length() {
+    match tokens[index] {
+      Word(word) => {
+        pending_separator = None
+        if is_fd_word(word) && index + 1 < tokens.length() {
+          match tokens[index + 1] {
+            Op(next_op) if next_op == ">" || next_op == ">>" || next_op == ">&" => {
+              let op = "\{word}\{next_op}"
+              match parse_redirect_target(tokens, index + 2) {
+                Some((target, next_index)) => {
+                  redirects.push({ op, target })
+                  saw_part = true
+                  index = next_index
+                  continue
+                }
+                None =>
+                  return SyntaxError("redirection \{op} requires a target")
+              }
+            }
+            _ => ()
+          }
+        }
+        if argv.length() == 0 && is_env_assignment_word(word) {
+          match split_env_assignment(word) {
+            Some(assignment) => env.push(assignment)
+            None => argv.push(word)
+          }
+        } else {
+          if argv.length() == 0 && is_too_complex_command_word(word) {
+            return TooComplex("shell control command is not supported: \{word}")
+          }
+          argv.push(word)
+        }
+        saw_part = true
+        index += 1
+      }
+      Op(op) if is_separator(op) => {
+        if !saw_part {
+          return SyntaxError("operator \{op} has no preceding command")
+        }
+        push_command(commands, env, argv, redirects)
+        env = []
+        argv = []
+        redirects = []
+        saw_part = false
+        pending_separator = Some(op)
+        index += 1
+      }
+      Op(op) if is_redirect_op(op) => {
+        pending_separator = None
+        match parse_redirect_target(tokens, index + 1) {
+          Some((target, next_index)) => {
+            redirects.push({ op, target })
+            saw_part = true
+            index = next_index
+          }
+          None => return SyntaxError("redirection \{op} requires a target")
+        }
+      }
+      Op(op) => return TooComplex("unsupported shell operator: \{op}")
+    }
+  }
+  if !saw_part {
+    match pending_separator {
+      Some(";") | None => ()
+      Some(op) => return SyntaxError("operator \{op} has no following command")
+    }
+  } else {
+    push_command(commands, env, argv, redirects)
+  }
+  Simple(commands)
+}
+
+///|
+fn parse_redirect_target(tokens : Array[Token], index : Int) -> (String, Int)? {
+  if index >= tokens.length() {
+    None
+  } else {
+    match tokens[index] {
+      Word(target) => Some((target, index + 1))
+      Op(_) => None
+    }
+  }
+}
+
+///|
+fn push_command(
+  commands : Array[SimpleCommand],
+  env : Array[EnvAssignment],
+  argv : Array[String],
+  redirects : Array[Redirect],
+) -> Unit {
+  commands.push({
+    argv,
+    env,
+    redirects,
+    source: render_source(env, argv, redirects),
+  })
+}
+
+///|
+fn render_source(
+  env : Array[EnvAssignment],
+  argv : Array[String],
+  redirects : Array[Redirect],
+) -> String {
+  let parts : Array[String] = []
+  for assignment in env {
+    parts.push("\{assignment.name}=\{assignment.value}")
+  }
+  for arg in argv {
+    parts.push(arg)
+  }
+  for redirect in redirects {
+    parts.push("\{redirect.op} \{redirect.target}")
+  }
+  parts.join(" ")
+}
+
+///|
+fn is_separator(op : String) -> Bool {
+  op == "&&" || op == "||" || op == ";" || op == "|"
+}
+
+///|
+fn is_redirect_op(op : String) -> Bool {
+  op == ">" || op == ">>" || op == "<" || op == "&>" || op == ">&"
+}
+
+///|
+fn is_fd_word(word : String) -> Bool {
+  if word == "" {
+    return false
+  }
+  for ch in word {
+    if !(ch is ('0'..='9')) {
+      return false
+    }
+  }
+  true
+}
+
+///|
+fn split_env_assignment(word : String) -> EnvAssignment? {
+  let parts = word.split("=").collect()
+  if parts.length() < 2 {
+    return None
+  }
+  let name = parts[0].to_owned()
+  if !is_valid_env_name(name) {
+    return None
+  }
+  let values : Array[String] = []
+  for index, part in parts {
+    if index > 0 {
+      values.push(part.to_owned())
+    }
+  }
+  Some({ name, value: values.join("=") })
+}
+
+///|
+fn is_env_assignment_word(word : String) -> Bool {
+  split_env_assignment(word) is Some(_)
+}
+
+///|
+fn is_valid_env_name(name : String) -> Bool {
+  if name == "" {
+    return false
+  }
+  let mut index = 0
+  for ch in name {
+    let valid = if index == 0 {
+      ch is ('a'..='z') || ch is ('A'..='Z') || ch == '_'
+    } else {
+      ch is ('a'..='z') || ch is ('A'..='Z') || ch is ('0'..='9') || ch == '_'
+    }
+    if !valid {
+      return false
+    }
+    index += 1
+  }
+  true
+}
+
+///|
+fn is_too_complex_command_word(word : String) -> Bool {
+  match word {
+    "!"
+    | "{"
+    | "}"
+    | "."
+    | "case"
+    | "coproc"
+    | "do"
+    | "done"
+    | "elif"
+    | "else"
+    | "esac"
+    | "eval"
+    | "exec"
+    | "fi"
+    | "for"
+    | "function"
+    | "if"
+    | "in"
+    | "select"
+    | "source"
+    | "then"
+    | "time"
+    | "trap"
+    | "until"
+    | "while" => true
+    _ => false
+  }
+}
