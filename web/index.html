@@ -198,10 +198,14 @@
     .theme-button:hover { border-color: var(--accent); }
     .theme-button.active { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
 
-    /* main */
-    .main { overflow-y: auto; padding: 20px 28px; }
+    /* main: no top padding on the scroll container itself, so the sticky toolbar
+       can pin flush to the very top. The 20px top breathing room moves onto the
+       content (.session-view / .main-toolbar) where it scrolls away normally. */
+    .main { overflow-y: auto; padding: 0 28px; }
+    .session-view { padding-top: 20px; }
     .main-toolbar {
       min-height: 34px;
+      padding-top: 20px;
       display: flex;
       align-items: center;
       justify-content: flex-start;
@@ -217,6 +221,20 @@
     .header-meta { color: var(--muted); font-size: 12px; }
 
     /* mode toggle */
+    /* sticky toolbar: keeps the view/args toggles + error bar pinned to the top
+       of the scrolling .main while reading a long log. Negative side margins let
+       its background span the .main padding gutter so content can't peek beside it. */
+    .sticky-toolbar {
+      position: sticky;
+      top: 0;
+      z-index: 5;
+      background: var(--bg);
+      margin: 0 -28px 16px;
+      padding: 12px 28px;
+      border-bottom: 1px solid var(--border);
+    }
+    .sticky-toolbar .mode-row { margin-bottom: 0; }
+    .sticky-toolbar .error-bar { margin: 10px 0 0; }
     .mode-row {
       display: flex;
       align-items: center;
@@ -225,7 +243,9 @@
       gap: 8px 14px;
       margin-bottom: 16px;
     }
-    .mode-toggle { display: flex; gap: 8px; }
+    .mode-cluster { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; }
+    .mode-toggle { display: flex; align-items: center; gap: 8px; }
+    .args-toggle-label { color: var(--muted); font-size: 12px; margin-right: 2px; }
     .mode-button {
       background: var(--panel); color: var(--text);
       border: 1px solid var(--border); border-radius: 999px;
@@ -328,6 +348,23 @@
     details.tool-call > summary.tool-call-name { cursor: pointer; }
     details.tool-call[open] > summary.tool-call-name { margin-bottom: 4px; }
     .tool-call-args { margin: 0; white-space: pre-wrap; font-family: ui-monospace, monospace; font-size: 12px; color: var(--muted); }
+
+    /* friendly tool-args: one key: value row per field, values shown verbatim */
+    .tool-call-args-rendered { margin: 0; font-size: 12px; }
+    .arg-field { margin: 3px 0; }
+    .arg-key { color: var(--accent); font-family: ui-monospace, monospace; font-size: 12px; font-weight: 600; }
+    .arg-key::after { content: ": "; color: var(--muted); font-weight: 400; }
+    .arg-value-inline { font-family: ui-monospace, monospace; font-size: 12px; white-space: pre-wrap; word-break: break-word; }
+    .arg-value {
+      margin: 3px 0 0; padding: 6px 8px;
+      background: var(--panel-2); border: 1px solid var(--border); border-radius: 4px;
+      white-space: pre-wrap; word-break: break-word;
+      font-family: ui-monospace, monospace; font-size: 12px;
+    }
+    /* tool-args toggle: friendly form by default, raw JSON under .show-original */
+    .tool-call-args-original { display: none; }
+    .session-view.show-original .tool-call-args-original { display: block; }
+    .session-view.show-original .tool-call-args-rendered { display: none; }
 
     /* folded tool-result cards: the label is the toggle, body hides until clicked */
     details.card > summary.card-label { cursor: pointer; }

@@ -342,8 +342,15 @@ fn assistant_card(
 
 ///|
 /// A tool call, with its arguments folded away by default: the row shows only
-/// the tool name and expands to the full argument JSON on click. Calls with no
-/// meaningful arguments render as a plain name (nothing to fold).
+/// the tool name and expands on click. Calls with no meaningful arguments render
+/// as a plain name (nothing to fold).
+///
+/// Expanded, the call carries *two* renderings of its arguments: a human-friendly
+/// one where each field's value is shown verbatim (a `write_file` body is real
+/// text, not a quoted-and-escaped JSON string) and the original pretty-printed
+/// JSON. Only one is visible at a time — the stylesheet shows the friendly form by
+/// default and swaps to the original under `.show-original`, so the raw arguments
+/// stay one toggle away for debugging without re-rendering.
 fn tool_call_view(
   call : @deepseek.ToolCall,
   briefs : Map[String, String],
@@ -355,16 +362,83 @@ fn tool_call_view(
   if briefs.get(call.id) is Some(brief) && !brief.trim().is_empty() {
     name_row.push(@html.span(class="tool-call-brief", " · \{brief}"))
   }
-  let args = pretty_json(call.arguments)
-  if is_blank_args(args) {
+  let original = pretty_json(call.arguments)
+  if is_blank_args(original) {
     return @html.div(class="tool-call", [
       @html.div(class="tool-call-name", name_row),
     ])
   }
   @html.details(class="tool-call", [
     @html.summary(class="tool-call-name", name_row),
-    @html.pre(class="tool-call-args", args),
+    render_args_friendly(call.arguments),
+    @html.pre(class="tool-call-args tool-call-args-original", original),
   ])
+}
+
+///|
+/// The human-friendly rendering of a tool call's arguments: one row per field,
+/// with the value shown verbatim rather than as a quoted-and-escaped JSON string,
+/// so a `write_file` body or a `bash` command reads as plain text. Falls back to
+/// the pretty-printed JSON (in the same hidden-on-toggle block) when the arguments
+/// are not a JSON object — a bare value, an array, or text the model emitted that
+/// does not parse.
+fn render_args_friendly(raw : String) -> @html.Html {
+  let json = @json.parse(raw) catch {
+    _ => return @html.pre(class="tool-call-args tool-call-args-rendered", raw)
+  }
+  match json {
+    Object(fields) if !fields.is_empty() => {
+      let rows : Array[@html.Html] = [
+        for key, value in fields => arg_field(key, value)
+      ]
+      @html.div(class="tool-call-args-rendered", rows)
+    }
+    _ =>
+      @html.pre(
+        class="tool-call-args tool-call-args-rendered",
+        pretty_json(raw),
+      )
+  }
+}
+
+///|
+/// One `key: value` row of the friendly arguments view. String values render
+/// verbatim — a multi-line value (e.g. a file body) as a preformatted block, a
+/// single-line value inline. Non-string scalars render inline; nested arrays and
+/// objects keep their JSON form, which is rare for tool arguments.
+fn arg_field(key : String, value : Json) -> @html.Html {
+  let row : Array[@html.Html] = [@html.span(class="arg-key", key)]
+  match value {
+    String(text) =>
+      if text.contains("\n") {
+        row.push(@html.pre(class="arg-value", text))
+      } else {
+        row.push(@html.span(class="arg-value-inline", text))
+      }
+    Array(_) | Object(_) =>
+      row.push(@html.pre(class="arg-value", value.stringify(indent=2)))
+    scalar =>
+      row.push(@html.span(class="arg-value-inline", scalar_text(scalar)))
+  }
+  @html.div(class="arg-field", row)
+}
+
+///|
+/// A JSON scalar as the plain text to show inline. Numbers keep their original
+/// source spelling when the parser preserved it.
+fn scalar_text(value : Json) -> String {
+  match value {
+    True => "true"
+    False => "false"
+    Null => "null"
+    Number(n, repr~) =>
+      match repr {
+        Some(text) => text
+        None => n.to_string()
+      }
+    String(text) => text
+    other => other.stringify()
+  }
 }
 
 ///|

@@ -34,6 +34,9 @@ struct Model {
   status : String
   // "Errors only" filter folds the log down to failed tool results.
   errors_only : Bool
+  // Tool-call arguments rendering: the human-friendly form (values shown verbatim,
+  // no JSON quoting) by default, or the original pretty-printed JSON for debugging.
+  show_original_args : Bool
 }
 
 ///|
@@ -65,6 +68,7 @@ enum Msg {
   Select(String)
   SessionFetched(String, Result[String, Error])
   SetMode(@viz.ViewMode)
+  SetArgsView(Bool)
   SetTheme(Theme)
   ToggleSidebar
   ToggleRoot(String)
@@ -99,6 +103,7 @@ fn init_model() -> Model {
     loading: false,
     status: "loading sessions…",
     errors_only: false,
+    show_original_args: false,
   }
 }
 
@@ -197,6 +202,8 @@ fn update(emit : @cmd.Emit[Msg], msg : Msg, model : Model) -> (@cmd.Cmd, Model) 
         }
       }
     SetMode(mode) => (@cmd.none, { ..model, view_mode: mode })
+    SetArgsView(show_original) =>
+      (@cmd.none, { ..model, show_original_args: show_original })
     ToggleErrorsOnly =>
       (@cmd.none, { ..model, errors_only: !model.errors_only })
     // Scroll to the next/previous failed-tool card, cycling. The count is
@@ -732,8 +739,12 @@ fn main_pane(emit : @cmd.Emit[Msg], model : Model) -> @html.Html {
           let error_count = @viz.rendered_error_count(session, model.view_mode)
           @html.div(class=session_view_class(model), [
             header_strip(model, id, row.map(row => row.root_label)),
-            mode_row(emit, model, parsed),
-            error_bar(emit, model, error_count),
+            // Pin the view/args toggles and the error bar to the top of the
+            // scroll area so they stay reachable while reading a long log.
+            @html.div(class="sticky-toolbar", [
+              mode_row(emit, model, parsed),
+              error_bar(emit, model, error_count),
+            ]),
             @viz.render_notices(parsed),
             session_log_view(model, session, error_count),
           ])
@@ -777,9 +788,39 @@ fn mode_row(
   parsed : @session_log.ParsedLog,
 ) -> @html.Html {
   @html.div(class="mode-row", [
-    mode_toggle(emit, model),
+    @html.div(class="mode-cluster", [
+      mode_toggle(emit, model),
+      args_toggle(emit, model),
+    ]),
     session_metadata(model, parsed),
   ])
+}
+
+///|
+/// Toggle between the human-friendly tool-argument rendering (values verbatim, no
+/// JSON quoting) and the original pretty-printed JSON kept for debugging. Both are
+/// always in the DOM; this only flips which one the stylesheet shows.
+fn args_toggle(emit : @cmd.Emit[Msg], model : Model) -> @html.Html {
+  @html.div(class="mode-toggle args-toggle", [
+    @html.span(class="args-toggle-label", "Tool args"),
+    args_button(emit, model, false, "Rendered"),
+    args_button(emit, model, true, "Original"),
+  ])
+}
+
+///|
+fn args_button(
+  emit : @cmd.Emit[Msg],
+  model : Model,
+  show_original : Bool,
+  label : String,
+) -> @html.Html {
+  let classes = if model.show_original_args == show_original {
+    "mode-button active"
+  } else {
+    "mode-button"
+  }
+  @html.button(class=classes, on_click=emit(SetArgsView(show_original)), label)
 }
 
 ///|
@@ -951,12 +992,14 @@ fn format_scaled_size(bytes : Int64, unit : Int64, suffix : String) -> String {
 
 ///|
 /// Add the `errors-only` class so the stylesheet folds the log down to failed
-/// tool cards (and the turns containing them).
+/// tool cards (and the turns containing them), and `show-original` so it swaps the
+/// friendly tool-argument rendering for the raw JSON.
 fn session_view_class(model : Model) -> String {
-  if model.errors_only {
-    "session-view errors-only"
-  } else {
-    "session-view"
+  match (model.errors_only, model.show_original_args) {
+    (false, false) => "session-view"
+    (true, false) => "session-view errors-only"
+    (false, true) => "session-view show-original"
+    (true, true) => "session-view errors-only show-original"
   }
 }
 

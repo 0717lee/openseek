@@ -138,6 +138,54 @@ test "tool calls fold their arguments, empty args stay flat" {
 }
 
 ///|
+test "tool args render verbatim, keeping the raw JSON for debugging" {
+  // A write_file-style call: the body is a multi-line string. The friendly view
+  // must show it as real text (no JSON quoting/escaping), while the original
+  // pretty-printed JSON stays in the DOM, hidden behind the `.show-original`
+  // toggle, so the raw escaped form is still available for debugging.
+  let session = @agent_session.Session(SessionId("w"), system_prompt="").append(
+    Assistant(
+      AssistantMessage("", tool_calls=[
+        ToolCall(
+          id="w1",
+          name="write_file",
+          arguments="{\"path\":\"notes.txt\",\"content\":\"alpha\\nbeta\"}",
+        ),
+      ]),
+    ),
+  )
+  let html = render(@viz.render_session(session, RawLog))
+  // Friendly form: a key/value row per field, the body shown verbatim with a real
+  // newline — not the JSON-escaped `alpha\nbeta`.
+  assert_true(html.contains("class=\"tool-call-args-rendered\""))
+  assert_true(html.contains("class=\"arg-key\">path"))
+  assert_true(html.contains("class=\"arg-key\">content"))
+  assert_true(html.contains("notes.txt"))
+  assert_true(html.contains("class=\"arg-value\">alpha\nbeta</pre>"))
+  // Original form preserved for debugging: the escaped JSON string.
+  assert_true(html.contains("tool-call-args-original"))
+  assert_true(html.contains("alpha\\nbeta"))
+}
+
+///|
+test "non-object tool args fall back to JSON in both forms" {
+  // Arguments that are not a JSON object (here a bare array) have no key/value
+  // fields, so the friendly view falls back to pretty JSON rather than inventing
+  // a structure.
+  let session = @agent_session.Session(SessionId("arr"), system_prompt="").append(
+    Assistant(
+      AssistantMessage("", tool_calls=[
+        ToolCall(id="a1", name="batch", arguments="[1,2,3]"),
+      ]),
+    ),
+  )
+  let html = render(@viz.render_session(session, RawLog))
+  assert_true(html.contains("class=\"tool-call-args tool-call-args-rendered\""))
+  assert_true(html.contains("tool-call-args-original"))
+  assert_false(html.contains("arg-key"))
+}
+
+///|
 test "failed tool result is folded and red-flagged" {
   let html = render(@viz.render_session(error_tool_session(), RawLog))
   // Folded by default (a <details> with no `open`), tagged as an error, and the
