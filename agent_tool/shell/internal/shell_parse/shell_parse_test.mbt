@@ -308,6 +308,31 @@ test "parse shell comments without losing visible commands" {
 }
 
 ///|
+test "parse newlines without duplicate separators" {
+  guard @shell_parse.parse_for_policy("moon fmt;\n") is Simple(trailing) else {
+    fail("expected trailing separator before newline")
+  }
+  assert_eq(trailing.length(), 1)
+  assert_true(trailing[0].argv == ["moon", "fmt"])
+  guard @shell_parse.parse_for_policy("moon fmt\n\nmoon test")
+    is Simple(blank_line) else {
+    fail("expected blank line between commands")
+  }
+  assert_eq(blank_line.length(), 2)
+  assert_true(blank_line[0].argv == ["moon", "fmt"])
+  assert_true(blank_line[1].argv == ["moon", "test"])
+  assert_true(blank_line[1].separator_before is Some(";"))
+  guard @shell_parse.parse_for_policy("cd ./pkg &&\nmoon fmt")
+    is Simple(and_newline) else {
+    fail("expected newline after && to continue compound command")
+  }
+  assert_eq(and_newline.length(), 2)
+  assert_true(and_newline[0].argv == ["cd", "./pkg"])
+  assert_true(and_newline[1].argv == ["moon", "fmt"])
+  assert_true(and_newline[1].separator_before is Some("&&"))
+}
+
+///|
 test "parse pipes and conditionals as visible top level commands" {
   guard @shell_parse.parse_for_policy("moon check 2>&1 | tee out.log || true")
     is Simple(commands) else {

@@ -187,6 +187,7 @@ fn shell_environment_builtin(command_name : String) -> Bool {
   match command_name {
     "export" | "readonly" | "set" | "unset" | "typeset" | "declare" | "local" =>
       true
+    "alias" | "unalias" | "hash" => true
     _ => false
   }
 }
@@ -488,6 +489,7 @@ test "detect moon commands that should trigger follow-up check" {
   assert_true(should_auto_check_moon_command("command -- moon fmt"))
   assert_true(should_auto_check_moon_command("command -p moon fmt"))
   assert_true(should_auto_check_moon_command("cd ./pkg && moon fmt"))
+  assert_true(should_auto_check_moon_command("cd ./pkg &&\nmoon fmt"))
   assert_true(
     should_auto_check_moon_command("cd ./pkg && moon fmt # trailing note"),
   )
@@ -555,6 +557,10 @@ test "do not trigger follow-up check for read-only moon commands or data" {
   assert_false(should_auto_check_moon_command("set -a; FOO=bar; moon fmt"))
   assert_false(should_auto_check_moon_command("PATH=/tmp; moon fmt"))
   assert_false(
+    should_auto_check_moon_command("alias moon='echo fake'\nmoon fmt"),
+  )
+  assert_false(should_auto_check_moon_command("hash -r\nmoon fmt"))
+  assert_false(
     should_auto_check_moon_command("command export FOO=bar; moon fmt"),
   )
   assert_false(
@@ -590,6 +596,10 @@ test "detect moon command check cwd from -C option" {
   )
   assert_true(
     moon_auto_check_start_cwd("cd ./project && moon fmt", Some("/repo"))
+    is Some("/repo/project"),
+  )
+  assert_true(
+    moon_auto_check_start_cwd("cd ./project &&\nmoon fmt", Some("/repo"))
     is Some("/repo/project"),
   )
   assert_true(

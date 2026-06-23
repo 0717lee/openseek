@@ -44,7 +44,7 @@ test "command policy detects moon_cmd in simple shell compounds" {
       "cd demo && moon_cmd check", "DEEPSEEK_MODEL=x moon_cmd run cmd/main", "env DEEPSEEK_MODEL=x moon_cmd check",
       "env -- DEEPSEEK_MODEL=x moon_cmd check", "command moon_cmd check", "command -- moon_cmd check",
       "command -p moon_cmd check", "true || moon_cmd test", "moon_cmd check > out.log",
-      "cd demo && moon_cmd check # trailing note",
+      "cd demo && moon_cmd check # trailing note", "true;\nmoon_cmd check",
     ] {
     guard @command_policy.moonbit_command_policy_error(cmd) is Some(message) else {
       fail("expected moon_cmd to be redirected for \{cmd}")

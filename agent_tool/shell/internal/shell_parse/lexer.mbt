@@ -192,9 +192,8 @@ fn lex(command : String) -> LexResult {
             }
           }
           '\n' | '\r' => {
-            let attached = !word.empty
             word.flush_and_reset(tokens)
-            tokens.push(Op(";", attached))
+            push_newline_separator(tokens)
             index += 1
           }
           _ => {
@@ -270,7 +269,7 @@ fn lex(command : String) -> LexResult {
         }
       Comment => {
         if ch == '\n' || ch == '\r' {
-          push_comment_newline_separator(tokens)
+          push_newline_separator(tokens)
           state = Plain
         }
         index += 1
@@ -289,7 +288,7 @@ fn lex(command : String) -> LexResult {
 }
 
 ///|
-fn push_comment_newline_separator(tokens : Array[Token]) -> Unit {
+fn push_newline_separator(tokens : Array[Token]) -> Unit {
   if tokens.length() == 0 {
     return
   }
