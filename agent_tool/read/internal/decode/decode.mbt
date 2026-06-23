@@ -1,6 +1,6 @@
 ///|
-/// Rendered content characters one `read` call returns when the model does not
-/// pick a `max_output_chars` budget itself.
+/// Rendered content size (UTF-16 code units) one `read` call returns when the
+/// model does not pick a `max_output_chars` budget itself.
 pub let default_max_output_chars : Int = 12000
 
 ///|
@@ -11,7 +11,7 @@ pub let hard_max_output_chars : Int = 50000
 ///|
 /// Decoded arguments of the `read` tool: one file path, starting from the
 /// 1-based `start_line`, at most `max_lines` lines (unbounded when `None`),
-/// truncated to `max_output_chars` rendered content characters.
+/// truncated to `max_output_chars` rendered UTF-16 code units.
 pub struct ReadInput {
   path : String
   start_line : Int

@@ -11,9 +11,10 @@
 ///   to 1. Single-file calls only.
 /// - `max_lines` (number, optional): maximum number of lines to return.
 ///   Single-file calls only.
-/// - `max_output_chars` (number, optional): maximum rendered content chars
-///   for the whole call, including line-number gutters when present. Defaults
-///   to 12000 and is capped at 50000.
+/// - `max_output_chars` (number, optional): maximum rendered content size for
+///   the whole call, counted in UTF-16 code units (`String::length`, an O(1)
+///   soft budget) and including line-number gutters when present. Defaults to
+///   12000 and is capped at 50000. Truncation never splits a surrogate pair.
 ///
 /// ## Result
 /// - `Respond(ToolOutput(<file contents>))` on success for uncapped whole-file
@@ -110,7 +111,7 @@ async fn read_file(
   let brief = "read \{@agent_tool.brief_basename(path)}"
   let include_header = input.start_line != 1 ||
     input.max_lines is Some(_) ||
-    selection.content.char_length() > input.max_output_chars
+    selection.content.length() > input.max_output_chars
   if include_header {
     let rendered = render_numbered_content(selection, input.max_output_chars)
     let output =
@@ -119,8 +120,8 @@ async fn read_file(
       $|end_line=\{rendered.end_line}
       $|total_lines=\{selection.total_lines}
       $|shown_lines=\{rendered.shown_lines}
-      $|file_chars=\{content.char_length()}
-      $|selected_chars=\{selection.content.char_length()}
+      $|file_chars=\{content.length()}
+      $|selected_chars=\{selection.content.length()}
       $|shown_chars=\{rendered.shown_chars}
       $|line_limited=\{selection.line_limited}
       $|truncated=\{rendered.truncated}
@@ -180,14 +181,37 @@ async fn directory_read_error(path : String) -> String? {
 }
 
 ///|
-fn char_prefix(content : String, max_chars : Int) -> String {
-  if max_chars <= 0 {
+/// Keep at most `max_units` leading UTF-16 code units of `content`. The budget
+/// is a soft limit, so we count in code units (`String::length`, O(1)) rather
+/// than Unicode code points, and only snap the cut down to a character boundary
+/// so the result can never end in a lone surrogate.
+fn code_unit_prefix(content : String, max_units : Int) -> String {
+  if max_units <= 0 {
     ""
-  } else if content.char_length() <= max_chars {
+  } else if content.length() <= max_units {
     content
   } else {
-    StringView::from_iter(content.iter().take(max_chars)).to_owned()
+    "\{content[:char_boundary_at_or_below(content, max_units)]}"
   }
+}
+
+///|
+/// Largest code-unit offset `<= max_units` that is a valid character boundary.
+/// A surrogate pair spans two code units; if `max_units` would land between them
+/// (the unit at `max_units` is a trailing surrogate) step back one so the
+/// leading surrogate is dropped too. Callers pass `max_units < content.length()`.
+fn char_boundary_at_or_below(content : String, max_units : Int) -> Int {
+  if is_low_surrogate(content.at(max_units)) {
+    max_units - 1
+  } else {
+    max_units
+  }
+}
+
+///|
+fn is_low_surrogate(unit : UInt16) -> Bool {
+  let code = unit.to_int()
+  code >= 0xDC00 && code <= 0xDFFF
 }
 
 ///|
@@ -218,21 +242,21 @@ fn render_numbered_content(
   let mut remaining = max_chars
   let mut truncated = false
   for index in 0..<lines.length() {
-    let separator_chars = if numbered.length() == 0 { 0 } else { 1 }
+    let separator_units = if numbered.length() == 0 { 0 } else { 1 }
     let prefix = "\{selection.start_line + index}\t"
-    let prefix_budget = separator_chars + prefix.char_length()
+    let prefix_budget = separator_units + prefix.length()
     if remaining < prefix_budget {
       truncated = true
       break
     }
     let available = remaining - prefix_budget
     let line = lines[index]
-    let line_chars = line.char_length()
-    if line_chars <= available {
+    let line_units = line.length()
+    if line_units <= available {
       numbered.push("\{prefix}\{line}")
-      remaining = remaining - prefix_budget - line_chars
+      remaining = remaining - prefix_budget - line_units
     } else {
-      numbered.push("\{prefix}\{char_prefix(line, available)}")
+      numbered.push("\{prefix}\{code_unit_prefix(line, available)}")
       remaining = 0
       truncated = true
       break
@@ -248,13 +272,7 @@ fn render_numbered_content(
   } else {
     selection.start_line + shown_lines - 1
   }
-  {
-    content,
-    end_line,
-    shown_lines,
-    shown_chars: content.char_length(),
-    truncated,
-  }
+  { content, end_line, shown_lines, shown_chars: content.length(), truncated }
 }
 
 ///|
@@ -395,13 +413,24 @@ async test "read caps after adding line number gutters" {
 async test "read caps unicode content on character boundaries" {
   @vfs.with_tmpdir(dir => {
     let path = "\{dir}/unicode.txt"
+    // "😀" is one code point but two UTF-16 code units; "😀Z" has length 3.
     @fs.write_file(path, "😀Z", create_mode=CreateOrTruncate)
-    let result = execute({ "path": path, "max_lines": 1, "max_output_chars": 3 })
-    guard result is Respond(output) else { fail("expected Respond") }
+    // Budget 4 = "1\t" (2 units) + "😀" (2 units): the emoji fits whole and Z
+    // is dropped.
+    let fits = execute({ "path": path, "max_lines": 1, "max_output_chars": 4 })
+    guard fits is Respond(output) else { fail("expected Respond") }
     assert_true(output.is_error)
-    assert_true(output.content.contains("shown_chars=3"))
+    assert_true(output.content.contains("shown_chars=4"))
     assert_true(output.content.contains("1\t😀"))
     assert_false(output.content.contains("Z"))
+    // Budget 3 leaves only one unit after the gutter, which would split "😀".
+    // Rather than emit a lone surrogate, the whole emoji is dropped.
+    let splits = execute({ "path": path, "max_lines": 1, "max_output_chars": 3 })
+    guard splits is Respond(output) else { fail("expected Respond") }
+    assert_true(output.is_error)
+    assert_true(output.content.contains("shown_chars=2"))
+    assert_false(output.content.contains("😀"))
+    assert_true(output.content.has_suffix("1\t"))
   })
 }
 
