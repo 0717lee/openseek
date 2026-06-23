@@ -221,6 +221,9 @@ fn cwd_command_effect(
   base_cwd : String,
 ) -> CwdCommandEffect {
   let argv = command.argv
+  if argv.length() > 0 && argv[0] == "env" {
+    return NotCwdCommand
+  }
   match command.command_index() {
     Some(command_index) if command_index < argv.length() =>
       match argv[command_index] {
@@ -329,12 +332,19 @@ fn parse_moon_invocation(
         cwd = resolve_command_cwd(cwd, argv[index + 1])
         index += 2
       }
+      option if moon_attached_cwd_option(option) is Some(target) => {
+        cwd = resolve_command_cwd(cwd, target)
+        index += 1
+      }
       "--target-dir" | "-Z" | "--unstable-feature" => {
         if index + 1 >= argv.length() {
           return None
         }
         index += 2
       }
+      option if moon_attached_value_option(option, "--target-dir") ||
+        moon_attached_value_option(option, "-Z") ||
+        moon_attached_value_option(option, "--unstable-feature") => index += 1
       "--dry-run" => {
         dry_run = true
         index += 1
@@ -346,6 +356,41 @@ fn parse_moon_invocation(
     }
   }
   None
+}
+
+///|
+fn moon_attached_cwd_option(option : String) -> String? {
+  if option.has_prefix("-C=") {
+    option_value_after_prefix(option, "-C=")
+  } else {
+    option_value_after_prefix(option, "-C")
+  }
+}
+
+///|
+fn moon_attached_value_option(option : String, name : String) -> Bool {
+  if name.has_prefix("--") {
+    option_value_after_prefix(option, name + "=") is Some(_)
+  } else if option.has_prefix(name + "=") {
+    option_value_after_prefix(option, name + "=") is Some(_)
+  } else {
+    option_value_after_prefix(option, name) is Some(_)
+  }
+}
+
+///|
+fn option_value_after_prefix(option : String, prefix : String) -> String? {
+  match option.strip_prefix(prefix) {
+    Some(value) => {
+      let value = value.to_owned()
+      if value == "" {
+        None
+      } else {
+        Some(value)
+      }
+    }
+    None => None
+  }
 }
 
 ///|
@@ -478,7 +523,12 @@ test "detect moon commands that should trigger follow-up check" {
   assert_true(should_auto_check_moon_command("moon fmt # trailing note"))
   assert_true(should_auto_check_moon_command("moon info"))
   assert_true(should_auto_check_moon_command("moon -C pkg fmt"))
+  assert_true(should_auto_check_moon_command("moon -Cpkg fmt"))
+  assert_true(should_auto_check_moon_command("moon -C=pkg fmt"))
   assert_true(should_auto_check_moon_command("moon -q -C pkg info"))
+  assert_true(
+    should_auto_check_moon_command("moon --target-dir=/tmp/build fmt"),
+  )
   assert_true(
     should_auto_check_moon_command(
       "moon ide rename old_name new_name --loc main.mbt:1:8 --apply",
@@ -585,12 +635,27 @@ test "detect moon command check cwd from -C option" {
     is Some("/repo/pkg"),
   )
   assert_true(
+    moon_auto_check_start_cwd("moon -Cpkg fmt", Some("/repo"))
+    is Some("/repo/pkg"),
+  )
+  assert_true(
+    moon_auto_check_start_cwd("moon -C=pkg fmt", Some("/repo"))
+    is Some("/repo/pkg"),
+  )
+  assert_true(
     moon_auto_check_start_cwd("moon -C ../other info", Some("/repo/pkg"))
     is Some("/repo/other"),
   )
   assert_true(
     moon_auto_check_start_cwd("moon -C /tmp/mod fmt", Some("/repo"))
     is Some("/tmp/mod"),
+  )
+  assert_true(
+    moon_auto_check_start_cwd(
+      "moon --target-dir=/tmp/moonbuild fmt",
+      Some("/repo"),
+    )
+    is Some("/repo"),
   )
   assert_true(
     moon_auto_check_start_cwd("cd project && moon fmt", Some("/repo")) is None,
@@ -602,6 +667,14 @@ test "detect moon command check cwd from -C option" {
   assert_true(
     moon_auto_check_start_cwd("cd ./project &&\nmoon fmt", Some("/repo"))
     is Some("/repo/project"),
+  )
+  assert_true(
+    moon_auto_check_start_cwd("env cd ./project && moon fmt", Some("/repo"))
+    is Some("/repo"),
+  )
+  assert_true(
+    moon_auto_check_start_cwd("env -i cd ./project && moon fmt", Some("/repo"))
+    is Some("/repo"),
   )
   assert_true(
     moon_auto_check_start_cwd("cd -- project && moon fmt", Some("/repo"))

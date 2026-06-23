@@ -494,7 +494,10 @@ async test "shell appends moon check from moon command target cwd" {
       ),
       create_mode=CreateOrTruncate,
     )
-    for cmd in ["moon -C project fmt", "cd ./project && moon fmt"] {
+    for
+      cmd in [
+        "moon -C project fmt", "moon -Cproject fmt", "moon -C=project fmt", "cd ./project && moon fmt",
+      ] {
       let result = run_shell({ "cmd": cmd, "cwd": dir })
       guard result is Respond(output) else { fail("expected Respond") }
       assert_false(output.is_error)
