@@ -25,7 +25,7 @@ Ranged or capped reads include a metadata header so the model knows what it saw
 and what it did not see. The body of those headered blocks is line-numbered as
 `<line-number>\t<content>`, matching the common `cat -n` style used by other
 coding agents.
-Automatic character truncation is marked as a tool error even when the file was
+Automatic output truncation is marked as a tool error even when the file was
 read successfully; that makes lossy context visible to the loop instead of
 silently pretending the returned prefix is complete.
 
@@ -59,21 +59,22 @@ Prefer a range plus a cap over reading a large file and relying on truncation.
 | `path` | string | yes | Filesystem path. Relative paths resolve against the agent process's current working directory. |
 | `start_line` | number | no | 1-based first line to return. Defaults to `1`. |
 | `max_lines` | number | no | Maximum number of lines to return. |
-| `max_output_chars` | number | no | Maximum rendered content chars to return, including line-number gutters when present. Defaults to `12000` and is capped at `50000`. |
+| `max_output_chars` | number | no | Maximum rendered content size to return, counted in UTF-16 code units (`String::length`) and including line-number gutters when present. Defaults to `12000` and is capped at `50000`. Truncation snaps down to a character boundary, so a surrogate pair is never split. |
 
 ## Action
 
 The action is always `Respond(ToolOutput(...))` — the agent loop forwards
 `ToolOutput.content` to the model as a tool-call response. `is_error` is
 `false` on success and `true` for read failures, argument failures, or automatic
-character truncation. The string body has one of these shapes:
+output truncation. The string body has one of these shapes:
 
 - The file's text contents on uncapped whole-file success.
 - A metadata header followed by `---` and line-numbered selected content for
-  ranged reads or capped reads. The header includes line and character counts
-  plus `line_format=<line-number>\t<content>`; `shown_chars` counts the
-  rendered numbered body, and `truncated=true` when `max_output_chars` cut that
-  rendered body.
+  ranged reads or capped reads. The header includes line counts and UTF-16
+  code-unit counts (`file_chars`, `selected_chars`, `shown_chars`) plus
+  `line_format=<line-number>\t<content>`; `shown_chars` counts the rendered
+  numbered body, and `truncated=true` when `max_output_chars` cut that rendered
+  body.
 - `"error reading <path>: <error>"` — a single-file read failed. Common
   causes: the file is missing, the agent doesn't have read permissions, or
   the bytes aren't valid UTF-8.
