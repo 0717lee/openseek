@@ -107,22 +107,29 @@ async fn read_file(
       )
   }
   let selection = select_lines(content, input.start_line, input.max_lines)
+  let brief = "read \{@agent_tool.brief_basename(path)}"
   let include_header = input.start_line != 1 ||
     input.max_lines is Some(_) ||
     selection.content.char_length() > input.max_output_chars
   if include_header {
     let rendered = render_numbered_content(selection, input.max_output_chars)
-    let output = "\{read_header(path, content, selection, rendered)}\{rendered.content}"
-    @agent_tool.ToolAction::respond(
-      output,
-      is_error=rendered.truncated,
-      brief="read \{@agent_tool.brief_basename(path)}",
-    )
+    let output =
+      $|path=\{path}
+      $|start_line=\{selection.start_line}
+      $|end_line=\{rendered.end_line}
+      $|total_lines=\{selection.total_lines}
+      $|shown_lines=\{rendered.shown_lines}
+      $|file_chars=\{content.char_length()}
+      $|selected_chars=\{selection.content.char_length()}
+      $|shown_chars=\{rendered.shown_chars}
+      $|line_limited=\{selection.line_limited}
+      $|truncated=\{rendered.truncated}
+      $|line_format=<line-number>\{"\\t"}<content>
+      $|---
+      $|\{rendered.content}
+    @agent_tool.ToolAction::respond(output, is_error=rendered.truncated, brief~)
   } else {
-    @agent_tool.ToolAction::respond(
-      selection.content,
-      brief="read \{@agent_tool.brief_basename(path)}",
-    )
+    @agent_tool.ToolAction::respond(selection.content, brief~)
   }
 }
 
@@ -132,7 +139,7 @@ fn select_lines(
   start_line : Int,
   max_lines : Int?,
 ) -> ReadSelection {
-  let lines = [ for line in content.split("\n") => line.to_owned() ]
+  let lines = [ for line in content.split("\n") => line ]
   let total_lines = lines.length()
   // Clamp both bounds into [0, total_lines] so the slice below is always
   // ascending and in range — a start past the last line selects nothing.
@@ -146,7 +153,7 @@ fn select_lines(
       start_index + count.clamp(min=0, max=total_lines - start_index)
     None => total_lines
   }
-  let selected = lines[start_index:end_exclusive].to_owned()
+  let selected = lines[start_index:end_exclusive]
   let shown_lines = selected.length()
   let line_limited = match max_lines {
     Some(_) => end_exclusive < total_lines
@@ -248,30 +255,6 @@ fn render_numbered_content(
     shown_chars: content.char_length(),
     truncated,
   }
-}
-
-///|
-fn read_header(
-  path : String,
-  original : String,
-  selection : ReadSelection,
-  rendered : RenderedSelection,
-) -> String {
-  [
-    "path=\{path}",
-    "start_line=\{selection.start_line}",
-    "end_line=\{rendered.end_line}",
-    "total_lines=\{selection.total_lines}",
-    "shown_lines=\{rendered.shown_lines}",
-    "file_chars=\{original.char_length()}",
-    "selected_chars=\{selection.content.char_length()}",
-    "shown_chars=\{rendered.shown_chars}",
-    "line_limited=\{selection.line_limited}",
-    "truncated=\{rendered.truncated}",
-    "line_format=<line-number>\\t<content>",
-    "---",
-    "",
-  ].join("\n")
 }
 
 ///|

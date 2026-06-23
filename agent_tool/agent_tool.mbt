@@ -31,7 +31,7 @@ pub fn AgentToolCall::AgentToolCall(
 ///|
 /// A JSON Schema describing the arguments a tool accepts. Wraps a raw `Json`
 /// value so registry entries advertise schemas explicitly.
-pub(all) struct JsonSchema(Json)
+pub(all) struct JsonSchema(Json) derive(Debug)
 
 ///|
 /// A locally registered tool: the name and JSON Schema sent to DeepSeek, plus a
@@ -42,7 +42,7 @@ pub struct AgentToolDefinition {
   description : String
   schema : JsonSchema
   execute : ToolExecutor
-}
+} derive(Debug(ignore=ToolExecutor))
 
 ///|
 /// Builds a tool definition with a name, JSON Schema for the arguments, and

@@ -87,15 +87,37 @@ character truncation. The string body has one of these shapes:
 ///|
 test "read tool advertises the expected schema" {
   let tool = @read.definition()
-  assert_eq(tool.name, "read")
-  let JsonSchema(schema) = tool.schema
-  let text = schema.stringify()
-  assert_true(text.contains("\"path\""))
-  assert_false(text.contains("\"paths\""))
-  assert_true(text.contains("\"required\""))
-  assert_true(text.contains("\"start_line\""))
-  assert_true(text.contains("\"max_lines\""))
-  assert_true(text.contains("\"max_output_chars\""))
+  debug_inspect(
+    tool,
+    content=(
+      #|{
+      #|  name: "read",
+      #|  description: "Read arguments.path as text. For several known independent files, batch separate read tool calls in one assistant response when possible. Do not use read for directories: inspect them with `ls` or `tree`, then read specific files. Supports optional start_line, max_lines, and max_output_chars for focused single-file reads. Headered outputs use `<line-number>\\t<content>` numbered lines.",
+      #|  schema: JsonSchema(
+      #|    Object(
+      #|      {
+      #|        "type": String("object"),
+      #|        "required": Array([String("path")]),
+      #|        "properties": Object(
+      #|          {
+      #|            "path": Object(
+      #|              {
+      #|                "type": String("string"),
+      #|                "description": String("Text file path to read. Directories are not supported; use `ls` or `tree` first, then read specific files."),
+      #|              },
+      #|            ),
+      #|            "start_line": Object({ "type": String("number") }),
+      #|            "max_lines": Object({ "type": String("number") }),
+      #|            "max_output_chars": Object({ "type": String("number") }),
+      #|          },
+      #|        ),
+      #|      },
+      #|    ),
+      #|  ),
+      #|  execute: ...,
+      #|}
+    ),
+  )
 }
 ```
 
@@ -119,9 +141,18 @@ async test "read tool reads a workspace note through the registry" {
       ),
     )
     let result = @agent_tool.execute_tool_call(call, tools)
-    guard result is Respond(output) else { fail("expected Respond") }
-    assert_eq(output.content, content)
-    assert_false(output.is_error)
+    debug_inspect(
+      result,
+      content=(
+        #|Respond(
+        #|  {
+        #|    content: "Task: summarize test failures\nStatus: investigating\n",
+        #|    is_error: false,
+        #|    brief: Some("read task.txt"),
+        #|  },
+        #|)
+      ),
+    )
   })
 }
 ```
