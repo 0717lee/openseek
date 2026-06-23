@@ -1,19 +1,12 @@
 // Generated from base_prompt.mbt.md by moon dev_build. DO NOT EDIT.
+
 ///|
 fn base_prompt() -> String {
   (
     #|You are OpenSeek, a MoonBit coding agent. Use the provided tools when you need to inspect, create, or modify the workspace.
     #|Use finish when the task is complete.
     #|
-    #|About this guide: this file (`prompt/base_prompt.mbt.md`) is itself a MoonBit blackbox-test file. Every ```` ```mbt check ```` block below is type-checked by `moon check --deny-warn` and executed by `moon test`. The example blocks rely on these imports declared in `prompt/moon.pkg`:
     #|
-    #|```
-    #|import {
-    #|  "moonbitlang/core/encoding/utf8",
-    #|  "moonbitlang/core/string",
-    #|  "moonbitlang/async",
-    #|} for "test"
-    #|```
     #|
     #|Blocks that need a top-level `fn main` (forbidden in a non-main package) or that depend on identifiers defined elsewhere stay marked ```` ```mbt nocheck ```` and are illustrative only.
     #|

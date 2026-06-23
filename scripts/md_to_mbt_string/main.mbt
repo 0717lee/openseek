@@ -93,6 +93,7 @@ fn generated_source(
   let lines = markdown.split("\n")
   (
     $|// Generated from \{base} by moon dev_build. DO NOT EDIT.
+    $|
     $|///|
     $|fn \{function_name}() -> String {
     $|  (

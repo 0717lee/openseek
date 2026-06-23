@@ -1,4 +1,5 @@
 // Generated from flash_prompt.mbt.md by moon dev_build. DO NOT EDIT.
+
 ///|
 fn flash_prompt() -> String {
   (
@@ -25,8 +26,8 @@ fn flash_prompt() -> String {
     #|- Use the right tool for the job:
     #|  - `read`, `edit`, and `write` for files.
     #|  - `shell` for all Moon commands, including `moon check` for compiler
-    #|    feedback; pass the tool's `cwd` field instead of embedding repeated
-    #|    `cd ... &&` strings.
+    #|    feedback; pass the tool's `cwd` field, or use `moon -C dir check` instead
+    #|    of embedding repeated `cd ... &&` strings.
     #|- Start `moon check` once `moon.mod` and the relevant `moon.pkg` files exist;
     #|  use `moon build` or `moon test` only when you need artifacts or test results.
     #|- Keep reads focused. Use bounded reads for large files and logs.
