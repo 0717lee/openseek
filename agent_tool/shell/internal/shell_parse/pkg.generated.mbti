@@ -42,3 +42,4 @@ pub fn SimpleCommand::command_name(Self) -> String?
 // Type aliases
 
 // Traits
+
