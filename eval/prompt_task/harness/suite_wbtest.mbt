@@ -16,6 +16,14 @@ fn suite_config_json() -> Json {
       {
         "id": "alpha",
         "task_file": "tasks/alpha.md",
+        "session_fixture": {
+          "format": "claude-jsonl",
+          "path": "fixtures/alpha.jsonl",
+          "target_bytes": 200000,
+          "needle_id": "COMPACT-ACTIVE-WORK-742",
+          "needle_text": "cancelled compaction must emit compaction_failed",
+          "answer_file": "{{WORKSPACE}}/answer.json",
+        },
         "validation_probes": [
           { "name": "moon check", "command": ["moon", "--version"] },
         ],
@@ -55,6 +63,12 @@ async test "suite config parses relative task paths and flattens jobs" {
     assert_eq(config.models.length(), 2)
     assert_eq(config.problems.length(), 2)
     assert_eq(config.problems[0].task_file, root + "/suite/tasks/alpha.md")
+    guard config.problems[0].session_fixture is Some(fixture) else {
+      fail("expected alpha session fixture")
+    }
+    assert_eq(fixture.path, root + "/suite/fixtures/alpha.jsonl")
+    assert_eq(fixture.target_bytes, 200000)
+    assert_eq(fixture.needle_id, "COMPACT-ACTIVE-WORK-742")
     assert_eq(config.problems[1].prompt_label, "Beta Problem")
     let jobs = suite_jobs(config)
     assert_eq(jobs.length(), 12)

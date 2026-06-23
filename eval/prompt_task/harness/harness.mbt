@@ -84,7 +84,7 @@ pub async fn run_experiments(config : Config) -> RunManifest {
   let task = parse_trial_task(@fs.read_file(config.task_file).text())
   prepare_output_dir(config.out_dir)
   let trials = run_indexed_with_concurrency(config.runs, config.concurrency, index => {
-    run_trial(config, task, index)
+    run_trial(config, task, index, None)
   })
   let manifest = RunManifest(
     model=config.model.to_string(),
@@ -137,6 +137,7 @@ async fn run_trial(
   config : Config,
   task : TrialTask,
   index : Int,
+  session_fixture : SessionFixtureSpec?,
 ) -> TrialArtifact {
   let trial_name = padded_index(index + 1)
   let workspace = "\{config.out_dir}/workspaces/\{trial_name}"
@@ -148,6 +149,16 @@ async fn run_trial(
   // ensuring the agent's session store and tool cwd live under the workspace.
   let repo_root = @fs.realpath(config.repo_root)
   let log_path = "\{config.out_dir}/logs/\{trial_name}.log"
+  match session_fixture {
+    Some(fixture) =>
+      seed_session_fixture(
+        fixture,
+        session_id~,
+        workspace=real_workspace,
+        system_prompt=fixture_system_prompt(config),
+      )
+    None => ()
+  }
   let exit_code = run_trial_task(
     config,
     task,
@@ -169,6 +180,24 @@ async fn run_trial(
     events_path~,
     exit_code~,
   )
+}
+
+///|
+async fn fixture_system_prompt(config : Config) -> String {
+  let base = if config.system_prompt_file == "" {
+    @prompt.system_prompt_for_model(config.model)
+  } else {
+    @fs.read_file(@fs.realpath(config.system_prompt_file)).text()
+  }
+  if config.system_prompt_addendum_file == "" {
+    base
+  } else {
+    (
+      $|\{base}
+      $|
+      $|\{@fs.read_file(@fs.realpath(config.system_prompt_addendum_file)).text()}
+    )
+  }
 }
 
 ///|

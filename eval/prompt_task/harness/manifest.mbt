@@ -48,6 +48,34 @@ pub fn ValidationProbeSpec::ValidationProbeSpec(
 }
 
 ///|
+/// External transcript used to seed a durable trial session before running a
+/// compact-mode prompt task. The fixture file stays outside the repository; the
+/// runner records only this configuration and writes converted session events
+/// into each isolated trial workspace.
+pub struct SessionFixtureSpec {
+  format : String
+  path : String
+  target_bytes : Int
+  needle_id : String
+  needle_text : String
+  answer_file : String
+}
+
+///|
+/// Build a transcript fixture spec. `format` currently supports
+/// `claude-jsonl`.
+pub fn SessionFixtureSpec::SessionFixtureSpec(
+  format~ : String,
+  path~ : String,
+  target_bytes~ : Int,
+  needle_id~ : String,
+  needle_text~ : String,
+  answer_file? : String = "",
+) -> SessionFixtureSpec {
+  { format, path, target_bytes, needle_id, needle_text, answer_file }
+}
+
+///|
 /// Durable artifact record for one prompt-task trial. The runner writes these
 /// fields once; analyzers can replay report generation from them without
 /// rerunning the agent.
@@ -179,6 +207,18 @@ fn ValidationProbeSpec::to_json(self : ValidationProbeSpec) -> Json {
 }
 
 ///|
+fn SessionFixtureSpec::to_json(self : SessionFixtureSpec) -> Json {
+  {
+    "format": self.format,
+    "path": self.path,
+    "target_bytes": self.target_bytes,
+    "needle_id": self.needle_id,
+    "needle_text": self.needle_text,
+    "answer_file": self.answer_file,
+  }
+}
+
+///|
 fn TrialArtifact::to_json(self : TrialArtifact) -> Json {
   {
     "index": self.index,
@@ -255,6 +295,23 @@ fn ValidationProbeSpec::from_json(json : Json) -> ValidationProbeSpec raise {
     stdout_contains=string_field_default(fields, "stdout_contains", ""),
     stderr_contains=string_field_default(fields, "stderr_contains", ""),
     stdout_json=bool_field_default(fields, "stdout_json", false),
+  )
+}
+
+///|
+fn SessionFixtureSpec::from_json(json : Json) -> SessionFixtureSpec raise {
+  let fields = object_fields(json, "session fixture")
+  let target_bytes = int_field(fields, "target_bytes")
+  guard target_bytes > 0 else {
+    fail("session fixture target_bytes must be positive")
+  }
+  SessionFixtureSpec(
+    format=string_field(fields, "format"),
+    path=string_field(fields, "path"),
+    target_bytes~,
+    needle_id=string_field(fields, "needle_id"),
+    needle_text=string_field(fields, "needle_text"),
+    answer_file=string_field_default(fields, "answer_file", ""),
   )
 }
 

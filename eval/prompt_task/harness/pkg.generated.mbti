@@ -124,9 +124,10 @@ pub struct ProblemSpec {
   id : String
   prompt_label : String
   task_file : String
+  session_fixture : SessionFixtureSpec?
   validation_probes : Array[ValidationProbeSpec]
 }
-pub fn ProblemSpec::ProblemSpec(id~ : String, prompt_label? : String, task_file~ : String, validation_probes~ : Array[ValidationProbeSpec]) -> Self
+pub fn ProblemSpec::ProblemSpec(id~ : String, prompt_label? : String, task_file~ : String, session_fixture? : SessionFixtureSpec, validation_probes~ : Array[ValidationProbeSpec]) -> Self
 
 pub struct RunManifest {
   model : String
@@ -142,6 +143,16 @@ pub struct RunManifest {
   trials : Array[TrialArtifact]
 }
 pub fn RunManifest::RunManifest(model~ : String, problem_id~ : String, prompt_label~ : String, task_file~ : String, runs~ : Int, concurrency~ : Int, min_successes~ : Int, max_steps~ : Int, out_dir~ : String, validation_probes~ : Array[ValidationProbeSpec], trials~ : Array[TrialArtifact]) -> Self
+
+pub struct SessionFixtureSpec {
+  format : String
+  path : String
+  target_bytes : Int
+  needle_id : String
+  needle_text : String
+  answer_file : String
+}
+pub fn SessionFixtureSpec::SessionFixtureSpec(format~ : String, path~ : String, target_bytes~ : Int, needle_id~ : String, needle_text~ : String, answer_file? : String) -> Self
 
 pub struct SuiteConfig {
   api_key : String

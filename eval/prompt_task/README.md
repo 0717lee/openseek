@@ -61,6 +61,42 @@ existing `--analyze-only` command. The suite above supplies the recall-specific
 validation probe; direct `--task-file` runs keep the runner's existing default
 TOML validation.
 
+For a more realistic compaction stress case, a suite problem can seed the trial
+session from an external Claude JSONL transcript before the first phase runs.
+This is meant for local benchmarks against private `~/.claude` exports or copied
+fixtures; do not commit the transcript itself. The harness converts assistant
+text, `tool_use`, and `tool_result` blocks into normal OpenSeek session events,
+injects a deterministic recall needle around the configured byte budget, then
+runs the usual phase/compact/resume flow.
+
+Example suite problem:
+
+```json
+{
+  "id": "compaction_claude_tool_recall",
+  "task_file": "tasks/compaction_fixture_recall.md",
+  "session_fixture": {
+    "format": "claude-jsonl",
+    "path": "/absolute/path/to/claude-session.jsonl",
+    "target_bytes": 200000,
+    "needle_id": "COMPACT-ACTIVE-WORK-742",
+    "needle_text": "cancelled compaction must emit compaction_failed",
+    "answer_file": "{{WORKSPACE}}/.openseek-compaction-answer.json"
+  },
+  "validation_probes": [
+    {
+      "name": "needle answer",
+      "command": ["cat", "{{WORKSPACE}}/.openseek-compaction-answer.json"],
+      "stdout_contains": "COMPACT-ACTIVE-WORK-742"
+    }
+  ]
+}
+```
+
+The task file should still use `--COMPACT--`; the post-compact phase should ask
+the agent to recover the injected decision and write the exact answer to the
+configured `answer_file`.
+
 Run a multi-problem suite:
 
 ```bash

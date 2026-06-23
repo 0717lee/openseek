@@ -7,6 +7,7 @@ pub struct ProblemSpec {
   id : String
   prompt_label : String
   task_file : String
+  session_fixture : SessionFixtureSpec?
   validation_probes : Array[ValidationProbeSpec]
 }
 
@@ -16,6 +17,7 @@ pub fn ProblemSpec::ProblemSpec(
   id~ : String,
   prompt_label? : String = "",
   task_file~ : String,
+  session_fixture? : SessionFixtureSpec,
   validation_probes~ : Array[ValidationProbeSpec],
 ) -> ProblemSpec {
   {
@@ -26,6 +28,7 @@ pub fn ProblemSpec::ProblemSpec(
       prompt_label
     },
     task_file,
+    session_fixture,
     validation_probes,
   }
 }
@@ -318,8 +321,32 @@ fn ProblemSpec::from_json(json : Json, base_dir : String) -> ProblemSpec raise {
     id~,
     prompt_label=string_field_default(fields, "prompt_label", id),
     task_file=resolve_relative_path(base_dir, string_field(fields, "task_file")),
+    session_fixture?=parse_session_fixture(fields, base_dir),
     validation_probes=probes,
   )
+}
+
+///|
+fn parse_session_fixture(
+  fields : Map[String, Json],
+  base_dir : String,
+) -> SessionFixtureSpec? raise {
+  match fields.get("session_fixture") {
+    Some(Null) | None => None
+    Some(json) => {
+      let fixture = SessionFixtureSpec::from_json(json)
+      Some(
+        SessionFixtureSpec(
+          format=fixture.format,
+          path=resolve_relative_path(base_dir, fixture.path),
+          target_bytes=fixture.target_bytes,
+          needle_id=fixture.needle_id,
+          needle_text=fixture.needle_text,
+          answer_file=fixture.answer_file,
+        ),
+      )
+    }
+  }
 }
 
 ///|
@@ -401,7 +428,12 @@ async fn run_suite_job(
   {
     model: job.model.to_string(),
     problem_id: job.problem.id,
-    artifact: run_trial(config, task, job.repeat_index),
+    artifact: run_trial(
+      config,
+      task,
+      job.repeat_index,
+      job.problem.session_fixture,
+    ),
   }
 }
 
@@ -605,6 +637,10 @@ fn ProblemSpec::to_json(self : ProblemSpec) -> Json {
     "id": self.id,
     "prompt_label": self.prompt_label,
     "task_file": self.task_file,
+    "session_fixture": match self.session_fixture {
+      Some(fixture) => fixture.to_json()
+      None => Json::null()
+    },
     "validation_probes": (
       [
         for probe in self.validation_probes => probe.to_json()
@@ -628,6 +664,7 @@ fn ProblemSpec::from_manifest_json(json : Json) -> ProblemSpec raise {
     id=string_field(fields, "id"),
     prompt_label=string_field(fields, "prompt_label"),
     task_file=string_field(fields, "task_file"),
+    session_fixture?=parse_session_fixture(fields, "."),
     validation_probes=probes,
   )
 }
