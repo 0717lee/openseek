@@ -398,6 +398,114 @@ async test "shell rejects moon_cmd as a shell command" {
 }
 
 ///|
+#cfg(not(platform="windows"))
+async test "shell appends moon check after applied moon ide rename" {
+  @vfs.with_tmpdir(prefix="openseek-shell-auto-check-", dir => {
+    @fs.write_file(
+      "\{dir}/moon.mod",
+      "name = \"tmp/shell_auto_check\"\n",
+      create_mode=CreateOrTruncate,
+    )
+    @fs.write_file(
+      "\{dir}/moon.pkg",
+      "warnings = \"+unnecessary_annotation\"\n",
+      create_mode=CreateOrTruncate,
+    )
+    @fs.write_file(
+      "\{dir}/main.mbt",
+      (
+        #|pub fn old_name() -> Int { missing_symbol }
+        #|
+        #|pub fn call() -> Int { old_name() }
+        #|
+      ),
+      create_mode=CreateOrTruncate,
+    )
+    let result = run_shell({
+      "cmd": "moon ide rename old_name new_name --loc main.mbt:1:8 --apply",
+      "cwd": dir,
+    })
+    guard result is Respond(output) else { fail("expected Respond") }
+    assert_false(output.is_error)
+    assert_true(output.content.has_prefix("exit=0\n"))
+    assert_true(output.content.contains("Applied 2 edit(s)"))
+    assert_true(output.content.contains("\nmoon check:\nexit="))
+    assert_true(output.content.contains("missing_symbol"))
+    let renamed = @fs.read_file("\{dir}/main.mbt").text()
+    assert_true(renamed.contains("new_name"))
+    assert_false(renamed.contains("old_name"))
+  })
+}
+
+///|
+async test "shell does not append moon check for non-mutating moon shapes" {
+  @vfs.with_tmpdir(prefix="openseek-shell-no-auto-check-", dir => {
+    @fs.write_file(
+      "\{dir}/moon.mod",
+      "name = \"tmp/shell_no_auto_check\"\n",
+      create_mode=CreateOrTruncate,
+    )
+    @fs.write_file(
+      "\{dir}/moon.pkg",
+      "warnings = \"+unnecessary_annotation\"\n",
+      create_mode=CreateOrTruncate,
+    )
+    @fs.write_file(
+      "\{dir}/main.mbt",
+      (
+        #|pub fn broken() -> Int { missing_symbol }
+        #|
+      ),
+      create_mode=CreateOrTruncate,
+    )
+    for cmd in ["echo moon add", "true || moon fmt", "moon fmt --check"] {
+      let result = run_shell({ "cmd": cmd, "cwd": dir })
+      guard result is Respond(output) else { fail("expected Respond") }
+      assert_false(output.content.contains("moon check:"))
+    }
+    let timed = run_shell({ "cmd": "moon fmt", "cwd": dir, "timeout_ms": 30000 })
+    guard timed is Respond(output) else { fail("expected Respond") }
+    assert_false(output.is_error)
+    assert_false(output.content.contains("moon check:"))
+  })
+}
+
+///|
+#cfg(not(platform="windows"))
+async test "shell appends moon check from moon command target cwd" {
+  @vfs.with_tmpdir(prefix="openseek-shell-auto-check-c-option-", dir => {
+    let project = "\{dir}/project"
+    @fs.mkdir(project)
+    @fs.write_file(
+      "\{project}/moon.mod",
+      "name = \"tmp/shell_auto_check_c_option\"\n",
+      create_mode=CreateOrTruncate,
+    )
+    @fs.write_file(
+      "\{project}/moon.pkg",
+      "warnings = \"+unnecessary_annotation\"\n",
+      create_mode=CreateOrTruncate,
+    )
+    @fs.write_file(
+      "\{project}/main.mbt",
+      (
+        #|pub fn broken() -> Int { missing_symbol }
+        #|
+      ),
+      create_mode=CreateOrTruncate,
+    )
+    for cmd in ["moon -C project fmt", "cd ./project && moon fmt"] {
+      let result = run_shell({ "cmd": cmd, "cwd": dir })
+      guard result is Respond(output) else { fail("expected Respond") }
+      assert_false(output.is_error)
+      assert_true(output.content.has_prefix("exit=0\n"))
+      assert_true(output.content.contains("\nmoon check:\nexit="))
+      assert_true(output.content.contains("missing_symbol"))
+    }
+  })
+}
+
+///|
 async test "shell rejects missing cmd" {
   let result = run_shell({ "cwd": "unused" })
   guard result is Respond(output) else { fail("expected Respond") }

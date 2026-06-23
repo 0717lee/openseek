@@ -71,13 +71,18 @@ async fn execute_with_workspace(
       )
     }
   }
-  match @command_policy.moonbit_command_policy_error(input.cmd) {
+  let parsed_command = @shell_parse.parse_for_policy(input.cmd)
+  match
+    @command_policy.moonbit_command_policy_error_for_parse(
+      input.cmd,
+      parsed_command,
+    ) {
     Some(message) =>
       return @agent_tool.ToolAction::respond(message, is_error=true)
     None => ()
   }
   let cwd = @workspace_path.resolve_cwd(workspace_root, input.cwd)
-  shell(input, cwd) catch {
+  shell(input, parsed_command, cwd) catch {
     error =>
       @agent_tool.ToolAction::respond(
         "error running shell: \{error}",
@@ -89,6 +94,7 @@ async fn execute_with_workspace(
 ///|
 async fn shell(
   input : @decode.ShellInput,
+  parsed_command : @shell_parse.ParseResult,
   cwd : String?,
 ) -> @agent_tool.ToolAction {
   if cwd is Some(cwd) {
@@ -139,8 +145,16 @@ async fn shell(
     }
   }
   let response = shell_response(output, input.max_output_chars)
-  @agent_tool.ToolAction::respond(
+  let content = append_moon_command_check_summary(
+    parsed_command,
+    cwd,
     response.content,
+    output,
+    input.timeout_ms,
+    input.max_output_chars,
+  )
+  @agent_tool.ToolAction::respond(
+    content,
     is_error=response.is_error,
     brief=shell_brief(input.cmd, output.exit_code),
   )

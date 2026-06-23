@@ -17,12 +17,15 @@ pub(all) enum ParseResult {
 /// `argv` contains the command name and arguments after shell quoting and
 /// backslash escaping are resolved. `env` contains leading `NAME=value`
 /// assignments that apply to this command. `redirects` contains basic
-/// redirections attached to the command. `source` is a compact normalized
-/// rendering for diagnostics; it is not guaranteed to byte-match the input.
+/// redirections attached to the command. `separator_before` records the
+/// top-level operator before this command (`&&`, `||`, `;`, or `|`), if any.
+/// `source` is a compact normalized rendering for diagnostics; it is not
+/// guaranteed to byte-match the input.
 pub(all) struct SimpleCommand {
   argv : Array[String]
   env : Array[EnvAssignment]
   redirects : Array[Redirect]
+  separator_before : String?
   source : String
 } derive(Debug, Eq)
 
@@ -69,4 +72,5 @@ priv enum LexState {
   Plain
   SingleQuoted
   DoubleQuoted
+  Comment
 }

@@ -21,6 +21,7 @@ fn parse_tokens(tokens : Array[Token]) -> ParseResult {
   let mut redirects : Array[Redirect] = []
   let mut saw_part = false
   let mut pending_separator : String? = None
+  let mut separator_before : String? = None
   let mut index = 0
   while index < tokens.length() {
     match tokens[index] {
@@ -76,12 +77,18 @@ fn parse_tokens(tokens : Array[Token]) -> ParseResult {
         if !saw_part {
           return SyntaxError("operator \{op} has no preceding command")
         }
-        push_command(commands, env, argv, redirects)
+        match too_complex_shell_control_word(argv) {
+          Some(word) =>
+            return TooComplex("shell control command is not supported: \{word}")
+          None => ()
+        }
+        push_command(commands, env, argv, redirects, separator_before)
         env = []
         argv = []
         redirects = []
         saw_part = false
         pending_separator = Some(op)
+        separator_before = Some(op)
         index += 1
       }
       Op(op, _) if is_redirect_op(op) => {
@@ -104,7 +111,12 @@ fn parse_tokens(tokens : Array[Token]) -> ParseResult {
       Some(op) => return SyntaxError("operator \{op} has no following command")
     }
   } else {
-    push_command(commands, env, argv, redirects)
+    match too_complex_shell_control_word(argv) {
+      Some(word) =>
+        return TooComplex("shell control command is not supported: \{word}")
+      None => ()
+    }
+    push_command(commands, env, argv, redirects, separator_before)
   }
   Simple(commands)
 }
@@ -127,11 +139,13 @@ fn push_command(
   env : Array[EnvAssignment],
   argv : Array[String],
   redirects : Array[Redirect],
+  separator_before : String?,
 ) -> Unit {
   commands.push({
     argv,
     env,
     redirects,
+    separator_before,
     source: render_source(env, argv, redirects),
   })
 }
@@ -162,12 +176,18 @@ fn is_separator(op : String) -> Bool {
 
 ///|
 fn is_redirect_op(op : String) -> Bool {
-  op == ">" || op == ">>" || op == "<" || op == "&>" || op == ">&"
+  op == ">" ||
+  op == ">>" ||
+  op == "<" ||
+  op == "&>" ||
+  op == "&>>" ||
+  op == ">&" ||
+  op == "<&"
 }
 
 ///|
 fn is_fd_redirect_op(op : String) -> Bool {
-  op == ">" || op == ">>" || op == ">&" || op == "<"
+  op == ">" || op == ">>" || op == ">&" || op == "<" || op == "<&"
 }
 
 ///|
@@ -242,6 +262,7 @@ fn is_too_complex_command_word(word : String) -> Bool {
     | "else"
     | "esac"
     | "eval"
+    | "exit"
     | "exec"
     | "fi"
     | "for"
@@ -257,4 +278,57 @@ fn is_too_complex_command_word(word : String) -> Bool {
     | "while" => true
     _ => false
   }
+}
+
+///|
+fn too_complex_shell_control_word(argv : Array[String]) -> String? {
+  match effective_shell_control_word_index(argv) {
+    Some(index) if is_too_complex_command_word(argv[index]) => Some(argv[index])
+    _ => None
+  }
+}
+
+///|
+fn effective_shell_control_word_index(argv : Array[String]) -> Int? {
+  if argv.length() == 0 {
+    return None
+  }
+  match argv[0] {
+    "command" => command_payload_index(argv)
+    "builtin" =>
+      if argv.length() > 1 {
+        if argv[1] == "--" {
+          if argv.length() > 2 {
+            Some(2)
+          } else {
+            None
+          }
+        } else {
+          Some(1)
+        }
+      } else {
+        None
+      }
+    _ => Some(0)
+  }
+}
+
+///|
+fn command_payload_index(argv : Array[String]) -> Int? {
+  let mut index = 1
+  while index < argv.length() {
+    match argv[index] {
+      "--" =>
+        if index + 1 < argv.length() {
+          return Some(index + 1)
+        } else {
+          return None
+        }
+      "-p" => index += 1
+      "-v" | "-V" => return None
+      arg if arg.has_prefix("-") => return None
+      _ => return Some(index)
+    }
+  }
+  None
 }

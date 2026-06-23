@@ -3,17 +3,18 @@ import {
   "bobzhang/openseek/agent_tool/internal/error" @tool_error,
   "bobzhang/openseek/agent_tool/shell/internal/command_policy",
   "bobzhang/openseek/agent_tool/shell/internal/decode",
+  "bobzhang/openseek/agent_tool/shell/internal/shell_parse",
   "bobzhang/openseek/internal/workspace_path",
   "moonbitlang/async",
   "moonbitlang/async/fs",
   "moonbitlang/async/process",
   "moonbitlang/core/encoding/utf8",
   "moonbitlang/core/json",
+  "moonbitlang/x/path",
 }
 
 import {
   "bobzhang/openseek/testkit/filesystem" @vfs,
-  "moonbitlang/x/path",
 } for "test"
 
 warnings = "+unnecessary_annotation"

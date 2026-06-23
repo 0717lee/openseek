@@ -8,6 +8,18 @@
 /// the model what to do instead, because the model is the caller who reads it.
 pub fn moonbit_command_policy_error(cmd : String) -> String? {
   let parsed = @shell_parse.parse_for_policy(cmd)
+  moonbit_command_policy_error_for_parse(cmd, parsed)
+}
+
+///|
+/// Apply shell command policy using an already-computed shell parse result.
+///
+/// This is used by `shell` so policy and follow-up Moon checks share one parse
+/// of the same command string.
+pub fn moonbit_command_policy_error_for_parse(
+  cmd : String,
+  parsed : @shell_parse.ParseResult,
+) -> String? {
   if @shell_parse.contains_command(parsed, "moon_cmd") {
     Some(moon_cmd_error_message())
   } else if parsed is Simple(_) {

@@ -5,7 +5,20 @@
 /// recognizes the common `env NAME=value command ...` wrapper. It deliberately
 /// avoids interpreting complex `env` option forms; those remain `env`.
 pub fn SimpleCommand::command_name(self : SimpleCommand) -> String? {
-  effective_command_name(self.argv)
+  match self.command_index() {
+    Some(index) if index < self.argv.length() => Some(self.argv[index])
+    _ => None
+  }
+}
+
+///|
+/// Return the index in `argv` of this command's effective command word.
+///
+/// This is the index-aware counterpart of `command_name()`, so consumers that
+/// need to continue scanning command flags do not have to duplicate wrapper
+/// grammar.
+pub fn SimpleCommand::command_index(self : SimpleCommand) -> Int? {
+  effective_command_index(self.argv)
 }
 
 ///|
@@ -20,47 +33,30 @@ pub fn contains_command(result : ParseResult, name : String) -> Bool {
 }
 
 ///|
-/// True when the parsed result contains a statically visible directory-changing
-/// command (`cd`, `pushd`, or `popd`).
-pub fn has_cd(result : ParseResult) -> Bool {
-  match result {
-    Simple(commands) =>
-      commands.any(command => {
-        match command.command_name() {
-          Some("cd" | "pushd" | "popd") => true
-          _ => false
-        }
-      })
-    _ => false
-  }
-}
-
-///|
-/// True when the parsed result contains both a directory-changing command and a
-/// command with the requested effective name.
-pub fn has_cd_and_command(result : ParseResult, name : String) -> Bool {
-  has_cd(result) && contains_command(result, name)
-}
-
-///|
-fn effective_command_name(argv : Array[String]) -> String? {
+fn effective_command_index(argv : Array[String]) -> Int? {
   if argv.length() == 0 {
     return None
   }
   match argv[0] {
-    "env" => env_wrapped_command_name(argv)
-    "command" | "builtin" =>
+    "env" => env_wrapped_command_index(argv)
+    "command" => command_wrapped_command_index(argv)
+    "builtin" =>
       if argv.length() > 1 {
-        Some(argv[1])
+        let index = if argv[1] == "--" { 2 } else { 1 }
+        if index < argv.length() {
+          Some(index)
+        } else {
+          Some(0)
+        }
       } else {
-        Some(argv[0])
+        Some(0)
       }
-    command => Some(command)
+    _ => Some(0)
   }
 }
 
 ///|
-fn env_wrapped_command_name(argv : Array[String]) -> String? {
+fn command_wrapped_command_index(argv : Array[String]) -> Int? {
   let mut index = 1
   while index < argv.length() {
     let arg = argv[index]
@@ -68,22 +64,50 @@ fn env_wrapped_command_name(argv : Array[String]) -> String? {
       index += 1
       break
     }
-    if is_env_assignment_word(arg) {
+    if arg == "-p" {
       index += 1
       continue
     }
-    if arg == "-i" || arg == "-" {
-      index += 1
-      continue
+    if arg == "-v" || arg == "-V" || arg.has_prefix("-") {
+      return Some(0)
     }
-    if arg.has_prefix("-") {
-      return Some("env")
-    }
-    return Some(arg)
+    return Some(index)
   }
   if index < argv.length() {
-    Some(argv[index])
+    Some(index)
   } else {
-    Some("env")
+    Some(0)
+  }
+}
+
+///|
+fn env_wrapped_command_index(argv : Array[String]) -> Int? {
+  let mut index = 1
+  let mut scanning_options = true
+  while index < argv.length() {
+    let arg = argv[index]
+    if scanning_options && arg == "--" {
+      scanning_options = false
+      index += 1
+      continue
+    }
+    if scanning_options && (arg == "-i" || arg == "-") {
+      index += 1
+      continue
+    }
+    if scanning_options && arg.has_prefix("-") {
+      return Some(0)
+    }
+    if is_env_assignment_word(arg) {
+      scanning_options = false
+      index += 1
+      continue
+    }
+    return Some(index)
+  }
+  if index < argv.length() {
+    Some(index)
+  } else {
+    Some(0)
   }
 }

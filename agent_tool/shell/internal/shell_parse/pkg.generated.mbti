@@ -8,10 +8,6 @@ import {
 // Values
 pub fn contains_command(ParseResult, String) -> Bool
 
-pub fn has_cd(ParseResult) -> Bool
-
-pub fn has_cd_and_command(ParseResult, String) -> Bool
-
 pub fn parse_for_policy(String) -> ParseResult
 
 // Errors
@@ -37,8 +33,10 @@ pub(all) struct SimpleCommand {
   argv : Array[String]
   env : Array[EnvAssignment]
   redirects : Array[Redirect]
+  separator_before : String?
   source : String
 } derive(Eq, @debug.Debug)
+pub fn SimpleCommand::command_index(Self) -> Int?
 pub fn SimpleCommand::command_name(Self) -> String?
 
 // Type aliases

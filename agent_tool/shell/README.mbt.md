@@ -44,6 +44,18 @@ Prefer dedicated tools when they encode useful policy. Run Moon commands such as
 `shell` with the `cwd` field. Use shell features such as pipes and heredocs for
 CLI probes.
 
+After a successful mutating Moon command, `shell` appends bounded
+`moon check --diagnostic-limit 1` feedback from the nearest MoonBit module root,
+respecting `moon -C <dir>` and explicit cwd changes such as
+`cd ./dir && moon ...`. Bare relative `cd dir` is skipped because `CDPATH` can
+change which directory the shell enters. This covers commands such as
+`moon add`, `moon remove`, `moon update`, `moon fmt`, `moon info`,
+`moon test --update`, and `moon ide rename ... --apply`. Read-only variants
+such as dry-run commands and `moon fmt --check` are left alone, as are Moon
+invocations with per-command environment overrides such as `FOO=bar moon` or
+`env FOO=bar moon`. Follow-up checks are skipped when `timeout_ms` is set and
+share the remaining `max_output_chars` budget.
+
 ## Arguments
 
 | Name | Type   | Required | Notes |
@@ -62,6 +74,8 @@ arguments, non-zero shell exit codes, and output truncation. The string body
 has one of these shapes:
 
 - `"exit=<code>\n<stdout/stderr merged>"` — normal completion.
+- For successful mutating `moon` commands, the normal completion output may be
+  followed by a `moon check:` section with bounded compiler diagnostics.
 - `"exit=<code-or-cancelled>\ntruncated=true\noutput_limit_reached=true\nshown_chars=<n>\nmax_output_chars=<n>\n<output-prefix>"` —
   output exceeded `max_output_chars` while the process pipe was being read. The
   command is cancelled if it has not already exited; no full output length is

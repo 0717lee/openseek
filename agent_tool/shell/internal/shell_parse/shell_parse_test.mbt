@@ -20,11 +20,14 @@ test "parse cd then moon as separate top level commands" {
   assert_eq(commands.length(), 2)
   assert_true(commands[0].argv == ["cd", "pkg/foo"])
   assert_true(commands[1].argv == ["moon", "test", "--target", "native"])
-  assert_true(@shell_parse.has_cd(Simple(commands)))
-  assert_true(@shell_parse.has_cd_and_command(Simple(commands), "moon"))
+  assert_true(commands[0].separator_before is None)
+  assert_true(commands[1].separator_before is Some("&&"))
+  assert_true(commands[0].command_index() == Some(0))
+  assert_true(commands[1].command_index() == Some(0))
 }
 
 ///|
+#cfg(not(platform="windows"))
 test "parse quotes and backslash escapes without expansion" {
   guard @shell_parse.parse_for_policy(
       "moon run cmd/main -- \"a b\" 'c$d' escaped\\ space",
@@ -37,6 +40,16 @@ test "parse quotes and backslash escapes without expansion" {
     commands[0].argv ==
     ["moon", "run", "cmd/main", "--", "a b", "c$d", "escaped space"],
   )
+}
+
+///|
+#cfg(platform="windows")
+test "parse Windows path backslashes as literal characters" {
+  guard @shell_parse.parse_for_policy("moon -C .\\pkg fmt") is Simple(commands) else {
+    fail("expected Windows path command")
+  }
+  assert_eq(commands.length(), 1)
+  assert_true(commands[0].argv == ["moon", "-C", ".\\pkg", "fmt"])
 }
 
 ///|
@@ -78,6 +91,7 @@ test "parse environment assignments and redirects" {
 }
 
 ///|
+#cfg(not(platform="windows"))
 test "parse quoted and escaped environment assignment values" {
   guard @shell_parse.parse_for_policy("FOO=\"bar baz\" PATH=\\~/bin moon check")
     is Simple(commands) else {
@@ -140,6 +154,20 @@ test "preserve spaced numeric arguments before redirects" {
 }
 
 ///|
+test "parse append both and fd duplicate redirects" {
+  guard @shell_parse.parse_for_policy("cmd &>>out <&3") is Simple(commands) else {
+    fail("expected append-both and fd duplicate redirects")
+  }
+  assert_eq(commands.length(), 1)
+  assert_true(commands[0].argv == ["cmd"])
+  assert_true(
+    commands[0].redirects ==
+    [{ op: "&>>", target: "out" }, { op: "<&", target: "3" }],
+  )
+}
+
+///|
+#cfg(not(platform="windows"))
 test "keep quoted words out of special shell grammar" {
   guard @shell_parse.parse_for_policy("cmd \"2\"<input") is Simple(commands) else {
     fail("expected quoted numeric argument")
@@ -159,7 +187,40 @@ test "detect env wrapper command name" {
   }
   assert_eq(commands.length(), 1)
   assert_true(commands[0].command_name() == Some("moon"))
+  assert_true(commands[0].command_index() == Some(2))
   assert_true(@shell_parse.contains_command(Simple(commands), "moon"))
+  guard @shell_parse.parse_for_policy("env -- FOO=bar moon check")
+    is Simple(dash_dash_commands) else {
+    fail("expected env -- wrapper")
+  }
+  assert_true(dash_dash_commands[0].command_name() == Some("moon"))
+  assert_true(dash_dash_commands[0].command_index() == Some(3))
+  assert_true(@shell_parse.contains_command(Simple(dash_dash_commands), "moon"))
+}
+
+///|
+test "env options are only recognized before assignments" {
+  guard @shell_parse.parse_for_policy("env FOO=bar -i moon check")
+    is Simple(after_assignment) else {
+    fail("expected env command after assignment")
+  }
+  assert_true(after_assignment[0].command_name() == Some("-i"))
+  assert_true(after_assignment[0].command_index() == Some(2))
+  assert_true(!@shell_parse.contains_command(Simple(after_assignment), "moon"))
+  guard @shell_parse.parse_for_policy("env FOO=bar -- moon check")
+    is Simple(after_dash_dash) else {
+    fail("expected env command after assignment before dash dash")
+  }
+  assert_true(after_dash_dash[0].command_name() == Some("--"))
+  assert_true(after_dash_dash[0].command_index() == Some(2))
+  assert_true(!@shell_parse.contains_command(Simple(after_dash_dash), "moon"))
+  guard @shell_parse.parse_for_policy("env -i FOO=bar moon check")
+    is Simple(before_assignment) else {
+    fail("expected env option before assignment")
+  }
+  assert_true(before_assignment[0].command_name() == Some("moon"))
+  assert_true(before_assignment[0].command_index() == Some(3))
+  assert_true(@shell_parse.contains_command(Simple(before_assignment), "moon"))
 }
 
 ///|
@@ -169,16 +230,40 @@ test "detect command wrapper but keep complex env options conservative" {
   }
   assert_eq(commands.length(), 1)
   assert_true(commands[0].command_name() == Some("moon"))
+  assert_true(commands[0].command_index() == Some(1))
   assert_true(@shell_parse.contains_command(Simple(commands), "moon"))
+  guard @shell_parse.parse_for_policy("command -- moon check")
+    is Simple(dash_dash_commands) else {
+    fail("expected command -- wrapper")
+  }
+  assert_true(dash_dash_commands[0].command_name() == Some("moon"))
+  assert_true(dash_dash_commands[0].command_index() == Some(2))
+  assert_true(@shell_parse.contains_command(Simple(dash_dash_commands), "moon"))
+  guard @shell_parse.parse_for_policy("command -p moon check")
+    is Simple(path_commands) else {
+    fail("expected command -p wrapper")
+  }
+  assert_true(path_commands[0].command_name() == Some("moon"))
+  assert_true(path_commands[0].command_index() == Some(2))
+  assert_true(@shell_parse.contains_command(Simple(path_commands), "moon"))
+  guard @shell_parse.parse_for_policy("command -v moon")
+    is Simple(lookup_commands) else {
+    fail("expected command -v lookup")
+  }
+  assert_true(lookup_commands[0].command_name() == Some("command"))
+  assert_true(lookup_commands[0].command_index() == Some(0))
+  assert_true(!@shell_parse.contains_command(Simple(lookup_commands), "moon"))
   guard @shell_parse.parse_for_policy("env -u FOO moon check")
     is Simple(env_commands) else {
     fail("expected env option wrapper to parse")
   }
   assert_true(env_commands[0].command_name() == Some("env"))
+  assert_true(env_commands[0].command_index() == Some(0))
   assert_true(!@shell_parse.contains_command(Simple(env_commands), "moon"))
 }
 
 ///|
+#cfg(not(platform="windows"))
 test "parse safe quoted glob and escaped dollar as literals" {
   guard @shell_parse.parse_for_policy(
       "moon test \"*.mbt\" '${NOT_EXPANDED}' \"\\$literal\"",
@@ -188,6 +273,37 @@ test "parse safe quoted glob and escaped dollar as literals" {
   }
   assert_true(
     commands[0].argv == ["moon", "test", "*.mbt", "${NOT_EXPANDED}", "$literal"],
+  )
+}
+
+///|
+test "parse shell comments without losing visible commands" {
+  guard @shell_parse.parse_for_policy("moon check # trailing note")
+    is Simple(one_line) else {
+    fail("expected trailing comment to be ignored")
+  }
+  assert_eq(one_line.length(), 1)
+  assert_true(one_line[0].argv == ["moon", "check"])
+  guard @shell_parse.parse_for_policy(
+      "moon check # first command\n# blank comment\nmoon test",
+    )
+    is Simple(multi_line) else {
+    fail("expected comments to preserve newline command separation")
+  }
+  assert_eq(multi_line.length(), 2)
+  assert_true(multi_line[0].argv == ["moon", "check"])
+  assert_true(multi_line[1].argv == ["moon", "test"])
+  assert_true(multi_line[1].separator_before is Some(";"))
+  guard @shell_parse.parse_for_policy("echo a#b # trailing note")
+    is Simple(literal_hash) else {
+    fail("expected hash inside word to remain literal")
+  }
+  assert_true(literal_hash[0].argv == ["echo", "a#b"])
+  assert_true(
+    @shell_parse.parse_for_policy("moon check && # note") is SyntaxError(_),
+  )
+  assert_true(
+    @shell_parse.parse_for_policy("printf x > # note") is SyntaxError(_),
   )
 }
 
@@ -202,6 +318,9 @@ test "parse pipes and conditionals as visible top level commands" {
   assert_true(commands[0].redirects == [{ op: "2>&", target: "1" }])
   assert_true(commands[1].argv == ["tee", "out.log"])
   assert_true(commands[2].argv == ["true"])
+  assert_true(commands[0].separator_before is None)
+  assert_true(commands[1].separator_before is Some("|"))
+  assert_true(commands[2].separator_before is Some("||"))
   assert_true(@shell_parse.contains_command(Simple(commands), "moon"))
 }
 
@@ -216,6 +335,7 @@ test "return syntax errors for dangling operators and redirects" {
 }
 
 ///|
+#cfg(not(platform="windows"))
 test "return too complex for runtime expansion and shell structures" {
   assert_true(
     @shell_parse.parse_for_policy("cd \"$(pwd)\" && moon check")
@@ -242,6 +362,19 @@ test "return too complex for runtime expansion and shell structures" {
   assert_true(@shell_parse.parse_for_policy("moon \\\ncheck") is TooComplex(_))
   assert_true(
     @shell_parse.parse_for_policy("eval 'moon check'") is TooComplex(_),
+  )
+  assert_true(
+    @shell_parse.parse_for_policy("exit 0; moon fmt") is TooComplex(_),
+  )
+  assert_true(
+    @shell_parse.parse_for_policy("command exit 0; moon fmt") is TooComplex(_),
+  )
+  assert_true(
+    @shell_parse.parse_for_policy("command -p exit 0; moon fmt")
+    is TooComplex(_),
+  )
+  assert_true(
+    @shell_parse.parse_for_policy("command -v exit; moon fmt") is Simple(_),
   )
   assert_true(@shell_parse.parse_for_policy("HOME=~ cmd") is TooComplex(_))
   assert_true(

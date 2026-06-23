@@ -1,17 +1,60 @@
 ///|
+priv struct LexerWord {
+  mut text : StringBuilder
+  mut empty : Bool
+  mut has_quote_or_escape : Bool
+  mut quote_or_escape_before_equals : Bool
+  mut seen_unquoted_equals : Bool
+  mut assignment_tilde_candidate : Bool
+  mut has_assignment_tilde_expansion : Bool
+}
+
+///|
+fn LexerWord::new() -> LexerWord {
+  {
+    text: StringBuilder(),
+    empty: true,
+    has_quote_or_escape: false,
+    quote_or_escape_before_equals: false,
+    seen_unquoted_equals: false,
+    assignment_tilde_candidate: false,
+    has_assignment_tilde_expansion: false,
+  }
+}
+
+///|
+fn LexerWord::flush(self : LexerWord, tokens : Array[Token]) -> Unit {
+  if !self.empty {
+    tokens.push(
+      Word(self.text.to_string(), {
+        has_quote_or_escape: self.has_quote_or_escape,
+        quote_or_escape_before_equals: self.quote_or_escape_before_equals,
+        has_assignment_tilde_expansion: self.has_assignment_tilde_expansion,
+      }),
+    )
+  }
+}
+
+///|
+fn LexerWord::flush_and_reset(self : LexerWord, tokens : Array[Token]) -> Unit {
+  self.flush(tokens)
+  self.text = StringBuilder()
+  self.empty = true
+  self.has_quote_or_escape = false
+  self.quote_or_escape_before_equals = false
+  self.seen_unquoted_equals = false
+  self.assignment_tilde_candidate = false
+  self.has_assignment_tilde_expansion = false
+}
+
+///|
 fn lex(command : String) -> LexResult {
   let chars : Array[Char] = []
   for ch in command {
     chars.push(ch)
   }
   let tokens : Array[Token] = []
-  let mut word = StringBuilder()
-  let mut word_empty = true
-  let mut word_has_quote_or_escape = false
-  let mut word_quote_or_escape_before_equals = false
-  let mut word_seen_unquoted_equals = false
-  let mut word_assignment_tilde_candidate = false
-  let mut word_has_assignment_tilde_expansion = false
+  let word = LexerWord::new()
   let mut state = Plain
   let mut index = 0
   while index < chars.length() {
@@ -19,104 +62,94 @@ fn lex(command : String) -> LexResult {
     match state {
       Plain => {
         if is_shell_space(ch) {
-          push_word(
-            tokens, word, word_empty, word_has_quote_or_escape, word_quote_or_escape_before_equals,
-            word_has_assignment_tilde_expansion,
-          )
-          word = StringBuilder()
-          word_empty = true
-          word_has_quote_or_escape = false
-          word_quote_or_escape_before_equals = false
-          word_seen_unquoted_equals = false
-          word_assignment_tilde_candidate = false
-          word_has_assignment_tilde_expansion = false
+          word.flush_and_reset(tokens)
           index += 1
           continue
         }
         match ch {
           '\'' => {
             state = SingleQuoted
-            word_empty = false
-            word_has_quote_or_escape = true
-            if !word_seen_unquoted_equals {
-              word_quote_or_escape_before_equals = true
+            word.empty = false
+            word.has_quote_or_escape = true
+            if !word.seen_unquoted_equals {
+              word.quote_or_escape_before_equals = true
             }
-            word_assignment_tilde_candidate = false
+            word.assignment_tilde_candidate = false
             index += 1
           }
           '"' => {
             state = DoubleQuoted
-            word_empty = false
-            word_has_quote_or_escape = true
-            if !word_seen_unquoted_equals {
-              word_quote_or_escape_before_equals = true
+            word.empty = false
+            word.has_quote_or_escape = true
+            if !word.seen_unquoted_equals {
+              word.quote_or_escape_before_equals = true
             }
-            word_assignment_tilde_candidate = false
+            word.assignment_tilde_candidate = false
             index += 1
           }
-          '\\' => {
-            if index + 1 >= chars.length() {
-              return LexSyntaxError("trailing backslash")
+          '\\' =>
+            if shell_backslash_escapes() {
+              if index + 1 >= chars.length() {
+                return LexSyntaxError("trailing backslash")
+              }
+              if chars[index + 1] == '\n' || chars[index + 1] == '\r' {
+                return LexTooComplex("line continuation is not supported")
+              }
+              word.text.write_char(chars[index + 1])
+              word.empty = false
+              word.has_quote_or_escape = true
+              if !word.seen_unquoted_equals {
+                word.quote_or_escape_before_equals = true
+              }
+              word.assignment_tilde_candidate = false
+              index += 2
+            } else {
+              word.text.write_char(ch)
+              word.empty = false
+              word.assignment_tilde_candidate = false
+              index += 1
             }
-            if chars[index + 1] == '\n' || chars[index + 1] == '\r' {
-              return LexTooComplex("line continuation is not supported")
-            }
-            word.write_char(chars[index + 1])
-            word_empty = false
-            word_has_quote_or_escape = true
-            if !word_seen_unquoted_equals {
-              word_quote_or_escape_before_equals = true
-            }
-            word_assignment_tilde_candidate = false
-            index += 2
-          }
           '$' | '`' => return LexTooComplex("shell expansion is not supported")
           '(' | ')' =>
             return LexTooComplex(
               "subshells and command groups are not supported",
             )
           '{' | '}' => return LexTooComplex("brace expansion is not supported")
-          '#' => return LexTooComplex("shell comments are not supported")
+          '#' =>
+            if word.empty {
+              state = Comment
+              index += 1
+            } else {
+              word.text.write_char(ch)
+              word.empty = false
+              word.assignment_tilde_candidate = false
+              index += 1
+            }
           '*' | '?' | '[' =>
             return LexTooComplex("unquoted glob expansion is not supported")
-          '~' if word_empty =>
+          '~' if word.empty =>
             return LexTooComplex("tilde expansion is not supported")
           '&' => {
-            let attached = !word_empty
-            push_word(
-              tokens, word, word_empty, word_has_quote_or_escape, word_quote_or_escape_before_equals,
-              word_has_assignment_tilde_expansion,
-            )
-            word = StringBuilder()
-            word_empty = true
-            word_has_quote_or_escape = false
-            word_quote_or_escape_before_equals = false
-            word_seen_unquoted_equals = false
-            word_assignment_tilde_candidate = false
-            word_has_assignment_tilde_expansion = false
+            let attached = !word.empty
+            word.flush_and_reset(tokens)
             if peek_char(chars, index + 1) == Some('&') {
               tokens.push(Op("&&", attached))
               index += 2
             } else if peek_char(chars, index + 1) == Some('>') {
-              tokens.push(Op("&>", attached))
-              index += 2
+              if peek_char(chars, index + 2) == Some('>') {
+                tokens.push(Op("&>>", attached))
+                index += 3
+              } else {
+                tokens.push(Op("&>", attached))
+                index += 2
+              }
             } else {
               return LexTooComplex("background operator is not supported")
             }
           }
           '|' => {
-            let attached = !word_empty
-            push_word(
-              tokens, word, word_empty, word_has_quote_or_escape, word_quote_or_escape_before_equals,
-              word_has_assignment_tilde_expansion,
-            )
-            word = StringBuilder()
-            word_empty = true
-            word_has_quote_or_escape = false
-            word_quote_or_escape_before_equals = false
-            word_seen_unquoted_equals = false
-            word_assignment_tilde_candidate = false
-            word_has_assignment_tilde_expansion = false
+            let attached = !word.empty
+            word.flush_and_reset(tokens)
             if peek_char(chars, index + 1) == Some('|') {
               tokens.push(Op("||", attached))
               index += 2
@@ -126,34 +159,14 @@ fn lex(command : String) -> LexResult {
             }
           }
           ';' => {
-            let attached = !word_empty
-            push_word(
-              tokens, word, word_empty, word_has_quote_or_escape, word_quote_or_escape_before_equals,
-              word_has_assignment_tilde_expansion,
-            )
-            word = StringBuilder()
-            word_empty = true
-            word_has_quote_or_escape = false
-            word_quote_or_escape_before_equals = false
-            word_seen_unquoted_equals = false
-            word_assignment_tilde_candidate = false
-            word_has_assignment_tilde_expansion = false
+            let attached = !word.empty
+            word.flush_and_reset(tokens)
             tokens.push(Op(";", attached))
             index += 1
           }
           '>' => {
-            let attached = !word_empty
-            push_word(
-              tokens, word, word_empty, word_has_quote_or_escape, word_quote_or_escape_before_equals,
-              word_has_assignment_tilde_expansion,
-            )
-            word = StringBuilder()
-            word_empty = true
-            word_has_quote_or_escape = false
-            word_quote_or_escape_before_equals = false
-            word_seen_unquoted_equals = false
-            word_assignment_tilde_candidate = false
-            word_has_assignment_tilde_expansion = false
+            let attached = !word.empty
+            word.flush_and_reset(tokens)
             if peek_char(chars, index + 1) == Some('&') {
               tokens.push(Op(">&", attached))
               index += 2
@@ -166,53 +179,37 @@ fn lex(command : String) -> LexResult {
             }
           }
           '<' => {
-            let attached = !word_empty
-            push_word(
-              tokens, word, word_empty, word_has_quote_or_escape, word_quote_or_escape_before_equals,
-              word_has_assignment_tilde_expansion,
-            )
-            word = StringBuilder()
-            word_empty = true
-            word_has_quote_or_escape = false
-            word_quote_or_escape_before_equals = false
-            word_seen_unquoted_equals = false
-            word_assignment_tilde_candidate = false
-            word_has_assignment_tilde_expansion = false
+            let attached = !word.empty
+            word.flush_and_reset(tokens)
             if peek_char(chars, index + 1) == Some('<') {
               return LexTooComplex("here documents are not supported")
+            } else if peek_char(chars, index + 1) == Some('&') {
+              tokens.push(Op("<&", attached))
+              index += 2
+            } else {
+              tokens.push(Op("<", attached))
+              index += 1
             }
-            tokens.push(Op("<", attached))
-            index += 1
           }
           '\n' | '\r' => {
-            let attached = !word_empty
-            push_word(
-              tokens, word, word_empty, word_has_quote_or_escape, word_quote_or_escape_before_equals,
-              word_has_assignment_tilde_expansion,
-            )
-            word = StringBuilder()
-            word_empty = true
-            word_has_quote_or_escape = false
-            word_quote_or_escape_before_equals = false
-            word_seen_unquoted_equals = false
-            word_assignment_tilde_candidate = false
-            word_has_assignment_tilde_expansion = false
+            let attached = !word.empty
+            word.flush_and_reset(tokens)
             tokens.push(Op(";", attached))
             index += 1
           }
           _ => {
-            if word_assignment_tilde_candidate && ch == '~' {
-              word_has_assignment_tilde_expansion = true
+            if word.assignment_tilde_candidate && ch == '~' {
+              word.has_assignment_tilde_expansion = true
             }
-            word.write_char(ch)
-            word_empty = false
-            if ch == '=' && !word_seen_unquoted_equals {
-              word_seen_unquoted_equals = true
-              word_assignment_tilde_candidate = true
-            } else if word_seen_unquoted_equals && ch == ':' {
-              word_assignment_tilde_candidate = true
+            word.text.write_char(ch)
+            word.empty = false
+            if ch == '=' && !word.seen_unquoted_equals {
+              word.seen_unquoted_equals = true
+              word.assignment_tilde_candidate = true
+            } else if word.seen_unquoted_equals && ch == ':' {
+              word.assignment_tilde_candidate = true
             } else {
-              word_assignment_tilde_candidate = false
+              word.assignment_tilde_candidate = false
             }
             index += 1
           }
@@ -222,8 +219,8 @@ fn lex(command : String) -> LexResult {
         if ch == '\'' {
           state = Plain
         } else {
-          word.write_char(ch)
-          word_empty = false
+          word.text.write_char(ch)
+          word.empty = false
         }
         index += 1
       }
@@ -237,67 +234,68 @@ fn lex(command : String) -> LexResult {
             return LexTooComplex(
               "expansion inside double quotes is not supported",
             )
-          '\\' => {
-            if index + 1 >= chars.length() {
-              return LexSyntaxError("trailing backslash in double quotes")
-            }
-            let next = chars[index + 1]
-            if next == '\n' || next == '\r' {
-              return LexTooComplex("line continuation is not supported")
-            }
-            if next == '"' || next == '\\' || next == '$' || next == '`' {
-              word.write_char(next)
-              word_empty = false
-              word_has_quote_or_escape = true
-              if !word_seen_unquoted_equals {
-                word_quote_or_escape_before_equals = true
+          '\\' =>
+            if shell_backslash_escapes() {
+              if index + 1 >= chars.length() {
+                return LexSyntaxError("trailing backslash in double quotes")
               }
-              word_assignment_tilde_candidate = false
-              index += 2
+              let next = chars[index + 1]
+              if next == '\n' || next == '\r' {
+                return LexTooComplex("line continuation is not supported")
+              }
+              if next == '"' || next == '\\' || next == '$' || next == '`' {
+                word.text.write_char(next)
+                word.empty = false
+                word.has_quote_or_escape = true
+                if !word.seen_unquoted_equals {
+                  word.quote_or_escape_before_equals = true
+                }
+                word.assignment_tilde_candidate = false
+                index += 2
+              } else {
+                word.text.write_char(ch)
+                word.empty = false
+                index += 1
+              }
             } else {
-              word.write_char(ch)
-              word_empty = false
+              word.text.write_char(ch)
+              word.empty = false
               index += 1
             }
-          }
           _ => {
-            word.write_char(ch)
-            word_empty = false
+            word.text.write_char(ch)
+            word.empty = false
             index += 1
           }
         }
+      Comment => {
+        if ch == '\n' || ch == '\r' {
+          push_comment_newline_separator(tokens)
+          state = Plain
+        }
+        index += 1
+      }
     }
   }
   match state {
     SingleQuoted => LexSyntaxError("unterminated single quote")
     DoubleQuoted => LexSyntaxError("unterminated double quote")
+    Comment => LexOk(tokens)
     Plain => {
-      push_word(
-        tokens, word, word_empty, word_has_quote_or_escape, word_quote_or_escape_before_equals,
-        word_has_assignment_tilde_expansion,
-      )
+      word.flush(tokens)
       LexOk(tokens)
     }
   }
 }
 
 ///|
-fn push_word(
-  tokens : Array[Token],
-  word : StringBuilder,
-  empty : Bool,
-  has_quote_or_escape : Bool,
-  quote_or_escape_before_equals : Bool,
-  has_assignment_tilde_expansion : Bool,
-) -> Unit {
-  if !empty {
-    tokens.push(
-      Word(word.to_string(), {
-        has_quote_or_escape,
-        quote_or_escape_before_equals,
-        has_assignment_tilde_expansion,
-      }),
-    )
+fn push_comment_newline_separator(tokens : Array[Token]) -> Unit {
+  if tokens.length() == 0 {
+    return
+  }
+  match tokens[tokens.length() - 1] {
+    Op("&&" | "||" | ";" | "|", _) => ()
+    _ => tokens.push(Op(";", false))
   }
 }
 
@@ -313,4 +311,16 @@ fn peek_char(chars : Array[Char], index : Int) -> Char? {
 ///|
 fn is_shell_space(ch : Char) -> Bool {
   ch == ' ' || ch == '\t'
+}
+
+///|
+#cfg(platform="windows")
+fn shell_backslash_escapes() -> Bool {
+  false
+}
+
+///|
+#cfg(not(platform="windows"))
+fn shell_backslash_escapes() -> Bool {
+  true
 }
