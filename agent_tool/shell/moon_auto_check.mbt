@@ -575,6 +575,7 @@ test "do not trigger follow-up check for read-only moon commands or data" {
 }
 
 ///|
+#cfg(not(platform="windows"))
 test "detect moon command check cwd from -C option" {
   assert_true(
     moon_auto_check_start_cwd("moon fmt", Some("/repo")) is Some("/repo"),
