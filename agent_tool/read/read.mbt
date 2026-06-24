@@ -162,14 +162,23 @@ async fn similar_file_hint(path : String) -> String {
   }
   // `dirname` is "" for a bare relative name (`README`); read its siblings from
   // the current directory so those paths get the same hint as nested ones.
-  let dir = requested.dirname().to_string()
-  let names = @fs.readdir(if dir == "" { "." } else { dir }, sort=true) catch {
-    _ => return ""
-  }
+  let dirname = requested.dirname().to_string()
+  let parent = if dirname == "" { "." } else { dirname }
+  let names = @fs.readdir(parent, sort=true) catch { _ => return "" }
   for candidate in names {
-    if candidate != name && file_stem(candidate) == stem {
-      return " Did you mean \{candidate}?"
+    if candidate == name || file_stem(candidate) != stem {
+      continue
     }
+    // `read` rejects directories, so a same-stem dir (`foo/` next to `foo.mbt`,
+    // a common package layout) would just point the agent at another failure —
+    // skip it and keep scanning for a same-stem file.
+    let kind = @fs.kind("\{parent}/\{candidate}", follow_symlink=true) catch {
+      _ => continue
+    }
+    if kind is Directory {
+      continue
+    }
+    return " Did you mean \{candidate}?"
   }
   ""
 }
@@ -603,6 +612,20 @@ async test "read hint probe does not mask errors for a non-directory parent" {
     guard result is Respond(output) else { fail("expected Respond") }
     assert_true(output.is_error)
     assert_true(output.content.contains("error reading"))
+  })
+}
+
+///|
+async test "read suggestion skips a same-stem directory for a sibling file" {
+  @vfs.with_tmpdir(dir => {
+    // `parser/` sorts before `parser.mbt`; the hint must skip the directory
+    // (read rejects directories) and point at the file instead.
+    @fs.mkdir("\{dir}/parser")
+    @fs.write_file("\{dir}/parser.mbt", "x", create_mode=CreateOrTruncate)
+    let result = execute({ "path": "\{dir}/parser.ts" })
+    guard result is Respond(output) else { fail("expected Respond") }
+    assert_true(output.is_error)
+    assert_true(output.content.has_suffix("Did you mean parser.mbt?"))
   })
 }
 
