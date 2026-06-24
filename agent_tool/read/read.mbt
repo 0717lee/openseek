@@ -208,7 +208,7 @@ fn code_unit_prefix(content : String, max_units : Int) -> String {
 /// (the unit at `max_units` is a trailing surrogate) step back one so the
 /// leading surrogate is dropped too. Callers pass `max_units < content.length()`.
 fn char_boundary_at_or_below(content : String, max_units : Int) -> Int {
-  if content.at(max_units).is_trailing_surrogate() {
+  if content[max_units].is_trailing_surrogate() {
     max_units - 1
   } else {
     max_units
