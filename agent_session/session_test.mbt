@@ -95,23 +95,46 @@ test "session projects to DeepSeek chat messages" {
       ),
     )
     .append(Terminal(Finished("done")))
-  let messages = session.chat_messages()
-  assert_eq(messages.length(), 5)
-  assert_true(messages[0].role is System)
-  assert_eq(messages[0].content, "system")
-  assert_true(messages[1].role is User)
-  assert_eq(messages[1].content, "inspect")
-  assert_true(messages[2].role is Assistant)
-  assert_eq(messages[2].content, "")
-  assert_true(messages[2].reasoning_content is Some("need file"))
-  assert_eq(messages[2].tool_calls.length(), 1)
-  assert_eq(messages[2].tool_calls[0].id, "call_1")
-  assert_eq(messages[2].tool_calls[0].name, "read")
-  assert_eq(messages[2].tool_calls[0].arguments, "{\"path\":\"README.md\"}")
-  assert_true(messages[3].role is Tool("call_1"))
-  assert_eq(messages[3].content, "README")
-  assert_true(messages[4].role is Assistant)
-  assert_eq(messages[4].content, "done")
+  // The projection is the documented contract: a leading System message, the
+  // user/assistant/tool turns, and a trailing Assistant message carrying the
+  // finish text. The snapshot pins every field of every message.
+  debug_inspect(
+    session.chat_messages(),
+    content=(
+      #|[
+      #|  {
+      #|    role: System,
+      #|    content: "system",
+      #|    tool_calls: [],
+      #|    reasoning_content: None,
+      #|  },
+      #|  {
+      #|    role: User,
+      #|    content: "inspect",
+      #|    tool_calls: [],
+      #|    reasoning_content: None,
+      #|  },
+      #|  {
+      #|    role: Assistant,
+      #|    content: "",
+      #|    tool_calls: [{ id: "call_1", name: "read", arguments: "{\"path\":\"README.md\"}" }],
+      #|    reasoning_content: Some("need file"),
+      #|  },
+      #|  {
+      #|    role: Tool("call_1"),
+      #|    content: "README",
+      #|    tool_calls: [],
+      #|    reasoning_content: None,
+      #|  },
+      #|  {
+      #|    role: Assistant,
+      #|    content: "done",
+      #|    tool_calls: [],
+      #|    reasoning_content: None,
+      #|  },
+      #|]
+    ),
+  )
 }
 
 ///|
