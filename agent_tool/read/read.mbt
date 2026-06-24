@@ -154,7 +154,10 @@ async fn similar_file_hint(path : String) -> String {
   if stem == "" {
     return ""
   }
-  let names = @fs.readdir(requested.dirname().to_string(), sort=true) catch {
+  // `dirname` is "" for a bare relative name (`README`); read its siblings from
+  // the current directory so those paths get the same hint as nested ones.
+  let dir = requested.dirname().to_string()
+  let names = @fs.readdir(if dir == "" { "." } else { dir }, sort=true) catch {
     _ => return ""
   }
   for candidate in names {
@@ -573,6 +576,14 @@ async test "read suggests a same-stem sibling when the path is missing" {
     guard bare is Respond(out2) else { fail("expected Respond") }
     assert_true(out2.content.has_suffix("Did you mean README.md?"))
   })
+}
+
+///|
+test "file_stem strips only the final extension" {
+  assert_eq(file_stem("foo.ts"), "foo")
+  assert_eq(file_stem("foo.test.ts"), "foo.test")
+  assert_eq(file_stem("Makefile"), "Makefile")
+  assert_eq(file_stem(".gitignore"), ".gitignore")
 }
 
 ///|
