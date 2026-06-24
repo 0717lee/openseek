@@ -44,17 +44,8 @@ test "markdown renders summary metrics and dynamic columns" {
 }
 
 ///|
-fn repeated_text(text : String, count : Int) -> String {
-  let out = StringBuilder::new()
-  for _ in 0..<count {
-    out.write_string(text)
-  }
-  out.to_string()
-}
-
-///|
 test "markdown details keep full arbitrary text" {
-  let long_reason = repeated_text("a", 95) + "😊 full reason tail"
+  let long_reason = "a".repeat(95) + "😊 full reason tail"
   let warning = "contains `inline` and ```fenced``` backticks"
   let report = @report.Report(title="Details", rows=[
     ReportRow(
