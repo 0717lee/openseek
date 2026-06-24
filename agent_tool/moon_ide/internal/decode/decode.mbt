@@ -51,7 +51,7 @@ fn parse_fields(fields : Map[String, Json]) -> MoonIdeInput raise {
   let loc = optional_string(fields, "loc")
   let target = optional_string(fields, "target")
   match target {
-    Some(value) => validate_target(value)
+    Some(value) => @moon_target.validate_target(value)
     None => ()
   }
   let no_check = optional_bool(fields, "no_check", default=false)
@@ -138,14 +138,6 @@ fn validate_action(action : String) -> Unit raise {
     fail(
       "arguments.action to be one of doc, outline, peek_def, hover, find_references",
     )
-  }
-}
-
-///|
-fn validate_target(target : String) -> Unit raise {
-  let allowed = ["wasm", "wasm-gc", "js", "native", "llvm", "all"]
-  if !allowed.contains(target) {
-    fail("arguments.target to be one of wasm, wasm-gc, js, native, llvm, all")
   }
 }
 

@@ -50,7 +50,7 @@ fn parse_fields(fields : Map[String, Json]) -> MoonCommandInput raise {
   let target = optional_string(fields, "target")
   match target {
     Some(value) => {
-      validate_target(value)
+      @moon_target.validate_target(value)
       validate_target_supported(command)
     }
     None => ()
@@ -187,14 +187,6 @@ fn validate_command(command : String) -> Unit raise {
   let allowed = ["check", "test", "run", "info", "fmt", "build"]
   if !allowed.contains(command) {
     fail("arguments.command to be one of check, test, run, info, fmt, build")
-  }
-}
-
-///|
-fn validate_target(target : String) -> Unit raise {
-  let allowed = ["wasm", "wasm-gc", "js", "native", "llvm", "all"]
-  if !allowed.contains(target) {
-    fail("arguments.target to be one of wasm, wasm-gc, js, native, llvm, all")
   }
 }
 

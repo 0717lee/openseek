@@ -31,7 +31,7 @@ fn parse_fields(fields : Map[String, Json]) -> MoonCheckInput raise {
   let cwd = optional_string(fields, "cwd")
   let target = optional_string(fields, "target")
   match target {
-    Some(value) => validate_target(value)
+    Some(value) => @moon_target.validate_target(value)
     None => ()
   }
   let warn_list = optional_string(fields, "warn_list")
@@ -60,13 +60,5 @@ fn optional_bool(fields : Map[String, Json], name : String) -> Bool raise {
     Some(True) => true
     Some(False) | Some(Null) | None => false
     _ => fail("arguments.\{name} to be a boolean")
-  }
-}
-
-///|
-fn validate_target(target : String) -> Unit raise {
-  let allowed = ["wasm", "wasm-gc", "js", "native", "llvm", "all"]
-  if !allowed.contains(target) {
-    fail("arguments.target to be one of wasm, wasm-gc, js, native, llvm, all")
   }
 }
