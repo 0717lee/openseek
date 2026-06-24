@@ -56,21 +56,11 @@ pub fn SessionId::generated(
   salt? : String = "",
 ) -> SessionId {
   fn pad2(value : Int) -> String {
-    if value < 10 {
-      "0\{value}"
-    } else {
-      "\{value}"
-    }
+    value.to_string().pad_start(2, '0')
   }
 
   fn pad3(value : Int) -> String {
-    if value < 10 {
-      "00\{value}"
-    } else if value < 100 {
-      "0\{value}"
-    } else {
-      "\{value}"
-    }
+    value.to_string().pad_start(3, '0')
   }
 
   let tail = if salt == "" { "" } else { "-\{salt}" }

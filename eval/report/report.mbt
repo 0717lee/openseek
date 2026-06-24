@@ -468,16 +468,7 @@ fn markdown_fence(text : String) -> String {
     longest
   }
   let length = if longest >= 3 { longest + 1 } else { 3 }
-  repeat_char('`', length)
-}
-
-///|
-fn repeat_char(char : Char, count : Int) -> String {
-  let out = StringBuilder::new()
-  for _ in 0..<count {
-    out.write_char(char)
-  }
-  out.to_string()
+  "`".repeat(length)
 }
 
 ///|
