@@ -1,24 +1,38 @@
+// `encode_chat_request` builds the JSON request body sent to DeepSeek's
+// chat-completions endpoint. Each test snapshots the exact body a given set of
+// options produces, so the file doubles as documentation of the wire format.
+// Regenerate the snapshots with `moon test --update` after changing the encoder.
+
 ///|
-test "encode_chat_request omits response format by default" {
+test "minimal request: flash model, no response_format, non-stream" {
   let body = @deepseek.encode_chat_request(model=V4Flash) <| [
     ChatMessage(System, content="plain text is fine"),
     ChatMessage(User, content="ping"),
   ]
-  let text = body.stringify()
-  assert_true(text.contains("\"stream\":false"))
-  assert_false(text.contains("\"response_format\""))
+  json_inspect(body, content={
+    "model": "deepseek-v4-flash",
+    "messages": [
+      { "role": "system", "content": "plain text is fine" },
+      { "role": "user", "content": "ping" },
+    ],
+    "stream": false,
+  })
 }
 
 ///|
-test "encode_chat_request defaults to V4Pro" {
+test "model defaults to V4Pro" {
   let body = @deepseek.encode_chat_request() <| [
     ChatMessage(User, content="ping"),
   ]
-  assert_true(body.stringify().contains("\"model\":\"deepseek-v4-pro\""))
+  json_inspect(body, content={
+    "model": "deepseek-v4-pro",
+    "messages": [{ "role": "user", "content": "ping" }],
+    "stream": false,
+  })
 }
 
 ///|
-test "encode_chat_request can ask for json output explicitly" {
+test "response_format=JsonObject asks for a JSON object reply" {
   let body = @deepseek.encode_chat_request(
     model=V4Flash,
     response_format=JsonObject,
@@ -26,13 +40,19 @@ test "encode_chat_request can ask for json output explicitly" {
     ChatMessage(System, content="json only"),
     ChatMessage(User, content="ping"),
   ]
-  guard body is { "response_format": { "type": String("json_object"), .. }, .. } else {
-    fail("wrong response_format")
-  }
+  json_inspect(body, content={
+    "model": "deepseek-v4-flash",
+    "messages": [
+      { "role": "system", "content": "json only" },
+      { "role": "user", "content": "ping" },
+    ],
+    "stream": false,
+    "response_format": { "type": "json_object" },
+  })
 }
 
 ///|
-test "encode_chat_request includes tools when present" {
+test "tools are advertised as function definitions" {
   let tool = @deepseek.ToolDefinition("shell", "Run a shell command.", {
     "type": "object",
     "properties": { "cmd": { "type": "string" } },
@@ -41,64 +61,95 @@ test "encode_chat_request includes tools when present" {
   let body = @deepseek.encode_chat_request(model=V4Flash, tools=[tool]) <| [
     ChatMessage(User, content="run tests"),
   ]
-  let text = body.stringify()
-  assert_true(text.contains("\"model\":\"deepseek-v4-flash\""))
-  assert_true(text.contains("\"messages\""))
-  assert_true(text.contains("\"tools\""))
-  assert_true(text.contains("\"type\":\"function\""))
-  assert_true(text.contains("\"name\":\"shell\""))
-  assert_true(text.contains("\"required\""))
+  json_inspect(body, content={
+    "model": "deepseek-v4-flash",
+    "messages": [{ "role": "user", "content": "run tests" }],
+    "stream": false,
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "shell",
+          "description": "Run a shell command.",
+          "parameters": {
+            "type": "object",
+            "properties": { "cmd": { "type": "string" } },
+            "required": ["cmd"],
+          },
+        },
+      },
+    ],
+  })
 }
 
 ///|
-test "encode_chat_request enables usage-bearing stream mode" {
+test "stream=true requests usage-bearing streaming" {
   let body = @deepseek.encode_chat_request(model=V4Flash, stream=true) <| [
     ChatMessage(User, content="stream this"),
   ]
-  let text = body.stringify()
-  assert_true(text.contains("\"stream\":true"))
-  guard body
-    is { "stream": True, "stream_options": { "include_usage": True, .. }, .. } else {
-    fail("wrong stream options")
-  }
+  json_inspect(body, content={
+    "model": "deepseek-v4-flash",
+    "messages": [{ "role": "user", "content": "stream this" }],
+    "stream": true,
+    "stream_options": { "include_usage": true },
+  })
 }
 
 ///|
-test "encode_chat_request encodes thinking controls" {
-  let high = @deepseek.encode_chat_request(model=V4Pro, thinking=High) <| [
+test "thinking=High enables reasoning at high effort" {
+  let body = @deepseek.encode_chat_request(model=V4Pro, thinking=High) <| [
     ChatMessage(User, content="solve"),
   ]
-  let high_text = high.stringify()
-  assert_true(high_text.contains("\"thinking\""))
-  assert_true(high_text.contains("\"type\":\"enabled\""))
-  assert_true(high_text.contains("\"reasoning_effort\":\"high\""))
-
-  let max = @deepseek.encode_chat_request(model=V4Pro, thinking=Max) <| [
-    ChatMessage(User, content="solve"),
-  ]
-  assert_true(max.stringify().contains("\"reasoning_effort\":\"max\""))
-
-  let no = @deepseek.encode_chat_request(model=V4Pro, thinking=No) <| [
-    ChatMessage(User, content="solve"),
-  ]
-  let no_text = no.stringify()
-  assert_true(no_text.contains("\"type\":\"disabled\""))
-  assert_false(no_text.contains("\"reasoning_effort\""))
+  json_inspect(body, content={
+    "model": "deepseek-v4-pro",
+    "messages": [{ "role": "user", "content": "solve" }],
+    "stream": false,
+    "thinking": { "type": "enabled" },
+    "reasoning_effort": "high",
+  })
 }
 
 ///|
-test "encode_chat_request omits tools and thinking when absent" {
+test "thinking=Max enables reasoning at max effort" {
+  let body = @deepseek.encode_chat_request(model=V4Pro, thinking=Max) <| [
+    ChatMessage(User, content="solve"),
+  ]
+  json_inspect(body, content={
+    "model": "deepseek-v4-pro",
+    "messages": [{ "role": "user", "content": "solve" }],
+    "stream": false,
+    "thinking": { "type": "enabled" },
+    "reasoning_effort": "max",
+  })
+}
+
+///|
+test "thinking=No disables reasoning and omits reasoning_effort" {
+  let body = @deepseek.encode_chat_request(model=V4Pro, thinking=No) <| [
+    ChatMessage(User, content="solve"),
+  ]
+  json_inspect(body, content={
+    "model": "deepseek-v4-pro",
+    "messages": [{ "role": "user", "content": "solve" }],
+    "stream": false,
+    "thinking": { "type": "disabled" },
+  })
+}
+
+///|
+test "tools and thinking are omitted when absent" {
   let body = @deepseek.encode_chat_request(model=V4Flash) <| [
     ChatMessage(User, content="hi"),
   ]
-  let text = body.stringify()
-  assert_false(text.contains("\"tools\""))
-  assert_false(text.contains("\"thinking\""))
-  assert_false(text.contains("\"reasoning_effort\""))
+  json_inspect(body, content={
+    "model": "deepseek-v4-flash",
+    "messages": [{ "role": "user", "content": "hi" }],
+    "stream": false,
+  })
 }
 
 ///|
-test "encode_chat_request rounds-trips assistant tool call echo and tool result" {
+test "assistant tool-call echo and tool result round-trip" {
   let call = @deepseek.ToolCall(
     id="call_42",
     name="shell",
@@ -110,20 +161,33 @@ test "encode_chat_request rounds-trips assistant tool call echo and tool result"
     ChatMessage(Assistant, content="", tool_calls=[call]),
     ChatMessage(Tool("call_42"), content="exit=0\nok"),
   ]
-  let text = body.stringify()
-  assert_true(text.contains("\"role\":\"system\""))
-  assert_true(text.contains("\"role\":\"user\""))
-  assert_true(text.contains("\"role\":\"assistant\""))
-  assert_true(text.contains("\"role\":\"tool\""))
-  assert_true(text.contains("\"content\":null"))
-  assert_true(text.contains("\"tool_call_id\":\"call_42\""))
-  assert_true(
-    text.contains("\"arguments\":\"{\\\"cmd\\\":\\\"moon test\\\"}\""),
-  )
+  json_inspect(body, content={
+    "model": "deepseek-v4-flash",
+    "messages": [
+      { "role": "system", "content": "be terse" },
+      { "role": "user", "content": "run the tests" },
+      {
+        "role": "assistant",
+        "content": null,
+        "tool_calls": [
+          {
+            "id": "call_42",
+            "type": "function",
+            "function": {
+              "name": "shell",
+              "arguments": "{\"cmd\":\"moon test\"}",
+            },
+          },
+        ],
+      },
+      { "role": "tool", "content": "exit=0\nok", "tool_call_id": "call_42" },
+    ],
+    "stream": false,
+  })
 }
 
 ///|
-test "encode_chat_request encodes multiple tool definitions" {
+test "multiple tool definitions are all encoded" {
   let shell = @deepseek.ToolDefinition("shell", "Run a shell command.", {
     "type": "object",
     "properties": { "cmd": { "type": "string" } },
@@ -140,7 +204,35 @@ test "encode_chat_request encodes multiple tool definitions" {
   ) <| [
     ChatMessage(User, content="look around"),
   ]
-  let text = body.stringify()
-  assert_true(text.contains("\"name\":\"shell\""))
-  assert_true(text.contains("\"name\":\"read\""))
+  json_inspect(body, content={
+    "model": "deepseek-v4-flash",
+    "messages": [{ "role": "user", "content": "look around" }],
+    "stream": false,
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "shell",
+          "description": "Run a shell command.",
+          "parameters": {
+            "type": "object",
+            "properties": { "cmd": { "type": "string" } },
+            "required": ["cmd"],
+          },
+        },
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "read",
+          "description": "Read a file.",
+          "parameters": {
+            "type": "object",
+            "properties": { "path": { "type": "string" } },
+            "required": ["path"],
+          },
+        },
+      },
+    ],
+  })
 }
