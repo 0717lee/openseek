@@ -1,8 +1,11 @@
 # Write Tool
 
-`write` overwrites `arguments.path` with `arguments.content`. Existing files
-are truncated; missing parent directories are **not** created — the agent
-should `shell` a `mkdir -p` first when it needs nested directories.
+`write` creates or overwrites `arguments.path` with `arguments.content`.
+Existing files are truncated and missing parent directories are created, so a
+`write` to `dir/sub/moon.pkg` works without a separate `mkdir`. When the path
+already exists the success message flags the overwrite, so the model can tell it
+replaced content it may not have read — prefer `edit` for targeted changes, and
+read an existing file before overwriting it.
 
 ## Design Rationale
 
@@ -12,10 +15,9 @@ contents are known. That makes the operation easy to explain in the transcript:
 the model supplied the whole desired file body, and the host wrote exactly that
 body.
 
-Parent directories are not created implicitly because directory creation is a
-separate workspace mutation. Keeping it explicit makes broad filesystem changes
-visible in the log and lets the agent choose whether to create a directory,
-reuse an existing package, or fix an incorrect path.
+Missing parent directories are created so a single `write` can lay down a file
+in a fresh package directory without a separate `mkdir` step; the created path
+stays inside the resolved workspace root.
 
 ## API Style
 
@@ -54,8 +56,10 @@ The action is always `Respond(ToolOutput(...))` — the agent loop forwards
 `false` on success and `true` for write or argument failures. The string body
 has one of these shapes:
 
-- `"ok: wrote <n> chars to <path>"` on success — `n` is the character count
-  of the written content.
+- `"ok: wrote <n> chars to <path>"` when a new file is created — `n` is the
+  character count of the written content. When the path already existed the
+  line ends with ` (overwrote existing file)` so the model can tell it clobbered
+  prior content.
   If the target is `moon.mod`, `moon.pkg`, `.mbt`, or `.mbt.md` inside a
   MoonBit module, the response may append bounded raw compiler feedback from
   module-root `moon check --diagnostic-limit 1`, starting with
@@ -108,7 +112,11 @@ async test "write tool updates an implementation note through the registry" {
     )
     let result = @agent_tool.execute_tool_call(call, tools)
     guard result is Respond(output) else { fail("expected Respond") }
-    assert_eq(output.content, "ok: wrote 11 chars to \{path}")
+    // The note already existed, so the result flags the overwrite.
+    assert_eq(
+      output.content,
+      "ok: wrote 11 chars to \{path} (overwrote existing file)",
+    )
     assert_false(output.is_error)
     assert_eq(@fs.read_file(path).text(), "tests green")
   })

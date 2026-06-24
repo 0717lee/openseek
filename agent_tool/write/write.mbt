@@ -9,7 +9,9 @@
 ///   before writing.
 ///
 /// ## Result
-/// - `Respond(ToolOutput("ok: wrote <n> chars to <path>"))` on success.
+/// - `Respond(ToolOutput("ok: wrote <n> chars to <path>"))` when a new file is
+///   created; the message gains ` (overwrote existing file)` when the path
+///   already existed, so the model can tell it clobbered prior content.
 /// - `Respond(ToolOutput("error writing <path>: <error>", is_error=true))`
 ///   if the write fails.
 /// - `Respond(ToolOutput("error: write requires ...", is_error=true))` for
@@ -19,7 +21,7 @@ pub fn definition(
 ) -> @agent_tool.AgentToolDefinition {
   AgentToolDefinition(
     name="write",
-    description="Overwrite arguments.path with arguments.content.",
+    description="Create or overwrite arguments.path with arguments.content (missing parent directories are created). If the file already exists, read it first so you do not discard content you have not seen, and prefer the edit tool for targeted changes. Do not create Markdown or README files unless the user explicitly asks for them.",
     schema=JsonSchema({
       "type": "object",
       "properties": {
@@ -71,15 +73,27 @@ async fn write_file(
       None => ()
     }
     create_parent_dirs(path)
+    // Probe before writing so the result can tell the model whether it created a
+    // new file or clobbered an existing one — a wholesale `write` over content it
+    // never read is a common way to lose work. A non-ENOENT `exists` error (e.g.
+    // ENOTDIR) falls through to the write below and the `catch` reports it.
+    let existed = @fs.exists(path)
     @fs.write_file(path, input.content, create_mode=CreateOrTruncate)
-    let content = @auto_check.append_summary(
-      path,
-      "ok: wrote \{input.content.length()} chars to \{path}",
-    )
+    let chars = input.content.length()
+    let summary = if existed {
+      "ok: wrote \{chars} chars to \{path} (overwrote existing file)"
+    } else {
+      "ok: wrote \{chars} chars to \{path}"
+    }
+    let content = @auto_check.append_summary(path, summary)
     @agent_tool.ToolAction::respond(
       content,
       brief=@agent_tool.brief_line(
-        "wrote \{input.content.length()} chars to \{input.path}",
+        if existed {
+          "overwrote \{input.path}"
+        } else {
+          "wrote \{chars} chars to \{input.path}"
+        },
       ),
     )
   } catch {
@@ -269,10 +283,32 @@ async test "write truncates existing files" {
     @fs.write_file(path, "long original content", create_mode=CreateOrTruncate)
     let result = execute({ "path": path, "content": "short" })
     guard result is Respond(output) else { fail("expected Respond") }
-    assert_eq(output.content, "ok: wrote 5 chars to \{path}")
+    // The path already existed, so the result flags the overwrite.
+    assert_eq(
+      output.content,
+      "ok: wrote 5 chars to \{path} (overwrote existing file)",
+    )
     assert_false(output.is_error)
     let read_back = @fs.read_file(path).text()
     assert_eq(read_back, "short")
+  })
+}
+
+///|
+async test "write reports whether it created or overwrote a file" {
+  @vfs.with_tmpdir(dir => {
+    let path = "\{dir}/note.txt"
+    // First write to a fresh path: a plain "created" result, no overwrite note.
+    let created = execute({ "path": path, "content": "v1" })
+    guard created is Respond(first) else { fail("expected Respond") }
+    assert_eq(first.content, "ok: wrote 2 chars to \{path}")
+    // Writing again clobbers the existing file, which the result now calls out.
+    let overwritten = execute({ "path": path, "content": "v2!" })
+    guard overwritten is Respond(second) else { fail("expected Respond") }
+    assert_eq(
+      second.content,
+      "ok: wrote 3 chars to \{path} (overwrote existing file)",
+    )
   })
 }
 
@@ -283,7 +319,10 @@ async test "write accepts empty content" {
     @fs.write_file(path, "previous", create_mode=CreateOrTruncate)
     let result = execute({ "path": path, "content": "" })
     guard result is Respond(output) else { fail("expected Respond") }
-    assert_eq(output.content, "ok: wrote 0 chars to \{path}")
+    assert_eq(
+      output.content,
+      "ok: wrote 0 chars to \{path} (overwrote existing file)",
+    )
     assert_false(output.is_error)
     let read_back = @fs.read_file(path).text()
     assert_eq(read_back, "")
