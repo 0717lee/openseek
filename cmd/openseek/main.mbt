@@ -540,11 +540,7 @@ fn compact_prompt_label(prompt : String) -> String {
 ///|
 fn format_utc_minute(seconds : Int64) -> String {
   fn pad2(value : Int) -> String {
-    if value < 10 {
-      "0\{value}"
-    } else {
-      "\{value}"
-    }
+    value.to_string().pad_start(2, '0')
   }
 
   let time = @time.unix(seconds) catch { _ => return "-" }

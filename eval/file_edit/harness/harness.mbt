@@ -374,9 +374,5 @@ fn count_successes(results : Array[TrialResult]) -> Int {
 
 ///|
 fn padded_index(value : Int) -> String {
-  if value < 10 {
-    "0\{value}"
-  } else {
-    value.to_string()
-  }
+  value.to_string().pad_start(2, '0')
 }
