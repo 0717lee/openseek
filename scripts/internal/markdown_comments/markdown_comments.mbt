@@ -110,8 +110,8 @@ fn push_html_block_ranges(
     return
   }
   let len = markdown.length()
-  let start = line_start(markdown, clamp(first_loc.first_ccode, min=0, max=len))
-  let stop = clamp(last_loc.last_ccode + 1, min=start, max=len)
+  let start = line_start(markdown, first_loc.first_ccode.clamp(min=0, max=len))
+  let stop = (last_loc.last_ccode + 1).clamp(min=start, max=len)
   push_html_comment_ranges(markdown, ranges, start~, stop~)
 }
 
@@ -146,8 +146,8 @@ fn push_html_comment_ranges(
   stop~ : Int,
 ) -> Unit {
   let len = markdown.length()
-  let stop = clamp(stop, min=0, max=len)
-  let mut cursor = clamp(start, min=0, max=stop)
+  let stop = stop.clamp(min=0, max=len)
+  let mut cursor = start.clamp(min=0, max=stop)
   while cursor < stop {
     match find_html_comment_open(markdown, start=cursor, stop~) {
       Some(first) =>
@@ -165,8 +165,8 @@ fn push_html_comment_ranges(
 
 ///|
 fn find_html_comment_open(markdown : String, start~ : Int, stop~ : Int) -> Int? {
-  let stop = clamp(stop, min=0, max=markdown.length())
-  let start = clamp(start, min=0, max=stop)
+  let stop = stop.clamp(min=0, max=markdown.length())
+  let start = start.clamp(min=0, max=stop)
   for cursor = start; cursor + 3 < stop; cursor = cursor + 1 {
     if markdown[cursor] == '<' &&
       markdown[cursor + 1] == '!' &&
@@ -185,8 +185,8 @@ fn find_html_comment_close(
   start~ : Int,
   stop~ : Int,
 ) -> Int? {
-  let stop = clamp(stop, min=0, max=markdown.length())
-  let start = clamp(start, min=0, max=stop)
+  let stop = stop.clamp(min=0, max=markdown.length())
+  let start = start.clamp(min=0, max=stop)
   for cursor = start; cursor + 2 < stop; cursor = cursor + 1 {
     if markdown[cursor] == '-' &&
       markdown[cursor + 1] == '-' &&
@@ -219,8 +219,8 @@ fn remove_source_ranges(
   let out = StringBuilder(size_hint=len)
   let mut cursor = 0
   for range in ranges {
-    let first = clamp(range.first, min=0, max=len)
-    let last_exclusive = clamp(range.last_exclusive, min=0, max=len)
+    let first = range.first.clamp(min=0, max=len)
+    let last_exclusive = range.last_exclusive.clamp(min=0, max=len)
     if last_exclusive <= cursor {
       continue
     }
@@ -233,15 +233,4 @@ fn remove_source_ranges(
     out.write_string(markdown.unsafe_substring(start=cursor, end=len))
   }
   out.to_string()
-}
-
-///|
-fn clamp(value : Int, min~ : Int, max~ : Int) -> Int {
-  if value < min {
-    min
-  } else if value > max {
-    max
-  } else {
-    value
-  }
 }
