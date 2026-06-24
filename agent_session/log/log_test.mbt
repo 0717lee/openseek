@@ -41,29 +41,103 @@ fn events_jsonl(session : @agent_session.Session) -> String {
 
 ///|
 test "parse round-trips every event kind" {
-  let parsed = @log.parse_events(events_jsonl(sample_session()))
-  inspect(parsed.events.length(), content="5")
-  inspect(parsed.errors.length(), content="0")
-  inspect(parsed.partial_tail, content="false")
+  // Serializing the sample session and parsing it back recovers all five event
+  // kinds (user, assistant-with-tool-call, tool, runtime, terminal) with no
+  // errors and no partial tail.
+  debug_inspect(
+    @log.parse_events(events_jsonl(sample_session())),
+    content=(
+      #|{
+      #|  events: [
+      #|    { sequence: 1, ts: 0, item: User({ content: "list the files" }) },
+      #|    {
+      #|      sequence: 2,
+      #|      ts: 0,
+      #|      item: Assistant(
+      #|        {
+      #|          content: "I'll run ls.",
+      #|          tool_calls: [{ id: "call_1", name: "shell", arguments: "{\"cmd\":\"ls\"}" }],
+      #|          reasoning_content: Some("The user wants a directory listing."),
+      #|        },
+      #|      ),
+      #|    },
+      #|    {
+      #|      sequence: 3,
+      #|      ts: 0,
+      #|      item: Tool(
+      #|        {
+      #|          tool_call_id: "call_1",
+      #|          tool_name: "shell",
+      #|          content: "README.md\nsrc",
+      #|          is_error: false,
+      #|          brief: None,
+      #|        },
+      #|      ),
+      #|    },
+      #|    {
+      #|      sequence: 4,
+      #|      ts: 0,
+      #|      item: Runtime({ content: "moon check: 0 errors" }),
+      #|    },
+      #|    {
+      #|      sequence: 5,
+      #|      ts: 0,
+      #|      item: Terminal(Finished("Here are your files: README.md, src.")),
+      #|    },
+      #|  ],
+      #|  errors: [],
+      #|  partial_tail: false,
+      #|}
+    ),
+  )
 }
 
 ///|
 test "parse tolerates a truncated final line" {
+  // A half-written last line (a crash mid-append) is dropped, the preceding
+  // events survive, and partial_tail flags the truncation.
   let text = "{\"sequence\":1,\"ts\":0,\"item\":{\"kind\":\"user\",\"payload\":{\"content\":\"hi\"}}}\n{\"sequence\":2,\"ts\":0,\"item\":{\"kind\":\"assi"
-  let parsed = @log.parse_events(text)
-  inspect(parsed.events.length(), content="1")
-  inspect(parsed.errors.length(), content="0")
-  inspect(parsed.partial_tail, content="true")
+  debug_inspect(
+    @log.parse_events(text),
+    content=(
+      #|{
+      #|  events: [{ sequence: 1, ts: 0, item: User({ content: "hi" }) }],
+      #|  errors: [],
+      #|  partial_tail: true,
+      #|}
+    ),
+  )
 }
 
 ///|
 test "parse records a bad interior line without aborting" {
+  // A corrupt interior line is recorded while the valid events on either side
+  // still parse. We snapshot the surviving events and the error's line number
+  // and original text, but not the parser's `message` — that wording belongs to
+  // moonbitlang/core and should not be pinned here.
   let text = "{\"sequence\":1,\"ts\":0,\"item\":{\"kind\":\"user\",\"payload\":{\"content\":\"hi\"}}}\nnot json at all\n{\"sequence\":2,\"ts\":0,\"item\":{\"kind\":\"terminal\",\"payload\":{\"kind\":\"finished\",\"message\":\"done\"}}}\n"
   let parsed = @log.parse_events(text)
-  inspect(parsed.events.length(), content="2")
-  inspect(parsed.errors.length(), content="1")
-  inspect(parsed.errors[0].line_number, content="2")
-  inspect(parsed.partial_tail, content="false")
+  debug_inspect(
+    parsed.events,
+    content=(
+      #|[
+      #|  { sequence: 1, ts: 0, item: User({ content: "hi" }) },
+      #|  { sequence: 2, ts: 0, item: Terminal(Finished("done")) },
+      #|]
+    ),
+  )
+  debug_inspect(
+    parsed.errors.map(e => (e.line_number, e.content)),
+    content=(
+      #|[(2, "not json at all")]
+    ),
+  )
+  inspect(
+    parsed.partial_tail,
+    content=(
+      #|false
+    ),
+  )
 }
 
 ///|
