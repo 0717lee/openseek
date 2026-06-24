@@ -145,7 +145,13 @@ fn read_footer(
 /// exists — i.e. the read failed for some other reason such as a permission
 /// error or invalid UTF-8 — or when nothing similar is found.
 async fn similar_file_hint(path : String) -> String {
-  if @fs.exists(path) {
+  // `@fs.exists` only maps ENOENT to `false`; it re-raises other access errors
+  // (EACCES on an unsearchable parent, ENOTDIR for `<file>/child`). This probe
+  // runs while formatting an existing read failure, so any raise here would
+  // escape the clean "error reading ..." response — treat a failed probe as "no
+  // hint", exactly like the `readdir` path below.
+  let exists = @fs.exists(path) catch { _ => return "" }
+  if exists {
     return ""
   }
   let requested : @path.Path = path
@@ -584,6 +590,20 @@ test "file_stem strips only the final extension" {
   assert_eq(file_stem("foo.test.ts"), "foo.test")
   assert_eq(file_stem("Makefile"), "Makefile")
   assert_eq(file_stem(".gitignore"), ".gitignore")
+}
+
+///|
+async test "read hint probe does not mask errors for a non-directory parent" {
+  @vfs.with_tmpdir(dir => {
+    @fs.write_file("\{dir}/notdir", "x", create_mode=CreateOrTruncate)
+    // Reading `<file>/child` fails with ENOTDIR, which the sibling probe's
+    // `@fs.exists` re-raises; the read must still return a clean tool error
+    // rather than letting that raise escape.
+    let result = execute({ "path": "\{dir}/notdir/child" })
+    guard result is Respond(output) else { fail("expected Respond") }
+    assert_true(output.is_error)
+    assert_true(output.content.contains("error reading"))
+  })
 }
 
 ///|
