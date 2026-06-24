@@ -371,30 +371,34 @@ fn eval_session_with_context(
     validation: context.validation,
     parse_errors: context.parse_errors,
     partial_tail: context.partial_tail,
-    moon_check_uses: count_occurrences(text, "moon check"),
-    moon_test_uses: count_occurrences(text, "moon test"),
-    moon_run_e_mentions: count_lines_containing_all(text, ["moon run", " -e"]),
-    moon_run_c_mentions: count_lines_containing_all(text, ["moon run", " -c"]),
-    bad_run_e_mentions: count_occurrences(
+    moon_check_uses: @metrics.count_occurrences(text, "moon check"),
+    moon_test_uses: @metrics.count_occurrences(text, "moon test"),
+    moon_run_e_mentions: @metrics.count_lines_containing_all(text, [
+      "moon run", " -e",
+    ]),
+    moon_run_c_mentions: @metrics.count_lines_containing_all(text, [
+      "moon run", " -c",
+    ]),
+    bad_run_e_mentions: @metrics.count_occurrences(
       text, "a value is required for `-e <SCRIPT>`",
     ),
-    from_str_mentions: count_occurrences(text, "@string.from_str"),
-    parse_int_mentions: count_occurrences(text, "@string.parse_int"),
-    argparse_mentions: count_occurrences(text, "@argparse.parse") +
-    count_occurrences(text, ".parse("),
-    old_argparse_mentions: count_occurrences(text, "@argparse.command") +
-    count_occurrences(text, "@argparse.flag") +
-    count_occurrences(text, "@argparse.argument") +
-    count_occurrences(text, ".is_present") +
-    count_occurrences(text, ".value("),
-    c_ffi_mentions: count_occurrences(text, "extern \"c\"") +
-    count_occurrences(text, "native-stub"),
-    env_args_mentions: count_occurrences(text, "@env.args"),
-    result_style_mentions: count_occurrences(text, "Result[") +
-    count_occurrences(text, "Ok(") +
-    count_occurrences(text, "Err("),
-    try_mentions: count_occurrences(text, "try?") +
-    count_occurrences(text, "try!"),
+    from_str_mentions: @metrics.count_occurrences(text, "@string.from_str"),
+    parse_int_mentions: @metrics.count_occurrences(text, "@string.parse_int"),
+    argparse_mentions: @metrics.count_occurrences(text, "@argparse.parse") +
+    @metrics.count_occurrences(text, ".parse("),
+    old_argparse_mentions: @metrics.count_occurrences(text, "@argparse.command") +
+    @metrics.count_occurrences(text, "@argparse.flag") +
+    @metrics.count_occurrences(text, "@argparse.argument") +
+    @metrics.count_occurrences(text, ".is_present") +
+    @metrics.count_occurrences(text, ".value("),
+    c_ffi_mentions: @metrics.count_occurrences(text, "extern \"c\"") +
+    @metrics.count_occurrences(text, "native-stub"),
+    env_args_mentions: @metrics.count_occurrences(text, "@env.args"),
+    result_style_mentions: @metrics.count_occurrences(text, "Result[") +
+    @metrics.count_occurrences(text, "Ok(") +
+    @metrics.count_occurrences(text, "Err("),
+    try_mentions: @metrics.count_occurrences(text, "try?") +
+    @metrics.count_occurrences(text, "try!"),
     warnings: if warnings.length() == 0 {
       ""
     } else {
@@ -634,30 +638,6 @@ fn sanitize_artifact_name(name : String) -> String {
 fn count_successes(results : Array[EvalResult]) -> Int {
   for result in results; count = 0 {
     if result.success {
-      continue count + 1
-    }
-  } nobreak {
-    count
-  }
-}
-
-///|
-fn count_occurrences(content : String, needle : String) -> Int {
-  if needle == "" {
-    return 0
-  }
-  let pieces = content.split(needle).collect()
-  pieces.length() - 1
-}
-
-///|
-fn count_lines_containing_all(content : String, needles : Array[String]) -> Int {
-  for line in content.split("\n"); count = 0 {
-    for needle in needles {
-      if !line.contains(needle) {
-        break
-      }
-    } nobreak {
       continue count + 1
     }
   } nobreak {

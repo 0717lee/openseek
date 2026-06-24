@@ -228,19 +228,29 @@ async fn evaluate_trial(
     steps: log_summary.steps,
     tool_errors: log_summary.tool_errors,
     shell_uses,
-    moon_cmd_uses: count_lines_containing_all(log_text, ["command=moon "]),
-    moon_run_e_mentions: count_lines_containing_all(log_text, [
+    moon_cmd_uses: @metrics.count_lines_containing_all(log_text, [
+      "command=moon ",
+    ]),
+    moon_run_e_mentions: @metrics.count_lines_containing_all(log_text, [
       "moon run", " -e",
     ]),
-    moon_run_c_mentions: count_lines_containing_all(log_text, [
+    moon_run_c_mentions: @metrics.count_lines_containing_all(log_text, [
       "moon run", " -c",
     ]),
-    moon_check_uses: count_lines_containing_all(log_text, ["command=moon check"]),
-    moon_test_uses: count_lines_containing_all(log_text, ["command=moon test"]),
-    moon_info_uses: count_lines_containing_all(log_text, ["command=moon info"]),
-    moon_fmt_uses: count_lines_containing_all(log_text, ["command=moon fmt"]),
-    edit_successes: count_occurrences(log_text, "ok: replaced "),
-    write_successes: count_occurrences(log_text, "ok: wrote "),
+    moon_check_uses: @metrics.count_lines_containing_all(log_text, [
+      "command=moon check",
+    ]),
+    moon_test_uses: @metrics.count_lines_containing_all(log_text, [
+      "command=moon test",
+    ]),
+    moon_info_uses: @metrics.count_lines_containing_all(log_text, [
+      "command=moon info",
+    ]),
+    moon_fmt_uses: @metrics.count_lines_containing_all(log_text, [
+      "command=moon fmt",
+    ]),
+    edit_successes: @metrics.count_occurrences(log_text, "ok: replaced "),
+    write_successes: @metrics.count_occurrences(log_text, "ok: wrote "),
     validation_passed,
     marker_present: marker_ok,
     warnings: if warnings.length() == 0 {
@@ -291,11 +301,11 @@ fn summarize_agent_log(log_text : String) -> AgentLogSummary {
     } else {
       0
     }
-    let shell_uses = count_occurrences(log_text, "\ntool: exit=") +
+    let shell_uses = @metrics.count_occurrences(log_text, "\ntool: exit=") +
       leading_shell_use
     {
-      steps: count_occurrences(log_text, "--- step "),
-      tool_errors: count_occurrences(log_text, "tool error:"),
+      steps: @metrics.count_occurrences(log_text, "--- step "),
+      tool_errors: @metrics.count_occurrences(log_text, "tool error:"),
       shell_uses,
     }
   }
@@ -348,30 +358,6 @@ async fn run_validation(
     ""
   } else {
     "validation failed: \{validation.join(" ")} exited \{code}: \{output.text()}"
-  }
-}
-
-///|
-fn count_occurrences(content : String, needle : String) -> Int {
-  if needle == "" {
-    return 0
-  }
-  let pieces = content.split(needle).collect()
-  pieces.length() - 1
-}
-
-///|
-fn count_lines_containing_all(content : String, needles : Array[String]) -> Int {
-  for line in content.split("\n"); count = 0 {
-    for needle in needles {
-      if !line.contains(needle) {
-        break
-      }
-    } nobreak {
-      continue count + 1
-    }
-  } nobreak {
-    count
   }
 }
 

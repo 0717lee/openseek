@@ -1,0 +1,16 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "bobzhang/openseek/eval/internal/metrics"
+
+// Values
+pub fn count_lines_containing_all(String, Array[String]) -> Int
+
+pub fn count_occurrences(String, String) -> Int
+
+// Errors
+
+// Types and methods
+
+// Type aliases
+
+// Traits
+

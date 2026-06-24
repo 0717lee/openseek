@@ -88,31 +88,6 @@ async test "dry run exact replacement oracle with jsonl agent log" {
 }
 
 ///|
-test "count_occurrences counts non-overlapping markers" {
-  assert_eq(count_occurrences("tool error: a\ntool error: b", "tool error:"), 2)
-  assert_eq(count_occurrences("abc", "z"), 0)
-}
-
-///|
-test "line counter documents all-match behavior" {
-  let log_text =
-    #|command=moon run -e fn main {}
-    #|command=moon run -c fn main {}
-    #|command=moon test
-    #|note=moon run without command prefix
-  debug_inspect(
-    [
-      count_lines_containing_all(log_text, ["command=moon "]),
-      count_lines_containing_all(log_text, ["moon run", " -e"]),
-      count_lines_containing_all(log_text, ["moon run", " -c"]),
-      count_lines_containing_all(log_text, ["command=moon ", "missing"]),
-      count_lines_containing_all("a\nb\n", []),
-    ],
-    content="[3, 1, 1, 0, 3]",
-  )
-}
-
-///|
 async test "indexed runner honors concurrency and preserves order" {
   let mut active = 0
   let mut max_active = 0
@@ -150,13 +125,31 @@ test "log monitor counts prompt-sensitive moon commands" {
     #|tool: cwd=.
     #|command=moon fmt
     #|exit=0
-  assert_eq(count_lines_containing_all(log_text, ["command=moon "]), 6)
-  assert_eq(count_lines_containing_all(log_text, ["moon run", " -e"]), 1)
-  assert_eq(count_lines_containing_all(log_text, ["moon run", " -c"]), 1)
-  assert_eq(count_lines_containing_all(log_text, ["command=moon check"]), 1)
-  assert_eq(count_lines_containing_all(log_text, ["command=moon test"]), 1)
-  assert_eq(count_lines_containing_all(log_text, ["command=moon info"]), 1)
-  assert_eq(count_lines_containing_all(log_text, ["command=moon fmt"]), 1)
+  assert_eq(@metrics.count_lines_containing_all(log_text, ["command=moon "]), 6)
+  assert_eq(
+    @metrics.count_lines_containing_all(log_text, ["moon run", " -e"]),
+    1,
+  )
+  assert_eq(
+    @metrics.count_lines_containing_all(log_text, ["moon run", " -c"]),
+    1,
+  )
+  assert_eq(
+    @metrics.count_lines_containing_all(log_text, ["command=moon check"]),
+    1,
+  )
+  assert_eq(
+    @metrics.count_lines_containing_all(log_text, ["command=moon test"]),
+    1,
+  )
+  assert_eq(
+    @metrics.count_lines_containing_all(log_text, ["command=moon info"]),
+    1,
+  )
+  assert_eq(
+    @metrics.count_lines_containing_all(log_text, ["command=moon fmt"]),
+    1,
+  )
 }
 
 ///|

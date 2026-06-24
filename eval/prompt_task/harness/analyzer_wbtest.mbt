@@ -139,11 +139,11 @@ test "line counter documents all-match behavior" {
     #|user: mention moon run only
   debug_inspect(
     [
-      count_lines_containing_all(text, ["assistant:"]),
-      count_lines_containing_all(text, ["moon run", " -e"]),
-      count_lines_containing_all(text, ["moon run", " -c"]),
-      count_lines_containing_all(text, ["assistant:", "missing"]),
-      count_lines_containing_all("a\nb\n", []),
+      @metrics.count_lines_containing_all(text, ["assistant:"]),
+      @metrics.count_lines_containing_all(text, ["moon run", " -e"]),
+      @metrics.count_lines_containing_all(text, ["moon run", " -c"]),
+      @metrics.count_lines_containing_all(text, ["assistant:", "missing"]),
+      @metrics.count_lines_containing_all("a\nb\n", []),
     ],
     content="[3, 1, 1, 0, 3]",
   )
