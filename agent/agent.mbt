@@ -302,7 +302,7 @@ pub async fn[X] run_turn_in_scope(
         append_item~,
       )
       let runtime_events = runtime.drain_events()
-      if runtime_update_message(runtime_events) is Some(update) {
+      if @moon_check.runtime_update_text(runtime_events) is Some(update) {
         // A batch in which every watcher reproduces its previous notice
         // (volatile counters aside) is collapsed to a one-line marker: the
         // model still learns its edit was processed with an unchanged
@@ -543,11 +543,6 @@ pub async fn[X] run_turn_in_scope(
       raise error
     }
   }
-}
-
-///|
-fn runtime_update_message(events : Array[@agent_runtime.AgentEvent]) -> String? {
-  @moon_check.runtime_update_text(events)
 }
 
 ///|

@@ -522,7 +522,7 @@ fn root_label(path : String) -> String {
 fn path_tail(path : String) -> String {
   let trimmed = trim_trailing_path_separators(path)
   match last_path_separator(trimmed) {
-    Some(index) => slice_from(trimmed, index + 1)
+    Some(index) => trimmed[index + 1:].to_owned()
     None => trimmed
   }
 }
@@ -692,12 +692,6 @@ fn strip_query(path : String) -> String {
     Some((path, _)) => "\{path}"
     None => path
   }
-}
-
-///|
-/// Code-unit slice `s[start:]` as an owned `String`.
-fn slice_from(s : String, start : Int) -> String {
-  s[start:].to_owned()
 }
 
 ///|

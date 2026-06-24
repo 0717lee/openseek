@@ -24,7 +24,7 @@ pub fn moonbit_command_policy_error_for_parse(
     Some(moon_cmd_error_message())
   } else if parsed is Simple(_) {
     None
-  } else if rough_first_command_name(cmd) == Some("moon_cmd") {
+  } else if first_command_word(shell_words(cmd)) == Some("moon_cmd") {
     Some(moon_cmd_error_message())
   } else {
     None
@@ -34,11 +34,6 @@ pub fn moonbit_command_policy_error_for_parse(
 ///|
 fn moon_cmd_error_message() -> String {
   "error: moon_cmd is not a shell command; run moon subcommands like `moon check` or `moon test` through shell directly"
-}
-
-///|
-fn rough_first_command_name(cmd : String) -> String? {
-  first_command_word(shell_words(cmd))
 }
 
 ///|

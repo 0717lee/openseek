@@ -75,7 +75,7 @@ pub async fn run_suite(config : Config) -> EvalReport {
     out_dir: config.out_dir,
     results,
   }
-  write_report_files(report)
+  @report.write_files(report.out_dir, report.markdown(), report.to_json())
   report
 }
 

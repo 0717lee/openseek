@@ -1,9 +1,4 @@
 ///|
-async fn write_report_files(report : EvalReport) -> Unit {
-  @report.write_files(report.out_dir, report.markdown(), report.to_json())
-}
-
-///|
 fn EvalReport::to_json(self : EvalReport) -> Json {
   {
     "model": self.model,
