@@ -807,8 +807,7 @@ fn cli_command() -> @argparse.Command {
 ///|
 fn value(matches : @argparse.Matches, name : String) -> String raise {
   match matches.values.get(name) {
-    Some([value]) => value
-    Some(values) if values.length() > 0 => values[0]
+    Some([value, ..]) => value
     _ => fail("missing parsed argument: \{name}")
   }
 }

@@ -659,19 +659,20 @@ fn session_list_format(matches : @argparse.Matches) -> SessionListFormat raise {
 /// milliseconds, or `null` for a directory whose session files cannot be
 /// stat-ed (such husks sort last, like the human-readable listing).
 async fn session_list_json(store : @store.SessionStore) -> Json {
-  let entries : Array[Json] = []
-  for listing in store.listings() {
-    let updated_at_ms : Json = match
-      session_listing_updated_at_ms(store, listing) {
-      Some(milliseconds) => Json::number(milliseconds.to_double())
-      None => Json::null()
+  let entries : Array[Json] = [
+    for listing in store.listings() => {
+      let updated_at_ms : Json = match
+        session_listing_updated_at_ms(store, listing) {
+        Some(milliseconds) => Json::number(milliseconds.to_double())
+        None => Json::null()
+      }
+      {
+        "id": listing.id().value(),
+        "title": session_title(listing.first_prompt()),
+        "updated_at_ms": updated_at_ms,
+      }
     }
-    entries.push({
-      "id": listing.id().value(),
-      "title": session_title(listing.first_prompt()),
-      "updated_at_ms": updated_at_ms,
-    })
-  }
+  ]
   Json::array(entries)
 }
 
