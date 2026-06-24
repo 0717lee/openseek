@@ -11,4 +11,5 @@ members = [
   "./lepus/extensions",
   "./lepus/runtime",
   "./lepus/cef",
+  "./editor",
 ]
