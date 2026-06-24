@@ -140,17 +140,17 @@ fn parent_dir(path : String) -> String {
 ///|
 async fn manifest_write_error(path : String, content : String) -> String? {
   let trimmed = content.trim()
-  if is_generated_mbti_path(path) {
+  if @manifest_path.is_generated_mbti_path(path) {
     return Some(
       "*.generated.mbti files are generated; run moon info instead of editing them",
     )
   }
-  if is_moon_mod_json_path(path) && !@fs.exists(path) {
+  if @manifest_path.is_moon_mod_json_path(path) && !@fs.exists(path) {
     return Some(
       "moon.mod.json is legacy; create moon.mod for new MoonBit projects",
     )
   }
-  if is_moon_mod_path(path) {
+  if @manifest_path.is_moon_mod_path(path) {
     if trimmed == "" {
       return Some("moon.mod must not be empty")
     }
@@ -161,7 +161,7 @@ async fn manifest_write_error(path : String, content : String) -> String? {
       return Some("moon.mod should include a module `name = ...` entry")
     }
   }
-  if is_moon_pkg_path(path) {
+  if @manifest_path.is_moon_pkg_path(path) {
     // This is normal when we create a moon.pkg dummy file
     // another mistake is AI is trying to write 
     // # as a comment
@@ -176,30 +176,6 @@ async fn manifest_write_error(path : String, content : String) -> String? {
     }
   }
   None
-}
-
-///|
-fn is_moon_mod_path(path : String) -> Bool {
-  let path = path.replace_all(old="\\", new="/")
-  path == "moon.mod" || path.has_suffix("/moon.mod")
-}
-
-///|
-fn is_moon_mod_json_path(path : String) -> Bool {
-  let path = path.replace_all(old="\\", new="/")
-  path == "moon.mod.json" || path.has_suffix("/moon.mod.json")
-}
-
-///|
-fn is_moon_pkg_path(path : String) -> Bool {
-  let path = path.replace_all(old="\\", new="/")
-  path == "moon.pkg" || path.has_suffix("/moon.pkg")
-}
-
-///|
-fn is_generated_mbti_path(path : String) -> Bool {
-  let path = path.replace_all(old="\\", new="/")
-  path.has_suffix(".generated.mbti")
 }
 
 ///|

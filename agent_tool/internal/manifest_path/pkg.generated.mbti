@@ -1,0 +1,20 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "bobzhang/openseek/agent_tool/internal/manifest_path"
+
+// Values
+pub fn is_generated_mbti_path(String) -> Bool
+
+pub fn is_moon_mod_json_path(String) -> Bool
+
+pub fn is_moon_mod_path(String) -> Bool
+
+pub fn is_moon_pkg_path(String) -> Bool
+
+// Errors
+
+// Types and methods
+
+// Type aliases
+
+// Traits
+
