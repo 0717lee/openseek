@@ -2,8 +2,10 @@
 package "bobzhang/openseek/tui"
 
 import {
+  "bobzhang/openseek/tui/completion",
   "bobzhang/openseek/tui/core",
   "bobzhang/openseek/tui/doc",
+  "bobzhang/openseek/tui/slash",
 }
 
 // Values
@@ -13,12 +15,14 @@ pub async fn[T] with_ui(config? : Config, async (Ui) -> T) -> T
 
 // Types and methods
 type Config
-pub fn Config::new(esc_timeout_ms? : Int, composer_max_rows? : Int) -> Self
+pub fn Config::new(esc_timeout_ms? : Int, composer_max_rows? : Int, slash_commands? : Array[@slash.SlashCommandSpec]) -> Self
 
 type Ui
 pub async fn Ui::append_item(Self, @core.TranscriptItem) -> Unit
 pub fn Ui::columns(Self) -> Int
+pub async fn Ui::open_picker(Self, name~ : String, items~ : Array[@completion.CompletionItem]) -> Unit
 pub async fn Ui::read_event(Self) -> @core.Event
+pub async fn Ui::replace_transcript(Self, Array[@core.TranscriptItem]) -> Unit
 #deprecated
 pub async fn Ui::set_activity(Self, @doc.Text?) -> Unit
 pub async fn Ui::set_live_view(Self, status~ : @doc.Text, activity~ : @doc.Text?, queued_inputs~ : Array[@core.Input]) -> Unit
@@ -28,9 +32,13 @@ pub async fn Ui::set_queued_inputs(Self, Array[@core.Input]) -> Unit
 pub async fn Ui::set_status(Self, @doc.Text) -> Unit
 
 // Type aliases
+pub using @completion {type CompletionItem}
+
 pub using @core {type Event}
 
 pub using @core {type Input}
+
+pub using @slash {type SlashCommandSpec}
 
 pub using @core {type ToolStatus}
 

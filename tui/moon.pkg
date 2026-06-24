@@ -2,6 +2,7 @@ import {
   "moonbitlang/async",
   "moonbitlang/async/io" @async/io,
   "moonbitlang/async/aqueue",
+  "bobzhang/openseek/tui/completion",
   "bobzhang/openseek/tui/core",
   "bobzhang/openseek/tui/doc",
   "bobzhang/openseek/tui/internal/composer",
@@ -9,7 +10,10 @@ import {
   "bobzhang/openseek/tui/internal/render",
   "bobzhang/openseek/tui/internal/surface",
   "bobzhang/openseek/tui/internal/task",
+  "bobzhang/openseek/tui/internal/text",
   "bobzhang/openseek/tui/internal/viewport",
+  "bobzhang/openseek/tui/slash",
+  "moonbit-community/displaytext",
   "moonbit-community/tty",
   "moonbit-community/tty/input" @tty/input,
 }

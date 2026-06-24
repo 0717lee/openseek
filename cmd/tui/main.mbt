@@ -234,10 +234,68 @@ fn initial_task(matches : @argparse.Matches) -> String? {
 }
 
 ///|
+fn model_completion_items() -> Array[@ui.CompletionItem] {
+  [
+    @ui.CompletionItem::new(
+      label=@deepseek.V4Flash.to_string(),
+      description="model",
+    ),
+    @ui.CompletionItem::new(
+      label=@deepseek.V4Pro.to_string(),
+      description="model",
+    ),
+  ]
+}
+
+///|
+fn resume_completion_description(listing : @store.SessionListing) -> String {
+  let prompt = listing.first_prompt().trim().to_owned()
+  if prompt.is_empty() {
+    "session"
+  } else {
+    prompt
+  }
+}
+
+///|
+/// The session candidates for the /resume picker. Raises if the store cannot be
+/// listed (e.g. an unreadable session root) so the caller can surface the real
+/// error, rather than swallowing it into an empty list that looks like a store
+/// with no sessions.
+async fn resume_completion_items(
+  config : AppConfig,
+) -> Array[@ui.CompletionItem] {
+  let listings = @store.SessionStore(config.session_root).listings()
+  [
+    for listing in listings => {
+      @ui.CompletionItem::new(
+        label=listing.id().value(),
+        description=resume_completion_description(listing),
+      )
+    }
+  ]
+}
+
+///|
 async fn run_tui(config : AppConfig, initial : String?) -> Unit {
-  @ui.with_ui(config=@ui.Config::new(composer_max_rows=4), ui => {
-    run_app(config, initial, ui)
-  })
+  // Commands only name and describe themselves; argument pickers (model list,
+  // session list) are opened by the handler with freshly-fetched candidates, so
+  // there is no startup snapshot to go stale.
+  @ui.with_ui(
+    config=@ui.Config::new(composer_max_rows=4, slash_commands=[
+      @ui.SlashCommandSpec::new(name="model", description="switch the model"),
+      @ui.SlashCommandSpec::new(name="exit", description="exit the TUI"),
+      @ui.SlashCommandSpec::new(
+        name="resume",
+        description="resume a durable session",
+      ),
+      @ui.SlashCommandSpec::new(
+        name="compact",
+        description="summarize and compact the conversation",
+      ),
+    ]),
+    ui => run_app(config, initial, ui),
+  )
 }
 
 ///|

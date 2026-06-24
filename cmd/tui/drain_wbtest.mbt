@@ -48,6 +48,50 @@ fn run_command_count(cmds : Array[Cmd]) -> Int {
 }
 
 ///|
+fn restart_engine_count(cmds : Array[Cmd]) -> Int {
+  for cmd in cmds; count = 0 {
+    if cmd is RestartEngine(_) {
+      continue count + 1
+    }
+  } nobreak {
+    count
+  }
+}
+
+///|
+fn resume_session_count(cmds : Array[Cmd]) -> Int {
+  for cmd in cmds; count = 0 {
+    if cmd is ResumeSession(_) {
+      continue count + 1
+    }
+  } nobreak {
+    count
+  }
+}
+
+///|
+fn compact_session_count(cmds : Array[Cmd]) -> Int {
+  for cmd in cmds; count = 0 {
+    if cmd is CompactSession(_) {
+      continue count + 1
+    }
+  } nobreak {
+    count
+  }
+}
+
+///|
+fn open_picker_count(cmds : Array[Cmd]) -> Int {
+  for cmd in cmds; count = 0 {
+    if cmd is (OpenPicker(_) | OpenResumePicker) {
+      continue count + 1
+    }
+  } nobreak {
+    count
+  }
+}
+
+///|
 test "engine configuration travels through the environment" {
   let config = drain_test_state().config
   let env = engine_extra_env(config)
@@ -98,6 +142,210 @@ test "agent engine env clears inherited api url without override" {
     "OPENSEEK_API_URL": "https://parent.example/chat/completions",
   })
   assert_true(env.get("OPENSEEK_API_URL") == Some(""))
+}
+
+///|
+test "model slash command opens a picker without a name and updates with one" {
+  let state = drain_test_state()
+  // Bare /model opens the model picker (the handler's job) rather than erroring
+  // or changing anything.
+  let bare = update(state, UiInput(SlashCommand(name="model", arguments="")))
+  guard bare is [OpenPicker(name~, items~)] else {
+    fail("expected bare /model to open the model picker")
+  }
+  assert_eq(name, "model")
+  assert_true(items.length() > 0)
+  assert_eq(error_item_count(bare), 0)
+  assert_eq(restart_engine_count(bare), 0)
+  assert_eq(state.config.model.to_string(), "deepseek-v4-pro")
+
+  let changed = update(
+    state,
+    UiInput(SlashCommand(name="model", arguments="deepseek-v4-flash")),
+  )
+  assert_eq(restart_engine_count(changed), 1)
+  assert_eq(error_item_count(changed), 0)
+  assert_eq(state.config.model.to_string(), "deepseek-v4-flash")
+}
+
+///|
+test "model slash command rejects invalid or running changes" {
+  let state = drain_test_state()
+  let invalid = update(
+    state,
+    UiInput(SlashCommand(name="model", arguments="deepseek-v4-unknown")),
+  )
+  assert_eq(error_item_count(invalid), 1)
+  assert_eq(restart_engine_count(invalid), 0)
+  assert_eq(state.config.model.to_string(), "deepseek-v4-pro")
+
+  let _ = update(state, UiInput(Steer(Prompt("work"))))
+  let running = update(
+    state,
+    UiInput(SlashCommand(name="model", arguments="deepseek-v4-flash")),
+  )
+  assert_eq(error_item_count(running), 1)
+  assert_eq(restart_engine_count(running), 0)
+  assert_eq(state.config.model.to_string(), "deepseek-v4-pro")
+}
+
+///|
+test "exit slash command quits" {
+  let state = drain_test_state()
+  let cmds = update(state, UiInput(SlashCommand(name="exit", arguments="")))
+  assert_eq(quit_count(cmds), 1)
+
+  let rejected = update(
+    state,
+    UiInput(SlashCommand(name="exit", arguments="now")),
+  )
+  assert_eq(quit_count(rejected), 0)
+  assert_eq(error_item_count(rejected), 1)
+}
+
+///|
+test "resume slash command opens a picker without an id and resumes with one" {
+  let state = drain_test_state()
+  // Bare /resume opens the session picker (fetched fresh by the loop) rather
+  // than erroring; only an explicit id resumes directly.
+  let bare = update(state, UiInput(SlashCommand(name="resume", arguments="")))
+  guard bare is [OpenResumePicker] else {
+    fail("expected bare /resume to open the session picker")
+  }
+  assert_eq(error_item_count(bare), 0)
+  assert_eq(resume_session_count(bare), 0)
+
+  let explicit = update(
+    state,
+    UiInput(SlashCommand(name="resume", arguments=" demo ")),
+  )
+  guard explicit is [ResumeSession(id)] else {
+    fail("expected explicit-session resume command")
+  }
+  assert_eq(id.value(), "demo")
+}
+
+///|
+test "resume slash command rejects running or queued work" {
+  let state = drain_test_state()
+  let _ = update(state, UiInput(Steer(Prompt("work"))))
+  let running = update(
+    state,
+    UiInput(SlashCommand(name="resume", arguments="")),
+  )
+  assert_eq(error_item_count(running), 1)
+  assert_eq(resume_session_count(running), 0)
+  // A busy session refuses even the bare (picker) form rather than opening it.
+  assert_eq(open_picker_count(running), 0)
+
+  let queued_state = drain_test_state()
+  queued_state.queued.push(Prompt("later"))
+  let queued_cmds : Array[Cmd] = []
+  handle_resume_command(queued_state, "", queued_cmds)
+  assert_eq(error_item_count(queued_cmds), 1)
+  assert_eq(open_picker_count(queued_cmds), 0)
+  assert_eq(resume_session_count(queued_cmds), 0)
+}
+
+///|
+test "compact slash command starts a compaction run when idle" {
+  let state = drain_test_state()
+  let cmds = update(state, UiInput(SlashCommand(name="compact", arguments="")))
+  assert_eq(compact_session_count(cmds), 1)
+  assert_eq(error_item_count(cmds), 0)
+  // The run is held busy so a concurrent prompt cannot interleave with the
+  // engine's compaction, and so the activity line shows work in progress.
+  assert_false(state.run is Idle)
+  // The start notice precedes the command, so the compaction is the tail.
+  guard cmds is [_, CompactSession(run_id~)] else {
+    fail("expected a compaction command")
+  }
+  assert_true(state.owns_run(run_id))
+
+  // A second compact while the first is still running is refused, not queued.
+  let busy = update(state, UiInput(SlashCommand(name="compact", arguments="")))
+  assert_eq(compact_session_count(busy), 0)
+  assert_eq(error_item_count(busy), 1)
+
+  // The engine's terminal event closes the run and previews the new context.
+  let done = update(
+    state,
+    AgentProgress(run_id~, CompactionFinished("- goal: ship /compact")),
+  )
+  assert_eq(compact_session_count(done), 0)
+  guard done is [AppendItem(Notice(_))] else {
+    fail("expected a compaction preview notice")
+  }
+  assert_true(state.run is Idle)
+}
+
+///|
+test "a prompt during compaction is rejected locally, not steered" {
+  let state = drain_test_state()
+  let started = update(
+    state,
+    UiInput(SlashCommand(name="compact", arguments="")),
+  )
+  guard started is [_, CompactSession(_)] else {
+    fail("expected compaction to start")
+  }
+  assert_true(state.run_is_compaction)
+
+  // Enter with a prompt must not steer (the engine drops steers during
+  // compaction); it is rejected locally so the text is not lost.
+  let steered = update(state, UiInput(Steer(Prompt("hello"))))
+  assert_eq(error_item_count(steered), 1)
+  assert_true(steered.iter().all(cmd => !(cmd is SteerAgent(_))))
+  assert_eq(state.pending_steers.length(), 0)
+
+  // Tab queues it instead, to run once compaction lands.
+  let _ = update(state, UiInput(Queue(Prompt("hello"))))
+  assert_eq(state.queued.length(), 1)
+
+  // When compaction finishes the queued prompt drains and starts.
+  let done = update(
+    state,
+    AgentProgress(run_id=state.run_id, CompactionFinished("summary")),
+  )
+  assert_false(state.run_is_compaction)
+  assert_eq(start_agent_count(done), 1)
+}
+
+///|
+test "compact slash command rejects arguments and pending work" {
+  let with_args = drain_test_state()
+  let rejected = update(
+    with_args,
+    UiInput(SlashCommand(name="compact", arguments="now")),
+  )
+  assert_eq(error_item_count(rejected), 1)
+  assert_eq(compact_session_count(rejected), 0)
+  assert_true(with_args.run is Idle)
+
+  let queued_state = drain_test_state()
+  queued_state.queued.push(Prompt("later"))
+  let queued_cmds : Array[Cmd] = []
+  handle_compact_command(queued_state, "", queued_cmds)
+  assert_eq(error_item_count(queued_cmds), 1)
+  assert_eq(compact_session_count(queued_cmds), 0)
+}
+
+///|
+test "compact slash command is unavailable on a oneshot engine" {
+  let state = drain_test_state()
+  state.config = { ..state.config, engine_mode: OneShot }
+  let cmds = update(state, UiInput(SlashCommand(name="compact", arguments="")))
+  assert_eq(error_item_count(cmds), 1)
+  assert_eq(compact_session_count(cmds), 0)
+  assert_true(state.run is Idle)
+}
+
+///|
+test "unknown slash command reports an error" {
+  let state = drain_test_state()
+  let cmds = update(state, UiInput(SlashCommand(name="unknown", arguments="")))
+  assert_eq(error_item_count(cmds), 1)
+  assert_true(state.run is Idle)
 }
 
 ///|

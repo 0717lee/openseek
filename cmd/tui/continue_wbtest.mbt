@@ -24,3 +24,19 @@ async test "--continue resolves the most recently active session" {
     })
   })
 }
+
+///|
+async test "resume completion items list durable sessions" {
+  @vfs.with_tmpdir(prefix="openseek-tui-resume-completion-", root => {
+    let store = @store.SessionStore(root)
+    store.create(Session(SessionId("demo"), system_prompt="system"))
+    let parsed = cli_command().parse(argv=["--session-root", root], env={
+      "DEEPSEEK": "test-key",
+    })
+    let items = resume_completion_items(parse_config(parsed))
+    guard items is [item] else { fail("expected one resume completion") }
+    assert_eq(item.label(), "demo")
+    assert_eq(item.insert_text(), "demo")
+    assert_eq(item.description(), "session")
+  })
+}

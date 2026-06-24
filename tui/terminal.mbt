@@ -4,10 +4,19 @@ fn Ui::composer_surface(
   cols~ : Int,
   rows~ : Int,
 ) -> @surface.Surface {
+  let completion = match self.completion_menu() {
+    Some(menu) if !self.completion.dismissed =>
+      @completion.Model::open(
+        items=menu.items,
+        selected=self.completion.selected,
+      )
+    _ => @completion.Model::closed()
+  }
   @render.composer_surface(
     self.composer,
     activity=self.activity,
     queued_inputs=self.queued_inputs,
+    completion~,
     status=self.status,
     notice=self.notice,
     cols~,
@@ -110,6 +119,32 @@ async fn Ui::append_transcript(self : Self, doc : @doc.Doc) -> Unit {
 /// transcript via `append_transcript`.
 pub async fn Ui::append_item(self : Self, item : TranscriptItem) -> Unit {
   self.append_transcript(@doc.ToDoc::to_doc(item))
+}
+
+///|
+/// Replace the permanent transcript with `items` and redraw the terminal from
+/// semantic state. This is used when an application switches conversations
+/// without restarting the UI.
+pub async fn Ui::replace_transcript(
+  self : Self,
+  items : Array[TranscriptItem],
+) -> Unit {
+  self.commands.wait(() => {
+    let docs : Array[@doc.Doc] = []
+    for item in items {
+      docs.push(@doc.ToDoc::to_doc(item))
+    }
+    self.transcript = docs
+    guard self.viewport is Some(viewport) else {
+      abort("replace transcript without an entered UI")
+    }
+    viewport.refresh_size(self.tty)
+    viewport.replay_scrollback(
+      self.tty,
+      scrollback=self.transcript_rows(cols=viewport.cols()),
+      surface=self.composer_surface(cols=viewport.cols(), rows=viewport.rows()),
+    )
+  })
 }
 
 ///|

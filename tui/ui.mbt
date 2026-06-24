@@ -7,7 +7,13 @@ struct Ui {
   mut viewport : @viewport.Viewport?
   composer : @composer.Model
   history : @history.History
-  transcript : Array[@doc.Doc]
+  completion : CompletionState
+  // Items backing the open argument picker, set by the command handler via
+  // `open_picker`. The argument-completion menu draws from this rather than from
+  // static spec data, so a command (e.g. /resume) supplies fresh candidates each
+  // time its picker opens. `None` when no picker is open.
+  mut picker : PickerSource?
+  mut transcript : Array[@doc.Doc]
   mut activity : @doc.Text?
   mut queued_inputs : Array[Input]
   mut status : @doc.Text
@@ -28,6 +34,8 @@ fn Ui::new(tty : @tty.Tty, config : Config) -> Ui {
     viewport: None,
     composer,
     history: @history.History::new(),
+    completion: CompletionState::new(),
+    picker: None,
     transcript: [],
     activity: None,
     queued_inputs: [],

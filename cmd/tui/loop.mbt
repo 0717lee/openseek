@@ -115,8 +115,11 @@ fn confirm_pending_steer(state : State, text : String) -> Unit {
 ///|
 fn is_terminal_event(event : @event.AgentEvent) -> Bool {
   match event {
-    AgentFinished(_) | AgentAborted(_) | MaxStepsExhausted | AgentError(_) =>
-      true
+    AgentFinished(_)
+    | AgentAborted(_)
+    | MaxStepsExhausted
+    | AgentError(_)
+    | CompactionFinished(_) => true
     _ => false
   }
 }
@@ -436,7 +439,208 @@ fn handle_agent_event(
       cmds.push(AppendItem(Error(message)))
       state.finish_run()
     }
+    // Compaction landed: the engine summarized the conversation into the durable
+    // session. The transcript on screen is unchanged — it is the display, not
+    // the model's context — so confirm with a notice that previews the summary
+    // now standing in for the prior turns, and close the run.
+    CompactionFinished(summary) => {
+      cmds.push(AppendItem(compaction_item(summary)))
+      state.finish_run()
+    }
   }
+}
+
+///|
+fn command_notice(title : String) -> @ui.TranscriptItem {
+  Notice(ToolCall(@doc.Text::plain(title)))
+}
+
+///|
+fn handle_model_command(
+  state : State,
+  arguments : String,
+  cmds : Array[Cmd],
+) -> Unit {
+  let model_name = arguments.trim()
+  if model_name.is_empty() {
+    // No model named: open the picker so the user can choose one.
+    cmds.push(OpenPicker(name="model", items=model_completion_items()))
+    return
+  }
+  if !(state.run is Idle) {
+    cmds.push(
+      AppendItem(Error("Model can only be changed when no task is running.")),
+    )
+    return
+  }
+  let model = @deepseek.Model::parse(model_name.to_owned()) catch {
+    error => {
+      cmds.push(AppendItem(Error("\{error}")))
+      return
+    }
+  }
+  state.config = { ..state.config, model, }
+  state.watcher_status = ""
+  cmds.push(RestartEngine(state.config))
+  cmds.push(
+    AppendItem(command_notice("model set to \{state.config.model.to_string()}")),
+  )
+}
+
+///|
+fn handle_resume_command(
+  state : State,
+  arguments : String,
+  cmds : Array[Cmd],
+) -> Unit {
+  if !(state.run is Idle) {
+    cmds.push(
+      AppendItem(Error("Session can only be resumed when no task is running.")),
+    )
+    return
+  }
+  if state.queued.length() > 0 {
+    cmds.push(
+      AppendItem(Error("Session cannot be resumed with queued input pending.")),
+    )
+    return
+  }
+  let session_id = arguments.trim().to_owned()
+  if session_id.is_empty() {
+    // No id given: open the session picker. The list is fetched by the loop
+    // when this runs, so it always reflects the sessions that exist now.
+    cmds.push(OpenResumePicker)
+  } else {
+    cmds.push(ResumeSession(SessionId(session_id)))
+  }
+}
+
+///|
+fn handle_compact_command(
+  state : State,
+  arguments : String,
+  cmds : Array[Cmd],
+) -> Unit {
+  if !arguments.trim().is_empty() {
+    cmds.push(AppendItem(Error("/compact does not accept arguments")))
+    return
+  }
+  // Compaction is a command on the persistent serve engine; a oneshot engine is
+  // spawned per prompt and has no session to summarize between turns.
+  if state.config.engine_mode is OneShot {
+    cmds.push(
+      AppendItem(Error("Compaction is not supported by a oneshot engine.")),
+    )
+    return
+  }
+  if !(state.run is Idle) {
+    cmds.push(
+      AppendItem(
+        Error("Context can only be compacted when no task is running."),
+      ),
+    )
+    return
+  }
+  if state.queued.length() > 0 {
+    cmds.push(
+      AppendItem(
+        Error("Context cannot be compacted with queued input pending."),
+      ),
+    )
+    return
+  }
+  // Hold the loop busy for the duration: compaction is a model call that can run
+  // for many seconds, and a slash command never echoes itself into the
+  // transcript, so the notice is the only sign work has begun until it lands.
+  cmds.push(AppendItem(command_notice("compacting context…")))
+  let run_id = state.start_run(@async.now())
+  // Mark the run non-steerable: a prompt typed while this is in flight must be
+  // queued, not steered into a compaction the engine will refuse it from.
+  state.run_is_compaction = true
+  cmds.push(CompactSession(run_id~))
+}
+
+///|
+
+///|
+fn handle_slash_command(
+  state : State,
+  name : String,
+  arguments : String,
+  cmds : Array[Cmd],
+) -> Unit {
+  match name.to_lower() {
+    "model" => handle_model_command(state, arguments, cmds)
+    "exit" =>
+      if arguments.trim().is_empty() {
+        cmds.push(Quit)
+      } else {
+        cmds.push(AppendItem(Error("/exit does not accept arguments")))
+      }
+    "resume" => handle_resume_command(state, arguments, cmds)
+    "compact" => handle_compact_command(state, arguments, cmds)
+    other => cmds.push(AppendItem(Error("Unknown slash command: /\{other}")))
+  }
+}
+
+///|
+/// Open the /resume session picker. The candidates are read from the store here
+/// (so the list reflects the sessions that exist at open time rather than a
+/// startup snapshot), and the three outcomes are kept distinct: a listing
+/// failure surfaces the real error, an empty store says so, and a non-empty one
+/// opens the picker — so a broken session root is never mistaken for an empty
+/// store, and an empty store never silently reopens an empty picker.
+async fn open_resume_picker(state : State, ui : @ui.Ui) -> Unit {
+  let items = resume_completion_items(state.config) catch {
+    error if @async.is_being_cancelled() => raise error
+    error => {
+      ui.append_item(Error("failed to list sessions: \{error}"))
+      return
+    }
+  }
+  if items.is_empty() {
+    ui.append_item(Error("No saved sessions to resume."))
+  } else {
+    ui.open_picker(name="resume", items~)
+  }
+}
+
+///|
+async fn resume_tui_session(
+  state : State,
+  ui : @ui.Ui,
+  engine : EngineClient,
+  session_id : @agent_session.SessionId,
+) -> Unit {
+  let store = @store.SessionStore(state.config.session_root)
+  let session = store.load(session_id) catch {
+    error if @async.is_being_cancelled() => raise error
+    error => {
+      // Pick the message from whether the session actually exists: a missing id
+      // (the common typo case) and an invalid id (path separators or `.`/`..`,
+      // which make the store raise on the very path it would probe) both read
+      // plainly instead of leaking the raw open() error and path. The probe is
+      // guarded so it can never unwind the resume and exit the TUI.
+      let present = store.exists(session_id) catch {
+        error if @async.is_being_cancelled() => raise error
+        _ => false
+      }
+      if present {
+        ui.append_item(
+          Error("failed to resume session \{session_id.value()}: \{error}"),
+        )
+      } else {
+        ui.append_item(Error("No session \"\{session_id.value()}\" to resume."))
+      }
+      return
+    }
+  }
+  state.switch_session(session.id())
+  engine.restart(state.config)
+  ui.replace_transcript(session_transcript_items(session))
+  ui.append_item(
+    command_notice("resumed session \{state.config.session_id.value()}"),
+  )
 }
 
 ///|
@@ -456,6 +660,8 @@ fn update(state : State, message : Msg) -> Array[Cmd] {
         // Enter while idle submits; Enter while a task runs steers it — the
         // text is folded into the running turn at its next step boundary.
         // Shell commands cannot steer a model turn, so they still queue.
+        SlashCommand(name~, arguments~) =>
+          handle_slash_command(state, name, arguments, cmds)
         Steer(input) =>
           if state.run is Idle {
             state.queued.push(input)
@@ -478,6 +684,17 @@ fn update(state : State, message : Msg) -> Array[Cmd] {
               AppendItem(
                 Error(
                   "A local shell command is running and cannot be steered. Press Tab to queue this input.",
+                ),
+              ),
+            )
+          } else if state.run_is_compaction {
+            // Compaction is a non-steerable model call; the serve engine drops
+            // steers during it. Reject locally so the prompt is not lost — the
+            // user can queue it to run once compaction lands.
+            cmds.push(
+              AppendItem(
+                Error(
+                  "Context is being compacted and cannot be steered. Press Tab to queue this input.",
                 ),
               ),
             )
@@ -634,6 +851,17 @@ async fn[G] run_message_loop(
             },
           )
         SteerAgent(text) => engine.steer(text)
+        // Compaction is an engine operation with no local task. Clear any stale
+        // command handle (as a queued prompt would) so a Ctrl-C cancels this
+        // compaction turn rather than a finished command task.
+        CompactSession(run_id~) => {
+          running_task = None
+          engine.compact(group, run_id)
+        }
+        OpenPicker(name~, items~) => ui.open_picker(name~, items~)
+        OpenResumePicker => open_resume_picker(state, ui)
+        RestartEngine(config) => engine.restart(config)
+        ResumeSession(target) => resume_tui_session(state, ui, engine, target)
         CancelAgent =>
           match running_task {
             // A local shell command (or a one-shot engine run) in flight:

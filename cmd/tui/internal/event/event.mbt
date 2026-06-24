@@ -47,4 +47,9 @@ pub(all) enum AgentEvent {
   AgentAborted(String)
   MaxStepsExhausted
   AgentError(String)
+  // The serve engine finished compacting the conversation: a terminal event for
+  // the controller's compaction run. Carries the summary the engine appended to
+  // the durable session — now the conversation's context — so the controller can
+  // preview it.
+  CompactionFinished(String)
 }

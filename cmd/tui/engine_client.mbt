@@ -4,6 +4,11 @@
 priv struct EngineProcess {
   writer : @process.WriteToProcess
   proc : @process.Process
+  // The client's spawn counter at the time this engine was created. A reader at
+  // EOF resets engine-scoped status (the watcher segment) only when it is still
+  // the latest engine — once a successor has spawned, the successor owns that
+  // status and a stale exit must not blank it.
+  generation : Int
   // Run bookkeeping is owned by the process whose stream produced it: a
   // reader at EOF must report the run that was open on *its* engine, never
   // one a respawned successor has since started.
@@ -29,9 +34,13 @@ priv struct EngineProcess {
 /// reported into the message loop as that run's failure, with the captured
 /// stderr prefix as the diagnostic.
 priv struct EngineClient {
-  config : AppConfig
+  mut config : AppConfig
   messages : @async.Queue[Msg]
   mut live : EngineProcess?
+  // Bumped on every spawn; the latest engine's generation. A dying engine
+  // compares its own generation against this to know whether a successor has
+  // taken over (so its EngineExited must be suppressed).
+  mut generation : Int
 }
 
 ///|
@@ -39,7 +48,7 @@ fn EngineClient::EngineClient(
   config : AppConfig,
   messages : @async.Queue[Msg],
 ) -> EngineClient {
-  { config, messages, live: None }
+  { config, messages, live: None, generation: 0 }
 }
 
 ///|
@@ -69,7 +78,14 @@ async fn[G] EngineClient::start(
     stderr=child_stderr,
     no_wait=true,
   )
-  let engine : EngineProcess = { writer, proc, latest_run: 0, run_open: false }
+  self.generation = self.generation + 1
+  let engine : EngineProcess = {
+    writer,
+    proc,
+    generation: self.generation,
+    latest_run: 0,
+    run_open: false,
+  }
   self.live = Some(engine)
   group.spawn_bg(no_wait=true) <| () => {
     let stderr_task = group.spawn(no_wait=true) <| () => {
@@ -127,8 +143,13 @@ async fn[G] EngineClient::start(
       )
     }
     // The watchers this engine owned died with it: let the loop reset
-    // engine-scoped status, whatever the exit reason.
-    self.messages.put(EngineExited)
+    // engine-scoped status. But only the latest engine owns that status — if a
+    // restart (or respawn) has since spawned a successor, this exit is stale and
+    // resetting would blank the new engine's live watcher segment, so suppress
+    // it. A clean restart with no successor yet still resets, correctly.
+    if engine.generation == self.generation {
+      self.messages.put(EngineExited)
+    }
   }
 }
 
@@ -184,6 +205,35 @@ async fn[G] EngineClient::prompt(
 }
 
 ///|
+/// Ask the engine to compact the conversation. Like `prompt`, this is an
+/// explicit user operation on the durable session, so it may spawn the engine
+/// (a fresh process resumes the same session and compacts it) and it opens a
+/// run whose terminal event — `compaction_finished` or a failure — closes it.
+async fn[G] EngineClient::compact(
+  self : EngineClient,
+  group : @async.TaskGroup[G],
+  run_id : Int,
+) -> Unit {
+  if self.live is None {
+    self.start(group) catch {
+      error => {
+        self.messages.put(AgentFailed(run_id~, error))
+        return
+      }
+    }
+  }
+  guard self.live is Some(live) else {
+    self.messages.put(
+      AgentFailed(run_id~, Failure::Failure("engine is not running")),
+    )
+    return
+  }
+  live.latest_run = run_id
+  live.run_open = true
+  self.send(run_id, { "command": "compact" })
+}
+
+///|
 /// Steer the running turn, or report the input as undeliverable when there
 /// is no live engine with an open run (e.g. the engine died an instant
 /// before the user pressed Enter). Steering must never spawn an engine: an
@@ -224,4 +274,14 @@ fn EngineClient::shutdown(self : EngineClient) -> Unit {
   if self.live is Some(live) {
     live.writer.close()
   }
+}
+
+///|
+/// Replace the engine configuration used for future prompts. If a serve process
+/// is already idle, close its command stream so the next prompt respawns with
+/// the new environment.
+fn EngineClient::restart(self : EngineClient, config : AppConfig) -> Unit {
+  self.shutdown()
+  self.live = None
+  self.config = config
 }

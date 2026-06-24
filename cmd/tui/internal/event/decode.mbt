@@ -50,6 +50,24 @@ pub fn decode_event(object : Json) -> AgentEvent? {
     // the run even though the engine process lives on.
     "turn_failed" =>
       Some(AgentError("turn failed: \{@jsonx.string(object, "error")}"))
+    // The engine rejected a command (e.g. an older or custom engine that does
+    // not understand `compact`) and keeps serving. It emits no terminal event,
+    // so without this the run that sent the command would stay open forever and
+    // the TUI would hang busy. Fail the run instead.
+    "command_error" =>
+      Some(
+        AgentError("engine rejected command: \{@jsonx.string(object, "error")}"),
+      )
+    // Compaction lifecycle on a serve engine. `compaction_started` carries no
+    // controller-visible state — the run is already shown busy — so it is left
+    // to drop as an unknown event. The two outcomes are terminal for the
+    // compaction run: success carries the summary (the new context) for a
+    // preview, failure folds into the general agent-error category like a
+    // failed turn.
+    "compaction_finished" =>
+      Some(CompactionFinished(@jsonx.string(object, "summary")))
+    "compaction_failed" =>
+      Some(AgentError("compaction failed: \{@jsonx.string(object, "error")}"))
     _ => None
   }
 }

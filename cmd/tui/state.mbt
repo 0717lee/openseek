@@ -49,7 +49,7 @@ priv enum RunState {
 
 ///|
 priv struct State {
-  config : AppConfig
+  mut config : AppConfig
   queued : Array[@ui.Input]
   mut run : RunState
   // Monotonic id of the most recently started run, bumped each time an input is
@@ -61,6 +61,11 @@ priv struct State {
   // engine turn. Steering and interrupt escalation must not touch the
   // persistent engine while the work in flight is a local task.
   mut run_is_command : Bool
+  // Whether the active run is a conversation compaction rather than an engine
+  // turn. Compaction is a non-steerable model call (the serve engine drops
+  // steers during it), so a prompt typed mid-compaction is rejected locally with
+  // a queue hint rather than steered into the void.
+  mut run_is_compaction : Bool
   // Final assistant text for the current step, used to avoid appending the same
   // answer again when `AgentFinished` follows `AssistantMessage`.
   mut step_response : String?
@@ -94,6 +99,7 @@ fn State::new(config : AppConfig) -> State {
     run: Idle,
     run_id: 0,
     run_is_command: false,
+    run_is_compaction: false,
     pending_steers: [],
     step_response: None,
     streaming_response: None,
@@ -135,6 +141,7 @@ fn State::owns_run(self : State, id : Int) -> Bool {
 fn State::finish_run(self : State) -> Unit {
   self.run = Idle
   self.run_is_command = false
+  self.run_is_compaction = false
   // Anything still unconfirmed died with the turn; the engine sweeps its
   // queue at turn end and reports each leftover as steer_dropped, which
   // arrives untagged and renders its own resubmit notice.
@@ -145,6 +152,23 @@ fn State::finish_run(self : State) -> Unit {
   if self.config.engine_mode is OneShot {
     self.watcher_status = ""
   }
+}
+
+///|
+fn State::switch_session(
+  self : State,
+  session_id : @agent_session.SessionId,
+) -> Unit {
+  self.config = { ..self.config, session_id, }
+  self.run = Idle
+  self.run_is_command = false
+  self.run_is_compaction = false
+  self.pending_steers.clear()
+  self.step_response = None
+  self.streaming_response = None
+  self.streaming_reasoning = None
+  self.usage = None
+  self.watcher_status = ""
 }
 
 ///|
@@ -204,6 +228,18 @@ priv enum Cmd {
   // Redirect the running turn: the text rides the engine's steer command and
   // lands at the turn's next step boundary.
   SteerAgent(String)
+  // Ask the serve engine to summarize and compact the conversation; carries the
+  // run id so the compaction's wire events are tagged to the run that requested
+  // it, exactly like a prompt.
+  CompactSession(run_id~ : Int)
+  // Open an argument picker for a slash command, populated with candidates the
+  // handler supplies. `OpenResumePicker` is separate because its candidates (the
+  // session list) require an async store read the synchronous `update` cannot
+  // do, so the message loop fetches them before opening.
+  OpenPicker(name~ : String, items~ : Array[@ui.CompletionItem])
+  OpenResumePicker
+  RestartEngine(AppConfig)
+  ResumeSession(@agent_session.SessionId)
   CancelAgent
   // Second Ctrl-C while already interrupting: the cancel command was not
   // enough, so kill the engine process outright.
