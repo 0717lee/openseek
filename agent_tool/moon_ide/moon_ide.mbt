@@ -130,30 +130,12 @@ async fn moon_ide(input : @decode.MoonIdeInput) -> @agent_tool.ToolAction {
     None => "."
   }
   let body = output.text()
-  let capped = cap_text(body, input.max_output_chars)
-  let truncation = truncation_header(body, input.max_output_chars)
+  let capped = @output.cap_text(body, input.max_output_chars)
+  let truncation = @output.truncation_header(body, input.max_output_chars)
   @agent_tool.ToolAction::respond(
     "cwd=\{cwd_text}\ncommand=moon \{args.join(" ")}\nexit=\{code}\{truncation}\n\{capped}",
     is_error=code != 0,
   )
-}
-
-///|
-fn cap_text(content : String, max_chars : Int) -> String {
-  if content.length() <= max_chars {
-    content
-  } else {
-    "\{content[:max_chars]}"
-  }
-}
-
-///|
-fn truncation_header(content : String, max_chars : Int) -> String {
-  if content.length() <= max_chars {
-    ""
-  } else {
-    "\ntruncated=true\noutput_chars=\{content.length()}\nshown_chars=\{max_chars}"
-  }
 }
 
 ///|
@@ -239,15 +221,6 @@ test "moon_ide rejects missing required fields" {
     }
   }
   fail("hover without loc parsed")
-}
-
-///|
-test "moon_ide records truncation metadata" {
-  assert_eq(cap_text("abcdef", 3), "abc")
-  assert_eq(
-    truncation_header("abcdef", 3),
-    "\ntruncated=true\noutput_chars=6\nshown_chars=3",
-  )
 }
 
 ///|

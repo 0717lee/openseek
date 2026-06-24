@@ -131,13 +131,13 @@ async fn moon_cmd(input : @decode.MoonCommandInput) -> @agent_tool.ToolAction {
     None => ""
   }
   let body = output.text()
-  let capped = cap_text(body, input.max_output_chars)
-  let truncation = truncation_header(body, input.max_output_chars)
+  let capped = @output.cap_text(body, input.max_output_chars)
+  let truncation = @output.truncation_header(body, input.max_output_chars)
   let head = @agent_tool.brief_line("moon \{args.join(" ")}", limit=64)
   let brief = if code != 0 { "\{head} → exit \{code}" } else { head }
   @agent_tool.ToolAction::respond(
     "cwd=\{cwd_text}\ncommand=moon \{args.join(" ")}\{update_review}\{stdin_review}\nexit=\{code}\{truncation}\n\{capped}",
-    is_error=code != 0 || is_truncated(body, input.max_output_chars),
+    is_error=code != 0 || @output.is_truncated(body, input.max_output_chars),
     brief~,
   )
 }
@@ -173,29 +173,6 @@ async fn collect_moon_output(
       @fs.rmdir(dir, recursive=true)
       result
     }
-  }
-}
-
-///|
-fn cap_text(content : String, max_chars : Int) -> String {
-  if content.length() <= max_chars {
-    content
-  } else {
-    "\{content[:max_chars]}"
-  }
-}
-
-///|
-fn is_truncated(content : String, max_chars : Int) -> Bool {
-  content.length() > max_chars
-}
-
-///|
-fn truncation_header(content : String, max_chars : Int) -> String {
-  if is_truncated(content, max_chars) {
-    "\ntruncated=true\noutput_chars=\{content.length()}\nshown_chars=\{max_chars}"
-  } else {
-    ""
   }
 }
 
@@ -330,16 +307,6 @@ test "moon_cmd accepts classified moon test update" {
 test "moon_cmd parses and caps output limit" {
   let input = @decode.decode({ "command": "check", "max_output_chars": 999999 })
   assert_eq(input.max_output_chars, @decode.hard_max_output_chars)
-}
-
-///|
-test "moon_cmd records truncation metadata" {
-  assert_eq(cap_text("abcdef", 3), "abc")
-  assert_true(is_truncated("abcdef", 3))
-  assert_eq(
-    truncation_header("abcdef", 3),
-    "\ntruncated=true\noutput_chars=6\nshown_chars=3",
-  )
 }
 
 ///|
