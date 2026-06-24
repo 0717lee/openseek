@@ -77,9 +77,10 @@ output truncation. The string body has one of these shapes:
 - On success: `<line-number>\t<content>` lines, then a newline, then the footer
   `<system>start_line=<n> shown_lines=<k> total_lines=<t> truncated=<bool></system>`.
   When the selected body is empty (the range starts past EOF, or the budget is
-  zero) only the footer is returned. `truncated=true` — set when
-  `max_output_chars` cut the numbered body — is the one case that flips
-  `is_error` to `true`.
+  zero) only the footer is returned. A zero-byte file returns just the footer
+  with `total_lines=0 note=empty file`, rather than a phantom blank `1\t` line.
+  `truncated=true` — set when `max_output_chars` cut the numbered body — is the
+  one case that flips `is_error` to `true`.
 - `"error reading <path>: <error>"` — a single-file read failed. Common
   causes: the file is missing, the agent doesn't have read permissions, or
   the bytes aren't valid UTF-8.

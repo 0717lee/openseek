@@ -21,8 +21,10 @@
 ///   Every read has the same shape regardless of range or cap: `<line-number>\t
 ///   <content>` lines followed by a single
 ///   `<system>start_line=.. shown_lines=.. total_lines=.. truncated=..</system>`
-///   footer (footer only when the body is empty). `is_error` is `true` only when
-///   the `max_output_chars` budget cut the body (`truncated=true`).
+///   footer (footer only when the body is empty, e.g. a range past EOF). A
+///   zero-byte file returns just that footer with `total_lines=0 note=empty
+///   file`. `is_error` is `true` only when the `max_output_chars` budget cut the
+///   body (`truncated=true`).
 /// - `Respond(ToolOutput("error reading <path>: <error>", is_error=true))`
 ///   if a single-file read fails (missing file, permission denied, invalid
 ///   UTF-8, directory path, etc.).
@@ -106,6 +108,17 @@ async fn read_file(
         is_error=true,
         brief~,
       )
+  }
+  // A zero-byte file would otherwise render as a phantom blank line `1\t`;
+  // report it explicitly so the model doesn't read that as real content. A file
+  // containing only a newline is not empty (it has blank lines) and renders
+  // normally.
+  if content == "" {
+    return @agent_tool.ToolAction::respond(
+      "<system>start_line=\{input.start_line} shown_lines=0 total_lines=0 truncated=false note=empty file</system>",
+      is_error=false,
+      brief~,
+    )
   }
   let selection = select_lines(content, input.start_line, input.max_lines)
   let rendered = render_numbered_content(selection, input.max_output_chars)
@@ -292,7 +305,7 @@ async test "read resolves relative paths under the workspace root" {
 }
 
 ///|
-async test "read renders an empty file as a single empty numbered line" {
+async test "read reports a zero-byte file explicitly" {
   @vfs.with_tmpdir(dir => {
     let path = "\{dir}/empty.txt"
     @fs.write_file(path, "", create_mode=CreateOrTruncate)
@@ -301,8 +314,24 @@ async test "read renders an empty file as a single empty numbered line" {
     assert_false(output.is_error)
     assert_eq(
       output.content,
+      "<system>start_line=1 shown_lines=0 total_lines=0 truncated=false note=empty file</system>",
+    )
+  })
+}
+
+///|
+async test "read treats a single-newline file as one blank line, not empty" {
+  @vfs.with_tmpdir(dir => {
+    let path = "\{dir}/newline.txt"
+    @fs.write_file(path, "\n", create_mode=CreateOrTruncate)
+    let result = execute({ "path": path })
+    guard result is Respond(output) else { fail("expected Respond") }
+    assert_false(output.is_error)
+    // "\n" splits into two empty lines, so this is not the empty-file case.
+    assert_eq(
+      output.content,
       [
-        "1\t", "<system>start_line=1 shown_lines=1 total_lines=1 truncated=false</system>",
+        "1\t", "2\t", "<system>start_line=1 shown_lines=2 total_lines=2 truncated=false</system>",
       ].join("\n"),
     )
   })
