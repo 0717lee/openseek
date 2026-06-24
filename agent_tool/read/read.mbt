@@ -208,17 +208,11 @@ fn code_unit_prefix(content : String, max_units : Int) -> String {
 /// (the unit at `max_units` is a trailing surrogate) step back one so the
 /// leading surrogate is dropped too. Callers pass `max_units < content.length()`.
 fn char_boundary_at_or_below(content : String, max_units : Int) -> Int {
-  if is_low_surrogate(content.at(max_units)) {
+  if content.at(max_units).is_trailing_surrogate() {
     max_units - 1
   } else {
     max_units
   }
-}
-
-///|
-fn is_low_surrogate(unit : UInt16) -> Bool {
-  let code = unit.to_int()
-  code >= 0xDC00 && code <= 0xDFFF
 }
 
 ///|

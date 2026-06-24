@@ -16,18 +16,11 @@ pub fn cap_text(content : String, max_chars : Int) -> String {
 /// surrogate, step back one so the leading surrogate is dropped too. Only
 /// reached with `0 <= max_units < content.length()`.
 fn char_boundary_at_or_below(content : String, max_units : Int) -> Int {
-  if max_units > 0 && is_low_surrogate(content[max_units]) {
+  if max_units > 0 && content[max_units].is_trailing_surrogate() {
     max_units - 1
   } else {
     max_units
   }
-}
-
-///|
-/// Whether `unit` is a UTF-16 low (trailing) surrogate — the second half of a
-/// surrogate pair.
-fn is_low_surrogate(unit : UInt16) -> Bool {
-  unit >= 0xDC00 && unit <= 0xDFFF
 }
 
 ///|
