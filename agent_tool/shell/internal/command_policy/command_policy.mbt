@@ -36,11 +36,20 @@ pub fn moonbit_command_policy_error_for_parse(
     // back to rough checks for the `moon_cmd` typo or a `sed -i` edit such as
     // `cd src && sed -i 's/a/b/' *.mbt`.
     Some(moon_cmd_error_message())
-  } else if rough_sed_in_place(cmd) {
+  } else if !parse_is_heredoc(parsed) && rough_sed_in_place(cmd) {
+    // Skip the sed scan for heredocs: the body is data (a script/doc the agent
+    // is writing), not commands, so `sed -i` text inside it must not be blocked.
     Some(sed_in_place_error_message())
   } else {
     None
   }
+}
+
+///|
+/// Whether the parse failed because of a here-document. Its body is multi-line
+/// data, not commands, so the rough sed scan would mis-read `sed -i` text in it.
+fn parse_is_heredoc(parsed : @shell_parse.ParseResult) -> Bool {
+  parsed is TooComplex(reason) && reason.contains("here document")
 }
 
 ///|

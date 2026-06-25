@@ -111,6 +111,9 @@ test "command policy allows read-only and non-sed uses of -i" {
       // separator) and non-sed leaders.
        "sed 's/a/b/' *.mbt", "echo sed -i *.txt", "grep -i sed *.mbt", "cat *.mbt | sed 's/a/b/'",
       "cd src && grep -i sed *.mbt",
+      // A heredoc body that mentions sed -i is data being written, not a
+      // command — it must not be blocked.
+       "cat > script.sh <<EOF\nsed -i 's/a/b/' f\nEOF",
     ] {
     guard @command_policy.moonbit_command_policy_error(cmd) is None else {
       fail("expected \{cmd} to be allowed")

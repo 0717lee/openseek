@@ -53,25 +53,29 @@ The implementation is deliberately conservative:
   `env -i sed ...` does not trip it.
 - If the structured parse fails (globs, expansions — e.g.
   `sed -i 's/a/b/' *.mbt`), fall back to a **rough, quote-unaware** text scan:
-  split on `&&`/`||`/`;`/`|` and flag a segment whose leading command word is
-  `moon_cmd`, or `sed` carrying an in-place flag.
+  split on `&&`/`||`/`&`/`;`/`|` and flag a segment whose leading command word is
+  `moon_cmd`, or `sed` (any path) carrying an in-place flag. The scan is skipped
+  for here-documents, whose body is data the agent is writing, not commands.
 
-This is still not a security sandbox and not a full POSIX shell interpreter. The
-rough fallback is best-effort, not exhaustive — by design it does not catch:
+This is still not a security sandbox and not a full POSIX shell interpreter. Both
+paths prefer **no false positives** (never block a command that is not actually
+an in-place edit) over exhaustive recall. Known gaps that are therefore *allowed*
+to run:
 
-- `sed` that is not the segment's leading command — `find ... -exec sed -i`,
+- `sed` that is not a command's leading word — `find ... -exec sed -i`,
   `xargs sed -i`;
-- `sed -i` reached only through a wrapper in a too-complex parse —
-  `command sed -i ... *.glob` (wrappers are handled in the precise path, not the
-  fallback);
-- operators or env values hidden inside quotes, which the quote-unaware split
-  can mis-segment.
+- `sed -i` behind an `env` option the parser does not unwrap, e.g.
+  `env -u FOO sed -i ...` (`command_name()` stays `env`); fixing this belongs in
+  the shared `shell_parse` env-unwrapping and is left for a follow-up;
+- in a too-complex parse, `sed -i` reached only through a `command`/`builtin`
+  wrapper, or operators/env values hidden inside quotes that the quote-unaware
+  split mis-segments.
 
-The structural reason these escape is that an unquoted glob makes the whole
-command `TooComplex`; the deeper fix is to teach the lexer to treat an unquoted
-glob as an opaque word (so the command name and flags stay statically visible)
-rather than failing the parse. That is a shared-parser change left for a separate
-PR.
+The structural reason the glob cases need the rough fallback at all is that an
+unquoted glob makes the whole command `TooComplex`; the deeper fix is to teach
+the lexer to treat an unquoted glob as an opaque word (so the command name and
+flags stay statically visible and the precise path handles them) — a shared-parser
+change left for a separate PR.
 
 ## Examples
 
