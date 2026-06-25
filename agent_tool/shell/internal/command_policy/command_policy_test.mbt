@@ -84,9 +84,11 @@ test "command policy redirects sed in-place editing to the edit tool" {
       "sed --in-place 's/a/b/' f", "sed --in-place=.bak 's/a/b/' f", "sed -Ei 's/a/b/' f",
       "sed -ni 's/a/b/' f", "command sed -i 's/a/b/' f", "env FOO=bar sed -i 's/a/b/' f",
       "cat f | sed -i 's/a/b/' f", "cd src && sed -i 's/a/b/' f",
-      // Globs/expansions parse as TooComplex; caught by the rough fallback.
+      // Globs/expansions parse as TooComplex; caught by the rough fallback,
+      // including after a separator.
        "sed -i 's/a/b/' *.mbt", "sed -i.bak 's/a/b/' *.mbt", "sed -i 's/a/b/' $(ls)",
-      "VAR=x sed -i 's/a/b/' *.mbt",
+      "VAR=x sed -i 's/a/b/' *.mbt", "cd src && sed -i 's/a/b/' *.mbt", "ls *.mbt; sed -i 's/a/b/' f",
+      "cat *.mbt | sed -i 's/a/b/' f",
     ] {
     guard @command_policy.moonbit_command_policy_error(cmd) is Some(message) else {
       fail("expected sed -i to be redirected for \{cmd}")
@@ -101,8 +103,10 @@ test "command policy allows read-only and non-sed uses of -i" {
     cmd in [
       "sed -n '1,5p' file.mbt", "sed 's/a/b/' file.mbt", "cat file | sed 's/a/b/'",
       "grep -i sed file.mbt", "env -i sed 's/a/b/' file", "echo sed -i", "sed -e 's/i/x/' file",
-      // TooComplex (glob) but not editing: a read-only sed and a non-sed leader.
-       "sed 's/a/b/' *.mbt", "echo sed -i *.txt", "grep -i sed *.mbt",
+      // TooComplex (glob) but not editing: read-only sed (even after a
+      // separator) and non-sed leaders.
+       "sed 's/a/b/' *.mbt", "echo sed -i *.txt", "grep -i sed *.mbt", "cat *.mbt | sed 's/a/b/'",
+      "cd src && grep -i sed *.mbt",
     ] {
     guard @command_policy.moonbit_command_policy_error(cmd) is None else {
       fail("expected \{cmd} to be allowed")

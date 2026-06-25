@@ -31,18 +31,15 @@ pub fn moonbit_command_policy_error_for_parse(
     } else {
       None
     }
-  } else {
+  } else if first_command_word(shell_words(cmd)) == Some("moon_cmd") {
     // Parse too complex to analyze structurally (globs, expansions, …): fall
-    // back to a rough leading-word check for the `moon_cmd` typo or a `sed -i`
-    // edit, e.g. `sed -i 's/a/b/' *.mbt`.
-    let words = shell_words(cmd)
-    if first_command_word(words) == Some("moon_cmd") {
-      Some(moon_cmd_error_message())
-    } else if rough_leading_sed_in_place(words) {
-      Some(sed_in_place_error_message())
-    } else {
-      None
-    }
+    // back to rough checks for the `moon_cmd` typo or a `sed -i` edit such as
+    // `cd src && sed -i 's/a/b/' *.mbt`.
+    Some(moon_cmd_error_message())
+  } else if rough_sed_in_place(cmd) {
+    Some(sed_in_place_error_message())
+  } else {
+    None
   }
 }
 
@@ -79,12 +76,41 @@ fn sed_edits_files(command : @shell_parse.SimpleCommand) -> Bool {
 }
 
 ///|
-/// Rough fallback for parses too complex to analyze structurally: true when the
-/// leading command word (after env assignments) is `sed` and a following word is
-/// an in-place flag. Used only when `parse_for_policy` returns `TooComplex` /
-/// `SyntaxError`, e.g. `sed -i 's/a/b/' *.mbt`. It does not unwrap
+/// Rough fallback for parses too complex to analyze structurally (globs,
+/// expansions) — used only when `parse_for_policy` returns `TooComplex` /
+/// `SyntaxError`. Split on shell separators and flag any segment that leads with
+/// `sed` carrying an in-place flag, so `cd src && sed -i 's/a/b/' *.mbt` is
+/// caught and `echo sed -i *.txt` (sed as data) is not. Quote-unaware, like the
+/// moon_cmd fallback: an operator inside quotes can still split a segment.
+fn rough_sed_in_place(cmd : String) -> Bool {
+  for segment in rough_command_segments(cmd) {
+    if segment_leads_with_sed_in_place(shell_words(segment)) {
+      return true
+    }
+  }
+  false
+}
+
+///|
+/// Split `cmd` into rough command segments on the `&&`, `||`, `;`, `|`, and
+/// newline separators. Quote-unaware — adequate for the complex-parse fallback,
+/// which only needs approximate command boundaries.
+fn rough_command_segments(cmd : String) -> Array[String] {
+  let normalized = cmd
+    .replace_all(old="&&", new="\n")
+    .replace_all(old="||", new="\n")
+    .replace_all(old=";", new="\n")
+    .replace_all(old="|", new="\n")
+  [
+    for segment in normalized.split("\n") => segment.to_owned()
+  ]
+}
+
+///|
+/// True when a segment's leading command word (after env assignments) is `sed`
+/// and a following word is an in-place flag. Does not unwrap
 /// `command`/`env`/`builtin`, matching the moon_cmd fallback's conservatism.
-fn rough_leading_sed_in_place(words : Array[String]) -> Bool {
+fn segment_leads_with_sed_in_place(words : Array[String]) -> Bool {
   let mut index = 0
   while index < words.length() && looks_like_env_assignment(words[index]) {
     index += 1
