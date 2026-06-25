@@ -31,10 +31,18 @@ pub fn moonbit_command_policy_error_for_parse(
     } else {
       None
     }
-  } else if first_command_word(shell_words(cmd)) == Some("moon_cmd") {
-    Some(moon_cmd_error_message())
   } else {
-    None
+    // Parse too complex to analyze structurally (globs, expansions, …): fall
+    // back to a rough leading-word check for the `moon_cmd` typo or a `sed -i`
+    // edit, e.g. `sed -i 's/a/b/' *.mbt`.
+    let words = shell_words(cmd)
+    if first_command_word(words) == Some("moon_cmd") {
+      Some(moon_cmd_error_message())
+    } else if rough_leading_sed_in_place(words) {
+      Some(sed_in_place_error_message())
+    } else {
+      None
+    }
   }
 }
 
@@ -64,6 +72,29 @@ fn sed_edits_files(command : @shell_parse.SimpleCommand) -> Bool {
       break
     }
     if is_sed_in_place_flag(arg) {
+      return true
+    }
+  }
+  false
+}
+
+///|
+/// Rough fallback for parses too complex to analyze structurally: true when the
+/// leading command word (after env assignments) is `sed` and a following word is
+/// an in-place flag. Used only when `parse_for_policy` returns `TooComplex` /
+/// `SyntaxError`, e.g. `sed -i 's/a/b/' *.mbt`. It does not unwrap
+/// `command`/`env`/`builtin`, matching the moon_cmd fallback's conservatism.
+fn rough_leading_sed_in_place(words : Array[String]) -> Bool {
+  let mut index = 0
+  while index < words.length() && looks_like_env_assignment(words[index]) {
+    index += 1
+  }
+  guard index < words.length() && words[index] == "sed" else { return false }
+  for cursor in (index + 1)..<words.length() {
+    if words[cursor] == "--" {
+      break
+    }
+    if is_sed_in_place_flag(words[cursor]) {
       return true
     }
   }
