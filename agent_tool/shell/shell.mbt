@@ -15,10 +15,13 @@
 ///   reported as a tool error.
 ///
 /// ## Result
-/// - `Respond(ToolOutput("exit=<code>\n<output>", is_error=<code != 0>))`
+/// Metadata is a trailing `<system>...</system>` footer (the `read` tool
+/// convention): output first, one footer line last. Output-less commands return
+/// just the footer.
+/// - `Respond(ToolOutput("<output>\n<system>exit=<code></system>", is_error=<code != 0>))`
 ///   when the platform shell runs. Non-zero exit codes are typed as tool errors
 ///   while preserving the full output for the model.
-/// - `Respond(ToolOutput("exit=<code-or-cancelled>\ntruncated=true\noutput_limit_reached=true\nshown_chars=<n>\nmax_output_chars=<n>\n<output-prefix>", is_error=true))`
+/// - `Respond(ToolOutput("<output-prefix>\n<system>exit=<code-or-cancelled> truncated=true output_limit_reached=true shown_chars=<n> max_output_chars=<n></system>", is_error=true))`
 ///   when output exceeds `max_output_chars`. The command may be cancelled before
 ///   its natural exit code is available.
 /// - `Respond(ToolOutput("error running shell: ...", is_error=true))` when
@@ -322,16 +325,17 @@ fn shell_response(
   max_output_chars : Int,
 ) -> ShellResponse {
   if output.output_limit_reached {
-    {
-      content: "\{exit_header(output.exit_code)}\ntruncated=true\noutput_limit_reached=true\nshown_chars=\{output.text.char_length()}\nmax_output_chars=\{max_output_chars}\n\{output.text}",
-      is_error: true,
-    }
+    let footer = "<system>\{exit_header(output.exit_code)} truncated=true output_limit_reached=true shown_chars=\{output.text.char_length()} max_output_chars=\{max_output_chars}</system>"
+    { content: with_system_footer(output.text, footer), is_error: true }
   } else {
     let code = match output.exit_code {
       Some(code) => code
       None => 0
     }
-    { content: "exit=\{code}\n\{output.text}", is_error: code != 0 }
+    {
+      content: with_system_footer(output.text, "<system>exit=\{code}</system>"),
+      is_error: code != 0,
+    }
   }
 }
 
@@ -340,6 +344,21 @@ fn exit_header(exit_code : Int?) -> String {
   match exit_code {
     Some(code) => "exit=\{code}"
     None => "exit=cancelled"
+  }
+}
+
+///|
+/// Append a trailing `<system>...</system>` metadata footer to command output,
+/// matching the `read` tool convention (output first, one footer line last).
+/// Output-less commands return just the footer, and a single newline separates
+/// output from the footer even when the output already ends in one.
+fn with_system_footer(text : String, footer : String) -> String {
+  if text == "" {
+    footer
+  } else if text.has_suffix("\n") {
+    "\{text}\{footer}"
+  } else {
+    "\{text}\n\{footer}"
   }
 }
 
@@ -364,6 +383,6 @@ test "shell formats output limit metadata" {
       { exit_code: Some(0), text: "abc", output_limit_reached: true },
       3,
     ).content,
-    "exit=0\ntruncated=true\noutput_limit_reached=true\nshown_chars=3\nmax_output_chars=3\nabc",
+    "abc\n<system>exit=0 truncated=true output_limit_reached=true shown_chars=3 max_output_chars=3</system>",
   )
 }

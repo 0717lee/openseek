@@ -37,8 +37,20 @@ async fn append_moon_command_check_summary(
     _ => None
   }
   match summary {
-    Some(summary) => "\{content}\n\{summary}"
+    Some(summary) => insert_before_system_footer(content, summary)
     None => content
+  }
+}
+
+///|
+/// Insert `block` just before the trailing `<system>...</system>` footer of a
+/// shell response, so the footer stays the last line (the read-tool convention).
+/// `content` from `shell_response` always ends with that footer line.
+fn insert_before_system_footer(content : String, block : String) -> String {
+  match content.rev_split_once("\n") {
+    Some((head, footer)) => "\{head}\n\{block}\n\{footer}"
+    // Output-less command: content is the footer line alone.
+    None => "\{block}\n\{content}"
   }
 }
 

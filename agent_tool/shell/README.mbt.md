@@ -70,13 +70,17 @@ share the remaining `max_output_chars` budget.
 The action is always `Respond(ToolOutput(...))` — the agent loop forwards
 `ToolOutput.content` to the model as a tool-call response and never finishes
 from a `shell` invocation. `is_error` is `true` for launch failures, invalid
-arguments, non-zero shell exit codes, and output truncation. The string body
-has one of these shapes:
+arguments, non-zero shell exit codes, and output truncation.
 
-- `"exit=<code>\n<stdout/stderr merged>"` — normal completion.
-- For successful mutating `moon` commands, the normal completion output may be
-  followed by a `moon check:` section with bounded compiler diagnostics.
-- `"exit=<code-or-cancelled>\ntruncated=true\noutput_limit_reached=true\nshown_chars=<n>\nmax_output_chars=<n>\n<output-prefix>"` —
+Metadata is a trailing `<system>...</system>` footer (the `read` tool
+convention): the merged stdout/stderr output comes first, then a single footer
+line. An output-less command returns just the footer. The string body has one of
+these shapes:
+
+- `"<stdout/stderr merged>\n<system>exit=<code></system>"` — normal completion.
+- For successful mutating `moon` commands, the output may be followed by a
+  `moon check:` section with bounded compiler diagnostics (after the footer).
+- `"<output-prefix>\n<system>exit=<code-or-cancelled> truncated=true output_limit_reached=true shown_chars=<n> max_output_chars=<n></system>"` —
   output exceeded `max_output_chars` while the process pipe was being read. The
   command is cancelled if it has not already exited; no full output length is
   reported because the full output was intentionally not collected.

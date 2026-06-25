@@ -114,8 +114,8 @@ async test "shell reads a virtual filesystem fixture from cwd" {
     inspect(
       output.content.trim(),
       content=(
-        #|exit=0
         #|shell-vfs
+        #|<system>exit=0</system>
       ),
     )
   })
@@ -139,7 +139,7 @@ async test "shell leaves output at exact limit as a normal result on Windows" {
   })
   guard result is Respond(output) else { fail("expected Respond") }
   assert_false(output.is_error)
-  assert_eq(output.content, "exit=0\nabc")
+  assert_eq(output.content, "abc\n<system>exit=0</system>")
 }
 
 ///|
@@ -148,7 +148,7 @@ async test "shell leaves output at exact limit as a normal result on Unix" {
   let result = run_shell({ "cmd": "printf %s 'abc'", "max_output_chars": 3 })
   guard result is Respond(output) else { fail("expected Respond") }
   assert_false(output.is_error)
-  assert_eq(output.content, "exit=0\nabc")
+  assert_eq(output.content, "abc\n<system>exit=0</system>")
 }
 
 ///|
@@ -160,7 +160,7 @@ async test "shell counts output limits in characters for non-ascii text on Windo
   })
   guard result is Respond(output) else { fail("expected Respond") }
   assert_false(output.is_error)
-  assert_eq(output.content, "exit=0\n中中")
+  assert_eq(output.content, "中中\n<system>exit=0</system>")
 }
 
 ///|
@@ -169,7 +169,7 @@ async test "shell counts output limits in characters for non-ascii text on Unix"
   let result = run_shell({ "cmd": "printf %s '中中'", "max_output_chars": 2 })
   guard result is Respond(output) else { fail("expected Respond") }
   assert_false(output.is_error)
-  assert_eq(output.content, "exit=0\n中中")
+  assert_eq(output.content, "中中\n<system>exit=0</system>")
 }
 
 ///|
@@ -181,7 +181,7 @@ async test "shell leaves four-byte utf8 output at exact character limit on Windo
   })
   guard result is Respond(output) else { fail("expected Respond") }
   assert_false(output.is_error)
-  assert_eq(output.content, "exit=0\n😀")
+  assert_eq(output.content, "😀\n<system>exit=0</system>")
 }
 
 ///|
@@ -190,7 +190,7 @@ async test "shell leaves four-byte utf8 output at exact character limit on Unix"
   let result = run_shell({ "cmd": "printf %s '😀'", "max_output_chars": 1 })
   guard result is Respond(output) else { fail("expected Respond") }
   assert_false(output.is_error)
-  assert_eq(output.content, "exit=0\n😀")
+  assert_eq(output.content, "😀\n<system>exit=0</system>")
 }
 
 ///|
@@ -204,7 +204,7 @@ async test "shell stops oversized output while the command is still running on W
   guard result is Respond(output) else { fail("expected Respond") }
   assert_true(output.is_error)
   assert_true(
-    output.content =~ re"^exit=cancelled\ntruncated=true\noutput_limit_reached=true\nshown_chars=3\nmax_output_chars=3\nabc$",
+    output.content =~ re"^abc\n<system>exit=cancelled truncated=true output_limit_reached=true shown_chars=3 max_output_chars=3</system>$",
   )
   assert_false(output.content.contains("timed out"))
   assert_false(output.content.contains("abcdef"))
@@ -221,7 +221,7 @@ async test "shell stops oversized output while the command is still running on U
   guard result is Respond(output) else { fail("expected Respond") }
   assert_true(output.is_error)
   assert_true(
-    output.content =~ re"^exit=cancelled\ntruncated=true\noutput_limit_reached=true\nshown_chars=3\nmax_output_chars=3\nabc$",
+    output.content =~ re"^abc\n<system>exit=cancelled truncated=true output_limit_reached=true shown_chars=3 max_output_chars=3</system>$",
   )
   assert_false(output.content.contains("timed out"))
   assert_false(output.content.contains("abcdef"))
@@ -238,7 +238,7 @@ async test "shell does not cut multi-byte utf8 output mid-character on Windows" 
   guard result is Respond(output) else { fail("expected Respond") }
   assert_true(output.is_error)
   assert_true(
-    output.content =~ re"^exit=cancelled\ntruncated=true\noutput_limit_reached=true\nshown_chars=2\nmax_output_chars=2\n中中$",
+    output.content =~ re"^中中\n<system>exit=cancelled truncated=true output_limit_reached=true shown_chars=2 max_output_chars=2</system>$",
   )
   assert_false(output.content.contains("�"))
   assert_false(output.content.contains("中中中"))
@@ -255,7 +255,7 @@ async test "shell does not cut multi-byte utf8 output mid-character on Unix" {
   guard result is Respond(output) else { fail("expected Respond") }
   assert_true(output.is_error)
   assert_true(
-    output.content =~ re"^exit=cancelled\ntruncated=true\noutput_limit_reached=true\nshown_chars=2\nmax_output_chars=2\n中中$",
+    output.content =~ re"^中中\n<system>exit=cancelled truncated=true output_limit_reached=true shown_chars=2 max_output_chars=2</system>$",
   )
   assert_false(output.content.contains("�"))
   assert_false(output.content.contains("中中中"))
@@ -272,7 +272,7 @@ async test "shell does not split four-byte utf8 characters on Windows" {
   guard result is Respond(output) else { fail("expected Respond") }
   assert_true(output.is_error)
   assert_true(
-    output.content =~ re"^exit=cancelled\ntruncated=true\noutput_limit_reached=true\nshown_chars=1\nmax_output_chars=1\n😀$",
+    output.content =~ re"^😀\n<system>exit=cancelled truncated=true output_limit_reached=true shown_chars=1 max_output_chars=1</system>$",
   )
   assert_false(output.content.contains("�"))
   assert_false(output.content.contains("😀😀"))
@@ -289,7 +289,7 @@ async test "shell does not split four-byte utf8 characters on Unix" {
   guard result is Respond(output) else { fail("expected Respond") }
   assert_true(output.is_error)
   assert_true(
-    output.content =~ re"^exit=cancelled\ntruncated=true\noutput_limit_reached=true\nshown_chars=1\nmax_output_chars=1\n😀$",
+    output.content =~ re"^😀\n<system>exit=cancelled truncated=true output_limit_reached=true shown_chars=1 max_output_chars=1</system>$",
   )
   assert_false(output.content.contains("�"))
   assert_false(output.content.contains("😀😀"))
@@ -328,7 +328,7 @@ async test "shell output limit wins over an unbounded producer on Windows" {
   guard result is Respond(output) else { fail("expected Respond") }
   assert_true(output.is_error)
   assert_true(
-    output.content =~ re"^exit=cancelled\ntruncated=true\noutput_limit_reached=true\nshown_chars=5\nmax_output_chars=5\nyyyyy$",
+    output.content =~ re"^yyyyy\n<system>exit=cancelled truncated=true output_limit_reached=true shown_chars=5 max_output_chars=5</system>$",
   )
   assert_false(output.content.contains("timed out"))
 }
@@ -344,7 +344,7 @@ async test "shell output limit wins over an unbounded producer on Unix" {
   guard result is Respond(output) else { fail("expected Respond") }
   assert_true(output.is_error)
   assert_true(
-    output.content =~ re"^exit=cancelled\ntruncated=true\noutput_limit_reached=true\nshown_chars=5\nmax_output_chars=5\nyyyyy$",
+    output.content =~ re"^yyyyy\n<system>exit=cancelled truncated=true output_limit_reached=true shown_chars=5 max_output_chars=5</system>$",
   )
   assert_false(output.content.contains("timed out"))
 }
@@ -438,10 +438,13 @@ async test "shell appends moon check after applied moon ide rename" {
     })
     guard result is Respond(output) else { fail("expected Respond") }
     assert_false(output.is_error)
-    assert_true(output.content.has_prefix("exit=0\n"))
+    assert_true(output.content.contains("<system>exit=0</system>"))
     assert_true(output.content.contains("Applied 2 edit(s)"))
     assert_true(output.content.contains("\nmoon check:\nexit="))
     assert_true(output.content.contains("missing_symbol"))
+    // The `<system>` footer stays the last line even with the moon check block
+    // inserted before it.
+    assert_true(output.content.has_suffix("<system>exit=0</system>"))
     let renamed = @fs.read_file("\{dir}/main.mbt").text()
     assert_true(renamed.contains("new_name"))
     assert_false(renamed.contains("old_name"))
@@ -512,7 +515,7 @@ async test "shell appends moon check from moon command target cwd" {
       let result = run_shell({ "cmd": cmd, "cwd": dir })
       guard result is Respond(output) else { fail("expected Respond") }
       assert_false(output.is_error)
-      assert_true(output.content.has_prefix("exit=0\n"))
+      assert_true(output.content.contains("<system>exit=0</system>"))
       assert_true(output.content.contains("\nmoon check:\nexit="))
       assert_true(output.content.contains("missing_symbol"))
     }
