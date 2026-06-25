@@ -6,19 +6,10 @@ code changes where overwriting the whole file would be unnecessarily broad.
 ## Design Rationale
 
 `edit` uses exact `old_string` replacement instead of a patch language because
-the host can validate the change with simple, deterministic rules. The default
-single-match requirement prevents ambiguous edits in files that contain repeated
-snippets. `replace_all=true` is explicit so broad changes show up in the tool
-call rather than being an accidental consequence of a loose match. When a
-single-match edit is ambiguous, the error reports the first matching line
-numbers so the caller can add enough surrounding context to make `old_string`
-unique.
-
-Optional `start_line` and `end_line` bounds turn the edit into a bounded exact
-replacement. The match is still by `old_string`, but counting and replacement
-happen only inside the inclusive 1-based line range. This keeps repeated text
-outside the intended area from making a focused edit ambiguous or being changed
-by `replace_all=true`.
+the host can validate the change with simple, deterministic rules. `start_line`
+anchors the edit near the caller's intended location, then the first matching
+`old_string` at or after that line is replaced. Optional `end_line` narrows the
+search when the caller wants a tighter inclusive 1-based line range.
 
 Rejecting empty `old_string` and identical replacements protects against
 no-op or explosive edits. The tool is designed for small surgical changes; if a
@@ -30,30 +21,19 @@ legacy `moon.mod.json`, JSON-style `moon.mod` or `moon.pkg`, or `moon.pkg` with
 
 ## API Style
 
-Use a context-rich exact string that should occur once:
+Use a context-rich exact string near the starting line:
 
 ```json
 {
   "path": "agent/prompt.mbt",
   "old_string": "Use moon check before moon test.",
-  "new_string": "Use moon check before moon test, and inspect failures before editing."
+  "new_string": "Use moon check before moon test, and inspect failures before editing.",
+  "start_line": 42
 }
 ```
 
-Set `replace_all=true` only after deciding every occurrence is intentionally
-part of the same change:
-
-```json
-{
-  "path": "agent/prompt.mbt",
-  "old_string": "moon.mod.json",
-  "new_string": "moon.mod",
-  "replace_all": true
-}
-```
-
-Use a line range when the same text appears elsewhere and the intended edit is
-localized:
+Use `end_line` when the same text appears shortly after the intended location
+and the edit should stay inside a tighter range:
 
 ```json
 {
@@ -72,9 +52,12 @@ localized:
 | `path`        | string  | yes | Filesystem path. Relative paths resolve against the agent process's current working directory. |
 | `old_string`  | string  | yes | Exact text to replace. Empty strings are rejected. |
 | `new_string`  | string  | yes | Replacement text. It must differ from `old_string`. |
-| `replace_all` | boolean | no  | Defaults to `false`. When false, `old_string` must occur exactly once in the selected range. |
-| `start_line`  | integer | no  | 1-based first line of the search/replace range. Defaults to the file start. |
+| `start_line`  | integer | yes | 1-based first line of the search/replace range. The first match at or after this line is replaced. |
 | `end_line`    | integer | no  | 1-based last line of the search/replace range. Defaults to the file end. |
+
+Legacy calls with `replace_all=false` are tolerated, but `replace_all=true` is
+rejected. Use separate line-anchored edit calls when several known locations in
+one file should be fixed.
 
 ## Action
 
@@ -83,14 +66,14 @@ The action is always `Respond(ToolOutput(...))` — the agent loop forwards
 `false` on success and `true` for edit or argument failures. The string body
 has one of these shapes:
 
-- `"ok: replaced <n> occurrence(s) in <path>"` on success.
+- `"ok: replaced <n> occurrence(s) at line <line> in <path>"` on success.
   If the target is `moon.mod`, `moon.pkg`, `.mbt`, or `.mbt.md` inside a
   MoonBit module, the response may append bounded raw compiler feedback from
   module-root `moon check --diagnostic-limit 1`, starting with
   `"moon check:"` after the success line. Failed checks include `exit=<code>`
   or `exit=cancelled`.
 - `"error editing <path>: old_string not found"` — no exact match was found in the selected range.
-- `"error editing <path>: old_string matched <n> times on lines <line>, ...; set replace_all=true to replace all occurrences"` — the edit was ambiguous in the selected range.
+- `"error editing <path>: replace_all=true is no longer supported; use separate line-anchored edit calls for multiple replacements"` — the call requested a global replacement.
 - `"error editing <path>: moon.pkg use // for comment syntax, not #"` or similar
   manifest-guard messages — the replacement would likely break MoonBit package
   discovery.
@@ -110,7 +93,7 @@ test "edit tool advertises the expected schema" {
   assert_true(text.contains("\"path\""))
   assert_true(text.contains("\"old_string\""))
   assert_true(text.contains("\"new_string\""))
-  assert_true(text.contains("\"replace_all\""))
+  assert_false(text.contains("\"replace_all\""))
   assert_true(text.contains("\"start_line\""))
   assert_true(text.contains("\"end_line\""))
   assert_true(text.contains("\"required\""))
@@ -133,6 +116,7 @@ async test "edit tool applies a focused code change through the registry" {
       "path": "\{tmpdir}/openseek-edit-readme-example.mbt",
       "old_string": "  \"hello\"",
       "new_string": "  \"hello, MoonBit\"",
+      "start_line": 2,
     }
 
     let call = @agent_tool.AgentToolCall(
@@ -144,7 +128,10 @@ async test "edit tool applies a focused code change through the registry" {
     )
     let result = @agent_tool.execute_tool_call(call, tools)
     guard result is Respond(output) else { fail("expected Respond") }
-    assert_eq(output.content, "ok: replaced 1 occurrence(s) in \{path}")
+    assert_eq(
+      output.content,
+      "ok: replaced 1 occurrence(s) at line 2 in \{path}",
+    )
     assert_false(output.is_error)
     assert_eq(
       @fs.read_file(path).text(),

@@ -124,6 +124,7 @@ async fn run_edit_case(
     "path": "\{root}/src/note.txt",
     "old_string": "beta\n",
     "new_string": "delta\n",
+    "start_line": 2,
   })
   let mut reason = expect_respond(
     action,

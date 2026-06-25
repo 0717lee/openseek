@@ -16,7 +16,7 @@ pub struct EditInput {
   old_string : String
   new_string : String
   replace_all : Bool
-  start_line : Int?
+  start_line : Int
   end_line : Int?
 } derive(@debug.Debug)
 

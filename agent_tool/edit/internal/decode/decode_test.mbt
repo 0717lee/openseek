@@ -5,6 +5,7 @@ test "decode valid edit input" {
       "path": "file.mbt",
       "old_string": "old",
       "new_string": "new",
+      "start_line": 1,
     }),
     content=(
       #|{
@@ -12,7 +13,7 @@ test "decode valid edit input" {
       #|  old_string: "old",
       #|  new_string: "new",
       #|  replace_all: false,
-      #|  start_line: None,
+      #|  start_line: 1,
       #|  end_line: None,
       #|}
     ),
@@ -27,6 +28,7 @@ test "decode replace_all flag" {
       "old_string": "old",
       "new_string": "new",
       "replace_all": true,
+      "start_line": 1,
     }),
     content=(
       #|{
@@ -34,7 +36,7 @@ test "decode replace_all flag" {
       #|  old_string: "old",
       #|  new_string: "new",
       #|  replace_all: true,
-      #|  start_line: None,
+      #|  start_line: 1,
       #|  end_line: None,
       #|}
     ),
@@ -57,7 +59,7 @@ test "decode line range" {
       #|  old_string: "old",
       #|  new_string: "new",
       #|  replace_all: false,
-      #|  start_line: Some(2),
+      #|  start_line: 2,
       #|  end_line: Some(4),
       #|}
     ),
@@ -72,6 +74,7 @@ test "decode rejects invalid replace_all" {
       "old_string": "old",
       "new_string": "new",
       "replace_all": "yes",
+      "start_line": 1,
     })
   catch {
     error => assert_true("\{error}".contains("arguments.replace_all"))
@@ -102,6 +105,7 @@ test "decode rejects invalid line range" {
       "path": "file.mbt",
       "old_string": "old",
       "new_string": "new",
+      "start_line": 1,
       "end_line": "4",
     })
   catch {
@@ -154,6 +158,17 @@ test "decode rejects missing required fields" {
     error => assert_true("\{error}".contains("arguments.new_string"))
   } noraise {
     _ => fail("missing new_string decoded")
+  }
+  try
+    @decode.decode({
+      "path": "file.mbt",
+      "old_string": "old",
+      "new_string": "new",
+    })
+  catch {
+    error => assert_true("\{error}".contains("arguments.start_line"))
+  } noraise {
+    _ => fail("missing start_line decoded")
   }
 }
 

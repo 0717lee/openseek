@@ -26,6 +26,7 @@ async test "a failed edit names the file in its brief" {
       "path": "\{dir}/ghost.mbt",
       "old_string": "a",
       "new_string": "b",
+      "start_line": 1,
     })
     guard result is Respond(output) else { fail("expected Respond") }
     assert_true(output.is_error)
@@ -43,10 +44,16 @@ async test "edit replaces a unique exact match" {
       "path": path,
       "old_string": "beta",
       "new_string": "delta",
+      "start_line": 1,
     })
     guard result is Respond(output) else { fail("expected Respond") }
-    assert_eq(output.content, "ok: replaced 1 occurrence(s) in \{path}")
+    assert_eq(
+      output.content,
+      "ok: replaced 1 occurrence(s) at line 2 in \{path}",
+    )
     assert_false(output.is_error)
+    guard output.brief is Some(brief) else { fail("expected a brief") }
+    assert_eq(brief, "edited unique.txt:2 (1×)")
     assert_eq(@fs.read_file(path).text(), "alpha\ndelta\ngamma\n")
   })
 }
@@ -64,14 +71,17 @@ async test "edit range limits a unique replacement" {
       "end_line": 3,
     })
     guard result is Respond(output) else { fail("expected Respond") }
-    assert_eq(output.content, "ok: replaced 1 occurrence(s) in \{path}")
+    assert_eq(
+      output.content,
+      "ok: replaced 1 occurrence(s) at line 3 in \{path}",
+    )
     assert_false(output.is_error)
     assert_eq(@fs.read_file(path).text(), "target\nkeep\nchanged\n")
   })
 }
 
 ///|
-async test "edit range replace_all stays inside range" {
+async test "edit rejects replace_all even with a range" {
   @vfs.with_tmpdir(dir => {
     let path = "\{dir}/range-replace-all.txt"
     @fs.write_file(
@@ -88,11 +98,14 @@ async test "edit range replace_all stays inside range" {
       "end_line": 3,
     })
     guard result is Respond(output) else { fail("expected Respond") }
-    assert_eq(output.content, "ok: replaced 2 occurrence(s) in \{path}")
-    assert_false(output.is_error)
+    assert_eq(
+      output.content,
+      "error editing \{path}: replace_all=true is no longer supported; use separate line-anchored edit calls for multiple replacements",
+    )
+    assert_true(output.is_error)
     assert_eq(
       @fs.read_file(path).text(),
-      "token\ninside value\ninside value\noutside token\n",
+      "token\ninside token\ninside token\noutside token\n",
     )
   })
 }
@@ -106,10 +119,14 @@ async test "edit resolves relative paths under the workspace root" {
       "path": "note.txt",
       "old_string": "before",
       "new_string": "after",
+      "start_line": 1,
     })
     guard result is Respond(output) else { fail("expected Respond") }
     assert_false(output.is_error)
-    assert_eq(output.content, "ok: replaced 1 occurrence(s) in \{path}")
+    assert_eq(
+      output.content,
+      "ok: replaced 1 occurrence(s) at line 1 in \{path}",
+    )
     assert_eq(@fs.read_file(path).text(), "after")
   })
 }
@@ -127,6 +144,7 @@ async test "edit preserves surrounding multiline content" {
       "path": path,
       "old_string": "  println(\"old\")",
       "new_string": "  println(\"new\")",
+      "start_line": 1,
     })
     guard result is Respond(output) else { fail("expected Respond") }
     assert_false(output.is_error)
@@ -171,6 +189,7 @@ async test "edit rejects empty old_string" {
       "path": path,
       "old_string": "",
       "new_string": "replacement",
+      "start_line": 1,
     })
     guard result is Respond(output) else { fail("expected Respond") }
     assert_eq(
@@ -190,6 +209,7 @@ async test "edit rejects identical replacement" {
       "path": path,
       "old_string": "content",
       "new_string": "content",
+      "start_line": 1,
     })
     guard result is Respond(output) else { fail("expected Respond") }
     assert_eq(
@@ -213,6 +233,7 @@ async test "edit rejects invalid moon.pkg comment rewrite" {
       "path": path,
       "old_string": "warnings = \"+unnecessary_annotation\"",
       "new_string": "# comment",
+      "start_line": 1,
     })
     let read_back = @fs.read_file(path).text()
     guard result is Respond(output) else { fail("expected Respond") }
@@ -233,6 +254,7 @@ async test "edit rejects generated mbti files" {
       "path": path,
       "old_string": "old",
       "new_string": "new",
+      "start_line": 1,
     })
     let read_back = @fs.read_file(path).text()
     guard result is Respond(output) else { fail("expected Respond") }
@@ -251,9 +273,13 @@ async test "edit rejects missing match" {
       "path": path,
       "old_string": "beta",
       "new_string": "gamma",
+      "start_line": 1,
     })
     guard result is Respond(output) else { fail("expected Respond") }
-    assert_eq(output.content, "error editing \{path}: old_string not found")
+    assert_eq(
+      output.content,
+      "error editing \{path}: old_string not found from line 1",
+    )
     assert_true(output.is_error)
   })
 }
@@ -281,9 +307,9 @@ async test "edit reports range for missing match" {
 }
 
 ///|
-async test "edit rejects ambiguous match without replace_all" {
+async test "edit replaces first match from start line" {
   @vfs.with_tmpdir(dir => {
-    let path = "\{dir}/ambiguous.txt"
+    let path = "\{dir}/first-match.txt"
     @fs.write_file(
       path,
       "alpha beta\nmiddle\nbeta",
@@ -293,21 +319,22 @@ async test "edit rejects ambiguous match without replace_all" {
       "path": path,
       "old_string": "beta",
       "new_string": "delta",
+      "start_line": 1,
     })
     guard result is Respond(output) else { fail("expected Respond") }
     assert_eq(
       output.content,
-      "error editing \{path}: old_string matched 2 times on lines 1, 3; set replace_all=true to replace all occurrences",
+      "ok: replaced 1 occurrence(s) at line 1 in \{path}",
     )
-    assert_true(output.is_error)
-    assert_eq(@fs.read_file(path).text(), "alpha beta\nmiddle\nbeta")
+    assert_false(output.is_error)
+    assert_eq(@fs.read_file(path).text(), "alpha delta\nmiddle\nbeta")
   })
 }
 
 ///|
-async test "edit reports ambiguous matches inside range" {
+async test "edit replaces first match inside range" {
   @vfs.with_tmpdir(dir => {
-    let path = "\{dir}/range-ambiguous.txt"
+    let path = "\{dir}/range-first-match.txt"
     @fs.write_file(
       path,
       "beta\nbeta\nmiddle\nbeta\nbeta\n",
@@ -323,31 +350,36 @@ async test "edit reports ambiguous matches inside range" {
     guard result is Respond(output) else { fail("expected Respond") }
     assert_eq(
       output.content,
-      "error editing \{path}: old_string matched 2 times on lines 2, 4 in line range 2-4; set replace_all=true to replace all occurrences in that range",
+      "ok: replaced 1 occurrence(s) at line 2 in \{path}",
     )
-    assert_true(output.is_error)
-    assert_eq(@fs.read_file(path).text(), "beta\nbeta\nmiddle\nbeta\nbeta\n")
+    assert_false(output.is_error)
+    assert_eq(@fs.read_file(path).text(), "beta\ndelta\nmiddle\nbeta\nbeta\n")
   })
 }
 
 ///|
-async test "edit reports first ambiguous match lines only" {
+async test "edit replaces first repeated match only" {
   @vfs.with_tmpdir(dir => {
     let path = "\{dir}/many-matches.txt"
     @fs.write_file(path, "x\nx\nx\nx\nx\nx\n", create_mode=CreateOrTruncate)
-    let result = run_edit({ "path": path, "old_string": "x", "new_string": "y" })
+    let result = run_edit({
+      "path": path,
+      "old_string": "x",
+      "new_string": "y",
+      "start_line": 1,
+    })
     guard result is Respond(output) else { fail("expected Respond") }
     assert_eq(
       output.content,
-      "error editing \{path}: old_string matched 6 times on lines 1, 2, 3, 4, 5, ...; set replace_all=true to replace all occurrences",
+      "ok: replaced 1 occurrence(s) at line 1 in \{path}",
     )
-    assert_true(output.is_error)
-    assert_eq(@fs.read_file(path).text(), "x\nx\nx\nx\nx\nx\n")
+    assert_false(output.is_error)
+    assert_eq(@fs.read_file(path).text(), "y\nx\nx\nx\nx\nx\n")
   })
 }
 
 ///|
-async test "edit replace_all updates every match" {
+async test "edit rejects unbounded replace_all" {
   @vfs.with_tmpdir(dir => {
     let path = "\{dir}/replace-all.txt"
     @fs.write_file(path, "alpha beta beta", create_mode=CreateOrTruncate)
@@ -356,11 +388,15 @@ async test "edit replace_all updates every match" {
       "old_string": "beta",
       "new_string": "delta",
       "replace_all": true,
+      "start_line": 1,
     })
     guard result is Respond(output) else { fail("expected Respond") }
-    assert_eq(output.content, "ok: replaced 2 occurrence(s) in \{path}")
-    assert_false(output.is_error)
-    assert_eq(@fs.read_file(path).text(), "alpha delta delta")
+    assert_eq(
+      output.content,
+      "error editing \{path}: replace_all=true is no longer supported; use separate line-anchored edit calls for multiple replacements",
+    )
+    assert_true(output.is_error)
+    assert_eq(@fs.read_file(path).text(), "alpha beta beta")
   })
 }
 
@@ -374,6 +410,7 @@ async test "edit rejects non-boolean replace_all" {
       "old_string": "alpha",
       "new_string": "beta",
       "replace_all": "yes",
+      "start_line": 1,
     })
     guard result is Respond(output) else { fail("expected Respond") }
     assert_eq(
@@ -391,6 +428,7 @@ async test "edit surfaces read errors" {
       "path": "\{dir}/does-not-exist.txt",
       "old_string": "x",
       "new_string": "y",
+      "start_line": 1,
     })
     guard result is Respond(output) else { fail("expected Respond") }
     assert_true(output.content.contains("error editing"))
