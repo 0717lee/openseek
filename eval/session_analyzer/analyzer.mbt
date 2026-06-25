@@ -116,7 +116,10 @@ fn summarize_session(session : @agent_session.Session) -> SessionMetrics {
         tool_results += 1
         if result.tool_name() == "shell" {
           shell_uses += 1
-          if shell_result_failed(result.content()) {
+          // Use the recorded `is_error` flag rather than re-parsing the shell
+          // output: the tool already decided success/failure, so this stays
+          // correct regardless of the output format.
+          if result.is_error() {
             shell_failures += 1
           }
         }
@@ -172,15 +175,6 @@ fn summarize_session(session : @agent_session.Session) -> SessionMetrics {
     terminal_status,
     terminal_message,
   }
-}
-
-///|
-fn shell_result_failed(content : String) -> Bool {
-  for piece in content.split("\n") {
-    let line = piece.to_owned().trim().to_owned()
-    return line.has_prefix("exit=") && line != "exit=0"
-  }
-  false
 }
 
 ///|

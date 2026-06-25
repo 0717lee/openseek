@@ -88,12 +88,37 @@ test "finish tool terminal does not double count a model step" {
 }
 
 ///|
-test "shell result failure detection reads only the exit header" {
-  assert_false(shell_result_failed("exit=0\nok"))
-  assert_false(shell_result_failed("exit=0\nexit=2"))
-  assert_false(shell_result_failed("not a shell header\nexit=2"))
-  assert_true(shell_result_failed("exit=2\nfailed"))
-  assert_true(shell_result_failed("exit=cancelled\ntruncated"))
+test "shell failures count is_error shell results, not output text" {
+  let session = @agent_session.Session(SessionId("t"), system_prompt="")
+    .append(
+      Tool(ToolResult(tool_call_id="ok", tool_name="shell", content="ok")),
+    )
+    .append(
+      Tool(
+        ToolResult(
+          tool_call_id="bad",
+          tool_name="shell",
+          // The failure is the recorded flag, not anything in the output text.
+          content="boom",
+          is_error=true,
+        ),
+      ),
+    )
+    .append(
+      // A non-shell error counts toward tool_errors but not shell_failures.
+      Tool(
+        ToolResult(
+          tool_call_id="edit",
+          tool_name="edit",
+          content="nope",
+          is_error=true,
+        ),
+      ),
+    )
+  let result = analyze_session(session)
+  assert_eq(result.shell_uses, 2)
+  assert_eq(result.shell_failures, 1)
+  assert_eq(result.tool_errors, 2)
 }
 
 ///|
