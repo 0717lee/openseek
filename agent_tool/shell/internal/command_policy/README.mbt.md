@@ -3,14 +3,20 @@
 This internal package contains the command-routing policy used by the `shell`
 tool before it runs `sh -c`.
 
-The policy exists for one narrow reason: the bare tool name `moon_cmd`, typed as
-a shell command, is not an executable — it should be the real `moon ...`
-subcommand run through shell. Everything else, including `moon check`, runs
-normally.
+The policy redirects two command shapes that an agent should not run through
+shell:
+
+- the bare tool name `moon_cmd`, typed as a shell command — it is not an
+  executable and should be the real `moon ...` subcommand run through shell;
+- `sed -i` (in-place file editing) — it silently misapplies edits often enough
+  to be untrustworthy, so the agent is sent to the `edit`/`write` tools.
+
+Everything else, including `moon check` and read-only `sed` (`sed -n '1,5p'`,
+`... | sed s/a/b/`), runs normally.
 
 This package is not a security sandbox. It is a local automation guardrail for a
 trusted agent. The shell tool can run arbitrary commands; this package only
-rejects the `moon_cmd` tool-name typo before execution.
+redirects the `moon_cmd` typo and `sed -i` editing before execution.
 
 ## Enforced Policy
 
@@ -22,6 +28,7 @@ The current policy blocks:
 | Command shape | Reason |
 | --- | --- |
 | `moon_cmd ...` | `moon_cmd` is a tool name, not an executable shell command; run `moon ...` directly. |
+| `sed -i ...` (incl. `--in-place`, `-i.bak`, `-Ei`) | In-place file editing is unreliable; use the `edit` tool to change contents or `write` to replace a file. |
 
 The policy allows:
 
@@ -29,6 +36,7 @@ The policy allows:
 | --- | --- |
 | `moon check` | Type-check for compiler feedback; runs through shell like any other `moon` subcommand. |
 | `moon test`, `moon run`, `moon info`, `moon fmt`, `moon build` | One-shot Moon commands run through shell. |
+| `sed -n '1,5p' f`, `... \| sed s/a/b/` | Read-only `sed` (no in-place flag) remains in shell. |
 | `git status --short` | Non-MoonBit commands remain in shell. |
 | `printf hi \| wc -c` | Shell-specific pipelines remain in shell. |
 
@@ -39,12 +47,18 @@ The implementation is deliberately conservative:
 - Parse the command with the internal shell policy parser.
 - Reject `moon_cmd` when it is a statically visible simple command name,
   including in flat compounds such as `cd demo && moon_cmd check`.
+- Reject `sed` carrying an in-place flag when it is a statically visible simple
+  command (after any `env`/`command`/`builtin` wrapper). The in-place flag is
+  read off `sed`'s own arguments, so an unrelated `-i` such as `grep -i sed` or
+  `env -i sed ...` does not trip it.
 - If parsing is too complex, keep a small fallback for the old leading
   `moon_cmd` typo case.
 
 This is still not a security sandbox and not a full POSIX shell interpreter.
 Commands whose runtime argv cannot be known statically are allowed unless they
-match the narrow fallback typo check.
+match the narrow fallback typo check — so `find ... -exec sed -i` and
+`xargs sed -i`, where `sed` is not the statically visible command, are not
+caught.
 
 ## Examples
 

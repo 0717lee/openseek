@@ -398,6 +398,17 @@ async test "shell rejects moon_cmd as a shell command" {
 }
 
 ///|
+async test "shell rejects sed -i in-place editing" {
+  // Blocked by policy before execution, so no file is touched; the model is
+  // redirected to the edit tool.
+  let result = run_shell({ "cmd": "sed -i 's/old/new/' main.mbt" })
+  guard result is Respond(output) else { fail("expected Respond") }
+  assert_true(output.is_error)
+  assert_true(output.content.contains("sed -i"))
+  assert_true(output.content.contains("edit"))
+}
+
+///|
 #cfg(not(platform="windows"))
 async test "shell appends moon check after applied moon ide rename" {
   @vfs.with_tmpdir(prefix="openseek-shell-auto-check-", dir => {
