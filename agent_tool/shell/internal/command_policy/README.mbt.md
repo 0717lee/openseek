@@ -51,14 +51,27 @@ The implementation is deliberately conservative:
   command (after any `env`/`command`/`builtin` wrapper). The in-place flag is
   read off `sed`'s own arguments, so an unrelated `-i` such as `grep -i sed` or
   `env -i sed ...` does not trip it.
-- If parsing is too complex, keep a small fallback for the old leading
-  `moon_cmd` typo case.
+- If the structured parse fails (globs, expansions — e.g.
+  `sed -i 's/a/b/' *.mbt`), fall back to a **rough, quote-unaware** text scan:
+  split on `&&`/`||`/`;`/`|` and flag a segment whose leading command word is
+  `moon_cmd`, or `sed` carrying an in-place flag.
 
-This is still not a security sandbox and not a full POSIX shell interpreter.
-Commands whose runtime argv cannot be known statically are allowed unless they
-match the narrow fallback typo check — so `find ... -exec sed -i` and
-`xargs sed -i`, where `sed` is not the statically visible command, are not
-caught.
+This is still not a security sandbox and not a full POSIX shell interpreter. The
+rough fallback is best-effort, not exhaustive — by design it does not catch:
+
+- `sed` that is not the segment's leading command — `find ... -exec sed -i`,
+  `xargs sed -i`;
+- `sed -i` reached only through a wrapper in a too-complex parse —
+  `command sed -i ... *.glob` (wrappers are handled in the precise path, not the
+  fallback);
+- operators or env values hidden inside quotes, which the quote-unaware split
+  can mis-segment.
+
+The structural reason these escape is that an unquoted glob makes the whole
+command `TooComplex`; the deeper fix is to teach the lexer to treat an unquoted
+glob as an opaque word (so the command name and flags stay statically visible)
+rather than failing the parse. That is a shared-parser change left for a separate
+PR.
 
 ## Examples
 

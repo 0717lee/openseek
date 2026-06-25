@@ -112,7 +112,7 @@ fn rough_command_segments(cmd : String) -> Array[String] {
 /// `command`/`env`/`builtin`, matching the moon_cmd fallback's conservatism.
 fn segment_leads_with_sed_in_place(words : Array[String]) -> Bool {
   let mut index = 0
-  while index < words.length() && looks_like_env_assignment(words[index]) {
+  while index < words.length() && is_env_assignment_prefix(words[index]) {
     index += 1
   }
   guard index < words.length() && words[index] == "sed" else { return false }
@@ -179,6 +179,38 @@ fn first_command_word(words : Array[String]) -> String? {
     }
   }
   None
+}
+
+///|
+/// A leading `NAME=value` environment prefix (any value), used to skip command
+/// env assignments when locating a segment's command word. More permissive than
+/// `looks_like_env_assignment`, which rejects values containing `/`, `-`, or
+/// empty — so a real prefix like `PATH=/usr/bin` before `sed -i` is skipped.
+fn is_env_assignment_prefix(word : String) -> Bool {
+  match word.find("=") {
+    Some(0) | None => false
+    Some(equals) => is_valid_env_name(word[:equals])
+  }
+}
+
+///|
+fn is_valid_env_name(name : StringView) -> Bool {
+  if name.length() == 0 {
+    return false
+  }
+  let mut first = true
+  for ch in name {
+    let valid = if first {
+      first = false
+      ch is ('a'..='z' | 'A'..='Z' | '_')
+    } else {
+      ch is ('a'..='z' | 'A'..='Z' | '0'..='9' | '_')
+    }
+    if !valid {
+      return false
+    }
+  }
+  true
 }
 
 ///|

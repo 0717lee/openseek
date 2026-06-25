@@ -88,7 +88,7 @@ test "command policy redirects sed in-place editing to the edit tool" {
       // including after a separator.
        "sed -i 's/a/b/' *.mbt", "sed -i.bak 's/a/b/' *.mbt", "sed -i 's/a/b/' $(ls)",
       "VAR=x sed -i 's/a/b/' *.mbt", "cd src && sed -i 's/a/b/' *.mbt", "ls *.mbt; sed -i 's/a/b/' f",
-      "cat *.mbt | sed -i 's/a/b/' f",
+      "cat *.mbt | sed -i 's/a/b/' f", "PATH=/usr/bin sed -i 's/a/b/' *.mbt",
     ] {
     guard @command_policy.moonbit_command_policy_error(cmd) is Some(message) else {
       fail("expected sed -i to be redirected for \{cmd}")
