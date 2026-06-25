@@ -139,13 +139,15 @@ fn rough_sed_in_place(cmd : String) -> Bool {
 }
 
 ///|
-/// Split `cmd` into rough command segments on the `&&`, `||`, `;`, `|`, and
-/// newline separators. Quote-unaware — adequate for the complex-parse fallback,
-/// which only needs approximate command boundaries.
+/// Split `cmd` into rough command segments on the `&&`, `||`, `;`, `|`, `&`
+/// (background), and newline separators. Quote-unaware — adequate for the
+/// complex-parse fallback, which only needs approximate command boundaries.
+/// `&&` is replaced before bare `&` so it is not split into two empty segments.
 fn rough_command_segments(cmd : String) -> Array[String] {
   let normalized = cmd
     .replace_all(old="&&", new="\n")
     .replace_all(old="||", new="\n")
+    .replace_all(old="&", new="\n")
     .replace_all(old=";", new="\n")
     .replace_all(old="|", new="\n")
   [
