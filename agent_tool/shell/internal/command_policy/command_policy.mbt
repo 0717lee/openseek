@@ -115,16 +115,38 @@ fn segment_leads_with_sed_in_place(words : Array[String]) -> Bool {
   while index < words.length() && is_env_assignment_prefix(words[index]) {
     index += 1
   }
-  guard index < words.length() && words[index] == "sed" else { return false }
+  // `shell_words` keeps quotes, so strip a fully-quoted token before matching —
+  // the shell still passes `'sed'` / `'-i'` through as `sed` / `-i`.
+  guard index < words.length() &&
+    strip_surrounding_quotes(words[index]) == "sed" else {
+    return false
+  }
   for cursor in (index + 1)..<words.length() {
-    if words[cursor] == "--" {
+    let word = strip_surrounding_quotes(words[cursor])
+    if word == "--" {
       break
     }
-    if is_sed_in_place_flag(words[cursor]) {
+    if is_sed_in_place_flag(word) {
       return true
     }
   }
   false
+}
+
+///|
+/// Strip one layer of matching single or double quotes wrapping the whole token
+/// (`'-i'` -> `-i`). Only used in the rough fallback, where `shell_words` leaves
+/// quotes in place; the precise path receives already-unquoted argv.
+fn strip_surrounding_quotes(word : String) -> String {
+  if word.length() >= 2 &&
+    (
+      (word.has_prefix("'") && word.has_suffix("'")) ||
+      (word.has_prefix("\"") && word.has_suffix("\""))
+    ) {
+    word[1:word.length() - 1].to_owned()
+  } else {
+    word
+  }
 }
 
 ///|
