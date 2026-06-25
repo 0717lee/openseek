@@ -103,6 +103,9 @@ test "command policy allows read-only and non-sed uses of -i" {
     cmd in [
       "sed -n '1,5p' file.mbt", "sed 's/a/b/' file.mbt", "cat file | sed 's/a/b/'",
       "grep -i sed file.mbt", "env -i sed 's/a/b/' file", "echo sed -i", "sed -e 's/i/x/' file",
+      // `-f`/`-e` consume the next word as the script/file, so a script file
+      // named `-i` is not an in-place flag.
+       "sed -f -i file.mbt", "sed -e 's/a/b/' -e p file.mbt",
       // TooComplex (glob) but not editing: read-only sed (even after a
       // separator) and non-sed leaders.
        "sed 's/a/b/' *.mbt", "echo sed -i *.txt", "grep -i sed *.mbt", "cat *.mbt | sed 's/a/b/'",

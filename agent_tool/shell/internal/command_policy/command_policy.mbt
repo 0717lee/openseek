@@ -61,15 +61,62 @@ fn sed_in_place_error_message() -> String {
 fn sed_edits_files(command : @shell_parse.SimpleCommand) -> Bool {
   guard command.command_name() is Some("sed") else { return false }
   guard command.command_index() is Some(start) else { return false }
-  // `command_index` skips the wrapper, so scan only `sed`'s own arguments.
-  for index in (start + 1)..<command.argv.length() {
-    let arg = command.argv[index]
+  // `command_index` skips the wrapper, so scan only `sed`'s own arguments. The
+  // argv is already unquoted by the real parser.
+  scan_sed_args_for_in_place(command.argv, start + 1, quoted=false)
+}
+
+///|
+/// Scan `sed` arguments starting at `start` for an in-place flag. `-e`/`-f` (and
+/// `--expression`/`--file`) consume the next word as their script/file value, so
+/// that operand is skipped — `sed -f -i file` reads a script file named `-i`, it
+/// is not an in-place edit. Stops at `--` (the rest are file operands). With
+/// `quoted~`, a fully-quoted token is unquoted first (the rough fallback path,
+/// where `shell_words` keeps quotes).
+fn scan_sed_args_for_in_place(
+  args : Array[String],
+  start : Int,
+  quoted~ : Bool,
+) -> Bool {
+  let mut index = start
+  while index < args.length() {
+    let arg = if quoted {
+      strip_surrounding_quotes(args[index])
+    } else {
+      args[index]
+    }
     if arg == "--" {
-      // Everything after `--` is a file operand, not a flag.
       break
     }
     if is_sed_in_place_flag(arg) {
       return true
+    }
+    index += if sed_option_consumes_next(arg) { 2 } else { 1 }
+  }
+  false
+}
+
+///|
+/// Whether a `sed` short/long option takes the *next* word as its value (so the
+/// scanner must skip that operand): a `-e`/`-f` cluster whose `e`/`f` is the last
+/// character, or `--expression`/`--file` without an attached `=value`.
+fn sed_option_consumes_next(arg : String) -> Bool {
+  if arg == "--expression" || arg == "--file" {
+    return true
+  }
+  if !arg.has_prefix("-") || arg.has_prefix("--") || arg == "-" {
+    return false
+  }
+  let chars = [ for ch in arg => ch ]
+  let mut idx = 1
+  while idx < chars.length() {
+    match chars[idx] {
+      // `e`/`f` consume the remainder of the token; if they are the last char,
+      // the value is the next word.
+      'e' | 'f' => return idx == chars.length() - 1
+      // `i` consumes the remainder as its in-place suffix, not the next word.
+      'i' => return false
+      _ => idx += 1
     }
   }
   false
@@ -121,16 +168,7 @@ fn segment_leads_with_sed_in_place(words : Array[String]) -> Bool {
     strip_surrounding_quotes(words[index]) == "sed" else {
     return false
   }
-  for cursor in (index + 1)..<words.length() {
-    let word = strip_surrounding_quotes(words[cursor])
-    if word == "--" {
-      break
-    }
-    if is_sed_in_place_flag(word) {
-      return true
-    }
-  }
-  false
+  scan_sed_args_for_in_place(words, index + 1, quoted=true)
 }
 
 ///|
