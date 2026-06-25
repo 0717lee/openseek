@@ -12,6 +12,8 @@ test "decode valid edit input" {
       #|  old_string: "old",
       #|  new_string: "new",
       #|  replace_all: false,
+      #|  start_line: None,
+      #|  end_line: None,
       #|}
     ),
   )
@@ -32,6 +34,31 @@ test "decode replace_all flag" {
       #|  old_string: "old",
       #|  new_string: "new",
       #|  replace_all: true,
+      #|  start_line: None,
+      #|  end_line: None,
+      #|}
+    ),
+  )
+}
+
+///|
+test "decode line range" {
+  debug_inspect(
+    @decode.decode({
+      "path": "file.mbt",
+      "old_string": "old",
+      "new_string": "new",
+      "start_line": 2,
+      "end_line": 4,
+    }),
+    content=(
+      #|{
+      #|  path: "file.mbt",
+      #|  old_string: "old",
+      #|  new_string: "new",
+      #|  replace_all: false,
+      #|  start_line: Some(2),
+      #|  end_line: Some(4),
       #|}
     ),
   )
@@ -50,6 +77,69 @@ test "decode rejects invalid replace_all" {
     error => assert_true("\{error}".contains("arguments.replace_all"))
   } noraise {
     _ => fail("invalid replace_all decoded")
+  }
+}
+
+///|
+test "decode rejects invalid line range" {
+  try
+    @decode.decode({
+      "path": "file.mbt",
+      "old_string": "old",
+      "new_string": "new",
+      "start_line": 0,
+    })
+  catch {
+    error =>
+      assert_true(
+        "\{error}".contains("arguments.start_line to be a positive integer"),
+      )
+  } noraise {
+    _ => fail("invalid start_line decoded")
+  }
+  try
+    @decode.decode({
+      "path": "file.mbt",
+      "old_string": "old",
+      "new_string": "new",
+      "end_line": "4",
+    })
+  catch {
+    error =>
+      assert_true("\{error}".contains("arguments.end_line to be an integer"))
+  } noraise {
+    _ => fail("invalid end_line decoded")
+  }
+  try
+    @decode.decode({
+      "path": "file.mbt",
+      "old_string": "old",
+      "new_string": "new",
+      "start_line": 1.9,
+    })
+  catch {
+    error =>
+      assert_true("\{error}".contains("arguments.start_line to be an integer"))
+  } noraise {
+    _ => fail("fractional start_line decoded")
+  }
+  try
+    @decode.decode({
+      "path": "file.mbt",
+      "old_string": "old",
+      "new_string": "new",
+      "start_line": 4,
+      "end_line": 2,
+    })
+  catch {
+    error =>
+      assert_true(
+        "\{error}".contains(
+          "arguments.end_line to be greater than or equal to arguments.start_line",
+        ),
+      )
+  } noraise {
+    _ => fail("inverted line range decoded")
   }
 }
 

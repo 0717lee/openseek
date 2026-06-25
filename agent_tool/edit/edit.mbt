@@ -9,6 +9,9 @@
 ///   `old_string`.
 /// - `replace_all` (bool, optional): replace every occurrence. Defaults to
 ///   `false`; when false, `old_string` must occur exactly once.
+/// - `start_line` / `end_line` (integer, optional): 1-based inclusive line
+///   bounds. When present, `old_string` is searched and replaced only inside
+///   that range.
 ///
 /// ## Result
 /// - `Respond(ToolOutput("ok: replaced <n> occurrence(s) in <path>"))` on
@@ -23,7 +26,7 @@ pub fn definition(
 ) -> @agent_tool.AgentToolDefinition {
   AgentToolDefinition(
     name="edit",
-    description="Replace exact text in arguments.path with arguments.new_string.",
+    description="Replace exact text in arguments.path with arguments.new_string. Optional start_line/end_line restrict the search and replacement to a 1-based inclusive line range.",
     schema=JsonSchema({
       "type": "object",
       "properties": {
@@ -31,6 +34,8 @@ pub fn definition(
         "old_string": { "type": "string" },
         "new_string": { "type": "string" },
         "replace_all": { "type": "boolean" },
+        "start_line": { "type": "integer" },
+        "end_line": { "type": "integer" },
       },
       "required": ["path", "old_string", "new_string"],
     }),
@@ -87,31 +92,40 @@ async fn edit_file(
         brief=fail_brief,
       )
   }
-  let parts = content
+  let region = select_edit_region(content, input)
+  let parts = region.body
     .split(input.old_string)
     .map(part => part.to_owned())
     .collect()
   let occurrences = parts.length() - 1
   if occurrences == 0 {
     return @agent_tool.ToolAction::respond(
-      "error editing \{path}: old_string not found",
+      "error editing \{path}: old_string not found\{range_detail(input)}",
       is_error=true,
       brief=fail_brief,
     )
   }
   if occurrences > 1 && !input.replace_all {
     return @agent_tool.ToolAction::respond(
-      ambiguous_match_message(path, occurrences, parts, input.old_string),
+      ambiguous_match_message(
+        path,
+        occurrences,
+        parts,
+        input.old_string,
+        range_detail(input),
+        start_line=region.start_line,
+      ),
       is_error=true,
       brief=fail_brief,
     )
   }
   let replacement_count = if input.replace_all { occurrences } else { 1 }
-  let new_content = if input.replace_all {
+  let new_body = if input.replace_all {
     parts.join(input.new_string)
   } else {
-    content.replace(old=input.old_string, new=input.new_string)
+    region.body.replace(old=input.old_string, new=input.new_string)
   }
+  let new_content = "\{region.prefix}\{new_body}\{region.suffix}"
   match @manifest_error.write_error(path, new_content) {
     Some(message) =>
       return @agent_tool.ToolAction::respond(
@@ -148,8 +162,10 @@ fn ambiguous_match_message(
   occurrences : Int,
   parts : Array[String],
   old_string : String,
+  range_detail : String,
+  start_line~ : Int,
 ) -> String {
-  let lines = occurrence_line_labels(parts, old_string, 5)
+  let lines = occurrence_line_labels(parts, old_string, 5, start_line~)
   let line_detail = if lines.length() == 0 {
     ""
   } else if occurrences > lines.length() {
@@ -157,7 +173,7 @@ fn ambiguous_match_message(
   } else {
     " on lines \{lines.join(", ")}"
   }
-  "error editing \{path}: old_string matched \{occurrences} times\{line_detail}; set replace_all=true to replace all occurrences"
+  "error editing \{path}: old_string matched \{occurrences} times\{line_detail}\{range_detail}; set replace_all=true to replace all occurrences\{replace_all_scope_suffix(range_detail)}"
 }
 
 ///|
@@ -165,9 +181,10 @@ fn occurrence_line_labels(
   parts : Array[String],
   old_string : String,
   max : Int,
+  start_line~ : Int,
 ) -> Array[String] {
   let labels : Array[String] = []
-  let mut current_line = 1
+  let mut current_line = start_line
   let occurrence_count = parts.length() - 1
   for index in 0..<occurrence_count {
     current_line = current_line + newline_count(parts[index])
@@ -182,4 +199,93 @@ fn occurrence_line_labels(
 ///|
 fn newline_count(text : String) -> Int {
   text.split("\n").count() - 1
+}
+
+///|
+priv struct EditRegion {
+  prefix : String
+  body : String
+  suffix : String
+  start_line : Int
+}
+
+///|
+fn select_edit_region(
+  content : String,
+  input : @decode.EditInput,
+) -> EditRegion {
+  let start_line = match input.start_line {
+    Some(line) => line
+    None => 1
+  }
+  let start = line_start_offset(content, start_line)
+  let end = match input.end_line {
+    Some(line) => line_end_offset(content, line)
+    None => content.length()
+  }
+  // `decode` guarantees end_line >= start_line when both are present. These
+  // clamps make ranges beyond EOF select an empty suffix without panicking.
+  let start = start.clamp(min=0, max=content.length())
+  let end = end.clamp(min=start, max=content.length())
+  {
+    prefix: content.unsafe_substring(start=0, end=start),
+    body: content.unsafe_substring(start~, end~),
+    suffix: content.unsafe_substring(start=end, end=content.length()),
+    start_line,
+  }
+}
+
+///|
+fn line_start_offset(content : String, line : Int) -> Int {
+  if line <= 1 {
+    0
+  } else {
+    let len = content.length()
+    let mut current_line = 1
+    for cursor = 0; cursor < len; cursor = cursor + 1 {
+      if content[cursor] == '\n' {
+        current_line = current_line + 1
+        if current_line == line {
+          break cursor + 1
+        }
+      }
+    } nobreak {
+      len
+    }
+  }
+}
+
+///|
+fn line_end_offset(content : String, line : Int) -> Int {
+  let len = content.length()
+  let mut current_line = 1
+  for cursor = 0; cursor < len; cursor = cursor + 1 {
+    if content[cursor] == '\n' {
+      if current_line == line {
+        break cursor + 1
+      }
+      current_line = current_line + 1
+    }
+  } nobreak {
+    len
+  }
+}
+
+///|
+fn range_detail(input : @decode.EditInput) -> String {
+  match (input.start_line, input.end_line) {
+    (Some(start), Some(end)) => " in line range \{start}-\{end}"
+    (Some(start), None) => " from line \{start}"
+    (None, Some(end)) => " through line \{end}"
+    (None, None) => ""
+  }
+}
+
+///|
+fn replace_all_scope_suffix(range_detail : String) -> String {
+  if range_detail == "" {
+    ""
+  } else {
+    " in that range"
+  }
 }

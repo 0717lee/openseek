@@ -14,6 +14,12 @@ single-match edit is ambiguous, the error reports the first matching line
 numbers so the caller can add enough surrounding context to make `old_string`
 unique.
 
+Optional `start_line` and `end_line` bounds turn the edit into a bounded exact
+replacement. The match is still by `old_string`, but counting and replacement
+happen only inside the inclusive 1-based line range. This keeps repeated text
+outside the intended area from making a focused edit ambiguous or being changed
+by `replace_all=true`.
+
 Rejecting empty `old_string` and identical replacements protects against
 no-op or explosive edits. The tool is designed for small surgical changes; if a
 file needs a complete rewrite, `write` is the clearer API.
@@ -46,6 +52,19 @@ part of the same change:
 }
 ```
 
+Use a line range when the same text appears elsewhere and the intended edit is
+localized:
+
+```json
+{
+  "path": "agent/prompt.mbt",
+  "old_string": "moon check",
+  "new_string": "moon check --diagnostic-limit 1",
+  "start_line": 120,
+  "end_line": 140
+}
+```
+
 ## Arguments
 
 | Name          | Type    | Required | Notes |
@@ -53,7 +72,9 @@ part of the same change:
 | `path`        | string  | yes | Filesystem path. Relative paths resolve against the agent process's current working directory. |
 | `old_string`  | string  | yes | Exact text to replace. Empty strings are rejected. |
 | `new_string`  | string  | yes | Replacement text. It must differ from `old_string`. |
-| `replace_all` | boolean | no  | Defaults to `false`. When false, `old_string` must occur exactly once. |
+| `replace_all` | boolean | no  | Defaults to `false`. When false, `old_string` must occur exactly once in the selected range. |
+| `start_line`  | integer | no  | 1-based first line of the search/replace range. Defaults to the file start. |
+| `end_line`    | integer | no  | 1-based last line of the search/replace range. Defaults to the file end. |
 
 ## Action
 
@@ -68,8 +89,8 @@ has one of these shapes:
   module-root `moon check --diagnostic-limit 1`, starting with
   `"moon check:"` after the success line. Failed checks include `exit=<code>`
   or `exit=cancelled`.
-- `"error editing <path>: old_string not found"` — no exact match was found.
-- `"error editing <path>: old_string matched <n> times on lines <line>, ...; set replace_all=true to replace all occurrences"` — the edit was ambiguous.
+- `"error editing <path>: old_string not found"` — no exact match was found in the selected range.
+- `"error editing <path>: old_string matched <n> times on lines <line>, ...; set replace_all=true to replace all occurrences"` — the edit was ambiguous in the selected range.
 - `"error editing <path>: moon.pkg use // for comment syntax, not #"` or similar
   manifest-guard messages — the replacement would likely break MoonBit package
   discovery.
@@ -90,6 +111,8 @@ test "edit tool advertises the expected schema" {
   assert_true(text.contains("\"old_string\""))
   assert_true(text.contains("\"new_string\""))
   assert_true(text.contains("\"replace_all\""))
+  assert_true(text.contains("\"start_line\""))
+  assert_true(text.contains("\"end_line\""))
   assert_true(text.contains("\"required\""))
 }
 ```

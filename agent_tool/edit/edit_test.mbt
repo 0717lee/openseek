@@ -52,6 +52,52 @@ async test "edit replaces a unique exact match" {
 }
 
 ///|
+async test "edit range limits a unique replacement" {
+  @vfs.with_tmpdir(dir => {
+    let path = "\{dir}/range.txt"
+    @fs.write_file(path, "target\nkeep\ntarget\n", create_mode=CreateOrTruncate)
+    let result = run_edit({
+      "path": path,
+      "old_string": "target",
+      "new_string": "changed",
+      "start_line": 3,
+      "end_line": 3,
+    })
+    guard result is Respond(output) else { fail("expected Respond") }
+    assert_eq(output.content, "ok: replaced 1 occurrence(s) in \{path}")
+    assert_false(output.is_error)
+    assert_eq(@fs.read_file(path).text(), "target\nkeep\nchanged\n")
+  })
+}
+
+///|
+async test "edit range replace_all stays inside range" {
+  @vfs.with_tmpdir(dir => {
+    let path = "\{dir}/range-replace-all.txt"
+    @fs.write_file(
+      path,
+      "token\ninside token\ninside token\noutside token\n",
+      create_mode=CreateOrTruncate,
+    )
+    let result = run_edit({
+      "path": path,
+      "old_string": "token",
+      "new_string": "value",
+      "replace_all": true,
+      "start_line": 2,
+      "end_line": 3,
+    })
+    guard result is Respond(output) else { fail("expected Respond") }
+    assert_eq(output.content, "ok: replaced 2 occurrence(s) in \{path}")
+    assert_false(output.is_error)
+    assert_eq(
+      @fs.read_file(path).text(),
+      "token\ninside value\ninside value\noutside token\n",
+    )
+  })
+}
+
+///|
 async test "edit resolves relative paths under the workspace root" {
   @vfs.with_tmpdir(prefix="openseek-edit-workspace-", dir => {
     let path = "\{dir}/note.txt"
@@ -213,6 +259,28 @@ async test "edit rejects missing match" {
 }
 
 ///|
+async test "edit reports range for missing match" {
+  @vfs.with_tmpdir(dir => {
+    let path = "\{dir}/range-missing.txt"
+    @fs.write_file(path, "alpha\nbeta\nalpha\n", create_mode=CreateOrTruncate)
+    let result = run_edit({
+      "path": path,
+      "old_string": "alpha",
+      "new_string": "gamma",
+      "start_line": 2,
+      "end_line": 2,
+    })
+    guard result is Respond(output) else { fail("expected Respond") }
+    assert_eq(
+      output.content,
+      "error editing \{path}: old_string not found in line range 2-2",
+    )
+    assert_true(output.is_error)
+    assert_eq(@fs.read_file(path).text(), "alpha\nbeta\nalpha\n")
+  })
+}
+
+///|
 async test "edit rejects ambiguous match without replace_all" {
   @vfs.with_tmpdir(dir => {
     let path = "\{dir}/ambiguous.txt"
@@ -233,6 +301,32 @@ async test "edit rejects ambiguous match without replace_all" {
     )
     assert_true(output.is_error)
     assert_eq(@fs.read_file(path).text(), "alpha beta\nmiddle\nbeta")
+  })
+}
+
+///|
+async test "edit reports ambiguous matches inside range" {
+  @vfs.with_tmpdir(dir => {
+    let path = "\{dir}/range-ambiguous.txt"
+    @fs.write_file(
+      path,
+      "beta\nbeta\nmiddle\nbeta\nbeta\n",
+      create_mode=CreateOrTruncate,
+    )
+    let result = run_edit({
+      "path": path,
+      "old_string": "beta",
+      "new_string": "delta",
+      "start_line": 2,
+      "end_line": 4,
+    })
+    guard result is Respond(output) else { fail("expected Respond") }
+    assert_eq(
+      output.content,
+      "error editing \{path}: old_string matched 2 times on lines 2, 4 in line range 2-4; set replace_all=true to replace all occurrences in that range",
+    )
+    assert_true(output.is_error)
+    assert_eq(@fs.read_file(path).text(), "beta\nbeta\nmiddle\nbeta\nbeta\n")
   })
 }
 
