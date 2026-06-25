@@ -59,7 +59,8 @@ fn sed_in_place_error_message() -> String {
 /// `... | sed s/a/b/`, or a non-`sed` `-i` such as `grep -i` / `env -i sed ...`
 /// — is left alone.
 fn sed_edits_files(command : @shell_parse.SimpleCommand) -> Bool {
-  guard command.command_name() is Some("sed") else { return false }
+  guard command.command_name() is Some(name) else { return false }
+  guard command_basename(name) == "sed" else { return false }
   guard command.command_index() is Some(start) else { return false }
   // `command_index` skips the wrapper, so scan only `sed`'s own arguments. The
   // argv is already unquoted by the real parser.
@@ -165,12 +166,24 @@ fn segment_leads_with_sed_in_place(words : Array[String]) -> Bool {
     index += 1
   }
   // `shell_words` keeps quotes, so strip a fully-quoted token before matching —
-  // the shell still passes `'sed'` / `'-i'` through as `sed` / `-i`.
+  // the shell still passes `'sed'` / `'-i'` through as `sed` / `-i`. Compare the
+  // basename so `/usr/bin/sed` / `./sed` match too.
   guard index < words.length() &&
-    strip_surrounding_quotes(words[index]) == "sed" else {
+    command_basename(strip_surrounding_quotes(words[index])) == "sed" else {
     return false
   }
   scan_sed_args_for_in_place(words, index + 1, quoted=true)
+}
+
+///|
+/// The final path component of a command word, so a path-qualified `sed`
+/// (`/usr/bin/sed`, `./sed`) compares equal to `sed`. Handles both separators.
+fn command_basename(name : String) -> String {
+  let normalized = name.replace_all(old="\\", new="/")
+  match normalized.rev_find("/") {
+    Some(slash) => normalized[slash + 1:].to_owned()
+    None => name
+  }
 }
 
 ///|
