@@ -83,18 +83,31 @@ test "command policy redirects sed in-place editing to the edit tool" {
       "sed -i 's/a/b/' file.mbt", "sed -i.bak 's/a/b/' file.mbt", "sed -i '' 's/a/b/' file.mbt",
       "sed --in-place 's/a/b/' f", "sed --in-place=.bak 's/a/b/' f", "sed -Ei 's/a/b/' f",
       "sed -ni 's/a/b/' f", "command sed -i 's/a/b/' f", "env FOO=bar sed -i 's/a/b/' f",
-      "cat f | sed -i 's/a/b/' f", "cd src && sed -i 's/a/b/' f",
-      // Globs/expansions parse as TooComplex; caught by the rough fallback,
-      // including after a separator.
-       "sed -i 's/a/b/' *.mbt", "sed -i.bak 's/a/b/' *.mbt", "sed -i 's/a/b/' $(ls)",
-      "VAR=x sed -i 's/a/b/' *.mbt", "cd src && sed -i 's/a/b/' *.mbt", "ls *.mbt; sed -i 's/a/b/' f",
-      "cat *.mbt | sed -i 's/a/b/' f", "PATH=/usr/bin sed -i 's/a/b/' *.mbt", "sed '-i' 's/a/b/' *.mbt",
-      "sleep 1 & sed -i 's/a/b/' *.mbt", "/usr/bin/sed -i 's/a/b/' file.mbt", "./sed -i 's/a/b/' *.mbt",
+      "cat f | sed -i 's/a/b/' f", "cd src && sed -i 's/a/b/' f", "'sed' -i 's/a/b/' f",
+      // Path-qualified sed (Simple parse) is matched by basename.
+       "/usr/bin/sed -i 's/a/b/' file.mbt", "./sed -i 's/a/b/' f",
     ] {
     guard @command_policy.moonbit_command_policy_error(cmd) is Some(message) else {
       fail("expected sed -i to be redirected for \{cmd}")
     }
     assert_true(message.contains("sed -i") && message.contains("edit"))
+  }
+}
+
+///|
+test "command policy does not block sed -i in too-complex (glob/heredoc) parses" {
+  // Documented tradeoff: a globbed / heredoc / expansion `sed -i` parses as
+  // TooComplex and is allowed to run. Blocking it would need a rough text scan
+  // of an unparseable command, which causes false positives (a quoted `|` in
+  // `grep 'a|sed -i' *.x`, a heredoc body), and a false block is worse than a
+  // missed glob. The precise path still catches every `Simple` form above.
+  for
+    cmd in [
+      "sed -i 's/a/b/' *.mbt", "cd src && sed -i 's/a/b/' *.mbt", "sed -i 's/a/b/' $(ls)",
+    ] {
+    guard @command_policy.moonbit_command_policy_error(cmd) is None else {
+      fail("expected \{cmd} to be allowed (too-complex parse)")
+    }
   }
 }
 
@@ -107,10 +120,11 @@ test "command policy allows read-only and non-sed uses of -i" {
       // `-f`/`-e` consume the next word as the script/file, so a script file
       // named `-i` is not an in-place flag.
        "sed -f -i file.mbt", "sed -e 's/a/b/' -e p file.mbt",
-      // TooComplex (glob) but not editing: read-only sed (even after a
-      // separator) and non-sed leaders.
+      // TooComplex parses that are NOT in-place edits must never be blocked:
+      // read-only sed, non-sed leaders, a quoted `|sed -i` inside a grep
+      // pattern, and a heredoc body that writes `sed -i`.
        "sed 's/a/b/' *.mbt", "echo sed -i *.txt", "grep -i sed *.mbt", "cat *.mbt | sed 's/a/b/'",
-      "cd src && grep -i sed *.mbt",
+      "cd src && grep -i sed *.mbt", "grep 'foo|sed -i' *.mbt", "cat > script.sh <<EOF\nsed -i 's/a/b/' f\nEOF",
     ] {
     guard @command_policy.moonbit_command_policy_error(cmd) is None else {
       fail("expected \{cmd} to be allowed")

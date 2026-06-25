@@ -42,36 +42,44 @@ The policy allows:
 
 ## Detection Strategy
 
-The implementation is deliberately conservative:
+Detection is **precise, not heuristic**, and prefers **no false positives**
+(never block a command that is not actually an in-place edit) over exhaustive
+recall:
 
 - Parse the command with the internal shell policy parser.
 - Reject `moon_cmd` when it is a statically visible simple command name,
   including in flat compounds such as `cd demo && moon_cmd check`.
 - Reject `sed` carrying an in-place flag when it is a statically visible simple
-  command (after any `env`/`command`/`builtin` wrapper). The in-place flag is
-  read off `sed`'s own arguments, so an unrelated `-i` such as `grep -i sed` or
-  `env -i sed ...` does not trip it.
-- If the structured parse fails (globs, expansions — e.g.
-  `sed -i 's/a/b/' *.mbt`), fall back to a **rough, quote-unaware** text scan:
-  split on `&&`/`||`/`;`/`|` and flag a segment whose leading command word is
-  `moon_cmd`, or `sed` carrying an in-place flag.
+  command. Because this runs on the structured parse, it correctly handles
+  `env`/`command`/`builtin` wrappers (via `command_index`), a path-qualified
+  `/usr/bin/sed` (via basename), quotes and separators (the parser unquotes argv
+  and splits commands), and `sed`'s own option grammar — `grep -i sed`,
+  `env -i sed ...`, and a script file named `-i` (`sed -f -i file`) are left
+  alone, and `-i` is read off `sed`'s own arguments only.
+- When the structured parse **fails** (globs, expansions, here-documents — e.g.
+  `sed -i 's/a/b/' *.mbt`), only the narrow leading-word `moon_cmd` typo check
+  runs. `sed -i` is **not** matched there.
 
-This is still not a security sandbox and not a full POSIX shell interpreter. The
-rough fallback is best-effort, not exhaustive — by design it does not catch:
+This is not a security sandbox and not a full POSIX shell interpreter. The
+sed guard is intentionally limited to commands the parser can analyze, because a
+rough text scan of an unparseable command produces false positives — a quoted
+`|sed -i` inside `grep 'a|sed -i' *.x`, or a here-document body that writes
+`sed -i` to a script — and a false block is worse than missing a globbed edit.
 
-- `sed` that is not the segment's leading command — `find ... -exec sed -i`,
+Known gaps that are therefore *allowed* to run (false negatives, by design):
+
+- any `sed -i` whose command parses as `TooComplex` — i.e. with an unquoted glob
+  (`sed -i 's/a/b/' *.mbt`), command/process substitution (`$(...)`), or a
+  here-document;
+- `sed` that is not a command's leading word — `find ... -exec sed -i`,
   `xargs sed -i`;
-- `sed -i` reached only through a wrapper in a too-complex parse —
-  `command sed -i ... *.glob` (wrappers are handled in the precise path, not the
-  fallback);
-- operators or env values hidden inside quotes, which the quote-unaware split
-  can mis-segment.
+- `sed -i` behind an `env` option the parser does not unwrap, e.g.
+  `env -u FOO sed -i ...` (`command_name()` stays `env`).
 
-The structural reason these escape is that an unquoted glob makes the whole
-command `TooComplex`; the deeper fix is to teach the lexer to treat an unquoted
-glob as an opaque word (so the command name and flags stay statically visible)
-rather than failing the parse. That is a shared-parser change left for a separate
-PR.
+The clean way to recover the common globbed case is to teach the lexer to treat
+an unquoted glob as an opaque word, so the command stays `Simple` and the precise
+path handles it; that shared-parser change (which also helps the `moon_cmd`
+policy and the `env`-option gap) is left for a separate PR.
 
 ## Examples
 
