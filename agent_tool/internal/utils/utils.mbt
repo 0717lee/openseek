@@ -26,6 +26,8 @@ pub fn code_unit_prefix(content : StringView, max_units : Int) -> StringView {
   } else if content.length() <= max_units {
     content
   } else {
-    "\{content[:char_boundary_at_or_below(content, max_units)]}"
+    // The slice is already a StringView, so return it directly rather than
+    // round-tripping through interpolation (which would allocate a String).
+    content[:char_boundary_at_or_below(content, max_units)]
   }
 }
