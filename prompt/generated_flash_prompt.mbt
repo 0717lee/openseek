@@ -12,12 +12,12 @@ fn flash_prompt() -> String {
     #|loop; add `--diagnostic-limit 5` for focused diagnostics. It skips code
     #|generation, so it is much faster than `moon build` or `moon test`. Use
     #|`moon build` or `moon test` only when you need artifacts or test results.
-    #|After `edit` or `write` changes `moon.mod`, `moon.pkg`, `.mbt`, or `.mbt.md`
-    #|inside a MoonBit module, the tool result may append bounded raw feedback from
-    #|module-root `moon check --diagnostic-limit 1`, starting with `moon check:`;
-    #|failures include `exit=<code>` or `exit=cancelled`. Treat it as immediate
-    #|compiler feedback, and run an explicit `moon check` when you need full
-    #|diagnostics.
+    #|After `edit` or `write` changes `moon.mod`, `moon.pkg`, `moon.work`, `.mbt`,
+    #|or `.mbt.md` inside a MoonBit module, the tool result may append bounded raw
+    #|feedback from module-root `moon check --diagnostic-limit 1`, starting with
+    #|`moon check:`; failures include `exit=<code>` or `exit=cancelled`. Treat it as
+    #|immediate compiler feedback, and run an explicit `moon check` when you need
+    #|full diagnostics.
     #|
     #|## Tool Protocol
     #|
@@ -28,8 +28,18 @@ fn flash_prompt() -> String {
     #|  - `shell` for all Moon commands, including `moon check` for compiler
     #|    feedback; pass the tool's `cwd` field, or use `moon -C dir check` instead
     #|    of embedding repeated `cd ... &&` strings.
+    #|    If shell reports that source file writes are blocked, retry compiler
+    #|    feedback fixes with line-anchored `edit`; use `write` only for intentional
+    #|    whole-file replacements.
     #|- Start `moon check` once `moon.mod` and the relevant `moon.pkg` files exist;
     #|  use `moon build` or `moon test` only when you need artifacts or test results.
+    #|- When fixing compiler feedback, trust the diagnostic path and location. Use
+    #|  `moon check --output-json` or focused `moon check --diagnostic-limit <N>` to
+    #|  group repeated diagnostics, then edit the reported locations. Do not perform
+    #|  broad source codemods with shell/Python/Perl/Ruby/Node/sed/awk scripts; use
+    #|  scripts only to analyze or summarize diagnostics, and apply compiler-feedback
+    #|  source changes through line-anchored `edit`. Do not generate rewritten source
+    #|  files with shell and then overwrite the original files.
     #|- Keep reads focused. Use bounded reads for large files and logs.
     #|
     #|Common `moon` subcommands:

@@ -9,7 +9,7 @@ shell:
 - the bare tool name `moon_cmd`, typed as a shell command — it is not an
   executable and should be the real `moon ...` subcommand run through shell;
 - `sed -i` (in-place file editing) — it silently misapplies edits often enough
-  to be untrustworthy, so the agent is sent to the `edit`/`write` tools.
+  to be untrustworthy, so the agent is sent to line-anchored `edit`.
 
 Everything else, including `moon check` and read-only `sed` (`sed -n '1,5p'`,
 `... | sed s/a/b/`), runs normally.
@@ -28,7 +28,7 @@ The current policy blocks:
 | Command shape | Reason |
 | --- | --- |
 | `moon_cmd ...` | `moon_cmd` is a tool name, not an executable shell command; run `moon ...` directly. |
-| `sed -i ...` (incl. `--in-place`, `-i.bak`, `-Ei`) | In-place file editing is unreliable; use the `edit` tool to change contents or `write` to replace a file. |
+| `sed -i ...` (incl. `--in-place`, `-i.bak`, `-Ei`) | In-place file editing is unreliable; use line-anchored `edit` calls for source changes. |
 
 The policy allows:
 
@@ -65,21 +65,27 @@ sed guard is intentionally limited to commands the parser can analyze, because a
 rough text scan of an unparseable command produces false positives — a quoted
 `|sed -i` inside `grep 'a|sed -i' *.x`, or a here-document body that writes
 `sed -i` to a script — and a false block is worse than missing a globbed edit.
+The outer `shell` tool still stops TooComplex in-place `sed` commands before
+execution, including shell loops where source paths are read indirectly from a
+file. Other source-specific TooComplex shapes may also be stopped before
+execution or at runtime with the source-write sandbox.
 
-Known gaps that are therefore *allowed* to run (false negatives, by design):
+Known parser-policy gaps that are therefore *allowed* past this package (false
+negatives, by design):
 
-- any `sed -i` whose command parses as `TooComplex` — i.e. with an unquoted glob
-  (`sed -i 's/a/b/' *.mbt`), command/process substitution (`$(...)`), or a
-  here-document;
+- any `sed -i` whose command parses as `TooComplex` and is not in a recognizable
+  command position, such as after `do`, `then`, `if`, `-exec`, or `-execdir`;
 - `sed` that is not a command's leading word — `find ... -exec sed -i`,
   `xargs sed -i`;
-- `sed -i` behind an `env` option the parser does not unwrap, e.g.
-  `env -u FOO sed -i ...` (`command_name()` stays `env`).
+- `sed -i` behind an `env` option that changes command interpretation or cwd,
+  e.g. `env -S 'sed -i ...'` or `env -C pkg sed -i ...`
+  (`command_name()` stays `env`).
 
-The clean way to recover the common globbed case is to teach the lexer to treat
-an unquoted glob as an opaque word, so the command stays `Simple` and the precise
-path handles it; that shared-parser change (which also helps the `moon_cmd`
-policy and the `env`-option gap) is left for a separate PR.
+The outer `shell` tool recovers the common globbed, `find -exec`, and shell-loop
+cases with a conservative text fallback. A cleaner lower-level recovery would be
+to teach the lexer to treat an unquoted glob as an opaque word, so the command
+stays `Simple` and this parser-policy package can own the precise path; that
+shared-parser change is left for a separate PR.
 
 ## Examples
 

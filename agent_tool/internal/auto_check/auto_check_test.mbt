@@ -145,6 +145,17 @@ async test "append_summary preserves module dependency graph failure text" {
 }
 
 ///|
+async test "append_summary checks from moon.work workspace root" {
+  @vfs.with_tmpdir(prefix="openseek-auto-check-workspace-", dir => {
+    let path = "\{dir}/moon.work"
+    @fs.write_file(path, "members = [\"pkg\"\n", create_mode=CreateOrTruncate)
+    let result = @auto_check.append_summary(path, "ok: wrote workspace")
+    assert_true(result.has_prefix("ok: wrote workspace\nmoon check:\nexit=255"))
+    assert_true(result.contains("failed to parse workspace file"))
+  })
+}
+
+///|
 async test "append_summary surfaces failed pre-build despite zero diagnostics" {
   @vfs.with_tmpdir(prefix="openseek-auto-check-prebuild-", dir => {
     @fs.write_file(

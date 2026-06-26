@@ -51,13 +51,13 @@ pub fn definition(
 ///|
 #cfg(platform="windows")
 fn shell_description() -> String {
-  "Run arguments.cmd through PowerShell (pwsh -NoProfile -Command), optionally in arguments.cwd, and return exit code plus output. Use PowerShell syntax and cmdlets in arguments.cmd."
+  "Run arguments.cmd through PowerShell (pwsh -NoProfile -Command), optionally in arguments.cwd, and return exit code plus output. Use PowerShell syntax and cmdlets in arguments.cmd. Source file edits for compiler feedback belong in line-anchored edit; do not use shell rewrites."
 }
 
 ///|
 #cfg(not(platform="windows"))
 fn shell_description() -> String {
-  "Run arguments.cmd through the POSIX shell (sh -c), optionally in arguments.cwd, and return exit code plus output. Use POSIX shell syntax in arguments.cmd."
+  "Run arguments.cmd through the POSIX shell (sh -c), optionally in arguments.cwd, and return exit code plus output. Use POSIX shell syntax in arguments.cmd. Source file edits for compiler feedback belong in line-anchored edit; do not use shell rewrites."
 }
 
 ///|
@@ -85,7 +85,7 @@ async fn execute_with_workspace(
     None => ()
   }
   let cwd = @workspace_path.resolve_cwd(workspace_root, input.cwd)
-  shell(input, parsed_command, cwd) catch {
+  shell(input, parsed_command, cwd, workspace_root) catch {
     error =>
       @agent_tool.ToolAction::respond(
         "error running shell: \{error}",
@@ -99,6 +99,7 @@ async fn shell(
   input : @decode.ShellInput,
   parsed_command : @shell_parse.ParseResult,
   cwd : String?,
+  workspace_root : String,
 ) -> @agent_tool.ToolAction {
   if cwd is Some(cwd) {
     let exists = @fs.exists(cwd)
@@ -116,26 +117,46 @@ async fn shell(
       )
     }
   }
+  match
+    direct_source_write_redirect_target(parsed_command, workspace_root, cwd) {
+    Some(target) =>
+      return @agent_tool.ToolAction::respond(
+        direct_source_write_redirect_blocked_content(target),
+        is_error=true,
+        brief=shell_brief(input.cmd, None),
+      )
+    None => ()
+  }
   let result = match input.timeout_ms {
     Some(timeout_ms) =>
       @async.with_timeout_opt(timeout_ms, () => {
-        collect_shell_output(
+        run_agent_shell_with_tree_precheck(
+          workspace_root,
           input.cmd,
+          parsed_command,
           cwd?,
           max_output_chars=input.max_output_chars,
         )
       })
     None =>
       Some(
-        collect_shell_output(
+        run_agent_shell_with_tree_precheck(
+          workspace_root,
           input.cmd,
+          parsed_command,
           cwd?,
           max_output_chars=input.max_output_chars,
         ),
       )
   }
-  let output = match result {
-    Some(result) => result
+  let agent_output = match result {
+    Some(ShellExecuted(output)) => output
+    Some(ShellPreblockedSourceTree(target)) =>
+      return @agent_tool.ToolAction::respond(
+        direct_source_tree_operation_blocked_content(target),
+        is_error=true,
+        brief=shell_brief(input.cmd, None),
+      )
     None => {
       let timeout_ms = match input.timeout_ms {
         Some(timeout_ms) => timeout_ms
@@ -147,20 +168,64 @@ async fn shell(
       )
     }
   }
+  let output = agent_output.output
   let response = shell_response(output, input.max_output_chars)
+  let sandbox_denied = agent_output_has_shell_sandbox_denial(agent_output)
+  let content = append_shell_sandbox_feedback_if_needed(
+    response.content,
+    agent_output,
+  )
   let content = append_moon_command_check_summary(
     parsed_command,
     cwd,
-    response.content,
+    content,
     output,
     input.timeout_ms,
     input.max_output_chars,
   )
   @agent_tool.ToolAction::respond(
     content,
-    is_error=response.is_error,
+    is_error=response.is_error || sandbox_denied,
     brief=shell_brief(input.cmd, output.exit_code),
   )
+}
+
+///|
+priv enum ShellRunResult {
+  ShellPreblockedSourceTree(String)
+  ShellExecuted(AgentShellOutput)
+}
+
+///|
+async fn run_agent_shell_with_tree_precheck(
+  workspace_root : String,
+  cmd : String,
+  parsed_command : @shell_parse.ParseResult,
+  cwd? : String,
+  max_output_chars~ : Int,
+) -> ShellRunResult {
+  match
+    direct_source_tree_operation_target(parsed_command, workspace_root, cwd) {
+    Some(target) => ShellPreblockedSourceTree(target)
+    None => {
+      match
+        dynamic_source_tree_operation_target(
+          parsed_command, cmd, workspace_root, cwd,
+        ) {
+        Some(target) => return ShellPreblockedSourceTree(target)
+        None => ()
+      }
+      ShellExecuted(
+        collect_agent_shell_output(
+          workspace_root,
+          cmd,
+          parsed_command,
+          cwd?,
+          max_output_chars~,
+        ),
+      )
+    }
+  }
 }
 
 ///|
@@ -203,8 +268,21 @@ pub async fn collect_shell_output(
   cwd? : String,
   max_output_chars? : Int = @decode.default_max_output_chars,
 ) -> ShellOutput {
-  let program = PlatformShellProgram
-  let args = platform_shell_args(cmd)
+  collect_process_output(
+    PlatformShellProgram,
+    platform_shell_args(cmd),
+    cwd?,
+    max_output_chars~,
+  )
+}
+
+///|
+async fn collect_process_output(
+  program : String,
+  args : Array[String],
+  cwd? : String,
+  max_output_chars~ : Int,
+) -> ShellOutput {
   let (reader, writer) = @process.read_from_process()
   @async.with_task_group() <| group => {
     defer reader.close()

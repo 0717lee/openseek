@@ -71,7 +71,7 @@ async fn moon_check_summary_for_cwd(
   cwd : String,
   max_output_chars : Int,
 ) -> String? {
-  let check_cwd = match nearest_moon_module_dir(cwd) {
+  let check_cwd = match nearest_moon_project_dir(cwd) {
     Some(check_cwd) => check_cwd
     None => return None
   }
@@ -437,14 +437,49 @@ fn argv_contains_update_flag(argv : Array[String], start : Int) -> Bool {
 }
 
 ///|
+fn argv_contains_update_flag_before_double_dash(
+  argv : Array[String],
+  start : Int,
+) -> Bool {
+  argv_contains_flag_before_double_dash(argv, start, "--update") ||
+  argv_contains_flag_before_double_dash(argv, start, "-u")
+}
+
+///|
 fn argv_contains_help_flag(argv : Array[String], start : Int) -> Bool {
   argv_contains_flag(argv, start, "--help") ||
   argv_contains_flag(argv, start, "-h")
 }
 
 ///|
+fn argv_contains_help_flag_before_double_dash(
+  argv : Array[String],
+  start : Int,
+) -> Bool {
+  argv_contains_flag_before_double_dash(argv, start, "--help") ||
+  argv_contains_flag_before_double_dash(argv, start, "-h")
+}
+
+///|
 fn argv_contains_flag(argv : Array[String], start : Int, flag : String) -> Bool {
   for index in start..<argv.length() {
+    if argv[index] == flag {
+      return true
+    }
+  }
+  false
+}
+
+///|
+fn argv_contains_flag_before_double_dash(
+  argv : Array[String],
+  start : Int,
+  flag : String,
+) -> Bool {
+  for index in start..<argv.length() {
+    if argv[index] == "--" {
+      return false
+    }
     if argv[index] == flag {
       return true
     }
@@ -473,9 +508,10 @@ fn resolve_command_cwd(base : String, target : String) -> String {
 }
 
 ///|
-async fn nearest_moon_module_dir(start : String) -> String? {
+async fn nearest_moon_project_dir(start : String) -> String? {
   for dir = start {
-    if @fs.exists(join_path(dir, "moon.mod")) {
+    if @fs.exists(join_path(dir, "moon.mod")) ||
+      @fs.exists(join_path(dir, "moon.work")) {
       return Some(dir)
     }
     match parent_dir(dir) {

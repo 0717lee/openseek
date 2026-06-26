@@ -45,8 +45,8 @@ Prefer dedicated tools when they encode useful policy. Run Moon commands such as
 CLI probes.
 
 After a successful mutating Moon command, `shell` appends bounded
-`moon check --diagnostic-limit 1` feedback from the nearest MoonBit module root,
-respecting `moon -C <dir>` and explicit cwd changes such as
+`moon check --diagnostic-limit 1` feedback from the nearest MoonBit module or
+workspace root, respecting `moon -C <dir>` and explicit cwd changes such as
 `cd ./dir && moon ...`. Bare relative `cd dir` is skipped because `CDPATH` can
 change which directory the shell enters. This covers commands such as
 `moon add`, `moon remove`, `moon update`, `moon fmt`, `moon info`,
@@ -55,6 +55,39 @@ such as dry-run commands and `moon fmt --check` are left alone, as are Moon
 invocations with per-command environment overrides such as `FOO=bar moon` or
 `env FOO=bar moon`. Follow-up checks are skipped when `timeout_ms` is set and
 share the remaining `max_output_chars` budget.
+
+When `/usr/bin/sandbox-exec` is available, agent shell commands run with
+MoonBit source files and manifests read-only by default. The profile blocks
+shell writes to `.mbt`, `.mbt.md`, `.mbti`, `moon.mod`, `moon.pkg`, `moon.work`,
+and the legacy JSON manifest names under the workspace root, while still
+allowing Moon-managed build/cache paths such as `_build` and `.mooncakes`. The
+profile is cached per normalized workspace root so ordinary read-only shell use
+does not rescan the repository every time. `sandbox-exec` is treated as usable
+only after a probe proves that a deny rule is actually enforced. If a command
+hits that sandbox, the tool keeps the original command output and adds guidance
+to retry compiler-feedback or mechanical code fixes with line-anchored `edit`,
+not shell-generated rewrites routed through another tool.
+
+Direct output redirects to protected source paths are blocked before the command
+runs. This catches masked forms such as `cmd 2>/dev/null > main.mbt || true`
+where the shell would otherwise hide the sandbox denial from the tool output.
+Direct `mv`/`rm` source-tree operations and obvious source-writing script
+snippets are also blocked before execution, including scripts that create
+MoonBit source under `_build` and then rename it into a package directory.
+Source-mutating Git operations such as `git checkout -- .`, `git restore`,
+`git reset --hard`, non-dry-run `git clean`, and non-checking `git apply` are
+blocked for the same reason.
+Too-complex command strings with in-place `sed` edits are rejected even when the
+source paths are indirect, as in `while read f; do sed -i ... "$f"; done`.
+Too-complex commands with visible MoonBit source creation or tree transfer
+markers are also rejected before execution.
+
+Narrowly recognized Moon commands that are expected to write source or package
+metadata run outside the source-write sandbox: `moon fmt`, `moon info`,
+`moon add`, `moon remove`, `moon update`, `moon test --update`, and
+`moon ide rename ... --apply`. Compounds are conservative; `moon fmt &&
+moon check` is trusted, while a broad script or source rewrite through shell is
+not.
 
 ## Arguments
 
@@ -79,7 +112,7 @@ these shapes:
 
 - `"<stdout/stderr merged>\n<system>exit=<code></system>"` — normal completion.
 - For successful mutating `moon` commands, the output may be followed by a
-  `moon check:` section with bounded compiler diagnostics (after the footer).
+  `moon check:` section with bounded compiler diagnostics before the footer.
 - `"<output-prefix>\n<system>exit=<code-or-cancelled> truncated=true output_limit_reached=true shown_chars=<n> max_output_chars=<n></system>"` —
   output exceeded `max_output_chars` while the process pipe was being read. The
   command is cancelled if it has not already exited; no full output length is

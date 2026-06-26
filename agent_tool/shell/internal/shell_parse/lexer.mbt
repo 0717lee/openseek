@@ -173,6 +173,9 @@ fn lex(command : String) -> LexResult {
             } else if peek_char(chars, index + 1) == Some('>') {
               tokens.push(Op(">>", attached))
               index += 2
+            } else if peek_char(chars, index + 1) == Some('|') {
+              tokens.push(Op(">|", attached))
+              index += 2
             } else {
               tokens.push(Op(">", attached))
               index += 1
@@ -185,6 +188,9 @@ fn lex(command : String) -> LexResult {
               return LexTooComplex("here documents are not supported")
             } else if peek_char(chars, index + 1) == Some('&') {
               tokens.push(Op("<&", attached))
+              index += 2
+            } else if peek_char(chars, index + 1) == Some('>') {
+              tokens.push(Op("<>", attached))
               index += 2
             } else {
               tokens.push(Op("<", attached))

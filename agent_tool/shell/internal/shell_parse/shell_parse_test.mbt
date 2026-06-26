@@ -155,14 +155,20 @@ test "preserve spaced numeric arguments before redirects" {
 
 ///|
 test "parse append both and fd duplicate redirects" {
-  guard @shell_parse.parse_for_policy("cmd &>>out <&3") is Simple(commands) else {
-    fail("expected append-both and fd duplicate redirects")
+  guard @shell_parse.parse_for_policy("cmd &>>out <&3 >| forced 4<>rw")
+    is Simple(commands) else {
+    fail("expected append-both, fd duplicate, and read-write redirects")
   }
   assert_eq(commands.length(), 1)
   assert_true(commands[0].argv == ["cmd"])
   assert_true(
     commands[0].redirects ==
-    [{ op: "&>>", target: "out" }, { op: "<&", target: "3" }],
+    [
+      { op: "&>>", target: "out" },
+      { op: "<&", target: "3" },
+      { op: ">|", target: "forced" },
+      { op: "4<>", target: "rw" },
+    ],
   )
 }
 
@@ -224,7 +230,7 @@ test "env options are only recognized before assignments" {
 }
 
 ///|
-test "detect command wrapper but keep complex env options conservative" {
+test "detect command wrapper and keep unknown env options conservative" {
   guard @shell_parse.parse_for_policy("command moon check") is Simple(commands) else {
     fail("expected command wrapper")
   }
@@ -257,9 +263,27 @@ test "detect command wrapper but keep complex env options conservative" {
     is Simple(env_commands) else {
     fail("expected env option wrapper to parse")
   }
-  assert_true(env_commands[0].command_name() == Some("env"))
-  assert_true(env_commands[0].command_index() == Some(0))
-  assert_true(!@shell_parse.contains_command(Simple(env_commands), "moon"))
+  assert_true(env_commands[0].command_name() == Some("moon"))
+  assert_true(env_commands[0].command_index() == Some(3))
+  assert_true(@shell_parse.contains_command(Simple(env_commands), "moon"))
+  guard @shell_parse.parse_for_policy("env -S 'moon check'")
+    is Simple(complex_env_commands) else {
+    fail("expected complex env option wrapper to parse")
+  }
+  assert_true(complex_env_commands[0].command_name() == Some("env"))
+  assert_true(complex_env_commands[0].command_index() == Some(0))
+  assert_true(
+    !@shell_parse.contains_command(Simple(complex_env_commands), "moon"),
+  )
+  guard @shell_parse.parse_for_policy("env -C /tmp moon check")
+    is Simple(env_chdir_commands) else {
+    fail("expected env chdir wrapper to parse")
+  }
+  assert_true(env_chdir_commands[0].command_name() == Some("env"))
+  assert_true(env_chdir_commands[0].command_index() == Some(0))
+  assert_true(
+    !@shell_parse.contains_command(Simple(env_chdir_commands), "moon"),
+  )
 }
 
 ///|

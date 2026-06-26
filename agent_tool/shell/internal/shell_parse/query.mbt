@@ -2,8 +2,8 @@
 /// Return the effective command name for this simple command.
 ///
 /// This strips leading environment assignments represented in `env`, and also
-/// recognizes the common `env NAME=value command ...` wrapper. It deliberately
-/// avoids interpreting complex `env` option forms; those remain `env`.
+/// recognizes common `env` wrappers such as `env NAME=value command ...` and
+/// `env -u NAME command ...`. More complex option forms remain `env`.
 pub fn SimpleCommand::command_name(self : SimpleCommand) -> String? {
   match self.command_index() {
     Some(index) if index < self.argv.length() => Some(self.argv[index])
@@ -95,6 +95,15 @@ fn env_wrapped_command_index(argv : Array[String]) -> Int? {
       index += 1
       continue
     }
+    if scanning_options && env_option_consumes_next(arg) {
+      index += 2
+      continue
+    }
+    if scanning_options &&
+      (env_option_with_attached_value(arg) || env_no_arg_option(arg)) {
+      index += 1
+      continue
+    }
     if scanning_options && arg.has_prefix("-") {
       return Some(0)
     }
@@ -109,5 +118,23 @@ fn env_wrapped_command_index(argv : Array[String]) -> Int? {
     Some(index)
   } else {
     Some(0)
+  }
+}
+
+///|
+fn env_option_consumes_next(arg : String) -> Bool {
+  arg == "-u" || arg == "--unset"
+}
+
+///|
+fn env_option_with_attached_value(arg : String) -> Bool {
+  (arg.has_prefix("-u") && arg != "-u") || arg.has_prefix("--unset=")
+}
+
+///|
+fn env_no_arg_option(arg : String) -> Bool {
+  match arg {
+    "--ignore-environment" | "-0" | "--null" | "--debug" => true
+    _ => false
   }
 }

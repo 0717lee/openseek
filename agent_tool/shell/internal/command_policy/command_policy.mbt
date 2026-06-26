@@ -6,7 +6,7 @@
 /// only redirection left is the tool name `moon_cmd` typed as a shell command,
 /// which is pointed back at running `moon ...` directly. `sed -i` (in-place file
 /// editing) is also blocked: it silently misapplies edits often enough to be
-/// untrustworthy, so the model is sent to the `edit`/`write` tools instead. The
+/// untrustworthy, so the model is sent to targeted edit tools instead. The
 /// error wording tells the model what to do, because the model is the caller who
 /// reads it.
 pub fn moonbit_command_policy_error(cmd : String) -> String? {
@@ -53,7 +53,7 @@ fn moon_cmd_error_message() -> String {
 
 ///|
 fn sed_in_place_error_message() -> String {
-  "error: `sed -i` edits files in place and is unreliable for code changes; use the `edit` tool to modify file contents, or `write` to replace a whole file"
+  "error: `sed -i` edits files in place and is unreliable for code changes; use line-anchored `edit` calls for source changes"
 }
 
 ///|

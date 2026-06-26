@@ -10,8 +10,8 @@ const MoonCheckCommand : String = "moon check --diagnostic-limit 1"
 ///|
 /// Append bounded raw `moon check` feedback after successful writes to MoonBit
 /// source or manifest files. The check runs from the containing MoonBit module
-/// root. Non-MoonBit paths and paths outside a MoonBit module are returned
-/// unchanged.
+/// or workspace root. Non-MoonBit paths and paths outside a MoonBit project are
+/// returned unchanged.
 pub async fn append_summary(path : String, content : String) -> String {
   let summary = auto_check_summary(path) catch {
     error if @async.is_being_cancelled() => raise error
@@ -50,7 +50,7 @@ async fn moon_check_cwd(path : String) -> String? {
   if !is_relevant_moonbit_path(path) {
     return None
   }
-  nearest_moon_module_dir(containing_dir(path))
+  nearest_moon_project_dir(containing_dir(path))
 }
 
 ///|
@@ -92,6 +92,8 @@ fn is_relevant_moonbit_path(path : String) -> Bool {
   path.has_suffix("/moon.mod") ||
   path == "moon.pkg" ||
   path.has_suffix("/moon.pkg") ||
+  path == "moon.work" ||
+  path.has_suffix("/moon.work") ||
   is_moonbit_source_path(path)
 }
 
@@ -112,9 +114,10 @@ fn containing_dir(path : String) -> String {
 }
 
 ///|
-async fn nearest_moon_module_dir(start : String) -> String? {
+async fn nearest_moon_project_dir(start : String) -> String? {
   for dir = start {
-    if @fs.exists(join_path(dir, "moon.mod")) {
+    if @fs.exists(join_path(dir, "moon.mod")) ||
+      @fs.exists(join_path(dir, "moon.work")) {
       return Some(dir)
     }
     match parent_dir(dir) {
@@ -169,6 +172,7 @@ fn join_path(dir : String, base : String) -> String {
 test "relevant path detection covers MoonBit source and manifests" {
   assert_true(is_relevant_moonbit_path("moon.mod"))
   assert_true(is_relevant_moonbit_path("lib/moon.pkg"))
+  assert_true(is_relevant_moonbit_path("moon.work"))
   assert_true(is_relevant_moonbit_path("lib/parser.mbt"))
   assert_true(is_relevant_moonbit_path("lib/README.mbt.md"))
   assert_false(is_relevant_moonbit_path("lib/parser.mbti"))

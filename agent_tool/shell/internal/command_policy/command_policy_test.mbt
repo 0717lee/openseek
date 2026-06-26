@@ -83,7 +83,8 @@ test "command policy redirects sed in-place editing to the edit tool" {
       "sed -i 's/a/b/' file.mbt", "sed -i.bak 's/a/b/' file.mbt", "sed -i '' 's/a/b/' file.mbt",
       "sed --in-place 's/a/b/' f", "sed --in-place=.bak 's/a/b/' f", "sed -Ei 's/a/b/' f",
       "sed -ni 's/a/b/' f", "command sed -i 's/a/b/' f", "env FOO=bar sed -i 's/a/b/' f",
-      "cat f | sed -i 's/a/b/' f", "cd src && sed -i 's/a/b/' f", "'sed' -i 's/a/b/' f",
+      "env -u FOO sed -i 's/a/b/' f", "env --unset FOO sed -i 's/a/b/' f", "cat f | sed -i 's/a/b/' f",
+      "cd src && sed -i 's/a/b/' f", "'sed' -i 's/a/b/' f",
       // Path-qualified sed (Simple parse) is matched by basename.
        "/usr/bin/sed -i 's/a/b/' file.mbt", "./sed -i 's/a/b/' f",
     ] {
@@ -91,6 +92,8 @@ test "command policy redirects sed in-place editing to the edit tool" {
       fail("expected sed -i to be redirected for \{cmd}")
     }
     assert_true(message.contains("sed -i") && message.contains("edit"))
+    assert_true(message.contains("line-anchored"))
+    assert_false(message.contains("`write`"))
   }
 }
 
