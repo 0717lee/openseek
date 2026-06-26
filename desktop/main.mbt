@@ -27,13 +27,7 @@ async fn main {
   extensions[@extension.ExtensionId] = @manifest.ExtensionSetting::enabled()
   extensions["justjavac/lepus-clipboard"] = @manifest.ExtensionSetting::enabled()
   let manifest = @manifest.AppManifest::new(
-    @manifest.WindowManifest::new(
-      "OpenSeek Desktop",
-      1120,
-      760,
-      size_hint=None,
-      immersive_titlebar=true,
-    ),
+    @manifest.WindowManifest::new("OpenSeek Desktop", 1120, 760, size_hint=None),
     File(frontend_entry),
     debug=1,
     extensions~,
