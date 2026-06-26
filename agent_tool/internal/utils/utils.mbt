@@ -8,10 +8,24 @@
 /// Shared by every tool that caps output to a UTF-16 code-unit budget (`read`
 /// renders numbered lines, `agent_tool/internal/output` caps tool output) so
 /// the surrogate-safety rule lives in exactly one place.
-pub fn char_boundary_at_or_below(content : String, max_units : Int) -> Int {
+pub fn char_boundary_at_or_below(content : StringView, max_units : Int) -> Int {
   if max_units > 0 && content[max_units].is_trailing_surrogate() {
     max_units - 1
   } else {
     max_units
+  }
+}
+
+///|
+/// Keep at most `max_units` leading UTF-16 code units of `content` without
+/// ever splitting a surrogate pair. This is a soft cap for rendered output, so
+/// it returns the full string when already within budget.
+pub fn code_unit_prefix(content : StringView, max_units : Int) -> StringView {
+  if max_units <= 0 {
+    ""
+  } else if content.length() <= max_units {
+    content
+  } else {
+    "\{content[:char_boundary_at_or_below(content, max_units)]}"
   }
 }

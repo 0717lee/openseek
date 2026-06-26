@@ -49,18 +49,13 @@ pub fn definition(
         "max_output_chars": { "type": "number" },
       },
     }),
-    execute=Async(arguments => execute_with_workspace(workspace_root, arguments)),
+    execute=Async(arguments => execute(workspace_root~, arguments)),
   )
 }
 
 ///|
-async fn execute(arguments : Json) -> @agent_tool.ToolAction {
-  execute_with_workspace(".", arguments)
-}
-
-///|
-async fn execute_with_workspace(
-  workspace_root : String,
+async fn execute(
+  workspace_root? : String = ".",
   arguments : Json,
 ) -> @agent_tool.ToolAction {
   let input = @decode.decode(arguments) catch {
@@ -76,16 +71,10 @@ async fn execute_with_workspace(
 }
 
 ///|
-priv struct ReadSelection {
+priv struct RenderedSelection {
   content : String
   start_line : Int
   total_lines : Int
-  shown_lines : Int
-}
-
-///|
-priv struct RenderedSelection {
-  content : String
   shown_lines : Int
   truncated : Bool
 }
@@ -96,10 +85,15 @@ async fn read_file(
   path~ : String,
 ) -> @agent_tool.ToolAction {
   let brief = "read \{@agent_tool.brief_basename(path)}"
-  match directory_read_error(path) {
-    Some(message) =>
-      return @agent_tool.ToolAction::respond(message, is_error=true, brief~)
-    None => ()
+  let is_directory = (@fs.kind(path, follow_symlink=true) is Directory) catch {
+    _ => false
+  }
+  if is_directory {
+    return @agent_tool.ToolAction::respond(
+      "error reading \{path}: path is a directory; use the shell tool with `ls` or `tree` to inspect directories, then read specific files.",
+      is_error=true,
+      brief~,
+    )
   }
   let content = @fs.read_file(path).text() catch {
     error =>
@@ -120,128 +114,85 @@ async fn read_file(
       brief~,
     )
   }
-  let selection = select_lines(content, input.start_line, input.max_lines)
-  let rendered = render_numbered_content(selection, input.max_output_chars)
+  let rendered = {
+    let lines = [ for line in content.split("\n") => line ]
+    let total_lines = lines.length()
+    // Clamp both bounds into [0, total_lines] so the slice below is always
+    // ascending and in range — a start past the last line selects nothing.
+    let start_index = (input.start_line - 1).clamp(min=0, max=total_lines)
+    let end_exclusive = match input.max_lines {
+      // Clamp the count BEFORE adding: a huge max_lines (e.g. Int max) must
+      // not overflow past start_index (Codex review). Such a request now
+      // returns the remaining lines, where the old post-add clamp overflowed
+      // negative and accidentally selected nothing.
+      Some(count) =>
+        start_index + count.clamp(min=0, max=total_lines - start_index)
+      None => total_lines
+    }
+    let selected = [ for line in lines[start_index:end_exclusive] => line ]
+    if selected.length() == 0 {
+      {
+        content: "",
+        start_line: input.start_line,
+        total_lines,
+        shown_lines: 0,
+        truncated: false,
+      }
+    } else if input.max_output_chars <= 0 {
+      {
+        content: "",
+        start_line: input.start_line,
+        total_lines,
+        shown_lines: 0,
+        truncated: true,
+      }
+    } else {
+      let numbered : Array[String] = []
+      let mut remaining = input.max_output_chars
+      let mut truncated = false
+      for index in 0..<selected.length() {
+        let separator_units = if numbered.length() == 0 { 0 } else { 1 }
+        let prefix = "\{input.start_line + index}\t"
+        let prefix_budget = separator_units + prefix.length()
+        if remaining < prefix_budget {
+          truncated = true
+          break
+        }
+        let available = remaining - prefix_budget
+        let line = selected[index]
+        let line_units = line.length()
+        if line_units <= available {
+          numbered.push("\{prefix}\{line}")
+          remaining = remaining - prefix_budget - line_units
+        } else {
+          numbered.push("\{prefix}\{@utils.code_unit_prefix(line, available)}")
+          remaining = 0
+          truncated = true
+          break
+        }
+      }
+      if numbered.length() < selected.length() {
+        truncated = true
+      }
+      {
+        content: numbered.join("\n"),
+        start_line: input.start_line,
+        total_lines,
+        shown_lines: numbered.length(),
+        truncated,
+      }
+    }
+  }
   // Every read has the same shape: numbered lines followed by a single status
   // footer. When the body is empty (start past EOF, or a zero budget) only the
   // footer is returned, so the model still learns what it asked for.
-  let footer = read_footer(selection, rendered)
+  let footer = "<system>start_line=\{rendered.start_line} shown_lines=\{rendered.shown_lines} total_lines=\{rendered.total_lines} truncated=\{rendered.truncated}</system>"
   let output = if rendered.content == "" {
     footer
   } else {
     "\{rendered.content}\n\{footer}"
   }
   @agent_tool.ToolAction::respond(output, is_error=rendered.truncated, brief~)
-}
-
-///|
-/// One-line status footer appended after the numbered content, replacing the
-/// old multi-field header. The model gets the line range it actually saw
-/// (`start_line` plus `shown_lines`), the file's `total_lines` (so it can tell
-/// whether more lines follow), and whether the `max_output_chars` budget cut
-/// the body (`truncated`).
-fn read_footer(
-  selection : ReadSelection,
-  rendered : RenderedSelection,
-) -> String {
-  "<system>start_line=\{selection.start_line} shown_lines=\{rendered.shown_lines} total_lines=\{selection.total_lines} truncated=\{rendered.truncated}</system>"
-}
-
-///|
-fn select_lines(
-  content : String,
-  start_line : Int,
-  max_lines : Int?,
-) -> ReadSelection {
-  let lines = [ for line in content.split("\n") => line ]
-  let total_lines = lines.length()
-  // Clamp both bounds into [0, total_lines] so the slice below is always
-  // ascending and in range — a start past the last line selects nothing.
-  let start_index = (start_line - 1).clamp(min=0, max=total_lines)
-  let end_exclusive = match max_lines {
-    // Clamp the count BEFORE adding: a huge max_lines (e.g. Int max) must
-    // not overflow past start_index (Codex review). Such a request now
-    // returns the remaining lines, where the old post-add clamp overflowed
-    // negative and accidentally selected nothing.
-    Some(count) =>
-      start_index + count.clamp(min=0, max=total_lines - start_index)
-    None => total_lines
-  }
-  let selected = lines[start_index:end_exclusive]
-  {
-    content: selected.join("\n"),
-    start_line,
-    total_lines,
-    shown_lines: selected.length(),
-  }
-}
-
-///|
-async fn directory_read_error(path : String) -> String? {
-  match (@fs.kind(path, follow_symlink=true) catch { _ => return None }) {
-    Directory =>
-      Some(
-        "error reading \{path}: path is a directory; use the shell tool with `ls` or `tree` to inspect directories, then read specific files.",
-      )
-    _ => None
-  }
-}
-
-///|
-/// Keep at most `max_units` leading UTF-16 code units of `content`. The budget
-/// is a soft limit, so we count in code units (`String::length`, O(1)) rather
-/// than Unicode code points, and only snap the cut down to a character boundary
-/// so the result can never end in a lone surrogate.
-fn code_unit_prefix(content : String, max_units : Int) -> String {
-  if max_units <= 0 {
-    ""
-  } else if content.length() <= max_units {
-    content
-  } else {
-    "\{content[:@utils.char_boundary_at_or_below(content, max_units)]}"
-  }
-}
-
-///|
-fn render_numbered_content(
-  selection : ReadSelection,
-  max_chars : Int,
-) -> RenderedSelection {
-  if selection.shown_lines == 0 {
-    return { content: "", shown_lines: 0, truncated: false }
-  }
-  if max_chars <= 0 {
-    return { content: "", shown_lines: 0, truncated: true }
-  }
-  let lines = [ for line in selection.content.split("\n") => line.to_owned() ]
-  let numbered : Array[String] = []
-  let mut remaining = max_chars
-  let mut truncated = false
-  for index in 0..<lines.length() {
-    let separator_units = if numbered.length() == 0 { 0 } else { 1 }
-    let prefix = "\{selection.start_line + index}\t"
-    let prefix_budget = separator_units + prefix.length()
-    if remaining < prefix_budget {
-      truncated = true
-      break
-    }
-    let available = remaining - prefix_budget
-    let line = lines[index]
-    let line_units = line.length()
-    if line_units <= available {
-      numbered.push("\{prefix}\{line}")
-      remaining = remaining - prefix_budget - line_units
-    } else {
-      numbered.push("\{prefix}\{code_unit_prefix(line, available)}")
-      remaining = 0
-      truncated = true
-      break
-    }
-  }
-  if numbered.length() < lines.length() {
-    truncated = true
-  }
-  { content: numbered.join("\n"), shown_lines: numbered.length(), truncated }
 }
 
 ///|
