@@ -111,10 +111,9 @@ async fn read_file(
   // ascending and in range — a start past the last line selects nothing.
   let start_index = (input.start_line - 1).clamp(min=0, max=total_lines)
   let end_exclusive = match input.max_lines {
-    // Clamp the count BEFORE adding: a huge max_lines (e.g. Int max) must not
-    // overflow past start_index (Codex review). Such a request now returns the
-    // remaining lines, where the old post-add clamp overflowed negative and
-    // accidentally selected nothing.
+    // Clamp count before adding it to start_index: a huge max_lines (e.g.
+    // Int::max_value) would otherwise overflow Int in the sum. Clamped, the
+    // selection simply runs to the last line.
     Some(count) =>
       start_index + count.clamp(min=0, max=total_lines - start_index)
     None => total_lines
