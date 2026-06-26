@@ -71,15 +71,6 @@ async fn execute(
 }
 
 ///|
-priv struct RenderedSelection {
-  content : String
-  start_line : Int
-  total_lines : Int
-  shown_lines : Int
-  truncated : Bool
-}
-
-///|
 async fn read_file(
   input : @decode.ReadInput,
   path~ : String,
@@ -114,85 +105,69 @@ async fn read_file(
       brief~,
     )
   }
-  let rendered = {
-    let lines = [ for line in content.split("\n") => line ]
-    let total_lines = lines.length()
-    // Clamp both bounds into [0, total_lines] so the slice below is always
-    // ascending and in range — a start past the last line selects nothing.
-    let start_index = (input.start_line - 1).clamp(min=0, max=total_lines)
-    let end_exclusive = match input.max_lines {
-      // Clamp the count BEFORE adding: a huge max_lines (e.g. Int max) must
-      // not overflow past start_index (Codex review). Such a request now
-      // returns the remaining lines, where the old post-add clamp overflowed
-      // negative and accidentally selected nothing.
-      Some(count) =>
-        start_index + count.clamp(min=0, max=total_lines - start_index)
-      None => total_lines
+  let lines = [ for line in content.split("\n") => line ]
+  let total_lines = lines.length()
+  // Clamp both bounds into [0, total_lines] so the slice below is always
+  // ascending and in range — a start past the last line selects nothing.
+  let start_index = (input.start_line - 1).clamp(min=0, max=total_lines)
+  let end_exclusive = match input.max_lines {
+    // Clamp the count BEFORE adding: a huge max_lines (e.g. Int max) must not
+    // overflow past start_index (Codex review). Such a request now returns the
+    // remaining lines, where the old post-add clamp overflowed negative and
+    // accidentally selected nothing.
+    Some(count) =>
+      start_index + count.clamp(min=0, max=total_lines - start_index)
+    None => total_lines
+  }
+  let selected = lines[start_index:end_exclusive]
+  // Render the selected lines as `<line-number>\t<content>`, streaming straight
+  // into `out` with `<+` and stopping once the max_output_chars budget runs
+  // out. Both the line-number gutter and the `\n` separators count against the
+  // budget. An empty selection (range past EOF) or an exhausted budget simply
+  // appends no body, leaving just the footer below.
+  let out = StringBuilder()
+  let mut shown_lines = 0
+  let mut remaining = input.max_output_chars
+  let mut truncated = false
+  for index in 0..<selected.length() {
+    let separator_units = if shown_lines == 0 { 0 } else { 1 }
+    let prefix = "\{input.start_line + index}\t"
+    let prefix_budget = separator_units + prefix.length()
+    if remaining < prefix_budget {
+      truncated = true
+      break
     }
-    let selected = [ for line in lines[start_index:end_exclusive] => line ]
-    if selected.length() == 0 {
-      {
-        content: "",
-        start_line: input.start_line,
-        total_lines,
-        shown_lines: 0,
-        truncated: false,
-      }
-    } else if input.max_output_chars <= 0 {
-      {
-        content: "",
-        start_line: input.start_line,
-        total_lines,
-        shown_lines: 0,
-        truncated: true,
-      }
+    let available = remaining - prefix_budget
+    let line = selected[index]
+    let line_units = line.length()
+    if separator_units == 1 {
+      out <+ "\n"
+    }
+    if line_units <= available {
+      out <+ "\{prefix}\{line}"
+      remaining = remaining - prefix_budget - line_units
     } else {
-      let numbered : Array[String] = []
-      let mut remaining = input.max_output_chars
-      let mut truncated = false
-      for index in 0..<selected.length() {
-        let separator_units = if numbered.length() == 0 { 0 } else { 1 }
-        let prefix = "\{input.start_line + index}\t"
-        let prefix_budget = separator_units + prefix.length()
-        if remaining < prefix_budget {
-          truncated = true
-          break
-        }
-        let available = remaining - prefix_budget
-        let line = selected[index]
-        let line_units = line.length()
-        if line_units <= available {
-          numbered.push("\{prefix}\{line}")
-          remaining = remaining - prefix_budget - line_units
-        } else {
-          numbered.push("\{prefix}\{@utils.code_unit_prefix(line, available)}")
-          remaining = 0
-          truncated = true
-          break
-        }
-      }
-      if numbered.length() < selected.length() {
-        truncated = true
-      }
-      {
-        content: numbered.join("\n"),
-        start_line: input.start_line,
-        total_lines,
-        shown_lines: numbered.length(),
-        truncated,
-      }
+      // The line overruns the budget: keep a surrogate-safe prefix of it (which
+      // may be empty, leaving just the gutter) and stop.
+      out <+ "\{prefix}\{@utils.code_unit_prefix(line, available)}"
+      shown_lines = shown_lines + 1
+      truncated = true
+      break
     }
+    shown_lines = shown_lines + 1
   }
-  // Every read has the same shape: numbered lines followed by a single status
-  // footer. When the body is empty (start past EOF, or a zero budget) only the
-  // footer is returned, so the model still learns what it asked for.
-  let footer = "<system>start_line=\{rendered.start_line} shown_lines=\{rendered.shown_lines} total_lines=\{rendered.total_lines} truncated=\{rendered.truncated}</system>"
-  let output = if rendered.content == "" {
-    footer
-  } else {
-    "\{rendered.content}\n\{footer}"
+  if shown_lines < selected.length() {
+    truncated = true
   }
-  @agent_tool.ToolAction::respond(output, is_error=rendered.truncated, brief~)
+  // Every read has the same shape: numbered lines (when any) followed by a
+  // single status footer, so even a body-less read still tells the model what
+  // it asked for.
+  if shown_lines > 0 {
+    out <+ "\n"
+  }
+  out <+
+    "<system>start_line=\{input.start_line} shown_lines=\{shown_lines} total_lines=\{total_lines} truncated=\{truncated}</system>"
+  @agent_tool.ToolAction::respond(out.to_string(), is_error=truncated, brief~)
 }
 
 ///|
