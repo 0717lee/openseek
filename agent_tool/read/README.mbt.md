@@ -16,7 +16,7 @@ read specific files.
 ## Design Rationale
 
 Every read has the **same shape** regardless of whether it is a whole-file read,
-a line range, or a capped read: right-aligned `<line-number>\t<content>` lines
+a line range, or a capped read: right-aligned `<line-number> |<content>` lines
 (the common numbered style used by other coding agents) followed by a single
 `<system>...</system>` status footer. The optional range and output-cap
 arguments exist for the failure mode seen in longer evaluations: large generated
@@ -74,11 +74,11 @@ The action is always `Respond(ToolOutput(...))` — the agent loop forwards
 `false` on success and `true` for read failures, argument failures, or automatic
 output truncation. The string body has one of these shapes:
 
-- On success: right-aligned `<line-number>\t<content>` lines, then a newline,
+- On success: right-aligned `<line-number> |<content>` lines, then a newline,
   then the footer `<system>start_line=<n> shown_lines=<k> total_lines=<t> truncated=<bool></system>`.
   When the selected body is empty (the range starts past EOF, or the budget is
   zero) only the footer is returned. A zero-byte file returns just the footer
-  with `total_lines=0 note=empty file`, rather than a phantom blank `1\t` line.
+  with `total_lines=0 note=empty file`, rather than a phantom blank `1 |` line.
   `truncated=true` — set when `max_output_chars` cut the numbered body — is the
   one case that flips `is_error` to `true`.
 - `"error reading <path>: <error>"` — a single-file read failed. Common
@@ -99,7 +99,7 @@ test "read tool advertises the expected schema" {
     content=(
       #|{
       #|  name: "read",
-      #|  description: "Read arguments.path as text. For several known independent files, batch separate read tool calls in one assistant response when possible. Do not use read for directories: inspect them with `ls` or `tree`, then read specific files. Supports optional start_line, max_lines, and max_output_chars for focused single-file reads. Output is right-aligned `<line-number>\\t<content>` numbered lines followed by a `<system>` status footer.",
+      #|  description: "Read arguments.path as text. For several known independent files, batch separate read tool calls in one assistant response when possible. Do not use read for directories: inspect them with `ls` or `tree`, then read specific files. Supports optional start_line, max_lines, and max_output_chars for focused single-file reads. Output is right-aligned `<line-number> |<content>` numbered lines followed by a `<system>` status footer.",
       #|  schema: JsonSchema(
       #|    Object(
       #|      {
@@ -158,7 +158,7 @@ async test "read tool reads a workspace note through the registry" {
     assert_eq(
       output.content,
       [
-        "1\tTask: summarize test failures", "2\tStatus: investigating", "3\t", "<system>start_line=1 shown_lines=3 total_lines=3 truncated=false</system>",
+        "1 |Task: summarize test failures", "2 |Status: investigating", "3 |", "<system>start_line=1 shown_lines=3 total_lines=3 truncated=false</system>",
       ].join("\n"),
     )
   })
@@ -191,7 +191,7 @@ async test "read tool supports focused range reads" {
     assert_eq(
       output.content,
       [
-        "2\tbeta", "3\tgamma", "<system>start_line=2 shown_lines=2 total_lines=4 truncated=false</system>",
+        "2 |beta", "3 |gamma", "<system>start_line=2 shown_lines=2 total_lines=4 truncated=false</system>",
       ].join("\n"),
     )
   })
