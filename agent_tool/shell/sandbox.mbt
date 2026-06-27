@@ -142,6 +142,17 @@ async fn probe_sandbox_exec_available() -> Bool {
     error if @async.is_being_cancelled() => raise error
     _ => return false
   }
+  // sandbox-exec matches `file-write*` rules against the *realpath* of the
+  // target. Temp dirs live under symlinked prefixes on macOS (`/tmp` ->
+  // `/private/tmp`, `$TMPDIR` under `/private/var/...`), so a deny rule built
+  // from the unresolved path never matches the resolved write. That made the
+  // probe believe the sandbox was unenforced and disabled it process-wide.
+  // Resolve the dir first, exactly like the real source-write profile does for
+  // the workspace root.
+  let probe_dir = @fs.realpath(probe_dir) catch {
+    error if @async.is_being_cancelled() => raise error
+    _ => probe_dir
+  }
   let blocked_path = @path.Path(probe_dir)
     .join(Path("blocked"))
     .normalize()
@@ -1131,7 +1142,7 @@ fn command_text_mentions_unsafe_in_place_sed(text : String) -> Bool {
   let words = command_text_words(text)
   for index in 0..<words.length() {
     if command_token_basename_is(words[index], "sed") &&
-      command_text_is_command_position(words, index) {
+      command_text_word_runs_as_command(words, index) {
       if command_text_sed_segment_has_in_place(words, index) {
         if !command_text_sed_is_safe_non_source_find_exec(words, index) {
           return true
@@ -1143,11 +1154,102 @@ fn command_text_mentions_unsafe_in_place_sed(text : String) -> Bool {
 }
 
 ///|
+/// True when `words[index]` is executed as a command: either a shell command
+/// position (`| sed`, `&& sed`, `find ... -exec sed`) or the utility that an
+/// `xargs` at the start of its segment runs (`... | xargs sed -i ...`). `xargs`
+/// runs its first non-option operand as a command, so a `sed -i`/`git restore`
+/// reached that way is a real source write even though the token sits in the
+/// middle of the `xargs` argument list rather than in shell command position.
+fn command_text_word_runs_as_command(
+  words : Array[String],
+  index : Int,
+) -> Bool {
+  command_text_is_command_position(words, index) ||
+  command_text_is_xargs_utility(words, index)
+}
+
+///|
+/// True when `words[index]` is the utility command an `xargs` invokes. The
+/// `xargs` must be the effective command at the start of `index`'s segment, and
+/// `index` must be the first operand that is not an `xargs` option (or its
+/// consumed value).
+fn command_text_is_xargs_utility(words : Array[String], index : Int) -> Bool {
+  let segment_start = command_text_segment_start(words, index)
+  let segment_end = command_text_segment_end(words, segment_start)
+  guard command_text_effective_command_index(words, segment_start, segment_end)
+    is Some(command_index) else {
+    return false
+  }
+  guard command_index < index &&
+    command_token_basename_is(words[command_index], "xargs") else {
+    return false
+  }
+  command_text_xargs_utility_index(words, command_index + 1, segment_end) ==
+  Some(index)
+}
+
+///|
+/// Index of the first `xargs` operand that names the utility to run, skipping
+/// `xargs` options and any separate values they consume. Returns the operand
+/// after `--`, or `None` when only options remain (xargs then defaults to
+/// `echo`, which writes nothing).
+fn command_text_xargs_utility_index(
+  words : Array[String],
+  start : Int,
+  limit : Int,
+) -> Int? {
+  let mut index = start
+  while index < limit {
+    let arg = words[index]
+    if arg == "--" {
+      return if index + 1 < limit { Some(index + 1) } else { None }
+    }
+    if arg.has_prefix("-") && arg != "-" {
+      index += if command_text_xargs_option_consumes_next(arg) { 2 } else { 1 }
+      continue
+    }
+    return Some(index)
+  }
+  None
+}
+
+///|
+/// Whether an `xargs` option takes the next word as a separate value (so the
+/// scanner must skip that value when locating the utility). Covers GNU and the
+/// BSD/macOS-only `-J`/`-R`/`-S` (replacement string, max replacements, replace
+/// size). Attached forms (`-n5`, `-I{}`, `--max-args=5`) and no-arg flags
+/// (`-r`, `-0`, `-t`) consume only their own token via the generic option branch.
+fn command_text_xargs_option_consumes_next(arg : String) -> Bool {
+  match arg {
+    "-a"
+    | "-d"
+    | "-E"
+    | "-I"
+    | "-J"
+    | "-L"
+    | "-n"
+    | "-P"
+    | "-R"
+    | "-S"
+    | "-s"
+    | "--arg-file"
+    | "--delimiter"
+    | "--eof"
+    | "--replace"
+    | "--max-lines"
+    | "--max-args"
+    | "--max-procs"
+    | "--max-chars" => true
+    _ => false
+  }
+}
+
+///|
 fn command_text_mentions_unsafe_git_source_operation(text : String) -> Bool {
   let words = command_text_words(text)
   for index in 0..<words.length() {
     if command_token_basename_is(words[index], "git") &&
-      command_text_is_command_position(words, index) {
+      command_text_word_runs_as_command(words, index) {
       let segment_end = command_text_segment_end(words, index)
       match command_text_git_subcommand_index(words, index + 1, segment_end) {
         Some(subcommand_index) =>

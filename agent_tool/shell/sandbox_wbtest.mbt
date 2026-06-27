@@ -1397,6 +1397,85 @@ async test "sandbox preblocks common source-writing commands" {
         real_root,
       ),
     )
+    // `xargs sed -i` runs sed as the xargs utility, so an in-place edit reached
+    // that way must be blocked even though sed is not in shell command position.
+    // (These shapes parse as TooComplex via the unquoted glob; the simple
+    // `find ... | xargs sed -i` form parses as Simple and is caught by the
+    // source-write sandbox instead.)
+    let xargs_sed_source = "echo *.mbt | xargs sed -i '' 's/42/43/g'"
+    assert_true(
+      is_some_path(
+        dynamic_source_tree_operation_target(
+          @shell_parse.parse_for_policy(xargs_sed_source),
+          xargs_sed_source,
+          real_root,
+          Some(real_root),
+        ),
+        real_root,
+      ),
+    )
+    let xargs_replace_sed = "echo *.mbt | xargs -I{} sed -i '' 's/42/43/g' {}"
+    assert_true(
+      is_some_path(
+        dynamic_source_tree_operation_target(
+          @shell_parse.parse_for_policy(xargs_replace_sed),
+          xargs_replace_sed,
+          real_root,
+          Some(real_root),
+        ),
+        real_root,
+      ),
+    )
+    let xargs_n1_sed = "echo *.mbt | xargs -n 1 sed -i '' 's/42/43/g'"
+    assert_true(
+      is_some_path(
+        dynamic_source_tree_operation_target(
+          @shell_parse.parse_for_policy(xargs_n1_sed),
+          xargs_n1_sed,
+          real_root,
+          Some(real_root),
+        ),
+        real_root,
+      ),
+    )
+    // BSD/macOS `-J replstr` consumes its operand before the utility.
+    let xargs_bsd_replace_sed = "echo *.mbt | xargs -J {} sed -i '' 's/42/43/g' {}"
+    assert_true(
+      is_some_path(
+        dynamic_source_tree_operation_target(
+          @shell_parse.parse_for_policy(xargs_bsd_replace_sed),
+          xargs_bsd_replace_sed,
+          real_root,
+          Some(real_root),
+        ),
+        real_root,
+      ),
+    )
+    // The same xargs-utility gap applied to git source-tree operations.
+    let xargs_git_checkout = "echo *.mbt | xargs git checkout --"
+    assert_true(
+      is_some_path(
+        dynamic_source_tree_operation_target(
+          @shell_parse.parse_for_policy(xargs_git_checkout),
+          xargs_git_checkout,
+          real_root,
+          Some(real_root),
+        ),
+        real_root,
+      ),
+    )
+    // Read-only xargs pipelines (sed is not the xargs utility, no in-place edit)
+    // must not be blocked, so analysis loops keep working.
+    let xargs_grep_readonly = "echo *.mbt | xargs grep -l 'sed -i'"
+    assert_true(
+      dynamic_source_tree_operation_target(
+        @shell_parse.parse_for_policy(xargs_grep_readonly),
+        xargs_grep_readonly,
+        real_root,
+        Some(real_root),
+      )
+      is None,
+    )
     let safe_find_then_sed = "find \{real_root} -name '*.txt' -print; sed -i '' 's/42/43/' *.mbt"
     assert_true(
       is_some_path(
