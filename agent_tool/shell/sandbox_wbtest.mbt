@@ -46,10 +46,12 @@ test "sandbox trusts only narrow moon source-writing commands" {
 ///|
 test "sandbox source write regex covers moonbit source and manifests" {
   let regex = source_write_regex("/tmp/a.b")
-  let create_regex = source_write_create_regex("/tmp/a.b")
-  assert_eq(create_regex, regex)
-  assert_true(regex.contains("_build[^/]+"))
-  assert_true(regex.contains("\\.mooncakes[^/]+"))
+  // The deny regex matches source files at any depth and no longer special-cases
+  // build directories; `_build`/`.mooncakes` are re-allowed by the carve-out.
+  assert_true(regex.contains("\\.mbt\\.md|\\.mbt|\\.mbti"))
+  assert_false(regex.contains("_build"))
+  let carveout = source_write_build_carveout_regex("/tmp/a.b")
+  assert_true(carveout.contains("_build|\\.mooncakes"))
   assert_true(
     is_protected_workspace_source_path("/workspace", "/workspace/moon.mod"),
   )
@@ -112,7 +114,8 @@ async test "sandbox profile is cached per normalized workspace root" {
   let cached = source_write_readonly_profile_data("/workspace/").profile
   assert_eq(cached, profile)
   assert_true(profile.contains("(deny file-write*"))
-  assert_true(profile.contains("(deny file-write-create"))
+  assert_true(profile.contains("(allow file-write* (regex"))
+  assert_false(profile.contains("(deny file-write-create"))
   assert_false(profile.contains("(literal \"/workspace\")"))
 }
 
@@ -765,6 +768,20 @@ async test "sandbox preblocks common source-writing commands" {
         direct_source_tree_operation_target_for_root(
           @shell_parse.parse_for_policy(
             "New-Item -Path main.mbt -ItemType File",
+          ),
+          real_root,
+          Some(real_root),
+        ),
+        main_path,
+      ),
+    )
+    // `-Name` is the leaf created under `-Path`, so the target is `./main.mbt`,
+    // not the `.` directory.
+    assert_true(
+      is_some_path(
+        direct_source_tree_operation_target_for_root(
+          @shell_parse.parse_for_policy(
+            "New-Item -Path . -Name main.mbt -ItemType File",
           ),
           real_root,
           Some(real_root),

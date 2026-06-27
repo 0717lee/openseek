@@ -507,6 +507,31 @@ async test "shell sandbox blocks source writes and points to edit tools" {
 }
 
 ///|
+async test "shell sandbox allows generated source writes under _build" {
+  if !sandbox_exec_usable_for_test() {
+    return
+  }
+  @vfs.with_tmpdir(prefix="openseek-shell-sandbox-build-carveout-", dir => {
+    @fs.mkdir("\{dir}/_build")
+    // `_build/main.mbt` matches the source-file shape but lives under a
+    // Moon-managed build tree, so the SBPL carve-out must keep it writable.
+    let result = run_shell_in_workspace(dir, {
+      "cmd": "awk 'BEGIN { print \"pub fn generated() -> Int { 1 }\" > \"_build/main.mbt\" }'",
+      "cwd": dir,
+    })
+    guard result is Respond(output) else { fail("expected Respond") }
+    assert_false(output.is_error)
+    assert_false(
+      output.content.contains("source file writes from shell are blocked"),
+    )
+    assert_eq(
+      @fs.read_file("\{dir}/_build/main.mbt").text(),
+      "pub fn generated() -> Int { 1 }\n",
+    )
+  })
+}
+
+///|
 #cfg(not(platform="windows"))
 async test "shell sandbox reports masked source write denials as errors" {
   @vfs.with_tmpdir(prefix="openseek-shell-sandbox-masked-denial-", dir => {

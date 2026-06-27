@@ -236,15 +236,21 @@ async fn source_write_readonly_profile_data(
   let scan = protected_source_tree_profile_scan(real_workspace_root)
   let denial_subjects = source_write_denial_subjects(scan.literal_paths)
   let source_regex = source_write_regex(real_workspace_root)
-  let source_create_regex = source_write_create_regex(real_workspace_root)
+  let build_carveout_regex = source_write_build_carveout_regex(
+    real_workspace_root,
+  )
   let profile = StringBuilder()
   profile.write_string("(version 1)\n")
   profile.write_string("(allow default)\n")
-  profile.write_string(
-    "(deny file-write-create (regex \"\{sbpl_string_escape(source_create_regex)}\"))\n",
-  )
+  // `file-write*` already covers `file-write-create`, so this single deny blocks
+  // both rewriting existing source and creating new source files. SBPL is
+  // last-match-wins, so the following carve-out re-allows Moon-managed build and
+  // cache trees without the deny regex having to special-case them.
   profile.write_string(
     "(deny file-write* (regex \"\{sbpl_string_escape(source_regex)}\"))\n",
+  )
+  profile.write_string(
+    "(allow file-write* (regex \"\{sbpl_string_escape(build_carveout_regex)}\"))\n",
   )
   for dir in scan.literal_paths {
     profile.write_string(
@@ -294,22 +300,19 @@ async fn cached_source_write_profile_valid(
 ///|
 fn source_write_regex(real_workspace_root : String) -> String {
   let root = regex_escape(strip_trailing_slash(real_workspace_root))
-  let source_dir = protected_source_directory_component_regex()
   let source_file = "([^/]*(\\.mbt\\.md|\\.mbt|\\.mbti)|(moon\\.mod\\.json|moon\\.pkg\\.json|moon\\.mod|moon\\.pkg|moon\\.work))"
-  "^" + root + "(/|$)(\{source_dir}/)*\{source_file}$"
+  "^" + root + "(/|$)(.*/)?\{source_file}$"
 }
 
 ///|
-fn source_write_create_regex(real_workspace_root : String) -> String {
-  source_write_regex(real_workspace_root)
-}
-
-///|
-fn protected_source_directory_component_regex() -> String {
-  let normal = "[^/_.][^/]*"
-  let not_build = "(_|_b|_bu|_bui|_buil|_build[^/]+|_[^b/][^/]*|_b[^u/][^/]*|_bu[^i/][^/]*|_bui[^l/][^/]*|_buil[^d/][^/]*)"
-  let not_mooncakes = "(\\.|\\.m|\\.mo|\\.moo|\\.moon|\\.moonc|\\.moonca|\\.mooncak|\\.mooncake|\\.mooncakes[^/]+|\\.[^m/][^/]*|\\.m[^o/][^/]*|\\.mo[^o/][^/]*|\\.moo[^n/][^/]*|\\.moon[^c/][^/]*|\\.moonc[^a/][^/]*|\\.moonca[^k/][^/]*|\\.mooncak[^e/][^/]*|\\.mooncake[^s/][^/]*)"
-  "(\{normal}|\{not_build}|\{not_mooncakes})"
+/// Paths under a Moon-managed `_build` or `.mooncakes` directory, where Moon
+/// itself writes generated `.mbt` sources. Emitted as an `allow` rule after the
+/// source deny so the sandbox blocks hand-written source rewrites while leaving
+/// Moon's own build/cache writes untouched. Mirrors the component names in
+/// `is_moon_managed_workspace_path`.
+fn source_write_build_carveout_regex(real_workspace_root : String) -> String {
+  let root = regex_escape(strip_trailing_slash(real_workspace_root))
+  "^" + root + "/(.*/)?(_build|\\.mooncakes)(/|$)"
 }
 
 ///|
@@ -2715,8 +2718,7 @@ async fn powershell_write_target(
   guard parse_powershell_path_operands(argv, arg_start) is Some(operands) else {
     return git_workspace_scope_target(real_workspace_root, cwd)
   }
-  for path in operands.paths {
-    let target = resolve_source_write_redirect_target(cwd, path)
+  for target in powershell_new_item_targets(operands, cwd) {
     if is_protected_workspace_source_path(real_workspace_root, target) {
       return Some(target)
     }
@@ -2729,6 +2731,34 @@ async fn powershell_write_target(
     }
   }
   None
+}
+
+///|
+/// Resolve the path(s) a `New-Item` invocation creates. `-Name` names the leaf
+/// item created inside each `-Path` parent (or the cwd when no `-Path` is
+/// given), so `New-Item -Path . -Name main.mbt` creates `./main.mbt`, not `.`.
+/// Without `-Name`, each `-Path` value is itself the created item.
+fn powershell_new_item_targets(
+  operands : PowershellPathOperands,
+  cwd : String,
+) -> Array[String] {
+  let targets : Array[String] = []
+  match operands.new_name {
+    Some(name) =>
+      if operands.paths.length() == 0 {
+        targets.push(resolve_source_write_redirect_target(cwd, name))
+      } else {
+        for parent in operands.paths {
+          let parent_dir = resolve_source_write_redirect_target(cwd, parent)
+          targets.push(resolve_source_write_redirect_target(parent_dir, name))
+        }
+      }
+    None =>
+      for path in operands.paths {
+        targets.push(resolve_source_write_redirect_target(cwd, path))
+      }
+  }
+  targets
 }
 
 ///|
