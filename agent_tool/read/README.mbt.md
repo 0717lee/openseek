@@ -16,8 +16,8 @@ read specific files.
 ## Design Rationale
 
 Every read has the **same shape** regardless of whether it is a whole-file read,
-a line range, or a capped read: `<line-number>\t<content>` lines (the common
-`cat -n` style used by other coding agents) followed by a single
+a line range, or a capped read: right-aligned `<line-number>\t<content>` lines
+(the common numbered style used by other coding agents) followed by a single
 `<system>...</system>` status footer. The optional range and output-cap
 arguments exist for the failure mode seen in longer evaluations: large generated
 files and dependency sources can flood the transcript and push useful context
@@ -74,8 +74,8 @@ The action is always `Respond(ToolOutput(...))` — the agent loop forwards
 `false` on success and `true` for read failures, argument failures, or automatic
 output truncation. The string body has one of these shapes:
 
-- On success: `<line-number>\t<content>` lines, then a newline, then the footer
-  `<system>start_line=<n> shown_lines=<k> total_lines=<t> truncated=<bool></system>`.
+- On success: right-aligned `<line-number>\t<content>` lines, then a newline,
+  then the footer `<system>start_line=<n> shown_lines=<k> total_lines=<t> truncated=<bool></system>`.
   When the selected body is empty (the range starts past EOF, or the budget is
   zero) only the footer is returned. A zero-byte file returns just the footer
   with `total_lines=0 note=empty file`, rather than a phantom blank `1\t` line.
@@ -99,7 +99,7 @@ test "read tool advertises the expected schema" {
     content=(
       #|{
       #|  name: "read",
-      #|  description: "Read arguments.path as text. For several known independent files, batch separate read tool calls in one assistant response when possible. Do not use read for directories: inspect them with `ls` or `tree`, then read specific files. Supports optional start_line, max_lines, and max_output_chars for focused single-file reads. Output is `<line-number>\\t<content>` numbered lines followed by a `<system>` status footer.",
+      #|  description: "Read arguments.path as text. For several known independent files, batch separate read tool calls in one assistant response when possible. Do not use read for directories: inspect them with `ls` or `tree`, then read specific files. Supports optional start_line, max_lines, and max_output_chars for focused single-file reads. Output is right-aligned `<line-number>\\t<content>` numbered lines followed by a `<system>` status footer.",
       #|  schema: JsonSchema(
       #|    Object(
       #|      {

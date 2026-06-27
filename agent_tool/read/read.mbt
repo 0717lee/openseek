@@ -19,7 +19,8 @@
 /// ## Result
 /// - `Respond(ToolOutput(<numbered lines> + "\n" + <footer>))` on success.
 ///   Every read has the same shape regardless of range or cap: `<line-number>\t
-///   <content>` lines followed by a single
+///   <content>` lines, with line numbers right-aligned to the selected range,
+///   followed by a single
 ///   `<system>start_line=.. shown_lines=.. total_lines=.. truncated=..</system>`
 ///   footer (footer only when the body is empty, e.g. a range past EOF). A
 ///   zero-byte file returns just that footer with `total_lines=0 note=empty
@@ -35,7 +36,7 @@ pub fn definition(
 ) -> @agent_tool.AgentToolDefinition {
   AgentToolDefinition(
     name="read",
-    description="Read arguments.path as text. For several known independent files, batch separate read tool calls in one assistant response when possible. Do not use read for directories: inspect them with `ls` or `tree`, then read specific files. Supports optional start_line, max_lines, and max_output_chars for focused single-file reads. Output is `<line-number>\\t<content>` numbered lines followed by a `<system>` status footer.",
+    description="Read arguments.path as text. For several known independent files, batch separate read tool calls in one assistant response when possible. Do not use read for directories: inspect them with `ls` or `tree`, then read specific files. Supports optional start_line, max_lines, and max_output_chars for focused single-file reads. Output is right-aligned `<line-number>\\t<content>` numbered lines followed by a `<system>` status footer.",
     schema=JsonSchema({
       "type": "object",
       "required": ["path"],
@@ -68,15 +69,6 @@ async fn execute(
     }
   }
   read_file(input, path=@workspace_path.resolve(workspace_root, input.path))
-}
-
-///|
-priv struct RenderedSelection {
-  content : String
-  start_line : Int
-  total_lines : Int
-  shown_lines : Int
-  truncated : Bool
 }
 
 ///|
@@ -114,85 +106,77 @@ async fn read_file(
       brief~,
     )
   }
-  let rendered = {
-    let lines = [ for line in content.split("\n") => line ]
-    let total_lines = lines.length()
-    // Clamp both bounds into [0, total_lines] so the slice below is always
-    // ascending and in range — a start past the last line selects nothing.
-    let start_index = (input.start_line - 1).clamp(min=0, max=total_lines)
-    let end_exclusive = match input.max_lines {
-      // Clamp the count BEFORE adding: a huge max_lines (e.g. Int max) must
-      // not overflow past start_index (Codex review). Such a request now
-      // returns the remaining lines, where the old post-add clamp overflowed
-      // negative and accidentally selected nothing.
-      Some(count) =>
-        start_index + count.clamp(min=0, max=total_lines - start_index)
-      None => total_lines
-    }
-    let selected = [ for line in lines[start_index:end_exclusive] => line ]
-    if selected.length() == 0 {
-      {
-        content: "",
-        start_line: input.start_line,
-        total_lines,
-        shown_lines: 0,
-        truncated: false,
-      }
-    } else if input.max_output_chars <= 0 {
-      {
-        content: "",
-        start_line: input.start_line,
-        total_lines,
-        shown_lines: 0,
-        truncated: true,
-      }
+  let lines = [ for line in content.split("\n") => line ]
+  let total_lines = lines.length()
+  // Clamp both bounds into [0, total_lines] so the render loop only visits
+  // valid lines — a start past the last line selects nothing.
+  let start_index = (input.start_line - 1).clamp(min=0, max=total_lines)
+  let end_exclusive = match input.max_lines {
+    // Clamp the count BEFORE adding: a huge max_lines (e.g. Int max) must
+    // not overflow past start_index. Such a request returns the remaining
+    // lines, where a post-add clamp could overflow and select nothing.
+    Some(count) =>
+      start_index + count.clamp(min=0, max=total_lines - start_index)
+    None => total_lines
+  }
+  let line_number_width = if start_index < end_exclusive {
+    (input.start_line + end_exclusive - start_index - 1).to_string().length()
+  } else {
+    input.start_line.to_string().length()
+  }
+  let output = StringBuilder()
+  let mut shown_lines = 0
+  let mut truncated = false
+  if start_index < end_exclusive {
+    if input.max_output_chars <= 0 {
+      truncated = true
     } else {
-      let numbered : Array[String] = []
       let mut remaining = input.max_output_chars
-      let mut truncated = false
-      for index in 0..<selected.length() {
-        let separator_units = if numbered.length() == 0 { 0 } else { 1 }
-        let prefix = "\{input.start_line + index}\t"
+      for index in start_index..<end_exclusive {
+        let separator_units = if output.is_empty() { 0 } else { 1 }
+        let line_number = input.start_line + index - start_index
+        let prefix = "\{line_number.to_string().pad_start(line_number_width, ' ')}\t"
         let prefix_budget = separator_units + prefix.length()
         if remaining < prefix_budget {
           truncated = true
           break
         }
+        if separator_units == 1 {
+          output <+ "\n"
+        }
         let available = remaining - prefix_budget
-        let line = selected[index]
+        let line = lines[index]
         let line_units = line.length()
         if line_units <= available {
-          numbered.push("\{prefix}\{line}")
+          output <+ "\{prefix}\{line}"
           remaining = remaining - prefix_budget - line_units
         } else {
-          numbered.push("\{prefix}\{@utils.code_unit_prefix(line, available)}")
+          output <+ "\{prefix}\{@utils.code_unit_prefix(line, available)}"
           remaining = 0
           truncated = true
+          shown_lines += 1
           break
         }
+        shown_lines += 1
       }
-      if numbered.length() < selected.length() {
+      if shown_lines < end_exclusive - start_index {
         truncated = true
-      }
-      {
-        content: numbered.join("\n"),
-        start_line: input.start_line,
-        total_lines,
-        shown_lines: numbered.length(),
-        truncated,
       }
     }
   }
   // Every read has the same shape: numbered lines followed by a single status
   // footer. When the body is empty (start past EOF, or a zero budget) only the
   // footer is returned, so the model still learns what it asked for.
-  let footer = "<system>start_line=\{rendered.start_line} shown_lines=\{rendered.shown_lines} total_lines=\{rendered.total_lines} truncated=\{rendered.truncated}</system>"
-  let output = if rendered.content == "" {
-    footer
-  } else {
-    "\{rendered.content}\n\{footer}"
+  if !output.is_empty() {
+    output <+ "\n"
   }
-  @agent_tool.ToolAction::respond(output, is_error=rendered.truncated, brief~)
+  output <+
+    "<system>start_line=\{input.start_line} shown_lines=\{shown_lines} total_lines=\{total_lines} truncated=\{truncated}</system>"
+  @agent_tool.ToolAction::respond(
+    output.to_string(),
+    is_error=truncated,
+    brief~,
+  )
 }
 
 ///|
@@ -357,12 +341,12 @@ async test "read counts the line-number gutter against the output budget" {
     let result = execute({ "path": path, "max_output_chars": 20 })
     guard result is Respond(output) else { fail("expected Respond") }
     assert_true(output.is_error)
-    // 20 code units buys exactly five `N\tx` lines (gutters included); the
-    // sixth gutter would overrun, so the body stops at line 5.
+    // 20 code units buys exactly four two-wide ` N\tx` lines (gutters
+    // included); the fifth gutter would overrun, so the body stops at line 4.
     assert_eq(
       output.content,
       [
-        "1\tx", "2\tx", "3\tx", "4\tx", "5\tx", "<system>start_line=1 shown_lines=5 total_lines=80 truncated=true</system>",
+        " 1\tx", " 2\tx", " 3\tx", " 4\tx", "<system>start_line=1 shown_lines=4 total_lines=80 truncated=true</system>",
       ].join("\n"),
     )
   })
@@ -401,7 +385,7 @@ async test "read caps unicode content on character boundaries" {
 }
 
 ///|
-async test "read numbers lines cat-n style with no header block" {
+async test "read numbers lines with an aligned gutter and no header block" {
   @vfs.with_tmpdir(dir => {
     let path = "\{dir}/aligned.txt"
     let content = [ for index in 1..<=111 => "line \{index}" ].join("\n")
@@ -409,8 +393,8 @@ async test "read numbers lines cat-n style with no header block" {
     let result = execute({ "path": path, "start_line": 9, "max_lines": 103 })
     guard result is Respond(output) else { fail("expected Respond") }
     assert_false(output.is_error)
-    assert_true(output.content.contains("9\tline 9"))
-    assert_true(output.content.contains("99\tline 99"))
+    assert_true(output.content.contains("  9\tline 9"))
+    assert_true(output.content.contains(" 99\tline 99"))
     assert_true(output.content.contains("100\tline 100"))
     assert_true(output.content.contains("111\tline 111"))
     assert_true(

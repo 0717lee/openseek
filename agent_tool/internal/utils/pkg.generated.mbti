@@ -2,9 +2,9 @@
 package "bobzhang/openseek/agent_tool/internal/utils"
 
 // Values
-pub fn char_boundary_at_or_below(String, Int) -> Int
+pub fn char_boundary_at_or_below(StringView, Int) -> Int
 
-pub fn code_unit_prefix(String, Int) -> String
+pub fn code_unit_prefix(StringView, Int) -> StringView
 
 // Errors
 
