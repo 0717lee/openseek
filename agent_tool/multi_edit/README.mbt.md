@@ -19,9 +19,12 @@ the content the caller expects. Because each edit is line-anchored,
 `old_string` can be the small exact span to replace instead of a large
 surrounding block. Each edit replaces the first matching span at or after its
 `start_line`, stopping at `end_line` when supplied. Replacement spans must not
-overlap. The final file also passes the same MoonBit manifest guard used by the
-other write tools, so generated `.mbti` files and known-bad manifest rewrites
-are rejected before the original file is overwritten.
+overlap — so when several changes fall on the same line (or in one tight span),
+the caller should combine them into a single edit whose `old_string` covers the
+whole span rather than emitting one edit per change, which would collide and
+fail the batch. The final file also passes the same MoonBit manifest guard used
+by the other write tools, so generated `.mbti` files and known-bad manifest
+rewrites are rejected before the original file is overwritten.
 
 ## API Style
 

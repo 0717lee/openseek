@@ -12,7 +12,7 @@ pub fn definition(
 ) -> @agent_tool.AgentToolDefinition {
   AgentToolDefinition(
     name="multi_edit",
-    description="Apply multiple exact line-anchored replacements to one file. Use this when compiler feedback identifies several known locations in the same file. Every edit must include old_string, new_string, and start_line; optional end_line bounds the search. Because each edit is line-anchored, old_string can be the small exact span to replace instead of a large context block. Each edit replaces the first matching span in its selected region. All edits are validated against the original file and no changes are written if any edit fails.",
+    description="Apply multiple exact line-anchored replacements to one file. Use this when compiler feedback identifies several known locations in the same file. Every edit must include old_string, new_string, and start_line; optional end_line bounds the search. Because each edit is line-anchored, old_string can be the small exact span to replace instead of a large context block. Each edit replaces the first matching span in its selected region. Do not emit separate edits for changes that are very close together: when several changes fall on the same line (or in one tight span), combine them into a single edit whose old_string covers the whole span, because adjacent or overlapping edits collide and the batch is rejected. All edits are validated against the original file and no changes are written if any edit fails.",
     schema=JsonSchema({
       "type": "object",
       "properties": {

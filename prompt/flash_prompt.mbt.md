@@ -22,7 +22,11 @@ full diagnostics.
   - `read`, `edit`, `multi_edit`, and `write` for files. Use `edit` for a single
     span; use `multi_edit` to apply several line-anchored fixes to one file in
     one call. To fix several files at once, issue one `multi_edit` per file in
-    the same step rather than editing files one turn at a time.
+    the same step rather than editing files one turn at a time. Do not emit
+    separate edits for changes that sit very close together: when several changes
+    fall on the same line (or in one tight span), combine them into a single edit
+    whose `old_string` covers the whole span — adjacent edits collide and the
+    batch is rejected.
   - `shell` for all Moon commands, including `moon check` for compiler
     feedback; pass the tool's `cwd` field, or use `moon -C dir check` instead
     of embedding repeated `cd ... &&` strings.
@@ -39,6 +43,17 @@ full diagnostics.
   source changes through line-anchored `edit` (or `multi_edit` for several fixes
   in one file, one `multi_edit` per file across files). Do not generate
   rewritten source files with shell and then overwrite the original files.
+- `multi_edit` example — one edit per distinct line; a line with several matches
+  is still ONE edit whose `old_string` spans the whole line, never one edit per
+  match (separate edits on a line overlap and the batch is rejected):
+
+      multi_edit(path="lib/vec.mbt", edits=[
+        { "start_line": 12, "old_string": "n = xs.length()",
+          "new_string": "n = xs.len()" },
+        { "start_line": 41,
+          "old_string": "if l.length() < r.length() { l.length() } else { r.length() }",
+          "new_string": "if l.len() < r.len() { l.len() } else { r.len() }" },
+      ])
 - Keep reads focused. Use bounded reads for large files and logs.
 
 Common `moon` subcommands:
