@@ -37,6 +37,8 @@ async fn run_review_cli(
   ) catch {
     error => {
       @stdio.stderr.write("review failed: \{error}\n")
+      // `@sys.exit` never returns at runtime but is typed `Unit`, so this arm
+      // still needs a diverging expression to satisfy the report-branch type.
       @sys.exit(1)
       return
     }
