@@ -251,5 +251,8 @@ priv enum Cmd {
   // Discover the available skills off the UI thread, then deliver them as a
   // `SkillsDiscovered` message (the `/skills` command's async first half).
   DiscoverSkills
+  // Open the modal skill picker over the discovered items (the second half of
+  // `/skills`).
+  OpenPicker(Array[@completion.CompletionItem])
   Quit
 }

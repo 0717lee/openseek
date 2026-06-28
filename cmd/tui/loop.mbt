@@ -745,8 +745,14 @@ fn update(state : State, message : Msg) -> Array[Cmd] {
     // The engine process is gone, and its watchers with it: an old
     // `moon_check running` segment would be a lie on the status bar.
     EngineExited => state.watcher_status = ""
-    // `/skills` discovery finished: list the skills for the user.
-    SkillsDiscovered(items) => cmds.push(AppendItem(skills_notice(items)))
+    // `/skills` discovery finished: open the picker over the skills, or note
+    // that the libraries are empty.
+    SkillsDiscovered(items) =>
+      if items.is_empty() {
+        cmds.push(AppendItem(skills_notice(items)))
+      } else {
+        cmds.push(OpenPicker(items))
+      }
     // No state change: Tick is a 1s heartbeat that just keeps the message loop
     // turning so the trailing refresh_ui re-runs and the elapsed-time activity
     // line ("Working (12s)") keeps advancing during quiet stretches.
@@ -861,6 +867,7 @@ async fn[G] run_message_loop(
             let items = discover_picker_skills(state.config.cwd)
             messages.put(SkillsDiscovered(items))
           }
+        OpenPicker(items) => ui.open_picker(items)
         Quit => {
           // Close the engine's stdin (the serve protocol's shutdown signal) and
           // give it a bounded moment to drain any already-delivered command

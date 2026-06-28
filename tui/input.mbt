@@ -94,6 +94,11 @@ async fn Ui::move_down_or_recall_history(self : Self) -> Unit {
 ///|
 async fn Ui::handle_key(self : Self, key : @tty/input.KeyEvent) -> Event? {
   self.sync_completion_menu()
+  // A modal picker (e.g. `/skills`) intercepts keys before the composer,
+  // history, and completion menu see them.
+  if self.picker_open() {
+    return self.handle_picker_key(key)
+  }
   match key.code {
     Char('a') if key.modifiers.ctrl() => {
       self.composer.move_home()
