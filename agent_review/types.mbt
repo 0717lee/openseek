@@ -1,0 +1,98 @@
+///|
+/// `ReviewReport` is the stable, versioned contract returned by every review
+/// front-end (the headless `--review` CLI today; TUI / MCP later) and consumed
+/// by external agents that dispatch a review to OpenSeek. The JSON shape is the
+/// integration boundary, so it is kept deliberately flat and string-typed.
+
+///|
+/// The schema version this build emits and accepts.
+pub let current_schema_version : Int = 1
+
+///|
+/// Allowed severity values, ordered most to least severe.
+pub fn severities() -> Array[String] {
+  ["blocker", "high", "medium", "low", "nit"]
+}
+
+///|
+/// A single review finding at an optional source location.
+pub(all) struct Finding {
+  file : String
+  line : Int?
+  severity : String
+  category : String
+  title : String
+  detail : String
+  suggestion : String?
+} derive(Debug, Eq, ToJson, FromJson)
+
+///|
+/// The change set the review covered.
+pub(all) struct ReviewScope {
+  base : String
+  head : String
+  files : Array[String]
+} derive(Debug, Eq, ToJson, FromJson)
+
+///|
+/// Deterministic preflight signals that ground the review in the compiler/tests
+/// rather than model opinion.
+pub(all) struct ReviewStats {
+  files_reviewed : Int
+  findings : Int
+  build : String
+  tests : String
+} derive(Debug, Eq, ToJson, FromJson)
+
+///|
+/// The full review report.
+pub(all) struct ReviewReport {
+  schema_version : Int
+  scope : ReviewScope
+  findings : Array[Finding]
+  summary : String
+  stats : ReviewStats
+} derive(Debug, Eq, ToJson, FromJson)
+
+///|
+/// Validate a report against the contract. Returns the list of problems; an
+/// empty list means the report is valid. The `submit_review` tool uses this to
+/// reject malformed model output and ask for a retry.
+pub fn ReviewReport::validate(self : ReviewReport) -> Array[String] {
+  let problems : Array[String] = []
+  if self.schema_version != current_schema_version {
+    problems.push(
+      "schema_version must be \{current_schema_version}, got \{self.schema_version}",
+    )
+  }
+  let allowed = severities()
+  for finding in self.findings {
+    if !allowed.contains(finding.severity) {
+      problems.push(
+        "finding '\{finding.title}': invalid severity '\{finding.severity}'",
+      )
+    }
+    if finding.file == "" {
+      problems.push("a finding has an empty file path")
+    }
+    if finding.title == "" {
+      problems.push("a finding has an empty title")
+    }
+  }
+  problems
+}
+
+///|
+/// Parse a report from JSON, returning the report or a human-readable error.
+pub fn ReviewReport::parse(json : Json) -> Result[ReviewReport, String] {
+  let report : ReviewReport = @json.from_json(json) catch {
+    e => return Err("invalid review report JSON: \{e}")
+  }
+  Ok(report)
+}
+
+///|
+/// Encode the report as a single-line JSON string (the CLI stdout contract).
+pub fn ReviewReport::to_json_string(self : ReviewReport) -> String {
+  self.to_json().stringify()
+}
