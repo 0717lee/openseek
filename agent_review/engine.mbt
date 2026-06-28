@@ -12,9 +12,12 @@ pub let default_review_max_steps : Int = 120
 
 ///|
 /// Run a code review of the changes between `base` and HEAD and return the
-/// structured report. Read-only: the toolset is `read`, `shell`, and
-/// `submit_review` — no edit/multi_edit/write — so a review cannot mutate the
-/// source tree. Raises `ReviewError` if the model finishes without submitting a
+/// structured report. The toolset is `read`, `shell` (in read-only mode), and
+/// `submit_review` — no edit/multi_edit/write — so the review reports rather
+/// than edits. Read-only is best-effort: the shell refuses obvious
+/// source-mutating moon commands, but `moon check`/`moon test` may still trigger
+/// pre-build source generation, so the checkout is not guaranteed byte-for-byte
+/// unchanged. Raises `ReviewError` if the model finishes without submitting a
 /// report.
 pub async fn run_review(
   api_key : String,

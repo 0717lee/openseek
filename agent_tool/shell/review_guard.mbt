@@ -21,12 +21,15 @@ fn command_is_mutating_moon(command : @shell_parse.SimpleCommand) -> Bool {
 }
 
 ///|
-/// Whether read-only (review) mode must refuse this parsed command: any
-/// source-mutating moon command anywhere in a `Simple` parse — including `&&`/
-/// `;` chains, pipes, and env prefixes — or any command too complex to analyze
-/// statically (`TooComplex`: subshells, command substitution, backticks), which
-/// is refused wholesale so the read-only guarantee holds even on hosts without
-/// the kernel sandbox.
+/// Whether read-only (review) mode should refuse this parsed command. This is a
+/// best-effort guard, not an airtight guarantee: it blocks the obvious bulk
+/// source-rewriters — a source-mutating moon command (fmt / info / test
+/// --update / ...) anywhere in a `Simple` parse, including `&&`/`;` chains,
+/// pipes, and env prefixes — so a review does not reformat or regenerate the
+/// tree wholesale. Opaque commands (`TooComplex`: subshells, command
+/// substitution) are allowed: a review that runs `moon check`/`moon test` can
+/// already trigger pre-build source generation, so chasing every last mutation
+/// is not worth crippling the review's ability to investigate.
 fn review_read_only_blocks(parsed : @shell_parse.ParseResult) -> Bool {
   match parsed {
     Simple(commands) => {
@@ -37,6 +40,6 @@ fn review_read_only_blocks(parsed : @shell_parse.ParseResult) -> Bool {
       }
       false
     }
-    _ => true
+    _ => false
   }
 }
