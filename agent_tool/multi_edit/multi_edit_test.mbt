@@ -49,6 +49,46 @@ async test "multi_edit applies multiple line-anchored replacements" {
 }
 
 ///|
+async test "multi_edit inserts when old_string is empty, alongside a replacement" {
+  @vfs.with_tmpdir(dir => {
+    let path = "\{dir}/insert.mbt"
+    @fs.write_file(
+      path,
+      "let a = old_a\nlet b = keep\nlet c = old_c\n",
+      create_mode=CreateOrTruncate,
+    )
+    let result = run_multi_edit({
+      "path": path,
+      "edits": [
+        { "old_string": "old_a", "new_string": "new_a", "start_line": 1 },
+        { "old_string": "", "new_string": "let x = new\n", "start_line": 2 },
+      ],
+    })
+    guard result is Respond(output) else { fail("expected Respond") }
+    assert_false(output.is_error)
+    assert_eq(
+      @fs.read_file(path).text(),
+      "let a = new_a\nlet x = new\nlet b = keep\nlet c = old_c\n",
+    )
+  })
+}
+
+///|
+async test "multi_edit rejects an edit with empty old_string and new_string" {
+  @vfs.with_tmpdir(dir => {
+    let path = "\{dir}/empty.mbt"
+    @fs.write_file(path, "let a = 1\n", create_mode=CreateOrTruncate)
+    let result = run_multi_edit({
+      "path": path,
+      "edits": [{ "old_string": "", "new_string": "", "start_line": 1 }],
+    })
+    guard result is Respond(output) else { fail("expected Respond") }
+    assert_true(output.is_error)
+    assert_true(output.content.contains("both empty"))
+  })
+}
+
+///|
 async test "multi_edit applies edits against original offsets despite length changes" {
   @vfs.with_tmpdir(dir => {
     let path = "\{dir}/offsets.mbt"

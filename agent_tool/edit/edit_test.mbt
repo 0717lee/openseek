@@ -181,20 +181,57 @@ async test "edit rejects non-object arguments" {
 }
 
 ///|
-async test "edit rejects empty old_string" {
+async test "edit inserts when old_string is empty" {
   @vfs.with_tmpdir(dir => {
-    let path = "\{dir}/empty-old.txt"
+    let path = "\{dir}/insert.txt"
+    @fs.write_file(path, "line1\nline2\n", create_mode=CreateOrTruncate)
+    // insert before line 2
+    let result = run_edit({
+      "path": path,
+      "old_string": "",
+      "new_string": "inserted\n",
+      "start_line": 2,
+    })
+    guard result is Respond(output) else { fail("expected Respond") }
+    assert_false(output.is_error)
+    assert_true(output.content.contains("ok: inserted at line 2"))
+    let updated = @fs.read_file(path).text()
+    assert_eq(updated, "line1\ninserted\nline2\n")
+  })
+}
+
+///|
+async test "edit can append at end of file via start_line past the last line" {
+  @vfs.with_tmpdir(dir => {
+    let path = "\{dir}/append.txt"
+    @fs.write_file(path, "a\nb\n", create_mode=CreateOrTruncate)
+    let result = run_edit({
+      "path": path,
+      "old_string": "",
+      "new_string": "c\n",
+      "start_line": 99,
+    })
+    guard result is Respond(output) else { fail("expected Respond") }
+    assert_false(output.is_error)
+    assert_eq(@fs.read_file(path).text(), "a\nb\nc\n")
+  })
+}
+
+///|
+async test "edit rejects empty old_string and new_string" {
+  @vfs.with_tmpdir(dir => {
+    let path = "\{dir}/empty-both.txt"
     @fs.write_file(path, "content", create_mode=CreateOrTruncate)
     let result = run_edit({
       "path": path,
       "old_string": "",
-      "new_string": "replacement",
+      "new_string": "",
       "start_line": 1,
     })
     guard result is Respond(output) else { fail("expected Respond") }
     assert_eq(
       output.content,
-      "error editing \{path}: old_string must be non-empty",
+      "error editing \{path}: old_string and new_string are both empty",
     )
     assert_true(output.is_error)
   })
