@@ -25,6 +25,7 @@ Arguments:
 
 Options:
   -h, --help                                                   Show help information.
+  --review                                                     Run a read-only code review of base...HEAD and print a JSON ReviewReport to stdout.
   --serve                                                      Run as a session server: read JSONL commands (prompt/steer/cancel) from stdin.
   --no-session                                                 Run ephemerally: do not record this run to a durable session.
   --session-list                                               List durable sessions (see --format) and exit.
@@ -44,6 +45,7 @@ Options:
   --session-compact-file <session-compact-file>                Read summary text from this file, append it to --session, and exit. [default: ]
   --session-compact-from <session-compact-from>                First event sequence covered by --session-compact-file. [default: ]
   --session-compact-to <session-compact-to>                    Last event sequence covered by --session-compact-file. [default: ]
+  --base <base>                                                Base ref for --review: review the diff base...HEAD. [default: origin/main]
   --format <format>                                            Output format for --session-list: text or json. [default: text]
 ```
 
