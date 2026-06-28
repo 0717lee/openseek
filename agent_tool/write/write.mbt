@@ -1,7 +1,9 @@
 ///|
-/// Tool definition for `write`: overwrites `arguments.path` with
-/// `arguments.content`. Existing files are truncated; missing parent
-/// directories are created (so `dir/moon.pkg` works without a separate mkdir).
+/// Tool definition for `write`: creates a new file at `arguments.path` with
+/// `arguments.content`, or overwrites an existing non-source file. Overwriting
+/// an existing `.mbt`/`.mbt.md` source file is rejected (use `edit`/`multi_edit`,
+/// which also insert). Missing parent directories are created (so `dir/moon.pkg`
+/// works without a separate mkdir).
 ///
 /// ## Arguments
 /// - `path` (string, required): filesystem path to write.
@@ -21,7 +23,7 @@ pub fn definition(
 ) -> @agent_tool.AgentToolDefinition {
   AgentToolDefinition(
     name="write",
-    description="Create or overwrite arguments.path with arguments.content (missing parent directories are created). If the file already exists, read it first so you do not discard content you have not seen. Prefer line-anchored edit (or multi_edit for several fixes in one file) for targeted compiler-feedback changes, and do not use write to route shell-generated rewrites back into source files. Do not create Markdown or README files unless the user explicitly asks for them.",
+    description="Create a new file at arguments.path with arguments.content (missing parent directories are created), or overwrite an existing non-source file. Overwriting an existing .mbt/.mbt.md source file is rejected: use edit or multi_edit to change existing source (an empty old_string inserts new code). Do not use write to route shell-generated rewrites back into source files. Do not create Markdown or README files unless the user explicitly asks for them.",
     schema=JsonSchema({
       "type": "object",
       "properties": {
@@ -72,6 +74,28 @@ async fn write_file(
         )
       None => ()
     }
+    // Guard the last unguarded source-write path: `write` is not sandboxed (it
+    // is an in-process file write, unlike `shell`), so overwriting an existing
+    // `.mbt`/`.mbt.md` file here would bypass the line-anchored edit discipline
+    // and risk silently dropping content. Existing source must change through
+    // `edit`/`multi_edit` (which also insert). Creating a NEW source file, or
+    // writing non-source files, is still allowed.
+    // Resolve symlinks before treating a path as a safe non-source overwrite: a
+    // link named `x.txt` pointing at `lib.mbt` would otherwise slip past the
+    // suffix check and truncate the source through CreateOrTruncate below.
+    if @fs.exists(path) {
+      let target = @fs.realpath(path) catch {
+        error if @async.is_being_cancelled() => raise error
+        _ => path
+      }
+      if is_mbt_source(path) || is_mbt_source(target) {
+        return @agent_tool.ToolAction::respond(
+          "error writing \{path}: existing source file — use edit or multi_edit to change it (an empty old_string inserts new code); write is for creating new files",
+          is_error=true,
+          brief="write \{@agent_tool.brief_basename(path)}",
+        )
+      }
+    }
     create_parent_dirs(path)
     // Probe before writing so the result can tell the model whether it created a
     // new file or clobbered an existing one — a wholesale `write` over content it
@@ -105,6 +129,14 @@ async fn write_file(
         brief="write \{@agent_tool.brief_basename(path)}",
       )
   }
+}
+
+///|
+/// Whether `path` is a hand-written MoonBit source file (`.mbt` or `.mbt.md`).
+/// `.mbti` interface files are excluded on purpose: generated ones are rejected
+/// by the manifest guard, and hand-maintained ones are rare and editable.
+fn is_mbt_source(path : String) -> Bool {
+  path.has_suffix(".mbt") || path.has_suffix(".mbt.md")
 }
 
 ///|
@@ -337,6 +369,74 @@ async test "write rejects generated mbti files" {
     assert_true(output.is_error)
     assert_true(output.content.contains("run moon info"))
     assert_eq(@fs.read_file(path).text(), "old interface")
+  })
+}
+
+///|
+async test "write rejects overwriting an existing .mbt source file" {
+  @vfs.with_tmpdir(dir => {
+    let path = "\{dir}/lib.mbt"
+    @fs.write_file(
+      path,
+      "pub fn f() -> Int { 1 }\n",
+      create_mode=CreateOrTruncate,
+    )
+    let result = execute({
+      "path": path,
+      "content": "pub fn f() -> Int { 2 }\n",
+    })
+    guard result is Respond(output) else { fail("expected Respond") }
+    assert_true(output.is_error)
+    assert_true(output.content.contains("use edit or multi_edit"))
+    // unchanged on disk
+    assert_eq(@fs.read_file(path).text(), "pub fn f() -> Int { 1 }\n")
+  })
+}
+
+///|
+async test "write still creates a NEW .mbt source file" {
+  @vfs.with_tmpdir(dir => {
+    let path = "\{dir}/new.mbt"
+    let result = execute({
+      "path": path,
+      "content": "pub fn g() -> Int { 0 }\n",
+    })
+    guard result is Respond(output) else { fail("expected Respond") }
+    assert_false(output.is_error)
+    assert_eq(@fs.read_file(path).text(), "pub fn g() -> Int { 0 }\n")
+  })
+}
+
+///|
+async test "write rejects overwriting an existing .mbt.md doc file" {
+  @vfs.with_tmpdir(dir => {
+    let path = "\{dir}/doc.mbt.md"
+    @fs.write_file(path, "# old\n", create_mode=CreateOrTruncate)
+    let result = execute({ "path": path, "content": "# new\n" })
+    guard result is Respond(output) else { fail("expected Respond") }
+    assert_true(output.is_error)
+    assert_true(output.content.contains("use edit or multi_edit"))
+  })
+}
+
+///|
+async test "write rejects overwriting source through a symlink" {
+  @vfs.with_tmpdir(dir => {
+    let src = "\{dir}/lib.mbt"
+    @fs.write_file(
+      src,
+      "pub fn f() -> Int { 1 }\n",
+      create_mode=CreateOrTruncate,
+    )
+    // link.txt -> lib.mbt: the .txt name must not let the write slip past the
+    // guard and truncate the real source.
+    let link = "\{dir}/link.txt"
+    @fs.symlink(target="lib.mbt", link)
+    let result = execute({ "path": link, "content": "clobbered\n" })
+    guard result is Respond(output) else { fail("expected Respond") }
+    assert_true(output.is_error)
+    assert_true(output.content.contains("use edit or multi_edit"))
+    assert_eq(@fs.read_file(src).text(), "pub fn f() -> Int { 1 }\n")
   })
 }
 
