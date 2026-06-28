@@ -30,6 +30,7 @@
 ///   invalid arguments.
 pub fn definition(
   workspace_root? : String = ".",
+  read_only? : Bool = false,
 ) -> @agent_tool.AgentToolDefinition {
   AgentToolDefinition(
     name="shell",
@@ -44,7 +45,9 @@ pub fn definition(
       },
       "required": ["cmd"],
     }),
-    execute=Async(arguments => execute_with_workspace(workspace_root, arguments)),
+    execute=Async(arguments => {
+      execute_with_workspace(workspace_root, arguments, read_only~)
+    }),
   )
 }
 
@@ -64,6 +67,7 @@ fn shell_description() -> String {
 async fn execute_with_workspace(
   workspace_root : String,
   arguments : Json,
+  read_only~ : Bool,
 ) -> @agent_tool.ToolAction {
   let input = @decode.decode(arguments) catch {
     error => {
@@ -73,6 +77,15 @@ async fn execute_with_workspace(
         is_error=true,
       )
     }
+  }
+  // Read-only (review) mode: refuse source-mutating moon commands (fmt, info,
+  // test --update, ...). The sandbox already blocks non-moon source writes; this
+  // closes the trusted-moon-command path so a review cannot edit the checkout.
+  if read_only && should_auto_check_moon_command(input.cmd) {
+    return @agent_tool.ToolAction::respond(
+      "blocked in read-only review mode: `\{input.cmd}` runs a source-mutating moon command; a review must not modify the checkout. Use `moon check` or `moon test` (without --update).",
+      is_error=true,
+    )
   }
   let parsed_command = @shell_parse.parse_for_policy(input.cmd)
   match

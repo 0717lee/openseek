@@ -28,7 +28,7 @@ pub async fn run_review(
   let captured : Ref[ReviewReport?] = { val: None }
   let tools = @agent_tool.Tools([
     @read.definition(workspace_root~),
-    @shell.definition(workspace_root~),
+    @shell.definition(workspace_root~, read_only=true),
     submit_review_tool(captured),
   ])
   let session = @agent_session.Session(
