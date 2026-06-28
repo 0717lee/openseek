@@ -79,14 +79,15 @@ async fn execute_with_workspace(
     }
   }
   let parsed_command = @shell_parse.parse_for_policy(input.cmd)
-  // Read-only (review) mode: refuse any source-mutating moon command anywhere in
-  // the parsed command (including `&&`/`;` chains and env prefixes), and any
-  // command too complex to analyze statically (pipes, subshells). The sandbox
-  // already blocks non-moon source writes; this closes the trusted-moon-command
-  // path so a review cannot edit the checkout even without the kernel sandbox.
+  // Read-only (review) mode: refuse the obvious bulk source-rewriters — a
+  // source-mutating moon command (fmt / info / test --update) anywhere in the
+  // parsed command, including `&&`/`;` chains, pipes, and env prefixes. This is
+  // best-effort: opaque commands are allowed and `moon check`/`moon test` may
+  // still pre-build, so it only stops a review from reformatting/regenerating
+  // the tree wholesale, not every possible mutation.
   if read_only && review_read_only_blocks(parsed_command) {
     return @agent_tool.ToolAction::respond(
-      "blocked in read-only review mode: `\{input.cmd}` may mutate the checkout (a moon fmt/info/test --update command, or a command too complex to verify). A review must not modify source; use plain `moon check`/`moon test` (no --update), `git`, or `read`.",
+      "blocked in read-only review mode: `\{input.cmd}` runs a source-mutating moon command (fmt/info/test --update); a review reports rather than rewrites the tree. Use plain `moon check`/`moon test` (no --update), `git`, or `read`.",
       is_error=true,
     )
   }

@@ -81,6 +81,12 @@ pub fn ReviewReport::validate(self : ReviewReport) -> Array[String] {
     if finding.title == "" {
       problems.push("a finding has an empty title")
     }
+    if finding.category == "" {
+      problems.push("finding '\{finding.title}': empty category")
+    }
+    if finding.detail == "" {
+      problems.push("finding '\{finding.title}': empty detail")
+    }
   }
   problems
 }
