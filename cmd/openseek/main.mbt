@@ -29,6 +29,18 @@ async fn run_cli() -> Unit {
     if flag(matches, "no-session") && session_id(matches) is Some(_) {
       fail("--no-session contradicts --session; pick one behavior")
     }
+    // Review is a read-only, ephemeral, single-report mode. It branches before
+    // workspace/session/serve handling and silences progress logging so stdout
+    // carries exactly one JSON ReviewReport.
+    if flag(matches, "review") {
+      if values(matches, "task").length() > 0 {
+        fail("--review reviews base...HEAD and does not take a task")
+      }
+      @xlog.global().set_handler(DiscardLog::{  })
+      let workspace_root = prepare_workspace_root(matches, log_created=false)
+      run_review_cli(matches, workspace_root~)
+      return
+    }
     // Best-of-N fleet mode owns its own workspace materialization and session
     // creation, so it branches before prepare_workspace_root (which would
     // create a single --dir) and the session/serve handling.
@@ -319,6 +331,12 @@ fn cli_command() -> @argparse.Command {
         about="Last event sequence covered by --session-compact-file.",
       ),
       OptionArg(
+        "base",
+        long="base",
+        default_values=["origin/main"],
+        about="Base ref for --review: review the diff base...HEAD.",
+      ),
+      OptionArg(
         "format",
         long="format",
         default_values=["text"],
@@ -326,6 +344,11 @@ fn cli_command() -> @argparse.Command {
       ),
     ],
     flags=[
+      FlagArg(
+        "review",
+        long="review",
+        about="Run a read-only code review of base...HEAD and print a JSON ReviewReport to stdout.",
+      ),
       FlagArg(
         "serve",
         long="serve",
