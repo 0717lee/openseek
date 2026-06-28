@@ -10,19 +10,36 @@
 async fn discover_picker_skills(
   workspace_root : String,
 ) -> Array[@completion.CompletionItem] {
-  let global_skills = match default_global_skills_dir() {
+  // Resolve the global library exactly as the engine does (see
+  // `skills_prompt_section_for_cwd`): `OPENSEEK_GLOBAL_SKILLS_DIR` resolved
+  // against the workspace when set, else the default `$HOME/.openseek/skills`.
+  // The TUI forwards the inherited environment to the engine, so an override
+  // the engine honors must be honored here too — otherwise the picker and the
+  // model's prompt disagree on which skills exist.
+  let global_dir = @env.get_env_var("OPENSEEK_GLOBAL_SKILLS_DIR").unwrap_or("")
+  let resolved_global = if global_dir.trim() != "" {
+    Some(@workspace_path.resolve(workspace_root, global_dir.trim().to_owned()))
+  } else {
+    default_global_skills_dir()
+  }
+  let global_skills = match resolved_global {
     Some(dir) => @agent_skill.discover_skills(dir)
     None => []
   }
   let workspace_skills = @agent_skill.discover_skills(
     @workspace_path.resolve(workspace_root, ".openseek/skills"),
   )
-  let merged = @agent_skill.merge_skills(global_skills, overrides=workspace_skills)
-  merged.map(skill => @completion.CompletionItem::new(
-    label=skill.name(),
-    insert_text="Use the \"\{skill.name()}\" skill. ",
-    description=skill.description(),
-  ))
+  let merged = @agent_skill.merge_skills(
+    global_skills,
+    overrides=workspace_skills,
+  )
+  merged.map(skill => {
+    @completion.CompletionItem::new(
+      label=skill.name(),
+      insert_text="Use the \"\{skill.name()}\" skill. ",
+      description=skill.description(),
+    )
+  })
 }
 
 ///|

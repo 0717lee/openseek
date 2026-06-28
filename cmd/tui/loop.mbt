@@ -575,7 +575,9 @@ fn skills_notice(
   let text = if items.is_empty() {
     "No skills found in .openseek/skills or ~/.openseek/skills."
   } else {
-    let lines = items.map(item => "  - \{item.label()} — \{item.description()}")
+    let lines = items.map(item => {
+      "  - \{item.label()} — \{item.description()}"
+    })
     "Available skills:\n\{lines.join("\n")}"
   }
   Notice(ToolCall(@doc.Text::plain(text)))

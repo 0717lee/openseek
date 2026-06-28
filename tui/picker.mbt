@@ -18,10 +18,15 @@ pub async fn Ui::open_picker(
   if items.is_empty() {
     return
   }
-  self.picker = Some({ items, selected: 0 })
-  self.completion.reset()
-  self.notice = None
-  self.redraw()
+  // Serialize with key/resize/status redraws on the command queue: this is
+  // dispatched from the message loop, not the tty worker, so a bare redraw here
+  // could interleave with one already in flight and leave the frame inconsistent.
+  self.commands.wait(() => {
+    self.picker = Some({ items, selected: 0 })
+    self.completion.reset()
+    self.notice = None
+    self.redraw()
+  })
 }
 
 ///|
@@ -103,7 +108,10 @@ async fn Ui::picker_accept(self : Self) -> Unit {
   guard self.picker is Some(picker) else { return }
   let selected = picker.selected.clamp(min=0, max=picker.items.length() - 1)
   self.picker = None
-  self.composer.insert(picker.items[selected].insert_text())
+  // Skill labels come from frontmatter/filenames, so strip terminal control
+  // sequences (e.g. ESC) before echoing the inserted text into the composer —
+  // `insert` (unlike `insert_user_text`) does not sanitize.
+  self.composer.insert(@text.sanitize(picker.items[selected].insert_text()))
   self.redraw()
 }
 

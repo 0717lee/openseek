@@ -4,7 +4,7 @@ import {
   "bobzhang/openseek/agent_session",
   "bobzhang/openseek/agent_skill",
   "bobzhang/openseek/internal/workspace_path",
-  "bobzhang/openseek/tui/completion" @completion,
+  "bobzhang/openseek/tui/completion",
   "bobzhang/openseek/agent_session/store",
   "bobzhang/openseek/agent_tool/shell",
   "bobzhang/openseek/cmd/tui/internal/command_context",

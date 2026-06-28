@@ -299,11 +299,17 @@ async fn Ui::handle_tty_event(self : Self, event : @tty.Event) -> Event? {
       self.redraw()
       None
     }
-    Input(Paste(text)) => {
-      self.composer.insert_user_text(text)
-      self.redraw_after_text_change()
-      None
-    }
+    // A bracketed paste reaches the composer outside `handle_key`, so the modal
+    // picker must swallow it here too — otherwise a paste edits the draft
+    // underneath the open list.
+    Input(Paste(text)) =>
+      if self.picker_open() {
+        None
+      } else {
+        self.composer.insert_user_text(text)
+        self.redraw_after_text_change()
+        None
+      }
     Input(FocusIn | FocusOut | Mouse(_)) => None
     Resize(size) => {
       self.redraw_after_resize(size)
