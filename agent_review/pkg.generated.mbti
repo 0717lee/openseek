@@ -1,0 +1,70 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "bobzhang/openseek/agent_review"
+
+import {
+  "bobzhang/openseek/agent_tool",
+  "bobzhang/openseek/deepseek",
+  "moonbitlang/core/debug",
+  "moonbitlang/core/json",
+  "moonbitlang/core/ref",
+}
+
+// Values
+pub let current_schema_version : Int
+
+pub let default_review_max_steps : Int
+
+pub fn review_system_prompt() -> String
+
+pub fn review_task(String) -> String
+
+pub async fn run_review(String, @deepseek.Model, String, workspace_root? : String, max_steps? : Int, thinking? : @deepseek.ThinkingMode, api_url? : String) -> ReviewReport
+
+pub fn severities() -> Array[String]
+
+pub fn submit_review_tool(@ref.Ref[ReviewReport?]) -> @agent_tool.AgentToolDefinition
+
+// Errors
+pub suberror ReviewError {
+  ReviewError(String)
+}
+
+// Types and methods
+pub(all) struct Finding {
+  file : String
+  line : Int?
+  severity : String
+  category : String
+  title : String
+  detail : String
+  suggestion : String?
+} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
+
+pub(all) struct ReviewReport {
+  schema_version : Int
+  scope : ReviewScope
+  findings : Array[Finding]
+  summary : String
+  stats : ReviewStats
+} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
+pub fn ReviewReport::parse(Json) -> Result[Self, String]
+pub fn ReviewReport::to_json_string(Self) -> String
+pub fn ReviewReport::validate(Self) -> Array[String]
+
+pub(all) struct ReviewScope {
+  base : String
+  head : String
+  files : Array[String]
+} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
+
+pub(all) struct ReviewStats {
+  files_reviewed : Int
+  findings : Int
+  build : String
+  tests : String
+} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
+
+// Type aliases
+
+// Traits
+
