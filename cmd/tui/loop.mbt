@@ -551,8 +551,34 @@ fn handle_slash_command(
         cmds.push(AppendItem(Error("/exit does not accept arguments")))
       }
     "compact" => handle_compact_command(state, arguments, cmds)
+    "skills" => handle_skills_command(arguments, cmds)
     other => cmds.push(AppendItem(Error("Unknown slash command: /\{other}")))
   }
+}
+
+///|
+/// `/skills`: kick off async skill discovery, which lands as `SkillsDiscovered`.
+/// Takes no arguments.
+fn handle_skills_command(arguments : String, cmds : Array[Cmd]) -> Unit {
+  if arguments.trim().is_empty() {
+    cmds.push(DiscoverSkills)
+  } else {
+    cmds.push(AppendItem(Error("/skills does not accept arguments")))
+  }
+}
+
+///|
+/// A transcript card listing the discovered skills (or a not-found notice).
+fn skills_notice(
+  items : Array[@completion.CompletionItem],
+) -> @ui.TranscriptItem {
+  let text = if items.is_empty() {
+    "No skills found in .openseek/skills or ~/.openseek/skills."
+  } else {
+    let lines = items.map(item => "  - \{item.label()} — \{item.description()}")
+    "Available skills:\n\{lines.join("\n")}"
+  }
+  Notice(ToolCall(@doc.Text::plain(text)))
 }
 
 ///|
@@ -719,6 +745,8 @@ fn update(state : State, message : Msg) -> Array[Cmd] {
     // The engine process is gone, and its watchers with it: an old
     // `moon_check running` segment would be a lie on the status bar.
     EngineExited => state.watcher_status = ""
+    // `/skills` discovery finished: list the skills for the user.
+    SkillsDiscovered(items) => cmds.push(AppendItem(skills_notice(items)))
     // No state change: Tick is a 1s heartbeat that just keeps the message loop
     // turning so the trailing refresh_ui re-runs and the elapsed-time activity
     // line ("Working (12s)") keeps advancing during quiet stretches.
@@ -824,6 +852,14 @@ async fn[G] run_message_loop(
             // escalate to beyond cancelling the task again.
             Some(task) => task.cancel()
             None => engine.kill()
+          }
+        // Discover skills off the UI thread (filesystem scan), then deliver them
+        // to the loop as `SkillsDiscovered`. Fire-and-forget: it never owns the
+        // run slot, so it must not displace a live turn as the cancel target.
+        DiscoverSkills =>
+          group.spawn_bg(no_wait=true) <| () => {
+            let items = discover_picker_skills(state.config.cwd)
+            messages.put(SkillsDiscovered(items))
           }
         Quit => {
           // Close the engine's stdin (the serve protocol's shutdown signal) and
