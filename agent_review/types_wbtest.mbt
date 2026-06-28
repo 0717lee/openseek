@@ -77,6 +77,12 @@ test "validate rejects a wrong schema version" {
 }
 
 ///|
+test "validate rejects an empty summary" {
+  assert_true({ ..sample_report(), summary: "" }.validate().length() > 0)
+  assert_true({ ..sample_report(), summary: "   " }.validate().length() > 0)
+}
+
+///|
 test "parse reports an error on malformed json" {
   guard ReviewReport::parse(Json::null()) is Err(_) else {
     fail("expected parse error")

@@ -65,6 +65,9 @@ pub fn ReviewReport::validate(self : ReviewReport) -> Array[String] {
       "schema_version must be \{current_schema_version}, got \{self.schema_version}",
     )
   }
+  if self.summary.trim() == "" {
+    problems.push("summary must not be empty")
+  }
   let allowed = severities()
   for finding in self.findings {
     if !allowed.contains(finding.severity) {

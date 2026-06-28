@@ -28,6 +28,11 @@ async fn run_review_cli(
   let max_steps = max_steps(matches)
   let thinking = @deepseek.ThinkingMode::parse(value(matches, "thinking"))
   let base = value(matches, "base")
+  if base.trim() == "" {
+    @stdio.stderr.write("review failed: --base must be a non-empty git ref\n")
+    @sys.exit(1)
+    return
+  }
   let report = @agent_review.run_review(
     api_key,
     model,

@@ -51,6 +51,7 @@ pub async fn run_review(
       tools~,
     )
   }
+  // Review is read-only and ephemeral; the final session is not persisted.
   ignore(final_session)
   match captured.val {
     Some(report) => report
