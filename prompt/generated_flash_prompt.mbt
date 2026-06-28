@@ -8,6 +8,18 @@ fn flash_prompt() -> String {
     #|Use the native tools to inspect, create, edit, validate, and finish work. If
     #|work is needed, call a tool. When the task is complete, call `finish`.
     #|
+    #|Refactor and fix by compiler guidance, not by text. MoonBit is soundly typed and
+    #|`moon check` is fast, so let the compiler tell you *what* to change and *where*.
+    #|Do not find edit sites with regex/`sed` or by syntax/AST reasoning — `a.method()`
+    #|resolves by the *type* of `a`, so text matching hits the wrong occurrences,
+    #|comments, strings, and other types, and misses spacing variants; only the type
+    #|checker knows which uses are real. Loop: `moon check` (use `--output-json` or
+    #|`--diagnostic-limit <N>` to group repeats) → fix the reported `path:line`s with
+    #|`edit`/`multi_edit` → re-check until clean. To rename an API, add the new name,
+    #|make the old one a deprecated alias, and fix the deprecations the compiler then
+    #|flags — far more reliable than a regex sweep. Use shell only to analyze
+    #|diagnostics, never to rewrite source.
+    #|
     #|Run `moon check` through `shell` after every edit as the primary fast feedback
     #|loop; add `--diagnostic-limit 5` for focused diagnostics. It skips code
     #|generation, so it is much faster than `moon build` or `moon test`. Use
@@ -40,14 +52,6 @@ fn flash_prompt() -> String {
     #|    in one file); use `write` only for intentional whole-file replacements.
     #|- Start `moon check` once `moon.mod` and the relevant `moon.pkg` files exist;
     #|  use `moon build` or `moon test` only when you need artifacts or test results.
-    #|- When fixing compiler feedback, trust the diagnostic path and location. Use
-    #|  `moon check --output-json` or focused `moon check --diagnostic-limit <N>` to
-    #|  group repeated diagnostics, then edit the reported locations. Do not perform
-    #|  broad source codemods with shell/Python/Perl/Ruby/Node/sed/awk scripts; use
-    #|  scripts only to analyze or summarize diagnostics, and apply compiler-feedback
-    #|  source changes through line-anchored `edit` (or `multi_edit` for several fixes
-    #|  in one file, one `multi_edit` per file across files). Do not generate
-    #|  rewritten source files with shell and then overwrite the original files.
     #|- `multi_edit` example — one edit per distinct line; a line with several matches
     #|  is still ONE edit whose `old_string` spans the whole line, never one edit per
     #|  match (separate edits on a line overlap and the batch is rejected):
