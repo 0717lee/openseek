@@ -1,0 +1,62 @@
+///|
+/// Raised when a review run fails for an infrastructure reason (e.g. the model
+/// finished without producing a structured report), as opposed to completing
+/// with findings.
+pub suberror ReviewError {
+  ReviewError(String)
+}
+
+///|
+/// Default step budget for one review run.
+pub let default_review_max_steps : Int = 120
+
+///|
+/// Run a code review of the changes between `base` and HEAD and return the
+/// structured report. Read-only: the toolset is `read`, `shell`, and
+/// `submit_review` — no edit/multi_edit/write — so a review cannot mutate the
+/// source tree. Raises `ReviewError` if the model finishes without submitting a
+/// report.
+pub async fn run_review(
+  api_key : String,
+  model : @deepseek.Model,
+  base : String,
+  workspace_root? : String = ".",
+  max_steps? : Int = default_review_max_steps,
+  thinking? : @deepseek.ThinkingMode = Max,
+  api_url? : String,
+) -> ReviewReport {
+  let captured : Ref[ReviewReport?] = { val: None }
+  let tools = @agent_tool.Tools([
+    @read.definition(workspace_root~),
+    @shell.definition(workspace_root~),
+    submit_review_tool(captured),
+  ])
+  let session = @agent_session.Session(
+    @agent_session.SessionId("review"),
+    system_prompt=review_system_prompt(),
+  )
+  let task = review_task(base)
+  let final_session : @agent_session.Session = @async.with_task_group() <| group => {
+    @agent.run_turn_in_scope(
+      @agent_runtime.AgentRuntime(workspace_root~),
+      @agent_runtime.AgentTaskScope(group),
+      api_key,
+      model,
+      session,
+      task,
+      append_item=(s, i) => s.append(i),
+      max_steps~,
+      thinking~,
+      api_url?,
+      tools~,
+    )
+  }
+  ignore(final_session)
+  match captured.val {
+    Some(report) => report
+    None =>
+      raise ReviewError(
+        "review finished without calling submit_review (no structured report)",
+      )
+  }
+}
