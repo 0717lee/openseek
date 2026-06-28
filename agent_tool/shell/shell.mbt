@@ -78,16 +78,18 @@ async fn execute_with_workspace(
       )
     }
   }
-  // Read-only (review) mode: refuse source-mutating moon commands (fmt, info,
-  // test --update, ...). The sandbox already blocks non-moon source writes; this
-  // closes the trusted-moon-command path so a review cannot edit the checkout.
-  if read_only && should_auto_check_moon_command(input.cmd) {
+  let parsed_command = @shell_parse.parse_for_policy(input.cmd)
+  // Read-only (review) mode: refuse any source-mutating moon command anywhere in
+  // the parsed command (including `&&`/`;` chains and env prefixes), and any
+  // command too complex to analyze statically (pipes, subshells). The sandbox
+  // already blocks non-moon source writes; this closes the trusted-moon-command
+  // path so a review cannot edit the checkout even without the kernel sandbox.
+  if read_only && review_read_only_blocks(parsed_command) {
     return @agent_tool.ToolAction::respond(
-      "blocked in read-only review mode: `\{input.cmd}` runs a source-mutating moon command; a review must not modify the checkout. Use `moon check` or `moon test` (without --update).",
+      "blocked in read-only review mode: `\{input.cmd}` may mutate the checkout (a moon fmt/info/test --update command, or a command too complex to verify). A review must not modify source; use plain `moon check`/`moon test` (no --update), `git`, or `read`.",
       is_error=true,
     )
   }
-  let parsed_command = @shell_parse.parse_for_policy(input.cmd)
   match
     @command_policy.moonbit_command_policy_error_for_parse(
       input.cmd,
