@@ -24,7 +24,7 @@ pub fn definition(
 ) -> @agent_tool.AgentToolDefinition {
   AgentToolDefinition(
     name="edit",
-    description="Replace the first exact text span at or after arguments.start_line in arguments.path with arguments.new_string. Optional end_line restricts the search to a 1-based inclusive line range. Because start_line anchors the location, old_string can be a small exact span instead of a large context block. For multiple compiler-feedback fixes in one file, use multi_edit with explicit line-anchored edits.",
+    description="Replace the first exact text span at or after arguments.start_line in arguments.path with arguments.new_string. Optional end_line restricts the search to a 1-based inclusive line range. Because start_line anchors the location, old_string can be a small exact span instead of a large context block. To INSERT new code instead of replacing, set old_string to the empty string: new_string is inserted at the start of start_line (use start_line = last line + 1 to append at end of file). For multiple compiler-feedback fixes in one file, use multi_edit with explicit line-anchored edits.",
     schema=JsonSchema({
       "type": "object",
       "properties": {
@@ -73,9 +73,9 @@ async fn edit_file(
       brief=fail_brief,
     )
   }
-  if input.old_string == "" {
+  if input.old_string == "" && input.new_string == "" {
     return @agent_tool.ToolAction::respond(
-      "error editing \{path}: old_string must be non-empty",
+      "error editing \{path}: old_string and new_string are both empty",
       is_error=true,
       brief=fail_brief,
     )
@@ -95,6 +95,41 @@ async fn edit_file(
         is_error=true,
         brief=fail_brief,
       )
+  }
+  if input.old_string == "" {
+    // Insertion: insert new_string at the start of start_line (a zero-width
+    // edit); use start_line = last line + 1 to append at end of file.
+    let at = line_start_offset(content, input.start_line).clamp(
+      min=0,
+      max=content.length(),
+    )
+    let new_content = "\{content.unsafe_substring(start=0, end=at)}\{input.new_string}\{content.unsafe_substring(start=at, end=content.length())}"
+    match @manifest_error.write_error(path, new_content) {
+      Some(message) =>
+        return @agent_tool.ToolAction::respond(
+          "error editing \{path}: \{message}",
+          is_error=true,
+          brief=fail_brief,
+        )
+      None => ()
+    }
+    return try {
+      @fs.write_file(path, new_content, create_mode=CreateOrTruncate)
+      let summary = "ok: inserted at line \{input.start_line} in \{path}"
+      let response = @auto_check.append_summary(path, summary)
+      @agent_tool.ToolAction::respond(
+        response,
+        brief="edited \{@agent_tool.brief_basename(path)}:\{input.start_line} (insert)",
+      )
+    } catch {
+      error if @async.is_being_cancelled() => raise error
+      error =>
+        @agent_tool.ToolAction::respond(
+          "error editing \{path}: error writing file: \{error}",
+          is_error=true,
+          brief=fail_brief,
+        )
+    }
   }
   let region = select_edit_region(content, input)
   let parts = region.body

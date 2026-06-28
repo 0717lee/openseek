@@ -12,7 +12,7 @@ pub fn definition(
 ) -> @agent_tool.AgentToolDefinition {
   AgentToolDefinition(
     name="multi_edit",
-    description="Apply multiple exact line-anchored replacements to one file. Use this when compiler feedback identifies several known locations in the same file. Every edit must include old_string, new_string, and start_line; optional end_line bounds the search. Because each edit is line-anchored, old_string can be the small exact span to replace instead of a large context block. Each edit replaces the first matching span in its selected region. Do not emit separate edits for changes that are very close together: when several changes fall on the same line (or in one tight span), combine them into a single edit whose old_string covers the whole span, because adjacent or overlapping edits collide and the batch is rejected. All edits are validated against the original file and no changes are written if any edit fails.",
+    description="Apply multiple exact line-anchored replacements to one file. Use this when compiler feedback identifies several known locations in the same file. Every edit must include old_string, new_string, and start_line; optional end_line bounds the search. Because each edit is line-anchored, old_string can be the small exact span to replace instead of a large context block. Each edit replaces the first matching span in its selected region. To INSERT new code instead of replacing, set old_string to the empty string: new_string is inserted at the start of start_line (use start_line = last line + 1 to append at end of file). Do not emit separate edits for changes that are very close together: when several changes fall on the same line (or in one tight span), combine them into a single edit whose old_string covers the whole span, because adjacent or overlapping edits collide and the batch is rejected. All edits are validated against the original file and no changes are written if any edit fails.",
     schema=JsonSchema({
       "type": "object",
       "properties": {
@@ -145,7 +145,27 @@ fn validate_edit(
 ) -> EditValidation {
   let range = line_range_label(item.start_line, item.end_line)
   if item.old_string == "" {
-    return Invalid({ index, range, message: "old_string must be non-empty" })
+    // Insertion: an empty old_string inserts new_string at the start of
+    // start_line (a zero-width edit). Use start_line = lastline + 1 to append at
+    // end of file. end_line is ignored for insertion.
+    if item.new_string == "" {
+      return Invalid({
+        index,
+        range,
+        message: "old_string and new_string are both empty",
+      })
+    }
+    let at = line_start_offset(content, item.start_line).clamp(
+      min=0,
+      max=content.length(),
+    )
+    return Valid({
+      index,
+      start: at,
+      end: at,
+      new_string: item.new_string,
+      range,
+    })
   }
   if item.old_string == item.new_string {
     return Invalid({

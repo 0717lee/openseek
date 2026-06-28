@@ -13,9 +13,12 @@ search when the caller wants a tighter inclusive 1-based line range. Because
 the line anchor carries the location, `old_string` can be the small exact span
 to replace instead of a large surrounding block.
 
-Rejecting empty `old_string` and identical replacements protects against
-no-op or explosive edits. The tool is designed for small surgical changes; if a
-file needs a complete rewrite, `write` is the clearer API.
+An empty `old_string` switches the tool to insertion: `new_string` is inserted
+at the start of `start_line` (use `start_line` = last line + 1 to append at end
+of file). Rejecting empty-and-empty (both `old_string` and `new_string` empty)
+and identical replacements protects against no-op edits. The tool is designed
+for small surgical changes; if a file needs a complete rewrite, `write` is the
+clearer API.
 
 MoonBit manifests get the same safety check as `write`: edits that would create
 legacy `moon.mod.json`, JSON-style `moon.mod` or `moon.pkg`, or `moon.pkg` with
@@ -52,8 +55,8 @@ and the edit should stay inside a tighter range:
 | Name          | Type    | Required | Notes |
 | ------------- | ------- | -------- | ----- |
 | `path`        | string  | yes | Filesystem path. Relative paths resolve against the agent process's current working directory. |
-| `old_string`  | string  | yes | Exact text to replace. Empty strings are rejected. |
-| `new_string`  | string  | yes | Replacement text. It must differ from `old_string`. |
+| `old_string`  | string  | yes | Exact text to replace. Empty string switches to insertion at `start_line`. |
+| `new_string`  | string  | yes | Replacement (or inserted) text. For replacement it must differ from `old_string`; empty-and-empty is rejected. |
 | `start_line`  | integer | yes | 1-based first line of the search/replace range. The first match at or after this line is replaced. |
 | `end_line`    | integer | no  | 1-based last line of the search/replace range. Defaults to the file end. |
 
