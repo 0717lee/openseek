@@ -19,9 +19,9 @@ fn[X] tool_definitions(
   Tools([
     @shell.definition(workspace_root~),
     @read.definition(workspace_root~),
-    @edit.definition(workspace_root~),
+    @edit.definition(workspace_root~, undo=Some(undo)),
     @multi_edit.definition(workspace_root~, undo=Some(undo)),
-    @write.definition(workspace_root~),
+    @write.definition(workspace_root~, undo=Some(undo)),
     @edit_undo.definition(undo=Some(undo)),
     @finish.definition(),
   ])

@@ -18,6 +18,41 @@ async fn run_edit_in_workspace(
 }
 
 ///|
+async fn run_edit_with_undo(
+  store : @undo.UndoStore,
+  arguments : Json,
+) -> @agent_tool.ToolAction {
+  match @edit.definition(undo=Some(store)).execute {
+    Async(execute) => execute(arguments)
+    Sync(_) => fail("edit tool should be async")
+  }
+}
+
+///|
+async test "edit records an undo snapshot of the file it edits" {
+  @vfs.with_tmpdir(dir => {
+    let path = "\{dir}/a.mbt"
+    @fs.write_file(path, "let x = old\n", create_mode=CreateOrTruncate)
+    let store = @undo.UndoStore::new()
+    let result = run_edit_with_undo(store, {
+      "path": path,
+      "old_string": "old",
+      "new_string": "new",
+      "start_line": 1,
+    })
+    guard result is Respond(output) else { fail("expected Respond") }
+    assert_false(output.is_error)
+    assert_eq(@fs.read_file(path).text(), "let x = new\n")
+    assert_eq(store.depth(), 1)
+    guard store.pop() is Some(entry) else { fail("expected a snapshot") }
+    assert_eq(entry.files.length(), 1)
+    assert_eq(entry.files[0].path, path)
+    assert_true(entry.files[0].before is Some("let x = old\n"))
+    assert_eq(entry.files[0].after, "let x = new\n")
+  })
+}
+
+///|
 async test "a failed edit names the file in its brief" {
   @vfs.with_tmpdir(dir => {
     // Editing a missing file fails; the error still briefs the target file so

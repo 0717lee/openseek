@@ -80,9 +80,18 @@ async fn execute(undo : @undo.UndoStore?) -> @agent_tool.ToolAction {
             )
         }
       None =>
-        @fs.remove(snap.path) catch {
-          error if @async.is_being_cancelled() => raise error
-          _ => () // already gone is fine
+        // Delete a file the edition created. "Already gone" is fine, but a real
+        // remove failure must be reported — don't claim the revert succeeded.
+        if @fs.exists(snap.path) {
+          @fs.remove(snap.path) catch {
+            error if @async.is_being_cancelled() => raise error
+            error =>
+              return @agent_tool.ToolAction::respond(
+                "error: edit_undo: failed to delete \{snap.path}: \{error}",
+                is_error=true,
+                brief~,
+              )
+          }
         }
     }
   }

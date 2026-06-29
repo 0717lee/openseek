@@ -21,6 +21,7 @@
 ///   invalid arguments.
 pub fn definition(
   workspace_root? : String = ".",
+  undo? : @undo.UndoStore? = None,
 ) -> @agent_tool.AgentToolDefinition {
   AgentToolDefinition(
     name="edit",
@@ -36,13 +37,16 @@ pub fn definition(
       },
       "required": ["path", "old_string", "new_string", "start_line"],
     }),
-    execute=Async(arguments => execute_with_workspace(workspace_root, arguments)),
+    execute=Async(arguments => {
+      execute_with_workspace(workspace_root, undo, arguments)
+    }),
   )
 }
 
 ///|
 async fn execute_with_workspace(
   workspace_root : String,
+  undo : @undo.UndoStore?,
   arguments : Json,
 ) -> @agent_tool.ToolAction {
   let input = @decode.decode(arguments) catch {
@@ -55,12 +59,28 @@ async fn execute_with_workspace(
     }
   }
   let path = @workspace_path.resolve(workspace_root, input.path)
-  edit_file(input, path~)
+  edit_file(input, undo, path~)
+}
+
+///|
+/// Record a successful single-file edit so `edit_undo` can revert it: `before`
+/// is the original content, `after` is what we wrote.
+fn record_undo(
+  undo : @undo.UndoStore?,
+  path : String,
+  before : String,
+  after : String,
+) -> Unit {
+  match undo {
+    Some(store) => store.push([{ path, before: Some(before), after }])
+    None => ()
+  }
 }
 
 ///|
 async fn edit_file(
   input : @decode.EditInput,
+  undo : @undo.UndoStore?,
   path~ : String,
 ) -> @agent_tool.ToolAction {
   // Every failure names the file it tried to edit so the viz can show
@@ -115,6 +135,7 @@ async fn edit_file(
     }
     return try {
       @fs.write_file(path, new_content, create_mode=CreateOrTruncate)
+      record_undo(undo, path, content, new_content)
       let summary = "ok: inserted at line \{input.start_line} in \{path}"
       let response = @auto_check.append_summary(path, summary)
       @agent_tool.ToolAction::respond(
@@ -163,6 +184,7 @@ async fn edit_file(
   }
   try {
     @fs.write_file(path, new_content, create_mode=CreateOrTruncate)
+    record_undo(undo, path, content, new_content)
     let summary = "ok: replaced \{replacement_count} occurrence(s) at line \{match_line} in \{path}"
     let content = @auto_check.append_summary(path, summary)
     @agent_tool.ToolAction::respond(

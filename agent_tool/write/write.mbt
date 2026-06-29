@@ -20,6 +20,7 @@
 ///   invalid arguments.
 pub fn definition(
   workspace_root? : String = ".",
+  undo? : @undo.UndoStore? = None,
 ) -> @agent_tool.AgentToolDefinition {
   AgentToolDefinition(
     name="write",
@@ -32,18 +33,21 @@ pub fn definition(
       },
       "required": ["path", "content"],
     }),
-    execute=Async(arguments => execute_with_workspace(workspace_root, arguments)),
+    execute=Async(arguments => {
+      execute_with_workspace(workspace_root, undo, arguments)
+    }),
   )
 }
 
 ///|
 async fn execute(arguments : Json) -> @agent_tool.ToolAction {
-  execute_with_workspace(".", arguments)
+  execute_with_workspace(".", None, arguments)
 }
 
 ///|
 async fn execute_with_workspace(
   workspace_root : String,
+  undo : @undo.UndoStore?,
   arguments : Json,
 ) -> @agent_tool.ToolAction {
   let input = @decode.decode(arguments) catch {
@@ -56,12 +60,21 @@ async fn execute_with_workspace(
     }
   }
   let path = @workspace_path.resolve(workspace_root, input.path)
-  write_file(input, path~)
+  write_file(input, undo, path~)
+}
+
+///|
+/// A file's current content, or `None` if it cannot be read as text.
+async fn read_text(path : String) -> String? {
+  Some(@fs.read_file(path).text()) catch {
+    _ => None
+  }
 }
 
 ///|
 async fn write_file(
   input : @decode.WriteInput,
+  undo : @undo.UndoStore?,
   path~ : String,
 ) -> @agent_tool.ToolAction {
   try {
@@ -102,7 +115,17 @@ async fn write_file(
     // never read is a common way to lose work. A non-ENOENT `exists` error (e.g.
     // ENOTDIR) falls through to the write below and the `catch` reports it.
     let existed = @fs.exists(path)
+    // Snapshot the prior state for undo: a created file records before=None
+    // (undo deletes it); an overwrite records the prior content. If an existing
+    // file's content can't be read as text, skip undo — we can't safely restore.
+    let prior = if existed { read_text(path) } else { None }
+    let record_undo = !existed || prior is Some(_)
     @fs.write_file(path, input.content, create_mode=CreateOrTruncate)
+    match (undo, record_undo) {
+      (Some(store), true) =>
+        store.push([{ path, before: prior, after: input.content }])
+      _ => ()
+    }
     let chars = input.content.length()
     let summary = if existed {
       "ok: wrote \{chars} chars to \{path} (overwrote existing file)"
