@@ -11,9 +11,14 @@ pub(all) struct FileSnapshot {
 } derive(Debug, Eq)
 
 ///|
-/// One undoable edition: the files a single successful mutating tool call wrote.
+/// One edition recorded by a successful mutating tool call. Usually the files it
+/// wrote; when `reason` is `Some`, it is instead a non-undoable *barrier* — the
+/// mutation happened but cannot be reverted (e.g. a write that clobbered binary
+/// content we could not snapshot as text). `edit_undo` refuses at a barrier
+/// rather than skipping it and reverting an older edition, preserving LIFO.
 pub struct UndoEntry {
   files : Array[FileSnapshot]
+  reason : String?
 } derive(Debug)
 
 ///|
@@ -40,7 +45,20 @@ pub fn UndoStore::new(max_depth? : Int = 10) -> UndoStore {
 /// call must not leave an undo entry. When the depth cap is exceeded the oldest
 /// editions are dropped.
 pub fn UndoStore::push(self : UndoStore, files : Array[FileSnapshot]) -> Unit {
-  self.entries.push({ files, })
+  self.record({ files, reason: None })
+}
+
+///|
+/// Record a non-undoable barrier: the mutation succeeded but cannot be reverted.
+/// `edit_undo` refuses (with `reason`) when it reaches one, so it never reverts
+/// an older edition past a change it could not snapshot.
+pub fn UndoStore::push_barrier(self : UndoStore, reason : String) -> Unit {
+  self.record({ files: [], reason: Some(reason) })
+}
+
+///|
+fn UndoStore::record(self : UndoStore, entry : UndoEntry) -> Unit {
+  self.entries.push(entry)
   let extra = self.entries.length() - self.max_depth
   if extra > 0 {
     self.entries = [ for i in extra..<self.entries.length() => self.entries[i] ]

@@ -51,3 +51,13 @@ test "an edition can span multiple files" {
   assert_eq(e.files.length(), 2)
   assert_eq(e.files[1].path, "y.mbt")
 }
+
+///|
+test "push_barrier records a non-undoable barrier" {
+  let store = @undo.UndoStore::new()
+  store.push_barrier("prior content was binary")
+  assert_eq(store.depth(), 1)
+  guard store.pop() is Some(entry) else { fail("expected an entry") }
+  assert_eq(entry.files.length(), 0)
+  assert_true(entry.reason is Some("prior content was binary"))
+}

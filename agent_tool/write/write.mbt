@@ -119,12 +119,20 @@ async fn write_file(
     // (undo deletes it); an overwrite records the prior content. If an existing
     // file's content can't be read as text, skip undo — we can't safely restore.
     let prior = if existed { read_text(path) } else { None }
-    let record_undo = !existed || prior is Some(_)
     @fs.write_file(path, input.content, create_mode=CreateOrTruncate)
-    match (undo, record_undo) {
-      (Some(store), true) =>
-        store.push([{ path, before: prior, after: input.content }])
-      _ => ()
+    match undo {
+      Some(store) =>
+        if existed && prior is None {
+          // Overwrote an existing file whose prior content wasn't readable text,
+          // so it can't be snapshotted. Record a barrier so undo refuses here
+          // rather than reverting an older edition (preserving LIFO).
+          store.push_barrier(
+            "\{path} was overwritten but its prior content wasn't readable text, so the overwrite can't be undone",
+          )
+        } else {
+          store.push([{ path, before: prior, after: input.content }])
+        }
+      None => ()
     }
     let chars = input.content.length()
     let summary = if existed {

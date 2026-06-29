@@ -18,6 +18,7 @@ pub(all) struct FileSnapshot {
 
 pub struct UndoEntry {
   files : Array[FileSnapshot]
+  reason : String?
 } derive(@debug.Debug)
 
 pub struct UndoStore {
@@ -27,6 +28,7 @@ pub fn UndoStore::depth(Self) -> Int
 pub fn UndoStore::new(max_depth? : Int) -> Self
 pub fn UndoStore::pop(Self) -> UndoEntry?
 pub fn UndoStore::push(Self, Array[FileSnapshot]) -> Unit
+pub fn UndoStore::push_barrier(Self, String) -> Unit
 
 // Type aliases
 

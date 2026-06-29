@@ -41,18 +41,36 @@ async fn execute(undo : @undo.UndoStore?) -> @agent_tool.ToolAction {
         brief~,
       )
   }
+  // A barrier: this edition succeeded but cannot be reverted. Refuse here rather
+  // than skip it and revert an older edition — that would break LIFO. Re-push it
+  // so it keeps blocking.
+  match entry.reason {
+    Some(reason) => {
+      store.push_barrier(reason)
+      return @agent_tool.ToolAction::respond(
+        "error: edit_undo: the most recent change can't be undone (\{reason}); not reverting earlier edits",
+        is_error=true,
+        brief~,
+      )
+    }
+    None => ()
+  }
   // Conflict check: every file must be unchanged since the edition (its current
   // content still equals what the tool wrote). Atomic — if any file changed,
   // revert none and leave the stack as it was so the agent can resolve it.
   let conflicts : Array[String] = []
   for snap in entry.files {
-    let current = read_current(snap.path)
-    let unchanged = match (current, snap.before) {
-      (Some(content), _) => content == snap.after
-      // A created file that is already gone: deleting it is a no-op, not a conflict.
-      (None, None) => true
-      // An edited file we can no longer read counts as changed.
-      (None, Some(_)) => false
+    let unchanged = if @fs.exists(snap.path) {
+      match read_current(snap.path) {
+        Some(content) => content == snap.after
+        // Exists but unreadable: we can't confirm it's unchanged — treat as a
+        // conflict so we never delete or clobber possibly-newer content.
+        None => false
+      }
+    } else {
+      // Missing: a file the edition created is already gone (delete is a no-op);
+      // a file it edited is now gone, which is a conflict.
+      snap.before is None
     }
     if !unchanged {
       conflicts.push(snap.path)

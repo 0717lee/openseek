@@ -70,6 +70,19 @@ async test "edit_undo reverts every file in the edition atomically" {
 }
 
 ///|
+async test "edit_undo refuses at a barrier and keeps it on the stack" {
+  let store = @undo.UndoStore::new()
+  store.push_barrier("a binary file was overwritten")
+  let result = run_edit_undo(store)
+  guard result is Respond(output) else { fail("expected Respond") }
+  assert_true(output.is_error)
+  assert_true(output.content.contains("can't be undone"))
+  assert_true(output.content.contains("a binary file was overwritten"))
+  // Barrier is re-pushed so it keeps blocking older edits.
+  assert_eq(store.depth(), 1)
+}
+
+///|
 async test "edit_undo deletes a file the edition created" {
   @vfs.with_tmpdir(dir => {
     let path = "\{dir}/created.txt"
