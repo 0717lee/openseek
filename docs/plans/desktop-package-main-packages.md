@@ -213,3 +213,74 @@ validate generated interfaces.
   runtime API changes.
 - Do not run full packaging commands unless explicitly requested, because they
   download external artifacts and require platform-specific tools.
+
+## Follow-up: macOS CEF Helper Bundle
+
+### Goal
+
+Make the macOS `libcef` bundle launch CEF subprocesses from a canonical nested
+helper app and keep Proton's native binaries compatible with the package's
+declared minimum macOS version.
+
+### Accepted Design
+
+- Keep the full Proton runtime under `Contents/Resources/proton`, preserving its
+  existing internal framework/resource layout and the host rpath pointing at
+  `Resources/proton/lib`.
+- Add a nested helper app at
+  `Contents/Frameworks/OpenSeek Desktop Helper.app` containing a copy of
+  `cef_process` at `Contents/MacOS/cef_process`.
+- Give the helper app its own `Info.plist`, with bundle identifier derived from
+  the main bundle id as
+  `community.moonbit.proton.openseek-desktop.helper`.
+- Repoint the helper executable's rpath to
+  `@loader_path/../../../../Resources/proton/lib`, so its `@rpath/libproton.dylib`
+  resolves to the bundled runtime.
+- Sign the helper executable inside-out before the main app. For ad-hoc builds,
+  keep the CEF helper signing identifier as `cef_process`; for distribution
+  builds, use the same identifier plus hardened runtime and timestamp.
+- Pass `MACOSX_DEPLOYMENT_TARGET=12.0` to Proton runtime assembly as well as to
+  the host and engine builds, so Proton artifacts built during setup inherit the
+  package's deployment target.
+
+### Target Files And Surfaces
+
+- `desktop/package/macos/main.mbt`: package-time helper app layout, Info.plist,
+  rpath patching, and signing orchestration.
+- `desktop/package/macos/main_wbtest.mbt`: focused tests for derived helper
+  paths/metadata if the implementation introduces testable pure helpers.
+- No desktop runtime or Proton public API changes are expected.
+
+### API And Interface Diff
+
+- `openseek_desktop/package/macos` should not expose new public APIs in
+  `pkg.generated.mbti`; new helpers should remain private to the package.
+- Runtime-facing interfaces in `desktop/proton` and desktop host packages should
+  remain unchanged.
+
+### Open Questions
+
+- Chromium 147's peer requirement validation is intentionally out of scope for
+  this step. If ad-hoc builds still show a blank page after the helper app is
+  present, resolve that separately through real Developer ID signing or a
+  browser-side CEF command-line feature override in `libproton`.
+- The current vendored/prebuilt `libproton.dylib` and `cef_process` still carry
+  `LC_BUILD_VERSION` `minos 26.0` even when `MACOSX_DEPLOYMENT_TARGET=12.0` is
+  forwarded into `cef setup`. Supporting macOS versions below 26 requires a
+  rebuilt or replaced Proton runtime, or a separate approved Mach-O rewriting
+  and signing plan.
+
+### Next Implementation Step
+
+Update the macOS packager to stage and sign the helper app, propagate the
+deployment target into Proton runtime assembly, then validate the generated
+bundle structure and Mach-O metadata.
+
+### Validation Plan
+
+- Run `moon -C desktop check --target native`.
+- Run `moon -C desktop test package/macos`.
+- Run `moon -C desktop info && moon -C desktop fmt`.
+- Build the macOS bundle with `moon -C desktop run --target native package/macos`.
+- Inspect the generated bundle's `Contents/Frameworks` tree, helper executable
+  rpath, `LC_BUILD_VERSION`, and code signature verification.

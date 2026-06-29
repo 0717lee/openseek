@@ -11,6 +11,9 @@ const ContentsPath : String = AppPath + "/Contents"
 const MacOSPath : String = ContentsPath + "/MacOS"
 
 ///|
+const FrameworksPath : String = ContentsPath + "/Frameworks"
+
+///|
 const ResourcesPath : String = ContentsPath + "/Resources"
 
 ///|
@@ -27,6 +30,27 @@ const ResourcesPath : String = ContentsPath + "/Resources"
 const ProtonRuntimePath : String = ResourcesPath + "/proton"
 
 ///|
+const CefProcessName : String = "cef_process"
+
+///|
+const HelperAppName : String = "OpenSeek Desktop Helper.app"
+
+///|
+const HelperAppPath : String = FrameworksPath + "/" + HelperAppName
+
+///|
+const HelperContentsPath : String = HelperAppPath + "/Contents"
+
+///|
+const HelperMacOSPath : String = HelperContentsPath + "/MacOS"
+
+///|
+const HelperExecutablePath : String = HelperMacOSPath + "/" + CefProcessName
+
+///|
+const HelperProtonRPath : String = "@loader_path/../../../../Resources/proton/lib"
+
+///|
 /// Frontend assets live under Resources, not MacOS: codesign without the
 /// deprecated `--deep` treats everything in `Contents/MacOS/` as code and
 /// rejects plain data files there.
@@ -35,6 +59,12 @@ const AppAssetDir : String = ResourcesPath + "/assets"
 ///|
 const MoonbitSeedDir : String = ResourcesPath +
   "/toolchains/moonbit/macos-arm64"
+
+///|
+const AppBundleIdentifier : String = "community.moonbit.proton.openseek-desktop"
+
+///|
+const HelperBundleIdentifier : String = AppBundleIdentifier + ".helper"
 
 ///|
 /// Minimum macOS the produced binaries run on. Without this, clang pins
@@ -48,10 +78,30 @@ async fn build_outputs(ws : @packaging.Workspace) -> Unit {
   let env = { "MACOSX_DEPLOYMENT_TARGET": MinMacOSVersion }
   // Assemble the CEF runtime first: native_link_config reads
   // `.proton/runtime.json` to link the host against libproton/CEF.
-  let _ = @packaging.assemble_cef_runtime(ws, @packaging.posix_proton_cli())
+  let _ = assemble_macos_cef_runtime(ws, env)
   @packaging.build_frontend_bundle(ws)
   @packaging.build_native_host(ws, extra_env=env)
   @packaging.build_engine(ws, extra_env=env)
+}
+
+///|
+/// Forward the host deployment target into `cef setup` so any native artifacts
+/// it builds match the outer bundle's LSMinimumSystemVersion. Current Proton
+/// releases may still reuse prebuilt artifacts with their existing Mach-O
+/// version stamps; packaging validation should surface that separately.
+async fn assemble_macos_cef_runtime(
+  ws : @packaging.Workspace,
+  extra_env : Map[String, String],
+) -> String {
+  let cli = @packaging.posix_proton_cli()
+  @packaging.ensure_proton_cli(ws, cli)
+  @packaging.run_checked(
+    ws.at(cli),
+    ["-C", ws.dir(), "cef", "setup"],
+    dir=ws.dir(),
+    extra_env~,
+  )
+  @packaging.proton_runtime_dist(ws)
 }
 
 ///|
@@ -111,29 +161,93 @@ async fn bundle_proton_runtime(ws : @packaging.Workspace) -> Unit {
     ["-add_rpath", "@executable_path/../Resources/proton/lib", ws.at(host)],
     dir=ws.dir(),
   )
+  stage_cef_helper_app(ws)
+}
+
+///|
+/// Chromium derives its macOS MachPort rendezvous base bundle id by walking
+/// outward from the helper executable. A bare `cef_process` under Resources has
+/// no enclosing helper app, so CEF subprocesses compute a different rendezvous
+/// service name from the browser and die during startup. Keep the real runtime
+/// under Resources, but launch subprocesses from this tiny nested helper app.
+async fn stage_cef_helper_app(ws : @packaging.Workspace) -> Unit {
+  let source = ProtonRuntimePath + "/bin/" + CefProcessName
+  @packaging.ensure_dir(ws.at(HelperMacOSPath))
+  @packaging.write_text(
+    ws.at(HelperContentsPath + "/Info.plist"),
+    helper_info_plist_source(),
+  )
+  @packaging.copy_file(ws.at(source), ws.at(HelperExecutablePath))
+  @packaging.run_checked("chmod", ["+x", HelperExecutablePath], dir=ws.dir())
+  patch_helper_rpath(ws)
+}
+
+///|
+async fn patch_helper_rpath(ws : @packaging.Workspace) -> Unit {
+  let helper = ws.at(HelperExecutablePath)
+  let _ = @process.run(
+    "install_name_tool",
+    ["-delete_rpath", "@loader_path/../lib", helper],
+    inherit_env=true,
+    cwd=ws.dir().view(),
+  )
+  let _ = @process.run(
+    "install_name_tool",
+    ["-delete_rpath", "@loader_path/../Frameworks", helper],
+    inherit_env=true,
+    cwd=ws.dir().view(),
+  )
+  @packaging.run_checked(
+    "install_name_tool",
+    ["-add_rpath", HelperProtonRPath, helper],
+    dir=ws.dir(),
+  )
+}
+
+///|
+fn helper_info_plist_source() -> String {
+  let source =
+    $|<?xml version="1.0" encoding="UTF-8"?>
+    $|<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+    $|<plist version="1.0">
+    $|<dict>
+    $|  <key>CFBundleDevelopmentRegion</key><string>en</string>
+    $|  <key>CFBundleDisplayName</key><string>OpenSeek Desktop Helper</string>
+    $|  <key>CFBundleExecutable</key><string>\{CefProcessName}</string>
+    $|  <key>CFBundleIdentifier</key><string>\{HelperBundleIdentifier}</string>
+    $|  <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+    $|  <key>CFBundleName</key><string>OpenSeek Desktop Helper</string>
+    $|  <key>CFBundlePackageType</key><string>APPL</string>
+    $|  <key>CFBundleShortVersionString</key><string>0.1.0</string>
+    $|  <key>CFBundleVersion</key><string>0.1.0</string>
+    $|  <key>LSMinimumSystemVersion</key><string>\{MinMacOSVersion}</string>
+    $|</dict>
+    $|</plist>
+    $|
+  source
 }
 
 ///|
 fn info_plist_source() -> String {
   let source =
-    #|<?xml version="1.0" encoding="UTF-8"?>
-    #|<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-    #|<plist version="1.0">
-    #|<dict>
-    #|  <key>CFBundleDevelopmentRegion</key><string>en</string>
-    #|  <key>CFBundleDisplayName</key><string>OpenSeek Desktop</string>
-    #|  <key>CFBundleExecutable</key><string>openseek-desktop</string>
-    #|  <key>CFBundleIdentifier</key><string>community.moonbit.proton.openseek-desktop</string>
-    #|  <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
-    #|  <key>CFBundleName</key><string>OpenSeek Desktop</string>
-    #|  <key>CFBundlePackageType</key><string>APPL</string>
-    #|  <key>CFBundleShortVersionString</key><string>0.1.0</string>
-    #|  <key>CFBundleVersion</key><string>0.1.0</string>
-    #|  <key>LSMinimumSystemVersion</key><string>12.0</string>
-    #|  <key>NSHighResolutionCapable</key><true/>
-    #|</dict>
-    #|</plist>
-    #|
+    $|<?xml version="1.0" encoding="UTF-8"?>
+    $|<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+    $|<plist version="1.0">
+    $|<dict>
+    $|  <key>CFBundleDevelopmentRegion</key><string>en</string>
+    $|  <key>CFBundleDisplayName</key><string>OpenSeek Desktop</string>
+    $|  <key>CFBundleExecutable</key><string>openseek-desktop</string>
+    $|  <key>CFBundleIdentifier</key><string>\{AppBundleIdentifier}</string>
+    $|  <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+    $|  <key>CFBundleName</key><string>OpenSeek Desktop</string>
+    $|  <key>CFBundlePackageType</key><string>APPL</string>
+    $|  <key>CFBundleShortVersionString</key><string>0.1.0</string>
+    $|  <key>CFBundleVersion</key><string>0.1.0</string>
+    $|  <key>LSMinimumSystemVersion</key><string>\{MinMacOSVersion}</string>
+    $|  <key>NSHighResolutionCapable</key><true/>
+    $|</dict>
+    $|</plist>
+    $|
   source
 }
 
@@ -170,6 +284,29 @@ fn codesign_file_args(
     ["--force", "--options", "runtime", "--timestamp", "--sign", identity, path]
   } else {
     ["--force", "--sign", identity, path]
+  }
+}
+
+///|
+fn codesign_cef_process_args(
+  identity : String,
+  path : String,
+  distribution~ : Bool,
+) -> Array[String] {
+  if distribution {
+    [
+      "--force",
+      "--options",
+      "runtime",
+      "--timestamp",
+      "-i",
+      CefProcessName,
+      "--sign",
+      identity,
+      path,
+    ]
+  } else {
+    ["--force", "-i", CefProcessName, "--sign", identity, path]
   }
 }
 
@@ -266,10 +403,7 @@ async fn sign_runtime_machos_outside_framework(
       sign_runtime_machos_outside_framework(ws, path, identity)
     } else if is_macho_file(path) {
       let args = if entry == "cef_process" {
-        [
-          "--force", "--options", "runtime", "--timestamp", "-i", "cef_process",
-          "--sign", identity, path,
-        ]
+        codesign_cef_process_args(identity, path, distribution=true)
       } else {
         [
           "--force", "--options", "runtime", "--timestamp", "--sign", identity, path,
@@ -278,6 +412,23 @@ async fn sign_runtime_machos_outside_framework(
       @packaging.run_checked("codesign", args, dir=ws.dir())
     }
   }
+}
+
+///|
+async fn sign_cef_helper(
+  ws : @packaging.Workspace,
+  identity : String,
+  distribution~ : Bool,
+) -> Unit {
+  let helper = ws.at(HelperExecutablePath)
+  if !@asyncfs.exists(helper) {
+    return
+  }
+  @packaging.run_checked(
+    "codesign",
+    codesign_cef_process_args(identity, helper, distribution~),
+    dir=ws.dir(),
+  )
 }
 
 ///|
@@ -338,6 +489,7 @@ fn parse_sign_config(argv? : ArrayView[String]) -> SignConfig raise {
 async fn sign_app(ws : @packaging.Workspace, sign : SignConfig) -> Unit {
   guard sign.identity is Some(identity) else {
     sign_moonbit_seed_binaries(ws, "-", distribution=false)
+    sign_cef_helper(ws, "-", distribution=false)
     // Do NOT re-sign the bundled CEF runtime. `cef setup` ships it
     // linker-signed (a valid adhoc signature); re-signing with `codesign`
     // replaces that with a plain adhoc signature and rewrites `cef_process`'s
@@ -372,6 +524,7 @@ async fn sign_app(ws : @packaging.Workspace, sign : SignConfig) -> Unit {
   // SIGTRAPs the helper), then sign the framework as a bundle, never walking
   // into its inner mach-o (that breaks the framework seal).
   sign_proton_runtime_for_distribution(ws, identity)
+  sign_cef_helper(ws, identity, distribution=true)
   @packaging.run_checked(
     "codesign",
     [

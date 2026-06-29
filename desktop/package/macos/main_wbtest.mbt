@@ -6,6 +6,31 @@ test "macos package args default to ad-hoc signing" {
 }
 
 ///|
+test "macos helper plist describes cef helper app" {
+  let plist = helper_info_plist_source()
+  assert_true(
+    plist.contains(
+      "<key>CFBundleExecutable</key><string>\{CefProcessName}</string>",
+    ),
+  )
+  assert_true(
+    plist.contains(
+      "<key>CFBundleIdentifier</key><string>\{HelperBundleIdentifier}</string>",
+    ),
+  )
+  assert_true(
+    plist.contains(
+      "<key>LSMinimumSystemVersion</key><string>\{MinMacOSVersion}</string>",
+    ),
+  )
+}
+
+///|
+test "macos helper executable rpath points back to bundled proton runtime" {
+  assert_eq(HelperProtonRPath, "@loader_path/../../../../Resources/proton/lib")
+}
+
+///|
 test "macos package args parse signing and notarization" {
   let config = parse_sign_config(argv=[
     "--sign", "Developer ID Application: Example", "--notarize", "notary",
