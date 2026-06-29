@@ -7,10 +7,11 @@ test "macos package args default to ad-hoc signing" {
 
 ///|
 test "macos helper plist describes cef helper app" {
-  let plist = helper_info_plist_source()
+  let helper = cef_helper_variants()[0]
+  let plist = helper_info_plist_source(helper)
   assert_true(
     plist.contains(
-      "<key>CFBundleExecutable</key><string>\{CefProcessName}</string>",
+      "<key>CFBundleExecutable</key><string>\{HelperExecutableBaseName}</string>",
     ),
   )
   assert_true(
@@ -22,6 +23,36 @@ test "macos helper plist describes cef helper app" {
     plist.contains(
       "<key>LSMinimumSystemVersion</key><string>\{MinMacOSVersion}</string>",
     ),
+  )
+}
+
+///|
+test "macos renderer helper plist uses cef helper variant name" {
+  let helper = cef_helper_variants()[4]
+  let plist = helper_info_plist_source(helper)
+  assert_eq(helper.executable_name(), "OpenSeek Desktop Helper (Renderer)")
+  assert_eq(
+    helper.executable_path(),
+    "dist/OpenSeek Desktop.app/Contents/Frameworks/OpenSeek Desktop Helper (Renderer).app/Contents/MacOS/OpenSeek Desktop Helper (Renderer)",
+  )
+  assert_true(
+    plist.contains(
+      "<key>CFBundleExecutable</key><string>OpenSeek Desktop Helper (Renderer)</string>",
+    ),
+  )
+  assert_true(
+    plist.contains(
+      "<key>CFBundleIdentifier</key><string>community.moonbit.proton.openseek-desktop.helper.renderer</string>",
+    ),
+  )
+}
+
+///|
+test "macos base helper path points at chromium helper executable name" {
+  let helper = cef_helper_variants()[0]
+  assert_eq(
+    helper.executable_path(),
+    "dist/OpenSeek Desktop.app/Contents/Frameworks/OpenSeek Desktop Helper.app/Contents/MacOS/OpenSeek Desktop Helper",
   )
 }
 

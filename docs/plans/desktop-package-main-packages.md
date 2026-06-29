@@ -327,3 +327,132 @@ app to verify CEF uses the nested helper executable.
 - Run `moon -C desktop info`.
 - Run `moon -C desktop fmt`.
 - Inspect the generated app bundle and launch it.
+
+## Follow-up: macOS CEF Renderer Startup
+
+### Goal
+
+Make the macOS `libcef` runtime start a live renderer process so packaged
+OpenSeek can actually render `proton://app/` and execute page JavaScript.
+
+### Accepted Design
+
+- Fix the vendored Lepus mac CEF implementation rather than the OpenSeek
+  facade: a minimal C smoke app running inside the same `.app` bundle still
+  produced a DevTools page target with no renderer and CDP `Runtime.enable`
+  timed out.
+- Align the mac CEF bootstrap with current CEF M142 C API requirements where
+  needed, including runtime library loading from the bundle and helper process
+  startup.
+- Fix C API handler ownership on mac by adding references before returning
+  handler pointers to CEF, matching the official C API examples.
+- Add focused native debug logging for page load and scheme-handler callbacks
+  so renderer startup and `proton://` resource handling are observable.
+- Keep the Proton C ABI and MoonBit-facing APIs unchanged.
+- After Lepus renderer startup is fixed, keep the macOS packager aligned with
+  the runtime requirements: CEF-style plist metadata, hardened runtime
+  entitlements, and inside-out signing of CEF framework libraries and helpers.
+
+### Target Files And Surfaces
+
+- `vendor/lepus/native/src/engine/cef_mac/proton_engine_cef_mac.m`: mac CEF
+  runtime initialization, handler ownership, and diagnostics.
+- `vendor/lepus/native/src/cef_process.c`: mac helper process bootstrap if CEF
+  runtime loading needs helper-side setup.
+- `vendor/lepus/native/CMakeLists.txt`: mac native linking/build inputs if the
+  CEF wrapper library loader is required.
+- `desktop/package/macos/main.mbt`: package-time signing/plist/entitlement
+  follow-up after renderer startup is verified in Lepus.
+
+### API And Interface Diff
+
+- No intended changes to Proton's exported C ABI.
+- No intended changes to desktop host/runtime MoonBit APIs or generated
+  package interfaces.
+- mac native build internals may gain private helper functions and CMake build
+  inputs only.
+
+### Open Questions
+
+- Whether direct-linking the CEF framework is sufficient once handler ownership
+  is fixed, or whether M142 requires the CEF wrapper library loader in both
+  main and helper processes for this embedding shape.
+- Whether browser creation must be deferred until CEF's browser process is
+  fully initialized, instead of immediately after `cef_initialize`.
+
+### Next Implementation Step
+
+Patch Lepus mac native code with handler ownership fixes and instrumentation,
+then iterate on mac CEF bootstrap/linking until a minimal bundle smoke can
+evaluate JavaScript through CDP and shows a stable renderer process.
+
+### Validation Plan
+
+- Rebuild the Lepus/native mac runtime through the existing `cef setup` path.
+- Rebuild the macOS package.
+- Launch the generated `.app` directly, inspect stable CEF subprocesses, and
+  verify CDP `Runtime.evaluate` returns page DOM/JS state for `proton://app/`.
+- Run `moon -C desktop test proton/native --target native`.
+- Run `moon -C desktop info && moon -C desktop fmt`.
+
+## Follow-up: macOS CEF Helper Executable Names
+
+### Goal
+
+Make the macOS packaged app launch CEF renderer subprocesses by matching
+Chromium's helper bundle naming convention.
+
+### Accepted Design
+
+- Keep the full Proton runtime under `Contents/Resources/proton`.
+- Generate the CEF macOS helper app family under `Contents/Frameworks`:
+  - `OpenSeek Desktop Helper.app`
+  - `OpenSeek Desktop Helper (Alerts).app`
+  - `OpenSeek Desktop Helper (GPU).app`
+  - `OpenSeek Desktop Helper (Plugin).app`
+  - `OpenSeek Desktop Helper (Renderer).app`
+- Copy the same built `cef_process` Mach-O into each helper app, but name the
+  destination executable after the helper app bundle, e.g.
+  `OpenSeek Desktop Helper (Renderer).app/Contents/MacOS/OpenSeek Desktop Helper (Renderer)`.
+- Set each helper app's `CFBundleExecutable`, `CFBundleName`,
+  `CFBundleDisplayName`, and bundle identifier to match the helper variant.
+- Patch every helper executable's rpath to
+  `@loader_path/../../../../Resources/proton/lib`.
+- Keep the runtime-facing helper path pointed at the base helper executable:
+  `Contents/Frameworks/OpenSeek Desktop Helper.app/Contents/MacOS/OpenSeek Desktop Helper`.
+- Prefer the base helper in macOS helper discovery so adding helper variants
+  cannot accidentally pass the renderer, GPU, plugin, or alerts helper as
+  `browser_subprocess_path`.
+
+### Target Files And Surfaces
+
+- `desktop/package/macos/main.mbt`: helper bundle generation, metadata, rpath
+  patching, and signing traversal.
+- `desktop/package/macos/main_wbtest.mbt`: helper metadata/unit coverage.
+- `desktop/proton/facade_macos_layout.mbt`: package-runtime helper discovery,
+  limited to preferring the base helper executable when multiple helpers exist.
+
+### API And Interface Diff
+
+- No public MoonBit API changes are intended.
+- Generated `.mbti` files should not expose new package APIs.
+
+### Open Questions
+
+- Developer ID distribution signing still needs end-to-end validation with a
+  real signing identity and notarization profile.
+
+### Next Implementation Step
+
+Update the macOS packager and helper discovery, then rebuild the bundle and
+verify a packaged app produces `Helper (Renderer)` subprocesses and can execute
+JavaScript through CDP.
+
+### Validation Plan
+
+- Run `moon -C desktop test package/macos --target native`.
+- Run `moon -C desktop test proton --target native`.
+- Run `moon -C desktop info && moon -C desktop fmt`.
+- Run `moon -C desktop run --target native package/macos`.
+- Inspect helper bundle names, `CFBundleExecutable`, rpaths, and signatures.
+- Launch the generated app and verify CDP `Runtime.evaluate` on `proton://app/`.

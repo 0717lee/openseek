@@ -10,30 +10,57 @@
 /// walk then climbs out to the main `.app` and yields the same base bundle id
 /// the browser uses, so the rendezvous names match.
 ///
-/// This returns the helper executable path when the host runs from
-/// `…/Contents/MacOS/<exe>` and a `Contents/Frameworks/<name>.app` carrying a
-/// `Contents/MacOS/<exe>` is present; otherwise `None`, leaving the runtime to
-/// its default subprocess discovery (correct for the unbundled dev flow and for
-/// platforms without this constraint).
+/// This returns the base helper executable path when the host runs from
+/// `…/Contents/MacOS/<exe>` and a `Contents/Frameworks/<name> Helper.app`
+/// carrying a `Contents/MacOS/<name> Helper` executable is present; otherwise
+/// `None`, leaving the runtime to its default subprocess discovery (correct for
+/// the unbundled dev flow and for platforms without this constraint).
 async fn macos_bundled_helper_path() -> String? {
   guard @env.args().get(0) is Some(exe_path) else { return None }
-  let exe : @mbpath.Path = exe_path
+  let resolved_exe_path = @fs.realpath(exe_path) catch {
+    error if @async.is_being_cancelled() => raise error
+    _ => return None
+  }
+  let exe : @mbpath.Path = resolved_exe_path
   let macos_dir = exe.dirname()
   // Only an `.app` layout puts the executable directly under `MacOS`.
   guard macos_dir.basename() == "MacOS" else { return None }
   let frameworks = macos_dir.dirname().join("Frameworks")
   let entries = list_dir(frameworks.to_string())
   for entry in entries {
-    if !entry.has_suffix(".app") {
-      continue
+    if is_base_cef_helper_app(entry) {
+      if helper_executable_in_app(frameworks, entry) is Some(path) {
+        return Some(path)
+      }
     }
-    let helper_macos = frameworks.join(entry).join("Contents").join("MacOS")
-    let helper_exe = first_regular_file(helper_macos.to_string())
-    if helper_exe is Some(name) {
-      return Some(helper_macos.join(name).to_string())
+  }
+  for entry in entries {
+    if entry.has_suffix(".app") {
+      if helper_executable_in_app(frameworks, entry) is Some(path) {
+        return Some(path)
+      }
     }
   }
   None
+}
+
+///|
+fn is_base_cef_helper_app(entry : String) -> Bool {
+  entry.has_suffix(" Helper.app")
+}
+
+///|
+async fn helper_executable_in_app(
+  frameworks : @mbpath.Path,
+  entry : String,
+) -> String? {
+  let helper_macos = frameworks.join(entry).join("Contents").join("MacOS")
+  let helper_exe = first_regular_file(helper_macos.to_string())
+  if helper_exe is Some(name) {
+    Some(helper_macos.join(name).to_string())
+  } else {
+    None
+  }
 }
 
 ///|
