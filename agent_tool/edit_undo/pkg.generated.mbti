@@ -1,5 +1,5 @@
 // Generated using `moon info`, DON'T EDIT IT
-package "bobzhang/openseek/agent_tool/multi_edit"
+package "bobzhang/openseek/agent_tool/edit_undo"
 
 import {
   "bobzhang/openseek/agent_tool",
@@ -7,7 +7,7 @@ import {
 }
 
 // Values
-pub fn definition(workspace_root? : String, undo? : @undo.UndoStore?) -> @agent_tool.AgentToolDefinition
+pub fn definition(undo? : @undo.UndoStore?) -> @agent_tool.AgentToolDefinition
 
 // Errors
 

@@ -12,12 +12,17 @@ fn[X] tool_definitions(
   // `moon check` through shell).
   ignore(scope)
   let workspace_root = runtime.workspace_root()
+  // Shared, bounded, session-scoped undo history: the edit tools push a snapshot
+  // of every file they write; `edit_undo` pops the most recent edition to revert
+  // it. Built once per session here, so the history survives across steps.
+  let undo = @undo.UndoStore::new()
   Tools([
     @shell.definition(workspace_root~),
     @read.definition(workspace_root~),
     @edit.definition(workspace_root~),
-    @multi_edit.definition(workspace_root~),
+    @multi_edit.definition(workspace_root~, undo=Some(undo)),
     @write.definition(workspace_root~),
+    @edit_undo.definition(undo=Some(undo)),
     @finish.definition(),
   ])
 }
@@ -27,13 +32,14 @@ async test "agent registers the expected tool names" {
   @async.with_task_group() <| group => {
     let tools = tool_definitions(AgentRuntime(), AgentTaskScope(group))
     let function_tools = tools.function_tools()
-    assert_eq(function_tools.length(), 6)
+    assert_eq(function_tools.length(), 7)
     let names = [ for t in function_tools => t.name ]
     assert_true(names.contains("shell"))
     assert_true(names.contains("read"))
     assert_true(names.contains("edit"))
     assert_true(names.contains("multi_edit"))
     assert_true(names.contains("write"))
+    assert_true(names.contains("edit_undo"))
     assert_true(names.contains("finish"))
     assert_false(names.contains("moon_check"))
     assert_false(names.contains("moon_cmd"))

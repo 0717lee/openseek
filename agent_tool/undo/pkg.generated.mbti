@@ -1,5 +1,5 @@
 // Generated using `moon info`, DON'T EDIT IT
-package "bobzhang/openseek/agent_tool/internal/undo"
+package "bobzhang/openseek/agent_tool/undo"
 
 import {
   "moonbitlang/core/debug",
@@ -21,8 +21,7 @@ pub struct UndoEntry {
 } derive(@debug.Debug)
 
 pub struct UndoStore {
-  mut entries : Array[UndoEntry]
-  max_depth : Int
+  // private fields
 }
 pub fn UndoStore::depth(Self) -> Int
 pub fn UndoStore::new(max_depth? : Int) -> Self

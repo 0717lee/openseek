@@ -10,6 +10,7 @@
 /// listed contiguously.
 pub fn definition(
   workspace_root? : String = ".",
+  undo? : @undo.UndoStore? = None,
 ) -> @agent_tool.AgentToolDefinition {
   AgentToolDefinition(
     name="multi_edit",
@@ -49,13 +50,16 @@ pub fn definition(
         },
       },
     }),
-    execute=Async(arguments => execute_with_workspace(workspace_root, arguments)),
+    execute=Async(arguments => {
+      execute_with_workspace(workspace_root, undo, arguments)
+    }),
   )
 }
 
 ///|
 async fn execute_with_workspace(
   workspace_root : String,
+  undo : @undo.UndoStore?,
   arguments : Json,
 ) -> @agent_tool.ToolAction {
   let args = @decode.decode_args(arguments) catch {
@@ -84,7 +88,7 @@ async fn execute_with_workspace(
       is_error=true,
     )
   }
-  multi_edit_files(workspace_root, edits)
+  multi_edit_files(workspace_root, undo, edits)
 }
 
 ///|
@@ -138,6 +142,7 @@ priv struct PreparedWrite {
   path : String
   new_content : String
   edit_count : Int
+  before : String
 }
 
 ///|
@@ -158,6 +163,7 @@ priv struct PreparedFile {
 /// keeps partial application limited to a raw filesystem write error.
 async fn multi_edit_files(
   workspace_root : String,
+  undo : @undo.UndoStore?,
   edits : Array[@decode.MultiEditItem],
 ) -> @agent_tool.ToolAction {
   let brief = "multi_edit"
@@ -231,6 +237,7 @@ async fn multi_edit_files(
           path: prepared_file.path,
           new_content,
           edit_count: prepared_file.plans.length(),
+          before: prepared_file.content,
         })
     }
   }
@@ -251,6 +258,23 @@ async fn multi_edit_files(
           brief~,
         )
     }
+  }
+  // Record this successful edition so `edit_undo` can revert it. `before` is the
+  // original content (multi_edit only edits existing files); `after` is what we
+  // wrote, used to detect a later change before restoring.
+  match undo {
+    Some(store) => {
+      let snapshots : Array[@undo.FileSnapshot] = []
+      for write in writes {
+        snapshots.push({
+          path: write.path,
+          before: Some(write.before),
+          after: write.new_content,
+        })
+      }
+      store.push(snapshots)
+    }
+    None => ()
   }
   // Append `moon check` feedback once, from the first written file's module. A
   // batch spanning multiple modules only surfaces the first module's

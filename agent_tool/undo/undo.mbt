@@ -23,8 +23,8 @@ pub struct UndoEntry {
 /// dropped so memory stays bounded. `edit_undo` is a safety net for the last few
 /// mistakes, not a full history.
 pub struct UndoStore {
-  mut entries : Array[UndoEntry]
-  max_depth : Int
+  priv mut entries : Array[UndoEntry]
+  priv max_depth : Int
 }
 
 ///|

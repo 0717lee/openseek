@@ -117,8 +117,10 @@ calls `@agent.run`, but that decision lives outside the `agent` package.
   `moon check` for compiler feedback);
 - `read`: read a text file;
 - `edit`: replace exact text in a file;
-- `multi_edit`: apply several explicit line-anchored replacements to one file;
+- `multi_edit`: apply many line-anchored replacements across one or more files
+  (given inline or from an edits file);
 - `write`: overwrite a file;
+- `edit_undo`: revert the most recent edit/multi_edit/write edition;
 - `finish`: end the task with a final answer.
 
 File-oriented tools capture `runtime.workspace_root()` when the registry is
@@ -137,7 +139,15 @@ async test "standard tools are registered in dispatch order" {
         for tool in tools.function_tools() => tool.name
       ],
       content=(
-        #|["shell", "read", "edit", "multi_edit", "write", "finish"]
+        #|[
+        #|  "shell",
+        #|  "read",
+        #|  "edit",
+        #|  "multi_edit",
+        #|  "write",
+        #|  "edit_undo",
+        #|  "finish",
+        #|]
       ),
     )
   }
