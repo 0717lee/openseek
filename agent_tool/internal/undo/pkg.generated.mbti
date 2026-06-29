@@ -1,0 +1,35 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "bobzhang/openseek/agent_tool/internal/undo"
+
+import {
+  "moonbitlang/core/debug",
+}
+
+// Values
+
+// Errors
+
+// Types and methods
+pub(all) struct FileSnapshot {
+  path : String
+  before : String?
+  after : String
+} derive(Eq, @debug.Debug)
+
+pub struct UndoEntry {
+  files : Array[FileSnapshot]
+} derive(@debug.Debug)
+
+pub struct UndoStore {
+  mut entries : Array[UndoEntry]
+  max_depth : Int
+}
+pub fn UndoStore::depth(Self) -> Int
+pub fn UndoStore::new(max_depth? : Int) -> Self
+pub fn UndoStore::pop(Self) -> UndoEntry?
+pub fn UndoStore::push(Self, Array[FileSnapshot]) -> Unit
+
+// Type aliases
+
+// Traits
+
