@@ -14,6 +14,19 @@ const MacOSPath : String = ContentsPath + "/MacOS"
 const ResourcesPath : String = ContentsPath + "/Resources"
 
 ///|
+/// The whole assembled Proton runtime (lib/libproton.dylib, the CEF framework,
+/// bin/cef_process + GL dylibs, Resources/locales) is copied here as a unit so
+/// its internal `@loader_path/..` references keep resolving; the host's rpath is
+/// repointed at `proton/lib`. It lives under Resources, not Frameworks:
+/// `codesign` requires every entry directly under `Contents/Frameworks` to be a
+/// valid framework/dylib bundle, and the runtime's `Resources/*.lproj` data
+/// dirs make it reject the tree ("bundle format unrecognized"). Under Resources
+/// the tree is sealed as data by the outer app signature. Its nested mach-o keep
+/// the valid (linker) adhoc signatures `cef setup` ships; they are only
+/// re-signed for Developer ID distribution, never for the adhoc build.
+const ProtonRuntimePath : String = ResourcesPath + "/proton"
+
+///|
 /// Frontend assets live under Resources, not MacOS: codesign without the
 /// deprecated `--deep` treats everything in `Contents/MacOS/` as code and
 /// rejects plain data files there.
@@ -33,7 +46,9 @@ const MinMacOSVersion : String = "12.0"
 ///|
 async fn build_outputs(ws : @packaging.Workspace) -> Unit {
   let env = { "MACOSX_DEPLOYMENT_TARGET": MinMacOSVersion }
-  @packaging.ensure_codegen_tool(ws, @packaging.posix_codegen_tool())
+  // Assemble the CEF runtime first: native_link_config reads
+  // `.proton/runtime.json` to link the host against libproton/CEF.
+  let _ = @packaging.assemble_cef_runtime(ws, @packaging.posix_proton_cli())
   @packaging.build_frontend_bundle(ws)
   @packaging.build_native_host(ws, extra_env=env)
   @packaging.build_engine(ws, extra_env=env)
@@ -70,8 +85,32 @@ async fn copy_bundle_files(ws : @packaging.Workspace) -> Unit {
     ws.at("frontend.js"),
     ws.at(AppAssetDir + "/frontend.js"),
   )
+  bundle_proton_runtime(ws)
   let target = @moonbit.moonbit_macos_arm64_toolchain()
   @moonbit.stage_moonbit_toolchain_seed(ws, target, MoonbitSeedDir)
+}
+
+///|
+/// Copy the assembled Proton runtime into the bundle and repoint the host's
+/// libproton rpath at it. native_link_config bakes an absolute rpath to the
+/// dev dist's `lib/`; that only resolves on the build machine, so swap it for
+/// an `@executable_path`-relative one that points at the copied runtime.
+async fn bundle_proton_runtime(ws : @packaging.Workspace) -> Unit {
+  let dist = @packaging.proton_runtime_dist(ws)
+  @packaging.copy_tree(dist, ws.at(ProtonRuntimePath))
+  let host = MacOSPath + "/openseek-desktop"
+  // The dev rpath only exists on the build machine; deleting it is best-effort.
+  let _ = @process.run(
+    "install_name_tool",
+    ["-delete_rpath", dist + "/lib", ws.at(host)],
+    inherit_env=true,
+    cwd=ws.dir().view(),
+  )
+  @packaging.run_checked(
+    "install_name_tool",
+    ["-add_rpath", "@executable_path/../Resources/proton/lib", ws.at(host)],
+    dir=ws.dir(),
+  )
 }
 
 ///|
@@ -84,7 +123,7 @@ fn info_plist_source() -> String {
     #|  <key>CFBundleDevelopmentRegion</key><string>en</string>
     #|  <key>CFBundleDisplayName</key><string>OpenSeek Desktop</string>
     #|  <key>CFBundleExecutable</key><string>openseek-desktop</string>
-    #|  <key>CFBundleIdentifier</key><string>community.moonbit.lepus.openseek-desktop</string>
+    #|  <key>CFBundleIdentifier</key><string>community.moonbit.proton.openseek-desktop</string>
     #|  <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
     #|  <key>CFBundleName</key><string>OpenSeek Desktop</string>
     #|  <key>CFBundlePackageType</key><string>APPL</string>
@@ -174,6 +213,74 @@ async fn sign_macho_files_under(
 }
 
 ///|
+/// Sign the bundled CEF runtime for Developer ID distribution. The loose dylibs
+/// and the `cef_process` helper are signed individually (the helper keeps its
+/// `cef_process` code-signing identifier — CEF SIGTRAPs a helper whose id was
+/// rewritten to `codesign`'s default hashed name), then the Chromium framework
+/// is signed as a bundle. The framework's inner mach-o is never signed on its
+/// own: doing so breaks the framework's seal. UNVALIDATED — no Developer ID
+/// signing host is available here.
+async fn sign_proton_runtime_for_distribution(
+  ws : @packaging.Workspace,
+  identity : String,
+) -> Unit {
+  let root = ws.at(ProtonRuntimePath)
+  sign_runtime_machos_outside_framework(ws, root, identity)
+  let frameworks_dir = root + "/Frameworks"
+  if @asyncfs.exists(frameworks_dir) {
+    for entry in @asyncfs.readdir(frameworks_dir, sort=true) {
+      if entry.has_suffix(".framework") {
+        @packaging.run_checked(
+          "codesign",
+          [
+            "--force",
+            "--options",
+            "runtime",
+            "--timestamp",
+            "--sign",
+            identity,
+            frameworks_dir + "/" + entry,
+          ],
+          dir=ws.dir(),
+        )
+      }
+    }
+  }
+}
+
+///|
+/// Sign every mach-o under `dir` except those inside a `.framework` bundle,
+/// which must be signed as a unit by the caller. `cef_process` keeps its
+/// identifier so CEF's helper bootstrap accepts it.
+async fn sign_runtime_machos_outside_framework(
+  ws : @packaging.Workspace,
+  dir : String,
+  identity : String,
+) -> Unit {
+  for entry in @asyncfs.readdir(dir, sort=true) {
+    let path = dir + "/" + entry
+    if @asyncfs.kind(path) is Directory {
+      if entry.has_suffix(".framework") {
+        continue
+      }
+      sign_runtime_machos_outside_framework(ws, path, identity)
+    } else if is_macho_file(path) {
+      let args = if entry == "cef_process" {
+        [
+          "--force", "--options", "runtime", "--timestamp", "-i", "cef_process",
+          "--sign", identity, path,
+        ]
+      } else {
+        [
+          "--force", "--options", "runtime", "--timestamp", "--sign", identity, path,
+        ]
+      }
+      @packaging.run_checked("codesign", args, dir=ws.dir())
+    }
+  }
+}
+
+///|
 /// Signing configuration from the package arguments: `--sign <identity>` names
 /// a Developer ID Application identity for distribution, `--notarize <profile>`
 /// names a notarytool keychain profile.
@@ -231,9 +338,22 @@ fn parse_sign_config(argv? : ArrayView[String]) -> SignConfig raise {
 async fn sign_app(ws : @packaging.Workspace, sign : SignConfig) -> Unit {
   guard sign.identity is Some(identity) else {
     sign_moonbit_seed_binaries(ws, "-", distribution=false)
+    // Do NOT re-sign the bundled CEF runtime. `cef setup` ships it
+    // linker-signed (a valid adhoc signature); re-signing with `codesign`
+    // replaces that with a plain adhoc signature and rewrites `cef_process`'s
+    // identifier to a hashed `cef_process-<hash>`. CEF's multi-process
+    // bootstrap then SIGTRAPs the helper at `cef_execute_process`, so every
+    // renderer dies and the window stays blank. The runtime under Resources is
+    // sealed as data by the outer app signature; each helper still loads under
+    // its own intact linker signature. Only our own binaries need signing.
     @packaging.run_checked(
       "codesign",
-      ["--force", "--deep", "--sign", "-", AppPath],
+      ["--force", "--sign", "-", MacOSPath + "/openseek"],
+      dir=ws.dir(),
+    )
+    @packaging.run_checked(
+      "codesign",
+      ["--force", "--sign", "-", AppPath],
       dir=ws.dir(),
     )
     return
@@ -243,6 +363,15 @@ async fn sign_app(ws : @packaging.Workspace, sign : SignConfig) -> Unit {
   // the bundle, because deprecated `--deep` signs nested code with the wrong
   // designated requirements.
   sign_moonbit_seed_binaries(ws, identity, distribution=true)
+  // Sign the bundled CEF runtime inside-out before the app so every executable
+  // carries the hardened-runtime signature notarization requires. UNVALIDATED:
+  // no Developer ID host here. Unlike the adhoc path (which must leave the
+  // runtime's linker signatures untouched), notarization forces a re-sign — so
+  // do it the way CEF tolerates: sign the loose dylibs and the `cef_process`
+  // helper while preserving the helper's `cef_process` identifier (a mangled id
+  // SIGTRAPs the helper), then sign the framework as a bundle, never walking
+  // into its inner mach-o (that breaks the framework seal).
+  sign_proton_runtime_for_distribution(ws, identity)
   @packaging.run_checked(
     "codesign",
     [

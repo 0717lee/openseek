@@ -13,7 +13,7 @@ const FrontendBundleOutput : String = "frontend.js"
 const NativePackage : String = "."
 
 ///|
-const NativeBinary : String = "_build/native/release/build/openseek_desktop/openseek_desktop.exe"
+const NativeBinary : String = "_build/native/release/build/openseek_desktop.exe"
 
 ///|
 const EnginePackage : String = "cmd/openseek"
@@ -52,7 +52,6 @@ struct Workspace {
 pub async fn locate_workspace() -> Workspace {
   for candidate in [".", "desktop"] {
     if @asyncfs.exists(candidate + "/moon.mod") &&
-      @asyncfs.exists(candidate + "/lepus") &&
       @asyncfs.exists(candidate + "/frontend") {
       return {
         root: absolute_path(candidate),
@@ -126,17 +125,79 @@ pub fn engine_package() -> String {
 }
 
 ///|
-/// Return the POSIX lepus code generation tool path relative to the desktop
-/// workspace.
-pub fn posix_codegen_tool() -> String {
-  "lepus/target/lepus-tools/lepus_cli"
+/// The mooncakes package providing the Proton CLI (`cef setup`, codegen).
+const ProtonCliPackage : String = "justjavac/proton_cli"
+
+///|
+/// Return the POSIX Proton CLI path relative to the desktop workspace.
+pub fn posix_proton_cli() -> String {
+  "target/proton-tools/proton_cli"
 }
 
 ///|
-/// Return the Windows lepus code generation tool path relative to the desktop
-/// workspace.
-pub fn windows_codegen_tool() -> String {
-  "lepus/target/lepus-tools/lepus_cli.exe"
+/// Return the Windows Proton CLI path relative to the desktop workspace.
+pub fn windows_proton_cli() -> String {
+  "target/proton-tools/proton_cli.exe"
+}
+
+///|
+/// Install the Proton CLI to `target/proton-tools` if the requested
+/// workspace-relative tool path does not already exist.
+pub async fn ensure_proton_cli(ws : Workspace, tool_path : String) -> Unit {
+  if @asyncfs.exists(ws.at(tool_path)) {
+    return
+  }
+  run_checked(
+    "moon",
+    ["install", ProtonCliPackage, "--bin", "target/proton-tools"],
+    dir=ws.dir(),
+  )
+}
+
+///|
+/// Assemble the Proton CEF runtime (`cef setup`) so the native host links
+/// against `libproton`/CEF and the runtime can be copied into the bundle.
+/// Returns the absolute path to the assembled runtime dist directory. The
+/// command downloads CEF on first run (large); a pre-populated `.cef-cache`
+/// lets it complete offline.
+pub async fn assemble_cef_runtime(ws : Workspace, tool_path : String) -> String {
+  ensure_proton_cli(ws, tool_path)
+  run_checked(ws.at(tool_path), ["-C", ws.dir(), "cef", "setup"], dir=ws.dir())
+  proton_runtime_dist(ws)
+}
+
+///|
+/// Read the absolute Proton runtime dist directory from `.proton/runtime.json`,
+/// the manifest `cef setup` writes. Raises when the manifest is missing or
+/// malformed.
+pub async fn proton_runtime_dist(ws : Workspace) -> String {
+  let manifest = ws.at(".proton/runtime.json")
+  if !@asyncfs.exists(manifest) {
+    raise PackageError(
+      "Proton runtime manifest not found: \{manifest} (run cef setup)",
+    )
+  }
+  let text = @asyncfs.read_file(manifest).text()
+  let dist = match @json.parse(text) {
+    Object(fields) =>
+      match fields.get("dist") {
+        Some(String(value)) => value
+        _ =>
+          raise PackageError("Proton runtime manifest has no \"dist\": \{text}")
+      }
+    _ => raise PackageError("Proton runtime manifest is not an object: \{text}")
+  }
+  ws.at(dist)
+}
+
+///|
+/// Recursively copy a directory tree, replacing the destination. Uses the
+/// host's `cp -R`; packaging runs on the build host so this stays simple.
+pub async fn copy_tree(source : String, destination : String) -> Unit {
+  remove_path_if_exists(destination)
+  let parent = (destination : @path.Path).dirname().to_string()
+  ensure_dir(parent)
+  run_checked("cp", ["-R", source, destination], dir=parent)
 }
 
 ///|
@@ -166,20 +227,6 @@ pub async fn run_checked(
   if code != 0 {
     raise PackageError("command failed with exit code \{code}: \{command}")
   }
-}
-
-///|
-/// Install the lepus code generation tool if the requested workspace-relative
-/// tool path does not already exist.
-pub async fn ensure_codegen_tool(ws : Workspace, tool_path : String) -> Unit {
-  if @asyncfs.exists(ws.at(tool_path)) {
-    return
-  }
-  run_checked(
-    "moon",
-    ["install", "./cli", "--bin", "target/lepus-tools"],
-    dir=ws.at("lepus"),
-  )
 }
 
 ///|
