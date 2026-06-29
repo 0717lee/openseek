@@ -1,0 +1,3 @@
+[submodule "vendor/lepus"]
+	path = vendor/lepus
+	url = https://github.com/moonbit-community/lepus.git
