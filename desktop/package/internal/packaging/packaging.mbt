@@ -13,7 +13,7 @@ const FrontendBundleOutput : String = "frontend.js"
 const NativePackage : String = "."
 
 ///|
-const NativeBinary : String = "_build/native/release/build/openseek_desktop.exe"
+const NativeBinary : String = "_build/native/release/build/openseek_desktop/openseek_desktop.exe"
 
 ///|
 const EnginePackage : String = "cmd/openseek"

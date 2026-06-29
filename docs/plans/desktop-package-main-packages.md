@@ -284,3 +284,46 @@ bundle structure and Mach-O metadata.
 - Build the macOS bundle with `moon -C desktop run --target native package/macos`.
 - Inspect the generated bundle's `Contents/Frameworks` tree, helper executable
   rpath, `LC_BUILD_VERSION`, and code signature verification.
+
+## Follow-up: Clean Build Host Binary Path
+
+### Goal
+
+Make the packaging helpers consume the native host binary path produced by a
+clean current MoonBit release build.
+
+### Accepted Design
+
+- Keep the native host package as `.` and keep the existing package command
+  flow unchanged.
+- Update the shared packaging helper's native host artifact path from the stale
+  flat output path to the clean-build nested output path:
+  `_build/native/release/build/openseek_desktop/openseek_desktop.exe`.
+- Do not change runtime APIs, package public APIs, or platform-specific bundle
+  layouts.
+
+### Target Files And Surfaces
+
+- `desktop/package/internal/packaging/packaging.mbt`: native host artifact path
+  constant only.
+
+### API And Interface Diff
+
+- No intended `.mbti` or public API changes.
+
+### Open Questions
+
+- None. `moon -C desktop clean` followed by the macOS package command showed
+  the clean build emits only the nested native host binary path.
+
+### Next Implementation Step
+
+Update the native host artifact path, rebuild the macOS package, and launch the
+app to verify CEF uses the nested helper executable.
+
+### Validation Plan
+
+- Run `moon -C desktop run --target native package/macos`.
+- Run `moon -C desktop info`.
+- Run `moon -C desktop fmt`.
+- Inspect the generated app bundle and launch it.
