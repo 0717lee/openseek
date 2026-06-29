@@ -125,8 +125,13 @@ pub fn engine_package() -> String {
 }
 
 ///|
-/// The mooncakes package providing the Proton CLI (`cef setup`, codegen).
-const ProtonCliPackage : String = "justjavac/proton_cli"
+/// The workspace-local Proton CLI (`cef setup`, codegen).
+const ProtonCliSource : String = "./lepus/cli"
+
+///|
+/// Marker for the installed Proton CLI source, so stale registry-installed
+/// binaries are replaced after the workspace switches to the Lepus submodule.
+const ProtonCliSourceMarker : String = "target/proton-tools/.proton_cli_source"
 
 ///|
 /// Return the POSIX Proton CLI path relative to the desktop workspace.
@@ -144,14 +149,20 @@ pub fn windows_proton_cli() -> String {
 /// Install the Proton CLI to `target/proton-tools` if the requested
 /// workspace-relative tool path does not already exist.
 pub async fn ensure_proton_cli(ws : Workspace, tool_path : String) -> Unit {
+  let marker = ws.at(ProtonCliSourceMarker)
   if @asyncfs.exists(ws.at(tool_path)) {
-    return
+    if @asyncfs.exists(marker) {
+      if @asyncfs.read_file(marker).text() == ProtonCliSource {
+        return
+      }
+    }
   }
   run_checked(
     "moon",
-    ["install", ProtonCliPackage, "--bin", "target/proton-tools"],
+    ["install", ProtonCliSource, "--bin", "target/proton-tools"],
     dir=ws.dir(),
   )
+  @asyncfs.write_file(marker, ProtonCliSource, create_mode=CreateOrTruncate)
 }
 
 ///|

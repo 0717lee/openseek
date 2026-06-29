@@ -451,8 +451,79 @@ JavaScript through CDP.
 ### Validation Plan
 
 - Run `moon -C desktop test package/macos --target native`.
-- Run `moon -C desktop test proton --target native`.
+- Run `moon -C desktop test lepus/proton --target native`.
 - Run `moon -C desktop info && moon -C desktop fmt`.
 - Run `moon -C desktop run --target native package/macos`.
 - Inspect helper bundle names, `CFBundleExecutable`, rpaths, and signatures.
 - Launch the generated app and verify CDP `Runtime.evaluate` on `proton://app/`.
+
+## Follow-up: macOS Menu And Quit Handling
+
+### Goal
+
+Install the macOS application menu at a CEF-safe point and make Quit close the
+CEF browser through the same path as the window close button, so the MoonBit
+runtime loop can observe `window_closed` and destroy the runtime cleanly.
+
+### Accepted Design
+
+- Keep only one Proton/Lepus implementation in this workspace:
+  `desktop/lepus` becomes the Lepus submodule and `vendor/lepus` plus the
+  tracked `desktop/proton` copy are removed.
+- Move the existing OpenSeek-specific Proton facade/prebuilt changes into the
+  `desktop/lepus` submodule branch
+  `haoxiang/openseek-desktop-proton`, then push that branch to the submodule
+  remote.
+- Update `desktop/moon.work` to use `./lepus/proton`, preserving the
+  `justjavac/proton` module identity without duplicating source.
+- Do not install the menu from OpenSeek `desktop/main.mbt` before Proton creates
+  its AppKit application object.
+- In the Lepus mac runtime, install the default macOS app menu after
+  `[ProtonApplication sharedApplication]`, `setActivationPolicy`, and
+  `finishLaunching`, while no window has been shown and no event pump has
+  started.
+- In the Lepus mac runtime, override `terminate:` on `ProtonApplication` so
+  app-menu Quit/Cmd+Q requests close all live CEF windows instead of letting
+  AppKit hard-terminate the process.
+- Keep Quit on the existing close lifecycle: CEF `close_browser`, then
+  `on_before_close`, then `window_closed`, then MoonBit runtime teardown.
+
+### Target Files And Surfaces
+
+- `.gitmodules`: remove `vendor/lepus` and add `desktop/lepus`.
+- `desktop/moon.work`: replace `./proton` with `./lepus/proton`.
+- `desktop/lepus` submodule: branch
+  `haoxiang/openseek-desktop-proton`, containing Proton facade/prebuilt changes
+  and Lepus native mac menu/quit handling.
+- Main repository index: remove tracked Proton source files and record only the
+  `desktop/lepus` submodule pointer.
+
+### API And Interface Diff
+
+- No intended public MoonBit API changes.
+- No intended Proton C ABI changes.
+- Main repository dependency graph changes from vendored files to a submodule
+  pointer at `desktop/lepus` plus the `./lepus/proton` workspace member.
+
+### Open Questions
+
+- None for this migration. Future generic Proton app-lifecycle customization is
+  intentionally out of scope.
+
+### Next Implementation Step
+
+Convert `desktop/lepus` to the Lepus submodule on
+`haoxiang/openseek-desktop-proton`, patch Lepus native mac menu/quit handling
+inside that submodule, rebuild/sync mac prebuilt artifacts, then rebuild and
+launch the package to verify menu Quit and Cmd+Q exit through `window_closed`.
+
+### Validation Plan
+
+- Run `moon -C desktop check --target native`.
+- Run `moon -C desktop test lepus/proton --target native`.
+- Run `moon -C desktop info && moon -C desktop fmt`.
+- Rebuild Lepus darwin-arm64 prebuilt artifacts inside the `desktop/lepus`
+  submodule.
+- Run `moon -C desktop run --target native package/macos`.
+- Launch the generated app, verify `Cmd+Q`/Quit exits the process, and confirm
+  no stale OpenSeek processes remain.
