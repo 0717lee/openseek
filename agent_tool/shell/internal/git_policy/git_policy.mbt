@@ -128,11 +128,39 @@ fn preblock_for_subcommand(
     "am" | "update-index" | "read-tree" | "fast-import" | "mv" => true
     // `clean` permanently deletes untracked files unless it is a dry run.
     "clean" => !clean_args_request_dry_run(words, args_start, end)
-    // A recoverable object-store writer is only unsafe when reconfigured.
+    // checkout/switch/restore can overwrite an UNTRACKED file at a path when
+    // forced or sourced from another tree (`-f`/`--force`/`--source`/`--overlay`/
+    // `--ours`/`--theirs`), permanently losing it (git's own untracked guard is
+    // bypassed). Plain index restore (`git checkout -- f`) is fine.
+    "checkout" | "switch" | "restore" =>
+      region_reconfigures(words, global_start, subcommand_index) ||
+      overwrites_untracked_from_tree(words, args_start, end)
+    // The other recoverable writers are only unsafe when reconfigured.
     subcommand =>
       subcommand_writes_from_object_store(subcommand) &&
       region_reconfigures(words, global_start, subcommand_index)
   }
+}
+
+///|
+fn overwrites_untracked_from_tree(
+  words : Array[String],
+  start : Int,
+  end : Int,
+) -> Bool {
+  for index in start..<end {
+    let arg = words[index]
+    if arg == "-f" ||
+      arg == "--force" ||
+      arg == "--overlay" ||
+      arg == "--ours" ||
+      arg == "--theirs" ||
+      arg == "--source" ||
+      arg.has_prefix("--source=") {
+      return true
+    }
+  }
+  false
 }
 
 ///|

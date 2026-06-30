@@ -2576,6 +2576,7 @@ async fn source_tree_operation_target_for_command(
         command_index + 1,
         real_workspace_root,
         cwd,
+        command_has_custom_environment(command),
       )
     "find" =>
       source_tree_find_target(
@@ -3154,8 +3155,9 @@ fn git_preblock_target(
   arg_start : Int,
   real_workspace_root : String,
   cwd : String,
+  has_custom_env : Bool,
 ) -> String? {
-  if @git_policy.should_preblock(argv, arg_start) {
+  if git_must_preblock(argv, arg_start, has_custom_env) {
     // Block unconditionally; do not condition on the resolved cwd (that would let
     // `git -C <workspace> ...` run from an outside cwd slip through). Prefer the
     // workspace-scoped target for the message; fall back to the workspace root.
@@ -3171,6 +3173,29 @@ fn git_preblock_target(
   } else {
     None
   }
+}
+
+///|
+fn git_must_preblock(
+  argv : Array[String],
+  arg_start : Int,
+  has_custom_env : Bool,
+) -> Bool {
+  if @git_policy.should_preblock(argv, arg_start) {
+    return true
+  }
+  // A custom environment (`GIT_DIR`/`GIT_WORK_TREE`/`GIT_CONFIG_*`, or `env ...
+  // git`) is the environment analogue of `-c`/`-C`: it can repoint git's config,
+  // git dir, or worktree, so a custom-env object-store writer can write workspace
+  // source from another repository. The trust path already demotes it, but on
+  // platforms without sandbox-exec SourceReadOnly still runs unsandboxed, so it
+  // must be pre-blocked too.
+  has_custom_env &&
+  (match @git_policy.parse(argv, arg_start) {
+    Some(invocation) =>
+      @git_policy.subcommand_writes_from_object_store(invocation.subcommand)
+    None => false
+  })
 }
 
 ///|

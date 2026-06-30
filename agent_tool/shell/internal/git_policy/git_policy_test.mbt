@@ -42,6 +42,10 @@ test "should_preblock: feeders, mv, non-dry-run clean, reconfigured writers" {
       // read-only apply flag forced back to applying.
       ["git", "apply", "--stat", "--apply", "patch"],
       ["git", "apply", "--cached", "patch"],
+      // checkout/restore that can clobber an untracked file from another tree.
+      ["git", "checkout", "-f", "other"],
+      ["git", "restore", "--source=HEAD~1", "--", "foo.mbt"],
+      ["git", "checkout", "--ours", "conflict.mbt"],
       ["git", "-c", "filter.f.smudge=cmd", "checkout", "--", "."],
       ["git", "-C", "/tmp/x", "checkout", "--", "."],
       ["git", "--work-tree=/tmp/x", "restore", "main.mbt"],

@@ -801,13 +801,16 @@ async test "sandbox preblocks common source-writing commands" {
       ),
     )
     // Conservatively pre-blocked git: store feeders (external patch + plumbing),
-    // mv, non-dry-run clean, and reconfigured writers (-c filter / -C / --work-tree).
+    // mv, non-dry-run clean, reconfigured writers (-c filter / -C / --work-tree /
+    // custom env), and checkout/restore forms that can clobber untracked source.
     for
       blocked_git in [
         "git apply patch.diff", "git am patch.mbox", "git apply --cached patch.diff",
         "git apply --index patch.diff", "git update-index --cacheinfo 100644,abc,main.mbt",
         "git read-tree HEAD", "git fast-import", "git mv notes.md main.mbt", "git clean -fd",
         "git clean -e -n -fd", "git -c filter.f.smudge=cmd checkout -- .", "git -C /tmp/x checkout -- .",
+        "git checkout -f other", "git restore --source=HEAD~1 -- main.mbt", "GIT_DIR=/tmp/x git checkout -- main.mbt",
+        "env GIT_WORK_TREE=. git restore main.mbt",
       ] {
       assert_true(
         is_some_path(
@@ -1992,8 +1995,8 @@ test "sandbox trusts recoverable git, sandboxes patch and reconfiguring git" {
   for
     cmd in [
       "git checkout -- main.mbt", "git checkout feature/foo", "git switch main",
-      "git restore main.mbt", "git restore --source=HEAD~1 main.mbt", "git reset --hard",
-      "git stash", "git stash pop", "git rm main.mbt", "cd pkg && git checkout -- main.mbt",
+      "git restore main.mbt", "git reset --hard", "git stash", "git stash pop", "git rm main.mbt",
+      "cd pkg && git checkout -- main.mbt",
     ] {
     assert_true(mode_for(cmd) is TrustedSourceWrite)
   }
