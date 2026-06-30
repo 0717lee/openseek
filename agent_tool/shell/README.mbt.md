@@ -75,10 +75,12 @@ where the shell would otherwise hide the sandbox denial from the tool output.
 Direct `mv`/`rm` source-tree operations and obvious source-writing script
 snippets are also blocked before execution, including scripts that create
 MoonBit source under `_build` and then rename it into a package directory.
-`git apply` and `git am` are blocked before execution for the same reason: they
-write the worktree (or stage, with `--cached`) from an EXTERNAL patch, which is
-arbitrary content the source-write tools must keep out. Recoverable Git worktree
-subcommands are not blocked — see the trusted list below.
+Git subcommands that can place content from outside the object store into git's
+store or worktree are blocked before execution, because a later trusted
+`checkout`/`restore` would materialize it into source: `git apply` / `git am`
+(external patches, including `--cached`), and the plumbing feeders `update-index`,
+`read-tree`, and `fast-import`. Recoverable Git worktree subcommands are not
+blocked — see the trusted list below.
 Too-complex command strings with in-place `sed` edits are rejected even when the
 source paths are indirect, as in `while read f; do sed -i ... "$f"; done`.
 Too-complex commands with visible MoonBit source creation or tree transfer
@@ -95,12 +97,17 @@ Recoverable Git worktree subcommands also run outside the source-write sandbox,
 because every write they make sources from git's own object store (HEAD, the
 index, a commit/tree, or a stash) — recoverable and reviewable through git, never
 from an external file or stdin: `checkout`, `switch`, `restore`, `reset`,
-`stash`, `clean`, `rm`, and `mv`. Trust is withheld when the invocation could
-reconfigure git to synthesize arbitrary bytes — a custom environment
-(`GIT_CONFIG_*`, `env ... git`) or a config/dir/exec global option (`-c`,
-`--config-env`, `--git-dir`, `--namespace`, `--exec-path`) — and from `git apply`
-/ `git am` (external patches) and any unrecognized subcommand or alias, which
-stay under the sandbox.
+`stash`, `clean`, and `rm`. `mv` is excluded because it moves arbitrary worktree
+bytes onto the destination; `rm` only deletes, so it cannot inject. Trust is
+withheld when the invocation could reconfigure git to write from outside the
+workspace repo — a custom environment (`GIT_CONFIG_*`, `env ... git`) or a
+reconfiguring global option that repoints config (`-c`, `--config-env`), the exec
+path (`--exec-path`), the git dir (`--git-dir`, `--namespace`), or the cwd/worktree
+(`-C`, `--work-tree`) — and from the blocked store-feeders above plus any
+unrecognized subcommand or alias, which stay under the sandbox. This trusts git's
+own config: it is not a hard boundary, since a determined plumbing sequence
+(`replace`, `filter-branch`, `commit-tree`) can still seed the object store while
+`.git` is writable.
 
 ## Arguments
 

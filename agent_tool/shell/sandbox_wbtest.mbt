@@ -805,7 +805,8 @@ async test "sandbox preblocks common source-writing commands" {
     for
       patch_cmd in [
         "git apply patch.diff", "git am patch.mbox", "git apply --cached patch.diff",
-        "git apply --index patch.diff",
+        "git apply --index patch.diff", "git update-index --cacheinfo 100644,abc,main.mbt",
+        "git read-tree HEAD", "git fast-import",
       ] {
       assert_true(
         is_some_path(
@@ -837,7 +838,7 @@ async test "sandbox preblocks common source-writing commands" {
       recoverable_git in [
         "git checkout -- .", "git checkout feature/foo", "git switch feature/foo",
         "git restore main.mbt", "git reset --hard", "git clean -fd", "git rm main.mbt",
-        "git mv main.mbt backup.mbt", "git stash",
+        "git stash",
       ] {
       assert_true(
         direct_source_tree_operation_target_for_root(
@@ -1980,22 +1981,29 @@ test "sandbox trusts recoverable git, sandboxes patch and reconfiguring git" {
     cmd in [
       "git checkout -- main.mbt", "git checkout feature/foo", "git switch main",
       "git restore main.mbt", "git restore --source=HEAD~1 main.mbt", "git reset --hard",
-      "git stash", "git stash pop", "git clean -fd", "git rm main.mbt", "git mv a.mbt b.mbt",
-      "cd pkg && git checkout -- main.mbt",
+      "git stash", "git stash pop", "git clean -fd", "git rm main.mbt", "cd pkg && git checkout -- main.mbt",
     ] {
     assert_true(mode_for(cmd) is TrustedSourceWrite)
   }
-  // git apply / git am apply an EXTERNAL patch, so they stay sandboxed.
-  for cmd in ["git apply patch.diff", "git am patch.mbox"] {
+  // External-patch / store-feeder git, and `mv` (which moves arbitrary worktree
+  // bytes onto the destination rather than reading the object store), stay
+  // sandboxed.
+  for
+    cmd in [
+      "git apply patch.diff", "git am patch.mbox", "git update-index --cacheinfo 100644,abc,main.mbt",
+      "git read-tree HEAD", "git fast-import", "git mv notes.md main.mbt",
+    ] {
     assert_true(mode_for(cmd) is SourceReadOnly)
   }
-  // Config/dir/exec global options or a custom environment could enable a smudge
-  // filter or merge driver, so they drop git out of the trusted path.
+  // Reconfiguring global options (config/dir/exec/cwd/worktree) or a custom
+  // environment could repoint git or enable a filter/merge driver, so they drop
+  // git out of the trusted path.
   for
     cmd in [
       "git -c core.editor=x checkout -- .", "git -c filter.f.smudge=cmd checkout -- .",
       "git --git-dir=/tmp/x checkout -- .", "git --exec-path=/tmp checkout -- .",
-      "FOO=bar git checkout -- .", "env GIT_CONFIG_COUNT=1 git checkout -- .",
+      "git -C /tmp/x checkout -- .", "git --work-tree=/tmp/x checkout -- .", "FOO=bar git checkout -- .",
+      "env GIT_CONFIG_COUNT=1 git checkout -- .",
     ] {
     assert_true(mode_for(cmd) is SourceReadOnly)
   }

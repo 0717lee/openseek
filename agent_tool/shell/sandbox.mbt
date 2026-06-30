@@ -493,19 +493,15 @@ fn trusted_command_class(
 /// Git subcommands trusted to run unsandboxed and write workspace source. Every
 /// worktree write these make sources its content from git's own object store —
 /// HEAD, the index, a commit/tree, or a stash — which is recoverable and
-/// reviewable through git, never from an external file or stdin. `apply`/`am`
-/// are deliberately absent (they apply an external patch — arbitrary content the
-/// source-write sandbox must keep out), as is everything unknown (fail closed).
+/// reviewable through git, never from an external file or stdin. `mv` is absent:
+/// it moves existing worktree bytes onto the destination, so `git mv notes.md
+/// main.mbt` would create source from arbitrary worktree content rather than the
+/// object store. `apply`/`am` are absent (they apply an external patch), as is
+/// everything unknown (fail closed). `rm` only deletes, so it cannot inject.
 fn git_subcommand_writes_from_object_store(subcommand : String) -> Bool {
   match subcommand {
-    "checkout"
-    | "switch"
-    | "restore"
-    | "reset"
-    | "stash"
-    | "clean"
-    | "rm"
-    | "mv" => true
+    "checkout" | "switch" | "restore" | "reset" | "stash" | "clean" | "rm" =>
+      true
     _ => false
   }
 }
@@ -513,10 +509,12 @@ fn git_subcommand_writes_from_object_store(subcommand : String) -> Bool {
 ///|
 /// Classify a `git` command for the trusted-source-write path. Trust is granted
 /// only to the recoverable worktree subcommands above, and only when the
-/// invocation cannot reconfigure git to synthesize arbitrary bytes: a custom
-/// environment (`GIT_CONFIG_*`, `env ... git`) or a config/dir/exec global option
-/// (`-c`, `--config-env`, `--git-dir`, `--namespace`, `--exec-path`) could enable
-/// a smudge filter or merge driver, so those fall through to the sandbox.
+/// invocation cannot reconfigure git to write from somewhere other than the
+/// workspace repo's object store: a custom environment (`GIT_CONFIG_*`,
+/// `env ... git`) or a relocating global option could repoint config (enabling a
+/// smudge filter or merge driver), the git dir, the exec path, or the worktree —
+/// e.g. `git -C /tmp/x --work-tree=. checkout` would write the workspace from a
+/// different repository. Those fall through to the sandbox.
 fn trusted_git_command_class(
   command : @shell_parse.SimpleCommand,
   git_index : Int,
@@ -542,11 +540,16 @@ fn trusted_git_command_class(
 
 ///|
 /// True for git global options that repoint git at different config, an external
-/// program path, or another git dir — precursors that could turn an otherwise
-/// object-store subcommand into an arbitrary-byte writer via filters or drivers.
+/// program path, another git dir, or another cwd/worktree — precursors that could
+/// turn an otherwise object-store subcommand into an arbitrary-byte writer via
+/// filters/drivers or write the workspace from a different repository.
 fn git_global_option_reconfigures(arg : String) -> Bool {
   git_global_option_consumes_next(arg) ||
-  git_global_option_with_attached_value(arg)
+  git_global_option_with_attached_value(arg) ||
+  arg == "-C" ||
+  arg == "--work-tree" ||
+  git_attached_cwd_option(arg) is Some(_) ||
+  git_attached_work_tree_option(arg) is Some(_)
 }
 
 ///|
@@ -1420,11 +1423,12 @@ fn command_text_git_subcommand_updates_source_tree(
     ) {
     return false
   }
-  // Only the external-patch subcommands are pre-blocked in the TooComplex text
-  // path; every other git worktree write sources from the object store and is
-  // handled by the trusted-source-write path (or, on macOS, the kernel sandbox).
+  // Only the store-feeder subcommands are pre-blocked in the TooComplex text
+  // path (see git_store_feeder_preblock_target); every other git worktree write
+  // sources from the object store and is handled by the trusted-source-write
+  // path (or, on macOS, the kernel sandbox).
   match words[subcommand_index] {
-    "apply" | "am" => true
+    "apply" | "am" | "update-index" | "read-tree" | "fast-import" => true
     _ => false
   }
 }
@@ -2670,7 +2674,7 @@ async fn source_tree_operation_target_for_command(
         predicted_dirs,
       )
     "git" =>
-      git_external_patch_preblock_target(
+      git_store_feeder_preblock_target(
         command.argv,
         command_index + 1,
         real_workspace_root,
@@ -3246,14 +3250,26 @@ priv struct GitInvocation {
 }
 
 ///|
-/// Pre-block `git apply` / `git am`: they write the worktree (or stage it, with
-/// `--cached`, which then feeds a later trusted `checkout`/`restore`) from an
-/// EXTERNAL patch — arbitrary content the source-write sandbox must keep out.
-/// The runtime `sandbox-exec` profile already denies this on macOS; this static
-/// guard is what blocks it on platforms without a kernel sandbox. Every other
-/// git subcommand sources its writes from the object store and is handled by the
-/// trusted-source-write path (`trusted_git_command_class`).
-fn git_external_patch_preblock_target(
+/// Pre-block git subcommands that can place content from OUTSIDE the object store
+/// into git's store or worktree, which a later trusted `checkout`/`restore` would
+/// then materialize into source:
+///
+/// - `apply` / `am` apply an external patch (also directly, or via `--cached`);
+/// - `update-index` can stage an arbitrary blob at a source path
+///   (`git hash-object -w` + `git update-index --cacheinfo … main.mbt`);
+/// - `read-tree` can write the worktree/index from an arbitrary (e.g. `mktree`d)
+///   tree;
+/// - `fast-import` streams arbitrary objects and refs.
+///
+/// These are plumbing the agent does not need, so blocking them is friction-free
+/// and reliable (subcommand name only). The runtime `sandbox-exec` profile also
+/// denies direct source writes on macOS; this static guard is the cross-platform
+/// backstop. NOTE: this is not exhaustive — `replace`, `filter-branch`, and
+/// `commit-tree`+`mktree` can also seed the object store, so a determined plumbing
+/// sequence remains a residual channel while `.git` itself is writable. Every
+/// other git subcommand sources writes from the object store and is handled by
+/// the trusted-source-write path (`trusted_git_command_class`).
+fn git_store_feeder_preblock_target(
   argv : Array[String],
   arg_start : Int,
   real_workspace_root : String,
@@ -3264,7 +3280,7 @@ fn git_external_patch_preblock_target(
     return None
   }
   match invocation.subcommand {
-    "apply" | "am" =>
+    "apply" | "am" | "update-index" | "read-tree" | "fast-import" =>
       git_workspace_scope_target(real_workspace_root, invocation.cwd)
     _ => None
   }
