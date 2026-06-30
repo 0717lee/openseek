@@ -26,12 +26,39 @@ test "object-store-write classification excludes mv and plumbing" {
 }
 
 ///|
-test "store-feeder classification" {
-  for sub in ["apply", "am", "update-index", "read-tree", "fast-import"] {
-    assert_true(@git_policy.subcommand_is_store_feeder(sub))
+test "should_preblock: feeders, mv, non-dry-run clean, reconfigured writers" {
+  // Blocked: mutates source but is not a recoverable object-store write.
+  for
+    cmd in [
+      ["git", "apply", "patch"],
+      ["git", "am", "mbox"],
+      ["git", "update-index", "--cacheinfo", "100644,abc,main.mbt"],
+      ["git", "read-tree", "HEAD"],
+      ["git", "fast-import"],
+      ["git", "mv", "notes.md", "main.mbt"],
+      ["git", "clean", "-fd"],
+      ["git", "-c", "filter.f.smudge=cmd", "checkout", "--", "."],
+      ["git", "-C", "/tmp/x", "checkout", "--", "."],
+      ["git", "--work-tree=/tmp/x", "restore", "main.mbt"],
+    ] {
+    assert_true(@git_policy.should_preblock(cmd, 1))
   }
-  for sub in ["checkout", "restore", "status", "mv"] {
-    assert_false(@git_policy.subcommand_is_store_feeder(sub))
+  // Not blocked: recoverable writers, dry-run clean, read-only git, reconfigured
+  // read-only git, and help.
+  for
+    cmd in [
+      ["git", "checkout", "--", "main.mbt"],
+      ["git", "restore", "main.mbt"],
+      ["git", "reset", "--hard"],
+      ["git", "stash"],
+      ["git", "rm", "main.mbt"],
+      ["git", "clean", "-fdn"],
+      ["git", "clean", "--dry-run"],
+      ["git", "status"],
+      ["git", "-c", "core.pager=less", "status"],
+      ["git", "checkout", "--help"],
+    ] {
+    assert_false(@git_policy.should_preblock(cmd, 1))
   }
 }
 
@@ -50,21 +77,16 @@ test "reconfiguring global options" {
 }
 
 ///|
-test "text-path subcommand finding and feeder check" {
-  let words = ["git", "-C", "pkg", "apply", "patch"]
-  guard @git_policy.text_subcommand_index(words, 1, words.length()) is Some(i) else {
-    fail("expected Some")
-  }
-  assert_eq(words[i], "apply")
-  assert_true(
-    @git_policy.text_subcommand_is_store_feeder(words, i, words.length()),
-  )
-  // A help flag on the subcommand disables the feeder block.
-  let help = ["git", "apply", "--help"]
-  guard @git_policy.text_subcommand_index(help, 1, help.length()) is Some(j) else {
-    fail("expected Some")
-  }
+test "text_should_preblock mirrors should_preblock on a flat word list" {
+  let apply = ["git", "-C", "pkg", "apply", "patch"]
+  assert_true(@git_policy.text_should_preblock(apply, 1, apply.length()))
+  let mv = ["git", "mv", "a", "b"]
+  assert_true(@git_policy.text_should_preblock(mv, 1, mv.length()))
+  let recoverable = ["git", "checkout", "--", "f"]
   assert_false(
-    @git_policy.text_subcommand_is_store_feeder(help, j, help.length()),
+    @git_policy.text_should_preblock(recoverable, 1, recoverable.length()),
   )
+  // A help flag on the subcommand disables the block.
+  let help = ["git", "apply", "--help"]
+  assert_false(@git_policy.text_should_preblock(help, 1, help.length()))
 }

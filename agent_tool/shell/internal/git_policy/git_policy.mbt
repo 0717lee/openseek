@@ -81,7 +81,7 @@ pub fn subcommand_writes_from_object_store(subcommand : String) -> Bool {
 /// feeders `update-index`, `read-tree`, and `fast-import`. Not exhaustive —
 /// `replace`/`filter-branch`/`commit-tree` remain a residual channel while `.git`
 /// is writable.
-pub fn subcommand_is_store_feeder(subcommand : String) -> Bool {
+fn subcommand_is_store_feeder(subcommand : String) -> Bool {
   match subcommand {
     "apply" | "am" | "update-index" | "read-tree" | "fast-import" => true
     _ => false
@@ -89,13 +89,99 @@ pub fn subcommand_is_store_feeder(subcommand : String) -> Bool {
 }
 
 ///|
-/// Find the git subcommand's index in a flat `words` list (the TooComplex text
-/// path), scanning `[start, end)` and skipping global options. Mirrors `parse`.
-pub fn text_subcommand_index(
+/// Whether a git invocation must be pre-blocked before execution — the
+/// cross-platform guard that does not depend on the runtime sandbox. Conservative
+/// by design: block the git that mutates source but is NOT a recoverable
+/// object-store write — store feeders (`apply`/`am`/`update-index`/`read-tree`/
+/// `fast-import`), `mv` (moves arbitrary worktree bytes), non-dry-run `clean`
+/// (permanently deletes untracked files), and any object-store writer that is
+/// reconfigured (`git -c filter=… checkout`, `-C`, `--work-tree`). The recoverable
+/// writers (`checkout`/`switch`/`restore`/`reset`/`stash`/`rm`) and read-only git
+/// are not pre-blocked; they run (trusted, or sandboxed where they cannot harm).
+pub fn should_preblock(argv : Array[String], arg_start : Int) -> Bool {
+  guard parse(argv, arg_start) is Some(invocation) else { return false }
+  preblock_for_subcommand(
+    argv,
+    arg_start,
+    invocation.subcommand_index,
+    argv.length(),
+  )
+}
+
+///|
+/// The TooComplex text-path counterpart of `should_preblock`, scanning a flat
+/// `words` list over `[start, end)`. Returns false when the subcommand requests
+/// help.
+pub fn text_should_preblock(
   words : Array[String],
   start : Int,
   end : Int,
-) -> Int? {
+) -> Bool {
+  guard text_subcommand_index(words, start, end) is Some(subcommand_index) else {
+    return false
+  }
+  let help_index = subcommand_index + 1
+  if help_index < end &&
+    (words[help_index] == "--help" || words[help_index] == "-h") {
+    return false
+  }
+  preblock_for_subcommand(words, start, subcommand_index, end)
+}
+
+///|
+fn preblock_for_subcommand(
+  words : Array[String],
+  global_start : Int,
+  subcommand_index : Int,
+  end : Int,
+) -> Bool {
+  let subcommand = words[subcommand_index]
+  if subcommand_is_store_feeder(subcommand) || subcommand == "mv" {
+    return true
+  }
+  if subcommand == "clean" {
+    return !clean_args_request_dry_run(words, subcommand_index + 1, end)
+  }
+  if subcommand_writes_from_object_store(subcommand) {
+    return region_reconfigures(words, global_start, subcommand_index)
+  }
+  false
+}
+
+///|
+fn region_reconfigures(words : Array[String], start : Int, end : Int) -> Bool {
+  for index in start..<end {
+    if global_option_reconfigures(words[index]) {
+      return true
+    }
+  }
+  false
+}
+
+///|
+/// True when `git clean`'s arguments include a dry-run flag (`-n`, `--dry-run`,
+/// or a short cluster such as `-fdn`); in git clean `n` always means dry run.
+fn clean_args_request_dry_run(
+  words : Array[String],
+  start : Int,
+  end : Int,
+) -> Bool {
+  for index in start..<end {
+    let arg = words[index]
+    if arg == "-n" || arg == "--dry-run" {
+      return true
+    }
+    if arg.has_prefix("-") && !arg.has_prefix("--") && arg.contains("n") {
+      return true
+    }
+  }
+  false
+}
+
+///|
+/// Find the git subcommand's index in a flat `words` list (the TooComplex text
+/// path), scanning `[start, end)` and skipping global options. Mirrors `parse`.
+fn text_subcommand_index(words : Array[String], start : Int, end : Int) -> Int? {
   let mut index = start
   while index < end {
     let arg = words[index]
@@ -119,23 +205,6 @@ pub fn text_subcommand_index(
     return Some(index)
   }
   None
-}
-
-///|
-/// True when the git subcommand at `subcommand_index` in `words` is a store
-/// feeder that must be pre-blocked in the text path (false when its first
-/// argument requests help).
-pub fn text_subcommand_is_store_feeder(
-  words : Array[String],
-  subcommand_index : Int,
-  segment_end : Int,
-) -> Bool {
-  let help_index = subcommand_index + 1
-  if help_index < segment_end &&
-    (words[help_index] == "--help" || words[help_index] == "-h") {
-    return false
-  }
-  subcommand_is_store_feeder(words[subcommand_index])
 }
 
 ///|

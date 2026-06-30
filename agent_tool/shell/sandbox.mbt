@@ -1283,14 +1283,8 @@ fn command_text_mentions_unsafe_git_source_operation(text : String) -> Bool {
     if command_token_basename_is(words[index], "git") &&
       command_text_word_runs_as_command(words, index) {
       let segment_end = command_text_segment_end(words, index)
-      match @git_policy.text_subcommand_index(words, index + 1, segment_end) {
-        Some(subcommand_index) =>
-          if @git_policy.text_subcommand_is_store_feeder(
-              words, subcommand_index, segment_end,
-            ) {
-            return true
-          }
-        None => ()
+      if @git_policy.text_should_preblock(words, index + 1, segment_end) {
+        return true
       }
     }
   }
@@ -2577,7 +2571,7 @@ async fn source_tree_operation_target_for_command(
         predicted_dirs,
       )
     "git" =>
-      git_store_feeder_preblock_target(
+      git_preblock_target(
         command.argv,
         command_index + 1,
         real_workspace_root,
@@ -3146,39 +3140,25 @@ fn source_writing_awk_target(
 }
 
 ///|
-/// Pre-block git subcommands that can place content from OUTSIDE the object store
-/// into git's store or worktree, which a later trusted `checkout`/`restore` would
-/// then materialize into source:
-///
-/// - `apply` / `am` apply an external patch (also directly, or via `--cached`);
-/// - `update-index` can stage an arbitrary blob at a source path
-///   (`git hash-object -w` + `git update-index --cacheinfo … main.mbt`);
-/// - `read-tree` can write the worktree/index from an arbitrary (e.g. `mktree`d)
-///   tree;
-/// - `fast-import` streams arbitrary objects and refs.
-///
-/// These are plumbing the agent does not need, so blocking them is friction-free
-/// and reliable (subcommand name only). The runtime `sandbox-exec` profile also
-/// denies direct source writes on macOS; this static guard is the cross-platform
-/// backstop. NOTE: this is not exhaustive — `replace`, `filter-branch`, and
-/// `commit-tree`+`mktree` can also seed the object store, so a determined plumbing
-/// sequence remains a residual channel while `.git` itself is writable. Every
-/// other git subcommand sources writes from the object store and is handled by
-/// the trusted-source-write path (`trusted_git_command_class`).
-fn git_store_feeder_preblock_target(
+/// Pre-block, before execution and independent of the runtime sandbox, the git
+/// that mutates source but is not a recoverable object-store write —
+/// `@git_policy.should_preblock` (store feeders, `mv`, non-dry-run `clean`, and
+/// reconfigured writers). This is the cross-platform guard; on macOS `sandbox-exec`
+/// is a second layer. The recoverable writers and read-only git are handled by
+/// the trusted-source-write path (`trusted_git_command_class`) instead. NOTE: a
+/// determined plumbing sequence (`replace`, `filter-branch`, `commit-tree`) can
+/// still seed the object store while `.git` is writable — a residual channel, not
+/// a hard boundary.
+fn git_preblock_target(
   argv : Array[String],
   arg_start : Int,
   real_workspace_root : String,
   cwd : String,
 ) -> String? {
-  guard @git_policy.parse(argv, arg_start) is Some(invocation) else {
-    return None
-  }
-  if @git_policy.subcommand_is_store_feeder(invocation.subcommand) {
-    // Block feeders unconditionally. Conditioning on the resolved cwd would let
-    // `git -C <workspace> apply` run from an outside cwd slip through, and these
-    // are plumbing the agent never needs anyway. Prefer the workspace-scoped
-    // target for the message; fall back to the workspace root.
+  if @git_policy.should_preblock(argv, arg_start) {
+    // Block unconditionally; do not condition on the resolved cwd (that would let
+    // `git -C <workspace> ...` run from an outside cwd slip through). Prefer the
+    // workspace-scoped target for the message; fall back to the workspace root.
     match git_workspace_scope_target(real_workspace_root, cwd) {
       Some(target) => Some(target)
       None =>

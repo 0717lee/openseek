@@ -6,13 +6,11 @@ pub fn global_option_reconfigures(String) -> Bool
 
 pub fn parse(Array[String], Int) -> Invocation?
 
-pub fn subcommand_is_store_feeder(String) -> Bool
+pub fn should_preblock(Array[String], Int) -> Bool
 
 pub fn subcommand_writes_from_object_store(String) -> Bool
 
-pub fn text_subcommand_index(Array[String], Int, Int) -> Int?
-
-pub fn text_subcommand_is_store_feeder(Array[String], Int, Int) -> Bool
+pub fn text_should_preblock(Array[String], Int, Int) -> Bool
 
 // Errors
 

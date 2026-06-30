@@ -75,12 +75,14 @@ where the shell would otherwise hide the sandbox denial from the tool output.
 Direct `mv`/`rm` source-tree operations and obvious source-writing script
 snippets are also blocked before execution, including scripts that create
 MoonBit source under `_build` and then rename it into a package directory.
-Git subcommands that can place content from outside the object store into git's
-store or worktree are blocked before execution, because a later trusted
-`checkout`/`restore` would materialize it into source: `git apply` / `git am`
-(external patches, including `--cached`), and the plumbing feeders `update-index`,
-`read-tree`, and `fast-import`. Recoverable Git worktree subcommands are not
-blocked — see the trusted list below.
+Git subcommands that mutate source but are not a recoverable object-store write
+are conservatively blocked before execution — a cross-platform guard that does
+not depend on the runtime sandbox: the external-patch/plumbing store feeders
+(`apply`/`am` including `--cached`, `update-index`, `read-tree`, `fast-import`),
+`mv` (moves arbitrary worktree bytes onto the destination), non-dry-run `clean`
+(permanently deletes untracked files), and any object-store writer that is
+reconfigured (`git -c filter=… checkout`, `-C`, `--work-tree`). The recoverable
+worktree subcommands are not blocked — see the trusted list below.
 Too-complex command strings with in-place `sed` edits are rejected even when the
 source paths are indirect, as in `while read f; do sed -i ... "$f"; done`.
 Too-complex commands with visible MoonBit source creation or tree transfer

@@ -800,18 +800,19 @@ async test "sandbox preblocks common source-writing commands" {
         real_root,
       ),
     )
-    // git apply / git am apply an EXTERNAL patch and stay pre-blocked (the only
-    // remaining git pre-block; on macOS the runtime sandbox covers them too).
+    // Conservatively pre-blocked git: store feeders (external patch + plumbing),
+    // mv, non-dry-run clean, and reconfigured writers (-c filter / -C / --work-tree).
     for
-      patch_cmd in [
+      blocked_git in [
         "git apply patch.diff", "git am patch.mbox", "git apply --cached patch.diff",
         "git apply --index patch.diff", "git update-index --cacheinfo 100644,abc,main.mbt",
-        "git read-tree HEAD", "git fast-import",
+        "git read-tree HEAD", "git fast-import", "git mv notes.md main.mbt", "git clean -fd",
+        "git -c filter.f.smudge=cmd checkout -- .", "git -C /tmp/x checkout -- .",
       ] {
       assert_true(
         is_some_path(
           direct_source_tree_operation_target_for_root(
-            @shell_parse.parse_for_policy(patch_cmd),
+            @shell_parse.parse_for_policy(blocked_git),
             real_root,
             Some(real_root),
           ),
@@ -843,12 +844,13 @@ async test "sandbox preblocks common source-writing commands" {
         real_root,
       ),
     )
-    // Recoverable git worktree subcommands write from the object store and are no
-    // longer pre-blocked (they run as trusted source writers instead).
+    // Recoverable git worktree subcommands (and dry-run clean) are not pre-blocked;
+    // they run as trusted source writers, or harmlessly sandboxed.
     for
       recoverable_git in [
         "git checkout -- .", "git checkout feature/foo", "git switch feature/foo",
         "git restore main.mbt", "git reset --hard", "git rm main.mbt", "git stash",
+        "git clean -fdn", "git status",
       ] {
       assert_true(
         direct_source_tree_operation_target_for_root(
