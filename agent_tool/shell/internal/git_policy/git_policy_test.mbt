@@ -37,14 +37,19 @@ test "should_preblock: feeders, mv, non-dry-run clean, reconfigured writers" {
       ["git", "fast-import"],
       ["git", "mv", "notes.md", "main.mbt"],
       ["git", "clean", "-fd"],
+      // `-e -n` is an exclude pattern, not a dry run -> still destructive.
+      ["git", "clean", "-e", "-n", "-fd"],
+      // read-only apply flag forced back to applying.
+      ["git", "apply", "--stat", "--apply", "patch"],
+      ["git", "apply", "--cached", "patch"],
       ["git", "-c", "filter.f.smudge=cmd", "checkout", "--", "."],
       ["git", "-C", "/tmp/x", "checkout", "--", "."],
       ["git", "--work-tree=/tmp/x", "restore", "main.mbt"],
     ] {
     assert_true(@git_policy.should_preblock(cmd, 1))
   }
-  // Not blocked: recoverable writers, dry-run clean, read-only git, reconfigured
-  // read-only git, and help.
+  // Not blocked: recoverable writers, dry-run clean, read-only apply validation,
+  // read-only git, reconfigured read-only git, and help.
   for
     cmd in [
       ["git", "checkout", "--", "main.mbt"],
@@ -54,9 +59,12 @@ test "should_preblock: feeders, mv, non-dry-run clean, reconfigured writers" {
       ["git", "rm", "main.mbt"],
       ["git", "clean", "-fdn"],
       ["git", "clean", "--dry-run"],
+      ["git", "apply", "--check", "patch"],
+      ["git", "apply", "--stat", "patch"],
       ["git", "status"],
       ["git", "-c", "core.pager=less", "status"],
       ["git", "checkout", "--help"],
+      ["git", "clean", "--help"],
     ] {
     assert_false(@git_policy.should_preblock(cmd, 1))
   }

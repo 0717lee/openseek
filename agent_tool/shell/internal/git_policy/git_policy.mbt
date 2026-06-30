@@ -75,20 +75,6 @@ pub fn subcommand_writes_from_object_store(subcommand : String) -> Bool {
 }
 
 ///|
-/// Git subcommands that can place content from OUTSIDE the object store into
-/// git's store or worktree, which a later trusted `checkout`/`restore` would
-/// materialize into source: external-patch (`apply`/`am`) and the plumbing
-/// feeders `update-index`, `read-tree`, and `fast-import`. Not exhaustive —
-/// `replace`/`filter-branch`/`commit-tree` remain a residual channel while `.git`
-/// is writable.
-fn subcommand_is_store_feeder(subcommand : String) -> Bool {
-  match subcommand {
-    "apply" | "am" | "update-index" | "read-tree" | "fast-import" => true
-    _ => false
-  }
-}
-
-///|
 /// Whether a git invocation must be pre-blocked before execution — the
 /// cross-platform guard that does not depend on the runtime sandbox. Conservative
 /// by design: block the git that mutates source but is NOT a recoverable
@@ -120,11 +106,6 @@ pub fn text_should_preblock(
   guard text_subcommand_index(words, start, end) is Some(subcommand_index) else {
     return false
   }
-  let help_index = subcommand_index + 1
-  if help_index < end &&
-    (words[help_index] == "--help" || words[help_index] == "-h") {
-    return false
-  }
   preblock_for_subcommand(words, start, subcommand_index, end)
 }
 
@@ -135,17 +116,41 @@ fn preblock_for_subcommand(
   subcommand_index : Int,
   end : Int,
 ) -> Bool {
-  let subcommand = words[subcommand_index]
-  if subcommand_is_store_feeder(subcommand) || subcommand == "mv" {
-    return true
+  let args_start = subcommand_index + 1
+  if args_start < end &&
+    (words[args_start] == "--help" || words[args_start] == "-h") {
+    return false
   }
-  if subcommand == "clean" {
-    return !clean_args_request_dry_run(words, subcommand_index + 1, end)
+  match words[subcommand_index] {
+    // `apply` writes unless it is a read-only validation/info mode (`--check`,
+    // `--stat`, `--numstat`, `--summary`) with no forced application.
+    "apply" => apply_writes(words, args_start, end)
+    "am" | "update-index" | "read-tree" | "fast-import" | "mv" => true
+    // `clean` permanently deletes untracked files unless it is a dry run.
+    "clean" => !clean_args_request_dry_run(words, args_start, end)
+    // A recoverable object-store writer is only unsafe when reconfigured.
+    subcommand =>
+      subcommand_writes_from_object_store(subcommand) &&
+      region_reconfigures(words, global_start, subcommand_index)
   }
-  if subcommand_writes_from_object_store(subcommand) {
-    return region_reconfigures(words, global_start, subcommand_index)
+}
+
+///|
+/// `git apply` writes the worktree/index unless it runs in a read-only
+/// validation/info mode (`--check`/`--stat`/`--numstat`/`--summary`) and is not
+/// forced to apply (`--apply`/`--cached`/`--index`/`--3way`). Conservative: a
+/// read-only flag alongside any forcing flag is treated as writing.
+fn apply_writes(words : Array[String], start : Int, end : Int) -> Bool {
+  let mut read_only = false
+  let mut forced = false
+  for index in start..<end {
+    match words[index] {
+      "--check" | "--stat" | "--numstat" | "--summary" => read_only = true
+      "--apply" | "--cached" | "--index" | "--3way" | "-3" => forced = true
+      _ => ()
+    }
   }
-  false
+  forced || !read_only
 }
 
 ///|
@@ -159,23 +164,38 @@ fn region_reconfigures(words : Array[String], start : Int, end : Int) -> Bool {
 }
 
 ///|
-/// True when `git clean`'s arguments include a dry-run flag (`-n`, `--dry-run`,
-/// or a short cluster such as `-fdn`); in git clean `n` always means dry run.
+/// True when `git clean`'s arguments request a dry run (`-n`, `--dry-run`, or a
+/// short cluster such as `-fdn`; in git clean `n` always means dry run). An
+/// exclude option (`-e`/`--exclude`/a cluster with `e`) takes a pattern operand
+/// that could itself look like `-n` (`git clean -e -n -fd` is destructive), so
+/// rather than parse git's getopt clustering this conservatively treats any clean
+/// carrying an exclude as NOT a dry run — it stays blocked.
 fn clean_args_request_dry_run(
   words : Array[String],
   start : Int,
   end : Int,
 ) -> Bool {
+  let mut dry_run = false
   for index in start..<end {
     let arg = words[index]
-    if arg == "-n" || arg == "--dry-run" {
-      return true
+    if clean_arg_is_exclude(arg) {
+      return false
     }
-    if arg.has_prefix("-") && !arg.has_prefix("--") && arg.contains("n") {
-      return true
+    if arg == "-n" ||
+      arg == "--dry-run" ||
+      (arg.has_prefix("-") && !arg.has_prefix("--") && arg.contains("n")) {
+      dry_run = true
     }
   }
-  false
+  dry_run
+}
+
+///|
+fn clean_arg_is_exclude(arg : String) -> Bool {
+  arg == "-e" ||
+  arg == "--exclude" ||
+  arg.has_prefix("--exclude=") ||
+  (arg.has_prefix("-") && !arg.has_prefix("--") && arg.contains("e"))
 }
 
 ///|

@@ -807,7 +807,7 @@ async test "sandbox preblocks common source-writing commands" {
         "git apply patch.diff", "git am patch.mbox", "git apply --cached patch.diff",
         "git apply --index patch.diff", "git update-index --cacheinfo 100644,abc,main.mbt",
         "git read-tree HEAD", "git fast-import", "git mv notes.md main.mbt", "git clean -fd",
-        "git -c filter.f.smudge=cmd checkout -- .", "git -C /tmp/x checkout -- .",
+        "git clean -e -n -fd", "git -c filter.f.smudge=cmd checkout -- .", "git -C /tmp/x checkout -- .",
       ] {
       assert_true(
         is_some_path(
@@ -850,7 +850,7 @@ async test "sandbox preblocks common source-writing commands" {
       recoverable_git in [
         "git checkout -- .", "git checkout feature/foo", "git switch feature/foo",
         "git restore main.mbt", "git reset --hard", "git rm main.mbt", "git stash",
-        "git clean -fdn", "git status",
+        "git clean -fdn", "git status", "git apply --check patch.diff", "git apply --stat patch.diff",
       ] {
       assert_true(
         direct_source_tree_operation_target_for_root(

@@ -81,8 +81,9 @@ not depend on the runtime sandbox: the external-patch/plumbing store feeders
 (`apply`/`am` including `--cached`, `update-index`, `read-tree`, `fast-import`),
 `mv` (moves arbitrary worktree bytes onto the destination), non-dry-run `clean`
 (permanently deletes untracked files), and any object-store writer that is
-reconfigured (`git -c filter=… checkout`, `-C`, `--work-tree`). The recoverable
-worktree subcommands are not blocked — see the trusted list below.
+reconfigured (`git -c filter=… checkout`, `-C`, `--work-tree`). Read-only patch
+validation (`git apply --check`/`--stat`) and dry-run `clean` (`-n`) are allowed.
+The recoverable worktree subcommands are not blocked — see the trusted list below.
 Too-complex command strings with in-place `sed` edits are rejected even when the
 source paths are indirect, as in `while read f; do sed -i ... "$f"; done`.
 Too-complex commands with visible MoonBit source creation or tree transfer
