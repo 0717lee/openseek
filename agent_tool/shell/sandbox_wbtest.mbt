@@ -532,7 +532,6 @@ async test "sandbox preblocks common source-writing commands" {
     @fs.symlink(target="main.mbt", "\{root}/out.log")
     let real_root = @fs.realpath(root)
     let main_path = "\{real_root}/main.mbt"
-    let pkg_main_path = "\{real_root}/pkg/main.mbt"
     let src_pkg_path = "\{real_root}/src/pkg"
     let backup_path = "\{real_root}/backup.mbt"
     assert_true(
@@ -801,554 +800,54 @@ async test "sandbox preblocks common source-writing commands" {
         real_root,
       ),
     )
-    assert_true(
-      is_some_path(
-        direct_source_tree_operation_target_for_root(
-          @shell_parse.parse_for_policy("git checkout -- ."),
-          real_root,
-          Some(real_root),
-        ),
-        real_root,
-      ),
-    )
-    assert_true(
-      is_some_path(
-        direct_source_tree_operation_target_for_root(
-          @shell_parse.parse_for_policy("git checkout feature/foo"),
-          real_root,
-          Some(real_root),
-        ),
-        real_root,
-      ),
-    )
-    assert_true(
-      is_some_path(
-        direct_source_tree_operation_target_for_root(
-          @shell_parse.parse_for_policy("git switch feature/foo"),
-          real_root,
-          Some(real_root),
-        ),
-        real_root,
-      ),
-    )
-    assert_true(
-      direct_source_tree_operation_target_for_root(
-        @shell_parse.parse_for_policy("git checkout --help"),
-        real_root,
-        Some(real_root),
-      )
-      is None,
-    )
-    assert_true(
-      direct_source_tree_operation_target_for_root(
-        @shell_parse.parse_for_policy("git --help checkout"),
-        real_root,
-        Some(real_root),
-      )
-      is None,
-    )
-    assert_true(
-      direct_source_tree_operation_target_for_root(
-        @shell_parse.parse_for_policy("git switch --help"),
-        real_root,
-        Some(real_root),
-      )
-      is None,
-    )
-    assert_true(
-      direct_source_tree_operation_target_for_root(
-        @shell_parse.parse_for_policy("git restore --help"),
-        real_root,
-        Some(real_root),
-      )
-      is None,
-    )
-    assert_true(
-      dynamic_source_tree_operation_target(
-        @shell_parse.parse_for_policy("if true; then git switch --help; fi"),
-        "if true; then git switch --help; fi",
-        real_root,
-        Some(real_root),
-      )
-      is None,
-    )
-    assert_true(
-      dynamic_source_tree_operation_target(
-        @shell_parse.parse_for_policy("if true; then git --help checkout; fi"),
-        "if true; then git --help checkout; fi",
-        real_root,
-        Some(real_root),
-      )
-      is None,
-    )
-    assert_true(
-      direct_source_tree_operation_target_for_root(
-        @shell_parse.parse_for_policy("git checkout -- notes.txt"),
-        real_root,
-        Some(real_root),
-      )
-      is None,
-    )
-    assert_true(
-      is_some_path(
-        direct_source_tree_operation_target_for_root(
-          @shell_parse.parse_for_policy("git checkout -- ':!*.txt'"),
-          real_root,
-          Some(real_root),
-        ),
-        real_root,
-      ),
-    )
-    assert_true(
-      is_some_path(
-        direct_source_tree_operation_target_for_root(
-          @shell_parse.parse_for_policy("git checkout -- ':(exclude)*.txt'"),
-          real_root,
-          Some(real_root),
-        ),
-        real_root,
-      ),
-    )
-    assert_true(
-      is_some_path(
-        direct_source_tree_operation_target_for_root(
-          @shell_parse.parse_for_policy("git checkout -- deleted_pkg"),
-          real_root,
-          Some(real_root),
-        ),
-        "\{real_root}/deleted_pkg",
-      ),
-    )
-    assert_true(
-      is_some_path(
-        direct_source_tree_operation_target_for_root(
-          @shell_parse.parse_for_policy("git checkout feature/foo -- main.mbt"),
-          real_root,
-          Some(real_root),
-        ),
-        main_path,
-      ),
-    )
-    assert_true(
-      is_some_path(
-        direct_source_tree_operation_target_for_root(
-          @shell_parse.parse_for_policy("git restore deleted_pkg"),
-          real_root,
-          Some(real_root),
-        ),
-        "\{real_root}/deleted_pkg",
-      ),
-    )
-    assert_true(
-      is_some_path(
-        direct_source_tree_operation_target_for_root(
-          @shell_parse.parse_for_policy("git restore ':(top)moon.pkg'"),
-          real_root,
-          Some("\{real_root}/pkg"),
-        ),
-        "\{real_root}/moon.pkg",
-      ),
-    )
-    assert_true(
-      direct_source_tree_operation_target_for_root(
-        @shell_parse.parse_for_policy("git restore ':(top)notes.txt'"),
-        real_root,
-        Some("\{real_root}/pkg"),
-      )
-      is None,
-    )
-    assert_true(
-      is_some_path(
-        direct_source_tree_operation_target_for_root(
-          @shell_parse.parse_for_policy(
-            "git -C \{real_root}/pkg restore main.mbt",
+    // git apply / git am apply an EXTERNAL patch and stay pre-blocked (the only
+    // remaining git pre-block; on macOS the runtime sandbox covers them too).
+    for
+      patch_cmd in [
+        "git apply patch.diff", "git am patch.mbox", "git apply --cached patch.diff",
+        "git apply --index patch.diff",
+      ] {
+      assert_true(
+        is_some_path(
+          direct_source_tree_operation_target_for_root(
+            @shell_parse.parse_for_policy(patch_cmd),
+            real_root,
+            Some(real_root),
           ),
           real_root,
-          Some(real_root),
         ),
-        pkg_main_path,
-      ),
-    )
-    assert_true(
-      direct_source_tree_operation_target_for_root(
-        @shell_parse.parse_for_policy(
-          "git -C \{real_root}-external restore main.mbt",
-        ),
-        real_root,
-        Some(real_root),
       )
-      is None,
-    )
-    assert_true(
-      direct_source_tree_operation_target_for_root(
-        @shell_parse.parse_for_policy(
-          "git -C \{real_root}-external switch feature/foo",
-        ),
-        real_root,
-        Some(real_root),
-      )
-      is None,
-    )
-    assert_true(
-      is_some_path(
-        direct_source_tree_operation_target_for_root(
-          @shell_parse.parse_for_policy("git restore main.mbt"),
-          real_root,
-          Some(real_root),
-        ),
-        main_path,
-      ),
-    )
-    assert_true(
-      is_some_path(
-        direct_source_tree_operation_target_for_root(
-          @shell_parse.parse_for_policy("git restore ':^*.txt'"),
-          real_root,
-          Some(real_root),
-        ),
-        real_root,
-      ),
-    )
-    assert_true(
-      is_some_path(
-        direct_source_tree_operation_target_for_root(
-          @shell_parse.parse_for_policy("git restore -- ':/!*.txt'"),
-          real_root,
-          Some(real_root),
-        ),
-        real_root,
-      ),
-    )
-    assert_true(
-      is_some_path(
-        direct_source_tree_operation_target_for_root(
-          @shell_parse.parse_for_policy("git restore -- ':(top,exclude)*.txt'"),
-          real_root,
-          Some(real_root),
-        ),
-        real_root,
-      ),
-    )
-    assert_true(
-      direct_source_tree_operation_target_for_root(
-        @shell_parse.parse_for_policy("git restore -- notes.txt ':!*.txt'"),
-        real_root,
-        Some(real_root),
-      )
-      is None,
-    )
-    assert_true(
-      is_some_path(
-        direct_source_tree_operation_target_for_root(
-          @shell_parse.parse_for_policy(
-            "git --literal-pathspecs restore main.mbt",
-          ),
-          real_root,
-          Some(real_root),
-        ),
-        main_path,
-      ),
-    )
-    assert_true(
-      is_some_path(
-        direct_source_tree_operation_target_for_root(
-          @shell_parse.parse_for_policy(
-            "git --no-optional-locks restore main.mbt",
-          ),
-          real_root,
-          Some(real_root),
-        ),
-        main_path,
-      ),
-    )
-    assert_true(
-      direct_source_tree_operation_target_for_root(
-        @shell_parse.parse_for_policy("git restore --staged ."),
-        real_root,
-        Some(real_root),
-      )
-      is None,
-    )
-    assert_true(
-      direct_source_tree_operation_target_for_root(
-        @shell_parse.parse_for_policy("git restore --staged main.mbt"),
-        real_root,
-        Some(real_root),
-      )
-      is None,
-    )
-    assert_true(
-      direct_source_tree_operation_target_for_root(
-        @shell_parse.parse_for_policy("git restore -S main.mbt"),
-        real_root,
-        Some(real_root),
-      )
-      is None,
-    )
-    assert_true(
-      is_some_path(
-        direct_source_tree_operation_target_for_root(
-          @shell_parse.parse_for_policy(
-            "git restore --staged --worktree main.mbt",
-          ),
-          real_root,
-          Some(real_root),
-        ),
-        main_path,
-      ),
-    )
-    assert_true(
-      is_some_path(
-        direct_source_tree_operation_target_for_root(
-          @shell_parse.parse_for_policy("git restore -SW main.mbt"),
-          real_root,
-          Some(real_root),
-        ),
-        main_path,
-      ),
-    )
-    assert_true(
-      is_some_path(
-        direct_source_tree_operation_target_for_root(
-          @shell_parse.parse_for_policy("git reset --hard"),
-          real_root,
-          Some(real_root),
-        ),
-        real_root,
-      ),
-    )
-    assert_true(
-      is_some_path(
-        direct_source_tree_operation_target_for_root(
-          @shell_parse.parse_for_policy("git rm main.mbt"),
-          real_root,
-          Some(real_root),
-        ),
-        main_path,
-      ),
-    )
-    assert_true(
-      direct_source_tree_operation_target_for_root(
-        @shell_parse.parse_for_policy("git rm --cached main.mbt"),
-        real_root,
-        Some(real_root),
-      )
-      is None,
-    )
-    assert_true(
-      direct_source_tree_operation_target_for_root(
-        @shell_parse.parse_for_policy("git rm -n main.mbt"),
-        real_root,
-        Some(real_root),
-      )
-      is None,
-    )
-    assert_true(
-      is_some_path(
-        direct_source_tree_operation_target_for_root(
-          @shell_parse.parse_for_policy("git mv main.mbt backup.mbt"),
-          real_root,
-          Some(real_root),
-        ),
-        main_path,
-      ),
-    )
-    assert_true(
-      direct_source_tree_operation_target_for_root(
-        @shell_parse.parse_for_policy("git mv -n main.mbt backup.mbt"),
-        real_root,
-        Some(real_root),
-      )
-      is None,
-    )
-    assert_true(
-      is_some_path(
-        direct_source_tree_operation_target_for_root(
-          @shell_parse.parse_for_policy("git clean -fd"),
-          real_root,
-          Some(real_root),
-        ),
-        real_root,
-      ),
-    )
-    assert_true(
-      direct_source_tree_operation_target_for_root(
-        @shell_parse.parse_for_policy("git clean -fdn"),
-        real_root,
-        Some(real_root),
-      )
-      is None,
-    )
-    assert_true(
-      is_some_path(
-        direct_source_tree_operation_target_for_root(
-          @shell_parse.parse_for_policy("git clean -e -n -fd"),
-          real_root,
-          Some(real_root),
-        ),
-        real_root,
-      ),
-    )
-    assert_true(
-      is_some_path(
-        direct_source_tree_operation_target_for_root(
-          @shell_parse.parse_for_policy("git clean -fde -n"),
-          real_root,
-          Some(real_root),
-        ),
-        real_root,
-      ),
-    )
-    assert_true(
-      direct_source_tree_operation_target_for_root(
-        @shell_parse.parse_for_policy("git clean -fne ignored"),
-        real_root,
-        Some(real_root),
-      )
-      is None,
-    )
-    assert_true(
-      is_some_path(
-        direct_source_tree_operation_target_for_root(
-          @shell_parse.parse_for_policy("git clean --interactive"),
-          real_root,
-          Some(real_root),
-        ),
-        real_root,
-      ),
-    )
-    assert_true(
-      direct_source_tree_operation_target_for_root(
-        @shell_parse.parse_for_policy("git clean --dry-run"),
-        real_root,
-        Some(real_root),
-      )
-      is None,
-    )
-    assert_true(
-      is_some_path(
-        direct_source_tree_operation_target_for_root(
-          @shell_parse.parse_for_policy("git clean --exclude -n -fd"),
-          real_root,
-          Some(real_root),
-        ),
-        real_root,
-      ),
-    )
-    assert_true(
-      direct_source_tree_operation_target_for_root(
-        @shell_parse.parse_for_policy("git apply --check patch.diff"),
-        real_root,
-        Some(real_root),
-      )
-      is None,
-    )
-    assert_true(
-      is_some_path(
-        direct_source_tree_operation_target_for_root(
-          @shell_parse.parse_for_policy("git apply --stat --apply patch.diff"),
-          real_root,
-          Some(real_root),
-        ),
-        real_root,
-      ),
-    )
-    assert_true(
-      direct_source_tree_operation_target_for_root(
-        @shell_parse.parse_for_policy("git apply --cached patch.diff"),
-        real_root,
-        Some(real_root),
-      )
-      is None,
-    )
-    assert_true(
-      is_some_path(
-        direct_source_tree_operation_target_for_root(
-          @shell_parse.parse_for_policy("git apply --index patch.diff"),
-          real_root,
-          Some(real_root),
-        ),
-        real_root,
-      ),
-    )
-    let git_restore_source_glob = "git restore *.mbt"
+    }
+    // git apply is also caught in the TooComplex text path (e.g. globbed patches).
+    let git_apply_glob = "git apply *.patch"
     assert_true(
       is_some_path(
         dynamic_source_tree_operation_target(
-          @shell_parse.parse_for_policy(git_restore_source_glob),
-          git_restore_source_glob,
+          @shell_parse.parse_for_policy(git_apply_glob),
+          git_apply_glob,
           real_root,
           Some(real_root),
         ),
         real_root,
       ),
     )
-    let git_restore_expanded_source_glob = "git restore src/*"
-    assert_true(
-      is_some_path(
-        dynamic_source_tree_operation_target(
-          @shell_parse.parse_for_policy(git_restore_expanded_source_glob),
-          git_restore_expanded_source_glob,
+    // Recoverable git worktree subcommands write from the object store and are no
+    // longer pre-blocked (they run as trusted source writers instead).
+    for
+      recoverable_git in [
+        "git checkout -- .", "git checkout feature/foo", "git switch feature/foo",
+        "git restore main.mbt", "git reset --hard", "git clean -fd", "git rm main.mbt",
+        "git mv main.mbt backup.mbt", "git stash",
+      ] {
+      assert_true(
+        direct_source_tree_operation_target_for_root(
+          @shell_parse.parse_for_policy(recoverable_git),
           real_root,
           Some(real_root),
-        ),
-        real_root,
-      ),
-    )
-    let git_checkout_source_glob = "git checkout -- *.mbt"
-    assert_true(
-      is_some_path(
-        dynamic_source_tree_operation_target(
-          @shell_parse.parse_for_policy(git_checkout_source_glob),
-          git_checkout_source_glob,
-          real_root,
-          Some(real_root),
-        ),
-        real_root,
-      ),
-    )
-    let git_checkout_expanded_branch = "git checkout $branch"
-    assert_true(
-      is_some_path(
-        dynamic_source_tree_operation_target(
-          @shell_parse.parse_for_policy(git_checkout_expanded_branch),
-          git_checkout_expanded_branch,
-          real_root,
-          Some(real_root),
-        ),
-        real_root,
-      ),
-    )
-    let git_restore_staged_glob = "git restore --staged *.mbt"
-    assert_true(
-      dynamic_source_tree_operation_target(
-        @shell_parse.parse_for_policy(git_restore_staged_glob),
-        git_restore_staged_glob,
-        real_root,
-        Some(real_root),
+        )
+        is None,
       )
-      is None,
-    )
-    let git_restore_staged_expanded_glob = "git restore --staged src/*"
-    assert_true(
-      dynamic_source_tree_operation_target(
-        @shell_parse.parse_for_policy(git_restore_staged_expanded_glob),
-        git_restore_staged_expanded_glob,
-        real_root,
-        Some(real_root),
-      )
-      is None,
-    )
-    let scoped_git_segments = "git restore --staged *.mbt && git apply --cached patch.diff"
-    assert_true(
-      dynamic_source_tree_operation_target(
-        @shell_parse.parse_for_policy(scoped_git_segments),
-        scoped_git_segments,
-        real_root,
-        Some(real_root),
-      )
-      is None,
-    )
+    }
     let find_sed_source = "find \{real_root} -name '*.mbt' -exec sed -i '' 's/42/43/' {} +"
     assert_true(
       is_some_path(
@@ -1451,13 +950,14 @@ async test "sandbox preblocks common source-writing commands" {
         real_root,
       ),
     )
-    // The same xargs-utility gap applied to git source-tree operations.
-    let xargs_git_checkout = "echo *.mbt | xargs git checkout --"
+    // The same xargs-utility gap still applies to `git apply` (the one blocked
+    // git op); recoverable git subcommands are trusted and not pre-blocked.
+    let xargs_git_apply = "echo *.patch | xargs git apply"
     assert_true(
       is_some_path(
         dynamic_source_tree_operation_target(
-          @shell_parse.parse_for_policy(xargs_git_checkout),
-          xargs_git_checkout,
+          @shell_parse.parse_for_policy(xargs_git_apply),
+          xargs_git_apply,
           real_root,
           Some(real_root),
         ),
@@ -2470,6 +1970,39 @@ fn mode_for(cmd : String) -> SourceWriteMode {
     "/workspace",
     Some("/workspace"),
   )
+}
+
+///|
+test "sandbox trusts recoverable git, sandboxes patch and reconfiguring git" {
+  // Recoverable worktree subcommands run unsandboxed (trusted to write source):
+  // every write they make comes from git's own object store.
+  for
+    cmd in [
+      "git checkout -- main.mbt", "git checkout feature/foo", "git switch main",
+      "git restore main.mbt", "git restore --source=HEAD~1 main.mbt", "git reset --hard",
+      "git stash", "git stash pop", "git clean -fd", "git rm main.mbt", "git mv a.mbt b.mbt",
+      "cd pkg && git checkout -- main.mbt",
+    ] {
+    assert_true(mode_for(cmd) is TrustedSourceWrite)
+  }
+  // git apply / git am apply an EXTERNAL patch, so they stay sandboxed.
+  for cmd in ["git apply patch.diff", "git am patch.mbox"] {
+    assert_true(mode_for(cmd) is SourceReadOnly)
+  }
+  // Config/dir/exec global options or a custom environment could enable a smudge
+  // filter or merge driver, so they drop git out of the trusted path.
+  for
+    cmd in [
+      "git -c core.editor=x checkout -- .", "git -c filter.f.smudge=cmd checkout -- .",
+      "git --git-dir=/tmp/x checkout -- .", "git --exec-path=/tmp checkout -- .",
+      "FOO=bar git checkout -- .", "env GIT_CONFIG_COUNT=1 git checkout -- .",
+    ] {
+    assert_true(mode_for(cmd) is SourceReadOnly)
+  }
+  // Unknown / plumbing / read-only git is not granted trust (fail closed).
+  for cmd in ["git status", "git diff", "git checkout-index -a", "git co -- ."] {
+    assert_true(mode_for(cmd) is SourceReadOnly)
+  }
 }
 
 ///|

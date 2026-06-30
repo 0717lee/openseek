@@ -482,10 +482,71 @@ fn trusted_command_class(
             UntrustedCommand
           }
         "moon" => trusted_moon_command_class(command, command_index)
+        "git" => trusted_git_command_class(command, command_index)
         _ => UntrustedCommand
       }
     _ => UntrustedCommand
   }
+}
+
+///|
+/// Git subcommands trusted to run unsandboxed and write workspace source. Every
+/// worktree write these make sources its content from git's own object store —
+/// HEAD, the index, a commit/tree, or a stash — which is recoverable and
+/// reviewable through git, never from an external file or stdin. `apply`/`am`
+/// are deliberately absent (they apply an external patch — arbitrary content the
+/// source-write sandbox must keep out), as is everything unknown (fail closed).
+fn git_subcommand_writes_from_object_store(subcommand : String) -> Bool {
+  match subcommand {
+    "checkout"
+    | "switch"
+    | "restore"
+    | "reset"
+    | "stash"
+    | "clean"
+    | "rm"
+    | "mv" => true
+    _ => false
+  }
+}
+
+///|
+/// Classify a `git` command for the trusted-source-write path. Trust is granted
+/// only to the recoverable worktree subcommands above, and only when the
+/// invocation cannot reconfigure git to synthesize arbitrary bytes: a custom
+/// environment (`GIT_CONFIG_*`, `env ... git`) or a config/dir/exec global option
+/// (`-c`, `--config-env`, `--git-dir`, `--namespace`, `--exec-path`) could enable
+/// a smudge filter or merge driver, so those fall through to the sandbox.
+fn trusted_git_command_class(
+  command : @shell_parse.SimpleCommand,
+  git_index : Int,
+) -> TrustedCommandClass {
+  if command_has_custom_environment(command) {
+    return UntrustedCommand
+  }
+  guard git_invocation(command.argv, git_index + 1, ".", ".")
+    is Some(invocation) else {
+    return UntrustedCommand
+  }
+  for index in (git_index + 1)..<invocation.subcommand_index {
+    if git_global_option_reconfigures(command.argv[index]) {
+      return UntrustedCommand
+    }
+  }
+  if git_subcommand_writes_from_object_store(invocation.subcommand) {
+    TrustedCommandWrite
+  } else {
+    UntrustedCommand
+  }
+}
+
+///|
+/// True for git global options that repoint git at different config, an external
+/// program path, or another git dir — precursors that could turn an otherwise
+/// object-store subcommand into an arbitrary-byte writer via filters or drivers.
+fn git_global_option_reconfigures(arg : String) -> Bool {
+  git_global_option_consumes_next(arg) ||
+  git_global_option_with_attached_value(arg)
 }
 
 ///|
@@ -1359,44 +1420,11 @@ fn command_text_git_subcommand_updates_source_tree(
     ) {
     return false
   }
+  // Only the external-patch subcommands are pre-blocked in the TooComplex text
+  // path; every other git worktree write sources from the object store and is
+  // handled by the trusted-source-write path (or, on macOS, the kernel sandbox).
   match words[subcommand_index] {
-    "checkout" | "switch" => true
-    "restore" =>
-      command_text_git_restore_updates_worktree(
-        words,
-        subcommand_index + 1,
-        segment_end,
-      )
-    "reset" =>
-      command_text_git_reset_updates_worktree(
-        words,
-        subcommand_index + 1,
-        segment_end,
-      )
-    "clean" =>
-      command_text_git_clean_updates_worktree(
-        words,
-        subcommand_index + 1,
-        segment_end,
-      )
-    "apply" =>
-      command_text_git_apply_updates_worktree(
-        words,
-        subcommand_index + 1,
-        segment_end,
-      )
-    "rm" =>
-      command_text_git_rm_updates_worktree(
-        words,
-        subcommand_index + 1,
-        segment_end,
-      )
-    "mv" =>
-      command_text_git_mv_updates_worktree(
-        words,
-        subcommand_index + 1,
-        segment_end,
-      )
+    "apply" | "am" => true
     _ => false
   }
 }
@@ -1408,132 +1436,6 @@ fn command_text_git_subcommand_args_request_help(
   end : Int,
 ) -> Bool {
   start < end && (words[start] == "--help" || words[start] == "-h")
-}
-
-///|
-fn command_text_git_restore_updates_worktree(
-  words : Array[String],
-  start : Int,
-  end : Int,
-) -> Bool {
-  let mut staged = false
-  let mut worktree = false
-  let mut index = start
-  while index < end {
-    let arg = words[index]
-    if arg == "--" {
-      break
-    }
-    if arg == "--staged" || git_restore_short_option_cluster_has(arg, "S") {
-      staged = true
-    }
-    if arg == "--worktree" || git_restore_short_option_cluster_has(arg, "W") {
-      worktree = true
-    }
-    if git_restore_option_consumes_next(arg) {
-      index += 2
-      continue
-    }
-    index += 1
-  }
-  worktree || !staged
-}
-
-///|
-fn command_text_git_reset_updates_worktree(
-  words : Array[String],
-  start : Int,
-  end : Int,
-) -> Bool {
-  let mut index = start
-  while index < end {
-    match words[index] {
-      "--hard" | "--merge" | "--keep" => return true
-      _ => index += 1
-    }
-  }
-  false
-}
-
-///|
-fn command_text_git_clean_updates_worktree(
-  words : Array[String],
-  start : Int,
-  end : Int,
-) -> Bool {
-  let mut dry_run = false
-  let mut index = start
-  while index < end {
-    let arg = words[index]
-    if git_clean_short_option_has_dry_run(arg) ||
-      git_clean_long_option_is_dry_run(arg) {
-      dry_run = true
-    }
-    if git_clean_option_consumes_next(arg) {
-      index += 2
-      continue
-    }
-    index += 1
-  }
-  !dry_run
-}
-
-///|
-fn command_text_git_apply_updates_worktree(
-  words : Array[String],
-  start : Int,
-  end : Int,
-) -> Bool {
-  let mut applies = true
-  let mut cached_only = false
-  let mut index = start
-  while index < end {
-    match words[index] {
-      "--check" | "--stat" | "--numstat" | "--summary" => applies = false
-      "--cached" => cached_only = true
-      "--index" => cached_only = false
-      "--apply" => applies = true
-      _ => ()
-    }
-    index += 1
-  }
-  applies && !cached_only
-}
-
-///|
-fn command_text_git_rm_updates_worktree(
-  words : Array[String],
-  start : Int,
-  end : Int,
-) -> Bool {
-  let mut cached_only = false
-  let mut dry_run = false
-  for index in start..<end {
-    let arg = words[index]
-    match arg {
-      "--cached" => cached_only = true
-      "-n" | "--dry-run" => dry_run = true
-      _ => if git_restore_short_option_cluster_has(arg, "n") { dry_run = true }
-    }
-  }
-  !cached_only && !dry_run
-}
-
-///|
-fn command_text_git_mv_updates_worktree(
-  words : Array[String],
-  start : Int,
-  end : Int,
-) -> Bool {
-  for index in start..<end {
-    let arg = words[index]
-    if arg == "-n" ||
-      arg == "--dry-run" ||
-      git_restore_short_option_cluster_has(arg, "n") {
-      return false
-    }
-  }
-  true
 }
 
 ///|
@@ -2768,7 +2670,7 @@ async fn source_tree_operation_target_for_command(
         predicted_dirs,
       )
     "git" =>
-      source_tree_git_target(
+      git_external_patch_preblock_target(
         command.argv,
         command_index + 1,
         real_workspace_root,
@@ -3344,7 +3246,14 @@ priv struct GitInvocation {
 }
 
 ///|
-async fn source_tree_git_target(
+/// Pre-block `git apply` / `git am`: they write the worktree (or stage it, with
+/// `--cached`, which then feeds a later trusted `checkout`/`restore`) from an
+/// EXTERNAL patch — arbitrary content the source-write sandbox must keep out.
+/// The runtime `sandbox-exec` profile already denies this on macOS; this static
+/// guard is what blocks it on platforms without a kernel sandbox. Every other
+/// git subcommand sources its writes from the object store and is handled by the
+/// trusted-source-write path (`trusted_git_command_class`).
+fn git_external_patch_preblock_target(
   argv : Array[String],
   arg_start : Int,
   real_workspace_root : String,
@@ -3354,49 +3263,9 @@ async fn source_tree_git_target(
     is Some(invocation) else {
     return None
   }
-  let subcommand_index = invocation.subcommand_index
-  let git_cwd = invocation.cwd
-  if git_subcommand_args_request_help(argv, subcommand_index + 1) {
-    return None
-  }
   match invocation.subcommand {
-    "checkout" =>
-      git_checkout_target(
-        argv,
-        subcommand_index + 1,
-        real_workspace_root,
-        git_cwd,
-      )
-    "switch" => git_workspace_scope_target(real_workspace_root, git_cwd)
-    "restore" =>
-      git_restore_target(
-        argv,
-        subcommand_index + 1,
-        real_workspace_root,
-        git_cwd,
-      )
-    "reset" =>
-      if git_reset_updates_worktree(argv, subcommand_index + 1) {
-        git_workspace_scope_target(real_workspace_root, git_cwd)
-      } else {
-        None
-      }
-    "clean" =>
-      if git_clean_updates_worktree(argv, subcommand_index + 1) {
-        git_workspace_scope_target(real_workspace_root, git_cwd)
-      } else {
-        None
-      }
-    "apply" =>
-      if git_apply_updates_worktree(argv, subcommand_index + 1) {
-        git_workspace_scope_target(real_workspace_root, git_cwd)
-      } else {
-        None
-      }
-    "rm" =>
-      git_rm_target(argv, subcommand_index + 1, real_workspace_root, git_cwd)
-    "mv" =>
-      git_mv_target(argv, subcommand_index + 1, real_workspace_root, git_cwd)
+    "apply" | "am" =>
+      git_workspace_scope_target(real_workspace_root, invocation.cwd)
     _ => None
   }
 }
@@ -3538,32 +3407,6 @@ fn git_global_no_arg_option(arg : String) -> Bool {
 }
 
 ///|
-fn git_subcommand_args_request_help(
-  argv : Array[String],
-  arg_start : Int,
-) -> Bool {
-  arg_start < argv.length() &&
-  (argv[arg_start] == "--help" || argv[arg_start] == "-h")
-}
-
-///|
-async fn git_checkout_target(
-  argv : Array[String],
-  arg_start : Int,
-  real_workspace_root : String,
-  cwd : String,
-) -> String? {
-  if git_command_has_dash_dash(argv, arg_start) {
-    return git_restore_pathspec_target(
-      git_pathspecs_after_dash_dash(argv, arg_start),
-      real_workspace_root,
-      cwd,
-    )
-  }
-  git_workspace_scope_target(real_workspace_root, cwd)
-}
-
-///|
 fn git_workspace_scope_target(
   real_workspace_root : String,
   cwd : String,
@@ -3576,450 +3419,6 @@ fn git_workspace_scope_target(
     Some(target)
   } else {
     None
-  }
-}
-
-///|
-fn git_command_has_dash_dash(argv : Array[String], arg_start : Int) -> Bool {
-  let mut index = arg_start
-  while index < argv.length() {
-    if argv[index] == "--" {
-      return true
-    }
-    index += 1
-  }
-  false
-}
-
-///|
-async fn git_restore_target(
-  argv : Array[String],
-  arg_start : Int,
-  real_workspace_root : String,
-  cwd : String,
-) -> String? {
-  if !git_restore_updates_worktree(argv, arg_start) {
-    return None
-  }
-  let paths = git_restore_paths(argv, arg_start)
-  git_restore_pathspec_target(paths, real_workspace_root, cwd)
-}
-
-///|
-fn git_restore_updates_worktree(argv : Array[String], arg_start : Int) -> Bool {
-  let mut staged = false
-  let mut worktree = false
-  let mut index = arg_start
-  while index < argv.length() {
-    let arg = argv[index]
-    if arg == "--" {
-      break
-    }
-    if arg == "--staged" || git_restore_short_option_cluster_has(arg, "S") {
-      staged = true
-    }
-    if arg == "--worktree" || git_restore_short_option_cluster_has(arg, "W") {
-      worktree = true
-    }
-    if git_restore_option_consumes_next(arg) {
-      index += 2
-      continue
-    }
-    index += 1
-  }
-  worktree || !staged
-}
-
-///|
-fn git_restore_short_option_cluster_has(arg : String, flag : String) -> Bool {
-  arg.has_prefix("-") &&
-  !arg.has_prefix("--") &&
-  arg != "-" &&
-  arg.contains(flag)
-}
-
-///|
-async fn git_restore_pathspec_target(
-  paths : Array[String],
-  real_workspace_root : String,
-  cwd : String,
-) -> String? {
-  if paths.length() == 0 {
-    return git_workspace_scope_target(real_workspace_root, cwd)
-  }
-  let mut has_positive_pathspec = false
-  for path in paths {
-    if !git_pathspec_is_exclude(path) {
-      has_positive_pathspec = true
-      break
-    }
-  }
-  if !has_positive_pathspec {
-    return git_workspace_scope_target(real_workspace_root, cwd)
-  }
-  for path in paths {
-    if git_pathspec_is_exclude(path) {
-      continue
-    }
-    guard git_positive_pathspec(path, real_workspace_root, cwd) is Some(spec) else {
-      continue
-    }
-    if spec.path == "" || spec.path == "." {
-      return git_workspace_scope_target(real_workspace_root, spec.base)
-    }
-    let target = resolve_source_write_redirect_target(spec.base, spec.path)
-    if protected_workspace_source_or_tree_path(real_workspace_root, target) {
-      return Some(target)
-    }
-    if git_pathspec_may_restore_workspace_source(real_workspace_root, target) {
-      return Some(target)
-    }
-  }
-  None
-}
-
-///|
-priv struct GitPositivePathspec {
-  base : String
-  path : String
-}
-
-///|
-fn git_positive_pathspec(
-  pathspec : String,
-  real_workspace_root : String,
-  cwd : String,
-) -> GitPositivePathspec? {
-  if pathspec.has_prefix(":/") {
-    return Some({ base: real_workspace_root, path: pathspec[2:].to_owned() })
-  }
-  if pathspec.has_prefix(":(") {
-    match pathspec.find(")") {
-      Some(close) => {
-        let magic = pathspec[2:close]
-        if git_long_pathspec_magic_is_exclude(magic) {
-          return None
-        }
-        let base = if git_long_pathspec_magic_is_top(magic) {
-          real_workspace_root
-        } else {
-          cwd
-        }
-        return Some({ base, path: pathspec[close + 1:].to_owned() })
-      }
-      None => ()
-    }
-  }
-  Some({ base: cwd, path: pathspec })
-}
-
-///|
-fn git_pathspec_is_exclude(pathspec : String) -> Bool {
-  if pathspec.has_prefix(":!") || pathspec.has_prefix(":^") {
-    return true
-  }
-  if pathspec.has_prefix(":/!") || pathspec.has_prefix(":/^") {
-    return true
-  }
-  if pathspec.has_prefix(":(") {
-    match pathspec.find(")") {
-      Some(close) =>
-        return git_long_pathspec_magic_is_exclude(pathspec[2:close])
-      None => return false
-    }
-  }
-  false
-}
-
-///|
-fn git_long_pathspec_magic_is_top(magic : StringView) -> Bool {
-  for part in magic.split(",") {
-    if part == "top" || part == "/" {
-      return true
-    }
-  }
-  false
-}
-
-///|
-fn git_long_pathspec_magic_is_exclude(magic : StringView) -> Bool {
-  for part in magic.split(",") {
-    if part == "exclude" || part == "!" || part == "^" {
-      return true
-    }
-  }
-  false
-}
-
-///|
-fn git_pathspecs_after_dash_dash(
-  argv : Array[String],
-  arg_start : Int,
-) -> Array[String] {
-  let paths : Array[String] = []
-  let mut index = arg_start
-  let mut after_dash_dash = false
-  while index < argv.length() {
-    let arg = argv[index]
-    if !after_dash_dash && arg == "--" {
-      after_dash_dash = true
-      index += 1
-      continue
-    }
-    if after_dash_dash {
-      paths.push(arg)
-    }
-    index += 1
-  }
-  paths
-}
-
-///|
-fn git_pathspec_may_restore_workspace_source(
-  real_workspace_root : String,
-  target : String,
-) -> Bool {
-  let root = strip_trailing_slash(
-    @path.Path(real_workspace_root).normalize().to_string(),
-  )
-  let target = @path.Path(target).normalize().to_string()
-  is_under_workspace_root(root, target) &&
-  !is_moon_managed_workspace_path(root, target) &&
-  !looks_like_non_source_file_path(target)
-}
-
-///|
-fn git_restore_paths(argv : Array[String], arg_start : Int) -> Array[String] {
-  let paths : Array[String] = []
-  let mut index = arg_start
-  let mut after_dash_dash = false
-  while index < argv.length() {
-    let arg = argv[index]
-    if !after_dash_dash && arg == "--" {
-      after_dash_dash = true
-      index += 1
-      continue
-    }
-    if !after_dash_dash && git_restore_option_consumes_next(arg) {
-      index += 2
-      continue
-    }
-    if !after_dash_dash && git_restore_option_with_attached_value(arg) {
-      index += 1
-      continue
-    }
-    if !after_dash_dash && arg.has_prefix("-") && arg != "-" {
-      index += 1
-      continue
-    }
-    if after_dash_dash || !arg.has_prefix("-") || arg == "-" {
-      paths.push(arg)
-    }
-    index += 1
-  }
-  paths
-}
-
-///|
-fn git_restore_option_consumes_next(arg : String) -> Bool {
-  arg == "--source" || arg == "-s" || arg == "--pathspec-from-file"
-}
-
-///|
-fn git_restore_option_with_attached_value(arg : String) -> Bool {
-  arg.has_prefix("--source=") || arg.has_prefix("--pathspec-from-file=")
-}
-
-///|
-fn git_reset_updates_worktree(argv : Array[String], arg_start : Int) -> Bool {
-  let mut index = arg_start
-  while index < argv.length() {
-    match argv[index] {
-      "--hard" | "--merge" | "--keep" => return true
-      _ => index += 1
-    }
-  }
-  false
-}
-
-///|
-fn git_clean_updates_worktree(argv : Array[String], arg_start : Int) -> Bool {
-  let mut dry_run = false
-  let mut index = arg_start
-  while index < argv.length() {
-    let arg = argv[index]
-    if git_clean_short_option_has_dry_run(arg) ||
-      git_clean_long_option_is_dry_run(arg) {
-      dry_run = true
-    }
-    if git_clean_option_consumes_next(arg) {
-      index += 2
-      continue
-    }
-    index += 1
-  }
-  !dry_run
-}
-
-///|
-fn git_clean_long_option_is_dry_run(arg : String) -> Bool {
-  arg == "--dry-run"
-}
-
-///|
-fn git_clean_option_consumes_next(arg : String) -> Bool {
-  arg == "--exclude" || git_clean_short_option_cluster_consumes_next(arg)
-}
-
-///|
-fn git_clean_short_option_cluster_consumes_next(arg : String) -> Bool {
-  if !arg.has_prefix("-") || arg.has_prefix("--") || arg == "-" {
-    return false
-  }
-  let chars = [ for ch in arg => ch ]
-  chars.length() >= 2 && chars[chars.length() - 1] == 'e'
-}
-
-///|
-fn git_clean_short_option_has_dry_run(arg : String) -> Bool {
-  if !arg.has_prefix("-") || arg.has_prefix("--") || arg == "-" {
-    return false
-  }
-  let chars = [ for ch in arg => ch ]
-  for index in 1..<chars.length() {
-    match chars[index] {
-      'n' => return true
-      'e' => return false
-      _ => ()
-    }
-  }
-  false
-}
-
-///|
-fn git_apply_updates_worktree(argv : Array[String], arg_start : Int) -> Bool {
-  let mut applies = true
-  let mut cached_only = false
-  let mut index = arg_start
-  while index < argv.length() {
-    match argv[index] {
-      "--check" | "--stat" | "--numstat" | "--summary" => applies = false
-      "--cached" => cached_only = true
-      "--index" => cached_only = false
-      "--apply" => applies = true
-      _ => ()
-    }
-    index += 1
-  }
-  applies && !cached_only
-}
-
-///|
-async fn git_rm_target(
-  argv : Array[String],
-  arg_start : Int,
-  real_workspace_root : String,
-  cwd : String,
-) -> String? {
-  let mut cached_only = false
-  let mut dry_run = false
-  let mut pathspec_from_file = false
-  let paths : Array[String] = []
-  let mut index = arg_start
-  let mut after_dash_dash = false
-  while index < argv.length() {
-    let arg = argv[index]
-    if !after_dash_dash && arg == "--" {
-      after_dash_dash = true
-      index += 1
-      continue
-    }
-    if !after_dash_dash {
-      match arg {
-        "--cached" => {
-          cached_only = true
-          index += 1
-          continue
-        }
-        "-n" | "--dry-run" => {
-          dry_run = true
-          index += 1
-          continue
-        }
-        "--pathspec-from-file" => {
-          if index + 1 >= argv.length() {
-            return None
-          }
-          pathspec_from_file = true
-          index += 2
-          continue
-        }
-        "--pathspec-file-nul" => {
-          index += 1
-          continue
-        }
-        _ =>
-          if git_restore_short_option_cluster_has(arg, "n") {
-            dry_run = true
-            index += 1
-            continue
-          } else if arg.has_prefix("--pathspec-from-file=") {
-            pathspec_from_file = true
-            index += 1
-            continue
-          } else if arg.has_prefix("-") && arg != "-" {
-            index += 1
-            continue
-          }
-      }
-    }
-    paths.push(arg)
-    index += 1
-  }
-  if cached_only || dry_run {
-    None
-  } else if pathspec_from_file {
-    git_workspace_scope_target(real_workspace_root, cwd)
-  } else {
-    git_restore_pathspec_target(paths, real_workspace_root, cwd)
-  }
-}
-
-///|
-async fn git_mv_target(
-  argv : Array[String],
-  arg_start : Int,
-  real_workspace_root : String,
-  cwd : String,
-) -> String? {
-  let paths : Array[String] = []
-  let mut index = arg_start
-  let mut after_dash_dash = false
-  while index < argv.length() {
-    let arg = argv[index]
-    if !after_dash_dash && arg == "--" {
-      after_dash_dash = true
-      index += 1
-      continue
-    }
-    if !after_dash_dash {
-      if arg == "-n" ||
-        arg == "--dry-run" ||
-        git_restore_short_option_cluster_has(arg, "n") {
-        return None
-      }
-      if arg.has_prefix("-") && arg != "-" {
-        index += 1
-        continue
-      }
-    }
-    paths.push(arg)
-    index += 1
-  }
-  if paths.length() < 2 {
-    None
-  } else {
-    git_restore_pathspec_target(paths, real_workspace_root, cwd)
   }
 }
 

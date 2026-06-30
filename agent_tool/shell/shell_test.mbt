@@ -832,39 +832,31 @@ async test "shell sandbox preblocks masked mv backup source moves" {
 
 ///|
 #cfg(not(platform="windows"))
-async test "shell sandbox preblocks masked git source mutations" {
-  @vfs.with_tmpdir(prefix="openseek-shell-sandbox-git-masked-source-", dir => {
+async test "shell sandbox preblocks masked git apply" {
+  @vfs.with_tmpdir(prefix="openseek-shell-sandbox-git-apply-source-", dir => {
     @fs.write_file(
       "\{dir}/main.mbt",
       "pub fn answer() -> Int { 42 }\n",
       create_mode=CreateOrTruncate,
     )
-    let rm_result = run_shell_in_workspace(dir, {
-      "cmd": "git rm main.mbt 2>/dev/null || true",
+    // `git apply` applies an EXTERNAL patch — arbitrary content — so it stays
+    // pre-blocked before execution even when the failure is masked. Recoverable
+    // git worktree subcommands (checkout/restore/reset/rm/mv/...) are no longer
+    // blocked; they run as trusted source writers.
+    let result = run_shell_in_workspace(dir, {
+      "cmd": "git apply change.patch 2>/dev/null || true",
       "cwd": dir,
     })
-    guard rm_result is Respond(rm_output) else { fail("expected Respond") }
-    assert_true(rm_output.is_error)
-    assert_true(rm_output.content.contains("source tree operation is blocked"))
+    guard result is Respond(output) else { fail("expected Respond") }
+    assert_true(output.is_error)
+    assert_true(output.content.contains("source tree operation is blocked"))
     assert_true(
-      rm_output.content.contains("source file writes from shell are blocked"),
+      output.content.contains("source file writes from shell are blocked"),
     )
     assert_eq(
       @fs.read_file("\{dir}/main.mbt").text(),
       "pub fn answer() -> Int { 42 }\n",
     )
-    let mv_result = run_shell_in_workspace(dir, {
-      "cmd": "git mv main.mbt backup.mbt 2>/dev/null || true",
-      "cwd": dir,
-    })
-    guard mv_result is Respond(mv_output) else { fail("expected Respond") }
-    assert_true(mv_output.is_error)
-    assert_true(mv_output.content.contains("source tree operation is blocked"))
-    assert_true(
-      mv_output.content.contains("source file writes from shell are blocked"),
-    )
-    assert_true(@fs.exists("\{dir}/main.mbt"))
-    assert_false(@fs.exists("\{dir}/backup.mbt"))
   })
 }
 
@@ -1824,24 +1816,39 @@ async test "shell preblocks looped sed source rewrites through path list" {
 
 ///|
 #cfg(not(platform="windows"))
-async test "shell preblocks git source rollback" {
+async test "shell allows recoverable git worktree rollback" {
   @vfs.with_tmpdir(prefix="openseek-shell-git-rollback-", dir => {
     @fs.write_file(
       "\{dir}/main.mbt",
       "pub fn answer() -> Int { 42 }\n",
       create_mode=CreateOrTruncate,
     )
+    // Build a tiny repo with a committed main.mbt. init/config/add/commit only
+    // touch `.git`, so they run (sandboxed) without being blocked.
+    let setup = run_shell_in_workspace(dir, {
+      "cmd": "git init -q && git config user.email a@b.c && git config user.name t && git add main.mbt && git commit -q -m init",
+      "cwd": dir,
+    })
+    guard setup is Respond(setup_output) else { fail("expected Respond") }
+    assert_false(
+      setup_output.content.contains("source file writes from shell are blocked"),
+    )
+    // Dirty the tracked source, then discard the change with `git checkout` — a
+    // trusted, recoverable worktree write that now runs unsandboxed and succeeds.
+    @fs.write_file(
+      "\{dir}/main.mbt",
+      "pub fn answer() -> Int { 999 }\n",
+      create_mode=CreateOrTruncate,
+    )
     let result = run_shell_in_workspace(dir, {
-      "cmd": "git checkout -- .",
+      "cmd": "git checkout -- main.mbt",
       "cwd": dir,
     })
     guard result is Respond(output) else { fail("expected Respond") }
-    assert_true(output.is_error)
-    assert_true(
+    assert_false(output.is_error)
+    assert_false(
       output.content.contains("source file writes from shell are blocked"),
     )
-    assert_true(output.content.contains("line-anchored"))
-    assert_false(output.content.contains("`write`"))
     assert_eq(
       @fs.read_file("\{dir}/main.mbt").text(),
       "pub fn answer() -> Int { 42 }\n",
