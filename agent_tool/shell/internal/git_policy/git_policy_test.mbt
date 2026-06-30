@@ -47,6 +47,8 @@ test "should_preblock: feeders, mv, non-dry-run clean, reconfigured writers" {
       ["git", "restore", "--source=HEAD~1", "--", "foo.mbt"],
       ["git", "restore", "-s", "HEAD~1", "foo.mbt"],
       ["git", "checkout", "HEAD~1", "--", "foo.mbt"],
+      ["git", "checkout", "-fB", "new", "other"],
+      ["git", "checkout", "HEAD~1", "--pathspec-from-file=list"],
       ["git", "checkout", "--ours", "conflict.mbt"],
       ["git", "-c", "filter.f.smudge=cmd", "checkout", "--", "."],
       ["git", "-C", "/tmp/x", "checkout", "--", "."],

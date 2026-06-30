@@ -170,14 +170,16 @@ fn overwrites_untracked_from_tree(
   start : Int,
   end : Int,
 ) -> Bool {
-  let mut positional_before_dash_dash = false
+  let mut positional_before_paths = false
   for index in start..<end {
     let arg = words[index]
-    if arg == "-f" ||
-      arg == "--force" ||
+    // Force / overlay / side-pick overwrite regardless of untracked state. `-f`
+    // may be clustered (`-fB`, `-fq`), so match it inside a short cluster too.
+    if arg == "--force" ||
       arg == "--overlay" ||
       arg == "--ours" ||
-      arg == "--theirs" {
+      arg == "--theirs" ||
+      short_cluster_has(arg, "f") {
       return true
     }
     // Explicit source tree-ish: `--source`, `--source=<t>`, `-s`, `-s<t>`.
@@ -187,15 +189,28 @@ fn overwrites_untracked_from_tree(
       (arg.has_prefix("-s") && !arg.has_prefix("--")) {
       return true
     }
-    if arg == "--" {
-      // A positional tree-ish before `--` sources the listed paths from it.
-      return positional_before_dash_dash
+    // `--`, or `--pathspec-from-file`, ends the tree-ish/pathspec boundary; a
+    // positional tree-ish before it (`git checkout HEAD~1 -- f`, or
+    // `git checkout HEAD~1 --pathspec-from-file=list`) sources the paths from it.
+    if arg == "--" ||
+      arg == "--pathspec-from-file" ||
+      arg.has_prefix("--pathspec-from-file=") {
+      return positional_before_paths
     }
     if !arg.has_prefix("-") {
-      positional_before_dash_dash = true
+      positional_before_paths = true
     }
   }
   false
+}
+
+///|
+/// True when `arg` is a short option cluster (`-…`, not `--…`) containing `flag`.
+fn short_cluster_has(arg : String, flag : String) -> Bool {
+  arg.has_prefix("-") &&
+  !arg.has_prefix("--") &&
+  arg != "-" &&
+  arg.contains(flag)
 }
 
 ///|
