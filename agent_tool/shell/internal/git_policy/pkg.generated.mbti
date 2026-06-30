@@ -1,0 +1,28 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "bobzhang/openseek/agent_tool/shell/internal/git_policy"
+
+// Values
+pub fn global_option_reconfigures(String) -> Bool
+
+pub fn parse(Array[String], Int) -> Invocation?
+
+pub fn subcommand_is_store_feeder(String) -> Bool
+
+pub fn subcommand_writes_from_object_store(String) -> Bool
+
+pub fn text_subcommand_index(Array[String], Int, Int) -> Int?
+
+pub fn text_subcommand_is_store_feeder(Array[String], Int, Int) -> Bool
+
+// Errors
+
+// Types and methods
+pub(all) struct Invocation {
+  subcommand : String
+  subcommand_index : Int
+}
+
+// Type aliases
+
+// Traits
+

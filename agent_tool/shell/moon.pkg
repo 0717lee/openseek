@@ -3,6 +3,7 @@ import {
   "bobzhang/openseek/agent_tool/internal/error" @tool_error,
   "bobzhang/openseek/agent_tool/shell/internal/command_policy",
   "bobzhang/openseek/agent_tool/shell/internal/decode",
+  "bobzhang/openseek/agent_tool/shell/internal/git_policy",
   "bobzhang/openseek/agent_tool/shell/internal/shell_parse",
   "bobzhang/openseek/internal/workspace_path",
   "moonbitlang/async",

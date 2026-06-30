@@ -490,23 +490,6 @@ fn trusted_command_class(
 }
 
 ///|
-/// Git subcommands trusted to run unsandboxed and write workspace source. Every
-/// worktree write these make sources its content from git's own object store —
-/// HEAD, the index, a commit/tree, or a stash — which is recoverable and
-/// reviewable through git, never from an external file or stdin. `mv` is absent:
-/// it moves existing worktree bytes onto the destination, so `git mv notes.md
-/// main.mbt` would create source from arbitrary worktree content rather than the
-/// object store. `apply`/`am` are absent (they apply an external patch), as is
-/// everything unknown (fail closed). `rm` only deletes, so it cannot inject.
-fn git_subcommand_writes_from_object_store(subcommand : String) -> Bool {
-  match subcommand {
-    "checkout" | "switch" | "restore" | "reset" | "stash" | "clean" | "rm" =>
-      true
-    _ => false
-  }
-}
-
-///|
 /// Classify a `git` command for the trusted-source-write path. Trust is granted
 /// only to the recoverable worktree subcommands above, and only when the
 /// invocation cannot reconfigure git to write from somewhere other than the
@@ -522,34 +505,19 @@ fn trusted_git_command_class(
   if command_has_custom_environment(command) {
     return UntrustedCommand
   }
-  guard git_invocation(command.argv, git_index + 1, ".", ".")
-    is Some(invocation) else {
+  guard @git_policy.parse(command.argv, git_index + 1) is Some(invocation) else {
     return UntrustedCommand
   }
   for index in (git_index + 1)..<invocation.subcommand_index {
-    if git_global_option_reconfigures(command.argv[index]) {
+    if @git_policy.global_option_reconfigures(command.argv[index]) {
       return UntrustedCommand
     }
   }
-  if git_subcommand_writes_from_object_store(invocation.subcommand) {
+  if @git_policy.subcommand_writes_from_object_store(invocation.subcommand) {
     TrustedCommandWrite
   } else {
     UntrustedCommand
   }
-}
-
-///|
-/// True for git global options that repoint git at different config, an external
-/// program path, another git dir, or another cwd/worktree — precursors that could
-/// turn an otherwise object-store subcommand into an arbitrary-byte writer via
-/// filters/drivers or write the workspace from a different repository.
-fn git_global_option_reconfigures(arg : String) -> Bool {
-  git_global_option_consumes_next(arg) ||
-  git_global_option_with_attached_value(arg) ||
-  arg == "-C" ||
-  arg == "--work-tree" ||
-  git_attached_cwd_option(arg) is Some(_) ||
-  git_attached_work_tree_option(arg) is Some(_)
 }
 
 ///|
@@ -1315,9 +1283,9 @@ fn command_text_mentions_unsafe_git_source_operation(text : String) -> Bool {
     if command_token_basename_is(words[index], "git") &&
       command_text_word_runs_as_command(words, index) {
       let segment_end = command_text_segment_end(words, index)
-      match command_text_git_subcommand_index(words, index + 1, segment_end) {
+      match @git_policy.text_subcommand_index(words, index + 1, segment_end) {
         Some(subcommand_index) =>
-          if command_text_git_subcommand_updates_source_tree(
+          if @git_policy.text_subcommand_is_store_feeder(
               words, subcommand_index, segment_end,
             ) {
             return true
@@ -1375,71 +1343,6 @@ fn powershell_source_writing_command_name(name : String) -> Bool {
     | "ni" => true
     _ => false
   }
-}
-
-///|
-fn command_text_git_subcommand_index(
-  words : Array[String],
-  start : Int,
-  end : Int,
-) -> Int? {
-  let mut index = start
-  while index < end {
-    let arg = words[index]
-    if arg == "--help" || arg == "-h" {
-      return None
-    }
-    if arg == "-C" ||
-      arg == "--work-tree" ||
-      git_global_option_consumes_next(arg) {
-      index += 2
-      continue
-    }
-    if git_attached_cwd_option(arg) is Some(_) ||
-      git_attached_work_tree_option(arg) is Some(_) ||
-      git_global_option_with_attached_value(arg) ||
-      git_global_no_arg_option(arg) {
-      index += 1
-      continue
-    }
-    if arg.has_prefix("-") && arg != "-" {
-      return None
-    }
-    return Some(index)
-  }
-  None
-}
-
-///|
-fn command_text_git_subcommand_updates_source_tree(
-  words : Array[String],
-  subcommand_index : Int,
-  segment_end : Int,
-) -> Bool {
-  if command_text_git_subcommand_args_request_help(
-      words,
-      subcommand_index + 1,
-      segment_end,
-    ) {
-    return false
-  }
-  // Only the store-feeder subcommands are pre-blocked in the TooComplex text
-  // path (see git_store_feeder_preblock_target); every other git worktree write
-  // sources from the object store and is handled by the trusted-source-write
-  // path (or, on macOS, the kernel sandbox).
-  match words[subcommand_index] {
-    "apply" | "am" | "update-index" | "read-tree" | "fast-import" => true
-    _ => false
-  }
-}
-
-///|
-fn command_text_git_subcommand_args_request_help(
-  words : Array[String],
-  start : Int,
-  end : Int,
-) -> Bool {
-  start < end && (words[start] == "--help" || words[start] == "-h")
 }
 
 ///|
@@ -3243,13 +3146,6 @@ fn source_writing_awk_target(
 }
 
 ///|
-priv struct GitInvocation {
-  subcommand : String
-  subcommand_index : Int
-  cwd : String
-}
-
-///|
 /// Pre-block git subcommands that can place content from OUTSIDE the object store
 /// into git's store or worktree, which a later trusted `checkout`/`restore` would
 /// then materialize into source:
@@ -3275,150 +3171,13 @@ fn git_store_feeder_preblock_target(
   real_workspace_root : String,
   cwd : String,
 ) -> String? {
-  guard git_invocation(argv, arg_start, real_workspace_root, cwd)
-    is Some(invocation) else {
+  guard @git_policy.parse(argv, arg_start) is Some(invocation) else {
     return None
   }
-  match invocation.subcommand {
-    "apply" | "am" | "update-index" | "read-tree" | "fast-import" =>
-      git_workspace_scope_target(real_workspace_root, invocation.cwd)
-    _ => None
-  }
-}
-
-///|
-fn git_invocation(
-  argv : Array[String],
-  arg_start : Int,
-  real_workspace_root : String,
-  cwd : String,
-) -> GitInvocation? {
-  let mut index = arg_start
-  let mut effective_cwd = source_write_detection_cwd(
-    real_workspace_root,
-    Some(cwd),
-  )
-  while index < argv.length() {
-    let arg = argv[index]
-    if arg == "--" {
-      return None
-    }
-    if arg == "--help" || arg == "-h" {
-      return None
-    }
-    if arg == "-C" {
-      if index + 1 >= argv.length() {
-        return None
-      }
-      effective_cwd = resolve_source_write_redirect_target(
-        effective_cwd,
-        argv[index + 1],
-      )
-      index += 2
-      continue
-    }
-    match git_attached_cwd_option(arg) {
-      Some(next_cwd) => {
-        effective_cwd = resolve_source_write_redirect_target(
-          effective_cwd, next_cwd,
-        )
-        index += 1
-        continue
-      }
-      None => ()
-    }
-    if arg == "--work-tree" {
-      if index + 1 >= argv.length() {
-        return None
-      }
-      effective_cwd = resolve_source_write_redirect_target(
-        effective_cwd,
-        argv[index + 1],
-      )
-      index += 2
-      continue
-    }
-    match git_attached_work_tree_option(arg) {
-      Some(work_tree) => {
-        effective_cwd = resolve_source_write_redirect_target(
-          effective_cwd, work_tree,
-        )
-        index += 1
-        continue
-      }
-      None => ()
-    }
-    if git_global_option_consumes_next(arg) {
-      index += 2
-      continue
-    }
-    if git_global_option_with_attached_value(arg) ||
-      git_global_no_arg_option(arg) {
-      index += 1
-      continue
-    }
-    if arg.has_prefix("-") && arg != "-" {
-      return None
-    }
-    return Some({ subcommand: arg, subcommand_index: index, cwd: effective_cwd })
-  }
-  None
-}
-
-///|
-fn git_attached_cwd_option(arg : String) -> String? {
-  if arg.has_prefix("-C") && arg != "-C" {
-    Some(arg[2:].to_owned())
+  if @git_policy.subcommand_is_store_feeder(invocation.subcommand) {
+    git_workspace_scope_target(real_workspace_root, cwd)
   } else {
     None
-  }
-}
-
-///|
-fn git_attached_work_tree_option(arg : String) -> String? {
-  if arg.has_prefix("--work-tree=") {
-    Some(arg["--work-tree=".length():].to_owned())
-  } else {
-    None
-  }
-}
-
-///|
-fn git_global_option_consumes_next(arg : String) -> Bool {
-  arg == "-c" ||
-  arg == "--config-env" ||
-  arg == "--exec-path" ||
-  arg == "--git-dir" ||
-  arg == "--namespace"
-}
-
-///|
-fn git_global_option_with_attached_value(arg : String) -> Bool {
-  (arg.has_prefix("-c") && arg != "-c") ||
-  arg.has_prefix("--config-env=") ||
-  arg.has_prefix("--exec-path=") ||
-  arg.has_prefix("--git-dir=") ||
-  arg.has_prefix("--namespace=")
-}
-
-///|
-fn git_global_no_arg_option(arg : String) -> Bool {
-  match arg {
-    "--version"
-    | "--help"
-    | "-p"
-    | "--paginate"
-    | "-P"
-    | "--no-pager"
-    | "--no-replace-objects"
-    | "--no-optional-locks"
-    | "--no-lazy-fetch"
-    | "--literal-pathspecs"
-    | "--glob-pathspecs"
-    | "--noglob-pathspecs"
-    | "--icase-pathspecs"
-    | "--bare" => true
-    _ => false
   }
 }
 
