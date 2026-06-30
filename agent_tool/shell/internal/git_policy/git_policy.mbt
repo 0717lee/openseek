@@ -61,14 +61,15 @@ pub fn global_option_reconfigures(arg : String) -> Bool {
 }
 
 ///|
-/// Git subcommands whose every worktree write sources from git's own object
-/// store (HEAD, the index, a commit/tree, or a stash) — recoverable and
-/// reviewable through git, never from an external file or stdin. `mv` is excluded
-/// (it moves arbitrary worktree bytes onto the destination); `rm` only deletes.
+/// Git subcommands whose every worktree change either materializes content from
+/// git's own object store (HEAD, the index, a commit/tree, or a stash) or removes
+/// a tracked file recoverable from it — reviewable through git, never sourced from
+/// an external file or stdin. Excluded: `mv` (moves arbitrary worktree bytes onto
+/// the destination) and `clean` (deletes UNTRACKED files with no object-store
+/// copy — permanent). `rm` stays: it only deletes tracked files.
 pub fn subcommand_writes_from_object_store(subcommand : String) -> Bool {
   match subcommand {
-    "checkout" | "switch" | "restore" | "reset" | "stash" | "clean" | "rm" =>
-      true
+    "checkout" | "switch" | "restore" | "reset" | "stash" | "rm" => true
     _ => false
   }
 }

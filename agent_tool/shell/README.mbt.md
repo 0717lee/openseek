@@ -94,11 +94,13 @@ moon check` is trusted, while a broad script or source rewrite through shell is
 not.
 
 Recoverable Git worktree subcommands also run outside the source-write sandbox,
-because every write they make sources from git's own object store (HEAD, the
-index, a commit/tree, or a stash) — recoverable and reviewable through git, never
-from an external file or stdin: `checkout`, `switch`, `restore`, `reset`,
-`stash`, `clean`, and `rm`. `mv` is excluded because it moves arbitrary worktree
-bytes onto the destination; `rm` only deletes, so it cannot inject. Trust is
+because every change they make either materializes content from git's own object
+store (HEAD, the index, a commit/tree, or a stash) or removes a tracked file
+recoverable from it — reviewable through git, never sourced from an external file
+or stdin: `checkout`, `switch`, `restore`, `reset`, `stash`, and `rm`. `mv` is
+excluded (it moves arbitrary worktree bytes onto the destination) and `clean` is
+excluded (it deletes untracked files with no object-store copy — permanent);
+`rm` stays because it only deletes tracked files. Trust is
 withheld when the invocation could reconfigure git to write from outside the
 workspace repo — a custom environment (`GIT_CONFIG_*`, `env ... git`) or a
 reconfiguring global option that repoints config (`-c`, `--config-env`), the exec

@@ -819,6 +819,17 @@ async test "sandbox preblocks common source-writing commands" {
         ),
       )
     }
+    // A store feeder is blocked unconditionally — not conditioned on the resolved
+    // cwd — so it cannot slip through with a cwd outside the workspace (e.g. a
+    // `git -C <workspace>` run from elsewhere).
+    assert_true(
+      direct_source_tree_operation_target_for_root(
+        @shell_parse.parse_for_policy("git apply patch.diff"),
+        real_root,
+        Some("\{real_root}-external"),
+      )
+      is Some(_),
+    )
     // git apply is also caught in the TooComplex text path (e.g. globbed patches).
     let git_apply_glob = "git apply *.patch"
     assert_true(
@@ -837,8 +848,7 @@ async test "sandbox preblocks common source-writing commands" {
     for
       recoverable_git in [
         "git checkout -- .", "git checkout feature/foo", "git switch feature/foo",
-        "git restore main.mbt", "git reset --hard", "git clean -fd", "git rm main.mbt",
-        "git stash",
+        "git restore main.mbt", "git reset --hard", "git rm main.mbt", "git stash",
       ] {
       assert_true(
         direct_source_tree_operation_target_for_root(
@@ -1981,17 +1991,17 @@ test "sandbox trusts recoverable git, sandboxes patch and reconfiguring git" {
     cmd in [
       "git checkout -- main.mbt", "git checkout feature/foo", "git switch main",
       "git restore main.mbt", "git restore --source=HEAD~1 main.mbt", "git reset --hard",
-      "git stash", "git stash pop", "git clean -fd", "git rm main.mbt", "cd pkg && git checkout -- main.mbt",
+      "git stash", "git stash pop", "git rm main.mbt", "cd pkg && git checkout -- main.mbt",
     ] {
     assert_true(mode_for(cmd) is TrustedSourceWrite)
   }
-  // External-patch / store-feeder git, and `mv` (which moves arbitrary worktree
-  // bytes onto the destination rather than reading the object store), stay
-  // sandboxed.
+  // External-patch / store-feeder git stays sandboxed, as do `mv` (moves arbitrary
+  // worktree bytes onto the destination, not the object store) and `clean`
+  // (deletes UNTRACKED files with no object-store copy — permanent).
   for
     cmd in [
       "git apply patch.diff", "git am patch.mbox", "git update-index --cacheinfo 100644,abc,main.mbt",
-      "git read-tree HEAD", "git fast-import", "git mv notes.md main.mbt",
+      "git read-tree HEAD", "git fast-import", "git mv notes.md main.mbt", "git clean -fd",
     ] {
     assert_true(mode_for(cmd) is SourceReadOnly)
   }

@@ -3175,7 +3175,19 @@ fn git_store_feeder_preblock_target(
     return None
   }
   if @git_policy.subcommand_is_store_feeder(invocation.subcommand) {
-    git_workspace_scope_target(real_workspace_root, cwd)
+    // Block feeders unconditionally. Conditioning on the resolved cwd would let
+    // `git -C <workspace> apply` run from an outside cwd slip through, and these
+    // are plumbing the agent never needs anyway. Prefer the workspace-scoped
+    // target for the message; fall back to the workspace root.
+    match git_workspace_scope_target(real_workspace_root, cwd) {
+      Some(target) => Some(target)
+      None =>
+        Some(
+          strip_trailing_slash(
+            @path.Path(real_workspace_root).normalize().to_string(),
+          ),
+        )
+    }
   } else {
     None
   }

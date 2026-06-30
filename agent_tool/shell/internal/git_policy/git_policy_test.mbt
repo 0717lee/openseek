@@ -17,10 +17,10 @@ test "parse fails closed" {
 
 ///|
 test "object-store-write classification excludes mv and plumbing" {
-  for sub in ["checkout", "switch", "restore", "reset", "stash", "clean", "rm"] {
+  for sub in ["checkout", "switch", "restore", "reset", "stash", "rm"] {
     assert_true(@git_policy.subcommand_writes_from_object_store(sub))
   }
-  for sub in ["mv", "apply", "am", "status", "checkout-index", "co"] {
+  for sub in ["mv", "clean", "apply", "am", "status", "checkout-index", "co"] {
     assert_false(@git_policy.subcommand_writes_from_object_store(sub))
   }
 }
