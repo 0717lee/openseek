@@ -45,6 +45,8 @@ test "should_preblock: feeders, mv, non-dry-run clean, reconfigured writers" {
       // checkout/restore that can clobber an untracked file from another tree.
       ["git", "checkout", "-f", "other"],
       ["git", "restore", "--source=HEAD~1", "--", "foo.mbt"],
+      ["git", "restore", "-s", "HEAD~1", "foo.mbt"],
+      ["git", "checkout", "HEAD~1", "--", "foo.mbt"],
       ["git", "checkout", "--ours", "conflict.mbt"],
       ["git", "-c", "filter.f.smudge=cmd", "checkout", "--", "."],
       ["git", "-C", "/tmp/x", "checkout", "--", "."],
@@ -57,6 +59,7 @@ test "should_preblock: feeders, mv, non-dry-run clean, reconfigured writers" {
   for
     cmd in [
       ["git", "checkout", "--", "main.mbt"],
+      ["git", "checkout", "feature/foo"],
       ["git", "restore", "main.mbt"],
       ["git", "reset", "--hard"],
       ["git", "stash"],

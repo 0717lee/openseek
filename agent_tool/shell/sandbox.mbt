@@ -1286,6 +1286,33 @@ fn command_text_mentions_unsafe_git_source_operation(text : String) -> Bool {
       if @git_policy.text_should_preblock(words, index + 1, segment_end) {
         return true
       }
+      // A custom environment before `git` (e.g. `GIT_DIR=… git checkout -- *.mbt`)
+      // can repoint git's repo/worktree/config; the text path cannot see it from
+      // `words[index + 1..]`, so block object-store writers carrying one.
+      if command_text_segment_has_custom_env(words, index) &&
+        @git_policy.text_invocation_writes_from_object_store(
+          words,
+          index + 1,
+          segment_end,
+        ) {
+        return true
+      }
+    }
+  }
+  false
+}
+
+///|
+/// True when the command segment ending at the `git` word at `git_index` carries
+/// a custom environment — a leading `env` runner or a `VAR=value` assignment.
+fn command_text_segment_has_custom_env(
+  words : Array[String],
+  git_index : Int,
+) -> Bool {
+  for index in command_text_segment_start(words, git_index)..<git_index {
+    let word = words[index]
+    if command_basename(word) == "env" || command_text_env_assignment_word(word) {
+      return true
     }
   }
   false

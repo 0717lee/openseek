@@ -810,7 +810,8 @@ async test "sandbox preblocks common source-writing commands" {
         "git read-tree HEAD", "git fast-import", "git mv notes.md main.mbt", "git clean -fd",
         "git clean -e -n -fd", "git -c filter.f.smudge=cmd checkout -- .", "git -C /tmp/x checkout -- .",
         "git checkout -f other", "git restore --source=HEAD~1 -- main.mbt", "GIT_DIR=/tmp/x git checkout -- main.mbt",
-        "env GIT_WORK_TREE=. git restore main.mbt",
+        "env GIT_WORK_TREE=. git restore main.mbt", "git checkout HEAD~1 -- main.mbt",
+        "git restore -s HEAD~1 main.mbt",
       ] {
       assert_true(
         is_some_path(
@@ -846,6 +847,18 @@ async test "sandbox preblocks common source-writing commands" {
         ),
         real_root,
       ),
+    )
+    // A custom-env object-store writer is caught in the TooComplex text path too,
+    // even though the env assignment precedes the `git` word.
+    let git_env_glob = "GIT_DIR=/tmp/x git checkout -- *.mbt"
+    assert_true(
+      dynamic_source_tree_operation_target(
+        @shell_parse.parse_for_policy(git_env_glob),
+        git_env_glob,
+        real_root,
+        Some(real_root),
+      )
+      is Some(_),
     )
     // Recoverable git worktree subcommands (and dry-run clean) are not pre-blocked;
     // they run as trusted source writers, or harmlessly sandboxed.

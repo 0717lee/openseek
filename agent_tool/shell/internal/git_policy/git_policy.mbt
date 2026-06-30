@@ -110,6 +110,23 @@ pub fn text_should_preblock(
 }
 
 ///|
+/// Whether the git subcommand found in `words[start..end)` is a recoverable
+/// object-store writer (checkout/switch/restore/reset/stash/rm). The text path
+/// uses this to decide whether a custom environment before `git` (which it cannot
+/// see in `words[start..]`) makes the writer unsafe and must be pre-blocked.
+pub fn text_invocation_writes_from_object_store(
+  words : Array[String],
+  start : Int,
+  end : Int,
+) -> Bool {
+  match text_subcommand_index(words, start, end) {
+    Some(subcommand_index) =>
+      subcommand_writes_from_object_store(words[subcommand_index])
+    None => false
+  }
+}
+
+///|
 fn preblock_for_subcommand(
   words : Array[String],
   global_start : Int,
@@ -143,21 +160,39 @@ fn preblock_for_subcommand(
 }
 
 ///|
+/// True when a `checkout`/`switch`/`restore` form can overwrite an untracked file
+/// from another tree: a force/overlay/side flag, an explicit source tree-ish
+/// (`--source`/`--source=`/`-s`/`-s<tree>`), or a positional tree-ish before
+/// `--` (`git checkout <tree-ish> -- <path>`). Plain index restore
+/// (`git checkout -- f`, `git restore f`) and bare branch switch are excluded.
 fn overwrites_untracked_from_tree(
   words : Array[String],
   start : Int,
   end : Int,
 ) -> Bool {
+  let mut positional_before_dash_dash = false
   for index in start..<end {
     let arg = words[index]
     if arg == "-f" ||
       arg == "--force" ||
       arg == "--overlay" ||
       arg == "--ours" ||
-      arg == "--theirs" ||
-      arg == "--source" ||
-      arg.has_prefix("--source=") {
+      arg == "--theirs" {
       return true
+    }
+    // Explicit source tree-ish: `--source`, `--source=<t>`, `-s`, `-s<t>`.
+    if arg == "--source" ||
+      arg.has_prefix("--source=") ||
+      arg == "-s" ||
+      (arg.has_prefix("-s") && !arg.has_prefix("--")) {
+      return true
+    }
+    if arg == "--" {
+      // A positional tree-ish before `--` sources the listed paths from it.
+      return positional_before_dash_dash
+    }
+    if !arg.has_prefix("-") {
+      positional_before_dash_dash = true
     }
   }
   false
