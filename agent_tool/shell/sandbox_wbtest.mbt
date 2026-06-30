@@ -2471,3 +2471,76 @@ fn mode_for(cmd : String) -> SourceWriteMode {
     Some("/workspace"),
   )
 }
+
+///|
+async test "sandbox scans source writes after CRLF here-documents" {
+  @vfs.with_tmpdir(prefix="openseek-shell-sandbox-crlf-heredoc-", root => {
+    @fs.write_file(
+      "\{root}/main.mbt",
+      "pub fn answer() -> Int { 42 }\n",
+      create_mode=CreateOrTruncate,
+    )
+    let real_root = @fs.realpath(root)
+    // CRLF line endings must not break here-document terminator matching. The
+    // unquoted marker read used to keep the trailing `\r` while the closing-line
+    // match stripped it, so the body never terminated and swallowed the later
+    // in-place source edit.
+    let crlf_heredoc_then_sed = "cat <<EOF\r\nnote\r\nEOF\r\nsed -i 's/42/43/' main.mbt\r\n"
+    assert_true(
+      dynamic_source_tree_operation_target(
+        @shell_parse.parse_for_policy(crlf_heredoc_then_sed),
+        crlf_heredoc_then_sed,
+        real_root,
+        Some(real_root),
+      )
+      is Some(_),
+    )
+    // The LF form already worked; keep it as a control for the same shape.
+    let lf_heredoc_then_sed = "cat <<EOF\nnote\nEOF\nsed -i 's/42/43/' main.mbt\n"
+    assert_true(
+      dynamic_source_tree_operation_target(
+        @shell_parse.parse_for_policy(lf_heredoc_then_sed),
+        lf_heredoc_then_sed,
+        real_root,
+        Some(real_root),
+      )
+      is Some(_),
+    )
+  })
+}
+
+///|
+async test "sandbox scans source writes after arithmetic left shifts" {
+  @vfs.with_tmpdir(prefix="openseek-shell-sandbox-arith-shift-", root => {
+    @fs.write_file(
+      "\{root}/main.mbt",
+      "pub fn answer() -> Int { 42 }\n",
+      create_mode=CreateOrTruncate,
+    )
+    let real_root = @fs.realpath(root)
+    // `$((1 << 8))` is arithmetic, not a here-document; the `<<` left shift must
+    // not be read as a here-document operator whose phantom delimiter hides the
+    // following in-place source edit.
+    let arith_then_sed = "SHIFT=$((1 << 8))\nsed -i 's/42/43/' main.mbt\n"
+    assert_true(
+      dynamic_source_tree_operation_target(
+        @shell_parse.parse_for_policy(arith_then_sed),
+        arith_then_sed,
+        real_root,
+        Some(real_root),
+      )
+      is Some(_),
+    )
+    // A bare arithmetic command with no source write stays allowed.
+    let arith_only = "echo $((1 << 8))\n"
+    assert_true(
+      dynamic_source_tree_operation_target(
+        @shell_parse.parse_for_policy(arith_only),
+        arith_only,
+        real_root,
+        Some(real_root),
+      )
+      is None,
+    )
+  })
+}

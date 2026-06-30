@@ -516,6 +516,7 @@ async test "shell sandbox blocks source writes and points to edit tools" {
 }
 
 ///|
+#cfg(not(platform="windows"))
 async test "shell sandbox allows generated source writes under _build" {
   if !sandbox_exec_usable_for_test() {
     return

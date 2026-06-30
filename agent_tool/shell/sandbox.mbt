@@ -2370,6 +2370,25 @@ fn heredoc_delimiters_in_line(line : String) -> Array[HeredocDelimiter] {
           escaped = true
         } else if ch == '\'' || ch == '"' {
           quote = Some(ch)
+        } else if ch == '$' &&
+          index + 2 < chars.length() &&
+          chars[index + 1] == '(' &&
+          chars[index + 2] == '(' {
+          // Arithmetic expansion `$(( ... ))` never contains a here-document, so
+          // skip its balanced parentheses. Otherwise a left shift such as
+          // `$((1 << 8))` is misread as a here-document operator, and the bogus
+          // delimiter swallows every following line from the source-write scan.
+          index += 3
+          let mut depth = 2
+          while index < chars.length() && depth > 0 {
+            if chars[index] == '(' {
+              depth += 1
+            } else if chars[index] == ')' {
+              depth -= 1
+            }
+            index += 1
+          }
+          continue
         } else if ch == '<' &&
           index + 1 < chars.length() &&
           chars[index + 1] == '<' {
@@ -2449,6 +2468,7 @@ fn read_heredoc_delimiter(
 ///|
 fn heredoc_delimiter_char(ch : Char) -> Bool {
   !command_text_line_space(ch) &&
+  ch != '\r' &&
   ch != ';' &&
   ch != '&' &&
   ch != '|' &&
