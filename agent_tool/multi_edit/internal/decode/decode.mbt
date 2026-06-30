@@ -19,6 +19,10 @@ pub struct MultiEditItem {
 pub struct MultiEditArgs {
   inline : Array[MultiEditItem]
   edits_file : String?
+  // The model's requested auto-revert threshold (`None` = host default). The
+  // tool clamps it to a host-enforced range, so the model can tighten the
+  // guardrail but not raise it past the cap.
+  revert_when_errors_above : Int?
 } derive(Debug)
 
 ///|
@@ -44,7 +48,19 @@ pub fn decode_args(arguments : Json) -> MultiEditArgs raise {
         Some(Null) | None => None
         Some(_) => fail("arguments.edits_file to be a string path")
       }
-      { inline, edits_file }
+      let revert_when_errors_above = match
+        fields.get("revert_when_errors_above") {
+        Some(Number(value, ..)) => {
+          let int_value = value.to_int()
+          if int_value.to_double() != value {
+            fail("arguments.revert_when_errors_above to be an integer")
+          }
+          Some(int_value)
+        }
+        Some(Null) | None => None
+        Some(_) => fail("arguments.revert_when_errors_above to be an integer")
+      }
+      { inline, edits_file, revert_when_errors_above }
     }
     _ => fail("object arguments")
   }

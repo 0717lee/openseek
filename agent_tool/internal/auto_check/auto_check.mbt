@@ -46,6 +46,120 @@ async fn auto_check_summary(path : String) -> String? {
 }
 
 ///|
+/// `moon check --output-json` emits one JSON diagnostic object per line, so the
+/// guardrail can count `level == "error"` exactly instead of parsing the
+/// warning-heavy human summary.
+const MoonCheckJsonCommand : String = "moon check --output-json"
+
+///|
+/// A larger capture budget than the human summary: a project with hundreds of
+/// warnings emits a JSON line each, and undercounting would weaken the
+/// guardrail. If output still overflows this, `CheckErrors::truncated` is set
+/// and the count is a lower bound — which only ever makes the guard fire more
+/// readily, never less.
+const MoonCheckJsonMaxOutputChars : Int = 400000
+
+///|
+/// How many individual error diagnostics a revert report surfaces; enough to
+/// show the shape of an over-match without dumping a broken build.
+pub const RevertErrorDisplayLimit : Int = 10
+
+///|
+/// A tally of `moon check` diagnostics by severity, with a few formatted error
+/// lines for display. `truncated` means moon check produced more output than
+/// the capture budget, so `error_count` and `warning_count` are lower bounds.
+pub(all) struct CheckErrors {
+  error_count : Int
+  warning_count : Int
+  first_errors : Array[String]
+  truncated : Bool
+} derive(Debug)
+
+///|
+/// Run `moon check --output-json` from the MoonBit module containing `path` and
+/// tally diagnostics by level. Returns `None` when `path` is not a relevant
+/// MoonBit file, is not inside a MoonBit project, or the check could not run
+/// (timed out / failed to spawn) — in every `None` case the caller keeps the
+/// batch unguarded, matching `append_summary`'s fail-open behavior.
+pub async fn count_errors(path : String) -> CheckErrors? {
+  let cwd = match moon_check_cwd(path) {
+    Some(cwd) => cwd
+    None => return None
+  }
+  let result = @async.with_timeout_opt(MoonCheckTimeoutMs, () => {
+    @shell.collect_shell_output(
+      MoonCheckJsonCommand,
+      cwd~,
+      max_output_chars=MoonCheckJsonMaxOutputChars,
+    )
+  }) catch {
+    error if @async.is_being_cancelled() => raise error
+    _ => return None
+  }
+  match result {
+    Some(output) =>
+      Some(
+        tally_diagnostics(output.text, truncated=output.output_limit_reached),
+      )
+    None => None
+  }
+}
+
+///|
+/// Tally `moon check --output-json` output (JSON Lines: one diagnostic object
+/// per line) by severity. Lines that are not diagnostic objects — a trailing
+/// human summary, a blank line — are ignored, so they never disturb the count.
+pub fn tally_diagnostics(text : String, truncated~ : Bool) -> CheckErrors {
+  let mut error_count = 0
+  let mut warning_count = 0
+  let first_errors : Array[String] = []
+  for raw in text.split("\n") {
+    // Cheap pre-filter: only diagnostic lines carry a `level` field, so a
+    // blank line or a human summary never reaches the JSON parser.
+    if !raw.contains("\"level\"") {
+      continue
+    }
+    let json = @json.parse(raw.to_owned()) catch { _ => continue }
+    guard json is Object(fields) else { continue }
+    match fields.get("level") {
+      Some(String("error")) => {
+        error_count = error_count + 1
+        if first_errors.length() < RevertErrorDisplayLimit {
+          first_errors.push(format_diagnostic_line(fields))
+        }
+      }
+      Some(String("warning")) => warning_count = warning_count + 1
+      _ => ()
+    }
+  }
+  { error_count, warning_count, first_errors, truncated }
+}
+
+///|
+/// Render one diagnostic object as `path:loc: message`, the same shape the
+/// human `moon check` output uses, so a reverted batch points the model
+/// straight at the offending sites.
+fn format_diagnostic_line(fields : Map[String, Json]) -> String {
+  let path = json_string_field(fields, "path")
+  let loc = json_string_field(fields, "loc")
+  let message = json_string_field(fields, "message")
+  let where_ = if loc == "" { path } else { "\{path}:\{loc}" }
+  if message == "" {
+    where_
+  } else {
+    "\{where_}: \{message}"
+  }
+}
+
+///|
+fn json_string_field(fields : Map[String, Json], name : String) -> String {
+  match fields.get(name) {
+    Some(String(value)) => value
+    _ => ""
+  }
+}
+
+///|
 async fn moon_check_cwd(path : String) -> String? {
   if !is_relevant_moonbit_path(path) {
     return None
@@ -238,4 +352,60 @@ test "formats truncated moon check output with metadata" {
       #|long output
     ),
   )
+}
+
+///|
+test "tally counts errors and warnings from output-json lines" {
+  // Real `moon check --output-json` shapes: one diagnostic object per line.
+  let text =
+    #|{"$message_type":"diagnostic","level":"warning","error_code":20,"path":"argparse/help.mbt","loc":"128:44-128:50","message":"Warning (deprecated): `length` is deprecated, use `len` instead"}
+    #|{"$message_type":"diagnostic","level":"error","error_code":1,"path":"argparse/arg.mbt","loc":"3:1-3:9","message":"Type mismatch: expected Int, got String"}
+    #|{"$message_type":"diagnostic","level":"warning","error_code":20,"path":"argparse/help.mbt","loc":"152:42-152:48","message":"Warning (deprecated): `length` is deprecated, use `len` instead"}
+  let tally = tally_diagnostics(text, truncated=false)
+  assert_eq(tally.error_count, 1)
+  assert_eq(tally.warning_count, 2)
+  assert_eq(tally.truncated, false)
+  assert_eq(tally.first_errors.length(), 1)
+  assert_eq(
+    tally.first_errors[0],
+    "argparse/arg.mbt:3:1-3:9: Type mismatch: expected Int, got String",
+  )
+}
+
+///|
+test "tally ignores blank lines and non-diagnostic summary lines" {
+  let text =
+    #|
+    #|{"$message_type":"diagnostic","level":"error","error_code":1,"path":"a.mbt","loc":"1:1-1:2","message":"boom"}
+    #|Failed with 265 warnings, 1 errors.
+    #|{"not-json
+  let tally = tally_diagnostics(text, truncated=false)
+  assert_eq(tally.error_count, 1)
+  assert_eq(tally.warning_count, 0)
+  assert_eq(tally.first_errors.length(), 1)
+  assert_eq(tally.first_errors[0], "a.mbt:1:1-1:2: boom")
+}
+
+///|
+test "tally caps surfaced errors at the display limit but keeps the full count" {
+  let lines : Array[String] = []
+  for index in 0..<25 {
+    lines.push(
+      "{\"$message_type\":\"diagnostic\",\"level\":\"error\",\"path\":\"f\{index}.mbt\",\"loc\":\"1:1-1:2\",\"message\":\"e\{index}\"}",
+    )
+  }
+  let tally = tally_diagnostics(lines.join("\n"), truncated=true)
+  assert_eq(tally.error_count, 25)
+  assert_eq(tally.first_errors.length(), RevertErrorDisplayLimit)
+  assert_eq(tally.first_errors[0], "f0.mbt:1:1-1:2: e0")
+  assert_eq(tally.truncated, true)
+}
+
+///|
+test "tally renders a diagnostic without a location using just the path" {
+  let text =
+    #|{"$message_type":"diagnostic","level":"error","path":"a.mbt","message":"module-level boom"}
+  let tally = tally_diagnostics(text, truncated=false)
+  assert_eq(tally.first_errors.length(), 1)
+  assert_eq(tally.first_errors[0], "a.mbt: module-level boom")
 }

@@ -82,6 +82,44 @@ test "decode_args rejects wrong field types" {
 }
 
 ///|
+test "decode_args reads revert_when_errors_above and defaults to None" {
+  let absent = @decode.decode_args({ "edits": [] })
+  assert_true(absent.revert_when_errors_above is None)
+  let present = @decode.decode_args({
+    "edits": [],
+    "revert_when_errors_above": 3,
+  })
+  assert_true(present.revert_when_errors_above is Some(3))
+  // Zero is meaningful (revert on any introduced error) and must round-trip.
+  let zero = @decode.decode_args({ "edits": [], "revert_when_errors_above": 0 })
+  assert_true(zero.revert_when_errors_above is Some(0))
+}
+
+///|
+test "decode_args rejects a non-integer revert_when_errors_above" {
+  try @decode.decode_args({ "revert_when_errors_above": 1.5 }) catch {
+    error =>
+      assert_true(
+        "\{error}".contains(
+          "arguments.revert_when_errors_above to be an integer",
+        ),
+      )
+  } noraise {
+    _ => fail("fractional threshold decoded")
+  }
+  try @decode.decode_args({ "revert_when_errors_above": "5" }) catch {
+    error =>
+      assert_true(
+        "\{error}".contains(
+          "arguments.revert_when_errors_above to be an integer",
+        ),
+      )
+  } noraise {
+    _ => fail("string threshold decoded")
+  }
+}
+
+///|
 test "decode_edits_json parses a bare array of edits" {
   let edits = @decode.decode_edits_json([
     {

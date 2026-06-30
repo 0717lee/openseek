@@ -47,6 +47,11 @@ pub fn definition(
           "description": "Path to a JSON file holding an array of the same edit objects — a response file for large, script-generated batches. Concatenated with inline edits when both are given.",
           "examples": ["fixes.json"],
         },
+        "revert_when_errors_above": {
+          "type": "integer",
+          "description": "Auto-revert safety net. After the batch is written, `moon check` runs; if this batch INTRODUCES more than this many new compile errors (measured against the pre-batch error count, so pre-existing errors and all warnings are ignored), the entire batch is rolled back to its pre-batch contents and the call returns an error listing the first few new errors — so an over-matching replace cannot leave a broken tree to untangle. Default 5; the host caps the effective value (you can make it stricter, e.g. 0 to revert on any new error, but cannot disable it). A batch that keeps or reduces the error count is never reverted.",
+          "examples": [5],
+        },
       },
     }),
     execute=Async(arguments => execute_with_workspace(workspace_root, arguments)),
@@ -84,7 +89,7 @@ async fn execute_with_workspace(
       is_error=true,
     )
   }
-  multi_edit_files(workspace_root, edits)
+  multi_edit_files(workspace_root, edits, args.revert_when_errors_above)
 }
 
 ///|
@@ -137,6 +142,9 @@ async fn load_edits_file(
 priv struct PreparedWrite {
   path : String
   new_content : String
+  // The file's pre-batch content, kept so the auto-revert guard can roll the
+  // file back (and re-measure the baseline error count) without re-reading.
+  original_content : String
   edit_count : Int
 }
 
@@ -159,6 +167,7 @@ priv struct PreparedFile {
 async fn multi_edit_files(
   workspace_root : String,
   edits : Array[@decode.MultiEditItem],
+  revert_when_errors_above : Int?,
 ) -> @agent_tool.ToolAction {
   let brief = "multi_edit"
   // Resolve every edit's path up front and key contiguity and grouping on the
@@ -230,6 +239,7 @@ async fn multi_edit_files(
         writes.push({
           path: prepared_file.path,
           new_content,
+          original_content: prepared_file.content,
           edit_count: prepared_file.plans.length(),
         })
     }
@@ -252,17 +262,202 @@ async fn multi_edit_files(
         )
     }
   }
-  // Append `moon check` feedback once, from the first written file's module. A
-  // batch spanning multiple modules only surfaces the first module's
-  // diagnostics, which is acceptable for the in-project repair case. `writes` is
-  // non-empty here (a non-empty batch with no failures always renders at least
-  // one write), but match defensively rather than index blindly.
-  let summary = success_summary(writes)
-  let response = match writes.get(0) {
-    Some(first) => @auto_check.append_summary(first.path, summary)
-    None => summary
+  // The batch is on disk. Run the auto-revert guard from the first written
+  // file's module: it appends `moon check` feedback and, if this batch
+  // introduced too many new errors, rolls the whole batch back. A batch
+  // spanning multiple modules only checks the first module's diagnostics, which
+  // is acceptable for the in-project repair case. `writes` is non-empty here (a
+  // non-empty batch with no failures always renders at least one write), but
+  // match defensively rather than index blindly.
+  match writes.get(0) {
+    Some(first) =>
+      revert_guarded_response(
+        first.path,
+        writes,
+        effective_revert_threshold(revert_when_errors_above),
+      )
+    None =>
+      @agent_tool.ToolAction::respond(
+        success_summary(writes),
+        brief=success_brief(writes),
+      )
   }
-  @agent_tool.ToolAction::respond(response, brief=success_brief(writes))
+}
+
+///|
+/// The host default number of newly introduced errors a batch may cause before
+/// it is auto-reverted. Conservative: a handful of new errors is a likely
+/// over-match, not a transient cross-file gap.
+const DefaultRevertThreshold : Int = 5
+
+///|
+/// The largest threshold the model may request. The model can make the guard
+/// stricter (down to 0 — revert on any new error) but never raise it past this
+/// cap, so an overconfident call cannot silently disable the safety net.
+const HostMaxRevertThreshold : Int = 10
+
+///|
+/// Resolve the model's requested threshold against the host policy: absent →
+/// the default; present → clamped to `[0, HostMaxRevertThreshold]`.
+fn effective_revert_threshold(requested : Int?) -> Int {
+  match requested {
+    Some(value) => value.clamp(min=0, max=HostMaxRevertThreshold)
+    None => DefaultRevertThreshold
+  }
+}
+
+///|
+/// Run `moon check` over the just-written batch and decide whether to keep it
+/// or roll it back. Keeps the batch (reporting honestly when sub-threshold
+/// errors remain) unless it introduced more than `threshold` NEW errors versus
+/// the pre-batch baseline; the baseline is measured lazily — only when the
+/// after-check already breaches the threshold — by restoring the originals,
+/// re-checking, then either staying reverted or re-applying.
+async fn revert_guarded_response(
+  check_path : String,
+  writes : Array[PreparedWrite],
+  threshold : Int,
+) -> @agent_tool.ToolAction {
+  let summary = success_summary(writes)
+  let kept = @agent_tool.ToolAction::respond(
+    summary,
+    brief=success_brief(writes),
+  )
+  let after = count_errors_or_none(check_path)
+  // Not a MoonBit project, or the check could not run: keep the batch exactly
+  // as applied, just as before this guardrail existed.
+  guard after is Some(after) else { return kept }
+  if after.error_count <= threshold {
+    return @agent_tool.ToolAction::respond(
+      keep_response(summary, after, threshold),
+      brief=success_brief(writes),
+    )
+  }
+  // Suspicious: the post-batch error count is over the line. Measure the
+  // pre-batch baseline by restoring the originals and re-checking, so the guard
+  // fires on errors this batch INTRODUCED, not on ones that were already there.
+  let restore_failures = write_files(writes, write => write.original_content)
+  let before = count_errors_or_none(check_path)
+  let before_count = match before {
+    Some(before) => before.error_count
+    None => 0
+  }
+  let introduced = after.error_count - before_count
+  if introduced > threshold {
+    // Real breakage. Stay reverted (the originals are already back on disk).
+    @agent_tool.ToolAction::respond(
+      revert_report(writes, after, introduced~, threshold~, restore_failures~),
+      is_error=true,
+      brief="multi_edit reverted (\{introduced} new error(s))",
+    )
+  } else {
+    // False alarm: the errors were mostly pre-existing. Re-apply and keep.
+    let _ = write_files(writes, write => write.new_content)
+    @agent_tool.ToolAction::respond(
+      keep_response(summary, after, threshold, introduced~),
+      brief=success_brief(writes),
+    )
+  }
+}
+
+///|
+/// `@auto_check.count_errors`, with cancellation propagated and any other
+/// failure mapped to `None` (fail open — keep the batch unguarded).
+async fn count_errors_or_none(path : String) -> @auto_check.CheckErrors? {
+  @auto_check.count_errors(path) catch {
+    error if @async.is_being_cancelled() => raise error
+    _ => None
+  }
+}
+
+///|
+/// Write `content(write)` to every file, returning the paths that could not be
+/// written (best effort — a restore/re-apply must not raise mid-rollback). A
+/// non-empty result is surfaced in the revert report so a half-restored tree is
+/// never reported as a clean rollback.
+async fn write_files(
+  writes : Array[PreparedWrite],
+  content : (PreparedWrite) -> String,
+) -> Array[String] {
+  let failures : Array[String] = []
+  for write in writes {
+    @fs.write_file(write.path, content(write), create_mode=CreateOrTruncate) catch {
+      error if @async.is_being_cancelled() => raise error
+      _ => failures.push(write.path)
+    }
+  }
+  failures
+}
+
+///|
+/// The kept-batch response: the success summary plus an honest `moon check`
+/// status line. A batch that still leaves errors is reported as `applied with
+/// N error(s)`, never as clean. `introduced` is `Some` only on the rare
+/// false-alarm path where the post-batch count breached the threshold but the
+/// batch turned out to add few NEW errors (most pre-existed) — then the line
+/// makes the introduced-vs-total split explicit, so a kept total above the
+/// threshold never reads as a contradiction.
+fn keep_response(
+  summary : String,
+  after : @auto_check.CheckErrors,
+  threshold : Int,
+  introduced? : Int,
+) -> String {
+  if after.error_count == 0 {
+    return "\{summary}\nmoon check: ok — 0 errors, \{after.warning_count} warning(s)"
+  }
+  let errors = error_count_label(after)
+  let header = match introduced {
+    Some(introduced) =>
+      "\{summary}\nmoon check: applied with \{errors} error(s) kept (only \{introduced} newly introduced ≤ revert_when_errors_above=\{threshold}; the rest pre-existed), \{after.warning_count} warning(s)"
+    None =>
+      "\{summary}\nmoon check: applied with \{errors} error(s) kept (≤ revert_when_errors_above=\{threshold}), \{after.warning_count} warning(s)"
+  }
+  if after.first_errors.is_empty() {
+    header
+  } else {
+    "\{header}\n\{after.first_errors.join("\n")}"
+  }
+}
+
+///|
+/// The reverted-batch report: what was applied, how many new errors triggered
+/// the rollback, the first few of them, and how to retry.
+fn revert_report(
+  writes : Array[PreparedWrite],
+  after : @auto_check.CheckErrors,
+  introduced~ : Int,
+  threshold~ : Int,
+  restore_failures~ : Array[String],
+) -> String {
+  let mut total = 0
+  for write in writes {
+    total = total + write.edit_count
+  }
+  let head = "reverted: applied \{total} edit(s) across \{writes.length()} file(s), but moon check then reported \{error_count_label(after)} error(s) (\{introduced} newly introduced > revert_when_errors_above=\{threshold}); all \{writes.length()} file(s) were rolled back to their pre-batch contents."
+  let errors = if after.first_errors.is_empty() {
+    ""
+  } else {
+    "\nfirst \{after.first_errors.length()} error(s):\n\{after.first_errors.join("\n")}"
+  }
+  let restore_note = if restore_failures.is_empty() {
+    ""
+  } else {
+    "\nWARNING: could not restore \{restore_failures.length()} file(s): \{restore_failures.join(", ")} — inspect them manually."
+  }
+  let tail = "\nre-issue with more precise old_strings (include the receiver) and/or smaller batches so a replacement cannot stray onto unintended sites."
+  "\{head}\{errors}\{restore_note}\{tail}"
+}
+
+///|
+/// Render an error count, marking it a lower bound when moon check's output was
+/// truncated (so the true count is at least this many).
+fn error_count_label(after : @auto_check.CheckErrors) -> String {
+  if after.truncated {
+    "≥\{after.error_count}"
+  } else {
+    "\{after.error_count}"
+  }
 }
 
 ///|

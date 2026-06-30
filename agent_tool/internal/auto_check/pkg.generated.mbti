@@ -1,12 +1,28 @@
 // Generated using `moon info`, DON'T EDIT IT
 package "bobzhang/openseek/agent_tool/internal/auto_check"
 
+import {
+  "moonbitlang/core/debug",
+}
+
 // Values
+pub const RevertErrorDisplayLimit : Int = 10
+
 pub async fn append_summary(String, String) -> String
+
+pub async fn count_errors(String) -> CheckErrors?
+
+pub fn tally_diagnostics(String, truncated~ : Bool) -> CheckErrors
 
 // Errors
 
 // Types and methods
+pub(all) struct CheckErrors {
+  error_count : Int
+  warning_count : Int
+  first_errors : Array[String]
+  truncated : Bool
+} derive(@debug.Debug)
 
 // Type aliases
 
