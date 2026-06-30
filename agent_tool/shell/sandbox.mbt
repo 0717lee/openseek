@@ -1814,12 +1814,6 @@ priv struct HeredocDelimiter {
 }
 
 ///|
-priv struct HeredocReadResult {
-  marker : String
-  next : Int
-}
-
-///|
 priv struct CommandWordReadResult {
   word : String
   next : Int
@@ -2349,119 +2343,148 @@ fn strip_leading_dot_slash(path : String) -> String {
 fn heredoc_delimiters_in_line(line : String) -> Array[HeredocDelimiter] {
   let delimiters : Array[HeredocDelimiter] = []
   let chars = [ for ch in line => ch ]
-  let mut index = 0
-  let mut quote : Char? = None
-  let mut escaped = false
-  while index < chars.length() {
-    let ch = chars[index]
-    match quote {
-      Some(end_quote) =>
-        if escaped {
-          escaped = false
-        } else if end_quote == '"' && ch == '\\' {
-          escaped = true
-        } else if ch == end_quote {
-          quote = None
+  for view = chars[:] {
+    match view {
+      [] => break
+      // A backslash escapes the next code unit, so `\<\<` is not a here-document.
+      ['\\', _, .. rest] => continue rest
+      // Quoted spans never start a here-document or arithmetic expansion.
+      ['\'', .. rest] => continue heredoc_skip_single_quoted(rest)
+      ['"', .. rest] => continue heredoc_skip_double_quoted(rest)
+      // Arithmetic expansion `$(( ... ))` never contains a here-document, so skip
+      // its balanced parentheses. Otherwise a left shift such as `$((1 << 8))` is
+      // misread as a here-document operator whose delimiter swallows later lines.
+      ['$', '(', '(', .. rest] => continue heredoc_skip_arithmetic(rest)
+      // Here-document operator: `<<`, an optional `-`, optional blanks, then the
+      // delimiter word.
+      ['<', '<', .. rest] => {
+        let (strip_tabs, rest) = match rest {
+          ['-', .. after] => (true, after)
+          _ => (false, rest)
         }
-      None =>
-        if escaped {
-          escaped = false
-        } else if ch == '\\' {
-          escaped = true
-        } else if ch == '\'' || ch == '"' {
-          quote = Some(ch)
-        } else if ch == '$' &&
-          index + 2 < chars.length() &&
-          chars[index + 1] == '(' &&
-          chars[index + 2] == '(' {
-          // Arithmetic expansion `$(( ... ))` never contains a here-document, so
-          // skip its balanced parentheses. Otherwise a left shift such as
-          // `$((1 << 8))` is misread as a here-document operator, and the bogus
-          // delimiter swallows every following line from the source-write scan.
-          index += 3
-          let mut depth = 2
-          while index < chars.length() && depth > 0 {
-            if chars[index] == '(' {
-              depth += 1
-            } else if chars[index] == ')' {
-              depth -= 1
+        let rest = heredoc_skip_line_space(rest)
+        match read_heredoc_delimiter(rest) {
+          Some((marker, after)) => {
+            if marker != "" {
+              delimiters.push({ marker, strip_tabs })
             }
-            index += 1
+            continue after
           }
-          continue
-        } else if ch == '<' &&
-          index + 1 < chars.length() &&
-          chars[index + 1] == '<' {
-          index += 2
-          let strip_tabs = if index < chars.length() && chars[index] == '-' {
-            index += 1
-            true
-          } else {
-            false
-          }
-          while index < chars.length() && command_text_line_space(chars[index]) {
-            index += 1
-          }
-          match read_heredoc_delimiter(chars, index) {
-            Some(result) => {
-              if result.marker != "" {
-                delimiters.push({ marker: result.marker, strip_tabs })
-              }
-              index = result.next
-              continue
-            }
-            None => ()
-          }
+          None => continue rest
         }
+      }
+      [_, .. rest] => continue rest
     }
-    index += 1
   }
   delimiters
 }
 
 ///|
-fn read_heredoc_delimiter(
-  chars : Array[Char],
-  start : Int,
-) -> HeredocReadResult? {
-  if start >= chars.length() {
-    return None
+/// Consume a single-quoted span, returning the view after the closing `'`.
+/// Single quotes are literal in POSIX shells, so nothing is escaped inside.
+fn heredoc_skip_single_quoted(view : ArrayView[Char]) -> ArrayView[Char] {
+  for v = view {
+    match v {
+      ['\'', .. rest] => break rest
+      [_, .. rest] => continue rest
+      [] => break v
+    }
   }
+}
+
+///|
+/// Consume a double-quoted span, returning the view after the closing `"`. A
+/// backslash escapes the next code unit, so an escaped quote does not close it.
+fn heredoc_skip_double_quoted(view : ArrayView[Char]) -> ArrayView[Char] {
+  for v = view {
+    match v {
+      ['\\', _, .. rest] => continue rest
+      ['"', .. rest] => break rest
+      [_, .. rest] => continue rest
+      [] => break v
+    }
+  }
+}
+
+///|
+/// Consume an arithmetic expansion whose opening `$((` was already matched,
+/// returning the view after the balancing `))`.
+fn heredoc_skip_arithmetic(view : ArrayView[Char]) -> ArrayView[Char] {
+  for v = view, depth = 2 {
+    if depth == 0 {
+      break v
+    }
+    match v {
+      ['(', .. rest] => continue rest, depth + 1
+      [')', .. rest] => continue rest, depth - 1
+      [_, .. rest] => continue rest, depth
+      [] => break v
+    }
+  }
+}
+
+///|
+/// Drop leading shell blanks (space or tab) from `view`.
+fn heredoc_skip_line_space(view : ArrayView[Char]) -> ArrayView[Char] {
+  for v = view {
+    match v {
+      [ch, .. rest] if command_text_line_space(ch) => continue rest
+      _ => break v
+    }
+  }
+}
+
+///|
+/// Read the here-document delimiter word at the start of `view`, returning the
+/// unquoted marker and the view positioned after it, or `None` when there is no
+/// delimiter (empty input or an unterminated quote).
+fn read_heredoc_delimiter(view : ArrayView[Char]) -> (String, ArrayView[Char])? {
+  match view {
+    ['\'', .. rest] => read_quoted_heredoc_marker(rest, '\'')
+    ['"', .. rest] => read_quoted_heredoc_marker(rest, '"')
+    [] => None
+    _ => {
+      let marker = StringBuilder()
+      let rest = for v = view {
+        match v {
+          ['\\', ch, .. rest] if heredoc_delimiter_char(ch) => {
+            marker.write_char(ch)
+            continue rest
+          }
+          [ch, .. rest] if heredoc_delimiter_char(ch) => {
+            marker.write_char(ch)
+            continue rest
+          }
+          _ => break v
+        }
+      }
+      Some((marker.to_string(), rest))
+    }
+  }
+}
+
+///|
+/// Read a quoted here-document marker up to the closing `quote`, returning the
+/// marker and the view after the quote, or `None` if the quote never closes. A
+/// backslash escapes the next code unit only inside double quotes.
+fn read_quoted_heredoc_marker(
+  view : ArrayView[Char],
+  quote : Char,
+) -> (String, ArrayView[Char])? {
   let marker = StringBuilder()
-  let first = chars[start]
-  if first == '\'' || first == '"' {
-    let quote = first
-    let mut index = start + 1
-    let mut escaped = false
-    while index < chars.length() {
-      let ch = chars[index]
-      if escaped {
+  for v = view {
+    match v {
+      ['\\', ch, .. rest] if quote == '"' => {
         marker.write_char(ch)
-        escaped = false
-      } else if quote == '"' && ch == '\\' {
-        escaped = true
-      } else if ch == quote {
-        return Some({ marker: marker.to_string(), next: index + 1 })
-      } else {
+        continue rest
+      }
+      [ch, .. rest] if ch == quote => break Some((marker.to_string(), rest))
+      [ch, .. rest] => {
         marker.write_char(ch)
+        continue rest
       }
-      index += 1
+      [] => break None
     }
-    None
-  } else {
-    let mut index = start
-    while index < chars.length() && heredoc_delimiter_char(chars[index]) {
-      if chars[index] == '\\' &&
-        index + 1 < chars.length() &&
-        heredoc_delimiter_char(chars[index + 1]) {
-        marker.write_char(chars[index + 1])
-        index += 2
-        continue
-      }
-      marker.write_char(chars[index])
-      index += 1
-    }
-    Some({ marker: marker.to_string(), next: index })
   }
 }
 
