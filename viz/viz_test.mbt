@@ -187,6 +187,55 @@ test "non-object tool args fall back to JSON in both forms" {
 }
 
 ///|
+test "a nested object argument recurses into indented key/value rows" {
+  // A nested object must not collapse to one escaped JSON blob: it recurses
+  // into the same key/value rows, indented, with string leaves shown verbatim.
+  let session = @agent_session.Session(SessionId("nest"), system_prompt="").append(
+    Assistant(
+      AssistantMessage("", tool_calls=[
+        ToolCall(
+          id="n1",
+          name="configure",
+          arguments="{\"name\":\"probe\",\"opts\":{\"retries\":3,\"label\":\"fast\"}}",
+        ),
+      ]),
+    ),
+  )
+  let html = render(@viz.render_session(session, RawLog))
+  assert_true(html.contains("class=\"arg-key\">name"))
+  assert_true(html.contains("class=\"arg-key\">opts"))
+  // The nested object recurses rather than dumping stringified JSON.
+  assert_true(html.contains("class=\"arg-object\""))
+  assert_true(html.contains("class=\"arg-key\">retries"))
+  assert_true(html.contains("class=\"arg-key\">label"))
+  assert_true(html.contains("class=\"arg-value-inline\">fast"))
+}
+
+///|
+test "an array-of-objects argument renders one item per element" {
+  // Each array element renders as its own item, recursing into the element's
+  // fields — the general shape `multi_edit`'s `edits` benefits from.
+  let session = @agent_session.Session(SessionId("arr2"), system_prompt="").append(
+    Assistant(
+      AssistantMessage("", tool_calls=[
+        ToolCall(
+          id="a2",
+          name="batch",
+          arguments="{\"steps\":[{\"op\":\"add\",\"n\":1},{\"op\":\"del\",\"n\":2}]}",
+        ),
+      ]),
+    ),
+  )
+  let html = render(@viz.render_session(session, RawLog))
+  assert_true(html.contains("class=\"arg-key\">steps"))
+  assert_true(html.contains("class=\"arg-array\""))
+  // Two elements → two items, each with its own recursed fields.
+  assert_eq(occurrences(html, "class=\"arg-item\""), 2)
+  assert_true(html.contains("class=\"arg-value-inline\">add"))
+  assert_true(html.contains("class=\"arg-value-inline\">del"))
+}
+
+///|
 test "a failed tool call is tagged so errors-only keeps its call card" {
   // error_tool_session: c1 (shell) failed. Its call gets `tool-call-failed`, the
   // hook the errors-only stylesheet uses to keep the assistant card holding the

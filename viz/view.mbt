@@ -418,20 +418,39 @@ fn render_args_friendly(raw : String) -> @html.Html {
 /// single-line value inline. Non-string scalars render inline; nested arrays and
 /// objects keep their JSON form, which is rare for tool arguments.
 fn arg_field(key : String, value : Json) -> @html.Html {
-  let row : Array[@html.Html] = [@html.span(class="arg-key") <| key]
+  @html.div(class="arg-field") <| [
+    @html.span(class="arg-key") <| key,
+    render_value(value),
+  ]
+}
+
+///|
+/// Render a JSON value in the friendly view, recursing into nested objects and
+/// arrays rather than dumping them as one escaped `stringify` blob. A string
+/// leaf shows verbatim — a multi-line body (e.g. a `write_file` content) as a
+/// preformatted block, otherwise inline. A nested object becomes an indented
+/// block of the same `key: value` rows; an array becomes a list of rendered
+/// items; other scalars render inline. Empty containers collapse to `{}` / `[]`.
+fn render_value(value : Json) -> @html.Html {
   match value {
     String(text) =>
       if text.contains("\n") {
-        row.push(@html.pre(class="arg-value") <| text)
+        @html.pre(class="arg-value") <| text
       } else {
-        row.push(@html.span(class="arg-value-inline") <| text)
+        @html.span(class="arg-value-inline") <| text
       }
-    Array(_) | Object(_) =>
-      row.push(@html.pre(class="arg-value") <| value.stringify(indent=2))
-    scalar =>
-      row.push(@html.span(class="arg-value-inline") <| scalar_text(scalar))
+    Object(fields) if !fields.is_empty() =>
+      @html.div(class="arg-object") <| [
+        for key, field in fields => arg_field(key, field)
+      ]
+    Array(items) if !items.is_empty() =>
+      @html.div(class="arg-array") <| [
+        for item in items => @html.div(class="arg-item") <| render_value(item)
+      ]
+    Object(_) => @html.span(class="arg-value-inline") <| "{}"
+    Array(_) => @html.span(class="arg-value-inline") <| "[]"
+    scalar => @html.span(class="arg-value-inline") <| scalar_text(scalar)
   }
-  @html.div(class="arg-field") <| row
 }
 
 ///|

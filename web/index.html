@@ -364,6 +364,14 @@
       white-space: pre-wrap; word-break: break-word;
       font-family: ui-monospace, monospace; font-size: 12px;
     }
+    /* nested args: objects/arrays recurse into indented rows, not a JSON blob */
+    .arg-object { margin: 2px 0 2px 2px; padding-left: 8px; border-left: 1px solid var(--border); }
+    .arg-array { margin: 2px 0 2px 2px; }
+    .arg-item {
+      margin: 3px 0; padding: 1px 0 1px 8px;
+      border-left: 2px solid var(--border);
+    }
+
     /* tool-args toggle: friendly form by default, raw JSON under .show-original */
     .tool-call-args-original { display: none; }
     .session-view.show-original .tool-call-args-original { display: block; }
