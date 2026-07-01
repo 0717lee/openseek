@@ -1,15 +1,26 @@
 ///|
-test "subcommand typo suggestions catch near-misses, not prompts" {
-  // Near-miss typos map to the intended subcommand.
-  assert_true(subcommand_typo_suggestion("ran") is Some("run"))
-  assert_true(subcommand_typo_suggestion("serv") is Some("serve"))
-  assert_true(subcommand_typo_suggestion("reveiw") is Some("review"))
-  assert_true(subcommand_typo_suggestion("session") is Some("sessions"))
-  // Exact subcommands and clear prompts are not typos.
-  assert_true(subcommand_typo_suggestion("run") is None)
-  assert_true(subcommand_typo_suggestion("fix the bug") is None)
-  assert_true(subcommand_typo_suggestion("--base") is None)
-  assert_true(subcommand_typo_suggestion("deploy") is None)
+test "typo suggestions catch command-shaped near-misses, not prompts" {
+  // Command-shaped typos (bare word, flags, or a single quoted arg) suggest the
+  // intended subcommand.
+  assert_true(subcommand_typo_suggestion(["ran"]) is Some("run"))
+  assert_true(subcommand_typo_suggestion(["serv"]) is Some("serve"))
+  assert_true(
+    subcommand_typo_suggestion(["reveiw", "--base", "main"]) is Some("review"),
+  )
+  assert_true(
+    subcommand_typo_suggestion(["ran", "fix the parser"]) is Some("run"),
+  )
+  assert_true(subcommand_typo_suggestion(["session"]) is Some("sessions"))
+  // Natural-language prompts that merely start with a near-miss word stay prompts.
+  assert_true(subcommand_typo_suggestion(["ran", "tests"]) is None)
+  assert_true(subcommand_typo_suggestion(["server", "error"]) is None)
+  assert_true(subcommand_typo_suggestion(["ran", "the", "tests"]) is None)
+  // Exact subcommands, quoted prompts, flags, far words, and no args are not typos.
+  assert_true(subcommand_typo_suggestion(["run"]) is None)
+  assert_true(subcommand_typo_suggestion(["fix the bug"]) is None)
+  assert_true(subcommand_typo_suggestion(["--base"]) is None)
+  assert_true(subcommand_typo_suggestion(["deploy"]) is None)
+  assert_true(subcommand_typo_suggestion([]) is None)
 }
 
 ///|

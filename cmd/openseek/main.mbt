@@ -56,10 +56,10 @@ async fn dispatch() -> Unit {
     launch_tui(args[2:], env)
   } else if is_engine_subcommand(first) {
     run_engine(args[1:], env)
-  } else if subcommand_typo_suggestion(first) is Some(suggestion) {
-    // A bare word that closely mis-spells a subcommand (e.g. `ran` → `run`) is
-    // almost certainly a typo, not a prompt; say so instead of silently opening
-    // the UI with the mistyped text as its prompt.
+  } else if subcommand_typo_suggestion(args[1:]) is Some(suggestion) {
+    // A command-shaped invocation whose first word closely mis-spells a
+    // subcommand (e.g. `ran` → `run`) is almost certainly a typo, not a prompt;
+    // say so instead of silently opening the UI with the mistyped text.
     @stdio.stderr.write(unknown_command_message(first, suggestion)) catch {
       _ => ()
     }
@@ -71,15 +71,26 @@ async fn dispatch() -> Unit {
 }
 
 ///|
-/// If `token` looks like a mistyped subcommand — a single bare word close to a
-/// reserved subcommand — return the intended one, else `None`. A real prompt is
-/// never treated as a typo: it has spaces or starts with `-`/`--`, so
-/// `openseek fix the bug` and `openseek -- run …` still reach the TUI. Short
-/// subcommands tolerate a single edit, longer ones up to two.
-fn subcommand_typo_suggestion(token : String) -> String? {
+/// If the invocation `tail` (starting at the candidate subcommand word) looks
+/// like a mistyped subcommand, return the intended one, else `None`.
+///
+/// Only a plausible *command attempt* is second-guessed, never a natural-language
+/// prompt. The first word must be a single bare word (no spaces, not `-`/`--`)
+/// close to a reserved subcommand, and the rest must be **command-shaped**:
+/// nothing, only option flags, or a single quoted (space-bearing) argument. So
+/// `openseek fix the bug`, `openseek ran tests`, and `openseek server error` stay
+/// prompts, while `openseek ran`, `openseek reveiw --base X`, and
+/// `openseek ran 'fix the parser'` are treated as typos. Short subcommands
+/// tolerate a single edit, longer ones up to two.
+fn subcommand_typo_suggestion(tail : ArrayView[String]) -> String? {
+  guard tail is [token, .. rest] else { return None }
   guard !token.contains(" ") && !token.has_prefix("-") && token.length() >= 2 else {
     return None
   }
+  let command_shaped = rest.length() == 0 ||
+    contains_option_flag(rest) ||
+    (rest.length() == 1 && rest[0].contains(" "))
+  guard command_shaped else { return None }
   let mut best : String? = None
   let mut best_distance = 0
   for candidate in ["run", "serve", "review", "sessions", "tui"] {
@@ -94,6 +105,18 @@ fn subcommand_typo_suggestion(token : String) -> String? {
     }
   }
   best
+}
+
+///|
+/// True when any arg is an option flag (`-`/`--`…). A natural-language prompt
+/// rarely contains one, so its presence marks the invocation as a command.
+fn contains_option_flag(args : ArrayView[String]) -> Bool {
+  for arg in args {
+    if arg.has_prefix("-") {
+      return true
+    }
+  }
+  false
 }
 
 ///|
