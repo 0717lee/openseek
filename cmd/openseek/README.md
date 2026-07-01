@@ -16,12 +16,17 @@ openseek review [--base REF]   read-only code review of REF...HEAD → one JSON 
 openseek sessions list|show <id>|compact <id> …   manage durable sessions
 ```
 
-The first token must be a subcommand (or a flag). There is **no free-form
-top-level prompt**: a bare word that is not a subcommand is treated as a typo and
-rejected — with a `did you mean …?` suggestion when it is close (e.g. `openseek
-serv` → suggests `serve`) — rather than silently opening the UI with that word.
-Launch the UI with an initial prompt via `--prompt` (`openseek --prompt "fix the
-bug"` or `openseek tui --prompt "fix the bug"`).
+The whole CLI is **one `moonbitlang/core/argparse` command tree**: the root's
+default action is the interactive UI, and `tui`/`run`/`serve`/`review`/`sessions`
+are subcommands (argparse owns parsing, `--help`, and rejecting unknown
+subcommands). There is **no free-form top-level prompt** — a bare word that is
+not a subcommand is rejected by the parser rather than silently opening the UI
+with that word. (argparse does not yet suggest a near-miss subcommand the way it
+does for options; that gap is tracked upstream in `moonbitlang/core`.) Only the
+options shared with the engine (`--api-key`, `--model`, …) sit on the root, as
+globals; the UI's own options (`--prompt`, `--engine`, `--continue`) live on the
+`tui` subcommand, so launch the UI with an initial prompt via `openseek tui
+--prompt "fix the bug"`.
 
 ## `openseek run`
 

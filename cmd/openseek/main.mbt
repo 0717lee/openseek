@@ -1,10 +1,11 @@
 ///|
-/// Single-binary entry point. `openseek` is a subcommand tree: the interactive
-/// TUI is the default (bare `openseek`, `openseek --prompt "…"`, or explicit
-/// `openseek tui`), and the headless engine lives under `run`/`serve`/`review`/
-/// `sessions`. The first token is peeled here — rather than sharing one argparse
-/// root with the TUI — so the TUI keeps its own parser and the engine's
-/// stdout-JSONL logging is only installed on engine paths, never the UI path.
+/// Single-binary entry point. `openseek` is one argparse command tree: the
+/// interactive TUI is the default action (bare `openseek`) and also the explicit
+/// `tui` subcommand, while the headless engine lives under
+/// `run`/`serve`/`review`/`sessions`. argparse owns parsing, `--help`, and
+/// error reporting (including rejecting unknown subcommands); we only dispatch on
+/// the parsed result. Engine stdout-JSONL logging is installed per subcommand in
+/// the run/serve handlers, never on the UI path.
 async fn main {
   dispatch() catch {
     error => {
@@ -17,123 +18,34 @@ async fn main {
 }
 
 ///|
-/// The hand-written top-level help. The peel means argparse never sees the root,
-/// so `openseek --help` (and the TUI's `<engine> --help` launchability probe)
-/// is served here — exiting 0 with no TTY or API key required.
-fn top_level_help() -> String {
-  (
-    #|openseek — DeepSeek-backed MoonBit coding agent
-    #|
-    #|Usage:
-    #|  openseek [--prompt "…"]        Launch the interactive terminal UI (default).
-    #|  openseek tui [--prompt "…"]    The interactive UI, explicitly.
-    #|  openseek run [options] TASK    Run one task headlessly; stream JSONL on stdout.
-    #|  openseek serve                 JSONL command server (stdin: prompt/steer/cancel/compact).
-    #|  openseek review [--base REF]   Read-only code review of REF...HEAD; one JSON report.
-    #|  openseek sessions <list|show|compact>   Manage durable sessions.
-    #|
-    #|Run `openseek <subcommand> --help` for a subcommand's options.
-  )
-}
-
-///|
+/// Parse the whole `openseek` command tree and dispatch on the chosen subcommand.
+/// No subcommand (or the explicit `tui`) runs the interactive UI; the others are
+/// the headless engine.
 async fn dispatch() -> Unit {
-  let args = @env.args()
+  let argv = @env.args()[1:]
   let env = @env.get_env_vars()
-  guard args.length() >= 2 else {
-    // Bare `openseek`: the interactive UI with no initial prompt.
-    return launch_tui([], env)
-  }
-  let first = args[1]
-  if first == "--help" || first == "-h" {
-    // Served without a TTY/key so the engine-launchability probe works.
-    println(top_level_help())
-  } else if first == "tui" {
-    // Explicit UI; drop the `tui` selector.
-    launch_tui(args[2:], env)
-  } else if is_engine_subcommand(first) {
-    run_engine(args[1:], env)
-  } else if first.has_prefix("-") {
-    // Flags with no subcommand (e.g. `--prompt "…"`, `--continue`) run the UI.
-    launch_tui(args[1:], env)
-  } else {
-    // A bare word that is not a subcommand is a typo, not a free-form prompt:
-    // report it (with a suggestion) instead of silently opening the UI.
-    fail(unknown_command_message(first))
-  }
-}
-
-///|
-/// Error for a first token that is neither a subcommand nor a flag. Suggests the
-/// closest subcommand (edit distance ≤ 2) so a misspelling like `serv` is caught
-/// rather than swallowed as a prompt.
-fn unknown_command_message(name : String) -> String {
-  let mut suggestion : String? = None
-  // Accept only distances < 3, i.e. ≤ 2 edits.
-  let mut best_distance = 3
-  for cmd in ["tui", "run", "serve", "review", "sessions"] {
-    let d = edit_distance(name, cmd)
-    if d < best_distance {
-      best_distance = d
-      suggestion = Some(cmd)
-    }
-  }
-  let hint = match suggestion {
-    Some(cmd) => "; did you mean `\{cmd}`?"
-    None => ""
-  }
-  "unknown command `\{name}`\{hint}\nRun `openseek --help` for commands, or `openseek --prompt \"…\"` to open the UI with a prompt."
-}
-
-///|
-/// Character sequence of a string, so `edit_distance` can index it.
-fn string_chars(s : String) -> Array[Char] {
-  let out : Array[Char] = []
-  for c in s {
-    out.push(c)
-  }
-  out
-}
-
-///|
-/// Levenshtein edit distance, for the unknown-command suggestion.
-fn edit_distance(a : String, b : String) -> Int {
-  let x = string_chars(a)
-  let y = string_chars(b)
-  let m = x.length()
-  let n = y.length()
-  let prev = Array::make(n + 1, 0)
-  let curr = Array::make(n + 1, 0)
-  for j in 0..<(n + 1) {
-    prev[j] = j
-  }
-  for i in 1..<(m + 1) {
-    curr[0] = i
-    for j in 1..<(n + 1) {
-      let cost = if x[i - 1] == y[j - 1] { 0 } else { 1 }
-      let mut best = prev[j] + 1
-      let ins = curr[j - 1] + 1
-      if ins < best {
-        best = ins
+  let matches = root_command().parse(argv~, env~)
+  match matches.subcommand {
+    Some(("tui", m)) => @tui.run(m)
+    Some(("run", m)) => run_task_command(m)
+    Some(("serve", m)) => run_serve_command(m)
+    Some(("review", m)) => run_review_command(m)
+    Some(("sessions", m)) => run_sessions_command(m)
+    // argparse rejects unknown subcommands during parse, so this is unreachable.
+    Some((name, _)) => fail("unhandled subcommand: \{name}")
+    // Bare `openseek` IS `openseek tui`: re-parse through the `tui` subcommand so
+    // its own options and env bindings (OPENSEEK_ENGINE, OPENSEEK_ENGINE_MODE)
+    // apply to the default UI, not only to an explicit `tui`. The first parse
+    // already accepted `argv` at the root, and `tui` inherits the root globals,
+    // so this re-parse cannot newly fail.
+    None => {
+      guard root_command().parse(argv=["tui", ..argv], env~).subcommand
+        is Some((_, m)) else {
+        fail("failed to initialize the interactive UI")
       }
-      let sub = prev[j - 1] + cost
-      if sub < best {
-        best = sub
-      }
-      curr[j] = best
-    }
-    for j in 0..<(n + 1) {
-      prev[j] = curr[j]
+      @tui.run(m)
     }
   }
-  prev[n]
-}
-
-///|
-/// Names reserved as engine subcommands. A non-subcommand first token is either a
-/// flag (routed to the UI) or a bare word rejected as a typo — see `dispatch`.
-fn is_engine_subcommand(name : String) -> Bool {
-  name == "run" || name == "serve" || name == "review" || name == "sessions"
 }
 
 ///|
@@ -143,7 +55,7 @@ fn run_matches(
   argv~ : Array[String],
   env~ : Map[String, String],
 ) -> @argparse.Matches raise {
-  guard engine_command().parse(argv=["run", ..argv], env~).subcommand
+  guard root_command().parse(argv=["run", ..argv], env~).subcommand
     is Some((_, sm)) else {
     fail("expected a run subcommand")
   }
@@ -158,7 +70,7 @@ fn sessions_leaf_matches(
   argv~ : Array[String],
   env~ : Map[String, String],
 ) -> @argparse.Matches raise {
-  guard engine_command().parse(argv=["sessions", sub, ..argv], env~).subcommand
+  guard root_command().parse(argv=["sessions", sub, ..argv], env~).subcommand
     is Some((_, ssm)) else {
     fail("expected a sessions subcommand")
   }
@@ -166,34 +78,6 @@ fn sessions_leaf_matches(
     fail("expected a sessions leaf subcommand")
   }
   leaf
-}
-
-///|
-/// Launch the interactive UI. Arg parsing and the `--help`/error and non-TTY
-/// guards live in `@tui.run`, so `--help` still works when stdout is piped.
-async fn launch_tui(
-  argv : ArrayView[String],
-  env : Map[String, String],
-) -> Unit {
-  @tui.run(argv~, env~)
-}
-
-///|
-/// Parse and dispatch the headless engine subcommands. `argv` includes the
-/// subcommand token (e.g. `["run", "task"]`).
-async fn run_engine(
-  argv : ArrayView[String],
-  env : Map[String, String],
-) -> Unit {
-  let matches = engine_command().parse(argv~, env~)
-  match matches.subcommand {
-    Some(("run", m)) => run_task_command(m)
-    Some(("serve", m)) => run_serve_command(m)
-    Some(("review", m)) => run_review_command(m)
-    Some(("sessions", m)) => run_sessions_command(m)
-    // Peeled by `is_engine_subcommand`, so this is unreachable in practice.
-    _ => fail("unknown engine subcommand")
-  }
 }
 
 ///|
@@ -478,30 +362,31 @@ test "failure_message avoids duplicating argparse error prefix" {
 }
 
 ///|
-test "unknown_command_message suggests the closest subcommand" {
-  // A near-miss (≤ 2 edits) is caught with a suggestion, not swallowed.
-  assert_true(unknown_command_message("serv").contains("did you mean `serve`?"))
-  assert_true(
-    unknown_command_message("revie").contains("did you mean `review`?"),
-  )
-  assert_true(
-    unknown_command_message("sesions").contains("did you mean `sessions`?"),
-  )
-  // Distance exactly 2 (the threshold) still suggests.
-  assert_true(unknown_command_message("srv").contains("did you mean `serve`?"))
-  // A far-off token (a stray prompt) gets no suggestion but still errors clearly.
-  let far = unknown_command_message("fix the bug")
-  assert_true(far.contains("unknown command `fix the bug`"))
-  assert_false(far.contains("did you mean"))
+test "root command rejects an unknown subcommand" {
+  // argparse owns this now (no hand-rolled dispatch): a bare non-subcommand word
+  // is refused rather than silently opening the UI as a free-form prompt.
+  let outcome = try {
+    root_command().parse(argv=["serv"], env={}) |> ignore
+    "parsed"
+  } catch {
+    e => "\{e}"
+  }
+  assert_false(outcome == "parsed")
+  assert_true(outcome.contains("serv"))
 }
 
 ///|
-test "edit_distance basics" {
-  assert_eq(edit_distance("serve", "serve"), 0)
-  assert_eq(edit_distance("serv", "serve"), 1)
-  assert_eq(edit_distance("sesions", "sessions"), 1)
-  assert_eq(edit_distance("srv", "serve"), 2)
-  assert_eq(edit_distance("", "run"), 3)
+test "bare parse selects no subcommand (the UI default)" {
+  let m = root_command().parse(argv=[], env={ "DEEPSEEK": "k" })
+  assert_true(m.subcommand is None)
+}
+
+///|
+test "tui is an explicit subcommand" {
+  guard root_command().parse(argv=["tui"], env={ "DEEPSEEK": "k" }).subcommand
+    is Some(("tui", _)) else {
+    fail("expected tui subcommand")
+  }
 }
 
 ///|
@@ -516,56 +401,13 @@ fn dir_option() -> @argparse.OptionArg {
 }
 
 ///|
-fn session_root_option() -> @argparse.OptionArg {
-  OptionArg(
-    "session-root",
-    long="session-root",
-    env="OPENSEEK_SESSION_ROOT",
-    default_values=[".openseek"],
-    about="Directory containing durable OpenSeek sessions.",
-  )
-}
-
-///|
-/// Options shared by the agent-running subcommands (`run`, `serve`, `review`).
+/// Engine-only options for the agent-running subcommands (`run`, `serve`,
+/// `review`). The agent-shared options (`--api-key`, `--model`, `--api-url`,
+/// `--max-steps`, `--thinking`, `--session`, `--session-root`) are root globals
+/// (see `root_command`) inherited here — redeclaring a global is a build error.
 fn agent_options() -> Array[@argparse.OptionArg] {
   [
-    OptionArg(
-      "api-key",
-      long="api-key",
-      env="DEEPSEEK",
-      default_values=[""],
-      about="DeepSeek API key.",
-    ),
-    OptionArg(
-      "model",
-      long="model",
-      env="DEEPSEEK_MODEL",
-      default_values=[@deepseek.V4Pro.to_string()],
-      about="DeepSeek model: deepseek-v4-flash or deepseek-v4-pro.",
-    ),
-    OptionArg(
-      "api-url",
-      long="api-url",
-      env="OPENSEEK_API_URL",
-      default_values=[""],
-      about="DeepSeek-compatible chat completions endpoint.",
-    ),
     dir_option(),
-    OptionArg(
-      "max-steps",
-      long="max-steps",
-      env="OPENSEEK_MAX_STEPS",
-      default_values=["1000"],
-      about="Maximum number of agent loop steps before stopping.",
-    ),
-    OptionArg(
-      "thinking",
-      long="thinking",
-      env="OPENSEEK_THINKING",
-      default_values=["max"],
-      about="DeepSeek thinking mode: no, high, or max.",
-    ),
     OptionArg(
       "system-prompt-file",
       long="system-prompt-file",
@@ -587,26 +429,38 @@ fn agent_options() -> Array[@argparse.OptionArg] {
       default_values=[""],
       about="User-level skills directory advertised alongside workspace skills; empty means $HOME/.openseek/skills, or %USERPROFILE%/.openseek/skills on Windows.",
     ),
-    OptionArg(
-      "session",
-      long="session",
-      env="OPENSEEK_SESSION",
-      default_values=[""],
-      about="Create or resume this durable session id.",
-    ),
-    session_root_option(),
   ]
 }
 
 ///|
-/// The headless engine command: a subcommand tree parsed by `run_engine` after
-/// the top-level peel. `disable_help_subcommand` keeps `help` from shadowing a
-/// prompt word; each subcommand still has its own `--help`.
-fn engine_command() -> @argparse.Command {
+/// The whole `openseek` command tree. The interactive UI's options sit on the
+/// root (its default action, so bare `openseek` / `openseek --prompt "…"` open
+/// the UI) and on the explicit `tui` subcommand; the headless engine is under
+/// `run`/`serve`/`review`/`sessions`. `subcommand_required=false` lets the bare
+/// command fall through to the UI; `disable_help_subcommand` keeps a `help` word
+/// from shadowing the parse. Each subcommand keeps its own `--help`. Parsed once
+/// in `dispatch`.
+fn root_command() -> @argparse.Command {
   Command(
     "openseek",
-    about="OpenSeek headless engine.",
+    about="DeepSeek-backed MoonBit coding agent — runs the interactive UI by default.",
+    // Only the shared options (--api-key, --model, …) live on the root, as
+    // globals: every subcommand either uses them (run/serve/review, and the UI
+    // default) or harmlessly inherits them, and they resolve in any position
+    // (`openseek --api-key k tui`, bare `openseek`). UI-only options
+    // (--engine/--engine-mode/--prompt/--continue) live ONLY on the `tui`
+    // subcommand, so they neither leak into the engine subcommands' help nor get
+    // silently accepted-and-ignored before one (`openseek --prompt x run` is an
+    // error, not a no-op). Bare `openseek` reads UI-only options at their
+    // defaults; use `openseek tui --prompt "…"` to set them.
+    options=@tui.tui_shared_options(global=true),
     subcommands=[
+      Command(
+        "tui",
+        about="OpenSeek terminal UI.",
+        options=@tui.tui_ui_options(),
+        flags=@tui.tui_ui_flags(),
+      ),
       Command(
         "run",
         about="Run one task headlessly; stream JSONL events on stdout.",
@@ -668,7 +522,6 @@ fn engine_command() -> @argparse.Command {
         subcommands=[
           Command("list", about="List durable sessions (see --format).", options=[
             dir_option(),
-            session_root_option(),
             OptionArg(
               "format",
               long="format",
@@ -679,7 +532,7 @@ fn engine_command() -> @argparse.Command {
           Command(
             "show",
             about="Print the durable session JSON for <id>.",
-            options=[dir_option(), session_root_option()],
+            options=[dir_option()],
             positionals=[PositionArg("id", about="Session id.")],
           ),
           Command(
@@ -687,7 +540,6 @@ fn engine_command() -> @argparse.Command {
             about="Append a summary to <id> covering a sequence range.",
             options=[
               dir_option(),
-              session_root_option(),
               OptionArg(
                 "file",
                 long="file",
@@ -712,7 +564,7 @@ fn engine_command() -> @argparse.Command {
         ],
       ),
     ],
-    subcommand_required=true,
+    subcommand_required=false,
     disable_help_subcommand=true,
   )
 }
@@ -776,8 +628,13 @@ fn task_text(matches : @argparse.Matches) -> String raise {
 }
 
 ///|
-fn session_id(matches : @argparse.Matches) -> @agent_session.SessionId? raise {
-  let id = value(matches, "session").trim()
+fn session_id(matches : @argparse.Matches) -> @agent_session.SessionId? {
+  // `--session` is a root global without a default, so read it gracefully: it is
+  // absent (not empty) in a subcommand's matches when unset.
+  let id = match values(matches, "session") {
+    [session, ..] => session.trim()
+    [] => ""
+  }
   if id.is_empty() {
     None
   } else {
