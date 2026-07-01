@@ -77,20 +77,17 @@ async fn dispatch() -> Unit {
 /// Only a plausible *command attempt* is second-guessed, never a natural-language
 /// prompt. The first word must be a single bare word (no spaces, not `-`/`--`)
 /// close to a reserved subcommand, and the rest must be **command-shaped**:
-/// nothing, only option flags, or a single quoted (space-bearing) argument. So
-/// `openseek fix the bug`, `openseek ran tests`, and `openseek server error` stay
-/// prompts, while `openseek ran`, `openseek reveiw --base X`, and
-/// `openseek ran 'fix the parser'` are treated as typos. Short subcommands
-/// tolerate a single edit, longer ones up to two.
+/// nothing, an option flag, a single quoted (space-bearing) argument, or — for
+/// `sessions`, which requires one — a known leaf word (`list`/`show`/`compact`).
+/// So `openseek fix the bug`, `openseek ran tests`, and `openseek server error`
+/// stay prompts, while `openseek ran`, `openseek reveiw --base X`,
+/// `openseek ran 'fix the parser'`, and `openseek session list` are typos. Short
+/// subcommands tolerate a single edit, longer ones up to two.
 fn subcommand_typo_suggestion(tail : ArrayView[String]) -> String? {
   guard tail is [token, .. rest] else { return None }
   guard !token.contains(" ") && !token.has_prefix("-") && token.length() >= 2 else {
     return None
   }
-  let command_shaped = rest.length() == 0 ||
-    contains_option_flag(rest) ||
-    (rest.length() == 1 && rest[0].contains(" "))
-  guard command_shaped else { return None }
   let mut best : String? = None
   let mut best_distance = 0
   for candidate in ["run", "serve", "review", "sessions", "tui"] {
@@ -104,7 +101,20 @@ fn subcommand_typo_suggestion(tail : ArrayView[String]) -> String? {
       best_distance = distance
     }
   }
-  best
+  guard best is Some(candidate) else { return None }
+  let command_shaped = rest.length() == 0 ||
+    contains_option_flag(rest) ||
+    (rest.length() == 1 && rest[0].contains(" ")) ||
+    (candidate == "sessions" && rest is [leaf, ..] && sessions_leaf_word(leaf))
+  guard command_shaped else { return None }
+  Some(candidate)
+}
+
+///|
+/// The leaf subcommands `sessions` requires, so `openseek session list` reads as
+/// a command typo rather than a prompt.
+fn sessions_leaf_word(word : String) -> Bool {
+  word == "list" || word == "show" || word == "compact"
 }
 
 ///|

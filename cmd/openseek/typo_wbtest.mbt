@@ -11,10 +11,19 @@ test "typo suggestions catch command-shaped near-misses, not prompts" {
     subcommand_typo_suggestion(["ran", "fix the parser"]) is Some("run"),
   )
   assert_true(subcommand_typo_suggestion(["session"]) is Some("sessions"))
+  // `sessions` requires a leaf, so leaf words make the typo command-shaped.
+  assert_true(
+    subcommand_typo_suggestion(["session", "list"]) is Some("sessions"),
+  )
+  assert_true(
+    subcommand_typo_suggestion(["sesssions", "show", "abc"]) is Some("sessions"),
+  )
   // Natural-language prompts that merely start with a near-miss word stay prompts.
   assert_true(subcommand_typo_suggestion(["ran", "tests"]) is None)
   assert_true(subcommand_typo_suggestion(["server", "error"]) is None)
   assert_true(subcommand_typo_suggestion(["ran", "the", "tests"]) is None)
+  // A leaf word only rescues `sessions`, not an unrelated near-miss.
+  assert_true(subcommand_typo_suggestion(["server", "list"]) is None)
   // Exact subcommands, quoted prompts, flags, far words, and no args are not typos.
   assert_true(subcommand_typo_suggestion(["run"]) is None)
   assert_true(subcommand_typo_suggestion(["fix the bug"]) is None)
