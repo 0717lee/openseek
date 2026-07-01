@@ -7,20 +7,12 @@
 /// file extension) so the run directories are unambiguous and easy to recognize.
 async fn run_fleet(matches : @argparse.Matches, concurrency~ : Int) -> Unit {
   // Fleet mode owns session creation and is a one-shot batch, so it conflicts
-  // with the server and the single-session/no-session/session-subcommand modes.
-  guard !flag(matches, "serve") else {
-    fail("--concurrency cannot be combined with --serve")
-  }
+  // with the single-session and no-session modes of `openseek run`.
   guard session_id(matches) is None else {
     fail("--concurrency runs independent sessions; remove --session")
   }
   guard !flag(matches, "no-session") else {
     fail("--concurrency records each run; remove --no-session")
-  }
-  guard session_command_count(matches) == 0 else {
-    fail(
-      "--concurrency cannot be combined with --session-list/--session-show/--session-compact-file",
-    )
   }
   let task = task_text(matches)
   let api_key = api_key(matches)
