@@ -382,7 +382,7 @@ fn tool_call_view(
   }
   @html.details(class=cls) <| [
     @html.summary(class="tool-call-name") <| name_row,
-    render_args_friendly(call.arguments),
+    render_args_friendly(call.name, call.arguments),
     @html.pre(class="tool-call-args tool-call-args-original") <| original,
   ]
 }
@@ -394,10 +394,14 @@ fn tool_call_view(
 /// the pretty-printed JSON (in the same hidden-on-toggle block) when the arguments
 /// are not a JSON object — a bare value, an array, or text the model emitted that
 /// does not parse.
-fn render_args_friendly(raw : String) -> @html.Html {
+fn render_args_friendly(tool_name : String, raw : String) -> @html.Html {
   let json = @json.parse(raw) catch {
     _ => return @html.pre(class="tool-call-args tool-call-args-rendered") <| raw
   }
+  // For the edit tools, synthesize a `generated_diff` field so the change reads
+  // as a diff without hunting through separate old_string / new_string fields.
+  // The original fields are kept; the raw JSON (Original toggle) is untouched.
+  let json = augment_with_diffs(tool_name, json)
   match json {
     Object(fields) if !fields.is_empty() => {
       let rows : Array[@html.Html] = [
@@ -418,10 +422,127 @@ fn render_args_friendly(raw : String) -> @html.Html {
 /// single-line value inline. Non-string scalars render inline; nested arrays and
 /// objects keep their JSON form, which is rare for tool arguments.
 fn arg_field(key : String, value : Json) -> @html.Html {
+  // A synthesized `generated_diff` string renders as a colored diff block; every
+  // other field uses the generic recursive rendering.
+  let value_html = match value {
+    String(text) if key == "generated_diff" => diff_block(text)
+    _ => render_value(value)
+  }
   @html.div(class="arg-field") <| [
     @html.span(class="arg-key") <| key,
-    render_value(value),
+    value_html,
   ]
+}
+
+///|
+/// Add a synthesized `generated_diff` field to the arguments of the edit tools,
+/// leaving every other tool (and the raw JSON) untouched. `edit` gains one
+/// top-level diff; `multi_edit` gains one per edit inside its `edits` array. The
+/// parsed JSON is mutated in place — it is a throwaway parse used only to render
+/// the friendly view, never the stored arguments.
+fn augment_with_diffs(tool_name : String, json : Json) -> Json {
+  match tool_name {
+    "edit" => add_edit_diff(json)
+    "multi_edit" =>
+      match json {
+        Object(fields) => {
+          if fields.get("edits") is Some(Array(items)) {
+            for item in items {
+              add_edit_diff(item) |> ignore
+            }
+          }
+          json
+        }
+        _ => json
+      }
+    _ => json
+  }
+}
+
+///|
+/// Add a `generated_diff` field to one edit-shaped object (in place), derived
+/// from its `old_string` / `new_string`. Leaves the object unchanged when those
+/// are absent, not strings, or equal (a no-op the tool would reject anyway).
+fn add_edit_diff(json : Json) -> Json {
+  guard json is Object(fields) else { return json }
+  guard fields.get("old_string") is Some(String(old)) else { return json }
+  guard fields.get("new_string") is Some(String(new)) else { return json }
+  if old != new {
+    fields["generated_diff"] = Json::string(generate_diff(old, new))
+  }
+  json
+}
+
+///|
+/// A line-oriented diff of `old` → `new`: shared leading/trailing lines are
+/// context (`  `), the differing middle is removed (`- `) then added (`+ `). An
+/// insertion (empty `old`) is all `+` lines; a deletion (empty `new`) all `-`.
+fn generate_diff(old : String, new : String) -> String {
+  if old == "" {
+    return prefix_lines(new, "+ ")
+  }
+  if new == "" {
+    return prefix_lines(old, "- ")
+  }
+  let old_lines = string_lines(old)
+  let new_lines = string_lines(new)
+  let n = old_lines.length()
+  let m = new_lines.length()
+  let mut pre = 0
+  while pre < n && pre < m && old_lines[pre] == new_lines[pre] {
+    pre += 1
+  }
+  let mut suf = 0
+  while suf < n - pre &&
+        suf < m - pre &&
+        old_lines[n - 1 - suf] == new_lines[m - 1 - suf] {
+    suf += 1
+  }
+  let out : Array[String] = []
+  for i in 0..<pre {
+    out.push("  " + old_lines[i])
+  }
+  for i in pre..<(n - suf) {
+    out.push("- " + old_lines[i])
+  }
+  for i in pre..<(m - suf) {
+    out.push("+ " + new_lines[i])
+  }
+  for i in (n - suf)..<n {
+    out.push("  " + old_lines[i])
+  }
+  out.join("\n")
+}
+
+///|
+/// Split `text` into lines on `\n`.
+fn string_lines(text : String) -> Array[String] {
+  text.split("\n").map(line => line.to_owned()).collect()
+}
+
+///|
+/// Prefix every line of `text` with `marker` (for all-added / all-removed diffs).
+fn prefix_lines(text : String, marker : String) -> String {
+  string_lines(text).map(line => marker + line).join("\n")
+}
+
+///|
+/// Render a synthesized diff string as colored lines: `+ ` added (green), `- `
+/// removed (red), anything else context (muted). Shown verbatim, monospace.
+fn diff_block(text : String) -> @html.Html {
+  let lines : Array[@html.Html] = []
+  for raw in text.split("\n") {
+    let line = raw.to_owned()
+    let cls = if line.has_prefix("+ ") {
+      "diff-add"
+    } else if line.has_prefix("- ") {
+      "diff-del"
+    } else {
+      "diff-ctx"
+    }
+    lines.push(@html.div(class=cls) <| line)
+  }
+  @html.div(class="arg-value diff-block") <| lines
 }
 
 ///|

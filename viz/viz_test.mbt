@@ -236,6 +236,76 @@ test "an array-of-objects argument renders one item per element" {
 }
 
 ///|
+test "edit args gain a synthesized generated_diff, keeping the originals" {
+  // The original old_string/new_string rows are kept AND a generated_diff field
+  // is added, rendered as a colored diff (- removed / + added).
+  let session = @agent_session.Session(SessionId("ed"), system_prompt="").append(
+    Assistant(
+      AssistantMessage("", tool_calls=[
+        ToolCall(
+          id="e1",
+          name="edit",
+          arguments="{\"path\":\"lib/parser.mbt\",\"old_string\":\"args.length()\",\"new_string\":\"args.len()\",\"start_line\":12}",
+        ),
+      ]),
+    ),
+  )
+  let html = render(@viz.render_session(session, RawLog))
+  // Originals kept.
+  assert_true(html.contains("class=\"arg-key\">old_string"))
+  assert_true(html.contains("class=\"arg-key\">new_string"))
+  // New synthesized field, shown as a diff.
+  assert_true(html.contains("class=\"arg-key\">generated_diff"))
+  assert_true(html.contains("class=\"diff-del\">- args.length()"))
+  assert_true(html.contains("class=\"diff-add\">+ args.len()"))
+  // The raw JSON (Original toggle) is untouched — no synthesized field there.
+  assert_false(html.contains("\\\"generated_diff\\\""))
+}
+
+///|
+test "multi_edit gains a generated_diff per edit" {
+  let session = @agent_session.Session(SessionId("med"), system_prompt="").append(
+    Assistant(
+      AssistantMessage("", tool_calls=[
+        ToolCall(
+          id="m1",
+          name="multi_edit",
+          arguments="{\"edits\":[{\"file\":\"a.mbt\",\"old_string\":\"foo\",\"new_string\":\"bar\",\"start_line\":1},{\"file\":\"b.mbt\",\"old_string\":\"x\",\"new_string\":\"y\",\"start_line\":2}]}",
+        ),
+      ]),
+    ),
+  )
+  let html = render(@viz.render_session(session, RawLog))
+  // One diff per edit.
+  assert_eq(occurrences(html, "class=\"arg-key\">generated_diff"), 2)
+  assert_true(html.contains("class=\"diff-del\">- foo"))
+  assert_true(html.contains("class=\"diff-add\">+ bar"))
+  assert_true(html.contains("class=\"diff-del\">- x"))
+  assert_true(html.contains("class=\"diff-add\">+ y"))
+}
+
+///|
+test "an insertion edit diffs as added-only lines" {
+  // Empty old_string → the generated_diff is all `+` lines, shown verbatim
+  // across real newlines, with no removed side.
+  let session = @agent_session.Session(SessionId("insd"), system_prompt="").append(
+    Assistant(
+      AssistantMessage("", tool_calls=[
+        ToolCall(
+          id="i1",
+          name="edit",
+          arguments="{\"path\":\"a.mbt\",\"old_string\":\"\",\"new_string\":\"let x = 1\\nlet y = 2\",\"start_line\":5}",
+        ),
+      ]),
+    ),
+  )
+  let html = render(@viz.render_session(session, RawLog))
+  assert_true(html.contains("class=\"diff-add\">+ let x = 1"))
+  assert_true(html.contains("class=\"diff-add\">+ let y = 2"))
+  assert_false(html.contains("class=\"diff-del\""))
+}
+
+///|
 test "a failed tool call is tagged so errors-only keeps its call card" {
   // error_tool_session: c1 (shell) failed. Its call gets `tool-call-failed`, the
   // hook the errors-only stylesheet uses to keep the assistant card holding the

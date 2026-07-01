@@ -22,6 +22,7 @@
       --assistant: #1a8f63;
       --tool: #8a6d10;
       --error: #c2334a;
+      --added: #1a8f63;
       --runtime: #6d4fb0;
       --summary: #b5701f;
       --terminal: #2b7e9e;
@@ -47,6 +48,7 @@
       --assistant: #36c08a;
       --tool: #c9a227;
       --error: #e0556b;
+      --added: #36c08a;
       --runtime: #9a7bd6;
       --summary: #d98a3a;
       --terminal: #5fa8c7;
@@ -73,6 +75,7 @@
         --assistant: #36c08a;
         --tool: #c9a227;
         --error: #e0556b;
+        --added: #36c08a;
         --runtime: #9a7bd6;
         --summary: #d98a3a;
         --terminal: #5fa8c7;
@@ -371,6 +374,17 @@
       margin: 3px 0; padding: 1px 0 1px 8px;
       border-left: 2px solid var(--border);
     }
+
+    /* synthesized `generated_diff`: colored per-line diff (+ added, - removed) */
+    .diff-block {
+      margin: 3px 0 0; padding: 4px 8px;
+      background: var(--panel-2); border: 1px solid var(--border); border-radius: 4px;
+      font-family: ui-monospace, monospace; font-size: 12px;
+    }
+    .diff-add, .diff-del, .diff-ctx { white-space: pre-wrap; word-break: break-word; }
+    .diff-add { color: var(--added, #1a8f63); }
+    .diff-del { color: var(--error); }
+    .diff-ctx { color: var(--muted); }
 
     /* tool-args toggle: friendly form by default, raw JSON under .show-original */
     .tool-call-args-original { display: none; }
