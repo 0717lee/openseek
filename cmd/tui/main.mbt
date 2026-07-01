@@ -224,6 +224,34 @@ fn parse_config(matches : @argparse.Matches) -> AppConfig raise {
 }
 
 ///|
+/// Resolve the engine command when it is still the built-in default `openseek`:
+/// re-launch *this* executable as the engine so `openseek tui` never spawns a
+/// separately-installed, possibly stale binary. An explicit `--engine` /
+/// `OPENSEEK_ENGINE` value (anything other than the default) is left untouched.
+fn with_engine_self_default(config : AppConfig) -> AppConfig {
+  if config.engine == "openseek" {
+    { ..config, engine: default_engine(@sys.get_cli_args()) }
+  } else {
+    config
+  }
+}
+
+///|
+/// The engine command derived from the process arguments. `args[0]` (argv0) with
+/// a path separator (`/` or, on Windows, `\`) is used directly — spawn resolves
+/// it against the launch cwd (the TUI never `chdir`s; the engine's workspace is
+/// set via `OPENSEEK_DIR`), so `./openseek` or an absolute path re-launches the
+/// same file. A bare name is left as `openseek` for a PATH lookup, which for a
+/// single binary is the same file we are running. Split out so it is
+/// unit-testable without a real argv0.
+fn default_engine(args : ArrayView[String]) -> String {
+  match args {
+    [argv0, ..] if argv0.contains("/") || argv0.contains("\\") => argv0
+    _ => "openseek"
+  }
+}
+
+///|
 fn initial_task(matches : @argparse.Matches) -> String? {
   let task = values(matches, "task").join(" ").trim().to_owned()
   if task.is_empty() {
@@ -302,7 +330,7 @@ async fn engine_launchable(engine : String) -> Bool {
 /// both are supplied by the single-binary dispatcher in `cmd/openseek`.
 pub async fn run(argv~ : ArrayView[String], env~ : Map[String, String]) -> Unit {
   let matches = cli_command().parse(argv~, env~)
-  let mut config = parse_config(matches)
+  let mut config = with_engine_self_default(parse_config(matches))
   if continue_requested(matches) {
     config = with_latest_session(config)
   }
@@ -459,6 +487,29 @@ test "cli overrides the engine binary" {
     "DEEPSEEK": "test-key",
   })
   assert_eq(parse_config(parsed).engine, "./fake-engine")
+}
+
+///|
+test "default_engine re-launches a path argv0 and falls back to PATH for a bare name" {
+  // A path (absolute or relative) is used directly so we re-exec the same file.
+  assert_eq(
+    default_engine(["/usr/local/bin/openseek"]),
+    "/usr/local/bin/openseek",
+  )
+  assert_eq(default_engine(["./openseek"]), "./openseek")
+  assert_eq(
+    default_engine(["target/native/openseek"]),
+    "target/native/openseek",
+  )
+  // Windows-style separators count as a path too.
+  assert_eq(
+    default_engine(["target\\native\\openseek.exe"]),
+    "target\\native\\openseek.exe",
+  )
+  // A bare name (found via PATH) or a missing argv0 falls back to `openseek`,
+  // which for a single binary resolves to the same file we are running.
+  assert_eq(default_engine(["openseek"]), "openseek")
+  assert_eq(default_engine([]), "openseek")
 }
 
 ///|

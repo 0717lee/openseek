@@ -5,8 +5,10 @@ on the reusable [`tui`](../../tui/README.md) controller package. It ships as a
 library launched by the single `openseek` binary as the `openseek tui`
 subcommand (there is no separate `tui` executable).
 
-The TUI runs no agent code itself. It spawns the `openseek` engine (override
-with `--engine` or `OPENSEEK_ENGINE`) **once per session** in `--serve` mode and
+The TUI runs no agent code itself. It spawns the `openseek` engine — by default
+this same binary, re-launched in `--serve` mode (so the UI and engine can never
+drift out of sync), resolved via argv[0] when invoked by path and otherwise from
+`PATH`; override with `--engine` or `OPENSEEK_ENGINE` — **once per session** and
 drives it over stdin commands, rendering the engine's JSONL event stream: streamed thinking and answer text move live on
 the activity line, each turn's reasoning is kept as a dim `✻` transcript
 aside above its answer, and tool results land as `⏺` blocks. Pressing Enter
