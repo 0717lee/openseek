@@ -1,8 +1,9 @@
 # Verified OpenSeek TUI CLI Documentation
 
 These examples are executed by `moon cram test tests/cram`. The Moon wrapper
-builds the native package at `cmd/tui` first, then exposes the executable on
-`PATH` as `tui.exe`.
+builds the native package at `cmd/openseek` first, then exposes the executable on
+`PATH` as `openseek.exe`. The interactive terminal UI is the `tui` subcommand of
+that single binary.
 
 Both commands are offline: they exercise only the argument parser, which runs
 before the terminal UI starts, so the suite needs no API key, no TTY, and makes
@@ -15,8 +16,8 @@ no network calls. The live, API-backed examples live in
 and defaults behind each one, then exits successfully.
 
 ```mooncram
-$ tui.exe --help
-Usage: openseek-tui --api-key <api-key> [options] [task...]
+$ openseek.exe tui --help
+Usage: openseek tui --api-key <api-key> [options] [task...]
 
 OpenSeek terminal UI.
 
@@ -44,10 +45,10 @@ the missing required argument, prints the usage, and exits non-zero — before t
 terminal UI ever starts.
 
 ```mooncram
-$ env -u DEEPSEEK tui.exe "summarize this project"
+$ env -u DEEPSEEK openseek.exe tui "summarize this project" 2>&1
 error: the following required argument was not provided: 'api-key'
 
-Usage: openseek-tui --api-key <api-key> [options] [task...]
+Usage: openseek tui --api-key <api-key> [options] [task...]
 
 OpenSeek terminal UI.
 
@@ -79,14 +80,14 @@ the normal `--` delimiter stops option parsing.
 $ sh <<'EOF'
 > stdout=$(mktemp)
 > stderr=$(mktemp)
-> if env DEEPSEEK=test-key tui.exe --xxy he > "$stdout" 2> "$stderr"; then echo exit-zero; else echo exit-non-zero; fi
-> sed -n '1p' "$stdout"
-> if test -s "$stderr"; then echo stderr-not-empty; else echo stderr-empty; fi
+> if env DEEPSEEK=test-key openseek.exe tui --xxy he > "$stdout" 2> "$stderr"; then echo exit-zero; else echo exit-non-zero; fi
+> sed -n '1p' "$stderr"
+> if test -s "$stdout"; then echo stdout-not-empty; else echo stdout-empty; fi
 > rm -f "$stdout" "$stderr"
 > EOF
 exit-non-zero
 error: unexpected argument '--xxy' found
-stderr-empty
+stdout-empty
 ```
 
 When the initial task itself must start with `-`, use `--`. This gets past
@@ -94,7 +95,7 @@ argument parsing; the fake engine then fails the preflight check before the TUI
 takes over the terminal.
 
 ```mooncram
-$ env DEEPSEEK=test-key tui.exe --engine openseek-not-a-real-binary -- '--xxy he'
+$ env DEEPSEEK=test-key openseek.exe tui --engine openseek-not-a-real-binary -- '--xxy he'
 error: engine 'openseek-not-a-real-binary' is not usable: it must be on PATH, executable, and accept `--help` (exit 0) the way openseek does.
 Pass --engine <path>, set OPENSEEK_ENGINE, or install the openseek binary.
 [1]

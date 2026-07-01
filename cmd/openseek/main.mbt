@@ -1,11 +1,28 @@
 ///|
+/// Single-binary entry point. The first argument selects the mode: `openseek tui`
+/// launches the interactive UI (`@tui.run`); anything else is the agent engine /
+/// CLI (`run_cli`, which owns stdout for its JSONL event stream). The `tui` token
+/// is peeled here rather than modeled as an argparse subcommand because the engine
+/// takes a free-form positional task, which a subcommand would make ambiguous.
 async fn main {
-  run_cli() catch {
-    error => {
-      @stdio.stderr.write("error: \{failure_message("\{error}")}\n") catch {
-        _ => ()
+  let args = @env.args()
+  if args.length() >= 2 && args[1] == "tui" {
+    @tui.run(argv=args[2:], env=@env.get_env_vars()) catch {
+      error => {
+        @stdio.stderr.write("error: \{failure_message("\{error}")}\n") catch {
+          _ => ()
+        }
+        @sys.exit(1)
       }
-      @sys.exit(1)
+    }
+  } else {
+    run_cli() catch {
+      error => {
+        @stdio.stderr.write("error: \{failure_message("\{error}")}\n") catch {
+          _ => ()
+        }
+        @sys.exit(1)
+      }
     }
   }
 }

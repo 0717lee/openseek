@@ -1,7 +1,7 @@
 ///|
 fn cli_command() -> @argparse.Command {
   Command(
-    "openseek-tui",
+    "openseek tui",
     about="OpenSeek terminal UI.",
     options=[
       OptionArg(
@@ -297,8 +297,11 @@ async fn engine_launchable(engine : String) -> Bool {
 }
 
 ///|
-async fn main {
-  let matches = cli_command().parse(env=@env.get_env_vars())
+/// Run the interactive terminal UI — the `openseek tui` subcommand. `argv` is the
+/// argument list *after* the `tui` selector and `env` the process environment;
+/// both are supplied by the single-binary dispatcher in `cmd/openseek`.
+pub async fn run(argv~ : ArrayView[String], env~ : Map[String, String]) -> Unit {
+  let matches = cli_command().parse(argv~, env~)
   let mut config = parse_config(matches)
   if continue_requested(matches) {
     config = with_latest_session(config)
