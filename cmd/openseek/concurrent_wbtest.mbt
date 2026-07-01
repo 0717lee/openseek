@@ -53,11 +53,11 @@ test "has_shebang detects #! scripts" {
 test "inspect_hint adds --session-root only when non-default" {
   assert_eq(
     inspect_hint(".openseek"),
-    "openseek --dir <run-dir> --session <id> --session-show",
+    "openseek sessions show <id> --dir <run-dir>",
   )
   assert_eq(
     inspect_hint("myroot"),
-    "openseek --dir <run-dir> --session <id> --session-show --session-root myroot",
+    "openseek sessions show <id> --dir <run-dir> --session-root myroot",
   )
 }
 

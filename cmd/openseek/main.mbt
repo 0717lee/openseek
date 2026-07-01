@@ -229,6 +229,11 @@ async fn run_task_command(matches : @argparse.Matches) -> Unit {
 /// `openseek serve` — the persistent JSONL command server the TUI drives: read
 /// prompt/steer/cancel/compact on stdin, stream events on stdout.
 async fn run_serve_command(matches : @argparse.Matches) -> Unit {
+  // Serve is ephemeral by default (durable only with --session); --no-session
+  // makes that explicit and, as in every mode, contradicts an explicit --session.
+  if flag(matches, "no-session") && session_id(matches) is Some(_) {
+    fail("--no-session contradicts --session; pick one behavior")
+  }
   with_jsonl_stdout(() => {
     let workspace_root = prepare_workspace_root(matches, log_created=true)
     run_serve(matches, workspace_root~)
@@ -540,6 +545,13 @@ fn engine_command() -> @argparse.Command {
         "serve",
         about="Session server: read JSONL commands (prompt/steer/cancel/compact) from stdin.",
         options=agent_options(),
+        flags=[
+          FlagArg(
+            "no-session",
+            long="no-session",
+            about="Run ephemerally: do not record this server's conversation to a durable session.",
+          ),
+        ],
       ),
       Command(
         "review",
@@ -749,7 +761,7 @@ fn session_root(
 }
 
 ///|
-/// Longest first-prompt label a `--session-list` row carries; enough to
+/// Longest first-prompt label a `sessions list` row carries; enough to
 /// recognize a conversation without wrapping a normal terminal row.
 const PromptLabelMaxChars : Int = 60
 
@@ -802,10 +814,10 @@ fn format_utc_minute(seconds : Int64) -> String {
 }
 
 ///|
-/// One `--session-list` row: tab-separated id, last-activity stamp (UTC,
+/// One `sessions list` row: tab-separated id, last-activity stamp (UTC,
 /// minute precision; `-` for an unreadable session), and the first user
 /// prompt as a one-line label. Tab separation keeps the listing scriptable —
-/// `--session-list | cut -f1` recovers the bare ids the old format printed.
+/// `sessions list | cut -f1` recovers the bare ids the old format printed.
 fn format_session_listing(listing : @store.SessionListing) -> String {
   let when = match listing.last_active_unix_seconds() {
     Some(seconds) => format_utc_minute(seconds)

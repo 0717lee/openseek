@@ -333,7 +333,7 @@ fn has_shebang(data : Bytes) -> Bool {
 ///|
 /// The summary's "inspect a run" command. Includes `--session-root` only when it
 /// is non-default, since each run records its session under that root inside its
-/// run directory, and `--session-show` resolves the root relative to `--dir`.
+/// run directory, and `sessions show` resolves the root relative to `--dir`.
 fn inspect_hint(session_root_value : String) -> String {
   let root = session_root_value.trim()
   let extra = if root == "" || root == ".openseek" {
@@ -341,7 +341,7 @@ fn inspect_hint(session_root_value : String) -> String {
   } else {
     " --session-root \{root}"
   }
-  "openseek --dir <run-dir> --session <id> --session-show\{extra}"
+  "openseek sessions show <id> --dir <run-dir>\{extra}"
 }
 
 ///|
