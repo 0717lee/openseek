@@ -1,17 +1,33 @@
 # OpenSeek CLI
 
-This package is the native-only command-line entry point for OpenSeek. It parses
-arguments with `moonbitlang/core/argparse`, reads defaults from environment
-variables, and calls `bobzhang/openseek/agent.run` for one-shot tasks or
-`agent.run_turn_with_append` for durable sessions.
+This package is the native-only entry point for OpenSeek — the single `openseek`
+binary. It is a subcommand tree: the interactive terminal UI is the **default**
+(see [`cmd/tui`](../tui/README.md)), and the headless engine lives under named
+subcommands. It parses arguments with `moonbitlang/core/argparse`, reads defaults
+from environment variables, and calls `bobzhang/openseek/agent.run` for one-shot
+tasks or `agent.run_turn_with_append` for durable sessions.
 
-## Command
-
-```bash
-moon run cmd/openseek -- [--api-key sk-...] [--model deepseek-v4-pro] [--api-url https://api.deepseek.com/chat/completions] [--dir .] [--max-steps 1000] [--system-prompt-file prompt.md] [--system-prompt-addendum-file addendum.md] [--session session-id] [--session-root .openseek] "task text"
+```
+openseek [PROMPT...]           interactive UI (default), optionally with a prompt
+openseek tui [PROMPT...]       the UI, explicitly
+openseek run [options] TASK    run one task headlessly; JSONL events on stdout
+openseek serve                 JSONL command server (stdin: prompt/steer/cancel/compact)
+openseek review [--base REF]   read-only code review of REF...HEAD → one JSON report
+openseek sessions list|show <id>|compact <id> …   manage durable sessions
 ```
 
-Agent runs require `--api-key` or `DEEPSEEK`. `--model` can also be supplied with
+The first token is a reserved subcommand only when it exactly matches one above;
+any other first token (or none) launches the UI, so `openseek "fix the bug"` is a
+prompt. Use `openseek -- PROMPT` to force a prompt that begins with a subcommand
+word (e.g. `openseek -- run the tests`).
+
+## `openseek run`
+
+```bash
+moon run cmd/openseek -- run [--api-key sk-...] [--model deepseek-v4-pro] [--api-url https://api.deepseek.com/chat/completions] [--dir .] [--max-steps 1000] [--system-prompt-file prompt.md] [--system-prompt-addendum-file addendum.md] [--session session-id] [--session-root .openseek] "task text"
+```
+
+Runs require `--api-key` or `DEEPSEEK`. `--model` can also be supplied with
 `DEEPSEEK_MODEL`; it defaults to `deepseek-v4-pro`. `--max-steps` can also be
 supplied with `OPENSEEK_MAX_STEPS`; it defaults to `1000`.
 `--api-url` can also be supplied with `OPENSEEK_API_URL`; when omitted, OpenSeek
@@ -25,46 +41,49 @@ exists.
 `--system-prompt-file` and `--system-prompt-addendum-file` can also be supplied
 with `OPENSEEK_SYSTEM_PROMPT_FILE` and
 `OPENSEEK_SYSTEM_PROMPT_ADDENDUM_FILE`. `--session` can also be supplied with
-`OPENSEEK_SESSION`; when set, the CLI creates or resumes that session under
+`OPENSEEK_SESSION`; when set, the run creates or resumes that session under
 `--session-root` / `OPENSEEK_SESSION_ROOT` (default `.openseek`). Relative
 session roots are resolved under `--dir`.
 
 Every run records a durable session: without `--session`, a generated
-`cli-YYYYMMDD-HHMMSS-mmm` id is used and announced by a `session_started`
-event on stdout, so the conversation is reviewable afterwards with
-`--session-list` / `--session-show` (or the viz server) and resumable with
+`cli-YYYYMMDD-HHMMSS-mmm` id is used and announced by a `session_started` event
+on stdout, so the conversation is reviewable afterwards with `openseek sessions
+list` / `openseek sessions show <id>` (or the viz server) and resumable with
 `--session <id>`. Pass `--no-session` to run ephemerally; combining it with
 `--session` is rejected.
 
-Without an explicit prompt file, the CLI uses the Flash built-in prompt for
-both `deepseek-v4-flash` and `deepseek-v4-pro`. The older base prompt remains
-in `prompt/base_prompt.mbt.md` for comparison and experiments, but it is not
+Without an explicit prompt file, the CLI uses the Flash built-in prompt for both
+`deepseek-v4-flash` and `deepseek-v4-pro`. The older base prompt remains in
+`prompt/base_prompt.mbt.md` for comparison and experiments, but it is not
 selected by default.
 
-## Session Management
+## `openseek sessions`
 
-The session-management commands are offline and do not require `--api-key`:
+The session-management subcommands are offline and do not require `--api-key`:
 
 ```bash
-moon run cmd/openseek -- --session-list --session-root .openseek
-moon run cmd/openseek -- --session-list --format=json --session-root .openseek
-moon run cmd/openseek -- --session-show --session parser-fix --session-root .openseek
-moon run cmd/openseek -- --session parser-fix --session-compact-file summary.txt --session-compact-from 1 --session-compact-to 120
+moon run cmd/openseek -- sessions list --session-root .openseek
+moon run cmd/openseek -- sessions list --format=json --session-root .openseek
+moon run cmd/openseek -- sessions show parser-fix --session-root .openseek
+moon run cmd/openseek -- sessions compact parser-fix --file summary.txt --from 1 --to 120
 ```
 
-`--session-list --format=json` is the machine-readable form of the listing,
+`sessions list --format=json` is the machine-readable form of the listing,
 consumed by clients such as the desktop app's sidebar: one JSON array of
-`{id, title, updated_at_ms}` objects, most recently active first. `title` is
-the first line of the session's first user prompt; `updated_at_ms` is `null`
-for a directory whose session files cannot be stat-ed (such husks sort last,
-like the human-readable listing).
+`{id, title, updated_at_ms}` objects, most recently active first. `title` is the
+first line of the session's first user prompt; `updated_at_ms` is `null` for a
+directory whose session files cannot be stat-ed (such husks sort last, like the
+human-readable listing).
 
-`--session-compact-file` appends a typed summary event. It does not delete raw
-events from `events.jsonl`; `agent_session.Session::chat_messages` uses the
-summary to compact model context on replay.
+`sessions compact <id> --file <f> --from <n> --to <n>` appends a typed summary
+event. It does not delete raw events from `events.jsonl`;
+`agent_session.Session::chat_messages` uses the summary to compact model context
+on replay.
 
-In `--serve` mode, controllers can ask the engine to generate and append a
-summary without using a temporary file:
+## `openseek serve`
+
+In `serve` mode, controllers can ask the engine to generate and append a summary
+without using a temporary file:
 
 ```jsonl
 {"command":"compact"}
@@ -73,31 +92,34 @@ summary without using a temporary file:
 The engine handles this in command order, waits for any active turn to finish,
 generates the summary with the configured model endpoint, appends a `Summary`
 event covering the current session, and emits `compaction_started`,
-`compaction_finished`, or `compaction_failed` JSONL events. With `--session`,
-the summary is persisted to the durable session log. With `--no-session`, it
-only updates the live in-memory session for the current serve process.
+`compaction_finished`, or `compaction_failed` JSONL events. With `--session`, the
+summary is persisted to the durable session log. With `--no-session`, it only
+updates the live in-memory session for the current serve process.
+
+`serve` is what the terminal UI spawns for each session; it is also the stable
+protocol for other integrations.
 
 ## Examples
 
 ```bash
 export DEEPSEEK=sk-...
-moon run cmd/openseek -- "run moon test and summarize the result"
+moon run cmd/openseek -- run "run moon test and summarize the result"
 ```
 
 ```bash
-DEEPSEEK_MODEL=deepseek-v4-flash moon run cmd/openseek -- "inspect the package docs"
+DEEPSEEK_MODEL=deepseek-v4-flash moon run cmd/openseek -- run "inspect the package docs"
 ```
 
 ```bash
-moon run cmd/openseek -- --max-steps 200 "write tests, fix failures, and summarize"
+moon run cmd/openseek -- run --max-steps 200 "write tests, fix failures, and summarize"
 ```
 
 ```bash
-moon run cmd/openseek -- --dir ../another-workspace "run moon test"
+moon run cmd/openseek -- run --dir ../another-workspace "run moon test"
 ```
 
 ```bash
-moon run cmd/openseek -- --session parser-fix "continue from the last run"
+moon run cmd/openseek -- run --session parser-fix "continue from the last run"
 ```
 
 Best-of-N: run the same task in N sibling copies of `--dir` concurrently, each
@@ -113,18 +135,20 @@ original repo. Each run's session lives under its run directory.
 
 ```bash
 # 3 attempts at the same fix in dir_run_1 / dir_run_2 / dir_run_3
-moon run cmd/openseek -- --concurrency 3 --dir myproject "fix the failing test"
+moon run cmd/openseek -- run --concurrency 3 --dir myproject "fix the failing test"
 ```
 
-`--concurrency` (env `OPENSEEK_CONCURRENCY`, default `1`) cannot be combined with
-`--serve`, `--session`, `--no-session`, or the `--session-*` commands.
+`run --concurrency` (env `OPENSEEK_CONCURRENCY`, default `1`) cannot be combined
+with `--session` or `--no-session`.
 
 ## Package Boundary
 
-This package should stay thin: argument parsing, environment-backed defaults,
-model parsing, prompt override file loading, session-store setup, and
-delegation to the agent package. The prompt package owns built-in prompt
-selection; the agent package owns tool definitions and the execution loop.
+This package should stay thin: subcommand dispatch, argument parsing,
+environment-backed defaults, model parsing, prompt override file loading,
+session-store setup, and delegation to the agent package. The interactive UI is
+the `cmd/tui` library, launched via the `tui` subcommand; the prompt package owns
+built-in prompt selection; the agent package owns tool definitions and the
+execution loop.
 
 Run the package tests with:
 
