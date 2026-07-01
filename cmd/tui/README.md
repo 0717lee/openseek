@@ -5,16 +5,18 @@ on the reusable [`tui`](../../tui/README.md) controller package. It ships as a
 library launched by the single `openseek` binary as the `openseek tui`
 subcommand (there is no separate `tui` executable).
 
-The TUI runs no agent code itself. It spawns the `openseek` engine — by default
-this same binary, re-launched in `--serve` mode (so the UI and engine can never
-drift out of sync), resolved via argv[0] when invoked by path and otherwise from
-`PATH`; override with `--engine` or `OPENSEEK_ENGINE` — **once per session** and
-drives it over stdin commands, rendering the engine's JSONL event stream: streamed thinking and answer text move live on
-the activity line, each turn's reasoning is kept as a dim `✻` transcript
-aside above its answer, and tool results land as `⏺` blocks. Pressing Enter
-while a task runs steers it mid-turn; Ctrl-C cancels the turn (a second
-Ctrl-C kills the engine, and the next prompt respawns it on the same
-session).
+The TUI runs no agent code itself. It spawns the `openseek` engine **once per
+session** in `--serve` mode and drives it over stdin commands, rendering the
+engine's JSONL event stream: streamed thinking and answer text move live on the
+activity line, each turn's reasoning is kept as a dim `✻` transcript aside above
+its answer, and tool results land as `⏺` blocks. Pressing Enter while a task
+runs steers it mid-turn; Ctrl-C cancels the turn (a second Ctrl-C kills the
+engine, and the next prompt respawns it on the same session).
+
+By default the engine is this same binary re-launched (resolved from argv[0]
+when invoked by path, otherwise `openseek` on `PATH`), so the UI and engine are
+one artifact and never drift out of sync. Override it with `--engine` or
+`OPENSEEK_ENGINE`.
 
 A custom or recorded-stream engine that only speaks the original
 one-process-per-prompt protocol still works with `--engine-mode oneshot`

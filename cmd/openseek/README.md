@@ -5,6 +5,15 @@ arguments with `moonbitlang/core/argparse`, reads defaults from environment
 variables, and calls `bobzhang/openseek/agent.run` for one-shot tasks or
 `agent.run_turn_with_append` for durable sessions.
 
+## The `tui` subcommand
+
+This is the single OpenSeek binary — there is no separate TUI executable.
+Invoked as `openseek tui …` it launches the interactive terminal UI (see
+[`cmd/tui`](../tui/README.md)), which spawns this same binary in `--serve` mode
+as its engine; every other invocation is the engine / CLI documented below. The
+first argument `tui` is therefore reserved: to run a task whose text starts with
+`tui`, stop option parsing first, e.g. `openseek -- tui is broken`.
+
 ## Command
 
 ```bash
