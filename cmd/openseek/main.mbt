@@ -56,10 +56,87 @@ async fn dispatch() -> Unit {
     launch_tui(args[2:], env)
   } else if is_engine_subcommand(first) {
     run_engine(args[1:], env)
+  } else if subcommand_typo_suggestion(first) is Some(suggestion) {
+    // A bare word that closely mis-spells a subcommand (e.g. `ran` → `run`) is
+    // almost certainly a typo, not a prompt; say so instead of silently opening
+    // the UI with the mistyped text as its prompt.
+    @stdio.stderr.write(unknown_command_message(first, suggestion)) catch {
+      _ => ()
+    }
+    @sys.exit(2)
   } else {
     // A bare prompt (or `--`): the whole tail is the TUI's initial prompt.
     launch_tui(args[1:], env)
   }
+}
+
+///|
+/// If `token` looks like a mistyped subcommand — a single bare word close to a
+/// reserved subcommand — return the intended one, else `None`. A real prompt is
+/// never treated as a typo: it has spaces or starts with `-`/`--`, so
+/// `openseek fix the bug` and `openseek -- run …` still reach the TUI. Short
+/// subcommands tolerate a single edit, longer ones up to two.
+fn subcommand_typo_suggestion(token : String) -> String? {
+  guard !token.contains(" ") && !token.has_prefix("-") && token.length() >= 2 else {
+    return None
+  }
+  let mut best : String? = None
+  let mut best_distance = 0
+  for candidate in ["run", "serve", "review", "sessions", "tui"] {
+    if candidate == token {
+      return None
+    }
+    let distance = levenshtein(token, candidate)
+    let threshold = if candidate.length() <= 4 { 1 } else { 2 }
+    if distance <= threshold && (best is None || distance < best_distance) {
+      best = Some(candidate)
+      best_distance = distance
+    }
+  }
+  best
+}
+
+///|
+/// The "did you mean" message for a mistyped subcommand — the fix, plus how to
+/// force the word to be treated as a prompt.
+fn unknown_command_message(token : String, suggestion : String) -> String {
+  (
+    $|error: unknown command '\{token}'. Did you mean '\{suggestion}'?
+    $|Run `openseek --help` for usage, or pass it as a prompt: `openseek -- \{token} ...`.
+    $|
+  )
+}
+
+///|
+/// Levenshtein edit distance between two short words.
+fn levenshtein(a : String, b : String) -> Int {
+  let ca = [ for c in a => c ]
+  let cb = [ for c in b => c ]
+  let n = ca.length()
+  let m = cb.length()
+  if n == 0 {
+    return m
+  }
+  if m == 0 {
+    return n
+  }
+  let prev = Array::makei(m + 1, i => i)
+  let curr = Array::make(m + 1, 0)
+  for i in 1..<=n {
+    curr[0] = i
+    for j in 1..<=m {
+      let cost = if ca[i - 1] == cb[j - 1] { 0 } else { 1 }
+      let deletion = prev[j] + 1
+      let insertion = curr[j - 1] + 1
+      let substitution = prev[j - 1] + cost
+      let smaller = if deletion < insertion { deletion } else { insertion }
+      curr[j] = if smaller < substitution { smaller } else { substitution }
+    }
+    for j in 0..<=m {
+      prev[j] = curr[j]
+    }
+  }
+  prev[m]
 }
 
 ///|
