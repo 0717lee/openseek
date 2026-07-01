@@ -20,16 +20,91 @@ $ openseek.exe --help
 openseek — DeepSeek-backed MoonBit coding agent
 
 Usage:
-  openseek [PROMPT...]           Launch the interactive terminal UI (default),
-                                 optionally with an initial prompt.
-  openseek tui [PROMPT...]       The interactive UI, explicitly.
+  openseek [--prompt "…"]        Launch the interactive terminal UI (default).
+  openseek tui [--prompt "…"]    The interactive UI, explicitly.
   openseek run [options] TASK    Run one task headlessly; stream JSONL on stdout.
   openseek serve                 JSONL command server (stdin: prompt/steer/cancel/compact).
   openseek review [--base REF]   Read-only code review of REF...HEAD; one JSON report.
   openseek sessions <list|show|compact>   Manage durable sessions.
 
 Run `openseek <subcommand> --help` for a subcommand's options.
-Use `openseek -- PROMPT` to pass a prompt that begins with a subcommand word.
+```
+
+## A Misspelled Subcommand Is An Error, Not A Prompt
+
+There is no free-form top-level prompt: a bare word that is not a subcommand is
+treated as a typo and rejected — with a suggestion when it is close — rather than
+silently opening the UI with that word as a prompt.
+
+```mooncram
+$ openseek.exe serv 2>&1
+error: unknown command `serv`; did you mean `serve`?
+Run `openseek --help` for commands, or `openseek --prompt "…"` to open the UI with a prompt.
+[1]
+```
+
+A token that resembles nothing gets a clean error without a bogus suggestion.
+
+```mooncram
+$ openseek.exe frobnicate 2>&1
+error: unknown command `frobnicate`
+Run `openseek --help` for commands, or `openseek --prompt "…"` to open the UI with a prompt.
+[1]
+```
+
+## Top-Level Flags Open The UI; A Prompt Comes From `--prompt`
+
+A leading flag (no subcommand) runs the interactive UI, and `--prompt` supplies
+an initial prompt. Offline, this reaches the engine preflight — pointed here at a
+missing engine so it fails deterministically without the network, which also
+proves `--prompt` was accepted (not rejected as an unexpected argument).
+
+```mooncram
+$ env DEEPSEEK=test-key openseek.exe --engine does-not-exist --prompt "inspect project" 2>&1
+error: engine 'does-not-exist' is not usable: it must be on PATH, executable, and accept `--help` (exit 0) the way openseek does.
+Pass --engine <path>, set OPENSEEK_ENGINE, or install the openseek binary.
+[1]
+```
+
+With no free-form positional, `--` no longer smuggles a prompt: a value after it
+is rejected by the parser rather than opening the UI.
+
+```mooncram
+$ sh <<'EOF'
+> stderr=$(mktemp)
+> if env DEEPSEEK=test-key openseek.exe -- something 2> "$stderr" >/dev/null; then echo exit-zero; else echo exit-non-zero; fi
+> sed -n '1p' "$stderr"
+> rm -f "$stderr"
+> EOF
+exit-non-zero
+error: unexpected value 'something' found; no more were expected
+```
+
+A leading `-` of any kind routes to the UI (never a subcommand). A lone `--`
+opens the UI with no prompt, so it still needs an API key like any UI launch:
+
+```mooncram
+$ sh <<'EOF'
+> stderr=$(mktemp)
+> if env -u DEEPSEEK openseek.exe -- 2> "$stderr" >/dev/null; then echo exit-zero; else echo exit-non-zero; fi
+> sed -n '1p' "$stderr"
+> rm -f "$stderr"
+> EOF
+exit-non-zero
+error: the following required argument was not provided: 'api-key'
+```
+
+A lone `-` routes to the UI too, where the parser rejects it as a stray value.
+
+```mooncram
+$ sh <<'EOF'
+> stderr=$(mktemp)
+> if env DEEPSEEK=test-key openseek.exe - 2> "$stderr" >/dev/null; then echo exit-zero; else echo exit-non-zero; fi
+> sed -n '1p' "$stderr"
+> rm -f "$stderr"
+> EOF
+exit-non-zero
+error: unexpected value '-' found; no more were expected
 ```
 
 ## `openseek run` Runs One Task Headlessly

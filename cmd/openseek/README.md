@@ -8,18 +8,20 @@ from environment variables, and calls `bobzhang/openseek/agent.run` for one-shot
 tasks or `agent.run_turn_with_append` for durable sessions.
 
 ```
-openseek [PROMPT...]           interactive UI (default), optionally with a prompt
-openseek tui [PROMPT...]       the UI, explicitly
+openseek [--prompt "…"]        interactive UI (default)
+openseek tui [--prompt "…"]    the UI, explicitly
 openseek run [options] TASK    run one task headlessly; JSONL events on stdout
 openseek serve                 JSONL command server (stdin: prompt/steer/cancel/compact)
 openseek review [--base REF]   read-only code review of REF...HEAD → one JSON report
 openseek sessions list|show <id>|compact <id> …   manage durable sessions
 ```
 
-The first token is a reserved subcommand only when it exactly matches one above;
-any other first token (or none) launches the UI, so `openseek "fix the bug"` is a
-prompt. Use `openseek -- PROMPT` to force a prompt that begins with a subcommand
-word (e.g. `openseek -- run the tests`).
+The first token must be a subcommand (or a flag). There is **no free-form
+top-level prompt**: a bare word that is not a subcommand is treated as a typo and
+rejected — with a `did you mean …?` suggestion when it is close (e.g. `openseek
+serv` → suggests `serve`) — rather than silently opening the UI with that word.
+Launch the UI with an initial prompt via `--prompt` (`openseek --prompt "fix the
+bug"` or `openseek tui --prompt "fix the bug"`).
 
 ## `openseek run`
 
