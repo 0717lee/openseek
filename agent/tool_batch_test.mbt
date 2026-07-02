@@ -77,7 +77,7 @@ async test "agent executes each normal tool call in a response batch" {
       runtime~,
       scope~,
       api_key="test-key",
-      model=V4Flash,
+      model=Deepseek(V4Flash),
       session~,
       task="run both tools",
       append_item=(session, item) => session.append(item),
@@ -166,7 +166,7 @@ async test "agent failure terminal uses the latest persisted session" {
       runtime~,
       scope~,
       api_key="test-key",
-      model=V4Flash,
+      model=Deepseek(V4Flash),
       session=initial,
       task="run the append failure tool",
       append_item=(session, item) => {

@@ -156,8 +156,8 @@ fn trial_extra_env(
 ///|
 fn api_key_env_for_model(model : @deepseek.Model) -> String {
   match model {
-    KimiK27Code | KimiK27CodeHighSpeed => "KIMI"
-    V4Flash | V4Pro => "DEEPSEEK"
+    Kimi(_) => "KIMI"
+    Deepseek(_) => "DEEPSEEK"
   }
 }
 

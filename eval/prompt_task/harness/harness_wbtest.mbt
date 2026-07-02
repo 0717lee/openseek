@@ -29,7 +29,7 @@ async test "indexed runner honors concurrency and preserves order" {
 test "trial environment pins workspace-local session root" {
   let config = Config(
     api_key="key",
-    model=V4Flash,
+    model=Deepseek(V4Flash),
     problem_id="toml_parser_cli",
     runs=1,
     concurrency=1,
@@ -47,7 +47,7 @@ test "trial environment pins workspace-local session root" {
   assert_true(env.get("DEEPSEEK") == Some("key"))
   assert_true(env.get("KIMI") is None)
   let kimi_env = trial_extra_env(
-    { ..config, model: KimiK27CodeHighSpeed },
+    { ..config, model: Kimi(K27CodeHighSpeed) },
     "/tmp/workspace",
   )
   assert_true(kimi_env.get("KIMI") == Some("key"))
@@ -69,7 +69,7 @@ test "empty api key leaves provider keys to the inherited environment" {
   // variable to an empty string, which would shadow the inherited key.
   let config = Config(
     api_key="",
-    model=V4Pro,
+    model=Deepseek(V4Pro),
     problem_id="expr_eval",
     runs=1,
     concurrency=1,
@@ -87,7 +87,7 @@ test "empty api key leaves provider keys to the inherited environment" {
   assert_true(env.get("DEEPSEEK") is None)
   assert_true(env.get("KIMI") is None)
   let kimi_env = trial_extra_env(
-    { ..config, model: KimiK27Code },
+    { ..config, model: Kimi(K27Code) },
     "/tmp/workspace",
   )
   assert_true(kimi_env.get("KIMI") is None)

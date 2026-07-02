@@ -95,7 +95,7 @@ async test "chat stream handler accumulates Kimi stream_options usage" {
     }
     let client = @client.Client(
       api_key="test-key",
-      model=KimiK27Code,
+      model=Kimi(K27Code),
       api_url=url,
     )
     let response = client.chat(

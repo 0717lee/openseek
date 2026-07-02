@@ -5,13 +5,13 @@ const DeepSeekDefaultApiUrl : String = "https://api.deepseek.com/chat/completion
 const KimiDefaultApiUrl : String = "https://api.moonshot.cn/v1/chat/completions"
 
 ///|
-let default_model : @deepseek.Model = V4Pro
+let default_model : @deepseek.Model = Deepseek(V4Pro)
 
 ///|
 fn default_api_url_for_model(model : @deepseek.Model) -> String {
   match model {
-    KimiK27Code | KimiK27CodeHighSpeed => KimiDefaultApiUrl
-    V4Flash | V4Pro => DeepSeekDefaultApiUrl
+    Kimi(_) => KimiDefaultApiUrl
+    Deepseek(_) => DeepSeekDefaultApiUrl
   }
 }
 

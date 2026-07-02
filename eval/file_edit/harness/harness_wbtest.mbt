@@ -108,7 +108,7 @@ async test "indexed runner honors concurrency and preserves order" {
 test "trial environment uses selected provider api key env" {
   let config = Config(
     api_key="key",
-    model=V4Flash,
+    model=Deepseek(V4Flash),
     runs=1,
     concurrency=1,
     min_successes=1,
@@ -123,7 +123,7 @@ test "trial environment uses selected provider api key env" {
   assert_true(env.get("DEEPSEEK") == Some("key"))
   assert_true(env.get("KIMI") is None)
   let kimi_env = trial_extra_env(
-    { ..config, model: KimiK27CodeHighSpeed },
+    { ..config, model: Kimi(K27CodeHighSpeed) },
     "/tmp/workspace",
   )
   assert_true(kimi_env.get("KIMI") == Some("key"))

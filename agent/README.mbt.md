@@ -23,14 +23,14 @@ The exported surface is small:
 ```mbt nocheck
 @agent.run(
   api_key,
-  V4Pro,
+  Deepseek(V4Pro),
   "fix the tests",
   system_prompt_text="You are an OpenSeek agent.",
 )
 
 let next = @agent.run_turn(
   api_key,
-  V4Flash,
+  Deepseek(V4Flash),
   session,
   "continue",
   max_steps=100,
@@ -38,7 +38,7 @@ let next = @agent.run_turn(
 
 let persisted = @agent.run_turn_with_append(
   api_key,
-  V4Pro,
+  Deepseek(V4Pro),
   session,
   "continue",
   append_item=(session, item) => store.append(session, item),
@@ -52,7 +52,7 @@ let persisted = @agent.run_turn_with_append(
     runtime,
     scope,
     api_key,
-    V4Pro,
+    Deepseek(V4Pro),
     session,
     "continue",
     append_item=(session, item) => session.append(item),
@@ -190,7 +190,7 @@ async test "zero step run_turn appends user then failure terminal" {
   )
   let result = @agent.run_turn(
     api_key="unused-api-key",
-    model=V4Flash,
+    model=Deepseek(V4Flash),
     session~,
     task="hello",
     max_steps=0,
@@ -226,7 +226,7 @@ async test "run_turn_with_append calls the persistence hook for each item" {
   let appended : Array[String] = []
   let result = @agent.run_turn_with_append(
     api_key="unused-api-key",
-    model=V4Flash,
+    model=Deepseek(V4Flash),
     session~,
     task="persist me",
     append_item=(session, item) => {

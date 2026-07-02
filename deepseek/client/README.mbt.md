@@ -42,7 +42,7 @@ Other HTTP 4xx responses fail immediately. `retry_attempts` counts total tries;
 test "construct DeepSeek client configuration" {
   let client = @client.Client(
     api_key="test-key",
-    model=V4Flash,
+    model=Deepseek(V4Flash),
     thinking=Max,
     retry_attempts=5,
     retry_backoff_ms=200,
@@ -52,7 +52,7 @@ test "construct DeepSeek client configuration" {
     content=(
       #|{
       #|  api_key: ...,
-      #|  model: V4Flash,
+      #|  model: Deepseek(V4Flash),
       #|  api_url: "https://api.deepseek.com/chat/completions",
       #|  thinking: Max,
       #|  retry_attempts: 5,
@@ -93,7 +93,11 @@ The request body has this shape:
 ```moonbit check
 ///|
 test "Client::chat request body shape" {
-  let client = @client.Client(api_key="test-key", model=V4Flash, thinking=Max)
+  let client = @client.Client(
+    api_key="test-key",
+    model=Deepseek(V4Flash),
+    thinking=Max,
+  )
   let tool = @deepseek.ToolDefinition("read", "Read a file.", {
     "type": "object",
     "properties": { "path": { "type": "string" } },

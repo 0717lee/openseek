@@ -10,8 +10,8 @@
 /// CLI option that carries the provider-specific API key for `model`.
 fn api_key_arg_for_model(model : @deepseek.Model) -> String {
   match model {
-    KimiK27Code | KimiK27CodeHighSpeed => "kimi-api-key"
-    V4Flash | V4Pro => "deepseek-api-key"
+    Kimi(_) => "kimi-api-key"
+    Deepseek(_) => "deepseek-api-key"
   }
 }
 
@@ -21,8 +21,8 @@ fn api_key_arg_for_model(model : @deepseek.Model) -> String {
 /// must stay in lockstep with `api_key`'s lookup order.
 pub fn api_key_env_for_model(model : @deepseek.Model) -> String {
   match model {
-    KimiK27Code | KimiK27CodeHighSpeed => "KIMI"
-    V4Flash | V4Pro => "DEEPSEEK"
+    Kimi(_) => "KIMI"
+    Deepseek(_) => "DEEPSEEK"
   }
 }
 
@@ -30,8 +30,8 @@ pub fn api_key_env_for_model(model : @deepseek.Model) -> String {
 /// Human-readable provider name for `model`, used in error guidance.
 fn api_key_provider_for_model(model : @deepseek.Model) -> String {
   match model {
-    KimiK27Code | KimiK27CodeHighSpeed => "Kimi"
-    V4Flash | V4Pro => "DeepSeek"
+    Kimi(_) => "Kimi"
+    Deepseek(_) => "DeepSeek"
   }
 }
 

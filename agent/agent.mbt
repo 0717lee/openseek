@@ -193,7 +193,7 @@ async test "run_turn_with_append closes failed persisted turns" {
   let mut persisted = initial
   let _ = run_turn_with_append(
     api_key="unused",
-    model=V4Pro,
+    model=Deepseek(V4Pro),
     session=initial,
     task="hello",
     append_item=(session, item) => {

@@ -8,11 +8,11 @@ test "client defaults" {
 
 ///|
 test "client endpoint defaults follow selected model" {
-  let kimi = @client.Client(api_key="test-key", model=KimiK27Code)
+  let kimi = @client.Client(api_key="test-key", model=Kimi(K27Code))
   assert_eq(kimi.api_url, "https://api.moonshot.cn/v1/chat/completions")
   let proxied = @client.Client(
     api_key="test-key",
-    model=KimiK27CodeHighSpeed,
+    model=Kimi(K27CodeHighSpeed),
     api_url="https://proxy.example/v1/chat/completions",
   )
   assert_eq(proxied.api_url, "https://proxy.example/v1/chat/completions")
@@ -26,7 +26,7 @@ test "client debug redacts api key" {
     content=(
       #|{
       #|  api_key: ...,
-      #|  model: V4Pro,
+      #|  model: Deepseek(V4Pro),
       #|  api_url: "https://api.deepseek.com/chat/completions",
       #|  thinking: Max,
       #|  retry_attempts: 3,

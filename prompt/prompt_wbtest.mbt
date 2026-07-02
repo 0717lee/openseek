@@ -9,6 +9,6 @@
 /// and breaks on every rewording, so this package pins just the selection
 /// contract.
 test "system_prompt_for_model returns the flash prompt for every model" {
-  assert_eq(system_prompt_for_model(V4Flash), flash_prompt())
-  assert_eq(system_prompt_for_model(V4Pro), flash_prompt())
+  assert_eq(system_prompt_for_model(Deepseek(V4Flash)), flash_prompt())
+  assert_eq(system_prompt_for_model(Deepseek(V4Pro)), flash_prompt())
 }

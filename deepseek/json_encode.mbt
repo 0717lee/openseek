@@ -10,7 +10,7 @@ fn ChatMessage::reasoning_json_fields(
   message : ChatMessage,
   model : Model,
 ) -> Array[(String, Json)] {
-  if !model.is_kimi_k27_code() {
+  if !(model is Kimi(_)) {
     return []
   }
   if message.role is Assistant && message.reasoning_content is Some(reasoning) {
@@ -92,7 +92,7 @@ fn thinking_json_fields(
   model : Model,
   thinking : ThinkingMode?,
 ) -> Array[(String, Json)] {
-  if model.is_kimi_k27_code() {
+  if model is Kimi(_) {
     return []
   }
   match thinking {
@@ -110,7 +110,7 @@ const KimiDefaultMaxTokens : Int = 32_000
 
 ///|
 fn max_tokens_json_fields(model : Model) -> Array[(String, Json)] {
-  if model.is_kimi_k27_code() {
+  if model is Kimi(_) {
     // Keep the default aligned with kimi-cli's Kimi provider:
     // https://github.com/MoonshotAI/kimi-cli/blob/2c34efbbc6c7cfe40770623281e87c138ff8eb6c/packages/kosong/src/kosong/chat_provider/kimi.py#L163-L166
     [("max_tokens", Json::number(KimiDefaultMaxTokens.to_double()))]
@@ -128,7 +128,7 @@ pub fn encode_chat_request(
   thinking? : ThinkingMode,
   stream? : Bool = false,
   response_format? : ResponseFormat,
-  model? : Model = V4Pro,
+  model? : Model = Deepseek(V4Pro),
   messages : Array[ChatMessage],
 ) -> Json {
   Json::object(
@@ -167,7 +167,7 @@ pub fn encode_chat_request(
 ///|
 test "tool messages include tool call id" {
   let body = ChatMessage(Tool("call_123"), content="tool result")
-  json_inspect(body.to_json_for_model(V4Pro), content={
+  json_inspect(body.to_json_for_model(Deepseek(V4Pro)), content={
     "role": "tool",
     "content": "tool result",
     "tool_call_id": "call_123",
@@ -217,7 +217,7 @@ test "assistant tool call messages encode tool_calls, never reasoning" {
     ],
     reasoning_content="checked available tools",
   )
-  json_inspect(body.to_json_for_model(V4Pro), content={
+  json_inspect(body.to_json_for_model(Deepseek(V4Pro)), content={
     "role": "assistant",
     "content": null,
     "tool_calls": [
@@ -247,7 +247,7 @@ test "kimi assistant messages preserve reasoning content" {
     ],
     reasoning_content="checked available tools",
   )
-  json_inspect(body.to_json_for_model(KimiK27Code), content={
+  json_inspect(body.to_json_for_model(Kimi(K27Code)), content={
     "role": "assistant",
     "content": null,
     "tool_calls": [
@@ -273,7 +273,7 @@ test "assistant tool call messages preserve content when present" {
       arguments="{\"location\":\"Hangzhou\"}",
     ),
   ])
-  json_inspect(body.to_json_for_model(V4Pro), content={
+  json_inspect(body.to_json_for_model(Deepseek(V4Pro)), content={
     "role": "assistant",
     "content": "I will check that now.",
     "tool_calls": [
@@ -297,7 +297,7 @@ test "tool call arguments pass through as opaque strings" {
     arguments="not even valid json{",
   )
   let body = ChatMessage(Assistant, content="", tool_calls=[call])
-  json_inspect(body.to_json_for_model(V4Pro), content={
+  json_inspect(body.to_json_for_model(Deepseek(V4Pro)), content={
     "role": "assistant",
     "content": null,
     "tool_calls": [
