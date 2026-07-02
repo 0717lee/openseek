@@ -84,11 +84,7 @@ fn skip_outline_dir(name : String) -> Bool {
 
 ///|
 fn outline_indent(depth : Int) -> String {
-  let sb = StringBuilder()
-  for _ in 0..<depth {
-    sb.write_string("  ")
-  }
-  sb.to_string()
+  "  ".repeat(depth)
 }
 
 ///|

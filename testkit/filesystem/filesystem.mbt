@@ -50,6 +50,17 @@ pub fn FileSystem::to_json(self : FileSystem) -> Json {
 }
 
 ///|
+/// The underlying JSON object's fields, raising when the top-level JSON is not
+/// an object as the convention requires.
+fn FileSystem::object_fields(self : FileSystem) -> Map[String, Json] raise {
+  let FileSystem(json) = self
+  guard json is Object(fields) else {
+    fail("file system must be a JSON object")
+  }
+  fields
+}
+
+///|
 /// Check the whole filesystem against the convention, raising on the first
 /// violation. Equivalent to `entries()` with the result discarded.
 pub fn FileSystem::validate(self : FileSystem) -> Unit raise {
@@ -60,10 +71,7 @@ pub fn FileSystem::validate(self : FileSystem) -> Unit raise {
 /// Every file as a `FileEntry`, sorted by path for deterministic iteration.
 /// Raises when the JSON violates the filesystem convention.
 pub fn FileSystem::entries(self : FileSystem) -> Array[FileEntry] raise {
-  let FileSystem(json) = self
-  guard json is Object(fields) else {
-    fail("file system must be a JSON object")
-  }
+  let fields = self.object_fields()
   let paths = fields.keys().collect()
   paths.sort()
   [
@@ -91,10 +99,7 @@ pub fn FileSystem::paths(self : FileSystem) -> Array[String] raise {
 /// "absent".
 pub fn FileSystem::get(self : FileSystem, path : String) -> String? raise {
   validate_relative_path(path)
-  let FileSystem(json) = self
-  guard json is Object(fields) else {
-    fail("file system must be a JSON object")
-  }
+  let fields = self.object_fields()
   match fields.get(path) {
     Some(String(content)) => Some(content)
     Some(_) => fail("file content for `\{path}` must be a string")
