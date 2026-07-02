@@ -324,13 +324,15 @@ fn edit_reject_report(
   } else {
     "\nfirst \{formatted.length()} parse error(s), excerpted from the WOULD-BE content (not what is on disk):\n\{formatted.join("\n")}"
   }
+  let hints = @auto_check.pitfall_hints(gate.errors)
+  let hint_lines = if hints.is_empty() { "" } else { "\n\{hints.join("\n")}" }
   let retry = if introduced >= SmallerEditsHintThreshold {
     "\n\{introduced_label} new parse errors usually means the replacement would break the file's structure (an unbalanced brace, a misplaced insertion, or non-MoonBit text). Do not re-issue the same edit: split it into smaller pieces — multi_edit applies several small line-anchored edits in one validated call — and check after each step."
   } else {
     "\nre-issue the edit with a corrected new_string (check delimiters against the excerpt above)."
   }
   let opt_out = "\n(To intentionally produce content that does not parse, e.g. a fixture, pass revert_on_parse_errors=false.)"
-  "\{head}\{pre_existing}\{listed}\{retry}\{opt_out}"
+  "\{head}\{pre_existing}\{listed}\{hint_lines}\{retry}\{opt_out}"
 }
 
 ///|

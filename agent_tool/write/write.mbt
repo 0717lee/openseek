@@ -219,13 +219,15 @@ fn write_reject_report(
   } else {
     "\nfirst \{formatted.length()} parse error(s), with the rejected content excerpted:\n\{formatted.join("\n")}"
   }
+  let hints = @auto_check.pitfall_hints(gate.errors)
+  let hint_lines = if hints.is_empty() { "" } else { "\n\{hints.join("\n")}" }
   let retry = if count >= SmallerPartsHintThreshold {
     "\n\{count_label} parse errors usually means the content is malformed wholesale (truncated or not valid MoonBit). Do not re-issue the same content: write a smaller file first — a minimal skeleton that parses — then grow it in small pieces with edit (an empty old_string inserts), checking after each step."
   } else {
     "\nre-issue write with the corrected full content."
   }
   let opt_out = "\n(To intentionally create a file that does not parse, e.g. a test fixture, pass revert_on_parse_errors=false.)"
-  "\{head}\{listed}\{retry}\{opt_out}"
+  "\{head}\{listed}\{hint_lines}\{retry}\{opt_out}"
 }
 
 ///|

@@ -334,6 +334,7 @@ async fn parse_gate_batch_rejection(
   writes : Array[PreparedWrite],
 ) -> @agent_tool.ToolAction? {
   let rejections : Array[FileRejection] = []
+  let all_errors : Array[@auto_check.ParseGateError] = []
   for write in writes {
     let target = @fs.realpath(write.path) catch {
       error if @async.is_being_cancelled() => raise error
@@ -375,6 +376,9 @@ async fn parse_gate_batch_rejection(
       truncated: gate.truncated,
       section: "\{write.path}: would gain \{bound}\{introduced} new parse error(s)\{pre_existing}:\n\{formatted.join("\n")}",
     })
+    for error in gate.errors {
+      all_errors.push(error)
+    }
   }
   if rejections.is_empty() {
     return None
@@ -390,7 +394,12 @@ async fn parse_gate_batch_rejection(
   let bound = if any_truncated { "≥" } else { "" }
   Some(
     @agent_tool.ToolAction::respond(
-      batch_reject_report(rejections, total~, any_truncated~),
+      batch_reject_report(
+        rejections,
+        total~,
+        any_truncated~,
+        hints=@auto_check.pitfall_hints(all_errors),
+      ),
       is_error=true,
       brief="multi_edit rejected (\{bound}\{total} parse error(s))",
     ),
@@ -404,6 +413,7 @@ fn batch_reject_report(
   rejections : Array[FileRejection],
   total~ : Int,
   any_truncated~ : Bool,
+  hints~ : Array[String],
 ) -> String {
   let total_label = if any_truncated { "at least \{total}" } else { "\{total}" }
   let head = "rejected: the batch would introduce \{total_label} new parse error(s) across \{rejections.length()} file(s), so NO files were changed."
@@ -421,9 +431,10 @@ fn batch_reject_report(
   } else {
     ""
   }
+  let hint_lines = if hints.is_empty() { "" } else { "\n\{hints.join("\n")}" }
   let retry = "\nre-issue with corrected new_strings (check delimiters against the excerpts above), or split the batch and check after each step."
   let opt_out = "\n(To intentionally produce content that does not parse, e.g. a fixture, pass revert_on_parse_errors=false.)"
-  "\{head}\nexcerpts are from the WOULD-BE content (not what is on disk):\n\{sections.join("\n")}\{overflow}\{retry}\{opt_out}"
+  "\{head}\nexcerpts are from the WOULD-BE content (not what is on disk):\n\{sections.join("\n")}\{overflow}\{hint_lines}\{retry}\{opt_out}"
 }
 
 ///|

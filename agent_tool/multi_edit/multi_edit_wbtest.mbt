@@ -126,7 +126,7 @@ test "batch_reject_report caps detailed files and labels lower bounds" {
         } : FileRejection)
     }
   ]
-  let report = batch_reject_report(rejections, total=5, any_truncated=true)
+  let report = batch_reject_report(rejections, total=5, any_truncated=true, hints=[])
   assert_true(
     report.contains(
       "rejected: the batch would introduce at least 5 new parse error(s) across 5 file(s), so NO files were changed.",

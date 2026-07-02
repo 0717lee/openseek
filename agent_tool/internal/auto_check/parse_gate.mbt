@@ -219,6 +219,42 @@ pub fn format_parse_gate_errors(
 }
 
 ///|
+/// One-line MoonBit idiom corrections for parse-error classes that models
+/// repeatedly produce from Rust or legacy-MoonBit priors, matched against the
+/// diagnostic message. Recorded eval sessions showed these three classes
+/// accounted for every gate rejection, and prompt rules alone did not prevent
+/// them — the correction lands best at the moment of failure. Each hint
+/// appears at most once per report.
+pub fn pitfall_hints(errors : Array[ParseGateError]) -> Array[String] {
+  let hints : Array[String] = []
+  fn add(hint : String) {
+    for existing in hints {
+      if existing == hint {
+        return
+      }
+    }
+    hints.push(hint)
+  }
+  for error in errors {
+    if error.message.contains("unexpected token `mut`") {
+      add(
+        "hint: MoonBit parameters and receivers cannot be `mut` (unlike Rust). Rebind inside the body (`let mut x = param`), use a `mut` field on a struct you pass in, or `Ref[T]`.",
+      )
+    } else if error.message.contains("unrecognized character u32:0x7e") {
+      add(
+        "hint: `~` before an argument (`f(~label)`) is legacy MoonBit. Pass `label=value`, or `label~` to pun a same-named variable.",
+      )
+    } else if error.message.contains("unexpected token `?`") ||
+      error.message.contains("unexpected token `!`") {
+      add(
+        "hint: postfix `f(...)?` / `f(...)!` error propagation is legacy MoonBit. Inside a function declaring `raise`, a plain call `f(...)` propagates automatically; handle locally with `f(...) catch { ... }`.",
+      )
+    }
+  }
+  hints
+}
+
+///|
 /// Indent the compiler's `context` excerpt (numbered source lines, one per
 /// `\n`) by two spaces, dropping only the trailing blank line the final `\n`
 /// produces — interior blank lines, should moonc ever emit them, are kept so
@@ -456,4 +492,40 @@ async test "content_parse_errors gates real content through moonc" {
     fail("expected the gate to run (is moonc on PATH?)")
   }
   assert_true(recovered.errors.length() > 0)
+}
+
+///|
+test "pitfall_hints maps known error classes and dedupes" {
+  let hints = pitfall_hints([
+    {
+      loc: "2:6-2:9",
+      message: "Parse error, unexpected token `mut`, you may expect parameter name or label.",
+      context: "",
+    },
+    {
+      loc: "6:12-6:15",
+      message: "Parse error, unexpected token `mut`, you may expect parameter name or label.",
+      context: "",
+    },
+    {
+      loc: "3:3-3:4",
+      message: "Lexing error: unrecognized character u32:0x7e",
+      context: "",
+    },
+    {
+      loc: "4:15-4:16",
+      message: "Parse error, unexpected token `?`, you may expect `;` or `}`.",
+      context: "",
+    },
+  ])
+  // One hint per class, in first-seen order, duplicates collapsed.
+  assert_eq(hints.length(), 3)
+  assert_true(hints[0].contains("cannot be `mut`"))
+  assert_true(hints[1].contains("`f(~label)`"))
+  assert_true(hints[2].contains("error propagation is legacy"))
+  // Unknown classes produce no hint.
+  let none = pitfall_hints([
+    { loc: "1:1", message: "Parse error, unexpected token `}`.", context: "" },
+  ])
+  assert_eq(none.length(), 0)
 }

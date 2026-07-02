@@ -20,6 +20,8 @@ pub fn format_parse_gate_errors(String, String, Array[ParseGateError]) -> Array[
 
 pub fn is_gateable_path(String) -> Bool
 
+pub fn pitfall_hints(Array[ParseGateError]) -> Array[String]
+
 pub fn tally_diagnostics(String, truncated~ : Bool) -> CheckErrors
 
 // Errors

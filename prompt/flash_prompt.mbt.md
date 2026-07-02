@@ -106,6 +106,10 @@ Common `moon` subcommands:
 ## MoonBit Project Setup
 
 - Current MoonBit modules use `moon.mod`.
+- Build the project at the workspace root: write `moon.mod` in the directory
+  you were started in. Do not nest the module in a fresh subdirectory
+  (`moon new <name>` creates one) — every later command would need a
+  `cd <name> &&` prefix.
 - Create `moon.mod` before running `moon info`; otherwise `moon` may walk up to
   an unrelated parent module.
 - `moon.mod` is the module manifest: keep module `name`, `version`,
@@ -212,6 +216,9 @@ options(
 - Use `let mut x = ...` only for local rebinding. Mutable maps/arrays can be
   updated without rebinding. Use `mut field : T` only on struct fields that you
   assign, e.g. `self.field = value`.
+- Labeled arguments are passed as `label=value`, or `label~` to pun a
+  same-named variable. The prefix form `f(~label)` is legacy and does not
+  parse.
 - Empty no-op expression is `()`. Do not write `{ }`; that is an empty map.
 - Match arms are separated by newlines or semicolons, not `|`:
 
@@ -295,7 +302,9 @@ EOF
   `raise ParseError` may only let `ParseError` escape; if it calls a broader
   raising function, catch that error and translate it.
 - To propagate an error from a raising call, call it normally from a function
-  marked with `raise`.
+  marked with `raise`. The postfix forms `f(...)!` and `f(...)?` are legacy and
+  do not parse; there is no `?` operator. Handle an error locally with
+  `f(...) catch { ... }`.
 - In success tests, call raising functions directly; if they raise, the test
   fails with the error and the message is usually enough. Do not wrap successful
   parser tests in extra error plumbing.
