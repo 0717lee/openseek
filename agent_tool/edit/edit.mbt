@@ -117,42 +117,15 @@ async fn edit_file(
       max=content.length(),
     )
     let new_content = "\{content.unsafe_substring(start=0, end=at)}\{input.new_string}\{content.unsafe_substring(start=at, end=content.length())}"
-    match @manifest_error.write_error(path, new_content) {
-      Some(message) =>
-        return @agent_tool.ToolAction::respond(
-          "error editing \{path}: \{message}",
-          is_error=true,
-          brief=fail_brief,
-        )
-      None => ()
-    }
-    match
-      parse_gate_rejection(
-        path,
-        original_content=content,
-        new_content~,
-        revert_on_parse_errors=input.revert_on_parse_errors,
-      ) {
-      Some(rejection) => return rejection
-      None => ()
-    }
-    return try {
-      @fs.write_file(path, new_content, create_mode=CreateOrTruncate)
-      let summary = "ok: inserted at line \{input.start_line} in \{path}"
-      let response = @auto_check.append_summary(path, summary)
-      @agent_tool.ToolAction::respond(
-        response,
-        brief="edited \{@agent_tool.brief_basename(path)}:\{input.start_line} (insert)",
-      )
-    } catch {
-      error if @async.is_being_cancelled() => raise error
-      error =>
-        @agent_tool.ToolAction::respond(
-          "error editing \{path}: error writing file: \{error}",
-          is_error=true,
-          brief=fail_brief,
-        )
-    }
+    return commit_edit(
+      path,
+      original_content=content,
+      new_content~,
+      revert_on_parse_errors=input.revert_on_parse_errors,
+      fail_brief~,
+      summary="ok: inserted at line \{input.start_line} in \{path}",
+      ok_brief="edited \{@agent_tool.brief_basename(path)}:\{input.start_line} (insert)",
+    )
   }
   let region = select_edit_region(content, input)
   let parts = region.body
@@ -175,33 +148,52 @@ async fn edit_file(
   )
   let new_body = "\{parts[0]}\{input.new_string}\{region.body.unsafe_substring(start=match_end, end=region.body.length())}"
   let new_content = "\{region.prefix}\{new_body}\{region.suffix}"
-  match @manifest_error.write_error(path, new_content) {
-    Some(message) =>
-      return @agent_tool.ToolAction::respond(
-        "error editing \{path}: \{message}",
-        is_error=true,
-        brief=fail_brief,
-      )
-    None => ()
+  commit_edit(
+    path,
+    original_content=content,
+    new_content~,
+    revert_on_parse_errors=input.revert_on_parse_errors,
+    fail_brief~,
+    summary="ok: replaced \{replacement_count} occurrence(s) at line \{match_line} in \{path}",
+    ok_brief="edited \{@agent_tool.brief_basename(path)}:\{match_line} (\{replacement_count}×)",
+  )
+}
+
+///|
+/// Shared tail for both the insertion and replacement paths: run the manifest
+/// and parse-gate guards against the candidate content, then write it and
+/// report success — or return the matching error `ToolAction`. `summary` and
+/// `ok_brief` describe the specific edit that was made; `fail_brief` folds
+/// every failure onto the same `→ edit · edit <file> 🚩` viz line.
+async fn commit_edit(
+  path : String,
+  original_content~ : String,
+  new_content~ : String,
+  revert_on_parse_errors~ : Bool,
+  fail_brief~ : String,
+  summary~ : String,
+  ok_brief~ : String,
+) -> @agent_tool.ToolAction {
+  if @manifest_error.write_error(path, new_content) is Some(message) {
+    return @agent_tool.ToolAction::respond(
+      "error editing \{path}: \{message}",
+      is_error=true,
+      brief=fail_brief,
+    )
   }
-  match
-    parse_gate_rejection(
+  if parse_gate_rejection(
       path,
-      original_content=content,
+      original_content~,
       new_content~,
-      revert_on_parse_errors=input.revert_on_parse_errors,
-    ) {
-    Some(rejection) => return rejection
-    None => ()
+      revert_on_parse_errors~,
+    )
+    is Some(rejection) {
+    return rejection
   }
   try {
     @fs.write_file(path, new_content, create_mode=CreateOrTruncate)
-    let summary = "ok: replaced \{replacement_count} occurrence(s) at line \{match_line} in \{path}"
     let response = @auto_check.append_summary(path, summary)
-    @agent_tool.ToolAction::respond(
-      response,
-      brief="edited \{@agent_tool.brief_basename(path)}:\{match_line} (\{replacement_count}×)",
-    )
+    @agent_tool.ToolAction::respond(response, brief=ok_brief)
   } catch {
     error if @async.is_being_cancelled() => raise error
     error =>
