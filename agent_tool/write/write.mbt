@@ -9,11 +9,18 @@
 /// - `path` (string, required): filesystem path to write.
 /// - `content` (string, required): text to write. The file is truncated
 ///   before writing.
+/// - `revert_on_parse_errors` (boolean, optional, default true): after a new
+///   `.mbt`/`.mbt.md` file is written, `moon check` runs; if the new file
+///   itself has lex/parse errors (codes 3000-3999) it is deleted and the
+///   errors are returned. Set false only to intentionally create a file that
+///   does not parse (e.g. a test fixture).
 ///
 /// ## Result
 /// - `Respond(ToolOutput("ok: wrote <n> chars to <path>"))` when a new file is
 ///   created; the message gains ` (overwrote existing file)` when the path
 ///   already existed, so the model can tell it clobbered prior content.
+/// - `Respond(ToolOutput("reverted: wrote <path> ...", is_error=true))` when
+///   the parse-error guard deleted a new source file that did not parse.
 /// - `Respond(ToolOutput("error writing <path>: <error>", is_error=true))`
 ///   if the write fails.
 /// - `Respond(ToolOutput("error: write requires ...", is_error=true))` for
@@ -23,12 +30,17 @@ pub fn definition(
 ) -> @agent_tool.AgentToolDefinition {
   AgentToolDefinition(
     name="write",
-    description="Create a new file at arguments.path with arguments.content (missing parent directories are created), or overwrite an existing non-source file. Overwriting an existing .mbt/.mbt.md source file is rejected: use edit or multi_edit to change existing source (an empty old_string inserts new code). Do not use write to route shell-generated rewrites back into source files. Do not create Markdown or README files unless the user explicitly asks for them.",
+    description="Create a new file at arguments.path with arguments.content (missing parent directories are created), or overwrite an existing non-source file. Overwriting an existing .mbt/.mbt.md source file is rejected: use edit or multi_edit to change existing source (an empty old_string inserts new code). A new .mbt/.mbt.md file that fails to lex/parse is auto-deleted (reverted) and the parse errors are returned — see revert_on_parse_errors. Do not use write to route shell-generated rewrites back into source files. Do not create Markdown or README files unless the user explicitly asks for them.",
     schema=JsonSchema({
       "type": "object",
       "properties": {
         "path": { "type": "string" },
         "content": { "type": "string" },
+        "revert_on_parse_errors": {
+          "type": "boolean",
+          "description": "Auto-revert safety net, on by default. After a new .mbt/.mbt.md file is written, `moon check` runs; if the new file itself has lex/parse errors (error codes 3000-3999) it is DELETED and the call returns the parse errors with source context — a file that does not parse is never a valid intermediate state, and write cannot overwrite existing source, so deleting re-opens the natural retry (re-issue write with corrected content). Type errors (4xxx) never trigger the revert; they may be a legitimate transient state during multi-file work. Set false only to intentionally create a file that does not parse (e.g. a test fixture).",
+          "examples": [false],
+        },
       },
       "required": ["path", "content"],
     }),
@@ -109,17 +121,21 @@ async fn write_file(
     } else {
       "ok: wrote \{chars} chars to \{path}"
     }
-    let content = @auto_check.append_summary(path, summary)
-    @agent_tool.ToolAction::respond(
-      content,
-      brief=@agent_tool.brief_line(
-        if existed {
-          "overwrote \{input.path}"
-        } else {
-          "wrote \{chars} chars to \{input.path}"
-        },
-      ),
+    let ok_brief = @agent_tool.brief_line(
+      if existed {
+        "overwrote \{input.path}"
+      } else {
+        "wrote \{chars} chars to \{input.path}"
+      },
     )
+    // A source path reaching this point is always a NEW file (the overwrite
+    // guard above rejects existing source), so any parse error inside it was
+    // introduced by this write — no pre-write baseline is needed.
+    if input.revert_on_parse_errors && is_mbt_source(path) {
+      return parse_guarded_response(path, summary, ok_brief~)
+    }
+    let content = @auto_check.append_summary(path, summary)
+    @agent_tool.ToolAction::respond(content, brief=ok_brief)
   } catch {
     error if @async.is_being_cancelled() => raise error
     error =>
@@ -129,6 +145,87 @@ async fn write_file(
         brief="write \{@agent_tool.brief_basename(path)}",
       )
   }
+}
+
+///|
+/// From this many parse errors up, the revert report stops suggesting a plain
+/// re-issue and pushes writing the file in smaller parts instead: parse errors
+/// cascade, so several of them usually mean the content is malformed wholesale
+/// (truncated generation, stray markdown fences, non-MoonBit text), and a
+/// smaller skeleton that parses is the reliable way back.
+const SmallerPartsHintThreshold : Int = 3
+
+///|
+/// Post-write guard for a NEW MoonBit source file: run `moon check` and, when
+/// the file itself has lex/parse errors, delete it and return the errors with
+/// their source context. A non-parsing file is never a valid intermediate
+/// state, and `write` refuses to overwrite existing source — keeping the
+/// broken file would force the model to repair garbage through line-anchored
+/// edits, while deleting re-opens the natural retry: re-issue `write` with
+/// corrected content. Fail-open: when the check cannot run (not a MoonBit
+/// project, timeout), the file is kept exactly as written.
+async fn parse_guarded_response(
+  path : String,
+  summary : String,
+  ok_brief~ : String,
+) -> @agent_tool.ToolAction {
+  let check = @auto_check.check_source(path) catch {
+    error if @async.is_being_cancelled() => raise error
+    _ => None
+  }
+  guard check is Some(check) else {
+    return @agent_tool.ToolAction::respond(summary, brief=ok_brief)
+  }
+  if check.parse_error_count == 0 {
+    return @agent_tool.ToolAction::respond(
+      "\{summary}\n\{@auto_check.source_check_feedback(check)}",
+      brief=ok_brief,
+    )
+  }
+  let removed = try {
+    @fs.remove(path)
+    true
+  } catch {
+    error if @async.is_being_cancelled() => raise error
+    _ => false
+  }
+  @agent_tool.ToolAction::respond(
+    write_revert_report(path, check, removed~),
+    is_error=true,
+    brief="write reverted (\{check.parse_error_count} parse error(s))",
+  )
+}
+
+///|
+/// The reverted-write report: what was deleted, the first parse errors with
+/// their source excerpts (the model's only remaining view of the content), and
+/// how to retry — a plain re-issue for a small slip, smaller incremental
+/// writes when the errors suggest wholesale malformed content.
+fn write_revert_report(
+  path : String,
+  check : @auto_check.SourceCheck,
+  removed~ : Bool,
+) -> String {
+  let count = check.parse_error_count
+  let head = "reverted: wrote \{path} but the new file has \{count} parse error(s), so it was deleted (nothing is on disk)."
+  let shown = check.parse_errors.length()
+  let errors = if shown == 0 {
+    ""
+  } else {
+    "\nfirst \{shown} parse error(s), with the deleted content excerpted:\n\{check.parse_errors.join("\n")}"
+  }
+  let removed_note = if removed {
+    ""
+  } else {
+    "\nWARNING: could not delete \{path} — the broken content is still on disk; inspect it manually."
+  }
+  let retry = if count >= SmallerPartsHintThreshold {
+    "\n\{count} parse errors usually means the content is malformed wholesale (truncated or not valid MoonBit). Do not re-issue the same content: write a smaller file first — a minimal skeleton that parses — then grow it in small pieces with edit (an empty old_string inserts), checking after each step."
+  } else {
+    "\nre-issue write with the corrected full content."
+  }
+  let opt_out = "\n(To intentionally create a file that does not parse, e.g. a test fixture, pass revert_on_parse_errors=false.)"
+  "\{head}\{errors}\{removed_note}\{retry}\{opt_out}"
 }
 
 ///|
@@ -453,6 +550,53 @@ async test "write rejects suspiciously tiny moon.pkg" {
       ),
     )
   })
+}
+
+///|
+test "write_revert_report excerpts the deleted content and asks for a re-issue" {
+  let check : @auto_check.SourceCheck = {
+    error_count: 1,
+    warning_count: 0,
+    parse_error_count: 1,
+    parse_errors: [
+      "lib/a.mbt:7:1-7:2: Parse error, unexpected token `}`.\n  6 |  let y =\n  7 |}",
+    ],
+    first_errors: ["lib/a.mbt:7:1-7:2: Parse error, unexpected token `}`."],
+    truncated: false,
+    failure_output: None,
+  }
+  inspect(
+    write_revert_report("lib/a.mbt", check, removed=true),
+    content=(
+      #|reverted: wrote lib/a.mbt but the new file has 1 parse error(s), so it was deleted (nothing is on disk).
+      #|first 1 parse error(s), with the deleted content excerpted:
+      #|lib/a.mbt:7:1-7:2: Parse error, unexpected token `}`.
+      #|  6 |  let y =
+      #|  7 |}
+      #|re-issue write with the corrected full content.
+      #|(To intentionally create a file that does not parse, e.g. a test fixture, pass revert_on_parse_errors=false.)
+    ),
+  )
+}
+
+///|
+test "write_revert_report pushes smaller parts when parse errors cascade" {
+  let check : @auto_check.SourceCheck = {
+    error_count: 4,
+    warning_count: 1,
+    parse_error_count: 4,
+    parse_errors: ["lib/a.mbt:1:1-1:2: Parse error."],
+    first_errors: [],
+    truncated: false,
+    failure_output: None,
+  }
+  let report = write_revert_report("lib/a.mbt", check, removed=false)
+  assert_true(report.contains("4 parse errors usually means"))
+  assert_true(report.contains("write a smaller file first"))
+  assert_true(report.contains("WARNING: could not delete lib/a.mbt"))
+  assert_false(
+    report.contains("re-issue write with the corrected full content"),
+  )
 }
 
 ///|
