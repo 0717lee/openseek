@@ -33,10 +33,10 @@ async test "realworld DeepSeek API smoke test" {
 
 ///|
 async test "realworld Kimi API smoke test" {
-  guard @env.get_env_var("DEEPSEEK_MODEL") is Some(model_name) &&
+  guard @env.get_env_var("OPENSEEK_MODEL") is Some(model_name) &&
     (model_name == "kimi-k2.7-code" || model_name == "kimi-k2.7-code-highspeed") else {
     println(
-      "DEEPSEEK_MODEL is not a Kimi model; skipping realworld Kimi API smoke test",
+      "OPENSEEK_MODEL is not a Kimi model; skipping realworld Kimi API smoke test",
     )
     return
   }

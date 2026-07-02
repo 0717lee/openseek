@@ -35,7 +35,7 @@ moon run cmd/openseek -- run [--api-key sk-...] [--model deepseek-v4-pro] [--api
 ```
 
 Runs require `--api-key` or `DEEPSEEK`. `--model` can also be supplied with
-`DEEPSEEK_MODEL`; it accepts `deepseek-v4-flash`, `deepseek-v4-pro`,
+`OPENSEEK_MODEL`; it accepts `deepseek-v4-flash`, `deepseek-v4-pro`,
 `kimi-k2.7-code`, and `kimi-k2.7-code-highspeed`, and defaults to
 `deepseek-v4-pro`. `--max-steps` can also be supplied with
 `OPENSEEK_MAX_STEPS`; it defaults to `1000`. `--api-url` can also be supplied
@@ -116,7 +116,7 @@ moon run cmd/openseek -- run "run moon test and summarize the result"
 ```
 
 ```bash
-DEEPSEEK_MODEL=deepseek-v4-flash moon run cmd/openseek -- run "inspect the package docs"
+OPENSEEK_MODEL=deepseek-v4-flash moon run cmd/openseek -- run "inspect the package docs"
 ```
 
 ```bash

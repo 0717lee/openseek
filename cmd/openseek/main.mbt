@@ -1137,7 +1137,7 @@ test "session listing rows are tab-separated and survive odd prompts" {
 test "cli parses env backed options and task" {
   let parsed = run_matches(argv=["write", "MoonBit"], env={
     "DEEPSEEK": "test-key",
-    "DEEPSEEK_MODEL": "deepseek-v4-pro",
+    "OPENSEEK_MODEL": "deepseek-v4-pro",
     "OPENSEEK_API_URL": "https://proxy.example/v1/chat/completions",
     "OPENSEEK_DIR": "/tmp/openseek-workspace",
     "OPENSEEK_MAX_STEPS": "120",
