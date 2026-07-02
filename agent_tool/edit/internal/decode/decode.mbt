@@ -3,7 +3,9 @@
 /// `new_string` in the file at `path`. `start_line` anchors the search, and
 /// optional `end_line` bounds it to an inclusive 1-based line range. The legacy
 /// `replace_all` flag is still decoded so `agent_tool/edit` can return a
-/// targeted migration error for `replace_all=true`.
+/// targeted migration error for `replace_all=true`. `revert_on_parse_errors`
+/// (default true) controls the post-edit guard that restores a MoonBit source
+/// file when the edit introduced lex/parse errors.
 pub struct EditInput {
   path : String
   old_string : String
@@ -11,6 +13,7 @@ pub struct EditInput {
   replace_all : Bool
   start_line : Int
   end_line : Int?
+  revert_on_parse_errors : Bool
 } derive(Debug)
 
 ///|
@@ -37,6 +40,9 @@ fn parse_fields(fields : Map[String, Json]) -> EditInput raise {
   let replace_all = optional_bool(fields, "replace_all", false)
   let start_line = required_positive_int(fields, "start_line", "arguments")
   let end_line = optional_positive_int_option(fields, "end_line")
+  let revert_on_parse_errors = optional_bool(
+    fields, "revert_on_parse_errors", true,
+  )
   match end_line {
     Some(end) if end < start_line =>
       fail(
@@ -44,7 +50,15 @@ fn parse_fields(fields : Map[String, Json]) -> EditInput raise {
       )
     _ => ()
   }
-  { path, old_string, new_string, replace_all, start_line, end_line }
+  {
+    path,
+    old_string,
+    new_string,
+    replace_all,
+    start_line,
+    end_line,
+    revert_on_parse_errors,
+  }
 }
 
 ///|

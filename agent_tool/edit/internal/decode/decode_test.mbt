@@ -15,6 +15,7 @@ test "decode valid edit input" {
       #|  replace_all: false,
       #|  start_line: 1,
       #|  end_line: None,
+      #|  revert_on_parse_errors: true,
       #|}
     ),
   )
@@ -38,6 +39,7 @@ test "decode replace_all flag" {
       #|  replace_all: true,
       #|  start_line: 1,
       #|  end_line: None,
+      #|  revert_on_parse_errors: true,
       #|}
     ),
   )
@@ -61,6 +63,7 @@ test "decode line range" {
       #|  replace_all: false,
       #|  start_line: 2,
       #|  end_line: Some(4),
+      #|  revert_on_parse_errors: true,
       #|}
     ),
   )
@@ -178,5 +181,38 @@ test "decode rejects non-object arguments" {
     error => assert_true("\{error}".contains("object arguments"))
   } noraise {
     _ => fail("non-object decoded")
+  }
+}
+
+///|
+test "decode reads revert_on_parse_errors" {
+  let off = @decode.decode({
+    "path": "file.mbt",
+    "old_string": "old",
+    "new_string": "new",
+    "start_line": 1,
+    "revert_on_parse_errors": false,
+  })
+  assert_false(off.revert_on_parse_errors)
+  let default_on = @decode.decode({
+    "path": "file.mbt",
+    "old_string": "old",
+    "new_string": "new",
+    "start_line": 1,
+  })
+  assert_true(default_on.revert_on_parse_errors)
+  try
+    @decode.decode({
+      "path": "file.mbt",
+      "old_string": "old",
+      "new_string": "new",
+      "start_line": 1,
+      "revert_on_parse_errors": "yes",
+    })
+  catch {
+    error =>
+      assert_true("\{error}".contains("arguments.revert_on_parse_errors"))
+  } noraise {
+    _ => fail("non-boolean flag decoded")
   }
 }
