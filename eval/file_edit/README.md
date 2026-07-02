@@ -18,7 +18,7 @@ The default baseline is cheap Flash:
 
 ```bash
 moon run --target native eval/file_edit/cmd/main -- \
-  --api-key "$DEEPSEEK" \
+  --api-key "$OPENSEEK_API_KEY" \
   --model deepseek-v4-flash \
   --runs 10 \
   --concurrency 1 \
@@ -39,7 +39,7 @@ Run A with the built-in prompt:
 
 ```bash
 moon run --target native eval/file_edit/cmd/main -- \
-  --api-key "$DEEPSEEK" \
+  --api-key "$OPENSEEK_API_KEY" \
   --model deepseek-v4-flash \
   --runs 10 \
   --concurrency 1 \
@@ -53,7 +53,7 @@ Run B with an addendum:
 
 ```bash
 moon run --target native eval/file_edit/cmd/main -- \
-  --api-key "$DEEPSEEK" \
+  --api-key "$OPENSEEK_API_KEY" \
   --model deepseek-v4-flash \
   --runs 10 \
   --concurrency 1 \
@@ -74,7 +74,7 @@ five Flash repeats with five concurrent agent processes:
 
 ```bash
 moon run --target native eval/file_edit/cmd/main -- \
-  --api-key "$DEEPSEEK" \
+  --api-key "$OPENSEEK_API_KEY" \
   --model deepseek-v4-flash \
   --runs 5 \
   --concurrency 5 \

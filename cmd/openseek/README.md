@@ -34,7 +34,8 @@ globals; the UI's own options (`--prompt`, `--engine`, `--continue`) live on the
 moon run cmd/openseek -- run [--api-key sk-...] [--model deepseek-v4-pro] [--api-url https://api.deepseek.com/chat/completions] [--dir .] [--max-steps 1000] [--system-prompt-file prompt.md] [--system-prompt-addendum-file addendum.md] [--session session-id] [--session-root .openseek] "task text"
 ```
 
-Runs require `--api-key` or `DEEPSEEK`. `--model` can also be supplied with
+Runs require `--api-key` or `OPENSEEK_API_KEY`. For Kimi models, `KIMI` is also
+accepted as the provider-specific API key. `--model` can also be supplied with
 `OPENSEEK_MODEL`; it accepts `deepseek-v4-flash`, `deepseek-v4-pro`,
 `kimi-k2.7-code`, and `kimi-k2.7-code-highspeed`, and defaults to
 `deepseek-v4-pro`. `--max-steps` can also be supplied with
@@ -111,7 +112,7 @@ protocol for other integrations.
 ## Examples
 
 ```bash
-export DEEPSEEK=sk-...
+export OPENSEEK_API_KEY=sk-...
 moon run cmd/openseek -- run "run moon test and summarize the result"
 ```
 

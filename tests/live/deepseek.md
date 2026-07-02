@@ -5,7 +5,7 @@ DeepSeek API calls — there is no mocking. They live in a separate directory so
 the offline suite can run in CI without credentials, while these are opt-in:
 
 ```bash
-export DEEPSEEK=sk-...            # a real DeepSeek API key
+export OPENSEEK_API_KEY=sk-...            # a real provider API key
 moon cram test tests/live
 ```
 

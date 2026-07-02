@@ -32,7 +32,7 @@ Commands:
 
 Options:
   -h, --help                     Show help information.
-  --api-key <api-key>            DeepSeek API key. [env: DEEPSEEK] [default: ]
+  --api-key <api-key>            API key for the selected chat provider. [env: OPENSEEK_API_KEY] [default: ]
   --model <model>                Chat model: deepseek-v4-flash, deepseek-v4-pro, kimi-k2.7-code, or kimi-k2.7-code-highspeed. [env: OPENSEEK_MODEL] [default: deepseek-v4-pro]
   --api-url <api-url>            DeepSeek-compatible chat completions endpoint. [env: OPENSEEK_API_URL] [default: ]
   --max-steps <max-steps>        Maximum number of agent loop steps before stopping. [env: OPENSEEK_MAX_STEPS] [default: 1000]
@@ -57,7 +57,7 @@ rejection for now.)
 ```mooncram
 $ sh <<'EOF'
 > stderr=$(mktemp)
-> if env -u DEEPSEEK openseek.exe serv 2> "$stderr" >/dev/null; then echo exit-zero; else echo exit-non-zero; fi
+> if env -u OPENSEEK_API_KEY openseek.exe serv 2> "$stderr" >/dev/null; then echo exit-zero; else echo exit-non-zero; fi
 > sed -n '1p' "$stderr"
 > rm -f "$stderr"
 > EOF
@@ -75,7 +75,7 @@ subcommand. So `openseek --prompt x run â€¦` is an error; use `openseek tui
 ```mooncram
 $ sh <<'EOF'
 > stderr=$(mktemp)
-> if env DEEPSEEK=test-key openseek.exe --prompt x run TASK 2> "$stderr" >/dev/null; then echo exit-zero; else echo exit-non-zero; fi
+> if env OPENSEEK_API_KEY=test-key openseek.exe --prompt x run TASK 2> "$stderr" >/dev/null; then echo exit-zero; else echo exit-non-zero; fi
 > sed -n '1p' "$stderr"
 > rm -f "$stderr"
 > EOF
@@ -89,7 +89,7 @@ is rejected by the parser rather than opening the UI.
 ```mooncram
 $ sh <<'EOF'
 > stderr=$(mktemp)
-> if env DEEPSEEK=test-key openseek.exe -- something 2> "$stderr" >/dev/null; then echo exit-zero; else echo exit-non-zero; fi
+> if env OPENSEEK_API_KEY=test-key openseek.exe -- something 2> "$stderr" >/dev/null; then echo exit-zero; else echo exit-non-zero; fi
 > sed -n '1p' "$stderr"
 > rm -f "$stderr"
 > EOF
@@ -106,7 +106,7 @@ engine pre-flight fail deterministically, proving the env var is honored for a
 bare launch.
 
 ```mooncram
-$ env DEEPSEEK=test-key OPENSEEK_ENGINE=does-not-exist openseek.exe 2>&1
+$ env OPENSEEK_API_KEY=test-key OPENSEEK_ENGINE=does-not-exist openseek.exe 2>&1
 error: engine 'does-not-exist' is not usable: it must be on PATH, executable, and accept `--help` (exit 0) the way openseek does.
 Pass --engine <path>, set OPENSEEK_ENGINE, or install the openseek binary.
 [1]
@@ -128,7 +128,7 @@ Arguments:
 
 Options:
   -h, --help                                                   Show help information.
-  --api-key <api-key>                                          DeepSeek API key. [env: DEEPSEEK] [default: ]
+  --api-key <api-key>                                          API key for the selected chat provider. [env: OPENSEEK_API_KEY] [default: ]
   --model <model>                                              Chat model: deepseek-v4-flash, deepseek-v4-pro, kimi-k2.7-code, or kimi-k2.7-code-highspeed. [env: OPENSEEK_MODEL] [default: deepseek-v4-pro]
   --api-url <api-url>                                          DeepSeek-compatible chat completions endpoint. [env: OPENSEEK_API_URL] [default: ]
   --max-steps <max-steps>                                      Maximum number of agent loop steps before stopping. [env: OPENSEEK_MAX_STEPS] [default: 1000]
@@ -143,22 +143,22 @@ Options:
   --concurrency <concurrency>                                  Run the task in N sibling copies of --dir concurrently (best-of-N); 1 means a single run. [env: OPENSEEK_CONCURRENCY] [default: 1]
 ```
 
-## A DeepSeek API Key Is Required For Agent Runs
+## API Key Is Required For Agent Runs
 
-With no `--api-key` flag and no `DEEPSEEK` in the environment, a run reports the
+With no `--api-key` flag and no `OPENSEEK_API_KEY` in the environment, a run reports the
 missing key and exits non-zero.
 
 ```mooncram
 $ sh <<'EOF'
 > stdout=$(mktemp)
 > stderr=$(mktemp)
-> if env -u DEEPSEEK openseek.exe run "summarize this project" > "$stdout" 2> "$stderr"; then echo exit-zero; else echo exit-non-zero; fi
+> if env -u OPENSEEK_API_KEY -u KIMI -u OPENSEEK_MODEL openseek.exe run "summarize this project" > "$stdout" 2> "$stderr"; then echo exit-zero; else echo exit-non-zero; fi
 > cat "$stderr"
 > if test -s "$stdout"; then echo stdout-not-empty; else echo stdout-empty; fi
 > rm -f "$stdout" "$stderr"
 > EOF
 exit-non-zero
-error: --api-key or DEEPSEEK is required for agent runs
+error: an API key is required: pass --api-key or set OPENSEEK_API_KEY
 stdout-empty
 ```
 
@@ -172,7 +172,7 @@ instead of silently turning them into prompt text.
 $ sh <<'EOF'
 > stdout=$(mktemp)
 > stderr=$(mktemp)
-> if env -u DEEPSEEK openseek.exe run --xxy he > "$stdout" 2> "$stderr"; then echo exit-zero; else echo exit-non-zero; fi
+> if env -u OPENSEEK_API_KEY openseek.exe run --xxy he > "$stdout" 2> "$stderr"; then echo exit-zero; else echo exit-non-zero; fi
 > sed -n '1p' "$stderr"
 > if test -s "$stdout"; then echo stdout-not-empty; else echo stdout-empty; fi
 > rm -f "$stdout" "$stderr"
@@ -189,20 +189,20 @@ Here parsing succeeds and the run reaches the later API-key validation.
 $ sh <<'EOF'
 > stdout=$(mktemp)
 > stderr=$(mktemp)
-> if env -u DEEPSEEK openseek.exe run -- '--xxy he' > "$stdout" 2> "$stderr"; then echo exit-zero; else echo exit-non-zero; fi
+> if env -u OPENSEEK_API_KEY -u KIMI -u OPENSEEK_MODEL openseek.exe run -- '--xxy he' > "$stdout" 2> "$stderr"; then echo exit-zero; else echo exit-non-zero; fi
 > cat "$stderr"
 > if test -s "$stdout"; then echo stdout-not-empty; else echo stdout-empty; fi
 > rm -f "$stdout" "$stderr"
 > EOF
 exit-non-zero
-error: --api-key or DEEPSEEK is required for agent runs
+error: an API key is required: pass --api-key or set OPENSEEK_API_KEY
 stdout-empty
 ```
 
 ## `openseek sessions` Is Offline
 
 Session inspection and compaction operate on typed session files and do not
-require a DeepSeek API key. Hand-written log lines carry the 0 sentinel stamp;
+require a API key for the selected chat provider. Hand-written log lines carry the 0 sentinel stamp;
 the summary event the compaction *appends* is stamped with the wall clock, so
 both `sessions show` calls strip `ts` to stay deterministic.
 
@@ -216,10 +216,10 @@ $ sh <<'EOF'
 > {"sequence":2,"ts":0,"item":{"kind":"assistant","payload":{"content":"answer","tool_calls":[]}}}
 > JSONL
 > printf 'hello and answer' > "$tmp/summary.txt"
-> env -u DEEPSEEK openseek.exe sessions list --session-root "$tmp" | cut -f1
-> env -u DEEPSEEK openseek.exe sessions show demo --session-root "$tmp" | sed -E 's/"ts":[0-9]+,//g'
-> env -u DEEPSEEK openseek.exe sessions compact demo --session-root "$tmp" --file "$tmp/summary.txt" --from 1 --to 2
-> env -u DEEPSEEK openseek.exe sessions show demo --session-root "$tmp" | sed -E 's/"ts":[0-9]+,//g'
+> env -u OPENSEEK_API_KEY openseek.exe sessions list --session-root "$tmp" | cut -f1
+> env -u OPENSEEK_API_KEY openseek.exe sessions show demo --session-root "$tmp" | sed -E 's/"ts":[0-9]+,//g'
+> env -u OPENSEEK_API_KEY openseek.exe sessions compact demo --session-root "$tmp" --file "$tmp/summary.txt" --from 1 --to 2
+> env -u OPENSEEK_API_KEY openseek.exe sessions show demo --session-root "$tmp" | sed -E 's/"ts":[0-9]+,//g'
 > rm -rf "$tmp"
 > EOF
 demo
@@ -247,9 +247,9 @@ to reach the API. The generated id's timestamp is normalized for determinism.
 $ sh <<'EOF'
 > tmp=$(mktemp -d)
 > cd "$tmp"
-> if env DEEPSEEK=test-key openseek.exe run --api-url "http://127.0.0.1:9/chat/completions" "say hi" > out.jsonl 2>/dev/null; then echo exit-zero; else echo exit-non-zero; fi
+> if env OPENSEEK_API_KEY=test-key openseek.exe run --api-url "http://127.0.0.1:9/chat/completions" "say hi" > out.jsonl 2>/dev/null; then echo exit-zero; else echo exit-non-zero; fi
 > grep -c '"event":"session_started"' out.jsonl
-> env -u DEEPSEEK openseek.exe sessions list | cut -f1 | sed -E 's/cli-[0-9]{8}-[0-9]{6}-[0-9]{3}(-[A-Za-z0-9]+)?/cli-<stamp>/'
+> env -u OPENSEEK_API_KEY openseek.exe sessions list | cut -f1 | sed -E 's/cli-[0-9]{8}-[0-9]{6}-[0-9]{3}(-[A-Za-z0-9]+)?/cli-<stamp>/'
 > rm -rf "$tmp"
 > EOF
 exit-non-zero
@@ -264,7 +264,7 @@ behind.
 $ sh <<'EOF'
 > tmp=$(mktemp -d)
 > cd "$tmp"
-> env DEEPSEEK=test-key openseek.exe run --no-session --api-url "http://127.0.0.1:9/chat/completions" "say hi" >/dev/null 2>&1
+> env OPENSEEK_API_KEY=test-key openseek.exe run --no-session --api-url "http://127.0.0.1:9/chat/completions" "say hi" >/dev/null 2>&1
 > if test -d .openseek; then echo recorded; else echo ephemeral; fi
 > rm -rf "$tmp"
 > EOF
@@ -282,11 +282,11 @@ it.
 $ sh <<'EOF'
 > tmp=$(mktemp -d)
 > mkdir -p "$tmp/parent"
-> if env DEEPSEEK=test-key openseek.exe run --dir "$tmp/parent/new" --api-url "http://127.0.0.1:9/chat/completions" "say hi" > "$tmp/out.jsonl" 2>/dev/null; then echo exit-zero; else echo exit-non-zero; fi
+> if env OPENSEEK_API_KEY=test-key openseek.exe run --dir "$tmp/parent/new" --api-url "http://127.0.0.1:9/chat/completions" "say hi" > "$tmp/out.jsonl" 2>/dev/null; then echo exit-zero; else echo exit-non-zero; fi
 > if test -d "$tmp/parent/new"; then echo dir-created; else echo dir-missing; fi
 > grep -c '"event":"workspace_created"' "$tmp/out.jsonl"
-> env -u DEEPSEEK openseek.exe sessions list --dir "$tmp/parent/new" | cut -f1 | sed -E 's/cli-[0-9]{8}-[0-9]{6}-[0-9]{3}(-[A-Za-z0-9]+)?/cli-<stamp>/'
-> env -u DEEPSEEK openseek.exe sessions list --dir "$tmp/parent/fresh" > "$tmp/session-list.out"
+> env -u OPENSEEK_API_KEY openseek.exe sessions list --dir "$tmp/parent/new" | cut -f1 | sed -E 's/cli-[0-9]{8}-[0-9]{6}-[0-9]{3}(-[A-Za-z0-9]+)?/cli-<stamp>/'
+> env -u OPENSEEK_API_KEY openseek.exe sessions list --dir "$tmp/parent/fresh" > "$tmp/session-list.out"
 > if test -d "$tmp/parent/fresh"; then echo session-dir-created; else echo session-dir-missing; fi
 > wc -l < "$tmp/session-list.out" | tr -d ' '
 > rm -rf "$tmp"
@@ -302,7 +302,7 @@ session-dir-created
 Asking for both recording behaviors at once is rejected before any work happens.
 
 ```mooncram
-$ env DEEPSEEK=test-key openseek.exe run --session demo --no-session "say hi" 2>&1
+$ env OPENSEEK_API_KEY=test-key openseek.exe run --session demo --no-session "say hi" 2>&1
 error: --no-session contradicts --session; pick one behavior
 [1]
 ```
@@ -318,7 +318,7 @@ without ever touching the network. The `grep -o` keeps only the stable event
 tag, since event lines carry timestamps.
 
 ```mooncram
-$ printf '{"command":"reboot"}\n{"command":"cancel"}\n' | env DEEPSEEK=test-key openseek.exe serve 2>/dev/null | grep -o '"event":"command_error"'
+$ printf '{"command":"reboot"}\n{"command":"cancel"}\n' | env OPENSEEK_API_KEY=test-key openseek.exe serve 2>/dev/null | grep -o '"event":"command_error"'
 "event":"command_error"
 ```
 
@@ -329,7 +329,7 @@ carries a `steer_dropped` event so the controller can ask the user to resubmit â
 and, usefully for this offline test, no turn means no network.
 
 ```mooncram
-$ printf '{"command":"steer","text":"too late"}\n' | env DEEPSEEK=test-key openseek.exe serve 2>/dev/null | grep -o '"event":"steer_dropped"'
+$ printf '{"command":"steer","text":"too late"}\n' | env OPENSEEK_API_KEY=test-key openseek.exe serve 2>/dev/null | grep -o '"event":"steer_dropped"'
 "event":"steer_dropped"
 ```
 
@@ -339,7 +339,7 @@ anything runs.
 ```mooncram
 $ sh <<'EOF'
 > stderr=$(mktemp)
-> if env DEEPSEEK=test-key openseek.exe serve "do something" 2> "$stderr" >/dev/null; then echo exit-zero; else echo exit-non-zero; fi
+> if env OPENSEEK_API_KEY=test-key openseek.exe serve "do something" 2> "$stderr" >/dev/null; then echo exit-zero; else echo exit-non-zero; fi
 > sed -n '1p' "$stderr"
 > rm -f "$stderr"
 > EOF

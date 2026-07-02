@@ -87,7 +87,7 @@ The checked-in prompt-task runner supports five concurrent repeats:
 
 ```bash
 moon run --target native eval/prompt_task/cmd/main -- \
-  --api-key "$DEEPSEEK" \
+  --api-key "$OPENSEEK_API_KEY" \
   --model deepseek-v4-flash \
   --runs 5 \
   --concurrency 5 \
