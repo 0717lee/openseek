@@ -54,11 +54,14 @@ const ParseGateFileName : String = "parse_gate.mbt"
 
 ///|
 /// One lex/parse diagnostic from the gate. `loc` keeps the compiler's
-/// `line:col-line:col` shape; the caller renders excerpts from the content it
-/// already holds in memory (moonc's own `context` field is empty).
+/// `line:col-line:col` shape. `context` is the compiler's own numbered source
+/// excerpt — populated when moonc can re-read the file relative to its cwd,
+/// which the scratch-dir invocation guarantees; the formatter still falls back
+/// to synthesizing an excerpt from the in-memory content when it is empty.
 pub(all) struct ParseGateError {
   loc : String
   message : String
+  context : String
 } derive(Debug)
 
 ///|
@@ -139,6 +142,7 @@ fn decide_parse_gate(text : String, exit_code : Int?) -> Array[ParseGateError]? 
       errors.push({
         loc: json_string_field(fields, "loc"),
         message: json_string_field(fields, "message"),
+        context: json_string_field(fields, "context"),
       })
     }
   }
@@ -154,9 +158,10 @@ fn decide_parse_gate(text : String, exit_code : Int?) -> Array[ParseGateError]? 
 ///|
 /// Render up to `ParseErrorDisplayLimit` gate errors as
 /// `path:loc: message` lines, each followed by a numbered excerpt of the
-/// offending lines synthesized from `content` — the content is not on disk
-/// (the write was rejected), so these excerpts are the model's only view of
-/// the broken spot.
+/// offending lines — the rejected content never lands at its destination, so
+/// these excerpts are the model's only view of the broken spot. The compiler's
+/// own `context` excerpt is preferred; when it is absent the excerpt is
+/// synthesized from the in-memory `content` via the diagnostic's `loc`.
 pub fn format_parse_gate_errors(
   display_path : String,
   content : String,
@@ -175,7 +180,11 @@ pub fn format_parse_gate_errors(
       } else {
         "\{display_path}:\{error.loc}: \{error.message}"
       }
-      let excerpt = excerpt_for_loc(lines, error.loc)
+      let excerpt = if error.context == "" {
+        excerpt_for_loc(lines, error.loc)
+      } else {
+        indent_context(error.context)
+      }
       if excerpt == "" {
         header
       } else {
@@ -183,6 +192,16 @@ pub fn format_parse_gate_errors(
       }
     }
   ]
+}
+
+///|
+/// Indent the compiler's `context` excerpt (numbered source lines, one per
+/// `\n`) by two spaces, dropping the trailing blank line.
+fn indent_context(context : String) -> String {
+  let indented = [
+    for line in context.split("\n") if !line.is_empty() => "  \{line}"
+  ]
+  indented.join("\n")
 }
 
 ///|
@@ -262,12 +281,13 @@ fn pad_line_number(number : Int, width : Int) -> String {
 ///|
 test "decide_parse_gate splits errors, clean, and cannot-run" {
   let broken =
-    #|{"$message_type":"diagnostic","level":"error","error_code":3002,"path":"parse_gate.mbt","loc":"5:2-5:2","message":"Parse error, unexpected token `end of file`.","context":""}
+    #|{"$message_type":"diagnostic","level":"error","error_code":3002,"path":"parse_gate.mbt","loc":"5:2-5:2","message":"Parse error, unexpected token `end of file`.","context":"4 |  match x {\n5 |}\n"}
   guard decide_parse_gate(broken, Some(2)) is Some(errors) else {
     fail("expected errors")
   }
   assert_eq(errors.length(), 1)
   assert_eq(errors[0].loc, "5:2-5:2")
+  assert_eq(errors[0].context, "4 |  match x {\n5 |}\n")
   // Clean run: exit 0, no diagnostics.
   guard decide_parse_gate("", Some(0)) is Some(clean) else {
     fail("expected clean")
@@ -293,9 +313,34 @@ test "format_parse_gate_errors synthesizes numbered excerpts from content" {
     #|  let x =
     #|}
   let formatted = format_parse_gate_errors("lib/a.mbt", content, [
-    { loc: "4:1-4:2", message: "Parse error, unexpected token `}`." },
+    {
+      loc: "4:1-4:2",
+      message: "Parse error, unexpected token `}`.",
+      context: "",
+    },
   ])
   assert_eq(formatted.length(), 1)
+  assert_eq(
+    formatted[0],
+    (
+      #|lib/a.mbt:4:1-4:2: Parse error, unexpected token `}`.
+      #|  3 |  let x =
+      #|  4 |}
+    ),
+  )
+}
+
+///|
+test "format_parse_gate_errors prefers the compiler's own context excerpt" {
+  // The compiler context wins over synthesis; the content lines would say
+  // otherwise, proving which source was used.
+  let formatted = format_parse_gate_errors("lib/a.mbt", "unrelated\ncontent", [
+    {
+      loc: "4:1-4:2",
+      message: "Parse error, unexpected token `}`.",
+      context: "3 |  let x =\n4 |}\n",
+    },
+  ])
   assert_eq(
     formatted[0],
     (
@@ -311,17 +356,20 @@ test "format_parse_gate_errors caps at the display limit and handles bad locs" {
   let errors = [
     for index in 0..<9 => {
       (
-        { loc: "\{index + 1}:1-\{index + 1}:2", message: "e\{index}" } :
-        ParseGateError)
+        {
+          loc: "\{index + 1}:1-\{index + 1}:2",
+          message: "e\{index}",
+          context: "",
+        } : ParseGateError)
     }
   ]
   let formatted = format_parse_gate_errors("a.mbt", "one\ntwo\nthree", errors)
   assert_eq(formatted.length(), ParseErrorDisplayLimit)
   // A loc beyond the content and a malformed loc degrade to the bare header.
   let odd = format_parse_gate_errors("a.mbt", "only", [
-    { loc: "9:1-9:2", message: "past the end" },
-    { loc: "junk", message: "no loc" },
-    { loc: "", message: "empty loc" },
+    { loc: "9:1-9:2", message: "past the end", context: "" },
+    { loc: "junk", message: "no loc", context: "" },
+    { loc: "", message: "empty loc", context: "" },
   ])
   assert_eq(odd[0], "a.mbt:9:1-9:2: past the end")
   assert_eq(odd[1], "a.mbt:junk: no loc")
@@ -354,4 +402,7 @@ async test "content_parse_errors gates real content through moonc" {
   }
   assert_true(errors.length() > 0)
   assert_true(errors[0].message.contains("Parse error"))
+  // The scratch-dir invocation (relative file name, cwd inside the dir) makes
+  // moonc emit its own context excerpt; the formatter prefers it.
+  assert_true(errors[0].context != "")
 }

@@ -254,12 +254,12 @@ async fn parse_gate_rejection(
     error if @async.is_being_cancelled() => raise error
     _ => None
   }
-  let before_count = match before {
-    Some(before) => before.length()
-    // The gate parsed the new content but not the original: treat the
-    // original as clean, which errs toward rejecting a breaking edit.
-    None => 0
-  }
+  // The gate parsed the new content but could not parse the original (a
+  // transient tmpdir/moonc failure): without a baseline there is no honest
+  // "introduced" answer, so fail open and let the edit proceed — the gate
+  // must never reject on a comparison it could not actually make.
+  guard before is Some(before) else { return None }
+  let before_count = before.length()
   let introduced = errors.length() - before_count
   if introduced <= 0 {
     return None
@@ -287,7 +287,7 @@ fn edit_reject_report(
 ) -> String {
   let head = "rejected: the edit would introduce \{introduced} new parse error(s) in \{path}, so the file was NOT modified."
   let pre_existing = if before_count > 0 {
-    " (the file already has \{before_count} parse error(s); only the newly introduced ones count)"
+    " (the file already has \{before_count} parse error(s); only counts are compared, so the excerpts below may include pre-existing errors, not only the newly introduced ones)"
   } else {
     ""
   }
@@ -404,7 +404,13 @@ test "edit_reject_report excerpts the would-be content and asks for a re-issue" 
     edit_reject_report(
       "lib/a.mbt",
       would_be,
-      [{ loc: "4:1-4:2", message: "Parse error, unexpected token `}`." }],
+      [
+        {
+          loc: "4:1-4:2",
+          message: "Parse error, unexpected token `}`.",
+          context: "",
+        },
+      ],
       introduced=1,
       before_count=0,
     ),
@@ -425,7 +431,7 @@ test "edit_reject_report pushes smaller edits and names pre-existing errors" {
   let errors = [
     for index in 0..<5 => {
       (
-        { loc: "\{index + 1}:1", message: "e\{index}" } :
+        { loc: "\{index + 1}:1", message: "e\{index}", context: "" } :
         @auto_check.ParseGateError)
     }
   ]

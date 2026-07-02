@@ -138,7 +138,15 @@ async fn write_file(
     // never read is a common way to lose work. A non-ENOENT `exists` error (e.g.
     // ENOTDIR) falls through to the write below and the `catch` reports it.
     let existed = @fs.exists(path)
-    @fs.write_file(path, input.content, create_mode=CreateOrTruncate)
+    // For source files the guard above already returned when the path existed,
+    // so create with CreateNew: if another writer created the file between the
+    // probe and this write, fail instead of truncating hand-written source.
+    // Non-source overwrites keep CreateOrTruncate.
+    @fs.write_file(
+      path,
+      input.content,
+      create_mode=if is_mbt_source(path) { CreateNew } else { CreateOrTruncate },
+    )
     let chars = input.content.length()
     let summary = if existed {
       "ok: wrote \{chars} chars to \{path} (overwrote existing file)"
@@ -533,7 +541,11 @@ test "write_reject_report excerpts the rejected content and asks for a re-issue"
     #|}
   inspect(
     write_reject_report("lib/a.mbt", content, [
-      { loc: "4:1-4:2", message: "Parse error, unexpected token `}`." },
+      {
+        loc: "4:1-4:2",
+        message: "Parse error, unexpected token `}`.",
+        context: "",
+      },
     ]),
     content=(
       #|rejected: the content for lib/a.mbt has 1 parse error(s); nothing was written.
@@ -552,7 +564,7 @@ test "write_reject_report pushes smaller parts when parse errors cascade" {
   let errors = [
     for index in 0..<4 => {
       (
-        { loc: "\{index + 1}:1", message: "e\{index}" } :
+        { loc: "\{index + 1}:1", message: "e\{index}", context: "" } :
         @auto_check.ParseGateError)
     }
   ]

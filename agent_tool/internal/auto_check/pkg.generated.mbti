@@ -35,6 +35,7 @@ pub(all) struct CheckErrors {
 pub(all) struct ParseGateError {
   loc : String
   message : String
+  context : String
 } derive(@debug.Debug)
 
 // Type aliases
