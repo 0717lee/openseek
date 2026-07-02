@@ -48,15 +48,12 @@ fn parse_fields(fields : Map[String, Json]) -> MoonCommandInput raise {
   validate_command(command)
   let cwd = optional_string(fields, "cwd")
   let target = optional_string(fields, "target")
-  match target {
-    Some(value) => {
-      @moon_target.validate_target(value)
-      validate_target_supported(command)
-    }
-    None => ()
+  if target is Some(value) {
+    @moon_target.validate_target(value)
+    validate_target_supported(command)
   }
-  let args = parse_arg_list(fields)
-  let paths = parse_paths(fields)
+  let args = parse_string_list(fields, "arg", "args")
+  let paths = parse_string_list(fields, "path", "paths")
   let program_args = optional_string_array(fields, "program_args")
   if program_args.length() > 0 && command != "run" {
     fail("arguments.program_args only with command run")
@@ -106,31 +103,23 @@ fn optional_string(fields : Map[String, Json], name : String) -> String? raise {
 }
 
 ///|
-fn parse_arg_list(fields : Map[String, Json]) -> Array[String] raise {
-  let args : Array[String] = []
-  match fields.get("arg") {
-    Some(String(arg)) if arg != "" => args.push(arg)
+/// Collect a string list from a singular field (`singular`) followed by a
+/// plural array field (`plural`), skipping empty/null entries.
+fn parse_string_list(
+  fields : Map[String, Json],
+  singular : String,
+  plural : String,
+) -> Array[String] raise {
+  let values : Array[String] = []
+  match fields.get(singular) {
+    Some(String(value)) if value != "" => values.push(value)
     Some(String(_)) | Some(Null) | None => ()
-    _ => fail("arguments.arg to be a string")
+    _ => fail("arguments.\{singular} to be a string")
   }
-  for arg in optional_string_array(fields, "args") {
-    args.push(arg)
+  for value in optional_string_array(fields, plural) {
+    values.push(value)
   }
-  args
-}
-
-///|
-fn parse_paths(fields : Map[String, Json]) -> Array[String] raise {
-  let paths : Array[String] = []
-  match fields.get("path") {
-    Some(String(path)) if path != "" => paths.push(path)
-    Some(String(_)) | Some(Null) | None => ()
-    _ => fail("arguments.path to be a string")
-  }
-  for path in optional_string_array(fields, "paths") {
-    paths.push(path)
-  }
-  paths
+  values
 }
 
 ///|
