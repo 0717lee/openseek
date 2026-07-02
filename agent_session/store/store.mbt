@@ -110,18 +110,6 @@ fn session_file_text(session : @agent_session.Session) -> String {
 }
 
 ///|
-fn parse_events_jsonl(
-  text : String,
-) -> @vector.Vector[@agent_session.SessionEvent] raise {
-  let events : Array[@agent_session.SessionEvent] = [
-    for line in text.split("\n") if !line.trim().is_empty() => {
-      @json.from_json(@json.parse(line))
-    }
-  ]
-  @vector.from_array(events)
-}
-
-///|
 fn checked_last_sequence_in_events(
   events : @vector.Vector[@agent_session.SessionEvent],
 ) -> Int raise {
@@ -138,13 +126,34 @@ fn checked_last_sequence_in_events(
 }
 
 ///|
-/// Rebuild a session from the durable single-file form: the first line must be
-/// a header record, every following non-blank line must decode as an event,
-/// and event sequences must be contiguous from 1.
-fn session_from_file_text(
+/// A session rebuilt from durable text, plus whether that text ends in an
+/// unterminated final record — a torn write from a crash mid-append, or a
+/// record missing only its newline. Either way the next durable write must
+/// rewrite the file instead of appending, or the new record would glue onto
+/// the unterminated tail.
+priv struct ParsedSessionFile {
+  session : @agent_session.Session
+  needs_tail_repair : Bool
+}
+
+///|
+/// Rebuild a session from the durable single-file form: the first line must
+/// be a header record, every following non-blank line must decode as an
+/// event, and event sequences must be contiguous from 1.
+///
+/// The only tolerated deviation is an unterminated final record. A crash can
+/// tear the last append mid-line, and refusing to load would make the whole
+/// session unresumable over bytes no writer ever committed. A torn final
+/// record is dropped; a final record that decodes but merely lacks its
+/// newline is kept. Both are reported via `needs_tail_repair` so writers can
+/// rewrite. The rule is uniform: in a zero-event file the header is the final
+/// record, so a decodable header without its newline also loads (and gets
+/// repaired). A bad line *followed by more lines* (or by a final newline) is
+/// interior corruption, not a torn append, and still fails the load.
+fn parse_session_file(
   requested_id : @agent_session.SessionId,
   text : String,
-) -> @agent_session.Session raise {
+) -> ParsedSessionFile raise {
   let (first, rest) = match text.split_once("\n") {
     Some((first, rest)) => (first.to_owned(), rest.to_owned())
     None => (text, "")
@@ -167,56 +176,85 @@ fn session_from_file_text(
       "session header id mismatch: requested \{requested_id.value()}, found \{header.id}",
     )
   }
-  let events = parse_events_jsonl(rest)
+  let ends_with_newline = text.has_suffix("\n")
+  let segments = rest.split("\n").map(line => line.to_owned()).collect()
+  let decoded : Array[@agent_session.SessionEvent] = []
+  for index, line in segments {
+    if line.trim().is_empty() {
+      continue
+    }
+    let unterminated_last = index == segments.length() - 1 && !ends_with_newline
+    let event : @agent_session.SessionEvent = @json.from_json(@json.parse(line)) catch {
+      error => if unterminated_last { continue } else { raise error }
+    }
+    decoded.push(event)
+  }
+  let events = @vector.from_array(decoded)
   ignore(checked_last_sequence_in_events(events))
-  Session(SessionId(header.id), system_prompt=header.system_prompt, events~)
+  {
+    session: Session(
+      SessionId(header.id),
+      system_prompt=header.system_prompt,
+      events~,
+    ),
+    needs_tail_repair: !ends_with_newline,
+  }
 }
 
 ///|
-async fn load_persisted_session(
+async fn read_session_file(
   store : SessionStore,
   id : @agent_session.SessionId,
-) -> @agent_session.Session {
-  session_from_file_text(id, @fs.read_file(store.session_file_path(id)).text())
+) -> ParsedSessionFile {
+  parse_session_file(id, @fs.read_file(store.session_file_path(id)).text())
 }
 
 ///|
+/// Verify that `session` still matches the durable state, and report whether
+/// the durable file ends in an unterminated record that the next write must
+/// repair. A missing file is current only for an empty snapshot.
 async fn ensure_session_is_current(
   store : SessionStore,
   session : @agent_session.Session,
-) -> Unit {
-  let persisted = load_persisted_session(store, session.id()) catch {
+) -> Bool {
+  let parsed = read_session_file(store, session.id()) catch {
     @os_error.OSError(_) as error if error.is_ENOENT() => {
       if session.last_sequence() != 0 {
         fail(
           "stale session snapshot for \{session.id().value()}: no durable session file, in-memory last sequence \{session.last_sequence()}",
         )
       }
-      return
+      return false
     }
     error => raise error
   }
+  let persisted = parsed.session
   if persisted.system_prompt() != session.system_prompt() ||
     events_jsonl(persisted.events()) != events_jsonl(session.events()) {
     fail("stale session snapshot for \{session.id().value()}")
   }
+  parsed.needs_tail_repair
 }
 
 ///|
 /// Persist one new event for `session`. The common case is a single
 /// `O_APPEND` write of one line. The first durable write for a session (no
 /// file yet) instead writes the header line and the first event atomically,
-/// so a session file can never exist without its header. Callers hold the
-/// exclusive session lock and have already verified the snapshot is current,
-/// which for the missing-file case means `session` contains exactly the
-/// events being persisted.
-async fn append_durable_event(
+/// so a session file can never exist without its header. When the durable
+/// tail is unterminated (`repair_tail`), appending would glue the new record
+/// onto the torn bytes, so the whole file is rewritten atomically from the
+/// snapshot — which discards the uncommitted tail and includes the new event.
+/// Callers hold the exclusive session lock and have already verified the
+/// snapshot is current, so for the missing-file and repair cases `session`
+/// contains exactly the events being persisted.
+async fn persist_event(
   store : SessionStore,
   session : @agent_session.Session,
   event : @agent_session.SessionEvent,
+  repair_tail~ : Bool,
 ) -> Unit {
   let path = store.session_file_path(session.id())
-  if @fs.exists(path) {
+  if !repair_tail && @fs.exists(path) {
     @fs.write_file(
       path,
       "\{event.to_json().stringify()}\n",
@@ -546,15 +584,21 @@ pub async fn SessionStore::create(
 /// `list` or `listings` when presenting choices, or `latest` when implementing
 /// "resume the newest session", then pass the chosen id to `load`.
 ///
+/// One deviation is tolerated: an unterminated final record — a torn write
+/// from a crash mid-append. The torn bytes are dropped (or kept, when the
+/// record is complete and only its newline is missing) so the session stays
+/// resumable; `load` itself never mutates the file, and the next `append` or
+/// `compact` repairs the tail on disk.
+///
 /// The call raises if the id is invalid, the file cannot be read (including a
-/// missing file), the header line is absent or malformed, or any event line is
-/// invalid.
+/// missing file), the header line is absent or malformed, or any event line
+/// other than an unterminated final record is invalid.
 pub async fn SessionStore::load(
   self : SessionStore,
   id : @agent_session.SessionId,
 ) -> @agent_session.Session {
   with_existing_session_lock(self, id, Shared, () => {
-    load_persisted_session(self, id)
+    read_session_file(self, id).session
   })
 }
 
@@ -571,7 +615,9 @@ pub async fn SessionStore::load(
 /// wall-clock timestamp, one JSONL line is appended to
 /// `openseek_session.jsonl`, and the new immutable `Session` is returned. The
 /// first append for a session id creates the file, writing the header line and
-/// the first event together. The input session is unchanged.
+/// the first event together; and when a crash left the durable tail
+/// unterminated, the append rewrites the file atomically instead, repairing
+/// the tail as it persists the new event. The input session is unchanged.
 pub async fn SessionStore::append(
   self : SessionStore,
   session : @agent_session.Session,
@@ -579,12 +625,12 @@ pub async fn SessionStore::append(
 ) -> @agent_session.Session {
   ensure_session_dir(self, session.id())
   with_session_lock(self, session.id(), Exclusive, () => {
-    ensure_session_is_current(self, session)
+    let repair_tail = ensure_session_is_current(self, session)
     let (next, event) = session.append_event(
       item,
       unix_ms=@env.now().reinterpret_as_int64(),
     )
-    append_durable_event(self, next, event)
+    persist_event(self, next, event, repair_tail~)
     next
   })
 }
@@ -610,7 +656,7 @@ pub async fn SessionStore::compact(
 ) -> @agent_session.Session {
   ensure_session_dir(self, session.id())
   with_session_lock(self, session.id(), Exclusive, () => {
-    ensure_session_is_current(self, session)
+    let repair_tail = ensure_session_is_current(self, session)
     let next = session.compact(
       content~,
       from_sequence~,
@@ -621,7 +667,7 @@ pub async fn SessionStore::compact(
       Some(event) => event
       None => fail("compacted session did not append a summary event")
     }
-    append_durable_event(self, next, event)
+    persist_event(self, next, event, repair_tail~)
     next
   })
 }

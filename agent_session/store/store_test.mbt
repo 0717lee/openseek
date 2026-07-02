@@ -482,29 +482,284 @@ async test "store rejects a header whose id does not match the directory" {
 }
 
 ///|
-async test "store fails load on a torn trailing event line" {
+async test "load drops a torn trailing record without mutating the file" {
   let store = new_store()
   let session = @agent_session.Session(SessionId("s1"), system_prompt="system").append(
     User(UserMessage("first")),
   )
   store.create(session)
-  // A crash mid-append leaves a half-written last line; load is strict and
-  // refuses to silently drop it.
+  // A crash mid-append leaves a half-written last line. The uncommitted tail
+  // is dropped so the session stays resumable, and load itself is read-only.
   @fs.write_file(
     session_file(store, "s1"),
     "{\"sequence\":2,\"ts\":0,\"item\":{\"kind\":\"assi",
     create_mode=OpenOrCreate,
     append=true,
   )
-  let _ = store.load(SessionId("s1")) catch {
+  let text_before = @fs.read_file(session_file(store, "s1")).text()
+  let loaded = store.load(SessionId("s1"))
+  assert_eq(loaded.events().length(), 1)
+  assert_eq(loaded.last_sequence(), 1)
+  assert_eq(@fs.read_file(session_file(store, "s1")).text(), text_before)
+  @fs.rmdir(store.root(), recursive=true)
+}
+
+///|
+async test "load keeps a complete final record that lost only its newline" {
+  let store = new_store()
+  let session = @agent_session.Session(SessionId("s1"), system_prompt="system")
+  let (_, event) = session.append_event(User(UserMessage("first")))
+  store.create(session)
+  // The append was torn exactly at the newline boundary: the record is whole.
+  @fs.write_file(
+    session_file(store, "s1"),
+    event.to_json().stringify(),
+    create_mode=OpenOrCreate,
+    append=true,
+  )
+  let loaded = store.load(SessionId("s1"))
+  assert_eq(loaded.events().length(), 1)
+  guard loaded.events()[0].item() is User(message) else {
+    fail("expected the unterminated user event")
+  }
+  assert_eq(message.content(), "first")
+  @fs.rmdir(store.root(), recursive=true)
+}
+
+///|
+async test "append repairs a torn tail before persisting the next event" {
+  let store = new_store()
+  let session = @agent_session.Session(SessionId("s1"), system_prompt="system").append(
+    User(UserMessage("first")),
+  )
+  store.create(session)
+  @fs.write_file(
+    session_file(store, "s1"),
+    "{\"sequence\":2,\"ts\":0,\"item\":{\"kind\":\"assi",
+    create_mode=OpenOrCreate,
+    append=true,
+  )
+  let resumed = store.load(SessionId("s1"))
+  let next = store.append(resumed, Runtime(RuntimeNotice("recovered")))
+  assert_eq(next.events().length(), 2)
+  assert_eq(next.last_sequence(), 2)
+  // The rewrite discarded the torn bytes and terminated every line.
+  let text = @fs.read_file(session_file(store, "s1")).text()
+  assert_true(text.has_suffix("\n"))
+  assert_true(!text.contains("assi"))
+  let reloaded = store.load(SessionId("s1"))
+  assert_eq(reloaded.events().length(), 2)
+  assert_eq(reloaded.last_sequence(), 2)
+  @fs.rmdir(store.root(), recursive=true)
+}
+
+///|
+async test "append repairs and keeps a complete unterminated final event" {
+  let store = new_store()
+  let session = @agent_session.Session(SessionId("s1"), system_prompt="system")
+  let (_, event) = session.append_event(User(UserMessage("first")))
+  store.create(session)
+  @fs.write_file(
+    session_file(store, "s1"),
+    event.to_json().stringify(),
+    create_mode=OpenOrCreate,
+    append=true,
+  )
+  let resumed = store.load(SessionId("s1"))
+  assert_eq(resumed.events().length(), 1)
+  let next = store.append(resumed, Runtime(RuntimeNotice("second")))
+  assert_eq(next.last_sequence(), 2)
+  let text = @fs.read_file(session_file(store, "s1")).text()
+  assert_true(text.has_suffix("\n"))
+  let reloaded = store.load(SessionId("s1"))
+  assert_eq(reloaded.events().length(), 2)
+  guard reloaded.events()[0].item() is User(message) else {
+    fail("expected the recovered user event to survive the repair")
+  }
+  assert_eq(message.content(), "first")
+  @fs.rmdir(store.root(), recursive=true)
+}
+
+///|
+async test "append rejects a stale snapshot against an unterminated durable event" {
+  let store = new_store()
+  let session = @agent_session.Session(SessionId("s1"), system_prompt="system")
+  let (_, event) = session.append_event(User(UserMessage("first")))
+  store.create(session)
+  // Another writer committed an event; only its newline is missing. The
+  // pre-commit empty snapshot is stale, and tail repair must not become a
+  // path that discards that writer's data.
+  @fs.write_file(
+    session_file(store, "s1"),
+    event.to_json().stringify(),
+    create_mode=OpenOrCreate,
+    append=true,
+  )
+  let _ = store.append(session, Runtime(RuntimeNotice("stale"))) catch {
     error => {
-      assert_true("\{error}" != "")
+      assert_true("\{error}".contains("stale session snapshot"))
+      let loaded = store.load(SessionId("s1"))
+      assert_eq(loaded.events().length(), 1)
+      guard loaded.events()[0].item() is User(message) else {
+        fail("expected the durable user event to survive")
+      }
+      assert_eq(message.content(), "first")
       @fs.rmdir(store.root(), recursive=true)
       return
     }
   }
   @fs.rmdir(store.root(), recursive=true)
-  fail("torn trailing line was accepted")
+  fail("stale append onto an unterminated durable event was accepted")
+}
+
+///|
+async test "load tolerates unterminated tails in every torn shape" {
+  let store = new_store()
+  // Valid JSON that is not a valid event: torn exactly inside the payload in
+  // a way that still balances braces.
+  store.create(Session(SessionId("json"), system_prompt="system"))
+  @fs.write_file(
+    session_file(store, "json"),
+    "{\"not\":\"an event\"}",
+    create_mode=OpenOrCreate,
+    append=true,
+  )
+  assert_eq(store.load(SessionId("json")).events().length(), 0)
+  // Whitespace-only unterminated tail.
+  let one_event = @agent_session.Session(
+    SessionId("blank"),
+    system_prompt="system",
+  ).append(User(UserMessage("hello")))
+  store.create(one_event)
+  @fs.write_file(
+    session_file(store, "blank"),
+    "   ",
+    create_mode=OpenOrCreate,
+    append=true,
+  )
+  assert_eq(store.load(SessionId("blank")).events().length(), 1)
+  // Torn garbage after zero events.
+  store.create(Session(SessionId("zero"), system_prompt="system"))
+  @fs.write_file(
+    session_file(store, "zero"),
+    "{\"seq",
+    create_mode=OpenOrCreate,
+    append=true,
+  )
+  assert_eq(store.load(SessionId("zero")).events().length(), 0)
+  @fs.rmdir(store.root(), recursive=true)
+}
+
+///|
+async test "load keeps a header-only file that lost its newline" {
+  let store = new_store()
+  // `create` can never produce this (tmp+rename is atomic), but the tolerance
+  // rule is uniform: in a zero-event file the header is the final record.
+  @fs.mkdir("\{store.root()}/sessions/s1", recursive=true)
+  @fs.write_file(
+    session_file(store, "s1"),
+    "{\"version\":1,\"id\":\"s1\",\"system_prompt\":\"system\"}",
+    create_mode=CreateOrTruncate,
+  )
+  let loaded = store.load(SessionId("s1"))
+  assert_eq(loaded.events().length(), 0)
+  assert_eq(loaded.system_prompt(), "system")
+  // The next append terminates the header line as it persists the event.
+  ignore(store.append(loaded, User(UserMessage("first"))))
+  let text = @fs.read_file(session_file(store, "s1")).text()
+  assert_true(text.has_suffix("\n"))
+  assert_eq(store.load(SessionId("s1")).events().length(), 1)
+  @fs.rmdir(store.root(), recursive=true)
+}
+
+///|
+async test "compact repairs a torn tail before persisting the summary" {
+  let store = new_store()
+  let session = @agent_session.Session(SessionId("s1"), system_prompt="system")
+    .append(User(UserMessage("first")))
+    .append(Assistant(AssistantMessage("second")))
+  store.create(session)
+  @fs.write_file(
+    session_file(store, "s1"),
+    "{\"sequence\":3,\"ts\":0,\"item\":{\"kind\":\"runt",
+    create_mode=OpenOrCreate,
+    append=true,
+  )
+  let resumed = store.load(SessionId("s1"))
+  let compacted = store.compact(
+    resumed,
+    content="first two events",
+    from_sequence=1,
+    to_sequence=2,
+  )
+  assert_eq(compacted.events().length(), 3)
+  let text = @fs.read_file(session_file(store, "s1")).text()
+  assert_true(text.has_suffix("\n"))
+  assert_true(!text.contains("runt"))
+  assert_eq(store.load(SessionId("s1")).events().length(), 3)
+  @fs.rmdir(store.root(), recursive=true)
+}
+
+///|
+async test "latest can resume a session whose newest write was torn" {
+  let store = new_store()
+  store.create(Session(SessionId("older"), system_prompt="system"))
+  @async.sleep(50)
+  let newest = @agent_session.Session(
+    SessionId("newest"),
+    system_prompt="system",
+  ).append(User(UserMessage("hello")))
+  store.create(newest)
+  @fs.write_file(
+    session_file(store, "newest"),
+    "{\"sequence\":2,\"ts\":0,\"item\":{\"kind\":\"assi",
+    create_mode=OpenOrCreate,
+    append=true,
+  )
+  guard store.latest() is Some(id) else { fail("expected a latest session") }
+  assert_eq(id.value(), "newest")
+  @fs.rmdir(store.root(), recursive=true)
+}
+
+///|
+async test "load still fails on corruption that is not a torn tail" {
+  let store = new_store()
+  let session = @agent_session.Session(SessionId("s1"), system_prompt="system").append(
+    User(UserMessage("first")),
+  )
+  store.create(session)
+  // Terminated garbage is interior-style corruption, not an interrupted
+  // append: something after the bad line committed a newline.
+  @fs.write_file(
+    session_file(store, "s1"),
+    "not an event\n",
+    create_mode=OpenOrCreate,
+    append=true,
+  )
+  let _ = store.load(SessionId("s1")) catch {
+    error => {
+      assert_true("\{error}" != "")
+      // A bad line with valid lines after it fails the same way.
+      let (_, event) = session.append_event(Runtime(RuntimeNotice("later")))
+      @fs.write_file(
+        session_file(store, "s1"),
+        "\{event.to_json().stringify()}\n",
+        create_mode=OpenOrCreate,
+        append=true,
+      )
+      let _ = store.load(SessionId("s1")) catch {
+        error => {
+          assert_true("\{error}" != "")
+          @fs.rmdir(store.root(), recursive=true)
+          return
+        }
+      }
+      @fs.rmdir(store.root(), recursive=true)
+      fail("interior corruption was accepted")
+    }
+  }
+  @fs.rmdir(store.root(), recursive=true)
+  fail("terminated garbage line was accepted")
 }
 
 ///|

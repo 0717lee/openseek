@@ -47,7 +47,9 @@ let session = store.compact(
 Use `create` when writing a complete session snapshot. Use `append` for normal
 agent progress. `append` is the safe save path: it checks that the caller's
 in-memory session still matches disk, then appends exactly one timestamped
-event line.
+event line — except when a crash left the file's tail unterminated, in which
+case it rewrites the file atomically, repairing the tail as it persists the
+new event.
 
 `load` takes a `SessionId` because `SessionStore(root)` is a directory-backed
 collection, not a handle to one current session. The id selects
@@ -299,8 +301,13 @@ maintain:
   atomically, so a session file can never exist without its header.
 - `create` rewrites the file atomically (temp file, then rename); an
   interrupted rewrite leaves the previous file intact.
-- Every load checks the header record and contiguous sequence numbers; a torn
-  trailing line fails the load rather than being silently dropped.
+- Every load checks the header record and contiguous sequence numbers.
+- A crash can tear the final append mid-line. `load` tolerates exactly that —
+  an unterminated final record is dropped (or kept when only its newline is
+  missing) so the session stays resumable — while `load` itself never writes.
+  The next `append` or `compact` repairs the file by rewriting it atomically,
+  discarding the uncommitted tail. Corruption anywhere else still fails the
+  load.
 - Every append or compact checks that the caller's session still matches disk.
 
 These rules keep persistence concerns out of `agent_session.Session` while
