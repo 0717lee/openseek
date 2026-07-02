@@ -98,6 +98,107 @@ test "log size formats larger byte counts" {
 }
 
 ///|
+test "apply_dropped_file switches to local-file mode with the header lifted" {
+  let text =
+    #|{"version":1,"id":"demo","system_prompt":"SYS"}
+    #|{"sequence":1,"ts":0,"item":{"kind":"user","payload":{"content":"hi"}}}
+    #|
+  let selected = { ..init_model(), selected: Some("0|remote"), loading: true }
+  let model = apply_dropped_file(selected, "run.jsonl", 123L, text)
+  debug_inspect(model.selected, content="None")
+  debug_inspect(model.dropped, content="Some(\"run.jsonl\")")
+  inspect(model.system_prompt, content="SYS")
+  inspect(model.header_present, content="true")
+  inspect(model.log_bytes, content="123")
+  inspect(model.loading, content="false")
+  guard model.parsed is Some(parsed) else { fail("expected parsed log") }
+  inspect(parsed.events.length(), content="1")
+}
+
+///|
+test "apply_dropped_file tolerates a header-less event log" {
+  let text =
+    #|{"sequence":1,"ts":0,"item":{"kind":"user","payload":{"content":"hi"}}}
+    #|
+  let model = apply_dropped_file(init_model(), "bare.jsonl", 75L, text)
+  inspect(model.system_prompt, content="")
+  inspect(model.header_present, content="false")
+  guard model.parsed is Some(parsed) else { fail("expected parsed log") }
+  inspect(parsed.events.length(), content="1")
+}
+
+///|
+test "dropped display id prefers the header identity over the file name" {
+  let with_header = @viz.parse_events(
+    (
+      #|{"version":1,"id":"cli-123","system_prompt":"SYS"}
+      #|
+    ),
+  )
+  inspect(dropped_display_id("run.jsonl", with_header), content="cli-123")
+  let bare = @viz.parse_events("")
+  inspect(dropped_display_id("run.jsonl", bare), content="run.jsonl")
+}
+
+///|
+test "stale dropped-file reads are discarded" {
+  let emit : @cmd.Emit[Msg] = Emit(_ => @cmd.none)
+  let model = { ..init_model(), drop_ticket: 2 }
+  // A read issued before the user moved on carries an old ticket: ignored.
+  let (_, unchanged) = update(
+    emit,
+    DroppedFileRead(1, "old.jsonl", 1L, Ok("")),
+    model,
+  )
+  debug_inspect(unchanged.dropped, content="None")
+  // The read matching the current ticket applies.
+  let (_, applied) = update(
+    emit,
+    DroppedFileRead(2, "new.jsonl", 1L, Ok("")),
+    model,
+  )
+  debug_inspect(applied.dropped, content="Some(\"new.jsonl\")")
+}
+
+///|
+test "a late session list does not clobber the dropped-file status" {
+  let emit : @cmd.Emit[Msg] = Emit(_ => @cmd.none)
+  let dropped = apply_dropped_file(
+    init_model(),
+    "run.jsonl",
+    10L,
+    (
+      #|{"sequence":1,"ts":0,"item":{"kind":"user","payload":{"content":"hi"}}}
+      #|
+    ),
+  )
+  let before = dropped.status
+  let (_, listed) = update(emit, SessionsFetched(Ok("[]")), dropped)
+  inspect(listed.status == before, content="true")
+  inspect(listed.sessions.length(), content="0")
+  // Without an active dropped file the list outcome still updates the status.
+  let (_, plain) = update(emit, SessionsFetched(Ok("[]")), init_model())
+  inspect(plain.status, content="0 session(s)")
+}
+
+///|
+test "selecting a session invalidates an in-flight dropped-file read" {
+  let emit : @cmd.Emit[Msg] = Emit(_ => @cmd.none)
+  let model = { ..init_model(), drop_ticket: 5 }
+  let (_, selected) = update(emit, Select("0|remote"), model)
+  inspect(selected.drop_ticket, content="6")
+  debug_inspect(selected.selected, content="Some(\"0|remote\")")
+  // The read the old drop issued now carries a stale ticket.
+  let (_, unchanged) = update(
+    emit,
+    DroppedFileRead(5, "old.jsonl", 1L, Ok("")),
+    selected,
+  )
+  debug_inspect(unchanged.dropped, content="None")
+  debug_inspect(unchanged.selected, content="Some(\"0|remote\")")
+}
+
+///|
 test "parse_load distinguishes not-found from malformed" {
   guard parse_load("{\"found\":false}") is NotFound else {
     fail("expected NotFound")

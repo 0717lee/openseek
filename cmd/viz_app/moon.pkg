@@ -3,6 +3,7 @@ import {
   "bobzhang/openseek/agent_session/log" @session_log,
   "bobzhang/openseek/viz",
   "moonbit-community/rabbita",
+  "moonbit-community/rabbita/dom",
   "moonbit-community/rabbita/html",
   "moonbit-community/rabbita/cmd",
   "moonbit-community/rabbita/http",

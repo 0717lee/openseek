@@ -22,6 +22,13 @@ struct SessionRow {
 struct Model {
   sessions : Array[SessionRow]
   selected : String?
+  // Name of a locally dropped session file being viewed instead of a server
+  // session. Mutually exclusive with `selected`.
+  dropped : String?
+  // Monotonic ticket for dropped-file reads. Every new drop and every session
+  // selection advances it, so a read that finishes after the user moved on
+  // carries a stale ticket and is discarded.
+  drop_ticket : Int
   parsed : @session_log.ParsedLog?
   system_prompt : String
   header_present : Bool
@@ -67,6 +74,8 @@ enum Msg {
   SessionsFetched(Result[String, Error])
   Select(String)
   SessionFetched(String, Result[String, Error])
+  FileDropped(String, Int64, @dom.Blob)
+  DroppedFileRead(Int, String, Int64, Result[String, Error])
   SetMode(@viz.ViewMode)
   SetArgsView(Bool)
   SetTheme(Theme)
@@ -92,6 +101,8 @@ fn init_model() -> Model {
   {
     sessions: [],
     selected: None,
+    dropped: None,
+    drop_ticket: 0,
     parsed: None,
     system_prompt: "",
     header_present: false,
@@ -124,14 +135,26 @@ fn update(emit : @cmd.Emit[Msg], msg : Msg, model : Model) -> (@cmd.Cmd, Model) 
                 model.collapsed_roots,
                 sessions,
               ),
-              status: "\{sessions.length()} session(s)",
+              status: list_status(model, "\{sessions.length()} session(s)"),
             },
           )
         None =>
-          (@cmd.none, { ..model, status: "could not read the session list" })
+          (
+            @cmd.none,
+            {
+              ..model,
+              status: list_status(model, "could not read the session list"),
+            },
+          )
       }
     SessionsFetched(Err(error)) =>
-      (@cmd.none, { ..model, status: "failed to list sessions: \{error}" })
+      (
+        @cmd.none,
+        {
+          ..model,
+          status: list_status(model, "failed to list sessions: \{error}"),
+        },
+      )
     Select(key) => {
       let label = session_label(model, key)
       let command = fetch_text(emit, session_url(key), result => {
@@ -142,6 +165,9 @@ fn update(emit : @cmd.Emit[Msg], msg : Msg, model : Model) -> (@cmd.Cmd, Model) 
         {
           ..model,
           selected: Some(key),
+          dropped: None,
+          // Invalidate any in-flight dropped-file read.
+          drop_ticket: model.drop_ticket + 1,
           parsed: None,
           system_prompt: "",
           header_present: false,
@@ -201,6 +227,40 @@ fn update(emit : @cmd.Emit[Msg], msg : Msg, model : Model) -> (@cmd.Cmd, Model) 
             }
         }
       }
+    FileDropped(name, bytes, file) => {
+      let ticket = model.drop_ticket + 1
+      (
+        @cmd.attempt(
+          result => emit(DroppedFileRead(ticket, name, bytes, result)),
+          () => file.text(),
+        ),
+        {
+          ..model,
+          drop_ticket: ticket,
+          loading: true,
+          status: "reading \{name}…",
+        },
+      )
+    }
+    DroppedFileRead(ticket, name, bytes, result) =>
+      // Discard a read that finished after the user moved on — selected a
+      // session or dropped a newer file (both advance the ticket).
+      if ticket != model.drop_ticket {
+        (@cmd.none, model)
+      } else {
+        match result {
+          Ok(text) => (@cmd.none, apply_dropped_file(model, name, bytes, text))
+          Err(error) =>
+            (
+              @cmd.none,
+              {
+                ..model,
+                loading: false,
+                status: "failed to read dropped file: \{error}",
+              },
+            )
+        }
+      }
     SetMode(mode) => (@cmd.none, { ..model, view_mode: mode })
     SetArgsView(show_original) =>
       (@cmd.none, { ..model, show_original_args: show_original })
@@ -253,6 +313,100 @@ fn fetch_text(
 ) -> @cmd.Cmd {
   @http.get(url).expect_text(emit.map(to_msg))
 }
+
+///|
+/// Switch the viewer to a locally dropped session file. Everything comes from
+/// the file text itself — the header line carries the identity and system
+/// prompt — so no server round-trip is involved.
+fn apply_dropped_file(
+  model : Model,
+  name : String,
+  bytes : Int64,
+  text : String,
+) -> Model {
+  let parsed = @viz.parse_events(text)
+  let (system_prompt, header_present) = match parsed.header {
+    Some(header) => (header.system_prompt, true)
+    None => ("", false)
+  }
+  {
+    ..model,
+    selected: None,
+    dropped: Some(name),
+    parsed: Some(parsed),
+    system_prompt,
+    header_present,
+    log_bytes: bytes,
+    loading: false,
+    status: events_status(parsed),
+  }
+}
+
+///|
+/// The browser opens a dropped file as a navigation unless dragover and drop
+/// are both cancelled, so the dragover handler exists purely for
+/// `prevent_default`.
+fn drop_target_attrs(emit : @cmd.Emit[Msg]) -> @html.Attrs {
+  @html.Attrs::build()
+  .on_dragover(event => {
+    event.prevent_default()
+    @cmd.none
+  })
+  .on_drop(event => read_dropped_file(emit, event))
+}
+
+///|
+/// Turn a drop event into a `FileDropped` message carrying the first dropped
+/// file; `update` tickets and issues the asynchronous read. Non-file drops
+/// (text selections, links) are ignored.
+fn read_dropped_file(emit : @cmd.Emit[Msg], event : @dom.DragEvent) -> @cmd.Cmd {
+  event.prevent_default()
+  let transfer = event.get_data_transfer()
+  if data_transfer_file_count(transfer) == 0 {
+    return @cmd.none
+  }
+  let name = data_transfer_file_name(transfer, 0)
+  let file = data_transfer_file(transfer, 0)
+  emit(FileDropped(name, file.get_size().to_int64(), file))
+}
+
+///|
+/// The status line labels the active view, and while a dropped file is shown
+/// the header strip renders it — a session-list outcome arriving late must
+/// not clobber the dropped log's summary.
+fn list_status(model : Model, message : String) -> String {
+  match model.dropped {
+    Some(_) => model.status
+    None => message
+  }
+}
+
+///|
+/// The id shown for a dropped session: the identity recorded in the file's
+/// header when present, the file name for a bare header-less event log.
+fn dropped_display_id(name : String, parsed : @session_log.ParsedLog) -> String {
+  match parsed.header {
+    Some(header) => header.id
+    None => name
+  }
+}
+
+///|
+/// `rabbita/dom` binds `DataTransfer.items` but not `DataTransfer.files`; a
+/// dropped `File` is a `Blob` subtype, which is all the reader needs.
+extern "js" fn data_transfer_file_count(transfer : @dom.DataTransfer) -> Int = "(t) => (t.files ? t.files.length : 0)"
+
+///|
+extern "js" fn data_transfer_file_name(
+  transfer : @dom.DataTransfer,
+  index : Int,
+) -> String = "(t, i) => t.files[i].name"
+
+///|
+extern "js" fn data_transfer_file(
+  transfer : @dom.DataTransfer,
+  index : Int,
+) -> @dom.Blob = "(t, i) => t.files[i]"
 
 ///|
 /// Percent-encode the id so session ids containing URL-reserved characters
@@ -399,7 +553,7 @@ fn events_status(parsed : @session_log.ParsedLog) -> String {
 
 ///|
 fn view(emit : @cmd.Emit[Msg], model : Model) -> @html.Html {
-  @html.div(class=app_class(model)) <| [
+  @html.div(class=app_class(model), attrs=drop_target_attrs(emit)) <| [
     sidebar_pane(emit, model),
     @html.section(class="main") <| [
       main_toolbar(emit, model),
@@ -699,14 +853,26 @@ fn sidebar_row(
 
 ///|
 fn main_pane(emit : @cmd.Emit[Msg], model : Model) -> @html.Html {
-  match model.selected {
-    None =>
+  match (model.dropped, model.selected) {
+    (Some(name), _) =>
+      match model.parsed {
+        Some(parsed) =>
+          session_pane(
+            emit,
+            model,
+            parsed,
+            id=dropped_display_id(name, parsed),
+            root_label=Some("dropped file: \{name}"),
+          )
+        None => @html.div(class="placeholder") <| model.status
+      }
+    (None, None) =>
       @html.div(class="placeholder") <| (if model.sidebar_visible {
-        "Select a session from the left to view it."
+        "Select a session from the left to view it, or drop an openseek_session.jsonl file anywhere in this window."
       } else {
-        "Show sessions to select a session."
+        "Show sessions to select a session, or drop an openseek_session.jsonl file anywhere in this window."
       })
-    Some(key) =>
+    (None, Some(key)) =>
       match model.parsed {
         None =>
           if model.loading {
@@ -720,26 +886,45 @@ fn main_pane(emit : @cmd.Emit[Msg], model : Model) -> @html.Html {
             Some(row) => row.id
             None => key
           }
-          let session = @viz.session_from_parse(
+          session_pane(
+            emit,
+            model,
             parsed,
             id~,
-            system_prompt=model.system_prompt,
+            root_label=row.map(row => row.root_label),
           )
-          let error_count = @viz.rendered_error_count(session, model.view_mode)
-          @html.div(class=session_view_class(model)) <| [
-            header_strip(model, id, row.map(row => row.root_label)),
-            // Pin the view/args toggles and the error bar to the top of the
-            // scroll area so they stay reachable while reading a long log.
-            @html.div(class="sticky-toolbar") <| [
-              mode_row(emit, model, parsed),
-              error_bar(emit, model, error_count),
-            ],
-            @viz.render_notices(parsed),
-            session_log_view(model, session, error_count),
-          ]
         }
       }
   }
+}
+
+///|
+/// Render one parsed session — served or dropped — with the header strip,
+/// sticky toolbar, notices, and log.
+fn session_pane(
+  emit : @cmd.Emit[Msg],
+  model : Model,
+  parsed : @session_log.ParsedLog,
+  id~ : String,
+  root_label~ : String?,
+) -> @html.Html {
+  let session = @viz.session_from_parse(
+    parsed,
+    id~,
+    system_prompt=model.system_prompt,
+  )
+  let error_count = @viz.rendered_error_count(session, model.view_mode)
+  @html.div(class=session_view_class(model)) <| [
+    header_strip(model, id, root_label),
+    // Pin the view/args toggles and the error bar to the top of the
+    // scroll area so they stay reachable while reading a long log.
+    @html.div(class="sticky-toolbar") <| [
+      mode_row(emit, model, parsed),
+      error_bar(emit, model, error_count),
+    ],
+    @viz.render_notices(parsed),
+    session_log_view(model, session, error_count),
+  ]
 }
 
 ///|
@@ -1053,15 +1238,14 @@ fn session_log_view(
 }
 
 ///|
-/// Number of failures the active view will draw, recomputed from the loaded log.
+/// Number of failures the active view will draw, recomputed from the loaded
+/// log — served or dropped; the session id plays no part in the count.
 /// Returns 0 when nothing is loaded.
 fn current_error_count(model : Model) -> Int {
-  guard model.selected is Some(key) else { return 0 }
   guard model.parsed is Some(parsed) else { return 0 }
-  let id = session_label(model, key)
   let session = @viz.session_from_parse(
     parsed,
-    id~,
+    id="",
     system_prompt=model.system_prompt,
   )
   @viz.rendered_error_count(session, model.view_mode)

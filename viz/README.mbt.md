@@ -33,6 +33,14 @@ no browser needed in CI.
 - `GET /api/sessions/<key>` → `{found, events, events_bytes}` envelope for the frontend (`events` is the raw session-file text; its first line is the header record)
 - `GET /api/sessions/<key>/openseek_session.jsonl` → raw session file
 
+## Drag and drop
+
+A session file is self-contained (the header line carries the id and system
+prompt), so the viewer also renders files that are not in any scanned store:
+drop an `openseek_session.jsonl` anywhere in the window and it is read and
+rendered entirely client-side — nothing is uploaded. Selecting a session from
+the sidebar returns to the served view.
+
 ## Running it
 
 ```bash
