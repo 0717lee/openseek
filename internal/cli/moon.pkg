@@ -1,0 +1,8 @@
+import {
+  "moonbitlang/core/argparse",
+  "moonbitlang/core/string",
+}
+
+warnings = "+unnecessary_annotation"
+
+supported_targets = "+native"

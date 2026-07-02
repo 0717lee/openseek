@@ -189,12 +189,12 @@ async fn run_serve(
   matches : @argparse.Matches,
   workspace_root~ : String,
 ) -> Unit {
-  let api_url = api_url(matches)
-  let model = @deepseek.Model::parse(value(matches, "model"))
-  let api_key = api_key(matches, model)
+  let api_url = @agentcli.api_url(matches)
+  let model = @deepseek.Model::parse(@cli.value(matches, "model"))
+  let api_key = @agentcli.api_key(matches, model)
   let max_steps = max_steps(matches)
-  let thinking = @deepseek.ThinkingMode::parse(value(matches, "thinking"))
-  let (store, initial_session) = match session_id(matches) {
+  let thinking = @deepseek.ThinkingMode::parse(@cli.value(matches, "thinking"))
+  let (store, initial_session) = match @agentcli.session_id(matches) {
     Some(id) => {
       let store = @store.SessionStore(session_root(matches, workspace_root~))
       (

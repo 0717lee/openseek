@@ -11,24 +11,22 @@
 /// It never writes to the stores, so pointing it at live session roots is safe.
 async fn main {
   let matches = cli_command().parse(env=@env.get_env_vars())
-  let port = parse_port(value(matches, "port"))
-  let host = value(matches, "host").trim().to_owned()
-  if host.is_empty() {
-    fail("--host or OPENSEEK_VIZ_HOST must not be empty")
-  }
-  let session_root = value(matches, "session-root").trim().to_owned()
-  if session_root.is_empty() {
-    fail("--session-root or OPENSEEK_SESSION_ROOT must not be empty")
-  }
-  let session_root_name = value(matches, "session-root-name").trim().to_owned()
-  if session_root_name.is_empty() {
-    fail(
-      "--session-root-name or OPENSEEK_VIZ_SESSION_ROOT_NAME must not be empty",
-    )
-  }
+  let port = parse_port(@cli.value(matches, "port"))
+  let host = @cli.require_non_empty(
+    matches, "host", "--host or OPENSEEK_VIZ_HOST must not be empty",
+  )
+  let session_root = @cli.require_non_empty(
+    matches, "session-root", "--session-root or OPENSEEK_SESSION_ROOT must not be empty",
+  )
+  let session_root_name = @cli.require_non_empty(
+    matches, "session-root-name", "--session-root-name or OPENSEEK_VIZ_SESSION_ROOT_NAME must not be empty",
+  )
+  // Keep main's fix (f26def11): an explicit --session-root drops the default
+  // cwd scan. effective_search_dirs encodes that; do not revert to a bare
+  // non_empty_values(matches, "search-dir").
   let search_dirs = effective_search_dirs(matches)
-  let web_dir = value(matches, "web-dir")
-  let bundle = value(matches, "bundle")
+  let web_dir = @cli.value(matches, "web-dir")
+  let bundle = @cli.value(matches, "bundle")
   let module_root = match @env.args() {
     [exe, ..] => module_root_from_exe(exe)
     [] => None
@@ -770,14 +768,6 @@ fn cli_command() -> @argparse.Command {
       ),
     ],
   )
-}
-
-///|
-fn value(matches : @argparse.Matches, name : String) -> String raise {
-  match matches.values.get(name) {
-    Some([value, ..]) => value
-    _ => fail("missing parsed argument: \{name}")
-  }
 }
 
 ///|

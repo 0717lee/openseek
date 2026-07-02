@@ -100,14 +100,15 @@ async fn with_jsonl_stdout(body : async () -> Unit) -> Unit {
 async fn run_task_command(matches : @argparse.Matches) -> Unit {
   with_jsonl_stdout(() => {
     // --no-session contradicts an explicit --session; reject up front.
-    if flag(matches, "no-session") && session_id(matches) is Some(_) {
+    if @cli.flag(matches, "no-session") &&
+      @agentcli.session_id(matches) is Some(_) {
       fail("--no-session contradicts --session; pick one behavior")
     }
     // Best-of-N fleet mode owns its own workspace materialization and session
     // creation, so it branches before prepare_workspace_root (which would
     // create a single --dir).
-    let concurrency = parse_positive_int(
-      value(matches, "concurrency"),
+    let concurrency = @cli.parse_positive_int(
+      @cli.value(matches, "concurrency"),
       "--concurrency",
     )
     if fleet_mode(matches, concurrency) {
@@ -115,11 +116,13 @@ async fn run_task_command(matches : @argparse.Matches) -> Unit {
       return
     }
     let workspace_root = prepare_workspace_root(matches, log_created=true)
-    let api_url = api_url(matches)
-    let model = @deepseek.Model::parse(value(matches, "model"))
-    let api_key = api_key(matches, model)
+    let api_url = @agentcli.api_url(matches)
+    let model = @deepseek.Model::parse(@cli.value(matches, "model"))
+    let api_key = @agentcli.api_key(matches, model)
     let max_steps = max_steps(matches)
-    let thinking = @deepseek.ThinkingMode::parse(value(matches, "thinking"))
+    let thinking = @deepseek.ThinkingMode::parse(
+      @cli.value(matches, "thinking"),
+    )
     let task = task_text(matches)
     match resolved_session_id(matches) {
       None => {
@@ -182,7 +185,8 @@ async fn run_task_command(matches : @argparse.Matches) -> Unit {
 async fn run_serve_command(matches : @argparse.Matches) -> Unit {
   // Serve is ephemeral by default (durable only with --session); --no-session
   // makes that explicit and, as in every mode, contradicts an explicit --session.
-  if flag(matches, "no-session") && session_id(matches) is Some(_) {
+  if @cli.flag(matches, "no-session") &&
+    @agentcli.session_id(matches) is Some(_) {
     fail("--no-session contradicts --session; pick one behavior")
   }
   with_jsonl_stdout(() => {
@@ -217,7 +221,7 @@ async fn run_sessions_command(matches : @argparse.Matches) -> Unit {
 fn sessions_target_id(
   matches : @argparse.Matches,
 ) -> @agent_session.SessionId raise {
-  match values(matches, "id") {
+  match @cli.values(matches, "id") {
     [id, ..] if !id.trim().is_empty() => SessionId(id.trim().to_owned())
     _ => fail("a session id is required (e.g. `openseek sessions show <id>`)")
   }
@@ -248,12 +252,15 @@ async fn sessions_compact(matches : @argparse.Matches) -> Unit {
   let workspace_root = prepare_workspace_root(matches, log_created=false)
   let store = @store.SessionStore(session_root(matches, workspace_root~))
   let id = sessions_target_id(matches)
-  let compact_file = value(matches, "file").trim().to_owned()
+  let compact_file = @cli.value(matches, "file").trim().to_owned()
   if compact_file.is_empty() {
     fail("`openseek sessions compact` requires --file")
   }
-  let from_sequence = required_positive_int(value(matches, "from"), "--from")
-  let to_sequence = required_positive_int(value(matches, "to"), "--to")
+  let from_sequence = required_positive_int(
+    @cli.value(matches, "from"),
+    "--from",
+  )
+  let to_sequence = required_positive_int(@cli.value(matches, "to"), "--to")
   let summary_path = @workspace_path.resolve(workspace_root, compact_file)
   let summary = @fs.read_file(summary_path).text()
   let compacted = store.compact(
@@ -287,7 +294,7 @@ async fn sessions_compact(matches : @argparse.Matches) -> Unit {
 async fn resolved_session_id(
   matches : @argparse.Matches,
 ) -> @agent_session.SessionId? {
-  match (session_id(matches), flag(matches, "no-session")) {
+  match (@agentcli.session_id(matches), @cli.flag(matches, "no-session")) {
     (Some(_), true) =>
       fail("--no-session contradicts --session; pick one behavior")
     (Some(id), false) => Some(id)
@@ -563,27 +570,6 @@ fn root_command() -> @argparse.Command {
 }
 
 ///|
-fn value(matches : @argparse.Matches, name : String) -> String raise {
-  match matches.values.get(name) {
-    Some([value, ..]) => value
-    _ => fail("missing parsed argument: \{name}")
-  }
-}
-
-///|
-fn values(matches : @argparse.Matches, name : String) -> Array[String] {
-  match matches.values.get(name) {
-    Some(values) => values
-    None => []
-  }
-}
-
-///|
-fn flag(matches : @argparse.Matches, name : String) -> Bool {
-  matches.flags.get(name).unwrap_or(false)
-}
-
-///|
 /// Whether `openseek run` should use fleet mode: any N >= 2, or an explicit
 /// `--concurrency` at any value. `--concurrency 1` still means "one run in a
 /// copied `<dir>_run_1` workspace" — the flag always protects `--dir` from
@@ -600,75 +586,13 @@ fn explicitly_provided(matches : @argparse.Matches, name : String) -> Bool {
 }
 
 ///|
-fn api_key_arg_for_model(model : @deepseek.Model) -> String {
-  match model {
-    KimiK27Code | KimiK27CodeHighSpeed => "kimi-api-key"
-    V4Flash | V4Pro => "deepseek-api-key"
-  }
-}
-
-///|
-fn api_key_env_for_model(model : @deepseek.Model) -> String {
-  match model {
-    KimiK27Code | KimiK27CodeHighSpeed => "KIMI"
-    V4Flash | V4Pro => "DEEPSEEK"
-  }
-}
-
-///|
-fn api_key_provider_for_model(model : @deepseek.Model) -> String {
-  match model {
-    KimiK27Code | KimiK27CodeHighSpeed => "Kimi"
-    V4Flash | V4Pro => "DeepSeek"
-  }
-}
-
-///|
-fn non_empty_value(matches : @argparse.Matches, name : String) -> String? raise {
-  let key = value(matches, name).trim()
-  if key.is_empty() {
-    None
-  } else {
-    Some("\{key}")
-  }
-}
-
-///|
-fn api_key(
-  matches : @argparse.Matches,
-  model : @deepseek.Model,
-) -> String raise {
-  match non_empty_value(matches, "api-key") {
-    Some(key) => return key
-    None => ()
-  }
-  match non_empty_value(matches, api_key_arg_for_model(model)) {
-    Some(key) => return key
-    None => ()
-  }
-  fail(
-    "an API key is required for \{api_key_provider_for_model(model)} models: pass --api-key or set \{api_key_env_for_model(model)}",
-  )
-}
-
-///|
-fn api_url(matches : @argparse.Matches) -> String? raise {
-  let url = value(matches, "api-url").trim()
-  if url.is_empty() {
-    None
-  } else {
-    Some("\{url}")
-  }
-}
-
-///|
 fn max_steps(matches : @argparse.Matches) -> Int raise {
-  parse_positive_int(value(matches, "max-steps"), "--max-steps")
+  @cli.parse_positive_int(@cli.value(matches, "max-steps"), "--max-steps")
 }
 
 ///|
 fn task_text(matches : @argparse.Matches) -> String raise {
-  let task = values(matches, "task").join(" ").trim()
+  let task = @cli.values(matches, "task").join(" ").trim()
   if task.is_empty() {
     fail("task description is required for agent runs")
   }
@@ -676,26 +600,13 @@ fn task_text(matches : @argparse.Matches) -> String raise {
 }
 
 ///|
-fn session_id(matches : @argparse.Matches) -> @agent_session.SessionId? {
-  // `--session` is a root global without a default, so read it gracefully: it is
-  // absent (not empty) in a subcommand's matches when unset.
-  let id = match values(matches, "session") {
-    [session, ..] => session.trim()
-    [] => ""
-  }
-  if id.is_empty() {
-    None
-  } else {
-    Some(SessionId("\{id}"))
-  }
-}
-
-///|
 async fn prepare_workspace_root(
   matches : @argparse.Matches,
   log_created? : Bool = true,
 ) -> String {
-  let dir = trim_trailing_path_separators("\{value(matches, "dir").trim()}")
+  let dir = trim_trailing_path_separators(
+    "\{@cli.value(matches, "dir").trim()}",
+  )
   if dir.is_empty() {
     fail("--dir or OPENSEEK_DIR must not be empty")
   }
@@ -752,11 +663,10 @@ fn session_root(
   matches : @argparse.Matches,
   workspace_root? : String = ".",
 ) -> String raise {
-  let root = value(matches, "session-root").trim()
-  if root.is_empty() {
-    fail("--session-root or OPENSEEK_SESSION_ROOT must not be empty")
-  }
-  @workspace_path.resolve(workspace_root, "\{root}")
+  let root = @cli.require_non_empty(
+    matches, "session-root", "--session-root or OPENSEEK_SESSION_ROOT must not be empty",
+  )
+  @workspace_path.resolve(workspace_root, root)
 }
 
 ///|
@@ -833,7 +743,7 @@ priv enum SessionListFormat {
 
 ///|
 fn session_list_format(matches : @argparse.Matches) -> SessionListFormat raise {
-  match value(matches, "format") {
+  match @cli.value(matches, "format") {
     "text" => Text
     "json" => Json
     other => fail("--format must be text or json, got: \{other}")
@@ -928,8 +838,8 @@ async fn configured_system_prompt(
   model : @deepseek.Model,
   workspace_root? : String = ".",
 ) -> String {
-  let base_path = value(matches, "system-prompt-file")
-  let addendum_path = value(matches, "system-prompt-addendum-file")
+  let base_path = @cli.value(matches, "system-prompt-file")
+  let addendum_path = @cli.value(matches, "system-prompt-addendum-file")
   let base = if base_path == "" {
     @prompt.system_prompt_for_model(model)
   } else {
@@ -963,7 +873,7 @@ async fn configured_system_prompt(
   // prefix-cache hittable.
   match
     skills_prompt_section_for_cwd(
-      global_dir=value(matches, "global-skills-dir"),
+      global_dir=@cli.value(matches, "global-skills-dir"),
       workspace_root~,
     ) {
     Some(section) =>
@@ -1151,23 +1061,12 @@ async test "environment section inline snapshot for deterministic layout" {
 }
 
 ///|
-fn parse_positive_int(input : String, label : String) -> Int raise {
-  let parsed = @string.parse_int(input) catch {
-    _ => fail("\{label} must be a positive integer, got: \{input}")
-  }
-  guard parsed > 0 else {
-    fail("\{label} must be a positive integer, got: \{input}")
-  }
-  parsed
-}
-
-///|
 fn required_positive_int(input : String, label : String) -> Int raise {
   let trimmed = input.trim()
   if trimmed.is_empty() {
     fail("\{label} is required")
   }
-  parse_positive_int("\{trimmed}", label)
+  @cli.parse_positive_int("\{trimmed}", label)
 }
 
 ///|
@@ -1203,15 +1102,20 @@ test "cli parses env backed options and task" {
     "OPENSEEK_SESSION": "demo",
     "OPENSEEK_SESSION_ROOT": "/tmp/openseek-sessions",
   })
-  assert_eq(api_key(parsed, V4Pro), "test-key")
-  assert_eq(value(parsed, "model"), "deepseek-v4-pro")
-  guard api_url(parsed) is Some(url) else { fail("expected api url") }
+  assert_eq(@agentcli.api_key(parsed, V4Pro), "test-key")
+  assert_eq(@cli.value(parsed, "model"), "deepseek-v4-pro")
+  guard @agentcli.api_url(parsed) is Some(url) else { fail("expected api url") }
   assert_eq(url, "https://proxy.example/v1/chat/completions")
-  assert_eq(value(parsed, "dir"), "/tmp/openseek-workspace")
+  assert_eq(@cli.value(parsed, "dir"), "/tmp/openseek-workspace")
   assert_eq(max_steps(parsed), 120)
-  assert_eq(value(parsed, "system-prompt-file"), "/tmp/prompt-a.md")
-  assert_eq(value(parsed, "system-prompt-addendum-file"), "/tmp/prompt-b.md")
-  guard session_id(parsed) is Some(id) else { fail("expected session id") }
+  assert_eq(@cli.value(parsed, "system-prompt-file"), "/tmp/prompt-a.md")
+  assert_eq(
+    @cli.value(parsed, "system-prompt-addendum-file"),
+    "/tmp/prompt-b.md",
+  )
+  guard @agentcli.session_id(parsed) is Some(id) else {
+    fail("expected session id")
+  }
   assert_eq(id.value(), "demo")
   assert_eq(session_root(parsed), "/tmp/openseek-sessions")
   assert_eq(task_text(parsed), "write MoonBit")
@@ -1222,12 +1126,12 @@ test "cli defaults model and max steps" {
   let parsed = run_matches(argv=["write", "MoonBit"], env={
     "DEEPSEEK": "test-key",
   })
-  assert_eq(api_key(parsed, V4Pro), "test-key")
-  assert_eq(value(parsed, "model"), "deepseek-v4-pro")
-  assert_true(api_url(parsed) is None)
-  assert_eq(value(parsed, "dir"), ".")
+  assert_eq(@agentcli.api_key(parsed, V4Pro), "test-key")
+  assert_eq(@cli.value(parsed, "model"), "deepseek-v4-pro")
+  assert_true(@agentcli.api_url(parsed) is None)
+  assert_eq(@cli.value(parsed, "dir"), ".")
   assert_eq(max_steps(parsed), 1000)
-  assert_true(session_id(parsed) is None)
+  assert_true(@agentcli.session_id(parsed) is None)
   assert_eq(session_root(parsed), ".openseek")
 }
 
@@ -1237,11 +1141,11 @@ test "cli uses KIMI only for Kimi models" {
     "KIMI": "kimi-key",
     "OPENSEEK_MODEL": "kimi-k2.7-code-highspeed",
   })
-  assert_eq(api_key(kimi, KimiK27CodeHighSpeed), "kimi-key")
+  assert_eq(@agentcli.api_key(kimi, KimiK27CodeHighSpeed), "kimi-key")
   let deepseek = run_matches(argv=["write", "MoonBit"], env={
     "KIMI": "kimi-key",
   })
-  let _ = api_key(deepseek, V4Pro) catch {
+  let _ = @agentcli.api_key(deepseek, V4Pro) catch {
     error => {
       assert_true("\{error}".contains("DEEPSEEK"))
       return
@@ -1287,8 +1191,8 @@ test "sessions list needs no api key or task" {
   // The `sessions` subcommands do not declare api-key/task at all, so listing
   // works with no DeepSeek setup.
   let parsed = sessions_leaf_matches(sub="list", argv=[], env={})
-  assert_eq(value(parsed, "format"), "text")
-  assert_eq(value(parsed, "session-root"), ".openseek")
+  assert_eq(@cli.value(parsed, "format"), "text")
+  assert_eq(@cli.value(parsed, "session-root"), ".openseek")
 }
 
 ///|
@@ -1400,7 +1304,7 @@ async test "session commands reject empty session root" {
 ///|
 test "agent runs require api key" {
   let parsed = run_matches(argv=["write", "MoonBit"], env={})
-  let _ = api_key(parsed, V4Pro) catch {
+  let _ = @agentcli.api_key(parsed, V4Pro) catch {
     error => {
       assert_true("\{error}".contains("DEEPSEEK"))
       return
