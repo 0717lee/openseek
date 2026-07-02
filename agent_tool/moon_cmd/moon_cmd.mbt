@@ -92,12 +92,9 @@ async fn execute(arguments : Json) -> @agent_tool.ToolAction {
 ///|
 fn command_args(input : @decode.MoonCommandInput) -> Array[String] {
   let args : Array[String] = [input.command]
-  match input.target {
-    Some(target) => {
-      args.push("--target")
-      args.push(target)
-    }
-    None => ()
+  if input.target is Some(target) {
+    args.push("--target")
+    args.push(target)
   }
   for arg in input.args {
     args.push(arg)
@@ -118,10 +115,7 @@ fn command_args(input : @decode.MoonCommandInput) -> Array[String] {
 async fn moon_cmd(input : @decode.MoonCommandInput) -> @agent_tool.ToolAction {
   let args = command_args(input)
   let (code, output) = collect_moon_output(args, input.cwd, input.stdin)
-  let cwd_text = match input.cwd {
-    Some(cwd) => cwd
-    None => "."
-  }
+  let cwd_text = input.cwd.unwrap_or(".")
   let update_review = match (input.test_update_kind, input.test_update_reason) {
     (Some(kind), Some(reason)) => "\nsnapshot_update=\{kind}: \{reason}"
     _ => ""
