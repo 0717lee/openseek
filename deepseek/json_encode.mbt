@@ -1,15 +1,31 @@
 ///|
-/// Encodes a `ChatMessage` as the DeepSeek chat completions wire object.
+/// Keep assistant reasoning_content for Kimi K2.7 Code as per their documentation:
+///
+/// > Because Preserved Thinking is always on, in multi-turn conversations you
+/// > must keep the `reasoning_content` of every historical assistant message in
+/// > `messages` as-is.
+///
+/// See: https://platform.kimi.ai/docs/guide/use-kimi-k2-thinking-model#using-the-kimi-k2-7-code-model
+fn ChatMessage::reasoning_json_fields(
+  message : ChatMessage,
+  model : Model,
+) -> Array[(String, Json)] {
+  if !model.is_kimi_k27_code() {
+    return []
+  }
+  if message.role is Assistant && message.reasoning_content is Some(reasoning) {
+    [("reasoning_content", Json::string(reasoning))]
+  } else {
+    []
+  }
+}
+
+///|
+/// Encodes a `ChatMessage` for a selected chat-completions model.
 ///
 /// Assistant messages whose `content` is empty but carry tool calls are
 /// encoded with JSON `content: null`, as the API requires.
-///
-/// `reasoning_content` is deliberately never encoded: it is response-side
-/// data the model does not read back (DeepSeek's docs say not to return it),
-/// and resending it grows every request — a real 156-step run accumulated
-/// 64KB of dead reasoning, 11% of its final 141K-token context. Sessions
-/// still store it for the TUI transcript and the visualizer.
-impl ToJson for ChatMessage with fn to_json(message : ChatMessage) -> Json {
+fn ChatMessage::to_json_for_model(message : ChatMessage, model : Model) -> Json {
   let content = match message.role {
     Assistant if message.tool_calls.length() > 0 && message.content == "" =>
       Json::null()
@@ -29,6 +45,7 @@ impl ToJson for ChatMessage with fn to_json(message : ChatMessage) -> Json {
         } else {
           []
         },
+        ..message.reasoning_json_fields(model),
       ],
     ),
   )
@@ -65,6 +82,44 @@ impl ToJson for ToolCall with fn to_json(call : ToolCall) -> Json {
 }
 
 ///|
+/// Omit `thinking` parameter for Kimi K2.7 Code.
+///
+/// > When using kimi-k2.7-code you do not need to (and should not) pass the
+/// > thinking parameter ...
+///
+/// See: https://platform.kimi.ai/docs/guide/use-kimi-k2-thinking-model#using-the-kimi-k2-7-code-model
+fn thinking_json_fields(
+  model : Model,
+  thinking : ThinkingMode?,
+) -> Array[(String, Json)] {
+  if model.is_kimi_k27_code() {
+    return []
+  }
+  match thinking {
+    Some(No) => [("thinking", { "type": "disabled" })]
+    Some(High) =>
+      [("thinking", { "type": "enabled" }), ("reasoning_effort", "high")]
+    Some(Max) =>
+      [("thinking", { "type": "enabled" }), ("reasoning_effort", "max")]
+    None => []
+  }
+}
+
+///|
+const KimiDefaultMaxTokens : Int = 32_000
+
+///|
+fn max_tokens_json_fields(model : Model) -> Array[(String, Json)] {
+  if model.is_kimi_k27_code() {
+    // Keep the default aligned with kimi-cli's Kimi provider:
+    // https://github.com/MoonshotAI/kimi-cli/blob/2c34efbbc6c7cfe40770623281e87c138ff8eb6c/packages/kosong/src/kosong/chat_provider/kimi.py#L163-L166
+    [("max_tokens", Json::number(KimiDefaultMaxTokens.to_double()))]
+  } else {
+    []
+  }
+}
+
+///|
 /// Encodes a DeepSeek chat completions request body.
 ///
 /// `response_format`, `tools`, and `thinking` are omitted when empty / `None`.
@@ -80,7 +135,12 @@ pub fn encode_chat_request(
     Map(
       [
         ("model", Json::string(model.to_string())),
-        ("messages", ([ for message in messages => message ] : Json)),
+        (
+          "messages",
+          [
+            for message in messages => message.to_json_for_model(model)
+          ],
+        ),
         ("stream", Json::boolean(stream)),
         ..match response_format {
           Some(format) =>
@@ -97,20 +157,8 @@ pub fn encode_chat_request(
         } else {
           []
         },
-        ..match thinking {
-          Some(No) => [("thinking", ({ "type": "disabled" } : Json))]
-          Some(High) =>
-            [
-              ("thinking", ({ "type": "enabled" } : Json)),
-              ("reasoning_effort", Json::string("high")),
-            ]
-          Some(Max) =>
-            [
-              ("thinking", ({ "type": "enabled" } : Json)),
-              ("reasoning_effort", Json::string("max")),
-            ]
-          None => []
-        },
+        ..thinking_json_fields(model, thinking),
+        ..max_tokens_json_fields(model),
       ],
     ),
   )

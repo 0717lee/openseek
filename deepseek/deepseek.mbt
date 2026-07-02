@@ -1,26 +1,40 @@
 ///|
-/// DeepSeek chat model names accepted by the chat completions API.
+/// DeepSeek chat model names plus supported Kimi K2.7 Code model names.
 pub(all) enum Model {
   V4Flash
   V4Pro
+  KimiK27Code
+  KimiK27CodeHighSpeed
 } derive(Eq, Debug)
 
 ///|
-/// Returns the DeepSeek wire name for a chat model.
+/// Returns the wire name for a chat model.
 pub impl Show for Model with fn to_string(self : Model) -> String {
   match self {
     V4Flash => "deepseek-v4-flash"
     V4Pro => "deepseek-v4-pro"
+    KimiK27Code => "kimi-k2.7-code"
+    KimiK27CodeHighSpeed => "kimi-k2.7-code-highspeed"
   }
 }
 
 ///|
-/// Parses a DeepSeek wire model name into a typed model.
+/// Parses a wire model name into a typed model.
 pub fn Model::parse(input : String) -> Model raise {
   match input {
     "deepseek-v4-flash" => V4Flash
     "deepseek-v4-pro" => V4Pro
-    other => fail("unknown DeepSeek model: \{other}")
+    "kimi-k2.7-code" => KimiK27Code
+    "kimi-k2.7-code-highspeed" => KimiK27CodeHighSpeed
+    other => fail("unknown model: \{other}")
+  }
+}
+
+///|
+fn Model::is_kimi_k27_code(self : Model) -> Bool {
+  match self {
+    KimiK27Code | KimiK27CodeHighSpeed => true
+    V4Flash | V4Pro => false
   }
 }
 

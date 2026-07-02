@@ -1,8 +1,19 @@
 ///|
-let default_api_url : String = "https://api.deepseek.com/chat/completions"
+const DeepSeekDefaultApiUrl : String = "https://api.deepseek.com/chat/completions"
+
+///|
+const KimiDefaultApiUrl : String = "https://api.moonshot.cn/v1/chat/completions"
 
 ///|
 let default_model : @deepseek.Model = V4Pro
+
+///|
+fn default_api_url_for_model(model : @deepseek.Model) -> String {
+  match model {
+    KimiK27Code | KimiK27CodeHighSpeed => KimiDefaultApiUrl
+    V4Flash | V4Pro => DeepSeekDefaultApiUrl
+  }
+}
 
 ///|
 type API_KEY = String
@@ -22,8 +33,8 @@ pub struct Client {
 /// Constructs a DeepSeek HTTP client.
 ///
 /// `model` defaults to `deepseek-v4-pro`; `api_url` defaults to the DeepSeek
-/// chat completions endpoint. `thinking` defaults to `No`; pass `High` or
-/// `Max` to enable DeepSeek V4 thinking mode explicitly.
+/// endpoint, or the Kimi endpoint for Kimi models. `thinking` defaults to
+/// `No`; pass `High` or `Max` to enable DeepSeek V4 thinking mode explicitly.
 ///
 /// Transient failures — transport errors, HTTP 429, and 5xx — are retried up
 /// to `retry_attempts` total tries with exponential backoff starting at
@@ -33,7 +44,7 @@ pub struct Client {
 pub fn Client::Client(
   api_key~ : String,
   model? : @deepseek.Model = default_model,
-  api_url? : String = default_api_url,
+  api_url? : String = default_api_url_for_model(model),
   thinking? : @deepseek.ThinkingMode = No,
   retry_attempts? : Int = 3,
   retry_backoff_ms? : Int = 500,

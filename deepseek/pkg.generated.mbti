@@ -31,6 +31,8 @@ pub impl @json.FromJson for ChatResponse
 pub(all) enum Model {
   V4Flash
   V4Pro
+  KimiK27Code
+  KimiK27CodeHighSpeed
 } derive(Eq, @debug.Debug)
 pub fn Model::parse(String) -> Self raise
 pub impl Show for Model
