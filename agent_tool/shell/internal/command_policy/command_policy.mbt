@@ -139,12 +139,7 @@ fn is_sed_in_place_flag(arg : String) -> Bool {
   if !arg.has_prefix("-") || arg.has_prefix("--") || arg == "-" {
     return false
   }
-  let mut first = true
-  for ch in arg {
-    if first {
-      first = false
-      continue
-    }
+  for ch in arg[1:] {
     match ch {
       'i' => return true
       'e' | 'f' => return false
