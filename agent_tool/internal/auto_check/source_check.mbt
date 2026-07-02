@@ -230,8 +230,9 @@ fn format_diagnostic_with_context(fields : Map[String, Json]) -> String {
     return line
   }
   let excerpt = [
-    for context_line in context.split("\n")
-    if !context_line.is_empty() => "  \{context_line}"
+    for context_line in context.split("\n") if !context_line.is_empty() => {
+      "  \{context_line}"
+    }
   ]
   "\{line}\n\{excerpt.join("\n")}"
 }
@@ -321,7 +322,9 @@ test "tally_source_check reports a failed check with no diagnostics" {
   )
   assert_eq(check.error_count, 0)
   assert_eq(check.parse_error_count, 0)
-  guard check.failure_output is Some(raw) else { fail("expected failure output") }
+  guard check.failure_output is Some(raw) else {
+    fail("expected failure output")
+  }
   assert_true(raw.contains("exit=255"))
   assert_true(raw.contains("Failed to calculate build plan"))
   // A clean run with no diagnostics is just ok — no failure output.
@@ -345,7 +348,10 @@ test "source_check_feedback renders ok, errors, and failure fallback" {
     truncated: false,
     failure_output: None,
   }
-  assert_eq(source_check_feedback(ok), "moon check: ok — 0 errors, 2 warning(s)")
+  assert_eq(
+    source_check_feedback(ok),
+    "moon check: ok — 0 errors, 2 warning(s)",
+  )
   let errors : SourceCheck = {
     error_count: 3,
     warning_count: 0,

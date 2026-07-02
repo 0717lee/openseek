@@ -18,6 +18,7 @@ pub struct EditInput {
   replace_all : Bool
   start_line : Int
   end_line : Int?
+  revert_on_parse_errors : Bool
 } derive(@debug.Debug)
 
 // Type aliases

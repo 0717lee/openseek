@@ -8,7 +8,6 @@ test "decode valid write input" {
       #|  content: "hello",
       #|  revert_on_parse_errors: true,
       #|}
-
     ),
   )
 }
@@ -37,7 +36,6 @@ test "decode reads revert_on_parse_errors" {
       #|  content: "broken(",
       #|  revert_on_parse_errors: false,
       #|}
-
     ),
   )
   // Null is treated as absent, keeping the guard on.
