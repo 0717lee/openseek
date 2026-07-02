@@ -3956,17 +3956,11 @@ async fn script_generated_tree_transfer_literal_pair_target(
   cwd : String,
 ) -> String? {
   let literals = script_quoted_literals(text)
-  for source_index in 0..<literals.length() {
-    for dest_index in 0..<literals.length() {
+  for source_index, source_literal in literals {
+    for dest_index, dest_literal in literals {
       if source_index != dest_index {
-        let source = resolve_source_write_redirect_target(
-          cwd,
-          literals[source_index],
-        )
-        let dest = resolve_source_write_redirect_target(
-          cwd,
-          literals[dest_index],
-        )
+        let source = resolve_source_write_redirect_target(cwd, source_literal)
+        let dest = resolve_source_write_redirect_target(cwd, dest_literal)
         if script_generated_tree_transfer_literal_pair_can_create_workspace_source(
             root, source, dest,
           ) {
@@ -4618,19 +4612,7 @@ fn parse_mv_operands(argv : Array[String], arg_start : Int) -> MvOperands? {
     operands.push(arg)
     index += 1
   }
-  match target_directory {
-    Some(dest) => Some({ sources: operands, dest: Some(dest) })
-    None =>
-      if operands.length() >= 2 {
-        let sources : Array[String] = []
-        for index in 0..<(operands.length() - 1) {
-          sources.push(operands[index])
-        }
-        Some({ sources, dest: Some(operands[operands.length() - 1]) })
-      } else {
-        Some({ sources: [], dest: None })
-      }
-  }
+  operands_with_optional_dest(operands, target_directory)
 }
 
 ///|

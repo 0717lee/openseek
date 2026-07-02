@@ -174,10 +174,7 @@ async fn shell(
         brief=shell_brief(input.cmd, None),
       )
     None => {
-      let timeout_ms = match input.timeout_ms {
-        Some(timeout_ms) => timeout_ms
-        None => 0
-      }
+      let timeout_ms = input.timeout_ms.unwrap_or(0)
       return @agent_tool.ToolAction::respond(
         "error: shell command timed out after \{timeout_ms}ms",
         is_error=true,
@@ -422,10 +419,7 @@ fn shell_response(
     let footer = "<system>\{exit_header(output.exit_code)} truncated=true output_limit_reached=true shown_chars=\{output.text.char_length()} max_output_chars=\{max_output_chars}</system>"
     { content: with_system_footer(output.text, footer), is_error: true }
   } else {
-    let code = match output.exit_code {
-      Some(code) => code
-      None => 0
-    }
+    let code = output.exit_code.unwrap_or(0)
     {
       content: with_system_footer(output.text, "<system>exit=\{code}</system>"),
       is_error: code != 0,
