@@ -1058,10 +1058,7 @@ fn session_log_view(
 fn current_error_count(model : Model) -> Int {
   guard model.selected is Some(key) else { return 0 }
   guard model.parsed is Some(parsed) else { return 0 }
-  let id = match session_row(model, key) {
-    Some(row) => row.id
-    None => key
-  }
+  let id = session_label(model, key)
   let session = @viz.session_from_parse(
     parsed,
     id~,
