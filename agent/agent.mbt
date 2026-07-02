@@ -348,9 +348,9 @@ pub async fn[X] run_turn_in_scope(
         "" => None
         content => Some(content)
       }
-      if response.tool_calls.length() == 0 {
+      if response.tool_calls.is_empty() {
         let steer_inputs = pending_steers(runtime)
-        if steer_inputs.length() == 0 {
+        if steer_inputs.is_empty() {
           let next = append_item(session, Terminal(Finished(response.content)))
           @xlog.info() <?
             { "event": "agent_finished", "answer": response.content }
@@ -433,7 +433,7 @@ pub async fn[X] run_turn_in_scope(
               ),
             )
             let steer_inputs = pending_steers(runtime)
-            if steer_inputs.length() == 0 {
+            if steer_inputs.is_empty() {
               let next = append_item(session, Terminal(Finished(answer)))
               @xlog.info() <? { "event": "agent_finished", "answer": answer }
               return next
@@ -446,8 +446,7 @@ pub async fn[X] run_turn_in_scope(
             messages.push(
               ChatMessage(Tool(native_call.id), content="finished: \{answer}"),
             )
-            for rest_index in (call_index + 1)..<response.tool_calls.length() {
-              let skipped = response.tool_calls[rest_index]
+            for skipped in response.tool_calls[call_index + 1:] {
               let note = "skipped: user input arrived before this call ran"
               @xlog.info() <?
                 {
@@ -523,20 +522,14 @@ pub async fn[X] run_turn_in_scope(
     @xlog.warn() <? { "event": "max_steps_exhausted" }
     next
   } catch {
-    error if @async.is_being_cancelled() || @async.is_cancellation_error(error) => {
-      ignore(
-        append_item(session, Terminal(Interrupted("cancelled"))) catch {
-          _ => session
-        },
-      )
-      raise error
-    }
     error => {
-      ignore(
-        append_item(session, Terminal(Failed("agent failed: \{error}"))) catch {
-          _ => session
-        },
-      )
+      let terminal : @agent_session.SessionItem = if @async.is_being_cancelled() ||
+        @async.is_cancellation_error(error) {
+        Terminal(Interrupted("cancelled"))
+      } else {
+        Terminal(Failed("agent failed: \{error}"))
+      }
+      ignore(append_item(session, terminal) catch { _ => session })
       raise error
     }
   }
