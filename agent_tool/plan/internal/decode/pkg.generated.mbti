@@ -1,0 +1,34 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "bobzhang/openseek/agent_tool/plan/internal/decode"
+
+import {
+  "moonbitlang/core/debug",
+}
+
+// Values
+pub const MAX_STEPS : Int = 20
+
+pub fn decode(Json) -> PlanInput raise
+
+// Errors
+
+// Types and methods
+pub struct PlanInput {
+  steps : Array[PlanStep]
+} derive(@debug.Debug)
+
+pub enum PlanStatus {
+  Pending
+  Active
+  Done
+} derive(Eq, @debug.Debug)
+
+pub struct PlanStep {
+  title : String
+  status : PlanStatus
+} derive(@debug.Debug)
+
+// Type aliases
+
+// Traits
+
