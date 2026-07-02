@@ -425,7 +425,7 @@ async fn resolve_events_path(trial : TrialArtifact) -> String {
     trial.workspace +
     "/.openseek/sessions/" +
     trial.session_id +
-    "/events.jsonl"
+    "/openseek_session.jsonl"
   }
 }
 

@@ -812,9 +812,7 @@ async fn session_listing_updated_at_ms(
   listing : @store.SessionListing,
 ) -> Int64? {
   let id = listing.id()
-  let stamp = @fs.mtime(store.event_log_file(id)) catch {
-    _ => @fs.mtime(store.header_file(id)) catch { _ => return None }
-  }
+  let stamp = @fs.mtime(store.session_file(id)) catch { _ => return None }
   let (seconds, nanoseconds) = stamp
   Some(mtime_to_unix_millis(seconds, nanoseconds))
 }

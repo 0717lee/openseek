@@ -1,7 +1,7 @@
 ///|
 /// Run the prompt task `config.runs` times, `config.concurrency` at a time,
 /// writing only durable artifacts: workspaces, raw process logs, recorded
-/// session `events.jsonl` files, and a run manifest. No validation or report
+/// session `openseek_session.jsonl` files, and a run manifest. No validation or report
 /// analysis is performed in this phase.
 pub async fn run_experiments(config : Config) -> RunManifest {
   if config.api_key == "" {
@@ -114,7 +114,7 @@ async fn run_trial(
   let events_path = discover_session_events(
     real_workspace,
     session_id,
-    fallback="\{real_workspace}/.openseek/sessions/\{session_id}/events.jsonl",
+    fallback="\{real_workspace}/.openseek/sessions/\{session_id}/openseek_session.jsonl",
   )
   TrialArtifact(
     index=index + 1,
@@ -170,7 +170,7 @@ async fn collect_session_events(
     let path = "\{dir}/\{name}"
     if is_directory(path) {
       collect_session_events(path, session_id, matches)
-    } else if name == "events.jsonl" &&
+    } else if name == "openseek_session.jsonl" &&
       path.contains("/sessions/\{session_id}/") {
       matches.push(path)
     }

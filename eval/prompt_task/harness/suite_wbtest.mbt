@@ -178,7 +178,7 @@ fn eval_result_for_suite_test(index : Int, success : Bool) -> EvalResult {
     padded_index(index) +
     "/.openseek/sessions/trial-" +
     padded_index(index) +
-    "/events.jsonl",
+    "/openseek_session.jsonl",
     exit_code: 0,
     steps: index * 2,
     tool_results: index,

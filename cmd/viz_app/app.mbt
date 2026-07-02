@@ -16,9 +16,9 @@ struct SessionRow {
 
 ///|
 /// The whole viewer state. The current session is kept as the parsed log plus a
-/// system prompt fetched from `session.json`; the typed `Session` and its model
-/// projection are rebuilt in `view` so the two view modes always agree with the
-/// bytes on disk.
+/// system prompt lifted from the session file's header line; the typed
+/// `Session` and its model projection are rebuilt in `view` so the two view
+/// modes always agree with the bytes on disk.
 struct Model {
   sessions : Array[SessionRow]
   selected : String?
@@ -745,9 +745,9 @@ fn main_pane(emit : @cmd.Emit[Msg], model : Model) -> @html.Html {
 ///|
 fn header_strip(model : Model, id : String, root_label : String?) -> @html.Html {
   let prompt_note = if model.header_present {
-    "session.json loaded"
+    "session header loaded"
   } else {
-    "no session.json (events only)"
+    "no session header (events only)"
   }
   let root_note = match root_label {
     Some(root) => " · \{root}"
@@ -1124,9 +1124,10 @@ fn session_row_of(json : Json) -> SessionRow? {
 }
 
 ///|
-/// Decode the `/api/sessions/<id>` envelope into a `LoadOutcome`. `header` is
-/// the parsed `session.json` (or null); its `system_prompt` is lifted out when
-/// present so the viewer can label the header strip and seed the model view.
+/// Decode the `/api/sessions/<id>` envelope into a `LoadOutcome`. `events` is
+/// the raw session-file text; the header record on its first line carries the
+/// system prompt, lifted out so the viewer can label the header strip and seed
+/// the model view.
 fn parse_load(text : String) -> LoadOutcome {
   let json = @json.parse(text) catch { _ => return Malformed }
   guard json is Object(fields) else { return Malformed }
@@ -1143,16 +1144,9 @@ fn parse_load(text : String) -> LoadOutcome {
     _ => return Malformed
   }
   let parsed = @viz.parse_events(events_text)
-  let (system_prompt, header_present) = match fields.get("header") {
-    Some(Object(header)) =>
-      (
-        match header.get("system_prompt") {
-          Some(String(prompt)) => prompt
-          _ => ""
-        },
-        true,
-      )
-    _ => ("", false)
+  let (system_prompt, header_present) = match parsed.header {
+    Some(header) => (header.system_prompt, true)
+    None => ("", false)
   }
   let log_bytes = match fields.get("events_bytes") {
     Some(Number(value, ..)) => value.to_int64()

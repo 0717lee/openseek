@@ -48,6 +48,7 @@ test "parse round-trips every event kind" {
     @log.parse_events(events_jsonl(sample_session())),
     content=(
       #|{
+      #|  header: None,
       #|  events: [
       #|    { sequence: 1, ts: 0, item: User({ content: "list the files" }) },
       #|    {
@@ -101,6 +102,7 @@ test "parse tolerates a truncated final line" {
     @log.parse_events(text),
     content=(
       #|{
+      #|  header: None,
       #|  events: [{ sequence: 1, ts: 0, item: User({ content: "hi" }) }],
       #|  errors: [],
       #|  partial_tail: true,
@@ -138,6 +140,32 @@ test "parse records a bad interior line without aborting" {
       #|false
     ),
   )
+}
+
+///|
+test "parse lifts the header record from the first line" {
+  // A session file as the store writes it: header line first, events after.
+  let header : @log.SessionFileHeader = {
+    id: "demo",
+    system_prompt: "You are a helpful agent.",
+  }
+  let text = "\{header.to_json().stringify()}\n\{events_jsonl(sample_session())}"
+  let parsed = @log.parse_events(text)
+  debug_inspect(
+    parsed.header,
+    content=(
+      #|Some({ id: "demo", system_prompt: "You are a helpful agent." })
+    ),
+  )
+  assert_eq(parsed.events.length(), 5)
+  assert_eq(parsed.errors.length(), 0)
+  // A header record is only recognized on the first content line; later
+  // header-shaped lines are ordinary bad lines.
+  let trailing = "\{events_jsonl(sample_session())}\{header.to_json().stringify()}\n"
+  let reparsed = @log.parse_events(trailing)
+  debug_inspect(reparsed.header, content="None")
+  assert_eq(reparsed.events.length(), 5)
+  assert_eq(reparsed.errors.length(), 1)
 }
 
 ///|

@@ -210,8 +210,8 @@ both `sessions show` calls strip `ts` to stay deterministic.
 $ sh <<'EOF'
 > tmp=$(mktemp -d)
 > mkdir -p "$tmp/sessions/demo"
-> printf '{"version":1,"id":"demo","system_prompt":"system","last_sequence":2}' > "$tmp/sessions/demo/session.json"
-> cat > "$tmp/sessions/demo/events.jsonl" <<'JSONL'
+> cat > "$tmp/sessions/demo/openseek_session.jsonl" <<'JSONL'
+> {"version":1,"id":"demo","system_prompt":"system"}
 > {"sequence":1,"ts":0,"item":{"kind":"user","payload":{"content":"hello"}}}
 > {"sequence":2,"ts":0,"item":{"kind":"assistant","payload":{"content":"answer","tool_calls":[]}}}
 > JSONL

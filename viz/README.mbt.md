@@ -1,7 +1,7 @@
 # OpenSeek session visualizer
 
 A browser viewer for OpenSeek's durable session logs. It renders the
-`events.jsonl` append-only log of a session two ways, side by side behind a
+`openseek_session.jsonl` file of a session (a header line plus append-only event lines) two ways, side by side behind a
 toggle:
 
 - **Raw log** — every event in file order, grouped into turns (user prompt →
@@ -17,7 +17,7 @@ System follows the OS via `prefers-color-scheme`).
 
 | Package          | Target | Role                                                                 |
 |------------------|--------|---------------------------------------------------------------------|
-| `viz`            | js     | Pure parse + render: `events.jsonl` text → typed events → `@html.Html`. Reuses `agent_session` decoders and projection, so it stays correct as the format evolves. |
+| `viz`            | js     | Pure parse + render: session-file text → typed events → `@html.Html`. Reuses `agent_session` decoders and projection, so it stays correct as the format evolves. |
 | `cmd/viz_app`    | js     | The rabbita (TEA) frontend: session browser, fetch, mode toggle.    |
 | `cmd/viz_server` | native | Read-only web server (`moonbitlang/async/http`) exposing a JSON/raw-file API over a `SessionStore`. It never writes, so pointing it at a live session root is safe. |
 
@@ -30,9 +30,8 @@ no browser needed in CI.
 - `GET /` → the viewer shell (`web/index.html`)
 - `GET /viz_app.js` → the compiled frontend bundle (auto-located from the moon build output)
 - `GET /api/sessions` → `[{key, id, root, root_label, last_active, first_prompt}, …]`, most recent first across all roots
-- `GET /api/sessions/<key>` → `{found, events, events_bytes, header}` envelope for the frontend
-- `GET /api/sessions/<key>/events.jsonl` → raw append-only log
-- `GET /api/sessions/<key>/session.json` → raw header (404 when absent; the frontend degrades to events-only)
+- `GET /api/sessions/<key>` → `{found, events, events_bytes}` envelope for the frontend (`events` is the raw session-file text; its first line is the header record)
+- `GET /api/sessions/<key>/openseek_session.jsonl` → raw session file
 
 ## Running it
 

@@ -1,13 +1,12 @@
 ///|
-/// Read-only web server for the events.jsonl visualizer. Serves the static
+/// Read-only web server for the session-file visualizer. Serves the static
 /// frontend bundle plus a tiny JSON/raw-file API over a `SessionStore`:
 ///
 /// - `GET /`                                  → the viewer shell (web/index.html)
 /// - `GET /viz_app.js`                        → the compiled frontend bundle
 /// - `GET /api/sessions`                      → JSON listing across known roots
-/// - `GET /api/sessions/<key>`                → `{found, events, header}` envelope
-/// - `GET /api/sessions/<key>/events.jsonl`   → raw append-only event log
-/// - `GET /api/sessions/<key>/session.json`   → raw header (404 when absent)
+/// - `GET /api/sessions/<key>`                → `{found, events, events_bytes}` envelope
+/// - `GET /api/sessions/<key>/openseek_session.jsonl` → raw session file (header line + events)
 ///
 /// It never writes to the stores, so pointing it at live session roots is safe.
 async fn main {
@@ -202,13 +201,11 @@ async fn session_path_reply(catalog : SessionCatalog, rest : String) -> Reply {
   let id = @agent_session.SessionId(id_value)
   match file {
     None => session_envelope_reply(root.store, id)
-    Some("events.jsonl") =>
+    Some("openseek_session.jsonl") =>
       asset_reply(
-        root.store.event_log_file(id),
+        root.store.session_file(id),
         "application/x-ndjson; charset=utf-8",
       )
-    Some("session.json") =>
-      asset_reply(root.store.header_file(id), "application/json; charset=utf-8")
     Some(other) =>
       text_reply(404, "Not Found", "no such session file: \{other}")
   }
@@ -227,45 +224,25 @@ fn valid_session_id(value : String) -> Bool {
 
 ///|
 /// Serve one session as a single JSON envelope:
-/// `{ "found": Bool, "events": String, "events_bytes": Number, "header": Json|null }`.
+/// `{ "found": Bool, "events": String, "events_bytes": Number }`.
 ///
 /// The frontend's HTTP client (`rabbita/http`) resolves any completed response
 /// as success regardless of status code, so absence and content must be encoded
-/// in the body rather than signalled by 404. `events` is the raw `events.jsonl`
-/// text; `header` is the parsed `session.json` or `null` when it is absent.
+/// in the body rather than signalled by 404. `events` is the raw session-file
+/// text — the header line followed by event lines — which the frontend parser
+/// splits apart itself.
 async fn session_envelope_reply(
   store : @store.SessionStore,
   id : @agent_session.SessionId,
 ) -> Reply {
-  let events_path = store.event_log_file(id)
-  let header_path = store.header_file(id)
-  let events_exists = @fs.exists(events_path)
-  let header_exists = @fs.exists(header_path)
-  // A session with only a header (e.g. a crash between the first header write
-  // and the empty-log write) is still loadable — `SessionStore::load` treats a
-  // missing log as empty — and `listings()` can surface it, so treat either
-  // file existing as found rather than reporting a listed session as missing.
-  if !events_exists && !header_exists {
+  let path = store.session_file(id)
+  if !@fs.exists(path) {
     return json_reply({ "found": false })
-  }
-  let events_text = if events_exists {
-    read_text_lossy(events_path)
-  } else {
-    ""
-  }
-  let events_bytes = if events_exists { file_size(events_path) } else { 0L }
-  let header : Json = if header_exists {
-    @json.parse(read_text_lossy(header_path)) catch {
-      _ => Json::null()
-    }
-  } else {
-    Json::null()
   }
   json_reply({
     "found": true,
-    "events": events_text,
-    "events_bytes": Json::number(events_bytes.to_double()),
-    "header": header,
+    "events": read_text_lossy(path),
+    "events_bytes": Json::number(file_size(path).to_double()),
   })
 }
 
@@ -650,7 +627,7 @@ async fn asset_reply(path : String, content_type : String) -> Reply {
 
 ///|
 /// Read a file as text, decoding invalid UTF-8 lossily rather than raising. A
-/// live `events.jsonl` can be torn mid-codepoint by a concurrent append; strict
+/// live session file can be torn mid-codepoint by a concurrent append; strict
 /// decoding would 500 the whole fetch, hiding the valid prefix. Lossy decoding
 /// keeps that prefix, and the torn final line then fails to parse client-side
 /// and is reported as a benign truncated tail.
@@ -739,7 +716,7 @@ fn hex_val(c : Char) -> Int? {
 fn cli_command() -> @argparse.Command {
   Command(
     "openseek-viz",
-    about="Read-only web server for the OpenSeek events.jsonl visualizer.",
+    about="Read-only web server for the OpenSeek session visualizer.",
     options=[
       OptionArg(
         "port",

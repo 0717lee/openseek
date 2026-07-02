@@ -85,7 +85,7 @@ directory whose session files cannot be stat-ed (such husks sort last, like the
 human-readable listing).
 
 `sessions compact <id> --file <f> --from <n> --to <n>` appends a typed summary
-event. It does not delete raw events from `events.jsonl`;
+event. It does not delete raw events from the session file;
 `agent_session.Session::chat_messages` uses the summary to compact model context
 on replay.
 

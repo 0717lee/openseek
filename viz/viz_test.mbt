@@ -1,6 +1,6 @@
 ///|
 /// Build a session that exercises every event kind, then serialize it back to
-/// the on-disk `events.jsonl` form so the parser is tested against exactly what
+/// the on-disk session-file event form so the parser is tested against exactly what
 /// the store writes.
 fn sample_session() -> @agent_session.Session {
   let s0 = @agent_session.Session(

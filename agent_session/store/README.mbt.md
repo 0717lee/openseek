@@ -14,15 +14,14 @@ Each session lives under:
 
 ```text
 <root>/sessions/<session-id>/
-  session.json
-  events.jsonl
+  openseek_session.jsonl
   session.lock
 ```
 
-`session.json` stores the small header: session id, system prompt, last
-sequence, and a fingerprint of the event-log prefix it describes.
-`events.jsonl` is the append-only stream of typed `SessionEvent` records. Loading
-replays the JSONL log into an immutable `agent_session.Session`.
+`openseek_session.jsonl` is the whole durable session: its first line is a
+header record (`{"version":1,"id":...,"system_prompt":...}`) and every
+following line is one typed `SessionEvent`. Events are append-only. Loading
+replays the event lines into an immutable `agent_session.Session`.
 
 `session.lock` is an implementation detail used to serialize writers and keep a
 reader from seeing a half-updated session.
@@ -47,31 +46,30 @@ let session = store.compact(
 
 Use `create` when writing a complete session snapshot. Use `append` for normal
 agent progress. `append` is the safe save path: it checks that the caller's
-in-memory session still matches disk, appends exactly one timestamped event, and
-updates the header.
+in-memory session still matches disk, then appends exactly one timestamped
+event line.
 
 `load` takes a `SessionId` because `SessionStore(root)` is a directory-backed
 collection, not a handle to one current session. The id selects
-`<root>/sessions/<id>/session.json` and
-`<root>/sessions/<id>/events.jsonl`; the store intentionally does not keep a
-hidden "current" session. When the caller needs to discover a session first,
-use `list`, `listings`, or `latest`, then pass the chosen id to `load`.
+`<root>/sessions/<id>/openseek_session.jsonl`; the store intentionally does not
+keep a hidden "current" session. When the caller needs to discover a session
+first, use `list`, `listings`, or `latest`, then pass the chosen id to `load`.
 
 ## Create And Load
 
-`create` writes a complete session. It is useful for new sessions, test
-fixtures, or deliberate rewrites. `load` reads the header, replays the JSONL
-events for the requested id, validates sequence numbers, and rebuilds the
-immutable `Session`.
+`create` writes a complete session atomically (temp file, then rename). It is
+useful for new sessions, test fixtures, or deliberate rewrites. `load` reads
+the single session file, replays the event lines for the requested id,
+validates sequence numbers, and rebuilds the immutable `Session`.
 
 More pedantically, `load(id)`:
 
 - validates `id` before using it in a path;
 - takes a shared session lock when the session directory exists;
-- reads `session.json` and checks that the header id equals the requested id;
-- parses every JSON line in `events.jsonl` as a typed `SessionEvent`;
+- reads `openseek_session.jsonl` and checks that the first line is a header
+  record whose id equals the requested id;
+- parses every following JSON line as a typed `SessionEvent`;
 - checks that event sequence numbers are contiguous;
-- validates the header's event-log fingerprint against the replayed log;
 - returns a rebuilt immutable `Session`;
 - does not create a missing session, choose a latest session, or mutate disk.
 
@@ -199,8 +197,8 @@ async test "append rejects a stale in-memory session" {
 
 ## Compact
 
-`compact` appends a validated `Summary` event. It does not rewrite
-`events.jsonl`; the raw covered events remain durable. The compaction effect is
+`compact` appends a validated `Summary` event. It does not rewrite earlier
+lines of the session file; the raw covered events remain durable. The compaction effect is
 visible when `Session::chat_messages` projects model context: covered earlier
 events are skipped and the later summary message is used instead.
 
@@ -282,28 +280,27 @@ them up. `latest` uses loadability as the resume gate.
 
 ## File Path Helpers
 
-`header_file` and `event_log_file` expose absolute paths for read-only tooling
-such as the visualizer server. They still validate the session id before
+`session_file` exposes the absolute path of a session's file for read-only
+tooling such as the visualizer server. It still validates the session id before
 constructing the path.
 
 ```mbt nocheck
 ///|
-let header = store.header_file(@agent_session.SessionId("demo"))
-
-///|
-let log = store.event_log_file(@agent_session.SessionId("demo"))
+let path = store.session_file(@agent_session.SessionId("demo"))
 ```
 
 ## Failure Model
 
-The store is designed around append-only progress and crash recovery:
+The whole session is one file, so there is no cross-file consistency to
+maintain:
 
-- `append` writes the JSONL event first, then the header. A log that is ahead of
-  the header is accepted on load.
-- `create` writes a restrictive header before rewriting the log, then writes a
-  permissive header after the rewrite succeeds. A stale tail after a rewrite is
-  rejected.
-- Every load checks contiguous sequence numbers and header/log fingerprints.
+- `append` is a single `O_APPEND` write of one event line. The first durable
+  write for a session (no file yet) writes the header line and the first event
+  atomically, so a session file can never exist without its header.
+- `create` rewrites the file atomically (temp file, then rename); an
+  interrupted rewrite leaves the previous file intact.
+- Every load checks the header record and contiguous sequence numbers; a torn
+  trailing line fails the load rather than being silently dropped.
 - Every append or compact checks that the caller's session still matches disk.
 
 These rules keep persistence concerns out of `agent_session.Session` while

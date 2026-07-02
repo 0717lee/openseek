@@ -1,7 +1,7 @@
 ///|
-test "parse_load reads a found envelope with header" {
+test "parse_load lifts the system prompt from the header line" {
   let text =
-    #|{"found":true,"events":"{\"sequence\":1,\"ts\":0,\"item\":{\"kind\":\"user\",\"payload\":{\"content\":\"hi\"}}}\n","events_bytes":77,"header":{"version":1,"system_prompt":"SYS"}}
+    #|{"found":true,"events":"{\"version\":1,\"id\":\"demo\",\"system_prompt\":\"SYS\"}\n{\"sequence\":1,\"ts\":0,\"item\":{\"kind\":\"user\",\"payload\":{\"content\":\"hi\"}}}\n","events_bytes":77}
   match parse_load(text) {
     Loaded(parsed, system_prompt, header_present, log_bytes) => {
       inspect(parsed.events.length(), content="1")
@@ -14,9 +14,9 @@ test "parse_load reads a found envelope with header" {
 }
 
 ///|
-test "parse_load treats a null header as events-only" {
+test "parse_load treats a header-less file as events-only" {
   let text =
-    #|{"found":true,"events":"","header":null}
+    #|{"found":true,"events":""}
   match parse_load(text) {
     Loaded(_, system_prompt, header_present, log_bytes) => {
       inspect(system_prompt, content="")
@@ -30,6 +30,7 @@ test "parse_load treats a null header as events-only" {
 ///|
 fn parsed_log(session : @agent_session.Session) -> @session_log.ParsedLog {
   {
+    header: None,
     events: [
       for event in session.events() => event
     ],
@@ -41,7 +42,7 @@ fn parsed_log(session : @agent_session.Session) -> @session_log.ParsedLog {
 ///|
 test "session metadata counts steps and total runtime" {
   let text =
-    #|{"found":true,"events":"{\"sequence\":1,\"ts\":100000,\"item\":{\"kind\":\"user\",\"payload\":{\"content\":\"hi\"}}}\n{\"sequence\":2,\"ts\":101500,\"item\":{\"kind\":\"assistant\",\"payload\":{\"content\":\"\",\"tool_calls\":[]}}}\n{\"sequence\":3,\"ts\":170300,\"item\":{\"kind\":\"terminal\",\"payload\":{\"kind\":\"finished\",\"message\":\"done\"}}}\n","events_bytes":307,"header":null}
+    #|{"found":true,"events":"{\"sequence\":1,\"ts\":100000,\"item\":{\"kind\":\"user\",\"payload\":{\"content\":\"hi\"}}}\n{\"sequence\":2,\"ts\":101500,\"item\":{\"kind\":\"assistant\",\"payload\":{\"content\":\"\",\"tool_calls\":[]}}}\n{\"sequence\":3,\"ts\":170300,\"item\":{\"kind\":\"terminal\",\"payload\":{\"kind\":\"finished\",\"message\":\"done\"}}}\n","events_bytes":307}
   match parse_load(text) {
     Loaded(parsed, _, _, log_bytes) => {
       inspect(format_log_size(log_bytes), content="307 B")

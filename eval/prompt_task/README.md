@@ -1,7 +1,7 @@
 # Prompt Task Eval
 
 This harness runs a MoonBit prompt task through the real OpenSeek agent with
-isolated workspaces, per-trial raw logs, durable session `events.jsonl` logs,
+isolated workspaces, per-trial raw logs, durable `openseek_session.jsonl` session files,
 and bounded parallelism. Reporting is a separate analyzer pass, so reports can
 be regenerated without rerunning model/API trials.
 

@@ -233,13 +233,12 @@ The store layout is:
 
 ```text
 <root>/sessions/<session-id>/
-  session.json
-  events.jsonl
+  openseek_session.jsonl
 ```
 
-`session.json` is a small header containing the id, system prompt, last
-sequence, and an event-log fingerprint. `events.jsonl` is the append-only event
-log. Loading replays JSONL events into a `Session`.
+`openseek_session.jsonl` holds the whole session: a header record
+(`{"version":1,"id":...,"system_prompt":...}`) on the first line, then one
+append-only event per line. Loading replays the event lines into a `Session`.
 
 Use the store for durable callers:
 
