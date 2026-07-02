@@ -287,7 +287,7 @@ async fn session_list_reply(catalog : SessionCatalog) -> Reply {
     }
   }
   rows.sort_by(compare_session_list_rows)
-  json_reply(Array::map(rows, row => row.to_json()).to_json())
+  json_reply(rows.map(row => row.to_json()).to_json())
 }
 
 ///|
@@ -382,10 +382,7 @@ async fn session_catalog(
   }
   // Scan the --session-root as well as the --search-dirs, so nested stores under
   // a container root are surfaced the same way search-dir trees are.
-  let scan_dirs = [session_root]
-  for dir in search_dirs {
-    scan_dirs.push(dir)
-  }
+  let scan_dirs = [session_root, ..search_dirs]
   for root in discover_session_roots(scan_dirs, session_root_name) {
     paths.push(root)
   }
