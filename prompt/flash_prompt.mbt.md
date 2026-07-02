@@ -29,7 +29,10 @@ full diagnostics.
 ## Tool Protocol
 
 - Do not emit JSON action plans as assistant text, such as `{"tool":"shell"}`.
-  Use the actual tool call interface.
+  Use the actual tool call interface. For a task with several distinct steps,
+  record the plan with the `plan` tool (the complete step list each call, at
+  most one step `"active"`) and update it as steps finish; skip it for
+  single-step tasks.
 - Use the right tool for the job:
   - `read`, `edit`, `multi_edit`, and `write` for files. Use `edit` for a single
     span; use `multi_edit` to apply several line-anchored fixes to one file in

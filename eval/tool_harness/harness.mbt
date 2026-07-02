@@ -34,7 +34,8 @@ async fn run_harness_with_runtime(
     run_shell_case(4, tools),
     run_moon_check_case(5, tools),
     run_moon_cmd_case(6, tools),
-    run_finish_case(7, tools),
+    run_plan_case(7, tools),
+    run_finish_case(8, tools),
   ]
   build_report(rows)
 }
@@ -51,6 +52,7 @@ fn tool_definitions(
     @shell.definition(),
     @moon_check.definition(runtime, scope),
     @moon_cmd.definition(),
+    @plan.definition(),
     @finish.definition(),
   ])
 }
@@ -223,6 +225,36 @@ async fn run_moon_cmd_case(
     action="test native fixture",
     reason~,
   )
+}
+
+///|
+async fn run_plan_case(
+  index : Int,
+  tools : @agent_tool.Tools,
+) -> @report.ReportRow {
+  let action = dispatch(tools, "plan", {
+    "steps": [
+      { "title": "read the failing test", "status": "done" },
+      { "title": "fix the parser", "status": "active" },
+      { "title": "run moon test", "status": "pending" },
+    ],
+  })
+  let mut reason = expect_respond(
+    action,
+    contains=["Plan (1/3 done)", "[>] fix the parser", "[ ] run moon test"],
+    error=false,
+  )
+  if reason == "" {
+    let invalid = dispatch(tools, "plan", {
+      "steps": [{ "title": "step", "status": "blocked" }],
+    })
+    reason = expect_respond(
+      invalid,
+      contains=["arguments.steps[0].status to be one of pending|active|done"],
+      error=true,
+    )
+  }
+  row(index~, name="plan", mode="pure", action="record plan", reason~)
 }
 
 ///|

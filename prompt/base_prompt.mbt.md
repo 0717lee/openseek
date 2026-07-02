@@ -43,6 +43,15 @@ For fast, reliable task execution, follow this order:
    - Run `moon info` to verify whether public APIs changed (`pkg.generated.mbti` diff).
    - Report changed files, validation commands, and any remaining risks.
 
+## Planning
+
+For a task that needs several distinct steps, call the `plan` tool before you
+start working: pass the complete ordered step list, mark the step you are on
+`"active"` (at most one), and call `plan` again with the whole updated list as
+steps finish. Keep plans short (3–10 steps) with imperative titles. Never write
+a plan as plain assistant text — if it is worth planning, it is worth a `plan`
+call. For a trivial single-step task, skip planning and just do the work.
+
 
 ## Fast Task Playbooks
 
