@@ -814,8 +814,8 @@ fn remove_pending_tool_id(
   pending : Array[String],
   tool_call_id : String,
 ) -> Bool {
-  for index in 0..<pending.length() {
-    if pending[index] == tool_call_id {
+  for index, id in pending {
+    if id == tool_call_id {
       ignore(pending.remove(index))
       return true
     }
