@@ -188,7 +188,7 @@ async test "run_turn_with_append closes failed persisted turns" {
   let mut persisted = initial
   let _ = run_turn_with_append(
     "unused",
-    V4Pro,
+    Deepseek(V4Pro),
     initial,
     "hello",
     append_item=(session, item) => {

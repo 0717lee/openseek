@@ -1,20 +1,48 @@
 ///|
-/// DeepSeek chat model names plus supported Kimi K2.7 Code model names.
-pub(all) enum Model {
+/// DeepSeek chat model variants.
+pub(all) enum DsVariant {
   V4Flash
   V4Pro
-  KimiK27Code
-  KimiK27CodeHighSpeed
 } derive(Eq, Debug)
+
+///|
+/// Kimi chat model variants.
+pub(all) enum KimiVariant {
+  K27Code
+  K27CodeHighSpeed
+} derive(Eq, Debug)
+
+///|
+/// Supported chat models grouped by provider.
+pub(all) enum Model {
+  Deepseek(DsVariant)
+  Kimi(KimiVariant)
+} derive(Eq, Debug)
+
+///|
+/// Returns the wire name for a DeepSeek chat model variant.
+pub impl Show for DsVariant with fn to_string(self : DsVariant) -> String {
+  match self {
+    V4Flash => "deepseek-v4-flash"
+    V4Pro => "deepseek-v4-pro"
+  }
+}
+
+///|
+/// Returns the wire name for a Kimi chat model variant.
+pub impl Show for KimiVariant with fn to_string(self : KimiVariant) -> String {
+  match self {
+    K27Code => "kimi-k2.7-code"
+    K27CodeHighSpeed => "kimi-k2.7-code-highspeed"
+  }
+}
 
 ///|
 /// Returns the wire name for a chat model.
 pub impl Show for Model with fn to_string(self : Model) -> String {
   match self {
-    V4Flash => "deepseek-v4-flash"
-    V4Pro => "deepseek-v4-pro"
-    KimiK27Code => "kimi-k2.7-code"
-    KimiK27CodeHighSpeed => "kimi-k2.7-code-highspeed"
+    Deepseek(variant) => variant.to_string()
+    Kimi(variant) => variant.to_string()
   }
 }
 
@@ -22,19 +50,11 @@ pub impl Show for Model with fn to_string(self : Model) -> String {
 /// Parses a wire model name into a typed model.
 pub fn Model::parse(input : String) -> Model raise {
   match input {
-    "deepseek-v4-flash" => V4Flash
-    "deepseek-v4-pro" => V4Pro
-    "kimi-k2.7-code" => KimiK27Code
-    "kimi-k2.7-code-highspeed" => KimiK27CodeHighSpeed
+    "deepseek-v4-flash" => Deepseek(V4Flash)
+    "deepseek-v4-pro" => Deepseek(V4Pro)
+    "kimi-k2.7-code" => Kimi(K27Code)
+    "kimi-k2.7-code-highspeed" => Kimi(K27CodeHighSpeed)
     other => fail("unknown model: \{other}")
-  }
-}
-
-///|
-fn Model::is_kimi_k27_code(self : Model) -> Bool {
-  match self {
-    KimiK27Code | KimiK27CodeHighSpeed => true
-    V4Flash | V4Pro => false
   }
 }
 

@@ -584,14 +584,6 @@ fn flag(matches : @argparse.Matches, name : String) -> Bool {
 }
 
 ///|
-fn uses_kimi_api_key_fallback(model : @deepseek.Model) -> Bool {
-  match model {
-    KimiK27Code | KimiK27CodeHighSpeed => true
-    V4Flash | V4Pro => false
-  }
-}
-
-///|
 fn non_empty_value(matches : @argparse.Matches, name : String) -> String? raise {
   let key = value(matches, name).trim()
   if key.is_empty() {
@@ -610,13 +602,13 @@ fn api_key(
     Some(key) => return key
     None => ()
   }
-  if uses_kimi_api_key_fallback(model) {
+  if model is Kimi(_) {
     match non_empty_value(matches, "kimi-api-key") {
       Some(key) => return key
       None => ()
     }
   }
-  if uses_kimi_api_key_fallback(model) {
+  if model is Kimi(_) {
     fail(
       "an API key is required for Kimi models: pass --api-key or set OPENSEEK_API_KEY or KIMI",
     )
@@ -1178,7 +1170,7 @@ test "cli parses env backed options and task" {
     "OPENSEEK_SESSION": "demo",
     "OPENSEEK_SESSION_ROOT": "/tmp/openseek-sessions",
   })
-  assert_eq(api_key(parsed, V4Pro), "test-key")
+  assert_eq(api_key(parsed, Deepseek(V4Pro)), "test-key")
   assert_eq(value(parsed, "model"), "deepseek-v4-pro")
   guard api_url(parsed) is Some(url) else { fail("expected api url") }
   assert_eq(url, "https://proxy.example/v1/chat/completions")
@@ -1197,7 +1189,7 @@ test "cli defaults model and max steps" {
   let parsed = run_matches(argv=["write", "MoonBit"], env={
     "OPENSEEK_API_KEY": "test-key",
   })
-  assert_eq(api_key(parsed, V4Pro), "test-key")
+  assert_eq(api_key(parsed, Deepseek(V4Pro)), "test-key")
   assert_eq(value(parsed, "model"), "deepseek-v4-pro")
   assert_true(api_url(parsed) is None)
   assert_eq(value(parsed, "dir"), ".")
@@ -1212,11 +1204,11 @@ test "cli uses KIMI only for Kimi models" {
     "KIMI": "kimi-key",
     "OPENSEEK_MODEL": "kimi-k2.7-code-highspeed",
   })
-  assert_eq(api_key(kimi, KimiK27CodeHighSpeed), "kimi-key")
+  assert_eq(api_key(kimi, Kimi(K27CodeHighSpeed)), "kimi-key")
   let deepseek = run_matches(argv=["write", "MoonBit"], env={
     "KIMI": "kimi-key",
   })
-  let _ = api_key(deepseek, V4Pro) catch {
+  let _ = api_key(deepseek, Deepseek(V4Pro)) catch {
     error => {
       assert_true("\{error}".contains("OPENSEEK_API_KEY"))
       return
@@ -1360,7 +1352,7 @@ async test "session commands reject empty session root" {
 ///|
 test "agent runs require api key" {
   let parsed = run_matches(argv=["write", "MoonBit"], env={})
-  let _ = api_key(parsed, V4Pro) catch {
+  let _ = api_key(parsed, Deepseek(V4Pro)) catch {
     error => {
       assert_true("\{error}".contains("OPENSEEK_API_KEY"))
       return
@@ -1461,7 +1453,7 @@ async test "configured system prompt can replace and append files" {
     // Environment last: base and addendum form the cache-shared prefix; the
     // per-project cwd is the only divergence point.
     assert_eq(
-      configured_system_prompt(parsed, V4Flash),
+      configured_system_prompt(parsed, Deepseek(V4Flash)),
       "base prompt\n\n\naddendum\n\n\n\{environment_prompt_section()}",
     )
   })
@@ -1491,7 +1483,7 @@ async test "configured system prompt advertises global skills" {
         "OPENSEEK_GLOBAL_SKILLS_DIR": "\{dir}/skills",
       },
     )
-    let prompt = configured_system_prompt(parsed, V4Flash)
+    let prompt = configured_system_prompt(parsed, Deepseek(V4Flash))
     assert_true(prompt.contains("## Skills"))
     assert_true(
       prompt.contains(
@@ -1533,7 +1525,7 @@ async test "configured system prompt uses the selected workspace root" {
     )
     let prompt = configured_system_prompt(
       parsed,
-      V4Flash,
+      Deepseek(V4Flash),
       workspace_root=real_workspace,
     )
     assert_true(prompt.has_prefix("workspace prompt"))
@@ -1552,12 +1544,12 @@ async test "configured system prompt defaults to the flash prompt" {
     "OPENSEEK_API_KEY": "test-key",
   })
   assert_true(
-    configured_system_prompt(parsed, V4Flash).contains(
+    configured_system_prompt(parsed, Deepseek(V4Flash)).contains(
       "MoonBit coding agent focused on implementing user tasks",
     ),
   )
   assert_true(
-    configured_system_prompt(parsed, V4Pro).contains(
+    configured_system_prompt(parsed, Deepseek(V4Pro)).contains(
       "MoonBit coding agent focused on implementing user tasks",
     ),
   )
@@ -1581,7 +1573,7 @@ async test "load_or_new_session defers first durable write until append" {
         "OPENSEEK_GLOBAL_SKILLS_DIR": "\{root}/no-global-skills",
       },
     )
-    let created = load_or_new_session(store, id, parsed, V4Pro)
+    let created = load_or_new_session(store, id, parsed, Deepseek(V4Pro))
     let grounded_prompt = "system\n\n\{environment_prompt_section()}"
     assert_eq(created.system_prompt(), grounded_prompt)
     assert_eq(created.events().length(), 0)
@@ -1589,7 +1581,7 @@ async test "load_or_new_session defers first durable write until append" {
     let with_event = store.append(created, User(UserMessage("hello")))
     assert_eq(with_event.events().length(), 1)
     @fs.remove(prompt_path)
-    let loaded = load_or_new_session(store, id, parsed, V4Pro)
+    let loaded = load_or_new_session(store, id, parsed, Deepseek(V4Pro))
     assert_eq(loaded.system_prompt(), grounded_prompt)
     assert_eq(loaded.events().length(), 1)
   })
@@ -1635,7 +1627,7 @@ async test "new durable session header persists project layout" {
       store,
       id,
       parsed,
-      V4Pro,
+      Deepseek(V4Pro),
       workspace_root=real_workspace,
     )
     let _ = store.append(created, User(UserMessage("hello")))
@@ -1674,7 +1666,7 @@ async test "load_or_new_session recovers empty interrupted session directory" {
       },
     )
     let store = @store.SessionStore(root)
-    let session = load_or_new_session(store, id, parsed, V4Pro)
+    let session = load_or_new_session(store, id, parsed, Deepseek(V4Pro))
     assert_eq(
       session.system_prompt(),
       "system\n\n\{environment_prompt_section()}",
