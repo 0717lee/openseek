@@ -30,9 +30,8 @@ pub fn decode(arguments : Json) -> MoonCheckInput raise {
 fn parse_fields(fields : Map[String, Json]) -> MoonCheckInput raise {
   let cwd = optional_string(fields, "cwd")
   let target = optional_string(fields, "target")
-  match target {
-    Some(value) => @moon_target.validate_target(value)
-    None => ()
+  if target is Some(value) {
+    @moon_target.validate_target(value)
   }
   let warn_list = optional_string(fields, "warn_list")
   {

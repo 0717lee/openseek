@@ -103,12 +103,10 @@ fn decode_edit_item(item : Json, index : Int) -> MultiEditItem raise {
       let new_string = required_string_with_prefix(fields, "new_string", prefix)
       let start_line = required_positive_int(fields, "start_line", prefix)
       let end_line = optional_positive_int(fields, "end_line", prefix)
-      match end_line {
-        Some(end) if end < start_line =>
-          fail(
-            "\{prefix}.end_line to be greater than or equal to \{prefix}.start_line",
-          )
-        _ => ()
+      if end_line is Some(end) && end < start_line {
+        fail(
+          "\{prefix}.end_line to be greater than or equal to \{prefix}.start_line",
+        )
       }
       { file, old_string, new_string, start_line, end_line }
     }
@@ -144,22 +142,31 @@ fn missing_field(
 }
 
 ///|
+/// Read a JSON number as a positive 1-based integer, failing when it is
+/// fractional or non-positive.
+fn positive_int_of_number(
+  value : Double,
+  name : String,
+  prefix : String,
+) -> Int raise {
+  let int_value = value.to_int()
+  if int_value.to_double() != value {
+    fail("\{prefix}.\{name} to be an integer")
+  }
+  if int_value <= 0 {
+    fail("\{prefix}.\{name} to be a positive integer")
+  }
+  int_value
+}
+
+///|
 fn required_positive_int(
   fields : Map[String, Json],
   name : String,
   prefix : String,
 ) -> Int raise {
   match fields.get(name) {
-    Some(Number(value, ..)) => {
-      let int_value = value.to_int()
-      if int_value.to_double() != value {
-        fail("\{prefix}.\{name} to be an integer")
-      }
-      if int_value <= 0 {
-        fail("\{prefix}.\{name} to be a positive integer")
-      }
-      int_value
-    }
+    Some(Number(value, ..)) => positive_int_of_number(value, name, prefix)
     Some(Null) | None => fail(missing_field(fields, name, prefix))
     Some(_) => fail("\{prefix}.\{name} to be an integer")
   }
@@ -172,16 +179,7 @@ fn optional_positive_int(
   prefix : String,
 ) -> Int? raise {
   match fields.get(name) {
-    Some(Number(value, ..)) => {
-      let int_value = value.to_int()
-      if int_value.to_double() != value {
-        fail("\{prefix}.\{name} to be an integer")
-      }
-      if int_value <= 0 {
-        fail("\{prefix}.\{name} to be a positive integer")
-      }
-      Some(int_value)
-    }
+    Some(Number(value, ..)) => Some(positive_int_of_number(value, name, prefix))
     Some(Null) | None => None
     _ => fail("\{prefix}.\{name} to be an integer")
   }

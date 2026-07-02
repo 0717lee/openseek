@@ -103,10 +103,7 @@ fn push_html_block_ranges(
   guard block.0.get(block.0.length() - 1) is Some(last_line) else { return }
   let first_loc = first_line.meta.loc
   let last_loc = last_line.meta.loc
-  if first_loc.is_none() ||
-    first_loc.is_empty() ||
-    last_loc.is_none() ||
-    last_loc.is_empty() {
+  if loc_is_absent(first_loc) || loc_is_absent(last_loc) {
     return
   }
   let len = markdown.length()
@@ -130,9 +127,14 @@ fn is_html_comment(text : StringView) -> Bool {
 }
 
 ///|
+fn loc_is_absent(loc : @cmark_base.TextLoc) -> Bool {
+  loc.is_none() || loc.is_empty()
+}
+
+///|
 fn push_loc_range(ranges : Array[SourceRange], meta : @cmark_base.Meta) -> Unit {
   let loc = meta.loc
-  if loc.is_none() || loc.is_empty() {
+  if loc_is_absent(loc) {
     return
   }
   ranges.push({ first: loc.first_ccode, last_exclusive: loc.last_ccode + 1 })
@@ -149,17 +151,15 @@ fn push_html_comment_ranges(
   let stop = stop.clamp(min=0, max=len)
   let mut cursor = start.clamp(min=0, max=stop)
   while cursor < stop {
-    match find_html_comment_open(markdown, start=cursor, stop~) {
-      Some(first) =>
-        match find_html_comment_close(markdown, start=first + 4, stop~) {
-          Some(last_exclusive) => {
-            ranges.push({ first, last_exclusive })
-            cursor = last_exclusive
-          }
-          None => break
-        }
-      None => break
+    guard find_html_comment_open(markdown, start=cursor, stop~) is Some(first) else {
+      break
     }
+    guard find_html_comment_close(markdown, start=first + 4, stop~)
+      is Some(last_exclusive) else {
+      break
+    }
+    ranges.push({ first, last_exclusive })
+    cursor = last_exclusive
   }
 }
 
