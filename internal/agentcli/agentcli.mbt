@@ -44,13 +44,11 @@ pub fn api_key(
   matches : @argparse.Matches,
   model : @deepseek.Model,
 ) -> String raise {
-  match @cli.non_empty_value(matches, "api-key") {
-    Some(key) => return key
-    None => ()
+  if @cli.non_empty_value(matches, "api-key") is Some(key) {
+    return key
   }
-  match @cli.non_empty_value(matches, api_key_arg_for_model(model)) {
-    Some(key) => return key
-    None => ()
+  if @cli.non_empty_value(matches, api_key_arg_for_model(model)) is Some(key) {
+    return key
   }
   fail(
     "an API key is required for \{api_key_provider_for_model(model)} models: pass --api-key or set \{api_key_env_for_model(model)}",
