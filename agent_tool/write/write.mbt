@@ -78,14 +78,12 @@ async fn write_file(
   path~ : String,
 ) -> @agent_tool.ToolAction {
   try {
-    match manifest_write_error(path, input.content) {
-      Some(message) =>
-        return @agent_tool.ToolAction::respond(
-          "error writing \{path}: \{message}",
-          is_error=true,
-          brief="write \{@agent_tool.brief_basename(path)}",
-        )
-      None => ()
+    if manifest_write_error(path, input.content) is Some(message) {
+      return @agent_tool.ToolAction::respond(
+        "error writing \{path}: \{message}",
+        is_error=true,
+        brief="write \{@agent_tool.brief_basename(path)}",
+      )
     }
     // Guard the last unguarded source-write path: `write` is not sandboxed (it
     // is an in-process file write, unlike `shell`), so overwriting an existing
@@ -122,16 +120,13 @@ async fn write_file(
         error if @async.is_being_cancelled() => raise error
         _ => None
       }
-      match gate {
-        Some(gate) if gate.errors.length() > 0 => {
-          let bound = if gate.truncated { "≥" } else { "" }
-          return @agent_tool.ToolAction::respond(
-            write_reject_report(path, input.content, gate),
-            is_error=true,
-            brief="write rejected (\{bound}\{gate.errors.length()} parse error(s))",
-          )
-        }
-        _ => ()
+      if gate is Some(gate) && gate.errors.length() > 0 {
+        let bound = if gate.truncated { "≥" } else { "" }
+        return @agent_tool.ToolAction::respond(
+          write_reject_report(path, input.content, gate),
+          is_error=true,
+          brief="write rejected (\{bound}\{gate.errors.length()} parse error(s))",
+        )
       }
     }
     create_parent_dirs(path)
@@ -253,12 +248,9 @@ async fn create_parent_dirs(path : String) -> Unit {
 /// The directory portion of `path` (before the last `/` or `\`), or `""` when
 /// the path has no directory component or is at the filesystem root.
 fn parent_dir(path : String) -> String {
-  let cut = match (path.rev_find("/"), path.rev_find("\\")) {
-    (Some(a), Some(b)) => if a > b { a } else { b }
-    (Some(a), None) => a
-    (None, Some(b)) => b
-    (None, None) => -1
-  }
+  let slash = path.rev_find("/").unwrap_or(-1)
+  let backslash = path.rev_find("\\").unwrap_or(-1)
+  let cut = if slash > backslash { slash } else { backslash }
   if cut <= 0 {
     ""
   } else {
