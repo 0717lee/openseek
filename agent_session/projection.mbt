@@ -8,19 +8,28 @@ fn summary_model_content(summary : SessionSummary) -> String {
 }
 
 ///|
+/// A status line for a non-finished turn: the bare `label` when `reason` is
+/// blank, otherwise the label followed by the reason on its own line.
+fn agent_status_message(label : String, reason : String) -> String? {
+  if reason.trim().is_empty() {
+    Some(label)
+  } else {
+    Some("\{label}\n\{reason}")
+  }
+}
+
+///|
 fn terminal_model_message(terminal : TurnTerminal) -> String? {
   match terminal {
-    Finished(answer) if !answer.trim().is_empty() => Some(answer)
-    Finished(_) => None
-    Aborted(reason) if !reason.trim().is_empty() =>
-      Some("[agent aborted]\n\{reason}")
-    Aborted(_) => Some("[agent aborted]")
-    Interrupted(reason) if !reason.trim().is_empty() =>
-      Some("[agent interrupted]\n\{reason}")
-    Interrupted(_) => Some("[agent interrupted]")
-    Failed(message) if !message.trim().is_empty() =>
-      Some("[agent failed]\n\{message}")
-    Failed(_) => Some("[agent failed]")
+    Finished(answer) =>
+      if answer.trim().is_empty() {
+        None
+      } else {
+        Some(answer)
+      }
+    Aborted(reason) => agent_status_message("[agent aborted]", reason)
+    Interrupted(reason) => agent_status_message("[agent interrupted]", reason)
+    Failed(reason) => agent_status_message("[agent failed]", reason)
   }
 }
 
@@ -60,8 +69,8 @@ fn remove_pending_tool_call(
   pending : Array[@deepseek.ToolCall],
   tool_call_id : String,
 ) -> Bool {
-  for index in 0..<pending.length() {
-    if pending[index].id == tool_call_id {
+  for index, call in pending {
+    if call.id == tool_call_id {
       ignore(pending.remove(index))
       return true
     }

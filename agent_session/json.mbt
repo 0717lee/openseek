@@ -25,8 +25,7 @@ fn string_field(
 ) -> String raise @json.JsonDecodeError {
   match fields.get(key) {
     Some(String(value)) => value
-    Some(_) => json_decode_error(path.add_key(key), "expected string")
-    None => json_decode_error(path.add_key(key), "expected string")
+    _ => json_decode_error(path.add_key(key), "expected string")
   }
 }
 
@@ -38,8 +37,7 @@ fn int_field(
 ) -> Int raise @json.JsonDecodeError {
   match fields.get(key) {
     Some(Number(value, ..)) => value.to_int()
-    Some(_) => json_decode_error(path.add_key(key), "expected int")
-    None => json_decode_error(path.add_key(key), "expected int")
+    _ => json_decode_error(path.add_key(key), "expected int")
   }
 }
 
