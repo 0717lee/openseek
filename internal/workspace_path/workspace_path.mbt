@@ -1,11 +1,17 @@
 ///|
+/// Whether `workspace_root` selects the default (pre-workspace) behavior: both
+/// an empty root and "." mean "leave paths as-is".
+fn is_default_root(workspace_root : String) -> Bool {
+  workspace_root == "" || workspace_root == "."
+}
+
+///|
 /// Resolve a tool path against the agent workspace root. Absolute paths are
 /// already explicit, and the default root "." intentionally preserves the
 /// pre-workspace behavior and output text.
 pub fn resolve(workspace_root : String, path : String) -> String {
   if path == "" ||
-    workspace_root == "" ||
-    workspace_root == "." ||
+    is_default_root(workspace_root) ||
     @path.Path(path).is_absolute() {
     path
   } else {
@@ -19,7 +25,7 @@ pub fn resolve(workspace_root : String, path : String) -> String {
 pub fn resolve_cwd(workspace_root : String, cwd : String?) -> String? {
   match cwd {
     Some(cwd) if cwd != "" => Some(resolve(workspace_root, cwd))
-    _ if workspace_root == "" || workspace_root == "." => None
+    _ if is_default_root(workspace_root) => None
     _ => Some(workspace_root)
   }
 }
