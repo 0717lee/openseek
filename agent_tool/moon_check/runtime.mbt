@@ -360,10 +360,7 @@ fn[X] MoonCheckRuntime::emit_moon_check(
 /// runs, reported stale results, and a real session ended with the model
 /// running `pkill -9 -f "moon check"` to recover.
 fn moon_check_key_for_cwd(cwd : String?) -> String {
-  match cwd {
-    Some(cwd) => "cwd=\{cwd}"
-    None => "cwd=."
-  }
+  "cwd=\{cwd.unwrap_or(".")}"
 }
 
 ///|

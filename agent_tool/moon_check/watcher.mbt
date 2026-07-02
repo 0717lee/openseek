@@ -34,19 +34,13 @@ fn command_args(input : @decode.MoonCheckInput, watch~ : Bool) -> Array[String] 
   }
   args.push("--diagnostic-limit")
   args.push(default_diagnostic_limit.to_string())
-  match input.target {
-    Some(target) => {
-      args.push("--target")
-      args.push(target)
-    }
-    None => ()
+  if input.target is Some(target) {
+    args.push("--target")
+    args.push(target)
   }
-  match input.warn_list {
-    Some(warn_list) => {
-      args.push("--warn-list")
-      args.push(warn_list)
-    }
-    None => ()
+  if input.warn_list is Some(warn_list) {
+    args.push("--warn-list")
+    args.push(warn_list)
   }
   if input.deny_warn {
     args.push("--deny-warn")

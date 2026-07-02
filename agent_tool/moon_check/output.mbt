@@ -106,6 +106,43 @@ fn first_line_containing(content : String, needle : String) -> String? {
 }
 
 ///|
+/// `\nexit=<code>` when the watcher recorded an exit code, else empty. Shared
+/// by `moon_check_response` and `update_text`.
+fn MoonCheckSnapshot::exit_suffix(self : MoonCheckSnapshot) -> String {
+  match self.exit_code {
+    Some(code) => "\nexit=\{code}"
+    None => ""
+  }
+}
+
+///|
+/// `\nrestart_count=...\nrestart_limit=...` (plus an optional
+/// `\nrestart_reason=...`) once a restart has happened or a reason is pending,
+/// else empty. Shared by `moon_check_response` and `update_text`.
+fn MoonCheckSnapshot::restart_suffix(self : MoonCheckSnapshot) -> String {
+  if self.restart_count > 0 || self.restart_reason is Some(_) {
+    let reason = match self.restart_reason {
+      Some(reason) => "\nrestart_reason=\{reason}"
+      None => ""
+    }
+    "\nrestart_count=\{self.restart_count}\nrestart_limit=\{self.restart_limit}\{reason}"
+  } else {
+    ""
+  }
+}
+
+///|
+/// The captured output on its own line, or the `(no output yet)` placeholder.
+/// Shared by `moon_check_response` and `update_text`.
+fn MoonCheckSnapshot::output_suffix(self : MoonCheckSnapshot) -> String {
+  if self.output == "" {
+    "\n(no output yet)"
+  } else {
+    "\n\{self.output}"
+  }
+}
+
+///|
 /// Format the `ToolAction` body returned to the agent. `watcher` is one of
 /// `"started"`, `"reused"`, or `"restarted"`. Includes the watcher id, status,
 /// seq, optional exit/truncation/restart metadata, then the captured output.
@@ -113,35 +150,12 @@ fn moon_check_response(
   watcher : String,
   snapshot : MoonCheckSnapshot,
 ) -> String {
-  let cwd_text = match snapshot.cwd {
-    Some(cwd) => cwd
-    None => "."
-  }
-  let exit = match snapshot.exit_code {
-    Some(code) => "\nexit=\{code}"
-    None => ""
-  }
   let truncated = if snapshot.output_truncated {
     "\ntruncated=true\nmax_output_chars=\{snapshot.max_output_chars}"
   } else {
     ""
   }
-  let restart = if snapshot.restart_count > 0 ||
-    snapshot.restart_reason is Some(_) {
-    let reason = match snapshot.restart_reason {
-      Some(reason) => "\nrestart_reason=\{reason}"
-      None => ""
-    }
-    "\nrestart_count=\{snapshot.restart_count}\nrestart_limit=\{snapshot.restart_limit}\{reason}"
-  } else {
-    ""
-  }
-  let output = if snapshot.output == "" {
-    "\n(no output yet)"
-  } else {
-    "\n\{snapshot.output}"
-  }
-  "cwd=\{cwd_text}\ncommand=\{snapshot.command}\nwatcher=\{watcher}\nid=\{snapshot.id}\nstatus=\{moon_check_status_label(snapshot.status)}\nseq=\{snapshot.seq}\{exit}\{truncated}\{restart}\{output}"
+  "cwd=\{snapshot.cwd.unwrap_or(".")}\ncommand=\{snapshot.command}\nwatcher=\{watcher}\nid=\{snapshot.id}\nstatus=\{moon_check_status_label(snapshot.status)}\nseq=\{snapshot.seq}\{snapshot.exit_suffix()}\{truncated}\{snapshot.restart_suffix()}\{snapshot.output_suffix()}"
 }
 
 ///|
@@ -161,30 +175,8 @@ fn moon_check_status_label(status : WatcherStatus) -> String {
 /// included because the parent block lists multiple watchers and each needs
 /// its own identifying fields.
 fn MoonCheckSnapshot::update_text(update : MoonCheckSnapshot) -> String {
-  let cwd = match update.cwd {
-    Some(cwd) => cwd
-    None => "."
-  }
-  let exit = match update.exit_code {
-    Some(code) => "\nexit=\{code}"
-    None => ""
-  }
   let truncated = if update.output_truncated { "\ntruncated=true" } else { "" }
-  let restart = if update.restart_count > 0 || update.restart_reason is Some(_) {
-    let reason = match update.restart_reason {
-      Some(reason) => "\nrestart_reason=\{reason}"
-      None => ""
-    }
-    "\nrestart_count=\{update.restart_count}\nrestart_limit=\{update.restart_limit}\{reason}"
-  } else {
-    ""
-  }
-  let output = if update.output == "" {
-    "\n(no output yet)"
-  } else {
-    "\n\{update.output}"
-  }
-  "id=\{update.id}\ncwd=\{cwd}\ncommand=\{update.command}\nstatus=\{moon_check_status_label(update.status)}\nseq=\{update.seq}\{exit}\{truncated}\{restart}\{output}"
+  "id=\{update.id}\ncwd=\{update.cwd.unwrap_or(".")}\ncommand=\{update.command}\nstatus=\{moon_check_status_label(update.status)}\nseq=\{update.seq}\{update.exit_suffix()}\{truncated}\{update.restart_suffix()}\{update.output_suffix()}"
 }
 
 ///|
@@ -200,12 +192,9 @@ pub fn runtime_update_text(
 ) -> String? {
   let latest_moon_checks : Map[String, MoonCheckSnapshot] = {}
   let moon_check_count = for event in events; count = 0 {
-    match event {
-      MoonCheckUpdate(update) => {
-        latest_moon_checks[update.key] = update
-        continue count + 1
-      }
-      _ => ()
+    if event is MoonCheckUpdate(update) {
+      latest_moon_checks[update.key] = update
+      continue count + 1
     }
   } nobreak {
     count
@@ -250,9 +239,8 @@ pub fn update_fingerprints(
 ) -> Array[(String, String)] {
   let latest : Map[String, MoonCheckSnapshot] = {}
   for event in events {
-    match event {
-      MoonCheckUpdate(update) => latest[update.key] = update
-      _ => ()
+    if event is MoonCheckUpdate(update) {
+      latest[update.key] = update
     }
   }
   [
