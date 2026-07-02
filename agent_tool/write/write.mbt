@@ -207,17 +207,18 @@ fn write_revert_report(
   removed~ : Bool,
 ) -> String {
   let count = check.parse_error_count
-  let head = "reverted: wrote \{path} but the new file has \{count} parse error(s), so it was deleted (nothing is on disk)."
+  // The headline states one clear filesystem outcome; a failed delete must not
+  // read as "nothing is on disk".
+  let head = if removed {
+    "reverted: wrote \{path} but the new file has \{count} parse error(s), so it was deleted (nothing is on disk)."
+  } else {
+    "reverted: wrote \{path} but the new file has \{count} parse error(s); deleting it FAILED, so the broken content is still on disk — remove or fix it before relying on this package."
+  }
   let shown = check.parse_errors.length()
   let errors = if shown == 0 {
     ""
   } else {
-    "\nfirst \{shown} parse error(s), with the deleted content excerpted:\n\{check.parse_errors.join("\n")}"
-  }
-  let removed_note = if removed {
-    ""
-  } else {
-    "\nWARNING: could not delete \{path} — the broken content is still on disk; inspect it manually."
+    "\nfirst \{shown} parse error(s), with the rejected content excerpted:\n\{check.parse_errors.join("\n")}"
   }
   let retry = if count >= SmallerPartsHintThreshold {
     "\n\{count} parse errors usually means the content is malformed wholesale (truncated or not valid MoonBit). Do not re-issue the same content: write a smaller file first — a minimal skeleton that parses — then grow it in small pieces with edit (an empty old_string inserts), checking after each step."
@@ -225,7 +226,7 @@ fn write_revert_report(
     "\nre-issue write with the corrected full content."
   }
   let opt_out = "\n(To intentionally create a file that does not parse, e.g. a test fixture, pass revert_on_parse_errors=false.)"
-  "\{head}\{errors}\{removed_note}\{retry}\{opt_out}"
+  "\{head}\{errors}\{retry}\{opt_out}"
 }
 
 ///|
@@ -563,13 +564,14 @@ test "write_revert_report excerpts the deleted content and asks for a re-issue" 
     ],
     first_errors: ["lib/a.mbt:7:1-7:2: Parse error, unexpected token `}`."],
     truncated: false,
+    exit_code: Some(1),
     failure_output: None,
   }
   inspect(
     write_revert_report("lib/a.mbt", check, removed=true),
     content=(
       #|reverted: wrote lib/a.mbt but the new file has 1 parse error(s), so it was deleted (nothing is on disk).
-      #|first 1 parse error(s), with the deleted content excerpted:
+      #|first 1 parse error(s), with the rejected content excerpted:
       #|lib/a.mbt:7:1-7:2: Parse error, unexpected token `}`.
       #|  6 |  let y =
       #|  7 |}
@@ -588,12 +590,16 @@ test "write_revert_report pushes smaller parts when parse errors cascade" {
     parse_errors: ["lib/a.mbt:1:1-1:2: Parse error."],
     first_errors: [],
     truncated: false,
+    exit_code: Some(1),
     failure_output: None,
   }
   let report = write_revert_report("lib/a.mbt", check, removed=false)
   assert_true(report.contains("4 parse errors usually means"))
   assert_true(report.contains("write a smaller file first"))
-  assert_true(report.contains("WARNING: could not delete lib/a.mbt"))
+  // A failed delete flips the headline: the broken file is still on disk, and
+  // the report must not claim otherwise.
+  assert_true(report.contains("deleting it FAILED"))
+  assert_false(report.contains("nothing is on disk"))
   assert_false(
     report.contains("re-issue write with the corrected full content"),
   )

@@ -25,7 +25,9 @@ const ParseErrorCodeMax : Int = 3999
 /// check produced more output than the capture budget, so counts are lower
 /// bounds. `failure_output` is `Some` when the check exited non-zero without
 /// emitting any diagnostics (e.g. a broken build plan), so feedback derived
-/// from the zero counts never reads as a false "ok".
+/// from the zero counts never reads as a false "ok"; `exit_code` keeps the
+/// raw exit so feedback can also avoid "ok" when the run failed for a reason
+/// the captured diagnostics don't show (e.g. warnings-as-errors).
 pub(all) struct SourceCheck {
   error_count : Int
   warning_count : Int
@@ -33,6 +35,7 @@ pub(all) struct SourceCheck {
   parse_errors : Array[String]
   first_errors : Array[String]
   truncated : Bool
+  exit_code : Int?
   failure_output : String?
 } derive(Debug)
 
@@ -71,6 +74,7 @@ pub async fn check_source(path : String) -> SourceCheck? {
           target~,
           truncated=output.output_limit_reached,
           exit_code=output.exit_code,
+          check_cwd=cwd,
         ),
       )
     None => None
@@ -87,6 +91,7 @@ pub fn tally_source_check(
   target~ : String,
   truncated~ : Bool,
   exit_code~ : Int?,
+  check_cwd? : String,
 ) -> SourceCheck {
   let mut error_count = 0
   let mut warning_count = 0
@@ -110,7 +115,11 @@ pub fn tally_source_check(
           first_errors.push(format_diagnostic_line(fields))
         }
         if is_parse_error_code(fields) &&
-          diagnostic_targets_file(json_string_field(fields, "path"), target) {
+          diagnostic_targets_file(
+            json_string_field(fields, "path"),
+            target,
+            check_cwd,
+          ) {
           parse_error_count += 1
           if parse_errors.length() < ParseErrorDisplayLimit {
             parse_errors.push(format_diagnostic_with_context(fields))
@@ -136,6 +145,7 @@ pub fn tally_source_check(
     parse_errors,
     first_errors,
     truncated,
+    exit_code,
     failure_output,
   }
 }
@@ -153,7 +163,22 @@ pub fn source_check_feedback(check : SourceCheck) -> String {
     None => ()
   }
   if check.error_count == 0 {
-    return "moon check: ok — 0 errors, \{check.warning_count} warning(s)"
+    if check.exit_code is Some(0) && !check.truncated {
+      return "moon check: ok — 0 errors, \{check.warning_count} warning(s)"
+    }
+    // No error diagnostics were captured, but the run did not finish cleanly
+    // (non-zero exit, e.g. warnings-as-errors, or truncated capture) — never
+    // call that "ok".
+    let exit_label = match check.exit_code {
+      Some(code) => "exit=\{code}"
+      None => "exit=cancelled"
+    }
+    let truncated_label = if check.truncated {
+      ", output truncated"
+    } else {
+      ""
+    }
+    return "moon check: 0 error(s) captured but the check did not pass (\{exit_label}\{truncated_label}), \{check.warning_count} warning(s)"
   }
   let errors = if check.truncated {
     "≥\{check.error_count}"
@@ -190,22 +215,49 @@ fn is_parse_error_code(fields : Map[String, Json]) -> Bool {
 
 ///|
 /// Whether a diagnostic's `path` names the target file. Current moon versions
-/// emit absolute diagnostic paths, so after the caller resolves the target the
-/// exact comparison usually decides; the suffix checks keep the match working
-/// when either side is relative (older moon output, or an unresolvable
-/// target). Suffix matching is a heuristic — it requires a `/` boundary so
-/// `lib/a.mbt` never matches `other_a.mbt`, but two files sharing a relative
-/// suffix could collide; acceptable for a guard that only inspects the file
-/// just written.
-fn diagnostic_targets_file(diag_path : String, target : String) -> Bool {
+/// emit absolute (resolved) diagnostic paths and the caller resolves the
+/// target, so the exact comparison usually decides. When one side is relative
+/// (older moon output, or an unresolvable target), it is resolved against
+/// `check_cwd` — the module root the check ran from — and compared exactly
+/// again. No suffix heuristics: a false positive here deletes or rolls back a
+/// clean file, while a false negative only leaves the guard fail-open, so
+/// precision wins over recall.
+fn diagnostic_targets_file(
+  diag_path : String,
+  target : String,
+  check_cwd : String?,
+) -> Bool {
   let diag = normalize_match_path(diag_path)
   let target = normalize_match_path(target)
   if diag == "" || target == "" {
     return false
   }
-  diag == target ||
-  diag.has_suffix("/\{target}") ||
-  target.has_suffix("/\{diag}")
+  if diag == target {
+    return true
+  }
+  match check_cwd {
+    Some(cwd) => {
+      let cwd = normalize_match_path(cwd)
+      resolve_against(cwd, diag) == resolve_against(cwd, target)
+    }
+    None => false
+  }
+}
+
+///|
+fn resolve_against(cwd : String, path : String) -> String {
+  if is_absolute_match_path(path) || cwd == "" || cwd == "." {
+    path
+  } else if cwd.has_suffix("/") {
+    "\{cwd}\{path}"
+  } else {
+    "\{cwd}/\{path}"
+  }
+}
+
+///|
+fn is_absolute_match_path(path : String) -> Bool {
+  path.has_prefix("/") || (path.length() >= 2 && path[1] == ':')
 }
 
 ///|
@@ -269,7 +321,7 @@ test "tally_source_check scopes parse errors to the target file" {
 }
 
 ///|
-test "tally_source_check matches relative diagnostic paths by suffix" {
+test "tally_source_check resolves relative diagnostic paths via the check cwd" {
   let text =
     #|{"$message_type":"diagnostic","level":"error","error_code":3002,"path":"lib/new.mbt","loc":"1:1-1:2","message":"Parse error.","context":""}
   let check = tally_source_check(
@@ -277,19 +329,29 @@ test "tally_source_check matches relative diagnostic paths by suffix" {
     target="/ws/lib/new.mbt",
     truncated=false,
     exit_code=Some(1),
+    check_cwd="/ws",
   )
   assert_eq(check.parse_error_count, 1)
   // A diagnostic without a context excerpt renders as the bare one-liner.
   assert_eq(check.parse_errors[0], "lib/new.mbt:1:1-1:2: Parse error.")
-  // The `/` boundary is required: a same-suffix basename in another directory
-  // must not count against the target.
+  // A different target under the same cwd must not match.
   let other = tally_source_check(
     text,
     target="/ws/other_lib/wrong_new.mbt",
     truncated=false,
     exit_code=Some(1),
+    check_cwd="/ws",
   )
   assert_eq(other.parse_error_count, 0)
+  // Without a cwd a relative diagnostic cannot be resolved — fail open (no
+  // match) rather than guessing by suffix.
+  let no_cwd = tally_source_check(
+    text,
+    target="/ws/lib/new.mbt",
+    truncated=false,
+    exit_code=Some(1),
+  )
+  assert_eq(no_cwd.parse_error_count, 0)
 }
 
 ///|
@@ -346,6 +408,7 @@ test "source_check_feedback renders ok, errors, and failure fallback" {
     parse_errors: [],
     first_errors: [],
     truncated: false,
+    exit_code: Some(0),
     failure_output: None,
   }
   assert_eq(
@@ -359,6 +422,7 @@ test "source_check_feedback renders ok, errors, and failure fallback" {
     parse_errors: [],
     first_errors: ["a.mbt:1:1-1:2: boom"],
     truncated: true,
+    exit_code: Some(1),
     failure_output: None,
   }
   assert_eq(
@@ -375,22 +439,71 @@ test "source_check_feedback renders ok, errors, and failure fallback" {
     parse_errors: [],
     first_errors: [],
     truncated: false,
+    exit_code: Some(255),
     failure_output: Some("moon check:\nexit=255\nError: broken plan"),
   }
   assert_eq(
     source_check_feedback(failed),
     "moon check:\nexit=255\nError: broken plan",
   )
+  // Zero errors captured but a non-zero exit (e.g. warnings-as-errors) or a
+  // truncated capture must never render as "ok".
+  let unclean : SourceCheck = {
+    error_count: 0,
+    warning_count: 4,
+    parse_error_count: 0,
+    parse_errors: [],
+    first_errors: [],
+    truncated: false,
+    exit_code: Some(1),
+    failure_output: None,
+  }
+  assert_eq(
+    source_check_feedback(unclean),
+    "moon check: 0 error(s) captured but the check did not pass (exit=1), 4 warning(s)",
+  )
+  let clipped : SourceCheck = {
+    error_count: 0,
+    warning_count: 0,
+    parse_error_count: 0,
+    parse_errors: [],
+    first_errors: [],
+    truncated: true,
+    exit_code: Some(0),
+    failure_output: None,
+  }
+  assert_eq(
+    source_check_feedback(clipped),
+    "moon check: 0 error(s) captured but the check did not pass (exit=0, output truncated), 0 warning(s)",
+  )
 }
 
 ///|
-test "diagnostic path matching normalizes separators and dot prefixes" {
-  assert_true(diagnostic_targets_file("/ws/lib/a.mbt", "/ws/lib/a.mbt"))
-  assert_true(diagnostic_targets_file("lib/a.mbt", "/ws/lib/a.mbt"))
-  assert_true(diagnostic_targets_file("/ws/lib/a.mbt", "lib/a.mbt"))
-  assert_true(diagnostic_targets_file("lib\\a.mbt", "/ws/lib/a.mbt"))
-  assert_true(diagnostic_targets_file("./lib/a.mbt", "lib/a.mbt"))
-  assert_false(diagnostic_targets_file("lib/a.mbt", "/ws/lib/b.mbt"))
-  assert_false(diagnostic_targets_file("a.mbt", "/ws/extra_a.mbt"))
-  assert_false(diagnostic_targets_file("", "/ws/a.mbt"))
+test "diagnostic path matching is exact, resolving relative sides via cwd" {
+  assert_true(diagnostic_targets_file("/ws/lib/a.mbt", "/ws/lib/a.mbt", None))
+  assert_true(
+    diagnostic_targets_file("lib/a.mbt", "/ws/lib/a.mbt", Some("/ws")),
+  )
+  assert_true(
+    diagnostic_targets_file("/ws/lib/a.mbt", "lib/a.mbt", Some("/ws")),
+  )
+  assert_true(
+    diagnostic_targets_file("lib\\a.mbt", "/ws/lib/a.mbt", Some("/ws")),
+  )
+  assert_true(diagnostic_targets_file("./lib/a.mbt", "lib/a.mbt", None))
+  assert_false(
+    diagnostic_targets_file("lib/a.mbt", "/ws/lib/b.mbt", Some("/ws")),
+  )
+  assert_false(diagnostic_targets_file("a.mbt", "/ws/extra_a.mbt", Some("/ws")))
+  assert_false(diagnostic_targets_file("", "/ws/a.mbt", None))
+  // No suffix guessing: a same-suffix file rooted elsewhere must not match,
+  // and a relative diagnostic without a cwd cannot match an absolute target.
+  assert_false(
+    diagnostic_targets_file(
+      "src/lib/a.mbt",
+      "/ws/other/src/lib/a.mbt",
+      Some("/ws"),
+    ),
+  )
+  assert_false(diagnostic_targets_file("lib/a.mbt", "/ws/lib/a.mbt", None))
 }

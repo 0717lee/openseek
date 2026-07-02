@@ -274,32 +274,49 @@ async fn parse_guarded_edit_response(
       brief=fail_brief,
     )
   }
-  let before = check_source_or_none(path)
-  let before_parse = match before {
-    Some(before) => before.parse_error_count
-    None => 0
-  }
-  let introduced = after.parse_error_count - before_parse
-  if introduced > 0 {
-    // Real breakage. Stay reverted (the original is already back on disk).
-    return @agent_tool.ToolAction::respond(
-      edit_revert_report(path, after, introduced~),
-      is_error=true,
-      brief="edit reverted (\{introduced} parse error(s))",
+  // From here the PRE-EDIT content is on disk. If the call is cancelled during
+  // the baseline check, put the edit back before propagating: a cancelled call
+  // must not silently vanish an already-written edit (matching the tools'
+  // cancel-after-write behavior elsewhere). The re-apply is best-effort — under
+  // cancellation the write itself may refuse to run.
+  try {
+    let before = check_source_or_none(path)
+    let before_parse = match before {
+      Some(before) => before.parse_error_count
+      None => 0
+    }
+    // Counts, not diagnostic identities, on purpose: an edit shifts the line
+    // numbers of every pre-existing error below it, so identity matching keyed
+    // on locations would false-fire constantly. The blind spot (an edit that
+    // fixes one parse error while introducing another, keeping the count flat)
+    // is kept, and the response below reports the surviving errors either way.
+    let introduced = after.parse_error_count - before_parse
+    if introduced > 0 {
+      // Real breakage. Stay reverted (the original is already back on disk).
+      return @agent_tool.ToolAction::respond(
+        edit_revert_report(path, after, introduced~),
+        is_error=true,
+        brief="edit reverted (\{introduced} parse error(s))",
+      )
+    }
+    // False alarm: as many parse errors were already present. Re-apply and keep.
+    if !write_or_false(path, new_content) {
+      return @agent_tool.ToolAction::respond(
+        "error editing \{path}: the edit was validated but could not be re-applied after baseline measurement; the file holds its pre-edit content",
+        is_error=true,
+        brief=fail_brief,
+      )
+    }
+    @agent_tool.ToolAction::respond(
+      "\{summary}\n\{@auto_check.source_check_feedback(after)}\nnote: \{after.parse_error_count} parse error(s) were already present before this edit (the edit did not add to the count), so the edit was kept.",
+      brief=ok_brief,
     )
+  } catch {
+    error => {
+      let _ = write_or_false(path, new_content) catch { _ => false }
+      raise error
+    }
   }
-  // False alarm: the parse errors pre-existed this edit. Re-apply and keep.
-  if !write_or_false(path, new_content) {
-    return @agent_tool.ToolAction::respond(
-      "error editing \{path}: the edit was validated but could not be re-applied after baseline measurement; the file holds its pre-edit content",
-      is_error=true,
-      brief=fail_brief,
-    )
-  }
-  @agent_tool.ToolAction::respond(
-    "\{summary}\n\{@auto_check.source_check_feedback(after)}\nnote: the \{after.parse_error_count} parse error(s) pre-existed this edit (none newly introduced), so the edit was kept.",
-    brief=ok_brief,
-  )
 }
 
 ///|
@@ -446,6 +463,7 @@ test "edit_revert_report excerpts the rolled-back content and asks for a re-issu
     ],
     first_errors: ["lib/a.mbt:7:1-7:2: Parse error, unexpected token `}`."],
     truncated: false,
+    exit_code: Some(1),
     failure_output: None,
   }
   inspect(
@@ -471,6 +489,7 @@ test "edit_revert_report pushes smaller edits when parse errors cascade" {
     parse_errors: ["lib/a.mbt:1:1-1:2: Parse error."],
     first_errors: [],
     truncated: false,
+    exit_code: Some(1),
     failure_output: None,
   }
   let report = edit_revert_report("lib/a.mbt", after, introduced=4)

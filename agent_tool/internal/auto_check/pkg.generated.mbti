@@ -22,7 +22,7 @@ pub fn source_check_feedback(SourceCheck) -> String
 
 pub fn tally_diagnostics(String, truncated~ : Bool) -> CheckErrors
 
-pub fn tally_source_check(String, target~ : String, truncated~ : Bool, exit_code~ : Int?) -> SourceCheck
+pub fn tally_source_check(String, target~ : String, truncated~ : Bool, exit_code~ : Int?, check_cwd? : String) -> SourceCheck
 
 // Errors
 
@@ -41,6 +41,7 @@ pub(all) struct SourceCheck {
   parse_errors : Array[String]
   first_errors : Array[String]
   truncated : Bool
+  exit_code : Int?
   failure_output : String?
 } derive(@debug.Debug)
 
