@@ -105,6 +105,32 @@ async test "indexed runner honors concurrency and preserves order" {
 }
 
 ///|
+test "trial environment uses selected provider api key env" {
+  let config = Config(
+    api_key="key",
+    model=V4Flash,
+    runs=1,
+    concurrency=1,
+    min_successes=1,
+    max_steps=12,
+    out_dir="out",
+    repo_root=".",
+    prompt_label="label",
+    system_prompt_file="",
+    system_prompt_addendum_file="",
+  )
+  let env = trial_extra_env(config, "/tmp/workspace")
+  assert_true(env.get("DEEPSEEK") == Some("key"))
+  assert_true(env.get("KIMI") is None)
+  let kimi_env = trial_extra_env(
+    { ..config, model: KimiK27CodeHighSpeed },
+    "/tmp/workspace",
+  )
+  assert_true(kimi_env.get("KIMI") == Some("key"))
+  assert_true(kimi_env.get("DEEPSEEK") is None)
+}
+
+///|
 test "log monitor counts prompt-sensitive moon commands" {
   let log_text =
     #|tool: cwd=.

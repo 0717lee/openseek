@@ -44,8 +44,14 @@ test "trial environment pins workspace-local session root" {
     system_prompt_addendum_file="",
   )
   let env = trial_extra_env(config, "/tmp/workspace")
-  guard env.get("DEEPSEEK") is Some(api_key) else { fail("expected DEEPSEEK") }
-  assert_eq(api_key, "key")
+  assert_true(env.get("DEEPSEEK") == Some("key"))
+  assert_true(env.get("KIMI") is None)
+  let kimi_env = trial_extra_env(
+    { ..config, model: KimiK27CodeHighSpeed },
+    "/tmp/workspace",
+  )
+  assert_true(kimi_env.get("KIMI") == Some("key"))
+  assert_true(kimi_env.get("DEEPSEEK") is None)
   guard env.get("OPENSEEK_SESSION_ROOT") is Some(root) else {
     fail("expected OPENSEEK_SESSION_ROOT")
   }

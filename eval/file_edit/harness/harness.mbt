@@ -146,15 +146,7 @@ async fn run_trial(config : Config, index : Int) -> TrialResult {
   let (exit_code, output) = @process.collect_output_merged(
     "moon",
     args,
-    extra_env={
-      "DEEPSEEK": config.api_key,
-      "OPENSEEK_MODEL": config.model.to_string(),
-      "OPENSEEK_MAX_STEPS": config.max_steps.to_string(),
-      // Trials inherit the developer's env, so point the global skills
-      // lookup at a workspace path that does not exist — the developer's
-      // own ~/.openseek/skills must never reach a trial prompt.
-      "OPENSEEK_GLOBAL_SKILLS_DIR": "\{real_workspace}/.no-global-skills",
-    },
+    extra_env=trial_extra_env(config, real_workspace),
     inherit_env=true,
     cwd=real_workspace,
   )
@@ -170,6 +162,31 @@ async fn run_trial(config : Config, index : Int) -> TrialResult {
     exit_code,
     log_text,
   )
+}
+
+///|
+fn trial_extra_env(
+  config : Config,
+  real_workspace : String,
+) -> Map[String, String] {
+  let env = {
+    "OPENSEEK_MODEL": config.model.to_string(),
+    "OPENSEEK_MAX_STEPS": config.max_steps.to_string(),
+    // Trials inherit the developer's env, so point the global skills
+    // lookup at a workspace path that does not exist — the developer's
+    // own ~/.openseek/skills must never reach a trial prompt.
+    "OPENSEEK_GLOBAL_SKILLS_DIR": "\{real_workspace}/.no-global-skills",
+  }
+  env[api_key_env_for_model(config.model)] = config.api_key
+  env
+}
+
+///|
+fn api_key_env_for_model(model : @deepseek.Model) -> String {
+  match model {
+    KimiK27Code | KimiK27CodeHighSpeed => "KIMI"
+    V4Flash | V4Pro => "DEEPSEEK"
+  }
 }
 
 ///|

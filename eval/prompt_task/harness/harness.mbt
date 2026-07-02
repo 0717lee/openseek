@@ -131,12 +131,21 @@ fn trial_extra_env(
   config : Config,
   real_workspace : String,
 ) -> Map[String, String] {
-  {
-    "DEEPSEEK": config.api_key,
+  let env = {
     "OPENSEEK_MODEL": config.model.to_string(),
     "OPENSEEK_MAX_STEPS": config.max_steps.to_string(),
     "OPENSEEK_SESSION_ROOT": ".openseek",
     "OPENSEEK_GLOBAL_SKILLS_DIR": "\{real_workspace}/.no-global-skills",
+  }
+  env[api_key_env_for_model(config.model)] = config.api_key
+  env
+}
+
+///|
+fn api_key_env_for_model(model : @deepseek.Model) -> String {
+  match model {
+    KimiK27Code | KimiK27CodeHighSpeed => "KIMI"
+    V4Flash | V4Pro => "DEEPSEEK"
   }
 }
 
