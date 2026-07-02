@@ -309,6 +309,10 @@ maintain:
   discarding the uncommitted tail. Corruption anywhere else still fails the
   load.
 - Every append or compact checks that the caller's session still matches disk.
+  When the snapshot is physically the value this store instance last synced
+  and the file's size+mtime+ctime fingerprint is unchanged, that check is
+  O(1); any other snapshot — or any on-disk change — falls back to a full
+  read-and-compare, so the guarantee is the same either way.
 
 These rules keep persistence concerns out of `agent_session.Session` while
 giving CLI, TUI, serve mode, and visualization code one shared durable boundary.

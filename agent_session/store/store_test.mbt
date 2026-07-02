@@ -266,6 +266,83 @@ async test "store serializes concurrent first appends from empty snapshots" {
 }
 
 ///|
+async test "chained appends on returned values persist every event" {
+  // The common agent loop: each append's return value feeds the next call,
+  // which is exactly the shape the fingerprint fast path accelerates.
+  let store = new_store()
+  let mut session = @agent_session.Session(
+    SessionId("s1"),
+    system_prompt="system",
+  )
+  store.create(session)
+  for step in 0..<5 {
+    session = store.append(session, Runtime(RuntimeNotice("step \{step}")))
+  }
+  assert_eq(session.last_sequence(), 5)
+  let events = store.load(SessionId("s1")).events()
+  assert_eq(events.length(), 5)
+  for index in 0..<events.length() {
+    let event = events[index]
+    assert_eq(event.sequence(), index + 1)
+    guard event.item() is Runtime(notice) else { fail("expected notice") }
+    assert_eq(notice.content(), "step \{index}")
+  }
+  @fs.rmdir(store.root(), recursive=true)
+}
+
+///|
+async test "another store instance's write defeats the fingerprint fast path" {
+  // store_a syncs a snapshot, then store_b (another process, in effect)
+  // appends. store_a's snapshot is physically the value it last synced, so
+  // only the on-disk fingerprint reveals the divergence.
+  let store_a = new_store()
+  let store_b : @store.SessionStore = SessionStore(store_a.root())
+  let session = @agent_session.Session(SessionId("s1"), system_prompt="system")
+  store_a.create(session)
+  let from_a = store_a.append(session, User(UserMessage("from a")))
+  let loaded_by_b = store_b.load(SessionId("s1"))
+  ignore(store_b.append(loaded_by_b, Runtime(RuntimeNotice("from b"))))
+  let _ = store_a.append(from_a, Runtime(RuntimeNotice("stale from a"))) catch {
+    error => {
+      assert_true("\{error}".contains("stale session snapshot"))
+      let loaded = store_a.load(SessionId("s1"))
+      assert_eq(loaded.events().length(), 2)
+      @fs.rmdir(store_a.root(), recursive=true)
+      return
+    }
+  }
+  @fs.rmdir(store_a.root(), recursive=true)
+  fail("stale append past the fast path was accepted")
+}
+
+///|
+async test "a same-size rewrite by another store is still detected" {
+  let store_a = new_store()
+  let store_b : @store.SessionStore = SessionStore(store_a.root())
+  let session = @agent_session.Session(
+    SessionId("s1"),
+    system_prompt="prompt A",
+  )
+  store_a.create(session)
+  // Same byte length, different content: the size component of the
+  // fingerprint cannot see this rewrite — only its timestamps can (mtime,
+  // plus ctime, which user space cannot forge). Filesystem mtimes need a
+  // beat between writes to order reliably.
+  @async.sleep(50)
+  store_b.create(Session(SessionId("s1"), system_prompt="prompt B"))
+  let _ = store_a.append(session, User(UserMessage("stale"))) catch {
+    error => {
+      assert_true("\{error}".contains("stale session snapshot"))
+      assert_eq(store_a.load(SessionId("s1")).system_prompt(), "prompt B")
+      @fs.rmdir(store_a.root(), recursive=true)
+      return
+    }
+  }
+  @fs.rmdir(store_a.root(), recursive=true)
+  fail("same-size rewrite slipped past the fingerprint fast path")
+}
+
+///|
 async test "store rejects stale snapshots before appending" {
   let store = new_store()
   let session = @agent_session.Session(SessionId("s1"), system_prompt="system")

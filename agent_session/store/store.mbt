@@ -10,14 +10,42 @@ let lock_file_name : String = "session.lock"
 ///|
 /// Native filesystem-backed collection of durable OpenSeek sessions.
 ///
-/// A `SessionStore` owns only a root path string. Under that root, each session
-/// is stored in `sessions/<id>/` with two files: `openseek_session.jsonl` (a
-/// header line followed by append-only event lines) and `session.lock`. The
-/// store is not a handle to one current session; APIs that operate on a session
-/// either take a `SessionId` or a `Session` carrying its id.
+/// A `SessionStore` owns a root path string plus an in-memory sync cache.
+/// Under that root, each session is stored in `sessions/<id>/` with two files:
+/// `openseek_session.jsonl` (a header line followed by append-only event
+/// lines) and `session.lock`. The store is not a handle to one current
+/// session; APIs that operate on a session either take a `SessionId` or a
+/// `Session` carrying its id.
 pub struct SessionStore {
   priv root : String
+  // The last session value this store instance loaded from or persisted to
+  // disk, per id, with the file fingerprint at that moment. Purely an
+  // optimization: it lets the stale-snapshot check skip re-reading the whole
+  // file on the common append path. Never required for correctness — a
+  // missing or mismatching mark falls back to the full comparison.
+  priv marks : Map[String, DurableMark]
 } derive(Debug)
+
+///|
+priv struct DurableMark {
+  session : @agent_session.Session
+  fingerprint : FileFingerprint
+} derive(Debug)
+
+///|
+/// Metadata that changes whenever the session file is visibly touched. Size
+/// catches every append (the file grows). mtime catches rewrites. ctime —
+/// which user space cannot set, unlike mtime — additionally changes on every
+/// data write and is freshly stamped by the kernel on the inode a rename
+/// installs, so even a rewrite forged to preserve size and mtime does not
+/// reproduce it.
+priv struct FileFingerprint {
+  size : Int64
+  mtime_seconds : Int64
+  mtime_nanoseconds : Int
+  ctime_seconds : Int64
+  ctime_nanoseconds : Int
+} derive(Debug, Eq)
 
 ///|
 /// Construct a store rooted at `root`.
@@ -28,7 +56,7 @@ pub struct SessionStore {
 /// treat a missing `root/sessions` directory as an empty store where that makes
 /// sense.
 pub fn SessionStore::SessionStore(root : String) -> SessionStore {
-  { root, }
+  { root, marks: {} }
 }
 
 ///|
@@ -210,13 +238,73 @@ async fn read_session_file(
 }
 
 ///|
+/// The fingerprint of the file at `path`, or `None` when it cannot be
+/// stat-ed. Two equal fingerprints mean the file was not visibly touched
+/// between them.
+async fn file_fingerprint(path : String) -> FileFingerprint? {
+  let file = @fs.open(path, mode=ReadOnly) catch { _ => return None }
+  defer file.close()
+  let size = file.size() catch { _ => return None }
+  let (mtime_seconds, mtime_nanoseconds) = file.mtime() catch {
+    _ => return None
+  }
+  let (ctime_seconds, ctime_nanoseconds) = file.ctime() catch {
+    _ => return None
+  }
+  Some({
+    size,
+    mtime_seconds,
+    mtime_nanoseconds,
+    ctime_seconds,
+    ctime_nanoseconds,
+  })
+}
+
+///|
+/// Remember `session` as the value this store last synced with disk for its
+/// id. Called with the write lock (or the shared read lock) held, so the
+/// fingerprint taken here describes exactly the bytes that were just written
+/// or read. Best-effort: a failed stat only costs the fast path.
+async fn record_mark(
+  store : SessionStore,
+  session : @agent_session.Session,
+) -> Unit {
+  let path = store.session_file_path(session.id()) catch { _ => return }
+  match file_fingerprint(path) {
+    Some(fingerprint) =>
+      store.marks[session.id().value()] = { session, fingerprint }
+    None => store.marks.remove(session.id().value())
+  }
+}
+
+///|
 /// Verify that `session` still matches the durable state, and report whether
 /// the durable file ends in an unterminated record that the next write must
 /// repair. A missing file is current only for an empty snapshot.
+///
+/// Fast path: when `session` is physically the exact value this store last
+/// loaded from or persisted to disk, and the file fingerprint is unchanged
+/// since that sync, the durable state cannot have diverged — the full
+/// read/parse/compare is skipped, turning the per-append cost from O(file)
+/// to O(1). Any mismatch, and any snapshot this store did not hand out,
+/// falls through to the full comparison, so the guarantees are unchanged.
 async fn ensure_session_is_current(
   store : SessionStore,
   session : @agent_session.Session,
 ) -> Bool {
+  match store.marks.get(session.id().value()) {
+    Some(mark) if physical_equal(mark.session, session) =>
+      match file_fingerprint(store.session_file_path(session.id())) {
+        Some(fingerprint) =>
+          if fingerprint == mark.fingerprint {
+            // The store only ever syncs newline-terminated text, so an
+            // unchanged file needs no tail repair.
+            return false
+          }
+        None => ()
+      }
+    _ => ()
+  }
   let parsed = read_session_file(store, session.id()) catch {
     @os_error.OSError(_) as error if error.is_ENOENT() => {
       if session.last_sequence() != 0 {
@@ -564,6 +652,7 @@ pub async fn SessionStore::create(
       self.session_file_path(session.id()),
       session_file_text(session),
     )
+    record_mark(self, session)
   })
 }
 
@@ -598,7 +687,12 @@ pub async fn SessionStore::load(
   id : @agent_session.SessionId,
 ) -> @agent_session.Session {
   with_existing_session_lock(self, id, Shared, () => {
-    read_session_file(self, id).session
+    let parsed = read_session_file(self, id)
+    // A torn file must keep taking the full path so the next write repairs it.
+    if !parsed.needs_tail_repair {
+      record_mark(self, parsed.session)
+    }
+    parsed.session
   })
 }
 
@@ -631,6 +725,7 @@ pub async fn SessionStore::append(
       unix_ms=@env.now().reinterpret_as_int64(),
     )
     persist_event(self, next, event, repair_tail~)
+    record_mark(self, next)
     next
   })
 }
@@ -668,6 +763,7 @@ pub async fn SessionStore::compact(
       None => fail("compacted session did not append a summary event")
     }
     persist_event(self, next, event, repair_tail~)
+    record_mark(self, next)
     next
   })
 }
