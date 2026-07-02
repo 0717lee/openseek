@@ -112,3 +112,30 @@ test "revert_report marks a truncated count and a failed restore" {
   assert_true(report.contains("reported ≥400 error(s)"))
   assert_true(report.contains("WARNING: could not restore 1 file(s): a.mbt"))
 }
+
+///|
+test "batch_reject_report caps detailed files and labels lower bounds" {
+  let rejections : Array[FileRejection] = [
+    for index in 0..<5 => {
+      (
+        {
+          path: "lib/f\{index}.mbt",
+          introduced: 1,
+          truncated: index == 0,
+          section: "lib/f\{index}.mbt: would gain 1 new parse error(s):\nlib/f\{index}.mbt:1:1: e",
+        } : FileRejection)
+    }
+  ]
+  let report = batch_reject_report(rejections, total=5, any_truncated=true)
+  assert_true(
+    report.contains(
+      "rejected: the batch would introduce at least 5 new parse error(s) across 5 file(s), so NO files were changed.",
+    ),
+  )
+  // Only the first RejectedFileDisplayLimit files are detailed; the rest are
+  // named in the overflow line.
+  assert_true(report.contains("lib/f2.mbt: would gain"))
+  assert_false(report.contains("lib/f3.mbt: would gain"))
+  assert_true(report.contains("…and 2 more file(s): lib/f3.mbt, lib/f4.mbt"))
+  assert_true(report.contains("revert_on_parse_errors=false"))
+}

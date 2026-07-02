@@ -13,7 +13,7 @@ pub fn definition(
 ) -> @agent_tool.AgentToolDefinition {
   AgentToolDefinition(
     name="multi_edit",
-    description="Apply many exact line-anchored replacements across one or more files in a single validated batch — the efficient path for compiler-feedback repair: when `moon check` (or another analyzer) reports several known locations, fix them all in one call instead of many separate `edit` calls. Supply the edits two ways and either or both are used (they are concatenated): `edits` is an inline array of edit objects; `edits_file` is the path to a JSON file holding an array of the same objects — for large batches, generate that file from compiler diagnostics with a script and pass its path. Each edit is {file, old_string, new_string, start_line, optional end_line}: `file` is the path to change; `start_line` (1-based) anchors the search and `end_line` bounds it, so old_string can be the small exact span instead of a large context block; each edit replaces the first matching span in its range. Make old_string uniquely identify the flagged code — include the receiver, e.g. `args.length()` — so a rename cannot stray onto a same-named call elsewhere on the line. List all edits for a given file contiguously. To INSERT instead of replace, set old_string to the empty string: new_string is inserted at the start of start_line (use start_line = last line + 1 to append at end of file). Combine changes on the same line (or one tight span) into a single edit, because adjacent or overlapping edits collide and the whole batch is rejected. Every edit is validated against the original files before anything is written; if any edit fails, no files are changed.",
+    description="Apply many exact line-anchored replacements across one or more files in a single validated batch — the efficient path for compiler-feedback repair: when `moon check` (or another analyzer) reports several known locations, fix them all in one call instead of many separate `edit` calls. Supply the edits two ways and either or both are used (they are concatenated): `edits` is an inline array of edit objects; `edits_file` is the path to a JSON file holding an array of the same objects — for large batches, generate that file from compiler diagnostics with a script and pass its path. Each edit is {file, old_string, new_string, start_line, optional end_line}: `file` is the path to change; `start_line` (1-based) anchors the search and `end_line` bounds it, so old_string can be the small exact span instead of a large context block; each edit replaces the first matching span in its range. Make old_string uniquely identify the flagged code — include the receiver, e.g. `args.length()` — so a rename cannot stray onto a same-named call elsewhere on the line. List all edits for a given file contiguously. To INSERT instead of replace, set old_string to the empty string: new_string is inserted at the start of start_line (use start_line = last line + 1 to append at end of file). Combine changes on the same line (or one tight span) into a single edit, because adjacent or overlapping edits collide and the whole batch is rejected. Every edit is validated against the original files before anything is written; a batch that would introduce lex/parse errors into a .mbt file is also rejected BEFORE writing (see revert_on_parse_errors); if any edit fails, no files are changed.",
     schema=JsonSchema({
       "type": "object",
       "properties": {
@@ -52,6 +52,11 @@ pub fn definition(
           "description": "Auto-revert safety net. After the batch is written, `moon check` runs; if this batch INTRODUCES more than this many new compile errors (measured against the pre-batch error count, so pre-existing errors and all warnings are ignored), the entire batch is rolled back to its pre-batch contents and the call returns an error listing the first few new errors — so an over-matching replace cannot leave a broken tree to untangle. Default 5; the host caps the effective value (you can make it stricter, e.g. 0 to revert on any new error, but cannot disable it). A batch that keeps or reduces the error count is never reverted.",
           "examples": [5],
         },
+        "revert_on_parse_errors": {
+          "type": "boolean",
+          "description": "Syntax gate, on by default. Before the batch is written, each edited .mbt file's rendered result is parsed standalone (moonc -stop-after-parsing); if any file would gain new lex/parse errors — measured against its pre-batch content parsed the same way, so pre-existing parse errors are ignored — the WHOLE batch is rejected with no files changed, and the call returns the errors with excerpts of the would-be content. Type errors never trigger this gate (the post-write revert_when_errors_above guard covers those), and .mbt.md files are not gated. Set false only to intentionally produce content that does not parse (e.g. a fixture).",
+          "examples": [false],
+        },
       },
     }),
     execute=Async(arguments => execute_with_workspace(workspace_root, arguments)),
@@ -89,7 +94,12 @@ async fn execute_with_workspace(
       is_error=true,
     )
   }
-  multi_edit_files(workspace_root, edits, args.revert_when_errors_above)
+  multi_edit_files(
+    workspace_root,
+    edits,
+    args.revert_when_errors_above,
+    revert_on_parse_errors=args.revert_on_parse_errors,
+  )
 }
 
 ///|
@@ -168,6 +178,7 @@ async fn multi_edit_files(
   workspace_root : String,
   edits : Array[@decode.MultiEditItem],
   revert_when_errors_above : Int?,
+  revert_on_parse_errors~ : Bool,
 ) -> @agent_tool.ToolAction {
   let brief = "multi_edit"
   // Resolve every edit's path up front and key contiguity and grouping on the
@@ -251,6 +262,17 @@ async fn multi_edit_files(
       brief~,
     )
   }
+  // Pre-write syntax gate over the rendered batch (see parse_gate.mbt): if
+  // any edited `.mbt` file would gain new lex/parse errors, reject the whole
+  // batch before anything touches disk — the same all-or-nothing contract as
+  // the validation above. Type-error regressions stay the post-write
+  // moon-check guard's job below.
+  if revert_on_parse_errors {
+    match parse_gate_batch_rejection(writes) {
+      Some(rejection) => return rejection
+      None => ()
+    }
+  }
   for write in writes {
     @fs.write_file(write.path, write.new_content, create_mode=CreateOrTruncate) catch {
       error if @async.is_being_cancelled() => raise error
@@ -282,6 +304,126 @@ async fn multi_edit_files(
         brief=success_brief(writes),
       )
   }
+}
+
+///|
+/// How many offending files a batch reject report details in full; the rest
+/// are named in a summary line so a wide batch cannot flood the transcript.
+const RejectedFileDisplayLimit : Int = 3
+
+///|
+/// One file the parse gate rejected: how many new parse errors the batch
+/// would introduce there, and the formatted excerpts.
+priv struct FileRejection {
+  path : String
+  introduced : Int
+  truncated : Bool
+  section : String
+}
+
+///|
+/// Pre-write syntax gate over the rendered batch: parse each edited `.mbt`
+/// file's would-be result standalone (moonc -stop-after-parsing, see
+/// parse_gate.mbt) and reject the whole batch when any file would gain new
+/// parse errors versus its pre-batch content parsed the same way. The same
+/// soundness rules as `edit`'s gate apply per file: fail open when the gate
+/// cannot run or the baseline is missing/truncated, accept a truncated
+/// new-content capture as a lower bound, and resolve symlinked targets before
+/// deciding whether a file is gateable.
+async fn parse_gate_batch_rejection(
+  writes : Array[PreparedWrite],
+) -> @agent_tool.ToolAction? {
+  let rejections : Array[FileRejection] = []
+  for write in writes {
+    let target = @fs.realpath(write.path) catch {
+      error if @async.is_being_cancelled() => raise error
+      _ => write.path
+    }
+    if !@auto_check.is_gateable_path(write.path) &&
+      !@auto_check.is_gateable_path(target) {
+      continue
+    }
+    let gate = @auto_check.content_parse_errors(write.new_content) catch {
+      error if @async.is_being_cancelled() => raise error
+      _ => None
+    }
+    guard gate is Some(gate) && gate.errors.length() > 0 else { continue }
+    let before = @auto_check.content_parse_errors(write.original_content) catch {
+      error if @async.is_being_cancelled() => raise error
+      _ => None
+    }
+    guard before is Some(before) && !before.truncated else { continue }
+    let before_count = before.errors.length()
+    let introduced = gate.errors.length() - before_count
+    if introduced <= 0 {
+      continue
+    }
+    let bound = if gate.truncated { "at least " } else { "" }
+    let pre_existing = if before_count > 0 {
+      " (already has \{before_count} parse error(s); excerpts may include pre-existing ones)"
+    } else {
+      ""
+    }
+    let formatted = @auto_check.format_parse_gate_errors(
+      write.path,
+      write.new_content,
+      gate.errors,
+    )
+    rejections.push({
+      path: write.path,
+      introduced,
+      truncated: gate.truncated,
+      section: "\{write.path}: would gain \{bound}\{introduced} new parse error(s)\{pre_existing}:\n\{formatted.join("\n")}",
+    })
+  }
+  if rejections.is_empty() {
+    return None
+  }
+  let mut total = 0
+  let mut any_truncated = false
+  for rejection in rejections {
+    total += rejection.introduced
+    if rejection.truncated {
+      any_truncated = true
+    }
+  }
+  let bound = if any_truncated { "≥" } else { "" }
+  Some(
+    @agent_tool.ToolAction::respond(
+      batch_reject_report(rejections, total~, any_truncated~),
+      is_error=true,
+      brief="multi_edit rejected (\{bound}\{total} parse error(s))",
+    ),
+  )
+}
+
+///|
+/// The rejected-batch report: no files were changed, per-file excerpts of the
+/// would-be content (capped), and how to retry.
+fn batch_reject_report(
+  rejections : Array[FileRejection],
+  total~ : Int,
+  any_truncated~ : Bool,
+) -> String {
+  let total_label = if any_truncated { "at least \{total}" } else { "\{total}" }
+  let head = "rejected: the batch would introduce \{total_label} new parse error(s) across \{rejections.length()} file(s), so NO files were changed."
+  let shown = if rejections.length() < RejectedFileDisplayLimit {
+    rejections.length()
+  } else {
+    RejectedFileDisplayLimit
+  }
+  let sections = [ for rejection in rejections[0:shown] => rejection.section ]
+  let overflow = if rejections.length() > shown {
+    let hidden = [
+      for rejection in rejections[shown:rejections.length()] => rejection.path
+    ]
+    "\n…and \{hidden.length()} more file(s): \{hidden.join(", ")}"
+  } else {
+    ""
+  }
+  let retry = "\nre-issue with corrected new_strings (check delimiters against the excerpts above), or split the batch and check after each step."
+  let opt_out = "\n(To intentionally produce content that does not parse, e.g. a fixture, pass revert_on_parse_errors=false.)"
+  "\{head}\nexcerpts are from the WOULD-BE content (not what is on disk):\n\{sections.join("\n")}\{overflow}\{retry}\{opt_out}"
 }
 
 ///|

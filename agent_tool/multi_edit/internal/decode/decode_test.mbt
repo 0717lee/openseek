@@ -269,3 +269,22 @@ test "decode rejects non-object arguments" {
     _ => fail("non-object decoded")
   }
 }
+
+///|
+test "decode reads revert_on_parse_errors" {
+  let off = @decode.decode_args({
+    "edits": [
+      { "file": "a.mbt", "old_string": "x", "new_string": "y", "start_line": 1 },
+    ],
+    "revert_on_parse_errors": false,
+  })
+  assert_false(off.revert_on_parse_errors)
+  let default_on = @decode.decode_args({ "edits": [] })
+  assert_true(default_on.revert_on_parse_errors)
+  try @decode.decode_args({ "edits": [], "revert_on_parse_errors": 1 }) catch {
+    error =>
+      assert_true("\{error}".contains("arguments.revert_on_parse_errors"))
+  } noraise {
+    _ => fail("non-boolean flag decoded")
+  }
+}
