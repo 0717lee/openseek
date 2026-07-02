@@ -168,11 +168,7 @@ pub fn AgentRuntime::queue_steer(
 /// this call. This method does not trim or filter; consumers decide how to treat
 /// blank steering input.
 pub fn AgentRuntime::drain_steers(self : AgentRuntime) -> Array[SteerInput] {
-  let inputs : Array[SteerInput] = []
-  while (self.steers.try_get() catch { _ => None }) is Some(input) {
-    inputs.push(input)
-  }
-  inputs
+  drain_queue(self.steers)
 }
 
 ///|
@@ -184,11 +180,20 @@ pub fn AgentRuntime::drain_steers(self : AgentRuntime) -> Array[SteerInput] {
 /// loop calls this at step boundaries to fold retained background tool output
 /// into the conversation.
 pub fn AgentRuntime::drain_events(self : AgentRuntime) -> Array[AgentEvent] {
-  let events : Array[AgentEvent] = []
-  while (self.events.try_get() catch { _ => None }) is Some(event) {
-    events.push(event)
+  drain_queue(self.events)
+}
+
+///|
+/// Drain a queue into an array, oldest retained first, until it reports empty.
+///
+/// Shared by `drain_events` and `drain_steers`. `try_get` may raise on a closed
+/// queue; that outcome is treated as "no more items" so draining terminates.
+fn[T] drain_queue(queue : @aqueue.Queue[T]) -> Array[T] {
+  let items : Array[T] = []
+  while (queue.try_get() catch { _ => None }) is Some(item) {
+    items.push(item)
   }
-  events
+  items
 }
 
 ///|
