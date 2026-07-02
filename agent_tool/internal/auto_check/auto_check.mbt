@@ -25,10 +25,7 @@ pub async fn append_summary(path : String, content : String) -> String {
 
 ///|
 async fn auto_check_summary(path : String) -> String? {
-  let cwd = match moon_check_cwd(path) {
-    Some(cwd) => cwd
-    None => return None
-  }
+  guard moon_check_cwd(path) is Some(cwd) else { return None }
   let result = @async.with_timeout_opt(MoonCheckTimeoutMs, () => {
     @shell.collect_shell_output(
       MoonCheckCommand,
@@ -82,10 +79,7 @@ pub(all) struct CheckErrors {
 /// (timed out / failed to spawn) — in every `None` case the caller keeps the
 /// batch unguarded, matching `append_summary`'s fail-open behavior.
 pub async fn count_errors(path : String) -> CheckErrors? {
-  let cwd = match moon_check_cwd(path) {
-    Some(cwd) => cwd
-    None => return None
-  }
+  guard moon_check_cwd(path) is Some(cwd) else { return None }
   let result = @async.with_timeout_opt(MoonCheckTimeoutMs, () => {
     @shell.collect_shell_output(
       MoonCheckJsonCommand,

@@ -180,6 +180,12 @@ fn decide_parse_gate(
 }
 
 ///|
+/// Split `text` on `sep`, returning each piece as an owned `String`.
+fn split_owned(text : String, sep : StringView) -> Array[String] {
+  text.split(sep).map(s => s.to_owned()).collect()
+}
+
+///|
 /// Render up to `ParseErrorDisplayLimit` gate errors as
 /// `path:loc: message` lines, each followed by a numbered excerpt of the
 /// offending lines — the rejected content never lands at its destination, so
@@ -191,7 +197,7 @@ pub fn format_parse_gate_errors(
   content : String,
   errors : Array[ParseGateError],
 ) -> Array[String] {
-  let lines = content.split("\n").map(line => line.to_owned()).collect()
+  let lines = split_owned(content, "\n")
   let shown = if errors.length() < ParseErrorDisplayLimit {
     errors.length()
   } else {
@@ -224,7 +230,7 @@ pub fn format_parse_gate_errors(
 /// produces — interior blank lines, should moonc ever emit them, are kept so
 /// the excerpt stays faithful.
 fn indent_context(context : String) -> String {
-  let lines = context.split("\n").map(line => line.to_owned()).collect()
+  let lines = split_owned(context, "\n")
   if !lines.is_empty() && lines[lines.length() - 1] == "" {
     let _ = lines.pop()
   }
@@ -267,7 +273,7 @@ fn excerpt_for_loc(lines : Array[String], loc : String) -> String {
 /// The inclusive 1-based `(first, last)` line pair named by a compiler `loc`
 /// like `7:1-9:2` (or a bare `7:1`). `None` when the loc is malformed.
 fn loc_line_span(loc : String) -> (Int, Int)? {
-  let parts = loc.split("-").map(part => part.to_owned()).collect()
+  let parts = split_owned(loc, "-")
   guard parts.length() >= 1 && parts[0] != "" else { return None }
   guard leading_line_number(parts[0]) is Some(start) else { return None }
   let end = if parts.length() >= 2 {
