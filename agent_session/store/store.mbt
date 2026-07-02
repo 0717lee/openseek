@@ -146,8 +146,7 @@ fn header_string_field(
 ) -> String raise @json.JsonDecodeError {
   match fields.get(key) {
     Some(String(value)) => value
-    Some(_) => json_decode_error(path.add_key(key), "expected string")
-    None => json_decode_error(path.add_key(key), "expected string")
+    _ => json_decode_error(path.add_key(key), "expected string")
   }
 }
 
@@ -159,8 +158,7 @@ fn header_int_field(
 ) -> Int raise @json.JsonDecodeError {
   match fields.get(key) {
     Some(Number(value, ..)) => value.to_int()
-    Some(_) => json_decode_error(path.add_key(key), "expected int")
-    None => json_decode_error(path.add_key(key), "expected int")
+    _ => json_decode_error(path.add_key(key), "expected int")
   }
 }
 
@@ -642,6 +640,19 @@ async fn first_prompt_in_log(path : String) -> String {
 }
 
 ///|
+/// Order stamped rows newest-first by `(seconds, nanoseconds)`, ignoring the
+/// row payload in tuple position 0.
+fn[T] stamped_newest_first(a : (T, Int64, Int), b : (T, Int64, Int)) -> Int {
+  let (_, a_seconds, a_nanoseconds) = a
+  let (_, b_seconds, b_nanoseconds) = b
+  if b_seconds != a_seconds {
+    b_seconds.compare(a_seconds)
+  } else {
+    b_nanoseconds.compare(a_nanoseconds)
+  }
+}
+
+///|
 /// List sessions with picker-friendly metadata, most recently active first.
 ///
 /// This scans each session directory for timestamps and a first prompt label,
@@ -683,15 +694,7 @@ pub async fn SessionStore::listings(
     )
   }
   // Most recently active first.
-  stamped.sort_by((a, b) => {
-    let (_, a_seconds, a_nanoseconds) = a
-    let (_, b_seconds, b_nanoseconds) = b
-    if b_seconds != a_seconds {
-      b_seconds.compare(a_seconds)
-    } else {
-      b_nanoseconds.compare(a_nanoseconds)
-    }
-  })
+  stamped.sort_by(stamped_newest_first)
   let listings = [ for entry in stamped => entry.0 ]
   for listing in unreadable {
     listings.push(listing)
@@ -725,15 +728,7 @@ pub async fn SessionStore::latest(
     stamped.push((id, seconds, nanoseconds))
   }
   // Newest first.
-  stamped.sort_by((a, b) => {
-    let (_, a_seconds, a_nanoseconds) = a
-    let (_, b_seconds, b_nanoseconds) = b
-    if b_seconds != a_seconds {
-      b_seconds.compare(a_seconds)
-    } else {
-      b_nanoseconds.compare(a_nanoseconds)
-    }
-  })
+  stamped.sort_by(stamped_newest_first)
   for entry in stamped {
     let (id, _, _) = entry
     let _ = self.load(id) catch { _ => continue }
