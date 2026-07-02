@@ -148,7 +148,7 @@ async fn run_trial(config : Config, index : Int) -> TrialResult {
     args,
     extra_env={
       "DEEPSEEK": config.api_key,
-      "DEEPSEEK_MODEL": config.model.to_string(),
+      "OPENSEEK_MODEL": config.model.to_string(),
       "OPENSEEK_MAX_STEPS": config.max_steps.to_string(),
       // Trials inherit the developer's env, so point the global skills
       // lookup at a workspace path that does not exist — the developer's
