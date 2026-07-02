@@ -30,7 +30,7 @@ pub fn tui_shared_options(global? : Bool = false) -> Array[@argparse.OptionArg] 
       "model",
       long="model",
       env="OPENSEEK_MODEL",
-      default_values=[@deepseek.V4Pro.to_string()],
+      default_values=[@deepseek.Deepseek(V4Pro).to_string()],
       global~,
       about="Chat model: deepseek-v4-flash, deepseek-v4-pro, kimi-k2.7-code, or kimi-k2.7-code-highspeed.",
     ),
@@ -436,14 +436,6 @@ fn[T : @tty.Fd] is_tty(fd : T) -> Bool {
 }
 
 ///|
-fn uses_kimi_api_key_fallback(model : @deepseek.Model) -> Bool {
-  match model {
-    KimiK27Code | KimiK27CodeHighSpeed => true
-    V4Flash | V4Pro => false
-  }
-}
-
-///|
 fn non_empty_value(matches : @argparse.Matches, name : String) -> String? raise {
   let key = value(matches, name).trim()
   if key.is_empty() {
@@ -462,13 +454,13 @@ fn api_key_for_model(
     Some(key) => return key
     None => ()
   }
-  if uses_kimi_api_key_fallback(model) {
+  if model is Kimi(_) {
     match non_empty_value(matches, "kimi-api-key") {
       Some(key) => return key
       None => ()
     }
   }
-  if uses_kimi_api_key_fallback(model) {
+  if model is Kimi(_) {
     fail(
       "an API key is required for Kimi models: pass --api-key or set OPENSEEK_API_KEY or KIMI",
     )
@@ -515,7 +507,7 @@ test "cli uses KIMI only for Kimi models" {
   })
   let kimi_config = parse_config(kimi)
   assert_eq(kimi_config.api_key, "kimi-key")
-  assert_true(kimi_config.model is KimiK27CodeHighSpeed)
+  assert_true(kimi_config.model is Kimi(K27CodeHighSpeed))
   let deepseek = cli_command().parse(argv=[], env={ "KIMI": "kimi-key" })
   let _ = parse_config(deepseek) catch {
     error => {

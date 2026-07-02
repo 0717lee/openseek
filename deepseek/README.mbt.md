@@ -10,8 +10,8 @@ The HTTP client lives in `bobzhang/openseek/deepseek/client`.
 
 ## API Shape
 
-- `Model`: DeepSeek chat model names plus Kimi K2.7 Code compatibility variants,
-  with `Show` for wire strings and `Debug` for inspection.
+- `Model`: provider-tagged chat models, e.g. `Deepseek(V4Pro)` and
+  `Kimi(K27Code)`, with `Show` for wire strings and `Debug` for inspection.
 - `ThinkingMode`: typed control for DeepSeek V4 thinking (`No`, `High`, or
   `Max`).
 - `Role`: `System`, `User`, `Assistant`, and `Tool(tool_call_id)`, with `Show`
@@ -23,7 +23,7 @@ The HTTP client lives in `bobzhang/openseek/deepseek/client`.
   normal text; pass `JsonObject` only when the assistant content must be a JSON
   object.
 - `encode_chat_request(tools?, thinking?, stream?, response_format?,
-  model?=V4Pro) <| messages`: builds the full DeepSeek chat completions request
+  model?=Deepseek(V4Pro)) <| messages`: builds the full DeepSeek chat completions request
   body. Streaming requests include usage-bearing stream options. Kimi K2.7 Code
   requests omit DeepSeek-specific thinking fields, set a large default
   `max_tokens`, and preserve assistant `reasoning_content`. The per-value
@@ -68,7 +68,7 @@ The usual sequence is:
 ```moonbit check
 ///|
 test "encode chat request values" {
-  let body = @deepseek.encode_chat_request(model=V4Flash) <| [
+  let body = @deepseek.encode_chat_request(model=Deepseek(V4Flash)) <| [
     ChatMessage(User, content="write a MoonBit test"),
   ]
   json_inspect(body, content={
@@ -83,7 +83,7 @@ test "encode chat request values" {
 ///|
 test "encode tool-enabled chat request" {
   let body = @deepseek.encode_chat_request(
-    model=V4Flash,
+    model=Deepseek(V4Flash),
     tools=[
       ToolDefinition("read", "Read a file.", {
         "type": "object",
@@ -143,7 +143,7 @@ test "encode tool-enabled chat request" {
 ///|
 test "encode json-object response request" {
   let body = @deepseek.encode_chat_request(
-    model=V4Flash,
+    model=Deepseek(V4Flash),
     response_format=JsonObject,
   ) <| [
     ChatMessage(User, content="return {\"ok\":true}"),

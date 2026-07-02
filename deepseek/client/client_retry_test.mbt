@@ -149,7 +149,7 @@ async test "streaming Kimi chat retries a pre-stream 502 and then streams" {
     }
     let client = @client.Client(
       api_key="test-key",
-      model=KimiK27Code,
+      model=Kimi(K27Code),
       api_url=url,
       retry_attempts=3,
       retry_backoff_ms=1,

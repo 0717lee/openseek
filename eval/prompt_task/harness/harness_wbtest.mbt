@@ -29,7 +29,7 @@ async test "indexed runner honors concurrency and preserves order" {
 test "trial environment pins workspace-local session root" {
   let config = Config(
     api_key="key",
-    model=V4Flash,
+    model=Deepseek(V4Flash),
     problem_id="toml_parser_cli",
     runs=1,
     concurrency=1,

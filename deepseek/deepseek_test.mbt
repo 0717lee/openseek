@@ -30,6 +30,10 @@ test "chat message constructor keeps labeled fields" {
 
 ///|
 test "model parsing" {
+  assert_true(@deepseek.Model::parse("deepseek-v4-flash") is Deepseek(V4Flash))
+  assert_true(
+    @deepseek.Model::parse("kimi-k2.7-code-highspeed") is Kimi(K27CodeHighSpeed),
+  )
   assert_eq(
     @deepseek.Model::parse("deepseek-v4-flash").to_string(),
     "deepseek-v4-flash",

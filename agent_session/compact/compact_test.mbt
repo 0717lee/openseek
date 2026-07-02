@@ -4,7 +4,7 @@ async test "compaction rejects empty sessions before summary generation" {
     @compact.compact_session(
       Session(SessionId("empty"), system_prompt="system"),
       api_key="",
-      model=V4Flash,
+      model=Deepseek(V4Flash),
     )
   catch {
     error => assert_true("\{error}".contains("at least one event"))

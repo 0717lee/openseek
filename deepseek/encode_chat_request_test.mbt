@@ -5,7 +5,7 @@
 
 ///|
 test "minimal request: flash model, no response_format, non-stream" {
-  let body = @deepseek.encode_chat_request(model=V4Flash) <| [
+  let body = @deepseek.encode_chat_request(model=Deepseek(V4Flash)) <| [
     ChatMessage(System, content="plain text is fine"),
     ChatMessage(User, content="ping"),
   ]
@@ -20,7 +20,7 @@ test "minimal request: flash model, no response_format, non-stream" {
 }
 
 ///|
-test "model defaults to V4Pro" {
+test "model defaults to Deepseek(V4Pro)" {
   let body = @deepseek.encode_chat_request() <| [
     ChatMessage(User, content="ping"),
   ]
@@ -34,7 +34,7 @@ test "model defaults to V4Pro" {
 ///|
 test "response_format=JsonObject asks for a JSON object reply" {
   let body = @deepseek.encode_chat_request(
-    model=V4Flash,
+    model=Deepseek(V4Flash),
     response_format=JsonObject,
   ) <| [
     ChatMessage(System, content="json only"),
@@ -58,7 +58,10 @@ test "tools are advertised as function definitions" {
     "properties": { "cmd": { "type": "string" } },
     "required": ["cmd"],
   })
-  let body = @deepseek.encode_chat_request(model=V4Flash, tools=[tool]) <| [
+  let body = @deepseek.encode_chat_request(
+    model=Deepseek(V4Flash),
+    tools=[tool],
+  ) <| [
     ChatMessage(User, content="run tests"),
   ]
   json_inspect(body, content={
@@ -84,7 +87,7 @@ test "tools are advertised as function definitions" {
 
 ///|
 test "stream=true requests usage-bearing streaming" {
-  let body = @deepseek.encode_chat_request(model=V4Flash, stream=true) <| [
+  let body = @deepseek.encode_chat_request(model=Deepseek(V4Flash), stream=true) <| [
     ChatMessage(User, content="stream this"),
   ]
   json_inspect(body, content={
@@ -97,7 +100,7 @@ test "stream=true requests usage-bearing streaming" {
 
 ///|
 test "thinking=High enables reasoning at high effort" {
-  let body = @deepseek.encode_chat_request(model=V4Pro, thinking=High) <| [
+  let body = @deepseek.encode_chat_request(model=Deepseek(V4Pro), thinking=High) <| [
     ChatMessage(User, content="solve"),
   ]
   json_inspect(body, content={
@@ -111,7 +114,7 @@ test "thinking=High enables reasoning at high effort" {
 
 ///|
 test "thinking=Max enables reasoning at max effort" {
-  let body = @deepseek.encode_chat_request(model=V4Pro, thinking=Max) <| [
+  let body = @deepseek.encode_chat_request(model=Deepseek(V4Pro), thinking=Max) <| [
     ChatMessage(User, content="solve"),
   ]
   json_inspect(body, content={
@@ -125,7 +128,7 @@ test "thinking=Max enables reasoning at max effort" {
 
 ///|
 test "thinking=No disables reasoning and omits reasoning_effort" {
-  let body = @deepseek.encode_chat_request(model=V4Pro, thinking=No) <| [
+  let body = @deepseek.encode_chat_request(model=Deepseek(V4Pro), thinking=No) <| [
     ChatMessage(User, content="solve"),
   ]
   json_inspect(body, content={
@@ -144,7 +147,7 @@ test "kimi code omits thinking and preserves assistant reasoning" {
     arguments="{\"cmd\":\"moon test\"}",
   )
   let body = @deepseek.encode_chat_request(
-    model=KimiK27Code,
+    model=Kimi(K27Code),
     thinking=Max,
     stream=true,
   ) <| [
@@ -187,7 +190,7 @@ test "kimi code omits thinking and preserves assistant reasoning" {
 ///|
 test "kimi highspeed uses the same code-model request policy" {
   let body = @deepseek.encode_chat_request(
-    model=KimiK27CodeHighSpeed,
+    model=Kimi(K27CodeHighSpeed),
     thinking=No,
   ) <| [
     ChatMessage(User, content="solve"),
@@ -202,7 +205,7 @@ test "kimi highspeed uses the same code-model request policy" {
 
 ///|
 test "tools and thinking are omitted when absent" {
-  let body = @deepseek.encode_chat_request(model=V4Flash) <| [
+  let body = @deepseek.encode_chat_request(model=Deepseek(V4Flash)) <| [
     ChatMessage(User, content="hi"),
   ]
   json_inspect(body, content={
@@ -219,7 +222,7 @@ test "assistant tool-call echo and tool result round-trip" {
     name="shell",
     arguments="{\"cmd\":\"moon test\"}",
   )
-  let body = @deepseek.encode_chat_request(model=V4Flash) <| [
+  let body = @deepseek.encode_chat_request(model=Deepseek(V4Flash)) <| [
     ChatMessage(System, content="be terse"),
     ChatMessage(User, content="run the tests"),
     ChatMessage(Assistant, content="", tool_calls=[call]),
@@ -263,7 +266,7 @@ test "multiple tool definitions are all encoded" {
     "required": ["path"],
   })
   let body = @deepseek.encode_chat_request(
-    model=V4Flash,
+    model=Deepseek(V4Flash),
     tools=[shell, read_tool],
   ) <| [
     ChatMessage(User, content="look around"),
