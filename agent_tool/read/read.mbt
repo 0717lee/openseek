@@ -132,9 +132,9 @@ async fn read_file(
       truncated = true
     } else {
       let mut remaining = input.max_output_chars
-      for index in start_index..<end_exclusive {
+      for offset, line in lines[start_index:end_exclusive] {
         let separator_units = if output.is_empty() { 0 } else { 1 }
-        let line_number = input.start_line + index - start_index
+        let line_number = input.start_line + offset
         let prefix = "\{line_number.to_string().pad_start(line_number_width, ' ')} |"
         let prefix_budget = separator_units + prefix.length()
         if remaining < prefix_budget {
@@ -145,7 +145,6 @@ async fn read_file(
           output <+ "\n"
         }
         let available = remaining - prefix_budget
-        let line = lines[index]
         let line_units = line.length()
         if line_units <= available {
           output <+ "\{prefix}\{line}"
