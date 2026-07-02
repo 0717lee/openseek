@@ -302,9 +302,9 @@ EOF
   `raise ParseError` may only let `ParseError` escape; if it calls a broader
   raising function, catch that error and translate it.
 - To propagate an error from a raising call, call it normally from a function
-  marked with `raise`. The postfix forms `f(...)!` and `f(...)?` are legacy and
-  do not parse; there is no `?` operator. Handle an error locally with
-  `f(...) catch { ... }`.
+  marked with `raise`. There is no `?` operator: postfix `f(...)?` does not
+  parse, and the legacy bang call form `f!(...)` is deprecated. Handle an error
+  locally with `f(...) catch { ... }`.
 - In success tests, call raising functions directly; if they raise, the test
   fails with the error and the message is usually enough. Do not wrap successful
   parser tests in extra error plumbing.

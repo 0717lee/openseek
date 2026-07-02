@@ -246,8 +246,11 @@ pub fn pitfall_hints(errors : Array[ParseGateError]) -> Array[String] {
       )
     } else if error.message.contains("unexpected token `?`") ||
       error.message.contains("unexpected token `!`") {
+      // The `?` token has several wrong-prior sources (Rust `expr?`
+      // propagation/unwrap, C ternary `c ? a : b`), so the hint names the
+      // MoonBit idiom for each rather than guessing which one was meant.
       add(
-        "hint: postfix `f(...)?` / `f(...)!` error propagation is legacy MoonBit. Inside a function declaring `raise`, a plain call `f(...)` propagates automatically; handle locally with `f(...) catch { ... }`.",
+        "hint: MoonBit has no postfix `?`/`!` operator and no `?:` ternary. Errors propagate automatically inside a function declaring `raise` (just call `f(...)`; handle locally with `f(...) catch { ... }`); unwrap an Option by matching (`guard x is Some(v) else { ... }`); write conditionals with `if`/`match`.",
       )
     }
   }
@@ -522,7 +525,7 @@ test "pitfall_hints maps known error classes and dedupes" {
   assert_eq(hints.length(), 3)
   assert_true(hints[0].contains("cannot be `mut`"))
   assert_true(hints[1].contains("`f(~label)`"))
-  assert_true(hints[2].contains("error propagation is legacy"))
+  assert_true(hints[2].contains("no postfix `?`/`!` operator"))
   // Unknown classes produce no hint.
   let none = pitfall_hints([
     { loc: "1:1", message: "Parse error, unexpected token `}`.", context: "" },
