@@ -77,16 +77,11 @@ async fn execute_with_workspace(
   }
   // Concatenate the inline edits with the response file's edits (inline first).
   let edits = args.inline
-  match args.edits_file {
-    Some(spec) =>
-      match load_edits_file(workspace_root, spec) {
-        Ok(file_edits) =>
-          for edit in file_edits {
-            edits.push(edit)
-          }
-        Err(action) => return action
-      }
-    None => ()
+  if args.edits_file is Some(spec) {
+    match load_edits_file(workspace_root, spec) {
+      Ok(file_edits) => edits.append(file_edits)
+      Err(action) => return action
+    }
   }
   if edits.is_empty() {
     return @agent_tool.ToolAction::respond(
@@ -195,10 +190,8 @@ async fn multi_edit_files(
   }
   // A file's edits must form one contiguous block so each file is read,
   // validated, and written exactly once.
-  match check_contiguity(resolved) {
-    Some(message) =>
-      return @agent_tool.ToolAction::respond(message, is_error=true, brief~)
-    None => ()
+  if check_contiguity(resolved) is Some(message) {
+    return @agent_tool.ToolAction::respond(message, is_error=true, brief~)
   }
   let groups = group_contiguous(resolved)
   let failures : Array[EditFailure] = []
@@ -267,11 +260,9 @@ async fn multi_edit_files(
   // batch before anything touches disk — the same all-or-nothing contract as
   // the validation above. Type-error regressions stay the post-write
   // moon-check guard's job below.
-  if revert_on_parse_errors {
-    match parse_gate_batch_rejection(writes) {
-      Some(rejection) => return rejection
-      None => ()
-    }
+  if revert_on_parse_errors &&
+    parse_gate_batch_rejection(writes) is Some(rejection) {
+    return rejection
   }
   for write in writes {
     @fs.write_file(write.path, write.new_content, create_mode=CreateOrTruncate) catch {
@@ -414,9 +405,7 @@ fn batch_reject_report(
   }
   let sections = [ for rejection in rejections[0:shown] => rejection.section ]
   let overflow = if rejections.length() > shown {
-    let hidden = [
-      for rejection in rejections[shown:rejections.length()] => rejection.path
-    ]
+    let hidden = [ for rejection in rejections[shown:] => rejection.path ]
     "\n…and \{hidden.length()} more file(s): \{hidden.join(", ")}"
   } else {
     ""
@@ -572,10 +561,7 @@ fn revert_report(
   threshold~ : Int,
   restore_failures~ : Array[String],
 ) -> String {
-  let mut total = 0
-  for write in writes {
-    total = total + write.edit_count
-  }
+  let total = total_edit_count(writes)
   let head = "reverted: applied \{total} edit(s) across \{writes.length()} file(s), but moon check then reported \{error_count_label(after)} error(s) (\{introduced} newly introduced > revert_when_errors_above=\{threshold}); all \{writes.length()} file(s) were rolled back to their pre-batch contents."
   let errors = if after.first_errors.is_empty() {
     ""
@@ -622,9 +608,8 @@ fn check_contiguity(edits : Array[ResolvedEdit]) -> String? {
           "error multi_editing: edits for \{edit.file} must be contiguous; it reappears at edit[\{edit.index}] after another file's edits; list all edits for a file together",
         )
       }
-      match current {
-        Some(path) => ended[path] = ()
-        None => ()
+      if current is Some(path) {
+        ended[path] = ()
       }
       current = Some(edit.path)
     }
@@ -669,11 +654,18 @@ fn group_contiguous(edits : Array[ResolvedEdit]) -> Array[FileGroup] {
 }
 
 ///|
-fn success_summary(writes : Array[PreparedWrite]) -> String {
+/// Total number of edits applied across a batch's writes.
+fn total_edit_count(writes : Array[PreparedWrite]) -> Int {
   let mut total = 0
   for write in writes {
     total = total + write.edit_count
   }
+  total
+}
+
+///|
+fn success_summary(writes : Array[PreparedWrite]) -> String {
+  let total = total_edit_count(writes)
   let lines = [
     for write in writes => "\{write.path}: \{write.edit_count} edit(s)"
   ]
@@ -682,10 +674,7 @@ fn success_summary(writes : Array[PreparedWrite]) -> String {
 
 ///|
 fn success_brief(writes : Array[PreparedWrite]) -> String {
-  let mut total = 0
-  for write in writes {
-    total = total + write.edit_count
-  }
+  let total = total_edit_count(writes)
   if writes.length() == 1 {
     "multi_edit \{@agent_tool.brief_basename(writes[0].path)} (\{total}×)"
   } else {
@@ -788,7 +777,7 @@ fn collect_overlap_failures(
   plans : Array[PlannedEdit],
   failures : Array[EditFailure],
 ) -> Unit {
-  let ordered = [ for plan in plans => plan ]
+  let ordered = plans.copy()
   ordered.sort_by(compare_plan_ascending)
   let mut previous_end = -1
   let mut previous_index = -1
@@ -819,7 +808,7 @@ fn compare_plan_ascending(a : PlannedEdit, b : PlannedEdit) -> Int {
   } else if a.end > b.end {
     1
   } else {
-    compare_int(a.index, b.index)
+    a.index.compare(b.index)
   }
 }
 
@@ -829,19 +818,8 @@ fn compare_plan_descending(a : PlannedEdit, b : PlannedEdit) -> Int {
 }
 
 ///|
-fn compare_int(a : Int, b : Int) -> Int {
-  if a < b {
-    -1
-  } else if a > b {
-    1
-  } else {
-    0
-  }
-}
-
-///|
 fn apply_plans(content : String, plans : Array[PlannedEdit]) -> String {
-  let ordered = [ for plan in plans => plan ]
+  let ordered = plans.copy()
   ordered.sort_by(compare_plan_descending)
   let mut output = content
   for plan in ordered {
