@@ -123,11 +123,11 @@ async fn write_file(
         _ => None
       }
       match gate {
-        Some(errors) if errors.length() > 0 =>
+        Some(gate) if gate.errors.length() > 0 =>
           return @agent_tool.ToolAction::respond(
-            write_reject_report(path, input.content, errors),
+            write_reject_report(path, input.content, gate),
             is_error=true,
-            brief="write rejected (\{errors.length()} parse error(s))",
+            brief="write rejected (\{gate.errors.length()} parse error(s))",
           )
         _ => ()
       }
@@ -189,11 +189,22 @@ const SmallerPartsHintThreshold : Int = 3
 fn write_reject_report(
   path : String,
   content : String,
-  errors : Array[@auto_check.ParseGateError],
+  gate : @auto_check.ParseGate,
 ) -> String {
-  let count = errors.length()
-  let head = "rejected: the content for \{path} has \{count} parse error(s); nothing was written."
-  let formatted = @auto_check.format_parse_gate_errors(path, content, errors)
+  let count = gate.errors.length()
+  // A truncated capture makes the count a lower bound; never state an exact
+  // number the gate does not know.
+  let count_label = if gate.truncated {
+    "at least \{count}"
+  } else {
+    "\{count}"
+  }
+  let head = "rejected: the content for \{path} has \{count_label} parse error(s); nothing was written."
+  let formatted = @auto_check.format_parse_gate_errors(
+    path,
+    content,
+    gate.errors,
+  )
   let listed = if formatted.is_empty() {
     ""
   } else {
@@ -540,13 +551,16 @@ test "write_reject_report excerpts the rejected content and asks for a re-issue"
     #|  let y =
     #|}
   inspect(
-    write_reject_report("lib/a.mbt", content, [
-      {
-        loc: "4:1-4:2",
-        message: "Parse error, unexpected token `}`.",
-        context: "",
-      },
-    ]),
+    write_reject_report("lib/a.mbt", content, {
+      errors: [
+        {
+          loc: "4:1-4:2",
+          message: "Parse error, unexpected token `}`.",
+          context: "",
+        },
+      ],
+      truncated: false,
+    }),
     content=(
       #|rejected: the content for lib/a.mbt has 1 parse error(s); nothing was written.
       #|first 1 parse error(s), with the rejected content excerpted:
@@ -568,12 +582,21 @@ test "write_reject_report pushes smaller parts when parse errors cascade" {
         @auto_check.ParseGateError)
     }
   ]
-  let report = write_reject_report("lib/a.mbt", "x\ny\nz\nw", errors)
+  let report = write_reject_report("lib/a.mbt", "x\ny\nz\nw", {
+    errors,
+    truncated: false,
+  })
   assert_true(report.contains("4 parse errors usually means"))
   assert_true(report.contains("write a smaller file first"))
   assert_false(
     report.contains("re-issue write with the corrected full content"),
   )
+  // A truncated capture reports a lower bound, never an exact count.
+  let clipped = write_reject_report("lib/a.mbt", "x", {
+    errors: [{ loc: "1:1", message: "e", context: "" }],
+    truncated: true,
+  })
+  assert_true(clipped.contains("has at least 1 parse error(s)"))
 }
 
 ///|

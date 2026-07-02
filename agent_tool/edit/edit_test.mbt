@@ -530,3 +530,26 @@ async test "edit gates .mbt results through moonc before writing" {
     assert_true(@fs.read_file(path).text().contains("match 43 {"))
   })
 }
+
+///|
+async test "edit gates a breaking edit made through a non-mbt symlink" {
+  @vfs.with_tmpdir(prefix="openseek-edit-gate-link-", dir => {
+    let src = "\{dir}/lib.mbt"
+    let original = "///|\npub fn f() -> Int {\n  42\n}\n"
+    @fs.write_file(src, original, create_mode=CreateOrTruncate)
+    // alias.txt -> lib.mbt: the .txt spelling must not slip a broken result
+    // past the parse gate — the write lands in the .mbt target.
+    let link = "\{dir}/alias.txt"
+    @fs.symlink(target="lib.mbt", link)
+    let broken = run_edit({
+      "path": link,
+      "old_string": "  42",
+      "new_string": "  match 42 {",
+      "start_line": 3,
+    })
+    guard broken is Respond(out) else { fail("expected Respond") }
+    assert_true(out.is_error)
+    assert_true(out.content.contains("rejected: the edit would introduce"))
+    assert_eq(@fs.read_file(src).text(), original)
+  })
+}

@@ -240,33 +240,48 @@ async fn parse_gate_rejection(
   new_content~ : String,
   revert_on_parse_errors~ : Bool,
 ) -> @agent_tool.ToolAction? {
-  if !revert_on_parse_errors || !@auto_check.is_gateable_path(path) {
+  if !revert_on_parse_errors {
+    return None
+  }
+  // Resolve symlinks before deciding whether the gate applies: an edit through
+  // a link named `alias.txt` pointing at `lib/a.mbt` must be gated like the
+  // `.mbt` file it really writes (the same class `write`'s overwrite guard
+  // handles with realpath).
+  let target = @fs.realpath(path) catch {
+    error if @async.is_being_cancelled() => raise error
+    _ => path
+  }
+  if !@auto_check.is_gateable_path(path) &&
+    !@auto_check.is_gateable_path(target) {
     return None
   }
   let gate = @auto_check.content_parse_errors(new_content) catch {
     error if @async.is_being_cancelled() => raise error
     _ => None
   }
-  guard gate is Some(errors) && errors.length() > 0 else { return None }
+  guard gate is Some(gate) && gate.errors.length() > 0 else { return None }
   // The edited result has parse errors; reject only when the edit makes the
   // file WORSE than its original content parsed the same way.
   let before = @auto_check.content_parse_errors(original_content) catch {
     error if @async.is_being_cancelled() => raise error
     _ => None
   }
-  // The gate parsed the new content but could not parse the original (a
-  // transient tmpdir/moonc failure): without a baseline there is no honest
-  // "introduced" answer, so fail open and let the edit proceed — the gate
-  // must never reject on a comparison it could not actually make.
-  guard before is Some(before) else { return None }
-  let before_count = before.length()
-  let introduced = errors.length() - before_count
+  // The comparison is only sound against a COMPLETE baseline: a missing one
+  // (transient tmpdir/moonc failure) gives no honest "introduced" answer, and
+  // a truncated one is a lower bound whose subtraction could over-count the
+  // introduced errors and false-reject. Fail open in both cases — the gate
+  // must never reject on a comparison it could not actually make. A truncated
+  // NEW capture is fine: its count is a lower bound, so exceeding the complete
+  // baseline still proves the edit made things worse.
+  guard before is Some(before) && !before.truncated else { return None }
+  let before_count = before.errors.length()
+  let introduced = gate.errors.length() - before_count
   if introduced <= 0 {
     return None
   }
   Some(
     @agent_tool.ToolAction::respond(
-      edit_reject_report(path, new_content, errors, introduced~, before_count~),
+      edit_reject_report(path, new_content, gate, introduced~, before_count~),
       is_error=true,
       brief="edit rejected (\{introduced} parse error(s))",
     ),
@@ -281,18 +296,27 @@ async fn parse_gate_rejection(
 fn edit_reject_report(
   path : String,
   new_content : String,
-  errors : Array[@auto_check.ParseGateError],
+  gate : @auto_check.ParseGate,
   introduced~ : Int,
   before_count~ : Int,
 ) -> String {
-  let head = "rejected: the edit would introduce \{introduced} new parse error(s) in \{path}, so the file was NOT modified."
+  // A truncated capture makes the introduced count a lower bound; never state
+  // an exact number the gate does not know.
+  let introduced_label = if gate.truncated {
+    "at least \{introduced}"
+  } else {
+    "\{introduced}"
+  }
+  let head = "rejected: the edit would introduce \{introduced_label} new parse error(s) in \{path}, so the file was NOT modified."
   let pre_existing = if before_count > 0 {
     " (the file already has \{before_count} parse error(s); only counts are compared, so the excerpts below may include pre-existing errors, not only the newly introduced ones)"
   } else {
     ""
   }
   let formatted = @auto_check.format_parse_gate_errors(
-    path, new_content, errors,
+    path,
+    new_content,
+    gate.errors,
   )
   let listed = if formatted.is_empty() {
     ""
@@ -404,13 +428,16 @@ test "edit_reject_report excerpts the would-be content and asks for a re-issue" 
     edit_reject_report(
       "lib/a.mbt",
       would_be,
-      [
-        {
-          loc: "4:1-4:2",
-          message: "Parse error, unexpected token `}`.",
-          context: "",
-        },
-      ],
+      {
+        errors: [
+          {
+            loc: "4:1-4:2",
+            message: "Parse error, unexpected token `}`.",
+            context: "",
+          },
+        ],
+        truncated: false,
+      },
       introduced=1,
       before_count=0,
     ),
@@ -438,7 +465,7 @@ test "edit_reject_report pushes smaller edits and names pre-existing errors" {
   let report = edit_reject_report(
     "lib/a.mbt",
     "a\nb\nc\nd\ne",
-    errors,
+    { errors, truncated: false },
     introduced=4,
     before_count=1,
   )
@@ -446,4 +473,13 @@ test "edit_reject_report pushes smaller edits and names pre-existing errors" {
   assert_true(report.contains("split it into smaller pieces"))
   assert_true(report.contains("already has 1 parse error(s)"))
   assert_false(report.contains("re-issue the edit with a corrected new_string"))
+  // A truncated capture reports a lower bound, never an exact count.
+  let clipped = edit_reject_report(
+    "lib/a.mbt",
+    "a",
+    { errors: [{ loc: "1:1", message: "e", context: "" }], truncated: true },
+    introduced=1,
+    before_count=0,
+  )
+  assert_true(clipped.contains("would introduce at least 1 new parse error(s)"))
 }

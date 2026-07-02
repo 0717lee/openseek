@@ -72,11 +72,21 @@ pub fn is_gateable_path(path : String) -> Bool {
 }
 
 ///|
+/// One moonc run over candidate content: the captured lex/parse errors plus
+/// whether the output capture was truncated — a truncated capture makes
+/// `errors` a LOWER BOUND, not an exact tally, and callers that compare
+/// counts must account for that.
+pub(all) struct ParseGate {
+  errors : Array[ParseGateError]
+  truncated : Bool
+} derive(Debug)
+
+///|
 /// Parse `content` as a single standalone `.mbt` file and return its
-/// lex/parse errors (empty array = parses cleanly). Returns `None` when the
-/// gate could not run — moonc missing, scratch dir unwritable, timeout — so
-/// callers fail open, matching the other auto-check guards.
-pub async fn content_parse_errors(content : String) -> Array[ParseGateError]? {
+/// lex/parse errors (empty `errors` = parses cleanly). Returns `None` when
+/// the gate could not run — moonc missing, scratch dir unwritable, timeout —
+/// so callers fail open, matching the other auto-check guards.
+pub async fn content_parse_errors(content : String) -> ParseGate? {
   let dir = @fs.tmpdir(prefix="openseek-parse-gate-") catch {
     error if @async.is_being_cancelled() => raise error
     _ => return None
@@ -103,7 +113,12 @@ pub async fn content_parse_errors(content : String) -> Array[ParseGateError]? {
       )
     })
     match result {
-      Some(output) => decide_parse_gate(output.text, output.exit_code)
+      Some(output) =>
+        decide_parse_gate(
+          output.text,
+          output.exit_code,
+          truncated=output.output_limit_reached,
+        )
       None => None
     }
   } catch {
@@ -124,12 +139,17 @@ pub async fn content_parse_errors(content : String) -> Array[ParseGateError]? {
 }
 
 ///|
-/// Interpret one moonc run: parse-error diagnostics found → those errors; a
-/// clean exit with none → an empty array; anything else (moonc missing → 127,
-/// crash, unparseable output) → `None`, so the caller fails open. A non-zero
-/// exit with no captured parse errors is deliberately `None` rather than
-/// "clean": the gate must never certify content it did not actually parse.
-fn decide_parse_gate(text : String, exit_code : Int?) -> Array[ParseGateError]? {
+/// Interpret one moonc run: parse-error diagnostics found → those errors
+/// (with `truncated` marking them a lower bound); a clean, untruncated exit
+/// with none → an empty tally; anything else (moonc missing → 127, crash,
+/// unparseable output, a truncated capture with nothing caught) → `None`, so
+/// the caller fails open. The gate must never certify content it did not
+/// actually parse to completion.
+fn decide_parse_gate(
+  text : String,
+  exit_code : Int?,
+  truncated~ : Bool,
+) -> ParseGate? {
   let errors : Array[ParseGateError] = []
   for raw in text.split("\n") {
     if !raw.contains("\"level\"") {
@@ -147,9 +167,13 @@ fn decide_parse_gate(text : String, exit_code : Int?) -> Array[ParseGateError]? 
     }
   }
   if errors.length() > 0 {
-    Some(errors)
+    Some({ errors, truncated })
+  } else if truncated {
+    // Over the capture limit with no parse errors caught: the run was cut
+    // short, so "clean" would be a certification the gate cannot make.
+    None
   } else if exit_code is Some(0) {
-    Some([])
+    Some({ errors: [], truncated: false })
   } else {
     None
   }
@@ -285,27 +309,40 @@ fn pad_line_number(number : Int, width : Int) -> String {
 test "decide_parse_gate splits errors, clean, and cannot-run" {
   let broken =
     #|{"$message_type":"diagnostic","level":"error","error_code":3002,"path":"parse_gate.mbt","loc":"5:2-5:2","message":"Parse error, unexpected token `end of file`.","context":"4 |  match x {\n5 |}\n"}
-  guard decide_parse_gate(broken, Some(2)) is Some(errors) else {
+  guard decide_parse_gate(broken, Some(2), truncated=false) is Some(gate) else {
     fail("expected errors")
   }
-  assert_eq(errors.length(), 1)
-  assert_eq(errors[0].loc, "5:2-5:2")
-  assert_eq(errors[0].context, "4 |  match x {\n5 |}\n")
+  assert_eq(gate.errors.length(), 1)
+  assert_eq(gate.errors[0].loc, "5:2-5:2")
+  assert_eq(gate.errors[0].context, "4 |  match x {\n5 |}\n")
+  assert_false(gate.truncated)
   // Clean run: exit 0, no diagnostics.
-  guard decide_parse_gate("", Some(0)) is Some(clean) else {
+  guard decide_parse_gate("", Some(0), truncated=false) is Some(clean) else {
     fail("expected clean")
   }
-  assert_eq(clean.length(), 0)
+  assert_eq(clean.errors.length(), 0)
   // moonc missing (127) or any failure without parse diagnostics: fail open,
   // never certify unparsed content as clean.
   assert_true(
-    decide_parse_gate("sh: moonc: command not found", Some(127)) is None,
+    decide_parse_gate(
+      "sh: moonc: command not found",
+      Some(127),
+      truncated=false,
+    )
+    is None,
   )
-  assert_true(decide_parse_gate("", None) is None)
+  assert_true(decide_parse_gate("", None, truncated=false) is None)
   // Warnings alone never count as parse errors.
   let warning =
     #|{"$message_type":"diagnostic","level":"warning","error_code":2,"path":"parse_gate.mbt","loc":"1:1-1:2","message":"unused","context":""}
-  assert_true(decide_parse_gate(warning, Some(1)) is None)
+  assert_true(decide_parse_gate(warning, Some(1), truncated=false) is None)
+  // A truncated capture: errors caught are kept as a lower bound; a truncated
+  // capture with NOTHING caught cannot certify clean and fails open.
+  guard decide_parse_gate(broken, None, truncated=true) is Some(cut) else {
+    fail("expected truncated errors")
+  }
+  assert_true(cut.truncated)
+  assert_true(decide_parse_gate("", Some(0), truncated=true) is None)
 }
 
 ///|
@@ -398,14 +435,15 @@ async test "content_parse_errors gates real content through moonc" {
     is Some(clean) else {
     fail("expected the gate to run (is moonc on PATH?)")
   }
-  assert_eq(clean.length(), 0)
+  assert_eq(clean.errors.length(), 0)
+  assert_false(clean.truncated)
   guard content_parse_errors("///|\npub fn bad() -> Int {\n  let x =\n}\n")
-    is Some(errors) else {
+    is Some(gate) else {
     fail("expected the gate to run (is moonc on PATH?)")
   }
-  assert_true(errors.length() > 0)
-  assert_true(errors[0].message.contains("Parse error"))
+  assert_true(gate.errors.length() > 0)
+  assert_true(gate.errors[0].message.contains("Parse error"))
   // The scratch-dir invocation (relative file name, cwd inside the dir) makes
   // moonc emit its own context excerpt; the formatter prefers it.
-  assert_true(errors[0].context != "")
+  assert_true(gate.errors[0].context != "")
 }
