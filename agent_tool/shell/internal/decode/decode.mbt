@@ -92,17 +92,7 @@ fn optional_positive_int_or_default(
   name : String,
   default : Int,
 ) -> Int raise {
-  match fields.get(name) {
-    Some(Number(value, ..)) => {
-      let int_value = value.to_int()
-      if int_value <= 0 {
-        fail("arguments.\{name} to be a positive number")
-      }
-      int_value
-    }
-    Some(Null) | None => default
-    _ => fail("arguments.\{name} to be a number")
-  }
+  optional_positive_int(fields, name).unwrap_or(default)
 }
 
 ///|
