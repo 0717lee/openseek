@@ -196,12 +196,15 @@ pub fn format_parse_gate_errors(
 
 ///|
 /// Indent the compiler's `context` excerpt (numbered source lines, one per
-/// `\n`) by two spaces, dropping the trailing blank line.
+/// `\n`) by two spaces, dropping only the trailing blank line the final `\n`
+/// produces — interior blank lines, should moonc ever emit them, are kept so
+/// the excerpt stays faithful.
 fn indent_context(context : String) -> String {
-  let indented = [
-    for line in context.split("\n") if !line.is_empty() => "  \{line}"
-  ]
-  indented.join("\n")
+  let lines = context.split("\n").map(line => line.to_owned()).collect()
+  if !lines.is_empty() && lines[lines.length() - 1] == "" {
+    let _ = lines.pop()
+  }
+  [ for line in lines => "  \{line}" ].join("\n")
 }
 
 ///|
