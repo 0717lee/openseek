@@ -18,20 +18,11 @@ pub fn submit_review_tool(
 ///|
 fn submit(captured : Ref[ReviewReport?], args : Json) -> @agent_tool.ToolAction {
   match ReviewReport::parse(args) {
-    Err(msg) =>
-      @agent_tool.ToolAction::respond(
-        "submit_review rejected: \{msg}",
-        is_error=true,
-        brief="submit_review",
-      )
+    Err(msg) => reject(msg)
     Ok(report) => {
       let problems = report.validate()
       if problems.length() > 0 {
-        @agent_tool.ToolAction::respond(
-          "submit_review rejected: \{problems.join("; ")}",
-          is_error=true,
-          brief="submit_review",
-        )
+        reject(problems.join("; "))
       } else {
         captured.val = Some(report)
         @agent_tool.ToolAction::finish(
@@ -40,6 +31,17 @@ fn submit(captured : Ref[ReviewReport?], args : Json) -> @agent_tool.ToolAction 
       }
     }
   }
+}
+
+///|
+/// Reject malformed `submit_review` output with an error response so the model
+/// retries instead of finishing with no report.
+fn reject(reason : String) -> @agent_tool.ToolAction {
+  @agent_tool.ToolAction::respond(
+    "submit_review rejected: \{reason}",
+    is_error=true,
+    brief="submit_review",
+  )
 }
 
 ///|
