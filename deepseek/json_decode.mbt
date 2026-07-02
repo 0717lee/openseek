@@ -1,26 +1,25 @@
 ///|
+/// Reads an integer-valued field from a JSON object, returning 0 when the field
+/// is absent or is not a number.
+fn json_object_int(json : Json, key : String) -> Int {
+  match json {
+    Object(fields) =>
+      match fields.get(key) {
+        Some(Number(n, ..)) => n.to_int()
+        _ => 0
+      }
+    _ => 0
+  }
+}
+
+///|
 fn Usage::from_json(json : Json) -> Usage {
   {
-    prompt_tokens: match json {
-      { "prompt_tokens": Number(n, ..), .. } => n.to_int()
-      _ => 0
-    },
-    completion_tokens: match json {
-      { "completion_tokens": Number(n, ..), .. } => n.to_int()
-      _ => 0
-    },
-    total_tokens: match json {
-      { "total_tokens": Number(n, ..), .. } => n.to_int()
-      _ => 0
-    },
-    prompt_cache_hit_tokens: match json {
-      { "prompt_cache_hit_tokens": Number(n, ..), .. } => n.to_int()
-      _ => 0
-    },
-    prompt_cache_miss_tokens: match json {
-      { "prompt_cache_miss_tokens": Number(n, ..), .. } => n.to_int()
-      _ => 0
-    },
+    prompt_tokens: json_object_int(json, "prompt_tokens"),
+    completion_tokens: json_object_int(json, "completion_tokens"),
+    total_tokens: json_object_int(json, "total_tokens"),
+    prompt_cache_hit_tokens: json_object_int(json, "prompt_cache_hit_tokens"),
+    prompt_cache_miss_tokens: json_object_int(json, "prompt_cache_miss_tokens"),
   }
 }
 
