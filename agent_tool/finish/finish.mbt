@@ -35,43 +35,40 @@ fn finish(input : @decode.FinishInput) -> @agent_tool.ToolAction {
 }
 
 ///|
+/// Asserts that `execute(arguments)` yields `Control(Finish(expected))`.
+fn assert_finish(arguments : Json, expected : String) -> Unit raise {
+  guard execute(arguments) is Control(Finish(answer)) else {
+    fail("expected Finish")
+  }
+  assert_eq(answer, expected)
+}
+
+///|
 test "finish returns Finish with the answer" {
-  let result = execute({ "answer": "all done" })
-  guard result is Control(Finish(answer)) else { fail("expected Finish") }
-  assert_eq(answer, "all done")
+  assert_finish({ "answer": "all done" }, "all done")
 }
 
 ///|
 test "finish preserves multiline answers" {
-  let result = execute({ "answer": "line one\nline two" })
-  guard result is Control(Finish(answer)) else { fail("expected Finish") }
-  assert_eq(answer, "line one\nline two")
+  assert_finish({ "answer": "line one\nline two" }, "line one\nline two")
 }
 
 ///|
 test "finish ignores extra fields on the payload" {
-  let result = execute({ "answer": "done", "extra": "ignored" })
-  guard result is Control(Finish(answer)) else { fail("expected Finish") }
-  assert_eq(answer, "done")
+  assert_finish({ "answer": "done", "extra": "ignored" }, "done")
 }
 
 ///|
 test "finish returns empty Finish when answer is missing" {
-  let result = execute({})
-  guard result is Control(Finish(answer)) else { fail("expected Finish") }
-  assert_eq(answer, "")
+  assert_finish({}, "")
 }
 
 ///|
 test "finish returns empty Finish when answer is non-string" {
-  let result = execute({ "answer": 42 })
-  guard result is Control(Finish(answer)) else { fail("expected Finish") }
-  assert_eq(answer, "")
+  assert_finish({ "answer": 42 }, "")
 }
 
 ///|
 test "finish returns empty Finish on non-object arguments" {
-  let result = execute(Json::null())
-  guard result is Control(Finish(answer)) else { fail("expected Finish") }
-  assert_eq(answer, "")
+  assert_finish(Json::null(), "")
 }
