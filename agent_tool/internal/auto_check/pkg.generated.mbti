@@ -12,17 +12,15 @@ pub const RevertErrorDisplayLimit : Int = 10
 
 pub async fn append_summary(String, String) -> String
 
-pub async fn check_source(String) -> SourceCheck?
+pub async fn content_parse_errors(String) -> Array[ParseGateError]?
 
 pub async fn count_errors(String) -> CheckErrors?
 
-pub fn is_source_path(String) -> Bool
+pub fn format_parse_gate_errors(String, String, Array[ParseGateError]) -> Array[String]
 
-pub fn source_check_feedback(SourceCheck) -> String
+pub fn is_gateable_path(String) -> Bool
 
 pub fn tally_diagnostics(String, truncated~ : Bool) -> CheckErrors
-
-pub fn tally_source_check(String, target~ : String, truncated~ : Bool, exit_code~ : Int?, check_cwd? : String) -> SourceCheck
 
 // Errors
 
@@ -34,15 +32,9 @@ pub(all) struct CheckErrors {
   truncated : Bool
 } derive(@debug.Debug)
 
-pub(all) struct SourceCheck {
-  error_count : Int
-  warning_count : Int
-  parse_error_count : Int
-  parse_errors : Array[String]
-  first_errors : Array[String]
-  truncated : Bool
-  exit_code : Int?
-  failure_output : String?
+pub(all) struct ParseGateError {
+  loc : String
+  message : String
 } derive(@debug.Debug)
 
 // Type aliases

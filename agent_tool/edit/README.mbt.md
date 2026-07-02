@@ -24,15 +24,18 @@ MoonBit manifests get the same safety check as `write`: edits that would create
 legacy `moon.mod.json`, JSON-style `moon.mod` or `moon.pkg`, or `moon.pkg` with
 `#` comments are rejected before the original file is overwritten.
 
-Edits to MoonBit source (`.mbt`, `.mbt.md`) get a parse-error auto-revert: after
-the write, `moon check --output-json` runs, and if the file now has lex/parse
-errors (error codes 3000-3999) the guard measures the pre-edit baseline lazily —
-restore the original, re-check — and rolls the edit back only when it introduced
-new ones, failing the call with the errors excerpted from the rolled-back
-content. Pre-existing parse errors keep the edit with an honest note. Detection
-compares error *counts*, not diagnostic identities, because an edit shifts the
-line numbers of every pre-existing error below it. Type errors (4xxx) never
-revert. `revert_on_parse_errors=false` opts out.
+Edits to `.mbt` files get a pre-write syntax gate: the edited result is parsed
+standalone (`moonc compile -stop-after-parsing` in a scratch file, no project
+context needed), and an edit that would introduce new lex/parse errors is
+rejected with the file left untouched — the call fails with the errors and
+numbered excerpts synthesized from the would-be content. "Introduced" compares
+parse-error *counts* against the original content parsed the same way (not
+diagnostic identities, because an edit shifts the line numbers of every
+pre-existing error below it), so a file that already fails to parse still
+accepts edits, including partial fixes. Type errors never trigger the gate, and
+`.mbt.md` files are not gated (moonc cannot parse markdown-hosted code blocks;
+see the TODO in `agent_tool/internal/auto_check/parse_gate.mbt`).
+`revert_on_parse_errors=false` opts out.
 
 ## API Style
 
@@ -69,7 +72,7 @@ and the edit should stay inside a tighter range:
 | `new_string`  | string  | yes | Replacement (or inserted) text. For replacement it must differ from `old_string`; empty-and-empty is rejected. |
 | `start_line`  | integer | yes | 1-based first line of the search/replace range. The first match at or after this line is replaced. |
 | `end_line`    | integer | no  | 1-based last line of the search/replace range. Defaults to the file end. |
-| `revert_on_parse_errors` | boolean | no (default `true`) | Roll back an edit that introduces lex/parse errors into a `.mbt`/`.mbt.md` file, returning the errors with source context. Set `false` only to intentionally produce non-parsing content. |
+| `revert_on_parse_errors` | boolean | no (default `true`) | Reject an edit whose result would introduce new lex/parse errors into a `.mbt` file, leaving the file untouched and returning the errors with excerpts. `.mbt.md` is not gated. Set `false` only to intentionally produce non-parsing content. |
 
 Legacy calls with `replace_all=false` are tolerated, but `replace_all=true` is
 rejected. Use `multi_edit` when a compiler diagnostic suggests several known
@@ -87,11 +90,11 @@ has one of these shapes:
   MoonBit module, the response may append bounded raw compiler feedback from
   module-root `moon check --diagnostic-limit 1`, starting with
   `"moon check:"` after the success line. Failed checks include `exit=<code>`
-  or `exit=cancelled`. A kept source edit appends the guard's tally line
-  instead (e.g. `moon check: ok — 0 errors, 2 warning(s)`).
-- `"reverted: the edit introduced <n> new parse error(s) in <path>, ..."` with
-  `is_error=true` — the parse-error guard restored the pre-edit content; the
-  body excerpts the rolled-back content at each error and says how to retry.
+  or `exit=cancelled`.
+- `"rejected: the edit would introduce <n> new parse error(s) in <path>, ..."`
+  with `is_error=true` — the pre-write syntax gate refused the edit and the
+  file is untouched; the body excerpts the would-be content at each error and
+  says how to retry.
 - `"error editing <path>: old_string not found"` — no exact match was found in the selected range.
 - `"error editing <path>: replace_all=true is no longer supported; use multi_edit with explicit line-anchored edits"` — the call requested a global replacement.
 - `"error editing <path>: moon.pkg use // for comment syntax, not #"` or similar

@@ -473,3 +473,60 @@ async test "edit surfaces read errors" {
     assert_true(output.is_error)
   })
 }
+
+///|
+/// End-to-end through real moonc: the parse gate needs no moon project, so a
+/// plain tmpdir exercises the reject, the pre-existing-error tolerance, and
+/// the opt-out.
+async test "edit gates .mbt results through moonc before writing" {
+  @vfs.with_tmpdir(prefix="openseek-edit-gate-", dir => {
+    let original = "///|\npub fn f() -> Int {\n  42\n}\n"
+    let path = "\{dir}/a.mbt"
+    @fs.write_file(path, original, create_mode=CreateOrTruncate)
+    // A breaking edit is rejected and the file is untouched.
+    let broken = run_edit({
+      "path": path,
+      "old_string": "  42",
+      "new_string": "  match 42 {",
+      "start_line": 3,
+    })
+    guard broken is Respond(out) else { fail("expected Respond") }
+    assert_true(out.is_error)
+    assert_true(out.content.contains("rejected: the edit would introduce"))
+    assert_eq(@fs.read_file(path).text(), original)
+    // A clean edit is applied.
+    let clean = run_edit({
+      "path": path,
+      "old_string": "  42",
+      "new_string": "  43",
+      "start_line": 3,
+    })
+    guard clean is Respond(ok) else { fail("expected Respond") }
+    assert_false(ok.is_error)
+    assert_true(@fs.read_file(path).text().contains("  43"))
+    // A file with a pre-existing parse error still accepts an unrelated edit.
+    let pre_broken = "///|\npub fn g() -> Int {\n  1 +\n}\n// tail\n"
+    let path2 = "\{dir}/b.mbt"
+    @fs.write_file(path2, pre_broken, create_mode=CreateOrTruncate)
+    let unrelated = run_edit({
+      "path": path2,
+      "old_string": "// tail",
+      "new_string": "// tail (edited)",
+      "start_line": 5,
+    })
+    guard unrelated is Respond(kept) else { fail("expected Respond") }
+    assert_false(kept.is_error)
+    assert_true(@fs.read_file(path2).text().contains("(edited)"))
+    // Opt-out: the breaking edit lands.
+    let fixture = run_edit({
+      "path": path,
+      "old_string": "  43",
+      "new_string": "  match 43 {",
+      "start_line": 3,
+      "revert_on_parse_errors": false,
+    })
+    guard fixture is Respond(fx) else { fail("expected Respond") }
+    assert_false(fx.is_error)
+    assert_true(@fs.read_file(path).text().contains("match 43 {"))
+  })
+}

@@ -1,8 +1,8 @@
 ///|
 /// Decoded arguments of the `write` tool: create or overwrite the file at
 /// `path` with exactly `content`. `revert_on_parse_errors` (default true)
-/// controls the post-write guard that deletes a new MoonBit source file when
-/// it fails to lex/parse.
+/// controls the pre-write syntax gate that rejects new `.mbt` content that
+/// fails to lex/parse.
 pub struct WriteInput {
   path : String
   content : String

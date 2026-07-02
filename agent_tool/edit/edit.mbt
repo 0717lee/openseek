@@ -11,17 +11,18 @@
 /// - `end_line` (integer, optional): 1-based inclusive last line to search.
 /// - `replace_all=true` is rejected. Use `multi_edit` for multiple explicit
 ///   line-anchored replacements.
-/// - `revert_on_parse_errors` (boolean, optional, default true): after an edit
-///   to a `.mbt`/`.mbt.md` file, `moon check` runs; if the edit introduced
-///   lex/parse errors (codes 3000-3999) into the file, it is restored to its
-///   pre-edit content and the errors are returned. Pre-existing parse errors
-///   never trigger the revert.
+/// - `revert_on_parse_errors` (boolean, optional, default true): before an
+///   edit to a `.mbt` file is written, the edited result is parsed standalone
+///   (`moonc -stop-after-parsing`); an edit that would introduce new
+///   lex/parse errors is rejected and the file is left untouched. Pre-existing
+///   parse errors never trigger the gate, and `.mbt.md` is not gated (moonc
+///   cannot parse markdown; see parse_gate.mbt).
 ///
 /// ## Result
 /// - `Respond(ToolOutput("ok: replaced <n> occurrence(s) at line <line> in <path>"))`
 ///   on success.
-/// - `Respond(ToolOutput("reverted: the edit introduced ...", is_error=true))`
-///   when the parse-error guard rolled the file back.
+/// - `Respond(ToolOutput("rejected: the edit would introduce ...", is_error=true))`
+///   when the parse gate refused an edit whose result does not parse.
 /// - `Respond(ToolOutput("error editing <path>: ...", is_error=true))` for
 ///   filesystem failures, empty/no-op edits, or missing matches.
 /// - `Respond(ToolOutput("error: edit requires ...", is_error=true))` for
@@ -31,7 +32,7 @@ pub fn definition(
 ) -> @agent_tool.AgentToolDefinition {
   AgentToolDefinition(
     name="edit",
-    description="Replace the first exact text span at or after arguments.start_line in arguments.path with arguments.new_string. Optional end_line restricts the search to a 1-based inclusive line range. Because start_line anchors the location, old_string can be a small exact span instead of a large context block. To INSERT new code instead of replacing, set old_string to the empty string: new_string is inserted at the start of start_line (use start_line = last line + 1 to append at end of file). An edit that introduces lex/parse errors into a .mbt/.mbt.md file is auto-rolled-back and the parse errors are returned — see revert_on_parse_errors. For multiple compiler-feedback fixes in one file, use multi_edit with explicit line-anchored edits.",
+    description="Replace the first exact text span at or after arguments.start_line in arguments.path with arguments.new_string. Optional end_line restricts the search to a 1-based inclusive line range. Because start_line anchors the location, old_string can be a small exact span instead of a large context block. To INSERT new code instead of replacing, set old_string to the empty string: new_string is inserted at the start of start_line (use start_line = last line + 1 to append at end of file). An edit that would introduce lex/parse errors into a .mbt file is rejected BEFORE writing and the parse errors are returned — see revert_on_parse_errors. For multiple compiler-feedback fixes in one file, use multi_edit with explicit line-anchored edits.",
     schema=JsonSchema({
       "type": "object",
       "properties": {
@@ -42,7 +43,7 @@ pub fn definition(
         "end_line": { "type": "integer" },
         "revert_on_parse_errors": {
           "type": "boolean",
-          "description": "Auto-revert safety net, on by default. After the edit is written to a .mbt/.mbt.md file, `moon check` runs; if the edit INTRODUCED lex/parse errors (error codes 3000-3999) into the file — measured against the pre-edit content, so pre-existing parse errors are ignored — the file is restored to its pre-edit content and the call returns the parse errors with source context. Type errors (4xxx) never trigger the revert; they may be a legitimate transient state. Set false only to intentionally produce content that does not parse (e.g. a fixture).",
+          "description": "Syntax gate, on by default. Before the edit is written to a .mbt file, the edited result is parsed standalone (moonc -stop-after-parsing); an edit that would INTRODUCE new lex/parse errors — measured against the pre-edit content parsed the same way, so pre-existing parse errors are ignored — is REJECTED, the file is left untouched, and the call returns the errors with excerpts of the would-be content. Type errors never trigger the gate (they may be a legitimate transient state), and .mbt.md files are not gated. Set false only to intentionally produce content that does not parse (e.g. a fixture).",
           "examples": [false],
         },
       },
@@ -125,17 +126,23 @@ async fn edit_file(
         )
       None => ()
     }
-    return try {
-      @fs.write_file(path, new_content, create_mode=CreateOrTruncate)
-      let summary = "ok: inserted at line \{input.start_line} in \{path}"
-      edited_response(
+    match
+      parse_gate_rejection(
         path,
         original_content=content,
         new_content~,
-        summary,
-        ok_brief="edited \{@agent_tool.brief_basename(path)}:\{input.start_line} (insert)",
-        fail_brief~,
         revert_on_parse_errors=input.revert_on_parse_errors,
+      ) {
+      Some(rejection) => return rejection
+      None => ()
+    }
+    return try {
+      @fs.write_file(path, new_content, create_mode=CreateOrTruncate)
+      let summary = "ok: inserted at line \{input.start_line} in \{path}"
+      let response = @auto_check.append_summary(path, summary)
+      @agent_tool.ToolAction::respond(
+        response,
+        brief="edited \{@agent_tool.brief_basename(path)}:\{input.start_line} (insert)",
       )
     } catch {
       error if @async.is_being_cancelled() => raise error
@@ -177,17 +184,23 @@ async fn edit_file(
       )
     None => ()
   }
-  try {
-    @fs.write_file(path, new_content, create_mode=CreateOrTruncate)
-    let summary = "ok: replaced \{replacement_count} occurrence(s) at line \{match_line} in \{path}"
-    edited_response(
+  match
+    parse_gate_rejection(
       path,
       original_content=content,
       new_content~,
-      summary,
-      ok_brief="edited \{@agent_tool.brief_basename(path)}:\{match_line} (\{replacement_count}×)",
-      fail_brief~,
       revert_on_parse_errors=input.revert_on_parse_errors,
+    ) {
+    Some(rejection) => return rejection
+    None => ()
+  }
+  try {
+    @fs.write_file(path, new_content, create_mode=CreateOrTruncate)
+    let summary = "ok: replaced \{replacement_count} occurrence(s) at line \{match_line} in \{path}"
+    let response = @auto_check.append_summary(path, summary)
+    @agent_tool.ToolAction::respond(
+      response,
+      brief="edited \{@agent_tool.brief_basename(path)}:\{match_line} (\{replacement_count}×)",
     )
   } catch {
     error if @async.is_being_cancelled() => raise error
@@ -201,7 +214,7 @@ async fn edit_file(
 }
 
 ///|
-/// From this many newly introduced parse errors up, the revert report stops
+/// From this many newly introduced parse errors up, the reject report stops
 /// suggesting a corrected re-issue and pushes splitting the change into
 /// smaller edits instead: parse errors cascade, so several of them usually
 /// mean a large replacement (or a misplaced insertion) broke the file's
@@ -209,162 +222,90 @@ async fn edit_file(
 const SmallerEditsHintThreshold : Int = 3
 
 ///|
-/// The common tail of a successful edit write: for MoonBit source files with
-/// the guard enabled, run the parse-error revert guard; otherwise append the
-/// plain `moon check` feedback exactly as before the guard existed.
-async fn edited_response(
+/// Pre-write syntax gate for `.mbt` edits: parse the candidate result in a
+/// scratch file (moonc -stop-after-parsing, no project context) and reject
+/// the edit — leaving the file untouched — when it would introduce new parse
+/// errors. "Introduced" compares parse-error counts against the ORIGINAL
+/// content parsed the same way, so a file that already fails to parse can
+/// still be edited (including partial fixes). Counts, not diagnostic
+/// identities, on purpose: an edit shifts the line numbers of every
+/// pre-existing error below it, so identity matching keyed on locations would
+/// false-fire constantly; the blind spot (an edit that fixes one parse error
+/// while introducing another, keeping the count flat) is accepted. `.mbt.md`
+/// is not gated (see the TODO in parse_gate.mbt). Fail-open: when the gate
+/// cannot run, the edit proceeds as before the gate existed.
+async fn parse_gate_rejection(
   path : String,
   original_content~ : String,
   new_content~ : String,
-  summary : String,
-  ok_brief~ : String,
-  fail_brief~ : String,
   revert_on_parse_errors~ : Bool,
-) -> @agent_tool.ToolAction {
-  if revert_on_parse_errors && @auto_check.is_source_path(path) {
-    return parse_guarded_edit_response(
-      path,
-      original_content~,
-      new_content~,
-      summary,
-      ok_brief~,
-      fail_brief~,
-    )
+) -> @agent_tool.ToolAction? {
+  if !revert_on_parse_errors || !@auto_check.is_gateable_path(path) {
+    return None
   }
-  let response = @auto_check.append_summary(path, summary)
-  @agent_tool.ToolAction::respond(response, brief=ok_brief)
-}
-
-///|
-/// Post-edit guard for MoonBit source files: run `moon check` and, when the
-/// file now has lex/parse errors, decide whether this edit introduced them.
-/// The baseline is measured lazily — only when parse errors are present — by
-/// restoring the pre-edit content and re-checking, so the common clean edit
-/// pays for a single check. Introduced errors roll the file back and fail the
-/// call with the errors and their source context; pre-existing ones re-apply
-/// the edit and report honestly. Fail-open: when the check cannot run, the
-/// edit is kept exactly as written.
-async fn parse_guarded_edit_response(
-  path : String,
-  original_content~ : String,
-  new_content~ : String,
-  summary : String,
-  ok_brief~ : String,
-  fail_brief~ : String,
-) -> @agent_tool.ToolAction {
-  let after = check_source_or_none(path)
-  guard after is Some(after) else {
-    return @agent_tool.ToolAction::respond(summary, brief=ok_brief)
-  }
-  if after.parse_error_count == 0 {
-    return @agent_tool.ToolAction::respond(
-      "\{summary}\n\{@auto_check.source_check_feedback(after)}",
-      brief=ok_brief,
-    )
-  }
-  // Suspicious: the edited file has parse errors. Measure the pre-edit
-  // baseline by restoring the original and re-checking, so the guard fires on
-  // errors this edit INTRODUCED, not on ones that were already there.
-  if !write_or_false(path, original_content) {
-    // The restore write itself failed; the edit is on disk and rolling back is
-    // not possible. Keep it, but flag the parse errors loudly.
-    return @agent_tool.ToolAction::respond(
-      "\{summary}\n\{@auto_check.source_check_feedback(after)}\nWARNING: the file now has \{after.parse_error_count} parse error(s) and could not be rolled back — fix it with further edits.",
-      is_error=true,
-      brief=fail_brief,
-    )
-  }
-  // From here the PRE-EDIT content is on disk. If the call is cancelled during
-  // the baseline check, put the edit back before propagating: a cancelled call
-  // must not silently vanish an already-written edit (matching the tools'
-  // cancel-after-write behavior elsewhere). The re-apply is best-effort — under
-  // cancellation the write itself may refuse to run.
-  try {
-    let before = check_source_or_none(path)
-    let before_parse = match before {
-      Some(before) => before.parse_error_count
-      None => 0
-    }
-    // Counts, not diagnostic identities, on purpose: an edit shifts the line
-    // numbers of every pre-existing error below it, so identity matching keyed
-    // on locations would false-fire constantly. The blind spot (an edit that
-    // fixes one parse error while introducing another, keeping the count flat)
-    // is kept, and the response below reports the surviving errors either way.
-    let introduced = after.parse_error_count - before_parse
-    if introduced > 0 {
-      // Real breakage. Stay reverted (the original is already back on disk).
-      return @agent_tool.ToolAction::respond(
-        edit_revert_report(path, after, introduced~),
-        is_error=true,
-        brief="edit reverted (\{introduced} parse error(s))",
-      )
-    }
-    // False alarm: as many parse errors were already present. Re-apply and keep.
-    if !write_or_false(path, new_content) {
-      return @agent_tool.ToolAction::respond(
-        "error editing \{path}: the edit was validated but could not be re-applied after baseline measurement; the file holds its pre-edit content",
-        is_error=true,
-        brief=fail_brief,
-      )
-    }
-    @agent_tool.ToolAction::respond(
-      "\{summary}\n\{@auto_check.source_check_feedback(after)}\nnote: \{after.parse_error_count} parse error(s) were already present before this edit (the edit did not add to the count), so the edit was kept.",
-      brief=ok_brief,
-    )
-  } catch {
-    error => {
-      let _ = write_or_false(path, new_content) catch { _ => false }
-      raise error
-    }
-  }
-}
-
-///|
-/// The reverted-edit report: what was rolled back, the first parse errors with
-/// their source excerpts (from the as-edited content, which is no longer on
-/// disk), and how to retry — a corrected re-issue for a small slip, smaller
-/// pieces when the errors suggest the replacement broke the file's structure.
-fn edit_revert_report(
-  path : String,
-  after : @auto_check.SourceCheck,
-  introduced~ : Int,
-) -> String {
-  let head = "reverted: the edit introduced \{introduced} new parse error(s) in \{path}, so the file was restored to its pre-edit content."
-  let shown = after.parse_errors.length()
-  let errors = if shown == 0 {
-    ""
-  } else {
-    "\nfirst \{shown} parse error(s), excerpted from the rolled-back content:\n\{after.parse_errors.join("\n")}"
-  }
-  let retry = if introduced >= SmallerEditsHintThreshold {
-    "\n\{introduced} new parse errors usually means the replacement broke the file's structure (an unbalanced brace, a misplaced insertion, or non-MoonBit text). Do not re-issue the same edit: split it into smaller pieces — multi_edit applies several small line-anchored edits in one validated call — and check after each step."
-  } else {
-    "\nre-issue the edit with a corrected new_string (check delimiters against the excerpt above)."
-  }
-  let opt_out = "\n(To intentionally keep content that does not parse, e.g. a fixture, pass revert_on_parse_errors=false.)"
-  "\{head}\{errors}\{retry}\{opt_out}"
-}
-
-///|
-/// `@auto_check.check_source`, with cancellation propagated and any other
-/// failure mapped to `None` (fail open — keep the edit unguarded).
-async fn check_source_or_none(path : String) -> @auto_check.SourceCheck? {
-  @auto_check.check_source(path) catch {
+  let gate = @auto_check.content_parse_errors(new_content) catch {
     error if @async.is_being_cancelled() => raise error
     _ => None
   }
+  guard gate is Some(errors) && errors.length() > 0 else { return None }
+  // The edited result has parse errors; reject only when the edit makes the
+  // file WORSE than its original content parsed the same way.
+  let before = @auto_check.content_parse_errors(original_content) catch {
+    error if @async.is_being_cancelled() => raise error
+    _ => None
+  }
+  let before_count = match before {
+    Some(before) => before.length()
+    // The gate parsed the new content but not the original: treat the
+    // original as clean, which errs toward rejecting a breaking edit.
+    None => 0
+  }
+  let introduced = errors.length() - before_count
+  if introduced <= 0 {
+    return None
+  }
+  Some(
+    @agent_tool.ToolAction::respond(
+      edit_reject_report(path, new_content, errors, introduced~, before_count~),
+      is_error=true,
+      brief="edit rejected (\{introduced} parse error(s))",
+    ),
+  )
 }
 
 ///|
-/// Best-effort write for the guard's restore/re-apply steps — a rollback must
-/// not raise midway, so a failure is reported through the response text
-/// instead.
-async fn write_or_false(path : String, content : String) -> Bool {
-  @fs.write_file(path, content, create_mode=CreateOrTruncate) catch {
-    error if @async.is_being_cancelled() => raise error
-    _ => return false
+/// The rejected-edit report: the file was not modified, the first parse
+/// errors with excerpts synthesized from the would-be content, and how to
+/// retry — a corrected re-issue for a small slip, smaller pieces when the
+/// errors suggest the replacement broke the file's structure.
+fn edit_reject_report(
+  path : String,
+  new_content : String,
+  errors : Array[@auto_check.ParseGateError],
+  introduced~ : Int,
+  before_count~ : Int,
+) -> String {
+  let head = "rejected: the edit would introduce \{introduced} new parse error(s) in \{path}, so the file was NOT modified."
+  let pre_existing = if before_count > 0 {
+    " (the file already has \{before_count} parse error(s); only the newly introduced ones count)"
+  } else {
+    ""
   }
-  true
+  let formatted = @auto_check.format_parse_gate_errors(
+    path, new_content, errors,
+  )
+  let listed = if formatted.is_empty() {
+    ""
+  } else {
+    "\nfirst \{formatted.length()} parse error(s), excerpted from the WOULD-BE content (not what is on disk):\n\{formatted.join("\n")}"
+  }
+  let retry = if introduced >= SmallerEditsHintThreshold {
+    "\n\{introduced} new parse errors usually means the replacement would break the file's structure (an unbalanced brace, a misplaced insertion, or non-MoonBit text). Do not re-issue the same edit: split it into smaller pieces — multi_edit applies several small line-anchored edits in one validated call — and check after each step."
+  } else {
+    "\nre-issue the edit with a corrected new_string (check delimiters against the excerpt above)."
+  }
+  let opt_out = "\n(To intentionally produce content that does not parse, e.g. a fixture, pass revert_on_parse_errors=false.)"
+  "\{head}\{pre_existing}\{listed}\{retry}\{opt_out}"
 }
 
 ///|
@@ -453,47 +394,50 @@ fn range_detail(input : @decode.EditInput) -> String {
 }
 
 ///|
-test "edit_revert_report excerpts the rolled-back content and asks for a re-issue" {
-  let after : @auto_check.SourceCheck = {
-    error_count: 1,
-    warning_count: 0,
-    parse_error_count: 1,
-    parse_errors: [
-      "lib/a.mbt:7:1-7:2: Parse error, unexpected token `}`.\n  6 |  let y =\n  7 |}",
-    ],
-    first_errors: ["lib/a.mbt:7:1-7:2: Parse error, unexpected token `}`."],
-    truncated: false,
-    exit_code: Some(1),
-    failure_output: None,
-  }
+test "edit_reject_report excerpts the would-be content and asks for a re-issue" {
+  let would_be =
+    #|///|
+    #|pub fn f() -> Int {
+    #|  match 42 {
+    #|}
   inspect(
-    edit_revert_report("lib/a.mbt", after, introduced=1),
+    edit_reject_report(
+      "lib/a.mbt",
+      would_be,
+      [{ loc: "4:1-4:2", message: "Parse error, unexpected token `}`." }],
+      introduced=1,
+      before_count=0,
+    ),
     content=(
-      #|reverted: the edit introduced 1 new parse error(s) in lib/a.mbt, so the file was restored to its pre-edit content.
-      #|first 1 parse error(s), excerpted from the rolled-back content:
-      #|lib/a.mbt:7:1-7:2: Parse error, unexpected token `}`.
-      #|  6 |  let y =
-      #|  7 |}
+      #|rejected: the edit would introduce 1 new parse error(s) in lib/a.mbt, so the file was NOT modified.
+      #|first 1 parse error(s), excerpted from the WOULD-BE content (not what is on disk):
+      #|lib/a.mbt:4:1-4:2: Parse error, unexpected token `}`.
+      #|  3 |  match 42 {
+      #|  4 |}
       #|re-issue the edit with a corrected new_string (check delimiters against the excerpt above).
-      #|(To intentionally keep content that does not parse, e.g. a fixture, pass revert_on_parse_errors=false.)
+      #|(To intentionally produce content that does not parse, e.g. a fixture, pass revert_on_parse_errors=false.)
     ),
   )
 }
 
 ///|
-test "edit_revert_report pushes smaller edits when parse errors cascade" {
-  let after : @auto_check.SourceCheck = {
-    error_count: 5,
-    warning_count: 0,
-    parse_error_count: 5,
-    parse_errors: ["lib/a.mbt:1:1-1:2: Parse error."],
-    first_errors: [],
-    truncated: false,
-    exit_code: Some(1),
-    failure_output: None,
-  }
-  let report = edit_revert_report("lib/a.mbt", after, introduced=4)
+test "edit_reject_report pushes smaller edits and names pre-existing errors" {
+  let errors = [
+    for index in 0..<5 => {
+      (
+        { loc: "\{index + 1}:1", message: "e\{index}" } :
+        @auto_check.ParseGateError)
+    }
+  ]
+  let report = edit_reject_report(
+    "lib/a.mbt",
+    "a\nb\nc\nd\ne",
+    errors,
+    introduced=4,
+    before_count=1,
+  )
   assert_true(report.contains("4 new parse errors usually means"))
   assert_true(report.contains("split it into smaller pieces"))
+  assert_true(report.contains("already has 1 parse error(s)"))
   assert_false(report.contains("re-issue the edit with a corrected new_string"))
 }

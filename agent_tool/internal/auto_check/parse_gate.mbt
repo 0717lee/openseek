@@ -14,6 +14,33 @@
 const MooncParseCommand : String = "moonc compile -no-intermediate-file -stop-after-parsing -error-format json"
 
 ///|
+/// How many lex/parse errors a reject report surfaces. Each entry carries a
+/// source excerpt, and parse errors cascade — a handful shows the shape of the
+/// breakage without dumping pages.
+pub const ParseErrorDisplayLimit : Int = 5
+
+///|
+/// The `error_code` range for lexer and parser diagnostics (e.g. 3001 "Lexing
+/// error", 3002 "Parse error"). Codes at 4000 and above are type/resolution
+/// errors, which never appear under `-stop-after-parsing` anyway; the range
+/// check keeps the gate honest if that ever changes.
+const ParseErrorCodeMin : Int = 3000
+
+///|
+const ParseErrorCodeMax : Int = 3999
+
+///|
+fn is_parse_error_code(fields : Map[String, Json]) -> Bool {
+  match fields.get("error_code") {
+    Some(Number(code, ..)) => {
+      let code = code.to_int()
+      code >= ParseErrorCodeMin && code <= ParseErrorCodeMax
+    }
+    _ => false
+  }
+}
+
+///|
 const MooncParseTimeoutMs : Int = 10000
 
 ///|
@@ -33,6 +60,13 @@ pub(all) struct ParseGateError {
   loc : String
   message : String
 } derive(Debug)
+
+///|
+/// Whether the parse gate applies to `path`: plain `.mbt` only. `.mbt.md` is
+/// excluded — see the TODO above.
+pub fn is_gateable_path(path : String) -> Bool {
+  path.has_suffix(".mbt") && !path.has_suffix(".mbt.md")
+}
 
 ///|
 /// Parse `content` as a single standalone `.mbt` file and return its
@@ -92,10 +126,7 @@ pub async fn content_parse_errors(content : String) -> Array[ParseGateError]? {
 /// crash, unparseable output) → `None`, so the caller fails open. A non-zero
 /// exit with no captured parse errors is deliberately `None` rather than
 /// "clean": the gate must never certify content it did not actually parse.
-fn decide_parse_gate(
-  text : String,
-  exit_code : Int?,
-) -> Array[ParseGateError]? {
+fn decide_parse_gate(text : String, exit_code : Int?) -> Array[ParseGateError]? {
   let errors : Array[ParseGateError] = []
   for raw in text.split("\n") {
     if !raw.contains("\"level\"") {
@@ -166,7 +197,11 @@ fn excerpt_for_loc(lines : Array[String], loc : String) -> String {
   }
   // Cap the span so a single error covering a huge region cannot flood the
   // report; the error line itself always shows.
-  let mut last = if end_line > start_line + 3 { start_line + 3 } else { end_line }
+  let mut last = if end_line > start_line + 3 {
+    start_line + 3
+  } else {
+    end_line
+  }
   if last > lines.length() {
     last = lines.length()
   }
@@ -175,7 +210,9 @@ fn excerpt_for_loc(lines : Array[String], loc : String) -> String {
   }
   let width = "\{last}".length()
   let rendered = [
-    for number in first..=last => "  \{pad_line_number(number, width)} |\{lines[number - 1]}"
+    for number in first..<=last => {
+      "  \{pad_line_number(number, width)} |\{lines[number - 1]}"
+    }
   ]
   rendered.join("\n")
 }
@@ -238,7 +275,9 @@ test "decide_parse_gate splits errors, clean, and cannot-run" {
   assert_eq(clean.length(), 0)
   // moonc missing (127) or any failure without parse diagnostics: fail open,
   // never certify unparsed content as clean.
-  assert_true(decide_parse_gate("sh: moonc: command not found", Some(127)) is None)
+  assert_true(
+    decide_parse_gate("sh: moonc: command not found", Some(127)) is None,
+  )
   assert_true(decide_parse_gate("", None) is None)
   // Warnings alone never count as parse errors.
   let warning =
@@ -270,10 +309,11 @@ test "format_parse_gate_errors synthesizes numbered excerpts from content" {
 ///|
 test "format_parse_gate_errors caps at the display limit and handles bad locs" {
   let errors = [
-    for index in 0..<9 => ({
-      loc: "\{index + 1}:1-\{index + 1}:2",
-      message: "e\{index}",
-    } : ParseGateError)
+    for index in 0..<9 => {
+      (
+        { loc: "\{index + 1}:1-\{index + 1}:2", message: "e\{index}" } :
+        ParseGateError)
+    }
   ]
   let formatted = format_parse_gate_errors("a.mbt", "one\ntwo\nthree", errors)
   assert_eq(formatted.length(), ParseErrorDisplayLimit)

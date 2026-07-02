@@ -42,17 +42,19 @@ as are `moon.pkg` rewrites that use JSON-style syntax or `#` comments. Generated
 `*.generated.mbti` interface files are rejected too; refresh them with `moon info`
 instead.
 
-New MoonBit source files (`.mbt`, `.mbt.md`) get a parse-error auto-revert: after
-the write, `moon check --output-json` runs, and if the new file itself has
-lex/parse errors (error codes 3000-3999) the file is deleted and the call fails
-with the errors and their `context` source excerpts — the model's only remaining
-view of the rejected content. A non-parsing file is never a valid intermediate
-state, and `write` refuses to overwrite existing source, so deleting re-opens the
-natural retry: re-issue `write` with corrected content. Three or more parse
-errors switch the retry hint to writing a smaller skeleton first and growing it
-with `edit`. Type errors (4xxx) never revert — they can be a legitimate
-transient state during multi-file work. `revert_on_parse_errors=false` opts out
-for deliberately non-parsing fixtures.
+New `.mbt` content gets a pre-write syntax gate: the content is parsed
+standalone (`moonc compile -stop-after-parsing` in a scratch file, no project
+context needed), and content with lex/parse errors is rejected before anything —
+parent directories included — is created on disk. The call fails with the errors
+and numbered excerpts synthesized from the rejected content. A non-parsing file
+is never a valid intermediate state, and `write` refuses to overwrite existing
+source, so the natural retry is another `write` with corrected content. Three or
+more parse errors switch the retry hint to writing a smaller skeleton first and
+growing it with `edit`. Type errors never trigger the gate — they can be a
+legitimate transient state during multi-file work — and `.mbt.md` files are not
+gated (moonc cannot parse markdown-hosted code blocks; see the TODO in
+`agent_tool/internal/auto_check/parse_gate.mbt`). `revert_on_parse_errors=false`
+opts out for deliberately non-parsing fixtures.
 
 ## Arguments
 
@@ -60,7 +62,7 @@ for deliberately non-parsing fixtures.
 | --------- | ------ | -------- | ----- |
 | `path`    | string | yes | Filesystem path. Relative paths resolve against the agent process's current working directory. |
 | `content` | string | yes | Full file body. Empty strings are accepted and produce a zero-byte file. |
-| `revert_on_parse_errors` | boolean | no (default `true`) | Delete a NEW `.mbt`/`.mbt.md` file when it fails to lex/parse, returning the errors with source context. Set `false` only to intentionally create a non-parsing file (e.g. a fixture). |
+| `revert_on_parse_errors` | boolean | no (default `true`) | Reject new `.mbt` content that fails to lex/parse before anything is written, returning the errors with excerpts. `.mbt.md` is not gated. Set `false` only to intentionally create a non-parsing file (e.g. a fixture). |
 
 ## Action
 
@@ -77,10 +79,9 @@ has one of these shapes:
   MoonBit module, the response may append bounded raw compiler feedback from
   module-root `moon check --diagnostic-limit 1`, starting with
   `"moon check:"` after the success line. Failed checks include `exit=<code>`
-  or `exit=cancelled`. A kept new source file appends the guard's tally line
-  instead (e.g. `moon check: ok — 0 errors, 2 warning(s)`).
-- `"reverted: wrote <path> but the new file has <n> parse error(s), ..."` with
-  `is_error=true` — the parse-error guard deleted the new source file; the body
+  or `exit=cancelled`.
+- `"rejected: the content for <path> has <n> parse error(s); nothing was written."`
+  with `is_error=true` — the pre-write syntax gate refused the content; the body
   excerpts the rejected content at each error and says how to retry.
 - `"error writing <path>: <error>"` — the write failed. Common causes:
   permission denied, missing parent directory, read-only filesystem.

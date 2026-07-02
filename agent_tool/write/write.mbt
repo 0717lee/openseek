@@ -117,7 +117,7 @@ async fn write_file(
     // existing source, the natural retry is another `write` with corrected
     // content. `.mbt.md` is not gated (see the TODO in parse_gate.mbt).
     // Fail-open: when the gate cannot run (moonc missing), write as usual.
-    if input.revert_on_parse_errors && is_gateable_mbt(path) {
+    if input.revert_on_parse_errors && @auto_check.is_gateable_path(path) {
       let gate = @auto_check.content_parse_errors(input.content) catch {
         error if @async.is_being_cancelled() => raise error
         _ => None
@@ -206,13 +206,6 @@ fn write_reject_report(
 /// by the manifest guard, and hand-maintained ones are rare and editable.
 fn is_mbt_source(path : String) -> Bool {
   path.has_suffix(".mbt") || path.has_suffix(".mbt.md")
-}
-
-///|
-/// Whether the parse gate applies: plain `.mbt` only. `.mbt.md` is excluded —
-/// moonc cannot parse markdown-hosted code blocks (see parse_gate.mbt's TODO).
-fn is_gateable_mbt(path : String) -> Bool {
-  path.has_suffix(".mbt") && !path.has_suffix(".mbt.md")
 }
 
 ///|
@@ -557,7 +550,11 @@ test "write_reject_report excerpts the rejected content and asks for a re-issue"
 ///|
 test "write_reject_report pushes smaller parts when parse errors cascade" {
   let errors = [
-    for index in 0..<4 => ({ loc: "\{index + 1}:1", message: "e\{index}" } : @auto_check.ParseGateError)
+    for index in 0..<4 => {
+      (
+        { loc: "\{index + 1}:1", message: "e\{index}" } :
+        @auto_check.ParseGateError)
+    }
   ]
   let report = write_reject_report("lib/a.mbt", "x\ny\nz\nw", errors)
   assert_true(report.contains("4 parse errors usually means"))

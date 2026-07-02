@@ -236,3 +236,4 @@
 - Make tool schemas/descriptions sharper for conditional required fields such as `moon_ide.action = "doc"` requiring `query`.
 - Keep temporary debug code outside compiled packages, or provide a dedicated scratch package that cannot regress the deliverable package.
 - Make `moon_ide` failures clearer when `cwd` does not exist, or teach the prompt to create the workspace before semantic IDE calls against it.
+- Gate `.mbt.md` writes/edits on parse errors like `.mbt`. The moonc pre-write gate (`moonc compile -stop-after-parsing`) cannot parse markdown-hosted code blocks (it lexes the `#` headings and ``` fences as MoonBit), so `.mbt.md` is currently not parse-gated; gating it needs moon's own fenced-block extraction rules (```moonbit check vs plain fences, nocheck attributes) or an upstream moonc/moon flag for single-file .mbt.md checking.

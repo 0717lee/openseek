@@ -4,8 +4,8 @@
 /// optional `end_line` bounds it to an inclusive 1-based line range. The legacy
 /// `replace_all` flag is still decoded so `agent_tool/edit` can return a
 /// targeted migration error for `replace_all=true`. `revert_on_parse_errors`
-/// (default true) controls the post-edit guard that restores a MoonBit source
-/// file when the edit introduced lex/parse errors.
+/// (default true) controls the pre-write syntax gate that rejects an edit
+/// whose result would introduce new lex/parse errors into a `.mbt` file.
 pub struct EditInput {
   path : String
   old_string : String
