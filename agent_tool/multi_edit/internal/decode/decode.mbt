@@ -23,6 +23,9 @@ pub struct MultiEditArgs {
   // tool clamps it to a host-enforced range, so the model can tighten the
   // guardrail but not raise it past the cap.
   revert_when_errors_above : Int?
+  // Pre-write syntax gate (default true): reject the batch when any edited
+  // `.mbt` file would gain new lex/parse errors.
+  revert_on_parse_errors : Bool
 } derive(Debug)
 
 ///|
@@ -60,7 +63,12 @@ pub fn decode_args(arguments : Json) -> MultiEditArgs raise {
         Some(Null) | None => None
         Some(_) => fail("arguments.revert_when_errors_above to be an integer")
       }
-      { inline, edits_file, revert_when_errors_above }
+      let revert_on_parse_errors = match fields.get("revert_on_parse_errors") {
+        Some(True) | Some(Null) | None => true
+        Some(False) => false
+        Some(_) => fail("arguments.revert_on_parse_errors to be a boolean")
+      }
+      { inline, edits_file, revert_when_errors_above, revert_on_parse_errors }
     }
     _ => fail("object arguments")
   }
