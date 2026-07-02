@@ -49,10 +49,7 @@ fn LexerWord::flush_and_reset(self : LexerWord, tokens : Array[Token]) -> Unit {
 
 ///|
 fn lex(command : String) -> LexResult {
-  let chars : Array[Char] = []
-  for ch in command {
-    chars.push(ch)
-  }
+  let chars : Array[Char] = [ for ch in command => ch ]
   let tokens : Array[Token] = []
   let word = LexerWord::new()
   let mut state = Plain
@@ -295,11 +292,8 @@ fn lex(command : String) -> LexResult {
 
 ///|
 fn push_newline_separator(tokens : Array[Token]) -> Unit {
-  if tokens.length() == 0 {
-    return
-  }
-  match tokens[tokens.length() - 1] {
-    Op("&&" | "||" | ";" | "|", _) => ()
+  match tokens {
+    [] | [.., Op("&&" | "||" | ";" | "|", _)] => ()
     _ => tokens.push(Op(";", false))
   }
 }

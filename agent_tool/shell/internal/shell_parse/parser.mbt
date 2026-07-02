@@ -77,10 +77,8 @@ fn parse_tokens(tokens : Array[Token]) -> ParseResult {
         if !saw_part {
           return SyntaxError("operator \{op} has no preceding command")
         }
-        match too_complex_shell_control_word(argv) {
-          Some(word) =>
-            return TooComplex("shell control command is not supported: \{word}")
-          None => ()
+        if too_complex_shell_control_word(argv) is Some(word) {
+          return TooComplex("shell control command is not supported: \{word}")
         }
         push_command(commands, env, argv, redirects, separator_before)
         env = []
@@ -111,10 +109,8 @@ fn parse_tokens(tokens : Array[Token]) -> ParseResult {
       Some(op) => return SyntaxError("operator \{op} has no following command")
     }
   } else {
-    match too_complex_shell_control_word(argv) {
-      Some(word) =>
-        return TooComplex("shell control command is not supported: \{word}")
-      None => ()
+    if too_complex_shell_control_word(argv) is Some(word) {
+      return TooComplex("shell control command is not supported: \{word}")
     }
     push_command(commands, env, argv, redirects, separator_before)
   }
@@ -221,12 +217,7 @@ fn split_env_assignment(word : String) -> EnvAssignment? {
   if !is_valid_env_name(name) {
     return None
   }
-  let values : Array[String] = []
-  for index, part in parts {
-    if index > 0 {
-      values.push(part.to_owned())
-    }
-  }
+  let values = [ for part in parts[1:] => part.to_owned() ]
   Some({ name, value: values.join("=") })
 }
 
@@ -240,8 +231,7 @@ fn is_valid_env_name(name : String) -> Bool {
   if name == "" {
     return false
   }
-  let mut index = 0
-  for ch in name {
+  for index, ch in name {
     let valid = if index == 0 {
       ch is ('a'..='z') || ch is ('A'..='Z') || ch == '_'
     } else {
@@ -250,7 +240,6 @@ fn is_valid_env_name(name : String) -> Bool {
     if !valid {
       return false
     }
-    index += 1
   }
   true
 }
