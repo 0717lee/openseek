@@ -301,6 +301,20 @@ maintain:
   atomically, so a session file can never exist without its header.
 - `create` rewrites the file atomically (temp file, then rename); an
   interrupted rewrite leaves the previous file intact.
+- Durability policy: event appends and temp-file writes are flushed with
+  `fdatasync` before they return, and every file-creating write (create,
+  first append, tail repair) syncs the directory chain — session directory,
+  `sessions/`, root — itself, rather than trusting whichever process created
+  those directories. On POSIX-style local filesystems this makes a session
+  that `create` or `append` just reported durable survive a power loss, not
+  only a process crash. The directory syncs are best-effort: on platforms
+  where a directory cannot be opened or synced (notably Windows), power-loss
+  durability degrades to the filesystem's own guarantees, while
+  process-crash safety is unaffected. Two scope limits: the store root's own
+  directory entry lives in its parent, outside the store's ownership — when
+  the root is created lazily by the store, making the root itself durable is
+  the caller's setup concern; and an append to an existing file assumes that
+  file's creation was already durably completed by its creator.
 - Every load checks the header record and contiguous sequence numbers.
 - A crash can tear the final append mid-line. `load` tolerates exactly that —
   an unterminated final record is dropped (or kept when only its newline is

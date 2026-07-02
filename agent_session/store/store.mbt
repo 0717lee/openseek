@@ -255,22 +255,71 @@ async fn persist_event(
 ) -> Unit {
   let path = store.session_file_path(session.id())
   if !repair_tail && @fs.exists(path) {
+    // `sync=Data` (fdatasync) is the durability policy for event appends: a
+    // returned append survives an OS crash, not just a process crash. It is
+    // also the `write_file` default today — stated explicitly so the policy
+    // does not silently follow an upstream default change.
     @fs.write_file(
       path,
       "\{event.to_json().stringify()}\n",
       create_mode=OpenOrCreate,
       append=true,
+      sync=Data,
     )
   } else {
-    write_text_atomic(path, session_file_text(session))
+    write_text_atomic(
+      path,
+      session_file_text(session),
+      dirs=store.session_dir_chain(session.id()),
+    )
   }
 }
 
 ///|
-async fn write_text_atomic(path : String, text : String) -> Unit {
+/// Atomically replace `path` with `text`, then make the result durable by
+/// syncing `dirs` innermost-first.
+///
+/// The temp file is flushed (`sync=Data`) before the rename, so the rename
+/// can never install a file whose data blocks are still unwritten. The
+/// directory syncs are what make the rename — and, for a brand-new session,
+/// the directory entries above it — survive a power loss. The writer that
+/// claims durability syncs the whole chain itself rather than trusting
+/// whichever process happened to `mkdir` the directories moments earlier.
+/// Syncs are best-effort: on filesystems or platforms where a directory
+/// cannot be opened or synced, crash-consistency degrades only for power
+/// loss, never for process crashes.
+async fn write_text_atomic(
+  path : String,
+  text : String,
+  dirs~ : Array[String],
+) -> Unit {
   let tmp_path = "\{path}.tmp"
-  @fs.write_file(tmp_path, text, create_mode=CreateOrTruncate)
+  @fs.write_file(tmp_path, text, create_mode=CreateOrTruncate, sync=Data)
   @fs.rename(tmp_path, path, replace=true)
+  for dir in dirs {
+    sync_dir_best_effort(dir)
+  }
+}
+
+///|
+/// The directory chain whose entries a durable session write depends on,
+/// innermost first: the session directory (holds the file), `sessions/`
+/// (holds the session directory), and the root (holds `sessions/`). The
+/// root's own entry lives in its parent, outside the store's ownership.
+fn SessionStore::session_dir_chain(
+  self : SessionStore,
+  id : @agent_session.SessionId,
+) -> Array[String] raise {
+  [self.session_dir(id), self.sessions_dir(), self.root]
+}
+
+///|
+async fn sync_dir_best_effort(dir : String) -> Unit {
+  let file = @fs.open(dir, mode=ReadOnly) catch { _ => return }
+  defer file.close()
+  file.sync() catch {
+    _ => ()
+  }
 }
 
 ///|
@@ -563,6 +612,7 @@ pub async fn SessionStore::create(
     write_text_atomic(
       self.session_file_path(session.id()),
       session_file_text(session),
+      dirs=self.session_dir_chain(session.id()),
     )
   })
 }
