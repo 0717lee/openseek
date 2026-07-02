@@ -35,10 +35,12 @@ moon run cmd/openseek -- run [--api-key sk-...] [--model deepseek-v4-pro] [--api
 ```
 
 Runs require `--api-key` or `DEEPSEEK`. `--model` can also be supplied with
-`DEEPSEEK_MODEL`; it defaults to `deepseek-v4-pro`. `--max-steps` can also be
-supplied with `OPENSEEK_MAX_STEPS`; it defaults to `1000`.
-`--api-url` can also be supplied with `OPENSEEK_API_URL`; when omitted, OpenSeek
-uses the default DeepSeek chat completions endpoint.
+`DEEPSEEK_MODEL`; it accepts `deepseek-v4-flash`, `deepseek-v4-pro`,
+`kimi-k2.7-code`, and `kimi-k2.7-code-highspeed`, and defaults to
+`deepseek-v4-pro`. `--max-steps` can also be supplied with
+`OPENSEEK_MAX_STEPS`; it defaults to `1000`. `--api-url` can also be supplied
+with `OPENSEEK_API_URL`; when omitted, OpenSeek uses the default DeepSeek chat
+completions endpoint, or the Kimi endpoint for Kimi models.
 `--dir` can also be supplied with `OPENSEEK_DIR`; it defaults to `.` and becomes
 the workspace root for relative prompt files, sessions, workspace skills, and
 agent tools. If the directory itself is missing but its parent exists, OpenSeek
@@ -59,8 +61,8 @@ list` / `openseek sessions show <id>` (or the viz server) and resumable with
 `--session <id>`. Pass `--no-session` to run ephemerally; combining it with
 `--session` is rejected.
 
-Without an explicit prompt file, the CLI uses the Flash built-in prompt for both
-`deepseek-v4-flash` and `deepseek-v4-pro`. The older base prompt remains in
+Without an explicit prompt file, the CLI uses the Flash built-in prompt for the
+supported DeepSeek and Kimi model names. The older base prompt remains in
 `prompt/base_prompt.mbt.md` for comparison and experiments, but it is not
 selected by default.
 

@@ -141,6 +141,31 @@ async test "streaming chat retries a pre-stream 429 and then streams" {
 }
 
 ///|
+async test "streaming Kimi chat retries a pre-stream 502 and then streams" {
+  @async.with_task_group() <| group => {
+    guard flaky_server(group, failures=1, status=502, sse=true)
+      is Some((url, hits)) else {
+      return
+    }
+    let client = @client.Client(
+      api_key="test-key",
+      model=KimiK27Code,
+      api_url=url,
+      retry_attempts=3,
+      retry_backoff_ms=1,
+    )
+    let deltas : Array[String] = []
+    let response = client.chat(
+      [ChatMessage(User, content="hello")],
+      stream=StreamHandler(on_content_delta=delta => deltas.push(delta)),
+    )
+    assert_eq(response.content, "ok")
+    assert_eq(deltas.join("|"), "ok")
+    assert_eq(hits.val, 2)
+  }
+}
+
+///|
 /// A 2xx connection that dies before any event is transport-shaped: with no
 /// delta delivered, the stream call retries and the second connection
 /// serves the full stream.

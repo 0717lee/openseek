@@ -38,6 +38,14 @@ test "model parsing" {
     @deepseek.Model::parse("deepseek-v4-pro").to_string(),
     "deepseek-v4-pro",
   )
+  assert_eq(
+    @deepseek.Model::parse("kimi-k2.7-code").to_string(),
+    "kimi-k2.7-code",
+  )
+  assert_eq(
+    @deepseek.Model::parse("kimi-k2.7-code-highspeed").to_string(),
+    "kimi-k2.7-code-highspeed",
+  )
 }
 
 ///|

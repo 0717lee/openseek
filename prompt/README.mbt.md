@@ -6,15 +6,16 @@ functions through the module-level `md_to_mbt_string` dev-build rule.
 
 ## Prompt Sources
 
-- `flash_prompt.mbt.md`: the default built-in prompt used by DeepSeek V4
-  Flash and DeepSeek V4 Pro.
+- `flash_prompt.mbt.md`: the default built-in prompt used by the supported
+  DeepSeek and Kimi model names.
 - `base_prompt.mbt.md`: the older built-in prompt, retained for comparison and
   prompt experiments but not selected by default.
 
 ## API Shape
 
 - `system_prompt_for_model(model)`: return the default built-in prompt for a
-  DeepSeek model. Both current V4 models use the Flash prompt.
+  supported chat model. The supported DeepSeek and Kimi model names use the
+  Flash prompt.
 
 The agent package depends on this package for its default prompt, while the CLI
 can still override or append prompt files for A/B experiments.

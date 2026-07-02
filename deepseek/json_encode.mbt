@@ -167,7 +167,7 @@ pub fn encode_chat_request(
 ///|
 test "tool messages include tool call id" {
   let body = ChatMessage(Tool("call_123"), content="tool result")
-  json_inspect(body, content={
+  json_inspect(body.to_json_for_model(V4Pro), content={
     "role": "tool",
     "content": "tool result",
     "tool_call_id": "call_123",
@@ -217,7 +217,7 @@ test "assistant tool call messages encode tool_calls, never reasoning" {
     ],
     reasoning_content="checked available tools",
   )
-  json_inspect(body, content={
+  json_inspect(body.to_json_for_model(V4Pro), content={
     "role": "assistant",
     "content": null,
     "tool_calls": [
@@ -234,6 +234,37 @@ test "assistant tool call messages encode tool_calls, never reasoning" {
 }
 
 ///|
+test "kimi assistant messages preserve reasoning content" {
+  let body = ChatMessage(
+    Assistant,
+    content="",
+    tool_calls=[
+      ToolCall(
+        id="call_123",
+        name="get_weather",
+        arguments="{\"location\":\"Hangzhou\"}",
+      ),
+    ],
+    reasoning_content="checked available tools",
+  )
+  json_inspect(body.to_json_for_model(KimiK27Code), content={
+    "role": "assistant",
+    "content": null,
+    "tool_calls": [
+      {
+        "id": "call_123",
+        "type": "function",
+        "function": {
+          "name": "get_weather",
+          "arguments": "{\"location\":\"Hangzhou\"}",
+        },
+      },
+    ],
+    "reasoning_content": "checked available tools",
+  })
+}
+
+///|
 test "assistant tool call messages preserve content when present" {
   let body = ChatMessage(Assistant, content="I will check that now.", tool_calls=[
     ToolCall(
@@ -242,7 +273,7 @@ test "assistant tool call messages preserve content when present" {
       arguments="{\"location\":\"Hangzhou\"}",
     ),
   ])
-  json_inspect(body, content={
+  json_inspect(body.to_json_for_model(V4Pro), content={
     "role": "assistant",
     "content": "I will check that now.",
     "tool_calls": [
@@ -266,7 +297,7 @@ test "tool call arguments pass through as opaque strings" {
     arguments="not even valid json{",
   )
   let body = ChatMessage(Assistant, content="", tool_calls=[call])
-  json_inspect(body, content={
+  json_inspect(body.to_json_for_model(V4Pro), content={
     "role": "assistant",
     "content": null,
     "tool_calls": [

@@ -2,14 +2,16 @@
 
 This pure package provides strongly typed DeepSeek chat data and JSON
 encoding/decoding. Use it when constructing requests, parsing responses, or
-testing DeepSeek chat behavior without network access.
+testing DeepSeek chat behavior without network access. The typed model list
+also covers Kimi K2.7 Code models where their request policy differs from
+DeepSeek's.
 
 The HTTP client lives in `bobzhang/openseek/deepseek/client`.
 
 ## API Shape
 
-- `Model`: current DeepSeek chat model names, with `Show` for wire strings and
-  `Debug` for inspection.
+- `Model`: DeepSeek chat model names plus Kimi K2.7 Code compatibility variants,
+  with `Show` for wire strings and `Debug` for inspection.
 - `ThinkingMode`: typed control for DeepSeek V4 thinking (`No`, `High`, or
   `Max`).
 - `Role`: `System`, `User`, `Assistant`, and `Tool(tool_call_id)`, with `Show`
@@ -22,7 +24,9 @@ The HTTP client lives in `bobzhang/openseek/deepseek/client`.
   object.
 - `encode_chat_request(tools?, thinking?, stream?, response_format?,
   model?=V4Pro) <| messages`: builds the full DeepSeek chat completions request
-  body. Streaming requests include usage-bearing stream options. The per-value
+  body. Streaming requests include usage-bearing stream options. Kimi K2.7 Code
+  requests omit DeepSeek-specific thinking fields, set a large default
+  `max_tokens`, and preserve assistant `reasoning_content`. The per-value
   encoders for messages, tool definitions, and tool calls are package-private
   implementation details.
 - `ToolDefinition(name, description, parameters, strict?)`: a native DeepSeek

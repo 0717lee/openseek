@@ -137,6 +137,70 @@ test "thinking=No disables reasoning and omits reasoning_effort" {
 }
 
 ///|
+test "kimi code omits thinking and preserves assistant reasoning" {
+  let call = @deepseek.ToolCall(
+    id="call_42",
+    name="shell",
+    arguments="{\"cmd\":\"moon test\"}",
+  )
+  let body = @deepseek.encode_chat_request(
+    model=KimiK27Code,
+    thinking=Max,
+    stream=true,
+  ) <| [
+    ChatMessage(User, content="run tests"),
+    ChatMessage(
+      Assistant,
+      content="",
+      tool_calls=[call],
+      reasoning_content="need to validate first",
+    ),
+    ChatMessage(Tool("call_42"), content="exit=0\nok"),
+  ]
+  json_inspect(body, content={
+    "model": "kimi-k2.7-code",
+    "messages": [
+      { "role": "user", "content": "run tests" },
+      {
+        "role": "assistant",
+        "content": null,
+        "tool_calls": [
+          {
+            "id": "call_42",
+            "type": "function",
+            "function": {
+              "name": "shell",
+              "arguments": "{\"cmd\":\"moon test\"}",
+            },
+          },
+        ],
+        "reasoning_content": "need to validate first",
+      },
+      { "role": "tool", "content": "exit=0\nok", "tool_call_id": "call_42" },
+    ],
+    "stream": true,
+    "stream_options": { "include_usage": true },
+    "max_tokens": 32000,
+  })
+}
+
+///|
+test "kimi highspeed uses the same code-model request policy" {
+  let body = @deepseek.encode_chat_request(
+    model=KimiK27CodeHighSpeed,
+    thinking=No,
+  ) <| [
+    ChatMessage(User, content="solve"),
+  ]
+  json_inspect(body, content={
+    "model": "kimi-k2.7-code-highspeed",
+    "messages": [{ "role": "user", "content": "solve" }],
+    "stream": false,
+    "max_tokens": 32000,
+  })
+}
+
+///|
 test "tools and thinking are omitted when absent" {
   let body = @deepseek.encode_chat_request(model=V4Flash) <| [
     ChatMessage(User, content="hi"),

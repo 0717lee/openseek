@@ -2,6 +2,7 @@
 async fn stream_test_server(
   group : @async.TaskGroup[Unit],
   finish? : Bool = true,
+  kimi_usage? : Bool = false,
 ) -> String? {
   let server = @http.Server(@socket.Addr::parse("127.0.0.1:0")) catch {
     error => {
@@ -23,7 +24,12 @@ async fn stream_test_server(
         assert_true(request.headers.get("accept-encoding") is Some("identity"))
         let request_body = body.read_all().text()
         assert_true(request_body.contains("\"stream\":true"))
-        assert_true(request_body.contains("\"include_usage\":true"))
+        if kimi_usage {
+          assert_true(request_body.contains("\"model\":\"kimi-k2.7-code\""))
+          assert_true(request_body.contains("\"include_usage\":true"))
+        } else {
+          assert_true(request_body.contains("\"include_usage\":true"))
+        }
         assert_false(request_body.contains("\"response_format\""))
         conn.send_response(200, "OK", extra_headers={
           "Content-Type": "text/event-stream",
@@ -36,7 +42,11 @@ async fn stream_test_server(
           "data: {\"choices\":[{\"delta\":{\"content\":\" world\",\"reasoning_content\":\"hidden\",\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"read\",\"arguments\":\"{\\\"path\\\"\"}}]}}]}\n\n",
         )
         conn.write(
-          "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\":\\\"moon.mod\\\"}\"}}]}}],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":5,\"total_tokens\":8,\"prompt_cache_hit_tokens\":1,\"prompt_cache_miss_tokens\":2}}\n\n",
+          if kimi_usage {
+            "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\":\\\"moon.mod\\\"}\"}}]},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":5,\"total_tokens\":8}}\n\n"
+          } else {
+            "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\":\\\"moon.mod\\\"}\"}}]}}],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":5,\"total_tokens\":8,\"prompt_cache_hit_tokens\":1,\"prompt_cache_miss_tokens\":2}}\n\n"
+          },
         )
         if finish {
           conn.write("data: [DONE]\n\n")
@@ -74,6 +84,28 @@ async test "chat stream handler accumulates SSE content, tool calls, and usage" 
     assert_eq(response.usage.total_tokens, 8)
     assert_eq(response.usage.prompt_cache_hit_tokens, 1)
     assert_eq(response.usage.prompt_cache_miss_tokens, 2)
+  }
+}
+
+///|
+async test "chat stream handler accumulates Kimi stream_options usage" {
+  @async.with_task_group() <| group => {
+    guard stream_test_server(group, kimi_usage=true) is Some(url) else {
+      return
+    }
+    let client = @client.Client(
+      api_key="test-key",
+      model=KimiK27Code,
+      api_url=url,
+    )
+    let response = client.chat(
+      [ChatMessage(User, content="hello")],
+      stream=StreamHandler(on_content_delta=_ => ()),
+    )
+    assert_eq(response.content, "Hello world")
+    assert_eq(response.usage.prompt_tokens, 3)
+    assert_eq(response.usage.completion_tokens, 5)
+    assert_eq(response.usage.total_tokens, 8)
   }
 }
 

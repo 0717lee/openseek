@@ -28,7 +28,9 @@ The package depends on `moonbitlang/async/http` and is native-only.
 
 The default endpoint is `https://api.deepseek.com/chat/completions`, the default
 model is `deepseek-v4-pro`, and `thinking=No` is sent unless a different mode is
-provided. Pass `thinking=Max` for explicit max-effort thinking-mode requests.
+provided. Kimi K2.7 Code models default to
+`https://api.moonshot.cn/v1/chat/completions` and omit DeepSeek-specific
+thinking fields when the request body is encoded.
 
 Retries cover transient failures: transport errors, HTTP 429, and HTTP 5xx.
 Other HTTP 4xx responses fail immediately. `retry_attempts` counts total tries;
@@ -135,9 +137,9 @@ then append one `Tool(call.id)` result message per call before the next request.
 ## Streaming Chat
 
 Pass `stream=StreamHandler(...)` to `Client::chat` to send `stream=true` plus
-`stream_options={"include_usage":true}`. The transport pins `Accept-Encoding:
-identity` so a gzip-compressing intermediary cannot buffer and re-batch SSE
-deltas.
+`stream_options={"include_usage":true}` for usage-bearing streams. The transport
+pins `Accept-Encoding: identity` so a gzip-compressing intermediary cannot
+buffer and re-batch SSE deltas.
 
 The stream reader:
 
@@ -204,6 +206,9 @@ Run the package tests with:
 moon test deepseek/client
 ```
 
-The blackbox test suite includes a real API smoke test when `DEEPSEEK` is set.
-Without that environment variable, the smoke test prints a skip message and
-returns successfully.
+The blackbox test suite includes a real DeepSeek API smoke test when `DEEPSEEK`
+is set. Kimi smoke tests are opt-in: set `KIMI` to a Kimi API key. The normal
+Kimi smoke also uses `DEEPSEEK_MODEL` to choose the Kimi model; streaming,
+tool-call, and multi-turn reasoning-content smokes use `kimi-k2.7-code`.
+Without those environment variables, the smoke tests print skip messages and
+return successfully.
