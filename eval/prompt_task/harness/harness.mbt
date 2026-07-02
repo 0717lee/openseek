@@ -133,7 +133,7 @@ fn trial_extra_env(
 ) -> Map[String, String] {
   {
     "DEEPSEEK": config.api_key,
-    "DEEPSEEK_MODEL": config.model.to_string(),
+    "OPENSEEK_MODEL": config.model.to_string(),
     "OPENSEEK_MAX_STEPS": config.max_steps.to_string(),
     "OPENSEEK_SESSION_ROOT": ".openseek",
     "OPENSEEK_GLOBAL_SKILLS_DIR": "\{real_workspace}/.no-global-skills",
