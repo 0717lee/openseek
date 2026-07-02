@@ -24,7 +24,7 @@ Run five Flash TOML trials concurrently:
 
 ```bash
 moon run --target native eval/prompt_task/cmd/main -- \
-  --api-key "$OPENSEEK_API_KEY" \
+  --api-key "$DEEPSEEK" \
   --model deepseek-v4-flash \
   --runs 5 \
   --concurrency 5 \
@@ -46,7 +46,7 @@ Run a multi-problem suite:
 
 ```bash
 moon run --target native eval/prompt_task/cmd/main -- \
-  --api-key "$OPENSEEK_API_KEY" \
+  --api-key "$DEEPSEEK" \
   --suite-file .repos/openseek-eval-experiments/suites/moonbit_cli_suite_v1/suite.json \
   --out .repos/openseek-eval-experiments/runs/moonbit_cli_suite_v1_100x \
   --repo-root .
@@ -63,7 +63,7 @@ Run an A/B comparison by using different output directories and prompt labels:
 
 ```bash
 moon run --target native eval/prompt_task/cmd/main -- \
-  --api-key "$OPENSEEK_API_KEY" \
+  --api-key "$DEEPSEEK" \
   --model deepseek-v4-flash \
   --runs 5 \
   --concurrency 5 \

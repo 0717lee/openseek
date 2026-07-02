@@ -138,8 +138,7 @@ fn engine_exit_without_result(
 
 ///|
 fn engine_extra_env(config : AppConfig) -> Map[String, String] {
-  {
-    "OPENSEEK_API_KEY": config.api_key,
+  let env = {
     "OPENSEEK_API_URL": config.api_url.unwrap_or(""),
     "OPENSEEK_MODEL": config.model.to_string(),
     "OPENSEEK_MAX_STEPS": config.max_steps.to_string(),
@@ -148,6 +147,8 @@ fn engine_extra_env(config : AppConfig) -> Map[String, String] {
     "OPENSEEK_SESSION_ROOT": config.session_root,
     "OPENSEEK_DIR": config.cwd,
   }
+  env[api_key_env_for_model(config.model)] = config.api_key
+  env
 }
 
 ///|

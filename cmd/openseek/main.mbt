@@ -370,13 +370,13 @@ test "root command rejects an unknown subcommand" {
 
 ///|
 test "bare parse selects no subcommand (the UI default)" {
-  let m = root_command().parse(argv=[], env={ "OPENSEEK_API_KEY": "k" })
+  let m = root_command().parse(argv=[], env={ "DEEPSEEK": "k" })
   assert_true(m.subcommand is None)
 }
 
 ///|
 test "tui is an explicit subcommand" {
-  guard root_command().parse(argv=["tui"], env={ "OPENSEEK_API_KEY": "k" }).subcommand
+  guard root_command().parse(argv=["tui"], env={ "DEEPSEEK": "k" }).subcommand
     is Some(("tui", _)) else {
     fail("expected tui subcommand")
   }
@@ -584,10 +584,26 @@ fn flag(matches : @argparse.Matches, name : String) -> Bool {
 }
 
 ///|
-fn uses_kimi_api_key_fallback(model : @deepseek.Model) -> Bool {
+fn api_key_arg_for_model(model : @deepseek.Model) -> String {
   match model {
-    KimiK27Code | KimiK27CodeHighSpeed => true
-    V4Flash | V4Pro => false
+    KimiK27Code | KimiK27CodeHighSpeed => "kimi-api-key"
+    V4Flash | V4Pro => "deepseek-api-key"
+  }
+}
+
+///|
+fn api_key_env_for_model(model : @deepseek.Model) -> String {
+  match model {
+    KimiK27Code | KimiK27CodeHighSpeed => "KIMI"
+    V4Flash | V4Pro => "DEEPSEEK"
+  }
+}
+
+///|
+fn api_key_provider_for_model(model : @deepseek.Model) -> String {
+  match model {
+    KimiK27Code | KimiK27CodeHighSpeed => "Kimi"
+    V4Flash | V4Pro => "DeepSeek"
   }
 }
 
@@ -610,18 +626,13 @@ fn api_key(
     Some(key) => return key
     None => ()
   }
-  if uses_kimi_api_key_fallback(model) {
-    match non_empty_value(matches, "kimi-api-key") {
-      Some(key) => return key
-      None => ()
-    }
+  match non_empty_value(matches, api_key_arg_for_model(model)) {
+    Some(key) => return key
+    None => ()
   }
-  if uses_kimi_api_key_fallback(model) {
-    fail(
-      "an API key is required for Kimi models: pass --api-key or set OPENSEEK_API_KEY or KIMI",
-    )
-  }
-  fail("an API key is required: pass --api-key or set OPENSEEK_API_KEY")
+  fail(
+    "an API key is required for \{api_key_provider_for_model(model)} models: pass --api-key or set \{api_key_env_for_model(model)}",
+  )
 }
 
 ///|
@@ -1168,7 +1179,7 @@ test "session listing rows are tab-separated and survive odd prompts" {
 ///|
 test "cli parses env backed options and task" {
   let parsed = run_matches(argv=["write", "MoonBit"], env={
-    "OPENSEEK_API_KEY": "test-key",
+    "DEEPSEEK": "test-key",
     "OPENSEEK_MODEL": "deepseek-v4-pro",
     "OPENSEEK_API_URL": "https://proxy.example/v1/chat/completions",
     "OPENSEEK_DIR": "/tmp/openseek-workspace",
@@ -1195,7 +1206,7 @@ test "cli parses env backed options and task" {
 ///|
 test "cli defaults model and max steps" {
   let parsed = run_matches(argv=["write", "MoonBit"], env={
-    "OPENSEEK_API_KEY": "test-key",
+    "DEEPSEEK": "test-key",
   })
   assert_eq(api_key(parsed, V4Pro), "test-key")
   assert_eq(value(parsed, "model"), "deepseek-v4-pro")
@@ -1218,7 +1229,7 @@ test "cli uses KIMI only for Kimi models" {
   })
   let _ = api_key(deepseek, V4Pro) catch {
     error => {
-      assert_true("\{error}".contains("OPENSEEK_API_KEY"))
+      assert_true("\{error}".contains("DEEPSEEK"))
       return
     }
   }
@@ -1256,7 +1267,7 @@ async test "--dir creates a missing final component when its parent exists" {
   @vfs.with_tmpdir(prefix="openseek-dir-parent-", parent => {
     let child = "\{parent}/child"
     let parsed = run_matches(argv=["--dir", child, "write", "MoonBit"], env={
-      "OPENSEEK_API_KEY": "test-key",
+      "DEEPSEEK": "test-key",
     })
     let root = prepare_workspace_root(parsed)
     assert_true(@fs.exists(child))
@@ -1269,7 +1280,7 @@ async test "--dir creates a missing final component with trailing separator" {
   @vfs.with_tmpdir(prefix="openseek-dir-trailing-", parent => {
     let child = "\{parent}/child"
     let parsed = run_matches(argv=["--dir", "\{child}/", "write", "MoonBit"], env={
-      "OPENSEEK_API_KEY": "test-key",
+      "DEEPSEEK": "test-key",
     })
     let root = prepare_workspace_root(parsed)
     assert_true(@fs.exists(child))
@@ -1292,7 +1303,7 @@ async test "--dir rejects missing parents instead of creating recursively" {
   @vfs.with_tmpdir(prefix="openseek-dir-missing-parent-", root => {
     let child = "\{root}/missing/child"
     let parsed = run_matches(argv=["--dir", child, "write", "MoonBit"], env={
-      "OPENSEEK_API_KEY": "test-key",
+      "DEEPSEEK": "test-key",
     })
     let _ = prepare_workspace_root(parsed) catch {
       error => {
@@ -1314,7 +1325,7 @@ async test "--dir rejects existing non-directories" {
     let path = "\{root}/file"
     @fs.write_file(path, "not a directory", create_mode=CreateOrTruncate)
     let parsed = run_matches(argv=["--dir", path, "write", "MoonBit"], env={
-      "OPENSEEK_API_KEY": "test-key",
+      "DEEPSEEK": "test-key",
     })
     let _ = prepare_workspace_root(parsed) catch {
       error => {
@@ -1329,7 +1340,7 @@ async test "--dir rejects existing non-directories" {
 ///|
 test "session root resolves relative to workspace root" {
   let parsed = run_matches(argv=["write", "MoonBit"], env={
-    "OPENSEEK_API_KEY": "test-key",
+    "DEEPSEEK": "test-key",
   })
   assert_eq(
     session_root(parsed, workspace_root="/tmp/openseek-workspace"),
@@ -1337,7 +1348,7 @@ test "session root resolves relative to workspace root" {
   )
   let custom = run_matches(
     argv=["--session-root", "sessions", "write", "MoonBit"],
-    env={ "OPENSEEK_API_KEY": "test-key" },
+    env={ "DEEPSEEK": "test-key" },
   )
   assert_eq(
     session_root(custom, workspace_root="/tmp/openseek-workspace"),
@@ -1362,7 +1373,7 @@ test "agent runs require api key" {
   let parsed = run_matches(argv=["write", "MoonBit"], env={})
   let _ = api_key(parsed, V4Pro) catch {
     error => {
-      assert_true("\{error}".contains("OPENSEEK_API_KEY"))
+      assert_true("\{error}".contains("DEEPSEEK"))
       return
     }
   }
@@ -1371,7 +1382,7 @@ test "agent runs require api key" {
 
 ///|
 test "agent runs require task text" {
-  let parsed = run_matches(argv=[], env={ "OPENSEEK_API_KEY": "test-key" })
+  let parsed = run_matches(argv=[], env={ "DEEPSEEK": "test-key" })
   let _ = task_text(parsed) catch {
     error => {
       assert_true("\{error}".contains("task description is required"))
@@ -1384,7 +1395,7 @@ test "agent runs require task text" {
 ///|
 async test "one-shot runs record to a generated salted cli session by default" {
   let parsed = run_matches(argv=["write", "MoonBit"], env={
-    "OPENSEEK_API_KEY": "test-key",
+    "DEEPSEEK": "test-key",
   })
   guard resolved_session_id(parsed) is Some(id) else {
     fail("expected a generated session id")
@@ -1399,7 +1410,7 @@ async test "one-shot runs record to a generated salted cli session by default" {
 ///|
 async test "--no-session restores the ephemeral one-shot" {
   let parsed = run_matches(argv=["--no-session", "write", "MoonBit"], env={
-    "OPENSEEK_API_KEY": "test-key",
+    "DEEPSEEK": "test-key",
   })
   assert_true(resolved_session_id(parsed) is None)
 }
@@ -1407,7 +1418,7 @@ async test "--no-session restores the ephemeral one-shot" {
 ///|
 async test "an explicit --session id is used verbatim" {
   let parsed = run_matches(argv=["--session", "demo", "write", "MoonBit"], env={
-    "OPENSEEK_API_KEY": "test-key",
+    "DEEPSEEK": "test-key",
   })
   guard resolved_session_id(parsed) is Some(id) else {
     fail("expected the explicit id")
@@ -1419,7 +1430,7 @@ async test "an explicit --session id is used verbatim" {
 async test "--session with --no-session is a contradiction" {
   let parsed = run_matches(
     argv=["--session", "demo", "--no-session", "write", "MoonBit"],
-    env={ "OPENSEEK_API_KEY": "test-key" },
+    env={ "DEEPSEEK": "test-key" },
   )
   let _ = resolved_session_id(parsed) catch {
     error => {
@@ -1433,7 +1444,7 @@ async test "--session with --no-session is a contradiction" {
 ///|
 test "cli parses max steps option" {
   let parsed = run_matches(argv=["--max-steps", "25", "write", "MoonBit"], env={
-    "OPENSEEK_API_KEY": "test-key",
+    "DEEPSEEK": "test-key",
   })
   assert_eq(max_steps(parsed), 25)
 }
@@ -1454,7 +1465,7 @@ async test "configured system prompt can replace and append files" {
       // machine-independent: without it, a developer's ~/.openseek/skills
       // would append a ## Skills section (Codex review).
       env={
-        "OPENSEEK_API_KEY": "test-key",
+        "DEEPSEEK": "test-key",
         "OPENSEEK_GLOBAL_SKILLS_DIR": "\{dir}/no-global-skills",
       },
     )
@@ -1487,7 +1498,7 @@ async test "configured system prompt advertises global skills" {
     let parsed = run_matches(
       argv=["--system-prompt-file", prompt_path, "write", "MoonBit"],
       env={
-        "OPENSEEK_API_KEY": "test-key",
+        "DEEPSEEK": "test-key",
         "OPENSEEK_GLOBAL_SKILLS_DIR": "\{dir}/skills",
       },
     )
@@ -1527,7 +1538,7 @@ async test "configured system prompt uses the selected workspace root" {
         "--dir", workspace, "--system-prompt-file", "prompt.md", "write", "MoonBit",
       ],
       env={
-        "OPENSEEK_API_KEY": "test-key",
+        "DEEPSEEK": "test-key",
         "OPENSEEK_GLOBAL_SKILLS_DIR": "\{workspace}/no-global-skills",
       },
     )
@@ -1549,7 +1560,7 @@ async test "configured system prompt uses the selected workspace root" {
 ///|
 async test "configured system prompt defaults to the flash prompt" {
   let parsed = run_matches(argv=["write", "MoonBit"], env={
-    "OPENSEEK_API_KEY": "test-key",
+    "DEEPSEEK": "test-key",
   })
   assert_true(
     configured_system_prompt(parsed, V4Flash).contains(
@@ -1577,7 +1588,7 @@ async test "load_or_new_session defers first durable write until append" {
       ],
       // Pinned so the exact-prompt assertions stay machine-independent.
       env={
-        "OPENSEEK_API_KEY": "test-key",
+        "DEEPSEEK": "test-key",
         "OPENSEEK_GLOBAL_SKILLS_DIR": "\{root}/no-global-skills",
       },
     )
@@ -1627,7 +1638,7 @@ async test "new durable session header persists project layout" {
         "MoonBit",
       ],
       env={
-        "OPENSEEK_API_KEY": "test-key",
+        "DEEPSEEK": "test-key",
         "OPENSEEK_GLOBAL_SKILLS_DIR": "\{workspace}/no-global-skills",
       },
     )
@@ -1669,7 +1680,7 @@ async test "load_or_new_session recovers empty interrupted session directory" {
       ],
       // Pinned so the exact-prompt assertion stays machine-independent.
       env={
-        "OPENSEEK_API_KEY": "test-key",
+        "DEEPSEEK": "test-key",
         "OPENSEEK_GLOBAL_SKILLS_DIR": "\{root}/no-global-skills",
       },
     )
@@ -1865,7 +1876,7 @@ async test "session compaction rejects missing summary file" {
 ///|
 test "cli rejects invalid max steps" {
   let parsed = run_matches(argv=["--max-steps", "0", "write", "MoonBit"], env={
-    "OPENSEEK_API_KEY": "test-key",
+    "DEEPSEEK": "test-key",
   })
   let _ = max_steps(parsed) catch {
     error => {

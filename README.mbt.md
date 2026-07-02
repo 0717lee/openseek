@@ -70,11 +70,11 @@ sends DeepSeek native function tools and supports six local tools: `shell`,
 `read`, `edit`, `multi_edit`, `write`, and `finish`.
 
 ```bash
-export OPENSEEK_API_KEY=sk-...
+export DEEPSEEK=sk-...
 moon run cmd/openseek -- run "inspect this project and finish with a short summary"
 ```
 
-For Kimi models, `KIMI` is also accepted:
+For Kimi models, set `KIMI` instead:
 
 ```bash
 export KIMI=sk-...
@@ -100,7 +100,7 @@ text appear live on the activity line, and each turn's reasoning is kept as a di
 `✻` transcript aside above its answer.
 
 ```bash
-export OPENSEEK_API_KEY=sk-...
+export DEEPSEEK=sk-...
 moon run cmd/openseek -- tui
 ```
 
@@ -133,7 +133,7 @@ and exposes each on `PATH` as `<name>.exe` (e.g. `openseek.exe`).
   help banner and the missing-API-key error). The argument parser runs before the
   terminal UI starts, so these need no API key and no TTY.
 - [`tests/live/deepseek.md`](tests/live/deepseek.md) — a real, non-mock DeepSeek
-  round trip. It is opt-in (`OPENSEEK_API_KEY=sk-... moon cram test tests/live`) and
+  round trip. It is opt-in (`DEEPSEEK=sk-... moon cram test tests/live`) and
   parses the agent's JSONL log with MoonBit itself: a `moon run -e` script reads
   the stream through the published [`bobzhang/jsonl`](https://mooncakes.io/docs/bobzhang/jsonl)
   package and asserts on typed `Json` values — no `jq` — without pinning
