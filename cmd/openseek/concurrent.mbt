@@ -15,9 +15,9 @@ async fn run_fleet(matches : @argparse.Matches, concurrency~ : Int) -> Unit {
     fail("--concurrency records each run; remove --no-session")
   }
   let task = task_text(matches)
-  let api_key = api_key(matches)
   let api_url = api_url(matches)
   let model = @deepseek.Model::parse(value(matches, "model"))
+  let api_key = api_key(matches, model)
   let max_steps = max_steps(matches)
   let thinking = @deepseek.ThinkingMode::parse(value(matches, "thinking"))
   let dir = trim_trailing_path_separators("\{value(matches, "dir").trim()}")

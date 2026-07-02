@@ -132,7 +132,7 @@ fn trial_extra_env(
   real_workspace : String,
 ) -> Map[String, String] {
   {
-    "DEEPSEEK": config.api_key,
+    "OPENSEEK_API_KEY": config.api_key,
     "OPENSEEK_MODEL": config.model.to_string(),
     "OPENSEEK_MAX_STEPS": config.max_steps.to_string(),
     "OPENSEEK_SESSION_ROOT": ".openseek",

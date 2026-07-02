@@ -43,7 +43,7 @@ fn cli_command() -> @argparse.Command {
         "api-key",
         long="api-key",
         default_values=[""],
-        about="DeepSeek API key.",
+        about="API key for the selected chat provider.",
       ),
       OptionArg(
         "model",

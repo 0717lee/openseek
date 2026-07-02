@@ -20,11 +20,11 @@ async fn run_review_cli(
   matches : @argparse.Matches,
   workspace_root~ : String,
 ) -> Unit {
-  let api_key = api_key(matches)
   let api_url = api_url(matches)
   // Reviews always run on the strongest model; flash is too shallow for the
   // judgement a code review needs, so --model is not consulted here.
   let model = @deepseek.V4Pro
+  let api_key = api_key(matches, model)
   let max_steps = max_steps(matches)
   let thinking = @deepseek.ThinkingMode::parse(value(matches, "thinking"))
   let base = value(matches, "base")

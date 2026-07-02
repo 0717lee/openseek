@@ -147,7 +147,7 @@ async fn run_trial(config : Config, index : Int) -> TrialResult {
     "moon",
     args,
     extra_env={
-      "DEEPSEEK": config.api_key,
+      "OPENSEEK_API_KEY": config.api_key,
       "OPENSEEK_MODEL": config.model.to_string(),
       "OPENSEEK_MAX_STEPS": config.max_steps.to_string(),
       // Trials inherit the developer's env, so point the global skills
