@@ -1,0 +1,28 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "bobzhang/openseek/agent_tool/internal/decode_common"
+
+// Values
+pub fn cap_output_chars(Int, Int) -> Int
+
+pub fn optional_bool(Map[String, Json], String, Bool) -> Bool raise
+
+pub fn optional_positive_int_option(Map[String, Json], String, String) -> Int? raise
+
+pub fn optional_positive_number(Map[String, Json], String, Int) -> Int raise
+
+pub fn optional_positive_number_option(Map[String, Json], String) -> Int? raise
+
+pub fn optional_string(Map[String, Json], String) -> String? raise
+
+pub fn positive_int_of_number(Double, String, String) -> Int raise
+
+pub fn required_nonempty_string(Map[String, Json], String) -> String raise
+
+// Errors
+
+// Types and methods
+
+// Type aliases
+
+// Traits
+

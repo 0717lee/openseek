@@ -36,70 +36,20 @@ pub fn decode(arguments : Json) -> ShellInput raise {
 
 ///|
 fn parse_fields(fields : Map[String, Json]) -> ShellInput raise {
-  let cmd = required_string(fields, "cmd")
-  let cwd = optional_string(fields, "cwd")
-  let timeout_ms = optional_positive_int(fields, "timeout_ms")
-  let max_output_chars = optional_positive_int_or_default(
+  let cmd = @decode_common.required_nonempty_string(fields, "cmd")
+  let cwd = @decode_common.optional_string(fields, "cwd")
+  let timeout_ms = @decode_common.optional_positive_number_option(
+    fields, "timeout_ms",
+  )
+  let max_output_chars = @decode_common.optional_positive_number(
     fields, "max_output_chars", default_max_output_chars,
   )
   {
     cmd,
     cwd,
     timeout_ms,
-    max_output_chars: cap_max_output_chars(max_output_chars),
-  }
-}
-
-///|
-fn required_string(fields : Map[String, Json], name : String) -> String raise {
-  match fields.get(name) {
-    Some(String(value)) if value != "" => value
-    Some(String(_)) | Some(Null) | None => fail("arguments.\{name}")
-    _ => fail("arguments.\{name} to be a string")
-  }
-}
-
-///|
-fn optional_string(fields : Map[String, Json], name : String) -> String? raise {
-  match fields.get(name) {
-    Some(String(value)) if value != "" => Some(value)
-    Some(String(_)) | Some(Null) | None => None
-    _ => fail("arguments.\{name} to be a string")
-  }
-}
-
-///|
-fn optional_positive_int(
-  fields : Map[String, Json],
-  name : String,
-) -> Int? raise {
-  match fields.get(name) {
-    Some(Number(value, ..)) => {
-      let int_value = value.to_int()
-      if int_value <= 0 {
-        fail("arguments.\{name} to be a positive number")
-      }
-      Some(int_value)
-    }
-    Some(Null) | None => None
-    _ => fail("arguments.\{name} to be a number")
-  }
-}
-
-///|
-fn optional_positive_int_or_default(
-  fields : Map[String, Json],
-  name : String,
-  default : Int,
-) -> Int raise {
-  optional_positive_int(fields, name).unwrap_or(default)
-}
-
-///|
-fn cap_max_output_chars(value : Int) -> Int {
-  if value > hard_max_output_chars {
-    hard_max_output_chars
-  } else {
-    value
+    max_output_chars: @decode_common.cap_output_chars(
+      max_output_chars, hard_max_output_chars,
+    ),
   }
 }

@@ -37,10 +37,12 @@ fn parse_fields(fields : Map[String, Json]) -> EditInput raise {
   let path = required_string(fields, "path")
   let old_string = required_string(fields, "old_string")
   let new_string = required_string(fields, "new_string")
-  let replace_all = optional_bool(fields, "replace_all", false)
+  let replace_all = @decode_common.optional_bool(fields, "replace_all", false)
   let start_line = required_positive_int(fields, "start_line", "arguments")
-  let end_line = optional_positive_int_option(fields, "end_line")
-  let revert_on_parse_errors = optional_bool(
+  let end_line = @decode_common.optional_positive_int_option(
+    fields, "end_line", "arguments",
+  )
+  let revert_on_parse_errors = @decode_common.optional_bool(
     fields, "revert_on_parse_errors", true,
   )
   if end_line is Some(end) && end < start_line {
@@ -68,51 +70,14 @@ fn required_string(fields : Map[String, Json], name : String) -> String raise {
 }
 
 ///|
-fn optional_bool(
-  fields : Map[String, Json],
-  name : String,
-  default : Bool,
-) -> Bool raise {
-  match fields.get(name) {
-    Some(True) => true
-    Some(False) => false
-    Some(Null) | None => default
-    _ => fail("arguments.\{name} to be a boolean")
-  }
-}
-
-///|
-fn positive_int(value : Double, name : String, prefix : String) -> Int raise {
-  let int_value = value.to_int()
-  if int_value.to_double() != value {
-    fail("\{prefix}.\{name} to be an integer")
-  }
-  if int_value <= 0 {
-    fail("\{prefix}.\{name} to be a positive integer")
-  }
-  int_value
-}
-
-///|
-fn optional_positive_int_option(
-  fields : Map[String, Json],
-  name : String,
-) -> Int? raise {
-  match fields.get(name) {
-    Some(Number(value, ..)) => Some(positive_int(value, name, "arguments"))
-    Some(Null) | None => None
-    _ => fail("arguments.\{name} to be an integer")
-  }
-}
-
-///|
 fn required_positive_int(
   fields : Map[String, Json],
   name : String,
   prefix : String,
 ) -> Int raise {
   match fields.get(name) {
-    Some(Number(value, ..)) => positive_int(value, name, prefix)
+    Some(Number(value, ..)) =>
+      @decode_common.positive_int_of_number(value, name, prefix)
     _ => fail("\{prefix}.\{name} to be an integer")
   }
 }

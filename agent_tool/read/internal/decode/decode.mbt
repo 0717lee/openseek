@@ -43,16 +43,22 @@ fn parse_fields(fields : Map[String, Json]) -> ReadInput raise {
     Some(path) => path
     None => fail("arguments.path")
   }
-  let start_line = optional_positive_int(fields, "start_line", 1)
-  let max_lines = optional_positive_int_option(fields, "max_lines")
-  let max_output_chars = optional_positive_int(
+  let start_line = @decode_common.optional_positive_number(
+    fields, "start_line", 1,
+  )
+  let max_lines = @decode_common.optional_positive_number_option(
+    fields, "max_lines",
+  )
+  let max_output_chars = @decode_common.optional_positive_number(
     fields, "max_output_chars", default_max_output_chars,
   )
   {
     path,
     start_line,
     max_lines,
-    max_output_chars: cap_max_output_chars(max_output_chars),
+    max_output_chars: @decode_common.cap_output_chars(
+      max_output_chars, hard_max_output_chars,
+    ),
   }
 }
 
@@ -74,41 +80,5 @@ fn reject_paths(fields : Map[String, Json]) -> Unit raise {
       fail(
         "arguments.paths is not supported; batch separate read calls in one assistant response",
       )
-  }
-}
-
-///|
-fn optional_positive_int(
-  fields : Map[String, Json],
-  name : String,
-  default : Int,
-) -> Int raise {
-  optional_positive_int_option(fields, name).unwrap_or(default)
-}
-
-///|
-fn optional_positive_int_option(
-  fields : Map[String, Json],
-  name : String,
-) -> Int? raise {
-  match fields.get(name) {
-    Some(Number(value, ..)) => {
-      let int_value = value.to_int()
-      if int_value <= 0 {
-        fail("arguments.\{name} to be a positive number")
-      }
-      Some(int_value)
-    }
-    Some(Null) | None => None
-    _ => fail("arguments.\{name} to be a number")
-  }
-}
-
-///|
-fn cap_max_output_chars(value : Int) -> Int {
-  if value > hard_max_output_chars {
-    hard_max_output_chars
-  } else {
-    value
   }
 }

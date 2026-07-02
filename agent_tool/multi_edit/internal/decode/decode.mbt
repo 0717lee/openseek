@@ -63,11 +63,9 @@ pub fn decode_args(arguments : Json) -> MultiEditArgs raise {
         Some(Null) | None => None
         Some(_) => fail("arguments.revert_when_errors_above to be an integer")
       }
-      let revert_on_parse_errors = match fields.get("revert_on_parse_errors") {
-        Some(True) | Some(Null) | None => true
-        Some(False) => false
-        Some(_) => fail("arguments.revert_on_parse_errors to be a boolean")
-      }
+      let revert_on_parse_errors = @decode_common.optional_bool(
+        fields, "revert_on_parse_errors", true,
+      )
       { inline, edits_file, revert_when_errors_above, revert_on_parse_errors }
     }
     _ => fail("object arguments")
@@ -102,7 +100,9 @@ fn decode_edit_item(item : Json, index : Int) -> MultiEditItem raise {
       let old_string = required_string_with_prefix(fields, "old_string", prefix)
       let new_string = required_string_with_prefix(fields, "new_string", prefix)
       let start_line = required_positive_int(fields, "start_line", prefix)
-      let end_line = optional_positive_int(fields, "end_line", prefix)
+      let end_line = @decode_common.optional_positive_int_option(
+        fields, "end_line", prefix,
+      )
       if end_line is Some(end) && end < start_line {
         fail(
           "\{prefix}.end_line to be greater than or equal to \{prefix}.start_line",
@@ -142,45 +142,15 @@ fn missing_field(
 }
 
 ///|
-/// Read a JSON number as a positive 1-based integer, failing when it is
-/// fractional or non-positive.
-fn positive_int_of_number(
-  value : Double,
-  name : String,
-  prefix : String,
-) -> Int raise {
-  let int_value = value.to_int()
-  if int_value.to_double() != value {
-    fail("\{prefix}.\{name} to be an integer")
-  }
-  if int_value <= 0 {
-    fail("\{prefix}.\{name} to be a positive integer")
-  }
-  int_value
-}
-
-///|
 fn required_positive_int(
   fields : Map[String, Json],
   name : String,
   prefix : String,
 ) -> Int raise {
   match fields.get(name) {
-    Some(Number(value, ..)) => positive_int_of_number(value, name, prefix)
+    Some(Number(value, ..)) =>
+      @decode_common.positive_int_of_number(value, name, prefix)
     Some(Null) | None => fail(missing_field(fields, name, prefix))
     Some(_) => fail("\{prefix}.\{name} to be an integer")
-  }
-}
-
-///|
-fn optional_positive_int(
-  fields : Map[String, Json],
-  name : String,
-  prefix : String,
-) -> Int? raise {
-  match fields.get(name) {
-    Some(Number(value, ..)) => Some(positive_int_of_number(value, name, prefix))
-    Some(Null) | None => None
-    _ => fail("\{prefix}.\{name} to be an integer")
   }
 }

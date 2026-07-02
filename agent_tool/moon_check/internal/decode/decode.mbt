@@ -28,36 +28,18 @@ pub fn decode(arguments : Json) -> MoonCheckInput raise {
 
 ///|
 fn parse_fields(fields : Map[String, Json]) -> MoonCheckInput raise {
-  let cwd = optional_string(fields, "cwd")
-  let target = optional_string(fields, "target")
+  let cwd = @decode_common.optional_string(fields, "cwd")
+  let target = @decode_common.optional_string(fields, "target")
   if target is Some(value) {
     @moon_target.validate_target(value)
   }
-  let warn_list = optional_string(fields, "warn_list")
+  let warn_list = @decode_common.optional_string(fields, "warn_list")
   {
     cwd,
     target,
     warn_list,
-    deny_warn: optional_bool(fields, "deny_warn"),
-    fmt: optional_bool(fields, "fmt"),
-    explain: optional_bool(fields, "explain"),
-  }
-}
-
-///|
-fn optional_string(fields : Map[String, Json], name : String) -> String? raise {
-  match fields.get(name) {
-    Some(String(value)) if value != "" => Some(value)
-    Some(String(_)) | Some(Null) | None => None
-    _ => fail("arguments.\{name} to be a string")
-  }
-}
-
-///|
-fn optional_bool(fields : Map[String, Json], name : String) -> Bool raise {
-  match fields.get(name) {
-    Some(True) => true
-    Some(False) | Some(Null) | None => false
-    _ => fail("arguments.\{name} to be a boolean")
+    deny_warn: @decode_common.optional_bool(fields, "deny_warn", false),
+    fmt: @decode_common.optional_bool(fields, "fmt", false),
+    explain: @decode_common.optional_bool(fields, "explain", false),
   }
 }

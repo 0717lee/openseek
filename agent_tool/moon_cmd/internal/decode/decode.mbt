@@ -44,10 +44,10 @@ pub fn decode(arguments : Json) -> MoonCommandInput raise {
 
 ///|
 fn parse_fields(fields : Map[String, Json]) -> MoonCommandInput raise {
-  let command = required_string(fields, "command")
+  let command = @decode_common.required_nonempty_string(fields, "command")
   validate_command(command)
-  let cwd = optional_string(fields, "cwd")
-  let target = optional_string(fields, "target")
+  let cwd = @decode_common.optional_string(fields, "cwd")
+  let target = @decode_common.optional_string(fields, "target")
   if target is Some(value) {
     @moon_target.validate_target(value)
     validate_target_supported(command)
@@ -58,13 +58,17 @@ fn parse_fields(fields : Map[String, Json]) -> MoonCommandInput raise {
   if program_args.length() > 0 && command != "run" {
     fail("arguments.program_args only with command run")
   }
-  let stdin = optional_string(fields, "stdin")
+  let stdin = @decode_common.optional_string(fields, "stdin")
   if stdin is Some(_) && command != "run" {
     fail("arguments.stdin only with command run")
   }
-  let test_update_kind = optional_string(fields, "test_update_kind")
-  let test_update_reason = optional_string(fields, "test_update_reason")
-  let max_output_chars = optional_positive_int(
+  let test_update_kind = @decode_common.optional_string(
+    fields, "test_update_kind",
+  )
+  let test_update_reason = @decode_common.optional_string(
+    fields, "test_update_reason",
+  )
+  let max_output_chars = @decode_common.optional_positive_number(
     fields, "max_output_chars", default_max_output_chars,
   )
   validate_test_update_guard(
@@ -80,25 +84,9 @@ fn parse_fields(fields : Map[String, Json]) -> MoonCommandInput raise {
     stdin,
     test_update_kind,
     test_update_reason,
-    max_output_chars: cap_max_output_chars(max_output_chars),
-  }
-}
-
-///|
-fn required_string(fields : Map[String, Json], name : String) -> String raise {
-  match fields.get(name) {
-    Some(String(value)) if value != "" => value
-    Some(String(_)) | Some(Null) | None => fail("arguments.\{name}")
-    _ => fail("arguments.\{name} to be a string")
-  }
-}
-
-///|
-fn optional_string(fields : Map[String, Json], name : String) -> String? raise {
-  match fields.get(name) {
-    Some(String(value)) if value != "" => Some(value)
-    Some(String(_)) | Some(Null) | None => None
-    _ => fail("arguments.\{name} to be a string")
+    max_output_chars: @decode_common.cap_output_chars(
+      max_output_chars, hard_max_output_chars,
+    ),
   }
 }
 
@@ -141,34 +129,6 @@ fn optional_string_array(
     _ => fail("arguments.\{name} to be an array of strings")
   }
   values
-}
-
-///|
-fn optional_positive_int(
-  fields : Map[String, Json],
-  name : String,
-  default : Int,
-) -> Int raise {
-  match fields.get(name) {
-    Some(Number(value, ..)) => {
-      let int_value = value.to_int()
-      if int_value <= 0 {
-        fail("arguments.\{name} to be a positive number")
-      }
-      int_value
-    }
-    Some(Null) | None => default
-    _ => fail("arguments.\{name} to be a number")
-  }
-}
-
-///|
-fn cap_max_output_chars(value : Int) -> Int {
-  if value > hard_max_output_chars {
-    hard_max_output_chars
-  } else {
-    value
-  }
 }
 
 ///|
