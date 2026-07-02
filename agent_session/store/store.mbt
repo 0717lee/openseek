@@ -49,6 +49,11 @@ fn validate_session_id(id : @agent_session.SessionId) -> Unit raise {
   if value.contains("/") || value.contains("\\") {
     fail("session id must not contain path separators: \{value}")
   }
+  if value.contains("\u{0}") {
+    // A NUL truncates the path at the C boundary, silently mapping distinct
+    // ids onto one directory.
+    fail("session id must not contain a NUL character")
+  }
   if value == "." || value == ".." {
     fail("session id must not be `.` or `..`")
   }
@@ -164,9 +169,13 @@ fn parse_session_file(
         "session file for \{requested_id.value()} does not start with a header line: \{error}",
       )
   }
-  let header = match @session_log.parse_header(header_json) {
-    Some(header) => header
-    None =>
+  let header = match @session_log.classify_header(header_json) {
+    Header(header) => header
+    UnsupportedVersion(version) =>
+      fail(
+        "session file for \{requested_id.value()} uses unsupported session file version \{version}; this build reads version 1",
+      )
+    NotHeader =>
       fail(
         "session file for \{requested_id.value()} does not start with a header record",
       )

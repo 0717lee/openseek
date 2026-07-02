@@ -784,6 +784,40 @@ async test "store propagates unreadable session files instead of dropping histor
 }
 
 ///|
+async test "store names an unsupported session file version on load" {
+  let store = new_store()
+  @fs.mkdir("\{store.root()}/sessions/s1", recursive=true)
+  @fs.write_file(
+    session_file(store, "s1"),
+    "{\"version\":2,\"id\":\"s1\",\"system_prompt\":\"system\"}\n",
+    create_mode=CreateOrTruncate,
+  )
+  let _ = store.load(SessionId("s1")) catch {
+    error => {
+      assert_true("\{error}".contains("unsupported session file version 2"))
+      @fs.rmdir(store.root(), recursive=true)
+      return
+    }
+  }
+  @fs.rmdir(store.root(), recursive=true)
+  fail("version-2 session file was accepted")
+}
+
+///|
+async test "store rejects session ids containing NUL" {
+  let store = new_store()
+  let _ = store.exists(SessionId("bad\u{0}id")) catch {
+    error => {
+      assert_true("\{error}".contains("NUL"))
+      @fs.rmdir(store.root(), recursive=true)
+      return
+    }
+  }
+  @fs.rmdir(store.root(), recursive=true)
+  fail("NUL in session id accepted")
+}
+
+///|
 async test "store rejects path-like session ids" {
   let store = new_store()
   let _ = store.exists(SessionId("../bad")) catch {

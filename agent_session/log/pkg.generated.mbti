@@ -7,6 +7,8 @@ import {
 }
 
 // Values
+pub fn classify_header(Json) -> HeaderParse
+
 pub fn parse_events(String) -> ParsedLog
 
 pub fn parse_header(Json) -> SessionFileHeader?
@@ -16,6 +18,12 @@ pub fn session_from_parse(ParsedLog, id~ : String, system_prompt~ : String) -> @
 // Errors
 
 // Types and methods
+pub(all) enum HeaderParse {
+  Header(SessionFileHeader)
+  UnsupportedVersion(Int)
+  NotHeader
+} derive(@debug.Debug)
+
 pub(all) struct LineError {
   line_number : Int
   content : String

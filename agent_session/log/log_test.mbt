@@ -169,6 +169,46 @@ test "parse lifts the header record from the first line" {
 }
 
 ///|
+test "classify_header separates versions, headers, and non-headers" {
+  debug_inspect(
+    @log.classify_header({ "version": 1, "id": "demo", "system_prompt": "SYS" }),
+    content=(
+      #|Header({ id: "demo", system_prompt: "SYS" })
+    ),
+  )
+  // A file written by a newer format is named as such, not misreported as
+  // header-less.
+  debug_inspect(
+    @log.classify_header({ "version": 2, "whatever": "future shape" }),
+    content="UnsupportedVersion(2)",
+  )
+  // An event record is structurally not a header.
+  debug_inspect(
+    @log.classify_header({
+      "sequence": 1,
+      "ts": 0,
+      "item": { "kind": "user", "payload": { "content": "hi" } },
+    }),
+    content="NotHeader",
+  )
+  // A version-1 object missing required fields is malformed, not a header.
+  debug_inspect(
+    @log.classify_header({ "version": 1, "id": "demo" }),
+    content="NotHeader",
+  )
+  // The tolerant parser records an unsupported-version first line as a bad
+  // line rather than adopting it as the header.
+  let parsed = @log.parse_events(
+    (
+      #|{"version":2,"id":"demo","system_prompt":"SYS"}
+      #|
+    ),
+  )
+  debug_inspect(parsed.header, content="None")
+  assert_eq(parsed.errors.length(), 1)
+}
+
+///|
 test "session from parse uses supplied header values" {
   let session = @log.session_from_parse(
     @log.parse_events(events_jsonl(sample_session())),

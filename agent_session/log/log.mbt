@@ -27,21 +27,48 @@ pub impl ToJson for SessionFileHeader with fn to_json(
 }
 
 ///|
-/// Decode a session-file header record, or `None` when `json` is not a
-/// version-1 header object. Header and event records are structurally
-/// disjoint (events carry `sequence`/`item`, never `version`), so this is
-/// also how a reader tells the two apart.
-pub fn parse_header(json : Json) -> SessionFileHeader? {
-  guard json is Object(fields) else { return None }
-  guard fields.get("version") is Some(Number(version, ..)) &&
-    version.to_int() == session_file_version else {
-    return None
+/// How a would-be header record classified. `UnsupportedVersion` is kept
+/// distinct from `NotHeader` so a reader confronted with a file written by a
+/// newer format can say so, instead of misreporting it as a file that has no
+/// header at all.
+pub(all) enum HeaderParse {
+  Header(SessionFileHeader)
+  UnsupportedVersion(Int)
+  NotHeader
+} derive(Debug)
+
+///|
+/// Classify `json` as a session-file header record.
+///
+/// Header and event records are structurally disjoint (events carry
+/// `sequence`/`item`, never `version`), so this is also how a reader tells
+/// the two apart. Any object carrying a numeric `version` other than 1 is a
+/// header from a format this build does not read — `UnsupportedVersion` —
+/// even though its remaining fields cannot be interpreted.
+pub fn classify_header(json : Json) -> HeaderParse {
+  guard json is Object(fields) else { return NotHeader }
+  guard fields.get("version") is Some(Number(version, ..)) else {
+    return NotHeader
   }
-  guard fields.get("id") is Some(String(id)) else { return None }
+  if version.to_int() != session_file_version {
+    return UnsupportedVersion(version.to_int())
+  }
+  guard fields.get("id") is Some(String(id)) else { return NotHeader }
   guard fields.get("system_prompt") is Some(String(system_prompt)) else {
-    return None
+    return NotHeader
   }
-  Some({ id, system_prompt })
+  Header({ id, system_prompt })
+}
+
+///|
+/// Decode a session-file header record, or `None` when `json` is not a
+/// header this build can read. Use `classify_header` to distinguish an
+/// unsupported version from a non-header.
+pub fn parse_header(json : Json) -> SessionFileHeader? {
+  match classify_header(json) {
+    Header(header) => Some(header)
+    UnsupportedVersion(_) | NotHeader => None
+  }
 }
 
 ///|
