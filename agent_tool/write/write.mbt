@@ -123,12 +123,14 @@ async fn write_file(
         _ => None
       }
       match gate {
-        Some(gate) if gate.errors.length() > 0 =>
+        Some(gate) if gate.errors.length() > 0 => {
+          let bound = if gate.truncated { "≥" } else { "" }
           return @agent_tool.ToolAction::respond(
             write_reject_report(path, input.content, gate),
             is_error=true,
-            brief="write rejected (\{gate.errors.length()} parse error(s))",
+            brief="write rejected (\{bound}\{gate.errors.length()} parse error(s))",
           )
+        }
         _ => ()
       }
     }
@@ -138,14 +140,16 @@ async fn write_file(
     // never read is a common way to lose work. A non-ENOENT `exists` error (e.g.
     // ENOTDIR) falls through to the write below and the `catch` reports it.
     let existed = @fs.exists(path)
-    // For source files the guard above already returned when the path existed,
-    // so create with CreateNew: if another writer created the file between the
-    // probe and this write, fail instead of truncating hand-written source.
-    // Non-source overwrites keep CreateOrTruncate.
+    // A probe that says "new file" commits to CreateNew: if another writer
+    // created the file since (or a DANGLING symlink lurks at the path —
+    // `exists` follows links, so it reads false, but O_CREAT would create the
+    // link's target, e.g. alias.txt -> lib/new.mbt landing ungated source),
+    // the write fails instead of writing through. Only a genuine non-source
+    // overwrite keeps CreateOrTruncate.
     @fs.write_file(
       path,
       input.content,
-      create_mode=if is_mbt_source(path) { CreateNew } else { CreateOrTruncate },
+      create_mode=if existed { CreateOrTruncate } else { CreateNew },
     )
     let chars = input.content.length()
     let summary = if existed {
@@ -211,7 +215,7 @@ fn write_reject_report(
     "\nfirst \{formatted.length()} parse error(s), with the rejected content excerpted:\n\{formatted.join("\n")}"
   }
   let retry = if count >= SmallerPartsHintThreshold {
-    "\n\{count} parse errors usually means the content is malformed wholesale (truncated or not valid MoonBit). Do not re-issue the same content: write a smaller file first — a minimal skeleton that parses — then grow it in small pieces with edit (an empty old_string inserts), checking after each step."
+    "\n\{count_label} parse errors usually means the content is malformed wholesale (truncated or not valid MoonBit). Do not re-issue the same content: write a smaller file first — a minimal skeleton that parses — then grow it in small pieces with edit (an empty old_string inserts), checking after each step."
   } else {
     "\nre-issue write with the corrected full content."
   }
@@ -525,6 +529,24 @@ async test "write rejects overwriting source through a symlink" {
     assert_true(output.is_error)
     assert_true(output.content.contains("use edit or multi_edit"))
     assert_eq(@fs.read_file(src).text(), "pub fn f() -> Int { 1 }\n")
+  })
+}
+
+///|
+async test "write fails on a dangling symlink instead of creating its target" {
+  @vfs.with_tmpdir(dir => {
+    // alias.txt -> lib/new.mbt where the target does not exist: `exists`
+    // follows the link (false), so an O_CREAT write would create ungated
+    // source THROUGH the link. CreateNew on the not-existed probe makes the
+    // write fail instead.
+    @fs.mkdir("\{dir}/lib", recursive=true)
+    let link = "\{dir}/alias.txt"
+    @fs.symlink(target="lib/new.mbt", link)
+    let result = execute({ "path": link, "content": "not moonbit (" })
+    guard result is Respond(output) else { fail("expected Respond") }
+    assert_true(output.is_error)
+    assert_true(output.content.contains("error writing"))
+    assert_false(@fs.exists("\{dir}/lib/new.mbt"))
   })
 }
 
