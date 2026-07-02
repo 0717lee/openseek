@@ -334,21 +334,14 @@ async fn random_salt() -> String {
 
 ///|
 fn failure_message(error_text : String) -> String {
-  match error_text.strip_prefix("error: ") {
-    Some(message) => return "\{message}"
-    None => ()
+  if error_text.strip_prefix("error: ") is Some(message) {
+    return "\{message}"
   }
   let marker = " FAILED: "
-  let pieces = error_text.split(marker).collect()
-  if pieces.length() < 2 {
+  guard error_text.split(marker).collect() is [_, .., last] else {
     return error_text
   }
-  let message = pieces[pieces.length() - 1]
-  let message = match message.strip_suffix(")") {
-    Some(trimmed) => trimmed
-    None => message
-  }
-  "\{message}"
+  "\{last.strip_suffix(")").unwrap_or(last)}"
 }
 
 ///|
@@ -572,8 +565,7 @@ fn root_command() -> @argparse.Command {
 ///|
 fn value(matches : @argparse.Matches, name : String) -> String raise {
   match matches.values.get(name) {
-    Some([value]) => value
-    Some(values) if values.length() > 0 => values[0]
+    Some([value, ..]) => value
     _ => fail("missing parsed argument: \{name}")
   }
 }
@@ -588,10 +580,7 @@ fn values(matches : @argparse.Matches, name : String) -> Array[String] {
 
 ///|
 fn flag(matches : @argparse.Matches, name : String) -> Bool {
-  match matches.flags.get(name) {
-    Some(value) => value
-    None => false
-  }
+  matches.flags.get(name).unwrap_or(false)
 }
 
 ///|
