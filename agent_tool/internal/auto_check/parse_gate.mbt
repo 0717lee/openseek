@@ -446,4 +446,14 @@ async test "content_parse_errors gates real content through moonc" {
   // The scratch-dir invocation (relative file name, cwd inside the dir) makes
   // moonc emit its own context excerpt; the formatter prefers it.
   assert_true(gate.errors[0].context != "")
+  // moonc EXITS 0 when its parser recovers from an error (e.g. `&mut` in a
+  // parameter type), so the gate must trust captured diagnostics, never the
+  // exit code — this content must still be rejected.
+  guard content_parse_errors(
+      "///|\nfn f(input : String, pos : &mut Int) -> Unit {\n  ignore(input)\n}\n",
+    )
+    is Some(recovered) else {
+    fail("expected the gate to run (is moonc on PATH?)")
+  }
+  assert_true(recovered.errors.length() > 0)
 }
