@@ -4,7 +4,7 @@
 
 - Status: failed/incomplete as of 2026-05-22 11:17 CST.
 - Task: use the OpenSeek agent with `deepseek-v4-pro` reasoning mode to create a MoonBit TOML parser plus CLI that dumps parsed TOML as JSON.
-- Model setting: `DEEPSEEK_MODEL=deepseek-v4-pro`; OpenSeek defaults used reasoning mode with max reasoning effort.
+- Model setting: `OPENSEEK_MODEL=deepseek-v4-pro`; OpenSeek defaults used reasoning mode with max reasoning effort.
 - Log: `.moonagent/eval_runs/results/openseek_toml_cli_d4pro_reasoning.log`
 - Log size: 2,283 lines / 99,169 bytes.
 - Output workspace: `.moonagent/eval_runs/toml_cli_task`
@@ -54,7 +54,7 @@
 
 - Status: failed/incomplete as of 2026-05-22 20:14 CST.
 - Task: same TOML parser plus JSON-dump CLI task, using `--max-steps 1000`, `moon_check`, and `moon_cmd`.
-- Model setting: `DEEPSEEK_MODEL=deepseek-v4-flash`.
+- Model setting: `OPENSEEK_MODEL=deepseek-v4-flash`.
 - First attempt log: `.moonagent/eval_runs/results/openseek_toml_cli_d4flash_v1.log`
 - First attempt size: 23 lines / 645 bytes.
 - First attempt result: failed at step 1 by returning a JSON-like plan as assistant text instead of calling tools. No task files were created.
@@ -74,7 +74,7 @@
 
 - Status: partial success/incomplete as of 2026-05-22 21:10 CST.
 - Task: create a more complex MoonBit JSON Schema validator library plus native CLI under `.moonagent/eval_runs/json_schema_validator_pro_v1`.
-- Model setting: `DEEPSEEK_MODEL=deepseek-v4-pro`, `--max-steps 1000`.
+- Model setting: `OPENSEEK_MODEL=deepseek-v4-pro`, `--max-steps 1000`.
 - Log: `.moonagent/eval_runs/results/openseek_json_schema_d4pro_reasoning_v1.log`
 - Log size: 73,791 lines / 3,389,910 bytes.
 - Output workspace: `.moonagent/eval_runs/json_schema_validator_pro_v1`
@@ -88,7 +88,7 @@
 
 - Status: partial success/incomplete as of 2026-05-22 23:05 CST.
 - Task: repeat the JSON Schema validator library plus native CLI task after adding `moon_ide` and prompt guidance for flat MoonBit packages and small-file generation.
-- Model setting: `DEEPSEEK_MODEL=deepseek-v4-pro`, `--max-steps 1000`.
+- Model setting: `OPENSEEK_MODEL=deepseek-v4-pro`, `--max-steps 1000`.
 - Log: `.moonagent/eval_runs/results/openseek_json_schema_d4pro_reasoning_v2_moon_ide.log`
 - Log size: 72,627 lines / 3,191,156 bytes.
 - Output workspace: `.moonagent/eval_runs/json_schema_validator_pro_v2_moon_ide`
@@ -102,7 +102,7 @@
 
 - Status: succeeded as of 2026-05-22 23:33 CST.
 - Task: repeat the JSON Schema validator library plus native CLI task after adding command output caps and native CLI argument guidance.
-- Model setting: `DEEPSEEK_MODEL=deepseek-v4-pro`, `--max-steps 1000`.
+- Model setting: `OPENSEEK_MODEL=deepseek-v4-pro`, `--max-steps 1000`.
 - Log: `.moonagent/eval_runs/results/openseek_json_schema_d4pro_reasoning_v3_output_caps.log`
 - Log size: 3,200 lines / 179,082 bytes (196K on disk).
 - Output workspace: `.moonagent/eval_runs/json_schema_validator_pro_v3_output_caps`
@@ -117,7 +117,7 @@
 
 - Status: partial success/incomplete as of 2026-05-23 14:22 CST.
 - Task: repeat the JSON Schema validator library plus native CLI task after adding bounded `read` output for ranged and character-capped file inspection.
-- Model setting: `DEEPSEEK_MODEL=deepseek-v4-pro`, `--max-steps 1000`.
+- Model setting: `OPENSEEK_MODEL=deepseek-v4-pro`, `--max-steps 1000`.
 - Log: `.moonagent/eval_runs/results/openseek_json_schema_d4pro_reasoning_v4_bounded_read.log`
 - Log size: 3,345 lines / 303,726 bytes (328K on disk).
 - Output workspace: `.moonagent/eval_runs/json_schema_validator_pro_v4_bounded_read`
@@ -148,7 +148,7 @@
 
 ## DeepSeek V4 Pro Extensive Six-Task Eval
 
-- Status: completed as of 2026-05-23 after six parallel challenging runs with `DEEPSEEK_MODEL=deepseek-v4-pro` and `--max-steps 1000`.
+- Status: completed as of 2026-05-23 after six parallel challenging runs with `OPENSEEK_MODEL=deepseek-v4-pro` and `--max-steps 1000`.
 - Setup: the tasks were jqmini, JSONPath, CSVQL, semver dependency solver, Markdown outline/front-matter extractor, and HTTP route matcher. Logs total 16,914 lines under `.moonagent/eval_runs/results/openseek_*guarded*.log`.
 - Jqmini guarded V2: failed. The run stopped after 774 log lines with `OSError(@socket.Tcp::read(): Connection reset by peer)` after a huge `moon ide doc @array` response. Independent `moon check --output-json` still fails with 11 errors and 12 warnings, including error-type mismatches, nonexistent `Double::is_infinite`, nonexistent `Array::sorted`, and old `String::substring` call shapes.
 - JSONPath guarded V2: mostly succeeded. Independent validation: `moon check --output-json` passed with 5 deprecated `Show` warnings; `moon test --target native` passed 33/33; file and stdin CLI probes produced expected JSON Lines. Caveats: invalid-path mode returns exit 0 through `moon run` even though the built binary exits 1, and the final workspace still contains whitebox tests named `debug filter ...`.

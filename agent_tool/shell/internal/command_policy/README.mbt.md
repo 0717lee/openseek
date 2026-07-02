@@ -105,7 +105,7 @@ test "command policy allows moon subcommands through shell" {
   )
   assert_true(
     @command_policy.moonbit_command_policy_error(
-      "DEEPSEEK_MODEL=x moon run cmd/main",
+      "OPENSEEK_MODEL=x moon run cmd/main",
     )
     is None,
   )
