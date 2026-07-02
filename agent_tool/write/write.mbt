@@ -140,16 +140,21 @@ async fn write_file(
     // never read is a common way to lose work. A non-ENOENT `exists` error (e.g.
     // ENOTDIR) falls through to the write below and the `catch` reports it.
     let existed = @fs.exists(path)
-    // A probe that says "new file" commits to CreateNew: if another writer
-    // created the file since (or a DANGLING symlink lurks at the path —
-    // `exists` follows links, so it reads false, but O_CREAT would create the
-    // link's target, e.g. alias.txt -> lib/new.mbt landing ungated source),
-    // the write fails instead of writing through. Only a genuine non-source
-    // overwrite keeps CreateOrTruncate.
+    // Truncation is allowed ONLY for a genuine pre-existing non-source file;
+    // everything else commits to CreateNew, which fails instead of writing
+    // through when (a) the "new" path gained a file since the probe — for a
+    // source path that racer's file would otherwise be truncated despite the
+    // guard above — or (b) a DANGLING symlink lurks at the path (`exists`
+    // follows links, so it reads false, but O_CREAT would create the link's
+    // target, e.g. alias.txt -> lib/new.mbt landing ungated source).
     @fs.write_file(
       path,
       input.content,
-      create_mode=if existed { CreateOrTruncate } else { CreateNew },
+      create_mode=if existed && !is_mbt_source(path) {
+        CreateOrTruncate
+      } else {
+        CreateNew
+      },
     )
     let chars = input.content.length()
     let summary = if existed {
