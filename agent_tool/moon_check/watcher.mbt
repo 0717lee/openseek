@@ -263,7 +263,12 @@ async fn[X] handle_moon_check_exit(
         key,
         restart_count=stopped_snapshot.restart_count + 1,
         restart_reason=Some("auto restart after exit \{exit_code}"),
-        initial_output=ensure_trailing_newline(stopped_snapshot.output),
+        initial_output=if stopped_snapshot.output == "" ||
+          stopped_snapshot.output.has_suffix("\n") {
+          stopped_snapshot.output
+        } else {
+          "\{stopped_snapshot.output}\n"
+        },
       ),
     )
   }

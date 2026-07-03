@@ -714,7 +714,10 @@ fn validate_edit(
   index : Int,
   file~ : String,
 ) -> EditValidation {
-  let range = line_range_label(item.start_line, item.end_line)
+  let range = match item.end_line {
+    Some(end) => "line range \{item.start_line}-\{end}"
+    None => "from line \{item.start_line}"
+  }
   if item.old_string == "" {
     // Insertion: an empty old_string inserts new_string at the start of
     // start_line (a zero-width edit). Use start_line = lastline + 1 to append at
@@ -830,17 +833,16 @@ fn apply_plans(content : String, plans : Array[PlannedEdit]) -> String {
 
 ///|
 fn failure_report(failures : Array[EditFailure]) -> String {
-  let lines = [ for failure in failures => format_failure(failure) ]
+  let lines = [
+    for failure in failures => {
+      match failure.index {
+        Some(index) =>
+          "\{failure.file} edit[\{index}] \{failure.range}: \{failure.message}"
+        None => "\{failure.file}: \{failure.message}"
+      }
+    }
+  ]
   "error multi_editing: \{failures.length()} problem(s); no changes applied\n\{lines.join("\n")}"
-}
-
-///|
-fn format_failure(failure : EditFailure) -> String {
-  match failure.index {
-    Some(index) =>
-      "\{failure.file} edit[\{index}] \{failure.range}: \{failure.message}"
-    None => "\{failure.file}: \{failure.message}"
-  }
 }
 
 ///|
@@ -898,13 +900,5 @@ fn line_end_offset(content : String, line : Int) -> Int {
     }
   } nobreak {
     len
-  }
-}
-
-///|
-fn line_range_label(start_line : Int, end_line : Int?) -> String {
-  match end_line {
-    Some(end) => "line range \{start_line}-\{end}"
-    None => "from line \{start_line}"
   }
 }

@@ -37,7 +37,14 @@ async fn auto_check_summary(path : String) -> String? {
     _ => return Some("moon check: failed to run")
   }
   match result {
-    Some(output) => Some(format_moon_check_output(output))
+    Some(output) =>
+      Some(
+        format_moon_check_output_parts(
+          output.exit_code,
+          output.text,
+          output.output_limit_reached,
+        ),
+      )
     None => Some("moon check: timed out")
   }
 }
@@ -158,16 +165,13 @@ async fn moon_check_cwd(path : String) -> String? {
   if !is_relevant_moonbit_path(path) {
     return None
   }
-  nearest_moon_project_dir(containing_dir(path))
-}
-
-///|
-fn format_moon_check_output(output : @shell.ShellOutput) -> String {
-  format_moon_check_output_parts(
-    output.exit_code,
-    output.text,
-    output.output_limit_reached,
-  )
+  let normalized = path.replace_all(old="\\", new="/")
+  let dir = match normalized.rev_find("/") {
+    Some(0) => "/"
+    Some(cut) => normalized[:cut].to_owned()
+    None => "."
+  }
+  nearest_moon_project_dir(dir)
 }
 
 ///|
@@ -202,23 +206,10 @@ fn is_relevant_moonbit_path(path : String) -> Bool {
   path.has_suffix("/moon.pkg") ||
   path == "moon.work" ||
   path.has_suffix("/moon.work") ||
-  is_moonbit_source_path(path)
-}
-
-///|
-fn is_moonbit_source_path(path : String) -> Bool {
-  let path = path.replace_all(old="\\", new="/")
-  path.has_suffix(".mbt") || path.has_suffix(".mbt.md")
-}
-
-///|
-fn containing_dir(path : String) -> String {
-  let path = path.replace_all(old="\\", new="/")
-  match path.rev_find("/") {
-    Some(0) => "/"
-    Some(cut) => path[:cut].to_owned()
-    None => "."
-  }
+  ({
+    let normalized = path.replace_all(old="\\", new="/")
+    normalized.has_suffix(".mbt") || normalized.has_suffix(".mbt.md")
+  })
 }
 
 ///|
@@ -241,7 +232,7 @@ fn parent_dir(dir : String) -> String? {
   if normalized == "" ||
     normalized == "." ||
     normalized == "/" ||
-    is_windows_drive_root(normalized) {
+    (normalized.length() == 2 && normalized[1] == ':') {
     return None
   }
   match normalized.rev_find("/") {
@@ -249,11 +240,6 @@ fn parent_dir(dir : String) -> String? {
     Some(cut) => Some(normalized[:cut].to_owned())
     None => Some(".")
   }
-}
-
-///|
-fn is_windows_drive_root(path : String) -> Bool {
-  path.length() == 2 && path[1] == ':'
 }
 
 ///|

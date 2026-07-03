@@ -213,7 +213,15 @@ pub fn format_parse_gate_errors(
       let excerpt = if error.context == "" {
         excerpt_for_loc(lines, error.loc)
       } else {
-        indent_context(error.context)
+        // Indent the compiler's context excerpt (numbered source lines) by
+        // two spaces, dropping only the trailing blank line its final `\n`
+        // produces — interior blank lines stay so the excerpt is faithful.
+        let context_lines = split_owned(error.context, "\n")
+        if !context_lines.is_empty() &&
+          context_lines[context_lines.length() - 1] == "" {
+          let _ = context_lines.pop()
+        }
+        [ for line in context_lines => "  \{line}" ].join("\n")
       }
       if excerpt == "" {
         header
@@ -222,19 +230,6 @@ pub fn format_parse_gate_errors(
       }
     }
   ]
-}
-
-///|
-/// Indent the compiler's `context` excerpt (numbered source lines, one per
-/// `\n`) by two spaces, dropping only the trailing blank line the final `\n`
-/// produces — interior blank lines, should moonc ever emit them, are kept so
-/// the excerpt stays faithful.
-fn indent_context(context : String) -> String {
-  let lines = split_owned(context, "\n")
-  if !lines.is_empty() && lines[lines.length() - 1] == "" {
-    let _ = lines.pop()
-  }
-  [ for line in lines => "  \{line}" ].join("\n")
 }
 
 ///|
@@ -263,7 +258,7 @@ fn excerpt_for_loc(lines : Array[String], loc : String) -> String {
   let width = "\{last}".length()
   let rendered = [
     for number in first..<=last => {
-      "  \{pad_line_number(number, width)} |\{lines[number - 1]}"
+      "  \{"\{number}".pad_start(width, ' ')} |\{lines[number - 1]}"
     }
   ]
   rendered.join("\n")
@@ -304,11 +299,6 @@ fn leading_line_number(part : String) -> Int? {
     value = value * 10 + (ch.to_int() - '0'.to_int())
   }
   Some(value)
-}
-
-///|
-fn pad_line_number(number : Int, width : Int) -> String {
-  "\{number}".pad_start(width, ' ')
 }
 
 ///|

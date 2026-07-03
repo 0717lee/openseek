@@ -39,9 +39,11 @@ pub fn decode(arguments : Json) -> ReadInput raise {
 ///|
 fn parse_fields(fields : Map[String, Json]) -> ReadInput raise {
   reject_paths(fields)
-  let path = match optional_string(fields, "path") {
-    Some(path) => path
-    None => fail("arguments.path")
+  let path = match fields.get("path") {
+    Some(String(value)) if value != "" => value
+    Some(String(_)) => fail("arguments.path to be a non-empty string")
+    Some(Null) | None => fail("arguments.path")
+    _ => fail("arguments.path to be a string")
   }
   let start_line = optional_positive_int(fields, "start_line", 1)
   let max_lines = optional_positive_int_option(fields, "max_lines")
@@ -52,17 +54,11 @@ fn parse_fields(fields : Map[String, Json]) -> ReadInput raise {
     path,
     start_line,
     max_lines,
-    max_output_chars: cap_max_output_chars(max_output_chars),
-  }
-}
-
-///|
-fn optional_string(fields : Map[String, Json], name : String) -> String? raise {
-  match fields.get(name) {
-    Some(String(value)) if value != "" => Some(value)
-    Some(String(_)) => fail("arguments.\{name} to be a non-empty string")
-    Some(Null) | None => None
-    _ => fail("arguments.\{name} to be a string")
+    max_output_chars: if max_output_chars > hard_max_output_chars {
+      hard_max_output_chars
+    } else {
+      max_output_chars
+    },
   }
 }
 
@@ -101,14 +97,5 @@ fn optional_positive_int_option(
     }
     Some(Null) | None => None
     _ => fail("arguments.\{name} to be a number")
-  }
-}
-
-///|
-fn cap_max_output_chars(value : Int) -> Int {
-  if value > hard_max_output_chars {
-    hard_max_output_chars
-  } else {
-    value
   }
 }

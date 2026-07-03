@@ -132,19 +132,6 @@ fn execute(arguments : Json) -> @agent_tool.ToolAction {
 }
 
 ///|
-/// Step titles that read as verification work. Deciding "did the plan end
-/// without a verification step" only needs a coarse net: false positives just
-/// suppress a reminder the model did not need.
-fn is_verification_title(title : String) -> Bool {
-  let lowered = title.to_lower()
-  lowered.contains("test") ||
-  lowered.contains("check") ||
-  lowered.contains("verify") ||
-  lowered.contains("validate") ||
-  lowered.contains("lint")
-}
-
-///|
 /// Renders the decoded plan as a terse acknowledgment: progress count plus
 /// the in-progress step. The full plan already lives in the tool-call
 /// arguments that the session replays on every request, so the result adds
@@ -167,7 +154,14 @@ fn render(input : @decode.PlanInput) -> @agent_tool.ToolAction {
       InProgress => in_progress = Some(step.title)
       Pending => ()
     }
-    if is_verification_title(step.title) {
+    // Titles that read as verification work; a coarse net is enough —
+    // false positives just suppress a reminder the model did not need.
+    let lowered = step.title.to_lower()
+    if lowered.contains("test") ||
+      lowered.contains("check") ||
+      lowered.contains("verify") ||
+      lowered.contains("validate") ||
+      lowered.contains("lint") {
       has_verification = true
     }
   }

@@ -133,8 +133,12 @@ async fn edit_file(
     .map(part => part.to_owned())
     .collect()
   if parts.length() <= 1 {
+    let range_detail = match input.end_line {
+      Some(end) => " in line range \{input.start_line}-\{end}"
+      None => " from line \{input.start_line}"
+    }
     return @agent_tool.ToolAction::respond(
-      "error editing \{path}: old_string not found\{range_detail(input)}",
+      "error editing \{path}: old_string not found\{range_detail}",
       is_error=true,
       brief=fail_brief,
     )
@@ -400,14 +404,6 @@ fn line_number_at_offset(content : String, offset : Int) -> Int {
     }
   }
   line
-}
-
-///|
-fn range_detail(input : @decode.EditInput) -> String {
-  match input.end_line {
-    Some(end) => " in line range \{input.start_line}-\{end}"
-    None => " from line \{input.start_line}"
-  }
 }
 
 ///|

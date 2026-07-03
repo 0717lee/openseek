@@ -44,13 +44,21 @@ pub fn decode(arguments : Json) -> MoonCommandInput raise {
 
 ///|
 fn parse_fields(fields : Map[String, Json]) -> MoonCommandInput raise {
-  let command = required_string(fields, "command")
-  validate_command(command)
+  let command = match fields.get("command") {
+    Some(String(value)) if value != "" => value
+    Some(String(_)) | Some(Null) | None => fail("arguments.command")
+    _ => fail("arguments.command to be a string")
+  }
+  if !["check", "test", "run", "info", "fmt", "build"].contains(command) {
+    fail("arguments.command to be one of check, test, run, info, fmt, build")
+  }
   let cwd = optional_string(fields, "cwd")
   let target = optional_string(fields, "target")
   if target is Some(value) {
     @moon_target.validate_target(value)
-    validate_target_supported(command)
+    if command == "fmt" {
+      fail("arguments.target is not supported for command fmt")
+    }
   }
   let args = parse_string_list(fields, "arg", "args")
   let paths = parse_string_list(fields, "path", "paths")
@@ -80,16 +88,11 @@ fn parse_fields(fields : Map[String, Json]) -> MoonCommandInput raise {
     stdin,
     test_update_kind,
     test_update_reason,
-    max_output_chars: cap_max_output_chars(max_output_chars),
-  }
-}
-
-///|
-fn required_string(fields : Map[String, Json], name : String) -> String raise {
-  match fields.get(name) {
-    Some(String(value)) if value != "" => value
-    Some(String(_)) | Some(Null) | None => fail("arguments.\{name}")
-    _ => fail("arguments.\{name} to be a string")
+    max_output_chars: if max_output_chars > hard_max_output_chars {
+      hard_max_output_chars
+    } else {
+      max_output_chars
+    },
   }
 }
 
@@ -159,30 +162,6 @@ fn optional_positive_int(
     }
     Some(Null) | None => default
     _ => fail("arguments.\{name} to be a number")
-  }
-}
-
-///|
-fn cap_max_output_chars(value : Int) -> Int {
-  if value > hard_max_output_chars {
-    hard_max_output_chars
-  } else {
-    value
-  }
-}
-
-///|
-fn validate_command(command : String) -> Unit raise {
-  let allowed = ["check", "test", "run", "info", "fmt", "build"]
-  if !allowed.contains(command) {
-    fail("arguments.command to be one of check, test, run, info, fmt, build")
-  }
-}
-
-///|
-fn validate_target_supported(command : String) -> Unit raise {
-  if command == "fmt" {
-    fail("arguments.target is not supported for command fmt")
   }
 }
 

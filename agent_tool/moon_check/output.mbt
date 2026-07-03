@@ -54,15 +54,6 @@ fn moon_check_output_is_crash(output : String) -> Bool {
 }
 
 ///|
-fn ensure_trailing_newline(output : String) -> String {
-  if output == "" || output.has_suffix("\n") {
-    output
-  } else {
-    "\{output}\n"
-  }
-}
-
-///|
 /// Reduce a `moon` panic banner into a few lines the agent can act on:
 /// exit code, crash flag, the `panicked at ...` line, the underlying detail,
 /// and the restart budget. The full upstream "Please report it at ..." block
