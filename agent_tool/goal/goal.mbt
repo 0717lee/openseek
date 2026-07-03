@@ -39,9 +39,9 @@ pub fn GoalCell::GoalCell(
 }
 
 ///|
-/// Set the host-level token ceiling for active goals. Independent of any
-/// budget stored on the goal itself: unattended goal runs always stop at
-/// this ceiling even when the user set no explicit budget.
+/// Set the host-level token ceiling used for goals that carry no explicit
+/// budget of their own. A goal with an explicit `token_budget` is governed
+/// by that budget alone — the ceiling is a default, not a silent cap.
 pub fn GoalCell::set_host_token_budget(self : GoalCell, budget : Int?) -> Unit {
   self.host_token_budget = budget
 }
@@ -93,11 +93,13 @@ pub fn GoalCell::refresh(
 pub fn GoalCell::budget_exhausted(self : GoalCell) -> Bool {
   guard self.current is Some(goal) else { return false }
   guard goal.is_active() else { return false }
-  let goal_spent = goal.token_budget() is Some(budget) &&
-    self.tokens_used >= budget
-  let host_spent = self.host_token_budget is Some(ceiling) &&
-    self.tokens_used >= ceiling
-  goal_spent || host_spent
+  match goal.token_budget() {
+    // An explicit goal budget governs alone: the host ceiling is a default
+    // for unbudgeted goals, never a silent cap under a user-chosen budget.
+    Some(budget) => self.tokens_used >= budget
+    None =>
+      self.host_token_budget is Some(ceiling) && self.tokens_used >= ceiling
+  }
 }
 
 ///|

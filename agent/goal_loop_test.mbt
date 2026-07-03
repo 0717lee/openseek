@@ -199,7 +199,9 @@ async test "goal loop stops when the token budget is exhausted" {
     // prompt ever rendered.
     let internals = internal_events_of(result)
     assert_eq(internals.length(), 1)
-    assert_true(internals[0].content().contains("token budget is exhausted"))
+    assert_true(
+      internals[0].content().contains("token budget of 5 is exhausted"),
+    )
     guard result.current_goal() is Some(snapshot) else { fail("goal") }
     assert_false(snapshot.is_active())
     assert_true(snapshot.goal().is_unfinished())
@@ -448,8 +450,147 @@ async test "unbudgeted goals stop at the default host ceiling" {
     // The stop left a durable, model-visible explanation.
     let internals = internal_events_of(result)
     assert_eq(internals.length(), 1)
-    assert_true(internals[0].content().contains("token budget is exhausted"))
+    assert_true(
+      internals[0].content().contains("host token ceiling for unbudgeted"),
+    )
     // The goal-run registry advertises turn-scoped finish wording.
     assert_true(request_bodies[0].contains("End this turn with"))
+  }
+}
+
+///|
+async test "a resumed goal already over budget gets zero model calls" {
+  @async.with_task_group() <| group => {
+    let request_bodies : Array[String] = []
+    // Empty script: any request fails the test.
+    guard goal_test_server(group, [], request_bodies) is Some(url) else {
+      return
+    }
+    let runtime = @agent_runtime.AgentRuntime()
+    let scope = @agent_runtime.AgentTaskScope(group)
+    // A prior run left an active 5-token goal with 10 tokens already spent.
+    let session = @agent_session.Session(
+        SessionId("goal-preover"),
+        system_prompt="system",
+      )
+      .append(
+        Goal(
+          GoalUpdate(
+            goal_id="goal-1",
+            objective="old objective",
+            status=Active,
+            token_budget=5,
+          ),
+        ),
+      )
+      .append(Usage(TurnUsage(prompt_tokens=8, completion_tokens=2)))
+    let result = @agent.run_goal_in_scope(
+      runtime,
+      scope,
+      "test-key",
+      V4Flash,
+      session,
+      "keep going",
+      append_item=(session, item) => session.append(item),
+      max_steps=4,
+      api_url=url,
+    )
+    assert_eq(request_bodies.length(), 0)
+    guard result.current_goal() is Some(snapshot) else { fail("goal") }
+    assert_true(snapshot.goal().status() is BudgetLimited)
+  }
+}
+
+///|
+async test "an explicit goal budget is not undercut by the host ceiling" {
+  @async.with_task_group() <| group => {
+    let request_bodies : Array[String] = []
+    let responses = [
+      [
+        tool_call_chunk(
+          "call_1", "create_goal", "{\\\"objective\\\":\\\"obj-big\\\",\\\"token_budget\\\":300}",
+          3, 2,
+        ),
+      ],
+      // 150 tokens: over the 100-token host ceiling, under the explicit
+      // 300-token goal budget — the loop must continue.
+      [content_chunk("big spend, keep going", 100, 50)],
+      // Continuation pushes past the goal budget; then the loop stops.
+      [content_chunk("over the real budget now", 150, 50)],
+    ]
+    guard goal_test_server(group, responses, request_bodies) is Some(url) else {
+      return
+    }
+    let runtime = @agent_runtime.AgentRuntime()
+    let scope = @agent_runtime.AgentTaskScope(group)
+    let session = @agent_session.Session(
+      SessionId("goal-explicit"),
+      system_prompt="system",
+    )
+    let result = @agent.run_goal_in_scope(
+      runtime,
+      scope,
+      "test-key",
+      V4Flash,
+      session,
+      "pursue the objective",
+      append_item=(session, item) => session.append(item),
+      max_steps=4,
+      host_token_budget=100,
+      api_url=url,
+    )
+    // Three requests: the ceiling did not stop the budgeted goal early.
+    assert_eq(request_bodies.length(), 3)
+    guard result.current_goal() is Some(snapshot) else { fail("goal") }
+    assert_true(snapshot.goal().status() is BudgetLimited)
+    let internals = internal_events_of(result)
+    // One continuation prompt + one budget notice naming the real budget.
+    assert_eq(internals.length(), 2)
+    assert_true(
+      internals[1].content().contains("token budget of 300 is exhausted"),
+    )
+  }
+}
+
+///|
+async test "budget crossing on the final continuation beats the cap" {
+  @async.with_task_group() <| group => {
+    let request_bodies : Array[String] = []
+    let responses = [
+      [
+        tool_call_chunk(
+          "call_1", "create_goal", "{\\\"objective\\\":\\\"obj-lastleg\\\",\\\"token_budget\\\":100}",
+          3, 2,
+        ),
+      ],
+      [content_chunk("first turn done", 4, 1)],
+      // The single allowed continuation crosses the budget.
+      [content_chunk("spent it all", 120, 30)],
+    ]
+    guard goal_test_server(group, responses, request_bodies) is Some(url) else {
+      return
+    }
+    let runtime = @agent_runtime.AgentRuntime()
+    let scope = @agent_runtime.AgentTaskScope(group)
+    let session = @agent_session.Session(
+      SessionId("goal-lastleg"),
+      system_prompt="system",
+    )
+    let result = @agent.run_goal_in_scope(
+      runtime,
+      scope,
+      "test-key",
+      V4Flash,
+      session,
+      "pursue the objective",
+      append_item=(session, item) => session.append(item),
+      max_steps=4,
+      max_continuations=1,
+      api_url=url,
+    )
+    assert_eq(request_bodies.length(), 3)
+    // The durable outcome is the budget stop, not a silently active goal.
+    guard result.current_goal() is Some(snapshot) else { fail("goal") }
+    assert_true(snapshot.goal().status() is BudgetLimited)
   }
 }

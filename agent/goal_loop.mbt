@@ -7,9 +7,22 @@ pub const DEFAULT_MAX_CONTINUATIONS : Int = 25
 ///|
 /// Default host-level token ceiling for goal runs whose goal carries no
 /// explicit budget. Unattended auto-continuation without a budget is the
-/// one way this feature can burn unbounded spend, so the host always
-/// enforces a ceiling; `--goal-budget` (or `host_token_budget?`) overrides.
+/// one way this feature can burn unbounded spend, so unbudgeted goals stop
+/// here. A goal with an explicit budget is governed by that budget alone.
 pub const DEFAULT_GOAL_TOKEN_BUDGET : Int = 1_000_000
+
+///|
+/// Whether the goal has spent its governing budget: the goal's own budget
+/// when set, otherwise the host ceiling.
+fn goal_over_budget(
+  snapshot : @agent_session.GoalSnapshot,
+  host_token_budget : Int,
+) -> Bool {
+  match snapshot.goal().token_budget() {
+    Some(_) => snapshot.budget_exhausted()
+    None => snapshot.tokens_used() >= host_token_budget
+  }
+}
 
 ///|
 /// Whether the session's last event is a cleanly finished turn. The goal
@@ -126,6 +139,13 @@ pub async fn[X] run_goal_in_scope(
     }
   }
   let has_plan_tool = tools.find("plan") is Some(_)
+  // A resumed goal that is already over its governing budget gets no model
+  // call at all: record the stop and return before the first turn.
+  if session.current_goal() is Some(pre) &&
+    pre.is_active() &&
+    goal_over_budget(pre, host_token_budget) {
+    return mark_budget_limited(pre, session, append_item~)
+  }
   session = run_opened_turn_in_scope(
     runtime,
     scope,
@@ -144,8 +164,7 @@ pub async fn[X] run_goal_in_scope(
     guard last_turn_finished(session) else { return session }
     guard session.current_goal() is Some(snapshot) else { return session }
     guard snapshot.is_active() else { return session }
-    if snapshot.budget_exhausted() ||
-      snapshot.tokens_used() >= host_token_budget {
+    if goal_over_budget(snapshot, host_token_budget) {
       session = mark_budget_limited(snapshot, session, append_item~)
       refresh_goal_cell(goal_cell, session)
       return session
@@ -190,6 +209,12 @@ pub async fn[X] run_goal_in_scope(
     )
   }
   if session.current_goal() is Some(snapshot) && snapshot.is_active() {
+    // Budget beats the cap: if the final allowed continuation crossed the
+    // governing budget, the durable outcome is BudgetLimited, not a goal
+    // left silently active.
+    if goal_over_budget(snapshot, host_token_budget) {
+      return mark_budget_limited(snapshot, session, append_item~)
+    }
     @xlog.warn() <?
       {
         "event": "goal_continuations_exhausted",
@@ -237,9 +262,15 @@ async fn mark_budget_limited(
   let notice : @agent_session.SessionItem = Internal(
     InternalContext(
       source="goal",
-      (
-        $|The goal \{goal.goal_id()} was stopped by the host: its token budget is exhausted (\{snapshot.tokens_used()} tokens used). The objective was not completed. Re-running with --goal re-funds and resumes it.
-      ),
+      {
+        let cause = match goal.token_budget() {
+          Some(budget) => "its token budget of \{budget} is exhausted"
+          None => "the host token ceiling for unbudgeted goals is exhausted"
+        }
+        (
+          $|The goal \{goal.goal_id()} was stopped by the host: \{cause} (\{snapshot.tokens_used()} tokens used). The objective was not completed. Re-running with --goal re-funds and resumes it.
+        )
+      },
     ),
   ) catch {
     error => {
