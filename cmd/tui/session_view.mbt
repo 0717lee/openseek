@@ -52,10 +52,29 @@ fn session_item(item : @agent_session.SessionItem) -> @ui.TranscriptItem? {
       Some(runtime_item(parse_runtime_update(notice.content())))
     Summary(summary) => Some(summary_item(summary))
     Terminal(terminal) => terminal_item(terminal)
-    // Durable metadata: not part of the visible conversation replay.
-    Usage(_) | Goal(_) => None
+    // Usage stays hidden metadata; goal transitions are user-relevant
+    // lifecycle changes and replay as runtime notes.
+    Usage(_) => None
+    Goal(update) =>
+      Some(
+        runtime_item(
+          parse_runtime_update(
+            "goal \{update.goal_id()} \{goal_status_note(update.status())}: \{update.objective()}",
+          ),
+        ),
+      )
     Internal(context) =>
       Some(runtime_item(parse_runtime_update("[\{context.source()}] steering")))
+  }
+}
+
+///|
+fn goal_status_note(status : @agent_session.GoalStatus) -> String {
+  match status {
+    Active => "active"
+    Complete => "complete"
+    Blocked => "blocked"
+    BudgetLimited => "budget limited"
   }
 }
 

@@ -11,10 +11,22 @@
 ///
 /// `finish` is the only built-in tool whose action is not `Respond`. The loop
 /// always stops after `finish` runs, regardless of what comes back.
-pub fn definition() -> @agent_tool.AgentToolDefinition {
+pub fn definition(
+  turn_scoped? : Bool = false,
+) -> @agent_tool.AgentToolDefinition {
+  // Under a goal, `finish` ends only the current turn: the goal loop keeps
+  // starting turns while the goal stays active, and only update_goal (or
+  // the host's budget/cap stops) ends the run. The description must say so —
+  // tool descriptions are strong model-facing guidance, and "End the task"
+  // would contradict the continuation prompt.
+  let description = if turn_scoped {
+    "End this turn with arguments.answer. While a goal is active this does not end the goal: the loop starts another goal turn; only update_goal finishes the run."
+  } else {
+    "End the task with arguments.answer."
+  }
   AgentToolDefinition(
     name="finish",
-    description="End the task with arguments.answer.",
+    description~,
     schema=JsonSchema({
       "type": "object",
       "properties": { "answer": { "type": "string" } },

@@ -195,7 +195,11 @@ async test "goal loop stops when the token budget is exhausted" {
     assert_eq(goals.length(), 2)
     assert_true(goals[0].status() is Active)
     assert_true(goals[1].status() is BudgetLimited)
-    assert_eq(internal_events_of(result).length(), 0)
+    // The only internal item is the budget-limit notice — no continuation
+    // prompt ever rendered.
+    let internals = internal_events_of(result)
+    assert_eq(internals.length(), 1)
+    assert_true(internals[0].content().contains("token budget is exhausted"))
     guard result.current_goal() is Some(snapshot) else { fail("goal") }
     assert_false(snapshot.is_active())
     assert_true(snapshot.goal().is_unfinished())
@@ -398,5 +402,54 @@ async test "host-created goals run and resume without model creation" {
     let resumed_goals = goal_events_of(resumed)
     assert_eq(resumed_goals.length(), 1)
     assert_eq(resumed_goals[0].objective(), "host objective")
+  }
+}
+
+///|
+async test "unbudgeted goals stop at the default host ceiling" {
+  @async.with_task_group() <| group => {
+    let request_bodies : Array[String] = []
+    let responses = [
+      // No explicit budget on the goal: the host ceiling governs.
+      [
+        tool_call_chunk(
+          "call_1", "create_goal", "{\\\"objective\\\":\\\"obj-host\\\"}", 3, 2,
+        ),
+      ],
+      // Post-creation spend crosses the (test-sized) host ceiling.
+      [content_chunk("expensive turn", 90, 20)],
+      // No third response: a continuation would fail the test.
+    ]
+    guard goal_test_server(group, responses, request_bodies) is Some(url) else {
+      return
+    }
+    let runtime = @agent_runtime.AgentRuntime()
+    let scope = @agent_runtime.AgentTaskScope(group)
+    let session = @agent_session.Session(
+      SessionId("goal-host-ceiling"),
+      system_prompt="system",
+    )
+    let result = @agent.run_goal_in_scope(
+      runtime,
+      scope,
+      "test-key",
+      V4Flash,
+      session,
+      "pursue the objective",
+      append_item=(session, item) => session.append(item),
+      max_steps=4,
+      host_token_budget=100,
+      api_url=url,
+    )
+    assert_eq(request_bodies.length(), 2)
+    let goals = goal_events_of(result)
+    assert_eq(goals.length(), 2)
+    assert_true(goals[1].status() is BudgetLimited)
+    // The stop left a durable, model-visible explanation.
+    let internals = internal_events_of(result)
+    assert_eq(internals.length(), 1)
+    assert_true(internals[0].content().contains("token budget is exhausted"))
+    // The goal-run registry advertises turn-scoped finish wording.
+    assert_true(request_bodies[0].contains("End this turn with"))
   }
 }

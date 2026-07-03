@@ -19,7 +19,7 @@ fn[X] tool_definitions(
     @edit.definition(workspace_root~),
     @multi_edit.definition(workspace_root~),
     @write.definition(workspace_root~),
-    @finish.definition(),
+    @finish.definition(turn_scoped=goal_cell is Some(_)),
   ]
   // Goal tools share one per-run cell with the loop, which drains requested
   // transitions into durable Goal events after each tool result.

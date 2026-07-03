@@ -5,6 +5,13 @@
 pub const DEFAULT_MAX_CONTINUATIONS : Int = 25
 
 ///|
+/// Default host-level token ceiling for goal runs whose goal carries no
+/// explicit budget. Unattended auto-continuation without a budget is the
+/// one way this feature can burn unbounded spend, so the host always
+/// enforces a ceiling; `--goal-budget` (or `host_token_budget?`) overrides.
+pub const DEFAULT_GOAL_TOKEN_BUDGET : Int = 1_000_000
+
+///|
 /// Whether the session's last event is a cleanly finished turn. The goal
 /// loop only continues after `Terminal(Finished)`: aborted, interrupted,
 /// and failed turns stop the run and leave the goal for the user.
@@ -44,6 +51,7 @@ pub async fn[X] run_goal_in_scope(
   token_budget? : Int,
   max_steps? : Int = default_max_steps,
   max_continuations? : Int = DEFAULT_MAX_CONTINUATIONS,
+  host_token_budget? : Int = DEFAULT_GOAL_TOKEN_BUDGET,
   thinking? : @deepseek.ThinkingMode = Max,
   api_url? : String,
 ) -> @agent_session.Session {
@@ -105,6 +113,7 @@ pub async fn[X] run_goal_in_scope(
     }
   }
   let goal_cell = @goal_tool.GoalCell()
+  goal_cell.set_host_token_budget(Some(host_token_budget))
   refresh_goal_cell(goal_cell, session)
   let tools = tool_definitions(runtime, scope, goal_cell~) catch {
     error => {
@@ -135,7 +144,8 @@ pub async fn[X] run_goal_in_scope(
     guard last_turn_finished(session) else { return session }
     guard session.current_goal() is Some(snapshot) else { return session }
     guard snapshot.is_active() else { return session }
-    if snapshot.budget_exhausted() {
+    if snapshot.budget_exhausted() ||
+      snapshot.tokens_used() >= host_token_budget {
       session = mark_budget_limited(snapshot, session, append_item~)
       refresh_goal_cell(goal_cell, session)
       return session
@@ -220,7 +230,25 @@ async fn mark_budget_limited(
       "goal_id": goal.goal_id(),
       "tokens_used": snapshot.tokens_used(),
     }
-  append_item(session, Goal(limited))
+  let session = append_item(session, Goal(limited))
+  // A durable, model-visible notice: Goal events are hidden metadata, so
+  // without this a resumed transcript would end on an ordinary answer with
+  // no explanation of why the loop stopped.
+  let notice : @agent_session.SessionItem = Internal(
+    InternalContext(
+      source="goal",
+      (
+        $|The goal \{goal.goal_id()} was stopped by the host: its token budget is exhausted (\{snapshot.tokens_used()} tokens used). The objective was not completed. Re-running with --goal re-funds and resumes it.
+      ),
+    ),
+  ) catch {
+    error => {
+      @xlog.error() <?
+        { "event": "goal_budget_notice_failed", "error": "\{error}" }
+      return session
+    }
+  }
+  append_item(session, notice)
 }
 
 ///|
@@ -239,6 +267,7 @@ pub async fn run_goal_with_append(
   token_budget? : Int,
   max_steps? : Int = default_max_steps,
   max_continuations? : Int = DEFAULT_MAX_CONTINUATIONS,
+  host_token_budget? : Int = DEFAULT_GOAL_TOKEN_BUDGET,
   thinking? : @deepseek.ThinkingMode = Max,
   api_url? : String,
   workspace_root? : String = ".",
@@ -256,6 +285,7 @@ pub async fn run_goal_with_append(
       token_budget?,
       max_steps~,
       max_continuations~,
+      host_token_budget~,
       thinking~,
       api_url?,
     )

@@ -13,6 +13,7 @@ pub struct GoalCell {
   priv mut tokens_used : Int
   priv mut goal_events_seen : Int
   priv mut creation_allowed : Bool
+  priv mut host_token_budget : Int?
   priv pending : Array[@agent_session.GoalUpdate]
 }
 
@@ -32,8 +33,17 @@ pub fn GoalCell::GoalCell(
     tokens_used,
     goal_events_seen,
     creation_allowed: true,
+    host_token_budget: None,
     pending: [],
   }
+}
+
+///|
+/// Set the host-level token ceiling for active goals. Independent of any
+/// budget stored on the goal itself: unattended goal runs always stop at
+/// this ceiling even when the user set no explicit budget.
+pub fn GoalCell::set_host_token_budget(self : GoalCell, budget : Int?) -> Unit {
+  self.host_token_budget = budget
 }
 
 ///|
@@ -82,10 +92,12 @@ pub fn GoalCell::refresh(
 /// cannot burn arbitrarily far past the budget before the inter-turn stop.
 pub fn GoalCell::budget_exhausted(self : GoalCell) -> Bool {
   guard self.current is Some(goal) else { return false }
-  guard goal.is_active() && goal.token_budget() is Some(budget) else {
-    return false
-  }
-  self.tokens_used >= budget
+  guard goal.is_active() else { return false }
+  let goal_spent = goal.token_budget() is Some(budget) &&
+    self.tokens_used >= budget
+  let host_spent = self.host_token_budget is Some(ceiling) &&
+    self.tokens_used >= ceiling
+  goal_spent || host_spent
 }
 
 ///|

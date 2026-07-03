@@ -306,6 +306,18 @@ async fn run_serve(
     }
 
     fn start_turn(task_text : String) -> @async.Task[Unit] {
+      // Serve is goal-blind in v1: it runs ordinary turns with no goal tools
+      // and no continuation loop. If the session carries a goal that still
+      // wants attention, say so loudly instead of silently ignoring it.
+      if session.current_goal() is Some(snapshot) &&
+        (snapshot.is_active() || snapshot.goal().is_unfinished()) {
+        @xlog.warn() <?
+          {
+            "event": "goal_ignored_by_serve",
+            "goal_id": snapshot.goal().goal_id(),
+            "hint": "serve does not continue goals; use `openseek run --goal` to resume",
+          }
+      }
       group.spawn() <| () => {
         let _ = @agent.run_turn_in_scope(
           runtime,

@@ -21,6 +21,7 @@ pub fn GoalCell::budget_exhausted(Self) -> Bool
 pub fn GoalCell::current(Self) -> @agent_session.GoalUpdate?
 pub fn GoalCell::drain_pending(Self) -> Array[@agent_session.GoalUpdate]
 pub fn GoalCell::refresh(Self, @agent_session.GoalUpdate?, tokens_used~ : Int, goal_events_seen~ : Int) -> Unit
+pub fn GoalCell::set_host_token_budget(Self, Int?) -> Unit
 pub fn GoalCell::tokens_used(Self) -> Int
 
 // Type aliases
