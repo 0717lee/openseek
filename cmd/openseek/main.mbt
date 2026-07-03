@@ -110,6 +110,9 @@ async fn run_task_command(matches : @argparse.Matches) -> Unit {
       value(matches, "concurrency"),
       "--concurrency",
     )
+    // Validated before the fleet branch so an invalid value fails in every
+    // mode instead of being silently ignored by best-of-N runs.
+    let compact_threshold = compact_threshold(matches)
     if concurrency >= 2 {
       run_fleet(matches, concurrency~)
       return
@@ -151,6 +154,7 @@ async fn run_task_command(matches : @argparse.Matches) -> Unit {
               thinking~,
               api_url?,
               workspace_root~,
+              compact_threshold?,
             ),
           )
         } else {
@@ -163,6 +167,7 @@ async fn run_task_command(matches : @argparse.Matches) -> Unit {
             thinking~,
             api_url?,
             workspace_root~,
+            compact_threshold?,
           )
         }
       }
@@ -199,6 +204,7 @@ async fn run_task_command(matches : @argparse.Matches) -> Unit {
               thinking~,
               api_url?,
               workspace_root~,
+              compact_threshold?,
             ),
           )
         } else {
@@ -213,6 +219,7 @@ async fn run_task_command(matches : @argparse.Matches) -> Unit {
               thinking~,
               api_url?,
               workspace_root~,
+              compact_threshold?,
             ),
           )
         }
@@ -517,6 +524,13 @@ fn root_command() -> @argparse.Command {
             default_values=[""],
             about="Token budget for --goal, enforced at step boundaries: the run stops and marks the goal budget-limited once spent (a turn may overshoot by at most one model response).",
           ),
+          OptionArg(
+            "compact-threshold",
+            long="compact-threshold",
+            env="OPENSEEK_COMPACT_THRESHOLD",
+            default_values=["200000"],
+            about="Auto-compact the session once a model response reports at least this many prompt tokens; 0 disables auto-compaction.",
+          ),
         ],
         flags=[
           FlagArg(
@@ -708,6 +722,19 @@ fn goal_budget(matches : @argparse.Matches) -> Int? raise {
     None
   } else {
     Some(parse_positive_int(raw.to_owned(), "--goal-budget"))
+  }
+}
+
+///|
+fn compact_threshold(matches : @argparse.Matches) -> Int? raise {
+  // Only the documented "0" disables compaction; an explicitly empty value
+  // (e.g. OPENSEEK_COMPACT_THRESHOLD=) is invalid input, not a silent
+  // opt-out of the safety default, and fails in parse_positive_int.
+  let raw = value(matches, "compact-threshold").trim().to_owned()
+  if raw is "0" {
+    None
+  } else {
+    Some(parse_positive_int(raw, "--compact-threshold"))
   }
 }
 

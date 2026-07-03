@@ -177,6 +177,7 @@ async fn run_one_attempt(
       thinking~,
       api_url?,
       workspace_root=run_dir,
+      compact_threshold?=compact_threshold(matches),
     )
     let (status, detail) = terminal_summary(completed)
     {

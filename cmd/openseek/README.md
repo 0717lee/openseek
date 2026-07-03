@@ -39,7 +39,13 @@ Runs require `--api-key` or the provider-specific environment variable:
 be supplied with `OPENSEEK_MODEL`; it accepts `deepseek-v4-flash`,
 `deepseek-v4-pro`, `kimi-k2.7-code`, and `kimi-k2.7-code-highspeed`, and
 defaults to `deepseek-v4-pro`. `--max-steps` can also be supplied with
-`OPENSEEK_MAX_STEPS`; it defaults to `1000`. `--api-url` can also be supplied
+`OPENSEEK_MAX_STEPS`; it defaults to `1000`. `--compact-threshold` can also be
+supplied with `OPENSEEK_COMPACT_THRESHOLD`; it defaults to `200000`. Once a
+model response reports at least that many prompt tokens, the run summarizes the
+session through the model at the next step boundary, appends the summary as a
+durable `Summary` event (the summarizer's own usage is recorded first), and
+continues with the compacted context — long `--goal` runs no longer grow their
+prompt without bound. Pass `--compact-threshold 0` to disable auto-compaction. `--api-url` can also be supplied
 with `OPENSEEK_API_URL`; when omitted, OpenSeek uses the default DeepSeek chat
 completions endpoint, or the Kimi endpoint for Kimi models.
 `--dir` can also be supplied with `OPENSEEK_DIR`; it defaults to `.` and becomes
