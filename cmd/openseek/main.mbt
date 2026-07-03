@@ -121,6 +121,11 @@ async fn run_task_command(matches : @argparse.Matches) -> Unit {
     let max_steps = max_steps(matches)
     let thinking = @deepseek.ThinkingMode::parse(value(matches, "thinking"))
     let task = task_text(matches)
+    let goal_mode = flag(matches, "goal")
+    let goal_budget = goal_budget(matches)
+    if goal_budget is Some(_) && !goal_mode {
+      fail("--goal-budget requires --goal")
+    }
     match resolved_session_id(matches) {
       None => {
         let system_prompt_text = configured_system_prompt(
@@ -128,16 +133,38 @@ async fn run_task_command(matches : @argparse.Matches) -> Unit {
           model,
           workspace_root~,
         )
-        @agent.run(
-          api_key,
-          model,
-          task,
-          max_steps~,
-          system_prompt_text~,
-          thinking~,
-          api_url?,
-          workspace_root~,
-        )
+        if goal_mode {
+          let session = @agent_session.Session(
+            SessionId("one-shot"),
+            system_prompt=system_prompt_text,
+          )
+          ignore(
+            @agent.run_goal_with_append(
+              api_key,
+              model,
+              session,
+              task,
+              append_item=(session, item) => session.append(item),
+              objective=task,
+              token_budget?=goal_budget,
+              max_steps~,
+              thinking~,
+              api_url?,
+              workspace_root~,
+            ),
+          )
+        } else {
+          @agent.run(
+            api_key,
+            model,
+            task,
+            max_steps~,
+            system_prompt_text~,
+            thinking~,
+            api_url?,
+            workspace_root~,
+          )
+        }
       }
       Some(id) => {
         // Name the recording up front so a user scanning the event stream —
@@ -158,19 +185,37 @@ async fn run_task_command(matches : @argparse.Matches) -> Unit {
           model,
           workspace_root~,
         )
-        ignore(
-          @agent.run_turn_with_append(
-            api_key,
-            model,
-            session,
-            task,
-            append_item=(session, item) => store.append(session, item),
-            max_steps~,
-            thinking~,
-            api_url?,
-            workspace_root~,
-          ),
-        )
+        if goal_mode {
+          ignore(
+            @agent.run_goal_with_append(
+              api_key,
+              model,
+              session,
+              task,
+              append_item=(session, item) => store.append(session, item),
+              objective=task,
+              token_budget?=goal_budget,
+              max_steps~,
+              thinking~,
+              api_url?,
+              workspace_root~,
+            ),
+          )
+        } else {
+          ignore(
+            @agent.run_turn_with_append(
+              api_key,
+              model,
+              session,
+              task,
+              append_item=(session, item) => store.append(session, item),
+              max_steps~,
+              thinking~,
+              api_url?,
+              workspace_root~,
+            ),
+          )
+        }
       }
     }
   })
@@ -466,12 +511,23 @@ fn root_command() -> @argparse.Command {
             default_values=["1"],
             about="Run the task in N sibling copies of --dir concurrently (best-of-N); 1 means a single run.",
           ),
+          OptionArg(
+            "goal-budget",
+            long="goal-budget",
+            default_values=[""],
+            about="Token budget for --goal; the loop stops and marks the goal budget-limited when it is spent.",
+          ),
         ],
         flags=[
           FlagArg(
             "no-session",
             long="no-session",
             about="Run ephemerally: do not record this run to a durable session.",
+          ),
+          FlagArg(
+            "goal",
+            long="goal",
+            about="Treat the task as a persistent goal: keep starting turns until the goal is complete, blocked, budget-limited, or the continuation cap is hit.",
           ),
         ],
         positionals=[
@@ -642,6 +698,16 @@ fn api_url(matches : @argparse.Matches) -> String? raise {
     None
   } else {
     Some("\{url}")
+  }
+}
+
+///|
+fn goal_budget(matches : @argparse.Matches) -> Int? raise {
+  let raw = value(matches, "goal-budget").trim()
+  if raw.is_empty() {
+    None
+  } else {
+    Some(parse_positive_int(raw.to_owned(), "--goal-budget"))
   }
 }
 

@@ -66,8 +66,9 @@ filesystem, and process APIs.
 The `cmd/openseek` package is the single-binary entry point — a subcommand tree
 (default: the terminal UI; `run`/`serve`/`review`/`sessions` for the headless
 engine). `openseek run` parses arguments and runs the agent package. The agent
-sends DeepSeek native function tools and supports six local tools: `shell`,
-`read`, `edit`, `multi_edit`, `write`, and `finish`.
+sends DeepSeek native function tools and supports the local tools: `shell`,
+`read`, `edit`, `multi_edit`, `write`, `finish`, and the goal tools
+(`create_goal`, `update_goal`, `get_goal`) used by `openseek run --goal`.
 
 ```bash
 export DEEPSEEK=sk-...

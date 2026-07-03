@@ -40,11 +40,70 @@ pub async fn[X] run_goal_in_scope(
   session : @agent_session.Session,
   task : String,
   append_item~ : async (@agent_session.Session, @agent_session.SessionItem) -> @agent_session.Session,
+  objective? : String,
+  token_budget? : Int,
   max_steps? : Int = default_max_steps,
   max_continuations? : Int = DEFAULT_MAX_CONTINUATIONS,
   thinking? : @deepseek.ThinkingMode = Max,
   api_url? : String,
 ) -> @agent_session.Session {
+  // Host-created goal (`--goal`): the user set the objective directly, so
+  // the goal exists before the first turn instead of waiting for the model
+  // to call create_goal. Resuming a session whose goal is still unfinished
+  // or blocked keeps that goal: the new objective text is ignored in favor
+  // of continuing what was started (log records the resume).
+  let mut session = session
+  if objective is Some(text) {
+    match session.current_goal() {
+      Some(snapshot) if snapshot.is_active() || snapshot.goal().is_unfinished() => {
+        @xlog.info() <?
+          {
+            "event": "goal_resumed",
+            "goal_id": snapshot.goal().goal_id(),
+            "status": goal_status_text(snapshot.goal().status()),
+          }
+        // A budget-limited goal resumes as active: the user explicitly
+        // re-ran with --goal, which is the re-funding decision.
+        if !snapshot.is_active() {
+          let goal = snapshot.goal()
+          let reactivated = @agent_session.GoalUpdate(
+            goal_id=goal.goal_id(),
+            objective=goal.objective(),
+            status=Active,
+            token_budget?,
+          ) catch {
+            error =>
+              return append_item(
+                session,
+                Terminal(Failed("goal resume failed: \{error}")),
+              )
+          }
+          session = append_item(session, Goal(reactivated))
+        }
+      }
+      _ => {
+        let update = @agent_session.GoalUpdate(
+          goal_id="goal-\{count_goal_events(session) + 1}",
+          objective=text,
+          status=Active,
+          token_budget?,
+        ) catch {
+          error =>
+            return append_item(
+              session,
+              Terminal(Failed("invalid goal: \{error}")),
+            )
+        }
+        session = append_item(session, Goal(update))
+        @xlog.info() <?
+          {
+            "event": "goal_created",
+            "goal_id": update.goal_id(),
+            "objective": update.objective(),
+          }
+      }
+    }
+  }
   let goal_cell = @goal_tool.GoalCell()
   refresh_goal_cell(goal_cell, session)
   let tools = tool_definitions(runtime, scope, goal_cell~) catch {
@@ -58,7 +117,7 @@ pub async fn[X] run_goal_in_scope(
     }
   }
   let has_plan_tool = tools.find("plan") is Some(_)
-  let mut session = run_opened_turn_in_scope(
+  session = run_opened_turn_in_scope(
     runtime,
     scope,
     api_key,
@@ -162,4 +221,43 @@ async fn mark_budget_limited(
       "tokens_used": snapshot.tokens_used(),
     }
   append_item(session, Goal(limited))
+}
+
+///|
+/// Like `run_turn_with_append`, but goal-aware: owns a fresh runtime and
+/// task group, then drives `run_goal_in_scope` (one user turn plus automatic
+/// goal continuations) with every committed event persisted through
+/// `append_item`. `objective` host-creates (or resumes) the goal up front —
+/// the `--goal` CLI path.
+pub async fn run_goal_with_append(
+  api_key : String,
+  model : @deepseek.Model,
+  session : @agent_session.Session,
+  task : String,
+  append_item~ : async (@agent_session.Session, @agent_session.SessionItem) -> @agent_session.Session,
+  objective? : String,
+  token_budget? : Int,
+  max_steps? : Int = default_max_steps,
+  max_continuations? : Int = DEFAULT_MAX_CONTINUATIONS,
+  thinking? : @deepseek.ThinkingMode = Max,
+  api_url? : String,
+  workspace_root? : String = ".",
+) -> @agent_session.Session {
+  @async.with_task_group() <| group => {
+    run_goal_in_scope(
+      AgentRuntime(workspace_root~),
+      AgentTaskScope(group),
+      api_key,
+      model,
+      session,
+      task,
+      append_item~,
+      objective?,
+      token_budget?,
+      max_steps~,
+      max_continuations~,
+      thinking~,
+      api_url?,
+    )
+  }
 }
