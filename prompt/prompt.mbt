@@ -38,11 +38,14 @@ pub fn goal_continuation_prompt(
     }
     None => ("none", "unbounded")
   }
+  // The objective is substituted LAST: it is user-controlled text, and an
+  // objective containing a literal "{{tokens_used}}" must stay literal
+  // instead of being rewritten by a later placeholder pass.
   let mut prompt = goal_continuation()
-    .replace_all(old="{{objective}}", new=escaped)
     .replace_all(old="{{tokens_used}}", new=tokens_used.to_string())
     .replace_all(old="{{token_budget}}", new=budget_text)
     .replace_all(old="{{remaining_tokens}}", new=remaining_text)
+    .replace_all(old="{{objective}}", new=escaped)
   if has_plan_tool {
     prompt = prompt +
       (

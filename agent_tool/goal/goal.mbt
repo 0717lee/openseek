@@ -12,6 +12,7 @@ pub struct GoalCell {
   priv mut current : @agent_session.GoalUpdate?
   priv mut tokens_used : Int
   priv mut goal_events_seen : Int
+  priv mut creation_allowed : Bool
   priv pending : Array[@agent_session.GoalUpdate]
 }
 
@@ -26,7 +27,23 @@ pub fn GoalCell::GoalCell(
   tokens_used? : Int = 0,
   goal_events_seen? : Int = 0,
 ) -> GoalCell {
-  { current, tokens_used, goal_events_seen, pending: [] }
+  {
+    current,
+    tokens_used,
+    goal_events_seen,
+    creation_allowed: true,
+    pending: [],
+  }
+}
+
+///|
+/// Gate `create_goal` on the turn's provenance. Goals are created only from
+/// user-opened turns: in an automatic continuation the "user request" a
+/// creation claims to answer cannot exist, and allowing it would let a
+/// blocked goal be replaced by a fresh active one in the same breath —
+/// keeping the loop running past the user boundary the block should reach.
+pub fn GoalCell::allow_creation(self : GoalCell, allowed : Bool) -> Unit {
+  self.creation_allowed = allowed
 }
 
 ///|
@@ -57,6 +74,18 @@ pub fn GoalCell::refresh(
   // transition that never got drained (failed turn, reused cell) is stale
   // against the log and would replay old ids after newer events.
   self.pending.clear()
+}
+
+///|
+/// Whether the cell's goal is active with a spent token budget, as of the
+/// last refresh. The loop checks this at step boundaries so a single turn
+/// cannot burn arbitrarily far past the budget before the inter-turn stop.
+pub fn GoalCell::budget_exhausted(self : GoalCell) -> Bool {
+  guard self.current is Some(goal) else { return false }
+  guard goal.is_active() && goal.token_budget() is Some(budget) else {
+    return false
+  }
+  self.tokens_used >= budget
 }
 
 ///|
@@ -138,6 +167,12 @@ fn execute_create(cell : GoalCell, arguments : Json) -> @agent_tool.ToolAction {
       )
     }
   }
+  if !cell.creation_allowed {
+    return @agent_tool.ToolAction::respond(
+      "error: goals are created from user turns only; this automatic goal turn cannot start a new goal",
+      is_error=true,
+    )
+  }
   if cell.current() is Some(existing) && existing.is_unfinished() {
     // BudgetLimited counts as unfinished: the objective was not met, and a
     // silent replacement would discard that fact. The user decides whether
@@ -213,9 +248,12 @@ fn execute_update(cell : GoalCell, arguments : Json) -> @agent_tool.ToolAction {
       is_error=true,
     )
   }
-  guard existing.status() is Active else {
+  // Unfinished covers Active and BudgetLimited: a budget-limited goal must
+  // still be closable (complete after a final audit, or blocked), otherwise
+  // no tool path out of BudgetLimited exists and goal creation deadlocks.
+  guard existing.is_unfinished() else {
     return @agent_tool.ToolAction::respond(
-      "error: the goal \{existing.goal_id()} is not active; nothing to update",
+      "error: the goal \{existing.goal_id()} is already \{status_label(existing.status())}; nothing to update",
       is_error=true,
     )
   }
@@ -240,15 +278,21 @@ fn execute_update(cell : GoalCell, arguments : Json) -> @agent_tool.ToolAction {
     }
   }
   cell.request(update)
-  let label = match update.status() {
-    Complete => "complete"
-    Blocked => "blocked"
-    Active | BudgetLimited => "active"
-  }
+  let label = status_label(update.status())
   @agent_tool.ToolAction::respond(
     "goal \{update.goal_id()} marked \{label} after \{cell.tokens_used()} tokens",
     brief="goal \{label}",
   )
+}
+
+///|
+fn status_label(status : @agent_session.GoalStatus) -> String {
+  match status {
+    Active => "active"
+    Complete => "complete"
+    Blocked => "blocked"
+    BudgetLimited => "budget_limited"
+  }
 }
 
 ///|

@@ -278,3 +278,125 @@ async test "goal loop is a plain turn when no goal is created" {
     assert_true(request_bodies[0].contains("\"name\":\"create_goal\""))
   }
 }
+
+///|
+async test "budget exhaustion stops a turn at the step boundary" {
+  @async.with_task_group() <| group => {
+    let request_bodies : Array[String] = []
+    // The budget window opens at the goal's creating event, so the creation
+    // call itself does not count. The second step's usage (9 tokens against
+    // a 5-token budget) does — and the NEXT step boundary must end the turn
+    // without a third model call; the loop records the budget-limited stop.
+    let responses = [
+      [
+        tool_call_chunk(
+          "call_1", "create_goal", "{\\\"objective\\\":\\\"obj-hard\\\",\\\"token_budget\\\":5}",
+          3, 2,
+        ),
+      ],
+      [tool_call_chunk("call_2", "get_goal", "{}", 7, 2)],
+    ]
+    guard goal_test_server(group, responses, request_bodies) is Some(url) else {
+      return
+    }
+    let runtime = @agent_runtime.AgentRuntime()
+    let scope = @agent_runtime.AgentTaskScope(group)
+    let session = @agent_session.Session(
+      SessionId("goal-step-stop"),
+      system_prompt="system",
+    )
+    let result = @agent.run_goal_in_scope(
+      runtime,
+      scope,
+      "test-key",
+      V4Flash,
+      session,
+      "pursue the objective",
+      append_item=(session, item) => session.append(item),
+      max_steps=5,
+      api_url=url,
+    )
+    assert_eq(request_bodies.length(), 2)
+    let goals = goal_events_of(result)
+    assert_eq(goals.length(), 2)
+    assert_true(goals[1].status() is BudgetLimited)
+    // The turn closed cleanly at the boundary.
+    let events = result.events()
+    let mut found_note = false
+    for event in events {
+      if event.item() is Terminal(Finished(note)) {
+        found_note = note.contains("budget is exhausted") || found_note
+      }
+    }
+    assert_true(found_note)
+  }
+}
+
+///|
+async test "host-created goals run and resume without model creation" {
+  @async.with_task_group() <| group => {
+    let request_bodies : Array[String] = []
+    let responses = [
+      [content_chunk("worked on it", 3, 1)],
+      [content_chunk("more progress", 3, 1)],
+    ]
+    guard goal_test_server(group, responses, request_bodies) is Some(url) else {
+      return
+    }
+    let runtime = @agent_runtime.AgentRuntime()
+    let scope = @agent_runtime.AgentTaskScope(group)
+    let session = @agent_session.Session(
+      SessionId("goal-host"),
+      system_prompt="system",
+    )
+    // --goal path: the host creates the goal before the first turn.
+    let result = @agent.run_goal_in_scope(
+      runtime,
+      scope,
+      "test-key",
+      V4Flash,
+      session,
+      "pursue the objective",
+      append_item=(session, item) => session.append(item),
+      objective="host objective",
+      max_steps=2,
+      max_continuations=1,
+      api_url=url,
+    )
+    assert_eq(request_bodies.length(), 2)
+    let goals = goal_events_of(result)
+    assert_eq(goals.length(), 1)
+    assert_true(goals[0].status() is Active)
+    assert_eq(goals[0].objective(), "host objective")
+    // The goal precedes the user task in the durable log.
+    assert_true(result.events()[0].item() is Goal(_))
+
+    // Re-running --goal against the same session resumes: no new goal event.
+    let request_bodies2 : Array[String] = []
+    guard goal_test_server(
+        group,
+        [[content_chunk("resumed", 2, 1)]],
+        request_bodies2,
+      )
+      is Some(url2) else {
+      return
+    }
+    let resumed = @agent.run_goal_in_scope(
+      runtime,
+      scope,
+      "test-key",
+      V4Flash,
+      result,
+      "keep going",
+      append_item=(session, item) => session.append(item),
+      objective="ignored replacement text",
+      max_steps=2,
+      max_continuations=0,
+      api_url=url2,
+    )
+    assert_eq(request_bodies2.length(), 1)
+    let resumed_goals = goal_events_of(resumed)
+    assert_eq(resumed_goals.length(), 1)
+    assert_eq(resumed_goals[0].objective(), "host objective")
+  }
+}

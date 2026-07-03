@@ -304,20 +304,25 @@ async fn[X] run_opened_turn_in_scope(
 ) -> @agent_session.Session {
   let client = @client.Client(api_key~, model~, thinking~, api_url?)
   let mut session = append_item(session, opening)
-  // The goal cell is the goal tools' view of durable goal state. When the
-  // caller supplies prebuilt tools without a cell, the fresh cell is simply
-  // never consulted; when this function builds the registry, the goal tools
-  // are bound to it.
-  let goal_cell = match goal_cell {
+  // Goal tools are opt-in: they register only when the caller supplies a
+  // cell (the goal loop, or a host that owns continuation). A plain turn
+  // must not advertise create_goal — a goal created there would never be
+  // continued. Without a supplied cell the placeholder below only keeps the
+  // drain plumbing uniform; no tool can reach it.
+  let supplied_goal_cell = goal_cell
+  let goal_cell = match supplied_goal_cell {
     Some(cell) => cell
     None => GoalCell()
   }
   refresh_goal_cell(goal_cell, session)
+  // Goals are created from user-opened turns only; automatic continuations
+  // may finish or block a goal but never start one.
+  goal_cell.allow_creation(opening is User(_))
   try {
     let tools = match tools {
       Some(tools) => tools
       None =>
-        tool_definitions(runtime, scope, goal_cell~) catch {
+        tool_definitions(runtime, scope, goal_cell?=supplied_goal_cell) catch {
           error => {
             let next = append_item(
               session,
@@ -332,6 +337,17 @@ async fn[X] run_opened_turn_in_scope(
     let messages = session.chat_messages()
     let watcher_fingerprints : Map[String, String] = {}
     steps~: for step in 0..<max_steps {
+      // Budget gate at the step boundary: a goal turn whose budget ran out
+      // stops before the next model call instead of running to max_steps.
+      // Between steps every tool call has its result recorded, so ending
+      // here keeps the conversation API-valid. The goal loop appends the
+      // durable BudgetLimited transition afterwards.
+      if step > 0 && goal_cell.budget_exhausted() {
+        let note = "stopping: the goal token budget is exhausted"
+        let next = append_item(session, Terminal(Finished(note)))
+        @xlog.warn() <? { "event": "goal_budget_step_stop", "step": step }
+        return next
+      }
       // Steering first: user-visible mid-turn input should precede runtime
       // chatter the model reads alongside it.
       session = apply_steer_inputs(

@@ -32,6 +32,20 @@ fn[X] tool_definitions(
 }
 
 ///|
+async test "the default registry stays goal-less without a cell" {
+  @async.with_task_group() <| group => {
+    let tools = tool_definitions(AgentRuntime(), AgentTaskScope(group))
+    let names = [ for t in tools.function_tools() => t.name ]
+    // A plain turn must not advertise create_goal: a goal created there
+    // would never be continued.
+    assert_eq(names.length(), 6)
+    assert_false(names.contains("create_goal"))
+    assert_false(names.contains("update_goal"))
+    assert_false(names.contains("get_goal"))
+  }
+}
+
+///|
 async test "agent registers the expected tool names" {
   @async.with_task_group() <| group => {
     let tools = tool_definitions(

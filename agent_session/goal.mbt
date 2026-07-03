@@ -91,7 +91,12 @@ pub fn GoalUpdate::token_budget(self : GoalUpdate) -> Int? {
 ///
 /// `tokens_used` sums every usage event recorded after the goal was created
 /// (its first `Goal` event), so it spans all of the goal's turns and replays
-/// identically after resume.
+/// identically after resume. Two boundary consequences, both deliberate:
+/// usage from before the goal existed never counts (a long pre-goal session
+/// must not eat the budget), and for a model-created goal the model call
+/// that created it precedes the creating event, so that one call's usage is
+/// excluded — a bounded undercount of exactly one response. Host-created
+/// goals (`--goal`) precede the first turn entirely, so everything counts.
 pub struct GoalSnapshot {
   priv goal : GoalUpdate
   priv tokens_used : Int

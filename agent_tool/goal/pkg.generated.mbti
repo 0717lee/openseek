@@ -16,6 +16,8 @@ pub struct GoalCell {
   // private fields
 }
 pub fn GoalCell::GoalCell(current? : @agent_session.GoalUpdate, tokens_used? : Int, goal_events_seen? : Int) -> Self
+pub fn GoalCell::allow_creation(Self, Bool) -> Unit
+pub fn GoalCell::budget_exhausted(Self) -> Bool
 pub fn GoalCell::current(Self) -> @agent_session.GoalUpdate?
 pub fn GoalCell::drain_pending(Self) -> Array[@agent_session.GoalUpdate]
 pub fn GoalCell::refresh(Self, @agent_session.GoalUpdate?, tokens_used~ : Int, goal_events_seen~ : Int) -> Unit

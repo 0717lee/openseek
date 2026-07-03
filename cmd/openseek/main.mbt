@@ -515,7 +515,7 @@ fn root_command() -> @argparse.Command {
             "goal-budget",
             long="goal-budget",
             default_values=[""],
-            about="Token budget for --goal; the loop stops and marks the goal budget-limited when it is spent.",
+            about="Token budget for --goal, enforced at step boundaries: the run stops and marks the goal budget-limited once spent (a turn may overshoot by at most one model response).",
           ),
         ],
         flags=[

@@ -111,7 +111,7 @@ test "update_goal guards missing, finished, and malformed input" {
     dispatch(cell, "update_goal", { "status": "complete" }),
     is_error=true,
   )
-  assert_true(again.contains("is not active"))
+  assert_true(again.contains("is already blocked"))
 }
 
 ///|
@@ -165,4 +165,62 @@ test "refresh drops stale pending transitions" {
   // cell at the durable fold and must discard the undrained transition.
   cell.refresh(None, tokens_used=0, goal_events_seen=0)
   assert_eq(cell.drain_pending().length(), 0)
+}
+
+///|
+test "update_goal can close a budget-limited goal" {
+  // BudgetLimited must stay closable, or no tool path out of it exists and
+  // goal creation deadlocks (phase 3 review, finding 1).
+  let cell = GoalCell()
+  let _ = dispatch(cell, "create_goal", {
+    "objective": "ship it",
+    "token_budget": 10,
+  })
+  guard cell.current() is Some(goal) else { fail("expected goal") }
+  let limited = @agent_session.GoalUpdate(
+    goal_id=goal.goal_id(),
+    objective=goal.objective(),
+    status=BudgetLimited,
+    token_budget=10,
+  )
+  cell.refresh(Some(limited), tokens_used=10, goal_events_seen=2)
+  let closed = expect_respond(
+    dispatch(cell, "update_goal", { "status": "blocked" }),
+    is_error=false,
+  )
+  assert_true(closed.contains("marked blocked"))
+}
+
+///|
+test "create_goal is rejected in automatic goal turns" {
+  // Goals answer explicit user requests; a continuation turn has none, and
+  // allowing creation there would let blocked-then-create keep the loop
+  // running past the user boundary (phase 3 review, finding 2).
+  let cell = GoalCell()
+  cell.allow_creation(false)
+  let rejected = expect_respond(
+    dispatch(cell, "create_goal", { "objective": "sneaky new goal" }),
+    is_error=true,
+  )
+  assert_true(rejected.contains("user turns only"))
+  cell.allow_creation(true)
+  let created = expect_respond(
+    dispatch(cell, "create_goal", { "objective": "legit goal" }),
+    is_error=false,
+  )
+  assert_true(created.contains("goal goal-1 created"))
+}
+
+///|
+test "budget_exhausted reflects the refreshed view" {
+  let cell = GoalCell()
+  assert_false(cell.budget_exhausted())
+  let _ = dispatch(cell, "create_goal", {
+    "objective": "ship it",
+    "token_budget": 10,
+  })
+  cell.refresh(cell.current(), tokens_used=9, goal_events_seen=1)
+  assert_false(cell.budget_exhausted())
+  cell.refresh(cell.current(), tokens_used=10, goal_events_seen=1)
+  assert_true(cell.budget_exhausted())
 }
