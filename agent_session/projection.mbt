@@ -13,9 +13,18 @@ fn summary_model_content(summary : SessionSummary) -> String {
 /// `<codex_internal_context source="...">` wrapper; the source is constrained
 /// at construction so it embeds without escaping.
 fn internal_model_content(context : InternalContext) -> String {
+  // Defang any embedded closing tag so content can never escape the
+  // envelope: whatever follows a forged close would otherwise read as text
+  // outside the host-attributed block.
+  let content = context
+    .content()
+    .replace_all(
+      old="</openseek_internal_context",
+      new="</openseek-internal-context",
+    )
   (
     $|<openseek_internal_context source="\{context.source()}">
-    $|\{context.content()}
+    $|\{content}
     $|</openseek_internal_context>
   )
 }

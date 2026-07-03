@@ -901,6 +901,12 @@ fn model_message_time_labels(session : @agent_session.Session) -> Array[String] 
     if model_event_covered_by_later_summary(event, events) {
       continue
     }
+    // Metadata-only items must not act as repair boundaries: mirror
+    // `Session::chat_messages()`, which skips them before pending-tool-call
+    // repair (a Usage event sits between a tool call and its result).
+    if event.item() is (Usage(_) | Goal(_)) {
+      continue
+    }
     match event.item() {
       Assistant(message) => {
         flush_pending_tool_labels(pending_tool_calls, times)
@@ -936,6 +942,12 @@ fn model_message_step_labels(session : @agent_session.Session) -> Array[String] 
   let events = session.events()
   for event in events {
     if model_event_covered_by_later_summary(event, events) {
+      continue
+    }
+    // Metadata-only items must not act as repair boundaries: mirror
+    // `Session::chat_messages()`, which skips them before pending-tool-call
+    // repair (a Usage event sits between a tool call and its result).
+    if event.item() is (Usage(_) | Goal(_)) {
       continue
     }
     match event.item() {

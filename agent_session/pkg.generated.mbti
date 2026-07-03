@@ -25,7 +25,9 @@ pub fn AssistantMessage::tool_calls(Self) -> Array[@deepseek.ToolCall]
 pub struct GoalSnapshot {
   // private fields
 } derive(@debug.Debug)
+pub fn GoalSnapshot::budget_exhausted(Self) -> Bool
 pub fn GoalSnapshot::goal(Self) -> GoalUpdate
+pub fn GoalSnapshot::is_active(Self) -> Bool
 pub fn GoalSnapshot::remaining_tokens(Self) -> Int?
 pub fn GoalSnapshot::tokens_used(Self) -> Int
 
@@ -40,19 +42,23 @@ pub impl @json.FromJson for GoalStatus
 
 pub struct GoalUpdate {
   // private fields
-} derive(ToJson, @debug.Debug, @json.FromJson)
+} derive(ToJson, @debug.Debug)
 pub fn GoalUpdate::GoalUpdate(goal_id~ : String, objective~ : String, status~ : GoalStatus, token_budget? : Int) -> Self raise
 pub fn GoalUpdate::goal_id(Self) -> String
+pub fn GoalUpdate::is_active(Self) -> Bool
+pub fn GoalUpdate::is_unfinished(Self) -> Bool
 pub fn GoalUpdate::objective(Self) -> String
 pub fn GoalUpdate::status(Self) -> GoalStatus
 pub fn GoalUpdate::token_budget(Self) -> Int?
+pub impl @json.FromJson for GoalUpdate
 
 pub struct InternalContext {
   // private fields
-} derive(ToJson, @debug.Debug, @json.FromJson)
+} derive(ToJson, @debug.Debug)
 pub fn InternalContext::InternalContext(source~ : String, String) -> Self raise
 pub fn InternalContext::content(Self) -> String
 pub fn InternalContext::source(Self) -> String
+pub impl @json.FromJson for InternalContext
 
 pub struct RuntimeNotice {
   // private fields

@@ -183,8 +183,10 @@ fn append_item_text(
   item : @agent_session.SessionItem,
 ) -> Unit {
   match item {
-    User(_) | Summary(_) | Usage(_) | Goal(_) => ()
-    Internal(context) => write_line(out, context.content())
+    // Host-authored text (prompts, steering) stays out of the transcript
+    // metrics: they measure model behavior, and goal continuations quote
+    // objectives, commands, and audit prose that would skew the counters.
+    User(_) | Summary(_) | Usage(_) | Goal(_) | Internal(_) => ()
     Assistant(message) => {
       if message.reasoning_content() is Some(reasoning) {
         write_line(out, reasoning)

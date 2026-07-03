@@ -615,7 +615,7 @@ pub fn TurnUsage::total_tokens(self : TurnUsage) -> Int {
 pub struct InternalContext {
   priv source : String
   priv content : String
-} derive(Debug, ToJson, FromJson)
+} derive(Debug, ToJson)
 
 ///|
 /// Wrap host-injected steering content under a source label.

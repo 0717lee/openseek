@@ -25,14 +25,20 @@ async fn generate_compaction_summary(
   model~ : @deepseek.Model,
   session : @agent_session.Session,
   api_url? : String,
-) -> String {
+) -> (String, @agent_session.TurnUsage) {
   let client = @client.Client(api_key~, model~, api_url?, thinking=No)
   let response = client.chat(compaction_messages(session))
   let summary = response.content.trim().to_owned()
   if summary.is_empty() {
     fail("compaction summary was empty")
   }
-  summary
+  (
+    summary,
+    TurnUsage(
+      prompt_tokens=response.usage.prompt_tokens,
+      completion_tokens=response.usage.completion_tokens,
+    ),
+  )
 }
 
 ///|
@@ -52,6 +58,19 @@ async fn append_compaction_summary(
       to_sequence~,
       unix_ms=@env.now().reinterpret_as_int64(),
     )
+  }
+}
+
+///|
+async fn append_usage_event(
+  store? : @store.SessionStore,
+  session : @agent_session.Session,
+  usage : @agent_session.TurnUsage,
+) -> @agent_session.Session {
+  if store is Some(store) {
+    store.append(session, Usage(usage))
+  } else {
+    session.append(Usage(usage), unix_ms=@env.now().reinterpret_as_int64())
   }
 }
 
@@ -76,7 +95,16 @@ pub async fn compact_session(
       "from_sequence": from_sequence,
       "to_sequence": to_sequence,
     }
-  let summary = generate_compaction_summary(api_key~, model~, session, api_url?)
+  let (summary, usage) = generate_compaction_summary(
+    api_key~,
+    model~,
+    session,
+    api_url?,
+  )
+  // The summarizer call is real model spend: record it durably so budget
+  // accounting (a fold over Usage events) cannot undercount compaction.
+  // Appended before the Summary so the summary stays the range's terminator.
+  let session = append_usage_event(store?, session, usage)
   let next = append_compaction_summary(
     store?,
     session,

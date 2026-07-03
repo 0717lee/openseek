@@ -32,7 +32,7 @@ pub struct GoalUpdate {
   priv objective : String
   priv status : GoalStatus
   priv token_budget : Int?
-} derive(Debug, ToJson, FromJson)
+} derive(Debug, ToJson)
 
 ///|
 /// Record one goal transition.
@@ -47,11 +47,12 @@ pub fn GoalUpdate::GoalUpdate(
   status~ : GoalStatus,
   token_budget? : Int,
 ) -> GoalUpdate raise {
-  guard goal_id != "" else { fail("goal_id must not be empty") }
+  guard goal_id.trim() != "" else { fail("goal_id must not be blank") }
   guard objective.trim() != "" else { fail("goal objective must not be empty") }
-  if objective.length() > MAX_GOAL_OBJECTIVE_CHARS {
+  let objective_chars = objective.char_length()
+  if objective_chars > MAX_GOAL_OBJECTIVE_CHARS {
     fail(
-      "goal objective must be at most \{MAX_GOAL_OBJECTIVE_CHARS} chars, got \{objective.length()}",
+      "goal objective must be at most \{MAX_GOAL_OBJECTIVE_CHARS} chars, got \{objective_chars}",
     )
   }
   if token_budget is Some(budget) && budget <= 0 {
@@ -109,6 +110,32 @@ pub fn GoalSnapshot::tokens_used(self : GoalSnapshot) -> Int {
 }
 
 ///|
+/// Whether this transition leaves the goal actively pursued.
+pub fn GoalUpdate::is_active(self : GoalUpdate) -> Bool {
+  self.status is Active
+}
+
+///|
+/// Whether the goal still demands attention before a new one may replace
+/// it. `BudgetLimited` counts as unfinished: the objective was not met, and
+/// replacing it silently would discard that fact.
+pub fn GoalUpdate::is_unfinished(self : GoalUpdate) -> Bool {
+  self.status is (Active | BudgetLimited)
+}
+
+///|
+/// Whether the continuation loop should keep starting turns for this goal.
+pub fn GoalSnapshot::is_active(self : GoalSnapshot) -> Bool {
+  self.goal.is_active()
+}
+
+///|
+/// Whether a token budget exists and is used up.
+pub fn GoalSnapshot::budget_exhausted(self : GoalSnapshot) -> Bool {
+  self.remaining_tokens() is Some(0)
+}
+
+///|
 /// Return the remaining token budget, or `None` when the goal is unbudgeted.
 /// Never negative: an overshoot reports zero remaining.
 pub fn GoalSnapshot::remaining_tokens(self : GoalSnapshot) -> Int? {
@@ -129,24 +156,30 @@ pub fn GoalSnapshot::remaining_tokens(self : GoalSnapshot) -> Int? {
 /// creating event: the first `Goal` event carrying the same `goal_id`. Usage
 /// recorded before the goal existed does not count against its budget.
 pub fn Session::current_goal(self : Session) -> GoalSnapshot? {
-  let mut latest : GoalUpdate? = None
+  // One forward pass tracks goal *instances*: consecutive Goal events that
+  // share a goal_id are transitions of one instance, and the accounting
+  // window opens at the instance's first event. A Goal event with a
+  // different id starts a new instance and a new window — including an old
+  // id resurfacing after another goal ran in between. Only directly
+  // consecutive reuse of an id is indistinguishable from a transition, so
+  // allocators must never reuse an earlier instance's id (the run-time id
+  // allocator counts all prior goal events, which guarantees this).
+  let mut current : GoalUpdate? = None
+  let mut window_start = -1
   for event in self.events() {
     if event.item() is Goal(update) {
-      latest = Some(update)
+      let same_instance = current is Some(prior) &&
+        prior.goal_id() == update.goal_id()
+      if !same_instance {
+        window_start = event.sequence()
+      }
+      current = Some(update)
     }
   }
-  guard latest is Some(goal) else { return None }
-  // Find the goal's creating event, then sum usage recorded after it.
-  let mut created_sequence = -1
-  for event in self.events() {
-    if event.item() is Goal(update) && update.goal_id() == goal.goal_id() {
-      created_sequence = event.sequence()
-      break
-    }
-  }
+  guard current is Some(goal) else { return None }
   let mut tokens_used = 0
   for event in self.events() {
-    if event.sequence() > created_sequence && event.item() is Usage(usage) {
+    if event.sequence() > window_start && event.item() is Usage(usage) {
       tokens_used += usage.total_tokens()
     }
   }

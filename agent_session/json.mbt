@@ -269,3 +269,44 @@ pub impl FromJson for GoalStatus with fn from_json(
     _ => json_decode_error(path, "expected string goal status")
   }
 }
+
+///|
+/// Decode an internal-context item through its validating constructor, so a
+/// stored log cannot smuggle in a source label that construction would have
+/// rejected (the label embeds unescaped in the projection envelope).
+pub impl FromJson for InternalContext with fn from_json(
+  json : Json,
+  path : @json.JsonPath,
+) -> InternalContext {
+  let fields = expect_object(json, path)
+  let source = string_field(fields, path, "source")
+  let content = string_field(fields, path, "content")
+  InternalContext(source~, content) catch {
+    error => json_decode_error(path, "\{error}")
+  }
+}
+
+///|
+/// Decode a goal transition through its validating constructor, so replayed
+/// logs obey the same objective/budget rules as freshly created goals.
+pub impl FromJson for GoalUpdate with fn from_json(
+  json : Json,
+  path : @json.JsonPath,
+) -> GoalUpdate {
+  let fields = expect_object(json, path)
+  let goal_id = string_field(fields, path, "goal_id")
+  let objective = string_field(fields, path, "objective")
+  let status : GoalStatus = match fields.get("status") {
+    Some(status_json) =>
+      @json.from_json(status_json, path=path.add_key("status"))
+    None => json_decode_error(path.add_key("status"), "expected status")
+  }
+  let token_budget = match fields.get("token_budget") {
+    None | Some(Null) => None
+    Some(Number(value, ..)) => Some(value.to_int())
+    Some(_) => json_decode_error(path.add_key("token_budget"), "expected int")
+  }
+  GoalUpdate(goal_id~, objective~, status~, token_budget?) catch {
+    error => json_decode_error(path, "\{error}")
+  }
+}
