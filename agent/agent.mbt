@@ -290,9 +290,8 @@ pub async fn[X] run_turn_in_scope(
     steps~: for step in 0..<max_steps {
       // Steering first: user-visible mid-turn input should precede runtime
       // chatter the model reads alongside it.
-      session = apply_steer_inputs(
+      session = session.apply_steer_inputs(
         pending_steers(runtime),
-        session,
         messages,
         append_item~,
       )
@@ -381,9 +380,8 @@ pub async fn[X] run_turn_in_scope(
           session,
           Assistant(AssistantMessage(response.content, reasoning_content?)),
         )
-        session = apply_steer_inputs(
+        session = session.apply_steer_inputs(
           steer_inputs,
-          session,
           messages,
           append_item~,
         )
@@ -483,9 +481,8 @@ pub async fn[X] run_turn_in_scope(
                 ),
               )
             }
-            session = apply_steer_inputs(
+            session = session.apply_steer_inputs(
               steer_inputs,
-              session,
               messages,
               append_item~,
             )
@@ -573,12 +570,12 @@ fn pending_steers(
 /// message and a model-visible chat message. Both variants emit
 /// `steer_applied`; the `kind` field distinguishes prompt steering from
 /// command context.
-async fn apply_steer_inputs(
+async fn @agent_session.Session::apply_steer_inputs(
+  session : Self,
   inputs : Array[@agent_runtime.SteerInput],
-  session : @agent_session.Session,
   messages : Array[@deepseek.ChatMessage],
   append_item~ : async (@agent_session.Session, @agent_session.SessionItem) -> @agent_session.Session,
-) -> @agent_session.Session {
+) -> Self {
   for input in inputs; current = session {
     let (kind, text) = match input {
       Prompt(text) => ("prompt", text)
