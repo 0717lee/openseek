@@ -34,7 +34,8 @@ async fn run_harness_with_runtime(
     run_shell_case(4, tools),
     run_moon_check_case(5, tools),
     run_moon_cmd_case(6, tools),
-    run_finish_case(7, tools),
+    run_goal_case(7, tools),
+    run_finish_case(8, tools),
   ]
   build_report(rows)
 }
@@ -44,7 +45,7 @@ fn tool_definitions(
   runtime : @agent_runtime.AgentRuntime,
   scope : @agent_runtime.AgentTaskScope[@report.Report],
 ) -> @agent_tool.Tools raise {
-  Tools([
+  let definitions = [
     @read.definition(),
     @write.definition(),
     @edit.definition(),
@@ -52,7 +53,11 @@ fn tool_definitions(
     @moon_check.definition(runtime, scope),
     @moon_cmd.definition(),
     @finish.definition(),
-  ])
+  ]
+  for definition in @goal.definitions(GoalCell()) {
+    definitions.push(definition)
+  }
+  Tools(definitions)
 }
 
 ///|
@@ -223,6 +228,47 @@ async fn run_moon_cmd_case(
     action="test native fixture",
     reason~,
   )
+}
+
+///|
+async fn run_goal_case(
+  index : Int,
+  tools : @agent_tool.Tools,
+) -> @report.ReportRow {
+  let created = dispatch(tools, "create_goal", {
+    "objective": "keep the tool harness green",
+    "token_budget": 1000,
+  })
+  let mut reason = expect_respond(
+    created,
+    contains=["goal goal-1 created", "token budget 1000"],
+    error=false,
+  )
+  if reason == "" {
+    let duplicate = dispatch(tools, "create_goal", { "objective": "again" })
+    reason = expect_respond(
+      duplicate,
+      contains=["an unfinished goal exists (goal-1)"],
+      error=true,
+    )
+  }
+  if reason == "" {
+    let fetched = dispatch(tools, "get_goal", {})
+    reason = expect_respond(
+      fetched,
+      contains=["goal goal-1 (status: active)", "budget: 1000"],
+      error=false,
+    )
+  }
+  if reason == "" {
+    let completed = dispatch(tools, "update_goal", { "status": "complete" })
+    reason = expect_respond(
+      completed,
+      contains=["goal goal-1 marked complete"],
+      error=false,
+    )
+  }
+  row(index~, name="goal", mode="stateful", action="goal lifecycle", reason~)
 }
 
 ///|

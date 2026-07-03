@@ -5,6 +5,7 @@ import {
   "bobzhang/openseek/agent_runtime",
   "bobzhang/openseek/agent_session",
   "bobzhang/openseek/agent_tool",
+  "bobzhang/openseek/agent_tool/goal",
   "bobzhang/openseek/deepseek",
 }
 
@@ -15,7 +16,7 @@ pub async fn run(String, @deepseek.Model, String, system_prompt_text~ : String, 
 
 pub async fn run_turn(String, @deepseek.Model, @agent_session.Session, String, max_steps? : Int, thinking? : @deepseek.ThinkingMode, api_url? : String, workspace_root? : String) -> @agent_session.Session
 
-pub async fn[X] run_turn_in_scope(@agent_runtime.AgentRuntime, @agent_runtime.AgentTaskScope[X], String, @deepseek.Model, @agent_session.Session, String, append_item~ : async (@agent_session.Session, @agent_session.SessionItem) -> @agent_session.Session, max_steps? : Int, thinking? : @deepseek.ThinkingMode, api_url? : String, tools? : @agent_tool.Tools) -> @agent_session.Session
+pub async fn[X] run_turn_in_scope(@agent_runtime.AgentRuntime, @agent_runtime.AgentTaskScope[X], String, @deepseek.Model, @agent_session.Session, String, append_item~ : async (@agent_session.Session, @agent_session.SessionItem) -> @agent_session.Session, max_steps? : Int, thinking? : @deepseek.ThinkingMode, api_url? : String, tools? : @agent_tool.Tools, goal_cell? : @goal.GoalCell) -> @agent_session.Session
 
 pub async fn run_turn_with_append(String, @deepseek.Model, @agent_session.Session, String, append_item~ : async (@agent_session.Session, @agent_session.SessionItem) -> @agent_session.Session, max_steps? : Int, thinking? : @deepseek.ThinkingMode, api_url? : String, workspace_root? : String) -> @agent_session.Session
 

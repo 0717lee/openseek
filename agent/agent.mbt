@@ -263,14 +263,24 @@ pub async fn[X] run_turn_in_scope(
   thinking? : @deepseek.ThinkingMode = Max,
   api_url? : String,
   tools? : @agent_tool.Tools,
+  goal_cell? : @goal_tool.GoalCell,
 ) -> @agent_session.Session {
   let client = @client.Client(api_key~, model~, thinking~, api_url?)
   let mut session = append_item(session, User(UserMessage(task)))
+  // The goal cell is the goal tools' view of durable goal state. When the
+  // caller supplies prebuilt tools without a cell, the fresh cell is simply
+  // never consulted; when this function builds the registry, the goal tools
+  // are bound to it.
+  let goal_cell = match goal_cell {
+    Some(cell) => cell
+    None => GoalCell()
+  }
+  refresh_goal_cell(goal_cell, session)
   try {
     let tools = match tools {
       Some(tools) => tools
       None =>
-        tool_definitions(runtime, scope) catch {
+        tool_definitions(runtime, scope, goal_cell~) catch {
           error => {
             let next = append_item(
               session,
@@ -356,6 +366,7 @@ pub async fn[X] run_turn_in_scope(
           ),
         ),
       )
+      refresh_goal_cell(goal_cell, session)
       let reasoning_content = match response.reasoning_content {
         "" => None
         content => Some(content)
@@ -528,6 +539,7 @@ pub async fn[X] run_turn_in_scope(
             ),
           ),
         )
+        session = drain_goal_updates(goal_cell, session, append_item~)
       }
     }
     let next = append_item(session, Terminal(Failed("max steps exhausted")))
@@ -593,4 +605,72 @@ fn print_usage(usage : @deepseek.Usage) -> Unit {
       "cache_hit_tokens": usage.prompt_cache_hit_tokens,
       "cache_miss_tokens": usage.prompt_cache_miss_tokens,
     }
+}
+
+///|
+fn count_goal_events(session : @agent_session.Session) -> Int {
+  let mut count = 0
+  for event in session.events() {
+    if event.item() is Goal(_) {
+      count += 1
+    }
+  }
+  count
+}
+
+///|
+/// Point the cell's in-memory view at the session's folded goal state. The
+/// goal-event count seeds fresh goal-id allocation (ids must never repeat
+/// across instances — the accounting fold depends on it).
+fn refresh_goal_cell(
+  cell : @goal_tool.GoalCell,
+  session : @agent_session.Session,
+) -> Unit {
+  let goal_events_seen = count_goal_events(session)
+  match session.current_goal() {
+    Some(snapshot) =>
+      cell.refresh(
+        Some(snapshot.goal()),
+        tokens_used=snapshot.tokens_used(),
+        goal_events_seen~,
+      )
+    None => cell.refresh(None, tokens_used=0, goal_events_seen~)
+  }
+}
+
+///|
+fn goal_status_text(status : @agent_session.GoalStatus) -> String {
+  match status {
+    Active => "active"
+    Complete => "complete"
+    Blocked => "blocked"
+    BudgetLimited => "budget_limited"
+  }
+}
+
+///|
+/// Append the transitions the goal tools requested during the last dispatch
+/// as durable Goal events, in request order, then re-point the cell at the
+/// updated fold. The loop owns every durable append, so goal state and the
+/// rest of the log cannot race.
+async fn drain_goal_updates(
+  cell : @goal_tool.GoalCell,
+  session : @agent_session.Session,
+  append_item~ : async (@agent_session.Session, @agent_session.SessionItem) -> @agent_session.Session,
+) -> @agent_session.Session {
+  let updates = cell.drain_pending()
+  let mut session = session
+  for update in updates {
+    session = append_item(session, Goal(update))
+    @xlog.info() <?
+      {
+        "event": "goal_update",
+        "goal_id": update.goal_id(),
+        "status": goal_status_text(update.status()),
+      }
+  }
+  if updates.length() > 0 {
+    refresh_goal_cell(cell, session)
+  }
+  session
 }

@@ -1,0 +1,33 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "bobzhang/openseek/agent_tool/goal/internal/decode"
+
+import {
+  "moonbitlang/core/debug",
+}
+
+// Values
+pub fn decode_create(Json) -> CreateGoalInput raise
+
+pub fn decode_update(Json) -> UpdateGoalInput raise
+
+// Errors
+
+// Types and methods
+pub struct CreateGoalInput {
+  objective : String
+  token_budget : Int?
+} derive(@debug.Debug)
+
+pub enum RequestedStatus {
+  Complete
+  Blocked
+} derive(Eq, @debug.Debug)
+
+pub struct UpdateGoalInput {
+  status : RequestedStatus
+} derive(@debug.Debug)
+
+// Type aliases
+
+// Traits
+
