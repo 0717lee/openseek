@@ -344,6 +344,18 @@ pub async fn[X] run_turn_in_scope(
           { "event": "assistant_message", "content": response.content }
       }
       print_usage(response.usage)
+      // Durable usage metadata: budget accounting (e.g. goal token budgets)
+      // folds these events, so the log must carry what the process logger
+      // sees. Metadata-only; never projected into model messages.
+      session = append_item(
+        session,
+        Usage(
+          TurnUsage(
+            prompt_tokens=response.usage.prompt_tokens,
+            completion_tokens=response.usage.completion_tokens,
+          ),
+        ),
+      )
       let reasoning_content = match response.reasoning_content {
         "" => None
         content => Some(content)

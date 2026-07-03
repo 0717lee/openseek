@@ -305,3 +305,95 @@ test "generated session ids stamp the launcher prefix and UTC wall clock" {
     "cli-20260611-081500-042-1a2b3c4d",
   )
 }
+
+///|
+test "usage events are durable but never project into model messages" {
+  // Usage lands exactly where the loop records it: between an assistant tool
+  // call and its tool result. The projection must skip it without treating it
+  // as a turn boundary, or the pending call would flush into a synthetic
+  // tool-error and orphan the real result.
+  let session = @agent_session.Session(SessionId("s1"), system_prompt="system")
+    .append(User(UserMessage("inspect")))
+    .append(Assistant(AssistantMessage("", tool_calls=[sample_tool_call()])))
+    .append(Usage(TurnUsage(prompt_tokens=120, completion_tokens=30)))
+    .append(
+      Tool(
+        ToolResult(tool_call_id="call_1", tool_name="read", content="README"),
+      ),
+    )
+    .append(Usage(TurnUsage(prompt_tokens=180, completion_tokens=12)))
+    .append(Terminal(Finished("done")))
+  let messages = session.chat_messages()
+  // system, user, assistant(tool_call), tool result, final assistant — and
+  // nothing derived from the two Usage events.
+  assert_eq(messages.length(), 5)
+  guard messages[3].role is Tool("call_1") else {
+    fail("expected the real tool result to survive projection")
+  }
+  assert_eq(messages[3].content, "README")
+  // The durable log still carries both usage events for accounting folds.
+  let mut total = 0
+  for event in session.events() {
+    if event.item() is Usage(usage) {
+      total += usage.total_tokens()
+    }
+  }
+  assert_eq(total, 342)
+}
+
+///|
+test "internal context projects as an enveloped user message" {
+  let session = @agent_session.Session(SessionId("s1"), system_prompt="system").append(
+    Internal(InternalContext(source="goal", "Continue working toward it.")),
+  )
+  let messages = session.chat_messages()
+  assert_eq(messages.length(), 2)
+  guard messages[1].role is User else { fail("expected a user-role message") }
+  assert_eq(
+    messages[1].content,
+    (
+      #|<openseek_internal_context source="goal">
+      #|Continue working toward it.
+      #|</openseek_internal_context>
+    ),
+  )
+}
+
+///|
+test "internal context sources are constrained" {
+  fn rejected(source : String) -> Bool {
+    let _ = @agent_session.InternalContext(source~, "x") catch {
+      _ => return true
+    }
+    false
+  }
+
+  assert_true(rejected(""))
+  assert_true(rejected("Goal"))
+  assert_true(rejected("9goal"))
+  assert_true(rejected("goal-loop"))
+  assert_true(rejected("goal\" injected=\"1"))
+  assert_false(rejected("goal"))
+  assert_false(rejected("goal_loop2"))
+}
+
+///|
+test "usage and internal context round trip through JSON" {
+  let session = @agent_session.Session(SessionId("s1"), system_prompt="p")
+    .append(Usage(TurnUsage(prompt_tokens=7, completion_tokens=3)))
+    .append(Internal(InternalContext(source="goal", "steer")))
+  for event in session.events() {
+    let line = event.to_json().stringify()
+    let decoded : @agent_session.SessionEvent = @json.from_json(
+      @json.parse(line),
+    )
+    assert_eq(decoded.to_json().stringify(), line)
+  }
+  guard session.events()[0].item() is Usage(usage) else { fail("usage") }
+  assert_eq(usage.prompt_tokens(), 7)
+  guard session.events()[1].item() is Internal(context) else {
+    fail("internal")
+  }
+  assert_eq(context.source(), "goal")
+  assert_eq(context.content(), "steer")
+}

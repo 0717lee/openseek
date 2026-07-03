@@ -819,3 +819,25 @@ async test "store compacts by appending a durable summary" {
   assert_eq(loaded.chat_messages().length(), 2)
   @fs.rmdir(store.root(), recursive=true)
 }
+
+///|
+async test "store round-trips usage and internal context events" {
+  let store = new_store()
+  let session = @agent_session.Session(
+      SessionId("meta1"),
+      system_prompt="system",
+    )
+    .append(User(UserMessage("go")))
+    .append(Usage(TurnUsage(prompt_tokens=11, completion_tokens=5)))
+    .append(Internal(InternalContext(source="goal", "keep going")))
+  store.create(session)
+  let loaded = store.load(SessionId("meta1"))
+  assert_eq(loaded.events().length(), 3)
+  guard loaded.events()[1].item() is Usage(usage) else { fail("usage") }
+  assert_eq(usage.total_tokens(), 16)
+  guard loaded.events()[2].item() is Internal(context) else { fail("internal") }
+  assert_eq(context.source(), "goal")
+  // Resume equivalence: the reloaded session projects identical model context.
+  assert_eq(loaded.chat_messages().length(), session.chat_messages().length())
+  @fs.rmdir(store.root(), recursive=true)
+}

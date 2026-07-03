@@ -21,6 +21,13 @@ pub fn AssistantMessage::content(Self) -> String
 pub fn AssistantMessage::reasoning_content(Self) -> String?
 pub fn AssistantMessage::tool_calls(Self) -> Array[@deepseek.ToolCall]
 
+pub struct InternalContext {
+  // private fields
+} derive(ToJson, @debug.Debug, @json.FromJson)
+pub fn InternalContext::InternalContext(source~ : String, String) -> Self raise
+pub fn InternalContext::content(Self) -> String
+pub fn InternalContext::source(Self) -> String
+
 pub struct RuntimeNotice {
   // private fields
 } derive(ToJson, @debug.Debug, @json.FromJson)
@@ -65,6 +72,8 @@ pub(all) enum SessionItem {
   Runtime(RuntimeNotice)
   Summary(SessionSummary)
   Terminal(TurnTerminal)
+  Usage(TurnUsage)
+  Internal(InternalContext)
 } derive(@debug.Debug)
 pub impl ToJson for SessionItem
 pub impl @json.FromJson for SessionItem
@@ -95,6 +104,14 @@ pub(all) enum TurnTerminal {
 } derive(@debug.Debug)
 pub impl ToJson for TurnTerminal
 pub impl @json.FromJson for TurnTerminal
+
+pub struct TurnUsage {
+  // private fields
+} derive(ToJson, @debug.Debug, @json.FromJson)
+pub fn TurnUsage::TurnUsage(prompt_tokens~ : Int, completion_tokens~ : Int) -> Self
+pub fn TurnUsage::completion_tokens(Self) -> Int
+pub fn TurnUsage::prompt_tokens(Self) -> Int
+pub fn TurnUsage::total_tokens(Self) -> Int
 
 pub struct UserMessage {
   // private fields

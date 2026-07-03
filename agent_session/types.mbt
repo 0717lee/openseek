@@ -350,7 +350,9 @@ pub(all) enum TurnTerminal {
 /// answers a pending assistant tool call. `Summary` is append-only compaction
 /// metadata that can replace older events during projection. `Terminal`
 /// records turn completion status and may project as a final assistant/status
-/// message.
+/// message. `Internal` projects as an enveloped user-role message for
+/// host-injected steering. `Usage` is durable metadata only and never
+/// projects into model messages.
 pub(all) enum SessionItem {
   User(UserMessage)
   Assistant(AssistantMessage)
@@ -358,6 +360,8 @@ pub(all) enum SessionItem {
   Runtime(RuntimeNotice)
   Summary(SessionSummary)
   Terminal(TurnTerminal)
+  Usage(TurnUsage)
+  Internal(InternalContext)
 } derive(Debug)
 
 ///|
@@ -556,4 +560,106 @@ pub fn Session::compact(
     Summary(SessionSummary(content~, from_sequence~, to_sequence~)),
     unix_ms~,
   )
+}
+
+///|
+/// Per-model-response token usage, recorded durably so budget accounting can
+/// be a pure fold over the event log that replays identically after resume.
+///
+/// Metadata-only: `Usage` events are never projected into model messages (see
+/// `chat_messages`), and skipping them must not disturb pending tool-call
+/// repair, because the loop records usage between an assistant tool call and
+/// its tool result.
+pub struct TurnUsage {
+  priv prompt_tokens : Int
+  priv completion_tokens : Int
+} derive(Debug, ToJson, FromJson)
+
+///|
+/// Record the token usage of one model response.
+pub fn TurnUsage::TurnUsage(
+  prompt_tokens~ : Int,
+  completion_tokens~ : Int,
+) -> TurnUsage {
+  { prompt_tokens, completion_tokens }
+}
+
+///|
+/// Return the prompt-token count of this response.
+pub fn TurnUsage::prompt_tokens(self : TurnUsage) -> Int {
+  self.prompt_tokens
+}
+
+///|
+/// Return the completion-token count of this response.
+pub fn TurnUsage::completion_tokens(self : TurnUsage) -> Int {
+  self.completion_tokens
+}
+
+///|
+/// Return prompt plus completion tokens.
+pub fn TurnUsage::total_tokens(self : TurnUsage) -> Int {
+  self.prompt_tokens + self.completion_tokens
+}
+
+///|
+/// Host-injected hidden steering context, the analog of Codex's
+/// `InternalModelContextFragment`.
+///
+/// Projects as a user-role model message wrapped in an
+/// `<openseek_internal_context source="...">` envelope, so the model receives
+/// it like user input while stored history and UIs can tell it apart from
+/// text the user actually typed. Repeated host steering (e.g. goal
+/// continuation prompts) belongs here rather than in `User` events.
+pub struct InternalContext {
+  priv source : String
+  priv content : String
+} derive(Debug, ToJson, FromJson)
+
+///|
+/// Wrap host-injected steering content under a source label.
+///
+/// `source` is embedded in the envelope attribute without escaping, so it is
+/// constrained to `[a-z][a-z0-9_]*`; anything else raises. Constraining the
+/// label keeps the envelope unforgeable by content and easy to audit in
+/// stored history.
+pub fn InternalContext::InternalContext(
+  source~ : String,
+  content : String,
+) -> InternalContext raise {
+  guard is_valid_internal_source(source) else {
+    fail("invalid internal context source \{source}; expected [a-z][a-z0-9_]*")
+  }
+  { source, content }
+}
+
+///|
+fn is_valid_internal_source(source : String) -> Bool {
+  if source.length() == 0 {
+    return false
+  }
+  for index, unit in source {
+    let lower = unit is ('a'..='z')
+    let digit = unit is ('0'..='9')
+    if index == 0 {
+      if !lower {
+        return false
+      }
+    } else if !lower && !digit && unit != '_' {
+      return false
+    }
+  }
+  true
+}
+
+///|
+/// Return this context's source label.
+pub fn InternalContext::source(self : InternalContext) -> String {
+  self.source
+}
+
+///|
+/// Return the steering content without its envelope.
+pub fn InternalContext::content(self : InternalContext) -> String {
+  self.content
 }

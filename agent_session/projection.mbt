@@ -8,6 +8,19 @@ fn summary_model_content(summary : SessionSummary) -> String {
 }
 
 ///|
+/// Envelope for host-injected steering so the model sees the content as user
+/// input while history and UIs can attribute it to the host. Mirrors Codex's
+/// `<codex_internal_context source="...">` wrapper; the source is constrained
+/// at construction so it embeds without escaping.
+fn internal_model_content(context : InternalContext) -> String {
+  (
+    $|<openseek_internal_context source="\{context.source()}">
+    $|\{context.content()}
+    $|</openseek_internal_context>
+  )
+}
+
+///|
 /// A status line for a non-finished turn: the bare `label` when `reason` is
 /// blank, otherwise the label followed by the reason on its own line.
 fn agent_status_message(label : String, reason : String) -> String? {
@@ -61,6 +74,11 @@ fn append_item_message(
       if terminal_model_message(terminal) is Some(content) {
         messages.push(ChatMessage(Assistant, content~))
       }
+    Internal(context) =>
+      messages.push(ChatMessage(User, content=internal_model_content(context)))
+    // Metadata-only items are handled (skipped) before this function is
+    // reached; the arm exists so the match stays exhaustive.
+    Usage(_) => ()
   }
 }
 
@@ -143,6 +161,13 @@ pub fn Session::chat_messages(self : Session) -> Array[@deepseek.ChatMessage] {
   let events = self.events()
   for event in events {
     if is_covered_by_later_summary(event, events) {
+      continue
+    }
+    // Metadata-only items never reach the model. They must be skipped before
+    // the tool-call repair below: a `Usage` event lands between an assistant
+    // tool call and its tool result, and treating it as a normal event would
+    // flush the pending call into a synthetic tool error.
+    if event.item() is Usage(_) {
       continue
     }
     match event.item() {

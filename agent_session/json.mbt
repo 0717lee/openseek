@@ -125,6 +125,8 @@ fn item_payload(item : SessionItem) -> (String, Json) {
     Runtime(notice) => ("runtime_notice", notice.to_json())
     Summary(summary) => ("summary", summary.to_json())
     Terminal(terminal) => ("terminal", terminal.to_json())
+    Usage(usage) => ("usage", usage.to_json())
+    Internal(context) => ("internal_context", context.to_json())
   }
 }
 
@@ -165,6 +167,9 @@ pub impl FromJson for SessionItem with fn from_json(
     "summary" => Summary(@json.from_json(payload, path=path.add_key("payload")))
     "terminal" =>
       Terminal(@json.from_json(payload, path=path.add_key("payload")))
+    "usage" => Usage(@json.from_json(payload, path=path.add_key("payload")))
+    "internal_context" =>
+      Internal(@json.from_json(payload, path=path.add_key("payload")))
     other =>
       json_decode_error(
         path.add_key("kind"),

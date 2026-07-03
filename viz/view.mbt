@@ -301,6 +301,16 @@ fn event_card(
       ])
     Summary(summary) => summary_card(seq, time, summary)
     Terminal(terminal) => terminal_card(seq, time, terminal, step_label~)
+    Usage(usage) =>
+      card("runtime", "Usage", seq, time~, [
+        text_block(
+          "prompt: \{usage.prompt_tokens()} · completion: \{usage.completion_tokens()}",
+        ),
+      ])
+    Internal(context) =>
+      card("runtime", "Internal context (\{context.source()})", seq, time~, [
+        text_block(context.content()),
+      ])
   }
 }
 
@@ -850,6 +860,8 @@ fn terminal_projects_model_message(
 fn item_projects_model_message(item : @agent_session.SessionItem) -> Bool {
   match item {
     User(_) | Runtime(_) | Summary(_) | Assistant(_) | Tool(_) => true
+    Internal(_) => true
+    Usage(_) => false
     Terminal(terminal) => terminal_projects_model_message(terminal)
   }
 }

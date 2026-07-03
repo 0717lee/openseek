@@ -36,6 +36,25 @@ async fn steer_test_server(group : @async.TaskGroup[Unit]) -> String? {
 }
 
 ///|
+/// The durable log without `Usage` metadata, plus the usage-event count.
+/// Each model response appends one `Usage` event; these tests pin the
+/// conversation-shaped sequence and assert the usage count separately.
+fn conversation_events(
+  session : @agent_session.Session,
+) -> (Array[@agent_session.SessionEvent], Int) {
+  let visible = []
+  let mut usage_count = 0
+  for event in session.events() {
+    if event.item() is Usage(_) {
+      usage_count += 1
+    } else {
+      visible.push(event)
+    }
+  }
+  (visible, usage_count)
+}
+
+///|
 async test "queued steering is folded in at the next step boundary" {
   @async.with_task_group() <| group => {
     guard steer_test_server(group) is Some(url) else { return }
@@ -65,9 +84,10 @@ async test "queued steering is folded in at the next step boundary" {
       tools~,
     )
     // The steered text is durably part of the conversation: task, steer,
-    // then the finished terminal.
-    let events = result.events()
+    // then the finished terminal. Usage metadata is asserted separately.
+    let (events, usage_count) = conversation_events(result)
     assert_eq(events.length(), 3)
+    assert_eq(usage_count, 1)
     guard events[0].item() is User(task) else { fail("expected task event") }
     assert_eq(task.content(), "do the task")
     guard events[1].item() is User(steer) else { fail("expected steer event") }
@@ -152,8 +172,9 @@ async test "a steer racing the final call keeps the turn alive" {
     // User input beat the model's completion: the draft stayed an ordinary
     // assistant message, the steer follows it, and the turn finished on the
     // second answer.
-    let events = result.events()
+    let (events, usage_count) = conversation_events(result)
     assert_eq(events.length(), 4)
+    assert_eq(usage_count, 2)
     assert_true(events[0].item() is User(_))
     guard events[1].item() is Assistant(draft) else {
       fail("expected the draft as an assistant message")
@@ -249,8 +270,9 @@ async test "inject racing the final call keeps the turn alive" {
       max_steps=3,
       api_url=url,
     )
-    let events = result.events()
+    let (events, usage_count) = conversation_events(result)
     assert_eq(events.length(), 4)
+    assert_eq(usage_count, 2)
     assert_true(events[0].item() is User(_))
     guard events[1].item() is Assistant(draft) else {
       fail("expected the draft as an assistant message")
@@ -291,7 +313,9 @@ async test "blank steering input is dropped at the boundary" {
       api_url=url,
     )
     // The blank steer left no trace; only the real one was applied.
-    assert_eq(result.events().length(), 3)
+    let (events, usage_count) = conversation_events(result)
+    assert_eq(events.length(), 3)
+    assert_eq(usage_count, 1)
   }
 }
 
@@ -380,8 +404,9 @@ async test "streaming reasoning deltas are skipped in logs" {
       max_steps=1,
       api_url=url,
     )
-    let events = result.events()
+    let (events, usage_count) = conversation_events(result)
     assert_eq(events.length(), 2)
+    assert_eq(usage_count, 1)
     assert_true(events[0].item() is User(_))
     guard events[1].item() is Terminal(Finished("done")) else {
       fail("expected a completed one-step turn")

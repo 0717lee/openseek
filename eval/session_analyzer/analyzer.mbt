@@ -183,7 +183,8 @@ fn append_item_text(
   item : @agent_session.SessionItem,
 ) -> Unit {
   match item {
-    User(_) | Summary(_) => ()
+    User(_) | Summary(_) | Usage(_) => ()
+    Internal(context) => write_line(out, context.content())
     Assistant(message) => {
       if message.reasoning_content() is Some(reasoning) {
         write_line(out, reasoning)
