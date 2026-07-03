@@ -233,8 +233,17 @@ async fn sessions_list(matches : @argparse.Matches) -> Unit {
   let store = @store.SessionStore(session_root(matches, workspace_root~))
   match session_list_format(matches) {
     Text =>
+      // Tab-separated id, last-activity stamp (UTC, minute precision; `-` for
+      // an unreadable session), and the first user prompt as a one-line
+      // label — `sessions list | cut -f1` recovers the bare ids.
       for listing in store.listings() {
-        println(format_session_listing(listing))
+        let when = match listing.last_active_unix_seconds() {
+          Some(seconds) => format_utc_minute(seconds)
+          None => "-"
+        }
+        println(
+          "\{listing.id().value()}\t\{when}\t\{compact_prompt_label(listing.first_prompt())}",
+        )
       }
     Json => println(session_list_json(store).stringify())
   }
@@ -575,14 +584,10 @@ fn root_command() -> @argparse.Command {
 /// copied `<dir>_run_1` workspace" — the flag always protects `--dir` from
 /// writes, at every N. Only the flagless default runs in place.
 fn fleet_mode(matches : @argparse.Matches, concurrency : Int) -> Bool {
-  concurrency >= 2 || explicitly_provided(matches, "concurrency")
-}
-
-///|
-/// Whether the user supplied `name` on the command line or via its
-/// environment variable, rather than the built-in default filling it in.
-fn explicitly_provided(matches : @argparse.Matches, name : String) -> Bool {
-  matches.sources.get(name) is (Some(Argv) | Some(Env))
+  // Explicit means supplied on the command line or via its environment
+  // variable, rather than the built-in default filling it in.
+  concurrency >= 2 ||
+  matches.sources.get("concurrency") is (Some(Argv) | Some(Env))
 }
 
 ///|
@@ -648,14 +653,12 @@ fn is_path_root(path : String) -> Bool {
   path == "\\" ||
   path == "//" ||
   path == "\\\\" ||
-  is_windows_drive_root(path)
-}
-
-///|
-fn is_windows_drive_root(path : String) -> Bool {
-  path.length() == 3 &&
-  path[1] == ':' &&
-  (path.has_suffix("/") || path.has_suffix("\\"))
+  // A Windows drive root: `C:/` or `C:\`.
+  (
+    path.length() == 3 &&
+    path[1] == ':' &&
+    (path.has_suffix("/") || path.has_suffix("\\"))
+  )
 }
 
 ///|
@@ -720,19 +723,6 @@ fn format_utc_minute(seconds : Int64) -> String {
 
   let time = @time.unix(seconds) catch { _ => return "-" }
   "\{time.year()}-\{pad2(time.month())}-\{pad2(time.day())} \{pad2(time.hour())}:\{pad2(time.minute())}"
-}
-
-///|
-/// One `sessions list` row: tab-separated id, last-activity stamp (UTC,
-/// minute precision; `-` for an unreadable session), and the first user
-/// prompt as a one-line label. Tab separation keeps the listing scriptable —
-/// `sessions list | cut -f1` recovers the bare ids the old format printed.
-fn format_session_listing(listing : @store.SessionListing) -> String {
-  let when = match listing.last_active_unix_seconds() {
-    Some(seconds) => format_utc_minute(seconds)
-    None => "-"
-  }
-  "\{listing.id().value()}\t\{when}\t\{compact_prompt_label(listing.first_prompt())}"
 }
 
 ///|

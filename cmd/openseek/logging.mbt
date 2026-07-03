@@ -18,13 +18,6 @@ priv struct FlushedStdout {
 }
 
 ///|
-fn FlushedStdout::FlushedStdout(
-  format? : @xlog.Format = Jsonl,
-) -> FlushedStdout {
-  { format, lines: Queue(kind=Unbounded) }
-}
-
-///|
 impl @xlog.Handler for FlushedStdout with fn handle(
   self : FlushedStdout,
   entry : @xlog.Entry,
@@ -67,7 +60,7 @@ fn FlushedStdout::close(self : FlushedStdout) -> Unit {
 /// live. Best-effort: if the file cannot be opened, logging stays
 /// stdout-only rather than failing the run.
 fn configure_logging() -> FlushedStdout {
-  let stdout = FlushedStdout()
+  let stdout : FlushedStdout = { format: Jsonl, lines: Queue(kind=Unbounded) }
   guard @env.get_env_var("OPENSEEK_LOG_FILE") is Some(path) && path != "" else {
     @xlog.global().set_handler(stdout)
     return stdout
