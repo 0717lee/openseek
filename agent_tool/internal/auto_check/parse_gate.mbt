@@ -482,9 +482,17 @@ async test "content_parse_errors gates real content through moonc" {
   }
   assert_true(gate.errors.length() > 0)
   assert_true(gate.errors[0].message.contains("Parse error"))
-  // The scratch-dir invocation (relative file name, cwd inside the dir) makes
-  // moonc emit its own context excerpt; the formatter prefers it.
-  assert_true(gate.errors[0].context != "")
+  // Nightly moonc emits its own context excerpt in this invocation shape;
+  // stable does not — the contract is only that the formatter renders a
+  // numbered excerpt either way (compiler context preferred, loc-based
+  // synthesis as the fallback), so assert at that level.
+  let rendered = format_parse_gate_errors(
+    "gate.mbt",
+    "///|\npub fn bad() -> Int {\n  let x =\n}\n",
+    gate.errors,
+  )
+  assert_true(rendered.length() > 0)
+  assert_true(rendered[0].contains(" |"))
   // moonc EXITS 0 when its parser recovers from an error (e.g. `&mut` in a
   // parameter type), so the gate must trust captured diagnostics, never the
   // exit code — this content must still be rejected.
