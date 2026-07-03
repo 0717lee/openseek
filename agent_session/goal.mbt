@@ -117,8 +117,17 @@ pub fn GoalUpdate::is_active(self : GoalUpdate) -> Bool {
 
 ///|
 /// Whether the goal still demands attention before a new one may replace
-/// it. `BudgetLimited` counts as unfinished: the objective was not met, and
-/// replacing it silently would discard that fact.
+/// it. `BudgetLimited` counts as unfinished: the objective was not met and
+/// replacing it silently would discard that fact — the user decides whether
+/// to re-fund or abandon it.
+///
+/// `Blocked` is deliberately *not* unfinished: `update_goal` can only reach
+/// `complete` or `blocked`, so treating blocked as unfinished would lock
+/// goal creation out permanently (there is no reactivate transition yet).
+/// A blocked goal has already surfaced its impasse and stopped the loop;
+/// `create_goal` is explicit-user-request-only, so a subsequent creation is
+/// the user's redirection, not a silent abandonment. If a resume/reactivate
+/// transition lands later, revisit this.
 pub fn GoalUpdate::is_unfinished(self : GoalUpdate) -> Bool {
   self.status is (Active | BudgetLimited)
 }

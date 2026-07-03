@@ -6,6 +6,8 @@ import {
 }
 
 // Values
+pub fn goal_continuation_prompt(objective~ : String, tokens_used~ : Int, token_budget? : Int, has_plan_tool? : Bool) -> String
+
 pub fn system_prompt_for_model(@deepseek.Model) -> String
 
 // Errors

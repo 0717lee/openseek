@@ -10,9 +10,13 @@ import {
 }
 
 // Values
+pub const DEFAULT_MAX_CONTINUATIONS : Int = 25
+
 pub fn[X] build_tools(@agent_runtime.AgentRuntime, @agent_runtime.AgentTaskScope[X], goal_cell? : @goal.GoalCell) -> @agent_tool.Tools raise
 
 pub async fn run(String, @deepseek.Model, String, system_prompt_text~ : String, max_steps? : Int, thinking? : @deepseek.ThinkingMode, api_url? : String, workspace_root? : String) -> Unit
+
+pub async fn[X] run_goal_in_scope(@agent_runtime.AgentRuntime, @agent_runtime.AgentTaskScope[X], String, @deepseek.Model, @agent_session.Session, String, append_item~ : async (@agent_session.Session, @agent_session.SessionItem) -> @agent_session.Session, max_steps? : Int, max_continuations? : Int, thinking? : @deepseek.ThinkingMode, api_url? : String) -> @agent_session.Session
 
 pub async fn run_turn(String, @deepseek.Model, @agent_session.Session, String, max_steps? : Int, thinking? : @deepseek.ThinkingMode, api_url? : String, workspace_root? : String) -> @agent_session.Session
 

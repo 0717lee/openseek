@@ -622,3 +622,17 @@ test "goal snapshot helpers expose loop decisions" {
   assert_false(capped.is_active())
   assert_true(capped.goal().is_unfinished())
 }
+
+///|
+test "a blocked goal is replaceable by design" {
+  // Deliberate v1 semantics: update_goal reaches only complete|blocked, so a
+  // blocked goal must not gate create_goal or goal creation deadlocks. The
+  // impasse was already surfaced when the loop stopped; a subsequent
+  // explicit create_goal is the user's redirection.
+  let blocked = @agent_session.Session(SessionId("g8"), system_prompt="s").append(
+    goal_event("goal-1", Blocked),
+  )
+  guard blocked.current_goal() is Some(snapshot) else { fail("expected goal") }
+  assert_false(snapshot.is_active())
+  assert_false(snapshot.goal().is_unfinished())
+}

@@ -5,6 +5,7 @@ import {
   "bobzhang/openseek/agent_tool/edit",
   "bobzhang/openseek/agent_tool/finish",
   "bobzhang/openseek/agent_tool/goal" @goal_tool,
+  "bobzhang/openseek/prompt",
   "bobzhang/openseek/agent_tool/moon_check",
   "bobzhang/openseek/agent_tool/multi_edit",
   "bobzhang/openseek/agent_tool/read",
