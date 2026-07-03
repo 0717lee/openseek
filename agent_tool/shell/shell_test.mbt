@@ -54,7 +54,7 @@ async fn sandbox_exec_usable_for_test() -> Bool {
     profile,
     "sh",
     "-c",
-    "printf probe > \{test_shell_quote(blocked)}",
+    "printf probe > '\{blocked.replace_all(old="'", new="'\\''")}'",
   ]) catch {
     _ => {
       cleanup_sandbox_exec_test_probe(probe_dir, blocked)
@@ -64,12 +64,6 @@ async fn sandbox_exec_usable_for_test() -> Bool {
   let denied = deny_code != 0 && !@fs.exists(blocked)
   cleanup_sandbox_exec_test_probe(probe_dir, blocked)
   denied
-}
-
-///|
-#cfg(not(platform="windows"))
-fn test_shell_quote(text : String) -> String {
-  "'\{text.replace_all(old="'", new="'\\''")}'"
 }
 
 ///|

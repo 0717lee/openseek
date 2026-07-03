@@ -58,7 +58,7 @@ fn lex(command : String) -> LexResult {
     let ch = chars[index]
     match state {
       Plain => {
-        if is_shell_space(ch) {
+        if ch is (' ' | '\t') {
           word.flush_and_reset(tokens)
           index += 1
           continue
@@ -305,11 +305,6 @@ fn peek_char(chars : Array[Char], index : Int) -> Char? {
   } else {
     None
   }
-}
-
-///|
-fn is_shell_space(ch : Char) -> Bool {
-  ch == ' ' || ch == '\t'
 }
 
 ///|

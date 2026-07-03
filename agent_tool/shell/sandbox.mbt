@@ -178,7 +178,8 @@ async fn probe_sandbox_exec_available() -> Bool {
     return false
   }
   let write_args = ["-p", probe_profile, PlatformShellProgram]
-  for arg in platform_shell_args("printf probe > \{shell_quote(blocked_path)}") {
+  let quoted_path = "'\{blocked_path.replace_all(old="'", new="'\\''")}'"
+  for arg in platform_shell_args("printf probe > \{quoted_path}") {
     write_args.push(arg)
   }
   let write_output = collect_process_output(
@@ -212,11 +213,6 @@ fn sandbox_denial_probe_profile(blocked_path : String) -> String {
     $|(allow default)
     $|(deny file-write* (literal "\{sbpl_string_escape(blocked_path)}"))
   )
-}
-
-///|
-fn shell_quote(text : String) -> String {
-  "'\{text.replace_all(old="'", new="'\\''")}'"
 }
 
 ///|
@@ -1904,21 +1900,16 @@ fn command_line_after_first_post_heredoc_pipe(line : String) -> String? {
           ch == '|' &&
           !(index > 0 && chars[index - 1] == '|') &&
           !(index + 1 < chars.length() && chars[index + 1] == '|') {
-          return Some(chars_to_string(chars, index + 1))
+          let target = StringBuilder()
+          for rest in (index + 1)..<chars.length() {
+            target.write_char(chars[rest])
+          }
+          return Some(target.to_string())
         }
     }
     index += 1
   }
   None
-}
-
-///|
-fn chars_to_string(chars : Array[Char], start : Int) -> String {
-  let output = StringBuilder()
-  for index in start..<chars.length() {
-    output.write_char(chars[index])
-  }
-  output.to_string()
 }
 
 ///|
@@ -2336,18 +2327,13 @@ fn heredoc_line_matches_delimiter(
   line : String,
   delimiter : HeredocDelimiter,
 ) -> Bool {
-  let line = strip_trailing_cr(line)
-  let line = if delimiter.strip_tabs { strip_leading_tabs(line) } else { line }
-  line == delimiter.marker
-}
-
-///|
-fn strip_trailing_cr(line : String) -> String {
-  if line.has_suffix("\r") {
+  let line = if line.has_suffix("\r") {
     line[:line.length() - 1].to_owned()
   } else {
     line
   }
+  let line = if delimiter.strip_tabs { strip_leading_tabs(line) } else { line }
+  line == delimiter.marker
 }
 
 ///|

@@ -179,7 +179,12 @@ fn overwrites_untracked_from_tree(
       arg == "--overlay" ||
       arg == "--ours" ||
       arg == "--theirs" ||
-      short_cluster_has(arg, "f") {
+      (
+        arg.has_prefix("-") &&
+        !arg.has_prefix("--") &&
+        arg != "-" &&
+        arg.contains("f")
+      ) {
       return true
     }
     // Explicit source tree-ish: `--source`, `--source=<t>`, `-s`, `-s<t>`.
@@ -202,15 +207,6 @@ fn overwrites_untracked_from_tree(
     }
   }
   false
-}
-
-///|
-/// True when `arg` is a short option cluster (`-…`, not `--…`) containing `flag`.
-fn short_cluster_has(arg : String, flag : String) -> Bool {
-  arg.has_prefix("-") &&
-  !arg.has_prefix("--") &&
-  arg != "-" &&
-  arg.contains(flag)
 }
 
 ///|
@@ -256,7 +252,11 @@ fn clean_args_request_dry_run(
   let mut dry_run = false
   for index in start..<end {
     let arg = words[index]
-    if clean_arg_is_exclude(arg) {
+    // `-e`/`--exclude[=…]`, including `e` inside a short cluster.
+    if arg == "-e" ||
+      arg == "--exclude" ||
+      arg.has_prefix("--exclude=") ||
+      (arg.has_prefix("-") && !arg.has_prefix("--") && arg.contains("e")) {
       return false
     }
     if arg == "-n" ||
@@ -266,14 +266,6 @@ fn clean_args_request_dry_run(
     }
   }
   dry_run
-}
-
-///|
-fn clean_arg_is_exclude(arg : String) -> Bool {
-  arg == "-e" ||
-  arg == "--exclude" ||
-  arg.has_prefix("--exclude=") ||
-  (arg.has_prefix("-") && !arg.has_prefix("--") && arg.contains("e"))
 }
 
 ///|

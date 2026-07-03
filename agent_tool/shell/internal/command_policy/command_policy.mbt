@@ -27,7 +27,9 @@ pub fn moonbit_command_policy_error_for_parse(
     Some(moon_cmd_error_message())
   } else if parsed is Simple(commands) {
     if commands.any(sed_edits_files) {
-      Some(sed_in_place_error_message())
+      Some(
+        "error: `sed -i` edits files in place and is unreliable for code changes; use line-anchored `edit` (or `multi_edit` for several fixes in one file) for source changes",
+      )
     } else {
       None
     }
@@ -52,18 +54,20 @@ fn moon_cmd_error_message() -> String {
 }
 
 ///|
-fn sed_in_place_error_message() -> String {
-  "error: `sed -i` edits files in place and is unreliable for code changes; use line-anchored `edit` (or `multi_edit` for several fixes in one file) for source changes"
-}
-
-///|
 /// True when `command` is `sed` (after any `env`/`command`/`builtin` wrapper,
 /// and ignoring a `/usr/bin/` style path) invoked with an in-place edit flag.
 /// Read-only `sed` — `sed -n '1,5p' file`, `... | sed s/a/b/`, or a non-`sed`
 /// `-i` such as `grep -i` / `env -i sed ...` — is left alone.
 fn sed_edits_files(command : @shell_parse.SimpleCommand) -> Bool {
   guard command.command_name() is Some(name) else { return false }
-  guard command_basename(name) == "sed" else { return false }
+  // Compare the final path component so `/usr/bin/sed` and `.\sed` equal
+  // `sed` on both separators.
+  let normalized = name.replace_all(old="\\", new="/")
+  let basename = match normalized.rev_find("/") {
+    Some(slash) => normalized[slash + 1:].to_owned()
+    None => name
+  }
+  guard basename == "sed" else { return false }
   guard command.command_index() is Some(start) else { return false }
   // `command_index` skips the wrapper, so scan only `sed`'s own arguments; the
   // argv is already unquoted by the parser.
@@ -117,17 +121,6 @@ fn sed_option_consumes_next(arg : String) -> Bool {
 }
 
 ///|
-/// The final path component of a command word, so a path-qualified `sed`
-/// (`/usr/bin/sed`, `./sed`) compares equal to `sed`. Handles both separators.
-fn command_basename(name : String) -> String {
-  let normalized = name.replace_all(old="\\", new="/")
-  match normalized.rev_find("/") {
-    Some(slash) => normalized[slash + 1:].to_owned()
-    None => name
-  }
-}
-
-///|
 /// Whether a single `sed` argument requests in-place editing: the long
 /// `--in-place[=suffix]` form, or a short cluster containing `i` (`-i`, `-i.bak`,
 /// `-Ei`). `-e`/`-f` consume the rest of the token as their value, so an `i`
@@ -153,17 +146,12 @@ fn is_sed_in_place_flag(arg : String) -> Bool {
 fn shell_words(cmd : String) -> Array[String] {
   let words : Array[String] = []
   for piece in cmd.split(" ") {
-    let word = clean_shell_word(piece.to_owned())
+    let word = "\{piece.trim(chars="\t\r\n ").trim(chars=";&|()")}"
     if word != "" {
       words.push(word)
     }
   }
   words
-}
-
-///|
-fn clean_shell_word(word : String) -> String {
-  "\{word.trim(chars="\t\r\n ").trim(chars=";&|()")}"
 }
 
 ///|

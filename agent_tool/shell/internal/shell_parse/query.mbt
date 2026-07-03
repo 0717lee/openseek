@@ -95,12 +95,16 @@ fn env_wrapped_command_index(argv : Array[String]) -> Int? {
       index += 1
       continue
     }
-    if scanning_options && env_option_consumes_next(arg) {
+    if scanning_options && (arg == "-u" || arg == "--unset") {
       index += 2
       continue
     }
     if scanning_options &&
-      (env_option_with_attached_value(arg) || env_no_arg_option(arg)) {
+      (
+        (arg.has_prefix("-u") && arg != "-u") ||
+        arg.has_prefix("--unset=") ||
+        arg is ("--ignore-environment" | "-0" | "--null" | "--debug")
+      ) {
       index += 1
       continue
     }
@@ -118,23 +122,5 @@ fn env_wrapped_command_index(argv : Array[String]) -> Int? {
     Some(index)
   } else {
     Some(0)
-  }
-}
-
-///|
-fn env_option_consumes_next(arg : String) -> Bool {
-  arg == "-u" || arg == "--unset"
-}
-
-///|
-fn env_option_with_attached_value(arg : String) -> Bool {
-  (arg.has_prefix("-u") && arg != "-u") || arg.has_prefix("--unset=")
-}
-
-///|
-fn env_no_arg_option(arg : String) -> Bool {
-  match arg {
-    "--ignore-environment" | "-0" | "--null" | "--debug" => true
-    _ => false
   }
 }

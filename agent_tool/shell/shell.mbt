@@ -376,7 +376,10 @@ async fn read_output_prefix(
         let text = decode_valid_utf8_prefix(buffer.to_bytes())
         if text.char_length() > max_output_chars {
           return {
-            text: text_prefix_by_chars(text, max_output_chars),
+            text: match text.offset_of_nth_char(max_output_chars) {
+              Some(end) => "\{text[:end]}"
+              None => text
+            },
             output_limit_reached: true,
           }
         } else {
@@ -384,14 +387,6 @@ async fn read_output_prefix(
         }
       }
     }
-  }
-}
-
-///|
-fn text_prefix_by_chars(text : String, max_chars : Int) -> String {
-  match text.offset_of_nth_char(max_chars) {
-    Some(end) => "\{text[:end]}"
-    None => text
   }
 }
 
@@ -416,7 +411,11 @@ fn shell_response(
   max_output_chars : Int,
 ) -> ShellResponse {
   if output.output_limit_reached {
-    let footer = "<system>\{exit_header(output.exit_code)} truncated=true output_limit_reached=true shown_chars=\{output.text.char_length()} max_output_chars=\{max_output_chars}</system>"
+    let exit_header = match output.exit_code {
+      Some(code) => "exit=\{code}"
+      None => "exit=cancelled"
+    }
+    let footer = "<system>\{exit_header} truncated=true output_limit_reached=true shown_chars=\{output.text.char_length()} max_output_chars=\{max_output_chars}</system>"
     { content: with_system_footer(output.text, footer), is_error: true }
   } else {
     let code = output.exit_code.unwrap_or(0)
@@ -424,14 +423,6 @@ fn shell_response(
       content: with_system_footer(output.text, "<system>exit=\{code}</system>"),
       is_error: code != 0,
     }
-  }
-}
-
-///|
-fn exit_header(exit_code : Int?) -> String {
-  match exit_code {
-    Some(code) => "exit=\{code}"
-    None => "exit=cancelled"
   }
 }
 

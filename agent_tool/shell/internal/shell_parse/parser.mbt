@@ -73,7 +73,7 @@ fn parse_tokens(tokens : Array[Token]) -> ParseResult {
         saw_part = true
         index += 1
       }
-      Op(op, _) if is_separator(op) => {
+      Op(op, _) if op is ("&&" | "||" | ";" | "|") => {
         if !saw_part {
           return SyntaxError("operator \{op} has no preceding command")
         }
@@ -163,11 +163,6 @@ fn render_source(
     parts.push("\{redirect.op} \{redirect.target}")
   }
   parts.join(" ")
-}
-
-///|
-fn is_separator(op : String) -> Bool {
-  op == "&&" || op == "||" || op == ";" || op == "|"
 }
 
 ///|
