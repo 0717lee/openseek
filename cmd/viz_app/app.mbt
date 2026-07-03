@@ -157,9 +157,9 @@ fn update(emit : @cmd.Emit[Msg], msg : Msg, model : Model) -> (@cmd.Cmd, Model) 
       )
     Select(key) => {
       let label = session_label(model, key)
-      let command = fetch_text(emit, session_url(key), result => {
-        SessionFetched(key, result)
-      })
+      let command = @http.get(session_url(key)).expect_text(
+        emit.map(result => SessionFetched(key, result)),
+      )
       (
         command,
         {
@@ -281,7 +281,10 @@ fn update(emit : @cmd.Emit[Msg], msg : Msg, model : Model) -> (@cmd.Cmd, Model) 
     SetTheme(theme) =>
       // Apply the theme as a side effect (set `data-theme` on <html>) so the CSS
       // variable blocks take over; the model tracks it for button highlighting.
-      (apply_theme(theme), { ..model, theme, })
+      (
+        @cmd.effect(() => set_document_theme(theme.value())),
+        { ..model, theme, },
+      )
     ToggleSidebar =>
       (@cmd.none, { ..model, sidebar_visible: !model.sidebar_visible })
     ToggleRoot(root) =>
@@ -299,20 +302,6 @@ fn update(emit : @cmd.Emit[Msg], msg : Msg, model : Model) -> (@cmd.Cmd, Model) 
 /// Set `data-theme` on the document root. `light`/`dark` pick a fixed palette;
 /// `system` defers to the OS via the stylesheet's `prefers-color-scheme` query.
 extern "js" fn set_document_theme(theme : String) -> Unit = "(t) => document.documentElement.setAttribute('data-theme', t)"
-
-///|
-fn apply_theme(theme : Theme) -> @cmd.Cmd {
-  @cmd.effect(() => set_document_theme(theme.value()))
-}
-
-///|
-fn fetch_text(
-  emit : @cmd.Emit[Msg],
-  url : String,
-  to_msg : (Result[String, Error]) -> Msg,
-) -> @cmd.Cmd {
-  @http.get(url).expect_text(emit.map(to_msg))
-}
 
 ///|
 /// Switch the viewer to a locally dropped session file. Everything comes from
@@ -340,19 +329,6 @@ fn apply_dropped_file(
     loading: false,
     status: events_status(parsed),
   }
-}
-
-///|
-/// The browser opens a dropped file as a navigation unless dragover and drop
-/// are both cancelled, so the dragover handler exists purely for
-/// `prevent_default`.
-fn drop_target_attrs(emit : @cmd.Emit[Msg]) -> @html.Attrs {
-  @html.Attrs::build()
-  .on_dragover(event => {
-    event.prevent_default()
-    @cmd.none
-  })
-  .on_drop(event => read_dropped_file(emit, event))
 }
 
 ///|
@@ -553,7 +529,16 @@ fn events_status(parsed : @session_log.ParsedLog) -> String {
 
 ///|
 fn view(emit : @cmd.Emit[Msg], model : Model) -> @html.Html {
-  @html.div(class=app_class(model), attrs=drop_target_attrs(emit)) <| [
+  // The browser opens a dropped file as a navigation unless dragover and drop
+  // are both cancelled, so the dragover handler exists purely for
+  // `prevent_default`.
+  let drop_target = @html.Attrs::build()
+    .on_dragover(event => {
+      event.prevent_default()
+      @cmd.none
+    })
+    .on_drop(event => read_dropped_file(emit, event))
+  @html.div(class=app_class(model), attrs=drop_target) <| [
     sidebar_pane(emit, model),
     @html.section(class="main") <| [
       main_toolbar(emit, model),
@@ -589,7 +574,11 @@ fn sidebar_pane(emit : @cmd.Emit[Msg], model : Model) -> @html.Html {
       @html.div(class="status") <| model.status,
     ],
     sidebar_list(emit, model),
-    theme_toggle(emit, model),
+    @html.div(class="theme-toggle") <| [
+      theme_button(emit, model, Light, "Light"),
+      theme_button(emit, model, Dark, "Dark"),
+      theme_button(emit, model, System, "System"),
+    ],
   ]
 }
 
@@ -604,15 +593,6 @@ fn main_toolbar(emit : @cmd.Emit[Msg], model : Model) -> @html.Html {
       title="Show sessions",
       on_click=emit(ToggleSidebar),
     ) <| "Show sessions",
-  ]
-}
-
-///|
-fn theme_toggle(emit : @cmd.Emit[Msg], model : Model) -> @html.Html {
-  @html.div(class="theme-toggle") <| [
-    theme_button(emit, model, Light, "Light"),
-    theme_button(emit, model, Dark, "Dark"),
-    theme_button(emit, model, System, "System"),
   ]
 }
 
@@ -641,10 +621,12 @@ fn sidebar_list(emit : @cmd.Emit[Msg], model : Model) -> @html.Html {
     let rows = model.sessions
       .filter(row => session_group(row.root_label, row.is_marker) == group)
       .map(row => sidebar_row(emit, model, row))
-    let collapsed = root_collapsed(model, group)
+    let collapsed = model.collapsed_roots.contains(group)
     let display = group_display(group)
     sections.push(
-      @html.div(class=session_root_class(collapsed)) <| [
+      @html.div(
+        class=if collapsed { "session-root collapsed" } else { "session-root" },
+      ) <| [
         @html.button(
           class="session-root-toggle",
           title=if collapsed {
@@ -671,15 +653,6 @@ fn sidebar_list(emit : @cmd.Emit[Msg], model : Model) -> @html.Html {
     )
   }
   @html.div(class="session-list") <| sections
-}
-
-///|
-fn session_root_class(collapsed : Bool) -> String {
-  if collapsed {
-    "session-root collapsed"
-  } else {
-    "session-root"
-  }
 }
 
 ///|
@@ -715,17 +688,6 @@ fn parent_dir(p : String) -> String {
     ""
   } else {
     p[:i].to_owned()
-  }
-}
-
-///|
-/// The last path segment of `p`.
-fn path_basename(p : String) -> String {
-  let i = last_separator(p)
-  if i < 0 {
-    p
-  } else {
-    p[i + 1:].to_owned()
   }
 }
 
@@ -780,9 +742,11 @@ fn session_row_label(
 ) -> String {
   let normalized = strip_dot_prefix(root_label)
   guard is_marker else { return id }
-  let workspace = path_basename(parent_dir(normalized))
-  if !workspace.is_empty() &&
-    session_group(root_label, is_marker) != parent_dir(normalized) {
+  let parent = parent_dir(normalized)
+  // The workspace name is the last path segment of the store's parent.
+  let sep = last_separator(parent)
+  let workspace = if sep < 0 { parent } else { parent[sep + 1:].to_owned() }
+  if !workspace.is_empty() && session_group(root_label, is_marker) != parent {
     workspace
   } else {
     id
@@ -798,11 +762,6 @@ fn group_display(group : String) -> String {
   } else {
     group
   }
-}
-
-///|
-fn root_collapsed(model : Model, root : String) -> Bool {
-  model.collapsed_roots.contains(root)
 }
 
 ///|
@@ -846,7 +805,10 @@ fn sidebar_row(
         row.id,
         row.is_marker,
       ),
-      last_active_view(row.last_active),
+      match last_active_label(row.last_active) {
+        "" => @html.nothing
+        label => @html.span(class="session-item-time") <| label
+      },
     ],
   ]
 }
@@ -914,7 +876,16 @@ fn session_pane(
     system_prompt=model.system_prompt,
   )
   let error_count = @viz.rendered_error_count(session, model.view_mode)
-  @html.div(class=session_view_class(model)) <| [
+  // `errors-only` folds the log down to failed tool cards (and the turns
+  // containing them); `show-original` swaps the friendly tool-argument
+  // rendering for the raw JSON.
+  let view_class = match (model.errors_only, model.show_original_args) {
+    (false, false) => "session-view"
+    (true, false) => "session-view errors-only"
+    (false, true) => "session-view show-original"
+    (true, true) => "session-view errors-only show-original"
+  }
+  @html.div(class=view_class) <| [
     header_strip(model, id, root_label),
     // Pin the view/args toggles and the error bar to the top of the
     // scroll area so they stay reachable while reading a long log.
@@ -945,14 +916,6 @@ fn header_strip(model : Model, id : String, root_label : String?) -> @html.Html 
 }
 
 ///|
-fn mode_toggle(emit : @cmd.Emit[Msg], model : Model) -> @html.Html {
-  @html.div(class="mode-toggle") <| [
-    mode_button(emit, model, RawLog, "Raw log"),
-    mode_button(emit, model, ModelView, "Model view"),
-  ]
-}
-
-///|
 fn mode_row(
   emit : @cmd.Emit[Msg],
   model : Model,
@@ -960,22 +923,21 @@ fn mode_row(
 ) -> @html.Html {
   @html.div(class="mode-row") <| [
     @html.div(class="mode-cluster") <| [
-      mode_toggle(emit, model),
-      args_toggle(emit, model),
+      @html.div(class="mode-toggle") <| [
+        mode_button(emit, model, RawLog, "Raw log"),
+        mode_button(emit, model, ModelView, "Model view"),
+      ],
+      // The args toggle flips between the human-friendly tool-argument
+      // rendering (values verbatim, no JSON quoting) and the original
+      // pretty-printed JSON kept for debugging. Both are always in the DOM;
+      // this only flips which one the stylesheet shows.
+      @html.div(class="mode-toggle args-toggle") <| [
+        @html.span(class="args-toggle-label") <| "Tool args",
+        args_button(emit, model, false, "Rendered"),
+        args_button(emit, model, true, "Original"),
+      ],
     ],
     session_metadata(model, parsed),
-  ]
-}
-
-///|
-/// Toggle between the human-friendly tool-argument rendering (values verbatim, no
-/// JSON quoting) and the original pretty-printed JSON kept for debugging. Both are
-/// always in the DOM; this only flips which one the stylesheet shows.
-fn args_toggle(emit : @cmd.Emit[Msg], model : Model) -> @html.Html {
-  @html.div(class="mode-toggle args-toggle") <| [
-    @html.span(class="args-toggle-label") <| "Tool args",
-    args_button(emit, model, false, "Rendered"),
-    args_button(emit, model, true, "Original"),
   ]
 }
 
@@ -1066,7 +1028,10 @@ fn terminal_finished_represents_agent_step(
 ///|
 fn runtime_label(parsed : @session_log.ParsedLog) -> String {
   match running_ms(parsed) {
-    Some(milliseconds) => format_span_total_seconds(milliseconds)
+    Some(milliseconds) => {
+      let tenths = milliseconds / 100L
+      "\{tenths / 10L}.\{tenths % 10L}s"
+    }
     None => "n/a"
   }
 }
@@ -1116,12 +1081,6 @@ fn last_event_ms(parsed : @session_log.ParsedLog) -> Int64? {
 }
 
 ///|
-fn format_span_total_seconds(span_ms : Int64) -> String {
-  let tenths = span_ms / 100L
-  "\{tenths / 10L}.\{tenths % 10L}s"
-}
-
-///|
 fn last_active_label(last_active : Int64?) -> String {
   match last_active {
     Some(seconds) => absolute_time_label(seconds * 1000L)
@@ -1132,16 +1091,6 @@ fn last_active_label(last_active : Int64?) -> String {
 ///|
 fn absolute_time_label(milliseconds : Int64) -> String {
   format_unix_ms_utc(milliseconds.to_double())
-}
-
-///|
-fn last_active_view(last_active : Int64?) -> @html.Html {
-  let label = last_active_label(last_active)
-  if label.is_empty() {
-    @html.nothing
-  } else {
-    @html.span(class="session-item-time") <| label
-  }
 }
 
 ///|
@@ -1159,19 +1108,6 @@ fn format_log_size(bytes : Int64) -> String {
 fn format_scaled_size(bytes : Int64, unit : Int64, suffix : String) -> String {
   let tenths = bytes * 10L / unit
   "\{tenths / 10L}.\{tenths % 10L} \{suffix}"
-}
-
-///|
-/// Add the `errors-only` class so the stylesheet folds the log down to failed
-/// tool cards (and the turns containing them), and `show-original` so it swaps the
-/// friendly tool-argument rendering for the raw JSON.
-fn session_view_class(model : Model) -> String {
-  match (model.errors_only, model.show_original_args) {
-    (false, false) => "session-view"
-    (true, false) => "session-view errors-only"
-    (false, true) => "session-view show-original"
-    (true, true) => "session-view errors-only show-original"
-  }
 }
 
 ///|

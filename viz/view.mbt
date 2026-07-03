@@ -193,7 +193,7 @@ fn turn_block(
   let errors = count_turn_tool_errors(turn)
   if errors > 0 {
     summary.push(
-      @html.span(class="turn-error-badge") <| " · 🚩 \{errors} error\{plural(errors)}",
+      @html.span(class="turn-error-badge") <| " · 🚩 \{errors} error\{if errors == 1 { "" } else { "s" }}",
     )
   }
   @html.details(open=true, class="turn") <| [
@@ -211,16 +211,6 @@ fn count_turn_tool_errors(turn : Array[@agent_session.SessionEvent]) -> Int {
     }
   } nobreak {
     count
-  }
-}
-
-///|
-/// `""` for one, `"s"` otherwise — for pluralizing a count in a label.
-fn plural(n : Int) -> String {
-  if n == 1 {
-    ""
-  } else {
-    "s"
   }
 }
 
@@ -299,7 +289,14 @@ fn event_card(
       card("runtime", "Runtime notice", seq, time~, [
         text_block(notice.content()),
       ])
-    Summary(summary) => summary_card(seq, time, summary)
+    Summary(summary) =>
+      card(
+        "summary",
+        "Summary · covers events \{summary.from_sequence()}..\{summary.to_sequence()}",
+        seq,
+        time~,
+        [text_block(summary.content())],
+      )
     Terminal(terminal) => terminal_card(seq, time, terminal, step_label~)
   }
 }
@@ -384,7 +381,10 @@ fn tool_call_view(
     "tool-call"
   }
   let original = pretty_json(call.arguments)
-  if is_blank_args(original) {
+  // Blank arguments — empty text or an empty object — carry nothing worth
+  // folding away behind a details toggle.
+  let trimmed = original.trim().to_owned()
+  if trimmed.is_empty() || trimmed == "{}" {
     return @html.div(id?=anchor, class=cls) <| [
       @html.div(class="tool-call-name") <| name_row,
     ]
@@ -636,14 +636,6 @@ fn call_brief_display(brief : String?, is_error : Bool) -> String? {
 }
 
 ///|
-/// Whether a tool call's (pretty-printed) arguments carry nothing worth folding
-/// away — empty text or an empty object.
-fn is_blank_args(args : String) -> Bool {
-  let trimmed = args.trim().to_owned()
-  trimmed.is_empty() || trimmed == "{}"
-}
-
-///|
 /// Tool output is noisy, so fold it behind the label by default. The summary
 /// keeps the tool name and, on failure, a red flag — both visible while the card
 /// is collapsed — so a failed tool stands out without expanding it.
@@ -689,16 +681,6 @@ fn tool_card(
       text_block(result.content()),
     ],
   ]
-}
-
-///|
-fn summary_card(
-  seq : Int,
-  time : String,
-  summary : @agent_session.SessionSummary,
-) -> @html.Html {
-  let label = "Summary · covers events \{summary.from_sequence()}..\{summary.to_sequence()}"
-  card("summary", label, seq, time~, [text_block(summary.content())])
 }
 
 ///|
@@ -837,20 +819,11 @@ fn flush_pending_tool_labels(
 }
 
 ///|
-fn terminal_projects_model_message(
-  terminal : @agent_session.TurnTerminal,
-) -> Bool {
-  match terminal {
-    Finished(answer) => !answer.trim().is_empty()
-    Aborted(_) | Interrupted(_) | Failed(_) => true
-  }
-}
-
-///|
 fn item_projects_model_message(item : @agent_session.SessionItem) -> Bool {
   match item {
     User(_) | Runtime(_) | Summary(_) | Assistant(_) | Tool(_) => true
-    Terminal(terminal) => terminal_projects_model_message(terminal)
+    Terminal(Finished(answer)) => !answer.trim().is_empty()
+    Terminal(Aborted(_) | Interrupted(_) | Failed(_)) => true
   }
 }
 

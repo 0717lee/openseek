@@ -11,7 +11,11 @@
 /// It never writes to the stores, so pointing it at live session roots is safe.
 async fn main {
   let matches = cli_command().parse(env=@env.get_env_vars())
-  let port = parse_port(@cli.value(matches, "port"))
+  let port_text = @cli.value(matches, "port")
+  let port = @string.parse_int(port_text) catch {
+    _ =>
+      fail("--port or OPENSEEK_VIZ_PORT must be an integer, got: \{port_text}")
+  }
   let host = @cli.require_non_empty(
     matches, "host", "--host or OPENSEEK_VIZ_HOST must not be empty",
   )
@@ -130,20 +134,17 @@ async fn handle(
   let reply = build_reply(request, catalog, shell, bundle) catch {
     error => text_reply(500, "Internal Server Error", "error: \{error}")
   }
-  send_reply(conn, reply) catch {
+  try {
+    conn.send_response(reply.code, reply.reason, extra_headers={
+      "Content-Type": reply.content_type,
+    })
+    conn.write_string(reply.body)
+    conn.end_response()
+  } catch {
     // The send already started, so a mid-body failure (client hung up) must not
     // trigger a second send_response. Swallow it; run_forever keeps serving.
     _ => ()
   }
-}
-
-///|
-async fn send_reply(conn : @http.ServerConnection, reply : Reply) -> Unit {
-  conn.send_response(reply.code, reply.reason, extra_headers={
-    "Content-Type": reply.content_type,
-  })
-  conn.write_string(reply.body)
-  conn.end_response()
 }
 
 ///|
@@ -156,7 +157,11 @@ async fn build_reply(
   guard request.meth is Get else {
     return text_reply(405, "Method Not Allowed", "only GET is supported")
   }
-  let path = strip_query(request.path)
+  // The route match ignores any `?query` suffix.
+  let path = match request.path.split_once("?") {
+    Some((path, _)) => "\{path}"
+    None => request.path
+  }
   match path {
     "/" | "/index.html" =>
       search_reply(
@@ -239,10 +244,17 @@ async fn session_envelope_reply(
   if !@fs.exists(path) {
     return json_reply({ "found": false })
   }
+  let size = try {
+    let file = @fs.open(path, mode=ReadOnly)
+    defer file.close()
+    file.size()
+  } catch {
+    _ => 0L
+  }
   json_reply({
     "found": true,
     "events": read_text_lossy(path),
-    "events_bytes": Json::number(file_size(path).to_double()),
+    "events_bytes": Json::number(size.to_double()),
   })
 }
 
@@ -253,7 +265,7 @@ async fn session_list_reply(catalog : SessionCatalog) -> Reply {
     for listing in root.store.listings() {
       let id = listing.id().value()
       rows.push({
-        key: session_key(root.key, id),
+        key: "\{root.key}|\{id}",
         id,
         root: root.path,
         root_label: root.label,
@@ -354,7 +366,8 @@ async fn session_catalog(
   // (named like the root marker, or holding a `sessions/` directory). Otherwise
   // it is a container — e.g. a directory of best-of-N run workspaces, each with
   // its own nested store — and announcing it as a root would list zero sessions.
-  if is_session_store(session_root, session_root_name) {
+  if path_tail(session_root) == session_root_name ||
+    is_directory(join_path(session_root, "sessions")) {
     paths.push(session_root)
   }
   // Scan the --session-root as well as the --search-dirs, so nested stores under
@@ -366,10 +379,14 @@ async fn session_catalog(
   let unique = unique_paths(paths)
   let roots : Array[SessionRoot] = []
   for index, path in unique {
+    // A root's label is its path with trailing separators trimmed; an
+    // all-separator path keeps its original spelling.
+    let trimmed = trim_trailing_path_separators(path)
+    let label = if trimmed.is_empty() { path } else { trimmed }
     roots.push({
       key: index.to_string(),
       path,
-      label: root_label(path),
+      label,
       is_marker: path_tail(path) == session_root_name,
       store: @store.SessionStore(path),
     })
@@ -406,7 +423,11 @@ async fn scan_session_roots(
   }
   let names = @fs.readdir(dir, sort=true) catch { _ => return }
   for name in names {
-    if should_skip_scan_dir(name, session_root_name) {
+    if name == session_root_name ||
+      name == ".git" ||
+      name == "node_modules" ||
+      name == ".mooncakes" ||
+      name == "_build" {
       continue
     }
     let child = join_path(dir, name)
@@ -423,24 +444,6 @@ async fn is_directory(path : String) -> Bool {
 }
 
 ///|
-/// Whether `path` is itself a session store (servable directly) rather than a
-/// container to scan: it is named like the root marker (e.g. `.openseek`), or it
-/// already holds a `sessions/` directory.
-async fn is_session_store(path : String, session_root_name : String) -> Bool {
-  path_tail(path) == session_root_name ||
-  is_directory(join_path(path, "sessions"))
-}
-
-///|
-fn should_skip_scan_dir(name : String, session_root_name : String) -> Bool {
-  name == session_root_name ||
-  name == ".git" ||
-  name == "node_modules" ||
-  name == ".mooncakes" ||
-  name == "_build"
-}
-
-///|
 async fn unique_paths(paths : Array[String]) -> Array[String] {
   let seen : Array[String] = []
   let unique : Array[String] = []
@@ -452,11 +455,6 @@ async fn unique_paths(paths : Array[String]) -> Array[String] {
     }
   }
   unique
-}
-
-///|
-fn session_key(root_key : String, id : String) -> String {
-  "\{root_key}|\{id}"
 }
 
 ///|
@@ -483,32 +481,14 @@ fn SessionCatalog::lookup(
 }
 
 ///|
-fn root_label(path : String) -> String {
-  let trimmed = trim_trailing_path_separators(path)
-  if trimmed.is_empty() {
-    path
-  } else {
-    trimmed
-  }
-}
-
-///|
 fn path_tail(path : String) -> String {
   let trimmed = trim_trailing_path_separators(path)
-  match last_path_separator(trimmed) {
-    Some(index) => trimmed[index + 1:].to_owned()
-    None => trimmed
+  let separator = match (trimmed.rev_find("/"), trimmed.rev_find("\\")) {
+    (Some(a), Some(b)) => if a > b { a } else { b }
+    (Some(a), None) | (None, Some(a)) => a
+    (None, None) => return trimmed
   }
-}
-
-///|
-fn last_path_separator(path : String) -> Int? {
-  match (path.rev_find("/"), path.rev_find("\\")) {
-    (Some(a), Some(b)) => Some(if a > b { a } else { b })
-    (Some(a), None) => Some(a)
-    (None, Some(b)) => Some(b)
-    (None, None) => None
-  }
+  trimmed[separator + 1:].to_owned()
 }
 
 ///|
@@ -636,15 +616,6 @@ async fn read_text_lossy(path : String) -> String {
 }
 
 ///|
-async fn file_size(path : String) -> Int64 {
-  let file = @fs.open(path, mode=ReadOnly) catch { _ => return 0L }
-  defer file.close()
-  file.size() catch {
-    _ => 0L
-  }
-}
-
-///|
 fn json_reply(body : Json) -> Reply {
   {
     code: 200,
@@ -657,15 +628,6 @@ fn json_reply(body : Json) -> Reply {
 ///|
 fn text_reply(code : Int, reason : String, message : String) -> Reply {
   { code, reason, content_type: "text/plain; charset=utf-8", body: message }
-}
-
-///|
-/// The path without any `?query` suffix.
-fn strip_query(path : String) -> String {
-  match path.split_once("?") {
-    Some((path, _)) => "\{path}"
-    None => path
-  }
 }
 
 ///|
@@ -808,12 +770,5 @@ fn non_empty_values(
         }
       ]
     None => []
-  }
-}
-
-///|
-fn parse_port(text : String) -> Int raise {
-  @string.parse_int(text) catch {
-    _ => fail("--port or OPENSEEK_VIZ_PORT must be an integer, got: \{text}")
   }
 }
