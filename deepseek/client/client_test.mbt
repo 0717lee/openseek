@@ -31,6 +31,7 @@ test "client debug redacts api key" {
       #|  thinking: Max,
       #|  retry_attempts: 3,
       #|  retry_backoff_ms: 500,
+      #|  idle_timeout_ms: 120000,
       #|}
     ),
   )

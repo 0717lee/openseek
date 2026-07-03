@@ -110,6 +110,126 @@ async test "chat stream handler accumulates Kimi stream_options usage" {
 }
 
 ///|
+/// A 2xx connection that goes silent — headers sent, then neither an SSE event
+/// nor a close — must not hang the client forever. The idle timeout trips;
+/// because nothing was delivered the stall counts as pre-event, so the request
+/// retries and the second connection serves the full stream. Without the idle
+/// bound this `read_until` blocks indefinitely (the observed production hang).
+async test "streaming chat retries an idle stall before any event" {
+  @async.with_task_group() <| group => {
+    let server = @http.Server(@socket.Addr::parse("127.0.0.1:0")) catch {
+      error => {
+        let message = "\{error}"
+        if message.contains("Operation not permitted") {
+          println("local TCP bind unavailable; skipping idle-stall test")
+          return
+        }
+        raise error
+      }
+    }
+    let hits : Ref[Int] = { val: 0 }
+    group.spawn_bg(no_wait=true) <| () => {
+      server.run_forever(
+        (_request, body, conn) => {
+          let _ = body.read_all()
+          hits.val = hits.val + 1
+          conn.send_response(200, "OK", extra_headers={
+            "Content-Type": "text/event-stream",
+          })
+          conn.flush()
+          if hits.val > 1 {
+            conn.write(
+              "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\n",
+            )
+            conn.write("data: [DONE]\n\n")
+          } else {
+            // Hold the connection open but silent, well past the client's idle
+            // timeout, without sending an event or closing it.
+            @async.sleep(3_000)
+          }
+        },
+        max_connections=8,
+      )
+    }
+    let url = "http://127.0.0.1:\{server.addr.port()}/chat/completions"
+    let client = @client.Client(
+      api_key="test-key",
+      api_url=url,
+      retry_attempts=3,
+      retry_backoff_ms=1,
+      idle_timeout_ms=100,
+    )
+    let response = client.chat(
+      [ChatMessage(User, content="hello")],
+      stream=StreamHandler(on_content_delta=_ => ()),
+    )
+    assert_eq(response.content, "ok")
+    assert_eq(hits.val, 2)
+  }
+}
+
+///|
+/// Once an event has been delivered, an idle stall must surface as a failure
+/// rather than retry — replaying the stream would hand the consumer duplicate
+/// content. The server streams one delta, then goes silent forever; the idle
+/// timeout trips but the delivered-event bail keeps the failure final, so there
+/// is no second hit.
+async test "streaming chat fails an idle stall after a delta without retrying" {
+  @async.with_task_group() <| group => {
+    let server = @http.Server(@socket.Addr::parse("127.0.0.1:0")) catch {
+      error => {
+        let message = "\{error}"
+        if message.contains("Operation not permitted") {
+          println("local TCP bind unavailable; skipping idle-stall test")
+          return
+        }
+        raise error
+      }
+    }
+    let hits : Ref[Int] = { val: 0 }
+    group.spawn_bg(no_wait=true) <| () => {
+      server.run_forever(
+        (_request, body, conn) => {
+          let _ = body.read_all()
+          hits.val = hits.val + 1
+          conn.send_response(200, "OK", extra_headers={
+            "Content-Type": "text/event-stream",
+          })
+          conn.write(
+            "data: {\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n\n",
+          )
+          conn.flush()
+          // Never send [DONE]; hold the connection open and silent.
+          @async.sleep(3_000)
+        },
+        max_connections=8,
+      )
+    }
+    let url = "http://127.0.0.1:\{server.addr.port()}/chat/completions"
+    let client = @client.Client(
+      api_key="test-key",
+      api_url=url,
+      retry_attempts=3,
+      retry_backoff_ms=1,
+      idle_timeout_ms=100,
+    )
+    let deltas : Array[String] = []
+    let _ = client.chat(
+      [ChatMessage(User, content="hello")],
+      stream=StreamHandler(on_content_delta=delta => deltas.push(delta)),
+    ) catch {
+      error => {
+        assert_true("\{error}".contains("idle"))
+        assert_eq(deltas.join("|"), "partial")
+        assert_eq(hits.val, 1)
+        return
+      }
+    }
+    fail("expected an idle-stall failure")
+  }
+}
+
+///|
 async test "chat stream handler rejects EOF before done" {
   @async.with_task_group() <| group => {
     guard stream_test_server(group, finish=false) is Some(url) else { return }

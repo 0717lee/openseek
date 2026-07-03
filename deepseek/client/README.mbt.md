@@ -57,6 +57,7 @@ test "construct DeepSeek client configuration" {
       #|  thinking: Max,
       #|  retry_attempts: 5,
       #|  retry_backoff_ms: 200,
+      #|  idle_timeout_ms: 120000,
       #|}
     ),
   )

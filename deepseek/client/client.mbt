@@ -27,6 +27,7 @@ pub struct Client {
   thinking : @deepseek.ThinkingMode
   retry_attempts : Int
   retry_backoff_ms : Int
+  idle_timeout_ms : Int
 } derive(Debug(ignore=API_KEY))
 
 ///|
@@ -41,6 +42,17 @@ pub struct Client {
 /// `retry_backoff_ms` (doubling per retry, capped at 60s). Client errors
 /// other than 429 never retry, and a streaming call never retries once the
 /// stream has produced any event — text, tool-call, or usage alike.
+///
+/// `idle_timeout_ms` bounds how long a streaming request may sit with no
+/// progress: it caps both the wait for response headers and the wait between
+/// SSE events. A silent stall (a connection the peer accepts then never feeds,
+/// which TCP alone will not surface for a long time) trips it, and the stall is
+/// converted to the same retryable class as a mid-stream drop — so a stall
+/// before any event is retried on a fresh connection, while one after output
+/// bails to a clean failure rather than duplicating a half-consumed completion.
+/// It is an *idle* bound, reset by every byte, so a long-but-progressing
+/// completion never trips it. Pass `0` (or less) to disable. Defaults to 120s;
+/// it applies to the streaming path only (the mode the agent and TUI use).
 pub fn Client::Client(
   api_key~ : String,
   model? : @deepseek.Model = default_model,
@@ -48,8 +60,17 @@ pub fn Client::Client(
   thinking? : @deepseek.ThinkingMode = No,
   retry_attempts? : Int = 3,
   retry_backoff_ms? : Int = 500,
+  idle_timeout_ms? : Int = 120_000,
 ) -> Client {
-  { api_key, model, api_url, thinking, retry_attempts, retry_backoff_ms }
+  {
+    api_key,
+    model,
+    api_url,
+    thinking,
+    retry_attempts,
+    retry_backoff_ms,
+    idle_timeout_ms,
+  }
 }
 
 ///|
@@ -240,7 +261,15 @@ async fn Client::chat_stream_attempt(
   })
   defer client.close()
   client.write(body.stringify())
-  let resp = client.end_request()
+  // Bound the wait for response headers the same way the SSE loop bounds the
+  // wait between events: a peer that accepts the connection then never sends a
+  // status line would otherwise block here forever, before any event, with no
+  // error for the retry loop to see.
+  let resp = with_idle_timeout(
+    self.idle_timeout_ms,
+    "DeepSeek response headers",
+    () => client.end_request(),
+  )
   guard resp.code >= 200 && resp.code < 300 else {
     let text = client.read_all().text()
     let message = "DeepSeek API error \{resp.code}: \{text}"
@@ -255,6 +284,7 @@ async fn Client::chat_stream_attempt(
   // decides whether retrying is allowed.
   read_chat_stream(
     client,
+    idle_timeout_ms=self.idle_timeout_ms,
     on_stream_event~,
     on_content_delta=stream.on_content_delta,
     on_reasoning_delta=stream.on_reasoning_delta,

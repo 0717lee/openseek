@@ -208,8 +208,34 @@ async fn flush_sse_event(
 }
 
 ///|
+/// Runs `read` under an idle bound: if it produces nothing within
+/// `idle_timeout_ms`, the stall is converted to `RetryableApiError` so the
+/// client's retry loop can re-run the request on a fresh connection — subject
+/// to the same delivered-event bail as a mid-stream drop, so a stall after any
+/// output surfaces as a failure rather than replaying a half-consumed
+/// completion. `read`'s own errors propagate unchanged; a non-positive budget
+/// disables the bound. The clock covers a single `read`, so on the SSE loop it
+/// measures the gap between events and never trips on a long, progressing
+/// completion.
+async fn[T] with_idle_timeout(
+  idle_timeout_ms : Int,
+  what : String,
+  read : async () -> T,
+) -> T {
+  if idle_timeout_ms <= 0 {
+    read()
+  } else {
+    match @async.with_timeout_opt(idle_timeout_ms, read) {
+      Some(value) => value
+      None => raise RetryableApiError("\{what} idle for \{idle_timeout_ms}ms")
+    }
+  }
+}
+
+///|
 async fn read_chat_stream(
   reader : @http.Client,
+  idle_timeout_ms~ : Int,
   on_stream_event~ : () -> Unit,
   on_content_delta~ : async (String) -> Unit,
   on_reasoning_delta~ : async (String) -> Unit,
@@ -217,7 +243,10 @@ async fn read_chat_stream(
   let acc = StreamAccumulator::StreamAccumulator()
   let data_lines : Array[String] = []
   for ;; {
-    match reader.read_until("\n") {
+    match
+      with_idle_timeout(idle_timeout_ms, "DeepSeek stream", () => {
+        reader.read_until("\n")
+      }) {
       None => {
         if flush_sse_event(
             acc,
