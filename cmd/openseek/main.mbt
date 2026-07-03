@@ -110,7 +110,7 @@ async fn run_task_command(matches : @argparse.Matches) -> Unit {
       value(matches, "concurrency"),
       "--concurrency",
     )
-    if concurrency >= 2 {
+    if fleet_mode(matches, concurrency) {
       run_fleet(matches, concurrency~)
       return
     }
@@ -464,7 +464,7 @@ fn root_command() -> @argparse.Command {
             long="concurrency",
             env="OPENSEEK_CONCURRENCY",
             default_values=["1"],
-            about="Run the task in N sibling copies of --dir concurrently (best-of-N); 1 means a single run.",
+            about="Run the task in N sibling copies of --dir concurrently (best-of-N). Any explicit value, including 1, copies --dir into <dir>_run_<i> and never writes to --dir itself; omit the flag for a single in-place run.",
           ),
         ],
         flags=[
@@ -581,6 +581,22 @@ fn values(matches : @argparse.Matches, name : String) -> Array[String] {
 ///|
 fn flag(matches : @argparse.Matches, name : String) -> Bool {
   matches.flags.get(name).unwrap_or(false)
+}
+
+///|
+/// Whether `openseek run` should use fleet mode: any N >= 2, or an explicit
+/// `--concurrency` at any value. `--concurrency 1` still means "one run in a
+/// copied `<dir>_run_1` workspace" — the flag always protects `--dir` from
+/// writes, at every N. Only the flagless default runs in place.
+fn fleet_mode(matches : @argparse.Matches, concurrency : Int) -> Bool {
+  concurrency >= 2 || explicitly_provided(matches, "concurrency")
+}
+
+///|
+/// Whether the user supplied `name` on the command line or via its
+/// environment variable, rather than the built-in default filling it in.
+fn explicitly_provided(matches : @argparse.Matches, name : String) -> Bool {
+  matches.sources.get(name) is (Some(Argv) | Some(Env))
 }
 
 ///|
@@ -1232,6 +1248,21 @@ test "cli uses KIMI only for Kimi models" {
     }
   }
   fail("KIMI was accepted for a DeepSeek model")
+}
+
+///|
+test "explicit --concurrency selects fleet mode even at 1" {
+  // Any explicit --concurrency copies --dir; 1 is not an in-place special case.
+  let explicit_one = run_matches(argv=["--concurrency", "1", "task"], env={})
+  assert_true(fleet_mode(explicit_one, 1))
+  // The env var counts as explicit too.
+  let via_env = run_matches(argv=["task"], env={ "OPENSEEK_CONCURRENCY": "1" })
+  assert_true(fleet_mode(via_env, 1))
+  // Only the flagless default runs in place.
+  let default_run = run_matches(argv=["task"], env={})
+  assert_false(fleet_mode(default_run, 1))
+  // N >= 2 is fleet mode regardless of how it was set.
+  assert_true(fleet_mode(default_run, 2))
 }
 
 ///|

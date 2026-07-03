@@ -1,7 +1,8 @@
 ///|
-/// "Best-of-N" fleet mode (`--concurrency N`): run the same task in N sibling
-/// copies of `--dir` concurrently, each recording its own durable session, then
-/// print a summary. The original `--dir` is never written to.
+/// "Best-of-N" fleet mode (`--concurrency N`, any explicit N including 1): run
+/// the same task in N sibling copies of `--dir` concurrently, each recording
+/// its own durable session, then print a summary. The original `--dir` is
+/// never written to.
 ///
 /// Naming uses `<base>_run_<i>` (underscores, not a dotted suffix that reads as a
 /// file extension) so the run directories are unambiguous and easy to recognize.

@@ -37,10 +37,9 @@ binary gate. The `passed/total` count is a useful partial-credit signal. A bare
 
 Notes:
 
-- **`--concurrency 1` writes in place.** A single run mutates `--dir` directly
-  (the agent writes its implementation there), dirtying the vendored task. For a
-  one-off, copy the task first (`cp -r eval/swe_agi/tasks/csv /tmp/csv && …
-  --dir /tmp/csv`). `--concurrency ≥ 2` needs no copy.
+- **`--concurrency 1` also copies.** Any explicit `--concurrency` — including
+  1 — runs in `<task>_run_<i>` copies and never writes to `--dir` itself. Only
+  a flagless `openseek run --dir <task>` mutates the task directory in place.
 - **For a strict grade**, restore the shipped tests before `moon test` — the
   agent works in a copy where the tests are writable and may add or edit
   `*_test.mbt`. Drop the run's `*_test.mbt` and copy the task's originals back.
