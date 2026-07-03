@@ -53,6 +53,10 @@ pub fn GoalCell::refresh(
   self.current = current
   self.tokens_used = tokens_used
   self.goal_events_seen = goal_events_seen
+  // Re-pointing at the durable fold makes it the truth: any requested
+  // transition that never got drained (failed turn, reused cell) is stale
+  // against the log and would replay old ids after newer events.
+  self.pending.clear()
 }
 
 ///|
@@ -134,7 +138,10 @@ fn execute_create(cell : GoalCell, arguments : Json) -> @agent_tool.ToolAction {
       )
     }
   }
-  if cell.current() is Some(existing) && existing.status() is Active {
+  if cell.current() is Some(existing) && existing.is_unfinished() {
+    // BudgetLimited counts as unfinished: the objective was not met, and a
+    // silent replacement would discard that fact. The user decides whether
+    // to re-fund or abandon it.
     return @agent_tool.ToolAction::respond(
       "error: an unfinished goal exists (\{existing.goal_id()}); use update_goal to mark it complete or blocked before creating a new one",
       is_error=true,
@@ -175,7 +182,7 @@ fn update_goal_definition(cell : GoalCell) -> @agent_tool.AgentToolDefinition {
   AgentToolDefinition(
     name="update_goal",
     description=(
-      #|Set the current goal's status. Use "complete" only after a completion audit proves, from current evidence (files, command output, test results), that every requirement of the objective is satisfied — a finished checklist or plausible final answer is not proof. Use "blocked" only when the same blocking condition has repeated for at least three consecutive goal turns and no meaningful progress is possible without user input or an external change. Do not call this tool otherwise; ending a turn does not require updating the goal.
+      #|Set the current goal's status. Use "complete" only after a completion audit proves, from current evidence (files, command output, test results), that every requirement of the objective is satisfied — a finished checklist or plausible final answer is not proof, and stopping work or a nearly exhausted budget never justifies "complete". If the completed goal had a token budget, report the final consumed tokens to the user after update_goal succeeds. Use "blocked" only when the same blocking condition has repeated for at least three consecutive goal turns and no meaningful progress is possible without user input or an external change — never merely because the work is hard, slow, uncertain, or would benefit from clarification; if the user resumes a previously blocked goal, run a fresh blocked audit before using "blocked" again. Do not call this tool otherwise; ending a turn does not require updating the goal.
     ),
     schema=JsonSchema({
       "type": "object",

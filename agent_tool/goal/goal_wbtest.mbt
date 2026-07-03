@@ -131,3 +131,38 @@ test "get_goal reports state and budget arithmetic" {
   )
   assert_true(report.contains("<objective>\nship it\n</objective>"))
 }
+
+///|
+test "create_goal refuses to replace a budget-limited goal" {
+  let cell = GoalCell()
+  let _ = dispatch(cell, "create_goal", {
+    "objective": "ship it",
+    "token_budget": 10,
+  })
+  guard cell.current() is Some(goal) else { fail("expected goal") }
+  // The host marks the goal budget-limited (phase 3); simulate that view.
+  let limited = @agent_session.GoalUpdate(
+    goal_id=goal.goal_id(),
+    objective=goal.objective(),
+    status=BudgetLimited,
+    token_budget=10,
+  )
+  cell.refresh(Some(limited), tokens_used=10, goal_events_seen=2)
+  let rejected = expect_respond(
+    dispatch(cell, "create_goal", { "objective": "replacement" }),
+    is_error=true,
+  )
+  assert_true(rejected.contains("an unfinished goal exists"))
+}
+
+///|
+test "refresh drops stale pending transitions" {
+  let cell = GoalCell()
+  let _ = dispatch(cell, "create_goal", { "objective": "ship it" })
+  assert_eq(cell.drain_pending().length(), 1)
+  let _ = dispatch(cell, "update_goal", { "status": "complete" })
+  // The turn dies before the loop drains; a later refresh re-points the
+  // cell at the durable fold and must discard the undrained transition.
+  cell.refresh(None, tokens_used=0, goal_events_seen=0)
+  assert_eq(cell.drain_pending().length(), 0)
+}

@@ -41,8 +41,9 @@ pub fn steer(runtime : @agent_runtime.AgentRuntime, text : String) -> Unit {
 pub fn[X] build_tools(
   runtime : @agent_runtime.AgentRuntime,
   scope : @agent_runtime.AgentTaskScope[X],
+  goal_cell? : @goal_tool.GoalCell,
 ) -> @agent_tool.Tools raise {
-  tool_definitions(runtime, scope)
+  tool_definitions(runtime, scope, goal_cell?)
 }
 
 ///|
@@ -265,8 +266,44 @@ pub async fn[X] run_turn_in_scope(
   tools? : @agent_tool.Tools,
   goal_cell? : @goal_tool.GoalCell,
 ) -> @agent_session.Session {
+  run_opened_turn_in_scope(
+    runtime,
+    scope,
+    api_key,
+    model,
+    session,
+    User(UserMessage(task)),
+    append_item~,
+    max_steps~,
+    thinking~,
+    api_url?,
+    tools?,
+    goal_cell?,
+  )
+}
+
+///|
+/// One agent turn whose opening event is caller-chosen: a `User` task for
+/// ordinary turns, or an `Internal` continuation for automatic goal turns.
+/// The opening is appended durably and reaches the model through the
+/// projection, so goal continuations arrive enveloped instead of posing as
+/// user text.
+async fn[X] run_opened_turn_in_scope(
+  runtime : @agent_runtime.AgentRuntime,
+  scope : @agent_runtime.AgentTaskScope[X],
+  api_key : String,
+  model : @deepseek.Model,
+  session : @agent_session.Session,
+  opening : @agent_session.SessionItem,
+  append_item~ : async (@agent_session.Session, @agent_session.SessionItem) -> @agent_session.Session,
+  max_steps~ : Int,
+  thinking~ : @deepseek.ThinkingMode,
+  api_url? : String,
+  tools? : @agent_tool.Tools,
+  goal_cell? : @goal_tool.GoalCell,
+) -> @agent_session.Session {
   let client = @client.Client(api_key~, model~, thinking~, api_url?)
-  let mut session = append_item(session, User(UserMessage(task)))
+  let mut session = append_item(session, opening)
   // The goal cell is the goal tools' view of durable goal state. When the
   // caller supplies prebuilt tools without a cell, the fresh cell is simply
   // never consulted; when this function builds the registry, the goal tools
