@@ -2,6 +2,14 @@
 let default_max_steps : Int = 1000
 
 ///|
+/// Minimum number of steps between auto-compactions in one turn. Normally
+/// the trigger self-resets — the first post-compaction prompt is a fraction
+/// of the threshold — so this only bounds the pathological case where the
+/// summary plus recent history still exceeds the threshold, and it spaces
+/// out retries after a failed summarizer call.
+let compaction_cooldown_steps : Int = 8
+
+///|
 /// Queue `text` as steering input for the turn running on `runtime`.
 ///
 /// This is a thin public wrapper over `AgentRuntime::queue_steer(Prompt(...))`.
@@ -74,6 +82,7 @@ pub async fn run(
   thinking? : @deepseek.ThinkingMode = Max,
   api_url? : String,
   workspace_root? : String = ".",
+  compact_threshold? : Int,
 ) -> Unit {
   let session = @agent_session.Session(
     SessionId("one-shot"),
@@ -89,6 +98,7 @@ pub async fn run(
       thinking~,
       api_url?,
       workspace_root~,
+      compact_threshold?,
     ),
   )
 }
@@ -121,6 +131,7 @@ pub async fn run_turn(
   thinking? : @deepseek.ThinkingMode = Max,
   api_url? : String,
   workspace_root? : String = ".",
+  compact_threshold? : Int,
 ) -> @agent_session.Session {
   run_turn_with_append(
     api_key,
@@ -132,6 +143,7 @@ pub async fn run_turn(
     thinking~,
     api_url?,
     workspace_root~,
+    compact_threshold?,
   )
 }
 
@@ -165,6 +177,7 @@ pub async fn run_turn_with_append(
   thinking? : @deepseek.ThinkingMode = Max,
   api_url? : String,
   workspace_root? : String = ".",
+  compact_threshold? : Int,
 ) -> @agent_session.Session {
   @async.with_task_group() <| group => {
     run_turn_in_scope(
@@ -178,6 +191,7 @@ pub async fn run_turn_with_append(
       max_steps~,
       thinking~,
       api_url?,
+      compact_threshold?,
     )
   }
 }
@@ -265,6 +279,7 @@ pub async fn[X] run_turn_in_scope(
   api_url? : String,
   tools? : @agent_tool.Tools,
   goal_cell? : @goal_tool.GoalCell,
+  compact_threshold? : Int,
 ) -> @agent_session.Session {
   run_opened_turn_in_scope(
     runtime,
@@ -279,6 +294,7 @@ pub async fn[X] run_turn_in_scope(
     api_url?,
     tools?,
     goal_cell?,
+    compact_threshold?,
   )
 }
 
@@ -301,6 +317,7 @@ async fn[X] run_opened_turn_in_scope(
   api_url? : String,
   tools? : @agent_tool.Tools,
   goal_cell? : @goal_tool.GoalCell,
+  compact_threshold? : Int,
 ) -> @agent_session.Session {
   let client = @client.Client(api_key~, model~, thinking~, api_url?)
   let mut session = append_item(session, opening)
@@ -334,8 +351,13 @@ async fn[X] run_opened_turn_in_scope(
           }
         }
     }
-    let messages = session.chat_messages()
+    let mut messages = session.chat_messages()
     let watcher_fingerprints : Map[String, String] = {}
+    // Seeded from the log, not zero: a continuation or resumed turn whose
+    // projection is already past the threshold compacts before its first
+    // model call instead of after it.
+    let mut last_prompt_tokens = last_recorded_prompt_tokens(session)
+    let mut last_compaction_step = -compaction_cooldown_steps
     steps~: for step in 0..<max_steps {
       // Budget gate at the step boundary: a goal turn whose budget ran out
       // stops before the next model call instead of running to max_steps.
@@ -347,6 +369,102 @@ async fn[X] run_opened_turn_in_scope(
         let next = append_item(session, Terminal(Finished(note)))
         @xlog.warn() <? { "event": "goal_budget_step_stop", "step": step }
         return next
+      }
+      // Auto-compaction at the same safe boundary: every tool call has its
+      // result recorded, so the whole log can be summarized without
+      // orphaning a pending call. Triggered by the previous response's
+      // observed prompt size — the provider's own count, no local
+      // tokenizing. The cooldown bounds re-compaction when the summary plus
+      // recent history still exceeds the threshold; normally the trigger
+      // self-resets because the next prompt shrinks far below it.
+      if compact_threshold is Some(threshold) &&
+        threshold > 0 &&
+        last_prompt_tokens >= threshold &&
+        step - last_compaction_step >= compaction_cooldown_steps {
+        last_compaction_step = step
+        let prompt_tokens_before = last_prompt_tokens
+        // Only an active goal's objective belongs in the summary prompt: a
+        // goal that just completed or blocked must not be preserved by the
+        // summarizer as work still in progress.
+        let objective = match goal_cell.current() {
+          Some(goal) if goal.status() is Active => Some(goal.objective())
+          _ => None
+        }
+        // Compaction is an optimization; its failure must never end a turn
+        // that could still make progress. The cooldown above also spaces
+        // out retries after a failure.
+        let compaction = try
+          @compact.generate_summary(
+            api_key~,
+            model~,
+            session,
+            api_url?,
+            objective?,
+            unread_opening=step == 0,
+          )
+        catch {
+          error => {
+            @xlog.error() <?
+              {
+                "event": "compaction_failed",
+                "step": step,
+                "error": "\{error}",
+              }
+            None
+          }
+        } noraise {
+          result => Some(result)
+        }
+        if compaction is Some((summary, usage)) {
+          // Mirror `@compact.compact_session`: capture the covered range
+          // first, record the summarizer's own spend (budget folds must
+          // see it), then append the summary as the range's terminator —
+          // all through `append_item`, the loop's single durable path.
+          let to_sequence = session.last_sequence()
+          session = append_item(session, Usage(usage))
+          refresh_goal_cell(goal_cell, session)
+          session = append_item(
+            session,
+            Summary(
+              SessionSummary(content=summary, from_sequence=1, to_sequence~),
+            ),
+          )
+          if step == 0 {
+            // The turn's opening (a user task or a goal continuation
+            // envelope) was appended before this boundary, so the model has
+            // not read it yet. The projection emits uncovered events in log
+            // order, so re-deliver the opening after the checkpoint —
+            // otherwise the summary would land after the fresh instruction
+            // and could take precedence over it. The summarizer was told to
+            // leave the instruction to this verbatim copy.
+            session = append_item(session, opening)
+          }
+          // The projection changed shape: rebuild the model-facing messages
+          // from the compacted session, and forget watcher fingerprints —
+          // the notices they describe are now behind the summary, so the
+          // next runtime update must be emitted in full, not collapsed to
+          // a "results unchanged" marker.
+          messages = session.chat_messages()
+          watcher_fingerprints.clear()
+          last_prompt_tokens = 0
+          @xlog.info() <?
+            {
+              "event": "auto_compaction",
+              "step": step,
+              "to_sequence": to_sequence,
+              "prompt_tokens_before": prompt_tokens_before,
+            }
+          // The summarizer's own spend counts against the goal budget (the
+          // usage above was folded into the cell), so re-run the budget gate:
+          // compaction must not buy one extra model call past the budget.
+          // The summary stays durable either way — it was already paid for.
+          if goal_cell.budget_exhausted() {
+            let note = "stopping: the goal token budget is exhausted"
+            let next = append_item(session, Terminal(Finished(note)))
+            @xlog.warn() <? { "event": "goal_budget_step_stop", "step": step }
+            return next
+          }
+        }
       }
       // Steering first: user-visible mid-turn input should precede runtime
       // chatter the model reads alongside it.
@@ -420,6 +538,7 @@ async fn[X] run_opened_turn_in_scope(
         ),
       )
       refresh_goal_cell(goal_cell, session)
+      last_prompt_tokens = response.usage.prompt_tokens
       let reasoning_content = match response.reasoning_content {
         "" => None
         content => Some(content)
@@ -726,4 +845,37 @@ async fn drain_goal_updates(
     refresh_goal_cell(cell, session)
   }
   session
+}
+
+///|
+/// The prompt size the provider reported for the session's most recent model
+/// response, folded from durable `Usage` events. Seeds the auto-compaction
+/// trigger at turn open so continuation and resumed turns inherit the real
+/// projection size instead of starting blind at zero.
+fn last_recorded_prompt_tokens(session : @agent_session.Session) -> Int {
+  let mut last = 0
+  let mut last_sequence = 0
+  for event in session.events() {
+    match event.item() {
+      Usage(usage) => {
+        last = usage.prompt_tokens()
+        last_sequence = event.sequence()
+      }
+      // A summary shrinks the projection, so a usage it covers — the
+      // summarizer's own call included — no longer describes the prompt the
+      // next request will send; drop it. But a partial summary (e.g. from
+      // `sessions compact --from/--to`) can be appended after a usage it does
+      // not cover, and that usage still describes the prompt a resumed run
+      // will replay — so reset only when the summary actually covers it.
+      Summary(summary) =>
+        if last_sequence != 0 &&
+          summary.from_sequence() <= last_sequence &&
+          last_sequence <= summary.to_sequence() {
+          last = 0
+          last_sequence = 0
+        }
+      _ => ()
+    }
+  }
+  last
 }

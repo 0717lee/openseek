@@ -4,7 +4,7 @@ test "compaction messages use projected history plus checkpoint prompt" {
     .append(User(UserMessage("first")))
     .append(Assistant(AssistantMessage("answer")))
     .append(User(UserMessage("next")))
-  let messages = compaction_messages(session)
+  let messages = compaction_messages(session, unread_opening=false)
   assert_eq(messages.length(), 5)
   assert_true(messages[0].role is System)
   assert_eq(messages[0].content, "system")

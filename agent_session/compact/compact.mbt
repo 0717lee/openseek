@@ -15,19 +15,57 @@ const CompactionUserPrompt : String =
 ///|
 fn compaction_messages(
   session : @agent_session.Session,
+  objective? : String,
+  unread_opening~ : Bool,
 ) -> Array[@deepseek.ChatMessage] {
-  session.chat_messages()..push(ChatMessage(User, content=CompactionUserPrompt))
+  let mut prompt = match objective {
+    Some(objective) => {
+      let prompt =
+        $|\{CompactionUserPrompt}
+        $|
+        $|An active session goal is in progress. Preserve everything needed to
+        $|keep pursuing this exact objective:
+        $|<objective>
+        $|\{objective}
+        $|</objective>
+      prompt
+    }
+    None => CompactionUserPrompt
+  }
+  if unread_opening {
+    prompt = (
+      $|\{prompt}
+      $|
+      $|The final user-role message before this one is a fresh instruction the
+      $|assistant has not acted on yet. It will be re-delivered verbatim right
+      $|after your summary: do not summarize, paraphrase, or restate any part
+      $|of it.
+    )
+  }
+  session.chat_messages()..push(ChatMessage(User, content=prompt))
 }
 
 ///|
-async fn generate_compaction_summary(
+/// Generate a checkpoint summary through the model without appending
+/// anything: the caller owns durability of both the summary and the
+/// summarizer's own token spend. `objective` (an active goal's objective)
+/// makes the summary preserve goal-relevant state explicitly.
+///
+/// The request streams with a silent handler so it rides the client's
+/// idle-timeout protection — the same mode the agent loop uses.
+pub async fn generate_summary(
   api_key~ : String,
   model~ : @deepseek.Model,
   session : @agent_session.Session,
   api_url? : String,
+  objective? : String,
+  unread_opening? : Bool = false,
 ) -> (String, @agent_session.TurnUsage) {
   let client = @client.Client(api_key~, model~, api_url?, thinking=No)
-  let response = client.chat(compaction_messages(session))
+  let response = client.chat(
+    compaction_messages(session, objective?, unread_opening~),
+    stream=StreamHandler(on_content_delta=_ => ()),
+  )
   let summary = response.content.trim().to_owned()
   if summary.is_empty() {
     fail("compaction summary was empty")
@@ -95,12 +133,7 @@ pub async fn compact_session(
       "from_sequence": from_sequence,
       "to_sequence": to_sequence,
     }
-  let (summary, usage) = generate_compaction_summary(
-    api_key~,
-    model~,
-    session,
-    api_url?,
-  )
+  let (summary, usage) = generate_summary(api_key~, model~, session, api_url?)
   // The summarizer call is real model spend: record it durably so budget
   // accounting (a fold over Usage events) cannot undercount compaction.
   // Appended before the Summary so the summary stays the range's terminator.

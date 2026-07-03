@@ -67,6 +67,7 @@ pub async fn[X] run_goal_in_scope(
   host_token_budget? : Int = DEFAULT_GOAL_TOKEN_BUDGET,
   thinking? : @deepseek.ThinkingMode = Max,
   api_url? : String,
+  compact_threshold? : Int,
 ) -> @agent_session.Session {
   // Host-created goal (`--goal`): the user set the objective directly, so
   // the goal exists before the first turn instead of waiting for the model
@@ -159,6 +160,7 @@ pub async fn[X] run_goal_in_scope(
     api_url?,
     tools~,
     goal_cell~,
+    compact_threshold?,
   )
   for continuation in 0..<max_continuations {
     guard last_turn_finished(session) else { return session }
@@ -206,6 +208,7 @@ pub async fn[X] run_goal_in_scope(
       api_url?,
       tools~,
       goal_cell~,
+      compact_threshold?,
     )
   }
   if session.current_goal() is Some(snapshot) && snapshot.is_active() {
@@ -302,6 +305,7 @@ pub async fn run_goal_with_append(
   thinking? : @deepseek.ThinkingMode = Max,
   api_url? : String,
   workspace_root? : String = ".",
+  compact_threshold? : Int,
 ) -> @agent_session.Session {
   @async.with_task_group() <| group => {
     run_goal_in_scope(
@@ -319,6 +323,7 @@ pub async fn run_goal_with_append(
       host_token_budget~,
       thinking~,
       api_url?,
+      compact_threshold?,
     )
   }
 }

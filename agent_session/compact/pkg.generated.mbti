@@ -10,6 +10,8 @@ import {
 // Values
 pub async fn compact_session(store? : @store.SessionStore, @agent_session.Session, api_key~ : String, model~ : @deepseek.Model, api_url? : String) -> @agent_session.Session
 
+pub async fn generate_summary(api_key~ : String, model~ : @deepseek.Model, @agent_session.Session, api_url? : String, objective? : String, unread_opening? : Bool) -> (String, @agent_session.TurnUsage)
+
 // Errors
 
 // Types and methods
