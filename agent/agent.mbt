@@ -579,17 +579,18 @@ async fn apply_steer_inputs(
   messages : Array[@deepseek.ChatMessage],
   append_item~ : async (@agent_session.Session, @agent_session.SessionItem) -> @agent_session.Session,
 ) -> @agent_session.Session {
-  let mut current = session
-  for input in inputs {
+  for input in inputs; current = session {
     let (kind, text) = match input {
       Prompt(text) => ("prompt", text)
       Command(text) => ("command", text)
     }
-    current = append_item(current, User(UserMessage(text)))
+    let next = append_item(current, User(UserMessage(text)))
     messages.push(ChatMessage(User, content=text))
     @xlog.info() <? { "event": "steer_applied", "kind": kind, "content": text }
+    continue next
+  } nobreak {
+    current
   }
-  current
 }
 
 ///|
