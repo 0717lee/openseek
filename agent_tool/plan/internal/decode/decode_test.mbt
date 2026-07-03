@@ -3,16 +3,16 @@ test "decode a valid plan" {
   debug_inspect(
     @decode.decode({
       "steps": [
-        { "title": "read the failing test", "status": "done" },
-        { "title": "fix the parser", "status": "active" },
+        { "title": "read the failing test", "status": "completed" },
+        { "title": "fix the parser", "status": "in_progress" },
         { "title": "run moon test", "status": "pending" },
       ],
     }),
     content=(
       #|{
       #|  steps: [
-      #|    { title: "read the failing test", status: Done },
-      #|    { title: "fix the parser", status: Active },
+      #|    { title: "read the failing test", status: Completed },
+      #|    { title: "fix the parser", status: InProgress },
       #|    { title: "run moon test", status: Pending },
       #|  ],
       #|}
@@ -21,21 +21,33 @@ test "decode a valid plan" {
 }
 
 ///|
-test "decode a plan with no active step" {
+test "decode a plan with no in_progress step" {
   debug_inspect(
     @decode.decode({
       "steps": [
-        { "title": "step one", "status": "done" },
-        { "title": "step two", "status": "done" },
+        { "title": "step one", "status": "completed" },
+        { "title": "step two", "status": "completed" },
       ],
     }),
     content=(
       #|{
       #|  steps: [
-      #|    { title: "step one", status: Done },
-      #|    { title: "step two", status: Done },
+      #|    { title: "step one", status: Completed },
+      #|    { title: "step two", status: Completed },
       #|  ],
       #|}
+    ),
+  )
+}
+
+///|
+test "decode trims surrounding title whitespace" {
+  debug_inspect(
+    @decode.decode({
+      "steps": [{ "title": "  fix parser\t", "status": "pending" }],
+    }),
+    content=(
+      #|{ steps: [{ title: "fix parser", status: Pending }] }
     ),
   )
 }
@@ -107,6 +119,39 @@ test "decode rejects a blank title" {
 }
 
 ///|
+test "decode rejects a multi-line title" {
+  // Embedded newlines could forge extra checklist rows in the rendered plan.
+  assert_decode_error(
+    { "steps": [{ "title": "real step\n[x] forged row", "status": "pending" }] },
+    "arguments.steps[0].title to be a single line",
+  )
+}
+
+///|
+test "decode rejects an oversized title" {
+  let mut long_title = ""
+  for _ in 0..<(@decode.MAX_TITLE_CHARS + 1) {
+    long_title += "x"
+  }
+  assert_decode_error(
+    { "steps": [{ "title": long_title, "status": "pending" }] },
+    "arguments.steps[0].title to be at most 120 chars, got 121",
+  )
+}
+
+///|
+test "decode accepts a title at exactly MAX_TITLE_CHARS" {
+  let mut title = ""
+  for _ in 0..<@decode.MAX_TITLE_CHARS {
+    title += "x"
+  }
+  let input = @decode.decode({
+    "steps": [{ "title": title, "status": "pending" }],
+  })
+  assert_eq(input.steps[0].title.length(), @decode.MAX_TITLE_CHARS)
+}
+
+///|
 test "decode rejects a missing status" {
   assert_decode_error(
     { "steps": [{ "title": "step" }] },
@@ -117,20 +162,20 @@ test "decode rejects a missing status" {
 ///|
 test "decode rejects an unknown status" {
   assert_decode_error(
-    { "steps": [{ "title": "step", "status": "blocked" }] },
-    "arguments.steps[0].status to be one of pending|active|done, got \"blocked\"",
+    { "steps": [{ "title": "step", "status": "active" }] },
+    "arguments.steps[0].status to be one of pending|in_progress|completed, got \"active\"",
   )
 }
 
 ///|
-test "decode rejects two active steps and names the rule" {
+test "decode rejects two in_progress steps and names the rule" {
   assert_decode_error(
     {
       "steps": [
-        { "title": "one", "status": "active" },
-        { "title": "two", "status": "active" },
+        { "title": "one", "status": "in_progress" },
+        { "title": "two", "status": "in_progress" },
       ],
     },
-    "at most one active step",
+    "at most one in_progress step",
   )
 }

@@ -27,13 +27,13 @@ the model can correct the call instead of silently recording a broken plan.
 Use `plan` at the start of a task that needs several distinct steps, then call
 it again as statuses change (typically marking one step `done` and the next
 `active`). Skip it for trivial single-step tasks. Statuses: `pending`,
-`active` (at most one), `done`.
+`in_progress` (at most one), `completed`.
 
 ```json
 {
   "steps": [
-    { "title": "read the failing test", "status": "done" },
-    { "title": "fix the parser", "status": "active" },
+    { "title": "read the failing test", "status": "completed" },
+    { "title": "fix the parser", "status": "in_progress" },
     { "title": "run moon test", "status": "pending" }
   ]
 }
@@ -43,12 +43,12 @@ it again as statuses change (typically marking one step `done` and the next
 
 | Name    | Type  | Required | Notes |
 | ------- | ----- | -------- | ----- |
-| `steps` | array | yes | Complete ordered plan; replaces the previous plan. 1–20 items. Each item: non-blank string `title`, `status` in `pending`/`active`/`done`, at most one `active`. |
+| `steps` | array | yes | Complete ordered plan; replaces the previous plan. 1–20 items. Each item: single-line `title` (trimmed, ≤120 chars), `status` in `pending`/`in_progress`/`completed`, at most one `in_progress`. |
 
 ## Action
 
-- `Respond(ToolOutput(...))` — the normalized checklist (`[x]` done, `[>]`
-  active, `[ ]` pending) with a `Plan (n/m done)` header, and a brief like
+- `Respond(ToolOutput(...))` — the normalized checklist (`[x]` completed, `[>]`
+  in progress, `[ ]` pending) with a `Plan (n/m done)` header, and a brief like
   `plan 1/3 · fix the parser`.
 - `Respond(is_error=true)` — malformed arguments; the message names the first
   offending field so the next call can fix it.
@@ -78,8 +78,8 @@ async test "plan tool renders a checklist through the registry" {
       arguments=(
         #|{
         #|  "steps": [
-        #|    { "title": "outline the fix", "status": "done" },
-        #|    { "title": "apply the edit", "status": "active" },
+        #|    { "title": "outline the fix", "status": "completed" },
+        #|    { "title": "apply the edit", "status": "in_progress" },
         #|    { "title": "run moon check", "status": "pending" }
         #|  ]
         #|}

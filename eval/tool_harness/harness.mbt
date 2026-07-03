@@ -234,8 +234,8 @@ async fn run_plan_case(
 ) -> @report.ReportRow {
   let action = dispatch(tools, "plan", {
     "steps": [
-      { "title": "read the failing test", "status": "done" },
-      { "title": "fix the parser", "status": "active" },
+      { "title": "read the failing test", "status": "completed" },
+      { "title": "fix the parser", "status": "in_progress" },
       { "title": "run moon test", "status": "pending" },
     ],
   })
@@ -246,11 +246,13 @@ async fn run_plan_case(
   )
   if reason == "" {
     let invalid = dispatch(tools, "plan", {
-      "steps": [{ "title": "step", "status": "blocked" }],
+      "steps": [{ "title": "step", "status": "active" }],
     })
     reason = expect_respond(
       invalid,
-      contains=["arguments.steps[0].status to be one of pending|active|done"],
+      contains=[
+        "arguments.steps[0].status to be one of pending|in_progress|completed",
+      ],
       error=true,
     )
   }

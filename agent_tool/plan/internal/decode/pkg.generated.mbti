@@ -8,6 +8,8 @@ import {
 // Values
 pub const MAX_STEPS : Int = 20
 
+pub const MAX_TITLE_CHARS : Int = 120
+
 pub fn decode(Json) -> PlanInput raise
 
 // Errors
@@ -19,8 +21,8 @@ pub struct PlanInput {
 
 pub enum PlanStatus {
   Pending
-  Active
-  Done
+  InProgress
+  Completed
 } derive(Eq, @debug.Debug)
 
 pub struct PlanStep {
