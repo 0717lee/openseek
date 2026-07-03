@@ -55,19 +55,15 @@ fn @path.Path::basename(path : @path.Path) -> StringView {
   }
   for view = trimmed {
     match view {
-      [] => break trim_windows_drive_prefix(trimmed)
+      [] =>
+        // A bare drive prefix (`C:`) has no basename to recover.
+        break match trimmed {
+          ['a'..='z' | 'A'..='Z', ':', .. rest] => rest
+          _ => trimmed
+        }
       [.., '/' | '\\'] as prefix => break trimmed[prefix.length():]
       [.. rest, _] => continue rest
     }
-  }
-}
-
-///|
-#cfg(platform="windows")
-fn trim_windows_drive_prefix(path : StringView) -> StringView {
-  match path {
-    ['a'..='z' | 'A'..='Z', ':', .. rest] => rest
-    _ => path
   }
 }
 

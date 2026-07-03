@@ -36,13 +36,17 @@ async fn collect_dirs(
   let names = @fs.readdir(dir, sort=true) catch { _ => return }
   for name in names {
     guard out.length() < max_dirs else { return }
-    if skip_outline_dir(name) {
+    // Hidden dirs plus build output and vendored deps stay out of outlines.
+    if name.has_prefix(".") ||
+      name == "node_modules" ||
+      name == "_build" ||
+      name == "target" {
       continue
     }
     let child = "\{dir}/\{name}"
     let kind = @fs.kind(child, follow_symlink=false) catch { _ => continue }
     guard kind is Directory else { continue }
-    out.push(outline_indent(depth) + sanitize_name(name) + "/")
+    out.push("  ".repeat(depth) + sanitize_name(name) + "/")
     collect_dirs(child, depth + 1, max_depth, max_dirs, out)
   }
 }
@@ -70,21 +74,6 @@ fn sanitize_name(name : String) -> String {
     count += 1
   }
   sb.to_string()
-}
-
-///|
-/// Directories left out of the outline: hidden dirs plus build output and
-/// vendored deps.
-fn skip_outline_dir(name : String) -> Bool {
-  name.has_prefix(".") ||
-  name == "node_modules" ||
-  name == "_build" ||
-  name == "target"
-}
-
-///|
-fn outline_indent(depth : Int) -> String {
-  "  ".repeat(depth)
 }
 
 ///|

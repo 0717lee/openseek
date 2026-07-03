@@ -6,18 +6,12 @@ priv struct SourceRange {
 
 ///|
 pub fn without_comments(markdown : String) -> String {
-  let ranges = comment_ranges(markdown)
-  guard !ranges.is_empty() else { markdown }
-  ranges.sort_by(fn(left, right) { left.first.compare(right.first) })
-  remove_source_ranges(markdown, ranges)
-}
-
-///|
-fn comment_ranges(markdown : String) -> Array[SourceRange] {
   let ranges = []
   let doc = @cmark.Doc::from_string(locs=true, markdown)
   collect_block_comment_ranges(markdown, doc.block, ranges)
-  ranges
+  guard !ranges.is_empty() else { markdown }
+  ranges.sort_by(fn(left, right) { left.first.compare(right.first) })
+  remove_source_ranges(markdown, ranges)
 }
 
 ///|
@@ -76,10 +70,19 @@ fn collect_inline_comment_ranges(
   ranges : Array[SourceRange],
 ) -> Unit {
   match inline {
-    RawHtml(node) =>
-      if inline_raw_html_is_comment(node.v) {
-        push_loc_range(ranges, node.meta)
+    RawHtml(node) => {
+      let text = StringBuilder()
+      for tight in node.v.0.iter() {
+        text.write_string(tight.to_string())
       }
+      let loc = node.meta.loc
+      if is_html_comment(text.to_string()) && !loc_is_absent(loc) {
+        ranges.push({
+          first: loc.first_ccode,
+          last_exclusive: loc.last_ccode + 1,
+        })
+      }
+    }
     Inlines(node) =>
       for child in node.v.iter() {
         collect_inline_comment_ranges(child, ranges)
@@ -113,15 +116,6 @@ fn push_html_block_ranges(
 }
 
 ///|
-fn inline_raw_html_is_comment(raw : @cmark.InlineRawHtml) -> Bool {
-  let text = StringBuilder()
-  for tight in raw.0.iter() {
-    text.write_string(tight.to_string())
-  }
-  is_html_comment(text.to_string())
-}
-
-///|
 fn is_html_comment(text : StringView) -> Bool {
   text.trim_start().has_prefix("<!--")
 }
@@ -129,15 +123,6 @@ fn is_html_comment(text : StringView) -> Bool {
 ///|
 fn loc_is_absent(loc : @cmark_base.TextLoc) -> Bool {
   loc.is_none() || loc.is_empty()
-}
-
-///|
-fn push_loc_range(ranges : Array[SourceRange], meta : @cmark_base.Meta) -> Unit {
-  let loc = meta.loc
-  if loc_is_absent(loc) {
-    return
-  }
-  ranges.push({ first: loc.first_ccode, last_exclusive: loc.last_ccode + 1 })
 }
 
 ///|
