@@ -244,6 +244,9 @@ async fn session_envelope_reply(
   if !@fs.exists(path) {
     return json_reply({ "found": false })
   }
+  // Read the text before stat-ing: on a live file the reported size must
+  // describe at most what was served, never a later append the text misses.
+  let events = read_text_lossy(path)
   let size = try {
     let file = @fs.open(path, mode=ReadOnly)
     defer file.close()
@@ -253,7 +256,7 @@ async fn session_envelope_reply(
   }
   json_reply({
     "found": true,
-    "events": read_text_lossy(path),
+    "events": events,
     "events_bytes": Json::number(size.to_double()),
   })
 }
