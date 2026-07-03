@@ -140,7 +140,7 @@ Options:
   --system-prompt-file <system-prompt-file>                    Read the complete system prompt from this file instead of the built-in prompt. [env: OPENSEEK_SYSTEM_PROMPT_FILE] [default: ]
   --system-prompt-addendum-file <system-prompt-addendum-file>  Append this file to the selected system prompt for prompt experiments. [env: OPENSEEK_SYSTEM_PROMPT_ADDENDUM_FILE] [default: ]
   --global-skills-dir <global-skills-dir>                      User-level skills directory advertised alongside workspace skills; empty means $HOME/.openseek/skills, or %USERPROFILE%/.openseek/skills on Windows. [env: OPENSEEK_GLOBAL_SKILLS_DIR] [default: ]
-  --concurrency <concurrency>                                  Run the task in N sibling copies of --dir concurrently (best-of-N); 1 means a single run. [env: OPENSEEK_CONCURRENCY] [default: 1]
+  --concurrency <concurrency>                                  Run the task in N sibling copies of --dir concurrently (best-of-N). Any explicit value, including 1, copies --dir into <dir>_run_<i> and never writes to --dir itself; omit the flag for a single in-place run. [env: OPENSEEK_CONCURRENCY] [default: 1]
 ```
 
 ## API Key Is Required For Agent Runs
