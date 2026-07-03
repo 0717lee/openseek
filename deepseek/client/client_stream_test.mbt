@@ -230,6 +230,68 @@ async test "streaming chat fails an idle stall after a delta without retrying" {
 }
 
 ///|
+/// Regression (Codex review): a `data:` line received WITHOUT its blank-line
+/// terminator, then an idle stall, is buffered-but-unflushed model output. The
+/// idle path must flush it first — firing on_stream_event and delivering the
+/// content — so the delivered-event bail keeps the failure final instead of
+/// replaying a half-consumed completion. Exactly one hit; the delta is seen.
+async test "streaming chat does not retry an idle stall after an unterminated data line" {
+  @async.with_task_group() <| group => {
+    let server = @http.Server(@socket.Addr::parse("127.0.0.1:0")) catch {
+      error => {
+        let message = "\{error}"
+        if message.contains("Operation not permitted") {
+          println("local TCP bind unavailable; skipping idle-stall test")
+          return
+        }
+        raise error
+      }
+    }
+    let hits : Ref[Int] = { val: 0 }
+    group.spawn_bg(no_wait=true) <| () => {
+      server.run_forever(
+        (_request, body, conn) => {
+          let _ = body.read_all()
+          hits.val = hits.val + 1
+          conn.send_response(200, "OK", extra_headers={
+            "Content-Type": "text/event-stream",
+          })
+          // One data line, then a single newline — NO blank-line terminator —
+          // then silence. The delta sits buffered in data_lines.
+          conn.write(
+            "data: {\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n",
+          )
+          conn.flush()
+          @async.sleep(3_000)
+        },
+        max_connections=8,
+      )
+    }
+    let url = "http://127.0.0.1:\{server.addr.port()}/chat/completions"
+    let client = @client.Client(
+      api_key="test-key",
+      api_url=url,
+      retry_attempts=3,
+      retry_backoff_ms=1,
+      idle_timeout_ms=100,
+    )
+    let deltas : Array[String] = []
+    let _ = client.chat(
+      [ChatMessage(User, content="hello")],
+      stream=StreamHandler(on_content_delta=delta => deltas.push(delta)),
+    ) catch {
+      error => {
+        assert_true("\{error}".contains("idle"))
+        assert_eq(deltas.join("|"), "partial")
+        assert_eq(hits.val, 1)
+        return
+      }
+    }
+    fail("expected an idle-stall failure without retry")
+  }
+}
+
+///|
 async test "chat stream handler rejects EOF before done" {
   @async.with_task_group() <| group => {
     guard stream_test_server(group, finish=false) is Some(url) else { return }

@@ -208,15 +208,13 @@ async fn flush_sse_event(
 }
 
 ///|
-/// Runs `read` under an idle bound: if it produces nothing within
-/// `idle_timeout_ms`, the stall is converted to `RetryableApiError` so the
-/// client's retry loop can re-run the request on a fresh connection — subject
-/// to the same delivered-event bail as a mid-stream drop, so a stall after any
-/// output surfaces as a failure rather than replaying a half-consumed
-/// completion. `read`'s own errors propagate unchanged; a non-positive budget
-/// disables the bound. The clock covers a single `read`, so on the SSE loop it
-/// measures the gap between events and never trips on a long, progressing
-/// completion.
+/// Runs `read` under an idle bound, raising `RetryableApiError` directly if it
+/// produces nothing within `idle_timeout_ms`. Use it only where a stall leaves
+/// no buffered state to reconcile — the response-header read, where nothing has
+/// been produced yet so retrying on a fresh connection is unconditionally safe.
+/// The SSE body loop instead uses `read_stream_line`, which must flush a
+/// buffered event before raising. `read`'s own errors propagate unchanged; a
+/// non-positive budget disables the bound.
 async fn[T] with_idle_timeout(
   idle_timeout_ms : Int,
   what : String,
@@ -233,6 +231,23 @@ async fn[T] with_idle_timeout(
 }
 
 ///|
+/// One SSE line under the idle bound: `Some(Some(line))` is a line,
+/// `Some(None)` is EOF, and `None` is an idle timeout — kept distinct from EOF
+/// only so the caller can label the retry reason, since both are handled the
+/// same way (flush any buffered event first). A non-positive budget disables
+/// the bound.
+async fn read_stream_line(
+  reader : @http.Client,
+  idle_timeout_ms : Int,
+) -> String?? {
+  if idle_timeout_ms <= 0 {
+    Some(reader.read_until("\n"))
+  } else {
+    @async.with_timeout_opt(idle_timeout_ms, () => reader.read_until("\n"))
+  }
+}
+
+///|
 async fn read_chat_stream(
   reader : @http.Client,
   idle_timeout_ms~ : Int,
@@ -243,27 +258,13 @@ async fn read_chat_stream(
   let acc = StreamAccumulator::StreamAccumulator()
   let data_lines : Array[String] = []
   for ;; {
-    match
-      with_idle_timeout(idle_timeout_ms, "DeepSeek stream", () => {
-        reader.read_until("\n")
-      }) {
-      None => {
-        if flush_sse_event(
-            acc,
-            data_lines,
-            on_stream_event~,
-            on_content_delta~,
-            on_reasoning_delta~,
-          ) {
-          break
-        }
-        // A connection that dies before [DONE] is transport-shaped; raise
-        // the retryable class so the client's retry loop may re-run the
-        // request — its delivered-delta bail makes this final whenever any
-        // output already reached the consumer.
-        raise RetryableApiError("DeepSeek stream ended before [DONE]")
-      }
-      Some(raw) => {
+    // An interrupted read — EOF or idle timeout — must flush any buffered event
+    // before raising: a `data:` line received without its blank-line terminator
+    // is model output already produced (and billed), so flushing fires
+    // on_stream_event and keeps the retry loop from replaying a half-consumed
+    // completion. EOF and timeout differ only in the retry reason.
+    let reason = match read_stream_line(reader, idle_timeout_ms) {
+      Some(Some(raw)) => {
         let trimmed = raw.trim()
         if trimmed.is_empty() {
           if flush_sse_event(
@@ -278,8 +279,21 @@ async fn read_chat_stream(
         } else if sse_data_fragment(raw) is Some(data) {
           data_lines.push(data)
         }
+        continue
       }
+      Some(None) => "DeepSeek stream ended before [DONE]"
+      None => "DeepSeek stream idle for \{idle_timeout_ms}ms"
     }
+    if flush_sse_event(
+        acc,
+        data_lines,
+        on_stream_event~,
+        on_content_delta~,
+        on_reasoning_delta~,
+      ) {
+      break
+    }
+    raise RetryableApiError(reason)
   }
   acc.response()
 }
