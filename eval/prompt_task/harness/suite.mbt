@@ -317,7 +317,14 @@ fn ProblemSpec::from_json(json : Json, base_dir : String) -> ProblemSpec raise {
   ProblemSpec(
     id~,
     prompt_label=string_field_default(fields, "prompt_label", id),
-    task_file=resolve_relative_path(base_dir, string_field(fields, "task_file")),
+    task_file={
+      let task_file = string_field(fields, "task_file")
+      if task_file.has_prefix("/") || base_dir == "." {
+        task_file
+      } else {
+        base_dir + "/" + task_file
+      }
+    },
     validation_probes=probes,
   )
 }
@@ -329,7 +336,10 @@ pub async fn run_suite(config : SuiteConfig) -> SuiteManifest {
   if config.api_key == "" {
     fail("api_key is required for running suite trials")
   }
-  prepare_suite_output_dir(config.out_dir)
+  if @fs.exists(config.out_dir) {
+    @fs.rmdir(config.out_dir, recursive=true)
+  }
+  @fs.mkdir(config.out_dir + "/combos", recursive=true)
   let jobs = suite_jobs(config)
   prepare_combo_output_dirs(jobs)
   let artifacts = run_indexed_with_concurrency(
@@ -343,18 +353,10 @@ pub async fn run_suite(config : SuiteConfig) -> SuiteManifest {
 }
 
 ///|
-async fn prepare_suite_output_dir(out_dir : String) -> Unit {
-  if @fs.exists(out_dir) {
-    @fs.rmdir(out_dir, recursive=true)
-  }
-  @fs.mkdir(out_dir + "/combos", recursive=true)
-}
-
-///|
 async fn prepare_combo_output_dirs(jobs : Array[SuiteJob]) -> Unit {
   let seen : Array[String] = []
   for job in jobs {
-    if !string_array_contains(seen, job.out_dir) {
+    if !seen.contains(job.out_dir) {
       seen.push(job.out_dir)
       prepare_output_dir(job.out_dir)
     }
@@ -483,7 +485,12 @@ pub async fn analyze_suite(out_dir : String) -> SuiteReport {
     concurrency=manifest.concurrency,
     reports~,
   )
-  write_suite_report_files(report)
+  @report.write_files(
+    report.out_dir,
+    report.markdown(),
+    report.to_json(),
+    html=report.html(),
+  )
   report
 }
 
@@ -572,7 +579,11 @@ fn SuiteManifest::from_json(json : Json) -> SuiteManifest raise {
     max_steps=int_field(fields, "max_steps"),
     models=string_array_field(fields, "models"),
     problems=suite_manifest_problems(fields),
-    combos=suite_manifest_combos(fields),
+    combos=match fields.get("combos") {
+      Some(Array(items)) => [ for item in items => ComboRun::from_json(item) ]
+      Some(_) => fail("suite manifest combos must be an array")
+      None => fail("suite manifest combos is missing")
+    },
   )
 }
 
@@ -587,15 +598,6 @@ fn suite_manifest_problems(
       ]
     Some(_) => fail("suite manifest problems must be an array")
     None => fail("suite manifest problems is missing")
-  }
-}
-
-///|
-fn suite_manifest_combos(fields : Map[String, Json]) -> Array[ComboRun] raise {
-  match fields.get("combos") {
-    Some(Array(items)) => [ for item in items => ComboRun::from_json(item) ]
-    Some(_) => fail("suite manifest combos must be an array")
-    None => fail("suite manifest combos is missing")
   }
 }
 
@@ -675,16 +677,6 @@ fn string_array_field(
     Some(_) => fail("\{key} must be an array")
     None => fail("\{key} is missing")
   }
-}
-
-///|
-async fn write_suite_report_files(report : SuiteReport) -> Unit {
-  @report.write_files(
-    report.out_dir,
-    report.markdown(),
-    report.to_json(),
-    html=report.html(),
-  )
 }
 
 ///|
@@ -777,11 +769,27 @@ fn suite_report_row(
     warnings=suite_combo_warnings(report),
     metrics=[
       Metric(name="Model", value=report.model),
-      Metric(name="Problem", value=problem_id_from_report(report)),
+      Metric(
+        name="Problem",
+        // The problem id is the prompt label's `problem[:variant]` head.
+        value=match report.prompt_label.split_once(":") {
+          Some((problem, _)) => "\{problem}"
+          None => report.prompt_label
+        },
+      ),
       Metric(name="Successes", value="\{report.successes}/\{report.runs}"),
-      Metric(name="Avg Steps", value=average_steps(report)),
-      Metric(name="Avg Tool Errors", value=average_tool_errors(report)),
-      Metric(name="Avg Shell Failures", value=average_shell_failures(report)),
+      Metric(
+        name="Avg Steps",
+        value=average_result_metric(report, result => result.steps),
+      ),
+      Metric(
+        name="Avg Tool Errors",
+        value=average_result_metric(report, result => result.tool_errors),
+      ),
+      Metric(
+        name="Avg Shell Failures",
+        value=average_result_metric(report, result => result.shell_failures),
+      ),
       Metric(name="Finished", value=finished_summary(report)),
       Metric(name="Validation", value=validation_summary(report)),
     ],
@@ -817,31 +825,6 @@ fn suite_success_summary(report : SuiteReport) -> String {
 }
 
 ///|
-fn problem_id_from_report(report : EvalReport) -> String {
-  let pieces = report.prompt_label.split(":").collect()
-  if pieces.length() > 0 {
-    pieces[0].to_owned()
-  } else {
-    report.prompt_label
-  }
-}
-
-///|
-fn average_steps(report : EvalReport) -> String {
-  average_result_metric(report, result => result.steps)
-}
-
-///|
-fn average_tool_errors(report : EvalReport) -> String {
-  average_result_metric(report, result => result.tool_errors)
-}
-
-///|
-fn average_shell_failures(report : EvalReport) -> String {
-  average_result_metric(report, result => result.shell_failures)
-}
-
-///|
 fn average_result_metric(
   report : EvalReport,
   metric : (EvalResult) -> Int,
@@ -854,15 +837,9 @@ fn average_result_metric(
   } nobreak {
     total
   }
-  format_average(total, report.results.length())
-}
-
-///|
-fn format_average(total : Int, count : Int) -> String {
-  if count == 0 {
-    return "0.0"
-  }
-  let tenths = (total * 10 + count / 2) / count
+  // Round half-up to one decimal place.
+  let tenths = (total * 10 + report.results.length() / 2) /
+    report.results.length()
   "\{tenths / 10}.\{tenths % 10}"
 }
 
@@ -921,25 +898,6 @@ fn combo_out_dir(
   sanitize_artifact_name(model) +
   "/" +
   sanitize_artifact_name(problem_id)
-}
-
-///|
-fn string_array_contains(items : Array[String], value : String) -> Bool {
-  for item in items {
-    if item == value {
-      return true
-    }
-  }
-  false
-}
-
-///|
-fn resolve_relative_path(base_dir : String, path : String) -> String {
-  if path.has_prefix("/") || base_dir == "." {
-    path
-  } else {
-    base_dir + "/" + path
-  }
 }
 
 ///|

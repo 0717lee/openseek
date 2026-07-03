@@ -494,7 +494,11 @@ async fn run_validation_probe(
   }
   if spec.write_file != "" {
     @fs.write_file(
-      workspace_path(workspace, spec.write_file),
+      if spec.write_file.has_prefix("/") {
+        spec.write_file
+      } else {
+        workspace + "/" + spec.write_file
+      },
       replace_workspace(spec.write_content, workspace),
       create_mode=CreateOrTruncate,
     )
@@ -605,15 +609,6 @@ fn validation_passed_by_name(
     }
   }
   false
-}
-
-///|
-fn workspace_path(workspace : String, path : String) -> String {
-  if path.has_prefix("/") {
-    path
-  } else {
-    workspace + "/" + path
-  }
 }
 
 ///|

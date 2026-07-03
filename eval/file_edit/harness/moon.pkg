@@ -1,5 +1,6 @@
 import {
   "bobzhang/openseek/deepseek",
+  "bobzhang/openseek/internal/agentcli",
   "bobzhang/openseek/eval/file_edit/cases",
   "bobzhang/openseek/eval/internal/metrics",
   "bobzhang/openseek/eval/report",

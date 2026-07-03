@@ -177,16 +177,8 @@ fn trial_extra_env(
     // own ~/.openseek/skills must never reach a trial prompt.
     "OPENSEEK_GLOBAL_SKILLS_DIR": "\{real_workspace}/.no-global-skills",
   }
-  env[api_key_env_for_model(config.model)] = config.api_key
+  env[@agentcli.api_key_env_for_model(config.model)] = config.api_key
   env
-}
-
-///|
-fn api_key_env_for_model(model : @deepseek.Model) -> String {
-  match model {
-    KimiK27Code | KimiK27CodeHighSpeed => "KIMI"
-    V4Flash | V4Pro => "DEEPSEEK"
-  }
 }
 
 ///|

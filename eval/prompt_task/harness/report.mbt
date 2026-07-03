@@ -7,18 +7,13 @@ async fn write_report_files(report : EvalReport) -> Unit {
     html=report.html(),
   )
   for result in report.results {
-    write_eval_result_files(report.out_dir, result)
+    @report.write_files(
+      report.out_dir + "/eval_results/" + eval_result_artifact_name(result),
+      result.markdown(),
+      result.to_json(),
+      html=result.html(),
+    )
   }
-}
-
-///|
-async fn write_eval_result_files(out_dir : String, result : EvalResult) -> Unit {
-  @report.write_files(
-    out_dir + "/eval_results/" + eval_result_artifact_name(result),
-    result.markdown(),
-    result.to_json(),
-    html=result.html(),
-  )
 }
 
 ///|
@@ -191,7 +186,7 @@ fn eval_result_row(
   include_eval_link~ : Bool,
 ) -> @report.ReportRow {
   ReportRow(
-    index=display_index(result),
+    index=if result.index > 0 { result.index } else { 1 },
     name=eval_result_name(result),
     success=result.success,
     reason=result.reason,
@@ -202,7 +197,14 @@ fn eval_result_row(
       Metric(name="Tool Errors", value=result.tool_errors.to_string()),
       Metric(name="Shell Failures", value=result.shell_failures.to_string()),
       Metric(name="Finished", value=result.finished.to_string()),
-      Metric(name="Validation", value=validation_status(result.validation)),
+      Metric(
+        name="Validation",
+        value=if result.validation.ran {
+          result.validation.passed.to_string()
+        } else {
+          "not run"
+        },
+      ),
       Metric(name="Exit Code", value=result.exit_code.to_string()),
     ],
     details=eval_details(result, out_dir~, include_eval_link~),
@@ -328,24 +330,6 @@ fn eval_result_artifact_name(result : EvalResult) -> String {
   .replace_all(old="\\", new="_")
   .replace_all(old=":", new="_")
   .replace_all(old=" ", new="_")
-}
-
-///|
-fn display_index(result : EvalResult) -> Int {
-  if result.index > 0 {
-    result.index
-  } else {
-    1
-  }
-}
-
-///|
-fn validation_status(validation : ValidationResult) -> String {
-  if !validation.ran {
-    "not run"
-  } else {
-    validation.passed.to_string()
-  }
 }
 
 ///|

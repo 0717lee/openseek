@@ -7,15 +7,6 @@
 /// package removes.
 
 ///|
-/// CLI option that carries the provider-specific API key for `model`.
-fn api_key_arg_for_model(model : @deepseek.Model) -> String {
-  match model {
-    KimiK27Code | KimiK27CodeHighSpeed => "kimi-api-key"
-    V4Flash | V4Pro => "deepseek-api-key"
-  }
-}
-
-///|
 /// Environment variable that carries the API key for `model`'s provider.
 /// Spawned engine processes inherit their key through this variable, so it
 /// must stay in lockstep with `api_key`'s lookup order.
@@ -23,15 +14,6 @@ pub fn api_key_env_for_model(model : @deepseek.Model) -> String {
   match model {
     KimiK27Code | KimiK27CodeHighSpeed => "KIMI"
     V4Flash | V4Pro => "DEEPSEEK"
-  }
-}
-
-///|
-/// Human-readable provider name for `model`, used in error guidance.
-fn api_key_provider_for_model(model : @deepseek.Model) -> String {
-  match model {
-    KimiK27Code | KimiK27CodeHighSpeed => "Kimi"
-    V4Flash | V4Pro => "DeepSeek"
   }
 }
 
@@ -47,11 +29,21 @@ pub fn api_key(
   if @cli.non_empty_value(matches, "api-key") is Some(key) {
     return key
   }
-  if @cli.non_empty_value(matches, api_key_arg_for_model(model)) is Some(key) {
+  // The provider-specific option name and the human-readable provider name
+  // key off the same model split as the env lookup below.
+  let arg = match model {
+    KimiK27Code | KimiK27CodeHighSpeed => "kimi-api-key"
+    V4Flash | V4Pro => "deepseek-api-key"
+  }
+  if @cli.non_empty_value(matches, arg) is Some(key) {
     return key
   }
+  let provider = match model {
+    KimiK27Code | KimiK27CodeHighSpeed => "Kimi"
+    V4Flash | V4Pro => "DeepSeek"
+  }
   fail(
-    "an API key is required for \{api_key_provider_for_model(model)} models: pass --api-key or set \{api_key_env_for_model(model)}",
+    "an API key is required for \{provider} models: pass --api-key or set \{api_key_env_for_model(model)}",
   )
 }
 

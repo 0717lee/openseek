@@ -143,16 +143,8 @@ fn trial_extra_env(
     "OPENSEEK_SESSION_ROOT": ".openseek",
     "OPENSEEK_GLOBAL_SKILLS_DIR": "\{real_workspace}/.no-global-skills",
   }
-  env[api_key_env_for_model(config.model)] = config.api_key
+  env[@agentcli.api_key_env_for_model(config.model)] = config.api_key
   env
-}
-
-///|
-fn api_key_env_for_model(model : @deepseek.Model) -> String {
-  match model {
-    KimiK27Code | KimiK27CodeHighSpeed => "KIMI"
-    V4Flash | V4Pro => "DEEPSEEK"
-  }
 }
 
 ///|
@@ -179,7 +171,10 @@ async fn collect_session_events(
   guard is_directory(dir) else { return }
   let names = @fs.readdir(dir, sort=true) catch { _ => return }
   for name in names {
-    if should_skip_scan_dir(name) {
+    if name == ".git" ||
+      name == "node_modules" ||
+      name == ".mooncakes" ||
+      name == "_build" {
       continue
     }
     let path = "\{dir}/\{name}"
@@ -196,14 +191,6 @@ async fn collect_session_events(
 async fn is_directory(path : String) -> Bool {
   (@fs.kind(path, follow_symlink=false) catch { _ => return false }) ==
   Directory
-}
-
-///|
-fn should_skip_scan_dir(name : String) -> Bool {
-  name == ".git" ||
-  name == "node_modules" ||
-  name == ".mooncakes" ||
-  name == "_build"
 }
 
 ///|
