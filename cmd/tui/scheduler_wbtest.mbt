@@ -89,11 +89,6 @@ fn notice_count(cmds : Array[Cmd]) -> Int {
 }
 
 ///|
-fn error_count(cmds : Array[Cmd]) -> Int {
-  [ for cmd in cmds if cmd is AppendItem(Error(_)) => cmd ].length()
-}
-
-///|
 test "loop arm/off/status/pause/resume lifecycle" {
   let state = scheduler_test_state()
   // Arm: schedule set, notice appended, full countdown.
@@ -132,7 +127,10 @@ test "loop arm/off/status/pause/resume lifecycle" {
   let _ = update(state, UiInput(SlashCommand(name="loop", arguments="off")))
   assert_true(state.schedule is None)
   let again = update(state, UiInput(SlashCommand(name="loop", arguments="off")))
-  assert_eq(error_count(again), 1)
+  assert_eq(
+    [ for cmd in again if cmd is AppendItem(Error(_)) => cmd ].length(),
+    1,
+  )
 }
 
 ///|

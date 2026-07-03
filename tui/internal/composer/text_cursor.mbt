@@ -207,19 +207,3 @@ fn move_cursor_word(
   }
   cursor
 }
-
-///|
-fn move_cursor_word_right(
-  logical_lines : Array[LogicLine],
-  cursor : TextCursor,
-) -> TextCursor {
-  move_cursor_word(logical_lines, cursor, direction=Forward)
-}
-
-///|
-fn move_cursor_word_left(
-  logical_lines : Array[LogicLine],
-  cursor : TextCursor,
-) -> TextCursor {
-  move_cursor_word(logical_lines, cursor, direction=Backward)
-}

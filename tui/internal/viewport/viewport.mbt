@@ -1,17 +1,4 @@
 ///|
-/// Full reset before a from-scratch redraw: drop any scroll region and text
-/// style, then erase both the visible screen and the scrollback, leaving the
-/// cursor at the home position.
-async fn clear_screen_and_scrollback(tty : @tty.Tty) -> Unit {
-  tty.reset_top_bottom_margins()
-  tty.reset_style()
-  tty.set_cursor_position(1, 1)
-  tty.erase_display()
-  tty.erase_scrollback()
-  tty.set_cursor_position(1, 1)
-}
-
-///|
 struct Viewport {
   mut size : @terminal_size.TerminalSize
   size_source : SizeSource
@@ -299,13 +286,6 @@ async fn apply_style(tty : @tty.Tty, style : @style.Style) -> Unit {
 }
 
 ///|
-async fn write_span(tty : @tty.Tty, span : @surface.Span) -> Unit {
-  apply_style(tty, span.style())
-  tty.write(span.text())
-  tty.reset_style()
-}
-
-///|
 /// Run `body` with terminal auto-wrap disabled, restoring it even if drawing
 /// raises.
 async fn without_auto_wrap(tty : @tty.Tty, body : async () -> Unit) -> Unit {
@@ -331,7 +311,9 @@ async fn draw_surface_line_at_cursor(
   erase_cursor_row(tty)
   if line is Some(line) {
     for span in line.spans() {
-      write_span(tty, span)
+      apply_style(tty, span.style())
+      tty.write(span.text())
+      tty.reset_style()
     }
   }
 }
@@ -554,7 +536,15 @@ pub async fn Viewport::replay_scrollback(
   surface~ : @surface.Surface,
 ) -> Unit {
   tty.hide_cursor()
-  clear_screen_and_scrollback(tty)
+  // Full reset before a from-scratch redraw: drop any scroll region and
+  // text style, then erase both the visible screen and the scrollback,
+  // leaving the cursor at home.
+  tty.reset_top_bottom_margins()
+  tty.reset_style()
+  tty.set_cursor_position(1, 1)
+  tty.erase_display()
+  tty.erase_scrollback()
+  tty.set_cursor_position(1, 1)
   // `set_geometry` clamps the height to the screen itself.
   self.set_geometry(top=1, height=surface.height())
   let surface = surface.with_max_rows(self.height())

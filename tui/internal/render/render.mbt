@@ -35,15 +35,6 @@ fn prompt_line(
 }
 
 ///|
-fn status_line(
-  status : @doc.Text,
-  notice : @doc.Text?,
-  cols~ : Int,
-) -> @surface.Line {
-  notice.unwrap_or(status).first_line(width=cols)
-}
-
-///|
 const MaxCompletionMenuRows : Int = 6
 
 ///|
@@ -275,7 +266,10 @@ pub fn composer_surface(
     rows.push(row)
   }
   rows.push(
-    indent_line(status_line(status, notice, cols=cols - indent), indent~),
+    indent_line(
+      notice.unwrap_or(status).first_line(width=cols - indent),
+      indent~,
+    ),
   )
   @surface.Surface::new(
     width=cols,

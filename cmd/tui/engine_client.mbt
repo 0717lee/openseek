@@ -38,14 +38,6 @@ priv struct EngineClient {
 }
 
 ///|
-fn EngineClient::EngineClient(
-  config : AppConfig,
-  messages : @async.Queue[Msg],
-) -> EngineClient {
-  { config, messages, live: None }
-}
-
-///|
 /// Spawn the serve-mode engine and its stream readers inside `group`.
 ///
 /// The stdout reader runs for the engine's lifetime, decoding events and

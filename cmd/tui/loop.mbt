@@ -19,14 +19,6 @@ async fn read_ui_events(ui : @ui.Ui, messages : @async.Queue[Msg]) -> Unit {
 }
 
 ///|
-async fn tick_ui(messages : @async.Queue[Msg]) -> Unit {
-  for ;; {
-    @async.sleep(1000)
-    messages.put(Tick)
-  }
-}
-
-///|
 /// Cap on the engine stderr we retain to surface in a no-terminal-event error.
 /// We still read past it so the child can never block writing to a full stderr
 /// pipe (which would deadlock the `proc.wait()` below), but only this many bytes
@@ -173,14 +165,6 @@ fn engine_env(
 }
 
 ///|
-/// One-shot engine invocation: `<engine> run -- <task>`. The `run` subcommand is
-/// the headless one-shot mode; `--` stops option parsing so a task starting with
-/// `-` is taken literally.
-fn engine_args(task : String) -> Array[String] {
-  ["run", "--", task]
-}
-
-///|
 /// Spawn the agent engine for one input and stream its JSONL stdout into the
 /// message loop.
 ///
@@ -211,7 +195,9 @@ async fn run_agent_task(
       // settings go through a fully materialized environment so custom replay
       // engines do not need to accept OpenSeek-specific flags, and inherited
       // session vars cannot shadow explicit TUI config.
-      engine_args(task),
+      // `run` is the headless one-shot mode; `--` stops option parsing so
+      // a task starting with `-` is taken literally.
+      ["run", "--", task],
       inherit_env=false,
       extra_env=child_env,
       stdout=child_stdout,
@@ -788,7 +774,7 @@ async fn[G] run_message_loop(
   // prompt of this TUI session. Prompts, steers, and cancels are commands on
   // its stdin; a `!` shell command remains a local task, tracked by
   // `running_task` so an interrupt can cancel it directly.
-  let engine = EngineClient(state.config, messages)
+  let engine : EngineClient = { config: state.config, messages, live: None }
   let mut running_task : @async.Task[Unit]? = None
   outer~: for ;; {
     // Apply every message already enqueued before deciding anything further:

@@ -84,11 +84,6 @@ fn find_cursor_visual_row(
 }
 
 ///|
-fn is_row_start_at_cursor(row~ : VisualRow, cursor~ : TextCursor) -> Bool {
-  row.logic_start == cursor.position
-}
-
-///|
 /// Resolve the cursor to a wrapped row index.
 ///
 /// A cursor sitting exactly on a soft-wrap boundary is ambiguous: the same text
@@ -104,7 +99,7 @@ fn resolve_cursor(
   let index = find_cursor_visual_row(logical_lines, rows~, cursor~)
   let line = logical_lines[cursor.line]
   if at_wrap_end &&
-    is_row_start_at_cursor(row=rows[index], cursor~) &&
+    rows[index].logic_start == cursor.position &&
     index > line.row_start {
     index - 1
   } else {

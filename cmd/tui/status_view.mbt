@@ -22,14 +22,6 @@ fn format_status_segments(segments : Array[Segment]) -> @doc.Text {
 }
 
 ///|
-fn format_usage_segment(usage : @event.UsageInfo?) -> String {
-  match usage {
-    None => ""
-    Some(usage) => "tokens \{usage.total_tokens}"
-  }
-}
-
-///|
 fn status_segments(state : State) -> Array[Segment] {
   [
     {
@@ -45,7 +37,10 @@ fn status_segments(state : State) -> Array[Segment] {
     },
     { text: state.config.cwd, style: Style(foreground=Basic(Green)) },
     {
-      text: format_usage_segment(state.usage),
+      text: match state.usage {
+        None => ""
+        Some(usage) => "tokens \{usage.total_tokens}"
+      },
       style: Style(foreground=Basic(Magenta)),
     },
     {
@@ -77,11 +72,6 @@ fn loop_segment_text(schedule : Schedule?) -> String {
 }
 
 ///|
-fn format_status_bar_text(state : State) -> @doc.Text {
-  format_status_segments(status_segments(state))
-}
-
-///|
 fn format_two_digits(value : Int64) -> String {
   if value < 10L {
     "0\{value}"
@@ -104,12 +94,6 @@ fn format_elapsed_compact(elapsed_seconds : Int64) -> String {
     let seconds = elapsed_seconds % 60L
     "\{hours}h \{format_two_digits(minutes)}m \{format_two_digits(seconds)}s"
   }
-}
-
-///|
-fn elapsed_seconds(started_ms : Int64, now_ms : Int64) -> Int64 {
-  let elapsed_ms = if now_ms > started_ms { now_ms - started_ms } else { 0L }
-  elapsed_ms / 1000L
 }
 
 ///|
@@ -215,8 +199,9 @@ fn format_activity_text(state : State, cols~ : Int) -> @doc.Text? {
     )
     return Some(Text(spans + steer_segment))
   }
+  let now_ms = @async.now()
   let elapsed = format_elapsed_compact(
-    elapsed_seconds(started_ms, @async.now()),
+    (if now_ms > started_ms { now_ms - started_ms } else { 0L }) / 1000L,
   )
   let spans : Array[@doc.Span] = [
     @doc.Span::plain("Working"),
@@ -228,7 +213,7 @@ fn format_activity_text(state : State, cols~ : Int) -> @doc.Text? {
 ///|
 async fn refresh_ui(ui : @ui.Ui, state : State) -> Unit {
   ui.set_live_view(
-    status=format_status_bar_text(state),
+    status=format_status_segments(status_segments(state)),
     activity=format_activity_text(state, cols=ui.columns()),
     queued_inputs=state.queued,
   )

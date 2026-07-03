@@ -1,14 +1,4 @@
 ///|
-fn session_tool_item(result : @agent_session.ToolResult) -> @ui.TranscriptItem {
-  let event : @event.ToolResultEvent = {
-    name: result.tool_name(),
-    content: result.content(),
-    is_error: result.is_error(),
-  }
-  tool_item(event)
-}
-
-///|
 fn summary_item(summary : @agent_session.SessionSummary) -> @ui.TranscriptItem {
   Notice(
     ToolCall(
@@ -47,7 +37,14 @@ fn session_item(item : @agent_session.SessionItem) -> @ui.TranscriptItem? {
       } else {
         Some(Response(message.content()))
       }
-    Tool(result) => Some(session_tool_item(result))
+    Tool(result) =>
+      Some(
+        tool_item({
+          name: result.tool_name(),
+          content: result.content(),
+          is_error: result.is_error(),
+        }),
+      )
     Runtime(notice) =>
       Some(runtime_item(parse_runtime_update(notice.content())))
     Summary(summary) => Some(summary_item(summary))

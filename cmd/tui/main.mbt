@@ -165,13 +165,6 @@ async fn with_latest_session(config : AppConfig) -> AppConfig {
 }
 
 ///|
-fn session_root(matches : @argparse.Matches) -> String raise {
-  @cli.require_non_empty(
-    matches, "session-root", "--session-root or OPENSEEK_SESSION_ROOT must not be empty",
-  )
-}
-
-///|
 /// Session id for a TUI launch that did not pick one.
 ///
 /// Conversation continuity is the TUI's default. The engine runs once per
@@ -192,7 +185,9 @@ fn parse_config(matches : @argparse.Matches) -> AppConfig raise {
   }
   let explicit_session = @agentcli.session_id(matches)
   let session_root_value = if explicit_session is Some(_) {
-    session_root(matches)
+    @cli.require_non_empty(
+      matches, "session-root", "--session-root or OPENSEEK_SESSION_ROOT must not be empty",
+    )
   } else {
     let root = @cli.value(matches, "session-root").trim().to_owned()
     if root.is_empty() {
@@ -312,7 +307,13 @@ async fn run_app(config : AppConfig, initial : String?, ui : @ui.Ui) -> Unit {
   refresh_ui(ui, state)
   @async.with_task_group(group => {
     group.spawn_bg(no_wait=true) <| () => { read_ui_events(ui, messages) }
-    group.spawn_bg(no_wait=true) <| () => { tick_ui(messages) }
+    // The 1/s Tick heartbeat driving countdowns and elapsed displays.
+    group.spawn_bg(no_wait=true) <| () => {
+      for ;; {
+        @async.sleep(1000)
+        messages.put(Tick)
+      }
+    }
     match initial {
       Some(task) => messages.put(UiInput(Steer(Prompt(task))))
       None => ()

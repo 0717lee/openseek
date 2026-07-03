@@ -108,15 +108,6 @@ pub fn Cursor::col(self : Cursor) -> Int {
 }
 
 ///|
-fn normalize_surface_width(width : Int) -> Int {
-  if width < 1 {
-    1
-  } else {
-    width
-  }
-}
-
-///|
 fn normalize_surface_index(value : Int, max_value : Int) -> Int {
   value.clamp(min=0, max=max_value)
 }
@@ -144,7 +135,7 @@ pub fn Surface::new(
   rows~ : Array[Line],
   cursor~ : Cursor,
 ) -> Surface {
-  let width = normalize_surface_width(width)
+  let width = width.max(1)
   let cursor = normalize_surface_cursor(rows, width, cursor)
   { width, rows, cursor }
 }

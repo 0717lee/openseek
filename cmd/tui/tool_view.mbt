@@ -38,16 +38,11 @@ fn detail_texts(lines : Array[String]) -> Array[@doc.Text] {
 }
 
 ///|
-fn tool_title(result : @event.ToolResultEvent) -> @doc.Text {
-  let label = if result.is_error { "Tool failed" } else { "Tool" }
-  @doc.Text::plain("\{label} \{result.name}")
-}
-
-///|
 fn tool_item(result : @event.ToolResultEvent) -> @ui.TranscriptItem {
+  let label = if result.is_error { "Tool failed" } else { "Tool" }
   ToolCall(
     ToolCall(
-      tool_title(result),
+      @doc.Text::plain("\{label} \{result.name}"),
       status=if result.is_error { Failed } else { Completed },
       details=detail_texts(compact_lines(result.content, ToolOutputLineLimit)),
     ),

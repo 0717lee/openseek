@@ -5,33 +5,10 @@ fn prompt_entry(text : String) -> @history.Entry {
 }
 
 ///|
-fn shell_entry(text : String) -> @history.Entry {
-  let composer = @composer.Model::new("")
-  composer.insert_user_text("!\{text}")
-  @history.Entry::new(composer.text(), composer.mode())
-}
-
-///|
 fn recalled_text(entry : @history.Entry?) -> String {
   match entry {
     Some(entry) => entry.text()
     None => "<none>"
-  }
-}
-
-///|
-fn recalled_is_shell(entry : @history.Entry?) -> Bool {
-  match entry {
-    Some(entry) => entry.mode().is_shell()
-    None => false
-  }
-}
-
-///|
-fn recalled_is_input(entry : @history.Entry?) -> Bool {
-  match entry {
-    Some(entry) => entry.mode().is_input()
-    None => false
   }
 }
 
@@ -71,9 +48,13 @@ test "history skips empty and adjacent duplicate entries" {
 test "history distinguishes shell and prompt entries" {
   let history = @history.History::new()
   history.push(prompt_entry("pwd"))
-  history.push(shell_entry("pwd"))
+  let shell_composer = @composer.Model::new("")
+  shell_composer.insert_user_text("!pwd")
+  history.push(
+    @history.Entry::new(shell_composer.text(), shell_composer.mode()),
+  )
   let previous = history.previous(prompt_entry("draft"))
-  inspect(recalled_is_shell(previous), content="true")
+  assert_true(previous is Some(entry) && entry.mode().is_shell())
   let previous = history.previous(prompt_entry("ignored"))
-  inspect(recalled_is_input(previous), content="true")
+  assert_true(previous is Some(entry) && entry.mode().is_input())
 }

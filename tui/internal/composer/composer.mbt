@@ -12,14 +12,6 @@ pub const DefaultMaxTextRows : Int = 4
 const PromptWidth : Int = 2
 
 ///|
-/// Editable content width for a composer rendered at `cols` terminal columns,
-/// i.e. the room left once the two-column prompt prefix is reserved.
-fn compute_content_width(cols~ : Int) -> Int {
-  let width = cols - PromptWidth
-  width.max(1)
-}
-
-///|
 /// Content width assumed before the composer has been laid out against a real
 /// terminal. The renderer calls `Model::resize` on every frame, so this only
 /// governs editing that happens before the first draw.
@@ -355,7 +347,8 @@ pub fn Model::resize(self : Model, cols~ : Int, max_rows? : Int) -> Unit {
     Some(max_rows) => max_rows.clamp(min=MinTextRows, max=self.max_text_rows)
     None => self.max_text_rows
   }
-  self.content_width = compute_content_width(cols~)
+  // Editable width once the two-column prompt prefix is reserved.
+  self.content_width = (cols - PromptWidth).max(1)
   self.visual_rows = wrap_visual_rows(
     self.logical_lines,
     content_width=self.content_width,
@@ -603,7 +596,7 @@ pub fn Model::move_right(self : Model) -> Unit {
 /// then the run of word units. Matches readline's `forward-word` (Alt-F).
 pub fn Model::move_word_right(self : Model) -> Unit {
   self.set_cursor(
-    cursor=move_cursor_word_right(self.logical_lines, self.cursor),
+    cursor=move_cursor_word(self.logical_lines, self.cursor, direction=Forward),
   )
 }
 
@@ -612,7 +605,9 @@ pub fn Model::move_word_right(self : Model) -> Unit {
 /// delimiters, then the run of word units. Matches readline's `backward-word`
 /// (Alt-B).
 pub fn Model::move_word_left(self : Model) -> Unit {
-  self.set_cursor(cursor=move_cursor_word_left(self.logical_lines, self.cursor))
+  self.set_cursor(
+    cursor=move_cursor_word(self.logical_lines, self.cursor, direction=Backward),
+  )
 }
 
 ///|

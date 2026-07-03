@@ -90,20 +90,11 @@ pub fn parse(content : String) -> ShellCommand? {
 }
 
 ///|
-fn exit_header(exit_code : Int?) -> String {
-  if exit_code is Some(code) {
-    "exit=\{code}"
-  } else {
-    "exit=cancelled"
-  }
-}
-
-///|
 fn shell_result_text(result : @shell.ShellOutput) -> String {
   if result.output_limit_reached {
     let shown_chars = result.text.char_length()
     (
-      $|\{exit_header(result.exit_code)}
+      $|\{if result.exit_code is Some(code) { "exit=\{code}" } else { "exit=cancelled" }}
       $|truncated=true
       $|output_limit_reached=true
       $|shown_chars=\{shown_chars}
