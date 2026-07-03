@@ -50,9 +50,13 @@ pub struct Client {
 /// converted to the same retryable class as a mid-stream drop — so a stall
 /// before any event is retried on a fresh connection, while one after output
 /// bails to a clean failure rather than duplicating a half-consumed completion.
-/// It is an *idle* bound, reset by every byte, so a long-but-progressing
-/// completion never trips it. Pass `0` (or less) to disable. Defaults to 120s;
-/// it applies to the streaming path only (the mode the agent and TUI use).
+/// The bound is measured per read — the header line, then each SSE event line —
+/// so it resets on every event, not on every byte: a stream that keeps
+/// delivering events never trips it. (The clock therefore covers one whole line;
+/// with real DeepSeek deltas, which are small and sub-second apart, a single
+/// line never approaches the default anyway.) Pass `0` (or less) to disable.
+/// Defaults to 120s; it applies to the streaming path only (the mode the agent
+/// and TUI use).
 pub fn Client::Client(
   api_key~ : String,
   model? : @deepseek.Model = default_model,
