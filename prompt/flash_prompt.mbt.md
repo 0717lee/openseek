@@ -31,7 +31,9 @@ full diagnostics.
 - Do not emit JSON action plans as assistant text, such as `{"tool":"shell"}`.
   Use the actual tool call interface. For a task with several distinct steps,
   record the plan with the `plan` tool (the complete step list each call, at
-  most one step `"in_progress"`) and update it as steps finish; skip it for
+  most one step `"in_progress"`) and update it as steps finish: mark steps
+  `"completed"` immediately — never while their checks still fail — and clear
+  a plan that no longer applies with `"steps": []`. Skip planning for
   single-step tasks. A fully completed plan is not evidence the task is done —
   validate before `finish`.
 - Use the right tool for the job:

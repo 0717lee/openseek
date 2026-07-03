@@ -119,6 +119,7 @@ calls `@agent.run`, but that decision lives outside the `agent` package.
 - `edit`: replace exact text in a file;
 - `multi_edit`: apply several explicit line-anchored replacements to one file;
 - `write`: overwrite a file;
+- `plan`: record or replace the step-by-step plan for a multi-step task;
 - `finish`: end the task with a final answer.
 
 File-oriented tools capture `runtime.workspace_root()` when the registry is

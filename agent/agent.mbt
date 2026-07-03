@@ -31,7 +31,7 @@ pub fn steer(runtime : @agent_runtime.AgentRuntime, text : String) -> Unit {
 /// Build the agent's standard tool registry bound to `runtime` and `scope`.
 ///
 /// The returned registry contains the built-in local tools: `shell`, `read`,
-/// `edit`, `multi_edit`, `write`, and `finish`. File-oriented tools capture
+/// `edit`, `multi_edit`, `write`, `plan`, and `finish`. File-oriented tools capture
 /// `runtime.workspace_root()` when this function is called. The `scope`
 /// parameter remains part of the API so future stateful tools can spawn bounded
 /// background work under the caller-owned task scope.

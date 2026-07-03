@@ -19,6 +19,7 @@ be invoked correctly through the same typed boundary the agent loop uses.
   `moon check --watch --diagnostic-limit 10` on a temporary
   MoonBit package.
 - `moon_cmd`: real `moon test` on the same style of temporary package.
+- `plan`: happy-path acknowledgment plus a malformed-status rejection.
 - `finish`: verifies the control action returned by the loop terminator.
 
 ## Example

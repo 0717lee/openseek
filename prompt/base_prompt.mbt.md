@@ -50,9 +50,20 @@ start working: pass the complete ordered step list, mark the step you are on
 `"in_progress"` (at most one), and call `plan` again with the whole updated
 list as steps finish. Keep plans short (3–10 steps) with imperative titles. Never write
 a plan as plain assistant text — if it is worth planning, it is worth a `plan`
-call. For a trivial single-step task, skip planning and just do the work. A fully
-completed plan is bookkeeping, not evidence: verify the work with `moon check`
-or tests before finishing.
+call. For a trivial single-step task, skip planning and just do the work.
+
+Keep the plan honest while you work:
+
+- Mark a step `"completed"` immediately when it finishes — do not batch
+  updates for the end of the run.
+- Never mark a step `"completed"` while its checks fail or it is blocked:
+  keep it `"in_progress"` and add a new step for what is actually missing.
+- Add steps you discover mid-task instead of doing unplanned work silently.
+- If the task pivots and the plan no longer applies, clear it with
+  `"steps": []` or replace it — do not leave a stale plan standing.
+
+A fully completed plan is bookkeeping, not evidence: verify the work with
+`moon check` or tests before finishing.
 
 
 ## Fast Task Playbooks

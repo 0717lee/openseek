@@ -241,7 +241,7 @@ async fn run_plan_case(
   })
   let mut reason = expect_respond(
     action,
-    contains=["Plan (1/3 done)", "[>] fix the parser", "[ ] run moon test"],
+    contains=["Plan updated: 1/3 done", "in progress: fix the parser"],
     error=false,
   )
   if reason == "" {

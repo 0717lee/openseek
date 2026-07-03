@@ -17,7 +17,8 @@ pub struct PlanStep {
 
 ///|
 /// Decoded arguments of the `plan` tool: the complete, ordered list of steps.
-/// Every call replaces the previous plan, so the array is the whole plan.
+/// Every call replaces the previous plan, so the array is the whole plan; an
+/// empty array clears it.
 pub struct PlanInput {
   steps : Array[PlanStep]
 } derive(Debug)
@@ -29,8 +30,10 @@ pub struct PlanInput {
 pub const MAX_STEPS : Int = 20
 
 ///|
-/// Upper bound on a step title, in chars. Titles are echoed verbatim into the
-/// model-visible checklist, so oversized titles crowd out context.
+/// Upper bound on a step title, in Unicode characters (code points), counted
+/// after trimming. Titles are rendered into the UI brief and replayed with
+/// the tool-call arguments on every request, so oversized titles crowd out
+/// context.
 pub const MAX_TITLE_CHARS : Int = 120
 
 ///|
@@ -38,19 +41,27 @@ pub const MAX_TITLE_CHARS : Int = 120
 ///
 /// Strict by design, unlike `finish`: a malformed plan is fed back to the
 /// model as an error naming the first offending field so the next call can
-/// correct it. Rules: `steps` is a required non-empty array of at most
-/// `MAX_STEPS` objects, each with a `status` of `"pending"`, `"in_progress"`,
-/// or `"completed"` (at most one step in progress) and a `title` that is
-/// non-blank, a single line, and at most `MAX_TITLE_CHARS` chars after
-/// trimming. Titles are trimmed because they are echoed verbatim into the
-/// checklist the model re-reads, where embedded newlines could forge extra
-/// checklist rows.
+/// correct it. Rules: `steps` is a required array of at most `MAX_STEPS`
+/// objects (empty clears the plan) and no other argument fields exist; each
+/// step carries exactly a `status` of `"pending"`, `"in_progress"`, or
+/// `"completed"` (at most one step in progress) and a `title` that is
+/// non-blank, a single line, and at most `MAX_TITLE_CHARS` characters after
+/// trimming.
+///
+/// Error messages never echo model-supplied text: `failure_message` recovers
+/// the message by splitting on a marker, so interpolating a crafted value
+/// could truncate the very error meant to correct it.
 pub fn decode(arguments : Json) -> PlanInput raise {
-  guard arguments is { "steps": Array(items), .. } else {
-    fail("arguments.steps to be an array of steps")
+  guard arguments is Object(fields) else {
+    fail("arguments to be an object with a steps array")
   }
-  if items.length() == 0 {
-    fail("arguments.steps to be non-empty")
+  for key, _ in fields {
+    if key != "steps" {
+      fail("arguments to have only the steps field")
+    }
+  }
+  guard fields.get("steps") is Some(Array(items)) else {
+    fail("arguments.steps to be an array of steps")
   }
   if items.length() > MAX_STEPS {
     fail(
@@ -74,63 +85,63 @@ pub fn decode(arguments : Json) -> PlanInput raise {
 
 ///|
 fn decode_step(index : Int, item : Json) -> PlanStep raise {
-  guard item is Object(_) else {
+  guard item is Object(fields) else {
     fail("arguments.steps[\{index}] to be an object")
   }
-  guard item is { "title": String(raw_title), .. } else {
-    fail("arguments.steps[\{index}].title to be a string")
+  for key, _ in fields {
+    if key != "title" && key != "status" {
+      fail("arguments.steps[\{index}] to have only title and status fields")
+    }
+  }
+  let raw_title = match fields.get("title") {
+    Some(String(value)) => value
+    Some(_) => fail("arguments.steps[\{index}].title to be a string")
+    None => fail("arguments.steps[\{index}].title to be present")
   }
   let title = normalize_title(index, raw_title)
-  guard item is { "status": String(status_text), .. } else {
-    fail("arguments.steps[\{index}].status to be a string")
-  }
-  let status = match status_text {
-    "pending" => PlanStatus::Pending
-    "in_progress" => InProgress
-    "completed" => Completed
-    other =>
+  let status = match fields.get("status") {
+    Some(String("pending")) => PlanStatus::Pending
+    Some(String("in_progress")) => InProgress
+    Some(String("completed")) => Completed
+    Some(String(_)) =>
       fail(
-        "arguments.steps[\{index}].status to be one of pending|in_progress|completed, got \"\{other}\"",
+        "arguments.steps[\{index}].status to be one of pending|in_progress|completed",
       )
+    Some(_) => fail("arguments.steps[\{index}].status to be a string")
+    None => fail("arguments.steps[\{index}].status to be present")
   }
   { title, status }
 }
 
 ///|
-/// Trims surrounding whitespace and enforces the single-line and length
-/// rules. The trimmed title is what gets rendered, so a title that only
-/// differs by surrounding whitespace round-trips to the same checklist.
+/// Trims surrounding whitespace and enforces the non-blank, single-line, and
+/// length rules. The trimmed title is what gets rendered, so a title that
+/// only differs by surrounding whitespace round-trips identically. Blankness
+/// uses the Unicode White_Space property, not just ASCII: a title of
+/// no-break or ideographic spaces would otherwise render as an empty row.
+/// Length counts code points, matching the `maxLength` the advertised JSON
+/// Schema promises, so a schema-valid title is never rejected over its
+/// encoding.
 fn normalize_title(index : Int, raw_title : String) -> String raise {
-  let title = trim_whitespace(raw_title)
-  if title.length() == 0 {
-    fail("arguments.steps[\{index}].title to be non-blank")
+  let title = raw_title.trim().to_owned()
+  if title.contains("\n") || title.contains("\r") {
+    fail("arguments.steps[\{index}].title to be a single line")
   }
+  let mut visible = false
   for ch in title {
-    if ch == '\n' || ch == '\r' {
-      fail("arguments.steps[\{index}].title to be a single line")
+    if !ch.is_whitespace() {
+      visible = true
+      break
     }
   }
-  if title.length() > MAX_TITLE_CHARS {
+  if !visible {
+    fail("arguments.steps[\{index}].title to be non-blank")
+  }
+  let chars = title.char_length()
+  if chars > MAX_TITLE_CHARS {
     fail(
-      "arguments.steps[\{index}].title to be at most \{MAX_TITLE_CHARS} chars, got \{title.length()}",
+      "arguments.steps[\{index}].title to be at most \{MAX_TITLE_CHARS} chars, got \{chars}",
     )
   }
   title
-}
-
-///|
-fn trim_whitespace(text : String) -> String {
-  fn is_ws(unit : UInt16) -> Bool {
-    unit == ' ' || unit == '\t' || unit == '\n' || unit == '\r'
-  }
-
-  let mut start = 0
-  let mut stop = text.length()
-  while start < stop && is_ws(text[start]) {
-    start += 1
-  }
-  while stop > start && is_ws(text[stop - 1]) {
-    stop -= 1
-  }
-  text[start:stop].to_owned()
 }

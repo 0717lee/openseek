@@ -4,47 +4,52 @@
 ///
 /// ## Arguments
 /// - `steps` (array, required): the complete ordered plan. Each item is an
-///   object with a `title` (non-blank single line, at most
-///   `@decode.MAX_TITLE_CHARS` chars after trimming) and a `status` of
+///   object with exactly a `title` (non-blank single line, at most
+///   `@decode.MAX_TITLE_CHARS` characters after trimming) and a `status` of
 ///   `"pending"`, `"in_progress"`, or `"completed"`. At most one step may be
-///   `in_progress`, and the plan is capped at `@decode.MAX_STEPS` steps.
+///   `in_progress`, the plan is capped at `@decode.MAX_STEPS` steps, and an
+///   empty array clears the plan.
 ///
 /// ## Result
-/// - `Respond` with a normalized checklist rendering of the plan, so the
-///   current plan stays visible in the transcript where the model re-reads it
-///   on every request, plus a one-line `brief` for the UI
-///   (`plan 2/5 · fix the parser`).
+/// - `Respond` with a terse acknowledgment (`Plan updated: 2/5 done · in
+///   progress: fix the parser.`) plus a one-line `brief` for the UI
+///   (`plan 2/5 · fix the parser`). The plan itself stays model-visible
+///   through the tool-call arguments, which the session replays on every
+///   request — echoing the checklist again in the result would double that
+///   cost for no information gain. When every step is completed and none of
+///   them looks like a verification step, the acknowledgment appends a
+///   reminder to verify before finishing — at exactly the moment such skips
+///   happen.
 /// - Malformed arguments produce `Respond(is_error=true)` naming the first
 ///   offending field so the model can correct the call.
 ///
 /// The tool is deliberately stateless: every call passes the whole plan and
 /// replaces the previous one, so plan state lives in the transcript itself and
 /// there is nothing to reconcile, persist, or leak across turns. A plan is a
-/// bookkeeping aid, not evidence: a checklist with every step completed only
+/// bookkeeping aid, not evidence: a plan with every step completed only
 /// records that the model believes its steps are exhausted, and never
 /// substitutes for verifying the actual work.
 pub fn definition() -> @agent_tool.AgentToolDefinition {
   AgentToolDefinition(
     name="plan",
     description=(
-      #|Record or update your step-by-step plan for a multi-step task. Pass the complete list of steps on every call; it replaces the previous plan. Keep titles short, single-line, and imperative, mark at most one step "in_progress", and mark finished steps "completed". Use it when a task needs several distinct steps, and update it as steps complete; skip it for trivial single-step tasks. Never write a plan as plain assistant text. Updating the plan records intent only: it is not a substitute for doing the work, and a fully completed plan is not evidence the task is done — verify with checks or tests before finishing.
+      #|Record or update your step-by-step plan for a multi-step task. Pass the complete list of steps on every call; it replaces the previous plan, and an empty list clears it. Keep titles short, single-line, and imperative, mark at most one step "in_progress", and mark finished steps "completed". Use it when a task needs several distinct steps, and update it as steps complete; skip it for trivial single-step tasks. Never write a plan as plain assistant text. Updating the plan records intent only: it is not a substitute for doing the work, and a fully completed plan is not evidence the task is done — verify with checks or tests before finishing.
     ),
     schema=JsonSchema({
       "type": "object",
       "properties": {
         "steps": {
           "type": "array",
-          "description": "The complete ordered plan; replaces the previous plan.",
-          "minItems": 1,
-          "maxItems": 20,
+          "description": "The complete ordered plan; replaces the previous plan. An empty array clears the plan.",
+          "maxItems": @decode.MAX_STEPS.to_json(),
           "items": {
             "type": "object",
             "properties": {
               "title": {
                 "type": "string",
-                "description": "Short imperative step title on a single line.",
+                "description": "Short imperative step title on a single line; non-blank after trimming.",
                 "minLength": 1,
-                "maxLength": 120,
+                "maxLength": @decode.MAX_TITLE_CHARS.to_json(),
               },
               "status": {
                 "type": "string",
@@ -78,33 +83,61 @@ fn execute(arguments : Json) -> @agent_tool.ToolAction {
 }
 
 ///|
-/// Renders the decoded plan as a checklist: `[x]` completed, `[>]`
-/// in progress, `[ ]` pending. The content echoes the whole plan back into
-/// the transcript; the brief compresses it to completed-count plus the
-/// in-progress step for UI display.
+/// Step titles that read as verification work. Deciding "did the plan end
+/// without a verification step" only needs a coarse net: false positives just
+/// suppress a reminder the model did not need.
+fn is_verification_title(title : String) -> Bool {
+  let lowered = title.to_lower()
+  lowered.contains("test") ||
+  lowered.contains("check") ||
+  lowered.contains("verify") ||
+  lowered.contains("validate") ||
+  lowered.contains("lint")
+}
+
+///|
+/// Renders the decoded plan as a terse acknowledgment: progress count plus
+/// the in-progress step. The full plan already lives in the tool-call
+/// arguments that the session replays on every request, so the result adds
+/// only what the arguments do not state — the tally, and a verification
+/// reminder when a plan finishes without any verification-looking step.
 fn render(input : @decode.PlanInput) -> @agent_tool.ToolAction {
   let total = input.steps.length()
+  if total == 0 {
+    return @agent_tool.ToolAction::respond(
+      "Plan cleared.",
+      brief="plan cleared",
+    )
+  }
   let mut completed = 0
   let mut in_progress : String? = None
-  let lines = StringBuilder::new()
+  let mut has_verification = false
   for step in input.steps {
-    let marker = match step.status {
-      Completed => "[x]"
-      InProgress => "[>]"
-      Pending => "[ ]"
+    match step.status {
+      Completed => completed += 1
+      InProgress => in_progress = Some(step.title)
+      Pending => ()
     }
-    if step.status is Completed {
-      completed += 1
+    if is_verification_title(step.title) {
+      has_verification = true
     }
-    if step.status is InProgress {
-      in_progress = Some(step.title)
-    }
-    lines.write_string("\{marker} \{step.title}\n")
   }
-  let content = "Plan (\{completed}/\{total} done)\n\{lines.to_string()}"
+  let mut content = match in_progress {
+    Some(title) =>
+      "Plan updated: \{completed}/\{total} done · in progress: \{title}."
+    None =>
+      if completed == total {
+        "Plan updated: all \{total} steps completed."
+      } else {
+        "Plan updated: \{completed}/\{total} done, no step in progress."
+      }
+  }
+  if completed == total && !has_verification {
+    content += " No step verified the work — run checks or tests before finishing."
+  }
   let brief = match in_progress {
     Some(title) =>
-      "plan \{completed}/\{total} · \{@agent_tool.brief_line(title)}"
+      @agent_tool.brief_line("plan \{completed}/\{total} · \{title}")
     None =>
       if completed == total {
         "plan \{completed}/\{total} · all steps done"
@@ -143,7 +176,7 @@ fn assert_plan_error(arguments : Json, expected : String) -> Unit raise {
 }
 
 ///|
-test "plan renders a checklist with progress" {
+test "plan acknowledges progress and the in-progress step" {
   assert_plan(
     {
       "steps": [
@@ -152,19 +185,13 @@ test "plan renders a checklist with progress" {
         { "title": "run moon test", "status": "pending" },
       ],
     },
-    (
-      #|Plan (1/3 done)
-      #|[x] read the failing test
-      #|[>] fix the parser
-      #|[ ] run moon test
-      #|
-    ),
+    "Plan updated: 1/3 done · in progress: fix the parser.",
     "plan 1/3 · fix the parser",
   )
 }
 
 ///|
-test "plan with every step completed says all steps done" {
+test "plan with every step completed reminds about missing verification" {
   assert_plan(
     {
       "steps": [
@@ -172,12 +199,21 @@ test "plan with every step completed says all steps done" {
         { "title": "step two", "status": "completed" },
       ],
     },
-    (
-      #|Plan (2/2 done)
-      #|[x] step one
-      #|[x] step two
-      #|
-    ),
+    "Plan updated: all 2 steps completed. No step verified the work — run checks or tests before finishing.",
+    "plan 2/2 · all steps done",
+  )
+}
+
+///|
+test "plan completed through a verification step needs no reminder" {
+  assert_plan(
+    {
+      "steps": [
+        { "title": "fix the parser", "status": "completed" },
+        { "title": "run moon test", "status": "completed" },
+      ],
+    },
+    "Plan updated: all 2 steps completed.",
     "plan 2/2 · all steps done",
   )
 }
@@ -191,12 +227,7 @@ test "plan with no in_progress step and work left omits the active title" {
         { "title": "step two", "status": "pending" },
       ],
     },
-    (
-      #|Plan (1/2 done)
-      #|[x] step one
-      #|[ ] step two
-      #|
-    ),
+    "Plan updated: 1/2 done, no step in progress.",
     "plan 1/2",
   )
 }
@@ -204,23 +235,32 @@ test "plan with no in_progress step and work left omits the active title" {
 ///|
 test "plan renders trimmed titles" {
   assert_plan(
-    { "steps": [{ "title": "  fix parser  ", "status": "pending" }] },
-    (
-      #|Plan (0/1 done)
-      #|[ ] fix parser
-      #|
-    ),
-    "plan 0/1",
+    { "steps": [{ "title": "  fix parser  ", "status": "in_progress" }] },
+    "Plan updated: 0/1 done · in progress: fix parser.",
+    "plan 0/1 · fix parser",
   )
+}
+
+///|
+test "plan caps the composed brief at the shared budget" {
+  let long_title = "a title long enough that prefix plus title passes the seventy-two character cap"
+  guard execute({ "steps": [{ "title": long_title, "status": "in_progress" }] })
+    is Respond(output) else {
+    fail("expected Respond")
+  }
+  guard output.brief is Some(brief) else { fail("expected a brief") }
+  assert_true(brief.char_length() <= 73, msg="brief too long: \{brief}")
+  assert_true(brief.has_suffix("…"))
+}
+
+///|
+test "plan clears with an empty step list" {
+  assert_plan({ "steps": [] }, "Plan cleared.", "plan cleared")
 }
 
 ///|
 test "plan rejects malformed arguments with a field-naming error" {
   assert_plan_error({}, "error: plan requires arguments.steps to be an array")
-  assert_plan_error(
-    { "steps": [] },
-    "error: plan requires arguments.steps to be non-empty",
-  )
   assert_plan_error(
     { "steps": [{ "title": "one", "status": "doing" }] },
     "arguments.steps[0].status to be one of pending|in_progress|completed",
@@ -237,6 +277,10 @@ test "plan rejects malformed arguments with a field-naming error" {
       ],
     },
     "at most one in_progress step",
+  )
+  assert_plan_error(
+    { "steps": [{ "title": "one", "status": "pending", "note": "extra" }] },
+    "arguments.steps[0] to have only title and status fields",
   )
 }
 

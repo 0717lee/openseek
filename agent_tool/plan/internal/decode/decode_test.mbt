@@ -76,12 +76,33 @@ test "decode rejects missing steps" {
 
 ///|
 test "decode rejects non-object arguments" {
-  assert_decode_error(Json::null(), "arguments.steps to be an array")
+  assert_decode_error(Json::null(), "arguments to be an object")
 }
 
 ///|
-test "decode rejects an empty plan" {
-  assert_decode_error({ "steps": [] }, "arguments.steps to be non-empty")
+test "decode accepts an empty plan as a clear" {
+  debug_inspect(
+    @decode.decode({ "steps": [] }),
+    content=(
+      #|{ steps: [] }
+    ),
+  )
+}
+
+///|
+test "decode rejects unknown argument fields" {
+  assert_decode_error(
+    { "steps": [], "note": "extra" },
+    "arguments to have only the steps field",
+  )
+}
+
+///|
+test "decode rejects unknown step fields" {
+  assert_decode_error(
+    { "steps": [{ "title": "one", "status": "pending", "id": 1 }] },
+    "arguments.steps[0] to have only title and status fields",
+  )
 }
 
 ///|
@@ -106,7 +127,7 @@ test "decode rejects a non-object step" {
 test "decode rejects a missing title" {
   assert_decode_error(
     { "steps": [{ "status": "pending" }] },
-    "arguments.steps[0].title to be a string",
+    "arguments.steps[0].title to be present",
   )
 }
 
@@ -116,11 +137,18 @@ test "decode rejects a blank title" {
     { "steps": [{ "title": "  ", "status": "pending" }] },
     "arguments.steps[0].title to be non-blank",
   )
+  // Unicode-only whitespace is blank too: an NBSP or ideographic-space title
+  // would render as a visually empty row.
+  assert_decode_error(
+    { "steps": [{ "title": "\u{00A0}\u{3000}", "status": "pending" }] },
+    "arguments.steps[0].title to be non-blank",
+  )
 }
 
 ///|
 test "decode rejects a multi-line title" {
-  // Embedded newlines could forge extra checklist rows in the rendered plan.
+  // Embedded newlines could forge extra lines in the rendered brief or any
+  // future plan rendering.
   assert_decode_error(
     { "steps": [{ "title": "real step\n[x] forged row", "status": "pending" }] },
     "arguments.steps[0].title to be a single line",
@@ -129,10 +157,7 @@ test "decode rejects a multi-line title" {
 
 ///|
 test "decode rejects an oversized title" {
-  let mut long_title = ""
-  for _ in 0..<(@decode.MAX_TITLE_CHARS + 1) {
-    long_title += "x"
-  }
+  let long_title = "x".repeat(@decode.MAX_TITLE_CHARS + 1)
   assert_decode_error(
     { "steps": [{ "title": long_title, "status": "pending" }] },
     "arguments.steps[0].title to be at most 120 chars, got 121",
@@ -141,10 +166,7 @@ test "decode rejects an oversized title" {
 
 ///|
 test "decode accepts a title at exactly MAX_TITLE_CHARS" {
-  let mut title = ""
-  for _ in 0..<@decode.MAX_TITLE_CHARS {
-    title += "x"
-  }
+  let title = "x".repeat(@decode.MAX_TITLE_CHARS)
   let input = @decode.decode({
     "steps": [{ "title": title, "status": "pending" }],
   })
@@ -152,10 +174,21 @@ test "decode accepts a title at exactly MAX_TITLE_CHARS" {
 }
 
 ///|
+test "decode counts title length in code points, matching the schema" {
+  // 61 fire emoji are 122 UTF-16 code units but only 61 characters — well
+  // inside the advertised maxLength, so the decoder must accept them.
+  let title = "\u{1F525}".repeat(61)
+  let input = @decode.decode({
+    "steps": [{ "title": title, "status": "pending" }],
+  })
+  assert_eq(input.steps[0].title.char_length(), 61)
+}
+
+///|
 test "decode rejects a missing status" {
   assert_decode_error(
     { "steps": [{ "title": "step" }] },
-    "arguments.steps[0].status to be a string",
+    "arguments.steps[0].status to be present",
   )
 }
 
@@ -163,7 +196,7 @@ test "decode rejects a missing status" {
 test "decode rejects an unknown status" {
   assert_decode_error(
     { "steps": [{ "title": "step", "status": "active" }] },
-    "arguments.steps[0].status to be one of pending|in_progress|completed, got \"active\"",
+    "arguments.steps[0].status to be one of pending|in_progress|completed",
   )
 }
 
