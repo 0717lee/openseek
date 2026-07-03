@@ -506,16 +506,10 @@ async test "an explicit goal budget is not undercut by the host ceiling" {
   @async.with_task_group() <| group => {
     let request_bodies : Array[String] = []
     let responses = [
-      [
-        tool_call_chunk(
-          "call_1", "create_goal", "{\\\"objective\\\":\\\"obj-big\\\",\\\"token_budget\\\":300}",
-          3, 2,
-        ),
-      ],
       // 150 tokens: over the 100-token host ceiling, under the explicit
       // 300-token goal budget — the loop must continue.
       [content_chunk("big spend, keep going", 100, 50)],
-      // Continuation pushes past the goal budget; then the loop stops.
+      // The continuation pushes past the goal budget; then the loop stops.
       [content_chunk("over the real budget now", 150, 50)],
     ]
     guard goal_test_server(group, responses, request_bodies) is Some(url) else {
@@ -527,6 +521,9 @@ async test "an explicit goal budget is not undercut by the host ceiling" {
       SessionId("goal-explicit"),
       system_prompt="system",
     )
+    // Host-created (--goal --goal-budget 300): only the host may set a
+    // budget above the ceiling — the user typed it. Model-set budgets over
+    // the ceiling are rejected (see the create_goal clamp test).
     let result = @agent.run_goal_in_scope(
       runtime,
       scope,
@@ -535,12 +532,15 @@ async test "an explicit goal budget is not undercut by the host ceiling" {
       session,
       "pursue the objective",
       append_item=(session, item) => session.append(item),
+      objective="big objective",
+      token_budget=300,
       max_steps=4,
       host_token_budget=100,
       api_url=url,
     )
-    // Three requests: the ceiling did not stop the budgeted goal early.
-    assert_eq(request_bodies.length(), 3)
+    // Two requests: the ceiling did not stop the budgeted goal after the
+    // first 150-token turn.
+    assert_eq(request_bodies.length(), 2)
     guard result.current_goal() is Some(snapshot) else { fail("goal") }
     assert_true(snapshot.goal().status() is BudgetLimited)
     let internals = internal_events_of(result)

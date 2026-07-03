@@ -47,6 +47,12 @@ pub fn GoalCell::set_host_token_budget(self : GoalCell, budget : Int?) -> Unit {
 }
 
 ///|
+/// Return the host-level token ceiling, when one is set.
+pub fn GoalCell::host_token_budget(self : GoalCell) -> Int? {
+  self.host_token_budget
+}
+
+///|
 /// Gate `create_goal` on the turn's provenance. Goals are created only from
 /// user-opened turns: in an automatic continuation the "user request" a
 /// creation claims to answer cannot exist, and allowing it would let a
@@ -184,6 +190,17 @@ fn execute_create(cell : GoalCell, arguments : Json) -> @agent_tool.ToolAction {
   if !cell.creation_allowed {
     return @agent_tool.ToolAction::respond(
       "error: goals are created from user turns only; this automatic goal turn cannot start a new goal",
+      is_error=true,
+    )
+  }
+  // The host ceiling is the hard spend cap against bad tool use: a
+  // model-chosen budget cannot raise it. Only the host (--goal-budget)
+  // sets budgets above the ceiling, because the user typed that number.
+  if input.token_budget is Some(requested) &&
+    cell.host_token_budget() is Some(ceiling) &&
+    requested > ceiling {
+    return @agent_tool.ToolAction::respond(
+      "error: token_budget \{requested} exceeds the host ceiling of \{ceiling}; omit token_budget or ask the user to raise it with --goal-budget",
       is_error=true,
     )
   }

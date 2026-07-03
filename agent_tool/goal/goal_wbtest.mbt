@@ -224,3 +224,27 @@ test "budget_exhausted reflects the refreshed view" {
   cell.refresh(cell.current(), tokens_used=10, goal_events_seen=1)
   assert_true(cell.budget_exhausted())
 }
+
+///|
+test "create_goal cannot set a budget above the host ceiling" {
+  let cell = GoalCell()
+  cell.set_host_token_budget(Some(1000))
+  let rejected = expect_respond(
+    dispatch(cell, "create_goal", {
+      "objective": "big spender",
+      "token_budget": 5000,
+    }),
+    is_error=true,
+  )
+  assert_true(rejected.contains("exceeds the host ceiling of 1000"))
+  // At or under the ceiling is fine; without a ceiling (host-created flows
+  // set one before any turn runs) the check is inert.
+  let ok = expect_respond(
+    dispatch(cell, "create_goal", {
+      "objective": "frugal",
+      "token_budget": 1000,
+    }),
+    is_error=false,
+  )
+  assert_true(ok.contains("token budget 1000"))
+}
