@@ -151,16 +151,16 @@ old watcher records and start duplicate watchers.
 
 ## Steering
 
-Steering is user input that arrives while a turn is active. `steer(runtime,
-text)` stores the raw string as prompt steering in the runtime's lossless
-steering queue:
+Steering is user input that arrives while a turn is active.
+`runtime.queue_steer(Prompt(text))` stores the raw string as prompt steering in
+the runtime's lossless steering queue:
 
 ```mbt check
 ///|
-test "steer queues raw text" {
+test "queue_steer queues raw text" {
   let runtime = @agent_runtime.AgentRuntime()
-  @agent.steer(runtime, "also run tests")
-  @agent.steer(runtime, "   ")
+  runtime.queue_steer(Prompt("also run tests"))
+  runtime.queue_steer(Prompt("   "))
   let drained = runtime.drain_steers()
   assert_eq(drained.length(), 2)
   assert_true(drained[0] is Prompt("also run tests"))
@@ -189,10 +189,10 @@ async test "zero step run_turn appends user then failure terminal" {
     system_prompt="system",
   )
   let result = @agent.run_turn(
-    "unused-api-key",
-    V4Flash,
-    session,
-    "hello",
+    api_key="unused-api-key",
+    model=V4Flash,
+    session~,
+    task="hello",
     max_steps=0,
   )
   debug_inspect(
@@ -225,10 +225,10 @@ async test "run_turn_with_append calls the persistence hook for each item" {
   )
   let appended : Array[String] = []
   let result = @agent.run_turn_with_append(
-    "unused-api-key",
-    V4Flash,
-    session,
-    "persist me",
+    api_key="unused-api-key",
+    model=V4Flash,
+    session~,
+    task="persist me",
     append_item=(session, item) => {
       appended.push(
         match item {

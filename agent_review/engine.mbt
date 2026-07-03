@@ -41,12 +41,12 @@ pub async fn run_review(
   let task = review_task(base)
   let final_session : @agent_session.Session = @async.with_task_group() <| group => {
     @agent.run_turn_in_scope(
-      @agent_runtime.AgentRuntime(workspace_root~),
-      @agent_runtime.AgentTaskScope(group),
-      api_key,
-      model,
-      session,
-      task,
+      runtime=@agent_runtime.AgentRuntime(workspace_root~),
+      scope=@agent_runtime.AgentTaskScope(group),
+      api_key~,
+      model~,
+      session~,
+      task~,
       append_item=(s, i) => s.append(i),
       max_steps~,
       thinking~,

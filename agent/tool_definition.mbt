@@ -1,9 +1,18 @@
 ///|
-/// The agent's local tool registry. Each tool lives in its own subpackage of
-/// `agent_tool` and exposes a `definition()` constructor; this function bundles
-/// them into the `Tools` value the loop dispatches against. Raises if two
-/// definitions share a name.
-fn[X] tool_definitions(
+/// Build the agent's standard tool registry bound to `runtime` and `scope`.
+///
+/// The returned registry contains the built-in local tools: `shell`, `read`,
+/// `edit`, `multi_edit`, `write`, `plan`, and `finish`. Each tool lives in its
+/// own subpackage of `agent_tool` and exposes a `definition()` constructor;
+/// this function bundles them into the `Tools` value the loop dispatches
+/// against. File-oriented tools capture `runtime.workspace_root()` when this
+/// function is called. The `scope` parameter remains part of the API so future
+/// stateful tools can spawn bounded background work under the caller-owned
+/// task scope.
+///
+/// Raises if the standard tool definitions contain duplicate names. Under the
+/// checked-in registry that should be a programming error, not user input.
+pub fn[X] build_tools(
   runtime : @agent_runtime.AgentRuntime,
   scope : @agent_runtime.AgentTaskScope[X],
 ) -> @agent_tool.Tools raise {
@@ -26,7 +35,7 @@ fn[X] tool_definitions(
 ///|
 async test "agent registers the expected tool names" {
   @async.with_task_group() <| group => {
-    let tools = tool_definitions(AgentRuntime(), AgentTaskScope(group))
+    let tools = build_tools(AgentRuntime(), AgentTaskScope(group))
     let function_tools = tools.function_tools()
     assert_eq(function_tools.length(), 7)
     let names = [ for t in function_tools => t.name ]

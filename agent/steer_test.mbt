@@ -44,7 +44,7 @@ async test "queued steering is folded in at the next step boundary" {
     // Steer before the turn starts: the loop drains the steering queue at
     // its first step boundary, so the steered text must reach the model
     // alongside the task (the mock server asserts both are in the body).
-    @agent.steer(runtime, "also rename the file")
+    runtime.queue_steer(Prompt("also rename the file"))
     let session = @agent_session.Session(
       SessionId("steer-test"),
       system_prompt="system",
@@ -53,12 +53,12 @@ async test "queued steering is folded in at the next step boundary" {
     // shares it across turns.
     let tools = @agent.build_tools(runtime, scope)
     let result = @agent.run_turn_in_scope(
-      runtime,
-      scope,
-      "test-key",
-      V4Flash,
-      session,
-      "do the task",
+      runtime~,
+      scope~,
+      api_key="test-key",
+      model=V4Flash,
+      session~,
+      task="do the task",
       append_item=(session, item) => session.append(item),
       max_steps=2,
       api_url=url,
@@ -109,7 +109,7 @@ async fn override_test_server(
         })
         if requests == 1 {
           // The steer arrives while this "final" call is in flight.
-          @agent.steer(runtime, "actually, make it rhyme")
+          runtime.queue_steer(Prompt("actually, make it rhyme"))
           conn.write(
             "data: {\"choices\":[{\"delta\":{\"content\":\"draft answer\"}}]}\n\n",
           )
@@ -139,12 +139,12 @@ async test "a steer racing the final call keeps the turn alive" {
       system_prompt="system",
     )
     let result = @agent.run_turn_in_scope(
-      runtime,
-      scope,
-      "test-key",
-      V4Flash,
-      session,
-      "write a poem",
+      runtime~,
+      scope~,
+      api_key="test-key",
+      model=V4Flash,
+      session~,
+      task="write a poem",
       append_item=(session, item) => session.append(item),
       max_steps=3,
       api_url=url,
@@ -239,12 +239,12 @@ async test "inject racing the final call keeps the turn alive" {
       system_prompt="system",
     )
     let result = @agent.run_turn_in_scope(
-      runtime,
-      scope,
-      "test-key",
-      V4Flash,
-      session,
-      "inspect files",
+      runtime~,
+      scope~,
+      api_key="test-key",
+      model=V4Flash,
+      session~,
+      task="inspect files",
       append_item=(session, item) => session.append(item),
       max_steps=3,
       api_url=url,
@@ -273,19 +273,19 @@ async test "blank steering input is dropped at the boundary" {
     guard steer_test_server(group) is Some(url) else { return }
     let runtime = @agent_runtime.AgentRuntime()
     let scope = @agent_runtime.AgentTaskScope(group)
-    @agent.steer(runtime, "   ")
-    @agent.steer(runtime, "also rename the file")
+    runtime.queue_steer(Prompt("   "))
+    runtime.queue_steer(Prompt("also rename the file"))
     let session = @agent_session.Session(
       SessionId("steer-blank"),
       system_prompt="system",
     )
     let result = @agent.run_turn_in_scope(
-      runtime,
-      scope,
-      "test-key",
-      V4Flash,
-      session,
-      "do the task",
+      runtime~,
+      scope~,
+      api_key="test-key",
+      model=V4Flash,
+      session~,
+      task="do the task",
       append_item=(session, item) => session.append(item),
       max_steps=2,
       api_url=url,
@@ -373,10 +373,10 @@ async test "streaming reasoning deltas are skipped in logs" {
       system_prompt="system",
     )
     let result = @agent.run_turn(
-      "test-key",
-      V4Flash,
-      session,
-      "do the task",
+      api_key="test-key",
+      model=V4Flash,
+      session~,
+      task="do the task",
       max_steps=1,
       api_url=url,
     )

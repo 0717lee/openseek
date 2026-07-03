@@ -308,12 +308,12 @@ async fn run_serve(
     fn start_turn(task_text : String) -> @async.Task[Unit] {
       group.spawn() <| () => {
         let _ = @agent.run_turn_in_scope(
-          runtime,
-          scope,
-          api_key,
-          model,
-          session,
-          task_text,
+          runtime~,
+          scope~,
+          api_key~,
+          model~,
+          session~,
+          task=task_text,
           append_item=(current, item) => {
             let next = match store {
               Some(store) => store.append(current, item)
@@ -404,10 +404,10 @@ async fn run_serve(
                 // A turn is running, or a prompt is queued ahead of this steer:
                 // the lossless steering queue delivers it at that turn's next
                 // step boundary (or its first, if it has not started yet).
-                Some(ActiveTurn(_)) => @agent.steer(runtime, text)
+                Some(ActiveTurn(_)) => runtime.queue_steer(Prompt(text))
                 Some(ActiveCompact(_)) | None =>
                   if has_pending_prompt(pending) {
-                    @agent.steer(runtime, text)
+                    runtime.queue_steer(Prompt(text))
                   } else {
                     // An idle (or merely compacting) engine never converts
                     // prompt steering into a prompt: the only way it arrives

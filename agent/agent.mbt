@@ -19,54 +19,21 @@ let plan_reminder_after_steps : Int = 10
 fn plan_reminder_text(checklist : String?) -> String {
   match checklist {
     Some(lines) =>
-      "[plan reminder]\nThe plan tool has not been called in a while. If progress was made, update step statuses; if the plan no longer matches the work, replace it or clear it with steps: []. Current plan:\n\{lines}"
+      (
+        $|[plan reminder]
+        $|The plan tool has not been called in a while. If progress was made,
+        $|update step statuses; if the plan no longer matches the work,
+        $|replace it or clear it with steps: []. Current plan:
+        $|\{lines}
+      )
     None =>
-      "[plan reminder]\nThe plan tool has not been used in this turn. If this task takes several distinct steps, record a plan with the plan tool and keep step statuses current. If not, ignore this reminder."
+      (
+        #|[plan reminder]
+        #|The plan tool has not been used in this turn. If this task takes
+        #|several distinct steps, record a plan with the plan tool and keep
+        #|step statuses current. If not, ignore this reminder.
+      )
   }
-}
-
-///|
-/// Queue `text` as steering input for the turn running on `runtime`.
-///
-/// This is a thin public wrapper over `AgentRuntime::queue_steer(Prompt(...))`.
-/// It does not inspect, trim, deduplicate, or validate the string. The agent
-/// loop filters blank strings later when it drains pending steers.
-///
-/// Steering lands at the next step boundary — after the in-flight model call
-/// and its tool batch complete, where the loop already folds in runtime
-/// updates — so completed work is never thrown away. User input also wins
-/// over model-initiated completion: a steer that arrives while the final
-/// call is in flight keeps the turn alive (the would-be answer becomes an
-/// ordinary assistant message, or the finish call's batch is closed out)
-/// and the conversation continues with the steer. Only error terminals
-/// (abort, failure, exhausted steps) still end the turn; a steer queued
-/// then is either applied by the next turn that shares the runtime or drained
-/// and rejected by the caller, as serve mode does after a turn finishes.
-///
-/// When the loop applies a non-blank steer, the text is appended to the session
-/// as a user message, pushed into the model-facing message array, and logged as
-/// a `steer_applied` event. The channel is lossless with respect to runtime
-/// event overflow, so noisy watcher updates cannot push out user steering.
-pub fn steer(runtime : @agent_runtime.AgentRuntime, text : String) -> Unit {
-  runtime.queue_steer(Prompt(text))
-}
-
-///|
-/// Build the agent's standard tool registry bound to `runtime` and `scope`.
-///
-/// The returned registry contains the built-in local tools: `shell`, `read`,
-/// `edit`, `multi_edit`, `write`, `plan`, and `finish`. File-oriented tools capture
-/// `runtime.workspace_root()` when this function is called. The `scope`
-/// parameter remains part of the API so future stateful tools can spawn bounded
-/// background work under the caller-owned task scope.
-///
-/// Raises if the standard tool definitions contain duplicate names. Under the
-/// checked-in registry that should be a programming error, not user input.
-pub fn[X] build_tools(
-  runtime : @agent_runtime.AgentRuntime,
-  scope : @agent_runtime.AgentTaskScope[X],
-) -> @agent_tool.Tools raise {
-  tool_definitions(runtime, scope)
 }
 
 ///|
@@ -89,9 +56,9 @@ pub fn[X] build_tools(
 /// `run_turn_with_append` when every committed event must be persisted as the
 /// turn progresses.
 pub async fn run(
-  api_key : String,
-  model : @deepseek.Model,
-  task : String,
+  api_key~ : String,
+  model~ : @deepseek.Model,
+  task~ : String,
   system_prompt_text~ : String,
   max_steps? : Int = default_max_steps,
   thinking? : @deepseek.ThinkingMode = Max,
@@ -104,10 +71,10 @@ pub async fn run(
   )
   ignore(
     run_turn(
-      api_key,
-      model,
-      session,
-      task,
+      api_key~,
+      model~,
+      session~,
+      task~,
       max_steps~,
       thinking~,
       api_url?,
@@ -136,20 +103,20 @@ pub async fn run(
 /// turn appends the user task and then terminates with
 /// `Terminal(Failed("max steps exhausted"))` without making a model request.
 pub async fn run_turn(
-  api_key : String,
-  model : @deepseek.Model,
-  session : @agent_session.Session,
-  task : String,
+  api_key~ : String,
+  model~ : @deepseek.Model,
+  session~ : @agent_session.Session,
+  task~ : String,
   max_steps? : Int = default_max_steps,
   thinking? : @deepseek.ThinkingMode = Max,
   api_url? : String,
   workspace_root? : String = ".",
 ) -> @agent_session.Session {
   run_turn_with_append(
-    api_key,
-    model,
-    session,
-    task,
+    api_key~,
+    model~,
+    session~,
+    task~,
     append_item=(session, item) => session.append(item),
     max_steps~,
     thinking~,
@@ -179,10 +146,10 @@ pub async fn run_turn(
 /// the duration of one turn. Use `run_turn_in_scope` when the caller needs to
 /// preserve runtime state or tool state across turns.
 pub async fn run_turn_with_append(
-  api_key : String,
-  model : @deepseek.Model,
-  session : @agent_session.Session,
-  task : String,
+  api_key~ : String,
+  model~ : @deepseek.Model,
+  session~ : @agent_session.Session,
+  task~ : String,
   append_item~ : async (@agent_session.Session, @agent_session.SessionItem) -> @agent_session.Session,
   max_steps? : Int = default_max_steps,
   thinking? : @deepseek.ThinkingMode = Max,
@@ -191,12 +158,12 @@ pub async fn run_turn_with_append(
 ) -> @agent_session.Session {
   @async.with_task_group() <| group => {
     run_turn_in_scope(
-      AgentRuntime(workspace_root~),
-      AgentTaskScope(group),
-      api_key,
-      model,
-      session,
-      task,
+      runtime=AgentRuntime(workspace_root~),
+      scope=AgentTaskScope(group),
+      api_key~,
+      model~,
+      session~,
+      task~,
       append_item~,
       max_steps~,
       thinking~,
@@ -211,10 +178,10 @@ async test "run_turn_with_append closes failed persisted turns" {
   let mut calls = 0
   let mut persisted = initial
   let _ = run_turn_with_append(
-    "unused",
-    V4Pro,
-    initial,
-    "hello",
+    api_key="unused",
+    model=V4Pro,
+    session=initial,
+    task="hello",
     append_item=(session, item) => {
       calls = calls + 1
       if calls == 2 {
@@ -280,12 +247,12 @@ async test "run_turn_with_append closes failed persisted turns" {
 /// client. The caller owns the lifetime of `runtime`, `scope`, and any shared
 /// `tools` registry passed here.
 pub async fn[X] run_turn_in_scope(
-  runtime : @agent_runtime.AgentRuntime,
-  scope : @agent_runtime.AgentTaskScope[X],
-  api_key : String,
-  model : @deepseek.Model,
-  session : @agent_session.Session,
-  task : String,
+  runtime~ : @agent_runtime.AgentRuntime,
+  scope~ : @agent_runtime.AgentTaskScope[X],
+  api_key~ : String,
+  model~ : @deepseek.Model,
+  session~ : @agent_session.Session,
+  task~ : String,
   append_item~ : async (@agent_session.Session, @agent_session.SessionItem) -> @agent_session.Session,
   max_steps? : Int = default_max_steps,
   thinking? : @deepseek.ThinkingMode = Max,
@@ -298,7 +265,7 @@ pub async fn[X] run_turn_in_scope(
     let tools = match tools {
       Some(tools) => tools
       None =>
-        tool_definitions(runtime, scope) catch {
+        build_tools(runtime, scope) catch {
           error => {
             let next = append_item(
               session,

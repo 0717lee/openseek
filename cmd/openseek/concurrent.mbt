@@ -171,10 +171,10 @@ async fn run_one_attempt(
       workspace_root=run_dir,
     )
     let completed = @agent.run_turn_with_append(
-      api_key,
-      model,
-      session,
-      task,
+      api_key~,
+      model~,
+      session~,
+      task~,
       append_item=(session, item) => store.append(session, item),
       max_steps~,
       thinking~,

@@ -132,9 +132,9 @@ async fn run_task_command(matches : @argparse.Matches) -> Unit {
           workspace_root~,
         )
         @agent.run(
-          api_key,
-          model,
-          task,
+          api_key~,
+          model~,
+          task~,
           max_steps~,
           system_prompt_text~,
           thinking~,
@@ -163,10 +163,10 @@ async fn run_task_command(matches : @argparse.Matches) -> Unit {
         )
         ignore(
           @agent.run_turn_with_append(
-            api_key,
-            model,
-            session,
-            task,
+            api_key~,
+            model~,
+            session~,
+            task~,
             append_item=(session, item) => store.append(session, item),
             max_steps~,
             thinking~,
