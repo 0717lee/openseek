@@ -30,9 +30,10 @@ afterward), and the footer always reports the range it saw (`start_line`,
 follow), and whether the budget cut the body (`truncated`). This matches the
 lean, content-first convention used by Claude Code and the kimi agents, which
 keep status metadata in a small footer rather than a verbose header.
-Automatic output truncation is marked as a tool error even when the file was
-read successfully; that makes lossy context visible to the loop instead of
-silently pretending the returned prefix is complete.
+Automatic output truncation is not a tool error — the file was read
+successfully and the returned prefix is real content. The cut stays visible
+twice over: the footer's `truncated=true` tells the model the prefix is
+incomplete, and the transcript brief gains a `(truncated)` marker for humans.
 
 For several known independent files, issue several independent `read` calls in
 the same assistant response. That avoids extra model round trips while
@@ -71,16 +72,17 @@ large file and relying on truncation.
 
 The action is always `Respond(ToolOutput(...))` — the agent loop forwards
 `ToolOutput.content` to the model as a tool-call response. `is_error` is
-`false` on success and `true` for read failures, argument failures, or automatic
-output truncation. The string body has one of these shapes:
+`false` on success and `true` for read failures or argument failures. The
+string body has one of these shapes:
 
 - On success: right-aligned `<line-number> |<content>` lines, then a newline,
   then the footer `<system>start_line=<n> shown_lines=<k> total_lines=<t> truncated=<bool></system>`.
   When the selected body is empty (the range starts past EOF, or the budget is
   zero) only the footer is returned. A zero-byte file returns just the footer
   with `total_lines=0 note=empty file`, rather than a phantom blank `1 |` line.
-  `truncated=true` — set when `max_output_chars` cut the numbered body — is the
-  one case that flips `is_error` to `true`.
+  `truncated=true` — set when `max_output_chars` cut the numbered body — keeps
+  `is_error` `false`: the prefix is real content, so the model reads the
+  footer, and the brief gains a `(truncated)` marker for the transcript.
 - `"error reading <path>: <error>"` — a single-file read failed. Common
   causes: the file is missing, the agent doesn't have read permissions, or
   the bytes aren't valid UTF-8.

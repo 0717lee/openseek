@@ -24,8 +24,10 @@
 ///   `<system>start_line=.. shown_lines=.. total_lines=.. truncated=..</system>`
 ///   footer (footer only when the body is empty, e.g. a range past EOF). A
 ///   zero-byte file returns just that footer with `total_lines=0 note=empty
-///   file`. `is_error` is `true` only when the `max_output_chars` budget cut the
-///   body (`truncated=true`).
+///   file`. A body cut by the `max_output_chars` budget is still a successful
+///   read, not a tool error: the footer's `truncated=true` tells the model the
+///   prefix is incomplete, and the brief gains a `(truncated)` marker for the
+///   human transcript.
 /// - `Respond(ToolOutput("error reading <path>: <error>", is_error=true))`
 ///   if a single-file read fails (missing file, permission denied, invalid
 ///   UTF-8, directory path, etc.).
@@ -171,10 +173,14 @@ async fn read_file(
   }
   output <+
     "<system>start_line=\{input.start_line} shown_lines=\{shown_lines} total_lines=\{total_lines} truncated=\{truncated}</system>"
+  // A truncated body is a successful read of a prefix, not a failure: the
+  // model sees `truncated=true` in the footer, so treating it as a tool error
+  // would only teach the loop to retry a read that worked. The brief carries
+  // the marker so a human scanning the transcript sees the cut too.
   @agent_tool.ToolAction::respond(
     output.to_string(),
-    is_error=truncated,
-    brief~,
+    is_error=false,
+    brief=if truncated { "\{brief} (truncated)" } else { brief },
   )
 }
 
@@ -186,6 +192,9 @@ async test "read renders a whole file as numbered lines with a status footer" {
     let result = execute({ "path": path })
     guard result is Respond(output) else { fail("expected Respond") }
     assert_false(output.is_error)
+    // An untruncated read keeps the plain brief — no `(truncated)` marker.
+    guard output.brief is Some(brief) else { fail("expected a brief") }
+    assert_eq(brief, "read test.txt")
     assert_eq(
       output.content,
       [
@@ -312,13 +321,17 @@ async test "read returns a footer only when the range starts past EOF" {
 }
 
 ///|
-async test "read caps oversized output and marks it as an error" {
+async test "read caps oversized output without marking it as an error" {
   @vfs.with_tmpdir(dir => {
     let path = "\{dir}/capped.txt"
     @fs.write_file(path, "abcdef", create_mode=CreateOrTruncate)
     let result = execute({ "path": path, "max_output_chars": 4 })
     guard result is Respond(output) else { fail("expected Respond") }
-    assert_true(output.is_error)
+    // The prefix was read successfully; the footer (for the model) and the
+    // brief (for the human transcript) carry the truncation, not is_error.
+    assert_false(output.is_error)
+    guard output.brief is Some(brief) else { fail("expected a brief") }
+    assert_eq(brief, "read capped.txt (truncated)")
     assert_eq(
       output.content,
       [
@@ -339,7 +352,7 @@ async test "read counts the line-number gutter against the output budget" {
     )
     let result = execute({ "path": path, "max_output_chars": 24 })
     guard result is Respond(output) else { fail("expected Respond") }
-    assert_true(output.is_error)
+    assert_false(output.is_error)
     // 24 code units buys exactly four two-wide ` N |x` lines (gutters
     // included); the fifth gutter would overrun, so the body stops at line 4.
     assert_eq(
@@ -360,7 +373,7 @@ async test "read caps unicode content on character boundaries" {
     // Budget 5 = "1 |" (3 units) + "😀" (2 units): the emoji fits whole, Z drops.
     let fits = execute({ "path": path, "max_lines": 1, "max_output_chars": 5 })
     guard fits is Respond(output) else { fail("expected Respond") }
-    assert_true(output.is_error)
+    assert_false(output.is_error)
     assert_eq(
       output.content,
       [
@@ -372,7 +385,7 @@ async test "read caps unicode content on character boundaries" {
     // emoji is dropped.
     let splits = execute({ "path": path, "max_lines": 1, "max_output_chars": 4 })
     guard splits is Respond(output) else { fail("expected Respond") }
-    assert_true(output.is_error)
+    assert_false(output.is_error)
     assert_false(output.content.contains("😀"))
     assert_eq(
       output.content,
