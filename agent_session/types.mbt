@@ -92,11 +92,6 @@ priv struct SessionToolCall {
 } derive(Debug, ToJson, FromJson)
 
 ///|
-fn SessionToolCall::from_deepseek(call : @deepseek.ToolCall) -> SessionToolCall {
-  { id: call.id, name: call.name, arguments: call.arguments }
-}
-
-///|
 fn SessionToolCall::to_deepseek(self : SessionToolCall) -> @deepseek.ToolCall {
   ToolCall(id=self.id, name=self.name, arguments=self.arguments)
 }
@@ -144,7 +139,9 @@ pub fn AssistantMessage::AssistantMessage(
   {
     content,
     tool_calls: [
-      for call in tool_calls => SessionToolCall::from_deepseek(call)
+      for call in tool_calls => {
+        { id: call.id, name: call.name, arguments: call.arguments }
+      }
     ],
     reasoning_content,
   }
@@ -380,15 +377,6 @@ pub struct SessionEvent {
 } derive(Debug, ToJson, FromJson)
 
 ///|
-fn SessionEvent::SessionEvent(
-  sequence~ : Int,
-  item~ : SessionItem,
-  unix_ms? : Int64 = 0,
-) -> SessionEvent {
-  { sequence, ts: unix_ms.to_double(), item }
-}
-
-///|
 /// Return this event's one-based position in the session log.
 pub fn SessionEvent::sequence(self : SessionEvent) -> Int {
   self.sequence
@@ -510,7 +498,11 @@ pub fn Session::append_event(
   item : SessionItem,
   unix_ms? : Int64 = 0,
 ) -> (Session, SessionEvent) {
-  let event = SessionEvent(sequence=self.next_sequence(), item~, unix_ms~)
+  let event : SessionEvent = {
+    sequence: self.next_sequence(),
+    ts: unix_ms.to_double(),
+    item,
+  }
   (
     {
       id: self.id,

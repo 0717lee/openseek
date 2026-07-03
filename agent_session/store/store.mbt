@@ -2,14 +2,6 @@
 let session_dir_name : String = "sessions"
 
 ///|
-/// Session files carry their id in the name so files collected out of their
-/// directories — for cross-session visualization or comparison — stay
-/// self-naming.
-fn session_file_name(id : @agent_session.SessionId) -> String {
-  "openseek_session-\{id.value()}.jsonl"
-}
-
-///|
 /// The lock file carries no id suffix: it already lives inside the per-id
 /// session directory, and it is transient local coordination that is never
 /// collected alongside the jsonl.
@@ -110,11 +102,14 @@ fn SessionStore::session_dir(
 }
 
 ///|
+/// Session files carry their id in the name so files collected out of their
+/// directories — for cross-session visualization or comparison — stay
+/// self-naming.
 fn SessionStore::session_file_path(
   self : SessionStore,
   id : @agent_session.SessionId,
 ) -> String raise {
-  "\{self.session_dir(id)}/\{session_file_name(id)}"
+  "\{self.session_dir(id)}/openseek_session-\{id.value()}.jsonl"
 }
 
 ///|
@@ -123,15 +118,6 @@ fn SessionStore::lock_path(
   id : @agent_session.SessionId,
 ) -> String raise {
   "\{self.session_dir(id)}/\{lock_file_name}"
-}
-
-///|
-fn header_line(session : @agent_session.Session) -> String {
-  let header : @session_log.SessionFileHeader = {
-    id: session.id().value(),
-    system_prompt: session.system_prompt(),
-  }
-  "\{header.to_json().stringify()}\n"
 }
 
 ///|
@@ -147,7 +133,11 @@ fn events_jsonl(events : @vector.Vector[@agent_session.SessionEvent]) -> String 
 /// The complete durable form of a session: one header line followed by one
 /// line per event.
 fn session_file_text(session : @agent_session.Session) -> String {
-  "\{header_line(session)}\{events_jsonl(session.events())}"
+  let header : @session_log.SessionFileHeader = {
+    id: session.id().value(),
+    system_prompt: session.system_prompt(),
+  }
+  "\{header.to_json().stringify()}\n\{events_jsonl(session.events())}"
 }
 
 ///|
@@ -402,7 +392,11 @@ async fn write_text_atomic(
   @fs.write_file(tmp_path, text, create_mode=CreateOrTruncate, sync=Data)
   @fs.rename(tmp_path, path, replace=true)
   for dir in dirs {
-    sync_dir_best_effort(dir)
+    let file = @fs.open(dir, mode=ReadOnly) catch { _ => continue }
+    file.sync() catch {
+      _ => ()
+    }
+    file.close()
   }
 }
 
@@ -416,20 +410,6 @@ fn SessionStore::session_dir_chain(
   id : @agent_session.SessionId,
 ) -> Array[String] raise {
   [self.session_dir(id), self.sessions_dir(), self.root]
-}
-
-///|
-async fn sync_dir_best_effort(dir : String) -> Unit {
-  let file = @fs.open(dir, mode=ReadOnly) catch { _ => return }
-  defer file.close()
-  file.sync() catch {
-    _ => ()
-  }
-}
-
-///|
-async fn ensure_dir_exists(dir : String) -> Unit {
-  ensure_dir_exists_with_retry(dir, attempts=4)
 }
 
 ///|
@@ -450,7 +430,7 @@ async fn ensure_session_dir(
   id : @agent_session.SessionId,
 ) -> Unit {
   let dir = store.session_dir(id)
-  ensure_dir_exists(dir)
+  ensure_dir_exists_with_retry(dir, attempts=4)
 }
 
 ///|

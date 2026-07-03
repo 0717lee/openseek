@@ -11,21 +11,6 @@ let default_max_steps : Int = 1000
 let plan_reminder_after_steps : Int = 10
 
 ///|
-/// The staleness reminder injected when the `plan` tool has gone unused for
-/// `plan_reminder_after_steps` model requests. With a known current plan the
-/// reminder re-surfaces it — the last plan call may sit dozens of steps back
-/// in context — and otherwise it nudges once toward recording a plan, while
-/// staying explicit that trivial work should ignore it.
-fn plan_reminder_text(checklist : String?) -> String {
-  match checklist {
-    Some(lines) =>
-      "[plan reminder]\nThe plan tool has not been called in a while. If progress was made, update step statuses; if the plan no longer matches the work, replace it or clear it with steps: []. Current plan:\n\{lines}"
-    None =>
-      "[plan reminder]\nThe plan tool has not been used in this turn. If this task takes several distinct steps, record a plan with the plan tool and keep step statuses current. If not, ignore this reminder."
-  }
-}
-
-///|
 /// Queue `text` as steering input for the turn running on `runtime`.
 ///
 /// This is a thin public wrapper over `AgentRuntime::queue_steer(Prompt(...))`.
@@ -359,7 +344,16 @@ pub async fn[X] run_turn_in_scope(
       if plan_registered &&
         steps_since_plan >= plan_reminder_after_steps &&
         steps_since_reminder >= plan_reminder_after_steps {
-        let reminder = plan_reminder_text(plan_checklist)
+        // With a known current plan the reminder re-surfaces it — the last
+        // plan call may sit dozens of steps back in context — and otherwise
+        // it nudges once toward recording a plan, while staying explicit
+        // that trivial work should ignore it.
+        let reminder = match plan_checklist {
+          Some(lines) =>
+            "[plan reminder]\nThe plan tool has not been called in a while. If progress was made, update step statuses; if the plan no longer matches the work, replace it or clear it with steps: []. Current plan:\n\{lines}"
+          None =>
+            "[plan reminder]\nThe plan tool has not been used in this turn. If this task takes several distinct steps, record a plan with the plan tool and keep step statuses current. If not, ignore this reminder."
+        }
         @xlog.info() <? { "event": "plan_reminder", "content": reminder }
         session = append_item(session, Runtime(RuntimeNotice(reminder)))
         messages.push(ChatMessage(User, content=reminder))

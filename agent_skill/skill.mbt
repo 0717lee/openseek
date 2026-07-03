@@ -11,11 +11,6 @@ pub struct Skill {
 } derive(Debug)
 
 ///|
-fn Skill::Skill(name~ : String, description~ : String, path~ : String) -> Skill {
-  { name, description, path }
-}
-
-///|
 /// The skill's short identifier, from frontmatter `name:` or the file stem.
 pub fn Skill::name(self : Skill) -> String {
   self.name
@@ -124,7 +119,7 @@ async fn add_skill_file(skills : Array[Skill], path : String) -> Unit {
     stem => stem
   }
   let (name, description) = parse_frontmatter(text, fallback)
-  skills.push(Skill(name~, description~, path~))
+  skills.push({ name, description, path })
 }
 
 ///|

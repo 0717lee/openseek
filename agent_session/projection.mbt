@@ -1,13 +1,4 @@
 ///|
-fn summary_model_content(summary : SessionSummary) -> String {
-  (
-    $|[conversation summary]
-    $|source_events=\{summary.from_sequence()}..\{summary.to_sequence()}
-    $|\{summary.content()}
-  )
-}
-
-///|
 /// A status line for a non-finished turn: the bare `label` when `reason` is
 /// blank, otherwise the label followed by the reason on its own line.
 fn agent_status_message(label : String, reason : String) -> String? {
@@ -43,7 +34,16 @@ fn append_item_message(
     Runtime(notice) =>
       messages.push(ChatMessage(User, content=notice.content()))
     Summary(summary) =>
-      messages.push(ChatMessage(User, content=summary_model_content(summary)))
+      messages.push(
+        ChatMessage(
+          User,
+          content=(
+            $|[conversation summary]
+            $|source_events=\{summary.from_sequence()}..\{summary.to_sequence()}
+            $|\{summary.content()}
+          ),
+        ),
+      )
     Assistant(message) =>
       messages.push(
         ChatMessage(
@@ -95,20 +95,15 @@ fn flush_pending_tool_calls(
 }
 
 ///|
-fn summary_covers_event(summary_event : SessionEvent, sequence : Int) -> Bool {
-  guard summary_event.item() is Summary(summary) else { return false }
-  summary_event.sequence() > sequence &&
-  summary.from_sequence() <= sequence &&
-  sequence <= summary.to_sequence()
-}
-
-///|
 fn is_covered_by_later_summary(
   event : SessionEvent,
   events : @vector.Vector[SessionEvent],
 ) -> Bool {
   for candidate in events {
-    if summary_covers_event(candidate, event.sequence()) {
+    guard candidate.item() is Summary(summary) else { continue }
+    if candidate.sequence() > event.sequence() &&
+      summary.from_sequence() <= event.sequence() &&
+      event.sequence() <= summary.to_sequence() {
       return true
     }
   }

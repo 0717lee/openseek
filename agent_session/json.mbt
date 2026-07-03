@@ -66,32 +66,18 @@ pub impl FromJson for SessionId with fn from_json(
 }
 
 ///|
-fn terminal_kind(terminal : TurnTerminal) -> String {
-  match terminal {
-    Finished(_) => "finished"
-    Aborted(_) => "aborted"
-    Interrupted(_) => "interrupted"
-    Failed(_) => "failed"
-  }
-}
-
-///|
-fn terminal_message(terminal : TurnTerminal) -> String {
-  match terminal {
-    Finished(message)
-    | Aborted(message)
-    | Interrupted(message)
-    | Failed(message) => message
-  }
-}
-
-///|
 /// Encode a terminal status as `{ "kind": ..., "message": ... }`.
 ///
 /// `kind` is one of `finished`, `aborted`, `interrupted`, or `failed`. The
 /// variant payload is stored in `message`.
 pub impl ToJson for TurnTerminal with fn to_json(terminal : TurnTerminal) -> Json {
-  { "kind": terminal_kind(terminal), "message": terminal_message(terminal) }
+  let (kind, message) = match terminal {
+    Finished(message) => ("finished", message)
+    Aborted(message) => ("aborted", message)
+    Interrupted(message) => ("interrupted", message)
+    Failed(message) => ("failed", message)
+  }
+  { "kind": kind, "message": message }
 }
 
 ///|
