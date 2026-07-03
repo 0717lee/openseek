@@ -351,8 +351,8 @@ pub(all) enum TurnTerminal {
 /// metadata that can replace older events during projection. `Terminal`
 /// records turn completion status and may project as a final assistant/status
 /// message. `Internal` projects as an enveloped user-role message for
-/// host-injected steering. `Usage` is durable metadata only and never
-/// projects into model messages.
+/// host-injected steering. `Usage` and `Goal` are durable metadata only and
+/// never project into model messages.
 pub(all) enum SessionItem {
   User(UserMessage)
   Assistant(AssistantMessage)
@@ -362,6 +362,7 @@ pub(all) enum SessionItem {
   Terminal(TurnTerminal)
   Usage(TurnUsage)
   Internal(InternalContext)
+  Goal(GoalUpdate)
 } derive(Debug)
 
 ///|

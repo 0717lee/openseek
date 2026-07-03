@@ -311,6 +311,20 @@ fn event_card(
       card("runtime", "Internal context (\{context.source()})", seq, time~, [
         text_block(context.content()),
       ])
+    Goal(update) =>
+      card("runtime", "Goal (\{status_text(update.status())})", seq, time~, [
+        text_block(update.objective()),
+      ])
+  }
+}
+
+///|
+fn status_text(status : @agent_session.GoalStatus) -> String {
+  match status {
+    Active => "active"
+    Complete => "complete"
+    Blocked => "blocked"
+    BudgetLimited => "budget limited"
   }
 }
 
@@ -861,7 +875,7 @@ fn item_projects_model_message(item : @agent_session.SessionItem) -> Bool {
   match item {
     User(_) | Runtime(_) | Summary(_) | Assistant(_) | Tool(_) => true
     Internal(_) => true
-    Usage(_) => false
+    Usage(_) | Goal(_) => false
     Terminal(terminal) => terminal_projects_model_message(terminal)
   }
 }

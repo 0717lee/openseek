@@ -9,6 +9,7 @@ import {
 }
 
 // Values
+pub const MAX_GOAL_OBJECTIVE_CHARS : Int = 4000
 
 // Errors
 
@@ -20,6 +21,31 @@ pub fn AssistantMessage::AssistantMessage(String, tool_calls? : Array[@deepseek.
 pub fn AssistantMessage::content(Self) -> String
 pub fn AssistantMessage::reasoning_content(Self) -> String?
 pub fn AssistantMessage::tool_calls(Self) -> Array[@deepseek.ToolCall]
+
+pub struct GoalSnapshot {
+  // private fields
+} derive(@debug.Debug)
+pub fn GoalSnapshot::goal(Self) -> GoalUpdate
+pub fn GoalSnapshot::remaining_tokens(Self) -> Int?
+pub fn GoalSnapshot::tokens_used(Self) -> Int
+
+pub(all) enum GoalStatus {
+  Active
+  Complete
+  Blocked
+  BudgetLimited
+} derive(Eq, @debug.Debug)
+pub impl ToJson for GoalStatus
+pub impl @json.FromJson for GoalStatus
+
+pub struct GoalUpdate {
+  // private fields
+} derive(ToJson, @debug.Debug, @json.FromJson)
+pub fn GoalUpdate::GoalUpdate(goal_id~ : String, objective~ : String, status~ : GoalStatus, token_budget? : Int) -> Self raise
+pub fn GoalUpdate::goal_id(Self) -> String
+pub fn GoalUpdate::objective(Self) -> String
+pub fn GoalUpdate::status(Self) -> GoalStatus
+pub fn GoalUpdate::token_budget(Self) -> Int?
 
 pub struct InternalContext {
   // private fields
@@ -42,6 +68,7 @@ pub fn Session::append(Self, SessionItem, unix_ms? : Int64) -> Self
 pub fn Session::append_event(Self, SessionItem, unix_ms? : Int64) -> (Self, SessionEvent)
 pub fn Session::chat_messages(Self) -> Array[@deepseek.ChatMessage]
 pub fn Session::compact(Self, content~ : String, from_sequence~ : Int, to_sequence~ : Int, unix_ms? : Int64) -> Self raise
+pub fn Session::current_goal(Self) -> GoalSnapshot?
 pub fn Session::events(Self) -> @vector.Vector[SessionEvent]
 pub fn Session::id(Self) -> SessionId
 pub fn Session::last_sequence(Self) -> Int
@@ -74,6 +101,7 @@ pub(all) enum SessionItem {
   Terminal(TurnTerminal)
   Usage(TurnUsage)
   Internal(InternalContext)
+  Goal(GoalUpdate)
 } derive(@debug.Debug)
 pub impl ToJson for SessionItem
 pub impl @json.FromJson for SessionItem

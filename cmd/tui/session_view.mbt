@@ -53,7 +53,7 @@ fn session_item(item : @agent_session.SessionItem) -> @ui.TranscriptItem? {
     Summary(summary) => Some(summary_item(summary))
     Terminal(terminal) => terminal_item(terminal)
     // Durable metadata: not part of the visible conversation replay.
-    Usage(_) => None
+    Usage(_) | Goal(_) => None
     Internal(context) =>
       Some(runtime_item(parse_runtime_update("[\{context.source()}] steering")))
   }

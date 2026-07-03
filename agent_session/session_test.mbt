@@ -397,3 +397,127 @@ test "usage and internal context round trip through JSON" {
   assert_eq(context.source(), "goal")
   assert_eq(context.content(), "steer")
 }
+
+///|
+fn goal_event(
+  goal_id : String,
+  status : @agent_session.GoalStatus,
+  token_budget? : Int,
+) -> @agent_session.SessionItem raise {
+  Goal(
+    GoalUpdate(goal_id~, objective="ship the feature", status~, token_budget?),
+  )
+}
+
+///|
+test "current_goal is None without goal events" {
+  let session = @agent_session.Session(SessionId("g0"), system_prompt="s").append(
+    User(UserMessage("hello")),
+  )
+  assert_true(session.current_goal() is None)
+}
+
+///|
+test "current_goal folds the latest transition and post-creation usage" {
+  let session = @agent_session.Session(SessionId("g1"), system_prompt="s")
+    // Usage before the goal exists must not count against its budget.
+    .append(Usage(TurnUsage(prompt_tokens=1000, completion_tokens=1000)))
+    .append(goal_event("goal-1", Active, token_budget=500))
+    .append(Usage(TurnUsage(prompt_tokens=100, completion_tokens=50)))
+    .append(Usage(TurnUsage(prompt_tokens=200, completion_tokens=30)))
+  guard session.current_goal() is Some(snapshot) else { fail("expected goal") }
+  assert_eq(snapshot.goal().goal_id(), "goal-1")
+  assert_true(snapshot.goal().status() is Active)
+  assert_eq(snapshot.tokens_used(), 380)
+  guard snapshot.remaining_tokens() is Some(remaining) else {
+    fail("expected budget")
+  }
+  assert_eq(remaining, 120)
+
+  // A later transition of the same goal keeps the accounting window.
+  let updated = session.append(goal_event("goal-1", Complete, token_budget=500))
+  guard updated.current_goal() is Some(done) else { fail("expected goal") }
+  assert_true(done.goal().status() is Complete)
+  assert_eq(done.tokens_used(), 380)
+}
+
+///|
+test "remaining_tokens clamps at zero and is None when unbudgeted" {
+  let over = @agent_session.Session(SessionId("g2"), system_prompt="s")
+    .append(goal_event("goal-1", Active, token_budget=100))
+    .append(Usage(TurnUsage(prompt_tokens=300, completion_tokens=0)))
+  guard over.current_goal() is Some(snapshot) else { fail("expected goal") }
+  guard snapshot.remaining_tokens() is Some(remaining) else {
+    fail("expected budget")
+  }
+  assert_eq(remaining, 0)
+  let unbudgeted = @agent_session.Session(SessionId("g3"), system_prompt="s").append(
+    goal_event("goal-1", Active),
+  )
+  guard unbudgeted.current_goal() is Some(free) else { fail("expected goal") }
+  assert_true(free.remaining_tokens() is None)
+}
+
+///|
+test "a replacing goal restarts the usage window" {
+  let session = @agent_session.Session(SessionId("g4"), system_prompt="s")
+    .append(goal_event("goal-1", Active))
+    .append(Usage(TurnUsage(prompt_tokens=100, completion_tokens=0)))
+    .append(goal_event("goal-1", Complete))
+    .append(goal_event("goal-2", Active))
+    .append(Usage(TurnUsage(prompt_tokens=40, completion_tokens=2)))
+  guard session.current_goal() is Some(snapshot) else { fail("expected goal") }
+  assert_eq(snapshot.goal().goal_id(), "goal-2")
+  // Only the usage after goal-2's creation counts.
+  assert_eq(snapshot.tokens_used(), 42)
+}
+
+///|
+test "goal updates validate their fields" {
+  fn rejected(build : () -> @agent_session.GoalUpdate raise) -> Bool {
+    let _ = build() catch { _ => return true }
+    false
+  }
+
+  assert_true(
+    rejected(() => GoalUpdate(goal_id="", objective="x", status=Active)),
+  )
+  assert_true(
+    rejected(() => GoalUpdate(goal_id="g", objective="  ", status=Active)),
+  )
+  assert_true(
+    rejected(() => {
+      GoalUpdate(goal_id="g", objective="x", status=Active, token_budget=0)
+    }),
+  )
+  let mut oversized = ""
+  for _ in 0..<4001 {
+    oversized += "x"
+  }
+  assert_true(
+    rejected(() => GoalUpdate(goal_id="g", objective=oversized, status=Active)),
+  )
+  assert_false(
+    rejected(() => {
+      GoalUpdate(goal_id="g", objective="x", status=Active, token_budget=100)
+    }),
+  )
+}
+
+///|
+test "goal events round trip through JSON and stay out of model context" {
+  let session = @agent_session.Session(SessionId("g5"), system_prompt="s")
+    .append(goal_event("goal-1", Active, token_budget=500))
+    .append(goal_event("goal-1", Blocked))
+    .append(goal_event("goal-1", BudgetLimited))
+    .append(goal_event("goal-1", Complete))
+  for event in session.events() {
+    let line = event.to_json().stringify()
+    let decoded : @agent_session.SessionEvent = @json.from_json(
+      @json.parse(line),
+    )
+    assert_eq(decoded.to_json().stringify(), line)
+  }
+  // Goals are host metadata: the model sees only the system prompt.
+  assert_eq(session.chat_messages().length(), 1)
+}

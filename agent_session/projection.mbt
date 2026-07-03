@@ -77,8 +77,8 @@ fn append_item_message(
     Internal(context) =>
       messages.push(ChatMessage(User, content=internal_model_content(context)))
     // Metadata-only items are handled (skipped) before this function is
-    // reached; the arm exists so the match stays exhaustive.
-    Usage(_) => ()
+    // reached; the arms exist so the match stays exhaustive.
+    Usage(_) | Goal(_) => ()
   }
 }
 
@@ -167,7 +167,7 @@ pub fn Session::chat_messages(self : Session) -> Array[@deepseek.ChatMessage] {
     // the tool-call repair below: a `Usage` event lands between an assistant
     // tool call and its tool result, and treating it as a normal event would
     // flush the pending call into a synthetic tool error.
-    if event.item() is Usage(_) {
+    if event.item() is (Usage(_) | Goal(_)) {
       continue
     }
     match event.item() {

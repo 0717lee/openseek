@@ -127,6 +127,7 @@ fn item_payload(item : SessionItem) -> (String, Json) {
     Terminal(terminal) => ("terminal", terminal.to_json())
     Usage(usage) => ("usage", usage.to_json())
     Internal(context) => ("internal_context", context.to_json())
+    Goal(update) => ("goal", update.to_json())
   }
 }
 
@@ -170,6 +171,7 @@ pub impl FromJson for SessionItem with fn from_json(
     "usage" => Usage(@json.from_json(payload, path=path.add_key("payload")))
     "internal_context" =>
       Internal(@json.from_json(payload, path=path.add_key("payload")))
+    "goal" => Goal(@json.from_json(payload, path=path.add_key("payload")))
     other =>
       json_decode_error(
         path.add_key("kind"),
@@ -235,4 +237,35 @@ pub impl FromJson for Session with fn from_json(
     system_prompt=string_field(fields, path, "system_prompt"),
     events~,
   )
+}
+
+///|
+/// Encode a goal status as its stable storage string: `active`, `complete`,
+/// `blocked`, or `budget_limited`.
+pub impl ToJson for GoalStatus with fn to_json(status : GoalStatus) -> Json {
+  let text = match status {
+    Active => "active"
+    Complete => "complete"
+    Blocked => "blocked"
+    BudgetLimited => "budget_limited"
+  }
+  Json::string(text)
+}
+
+///|
+/// Decode a goal status from its stable storage string. Unknown values raise
+/// `JsonDecodeError` so persisted goals cannot silently change lifecycle
+/// state.
+pub impl FromJson for GoalStatus with fn from_json(
+  json : Json,
+  path : @json.JsonPath,
+) -> GoalStatus {
+  match json {
+    String("active") => Active
+    String("complete") => Complete
+    String("blocked") => Blocked
+    String("budget_limited") => BudgetLimited
+    String(other) => json_decode_error(path, "unknown goal status: \{other}")
+    _ => json_decode_error(path, "expected string goal status")
+  }
 }
