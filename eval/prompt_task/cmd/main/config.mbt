@@ -6,8 +6,10 @@ fn config_from_matches(matches : @argparse.Matches) -> @harness.Config raise {
     "--min-successes",
   )
   guard min_successes <= runs else { fail("--min-successes must be <= --runs") }
+  // An empty --api-key is allowed: the harness falls back to the provider's
+  // environment variable (DEEPSEEK/KIMI), which is the only way a cross-provider
+  // run authenticates each model with its own key.
   let api_key = value(matches, "api-key")
-  guard api_key != "" else { fail("--api-key is required for running trials") }
   Config(
     api_key~,
     model=@deepseek.Model::parse(value(matches, "model")),
@@ -34,8 +36,9 @@ fn config_from_matches(matches : @argparse.Matches) -> @harness.Config raise {
 async fn suite_config_from_matches(
   matches : @argparse.Matches,
 ) -> @harness.SuiteConfig {
+  // Empty --api-key means "inherit each model's provider key from the
+  // environment"; run_suite validates every listed provider up front.
   let api_key = value(matches, "api-key")
-  guard api_key != "" else { fail("--api-key is required for running trials") }
   @harness.suite_config_from_file(
     value(matches, "suite-file"),
     api_key~,

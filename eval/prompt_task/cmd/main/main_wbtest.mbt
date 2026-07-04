@@ -43,15 +43,14 @@ test "cli parses suite file option" {
 }
 
 ///|
-test "running trials requires an api key" {
+test "empty api key parses through for environment fallback" {
+  // An empty --api-key is no longer rejected here: the harness falls back to
+  // the provider's environment variable so one suite can span providers. The
+  // key-presence check moved to run time (require_api_access), which names the
+  // exact missing variable.
   let matches = cli_command().parse(argv=[])
-  let _ = config_from_matches(matches) catch {
-    error => {
-      assert_true("\{error}".contains("--api-key is required"))
-      return
-    }
-  }
-  fail("missing api key parsed")
+  let config = config_from_matches(matches)
+  assert_eq(config.api_key, "")
 }
 
 ///|

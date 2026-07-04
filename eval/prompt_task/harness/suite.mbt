@@ -326,8 +326,11 @@ fn ProblemSpec::from_json(json : Json, base_dir : String) -> ProblemSpec raise {
 /// Run every `(model, problem, repeat)` job with one suite-level concurrency
 /// budget. Each model/problem combo still gets a normal `run_manifest.json`.
 pub async fn run_suite(config : SuiteConfig) -> SuiteManifest {
-  if config.api_key == "" {
-    fail("api_key is required for running suite trials")
+  // Validate every provider up front: a cross-provider suite (`deepseek-*` and
+  // `kimi-*` together) runs with an empty `api_key` and inherits DEEPSEEK/KIMI
+  // from the environment, so each listed model needs its own key path.
+  for model in config.models {
+    require_api_access(config.api_key, model)
   }
   prepare_suite_output_dir(config.out_dir)
   let jobs = suite_jobs(config)

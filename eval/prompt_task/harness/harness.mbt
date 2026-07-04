@@ -4,9 +4,7 @@
 /// session `openseek_session-<id>.jsonl` files, and a run manifest. No
 /// validation or report analysis is performed in this phase.
 pub async fn run_experiments(config : Config) -> RunManifest {
-  if config.api_key == "" {
-    fail("api_key is required for running trials")
-  }
+  require_api_access(config.api_key, config.model)
   prepare_output_dir(config.out_dir)
   let task_template = @fs.read_file(config.task_file).text()
   let trials = run_indexed_with_concurrency(config.runs, config.concurrency, index => {
@@ -143,7 +141,15 @@ fn trial_extra_env(
     "OPENSEEK_SESSION_ROOT": ".openseek",
     "OPENSEEK_GLOBAL_SKILLS_DIR": "\{real_workspace}/.no-global-skills",
   }
-  env[api_key_env_for_model(config.model)] = config.api_key
+  // An explicit `api_key` overrides this model's provider key for every trial.
+  // An empty one means "let the engine inherit its provider key from the
+  // parent environment" — the only way one suite can span providers, since
+  // DeepSeek reads DEEPSEEK and Kimi reads KIMI and a single shared key cannot
+  // authenticate both. Overriding unconditionally would clobber the inherited
+  // KIMI (or DEEPSEEK) of the other provider's trials with the wrong key.
+  if config.api_key != "" {
+    env[api_key_env_for_model(config.model)] = config.api_key
+  }
   env
 }
 
@@ -153,6 +159,24 @@ fn api_key_env_for_model(model : @deepseek.Model) -> String {
     KimiK27Code | KimiK27CodeHighSpeed => "KIMI"
     V4Flash | V4Pro => "DEEPSEEK"
   }
+}
+
+///|
+/// Fail fast when no key path exists for `model`: a trial authenticates either
+/// through an explicit `api_key` or the inherited provider environment
+/// variable. Checking here surfaces a clear message instead of letting every
+/// trial spawn an engine that immediately errors on the missing key.
+fn require_api_access(api_key : String, model : @deepseek.Model) -> Unit raise {
+  if api_key != "" {
+    return
+  }
+  let env_var = api_key_env_for_model(model)
+  if @env.get_env_var(env_var) is Some(value) && value != "" {
+    return
+  }
+  fail(
+    "no API key for \{model}: pass --api-key or export \{env_var} so trials can inherit it",
+  )
 }
 
 ///|
