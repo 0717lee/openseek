@@ -1,0 +1,287 @@
+{
+  "name": "deepseek-vs-kimi",
+  "models": ["deepseek-v4-pro", "kimi-k2.7-code"],
+  "runs_per_combo": 3,
+  "concurrency": 6,
+  "min_successes": 0,
+  "max_steps": 160,
+  "problems": [
+    {
+      "id": "json_patch",
+      "prompt_label": "JSON Pointer/Patch/diff CLI",
+      "task_file": "json_patch_cli.md",
+      "validation_probes": [
+        { "name": "moon check", "command": ["moon", "check", "--target", "native"] },
+        { "name": "moon test", "command": ["moon", "test", "--target", "native"] },
+        {
+          "name": "pointer escaping",
+          "command": ["moon", "run", "--target", "native", "cmd/jsonpatch", "--", "pointer", "/a~1b/c~0d"],
+          "stdin": "{\"a/b\":{\"c~d\":5}}",
+          "stdout_json": true,
+          "output_contains": "5"
+        },
+        {
+          "name": "patch replace",
+          "command": ["moon", "run", "--target", "native", "cmd/jsonpatch", "--", "patch", "patch.json"],
+          "write_file": "patch.json",
+          "write_content": "[{\"op\":\"replace\",\"path\":\"/x\",\"value\":9}]",
+          "stdin": "{\"x\":1}",
+          "stdout_json": true,
+          "output_contains": "9"
+        },
+        {
+          "name": "patch array append",
+          "command": ["moon", "run", "--target", "native", "cmd/jsonpatch", "--", "patch", "append.json"],
+          "write_file": "append.json",
+          "write_content": "[{\"op\":\"add\",\"path\":\"/a/-\",\"value\":3}]",
+          "stdin": "{\"a\":[1,2]}",
+          "stdout_json": true,
+          "output_contains": "3"
+        },
+        {
+          "name": "failed test op",
+          "command": ["moon", "run", "--target", "native", "cmd/jsonpatch", "--", "patch", "bad.json"],
+          "write_file": "bad.json",
+          "write_content": "[{\"op\":\"test\",\"path\":\"/x\",\"value\":2}]",
+          "stdin": "{\"x\":1}",
+          "expect_exit": -1,
+          "stderr_contains": "error"
+        },
+        {
+          "name": "structural diff",
+          "command": ["moon", "run", "--target", "native", "cmd/jsonpatch", "--", "diff", "b.json"],
+          "write_file": "b.json",
+          "write_content": "{\"x\":2}",
+          "stdin": "{\"x\":1}",
+          "stdout_json": true
+        }
+      ]
+    },
+    {
+      "id": "uri_normalizer",
+      "prompt_label": "URI normalizer/resolver CLI",
+      "task_file": "uri_normalizer_cli.md",
+      "validation_probes": [
+        { "name": "moon check", "command": ["moon", "check", "--target", "native"] },
+        { "name": "moon test", "command": ["moon", "test", "--target", "native"] },
+        {
+          "name": "dot segments",
+          "command": ["moon", "run", "--target", "native", "cmd/urinorm", "--", "normalize"],
+          "stdin": "http://a/b/c/../g",
+          "stdout_contains": "http://a/b/g"
+        },
+        {
+          "name": "case folding",
+          "command": ["moon", "run", "--target", "native", "cmd/urinorm", "--", "normalize"],
+          "stdin": "HTTP://Example.COM/",
+          "stdout_contains": "http://example.com/"
+        },
+        {
+          "name": "relative resolution",
+          "command": ["moon", "run", "--target", "native", "cmd/urinorm", "--", "resolve", "http://a/b/c/d;p?q"],
+          "stdin": "../../g",
+          "stdout_contains": "http://a/g"
+        },
+        {
+          "name": "malformed input",
+          "command": ["moon", "run", "--target", "native", "cmd/urinorm", "--", "normalize"],
+          "stdin": "http://[oops",
+          "expect_exit": -1,
+          "stderr_contains": "error"
+        }
+      ]
+    },
+    {
+      "id": "expr_eval",
+      "prompt_label": "Expression parser/evaluator CLI",
+      "task_file": "expr_eval_cli.md",
+      "validation_probes": [
+        { "name": "moon check", "command": ["moon", "check", "--target", "native"] },
+        { "name": "moon test", "command": ["moon", "test", "--target", "native"] },
+        {
+          "name": "precedence",
+          "command": ["moon", "run", "--target", "native", "cmd/expr"],
+          "stdin": "2 + 3 * 4",
+          "stdout_contains": "14"
+        },
+        {
+          "name": "right-associative power",
+          "command": ["moon", "run", "--target", "native", "cmd/expr"],
+          "stdin": "2 ^ 3 ^ 2",
+          "stdout_contains": "512"
+        },
+        {
+          "name": "float division",
+          "command": ["moon", "run", "--target", "native", "cmd/expr"],
+          "stdin": "10 / 4",
+          "stdout_contains": "2.5"
+        },
+        {
+          "name": "variables",
+          "command": ["moon", "run", "--target", "native", "cmd/expr"],
+          "stdin": "let x = 5;\nx * x",
+          "stdout_contains": "25"
+        },
+        {
+          "name": "parse error",
+          "command": ["moon", "run", "--target", "native", "cmd/expr"],
+          "stdin": "1 + * 2",
+          "expect_exit": -1,
+          "stderr_contains": "error"
+        }
+      ]
+    },
+    {
+      "id": "sat_solver",
+      "prompt_label": "DPLL SAT solver CLI",
+      "task_file": "sat_solver_cli.md",
+      "validation_probes": [
+        { "name": "moon check", "command": ["moon", "check", "--target", "native"] },
+        { "name": "moon test", "command": ["moon", "test", "--target", "native"] },
+        {
+          "name": "satisfiable",
+          "command": ["moon", "run", "--target", "native", "cmd/sat"],
+          "stdin": "p cnf 1 1\n1 0\n",
+          "stdout_contains": "v 1"
+        },
+        {
+          "name": "contradiction",
+          "command": ["moon", "run", "--target", "native", "cmd/sat"],
+          "stdin": "p cnf 1 2\n1 0\n-1 0\n",
+          "stdout_contains": "UNSATISFIABLE"
+        },
+        {
+          "name": "comments and propagation",
+          "command": ["moon", "run", "--target", "native", "cmd/sat"],
+          "stdin": "c example\np cnf 2 2\n1 2 0\n-1 2 0\n",
+          "stdout_contains": "v "
+        },
+        {
+          "name": "empty clause",
+          "command": ["moon", "run", "--target", "native", "cmd/sat"],
+          "stdin": "p cnf 1 1\n0\n",
+          "stdout_contains": "UNSATISFIABLE"
+        }
+      ]
+    },
+    {
+      "id": "rpn_repair",
+      "prompt_label": "RPN calculator repair",
+      "task_file": "rpn_repair.md",
+      "validation_probes": [
+        { "name": "moon check", "command": ["moon", "check", "--target", "native"] },
+        { "name": "moon test", "command": ["moon", "test", "--target", "native"] },
+        {
+          "name": "division result",
+          "command": ["moon", "run", "--target", "native", "cmd/rpn"],
+          "stdin": "8 2 /",
+          "stdout_contains": "4"
+        },
+        {
+          "name": "division by zero",
+          "command": ["moon", "run", "--target", "native", "cmd/rpn"],
+          "stdin": "1 0 /",
+          "expect_exit": -1,
+          "stderr_contains": "error"
+        },
+        {
+          "name": "stack underflow",
+          "command": ["moon", "run", "--target", "native", "cmd/rpn"],
+          "stdin": "1 +",
+          "expect_exit": -1,
+          "stderr_contains": "error"
+        },
+        {
+          "name": "leftover operands",
+          "command": ["moon", "run", "--target", "native", "cmd/rpn"],
+          "stdin": "1 2",
+          "expect_exit": -1,
+          "stderr_contains": "error"
+        },
+        {
+          "name": "unknown token",
+          "command": ["moon", "run", "--target", "native", "cmd/rpn"],
+          "stdin": "1 x +",
+          "expect_exit": -1,
+          "stderr_contains": "error"
+        }
+      ]
+    },
+    {
+      "id": "dir_stats",
+      "prompt_label": "Async directory statistics CLI",
+      "task_file": "dir_stats_cli.md",
+      "validation_probes": [
+        { "name": "moon check", "command": ["moon", "check", "--target", "native"] },
+        { "name": "moon test", "command": ["moon", "test", "--target", "native"] },
+        {
+          "name": "stdin file list",
+          "command": ["moon", "run", "--target", "native", "cmd/dirstats", "--", "--stdin"],
+          "write_file": "probe_a.txt",
+          "write_content": "one\ntwo\nthree\n",
+          "stdin": "probe_a.txt\n",
+          "stdout_json": true,
+          "output_contains": "{\"files\":1,\"lines\":3,\"bytes\":14}"
+        },
+        {
+          "name": "empty file",
+          "command": ["moon", "run", "--target", "native", "cmd/dirstats", "--", "--stdin"],
+          "write_file": "probe_empty.txt",
+          "write_content": "",
+          "stdin": "probe_empty.txt\n",
+          "stdout_json": true,
+          "output_contains": "{\"files\":1,\"lines\":0,\"bytes\":0}"
+        },
+        {
+          "name": "missing path",
+          "command": ["moon", "run", "--target", "native", "cmd/dirstats", "--", "--stdin"],
+          "stdin": "does_not_exist.txt\n",
+          "expect_exit": -1,
+          "stderr_contains": "error"
+        }
+      ]
+    },
+    {
+      "id": "utf8_decode",
+      "prompt_label": "UTF-8 decoder/validator CLI",
+      "task_file": "utf8_decode_cli.md",
+      "validation_probes": [
+        { "name": "moon check", "command": ["moon", "check", "--target", "native"] },
+        { "name": "moon test", "command": ["moon", "test", "--target", "native"] },
+        {
+          "name": "four-byte sequence",
+          "command": ["moon", "run", "--target", "native", "cmd/utf8", "--", "decode"],
+          "stdin": "f09f9880",
+          "stdout_contains": "U+1F600"
+        },
+        {
+          "name": "ascii",
+          "command": ["moon", "run", "--target", "native", "cmd/utf8", "--", "decode"],
+          "stdin": "48656C6C6F",
+          "stdout_contains": "U+0048"
+        },
+        {
+          "name": "overlong encoding",
+          "command": ["moon", "run", "--target", "native", "cmd/utf8", "--", "decode"],
+          "stdin": "c0af",
+          "expect_exit": -1,
+          "stderr_contains": "error"
+        },
+        {
+          "name": "truncated sequence",
+          "command": ["moon", "run", "--target", "native", "cmd/utf8", "--", "decode"],
+          "stdin": "f09f98",
+          "expect_exit": -1,
+          "stderr_contains": "error"
+        },
+        {
+          "name": "surrogate code point",
+          "command": ["moon", "run", "--target", "native", "cmd/utf8", "--", "decode"],
+          "stdin": "eda080",
+          "expect_exit": -1,
+          "stderr_contains": "error"
+        }
+      ]
+    }
+  ]
+}
