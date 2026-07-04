@@ -394,153 +394,17 @@ pub async fn[X] run_turn_in_scope(
         )
         continue loop_steps~
       }
-      let assistant_message : @deepseek.ChatMessage = ChatMessage(
-        Assistant,
-        content=response.content,
-        tool_calls=response.tool_calls,
-        reasoning_content?,
-      )
-      messages.push(assistant_message)
-      session = append_item(
-        session,
-        Assistant(
-          AssistantMessage(
-            response.content,
-            tool_calls=response.tool_calls,
-            reasoning_content?,
-          ),
-        ),
-      )
-      for call_index, native_call in response.tool_calls {
-        let tool_call = @agent_tool.AgentToolCall(native_call) catch {
-          error => {
-            @xlog.error() <?
-              {
-                "event": "tool_call_decode_error",
-                "tool_call_id": native_call.id,
-                "tool_name": native_call.name,
-                "error": "\{error}",
-              }
-            messages.push(
-              ChatMessage(Tool(native_call.id), content="error: \{error}"),
-            )
-            session = append_item(
-              session,
-              Tool(
-                ToolResult(
-                  tool_call_id=native_call.id,
-                  tool_name=native_call.name,
-                  content="error: \{error}",
-                  is_error=true,
-                ),
-              ),
-            )
-            continue
-          }
-        }
-        let result = @agent_tool.execute_tool_call(tool_call, tools)
-        let output = match result {
-          Control(Finish(answer)) => {
-            session = append_item(
-              session,
-              Tool(
-                ToolResult(
-                  tool_call_id=native_call.id,
-                  tool_name=tool_call.name,
-                  content="finished: \{answer}",
-                ),
-              ),
-            )
-            let steer_inputs = pending_steers(runtime)
-            if steer_inputs.is_empty() {
-              let next = append_item(session, Terminal(Finished(answer)))
-              @xlog.info() <? { "event": "agent_finished", "answer": answer }
-              return next
-            }
-            // User input wins over the finish tool as well. Continuing the turn
-            // must keep the conversation API-valid: every call in the
-            // assistant's batch needs a result message, so the finish call's
-            // result and skipped notes for the unexecuted remainder are pushed
-            // before the new input.
-            messages.push(
-              ChatMessage(Tool(native_call.id), content="finished: \{answer}"),
-            )
-            for skipped in response.tool_calls[call_index + 1:] {
-              let note = "skipped: user input arrived before this call ran"
-              @xlog.info() <?
-                {
-                  "event": "tool_result",
-                  "tool_call_id": skipped.id,
-                  "tool_name": skipped.name,
-                  "is_error": true,
-                  "content": note,
-                }
-              messages.push(ChatMessage(Tool(skipped.id), content=note))
-              session = append_item(
-                session,
-                Tool(
-                  ToolResult(
-                    tool_call_id=skipped.id,
-                    tool_name=skipped.name,
-                    content=note,
-                    is_error=true,
-                  ),
-                ),
-              )
-            }
-            session = session.apply_steer_inputs(
-              steer_inputs,
-              messages,
-              append_item~,
-            )
-            continue loop_steps~
-          }
-          Control(Abort(reason)) => {
-            session = append_item(
-              session,
-              Tool(
-                ToolResult(
-                  tool_call_id=native_call.id,
-                  tool_name=tool_call.name,
-                  content="aborted: \{reason}",
-                  is_error=true,
-                ),
-              ),
-            )
-            let next = append_item(session, Terminal(Aborted(reason)))
-            @xlog.warn() <? { "event": "agent_aborted", "reason": reason }
-            return next
-          }
-          Respond(output) => output
-        }
-        if tool_call.name == "plan" && !output.is_error {
-          // A successful plan write restarts the staleness cadence and
-          // refreshes the checklist the next reminder would re-surface; a
-          // cleared plan drops back to the plan-free nudge.
-          cadence.steps_since_plan = 0
-          cadence.checklist = @plan.reminder_checklist(tool_call.arguments)
-        }
-        @xlog.info() <?
-          {
-            "event": "tool_result",
-            "tool_call_id": native_call.id,
-            "tool_name": tool_call.name,
-            "is_error": output.is_error,
-            "content": output.content,
-          }
-        messages.push(ChatMessage(Tool(native_call.id), content=output.content))
-        session = append_item(
-          session,
-          Tool(
-            ToolResult(
-              tool_call_id=native_call.id,
-              tool_name=tool_call.name,
-              content=output.content,
-              is_error=output.is_error,
-              brief?=output.brief,
-            ),
-          ),
-        )
+      match
+        session.run_tool_batch(
+          response,
+          messages,
+          tools,
+          runtime,
+          cadence,
+          append_item~,
+        ) {
+        Done(next) => return next
+        Continue(next) => session = next
       }
     }
     let next = append_item(session, Terminal(Failed("max steps exhausted")))
