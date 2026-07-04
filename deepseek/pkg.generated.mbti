@@ -79,7 +79,8 @@ pub struct Usage {
   total_tokens : Int
   prompt_cache_hit_tokens : Int
   prompt_cache_miss_tokens : Int
-} derive(@debug.Debug)
+} derive(ToJson, @debug.Debug)
+pub impl @json.FromJson for Usage
 
 // Type aliases
 

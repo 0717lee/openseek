@@ -43,7 +43,13 @@ fn[T] json_decode_error(
 }
 
 ///|
-impl FromJson for Usage with fn from_json(json : Json, _path : @json.JsonPath) -> Usage {
+/// Public so wire consumers (the TUI decodes the engine's `usage` log event)
+/// can round-trip the same schema `ToJson` emits. Lenient by design: absent
+/// or malformed fields decode as 0, and no shape ever raises.
+pub impl FromJson for Usage with fn from_json(
+  json : Json,
+  _path : @json.JsonPath,
+) -> Usage {
   Usage::from_json(json)
 }
 

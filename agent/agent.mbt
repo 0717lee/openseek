@@ -592,12 +592,5 @@ async fn @agent_session.Session::apply_steer_inputs(
 
 ///|
 fn print_usage(usage : @deepseek.Usage) -> Unit {
-  @xlog.info() <?
-    {
-      "event": "usage",
-      "prompt_tokens": usage.prompt_tokens,
-      "completion_tokens": usage.completion_tokens,
-      "cache_hit_tokens": usage.prompt_cache_hit_tokens,
-      "cache_miss_tokens": usage.prompt_cache_miss_tokens,
-    }
+  @xlog.info() <? { "event": "usage", "usage": usage }
 }

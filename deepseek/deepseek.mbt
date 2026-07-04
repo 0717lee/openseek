@@ -150,7 +150,7 @@ pub struct Usage {
   total_tokens : Int
   prompt_cache_hit_tokens : Int
   prompt_cache_miss_tokens : Int
-} derive(Debug)
+} derive(Debug, ToJson)
 
 ///|
 /// Decoded DeepSeek chat response content, tool calls, and token usage.
