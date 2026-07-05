@@ -300,6 +300,73 @@ async fn terminal_batch_test_server(
 }
 
 ///|
+fn assert_no_synthetic_missing_tool_result(
+  session : @agent_session.Session,
+) -> Unit raise {
+  for message in session.chat_messages() {
+    assert_false(message.content.contains("previous agent process exited"))
+  }
+}
+
+///|
+async test "finish closes later tool calls as skipped before terminating" {
+  @async.with_task_group() <| group => {
+    guard terminal_batch_test_server(
+        group,
+        (
+          #|data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_finish","function":{"name":"finish","arguments":"{\"answer\":\"done\"}"}},{"index":1,"id":"call_read","function":{"name":"read","arguments":"{\"path\":\"moon.mod\"}"}}]}}]}
+        ),
+      )
+      is Some(url) else {
+      return
+    }
+    let runtime = @agent_runtime.AgentRuntime()
+    let scope = @agent_runtime.AgentTaskScope(group)
+    let session = @agent_session.Session(
+      SessionId("finish-batch"),
+      system_prompt="system",
+    )
+    let result = @agent.run_turn_in_scope(
+      runtime~,
+      scope~,
+      api_key="test-key",
+      model=V4Flash,
+      session~,
+      task="finish then read",
+      append_item=(session, item) => session.append(item),
+      max_steps=1,
+      api_url=url,
+    )
+    let events = result.events()
+    assert_eq(events.length(), 5)
+    guard events[1].item() is Assistant(message) else {
+      fail("expected assistant tool-call message")
+    }
+    assert_eq(message.tool_calls().length(), 2)
+    guard events[2].item() is Tool(finish_result) else {
+      fail("expected finish tool result")
+    }
+    assert_eq(finish_result.tool_call_id(), "call_finish")
+    assert_eq(finish_result.content(), "finished: done")
+    guard events[3].item() is Tool(skipped) else {
+      fail("expected skipped tool result")
+    }
+    assert_eq(skipped.tool_call_id(), "call_read")
+    assert_eq(skipped.tool_name(), "read")
+    assert_eq(
+      skipped.content(),
+      "skipped: finish ended the turn before this call ran",
+    )
+    assert_true(skipped.is_error())
+    guard events[4].item() is Terminal(Finished(answer)) else {
+      fail("expected finished terminal")
+    }
+    assert_eq(answer, "done")
+    assert_no_synthetic_missing_tool_result(result)
+  }
+}
+
+///|
 fn abort_batch_tools() -> @agent_tool.Tools raise {
   Tools([
     AgentToolDefinition(
@@ -315,6 +382,63 @@ fn abort_batch_tools() -> @agent_tool.Tools raise {
       execute=Sync(_args => @agent_tool.ToolAction::respond("echoed")),
     ),
   ])
+}
+
+///|
+async test "abort closes later tool calls as skipped before terminating" {
+  @async.with_task_group() <| group => {
+    guard terminal_batch_test_server(
+        group,
+        (
+          #|data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_abort","function":{"name":"abort","arguments":"{}"}},{"index":1,"id":"call_echo","function":{"name":"echo","arguments":"{}"}}]}}]}
+        ),
+      )
+      is Some(url) else {
+      return
+    }
+    let runtime = @agent_runtime.AgentRuntime()
+    let scope = @agent_runtime.AgentTaskScope(group)
+    let session = @agent_session.Session(
+      SessionId("abort-batch"),
+      system_prompt="system",
+    )
+    let tools = abort_batch_tools()
+    let result = @agent.run_turn_in_scope(
+      runtime~,
+      scope~,
+      api_key="test-key",
+      model=V4Flash,
+      session~,
+      task="abort then echo",
+      append_item=(session, item) => session.append(item),
+      max_steps=1,
+      api_url=url,
+      tools~,
+    )
+    let events = result.events()
+    assert_eq(events.length(), 5)
+    guard events[2].item() is Tool(abort_result) else {
+      fail("expected abort tool result")
+    }
+    assert_eq(abort_result.tool_call_id(), "call_abort")
+    assert_eq(abort_result.content(), "aborted: stop now")
+    assert_true(abort_result.is_error())
+    guard events[3].item() is Tool(skipped) else {
+      fail("expected skipped tool result")
+    }
+    assert_eq(skipped.tool_call_id(), "call_echo")
+    assert_eq(skipped.tool_name(), "echo")
+    assert_eq(
+      skipped.content(),
+      "skipped: abort ended the turn before this call ran",
+    )
+    assert_true(skipped.is_error())
+    guard events[4].item() is Terminal(Aborted(reason)) else {
+      fail("expected aborted terminal")
+    }
+    assert_eq(reason, "stop now")
+    assert_no_synthetic_missing_tool_result(result)
+  }
 }
 
 ///|

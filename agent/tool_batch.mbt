@@ -1,13 +1,14 @@
 // Executing one assistant tool-call batch. Extracted from the step loop in
 // `run_turn_in_scope` (agent.mbt) so the loop reads as a narrative; the batch
 // mechanics — decode errors, finish/abort control results, steering
-// overrides, plan cadence resets — live here.
+// overrides, plan cadence updates — live here.
 
 ///|
 /// Outcome of one assistant tool-call batch.
 priv enum BatchResult {
-  // Every call got a result — or a steering override cut the batch short —
-  // and the turn takes another model step with the carried session.
+  // Every call got a result, even if terminal control or a steering override
+  // prevented later calls in the batch from running; the turn takes another
+  // model step with the carried session.
   Continue(@agent_session.Session)
   // A terminal event was appended; the turn is over.
   Done(@agent_session.Session)
@@ -19,14 +20,49 @@ priv enum BatchResult {
 ///
 /// The conversation must stay API-valid: every tool call in the assistant
 /// message gets exactly one result message — real output, a decode error, a
-/// finish or abort note, or a skipped note for calls a steering override
-/// prevented from running.
+/// finish or abort note, or a skipped note for calls terminal control or a
+/// steering override prevented from running.
 ///
 /// A `finish` control result ends the turn only when no steering is pending;
 /// user input wins over model-initiated completion, so a pending steer turns
 /// the finish into an ordinary result, marks the unexecuted remainder
 /// skipped, folds the steer in, and continues. An abort always ends the
-/// turn. A successful `plan` write resets `cadence`.
+/// turn, after marking the unexecuted remainder skipped. A successful `plan`
+/// write resets the plan-silence counter and refreshes the checklist.
+async fn @agent_session.Session::append_skipped_tool_results(
+  session : Self,
+  messages : Array[@deepseek.ChatMessage],
+  calls : ArrayView[@deepseek.ToolCall],
+  note : String,
+  append_item~ : async (@agent_session.Session, @agent_session.SessionItem) -> @agent_session.Session,
+) -> @agent_session.Session {
+  let mut session = session
+  for skipped in calls {
+    @xlog.info() <?
+      {
+        "event": "tool_result",
+        "tool_call_id": skipped.id,
+        "tool_name": skipped.name,
+        "is_error": true,
+        "content": note,
+      }
+    messages.push(ChatMessage(Tool(skipped.id), content=note))
+    session = append_item(
+      session,
+      Tool(
+        ToolResult(
+          tool_call_id=skipped.id,
+          tool_name=skipped.name,
+          content=note,
+          is_error=true,
+        ),
+      ),
+    )
+  }
+  session
+}
+
+///|
 async fn @agent_session.Session::run_tool_batch(
   session : Self,
   response : @deepseek.ChatResponse,
@@ -101,6 +137,12 @@ async fn @agent_session.Session::run_tool_batch(
         )
         let steer_inputs = pending_steers(runtime)
         if steer_inputs.is_empty() {
+          session = session.append_skipped_tool_results(
+            messages,
+            response.tool_calls[call_index + 1:],
+            "skipped: finish ended the turn before this call ran",
+            append_item~,
+          )
           let next = append_item(session, Terminal(Finished(answer)))
           @xlog.info() <? { "event": "agent_finished", "answer": answer }
           return Done(next)
@@ -113,29 +155,12 @@ async fn @agent_session.Session::run_tool_batch(
         messages.push(
           ChatMessage(Tool(native_call.id), content="finished: \{answer}"),
         )
-        for skipped in response.tool_calls[call_index + 1:] {
-          let note = "skipped: user input arrived before this call ran"
-          @xlog.info() <?
-            {
-              "event": "tool_result",
-              "tool_call_id": skipped.id,
-              "tool_name": skipped.name,
-              "is_error": true,
-              "content": note,
-            }
-          messages.push(ChatMessage(Tool(skipped.id), content=note))
-          session = append_item(
-            session,
-            Tool(
-              ToolResult(
-                tool_call_id=skipped.id,
-                tool_name=skipped.name,
-                content=note,
-                is_error=true,
-              ),
-            ),
-          )
-        }
+        session = session.append_skipped_tool_results(
+          messages,
+          response.tool_calls[call_index + 1:],
+          "skipped: user input arrived before this call ran",
+          append_item~,
+        )
         session = session.apply_steer_inputs(
           steer_inputs,
           messages,
@@ -154,6 +179,12 @@ async fn @agent_session.Session::run_tool_batch(
               is_error=true,
             ),
           ),
+        )
+        session = session.append_skipped_tool_results(
+          messages,
+          response.tool_calls[call_index + 1:],
+          "skipped: abort ended the turn before this call ran",
+          append_item~,
         )
         let next = append_item(session, Terminal(Aborted(reason)))
         @xlog.warn() <? { "event": "agent_aborted", "reason": reason }
