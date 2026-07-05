@@ -227,9 +227,9 @@ async test "run_turn_with_append closes failed persisted turns" {
 /// Runs one user turn inside a caller-owned runtime and task scope.
 ///
 /// This is the building block for callers that keep an engine alive across
-/// turns (serve mode): the shared `runtime` carries steering input and
-/// runtime updates across the turn boundary, and a `tools` registry can be
-/// built once with `build_tools` and reused across turns. When `tools` is
+/// turns (serve mode): the shared `runtime` carries steering input across the
+/// turn boundary, and a `tools` registry can be built once with `build_tools`
+/// and reused across turns. When `tools` is
 /// omitted a fresh registry is built for this turn only. `scope` bounds
 /// background work the turn's tools spawn, so it must outlive every turn that
 /// may have spawned some. One-shot callers should prefer
@@ -237,9 +237,8 @@ async test "run_turn_with_append closes failed persisted turns" {
 /// of a single turn.
 ///
 /// The loop appends `task` as a user message before the first model request.
-/// At each step boundary it first drains and applies pending non-blank steers,
-/// then drains runtime events and turns known tool updates into model-visible
-/// runtime notices. When the registry includes the `plan` tool and
+/// At each step boundary it first drains and applies pending non-blank steers.
+/// When the registry includes the `plan` tool and
 /// `plan_reminder_after_steps` model requests pass without a successful
 /// `plan` call, the loop also injects a durable plan staleness reminder that
 /// re-surfaces the recorded plan (rate-limited by the same threshold). It
@@ -287,7 +286,6 @@ pub async fn[X] run_turn_in_scope(
       }
     }
     let messages = session.chat_messages()
-    let watcher_fingerprints : Map[String, String] = {}
     let plan_registered = tools.find("plan") is Some(_)
     let cadence : PlanCadence = {
       steps_since_plan: 0,
@@ -295,40 +293,13 @@ pub async fn[X] run_turn_in_scope(
       checklist: None,
     }
     loop_steps~: for step in 0..<max_steps {
-      // Steering first: user-visible mid-turn input should precede runtime
-      // chatter the model reads alongside it.
+      // Steering first: user-visible mid-turn input should be applied before
+      // plan reminders or the next model request.
       session = session.apply_steer_inputs(
         pending_steers(runtime),
         messages,
         append_item~,
       )
-      let runtime_events = runtime.drain_events()
-      if @moon_check.runtime_update_text(runtime_events) is Some(update) {
-        // A batch in which every watcher reproduces its previous notice
-        // (volatile counters aside) is collapsed to a one-line marker: the
-        // model still learns its edit was processed with an unchanged
-        // result, without re-paying for the full block — the analyzed
-        // 156-step session appended 61 near-identical update notices, 11%
-        // of its final context. Fingerprints are tracked per watcher so
-        // alternating multi-cwd batches cannot thrash the comparison.
-        let sections = @moon_check.update_fingerprints(runtime_events)
-        let mut fresh = sections.is_empty()
-        for pair in sections {
-          let (key, fingerprint) = pair
-          if watcher_fingerprints.get(key) != Some(fingerprint) {
-            fresh = true
-          }
-          watcher_fingerprints[key] = fingerprint
-        }
-        let notice = if fresh {
-          update
-        } else {
-          "[moon_check update]\nwatchers re-ran; results unchanged from the previous update"
-        }
-        @xlog.info() <? { "event": "runtime_update", "content": notice }
-        session = append_item(session, Runtime(RuntimeNotice(notice)))
-        messages.push(ChatMessage(User, content=notice))
-      }
       if plan_registered &&
         cadence.steps_since_plan >= plan_reminder_after_steps &&
         cadence.steps_since_reminder >= plan_reminder_after_steps {

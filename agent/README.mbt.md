@@ -4,13 +4,13 @@
 lower-level packages:
 
 - `agent_session`: immutable conversation state and model-message projection;
-- `agent_runtime`: per-loop runtime state, steering, and background events;
+- `agent_runtime`: per-loop workspace state and steering;
 - `agent_tool`: local tool registry and tool dispatch results;
 - `deepseek` and `deepseek/client`: model types and chat-completion requests.
 
 The package owns the orchestration policy: when to append session events, when
-to call the model, how to execute tool calls, how to fold in runtime updates,
-and how mid-turn steering changes the active turn.
+to call the model, how to execute tool calls, and how mid-turn steering changes
+the active turn.
 
 Prompt text is deliberately outside this package. Applications choose or build
 the system prompt, then pass it to `run` or store it in the `Session` supplied
@@ -145,9 +145,9 @@ async test "standard tools are registered in dispatch order" {
 }
 ```
 
-Build the registry once for a long-lived engine. Stateful tool records live in
-the registry value, not in `AgentRuntime`; rebuilding it every turn can orphan
-old watcher records and start duplicate watchers.
+Build the registry once for a long-lived engine. If a custom registry contains
+stateful tools, their records live in the registry value, not in
+`AgentRuntime`; rebuilding it every turn can orphan that tool state.
 
 ## Steering
 
@@ -256,16 +256,16 @@ async test "run_turn_with_append calls the persistence hook for each item" {
 `run_turn_in_scope` is the API for serve mode and other controllers that keep an
 engine alive across prompts. The caller supplies:
 
-- one shared `AgentRuntime` for steering and runtime event queues;
+- one shared `AgentRuntime` for workspace-root context and steering;
 - one `AgentTaskScope` from an enclosing `@async.with_task_group`;
 - an `append_item` callback for in-memory or durable session updates;
 - usually one shared `Tools` registry from `build_tools(runtime, scope)`.
 
-At each step boundary the loop first applies non-blank steering, then converts
-known runtime events into model-visible notices, then calls DeepSeek with the
-current session projection and tool schemas. Tool calls are executed in order.
-The turn ends on a direct model answer, `finish`, `abort`, cancellation,
-unexpected failure, or exhausted `max_steps`.
+At each step boundary the loop first applies non-blank steering, then may inject
+a plan reminder before calling DeepSeek with the current session projection and
+tool schemas. Tool calls are executed in order. The turn ends on a direct model
+answer, `finish`, `abort`, cancellation, unexpected failure, or exhausted
+`max_steps`.
 
 ## Operational Notes
 
