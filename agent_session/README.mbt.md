@@ -24,7 +24,7 @@ timestamp, and one `SessionItem` payload:
 - `Assistant`: model output, including native DeepSeek tool calls and optional
   reasoning content.
 - `Tool`: local tool result for one assistant tool call.
-- `Runtime`: runtime notice injected into model context, such as watcher output.
+- `Runtime`: runtime notice injected into model context, such as a plan reminder.
 - `Summary`: durable compaction record for a covered event range.
 - `Terminal`: how a turn ended: finished, aborted, interrupted, or failed.
 
@@ -254,7 +254,7 @@ Use the store for durable callers:
 The `agent` package appends session events as the loop progresses:
 
 1. The user task is appended as `User`.
-2. Runtime watcher notices may be appended as `Runtime`.
+2. Runtime notices may be appended as `Runtime`.
 3. Model responses are appended as `Assistant`.
 4. Tool executions are appended as `Tool`.
 5. The turn closes with one `Terminal`.

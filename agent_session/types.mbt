@@ -261,23 +261,23 @@ pub fn ToolResult::is_error(self : ToolResult) -> Bool {
 }
 
 ///|
-/// Out-of-band runtime update surfaced to the model.
+/// Out-of-band runtime notice surfaced to the model.
 ///
 /// Runtime notices are projected as user-role messages. They are intended for
-/// process state such as watcher diagnostics, steering messages, or other
-/// context that did not originate from the user's prompt text.
+/// loop-injected context such as plan reminders or other text that did not
+/// originate from the user's prompt.
 pub struct RuntimeNotice {
   priv content : String
 } derive(Debug, ToJson, FromJson)
 
 ///|
-/// Wrap one runtime update exactly as it should be replayed.
+/// Wrap one runtime notice exactly as it should be replayed.
 pub fn RuntimeNotice::RuntimeNotice(content : String) -> RuntimeNotice {
   { content, }
 }
 
 ///|
-/// Return the runtime update text.
+/// Return the runtime notice text.
 pub fn RuntimeNotice::content(self : RuntimeNotice) -> String {
   self.content
 }

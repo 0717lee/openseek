@@ -18,7 +18,7 @@ fn sample_session() -> @agent_session.Session {
       ToolResult(tool_call_id="call_1", tool_name="shell", content="exit=0\nok"),
     ),
   )
-  .append(Runtime(RuntimeNotice("[moon_check update]\nFinished.")))
+  .append(Runtime(RuntimeNotice("[plan reminder]\nrun tests")))
   .append(Terminal(Finished("done")))
 }
 

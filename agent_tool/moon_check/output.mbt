@@ -107,7 +107,7 @@ fn first_line_containing(content : String, needle : String) -> String? {
 
 ///|
 /// `\nexit=<code>` when the watcher recorded an exit code, else empty. Shared
-/// by `moon_check_response` and `update_text`.
+/// by `moon_check_response` formatting helpers.
 fn MoonCheckSnapshot::exit_suffix(self : MoonCheckSnapshot) -> String {
   match self.exit_code {
     Some(code) => "\nexit=\{code}"
@@ -118,7 +118,7 @@ fn MoonCheckSnapshot::exit_suffix(self : MoonCheckSnapshot) -> String {
 ///|
 /// `\nrestart_count=...\nrestart_limit=...` (plus an optional
 /// `\nrestart_reason=...`) once a restart has happened or a reason is pending,
-/// else empty. Shared by `moon_check_response` and `update_text`.
+/// else empty. Shared by `moon_check_response` formatting helpers.
 fn MoonCheckSnapshot::restart_suffix(self : MoonCheckSnapshot) -> String {
   if self.restart_count > 0 || self.restart_reason is Some(_) {
     let reason = match self.restart_reason {
@@ -133,7 +133,7 @@ fn MoonCheckSnapshot::restart_suffix(self : MoonCheckSnapshot) -> String {
 
 ///|
 /// The captured output on its own line, or the `(no output yet)` placeholder.
-/// Shared by `moon_check_response` and `update_text`.
+/// Shared by `moon_check_response` formatting helpers.
 fn MoonCheckSnapshot::output_suffix(self : MoonCheckSnapshot) -> String {
   if self.output == "" {
     "\n(no output yet)"
@@ -167,88 +167,6 @@ fn moon_check_status_label(status : WatcherStatus) -> String {
 }
 
 ///|
-/// Format a single watcher snapshot for inclusion in the coalesced
-/// `[moon_check update]` event block. Mirrors `moon_check_response` but leads
-/// with `id=` and omits the `watcher=<started|reused|restarted>` action
-/// verb — update events carry only the latest snapshot state, not the
-/// dispatch decision that produced them. `cwd=` and `command=` are still
-/// included because the parent block lists multiple watchers and each needs
-/// its own identifying fields.
-fn MoonCheckSnapshot::update_text(update : MoonCheckSnapshot) -> String {
-  let truncated = if update.output_truncated { "\ntruncated=true" } else { "" }
-  "id=\{update.id}\ncwd=\{update.cwd.unwrap_or(".")}\ncommand=\{update.command}\nstatus=\{moon_check_status_label(update.status)}\nseq=\{update.seq}\{update.exit_suffix()}\{truncated}\{update.restart_suffix()}\{update.output_suffix()}"
-}
-
-///|
-/// Coalesce `MoonCheckUpdate` events by watcher key, keeping only the latest
-/// snapshot per key (running or stopped — both can show up in a batch when a
-/// watcher exits mid-turn). Called by the agent loop between turns; returns a
-/// single `[moon_check update]` block whose body lists one section per
-/// watcher key seen in this batch.
-///
-/// Returns `None` if the event batch contains no `MoonCheckUpdate` entries.
-pub fn runtime_update_text(
-  events : Array[@agent_runtime.AgentEvent],
-) -> String? {
-  let latest_moon_checks : Map[String, MoonCheckSnapshot] = {}
-  let moon_check_count = for event in events; count = 0 {
-    if event is MoonCheckUpdate(update) {
-      latest_moon_checks[update.key] = update
-      continue count + 1
-    }
-  } nobreak {
-    count
-  }
-  if moon_check_count == 0 {
-    None
-  } else {
-    let parts = [
-      for update in latest_moon_checks.values() => update.update_text()
-    ]
-    Some(
-      "[moon_check update]\nevents=\{moon_check_count}\n\{parts.join("\n\n")}",
-    )
-  }
-}
-
-///|
-/// A snapshot's substance: its update text minus the volatile `seq=` chunk
-/// counter, which advances even when the diagnostics are unchanged. Derived
-/// from `update_text` (rather than rebuilt from fields) so it can never
-/// drift from what the model actually reads.
-fn MoonCheckSnapshot::fingerprint(self : MoonCheckSnapshot) -> String {
-  [
-    for line in self.update_text().split("\n") if !line.has_prefix("seq=") => {
-      line.to_owned()
-    }
-  ].join("\n")
-}
-
-///|
-/// Per-watcher fingerprints for a drained event batch: one
-/// `(registry key, fingerprint)` pair per watcher, coalesced to the latest
-/// snapshot exactly like `runtime_update_text`. Computed from the snapshots
-/// themselves — never by re-parsing the rendered block, whose watcher
-/// output can legally contain blank lines that would defeat any text-level
-/// sectioning. The agent loop tracks the last fingerprint per watcher
-/// across steps and collapses a batch in which nothing changed to a
-/// one-line marker (a real 156-step session accumulated 61 near-identical
-/// notices, 11% of its final context).
-pub fn update_fingerprints(
-  events : Array[@agent_runtime.AgentEvent],
-) -> Array[(String, String)] {
-  let latest : Map[String, MoonCheckSnapshot] = {}
-  for event in events {
-    if event is MoonCheckUpdate(update) {
-      latest[update.key] = update
-    }
-  }
-  [
-    for key, snapshot in latest => (key, snapshot.fingerprint())
-  ]
-}
-
-///|
 /// Heuristic for the `is_error` flag on the tool response. A snapshot is an
 /// error when the watcher exited non-zero, or when the latest output contains
 /// any of moon's error markers (`Had errors`, JSON `"level":"error"`,
@@ -267,117 +185,6 @@ fn moon_check_snapshot_is_error(snapshot : MoonCheckSnapshot) -> Bool {
       ) ||
       snapshot.output.contains("Error: failed when checking project")
   }
-}
-
-///|
-test "fingerprints ignore seq churn, key per watcher, survive blank lines" {
-  fn snapshot(
-    id : String,
-    key : String,
-    cwd : String,
-    seq : Int,
-    output : String,
-  ) -> MoonCheckSnapshot {
-    MoonCheckSnapshot(
-      id~,
-      key~,
-      command="moon check --watch --diagnostic-limit 10",
-      cwd=Some(cwd),
-      status=Running,
-      seq~,
-      output~,
-      output_truncated=false,
-      max_output_chars=12000,
-      exit_code=None,
-      restart_count=0,
-      restart_limit=3,
-      restart_reason=None,
-    )
-  }
-  // Only seq moved: same key, same fingerprint.
-  let first = update_fingerprints([
-    MoonCheckUpdate(snapshot("moon-check-1", "cwd=alpha", "alpha", 54, "ok")),
-  ])
-  let requeued = update_fingerprints([
-    MoonCheckUpdate(snapshot("moon-check-1", "cwd=alpha", "alpha", 92, "ok")),
-  ])
-  guard first is [(key_a, fp_a)] && requeued is [(key_b, fp_b)] else {
-    fail("expected one pair each")
-  }
-  assert_eq(key_a, key_b)
-  assert_eq(fp_a, fp_b)
-
-  // Output with blank-line paragraphs stays one watcher, one pair — a
-  // text-level "\n\n" split would have minted phantom sections here, and a
-  // later batch dropping a paragraph must register as a change.
-  let blanky = update_fingerprints([
-    MoonCheckUpdate(
-      snapshot(
-        "moon-check-1", "cwd=alpha", "alpha", 3, "Error: one\n\nError: two",
-      ),
-    ),
-  ])
-  guard blanky is [(_, fp_two_errors)] else { fail("expected one pair") }
-  let shrunk = update_fingerprints([
-    MoonCheckUpdate(
-      snapshot("moon-check-1", "cwd=alpha", "alpha", 4, "Error: one"),
-    ),
-  ])
-  guard shrunk is [(_, fp_one_error)] else { fail("expected one pair") }
-  assert_true(fp_two_errors != fp_one_error)
-
-  // Two watchers in one batch: one pair per registry key.
-  let both = update_fingerprints([
-    MoonCheckUpdate(snapshot("moon-check-1", "cwd=alpha", "alpha", 5, "ok")),
-    MoonCheckUpdate(snapshot("moon-check-2", "cwd=beta", "beta", 1, "bad")),
-  ])
-  assert_eq(both.length(), 2)
-}
-
-///|
-test "moon_check update text coalesces by watcher key" {
-  let message = runtime_update_text([
-    MoonCheckUpdate(
-      MoonCheckSnapshot(
-        id="moon-check-1",
-        key="cwd=.",
-        command="moon check --watch --diagnostic-limit 10",
-        cwd=None,
-        status=Running,
-        seq=1,
-        output="old",
-        output_truncated=false,
-        max_output_chars=12000,
-        exit_code=None,
-        restart_count=0,
-        restart_limit=3,
-        restart_reason=None,
-      ),
-    ),
-    MoonCheckUpdate(
-      MoonCheckSnapshot(
-        id="moon-check-1",
-        key="cwd=.",
-        command="moon check --watch --diagnostic-limit 10",
-        cwd=None,
-        status=Running,
-        seq=2,
-        output="new",
-        output_truncated=false,
-        max_output_chars=12000,
-        exit_code=None,
-        restart_count=0,
-        restart_limit=3,
-        restart_reason=None,
-      ),
-    ),
-  ])
-  guard message is Some(text) else { fail("expected message") }
-  assert_true(text.contains("[moon_check update]"))
-  assert_true(text.contains("events=2"))
-  assert_true(text.contains("seq=2"))
-  assert_true(text.contains("new"))
-  assert_false(text.contains("old"))
 }
 
 ///|

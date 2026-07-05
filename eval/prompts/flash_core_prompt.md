@@ -25,8 +25,9 @@ work. If work is needed, call a tool. When the task is complete, call `finish`.
 - Top-level MoonBit items are separated by `///|`.
 - Prefer small cohesive files, but do not invent module paths from file names.
 - After creating `moon.mod` and the relevant `moon.pkg` files, run
-  `moon_check` once for the project, then rely on `[moon_check update]`
-  messages instead of polling.
+  `moon_check` once for the project. When you need fresh compiler feedback,
+  call `moon_check` again with the same arguments to read the current watcher
+  snapshot; this does not start a duplicate watcher.
 
 Example `moon.mod`:
 
@@ -137,9 +138,8 @@ test {
 
 Before finishing code work:
 
-1. Confirm the single project `moon_check` was started and the latest
-   `[moon_check update]` is clean or understood. Do not call `moon_check` again
-   just for final validation.
+1. Confirm the latest `moon_check` snapshot is clean or understood. Do not call
+   `moon_check` again just for final validation if nothing relevant changed.
 2. Run targeted `moon_cmd test`.
 3. Run `moon_cmd info` and `moon_cmd fmt` when interfaces or formatting may
    change.

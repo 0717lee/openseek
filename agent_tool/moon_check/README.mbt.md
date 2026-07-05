@@ -13,9 +13,10 @@ tightest feedback loop in MoonBit work. It always runs
 `moon check --watch --diagnostic-limit 10`, which gives the agent fresh textual
 compiler context without depending on a shell pipeline or manual polling. The
 diagnostic limit keeps early broken-project states from flooding the
-conversation with a large compiler wall. The first call for a given cwd/options
-tuple starts a workspace watcher; later calls with the same tuple reuse the
-existing watcher and return the latest snapshot.
+conversation with a large compiler wall. The first call for a given cwd starts
+a workspace watcher; later calls with the same command reuse the existing
+watcher and return the latest snapshot. Changed options replace the cwd's
+watcher instead of stacking another one.
 If the underlying `moon --watch` process exits unexpectedly, `moon_check`
 compacts the crash output and automatically starts a replacement watcher for
 the same tuple, up to a small restart budget. This keeps compiler feedback
@@ -32,9 +33,7 @@ sequenceDiagram
   participant Agent
   participant Tool as moon_check
   participant State as MoonCheckRuntime
-  participant Runtime as agent_runtime
   participant Watcher as moon check --watch
-  participant Queue as Update queue
 
   Agent->>Tool: call with cwd/options
   Tool->>State: lookup watcher key
@@ -48,10 +47,6 @@ sequenceDiagram
   end
   Watcher-->>Tool: stdout/stderr chunks
   Tool->>State: record latest compact output
-  State->>Runtime: emit internal update event
-  Runtime->>Queue: runtime update
-  Agent->>Queue: drain before next model turn
-  Queue-->>Agent: moon_check renders coalesced update
   alt watcher exits unexpectedly
     Tool->>State: compact crash output
     Tool->>Watcher: restart within budget
@@ -72,12 +67,11 @@ MoonBit edit loop, especially after creating the module and package files:
 ```
 
 Use `warn_list` or `deny_warn` when the task requires stricter cleanup. After
-the first call, consume `[moon_check update]` runtime messages for fresh
-diagnostics instead of polling `moon_check` again. A later same-argument call
-only inspects the current watcher state and does not start a duplicate watcher;
-reserve that for changed options or a stopped watcher. Use `shell` for one-shot
-`moon` commands such as `moon test`, `moon run`, `moon info`, `moon fmt`, or
-user-facing command validation.
+the first call, use later same-argument calls when you need the current watcher
+snapshot; those calls do not start duplicate watchers. Changed options replace
+the cwd's watcher, and a stopped watcher restarts on the next call. Use `shell`
+for one-shot `moon` commands such as `moon test`, `moon run`, `moon info`,
+`moon fmt`, or user-facing command validation.
 
 ## Arguments
 

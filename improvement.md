@@ -73,13 +73,12 @@ shows where steps and tokens went to waste):
   accrued within a single 156-step turn via the agent's incremental
   pushes, not only across turns. Sessions still store reasoning for the
   TUI transcript and the visualizer.)*
-- [x] **Deduplicate watcher notices.** 61 `[moon_check update]` runtime
+- [x] **Remove stale watcher notices.** 61 moon_check runtime
   notices (11% of final context) were appended, mostly identical
-  re-reports from the duplicate watchers. Coalesce per watcher: a new
-  notice should supersede the previous one when nothing changed. *(Done:
-  the agent loop fingerprints each coalesced update — volatile `events=`
-  and `seq=` counters stripped — and skips appending when the substance
-  matches the previous step's notice.)*
+  re-reports from the duplicate watchers. The first mitigation coalesced
+  notices per watcher; the follow-up removed the unused runtime-notice
+  producer/API entirely. `moon_check` now returns watcher snapshots only from
+  direct tool calls.)*
 - [ ] **First-class API-lookup tool (or document the probe recipe).**
   *A/B result (2026-06-12, 5 flash trials per arm): a prompt addendum
   teaching query forms, the no-results fallback ladder, multi-query
@@ -121,12 +120,9 @@ shows where steps and tokens went to waste):
   0/5, sibling-workspace hijack eliminated, 5/5 artifacts in their own
   directories. Eval harnesses now run trial engines inside their staged
   workspaces so grounding and isolation agree.)*
-- [ ] **Trim watcher notice payloads.** With duplicate suppression in
-  place, busy runs still append 50–60 *distinct* notices (~1.2KB each,
-  50–70KB per run): every diagnostic change re-sends the full error block,
-  and line-number drift from unrelated edits makes near-identical errors
-  count as new. Consider capping per-notice output or diffing against the
-  previous state.
+- [x] **Remove watcher notice payload path.** The trimming idea is obsolete:
+  `moon_check` no longer emits runtime notices, and diagnostics are returned
+  from direct tool calls instead.
 - [ ] **Encourage batching independent tool calls.** 154 of 156 steps made
   exactly one tool call; the model proved it can batch (it opened with two
   parallel reads). A system-prompt nudge for batching independent

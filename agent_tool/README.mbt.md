@@ -47,27 +47,24 @@ the error and recover in the next step. `finish` returns `Control(Finish(...))`
 so ending the run is a host-loop decision rather than another message the model
 has to interpret.
 
-Stateful tools use `agent_runtime` directly when they need loop-scoped
-background work or event updates. For example, `moon_check` owns its watcher
-state, internal runtime events, and event rendering in its own package; its
-direct tool results still follow the normal `Respond(ToolOutput(...))`
-contract.
+Stateful tools use `agent_runtime` when they need loop-scoped capabilities such
+as the workspace root, bounded background work, or typed runtime events. For
+example, `moon_check` owns its watcher state in its own package and uses an
+`AgentTaskScope` for watcher tasks; its direct tool results still follow the
+normal `Respond(ToolOutput(...))` contract.
 
 ```mermaid
 flowchart LR
   Model[DeepSeek tool call] --> Agent[agent loop]
   Agent --> Tools[Tools registry]
+  Agent --> Runtime[agent_runtime scope/root]
+  Runtime --> MoonCheck
   Tools --> MoonCheck[moon_check executor]
-  Agent --> Runtime[agent_runtime]
-  MoonCheck --> Runtime
   MoonCheck --> Watcher[moon check --watch]
   Watcher --> Monitor[reader task]
   Monitor --> MoonCheck
-  MoonCheck --> Runtime
-  Runtime --> Queue[Runtime event queue]
-  Agent --> Queue
-  Queue --> Message["[moon_check update] user message"]
-  Message --> Model
+  MoonCheck --> Agent
+  Agent --> Model
 ```
 
 Each concrete tool is a subpackage to keep the root package focused on the

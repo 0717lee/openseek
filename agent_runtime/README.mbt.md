@@ -85,15 +85,15 @@ test "drain typed runtime events" {
     ),
   )
 
-  runtime.emit_event(ReadmeRuntimeEvent("moon_check: running"))
-  runtime.emit_event(ReadmeRuntimeEvent("moon_check: done"))
+  runtime.emit_event(ReadmeRuntimeEvent("builder: running"))
+  runtime.emit_event(ReadmeRuntimeEvent("builder: done"))
 
   debug_inspect(
     [
       for event in runtime.drain_events() => readme_event_text(event)
     ],
     content=(
-      #|["moon_check: running", "moon_check: done"]
+      #|["builder: running", "builder: done"]
     ),
   )
   debug_inspect(

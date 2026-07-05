@@ -291,7 +291,6 @@ fn test_snapshot(
 ) -> MoonCheckSnapshot {
   MoonCheckSnapshot(
     id="moon-check-test",
-    key="cwd=.",
     command="moon check --watch --diagnostic-limit 10",
     cwd=None,
     status=Running,

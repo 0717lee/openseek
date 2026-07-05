@@ -25,7 +25,7 @@ fn sample_session() -> @agent_session.Session {
       ),
     ),
   )
-  let s4 = s3.append(Runtime(RuntimeNotice("moon check: 0 errors")))
+  let s4 = s3.append(Runtime(RuntimeNotice("plan reminder: run tests")))
   s4.append(Terminal(Finished("Here are your files: README.md, src.")))
 }
 
@@ -78,7 +78,7 @@ test "parse round-trips every event kind" {
       #|    {
       #|      sequence: 4,
       #|      ts: 0,
-      #|      item: Runtime({ content: "moon check: 0 errors" }),
+      #|      item: Runtime({ content: "plan reminder: run tests" }),
       #|    },
       #|    {
       #|      sequence: 5,

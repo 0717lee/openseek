@@ -295,9 +295,8 @@ fn config_from_matches(matches : @argparse.Matches) -> Config raise {
 
 Before finishing code work:
 
-1. Confirm the single project `moon_check` was started and the latest
-   `[moon_check update]` is clean or understood. Do not call `moon_check` again
-   just for final validation.
+1. Confirm the latest `moon_check` snapshot is clean or understood. Do not call
+   `moon_check` again just for final validation if nothing relevant changed.
 2. Run targeted `moon_cmd test`.
 3. Run `moon_cmd info` and `moon_cmd fmt` when interfaces or formatting may
    change.

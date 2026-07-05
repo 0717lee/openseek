@@ -6,12 +6,10 @@ priv enum WatcherStatus {
 
 ///|
 /// Immutable view of a watcher's most recently observed state. Snapshots are
-/// what `moon_check` returns to the agent and what it broadcasts through
-/// `MoonCheckUpdate` events; the live `MoonCheckRecord` is kept private to the
-/// runtime.
+/// what `moon_check` returns to the agent; the live `MoonCheckRecord` is kept
+/// private to the runtime.
 priv struct MoonCheckSnapshot {
   id : String
-  key : String
   command : String
   cwd : String?
   status : WatcherStatus
@@ -28,7 +26,6 @@ priv struct MoonCheckSnapshot {
 ///|
 fn MoonCheckSnapshot::MoonCheckSnapshot(
   id~ : String,
-  key~ : String,
   command~ : String,
   cwd~ : String?,
   status~ : WatcherStatus,
@@ -43,7 +40,6 @@ fn MoonCheckSnapshot::MoonCheckSnapshot(
 ) -> MoonCheckSnapshot {
   {
     id,
-    key,
     command,
     cwd,
     status,
@@ -56,15 +52,6 @@ fn MoonCheckSnapshot::MoonCheckSnapshot(
     restart_limit,
     restart_reason,
   }
-}
-
-///|
-/// Extends the shared agent event stream with `MoonCheckUpdate(snapshot)`.
-/// The events are queued by `@agent_runtime.AgentRuntime` (just the event bus)
-/// and coalesced by `runtime_update_text` (see `output.mbt`), which the agent
-/// loop calls between turns to render a single update block per batch.
-extenum @agent_runtime.AgentEvent += {
-  MoonCheckUpdate(MoonCheckSnapshot)
 }
 
 ///|
@@ -98,7 +85,6 @@ priv struct MoonCheckRecord {
 fn MoonCheckRecord::to_snapshot(self : MoonCheckRecord) -> MoonCheckSnapshot {
   {
     id: self.id,
-    key: self.key,
     command: self.command,
     cwd: self.cwd,
     status: self.status,
@@ -121,14 +107,6 @@ fn MoonCheckRecord::to_snapshot(self : MoonCheckRecord) -> MoonCheckSnapshot {
 /// type parameter `X` matches the return type of the enclosing
 /// `@async.with_task_group()` that owns `scope`.
 priv struct MoonCheckRuntime[X] {
-  /// Event-bus handle used by `emit_moon_check` to publish
-  /// `MoonCheckUpdate(snapshot)` after every state transition (output append,
-  /// replace, stop). The agent loop drains the bus between steps via
-  /// `runtime_update_text` (output.mbt) and surfaces a coalesced
-  /// `[moon_check update]` block back into the conversation. The bus is
-  /// `DiscardOldest`-bounded, so a flood of chunks from a busy watcher can't
-  /// starve other tools.
-  runtime : @agent_runtime.AgentRuntime
   /// Structured-concurrency scope used to spawn child work. `scope.group()`
   /// is the `@async.TaskGroup` passed to both `@process.spawn` (for the
   /// `moon check --watch` child) and `group.spawn_bg(...)` (for the
@@ -160,10 +138,9 @@ priv struct MoonCheckRuntime[X] {
 
 ///|
 fn[X] MoonCheckRuntime::MoonCheckRuntime(
-  runtime : @agent_runtime.AgentRuntime,
   scope : @agent_runtime.AgentTaskScope[X],
 ) -> MoonCheckRuntime[X] {
-  { runtime, scope, moon_checks: {}, next_moon_check_index: 1 }
+  { scope, moon_checks: {}, next_moon_check_index: 1 }
 }
 
 ///|
@@ -238,8 +215,7 @@ fn[X] MoonCheckRuntime::moon_check_snapshot(
 /// those late chunks from clobbering the fresh replacement's state. The
 /// retained tail is trimmed to the latest run segment (split on moon's
 /// `Success/Had errors, waiting for filesystem changes...` markers) and
-/// capped at `max_output_chars`. Each successful update bumps `seq` and emits
-/// a `MoonCheckUpdate` event.
+/// capped at `max_output_chars`. Each successful update bumps `seq`.
 fn[X] MoonCheckRuntime::record_moon_check_output(
   self : MoonCheckRuntime[X],
   key : String,
@@ -259,9 +235,7 @@ fn[X] MoonCheckRuntime::record_moon_check_output(
       record.output_truncated = segment.char_length() > record.max_output_chars
       record.run_complete = moon_check_run_complete(record.output)
       record.seq += 1
-      let snapshot = record.to_snapshot()
-      self.emit_moon_check(snapshot)
-      Some(snapshot)
+      Some(record.to_snapshot())
     }
   }
 }
@@ -284,9 +258,7 @@ fn[X] MoonCheckRuntime::replace_moon_check_output(
       record.output_truncated = output.char_length() > record.max_output_chars
       record.run_complete = moon_check_run_complete(record.output)
       record.seq += 1
-      let snapshot = record.to_snapshot()
-      self.emit_moon_check(snapshot)
-      Some(snapshot)
+      Some(record.to_snapshot())
     }
   }
 }
@@ -305,9 +277,7 @@ fn[X] MoonCheckRuntime::mark_moon_check_stopped(
       record.status = Stopped
       record.exit_code = exit_code
       record.seq += 1
-      let snapshot = record.to_snapshot()
-      self.emit_moon_check(snapshot)
-      Some(snapshot)
+      Some(record.to_snapshot())
     }
   }
 }
@@ -343,14 +313,6 @@ fn[X] MoonCheckRuntime::moon_check_exit_signal(
 }
 
 ///|
-fn[X] MoonCheckRuntime::emit_moon_check(
-  self : MoonCheckRuntime[X],
-  snapshot : MoonCheckSnapshot,
-) -> Unit {
-  self.runtime.emit_event(MoonCheckUpdate(snapshot))
-}
-
-///|
 /// Stable string identifying a watcher by its directory — one watcher per
 /// cwd is the invariant. A call with the same cwd reuses the running
 /// watcher when its command matches and *replaces* it (stopping the old
@@ -371,7 +333,7 @@ fn moon_check_key(input : @decode.MoonCheckInput) -> String {
 ///|
 async test "moon_check runtime ignores stale watcher id updates" {
   @async.with_task_group() <| group => {
-    let runtime = MoonCheckRuntime(AgentRuntime(), AgentTaskScope(group))
+    let runtime = MoonCheckRuntime(AgentTaskScope(group))
     let key = "cwd=/tmp"
     let (reader1, writer1) = @process.read_from_process()
     let process1 = @process.spawn(
@@ -441,7 +403,7 @@ async test "moon_check runtime ignores stale watcher id updates" {
 ///|
 async test "moon_check keeps crash summary in replacement output" {
   @async.with_task_group() <| group => {
-    let runtime = MoonCheckRuntime(AgentRuntime(), AgentTaskScope(group))
+    let runtime = MoonCheckRuntime(AgentTaskScope(group))
     let key = "cwd=/tmp"
     let (reader, writer) = @process.read_from_process()
     let process = @process.spawn(

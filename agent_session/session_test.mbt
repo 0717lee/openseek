@@ -141,7 +141,7 @@ test "session projects to DeepSeek chat messages" {
 test "session JSON round trips typed events" {
   let session = @agent_session.Session(SessionId("s1"), system_prompt="system")
     .append(User(UserMessage("hello")))
-    .append(Runtime(RuntimeNotice("[moon_check update]\nok")))
+    .append(Runtime(RuntimeNotice("[plan reminder]\nrun tests")))
     .append(
       Summary(
         SessionSummary(

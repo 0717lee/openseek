@@ -32,7 +32,7 @@ pub(all) enum SteerInput {
 /// agent loop or a tool-specific renderer/query function.
 ///
 /// Use this for background state that should be visible at agent step
-/// boundaries, such as `moon_check --watch` snapshots. Do not use it for
+/// boundaries, such as long-running tool progress snapshots. Do not use it for
 /// mid-turn user steering text; use `queue_steer` for that lossless channel.
 pub(all) extenum AgentEvent {}
 
@@ -52,8 +52,8 @@ pub struct AgentRuntime {
   /// Defaults to "." so direct package users keep current-directory behavior.
   priv workspace_root : String
   /// Bounded event bus (see `default_agent_event_capacity`) that background
-  /// tools post updates to; the main loop drains it between steps to surface
-  /// retained tool output into the conversation.
+  /// tools can post updates to; consumers choose when and how to drain and
+  /// render retained tool output.
   priv events : @aqueue.Queue[AgentEvent]
   /// Unbounded queue of typed mid-turn input. Deliberately separate from the
   /// lossy event bus: a noisy watcher may fill `events` and cause later runtime
@@ -176,9 +176,8 @@ pub fn AgentRuntime::drain_steers(self : AgentRuntime) -> Array[SteerInput] {
 ///
 /// The returned array contains the events still present in the lossy bus at the
 /// moment of the drain. Events emitted while the bus was already full may have
-/// been ignored before this call. The bus is empty after draining. The agent
-/// loop calls this at step boundaries to fold retained background tool output
-/// into the conversation.
+/// been ignored before this call. The bus is empty after draining. Consumers
+/// decide how to interpret and render the opaque event values.
 pub fn AgentRuntime::drain_events(self : AgentRuntime) -> Array[AgentEvent] {
   drain_queue(self.events)
 }
