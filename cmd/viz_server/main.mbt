@@ -1,6 +1,7 @@
 ///|
 /// Read-only web server for the session-file visualizer. Serves the static
-/// frontend bundle plus a tiny JSON/raw-file API over a `SessionStore`:
+/// frontend bundle plus a tiny JSON/raw-file API over discovered session
+/// `.jsonl` files:
 ///
 /// - `GET /`                                  → the viewer shell (web/index.html)
 /// - `GET /viz_app.js`                        → the compiled frontend bundle
@@ -9,6 +10,9 @@
 /// - `GET /api/sessions/<key>/openseek_session-<id>.jsonl` → raw session file (header line + events)
 ///
 /// It never writes to the stores, so pointing it at live session roots is safe.
+/// Session discovery is intentionally file-oriented: only
+/// `openseek_session-*.jsonl` files are listed, so `.DS_Store`, lock files, and
+/// malformed/husk directories do not show up as sessions.
 async fn main {
   let matches = cli_command().parse(env=@env.get_env_vars())
   let port = parse_port(@cli.value(matches, "port"))
@@ -116,6 +120,20 @@ struct Reply {
 }
 
 ///|
+let sessions_dir_name : String = "sessions"
+
+///|
+let session_file_prefix : String = "openseek_session-"
+
+///|
+let session_file_suffix : String = ".jsonl"
+
+///|
+fn session_file_name(id : String) -> String {
+  "\{session_file_prefix}\{id}\{session_file_suffix}"
+}
+
+///|
 /// Handle one request: compute the reply (catching any failure as a 500), then
 /// send it exactly once. A failure during the send — e.g. the client closed the
 /// connection mid-body — is swallowed: the response was already started, so
@@ -178,46 +196,41 @@ async fn build_reply(
 ///|
 /// Resolve `<key>` (envelope) or `<key>/<file>` (raw) after the
 /// `/api/sessions/` route prefix. A key is either legacy `<id>` for the first
-/// root, or `<root>|<id>` for a discovered root. Both segments are
-/// percent-decoded — the file name embeds the session id, so ids containing
-/// URL-reserved characters (spaces, `?`, `#`) must decode in both positions
-/// to resolve the right session. The store's own id validation rejects path
-/// separators and `..`, so a crafted id cannot escape the session directory.
+/// matching file, or an opaque key returned by `/api/sessions`. Both segments
+/// are percent-decoded — ids containing URL-reserved characters (spaces, `?`,
+/// `#`) must decode in both positions to resolve the right session. The
+/// resolved path always comes from the catalog scan, never from the URL file
+/// segment.
 async fn session_path_reply(catalog : SessionCatalog, rest : String) -> Reply {
   let (key, file) = match rest.split_once("/") {
     None => (percent_decode(rest), None)
     Some((key, file)) =>
       (percent_decode("\{key}"), Some(percent_decode("\{file}")))
   }
-  let (root, id_value) = match catalog.lookup(key) {
+  let row = match catalog.lookup(key) {
     Some(found) => found
-    None => return text_reply(404, "Not Found", "session root not found")
+    None => return text_reply(404, "Not Found", "session file not found")
   }
-  // Validate the id ourselves so a malformed request is a 400, not a 500 from
-  // the store's path-building assertion. These are the store's own id rules.
-  guard valid_session_id(id_value) else {
+  guard valid_session_id(row.id) else {
     return text_reply(400, "Bad Request", "invalid session id")
   }
-  let id = @agent_session.SessionId(id_value)
   match file {
-    None => session_envelope_reply(root.store, id)
-    Some(name) if name == "openseek_session-\{id_value}.jsonl" =>
-      asset_reply(
-        root.store.session_file(id),
-        "application/x-ndjson; charset=utf-8",
-      )
+    None => session_envelope_reply(row.path)
+    Some(name) if name == session_file_name(row.id) =>
+      asset_reply(row.path, "application/x-ndjson; charset=utf-8")
     Some(other) =>
       text_reply(404, "Not Found", "no such session file: \{other}")
   }
 }
 
 ///|
-/// Mirror `SessionStore`'s id validation so a bad URL id is rejected as a client
-/// error before any store path is built (which would otherwise raise → 500).
+/// Mirror the session-store id validation enough for URL handling. File scan
+/// paths are catalog-derived, but a legacy bare-id URL still needs an id check.
 fn valid_session_id(value : String) -> Bool {
   value != "" &&
   !value.contains("/") &&
   !value.contains("\\") &&
+  !value.contains("\u{0}") &&
   value != "." &&
   value != ".."
 }
@@ -231,11 +244,7 @@ fn valid_session_id(value : String) -> Bool {
 /// in the body rather than signalled by 404. `events` is the raw session-file
 /// text — the header line followed by event lines — which the frontend parser
 /// splits apart itself.
-async fn session_envelope_reply(
-  store : @store.SessionStore,
-  id : @agent_session.SessionId,
-) -> Reply {
-  let path = store.session_file(id)
+async fn session_envelope_reply(path : String) -> Reply {
   if !@fs.exists(path) {
     return json_reply({ "found": false })
   }
@@ -248,36 +257,21 @@ async fn session_envelope_reply(
 
 ///|
 async fn session_list_reply(catalog : SessionCatalog) -> Reply {
-  let rows : Array[SessionListRow] = []
-  for root in catalog.roots {
-    for listing in root.store.listings() {
-      let id = listing.id().value()
-      rows.push({
-        key: session_key(root.key, id),
-        id,
-        root: root.path,
-        root_label: root.label,
-        is_marker: root.is_marker,
-        last_active: listing.last_active_unix_seconds(),
-        first_prompt: listing.first_prompt(),
-      })
-    }
-  }
-  rows.sort_by(compare_session_list_rows)
+  let rows = catalog.rows()
   json_reply(rows.map(row => row.to_json()).to_json())
 }
 
 ///|
 priv struct SessionRoot {
-  key : String
   path : String
+  scan_path : String
   label : String
+  recursive : Bool
   // Whether this root is a discovered marker store (its directory is named like
-  // the root marker, e.g. `.openseek`) rather than a direct store the user
-  // pointed `--session-root` at. The sidebar uses this to decide whether the
-  // path's last segment is a marker to strip when grouping by directory.
+  // the root marker, e.g. `.openseek`) rather than a direct directory/file of
+  // copied JSONL logs. The sidebar uses this to decide whether the path's last
+  // segment is a marker to strip when grouping by directory.
   is_marker : Bool
-  store : @store.SessionStore
 }
 
 ///|
@@ -292,7 +286,9 @@ priv struct SessionListRow {
   root : String
   root_label : String
   is_marker : Bool
+  path : String
   last_active : Int64?
+  last_active_nanoseconds : Int
   first_prompt : String
 }
 
@@ -318,7 +314,13 @@ fn compare_session_list_rows(a : SessionListRow, b : SessionListRow) -> Int {
   match (a.last_active, b.last_active) {
     (Some(a_time), Some(b_time)) =>
       if a_time == b_time {
-        compare_session_list_row_labels(a, b)
+        if a.last_active_nanoseconds == b.last_active_nanoseconds {
+          compare_session_list_row_labels(a, b)
+        } else if a.last_active_nanoseconds > b.last_active_nanoseconds {
+          -1
+        } else {
+          1
+        }
       } else if a_time > b_time {
         -1
       } else {
@@ -349,31 +351,25 @@ async fn session_catalog(
   search_dirs : Array[String],
   session_root_name : String,
 ) -> SessionCatalog {
-  let paths : Array[String] = []
-  // Serve the explicit --session-root directly only when it is actually a store
-  // (named like the root marker, or holding a `sessions/` directory). Otherwise
-  // it is a container — e.g. a directory of best-of-N run workspaces, each with
-  // its own nested store — and announcing it as a root would list zero sessions.
-  if is_session_store(session_root, session_root_name) {
-    paths.push(session_root)
-  }
-  // Scan the --session-root as well as the --search-dirs, so nested stores under
-  // a container root are surfaced the same way search-dir trees are.
-  let scan_dirs = [session_root, ..search_dirs]
-  for root in discover_session_roots(scan_dirs, session_root_name) {
-    paths.push(root)
-  }
-  let unique = unique_paths(paths)
   let roots : Array[SessionRoot] = []
-  for index, path in unique {
-    roots.push({
-      key: index.to_string(),
-      path,
-      label: root_label(path),
-      is_marker: path_tail(path) == session_root_name,
-      store: @store.SessionStore(path),
-    })
+  // Serve the explicit --session-root directly when it is a store, a directory
+  // of copied `openseek_session-*.jsonl` files, or a single matching file.
+  for root in session_root_sources(session_root, session_root_name) {
+    roots.push(root)
   }
+  // Scan the --session-root only when it is a container, so nested stores under
+  // a container root and standalone copied-log directories are surfaced the same
+  // way search-dir trees are. A direct store root is already served above; do
+  // not recurse into its `sessions/<id>` directories as copied-log roots.
+  let scan_dirs = if is_session_store(session_root, session_root_name) {
+    search_dirs
+  } else {
+    [session_root, ..search_dirs]
+  }
+  for root in discover_session_roots(scan_dirs, session_root_name) {
+    roots.push(root)
+  }
+  let roots = unique_roots(roots)
   { roots, }
 }
 
@@ -381,8 +377,8 @@ async fn session_catalog(
 async fn discover_session_roots(
   search_dirs : Array[String],
   session_root_name : String,
-) -> Array[String] {
-  let roots : Array[String] = []
+) -> Array[SessionRoot] {
+  let roots : Array[SessionRoot] = []
   for dir in search_dirs {
     scan_session_roots(dir, session_root_name, roots)
   }
@@ -393,16 +389,27 @@ async fn discover_session_roots(
 async fn scan_session_roots(
   dir : String,
   session_root_name : String,
-  roots : Array[String],
+  roots : Array[SessionRoot],
 ) -> Unit {
-  guard is_directory(dir) else { return }
+  guard is_directory(dir) else {
+    if is_session_jsonl_file(dir) {
+      roots.push(jsonl_collection_root(dir))
+    }
+    return
+  }
   if path_tail(dir) == session_root_name {
-    roots.push(dir)
+    if contains_direct_session_file(dir) {
+      roots.push(jsonl_collection_root(dir))
+    }
+    roots.push(store_root(dir, session_root_name))
     return
   }
   let direct = join_path(dir, session_root_name)
   if is_directory(direct) {
-    roots.push(direct)
+    roots.push(store_root(direct, session_root_name))
+  }
+  if contains_direct_session_file(dir) {
+    roots.push(jsonl_collection_root(dir))
   }
   let names = @fs.readdir(dir, sort=true) catch { _ => return }
   for name in names {
@@ -423,12 +430,77 @@ async fn is_directory(path : String) -> Bool {
 }
 
 ///|
+async fn is_regular_file(path : String) -> Bool {
+  (@fs.kind(path, follow_symlink=false) catch { _ => return false }) == Regular
+}
+
+///|
 /// Whether `path` is itself a session store (servable directly) rather than a
 /// container to scan: it is named like the root marker (e.g. `.openseek`), or it
 /// already holds a `sessions/` directory.
 async fn is_session_store(path : String, session_root_name : String) -> Bool {
   path_tail(path) == session_root_name ||
-  is_directory(join_path(path, "sessions"))
+  is_directory(join_path(path, sessions_dir_name))
+}
+
+///|
+async fn session_root_sources(
+  path : String,
+  session_root_name : String,
+) -> Array[SessionRoot] {
+  let roots : Array[SessionRoot] = []
+  if is_session_jsonl_source(path) {
+    roots.push(jsonl_collection_root(path))
+  }
+  if is_session_store(path, session_root_name) {
+    roots.push(store_root(path, session_root_name))
+  }
+  roots
+}
+
+///|
+fn store_root(path : String, session_root_name : String) -> SessionRoot {
+  {
+    path,
+    scan_path: join_path(path, sessions_dir_name),
+    label: root_label(path),
+    recursive: true,
+    is_marker: path_tail(path) == session_root_name,
+  }
+}
+
+///|
+fn jsonl_collection_root(path : String) -> SessionRoot {
+  {
+    path,
+    scan_path: path,
+    label: root_label(path),
+    recursive: false,
+    is_marker: false,
+  }
+}
+
+///|
+async fn is_session_jsonl_source(path : String) -> Bool {
+  is_session_jsonl_file(path) || contains_direct_session_file(path)
+}
+
+///|
+async fn is_session_jsonl_file(path : String) -> Bool {
+  is_regular_file(path) && session_id_from_file_name(path_tail(path)) is Some(_)
+}
+
+///|
+async fn contains_direct_session_file(dir : String) -> Bool {
+  guard is_directory(dir) else { return false }
+  let names = @fs.readdir(dir, sort=true) catch { _ => return false }
+  for name in names {
+    let child = join_path(dir, name)
+    if session_id_from_file_name(name) is Some(_) && is_regular_file(child) {
+      return true
+    }
+  }
+  false
 }
 
 ///|
@@ -441,45 +513,179 @@ fn should_skip_scan_dir(name : String, session_root_name : String) -> Bool {
 }
 
 ///|
-async fn unique_paths(paths : Array[String]) -> Array[String] {
+fn should_skip_session_file_scan_dir(name : String) -> Bool {
+  name == ".git" ||
+  name == "node_modules" ||
+  name == ".mooncakes" ||
+  name == "_build"
+}
+
+///|
+let first_prompt_scan_limit : Int = 50
+
+///|
+async fn unique_roots(roots : Array[SessionRoot]) -> Array[SessionRoot] {
   let seen : Array[String] = []
-  let unique : Array[String] = []
-  for path in paths {
-    let key = @fs.realpath(path) catch { _ => path }
+  let unique : Array[SessionRoot] = []
+  for root in roots {
+    let key = @fs.realpath(root.scan_path) catch { _ => root.scan_path }
     if !seen.contains(key) {
       seen.push(key)
-      unique.push(path)
+      unique.push(root)
     }
   }
   unique
 }
 
 ///|
-fn session_key(root_key : String, id : String) -> String {
-  "\{root_key}|\{id}"
+async fn first_prompt_in_log(path : String) -> String {
+  let file = @fs.open(path, mode=ReadOnly) catch { _ => return "" }
+  defer file.close()
+  let _ = file.read_until("\n") catch { _ => return "" }
+  for _ in 0..<first_prompt_scan_limit {
+    let next = file.read_until("\n") catch { _ => return "" }
+    guard next is Some(line) else { break }
+    if line.trim().is_empty() {
+      continue
+    }
+    let event : @agent_session.SessionEvent = @json.from_json(@json.parse(line)) catch {
+      _ => return ""
+    }
+    if event.item() is User(message) {
+      return message.content()
+    }
+  }
+  ""
 }
 
 ///|
-fn SessionCatalog::lookup(
-  self : SessionCatalog,
-  key : String,
-) -> (SessionRoot, String)? {
-  match key.split_once("|") {
-    Some((root_key, id)) => {
-      let root_key = "\{root_key}"
-      for root in self.roots {
-        if root.key == root_key {
-          return Some((root, "\{id}"))
+async fn SessionCatalog::rows(self : SessionCatalog) -> Array[SessionListRow] {
+  let rows : Array[SessionListRow] = []
+  for root in self.roots {
+    for path in session_files_under(root.scan_path, root.recursive) {
+      match session_id_from_file_name(path_tail(path)) {
+        Some(id) => {
+          let (last_active, last_active_nanoseconds) = session_file_stamp(path)
+          rows.push({
+            key: stable_session_key(path),
+            id,
+            root: root.path,
+            root_label: root.label,
+            is_marker: root.is_marker,
+            path,
+            last_active,
+            last_active_nanoseconds,
+            first_prompt: first_prompt_in_log(path),
+          })
+        }
+        None => ()
+      }
+    }
+  }
+  rows.sort_by(compare_session_list_rows)
+  rows
+}
+
+///|
+async fn session_files_under(path : String, recursive : Bool) -> Array[String] {
+  let files : Array[String] = []
+  collect_session_files(path, files, recursive)
+  files.sort()
+  files
+}
+
+///|
+async fn collect_session_files(
+  path : String,
+  files : Array[String],
+  recursive : Bool,
+) -> Unit {
+  let kind = @fs.kind(path, follow_symlink=false) catch { _ => return }
+  match kind {
+    Regular =>
+      if session_id_from_file_name(path_tail(path)) is Some(_) {
+        files.push(path)
+      }
+    Directory => {
+      let names = @fs.readdir(path, sort=true) catch { _ => return }
+      for name in names {
+        if should_skip_session_file_scan_dir(name) {
+          continue
+        }
+        let child = join_path(path, name)
+        let child_kind = @fs.kind(child, follow_symlink=false) catch {
+          _ => continue
+        }
+        match child_kind {
+          Regular =>
+            if session_id_from_file_name(name) is Some(_) {
+              files.push(child)
+            }
+          Directory =>
+            if recursive {
+              collect_session_files(child, files, recursive)
+            }
+          _ => ()
         }
       }
-      None
     }
-    None =>
-      match self.roots {
-        [root, ..] => Some((root, key))
-        [] => None
-      }
+    _ => ()
   }
+}
+
+///|
+fn stable_session_key(path : String) -> String {
+  let builder = StringBuilder()
+  builder <+ "file-"
+  for byte in @utf8.encode(path) {
+    let value = byte.to_int()
+    if value < 16 {
+      builder <+ "0"
+    }
+    builder <+ "\{value.to_string(radix=16)}"
+  }
+  builder.to_string()
+}
+
+///|
+fn session_id_from_file_name(name : String) -> String? {
+  guard name.has_prefix(session_file_prefix) &&
+    name.has_suffix(session_file_suffix) else {
+    return None
+  }
+  let id = name[session_file_prefix.length():name.length() -
+  session_file_suffix.length()].to_owned()
+  if valid_session_id(id) {
+    Some(id)
+  } else {
+    None
+  }
+}
+
+///|
+async fn session_file_stamp(path : String) -> (Int64?, Int) {
+  let stamp = @fs.mtime(path) catch { _ => return (None, 0) }
+  let (seconds, nanoseconds) = stamp
+  (Some(seconds), nanoseconds)
+}
+
+///|
+async fn SessionCatalog::lookup(
+  self : SessionCatalog,
+  key : String,
+) -> SessionListRow? {
+  let rows = self.rows()
+  for row in rows {
+    if row.key == key {
+      return Some(row)
+    }
+  }
+  for row in rows {
+    if row.id == key {
+      return Some(row)
+    }
+  }
+  None
 }
 
 ///|

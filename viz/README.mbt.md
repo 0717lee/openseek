@@ -19,7 +19,7 @@ System follows the OS via `prefers-color-scheme`).
 |------------------|--------|---------------------------------------------------------------------|
 | `viz`            | js     | Pure parse + render: session-file text → typed events → `@html.Html`. Reuses `agent_session` decoders and projection, so it stays correct as the format evolves. |
 | `cmd/viz_app`    | js     | The rabbita (TEA) frontend: session browser, fetch, mode toggle.    |
-| `cmd/viz_server` | native | Read-only web server (`moonbitlang/async/http`) exposing a JSON/raw-file API over a `SessionStore`. It never writes, so pointing it at a live session root is safe. |
+| `cmd/viz_server` | native | Read-only web server (`moonbitlang/async/http`) exposing a JSON/raw-file API over discovered `openseek_session-*.jsonl` files. It never writes, so pointing it at a live session root is safe. |
 
 The `viz` library is headless-testable: `render_session` returns `@html.Html`,
 which `@rabbita.render_to_string` turns into a string for snapshot assertions —
@@ -54,10 +54,14 @@ moon run cmd/viz_server --target native -- --search-dir . --port 8080
 ```
 
 By default the server scans `.` recursively for `.openseek` directories and
-also includes the compatibility `--session-root` (default `.openseek`). The
-scanner skips `.git`, `node_modules`, `.mooncakes`, and `_build`. Repeat
-`--search-dir` to scan several trees, and use `--session-root-name` when a
-different marker such as `.openroot` should be treated as the session root.
+also includes the compatibility `--session-root` (default `.openseek`). Session
+rows are discovered from `openseek_session-*.jsonl` files under each root's
+`sessions/` tree, so stray files like `.DS_Store` and husk directories are not
+listed. A directory or single file of copied `openseek_session-*.jsonl` logs can
+also be passed directly as `--session-root`. The scanner skips `.git`,
+`node_modules`, `.mooncakes`, and `_build`. Repeat `--search-dir` to scan
+several trees, and use `--session-root-name` when a different marker such as
+`.openroot` should be treated as the session root.
 
 `--session-root`, `--search-dir`, `--session-root-name`, `--port`,
 `--web-dir`, and `--bundle` all have env-var fallbacks

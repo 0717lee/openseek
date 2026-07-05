@@ -47,8 +47,14 @@ Useful options:
 moon run --target native cmd/viz_server -- --port 8081
 moon run --target native cmd/viz_server -- --host 127.0.0.1   # local only
 moon run --target native cmd/viz_server -- --search-dir path/to/project
+moon run --target native cmd/viz_server -- --session-root path/to/copied-jsonl-dir
 moon run --target native cmd/viz_server -- --session-root-name .openroot
 ```
+
+Session rows come from files named `openseek_session-*.jsonl`. The server
+ignores `.DS_Store`, lock files, and malformed/husk directories, and it can
+serve a normal `.openseek` store, a directory of copied JSONL files, or a single
+matching JSONL file.
 
 If the server cannot find the generated JavaScript bundle, pass it explicitly:
 
