@@ -442,6 +442,68 @@ async test "abort closes later tool calls as skipped before terminating" {
 }
 
 ///|
+async test "tool batch append failure preserves committed assistant before failure terminal" {
+  @async.with_task_group() <| group => {
+    guard terminal_batch_test_server(
+        group,
+        (
+          #|data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_echo","function":{"name":"echo","arguments":"{}"}}]}}]}
+        ),
+      )
+      is Some(url) else {
+      return
+    }
+    let runtime = @agent_runtime.AgentRuntime()
+    let scope = @agent_runtime.AgentTaskScope(group)
+    let session = @agent_session.Session(
+      SessionId("batch-append-failure"),
+      system_prompt="system",
+    )
+    let tools = abort_batch_tools()
+    let mut calls = 0
+    let mut persisted = session
+    let _ = @agent.run_turn_in_scope(
+      runtime~,
+      scope~,
+      api_key="test-key",
+      model=V4Flash,
+      session~,
+      task="echo once",
+      append_item=(current, item) => {
+        calls = calls + 1
+        if calls == 3 {
+          fail("persist tool result failed")
+        }
+        let next = current.append(item)
+        persisted = next
+        next
+      },
+      max_steps=1,
+      api_url=url,
+      tools~,
+    ) catch {
+      error => {
+        assert_true("\{error}".contains("persist tool result failed"))
+        assert_eq(calls, 4)
+        let events = persisted.events()
+        assert_eq(events.length(), 3)
+        assert_true(events[0].item() is User(_))
+        guard events[1].item() is Assistant(message) else {
+          fail("expected committed assistant before failure terminal")
+        }
+        assert_eq(message.tool_calls().length(), 1)
+        guard events[2].item() is Terminal(Failed(message)) else {
+          fail("expected failed terminal")
+        }
+        assert_true(message.contains("persist tool result failed"))
+        return
+      }
+    }
+    fail("expected failed append to be re-raised")
+  }
+}
+
+///|
 async test "blank steering input is dropped at the boundary" {
   @async.with_task_group() <| group => {
     guard steer_test_server(group) is Some(url) else { return }

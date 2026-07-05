@@ -394,6 +394,13 @@ pub async fn[X] run_turn_in_scope(
         )
         continue loop_steps~
       }
+      let append_batch_item = (current, item) => {
+        let next = append_item(current, item)
+        // The catch below appends failure terminals against this snapshot.
+        // Keep it current if a helper raises after a partial batch commit.
+        session = next
+        next
+      }
       match
         session.run_tool_batch(
           response,
@@ -401,7 +408,7 @@ pub async fn[X] run_turn_in_scope(
           tools,
           runtime,
           cadence,
-          append_item~,
+          append_item=append_batch_item,
         ) {
         Done(next) => return next
         Continue(next) => session = next
