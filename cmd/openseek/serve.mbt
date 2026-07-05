@@ -175,10 +175,9 @@ test "pending prompt helpers ignore queued compactions" {
 /// persistent-engine design — one process per conversation instead of one
 /// per prompt.
 ///
-/// The runtime and the tool registry are built once and shared by every
-/// turn, so stateful tools survive turn boundaries (a `moon_check` watcher
-/// started in turn 1 keeps reporting in turn 5). `steer` rides the
-/// runtime's lossless steering queue into the running (or already
+/// The runtime and the tool registry are built once and shared by every turn,
+/// so any registry-local tool state can survive turn boundaries. `steer` rides
+/// the runtime's lossless steering queue into the running (or already
 /// submitted) turn; with no turn to land in it is rejected with a
 /// `steer_dropped` event — that only happens by racing the terminal event
 /// through the pipes, and an engine must never start a turn the controller
@@ -224,9 +223,8 @@ async fn run_serve(
   @async.with_task_group(group => {
     let runtime = @agent_runtime.AgentRuntime(workspace_root~)
     let scope = @agent_runtime.AgentTaskScope(group)
-    // Built once: stateful tool records live in this registry, and
-    // rebuilding it per turn would orphan running watchers (see
-    // @agent.build_tools).
+    // Built once so registry-local tool state can survive turn boundaries
+    // (see @agent.build_tools).
     let tools = @agent.build_tools(runtime, scope)
     // All scheduling flows through one ordered queue with one consumer:
     // wire commands from the reader, plus the internal turn-completion and
