@@ -1,0 +1,205 @@
+///|
+async fn tool_batch_test_server(group : @async.TaskGroup[Unit]) -> String? {
+  let server = @http.Server(@socket.Addr::parse("127.0.0.1:0")) catch {
+    error => {
+      let message = "\{error}"
+      if message.contains("Operation not permitted") {
+        println("local TCP bind unavailable; skipping tool batch test")
+        return None
+      }
+      raise error
+    }
+  }
+  let mut requests = 0
+  group.spawn_bg(no_wait=true) <| () => {
+    server.run_forever(
+      (request, body, conn) => {
+        requests += 1
+        assert_eq(request.path, "/chat/completions")
+        let request_body = body.read_all().text()
+        conn.send_response(200, "OK", extra_headers={
+          "Content-Type": "text/event-stream",
+        })
+        if requests == 1 {
+          assert_true(request_body.contains("\"name\":\"first_test\""))
+          assert_true(request_body.contains("\"name\":\"second_test\""))
+          conn.write(
+            "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_first\",\"type\":\"function\",\"function\":{\"name\":\"first_test\",\"arguments\":\"{}\"}},{\"index\":1,\"id\":\"call_second\",\"type\":\"function\",\"function\":{\"name\":\"second_test\",\"arguments\":\"{}\"}}]}}]}\n\n",
+          )
+        } else {
+          assert_true(request_body.contains("first-result"))
+          assert_true(request_body.contains("second-result"))
+          conn.write(
+            "data: {\"choices\":[{\"delta\":{\"content\":\"done\"}}]}\n\n",
+          )
+        }
+        conn.write("data: [DONE]\n\n")
+      },
+      max_connections=2,
+    )
+  }
+  Some("http://127.0.0.1:\{server.addr.port()}/chat/completions")
+}
+
+///|
+async test "agent executes each normal tool call in a response batch" {
+  @async.with_task_group() <| group => {
+    guard tool_batch_test_server(group) is Some(url) else { return }
+    let runtime = @agent_runtime.AgentRuntime()
+    let scope = @agent_runtime.AgentTaskScope(group)
+    let session = @agent_session.Session(
+      SessionId("tool-batch-test"),
+      system_prompt="system",
+    )
+    let mut first_called = false
+    let mut second_called = false
+    let tools = @agent_tool.Tools([
+      AgentToolDefinition(
+        name="first_test",
+        description="First batch test tool.",
+        schema=JsonSchema({ "type": "object" }),
+        execute=Sync(_args => {
+          first_called = true
+          @agent_tool.ToolAction::respond("first-result")
+        }),
+      ),
+      AgentToolDefinition(
+        name="second_test",
+        description="Second batch test tool.",
+        schema=JsonSchema({ "type": "object" }),
+        execute=Sync(_args => {
+          second_called = true
+          @agent_tool.ToolAction::respond("second-result")
+        }),
+      ),
+    ])
+    let result = @agent.run_turn_in_scope(
+      runtime~,
+      scope~,
+      api_key="test-key",
+      model=V4Flash,
+      session~,
+      task="run both tools",
+      append_item=(session, item) => session.append(item),
+      max_steps=2,
+      api_url=url,
+      tools~,
+    )
+    assert_true(first_called)
+    assert_true(second_called)
+    let events = result.events()
+    assert_eq(events.length(), 5)
+    assert_true(events[0].item() is User(_))
+    guard events[1].item() is Assistant(message) else {
+      fail("expected assistant tool-call event")
+    }
+    assert_eq(message.tool_calls().length(), 2)
+    guard events[2].item() is Tool(first_result) else {
+      fail("expected first tool result")
+    }
+    assert_eq(first_result.tool_call_id(), "call_first")
+    assert_eq(first_result.content(), "first-result")
+    guard events[3].item() is Tool(second_result) else {
+      fail("expected second tool result")
+    }
+    assert_eq(second_result.tool_call_id(), "call_second")
+    assert_eq(second_result.content(), "second-result")
+    guard events[4].item() is Terminal(Finished(answer)) else {
+      fail("expected finished terminal")
+    }
+    assert_eq(answer, "done")
+  }
+}
+
+///|
+async fn append_failure_test_server(group : @async.TaskGroup[Unit]) -> String? {
+  let server = @http.Server(@socket.Addr::parse("127.0.0.1:0")) catch {
+    error => {
+      let message = "\{error}"
+      if message.contains("Operation not permitted") {
+        println("local TCP bind unavailable; skipping append failure test")
+        return None
+      }
+      raise error
+    }
+  }
+  group.spawn_bg(no_wait=true) <| () => {
+    server.run_forever(
+      (_request, body, conn) => {
+        let request_body = body.read_all().text()
+        assert_true(request_body.contains("\"name\":\"ok_test\""))
+        conn.send_response(200, "OK", extra_headers={
+          "Content-Type": "text/event-stream",
+        })
+        conn.write(
+          "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_ok\",\"type\":\"function\",\"function\":{\"name\":\"ok_test\",\"arguments\":\"{}\"}}]}}]}\n\n",
+        )
+        conn.write("data: [DONE]\n\n")
+      },
+      max_connections=1,
+    )
+  }
+  Some("http://127.0.0.1:\{server.addr.port()}/chat/completions")
+}
+
+///|
+async test "agent failure terminal uses the latest persisted session" {
+  @async.with_task_group() <| group => {
+    guard append_failure_test_server(group) is Some(url) else { return }
+    let runtime = @agent_runtime.AgentRuntime()
+    let scope = @agent_runtime.AgentTaskScope(group)
+    let initial = @agent_session.Session(
+      SessionId("append-failure-test"),
+      system_prompt="system",
+    )
+    let mut persisted = initial
+    let mut rejected_tool_result = false
+    let tools = @agent_tool.Tools([
+      AgentToolDefinition(
+        name="ok_test",
+        description="Produce a normal response after the assistant tool call.",
+        schema=JsonSchema({ "type": "object" }),
+        execute=Sync(_args => @agent_tool.ToolAction::respond("ok-result")),
+      ),
+    ])
+    let _ = @agent.run_turn_in_scope(
+      runtime~,
+      scope~,
+      api_key="test-key",
+      model=V4Flash,
+      session=initial,
+      task="run the append failure tool",
+      append_item=(session, item) => {
+        assert_eq(session.events().length(), persisted.events().length())
+        if item is Tool(_) && !rejected_tool_result {
+          rejected_tool_result = true
+          fail("persist tool result failed")
+        }
+        let next = session.append(item)
+        persisted = next
+        next
+      },
+      max_steps=1,
+      api_url=url,
+      tools~,
+    ) catch {
+      error => {
+        assert_true("\{error}".contains("persist tool result failed"))
+        assert_true(rejected_tool_result)
+        let events = persisted.events()
+        assert_eq(events.length(), 3)
+        assert_true(events[0].item() is User(_))
+        guard events[1].item() is Assistant(message) else {
+          fail("expected persisted assistant tool call")
+        }
+        assert_eq(message.tool_calls().length(), 1)
+        guard events[2].item() is Terminal(Failed(message)) else {
+          fail("expected persisted failure terminal")
+        }
+        assert_true(message.contains("persist tool result failed"))
+        return
+      }
+    }
+    fail("expected append failure")
+  }
+}
