@@ -225,8 +225,9 @@ const SmallerEditsHintThreshold : Int = 3
 /// false-fire constantly; the blind spot (an edit that fixes one parse error
 /// while introducing another, keeping the count flat) is accepted. The gate
 /// applies to every syncheck input — `.mbt`, `.mbt.md` (checked fenced blocks
-/// only), `moon.mod`, `moon.pkg` — keyed off `path`'s kind. Fail-open: when the
-/// gate cannot run, the edit proceeds as before the gate existed.
+/// only), `moon.mod`, `moon.pkg` — under each kind the file could be classified
+/// as (a cross-kind symlink is checked under both). Fail-open: when the gate
+/// cannot run, the edit proceeds as before the gate existed.
 async fn parse_gate_rejection(
   path : String,
   original_content~ : String,
@@ -244,52 +245,46 @@ async fn parse_gate_rejection(
     error if @async.is_being_cancelled() => raise error
     _ => path
   }
-  // Gate against whichever of the literal path or its symlink target names a
-  // syncheck input, PREFERRING the target: the file that actually gets compiled
-  // is the realpath, so its kind (`.mbt`, `.mbt.md`, `moon.mod`, `moon.pkg`)
-  // decides how the candidate content is parsed. Preferring the link name would
-  // let a `doc.mbt.md -> lib.mbt` alias parse raw source as markdown (only
-  // checked fences gated), passing malformed `.mbt` content through.
-  let gate_path = if @auto_check.is_gateable_path(target) {
-    target
-  } else {
-    path
+  // Gate under every syncheck kind this file could be classified as. A regular
+  // file yields one kind; a symlink that crosses kinds (e.g. `link.mbt ->
+  // doc.mbt.md`) yields two, and moon's classification of such a link is
+  // ambiguous, so reject on the FIRST kind under which the edit introduces new
+  // parse errors — that covers both interpretations. See `gate_paths`.
+  for gate_path in @auto_check.gate_paths(path, target) {
+    let gate = @auto_check.content_parse_errors(gate_path, new_content) catch {
+      error if @async.is_being_cancelled() => raise error
+      _ => None
+    }
+    guard gate is Some(gate) && gate.errors.length() > 0 else { continue }
+    // The edited result has parse errors under this kind; reject only when the
+    // edit makes the file WORSE than its original content parsed the same way.
+    let before = @auto_check.content_parse_errors(gate_path, original_content) catch {
+      error if @async.is_being_cancelled() => raise error
+      _ => None
+    }
+    // The comparison is only sound against a COMPLETE baseline: a missing one
+    // (transient tmpdir/moonc failure) gives no honest "introduced" answer, and
+    // a truncated one is a lower bound whose subtraction could over-count the
+    // introduced errors and false-reject. Fail open in both cases — the gate
+    // must never reject on a comparison it could not actually make. A truncated
+    // NEW capture is fine: its count is a lower bound, so exceeding the complete
+    // baseline still proves the edit made things worse.
+    guard before is Some(before) && !before.truncated else { continue }
+    let before_count = before.errors.length()
+    let introduced = gate.errors.length() - before_count
+    if introduced <= 0 {
+      continue
+    }
+    let bound = if gate.truncated { "≥" } else { "" }
+    return Some(
+      @agent_tool.ToolAction::respond(
+        edit_reject_report(path, new_content, gate, introduced~, before_count~),
+        is_error=true,
+        brief="edit rejected (\{bound}\{introduced} parse error(s))",
+      ),
+    )
   }
-  if !@auto_check.is_gateable_path(gate_path) {
-    return None
-  }
-  let gate = @auto_check.content_parse_errors(gate_path, new_content) catch {
-    error if @async.is_being_cancelled() => raise error
-    _ => None
-  }
-  guard gate is Some(gate) && gate.errors.length() > 0 else { return None }
-  // The edited result has parse errors; reject only when the edit makes the
-  // file WORSE than its original content parsed the same way.
-  let before = @auto_check.content_parse_errors(gate_path, original_content) catch {
-    error if @async.is_being_cancelled() => raise error
-    _ => None
-  }
-  // The comparison is only sound against a COMPLETE baseline: a missing one
-  // (transient tmpdir/moonc failure) gives no honest "introduced" answer, and
-  // a truncated one is a lower bound whose subtraction could over-count the
-  // introduced errors and false-reject. Fail open in both cases — the gate
-  // must never reject on a comparison it could not actually make. A truncated
-  // NEW capture is fine: its count is a lower bound, so exceeding the complete
-  // baseline still proves the edit made things worse.
-  guard before is Some(before) && !before.truncated else { return None }
-  let before_count = before.errors.length()
-  let introduced = gate.errors.length() - before_count
-  if introduced <= 0 {
-    return None
-  }
-  let bound = if gate.truncated { "≥" } else { "" }
-  Some(
-    @agent_tool.ToolAction::respond(
-      edit_reject_report(path, new_content, gate, introduced~, before_count~),
-      is_error=true,
-      brief="edit rejected (\{bound}\{introduced} parse error(s))",
-    ),
-  )
+  None
 }
 
 ///|

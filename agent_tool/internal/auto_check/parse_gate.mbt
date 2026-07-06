@@ -94,6 +94,31 @@ pub fn is_gateable_path(path : String) -> Bool {
 }
 
 ///|
+/// The distinct syncheck input KINDS named by `path` and its resolved symlink
+/// `target`, as representative paths to hand to `content_parse_errors`. Usually
+/// one entry: a regular file (where `target` is the same file), or a symlink
+/// whose link and target share a kind, or where only one side is a syncheck
+/// input. Two entries when a symlink CROSSES kinds, e.g. `link.mbt ->
+/// doc.mbt.md`: moon's classification of such a link is ambiguous — it may key
+/// off the directory entry it globs OR the file it resolves to — so the gate
+/// checks BOTH kinds and a caller rejects if either flags the candidate. `path`
+/// is listed first so a reject prefers the caller's own spelling. Pass the same
+/// value for `path` and `target` when there is no symlink to resolve.
+pub fn gate_paths(path : String, target : String) -> Array[String] {
+  let paths : Array[String] = []
+  let names : Array[String] = []
+  for candidate in [path, target] {
+    guard gate_scratch_name(candidate) is Some(name) else { continue }
+    if names.contains(name) {
+      continue
+    }
+    names.push(name)
+    paths.push(candidate)
+  }
+  paths
+}
+
+///|
 /// One moonc run over candidate content: the captured lex/parse errors plus
 /// whether the output capture was truncated — a truncated capture makes
 /// `errors` a LOWER BOUND, not an exact tally, and callers that compare

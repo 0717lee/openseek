@@ -329,53 +329,50 @@ async fn parse_gate_batch_rejection(
       error if @async.is_being_cancelled() => raise error
       _ => write.path
     }
-    // Prefer the symlink target's kind: the file that actually gets compiled is
-    // the realpath, so its kind decides how the candidate content is parsed (a
-    // `doc.mbt.md -> lib.mbt` alias must gate raw source as `.mbt`, not
-    // markdown). See the note in `edit`'s parse gate.
-    let gate_path = if @auto_check.is_gateable_path(target) {
-      target
-    } else {
-      write.path
+    // Gate under every syncheck kind this file could be classified as. A
+    // regular file yields one kind; a symlink that crosses kinds (e.g.
+    // `link.mbt -> doc.mbt.md`) yields two, and moon's classification of such a
+    // link is ambiguous, so check both and reject on the first that regresses.
+    // See `gate_paths`.
+    for gate_path in @auto_check.gate_paths(write.path, target) {
+      let gate = @auto_check.content_parse_errors(gate_path, write.new_content) catch {
+        error if @async.is_being_cancelled() => raise error
+        _ => None
+      }
+      guard gate is Some(gate) && gate.errors.length() > 0 else { continue }
+      let before = @auto_check.content_parse_errors(
+        gate_path,
+        write.original_content,
+      ) catch {
+        error if @async.is_being_cancelled() => raise error
+        _ => None
+      }
+      guard before is Some(before) && !before.truncated else { continue }
+      let before_count = before.errors.length()
+      let introduced = gate.errors.length() - before_count
+      if introduced <= 0 {
+        continue
+      }
+      let bound = if gate.truncated { "at least " } else { "" }
+      let pre_existing = if before_count > 0 {
+        " (already has \{before_count} parse error(s); excerpts may include pre-existing ones)"
+      } else {
+        ""
+      }
+      let formatted = @auto_check.format_parse_gate_errors(
+        write.path,
+        write.new_content,
+        gate.errors,
+      )
+      rejections.push({
+        path: write.path,
+        introduced,
+        truncated: gate.truncated,
+        section: "\{write.path}: would gain \{bound}\{introduced} new parse error(s)\{pre_existing}:\n\{formatted.join("\n")}",
+      })
+      // One rejection per file: the first kind that regresses is enough.
+      break
     }
-    if !@auto_check.is_gateable_path(gate_path) {
-      continue
-    }
-    let gate = @auto_check.content_parse_errors(gate_path, write.new_content) catch {
-      error if @async.is_being_cancelled() => raise error
-      _ => None
-    }
-    guard gate is Some(gate) && gate.errors.length() > 0 else { continue }
-    let before = @auto_check.content_parse_errors(
-      gate_path,
-      write.original_content,
-    ) catch {
-      error if @async.is_being_cancelled() => raise error
-      _ => None
-    }
-    guard before is Some(before) && !before.truncated else { continue }
-    let before_count = before.errors.length()
-    let introduced = gate.errors.length() - before_count
-    if introduced <= 0 {
-      continue
-    }
-    let bound = if gate.truncated { "at least " } else { "" }
-    let pre_existing = if before_count > 0 {
-      " (already has \{before_count} parse error(s); excerpts may include pre-existing ones)"
-    } else {
-      ""
-    }
-    let formatted = @auto_check.format_parse_gate_errors(
-      write.path,
-      write.new_content,
-      gate.errors,
-    )
-    rejections.push({
-      path: write.path,
-      introduced,
-      truncated: gate.truncated,
-      section: "\{write.path}: would gain \{bound}\{introduced} new parse error(s)\{pre_existing}:\n\{formatted.join("\n")}",
-    })
   }
   if rejections.is_empty() {
     return None

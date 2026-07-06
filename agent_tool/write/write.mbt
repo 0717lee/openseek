@@ -113,28 +113,26 @@ async fn write_file(
     // `moon.pkg`): parse the candidate content in a scratch file first (moonc
     // syncheck needs no project context), so malformed content is rejected
     // before anything — parent directories included — is created on disk. Gate
-    // by the target's kind so malformed content written THROUGH a link (e.g.
+    // under every kind this file could be classified as (from both the path and
+    // its symlink target), so malformed content written THROUGH a link (e.g.
     // `alias.txt -> moon.pkg`) is caught too. A non-parsing file is never a
     // valid intermediate state, and since `write` refuses to overwrite existing
     // source, the natural retry is another `write` with corrected content.
     // Fail-open: when the gate cannot run (moonc missing), write as usual.
-    let gate_path = if @auto_check.is_gateable_path(target) {
-      target
-    } else {
-      path
-    }
-    if input.revert_on_parse_errors && @auto_check.is_gateable_path(gate_path) {
-      let gate = @auto_check.content_parse_errors(gate_path, input.content) catch {
-        error if @async.is_being_cancelled() => raise error
-        _ => None
-      }
-      if gate is Some(gate) && gate.errors.length() > 0 {
-        let bound = if gate.truncated { "≥" } else { "" }
-        return @agent_tool.ToolAction::respond(
-          write_reject_report(path, input.content, gate),
-          is_error=true,
-          brief="write rejected (\{bound}\{gate.errors.length()} parse error(s))",
-        )
+    if input.revert_on_parse_errors {
+      for gate_path in @auto_check.gate_paths(path, target) {
+        let gate = @auto_check.content_parse_errors(gate_path, input.content) catch {
+          error if @async.is_being_cancelled() => raise error
+          _ => None
+        }
+        if gate is Some(gate) && gate.errors.length() > 0 {
+          let bound = if gate.truncated { "≥" } else { "" }
+          return @agent_tool.ToolAction::respond(
+            write_reject_report(path, input.content, gate),
+            is_error=true,
+            brief="write rejected (\{bound}\{gate.errors.length()} parse error(s))",
+          )
+        }
       }
     }
     create_parent_dirs(path)

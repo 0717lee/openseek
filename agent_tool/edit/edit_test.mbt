@@ -578,3 +578,30 @@ async test "edit gates by the target kind through a .mbt.md-named symlink" {
     assert_eq(@fs.read_file(src).text(), original)
   })
 }
+
+///|
+/// The reverse mismatch: a `.mbt`-spelled link to a `.mbt.md` target. moon may
+/// classify the link by its `.mbt` entry name, so a break that is invalid as
+/// source must be caught even though the target is named `.mbt.md`. Gating only
+/// the target kind would parse the result as markdown (checked fences only) and
+/// miss it — the gate must cover BOTH kinds. The target body is valid MoonBit
+/// source, so it parses clean under both kinds until the edit breaks it.
+async test "edit gates by the link kind through a .mbt-named symlink" {
+  @vfs.with_tmpdir(prefix="openseek-edit-gate-mbtlink-", dir => {
+    let target = "\{dir}/notes.mbt.md"
+    let original = "///|\npub fn f() -> Int {\n  42\n}\n"
+    @fs.write_file(target, original, create_mode=CreateOrTruncate)
+    let link = "\{dir}/link.mbt"
+    @fs.symlink(target="notes.mbt.md", link)
+    let broken = run_edit({
+      "path": link,
+      "old_string": "  42",
+      "new_string": "  match 42 {",
+      "start_line": 3,
+    })
+    guard broken is Respond(out) else { fail("expected Respond") }
+    assert_true(out.is_error)
+    assert_true(out.content.contains("rejected: the edit would introduce"))
+    assert_eq(@fs.read_file(target).text(), original)
+  })
+}
