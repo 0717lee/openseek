@@ -12,7 +12,12 @@
 ///   process is cancelled and the result is reported as a tool error.
 /// - `timeout_ms` (number, optional): positive timeout in milliseconds. If the
 ///   command is still running after the timeout, the process is cancelled and
-///   reported as a tool error.
+///   reported as a tool error. Not supported together with `run_in_background`.
+/// - `run_in_background` (boolean, optional): detach the command as a background
+///   job and return its job id instead of blocking for output. Read the job's
+///   output with the `shell_output` tool and stop it with `shell_stop`; the job
+///   is reaped when the session ends. When the job finishes on its own, a
+///   completion notice is delivered so the model can collect the result.
 ///
 /// ## Result
 /// Metadata is a trailing `<system>...</system>` footer (the `read` tool
@@ -56,13 +61,13 @@ pub fn definition(
 ///|
 #cfg(platform="windows")
 fn shell_description() -> String {
-  "Run arguments.cmd through PowerShell (pwsh -NoProfile -Command), optionally in arguments.cwd, and return exit code plus output. Use PowerShell syntax and cmdlets in arguments.cmd. Source file edits for compiler feedback belong in line-anchored edit (or multi_edit for several fixes in one file); do not use shell rewrites."
+  "Run arguments.cmd through PowerShell (pwsh -NoProfile -Command), optionally in arguments.cwd, and return exit code plus output. Use PowerShell syntax and cmdlets in arguments.cmd. Source file edits for compiler feedback belong in line-anchored edit (or multi_edit for several fixes in one file); do not use shell rewrites. Set run_in_background:true to detach a long-running command and get a job id back instead of blocking; read its output with shell_output and stop it with shell_stop."
 }
 
 ///|
 #cfg(not(platform="windows"))
 fn shell_description() -> String {
-  "Run arguments.cmd through the POSIX shell (sh -c), optionally in arguments.cwd, and return exit code plus output. Use POSIX shell syntax in arguments.cmd. Source file edits for compiler feedback belong in line-anchored edit (or multi_edit for several fixes in one file); do not use shell rewrites."
+  "Run arguments.cmd through the POSIX shell (sh -c), optionally in arguments.cwd, and return exit code plus output. Use POSIX shell syntax in arguments.cmd. Source file edits for compiler feedback belong in line-anchored edit (or multi_edit for several fixes in one file); do not use shell rewrites. Set run_in_background:true to detach a long-running command and get a job id back instead of blocking; read its output with shell_output and stop it with shell_stop."
 }
 
 ///|
