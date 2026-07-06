@@ -1,0 +1,29 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "bobzhang/openseek/agent_tool/shell_exec"
+
+// Values
+pub let default_hard_cap : Int
+
+pub let default_inline_cap : Int
+
+// Errors
+
+// Types and methods
+pub struct ShellOutputSink {
+  // private fields
+}
+pub fn ShellOutputSink::append_chunk(Self, Bytes) -> Unit
+pub fn ShellOutputSink::append_text(Self, String) -> Unit
+pub fn ShellOutputSink::finish(Self) -> Unit
+pub fn ShellOutputSink::new(inline_cap? : Int, hard_cap? : Int) -> Self
+pub fn ShellOutputSink::over_inline_cap(Self) -> Bool
+pub fn ShellOutputSink::seq(Self) -> Int
+pub fn ShellOutputSink::size(Self) -> Int
+pub fn ShellOutputSink::tail_from(Self, Int) -> String
+pub fn ShellOutputSink::text(Self) -> String
+pub fn ShellOutputSink::truncated(Self) -> Bool
+
+// Type aliases
+
+// Traits
+
