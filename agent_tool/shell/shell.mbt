@@ -374,10 +374,22 @@ async fn run_agent_shell_with_tree_precheck(
     // await, so a timeout must stop it explicitly here — not leak it.
     Some(spawn) => {
       let exec = spawn(launch.program, launch.args, cwd, max_output_chars)
-      let finished = match timeout_ms {
-        Some(timeout_ms) =>
-          @async.with_timeout_opt(timeout_ms, () => exec.wait())
-        None => Some(exec.wait())
+      // The execution runs on the session group, so it outlives this await. If
+      // the turn is cancelled (Ctrl-C / teardown) while we wait, stop it
+      // synchronously before re-raising — otherwise it orphans on the session
+      // group with no job entry, unpollable. (`with_timeout_opt` returns None on
+      // a timeout; only a real cancellation raises here.)
+      let finished = try {
+        match timeout_ms {
+          Some(timeout_ms) =>
+            @async.with_timeout_opt(timeout_ms, () => exec.wait())
+          None => Some(exec.wait())
+        }
+      } catch {
+        error => {
+          exec.request_stop()
+          raise error
+        }
       }
       match finished {
         // Timed out. Detach it to the background if a hook is provided

@@ -186,14 +186,24 @@ fn ShellExecution::set_terminal(
 /// another already consumed. Returns `false` only for an already-terminal job.
 pub async fn ShellExecution::stop(self : ShellExecution) -> Bool {
   guard !self.status.is_terminal() else { return false }
-  self.cancel_requested = true
-  self.process.cancel()
+  self.request_stop()
   for ;; {
     if self.status.is_terminal() {
       return true
     }
     @async.sleep(5)
   }
+}
+
+///|
+/// Synchronously request cancellation of the child (mark it and fire the process
+/// cancel) without awaiting the terminal transition. `Process::cancel` is sync,
+/// so this is safe to call while a turn is being cancelled — where awaiting is
+/// not — to stop a session-group execution before it can outlive the turn as an
+/// orphan. The monitor (on the session group) then reaps it to `Killed`.
+pub fn ShellExecution::request_stop(self : ShellExecution) -> Unit {
+  self.cancel_requested = true
+  self.process.cancel()
 }
 
 ///|

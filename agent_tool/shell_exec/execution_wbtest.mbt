@@ -57,6 +57,23 @@ async test "stop terminates a running execution" {
 
 ///|
 #cfg(not(platform="windows"))
+async test "request_stop synchronously terminates a running execution" {
+  @async.with_task_group(group => {
+    let exec = ShellExecution::start(AgentTaskScope(group), program="sleep", args=[
+      "30",
+    ])
+    @async.sleep(50)
+    assert_true(exec.status() is Running)
+    // Sync stop with no await — the path used to clean up during turn
+    // cancellation, where awaiting is not safe.
+    exec.request_stop()
+    poll_exec_terminal(exec)
+    assert_true(exec.status() is Killed)
+  })
+}
+
+///|
+#cfg(not(platform="windows"))
 async test "background flips a running execution to Backgrounded" {
   @async.with_task_group(group => {
     let exec = ShellExecution::start(AgentTaskScope(group), program="sleep", args=[
