@@ -329,10 +329,14 @@ async fn parse_gate_batch_rejection(
       error if @async.is_being_cancelled() => raise error
       _ => write.path
     }
-    let gate_path = if @auto_check.is_gateable_path(write.path) {
-      write.path
-    } else {
+    // Prefer the symlink target's kind: the file that actually gets compiled is
+    // the realpath, so its kind decides how the candidate content is parsed (a
+    // `doc.mbt.md -> lib.mbt` alias must gate raw source as `.mbt`, not
+    // markdown). See the note in `edit`'s parse gate.
+    let gate_path = if @auto_check.is_gateable_path(target) {
       target
+    } else {
+      write.path
     }
     if !@auto_check.is_gateable_path(gate_path) {
       continue

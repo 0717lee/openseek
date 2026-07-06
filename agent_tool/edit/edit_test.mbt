@@ -553,3 +553,28 @@ async test "edit gates a breaking edit made through a non-mbt symlink" {
     assert_eq(@fs.read_file(src).text(), original)
   })
 }
+
+///|
+/// The gate keys off the symlink TARGET's kind, not the link name: a
+/// `.mbt.md`-spelled link to a `.mbt` target must parse the result as source,
+/// not markdown. Parsing it as `.mbt.md` would ignore everything outside checked
+/// fences and let a broken edit to the real `.mbt` file slip through.
+async test "edit gates by the target kind through a .mbt.md-named symlink" {
+  @vfs.with_tmpdir(prefix="openseek-edit-gate-mdlink-", dir => {
+    let src = "\{dir}/lib.mbt"
+    let original = "///|\npub fn f() -> Int {\n  42\n}\n"
+    @fs.write_file(src, original, create_mode=CreateOrTruncate)
+    let link = "\{dir}/doc.mbt.md"
+    @fs.symlink(target="lib.mbt", link)
+    let broken = run_edit({
+      "path": link,
+      "old_string": "  42",
+      "new_string": "  match 42 {",
+      "start_line": 3,
+    })
+    guard broken is Respond(out) else { fail("expected Respond") }
+    assert_true(out.is_error)
+    assert_true(out.content.contains("rejected: the edit would introduce"))
+    assert_eq(@fs.read_file(src).text(), original)
+  })
+}

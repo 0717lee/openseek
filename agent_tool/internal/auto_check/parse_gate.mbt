@@ -55,17 +55,19 @@ const MooncParseMaxOutputChars : Int = 200000
 /// `None` when `path` is not a syncheck input (so the gate does not apply).
 /// syncheck keys off the name: `.mbt` / `.mbt.md` match by suffix, while
 /// `moon.mod` / `moon.pkg` must be that EXACT basename (a `foo.moon.pkg` or a
-/// `moon.pkg.json` is not recognized). The command always runs from the scratch
-/// directory against this bare name, so the command line never embeds a host
-/// path that would need platform-specific quoting.
+/// `moon.pkg.json` is not recognized). The manifest classifiers are shared with
+/// the write/edit tools, so they normalize Windows separators the same way. The
+/// command always runs from the scratch directory against this bare name, so the
+/// command line never embeds a host path that would need platform-specific
+/// quoting.
 fn gate_scratch_name(path : String) -> String? {
   if path.has_suffix(".mbt.md") {
     Some("parse_gate.mbt.md")
   } else if path.has_suffix(".mbt") {
     Some("parse_gate.mbt")
-  } else if path == "moon.mod" || path.has_suffix("/moon.mod") {
+  } else if @manifest_path.is_moon_mod_path(path) {
     Some("moon.mod")
-  } else if path == "moon.pkg" || path.has_suffix("/moon.pkg") {
+  } else if @manifest_path.is_moon_pkg_path(path) {
     Some("moon.pkg")
   } else {
     None
@@ -509,6 +511,9 @@ test "is_gateable_path covers syncheck input kinds only" {
   assert_true(is_gateable_path("README.mbt.md"))
   assert_true(is_gateable_path("moon.mod"))
   assert_true(is_gateable_path("sub/pkg/moon.pkg"))
+  // Windows separators classify like their POSIX form (shared manifest helpers).
+  assert_true(is_gateable_path("C:\\ws\\pkg\\moon.pkg"))
+  assert_true(is_gateable_path("C:\\ws\\moon.mod"))
   // Not syncheck inputs.
   assert_false(is_gateable_path("notes.md"))
   assert_false(is_gateable_path("moon.work"))

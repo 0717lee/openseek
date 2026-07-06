@@ -22,7 +22,7 @@
 ///   created; the message gains ` (overwrote existing file)` when the path
 ///   already existed, so the model can tell it clobbered prior content.
 /// - `Respond(ToolOutput("rejected: the content for <path> ...", is_error=true))`
-///   when the parse gate refused non-parsing `.mbt` content.
+///   when the parse gate refused non-parsing content.
 /// - `Respond(ToolOutput("error writing <path>: <error>", is_error=true))`
 ///   if the write fails.
 /// - `Respond(ToolOutput("error: write requires ...", is_error=true))` for
@@ -86,38 +86,45 @@ async fn write_file(
         brief="write \{@agent_tool.brief_basename(path)}",
       )
     }
+    // Resolve symlinks once, up front: the realpath decides both whether this
+    // is an existing-source overwrite to reject and — for the syntax gate below
+    // — what KIND the written file really is. A brand-new path has no target, so
+    // realpath fails and it falls back to its own name.
+    let target = @fs.realpath(path) catch {
+      error if @async.is_being_cancelled() => raise error
+      _ => path
+    }
     // Guard the last unguarded source-write path: `write` is not sandboxed (it
     // is an in-process file write, unlike `shell`), so overwriting an existing
     // `.mbt`/`.mbt.md` file here would bypass the line-anchored edit discipline
     // and risk silently dropping content. Existing source must change through
     // `edit`/`multi_edit` (which also insert). Creating a NEW source file, or
-    // writing non-source files, is still allowed.
-    // Resolve symlinks before treating a path as a safe non-source overwrite: a
-    // link named `x.txt` pointing at `lib.mbt` would otherwise slip past the
-    // suffix check and truncate the source through CreateOrTruncate below.
-    if @fs.exists(path) {
-      let target = @fs.realpath(path) catch {
-        error if @async.is_being_cancelled() => raise error
-        _ => path
-      }
-      if is_mbt_source(path) || is_mbt_source(target) {
-        return @agent_tool.ToolAction::respond(
-          "error writing \{path}: existing source file — use edit or multi_edit to change it (an empty old_string inserts new code); write is for creating new files",
-          is_error=true,
-          brief="write \{@agent_tool.brief_basename(path)}",
-        )
-      }
+    // writing non-source files, is still allowed. Resolving the symlink first
+    // stops a link named `x.txt` pointing at `lib.mbt` from slipping past the
+    // suffix check and truncating the source through CreateOrTruncate below.
+    if @fs.exists(path) && (is_mbt_source(path) || is_mbt_source(target)) {
+      return @agent_tool.ToolAction::respond(
+        "error writing \{path}: existing source file — use edit or multi_edit to change it (an empty old_string inserts new code); write is for creating new files",
+        is_error=true,
+        brief="write \{@agent_tool.brief_basename(path)}",
+      )
     }
     // Pre-write syntax gate for syncheck inputs (`.mbt`, `.mbt.md`, `moon.mod`,
     // `moon.pkg`): parse the candidate content in a scratch file first (moonc
     // syncheck needs no project context), so malformed content is rejected
-    // before anything — parent directories included — is created on disk. A
-    // non-parsing file is never a valid intermediate state, and since `write`
-    // refuses to overwrite existing source, the natural retry is another
-    // `write` with corrected content. Fail-open: when the gate cannot run
-    // (moonc missing), write as usual.
-    if input.revert_on_parse_errors && @auto_check.is_gateable_path(path) {
-      let gate = @auto_check.content_parse_errors(path, input.content) catch {
+    // before anything — parent directories included — is created on disk. Gate
+    // by the target's kind so malformed content written THROUGH a link (e.g.
+    // `alias.txt -> moon.pkg`) is caught too. A non-parsing file is never a
+    // valid intermediate state, and since `write` refuses to overwrite existing
+    // source, the natural retry is another `write` with corrected content.
+    // Fail-open: when the gate cannot run (moonc missing), write as usual.
+    let gate_path = if @auto_check.is_gateable_path(target) {
+      target
+    } else {
+      path
+    }
+    if input.revert_on_parse_errors && @auto_check.is_gateable_path(gate_path) {
+      let gate = @auto_check.content_parse_errors(gate_path, input.content) catch {
         error if @async.is_being_cancelled() => raise error
         _ => None
       }
@@ -545,6 +552,26 @@ async test "write fails on a dangling symlink instead of creating its target" {
     assert_true(output.is_error)
     assert_true(output.content.contains("error writing"))
     assert_false(@fs.exists("\{dir}/lib/new.mbt"))
+  })
+}
+
+///|
+/// Writing through a link whose own name is not a syncheck input still gates by
+/// the target's kind: `alias.txt -> moon.pkg` must not let malformed manifest
+/// content land in the real `moon.pkg` (the write would otherwise follow the
+/// link and truncate it). The existing manifest is left untouched.
+async test "write parse-gates manifest content written through a symlink" {
+  @vfs.with_tmpdir(prefix="openseek-write-manifest-link-", dir => {
+    let manifest = "\{dir}/moon.pkg"
+    let original = "import {}\n"
+    @fs.write_file(manifest, original, create_mode=CreateOrTruncate)
+    let link = "\{dir}/alias.txt"
+    @fs.symlink(target="moon.pkg", link)
+    let result = execute({ "path": link, "content": "x" })
+    guard result is Respond(output) else { fail("expected Respond") }
+    assert_true(output.is_error)
+    // The malformed content never reached the manifest.
+    assert_eq(@fs.read_file(manifest).text(), original)
   })
 }
 

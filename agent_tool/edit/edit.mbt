@@ -32,7 +32,7 @@ pub fn definition(
 ) -> @agent_tool.AgentToolDefinition {
   AgentToolDefinition(
     name="edit",
-    description="Replace the first exact text span at or after arguments.start_line in arguments.path with arguments.new_string. Optional end_line restricts the search to a 1-based inclusive line range. Because start_line anchors the location, old_string can be a small exact span instead of a large context block. To INSERT new code instead of replacing, set old_string to the empty string: new_string is inserted at the start of start_line (use start_line = last line + 1 to append at end of file). An edit that would introduce lex/parse errors into a .mbt file is rejected BEFORE writing and the parse errors are returned — see revert_on_parse_errors. For multiple compiler-feedback fixes in one file, use multi_edit with explicit line-anchored edits.",
+    description="Replace the first exact text span at or after arguments.start_line in arguments.path with arguments.new_string. Optional end_line restricts the search to a 1-based inclusive line range. Because start_line anchors the location, old_string can be a small exact span instead of a large context block. To INSERT new code instead of replacing, set old_string to the empty string: new_string is inserted at the start of start_line (use start_line = last line + 1 to append at end of file). An edit that would introduce lex/parse errors into a syntax-checkable file (.mbt, .mbt.md, moon.mod, moon.pkg) is rejected BEFORE writing and the parse errors are returned — see revert_on_parse_errors. For multiple compiler-feedback fixes in one file, use multi_edit with explicit line-anchored edits.",
     schema=JsonSchema({
       "type": "object",
       "properties": {
@@ -245,9 +245,16 @@ async fn parse_gate_rejection(
     _ => path
   }
   // Gate against whichever of the literal path or its symlink target names a
-  // syncheck input; that path's kind (`.mbt`, `.mbt.md`, `moon.mod`,
-  // `moon.pkg`) selects how the candidate content is parsed.
-  let gate_path = if @auto_check.is_gateable_path(path) { path } else { target }
+  // syncheck input, PREFERRING the target: the file that actually gets compiled
+  // is the realpath, so its kind (`.mbt`, `.mbt.md`, `moon.mod`, `moon.pkg`)
+  // decides how the candidate content is parsed. Preferring the link name would
+  // let a `doc.mbt.md -> lib.mbt` alias parse raw source as markdown (only
+  // checked fences gated), passing malformed `.mbt` content through.
+  let gate_path = if @auto_check.is_gateable_path(target) {
+    target
+  } else {
+    path
+  }
   if !@auto_check.is_gateable_path(gate_path) {
     return None
   }
