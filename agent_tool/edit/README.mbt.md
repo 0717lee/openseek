@@ -24,18 +24,17 @@ MoonBit manifests get the same safety check as `write`: edits that would create
 legacy `moon.mod.json`, JSON-style `moon.mod` or `moon.pkg`, or `moon.pkg` with
 `#` comments are rejected before the original file is overwritten.
 
-Edits to `.mbt` files get a pre-write syntax gate: the edited result is parsed
-standalone (`moonc compile -stop-after-parsing` in a scratch file, no project
-context needed), and an edit that would introduce new lex/parse errors is
-rejected with the file left untouched — the call fails with the errors and
-numbered excerpts synthesized from the would-be content. "Introduced" compares
-parse-error *counts* against the original content parsed the same way (not
-diagnostic identities, because an edit shifts the line numbers of every
-pre-existing error below it), so a file that already fails to parse still
-accepts edits, including partial fixes. Type errors never trigger the gate, and
-`.mbt.md` files are not gated (moonc cannot parse markdown-hosted code blocks;
-see the TODO in `agent_tool/internal/auto_check/parse_gate.mbt`).
-`revert_on_parse_errors=false` opts out.
+Edits to syncheck inputs (`.mbt`, `.mbt.md`, `moon.mod`, `moon.pkg`) get a
+pre-write syntax gate: the edited result is parsed standalone (`moonc syncheck`
+in a scratch file, no project context needed), and an edit that would introduce
+new lex/parse errors is rejected with the file left untouched — the call fails
+with the errors and numbered excerpts synthesized from the would-be content.
+"Introduced" compares parse-error *counts* against the original content parsed
+the same way (not diagnostic identities, because an edit shifts the line numbers
+of every pre-existing error below it), so a file that already fails to parse
+still accepts edits, including partial fixes. Type errors never trigger the
+gate; in `.mbt.md` only the checked (`mbt check` / `moonbit check`) fenced blocks
+are parsed. `revert_on_parse_errors=false` opts out.
 
 ## API Style
 
@@ -72,7 +71,7 @@ and the edit should stay inside a tighter range:
 | `new_string`  | string  | yes | Replacement (or inserted) text. For replacement it must differ from `old_string`; empty-and-empty is rejected. |
 | `start_line`  | integer | yes | 1-based first line of the search/replace range. The first match at or after this line is replaced. |
 | `end_line`    | integer | no  | 1-based last line of the search/replace range. Defaults to the file end. |
-| `revert_on_parse_errors` | boolean | no (default `true`) | Reject an edit whose result would introduce new lex/parse errors into a `.mbt` file, leaving the file untouched and returning the errors with excerpts. `.mbt.md` is not gated. Set `false` only to intentionally produce non-parsing content. |
+| `revert_on_parse_errors` | boolean | no (default `true`) | Reject an edit whose result would introduce new lex/parse errors into a syncheck input (`.mbt`, `.mbt.md`, `moon.mod`, `moon.pkg`), leaving the file untouched and returning the errors with excerpts. In `.mbt.md` only the checked fenced blocks are parsed. Set `false` only to intentionally produce non-parsing content. |
 
 Legacy calls with `replace_all=false` are tolerated, but `replace_all=true` is
 rejected. Use `multi_edit` when a compiler diagnostic suggests several known

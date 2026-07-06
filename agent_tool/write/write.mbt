@@ -10,11 +10,12 @@
 /// - `content` (string, required): text to write. The file is truncated
 ///   before writing.
 /// - `revert_on_parse_errors` (boolean, optional, default true): before a new
-///   `.mbt` file is written, its content is parsed standalone (`moonc
-///   -stop-after-parsing`); content with lex/parse errors is rejected and the
-///   errors are returned with excerpts — nothing lands on disk. `.mbt.md` is
-///   not gated (moonc cannot parse markdown; see parse_gate.mbt). Set false
-///   only to intentionally create a file that does not parse (e.g. a fixture).
+///   syncheck input (`.mbt`, `.mbt.md`, `moon.mod`, `moon.pkg`) is written, its
+///   content is parsed standalone (`moonc syncheck`); content with lex/parse
+///   errors is rejected and the errors are returned with excerpts — nothing
+///   lands on disk. In `.mbt.md` only the checked fenced blocks are parsed. Set
+///   false only to intentionally create a file that does not parse (e.g. a
+///   fixture).
 ///
 /// ## Result
 /// - `Respond(ToolOutput("ok: wrote <n> chars to <path>"))` when a new file is
@@ -31,7 +32,7 @@ pub fn definition(
 ) -> @agent_tool.AgentToolDefinition {
   AgentToolDefinition(
     name="write",
-    description="Create a new file at arguments.path with arguments.content (missing parent directories are created), or overwrite an existing non-source file. Overwriting an existing .mbt/.mbt.md source file is rejected: use edit or multi_edit to change existing source (an empty old_string inserts new code). New .mbt content that fails to lex/parse is rejected BEFORE writing and the parse errors are returned — see revert_on_parse_errors. Do not use write to route shell-generated rewrites back into source files. Do not create Markdown or README files unless the user explicitly asks for them.",
+    description="Create a new file at arguments.path with arguments.content (missing parent directories are created), or overwrite an existing non-source file. Overwriting an existing .mbt/.mbt.md source file is rejected: use edit or multi_edit to change existing source (an empty old_string inserts new code). New syntax-checkable content (.mbt, .mbt.md, moon.mod, moon.pkg) that fails to lex/parse is rejected BEFORE writing and the parse errors are returned — see revert_on_parse_errors. Do not use write to route shell-generated rewrites back into source files. Do not create Markdown or README files unless the user explicitly asks for them.",
     schema=JsonSchema({
       "type": "object",
       "properties": {
@@ -39,7 +40,7 @@ pub fn definition(
         "content": { "type": "string" },
         "revert_on_parse_errors": {
           "type": "boolean",
-          "description": "Syntax gate, on by default. Before a new .mbt file is written, its content is parsed standalone (moonc -stop-after-parsing); content with lex/parse errors is REJECTED — nothing is written — and the call returns the errors with excerpts of the offending lines. A file that does not parse is never a valid intermediate state, and write cannot overwrite existing source, so the retry is another write with corrected content. Type errors never trigger the gate (they may be a legitimate transient state during multi-file work), and .mbt.md files are not gated. Set false only to intentionally create a file that does not parse (e.g. a test fixture).",
+          "description": "Syntax gate, on by default. Before a new syntax-checkable file (.mbt, .mbt.md, moon.mod, moon.pkg) is written, its content is parsed standalone (moonc syncheck); content with lex/parse errors is REJECTED — nothing is written — and the call returns the errors with excerpts of the offending lines. A file that does not parse is never a valid intermediate state, and write cannot overwrite existing source, so the retry is another write with corrected content. Type errors never trigger the gate (they may be a legitimate transient state during multi-file work); in .mbt.md only the checked (`mbt check` / `moonbit check`) fenced blocks are parsed. Set false only to intentionally create a file that does not parse (e.g. a test fixture).",
           "examples": [false],
         },
       },
@@ -107,16 +108,16 @@ async fn write_file(
         )
       }
     }
-    // Pre-write syntax gate for plain `.mbt` files: parse the candidate
-    // content in a scratch file first (moonc -stop-after-parsing needs no
-    // project context), so malformed content is rejected before anything —
-    // parent directories included — is created on disk. A non-parsing file is
-    // never a valid intermediate state, and since `write` refuses to overwrite
-    // existing source, the natural retry is another `write` with corrected
-    // content. `.mbt.md` is not gated (see the TODO in parse_gate.mbt).
-    // Fail-open: when the gate cannot run (moonc missing), write as usual.
+    // Pre-write syntax gate for syncheck inputs (`.mbt`, `.mbt.md`, `moon.mod`,
+    // `moon.pkg`): parse the candidate content in a scratch file first (moonc
+    // syncheck needs no project context), so malformed content is rejected
+    // before anything — parent directories included — is created on disk. A
+    // non-parsing file is never a valid intermediate state, and since `write`
+    // refuses to overwrite existing source, the natural retry is another
+    // `write` with corrected content. Fail-open: when the gate cannot run
+    // (moonc missing), write as usual.
     if input.revert_on_parse_errors && @auto_check.is_gateable_path(path) {
-      let gate = @auto_check.content_parse_errors(input.content) catch {
+      let gate = @auto_check.content_parse_errors(path, input.content) catch {
         error if @async.is_being_cancelled() => raise error
         _ => None
       }
@@ -548,17 +549,18 @@ async test "write fails on a dangling symlink instead of creating its target" {
 }
 
 ///|
-async test "write rejects suspiciously tiny moon.pkg" {
+/// `moon.pkg` now flows through the syntax gate too, so malformed config is
+/// rejected before anything lands. Tininess alone is not the trigger — the
+/// manifest guard's commented-out "suspiciously small" heuristic stays off, and
+/// a valid dummy (`import {}`) still writes (see the parent-directories test) —
+/// invalid syntax is. A bare `x` is not a valid package statement.
+async test "write parse-gates a malformed moon.pkg" {
   @vfs.with_tmpdir(prefix="openseek-write-manifest-", dir => {
     let path = "\{dir}/moon.pkg"
     let result = execute({ "path": path, "content": "x" })
     guard result is Respond(output) else { fail("expected Respond") }
-    debug_inspect(
-      output.is_error,
-      content=(
-        #|false
-      ),
-    )
+    assert_true(output.is_error)
+    assert_false(@fs.exists(path))
   })
 }
 
@@ -620,7 +622,8 @@ test "write_reject_report pushes smaller parts when parse errors cascade" {
 
 ///|
 /// End-to-end through real moonc: the gate needs no moon project, so a plain
-/// tmpdir exercises the reject, the opt-out, and the ungated `.mbt.md` path.
+/// tmpdir exercises the reject, the opt-out, and the `.mbt.md` doc path (whose
+/// checked fenced blocks are now gated too).
 async test "write gates .mbt content through moonc before writing" {
   @vfs.with_tmpdir(prefix="openseek-write-gate-", dir => {
     // Broken .mbt: rejected, nothing on disk (not even parent dirs).
@@ -651,7 +654,7 @@ async test "write gates .mbt content through moonc before writing" {
     guard fixture is Respond(fx) else { fail("expected Respond") }
     assert_false(fx.is_error)
     assert_true(@fs.exists("\{dir}/lib/fixture.mbt"))
-    // .mbt.md is not gated: markdown content is written untouched.
+    // .mbt.md prose (no checked block): parses clean, written untouched.
     let doc = execute({
       "path": "\{dir}/lib/doc.mbt.md",
       "content": "# Doc\n\nprose only\n",
@@ -659,6 +662,14 @@ async test "write gates .mbt content through moonc before writing" {
     guard doc is Respond(md) else { fail("expected Respond") }
     assert_false(md.is_error)
     assert_true(@fs.exists("\{dir}/lib/doc.mbt.md"))
+    // .mbt.md with a broken ```mbt check block: gated like source, rejected.
+    let broken_doc = execute({
+      "path": "\{dir}/lib/broken.mbt.md",
+      "content": "# Doc\n\n```mbt check\n///|\npub fn h() -> Int {\n  let x =\n}\n```\n",
+    })
+    guard broken_doc is Respond(bad) else { fail("expected Respond") }
+    assert_true(bad.is_error)
+    assert_false(@fs.exists("\{dir}/lib/broken.mbt.md"))
   })
 }
 

@@ -1,17 +1,18 @@
 ///|
-/// Standalone syntax gate for `.mbt` content, built on
-/// `moonc compile -stop-after-parsing`: the compiler parses one file with no
-/// project context, so candidate content can be validated in a scratch file
-/// BEFORE it is written to its destination — a reject leaves no broken file to
-/// delete or restore. `-stop-after-parsing` reports only lexer/parser
-/// diagnostics (type errors never appear), making this a pure syntax check.
+/// Standalone syntax gate built on `moonc syncheck`, moonc's dedicated
+/// parse-only front end: it lexes and parses one file with no project context
+/// and reports lexer/parser diagnostics as JSON (type and resolution errors do
+/// not gate — see `is_parse_error_code`), so candidate content can be validated
+/// in a scratch file BEFORE it lands at its destination — a reject leaves no
+/// broken file to delete or restore.
 ///
-/// TODO(.mbt.md): raw moonc lexes markdown files as MoonBit source (the `#`
-/// heading and ``` fences themselves become lexing errors), so `.mbt.md`
-/// content cannot be gated this way. Gating doc files would need moon's own
-/// fenced-block extraction (```moonbit check vs plain fences, nocheck
-/// attributes); until then `.mbt.md` writes and edits are not parse-gated.
-const MooncParseCommand : String = "moonc compile -no-intermediate-file -stop-after-parsing -error-format json"
+/// `syncheck` recognizes its input kind by name (see `gate_scratch_name`):
+/// `.mbt` source; `.mbt.md` doc files, where it parses only the ` ```mbt check `
+/// and ` ```moonbit check ` fenced blocks and skips plain and `nocheck` fences,
+/// matching moon's own extraction; and the textual `moon.mod` / `moon.pkg`
+/// config files. `moon.work` and the legacy `*.json` config files are not
+/// `syncheck` inputs, so they are not gated.
+const MooncSyncheckCommand : String = "moonc syncheck -error-format json"
 
 ///|
 /// How many lex/parse errors a reject report surfaces. Each entry carries a
@@ -22,8 +23,11 @@ pub const ParseErrorDisplayLimit : Int = 5
 ///|
 /// The `error_code` range for lexer and parser diagnostics (e.g. 3001 "Lexing
 /// error", 3002 "Parse error"). Codes at 4000 and above are type/resolution
-/// errors, which never appear under `-stop-after-parsing` anyway; the range
-/// check keeps the gate honest if that ever changes.
+/// errors — including the `moon.pkg` / `moon.mod` config-validation diagnostics
+/// (e.g. 4192 "Invalid configuration") that syncheck emits alongside genuine
+/// parse errors. Those are semantic, not syntactic, and may be a legitimate
+/// transient state mid-edit, so the range check keeps the gate to pure syntax,
+/// matching how `.mbt` type errors never gate.
 const ParseErrorCodeMin : Int = 3000
 
 ///|
@@ -47,10 +51,26 @@ const MooncParseTimeoutMs : Int = 10000
 const MooncParseMaxOutputChars : Int = 200000
 
 ///|
-/// The scratch file is always named this and the command runs from the scratch
-/// directory, so the command line never embeds a host path that would need
-/// platform-specific quoting.
-const ParseGateFileName : String = "parse_gate.mbt"
+/// The scratch-file basename `moonc syncheck` needs for `path`'s input kind, or
+/// `None` when `path` is not a syncheck input (so the gate does not apply).
+/// syncheck keys off the name: `.mbt` / `.mbt.md` match by suffix, while
+/// `moon.mod` / `moon.pkg` must be that EXACT basename (a `foo.moon.pkg` or a
+/// `moon.pkg.json` is not recognized). The command always runs from the scratch
+/// directory against this bare name, so the command line never embeds a host
+/// path that would need platform-specific quoting.
+fn gate_scratch_name(path : String) -> String? {
+  if path.has_suffix(".mbt.md") {
+    Some("parse_gate.mbt.md")
+  } else if path.has_suffix(".mbt") {
+    Some("parse_gate.mbt")
+  } else if path == "moon.mod" || path.has_suffix("/moon.mod") {
+    Some("moon.mod")
+  } else if path == "moon.pkg" || path.has_suffix("/moon.pkg") {
+    Some("moon.pkg")
+  } else {
+    None
+  }
+}
 
 ///|
 /// One lex/parse diagnostic from the gate. `loc` keeps the compiler's
@@ -65,10 +85,10 @@ pub(all) struct ParseGateError {
 } derive(Debug)
 
 ///|
-/// Whether the parse gate applies to `path`: plain `.mbt` only. `.mbt.md` is
-/// excluded — see the TODO above.
+/// Whether the parse gate applies to `path` — i.e. `moonc syncheck` accepts its
+/// input kind: `.mbt`, `.mbt.md`, or an exact `moon.mod` / `moon.pkg`.
 pub fn is_gateable_path(path : String) -> Bool {
-  path.has_suffix(".mbt") && !path.has_suffix(".mbt.md")
+  gate_scratch_name(path) is Some(_)
 }
 
 ///|
@@ -82,11 +102,17 @@ pub(all) struct ParseGate {
 } derive(Debug)
 
 ///|
-/// Parse `content` as a single standalone `.mbt` file and return its
-/// lex/parse errors (empty `errors` = parses cleanly). Returns `None` when
-/// the gate could not run — moonc missing, scratch dir unwritable, timeout —
-/// so callers fail open, matching the other auto-check guards.
-pub async fn content_parse_errors(content : String) -> ParseGate? {
+/// Parse `content` as the standalone `moonc syncheck` input named by `path`'s
+/// kind and return its lex/parse errors (empty `errors` = parses cleanly).
+/// `path` only selects the scratch-file name (its input kind) — it is never
+/// read from disk. Returns `None` when the gate could not run — `path` is not a
+/// syncheck input, moonc missing, scratch dir unwritable, timeout — so callers
+/// fail open, matching the other auto-check guards.
+pub async fn content_parse_errors(
+  path : String,
+  content : String,
+) -> ParseGate? {
+  guard gate_scratch_name(path) is Some(scratch_name) else { return None }
   let dir = @fs.tmpdir(prefix="openseek-parse-gate-") catch {
     error if @async.is_being_cancelled() => raise error
     _ => return None
@@ -101,13 +127,13 @@ pub async fn content_parse_errors(content : String) -> ParseGate? {
   }
   try {
     @fs.write_file(
-      "\{dir}/\{ParseGateFileName}",
+      "\{dir}/\{scratch_name}",
       content,
       create_mode=CreateOrTruncate,
     )
     let result = @async.with_timeout_opt(MooncParseTimeoutMs, () => {
       @shell.collect_shell_output(
-        "\{MooncParseCommand} \{ParseGateFileName}",
+        "\{MooncSyncheckCommand} \{scratch_name}",
         cwd=dir,
         max_output_chars=MooncParseMaxOutputChars,
       )
@@ -437,14 +463,14 @@ test "loc_line_span reads spans, single points, and rejects junk" {
 /// Real-moonc round trips: unlike `moon check`, the standalone gate can run
 /// inside `moon test` safely (no project build lock is involved).
 async test "content_parse_errors gates real content through moonc" {
-  guard content_parse_errors("///|\npub fn ok() -> Int {\n  42\n}\n")
+  guard content_parse_errors("a.mbt", "///|\npub fn ok() -> Int {\n  42\n}\n")
     is Some(clean) else {
     fail("expected the gate to run (is moonc on PATH?)")
   }
   assert_eq(clean.errors.length(), 0)
   assert_false(clean.truncated)
   let bad_content = "///|\npub fn bad() -> Int {\n  let x =\n}\n"
-  guard content_parse_errors(bad_content) is Some(gate) else {
+  guard content_parse_errors("a.mbt", bad_content) is Some(gate) else {
     fail("expected the gate to run (is moonc on PATH?)")
   }
   assert_true(gate.errors.length() > 0)
@@ -465,10 +491,81 @@ async test "content_parse_errors gates real content through moonc" {
   // parameter type), so the gate must trust captured diagnostics, never the
   // exit code — this content must still be rejected.
   guard content_parse_errors(
-      "///|\nfn f(input : String, pos : &mut Int) -> Unit {\n  ignore(input)\n}\n",
+      "a.mbt", "///|\nfn f(input : String, pos : &mut Int) -> Unit {\n  ignore(input)\n}\n",
     )
     is Some(recovered) else {
     fail("expected the gate to run (is moonc on PATH?)")
   }
   assert_true(recovered.errors.length() > 0)
+}
+
+///|
+/// `is_gateable_path` matches exactly the input kinds `moonc syncheck` accepts:
+/// `.mbt`, `.mbt.md`, and an exact `moon.mod` / `moon.pkg` basename. Nested
+/// config files count; prefixed names (`x.moon.pkg`) and the legacy JSON /
+/// `moon.work` files do not.
+test "is_gateable_path covers syncheck input kinds only" {
+  assert_true(is_gateable_path("lib/a.mbt"))
+  assert_true(is_gateable_path("README.mbt.md"))
+  assert_true(is_gateable_path("moon.mod"))
+  assert_true(is_gateable_path("sub/pkg/moon.pkg"))
+  // Not syncheck inputs.
+  assert_false(is_gateable_path("notes.md"))
+  assert_false(is_gateable_path("moon.work"))
+  assert_false(is_gateable_path("moon.mod.json"))
+  assert_false(is_gateable_path("moon.pkg.json"))
+  assert_false(is_gateable_path("x.moon.pkg"))
+  assert_false(is_gateable_path("config.json"))
+}
+
+///|
+/// Real-syncheck round trips for the non-`.mbt` kinds. `.mbt.md` gates only the
+/// checked fenced blocks: a broken ` ```mbt check ` block is rejected, while the
+/// same break behind a plain (unchecked) fence is not, matching moon's own
+/// extraction. `moon.mod` / `moon.pkg` gate the textual config grammar.
+async test "content_parse_errors gates .mbt.md, moon.mod and moon.pkg" {
+  let checked_bad =
+    #|# Title
+    #|
+    #|```mbt check
+    #|///|
+    #|pub fn bad() -> Int {
+    #|  let x =
+    #|}
+    #|```
+  guard content_parse_errors("README.mbt.md", checked_bad) is Some(md) else {
+    fail("expected the gate to run (is moonc on PATH?)")
+  }
+  assert_true(md.errors.length() > 0)
+  assert_true(md.errors[0].message.contains("Parse error"))
+  // The same break behind a plain fence is display-only: syncheck skips it.
+  let plain_bad = checked_bad.replace(old="```mbt check", new="```mbt")
+  guard content_parse_errors("README.mbt.md", plain_bad) is Some(plain) else {
+    fail("expected the gate to run (is moonc on PATH?)")
+  }
+  assert_eq(plain.errors.length(), 0)
+  // Textual moon.mod / moon.pkg: clean parses, then real lex/parse breakage.
+  guard content_parse_errors(
+      "moon.mod", "name = \"me/proj\"\nversion = \"0.1.0\"\n",
+    )
+    is Some(mod_ok) else {
+    fail("expected the gate to run (is moonc on PATH?)")
+  }
+  assert_eq(mod_ok.errors.length(), 0)
+  guard content_parse_errors("moon.mod", "name = \"me/proj\n") is Some(mod_bad) else {
+    fail("expected the gate to run (is moonc on PATH?)")
+  }
+  assert_true(mod_bad.errors.length() > 0)
+  guard content_parse_errors("moon.pkg", "import {\n  \"me/proj/lib\",\n}\n")
+    is Some(pkg_ok) else {
+    fail("expected the gate to run (is moonc on PATH?)")
+  }
+  assert_eq(pkg_ok.errors.length(), 0)
+  guard content_parse_errors("moon.pkg", "import {\n  \"me/proj/lib\"\n")
+    is Some(pkg_bad) else {
+    fail("expected the gate to run (is moonc on PATH?)")
+  }
+  assert_true(pkg_bad.errors.length() > 0)
+  // A non-syncheck path never runs the gate — the caller fails open.
+  assert_true(content_parse_errors("moon.work", "members = [ ]\n") is None)
 }

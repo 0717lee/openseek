@@ -12,7 +12,7 @@ pub const RevertErrorDisplayLimit : Int = 10
 
 pub async fn append_summary(String, String) -> String
 
-pub async fn content_parse_errors(String) -> ParseGate?
+pub async fn content_parse_errors(String, String) -> ParseGate?
 
 pub async fn count_errors(String) -> CheckErrors?
 

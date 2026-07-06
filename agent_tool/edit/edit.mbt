@@ -12,11 +12,11 @@
 /// - `replace_all=true` is rejected. Use `multi_edit` for multiple explicit
 ///   line-anchored replacements.
 /// - `revert_on_parse_errors` (boolean, optional, default true): before an
-///   edit to a `.mbt` file is written, the edited result is parsed standalone
-///   (`moonc -stop-after-parsing`); an edit that would introduce new
-///   lex/parse errors is rejected and the file is left untouched. Pre-existing
-///   parse errors never trigger the gate, and `.mbt.md` is not gated (moonc
-///   cannot parse markdown; see parse_gate.mbt).
+///   edit to a syncheck input (`.mbt`, `.mbt.md`, `moon.mod`, `moon.pkg`) is
+///   written, the edited result is parsed standalone (`moonc syncheck`); an
+///   edit that would introduce new lex/parse errors is rejected and the file is
+///   left untouched. Pre-existing parse errors never trigger the gate; in
+///   `.mbt.md` only the checked fenced blocks are parsed.
 ///
 /// ## Result
 /// - `Respond(ToolOutput("ok: replaced <n> occurrence(s) at line <line> in <path>"))`
@@ -43,7 +43,7 @@ pub fn definition(
         "end_line": { "type": "integer" },
         "revert_on_parse_errors": {
           "type": "boolean",
-          "description": "Syntax gate, on by default. Before the edit is written to a .mbt file, the edited result is parsed standalone (moonc -stop-after-parsing); an edit that would INTRODUCE new lex/parse errors — measured against the pre-edit content parsed the same way, so pre-existing parse errors are ignored — is REJECTED, the file is left untouched, and the call returns the errors with excerpts of the would-be content. Type errors never trigger the gate (they may be a legitimate transient state), and .mbt.md files are not gated. Set false only to intentionally produce content that does not parse (e.g. a fixture).",
+          "description": "Syntax gate, on by default. Before the edit is written to a syntax-checkable file (.mbt, .mbt.md, moon.mod, moon.pkg), the edited result is parsed standalone (moonc syncheck); an edit that would INTRODUCE new lex/parse errors — measured against the pre-edit content parsed the same way, so pre-existing parse errors are ignored — is REJECTED, the file is left untouched, and the call returns the errors with excerpts of the would-be content. Type errors never trigger the gate (they may be a legitimate transient state); in .mbt.md only the checked (`mbt check` / `moonbit check`) fenced blocks are parsed. Set false only to intentionally produce content that does not parse (e.g. a fixture).",
           "examples": [false],
         },
       },
@@ -214,8 +214,8 @@ async fn commit_edit(
 const SmallerEditsHintThreshold : Int = 3
 
 ///|
-/// Pre-write syntax gate for `.mbt` edits: parse the candidate result in a
-/// scratch file (moonc -stop-after-parsing, no project context) and reject
+/// Pre-write syntax gate for syncheck-input edits: parse the candidate result
+/// in a scratch file (moonc syncheck, no project context) and reject
 /// the edit — leaving the file untouched — when it would introduce new parse
 /// errors. "Introduced" compares parse-error counts against the ORIGINAL
 /// content parsed the same way, so a file that already fails to parse can
@@ -223,9 +223,10 @@ const SmallerEditsHintThreshold : Int = 3
 /// identities, on purpose: an edit shifts the line numbers of every
 /// pre-existing error below it, so identity matching keyed on locations would
 /// false-fire constantly; the blind spot (an edit that fixes one parse error
-/// while introducing another, keeping the count flat) is accepted. `.mbt.md`
-/// is not gated (see the TODO in parse_gate.mbt). Fail-open: when the gate
-/// cannot run, the edit proceeds as before the gate existed.
+/// while introducing another, keeping the count flat) is accepted. The gate
+/// applies to every syncheck input — `.mbt`, `.mbt.md` (checked fenced blocks
+/// only), `moon.mod`, `moon.pkg` — keyed off `path`'s kind. Fail-open: when the
+/// gate cannot run, the edit proceeds as before the gate existed.
 async fn parse_gate_rejection(
   path : String,
   original_content~ : String,
@@ -243,18 +244,21 @@ async fn parse_gate_rejection(
     error if @async.is_being_cancelled() => raise error
     _ => path
   }
-  if !@auto_check.is_gateable_path(path) &&
-    !@auto_check.is_gateable_path(target) {
+  // Gate against whichever of the literal path or its symlink target names a
+  // syncheck input; that path's kind (`.mbt`, `.mbt.md`, `moon.mod`,
+  // `moon.pkg`) selects how the candidate content is parsed.
+  let gate_path = if @auto_check.is_gateable_path(path) { path } else { target }
+  if !@auto_check.is_gateable_path(gate_path) {
     return None
   }
-  let gate = @auto_check.content_parse_errors(new_content) catch {
+  let gate = @auto_check.content_parse_errors(gate_path, new_content) catch {
     error if @async.is_being_cancelled() => raise error
     _ => None
   }
   guard gate is Some(gate) && gate.errors.length() > 0 else { return None }
   // The edited result has parse errors; reject only when the edit makes the
   // file WORSE than its original content parsed the same way.
-  let before = @auto_check.content_parse_errors(original_content) catch {
+  let before = @auto_check.content_parse_errors(gate_path, original_content) catch {
     error if @async.is_being_cancelled() => raise error
     _ => None
   }

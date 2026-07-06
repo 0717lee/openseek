@@ -42,19 +42,19 @@ as are `moon.pkg` rewrites that use JSON-style syntax or `#` comments. Generated
 `*.generated.mbti` interface files are rejected too; refresh them with `moon info`
 instead.
 
-New `.mbt` content gets a pre-write syntax gate: the content is parsed
-standalone (`moonc compile -stop-after-parsing` in a scratch file, no project
-context needed), and content with lex/parse errors is rejected before anything —
-parent directories included — is created on disk. The call fails with the errors
-and numbered excerpts synthesized from the rejected content. A non-parsing file
-is never a valid intermediate state, and `write` refuses to overwrite existing
-source, so the natural retry is another `write` with corrected content. Three or
-more parse errors switch the retry hint to writing a smaller skeleton first and
-growing it with `edit`. Type errors never trigger the gate — they can be a
-legitimate transient state during multi-file work — and `.mbt.md` files are not
-gated (moonc cannot parse markdown-hosted code blocks; see the TODO in
-`agent_tool/internal/auto_check/parse_gate.mbt`). `revert_on_parse_errors=false`
-opts out for deliberately non-parsing fixtures.
+New syncheck inputs (`.mbt`, `.mbt.md`, `moon.mod`, `moon.pkg`) get a pre-write
+syntax gate: the content is parsed standalone (`moonc syncheck` in a scratch
+file, no project context needed), and content with lex/parse errors is rejected
+before anything — parent directories included — is created on disk. The call
+fails with the errors and numbered excerpts synthesized from the rejected
+content. A non-parsing file is never a valid intermediate state, and `write`
+refuses to overwrite existing source, so the natural retry is another `write`
+with corrected content. Three or more parse errors switch the retry hint to
+writing a smaller skeleton first and growing it with `edit`. Type errors never
+trigger the gate — they can be a legitimate transient state during multi-file
+work; in `.mbt.md` only the checked (`mbt check` / `moonbit check`) fenced blocks
+are parsed. `revert_on_parse_errors=false` opts out for deliberately non-parsing
+fixtures.
 
 ## Arguments
 
@@ -62,7 +62,7 @@ opts out for deliberately non-parsing fixtures.
 | --------- | ------ | -------- | ----- |
 | `path`    | string | yes | Filesystem path. Relative paths resolve against the agent process's current working directory. |
 | `content` | string | yes | Full file body. Empty strings are accepted and produce a zero-byte file. |
-| `revert_on_parse_errors` | boolean | no (default `true`) | Reject new `.mbt` content that fails to lex/parse before anything is written, returning the errors with excerpts. `.mbt.md` is not gated. Set `false` only to intentionally create a non-parsing file (e.g. a fixture). |
+| `revert_on_parse_errors` | boolean | no (default `true`) | Reject new syncheck-input content (`.mbt`, `.mbt.md`, `moon.mod`, `moon.pkg`) that fails to lex/parse before anything is written, returning the errors with excerpts. In `.mbt.md` only the checked fenced blocks are parsed. Set `false` only to intentionally create a non-parsing file (e.g. a fixture). |
 
 ## Action
 

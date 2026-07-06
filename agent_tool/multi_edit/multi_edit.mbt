@@ -54,7 +54,7 @@ pub fn definition(
         },
         "revert_on_parse_errors": {
           "type": "boolean",
-          "description": "Syntax gate, on by default. Before the batch is written, each edited .mbt file's rendered result is parsed standalone (moonc -stop-after-parsing); if any file would gain new lex/parse errors — measured against its pre-batch content parsed the same way, so pre-existing parse errors are ignored — the WHOLE batch is rejected with no files changed, and the call returns the errors with excerpts of the would-be content. Type errors never trigger this gate (the post-write revert_when_errors_above guard covers those), and .mbt.md files are not gated. Set false only to intentionally produce content that does not parse (e.g. a fixture).",
+          "description": "Syntax gate, on by default. Before the batch is written, each edited syntax-checkable file's (.mbt, .mbt.md, moon.mod, moon.pkg) rendered result is parsed standalone (moonc syncheck); if any file would gain new lex/parse errors — measured against its pre-batch content parsed the same way, so pre-existing parse errors are ignored — the WHOLE batch is rejected with no files changed, and the call returns the errors with excerpts of the would-be content. Type errors never trigger this gate (the post-write revert_when_errors_above guard covers those); in .mbt.md only the checked (`mbt check` / `moonbit check`) fenced blocks are parsed. Set false only to intentionally produce content that does not parse (e.g. a fixture).",
           "examples": [false],
         },
       },
@@ -313,14 +313,13 @@ priv struct FileRejection {
 }
 
 ///|
-/// Pre-write syntax gate over the rendered batch: parse each edited `.mbt`
-/// file's would-be result standalone (moonc -stop-after-parsing, see
-/// parse_gate.mbt) and reject the whole batch when any file would gain new
-/// parse errors versus its pre-batch content parsed the same way. The same
-/// soundness rules as `edit`'s gate apply per file: fail open when the gate
-/// cannot run or the baseline is missing/truncated, accept a truncated
-/// new-content capture as a lower bound, and resolve symlinked targets before
-/// deciding whether a file is gateable.
+/// Pre-write syntax gate over the rendered batch: parse each edited syncheck
+/// input's would-be result standalone (moonc syncheck, see parse_gate.mbt) and
+/// reject the whole batch when any file would gain new parse errors versus its
+/// pre-batch content parsed the same way. The same soundness rules as `edit`'s
+/// gate apply per file: fail open when the gate cannot run or the baseline is
+/// missing/truncated, accept a truncated new-content capture as a lower bound,
+/// and resolve symlinked targets before deciding whether a file is gateable.
 async fn parse_gate_batch_rejection(
   writes : Array[PreparedWrite],
 ) -> @agent_tool.ToolAction? {
@@ -330,16 +329,23 @@ async fn parse_gate_batch_rejection(
       error if @async.is_being_cancelled() => raise error
       _ => write.path
     }
-    if !@auto_check.is_gateable_path(write.path) &&
-      !@auto_check.is_gateable_path(target) {
+    let gate_path = if @auto_check.is_gateable_path(write.path) {
+      write.path
+    } else {
+      target
+    }
+    if !@auto_check.is_gateable_path(gate_path) {
       continue
     }
-    let gate = @auto_check.content_parse_errors(write.new_content) catch {
+    let gate = @auto_check.content_parse_errors(gate_path, write.new_content) catch {
       error if @async.is_being_cancelled() => raise error
       _ => None
     }
     guard gate is Some(gate) && gate.errors.length() > 0 else { continue }
-    let before = @auto_check.content_parse_errors(write.original_content) catch {
+    let before = @auto_check.content_parse_errors(
+      gate_path,
+      write.original_content,
+    ) catch {
       error if @async.is_being_cancelled() => raise error
       _ => None
     }
