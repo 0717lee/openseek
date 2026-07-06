@@ -79,44 +79,6 @@ impl ToJson for ToolCall with fn to_json(call : ToolCall) -> Json {
 }
 
 ///|
-/// Omit `thinking` parameter for Kimi K2.7 Code.
-///
-/// > When using kimi-k2.7-code you do not need to (and should not) pass the
-/// > thinking parameter ...
-///
-/// See: https://platform.kimi.ai/docs/guide/use-kimi-k2-thinking-model#using-the-kimi-k2-7-code-model
-fn thinking_json_fields(
-  model : Model,
-  thinking : ThinkingMode?,
-) -> Array[(String, Json)] {
-  if model is Kimi(_) {
-    return []
-  }
-  match thinking {
-    Some(No) => [("thinking", { "type": "disabled" })]
-    Some(High) =>
-      [("thinking", { "type": "enabled" }), ("reasoning_effort", "high")]
-    Some(Max) =>
-      [("thinking", { "type": "enabled" }), ("reasoning_effort", "max")]
-    None => []
-  }
-}
-
-///|
-const KimiDefaultMaxTokens : Int = 32_000
-
-///|
-fn max_tokens_json_fields(model : Model) -> Array[(String, Json)] {
-  if model is Kimi(_) {
-    // Keep the default aligned with kimi-cli's Kimi provider:
-    // https://github.com/MoonshotAI/kimi-cli/blob/2c34efbbc6c7cfe40770623281e87c138ff8eb6c/packages/kosong/src/kosong/chat_provider/kimi.py#L163-L166
-    [("max_tokens", Json::number(KimiDefaultMaxTokens.to_double()))]
-  } else {
-    []
-  }
-}
-
-///|
 /// Encodes a DeepSeek chat completions request body.
 ///
 /// `response_format`, `tools`, and `thinking` are omitted when empty / `None`.
@@ -148,8 +110,28 @@ pub fn encode_chat_request(
         ..if tools.length() > 0 {
           [("tools", ([ for tool in tools => tool ] : Json))]
         },
-        ..thinking_json_fields(model, thinking),
-        ..max_tokens_json_fields(model),
+        // Kimi K2.7 Code documentation says not to pass `thinking`.
+        // https://platform.kimi.ai/docs/guide/use-kimi-k2-thinking-model#using-the-kimi-k2-7-code-model
+        ..if !(model is Kimi(_)) && thinking is Some(mode) {
+          match mode {
+            No => [("thinking", ({ "type": "disabled" } : Json))]
+            High =>
+              [
+                ("thinking", ({ "type": "enabled" } : Json)),
+                ("reasoning_effort", Json::string("high")),
+              ]
+            Max =>
+              [
+                ("thinking", ({ "type": "enabled" } : Json)),
+                ("reasoning_effort", Json::string("max")),
+              ]
+          }
+        },
+        ..if model is Kimi(_) {
+          // Keep the default aligned with kimi-cli's Kimi provider:
+          // https://github.com/MoonshotAI/kimi-cli/blob/2c34efbbc6c7cfe40770623281e87c138ff8eb6c/packages/kosong/src/kosong/chat_provider/kimi.py#L163-L166
+          [("max_tokens", Json::number(32000.0))]
+        },
       ],
     ),
   )
