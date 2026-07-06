@@ -52,8 +52,9 @@ pub struct ShellExecution {
   // Foreground semantics: kill the child once the sink fills (its output prefix
   // reached the hard cap), so an un-timed runaway producer cannot hang the tool
   // call. A background job leaves this false — it caps retention but keeps
-  // running.
-  priv kill_when_full : Bool
+  // running. Cleared by `background()`: a detached command becomes a background
+  // job and should not be killed just for producing more output.
+  priv mut kill_when_full : Bool
 }
 
 ///|
@@ -214,6 +215,9 @@ pub async fn ShellExecution::wait(self : ShellExecution) -> Unit {
 pub fn ShellExecution::background(self : ShellExecution) -> Bool {
   guard self.status is Running else { return false }
   self.status = Backgrounded
+  // No longer a foreground call: keep running and cap retention like any
+  // background job, rather than being killed for filling the sink.
+  self.kill_when_full = false
   true
 }
 

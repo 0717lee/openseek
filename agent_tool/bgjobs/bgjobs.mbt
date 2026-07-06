@@ -131,9 +131,23 @@ pub async fn BgJobRuntime::start(
   cwd? : String,
   max_output_chars? : Int = default_max_output_chars,
 ) -> String {
-  let id = self.next_id()
   // A non-positive budget is clamped by the sink; pass through as-is.
   let exec = (self.spawn_exec)(program, args, cwd, max_output_chars)
+  self.adopt(exec, command~, cwd?)
+}
+
+///|
+/// Register an already-running `ShellExecution` as a background job and return
+/// its id. Used by detach-on-timeout: a foreground command that outlived its
+/// timeout is `background()`-ed and adopted here, so `shell_output`/`shell_stop`
+/// and the completion notice see it like any explicit background job.
+pub fn BgJobRuntime::adopt(
+  self : BgJobRuntime,
+  exec : @shell_exec.ShellExecution,
+  command~ : String,
+  cwd? : String,
+) -> String {
+  let id = self.next_id()
   self.jobs[id] = { id, command, cwd, exec }
   // Watch for a natural exit and fire `on_job_exit` once. The job entry is set
   // above before the watcher runs (the watcher first awaits the exit, ≥ one

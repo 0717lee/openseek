@@ -3,6 +3,7 @@ package "bobzhang/openseek/agent_tool/bgjobs"
 
 import {
   "bobzhang/openseek/agent_runtime",
+  "bobzhang/openseek/agent_tool/shell_exec",
 }
 
 // Values
@@ -13,6 +14,7 @@ import {
 pub struct BgJobRuntime {
   // private fields
 }
+pub fn BgJobRuntime::adopt(Self, @shell_exec.ShellExecution, command~ : String, cwd? : String) -> String
 pub fn BgJobRuntime::list(Self) -> Array[BgJobSnapshot]
 pub fn[X] BgJobRuntime::new(@agent_runtime.AgentTaskScope[X], on_job_exit? : (BgJobSnapshot) -> Unit) -> Self
 pub fn BgJobRuntime::snapshot(Self, String) -> BgJobSnapshot?

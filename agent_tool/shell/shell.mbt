@@ -180,9 +180,23 @@ async fn shell(
       bg_runtime?,
     )
   }
+  // Detach-on-timeout: with both a background runtime and a foreground spawner
+  // (the agent's configuration), a command that outlives its timeout is moved to
+  // the background instead of killed — the model keeps watching it with
+  // shell_output / shell_stop rather than losing it.
+  let on_timeout_detach : ((@shell_exec.ShellExecution) -> String)? = match
+    (bg_runtime, foreground_spawn) {
+    (Some(runtime), Some(_)) =>
+      Some(exec => {
+        let _ = exec.background()
+        runtime.adopt(exec, command=input.cmd, cwd?)
+      })
+    _ => None
+  }
   // `run_agent_shell_with_tree_precheck` owns the timeout now: with a session
-  // scope it awaits a session-group execution and stops it on timeout (so the
-  // process cannot leak); without one it wraps the per-call collection path.
+  // scope it awaits a session-group execution and, on timeout, detaches it (or
+  // stops it) so the process cannot leak; without one it wraps the per-call
+  // collection path.
   let result = run_agent_shell_with_tree_precheck(
     workspace_root,
     input.cmd,
@@ -191,6 +205,7 @@ async fn shell(
     max_output_chars=input.max_output_chars,
     timeout_ms?=input.timeout_ms,
     foreground_spawn?,
+    on_timeout_detach?,
   )
   let agent_output = match result {
     ShellExecuted(output) => output
@@ -205,6 +220,13 @@ async fn shell(
       return @agent_tool.ToolAction::respond(
         "error: shell command timed out after \{timeout_ms}ms",
         is_error=true,
+      )
+    }
+    ShellDetached(id) => {
+      let timeout_ms = input.timeout_ms.unwrap_or(0)
+      return @agent_tool.ToolAction::respond(
+        "command still running after \{timeout_ms}ms; moved to the background as job \{id}. Read its output with shell_output (job_id=\"\{id}\") and stop it with shell_stop (job_id=\"\{id}\").",
+        brief="\{@agent_tool.brief_line(input.cmd, limit=48)} → bg \{id}",
       )
     }
   }
@@ -314,6 +336,9 @@ priv enum ShellRunResult {
   ShellExecuted(AgentShellOutput)
   // The command was still running after `timeout_ms` and was stopped.
   ShellTimedOut
+  // The command was still running after `timeout_ms` and was detached to the
+  // background instead of stopped; carries the new job id.
+  ShellDetached(String)
 }
 
 ///|
@@ -325,6 +350,7 @@ async fn run_agent_shell_with_tree_precheck(
   max_output_chars~ : Int,
   timeout_ms? : Int,
   foreground_spawn? : async (String, Array[String], String?, Int) -> @shell_exec.ShellExecution,
+  on_timeout_detach? : (@shell_exec.ShellExecution) -> String,
 ) -> ShellRunResult {
   match
     direct_source_tree_operation_target(parsed_command, workspace_root, cwd) {
@@ -351,10 +377,16 @@ async fn run_agent_shell_with_tree_precheck(
         None => Some(exec.wait())
       }
       match finished {
-        None => {
-          let _ = exec.stop()
-          ShellTimedOut
-        }
+        // Timed out. Detach it to the background if a hook is provided
+        // (detach-on-timeout), otherwise stop it.
+        None =>
+          match on_timeout_detach {
+            Some(detach) => ShellDetached(detach(exec))
+            None => {
+              let _ = exec.stop()
+              ShellTimedOut
+            }
+          }
         Some(_) => ShellExecuted(agent_shell_output_from_exec(exec, launch))
       }
     }

@@ -25,8 +25,14 @@ async fn run_shell_in_workspace(
 async fn[X] run_shell_foreground(
   scope : @agent_runtime.AgentTaskScope[X],
   arguments : Json,
+  bg_runtime? : @bgjobs.BgJobRuntime,
 ) -> @agent_tool.ToolAction {
-  let definition = @shell.definition(foreground_spawn=(program, args, cwd, max) => {
+  let definition = @shell.definition(bg_runtime?, foreground_spawn=(
+    program,
+    args,
+    cwd,
+    max,
+  ) => {
     @shell_exec.ShellExecution::start(
       scope,
       program~,
@@ -54,6 +60,26 @@ async test "foreground shell runs through ShellExecution when a spawner is set" 
     assert_false(output.is_error)
     assert_true(output.content.contains("hi"))
     assert_true(output.content.contains("exit=0"))
+  })
+}
+
+///|
+#cfg(not(platform="windows"))
+async test "a foreground command that times out is detached to the background" {
+  @async.with_task_group(group => {
+    let scope : @agent_runtime.AgentTaskScope[Unit] = AgentTaskScope(group)
+    let bg = @bgjobs.BgJobRuntime::new(scope)
+    let action = run_shell_foreground(
+      scope,
+      { "cmd": "sleep 2", "timeout_ms": 100 },
+      bg_runtime=bg,
+    )
+    guard action is Respond(output) else { fail("expected a Respond action") }
+    // Detached, not killed: reported as a background job the model can watch.
+    assert_false(output.is_error)
+    assert_true(output.content.contains("moved to the background"))
+    assert_true(bg.list().length() == 1)
+    assert_true(bg.list()[0].status is Running)
   })
 }
 
