@@ -33,6 +33,7 @@ pub fn[X] AgentTaskScope::group(Self[X]) -> @async.TaskGroup[X]
 pub(all) enum SteerInput {
   Prompt(String)
   Command(String)
+  Notice(String)
 }
 
 // Type aliases

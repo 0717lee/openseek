@@ -15,11 +15,18 @@
 pub fn[X] build_tools(
   runtime : @agent_runtime.AgentRuntime,
   scope : @agent_runtime.AgentTaskScope[X],
+  on_background_wake? : () -> Unit = () => (),
 ) -> @agent_tool.Tools raise {
   // One background-job runtime per session, owned by `scope.group()`, shared by
   // the shell tools so a job started via `run_in_background` is later visible to
-  // the poll/stop tools.
-  let bg_runtime = @bgjobs.BgJobRuntime::new(scope)
+  // the poll/stop tools. When a job finishes on its own, push a completion
+  // notice as steering (the loop surfaces it to the model, which reads the full
+  // output with `shell_output`) and call `on_background_wake` — a serve engine
+  // uses it to wake an idle loop so the notice is delivered between turns.
+  let bg_runtime = @bgjobs.BgJobRuntime::new(scope, on_job_exit=snapshot => {
+    runtime.queue_steer(Notice(background_job_notice(snapshot)))
+    on_background_wake()
+  })
   let workspace_root = runtime.workspace_root()
   Tools([
     @shell.definition(bg_runtime~, workspace_root~),
@@ -32,6 +39,18 @@ pub fn[X] build_tools(
     @plan.definition(),
     @finish.definition(),
   ])
+}
+
+///|
+/// A one-line completion notice for a finished background job, pushed to the
+/// model as steering so it knows the job is done and can read its output.
+fn background_job_notice(snapshot : @bgjobs.BgJobSnapshot) -> String {
+  let status = match snapshot.status {
+    Running => "is still running"
+    Exited(code) => "exited with code \{code}"
+    Stopped => "was stopped"
+  }
+  "background job \{snapshot.id} (`\{snapshot.command}`) \{status}. Read its output with shell_output (job_id=\"\{snapshot.id}\")."
 }
 
 ///|

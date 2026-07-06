@@ -14,7 +14,7 @@ pub struct BgJobRuntime {
   // private fields
 }
 pub fn BgJobRuntime::list(Self) -> Array[BgJobSnapshot]
-pub fn[X] BgJobRuntime::new(@agent_runtime.AgentTaskScope[X]) -> Self
+pub fn[X] BgJobRuntime::new(@agent_runtime.AgentTaskScope[X], on_job_exit? : (BgJobSnapshot) -> Unit) -> Self
 pub fn BgJobRuntime::snapshot(Self, String) -> BgJobSnapshot?
 pub async fn BgJobRuntime::start(Self, program~ : String, args~ : Array[String], command~ : String, cwd? : String, max_output_chars? : Int) -> String
 pub async fn BgJobRuntime::stop(Self, String) -> Bool

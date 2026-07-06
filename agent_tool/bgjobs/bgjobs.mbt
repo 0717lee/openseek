@@ -56,6 +56,10 @@ pub struct BgJobRuntime {
   ) -> @process.Process
   // Spawn the per-job monitor task on that same group.
   priv spawn_monitor : (async () -> Unit) -> Unit
+  // Called once, with the terminal snapshot, when a job reaches a terminal
+  // status on its own (not on session teardown) — e.g. to push a completion
+  // notice back into the agent loop.
+  priv on_job_exit : ((BgJobSnapshot) -> Unit)?
   priv jobs : Map[String, BgJob]
   priv mut next_index : Int
 }
@@ -104,6 +108,7 @@ pub struct BgJobSnapshot {
 /// captured into spawn closures, so the returned runtime is not generic.
 pub fn[X] BgJobRuntime::new(
   scope : @agent_runtime.AgentTaskScope[X],
+  on_job_exit? : (BgJobSnapshot) -> Unit,
 ) -> BgJobRuntime {
   let group = scope.group()
   {
@@ -122,6 +127,7 @@ pub fn[X] BgJobRuntime::new(
     spawn_monitor: task => {
       group.spawn_bg(task, no_wait=true, allow_failure=true)
     },
+    on_job_exit,
     jobs: {},
     next_index: 1,
   }
@@ -239,6 +245,14 @@ async fn BgJobRuntime::monitor(
     self.flush_pending(id)
     self.finish(id, terminal)
   })
+  // Notify once when the job exited on its own. A `stop`-ped job is skipped —
+  // the caller that stopped it already knows — and a teardown cancellation
+  // raised out of the group above and never reaches here.
+  if self.on_job_exit is Some(callback) &&
+    self.snapshot(id) is Some(snapshot) &&
+    snapshot.status is Exited(_) {
+    callback(snapshot)
+  }
 }
 
 ///|

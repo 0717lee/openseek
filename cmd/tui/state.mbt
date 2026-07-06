@@ -217,6 +217,10 @@ priv enum Msg {
   // nothing — a fresh identical-text steer of the next turn keeps its own
   // acknowledgment.
   EngineSteerDropped(String)
+  // A background job finished while the engine was idle. Reported without a run
+  // id (like a session error) so it is never swept by the stale-run guard, and
+  // rendered as a notice line in the transcript.
+  EngineBackgroundNotice(String)
   // Session errors are not tied to a model turn, so they are reported without a
   // run id and never affect run lifecycle.
   EngineSessionError(String)
@@ -239,6 +243,7 @@ fn Msg::run_id(self : Msg) -> Int? {
     UiInput(_)
     | SteerDropped(_)
     | EngineSteerDropped(_)
+    | EngineBackgroundNotice(_)
     | EngineSessionError(_)
     | EngineExited
     | Tick => None

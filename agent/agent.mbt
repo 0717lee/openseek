@@ -296,7 +296,7 @@ fn @agent_runtime.AgentRuntime::pending_steers(
 ) -> Array[@agent_runtime.SteerInput] {
   [
     for input in runtime.drain_steers() if input
-    is (Prompt(text) | Command(text)) &&
+    is (Prompt(text) | Command(text) | Notice(text)) &&
     !text.trim().is_empty() => input
   ]
 }
@@ -313,11 +313,16 @@ async fn @agent_session.Session::apply_steer_inputs(
   append_item~ : async (@agent_session.Session, @agent_session.SessionItem) -> @agent_session.Session,
 ) -> Self {
   for input in inputs; current = session {
-    let (kind, text) = match input {
-      Prompt(text) => ("prompt", text)
-      Command(text) => ("command", text)
+    // A notice is persisted as a `Runtime` item, not a `User` message: both
+    // project to user-role model content, but on resume `Runtime` renders as a
+    // notice rather than user-authored input.
+    let (kind, text, item) : (String, String, @agent_session.SessionItem) = match
+      input {
+      Prompt(text) => ("prompt", text, User(UserMessage(text)))
+      Command(text) => ("command", text, User(UserMessage(text)))
+      Notice(text) => ("notice", text, Runtime(RuntimeNotice(text)))
     }
-    let next = append_item(current, User(UserMessage(text)))
+    let next = append_item(current, item)
     messages.push(ChatMessage(User, content=text))
     @xlog.info() <? { "event": "steer_applied", "kind": kind, "content": text }
     continue next

@@ -229,6 +229,49 @@ async test "bg job preserves non-ascii output" {
 
 ///|
 #cfg(not(platform="windows"))
+async test "on_job_exit fires once with the terminal snapshot of a natural exit" {
+  @async.with_task_group(group => {
+    let seen : Array[BgJobSnapshot] = []
+    let rt = BgJobRuntime::new(AgentTaskScope(group), on_job_exit=snapshot => {
+      seen.push(snapshot)
+    })
+    let id = rt.start(
+      program="sh",
+      args=["-c", "printf done"],
+      command="printf done",
+    )
+    for _ in 0..<200 {
+      if seen.length() > 0 {
+        break
+      }
+      @async.sleep(25)
+    }
+    assert_true(seen.length() == 1)
+    assert_true(seen[0].id == id)
+    assert_true(seen[0].status is Exited(0))
+    assert_true(seen[0].output.contains("done"))
+  })
+}
+
+///|
+#cfg(not(platform="windows"))
+async test "on_job_exit does not fire for a stopped job" {
+  @async.with_task_group(group => {
+    let count = [0]
+    let rt = BgJobRuntime::new(AgentTaskScope(group), on_job_exit=_snapshot => {
+      count[0] = count[0] + 1
+    })
+    let id = rt.start(program="sleep", args=["30"], command="sleep 30")
+    @async.sleep(50)
+    assert_true(rt.stop(id))
+    // Give any (incorrect) notification a chance to fire before asserting none.
+    @async.sleep(50)
+    assert_true(count[0] == 0)
+  })
+}
+
+///|
+#cfg(not(platform="windows"))
 async test "snapshot and stop handle unknown ids" {
   @async.with_task_group(group => {
     let rt = BgJobRuntime::new(AgentTaskScope(group))
