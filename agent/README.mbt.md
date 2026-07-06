@@ -114,7 +114,9 @@ calls `@agent.run`, but that decision lives outside the `agent` package.
 `build_tools(runtime, scope)` returns the standard local tool registry:
 
 - `shell`: run a command under the workspace root or an explicit cwd (including
-  `moon check` for compiler feedback);
+  `moon check` for compiler feedback), optionally detached via `run_in_background`;
+- `shell_output`: read the captured output and status of a background `shell` job;
+- `shell_stop`: stop a background `shell` job;
 - `read`: read a text file;
 - `edit`: replace exact text in a file;
 - `multi_edit`: apply several explicit line-anchored replacements to one file;
@@ -123,8 +125,8 @@ calls `@agent.run`, but that decision lives outside the `agent` package.
 - `finish`: end the task with a final answer.
 
 File-oriented tools capture `runtime.workspace_root()` when the registry is
-built. The registry still receives the runtime and task scope for stateful
-tools, though none currently use them.
+built. The task scope backs the shared background-job runtime that the `shell`
+(`run_in_background`), `shell_output`, and `shell_stop` tools use.
 
 ```mbt check
 ///|
@@ -138,7 +140,17 @@ async test "standard tools are registered in dispatch order" {
         for tool in tools.function_tools() => tool.name
       ],
       content=(
-        #|["shell", "read", "edit", "multi_edit", "write", "plan", "finish"]
+        #|[
+        #|  "shell",
+        #|  "shell_output",
+        #|  "shell_stop",
+        #|  "read",
+        #|  "edit",
+        #|  "multi_edit",
+        #|  "write",
+        #|  "plan",
+        #|  "finish",
+        #|]
       ),
     )
   }

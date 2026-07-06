@@ -282,7 +282,7 @@ async fn start_background(
     max_output_chars=input.max_output_chars,
   )
   @agent_tool.ToolAction::respond(
-    "started background job \{id}: `\{input.cmd}`. Read its output or stop it with the background-job tools.",
+    "started background job \{id}: `\{input.cmd}`. Read its output with shell_output (job_id=\"\{id}\") and stop it with shell_stop (job_id=\"\{id}\").",
     brief="\{@agent_tool.brief_line(input.cmd, limit=56)} → \{id}",
   )
 }

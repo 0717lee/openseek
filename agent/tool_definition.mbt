@@ -23,6 +23,8 @@ pub fn[X] build_tools(
   let workspace_root = runtime.workspace_root()
   Tools([
     @shell.definition(bg_runtime~, workspace_root~),
+    @shell_output.definition(bg_runtime),
+    @shell_stop.definition(bg_runtime),
     @read.definition(workspace_root~),
     @edit.definition(workspace_root~),
     @multi_edit.definition(workspace_root~),
@@ -37,9 +39,11 @@ async test "agent registers the expected tool names" {
   @async.with_task_group() <| group => {
     let tools = build_tools(AgentRuntime(), AgentTaskScope(group))
     let function_tools = tools.function_tools()
-    assert_eq(function_tools.length(), 7)
+    assert_eq(function_tools.length(), 9)
     let names = [ for t in function_tools => t.name ]
     assert_true(names.contains("shell"))
+    assert_true(names.contains("shell_output"))
+    assert_true(names.contains("shell_stop"))
     assert_true(names.contains("read"))
     assert_true(names.contains("edit"))
     assert_true(names.contains("multi_edit"))
