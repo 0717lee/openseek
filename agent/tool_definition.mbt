@@ -16,13 +16,13 @@ pub fn[X] build_tools(
   runtime : @agent_runtime.AgentRuntime,
   scope : @agent_runtime.AgentTaskScope[X],
 ) -> @agent_tool.Tools raise {
-  // The task scope is plumbed through for stateful tools; none currently need
-  // it (moon_check — the watcher tool — was removed in favor of plain
-  // `moon check` through shell).
-  ignore(scope)
+  // One background-job runtime per session, owned by `scope.group()`, shared by
+  // the shell tools so a job started via `run_in_background` is later visible to
+  // the poll/stop tools.
+  let bg_runtime = @bgjobs.BgJobRuntime::new(scope)
   let workspace_root = runtime.workspace_root()
   Tools([
-    @shell.definition(workspace_root~),
+    @shell.definition(bg_runtime~, workspace_root~),
     @read.definition(workspace_root~),
     @edit.definition(workspace_root~),
     @multi_edit.definition(workspace_root~),

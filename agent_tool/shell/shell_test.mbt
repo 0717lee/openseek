@@ -19,6 +19,31 @@ async fn run_shell_in_workspace(
 
 ///|
 #cfg(not(platform="windows"))
+async test "shell run_in_background starts a job and returns its id" {
+  @async.with_task_group(group => {
+    let bg = @bgjobs.BgJobRuntime::new(AgentTaskScope(group))
+    let action = match @shell.definition(bg_runtime=bg).execute {
+      Async(execute) =>
+        execute({ "cmd": "printf hi", "run_in_background": true })
+      Sync(_) => fail("shell tool should be async")
+    }
+    guard action is Respond(output) else { fail("expected a Respond action") }
+    assert_false(output.is_error)
+    assert_true(output.content.contains("started background job"))
+  })
+}
+
+///|
+#cfg(not(platform="windows"))
+async test "shell run_in_background without a runtime is a tool error" {
+  let action = run_shell({ "cmd": "printf hi", "run_in_background": true })
+  guard action is Respond(output) else { fail("expected a Respond action") }
+  assert_true(output.is_error)
+  assert_true(output.content.contains("not available"))
+}
+
+///|
+#cfg(not(platform="windows"))
 async fn sandbox_exec_usable_for_test() -> Bool {
   if !@fs.exists("/usr/bin/sandbox-exec") {
     return false

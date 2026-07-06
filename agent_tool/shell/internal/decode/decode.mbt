@@ -17,6 +17,10 @@ pub struct ShellInput {
   cwd : String?
   timeout_ms : Int?
   max_output_chars : Int
+  // Detach the command as a background job instead of blocking for its result;
+  // the tool returns a job id to poll with `shell_output` / stop with
+  // `shell_stop`. Ignored (false) unless the tool was wired with a job runtime.
+  run_in_background : Bool
 } derive(Debug)
 
 ///|
@@ -42,11 +46,22 @@ fn parse_fields(fields : Map[String, Json]) -> ShellInput raise {
   let max_output_chars = optional_positive_int_or_default(
     fields, "max_output_chars", default_max_output_chars,
   )
+  let run_in_background = optional_bool(fields, "run_in_background")
   {
     cmd,
     cwd,
     timeout_ms,
     max_output_chars: cap_max_output_chars(max_output_chars),
+    run_in_background,
+  }
+}
+
+///|
+fn optional_bool(fields : Map[String, Json], name : String) -> Bool raise {
+  match fields.get(name) {
+    Some(True) => true
+    Some(False) | Some(Null) | None => false
+    _ => fail("arguments.\{name} to be a boolean")
   }
 }
 

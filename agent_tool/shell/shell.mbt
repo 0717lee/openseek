@@ -29,6 +29,7 @@
 /// - `Respond(ToolOutput("error: shell requires ...", is_error=true))` for
 ///   invalid arguments.
 pub fn definition(
+  bg_runtime? : @bgjobs.BgJobRuntime,
   workspace_root? : String = ".",
   read_only? : Bool = false,
 ) -> @agent_tool.AgentToolDefinition {
@@ -42,11 +43,12 @@ pub fn definition(
         "cwd": { "type": "string" },
         "timeout_ms": { "type": "number" },
         "max_output_chars": { "type": "number" },
+        "run_in_background": { "type": "boolean" },
       },
       "required": ["cmd"],
     }),
     execute=Async(arguments => {
-      execute_with_workspace(workspace_root, arguments, read_only~)
+      execute_with_workspace(workspace_root, arguments, read_only~, bg_runtime?)
     }),
   )
 }
@@ -68,6 +70,7 @@ async fn execute_with_workspace(
   workspace_root : String,
   arguments : Json,
   read_only~ : Bool,
+  bg_runtime? : @bgjobs.BgJobRuntime,
 ) -> @agent_tool.ToolAction {
   let input = @decode.decode(arguments) catch {
     error => {
@@ -101,7 +104,7 @@ async fn execute_with_workspace(
     None => ()
   }
   let cwd = @workspace_path.resolve_cwd(workspace_root, input.cwd)
-  shell(input, parsed_command, cwd, workspace_root) catch {
+  shell(input, parsed_command, cwd, workspace_root, bg_runtime?) catch {
     error =>
       @agent_tool.ToolAction::respond(
         "error running shell: \{error}",
@@ -116,6 +119,7 @@ async fn shell(
   parsed_command : @shell_parse.ParseResult,
   cwd : String?,
   workspace_root : String,
+  bg_runtime? : @bgjobs.BgJobRuntime,
 ) -> @agent_tool.ToolAction {
   if cwd is Some(cwd) {
     let exists = @fs.exists(cwd)
@@ -142,6 +146,18 @@ async fn shell(
         brief=shell_brief(input.cmd, None),
       )
     None => ()
+  }
+  // Background: detach the command as a job and return its id instead of blocking
+  // for output. Runs the same source-tree guards and sandboxed launch as a
+  // foreground command, so `run_in_background` cannot bypass any guardrail.
+  if input.run_in_background {
+    return start_background(
+      input,
+      parsed_command,
+      cwd,
+      workspace_root,
+      bg_runtime?,
+    )
   }
   let result = match input.timeout_ms {
     Some(timeout_ms) =>
@@ -200,6 +216,74 @@ async fn shell(
     content,
     is_error=response.is_error || sandbox_denied,
     brief=shell_brief(input.cmd, output.exit_code),
+  )
+}
+
+///|
+/// Detach `input.cmd` as a background job through the platform shell and report
+/// its id, or a tool error when the tool was built without a job runtime (so the
+/// model learns background execution is unavailable rather than silently
+/// blocking).
+async fn start_background(
+  input : @decode.ShellInput,
+  parsed_command : @shell_parse.ParseResult,
+  cwd : String?,
+  workspace_root : String,
+  bg_runtime? : @bgjobs.BgJobRuntime,
+) -> @agent_tool.ToolAction {
+  guard bg_runtime is Some(runtime) else {
+    return @agent_tool.ToolAction::respond(
+      "error: run_in_background is not available in this context",
+      is_error=true,
+      brief=shell_brief(input.cmd, None),
+    )
+  }
+  // Same static source-tree write blockers as the foreground path, so a
+  // backgrounded `rm`/`mv`/dynamic write of protected files is preblocked.
+  match
+    direct_source_tree_operation_target(parsed_command, workspace_root, cwd) {
+    Some(target) =>
+      return @agent_tool.ToolAction::respond(
+        direct_source_tree_operation_blocked_content(target),
+        is_error=true,
+        brief=shell_brief(input.cmd, None),
+      )
+    None => ()
+  }
+  match
+    dynamic_source_tree_operation_target(
+      parsed_command,
+      input.cmd,
+      workspace_root,
+      cwd,
+    ) {
+    Some(target) =>
+      return @agent_tool.ToolAction::respond(
+        direct_source_tree_operation_blocked_content(target),
+        is_error=true,
+        brief=shell_brief(input.cmd, None),
+      )
+    None => ()
+  }
+  // Launch through the same sandbox as a foreground command: sandbox-exec with a
+  // source-write-blocking profile (or the plain shell when trusted/unavailable).
+  // Runtime write denials then surface in the job's output when it is polled.
+  let launch = agent_shell_launch(
+    workspace_root,
+    input.cmd,
+    parsed_command,
+    cwd?,
+  )
+  let id = runtime.start(
+    program=launch.program,
+    args=launch.args,
+    command=input.cmd,
+    cwd?,
+    max_output_chars=input.max_output_chars,
+  )
+  @agent_tool.ToolAction::respond(
+    "started background job \{id}: `\{input.cmd}`. Read its output or stop it with the background-job tools.",
+    brief="\{@agent_tool.brief_line(input.cmd, limit=56)} → \{id}",
   )
 }
 

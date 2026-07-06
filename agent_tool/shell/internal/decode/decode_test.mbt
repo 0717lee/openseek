@@ -13,6 +13,7 @@ test "decode valid shell input" {
       #|  cwd: Some("/tmp"),
       #|  timeout_ms: Some(250),
       #|  max_output_chars: 50000,
+      #|  run_in_background: false,
       #|}
     ),
   )
@@ -23,9 +24,37 @@ test "decode treats empty cwd as absent" {
   debug_inspect(
     @decode.decode({ "cmd": "pwd", "cwd": "" }),
     content=(
-      #|{ cmd: "pwd", cwd: None, timeout_ms: None, max_output_chars: 12000 }
+      #|{
+      #|  cmd: "pwd",
+      #|  cwd: None,
+      #|  timeout_ms: None,
+      #|  max_output_chars: 12000,
+      #|  run_in_background: false,
+      #|}
     ),
   )
+}
+
+///|
+test "decode reads run_in_background" {
+  assert_true(
+    @decode.decode({ "cmd": "sleep 5", "run_in_background": true }).run_in_background,
+  )
+  assert_false(@decode.decode({ "cmd": "sleep 5" }).run_in_background)
+}
+
+///|
+test "decode rejects a non-boolean run_in_background" {
+  try
+    @decode.decode({ "cmd": "echo hello", "run_in_background": "yes" })
+  catch {
+    error =>
+      assert_true(
+        "\{error}".contains("arguments.run_in_background to be a boolean"),
+      )
+  } noraise {
+    _ => fail("non-boolean run_in_background decoded")
+  }
 }
 
 ///|

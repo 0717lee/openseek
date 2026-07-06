@@ -1,5 +1,6 @@
 import {
   "bobzhang/openseek/agent_tool",
+  "bobzhang/openseek/agent_tool/bgjobs",
   "bobzhang/openseek/agent_tool/internal/error" @tool_error,
   "bobzhang/openseek/agent_tool/shell/internal/command_policy",
   "bobzhang/openseek/agent_tool/shell/internal/decode",
@@ -15,6 +16,7 @@ import {
 }
 
 import {
+  "bobzhang/openseek/agent_runtime",
   "bobzhang/openseek/testkit/filesystem" @vfs,
 } for "test"
 
