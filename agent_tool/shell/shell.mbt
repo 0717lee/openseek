@@ -11,8 +11,11 @@
 ///   50000. Once the retained output prefix exceeds this limit, the child
 ///   process is cancelled and the result is reported as a tool error.
 /// - `timeout_ms` (number, optional): positive timeout in milliseconds. If the
-///   command is still running after the timeout, the process is cancelled and
-///   reported as a tool error. Not supported together with `run_in_background`.
+///   command is still running after the timeout it is moved to the background as
+///   a job — read its output with `shell_output` and stop it with `shell_stop` —
+///   rather than killed (a context without a background runtime instead cancels
+///   it and reports a tool error). Not supported together with
+///   `run_in_background`.
 /// - `run_in_background` (boolean, optional): detach the command as a background
 ///   job and return its job id instead of blocking for output. Read the job's
 ///   output with the `shell_output` tool and stop it with `shell_stop`; the job
@@ -68,13 +71,13 @@ pub fn definition(
 ///|
 #cfg(platform="windows")
 fn shell_description() -> String {
-  "Run arguments.cmd through PowerShell (pwsh -NoProfile -Command), optionally in arguments.cwd, and return exit code plus output. Use PowerShell syntax and cmdlets in arguments.cmd. Source file edits for compiler feedback belong in line-anchored edit (or multi_edit for several fixes in one file); do not use shell rewrites. Set run_in_background:true to detach a long-running command and get a job id back instead of blocking; read its output with shell_output and stop it with shell_stop."
+  "Run arguments.cmd through PowerShell (pwsh -NoProfile -Command), optionally in arguments.cwd, and return exit code plus output. Use PowerShell syntax and cmdlets in arguments.cmd. Source file edits for compiler feedback belong in line-anchored edit (or multi_edit for several fixes in one file); do not use shell rewrites. Set run_in_background:true to detach a long-running command and get a job id back instead of blocking; read its output with shell_output and stop it with shell_stop. A command that exceeds timeout_ms is moved to the background the same way rather than killed, so you can keep working and poll it."
 }
 
 ///|
 #cfg(not(platform="windows"))
 fn shell_description() -> String {
-  "Run arguments.cmd through the POSIX shell (sh -c), optionally in arguments.cwd, and return exit code plus output. Use POSIX shell syntax in arguments.cmd. Source file edits for compiler feedback belong in line-anchored edit (or multi_edit for several fixes in one file); do not use shell rewrites. Set run_in_background:true to detach a long-running command and get a job id back instead of blocking; read its output with shell_output and stop it with shell_stop."
+  "Run arguments.cmd through the POSIX shell (sh -c), optionally in arguments.cwd, and return exit code plus output. Use POSIX shell syntax in arguments.cmd. Source file edits for compiler feedback belong in line-anchored edit (or multi_edit for several fixes in one file); do not use shell rewrites. Set run_in_background:true to detach a long-running command and get a job id back instead of blocking; read its output with shell_output and stop it with shell_stop. A command that exceeds timeout_ms is moved to the background the same way rather than killed, so you can keep working and poll it."
 }
 
 ///|

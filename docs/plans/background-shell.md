@@ -116,6 +116,22 @@ paying disk cost on the common small command.
 
 ## Remaining work — converge on the single-execution model
 
+**Implementation status (2026-07-07).** C1–C4 and C6 are implemented on branch
+`feat/shell-execution-model`; C5 is intentionally a no-op. Notable deviation from
+the design decision above: **C1 shipped as a bounded pure-memory sink, not
+buffer-then-spill.** The sink retains the output prefix up to a hard cap in
+memory and never writes a file — so memory is bounded (by the cap), foreground
+in-flight inspection is preserved, and there is no disk to fill. Consequences:
+
+- **C5 (size watchdog): not needed.** The watchdog guards a file from filling the
+  disk; with no file spill there is no disk risk (the plan already noted the
+  watchdog is only load-bearing once output spills to a file).
+- **File-pointer for large output: deferred.** Large foreground output is still
+  reported as the output-limit error (killed via `kill_when_full`), exactly as
+  before — not yet a `<system>output_file=…>` pointer. Adding it means giving the
+  sink an async spill path; a clean future enhancement, not required for the
+  detach-on-timeout goal, which C1–C4 deliver.
+
 Same commit gate as before: `moon fmt` → `moon check --target native <pkgs>` →
 `moon test <pkgs>` → `codex review --base <prev-sha>` (background, read the
 verdict, fix real findings, re-review clean) → drive the real tool where a
