@@ -66,28 +66,6 @@ priv struct AgentShellOutput {
 }
 
 ///|
-async fn collect_agent_shell_output(
-  workspace_root : String,
-  cmd : String,
-  parsed : @shell_parse.ParseResult,
-  cwd? : String,
-  max_output_chars~ : Int,
-) -> AgentShellOutput {
-  let launch = agent_shell_launch(workspace_root, cmd, parsed, cwd?)
-  let output = collect_process_output(
-    launch.program,
-    launch.args,
-    cwd?,
-    max_output_chars~,
-  )
-  {
-    output,
-    source_write_sandboxed: launch.source_write_sandboxed,
-    sandbox_denial_subjects: launch.sandbox_denial_subjects,
-  }
-}
-
-///|
 async fn agent_shell_launch(
   workspace_root : String,
   cmd : String,

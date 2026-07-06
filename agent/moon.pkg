@@ -9,6 +9,7 @@ import {
   "bobzhang/openseek/agent_tool/plan",
   "bobzhang/openseek/agent_tool/read",
   "bobzhang/openseek/agent_tool/shell",
+  "bobzhang/openseek/agent_tool/shell_exec",
   "bobzhang/openseek/agent_tool/shell_output",
   "bobzhang/openseek/agent_tool/shell_stop",
   "bobzhang/openseek/agent_tool/write",

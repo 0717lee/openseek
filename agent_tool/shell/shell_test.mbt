@@ -18,6 +18,62 @@ async fn run_shell_in_workspace(
 }
 
 ///|
+/// Run the shell tool with a foreground spawner, so the command runs through the
+/// shared `ShellExecution` model (session group + output sink + output-limit
+/// kill) exactly as the agent wires it in `build_tools`.
+#cfg(not(platform="windows"))
+async fn[X] run_shell_foreground(
+  scope : @agent_runtime.AgentTaskScope[X],
+  arguments : Json,
+) -> @agent_tool.ToolAction {
+  let definition = @shell.definition(foreground_spawn=(program, args, cwd, max) => {
+    @shell_exec.ShellExecution::start(
+      scope,
+      program~,
+      args~,
+      cwd?,
+      inline_cap=max,
+      hard_cap=max,
+      kill_when_full=true,
+    )
+  })
+  match definition.execute {
+    Async(execute) => execute(arguments)
+    Sync(_) => fail("shell tool should be async")
+  }
+}
+
+///|
+#cfg(not(platform="windows"))
+async test "foreground shell runs through ShellExecution when a spawner is set" {
+  @async.with_task_group(group => {
+    let action = run_shell_foreground(AgentTaskScope(group), {
+      "cmd": "printf hi",
+    })
+    guard action is Respond(output) else { fail("expected a Respond action") }
+    assert_false(output.is_error)
+    assert_true(output.content.contains("hi"))
+    assert_true(output.content.contains("exit=0"))
+  })
+}
+
+///|
+#cfg(not(platform="windows"))
+async test "foreground output-limit kills a runaway through ShellExecution" {
+  @async.with_task_group(group => {
+    let action = run_shell_foreground(AgentTaskScope(group), {
+      "cmd": "yes",
+      "max_output_chars": 100,
+    })
+    guard action is Respond(output) else { fail("expected a Respond action") }
+    // No timeout: the foreground output-limit kill (kill_when_full) stops the
+    // runaway once the sink fills, reported as the output-limit error.
+    assert_true(output.is_error)
+    assert_true(output.content.contains("output_limit_reached"))
+  })
+}
+
+///|
 #cfg(not(platform="windows"))
 async test "shell run_in_background starts a job and returns its id" {
   @async.with_task_group(group => {

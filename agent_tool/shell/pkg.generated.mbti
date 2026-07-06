@@ -4,12 +4,13 @@ package "bobzhang/openseek/agent_tool/shell"
 import {
   "bobzhang/openseek/agent_tool",
   "bobzhang/openseek/agent_tool/bgjobs",
+  "bobzhang/openseek/agent_tool/shell_exec",
 }
 
 // Values
 pub async fn collect_shell_output(String, cwd? : String, max_output_chars? : Int) -> ShellOutput
 
-pub fn definition(bg_runtime? : @bgjobs.BgJobRuntime, workspace_root? : String, read_only? : Bool) -> @agent_tool.AgentToolDefinition
+pub fn definition(bg_runtime? : @bgjobs.BgJobRuntime, workspace_root? : String, read_only? : Bool, foreground_spawn? : async (String, Array[String], String?, Int) -> @shell_exec.ShellExecution) -> @agent_tool.AgentToolDefinition
 
 // Errors
 

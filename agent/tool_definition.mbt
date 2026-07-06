@@ -29,7 +29,25 @@ pub fn[X] build_tools(
   })
   let workspace_root = runtime.workspace_root()
   Tools([
-    @shell.definition(bg_runtime~, workspace_root~),
+    // Foreground shell runs on the shared execution model too (on the session
+    // group, with the foreground output-limit kill), so it uses the same output
+    // sink as background jobs and can later be detached on timeout.
+    @shell.definition(bg_runtime~, workspace_root~, foreground_spawn=(
+      program,
+      args,
+      cwd,
+      max_output_chars,
+    ) => {
+      @shell_exec.ShellExecution::start(
+        scope,
+        program~,
+        args~,
+        cwd?,
+        inline_cap=max_output_chars,
+        hard_cap=max_output_chars,
+        kill_when_full=true,
+      )
+    }),
     @shell_output.definition(bg_runtime),
     @shell_stop.definition(bg_runtime),
     @read.definition(workspace_root~),
