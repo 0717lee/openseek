@@ -1,6 +1,11 @@
 // Generated using `moon info`, DON'T EDIT IT
 package "bobzhang/openseek/agent_tool/shell_exec"
 
+import {
+  "bobzhang/openseek/agent_runtime",
+  "moonbitlang/core/debug",
+}
+
 // Values
 pub let default_hard_cap : Int
 
@@ -9,6 +14,29 @@ pub let default_inline_cap : Int
 // Errors
 
 // Types and methods
+pub(all) enum ExecStatus {
+  Running
+  Backgrounded
+  Exited(Int)
+  Killed
+} derive(Eq, @debug.Debug)
+pub fn ExecStatus::is_terminal(Self) -> Bool
+
+pub struct ShellExecution {
+  // private fields
+}
+pub fn ShellExecution::background(Self) -> Bool
+pub fn ShellExecution::exit_code(Self) -> Int?
+pub fn ShellExecution::output(Self) -> String
+pub fn ShellExecution::output_truncated(Self) -> Bool
+pub fn ShellExecution::over_inline_cap(Self) -> Bool
+pub fn ShellExecution::seq(Self) -> Int
+pub fn ShellExecution::size(Self) -> Int
+pub async fn[X] ShellExecution::start(@agent_runtime.AgentTaskScope[X], program~ : String, args~ : Array[String], cwd? : String, inline_cap? : Int, hard_cap? : Int) -> Self
+pub fn ShellExecution::status(Self) -> ExecStatus
+pub async fn ShellExecution::stop(Self) -> Bool
+pub fn ShellExecution::tail_from(Self, Int) -> String
+
 pub struct ShellOutputSink {
   // private fields
 }
