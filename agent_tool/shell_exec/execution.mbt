@@ -172,6 +172,18 @@ pub async fn ShellExecution::stop(self : ShellExecution) -> Bool {
 }
 
 ///|
+/// Await the execution reaching a terminal status. Observes the status set by
+/// the monitor, so it composes with concurrent `stop`/`background` callers.
+pub async fn ShellExecution::wait(self : ShellExecution) -> Unit {
+  for ;; {
+    if self.status.is_terminal() {
+      return
+    }
+    @async.sleep(5)
+  }
+}
+
+///|
 /// Detach the execution: flip `Running` to `Backgrounded` so no call is awaiting
 /// it while the process keeps running. A no-op (returns `false`) once terminal or
 /// already backgrounded.
