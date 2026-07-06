@@ -36,14 +36,11 @@ fn ChatMessage::to_json_for_model(message : ChatMessage, model : Model) -> Json 
       [
         ("role", Json::string(message.role.to_string())),
         ("content", content),
-        ..match message.role {
-          Tool(tool_call_id) => [("tool_call_id", Json::string(tool_call_id))]
-          _ => []
+        ..if message.role is Tool(tool_call_id) {
+          [("tool_call_id", Json::string(tool_call_id))]
         },
         ..if message.tool_calls.length() > 0 {
           [("tool_calls", ([ for call in message.tool_calls => call ] : Json))]
-        } else {
-          []
         },
         ..message.reasoning_json_fields(model),
       ],
@@ -142,20 +139,14 @@ pub fn encode_chat_request(
           ],
         ),
         ("stream", Json::boolean(stream)),
-        ..match response_format {
-          Some(format) =>
-            [("response_format", ({ "type": format.to_string() } : Json))]
-          None => []
+        ..if response_format is Some(format) {
+          [("response_format", ({ "type": format.to_string() } : Json))]
         },
         ..if stream {
           [("stream_options", ({ "include_usage": true } : Json))]
-        } else {
-          []
         },
         ..if tools.length() > 0 {
           [("tools", ([ for tool in tools => tool ] : Json))]
-        } else {
-          []
         },
         ..thinking_json_fields(model, thinking),
         ..max_tokens_json_fields(model),

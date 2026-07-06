@@ -59,8 +59,6 @@ fn StreamAccumulator::response(
         ("content", Json::string(self.content.to_string())),
         ..if reasoning_content != "" {
           [("reasoning_content", Json::string(reasoning_content))]
-        } else {
-          []
         },
         ..if self.tool_calls.length() > 0 {
           [
@@ -69,8 +67,6 @@ fn StreamAccumulator::response(
               ([ for call in self.tool_calls => call.to_json() ] : Json),
             ),
           ]
-        } else {
-          []
         },
       ],
     ),
@@ -79,9 +75,8 @@ fn StreamAccumulator::response(
     Map(
       [
         ("choices", ([({ "message": message } : Json)] : Json)),
-        ..match self.usage {
-          Some(usage) => [("usage", usage)]
-          None => []
+        ..if self.usage is Some(usage) {
+          [("usage", usage)]
         },
       ],
     ),
