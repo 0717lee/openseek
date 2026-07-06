@@ -46,9 +46,14 @@ pub struct ShellExecution {
   priv sink : ShellOutputSink
   priv process : @process.Process
   priv mut status : ExecStatus
-  // Set before the child is cancelled (by `stop`) so the monitor reports
-  // `Killed` rather than the kill signal's exit code once `wait` returns.
+  // Set before the child is cancelled (by `stop`, or by the output-limit kill)
+  // so the monitor reports `Killed` rather than the kill signal's exit code.
   priv mut cancel_requested : Bool
+  // Foreground semantics: kill the child once the sink fills (its output prefix
+  // reached the hard cap), so an un-timed runaway producer cannot hang the tool
+  // call. A background job leaves this false — it caps retention but keeps
+  // running.
+  priv kill_when_full : Bool
 }
 
 ///|
@@ -62,6 +67,7 @@ pub async fn[X] ShellExecution::start(
   cwd? : String,
   inline_cap? : Int = default_inline_cap,
   hard_cap? : Int = default_hard_cap,
+  kill_when_full? : Bool = false,
 ) -> ShellExecution {
   let group = scope.group()
   let sink = ShellOutputSink::new(inline_cap~, hard_cap~)
@@ -76,7 +82,13 @@ pub async fn[X] ShellExecution::start(
     cancel_handler=@process.hard_cancel(),
     no_wait=true,
   )
-  let exec = { sink, process, status: Running, cancel_requested: false }
+  let exec = {
+    sink,
+    process,
+    status: Running,
+    cancel_requested: false,
+    kill_when_full,
+  }
   group.spawn_bg(no_wait=true, allow_failure=true) <| () => {
     exec.monitor(reader, process)
   }
@@ -101,7 +113,19 @@ async fn ShellExecution::monitor(
       for ;; {
         match (reader.read_some(max_len=1024) catch { _ => None }) {
           None => break
-          Some(bytes) => self.sink.append_chunk(bytes)
+          Some(bytes) => {
+            self.sink.append_chunk(bytes)
+            // Foreground output-limit kill: once the sink fills, stop the child
+            // so an un-timed runaway producer cannot block forever. The monitor
+            // then reports `Killed` (cancel_requested), and `output_truncated`
+            // marks it as the output-limit case.
+            if self.kill_when_full &&
+              self.sink.truncated() &&
+              !self.cancel_requested {
+              self.cancel_requested = true
+              self.process.cancel()
+            }
+          }
         }
       }
     }

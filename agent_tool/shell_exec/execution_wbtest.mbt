@@ -73,6 +73,26 @@ async test "background flips a running execution to Backgrounded" {
 
 ///|
 #cfg(not(platform="windows"))
+async test "kill_when_full stops a runaway producer once the sink fills" {
+  @async.with_task_group(group => {
+    let exec = ShellExecution::start(
+      AgentTaskScope(group),
+      program="sh",
+      args=["-c", "yes"],
+      inline_cap=100,
+      hard_cap=100,
+      kill_when_full=true,
+    )
+    poll_exec_terminal(exec)
+    // The runaway is killed once its output prefix fills the sink, not left to
+    // block forever; truncation marks it as the output-limit case.
+    assert_true(exec.status() is Killed)
+    assert_true(exec.output_truncated())
+  })
+}
+
+///|
+#cfg(not(platform="windows"))
 async test "output over the inline cap flags a pointer but keeps the prefix" {
   @async.with_task_group(group => {
     let exec = ShellExecution::start(
