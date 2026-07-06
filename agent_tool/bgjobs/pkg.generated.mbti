@@ -1,0 +1,42 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "bobzhang/openseek/agent_tool/bgjobs"
+
+import {
+  "bobzhang/openseek/agent_runtime",
+}
+
+// Values
+
+// Errors
+
+// Types and methods
+pub struct BgJobRuntime {
+  // private fields
+}
+pub fn BgJobRuntime::list(Self) -> Array[BgJobSnapshot]
+pub fn[X] BgJobRuntime::new(@agent_runtime.AgentTaskScope[X]) -> Self
+pub fn BgJobRuntime::snapshot(Self, String) -> BgJobSnapshot?
+pub async fn BgJobRuntime::start(Self, program~ : String, args~ : Array[String], command~ : String, cwd? : String, max_output_chars? : Int) -> String
+pub async fn BgJobRuntime::stop(Self, String) -> Bool
+
+pub struct BgJobSnapshot {
+  id : String
+  command : String
+  cwd : String?
+  status : BgJobStatus
+  output : String
+  output_truncated : Bool
+  seq : Int
+  exit_code : Int?
+}
+
+pub(all) enum BgJobStatus {
+  Running
+  Exited(Int)
+  Stopped
+} derive(Eq)
+
+// Type aliases
+
+// Traits
+
