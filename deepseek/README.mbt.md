@@ -25,8 +25,8 @@ The HTTP client lives in `bobzhang/openseek/deepseek/client`.
 - `encode_chat_request(tools?, thinking?, stream?, response_format?,
   model?=Deepseek(V4Pro)) <| messages`: builds the full DeepSeek chat completions request
   body. Streaming requests include usage-bearing stream options. Kimi K2.7 Code
-  requests omit DeepSeek-specific thinking fields, set a large default
-  `max_tokens`, and preserve assistant `reasoning_content`. The per-value
+  requests omit DeepSeek-specific thinking fields and preserve assistant
+  `reasoning_content`. The per-value
   encoders for messages, tool definitions, and tool calls are package-private
   implementation details.
 - `ToolDefinition(name, description, parameters, strict?)`: a native DeepSeek

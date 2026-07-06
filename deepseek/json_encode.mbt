@@ -127,11 +127,6 @@ pub fn encode_chat_request(
               ]
           }
         },
-        ..if model is Kimi(_) {
-          // Keep the default aligned with kimi-cli's Kimi provider:
-          // https://github.com/MoonshotAI/kimi-cli/blob/2c34efbbc6c7cfe40770623281e87c138ff8eb6c/packages/kosong/src/kosong/chat_provider/kimi.py#L163-L166
-          [("max_tokens", Json::number(32000.0))]
-        },
       ],
     ),
   )

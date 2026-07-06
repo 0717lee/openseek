@@ -183,7 +183,6 @@ test "kimi code omits thinking and preserves assistant reasoning" {
     ],
     "stream": true,
     "stream_options": { "include_usage": true },
-    "max_tokens": 32000,
   })
 }
 
@@ -199,7 +198,6 @@ test "kimi highspeed uses the same code-model request policy" {
     "model": "kimi-k2.7-code-highspeed",
     "messages": [{ "role": "user", "content": "solve" }],
     "stream": false,
-    "max_tokens": 32000,
   })
 }
 
