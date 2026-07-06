@@ -35,6 +35,26 @@ async test "shell run_in_background starts a job and returns its id" {
 
 ///|
 #cfg(not(platform="windows"))
+async test "shell run_in_background rejects timeout_ms" {
+  @async.with_task_group(group => {
+    let bg = @bgjobs.BgJobRuntime::new(AgentTaskScope(group))
+    let action = match @shell.definition(bg_runtime=bg).execute {
+      Async(execute) =>
+        execute({
+          "cmd": "sleep 30",
+          "run_in_background": true,
+          "timeout_ms": 1000,
+        })
+      Sync(_) => fail("shell tool should be async")
+    }
+    guard action is Respond(output) else { fail("expected a Respond action") }
+    assert_true(output.is_error)
+    assert_true(output.content.contains("timeout_ms is not supported"))
+  })
+}
+
+///|
+#cfg(not(platform="windows"))
 async test "shell run_in_background without a runtime is a tool error" {
   let action = run_shell({ "cmd": "printf hi", "run_in_background": true })
   guard action is Respond(output) else { fail("expected a Respond action") }

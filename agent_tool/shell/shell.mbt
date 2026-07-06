@@ -238,6 +238,16 @@ async fn start_background(
       brief=shell_brief(input.cmd, None),
     )
   }
+  // timeout_ms guards a blocking wait; a background job never blocks, so the two
+  // are contradictory. Reject rather than silently ignore the bound — a caller
+  // that wants a self-limit can wrap the command (e.g. `timeout <secs> <cmd>`).
+  if input.timeout_ms is Some(_) {
+    return @agent_tool.ToolAction::respond(
+      "error: timeout_ms is not supported with run_in_background — a background job does not block, so it runs until shell_stop. Wrap the command (e.g. `timeout <secs> <cmd>`) for a self-limit.",
+      is_error=true,
+      brief=shell_brief(input.cmd, None),
+    )
+  }
   // Same static source-tree write blockers as the foreground path, so a
   // backgrounded `rm`/`mv`/dynamic write of protected files is preblocked.
   match
