@@ -36,17 +36,35 @@ pub fn definition(
   AgentToolDefinition(
     name="shell",
     description=shell_description(),
-    schema=JsonSchema({
-      "type": "object",
-      "properties": {
-        "cmd": { "type": "string" },
-        "cwd": { "type": "string" },
-        "timeout_ms": { "type": "number" },
-        "max_output_chars": { "type": "number" },
-        "run_in_background": { "type": "boolean" },
+    // Only advertise `run_in_background` when a background runtime is wired
+    // (the agent's registry); a standalone/custom definition without one cannot
+    // execute it, so exposing it would let a model make a call that only errors.
+    schema=JsonSchema(
+      if bg_runtime is Some(_) {
+        {
+          "type": "object",
+          "properties": {
+            "cmd": { "type": "string" },
+            "cwd": { "type": "string" },
+            "timeout_ms": { "type": "number" },
+            "max_output_chars": { "type": "number" },
+            "run_in_background": { "type": "boolean" },
+          },
+          "required": ["cmd"],
+        }
+      } else {
+        {
+          "type": "object",
+          "properties": {
+            "cmd": { "type": "string" },
+            "cwd": { "type": "string" },
+            "timeout_ms": { "type": "number" },
+            "max_output_chars": { "type": "number" },
+          },
+          "required": ["cmd"],
+        }
       },
-      "required": ["cmd"],
-    }),
+    ),
     execute=Async(arguments => {
       execute_with_workspace(workspace_root, arguments, read_only~, bg_runtime?)
     }),
