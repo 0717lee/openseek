@@ -37,6 +37,11 @@ pub struct BgJobRuntime {
   // inline-preview budget, spill path) -> execution. Captured so the runtime type
   // is not generic.
   priv spawn_exec : async (String, Array[String], String?, Int, String?) -> @shell_exec.ShellExecution
+  // Spawn a *foreground* execution on the same session group: memory-only output
+  // capped at the budget and killed if it fills, so the shell tool's foreground
+  // path shares the execution model (and can be detached on timeout) without
+  // re-deriving generic spawning at each call site.
+  priv spawn_foreground_exec : async (String, Array[String], String?, Int) -> @shell_exec.ShellExecution
   // Spawn a per-job watcher task on that same group.
   priv spawn_watcher : (async () -> Unit) -> Unit
   // Directory for per-job spill files (full output beyond the inline preview).
@@ -97,6 +102,16 @@ pub fn[X] BgJobRuntime::new(
         spill_path?,
       )
     },
+    spawn_foreground_exec: (program, args, cwd, max_output_chars) => {
+      @shell_exec.ShellExecution::start(
+        scope,
+        program~,
+        args~,
+        cwd?,
+        inline_cap=max_output_chars,
+        kill_when_full=true,
+      )
+    },
     spawn_watcher: task => {
       group.spawn_bg(task, no_wait=true, allow_failure=true)
     },
@@ -112,6 +127,22 @@ fn BgJobRuntime::next_id(self : BgJobRuntime) -> String {
   let id = "bg-\{self.next_index}"
   self.next_index += 1
   id
+}
+
+///|
+/// Spawn a *foreground* execution on the session group: memory-only output
+/// capped at `max_output_chars` and killed if it fills. The shell tool's
+/// foreground path uses this so foreground and background share one execution
+/// model — and a timed-out foreground command can be `adopt`-ed (detached)
+/// rather than killed. Positional to match the shell tool's spawner type.
+pub async fn BgJobRuntime::spawn_foreground(
+  self : BgJobRuntime,
+  program : String,
+  args : Array[String],
+  cwd : String?,
+  max_output_chars : Int,
+) -> @shell_exec.ShellExecution {
+  (self.spawn_foreground_exec)(program, args, cwd, max_output_chars)
 }
 
 ///|

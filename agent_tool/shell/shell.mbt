@@ -31,6 +31,7 @@
 pub fn definition(
   workspace_root? : String = ".",
   read_only? : Bool = false,
+  bg_runtime? : @bgjobs.BgJobRuntime,
 ) -> @agent_tool.AgentToolDefinition {
   AgentToolDefinition(
     name="shell",
@@ -42,11 +43,12 @@ pub fn definition(
         "cwd": { "type": "string" },
         "timeout_ms": { "type": "number" },
         "max_output_chars": { "type": "number" },
+        "run_in_background": { "type": "boolean" },
       },
       "required": ["cmd"],
     }),
     execute=Async(arguments => {
-      execute_with_workspace(workspace_root, arguments, read_only~)
+      execute_with_workspace(workspace_root, arguments, read_only~, bg_runtime?)
     }),
   )
 }
@@ -68,6 +70,7 @@ async fn execute_with_workspace(
   workspace_root : String,
   arguments : Json,
   read_only~ : Bool,
+  bg_runtime? : @bgjobs.BgJobRuntime,
 ) -> @agent_tool.ToolAction {
   let input = @decode.decode(arguments) catch {
     error => {
@@ -101,7 +104,7 @@ async fn execute_with_workspace(
     None => ()
   }
   let cwd = @workspace_path.resolve_cwd(workspace_root, input.cwd)
-  shell(input, parsed_command, cwd, workspace_root) catch {
+  shell(input, parsed_command, cwd, workspace_root, bg_runtime?) catch {
     error =>
       @agent_tool.ToolAction::respond(
         "error running shell: \{error}",
@@ -116,6 +119,7 @@ async fn shell(
   parsed_command : @shell_parse.ParseResult,
   cwd : String?,
   workspace_root : String,
+  bg_runtime? : @bgjobs.BgJobRuntime,
 ) -> @agent_tool.ToolAction {
   if cwd is Some(cwd) {
     let exists = @fs.exists(cwd)
@@ -143,41 +147,71 @@ async fn shell(
       )
     None => ()
   }
-  let result = match input.timeout_ms {
-    Some(timeout_ms) =>
-      @async.with_timeout_opt(timeout_ms, () => {
-        run_agent_shell_with_tree_precheck(
-          workspace_root,
-          input.cmd,
-          parsed_command,
-          cwd?,
-          max_output_chars=input.max_output_chars,
-        )
-      })
-    None =>
-      Some(
-        run_agent_shell_with_tree_precheck(
-          workspace_root,
-          input.cmd,
-          parsed_command,
-          cwd?,
-          max_output_chars=input.max_output_chars,
-        ),
-      )
+  // Background: detach the command as a job and return its id instead of blocking
+  // for output. Runs the same source-tree guards and sandboxed launch as a
+  // foreground command, so `run_in_background` cannot bypass any guardrail.
+  if input.run_in_background {
+    return start_background(
+      input,
+      parsed_command,
+      cwd,
+      workspace_root,
+      bg_runtime?,
+    )
   }
+  // A background runtime means foreground commands run on the shared execution
+  // model (session group), which is what lets a timed-out one be detached rather
+  // than killed. Both the spawner and the detach hook come from it; without one
+  // the shell falls back to the per-call collection path (no detach).
+  let foreground_spawn : (async (String, Array[String], String?, Int) -> @shell_exec.ShellExecution)? = bg_runtime.map(runtime => {
+      (program, args, cwd, max) => {
+        runtime.spawn_foreground(program, args, cwd, max)
+      }
+    },
+  )
+  // Detach-on-timeout: move a command that outlives its timeout to the background
+  // instead of killing it — the model keeps watching it with shell_output /
+  // shell_stop rather than losing it.
+  let on_timeout_detach : ((@shell_exec.ShellExecution) -> String)? = bg_runtime.map(runtime => {
+      exec => {
+        let _ = exec.background()
+        runtime.adopt(exec, command=input.cmd, cwd?)
+      }
+    },
+  )
+  // `run_agent_shell_with_tree_precheck` owns the timeout: with a spawner it
+  // awaits a session-group execution and, on timeout, detaches it (or stops it)
+  // so the process cannot leak; without one it wraps the per-call collection path.
+  let result = run_agent_shell_with_tree_precheck(
+    workspace_root,
+    input.cmd,
+    parsed_command,
+    cwd?,
+    max_output_chars=input.max_output_chars,
+    timeout_ms?=input.timeout_ms,
+    foreground_spawn?,
+    on_timeout_detach?,
+  )
   let agent_output = match result {
-    Some(ShellExecuted(output)) => output
-    Some(ShellPreblockedSourceTree(target)) =>
+    ShellExecuted(output) => output
+    ShellPreblockedSourceTree(target) =>
       return @agent_tool.ToolAction::respond(
         direct_source_tree_operation_blocked_content(target),
         is_error=true,
         brief=shell_brief(input.cmd, None),
       )
-    None => {
+    ShellTimedOut => {
       let timeout_ms = input.timeout_ms.unwrap_or(0)
       return @agent_tool.ToolAction::respond(
         "error: shell command timed out after \{timeout_ms}ms",
         is_error=true,
+      )
+    }
+    ShellDetached(id) => {
+      let timeout_ms = input.timeout_ms.unwrap_or(0)
+      return @agent_tool.ToolAction::respond(
+        "command still running after \{timeout_ms}ms; moved to the background as job \{id}. Read its output with shell_output (job_id=\"\{id}\") and stop it with shell_stop (job_id=\"\{id}\").",
+        brief="\{@agent_tool.brief_line(input.cmd, limit=48)} → bg \{id}",
       )
     }
   }
@@ -207,6 +241,11 @@ async fn shell(
 priv enum ShellRunResult {
   ShellPreblockedSourceTree(String)
   ShellExecuted(AgentShellOutput)
+  // Still running after `timeout_ms` and stopped.
+  ShellTimedOut
+  // Still running after `timeout_ms` and detached to the background instead of
+  // stopped; carries the new job id.
+  ShellDetached(String)
 }
 
 ///|
@@ -216,29 +255,173 @@ async fn run_agent_shell_with_tree_precheck(
   parsed_command : @shell_parse.ParseResult,
   cwd? : String,
   max_output_chars~ : Int,
+  timeout_ms? : Int,
+  foreground_spawn? : async (String, Array[String], String?, Int) -> @shell_exec.ShellExecution,
+  on_timeout_detach? : (@shell_exec.ShellExecution) -> String,
 ) -> ShellRunResult {
   match
     direct_source_tree_operation_target(parsed_command, workspace_root, cwd) {
-    Some(target) => ShellPreblockedSourceTree(target)
-    None => {
-      match
-        dynamic_source_tree_operation_target(
-          parsed_command, cmd, workspace_root, cwd,
-        ) {
-        Some(target) => return ShellPreblockedSourceTree(target)
-        None => ()
+    Some(target) => return ShellPreblockedSourceTree(target)
+    None => ()
+  }
+  match
+    dynamic_source_tree_operation_target(
+      parsed_command, cmd, workspace_root, cwd,
+    ) {
+    Some(target) => return ShellPreblockedSourceTree(target)
+    None => ()
+  }
+  let launch = agent_shell_launch(workspace_root, cmd, parsed_command, cwd?)
+  match foreground_spawn {
+    // Foreground on the shared execution model: spawn on the session group and
+    // await it (up to `timeout_ms`). The session-group process outlives this
+    // await, so a timeout must stop it here — not leak it — and a turn
+    // cancellation must too (the catch stops it before re-raising).
+    Some(spawn) => {
+      let exec = spawn(launch.program, launch.args, cwd, max_output_chars)
+      let finished = try {
+        match timeout_ms {
+          Some(timeout_ms) =>
+            @async.with_timeout_opt(timeout_ms, () => exec.wait())
+          None => Some(exec.wait())
+        }
+      } catch {
+        error => {
+          exec.request_stop()
+          raise error
+        }
       }
-      ShellExecuted(
-        collect_agent_shell_output(
-          workspace_root,
-          cmd,
-          parsed_command,
-          cwd?,
-          max_output_chars~,
-        ),
-      )
+      match finished {
+        None =>
+          match on_timeout_detach {
+            Some(detach) => ShellDetached(detach(exec))
+            None => {
+              let _ = exec.stop()
+              ShellTimedOut
+            }
+          }
+        Some(_) => ShellExecuted(agent_shell_output_from_exec(exec, launch))
+      }
+    }
+    // No session scope (e.g. `collect_shell_output`, the TUI `!` command): keep
+    // the per-call collection path, with the same timeout wrapping as before.
+    None => {
+      let collected = match timeout_ms {
+        Some(timeout_ms) =>
+          @async.with_timeout_opt(timeout_ms, () => {
+            collect_process_output(
+              launch.program,
+              launch.args,
+              cwd?,
+              max_output_chars~,
+            )
+          })
+        None =>
+          Some(
+            collect_process_output(
+              launch.program,
+              launch.args,
+              cwd?,
+              max_output_chars~,
+            ),
+          )
+      }
+      match collected {
+        None => ShellTimedOut
+        Some(output) =>
+          ShellExecuted({
+            output,
+            source_write_sandboxed: launch.source_write_sandboxed,
+            sandbox_denial_subjects: launch.sandbox_denial_subjects,
+          })
+      }
     }
   }
+}
+
+///|
+/// Adapt a finished foreground execution into an `AgentShellOutput` for the
+/// shared renderer: exit code, retained output (the memory head — foreground is
+/// memory-only), and truncation, plus the launch's sandbox metadata.
+fn agent_shell_output_from_exec(
+  exec : @shell_exec.ShellExecution,
+  launch : AgentShellLaunch,
+) -> AgentShellOutput {
+  {
+    output: {
+      exit_code: exec.exit_code(),
+      text: exec.head(),
+      output_limit_reached: exec.output_truncated(),
+    },
+    source_write_sandboxed: launch.source_write_sandboxed,
+    sandbox_denial_subjects: launch.sandbox_denial_subjects,
+  }
+}
+
+///|
+/// Detach `input.cmd` as a background job through the platform shell and report
+/// its id, or a tool error when the tool was built without a job runtime.
+async fn start_background(
+  input : @decode.ShellInput,
+  parsed_command : @shell_parse.ParseResult,
+  cwd : String?,
+  workspace_root : String,
+  bg_runtime? : @bgjobs.BgJobRuntime,
+) -> @agent_tool.ToolAction {
+  guard bg_runtime is Some(runtime) else {
+    return @agent_tool.ToolAction::respond(
+      "error: run_in_background is not available in this context",
+      is_error=true,
+    )
+  }
+  if input.timeout_ms is Some(_) {
+    return @agent_tool.ToolAction::respond(
+      "error: timeout_ms is not supported with run_in_background; a background job runs until it finishes or is stopped with shell_stop",
+      is_error=true,
+    )
+  }
+  match
+    direct_source_tree_operation_target(parsed_command, workspace_root, cwd) {
+    Some(target) =>
+      return @agent_tool.ToolAction::respond(
+        direct_source_tree_operation_blocked_content(target),
+        is_error=true,
+        brief=shell_brief(input.cmd, None),
+      )
+    None => ()
+  }
+  match
+    dynamic_source_tree_operation_target(
+      parsed_command,
+      input.cmd,
+      workspace_root,
+      cwd,
+    ) {
+    Some(target) =>
+      return @agent_tool.ToolAction::respond(
+        direct_source_tree_operation_blocked_content(target),
+        is_error=true,
+        brief=shell_brief(input.cmd, None),
+      )
+    None => ()
+  }
+  let launch = agent_shell_launch(
+    workspace_root,
+    input.cmd,
+    parsed_command,
+    cwd?,
+  )
+  let id = runtime.start(
+    program=launch.program,
+    args=launch.args,
+    command=input.cmd,
+    cwd?,
+    max_output_chars=input.max_output_chars,
+  )
+  @agent_tool.ToolAction::respond(
+    "started background job \{id}: `\{input.cmd}`. Read its output with shell_output (job_id=\"\{id}\") and stop it with shell_stop (job_id=\"\{id}\").",
+    brief="\{@agent_tool.brief_line(input.cmd, limit=48)} → bg \{id}",
+  )
 }
 
 ///|

@@ -7,6 +7,80 @@ async fn run_shell(arguments : Json) -> @agent_tool.ToolAction {
 }
 
 ///|
+/// Run the shell tool wired like the agent: a background runtime, so foreground
+/// commands run through the shared ShellExecution model and the background /
+/// detach paths are exercised.
+#cfg(not(platform="windows"))
+async fn run_shell_wired(
+  bg : @bgjobs.BgJobRuntime,
+  arguments : Json,
+) -> @agent_tool.ToolAction {
+  match @shell.definition(bg_runtime=bg).execute {
+    Async(execute) => execute(arguments)
+    Sync(_) => fail("shell tool should be async")
+  }
+}
+
+///|
+#cfg(not(platform="windows"))
+async test "run_in_background starts a job and returns its id" {
+  @async.with_task_group(group => {
+    let bg = @bgjobs.BgJobRuntime::new(AgentTaskScope(group))
+    let action = run_shell_wired(bg, {
+      "cmd": "printf hi",
+      "run_in_background": true,
+    })
+    guard action is Respond(output) else { fail("expected a Respond action") }
+    assert_false(output.is_error)
+    assert_true(output.content.contains("started background job"))
+    assert_true(bg.list().length() == 1)
+  })
+}
+
+///|
+#cfg(not(platform="windows"))
+async test "run_in_background rejects timeout_ms" {
+  @async.with_task_group(group => {
+    let bg = @bgjobs.BgJobRuntime::new(AgentTaskScope(group))
+    let action = run_shell_wired(bg, {
+      "cmd": "printf hi",
+      "run_in_background": true,
+      "timeout_ms": 1000,
+    })
+    guard action is Respond(output) else { fail("expected a Respond action") }
+    assert_true(output.is_error)
+    assert_true(output.content.contains("not supported with run_in_background"))
+  })
+}
+
+///|
+#cfg(not(platform="windows"))
+async test "foreground runs through the execution model" {
+  @async.with_task_group(group => {
+    let bg = @bgjobs.BgJobRuntime::new(AgentTaskScope(group))
+    let action = run_shell_wired(bg, { "cmd": "printf hi" })
+    guard action is Respond(output) else { fail("expected a Respond action") }
+    assert_false(output.is_error)
+    assert_true(output.content.contains("hi"))
+    assert_true(output.content.contains("exit=0"))
+  })
+}
+
+///|
+#cfg(not(platform="windows"))
+async test "a foreground command that times out is detached to the background" {
+  @async.with_task_group(group => {
+    let bg = @bgjobs.BgJobRuntime::new(AgentTaskScope(group))
+    let action = run_shell_wired(bg, { "cmd": "sleep 2", "timeout_ms": 100 })
+    guard action is Respond(output) else { fail("expected a Respond action") }
+    assert_false(output.is_error)
+    assert_true(output.content.contains("moved to the background"))
+    assert_true(bg.list().length() == 1)
+    assert_true(bg.list()[0].status is Running)
+  })
+}
+
+///|
 async fn run_shell_in_workspace(
   workspace_root : String,
   arguments : Json,

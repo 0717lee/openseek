@@ -20,6 +20,7 @@ pub struct ShellInput {
   cwd : String?
   timeout_ms : Int?
   max_output_chars : Int
+  run_in_background : Bool
 } derive(@debug.Debug)
 
 // Type aliases
