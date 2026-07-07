@@ -1,0 +1,11 @@
+import {
+  "bobzhang/openseek/agent_runtime",
+  "moonbitlang/async",
+  "moonbitlang/async/fs",
+  "moonbitlang/async/process",
+  "moonbitlang/core/encoding/utf8",
+}
+
+warnings = "+unnecessary_annotation"
+
+supported_targets = "+native"
