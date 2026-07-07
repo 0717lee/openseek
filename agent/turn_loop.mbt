@@ -50,18 +50,17 @@ async fn AgentLoop::run(
   max_steps : Int,
 ) -> @agent_session.Session {
   self.last_session = session
-  let mut session = session
+
   try {
-    loop_steps~: for step in 0..<max_steps {
-      session = self.prepare_step(session)
+    let session = for step in 0..<max_steps; session = session {
+      let session = self.prepare_step(session)
       let response = self.chat(step)
       match self.handle_response(session, response) {
-        StepContinue(next) => {
-          session = next
-          continue loop_steps~
-        }
+        StepContinue(next) => continue next
         StepDone(next) => return next
       }
+    } nobreak {
+      session
     }
     @xlog.warn() <? { "event": "max_steps_exhausted" }
     self.append(session, Terminal(Failed("max steps exhausted")))

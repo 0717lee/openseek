@@ -232,15 +232,12 @@ pub async fn[X] run_turn_in_scope(
   tools? : @agent_tool.Tools,
 ) -> @agent_session.Session {
   let client = @client.Client(api_key~, model~, thinking~, api_url?)
-  let session = append_item(session, User(UserMessage(task)))
+  let session = session |> append_item(User(UserMessage(task)))
   let tools = tools.unwrap_or_else(() => build_tools(runtime, scope)) catch {
     error => {
-      let next = append_item(
-        session,
-        Terminal(Failed("agent setup failed: \{error}")),
-      )
       @xlog.error() <? { "event": "agent_setup_failed", "error": "\{error}" }
-      return next
+      return session
+        |> append_item(Terminal(Failed("agent setup failed: \{error}")))
     }
   }
   AgentLoop(runtime~, client~, tools~, append_item~, session~).run(

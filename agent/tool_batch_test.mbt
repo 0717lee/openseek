@@ -112,6 +112,88 @@ async test "agent executes each normal tool call in a response batch" {
 }
 
 ///|
+async fn max_step_exhaustion_test_server(
+  group : @async.TaskGroup[Unit],
+) -> String? {
+  let server = @http.Server(@socket.Addr::parse("127.0.0.1:0")) catch {
+    error => {
+      let message = "\{error}"
+      if message.contains("Operation not permitted") {
+        println("local TCP bind unavailable; skipping max-step exhaustion test")
+        return None
+      }
+      raise error
+    }
+  }
+  group.spawn_bg(no_wait=true) <| () => {
+    server.run_forever(
+      (_request, body, conn) => {
+        let request_body = body.read_all().text()
+        assert_true(request_body.contains("\"name\":\"continue_test\""))
+        conn.send_response(200, "OK", extra_headers={
+          "Content-Type": "text/event-stream",
+        })
+        conn.write(
+          "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_continue\",\"type\":\"function\",\"function\":{\"name\":\"continue_test\",\"arguments\":\"{}\"}}]}}]}\n\n",
+        )
+        conn.write("data: [DONE]\n\n")
+      },
+      max_connections=1,
+    )
+  }
+  Some("http://127.0.0.1:\{server.addr.port()}/chat/completions")
+}
+
+///|
+async test "max-step exhaustion preserves continued session state" {
+  @async.with_task_group() <| group => {
+    guard max_step_exhaustion_test_server(group) is Some(url) else { return }
+    let runtime = @agent_runtime.AgentRuntime()
+    let scope = @agent_runtime.AgentTaskScope(group)
+    let session = @agent_session.Session(
+      SessionId("max-step-exhaustion-test"),
+      system_prompt="system",
+    )
+    let tools = @agent_tool.Tools([
+      AgentToolDefinition(
+        name="continue_test",
+        description="Force the agent loop to continue.",
+        schema=JsonSchema({ "type": "object" }),
+        execute=Sync(_args => @agent_tool.ToolAction::respond("continue-result")),
+      ),
+    ])
+    let result = @agent.run_turn_in_scope(
+      runtime~,
+      scope~,
+      api_key="test-key",
+      model=Deepseek(V4Flash),
+      session~,
+      task="run one tool then exhaust",
+      append_item=(session, item) => session.append(item),
+      max_steps=1,
+      api_url=url,
+      tools~,
+    )
+    let events = result.events()
+    assert_eq(events.length(), 4)
+    assert_true(events[0].item() is User(_))
+    guard events[1].item() is Assistant(message) else {
+      fail("expected assistant tool-call event")
+    }
+    assert_eq(message.tool_calls().length(), 1)
+    guard events[2].item() is Tool(tool_result) else {
+      fail("expected tool result")
+    }
+    assert_eq(tool_result.tool_call_id(), "call_continue")
+    assert_eq(tool_result.content(), "continue-result")
+    guard events[3].item() is Terminal(Failed(message)) else {
+      fail("expected exhausted terminal")
+    }
+    assert_eq(message, "max steps exhausted")
+  }
+}
+
+///|
 async fn append_failure_test_server(group : @async.TaskGroup[Unit]) -> String? {
   let server = @http.Server(@socket.Addr::parse("127.0.0.1:0")) catch {
     error => {
