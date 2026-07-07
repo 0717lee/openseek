@@ -48,9 +48,15 @@ async fn execute(
   }
   // Preserve the foreground path's error semantics for a job read later: binary
   // (non-UTF-8) output and a sandboxed source-write denial are tool errors even
-  // when the command exited 0.
-  let sandbox_denied = snapshot.source_write_sandboxed &&
-    @shell.source_write_denied_in_text(output, snapshot.sandbox_denial_subjects)
+  // when the command exited 0. Scan the *full* retained output for a denial (the
+  // denial line can be earlier than the displayed tail), but only for a sandboxed
+  // job — so a full read is done only in that rare case.
+  let sandbox_denied = if snapshot.source_write_sandboxed {
+    let full = bg_runtime.read_output(job_id).unwrap_or(output)
+    @shell.source_write_denied_in_text(full, snapshot.sandbox_denial_subjects)
+  } else {
+    false
+  }
   let is_error = exit_error || snapshot.had_invalid_utf8 || sandbox_denied
   // Truncated whenever what we show is less than what the job produced — this
   // covers the window (large output), a memory-only runtime that dropped output
@@ -73,18 +79,20 @@ async fn execute(
     ""
   }
   let footer = "<system>job=\{job_id} \{status_label}\{truncation}\{binary}</system>"
-  let body = if output == "" {
-    footer
-  } else if output.has_suffix("\n") {
-    "\{output}\{footer}"
-  } else {
-    "\{output}\n\{footer}"
+  // Assemble: output, then the source-write denial guidance (like the foreground
+  // path), then the `<system>` footer LAST so it stays the trailing metadata line.
+  let content = StringBuilder()
+  if output != "" {
+    content.write_string(output)
+    if !output.has_suffix("\n") {
+      content.write_string("\n")
+    }
   }
-  // Append the source-write denial guidance, exactly as the foreground path does.
-  let content = if sandbox_denied {
-    "\{body}\n\n\{@shell.source_write_denial_feedback()}"
-  } else {
-    body
+  if sandbox_denied {
+    content.write_string(@shell.source_write_denial_feedback())
+    content.write_string("\n")
   }
+  content.write_string(footer)
+  let content = content.to_string()
   @agent_tool.ToolAction::respond(content, is_error~)
 }

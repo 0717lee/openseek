@@ -172,10 +172,16 @@ async fn shell(
   // Detach-on-timeout: move a command that outlives its timeout to the background
   // instead of killing it — the model keeps watching it with shell_output /
   // shell_stop rather than losing it.
-  let on_timeout_detach : ((@shell_exec.ShellExecution) -> String)? = bg_runtime.map(runtime => {
-      exec => {
+  let on_timeout_detach : ((@shell_exec.ShellExecution, AgentShellLaunch) -> String)? = bg_runtime.map(runtime => {
+      (exec, launch) => {
         let _ = exec.background()
-        runtime.adopt(exec, command=input.cmd, cwd?)
+        runtime.adopt(
+          exec,
+          command=input.cmd,
+          cwd?,
+          source_write_sandboxed=launch.source_write_sandboxed,
+          sandbox_denial_subjects=launch.sandbox_denial_subjects,
+        )
       }
     },
   )
@@ -266,7 +272,7 @@ async fn run_agent_shell_with_tree_precheck(
   max_output_chars~ : Int,
   timeout_ms? : Int,
   foreground_spawn? : async (String, Array[String], String?, Int) -> @shell_exec.ShellExecution,
-  on_timeout_detach? : (@shell_exec.ShellExecution) -> String,
+  on_timeout_detach? : (@shell_exec.ShellExecution, AgentShellLaunch) -> String,
 ) -> ShellRunResult {
   match
     direct_source_tree_operation_target(parsed_command, workspace_root, cwd) {
@@ -303,7 +309,7 @@ async fn run_agent_shell_with_tree_precheck(
       match finished {
         None =>
           match on_timeout_detach {
-            Some(detach) => ShellDetached(detach(exec))
+            Some(detach) => ShellDetached(detach(exec, launch))
             None => {
               let _ = exec.stop()
               ShellTimedOut
