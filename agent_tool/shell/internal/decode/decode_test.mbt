@@ -13,7 +13,9 @@ test "decode valid shell input" {
       #|  cwd: Some("/tmp"),
       #|  timeout_ms: Some(250),
       #|  max_output_chars: 50000,
+      #|  run_in_background: false,
       #|}
+
     ),
   )
 }
@@ -23,7 +25,14 @@ test "decode treats empty cwd as absent" {
   debug_inspect(
     @decode.decode({ "cmd": "pwd", "cwd": "" }),
     content=(
-      #|{ cmd: "pwd", cwd: None, timeout_ms: None, max_output_chars: 12000 }
+      #|{
+      #|  cmd: "pwd",
+      #|  cwd: None,
+      #|  timeout_ms: None,
+      #|  max_output_chars: 12000,
+      #|  run_in_background: false,
+      #|}
+
     ),
   )
 }
