@@ -464,12 +464,9 @@ pub fn Session::Session(
   system_prompt~ : String,
   events? : @vector.Vector[SessionEvent] = @vector.new(),
 ) -> Session {
-  let mut last_sequence = 0
-  for event in events {
-    if event.sequence > last_sequence {
-      last_sequence = event.sequence
-    }
-  }
+  let last_sequence = events.fold(init=0, (last_sequence, event) => {
+    last_sequence.max(event.sequence)
+  })
   { id, system_prompt, events, last_sequence }
 }
 
