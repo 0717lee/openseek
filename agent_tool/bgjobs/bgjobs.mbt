@@ -42,6 +42,18 @@ pub struct BgJobRuntime {
   // path shares the execution model (and can be detached on timeout) without
   // re-deriving generic spawning at each call site.
   priv spawn_foreground_exec : async (String, Array[String], String?, Int) -> @shell_exec.ShellExecution
+  // Spawn a *retained* foreground execution (may be detached on timeout):
+  // file-backed with a large hard cap, but still killed on exceeding the inline
+  // cap so a timed command that floods output is an immediate output-limit error;
+  // `background()` clears that kill so a detached-under-the-limit job keeps
+  // growing. The `String?` is the spill path.
+  priv spawn_foreground_retained_exec : async (
+    String,
+    Array[String],
+    String?,
+    Int,
+    String?,
+  ) -> @shell_exec.ShellExecution
   // Spawn a per-job watcher task on that same group.
   priv spawn_watcher : (async () -> Unit) -> Unit
   // Directory for per-job spill files (full output beyond the inline preview).
@@ -130,6 +142,23 @@ pub fn[X] BgJobRuntime::new(
         kill_when_full=true,
       )
     },
+    spawn_foreground_retained_exec: (
+      program,
+      args,
+      cwd,
+      max_output_chars,
+      spill_path,
+    ) => {
+      @shell_exec.ShellExecution::start(
+        scope,
+        program~,
+        args~,
+        cwd?,
+        inline_cap=max_output_chars,
+        spill_path?,
+        kill_when_full=true,
+      )
+    },
     spawn_watcher: task => {
       group.spawn_bg(task, no_wait=true, allow_failure=true)
     },
@@ -184,7 +213,9 @@ pub async fn BgJobRuntime::spawn_foreground_retained(
     self.fg_index += 1
     "\{dir}/fg-\{index}.out"
   })
-  (self.spawn_exec)(program, args, cwd, max_output_chars, spill_path)
+  (self.spawn_foreground_retained_exec)(
+    program, args, cwd, max_output_chars, spill_path,
+  )
 }
 
 ///|

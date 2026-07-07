@@ -115,12 +115,16 @@ async fn ShellExecution::monitor(
           None => break
           Some(bytes) => {
             self.sink.append_chunk(bytes)
-            // Foreground output-limit kill: once the sink fills, stop the child
-            // so an un-timed runaway cannot block forever. The monitor then
-            // reports `Killed`, and `output_truncated` marks the output-limit
-            // case.
+            // Foreground output-limit kill: stop the child as soon as output
+            // exceeds the inline cap (max_output_chars) — promptly, not only at a
+            // larger hard cap — so a chatty command is an immediate output-limit
+            // error rather than running to the timeout. `background()` clears this
+            // flag, so a job that is detached while still under the limit keeps
+            // growing afterward. `over_inline_cap` fires for a retained execution
+            // (inline < hard); `truncated` covers a memory-only one (inline ==
+            // hard, where total can never exceed inline).
             if self.kill_when_full &&
-              self.sink.truncated() &&
+              (self.sink.over_inline_cap() || self.sink.truncated()) &&
               !self.cancel_requested {
               self.cancel_requested = true
               self.process.cancel()

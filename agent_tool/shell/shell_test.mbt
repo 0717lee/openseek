@@ -96,13 +96,33 @@ async test "foreground enforces max_output_chars with an output-limit error" {
 
 ///|
 #cfg(not(platform="windows"))
+async test "a timed command that floods output is an output-limit error, not detached" {
+  @async.with_task_group(group => {
+    let bg = @bgjobs.BgJobRuntime::new(AgentTaskScope(group), spill_dir="/tmp")
+    // A long timeout, but the runaway must be killed at the output limit promptly
+    // (not run to the timeout and then backgrounded).
+    let action = run_shell_wired(bg, {
+      "cmd": "yes",
+      "timeout_ms": 30000,
+      "max_output_chars": 100,
+    })
+    guard action is Respond(output) else { fail("expected a Respond action") }
+    assert_true(output.is_error)
+    assert_true(output.content.contains("output_limit_reached"))
+  })
+}
+
+///|
+#cfg(not(platform="windows"))
 async test "a detached foreground job retains full output past the inline cap" {
   @async.with_task_group(group => {
     let bg = @bgjobs.BgJobRuntime::new(AgentTaskScope(group), spill_dir="/tmp")
-    // Produces a lot of output, then keeps running past the timeout → detached.
+    // Under the output limit at the timeout (still sleeping) → cleanly detached;
+    // then it floods output, which a detached job retains (the output-limit kill
+    // is cleared on detach).
     let action = run_shell_wired(bg, {
-      "cmd": "seq 1 5000; sleep 5",
-      "timeout_ms": 400,
+      "cmd": "sleep 0.3; seq 1 5000",
+      "timeout_ms": 150,
       "max_output_chars": 100,
     })
     guard action is Respond(output) else { fail("expected a Respond action") }
