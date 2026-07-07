@@ -301,31 +301,6 @@ fn @agent_runtime.AgentRuntime::pending_steers(
 }
 
 ///|
-/// Fold steering input into the conversation: each becomes a durable user
-/// message and a model-visible chat message. Both variants emit
-/// `steer_applied`; the `kind` field distinguishes prompt steering from
-/// command context.
-async fn @agent_session.Session::apply_steer_inputs(
-  session : Self,
-  inputs : Array[@agent_runtime.SteerInput],
-  messages : Array[@deepseek.ChatMessage],
-  append_item~ : async (@agent_session.Session, @agent_session.SessionItem) -> @agent_session.Session,
-) -> Self {
-  for input in inputs; current = session {
-    let (kind, text) = match input {
-      Prompt(text) => ("prompt", text)
-      Command(text) => ("command", text)
-    }
-    let next = append_item(current, User(UserMessage(text)))
-    messages.push(ChatMessage(User, content=text))
-    @xlog.info() <? { "event": "steer_applied", "kind": kind, "content": text }
-    continue next
-  } nobreak {
-    current
-  }
-}
-
-///|
 fn print_usage(usage : @deepseek.Usage) -> Unit {
   @xlog.info() <? { "event": "usage", "usage": usage }
 }
