@@ -28,14 +28,6 @@ The exported surface is small:
   system_prompt_text="You are an OpenSeek agent.",
 )
 
-let next = @agent.run_turn(
-  api_key,
-  Deepseek(V4Flash),
-  session,
-  "continue",
-  max_steps=100,
-)
-
 let persisted = @agent.run_turn_with_append(
   api_key,
   Deepseek(V4Pro),
@@ -67,14 +59,11 @@ let persisted = @agent.run_turn_with_append(
 session with id `"one-shot"`, runs one turn, logs progress, discards the final
 session value, and returns `Unit`. The caller must provide `system_prompt_text`.
 
-`run_turn` is the in-memory one-turn API. It returns the updated immutable
-session, but it owns a fresh runtime and fresh tool registry for that call. Use
-it when no background tool state needs to survive into a later turn.
-
 `run_turn_with_append` is the durable one-turn API. The `append_item` callback is
 called for every committed item and returns the new authoritative session
 snapshot. Filesystem-backed callers use this to persist progress even if a later
-model call or tool execution fails.
+model call or tool execution fails. Callers that only need an in-memory result
+can return `session.append(item)` from the callback.
 
 `run_turn_in_scope` is the long-lived engine API. The caller owns the
 `AgentRuntime`, `AgentTaskScope`, and usually a `Tools` registry built once with
@@ -176,23 +165,24 @@ abort, cancellation, failure, or exhausted steps still end the turn.
 
 ## One-Shot Turns
 
-`run_turn` appends the task as a user event, runs up to `max_steps` model/tool
-iterations, then appends a terminal event. With `max_steps=0`, no model request
-is made; this is useful for documenting the session contract without a network
-dependency:
+`run_turn_with_append` appends the task as a user event, runs up to `max_steps`
+model/tool iterations, then appends a terminal event. With `max_steps=0`, no
+model request is made; this is useful for documenting the session contract
+without a network dependency:
 
 ```mbt check
 ///|
-async test "zero step run_turn appends user then failure terminal" {
+async test "zero step run_turn_with_append appends user then failure terminal" {
   let session = @agent_session.Session(
     SessionId("readme-turn"),
     system_prompt="system",
   )
-  let result = @agent.run_turn(
+  let result = @agent.run_turn_with_append(
     api_key="unused-api-key",
     model=Deepseek(V4Flash),
     session~,
     task="hello",
+    append_item=(session, item) => session.append(item),
     max_steps=0,
   )
   debug_inspect(

@@ -55,9 +55,9 @@ priv struct PlanCadence {
 ///
 /// This is the highest-level convenience entry point. It creates a fresh
 /// in-memory session with id `"one-shot"`, appends `task` as the first user
-/// event through `run_turn`, runs the agent loop, logs progress through the
-/// configured process logger, and returns `Unit`. It does not persist the
-/// session and does not expose the final `Session` value to the caller.
+/// event, runs the agent loop, logs progress through the configured process
+/// logger, and returns `Unit`. It does not persist the session and does not
+/// expose the final `Session` value to the caller.
 ///
 /// `system_prompt_text` is required. Prompt selection is intentionally owned by
 /// the application layer, not by `agent`; this package does not depend on the
@@ -66,9 +66,9 @@ priv struct PlanCadence {
 /// tools resolve relative paths against that root. `api_url` is forwarded to
 /// the DeepSeek client and is mainly useful for tests or compatible endpoints.
 ///
-/// Prefer `run_turn` when the caller needs the final in-memory session, and
-/// `run_turn_with_append` when every committed event must be persisted as the
-/// turn progresses.
+/// Use `run_turn_with_append` when every committed event must be persisted as
+/// the turn progresses, or `run_turn_in_scope` when runtime/tool state must span
+/// turns.
 pub async fn run(
   api_key~ : String,
   model~ : @deepseek.Model,
@@ -84,58 +84,17 @@ pub async fn run(
     system_prompt=system_prompt_text,
   )
   ignore(
-    run_turn(
+    run_turn_with_append(
       api_key~,
       model~,
       session~,
       task~,
+      append_item=(session, item) => session.append(item),
       max_steps~,
       thinking~,
       api_url?,
       workspace_root~,
     ),
-  )
-}
-
-///|
-/// Runs one user turn against an in-memory session and returns the updated
-/// session. Callers that need durable persistence should use
-/// `run_turn_with_append`.
-///
-/// This appends `task` to `session`, owns a fresh `AgentRuntime` and
-/// `AgentTaskScope` for this single turn, builds a fresh standard tool registry,
-/// and returns the session produced by `run_turn_in_scope`. The input session is
-/// immutable; it is not changed in place.
-///
-/// Because the runtime and tools are fresh per call, registry-local tool state
-/// does not survive across separate `run_turn` calls. That is usually correct
-/// for one-shot callers. Long-lived callers should create one runtime, one task
-/// scope, and one `build_tools` registry, then call `run_turn_in_scope`
-/// repeatedly.
-///
-/// `max_steps` bounds the number of model-request iterations. If it is `0`, the
-/// turn appends the user task and then terminates with
-/// `Terminal(Failed("max steps exhausted"))` without making a model request.
-pub async fn run_turn(
-  api_key~ : String,
-  model~ : @deepseek.Model,
-  session~ : @agent_session.Session,
-  task~ : String,
-  max_steps? : Int = default_max_steps,
-  thinking? : @deepseek.ThinkingMode = Max,
-  api_url? : String,
-  workspace_root? : String = ".",
-) -> @agent_session.Session {
-  run_turn_with_append(
-    api_key~,
-    model~,
-    session~,
-    task~,
-    append_item=(session, item) => session.append(item),
-    max_steps~,
-    thinking~,
-    api_url?,
-    workspace_root~,
   )
 }
 
@@ -156,9 +115,9 @@ pub async fn run_turn(
 /// that append failure and then re-raises the original error. This means a
 /// durable store can preserve the partial turn up to the failure point.
 ///
-/// Like `run_turn`, this owns a fresh runtime, task group, and tool registry for
-/// the duration of one turn. Use `run_turn_in_scope` when the caller needs to
-/// preserve runtime state or tool state across turns.
+/// This owns a fresh runtime, task group, and tool registry for the duration of
+/// one turn. Use `run_turn_in_scope` when the caller needs to preserve runtime
+/// state or tool state across turns.
 pub async fn run_turn_with_append(
   api_key~ : String,
   model~ : @deepseek.Model,
@@ -232,9 +191,9 @@ async test "run_turn_with_append closes failed persisted turns" {
 /// and reused across turns. When `tools` is
 /// omitted a fresh registry is built for this turn only. `scope` bounds
 /// background work the turn's tools spawn, so it must outlive every turn that
-/// may have spawned some. One-shot callers should prefer
-/// `run_turn`/`run_turn_with_append`, which own everything for the duration
-/// of a single turn.
+/// may have spawned some. One-shot callers should prefer `run` or
+/// `run_turn_with_append`, which own everything for the duration of a single
+/// turn.
 ///
 /// The loop appends `task` as a user message before the first model request.
 /// At each step boundary it first drains and applies pending non-blank steers.

@@ -372,11 +372,12 @@ async test "streaming reasoning deltas are skipped in logs" {
       SessionId("reasoning-log-test"),
       system_prompt="system",
     )
-    let result = @agent.run_turn(
+    let result = @agent.run_turn_with_append(
       api_key="test-key",
       model=Deepseek(V4Flash),
       session~,
       task="do the task",
+      append_item=(session, item) => session.append(item),
       max_steps=1,
       api_url=url,
     )
