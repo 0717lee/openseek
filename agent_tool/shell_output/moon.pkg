@@ -1,0 +1,12 @@
+import {
+  "bobzhang/openseek/agent_tool",
+  "bobzhang/openseek/agent_tool/bgjobs",
+  "moonbitlang/core/json",
+}
+
+import {
+  "bobzhang/openseek/agent_runtime",
+  "moonbitlang/async",
+} for "test"
+
+supported_targets = "+native"
