@@ -4,8 +4,16 @@ priv struct AgentLoop {
   client : @client.Client
   tools : @agent_tool.Tools
   append_item : async (@agent_session.Session, @agent_session.SessionItem) -> @agent_session.Session
+  /// Turn-local DeepSeek request buffer. `AgentLoop` is private and per-run; a
+  /// later user turn gets a fresh loop seeded from `Session::chat_messages`, not
+  /// this array. Updates are append-first: whenever the loop adds a message here
+  /// for a newly appended session item, the durable append has already
+  /// succeeded.
   messages : Array[@deepseek.ChatMessage]
   plan_cadence : PlanCadence
+  /// Latest session returned by a successful append. The run-level error
+  /// handler uses it to persist a terminal failure/interruption even when the
+  /// local loop state is behind the last durable session.
   mut last_session : @agent_session.Session
 }
 
@@ -36,8 +44,14 @@ priv enum AgentStepOutcome {
 
 ///|
 priv enum ToolCallOutcome {
+  /// The tool returned a normal result; continue executing the remaining calls
+  /// in the current assistant tool-call batch.
   ContinueToolBatch(@agent_session.Session)
+  /// Stop the current tool batch and let the agent make another model request
+  /// with the updated session, without appending a terminal item.
   ContinueAgentLoop(@agent_session.Session)
+  /// Stop the current tool batch and finish the agent turn with a terminal
+  /// session item already appended.
   FinishAgentLoop(@agent_session.Session)
 }
 
@@ -56,6 +70,10 @@ async fn AgentLoop::run(
       if response.tool_calls.is_empty() {
         let steer_inputs = self.runtime.pending_steers()
         if steer_inputs.is_empty() {
+          // A true final answer is stored once as Terminal(Finished). Later turns
+          // rebuild model context through Session::chat_messages, which projects
+          // that terminal back into an assistant message; appending an Assistant
+          // session item here would duplicate the answer on replay.
           let session = self.append(
             session,
             Terminal(Finished(response.content)),
@@ -349,6 +367,12 @@ async fn AgentLoop::execute_tool_call(
 }
 
 ///|
+/// Append synthetic error results for tool calls left unexecuted after a finish
+/// tool loses to newly arrived user input.
+///
+/// Every call in the assistant's batch needs a result message, so the finish
+/// call's result and skipped notes for the unexecuted remainder are pushed
+/// before the new input.
 async fn AgentLoop::close_skipped_tool_calls(
   self : Self,
   session : @agent_session.Session,

@@ -250,6 +250,12 @@ async test "run_turn_with_append closes failed persisted turns" {
 /// `finish` tool returns `Control(Finish)`, a tool returns `Control(Abort)`,
 /// `max_steps` is exhausted, the task is cancelled, or an unexpected error
 /// escapes.
+/// A model final answer is stored as `Terminal(Finished(...))`; session replay
+/// projects that terminal back into an assistant message for later turns.
+/// Long-lived callers must carry the returned or append-updated `Session`
+/// across turns, not any loop-local request buffer. Each new turn constructs a
+/// fresh `AgentLoop` whose model context starts from `Session::chat_messages`,
+/// so TUI/serve-style callers preserve final answers through the session.
 ///
 /// A steer that arrives while the model's apparent final answer or a `finish`
 /// tool call is in flight keeps the turn alive. The would-be final answer is
