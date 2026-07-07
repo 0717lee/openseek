@@ -24,6 +24,24 @@ pub async fn[X] build_tools(
   let spill_dir : String? = Some(@fs.tmpdir(prefix="openseek-shell-")) catch {
     _ => None
   }
+  // Remove the session spill dir (and every job's spill file in it) when the
+  // owning scope ends, so `/tmp/openseek-shell-*` cannot accumulate across turns
+  // or sessions. A task parks on a never-fed queue until group teardown cancels
+  // it, then removes the dir shielded from that cancellation (rmdir is async, so
+  // it cannot run in a `defer`).
+  if spill_dir is Some(dir) {
+    scope.group().spawn_bg(no_wait=true, allow_failure=true) <| () => {
+      let parked : @async.Queue[Unit] = Queue(kind=Unbounded)
+      try parked.get() |> ignore catch {
+        _ =>
+          @async.protect_from_cancel(() => {
+            @fs.rmdir(dir, recursive=true) catch {
+              _ => ()
+            }
+          })
+      }
+    }
+  }
   let bg_runtime = @bgjobs.BgJobRuntime::new(scope, spill_dir?)
   let workspace_root = runtime.workspace_root()
   Tools([

@@ -47,7 +47,8 @@ async test "shell_output reports a finished job's exit code" {
 #cfg(not(platform="windows"))
 async test "shell_output windows a large job's output and notes truncation" {
   @async.with_task_group(group => {
-    let bg = @bgjobs.BgJobRuntime::new(AgentTaskScope(group), spill_dir="/tmp")
+    let dir = @fs.tmpdir(prefix="openseek-test-")
+    let bg = @bgjobs.BgJobRuntime::new(AgentTaskScope(group), spill_dir=dir)
     let id = bg.start(
       program="sh",
       args=["-c", "seq 1 20000"],
@@ -70,6 +71,9 @@ async test "shell_output windows a large job's output and notes truncation" {
     assert_true(output.content.contains("truncated=true"))
     assert_true(output.content.contains("20000"))
     assert_true(output.content.char_length() < 80000)
+    @fs.rmdir(dir, recursive=true) catch {
+      _ => ()
+    }
   })
 }
 

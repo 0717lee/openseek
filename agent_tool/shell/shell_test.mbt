@@ -98,7 +98,8 @@ async test "foreground enforces max_output_chars with an output-limit error" {
 #cfg(not(platform="windows"))
 async test "a timed command that floods output is an output-limit error, not detached" {
   @async.with_task_group(group => {
-    let bg = @bgjobs.BgJobRuntime::new(AgentTaskScope(group), spill_dir="/tmp")
+    let dir = @fs.tmpdir(prefix="openseek-test-")
+    let bg = @bgjobs.BgJobRuntime::new(AgentTaskScope(group), spill_dir=dir)
     // A long timeout, but the runaway must be killed at the output limit promptly
     // (not run to the timeout and then backgrounded).
     let action = run_shell_wired(bg, {
@@ -109,6 +110,9 @@ async test "a timed command that floods output is an output-limit error, not det
     guard action is Respond(output) else { fail("expected a Respond action") }
     assert_true(output.is_error)
     assert_true(output.content.contains("output_limit_reached"))
+    @fs.rmdir(dir, recursive=true) catch {
+      _ => ()
+    }
   })
 }
 
@@ -116,7 +120,8 @@ async test "a timed command that floods output is an output-limit error, not det
 #cfg(not(platform="windows"))
 async test "a detached foreground job retains full output past the inline cap" {
   @async.with_task_group(group => {
-    let bg = @bgjobs.BgJobRuntime::new(AgentTaskScope(group), spill_dir="/tmp")
+    let dir = @fs.tmpdir(prefix="openseek-test-")
+    let bg = @bgjobs.BgJobRuntime::new(AgentTaskScope(group), spill_dir=dir)
     // Under the output limit at the timeout (still sleeping) → cleanly detached;
     // then it floods output, which a detached job retains (the output-limit kill
     // is cleared on detach).
@@ -140,6 +145,9 @@ async test "a detached foreground job retains full output past the inline cap" {
     }
     assert_true(seen)
     let _ = bg.stop(id)
+    @fs.rmdir(dir, recursive=true) catch {
+      _ => ()
+    }
   })
 }
 
