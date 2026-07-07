@@ -68,6 +68,20 @@ async test "foreground runs through the execution model" {
 
 ///|
 #cfg(not(platform="windows"))
+async test "foreground enforces max_output_chars with an output-limit error" {
+  @async.with_task_group(group => {
+    let bg = @bgjobs.BgJobRuntime::new(AgentTaskScope(group))
+    // `yes` exceeds the tiny budget; the shared foreground path must report the
+    // output-limit error, not silently drop output as a success.
+    let action = run_shell_wired(bg, { "cmd": "yes", "max_output_chars": 100 })
+    guard action is Respond(output) else { fail("expected a Respond action") }
+    assert_true(output.is_error)
+    assert_true(output.content.contains("output_limit_reached"))
+  })
+}
+
+///|
+#cfg(not(platform="windows"))
 async test "a foreground command that times out is detached to the background" {
   @async.with_task_group(group => {
     let bg = @bgjobs.BgJobRuntime::new(AgentTaskScope(group))

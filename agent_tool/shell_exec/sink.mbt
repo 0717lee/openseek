@@ -251,6 +251,52 @@ pub async fn ShellOutputSink::read_all(self : ShellOutputSink) -> String {
 }
 
 ///|
+/// The last `n` characters of full output — a window onto the *recent* output of
+/// a (possibly still-running) job, read from the tail of the spill file so a
+/// poller sees progress rather than the unchanging prefix. Degrades to the head
+/// on a read error or a memory-only sink.
+pub async fn ShellOutputSink::read_tail(
+  self : ShellOutputSink,
+  n : Int,
+) -> String {
+  guard n > 0 else { return "" }
+  match self.file {
+    Some(file) => {
+      // Read a byte window sized for `n` UTF-8 chars (≤ 4 bytes each) from the
+      // file tail, decode lossily (a partial lead byte at the window start
+      // becomes a replacement char, dropped when we keep the last `n`), then keep
+      // the last `n` characters.
+      let want = n.to_int64() * 4 + 4
+      let start = if self.file_bytes > want {
+        self.file_bytes - want
+      } else {
+        0
+      }
+      let len = (self.file_bytes - start).to_int()
+      let bytes = file.read_exactly_at(len, position=start) catch {
+        _ => return self.head.to_string()
+      }
+      last_chars(@utf8.decode_lossy(bytes), n)
+    }
+    None => last_chars(self.head.to_string(), n)
+  }
+}
+
+///|
+/// The last `n` characters of `text` (or all of it if shorter).
+fn last_chars(text : String, n : Int) -> String {
+  let len = text.char_length()
+  if len <= n {
+    text
+  } else {
+    match text.offset_of_nth_char(len - n) {
+      Some(start) => "\{text[start:]}"
+      None => text
+    }
+  }
+}
+
+///|
 /// First `n` characters of `text` (assumes `n < text.char_length()`).
 fn prefix_chars(text : String, n : Int) -> String {
   match text.offset_of_nth_char(n) {

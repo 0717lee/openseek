@@ -15,7 +15,6 @@ test "decode valid shell input" {
       #|  max_output_chars: 50000,
       #|  run_in_background: false,
       #|}
-
     ),
   )
 }
@@ -32,7 +31,6 @@ test "decode treats empty cwd as absent" {
       #|  max_output_chars: 12000,
       #|  run_in_background: false,
       #|}
-
     ),
   )
 }

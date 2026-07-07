@@ -34,15 +34,24 @@ async fn execute(
       is_error=true,
     )
   }
-  // Full output (from the spill file for a large job); fall back to the snapshot
-  // preview if the read is unavailable.
-  let output = bg_runtime.read_output(job_id).unwrap_or(snapshot.output)
+  // Recent output, bounded to a window so a poll cannot flood the conversation
+  // with a large job's full log. For output over the window, show the *tail*
+  // (recent progress) and note the total size.
+  let window = 12000
+  let output = bg_runtime
+    .read_output_tail(job_id, window)
+    .unwrap_or(snapshot.output)
   let (status_label, is_error) = match snapshot.status {
     Running => ("running", false)
     Exited(code) => ("exit=\{code}", code != 0)
     Stopped => ("stopped", true)
   }
-  let footer = "<system>job=\{job_id} \{status_label}</system>"
+  let truncation = if snapshot.size > window {
+    " truncated=true total_chars=\{snapshot.size} showing_last=\{window}"
+  } else {
+    ""
+  }
+  let footer = "<system>job=\{job_id} \{status_label}\{truncation}</system>"
   let content = if output == "" {
     footer
   } else if output.has_suffix("\n") {

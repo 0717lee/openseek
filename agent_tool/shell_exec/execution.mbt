@@ -254,6 +254,15 @@ pub async fn ShellExecution::read_all(self : ShellExecution) -> String {
 }
 
 ///|
+/// The last `n` characters of output — a bounded window onto recent output.
+pub async fn ShellExecution::read_tail(
+  self : ShellExecution,
+  n : Int,
+) -> String {
+  self.sink.read_tail(n)
+}
+
+///|
 /// Whether output exceeded the inline cap (render a pointer; full output is in
 /// the spill file).
 pub fn ShellExecution::over_inline_cap(self : ShellExecution) -> Bool {

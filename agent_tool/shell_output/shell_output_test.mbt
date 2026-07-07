@@ -45,6 +45,36 @@ async test "shell_output reports a finished job's exit code" {
 
 ///|
 #cfg(not(platform="windows"))
+async test "shell_output windows a large job's output and notes truncation" {
+  @async.with_task_group(group => {
+    let bg = @bgjobs.BgJobRuntime::new(AgentTaskScope(group), spill_dir="/tmp")
+    let id = bg.start(
+      program="sh",
+      args=["-c", "seq 1 20000"],
+      command="seq",
+      max_output_chars=100,
+    )
+    for _ in 0..<200 {
+      if bg.snapshot(id) is Some(s) && !(s.status is Running) {
+        break
+      }
+      @async.sleep(25)
+    }
+    let action = match @shell_output.definition(bg).execute {
+      Async(execute) => execute({ "job_id": id })
+      Sync(_) => fail("shell_output should be async")
+    }
+    guard action is Respond(output) else { fail("expected a Respond action") }
+    // Bounded to the window, with truncation metadata, but still showing the
+    // recent (tail) output — here the end of the sequence.
+    assert_true(output.content.contains("truncated=true"))
+    assert_true(output.content.contains("20000"))
+    assert_true(output.content.char_length() < 80000)
+  })
+}
+
+///|
+#cfg(not(platform="windows"))
 async test "shell_output errors on an unknown job id" {
   @async.with_task_group(group => {
     let bg = @bgjobs.BgJobRuntime::new(AgentTaskScope(group))

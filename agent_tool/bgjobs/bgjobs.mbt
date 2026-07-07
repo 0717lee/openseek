@@ -103,12 +103,17 @@ pub fn[X] BgJobRuntime::new(
       )
     },
     spawn_foreground_exec: (program, args, cwd, max_output_chars) => {
+      // Foreground output-limit semantics: cap at exactly `max_output_chars`
+      // (inline == hard) and kill on overflow, so exceeding it is reported as the
+      // output-limit error, never silently dropped. Foreground is memory-only (no
+      // spill) — full output is a background-job feature.
       @shell_exec.ShellExecution::start(
         scope,
         program~,
         args~,
         cwd?,
         inline_cap=max_output_chars,
+        hard_cap=max_output_chars,
         kill_when_full=true,
       )
     },
@@ -249,6 +254,21 @@ pub async fn BgJobRuntime::read_output(
 ) -> String? {
   match self.jobs.get(id) {
     Some(job) => Some(job.exec.read_all())
+    None => None
+  }
+}
+
+///|
+/// The last `n` characters of one job's output — a bounded window onto recent
+/// output — or `None` for an unknown id. Used by `shell_output` so a poll cannot
+/// flood the conversation with a large job's full log.
+pub async fn BgJobRuntime::read_output_tail(
+  self : BgJobRuntime,
+  id : String,
+  n : Int,
+) -> String? {
+  match self.jobs.get(id) {
+    Some(job) => Some(job.exec.read_tail(n))
     None => None
   }
 }

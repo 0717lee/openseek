@@ -18,6 +18,7 @@ pub fn BgJobRuntime::adopt(Self, @shell_exec.ShellExecution, command~ : String, 
 pub fn BgJobRuntime::list(Self) -> Array[BgJobSnapshot]
 pub fn[X] BgJobRuntime::new(@agent_runtime.AgentTaskScope[X], spill_dir? : String, on_job_exit? : (BgJobSnapshot) -> Unit) -> Self
 pub async fn BgJobRuntime::read_output(Self, String) -> String?
+pub async fn BgJobRuntime::read_output_tail(Self, String, Int) -> String?
 pub fn BgJobRuntime::snapshot(Self, String) -> BgJobSnapshot?
 pub async fn BgJobRuntime::spawn_foreground(Self, String, Array[String], String?, Int) -> @shell_exec.ShellExecution
 pub async fn BgJobRuntime::start(Self, program~ : String, args~ : Array[String], command~ : String, cwd? : String, max_output_chars? : Int) -> String

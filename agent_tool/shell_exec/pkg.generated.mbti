@@ -31,6 +31,7 @@ pub fn ShellExecution::head(Self) -> String
 pub fn ShellExecution::output_truncated(Self) -> Bool
 pub fn ShellExecution::over_inline_cap(Self) -> Bool
 pub async fn ShellExecution::read_all(Self) -> String
+pub async fn ShellExecution::read_tail(Self, Int) -> String
 pub fn ShellExecution::request_stop(Self) -> Unit
 pub fn ShellExecution::seq(Self) -> Int
 pub fn ShellExecution::size(Self) -> Int
@@ -51,6 +52,7 @@ pub fn ShellOutputSink::head(Self) -> String
 pub fn ShellOutputSink::new(inline_cap? : Int, hard_cap? : Int, spill_path? : String) -> Self
 pub fn ShellOutputSink::over_inline_cap(Self) -> Bool
 pub async fn ShellOutputSink::read_all(Self) -> String
+pub async fn ShellOutputSink::read_tail(Self, Int) -> String
 pub fn ShellOutputSink::seq(Self) -> Int
 pub fn ShellOutputSink::size(Self) -> Int
 pub fn ShellOutputSink::spill_path(Self) -> String?
