@@ -336,9 +336,18 @@ pub fn SessionSummary::to_sequence(self : SessionSummary) -> Int {
 /// event is exactly one `Terminal`; if a session ends without one, replay is
 /// seeing a turn that was cut off mid-flight.
 pub(all) enum TurnTerminal {
+  /// The agent completed normally and produced a final assistant answer.
+  /// Non-blank text projects as an assistant message for later turns.
   Finished(String)
+  /// The agent intentionally stopped before normal completion, usually because
+  /// a control tool requested abort. The reason projects as an assistant status
+  /// message.
   Aborted(String)
+  /// The turn was externally cancelled, for example by task cancellation or
+  /// user interruption. The reason projects as an assistant status message.
   Interrupted(String)
+  /// The turn ended because an unexpected error escaped the agent loop. The
+  /// failure message projects as an assistant status message.
   Failed(String)
 } derive(Debug)
 
@@ -352,11 +361,28 @@ pub(all) enum TurnTerminal {
 /// records turn completion status and may project as a final assistant/status
 /// message.
 pub(all) enum SessionItem {
+  /// User-authored model input, including the initial task and any steering
+  /// text. JSON tag: `user`. Projection replays it as a user-role message.
   User(UserMessage)
+  /// Model output for one response. JSON tag: `assistant`. Projection preserves
+  /// visible content, optional reasoning content, and native DeepSeek tool calls;
+  /// those tool calls open pending ids that later `Tool` events may answer.
   Assistant(AssistantMessage)
+  /// Local result for one assistant tool call. JSON tag: `tool_result`.
+  /// Projection emits it only when `tool_call_id` matches a pending assistant
+  /// call; unmatched results are ignored to keep model replay protocol-valid.
   Tool(ToolResult)
+  /// Runtime-injected context, such as a plan reminder. JSON tag:
+  /// `runtime_notice`. Projection sends it as a user-role message even though it
+  /// did not originate from the user's prompt.
   Runtime(RuntimeNotice)
+  /// Append-only compaction metadata for an inclusive event sequence range.
+  /// JSON tag: `summary`. Projection skips covered earlier events when a later
+  /// summary covers their sequence and emits the summary text instead.
   Summary(SessionSummary)
+  /// Completion status for an agent turn. JSON tag: `terminal`.
+  /// `Finished(text)` can project as a final assistant message; aborted,
+  /// interrupted, and failed terminals project assistant status messages.
   Terminal(TurnTerminal)
 } derive(Debug)
 
