@@ -127,7 +127,17 @@ async test "standard tools are registered in dispatch order" {
         for tool in tools.function_tools() => tool.name
       ],
       content=(
-        #|["shell", "read", "edit", "multi_edit", "write", "plan", "finish"]
+        #|[
+        #|  "shell",
+        #|  "shell_output",
+        #|  "shell_stop",
+        #|  "read",
+        #|  "edit",
+        #|  "multi_edit",
+        #|  "write",
+        #|  "plan",
+        #|  "finish",
+        #|]
       ),
     )
   }
