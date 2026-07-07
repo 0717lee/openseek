@@ -63,6 +63,10 @@ priv struct BgJob {
   command : String
   cwd : String?
   exec : @shell_exec.ShellExecution
+  // Sandbox metadata carried from the launch (opaque to bgjobs) so a reader can
+  // apply the same source-write-denial detection the foreground path does.
+  source_write_sandboxed : Bool
+  sandbox_denial_subjects : Array[String]
 }
 
 ///|
@@ -80,6 +84,11 @@ pub struct BgJobSnapshot {
   size : Int
   seq : Int
   exit_code : Int?
+  // Preserved so a reader can match the foreground path's error semantics: mark
+  // binary output as an error, and detect a sandboxed source-write denial.
+  had_invalid_utf8 : Bool
+  source_write_sandboxed : Bool
+  sandbox_denial_subjects : Array[String]
 }
 
 ///|
@@ -161,13 +170,22 @@ pub async fn BgJobRuntime::start(
   command~ : String,
   cwd? : String,
   max_output_chars? : Int = default_max_output_chars,
+  source_write_sandboxed? : Bool = false,
+  sandbox_denial_subjects? : Array[String] = [],
 ) -> String {
   // Reserve one id and use it for both the spill file and the registry entry, so
   // the job id and its `<id>.out` file never diverge.
   let id = self.next_id()
   let spill_path = self.spill_dir.map(dir => "\{dir}/\{id}.out")
   let exec = (self.spawn_exec)(program, args, cwd, max_output_chars, spill_path)
-  self.register(id, exec, command~, cwd?)
+  self.register(
+    id,
+    exec,
+    command~,
+    cwd?,
+    source_write_sandboxed~,
+    sandbox_denial_subjects~,
+  )
   id
 }
 
@@ -181,9 +199,18 @@ pub fn BgJobRuntime::adopt(
   exec : @shell_exec.ShellExecution,
   command~ : String,
   cwd? : String,
+  source_write_sandboxed? : Bool = false,
+  sandbox_denial_subjects? : Array[String] = [],
 ) -> String {
   let id = self.next_id()
-  self.register(id, exec, command~, cwd?)
+  self.register(
+    id,
+    exec,
+    command~,
+    cwd?,
+    source_write_sandboxed~,
+    sandbox_denial_subjects~,
+  )
   id
 }
 
@@ -195,8 +222,17 @@ fn BgJobRuntime::register(
   exec : @shell_exec.ShellExecution,
   command~ : String,
   cwd? : String,
+  source_write_sandboxed~ : Bool,
+  sandbox_denial_subjects~ : Array[String],
 ) -> Unit {
-  self.jobs[id] = { id, command, cwd, exec }
+  self.jobs[id] = {
+    id,
+    command,
+    cwd,
+    exec,
+    source_write_sandboxed,
+    sandbox_denial_subjects,
+  }
   // Watch for a natural exit and fire `on_job_exit` once. The job entry is set
   // above before the watcher runs (the watcher first awaits the exit, ≥ one tick
   // later), so `snapshot(id)` always resolves.
@@ -233,6 +269,9 @@ fn BgJob::to_snapshot(self : BgJob) -> BgJobSnapshot {
     size: self.exec.size(),
     seq: self.exec.seq(),
     exit_code: self.exec.exit_code(),
+    had_invalid_utf8: self.exec.had_invalid_utf8(),
+    source_write_sandboxed: self.source_write_sandboxed,
+    sandbox_denial_subjects: self.sandbox_denial_subjects,
   }
 }
 

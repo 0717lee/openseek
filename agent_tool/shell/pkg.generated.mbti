@@ -11,6 +11,10 @@ pub async fn collect_shell_output(String, cwd? : String, max_output_chars? : Int
 
 pub fn definition(workspace_root? : String, read_only? : Bool, bg_runtime? : @bgjobs.BgJobRuntime) -> @agent_tool.AgentToolDefinition
 
+pub fn source_write_denial_feedback() -> String
+
+pub fn source_write_denied_in_text(String, Array[String]) -> Bool
+
 // Errors
 
 // Types and methods

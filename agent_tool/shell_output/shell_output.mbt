@@ -41,11 +41,17 @@ async fn execute(
   let output = bg_runtime
     .read_output_tail(job_id, window)
     .unwrap_or(snapshot.output)
-  let (status_label, is_error) = match snapshot.status {
+  let (status_label, exit_error) = match snapshot.status {
     Running => ("running", false)
     Exited(code) => ("exit=\{code}", code != 0)
     Stopped => ("stopped", true)
   }
+  // Preserve the foreground path's error semantics for a job read later: binary
+  // (non-UTF-8) output and a sandboxed source-write denial are tool errors even
+  // when the command exited 0.
+  let sandbox_denied = snapshot.source_write_sandboxed &&
+    @shell.source_write_denied_in_text(output, snapshot.sandbox_denial_subjects)
+  let is_error = exit_error || snapshot.had_invalid_utf8 || sandbox_denied
   // Truncated whenever what we show is less than what the job produced — this
   // covers the window (large output), a memory-only runtime that dropped output
   // past the budget, and a hard-cap drop — so a prefix is never presented as the
@@ -61,13 +67,24 @@ async fn execute(
   } else {
     ""
   }
-  let footer = "<system>job=\{job_id} \{status_label}\{truncation}</system>"
-  let content = if output == "" {
+  let binary = if snapshot.had_invalid_utf8 {
+    " binary_output=true"
+  } else {
+    ""
+  }
+  let footer = "<system>job=\{job_id} \{status_label}\{truncation}\{binary}</system>"
+  let body = if output == "" {
     footer
   } else if output.has_suffix("\n") {
     "\{output}\{footer}"
   } else {
     "\{output}\n\{footer}"
+  }
+  // Append the source-write denial guidance, exactly as the foreground path does.
+  let content = if sandbox_denied {
+    "\{body}\n\n\{@shell.source_write_denial_feedback()}"
+  } else {
+    body
   }
   @agent_tool.ToolAction::respond(content, is_error~)
 }

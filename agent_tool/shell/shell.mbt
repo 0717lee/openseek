@@ -434,6 +434,8 @@ async fn start_background(
     command=input.cmd,
     cwd?,
     max_output_chars=input.max_output_chars,
+    source_write_sandboxed=launch.source_write_sandboxed,
+    sandbox_denial_subjects=launch.sandbox_denial_subjects,
   )
   @agent_tool.ToolAction::respond(
     "started background job \{id}: `\{input.cmd}`. Read its output with shell_output (job_id=\"\{id}\") and stop it with shell_stop (job_id=\"\{id}\").",

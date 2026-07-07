@@ -5607,7 +5607,18 @@ fn sandbox_denied_source_write(
   output : ShellOutput,
   denial_subjects : Array[String],
 ) -> Bool {
-  output.text
+  source_write_denied_in_text(output.text, denial_subjects)
+}
+
+///|
+/// Whether `output_text` shows a sandboxed source-write denial for
+/// `denial_subjects`. Exposed so `shell_output` can apply the same detection to a
+/// background job's output that the foreground path applies inline.
+pub fn source_write_denied_in_text(
+  output_text : String,
+  denial_subjects : Array[String],
+) -> Bool {
+  output_text
   .split("\n")
   .any(line => {
     sandbox_denial_line_mentions_denial(line) &&
@@ -5616,6 +5627,13 @@ fn sandbox_denied_source_write(
       sandbox_denial_line_mentions_known_subject(line, denial_subjects)
     )
   })
+}
+
+///|
+/// The guidance appended when a shell command's output shows a sandboxed
+/// source-write denial. Exposed for `shell_output`.
+pub fn source_write_denial_feedback() -> String {
+  SandboxSourceWriteFeedback
 }
 
 ///|

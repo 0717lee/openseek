@@ -104,6 +104,34 @@ async test "shell_output flags dropped output for a memory-only job" {
 
 ///|
 #cfg(not(platform="windows"))
+async test "shell_output marks binary background output as a tool error" {
+  @async.with_task_group(group => {
+    let bg = @bgjobs.BgJobRuntime::new(AgentTaskScope(group))
+    // A background command with non-UTF-8 output that exits 0 must still be a
+    // tool error when read, matching the foreground path.
+    let id = bg.start(
+      program="sh",
+      args=["-c", "printf '\\377'"],
+      command="binary",
+    )
+    for _ in 0..<200 {
+      if bg.snapshot(id) is Some(s) && !(s.status is Running) {
+        break
+      }
+      @async.sleep(25)
+    }
+    let action = match @shell_output.definition(bg).execute {
+      Async(execute) => execute({ "job_id": id })
+      Sync(_) => fail("shell_output should be async")
+    }
+    guard action is Respond(output) else { fail("expected a Respond action") }
+    assert_true(output.is_error)
+    assert_true(output.content.contains("binary_output"))
+  })
+}
+
+///|
+#cfg(not(platform="windows"))
 async test "shell_output errors on an unknown job id" {
   @async.with_task_group(group => {
     let bg = @bgjobs.BgJobRuntime::new(AgentTaskScope(group))
