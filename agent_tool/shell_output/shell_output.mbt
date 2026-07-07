@@ -28,7 +28,7 @@ async fn execute(
       is_error=true,
     )
   }
-  guard bg_runtime.snapshot(job_id) is Some(snapshot) else {
+  guard bg_runtime.snapshot(job_id) is Some(_) else {
     return @agent_tool.ToolAction::respond(
       "error: no background job with id \{job_id}",
       is_error=true,
@@ -38,9 +38,17 @@ async fn execute(
   // with a large job's full log. For output over the window, show the *tail*
   // (recent progress).
   let window = 12000
-  let output = bg_runtime
-    .read_output_tail(job_id, window)
-    .unwrap_or(snapshot.output)
+  let output = bg_runtime.read_output_tail(job_id, window).unwrap_or("")
+  // Re-snapshot *after* the awaited read: the job may have appended more output
+  // or exited while the read yielded, so size/status/binary/truncation in the
+  // footer must reflect that post-read state, not a stale pre-read one — else a
+  // tail could be presented as complete or with an out-of-date status.
+  guard bg_runtime.snapshot(job_id) is Some(snapshot) else {
+    return @agent_tool.ToolAction::respond(
+      "error: no background job with id \{job_id}",
+      is_error=true,
+    )
+  }
   let (status_label, exit_error) = match snapshot.status {
     Running => ("running", false)
     Exited(code) => ("exit=\{code}", code != 0)
