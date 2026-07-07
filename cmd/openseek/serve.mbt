@@ -32,6 +32,9 @@ priv enum ServeStep {
   Wire(ServeCommand)
   TurnDone
   CompactDone(@agent_session.Session)
+  // A background job finished; wake the loop to drain and surface its notice
+  // even when no turn is active.
+  BackgroundNotice
   Shutdown
 }
 
@@ -223,9 +226,6 @@ async fn run_serve(
   @async.with_task_group(group => {
     let runtime = @agent_runtime.AgentRuntime(workspace_root~)
     let scope = @agent_runtime.AgentTaskScope(group)
-    // Built once so registry-local tool state can survive turn boundaries
-    // (see @agent.build_tools).
-    let tools = @agent.build_tools(runtime, scope)
     // All scheduling flows through one ordered queue with one consumer:
     // wire commands from the reader, plus the internal turn-completion and
     // shutdown markers. A second scheduler (e.g. acting on commands inside
@@ -233,6 +233,13 @@ async fn run_serve(
     // controller writing `prompt\nsteer\n` in one buffer must have its
     // steer land in that prompt's turn, exactly as the wire order says.
     let steps : @async.Queue[ServeStep] = Queue(kind=Unbounded)
+    // Built once so registry-local tool state can survive turn boundaries (see
+    // @agent.build_tools). A background job finishing wakes this loop with a
+    // `BackgroundNotice` step, so even a fully idle engine surfaces the
+    // completion instead of leaving it queued until the next prompt.
+    let tools = @agent.build_tools(runtime, scope, on_background_wake=() => {
+      ignore(steps.try_put(BackgroundNotice) catch { _ => false })
+    })
     group.spawn_bg(no_wait=true) <| () => {
       @jsonl.each(@stdio.stdin, json => {
         match decode_serve_command(json) {
@@ -267,7 +274,7 @@ async fn run_serve(
       }
     }
 
-    async fn append_command_context(text : String) -> Unit {
+    async fn append_command_context(text : String, kind : String) -> Unit {
       session = if store is Some(store) {
         store.append(session, User(UserMessage(text))) catch {
           error if @async.is_being_cancelled() ||
@@ -285,7 +292,32 @@ async fn run_serve(
         session.append(User(UserMessage(text)))
       }
       @xlog.info() <?
-        { "event": "steer_applied", "kind": "command", "content": text }
+        { "event": "steer_applied", "kind": kind, "content": text }
+    }
+
+    // Surface a background-job completion notice while the engine is idle
+    // (between turns). Persist it as a `Runtime` item — on resume it renders as a
+    // notice, not user input — and log it untagged: the TUI drops run-tagged
+    // events once a turn closes, so a between-turns notice must ride an untagged
+    // event.
+    async fn append_background_notice(text : String) -> Unit {
+      session = if store is Some(store) {
+        store.append(session, Runtime(RuntimeNotice(text))) catch {
+          error if @async.is_being_cancelled() ||
+            @async.is_cancellation_error(error) => raise error
+          error => {
+            @xlog.error() <?
+              {
+                "event": "session_error",
+                "error": "failed to append background notice: \{error}",
+              }
+            return
+          }
+        }
+      } else {
+        session.append(Runtime(RuntimeNotice(text)))
+      }
+      @xlog.info() <? { "event": "background_notice", "content": text }
     }
 
     // Steers still queued when work ends: prompt steering must not leak into a
@@ -298,7 +330,8 @@ async fn run_serve(
         match input {
           Prompt(text) =>
             @xlog.warn() <? { "event": "steer_dropped", "content": text }
-          Command(text) => append_command_context(text)
+          Command(text) => append_command_context(text, "command")
+          Notice(text) => append_background_notice(text)
         }
       }
     }
@@ -424,8 +457,11 @@ async fn run_serve(
               if active_work is Some(_) || has_pending_prompt(pending) {
                 runtime.queue_steer(Command(text))
               } else {
-                append_command_context(text)
+                append_command_context(text, "command")
               }
+            // A notice is engine-internal and never actually arrives over the
+            // wire; queue it losslessly for completeness.
+            Notice(text) => runtime.queue_steer(Notice(text))
           }
         Wire(Cancel) =>
           match active_work {
@@ -444,6 +480,10 @@ async fn run_serve(
           } else {
             active_work = Some(ActiveCompact(start_compaction(session)))
           }
+        // A background job finished. If a turn is active, its next step boundary
+        // drains and applies the queued notice live; only drain here when idle,
+        // so an idle engine still surfaces the completion.
+        BackgroundNotice => if active_work is None { drain_command_context() }
         TurnDone => {
           drain_command_context()
           active_work = None
