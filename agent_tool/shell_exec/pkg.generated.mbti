@@ -27,6 +27,7 @@ pub struct ShellExecution {
 }
 pub fn ShellExecution::background(Self) -> Bool
 pub fn ShellExecution::exit_code(Self) -> Int?
+pub fn ShellExecution::had_invalid_utf8(Self) -> Bool
 pub fn ShellExecution::head(Self) -> String
 pub fn ShellExecution::output_truncated(Self) -> Bool
 pub fn ShellExecution::over_inline_cap(Self) -> Bool
@@ -48,6 +49,7 @@ pub async fn ShellOutputSink::append_chunk(Self, Bytes) -> Unit
 pub async fn ShellOutputSink::append_text(Self, String) -> Unit
 pub fn ShellOutputSink::close(Self) -> Unit
 pub async fn ShellOutputSink::finish(Self) -> Unit
+pub fn ShellOutputSink::had_invalid_utf8(Self) -> Bool
 pub fn ShellOutputSink::head(Self) -> String
 pub fn ShellOutputSink::new(inline_cap? : Int, hard_cap? : Int, spill_path? : String) -> Self
 pub fn ShellOutputSink::over_inline_cap(Self) -> Bool

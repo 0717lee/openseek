@@ -282,6 +282,12 @@ pub fn ShellExecution::output_truncated(self : ShellExecution) -> Bool {
 }
 
 ///|
+/// Whether any invalid (non-UTF-8 / binary) output was seen.
+pub fn ShellExecution::had_invalid_utf8(self : ShellExecution) -> Bool {
+  self.sink.had_invalid_utf8()
+}
+
+///|
 /// Full-output length in characters.
 pub fn ShellExecution::size(self : ShellExecution) -> Int {
   self.sink.size()

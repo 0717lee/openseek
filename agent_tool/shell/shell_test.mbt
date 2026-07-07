@@ -68,6 +68,20 @@ async test "foreground runs through the execution model" {
 
 ///|
 #cfg(not(platform="windows"))
+async test "wired foreground reports binary output as a tool error" {
+  @async.with_task_group(group => {
+    let bg = @bgjobs.BgJobRuntime::new(AgentTaskScope(group))
+    // The wired path (through ShellExecution) must match the per-call path:
+    // non-UTF-8 output is a tool error, not replacement characters as success.
+    let action = run_shell_wired(bg, { "cmd": "printf '\\377'" })
+    guard action is Respond(output) else { fail("expected a Respond action") }
+    assert_true(output.is_error)
+    assert_true(output.content.contains("Malformed"))
+  })
+}
+
+///|
+#cfg(not(platform="windows"))
 async test "foreground enforces max_output_chars with an output-limit error" {
   @async.with_task_group(group => {
     let bg = @bgjobs.BgJobRuntime::new(AgentTaskScope(group))

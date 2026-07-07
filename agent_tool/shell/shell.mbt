@@ -214,6 +214,12 @@ async fn shell(
         brief="\{@agent_tool.brief_line(input.cmd, limit=48)} → bg \{id}",
       )
     }
+    ShellBinaryOutput =>
+      return @agent_tool.ToolAction::respond(
+        "error running shell: Malformed (binary / non-UTF-8) command output",
+        is_error=true,
+        brief=shell_brief(input.cmd, None),
+      )
   }
   let output = agent_output.output
   let response = shell_response(output, input.max_output_chars)
@@ -246,6 +252,9 @@ priv enum ShellRunResult {
   // Still running after `timeout_ms` and detached to the background instead of
   // stopped; carries the new job id.
   ShellDetached(String)
+  // The command produced invalid (non-UTF-8 / binary) output; the per-call path
+  // raises on strict decode, and the execution path reports it here.
+  ShellBinaryOutput
 }
 
 ///|
@@ -300,7 +309,15 @@ async fn run_agent_shell_with_tree_precheck(
               ShellTimedOut
             }
           }
-        Some(_) => ShellExecuted(agent_shell_output_from_exec(exec, launch))
+        // Preserve the per-call path's strict-decode behavior: invalid
+        // (binary/non-UTF-8) output is a tool error, not replacement characters
+        // presented as success.
+        Some(_) =>
+          if exec.had_invalid_utf8() {
+            ShellBinaryOutput
+          } else {
+            ShellExecuted(agent_shell_output_from_exec(exec, launch))
+          }
       }
     }
     // No session scope (e.g. `collect_shell_output`, the TUI `!` command): keep

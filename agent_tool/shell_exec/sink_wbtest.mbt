@@ -80,7 +80,7 @@ async test "finish flushes an incomplete trailing sequence lossily" {
 ///|
 test "split_valid_utf8 surfaces corrupt trailing bytes instead of hiding them" {
   let bytes : Bytes = [0x68, 0x69, 0xff]
-  let (text, rest) = split_valid_utf8(bytes)
+  let (text, rest, _) = split_valid_utf8(bytes)
   assert_true(rest.length() == 0)
   assert_true(text.has_prefix("hi"))
   assert_true(text.char_length() >= 3)
@@ -88,13 +88,13 @@ test "split_valid_utf8 surfaces corrupt trailing bytes instead of hiding them" {
 
 ///|
 test "split_valid_utf8 does not carry malformed multi-byte prefixes" {
-  let (t1, r1) = split_valid_utf8(([0x78, 0xE0, 0x80] : Bytes))
+  let (t1, r1, _) = split_valid_utf8(([0x78, 0xE0, 0x80] : Bytes))
   assert_true(r1.length() == 0)
   assert_true(t1.has_prefix("x"))
-  let (t2, r2) = split_valid_utf8(([0x78, 0xF4, 0x90] : Bytes))
+  let (t2, r2, _) = split_valid_utf8(([0x78, 0xF4, 0x90] : Bytes))
   assert_true(r2.length() == 0)
   assert_true(t2.has_prefix("x"))
-  let (t3, r3) = split_valid_utf8(([0x78, 0xE0, 0xA0] : Bytes))
+  let (t3, r3, _) = split_valid_utf8(([0x78, 0xE0, 0xA0] : Bytes))
   assert_true(t3 == "x")
   assert_true(r3.length() == 2)
 }

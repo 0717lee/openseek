@@ -36,6 +36,10 @@ pub struct ShellOutputSink {
   priv mut seq : Int
   // Set once output was dropped at the hard cap.
   priv mut truncated : Bool
+  // Set once any invalid (non-UTF-8 / binary) bytes were decoded lossily, so a
+  // consumer can preserve the strict-decode "binary output" error rather than
+  // silently showing replacement characters.
+  priv mut had_invalid : Bool
   // Full-output spill file, opened lazily once output exceeds `inline_cap` and a
   // spill path is configured. None → memory-only (small output, or no path).
   priv mut file : @fs.File?
@@ -62,6 +66,7 @@ pub fn ShellOutputSink::new(
     pending: b"",
     seq: 0,
     truncated: false,
+    had_invalid: false,
     file: None,
     file_bytes: 0,
     spill_path,
@@ -88,8 +93,11 @@ pub async fn ShellOutputSink::append_chunk(
   let buffer = Buffer()
   buffer.write_bytes(self.pending)
   buffer.write_bytes(chunk)
-  let (text, rest) = split_valid_utf8(buffer.to_bytes())
+  let (text, rest, invalid) = split_valid_utf8(buffer.to_bytes())
   self.pending = rest
+  if invalid {
+    self.had_invalid = true
+  }
   self.append_text(text)
 }
 
@@ -175,6 +183,9 @@ async fn ShellOutputSink::open_spill(
 /// so a multi-byte character that never completed is surfaced rather than lost.
 pub async fn ShellOutputSink::finish(self : ShellOutputSink) -> Unit {
   guard self.pending.length() > 0 else { return }
+  // A non-empty pending buffer at end of stream is an incomplete (or invalid)
+  // sequence — strict decoding would have rejected it, so mark it binary.
+  self.had_invalid = true
   let text = @utf8.decode_lossy(self.pending)
   self.pending = b""
   self.append_text(text)
@@ -208,6 +219,13 @@ pub fn ShellOutputSink::seq(self : ShellOutputSink) -> Int {
 /// Whether full output was dropped at the hard cap.
 pub fn ShellOutputSink::truncated(self : ShellOutputSink) -> Bool {
   self.truncated
+}
+
+///|
+/// Whether any invalid (non-UTF-8 / binary) bytes were decoded — the consumer
+/// may surface this as a "binary output" error instead of showing replacements.
+pub fn ShellOutputSink::had_invalid_utf8(self : ShellOutputSink) -> Bool {
+  self.had_invalid
 }
 
 ///|
@@ -310,11 +328,17 @@ fn prefix_chars(text : String, n : Int) -> String {
 /// trailing bytes of an incomplete multi-byte sequence to carry to the next
 /// chunk. A malformed (not merely incomplete) trailing sequence is surfaced now
 /// rather than held for a completion that can never be valid.
-fn split_valid_utf8(bytes : Bytes) -> (String, Bytes) {
+fn split_valid_utf8(bytes : Bytes) -> (String, Bytes, Bool) {
   let end = bytes.length() - incomplete_suffix_len(bytes)
   let tail = Buffer()
   tail.write_bytes(bytes[end:])
-  (@utf8.decode_lossy(bytes[:end]), tail.to_bytes())
+  // Strict-decode the complete prefix; on invalid bytes fall back to lossy and
+  // report it, so the caller can preserve the "binary output" error. A valid
+  // prefix (the common case) decodes once.
+  let (text, invalid) = (@utf8.decode(bytes[:end]), false) catch {
+    _ => (@utf8.decode_lossy(bytes[:end]), true)
+  }
+  (text, tail.to_bytes(), invalid)
 }
 
 ///|
