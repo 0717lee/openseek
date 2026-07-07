@@ -53,9 +53,32 @@ async fn AgentLoop::run(
     for step in 0..<max_steps; session = session {
       let session = self.prepare_step(session)
       let response = self.chat(step)
-      match self.handle_response(session, response) {
-        StepContinue(next) => continue next
-        StepDone(next) => return next
+      if response.tool_calls.is_empty() {
+        let steer_inputs = self.runtime.pending_steers()
+        if steer_inputs.is_empty() {
+          @xlog.info() <?
+            { "event": "agent_finished", "answer": response.content }
+          return self.append(session, Terminal(Finished(response.content)))
+        }
+        let reasoning_content = response.optional_reasoning_content()
+        // The model considers itself done, but user-visible input arrived while the
+        // final call was in flight: user input wins over model-initiated completion.
+        // The would-be answer stays as an ordinary assistant message and the turn
+        // continues with the new input folded in.
+        self.messages.push(
+          ChatMessage(Assistant, content=response.content, reasoning_content?),
+        )
+        let session = self.append(
+          session,
+          Assistant(AssistantMessage(response.content, reasoning_content?)),
+        )
+        let session = self.apply_steer_inputs(session, steer_inputs)
+        continue session
+      } else {
+        match self.handle_tool_calls(session, response) {
+          StepContinue(next) => continue next
+          StepDone(next) => return next
+        }
       }
     } nobreak {
       @xlog.warn() <? { "event": "max_steps_exhausted" }
@@ -157,46 +180,6 @@ fn @deepseek.ChatResponse::log_and_reasoning_content(
 }
 
 ///|
-async fn AgentLoop::handle_response(
-  self : Self,
-  session : @agent_session.Session,
-  response : @deepseek.ChatResponse,
-) -> AgentStepOutcome {
-  if response.tool_calls.is_empty() {
-    self.handle_final_response(session, response)
-  } else {
-    self.handle_tool_calls(session, response)
-  }
-}
-
-///|
-async fn AgentLoop::handle_final_response(
-  self : Self,
-  session : @agent_session.Session,
-  response : @deepseek.ChatResponse,
-) -> AgentStepOutcome {
-  let steer_inputs = self.runtime.pending_steers()
-  if steer_inputs.is_empty() {
-    @xlog.info() <? { "event": "agent_finished", "answer": response.content }
-    return StepDone(self.append(session, Terminal(Finished(response.content))))
-  }
-  let reasoning_content = response.optional_reasoning_content()
-  // The model considers itself done, but user-visible input arrived while the
-  // final call was in flight: user input wins over model-initiated completion.
-  // The would-be answer stays as an ordinary assistant message and the turn
-  // continues with the new input folded in.
-  self.messages.push(
-    ChatMessage(Assistant, content=response.content, reasoning_content?),
-  )
-  let session = self.append(
-    session,
-    Assistant(AssistantMessage(response.content, reasoning_content?)),
-  )
-  let session = self.apply_steer_inputs(session, steer_inputs)
-  StepContinue(session)
-}
-
-///|
 async fn AgentLoop::handle_tool_calls(
   self : Self,
   session : @agent_session.Session,
@@ -274,79 +257,80 @@ async fn AgentLoop::execute_tool_call(
   tool_call : @agent_tool.AgentToolCall,
 ) -> ToolCallOutcome {
   let result = @agent_tool.execute_tool_call(tool_call, self.tools)
-  let mut session = session
-  let output = match result {
-    Control(Finish(answer)) =>
-      return self.finish_from_tool(
-        session, response, call_index, native_call, tool_call, answer,
+  match result {
+    Control(Finish(answer)) => {
+      let mut session = self.append(
+        session,
+        Tool(
+          ToolResult(
+            tool_call_id=native_call.id,
+            tool_name=tool_call.name,
+            content="finished: \{answer}",
+          ),
+        ),
       )
-    Control(Abort(reason)) =>
-      return self.abort_from_tool(session, native_call, tool_call, reason)
-    Respond(output) => output
+      let steer_inputs = self.runtime.pending_steers()
+      if steer_inputs.is_empty() {
+        @xlog.info() <? { "event": "agent_finished", "answer": answer }
+        return FinishAgentLoop(self.append(session, Terminal(Finished(answer))))
+      }
+      // User input wins over the finish tool as well. Continuing the turn must keep
+      // the conversation API-valid: every call in the assistant's batch needs a
+      // result message, so the finish call's result and skipped notes for the
+      // unexecuted remainder are pushed before the new input.
+      self.messages.push(
+        ChatMessage(Tool(native_call.id), content="finished: \{answer}"),
+      )
+      let remaining_tool_calls = response.tool_calls[call_index + 1:]
+      session = self.close_skipped_tool_calls(session, remaining_tool_calls)
+      session = self.apply_steer_inputs(session, steer_inputs)
+      ContinueAgentLoop(session)
+    }
+    Control(Abort(reason)) => {
+      let session = self.append(
+        session,
+        Tool(
+          ToolResult(
+            tool_call_id=native_call.id,
+            tool_name=tool_call.name,
+            content="aborted: \{reason}",
+            is_error=true,
+          ),
+        ),
+      )
+      @xlog.warn() <? { "event": "agent_aborted", "reason": reason }
+      return FinishAgentLoop(self.append(session, Terminal(Aborted(reason))))
+    }
+    Respond(output) => {
+      self.plan_cadence.record_plan_success(tool_call, output)
+      log_tool_result(native_call, tool_call, output)
+      self.messages.push(
+        ChatMessage(Tool(native_call.id), content=output.content),
+      )
+      let session = self.append(
+        session,
+        Tool(
+          ToolResult(
+            tool_call_id=native_call.id,
+            tool_name=tool_call.name,
+            content=output.content,
+            is_error=output.is_error,
+            brief?=output.brief,
+          ),
+        ),
+      )
+      ContinueToolBatch(session)
+    }
   }
-  self.plan_cadence.record_plan_success(tool_call, output)
-  log_tool_result(native_call, tool_call, output)
-  self.messages.push(ChatMessage(Tool(native_call.id), content=output.content))
-  session = self.append(
-    session,
-    Tool(
-      ToolResult(
-        tool_call_id=native_call.id,
-        tool_name=tool_call.name,
-        content=output.content,
-        is_error=output.is_error,
-        brief?=output.brief,
-      ),
-    ),
-  )
-  ContinueToolBatch(session)
-}
-
-///|
-async fn AgentLoop::finish_from_tool(
-  self : Self,
-  session : @agent_session.Session,
-  response : @deepseek.ChatResponse,
-  call_index : Int,
-  native_call : @deepseek.ToolCall,
-  tool_call : @agent_tool.AgentToolCall,
-  answer : String,
-) -> ToolCallOutcome {
-  let mut session = self.append(
-    session,
-    Tool(
-      ToolResult(
-        tool_call_id=native_call.id,
-        tool_name=tool_call.name,
-        content="finished: \{answer}",
-      ),
-    ),
-  )
-  let steer_inputs = self.runtime.pending_steers()
-  if steer_inputs.is_empty() {
-    @xlog.info() <? { "event": "agent_finished", "answer": answer }
-    return FinishAgentLoop(self.append(session, Terminal(Finished(answer))))
-  }
-  // User input wins over the finish tool as well. Continuing the turn must keep
-  // the conversation API-valid: every call in the assistant's batch needs a
-  // result message, so the finish call's result and skipped notes for the
-  // unexecuted remainder are pushed before the new input.
-  self.messages.push(
-    ChatMessage(Tool(native_call.id), content="finished: \{answer}"),
-  )
-  session = self.close_skipped_tool_calls(session, response, call_index)
-  session = self.apply_steer_inputs(session, steer_inputs)
-  ContinueAgentLoop(session)
 }
 
 ///|
 async fn AgentLoop::close_skipped_tool_calls(
   self : Self,
   session : @agent_session.Session,
-  response : @deepseek.ChatResponse,
-  call_index : Int,
+  remaining_tool_calls : ArrayView[@deepseek.ToolCall],
 ) -> @agent_session.Session {
-  for skipped in response.tool_calls[call_index + 1:]; session = session {
+  for skipped in remaining_tool_calls; session = session {
     let note = "skipped: user input arrived before this call ran"
     @xlog.info() <?
       {
@@ -372,29 +356,6 @@ async fn AgentLoop::close_skipped_tool_calls(
   } nobreak {
     session
   }
-}
-
-///|
-async fn AgentLoop::abort_from_tool(
-  self : Self,
-  session : @agent_session.Session,
-  native_call : @deepseek.ToolCall,
-  tool_call : @agent_tool.AgentToolCall,
-  reason : String,
-) -> ToolCallOutcome {
-  let session = self.append(
-    session,
-    Tool(
-      ToolResult(
-        tool_call_id=native_call.id,
-        tool_name=tool_call.name,
-        content="aborted: \{reason}",
-        is_error=true,
-      ),
-    ),
-  )
-  @xlog.warn() <? { "event": "agent_aborted", "reason": reason }
-  FinishAgentLoop(self.append(session, Terminal(Aborted(reason))))
 }
 
 ///|
