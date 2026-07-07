@@ -394,3 +394,83 @@ async test "streaming reasoning deltas are skipped in logs" {
     assert_true(event_names.contains("assistant_message"))
   }
 }
+
+///|
+async fn notice_test_server(
+  group : @async.TaskGroup[Unit],
+  runtime : @agent_runtime.AgentRuntime,
+  notice : String,
+) -> String? {
+  let server = @http.Server(@socket.Addr::parse("127.0.0.1:0")) catch {
+    error => {
+      let message = "\{error}"
+      if message.contains("Operation not permitted") {
+        println("local TCP bind unavailable; skipping notice test")
+        return None
+      }
+      raise error
+    }
+  }
+  let mut requests = 0
+  group.spawn_bg(no_wait=true) <| () => {
+    server.run_forever(
+      (_request, body, conn) => {
+        requests += 1
+        let request_body = body.read_all().text()
+        conn.send_response(200, "OK", extra_headers={
+          "Content-Type": "text/event-stream",
+        })
+        if requests == 1 {
+          // A background job finishes mid-turn and pushes a notice.
+          runtime.queue_steer(Notice(notice))
+          conn.write(
+            "data: {\"choices\":[{\"delta\":{\"content\":\"draft\"}}]}\n\n",
+          )
+        } else {
+          // The notice was delivered to the model as user-role content.
+          assert_true(request_body.contains(notice))
+          conn.write(
+            "data: {\"choices\":[{\"delta\":{\"content\":\"done\"}}]}\n\n",
+          )
+        }
+        conn.write("data: [DONE]\n\n")
+      },
+      max_connections=2,
+    )
+  }
+  Some("http://127.0.0.1:\{server.addr.port()}/chat/completions")
+}
+
+///|
+async test "a background notice steer is applied as a runtime notice" {
+  @async.with_task_group() <| group => {
+    let runtime = @agent_runtime.AgentRuntime()
+    let notice = "background job bg-1 finished (exit=0): `ls`"
+    guard notice_test_server(group, runtime, notice) is Some(url) else {
+      return
+    }
+    let scope = @agent_runtime.AgentTaskScope(group)
+    let session = @agent_session.Session(
+      SessionId("notice"),
+      system_prompt="system",
+    )
+    let result = @agent.run_turn_in_scope(
+      runtime~,
+      scope~,
+      api_key="test-key",
+      model=Deepseek(V4Flash),
+      session~,
+      task="do a task",
+      append_item=(session, item) => session.append(item),
+      max_steps=10,
+      api_url=url,
+    )
+    // The notice persists as a RuntimeNotice (not a user message), so on resume
+    // it renders as a system notice rather than user input.
+    let notices = [
+      for event in result.events() if event.item() is Runtime(n) &&
+      n.content() == notice => n.content()
+    ]
+    assert_eq(notices.length(), 1)
+  }
+}

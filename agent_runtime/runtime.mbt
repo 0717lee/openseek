@@ -16,11 +16,14 @@ pub let default_agent_event_capacity : Int = 32
 ///
 /// Prompt steering is ordinary user redirection. Command steering is contextual
 /// output collected by the controller, such as an explicit TUI `!` shell
-/// command. Both variants are delivered to the model as user-role content, but
-/// consumers may render/acknowledge them differently.
+/// command. Notice steering is a system notification pushed by a tool, such as a
+/// background job announcing it has finished. All variants are delivered to the
+/// model as user-role content, but consumers may render/acknowledge them
+/// differently.
 pub(all) enum SteerInput {
   Prompt(String)
   Command(String)
+  Notice(String)
 }
 
 ///|

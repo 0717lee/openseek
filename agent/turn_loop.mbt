@@ -148,17 +148,24 @@ fn AgentLoop::push_finished_message(self : Self, answer : String) -> Unit {
 }
 
 ///|
+/// Fold steering input into the conversation: each becomes a durable session
+/// item and a model-visible chat message. Prompt/command steering persists as a
+/// user message; a background notice persists as a `RuntimeNotice` (so on resume
+/// it renders as a system notice, not user input). All emit `steer_applied`; the
+/// `kind` field distinguishes them.
 async fn AgentLoop::apply_steer_inputs(
   self : Self,
   session : @agent_session.Session,
   inputs : ArrayView[@agent_runtime.SteerInput],
 ) -> @agent_session.Session {
   for input in inputs; current = session {
-    let (kind, text) = match input {
-      Prompt(text) => ("prompt", text)
-      Command(text) => ("command", text)
+    let (kind, text, item) : (String, String, @agent_session.SessionItem) = match
+      input {
+      Prompt(text) => ("prompt", text, User(UserMessage(text)))
+      Command(text) => ("command", text, User(UserMessage(text)))
+      Notice(text) => ("notice", text, Runtime(RuntimeNotice(text)))
     }
-    let next = self.append(current, User(UserMessage(text)))
+    let next = self.append(current, item)
     self.messages.push(ChatMessage(User, content=text))
     @xlog.info() <? { "event": "steer_applied", "kind": kind, "content": text }
     continue next
