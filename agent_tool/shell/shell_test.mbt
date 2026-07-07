@@ -96,6 +96,35 @@ async test "foreground enforces max_output_chars with an output-limit error" {
 
 ///|
 #cfg(not(platform="windows"))
+async test "a detached foreground job retains full output past the inline cap" {
+  @async.with_task_group(group => {
+    let bg = @bgjobs.BgJobRuntime::new(AgentTaskScope(group), spill_dir="/tmp")
+    // Produces a lot of output, then keeps running past the timeout → detached.
+    let action = run_shell_wired(bg, {
+      "cmd": "seq 1 5000; sleep 5",
+      "timeout_ms": 400,
+      "max_output_chars": 100,
+    })
+    guard action is Respond(output) else { fail("expected a Respond action") }
+    assert_true(output.content.contains("moved to the background"))
+    // The detached job is file-backed, so its full output is retained, not
+    // capped at the foreground budget. Poll until the monitor has flushed it.
+    let id = bg.list()[0].id
+    let mut seen = false
+    for _ in 0..<200 {
+      if bg.read_output(id).unwrap_or("").contains("5000") {
+        seen = true
+        break
+      }
+      @async.sleep(25)
+    }
+    assert_true(seen)
+    let _ = bg.stop(id)
+  })
+}
+
+///|
+#cfg(not(platform="windows"))
 async test "a foreground command that times out is detached to the background" {
   @async.with_task_group(group => {
     let bg = @bgjobs.BgJobRuntime::new(AgentTaskScope(group))

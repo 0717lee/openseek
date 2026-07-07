@@ -52,6 +52,10 @@ pub struct BgJobRuntime {
   priv on_job_exit : ((BgJobSnapshot) -> Unit)?
   priv jobs : Map[String, BgJob]
   priv mut next_index : Int
+  // Separate counter for the spill files of detachable foreground executions
+  // (which are not registered until adopted), so their `fg-<n>.out` files never
+  // collide with a job's `bg-<n>.out`.
+  priv mut fg_index : Int
 }
 
 ///|
@@ -133,6 +137,7 @@ pub fn[X] BgJobRuntime::new(
     on_job_exit,
     jobs: {},
     next_index: 1,
+    fg_index: 1,
   }
 }
 
@@ -157,6 +162,29 @@ pub async fn BgJobRuntime::spawn_foreground(
   max_output_chars : Int,
 ) -> @shell_exec.ShellExecution {
   (self.spawn_foreground_exec)(program, args, cwd, max_output_chars)
+}
+
+///|
+/// Spawn a foreground execution that may be *detached* (adopted) on timeout: it
+/// uses the background retention config — file-backed (spill), a large hard cap,
+/// no output-limit kill — so that if it is detached and keeps producing output,
+/// `shell_output` still sees it. The foreground output-limit (over
+/// `max_output_chars`) is enforced by the caller at display time, not by killing;
+/// the caller's `timeout_ms` bounds the wait. Reuses the background spawn with a
+/// distinct `fg-<n>.out` spill file.
+pub async fn BgJobRuntime::spawn_foreground_retained(
+  self : BgJobRuntime,
+  program : String,
+  args : Array[String],
+  cwd : String?,
+  max_output_chars : Int,
+) -> @shell_exec.ShellExecution {
+  let spill_path = self.spill_dir.map(dir => {
+    let index = self.fg_index
+    self.fg_index += 1
+    "\{dir}/fg-\{index}.out"
+  })
+  (self.spawn_exec)(program, args, cwd, max_output_chars, spill_path)
 }
 
 ///|

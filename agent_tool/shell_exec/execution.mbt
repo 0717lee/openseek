@@ -214,6 +214,20 @@ pub async fn ShellExecution::wait(self : ShellExecution) -> Unit {
 }
 
 ///|
+/// Await terminal *or* the first invalid (binary / non-UTF-8) output, whichever
+/// comes first — so a foreground command that emits binary bytes and then keeps
+/// running fails immediately, matching the strict per-call path, instead of
+/// blocking until exit.
+pub async fn ShellExecution::wait_or_invalid(self : ShellExecution) -> Unit {
+  for ;; {
+    if self.status.is_terminal() || self.sink.had_invalid_utf8() {
+      return
+    }
+    @async.sleep(5)
+  }
+}
+
+///|
 /// Detach the execution: flip `Running → Backgrounded` so no call is awaiting it
 /// while the process keeps running, and clear the foreground output-limit kill (a
 /// detached job caps retention but keeps running). No-op (`false`) once terminal

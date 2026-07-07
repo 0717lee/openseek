@@ -163,9 +163,21 @@ async fn shell(
   // model (session group), which is what lets a timed-out one be detached rather
   // than killed. Both the spawner and the detach hook come from it; without one
   // the shell falls back to the per-call collection path (no detach).
+  //
+  // A command with a `timeout_ms` may be detached on timeout, so spawn it with
+  // the *retained* (file-backed, no output-limit kill) config so it keeps a full
+  // record if it is detached and produces more output — the foreground
+  // output-limit is enforced at display via `over_inline_cap`, and the timeout
+  // bounds the wait. A command with no timeout cannot detach, so it uses the
+  // memory-only foreground config (killed at the output limit, no leak).
+  let detachable = input.timeout_ms is Some(_)
   let foreground_spawn : (async (String, Array[String], String?, Int) -> @shell_exec.ShellExecution)? = bg_runtime.map(runtime => {
       (program, args, cwd, max) => {
-        runtime.spawn_foreground(program, args, cwd, max)
+        if detachable {
+          runtime.spawn_foreground_retained(program, args, cwd, max)
+        } else {
+          runtime.spawn_foreground(program, args, cwd, max)
+        }
       }
     },
   )
@@ -297,8 +309,8 @@ async fn run_agent_shell_with_tree_precheck(
       let finished = try {
         match timeout_ms {
           Some(timeout_ms) =>
-            @async.with_timeout_opt(timeout_ms, () => exec.wait())
-          None => Some(exec.wait())
+            @async.with_timeout_opt(timeout_ms, () => exec.wait_or_invalid())
+          None => Some(exec.wait_or_invalid())
         }
       } catch {
         error => {
@@ -319,7 +331,10 @@ async fn run_agent_shell_with_tree_precheck(
         // (binary/non-UTF-8) output is a tool error, not replacement characters
         // presented as success.
         Some(_) =>
+          // `wait_or_invalid` may return with the child still running (binary
+          // output seen); stop it so binary output is an immediate error.
           if exec.had_invalid_utf8() {
+            let _ = exec.stop()
             ShellBinaryOutput
           } else {
             ShellExecuted(agent_shell_output_from_exec(exec, launch))
@@ -374,7 +389,10 @@ fn agent_shell_output_from_exec(
     output: {
       exit_code: exec.exit_code(),
       text: exec.head(),
-      output_limit_reached: exec.output_truncated(),
+      // Foreground output-limit is the inline cap (max_output_chars): either the
+      // detachable execution grew past it (over_inline_cap, large hard cap) or the
+      // memory-only one was killed at it (truncated, hard cap == inline cap).
+      output_limit_reached: exec.over_inline_cap() || exec.output_truncated(),
     },
     source_write_sandboxed: launch.source_write_sandboxed,
     sandbox_denial_subjects: launch.sandbox_denial_subjects,

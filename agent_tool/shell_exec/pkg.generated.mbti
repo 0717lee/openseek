@@ -41,6 +41,7 @@ pub async fn[X] ShellExecution::start(@agent_runtime.AgentTaskScope[X], program~
 pub fn ShellExecution::status(Self) -> ExecStatus
 pub async fn ShellExecution::stop(Self) -> Bool
 pub async fn ShellExecution::wait(Self) -> Unit
+pub async fn ShellExecution::wait_or_invalid(Self) -> Unit
 
 pub struct ShellOutputSink {
   // private fields

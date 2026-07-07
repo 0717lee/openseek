@@ -21,6 +21,7 @@ pub async fn BgJobRuntime::read_output(Self, String) -> String?
 pub async fn BgJobRuntime::read_output_tail(Self, String, Int) -> String?
 pub fn BgJobRuntime::snapshot(Self, String) -> BgJobSnapshot?
 pub async fn BgJobRuntime::spawn_foreground(Self, String, Array[String], String?, Int) -> @shell_exec.ShellExecution
+pub async fn BgJobRuntime::spawn_foreground_retained(Self, String, Array[String], String?, Int) -> @shell_exec.ShellExecution
 pub async fn BgJobRuntime::start(Self, program~ : String, args~ : Array[String], command~ : String, cwd? : String, max_output_chars? : Int, source_write_sandboxed? : Bool, sandbox_denial_subjects? : Array[String]) -> String
 pub async fn BgJobRuntime::stop(Self, String) -> Bool
 
