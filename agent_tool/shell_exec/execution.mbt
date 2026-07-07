@@ -302,6 +302,14 @@ pub fn ShellExecution::had_invalid_utf8(self : ShellExecution) -> Bool {
 }
 
 ///|
+/// Delete the spill file — for a retained execution that finished in the
+/// foreground and is not adopted as a background job, so its temp file does not
+/// leak. The in-memory head remains readable.
+pub async fn ShellExecution::discard(self : ShellExecution) -> Unit {
+  self.sink.discard()
+}
+
+///|
 /// Full-output length in characters.
 pub fn ShellExecution::size(self : ShellExecution) -> Int {
   self.sink.size()

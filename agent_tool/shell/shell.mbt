@@ -332,12 +332,17 @@ async fn run_agent_shell_with_tree_precheck(
         // presented as success.
         Some(_) =>
           // `wait_or_invalid` may return with the child still running (binary
-          // output seen); stop it so binary output is an immediate error.
+          // output seen); stop it so binary output is an immediate error. Either
+          // way this execution finished in the foreground (not adopted), so free
+          // its spill file if the retained config opened one.
           if exec.had_invalid_utf8() {
             let _ = exec.stop()
+            exec.discard()
             ShellBinaryOutput
           } else {
-            ShellExecuted(agent_shell_output_from_exec(exec, launch))
+            let output = agent_shell_output_from_exec(exec, launch)
+            exec.discard()
+            ShellExecuted(output)
           }
       }
     }

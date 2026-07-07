@@ -204,6 +204,24 @@ pub fn ShellOutputSink::close(self : ShellOutputSink) -> Unit {
 }
 
 ///|
+/// Close and delete the spill file — for a retained execution that completed in
+/// the foreground (never adopted as a background job), so its temp file does not
+/// leak. Full output is no longer readable after this (the head remains).
+pub async fn ShellOutputSink::discard(self : ShellOutputSink) -> Unit {
+  match self.file {
+    Some(file) => {
+      file.close()
+      self.file = None
+      match self.spill_path {
+        Some(path) => @fs.remove(path) catch { _ => () }
+        None => ()
+      }
+    }
+    None => ()
+  }
+}
+
+///|
 /// Total full-output length in characters (≤ hard_cap).
 pub fn ShellOutputSink::size(self : ShellOutputSink) -> Int {
   self.total_chars

@@ -26,6 +26,7 @@ pub struct ShellExecution {
   // private fields
 }
 pub fn ShellExecution::background(Self) -> Bool
+pub async fn ShellExecution::discard(Self) -> Unit
 pub fn ShellExecution::exit_code(Self) -> Int?
 pub fn ShellExecution::had_invalid_utf8(Self) -> Bool
 pub fn ShellExecution::head(Self) -> String
@@ -49,6 +50,7 @@ pub struct ShellOutputSink {
 pub async fn ShellOutputSink::append_chunk(Self, Bytes) -> Unit
 pub async fn ShellOutputSink::append_text(Self, String) -> Unit
 pub fn ShellOutputSink::close(Self) -> Unit
+pub async fn ShellOutputSink::discard(Self) -> Unit
 pub async fn ShellOutputSink::finish(Self) -> Unit
 pub fn ShellOutputSink::had_invalid_utf8(Self) -> Bool
 pub fn ShellOutputSink::head(Self) -> String
