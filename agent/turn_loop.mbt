@@ -98,11 +98,19 @@ async fn AgentLoop::append(
 async fn AgentLoop::apply_steer_inputs(
   self : Self,
   session : @agent_session.Session,
-  inputs : Array[@agent_runtime.SteerInput],
+  inputs : ArrayView[@agent_runtime.SteerInput],
 ) -> @agent_session.Session {
-  session.apply_steer_inputs(inputs, self.messages, append_item=(session, item) => {
-    self.append(session, item)
-  })
+  for input in inputs; current = session {
+    let (kind, text) = match input {
+      Prompt(text) => ("prompt", text)
+      Command(text) => ("command", text)
+    }
+    self.messages.push(ChatMessage(User, content=text))
+    @xlog.info() <? { "event": "steer_applied", "kind": kind, "content": text }
+    continue self.append(current, User(UserMessage(text)))
+  } nobreak {
+    current
+  }
 }
 
 ///|
