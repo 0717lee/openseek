@@ -313,6 +313,13 @@ async fn AgentLoop::execute_tool_call(
       )
       let steer_inputs = self.runtime.pending_steers()
       if steer_inputs.is_empty() {
+        // The turn ends here, so trailing tool calls in this batch are left
+        // without an eager result item on purpose: the loop-local `messages`
+        // buffer is discarded, and the next turn rebuilds context from
+        // `Session::chat_messages`, whose `flush_pending_tool_calls` synthesizes
+        // a result for every still-unpaired call before it emits this terminal
+        // item. Only the continue path below closes skipped calls eagerly,
+        // because it reuses `messages` for the very next model request.
         let session = self.append(session, Terminal(Finished(answer)))
         self.push_finished_message(answer)
         @xlog.info() <? { "event": "agent_finished", "answer": answer }
@@ -339,6 +346,10 @@ async fn AgentLoop::execute_tool_call(
           ),
         ),
       )
+      // Abort ends the turn, so — like the no-steer finish path above — trailing
+      // unexecuted tool calls need no eager result item here: replay's
+      // `Session::chat_messages` projection (`flush_pending_tool_calls`)
+      // synthesizes results for any calls left unpaired before this terminal.
       let session = self.append(session, Terminal(Aborted(reason)))
       @xlog.warn() <? { "event": "agent_aborted", "reason": reason }
       return FinishAgentLoop(session)
