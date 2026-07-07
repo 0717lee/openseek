@@ -5,8 +5,7 @@ priv struct AgentLoop {
   tools : @agent_tool.Tools
   append_item : async (@agent_session.Session, @agent_session.SessionItem) -> @agent_session.Session
   messages : Array[@deepseek.ChatMessage]
-  plan_registered : Bool
-  cadence : PlanCadence
+  plan_cadence : PlanCadence
   mut last_session : @agent_session.Session
 }
 
@@ -24,8 +23,7 @@ fn AgentLoop::AgentLoop(
     tools,
     append_item,
     messages: session.chat_messages(),
-    plan_registered: tools.find("plan") is Some(_),
-    cadence: { steps_since_plan: 0, steps_since_reminder: 0, checklist: None },
+    plan_cadence: PlanCadence(registered=tools.find("plan") is Some(_)),
     last_session: session,
   }
 }
@@ -52,7 +50,7 @@ async fn AgentLoop::run(
   self.last_session = session
 
   try {
-    let session = for step in 0..<max_steps; session = session {
+    for step in 0..<max_steps; session = session {
       let session = self.prepare_step(session)
       let response = self.chat(step)
       match self.handle_response(session, response) {
@@ -60,10 +58,9 @@ async fn AgentLoop::run(
         StepDone(next) => return next
       }
     } nobreak {
-      session
+      @xlog.warn() <? { "event": "max_steps_exhausted" }
+      self.append(session, Terminal(Failed("max steps exhausted")))
     }
-    @xlog.warn() <? { "event": "max_steps_exhausted" }
-    self.append(session, Terminal(Failed("max steps exhausted")))
   } catch {
     error => {
       let terminal : @agent_session.SessionItem = if @async.is_being_cancelled() ||
@@ -115,17 +112,14 @@ async fn AgentLoop::prepare_step(
     session,
     self.runtime.pending_steers(),
   )
-  if self.plan_registered &&
-    self.cadence.steps_since_plan >= plan_reminder_after_steps &&
-    self.cadence.steps_since_reminder >= plan_reminder_after_steps {
-    let reminder = plan_reminder_text(self.cadence.checklist)
+  if self.plan_cadence.should_remind() {
+    let reminder = self.plan_cadence.reminder_text()
     @xlog.info() <? { "event": "plan_reminder", "content": reminder }
     session = self.append(session, Runtime(RuntimeNotice(reminder)))
     self.messages.push(ChatMessage(User, content=reminder))
-    self.cadence.steps_since_reminder = 0
+    self.plan_cadence.record_reminder()
   }
-  self.cadence.steps_since_plan += 1
-  self.cadence.steps_since_reminder += 1
+  self.plan_cadence.record_model_request()
   session
 }
 
@@ -265,8 +259,9 @@ async fn AgentLoop::handle_tool_calls(
       ContinueAgentLoop(next) => return StepContinue(next)
       FinishAgentLoop(next) => return StepDone(next)
     }
+  } nobreak {
+    StepContinue(session)
   }
-  StepContinue(session)
 }
 
 ///|
@@ -289,7 +284,7 @@ async fn AgentLoop::execute_tool_call(
       return self.abort_from_tool(session, native_call, tool_call, reason)
     Respond(output) => output
   }
-  self.record_plan_success(tool_call, output)
+  self.plan_cadence.record_plan_success(tool_call, output)
   log_tool_result(native_call, tool_call, output)
   self.messages.push(ChatMessage(Tool(native_call.id), content=output.content))
   session = self.append(
@@ -351,8 +346,7 @@ async fn AgentLoop::close_skipped_tool_calls(
   response : @deepseek.ChatResponse,
   call_index : Int,
 ) -> @agent_session.Session {
-  let mut session = session
-  for skipped in response.tool_calls[call_index + 1:] {
+  for skipped in response.tool_calls[call_index + 1:]; session = session {
     let note = "skipped: user input arrived before this call ran"
     @xlog.info() <?
       {
@@ -363,7 +357,7 @@ async fn AgentLoop::close_skipped_tool_calls(
         "content": note,
       }
     self.messages.push(ChatMessage(Tool(skipped.id), content=note))
-    session = self.append(
+    let session = self.append(
       session,
       Tool(
         ToolResult(
@@ -374,8 +368,10 @@ async fn AgentLoop::close_skipped_tool_calls(
         ),
       ),
     )
+    continue session
+  } nobreak {
+    session
   }
-  session
 }
 
 ///|
@@ -399,21 +395,6 @@ async fn AgentLoop::abort_from_tool(
   )
   @xlog.warn() <? { "event": "agent_aborted", "reason": reason }
   FinishAgentLoop(self.append(session, Terminal(Aborted(reason))))
-}
-
-///|
-fn AgentLoop::record_plan_success(
-  self : Self,
-  tool_call : @agent_tool.AgentToolCall,
-  output : @agent_tool.ToolOutput,
-) -> Unit {
-  if tool_call.name == "plan" && !output.is_error {
-    // A successful plan write restarts the staleness cadence and refreshes the
-    // checklist the next reminder would re-surface; a cleared plan drops back to
-    // the plan-free nudge.
-    self.cadence.steps_since_plan = 0
-    self.cadence.checklist = @plan.reminder_checklist(tool_call.arguments)
-  }
 }
 
 ///|

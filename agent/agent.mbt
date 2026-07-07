@@ -37,17 +37,60 @@ fn plan_reminder_text(checklist : String?) -> String {
 }
 
 ///|
-/// Plan staleness tracking for one turn: counters advance once per model
-/// request. A successful `plan` call resets `steps_since_plan` and refreshes
-/// `checklist`; injecting a reminder resets `steps_since_reminder`, so the
-/// reminder fires only after both enough plan silence and enough reminder
-/// silence. Turn-local by design — a fresh user turn resets the cadence.
-/// `checklist` carries the last successfully recorded plan for the reminder to
-/// re-surface.
+/// Plan staleness tracking for one turn. When the plan tool is registered,
+/// counters advance once per model request. A successful `plan` call resets
+/// `steps_since_plan` and refreshes `checklist`; injecting a reminder resets
+/// `steps_since_reminder`, so the reminder fires only after both enough plan
+/// silence and enough reminder silence. Turn-local by design — a fresh user
+/// turn resets the cadence. `checklist` carries the last successfully recorded
+/// plan for the reminder to re-surface.
 priv struct PlanCadence {
+  registered : Bool
   mut steps_since_plan : Int
   mut steps_since_reminder : Int
   mut checklist : String?
+}
+
+///|
+fn PlanCadence::PlanCadence(registered~ : Bool) -> PlanCadence {
+  { registered, steps_since_plan: 0, steps_since_reminder: 0, checklist: None }
+}
+
+///|
+fn PlanCadence::should_remind(self : Self) -> Bool {
+  self.registered &&
+  self.steps_since_plan >= plan_reminder_after_steps &&
+  self.steps_since_reminder >= plan_reminder_after_steps
+}
+
+///|
+fn PlanCadence::reminder_text(self : Self) -> String {
+  plan_reminder_text(self.checklist)
+}
+
+///|
+fn PlanCadence::record_reminder(self : Self) -> Unit {
+  self.steps_since_reminder = 0
+}
+
+///|
+fn PlanCadence::record_model_request(self : Self) -> Unit {
+  if self.registered {
+    self.steps_since_plan += 1
+    self.steps_since_reminder += 1
+  }
+}
+
+///|
+fn PlanCadence::record_plan_success(
+  self : Self,
+  tool_call : @agent_tool.AgentToolCall,
+  output : @agent_tool.ToolOutput,
+) -> Unit {
+  if self.registered && tool_call.name == "plan" && !output.is_error {
+    self.steps_since_plan = 0
+    self.checklist = @plan.reminder_checklist(tool_call.arguments)
+  }
 }
 
 ///|
