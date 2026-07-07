@@ -444,6 +444,13 @@ pub fn SessionEvent::unix_ms(self : SessionEvent) -> Int64 {
 /// `Session`; the receiver is unchanged. Internally the event log is an
 /// immutable vector, so appending shares existing structure instead of copying
 /// the whole history.
+///
+/// Event-log invariant: `events` is ordered oldest-first with contiguous,
+/// one-based sequence numbers (`1, 2, …, N`; no gaps, duplicates, or
+/// reordering), and `last_sequence` equals `N` (0 when the log is empty).
+/// `append`/`append_event` preserve it by construction; the `Session::Session`
+/// constructor trusts callers to supply a log that already satisfies it — see
+/// that constructor for the full contract.
 pub struct Session {
   priv id : SessionId
   priv system_prompt : String
@@ -455,10 +462,28 @@ pub struct Session {
 /// Build a session from identity, system prompt, and an optional event log.
 ///
 /// `id` is stored exactly as supplied. `system_prompt` becomes the first system
-/// message in `chat_messages` and is not changed by append operations. `events`
-/// is used as-is; this constructor does not check contiguity or sort events.
-/// `last_sequence` is recovered as the highest sequence number present, so the
-/// next append uses `last_sequence + 1`.
+/// message in `chat_messages` and is not changed by append operations.
+///
+/// ## Event-log invariant (caller-owned)
+///
+/// `events` must be the session's full log, oldest first, with contiguous
+/// one-based sequence numbers `1, 2, …, N` — no gaps, duplicates, or reordering.
+/// This constructor is unchecked: it neither sorts nor validates `events`, and
+/// only recovers `last_sequence` as the highest sequence present (0 when empty),
+/// so the next `append` uses `last_sequence + 1`.
+///
+/// A malformed log is accepted silently here but breaks downstream:
+/// - `append`/`append_event` derive the next sequence from `last_sequence`, so a
+///   gap or duplicate makes the next event skip or collide;
+/// - `SessionStore` re-validates on load and rejects a non-contiguous log
+///   ("session event log sequence mismatch"), so it cannot round-trip durably;
+/// - `chat_messages` projects events in log order, so replay assumes ascending
+///   sequence.
+///
+/// The intended callers are the deserializers that rebuild an already-valid log
+/// (this package's JSON decode, `agent_session/store`, and `agent_session/log`).
+/// Build a fresh session with empty `events` and grow it through `append`, which
+/// preserves the invariant automatically.
 pub fn Session::Session(
   id : SessionId,
   system_prompt~ : String,
