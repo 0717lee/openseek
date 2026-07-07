@@ -75,6 +75,35 @@ async test "shell_output windows a large job's output and notes truncation" {
 
 ///|
 #cfg(not(platform="windows"))
+async test "shell_output flags dropped output for a memory-only job" {
+  @async.with_task_group(group => {
+    // Memory-only runtime (no spill dir): output past the budget is dropped.
+    let bg = @bgjobs.BgJobRuntime::new(AgentTaskScope(group))
+    let id = bg.start(
+      program="sh",
+      args=["-c", "seq 1 2000"],
+      command="seq",
+      max_output_chars=100,
+    )
+    for _ in 0..<200 {
+      if bg.snapshot(id) is Some(s) && !(s.status is Running) {
+        break
+      }
+      @async.sleep(25)
+    }
+    let action = match @shell_output.definition(bg).execute {
+      Async(execute) => execute({ "job_id": id })
+      Sync(_) => fail("shell_output should be async")
+    }
+    guard action is Respond(output) else { fail("expected a Respond action") }
+    // Only ~100 chars retained but the job produced far more — must not present
+    // the prefix as complete.
+    assert_true(output.content.contains("truncated=true"))
+  })
+}
+
+///|
+#cfg(not(platform="windows"))
 async test "shell_output errors on an unknown job id" {
   @async.with_task_group(group => {
     let bg = @bgjobs.BgJobRuntime::new(AgentTaskScope(group))

@@ -36,7 +36,7 @@ async fn execute(
   }
   // Recent output, bounded to a window so a poll cannot flood the conversation
   // with a large job's full log. For output over the window, show the *tail*
-  // (recent progress) and note the total size.
+  // (recent progress).
   let window = 12000
   let output = bg_runtime
     .read_output_tail(job_id, window)
@@ -46,8 +46,18 @@ async fn execute(
     Exited(code) => ("exit=\{code}", code != 0)
     Stopped => ("stopped", true)
   }
-  let truncation = if snapshot.size > window {
-    " truncated=true total_chars=\{snapshot.size} showing_last=\{window}"
+  // Truncated whenever what we show is less than what the job produced — this
+  // covers the window (large output), a memory-only runtime that dropped output
+  // past the budget, and a hard-cap drop — so a prefix is never presented as the
+  // complete output.
+  let shown = output.char_length()
+  let truncation = if shown < snapshot.size || snapshot.output_truncated {
+    let cap = if snapshot.output_truncated {
+      " output_dropped_at_cap=true"
+    } else {
+      ""
+    }
+    " truncated=true total_chars=\{snapshot.size} shown_chars=\{shown}\{cap}"
   } else {
     ""
   }
