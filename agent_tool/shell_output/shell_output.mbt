@@ -151,6 +151,11 @@ fn wait_ms(arguments : Json) -> Result[Int?, String] {
         Ok(Some(wait))
       }
     }
-    { "wait_ms": Null, .. } | _ => Ok(None)
+    { "wait_ms": Null, .. } => Ok(None)
+    // Present but not a number (e.g. a stringified "30000"): reject rather than
+    // silently skip the wait — the local dispatcher does not enforce the JSON
+    // schema, so the decoder must.
+    { "wait_ms": _, .. } => Err("error: shell_output wait_ms must be a number")
+    _ => Ok(None)
   }
 }

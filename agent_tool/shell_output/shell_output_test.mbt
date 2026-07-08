@@ -204,3 +204,19 @@ async test "a non-positive wait_ms is a tool error" {
     assert_true(output.content.contains("wait_ms"))
   })
 }
+
+///|
+#cfg(not(platform="windows"))
+async test "a non-numeric wait_ms is a tool error, not silently ignored" {
+  @async.with_task_group(group => {
+    let bg = @bgjobs.BgJobRuntime::new(AgentTaskScope(group))
+    let id = bg.start(program="sh", args=["-c", "true"], command="noop")
+    let action = match @shell_output.definition(bg).execute {
+      Async(execute) => execute({ "job_id": id, "wait_ms": "30000" })
+      Sync(_) => fail("shell_output should be async")
+    }
+    guard action is Respond(output) else { fail("expected a Respond action") }
+    assert_true(output.is_error)
+    assert_true(output.content.contains("wait_ms must be a number"))
+  })
+}
