@@ -282,7 +282,12 @@ pub async fn[X] run_turn_in_scope(
 ) -> @agent_session.Session {
   let client = @client.Client(api_key~, model~, thinking~, api_url?)
   let session = session |> append_item(User(UserMessage(task)))
-  let tools = tools.unwrap_or_else(() => build_tools(runtime, scope)) catch {
+  let tools = try {
+    match tools {
+      Some(tools) => tools
+      None => build_tools(runtime, scope)
+    }
+  } catch {
     error => {
       @xlog.error() <? { "event": "agent_setup_failed", "error": "\{error}" }
       return session
@@ -301,7 +306,7 @@ fn @agent_runtime.AgentRuntime::pending_steers(
 ) -> Array[@agent_runtime.SteerInput] {
   [
     for input in runtime.drain_steers() if input
-    is (Prompt(text) | Command(text)) &&
+    is (Prompt(text) | Command(text) | Notice(text)) &&
     !text.trim().is_empty() => input
   ]
 }
