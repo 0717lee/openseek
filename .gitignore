@@ -23,6 +23,8 @@ eval/*
 !eval/session_analyzer/**
 !eval/tool_harness/
 !eval/tool_harness/**
+!eval/bgjobs_capability/
+!eval/bgjobs_capability/**
 !eval/internal/
 !eval/internal/**
 !eval/swe_agi/
