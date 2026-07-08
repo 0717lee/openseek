@@ -1,4 +1,17 @@
 ///|
+/// A recursive marker catalog root at `<base>/<label>`, scanning
+/// `<base>/<label>/sessions` — the shape every catalog fixture here uses.
+fn marker_root(base : String, label : String) -> SessionRoot {
+  {
+    path: "\{base}/\{label}",
+    scan_path: "\{base}/\{label}/sessions",
+    label,
+    recursive: true,
+    is_marker: true,
+  }
+}
+
+///|
 /// Environment-dependent (needs a default route), so absence is accepted; but
 /// whatever it returns must be a remotely-reachable IPv4 — never a loopback or
 /// unspecified address, which is the whole point of filtering them out.
@@ -371,20 +384,8 @@ async test "session catalog lookup supports stable and legacy keys" {
     )
     let catalog : SessionCatalog = {
       roots: [
-        {
-          path: "\{root}/app/.openseek",
-          scan_path: "\{root}/app/.openseek/sessions",
-          label: "app/.openseek",
-          recursive: true,
-          is_marker: true,
-        },
-        {
-          path: "\{root}/lib/.openseek",
-          scan_path: "\{root}/lib/.openseek/sessions",
-          label: "lib/.openseek",
-          recursive: true,
-          is_marker: true,
-        },
+        marker_root(root, "app/.openseek"),
+        marker_root(root, "lib/.openseek"),
       ],
     }
     let rows = catalog.rows()
@@ -432,20 +433,8 @@ async test "session_list_reply includes root metadata and stable keys" {
     )
     let catalog : SessionCatalog = {
       roots: [
-        {
-          path: "\{root}/app/.openseek",
-          scan_path: "\{root}/app/.openseek/sessions",
-          label: "app/.openseek",
-          recursive: true,
-          is_marker: true,
-        },
-        {
-          path: "\{root}/lib/.openseek",
-          scan_path: "\{root}/lib/.openseek/sessions",
-          label: "lib/.openseek",
-          recursive: true,
-          is_marker: true,
-        },
+        marker_root(root, "app/.openseek"),
+        marker_root(root, "lib/.openseek"),
       ],
     }
     let reply = session_list_reply(catalog)
@@ -471,17 +460,7 @@ async test "raw session file route decodes the file segment like the key" {
       User(UserMessage("hi")),
     )
     store.create(session)
-    let catalog : SessionCatalog = {
-      roots: [
-        {
-          path: "\{root}/.openseek",
-          scan_path: "\{root}/.openseek/sessions",
-          label: ".openseek",
-          recursive: true,
-          is_marker: true,
-        },
-      ],
-    }
+    let catalog : SessionCatalog = { roots: [marker_root(root, ".openseek")] }
     let reply = session_path_reply(
       catalog, "run%201/openseek_session-run%201.jsonl",
     )
