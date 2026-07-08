@@ -395,6 +395,23 @@ pub async fn BgJobRuntime::read_output_tail(
 }
 
 ///|
+/// Await the job reaching a terminal status, up to `timeout_ms`. Returns `true`
+/// once terminal, `false` on deadline or an unknown id. This is the await
+/// primitive behind `shell_output`'s `wait_ms`: a caller that needs the result
+/// *now* blocks here once instead of burning model round trips on polling.
+pub async fn BgJobRuntime::wait_exit(
+  self : BgJobRuntime,
+  id : String,
+  timeout_ms : Int,
+) -> Bool {
+  match self.jobs.get(id) {
+    Some(job) =>
+      @async.with_timeout_opt(timeout_ms, () => job.exec.wait()) is Some(_)
+    None => false
+  }
+}
+
+///|
 /// Snapshots of every job the session has started.
 pub fn BgJobRuntime::list(self : BgJobRuntime) -> Array[BgJobSnapshot] {
   let out = []

@@ -63,7 +63,8 @@ fn default_prompt() -> String {
     #|    `run_in_background: true`: it returns a job id immediately and a notice is
     #|    pushed to you when the job finishes. Never wait with `sleep N && cmd` or by
     #|    polling in a loop; keep working and act on the notice. `shell_output` reads
-    #|    a job's recent output; `shell_stop` cancels it.
+    #|    a job's recent output; `shell_stop` cancels it. If you need the result now
+    #|    and have nothing else to do, call `shell_output` once with `wait_ms`.
     #|- Start `moon check` once `moon.mod` and the relevant `moon.pkg` files exist;
     #|  use `moon build` or `moon test` only when you need artifacts or test results.
     #|- `multi_edit` example — one edit per distinct line; a line with several matches

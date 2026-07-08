@@ -148,3 +148,59 @@ async test "shell_output errors on an unknown job id" {
     assert_true(output.content.contains("no background job"))
   })
 }
+
+///|
+#cfg(not(platform="windows"))
+async test "wait_ms blocks until the job finishes and returns its output" {
+  @async.with_task_group(group => {
+    let bg = @bgjobs.BgJobRuntime::new(AgentTaskScope(group))
+    let id = bg.start(
+      program="sh",
+      args=["-c", "sleep 1; echo WAITED-OK"],
+      command="waited",
+    )
+    // No polling loop: a single call awaits the exit and returns the result.
+    let action = match @shell_output.definition(bg).execute {
+      Async(execute) => execute({ "job_id": id, "wait_ms": 30000 })
+      Sync(_) => fail("shell_output should be async")
+    }
+    guard action is Respond(output) else { fail("expected a Respond action") }
+    assert_false(output.is_error)
+    assert_true(output.content.contains("WAITED-OK"))
+    assert_true(output.content.contains("exit=0"))
+  })
+}
+
+///|
+#cfg(not(platform="windows"))
+async test "a wait_ms deadline on a still-running job is not an error" {
+  @async.with_task_group(group => {
+    let bg = @bgjobs.BgJobRuntime::new(AgentTaskScope(group))
+    let id = bg.start(program="sh", args=["-c", "sleep 30"], command="slow")
+    let action = match @shell_output.definition(bg).execute {
+      Async(execute) => execute({ "job_id": id, "wait_ms": 200 })
+      Sync(_) => fail("shell_output should be async")
+    }
+    guard action is Respond(output) else { fail("expected a Respond action") }
+    // Deadline expiry just reports the live status; the model can call again.
+    assert_false(output.is_error)
+    assert_true(output.content.contains("running"))
+    let _ = bg.stop(id)
+  })
+}
+
+///|
+#cfg(not(platform="windows"))
+async test "a non-positive wait_ms is a tool error" {
+  @async.with_task_group(group => {
+    let bg = @bgjobs.BgJobRuntime::new(AgentTaskScope(group))
+    let id = bg.start(program="sh", args=["-c", "true"], command="noop")
+    let action = match @shell_output.definition(bg).execute {
+      Async(execute) => execute({ "job_id": id, "wait_ms": -5 })
+      Sync(_) => fail("shell_output should be async")
+    }
+    guard action is Respond(output) else { fail("expected a Respond action") }
+    assert_true(output.is_error)
+    assert_true(output.content.contains("wait_ms"))
+  })
+}

@@ -7,10 +7,16 @@ pub fn definition(
 ) -> @agent_tool.AgentToolDefinition {
   AgentToolDefinition(
     name="shell_output",
-    description="Read a background shell job's recent output and status by its job_id (returned by shell run_in_background, or by a command moved to the background on timeout). Returns the most recent window of captured output (with truncation metadata naming the total size when output exceeds the window) and whether the job is still running.",
+    description="Read a background shell job's recent output and status by its job_id (returned by shell run_in_background, or by a command moved to the background on timeout). Returns the most recent window of captured output (with truncation metadata naming the total size when output exceeds the window) and whether the job is still running. If you need the job's result before you can continue and have no other work to do, pass wait_ms to block until it finishes instead of checking repeatedly.",
     schema=JsonSchema({
       "type": "object",
-      "properties": { "job_id": { "type": "string" } },
+      "properties": {
+        "job_id": { "type": "string" },
+        "wait_ms": {
+          "type": "number",
+          "description": "Wait up to this many milliseconds (capped at 120000) for the job to finish before reading. Use when you need the result now and have nothing else to do; never poll in a loop.",
+        },
+      },
       "required": ["job_id"],
     }),
     execute=Async(arguments => execute(bg_runtime, arguments)),
@@ -33,6 +39,19 @@ async fn execute(
       "error: no background job with id \{job_id}",
       is_error=true,
     )
+  }
+  // Await-before-read: with wait_ms the caller blocks (bounded) until the job
+  // exits — one efficient await instead of a model round trip per poll. A
+  // deadline expiry is not an error; the response simply reports the job still
+  // running. The cap keeps a single tool call from holding the turn for long —
+  // the model can always call again.
+  match wait_ms(arguments) {
+    Ok(Some(wait)) => {
+      let _ = bg_runtime.wait_exit(job_id, wait)
+    }
+    Ok(None) => ()
+    Err(message) =>
+      return @agent_tool.ToolAction::respond(message, is_error=true)
   }
   // Recent output, bounded to a window so a poll cannot flood the conversation
   // with a large job's full log. For output over the window, show the *tail*
@@ -110,4 +129,28 @@ async fn execute(
   content.write_string(footer)
   let content = content.to_string()
   @agent_tool.ToolAction::respond(content, is_error~)
+}
+
+///|
+/// Longest a single shell_output call may block awaiting a job, so one tool
+/// call cannot hold the turn indefinitely; the model can always call again.
+let max_wait_ms : Int = 120_000
+
+///|
+/// Decode the optional `wait_ms` argument: a positive number, capped at
+/// `max_wait_ms`. Absent/null means no waiting.
+fn wait_ms(arguments : Json) -> Result[Int?, String] {
+  match arguments {
+    { "wait_ms": Number(value, ..), .. } => {
+      let wait = value.to_int()
+      if wait <= 0 {
+        Err("error: shell_output wait_ms must be a positive number")
+      } else if wait > max_wait_ms {
+        Ok(Some(max_wait_ms))
+      } else {
+        Ok(Some(wait))
+      }
+    }
+    { "wait_ms": Null, .. } | _ => Ok(None)
+  }
 }
