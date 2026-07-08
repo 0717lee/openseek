@@ -21,5 +21,7 @@ so `shell_stop` is idempotent; only an unknown id is a tool error
   no process-group kill, so a command that daemonized its own children can
   leave descendants running after the job is reported stopped — the same
   limitation as foreground cancellation, documented rather than hidden.
-- Session teardown stops all jobs the same way: every child is spawned on the
-  session task group, so nothing outlives the session.
+- Session teardown stops all jobs the same way: every job's direct child is
+  spawned on the session task group, so it is cancelled when the session ends —
+  with the same direct-child-only limitation as above: daemonized descendants
+  can outlive the session.
