@@ -25,6 +25,8 @@ eval/*
 !eval/tool_harness/**
 !eval/bgjobs_capability/
 !eval/bgjobs_capability/**
+!eval/bgjobs_e2e/
+!eval/bgjobs_e2e/**
 !eval/internal/
 !eval/internal/**
 !eval/swe_agi/

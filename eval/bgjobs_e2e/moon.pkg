@@ -1,0 +1,13 @@
+import {
+  "bobzhang/jsonl",
+  "moonbitlang/async",
+  "moonbitlang/async/process",
+  "moonbitlang/core/env",
+  "moonbitlang/core/json",
+}
+
+supported_targets = "+native"
+
+options(
+  "is-main": true,
+)
