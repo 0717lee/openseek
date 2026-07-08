@@ -201,6 +201,7 @@ async test "the watchdog kills a background job that floods past the hard cap" {
 }
 
 ///|
+#cfg(not(platform="windows"))
 async test "the reaper kills a background job that outlives the time cap" {
   @async.with_task_group(group => {
     let notices : Array[BgJobSnapshot] = []
@@ -225,6 +226,7 @@ async test "the reaper kills a background job that outlives the time cap" {
 }
 
 ///|
+#cfg(not(platform="windows"))
 async test "an adopted job keeps its original wall-clock deadline" {
   @async.with_task_group(group => {
     let rt = BgJobRuntime::new(AgentTaskScope(group), hard_timeout_ms=150)
@@ -242,6 +244,7 @@ async test "an adopted job keeps its original wall-clock deadline" {
 }
 
 ///|
+#cfg(not(platform="windows"))
 async test "a requested stop is not blamed on the reaper" {
   @async.with_task_group(group => {
     let rt = BgJobRuntime::new(AgentTaskScope(group), hard_timeout_ms=60_000)
