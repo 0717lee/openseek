@@ -66,6 +66,12 @@ async fn[G] Engine::spawn(group : @async.TaskGroup[G]) -> Engine {
       child_env[name] = value
     }
   }
+  // HOME must pass through for the moon toolchain, but the engine also derives
+  // its global skills dir from it ($HOME/.openseek/skills) — a developer's
+  // personal skills could change the live model's behavior. Point the skills
+  // dir at a path that never exists so the eval's prompt is exactly the
+  // repo-configured one.
+  child_env["OPENSEEK_GLOBAL_SKILLS_DIR"] = "/nonexistent/openseek-eval-no-skills"
   let _proc = @process.spawn(
     group,
     "moon",
@@ -152,6 +158,17 @@ fn check(
 }
 
 ///|
+/// Index of the first event matching `matches`, in arrival order.
+fn first_index(seen : Array[Json], matches : (Json) -> Bool) -> Int? {
+  for index, event in seen {
+    if matches(event) {
+      return Some(index)
+    }
+  }
+  None
+}
+
+///|
 fn finished_answer(event : Json?) -> String {
   match event {
     Some({ "event": String("agent_finished"), "answer": String(answer), .. }) =>
@@ -183,37 +200,84 @@ async fn run_phases(engine : Engine, failures : Array[String]) -> Unit {
   let finished1 = engine.wait_for(360_000, seen1, event => {
     event is { "event": String("agent_finished"), .. }
   })
-  let started = seen1
-    .iter()
-    .any(event => {
-      event
-      is { "event": String("tool_result"), "content": String(content), .. } &&
-      content.contains("started background job")
-    })
-  let notice_mid = seen1
-    .iter()
-    .any(event => {
-      event
-      is { "event": String("steer_applied"), "kind": String("notice"), .. }
-    })
-  let read_output = seen1
-    .iter()
-    .any(event => {
-      event
-      is {
-        "event": String("tool_result"),
-        "tool_name": String("shell_output"),
-        "content": String(content),
-        ..
-      } &&
-      content.contains("NOTICE-MARK-4242")
-    })
-  check(failures, "P1: job started via run_in_background", started)
+  // Sequence assertions — presence alone would pass for the exact regressions
+  // this eval exists to catch (polling instead of the pushed notice; skipping
+  // the foreground work). Order in `seen1` is arrival order.
+  let started_at = first_index(seen1, event => {
+    event is { "event": String("tool_result"), "content": String(content), .. } &&
+    content.contains("started background job")
+  })
+  let notice_at = first_index(seen1, event => {
+    event is { "event": String("steer_applied"), "kind": String("notice"), .. }
+  })
+  let poll_at = first_index(seen1, event => {
+    event
+    is {
+      "event": String("tool_result"),
+      "tool_name": String("shell_output"),
+      ..
+    }
+  })
+  let read_at = first_index(seen1, event => {
+    event
+    is {
+      "event": String("tool_result"),
+      "tool_name": String("shell_output"),
+      "content": String(content),
+      ..
+    } &&
+    content.contains("NOTICE-MARK-4242")
+  })
+  let foreground_between = match (started_at, notice_at) {
+    (Some(started), Some(notice)) => {
+      let mut found = false
+      for index in (started + 1)..<notice {
+        if seen1[index]
+          is {
+            "event": String("tool_result"),
+            "tool_name": String("shell"),
+            "content": String(content),
+            ..
+          } &&
+          !content.contains("started background job") {
+          found = true
+          break
+        }
+      }
+      found
+    }
+    _ => false
+  }
   check(
-    failures, "P1: completion notice pushed mid-turn (steer_applied kind=notice)",
-    notice_mid,
+    failures,
+    "P1: job started via run_in_background",
+    started_at is Some(_),
   )
-  check(failures, "P1: model read the job output via shell_output", read_output)
+  check(
+    failures,
+    "P1: completion notice pushed mid-turn (steer_applied kind=notice)",
+    notice_at is Some(_),
+  )
+  check(
+    failures, "P1: foreground work ran between job start and the notice", foreground_between,
+  )
+  check(
+    failures,
+    "P1: no shell_output polling before the notice",
+    match (poll_at, notice_at) {
+      (Some(poll), Some(notice)) => poll > notice
+      (None, Some(_)) => true
+      _ => false
+    },
+  )
+  check(
+    failures,
+    "P1: model read the job output via shell_output after the notice",
+    match (read_at, notice_at) {
+      (Some(read), Some(notice)) => read > notice
+      _ => false
+    },
+  )
   check(
     failures,
     "P1: final answer contains the marker",
