@@ -1,0 +1,47 @@
+# Shell Output Tool
+
+`shell_output` reads a background shell job's recent output and status by its
+`job_id` — the id returned by `shell` with `run_in_background=true`, or by a
+foreground command that was moved to the background when it outlived its
+`timeout_ms`.
+
+The primary consumption path for job results is the **pushed completion
+notice** (a job announces itself when it finishes); `shell_output` is for
+checking progress on a still-running job, and for reading the output once the
+notice arrives. The tool description and system prompts steer the model away
+from calling it in a polling loop.
+
+## Result Shape
+
+Output first, one `<system>` footer line last (the `read` tool convention):
+
+```text
+<recent output…>
+<system>job=bg-3 running truncated=true total_chars=48210 shown_chars=12000</system>
+```
+
+- The body is a **bounded tail window** (most recent output), never the full
+  log — a poll must not flood the conversation. `truncated=true` appears
+  whenever what is shown is less than what the job produced, with
+  `total_chars`/`shown_chars` naming the gap; `output_dropped_at_cap=true`
+  marks output lost at the hard cap, and a watchdog-killed job reports
+  `stopped killed_at_output_cap=true` so the model does not read it as a
+  requested stop.
+- Status is `running`, `exit=<code>`, or `stopped`; non-zero exits and stops
+  are tool errors, preserving the foreground shell's semantics.
+
+## Design Rationale
+
+Two invariants drove the implementation:
+
+1. **Never present a partial view as complete.** The truncation check compares
+   what is *shown* against what the job *produced* — covering the tail window,
+   a memory-only runtime that dropped output past its budget, and hard-cap
+   drops. The footer metadata is sampled *after* the awaited read, so a job
+   that appends or exits while the read yields cannot produce a stale footer.
+2. **Foreground error-semantics parity.** A background job read later behaves
+   exactly like the same command run in the foreground: binary (non-UTF-8)
+   output is a tool error even at exit 0 (`binary_output=true`), and a
+   sandboxed source-write denial is detected by scanning the *full* retained
+   output (the denial line can be earlier than the displayed tail) with the
+   same guidance appended, footer still last.
