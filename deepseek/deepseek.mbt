@@ -59,6 +59,22 @@ pub fn Model::parse(input : String) -> Model raise {
 }
 
 ///|
+/// Context window served by the official API, in tokens.
+///
+/// Both V4 variants serve 1M context ("1M context is now the default across
+/// all official DeepSeek services", api-docs.deepseek.com news260424); the
+/// kimi-k2.7-code family serves 256K. These are the totals a request's
+/// prompt and completion must fit within, used by the agent loop as the
+/// ceiling for its auto-compaction guard. Per-variant match so adding a
+/// variant forces an explicit choice here.
+pub fn Model::context_window(self : Model) -> Int {
+  match self {
+    Deepseek(V4Flash | V4Pro) => 1_000_000
+    Kimi(K27Code | K27CodeHighSpeed) => 262_144
+  }
+}
+
+///|
 /// DeepSeek thinking control for V4 models.
 ///
 /// `No` disables thinking. `High` and `Max` enable thinking and select the

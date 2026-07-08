@@ -53,6 +53,17 @@ test "model parsing" {
 }
 
 ///|
+test "context windows per model" {
+  assert_eq((Deepseek(V4Flash) : @deepseek.Model).context_window(), 1_000_000)
+  assert_eq((Deepseek(V4Pro) : @deepseek.Model).context_window(), 1_000_000)
+  assert_eq((Kimi(K27Code) : @deepseek.Model).context_window(), 262_144)
+  assert_eq(
+    (Kimi(K27CodeHighSpeed) : @deepseek.Model).context_window(),
+    262_144,
+  )
+}
+
+///|
 test "thinking controls stringify" {
   let no : @deepseek.ThinkingMode = No
   let high : @deepseek.ThinkingMode = High
