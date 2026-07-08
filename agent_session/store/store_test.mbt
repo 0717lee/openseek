@@ -79,16 +79,15 @@ async test "store validates invalid ids before creating directories" {
   let parent = @fs.tmpdir(prefix="openseek-session-store-invalid-")
   let root = "\{parent}/missing-root"
   let store : @store.SessionStore = SessionStore(root)
-  let _ = store.create(Session(SessionId("../bad"), system_prompt="system")) catch {
+  try store.create(Session(SessionId("../bad"), system_prompt="system")) catch {
     error => {
       assert_true("\{error}".contains("path separators"))
       assert_true(!@fs.exists("\{root}/sessions"))
-      @fs.rmdir(parent, recursive=true)
-      return
     }
+  } noraise {
+    _ => fail("invalid session id accepted")
   }
   @fs.rmdir(parent, recursive=true)
-  fail("invalid session id accepted")
 }
 
 ///|
@@ -174,15 +173,12 @@ async test "store propagates non-missing list errors" {
     "not a directory",
     create_mode=CreateOrTruncate,
   )
-  let _ = store.list() catch {
-    error => {
-      assert_true("\{error}" != "")
-      @fs.rmdir(store.root(), recursive=true)
-      return
-    }
+  try store.list() catch {
+    error => assert_true("\{error}" != "")
+  } noraise {
+    _ => fail("list error was silently treated as empty")
   }
   @fs.rmdir(store.root(), recursive=true)
-  fail("list error was silently treated as empty")
 }
 
 ///|
@@ -302,17 +298,16 @@ async test "another store instance's write defeats the fingerprint fast path" {
   let from_a = store_a.append(session, User(UserMessage("from a")))
   let loaded_by_b = store_b.load(SessionId("s1"))
   ignore(store_b.append(loaded_by_b, Runtime(RuntimeNotice("from b"))))
-  let _ = store_a.append(from_a, Runtime(RuntimeNotice("stale from a"))) catch {
+  try store_a.append(from_a, Runtime(RuntimeNotice("stale from a"))) catch {
     error => {
       assert_true("\{error}".contains("stale session snapshot"))
       let loaded = store_a.load(SessionId("s1"))
       assert_eq(loaded.events().length(), 2)
-      @fs.rmdir(store_a.root(), recursive=true)
-      return
     }
+  } noraise {
+    _ => fail("stale append past the fast path was accepted")
   }
   @fs.rmdir(store_a.root(), recursive=true)
-  fail("stale append past the fast path was accepted")
 }
 
 ///|
@@ -330,16 +325,15 @@ async test "a same-size rewrite by another store is still detected" {
   // beat between writes to order reliably.
   @async.sleep(50)
   store_b.create(Session(SessionId("s1"), system_prompt="prompt B"))
-  let _ = store_a.append(session, User(UserMessage("stale"))) catch {
+  try store_a.append(session, User(UserMessage("stale"))) catch {
     error => {
       assert_true("\{error}".contains("stale session snapshot"))
       assert_eq(store_a.load(SessionId("s1")).system_prompt(), "prompt B")
-      @fs.rmdir(store_a.root(), recursive=true)
-      return
     }
+  } noraise {
+    _ => fail("same-size rewrite slipped past the fingerprint fast path")
   }
   @fs.rmdir(store_a.root(), recursive=true)
-  fail("same-size rewrite slipped past the fingerprint fast path")
 }
 
 ///|
@@ -348,17 +342,16 @@ async test "store rejects stale snapshots before appending" {
   let session = @agent_session.Session(SessionId("s1"), system_prompt="system")
   store.create(session)
   ignore(store.append(session, User(UserMessage("first"))))
-  let _ = store.append(session, Runtime(RuntimeNotice("stale"))) catch {
+  try store.append(session, Runtime(RuntimeNotice("stale"))) catch {
     error => {
       assert_true("\{error}".contains("stale session snapshot"))
       let loaded = store.load(SessionId("s1"))
       assert_eq(loaded.events().length(), 1)
-      @fs.rmdir(store.root(), recursive=true)
-      return
     }
+  } noraise {
+    _ => fail("stale append was accepted")
   }
   @fs.rmdir(store.root(), recursive=true)
-  fail("stale append was accepted")
 }
 
 ///|
@@ -373,18 +366,17 @@ async test "store rejects divergent snapshots with the same sequence" {
     events=session.events(),
   )
   store.create(session)
-  let _ = store.append(divergent, Runtime(RuntimeNotice("stale"))) catch {
+  try store.append(divergent, Runtime(RuntimeNotice("stale"))) catch {
     error => {
       assert_true("\{error}".contains("stale session snapshot"))
       let loaded = store.load(SessionId("s1"))
       assert_eq(loaded.system_prompt(), "system")
       assert_eq(loaded.events().length(), 1)
-      @fs.rmdir(store.root(), recursive=true)
-      return
     }
+  } noraise {
+    _ => fail("divergent same-sequence append was accepted")
   }
   @fs.rmdir(store.root(), recursive=true)
-  fail("divergent same-sequence append was accepted")
 }
 
 ///|
@@ -395,15 +387,12 @@ async test "store rejects non-empty snapshots when the session file is missing" 
   )
   store.create(session)
   @fs.remove(session_file(store, "s1"))
-  let _ = store.append(session, Runtime(RuntimeNotice("more"))) catch {
-    error => {
-      assert_true("\{error}".contains("stale session snapshot"))
-      @fs.rmdir(store.root(), recursive=true)
-      return
-    }
+  try store.append(session, Runtime(RuntimeNotice("more"))) catch {
+    error => assert_true("\{error}".contains("stale session snapshot"))
+  } noraise {
+    _ => fail("append onto a missing session file was accepted")
   }
   @fs.rmdir(store.root(), recursive=true)
-  fail("append onto a missing session file was accepted")
 }
 
 ///|
@@ -434,18 +423,9 @@ async test "store serializes concurrent appends from the same snapshot" {
       }
     }
   }
-  let mut ok = 0
-  let mut stale = 0
-  for result in results {
-    if result == "ok" {
-      ok += 1
-    } else if result == "stale" {
-      stale += 1
-    }
-  }
+  assert_eq(results.filter(r => r == "ok").length(), 1)
+  assert_eq(results.filter(r => r == "stale").length(), 1)
   let loaded = store.load(SessionId("s1"))
-  assert_eq(ok, 1)
-  assert_eq(stale, 1)
   assert_eq(loaded.events().length(), 1)
   assert_eq(loaded.last_sequence(), 1)
   @fs.rmdir(store.root(), recursive=true)
@@ -459,22 +439,23 @@ async test "store rejects stale snapshots before compacting" {
     .append(Assistant(AssistantMessage("second")))
   store.create(session)
   ignore(store.append(session, Runtime(RuntimeNotice("new durable tail"))))
-  let _ = store.compact(
-    session,
-    content="first two events",
-    from_sequence=1,
-    to_sequence=2,
-  ) catch {
+  try
+    store.compact(
+      session,
+      content="first two events",
+      from_sequence=1,
+      to_sequence=2,
+    )
+  catch {
     error => {
       assert_true("\{error}".contains("stale session snapshot"))
       let loaded = store.load(SessionId("s1"))
       assert_eq(loaded.events().length(), 3)
-      @fs.rmdir(store.root(), recursive=true)
-      return
     }
+  } noraise {
+    _ => fail("stale compact was accepted")
   }
   @fs.rmdir(store.root(), recursive=true)
-  fail("stale compact was accepted")
 }
 
 ///|
@@ -482,15 +463,12 @@ async test "store fails load when the session file is missing" {
   let store = new_store()
   store.create(Session(SessionId("s1"), system_prompt="system"))
   @fs.remove(session_file(store, "s1"))
-  let _ = store.load(SessionId("s1")) catch {
-    error => {
-      assert_true("\{error}" != "")
-      @fs.rmdir(store.root(), recursive=true)
-      return
-    }
+  try store.load(SessionId("s1")) catch {
+    error => assert_true("\{error}" != "")
+  } noraise {
+    _ => fail("missing session file was accepted")
   }
   @fs.rmdir(store.root(), recursive=true)
-  fail("missing session file was accepted")
 }
 
 ///|
@@ -506,15 +484,13 @@ async test "store rejects a session file without a header record" {
     "\{event.to_json().stringify()}\n",
     create_mode=CreateOrTruncate,
   )
-  let _ = store.load(SessionId("s1")) catch {
-    error => {
+  try store.load(SessionId("s1")) catch {
+    error =>
       assert_true("\{error}".contains("does not start with a header record"))
-      @fs.rmdir(store.root(), recursive=true)
-      return
-    }
+  } noraise {
+    _ => fail("header-less session file was accepted")
   }
   @fs.rmdir(store.root(), recursive=true)
-  fail("header-less session file was accepted")
 }
 
 ///|
@@ -526,15 +502,13 @@ async test "store rejects a malformed header line" {
     "not json at all\n",
     create_mode=CreateOrTruncate,
   )
-  let _ = store.load(SessionId("s1")) catch {
-    error => {
+  try store.load(SessionId("s1")) catch {
+    error =>
       assert_true("\{error}".contains("does not start with a header line"))
-      @fs.rmdir(store.root(), recursive=true)
-      return
-    }
+  } noraise {
+    _ => fail("malformed header line was accepted")
   }
   @fs.rmdir(store.root(), recursive=true)
-  fail("malformed header line was accepted")
 }
 
 ///|
@@ -547,15 +521,12 @@ async test "store rejects a header whose id does not match the directory" {
     @fs.read_file(session_file(store, "other")).text(),
     create_mode=CreateOrTruncate,
   )
-  let _ = store.load(SessionId("s1")) catch {
-    error => {
-      assert_true("\{error}".contains("session header id mismatch"))
-      @fs.rmdir(store.root(), recursive=true)
-      return
-    }
+  try store.load(SessionId("s1")) catch {
+    error => assert_true("\{error}".contains("session header id mismatch"))
+  } noraise {
+    _ => fail("mismatched header id was accepted")
   }
   @fs.rmdir(store.root(), recursive=true)
-  fail("mismatched header id was accepted")
 }
 
 ///|
@@ -672,7 +643,7 @@ async test "append rejects a stale snapshot against an unterminated durable even
     create_mode=OpenOrCreate,
     append=true,
   )
-  let _ = store.append(session, Runtime(RuntimeNotice("stale"))) catch {
+  try store.append(session, Runtime(RuntimeNotice("stale"))) catch {
     error => {
       assert_true("\{error}".contains("stale session snapshot"))
       let loaded = store.load(SessionId("s1"))
@@ -681,12 +652,11 @@ async test "append rejects a stale snapshot against an unterminated durable even
         fail("expected the durable user event to survive")
       }
       assert_eq(message.content(), "first")
-      @fs.rmdir(store.root(), recursive=true)
-      return
     }
+  } noraise {
+    _ => fail("stale append onto an unterminated durable event was accepted")
   }
   @fs.rmdir(store.root(), recursive=true)
-  fail("stale append onto an unterminated durable event was accepted")
 }
 
 ///|
@@ -813,7 +783,7 @@ async test "load still fails on corruption that is not a torn tail" {
     create_mode=OpenOrCreate,
     append=true,
   )
-  let _ = store.load(SessionId("s1")) catch {
+  try store.load(SessionId("s1")) catch {
     error => {
       assert_true("\{error}" != "")
       // A bad line with valid lines after it fails the same way.
@@ -824,19 +794,16 @@ async test "load still fails on corruption that is not a torn tail" {
         create_mode=OpenOrCreate,
         append=true,
       )
-      let _ = store.load(SessionId("s1")) catch {
-        error => {
-          assert_true("\{error}" != "")
-          @fs.rmdir(store.root(), recursive=true)
-          return
-        }
+      try store.load(SessionId("s1")) catch {
+        error => assert_true("\{error}" != "")
+      } noraise {
+        _ => fail("interior corruption was accepted")
       }
-      @fs.rmdir(store.root(), recursive=true)
-      fail("interior corruption was accepted")
     }
+  } noraise {
+    _ => fail("terminated garbage line was accepted")
   }
   @fs.rmdir(store.root(), recursive=true)
-  fail("terminated garbage line was accepted")
 }
 
 ///|
@@ -849,15 +816,12 @@ async test "store propagates unreadable session files instead of dropping histor
   let path = session_file(store, "s1")
   @fs.remove(path)
   @fs.mkdir(path)
-  let _ = store.load(SessionId("s1")) catch {
-    error => {
-      assert_true("\{error}" != "")
-      @fs.rmdir(store.root(), recursive=true)
-      return
-    }
+  try store.load(SessionId("s1")) catch {
+    error => assert_true("\{error}" != "")
+  } noraise {
+    _ => fail("unreadable session file was silently accepted")
   }
   @fs.rmdir(store.root(), recursive=true)
-  fail("unreadable session file was silently accepted")
 }
 
 ///|
@@ -869,42 +833,35 @@ async test "store names an unsupported session file version on load" {
     "{\"version\":2,\"id\":\"s1\",\"system_prompt\":\"system\"}\n",
     create_mode=CreateOrTruncate,
   )
-  let _ = store.load(SessionId("s1")) catch {
-    error => {
+  try store.load(SessionId("s1")) catch {
+    error =>
       assert_true("\{error}".contains("unsupported session file version 2"))
-      @fs.rmdir(store.root(), recursive=true)
-      return
-    }
+  } noraise {
+    _ => fail("version-2 session file was accepted")
   }
   @fs.rmdir(store.root(), recursive=true)
-  fail("version-2 session file was accepted")
 }
 
 ///|
 async test "store rejects session ids containing NUL" {
   let store = new_store()
-  let _ = store.exists(SessionId("bad\u{0}id")) catch {
-    error => {
-      assert_true("\{error}".contains("NUL"))
-      @fs.rmdir(store.root(), recursive=true)
-      return
-    }
+  try store.exists(SessionId("bad\u{0}id")) catch {
+    error => assert_true("\{error}".contains("NUL"))
+  } noraise {
+    _ => fail("NUL in session id accepted")
   }
   @fs.rmdir(store.root(), recursive=true)
-  fail("NUL in session id accepted")
 }
 
 ///|
 async test "store rejects path-like session ids" {
   let store = new_store()
-  let _ = store.exists(SessionId("../bad")) catch {
-    error => {
-      assert_true("\{error}".contains("path separators"))
-      @fs.rmdir(store.root(), recursive=true)
-      return
-    }
+  try store.exists(SessionId("../bad")) catch {
+    error => assert_true("\{error}".contains("path separators"))
+  } noraise {
+    _ => fail("invalid session id accepted")
   }
-  fail("invalid session id accepted")
+  @fs.rmdir(store.root(), recursive=true)
 }
 
 ///|
