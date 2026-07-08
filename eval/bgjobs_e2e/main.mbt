@@ -262,6 +262,30 @@ async fn run_phases(engine : Engine, failures : Array[String]) -> Unit {
     }
     _ => false
   }
+  // The anti-sleep discriminator: between the job start and the notice, every
+  // foreground shell result must be one of the requested tagged commands — a
+  // model bridging the wait with `sleep` (or any filler call) produces an
+  // untagged result in that window and fails.
+  let only_requested_before_notice = match (started_at, notice_at) {
+    (Some(started), Some(notice)) => {
+      let mut clean = true
+      for index in (started + 1)..<notice {
+        if seen1[index]
+          is {
+            "event": String("tool_result"),
+            "tool_name": String("shell"),
+            "content": String(content),
+            ..
+          } &&
+          !content.contains("FG-") {
+          clean = false
+          break
+        }
+      }
+      clean
+    }
+    _ => false
+  }
   let all_foreground_done = [
       "FG-ONE", "FG-TWO", "FG-THREE", "FG-FOUR", "FG-FIVE",
     ]
@@ -296,6 +320,10 @@ async fn run_phases(engine : Engine, failures : Array[String]) -> Unit {
   )
   check(
     failures, "P1: all five requested foreground commands ran", all_foreground_done,
+  )
+  check(
+    failures, "P1: only the requested commands ran while waiting (no sleep bridge)",
+    only_requested_before_notice,
   )
   // The prompt forbids reading before the pushed notice, and the foreground
   // work outlasts the short job so the model is never left idle: any pre-notice
