@@ -5,10 +5,13 @@ import {
   "bobzhang/openseek/agent_session",
   "bobzhang/openseek/agent_session/store",
   "bobzhang/openseek/deepseek",
+  "bobzhang/openseek/deepseek/client",
 }
 
 // Values
 pub async fn compact_session(store? : @store.SessionStore, @agent_session.Session, api_key~ : String, model~ : @deepseek.Model, api_url? : String) -> @agent_session.Session
+
+pub async fn generate_compaction_summary(client~ : @client.Client, @agent_session.Session) -> String
 
 // Errors
 

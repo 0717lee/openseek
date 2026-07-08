@@ -20,13 +20,14 @@ fn compaction_messages(
 }
 
 ///|
-async fn generate_compaction_summary(
-  api_key~ : String,
-  model~ : @deepseek.Model,
+/// Generate a handoff summary of the session's projected history through one
+/// model call, failing when the endpoint returns an empty summary. Pass a
+/// `thinking=No` client where the model honors the control (Kimi models
+/// ignore it): a checkpoint summary needs no reasoning budget.
+pub async fn generate_compaction_summary(
+  client~ : @client.Client,
   session : @agent_session.Session,
-  api_url? : String,
 ) -> String {
-  let client = @client.Client(api_key~, model~, api_url?, thinking=No)
   let response = client.chat(compaction_messages(session))
   let summary = response.content.trim().to_owned()
   if summary.is_empty() {
@@ -76,7 +77,8 @@ pub async fn compact_session(
       "from_sequence": from_sequence,
       "to_sequence": to_sequence,
     }
-  let summary = generate_compaction_summary(api_key~, model~, session, api_url?)
+  let client = @client.Client(api_key~, model~, api_url?, thinking=No)
+  let summary = generate_compaction_summary(client~, session)
   let next = append_compaction_summary(
     store?,
     session,

@@ -208,6 +208,38 @@ async test "store appends one event without rewriting the in-memory caller value
 }
 
 ///|
+async test "generic append persists summary events the projection honors" {
+  let store = new_store()
+  let session = @agent_session.Session(SessionId("s1"), system_prompt="system")
+    .append(User(UserMessage("first task")))
+    .append(Terminal(Finished("first answer")))
+  store.create(session)
+  // Auto-compaction persists through the loop's generic append hook (the
+  // serve-mode append_item), not SessionStore::compact.
+  let item = session.summary_item(
+    content="handoff summary",
+    from_sequence=1,
+    to_sequence=2,
+  )
+  let appended = store.append(session, item)
+  assert_eq(appended.last_sequence(), 3)
+  let loaded = store.load(SessionId("s1"))
+  assert_eq(loaded.events().length(), 3)
+  guard loaded.events()[2].item() is Summary(summary) else {
+    fail("expected summary event")
+  }
+  assert_eq(summary.content(), "handoff summary")
+  assert_true(loaded.events()[2].unix_ms() > 0)
+  let messages = loaded.chat_messages()
+  assert_eq(messages.length(), 2)
+  assert_true(messages[0].role is System)
+  assert_true(messages[1].role is User)
+  assert_true(messages[1].content.contains("[conversation summary]"))
+  assert_true(messages[1].content.contains("handoff summary"))
+  @fs.rmdir(store.root(), recursive=true)
+}
+
+///|
 async test "first append creates the session file with its header" {
   let store = new_store()
   // No create(): the CLI resumes-or-starts sessions whose first durable write

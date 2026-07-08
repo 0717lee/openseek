@@ -287,6 +287,27 @@ test "compact validates and appends summary event" {
 }
 
 ///|
+test "summary_item validates without appending" {
+  let session = @agent_session.Session(SessionId("s1"), system_prompt="system")
+    .append(User(UserMessage("first")))
+    .append(Assistant(AssistantMessage("second")))
+  let item = session.summary_item(
+    content="first two events",
+    from_sequence=1,
+    to_sequence=2,
+  )
+  assert_true(item is Summary(_))
+  assert_eq(session.events().length(), 2)
+  let _ = session.summary_item(content="x", from_sequence=1, to_sequence=3) catch {
+    error => {
+      assert_true("\{error}".contains("exceeds last sequence"))
+      return
+    }
+  }
+  fail("out-of-range summary accepted")
+}
+
+///|
 test "generated session ids stamp the launcher prefix and UTC wall clock" {
   assert_eq(
     @agent_session.SessionId::generated(prefix="cli", now_ms=0).value(),

@@ -39,6 +39,7 @@ pub fn Session::compact(Self, content~ : String, from_sequence~ : Int, to_sequen
 pub fn Session::events(Self) -> @vector.Vector[SessionEvent]
 pub fn Session::id(Self) -> SessionId
 pub fn Session::last_sequence(Self) -> Int
+pub fn Session::summary_item(Self, content~ : String, from_sequence~ : Int, to_sequence~ : Int) -> SessionItem raise
 pub fn Session::system_prompt(Self) -> String
 pub impl ToJson for Session
 pub impl @json.FromJson for Session

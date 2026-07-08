@@ -578,20 +578,20 @@ pub fn Session::append_event(
 }
 
 ///|
-/// Append a validated summary event for an existing event range.
+/// Validate and build a summary item for an existing event range without
+/// appending it.
 ///
-/// `content` must not be blank after trimming. `from_sequence` must be
-/// positive. `to_sequence` must be at least `from_sequence` and must not exceed
-/// the current `last_sequence`. On success, this appends a `Summary` item as the
-/// next event and returns the new session. It does not remove or rewrite any
-/// covered raw events; `chat_messages` applies the compaction during projection.
-pub fn Session::compact(
+/// Same preconditions as `Session::compact`, which delegates here: non-blank
+/// `content`, positive `from_sequence`, `to_sequence` within
+/// `from_sequence..last_sequence()`. For callers that must persist through
+/// their own append seam — such as the agent loop's `append_item` hook — and
+/// so cannot use `Session::compact`'s direct append.
+pub fn Session::summary_item(
   self : Session,
   content~ : String,
   from_sequence~ : Int,
   to_sequence~ : Int,
-  unix_ms? : Int64 = 0,
-) -> Session raise {
+) -> SessionItem raise {
   if content.trim().is_empty() {
     fail("summary content must not be empty")
   }
@@ -607,8 +607,26 @@ pub fn Session::compact(
       "summary range \{from_sequence}..\{to_sequence} exceeds last sequence \{last}",
     )
   }
+  Summary(SessionSummary(content~, from_sequence~, to_sequence~))
+}
+
+///|
+/// Append a validated summary event for an existing event range.
+///
+/// `content` must not be blank after trimming. `from_sequence` must be
+/// positive. `to_sequence` must be at least `from_sequence` and must not exceed
+/// the current `last_sequence`. On success, this appends a `Summary` item as the
+/// next event and returns the new session. It does not remove or rewrite any
+/// covered raw events; `chat_messages` applies the compaction during projection.
+pub fn Session::compact(
+  self : Session,
+  content~ : String,
+  from_sequence~ : Int,
+  to_sequence~ : Int,
+  unix_ms? : Int64 = 0,
+) -> Session raise {
   self.append(
-    Summary(SessionSummary(content~, from_sequence~, to_sequence~)),
+    self.summary_item(content~, from_sequence~, to_sequence~),
     unix_ms~,
   )
 }
