@@ -76,6 +76,8 @@ async fn execute(
     Stopped =>
       if snapshot.killed_by_output_limit {
         ("stopped killed_at_output_cap=true", true)
+      } else if snapshot.killed_by_time_limit {
+        ("stopped killed_at_time_cap=true", true)
       } else {
         ("stopped", true)
       }

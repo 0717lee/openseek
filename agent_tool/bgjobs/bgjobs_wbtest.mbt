@@ -199,3 +199,56 @@ async test "the watchdog kills a background job that floods past the hard cap" {
     assert_true(notices[0].killed_by_output_limit)
   })
 }
+
+///|
+async test "the reaper kills a background job that outlives the time cap" {
+  @async.with_task_group(group => {
+    let notices : Array[BgJobSnapshot] = []
+    let rt = BgJobRuntime::new(AgentTaskScope(group), hard_timeout_ms=80, on_job_exit=snapshot => {
+      notices.push(snapshot)
+    })
+    let id = rt.start(program="sh", args=["-c", "sleep 5"], command="sleep 5")
+    let snapshot = poll_until_terminal(rt, id)
+    assert_true(snapshot.status is Stopped)
+    assert_true(snapshot.killed_by_time_limit)
+    assert_false(snapshot.killed_by_output_limit)
+    // The kill is surfaced exactly once, like an output-cap kill.
+    for _ in 0..<200 {
+      if notices.length() > 0 {
+        break
+      }
+      @async.sleep(25)
+    }
+    assert_true(notices.length() == 1)
+    assert_true(notices[0].killed_by_time_limit)
+  })
+}
+
+///|
+async test "an adopted job keeps its original wall-clock deadline" {
+  @async.with_task_group(group => {
+    let rt = BgJobRuntime::new(AgentTaskScope(group), hard_timeout_ms=150)
+    // The execution starts OUTSIDE the registry (a foreground command) and
+    // burns most of its lifetime before being adopted on detach.
+    let exec = rt.spawn_foreground_retained("sh", ["-c", "sleep 5"], None, 200)
+    @async.sleep(120)
+    let _ = exec.background()
+    let id = rt.adopt(exec, command="sleep 5", source_write_sandboxed=false, sandbox_denial_subjects=[])
+    // Deadline measured from process start: ~30ms remain, not a fresh 150ms —
+    // the poll budget below is far under 150ms of slack either way.
+    let snapshot = poll_until_terminal(rt, id, ticks=40)
+    assert_true(snapshot.killed_by_time_limit)
+  })
+}
+
+///|
+async test "a requested stop is not blamed on the reaper" {
+  @async.with_task_group(group => {
+    let rt = BgJobRuntime::new(AgentTaskScope(group), hard_timeout_ms=60_000)
+    let id = rt.start(program="sh", args=["-c", "sleep 5"], command="sleep 5")
+    let _ = rt.stop(id)
+    guard rt.snapshot(id) is Some(snapshot) else { fail("expected snapshot") }
+    assert_false(snapshot.killed_by_time_limit)
+    assert_false(snapshot.killed_by_output_limit)
+  })
+}

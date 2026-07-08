@@ -62,6 +62,13 @@ pub struct ShellExecution {
   // above), so a consumer can tell a watchdog kill from a requested stop and
   // surface it rather than letting the job die silently.
   priv mut killed_by_output_limit : Bool
+  // Monotonic start stamp, so a wall-clock reaper measures a job's lifetime
+  // from process start — a detached (adopted) job keeps its original
+  // deadline, not one restarted at adoption.
+  priv started_at_ms : Int64
+  // Set when the child was cancelled by the wall-clock reaper, so consumers
+  // can tell a lifetime kill from a requested stop.
+  priv mut killed_by_time_limit : Bool
 }
 
 ///|
@@ -100,6 +107,8 @@ pub async fn[X] ShellExecution::start(
     kill_when_full,
     kill_at_hard_cap,
     killed_by_output_limit: false,
+    started_at_ms: @async.now(),
+    killed_by_time_limit: false,
   }
   group.spawn_bg(no_wait=true, allow_failure=true) <| () => {
     exec.monitor(reader, process)
@@ -328,6 +337,32 @@ pub fn ShellExecution::had_invalid_utf8(self : ShellExecution) -> Bool {
 /// runaway job die silently.
 pub fn ShellExecution::killed_by_output_limit(self : ShellExecution) -> Bool {
   self.killed_by_output_limit
+}
+
+///|
+/// Monotonic timestamp (ms) when the child was spawned.
+pub fn ShellExecution::started_at_ms(self : ShellExecution) -> Int64 {
+  self.started_at_ms
+}
+
+///|
+/// Whether the wall-clock reaper cancelled this execution.
+pub fn ShellExecution::killed_by_time_limit(self : ShellExecution) -> Bool {
+  self.killed_by_time_limit
+}
+
+///|
+/// Cancel a still-live execution because its wall-clock lifetime expired.
+/// Mirrors the output-limit trip: mark the reason before cancelling so the
+/// monitor reports `Killed` and consumers can name the reaper rather than
+/// reading it as a requested stop. No-op once terminal.
+pub fn ShellExecution::kill_for_time_limit(self : ShellExecution) -> Unit {
+  if self.status.is_terminal() {
+    return
+  }
+  self.killed_by_time_limit = true
+  self.cancel_requested = true
+  self.process.cancel()
 }
 
 ///|

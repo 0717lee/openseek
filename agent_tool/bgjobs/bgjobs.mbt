@@ -19,6 +19,12 @@ pub(all) enum BgJobStatus {
 } derive(Eq)
 
 ///|
+/// Default wall-clock lifetime for a background job (thirty minutes): long
+/// enough for real builds and suites, short enough that a runaway spinner —
+/// issue #419 saw one burn 131 minutes unnoticed — is reaped and surfaced.
+pub let default_hard_timeout_ms : Int = 1_800_000
+
+///|
 /// Session-scoped registry of background ("detached") jobs, each backed by one
 /// shared `@shell_exec.ShellExecution` (a process on `scope.group()`, a
 /// file-backed output sink, and a status flag). Every child is spawned on the
@@ -59,6 +65,12 @@ pub struct BgJobRuntime {
   // Directory for per-job spill files (full output beyond the inline preview).
   // None → memory-only jobs (no full-output file).
   priv spill_dir : String?
+  // Wall-clock lifetime cap for any registered job, measured from process
+  // start (an adopted job keeps its original deadline). Bounded lifetime,
+  // not machine protection: the kill reaches the direct child only, so a
+  // spinning grandchild can be orphaned — true process-group kill is
+  // upstream work in moonbitlang/async. Tests shrink it to fire cheaply.
+  priv hard_timeout_ms : Int
   // Called once, with the terminal snapshot, when a job exits on its own (not on
   // `stop`/teardown) — e.g. to push a completion notice into the agent loop.
   priv on_job_exit : ((BgJobSnapshot) -> Unit)?
@@ -108,6 +120,9 @@ pub struct BgJobSnapshot {
   // The job was killed by the output-limit watchdog (flooded past the hard cap),
   // not stopped on request — surfaced so the kill is never silent.
   killed_by_output_limit : Bool
+  // The job was killed by the wall-clock reaper (outlived hard_timeout_ms),
+  // not stopped on request — surfaced for the same reason.
+  killed_by_time_limit : Bool
 }
 
 ///|
@@ -120,6 +135,7 @@ pub fn[X] BgJobRuntime::new(
   scope : @agent_runtime.AgentTaskScope[X],
   spill_dir? : String,
   hard_output_cap? : Int = @shell_exec.default_hard_cap,
+  hard_timeout_ms? : Int = default_hard_timeout_ms,
   on_job_exit? : (BgJobSnapshot) -> Unit,
 ) -> BgJobRuntime {
   let group = scope.group()
@@ -179,6 +195,7 @@ pub fn[X] BgJobRuntime::new(
       group.spawn_bg(task, no_wait=true, allow_failure=true)
     },
     spill_dir,
+    hard_timeout_ms,
     on_job_exit,
     jobs: {},
     next_index: 1,
@@ -319,10 +336,24 @@ fn BgJobRuntime::register(
     exec.wait()
     guard self.on_job_exit is Some(callback) else { return }
     guard self.snapshot(id) is Some(snapshot) else { return }
-    guard snapshot.status is Exited(_) || snapshot.killed_by_output_limit else {
+    guard snapshot.status is Exited(_) ||
+      snapshot.killed_by_output_limit ||
+      snapshot.killed_by_time_limit else {
       return
     }
     callback(snapshot)
+  })
+  // Wall-clock reaper: every registered job has a bounded lifetime measured
+  // from its process start, so a detached job's foreground wait counts
+  // against the same deadline. The trip marks the reason before cancelling,
+  // and the exit watcher above surfaces it like an output-limit kill.
+  let remaining = self.hard_timeout_ms.to_int64() -
+    (@async.now() - exec.started_at_ms())
+  (self.spawn_watcher)(() => {
+    if remaining > 0L {
+      @async.sleep(remaining.to_int())
+    }
+    exec.kill_for_time_limit()
   })
 }
 
@@ -354,6 +385,7 @@ fn BgJob::to_snapshot(self : BgJob) -> BgJobSnapshot {
     source_write_sandboxed: self.source_write_sandboxed,
     sandbox_denial_subjects: self.sandbox_denial_subjects,
     killed_by_output_limit: self.exec.killed_by_output_limit(),
+    killed_by_time_limit: self.exec.killed_by_time_limit(),
   }
 }
 

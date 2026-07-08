@@ -7,6 +7,7 @@ import {
 }
 
 // Values
+pub let default_hard_timeout_ms : Int
 
 // Errors
 
@@ -16,7 +17,7 @@ pub struct BgJobRuntime {
 }
 pub fn BgJobRuntime::adopt(Self, @shell_exec.ShellExecution, command~ : String, cwd? : String, source_write_sandboxed? : Bool, sandbox_denial_subjects? : Array[String]) -> String
 pub fn BgJobRuntime::list(Self) -> Array[BgJobSnapshot]
-pub fn[X] BgJobRuntime::new(@agent_runtime.AgentTaskScope[X], spill_dir? : String, hard_output_cap? : Int, on_job_exit? : (BgJobSnapshot) -> Unit) -> Self
+pub fn[X] BgJobRuntime::new(@agent_runtime.AgentTaskScope[X], spill_dir? : String, hard_output_cap? : Int, hard_timeout_ms? : Int, on_job_exit? : (BgJobSnapshot) -> Unit) -> Self
 pub async fn BgJobRuntime::read_output(Self, String) -> String?
 pub async fn BgJobRuntime::read_output_tail(Self, String, Int) -> String?
 pub fn BgJobRuntime::snapshot(Self, String) -> BgJobSnapshot?
@@ -41,6 +42,7 @@ pub struct BgJobSnapshot {
   source_write_sandboxed : Bool
   sandbox_denial_subjects : Array[String]
   killed_by_output_limit : Bool
+  killed_by_time_limit : Bool
 }
 
 pub(all) enum BgJobStatus {

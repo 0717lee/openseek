@@ -9,6 +9,8 @@ fn background_notice_text(snapshot : @bgjobs.BgJobSnapshot) -> String {
     Stopped =>
       if snapshot.killed_by_output_limit {
         "killed: flooded past the output cap"
+      } else if snapshot.killed_by_time_limit {
+        "killed: outlived the wall-clock cap"
       } else {
         "stopped"
       }
