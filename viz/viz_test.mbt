@@ -1,4 +1,15 @@
 ///|
+/// `sample_session` round-tripped through the durable-log parse path with an
+/// empty system prompt — the "clean parsed session" several render tests use.
+fn clean_sample_session() -> @agent_session.Session {
+  @viz.session_from_parse(
+    @viz.parse_events(events_jsonl(sample_session())),
+    id="demo",
+    system_prompt="",
+  )
+}
+
+///|
 /// Build a session that exercises every event kind, then serialize it back to
 /// the on-disk session-file event form so the parser is tested against exactly what
 /// the store writes.
@@ -391,11 +402,7 @@ test "a failed tool call is tagged so errors-only keeps its call card" {
   let model = render(@viz.render_session(error_tool_session(), ModelView))
   assert_true(model.contains("tool-call-failed"))
   // A clean session tags no call as failed.
-  let clean = @viz.session_from_parse(
-    @viz.parse_events(events_jsonl(sample_session())),
-    id="demo",
-    system_prompt="",
-  )
+  let clean = clean_sample_session()
   assert_false(
     render(@viz.render_session(clean, RawLog)).contains("tool-call-failed"),
   )
@@ -506,11 +513,7 @@ test "model view does not flag a result the projection skipped" {
 ///|
 test "successful tool result folds without a flag" {
   // sample_session's tool result is a success; it should fold but carry no flag.
-  let session = @viz.session_from_parse(
-    @viz.parse_events(events_jsonl(sample_session())),
-    id="demo",
-    system_prompt="",
-  )
+  let session = clean_sample_session()
   let raw = render(@viz.render_session(session, RawLog))
   assert_true(
     raw.contains("<details class=\"card tool\" id=\"tool-result-1\">"),
@@ -550,11 +553,7 @@ test "tool call shows the brief its result recorded" {
   let model = render(@viz.render_session(session, ModelView))
   assert_true(model.contains("ran ls → 1 file"))
   // A *successful* result with no brief produces no brief span on its call.
-  let clean = @viz.session_from_parse(
-    @viz.parse_events(events_jsonl(sample_session())),
-    id="demo",
-    system_prompt="",
-  )
+  let clean = clean_sample_session()
   assert_false(
     render(@viz.render_session(clean, RawLog)).contains("tool-call-brief"),
   )
@@ -649,11 +648,7 @@ test "rendered_error_count matches the failures each view draws" {
   let failing = error_tool_session()
   inspect(@viz.rendered_error_count(failing, RawLog), content="1")
   inspect(@viz.rendered_error_count(failing, ModelView), content="1")
-  let clean = @viz.session_from_parse(
-    @viz.parse_events(events_jsonl(sample_session())),
-    id="demo",
-    system_prompt="",
-  )
+  let clean = clean_sample_session()
   inspect(@viz.rendered_error_count(clean, RawLog), content="0")
   inspect(@viz.rendered_error_count(clean, ModelView), content="0")
 }
