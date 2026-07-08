@@ -18,8 +18,10 @@
 async fn main {
   // This eval spends real model turns; skip cleanly where no key is configured.
   // `DEEPSEEK` is the engine's API-key env var (see
-  // @agentcli.api_key_env_for_model), not DEEPSEEK_API_KEY.
-  guard @env.get_env_var("DEEPSEEK") is Some(_) else {
+  // @agentcli.api_key_env_for_model), not DEEPSEEK_API_KEY. A blank value is
+  // treated as unset: the engine rejects it at startup, and continuing would
+  // burn the phase timeouts against an engine that never speaks.
+  guard @env.get_env_var("DEEPSEEK") is Some(key) && !key.trim().is_empty() else {
     println("SKIP: DEEPSEEK is not set; this eval drives the live engine")
     return
   }
@@ -76,6 +78,9 @@ async fn[G] Engine::spawn(group : @async.TaskGroup[G]) -> Engine {
     @jsonl.each(reader, json => {
       ignore(events.try_put(json) catch { _ => false })
     })
+    // The engine's stdout closed (it exited or crashed): push a sentinel so
+    // every pending wait fails fast instead of burning its full timeout.
+    ignore(events.try_put({ "event": "__engine_eof" }) catch { _ => false })
   }
   { writer, events }
 }
@@ -95,18 +100,27 @@ async fn Engine::wait_for(
   seen : Array[Json],
   matches : (Json) -> Bool,
 ) -> Json? {
-  @async.with_timeout_opt(timeout_ms, () => {
-    let mut found : Json = Json::null()
+  let result = @async.with_timeout_opt(timeout_ms, () => {
+    let mut found : Json? = None
     for ;; {
       let event = self.events.get()
+      // Engine gone: no further events can arrive, so stop waiting now rather
+      // than burning the remaining timeout.
+      if event is { "event": String("__engine_eof"), .. } {
+        break
+      }
       seen.push(event)
       if matches(event) {
-        found = event
+        found = Some(event)
         break
       }
     }
     found
   })
+  match result {
+    Some(found) => found
+    None => None
+  }
 }
 
 ///|
@@ -235,9 +249,27 @@ async fn run_phases(engine : Engine, failures : Array[String]) -> Unit {
   let finished3 = engine.wait_for(240_000, seen3, event => {
     event is { "event": String("agent_finished"), .. }
   })
+  // The marker literal already sits in the conversation (phase 2's prompt), so
+  // the answer alone cannot prove retrieval — require a shell_output tool
+  // result actually carrying the job's output.
+  let retrieved = seen3
+    .iter()
+    .any(event => {
+      event
+      is {
+        "event": String("tool_result"),
+        "tool_name": String("shell_output"),
+        "content": String(content),
+        ..
+      } &&
+      content.contains("IDLE-MARK-777")
+    })
+  check(
+    failures, "P3: shell_output returned the finished job's output", retrieved,
+  )
   check(
     failures,
-    "P3: model retrieved the idle job's output",
+    "P3: final answer contains the marker",
     finished_answer(finished3).contains("IDLE-MARK-777"),
   )
 }
