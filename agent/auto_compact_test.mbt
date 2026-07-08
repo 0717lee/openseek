@@ -214,7 +214,8 @@ async test "auto-compaction stage one folds prior turns and keeps the task" {
     }
 
     // The next main request was re-seeded from the compacted projection:
-    // task verbatim, summary in place of the prior turn, tool batch intact.
+    // the summary stands where the prior turn stood — before the active
+    // task, which stays verbatim — and the tool batch is intact.
     guard compacted_request is Some(request) else {
       fail("expected a post-compaction main request")
     }
@@ -222,10 +223,10 @@ async test "auto-compaction stage one folds prior turns and keeps the task" {
     assert_eq(messages.length(), 5)
     assert_eq(message_role(messages[0]), "system")
     assert_eq(message_role(messages[1]), "user")
-    assert_true(message_content(messages[1]).contains("TASK-MARKER"))
+    assert_true(message_content(messages[1]).contains("[conversation summary]"))
+    assert_true(message_content(messages[1]).contains("PRIOR-SUMMARY"))
     assert_eq(message_role(messages[2]), "user")
-    assert_true(message_content(messages[2]).contains("[conversation summary]"))
-    assert_true(message_content(messages[2]).contains("PRIOR-SUMMARY"))
+    assert_true(message_content(messages[2]).contains("TASK-MARKER"))
     assert_eq(message_role(messages[3]), "assistant")
     assert_true(messages[3] is { "tool_calls": Array(_), .. })
     assert_eq(message_role(messages[4]), "tool")

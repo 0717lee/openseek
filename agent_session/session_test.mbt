@@ -228,12 +228,43 @@ test "summary events compact covered model context" {
   assert_eq(session.events().length(), 4)
   let messages = session.chat_messages()
   assert_eq(messages.length(), 3)
+  // The summary stands where the covered range stood, before the uncovered
+  // recent user message — not at its own append position after it.
   assert_true(messages[1].role is User)
-  assert_eq(messages[1].content, "recent user")
+  assert_true(messages[1].content.contains("[conversation summary]"))
+  assert_false(messages[1].content.contains("old user\n"))
+  assert_true(messages[1].content.contains("old user and assistant"))
   assert_true(messages[2].role is User)
-  assert_true(messages[2].content.contains("[conversation summary]"))
-  assert_false(messages[2].content.contains("old user\n"))
-  assert_true(messages[2].content.contains("old user and assistant"))
+  assert_eq(messages[2].content, "recent user")
+}
+
+///|
+test "summary appended mid-turn projects before the uncovered tail" {
+  // The stage-one auto-compaction shape: the summary event lands after the
+  // active turn's task but covers only the prior turn, so projection must
+  // put its text where the prior turn stood, ahead of the task.
+  let session = @agent_session.Session(SessionId("s1"), system_prompt="system")
+    .append(User(UserMessage("prior task")))
+    .append(Terminal(Finished("prior answer")))
+    .append(User(UserMessage("active task")))
+    .append(
+      Summary(
+        SessionSummary(
+          content="prior turn recap",
+          from_sequence=1,
+          to_sequence=2,
+        ),
+      ),
+    )
+    .append(Assistant(AssistantMessage("working on it")))
+  let messages = session.chat_messages()
+  assert_eq(messages.length(), 4)
+  assert_true(messages[1].role is User)
+  assert_true(messages[1].content.contains("prior turn recap"))
+  assert_true(messages[2].role is User)
+  assert_eq(messages[2].content, "active task")
+  assert_true(messages[3].role is Assistant)
+  assert_eq(messages[3].content, "working on it")
 }
 
 ///|

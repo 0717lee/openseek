@@ -935,10 +935,22 @@ fn model_message_time_labels(session : @agent_session.Session) -> Array[String] 
   let pending_tool_calls : Array[String] = []
   let events = session.events()
   for event in events {
+    // Mirror `Session::chat_messages`: a surviving summary projects at the
+    // start of its covered range, so its label lands there too.
+    for candidate in events {
+      if candidate.item() is Summary(summary) &&
+        summary.from_sequence() == event.sequence() &&
+        !model_event_covered_by_later_summary(candidate, events) {
+        flush_pending_tool_labels(pending_tool_calls, times)
+        times.push(event_label(labels, candidate))
+      }
+    }
     if model_event_covered_by_later_summary(event, events) {
       continue
     }
     match event.item() {
+      // Labeled above at the start of its covered range.
+      Summary(_) => ()
       Assistant(message) => {
         flush_pending_tool_labels(pending_tool_calls, times)
         times.push(event_label(labels, event))
@@ -972,10 +984,22 @@ fn model_message_step_labels(session : @agent_session.Session) -> Array[String] 
   let pending_tool_calls : Array[String] = []
   let events = session.events()
   for event in events {
+    // Mirror `Session::chat_messages`: a surviving summary projects at the
+    // start of its covered range, so its label lands there too.
+    for candidate in events {
+      if candidate.item() is Summary(summary) &&
+        summary.from_sequence() == event.sequence() &&
+        !model_event_covered_by_later_summary(candidate, events) {
+        flush_pending_tool_labels(pending_tool_calls, labels)
+        labels.push(event_labels.get(candidate.sequence()).unwrap_or(""))
+      }
+    }
     if model_event_covered_by_later_summary(event, events) {
       continue
     }
     match event.item() {
+      // Labeled above at the start of its covered range.
+      Summary(_) => ()
       Assistant(message) => {
         flush_pending_tool_labels(pending_tool_calls, labels)
         labels.push(event_labels.get(event.sequence()).unwrap_or(""))

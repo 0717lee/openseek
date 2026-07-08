@@ -123,7 +123,8 @@ fn is_covered_by_later_summary(
 /// compaction rules:
 ///
 /// - events covered by a later `Summary` are skipped;
-/// - `User`, `Runtime`, and `Summary` become user-role messages;
+/// - `User`, `Runtime`, and `Summary` become user-role messages; a summary is
+///   emitted where its covered range starts, not where it was appended;
 /// - `Assistant` preserves visible content, tool calls, and reasoning content;
 /// - `Tool` is emitted only when it answers a pending assistant tool call;
 /// - pending tool calls are closed with synthetic tool-error messages before a
@@ -142,10 +143,25 @@ pub fn Session::chat_messages(self : Session) -> Array[@deepseek.ChatMessage] {
   let pending_tool_calls : Array[@deepseek.ToolCall] = []
   let events = self.events()
   for event in events {
+    // A surviving summary stands in for the events it covers, so its text is
+    // emitted where the covered range starts — not where the summary event
+    // was appended, which can be after uncovered later events (a stage-one
+    // auto-compaction lands after the active turn's task and must not read
+    // as newer input than that task).
+    for candidate in events {
+      if candidate.item() is Summary(summary) &&
+        summary.from_sequence() == event.sequence() &&
+        !is_covered_by_later_summary(candidate, events) {
+        flush_pending_tool_calls(pending_tool_calls, messages)
+        append_item_message(candidate.item(), messages)
+      }
+    }
     if is_covered_by_later_summary(event, events) {
       continue
     }
     match event.item() {
+      // Already emitted at the start of its covered range.
+      Summary(_) => ()
       Assistant(message) => {
         flush_pending_tool_calls(pending_tool_calls, messages)
         append_item_message(Assistant(message), messages)
