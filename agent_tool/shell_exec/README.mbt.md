@@ -65,7 +65,9 @@ spawned still holds the pipe open — so a concurrent reader drains bytes while
 `process.wait()` is the authoritative exit signal, followed by a short drain
 grace and a forced close.
 
-Two output-limit watchdogs, two thresholds:
+Two output-limit watchdogs, two thresholds (plus a wall-clock lifetime kill:
+`kill_for_time_limit`, driven by the bgjobs reaper, records
+`killed_by_time_limit` the same way):
 
 - `kill_when_full` (foreground): kill as soon as output exceeds the *inline*
   cap, so a chatty command is an immediate output-limit error rather than

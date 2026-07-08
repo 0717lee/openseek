@@ -39,7 +39,9 @@ flowchart LR
 Jobs use the sink's file-backed model: an inline preview up to the budget
 (`max_output_chars`, matching the shell tool's foreground default so a command
 reads the same either way), full output in a per-job spill file under the
-session's spill directory, and the hard-cap watchdog: a job that floods past
+session's spill directory, a thirty-minute wall-clock lifetime cap (a reaped
+job reports `killed_by_time_limit`, measured from process start so adopted
+jobs keep their original deadline), and the hard-cap watchdog: a job that floods past
 `hard_output_cap` (default 20M characters) is killed and reported as
 `killed_by_output_limit` — never left burning CPU with its output dropped, and
 never silently dead. Without a spill directory the runtime degrades to
@@ -48,7 +50,8 @@ memory-only jobs (bounded preview, rest dropped).
 ## Push-completion
 
 The per-job watcher awaits the execution and calls `on_job_exit` exactly once
-when the job ends *on its own* — a natural exit, or the output watchdog. A
+when the job ends *on its own* — a natural exit, the output watchdog, or the
+wall-clock reaper. A
 requested stop (`shell_stop`, session teardown) fires nothing: it is already
 user-visible. The `agent` package wires `on_job_exit` to queue a
 `SteerInput::Notice` (lossless) and poke the serve loop, which is what makes

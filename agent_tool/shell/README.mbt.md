@@ -22,7 +22,10 @@ compiler invocations large enough to damage the model context. When reading
 proves the output exceeds the cap, the tool cancels the child process and treats
 the result as a tool error so the agent knows it received only an output prefix.
 
-Callers may also set `timeout_ms` for commands that could wait indefinitely.
+Callers may set `timeout_ms` explicitly (capped at 600000; larger values are
+an error), and an omitted timeout gets a default so no foreground wait is ever
+unbounded: 120000 with a background runtime wired (the deadline detaches the
+command into a job) and 600000 otherwise.
 When the timeout expires, the in-flight process collection is cancelled and the
 tool returns an error instead of blocking the agent loop.
 
@@ -124,7 +127,7 @@ own config: it is not a hard boundary, since a determined plumbing sequence
 | ---- | ------ | -------- | ----- |
 | `cmd` | string | yes | Passed as the single command argument to the platform shell. |
 | `cwd` | string | no  | Working directory. An empty string is treated as missing. |
-| `timeout_ms` | number | no | Positive timeout in milliseconds. Timed-out commands are cancelled and reported as tool errors. |
+| `timeout_ms` | number | no | Positive timeout in milliseconds, max 600000 (default 120000 wired / 600000 unwired). Timed-out commands are detached to a background job when a runtime is wired, else cancelled and reported as tool errors. |
 | `max_output_chars` | number | no | Defaults to 12000, capped at 50000. The retained output prefix is bounded while reading; exceeding the limit cancels the command and returns a tool error. |
 
 ## Action

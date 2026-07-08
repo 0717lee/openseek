@@ -90,7 +90,10 @@ in a spawn closure) so it can be an optional tool argument. `start` spawns + ado
 ### L3 — tools, and L3.5 — integration
 
 - `shell`: foreground runs through a `ShellExecution` (via a spawner the agent
-  wires); `run_in_background:true` starts a job; a `timeout_ms` that elapses
+  wires); `run_in_background:true` starts a job; an omitted `timeout_ms`
+  defaults (120s wired / 600s unwired, max 600s explicit) so no foreground
+  wait is unbounded, jobs are reaped after 30 minutes of wall clock, and a
+  `timeout_ms` that elapses
   **detaches** (background + adopt) rather than kills; turn cancellation
   `request_stop`s the execution.
 - `shell_output` / `shell_stop`: poll and cancel — they read straight through the

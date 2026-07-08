@@ -25,7 +25,8 @@ Output first, one `<system>` footer line last (the `read` tool convention):
   whenever what is shown is less than what the job produced, with
   `total_chars`/`shown_chars` naming the gap; `output_dropped_at_cap=true`
   marks output lost at the hard cap, and a watchdog-killed job reports
-  `stopped killed_at_output_cap=true` so the model does not read it as a
+  `stopped killed_at_output_cap=true` (or `killed_at_time_cap=true` for the
+  wall-clock reaper) so the model does not read it as a
   requested stop.
 - Status is `running`, `exit=<code>`, or `stopped`; non-zero exits and stops
   are tool errors, preserving the foreground shell's semantics.
