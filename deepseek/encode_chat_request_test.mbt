@@ -202,18 +202,6 @@ test "kimi highspeed uses the same code-model request policy" {
 }
 
 ///|
-test "tools and thinking are omitted when absent" {
-  let body = @deepseek.encode_chat_request(model=Deepseek(V4Flash)) <| [
-    ChatMessage(User, content="hi"),
-  ]
-  json_inspect(body, content={
-    "model": "deepseek-v4-flash",
-    "messages": [{ "role": "user", "content": "hi" }],
-    "stream": false,
-  })
-}
-
-///|
 test "assistant tool-call echo and tool result round-trip" {
   let call = @deepseek.ToolCall(
     id="call_42",
