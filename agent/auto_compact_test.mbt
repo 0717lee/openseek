@@ -134,7 +134,7 @@ fn is_checkpoint_request(request : Json) -> Bool raise {
 ///|
 fn probe_tools(results : Array[String]) -> @agent_tool.Tools raise {
   let mut calls = 0
-  @agent_tool.Tools([
+  Tools([
     AgentToolDefinition(
       name="probe",
       description="Probe tool.",
@@ -175,8 +175,8 @@ async test "auto-compaction stage one folds prior turns and keeps the task" {
       .append(User(UserMessage("prior question about llamas")))
       .append(Terminal(Finished("prior answer about llamas")))
     let result = @agent.run_turn_in_scope(
-      runtime=@agent_runtime.AgentRuntime(),
-      scope=@agent_runtime.AgentTaskScope(group),
+      runtime=AgentRuntime(),
+      scope=AgentTaskScope(group),
       api_key="test-key",
       model=Deepseek(V4Flash),
       session~,
@@ -267,8 +267,8 @@ async test "auto-compaction escalates to a full checkpoint once then disarms" {
       .append(User(UserMessage("prior question")))
       .append(Terminal(Finished("prior answer")))
     let result = @agent.run_turn_in_scope(
-      runtime=@agent_runtime.AgentRuntime(),
-      scope=@agent_runtime.AgentTaskScope(group),
+      runtime=AgentRuntime(),
+      scope=AgentTaskScope(group),
       api_key="test-key",
       model=Deepseek(V4Flash),
       session~,
@@ -340,8 +340,8 @@ async test "auto-compaction guards the final answer at the exact threshold" {
       system_prompt="system",
     )
     let result = @agent.run_turn_in_scope(
-      runtime=@agent_runtime.AgentRuntime(),
-      scope=@agent_runtime.AgentTaskScope(group),
+      runtime=AgentRuntime(),
+      scope=AgentTaskScope(group),
       api_key="test-key",
       model=Deepseek(V4Flash),
       session~,
@@ -391,8 +391,8 @@ async test "auto-compaction stays quiet below the threshold" {
       system_prompt="system",
     )
     let result = @agent.run_turn_in_scope(
-      runtime=@agent_runtime.AgentRuntime(),
-      scope=@agent_runtime.AgentTaskScope(group),
+      runtime=AgentRuntime(),
+      scope=AgentTaskScope(group),
       api_key="test-key",
       model=Deepseek(V4Flash),
       session~,
@@ -436,8 +436,8 @@ async test "auto-compaction fails open and stops retrying for the turn" {
       system_prompt="system",
     )
     let result = @agent.run_turn_in_scope(
-      runtime=@agent_runtime.AgentRuntime(),
-      scope=@agent_runtime.AgentTaskScope(group),
+      runtime=AgentRuntime(),
+      scope=AgentTaskScope(group),
       api_key="test-key",
       model=Deepseek(V4Flash),
       session~,
