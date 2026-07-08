@@ -7,7 +7,7 @@ pub fn definition(
 ) -> @agent_tool.AgentToolDefinition {
   AgentToolDefinition(
     name="shell_output",
-    description="Read a background shell job's output and status by its job_id (returned by shell run_in_background, or by a command moved to the background on timeout). Returns the full output captured so far and whether the job is still running.",
+    description="Read a background shell job's recent output and status by its job_id (returned by shell run_in_background, or by a command moved to the background on timeout). Returns the most recent window of captured output (with truncation metadata naming the total size when output exceeds the window) and whether the job is still running.",
     schema=JsonSchema({
       "type": "object",
       "properties": { "job_id": { "type": "string" } },
@@ -52,7 +52,14 @@ async fn execute(
   let (status_label, exit_error) = match snapshot.status {
     Running => ("running", false)
     Exited(code) => ("exit=\{code}", code != 0)
-    Stopped => ("stopped", true)
+    // A watchdog kill (flooded past the hard cap) is named as such, so the model
+    // does not read it as a requested stop.
+    Stopped =>
+      if snapshot.killed_by_output_limit {
+        ("stopped killed_at_output_cap=true", true)
+      } else {
+        ("stopped", true)
+      }
   }
   // Preserve the foreground path's error semantics for a job read later: binary
   // (non-UTF-8) output and a sandboxed source-write denial are tool errors even

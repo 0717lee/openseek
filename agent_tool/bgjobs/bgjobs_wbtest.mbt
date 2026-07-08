@@ -169,3 +169,33 @@ async test "two jobs run independently with distinct ids" {
     assert_true(rt.list().length() == 2)
   })
 }
+
+///|
+#cfg(not(platform="windows"))
+async test "the watchdog kills a background job that floods past the hard cap" {
+  @async.with_task_group(group => {
+    let notices : Array[BgJobSnapshot] = []
+    // Tiny hard cap so `yes` trips the watchdog immediately instead of running
+    // to the 20M default.
+    let rt = BgJobRuntime::new(AgentTaskScope(group), hard_output_cap=200, on_job_exit=snapshot => {
+      notices.push(snapshot)
+    })
+    let id = rt.start(program="yes", args=[], command="yes")
+    let snapshot = poll_until_terminal(rt, id)
+    // Killed by the watchdog — not left running with its output dropped — and
+    // reported as such, not as a requested stop.
+    assert_true(snapshot.status is Stopped)
+    assert_true(snapshot.killed_by_output_limit)
+    assert_true(snapshot.output_truncated)
+    // The kill is pushed like a natural exit: a silently dead job would look
+    // like it just never finished.
+    for _ in 0..<200 {
+      if notices.length() > 0 {
+        break
+      }
+      @async.sleep(25)
+    }
+    assert_true(notices.length() == 1)
+    assert_true(notices[0].killed_by_output_limit)
+  })
+}

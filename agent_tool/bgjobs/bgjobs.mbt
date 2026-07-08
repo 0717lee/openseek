@@ -105,26 +105,38 @@ pub struct BgJobSnapshot {
   had_invalid_utf8 : Bool
   source_write_sandboxed : Bool
   sandbox_denial_subjects : Array[String]
+  // The job was killed by the output-limit watchdog (flooded past the hard cap),
+  // not stopped on request — surfaced so the kill is never silent.
+  killed_by_output_limit : Bool
 }
 
 ///|
 /// Create an empty runtime whose jobs are owned by `scope.group()`. Jobs spill
 /// full output into `spill_dir` (per-job files); omit it for memory-only jobs.
+/// `hard_output_cap` bounds any single job's *full* retained output (characters);
+/// the watchdog kills a job that floods past it — production uses the default,
+/// tests shrink it to exercise the watchdog cheaply.
 pub fn[X] BgJobRuntime::new(
   scope : @agent_runtime.AgentTaskScope[X],
   spill_dir? : String,
+  hard_output_cap? : Int = @shell_exec.default_hard_cap,
   on_job_exit? : (BgJobSnapshot) -> Unit,
 ) -> BgJobRuntime {
   let group = scope.group()
   {
     spawn_exec: (program, args, cwd, max_output_chars, spill_path) => {
+      // Background retention: inline preview up to the budget, full output to
+      // the spill file, and the hard-cap watchdog so a flooding job is killed
+      // (and surfaced) rather than left burning CPU with its output dropped.
       @shell_exec.ShellExecution::start(
         scope,
         program~,
         args~,
         cwd?,
         inline_cap=max_output_chars,
+        hard_cap=hard_output_cap,
         spill_path?,
+        kill_at_hard_cap=true,
       )
     },
     spawn_foreground_exec: (program, args, cwd, max_output_chars) => {
@@ -149,14 +161,18 @@ pub fn[X] BgJobRuntime::new(
       max_output_chars,
       spill_path,
     ) => {
+      // kill_at_hard_cap so that once detached (kill_when_full cleared by
+      // `background()`), the job is still bounded in output like any other.
       @shell_exec.ShellExecution::start(
         scope,
         program~,
         args~,
         cwd?,
         inline_cap=max_output_chars,
+        hard_cap=hard_output_cap,
         spill_path?,
         kill_when_full=true,
+        kill_at_hard_cap=true,
       )
     },
     spawn_watcher: task => {
@@ -292,14 +308,20 @@ fn BgJobRuntime::register(
     source_write_sandboxed,
     sandbox_denial_subjects,
   }
-  // Watch for a natural exit and fire `on_job_exit` once. The job entry is set
-  // above before the watcher runs (the watcher first awaits the exit, ≥ one tick
-  // later), so `snapshot(id)` always resolves.
+  // Watch for the job ending on its own and fire `on_job_exit` once: a natural
+  // exit, or the output-limit watchdog killing a flooding job — both must be
+  // surfaced (a watchdog kill silently eating an unwatched job would look like
+  // it just never finished). A requested stop (shell_stop, session teardown) is
+  // already user-visible and fires nothing. The job entry is set above before
+  // the watcher runs (the watcher first awaits the exit, ≥ one tick later), so
+  // `snapshot(id)` always resolves.
   (self.spawn_watcher)(() => {
     exec.wait()
     guard self.on_job_exit is Some(callback) else { return }
     guard self.snapshot(id) is Some(snapshot) else { return }
-    guard snapshot.status is Exited(_) else { return }
+    guard snapshot.status is Exited(_) || snapshot.killed_by_output_limit else {
+      return
+    }
     callback(snapshot)
   })
 }
@@ -331,6 +353,7 @@ fn BgJob::to_snapshot(self : BgJob) -> BgJobSnapshot {
     had_invalid_utf8: self.exec.had_invalid_utf8(),
     source_write_sandboxed: self.source_write_sandboxed,
     sandbox_denial_subjects: self.sandbox_denial_subjects,
+    killed_by_output_limit: self.exec.killed_by_output_limit(),
   }
 }
 

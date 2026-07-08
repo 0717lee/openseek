@@ -53,6 +53,15 @@ pub struct ShellExecution {
   // the hard cap or the kill threshold), so an un-timed runaway cannot hang the
   // tool call. Cleared by `background()` — a detached job keeps running.
   priv mut kill_when_full : Bool
+  // Background watchdog: kill the child once full output hits the *hard* cap —
+  // past it every further byte is dropped, so the job is a runaway producing
+  // nothing anyone can read. Unlike `kill_when_full` this survives
+  // `background()`: a detached job keeps running but not unboundedly.
+  priv kill_at_hard_cap : Bool
+  // Set when the child was cancelled by an output-limit watchdog (either flag
+  // above), so a consumer can tell a watchdog kill from a requested stop and
+  // surface it rather than letting the job die silently.
+  priv mut killed_by_output_limit : Bool
 }
 
 ///|
@@ -68,6 +77,7 @@ pub async fn[X] ShellExecution::start(
   hard_cap? : Int = default_hard_cap,
   spill_path? : String,
   kill_when_full? : Bool = false,
+  kill_at_hard_cap? : Bool = false,
 ) -> ShellExecution {
   let group = scope.group()
   let sink = ShellOutputSink::new(inline_cap~, hard_cap~, spill_path?)
@@ -88,6 +98,8 @@ pub async fn[X] ShellExecution::start(
     status: Running,
     cancel_requested: false,
     kill_when_full,
+    kill_at_hard_cap,
+    killed_by_output_limit: false,
   }
   group.spawn_bg(no_wait=true, allow_failure=true) <| () => {
     exec.monitor(reader, process)
@@ -115,17 +127,24 @@ async fn ShellExecution::monitor(
           None => break
           Some(bytes) => {
             self.sink.append_chunk(bytes)
-            // Foreground output-limit kill: stop the child as soon as output
-            // exceeds the inline cap (max_output_chars) — promptly, not only at a
-            // larger hard cap — so a chatty command is an immediate output-limit
-            // error rather than running to the timeout. `background()` clears this
-            // flag, so a job that is detached while still under the limit keeps
-            // growing afterward. `over_inline_cap` fires for a retained execution
-            // (inline < hard); `truncated` covers a memory-only one (inline ==
-            // hard, where total can never exceed inline).
-            if self.kill_when_full &&
-              (self.sink.over_inline_cap() || self.sink.truncated()) &&
+            // Output-limit watchdogs, two thresholds:
+            // - Foreground (`kill_when_full`): stop the child as soon as output
+            //   exceeds the inline cap (max_output_chars) — promptly, not only at
+            //   a larger hard cap — so a chatty command is an immediate
+            //   output-limit error rather than running to the timeout.
+            //   `background()` clears this flag, so a job detached while still
+            //   under the limit keeps growing afterward. `over_inline_cap` fires
+            //   for a retained execution (inline < hard); `truncated` covers a
+            //   memory-only one (inline == hard).
+            // - Background (`kill_at_hard_cap`): stop the child once full output
+            //   hits the hard cap — past it every byte is dropped, so a flooding
+            //   job would burn CPU producing nothing readable. Survives detach.
+            let over_foreground_limit = self.kill_when_full &&
+              (self.sink.over_inline_cap() || self.sink.truncated())
+            let over_hard_cap = self.kill_at_hard_cap && self.sink.truncated()
+            if (over_foreground_limit || over_hard_cap) &&
               !self.cancel_requested {
+              self.killed_by_output_limit = true
               self.cancel_requested = true
               self.process.cancel()
             }
@@ -233,9 +252,11 @@ pub async fn ShellExecution::wait_or_invalid(self : ShellExecution) -> Unit {
 
 ///|
 /// Detach the execution: flip `Running → Backgrounded` so no call is awaiting it
-/// while the process keeps running, and clear the foreground output-limit kill (a
-/// detached job caps retention but keeps running). No-op (`false`) once terminal
-/// or already backgrounded.
+/// while the process keeps running, and clear the foreground output-limit kill —
+/// a detached job may keep producing output. The hard-cap watchdog
+/// (`kill_at_hard_cap`) is deliberately NOT cleared: detached means unbounded in
+/// time, not unbounded in output. No-op (`false`) once terminal or already
+/// backgrounded.
 pub fn ShellExecution::background(self : ShellExecution) -> Bool {
   guard self.status is Running else { return false }
   self.status = Backgrounded
@@ -303,6 +324,14 @@ pub fn ShellExecution::output_truncated(self : ShellExecution) -> Bool {
 /// Whether any invalid (non-UTF-8 / binary) output was seen.
 pub fn ShellExecution::had_invalid_utf8(self : ShellExecution) -> Bool {
   self.sink.had_invalid_utf8()
+}
+
+///|
+/// Whether the child was cancelled by an output-limit watchdog (rather than a
+/// requested stop) — so a consumer can surface the kill instead of letting a
+/// runaway job die silently.
+pub fn ShellExecution::killed_by_output_limit(self : ShellExecution) -> Bool {
+  self.killed_by_output_limit
 }
 
 ///|

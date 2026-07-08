@@ -6,7 +6,12 @@ fn background_notice_text(snapshot : @bgjobs.BgJobSnapshot) -> String {
   let status = match snapshot.status {
     Exited(0) => "exit=0"
     Exited(code) => "exit=\{code}"
-    Stopped => "stopped"
+    Stopped =>
+      if snapshot.killed_by_output_limit {
+        "killed: flooded past the output cap"
+      } else {
+        "stopped"
+      }
     Running => "running"
   }
   "background job \{snapshot.id} finished (\{status}): `\{snapshot.command}` — read its output with shell_output (job_id=\"\{snapshot.id}\")."
