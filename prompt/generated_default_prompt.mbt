@@ -1,7 +1,7 @@
-// Generated from flash_prompt.mbt.md by moon dev_build. DO NOT EDIT.
+// Generated from default_prompt.mbt.md by moon dev_build. DO NOT EDIT.
 
 ///|
-fn flash_prompt() -> String {
+fn default_prompt() -> String {
   (
     #|You are OpenSeek, a MoonBit coding agent focused on implementing user tasks.
     #|

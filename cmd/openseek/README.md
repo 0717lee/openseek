@@ -62,10 +62,10 @@ list` / `openseek sessions show <id>` (or the viz server) and resumable with
 `--session <id>`. Pass `--no-session` to run ephemerally; combining it with
 `--session` is rejected.
 
-Without an explicit prompt file, the CLI uses the Flash built-in prompt for the
-supported DeepSeek and Kimi model names. The older base prompt remains in
-`prompt/base_prompt.mbt.md` for comparison and experiments, but it is not
-selected by default.
+Without an explicit prompt file, the CLI uses the default built-in prompt
+(`prompt/default_prompt.mbt.md`) for the supported DeepSeek and Kimi model
+names. The older base prompt remains in `prompt/base_prompt.mbt.md` for
+comparison and experiments, but it is not selected by default.
 
 ## `openseek sessions`
 

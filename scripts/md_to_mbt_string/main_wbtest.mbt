@@ -1,7 +1,7 @@
 ///|
 test "function name from markdown basename" {
   assert_eq(function_name_from_base("base_prompt.md"), "base_prompt")
-  assert_eq(function_name_from_base("flash_prompt.mbt.md"), "flash_prompt")
+  assert_eq(function_name_from_base("default_prompt.mbt.md"), "default_prompt")
 }
 
 ///|
@@ -12,8 +12,8 @@ test "@path.Path::basename handles Unix and Windows separators" {
     "base_prompt.mbt.md",
   )
   assert_eq(
-    @path.Path(".\\prompt\\flash_prompt.mbt.md").basename(),
-    "flash_prompt.mbt.md",
+    @path.Path(".\\prompt\\default_prompt.mbt.md").basename(),
+    "default_prompt.mbt.md",
   )
   assert_eq(@path.Path("C:\\a\\b\\c").basename(), "c")
   assert_eq(@path.Path("C:\\a\\b\\").basename(), "b")
@@ -94,16 +94,16 @@ test "generated source matches dev_build output shape" {
 ///|
 test "generated source preserves missing final newline" {
   let source = generated_source(
-    base="flash_prompt.md",
-    function_name="flash_prompt",
+    base="default_prompt.md",
+    function_name="default_prompt",
     markdown="one\ntwo",
   )
   inspect(
     source,
     content=(
-      #|// Generated from flash_prompt.md by moon dev_build. DO NOT EDIT.
+      #|// Generated from default_prompt.md by moon dev_build. DO NOT EDIT.
       #|///|
-      #|fn flash_prompt() -> String {
+      #|fn default_prompt() -> String {
       #|  (
       #|    #|one
       #|    #|two
@@ -142,16 +142,16 @@ test "generated source filters markdown comments" {
     #|<div><!-- hidden same-line html block -->kept html inline</div>
     #|
   let source = generated_source(
-    base="flash_prompt.md",
-    function_name="flash_prompt",
+    base="default_prompt.md",
+    function_name="default_prompt",
     markdown~,
   )
   inspect(
     source,
     content=(
-      #|// Generated from flash_prompt.md by moon dev_build. DO NOT EDIT.
+      #|// Generated from default_prompt.md by moon dev_build. DO NOT EDIT.
       #|///|
-      #|fn flash_prompt() -> String {
+      #|fn default_prompt() -> String {
       #|  (
       #|    #|# Title
       #|    #|
@@ -186,16 +186,16 @@ test "generated source filters markdown comments" {
 ///|
 test "generated source filters multiline inline comments" {
   let source = generated_source(
-    base="flash_prompt.md",
-    function_name="flash_prompt",
+    base="default_prompt.md",
+    function_name="default_prompt",
     markdown="foo <!-- hidden\ncomment --> bar\n",
   )
   inspect(
     source,
     content=(
-      #|// Generated from flash_prompt.md by moon dev_build. DO NOT EDIT.
+      #|// Generated from default_prompt.md by moon dev_build. DO NOT EDIT.
       #|///|
-      #|fn flash_prompt() -> String {
+      #|fn default_prompt() -> String {
       #|  (
       #|    #|foo  bar
       #|    #|

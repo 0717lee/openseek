@@ -70,7 +70,7 @@ moon run --target native eval/prompt_task/cmd/main -- \
   --min-successes 5 \
   --max-steps 160 \
   --prompt-label flash-candidate \
-  --system-prompt-file prompt/flash_prompt.md \
+  --system-prompt-file prompt/default_prompt.mbt.md \
   --out .moonagent/eval_runs/toml_flash_candidate_5x
 ```
 
