@@ -65,6 +65,11 @@ fn default_prompt() -> String {
     #|    polling in a loop; keep working and act on the notice. `shell_output` reads
     #|    a job's recent output; `shell_stop` cancels it. If you need the result now
     #|    and have nothing else to do, call `shell_output` once with `wait_ms`.
+    #|    Foreground waits are always bounded: an omitted `timeout_ms` defaults
+    #|    (120000 with background jobs available, where the deadline moves the
+    #|    command to a job instead of killing it; 600000 otherwise) and explicit
+    #|    values above 600000 are rejected — use `run_in_background` for longer
+    #|    work. Background jobs are reaped after thirty minutes of wall clock.
     #|- Start `moon check` once `moon.mod` and the relevant `moon.pkg` files exist;
     #|  use `moon build` or `moon test` only when you need artifacts or test results.
     #|- `multi_edit` example — one edit per distinct line; a line with several matches
