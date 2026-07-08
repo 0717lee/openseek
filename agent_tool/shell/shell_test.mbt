@@ -260,6 +260,26 @@ test "shell description tells models to use POSIX shell off Windows" {
 }
 
 ///|
+#cfg(not(platform="windows"))
+async test "shell description teaches background jobs only when a runtime is wired" {
+  // Unwired: no runtime means run_in_background does not exist and a timed-out
+  // command is killed — the description must not promise otherwise.
+  let unwired = @shell.definition().description
+  assert_false(unwired.contains("run_in_background"))
+  // Wired: guide the model to background long-running work and to rely on the
+  // pushed completion notice instead of blocking on sleeps or polling.
+  @async.with_task_group(group => {
+    let bg = @bgjobs.BgJobRuntime::new(AgentTaskScope(group))
+    let wired = @shell.definition(bg_runtime=bg).description
+    assert_true(wired.contains("run_in_background"))
+    assert_true(wired.contains("notice"))
+    assert_true(wired.contains("sleep"))
+    assert_true(wired.contains("shell_output"))
+    assert_true(wired.contains("shell_stop"))
+  })
+}
+
+///|
 async test "shell runs cmd and returns exit code plus output" {
   let result = run_shell({ "cmd": "echo hello" })
   guard result is Respond(output) else { fail("expected Respond") }

@@ -35,10 +35,17 @@ pub fn definition(
 ) -> @agent_tool.AgentToolDefinition {
   AgentToolDefinition(
     name="shell",
-    description=shell_description(),
-    // Only advertise `run_in_background` when a background runtime is wired
-    // (the agent's registry); a standalone/custom definition without one cannot
-    // execute it, so exposing it would let a model make a call that only errors.
+    // Only describe and advertise `run_in_background` when a background runtime
+    // is wired (the agent's registry): a standalone/custom definition without
+    // one cannot execute it, so exposing it would let a model make a call that
+    // only errors — and the timeout semantics genuinely differ (wired: detach to
+    // a background job; unwired: cancel and report a tool error), so a single
+    // static description would misstate one of the two contexts.
+    description=if bg_runtime is Some(_) {
+      shell_description() + background_description()
+    } else {
+      shell_description()
+    },
     schema=JsonSchema(
       if bg_runtime is Some(_) {
         {
@@ -46,9 +53,15 @@ pub fn definition(
           "properties": {
             "cmd": { "type": "string" },
             "cwd": { "type": "string" },
-            "timeout_ms": { "type": "number" },
+            "timeout_ms": {
+              "type": "number",
+              "description": "Max time to wait in the foreground; a command still running at the deadline is moved to the background as a job (not killed).",
+            },
             "max_output_chars": { "type": "number" },
-            "run_in_background": { "type": "boolean" },
+            "run_in_background": {
+              "type": "boolean",
+              "description": "Run as a background job: returns a job id immediately and a completion notice arrives when it exits. Use for long-running commands instead of blocking or sleeping.",
+            },
           },
           "required": ["cmd"],
         }
@@ -58,7 +71,10 @@ pub fn definition(
           "properties": {
             "cmd": { "type": "string" },
             "cwd": { "type": "string" },
-            "timeout_ms": { "type": "number" },
+            "timeout_ms": {
+              "type": "number",
+              "description": "Max time to wait; a command still running at the deadline is cancelled and reported as a tool error.",
+            },
             "max_output_chars": { "type": "number" },
           },
           "required": ["cmd"],
@@ -69,6 +85,16 @@ pub fn definition(
       execute_with_workspace(workspace_root, arguments, read_only~, bg_runtime?)
     }),
   )
+}
+
+///|
+/// The background-jobs paragraph appended to the shell description when a
+/// background runtime is wired. Guides the model away from blocking waits:
+/// long-running work goes to a background job and its completion is *pushed* as
+/// a notice, so `sleep N && cmd` chains and shell_output polling loops are both
+/// unnecessary and wasteful.
+fn background_description() -> String {
+  " For long-running work (builds, long test suites, servers, watchers) set run_in_background=true: the call returns a job id immediately and a notice arrives automatically when the job finishes — so never block the turn waiting on time (no `sleep N && cmd` chains, no repeated polling); keep working, or finish the turn, and act on the completion notice. Read a job's recent output with shell_output and cancel it with shell_stop. A foreground command that outlives timeout_ms is moved to the background as a job (not killed)."
 }
 
 ///|
