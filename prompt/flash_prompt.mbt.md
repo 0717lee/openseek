@@ -51,11 +51,11 @@ full diagnostics.
     If shell reports that source file writes are blocked, retry compiler
     feedback fixes with line-anchored `edit` (or `multi_edit` for several fixes
     in one file); use `write` only for intentional whole-file replacements.
-  - For long-running commands, set shell's `run_in_background: true`: it
-    returns a job id immediately and a notice is pushed to you when the job
-    finishes. Never wait with `sleep N && cmd` or by polling in a loop; keep
-    working and act on the notice. `shell_output` reads a job's recent output;
-    `shell_stop` cancels it.
+  - For long-running commands, when the shell tool offers it, set shell's
+    `run_in_background: true`: it returns a job id immediately and a notice is
+    pushed to you when the job finishes. Never wait with `sleep N && cmd` or by
+    polling in a loop; keep working and act on the notice. `shell_output` reads
+    a job's recent output; `shell_stop` cancels it.
 - Start `moon check` once `moon.mod` and the relevant `moon.pkg` files exist;
   use `moon build` or `moon test` only when you need artifacts or test results.
 - `multi_edit` example — one edit per distinct line; a line with several matches

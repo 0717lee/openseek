@@ -1,6 +1,7 @@
 ///|
 /// The completion notice pushed to the model when a background job exits: its
 /// id, terminal status, command, and how to read its output.
+#cfg(not(platform="windows"))
 fn background_notice_text(snapshot : @bgjobs.BgJobSnapshot) -> String {
   let status = match snapshot.status {
     Exited(0) => "exit=0"
@@ -12,27 +13,19 @@ fn background_notice_text(snapshot : @bgjobs.BgJobSnapshot) -> String {
 }
 
 ///|
-/// Build the agent's standard tool registry bound to `runtime` and `scope`.
+/// The shell tool family for the standard registry.
 ///
-/// The returned registry contains the built-in local tools: `shell`, `shell_output`, `shell_stop`, `read`,
-/// `edit`, `multi_edit`, `write`, `plan`, and `finish`. Each tool lives in its
-/// own subpackage of `agent_tool` and exposes a `definition()` constructor;
-/// this function bundles them into the `Tools` value the loop dispatches
-/// against. File-oriented tools capture `runtime.workspace_root()` when this
-/// function is called. The `scope` parameter remains part of the API so future
-/// stateful tools can spawn bounded background work under the caller-owned
-/// task scope.
-///
-/// Raises if the standard tool definitions contain duplicate names. Under the
-/// checked-in registry that should be a programming error, not user input.
-///
-/// `on_background_wake`, when supplied, is called each time a background job
-/// exits, so an idle controller can wake to surface the completion notice.
-pub async fn[X] build_tools(
+/// Off Windows: the shell tool wired to a session `BgJobRuntime` (background
+/// jobs, detach-on-timeout, push-completion notices) plus `shell_output` and
+/// `shell_stop`. The runtime spills large job output into a session temp dir
+/// (removed at scope teardown) and pushes a `Notice` steer + the
+/// `on_background_wake` poke when a job exits on its own.
+#cfg(not(platform="windows"))
+async fn[X] shell_tools(
   runtime : @agent_runtime.AgentRuntime,
   scope : @agent_runtime.AgentTaskScope[X],
   on_background_wake? : () -> Unit,
-) -> @agent_tool.Tools {
+) -> Array[@agent_tool.AgentToolDefinition] {
   // One background-job runtime per session, owned by `scope.group()`, shared by
   // the shell tools so a job started via `run_in_background` (or a command moved
   // to the background on timeout) is visible to shell_output / shell_stop. A
@@ -70,21 +63,73 @@ pub async fn[X] build_tools(
       None => ()
     }
   })
-  let workspace_root = runtime.workspace_root()
-  Tools([
-    @shell.definition(workspace_root~, bg_runtime~),
+  [
+    @shell.definition(workspace_root=runtime.workspace_root(), bg_runtime~),
     @shell_output.definition(bg_runtime),
     @shell_stop.definition(bg_runtime),
-    @read.definition(workspace_root~),
-    @edit.definition(workspace_root~),
-    @multi_edit.definition(workspace_root~),
-    @write.definition(workspace_root~),
-    @plan.definition(),
-    @finish.definition(),
-  ])
+  ]
 }
 
 ///|
+/// Windows graceful fallback: background jobs are unverified there (no Windows
+/// CI, and detached long-lived processes / hard-cancel semantics have never been
+/// exercised), so the registry keeps the pre-series shell — the per-call
+/// collection path, where a timed-out command is cancelled and reported as a
+/// tool error. With no runtime wired, the shell tool's schema and description
+/// automatically omit `run_in_background` and state the kill-on-timeout
+/// semantics, so the model is never taught a workflow the platform does not
+/// deliver. Enabling Windows later is this one function: build the runtime here
+/// once background jobs have been exercised on Windows.
+#cfg(platform="windows")
+async fn[X] shell_tools(
+  runtime : @agent_runtime.AgentRuntime,
+  scope : @agent_runtime.AgentTaskScope[X],
+  on_background_wake? : () -> Unit,
+) -> Array[@agent_tool.AgentToolDefinition] {
+  ignore(scope)
+  ignore(on_background_wake)
+  [@shell.definition(workspace_root=runtime.workspace_root())]
+}
+
+///|
+/// Build the agent's standard tool registry bound to `runtime` and `scope`.
+///
+/// The returned registry contains the built-in local tools: `shell` (plus
+/// `shell_output` and `shell_stop` where background jobs are supported — see
+/// `shell_tools`), `read`, `edit`, `multi_edit`, `write`, `plan`, and `finish`.
+/// Each tool lives in its own subpackage of `agent_tool` and exposes a
+/// `definition()` constructor; this function bundles them into the `Tools`
+/// value the loop dispatches against. File-oriented tools capture
+/// `runtime.workspace_root()` when this function is called. The `scope`
+/// parameter remains part of the API so future stateful tools can spawn bounded
+/// background work under the caller-owned task scope.
+///
+/// Raises if the standard tool definitions contain duplicate names. Under the
+/// checked-in registry that should be a programming error, not user input.
+///
+/// `on_background_wake`, when supplied, is called each time a background job
+/// exits, so an idle controller can wake to surface the completion notice.
+pub async fn[X] build_tools(
+  runtime : @agent_runtime.AgentRuntime,
+  scope : @agent_runtime.AgentTaskScope[X],
+  on_background_wake? : () -> Unit,
+) -> @agent_tool.Tools {
+  let workspace_root = runtime.workspace_root()
+  Tools(
+    shell_tools(runtime, scope, on_background_wake?) +
+    [
+      @read.definition(workspace_root~),
+      @edit.definition(workspace_root~),
+      @multi_edit.definition(workspace_root~),
+      @write.definition(workspace_root~),
+      @plan.definition(),
+      @finish.definition(),
+    ],
+  )
+}
+
+///|
+#cfg(not(platform="windows"))
 async test "agent registers the expected tool names" {
   @async.with_task_group() <| group => {
     let tools = build_tools(AgentRuntime(), AgentTaskScope(group))
@@ -103,6 +148,31 @@ async test "agent registers the expected tool names" {
     assert_false(names.contains("moon_check"))
     assert_false(names.contains("moon_cmd"))
     assert_false(names.contains("moon_ide"))
+  }
+}
+
+///|
+/// Windows keeps the pre-series shell (no background jobs — see `shell_tools`),
+/// so the registry omits shell_output/shell_stop and the shell tool itself must
+/// not advertise `run_in_background`.
+#cfg(platform="windows")
+async test "agent registers the expected tool names on windows" {
+  @async.with_task_group() <| group => {
+    let tools = build_tools(AgentRuntime(), AgentTaskScope(group))
+    let function_tools = tools.function_tools()
+    assert_eq(function_tools.length(), 7)
+    let names = [ for t in function_tools => t.name ]
+    assert_true(names.contains("shell"))
+    assert_false(names.contains("shell_output"))
+    assert_false(names.contains("shell_stop"))
+    assert_true(names.contains("read"))
+    assert_true(names.contains("edit"))
+    assert_true(names.contains("multi_edit"))
+    assert_true(names.contains("write"))
+    assert_true(names.contains("plan"))
+    assert_true(names.contains("finish"))
+    guard tools.find("shell") is Some(shell) else { fail("shell tool missing") }
+    assert_false(shell.description.contains("run_in_background"))
   }
 }
 

@@ -428,8 +428,9 @@ async fn run_agent_shell_with_tree_precheck(
 
 ///|
 /// Adapt a finished foreground execution into an `AgentShellOutput` for the
-/// shared renderer: exit code, retained output (the memory head — foreground is
-/// memory-only), and truncation, plus the launch's sandbox metadata.
+/// shared renderer: exit code, the in-memory head as the rendered output (a
+/// retained execution may also hold a spill file, but a foreground result only
+/// ever renders the head), and truncation, plus the launch's sandbox metadata.
 fn agent_shell_output_from_exec(
   exec : @shell_exec.ShellExecution,
   launch : AgentShellLaunch,
