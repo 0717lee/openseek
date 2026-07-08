@@ -1,4 +1,32 @@
 ///|
+/// Execute the shell_output tool for `job_id` and unwrap its Respond output.
+#cfg(not(platform="windows"))
+async fn run_shell_output(
+  bg : @bgjobs.BgJobRuntime,
+  job_id : String,
+) -> @agent_tool.ToolOutput {
+  let action = match @shell_output.definition(bg).execute {
+    Async(execute) => execute({ "job_id": job_id })
+    Sync(_) => fail("shell_output should be async")
+  }
+  guard action is Respond(output) else { fail("expected a Respond action") }
+  output
+}
+
+///|
+/// Poll until `id` leaves Running, on the same 200 x 25ms budget every test
+/// used inline (timing-sensitive: keep in lockstep with the old loops).
+#cfg(not(platform="windows"))
+async fn poll_bg_terminal(bg : @bgjobs.BgJobRuntime, id : String) -> Unit {
+  for _ in 0..<200 {
+    if bg.snapshot(id) is Some(s) && !(s.status is Running) {
+      break
+    }
+    @async.sleep(25)
+  }
+}
+
+///|
 #cfg(not(platform="windows"))
 async test "shell_output returns a running job's output and status" {
   @async.with_task_group(group => {
@@ -9,11 +37,7 @@ async test "shell_output returns a running job's output and status" {
       command="job",
     )
     @async.sleep(100)
-    let action = match @shell_output.definition(bg).execute {
-      Async(execute) => execute({ "job_id": id })
-      Sync(_) => fail("shell_output should be async")
-    }
-    guard action is Respond(output) else { fail("expected a Respond action") }
+    let output = run_shell_output(bg, id)
     assert_false(output.is_error)
     assert_true(output.content.contains("hi"))
     assert_true(output.content.contains("running"))
@@ -27,17 +51,8 @@ async test "shell_output reports a finished job's exit code" {
   @async.with_task_group(group => {
     let bg = @bgjobs.BgJobRuntime::new(AgentTaskScope(group))
     let id = bg.start(program="sh", args=["-c", "exit 2"], command="job")
-    for _ in 0..<200 {
-      if bg.snapshot(id) is Some(s) && !(s.status is Running) {
-        break
-      }
-      @async.sleep(25)
-    }
-    let action = match @shell_output.definition(bg).execute {
-      Async(execute) => execute({ "job_id": id })
-      Sync(_) => fail("shell_output should be async")
-    }
-    guard action is Respond(output) else { fail("expected a Respond action") }
+    poll_bg_terminal(bg, id)
+    let output = run_shell_output(bg, id)
     assert_true(output.is_error)
     assert_true(output.content.contains("exit=2"))
   })
@@ -55,17 +70,8 @@ async test "shell_output windows a large job's output and notes truncation" {
       command="seq",
       max_output_chars=100,
     )
-    for _ in 0..<200 {
-      if bg.snapshot(id) is Some(s) && !(s.status is Running) {
-        break
-      }
-      @async.sleep(25)
-    }
-    let action = match @shell_output.definition(bg).execute {
-      Async(execute) => execute({ "job_id": id })
-      Sync(_) => fail("shell_output should be async")
-    }
-    guard action is Respond(output) else { fail("expected a Respond action") }
+    poll_bg_terminal(bg, id)
+    let output = run_shell_output(bg, id)
     // Bounded to the window, with truncation metadata, but still showing the
     // recent (tail) output — here the end of the sequence.
     assert_true(output.content.contains("truncated=true"))
@@ -89,17 +95,8 @@ async test "shell_output flags dropped output for a memory-only job" {
       command="seq",
       max_output_chars=100,
     )
-    for _ in 0..<200 {
-      if bg.snapshot(id) is Some(s) && !(s.status is Running) {
-        break
-      }
-      @async.sleep(25)
-    }
-    let action = match @shell_output.definition(bg).execute {
-      Async(execute) => execute({ "job_id": id })
-      Sync(_) => fail("shell_output should be async")
-    }
-    guard action is Respond(output) else { fail("expected a Respond action") }
+    poll_bg_terminal(bg, id)
+    let output = run_shell_output(bg, id)
     // Only ~100 chars retained but the job produced far more — must not present
     // the prefix as complete.
     assert_true(output.content.contains("truncated=true"))
@@ -118,17 +115,8 @@ async test "shell_output marks binary background output as a tool error" {
       args=["-c", "printf '\\377'"],
       command="binary",
     )
-    for _ in 0..<200 {
-      if bg.snapshot(id) is Some(s) && !(s.status is Running) {
-        break
-      }
-      @async.sleep(25)
-    }
-    let action = match @shell_output.definition(bg).execute {
-      Async(execute) => execute({ "job_id": id })
-      Sync(_) => fail("shell_output should be async")
-    }
-    guard action is Respond(output) else { fail("expected a Respond action") }
+    poll_bg_terminal(bg, id)
+    let output = run_shell_output(bg, id)
     assert_true(output.is_error)
     assert_true(output.content.contains("binary_output"))
   })
@@ -139,11 +127,7 @@ async test "shell_output marks binary background output as a tool error" {
 async test "shell_output errors on an unknown job id" {
   @async.with_task_group(group => {
     let bg = @bgjobs.BgJobRuntime::new(AgentTaskScope(group))
-    let action = match @shell_output.definition(bg).execute {
-      Async(execute) => execute({ "job_id": "nope" })
-      Sync(_) => fail("shell_output should be async")
-    }
-    guard action is Respond(output) else { fail("expected a Respond action") }
+    let output = run_shell_output(bg, "nope")
     assert_true(output.is_error)
     assert_true(output.content.contains("no background job"))
   })
