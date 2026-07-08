@@ -24,10 +24,14 @@ the result as a tool error so the agent knows it received only an output prefix.
 
 Callers may set `timeout_ms` explicitly (capped at 600000; larger values are
 an error), and an omitted timeout gets a default so no foreground wait is ever
-unbounded: 120000 with a background runtime wired (the deadline detaches the
-command into a job) and 600000 otherwise.
-When the timeout expires, the in-flight process collection is cancelled and the
-tool returns an error instead of blocking the agent loop.
+unbounded. What the deadline does depends on the wiring:
+
+- with a background runtime (the agent's registry off Windows; default
+  120000): the command is *detached* into a background job — the tool returns
+  a job-id response ("moved to the background as job bg-N") instead of an
+  error, and `shell_output`/`shell_stop` keep watching it;
+- without one (default 600000): the in-flight process collection is cancelled
+  and the tool returns a timeout error instead of blocking the agent loop.
 
 ## API Style
 
