@@ -7,7 +7,9 @@ that was moved to the background when it outlived its `timeout_ms`.
 Stopping is a request against the shared `ShellExecution`: the child process is
 cancelled and the job lands on the `Stopped` status, which `shell_output`
 reports as a tool error thereafter. Stopping an already-finished job is a
-no-op error (`no background job with id …` covers unknown ids).
+*successful* no-op — the id is known, there is just nothing left to cancel —
+so `shell_stop` is idempotent; only an unknown id is a tool error
+(`no background job with id …`).
 
 ## Design Rationale
 
