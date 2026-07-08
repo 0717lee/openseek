@@ -129,6 +129,19 @@ async fn Engine::wait_for(
         break
       }
       seen.push(event)
+      // A failed or aborted turn is terminal for whatever we were waiting on:
+      // stop now with the real cause in `seen` instead of burning the timeout.
+      if event
+        is {
+          "event": String(
+            "turn_failed"
+            | "agent_aborted"
+            | "max_steps_exhausted"
+          ),
+          ..
+        } {
+        break
+      }
       if matches(event) {
         found = Some(event)
         break
@@ -186,16 +199,19 @@ async fn run_phases(engine : Engine, failures : Array[String]) -> Unit {
   engine.prompt(
     (
       #|Using the shell tool, first start this exact command as a background job
-      #|(run_in_background=true): sh -c 'sleep 12; echo NOTICE-MARK-4242'.
-      #|Then, in the foreground, run these three commands one at a time and note
-      #|each result:
+      #|(run_in_background=true): sh -c 'sleep 10; echo NOTICE-MARK-4242'.
+      #|Then, in the foreground, run these five commands one at a time (a
+      #|separate shell call each) and note each result:
       #|`echo FG-ONE $(ls agent_tool/shell_exec | wc -l)`,
       #|`echo FG-TWO $(ls agent_tool/bgjobs | wc -l)`,
-      #|`echo FG-THREE $(ls agent_tool/shell_output | wc -l)`.
-      #|Do NOT use sleep to wait and do NOT poll shell_output in a loop; when the
-      #|background job's completion notice arrives, read its output with
-      #|shell_output and put the exact marker line it printed in your final
-      #|answer together with the three FG counts.
+      #|`echo FG-THREE $(ls agent_tool/shell_output | wc -l)`,
+      #|`echo FG-FOUR $(ls agent_tool/shell_stop | wc -l)`,
+      #|`echo FG-FIVE $(ls agent_tool/shell | wc -l)`.
+      #|Do NOT use sleep to wait, and do NOT call shell_output until the
+      #|background job's completion notice arrives — it will be pushed to you;
+      #|keep doing the foreground work until then. When the notice arrives, read
+      #|the job's output with shell_output and put the exact marker line it
+      #|printed in your final answer together with the five FG counts.
     ),
   )
   let seen1 : Array[Json] = []
@@ -246,7 +262,9 @@ async fn run_phases(engine : Engine, failures : Array[String]) -> Unit {
     }
     _ => false
   }
-  let all_foreground_done = ["FG-ONE", "FG-TWO", "FG-THREE"]
+  let all_foreground_done = [
+      "FG-ONE", "FG-TWO", "FG-THREE", "FG-FOUR", "FG-FIVE",
+    ]
     .iter()
     .all(tag => {
       seen1
@@ -277,11 +295,12 @@ async fn run_phases(engine : Engine, failures : Array[String]) -> Unit {
     foreground_between,
   )
   check(
-    failures, "P1: all three requested foreground commands ran", all_foreground_done,
+    failures, "P1: all five requested foreground commands ran", all_foreground_done,
   )
-  // Out of foreground work with the job still running, the model's only way to
-  // reach a step boundary is one opportunistic shell_output check — that is
-  // rational, not a regression. What must never happen is a polling *loop*.
+  // The prompt forbids reading before the pushed notice, and the foreground
+  // work outlasts the short job so the model is never left idle: any pre-notice
+  // shell_output call is a violation, and the marker read must be *caused* by
+  // the notice — strictly after it.
   let polls_before_notice = match notice_at {
     Some(notice) => {
       let mut count = 0
@@ -301,13 +320,16 @@ async fn run_phases(engine : Engine, failures : Array[String]) -> Unit {
   }
   check(
     failures,
-    "P1: no shell_output polling loop before the notice (at most one check)",
-    polls_before_notice <= 1,
+    "P1: no shell_output call before the notice",
+    polls_before_notice == 0,
   )
   check(
     failures,
-    "P1: model retrieved the job output via shell_output",
-    read_at is Some(_),
+    "P1: model read the job output via shell_output after the notice",
+    match (read_at, notice_at) {
+      (Some(read), Some(notice)) => read > notice
+      _ => false
+    },
   )
   check(
     failures,
