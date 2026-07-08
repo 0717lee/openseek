@@ -1957,3 +1957,77 @@ async test "shell rejects cwd that is a file not a directory" {
     assert_true(output.content.contains("cwd is not a directory"))
   })
 }
+
+///|
+/// Run the shell tool unwired with an injected default timeout (the test
+/// seam for the no-explicit-timeout paths).
+async fn run_shell_default(
+  arguments : Json,
+  default_timeout_ms~ : Int,
+) -> @agent_tool.ToolOutput {
+  let action = match @shell.definition(default_timeout_ms~).execute {
+    Async(execute) => execute(arguments)
+    Sync(_) => fail("shell tool should be async")
+  }
+  guard action is Respond(output) else { fail("expected Respond") }
+  output
+}
+
+///|
+#cfg(not(platform="windows"))
+async test "an omitted timeout gets a default that kills on the unwired path" {
+  let output = run_shell_default({ "cmd": "sleep 2" }, default_timeout_ms=50)
+  assert_true(output.is_error)
+  assert_true(output.content.contains("timed out after 50ms"))
+  // The message tells the model the deadline was a default it can raise.
+  assert_true(output.content.contains("default foreground budget"))
+}
+
+///|
+#cfg(not(platform="windows"))
+async test "an omitted timeout detaches at the default on the wired path" {
+  @async.with_task_group() <| group => {
+    let bg = @bgjobs.BgJobRuntime::new(AgentTaskScope(group))
+    let action = match
+      @shell.definition(bg_runtime=bg, default_timeout_ms=50).execute {
+      Async(execute) => execute({ "cmd": "sleep 2" })
+      Sync(_) => fail("shell tool should be async")
+    }
+    guard action is Respond(output) else { fail("expected Respond") }
+    assert_false(output.is_error)
+    assert_true(output.content.contains("moved to the background as job"))
+    assert_true(output.content.contains("default foreground budget"))
+    // The detached command is a live, stoppable job.
+    let jobs = bg.list()
+    assert_eq(jobs.length(), 1)
+    let _ = bg.stop(jobs[0].id)
+  }
+}
+
+///|
+#cfg(not(platform="windows"))
+async test "an explicit timeout above the ceiling is an error, not a clamp" {
+  let output = run_shell({ "cmd": "true", "timeout_ms": 900000 })
+  assert_true(output.is_error)
+  assert_true(output.content.contains("exceeds the maximum"))
+  assert_true(output.content.contains("run_in_background"))
+}
+
+///|
+#cfg(not(platform="windows"))
+async test "run_in_background without timeout_ms is unaffected by defaults" {
+  @async.with_task_group() <| group => {
+    let bg = @bgjobs.BgJobRuntime::new(AgentTaskScope(group))
+    let action = match
+      @shell.definition(bg_runtime=bg, default_timeout_ms=50).execute {
+      Async(execute) => execute({ "cmd": "sleep 1", "run_in_background": true })
+      Sync(_) => fail("shell tool should be async")
+    }
+    guard action is Respond(output) else { fail("expected Respond") }
+    assert_false(output.is_error)
+    assert_true(output.content.contains("started background job"))
+    let jobs = bg.list()
+    assert_eq(jobs.length(), 1)
+    let _ = bg.stop(jobs[0].id)
+  }
+}

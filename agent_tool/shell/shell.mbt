@@ -1,4 +1,24 @@
 ///|
+/// Default foreground wait when the model omits `timeout_ms`. With a
+/// background runtime wired the deadline DETACHES the command into a job
+/// (nothing is lost, the turn stays alive — issue #419: two real multi-hour
+/// silent stalls came from unbounded foreground waits), so the default can
+/// be tight. Without one the deadline kills, so it is generous.
+pub const DefaultForegroundTimeoutMs : Int = 120_000
+
+///|
+/// Default foreground wait when no background runtime is wired (Windows and
+/// standalone registries): the deadline kills rather than detaches, so it is
+/// generous. Longer legitimate work must pass an explicit `timeout_ms`.
+pub const DefaultUnwiredForegroundTimeoutMs : Int = 600_000
+
+///|
+/// Ceiling for explicit `timeout_ms`. Longer work belongs in
+/// `run_in_background`, so an explicit value above this is an error rather
+/// than a silent clamp — a wait request is a semantic contract.
+pub const HardMaxForegroundTimeoutMs : Int = 600_000
+
+///|
 /// Tool definition for `shell`: runs `arguments.cmd` through the platform
 /// shell, optionally in `arguments.cwd`, and returns the exit code plus merged
 /// stdout/stderr output.
@@ -10,9 +30,13 @@
 /// - `max_output_chars` (number, optional): defaults to 12000 and is capped at
 ///   50000. Once the retained output prefix exceeds this limit, the child
 ///   process is cancelled and the result is reported as a tool error.
-/// - `timeout_ms` (number, optional): positive timeout in milliseconds. If the
-///   command is still running after the timeout, the process is cancelled and
-///   reported as a tool error.
+/// - `timeout_ms` (number, optional): positive timeout in milliseconds, capped
+///   at `HardMaxForegroundTimeoutMs` (explicit values above it are an error).
+///   When omitted, a default applies so no foreground wait is unbounded:
+///   `DefaultForegroundTimeoutMs` with a background runtime wired (the
+///   deadline detaches the command into a job), else
+///   `DefaultUnwiredForegroundTimeoutMs` (the deadline cancels the command,
+///   reported as a tool error).
 ///
 /// ## Result
 /// Metadata is a trailing `<system>...</system>` footer (the `read` tool
@@ -32,6 +56,7 @@ pub fn definition(
   workspace_root? : String = ".",
   read_only? : Bool = false,
   bg_runtime? : @bgjobs.BgJobRuntime,
+  default_timeout_ms? : Int,
 ) -> @agent_tool.AgentToolDefinition {
   AgentToolDefinition(
     name="shell",
@@ -55,7 +80,7 @@ pub fn definition(
             "cwd": { "type": "string" },
             "timeout_ms": {
               "type": "number",
-              "description": "Max time to wait in the foreground; a command still running at the deadline is moved to the background as a job (not killed).",
+              "description": "Max time to wait in the foreground (default 120000, max 600000); a command still running at the deadline is moved to the background as a job (not killed).",
             },
             "max_output_chars": { "type": "number" },
             "run_in_background": {
@@ -73,7 +98,7 @@ pub fn definition(
             "cwd": { "type": "string" },
             "timeout_ms": {
               "type": "number",
-              "description": "Max time to wait; a command still running at the deadline is cancelled and reported as a tool error.",
+              "description": "Max time to wait (default 600000, max 600000); a command still running at the deadline is cancelled and reported as a tool error.",
             },
             "max_output_chars": { "type": "number" },
           },
@@ -82,7 +107,13 @@ pub fn definition(
       },
     ),
     execute=Async(arguments => {
-      execute_with_workspace(workspace_root, arguments, read_only~, bg_runtime?)
+      execute_with_workspace(
+        workspace_root,
+        arguments,
+        read_only~,
+        bg_runtime?,
+        default_timeout_ms?,
+      )
     }),
   )
 }
@@ -94,7 +125,7 @@ pub fn definition(
 /// a notice, so `sleep N && cmd` chains and shell_output polling loops are both
 /// unnecessary and wasteful.
 fn background_description() -> String {
-  " For long-running work (builds, long test suites, servers, watchers) set run_in_background=true: the call returns a job id immediately and a notice arrives automatically when the job finishes — so never block the turn waiting on time (no `sleep N && cmd` chains, no repeated polling); keep working, or finish the turn, and act on the completion notice. Read a job's recent output with shell_output and cancel it with shell_stop. A foreground command that outlives timeout_ms is moved to the background as a job (not killed)."
+  " For long-running work (builds, long test suites, servers, watchers) set run_in_background=true: the call returns a job id immediately and a notice arrives automatically when the job finishes — so never block the turn waiting on time (no `sleep N && cmd` chains, no repeated polling); keep working, or finish the turn, and act on the completion notice. Read a job's recent output with shell_output and cancel it with shell_stop. A foreground command that outlives timeout_ms (default 120000ms when omitted) is moved to the background as a job (not killed); pass a larger timeout_ms (up to 600000) only when you must block on the result."
 }
 
 ///|
@@ -115,6 +146,7 @@ async fn execute_with_workspace(
   arguments : Json,
   read_only~ : Bool,
   bg_runtime? : @bgjobs.BgJobRuntime,
+  default_timeout_ms? : Int,
 ) -> @agent_tool.ToolAction {
   let input = @decode.decode(arguments) catch {
     error => {
@@ -148,7 +180,14 @@ async fn execute_with_workspace(
     None => ()
   }
   let cwd = @workspace_path.resolve_cwd(workspace_root, input.cwd)
-  shell(input, parsed_command, cwd, workspace_root, bg_runtime?) catch {
+  shell(
+    input,
+    parsed_command,
+    cwd,
+    workspace_root,
+    bg_runtime?,
+    default_timeout_ms?,
+  ) catch {
     error =>
       @agent_tool.ToolAction::respond(
         "error running shell: \{error}",
@@ -164,7 +203,16 @@ async fn shell(
   cwd : String?,
   workspace_root : String,
   bg_runtime? : @bgjobs.BgJobRuntime,
+  default_timeout_ms? : Int,
 ) -> @agent_tool.ToolAction {
+  // An explicit wait request above the ceiling is an error, not a silent
+  // clamp — the caller asked for wait semantics this tool will not provide.
+  if input.timeout_ms is Some(explicit) && explicit > HardMaxForegroundTimeoutMs {
+    return @agent_tool.ToolAction::respond(
+      "error: timeout_ms \{explicit} exceeds the maximum \{HardMaxForegroundTimeoutMs}ms; run longer work with run_in_background and poll it with shell_output",
+      is_error=true,
+    )
+  }
   if cwd is Some(cwd) {
     let exists = @fs.exists(cwd)
     if !exists {
@@ -208,13 +256,31 @@ async fn shell(
   // than killed. Both the spawner and the detach hook come from it; without one
   // the shell falls back to the per-call collection path (no detach).
   //
-  // A command with a `timeout_ms` may be detached on timeout, so spawn it with
-  // the *retained* (file-backed, no output-limit kill) config so it keeps a full
-  // record if it is detached and produces more output — the foreground
-  // output-limit is enforced at display via `over_inline_cap`, and the timeout
-  // bounds the wait. A command with no timeout cannot detach, so it uses the
-  // memory-only foreground config (killed at the output limit, no leak).
-  let detachable = input.timeout_ms is Some(_)
+  // No foreground wait is ever unbounded (issue #419: two real multi-hour
+  // silent turn stalls came from calls without timeout_ms): an omitted
+  // timeout gets a default — tight when a background runtime is wired, since
+  // the deadline then DETACHES the command into a job (nothing is lost and
+  // the turn stays alive); generous unwired, where the deadline kills.
+  // `default_timeout_ms` is the test seam for both.
+  let effective_timeout_ms = match input.timeout_ms {
+    Some(explicit) => explicit
+    None =>
+      match default_timeout_ms {
+        Some(injected) => injected
+        None =>
+          if bg_runtime is Some(_) {
+            DefaultForegroundTimeoutMs
+          } else {
+            DefaultUnwiredForegroundTimeoutMs
+          }
+      }
+  }
+  // Every wired foreground command may now be detached at its deadline, so
+  // spawn on the *retained* (file-backed, no output-limit kill) config: it
+  // keeps a full record if detached — the foreground output-limit is still
+  // enforced at display via `over_inline_cap` and the spill is discarded
+  // when the command finishes in the foreground.
+  let detachable = bg_runtime is Some(_)
   let foreground_spawn : (async (String, Array[String], String?, Int) -> @shell_exec.ShellExecution)? = bg_runtime.map(runtime => {
       (program, args, cwd, max) => {
         if detachable {
@@ -250,7 +316,7 @@ async fn shell(
     parsed_command,
     cwd?,
     max_output_chars=input.max_output_chars,
-    timeout_ms?=input.timeout_ms,
+    timeout_ms=effective_timeout_ms,
     foreground_spawn?,
     on_timeout_detach?,
   )
@@ -263,16 +329,24 @@ async fn shell(
         brief=shell_brief(input.cmd, None),
       )
     ShellTimedOut => {
-      let timeout_ms = input.timeout_ms.unwrap_or(0)
+      let budget = if input.timeout_ms is Some(_) {
+        ""
+      } else {
+        " (default foreground budget; pass timeout_ms up to \{HardMaxForegroundTimeoutMs}ms for longer waits)"
+      }
       return @agent_tool.ToolAction::respond(
-        "error: shell command timed out after \{timeout_ms}ms",
+        "error: shell command timed out after \{effective_timeout_ms}ms\{budget}",
         is_error=true,
       )
     }
     ShellDetached(id) => {
-      let timeout_ms = input.timeout_ms.unwrap_or(0)
+      let budget = if input.timeout_ms is Some(_) {
+        ""
+      } else {
+        " (default foreground budget)"
+      }
       return @agent_tool.ToolAction::respond(
-        "command still running after \{timeout_ms}ms; moved to the background as job \{id}. Read its output with shell_output (job_id=\"\{id}\") and stop it with shell_stop (job_id=\"\{id}\").",
+        "command still running after \{effective_timeout_ms}ms\{budget}; moved to the background as job \{id}. Read its output with shell_output (job_id=\"\{id}\") and stop it with shell_stop (job_id=\"\{id}\").",
         brief="\{@agent_tool.brief_line(input.cmd, limit=48)} → bg \{id}",
       )
     }
@@ -326,7 +400,7 @@ async fn run_agent_shell_with_tree_precheck(
   parsed_command : @shell_parse.ParseResult,
   cwd? : String,
   max_output_chars~ : Int,
-  timeout_ms? : Int,
+  timeout_ms~ : Int,
   foreground_spawn? : async (String, Array[String], String?, Int) -> @shell_exec.ShellExecution,
   on_timeout_detach? : (@shell_exec.ShellExecution, AgentShellLaunch) -> String,
 ) -> ShellRunResult {
@@ -350,13 +424,9 @@ async fn run_agent_shell_with_tree_precheck(
     // cancellation must too (the catch stops it before re-raising).
     Some(spawn) => {
       let exec = spawn(launch.program, launch.args, cwd, max_output_chars)
-      let finished = try {
-        match timeout_ms {
-          Some(timeout_ms) =>
-            @async.with_timeout_opt(timeout_ms, () => exec.wait_or_invalid())
-          None => Some(exec.wait_or_invalid())
-        }
-      } catch {
+      let finished = @async.with_timeout_opt(timeout_ms, () => {
+        exec.wait_or_invalid()
+      }) catch {
         error => {
           exec.request_stop()
           raise error
@@ -393,26 +463,14 @@ async fn run_agent_shell_with_tree_precheck(
     // No session scope (e.g. `collect_shell_output`, the TUI `!` command): keep
     // the per-call collection path, with the same timeout wrapping as before.
     None => {
-      let collected = match timeout_ms {
-        Some(timeout_ms) =>
-          @async.with_timeout_opt(timeout_ms, () => {
-            collect_process_output(
-              launch.program,
-              launch.args,
-              cwd?,
-              max_output_chars~,
-            )
-          })
-        None =>
-          Some(
-            collect_process_output(
-              launch.program,
-              launch.args,
-              cwd?,
-              max_output_chars~,
-            ),
-          )
-      }
+      let collected = @async.with_timeout_opt(timeout_ms, () => {
+        collect_process_output(
+          launch.program,
+          launch.args,
+          cwd?,
+          max_output_chars~,
+        )
+      })
       match collected {
         None => ShellTimedOut
         Some(output) =>

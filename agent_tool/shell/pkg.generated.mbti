@@ -7,9 +7,15 @@ import {
 }
 
 // Values
+pub const DefaultForegroundTimeoutMs : Int = 120_000
+
+pub const DefaultUnwiredForegroundTimeoutMs : Int = 600_000
+
+pub const HardMaxForegroundTimeoutMs : Int = 600_000
+
 pub async fn collect_shell_output(String, cwd? : String, max_output_chars? : Int) -> ShellOutput
 
-pub fn definition(workspace_root? : String, read_only? : Bool, bg_runtime? : @bgjobs.BgJobRuntime) -> @agent_tool.AgentToolDefinition
+pub fn definition(workspace_root? : String, read_only? : Bool, bg_runtime? : @bgjobs.BgJobRuntime, default_timeout_ms? : Int) -> @agent_tool.AgentToolDefinition
 
 pub fn source_write_denial_feedback() -> String
 
