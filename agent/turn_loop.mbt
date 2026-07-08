@@ -74,14 +74,7 @@ async fn AgentLoop::run(
           // rebuild model context through Session::chat_messages, which projects
           // that terminal back into an assistant message; appending an Assistant
           // session item here would duplicate the answer on replay.
-          let session = self.append(
-            session,
-            Terminal(Finished(response.content)),
-          )
-          self.push_finished_message(response.content)
-          @xlog.info() <?
-            { "event": "agent_finished", "answer": response.content }
-          return session
+          return self.finish_turn(session, response.content)
         }
         let reasoning_content = response.optional_reasoning_content()
         // The model considers itself done, but user-visible input arrived while the
@@ -258,18 +251,13 @@ async fn AgentLoop::handle_tool_calls(
     let tool_call = @agent_tool.AgentToolCall(native_call) catch {
       error => {
         let content = "error: \{error}"
-        let session = self.append(
+        let session = self.record_tool_result(
           session,
-          Tool(
-            ToolResult(
-              tool_call_id=native_call.id,
-              tool_name=native_call.name,
-              content~,
-              is_error=true,
-            ),
-          ),
+          tool_call_id=native_call.id,
+          tool_name=native_call.name,
+          content~,
+          is_error=true,
         )
-        self.messages.push(ChatMessage(Tool(native_call.id), content~))
         @xlog.error() <?
           {
             "event": "tool_call_decode_error",
@@ -305,25 +293,15 @@ async fn AgentLoop::execute_tool_call(
   let result = @agent_tool.execute_tool_call(tool_call, self.tools)
   match result {
     Control(Finish(answer)) => {
-      let session = self.append(
+      let session = self.record_tool_result(
         session,
-        Tool(
-          ToolResult(
-            tool_call_id=native_call.id,
-            tool_name=tool_call.name,
-            content="finished: \{answer}",
-          ),
-        ),
-      )
-      self.messages.push(
-        ChatMessage(Tool(native_call.id), content="finished: \{answer}"),
+        tool_call_id=native_call.id,
+        tool_name=tool_call.name,
+        content="finished: \{answer}",
       )
       let steer_inputs = self.runtime.pending_steers()
       if steer_inputs.is_empty() {
-        let session = self.append(session, Terminal(Finished(answer)))
-        self.push_finished_message(answer)
-        @xlog.info() <? { "event": "agent_finished", "answer": answer }
-        return FinishAgentLoop(session)
+        return FinishAgentLoop(self.finish_turn(session, answer))
       }
       // User input wins over the finish tool as well. Continuing the turn must keep
       // the conversation API-valid: every call in the assistant's batch needs a
@@ -351,22 +329,15 @@ async fn AgentLoop::execute_tool_call(
       return FinishAgentLoop(session)
     }
     Respond(output) => {
-      let session = self.append(
+      let session = self.record_tool_result(
         session,
-        Tool(
-          ToolResult(
-            tool_call_id=native_call.id,
-            tool_name=tool_call.name,
-            content=output.content,
-            is_error=output.is_error,
-            brief?=output.brief,
-          ),
-        ),
+        tool_call_id=native_call.id,
+        tool_name=tool_call.name,
+        content=output.content,
+        is_error=output.is_error,
+        brief?=output.brief,
       )
       self.plan_cadence.record_plan_success(tool_call, output)
-      self.messages.push(
-        ChatMessage(Tool(native_call.id), content=output.content),
-      )
       log_tool_result(native_call, tool_call, output)
       ContinueToolBatch(session)
     }
@@ -387,18 +358,13 @@ async fn AgentLoop::close_skipped_tool_calls(
 ) -> @agent_session.Session {
   for skipped in remaining_tool_calls; session = session {
     let note = "skipped: user input arrived before this call ran"
-    let session = self.append(
+    let session = self.record_tool_result(
       session,
-      Tool(
-        ToolResult(
-          tool_call_id=skipped.id,
-          tool_name=skipped.name,
-          content=note,
-          is_error=true,
-        ),
-      ),
+      tool_call_id=skipped.id,
+      tool_name=skipped.name,
+      content=note,
+      is_error=true,
     )
-    self.messages.push(ChatMessage(Tool(skipped.id), content=note))
     @xlog.info() <?
       {
         "event": "tool_result",
@@ -411,6 +377,42 @@ async fn AgentLoop::close_skipped_tool_calls(
   } nobreak {
     session
   }
+}
+
+///|
+/// Record one tool result: append it durably and mirror it into the in-flight
+/// chat messages. The two must stay in lockstep — every tool call in an
+/// assistant batch needs a matching result message for the conversation to
+/// stay API-valid.
+async fn AgentLoop::record_tool_result(
+  self : Self,
+  session : @agent_session.Session,
+  tool_call_id~ : String,
+  tool_name~ : String,
+  content~ : String,
+  is_error? : Bool = false,
+  brief? : String,
+) -> @agent_session.Session {
+  let session = self.append(
+    session,
+    Tool(ToolResult(tool_call_id~, tool_name~, content~, is_error~, brief?)),
+  )
+  self.messages.push(ChatMessage(Tool(tool_call_id), content~))
+  session
+}
+
+///|
+/// Durably record the turn's final answer and mirror it for the still-live
+/// loop state.
+async fn AgentLoop::finish_turn(
+  self : Self,
+  session : @agent_session.Session,
+  answer : String,
+) -> @agent_session.Session {
+  let session = self.append(session, Terminal(Finished(answer)))
+  self.push_finished_message(answer)
+  @xlog.info() <? { "event": "agent_finished", "answer": answer }
+  session
 }
 
 ///|
