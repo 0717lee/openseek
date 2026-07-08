@@ -206,12 +206,8 @@ fn ShellExecution::set_terminal(
 pub async fn ShellExecution::stop(self : ShellExecution) -> Bool {
   guard !self.status.is_terminal() else { return false }
   self.request_stop()
-  for ;; {
-    if self.status.is_terminal() {
-      return true
-    }
-    @async.sleep(5)
-  }
+  self.wait()
+  true
 }
 
 ///|

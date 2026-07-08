@@ -397,11 +397,9 @@ pub async fn BgJobRuntime::read_output_tail(
 ///|
 /// Snapshots of every job the session has started.
 pub fn BgJobRuntime::list(self : BgJobRuntime) -> Array[BgJobSnapshot] {
-  let out = []
-  for _, job in self.jobs {
-    out.push(job.to_snapshot())
-  }
-  out
+  [
+    for _, job in self.jobs => job.to_snapshot()
+  ]
 }
 
 ///|
