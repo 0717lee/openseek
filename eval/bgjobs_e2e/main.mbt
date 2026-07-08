@@ -55,10 +55,23 @@ async fn[G] Engine::spawn(group : @async.TaskGroup[G]) -> Engine {
   let (child_stdin, writer) = @process.write_to_process()
   let (reader, child_stdout) = @process.read_from_process()
   let (stderr_reader, child_stderr) = @process.read_from_process()
+  // Pin the child environment: only the toolchain basics and the API key pass
+  // through. Inheriting everything would let a developer's OPENSEEK_* overrides
+  // (model, session, dir, api url) silently change which engine configuration
+  // this eval validates.
+  let parent = @env.get_env_vars()
+  let child_env : Map[String, String] = {}
+  for name in ["PATH", "HOME", "TMPDIR", "DEEPSEEK"] {
+    if parent.get(name) is Some(value) {
+      child_env[name] = value
+    }
+  }
   let _proc = @process.spawn(
     group,
     "moon",
     ["run", "--target", "native", "cmd/openseek", "--", "serve"],
+    inherit_env=false,
+    extra_env=child_env,
     stdin=child_stdin,
     stdout=child_stdout,
     stderr=child_stderr,
@@ -215,7 +228,7 @@ async fn run_phases(engine : Engine, failures : Array[String]) -> Unit {
     (
       #|Start this exact command as a background job (run_in_background=true) and
       #|then finish immediately, answering with just the job id — do not wait for
-      #|it and do not read its output: sh -c 'sleep 6; echo IDLE-MARK-777'.
+      #|it and do not read its output: sh -c 'sleep 30; echo IDLE-MARK-777'.
     ),
   )
   let seen2 : Array[Json] = []
@@ -223,8 +236,11 @@ async fn run_phases(engine : Engine, failures : Array[String]) -> Unit {
     event is { "event": String("agent_finished"), .. }
   })
   check(failures, "P2: turn finished before the job", finished2 is Some(_))
+  // The 30s job comfortably outlives a normal two-response turn, so the
+  // notice arrives while the engine is idle; the wait covers the remaining
+  // sleep plus slack.
   let seen2b : Array[Json] = []
-  let idle_notice = engine.wait_for(30_000, seen2b, event => {
+  let idle_notice = engine.wait_for(90_000, seen2b, event => {
     event is { "event": String("background_notice"), .. }
   })
   check(
