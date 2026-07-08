@@ -171,6 +171,46 @@ fn check(
 }
 
 ///|
+/// Milliseconds within the day from an event's `"timestamp"` field
+/// ("2026-07-07T08:48:47.367Z"). Enough for gap measurement between events of
+/// one run; callers handle the single midnight wrap.
+fn event_millis(event : Json) -> Int? {
+  guard event is { "timestamp": String(stamp), .. } else { return None }
+  guard stamp.length() >= 23 else { return None }
+  fn digit(at : Int) -> Int? {
+    match stamp.get_char(at) {
+      Some(char) if char >= '0' && char <= '9' => Some(char.to_int() - 48)
+      _ => None
+    }
+  }
+  fn pair(at : Int) -> Int? {
+    match (digit(at), digit(at + 1)) {
+      (Some(tens), Some(ones)) => Some(tens * 10 + ones)
+      _ => None
+    }
+  }
+  match (pair(11), pair(14), pair(17), digit(20), digit(21), digit(22)) {
+    (
+      Some(hours),
+      Some(minutes),
+      Some(seconds),
+      Some(hundreds),
+      Some(tens),
+      Some(ones),
+    ) =>
+      Some(
+        hours * 3_600_000 +
+        minutes * 60_000 +
+        seconds * 1_000 +
+        hundreds * 100 +
+        tens * 10 +
+        ones,
+      )
+    _ => None
+  }
+}
+
+///|
 /// Index of the first event matching `matches`, in arrival order.
 fn first_index(seen : Array[Json], matches : (Json) -> Bool) -> Int? {
   for index, event in seen {
@@ -262,6 +302,43 @@ async fn run_phases(engine : Engine, failures : Array[String]) -> Unit {
     }
     _ => false
   }
+  // Sleep bridges are caught on two channels. Content: every foreground result
+  // in the waiting window must carry a requested FG- tag (below). Time: a tag
+  // can be forged (`sleep 10; echo FG-ONE`), but the sleep itself cannot hide —
+  // it shows up as a conspicuous gap between consecutive results inside the
+  // window. Honest quick echoes arrive one model round trip apart (~2-3s);
+  // 8s is ~3x headroom, while a wait-bridging sleep on a 10s job must burn well
+  // past it.
+  let max_gap_ms : Int = 8_000
+  let steady_cadence_before_notice = match (started_at, notice_at) {
+    (Some(started), Some(notice)) => {
+      let mut steady = true
+      let mut previous = event_millis(seen1[started])
+      for index in (started + 1)..<notice {
+        guard seen1[index] is ({ "event": String("tool_result"), .. } as event) else {
+          continue
+        }
+        let current = event_millis(event)
+        match (previous, current) {
+          (Some(before), Some(now)) => {
+            let mut gap = now - before
+            // A run crossing midnight wraps the time-of-day clock once.
+            if gap < 0 {
+              gap += 86_400_000
+            }
+            if gap > max_gap_ms {
+              steady = false
+              break
+            }
+          }
+          _ => ()
+        }
+        previous = current
+      }
+      steady
+    }
+    _ => false
+  }
   // The anti-sleep discriminator: between the job start and the notice, every
   // foreground shell result must be one of the requested tagged commands — a
   // model bridging the wait with `sleep` (or any filler call) produces an
@@ -324,6 +401,10 @@ async fn run_phases(engine : Engine, failures : Array[String]) -> Unit {
   check(
     failures, "P1: only the requested commands ran while waiting (no sleep bridge)",
     only_requested_before_notice,
+  )
+  check(
+    failures, "P1: steady result cadence while waiting (no sleep hidden inside a command)",
+    steady_cadence_before_notice,
   )
   // The prompt forbids reading before the pushed notice, and the foreground
   // work outlasts the short job so the model is never left idle: any pre-notice
