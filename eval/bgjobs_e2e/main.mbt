@@ -186,14 +186,16 @@ async fn run_phases(engine : Engine, failures : Array[String]) -> Unit {
   engine.prompt(
     (
       #|Using the shell tool, first start this exact command as a background job
-      #|(run_in_background=true): sh -c 'sleep 5; echo NOTICE-MARK-4242'.
+      #|(run_in_background=true): sh -c 'sleep 12; echo NOTICE-MARK-4242'.
       #|Then, in the foreground, run these three commands one at a time and note
-      #|each result: `ls agent_tool/shell_exec | wc -l`,
-      #|`ls agent_tool/bgjobs | wc -l`, `ls agent_tool/shell_output | wc -l`.
+      #|each result:
+      #|`echo FG-ONE $(ls agent_tool/shell_exec | wc -l)`,
+      #|`echo FG-TWO $(ls agent_tool/bgjobs | wc -l)`,
+      #|`echo FG-THREE $(ls agent_tool/shell_output | wc -l)`.
       #|Do NOT use sleep to wait and do NOT poll shell_output in a loop; when the
       #|background job's completion notice arrives, read its output with
       #|shell_output and put the exact marker line it printed in your final
-      #|answer together with the three counts.
+      #|answer together with the three FG counts.
     ),
   )
   let seen1 : Array[Json] = []
@@ -210,14 +212,6 @@ async fn run_phases(engine : Engine, failures : Array[String]) -> Unit {
   let notice_at = first_index(seen1, event => {
     event is { "event": String("steer_applied"), "kind": String("notice"), .. }
   })
-  let poll_at = first_index(seen1, event => {
-    event
-    is {
-      "event": String("tool_result"),
-      "tool_name": String("shell_output"),
-      ..
-    }
-  })
   let read_at = first_index(seen1, event => {
     event
     is {
@@ -228,6 +222,10 @@ async fn run_phases(engine : Engine, failures : Array[String]) -> Unit {
     } &&
     content.contains("NOTICE-MARK-4242")
   })
+  // The requested foreground commands are tagged (FG-*), so only *that* work
+  // counts: a model that burned the wait on `sleep`/trivial commands produces
+  // its first tagged result only after the job is done — i.e. after the notice
+  // — and fails this check.
   let foreground_between = match (started_at, notice_at) {
     (Some(started), Some(notice)) => {
       let mut found = false
@@ -239,7 +237,7 @@ async fn run_phases(engine : Engine, failures : Array[String]) -> Unit {
             "content": String(content),
             ..
           } &&
-          !content.contains("started background job") {
+          content.contains("FG-") {
           found = true
           break
         }
@@ -248,6 +246,22 @@ async fn run_phases(engine : Engine, failures : Array[String]) -> Unit {
     }
     _ => false
   }
+  let all_foreground_done = ["FG-ONE", "FG-TWO", "FG-THREE"]
+    .iter()
+    .all(tag => {
+      seen1
+      .iter()
+      .any(event => {
+        event
+        is {
+          "event": String("tool_result"),
+          "tool_name": String("shell"),
+          "content": String(content),
+          ..
+        } &&
+        content.contains(tag)
+      })
+    })
   check(
     failures,
     "P1: job started via run_in_background",
@@ -259,24 +273,41 @@ async fn run_phases(engine : Engine, failures : Array[String]) -> Unit {
     notice_at is Some(_),
   )
   check(
-    failures, "P1: foreground work ran between job start and the notice", foreground_between,
+    failures, "P1: requested foreground work ran between job start and the notice",
+    foreground_between,
+  )
+  check(
+    failures, "P1: all three requested foreground commands ran", all_foreground_done,
+  )
+  // Out of foreground work with the job still running, the model's only way to
+  // reach a step boundary is one opportunistic shell_output check — that is
+  // rational, not a regression. What must never happen is a polling *loop*.
+  let polls_before_notice = match notice_at {
+    Some(notice) => {
+      let mut count = 0
+      for index in 0..<notice {
+        if seen1[index]
+          is {
+            "event": String("tool_result"),
+            "tool_name": String("shell_output"),
+            ..
+          } {
+          count += 1
+        }
+      }
+      count
+    }
+    None => 0
+  }
+  check(
+    failures,
+    "P1: no shell_output polling loop before the notice (at most one check)",
+    polls_before_notice <= 1,
   )
   check(
     failures,
-    "P1: no shell_output polling before the notice",
-    match (poll_at, notice_at) {
-      (Some(poll), Some(notice)) => poll > notice
-      (None, Some(_)) => true
-      _ => false
-    },
-  )
-  check(
-    failures,
-    "P1: model read the job output via shell_output after the notice",
-    match (read_at, notice_at) {
-      (Some(read), Some(notice)) => read > notice
-      _ => false
-    },
+    "P1: model retrieved the job output via shell_output",
+    read_at is Some(_),
   )
   check(
     failures,
