@@ -416,28 +416,6 @@ async test "edit replaces first repeated match only" {
 }
 
 ///|
-async test "edit rejects unbounded replace_all" {
-  @vfs.with_tmpdir(dir => {
-    let path = "\{dir}/replace-all.txt"
-    @fs.write_file(path, "alpha beta beta", create_mode=CreateOrTruncate)
-    let result = run_edit({
-      "path": path,
-      "old_string": "beta",
-      "new_string": "delta",
-      "replace_all": true,
-      "start_line": 1,
-    })
-    guard result is Respond(output) else { fail("expected Respond") }
-    assert_eq(
-      output.content,
-      "error editing \{path}: replace_all=true is no longer supported; use multi_edit with explicit line-anchored edits",
-    )
-    assert_true(output.is_error)
-    assert_eq(@fs.read_file(path).text(), "alpha beta beta")
-  })
-}
-
-///|
 async test "edit rejects non-boolean replace_all" {
   @vfs.with_tmpdir(dir => {
     let path = "\{dir}/bad-replace-all.txt"

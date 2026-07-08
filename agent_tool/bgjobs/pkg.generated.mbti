@@ -24,6 +24,7 @@ pub async fn BgJobRuntime::spawn_foreground(Self, String, Array[String], String?
 pub async fn BgJobRuntime::spawn_foreground_retained(Self, String, Array[String], String?, Int) -> @shell_exec.ShellExecution
 pub async fn BgJobRuntime::start(Self, program~ : String, args~ : Array[String], command~ : String, cwd? : String, max_output_chars? : Int, source_write_sandboxed? : Bool, sandbox_denial_subjects? : Array[String]) -> String
 pub async fn BgJobRuntime::stop(Self, String) -> Bool
+pub async fn BgJobRuntime::wait_exit(Self, String, Int) -> Bool
 
 pub struct BgJobSnapshot {
   id : String

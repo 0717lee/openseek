@@ -2,14 +2,14 @@
 let default_max_steps : Int = 1000
 
 ///|
-/// Model requests since the last successful `plan` call — and since the last
-/// reminder — before the loop injects a plan staleness reminder. Both
-/// thresholds mirror the 10-turn / 10-turn cadence Claude Code uses for its
-/// todo reminder: long enough that short tasks never see a nag. Re-nagging is
-/// variant-dependent: with a recorded checklist the reminder re-surfaces real
-/// state and may repeat once per ten requests, while the no-plan nudge fires
-/// at most once per turn — a model that ignored "consider recording a plan"
-/// once gains nothing from hearing it every ten steps.
+/// Model requests since the last plan activity — a successful `plan` call or
+/// an injected reminder, whichever is more recent — before the loop injects a
+/// plan staleness reminder. Mirrors the 10-turn cadence Claude Code uses for
+/// its todo reminder: long enough that short tasks never see a nag. Re-nagging
+/// is variant-dependent: with a recorded checklist the reminder re-surfaces
+/// real state and may repeat once per ten requests, while the no-plan nudge
+/// fires at most once per turn — a model that ignored "consider recording a
+/// plan" once gains nothing from hearing it every ten steps.
 let plan_reminder_after_steps : Int = 10
 
 ///|
@@ -40,39 +40,31 @@ fn plan_reminder_text(checklist : String?) -> String {
 
 ///|
 /// Plan staleness tracking for one turn. When the plan tool is registered,
-/// counters advance once per model request. A successful `plan` call resets
-/// `steps_since_plan` and refreshes `checklist`; injecting a reminder resets
-/// `steps_since_reminder`, so the reminder fires only after both enough plan
-/// silence and enough reminder silence. The no-plan nudge additionally fires
-/// at most once per turn (`nagged_without_plan`): repeats are reserved for
-/// the checklist variant, which re-surfaces real recorded state instead of
+/// `silent_steps` advances once per model request and resets on either kind
+/// of plan activity — a successful `plan` call (which also refreshes
+/// `checklist`) or an injected reminder — so the reminder fires only after
+/// enough silence since both. The no-plan nudge additionally fires at most
+/// once per turn (`nagged_without_plan`): repeats are reserved for the
+/// checklist variant, which re-surfaces real recorded state instead of
 /// repeating advice the model already declined once. Turn-local by design —
 /// a fresh user turn resets the cadence. `checklist` carries the last
 /// successfully recorded plan for the reminder to re-surface.
 priv struct PlanCadence {
   registered : Bool
-  mut steps_since_plan : Int
-  mut steps_since_reminder : Int
+  mut silent_steps : Int
   mut checklist : String?
   mut nagged_without_plan : Bool
 }
 
 ///|
 fn PlanCadence::PlanCadence(registered~ : Bool) -> PlanCadence {
-  {
-    registered,
-    steps_since_plan: 0,
-    steps_since_reminder: 0,
-    checklist: None,
-    nagged_without_plan: false,
-  }
+  { registered, silent_steps: 0, checklist: None, nagged_without_plan: false }
 }
 
 ///|
 fn PlanCadence::should_remind(self : Self) -> Bool {
   self.registered &&
-  self.steps_since_plan >= plan_reminder_after_steps &&
-  self.steps_since_reminder >= plan_reminder_after_steps &&
+  self.silent_steps >= plan_reminder_after_steps &&
   (self.checklist is Some(_) || !self.nagged_without_plan)
 }
 
@@ -83,7 +75,7 @@ fn PlanCadence::reminder_text(self : Self) -> String {
 
 ///|
 fn PlanCadence::record_reminder(self : Self) -> Unit {
-  self.steps_since_reminder = 0
+  self.silent_steps = 0
   // The once-per-turn cap applies only to the no-plan nudge; a turn that
   // later records a plan re-nags through the checklist variant regardless.
   if self.checklist is None {
@@ -94,8 +86,7 @@ fn PlanCadence::record_reminder(self : Self) -> Unit {
 ///|
 fn PlanCadence::record_model_request(self : Self) -> Unit {
   if self.registered {
-    self.steps_since_plan += 1
-    self.steps_since_reminder += 1
+    self.silent_steps += 1
   }
 }
 
@@ -106,7 +97,7 @@ fn PlanCadence::record_plan_success(
   output : @agent_tool.ToolOutput,
 ) -> Unit {
   if self.registered && tool_call.name == "plan" && !output.is_error {
-    self.steps_since_plan = 0
+    self.silent_steps = 0
     self.checklist = @plan.reminder_checklist(tool_call.arguments)
   }
 }

@@ -274,25 +274,38 @@ async fn run_serve(
       }
     }
 
-    async fn append_command_context(text : String, kind : String) -> Unit {
+    // Append one idle-time item to the session, durably when a store is wired.
+    // Returns false (after logging a session_error naming `what`) when the
+    // durable append fails, so the caller skips its success log; cancellation
+    // still propagates.
+    async fn append_idle_item(
+      item : @agent_session.SessionItem,
+      what : String,
+    ) -> Bool {
       session = if store is Some(store) {
-        store.append(session, User(UserMessage(text))) catch {
+        store.append(session, item) catch {
           error if @async.is_being_cancelled() ||
             @async.is_cancellation_error(error) => raise error
           error => {
             @xlog.error() <?
               {
                 "event": "session_error",
-                "error": "failed to append command context: \{error}",
+                "error": "failed to append \{what}: \{error}",
               }
-            return
+            return false
           }
         }
       } else {
-        session.append(User(UserMessage(text)))
+        session.append(item)
       }
-      @xlog.info() <?
-        { "event": "steer_applied", "kind": kind, "content": text }
+      true
+    }
+
+    async fn append_command_context(text : String, kind : String) -> Unit {
+      if append_idle_item(User(UserMessage(text)), "command context") {
+        @xlog.info() <?
+          { "event": "steer_applied", "kind": kind, "content": text }
+      }
     }
 
     // Surface a background-job completion notice while the engine is idle
@@ -301,23 +314,9 @@ async fn run_serve(
     // events once a turn closes, so a between-turns notice must ride an untagged
     // event.
     async fn append_background_notice(text : String) -> Unit {
-      session = if store is Some(store) {
-        store.append(session, Runtime(RuntimeNotice(text))) catch {
-          error if @async.is_being_cancelled() ||
-            @async.is_cancellation_error(error) => raise error
-          error => {
-            @xlog.error() <?
-              {
-                "event": "session_error",
-                "error": "failed to append background notice: \{error}",
-              }
-            return
-          }
-        }
-      } else {
-        session.append(Runtime(RuntimeNotice(text)))
+      if append_idle_item(Runtime(RuntimeNotice(text)), "background notice") {
+        @xlog.info() <? { "event": "background_notice", "content": text }
       }
-      @xlog.info() <? { "event": "background_notice", "content": text }
     }
 
     // Steers still queued when work ends: prompt steering must not leak into a

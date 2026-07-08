@@ -177,6 +177,48 @@ async fn run_shell_in_workspace(
 }
 
 ///|
+/// The canonical protected source fixture for the masked-write catalog below.
+let answer_source : String = "pub fn answer() -> Int { 42 }\n"
+
+///|
+/// Write the protected `main.mbt` fixture into `dir`.
+async fn write_answer_main(
+  dir : String,
+  content? : String = answer_source,
+) -> Unit {
+  @fs.write_file("\{dir}/main.mbt", content, create_mode=CreateOrTruncate)
+}
+
+///|
+/// Assert the protected `main.mbt` fixture survived untouched.
+async fn assert_answer_main_unchanged(
+  dir : String,
+  content? : String = answer_source,
+) -> Unit {
+  assert_eq(@fs.read_file("\{dir}/main.mbt").text(), content)
+}
+
+///|
+/// Assert `result` is the pre-execution source-write refusal: an error
+/// Respond carrying the `marker` phrase plus the shared feedback line (and,
+/// when `line_anchored`, the edit-tool redirection hint).
+fn expect_source_write_blocked(
+  result : @agent_tool.ToolAction,
+  marker? : String = "source tree operation is blocked",
+  line_anchored? : Bool = false,
+) -> Unit raise {
+  guard result is Respond(output) else { fail("expected Respond") }
+  assert_true(output.is_error)
+  assert_true(output.content.contains(marker))
+  assert_true(
+    output.content.contains("source file writes from shell are blocked"),
+  )
+  if line_anchored {
+    assert_true(output.content.contains("line-anchored"))
+  }
+}
+
+///|
 #cfg(not(platform="windows"))
 async fn sandbox_exec_usable_for_test() -> Bool {
   if !@fs.exists("/usr/bin/sandbox-exec") {
@@ -663,11 +705,7 @@ async test "shell sandbox blocks source writes and points to edit tools" {
     return
   }
   @vfs.with_tmpdir(prefix="openseek-shell-sandbox-source-", dir => {
-    @fs.write_file(
-      "\{dir}/main.mbt",
-      "pub fn answer() -> Int { 42 }\n",
-      create_mode=CreateOrTruncate,
-    )
+    write_answer_main(dir)
     // The redirect target hides behind a variable, so the static preblock cannot
     // see it. The write only fails because the kernel source-write sandbox denies
     // it at runtime, which is exactly the enforcement this test must cover.
@@ -687,10 +725,7 @@ async test "shell sandbox blocks source writes and points to edit tools" {
     assert_true(output.content.contains("edit"))
     assert_true(output.content.contains("line-anchored"))
     assert_false(output.content.contains("`write`"))
-    assert_eq(
-      @fs.read_file("\{dir}/main.mbt").text(),
-      "pub fn answer() -> Int { 42 }\n",
-    )
+    assert_answer_main_unchanged(dir)
   })
 }
 
@@ -724,11 +759,7 @@ async test "shell sandbox allows generated source writes under _build" {
 #cfg(not(platform="windows"))
 async test "shell sandbox reports masked source write denials as errors" {
   @vfs.with_tmpdir(prefix="openseek-shell-sandbox-masked-denial-", dir => {
-    @fs.write_file(
-      "\{dir}/main.mbt",
-      "pub fn answer() -> Int { 42 }\n",
-      create_mode=CreateOrTruncate,
-    )
+    write_answer_main(dir)
     let result = run_shell_in_workspace(dir, {
       "cmd": "printf %s changed 2>/dev/null > main.mbt || true",
       "cwd": dir,
@@ -742,10 +773,7 @@ async test "shell sandbox reports masked source write denials as errors" {
     )
     assert_true(output.content.contains("line-anchored"))
     assert_false(output.content.contains("`write`"))
-    assert_eq(
-      @fs.read_file("\{dir}/main.mbt").text(),
-      "pub fn answer() -> Int { 42 }\n",
-    )
+    assert_answer_main_unchanged(dir)
   })
 }
 
@@ -753,11 +781,7 @@ async test "shell sandbox reports masked source write denials as errors" {
 #cfg(not(platform="windows"))
 async test "shell sandbox preblocks source write through symlink redirect" {
   @vfs.with_tmpdir(prefix="openseek-shell-sandbox-symlink-redirect-", dir => {
-    @fs.write_file(
-      "\{dir}/main.mbt",
-      "pub fn answer() -> Int { 42 }\n",
-      create_mode=CreateOrTruncate,
-    )
+    write_answer_main(dir)
     @fs.symlink(target="main.mbt", "\{dir}/out.log")
     let result = run_shell_in_workspace(dir, {
       "cmd": "moon fmt > out.log",
@@ -771,10 +795,7 @@ async test "shell sandbox preblocks source write through symlink redirect" {
     assert_true(
       output.content.contains("source file writes from shell are blocked"),
     )
-    assert_eq(
-      @fs.read_file("\{dir}/main.mbt").text(),
-      "pub fn answer() -> Int { 42 }\n",
-    )
+    assert_answer_main_unchanged(dir)
   })
 }
 
@@ -782,11 +803,7 @@ async test "shell sandbox preblocks source write through symlink redirect" {
 #cfg(not(platform="windows"))
 async test "shell sandbox preblocks copy through symlinked source destination" {
   @vfs.with_tmpdir(prefix="openseek-shell-sandbox-symlink-copy-", dir => {
-    @fs.write_file(
-      "\{dir}/main.mbt",
-      "pub fn answer() -> Int { 42 }\n",
-      create_mode=CreateOrTruncate,
-    )
+    write_answer_main(dir)
     @fs.write_file(
       "\{dir}/replacement.txt",
       "pub fn answer() -> Int { 43 }\n",
@@ -797,17 +814,8 @@ async test "shell sandbox preblocks copy through symlinked source destination" {
       "cmd": "cp replacement.txt out.log 2>/dev/null || true",
       "cwd": dir,
     })
-    guard result is Respond(output) else { fail("expected Respond") }
-    assert_true(output.is_error)
-    assert_true(output.content.contains("source tree operation is blocked"))
-    assert_true(
-      output.content.contains("source file writes from shell are blocked"),
-    )
-    assert_true(output.content.contains("line-anchored"))
-    assert_eq(
-      @fs.read_file("\{dir}/main.mbt").text(),
-      "pub fn answer() -> Int { 42 }\n",
-    )
+    expect_source_write_blocked(result, line_anchored=true)
+    assert_answer_main_unchanged(dir)
   })
 }
 
@@ -815,26 +823,14 @@ async test "shell sandbox preblocks copy through symlinked source destination" {
 #cfg(not(platform="windows"))
 async test "shell sandbox preblocks tee through symlinked source destination" {
   @vfs.with_tmpdir(prefix="openseek-shell-sandbox-symlink-tee-", dir => {
-    @fs.write_file(
-      "\{dir}/main.mbt",
-      "pub fn answer() -> Int { 42 }\n",
-      create_mode=CreateOrTruncate,
-    )
+    write_answer_main(dir)
     @fs.symlink(target="main.mbt", "\{dir}/out.log")
     let result = run_shell_in_workspace(dir, {
       "cmd": "printf changed | tee out.log >/dev/null",
       "cwd": dir,
     })
-    guard result is Respond(output) else { fail("expected Respond") }
-    assert_true(output.is_error)
-    assert_true(output.content.contains("source tree operation is blocked"))
-    assert_true(
-      output.content.contains("source file writes from shell are blocked"),
-    )
-    assert_eq(
-      @fs.read_file("\{dir}/main.mbt").text(),
-      "pub fn answer() -> Int { 42 }\n",
-    )
+    expect_source_write_blocked(result)
+    assert_answer_main_unchanged(dir)
   })
 }
 
@@ -859,11 +855,7 @@ async test "shell sandbox does not treat unrelated output as source denial" {
 #cfg(not(platform="windows"))
 async test "shell sandbox preblocks source write after uncertain cd chain" {
   @vfs.with_tmpdir(prefix="openseek-shell-sandbox-cd-chain-", dir => {
-    @fs.write_file(
-      "\{dir}/main.mbt",
-      "pub fn answer() -> Int { 42 }\n",
-      create_mode=CreateOrTruncate,
-    )
+    write_answer_main(dir)
     let result = run_shell_in_workspace(dir, {
       "cmd": "cd /definitely-missing-openseek 2>/dev/null && :; printf changed > main.mbt",
       "cwd": dir,
@@ -874,10 +866,7 @@ async test "shell sandbox preblocks source write after uncertain cd chain" {
     assert_true(
       output.content.contains("source file writes from shell are blocked"),
     )
-    assert_eq(
-      @fs.read_file("\{dir}/main.mbt").text(),
-      "pub fn answer() -> Int { 42 }\n",
-    )
+    assert_answer_main_unchanged(dir)
   })
 }
 
@@ -885,11 +874,7 @@ async test "shell sandbox preblocks source write after uncertain cd chain" {
 #cfg(not(platform="windows"))
 async test "shell sandbox preblocks source write after entering workspace from external cwd" {
   @vfs.with_tmpdir(prefix="openseek-shell-sandbox-external-cwd-", dir => {
-    @fs.write_file(
-      "\{dir}/main.mbt",
-      "pub fn answer() -> Int { 42 }\n",
-      create_mode=CreateOrTruncate,
-    )
+    write_answer_main(dir)
     let result = run_shell_in_workspace(dir, {
       "cmd": "cd \{dir}; printf changed 2>/dev/null > main.mbt || true",
       "cwd": "/tmp",
@@ -897,10 +882,7 @@ async test "shell sandbox preblocks source write after entering workspace from e
     guard result is Respond(output) else { fail("expected Respond") }
     assert_true(output.is_error)
     assert_true(output.content.contains("blocked before execution"))
-    assert_eq(
-      @fs.read_file("\{dir}/main.mbt").text(),
-      "pub fn answer() -> Int { 42 }\n",
-    )
+    assert_answer_main_unchanged(dir)
   })
 }
 
@@ -942,12 +924,7 @@ async test "shell sandbox tracks static relative cd before source directory move
       "cmd": "cd src && mv pkg pkg.bak 2>/dev/null || true",
       "cwd": dir,
     })
-    guard result is Respond(output) else { fail("expected Respond") }
-    assert_true(output.is_error)
-    assert_true(output.content.contains("source tree operation is blocked"))
-    assert_true(
-      output.content.contains("source file writes from shell are blocked"),
-    )
+    expect_source_write_blocked(result)
     assert_true(@fs.exists("\{dir}/src/pkg/main.mbt"))
     assert_false(@fs.exists("\{dir}/src/pkg.bak"))
   })
@@ -957,11 +934,7 @@ async test "shell sandbox tracks static relative cd before source directory move
 #cfg(not(platform="windows"))
 async test "shell sandbox preblocks masked cp source writes" {
   @vfs.with_tmpdir(prefix="openseek-shell-sandbox-cp-masked-source-", dir => {
-    @fs.write_file(
-      "\{dir}/main.mbt",
-      "pub fn answer() -> Int { 42 }\n",
-      create_mode=CreateOrTruncate,
-    )
+    write_answer_main(dir)
     @fs.write_file(
       "\{dir}/replacement.txt",
       "pub fn answer() -> Int { 43 }\n",
@@ -971,17 +944,8 @@ async test "shell sandbox preblocks masked cp source writes" {
       "cmd": "cp replacement.txt main.mbt 2>/dev/null || true",
       "cwd": dir,
     })
-    guard result is Respond(output) else { fail("expected Respond") }
-    assert_true(output.is_error)
-    assert_true(output.content.contains("source tree operation is blocked"))
-    assert_true(
-      output.content.contains("source file writes from shell are blocked"),
-    )
-    assert_true(output.content.contains("line-anchored"))
-    assert_eq(
-      @fs.read_file("\{dir}/main.mbt").text(),
-      "pub fn answer() -> Int { 42 }\n",
-    )
+    expect_source_write_blocked(result, line_anchored=true)
+    assert_answer_main_unchanged(dir)
   })
 }
 
@@ -989,21 +953,12 @@ async test "shell sandbox preblocks masked cp source writes" {
 #cfg(not(platform="windows"))
 async test "shell sandbox preblocks masked mv backup source moves" {
   @vfs.with_tmpdir(prefix="openseek-shell-sandbox-mv-backup-source-", dir => {
-    @fs.write_file(
-      "\{dir}/main.mbt",
-      "pub fn answer() -> Int { 42 }\n",
-      create_mode=CreateOrTruncate,
-    )
+    write_answer_main(dir)
     let result = run_shell_in_workspace(dir, {
       "cmd": "mv -b main.mbt backup 2>/dev/null || true",
       "cwd": dir,
     })
-    guard result is Respond(output) else { fail("expected Respond") }
-    assert_true(output.is_error)
-    assert_true(output.content.contains("source tree operation is blocked"))
-    assert_true(
-      output.content.contains("source file writes from shell are blocked"),
-    )
+    expect_source_write_blocked(result)
     assert_true(@fs.exists("\{dir}/main.mbt"))
     assert_false(@fs.exists("\{dir}/backup"))
   })
@@ -1013,11 +968,7 @@ async test "shell sandbox preblocks masked mv backup source moves" {
 #cfg(not(platform="windows"))
 async test "shell sandbox preblocks masked git apply" {
   @vfs.with_tmpdir(prefix="openseek-shell-sandbox-git-apply-source-", dir => {
-    @fs.write_file(
-      "\{dir}/main.mbt",
-      "pub fn answer() -> Int { 42 }\n",
-      create_mode=CreateOrTruncate,
-    )
+    write_answer_main(dir)
     // `git apply` applies an EXTERNAL patch — arbitrary content — so it stays
     // pre-blocked before execution even when the failure is masked. Recoverable
     // git worktree subcommands (checkout/restore/reset/rm/mv/...) are no longer
@@ -1026,16 +977,8 @@ async test "shell sandbox preblocks masked git apply" {
       "cmd": "git apply change.patch 2>/dev/null || true",
       "cwd": dir,
     })
-    guard result is Respond(output) else { fail("expected Respond") }
-    assert_true(output.is_error)
-    assert_true(output.content.contains("source tree operation is blocked"))
-    assert_true(
-      output.content.contains("source file writes from shell are blocked"),
-    )
-    assert_eq(
-      @fs.read_file("\{dir}/main.mbt").text(),
-      "pub fn answer() -> Int { 42 }\n",
-    )
+    expect_source_write_blocked(result)
+    assert_answer_main_unchanged(dir)
   })
 }
 
@@ -1043,26 +986,13 @@ async test "shell sandbox preblocks masked git apply" {
 #cfg(not(platform="windows"))
 async test "shell sandbox preblocks masked awk source writes" {
   @vfs.with_tmpdir(prefix="openseek-shell-sandbox-awk-masked-source-", dir => {
-    @fs.write_file(
-      "\{dir}/main.mbt",
-      "pub fn answer() -> Int { 42 }\n",
-      create_mode=CreateOrTruncate,
-    )
+    write_answer_main(dir)
     let result = run_shell_in_workspace(dir, {
       "cmd": "awk 'BEGIN { print \"pub fn answer() -> Int { 43 }\" > \"main.mbt\" }' 2>/dev/null || true",
       "cwd": dir,
     })
-    guard result is Respond(output) else { fail("expected Respond") }
-    assert_true(output.is_error)
-    assert_true(output.content.contains("source tree operation is blocked"))
-    assert_true(
-      output.content.contains("source file writes from shell are blocked"),
-    )
-    assert_true(output.content.contains("line-anchored"))
-    assert_eq(
-      @fs.read_file("\{dir}/main.mbt").text(),
-      "pub fn answer() -> Int { 42 }\n",
-    )
+    expect_source_write_blocked(result, line_anchored=true)
+    assert_answer_main_unchanged(dir)
   })
 }
 
@@ -1074,13 +1004,7 @@ async test "shell sandbox preblocks masked dynamic source tree renames" {
       "cmd": "src=_build/gen; mkdir -p \"$src\"; printf 'pub fn generated() -> Int { 1 }\\n' > \"$src/main.mbt\"; mv \"$src\" pkg 2>/dev/null || true",
       "cwd": dir,
     })
-    guard result is Respond(output) else { fail("expected Respond") }
-    assert_true(output.is_error)
-    assert_true(output.content.contains("source tree operation is blocked"))
-    assert_true(
-      output.content.contains("source file writes from shell are blocked"),
-    )
-    assert_true(output.content.contains("line-anchored"))
+    expect_source_write_blocked(result, line_anchored=true)
     assert_false(@fs.exists("\{dir}/pkg"))
     assert_false(@fs.exists("\{dir}/_build"))
   })
@@ -1098,26 +1022,13 @@ async test "shell sandbox preblocks masked pathlib source writes" {
     return
   }
   @vfs.with_tmpdir(prefix="openseek-shell-sandbox-pathlib-source-", dir => {
-    @fs.write_file(
-      "\{dir}/main.mbt",
-      "pub fn answer() -> Int { 42 }\n",
-      create_mode=CreateOrTruncate,
-    )
+    write_answer_main(dir)
     let result = run_shell_in_workspace(dir, {
       "cmd": "python3 -c 'from pathlib import Path; Path(\"main.mbt\").write_text(\"pub fn answer() -> Int { 43 }\\\\n\")' 2>/dev/null || true",
       "cwd": dir,
     })
-    guard result is Respond(output) else { fail("expected Respond") }
-    assert_true(output.is_error)
-    assert_true(output.content.contains("source tree operation is blocked"))
-    assert_true(
-      output.content.contains("source file writes from shell are blocked"),
-    )
-    assert_true(output.content.contains("line-anchored"))
-    assert_eq(
-      @fs.read_file("\{dir}/main.mbt").text(),
-      "pub fn answer() -> Int { 42 }\n",
-    )
+    expect_source_write_blocked(result, line_anchored=true)
+    assert_answer_main_unchanged(dir)
   })
 }
 
@@ -1125,25 +1036,13 @@ async test "shell sandbox preblocks masked pathlib source writes" {
 #cfg(not(platform="windows"))
 async test "shell sandbox preblocks masked heredoc source redirects" {
   @vfs.with_tmpdir(prefix="openseek-shell-sandbox-heredoc-source-", dir => {
-    @fs.write_file(
-      "\{dir}/main.mbt",
-      "pub fn answer() -> Int { 42 }\n",
-      create_mode=CreateOrTruncate,
-    )
+    write_answer_main(dir)
     let result = run_shell_in_workspace(dir, {
       "cmd": "cat 2>/dev/null > main.mbt <<'EOF' || true\npub fn answer() -> Int { 43 }\nEOF",
       "cwd": dir,
     })
-    guard result is Respond(output) else { fail("expected Respond") }
-    assert_true(output.is_error)
-    assert_true(output.content.contains("source tree operation is blocked"))
-    assert_true(
-      output.content.contains("source file writes from shell are blocked"),
-    )
-    assert_eq(
-      @fs.read_file("\{dir}/main.mbt").text(),
-      "pub fn answer() -> Int { 42 }\n",
-    )
+    expect_source_write_blocked(result)
+    assert_answer_main_unchanged(dir)
   })
 }
 
@@ -1151,25 +1050,13 @@ async test "shell sandbox preblocks masked heredoc source redirects" {
 #cfg(not(platform="windows"))
 async test "shell sandbox preblocks masked python heredoc source writes" {
   @vfs.with_tmpdir(prefix="openseek-shell-sandbox-python-heredoc-", dir => {
-    @fs.write_file(
-      "\{dir}/main.mbt",
-      "pub fn answer() -> Int { 42 }\n",
-      create_mode=CreateOrTruncate,
-    )
+    write_answer_main(dir)
     let result = run_shell_in_workspace(dir, {
       "cmd": "python3 - <<'PY' 2>/dev/null || true\nopen('main.mbt', 'w').write('pub fn answer() -> Int { 43 }\\n')\nPY",
       "cwd": dir,
     })
-    guard result is Respond(output) else { fail("expected Respond") }
-    assert_true(output.is_error)
-    assert_true(output.content.contains("source tree operation is blocked"))
-    assert_true(
-      output.content.contains("source file writes from shell are blocked"),
-    )
-    assert_eq(
-      @fs.read_file("\{dir}/main.mbt").text(),
-      "pub fn answer() -> Int { 42 }\n",
-    )
+    expect_source_write_blocked(result)
+    assert_answer_main_unchanged(dir)
   })
 }
 
@@ -1177,25 +1064,13 @@ async test "shell sandbox preblocks masked python heredoc source writes" {
 #cfg(not(platform="windows"))
 async test "shell sandbox preblocks masked versioned python source writes" {
   @vfs.with_tmpdir(prefix="openseek-shell-sandbox-python-versioned-", dir => {
-    @fs.write_file(
-      "\{dir}/main.mbt",
-      "pub fn answer() -> Int { 42 }\n",
-      create_mode=CreateOrTruncate,
-    )
+    write_answer_main(dir)
     let result = run_shell_in_workspace(dir, {
       "cmd": "python3.12 -c 'open(\"main.mbt\", \"w\").write(\"pub fn answer() -> Int { 43 }\\\\n\")' 2>/dev/null || true",
       "cwd": dir,
     })
-    guard result is Respond(output) else { fail("expected Respond") }
-    assert_true(output.is_error)
-    assert_true(output.content.contains("source tree operation is blocked"))
-    assert_true(
-      output.content.contains("source file writes from shell are blocked"),
-    )
-    assert_eq(
-      @fs.read_file("\{dir}/main.mbt").text(),
-      "pub fn answer() -> Int { 42 }\n",
-    )
+    expect_source_write_blocked(result)
+    assert_answer_main_unchanged(dir)
   })
 }
 
@@ -1203,25 +1078,13 @@ async test "shell sandbox preblocks masked versioned python source writes" {
 #cfg(not(platform="windows"))
 async test "shell sandbox preblocks python exe source write modes" {
   @vfs.with_tmpdir(prefix="openseek-shell-sandbox-python-exe-mode-", dir => {
-    @fs.write_file(
-      "\{dir}/main.mbt",
-      "pub fn answer() -> Int { 42 }\n",
-      create_mode=CreateOrTruncate,
-    )
+    write_answer_main(dir)
     let result = run_shell_in_workspace(dir, {
       "cmd": "python.exe -c 'open(\"main.mbt\", \"w+\").close()' 2>/dev/null || true",
       "cwd": dir,
     })
-    guard result is Respond(output) else { fail("expected Respond") }
-    assert_true(output.is_error)
-    assert_true(output.content.contains("source tree operation is blocked"))
-    assert_true(
-      output.content.contains("source file writes from shell are blocked"),
-    )
-    assert_eq(
-      @fs.read_file("\{dir}/main.mbt").text(),
-      "pub fn answer() -> Int { 42 }\n",
-    )
+    expect_source_write_blocked(result)
+    assert_answer_main_unchanged(dir)
   })
 }
 
@@ -1229,22 +1092,12 @@ async test "shell sandbox preblocks python exe source write modes" {
 #cfg(not(platform="windows"))
 async test "shell sandbox preblocks masked cp into created source directory" {
   @vfs.with_tmpdir(prefix="openseek-shell-sandbox-cp-created-dir-", dir => {
-    @fs.write_file(
-      "\{dir}/main.mbt",
-      "pub fn answer() -> Int { 42 }\n",
-      create_mode=CreateOrTruncate,
-    )
+    write_answer_main(dir)
     let result = run_shell_in_workspace(dir, {
       "cmd": "mkdir backup && cp main.mbt backup 2>/dev/null || true",
       "cwd": dir,
     })
-    guard result is Respond(output) else { fail("expected Respond") }
-    assert_true(output.is_error)
-    assert_true(output.content.contains("source tree operation is blocked"))
-    assert_true(
-      output.content.contains("source file writes from shell are blocked"),
-    )
-    assert_true(output.content.contains("line-anchored"))
+    expect_source_write_blocked(result, line_anchored=true)
     assert_true(@fs.exists("\{dir}/main.mbt"))
     assert_false(@fs.exists("\{dir}/backup/main.mbt"))
   })
@@ -1255,11 +1108,7 @@ async test "shell sandbox preblocks masked cp into created source directory" {
 async test "shell sandbox preserves mkdir predictions across fallback branches" {
   @vfs.with_tmpdir(prefix="openseek-shell-sandbox-cp-or-created-dir-", dir => {
     @vfs.with_tmpdir(prefix="openseek-shell-sandbox-external-source-", external => {
-      @fs.write_file(
-        "\{dir}/main.mbt",
-        "pub fn answer() -> Int { 42 }\n",
-        create_mode=CreateOrTruncate,
-      )
+      write_answer_main(dir)
       @fs.write_file(
         "\{external}/generated.mbt",
         "pub fn generated() -> Int { 1 }\n",
@@ -1269,13 +1118,7 @@ async test "shell sandbox preserves mkdir predictions across fallback branches" 
         "cmd": "mkdir gen || true; cp \{external}/generated.mbt gen 2>/dev/null || true",
         "cwd": dir,
       })
-      guard result is Respond(output) else { fail("expected Respond") }
-      assert_true(output.is_error)
-      assert_true(output.content.contains("source tree operation is blocked"))
-      assert_true(
-        output.content.contains("source file writes from shell are blocked"),
-      )
-      assert_true(output.content.contains("line-anchored"))
+      expect_source_write_blocked(result, line_anchored=true)
       assert_false(@fs.exists("\{dir}/gen/generated.mbt"))
     })
   })
@@ -1312,13 +1155,7 @@ async test "shell sandbox preblocks scripted source directory renames" {
       "cmd": "python3 -c 'import os; os.rename(\"pkg\", \"pkg.bak\")' 2>/dev/null || true",
       "cwd": dir,
     })
-    guard result is Respond(output) else { fail("expected Respond") }
-    assert_true(output.is_error)
-    assert_true(output.content.contains("source tree operation is blocked"))
-    assert_true(
-      output.content.contains("source file writes from shell are blocked"),
-    )
-    assert_true(output.content.contains("line-anchored"))
+    expect_source_write_blocked(result, line_anchored=true)
     assert_true(@fs.exists("\{dir}/pkg/main.mbt"))
     assert_false(@fs.exists("\{dir}/pkg.bak/main.mbt"))
   })
@@ -1349,13 +1186,7 @@ async test "shell sandbox preblocks scripted external source directory imports" 
         "cmd": "python3 -c 'import shutil; shutil.move(\"\{generated}\", \"pkg\")'",
         "cwd": workspace,
       })
-      guard result is Respond(output) else { fail("expected Respond") }
-      assert_true(output.is_error)
-      assert_true(output.content.contains("source tree operation is blocked"))
-      assert_true(
-        output.content.contains("source file writes from shell are blocked"),
-      )
-      assert_true(output.content.contains("line-anchored"))
+      expect_source_write_blocked(result, line_anchored=true)
       assert_true(@fs.exists("\{generated}/main.mbt"))
       assert_false(@fs.exists("\{workspace}/pkg/main.mbt"))
       let copy_result = run_shell_in_workspace(workspace, {
@@ -1701,11 +1532,7 @@ async test "shell sandbox still permits moon check build outputs" {
       "name = \"tmp/shell_sandbox_moon_check\"\n",
       create_mode=CreateOrTruncate,
     )
-    @fs.write_file(
-      "\{dir}/main.mbt",
-      "pub fn answer() -> Int { 42 }\n",
-      create_mode=CreateOrTruncate,
-    )
+    write_answer_main(dir)
     let result = run_shell_in_workspace(dir, { "cmd": "moon check", "cwd": dir })
     guard result is Respond(output) else { fail("expected Respond") }
     assert_false(output.is_error)
@@ -1738,11 +1565,7 @@ async test "shell allows moon check pre-build source outputs" {
       ),
       create_mode=CreateOrTruncate,
     )
-    @fs.write_file(
-      "\{dir}/main.mbt",
-      "pub fn answer() -> Int { generated() }\n",
-      create_mode=CreateOrTruncate,
-    )
+    write_answer_main(dir, content="pub fn answer() -> Int { generated() }\n")
     let result = run_shell_in_workspace(dir, { "cmd": "moon check", "cwd": dir })
     guard result is Respond(output) else { fail("expected Respond") }
     assert_false(output.is_error)
@@ -1814,11 +1637,7 @@ async test "shell sandbox blocks too-complex sed source rewrites" {
     return
   }
   @vfs.with_tmpdir(prefix="openseek-shell-sandbox-sed-glob-", dir => {
-    @fs.write_file(
-      "\{dir}/main.mbt",
-      "pub fn answer() -> Int { old }\n",
-      create_mode=CreateOrTruncate,
-    )
+    write_answer_main(dir, content="pub fn answer() -> Int { old }\n")
     let result = run_shell_in_workspace(dir, {
       "cmd": "sed -i '' 's/old/new/' *.mbt",
       "cwd": dir,
@@ -1830,9 +1649,9 @@ async test "shell sandbox blocks too-complex sed source rewrites" {
     )
     assert_true(output.content.contains("line-anchored"))
     assert_false(output.content.contains("`write`"))
-    assert_eq(
-      @fs.read_file("\{dir}/main.mbt").text(),
-      "pub fn answer() -> Int { old }\n",
+    assert_answer_main_unchanged(
+      dir,
+      content="pub fn answer() -> Int { old }\n",
     )
   })
 }
@@ -1841,11 +1660,7 @@ async test "shell sandbox blocks too-complex sed source rewrites" {
 #cfg(not(platform="windows"))
 async test "shell sandbox preblocks too-complex fd duplicate source redirect" {
   @vfs.with_tmpdir(prefix="openseek-shell-sandbox-fd-dup-source-", dir => {
-    @fs.write_file(
-      "\{dir}/main.mbt",
-      "pub fn answer() -> Int { 42 }\n",
-      create_mode=CreateOrTruncate,
-    )
+    write_answer_main(dir)
     let result = run_shell_in_workspace(dir, {
       "cmd": "printf changed >& main.mbt *.txt 2>/dev/null || true",
       "cwd": dir,
@@ -1853,10 +1668,7 @@ async test "shell sandbox preblocks too-complex fd duplicate source redirect" {
     guard result is Respond(output) else { fail("expected Respond") }
     assert_true(output.is_error)
     assert_true(output.content.contains("source tree operation is blocked"))
-    assert_eq(
-      @fs.read_file("\{dir}/main.mbt").text(),
-      "pub fn answer() -> Int { 42 }\n",
-    )
+    assert_answer_main_unchanged(dir)
   })
 }
 
@@ -1884,11 +1696,7 @@ async test "shell sandbox allows read-only grep of source text" {
 #cfg(not(platform="windows"))
 async test "shell preblocks env unset sed source rewrites" {
   @vfs.with_tmpdir(prefix="openseek-shell-env-sed-source-", dir => {
-    @fs.write_file(
-      "\{dir}/main.mbt",
-      "pub fn answer() -> Int { old }\n",
-      create_mode=CreateOrTruncate,
-    )
+    write_answer_main(dir, content="pub fn answer() -> Int { old }\n")
     let result = run_shell_in_workspace(dir, {
       "cmd": "env -u FOO sed -i '' 's/old/new/' *.mbt 2>/dev/null || true",
       "cwd": dir,
@@ -1900,9 +1708,9 @@ async test "shell preblocks env unset sed source rewrites" {
     )
     assert_true(output.content.contains("line-anchored"))
     assert_false(output.content.contains("`write`"))
-    assert_eq(
-      @fs.read_file("\{dir}/main.mbt").text(),
-      "pub fn answer() -> Int { old }\n",
+    assert_answer_main_unchanged(
+      dir,
+      content="pub fn answer() -> Int { old }\n",
     )
   })
 }
@@ -1911,11 +1719,7 @@ async test "shell preblocks env unset sed source rewrites" {
 #cfg(not(platform="windows"))
 async test "shell preblocks env assignment sed source rewrites" {
   @vfs.with_tmpdir(prefix="openseek-shell-env-assign-sed-source-", dir => {
-    @fs.write_file(
-      "\{dir}/main.mbt",
-      "pub fn answer() -> Int { old }\n",
-      create_mode=CreateOrTruncate,
-    )
+    write_answer_main(dir, content="pub fn answer() -> Int { old }\n")
     let result = run_shell_in_workspace(dir, {
       "cmd": "FOO=bar sed -i '' 's/old/new/' *.mbt 2>/dev/null || true",
       "cwd": dir,
@@ -1927,9 +1731,9 @@ async test "shell preblocks env assignment sed source rewrites" {
     )
     assert_true(output.content.contains("line-anchored"))
     assert_false(output.content.contains("`write`"))
-    assert_eq(
-      @fs.read_file("\{dir}/main.mbt").text(),
-      "pub fn answer() -> Int { old }\n",
+    assert_answer_main_unchanged(
+      dir,
+      content="pub fn answer() -> Int { old }\n",
     )
   })
 }
@@ -1938,11 +1742,7 @@ async test "shell preblocks env assignment sed source rewrites" {
 #cfg(not(platform="windows"))
 async test "shell preblocks find exec sed source rewrites" {
   @vfs.with_tmpdir(prefix="openseek-shell-find-sed-source-", dir => {
-    @fs.write_file(
-      "\{dir}/main.mbt",
-      "pub fn answer() -> Int { old }\n",
-      create_mode=CreateOrTruncate,
-    )
+    write_answer_main(dir, content="pub fn answer() -> Int { old }\n")
     let result = run_shell_in_workspace(dir, {
       "cmd": "find \{dir} -name '*.mbt' -exec env FOO=bar sed -i '' 's/old/new/' {} + 2>/dev/null || true",
       "cwd": dir,
@@ -1954,9 +1754,9 @@ async test "shell preblocks find exec sed source rewrites" {
     )
     assert_true(output.content.contains("line-anchored"))
     assert_false(output.content.contains("`write`"))
-    assert_eq(
-      @fs.read_file("\{dir}/main.mbt").text(),
-      "pub fn answer() -> Int { old }\n",
+    assert_answer_main_unchanged(
+      dir,
+      content="pub fn answer() -> Int { old }\n",
     )
   })
 }
@@ -1965,11 +1765,7 @@ async test "shell preblocks find exec sed source rewrites" {
 #cfg(not(platform="windows"))
 async test "shell preblocks looped sed source rewrites through path list" {
   @vfs.with_tmpdir(prefix="openseek-shell-loop-sed-source-", dir => {
-    @fs.write_file(
-      "\{dir}/main.mbt",
-      "pub fn answer() -> Int { old }\n",
-      create_mode=CreateOrTruncate,
-    )
+    write_answer_main(dir, content="pub fn answer() -> Int { old }\n")
     @fs.write_file(
       "\{dir}/files.txt",
       "\{dir}/main.mbt\n",
@@ -1986,9 +1782,9 @@ async test "shell preblocks looped sed source rewrites through path list" {
     )
     assert_true(output.content.contains("line-anchored"))
     assert_false(output.content.contains("`write`"))
-    assert_eq(
-      @fs.read_file("\{dir}/main.mbt").text(),
-      "pub fn answer() -> Int { old }\n",
+    assert_answer_main_unchanged(
+      dir,
+      content="pub fn answer() -> Int { old }\n",
     )
   })
 }
@@ -1997,11 +1793,7 @@ async test "shell preblocks looped sed source rewrites through path list" {
 #cfg(not(platform="windows"))
 async test "shell allows recoverable git worktree rollback" {
   @vfs.with_tmpdir(prefix="openseek-shell-git-rollback-", dir => {
-    @fs.write_file(
-      "\{dir}/main.mbt",
-      "pub fn answer() -> Int { 42 }\n",
-      create_mode=CreateOrTruncate,
-    )
+    write_answer_main(dir)
     // Build a tiny repo with a committed main.mbt. init/config/add/commit only
     // touch `.git`, so they run (sandboxed) without being blocked.
     let setup = run_shell_in_workspace(dir, {
@@ -2014,11 +1806,7 @@ async test "shell allows recoverable git worktree rollback" {
     )
     // Dirty the tracked source, then discard the change with `git checkout` — a
     // trusted, recoverable worktree write that now runs unsandboxed and succeeds.
-    @fs.write_file(
-      "\{dir}/main.mbt",
-      "pub fn answer() -> Int { 999 }\n",
-      create_mode=CreateOrTruncate,
-    )
+    write_answer_main(dir, content="pub fn answer() -> Int { 999 }\n")
     let result = run_shell_in_workspace(dir, {
       "cmd": "git checkout -- main.mbt",
       "cwd": dir,
@@ -2028,10 +1816,7 @@ async test "shell allows recoverable git worktree rollback" {
     assert_false(
       output.content.contains("source file writes from shell are blocked"),
     )
-    assert_eq(
-      @fs.read_file("\{dir}/main.mbt").text(),
-      "pub fn answer() -> Int { 42 }\n",
-    )
+    assert_answer_main_unchanged(dir)
   })
 }
 

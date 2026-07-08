@@ -185,7 +185,7 @@ async fn shell(
     direct_source_write_redirect_target(parsed_command, workspace_root, cwd) {
     Some(target) =>
       return @agent_tool.ToolAction::respond(
-        direct_source_write_redirect_blocked_content(target),
+        direct_source_blocked_content("source file write redirect", target),
         is_error=true,
         brief=shell_brief(input.cmd, None),
       )
@@ -258,7 +258,7 @@ async fn shell(
     ShellExecuted(output) => output
     ShellPreblockedSourceTree(target) =>
       return @agent_tool.ToolAction::respond(
-        direct_source_tree_operation_blocked_content(target),
+        direct_source_blocked_content("source tree operation", target),
         is_error=true,
         brief=shell_brief(input.cmd, None),
       )
@@ -475,7 +475,7 @@ async fn start_background(
     direct_source_tree_operation_target(parsed_command, workspace_root, cwd) {
     Some(target) =>
       return @agent_tool.ToolAction::respond(
-        direct_source_tree_operation_blocked_content(target),
+        direct_source_blocked_content("source tree operation", target),
         is_error=true,
         brief=shell_brief(input.cmd, None),
       )
@@ -490,7 +490,7 @@ async fn start_background(
     ) {
     Some(target) =>
       return @agent_tool.ToolAction::respond(
-        direct_source_tree_operation_blocked_content(target),
+        direct_source_blocked_content("source tree operation", target),
         is_error=true,
         brief=shell_brief(input.cmd, None),
       )

@@ -63,9 +63,8 @@ async fn[X] shell_tools(
   // drain it instead of leaving it until the next prompt.
   let bg_runtime = @bgjobs.BgJobRuntime::new(scope, spill_dir?, on_job_exit=snapshot => {
     runtime.queue_steer(Notice(background_notice_text(snapshot)))
-    match on_background_wake {
-      Some(wake) => wake()
-      None => ()
+    if on_background_wake is Some(wake) {
+      wake()
     }
   })
   [

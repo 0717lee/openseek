@@ -3,15 +3,9 @@
 /// carries both the original task and the steered text as user messages, then
 /// streams a plain content answer so the turn finishes without tool calls.
 async fn steer_test_server(group : @async.TaskGroup[Unit]) -> String? {
-  let server = @http.Server(@socket.Addr::parse("127.0.0.1:0")) catch {
-    error => {
-      let message = "\{error}"
-      if message.contains("Operation not permitted") {
-        println("local TCP bind unavailable; skipping steer test: \{message}")
-        return None
-      }
-      raise error
-    }
+  guard bind_test_server("local TCP bind unavailable; skipping steer test")
+    is Some(server) else {
+    return None
   }
   group.spawn_bg(no_wait=true) <| () => {
     server.run_forever(
@@ -88,15 +82,9 @@ async fn override_test_server(
   group : @async.TaskGroup[Unit],
   runtime : @agent_runtime.AgentRuntime,
 ) -> String? {
-  let server = @http.Server(@socket.Addr::parse("127.0.0.1:0")) catch {
-    error => {
-      let message = "\{error}"
-      if message.contains("Operation not permitted") {
-        println("local TCP bind unavailable; skipping override test")
-        return None
-      }
-      raise error
-    }
+  guard bind_test_server("local TCP bind unavailable; skipping override test")
+    is Some(server) else {
+    return None
   }
   let mut requests = 0
   group.spawn_bg(no_wait=true) <| () => {
@@ -174,15 +162,9 @@ async fn inject_override_test_server(
   runtime : @agent_runtime.AgentRuntime,
   context : String,
 ) -> String? {
-  let server = @http.Server(@socket.Addr::parse("127.0.0.1:0")) catch {
-    error => {
-      let message = "\{error}"
-      if message.contains("Operation not permitted") {
-        println("local TCP bind unavailable; skipping inject test")
-        return None
-      }
-      raise error
-    }
+  guard bind_test_server("local TCP bind unavailable; skipping inject test")
+    is Some(server) else {
+    return None
   }
   let mut requests = 0
   group.spawn_bg(no_wait=true) <| () => {
@@ -322,15 +304,11 @@ fn log_event(entry : Json) -> String {
 
 ///|
 async fn reasoning_log_test_server(group : @async.TaskGroup[Unit]) -> String? {
-  let server = @http.Server(@socket.Addr::parse("127.0.0.1:0")) catch {
-    error => {
-      let message = "\{error}"
-      if message.contains("Operation not permitted") {
-        println("local TCP bind unavailable; skipping reasoning log test")
-        return None
-      }
-      raise error
-    }
+  guard bind_test_server(
+      "local TCP bind unavailable; skipping reasoning log test",
+    )
+    is Some(server) else {
+    return None
   }
   group.spawn_bg(no_wait=true) <| () => {
     server.run_forever(
@@ -401,15 +379,9 @@ async fn notice_test_server(
   runtime : @agent_runtime.AgentRuntime,
   notice : String,
 ) -> String? {
-  let server = @http.Server(@socket.Addr::parse("127.0.0.1:0")) catch {
-    error => {
-      let message = "\{error}"
-      if message.contains("Operation not permitted") {
-        println("local TCP bind unavailable; skipping notice test")
-        return None
-      }
-      raise error
-    }
+  guard bind_test_server("local TCP bind unavailable; skipping notice test")
+    is Some(server) else {
+    return None
   }
   let mut requests = 0
   group.spawn_bg(no_wait=true) <| () => {

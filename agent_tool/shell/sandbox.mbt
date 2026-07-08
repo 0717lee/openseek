@@ -87,16 +87,18 @@ async fn agent_shell_launch(
     }
   }
   let profile_data = source_write_readonly_profile_data(real_workspace_root)
-  let args = ["-p", profile_data.profile, PlatformShellProgram]
-  for arg in platform_shell_args(cmd) {
-    args.push(arg)
-  }
   {
     program: SandboxExecPath,
-    args,
+    args: sandbox_exec_args(profile_data.profile, cmd),
     source_write_sandboxed: true,
     sandbox_denial_subjects: profile_data.denial_subjects,
   }
+}
+
+///|
+/// Argument vector for running `cmd` through `sandbox-exec` under `profile`.
+fn sandbox_exec_args(profile : String, cmd : String) -> Array[String] {
+  ["-p", profile, PlatformShellProgram, ..platform_shell_args(cmd)]
 }
 
 ///|
@@ -136,13 +138,9 @@ async fn probe_sandbox_exec_available() -> Bool {
     .normalize()
     .to_string()
   let probe_profile = sandbox_denial_probe_profile(blocked_path)
-  let args = ["-p", probe_profile, PlatformShellProgram]
-  for arg in platform_shell_args(PlatformNoopCommand) {
-    args.push(arg)
-  }
   let output = collect_process_output(
     SandboxExecPath,
-    args,
+    sandbox_exec_args(probe_profile, PlatformNoopCommand),
     max_output_chars=200,
   ) catch {
     error if @async.is_being_cancelled() => raise error
@@ -155,13 +153,12 @@ async fn probe_sandbox_exec_available() -> Bool {
     cleanup_sandbox_probe(probe_dir, blocked_path)
     return false
   }
-  let write_args = ["-p", probe_profile, PlatformShellProgram]
-  for arg in platform_shell_args("printf probe > \{shell_quote(blocked_path)}") {
-    write_args.push(arg)
-  }
   let write_output = collect_process_output(
     SandboxExecPath,
-    write_args,
+    sandbox_exec_args(
+      probe_profile,
+      "printf probe > \{shell_quote(blocked_path)}",
+    ),
     max_output_chars=400,
   ) catch {
     error if @async.is_being_cancelled() => raise error
@@ -5562,18 +5559,11 @@ fn is_protected_source_path(path : String) -> Bool {
 }
 
 ///|
-fn direct_source_write_redirect_blocked_content(target : String) -> String {
+/// Refusal content for a source-write `operation` (e.g. "source tree
+/// operation") blocked before the command is ever executed.
+fn direct_source_blocked_content(operation : String, target : String) -> String {
   (
-    $|shell sandbox: source file write redirect is blocked before execution: \{target}
-    $|\{SandboxSourceWriteFeedback}
-    $|<system>exit=blocked</system>
-  )
-}
-
-///|
-fn direct_source_tree_operation_blocked_content(target : String) -> String {
-  (
-    $|shell sandbox: source tree operation is blocked before execution: \{target}
+    $|shell sandbox: \{operation} is blocked before execution: \{target}
     $|\{SandboxSourceWriteFeedback}
     $|<system>exit=blocked</system>
   )
@@ -5663,29 +5653,10 @@ fn sandbox_denial_line_mentions_literal_subject(
 
 ///|
 fn sandbox_denial_line_mentions_source_path(line : StringView) -> Bool {
-  sandbox_denial_line_mentions_source_suffix(line, ".mbt.md") ||
-  sandbox_denial_line_mentions_source_suffix(line, ".mbt") ||
-  sandbox_denial_line_mentions_source_suffix(line, ".mbti") ||
-  sandbox_denial_line_mentions_source_suffix(line, "moon.mod.json") ||
-  sandbox_denial_line_mentions_source_suffix(line, "moon.pkg.json") ||
-  sandbox_denial_line_mentions_source_suffix(line, "moon.mod") ||
-  sandbox_denial_line_mentions_source_suffix(line, "moon.pkg") ||
-  sandbox_denial_line_mentions_source_suffix(line, "moon.work")
-}
-
-///|
-fn sandbox_denial_line_mentions_source_suffix(
-  line : StringView,
-  suffix : String,
-) -> Bool {
-  line.contains("\{suffix}:") ||
-  line.contains("\{suffix}'") ||
-  line.contains("\{suffix}\"") ||
-  line.contains("\{suffix}`") ||
-  (
-    sandbox_denial_line_has_denial_colon_before_subject(line) &&
-    line.has_suffix(suffix)
-  )
+  [
+    ".mbt.md", ".mbt", ".mbti", "moon.mod.json", "moon.pkg.json", "moon.mod", "moon.pkg",
+    "moon.work",
+  ].any(suffix => sandbox_denial_line_mentions_literal_subject(line, suffix))
 }
 
 ///|
