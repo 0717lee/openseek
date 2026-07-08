@@ -2,6 +2,9 @@
 priv struct AgentLoop {
   runtime : @agent_runtime.AgentRuntime
   client : @client.Client
+  /// Client for auto-compaction checkpoint summaries: thinking=No where the
+  /// model honors the control — a handoff summary needs no reasoning budget.
+  summary_client : @client.Client
   tools : @agent_tool.Tools
   append_item : async (@agent_session.Session, @agent_session.SessionItem) -> @agent_session.Session
   /// Turn-local DeepSeek request buffer. `AgentLoop` is private and per-run; a
@@ -11,16 +14,27 @@ priv struct AgentLoop {
   /// succeeded.
   messages : Array[@deepseek.ChatMessage]
   plan_cadence : PlanCadence
+  /// Sequence of this turn's user task. Auto-compaction's first stage folds
+  /// only events before it, keeping the active turn verbatim.
+  turn_start_sequence : Int
   /// Latest session returned by a successful append. The run-level error
   /// handler uses it to persist a terminal failure/interruption even when the
   /// local loop state is behind the last durable session.
   mut last_session : @agent_session.Session
+  /// Highest `to_sequence` an auto-compaction has covered this turn; once it
+  /// reaches the pre-turn prefix the next trigger escalates to a full range.
+  mut auto_compacted_to : Int
+  /// Set after a full-range auto-compaction or a failed summary: further
+  /// triggers this turn could only churn, so the guard disarms until the
+  /// next turn's fresh loop re-arms it.
+  mut auto_compact_disarmed : Bool
 }
 
 ///|
 fn AgentLoop::AgentLoop(
   runtime~ : @agent_runtime.AgentRuntime,
   client~ : @client.Client,
+  summary_client~ : @client.Client,
   tools~ : @agent_tool.Tools,
   append_item~ : async (@agent_session.Session, @agent_session.SessionItem) -> @agent_session.Session,
   session~ : @agent_session.Session,
@@ -28,11 +42,15 @@ fn AgentLoop::AgentLoop(
   {
     runtime,
     client,
+    summary_client,
     tools,
     append_item,
     messages: session.chat_messages(),
     plan_cadence: PlanCadence(registered=tools.find("plan") is Some(_)),
+    turn_start_sequence: session.last_sequence(),
     last_session: session,
+    auto_compacted_to: 0,
+    auto_compact_disarmed: false,
   }
 }
 
@@ -67,6 +85,7 @@ async fn AgentLoop::run(
     for step in 0..<max_steps; session = session {
       let session = self.prepare_step(session)
       let response = self.chat(step)
+      let session = self.maybe_auto_compact(session, response.usage)
       if response.tool_calls.is_empty() {
         let steer_inputs = self.runtime.pending_steers()
         if steer_inputs.is_empty() {

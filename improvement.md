@@ -139,7 +139,7 @@ shows where steps and tokens went to waste):
   thinking; make it an engine flag (`--thinking no|high|max`) and a TUI
   pass-through. *(Done: `OPENSEEK_THINKING` is env-backed on both binaries and
   threaded through `@agent.run*` as an optional param with max as the default.)*
-- [ ] **Auto-compaction — deferred, reframed as a context-ceiling guard.**
+- [x] **Auto-compaction — deferred, reframed as a context-ceiling guard.**
   Compaction exists only as the manual `--session-compact-*` flow.
   Deliberately deferred (owner decision, 2026-06-12): compaction rewrites
   the model-facing history prefix, so every request after it is a DeepSeek
@@ -148,7 +148,16 @@ shows where steps and tokens went to waste):
   price for a rewritten one, plus summary-generation cost and
   information-loss risk. When implemented, trigger only as the projected
   prompt approaches the model's context window (where the alternative is
-  failure), not as a cost optimization.
+  failure), not as a cost optimization. *(Done as exactly that guard: after
+  every response the loop compares reported total_tokens against 80% of
+  `Model::context_window`; over it, a checkpoint summary (thinking=No, the
+  manual flow's prompt) is appended through the turn's append seam — prior
+  turns first so the active task stays verbatim, then at most one
+  full-range checkpoint per turn, disarming on failure (fail-open) — and
+  the request buffer re-seeds from the compacted projection. Events
+  `auto_compaction_started/finished/failed` are distinct from the manual
+  `compaction_*` names, which the TUI treats as run-terminal; surfacing
+  auto-compaction in the TUI status line is a possible follow-up.)*
 - [x] **Richer `--session-list`.** Bare ids are hard to recognize; include
   last-activity time and the first user prompt as a label. *(Done:
   `SessionStore::listings` returns id + last-activity + first prompt, newest

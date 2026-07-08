@@ -264,7 +264,12 @@ async test "run_turn_with_append closes failed persisted turns" {
 /// re-surfaces the recorded plan (rate-limited by the same threshold). It
 /// sends the current DeepSeek chat projection with the active tool schemas,
 /// records assistant responses, executes tool calls in order, and records
-/// tool results. The turn ends when the model answers with no tool calls, the
+/// tool results. When a response reports token usage at or past 80% of the
+/// model's context window, the loop appends a checkpoint summary before
+/// continuing — prior turns first so the active task stays verbatim, then at
+/// most one full-range checkpoint per turn — and rebuilds its request buffer
+/// from the compacted projection (`auto_compaction_*` events; fail-open on
+/// summary errors). The turn ends when the model answers with no tool calls, the
 /// `finish` tool returns `Control(Finish)`, a tool returns `Control(Abort)`,
 /// `max_steps` is exhausted, the task is cancelled, or an unexpected error
 /// escapes.
@@ -299,6 +304,7 @@ pub async fn[X] run_turn_in_scope(
   tools? : @agent_tool.Tools,
 ) -> @agent_session.Session {
   let client = @client.Client(api_key~, model~, thinking~, api_url?)
+  let summary_client = @client.Client(api_key~, model~, api_url?, thinking=No)
   let session = session |> append_item(User(UserMessage(task)))
   let tools = try {
     match tools {
@@ -312,7 +318,7 @@ pub async fn[X] run_turn_in_scope(
         |> append_item(Terminal(Failed("agent setup failed: \{error}")))
     }
   }
-  AgentLoop(runtime~, client~, tools~, append_item~, session~).run(
+  AgentLoop(runtime~, client~, summary_client~, tools~, append_item~, session~).run(
     session, max_steps,
   )
 }
