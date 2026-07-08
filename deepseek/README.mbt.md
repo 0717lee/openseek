@@ -37,6 +37,133 @@ The HTTP client lives in `bobzhang/openseek/deepseek/client`.
   include `reasoning_content` and `tool_calls`. `ChatResponse` implements
   `FromJson` for DeepSeek chat completions response envelopes.
 
+## Architecture Diagrams
+
+The root `deepseek` package is pure data plus JSON encoding/decoding. The
+effectful HTTP transport lives one package down in `deepseek/client`.
+
+```mermaid
+flowchart LR
+  app["agent / tests"] --> root["deepseek\nmodels, messages, tools, JSON"]
+  session["agent_session\nchat projection"] --> root
+  client["deepseek/client\nHTTP, retries, SSE"] --> root
+  client --> api["DeepSeek / Kimi chat API"]
+```
+
+The core API is a set of public data types around chat request and response
+shapes. In this diagram, `+` marks public fields or constructors, and tagged
+unions correspond to MoonBit enum constructors.
+
+```mermaid
+classDiagram
+  direction LR
+
+  class Model {
+    <<tagged union>>
+    Deepseek(DsVariant)
+    Kimi(KimiVariant)
+    +parse(String) Model
+  }
+
+  class DsVariant {
+    <<enumeration>>
+    V4Flash
+    V4Pro
+  }
+
+  class KimiVariant {
+    <<enumeration>>
+    K27Code
+    K27CodeHighSpeed
+  }
+
+  class ThinkingMode {
+    <<enumeration>>
+    No
+    High
+    Max
+    +parse(String) ThinkingMode
+  }
+
+  class ResponseFormat {
+    <<enumeration>>
+    JsonObject
+  }
+
+  class Role {
+    <<tagged union>>
+    System
+    User
+    Assistant
+    Tool(String)
+  }
+
+  class ChatMessage {
+    +Role role
+    +String content
+    +ToolCall[] tool_calls
+    +String? reasoning_content
+    +ChatMessage(Role, content, tool_calls, reasoning_content)
+  }
+
+  class ToolDefinition {
+    +String name
+    +String description
+    +Json parameters
+    +Bool strict
+  }
+
+  class ToolCall {
+    +String id
+    +String name
+    +String arguments
+  }
+
+  class ChatResponse {
+    +String content
+    +String reasoning_content
+    +ToolCall[] tool_calls
+    +Usage usage
+  }
+
+  class Usage {
+    +Int prompt_tokens
+    +Int completion_tokens
+    +Int total_tokens
+    +Int prompt_cache_hit_tokens
+    +Int prompt_cache_miss_tokens
+  }
+
+  Model --> DsVariant
+  Model --> KimiVariant
+  ChatMessage --> Role
+  ChatMessage --> ToolCall
+  ChatResponse --> ToolCall
+  ChatResponse --> Usage
+  ToolDefinition --> ToolCall : advertised then requested as
+```
+
+`encode_chat_request` is the main pure request boundary. `ChatResponse` and
+`Usage` decode response JSON back into typed values.
+
+```mermaid
+flowchart TD
+  messages["ChatMessage[]"] --> encode["encode_chat_request"]
+  model["Model"] --> encode
+  thinking["ThinkingMode?"] --> encode
+  responseFormat["ResponseFormat?"] --> encode
+  tools["ToolDefinition[]"] --> encode
+  stream["stream Bool"] --> encode
+  encode --> requestJson["chat completions request JSON"]
+
+  responseJson["chat completions response JSON"] --> decode["FromJson ChatResponse"]
+  decode --> response["ChatResponse"]
+  response --> content["content"]
+  response --> reasoning["reasoning_content"]
+  response --> toolCalls["ToolCall[]"]
+  response --> usage["Usage"]
+```
+
 ## Native Tool Calls
 
 DeepSeek tool calling uses the same flow described in the
@@ -64,6 +191,26 @@ The usual sequence is:
    requested calls.
 5. Execute each local function after parsing `ToolCall.arguments`.
 6. Append each result as `ChatMessage(Tool(call.id), content=result)`.
+
+```mermaid
+sequenceDiagram
+  participant Caller
+  participant Encoder as encode_chat_request
+  participant API as DeepSeek / Kimi API
+  participant Tool as local tool
+
+  Caller->>Encoder: messages + ToolDefinition[]
+  Encoder-->>Caller: request JSON with tools
+  Caller->>API: chat completions request
+  API-->>Caller: ChatResponse with ToolCall[]
+  Caller->>Caller: append assistant tool-call echo
+  loop each ToolCall
+    Caller->>Tool: parse arguments and execute
+    Tool-->>Caller: result text
+    Caller->>Caller: append ChatMessage(Tool(call.id), content=result)
+  end
+  Caller->>API: next chat request with tool results
+```
 
 ```moonbit check
 ///|
