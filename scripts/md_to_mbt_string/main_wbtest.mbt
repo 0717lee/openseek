@@ -77,6 +77,7 @@ test "generated source matches dev_build output shape" {
     source,
     content=(
       #|// Generated from base_prompt.md by moon dev_build. DO NOT EDIT.
+      #|
       #|///|
       #|fn base_prompt() -> String {
       #|  (
@@ -87,6 +88,7 @@ test "generated source matches dev_build output shape" {
       #|  )
       #|}
       #|
+
     ),
   )
 }
@@ -102,6 +104,7 @@ test "generated source preserves missing final newline" {
     source,
     content=(
       #|// Generated from default_prompt.md by moon dev_build. DO NOT EDIT.
+      #|
       #|///|
       #|fn default_prompt() -> String {
       #|  (
@@ -110,6 +113,7 @@ test "generated source preserves missing final newline" {
       #|  )
       #|}
       #|
+
     ),
   )
 }
@@ -150,6 +154,7 @@ test "generated source filters markdown comments" {
     source,
     content=(
       #|// Generated from default_prompt.md by moon dev_build. DO NOT EDIT.
+      #|
       #|///|
       #|fn default_prompt() -> String {
       #|  (
@@ -179,6 +184,7 @@ test "generated source filters markdown comments" {
       #|  )
       #|}
       #|
+
     ),
   )
 }
@@ -194,6 +200,7 @@ test "generated source filters multiline inline comments" {
     source,
     content=(
       #|// Generated from default_prompt.md by moon dev_build. DO NOT EDIT.
+      #|
       #|///|
       #|fn default_prompt() -> String {
       #|  (
@@ -202,6 +209,7 @@ test "generated source filters multiline inline comments" {
       #|  )
       #|}
       #|
+
     ),
   )
 }
