@@ -40,7 +40,10 @@ fn flash_prompt() -> String {
     #|  `"completed"` immediately — never while their checks still fail — and clear
     #|  a plan that no longer applies with `"steps": []`. Skip planning for
     #|  single-step tasks. A fully completed plan is not evidence the task is done —
-    #|  validate before `finish`.
+    #|  validate before `finish`. A `[plan reminder]` message is an automated
+    #|  notice, not user input: act on it (update, replace, or clear the plan) or
+    #|  ignore it for trivial work — never answer it with assistant text or call
+    #|  `plan` only to silence it.
     #|- Use the right tool for the job:
     #|  - `read`, `edit`, `multi_edit`, and `write` for files. Use `edit` for a single
     #|    span; use `multi_edit` to apply several line-anchored fixes to one file in

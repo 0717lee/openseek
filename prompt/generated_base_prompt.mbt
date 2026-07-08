@@ -62,6 +62,14 @@ fn base_prompt() -> String {
     #|A fully completed plan is bookkeeping, not evidence: verify the work with
     #|`moon check` or tests before finishing.
     #|
+    #|A `[plan reminder]` message is an automated runtime notice, not user input:
+    #|it appears when the `plan` tool has gone unused for many steps. Act on it
+    #|instead of answering it — bring step statuses current, replace or clear a
+    #|plan that no longer matches the work, or record one if the task turned out
+    #|to be multi-step after all. If the task is genuinely trivial, ignore the
+    #|reminder and keep working. Never reply to the reminder with assistant text,
+    #|and never call `plan` only to silence it.
+    #|
     #|
     #|## Fast Task Playbooks
     #|
