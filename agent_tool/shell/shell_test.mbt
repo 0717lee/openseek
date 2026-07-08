@@ -7,6 +7,165 @@ async fn run_shell(arguments : Json) -> @agent_tool.ToolAction {
 }
 
 ///|
+/// Run the shell tool wired like the agent: a background runtime, so foreground
+/// commands run through the shared ShellExecution model and the background /
+/// detach paths are exercised.
+#cfg(not(platform="windows"))
+async fn run_shell_wired(
+  bg : @bgjobs.BgJobRuntime,
+  arguments : Json,
+) -> @agent_tool.ToolAction {
+  match @shell.definition(bg_runtime=bg).execute {
+    Async(execute) => execute(arguments)
+    Sync(_) => fail("shell tool should be async")
+  }
+}
+
+///|
+#cfg(not(platform="windows"))
+async test "run_in_background starts a job and returns its id" {
+  @async.with_task_group(group => {
+    let bg = @bgjobs.BgJobRuntime::new(AgentTaskScope(group))
+    let action = run_shell_wired(bg, {
+      "cmd": "printf hi",
+      "run_in_background": true,
+    })
+    guard action is Respond(output) else { fail("expected a Respond action") }
+    assert_false(output.is_error)
+    assert_true(output.content.contains("started background job"))
+    assert_true(bg.list().length() == 1)
+  })
+}
+
+///|
+#cfg(not(platform="windows"))
+async test "run_in_background rejects timeout_ms" {
+  @async.with_task_group(group => {
+    let bg = @bgjobs.BgJobRuntime::new(AgentTaskScope(group))
+    let action = run_shell_wired(bg, {
+      "cmd": "printf hi",
+      "run_in_background": true,
+      "timeout_ms": 1000,
+    })
+    guard action is Respond(output) else { fail("expected a Respond action") }
+    assert_true(output.is_error)
+    assert_true(output.content.contains("not supported with run_in_background"))
+  })
+}
+
+///|
+#cfg(not(platform="windows"))
+async test "foreground runs through the execution model" {
+  @async.with_task_group(group => {
+    let bg = @bgjobs.BgJobRuntime::new(AgentTaskScope(group))
+    let action = run_shell_wired(bg, { "cmd": "printf hi" })
+    guard action is Respond(output) else { fail("expected a Respond action") }
+    assert_false(output.is_error)
+    assert_true(output.content.contains("hi"))
+    assert_true(output.content.contains("exit=0"))
+  })
+}
+
+///|
+#cfg(not(platform="windows"))
+async test "wired foreground reports binary output as a tool error" {
+  @async.with_task_group(group => {
+    let bg = @bgjobs.BgJobRuntime::new(AgentTaskScope(group))
+    // The wired path (through ShellExecution) must match the per-call path:
+    // non-UTF-8 output is a tool error, not replacement characters as success.
+    let action = run_shell_wired(bg, { "cmd": "printf '\\377'" })
+    guard action is Respond(output) else { fail("expected a Respond action") }
+    assert_true(output.is_error)
+    assert_true(output.content.contains("Malformed"))
+  })
+}
+
+///|
+#cfg(not(platform="windows"))
+async test "foreground enforces max_output_chars with an output-limit error" {
+  @async.with_task_group(group => {
+    let bg = @bgjobs.BgJobRuntime::new(AgentTaskScope(group))
+    // `yes` exceeds the tiny budget; the shared foreground path must report the
+    // output-limit error, not silently drop output as a success.
+    let action = run_shell_wired(bg, { "cmd": "yes", "max_output_chars": 100 })
+    guard action is Respond(output) else { fail("expected a Respond action") }
+    assert_true(output.is_error)
+    assert_true(output.content.contains("output_limit_reached"))
+  })
+}
+
+///|
+#cfg(not(platform="windows"))
+async test "a timed command that floods output is an output-limit error, not detached" {
+  @async.with_task_group(group => {
+    let dir = @fs.tmpdir(prefix="openseek-test-")
+    let bg = @bgjobs.BgJobRuntime::new(AgentTaskScope(group), spill_dir=dir)
+    // A long timeout, but the runaway must be killed at the output limit promptly
+    // (not run to the timeout and then backgrounded).
+    let action = run_shell_wired(bg, {
+      "cmd": "yes",
+      "timeout_ms": 30000,
+      "max_output_chars": 100,
+    })
+    guard action is Respond(output) else { fail("expected a Respond action") }
+    assert_true(output.is_error)
+    assert_true(output.content.contains("output_limit_reached"))
+    @fs.rmdir(dir, recursive=true) catch {
+      _ => ()
+    }
+  })
+}
+
+///|
+#cfg(not(platform="windows"))
+async test "a detached foreground job retains full output past the inline cap" {
+  @async.with_task_group(group => {
+    let dir = @fs.tmpdir(prefix="openseek-test-")
+    let bg = @bgjobs.BgJobRuntime::new(AgentTaskScope(group), spill_dir=dir)
+    // Under the output limit at the timeout (still sleeping) → cleanly detached;
+    // then it floods output, which a detached job retains (the output-limit kill
+    // is cleared on detach).
+    let action = run_shell_wired(bg, {
+      "cmd": "sleep 0.3; seq 1 5000",
+      "timeout_ms": 150,
+      "max_output_chars": 100,
+    })
+    guard action is Respond(output) else { fail("expected a Respond action") }
+    assert_true(output.content.contains("moved to the background"))
+    // The detached job is file-backed, so its full output is retained, not
+    // capped at the foreground budget. Poll until the monitor has flushed it.
+    let id = bg.list()[0].id
+    let mut seen = false
+    for _ in 0..<200 {
+      if bg.read_output(id).unwrap_or("").contains("5000") {
+        seen = true
+        break
+      }
+      @async.sleep(25)
+    }
+    assert_true(seen)
+    let _ = bg.stop(id)
+    @fs.rmdir(dir, recursive=true) catch {
+      _ => ()
+    }
+  })
+}
+
+///|
+#cfg(not(platform="windows"))
+async test "a foreground command that times out is detached to the background" {
+  @async.with_task_group(group => {
+    let bg = @bgjobs.BgJobRuntime::new(AgentTaskScope(group))
+    let action = run_shell_wired(bg, { "cmd": "sleep 2", "timeout_ms": 100 })
+    guard action is Respond(output) else { fail("expected a Respond action") }
+    assert_false(output.is_error)
+    assert_true(output.content.contains("moved to the background"))
+    assert_true(bg.list().length() == 1)
+    assert_true(bg.list()[0].status is Running)
+  })
+}
+
+///|
 async fn run_shell_in_workspace(
   workspace_root : String,
   arguments : Json,
@@ -98,6 +257,26 @@ test "shell description tells models to use POSIX shell off Windows" {
   assert_true(description.contains("POSIX shell"))
   assert_true(description.contains("sh -c"))
   assert_true(description.contains("POSIX shell syntax"))
+}
+
+///|
+#cfg(not(platform="windows"))
+async test "shell description teaches background jobs only when a runtime is wired" {
+  // Unwired: no runtime means run_in_background does not exist and a timed-out
+  // command is killed — the description must not promise otherwise.
+  let unwired = @shell.definition().description
+  assert_false(unwired.contains("run_in_background"))
+  // Wired: guide the model to background long-running work and to rely on the
+  // pushed completion notice instead of blocking on sleeps or polling.
+  @async.with_task_group(group => {
+    let bg = @bgjobs.BgJobRuntime::new(AgentTaskScope(group))
+    let wired = @shell.definition(bg_runtime=bg).description
+    assert_true(wired.contains("run_in_background"))
+    assert_true(wired.contains("notice"))
+    assert_true(wired.contains("sleep"))
+    assert_true(wired.contains("shell_output"))
+    assert_true(wired.contains("shell_stop"))
+  })
 }
 
 ///|
