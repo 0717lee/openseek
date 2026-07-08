@@ -1,4 +1,15 @@
 ///|
+/// The durable plan-reminder notices recorded in `result`, in order.
+fn plan_reminders(result : @agent_session.Session) -> Array[String] {
+  [
+    for event in result.events() if event.item() is Runtime(notice) &&
+    notice.content().contains(@agent_session.PlanReminderPrefix) => {
+      notice.content()
+    }
+  ]
+}
+
+///|
 /// A scripted DeepSeek stand-in that keeps a turn alive with `plan` calls
 /// whose arguments are invalid — each yields an error tool result, which
 /// never resets the staleness cadence — for the first `plan_calls` requests,
@@ -11,15 +22,11 @@ async fn stale_plan_test_server(
   bodies : Array[String],
   plan_calls~ : Int,
 ) -> String? {
-  let server = @http.Server(@socket.Addr::parse("127.0.0.1:0")) catch {
-    error => {
-      let message = "\{error}"
-      if message.contains("Operation not permitted") {
-        println("local TCP bind unavailable; skipping plan reminder test")
-        return None
-      }
-      raise error
-    }
+  guard bind_test_server(
+      "local TCP bind unavailable; skipping plan reminder test",
+    )
+    is Some(server) else {
+    return None
   }
   group.spawn_bg(no_wait=true) <| () => {
     server.run_forever(
@@ -88,12 +95,7 @@ async test "a plan-silent turn gets one staleness reminder after ten requests" {
     )
     assert_true(bodies[10].contains("has not been used in this turn"))
     // The reminder is durable exactly once, in its plan-free nag variant.
-    let reminders = [
-      for event in result.events() if event.item() is Runtime(notice) &&
-      notice.content().contains(@agent_session.PlanReminderPrefix) => {
-        notice.content()
-      }
-    ]
+    let reminders = plan_reminders(result)
     assert_eq(reminders.length(), 1)
     assert_true(reminders[0].contains("has not been used in this turn"))
     guard result.events().peek() is Some(last) &&
@@ -115,15 +117,11 @@ async fn recorded_plan_test_server(
   bodies : Array[String],
   plan_calls~ : Int,
 ) -> String? {
-  let server = @http.Server(@socket.Addr::parse("127.0.0.1:0")) catch {
-    error => {
-      let message = "\{error}"
-      if message.contains("Operation not permitted") {
-        println("local TCP bind unavailable; skipping plan reminder test")
-        return None
-      }
-      raise error
-    }
+  guard bind_test_server(
+      "local TCP bind unavailable; skipping plan reminder test",
+    )
+    is Some(server) else {
+    return None
   }
   group.spawn_bg(no_wait=true) <| () => {
     server.run_forever(
@@ -196,12 +194,7 @@ async test "a recorded plan delays the reminder and is re-surfaced by it" {
     )
     assert_true(bodies[11].contains("Current plan:"))
     assert_true(bodies[11].contains("1. [in_progress] fix the parser"))
-    let reminders = [
-      for event in result.events() if event.item() is Runtime(notice) &&
-      notice.content().contains(@agent_session.PlanReminderPrefix) => {
-        notice.content()
-      }
-    ]
+    let reminders = plan_reminders(result)
     assert_eq(reminders.length(), 1)
     assert_true(reminders[0].contains("1. [in_progress] fix the parser"))
   }
@@ -266,12 +259,7 @@ async test "the no-plan nag fires at most once per turn" {
       1,
       msg="no later request may gain a second no-plan nag",
     )
-    let reminders = [
-      for event in result.events() if event.item() is Runtime(notice) &&
-      notice.content().contains(@agent_session.PlanReminderPrefix) => {
-        notice.content()
-      }
-    ]
+    let reminders = plan_reminders(result)
     assert_eq(reminders.length(), 1)
     assert_true(reminders[0].contains("has not been used in this turn"))
   }
@@ -329,12 +317,7 @@ async test "a stale recorded plan re-nags on the ten-request cadence" {
       2,
       msg="request 22 should carry the second checklist reminder",
     )
-    let reminders = [
-      for event in result.events() if event.item() is Runtime(notice) &&
-      notice.content().contains(@agent_session.PlanReminderPrefix) => {
-        notice.content()
-      }
-    ]
+    let reminders = plan_reminders(result)
     assert_eq(reminders.length(), 2)
     assert_true(reminders[0].contains("1. [in_progress] fix the parser"))
     assert_true(reminders[1].contains("1. [in_progress] fix the parser"))

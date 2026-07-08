@@ -1,14 +1,8 @@
 ///|
 async fn tool_batch_test_server(group : @async.TaskGroup[Unit]) -> String? {
-  let server = @http.Server(@socket.Addr::parse("127.0.0.1:0")) catch {
-    error => {
-      let message = "\{error}"
-      if message.contains("Operation not permitted") {
-        println("local TCP bind unavailable; skipping tool batch test")
-        return None
-      }
-      raise error
-    }
+  guard bind_test_server("local TCP bind unavailable; skipping tool batch test")
+    is Some(server) else {
+    return None
   }
   let mut requests = 0
   group.spawn_bg(no_wait=true) <| () => {
@@ -115,15 +109,11 @@ async test "agent executes each normal tool call in a response batch" {
 async fn max_step_exhaustion_test_server(
   group : @async.TaskGroup[Unit],
 ) -> String? {
-  let server = @http.Server(@socket.Addr::parse("127.0.0.1:0")) catch {
-    error => {
-      let message = "\{error}"
-      if message.contains("Operation not permitted") {
-        println("local TCP bind unavailable; skipping max-step exhaustion test")
-        return None
-      }
-      raise error
-    }
+  guard bind_test_server(
+      "local TCP bind unavailable; skipping max-step exhaustion test",
+    )
+    is Some(server) else {
+    return None
   }
   group.spawn_bg(no_wait=true) <| () => {
     server.run_forever(
@@ -195,15 +185,11 @@ async test "max-step exhaustion preserves continued session state" {
 
 ///|
 async fn append_failure_test_server(group : @async.TaskGroup[Unit]) -> String? {
-  let server = @http.Server(@socket.Addr::parse("127.0.0.1:0")) catch {
-    error => {
-      let message = "\{error}"
-      if message.contains("Operation not permitted") {
-        println("local TCP bind unavailable; skipping append failure test")
-        return None
-      }
-      raise error
-    }
+  guard bind_test_server(
+      "local TCP bind unavailable; skipping append failure test",
+    )
+    is Some(server) else {
+    return None
   }
   group.spawn_bg(no_wait=true) <| () => {
     server.run_forever(

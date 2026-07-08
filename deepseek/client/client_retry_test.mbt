@@ -8,15 +8,9 @@ async fn flaky_server(
   status~ : Int,
   sse? : Bool = false,
 ) -> (String, Ref[Int])? {
-  let server = @http.Server(@socket.Addr::parse("127.0.0.1:0")) catch {
-    error => {
-      let message = "\{error}"
-      if message.contains("Operation not permitted") {
-        println("local TCP bind unavailable; skipping retry test: \{message}")
-        return None
-      }
-      raise error
-    }
+  guard bind_test_server("local TCP bind unavailable; skipping retry test")
+    is Some(server) else {
+    return None
   }
   let hits : Ref[Int] = { val: 0 }
   group.spawn_bg(no_wait=true) <| () => {
@@ -171,15 +165,9 @@ async test "streaming Kimi chat retries a pre-stream 502 and then streams" {
 /// serves the full stream.
 async test "streaming chat retries a pre-delta stream drop" {
   @async.with_task_group() <| group => {
-    let server = @http.Server(@socket.Addr::parse("127.0.0.1:0")) catch {
-      error => {
-        let message = "\{error}"
-        if message.contains("Operation not permitted") {
-          println("local TCP bind unavailable; skipping retry test")
-          return
-        }
-        raise error
-      }
+    guard bind_test_server("local TCP bind unavailable; skipping retry test")
+      is Some(server) else {
+      return
     }
     let hits : Ref[Int] = { val: 0 }
     group.spawn_bg(no_wait=true) <| () => {
@@ -224,15 +212,9 @@ async test "streaming chat retries a pre-delta stream drop" {
 /// second hit.
 async test "streaming chat never retries after the first delta" {
   @async.with_task_group() <| group => {
-    let server = @http.Server(@socket.Addr::parse("127.0.0.1:0")) catch {
-      error => {
-        let message = "\{error}"
-        if message.contains("Operation not permitted") {
-          println("local TCP bind unavailable; skipping retry test")
-          return
-        }
-        raise error
-      }
+    guard bind_test_server("local TCP bind unavailable; skipping retry test")
+      is Some(server) else {
+      return
     }
     let hits : Ref[Int] = { val: 0 }
     group.spawn_bg(no_wait=true) <| () => {
@@ -281,15 +263,9 @@ async test "streaming chat never retries after the first delta" {
 /// review: the bail flag used to track callback-delivered text only.)
 async test "streaming chat never retries after a tool-call-only delta" {
   @async.with_task_group() <| group => {
-    let server = @http.Server(@socket.Addr::parse("127.0.0.1:0")) catch {
-      error => {
-        let message = "\{error}"
-        if message.contains("Operation not permitted") {
-          println("local TCP bind unavailable; skipping retry test")
-          return
-        }
-        raise error
-      }
+    guard bind_test_server("local TCP bind unavailable; skipping retry test")
+      is Some(server) else {
+      return
     }
     let hits : Ref[Int] = { val: 0 }
     group.spawn_bg(no_wait=true) <| () => {

@@ -4,15 +4,9 @@ async fn stream_test_server(
   finish? : Bool = true,
   kimi_usage? : Bool = false,
 ) -> String? {
-  let server = @http.Server(@socket.Addr::parse("127.0.0.1:0")) catch {
-    error => {
-      let message = "\{error}"
-      if message.contains("Operation not permitted") {
-        println("local TCP bind unavailable; skipping stream test: \{message}")
-        return None
-      }
-      raise error
-    }
+  guard bind_test_server("local TCP bind unavailable; skipping stream test")
+    is Some(server) else {
+    return None
   }
   group.spawn_bg(no_wait=true) <| () => {
     server.run_forever(
@@ -117,15 +111,11 @@ async test "chat stream handler accumulates Kimi stream_options usage" {
 /// bound this `read_until` blocks indefinitely (the observed production hang).
 async test "streaming chat retries an idle stall before any event" {
   @async.with_task_group() <| group => {
-    let server = @http.Server(@socket.Addr::parse("127.0.0.1:0")) catch {
-      error => {
-        let message = "\{error}"
-        if message.contains("Operation not permitted") {
-          println("local TCP bind unavailable; skipping idle-stall test")
-          return
-        }
-        raise error
-      }
+    guard bind_test_server(
+        "local TCP bind unavailable; skipping idle-stall test",
+      )
+      is Some(server) else {
+      return
     }
     let hits : Ref[Int] = { val: 0 }
     group.spawn_bg(no_wait=true) <| () => {
@@ -176,15 +166,11 @@ async test "streaming chat retries an idle stall before any event" {
 /// is no second hit.
 async test "streaming chat fails an idle stall after a delta without retrying" {
   @async.with_task_group() <| group => {
-    let server = @http.Server(@socket.Addr::parse("127.0.0.1:0")) catch {
-      error => {
-        let message = "\{error}"
-        if message.contains("Operation not permitted") {
-          println("local TCP bind unavailable; skipping idle-stall test")
-          return
-        }
-        raise error
-      }
+    guard bind_test_server(
+        "local TCP bind unavailable; skipping idle-stall test",
+      )
+      is Some(server) else {
+      return
     }
     let hits : Ref[Int] = { val: 0 }
     group.spawn_bg(no_wait=true) <| () => {
@@ -237,15 +223,11 @@ async test "streaming chat fails an idle stall after a delta without retrying" {
 /// replaying a half-consumed completion. Exactly one hit; the delta is seen.
 async test "streaming chat does not retry an idle stall after an unterminated data line" {
   @async.with_task_group() <| group => {
-    let server = @http.Server(@socket.Addr::parse("127.0.0.1:0")) catch {
-      error => {
-        let message = "\{error}"
-        if message.contains("Operation not permitted") {
-          println("local TCP bind unavailable; skipping idle-stall test")
-          return
-        }
-        raise error
-      }
+    guard bind_test_server(
+        "local TCP bind unavailable; skipping idle-stall test",
+      )
+      is Some(server) else {
+      return
     }
     let hits : Ref[Int] = { val: 0 }
     group.spawn_bg(no_wait=true) <| () => {
