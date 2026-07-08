@@ -295,13 +295,81 @@ fn event_card(
     Assistant(message) =>
       assistant_card(seq, time, message, briefs, failed, tags, step_label~)
     Tool(result) => tool_card(seq, time, result, tags)
-    Runtime(notice) =>
-      card("runtime", "Runtime notice", seq, time~, [
-        text_block(notice.content()),
-      ])
+    Runtime(notice) => runtime_card(seq, time, notice.content())
     Summary(summary) => summary_card(seq, time, summary)
     Terminal(terminal) => terminal_card(seq, time, terminal, step_label~)
   }
+}
+
+///|
+/// The label prefix the agent loop's plan cadence stamps on its staleness
+/// reminders (see `plan_reminder_text` in `agent`); the card renderer keys off
+/// it to give those notices a dedicated look.
+const PlanReminderPrefix : String = "[plan reminder]"
+
+///|
+/// Render a `RuntimeNotice` card. A plan-cadence reminder — recognized by its
+/// `[plan reminder]` prefix — gets its own label and, when it re-surfaces a
+/// recorded checklist ("Current plan:" followed by `N. [status] title` lines),
+/// the steps render as a status-classed list instead of raw text. Any other
+/// runtime notice keeps the generic card.
+fn runtime_card(seq : Int, time : String, content : String) -> @html.Html {
+  if !content.has_prefix(PlanReminderPrefix) {
+    return card("runtime", "Runtime notice", seq, time~, [text_block(content)])
+  }
+  let body : Array[@html.Html] = []
+  match split_plan_checklist(content) {
+    Some((prose, steps)) => {
+      body.push(text_block(prose))
+      body.push(
+        @html.ul(class="plan-steps") <| [
+          for step in steps => plan_step_item(step)
+        ],
+      )
+    }
+    None => body.push(text_block(content))
+  }
+  card("runtime plan-reminder", "Plan reminder", seq, time~, body)
+}
+
+///|
+/// Split a checklist-carrying reminder into its prose (through the
+/// "Current plan:" line) and the step lines after it. `None` when the notice
+/// has no checklist (the no-plan nag variant).
+fn split_plan_checklist(content : String) -> (String, Array[String])? {
+  let lines = content.split("\n").map(line => line.to_owned()).collect()
+  for index, line in lines {
+    if line.trim_end().has_suffix("Current plan:") {
+      let steps = [
+        for step in lines[index + 1:] if !step.trim().is_empty() => step
+      ]
+      if steps.is_empty() {
+        return None
+      }
+      return Some((lines[:index + 1].join("\n"), steps))
+    }
+  }
+  None
+}
+
+///|
+/// One checklist row: `N. [status] title` renders as a status chip plus the
+/// numbered title, with the status doubling as a CSS class
+/// (pending/in_progress/completed). A line that does not match the shape falls
+/// back to plain text so the card never drops content.
+fn plan_step_item(line : String) -> @html.Html {
+  guard line.find("[") is Some(open) &&
+    line.find("]") is Some(close) &&
+    open < close else {
+    return @html.li(class="plan-step") <| line
+  }
+  let status = line[open + 1:close].to_owned()
+  let number = line[:open].trim_end().to_owned()
+  let title = line[close + 1:].trim_start().to_owned()
+  @html.li(class="plan-step \{status}") <| [
+    @html.span(class="step-status") <| status,
+    @html.text(" \{number} \{title}"),
+  ]
 }
 
 ///|

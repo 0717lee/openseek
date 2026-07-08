@@ -824,6 +824,48 @@ test "a dangling call pairs only in the model view, where it is healed" {
 }
 
 ///|
+/// Plan-cadence reminders (the `[plan reminder]` prefix) get a dedicated card:
+/// the checklist variant renders its steps as status-classed rows, the no-plan
+/// variant keeps its prose, and an unrelated runtime notice keeps the generic
+/// card. The reminder bodies mirror `plan_reminder_text` in `agent`.
+test "plan reminder notices render a dedicated card with checklist rows" {
+  let checklist_reminder =
+    #|[plan reminder]
+    #|The plan tool has not been called in a while. If progress was made,
+    #|update step statuses; if the plan no longer matches the work,
+    #|replace it or clear it with steps: []. Current plan:
+    #|1. [completed] read the failing test
+    #|2. [in_progress] fix the parser
+    #|3. [pending] run moon test
+  let no_plan_reminder =
+    #|[plan reminder]
+    #|The plan tool has not been used in this turn. If this task takes
+    #|several distinct steps, record a plan with the plan tool and keep
+    #|step statuses current. If not, ignore this reminder.
+  let session = @agent_session.Session(SessionId("plan"), system_prompt="")
+    .append(User(UserMessage("do a long task")))
+    .append(Runtime(RuntimeNotice(checklist_reminder)))
+    .append(Runtime(RuntimeNotice(no_plan_reminder)))
+    .append(Runtime(RuntimeNotice("unrelated runtime context")))
+  let html = render(@viz.render_session(session, RawLog))
+  // Checklist variant: dedicated card, prose kept, one status-classed row per
+  // step with the status chip split from the numbered title.
+  assert_true(html.contains("class=\"card runtime plan-reminder\""))
+  assert_true(html.contains("Plan reminder"))
+  assert_true(html.contains("Current plan:"))
+  assert_true(html.contains("class=\"plan-steps\""))
+  assert_true(html.contains("class=\"plan-step completed\""))
+  assert_true(html.contains("class=\"plan-step in_progress\""))
+  assert_true(html.contains("class=\"plan-step pending\""))
+  assert_true(html.contains("2. fix the parser"))
+  // No-plan variant: the dedicated card without a checklist list.
+  assert_true(html.contains("has not been used in this turn"))
+  // Unrelated notices keep the generic runtime card.
+  assert_true(html.contains("Runtime notice"))
+  assert_true(html.contains("unrelated runtime context"))
+}
+
+///|
 /// Stamped events render relative offsets and a turn duration; unstamped
 /// events (the 0 sentinel) render no time chips at all.
 test "raw view shows total-second offsets and turn duration from ts" {

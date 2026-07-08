@@ -321,6 +321,17 @@
     .card.tool { border-left-color: var(--tool); }
     .card.tool.error { border-left-color: var(--error); background: var(--notice-error-bg); }
     .card.runtime { border-left-color: var(--runtime); }
+    /* plan-cadence reminder: checklist steps as status-classed rows */
+    .plan-steps { margin: 8px 0 0; padding-left: 20px; font-size: 12.5px; list-style: none; }
+    .plan-step { margin: 3px 0; }
+    .plan-step .step-status {
+      font-family: ui-monospace, monospace; font-size: 11px;
+      color: var(--muted); border: 1px solid var(--border);
+      border-radius: 4px; padding: 0 5px; margin-right: 6px;
+    }
+    .plan-step.completed { color: var(--muted); text-decoration: line-through; }
+    .plan-step.completed .step-status { text-decoration: none; }
+    .plan-step.in_progress { font-weight: 600; }
     .card.summary { border-left-color: var(--summary); background: var(--summary-bg); }
     .card.terminal { border-left-color: var(--terminal); }
     .card.system { border-left-color: var(--muted); }
