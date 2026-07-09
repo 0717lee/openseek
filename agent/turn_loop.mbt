@@ -14,6 +14,7 @@ priv struct AgentLoop {
   /// succeeded.
   messages : Array[@deepseek.ChatMessage]
   plan_cadence : PlanCadence
+  goal_cadence : GoalCadence
   /// Latest session returned by a successful append. The run-level error
   /// handler uses it to persist a terminal failure/interruption even when the
   /// local loop state is behind the last durable session.
@@ -37,6 +38,15 @@ fn AgentLoop::AgentLoop(
     append_item,
     messages: session.chat_messages(),
     plan_cadence: PlanCadence(registered=tools.find("plan") is Some(_)),
+    goal_cadence: GoalCadence(
+      session,
+      // Control-gated like the finish salvage: a custom non-control tool
+      // that happens to be named "goal" keeps its own schema and executor —
+      // the loop protocol only claims the name when the registered
+      // definition declares itself a control tool (the built-in does).
+      tool_registered=tools.find("goal") is Some(definition) &&
+        definition.is_control(),
+    ),
     last_session: session,
   }
 }
@@ -101,6 +111,27 @@ async fn AgentLoop::run(
       if response.tool_calls.is_empty() {
         let steer_inputs = self.runtime.pending_steers()
         if steer_inputs.is_empty() {
+          if step + 1 < max_steps &&
+            self.goal_cadence.due_finish_check() is Some(_) {
+            // The model considers itself done, but the standing goal is
+            // unconfirmed: keep the would-be answer as an ordinary assistant
+            // message and ask once whether the goal is met. The model may
+            // finish again immediately, so the turn is never held hostage.
+            // At the ceiling the history is checkpointed first, so the
+            // check round cannot overflow the pressured context.
+            match
+              self.continue_into_goal_check(
+                session,
+                response.usage,
+                spent_result_chars=0,
+                kept_answer=response.content,
+                keep_only_when_compacted=false,
+                reasoning_content?=response.optional_reasoning_content(),
+              ) {
+              Sealed(next) => return next
+              ContinueTurn(next) => continue next
+            }
+          }
           // A true final answer is stored once as Terminal(Finished). Later turns
           // rebuild model context through Session::chat_messages, which projects
           // that terminal back into an assistant message; appending an Assistant
@@ -139,7 +170,12 @@ async fn AgentLoop::run(
           response,
           tool_calls=response.tool_calls,
         )
-        match self.salvage_finish_at_ceiling(session, response) {
+        match
+          self.salvage_finish_at_ceiling(
+            session,
+            response,
+            last_step=step + 1 >= max_steps,
+          ) {
           Some(StepDone(next)) => return next
           // A steer arrived during the salvaged finish's checkpoint: the
           // turn continues from the compacted projection.
@@ -161,7 +197,12 @@ async fn AgentLoop::run(
           self.runtime.pending_steers(),
         )
       } else {
-        match self.handle_tool_calls(session, response) {
+        match
+          self.handle_tool_calls(
+            session,
+            response,
+            last_step=step + 1 >= max_steps,
+          ) {
           // Plain continuation — including after a checkpoint whose late
           // steer converted a finish into a continue: the soft decision
           // lives in handle_tool_calls, which knows the batch's real
@@ -180,6 +221,8 @@ async fn AgentLoop::run(
         }
       }
     } nobreak {
+      // A goal met in the last step's batch still needs its durable clear.
+      let session = self.flush_goal_tombstone(session)
       let session = self.append(
         session,
         Terminal(Failed("max steps exhausted")),
@@ -195,11 +238,12 @@ async fn AgentLoop::run(
       } else {
         Terminal(Failed("agent failed: \{error}"))
       }
-      ignore(
-        self.append(self.last_session, terminal) catch {
-          _ => self.last_session
-        },
-      )
+      // Best-effort: a goal met in the dying batch keeps its durable clear
+      // when the store still accepts appends.
+      let session = self.flush_goal_tombstone(self.last_session) catch {
+        _ => self.last_session
+      }
+      ignore(self.append(session, terminal) catch { _ => session })
       raise error
     }
   }
@@ -271,6 +315,9 @@ async fn AgentLoop::apply_steer_inputs(
     let next = self.append(current, item)
     self.messages.push(ChatMessage(User, content=text))
     @xlog.info() <? { "event": "steer_applied", "kind": kind, "content": text }
+    if input is Notice(text) {
+      self.goal_cadence.observe_notice(text)
+    }
     continue next
   } nobreak {
     current
@@ -282,12 +329,25 @@ async fn AgentLoop::prepare_step(
   self : Self,
   session : @agent_session.Session,
 ) -> @agent_session.Session {
+  // A goal(met) recorded in the previous batch lands its durable tombstone
+  // here, at a batch-safe boundary.
+  let session = self.flush_goal_tombstone(session)
   // Steering first: user-visible mid-turn input should be applied before plan
   // reminders or the next model request.
   let mut session = self.apply_steer_inputs(
     session,
     self.runtime.pending_steers(),
   )
+  if self.goal_cadence.due_reminder() is Some(goal) {
+    let reminder = goal_reminder_text(
+      goal,
+      tool_registered=self.goal_cadence.tool_registered,
+    )
+    session = self.append(session, Runtime(RuntimeNotice(reminder)))
+    self.messages.push(ChatMessage(User, content=reminder))
+    @xlog.info() <? { "event": "goal_reminder", "content": reminder }
+    self.goal_cadence.record_reminder()
+  }
   if self.plan_cadence.should_remind() {
     let reminder = self.plan_cadence.reminder_text()
     session = self.append(session, Runtime(RuntimeNotice(reminder)))
@@ -337,6 +397,7 @@ async fn AgentLoop::handle_tool_calls(
   self : Self,
   session : @agent_session.Session,
   response : @deepseek.ChatResponse,
+  last_step~ : Bool,
 ) -> AgentStepOutcome {
   let session = self.record_assistant(
     session,
@@ -362,6 +423,7 @@ async fn AgentLoop::handle_tool_calls(
           response,
           from=call_index,
           spent_result_chars~,
+          last_step~,
         ) {
         Some(outcome) => return outcome
         None => ()
@@ -401,6 +463,7 @@ async fn AgentLoop::handle_tool_calls(
         native_call,
         tool_call,
         spent_result_chars~,
+        last_step~,
       ) {
       ContinueToolBatch(next) => {
         // Account the result actually recorded for this call (the loop
@@ -438,7 +501,16 @@ async fn AgentLoop::execute_tool_call(
   native_call : @deepseek.ToolCall,
   tool_call : @agent_tool.AgentToolCall,
   spent_result_chars~ : Int64,
+  last_step~ : Bool,
 ) -> ToolCallOutcome {
+  // The goal status tool is loop-intercepted: only the loop knows whether a
+  // goal currently stands, and the durable clear must be sequenced by the
+  // loop, so the registry entry never executes here. Gated on registration:
+  // a hallucinated `goal` call against a registry that never advertised the
+  // tool must get the normal unknown-tool error, not clear a standing goal.
+  if tool_call.name == "goal" && self.goal_cadence.tool_registered {
+    return self.handle_goal_tool_call(session, native_call, tool_call)
+  }
   let result = @agent_tool.execute_tool_call(tool_call, self.tools)
   match result {
     Control(Finish(answer)) => {
@@ -465,6 +537,26 @@ async fn AgentLoop::execute_tool_call(
       )
       let steer_inputs = self.runtime.pending_steers()
       if steer_inputs.is_empty() {
+        // An unchecked standing goal converts the completion into a check
+        // round BEFORE steer/ceiling routing: the batch remainder is
+        // already closed above, so the check is the only insertion. At the
+        // ceiling the history is checkpointed first (see the helper).
+        // On the final bounded step there is no request budget left for a
+        // check round: injecting one would exit into "max steps exhausted"
+        // and turn a successful bounded turn into a failure. Finish.
+        if !last_step && self.goal_cadence.due_finish_check() is Some(_) {
+          return match
+            self.continue_into_goal_check(
+              session,
+              response.usage,
+              spent_result_chars~,
+              kept_answer=answer,
+              keep_only_when_compacted=true,
+            ) {
+            Sealed(next) => FinishAgentLoop(next)
+            ContinueTurn(next) => ContinueAgentLoop(next)
+          }
+        }
         return match
           self.finish_turn(
             session,
@@ -502,6 +594,9 @@ async fn AgentLoop::execute_tool_call(
           ),
         ),
       )
+      // The abort closes the batch; a goal met earlier in it still needs
+      // its durable clear before the terminal.
+      let session = self.flush_goal_tombstone(session)
       let session = self.append(session, Terminal(Aborted(reason)))
       @xlog.warn() <? { "event": "agent_aborted", "reason": reason }
       return FinishAgentLoop(session)
@@ -535,7 +630,7 @@ async fn AgentLoop::execute_tool_call(
 
 ///|
 /// Append synthetic error results for tool calls left unexecuted after a finish
-/// tool loses to newly arrived user input.
+/// tool loses to newly arrived user input or to a goal check.
 ///
 /// Every call in the assistant's batch needs a result message, so the finish
 /// call's result and skipped notes for the unexecuted remainder are pushed
@@ -601,6 +696,7 @@ async fn AgentLoop::salvage_finish_at_ceiling(
   response : @deepseek.ChatResponse,
   from? : Int = 0,
   spent_result_chars? : Int64 = 0,
+  last_step~ : Bool,
 ) -> AgentStepOutcome? {
   // The registry must declare the finish tool a CONTROL tool: that is how
   // the loop knows — without executing — that honoring the call appends a
@@ -618,11 +714,54 @@ async fn AgentLoop::salvage_finish_at_ceiling(
   let tool_call = @agent_tool.AgentToolCall(native_call) catch {
     _ => return None
   }
-  let session = self.close_skipped_tool_calls(
-    session,
-    response.tool_calls[from:finish_index],
-    note=ceiling_skip_note,
-  )
+  // Control-registered calls in the prefix are bounded by contract and can
+  // carry the completion's substance — the goal check text asks for
+  // goal(met) BEFORE finish, and skip-closing it would resurrect a
+  // completed goal for auto-continue. Execute them; skip everything else.
+  let session = for index = from, session = session {
+    if index >= finish_index {
+      break session
+    }
+    let call = response.tool_calls[index]
+    let is_control_call = self.tools.find(call.name) is Some(definition) &&
+      definition.is_control()
+    if is_control_call {
+      let decoded : @agent_tool.AgentToolCall? = Some(AgentToolCall(call)) catch {
+        _ => None
+      }
+      match decoded {
+        Some(tool_call) =>
+          match
+            self.execute_tool_call(
+              session,
+              response,
+              index,
+              call,
+              tool_call,
+              spent_result_chars~,
+              last_step~,
+            ) {
+            ContinueToolBatch(next) => continue index + 1, next
+            // The control already closed the batch remainder and prepared a
+            // continuation (e.g. a control finish converted into a goal
+            // check): re-scanning the same calls would duplicate results
+            // and bypass the injected check.
+            ContinueAgentLoop(next) => return Some(StepContinue(next))
+            // A prefix control that SEALED the turn (e.g. an abort) owns
+            // the terminal: executing the finish after it would append
+            // past a terminal and override the intended outcome.
+            FinishAgentLoop(next) => return Some(StepDone(next))
+          }
+        None => ()
+      }
+    }
+    continue index + 1,
+      self.close_skipped_tool_calls(
+        session,
+        response.tool_calls[index:index + 1],
+        note=ceiling_skip_note,
+      )
+  }
   match
     self.execute_tool_call(
       session,
@@ -631,6 +770,7 @@ async fn AgentLoop::salvage_finish_at_ceiling(
       native_call,
       tool_call,
       spent_result_chars~,
+      last_step~,
     ) {
     FinishAgentLoop(next) => Some(StepDone(next))
     // The finish ran but a steer converted it into a continuation: its
@@ -715,6 +855,125 @@ async fn AgentLoop::record_tool_result(
 }
 
 ///|
+/// Convert a completion attempt into a goal-check round. At the soft
+/// ceiling the history is checkpointed FIRST, so the check round runs from
+/// a compacted context — continuing with the uncheckpointed pressured
+/// history plus the check notice could overflow the next request. A failed
+/// checkpoint yields fail-open instead: the goal survives in the raw log
+/// and the next turn's start re-surfaces it. `kept_answer` (with its
+/// reasoning) becomes an ordinary assistant message — appended after any
+/// summary, so it stays verbatim — BOTH arms pass it: without it a ceiling
+/// checkpoint covers the finish result and the check round would see only
+/// the lossy summary instead of the verbatim answer non-ceiling checks
+/// get. Only the no-tool arm passes reasoning: the finish tool's answer is
+/// synthetic (its reasoning lives on the batch's covered assistant
+/// message; re-attaching it would duplicate what Kimi preserves there).
+async fn AgentLoop::continue_into_goal_check(
+  self : Self,
+  session : @agent_session.Session,
+  usage : @deepseek.Usage,
+  spent_result_chars~ : Int64,
+  kept_answer~ : String,
+  keep_only_when_compacted~ : Bool,
+  reasoning_content? : String,
+) -> FinishOutcome {
+  let at_ceiling = self.at_soft_context_ceiling(
+    usage,
+    extra_result_chars=spent_result_chars,
+  )
+  let (session, compacted) = if at_ceiling {
+    self.checkpoint_at_ceiling(session, [])
+  } else {
+    (session, false)
+  }
+  if at_ceiling && !compacted {
+    let to_sequence = session.last_sequence()
+    // A no-tool answer exists nowhere else: persist it before sealing, or
+    // the completion attempt is lost with the failed checkpoint. The
+    // finish-tool variant is already durable as the batch's tool result.
+    let session = if keep_only_when_compacted {
+      session
+    } else {
+      self.append(
+        session,
+        Assistant(AssistantMessage(kept_answer, reasoning_content?)),
+      )
+    }
+    // Same lossless-steering rule as the yield path: input queued during
+    // the failed checkpoint request persists (uncovered) instead of being
+    // boundary-dropped at TurnDone.
+    let session = self.apply_steer_inputs(
+      session,
+      self.runtime.pending_steers(),
+    )
+    return Sealed(
+      self.finish_context_yield(session, to_sequence, compacted=false),
+    )
+  }
+  // The finish-tool arm's answer is already durable as the batch's tool
+  // result, so it is re-kept only when a checkpoint just covered it; the
+  // no-tool arm's answer exists nowhere else and is always kept.
+  let session = if !keep_only_when_compacted || at_ceiling {
+    let session = self.append(
+      session,
+      Assistant(AssistantMessage(kept_answer, reasoning_content?)),
+    )
+    self.messages.push(
+      ChatMessage(Assistant, content=kept_answer, reasoning_content?),
+    )
+    session
+  } else {
+    session
+  }
+  // Steers queued during the checkpoint await land NOW, before the check:
+  // otherwise the next prepare_step would append them after it, the model
+  // would answer the newer instruction, and — finish_checked being spent —
+  // finish without ever addressing the standing-goal check.
+  let session = self.apply_steer_inputs(session, self.runtime.pending_steers())
+  // Those steers may themselves have SET or CLEARED the goal: check the
+  // cadence's CURRENT goal, never the text captured before the checkpoint —
+  // a goal set during the await deserves its own check, and a cleared one
+  // needs none (finish_checked stays unspent).
+  let session = match self.goal_cadence.due_finish_check() {
+    Some(current) => self.inject_goal_check(session, current)
+    None => session
+  }
+  if at_ceiling {
+    // Re-seed the in-flight buffer from the compacted projection: the
+    // whole point of the checkpoint is that the check round is small.
+    self.messages.clear()
+    for message in session.chat_messages() {
+      self.messages.push(message)
+    }
+  }
+  ContinueTurn(session)
+}
+
+///|
+/// Answer a finish attempt with the once-per-turn goal check: a durable
+/// runtime notice plus the mirrored model message, so the next request asks
+/// the model to confirm the standing goal before the turn may end.
+async fn AgentLoop::inject_goal_check(
+  self : Self,
+  session : @agent_session.Session,
+  goal : String,
+) -> @agent_session.Session {
+  let check = goal_check_text(
+    goal,
+    tool_registered=self.goal_cadence.tool_registered,
+  )
+  let session = self.append(session, Runtime(RuntimeNotice(check)))
+  self.messages.push(ChatMessage(User, content=check))
+  @xlog.info() <? { "event": "goal_check", "content": check }
+  self.goal_cadence.record_finish_check()
+  // The check must stay the newest instruction: a plan reminder landing at
+  // the same cadence boundary would bury it — the model would answer the
+  // plan nag, and finish_checked is already spent, bypassing the gate.
+  self.plan_cadence.record_reminder()
+  session
+}
+
+///|
 /// Durably record the turn's final answer and mirror it for the still-live
 /// loop state.
 ///
@@ -739,6 +998,10 @@ async fn AgentLoop::finish_turn(
   spent_result_chars? : Int64 = 0,
   reasoning_content? : String,
 ) -> FinishOutcome {
+  // A goal met in the turn's final batch still needs its durable clear
+  // before the terminal seals the turn — and before any compact-on-finish
+  // checkpoint, so the tombstone is covered like the rest of the history.
+  let session = self.flush_goal_tombstone(session)
   let session = if self.at_soft_context_ceiling(
       usage,
       extra_result_chars=spent_result_chars,

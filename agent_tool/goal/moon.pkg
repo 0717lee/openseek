@@ -1,0 +1,8 @@
+import {
+  "bobzhang/openseek/agent_tool",
+  "moonbitlang/core/json",
+}
+
+warnings = "+unnecessary_annotation"
+
+supported_targets = "+native"

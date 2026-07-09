@@ -11,7 +11,19 @@ import {
 // Values
 pub const ContextYieldAnswerPrefix : String = "[context ceiling]"
 
+pub const GoalBlockedPrefix : String = "[goal blocked]"
+
+pub const GoalCheckPrefix : String = "[goal check]"
+
+pub const GoalClearedNotice : String = "[goal cleared]"
+
+pub const GoalPrefix : String = "[goal]"
+
+pub const GoalReminderPrefix : String = "[goal reminder]"
+
 pub const PlanReminderPrefix : String = "[plan reminder]"
+
+pub fn goal_marker(String) -> GoalMarker?
 
 // Errors
 
@@ -23,6 +35,12 @@ pub fn AssistantMessage::AssistantMessage(String, tool_calls? : Array[@deepseek.
 pub fn AssistantMessage::content(Self) -> String
 pub fn AssistantMessage::reasoning_content(Self) -> String?
 pub fn AssistantMessage::tool_calls(Self) -> Array[@deepseek.ToolCall]
+
+pub(all) enum GoalMarker {
+  GoalSet(String)
+  GoalCleared
+  GoalBlocked(String)
+} derive(@debug.Debug)
 
 pub struct RuntimeNotice {
   // private fields
@@ -38,6 +56,7 @@ pub fn Session::append(Self, SessionItem, unix_ms? : Int64) -> Self
 pub fn Session::append_event(Self, SessionItem, unix_ms? : Int64) -> (Self, SessionEvent)
 pub fn Session::chat_messages(Self) -> Array[@deepseek.ChatMessage]
 pub fn Session::compact(Self, content~ : String, from_sequence~ : Int, to_sequence~ : Int, unix_ms? : Int64) -> Self raise
+pub fn Session::current_goal(Self) -> StandingGoal?
 pub fn Session::events(Self) -> @vector.Vector[SessionEvent]
 pub fn Session::id(Self) -> SessionId
 pub fn Session::last_sequence(Self) -> Int
@@ -80,6 +99,14 @@ pub fn SessionSummary::SessionSummary(content~ : String, from_sequence~ : Int, t
 pub fn SessionSummary::content(Self) -> String
 pub fn SessionSummary::from_sequence(Self) -> Int
 pub fn SessionSummary::to_sequence(Self) -> Int
+
+pub struct StandingGoal {
+  // private fields
+} derive(@debug.Debug)
+pub fn StandingGoal::answered_since_set(Self) -> Bool
+pub fn StandingGoal::blocked(Self) -> Bool
+pub fn StandingGoal::set_sequence(Self) -> Int
+pub fn StandingGoal::text(Self) -> String
 
 pub struct ToolResult {
   // private fields

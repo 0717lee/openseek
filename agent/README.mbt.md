@@ -139,6 +139,7 @@ async test "standard tools are registered in dispatch order" {
         #|  "multi_edit",
         #|  "write",
         #|  "plan",
+        #|  "goal",
         #|  "finish",
         #|]
       ),

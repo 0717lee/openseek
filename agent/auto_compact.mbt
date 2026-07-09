@@ -173,6 +173,12 @@ async fn AgentLoop::yield_at_context_ceiling(
   session : @agent_session.Session,
   steers : ArrayView[@agent_runtime.SteerInput],
 ) -> @agent_session.Session {
+  // A goal(met) recorded in the turn's final batch defers its durable
+  // [goal cleared] tombstone to a batch-safe boundary; every yield site
+  // has the batch closed, and without this flush the tombstone would be
+  // lost — current_goal() would resurrect a goal the model already met,
+  // and auto-continue would keep chaining toward it.
+  let session = self.flush_goal_tombstone(session)
   let to_sequence = session.last_sequence()
   let (session, compacted) = self.checkpoint_at_ceiling(session, steers)
   // The summary request takes seconds; steers submitted while it was in

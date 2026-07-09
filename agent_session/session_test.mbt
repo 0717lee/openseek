@@ -383,3 +383,58 @@ test "generated session ids stamp the launcher prefix and UTC wall clock" {
     "cli-20260611-081500-042-1a2b3c4d",
   )
 }
+
+///|
+test "a compacted-over set marker re-arms the turn-start reminder" {
+  // A fresh set normally rides the next request verbatim, so no reminder —
+  // but a summary covering the marker removes that verbatim text from the
+  // projection, and the cadence must re-surface the goal instead of
+  // trusting the lossy summary.
+  let session = @agent_session.Session(SessionId("s1"), system_prompt="sys")
+    .append(User(UserMessage("task")))
+    .append(
+      Runtime(RuntimeNotice("\{@agent_session.GoalPrefix}\nbig objective")),
+    )
+    .append(
+      Summary(SessionSummary(content="folded", from_sequence=1, to_sequence=2)),
+    )
+  guard session.current_goal() is Some(goal) else { fail("goal must stand") }
+  assert_true(goal.answered_since_set())
+}
+
+///|
+test "a summary of later events leaves a fresh set marker verbatim" {
+  // The marker stays in the projection (the summary's range starts after
+  // it), so the fresh-set suppression still applies: no extra reminder.
+  let session = @agent_session.Session(SessionId("s2"), system_prompt="sys")
+    .append(User(UserMessage("task one")))
+    .append(User(UserMessage("task two")))
+    .append(
+      Runtime(RuntimeNotice("\{@agent_session.GoalPrefix}\nbig objective")),
+    )
+    .append(
+      Summary(SessionSummary(content="folded", from_sequence=1, to_sequence=2)),
+    )
+  guard session.current_goal() is Some(goal) else { fail("goal must stand") }
+  assert_false(goal.answered_since_set())
+}
+
+///|
+test "a blocked marker pauses the standing goal without clearing it" {
+  let session = @agent_session.Session(SessionId("s3"), system_prompt="sys")
+    .append(
+      Runtime(RuntimeNotice("\{@agent_session.GoalPrefix}\nbig objective")),
+    )
+    .append(Terminal(Finished("earlier")))
+    .append(
+      Runtime(RuntimeNotice("\{@agent_session.GoalBlockedPrefix}\nneeds a key")),
+    )
+  guard session.current_goal() is Some(goal) else { fail("goal must stand") }
+  assert_true(goal.blocked())
+  // A NEWER set resets the pause.
+  let session = session.append(
+    Runtime(RuntimeNotice("\{@agent_session.GoalPrefix}\nnew objective")),
+  )
+  guard session.current_goal() is Some(goal) else { fail("goal must stand") }
+  assert_false(goal.blocked())
+}

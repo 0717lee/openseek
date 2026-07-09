@@ -129,6 +129,7 @@ pub async fn[X] build_tools(
       @multi_edit.definition(workspace_root~),
       @write.definition(workspace_root~),
       @plan.definition(),
+      @goal.definition(),
       @finish.definition(),
     ],
   )
@@ -140,7 +141,7 @@ async test "agent registers the expected tool names" {
   @async.with_task_group() <| group => {
     let tools = build_tools(AgentRuntime(), AgentTaskScope(group))
     let function_tools = tools.function_tools()
-    assert_eq(function_tools.length(), 9)
+    assert_eq(function_tools.length(), 10)
     let names = [ for t in function_tools => t.name ]
     assert_true(names.contains("shell"))
     assert_true(names.contains("shell_output"))
@@ -150,6 +151,7 @@ async test "agent registers the expected tool names" {
     assert_true(names.contains("multi_edit"))
     assert_true(names.contains("write"))
     assert_true(names.contains("plan"))
+    assert_true(names.contains("goal"))
     assert_true(names.contains("finish"))
     assert_false(names.contains("moon_check"))
     assert_false(names.contains("moon_cmd"))
@@ -166,7 +168,7 @@ async test "agent registers the expected tool names on windows" {
   @async.with_task_group() <| group => {
     let tools = build_tools(AgentRuntime(), AgentTaskScope(group))
     let function_tools = tools.function_tools()
-    assert_eq(function_tools.length(), 7)
+    assert_eq(function_tools.length(), 8)
     let names = [ for t in function_tools => t.name ]
     assert_true(names.contains("shell"))
     assert_false(names.contains("shell_output"))
@@ -176,6 +178,7 @@ async test "agent registers the expected tool names on windows" {
     assert_true(names.contains("multi_edit"))
     assert_true(names.contains("write"))
     assert_true(names.contains("plan"))
+    assert_true(names.contains("goal"))
     assert_true(names.contains("finish"))
     guard tools.find("shell") is Some(shell) else { fail("shell tool missing") }
     assert_false(shell.description.contains("run_in_background"))
