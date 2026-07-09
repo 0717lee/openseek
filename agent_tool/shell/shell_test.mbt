@@ -1,11 +1,20 @@
 ///|
-async fn run_shell(arguments : Json) -> @agent_tool.ToolOutput {
-  let action = match @shell.definition().execute {
+/// Execute a shell tool definition and unwrap its Respond output.
+async fn exec_shell(
+  definition : @agent_tool.AgentToolDefinition,
+  arguments : Json,
+) -> @agent_tool.ToolOutput {
+  let action = match definition.execute {
     Async(execute) => execute(arguments)
     Sync(_) => fail("shell tool should be async")
   }
   guard action is Respond(output) else { fail("expected Respond") }
   output
+}
+
+///|
+async fn run_shell(arguments : Json) -> @agent_tool.ToolOutput {
+  exec_shell(@shell.definition(), arguments)
 }
 
 ///|
@@ -17,12 +26,7 @@ async fn run_shell_wired(
   bg : @bgjobs.BgJobRuntime,
   arguments : Json,
 ) -> @agent_tool.ToolOutput {
-  let action = match @shell.definition(bg_runtime=bg).execute {
-    Async(execute) => execute(arguments)
-    Sync(_) => fail("shell tool should be async")
-  }
-  guard action is Respond(output) else { fail("expected Respond") }
-  output
+  exec_shell(@shell.definition(bg_runtime=bg), arguments)
 }
 
 ///|
@@ -166,12 +170,7 @@ async fn run_shell_in_workspace(
   workspace_root : String,
   arguments : Json,
 ) -> @agent_tool.ToolOutput {
-  let action = match @shell.definition(workspace_root~).execute {
-    Async(execute) => execute(arguments)
-    Sync(_) => fail("shell tool should be async")
-  }
-  guard action is Respond(output) else { fail("expected Respond") }
-  output
+  exec_shell(@shell.definition(workspace_root~), arguments)
 }
 
 ///|
@@ -1965,12 +1964,7 @@ async fn run_shell_default(
   arguments : Json,
   default_timeout_ms~ : Int,
 ) -> @agent_tool.ToolOutput {
-  let action = match @shell.definition(default_timeout_ms~).execute {
-    Async(execute) => execute(arguments)
-    Sync(_) => fail("shell tool should be async")
-  }
-  guard action is Respond(output) else { fail("expected Respond") }
-  output
+  exec_shell(@shell.definition(default_timeout_ms~), arguments)
 }
 
 ///|
@@ -1988,12 +1982,10 @@ async test "an omitted timeout gets a default that kills on the unwired path" {
 async test "an omitted timeout detaches at the default on the wired path" {
   @async.with_task_group() <| group => {
     let bg = @bgjobs.BgJobRuntime::new(AgentTaskScope(group))
-    let action = match
-      @shell.definition(bg_runtime=bg, default_timeout_ms=50).execute {
-      Async(execute) => execute({ "cmd": "sleep 2" })
-      Sync(_) => fail("shell tool should be async")
-    }
-    guard action is Respond(output) else { fail("expected Respond") }
+    let output = exec_shell(
+      @shell.definition(bg_runtime=bg, default_timeout_ms=50),
+      { "cmd": "sleep 2" },
+    )
     assert_false(output.is_error)
     assert_true(output.content.contains("moved to the background as job"))
     assert_true(output.content.contains("default foreground budget"))
@@ -2018,12 +2010,10 @@ async test "an explicit timeout above the ceiling is an error, not a clamp" {
 async test "run_in_background without timeout_ms is unaffected by defaults" {
   @async.with_task_group() <| group => {
     let bg = @bgjobs.BgJobRuntime::new(AgentTaskScope(group))
-    let action = match
-      @shell.definition(bg_runtime=bg, default_timeout_ms=50).execute {
-      Async(execute) => execute({ "cmd": "sleep 1", "run_in_background": true })
-      Sync(_) => fail("shell tool should be async")
-    }
-    guard action is Respond(output) else { fail("expected Respond") }
+    let output = exec_shell(
+      @shell.definition(bg_runtime=bg, default_timeout_ms=50),
+      { "cmd": "sleep 1", "run_in_background": true },
+    )
     assert_false(output.is_error)
     assert_true(output.content.contains("started background job"))
     let jobs = bg.list()

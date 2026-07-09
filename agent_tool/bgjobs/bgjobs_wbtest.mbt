@@ -18,6 +18,19 @@ async fn poll_until_terminal(
 }
 
 ///|
+/// Await the first pushed exit notice, on the same 200 x 25ms budget as
+/// `poll_until_terminal`.
+#cfg(not(platform="windows"))
+async fn wait_for_first(notices : Array[BgJobSnapshot]) -> Unit {
+  for _ in 0..<200 {
+    if notices.length() > 0 {
+      return
+    }
+    @async.sleep(25)
+  }
+}
+
+///|
 #cfg(not(platform="windows"))
 async test "bg job runs to completion and captures output" {
   @async.with_task_group(group => {
@@ -115,12 +128,7 @@ async test "on_job_exit fires once on a natural exit, never on stop" {
     let stopped = rt.start(program="sleep", args=["30"], command="sleep 30")
     @async.sleep(50)
     assert_true(rt.stop(stopped))
-    for _ in 0..<200 {
-      if seen.length() > 0 {
-        break
-      }
-      @async.sleep(25)
-    }
+    wait_for_first(seen)
     @async.sleep(50)
     // Exactly one notice — for the natural exit, not the stopped job.
     assert_true(seen.length() == 1)
@@ -189,12 +197,7 @@ async test "the watchdog kills a background job that floods past the hard cap" {
     assert_true(snapshot.output_truncated)
     // The kill is pushed like a natural exit: a silently dead job would look
     // like it just never finished.
-    for _ in 0..<200 {
-      if notices.length() > 0 {
-        break
-      }
-      @async.sleep(25)
-    }
+    wait_for_first(notices)
     assert_true(notices.length() == 1)
     assert_true(notices[0].killed_by_output_limit)
   })
@@ -214,12 +217,7 @@ async test "the reaper kills a background job that outlives the time cap" {
     assert_true(snapshot.killed_by_time_limit)
     assert_false(snapshot.killed_by_output_limit)
     // The kill is surfaced exactly once, like an output-cap kill.
-    for _ in 0..<200 {
-      if notices.length() > 0 {
-        break
-      }
-      @async.sleep(25)
-    }
+    wait_for_first(notices)
     assert_true(notices.length() == 1)
     assert_true(notices[0].killed_by_time_limit)
   })

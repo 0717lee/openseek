@@ -40,8 +40,8 @@ fn parse_fields(fields : Map[String, Json]) -> ShellInput raise {
   let cmd = required_string(fields, "cmd")
   let cwd = optional_string(fields, "cwd")
   let timeout_ms = optional_positive_int(fields, "timeout_ms")
-  let max_output_chars = optional_positive_int_or_default(
-    fields, "max_output_chars", default_max_output_chars,
+  let max_output_chars = optional_positive_int(fields, "max_output_chars").unwrap_or(
+    default_max_output_chars,
   )
   let run_in_background = optional_bool(fields, "run_in_background")
   {
@@ -96,15 +96,6 @@ fn optional_positive_int(
     Some(Null) | None => None
     _ => fail("arguments.\{name} to be a number")
   }
-}
-
-///|
-fn optional_positive_int_or_default(
-  fields : Map[String, Json],
-  name : String,
-  default : Int,
-) -> Int raise {
-  optional_positive_int(fields, name).unwrap_or(default)
 }
 
 ///|

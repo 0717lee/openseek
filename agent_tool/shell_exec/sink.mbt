@@ -194,12 +194,9 @@ pub async fn ShellOutputSink::finish(self : ShellOutputSink) -> Unit {
 ///|
 /// Release the spill file descriptor. Reads after this fall back to the head.
 pub fn ShellOutputSink::close(self : ShellOutputSink) -> Unit {
-  match self.file {
-    Some(file) => {
-      file.close()
-      self.file = None
-    }
-    None => ()
+  if self.file is Some(file) {
+    file.close()
+    self.file = None
   }
 }
 
@@ -208,16 +205,12 @@ pub fn ShellOutputSink::close(self : ShellOutputSink) -> Unit {
 /// the foreground (never adopted as a background job), so its temp file does not
 /// leak. Full output is no longer readable after this (the head remains).
 pub async fn ShellOutputSink::discard(self : ShellOutputSink) -> Unit {
-  match self.file {
-    Some(file) => {
-      file.close()
-      self.file = None
-      match self.spill_path {
-        Some(path) => @fs.remove(path) catch { _ => () }
-        None => ()
-      }
+  guard self.file is Some(_) else { return }
+  self.close()
+  if self.spill_path is Some(path) {
+    @fs.remove(path) catch {
+      _ => ()
     }
-    None => ()
   }
 }
 
@@ -388,32 +381,21 @@ fn incomplete_suffix_len(bytes : Bytes) -> Int {
 
 ///|
 fn utf8_sequence_len(b : Int) -> Int {
-  if b >= 0xF0 && b <= 0xF4 {
-    4
-  } else if b >= 0xE0 && b <= 0xEF {
-    3
-  } else if b >= 0xC2 && b <= 0xDF {
-    2
-  } else {
-    0
+  match b {
+    0xF0..=0xF4 => 4
+    0xE0..=0xEF => 3
+    0xC2..=0xDF => 2
+    _ => 0
   }
 }
 
 ///|
 fn continuation_range(lead : Int, j : Int) -> (Int, Int) {
-  if j == 1 {
-    if lead == 0xE0 {
-      (0xA0, 0xBF)
-    } else if lead == 0xED {
-      (0x80, 0x9F)
-    } else if lead == 0xF0 {
-      (0x90, 0xBF)
-    } else if lead == 0xF4 {
-      (0x80, 0x8F)
-    } else {
-      (0x80, 0xBF)
-    }
-  } else {
-    (0x80, 0xBF)
+  match (j, lead) {
+    (1, 0xE0) => (0xA0, 0xBF)
+    (1, 0xED) => (0x80, 0x9F)
+    (1, 0xF0) => (0x90, 0xBF)
+    (1, 0xF4) => (0x80, 0x8F)
+    _ => (0x80, 0xBF)
   }
 }

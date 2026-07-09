@@ -154,8 +154,7 @@ async fn ShellExecution::monitor(
             if (over_foreground_limit || over_hard_cap) &&
               !self.cancel_requested {
               self.killed_by_output_limit = true
-              self.cancel_requested = true
-              self.process.cancel()
+              self.request_stop()
             }
           }
         }
@@ -357,12 +356,9 @@ pub fn ShellExecution::killed_by_time_limit(self : ShellExecution) -> Bool {
 /// monitor reports `Killed` and consumers can name the reaper rather than
 /// reading it as a requested stop. No-op once terminal.
 pub fn ShellExecution::kill_for_time_limit(self : ShellExecution) -> Unit {
-  if self.status.is_terminal() {
-    return
-  }
+  guard !self.status.is_terminal() else { return }
   self.killed_by_time_limit = true
-  self.cancel_requested = true
-  self.process.cancel()
+  self.request_stop()
 }
 
 ///|

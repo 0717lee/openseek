@@ -73,14 +73,11 @@ async fn execute(
     Exited(code) => ("exit=\{code}", code != 0)
     // A watchdog kill (flooded past the hard cap) is named as such, so the model
     // does not read it as a requested stop.
-    Stopped =>
-      if snapshot.killed_by_output_limit {
-        ("stopped killed_at_output_cap=true", true)
-      } else if snapshot.killed_by_time_limit {
-        ("stopped killed_at_time_cap=true", true)
-      } else {
-        ("stopped", true)
-      }
+    Stopped if snapshot.killed_by_output_limit =>
+      ("stopped killed_at_output_cap=true", true)
+    Stopped if snapshot.killed_by_time_limit =>
+      ("stopped killed_at_time_cap=true", true)
+    Stopped => ("stopped", true)
   }
   // Preserve the foreground path's error semantics for a job read later: binary
   // (non-UTF-8) output and a sandboxed source-write denial are tool errors even

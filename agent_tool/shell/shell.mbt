@@ -170,14 +170,12 @@ async fn execute_with_workspace(
       is_error=true,
     )
   }
-  match
-    @command_policy.moonbit_command_policy_error_for_parse(
+  if @command_policy.moonbit_command_policy_error_for_parse(
       input.cmd,
       parsed_command,
-    ) {
-    Some(message) =>
-      return @agent_tool.ToolAction::respond(message, is_error=true)
-    None => ()
+    )
+    is Some(message) {
+    return @agent_tool.ToolAction::respond(message, is_error=true)
   }
   let cwd = @workspace_path.resolve_cwd(workspace_root, input.cwd)
   shell(
@@ -229,15 +227,13 @@ async fn shell(
       )
     }
   }
-  match
-    direct_source_write_redirect_target(parsed_command, workspace_root, cwd) {
-    Some(target) =>
-      return @agent_tool.ToolAction::respond(
-        direct_source_blocked_content("source file write redirect", target),
-        is_error=true,
-        brief=shell_brief(input.cmd, None),
-      )
-    None => ()
+  if direct_source_write_redirect_target(parsed_command, workspace_root, cwd)
+    is Some(target) {
+    return @agent_tool.ToolAction::respond(
+      direct_source_blocked_content("source file write redirect", target),
+      is_error=true,
+      brief=shell_brief(input.cmd, None),
+    )
   }
   // Background: detach the command as a job and return its id instead of blocking
   // for output. Runs the same source-tree guards and sandboxed launch as a
@@ -280,14 +276,9 @@ async fn shell(
   // keeps a full record if detached — the foreground output-limit is still
   // enforced at display via `over_inline_cap` and the spill is discarded
   // when the command finishes in the foreground.
-  let detachable = bg_runtime is Some(_)
   let foreground_spawn : (async (String, Array[String], String?, Int) -> @shell_exec.ShellExecution)? = bg_runtime.map(runtime => {
       (program, args, cwd, max) => {
-        if detachable {
-          runtime.spawn_foreground_retained(program, args, cwd, max)
-        } else {
-          runtime.spawn_foreground(program, args, cwd, max)
-        }
+        runtime.spawn_foreground_retained(program, args, cwd, max)
       }
     },
   )
@@ -394,6 +385,26 @@ priv enum ShellRunResult {
 }
 
 ///|
+/// The protected target of a source-tree operation in `cmd`, or `None` when the
+/// command is allowed: the direct (parse-based) detection first, then the
+/// dynamic (text-based) one for too-complex commands.
+async fn source_tree_operation_target(
+  parsed_command : @shell_parse.ParseResult,
+  cmd : String,
+  workspace_root : String,
+  cwd : String?,
+) -> String? {
+  match
+    direct_source_tree_operation_target(parsed_command, workspace_root, cwd) {
+    Some(target) => Some(target)
+    None =>
+      dynamic_source_tree_operation_target(
+        parsed_command, cmd, workspace_root, cwd,
+      )
+  }
+}
+
+///|
 async fn run_agent_shell_with_tree_precheck(
   workspace_root : String,
   cmd : String,
@@ -404,17 +415,9 @@ async fn run_agent_shell_with_tree_precheck(
   foreground_spawn? : async (String, Array[String], String?, Int) -> @shell_exec.ShellExecution,
   on_timeout_detach? : (@shell_exec.ShellExecution, AgentShellLaunch) -> String,
 ) -> ShellRunResult {
-  match
-    direct_source_tree_operation_target(parsed_command, workspace_root, cwd) {
-    Some(target) => return ShellPreblockedSourceTree(target)
-    None => ()
-  }
-  match
-    dynamic_source_tree_operation_target(
-      parsed_command, cmd, workspace_root, cwd,
-    ) {
-    Some(target) => return ShellPreblockedSourceTree(target)
-    None => ()
+  if source_tree_operation_target(parsed_command, cmd, workspace_root, cwd)
+    is Some(target) {
+    return ShellPreblockedSourceTree(target)
   }
   let launch = agent_shell_launch(workspace_root, cmd, parsed_command, cwd?)
   match foreground_spawn {
@@ -529,30 +532,18 @@ async fn start_background(
       is_error=true,
     )
   }
-  match
-    direct_source_tree_operation_target(parsed_command, workspace_root, cwd) {
-    Some(target) =>
-      return @agent_tool.ToolAction::respond(
-        direct_source_blocked_content("source tree operation", target),
-        is_error=true,
-        brief=shell_brief(input.cmd, None),
-      )
-    None => ()
-  }
-  match
-    dynamic_source_tree_operation_target(
+  if source_tree_operation_target(
       parsed_command,
       input.cmd,
       workspace_root,
       cwd,
-    ) {
-    Some(target) =>
-      return @agent_tool.ToolAction::respond(
-        direct_source_blocked_content("source tree operation", target),
-        is_error=true,
-        brief=shell_brief(input.cmd, None),
-      )
-    None => ()
+    )
+    is Some(target) {
+    return @agent_tool.ToolAction::respond(
+      direct_source_blocked_content("source tree operation", target),
+      is_error=true,
+      brief=shell_brief(input.cmd, None),
+    )
   }
   let launch = agent_shell_launch(
     workspace_root,

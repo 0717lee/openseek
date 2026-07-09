@@ -101,19 +101,17 @@ fn sed_option_consumes_next(arg : String) -> Bool {
   if !arg.has_prefix("-") || arg.has_prefix("--") || arg == "-" {
     return false
   }
-  let chars = [ for ch in arg => ch ]
-  let mut idx = 1
-  while idx < chars.length() {
-    match chars[idx] {
+  for view = arg[1:] {
+    match view {
       // `e`/`f` consume the remainder of the token; if they are the last char,
       // the value is the next word.
-      'e' | 'f' => return idx == chars.length() - 1
+      ['e' | 'f', .. rest] => break rest is []
       // `i` consumes the remainder as its in-place suffix, not the next word.
-      'i' => return false
-      _ => idx += 1
+      ['i', ..] => break false
+      [_, .. rest] => continue rest
+      [] => break false
     }
   }
-  false
 }
 
 ///|
