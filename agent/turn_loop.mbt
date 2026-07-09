@@ -447,6 +447,11 @@ fn log_tool_result(
       "tool_name": tool_call.name,
       "is_error": output.is_error,
       "content": output.content,
+      "brief": if output.brief is Some(brief) {
+        Json::string(brief)
+      } else {
+        Json::null()
+      },
     }
 }
 
