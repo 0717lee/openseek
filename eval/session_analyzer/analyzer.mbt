@@ -39,35 +39,26 @@ priv struct SessionMetrics {
 /// Analyze one already-loaded session.
 pub fn analyze_session(session : @agent_session.Session) -> EvalResult {
   let metrics = summarize_session(session)
-  let reasons : Array[String] = []
-  if !metrics.finished && metrics.terminal_status != "" {
-    reasons.push(
-      "agent terminal " +
-      metrics.terminal_status +
-      ": " +
-      metrics.terminal_message,
-    )
-  } else if !metrics.finished {
-    reasons.push("finish marker missing")
+  let reason = if metrics.finished {
+    "ok"
+  } else if metrics.terminal_status != "" {
+    "agent terminal " +
+    metrics.terminal_status +
+    ": " +
+    metrics.terminal_message
+  } else {
+    "finish marker missing"
   }
-  let warnings : Array[String] = []
-  if metrics.shell_uses > 0 {
-    warnings.push("shell output observed \{metrics.shell_uses} time(s)")
+  let warnings = if metrics.shell_uses > 0 {
+    "shell output observed \{metrics.shell_uses} time(s)"
+  } else {
+    ""
   }
-  let success = reasons.length() == 0
   {
     session_id: session.id().value(),
-    success,
-    reason: if success {
-      "ok"
-    } else {
-      reasons.join("; ")
-    },
-    warnings: if warnings.length() == 0 {
-      ""
-    } else {
-      warnings.join("; ")
-    },
+    success: metrics.finished,
+    reason,
+    warnings,
     steps: metrics.steps,
     tool_results: metrics.tool_results,
     tool_errors: metrics.tool_errors,

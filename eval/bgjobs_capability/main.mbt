@@ -50,7 +50,7 @@ async fn scenario_overlap(engine : Engine) -> Unit {
     event is { "event": String("agent_finished"), .. }
   })
   let wall_s = (@env.now().reinterpret_as_int64() - started_ms) / 1000
-  let backgrounded = first_index(seen, event => {
+  let backgrounded = seen.search_by(event => {
     event is { "event": String("tool_result"), "content": String(content), .. } &&
     content.contains("started background job")
   })
@@ -71,7 +71,7 @@ async fn scenario_overlap(engine : Engine) -> Unit {
     })
   // Any tool activity strictly between the job start and the marker retrieval
   // shows the wait was actually used for work.
-  let retrieved_at = first_index(seen, event => {
+  let retrieved_at = seen.search_by(event => {
     event
     is {
       "event": String("tool_result"),
@@ -82,21 +82,21 @@ async fn scenario_overlap(engine : Engine) -> Unit {
     content.contains("INTEG-OK-31337")
   })
   let overlapped = match (backgrounded, retrieved_at) {
-    (Some(started), Some(retrieved)) => {
-      let mut found = false
-      for index in (started + 1)..<retrieved {
-        if seen[index]
-          is { "event": String("tool_result"), "tool_name": String(name), .. } &&
-          name != "shell_output" {
-          found = true
-          break
-        }
-      }
-      found
-    }
+    (Some(started), Some(retrieved)) if started < retrieved =>
+      seen[started + 1:retrieved]
+      .iter()
+      .any(event => {
+        event
+        is { "event": String("tool_result"), "tool_name": String(name), .. } &&
+        name != "shell_output"
+      })
     _ => false
   }
-  let answer = finished_answer(finished)
+  let answer = match finished {
+    Some({ "event": String("agent_finished"), "answer": String(answer), .. }) =>
+      answer
+    _ => ""
+  }
   report("S1 used background job (the core judgment)", backgrounded is Some(_))
   report("S1 did not block the turn on the slow command", !blocked_foreground)
   report("S1 overlapped quick work with the running job", overlapped)
@@ -222,11 +222,10 @@ async fn Engine::wait_for(
   matches : (Json) -> Bool,
 ) -> Json? {
   let result = @async.with_timeout_opt(timeout_ms, () => {
-    let mut found : Json? = None
     for ;; {
       let event = self.events.get()
       if event is { "event": String("__engine_eof"), .. } {
-        break
+        break None
       }
       seen.push(event)
       // A failed or aborted turn is terminal for whatever we were waiting on:
@@ -240,36 +239,12 @@ async fn Engine::wait_for(
           ),
           ..
         } {
-        break
+        break None
       }
       if matches(event) {
-        found = Some(event)
-        break
+        break Some(event)
       }
     }
-    found
   })
-  match result {
-    Some(found) => found
-    None => None
-  }
-}
-
-///|
-fn first_index(seen : Array[Json], matches : (Json) -> Bool) -> Int? {
-  for index, event in seen {
-    if matches(event) {
-      return Some(index)
-    }
-  }
-  None
-}
-
-///|
-fn finished_answer(event : Json?) -> String {
-  match event {
-    Some({ "event": String("agent_finished"), "answer": String(answer), .. }) =>
-      answer
-    _ => ""
-  }
+  result.unwrap_or(None)
 }

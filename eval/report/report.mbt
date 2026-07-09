@@ -71,13 +71,7 @@ pub fn Report::Report(
 ///|
 /// How many rows passed.
 pub fn Report::successes(self : Report) -> Int {
-  for row in self.rows; count = 0 {
-    if row.success {
-      continue count + 1
-    }
-  } nobreak {
-    count
-  }
+  self.rows.iter().count_if(row => row.success)
 }
 
 ///|
@@ -108,18 +102,14 @@ pub fn Report::markdown(self : Report) -> String {
     lines.push("")
     lines.push("## Trial Details")
     lines.push("")
-    for line in detail_lines {
-      lines.push(line)
-    }
+    lines.append(detail_lines)
   }
   let log_lines = log_section_lines(self.rows)
   if log_lines.length() > 0 {
     lines.push("")
     lines.push("## Logs")
     lines.push("")
-    for line in log_lines {
-      lines.push(line)
-    }
+    lines.append(log_lines)
   }
   "\{lines.join("\n")}\n"
 }
@@ -167,12 +157,14 @@ pub fn Report::html(self : Report) -> String {
     out.write_string("</div>")
   }
   out.write_string("<div class=\"table-wrap\"><table><thead><tr>")
-  let columns : Array[String] = ["#", "Case", "Result"]
-  for column in self.metric_columns {
-    columns.push(column)
-  }
-  columns.push("Reason")
-  columns.push("Warnings")
+  let columns : Array[String] = [
+    "#",
+    "Case",
+    "Result",
+    ..self.metric_columns,
+    "Reason",
+    "Warnings",
+  ]
   for column in columns {
     out.write_string("<th>")
     out.write_string(escape_html(column))
@@ -303,24 +295,15 @@ fn ReportRow::to_json(self : ReportRow) -> Json {
 
 ///|
 fn table_header(metric_columns : Array[String]) -> String {
-  let cells : Array[String] = ["#", "Case", "Result"]
-  for column in metric_columns {
-    cells.push(column)
-  }
-  cells.push("Reason")
-  cells.push("Warnings")
+  let cells : Array[String] = [
+    "#", "Case", "Result", ..metric_columns, "Reason", "Warnings",
+  ]
   "| \{cells.join(" | ")} |"
 }
 
 ///|
 fn table_divider(metric_columns : Array[String]) -> String {
-  let cells : Array[String] = ["---", "---", "---"]
-  for _ in metric_columns {
-    cells.push("---")
-  }
-  cells.push("---")
-  cells.push("---")
-  "| \{cells.join(" | ")} |"
+  "| \{Array::make(metric_columns.length() + 5, "---").join(" | ")} |"
 }
 
 ///|

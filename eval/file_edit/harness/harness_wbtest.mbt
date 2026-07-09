@@ -15,7 +15,7 @@ async test "dry run exact replacement oracle" {
     let workspace = root + "/workspace"
     let log_path = root + "/trial.log"
     @fs.mkdir(workspace, recursive=true)
-    write_fixture(workspace, case)
+    case.initial.write_to(workspace)
     @vfs.FileSystem({ "src/note.txt": "alpha\ndelta\ngamma\n" }).write_to(
       workspace,
     )
@@ -53,7 +53,7 @@ async test "dry run exact replacement oracle with jsonl agent log" {
     let workspace = root + "/workspace"
     let log_path = root + "/trial.log"
     @fs.mkdir(workspace, recursive=true)
-    write_fixture(workspace, case)
+    case.initial.write_to(workspace)
     @vfs.FileSystem({ "src/note.txt": "alpha\ndelta\ngamma\n" }).write_to(
       workspace,
     )

@@ -5,8 +5,7 @@ pub fn count_occurrences(content : String, needle : String) -> Int {
   if needle == "" {
     return 0
   }
-  let pieces = content.split(needle).collect()
-  pieces.length() - 1
+  content.split(needle).count() - 1
 }
 
 ///|
@@ -16,15 +15,7 @@ pub fn count_lines_containing_all(
   content : String,
   needles : Array[String],
 ) -> Int {
-  for line in content.split("\n"); count = 0 {
-    for needle in needles {
-      if !line.contains(needle) {
-        break
-      }
-    } nobreak {
-      continue count + 1
-    }
-  } nobreak {
-    count
-  }
+  content
+  .split("\n")
+  .count_if(line => needles.iter().all(needle => line.contains(needle)))
 }

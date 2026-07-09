@@ -71,7 +71,7 @@ pub async fn run_suite(config : Config) -> EvalReport {
     runs: config.runs,
     concurrency: config.concurrency,
     min_successes: config.min_successes,
-    successes: count_successes(results),
+    successes: results.iter().count_if(result => result.success),
     out_dir: config.out_dir,
     results,
   }
@@ -113,7 +113,7 @@ async fn run_trial(config : Config, index : Int) -> TrialResult {
   let case = @cases.case_for_trial(index)
   let workspace = "\{config.out_dir}/workspaces/\{padded_index(index + 1)}-\{case.id}"
   @fs.mkdir(workspace, recursive=true)
-  write_fixture(workspace, case)
+  case.initial.write_to(workspace)
   let real_workspace = @fs.realpath(workspace)
   let task = case.task(real_workspace)
   // Run the engine in the trial workspace so environment grounding names it
@@ -187,11 +187,6 @@ fn api_key_env_for_model(model : @deepseek.Model) -> String {
     Kimi(_) => "KIMI"
     Deepseek(_) => "DEEPSEEK"
   }
-}
-
-///|
-async fn write_fixture(workspace : String, case : @cases.EvalCase) -> Unit {
-  case.initial.write_to(workspace)
 }
 
 ///|
@@ -301,9 +296,8 @@ fn summarize_agent_log(log_text : String) -> AgentLogSummary {
         if tool_name == "shell" {
           shell_uses += 1
         }
-        match is_error {
-          True => tool_errors += 1
-          _ => ()
+        if is_error is True {
+          tool_errors += 1
         }
       }
       { "event": String(_), .. } => has_json_events = true
@@ -341,9 +335,8 @@ async fn check_expected_state(
     let initial = case.initial.get(unchanged) catch {
       error => return "invalid initial file system: \{error}"
     }
-    let expected = match initial {
-      Some(content) => content
-      None => return "no initial fixture for unchanged file \{unchanged}"
+    guard initial is Some(expected) else {
+      return "no initial fixture for unchanged file \{unchanged}"
     }
     let path = "\{workspace}/\{unchanged}"
     let content = @fs.read_file(path).text() catch {
@@ -361,31 +354,16 @@ async fn run_validation(
   workspace : String,
   validation : Array[String],
 ) -> String {
-  if validation.length() == 0 {
-    return ""
-  }
-  let command = validation[0]
-  let args = [ for i in 1..<validation.length() => validation[i] ]
+  guard validation is [command, .. rest] else { return "" }
   let (code, output) = @process.collect_output_merged(
     command,
-    args,
+    rest.to_owned(),
     cwd=workspace,
   )
   if code == 0 {
     ""
   } else {
     "validation failed: \{validation.join(" ")} exited \{code}: \{output.text()}"
-  }
-}
-
-///|
-fn count_successes(results : Array[TrialResult]) -> Int {
-  for result in results; count = 0 {
-    if result.success {
-      continue count + 1
-    }
-  } nobreak {
-    count
   }
 }
 
