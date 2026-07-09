@@ -342,10 +342,7 @@ fn apply_dropped_file(
   text : String,
 ) -> Model {
   let parsed = @viz.parse_events(text)
-  let (system_prompt, header_present) = match parsed.header {
-    Some(header) => (header.system_prompt, true)
-    None => ("", false)
-  }
+  let (system_prompt, header_present) = header_info(parsed)
   {
     ..model,
     selected: None,
@@ -717,8 +714,7 @@ fn sidebar_groups(rows : Array[SessionRow]) -> Array[String] {
 fn last_separator(p : String) -> Int {
   match (p.rev_find("/"), p.rev_find("\\")) {
     (Some(a), Some(b)) => if a > b { a } else { b }
-    (Some(a), None) => a
-    (None, Some(b)) => b
+    (Some(a), None) | (None, Some(a)) => a
     (None, None) => -1
   }
 }
@@ -1115,6 +1111,17 @@ fn runtime_label(parsed : @session_log.ParsedLog) -> String {
 
 ///|
 fn running_ms(parsed : @session_log.ParsedLog) -> Int64? {
+  match stamp_range(parsed) {
+    // A torn log can stamp backwards; show no span rather than a negative one.
+    Some((first, last)) if last >= first => Some(last - first)
+    _ => None
+  }
+}
+
+///|
+/// The first and last positive wall-clock stamps in the log (unix ms), in file
+/// order, or `None` when no event carries one.
+fn stamp_range(parsed : @session_log.ParsedLog) -> (Int64, Int64)? {
   let mut first = 0L
   let mut last = 0L
   for event in parsed.events {
@@ -1126,8 +1133,8 @@ fn running_ms(parsed : @session_log.ParsedLog) -> Int64? {
       last = stamp
     }
   }
-  if first > 0L && last >= first {
-    Some(last - first)
+  if first > 0L {
+    Some((first, last))
   } else {
     None
   }
@@ -1143,18 +1150,7 @@ fn end_time_label(parsed : @session_log.ParsedLog) -> String {
 
 ///|
 fn last_event_ms(parsed : @session_log.ParsedLog) -> Int64? {
-  let mut last = 0L
-  for event in parsed.events {
-    let stamp = event.unix_ms()
-    if stamp > 0 {
-      last = stamp
-    }
-  }
-  if last > 0L {
-    Some(last)
-  } else {
-    None
-  }
+  stamp_range(parsed).map(range => range.1)
 }
 
 ///|
@@ -1312,13 +1308,7 @@ fn plural_s(n : Int) -> String {
 fn parse_session_rows(text : String) -> Array[SessionRow]? {
   let json = @json.parse(text) catch { _ => return None }
   guard json is Array(items) else { return None }
-  let rows : Array[SessionRow] = []
-  for item in items {
-    if session_row_of(item) is Some(row) {
-      rows.push(row)
-    }
-  }
-  Some(rows)
+  Some(items.filter_map(session_row_of))
 }
 
 ///|
@@ -1370,13 +1360,21 @@ fn parse_load(text : String) -> LoadOutcome {
     _ => return Malformed
   }
   let parsed = @viz.parse_events(events_text)
-  let (system_prompt, header_present) = match parsed.header {
-    Some(header) => (header.system_prompt, true)
-    None => ("", false)
-  }
+  let (system_prompt, header_present) = header_info(parsed)
   let log_bytes = match fields.get("events_bytes") {
     Some(Number(value, ..)) => value.to_int64()
     _ => events_text.length().to_int64()
   }
   Loaded(parsed, system_prompt, header_present, log_bytes)
+}
+
+///|
+/// Lift the header line's identity out of a parsed log:
+/// `(system_prompt, header_present)`. Shared by the served and dropped-file
+/// paths so both label the header strip and seed the model view the same way.
+fn header_info(parsed : @session_log.ParsedLog) -> (String, Bool) {
+  match parsed.header {
+    Some(header) => (header.system_prompt, true)
+    None => ("", false)
+  }
 }

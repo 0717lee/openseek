@@ -104,42 +104,23 @@ fn group_turns(
 /// but the common final-answer path stores the no-tool response only as
 /// `Terminal(Finished(_))`, so derive stable human-facing labels from both.
 fn agent_step_labels(session : @agent_session.Session) -> Map[Int, String] {
-  let total = agent_step_count(session)
+  let sequences = agent_step_sequences(session)
   let labels : Map[Int, String] = Map([])
-  let mut step = 0
-  let mut previous : @agent_session.SessionEvent? = None
-  let mut finish_in_batch = false
-  for event in session.events() {
-    if event_represents_agent_step(event, previous, finish_in_batch) {
-      step += 1
-      labels.set(event.sequence(), "Step \{step}/\{total}")
-    }
-    // A checkpoint Summary can sit between a finish-tool result and its
-    // terminal (compact-on-finish); skip it when looking backward so the
-    // terminal is still attributed to the finish call.
-    match event.item() {
-      Tool(result) =>
-        if result.tool_name() == "finish" {
-          finish_in_batch = true
-        }
-      Summary(_) => ()
-      _ => finish_in_batch = false
-    }
-    if !(event.item() is Summary(_)) {
-      previous = Some(event)
-    }
+  for index, sequence in sequences {
+    labels.set(sequence, "Step \{index + 1}/\{sequences.length()}")
   }
   labels
 }
 
 ///|
-fn agent_step_count(session : @agent_session.Session) -> Int {
-  let mut count = 0
+/// Sequence numbers of the events that represent agent steps, in log order.
+fn agent_step_sequences(session : @agent_session.Session) -> Array[Int] {
+  let sequences : Array[Int] = []
   let mut previous : @agent_session.SessionEvent? = None
   let mut finish_in_batch = false
   for event in session.events() {
     if event_represents_agent_step(event, previous, finish_in_batch) {
-      count += 1
+      sequences.push(event.sequence())
     }
     // A checkpoint Summary can sit between a finish-tool result and its
     // terminal (compact-on-finish); skip it when looking backward so the
@@ -156,7 +137,7 @@ fn agent_step_count(session : @agent_session.Session) -> Int {
       previous = Some(event)
     }
   }
-  count
+  sequences
 }
 
 ///|
@@ -371,7 +352,7 @@ fn runtime_card(seq : Int, time : String, content : String) -> @html.Html {
 /// "Current plan:" line) and the step lines after it. `None` when the notice
 /// has no checklist (the no-plan nag variant).
 fn split_plan_checklist(content : String) -> (String, Array[String])? {
-  let lines = content.split("\n").map(line => line.to_owned()).collect()
+  let lines = string_lines(content)
   for index, line in lines {
     if line.trim_end().has_suffix("Current plan:") {
       let steps = [
@@ -609,20 +590,20 @@ fn generate_diff(old : String, new : String) -> String {
         old_lines[n - 1 - suf] == new_lines[m - 1 - suf] {
     suf += 1
   }
-  let out : Array[String] = []
-  for i in 0..<pre {
-    out.push("  " + old_lines[i])
-  }
-  for i in pre..<(n - suf) {
-    out.push("- " + old_lines[i])
-  }
-  for i in pre..<(m - suf) {
-    out.push("+ " + new_lines[i])
-  }
-  for i in (n - suf)..<n {
-    out.push("  " + old_lines[i])
-  }
-  out.join("\n")
+  [
+    ..[
+      for line in old_lines[:pre] => "  " + line
+    ],
+    ..[
+      for line in old_lines[pre:n - suf] => "- " + line
+    ],
+    ..[
+      for line in new_lines[pre:m - suf] => "+ " + line
+    ],
+    ..[
+      for line in old_lines[n - suf:] => "  " + line
+    ],
+  ].join("\n")
 }
 
 ///|
@@ -762,22 +743,10 @@ fn tool_card(
   } else {
     "Tool result · \{result.tool_name()}"
   }
-  let flag = if is_error {
-    @html.span(class="tool-flag") <| "🚩 failed"
-  } else {
-    @html.nothing
-  }
+  let flag = failed_flag(is_error)
   // Pair this result back to the call that produced it (same `call N` tag).
   let pair = tags.get(result.tool_call_id())
-  let link = match pair {
-    Some(n) =>
-      pair_link(
-        n,
-        href="#\{tool_call_anchor(n)}",
-        title="Jump to the originating call (call \{n})",
-      )
-    None => @html.nothing
-  }
+  let link = result_back_link(pair)
   let anchor = pair.map(n => tool_result_anchor(n))
   @html.details(id?=anchor, class="card \{kind}") <| [
     @html.summary(class="card-label") <| card_head(
@@ -791,6 +760,32 @@ fn tool_card(
       text_block(result.content()),
     ],
   ]
+}
+
+///|
+/// The red flag a failed tool result shows while its card is still collapsed;
+/// nothing for a success.
+fn failed_flag(is_error : Bool) -> @html.Html {
+  if is_error {
+    @html.span(class="tool-flag") <| "🚩 failed"
+  } else {
+    @html.nothing
+  }
+}
+
+///|
+/// The `call N` chip on a result card, linking back to the originating call;
+/// nothing for an unpaired result.
+fn result_back_link(pair : Int?) -> @html.Html {
+  match pair {
+    Some(n) =>
+      pair_link(
+        n,
+        href="#\{tool_call_anchor(n)}",
+        title="Jump to the originating call (call \{n})",
+      )
+    None => @html.nothing
+  }
 }
 
 ///|
@@ -845,16 +840,8 @@ fn render_model(session : @agent_session.Session) -> @html.Html {
   let tags = model_pair_tags(messages)
   let cards : Array[@html.Html] = [
     for index, message in messages => {
-      let time = if index < time_labels.length() {
-        time_labels[index]
-      } else {
-        ""
-      }
-      let step_label = if index < step_labels.length() {
-        step_labels[index]
-      } else {
-        ""
-      }
+      let time = time_labels.get(index).unwrap_or("")
+      let step_label = step_labels.get(index).unwrap_or("")
       message_card(
         message,
         tool_results,
@@ -976,47 +963,10 @@ fn event_label(
 /// that event's relative turn offset.
 fn model_message_time_labels(session : @agent_session.Session) -> Array[String] {
   let labels = event_time_labels(session)
-  let times : Array[String] = [""]
-  let pending_tool_calls : Array[String] = []
-  let events = session.events()
-  for event in events {
-    // Mirror `Session::chat_messages`: a surviving summary projects at the
-    // start of its covered range, so its label lands there too.
-    for candidate in events {
-      if candidate.item() is Summary(summary) &&
-        summary.from_sequence() == event.sequence() &&
-        !model_event_covered_by_later_summary(candidate, events) {
-        flush_pending_tool_labels(pending_tool_calls, times)
-        times.push(event_label(labels, candidate))
-      }
-    }
-    if model_event_covered_by_later_summary(event, events) {
-      continue
-    }
-    match event.item() {
-      // Labeled above at the start of its covered range.
-      Summary(_) => ()
-      Assistant(message) => {
-        flush_pending_tool_labels(pending_tool_calls, times)
-        times.push(event_label(labels, event))
-        for call in message.tool_calls() {
-          pending_tool_calls.push(call.id)
-        }
-      }
-      Tool(result) =>
-        if remove_pending_tool_id(pending_tool_calls, result.tool_call_id()) {
-          times.push(event_label(labels, event))
-        }
-      item => {
-        flush_pending_tool_labels(pending_tool_calls, times)
-        if item_projects_model_message(item) {
-          times.push(event_label(labels, event))
-        }
-      }
-    }
+  let label_of = (event : @agent_session.SessionEvent) => {
+    event_label(labels, event)
   }
-  flush_pending_tool_labels(pending_tool_calls, times)
-  times
+  model_message_labels(session, label_of~, tool_label_of=label_of)
 }
 
 ///|
@@ -1024,8 +974,26 @@ fn model_message_time_labels(session : @agent_session.Session) -> Array[String] 
 /// assistant events get a label; terminal answers and synthetic healed tool
 /// results may project as model messages, but they are not agent-loop steps.
 fn model_message_step_labels(session : @agent_session.Session) -> Array[String] {
-  let event_labels = agent_step_labels(session)
-  let labels : Array[String] = [""]
+  let steps = agent_step_labels(session)
+  model_message_labels(session, label_of=event => event_label(steps, event), tool_label_of=_ => {
+    ""
+  })
+}
+
+///|
+/// One label per projected model message, parallel to
+/// `Session::chat_messages()`: the first system prompt has no backing event and
+/// gets `""`, each event-backed message gets `label_of` for its event —
+/// `tool_label_of` for a tool result — and each synthetic repair message gets
+/// `""` (see `flush_pending_tool_labels`). This walker must mirror the
+/// projection's message order exactly; one extra or missing label shifts every
+/// later chip.
+fn model_message_labels(
+  session : @agent_session.Session,
+  label_of~ : (@agent_session.SessionEvent) -> String,
+  tool_label_of~ : (@agent_session.SessionEvent) -> String,
+) -> Array[String] {
+  let out : Array[String] = [""]
   let pending_tool_calls : Array[String] = []
   let events = session.events()
   for event in events {
@@ -1035,8 +1003,8 @@ fn model_message_step_labels(session : @agent_session.Session) -> Array[String] 
       if candidate.item() is Summary(summary) &&
         summary.from_sequence() == event.sequence() &&
         !model_event_covered_by_later_summary(candidate, events) {
-        flush_pending_tool_labels(pending_tool_calls, labels)
-        labels.push(event_labels.get(candidate.sequence()).unwrap_or(""))
+        flush_pending_tool_labels(pending_tool_calls, out)
+        out.push(label_of(candidate))
       }
     }
     if model_event_covered_by_later_summary(event, events) {
@@ -1046,26 +1014,26 @@ fn model_message_step_labels(session : @agent_session.Session) -> Array[String] 
       // Labeled above at the start of its covered range.
       Summary(_) => ()
       Assistant(message) => {
-        flush_pending_tool_labels(pending_tool_calls, labels)
-        labels.push(event_labels.get(event.sequence()).unwrap_or(""))
+        flush_pending_tool_labels(pending_tool_calls, out)
+        out.push(label_of(event))
         for call in message.tool_calls() {
           pending_tool_calls.push(call.id)
         }
       }
       Tool(result) =>
         if remove_pending_tool_id(pending_tool_calls, result.tool_call_id()) {
-          labels.push("")
+          out.push(tool_label_of(event))
         }
       item => {
-        flush_pending_tool_labels(pending_tool_calls, labels)
+        flush_pending_tool_labels(pending_tool_calls, out)
         if item_projects_model_message(item) {
-          labels.push(event_labels.get(event.sequence()).unwrap_or(""))
+          out.push(label_of(event))
         }
       }
     }
   }
-  flush_pending_tool_labels(pending_tool_calls, labels)
-  labels
+  flush_pending_tool_labels(pending_tool_calls, out)
+  out
 }
 
 ///|
@@ -1136,14 +1104,8 @@ fn assign_pair_tags(
   call_ids : Array[String],
   result_ids : Array[String],
 ) -> Map[String, Int] {
-  let call_counts : Map[String, Int] = Map([])
-  for id in call_ids {
-    call_counts.set(id, call_counts.get(id).unwrap_or(0) + 1)
-  }
-  let result_counts : Map[String, Int] = Map([])
-  for id in result_ids {
-    result_counts.set(id, result_counts.get(id).unwrap_or(0) + 1)
-  }
+  let call_counts = occurrence_counts(call_ids)
+  let result_counts = occurrence_counts(result_ids)
   let tags : Map[String, Int] = Map([])
   let mut next = 1
   // A call_count of 1 means the id occurs exactly once in `call_ids`, so the loop
@@ -1157,6 +1119,16 @@ fn assign_pair_tags(
     }
   }
   tags
+}
+
+///|
+/// How many times each id occurs in `ids`.
+fn occurrence_counts(ids : Array[String]) -> Map[String, Int] {
+  let counts : Map[String, Int] = Map([])
+  for id in ids {
+    counts.set(id, counts.get(id).unwrap_or(0) + 1)
+  }
+  counts
 }
 
 ///|
@@ -1375,25 +1347,13 @@ fn model_tool_card(
     Tool(id) => tags.get(id)
     _ => None
   }
-  let link = match pair {
-    Some(n) =>
-      pair_link(
-        n,
-        href="#\{tool_call_anchor(n)}",
-        title="Jump to the originating call (call \{n})",
-      )
-    None => @html.nothing
-  }
+  let link = result_back_link(pair)
   let anchor = pair.map(n => tool_result_anchor(n))
   @html.details(id?=anchor, class="card \{kind}") <| [
     @html.summary(class="card-label") <| model_card_head(
       label,
       time~,
-      flag=if is_error {
-        @html.span(class="tool-flag") <| "🚩 failed"
-      } else {
-        @html.nothing
-      },
+      flag=failed_flag(is_error),
       link~,
     ),
     @html.div(class="card-body") <| [
@@ -1488,19 +1448,10 @@ fn card_head(
   link? : @html.Html = @html.nothing,
   step_label? : String = "",
 ) -> Array[@html.Html] {
-  let head : Array[@html.Html] = [
+  [
     @html.span(class="card-seq") <| "#\{seq}",
-    flag,
-    @html.text(label),
-    link,
+    ..model_card_head(label, time~, flag~, link~, step_label~),
   ]
-  if !step_label.is_empty() {
-    head.push(@html.span(class="card-step") <| step_label)
-  }
-  if !time.is_empty() {
-    head.push(@html.span(class="card-ts") <| time)
-  }
-  head
 }
 
 ///|

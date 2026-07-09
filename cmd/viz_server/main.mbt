@@ -340,12 +340,23 @@ async fn read_first_existing(
   candidates : Array[String],
   what : String,
 ) -> String {
+  match first_existing(candidates) {
+    Some(path) => read_text_lossy(path)
+    None => fail("could not locate \{what}")
+  }
+}
+
+///|
+/// The first non-empty candidate path that names an existing file, or `None`.
+/// Shared by the live asset route and the exporter so they resolve candidates
+/// identically.
+async fn first_existing(candidates : Array[String]) -> String? {
   for candidate in candidates {
     if candidate != "" && @fs.exists(candidate) {
-      return read_text_lossy(candidate)
+      return Some(candidate)
     }
   }
-  fail("could not locate \{what}")
+  None
 }
 
 ///|
@@ -463,20 +474,20 @@ fn SessionListRow::to_json(self : SessionListRow) -> Json {
 ///|
 fn compare_session_list_rows(a : SessionListRow, b : SessionListRow) -> Int {
   match (a.last_active, b.last_active) {
-    (Some(a_time), Some(b_time)) =>
-      if a_time == b_time {
-        if a.last_active_nanoseconds == b.last_active_nanoseconds {
-          compare_session_list_row_labels(a, b)
-        } else if a.last_active_nanoseconds > b.last_active_nanoseconds {
-          -1
-        } else {
-          1
-        }
-      } else if a_time > b_time {
-        -1
-      } else {
-        1
+    (Some(a_time), Some(b_time)) => {
+      // Most recently active first: compare b to a for a descending order.
+      let by_time = b_time.compare(a_time)
+      if by_time != 0 {
+        return by_time
       }
+      let by_nanoseconds = b.last_active_nanoseconds.compare(
+        a.last_active_nanoseconds,
+      )
+      if by_nanoseconds != 0 {
+        return by_nanoseconds
+      }
+      compare_session_list_row_labels(a, b)
+    }
     (Some(_), None) => -1
     (None, Some(_)) => 1
     (None, None) => compare_session_list_row_labels(a, b)
@@ -502,25 +513,24 @@ async fn session_catalog(
   search_dirs : Array[String],
   session_root_name : String,
 ) -> SessionCatalog {
-  let roots : Array[SessionRoot] = []
-  // Serve the explicit --session-root directly when it is a store, a directory
-  // of copied `openseek_session-*.jsonl` files, or a single matching file.
-  for root in session_root_sources(session_root, session_root_name) {
-    roots.push(root)
-  }
   // Scan the --session-root only when it is a container, so nested stores under
   // a container root and standalone copied-log directories are surfaced the same
-  // way search-dir trees are. A direct store root is already served above; do
-  // not recurse into its `sessions/<id>` directories as copied-log roots.
+  // way search-dir trees are. A direct store root is already served via
+  // `session_root_sources`; do not recurse into its `sessions/<id>` directories
+  // as copied-log roots.
   let scan_dirs = if is_session_store(session_root, session_root_name) {
     search_dirs
   } else {
     [session_root, ..search_dirs]
   }
-  for root in discover_session_roots(scan_dirs, session_root_name) {
-    roots.push(root)
-  }
-  let roots = unique_roots(roots)
+  let roots = unique_roots(
+    [
+      // Serve the explicit --session-root directly when it is a store, a directory
+      // of copied `openseek_session-*.jsonl` files, or a single matching file.
+      ..session_root_sources(session_root, session_root_name),
+      ..discover_session_roots(scan_dirs, session_root_name),
+    ],
+  )
   { roots, }
 }
 
@@ -656,19 +666,12 @@ async fn contains_direct_session_file(dir : String) -> Bool {
 
 ///|
 fn should_skip_scan_dir(name : String, session_root_name : String) -> Bool {
-  name == session_root_name ||
-  name == ".git" ||
-  name == "node_modules" ||
-  name == ".mooncakes" ||
-  name == "_build"
+  name == session_root_name || should_skip_session_file_scan_dir(name)
 }
 
 ///|
 fn should_skip_session_file_scan_dir(name : String) -> Bool {
-  name == ".git" ||
-  name == "node_modules" ||
-  name == ".mooncakes" ||
-  name == "_build"
+  name is (".git" | "node_modules" | ".mooncakes" | "_build")
 }
 
 ///|
@@ -800,12 +803,11 @@ fn stable_session_key(path : String) -> String {
 
 ///|
 fn session_id_from_file_name(name : String) -> String? {
-  guard name.has_prefix(session_file_prefix) &&
-    name.has_suffix(session_file_suffix) else {
+  guard name.strip_prefix(session_file_prefix) is Some(rest) &&
+    rest.strip_suffix(session_file_suffix) is Some(id) else {
     return None
   }
-  let id = name[session_file_prefix.length():name.length() -
-  session_file_suffix.length()].to_owned()
+  let id = id.to_owned()
   if valid_session_id(id) {
     Some(id)
   } else {
@@ -862,20 +864,25 @@ fn path_tail(path : String) -> String {
 fn last_path_separator(path : String) -> Int? {
   match (path.rev_find("/"), path.rev_find("\\")) {
     (Some(a), Some(b)) => Some(if a > b { a } else { b })
-    (Some(a), None) => Some(a)
-    (None, Some(b)) => Some(b)
+    (Some(a), None) | (None, Some(a)) => Some(a)
     (None, None) => None
   }
 }
 
 ///|
 fn trim_trailing_path_separators(path : String) -> String {
-  let mut result = path
-  while result.length() > 1 &&
-        (result.has_suffix("/") || result.has_suffix("\\")) {
-    result = result[:result.length() - 1].to_owned()
+  let trimmed = for view = path[:] {
+    match view {
+      // Always keep at least one character, so "/" stays "/".
+      [.. rest, '/' | '\\'] if !rest.is_empty() => continue rest
+      _ => break view
+    }
   }
-  result
+  if trimmed.length() == path.length() {
+    path
+  } else {
+    trimmed.to_owned()
+  }
 }
 
 ///|
@@ -935,24 +942,16 @@ fn bundle_candidates(
   web_dir : String,
   module_root : String?,
 ) -> Array[String] {
-  let candidates = [
-    bundle,
-    "\{web_dir}/viz_app.js",
-    "_build/js/release/build/bobzhang/openseek-viz-app/openseek-viz-app.js",
-    "_build/js/debug/build/bobzhang/openseek-viz-app/openseek-viz-app.js",
-    "_build/js/release/build/cmd/viz_app/viz_app.js",
-    "_build/js/debug/build/cmd/viz_app/viz_app.js",
+  let build_outputs = [
+    "_build/js/release/build/bobzhang/openseek-viz-app/openseek-viz-app.js", "_build/js/debug/build/bobzhang/openseek-viz-app/openseek-viz-app.js",
+    "_build/js/release/build/cmd/viz_app/viz_app.js", "_build/js/debug/build/cmd/viz_app/viz_app.js",
   ]
+  let candidates = [bundle, "\{web_dir}/viz_app.js", ..build_outputs]
   if module_root is Some(root) {
     candidates.push("\{root}/web/viz_app.js")
-    candidates.push(
-      "\{root}/_build/js/release/build/bobzhang/openseek-viz-app/openseek-viz-app.js",
-    )
-    candidates.push(
-      "\{root}/_build/js/debug/build/bobzhang/openseek-viz-app/openseek-viz-app.js",
-    )
-    candidates.push("\{root}/_build/js/release/build/cmd/viz_app/viz_app.js")
-    candidates.push("\{root}/_build/js/debug/build/cmd/viz_app/viz_app.js")
+    for path in build_outputs {
+      candidates.push("\{root}/\{path}")
+    }
   }
   candidates
 }
@@ -965,12 +964,10 @@ async fn search_reply(
   content_type : String,
   missing : String,
 ) -> Reply {
-  for candidate in candidates {
-    if candidate != "" && @fs.exists(candidate) {
-      return asset_reply(candidate, content_type)
-    }
+  match first_existing(candidates) {
+    Some(path) => asset_reply(path, content_type)
+    None => text_reply(404, "Not Found", missing)
   }
-  text_reply(404, "Not Found", missing)
 }
 
 ///|
