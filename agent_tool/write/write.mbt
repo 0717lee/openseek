@@ -79,7 +79,7 @@ async fn write_file(
   path~ : String,
 ) -> @agent_tool.ToolAction {
   try {
-    if manifest_write_error(path, input.content) is Some(message) {
+    if @manifest_error.write_error(path, input.content) is Some(message) {
       return @agent_tool.ToolAction::respond(
         "error writing \{path}: \{message}",
         is_error=true,
@@ -265,47 +265,6 @@ fn parent_dir(path : String) -> String {
 }
 
 ///|
-async fn manifest_write_error(path : String, content : String) -> String? {
-  let trimmed = content.trim()
-  if @manifest_path.is_generated_mbti_path(path) {
-    return Some(
-      "*.generated.mbti files are generated; run moon info instead of editing them",
-    )
-  }
-  if @manifest_path.is_moon_mod_json_path(path) && !@fs.exists(path) {
-    return Some(
-      "moon.mod.json is legacy; create moon.mod for new MoonBit projects",
-    )
-  }
-  if @manifest_path.is_moon_mod_path(path) {
-    if trimmed == "" {
-      return Some("moon.mod must not be empty")
-    }
-    if trimmed.has_prefix("{") || trimmed.contains("\"name\"") {
-      return Some("moon.mod uses current text syntax, not JSON")
-    }
-    if !trimmed.contains("name =") {
-      return Some("moon.mod should include a module `name = ...` entry")
-    }
-  }
-  if @manifest_path.is_moon_pkg_path(path) {
-    // This is normal when we create a moon.pkg dummy file
-    // another mistake is AI is trying to write 
-    // # as a comment
-    // if trimmed.length() < 8 {    
-    //   return Some("moon.pkg content is suspiciously small")
-    // }
-    if trimmed.has_prefix("#") {
-      return Some("moon.pkg use // for comment syntax, not #")
-    }
-    if trimmed.has_prefix("{") {
-      return Some("moon.pkg uses current text syntax, not JSON")
-    }
-  }
-  None
-}
-
-///|
 async test "write creates missing parent directories" {
   @vfs.with_tmpdir(dir => {
     let path = "\{dir}/pkg/sub/moon.pkg"
@@ -352,31 +311,6 @@ async test "write resolves relative paths under the workspace root" {
     assert_eq(output.content, "ok: wrote 9 chars to \{path}")
     assert_eq(@fs.read_file(path).text(), "workspace")
   })
-}
-
-///|
-async test "write manifest guards accept Windows path separators" {
-  guard manifest_write_error("C:\\workspace\\pkg.generated.mbti", "package x")
-    is Some(generated_mbti) else {
-    fail("expected generated mbti guard")
-  }
-  assert_true(generated_mbti.contains("run moon info"))
-  guard manifest_write_error("C:\\workspace\\moon.mod", "{\"name\":\"bad\"}")
-    is Some(moon_mod) else {
-    fail("expected moon.mod guard")
-  }
-  assert_eq(moon_mod, "moon.mod uses current text syntax, not JSON")
-  // guard manifest_write_error("C:\\workspace\\moon.pkg", "x") is Some(moon_pkg) else {
-  //   fail("expected moon.pkg guard")
-  // }
-  // assert_eq(moon_pkg, "moon.pkg content is suspiciously small")
-  guard manifest_write_error("C:\\workspace\\moon.mod.json", "{}")
-    is Some(moon_mod_json) else {
-    fail("expected moon.mod.json guard")
-  }
-  assert_eq(
-    moon_mod_json, "moon.mod.json is legacy; create moon.mod for new MoonBit projects",
-  )
 }
 
 ///|

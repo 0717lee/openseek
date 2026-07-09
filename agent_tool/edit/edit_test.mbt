@@ -1,11 +1,7 @@
 ///|
 async fn run_edit(arguments : Json) -> @agent_tool.ToolOutput {
-  let action = match @edit.definition().execute {
-    Async(execute) => execute(arguments)
-    Sync(_) => fail("edit tool should be async")
-  }
-  guard action is Respond(output) else { fail("expected Respond") }
-  output
+  // definition() defaults workspace_root to ".", so this is the same tool.
+  run_edit_in_workspace(".", arguments)
 }
 
 ///|

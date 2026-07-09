@@ -79,35 +79,28 @@ async fn edit_file(
   // Every failure names the file it tried to edit so the viz can show
   // `→ edit · edit <file> 🚩` on the folded call line.
   let fail_brief = "edit \{@agent_tool.brief_basename(path)}"
-  if input.replace_all {
-    return @agent_tool.ToolAction::respond(
-      "error editing \{path}: replace_all=true is no longer supported; use multi_edit with explicit line-anchored edits",
+  fn err(message : String) -> @agent_tool.ToolAction {
+    @agent_tool.ToolAction::respond(
+      "error editing \{path}: \{message}",
       is_error=true,
       brief=fail_brief,
+    )
+  }
+
+  if input.replace_all {
+    return err(
+      "replace_all=true is no longer supported; use multi_edit with explicit line-anchored edits",
     )
   }
   if input.old_string == "" && input.new_string == "" {
-    return @agent_tool.ToolAction::respond(
-      "error editing \{path}: old_string and new_string are both empty",
-      is_error=true,
-      brief=fail_brief,
-    )
+    return err("old_string and new_string are both empty")
   }
   if input.old_string == input.new_string {
-    return @agent_tool.ToolAction::respond(
-      "error editing \{path}: old_string and new_string are identical",
-      is_error=true,
-      brief=fail_brief,
-    )
+    return err("old_string and new_string are identical")
   }
   let content = @fs.read_file(path).text() catch {
     error if @async.is_being_cancelled() => raise error
-    error =>
-      return @agent_tool.ToolAction::respond(
-        "error editing \{path}: error reading file: \{error}",
-        is_error=true,
-        brief=fail_brief,
-      )
+    error => return err("error reading file: \{error}")
   }
   if input.old_string == "" {
     // Insertion: insert new_string at the start of start_line (a zero-width
@@ -128,25 +121,15 @@ async fn edit_file(
     )
   }
   let region = select_edit_region(content, input)
-  let parts = region.body
-    .split(input.old_string)
-    .map(part => part.to_owned())
-    .collect()
-  if parts.length() <= 1 {
-    return @agent_tool.ToolAction::respond(
-      "error editing \{path}: old_string not found\{range_detail(input)}",
-      is_error=true,
-      brief=fail_brief,
-    )
+  guard region.body.find(input.old_string) is Some(match_start) else {
+    return err("old_string not found\{range_detail(input)}")
   }
-  let replacement_count = 1
-  let match_start = parts[0].length()
   let match_end = match_start + input.old_string.length()
   let match_line = line_number_at_offset(
     content,
     region.prefix.length() + match_start,
   )
-  let new_body = "\{parts[0]}\{input.new_string}\{region.body.unsafe_substring(start=match_end, end=region.body.length())}"
+  let new_body = "\{region.body.unsafe_substring(start=0, end=match_start)}\{input.new_string}\{region.body.unsafe_substring(start=match_end, end=region.body.length())}"
   let new_content = "\{region.prefix}\{new_body}\{region.suffix}"
   commit_edit(
     path,
@@ -154,8 +137,8 @@ async fn edit_file(
     new_content~,
     revert_on_parse_errors=input.revert_on_parse_errors,
     fail_brief~,
-    summary="ok: replaced \{replacement_count} occurrence(s) at line \{match_line} in \{path}",
-    ok_brief="edited \{@agent_tool.brief_basename(path)}:\{match_line} (\{replacement_count}×)",
+    summary="ok: replaced 1 occurrence(s) at line \{match_line} in \{path}",
+    ok_brief="edited \{@agent_tool.brief_basename(path)}:\{match_line} (1×)",
   )
 }
 
@@ -362,21 +345,12 @@ fn select_edit_region(
 
 ///|
 fn line_start_offset(content : String, line : Int) -> Int {
+  // Line `line` starts right after line `line - 1` ends (nobreak: both scans
+  // land on content.length() for a line past EOF).
   if line <= 1 {
     0
   } else {
-    let len = content.length()
-    let mut current_line = 1
-    for cursor = 0; cursor < len; cursor = cursor + 1 {
-      if content[cursor] == '\n' {
-        current_line = current_line + 1
-        if current_line == line {
-          break cursor + 1
-        }
-      }
-    } nobreak {
-      len
-    }
+    line_end_offset(content, line - 1)
   }
 }
 

@@ -62,23 +62,32 @@ test "decode_args allows absent or empty edits (combined-empty is the tool's che
 }
 
 ///|
+/// Asserts that decoding `arguments` fails and the error message names the
+/// offending field.
+fn assert_decode_args_error(arguments : Json, expected : String) -> Unit raise {
+  let _ = @decode.decode_args(arguments) catch {
+    error => {
+      let message = "\{error}"
+      assert_true(
+        message.contains(expected),
+        msg="\{message} should contain \{expected}",
+      )
+      return
+    }
+  }
+  fail("expected decode error")
+}
+
+///|
 test "decode_args rejects wrong field types" {
-  try @decode.decode_args({ "edits": 5 }) catch {
-    error =>
-      assert_true(
-        "\{error}".contains("arguments.edits to be an array of edit objects"),
-      )
-  } noraise {
-    _ => fail("numeric edits decoded")
-  }
-  try @decode.decode_args({ "edits_file": 5 }) catch {
-    error =>
-      assert_true(
-        "\{error}".contains("arguments.edits_file to be a string path"),
-      )
-  } noraise {
-    _ => fail("numeric edits_file decoded")
-  }
+  assert_decode_args_error(
+    { "edits": 5 },
+    "arguments.edits to be an array of edit objects",
+  )
+  assert_decode_args_error(
+    { "edits_file": 5 },
+    "arguments.edits_file to be a string path",
+  )
 }
 
 ///|
@@ -97,26 +106,14 @@ test "decode_args reads revert_when_errors_above and defaults to None" {
 
 ///|
 test "decode_args rejects a non-integer revert_when_errors_above" {
-  try @decode.decode_args({ "revert_when_errors_above": 1.5 }) catch {
-    error =>
-      assert_true(
-        "\{error}".contains(
-          "arguments.revert_when_errors_above to be an integer",
-        ),
-      )
-  } noraise {
-    _ => fail("fractional threshold decoded")
-  }
-  try @decode.decode_args({ "revert_when_errors_above": "5" }) catch {
-    error =>
-      assert_true(
-        "\{error}".contains(
-          "arguments.revert_when_errors_above to be an integer",
-        ),
-      )
-  } noraise {
-    _ => fail("string threshold decoded")
-  }
+  assert_decode_args_error(
+    { "revert_when_errors_above": 1.5 },
+    "arguments.revert_when_errors_above to be an integer",
+  )
+  assert_decode_args_error(
+    { "revert_when_errors_above": "5" },
+    "arguments.revert_when_errors_above to be an integer",
+  )
 }
 
 ///|
@@ -146,8 +143,8 @@ test "decode_edits_json rejects a non-array document" {
 
 ///|
 test "decode rejects malformed edit entries with indexes" {
-  try
-    @decode.decode_args({
+  assert_decode_args_error(
+    {
       "edits": [
         {
           "file": "file.mbt",
@@ -157,19 +154,11 @@ test "decode rejects malformed edit entries with indexes" {
           "end_line": 1,
         },
       ],
-    })
-  catch {
-    error =>
-      assert_true(
-        "\{error}".contains(
-          "arguments.edits[0].start_line to be a positive integer",
-        ),
-      )
-  } noraise {
-    _ => fail("invalid start_line decoded")
-  }
-  try
-    @decode.decode_args({
+    },
+    "arguments.edits[0].start_line to be a positive integer",
+  )
+  assert_decode_args_error(
+    {
       "edits": [
         {
           "file": "file.mbt",
@@ -179,57 +168,29 @@ test "decode rejects malformed edit entries with indexes" {
           "end_line": 2,
         },
       ],
-    })
-  catch {
-    error =>
-      assert_true(
-        "\{error}".contains(
-          "arguments.edits[0].end_line to be greater than or equal to arguments.edits[0].start_line",
-        ),
-      )
-  } noraise {
-    _ => fail("inverted range decoded")
-  }
+    },
+    "arguments.edits[0].end_line to be greater than or equal to arguments.edits[0].start_line",
+  )
 }
 
 ///|
 test "decode rejects missing required fields" {
-  try
-    @decode.decode_args({
-      "edits": [{ "old_string": "old", "new_string": "new", "start_line": 1 }],
-    })
-  catch {
-    error =>
-      assert_true("\{error}".contains("arguments.edits[0] to include file"))
-  } noraise {
-    _ => fail("missing file decoded")
-  }
-  try
-    @decode.decode_args({
-      "edits": [{ "file": "file.mbt", "old_string": "old", "start_line": 1 }],
-    })
-  catch {
-    error =>
-      assert_true(
-        "\{error}".contains("arguments.edits[0] to include new_string"),
-      )
-  } noraise {
-    _ => fail("missing new_string decoded")
-  }
-  try
-    @decode.decode_args({
+  assert_decode_args_error(
+    { "edits": [{ "old_string": "old", "new_string": "new", "start_line": 1 }] },
+    "arguments.edits[0] to include file",
+  )
+  assert_decode_args_error(
+    { "edits": [{ "file": "file.mbt", "old_string": "old", "start_line": 1 }] },
+    "arguments.edits[0] to include new_string",
+  )
+  assert_decode_args_error(
+    {
       "edits": [
         { "file": "file.mbt", "old_string": "old", "new_string": "new" },
       ],
-    })
-  catch {
-    error =>
-      assert_true(
-        "\{error}".contains("arguments.edits[0] to include start_line"),
-      )
-  } noraise {
-    _ => fail("missing start_line decoded")
-  }
+    },
+    "arguments.edits[0] to include start_line",
+  )
 }
 
 ///|
@@ -263,11 +224,7 @@ test "decode lists present keys when a required field is misnamed" {
 
 ///|
 test "decode rejects non-object arguments" {
-  try @decode.decode_args(Json::null()) catch {
-    error => assert_true("\{error}".contains("object arguments"))
-  } noraise {
-    _ => fail("non-object decoded")
-  }
+  assert_decode_args_error(Json::null(), "object arguments")
 }
 
 ///|
@@ -281,10 +238,8 @@ test "decode reads revert_on_parse_errors" {
   assert_false(off.revert_on_parse_errors)
   let default_on = @decode.decode_args({ "edits": [] })
   assert_true(default_on.revert_on_parse_errors)
-  try @decode.decode_args({ "edits": [], "revert_on_parse_errors": 1 }) catch {
-    error =>
-      assert_true("\{error}".contains("arguments.revert_on_parse_errors"))
-  } noraise {
-    _ => fail("non-boolean flag decoded")
-  }
+  assert_decode_args_error(
+    { "edits": [], "revert_on_parse_errors": 1 },
+    "arguments.revert_on_parse_errors",
+  )
 }

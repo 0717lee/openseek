@@ -179,15 +179,17 @@ async fn multi_edit_files(
   // Resolve every edit's path up front and key contiguity and grouping on the
   // resolved path, so two spellings of one file (e.g. `a.mbt` and `./a.mbt`)
   // collapse into a single group rather than racing each other's writes.
-  let resolved : Array[ResolvedEdit] = []
-  for index, item in edits {
-    resolved.push({
-      index,
-      file: item.file,
-      path: @workspace_path.resolve(workspace_root, item.file),
-      item,
-    })
-  }
+  let resolved = [
+    for index, item in edits => {
+      (
+        {
+          index,
+          file: item.file,
+          path: @workspace_path.resolve(workspace_root, item.file),
+          item,
+        } : ResolvedEdit)
+    }
+  ]
   // A file's edits must form one contiguous block so each file is read,
   // validated, and written exactly once.
   if check_contiguity(resolved) is Some(message) {
@@ -377,14 +379,10 @@ async fn parse_gate_batch_rejection(
   if rejections.is_empty() {
     return None
   }
-  let mut total = 0
-  let mut any_truncated = false
-  for rejection in rejections {
-    total += rejection.introduced
-    if rejection.truncated {
-      any_truncated = true
-    }
-  }
+  let total = rejections.fold(init=0, (total, rejection) => {
+    total + rejection.introduced
+  })
+  let any_truncated = rejections.iter().any(rejection => rejection.truncated)
   let bound = if any_truncated { "≥" } else { "" }
   Some(
     @agent_tool.ToolAction::respond(
@@ -405,11 +403,7 @@ fn batch_reject_report(
 ) -> String {
   let total_label = if any_truncated { "at least \{total}" } else { "\{total}" }
   let head = "rejected: the batch would introduce \{total_label} new parse error(s) across \{rejections.length()} file(s), so NO files were changed."
-  let shown = if rejections.length() < RejectedFileDisplayLimit {
-    rejections.length()
-  } else {
-    RejectedFileDisplayLimit
-  }
+  let shown = rejections.length().min(RejectedFileDisplayLimit)
   let sections = [ for rejection in rejections[0:shown] => rejection.section ]
   let overflow = if rejections.length() > shown {
     let hidden = [ for rejection in rejections[shown:] => rejection.path ]
@@ -605,12 +599,9 @@ fn check_contiguity(edits : Array[ResolvedEdit]) -> String? {
   let ended : Map[String, Unit] = {}
   let mut current : String? = None
   for edit in edits {
-    let same = match current {
-      Some(path) => path == edit.path
-      None => false
-    }
+    let same = current is Some(path) && path == edit.path
     if !same {
-      if ended.get(edit.path) is Some(_) {
+      if ended.contains(edit.path) {
         return Some(
           "error multi_editing: edits for \{edit.file} must be contiguous; it reappears at edit[\{edit.index}] after another file's edits; list all edits for a file together",
         )
@@ -663,11 +654,7 @@ fn group_contiguous(edits : Array[ResolvedEdit]) -> Array[FileGroup] {
 ///|
 /// Total number of edits applied across a batch's writes.
 fn total_edit_count(writes : Array[PreparedWrite]) -> Int {
-  let mut total = 0
-  for write in writes {
-    total = total + write.edit_count
-  }
-  total
+  writes.fold(init=0, (total, write) => total + write.edit_count)
 }
 
 ///|
@@ -755,12 +742,7 @@ fn validate_edit(
     })
   }
   let region = select_edit_region(content, item.start_line, item.end_line)
-  let parts = region.body
-    .split(item.old_string)
-    .map(part => part.to_owned())
-    .collect()
-  let occurrences = parts.length() - 1
-  if occurrences == 0 {
+  guard region.body.find(item.old_string) is Some(offset) else {
     return Invalid({
       file,
       index: Some(index),
@@ -768,7 +750,7 @@ fn validate_edit(
       message: "old_string not found",
     })
   }
-  let start = region.start_offset + parts[0].length()
+  let start = region.start_offset + offset
   Valid({
     index,
     start,
@@ -806,17 +788,7 @@ fn collect_overlap_failures(
 
 ///|
 fn compare_plan_ascending(a : PlannedEdit, b : PlannedEdit) -> Int {
-  if a.start < b.start {
-    -1
-  } else if a.start > b.start {
-    1
-  } else if a.end < b.end {
-    -1
-  } else if a.end > b.end {
-    1
-  } else {
-    a.index.compare(b.index)
-  }
+  (a.start, a.end, a.index).compare((b.start, b.end, b.index))
 }
 
 ///|
@@ -874,21 +846,12 @@ fn select_edit_region(
 
 ///|
 fn line_start_offset(content : String, line : Int) -> Int {
+  // Line `line` starts right after line `line - 1` ends (nobreak: both scans
+  // land on content.length() for a line past EOF).
   if line <= 1 {
     0
   } else {
-    let len = content.length()
-    let mut current_line = 1
-    for cursor = 0; cursor < len; cursor = cursor + 1 {
-      if content[cursor] == '\n' {
-        current_line = current_line + 1
-        if current_line == line {
-          break cursor + 1
-        }
-      }
-    } nobreak {
-      len
-    }
+    line_end_offset(content, line - 1)
   }
 }
 

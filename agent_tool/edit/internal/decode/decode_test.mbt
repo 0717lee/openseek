@@ -70,118 +70,94 @@ test "decode line range" {
 }
 
 ///|
+/// Asserts that decoding `arguments` fails and the error message names the
+/// offending field.
+fn assert_decode_error(arguments : Json, expected : String) -> Unit raise {
+  let _ = @decode.decode(arguments) catch {
+    error => {
+      let message = "\{error}"
+      assert_true(
+        message.contains(expected),
+        msg="\{message} should contain \{expected}",
+      )
+      return
+    }
+  }
+  fail("expected decode error")
+}
+
+///|
 test "decode rejects invalid replace_all" {
-  try
-    @decode.decode({
+  assert_decode_error(
+    {
       "path": "file.mbt",
       "old_string": "old",
       "new_string": "new",
       "replace_all": "yes",
       "start_line": 1,
-    })
-  catch {
-    error => assert_true("\{error}".contains("arguments.replace_all"))
-  } noraise {
-    _ => fail("invalid replace_all decoded")
-  }
+    },
+    "arguments.replace_all",
+  )
 }
 
 ///|
 test "decode rejects invalid line range" {
-  try
-    @decode.decode({
+  assert_decode_error(
+    {
       "path": "file.mbt",
       "old_string": "old",
       "new_string": "new",
       "start_line": 0,
-    })
-  catch {
-    error =>
-      assert_true(
-        "\{error}".contains("arguments.start_line to be a positive integer"),
-      )
-  } noraise {
-    _ => fail("invalid start_line decoded")
-  }
-  try
-    @decode.decode({
+    },
+    "arguments.start_line to be a positive integer",
+  )
+  assert_decode_error(
+    {
       "path": "file.mbt",
       "old_string": "old",
       "new_string": "new",
       "start_line": 1,
       "end_line": "4",
-    })
-  catch {
-    error =>
-      assert_true("\{error}".contains("arguments.end_line to be an integer"))
-  } noraise {
-    _ => fail("invalid end_line decoded")
-  }
-  try
-    @decode.decode({
+    },
+    "arguments.end_line to be an integer",
+  )
+  assert_decode_error(
+    {
       "path": "file.mbt",
       "old_string": "old",
       "new_string": "new",
       "start_line": 1.9,
-    })
-  catch {
-    error =>
-      assert_true("\{error}".contains("arguments.start_line to be an integer"))
-  } noraise {
-    _ => fail("fractional start_line decoded")
-  }
-  try
-    @decode.decode({
+    },
+    "arguments.start_line to be an integer",
+  )
+  assert_decode_error(
+    {
       "path": "file.mbt",
       "old_string": "old",
       "new_string": "new",
       "start_line": 4,
       "end_line": 2,
-    })
-  catch {
-    error =>
-      assert_true(
-        "\{error}".contains(
-          "arguments.end_line to be greater than or equal to arguments.start_line",
-        ),
-      )
-  } noraise {
-    _ => fail("inverted line range decoded")
-  }
+    },
+    "arguments.end_line to be greater than or equal to arguments.start_line",
+  )
 }
 
 ///|
 test "decode rejects missing required fields" {
-  try @decode.decode({ "path": "file.mbt" }) catch {
-    error => assert_true("\{error}".contains("arguments.old_string"))
-  } noraise {
-    _ => fail("missing old_string decoded")
-  }
-  try @decode.decode({ "path": "file.mbt", "old_string": "old" }) catch {
-    error => assert_true("\{error}".contains("arguments.new_string"))
-  } noraise {
-    _ => fail("missing new_string decoded")
-  }
-  try
-    @decode.decode({
-      "path": "file.mbt",
-      "old_string": "old",
-      "new_string": "new",
-    })
-  catch {
-    error => assert_true("\{error}".contains("arguments.start_line"))
-  } noraise {
-    _ => fail("missing start_line decoded")
-  }
+  assert_decode_error({ "path": "file.mbt" }, "arguments.old_string")
+  assert_decode_error(
+    { "path": "file.mbt", "old_string": "old" },
+    "arguments.new_string",
+  )
+  assert_decode_error(
+    { "path": "file.mbt", "old_string": "old", "new_string": "new" },
+    "arguments.start_line",
+  )
 }
 
 ///|
 test "decode rejects non-object arguments" {
-  try @decode.decode(Json::null()) catch {
-    error => assert_true("\{error}".contains("object arguments"))
-  } noraise {
-    _ => fail("non-object decoded")
-  }
+  assert_decode_error(Json::null(), "object arguments")
 }
 
 ///|
@@ -201,18 +177,14 @@ test "decode reads revert_on_parse_errors" {
     "start_line": 1,
   })
   assert_true(default_on.revert_on_parse_errors)
-  try
-    @decode.decode({
+  assert_decode_error(
+    {
       "path": "file.mbt",
       "old_string": "old",
       "new_string": "new",
       "start_line": 1,
       "revert_on_parse_errors": "yes",
-    })
-  catch {
-    error =>
-      assert_true("\{error}".contains("arguments.revert_on_parse_errors"))
-  } noraise {
-    _ => fail("non-boolean flag decoded")
-  }
+    },
+    "arguments.revert_on_parse_errors",
+  )
 }

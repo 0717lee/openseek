@@ -1,11 +1,7 @@
 ///|
 async fn run_multi_edit(arguments : Json) -> @agent_tool.ToolOutput {
-  let action = match @multi_edit.definition().execute {
-    Async(execute) => execute(arguments)
-    Sync(_) => fail("multi_edit tool should be async")
-  }
-  guard action is Respond(output) else { fail("expected Respond") }
-  output
+  // definition() defaults workspace_root to ".", so this is the same tool.
+  run_multi_edit_in_workspace(".", arguments)
 }
 
 ///|
