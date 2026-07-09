@@ -13,14 +13,18 @@ fn plan_reminders(result : @agent_session.Session) -> Array[String] {
 /// A scripted DeepSeek stand-in that keeps a turn alive with `plan` calls
 /// whose arguments are invalid — each yields an error tool result, which
 /// never resets the staleness cadence — for the first `plan_calls` requests,
-/// then answers. The server only records request bodies and scripts responses
-/// by request number; all assertions happen in the test body after the run,
-/// so a client retry shows up as a hard request-count mismatch instead of
-/// silently shifting the cadence.
-async fn stale_plan_test_server(
+/// then answers. With `record_first=true`, request 1 instead records a VALID
+/// plan: the successful write resets the cadence, so the first reminder
+/// fires a full cadence window later and re-surfaces the recorded checklist.
+/// The server only records request bodies and scripts responses by request
+/// number; all assertions happen in the test body after the run, so a client
+/// retry shows up as a hard request-count mismatch instead of silently
+/// shifting the cadence.
+async fn plan_test_server(
   group : @async.TaskGroup[Unit],
   bodies : Array[String],
   plan_calls~ : Int,
+  record_first~ : Bool,
 ) -> String? {
   guard bind_test_server(
       "local TCP bind unavailable; skipping plan reminder test",
@@ -35,7 +39,14 @@ async fn stale_plan_test_server(
         conn.send_response(200, "OK", extra_headers={
           "Content-Type": "text/event-stream",
         })
-        if bodies.length() <= plan_calls {
+        if record_first && bodies.length() == 1 {
+          conn.write(
+            (
+              #|data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_plan","function":{"name":"plan","arguments":"{\"steps\":[{\"title\":\"fix the parser\",\"status\":\"in_progress\"}]}"}}]}}]}
+            ),
+          )
+          conn.write("\n\n")
+        } else if bodies.length() <= plan_calls {
           conn.write(
             (
               #|data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_plan","function":{"name":"plan","arguments":"{\"steps\":[{\"title\":\"step\",\"status\":\"doing\"}]}"}}]}}]}
@@ -60,7 +71,12 @@ async test "a plan-silent turn gets one staleness reminder after the cadence" {
   @async.with_task_group() <| group => {
     let cadence = @agent.plan_reminder_after_steps
     let bodies : Array[String] = []
-    guard stale_plan_test_server(group, bodies, plan_calls=cadence + 1)
+    guard plan_test_server(
+        group,
+        bodies,
+        plan_calls=cadence + 1,
+        record_first=false,
+      )
       is Some(url) else {
       return
     }
@@ -109,62 +125,16 @@ async test "a plan-silent turn gets one staleness reminder after the cadence" {
 }
 
 ///|
-/// A scripted stand-in where request 1 records a valid plan and requests
-/// 2..plan_calls keep the turn alive with invalid `plan` calls before the
-/// answer. The successful write resets the cadence, so the first reminder
-/// fires a full cadence window later and re-surfaces the recorded
-/// checklist. Assertions live in the test body, as above.
-async fn recorded_plan_test_server(
-  group : @async.TaskGroup[Unit],
-  bodies : Array[String],
-  plan_calls~ : Int,
-) -> String? {
-  guard bind_test_server(
-      "local TCP bind unavailable; skipping plan reminder test",
-    )
-    is Some(server) else {
-    return None
-  }
-  group.spawn_bg(no_wait=true) <| () => {
-    server.run_forever(
-      (_request, body, conn) => {
-        bodies.push(body.read_all().text())
-        conn.send_response(200, "OK", extra_headers={
-          "Content-Type": "text/event-stream",
-        })
-        if bodies.length() == 1 {
-          conn.write(
-            (
-              #|data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_plan","function":{"name":"plan","arguments":"{\"steps\":[{\"title\":\"fix the parser\",\"status\":\"in_progress\"}]}"}}]}}]}
-            ),
-          )
-          conn.write("\n\n")
-        } else if bodies.length() <= plan_calls {
-          conn.write(
-            (
-              #|data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_plan","function":{"name":"plan","arguments":"{\"steps\":[{\"title\":\"step\",\"status\":\"doing\"}]}"}}]}}]}
-            ),
-          )
-          conn.write("\n\n")
-        } else {
-          conn.write(
-            "data: {\"choices\":[{\"delta\":{\"content\":\"done\"}}]}\n\n",
-          )
-        }
-        conn.write("data: [DONE]\n\n")
-      },
-      max_connections=2,
-    )
-  }
-  Some("http://127.0.0.1:\{server.addr.port()}/chat/completions")
-}
-
-///|
 async test "a recorded plan delays the reminder and is re-surfaced by it" {
   @async.with_task_group() <| group => {
     let cadence = @agent.plan_reminder_after_steps
     let bodies : Array[String] = []
-    guard recorded_plan_test_server(group, bodies, plan_calls=cadence + 2)
+    guard plan_test_server(
+        group,
+        bodies,
+        plan_calls=cadence + 2,
+        record_first=true,
+      )
       is Some(url) else {
       return
     }
@@ -210,7 +180,7 @@ async test "a recorded plan delays the reminder and is re-surfaced by it" {
 /// later request — "did it fire again" is a count on the newest body, not an
 /// absence check on it.
 fn reminder_count(body : String) -> Int {
-  body.split(@agent_session.PlanReminderPrefix).collect().length() - 1
+  body.split(@agent_session.PlanReminderPrefix).count() - 1
 }
 
 ///|
@@ -222,7 +192,12 @@ async test "the no-plan nag fires at most once per turn" {
   @async.with_task_group() <| group => {
     let cadence = @agent.plan_reminder_after_steps
     let bodies : Array[String] = []
-    guard stale_plan_test_server(group, bodies, plan_calls=2 * cadence + 3)
+    guard plan_test_server(
+        group,
+        bodies,
+        plan_calls=2 * cadence + 3,
+        record_first=false,
+      )
       is Some(url) else {
       return
     }
@@ -280,7 +255,12 @@ async test "a stale recorded plan re-nags on the request cadence" {
   @async.with_task_group() <| group => {
     let cadence = @agent.plan_reminder_after_steps
     let bodies : Array[String] = []
-    guard recorded_plan_test_server(group, bodies, plan_calls=2 * cadence + 2)
+    guard plan_test_server(
+        group,
+        bodies,
+        plan_calls=2 * cadence + 2,
+        record_first=true,
+      )
       is Some(url) else {
       return
     }

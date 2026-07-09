@@ -22,17 +22,17 @@ The exported surface is small:
 
 ```mbt nocheck
 @agent.run(
-  api_key,
-  Deepseek(V4Pro),
-  "fix the tests",
+  api_key~,
+  model=Deepseek(V4Pro),
+  task="fix the tests",
   system_prompt_text="You are an OpenSeek agent.",
 )
 
 let persisted = @agent.run_turn_with_append(
-  api_key,
-  Deepseek(V4Pro),
-  session,
-  "continue",
+  api_key~,
+  model=Deepseek(V4Pro),
+  session~,
+  task="continue",
   append_item=(session, item) => store.append(session, item),
 )
 
@@ -41,18 +41,18 @@ let persisted = @agent.run_turn_with_append(
   let scope = @agent_runtime.AgentTaskScope(group)
   let tools = @agent.build_tools(runtime, scope)
   let next = @agent.run_turn_in_scope(
-    runtime,
-    scope,
-    api_key,
-    Deepseek(V4Pro),
-    session,
-    "continue",
+    runtime~,
+    scope~,
+    api_key~,
+    model=Deepseek(V4Pro),
+    session~,
+    task="continue",
     append_item=(session, item) => session.append(item),
     tools~,
   )
 }
 
-@agent.steer(runtime, "also update README")
+runtime.queue_steer(Prompt("also update README"))
 ```
 
 `run` is the highest-level one-shot entry point. It creates a fresh in-memory
@@ -70,8 +70,9 @@ can return `session.append(item)` from the callback.
 `build_tools`. This is the API used by serve mode so stateful tools and queued
 steering can span turns.
 
-`steer` queues raw user steering text on an `AgentRuntime`. It does not trim or
-filter. The loop drops blank strings when it drains steering at a step boundary.
+`runtime.queue_steer(Prompt(text))` queues raw user steering text on an
+`AgentRuntime`. It does not trim or filter. The loop drops blank strings when it
+drains steering at a step boundary.
 
 ## Prompt Ownership
 
@@ -112,8 +113,10 @@ calls `@agent.run`, but that decision lives outside the `agent` package.
 - `finish`: end the task with a final answer.
 
 File-oriented tools capture `runtime.workspace_root()` when the registry is
-built. The registry still receives the runtime and task scope for stateful
-tools, though none currently use them.
+built. The registry also receives the runtime and task scope for stateful
+tools: the shell tools use both — background-job completion notices are pushed
+through `runtime.queue_steer`, and the background-job runtime plus its spill-dir
+cleanup are owned by the task scope's group.
 
 ```mbt check
 ///|

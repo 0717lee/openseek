@@ -13,15 +13,11 @@ async fn auto_compact_test_server(
   group : @async.TaskGroup[Unit],
   handle : (Json) -> MockReply raise,
 ) -> String? {
-  let server = @http.Server(@socket.Addr::parse("127.0.0.1:0")) catch {
-    error => {
-      let message = "\{error}"
-      if message.contains("Operation not permitted") {
-        println("local TCP bind unavailable; skipping auto-compaction test")
-        return None
-      }
-      raise error
-    }
+  guard bind_test_server(
+      "local TCP bind unavailable; skipping auto-compaction test",
+    )
+    is Some(server) else {
+    return None
   }
   group.spawn_bg(no_wait=true) <| () => {
     server.run_forever(
@@ -60,24 +56,7 @@ fn usage_json(total_tokens : Int) -> Json {
 
 ///|
 fn sse_tool_call(id : String, name : String, total_tokens : Int) -> String {
-  (
-    {
-      "choices": [
-        {
-          "delta": {
-            "tool_calls": [
-              {
-                "index": 0,
-                "id": id,
-                "type": "function",
-                "function": { "name": name, "arguments": "{}" },
-              },
-            ],
-          },
-        },
-      ],
-      "usage": usage_json(total_tokens),
-    } : Json).stringify()
+  sse_tool_calls([(id, name)], total_tokens)
 }
 
 ///|
@@ -85,16 +64,18 @@ fn sse_tool_calls(
   calls : Array[(String, String)],
   total_tokens : Int,
 ) -> String {
-  let entries : Array[Json] = []
-  for index, call in calls {
-    let (id, name) = call
-    entries.push({
-      "index": index,
-      "id": id,
-      "type": "function",
-      "function": { "name": name, "arguments": "{}" },
-    })
-  }
+  let entries : Array[Json] = [
+    for index, call in calls => {
+      let (id, name) = call
+      (
+        {
+          "index": index,
+          "id": id,
+          "type": "function",
+          "function": { "name": name, "arguments": "{}" },
+        } : Json)
+    }
+  ]
   (
     {
       "choices": [{ "delta": { "tool_calls": entries.to_json() } }],
@@ -161,6 +142,36 @@ fn is_checkpoint_request(request : Json) -> Bool raise {
 }
 
 ///|
+/// The turn's final answer, failing the test unless the last event is a
+/// finished terminal.
+#callsite(autofill(loc))
+fn finished_answer(
+  result : @agent_session.Session,
+  loc~ : SourceLoc,
+) -> String raise {
+  guard result.events().peek() is Some(last) &&
+    last.item() is Terminal(Finished(answer)) else {
+    fail("expected finished terminal", loc~)
+  }
+  answer
+}
+
+///|
+/// The checkpoint summary appended right before the terminal, failing the
+/// test when it is missing.
+#callsite(autofill(loc))
+fn summary_before_terminal(
+  result : @agent_session.Session,
+  loc~ : SourceLoc,
+) -> @agent_session.SessionSummary raise {
+  let events = result.events()
+  guard events[events.length() - 2].item() is Summary(summary) else {
+    fail("expected the checkpoint summary before the terminal", loc~)
+  }
+  summary
+}
+
+///|
 fn probe_tools(results : Array[String]) -> @agent_tool.Tools raise {
   let mut calls = 0
   Tools([
@@ -177,15 +188,20 @@ fn probe_tools(results : Array[String]) -> @agent_tool.Tools raise {
 }
 
 ///|
+fn finish_definition() -> @agent_tool.AgentToolDefinition {
+  AgentToolDefinition(
+    name="finish",
+    description="Finish tool.",
+    schema=JsonSchema({ "type": "object" }),
+    execute=Sync(_args => @agent_tool.ToolAction::finish("wrapped: all done")),
+    control=true,
+  )
+}
+
+///|
 fn finish_and_probe_tools() -> @agent_tool.Tools raise {
   Tools([
-    AgentToolDefinition(
-      name="finish",
-      description="Finish tool.",
-      schema=JsonSchema({ "type": "object" }),
-      execute=Sync(_args => @agent_tool.ToolAction::finish("wrapped: all done")),
-      control=true,
-    ),
+    finish_definition(),
     AgentToolDefinition(
       name="probe",
       description="Probe tool.",
@@ -233,16 +249,10 @@ async test "pressure on a tool-call response yields immediately" {
     // terminal.
     assert_eq(main_step, 1)
     assert_eq(checkpoint_requests.length(), 1)
+    assert_true(finished_answer(result).contains("[context ceiling]"))
     let events = result.events()
-    guard events.peek() is Some(last) &&
-      last.item() is Terminal(Finished(answer)) else {
-      fail("expected finished terminal last")
-    }
-    assert_true(answer.contains("[context ceiling]"))
     let count = events.length()
-    guard events[count - 2].item() is Summary(summary) else {
-      fail("expected the checkpoint summary before the terminal")
-    }
+    let summary = summary_before_terminal(result)
     assert_eq(summary.content(), "CEILING-SUMMARY")
     assert_eq(summary.from_sequence(), 1)
     // The summary covers everything before it, including the closed batch.
@@ -293,16 +303,9 @@ async test "a final answer at pressure checkpoints then finishes normally" {
     // The answer is not durable when the summary generates: it must not be
     // foldable into the checkpoint text (it projects verbatim after it).
     assert_false(checkpoint_requests[0].stringify().contains("really done"))
-    let events = result.events()
-    let count = events.length()
-    guard events.peek() is Some(last) &&
-      last.item() is Terminal(Finished(answer)) else {
-      fail("expected finished terminal")
-    }
-    assert_eq(answer, "really done")
-    guard events[count - 2].item() is Summary(summary) else {
-      fail("expected the checkpoint summary before the terminal")
-    }
+    assert_eq(finished_answer(result), "really done")
+    let count = result.events().length()
+    let summary = summary_before_terminal(result)
     assert_eq(summary.content(), "FINISH-SUMMARY")
     assert_eq(summary.from_sequence(), 1)
     assert_eq(summary.to_sequence(), count - 2)
@@ -390,11 +393,7 @@ async test "a steer during compact-on-finish continues the turn compacted" {
     assert_true(summary_sequence > 0)
     assert_true(answer_sequence > summary_sequence)
     assert_true(steer_sequence > answer_sequence)
-    guard result.events().peek() is Some(last) &&
-      last.item() is Terminal(Finished(answer)) else {
-      fail("expected finished terminal")
-    }
-    assert_eq(answer, "done")
+    assert_eq(finished_answer(result), "done")
   }
 }
 
@@ -449,10 +448,7 @@ async test "a failed checkpoint with a late steer yields instead of continuing" 
     }
     assert_true(answer_kept)
     assert_true(steer_kept)
-    guard result.events().peek() is Some(last) &&
-      last.item() is Terminal(Finished(answer)) else {
-      fail("expected finished terminal")
-    }
+    let answer = finished_answer(result)
     assert_true(answer.contains("[context ceiling]"))
     assert_true(answer.contains("checkpoint attempt failed"))
   }
@@ -513,11 +509,7 @@ async test "a non-control finish shadow is skip-closed at the ceiling" {
         )
       }
     }
-    guard result.events().peek() is Some(last) &&
-      last.item() is Terminal(Finished(answer)) else {
-      fail("expected finished terminal")
-    }
-    assert_true(answer.contains("[context ceiling]"))
+    assert_true(finished_answer(result).contains("[context ceiling]"))
   }
 }
 
@@ -558,20 +550,14 @@ async test "a pressured finish batch salvages the completion" {
     )
     assert_eq(main_requests, 1)
     assert_eq(checkpoint_requests.length(), 1)
-    let events = result.events()
-    let count = events.length()
-    guard events.peek() is Some(last) &&
-      last.item() is Terminal(Finished(answer)) else {
-      fail("expected finished terminal")
-    }
     // A completed task, not a yield: the finish tool's answer verbatim.
-    assert_eq(answer, "wrapped: all done")
-    guard events[count - 2].item() is Summary(summary) else {
-      fail("expected the checkpoint summary before the terminal")
-    }
+    assert_eq(finished_answer(result), "wrapped: all done")
     // The leftover call was closed BEFORE the checkpoint, so the summary
     // range covers it — no projection repair text can leak into summaries.
-    assert_eq(summary.to_sequence(), count - 2)
+    assert_eq(
+      summary_before_terminal(result).to_sequence(),
+      result.events().length() - 2,
+    )
     let mut finish_result = false
     let mut prefix_skipped = false
     let mut leftover_closed = false
@@ -652,11 +638,7 @@ async test "a pressured finish tool losing to a steer yields instead" {
     assert_true(steer_sequence > 0)
     assert_true(summary_to > 0)
     assert_true(summary_to < steer_sequence)
-    guard result.events().peek() is Some(last) &&
-      last.item() is Terminal(Finished(answer)) else {
-      fail("expected finished terminal")
-    }
-    assert_true(answer.contains("[context ceiling]"))
+    assert_true(finished_answer(result).contains("[context ceiling]"))
   }
 }
 
@@ -690,11 +672,7 @@ async test "a failing checkpoint on a pressured finish keeps the real answer" {
     )
     // Fail-open: the turn still finishes as a normal success, uncompacted.
     assert_eq(checkpoint_requests.length(), 1)
-    guard result.events().peek() is Some(last) &&
-      last.item() is Terminal(Finished(answer)) else {
-      fail("expected finished terminal")
-    }
-    assert_eq(answer, "really done")
+    assert_eq(finished_answer(result), "really done")
     for event in result.events() {
       assert_false(event.item() is Summary(_))
     }
@@ -734,11 +712,7 @@ async test "below the soft ceiling nothing yields" {
       tools=probe_tools(["result-1"]),
     )
     assert_eq(requests, 2)
-    guard result.events().peek() is Some(last) &&
-      last.item() is Terminal(Finished(answer)) else {
-      fail("expected finished terminal")
-    }
-    assert_eq(answer, "done")
+    assert_eq(finished_answer(result), "done")
   }
 }
 
@@ -776,10 +750,7 @@ async test "a failed checkpoint still yields fail-open" {
     // The turn still ends at the ceiling — uncompacted — so the next turn's
     // pressure retries the checkpoint instead of stranding this one.
     assert_eq(checkpoint_requests.length(), 1)
-    guard result.events().peek() is Some(last) &&
-      last.item() is Terminal(Finished(answer)) else {
-      fail("expected finished terminal")
-    }
+    let answer = finished_answer(result)
     assert_true(answer.contains("[context ceiling]"))
     // Honest fail-open: the terminal must not claim a checkpoint exists.
     assert_true(answer.contains("checkpoint attempt failed"))
@@ -863,11 +834,7 @@ async test "a steer arriving under pressure survives the checkpoint verbatim" {
     // before the summary request is even sent — a cancellation mid-request
     // must not lose already-drained input).
     assert_true(steer_sequence < summary_sequence)
-    guard result.events().peek() is Some(last) &&
-      last.item() is Terminal(Finished(answer)) else {
-      fail("expected finished terminal")
-    }
-    assert_true(answer.contains("[context ceiling]"))
+    assert_true(finished_answer(result).contains("[context ceiling]"))
   }
 }
 
@@ -903,11 +870,7 @@ async test "pressure on the last allowed step yields at the ceiling not as exhau
     // Context beats steps: the pressured response yields in its own
     // iteration, so the step bound is never the one to end the turn.
     assert_eq(checkpoint_requests.length(), 1)
-    guard result.events().peek() is Some(last) &&
-      last.item() is Terminal(Finished(answer)) else {
-      fail("expected finished terminal")
-    }
-    assert_true(answer.contains("[context ceiling]"))
+    assert_true(finished_answer(result).contains("[context ceiling]"))
   }
 }
 
@@ -981,19 +944,11 @@ async test "a soft-ceiling batch executes then yields gracefully" {
     // and the turn still ended at the boundary with a checkpoint.
     assert_eq(main_requests, 1)
     assert_eq(checkpoint_requests.length(), 1)
-    let events = result.events()
-    let count = events.length()
-    guard events.peek() is Some(last) &&
-      last.item() is Terminal(Finished(answer)) else {
-      fail("expected finished terminal")
-    }
-    assert_true(answer.contains("[context ceiling]"))
-    guard events[count - 2].item() is Summary(summary) else {
-      fail("expected the checkpoint summary before the terminal")
-    }
+    assert_true(finished_answer(result).contains("[context ceiling]"))
+    let summary = summary_before_terminal(result)
     assert_eq(summary.content(), "SOFT-SUMMARY")
     // The executed result is inside the covered range.
-    assert_eq(summary.to_sequence(), count - 2)
+    assert_eq(summary.to_sequence(), result.events().length() - 2)
     let mut executed = false
     for event in result.events() {
       if event.item() is Tool(tool_result) {
@@ -1008,53 +963,31 @@ async test "a soft-ceiling batch executes then yields gracefully" {
 }
 
 ///|
+fn flood_definition(chars : Int) -> @agent_tool.AgentToolDefinition {
+  let content = "y".repeat(chars)
+  AgentToolDefinition(
+    name="flood",
+    description="Flood tool.",
+    schema=JsonSchema({ "type": "object" }),
+    execute=Sync(_args => @agent_tool.ToolAction::respond(content)),
+  )
+}
+
+///|
 fn flood_tools(chars : Int) -> @agent_tool.Tools raise {
-  let flood = StringBuilder()
-  for _i in 0..<chars {
-    flood.write_char('y')
-  }
-  let content = flood.to_string()
-  Tools([
-    AgentToolDefinition(
-      name="flood",
-      description="Flood tool.",
-      schema=JsonSchema({ "type": "object" }),
-      execute=Sync(_args => @agent_tool.ToolAction::respond(content)),
-    ),
-  ])
+  Tools([flood_definition(chars)])
 }
 
 ///|
 fn flood_batch(count : Int) -> Array[(String, String)] {
-  let calls : Array[(String, String)] = []
-  for index in 0..<count {
-    calls.push(("call_\{index + 1}", "flood"))
-  }
-  calls
+  [
+    for index in 0..<count => ("call_\{index + 1}", "flood")
+  ]
 }
 
 ///|
 fn flood_and_finish_tools(chars : Int) -> @agent_tool.Tools raise {
-  let flood = StringBuilder()
-  for _i in 0..<chars {
-    flood.write_char('y')
-  }
-  let content = flood.to_string()
-  Tools([
-    AgentToolDefinition(
-      name="flood",
-      description="Flood tool.",
-      schema=JsonSchema({ "type": "object" }),
-      execute=Sync(_args => @agent_tool.ToolAction::respond(content)),
-    ),
-    AgentToolDefinition(
-      name="finish",
-      description="Finish tool.",
-      schema=JsonSchema({ "type": "object" }),
-      execute=Sync(_args => @agent_tool.ToolAction::finish("wrapped: all done")),
-      control=true,
-    ),
-  ])
+  Tools([flood_definition(chars), finish_definition()])
 }
 
 ///|
@@ -1103,17 +1036,9 @@ async test "a budget trip salvages a finish in the remainder" {
     )
     assert_eq(main_requests, 1)
     assert_eq(checkpoint_requests.length(), 1)
-    let events = result.events()
-    let count = events.length()
-    guard events.peek() is Some(last) &&
-      last.item() is Terminal(Finished(answer)) else {
-      fail("expected finished terminal")
-    }
     // A completed task, not a yield: the salvaged finish's answer.
-    assert_eq(answer, "wrapped: all done")
-    guard events[count - 2].item() is Summary(_) else {
-      fail("expected the checkpoint summary before the terminal")
-    }
+    assert_eq(finished_answer(result), "wrapped: all done")
+    ignore(summary_before_terminal(result))
     let mut executed_floods = 0
     let mut skipped = 0
     let mut finish_result = false
@@ -1189,11 +1114,7 @@ async test "the running budget stops an overflowing batch mid-way" {
     // The executed prefix is covered by the checkpoint; the rest waits.
     assert_eq(executed, 3)
     assert_eq(skipped, 3)
-    guard result.events().peek() is Some(last) &&
-      last.item() is Terminal(Finished(answer)) else {
-      fail("expected finished terminal")
-    }
-    assert_true(answer.contains("[context ceiling]"))
+    assert_true(finished_answer(result).contains("[context ceiling]"))
   }
 }
 
@@ -1248,11 +1169,7 @@ async test "a below-soft batch with huge results yields instead of overflowing" 
     }
     assert_eq(executed, 4)
     assert_eq(skipped, 2)
-    guard result.events().peek() is Some(last) &&
-      last.item() is Terminal(Finished(answer)) else {
-      fail("expected finished terminal")
-    }
-    assert_true(answer.contains("[context ceiling]"))
+    assert_true(finished_answer(result).contains("[context ceiling]"))
   }
 }
 
@@ -1290,16 +1207,8 @@ async test "a finish tool in the soft band compacts and finishes normally" {
     // soft band) and compact-on-finish still checkpointed the session.
     assert_eq(main_requests, 1)
     assert_eq(checkpoint_requests.length(), 1)
-    let events = result.events()
-    let count = events.length()
-    guard events.peek() is Some(last) &&
-      last.item() is Terminal(Finished(answer)) else {
-      fail("expected finished terminal")
-    }
-    assert_eq(answer, "wrapped: all done")
-    guard events[count - 2].item() is Summary(_) else {
-      fail("expected the checkpoint summary before the terminal")
-    }
+    assert_eq(finished_answer(result), "wrapped: all done")
+    ignore(summary_before_terminal(result))
   }
 }
 
@@ -1343,10 +1252,7 @@ async test "a failing checkpoint after a soft batch keeps its results" {
       }
     }
     assert_true(executed)
-    guard result.events().peek() is Some(last) &&
-      last.item() is Terminal(Finished(answer)) else {
-      fail("expected finished terminal")
-    }
+    let answer = finished_answer(result)
     assert_true(answer.contains("[context ceiling]"))
     assert_true(answer.contains("checkpoint attempt failed"))
   }
@@ -1398,11 +1304,7 @@ async test "a steer arriving during the checkpoint request is preserved" {
     }
     assert_true(summary_sequence > 0)
     assert_true(steer_sequence > summary_sequence)
-    guard result.events().peek() is Some(last) &&
-      last.item() is Terminal(Finished(answer)) else {
-      fail("expected finished terminal")
-    }
-    assert_true(answer.contains("[context ceiling]"))
+    assert_true(finished_answer(result).contains("[context ceiling]"))
   }
 }
 
@@ -1448,18 +1350,9 @@ async test "a budget-tripped salvaged finish still checkpoints" {
     )
     assert_eq(main_requests, 1)
     assert_eq(checkpoint_requests.length(), 1)
-    let events = result.events()
-    let count = events.length()
-    guard events.peek() is Some(last) &&
-      last.item() is Terminal(Finished(answer)) else {
-      fail("expected finished terminal")
-    }
     // A real completion — with the checkpoint the fat prefix demands.
-    assert_eq(answer, "wrapped: all done")
-    guard events[count - 2].item() is Summary(summary) else {
-      fail("expected the checkpoint summary before the terminal")
-    }
-    assert_eq(summary.content(), "SALVAGE-SUMMARY")
+    assert_eq(finished_answer(result), "wrapped: all done")
+    assert_eq(summary_before_terminal(result).content(), "SALVAGE-SUMMARY")
     let mut executed = 0
     let mut skipped = 0
     for event in result.events() {
@@ -1538,11 +1431,7 @@ async test "a steer during a salvaged finish's checkpoint continues once" {
     assert_eq(summaries, 1)
     assert_eq(skip_notes, 2)
     assert_true(steer_present)
-    guard result.events().peek() is Some(last) &&
-      last.item() is Terminal(Finished(answer)) else {
-      fail("expected finished terminal")
-    }
-    assert_eq(answer, "done")
+    assert_eq(finished_answer(result), "done")
   }
 }
 
@@ -1560,18 +1449,6 @@ async test "an oversized tool result is clamped at the loop" {
       }
     }
     guard auto_compact_test_server(group, handle) is Some(url) else { return }
-    let flood = StringBuilder()
-    for _i in 0..<70_000 {
-      flood.write_char('x')
-    }
-    let tools : @agent_tool.Tools = Tools([
-      AgentToolDefinition(
-        name="flood",
-        description="Flood tool.",
-        schema=JsonSchema({ "type": "object" }),
-        execute=Sync(_args => @agent_tool.ToolAction::respond(flood.to_string())),
-      ),
-    ])
     let session = @agent_session.Session(
       SessionId("clamp"),
       system_prompt="system",
@@ -1585,9 +1462,8 @@ async test "an oversized tool result is clamped at the loop" {
       task="flood me",
       append_item=(session, item) => session.append(item),
       api_url=url,
-      tools~,
+      tools=flood_tools(70_000),
     )
-    ignore(result)
     let mut clamped = false
     for event in result.events() {
       if event.item() is Tool(tool_result) {
