@@ -357,7 +357,7 @@ async fn prepare_suite_output_dir(out_dir : String) -> Unit {
 async fn prepare_combo_output_dirs(jobs : Array[SuiteJob]) -> Unit {
   let seen : Array[String] = []
   for job in jobs {
-    if !string_array_contains(seen, job.out_dir) {
+    if !seen.contains(job.out_dir) {
       seen.push(job.out_dir)
       prepare_output_dir(job.out_dir)
     }
@@ -495,22 +495,15 @@ fn suite_manifest_for_output_dir(
   manifest : SuiteManifest,
   out_dir : String,
 ) -> SuiteManifest {
-  let original_out_dir = manifest.out_dir
-  SuiteManifest(
-    name=manifest.name,
-    out_dir~,
-    runs_per_combo=manifest.runs_per_combo,
-    concurrency=manifest.concurrency,
-    min_successes=manifest.min_successes,
-    max_steps=manifest.max_steps,
-    models=manifest.models,
-    problems=manifest.problems,
-    combos=[
+  {
+    ..manifest,
+    out_dir,
+    combos: [
       for combo in manifest.combos => {
-        relocate_suite_combo(combo, original_out_dir, out_dir)
+        relocate_suite_combo(combo, manifest.out_dir, out_dir)
       }
     ],
-  )
+  }
 }
 
 ///|
@@ -519,18 +512,15 @@ fn relocate_suite_combo(
   old_out_dir : String,
   new_out_dir : String,
 ) -> ComboRun {
-  ComboRun(
-    model=combo.model,
-    problem_id=combo.problem_id,
-    prompt_label=combo.prompt_label,
-    task_file=combo.task_file,
-    out_dir=relocate_output_path(combo.out_dir, old_out_dir, new_out_dir),
-    manifest_path=relocate_output_path(
+  {
+    ..combo,
+    out_dir: relocate_output_path(combo.out_dir, old_out_dir, new_out_dir),
+    manifest_path: relocate_output_path(
       combo.manifest_path,
       old_out_dir,
       new_out_dir,
     ),
-  )
+  }
 }
 
 ///|
@@ -705,24 +695,13 @@ fn SuiteReport::to_json(self : SuiteReport) -> Json {
 ///|
 /// Whether every combo report met its configured threshold.
 pub fn SuiteReport::passed(self : SuiteReport) -> Bool {
-  for report in self.reports {
-    if !report.passed() {
-      return false
-    }
-  }
-  true
+  self.reports.all(report => report.passed())
 }
 
 ///|
 /// One-line failure summary for CLIs that exit non-zero on missed thresholds.
 pub fn SuiteReport::failure_message(self : SuiteReport) -> String {
-  let failed = for report in self.reports; count = 0 {
-    if !report.passed() {
-      continue count + 1
-    }
-  } nobreak {
-    count
-  }
+  let failed = self.reports.count_if(report => !report.passed())
   "prompt task suite failed: \{failed}/\{self.reports.length()} combos below threshold"
 }
 
@@ -755,12 +734,8 @@ fn SuiteReport::as_report(self : SuiteReport) -> @report.Report {
       "Finished", "Validation",
     ],
     rows=[
-      for index in 0..<self.reports.length() => {
-        suite_report_row(
-          self.reports[index],
-          suite_out_dir=self.out_dir,
-          index~,
-        )
+      for index, report in self.reports => {
+        suite_report_row(report, suite_out_dir=self.out_dir, index~)
       }
     ],
   )
@@ -849,14 +824,9 @@ fn average_result_metric(
   report : EvalReport,
   metric : (EvalResult) -> Int,
 ) -> String {
-  if report.results.length() == 0 {
-    return "0.0"
-  }
-  let total = for result in report.results; total = 0 {
-    continue total + metric(result)
-  } nobreak {
-    total
-  }
+  let total = report.results.fold(init=0, (total, result) => {
+    total + metric(result)
+  })
   format_average(total, report.results.length())
 }
 
@@ -871,26 +841,12 @@ fn format_average(total : Int, count : Int) -> String {
 
 ///|
 fn finished_summary(report : EvalReport) -> String {
-  let count = for result in report.results; count = 0 {
-    if result.finished {
-      continue count + 1
-    }
-  } nobreak {
-    count
-  }
-  "\{count}/\{report.results.length()}"
+  "\{report.results.count_if(result => result.finished)}/\{report.results.length()}"
 }
 
 ///|
 fn validation_summary(report : EvalReport) -> String {
-  let count = for result in report.results; count = 0 {
-    if result.validation.passed {
-      continue count + 1
-    }
-  } nobreak {
-    count
-  }
-  "\{count}/\{report.results.length()}"
+  "\{report.results.count_if(result => result.validation.passed)}/\{report.results.length()}"
 }
 
 ///|
@@ -927,16 +883,6 @@ fn combo_out_dir(
 }
 
 ///|
-fn string_array_contains(items : Array[String], value : String) -> Bool {
-  for item in items {
-    if item == value {
-      return true
-    }
-  }
-  false
-}
-
-///|
 fn resolve_relative_path(base_dir : String, path : String) -> String {
   if path.has_prefix("/") || base_dir == "." {
     path
@@ -951,11 +897,7 @@ fn dirname(path : String) -> String {
   if pieces.length() <= 1 {
     return "."
   }
-  let cells : Array[String] = []
-  for index in 0..<(pieces.length() - 1) {
-    cells.push(pieces[index].to_owned())
-  }
-  let joined = cells.join("/")
+  let joined = pieces[:pieces.length() - 1].join("/")
   if joined == "" {
     if path.has_prefix("/") {
       "/"

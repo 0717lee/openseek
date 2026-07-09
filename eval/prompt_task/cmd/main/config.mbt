@@ -52,17 +52,13 @@ async fn suite_config_from_matches(
 
 ///|
 fn flag(matches : @argparse.Matches, name : String) -> Bool {
-  match matches.flags.get(name) {
-    Some(value) => value
-    None => false
-  }
+  matches.flags.get(name).unwrap_or(false)
 }
 
 ///|
 fn value(matches : @argparse.Matches, name : String) -> String raise {
   match matches.values.get(name) {
-    Some([value]) => value
-    Some(values) if values.length() > 0 => values[0]
+    Some([first, ..]) => first
     _ => fail("missing parsed argument: \{name}")
   }
 }

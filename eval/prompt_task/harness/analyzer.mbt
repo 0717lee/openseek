@@ -181,7 +181,7 @@ fn combine_results(
     runs: manifest.runs,
     concurrency: manifest.concurrency,
     min_successes: manifest.min_successes,
-    successes: count_successes(results),
+    successes: results.count_if(result => result.success),
     out_dir: manifest.out_dir,
     results,
   }
@@ -192,24 +192,15 @@ fn manifest_for_output_dir(
   manifest : RunManifest,
   out_dir : String,
 ) -> RunManifest {
-  let original_out_dir = manifest.out_dir
-  RunManifest(
-    model=manifest.model,
-    problem_id=manifest.problem_id,
-    prompt_label=manifest.prompt_label,
-    task_file=manifest.task_file,
-    runs=manifest.runs,
-    concurrency=manifest.concurrency,
-    min_successes=manifest.min_successes,
-    max_steps=manifest.max_steps,
-    out_dir~,
-    validation_probes=manifest.validation_probes,
-    trials=[
+  {
+    ..manifest,
+    out_dir,
+    trials: [
       for trial in manifest.trials => {
-        relocate_trial_artifacts(trial, original_out_dir, out_dir)
+        relocate_trial_artifacts(trial, manifest.out_dir, out_dir)
       }
     ],
-  )
+  }
 }
 
 ///|
@@ -218,18 +209,16 @@ fn relocate_trial_artifacts(
   old_out_dir : String,
   new_out_dir : String,
 ) -> TrialArtifact {
-  TrialArtifact(
-    index=trial.index,
-    workspace=relocate_workspace_path(trial, old_out_dir, new_out_dir),
-    log_path=relocate_output_path(trial.log_path, old_out_dir, new_out_dir),
-    session_id=trial.session_id,
-    events_path=relocate_output_path(
+  {
+    ..trial,
+    workspace: relocate_workspace_path(trial, old_out_dir, new_out_dir),
+    log_path: relocate_output_path(trial.log_path, old_out_dir, new_out_dir),
+    events_path: relocate_output_path(
       trial.events_path,
       old_out_dir,
       new_out_dir,
     ),
-    exit_code=trial.exit_code,
-  )
+  }
 }
 
 ///|
@@ -325,20 +314,14 @@ fn eval_session_with_context(
   context : EvalContext,
 ) -> EvalResult {
   let base = @session_analyzer.analyze_session(session)
-  let reasons : Array[String] = []
-  for reason in context.extra_reasons {
-    reasons.push(reason)
-  }
+  let reasons = context.extra_reasons.copy()
   if !base.success {
     reasons.push(base.reason)
   }
   if context.validation.ran && !context.validation.passed {
     reasons.push(context.validation.reason)
   }
-  let warnings : Array[String] = []
-  for warning in context.extra_warnings {
-    warnings.push(warning)
-  }
+  let warnings = context.extra_warnings.copy()
   if base.warnings != "" {
     warnings.push(base.warnings)
   }
@@ -461,12 +444,11 @@ async fn validate_workspace(
   for probe in probes {
     results.push(run_validation_probe(workspace, probe))
   }
-  let failures : Array[String] = []
-  for result in results {
-    if !result.passed {
-      failures.push(result.name + ": " + result.reason)
+  let failures = [
+    for result in results if !result.passed => {
+      result.name + ": " + result.reason
     }
-  }
+  ]
   {
     ran: true,
     passed: failures.length() == 0,
@@ -489,7 +471,7 @@ async fn run_validation_probe(
   workspace : String,
   spec : ValidationProbeSpec,
 ) -> ProbeResult {
-  if spec.command.length() == 0 {
+  guard spec.command is [head, .. rest] else {
     return ProbeResult(name=spec.name, passed=false, reason="command is empty")
   }
   if spec.write_file != "" {
@@ -499,17 +481,10 @@ async fn run_validation_probe(
       create_mode=CreateOrTruncate,
     )
   }
-  let args = [
-    for i in 1..<spec.command.length() => {
-      replace_workspace(spec.command[i], workspace)
-    }
-  ]
-  let (code, stdout, stderr) = if spec.stdin == "" {
-    @process.collect_output(
-      replace_workspace(spec.command[0], workspace),
-      args,
-      cwd=workspace,
-    )
+  let command = replace_workspace(head, workspace)
+  let args = [ for arg in rest => replace_workspace(arg, workspace) ]
+  let stdin_redirect : &@process.ProcessInput? = if spec.stdin == "" {
+    None
   } else {
     let stdin_path = workspace +
       "/.openseek-" +
@@ -520,13 +495,14 @@ async fn run_validation_probe(
       replace_workspace(spec.stdin, workspace),
       create_mode=CreateOrTruncate,
     )
-    @process.collect_output(
-      replace_workspace(spec.command[0], workspace),
-      args,
-      stdin=@process.redirect_from_file(stdin_path),
-      cwd=workspace,
-    )
+    Some(@process.redirect_from_file(stdin_path))
   }
+  let (code, stdout, stderr) = @process.collect_output(
+    command,
+    args,
+    stdin?=stdin_redirect,
+    cwd=workspace,
+  )
   probe_output_result(spec, code, stdout.text(), stderr.text())
 }
 
@@ -634,17 +610,6 @@ fn sanitize_artifact_name(name : String) -> String {
   .replace_all(old="\\", new="_")
   .replace_all(old=":", new="_")
   .replace_all(old=" ", new="_")
-}
-
-///|
-fn count_successes(results : Array[EvalResult]) -> Int {
-  for result in results; count = 0 {
-    if result.success {
-      continue count + 1
-    }
-  } nobreak {
-    count
-  }
 }
 
 ///|

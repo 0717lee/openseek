@@ -323,11 +323,7 @@ fn eval_result_name(result : EvalResult) -> String {
 
 ///|
 fn eval_result_artifact_name(result : EvalResult) -> String {
-  eval_result_name(result)
-  .replace_all(old="/", new="_")
-  .replace_all(old="\\", new="_")
-  .replace_all(old=":", new="_")
-  .replace_all(old=" ", new="_")
+  sanitize_artifact_name(eval_result_name(result))
 }
 
 ///|
@@ -353,12 +349,11 @@ fn validation_probe_summary(validation : ValidationResult) -> String {
   if validation.probes.length() == 0 {
     return "-"
   }
-  let cells : Array[String] = []
-  for probe in validation.probes {
-    let status = if probe.passed { "pass" } else { "fail" }
-    cells.push(probe.name + "=" + status)
-  }
-  cells.join(", ")
+  [
+    for probe in validation.probes => {
+      probe.name + "=" + (if probe.passed { "pass" } else { "fail" })
+    }
+  ].join(", ")
 }
 
 ///|
