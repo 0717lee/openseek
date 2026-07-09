@@ -106,7 +106,12 @@ async fn AgentLoop::run(
           // that terminal back into an assistant message; appending an Assistant
           // session item here would duplicate the answer on replay.
           match
-            self.finish_turn(session, response.content, usage=response.usage) {
+            self.finish_turn(
+              session,
+              response.content,
+              usage=response.usage,
+              reasoning_content?=response.optional_reasoning_content(),
+            ) {
             Sealed(next) => return next
             ContinueTurn(next) => continue next
           }
@@ -156,7 +161,15 @@ async fn AgentLoop::run(
           ),
         )
         match self.salvage_finish_at_ceiling(session, response) {
-          Some(next) => return next
+          Some(StepDone(next)) => return next
+          // A steer arrived during the salvaged finish's checkpoint: the
+          // turn continues from the compacted projection.
+          Some(StepContinue(next)) => continue next
+          Some(StepYield(next)) =>
+            return self.yield_at_context_ceiling(
+              next,
+              self.runtime.pending_steers(),
+            )
           None => ()
         }
         let session = self.close_skipped_tool_calls(
@@ -170,19 +183,11 @@ async fn AgentLoop::run(
         )
       } else {
         match self.handle_tool_calls(session, response) {
-          StepContinue(next) => {
-            if self.at_soft_context_ceiling(response.usage) {
-              // The soft ceiling ends the turn at this step's boundary: the
-              // batch above executed (under the running budget), so the
-              // checkpoint covers its real results and nothing is
-              // discarded or re-issued.
-              return self.yield_at_context_ceiling(
-                next,
-                self.runtime.pending_steers(),
-              )
-            }
-            continue next
-          }
+          // Plain continuation — including after a checkpoint whose late
+          // steer converted a finish into a continue: the soft decision
+          // lives in handle_tool_calls, which knows the batch's real
+          // growth and must not re-fire on stale pre-checkpoint usage.
+          StepContinue(next) => continue next
           StepDone(next) => return next
           // The running budget stopped the batch mid-way — at ANY usage
           // level, including below the soft ceiling: a below-threshold
@@ -357,9 +362,16 @@ async fn AgentLoop::handle_tool_calls(
       // A finish call in the unexecuted remainder is a completion, not
       // more output — on small-window models the budget can trip well
       // below the hard ceiling, and skip-closing the finish would turn an
-      // already-completed task into a context yield.
-      match self.salvage_finish_at_ceiling(session, response, from=call_index) {
-        Some(next) => return StepDone(next)
+      // already-completed task into a context yield. The executed prefix's
+      // growth rides along so the salvaged finish still checkpoints.
+      match
+        self.salvage_finish_at_ceiling(
+          session,
+          response,
+          from=call_index,
+          spent_result_chars~,
+        ) {
+        Some(outcome) => return outcome
         None => ()
       }
       let session = self.close_skipped_tool_calls(
@@ -391,7 +403,12 @@ async fn AgentLoop::handle_tool_calls(
     }
     match
       self.execute_tool_call(
-        session, response, call_index, native_call, tool_call,
+        session,
+        response,
+        call_index,
+        native_call,
+        tool_call,
+        spent_result_chars~,
       ) {
       ContinueToolBatch(next) => {
         // Account the result actually recorded for this call (the loop
@@ -405,7 +422,18 @@ async fn AgentLoop::handle_tool_calls(
       FinishAgentLoop(next) => return StepDone(next)
     }
   } nobreak {
-    StepContinue(session)
+    // The batch ran to completion. The soft decision includes the batch's
+    // own growth: a below-threshold response whose results carried the
+    // context into the soft band still ends here, gracefully, instead of
+    // sending one more oversized request to find out.
+    if self.at_soft_context_ceiling(
+        response.usage,
+        extra_result_chars=spent_result_chars,
+      ) {
+      StepYield(session)
+    } else {
+      StepContinue(session)
+    }
   }
 }
 
@@ -417,6 +445,7 @@ async fn AgentLoop::execute_tool_call(
   call_index : Int,
   native_call : @deepseek.ToolCall,
   tool_call : @agent_tool.AgentToolCall,
+  spent_result_chars~ : Int64,
 ) -> ToolCallOutcome {
   let result = @agent_tool.execute_tool_call(tool_call, self.tools)
   match result {
@@ -444,7 +473,13 @@ async fn AgentLoop::execute_tool_call(
       )
       let steer_inputs = self.runtime.pending_steers()
       if steer_inputs.is_empty() {
-        return match self.finish_turn(session, answer, usage=response.usage) {
+        return match
+          self.finish_turn(
+            session,
+            answer,
+            usage=response.usage,
+            spent_result_chars~,
+          ) {
           Sealed(next) => FinishAgentLoop(next)
           ContinueTurn(next) => ContinueAgentLoop(next)
         }
@@ -452,7 +487,10 @@ async fn AgentLoop::execute_tool_call(
       // User input wins over the finish tool as well — but never answered in
       // a starved context: at the ceiling the turn yields and the steers
       // survive the checkpoint verbatim.
-      if self.at_soft_context_ceiling(response.usage) {
+      if self.at_soft_context_ceiling(
+          response.usage,
+          extra_result_chars=spent_result_chars,
+        ) {
         return FinishAgentLoop(
           self.yield_at_context_ceiling(session, steer_inputs),
         )
@@ -551,19 +589,34 @@ async fn AgentLoop::close_skipped_tool_calls(
 /// whenever its batch executes; it just cannot be salvaged at the ceiling.
 ///
 /// Returns None when the batch carries no decodable finish call — nothing
-/// was appended and the caller proceeds with the plain yield.
+/// was appended and the caller proceeds with the plain yield. Otherwise
+/// the outcome distinguishes a sealed turn (StepDone: finished or yielded)
+/// from a continuation (StepContinue: a steer arriving during the salvaged
+/// finish's checkpoint converted it into ContinueTurn — treating that as a
+/// failed salvage would close already-closed calls again and fold the
+/// steer into a second summary).
 ///
 /// `from` is where the unexecuted remainder starts: 0 when the whole batch
 /// is being skipped (hard ceiling), or the tripping call's index when the
 /// running budget stopped execution mid-batch — calls before it already
-/// executed and have results. The finish call itself is exempt from the
-/// budget: its result is a few bytes of completion, not tool output.
+/// executed and have results (their growth arrives as
+/// `spent_result_chars`, so the salvaged finish still checkpoints). The
+/// finish call itself is exempt from the budget: its result is a few bytes
+/// of completion, not tool output.
 async fn AgentLoop::salvage_finish_at_ceiling(
   self : Self,
   session : @agent_session.Session,
   response : @deepseek.ChatResponse,
   from? : Int = 0,
-) -> @agent_session.Session? {
+  spent_result_chars? : Int64 = 0,
+) -> AgentStepOutcome? {
+  // The registry must declare the finish tool a CONTROL tool: that is how
+  // the loop knows — without executing — that honoring the call appends a
+  // few bytes, not tool output. A custom non-control tool shadowing the
+  // name is skip-closed like any other call at the ceiling.
+  guard self.tools.find("finish") is Some(definition) && definition.is_control() else {
+    return None
+  }
   let mut finish_index = -1
   for index, call in response.tool_calls {
     if index >= from && call.name == "finish" {
@@ -585,18 +638,30 @@ async fn AgentLoop::salvage_finish_at_ceiling(
   )
   match
     self.execute_tool_call(
-      session, response, finish_index, native_call, tool_call,
+      session,
+      response,
+      finish_index,
+      native_call,
+      tool_call,
+      spent_result_chars~,
     ) {
-    FinishAgentLoop(next) => Some(next)
+    FinishAgentLoop(next) => Some(StepDone(next))
+    // The finish ran but a steer converted it into a continuation: its
+    // remainder is already closed and the checkpoint appended.
+    ContinueAgentLoop(next) => Some(StepContinue(next))
     // A tool named `finish` that did not finish (custom override returning
     // Respond): close the remainder and fall back to the ceiling yield.
-    ContinueToolBatch(next) | ContinueAgentLoop(next) => {
+    ContinueToolBatch(next) => {
       let next = self.close_skipped_tool_calls(
         next,
         response.tool_calls[finish_index + 1:],
         note=ceiling_skip_note,
       )
-      Some(self.yield_at_context_ceiling(next, self.runtime.pending_steers()))
+      Some(
+        StepDone(
+          self.yield_at_context_ceiling(next, self.runtime.pending_steers()),
+        ),
+      )
     }
   }
 }
@@ -684,9 +749,14 @@ async fn AgentLoop::finish_turn(
   session : @agent_session.Session,
   answer : String,
   usage~ : @deepseek.Usage,
+  spent_result_chars? : Int64 = 0,
+  reasoning_content? : String,
 ) -> FinishOutcome {
-  let session = if self.at_soft_context_ceiling(usage) {
-    let (session, _compacted) = self.checkpoint_at_ceiling(session, [])
+  let session = if self.at_soft_context_ceiling(
+      usage,
+      extra_result_chars=spent_result_chars,
+    ) {
+    let (session, compacted) = self.checkpoint_at_ceiling(session, [])
     // The checkpoint request takes seconds; user input may have queued
     // while it was in flight. Appending it before the terminal would make
     // the decided answer read as its reply, and leaving it queued gets it
@@ -695,8 +765,26 @@ async fn AgentLoop::finish_turn(
     // and the turn continues, from the compacted projection.
     let steers = self.runtime.pending_steers()
     if !steers.is_empty() {
-      let session = self.append(session, Assistant(AssistantMessage(answer)))
+      let to_sequence = session.last_sequence()
+      // Keep the response's reasoning on the converted message: Kimi
+      // requires preserved reasoning_content on historical assistant
+      // messages, and this answer is history now.
+      let session = self.append(
+        session,
+        Assistant(AssistantMessage(answer, reasoning_content?)),
+      )
       let session = self.apply_steer_inputs(session, steers)
+      if !compacted {
+        // The checkpoint FAILED: continuing would build the next request
+        // from the same pressured, uncheckpointed history plus two more
+        // messages — the exact overflow the guard exists to prevent.
+        // Yield fail-open instead: the answer and steers are durable
+        // (uncovered, heading the next turn) and the next turn's pressure
+        // retries the checkpoint.
+        return Sealed(
+          self.finish_context_yield(session, to_sequence, compacted=false),
+        )
+      }
       // Re-seed the in-flight buffer from the projection: the whole point
       // of the checkpoint is that the continuation request is small, and
       // the buffer must never disagree with Session::chat_messages.

@@ -112,6 +112,21 @@ fn sse_final(content : String, total_tokens : Int) -> String {
 }
 
 ///|
+fn sse_final_with_reasoning(
+  content : String,
+  reasoning : String,
+  total_tokens : Int,
+) -> String {
+  (
+    {
+      "choices": [
+        { "delta": { "content": content, "reasoning_content": reasoning } },
+      ],
+      "usage": usage_json(total_tokens),
+    } : Json).stringify()
+}
+
+///|
 fn checkpoint_body(summary : String) -> Json {
   { "choices": [{ "message": { "role": "assistant", "content": summary } }] }
 }
@@ -169,6 +184,7 @@ fn finish_and_probe_tools() -> @agent_tool.Tools raise {
       description="Finish tool.",
       schema=JsonSchema({ "type": "object" }),
       execute=Sync(_args => @agent_tool.ToolAction::finish("wrapped: all done")),
+      control=true,
     ),
     AgentToolDefinition(
       name="probe",
@@ -308,7 +324,11 @@ async test "a steer during compact-on-finish continues the turn compacted" {
       } else {
         main_requests.push(request)
         if main_requests.length() == 1 {
-          Sse(sse_final("really done", 750_000))
+          Sse(
+            sse_final_with_reasoning(
+              "really done", "ceiling reasoning trace", 750_000,
+            ),
+          )
         } else {
           Sse(sse_final("done", 100_000))
         }
@@ -338,6 +358,7 @@ async test "a steer during compact-on-finish continues the turn compacted" {
     assert_true(continuation.contains("FINISH-SUMMARY"))
     assert_true(continuation.contains("late steer"))
     assert_true(continuation.contains("really done"))
+
     // The original task is covered by the checkpoint — not resent verbatim.
     assert_false(continuation.contains("answer briefly"))
     // Durable shape: the decided answer became an ordinary assistant
@@ -349,8 +370,16 @@ async test "a steer during compact-on-finish continues the turn compacted" {
     for event in result.events() {
       match event.item() {
         Summary(_) => summary_sequence = event.sequence()
-        Assistant(message) if message.content() == "really done" =>
+        Assistant(message) if message.content() == "really done" => {
           answer_sequence = event.sequence()
+          // The converted answer keeps its reasoning: Kimi requires
+          // preserved reasoning_content on historical assistant messages
+          // (the encoder sends it for Kimi models only — that per-provider
+          // wire behavior is pinned by the deepseek encoder tests).
+          assert_true(
+            message.reasoning_content() is Some("ceiling reasoning trace"),
+          )
+        }
         User(message) if message.content() == "late steer" =>
           steer_sequence = event.sequence()
         _ => ()
@@ -366,6 +395,129 @@ async test "a steer during compact-on-finish continues the turn compacted" {
       fail("expected finished terminal")
     }
     assert_eq(answer, "done")
+  }
+}
+
+///|
+async test "a failed checkpoint with a late steer yields instead of continuing" {
+  @async.with_task_group() <| group => {
+    let runtime = @agent_runtime.AgentRuntime()
+    let checkpoint_requests : Array[Json] = []
+    let mut main_requests = 0
+    let handle = request => {
+      if is_checkpoint_request(request) {
+        checkpoint_requests.push(request)
+        // The steer lands during the summary request — which then FAILS.
+        runtime.queue_steer(Prompt("late steer"))
+        // Empty summary fails generation client-side without HTTP retries.
+        Body(checkpoint_body(""))
+      } else {
+        main_requests += 1
+        Sse(sse_final("really done", 750_000))
+      }
+    }
+    guard auto_compact_test_server(group, handle) is Some(url) else { return }
+    let session = @agent_session.Session(
+      SessionId("failed-checkpoint-late-steer"),
+      system_prompt="system",
+    )
+    let result = @agent.run_turn_in_scope(
+      runtime~,
+      scope=AgentTaskScope(group),
+      api_key="test-key",
+      model=Deepseek(V4Flash),
+      session~,
+      task="answer briefly",
+      append_item=(session, item) => session.append(item),
+      api_url=url,
+    )
+    // Continuing would rebuild the next request from the same pressured,
+    // uncheckpointed history — so the turn yields fail-open instead. The
+    // answer and the steer are durable and head the next turn.
+    assert_eq(main_requests, 1)
+    assert_eq(checkpoint_requests.length(), 1)
+    let mut answer_kept = false
+    let mut steer_kept = false
+    for event in result.events() {
+      assert_false(event.item() is Summary(_))
+      match event.item() {
+        Assistant(message) if message.content() == "really done" =>
+          answer_kept = true
+        User(message) if message.content() == "late steer" => steer_kept = true
+        _ => ()
+      }
+    }
+    assert_true(answer_kept)
+    assert_true(steer_kept)
+    guard result.events().peek() is Some(last) &&
+      last.item() is Terminal(Finished(answer)) else {
+      fail("expected finished terminal")
+    }
+    assert_true(answer.contains("[context ceiling]"))
+    assert_true(answer.contains("checkpoint attempt failed"))
+  }
+}
+
+///|
+async test "a non-control finish shadow is skip-closed at the ceiling" {
+  @async.with_task_group() <| group => {
+    let checkpoint_requests : Array[Json] = []
+    let mut main_requests = 0
+    let handle = request => {
+      if is_checkpoint_request(request) {
+        checkpoint_requests.push(request)
+        Body(checkpoint_body("CEILING-SUMMARY"))
+      } else {
+        main_requests += 1
+        Sse(sse_tool_calls([("call_1", "finish")], 900_000))
+      }
+    }
+    guard auto_compact_test_server(group, handle) is Some(url) else { return }
+    // A custom registry shadowing the built-in name WITHOUT declaring
+    // control: salvage must not execute it — running arbitrary tool work
+    // at the ceiling is exactly what the guard prevents.
+    let tools : @agent_tool.Tools = Tools([
+      AgentToolDefinition(
+        name="finish",
+        description="Not a completion.",
+        schema=JsonSchema({ "type": "object" }),
+        execute=Sync(_args => {
+          @agent_tool.ToolAction::respond("shadow ran anyway")
+        }),
+      ),
+    ])
+    let session = @agent_session.Session(
+      SessionId("finish-shadow"),
+      system_prompt="system",
+    )
+    let result = @agent.run_turn_in_scope(
+      runtime=AgentRuntime(),
+      scope=AgentTaskScope(group),
+      api_key="test-key",
+      model=Deepseek(V4Flash),
+      session~,
+      task="keep grinding",
+      append_item=(session, item) => session.append(item),
+      api_url=url,
+      tools~,
+    )
+    assert_eq(main_requests, 1)
+    assert_eq(checkpoint_requests.length(), 1)
+    for event in result.events() {
+      if event.item() is Tool(tool_result) {
+        // Never executed: the only result is the ceiling skip note.
+        assert_true(tool_result.content() != "shadow ran anyway")
+        assert_true(tool_result.is_error())
+        assert_true(
+          tool_result.content().contains("yielding at the context ceiling"),
+        )
+      }
+    }
+    guard result.events().peek() is Some(last) &&
+      last.item() is Terminal(Finished(answer)) else {
+      fail("expected finished terminal")
+    }
+    assert_true(answer.contains("[context ceiling]"))
   }
 }
 
@@ -557,11 +709,12 @@ async test "below the soft ceiling nothing yields" {
       requests += 1
       assert_false(is_checkpoint_request(request))
       if requests == 1 {
-        // One token below 70% of the 1M window: the boundary is exclusive
-        // from below — the turn continues normally.
-        Sse(sse_tool_call("call_1", "probe", 699_999))
+        // Below 70% of the 1M window with enough margin that the batch's
+        // own small result cannot cross the boundary (post-batch growth
+        // counts): the turn continues normally.
+        Sse(sse_tool_call("call_1", "probe", 699_900))
       } else {
-        Sse(sse_final("done", 699_999))
+        Sse(sse_final("done", 699_900))
       }
     }
     guard auto_compact_test_server(group, handle) is Some(url) else { return }
@@ -899,6 +1052,7 @@ fn flood_and_finish_tools(chars : Int) -> @agent_tool.Tools raise {
       description="Finish tool.",
       schema=JsonSchema({ "type": "object" }),
       execute=Sync(_args => @agent_tool.ToolAction::finish("wrapped: all done")),
+      control=true,
     ),
   ])
 }
@@ -1249,6 +1403,146 @@ async test "a steer arriving during the checkpoint request is preserved" {
       fail("expected finished terminal")
     }
     assert_true(answer.contains("[context ceiling]"))
+  }
+}
+
+///|
+fn flood_then_finish_calls() -> Array[(String, String)] {
+  let calls = flood_batch(6)
+  calls.push(("call_7", "finish"))
+  calls
+}
+
+///|
+async test "a budget-tripped salvaged finish still checkpoints" {
+  @async.with_task_group() <| group => {
+    let checkpoint_requests : Array[Json] = []
+    let mut main_requests = 0
+    let handle = request => {
+      if is_checkpoint_request(request) {
+        checkpoint_requests.push(request)
+        Body(checkpoint_body("SALVAGE-SUMMARY"))
+      } else {
+        main_requests += 1
+        // Below the soft ceiling, but the executed prefix's growth (4 x ~59K)
+        // trips the running budget before the finish call; the salvage must
+        // carry that growth so the sealed turn is still checkpointed.
+        Sse(sse_tool_calls(flood_then_finish_calls(), 699_900))
+      }
+    }
+    guard auto_compact_test_server(group, handle) is Some(url) else { return }
+    let session = @agent_session.Session(
+      SessionId("salvage-budget-checkpoint"),
+      system_prompt="system",
+    )
+    let result = @agent.run_turn_in_scope(
+      runtime=AgentRuntime(),
+      scope=AgentTaskScope(group),
+      api_key="test-key",
+      model=Deepseek(V4Flash),
+      session~,
+      task="wrap it up",
+      append_item=(session, item) => session.append(item),
+      api_url=url,
+      tools=flood_and_finish_tools(59_000),
+    )
+    assert_eq(main_requests, 1)
+    assert_eq(checkpoint_requests.length(), 1)
+    let events = result.events()
+    let count = events.length()
+    guard events.peek() is Some(last) &&
+      last.item() is Terminal(Finished(answer)) else {
+      fail("expected finished terminal")
+    }
+    // A real completion — with the checkpoint the fat prefix demands.
+    assert_eq(answer, "wrapped: all done")
+    guard events[count - 2].item() is Summary(summary) else {
+      fail("expected the checkpoint summary before the terminal")
+    }
+    assert_eq(summary.content(), "SALVAGE-SUMMARY")
+    let mut executed = 0
+    let mut skipped = 0
+    for event in result.events() {
+      if event.item() is Tool(tool_result) {
+        if tool_result.is_error() {
+          skipped += 1
+        } else if tool_result.content().length() == 59_000 {
+          executed += 1
+        }
+      }
+    }
+    assert_eq(executed, 4)
+    assert_eq(skipped, 2)
+  }
+}
+
+///|
+async test "a steer during a salvaged finish's checkpoint continues once" {
+  @async.with_task_group() <| group => {
+    let runtime = @agent_runtime.AgentRuntime()
+    let checkpoint_requests : Array[Json] = []
+    let mut main_requests = 0
+    let handle = request => {
+      if is_checkpoint_request(request) {
+        checkpoint_requests.push(request)
+        // The steer lands while the salvaged finish's checkpoint is in
+        // flight: the finish converts into a continuation — the remainder is
+        // already closed, so it must NOT be closed again or summarized twice.
+        runtime.queue_steer(Prompt("late steer"))
+        Body(checkpoint_body("SALVAGE-SUMMARY"))
+      } else {
+        main_requests += 1
+        if main_requests == 1 {
+          Sse(sse_tool_calls(flood_then_finish_calls(), 699_900))
+        } else {
+          Sse(sse_final("done", 100_000))
+        }
+      }
+    }
+    guard auto_compact_test_server(group, handle) is Some(url) else { return }
+    let session = @agent_session.Session(
+      SessionId("salvage-late-steer"),
+      system_prompt="system",
+    )
+    let result = @agent.run_turn_in_scope(
+      runtime~,
+      scope=AgentTaskScope(group),
+      api_key="test-key",
+      model=Deepseek(V4Flash),
+      session~,
+      task="wrap it up",
+      append_item=(session, item) => session.append(item),
+      api_url=url,
+      tools=flood_and_finish_tools(59_000),
+    )
+    assert_eq(main_requests, 2)
+    assert_eq(checkpoint_requests.length(), 1)
+    let mut summaries = 0
+    let mut skip_notes = 0
+    let mut steer_present = false
+    for event in result.events() {
+      match event.item() {
+        Summary(_) => summaries += 1
+        Tool(tool_result) =>
+          if tool_result.is_error() &&
+            tool_result.content().contains("yielding at the context ceiling") {
+            skip_notes += 1
+          }
+        User(message) if message.content() == "late steer" =>
+          steer_present = true
+        _ => ()
+      }
+    }
+    // Exactly one checkpoint, the two budget-skipped calls closed exactly
+    // once, and the steer survives as the continuation's input.
+    assert_eq(summaries, 1)
+    assert_eq(skip_notes, 2)
+    assert_true(steer_present)
+    guard result.events().peek() is Some(last) &&
+      last.item() is Terminal(Finished(answer)) else {
+      fail("expected finished terminal")
+    }
+    assert_eq(answer, "done")
   }
 }
 

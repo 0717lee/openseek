@@ -21,6 +21,7 @@ pub fn definition() -> @agent_tool.AgentToolDefinition {
       "required": ["answer"],
     }),
     execute=Sync(execute),
+    control=true,
   )
 }
 

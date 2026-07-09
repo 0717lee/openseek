@@ -42,6 +42,12 @@ pub struct AgentToolDefinition {
   description : String
   schema : JsonSchema
   execute : ToolExecutor
+  /// A control tool's action is loop flow (`Control(Finish/Abort)`), not
+  /// tool output — its "result" is a few bytes. The loop uses this to know,
+  /// WITHOUT executing, that a call is safe to honor at the context
+  /// ceiling: the built-in `finish` declares it, and a custom completion
+  /// override must too or it is skip-closed like any other call there.
+  control : Bool
 } derive(Debug(ignore=ToolExecutor))
 
 ///|
@@ -52,8 +58,15 @@ pub fn AgentToolDefinition::AgentToolDefinition(
   description~ : String,
   schema~ : JsonSchema,
   execute~ : ToolExecutor,
+  control? : Bool = false,
 ) -> AgentToolDefinition {
-  { name, description, schema, execute }
+  { name, description, schema, execute, control }
+}
+
+///|
+/// Whether this tool declared itself a control tool (see the field doc).
+pub fn AgentToolDefinition::is_control(self : AgentToolDefinition) -> Bool {
+  self.control
 }
 
 ///|
@@ -288,6 +301,7 @@ test "Tools::function_tools converts the registry to deepseek tool definitions" 
       description: "Echo the input.",
       schema: JsonSchema({ "type": "object" }),
       execute: Sync(_args => ToolAction::respond("ok")),
+      control: false,
     },
   ])
   let function_tools = tools.function_tools()
@@ -303,6 +317,7 @@ test "Tools::find returns the registered definition by name" {
       description: "Echo.",
       schema: JsonSchema({ "type": "object" }),
       execute: Sync(_args => ToolAction::respond("ok")),
+      control: false,
     },
   ])
   guard tools.find("echo") is Some(definition) else { fail("missing echo") }
@@ -318,12 +333,14 @@ test "Tools::Tools raises on duplicate tool names" {
       description: "First.",
       schema: JsonSchema({ "type": "object" }),
       execute: Sync(_args => ToolAction::respond("first")),
+      control: false,
     },
     {
       name: "echo",
       description: "Second.",
       schema: JsonSchema({ "type": "object" }),
       execute: Sync(_args => ToolAction::respond("second")),
+      control: false,
     },
   ]) catch {
     error => {
@@ -358,6 +375,7 @@ async test "execute_tool_call dispatches to registered executor" {
           _ => ToolAction::respond("no value", is_error=true)
         }
       }),
+      control: false,
     },
   ])
   let call = AgentToolCall(
@@ -386,6 +404,7 @@ async test "execute_tool_call dispatches to async executor" {
       description: "Async echo.",
       schema: JsonSchema({ "type": "object" }),
       execute: Async(async_echo),
+      control: false,
     },
   ])
   let call = AgentToolCall(
@@ -405,6 +424,7 @@ test "Tools::function_tools preserves description and schema" {
       description: "Echo what comes in.",
       schema: JsonSchema({ "type": "object", "properties": {} }),
       execute: Sync(_args => ToolAction::respond("ok")),
+      control: false,
     },
   ])
   let function_tools = tools.function_tools()
@@ -430,18 +450,21 @@ test "Tools::function_tools yields one entry per definition" {
       description: "First.",
       schema: JsonSchema({ "type": "object" }),
       execute: Sync(_args => ToolAction::respond("1")),
+      control: false,
     },
     {
       name: "second",
       description: "Second.",
       schema: JsonSchema({ "type": "object" }),
       execute: Sync(_args => ToolAction::respond("2")),
+      control: false,
     },
     {
       name: "third",
       description: "Third.",
       schema: JsonSchema({ "type": "object" }),
       execute: Sync(_args => ToolAction::respond("3")),
+      control: false,
     },
   ])
   let function_tools = tools.function_tools()

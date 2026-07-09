@@ -35,16 +35,17 @@ fn at_context_share(
 ///|
 /// The turn must end at this step's boundary. `total_tokens` — last prompt
 /// plus completion — is the closest available proxy for the next request's
-/// prompt size.
+/// prompt size; `extra_result_chars` adds the current batch's recorded
+/// results (measured AFTER usage was), so a below-threshold response whose
+/// batch grew the context into the soft band still ends compacted.
 fn AgentLoop::at_soft_context_ceiling(
   self : Self,
   usage : @deepseek.Usage,
+  extra_result_chars? : Int64 = 0,
 ) -> Bool {
-  at_context_share(
-    usage,
-    self.client.model.context_window(),
-    soft_context_ceiling_percent,
-  )
+  let window = self.client.model.context_window().to_int64()
+  (usage.total_tokens.to_int64() + extra_result_chars) * 100 >=
+  window * soft_context_ceiling_percent.to_int64()
 }
 
 ///|

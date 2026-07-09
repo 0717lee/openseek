@@ -124,6 +124,7 @@ test "read tool advertises the expected schema" {
       #|    ),
       #|  ),
       #|  execute: ...,
+      #|  control: false,
       #|}
     ),
   )
