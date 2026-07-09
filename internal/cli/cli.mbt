@@ -64,6 +64,21 @@ pub fn require_non_empty(
 }
 
 ///|
+/// Parse option `name` as a strictly positive integer when present; an
+/// absent option — no flag, no env var, no table default — reads as `None`.
+/// For options whose absence is a mode, not a wiring bug (contrast `value`).
+pub fn parse_optional_positive_int(
+  matches : @argparse.Matches,
+  name : String,
+  label : String,
+) -> Int? raise {
+  match matches.values.get(name) {
+    Some([input, ..]) => Some(parse_positive_int(input, label))
+    _ => None
+  }
+}
+
+///|
 /// Parse `input` as a strictly positive integer; `label` names the offending
 /// option in the failure message.
 pub fn parse_positive_int(input : String, label : String) -> Int raise {

@@ -82,8 +82,9 @@ moon run cmd/openseek -- --model kimi-k2.7-code-highspeed run "inspect this proj
 ```
 
 `OPENSEEK_MODEL` is optional and defaults to `deepseek-v4-pro`.
-`OPENSEEK_MAX_STEPS` is optional and defaults to `1000`; pass `--max-steps` on
-the CLI to override it for one run. `--thinking no|high|max` controls DeepSeek
+`OPENSEEK_MAX_STEPS` is optional; when omitted, turns are bounded by the
+model's context window (a checkpoint summary carries each turn into the
+next) rather than a step count. Pass `--max-steps` to cap steps for one run. `--thinking no|high|max` controls DeepSeek
 thinking mode and effort (default: max).
 Pass `--dir <workspace>` or set `OPENSEEK_DIR` to run one-shot commands against
 another workspace while still launching from the current shell. The default is

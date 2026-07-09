@@ -135,7 +135,7 @@ async fn run_task_command(matches : @argparse.Matches) -> Unit {
           api_key~,
           model~,
           task~,
-          max_steps~,
+          max_steps?,
           system_prompt_text~,
           thinking~,
           api_url?,
@@ -168,7 +168,7 @@ async fn run_task_command(matches : @argparse.Matches) -> Unit {
             session~,
             task~,
             append_item=(session, item) => store.append(session, item),
-            max_steps~,
+            max_steps?,
             thinking~,
             api_url?,
             workspace_root~,
@@ -586,8 +586,10 @@ fn explicitly_provided(matches : @argparse.Matches, name : String) -> Bool {
 }
 
 ///|
-fn max_steps(matches : @argparse.Matches) -> Int raise {
-  @cli.parse_positive_int(@cli.value(matches, "max-steps"), "--max-steps")
+/// `None` — no flag, no env — means turns bounded by the model's context
+/// window (the engine's own default), not by a step count.
+fn max_steps(matches : @argparse.Matches) -> Int? raise {
+  @cli.parse_optional_positive_int(matches, "max-steps", "--max-steps")
 }
 
 ///|
@@ -1107,7 +1109,7 @@ test "cli parses env backed options and task" {
   guard @agentcli.api_url(parsed) is Some(url) else { fail("expected api url") }
   assert_eq(url, "https://proxy.example/v1/chat/completions")
   assert_eq(@cli.value(parsed, "dir"), "/tmp/openseek-workspace")
-  assert_eq(max_steps(parsed), 120)
+  assert_true(max_steps(parsed) is Some(120))
   assert_eq(@cli.value(parsed, "system-prompt-file"), "/tmp/prompt-a.md")
   assert_eq(
     @cli.value(parsed, "system-prompt-addendum-file"),
@@ -1130,7 +1132,7 @@ test "cli defaults model and max steps" {
   assert_eq(@cli.value(parsed, "model"), "deepseek-v4-pro")
   assert_true(@agentcli.api_url(parsed) is None)
   assert_eq(@cli.value(parsed, "dir"), ".")
-  assert_eq(max_steps(parsed), 1000)
+  assert_true(max_steps(parsed) is None)
   assert_true(@agentcli.session_id(parsed) is None)
   assert_eq(session_root(parsed), ".openseek")
 }
@@ -1379,7 +1381,7 @@ test "cli parses max steps option" {
   let parsed = run_matches(argv=["--max-steps", "25", "write", "MoonBit"], env={
     "DEEPSEEK": "test-key",
   })
-  assert_eq(max_steps(parsed), 25)
+  assert_true(max_steps(parsed) is Some(25))
 }
 
 ///|

@@ -352,7 +352,7 @@ async fn run_serve(
             session = next
             next
           },
-          max_steps~,
+          max_steps?,
           thinking~,
           api_url?,
           tools~,

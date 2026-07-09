@@ -38,7 +38,10 @@ async fn run_review_cli(
     model,
     base,
     workspace_root~,
-    max_steps~,
+    // Omission means context-bounded here too — uniform with run/serve/TUI.
+    // (run_review's own 120 default remains the contract for direct API
+    // callers only; before the flip the root flag default 1000 always won.)
+    max_steps=max_steps.unwrap_or(@agent.unbounded_max_steps),
     thinking~,
     api_url?,
   ) catch {
