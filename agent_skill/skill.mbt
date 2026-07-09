@@ -42,7 +42,7 @@ pub fn Skill::path(self : Skill) -> String {
 fn parse_frontmatter(text : String, fallback_name : String) -> (String, String) {
   let mut name = fallback_name
   let mut description = ""
-  let lines = text.split("\n").map(line => line.to_owned()).collect()
+  let lines = text.split("\n").collect()
   guard lines is [first, .. rest] && first.trim() == "---" else {
     return (name, description)
   }

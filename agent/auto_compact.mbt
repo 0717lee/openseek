@@ -23,13 +23,14 @@ let soft_context_ceiling_percent = 70
 let hard_context_ceiling_percent = 80
 
 ///|
-fn at_context_share(
-  usage : @deepseek.Usage,
-  context_window : Int,
+/// Whether `tokens` reaches `percent` of the model's context window.
+fn AgentLoop::at_context_share(
+  self : Self,
+  tokens : Int64,
   percent : Int,
 ) -> Bool {
-  usage.total_tokens.to_int64() * 100 >=
-  context_window.to_int64() * percent.to_int64()
+  tokens * 100 >=
+  self.client.model.context_window().to_int64() * percent.to_int64()
 }
 
 ///|
@@ -43,9 +44,10 @@ fn AgentLoop::at_soft_context_ceiling(
   usage : @deepseek.Usage,
   extra_result_chars? : Int64 = 0,
 ) -> Bool {
-  let window = self.client.model.context_window().to_int64()
-  (usage.total_tokens.to_int64() + extra_result_chars) * 100 >=
-  window * soft_context_ceiling_percent.to_int64()
+  self.at_context_share(
+    usage.total_tokens.to_int64() + extra_result_chars,
+    soft_context_ceiling_percent,
+  )
 }
 
 ///|
@@ -54,9 +56,8 @@ fn AgentLoop::at_hard_context_ceiling(
   self : Self,
   usage : @deepseek.Usage,
 ) -> Bool {
-  at_context_share(
-    usage,
-    self.client.model.context_window(),
+  self.at_context_share(
+    usage.total_tokens.to_int64(),
     hard_context_ceiling_percent,
   )
 }

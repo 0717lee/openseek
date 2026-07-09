@@ -116,18 +116,11 @@ async fn AgentLoop::run(
             ContinueTurn(next) => continue next
           }
         }
-        let reasoning_content = response.optional_reasoning_content()
         // The model considers itself done, but user-visible input arrived while the
         // final call was in flight: user input wins over model-initiated completion.
         // The would-be answer stays as an ordinary assistant message and the turn
         // continues with the new input folded in.
-        let session = self.append(
-          session,
-          Assistant(AssistantMessage(response.content, reasoning_content?)),
-        )
-        self.messages.push(
-          ChatMessage(Assistant, content=response.content, reasoning_content?),
-        )
+        let session = self.record_assistant(session, response)
         if self.at_soft_context_ceiling(response.usage) {
           // Yield now rather than answering the steer in a starved context;
           // the steers survive the checkpoint verbatim.
@@ -141,24 +134,10 @@ async fn AgentLoop::run(
         // request itself. Close every call with a skip note — API-valid, a
         // few bytes — and yield; the checkpoint summary carries the state
         // and the model re-issues the calls next turn if needed.
-        let reasoning_content = response.optional_reasoning_content()
-        let session = self.append(
+        let session = self.record_assistant(
           session,
-          Assistant(
-            AssistantMessage(
-              response.content,
-              tool_calls=response.tool_calls,
-              reasoning_content?,
-            ),
-          ),
-        )
-        self.messages.push(
-          ChatMessage(
-            Assistant,
-            content=response.content,
-            tool_calls=response.tool_calls,
-            reasoning_content?,
-          ),
+          response,
+          tool_calls=response.tool_calls,
         )
         match self.salvage_finish_at_ceiling(session, response) {
           Some(StepDone(next)) => return next
@@ -235,6 +214,33 @@ async fn AgentLoop::append(
   let next = (self.append_item)(session, item)
   self.last_session = next
   next
+}
+
+///|
+/// Durably append the response's assistant message and mirror it into the
+/// in-flight chat buffer — the two must stay in lockstep (see `messages`).
+async fn AgentLoop::record_assistant(
+  self : Self,
+  session : @agent_session.Session,
+  response : @deepseek.ChatResponse,
+  tool_calls? : Array[@deepseek.ToolCall],
+) -> @agent_session.Session {
+  let reasoning_content = response.optional_reasoning_content()
+  let session = self.append(
+    session,
+    Assistant(
+      AssistantMessage(response.content, tool_calls?, reasoning_content?),
+    ),
+  )
+  self.messages.push(
+    ChatMessage(
+      Assistant,
+      content=response.content,
+      tool_calls?,
+      reasoning_content?,
+    ),
+  )
+  session
 }
 
 ///|
@@ -322,7 +328,7 @@ fn @deepseek.ChatResponse::log_and_reasoning_content(
     @xlog.info() <?
       { "event": "assistant_message", "content": response.content }
   }
-  print_usage(response.usage)
+  @xlog.info() <? { "event": "usage", "usage": response.usage }
   response
 }
 
@@ -332,24 +338,10 @@ async fn AgentLoop::handle_tool_calls(
   session : @agent_session.Session,
   response : @deepseek.ChatResponse,
 ) -> AgentStepOutcome {
-  let reasoning_content = response.optional_reasoning_content()
-  let session = self.append(
+  let session = self.record_assistant(
     session,
-    Assistant(
-      AssistantMessage(
-        response.content,
-        tool_calls=response.tool_calls,
-        reasoning_content?,
-      ),
-    ),
-  )
-  self.messages.push(
-    ChatMessage(
-      Assistant,
-      content=response.content,
-      tool_calls=response.tool_calls,
-      reasoning_content?,
-    ),
+    response,
+    tool_calls=response.tool_calls,
   )
   let mut spent_result_chars : Int64 = 0
   for call_index, native_call in response.tool_calls; session = session {
@@ -617,16 +609,11 @@ async fn AgentLoop::salvage_finish_at_ceiling(
   guard self.tools.find("finish") is Some(definition) && definition.is_control() else {
     return None
   }
-  let mut finish_index = -1
-  for index, call in response.tool_calls {
-    if index >= from && call.name == "finish" {
-      finish_index = index
-      break
-    }
-  }
-  if finish_index < 0 {
+  guard response.tool_calls[from:].search_by(call => call.name == "finish")
+    is Some(offset) else {
     return None
   }
+  let finish_index = from + offset
   let native_call = response.tool_calls[finish_index]
   let tool_call = @agent_tool.AgentToolCall(native_call) catch {
     _ => return None
@@ -789,9 +776,7 @@ async fn AgentLoop::finish_turn(
       // of the checkpoint is that the continuation request is small, and
       // the buffer must never disagree with Session::chat_messages.
       self.messages.clear()
-      for message in session.chat_messages() {
-        self.messages.push(message)
-      }
+      self.messages.append(session.chat_messages())
       return ContinueTurn(session)
     }
     session

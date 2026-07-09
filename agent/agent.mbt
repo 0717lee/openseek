@@ -332,8 +332,3 @@ fn @agent_runtime.AgentRuntime::pending_steers(
     !text.trim().is_empty() => input
   ]
 }
-
-///|
-fn print_usage(usage : @deepseek.Usage) -> Unit {
-  @xlog.info() <? { "event": "usage", "usage": usage }
-}

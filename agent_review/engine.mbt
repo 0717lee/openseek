@@ -39,7 +39,8 @@ pub async fn run_review(
     system_prompt=review_system_prompt(),
   )
   let task = review_task(base)
-  let final_session : @agent_session.Session = @async.with_task_group() <| group => {
+  // Review is read-only and ephemeral; the final session is not persisted.
+  let _ : @agent_session.Session = @async.with_task_group() <| group => {
     @agent.run_turn_in_scope(
       runtime=@agent_runtime.AgentRuntime(workspace_root~),
       scope=@agent_runtime.AgentTaskScope(group),
@@ -54,8 +55,6 @@ pub async fn run_review(
       tools~,
     )
   }
-  // Review is read-only and ephemeral; the final session is not persisted.
-  ignore(final_session)
   match captured.val {
     Some(report) => report
     None =>
