@@ -127,7 +127,7 @@ fn normalize_title(index : Int, raw_title : String) -> String raise {
   if title.contains("\n") || title.contains("\r") {
     fail("arguments.steps[\{index}].title to be a single line")
   }
-  if title.iter().all(ch => ch.is_whitespace()) {
+  if title.all(ch => ch.is_whitespace()) {
     fail("arguments.steps[\{index}].title to be non-blank")
   }
   let chars = title.char_length()

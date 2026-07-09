@@ -208,6 +208,6 @@ async test "a finished background job queues a notice and wakes the controller" 
     }
     assert_true(woke)
     let steers = runtime.drain_steers()
-    assert_true(steers.iter().any(s => s is Notice(_)))
+    assert_true(steers.any(s => s is Notice(_)))
   })
 }

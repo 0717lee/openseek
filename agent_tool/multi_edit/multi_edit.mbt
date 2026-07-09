@@ -382,7 +382,7 @@ async fn parse_gate_batch_rejection(
   let total = rejections.fold(init=0, (total, rejection) => {
     total + rejection.introduced
   })
-  let any_truncated = rejections.iter().any(rejection => rejection.truncated)
+  let any_truncated = rejections.any(rejection => rejection.truncated)
   let bound = if any_truncated { "≥" } else { "" }
   Some(
     @agent_tool.ToolAction::respond(

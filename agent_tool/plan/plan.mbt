@@ -157,7 +157,7 @@ fn render(input : @decode.PlanInput) -> @agent_tool.ToolAction {
       brief="plan cleared",
     )
   }
-  let completed = input.steps.iter().count_if(step => step.status is Completed)
+  let completed = input.steps.count_if(step => step.status is Completed)
   // The decoder rejects plans with more than one in_progress step, so the
   // first match is the only one.
   let in_progress = input.steps

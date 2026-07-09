@@ -17,5 +17,5 @@ pub fn count_lines_containing_all(
 ) -> Int {
   content
   .split("\n")
-  .count_if(line => needles.iter().all(needle => line.contains(needle)))
+  .count_if(line => needles.all(needle => line.contains(needle)))
 }

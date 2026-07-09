@@ -338,7 +338,7 @@ fn expect_finish(action : @agent_tool.ToolAction, expected : String) -> String {
 
 ///|
 fn build_report(rows : Array[@report.ReportRow]) -> @report.Report {
-  let successes = rows.iter().count_if(row => row.success)
+  let successes = rows.count_if(row => row.success)
   Report(
     title="Tool Harness",
     summary=[

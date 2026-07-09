@@ -71,7 +71,7 @@ pub async fn run_suite(config : Config) -> EvalReport {
     runs: config.runs,
     concurrency: config.concurrency,
     min_successes: config.min_successes,
-    successes: results.iter().count_if(result => result.success),
+    successes: results.count_if(result => result.success),
     out_dir: config.out_dir,
     results,
   }

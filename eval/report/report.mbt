@@ -71,7 +71,7 @@ pub fn Report::Report(
 ///|
 /// How many rows passed.
 pub fn Report::successes(self : Report) -> Int {
-  self.rows.iter().count_if(row => row.success)
+  self.rows.count_if(row => row.success)
 }
 
 ///|
