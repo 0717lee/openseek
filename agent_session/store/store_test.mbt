@@ -282,8 +282,8 @@ async fn race_two_appends(
       }
     }
   }
-  assert_eq(results.filter(r => r == "ok").length(), 1)
-  assert_eq(results.filter(r => r == "stale").length(), 1)
+  assert_eq(results.count_if(r => r == "ok"), 1)
+  assert_eq(results.count_if(r => r == "stale"), 1)
 }
 
 ///|

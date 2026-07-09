@@ -103,7 +103,7 @@ fn multi_step_session() -> @agent_session.Session {
 
 ///|
 fn occurrences(text : String, needle : String) -> Int {
-  text.split(needle).collect().length() - 1
+  text.split(needle).count() - 1
 }
 
 ///|
