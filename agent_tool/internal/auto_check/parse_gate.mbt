@@ -251,11 +251,7 @@ pub fn format_parse_gate_errors(
   errors : Array[ParseGateError],
 ) -> Array[String] {
   let lines = split_owned(content, "\n")
-  let shown = if errors.length() < ParseErrorDisplayLimit {
-    errors.length()
-  } else {
-    ParseErrorDisplayLimit
-  }
+  let shown = errors.length().min(ParseErrorDisplayLimit)
   [
     for error in errors[0:shown] => {
       let header = if error.loc == "" {
@@ -301,18 +297,9 @@ fn excerpt_for_loc(lines : Array[String], loc : String) -> String {
     return ""
   }
   // Cap the span so a single error covering a huge region cannot flood the
-  // report; the error line itself always shows.
-  let mut last = if end_line > start_line + 3 {
-    start_line + 3
-  } else {
-    end_line
-  }
-  if last > lines.length() {
-    last = lines.length()
-  }
-  if last < first {
-    last = first
-  }
+  // report; the error line itself always shows. The early return above
+  // guarantees `first <= lines.length()`, so the clamp bounds are ordered.
+  let last = end_line.min(start_line + 3).clamp(min=first, max=lines.length())
   let width = "\{last}".length()
   let rendered = [
     for number in first..<=last => {

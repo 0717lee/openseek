@@ -170,12 +170,10 @@ pub fn brief_line(text : String, limit? : Int = 72) -> String {
 /// name a file without its directory. Returns `path` unchanged when it has no
 /// separator.
 pub fn brief_basename(path : String) -> String {
-  let cut = match (path.rev_find("/"), path.rev_find("\\")) {
-    (Some(a), Some(b)) => if a > b { a } else { b }
-    (Some(a), None) => a
-    (None, Some(b)) => b
-    (None, None) => -1
-  }
+  let cut = path
+    .rev_find("/")
+    .unwrap_or(-1)
+    .max(path.rev_find("\\").unwrap_or(-1))
   if cut < 0 {
     path
   } else {

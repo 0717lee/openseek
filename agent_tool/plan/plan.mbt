@@ -76,22 +76,21 @@ pub fn definition() -> @agent_tool.AgentToolDefinition {
 /// grows its own copy of the plan argument syntax.
 pub fn reminder_checklist(arguments : Json) -> String? {
   let input = @decode.decode(arguments) catch { _ => return None }
-  if input.steps.length() == 0 {
+  if input.steps.is_empty() {
     return None
   }
-  let lines = StringBuilder::new()
-  for index, step in input.steps {
-    let status = match step.status {
-      Pending => "pending"
-      InProgress => "in_progress"
-      Completed => "completed"
-    }
-    if index > 0 {
-      lines.write_char('\n')
-    }
-    lines.write_string("\{index + 1}. [\{status}] \{step.title}")
-  }
-  Some(lines.to_string())
+  Some(
+    [
+      for index, step in input.steps => {
+        let status = match step.status {
+          Pending => "pending"
+          InProgress => "in_progress"
+          Completed => "completed"
+        }
+        "\{index + 1}. [\{status}] \{step.title}"
+      }
+    ].join("\n"),
+  )
 }
 
 ///|
@@ -158,19 +157,16 @@ fn render(input : @decode.PlanInput) -> @agent_tool.ToolAction {
       brief="plan cleared",
     )
   }
-  let mut completed = 0
-  let mut in_progress : String? = None
-  let mut has_verification = false
-  for step in input.steps {
-    match step.status {
-      Completed => completed += 1
-      InProgress => in_progress = Some(step.title)
-      Pending => ()
-    }
-    if is_verification_title(step.title) {
-      has_verification = true
-    }
-  }
+  let completed = input.steps.iter().count_if(step => step.status is Completed)
+  // The decoder rejects plans with more than one in_progress step, so the
+  // first match is the only one.
+  let in_progress = input.steps
+    .iter()
+    .find_first(step => step.status is InProgress)
+    .map(step => step.title)
+  let has_verification = input.steps
+    .iter()
+    .any(step => is_verification_title(step.title))
   let mut content = match in_progress {
     Some(title) =>
       "Plan updated: \{completed}/\{total} done · in progress: \{title}."

@@ -90,13 +90,9 @@ pub async fn count_errors(path : String) -> CheckErrors? {
     error if @async.is_being_cancelled() => raise error
     _ => return None
   }
-  match result {
-    Some(output) =>
-      Some(
-        tally_diagnostics(output.text, truncated=output.output_limit_reached),
-      )
-    None => None
-  }
+  result.map(output => {
+    tally_diagnostics(output.text, truncated=output.output_limit_reached)
+  })
 }
 
 ///|
@@ -207,7 +203,6 @@ fn is_relevant_moonbit_path(path : String) -> Bool {
 
 ///|
 fn is_moonbit_source_path(path : String) -> Bool {
-  let path = path.replace_all(old="\\", new="/")
   path.has_suffix(".mbt") || path.has_suffix(".mbt.md")
 }
 
@@ -258,10 +253,11 @@ fn is_windows_drive_root(path : String) -> Bool {
 
 ///|
 fn strip_trailing_slash(path : String) -> String {
-  if path.length() > 1 && path.has_suffix("/") {
-    strip_trailing_slash(path[:path.length() - 1].to_owned())
-  } else {
-    path
+  for v = path[:] {
+    match v {
+      [.. rest, '/'] if rest.length() > 0 => continue rest
+      _ => break if v.length() == path.length() { path } else { v.to_owned() }
+    }
   }
 }
 

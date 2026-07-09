@@ -1,16 +1,23 @@
 ///|
+/// Writes the `moon.mod` + `moon.pkg` fixture pair a checkable module needs;
+/// tests whose manifest is itself under test keep explicit writes.
+async fn write_module(dir : String, name : String) -> Unit {
+  @fs.write_file(
+    "\{dir}/moon.mod",
+    "name = \"\{name}\"\n",
+    create_mode=CreateOrTruncate,
+  )
+  @fs.write_file(
+    "\{dir}/moon.pkg",
+    "warnings = \"+unnecessary_annotation\"\n",
+    create_mode=CreateOrTruncate,
+  )
+}
+
+///|
 async test "append_summary runs compact check for MoonBit source" {
   @vfs.with_tmpdir(prefix="openseek-auto-check-", dir => {
-    @fs.write_file(
-      "\{dir}/moon.mod",
-      "name = \"tmp/auto_check\"\n",
-      create_mode=CreateOrTruncate,
-    )
-    @fs.write_file(
-      "\{dir}/moon.pkg",
-      "warnings = \"+unnecessary_annotation\"\n",
-      create_mode=CreateOrTruncate,
-    )
+    write_module(dir, "tmp/auto_check")
     let path = "\{dir}/main.mbt"
     @fs.write_file(
       path,
@@ -33,16 +40,7 @@ async test "append_summary runs compact check for MoonBit source" {
 ///|
 async test "append_summary checks from module root for nested source" {
   @vfs.with_tmpdir(prefix="openseek-auto-check-root-", dir => {
-    @fs.write_file(
-      "\{dir}/moon.mod",
-      "name = \"tmp/auto_check_root\"\n",
-      create_mode=CreateOrTruncate,
-    )
-    @fs.write_file(
-      "\{dir}/moon.pkg",
-      "warnings = \"+unnecessary_annotation\"\n",
-      create_mode=CreateOrTruncate,
-    )
+    write_module(dir, "tmp/auto_check_root")
     @fs.write_file(
       "\{dir}/root_bad.mbt",
       "pub fn root_bad() -> Int { missing_from_root }\n",
@@ -67,16 +65,7 @@ async test "append_summary checks from module root for nested source" {
 ///|
 async test "append_summary runs compact check for MoonBit markdown source" {
   @vfs.with_tmpdir(prefix="openseek-auto-check-md-", dir => {
-    @fs.write_file(
-      "\{dir}/moon.mod",
-      "name = \"tmp/auto_check_md\"\n",
-      create_mode=CreateOrTruncate,
-    )
-    @fs.write_file(
-      "\{dir}/moon.pkg",
-      "warnings = \"+unnecessary_annotation\"\n",
-      create_mode=CreateOrTruncate,
-    )
+    write_module(dir, "tmp/auto_check_md")
     let path = "\{dir}/README.mbt.md"
     @fs.write_file(
       path,

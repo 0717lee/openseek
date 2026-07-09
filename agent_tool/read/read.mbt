@@ -108,7 +108,7 @@ async fn read_file(
       brief~,
     )
   }
-  let lines = [ for line in content.split("\n") => line ]
+  let lines = content.split("\n").collect()
   let total_lines = lines.length()
   // Clamp both bounds into [0, total_lines] so the render loop only visits
   // valid lines — a start past the last line selects nothing.

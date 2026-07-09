@@ -4,19 +4,12 @@
 /// an internal package and the raw error string includes source locations.
 pub fn failure_message(error_text : String) -> String {
   let marker = " FAILED: "
-  let pieces : Array[String] = error_text
-    .split(marker)
-    .map(piece => piece.to_owned())
-    .collect()
-  if pieces.length() < 2 {
-    return error_text
+  guard error_text.rev_find(marker) is Some(cut) else { return error_text }
+  let message = error_text[cut + marker.length():]
+  match message.strip_suffix(")") {
+    Some(trimmed) => trimmed.to_owned()
+    None => message.to_owned()
   }
-  let message = pieces[pieces.length() - 1]
-  let message = match message.strip_suffix(")") {
-    Some(trimmed) => trimmed
-    None => message
-  }
-  "\{message}"
 }
 
 ///|

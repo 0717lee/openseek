@@ -27,12 +27,7 @@ pub fn definition() -> @agent_tool.AgentToolDefinition {
 
 ///|
 fn execute(arguments : Json) -> @agent_tool.ToolAction {
-  finish(@decode.decode(arguments))
-}
-
-///|
-fn finish(input : @decode.FinishInput) -> @agent_tool.ToolAction {
-  @agent_tool.ToolAction::finish(input.answer)
+  @agent_tool.ToolAction::finish(@decode.decode(arguments).answer)
 }
 
 ///|
