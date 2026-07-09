@@ -9,6 +9,8 @@ import {
 }
 
 // Values
+pub const ContextYieldAnswerPrefix : String = "[context ceiling]"
+
 pub const PlanReminderPrefix : String = "[plan reminder]"
 
 // Errors

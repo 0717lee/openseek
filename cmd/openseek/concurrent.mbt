@@ -188,7 +188,10 @@ async fn run_one_attempt(
       session: id.value(),
       status,
       detail,
-      ok: status == "finished",
+      // A context-ceiling yield is durably Finished (replay/chaining) but is
+      // not task success for a one-shot fleet run.
+      ok: status == "finished" &&
+      !detail.has_prefix(@agent_session.ContextYieldAnswerPrefix),
     }
   } catch {
     error =>

@@ -1,5 +1,9 @@
 ///|
-let default_max_steps : Int = 1000
+/// Default step bound: effectively unbounded (Int max). Turns are bounded
+/// by the context window instead — a response at the ceiling yields the
+/// turn with a checkpoint summary — so a step count only binds when a
+/// caller passes one explicitly.
+pub let unbounded_max_steps : Int = 2147483647
 
 ///|
 /// Model requests since the last plan activity — a successful `plan` call or
@@ -126,7 +130,7 @@ pub async fn run(
   model~ : @deepseek.Model,
   task~ : String,
   system_prompt_text~ : String,
-  max_steps? : Int = default_max_steps,
+  max_steps? : Int = unbounded_max_steps,
   thinking? : @deepseek.ThinkingMode = Max,
   api_url? : String,
   workspace_root? : String = ".",
@@ -176,7 +180,7 @@ pub async fn run_turn_with_append(
   session~ : @agent_session.Session,
   task~ : String,
   append_item~ : async (@agent_session.Session, @agent_session.SessionItem) -> @agent_session.Session,
-  max_steps? : Int = default_max_steps,
+  max_steps? : Int = unbounded_max_steps,
   thinking? : @deepseek.ThinkingMode = Max,
   api_url? : String,
   workspace_root? : String = ".",
@@ -289,7 +293,7 @@ pub async fn[X] run_turn_in_scope(
   session~ : @agent_session.Session,
   task~ : String,
   append_item~ : async (@agent_session.Session, @agent_session.SessionItem) -> @agent_session.Session,
-  max_steps? : Int = default_max_steps,
+  max_steps? : Int = unbounded_max_steps,
   thinking? : @deepseek.ThinkingMode = Max,
   api_url? : String,
   tools? : @agent_tool.Tools,

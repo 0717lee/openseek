@@ -17,6 +17,8 @@ pub async fn[X] run_turn_in_scope(runtime~ : @agent_runtime.AgentRuntime, scope~
 
 pub async fn run_turn_with_append(api_key~ : String, model~ : @deepseek.Model, session~ : @agent_session.Session, task~ : String, append_item~ : async (@agent_session.Session, @agent_session.SessionItem) -> @agent_session.Session, max_steps? : Int, thinking? : @deepseek.ThinkingMode, api_url? : String, workspace_root? : String) -> @agent_session.Session
 
+pub let unbounded_max_steps : Int
+
 // Errors
 
 // Types and methods

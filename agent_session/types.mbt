@@ -1,4 +1,21 @@
 ///|
+/// The answer prefix every context-yield terminal carries. A turn that ends
+/// at the model's context ceiling is persisted as `Terminal(Finished(...))`
+/// — a distinct terminal kind would break old readers (the decoder is
+/// strict) and continuation machinery chains finished turns — so this
+/// prefix is how durable-log consumers distinguish a ceiling yield from
+/// task success. Lives here, next to the session model, because it is a
+/// raw-log contract: analyzers, fleet classification, and replay tooling
+/// all match on it.
+///
+/// Known, accepted limitation: a real answer that happens to START with
+/// this text (e.g. a task asking the model to echo it) classifies as a
+/// yield. The collision fails toward NOT-success — never false success —
+/// and the durable format has no terminal-metadata side channel, so a
+/// spoof-proof sentinel is not worth the format change.
+pub const ContextYieldAnswerPrefix : String = "[context ceiling]"
+
+///|
 /// Stable identifier for one OpenSeek conversation.
 ///
 /// `SessionId` is stored in every `Session` and is also used by

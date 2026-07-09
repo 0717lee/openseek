@@ -126,22 +126,37 @@ fn summarize_session(session : @agent_session.Session) -> SessionMetrics {
         if result.is_error() {
           tool_errors += 1
         }
-        previous_finish_tool = result.tool_name() == "finish"
+        // Sticky within the batch: results recorded after a finish call
+        // are by construction skip notes, and results are in CALL order —
+        // so "a finish result seen since the last assistant message" is
+        // the completion signal, not "the finish result came last".
+        if result.tool_name() == "finish" {
+          previous_finish_tool = true
+        }
       }
       Runtime(_) => {
         runtime_notices += 1
         previous_finish_tool = false
       }
-      Terminal(Finished(message)) => {
-        if !previous_finish_tool {
-          steps += 1
+      Terminal(Finished(message)) =>
+        if message.has_prefix(@agent_session.ContextYieldAnswerPrefix) {
+          // A context-ceiling yield is durably Finished (replay/chaining)
+          // but NOT task success: the work was checkpointed mid-flight. The
+          // synthetic terminal is not a model step either.
+          finished = false
+          terminal_status = "context_yield"
+          terminal_message = message
+          previous_finish_tool = false
+        } else {
+          if !previous_finish_tool {
+            steps += 1
+          }
+          finished = true
+          finish_message = message
+          terminal_status = "finished"
+          terminal_message = message
+          previous_finish_tool = false
         }
-        finished = true
-        finish_message = message
-        terminal_status = "finished"
-        terminal_message = message
-        previous_finish_tool = false
-      }
       Terminal(Aborted(message)) => {
         finished = false
         terminal_status = "aborted"
@@ -160,7 +175,10 @@ fn summarize_session(session : @agent_session.Session) -> SessionMetrics {
         terminal_message = message
         previous_finish_tool = false
       }
-      _ => previous_finish_tool = false
+      // A compact-on-finish checkpoint sits between the finish result and
+      // its terminal; it must not break the attribution.
+      Summary(_) => ()
+      User(_) => previous_finish_tool = false
     }
   }
   {

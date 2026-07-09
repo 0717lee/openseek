@@ -25,6 +25,91 @@ fn sample_session() -> @agent_session.Session {
 }
 
 ///|
+test "a checkpoint between finish result and terminal keeps step attribution" {
+  let session = @agent_session.Session(
+      SessionId("compact-on-finish"),
+      system_prompt="",
+    )
+    .append(User(UserMessage("wrap it up")))
+    .append(
+      Assistant(
+        AssistantMessage("finishing", tool_calls=[
+          ToolCall(id="call_1", name="finish", arguments="{}"),
+        ]),
+      ),
+    )
+    .append(
+      Tool(
+        ToolResult(
+          tool_call_id="call_1",
+          tool_name="finish",
+          content="finished: done",
+        ),
+      ),
+    )
+    .append(
+      // Results are recorded in CALL order: a skip note for a call after
+      // the finish sits between the finish result and the terminal. The
+      // attribution must survive it.
+      Tool(
+        ToolResult(
+          tool_call_id="call_2",
+          tool_name="probe",
+          content="skipped: an earlier finish tool call ended the batch before this call ran",
+          is_error=true,
+        ),
+      ),
+    )
+    .append(
+      Summary(
+        SessionSummary(content="checkpoint", from_sequence=1, to_sequence=4),
+      ),
+    )
+    .append(Terminal(Finished("done")))
+  let result = analyze_session(session)
+  // The terminal belongs to the finish call: one model step, not two.
+  assert_eq(result.steps, 1)
+  assert_true(result.finished)
+}
+
+///|
+test "a context-yield terminal is not task success" {
+  let session = @agent_session.Session(
+      SessionId("ceiling-yield"),
+      system_prompt="",
+    )
+    .append(User(UserMessage("build everything")))
+    .append(
+      Assistant(
+        AssistantMessage("working", tool_calls=[
+          ToolCall(id="call_1", name="shell", arguments="{}"),
+        ]),
+      ),
+    )
+    .append(
+      Tool(ToolResult(tool_call_id="call_1", tool_name="shell", content="ok")),
+    )
+    .append(
+      Summary(
+        SessionSummary(content="checkpoint", from_sequence=1, to_sequence=3),
+      ),
+    )
+    .append(
+      Terminal(
+        Finished(
+          "\{@agent_session.ContextYieldAnswerPrefix} continue in a new turn",
+        ),
+      ),
+    )
+  let result = analyze_session(session)
+  assert_false(result.finished)
+  assert_false(result.success)
+  assert_eq(result.terminal_status, "context_yield")
+  // The synthetic yield terminal is not a model step.
+  assert_eq(result.steps, 1)
+}
+
+///|
 test "session analyzer counts typed events" {
   let result = analyze_session(sample_session())
   assert_true(result.success)

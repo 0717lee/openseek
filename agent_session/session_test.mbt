@@ -184,6 +184,34 @@ test "projection closes unresolved historical tool calls" {
 }
 
 ///|
+test "projection skips context-yield terminals" {
+  // The full ceiling-yield shape: work, preserved steer, checkpoint
+  // summary, synthetic yield terminal. The resumed model context must be
+  // [system, summary, steer] — the yield status is run metadata, not an
+  // assistant answer, and must never read as the reply to the steer.
+  let session = @agent_session.Session(SessionId("s1"), system_prompt="system")
+    .append(User(UserMessage("build everything")))
+    .append(User(UserMessage("preserved steer")))
+    .append(
+      Summary(
+        SessionSummary(content="checkpoint", from_sequence=1, to_sequence=1),
+      ),
+    )
+    .append(
+      Terminal(
+        Finished(
+          "\{@agent_session.ContextYieldAnswerPrefix} continue in a new turn",
+        ),
+      ),
+    )
+  let messages = session.chat_messages()
+  assert_eq(messages.length(), 3)
+  assert_true(messages[1].content.contains("checkpoint"))
+  assert_true(messages[2].role is User)
+  assert_eq(messages[2].content, "preserved steer")
+}
+
+///|
 test "projection skips compacted assistant tool results" {
   let session = @agent_session.Session(SessionId("s1"), system_prompt="system")
     .append(User(UserMessage("inspect")))

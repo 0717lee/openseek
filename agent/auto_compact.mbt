@@ -1,105 +1,150 @@
 ///|
-/// Share of the model context window, in percent, at which the loop
-/// compacts. Auto-compaction is a context-ceiling guard, not a cost
-/// optimization: appending a summary rewrites the model-facing prefix and
-/// busts DeepSeek prefix-cache pricing, so it must fire only where the
-/// alternative is request failure (improvement.md). The headroom left below
-/// the ceiling must still fit the summary-generation request, which resends
-/// the projected history plus the checkpoint prompt.
-let auto_compact_threshold_percent = 80
+/// Soft context ceiling, percent of the model window: at or past it the
+/// turn ENDS at the current step's boundary — gracefully. A tool batch
+/// measured in the soft band still executes (aggregate-budgeted, see
+/// `soft_batch_fits`), the checkpoint covers its real results, and nothing
+/// is discarded or re-issued. Crossings land in the soft band whenever one
+/// round grows the context by less than the tier gap, which makes graceful
+/// exits the common case. The guard is a ceiling guard, not a cost
+/// optimization: rewriting the model-facing prefix busts DeepSeek
+/// prefix-cache pricing, so it must fire only where the alternative is
+/// request failure.
+let soft_context_ceiling_percent = 70
 
 ///|
-/// Compact the session when the last response reports token usage near the
-/// model's context window.
+/// Hard context ceiling: at or past it no tool batch STARTS — every call
+/// is skip-closed (completion salvage aside) so the checkpoint request
+/// stays bounded by the measured usage plus a few bytes of notes. Only
+/// reachable when a single round jumped the entire soft band, i.e. the
+/// previous batch returned enormous results — exactly when more unmeasured
+/// execution is dangerous. The headroom above must still fit the
+/// summary-generation request, which resends the projected history plus
+/// the checkpoint prompt.
+let hard_context_ceiling_percent = 80
+
+///|
+fn at_context_share(
+  usage : @deepseek.Usage,
+  context_window : Int,
+  percent : Int,
+) -> Bool {
+  usage.total_tokens.to_int64() * 100 >=
+  context_window.to_int64() * percent.to_int64()
+}
+
+///|
+/// The turn must end at this step's boundary. `total_tokens` — last prompt
+/// plus completion — is the closest available proxy for the next request's
+/// prompt size.
+fn AgentLoop::at_soft_context_ceiling(
+  self : Self,
+  usage : @deepseek.Usage,
+) -> Bool {
+  at_context_share(
+    usage,
+    self.client.model.context_window(),
+    soft_context_ceiling_percent,
+  )
+}
+
+///|
+/// No tool batch may start; skip-close and yield.
+fn AgentLoop::at_hard_context_ceiling(
+  self : Self,
+  usage : @deepseek.Usage,
+) -> Bool {
+  at_context_share(
+    usage,
+    self.client.model.context_window(),
+    hard_context_ceiling_percent,
+  )
+}
+
+///|
+/// Token allowance the checkpoint request needs beyond the projected
+/// history: the checkpoint prompt and message wrappers on the prompt side,
+/// PLUS the completion budget the summary itself is generated into — a
+/// budget that lets a batch push the projection to the window edge would
+/// leave the summary no room to be written and strand the session via
+/// fail-open. Consumed by the running batch budget in
+/// `AgentLoop::handle_tool_calls`.
+let checkpoint_reserve_tokens : Int = 16_384
+
+///|
+/// Whether the NEXT tool call in an executing batch provably fits:
+/// measured usage, plus the batch's results recorded so far (actual
+/// sizes, 1 char >= 1 token for mostly-ASCII tool output), plus one
+/// worst-case result for the call about to run, plus the checkpoint
+/// reserve, stays under the window. Checked before EVERY call at EVERY
+/// usage level — this, not a pre-execution estimate, is what makes batch
+/// execution safe: a pre-execution worst case over the whole batch would
+/// false-positive constantly (any 4-call batch would trip it on a 256K
+/// window at any usage), while the running check uses real sizes and only
+/// pessimizes one call ahead.
+fn AgentLoop::next_call_fits(
+  self : Self,
+  usage : @deepseek.Usage,
+  spent_result_chars : Int64,
+) -> Bool {
+  let window = self.client.model.context_window().to_int64()
+  usage.total_tokens.to_int64() +
+  spent_result_chars +
+  max_tool_result_chars.to_int64() +
+  checkpoint_reserve_tokens.to_int64() <
+  window
+}
+
+///|
+/// Append the ceiling checkpoint: still-queued steers first, then the
+/// Summary covering everything before them. Shared by both pressured
+/// terminal shapes — the context yield and compact-on-finish.
 ///
-/// The trigger reads `usage.total_tokens` — last prompt plus completion, the
-/// closest available proxy for the next request's prompt — right after every
-/// response, so a final-answer step still compacts and the next turn starts
-/// from the checkpoint instead of creeping past the ceiling turn by turn.
+/// The steers were already drained from the runtime queue, so they must be
+/// persisted BEFORE the cancellable summary request — a cancellation mid-
+/// request must find them durable, not lost (serve's turn-end drain would
+/// see an empty queue and report nothing). The summary is generated from
+/// the pre-steer snapshot (sessions are immutable values), so their content
+/// cannot be folded into the checkpoint text; they stay verbatim past it,
+/// projecting right after the summary to head the next turn.
 ///
-/// Two stages, bounded per turn. The first folds only events before this
-/// turn's task (`1..turn_start_sequence - 1`): the active task, steers, and
-/// tool results stay verbatim in context. If pressure persists — or there is
-/// no prior history — the second checkpoints everything so far, the same
-/// lossy-but-designed semantic as the manual compact flow, whose prompt
-/// carries current goal and intent forward. After that (or after a failed
-/// summary) the guard disarms for the rest of the turn; the next turn's
-/// fresh loop re-arms it.
-///
-/// Fail-open: a failed summary logs `auto_compaction_failed` and the turn
-/// continues uncompacted — a guardrail must not kill a turn that might still
-/// fit, and one that no longer fits fails visibly on the next main request.
-/// Known limit: the guard reacts to reported usage, so a single oversized
-/// tool result appended between responses can still overflow before the next
-/// check; tool-output capping (todo.md) is the fix for that, not compaction.
-///
-/// The `auto_compaction_*` event names are deliberately distinct from the
-/// manual flow's `compaction_*`: the TUI treats `compaction_finished` and
-/// `compaction_failed` as terminal for the active run, which a mid-turn
-/// auto-compaction is not.
-async fn AgentLoop::maybe_auto_compact(
+/// Only summary GENERATION is fail-open: on a model/endpoint error the
+/// session is returned uncompacted — a guardrail must not strand the turn —
+/// and the next pressured step retries. The summary APPEND stays outside
+/// the catch so a durability failure propagates like every other append.
+/// Cancellation re-raises. The Bool reports whether a Summary was actually
+/// appended, so callers never claim a checkpoint that does not exist.
+async fn AgentLoop::checkpoint_at_ceiling(
   self : Self,
   session : @agent_session.Session,
-  usage : @deepseek.Usage,
-) -> @agent_session.Session {
-  if self.auto_compact_disarmed {
-    return session
-  }
-  let context_window = self.client.model.context_window()
-  if usage.total_tokens.to_int64() * 100 <
-    context_window.to_int64() * auto_compact_threshold_percent.to_int64() {
-    return session
-  }
-  let prior_prefix_end = self.turn_start_sequence - 1
-  let to_sequence = if prior_prefix_end >= 1 &&
-    self.auto_compacted_to < prior_prefix_end {
-    prior_prefix_end
-  } else {
-    self.auto_compact_disarmed = true
-    session.last_sequence()
-  }
+  steers : ArrayView[@agent_runtime.SteerInput],
+) -> (@agent_session.Session, Bool) {
+  let to_sequence = session.last_sequence()
+  let covered = session
+  let session = self.apply_steer_inputs(session, steers)
   @xlog.info() <?
     {
       "event": "auto_compaction_started",
       "from_sequence": 1,
       "to_sequence": to_sequence,
-      "total_tokens": usage.total_tokens,
-      "context_window": context_window,
     }
-  let summary_source = if to_sequence == session.last_sequence() {
-    session
-  } else {
-    session_prefix(session, to_sequence)
-  }
   let summary = @compact.generate_compaction_summary(
     client=self.summary_client,
-    summary_source,
+    covered,
   ) catch {
     error => {
       if @async.is_being_cancelled() || @async.is_cancellation_error(error) {
         raise error
       }
-      self.auto_compact_disarmed = true
       @xlog.warn() <? { "event": "auto_compaction_failed", "error": "\{error}" }
-      return session
+      return (session, false)
     }
   }
-  // The preconditions hold by construction (the generator rejects empty
-  // summaries; 1 <= to_sequence <= last_sequence), and persistence must go
-  // through the loop's append seam, so `Session::compact`'s direct append is
-  // not usable here. A raise from either half propagates like any other
-  // append failure and closes the turn through the run-level handler.
   let item = session.summary_item(
     content=summary,
     from_sequence=1,
     to_sequence~,
   )
-  let next = self.append(session, item)
-  self.auto_compacted_to = to_sequence
-  self.messages.clear()
-  for message in next.chat_messages() {
-    self.messages.push(message)
-  }
+  let compacted = self.append(session, item)
   @xlog.info() <?
     {
       "event": "auto_compaction_finished",
@@ -107,30 +152,67 @@ async fn AgentLoop::maybe_auto_compact(
       "to_sequence": to_sequence,
       "summary": summary,
     }
-  next
+  (compacted, true)
 }
 
 ///|
-/// Rebuild events `1..to_sequence` as a standalone session so the checkpoint
-/// request summarizes exactly the range the summary event will cover — not
-/// the active turn it leaves verbatim. Re-appending a contiguous prefix
-/// preserves its sequence numbers, so ranges inside earlier summary events
-/// stay valid for the projection.
-fn session_prefix(
+/// End the turn at the context ceiling: the checkpoint, then the yield
+/// terminal, in that order, so the turn's last event stays a terminal (the
+/// session invariant every consumer of the raw log relies on) and the next
+/// turn — chained by a controller, an armed goal, or the user — seeds from
+/// the compacted projection.
+///
+/// The terminal is `Finished`: a distinct terminal kind would break old
+/// readers (the session decoder is strict), and continuation machinery
+/// chains finished turns. The `context_yield` event is the discriminator
+/// for consumers that must not read a yield as task success.
+async fn AgentLoop::yield_at_context_ceiling(
+  self : Self,
+  session : @agent_session.Session,
+  steers : ArrayView[@agent_runtime.SteerInput],
+) -> @agent_session.Session {
+  let to_sequence = session.last_sequence()
+  let (session, compacted) = self.checkpoint_at_ceiling(session, steers)
+  // The summary request takes seconds; steers submitted while it was in
+  // flight are still preservable — drain again so they persist (uncovered,
+  // after the summary) instead of being boundary-dropped at TurnDone.
+  // (Compact-on-finish handles its own late steers by CONTINUING the turn
+  // from the compacted projection — see finish_turn.)
+  let session = self.apply_steer_inputs(session, self.runtime.pending_steers())
+  self.finish_context_yield(session, to_sequence, compacted~)
+}
+
+///|
+/// Seal a context yield: the `Finished` terminal for replay and chaining,
+/// but `context_yield` — not `agent_finished` — on the wire, so live
+/// consumers never read a mid-task ceiling yield as task success.
+async fn AgentLoop::finish_context_yield(
+  self : Self,
   session : @agent_session.Session,
   to_sequence : Int,
+  compacted~ : Bool,
 ) -> @agent_session.Session {
-  for
-    event in session.events()
-    prefix = @agent_session.Session(
-      session.id(),
-      system_prompt=session.system_prompt(),
-    ) {
-    if event.sequence() <= to_sequence {
-      continue prefix.append(event.item())
-    }
-    continue prefix
-  } nobreak {
-    prefix
+  // Built FROM the shared prefix so the durable-log contract
+  // (@agent_session.ContextYieldAnswerPrefix) can never drift from the
+  // answer actually persisted — and honest about whether a checkpoint
+  // actually exists (fail-open must not promise a summary that was never
+  // appended).
+  let answer = if compacted {
+    @agent_session.ContextYieldAnswerPrefix +
+    " This turn reached the model's context window and was checkpointed. " +
+    "The work is not necessarily complete — continue it in a new turn, " +
+    "which starts from the checkpoint summary."
+  } else {
+    @agent_session.ContextYieldAnswerPrefix +
+    " This turn reached the model's context window; the checkpoint " +
+    "attempt failed, so the turn ended uncompacted. Continue in a new " +
+    "turn — its pressure retries the checkpoint."
   }
+  let session = self.append(session, Terminal(Finished(answer)))
+  // No push_finished_message: the yield status is not an assistant message
+  // — the model-facing projection skips it too (the loop ends here, but the
+  // buffer must never disagree with Session::chat_messages).
+  @xlog.info() <?
+    { "event": "context_yield", "to_sequence": to_sequence, "answer": answer }
+  session
 }
