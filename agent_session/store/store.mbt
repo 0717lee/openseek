@@ -151,19 +151,16 @@ fn session_file_text(session : @agent_session.Session) -> String {
 }
 
 ///|
-fn checked_last_sequence_in_events(
+fn check_contiguous_sequences(
   events : @vector.Vector[@agent_session.SessionEvent],
-) -> Int raise {
-  let mut expected = 1
-  for event in events {
-    if event.sequence() != expected {
+) -> Unit raise {
+  events.eachi((index, event) => {
+    if event.sequence() != index + 1 {
       fail(
-        "session event log sequence mismatch: expected \{expected}, found \{event.sequence()}",
+        "session event log sequence mismatch: expected \{index + 1}, found \{event.sequence()}",
       )
     }
-    expected += 1
-  }
-  expected - 1
+  })
 }
 
 ///|
@@ -235,7 +232,7 @@ fn parse_session_file(
     decoded.push(event)
   }
   let events = @vector.from_array(decoded)
-  ignore(checked_last_sequence_in_events(events))
+  check_contiguous_sequences(events)
   {
     session: Session(
       SessionId(header.id),
@@ -428,18 +425,13 @@ async fn sync_dir_best_effort(dir : String) -> Unit {
 }
 
 ///|
-async fn ensure_dir_exists(dir : String) -> Unit {
-  ensure_dir_exists_with_retry(dir, attempts=4)
-}
-
-///|
-async fn ensure_dir_exists_with_retry(dir : String, attempts~ : Int) -> Unit {
+async fn ensure_dir_exists(dir : String, attempts? : Int = 4) -> Unit {
   if @fs.exists(dir) {
     return
   }
   @fs.mkdir(dir, recursive=true) catch {
     @os_error.OSError(_) as error if error.is_EEXIST() && attempts > 0 =>
-      ensure_dir_exists_with_retry(dir, attempts=attempts - 1)
+      ensure_dir_exists(dir, attempts=attempts - 1)
     error => if @fs.exists(dir) { () } else { raise error }
   }
 }
@@ -449,8 +441,7 @@ async fn ensure_session_dir(
   store : SessionStore,
   id : @agent_session.SessionId,
 ) -> Unit {
-  let dir = store.session_dir(id)
-  ensure_dir_exists(dir)
+  ensure_dir_exists(store.session_dir(id))
 }
 
 ///|
@@ -661,11 +652,7 @@ pub async fn SessionStore::listings(
   }
   // Most recently active first.
   stamped.sort_by(stamped_newest_first)
-  let listings = [ for entry in stamped => entry.0 ]
-  for listing in unreadable {
-    listings.push(listing)
-  }
-  listings
+  [ for entry in stamped => entry.0 ]..append(unreadable)
 }
 
 ///|
@@ -803,7 +790,7 @@ pub async fn SessionStore::append(
 /// Append a validated summary event to a durable session.
 ///
 /// This has the same stale-snapshot and locking behavior as `append`, but the
-/// item is created by `Session::compact`. `content` must be non-blank,
+/// item is created by `Session::summary_item`. `content` must be non-blank,
 /// `from_sequence` must be positive, `to_sequence` must be at least
 /// `from_sequence`, and the range must already exist in the supplied session.
 ///
@@ -821,16 +808,10 @@ pub async fn SessionStore::compact(
   ensure_session_dir(self, session.id())
   with_session_lock(self, session.id(), Exclusive, () => {
     let repair_tail = ensure_session_is_current(self, session)
-    let next = session.compact(
-      content~,
-      from_sequence~,
-      to_sequence~,
+    let (next, event) = session.append_event(
+      session.summary_item(content~, from_sequence~, to_sequence~),
       unix_ms=@env.now().reinterpret_as_int64(),
     )
-    let event = match next.events().peek() {
-      Some(event) => event
-      None => fail("compacted session did not append a summary event")
-    }
     persist_event(self, next, event, repair_tail~)
     record_mark(self, next)
     next

@@ -256,37 +256,43 @@ async test "first append creates the session file with its header" {
 }
 
 ///|
-async test "store serializes concurrent first appends from empty snapshots" {
-  let store = new_store()
-  // Two writers race to be the first durable write for the same id. The
-  // exclusive lock serializes them; the loser sees the winner's file and gets
-  // a stale-snapshot error instead of clobbering the first event.
-  let session = @agent_session.Session(SessionId("s1"), system_prompt="system")
+/// Race two appends of the same in-memory snapshot. The exclusive lock
+/// serializes them, so exactly one lands and the other must see a
+/// stale-snapshot error.
+async fn race_two_appends(
+  store : @store.SessionStore,
+  session : @agent_session.Session,
+) -> Unit {
+  let items : Array[@agent_session.SessionItem] = [
+    User(UserMessage("first")),
+    Runtime(RuntimeNotice("second")),
+  ]
   let results : Array[String] = []
   @async.with_task_group() <| group => {
-    group.spawn_bg() <| () => {
-      try store.append(session, User(UserMessage("first"))) catch {
-        error => {
-          assert_true("\{error}".contains("stale session snapshot"))
-          results.push("stale")
+    for item in items {
+      group.spawn_bg() <| () => {
+        try store.append(session, item) catch {
+          error => {
+            assert_true("\{error}".contains("stale session snapshot"))
+            results.push("stale")
+          }
+        } noraise {
+          _ => results.push("ok")
         }
-      } noraise {
-        _ => results.push("ok")
-      }
-    }
-    group.spawn_bg() <| () => {
-      try store.append(session, Runtime(RuntimeNotice("second"))) catch {
-        error => {
-          assert_true("\{error}".contains("stale session snapshot"))
-          results.push("stale")
-        }
-      } noraise {
-        _ => results.push("ok")
       }
     }
   }
   assert_eq(results.filter(r => r == "ok").length(), 1)
   assert_eq(results.filter(r => r == "stale").length(), 1)
+}
+
+///|
+async test "store serializes concurrent first appends from empty snapshots" {
+  let store = new_store()
+  // Two writers race to be the first durable write for the same id. The loser
+  // sees the winner's file and must not clobber the first event.
+  let session = @agent_session.Session(SessionId("s1"), system_prompt="system")
+  race_two_appends(store, session)
   let loaded = store.load(SessionId("s1"))
   assert_eq(loaded.events().length(), 1)
   assert_eq(loaded.last_sequence(), 1)
@@ -431,32 +437,8 @@ async test "store rejects non-empty snapshots when the session file is missing" 
 async test "store serializes concurrent appends from the same snapshot" {
   let store = new_store()
   let session = @agent_session.Session(SessionId("s1"), system_prompt="system")
-  let results : Array[String] = []
   store.create(session)
-  @async.with_task_group() <| group => {
-    group.spawn_bg() <| () => {
-      try store.append(session, User(UserMessage("first"))) catch {
-        error => {
-          assert_true("\{error}".contains("stale session snapshot"))
-          results.push("stale")
-        }
-      } noraise {
-        _ => results.push("ok")
-      }
-    }
-    group.spawn_bg() <| () => {
-      try store.append(session, Runtime(RuntimeNotice("second"))) catch {
-        error => {
-          assert_true("\{error}".contains("stale session snapshot"))
-          results.push("stale")
-        }
-      } noraise {
-        _ => results.push("ok")
-      }
-    }
-  }
-  assert_eq(results.filter(r => r == "ok").length(), 1)
-  assert_eq(results.filter(r => r == "stale").length(), 1)
+  race_two_appends(store, session)
   let loaded = store.load(SessionId("s1"))
   assert_eq(loaded.events().length(), 1)
   assert_eq(loaded.last_sequence(), 1)

@@ -336,13 +336,11 @@ test "compact validates and appends summary event" {
   assert_eq(summary.content(), "first two events")
   assert_eq(summary.from_sequence(), 1)
   assert_eq(summary.to_sequence(), 2)
-  let _ = session.compact(content="", from_sequence=1, to_sequence=2) catch {
-    error => {
-      assert_true("\{error}".contains("content must not be empty"))
-      return
-    }
+  try session.compact(content="", from_sequence=1, to_sequence=2) catch {
+    error => assert_true("\{error}".contains("content must not be empty"))
+  } noraise {
+    _ => fail("empty summary accepted")
   }
-  fail("empty summary accepted")
 }
 
 ///|
@@ -357,13 +355,11 @@ test "summary_item validates without appending" {
   )
   assert_true(item is Summary(_))
   assert_eq(session.events().length(), 2)
-  let _ = session.summary_item(content="x", from_sequence=1, to_sequence=3) catch {
-    error => {
-      assert_true("\{error}".contains("exceeds last sequence"))
-      return
-    }
+  try session.summary_item(content="x", from_sequence=1, to_sequence=3) catch {
+    error => assert_true("\{error}".contains("exceeds last sequence"))
+  } noraise {
+    _ => fail("out-of-range summary accepted")
   }
-  fail("out-of-range summary accepted")
 }
 
 ///|

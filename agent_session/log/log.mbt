@@ -109,6 +109,21 @@ pub fn parse_events(text : String) -> ParsedLog {
   let ends_with_newline = text.has_suffix("\n")
   let lines = text.split("\n").map(line => line.to_owned()).collect()
   let mut partial_tail = false
+  // The one policy for a line that does not decode: an unterminated final
+  // line is a torn tail; anything else is a recorded per-line error.
+  fn note_bad_line(
+    line_number : Int,
+    line : String,
+    torn : Bool,
+    message : String,
+  ) -> Unit {
+    if torn {
+      partial_tail = true
+    } else {
+      errors.push({ line_number, content: line, message })
+    }
+  }
+
   let mut first_content_line = true
   for index, line in lines {
     let line_number = index + 1
@@ -117,14 +132,10 @@ pub fn parse_events(text : String) -> ParsedLog {
     }
     let may_be_header = first_content_line
     first_content_line = false
-    let is_last_segment = index == lines.length() - 1
+    let torn = index == lines.length() - 1 && !ends_with_newline
     let json = @json.parse(line) catch {
       error => {
-        if is_last_segment && !ends_with_newline {
-          partial_tail = true
-        } else {
-          errors.push({ line_number, content: line, message: "\{error}" })
-        }
+        note_bad_line(line_number, line, torn, "\{error}")
         continue
       }
     }
@@ -134,11 +145,7 @@ pub fn parse_events(text : String) -> ParsedLog {
     }
     let event : @agent_session.SessionEvent = @json.from_json(json) catch {
       error => {
-        if is_last_segment && !ends_with_newline {
-          partial_tail = true
-        } else {
-          errors.push({ line_number, content: line, message: "\{error}" })
-        }
+        note_bad_line(line_number, line, torn, "\{error}")
         continue
       }
     }
