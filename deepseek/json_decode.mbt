@@ -61,42 +61,21 @@ impl FromJson for ToolCall with fn from_json(json : Json, path : @json.JsonPath)
       "function": { "name": String(name), "arguments": String(arguments), .. },
       ..
     } => ToolCall(id~, name~, arguments~)
-    {
-      "id": String(_),
-      "function": { "name": String(_), "arguments": _, .. },
-      ..
-    } =>
-      json_decode_error(
-        path.add_key("function").add_key("arguments"),
-        "ToolCall::from_json: expected function.arguments",
-      )
     { "id": String(_), "function": { "name": String(_), .. }, .. } =>
       json_decode_error(
         path.add_key("function").add_key("arguments"),
         "ToolCall::from_json: expected function.arguments",
-      )
-    { "id": String(_), "function": { "name": _, .. }, .. } =>
-      json_decode_error(
-        path.add_key("function").add_key("name"),
-        "ToolCall::from_json: expected function.name",
       )
     Object({ "id": String(_), "function": Object(_), .. }) =>
       json_decode_error(
         path.add_key("function").add_key("name"),
         "ToolCall::from_json: expected function.name",
       )
-    Object({ "id": String(_), "function": _, .. }) =>
-      json_decode_error(
-        path.add_key("function"),
-        "ToolCall::from_json: expected function object",
-      )
     Object({ "id": String(_), .. }) =>
       json_decode_error(
         path.add_key("function"),
         "ToolCall::from_json: expected function object",
       )
-    Object({ "id": _, .. }) =>
-      json_decode_error(path.add_key("id"), "ToolCall::from_json: expected id")
     Object(_) =>
       json_decode_error(path.add_key("id"), "ToolCall::from_json: expected id")
     _ => json_decode_error(path, "ToolCall::from_json: expected object")
@@ -125,10 +104,6 @@ pub impl FromJson for ChatResponse with fn from_json(
         path.add_key("choices"),
         "ChatResponse::from_json: empty choices",
       )
-    { "choices": [Object({ "message": _, .. }), ..], .. } =>
-      json_decode_error(
-        message_path, "ChatResponse::from_json: expected message object",
-      )
     { "choices": [Object(_), ..], .. } =>
       json_decode_error(
         message_path, "ChatResponse::from_json: expected message object",
@@ -137,11 +112,6 @@ pub impl FromJson for ChatResponse with fn from_json(
       json_decode_error(
         path.add_key("choices").add_index(0),
         "ChatResponse::from_json: expected choice object",
-      )
-    { "choices": _, .. } =>
-      json_decode_error(
-        path.add_key("choices"),
-        "ChatResponse::from_json: expected choices array",
       )
     Object(_) =>
       json_decode_error(

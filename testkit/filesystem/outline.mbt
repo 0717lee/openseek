@@ -56,18 +56,13 @@ async fn collect_dirs(
 fn sanitize_name(name : String) -> String {
   let limit = 64
   let sb = StringBuilder()
-  let mut count = 0
-  for ch in name {
+  for ch in name; count = 0 {
     if count >= limit {
       sb.write_string("…")
       break
     }
-    if ch is ('\u{00}'..='\u{1F}' | '\u{7F}') {
-      sb.write_char('?')
-    } else {
-      sb.write_char(ch)
-    }
-    count += 1
+    sb.write_char(if ch is ('\u{00}'..='\u{1F}' | '\u{7F}') { '?' } else { ch })
+    continue count + 1
   }
   sb.to_string()
 }

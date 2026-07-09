@@ -154,10 +154,7 @@ async fn apply_stream_json(
 ///|
 fn sse_data_fragment(raw : String) -> String? {
   let line = raw.strip_suffix("\r").unwrap_or(raw)
-  match line.strip_prefix("data:") {
-    Some(data) => Some("\{data.trim()}")
-    None => None
-  }
+  line.strip_prefix("data:").map(data => "\{data.trim()}")
 }
 
 ///|

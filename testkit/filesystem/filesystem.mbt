@@ -208,12 +208,8 @@ fn validate_relative_path(path : String) -> Unit raise {
 
 ///|
 async fn ensure_parent_dir(root : String, path : String) -> Unit {
-  let parts = path.split("/").collect()
-  if parts.length() <= 1 {
-    return
-  }
-  let dirs = parts[:parts.length() - 1]
-  let _ = @fs.mkdir("\{root}/\{dirs.join("/")}", recursive=true) catch {
+  guard path.rev_split_once("/") is Some((dirs, _)) else { return }
+  @fs.mkdir("\{root}/\{dirs}", recursive=true) catch {
     _ => ()
   }
 }

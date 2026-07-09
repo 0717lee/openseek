@@ -189,7 +189,25 @@ pub async fn Client::chat(
   ) <| messages
   match stream {
     None => self.with_retries(() => self.chat_attempt(body), () => false)
-    Some(stream) => self.chat_stream_body(body, stream)
+    Some(stream) => {
+      // Once the server has produced any complete SSE event the completion is
+      // running and billed — text deltas, tool-call deltas, and usage alike,
+      // even though only text reaches the callbacks. A retry past that point
+      // could duplicate content or generate a different tool call, so the
+      // first event (not just the first text delta) bails the retry loop and
+      // failures surface instead (Codex review).
+      let mut streamed = false
+      self.with_retries(
+        () => {
+          self.chat_stream_attempt(
+            body,
+            on_stream_event=() => streamed = true,
+            stream,
+          )
+        },
+        () => streamed,
+      )
+    }
   }
 }
 
@@ -220,31 +238,6 @@ async fn Client::chat_attempt(
   ) catch {
     error => fail("DeepSeek response decode error: \{error}; body: \{text}")
   }
-}
-
-///|
-async fn Client::chat_stream_body(
-  self : Client,
-  body : Json,
-  stream : StreamHandler,
-) -> @deepseek.ChatResponse {
-  // Once the server has produced any complete SSE event the completion is
-  // running and billed — text deltas, tool-call deltas, and usage alike,
-  // even though only text reaches the callbacks. A retry past that point
-  // could duplicate content or generate a different tool call, so the
-  // first event (not just the first text delta) bails the retry loop and
-  // failures surface instead (Codex review).
-  let mut streamed = false
-  self.with_retries(
-    () => {
-      self.chat_stream_attempt(
-        body,
-        on_stream_event=() => streamed = true,
-        stream,
-      )
-    },
-    () => streamed,
-  )
 }
 
 ///|

@@ -95,15 +95,22 @@ async fn with_jsonl_stdout(body : async () -> Unit) -> Unit {
 }
 
 ///|
+/// `--no-session` combined with an explicit `--session` is a contradiction
+/// every mode rejects up front, before any workspace or session work.
+fn reject_session_contradiction(matches : @argparse.Matches) -> Unit raise {
+  if @cli.flag(matches, "no-session") &&
+    @agentcli.session_id(matches) is Some(_) {
+    fail("--no-session contradicts --session; pick one behavior")
+  }
+}
+
+///|
 /// `openseek run [TASK…]` — a headless one-shot agent run (best-of-N under
 /// `--concurrency`), streaming JSONL events on stdout.
 async fn run_task_command(matches : @argparse.Matches) -> Unit {
   with_jsonl_stdout(() => {
     // --no-session contradicts an explicit --session; reject up front.
-    if @cli.flag(matches, "no-session") &&
-      @agentcli.session_id(matches) is Some(_) {
-      fail("--no-session contradicts --session; pick one behavior")
-    }
+    reject_session_contradiction(matches)
     // Best-of-N fleet mode owns its own workspace materialization and session
     // creation, so it branches before prepare_workspace_root (which would
     // create a single --dir).
@@ -185,10 +192,7 @@ async fn run_task_command(matches : @argparse.Matches) -> Unit {
 async fn run_serve_command(matches : @argparse.Matches) -> Unit {
   // Serve is ephemeral by default (durable only with --session); --no-session
   // makes that explicit and, as in every mode, contradicts an explicit --session.
-  if @cli.flag(matches, "no-session") &&
-    @agentcli.session_id(matches) is Some(_) {
-    fail("--no-session contradicts --session; pick one behavior")
-  }
+  reject_session_contradiction(matches)
   with_jsonl_stdout(() => {
     let workspace_root = prepare_workspace_root(matches, log_created=true)
     run_serve(matches, workspace_root~)
@@ -252,10 +256,9 @@ async fn sessions_compact(matches : @argparse.Matches) -> Unit {
   let workspace_root = prepare_workspace_root(matches, log_created=false)
   let store = @store.SessionStore(session_root(matches, workspace_root~))
   let id = sessions_target_id(matches)
-  let compact_file = @cli.value(matches, "file").trim().to_owned()
-  if compact_file.is_empty() {
-    fail("`openseek sessions compact` requires --file")
-  }
+  let compact_file = @cli.require_non_empty(
+    matches, "file", "`openseek sessions compact` requires --file",
+  )
   let from_sequence = required_positive_int(
     @cli.value(matches, "from"),
     "--from",
@@ -811,24 +814,22 @@ async fn load_or_new_session(
   model : @deepseek.Model,
   workspace_root? : String = ".",
 ) -> @agent_session.Session {
-  if store.exists(id) {
-    store.load(id) catch {
-      @os_error.OSError(_) as error if error.is_ENOENT() =>
-        Session(
-          id,
-          system_prompt=configured_system_prompt(
-            matches,
-            model,
-            workspace_root~,
-          ),
-        )
-      error => raise error
-    }
-  } else {
+  // The prompt is built only when actually creating a fresh session: a
+  // re-load must not read prompt files again.
+  async fn fresh() -> @agent_session.Session {
     Session(
       id,
       system_prompt=configured_system_prompt(matches, model, workspace_root~),
     )
+  }
+
+  if store.exists(id) {
+    store.load(id) catch {
+      @os_error.OSError(_) as error if error.is_ENOENT() => fresh()
+      error => raise error
+    }
+  } else {
+    fresh()
   }
 }
 
@@ -888,13 +889,12 @@ async fn configured_system_prompt(
 
 ///|
 fn global_skills_dir_for_home(value : String?) -> String? {
-  if value is Some(value) {
-    let home = value.trim()
-    if !home.is_empty() {
-      return Some("\{home}/.openseek/skills")
-    }
+  let home = value.unwrap_or("").trim()
+  if home.is_empty() {
+    None
+  } else {
+    Some("\{home}/.openseek/skills")
   }
-  None
 }
 
 ///|
@@ -960,15 +960,8 @@ async fn skills_prompt_section_for_cwd(
 /// the recorded directory is where the session was started — resume it from
 /// the same project root.
 async fn environment_prompt_section(workspace_root? : String = ".") -> String {
-  let cwd = if workspace_root == "." || workspace_root == "" {
-    @fs.realpath(".") catch {
-      _ => "."
-    }
-  } else {
-    @fs.realpath(workspace_root) catch {
-      _ => workspace_root
-    }
-  }
+  let target = if workspace_root == "" { "." } else { workspace_root }
+  let cwd = @fs.realpath(target) catch { _ => target }
   // FIXME(upstream)
   // " \{sb => f(sb)}"
   // `f` is not allowed to be async, either fix it or better error message (macro expansion should work)

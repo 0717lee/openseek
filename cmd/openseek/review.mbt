@@ -51,8 +51,7 @@ async fn run_review_cli(
     }
   }
   @stdio.stdout.write(report.to_json_string() + "\n")
-  let blockers = report.findings.filter(f => f.severity == "blocker").length()
-  if blockers > 0 {
+  if report.findings.any(f => f.severity == "blocker") {
     @sys.exit(2)
   }
 }

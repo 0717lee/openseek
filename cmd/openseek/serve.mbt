@@ -53,10 +53,7 @@ fn decode_serve_command(json : Json) -> Result[ServeCommand, String] {
   match json {
     { "command": "prompt", "text": String(text), .. } => Ok(Prompt(text))
     { "command": "steer", .. } =>
-      match decode_steer_input(json) {
-        Ok(input) => Ok(Steer(input))
-        Err(message) => Err(message)
-      }
+      decode_steer_input(json).map(input => Steer(input))
     { "command": "prompt", .. } => Err("expected a string \"text\" field")
     { "command": "compact", .. } => Ok(Compact)
     { "command": "cancel", .. } => Ok(Cancel)
@@ -139,22 +136,14 @@ test "serve commands decode and reject with actionable errors" {
 
 ///|
 fn remove_next_pending_prompt(pending : Array[PendingWork]) -> Unit {
-  for index, work in pending {
-    if work is PendingPrompt(_) {
-      ignore(pending.remove(index))
-      return
-    }
+  if pending.search_by(work => work is PendingPrompt(_)) is Some(index) {
+    ignore(pending.remove(index))
   }
 }
 
 ///|
 fn has_pending_prompt(pending : Array[PendingWork]) -> Bool {
-  for work in pending {
-    if work is PendingPrompt(_) {
-      return true
-    }
-  }
-  false
+  pending.any(work => work is PendingPrompt(_))
 }
 
 ///|
@@ -397,20 +386,11 @@ async fn run_serve(
     }
 
     fn start_next_pending() -> Unit {
-      pending_loop~: for ;; {
-        if active_work is Some(_) || pending.length() == 0 {
-          break pending_loop~
-        }
-        match pending.remove(0) {
-          PendingPrompt(text) => {
-            active_work = Some(ActiveTurn(start_turn(text)))
-            break pending_loop~
-          }
-          PendingCompact => {
-            active_work = Some(ActiveCompact(start_compaction(session)))
-            break pending_loop~
-          }
-        }
+      guard active_work is None && pending.length() > 0 else { return }
+      match pending.remove(0) {
+        PendingPrompt(text) => active_work = Some(ActiveTurn(start_turn(text)))
+        PendingCompact =>
+          active_work = Some(ActiveCompact(start_compaction(session)))
       }
     }
 
@@ -469,9 +449,7 @@ async fn run_serve(
             None =>
               // No active work: in wire order the cancel targets the next
               // submitted prompt, so withdraw it before it starts.
-              if pending.length() > 0 {
-                remove_next_pending_prompt(pending)
-              }
+              remove_next_pending_prompt(pending)
           }
         Wire(Compact) =>
           if active_work is Some(_) {

@@ -69,13 +69,9 @@ async fn run_fleet(matches : @argparse.Matches, concurrency~ : Int) -> Unit {
     }
   })
   print_fleet_summary(task, outcomes, session_root_value)
-  let mut any_ok = false
-  for outcome in outcomes {
-    if outcome is Some(result) && result.ok {
-      any_ok = true
-    }
+  guard outcomes.any(outcome => outcome is Some(result) && result.ok) else {
+    fail("all \{concurrency} run(s) failed")
   }
-  guard any_ok else { fail("all \{concurrency} run(s) failed") }
 }
 
 ///|
@@ -359,12 +355,9 @@ async fn print_fleet_summary(
   session_root_value : String,
 ) -> Unit {
   let total = outcomes.length()
-  let mut finished = 0
-  for outcome in outcomes {
-    if outcome is Some(result) && result.ok {
-      finished += 1
-    }
-  }
+  let finished = outcomes
+    .iter()
+    .count_if(outcome => outcome is Some(result) && result.ok)
   let lines : Array[String] = [
     "",
     "openseek: \{total} run(s) of \"\{one_line_brief(task, 60)}\" — \{finished} finished, \{total - finished} not",
@@ -395,12 +388,8 @@ fn one_line_brief(text : String, max : Int) -> String {
     "\{one}"
   } else {
     let kept = StringBuilder()
-    for ch in one; count = 0 {
-      if count >= max {
-        break
-      }
+    for ch in one.iter().take(max) {
       kept.write_char(ch)
-      continue count + 1
     }
     kept.write_char('…')
     kept.to_string()

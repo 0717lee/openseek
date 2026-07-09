@@ -10,13 +10,10 @@ fn ChatMessage::reasoning_json_fields(
   message : ChatMessage,
   model : Model,
 ) -> Array[(String, Json)] {
-  if !(model is Kimi(_)) {
-    return []
-  }
-  if message.role is Assistant && message.reasoning_content is Some(reasoning) {
-    [("reasoning_content", Json::string(reasoning))]
-  } else {
-    []
+  match (model, message.role, message.reasoning_content) {
+    (Kimi(_), Assistant, Some(reasoning)) =>
+      [("reasoning_content", Json::string(reasoning))]
+    _ => []
   }
 }
 
