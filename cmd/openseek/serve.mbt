@@ -296,24 +296,12 @@ fn has_pending_goal(pending : Array[PendingWork]) -> Bool {
 }
 
 ///|
-fn has_pending_compact(pending : Array[PendingWork]) -> Bool {
-  for work in pending {
-    if work is PendingCompact {
-      return true
-    }
-  }
-  false
-}
-
-///|
 test "pending prompt helpers ignore queued compactions and goals" {
   let pending : Array[PendingWork] = []
   assert_false(has_pending_prompt(pending))
-  assert_false(has_pending_compact(pending))
   pending.push(PendingCompact)
   pending.push(PendingGoal("[goal]\nship it", [], false, 1))
   assert_false(has_pending_prompt(pending))
-  assert_true(has_pending_compact(pending))
   pending.push(PendingPrompt("next"))
   assert_true(has_pending_prompt(pending))
   // Cancel targets the next prompt, never a queued goal update.
@@ -581,22 +569,25 @@ async fn run_serve(
     // Monotonic serial over goal-affecting commands (set/clear/cancel): a
     // queued auto entry arms only if NO later command superseded it.
     let mut goal_command_serial = 0
-    // Local closures cannot take labelled args: the Bool is
-    // defer_continue — true only when the marker landed AFTER the turn
-    // ended (the PendingGoal drain).
+    // Arm the autonomous loop for a durably standing goal. Local closures
+    // cannot take labelled args: the Bool is defer_continue — true only
+    // when the marker landed AFTER the turn ended (the PendingGoal drain
+    // and the idle drain): that turn never saw the goal, so its first turn
+    // belongs to the controller. A goal steered INTO the finishing turn
+    // was already worked under — continue it.
+    fn arm_goal_auto(text : String, defer_continue : Bool) -> Unit {
+      goal_auto_target = Some(text)
+      goal_turns_remaining = GoalAutoContinueMaxTurns
+      goal_auto_pending = None
+      if defer_continue {
+        goal_promoted_this_boundary = true
+      }
+    }
+
     fn maybe_promote_goal_auto(defer_continue : Bool) -> Unit {
       if goal_auto_pending is Some((text, baseline)) &&
         goal_auto_promotable(session.current_goal(), text, baseline) {
-        goal_auto_target = Some(text)
-        goal_turns_remaining = GoalAutoContinueMaxTurns
-        goal_auto_pending = None
-        // Deferred only when the marker landed AFTER the turn ended (the
-        // PendingGoal drain): that turn never saw the goal, so its first
-        // turn belongs to the controller. A goal steered INTO the
-        // finishing turn was already worked under — continue it.
-        if defer_continue {
-          goal_promoted_this_boundary = true
-        }
+        arm_goal_auto(text, defer_continue)
       }
     }
     async fn compact_and_report(
@@ -659,8 +650,21 @@ async fn run_serve(
         // A blocked marker pauses auto-continuation but the goal stands:
         // it is reported by the loop's own goal_blocked event, not as a
         // goal_updated (the goal did not change).
-        Some(GoalBlocked(_)) => ()
-        None => ()
+        Some(GoalBlocked(_)) | None => ()
+      }
+    }
+
+    // Persist a goal marker at the session's current boundary and report it.
+    // The report happens only after the durable append succeeded — never at
+    // queue time — so a controller can only learn a goal that was actually
+    // persisted; callers gate their promotion tails on the returned Bool for
+    // the same reason.
+    async fn append_goal_marker(marker : String) -> Bool {
+      if append_idle_item(Runtime(RuntimeNotice(marker)), "goal update") {
+        report_goal_update(marker)
+        true
+      } else {
+        false
       }
     }
 
@@ -694,8 +698,7 @@ async fn run_serve(
             // transport: persist and report it as a goal update, so no
             // controller ever sees it dressed as a background notice.
             Some(_) =>
-              if append_idle_item(Runtime(RuntimeNotice(text)), "goal update") {
-                report_goal_update(text)
+              if append_goal_marker(text) {
                 // Drained at idle: the finished turn never saw this marker,
                 // so its first turn belongs to the controller.
                 maybe_promote_goal_auto(true)
@@ -717,21 +720,13 @@ async fn run_serve(
     // PendingGoal entry so the eventual drain replays true wire order.
     fn take_context_before_goal() -> Array[@agent_runtime.SteerInput] {
       let inputs = runtime.drain_steers()
-      let mut boundary = inputs.length()
-      for index, input in inputs {
-        if input is Prompt(_) {
-          boundary = index
-          break
-        }
+      let boundary = inputs
+        .search_by(input => input is Prompt(_))
+        .unwrap_or(inputs.length())
+      for input in inputs[boundary:] {
+        runtime.queue_steer(input)
       }
-      let context : Array[@agent_runtime.SteerInput] = []
-      for index in 0..<boundary {
-        context.push(inputs[index])
-      }
-      for index in boundary..<inputs.length() {
-        runtime.queue_steer(inputs[index])
-      }
-      context
+      [..inputs[:boundary]]
     }
 
     fn start_turn(task_text : String) -> @async.Task[Unit] {
@@ -800,19 +795,14 @@ async fn run_serve(
     }
 
     async fn start_next_pending() -> Unit {
-      pending_loop~: for ;; {
-        if active_work is Some(_) || pending.length() == 0 {
-          break pending_loop~
-        }
+      // Starting work makes the condition false on the recheck; instant-work
+      // arms (context, goal markers) keep draining in arrival order.
+      while active_work is None && pending.length() > 0 {
         match pending.remove(0) {
-          PendingPrompt(text) => {
+          PendingPrompt(text) =>
             active_work = Some(ActiveTurn(start_turn(text)))
-            break pending_loop~
-          }
-          PendingCompact => {
+          PendingCompact =>
             active_work = Some(ActiveCompact(start_compaction(session)))
-            break pending_loop~
-          }
           // Instant work: append the goal at its ordered position and keep
           // draining the queue. A command context produced BEFORE the goal
           // was queued lands first — the goal may depend on that output,
@@ -823,19 +813,14 @@ async fn run_serve(
             for input in context {
               apply_idle_context_input(input)
             }
-            if append_idle_item(Runtime(RuntimeNotice(marker)), "goal update") {
-              report_goal_update(marker)
-              // Promotion tied to THIS entry's durable append: with two
-              // same-text goals queued, an earlier append must not arm an
-              // auto command whose own marker is not durable yet.
-              if is_auto &&
-                serial == goal_command_serial &&
-                @agent_session.goal_marker(marker) is Some(GoalSet(text)) {
-                goal_auto_target = Some(text)
-                goal_turns_remaining = GoalAutoContinueMaxTurns
-                goal_auto_pending = None
-                goal_promoted_this_boundary = true
-              }
+            // Promotion tied to THIS entry's durable append: with two
+            // same-text goals queued, an earlier append must not arm an
+            // auto command whose own marker is not durable yet.
+            if append_goal_marker(marker) &&
+              is_auto &&
+              serial == goal_command_serial &&
+              @agent_session.goal_marker(marker) is Some(GoalSet(text)) {
+              arm_goal_auto(text, true)
             }
           }
         }
@@ -926,25 +911,15 @@ async fn run_serve(
           // with auto only records a PENDING intent against the current
           // sequence baseline — arming happens at promotion, after the
           // marker durably lands.
-          match action {
-            SetGoal(text, auto~) => {
-              // For a QUEUED goal the promotion is tied to its own append
-              // (see the PendingGoal drain); the baseline mechanism covers
-              // the steer/idle paths where the append happens elsewhere.
-              goal_auto_pending = if auto {
-                Some((text, session.last_sequence()))
-              } else {
-                None
-              }
-              goal_auto_target = None
-              goal_turns_remaining = 0
-            }
-            ClearGoal => {
-              goal_auto_pending = None
-              goal_auto_target = None
-              goal_turns_remaining = 0
-            }
+          // For a QUEUED goal the promotion is tied to its own append (see
+          // the PendingGoal drain); the baseline mechanism covers the
+          // steer/idle paths where the append happens elsewhere.
+          goal_auto_pending = match action {
+            SetGoal(text, auto=true) => Some((text, session.last_sequence()))
+            SetGoal(_, ..) | ClearGoal => None
           }
+          goal_auto_target = None
+          goal_turns_remaining = 0
           let marker = match action {
             SetGoal(text, ..) => "\{@agent_session.GoalPrefix}\n\{text}"
             ClearGoal => @agent_session.GoalClearedNotice
@@ -981,11 +956,7 @@ async fn run_serve(
             // persists it before any queued prompt starts, so the next turn
             // still sees it.
             runtime.queue_steer(Notice(marker))
-          } else if append_idle_item(
-              Runtime(RuntimeNotice(marker)),
-              "goal update",
-            ) {
-            report_goal_update(marker)
+          } else if append_goal_marker(marker) {
             maybe_promote_goal_auto(false)
           }
         }

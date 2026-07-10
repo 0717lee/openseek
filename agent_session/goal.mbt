@@ -85,11 +85,7 @@ pub fn goal_marker(content : String) -> GoalMarker? {
   if content == GoalClearedNotice {
     Some(GoalCleared)
   } else if content.has_prefix("\{GoalBlockedPrefix}\n") {
-    Some(
-      GoalBlocked(
-        "\{content.view(start_offset=GoalBlockedPrefix.length() + 1)}",
-      ),
-    )
+    Some(GoalBlocked(content[GoalBlockedPrefix.length() + 1:].to_owned()))
   } else if content.has_prefix("\{GoalPrefix}\n") {
     Some(GoalSet(content[GoalPrefix.length() + 1:].to_owned()))
   } else {
@@ -111,7 +107,8 @@ pub fn Session::current_goal(self : Session) -> StandingGoal? {
   let mut blocked = false
   let covered : Array[(Int, Int)] = []
   for index = events.length() - 1; index >= 0; index = index - 1 {
-    match events[index].item() {
+    let event = events[index]
+    match event.item() {
       Assistant(_) | Terminal(_) => answered = true
       // A summary whose range CONTAINS the set marker removes its verbatim
       // text from the projection: treat the goal as "answered" so the
@@ -127,15 +124,11 @@ pub fn Session::current_goal(self : Session) -> StandingGoal? {
           // temporally; a NEWER set is found first and naturally resets it.
           Some(GoalBlocked(_)) => blocked = true
           Some(GoalSet(text)) => {
-            let sequence = events[index].sequence()
-            let mut is_covered = false
-            for range in covered {
+            let sequence = event.sequence()
+            let is_covered = covered.any(range => {
               let (from, to) = range
-              if from <= sequence && sequence <= to {
-                is_covered = true
-                break
-              }
-            }
+              from <= sequence && sequence <= to
+            })
             return Some({
               text,
               answered_since_set: answered || is_covered,

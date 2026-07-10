@@ -88,25 +88,14 @@ fn GoalCadence::GoalCadence(
   session : @agent_session.Session,
   tool_registered~ : Bool,
 ) -> GoalCadence {
-  match session.current_goal() {
-    Some(goal) =>
-      {
-        tool_registered,
-        goal: Some(goal.text()),
-        remind_now: goal.answered_since_set(),
-        finish_checked: false,
-        pending_blocked_reason: None,
-        pending_tombstone: false,
-      }
-    None =>
-      {
-        tool_registered,
-        goal: None,
-        remind_now: false,
-        finish_checked: false,
-        pending_blocked_reason: None,
-        pending_tombstone: false,
-      }
+  let standing = session.current_goal()
+  {
+    tool_registered,
+    goal: standing.map(goal => goal.text()),
+    remind_now: standing.map(goal => goal.answered_since_set()).unwrap_or(false),
+    finish_checked: false,
+    pending_blocked_reason: None,
+    pending_tombstone: false,
   }
 }
 
@@ -115,9 +104,10 @@ fn GoalCadence::GoalCadence(
 /// instead of ending the turn.
 fn GoalCadence::due_finish_check(self : GoalCadence) -> String? {
   if self.finish_checked {
-    return None
+    None
+  } else {
+    self.goal
   }
-  self.goal
 }
 
 ///|
@@ -154,9 +144,8 @@ fn GoalCadence::record_finish_check(self : GoalCadence) -> Unit {
 /// context-window cycle starts a fresh turn that re-surfaces the goal
 /// right after the checkpoint.
 fn GoalCadence::due_reminder(self : GoalCadence) -> String? {
-  guard self.goal is Some(goal) else { return None }
   if self.remind_now {
-    Some(goal)
+    self.goal
   } else {
     None
   }
@@ -214,9 +203,10 @@ async fn AgentLoop::flush_goal_tombstone(
   session : @agent_session.Session,
 ) -> @agent_session.Session {
   let session = if self.goal_cadence.pending_blocked_reason is Some(reason) {
-    let marker = "\{@agent_session.GoalBlockedPrefix}\n\{reason}"
-    let next = self.append(session, Runtime(RuntimeNotice(marker)))
-    self.messages.push(ChatMessage(User, content=marker))
+    let next = self.append_runtime_notice(
+      session,
+      "\{@agent_session.GoalBlockedPrefix}\n\{reason}",
+    )
     // Cleared only AFTER the durable append, like the tombstone.
     self.goal_cadence.pending_blocked_reason = None
     @xlog.info() <? { "event": "goal_blocked", "reason": reason }
@@ -227,17 +217,14 @@ async fn AgentLoop::flush_goal_tombstone(
   if !self.goal_cadence.pending_tombstone {
     return session
   }
-  let next = self.append(
+  let next = self.append_runtime_notice(
     session,
-    Runtime(RuntimeNotice(@agent_session.GoalClearedNotice)),
+    @agent_session.GoalClearedNotice,
   )
   // Cleared only AFTER the durable append: a failed append must leave the
   // flag set so the error-path retry still lands the tombstone — otherwise
   // a durable goal(met) result coexists with a resurrected goal on resume.
   self.goal_cadence.pending_tombstone = false
-  self.messages.push(
-    ChatMessage(User, content=@agent_session.GoalClearedNotice),
-  )
   @xlog.info() <? { "event": "goal_updated", "goal": (None : String?) }
   next
 }

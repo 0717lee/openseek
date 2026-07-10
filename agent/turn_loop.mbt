@@ -84,6 +84,16 @@ priv enum ToolCallOutcome {
 }
 
 ///|
+/// A finish attempt's verdict, seen from inside a tool batch: a sealed turn
+/// stops the loop, a compact-on-finish continuation goes back to the model.
+fn ToolCallOutcome::of_finish(outcome : FinishOutcome) -> ToolCallOutcome {
+  match outcome {
+    Sealed(session) => FinishAgentLoop(session)
+    ContinueTurn(session) => ContinueAgentLoop(session)
+  }
+}
+
+///|
 /// Result note for tool calls discarded because the turn is ending at the
 /// context ceiling.
 let ceiling_skip_note : String = "skipped: the turn is yielding at the context ceiling; re-issue after the checkpoint if still needed"
@@ -261,6 +271,20 @@ async fn AgentLoop::append(
 }
 
 ///|
+/// Durably append a runtime notice and mirror it into the in-flight chat
+/// buffer — the notice becomes model-visible only after the durable append
+/// succeeds, so a failed append never leaves the buffer ahead of the log.
+async fn AgentLoop::append_runtime_notice(
+  self : Self,
+  session : @agent_session.Session,
+  content : String,
+) -> @agent_session.Session {
+  let next = self.append(session, Runtime(RuntimeNotice(content)))
+  self.messages.push(ChatMessage(User, content~))
+  next
+}
+
+///|
 /// Durably append the response's assistant message and mirror it into the
 /// in-flight chat buffer — the two must stay in lockstep (see `messages`).
 async fn AgentLoop::record_assistant(
@@ -343,15 +367,13 @@ async fn AgentLoop::prepare_step(
       goal,
       tool_registered=self.goal_cadence.tool_registered,
     )
-    session = self.append(session, Runtime(RuntimeNotice(reminder)))
-    self.messages.push(ChatMessage(User, content=reminder))
+    session = self.append_runtime_notice(session, reminder)
     @xlog.info() <? { "event": "goal_reminder", "content": reminder }
     self.goal_cadence.record_reminder()
   }
   if self.plan_cadence.should_remind() {
     let reminder = self.plan_cadence.reminder_text()
-    session = self.append(session, Runtime(RuntimeNotice(reminder)))
-    self.messages.push(ChatMessage(User, content=reminder))
+    session = self.append_runtime_notice(session, reminder)
     @xlog.info() <? { "event": "plan_reminder", "content": reminder }
     self.plan_cadence.record_reminder()
   }
@@ -545,28 +567,24 @@ async fn AgentLoop::execute_tool_call(
         // check round: injecting one would exit into "max steps exhausted"
         // and turn a successful bounded turn into a failure. Finish.
         if !last_step && self.goal_cadence.due_finish_check() is Some(_) {
-          return match
+          return ToolCallOutcome::of_finish(
             self.continue_into_goal_check(
               session,
               response.usage,
               spent_result_chars~,
               kept_answer=answer,
               keep_only_when_compacted=true,
-            ) {
-            Sealed(next) => FinishAgentLoop(next)
-            ContinueTurn(next) => ContinueAgentLoop(next)
-          }
+            ),
+          )
         }
-        return match
+        return ToolCallOutcome::of_finish(
           self.finish_turn(
             session,
             answer,
             usage=response.usage,
             spent_result_chars~,
-          ) {
-          Sealed(next) => FinishAgentLoop(next)
-          ContinueTurn(next) => ContinueAgentLoop(next)
-        }
+          ),
+        )
       }
       // User input wins over the finish tool as well — but never answered in
       // a starved context: at the ceiling the turn yields and the steers
@@ -942,9 +960,7 @@ async fn AgentLoop::continue_into_goal_check(
     // Re-seed the in-flight buffer from the compacted projection: the
     // whole point of the checkpoint is that the check round is small.
     self.messages.clear()
-    for message in session.chat_messages() {
-      self.messages.push(message)
-    }
+    self.messages.append(session.chat_messages())
   }
   ContinueTurn(session)
 }
@@ -962,8 +978,7 @@ async fn AgentLoop::inject_goal_check(
     goal,
     tool_registered=self.goal_cadence.tool_registered,
   )
-  let session = self.append(session, Runtime(RuntimeNotice(check)))
-  self.messages.push(ChatMessage(User, content=check))
+  let session = self.append_runtime_notice(session, check)
   @xlog.info() <? { "event": "goal_check", "content": check }
   self.goal_cadence.record_finish_check()
   // The check must stay the newest instruction: a plan reminder landing at
