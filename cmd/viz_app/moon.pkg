@@ -15,6 +15,4 @@ warnings = "+unnecessary_annotation"
 
 supported_targets = "js"
 
-options(
-  "is-main": true,
-)
+pkgtype(kind: "executable")
