@@ -1,13 +1,4 @@
 ///|
-const MoonCheckTimeoutMs : Int = 30000
-
-///|
-const MoonCheckMaxOutputChars : Int = 12000
-
-///|
-const MoonCheckCommand : String = "moon check --diagnostic-limit 1"
-
-///|
 /// Append bounded raw `moon check` feedback after successful writes to MoonBit
 /// source or manifest files. The check runs from the containing MoonBit module
 /// or workspace root. Non-MoonBit paths and paths outside a MoonBit project are
@@ -26,18 +17,25 @@ pub async fn append_summary(path : String, content : String) -> String {
 ///|
 async fn auto_check_summary(path : String) -> String? {
   guard moon_check_cwd(path) is Some(cwd) else { return None }
-  let result = @async.with_timeout_opt(MoonCheckTimeoutMs, () => {
+  let result = @async.with_timeout_opt(@moon_check.TimeoutMs, () => {
     @shell.collect_shell_output(
-      MoonCheckCommand,
+      @moon_check.Command,
       cwd~,
-      max_output_chars=MoonCheckMaxOutputChars,
+      max_output_chars=@moon_check.MaxOutputChars,
     )
   }) catch {
     error if @async.is_being_cancelled() => raise error
     _ => return Some("moon check: failed to run")
   }
   match result {
-    Some(output) => Some(format_moon_check_output(output))
+    Some(output) =>
+      Some(
+        @moon_check.format_output(
+          output.exit_code,
+          output.text,
+          output.output_limit_reached,
+        ),
+      )
     None => Some("moon check: timed out")
   }
 }
@@ -80,7 +78,7 @@ pub(all) struct CheckErrors {
 /// batch unguarded, matching `append_summary`'s fail-open behavior.
 pub async fn count_errors(path : String) -> CheckErrors? {
   guard moon_check_cwd(path) is Some(cwd) else { return None }
-  let result = @async.with_timeout_opt(MoonCheckTimeoutMs, () => {
+  let result = @async.with_timeout_opt(@moon_check.TimeoutMs, () => {
     @shell.collect_shell_output(
       MoonCheckJsonCommand,
       cwd~,
@@ -154,39 +152,7 @@ async fn moon_check_cwd(path : String) -> String? {
   if !is_relevant_moonbit_path(path) {
     return None
   }
-  nearest_moon_project_dir(containing_dir(path))
-}
-
-///|
-fn format_moon_check_output(output : @shell.ShellOutput) -> String {
-  format_moon_check_output_parts(
-    output.exit_code,
-    output.text,
-    output.output_limit_reached,
-  )
-}
-
-///|
-fn format_moon_check_output_parts(
-  exit_code : Int?,
-  output : String,
-  output_limit_reached : Bool,
-) -> String {
-  let header = match exit_code {
-    Some(0) => "moon check:"
-    Some(code) => "moon check:\nexit=\{code}"
-    None => "moon check:\nexit=cancelled"
-  }
-  let header = if output_limit_reached {
-    "\{header}\noutput_limit_reached=true"
-  } else {
-    header
-  }
-  if output == "" {
-    header
-  } else {
-    "\{header}\n\{output}"
-  }
+  @moon_check.nearest_project_dir(containing_dir(path))
 }
 
 ///|
@@ -217,62 +183,6 @@ fn containing_dir(path : String) -> String {
 }
 
 ///|
-async fn nearest_moon_project_dir(start : String) -> String? {
-  for dir = start {
-    if @fs.exists(join_path(dir, "moon.mod")) ||
-      @fs.exists(join_path(dir, "moon.work")) {
-      return Some(dir)
-    }
-    match parent_dir(dir) {
-      Some(parent) => continue parent
-      None => return None
-    }
-  }
-}
-
-///|
-fn parent_dir(dir : String) -> String? {
-  let normalized = strip_trailing_slash(dir.replace_all(old="\\", new="/"))
-  if normalized == "" ||
-    normalized == "." ||
-    normalized == "/" ||
-    is_windows_drive_root(normalized) {
-    return None
-  }
-  match normalized.rev_find("/") {
-    Some(0) => Some("/")
-    Some(cut) => Some(normalized[:cut].to_owned())
-    None => Some(".")
-  }
-}
-
-///|
-fn is_windows_drive_root(path : String) -> Bool {
-  path.length() == 2 && path[1] == ':'
-}
-
-///|
-fn strip_trailing_slash(path : String) -> String {
-  for v = path[:] {
-    match v {
-      [.. rest, '/'] if rest.length() > 0 => continue rest
-      _ => break if v.length() == path.length() { path } else { v.to_owned() }
-    }
-  }
-}
-
-///|
-fn join_path(dir : String, base : String) -> String {
-  if dir == "" || dir == "." {
-    base
-  } else if dir.has_suffix("/") {
-    "\{dir}\{base}"
-  } else {
-    "\{dir}/\{base}"
-  }
-}
-
-///|
 test "relevant path detection covers MoonBit source and manifests" {
   assert_true(is_relevant_moonbit_path("moon.mod"))
   assert_true(is_relevant_moonbit_path("lib/moon.pkg"))
@@ -281,67 +191,6 @@ test "relevant path detection covers MoonBit source and manifests" {
   assert_true(is_relevant_moonbit_path("lib/README.mbt.md"))
   assert_false(is_relevant_moonbit_path("lib/parser.mbti"))
   assert_false(is_relevant_moonbit_path("README.md"))
-}
-
-///|
-test "parent dir stops at filesystem roots" {
-  assert_true(parent_dir("/") is None)
-  assert_true(parent_dir("C:") is None)
-  assert_true(parent_dir("C:/") is None)
-  assert_true(parent_dir("C:/work") is Some("C:"))
-  assert_true(parent_dir("C:/work/lib") is Some("C:/work"))
-}
-
-///|
-test "formats raw moon check output with exit code" {
-  assert_eq(
-    format_moon_check_output_parts(
-      Some(255),
-      (
-        #|Error: Failed to calculate build plan
-        #|
-        #|Caused by:
-        #|    0: Failed to resolve the module dependency graph
-      ),
-      false,
-    ),
-    (
-      #|moon check:
-      #|exit=255
-      #|Error: Failed to calculate build plan
-      #|
-      #|Caused by:
-      #|    0: Failed to resolve the module dependency graph
-    ),
-  )
-}
-
-///|
-test "formats successful moon check output without exit code" {
-  assert_eq(
-    format_moon_check_output_parts(
-      Some(0),
-      "Finished. moon: ran 2 tasks, now up to date",
-      false,
-    ),
-    (
-      #|moon check:
-      #|Finished. moon: ran 2 tasks, now up to date
-    ),
-  )
-}
-
-///|
-test "formats truncated moon check output with metadata" {
-  assert_eq(
-    format_moon_check_output_parts(None, "long output", true),
-    (
-      #|moon check:
-      #|exit=cancelled
-      #|output_limit_reached=true
-      #|long output
-    ),
-  )
 }
 
 ///|

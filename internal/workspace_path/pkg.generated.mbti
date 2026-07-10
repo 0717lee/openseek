@@ -2,9 +2,15 @@
 package "bobzhang/openseek/internal/workspace_path"
 
 // Values
+pub fn join_child(String, String) -> String
+
+pub fn parent_dir(String) -> String?
+
 pub fn resolve(String, String) -> String
 
 pub fn resolve_cwd(String, String?) -> String?
+
+pub fn strip_trailing_slash(String) -> String
 
 // Errors
 

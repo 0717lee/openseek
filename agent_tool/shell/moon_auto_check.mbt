@@ -1,13 +1,4 @@
 ///|
-const MoonCheckTimeoutMs : Int = 30000
-
-///|
-const MoonCheckMaxOutputChars : Int = 12000
-
-///|
-const MoonCheckCommand : String = "moon check --diagnostic-limit 1"
-
-///|
 async fn append_moon_command_check_summary(
   parsed : @shell_parse.ParseResult,
   cwd : String?,
@@ -59,10 +50,10 @@ fn moon_check_output_budget(content : String, max_output_chars : Int) -> Int {
   let remaining = max_output_chars - content.char_length() - 1
   if remaining <= 0 {
     0
-  } else if remaining < MoonCheckMaxOutputChars {
+  } else if remaining < @moon_check.MaxOutputChars {
     remaining
   } else {
-    MoonCheckMaxOutputChars
+    @moon_check.MaxOutputChars
   }
 }
 
@@ -71,38 +62,26 @@ async fn moon_check_summary_for_cwd(
   cwd : String,
   max_output_chars : Int,
 ) -> String? {
-  let check_cwd = match nearest_moon_project_dir(cwd) {
+  let check_cwd = match @moon_check.nearest_project_dir(cwd) {
     Some(check_cwd) => check_cwd
     None => return None
   }
-  let result = @async.with_timeout_opt(MoonCheckTimeoutMs, () => {
-    collect_shell_output(MoonCheckCommand, cwd=check_cwd, max_output_chars~)
+  let result = @async.with_timeout_opt(@moon_check.TimeoutMs, () => {
+    collect_shell_output(@moon_check.Command, cwd=check_cwd, max_output_chars~)
   }) catch {
     error if @async.is_being_cancelled() => raise error
     _ => return Some("moon check: failed to run")
   }
   match result {
-    Some(output) => Some(format_moon_check_output(output))
+    Some(output) =>
+      Some(
+        @moon_check.format_output(
+          output.exit_code,
+          output.text,
+          output.output_limit_reached,
+        ),
+      )
     None => Some("moon check: timed out")
-  }
-}
-
-///|
-fn format_moon_check_output(output : ShellOutput) -> String {
-  let header = match output.exit_code {
-    Some(0) => "moon check:"
-    Some(code) => "moon check:\nexit=\{code}"
-    None => "moon check:\nexit=cancelled"
-  }
-  let header = if output.output_limit_reached {
-    "\{header}\noutput_limit_reached=true"
-  } else {
-    header
-  }
-  if output.text == "" {
-    header
-  } else {
-    "\{header}\n\{output.text}"
   }
 }
 
@@ -508,58 +487,13 @@ fn resolve_command_cwd(base : String, target : String) -> String {
 }
 
 ///|
-async fn nearest_moon_project_dir(start : String) -> String? {
-  for dir = start {
-    if @fs.exists(join_path(dir, "moon.mod")) ||
-      @fs.exists(join_path(dir, "moon.work")) {
-      return Some(dir)
-    }
-    match parent_dir(dir) {
-      Some(parent) => continue parent
-      None => return None
-    }
-  }
-}
-
-///|
-fn parent_dir(dir : String) -> String? {
-  let normalized = strip_trailing_slash(dir.replace_all(old="\\", new="/"))
-  if normalized == "" ||
-    normalized == "." ||
-    normalized == "/" ||
-    is_windows_drive_root(normalized) {
-    return None
-  }
-  match normalized.rev_find("/") {
-    Some(0) => Some("/")
-    Some(cut) => Some(normalized[:cut].to_owned())
-    None => Some(".")
-  }
-}
-
-///|
-fn is_windows_drive_root(path : String) -> Bool {
-  path.length() == 2 && path[1] == ':'
+fn parent_dir(path : String) -> String? {
+  @workspace_path.parent_dir(path)
 }
 
 ///|
 fn strip_trailing_slash(path : String) -> String {
-  if path.length() > 1 && path.has_suffix("/") {
-    strip_trailing_slash(path[:path.length() - 1].to_owned())
-  } else {
-    path
-  }
-}
-
-///|
-fn join_path(dir : String, base : String) -> String {
-  if dir == "" || dir == "." {
-    base
-  } else if dir.has_suffix("/") {
-    "\{dir}\{base}"
-  } else {
-    "\{dir}/\{base}"
-  }
+  @workspace_path.strip_trailing_slash(path)
 }
 
 ///|
@@ -598,7 +532,7 @@ test "bound follow-up check output by remaining shell output budget" {
   assert_eq(moon_check_output_budget("exit=0\nabc", 10), 0)
   assert_eq(
     moon_check_output_budget("exit=0\n", 20000),
-    MoonCheckMaxOutputChars,
+    @moon_check.MaxOutputChars,
   )
   assert_eq(moon_check_output_budget("exit=0\nabcdef", 20), 6)
 }

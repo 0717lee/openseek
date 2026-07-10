@@ -1,5 +1,6 @@
 import {
   "bobzhang/openseek/agent_tool/internal/manifest_path",
+  "bobzhang/openseek/agent_tool/internal/moon_check",
   "bobzhang/openseek/agent_tool/shell",
   "moonbitlang/async",
   "moonbitlang/async/fs",
