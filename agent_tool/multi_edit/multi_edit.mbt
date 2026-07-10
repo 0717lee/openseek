@@ -596,7 +596,7 @@ fn error_count_label(after : @auto_check.CheckErrors) -> String {
 fn check_contiguity(edits : Array[ResolvedEdit]) -> String? {
   // Set of paths whose contiguous block has already ended, so the membership
   // test stays O(1) even for a large batch touching many files.
-  let ended : Map[String, Unit] = {}
+  let ended : Map[String, Unit] = Map([])
   let mut current : String? = None
   for edit in edits {
     let same = current is Some(path) && path == edit.path

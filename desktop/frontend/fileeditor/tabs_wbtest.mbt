@@ -407,7 +407,7 @@ test "a deleted tab whose file reappears reloads on the next stats" {
 ///|
 test "FsChanged re-lists the root and expanded, already-listed directories" {
   let emit = test_emit()
-  let children : Map[@pathx.Relative, Array[FileEntry]] = {}
+  let children : Map[@pathx.Relative, Array[FileEntry]] = Map([])
   children[Relative("")] = []
   children[Relative("src")] = []
   let state = {

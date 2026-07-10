@@ -415,7 +415,7 @@ pub async fn run_engine_pump(
   guard manager.pump is Stopped else {
     raise EngineError("engine host is already connected")
   }
-  let sessions : Map[String, SessionSlot] = {}
+  let sessions : Map[String, SessionSlot] = Map([])
   fn reset() -> Unit {
     manager.pump = Stopped
   }

@@ -56,7 +56,7 @@ test "finish ignores extra fields on the payload" {
 
 ///|
 test "finish returns empty Finish when answer is missing" {
-  assert_finish({}, "")
+  assert_finish(Json::object(Map([])), "")
 }
 
 ///|

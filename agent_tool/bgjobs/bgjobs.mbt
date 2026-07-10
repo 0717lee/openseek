@@ -177,7 +177,7 @@ pub fn[X] BgJobRuntime::new(
     spill_dir,
     hard_timeout_ms,
     on_job_exit,
-    jobs: {},
+    jobs: Map([]),
     next_index: 1,
     fg_index: 1,
   }
