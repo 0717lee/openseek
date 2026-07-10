@@ -69,7 +69,7 @@ pub async fn apply_login_shell_env(
     ["-i", "-l", "-c", command]
   }
   log.info() <? { "message": "shell env probe", "shell": shell }
-  let probe_env : Map[String, String] = {}
+  let probe_env : Map[String, String] = Map([])
   probe_env[ResolvingGuardVar] = "1"
   let result = @async.with_timeout_opt(ProbeTimeoutMs, () => {
     @process.collect_stdout(shell, args, extra_env=probe_env)
@@ -121,7 +121,7 @@ fn parse_probe_output(text : String, mark : String) -> Map[String, String]? {
   guard text.rev_find(mark) is Some(last) && last >= start else { return None }
   let json = @json.parse(text[start:last]) catch { _ => return None }
   guard json is Object(entries) else { return None }
-  let env : Map[String, String] = {}
+  let env : Map[String, String] = Map([])
   for key, value in entries {
     if value is String(value) {
       env[key] = value

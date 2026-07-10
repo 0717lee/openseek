@@ -64,7 +64,7 @@ priv struct FileFingerprint {
 /// treat a missing `root/sessions` directory as an empty store where that makes
 /// sense.
 pub fn SessionStore::SessionStore(root : String) -> SessionStore {
-  { root, marks: {} }
+  { root, marks: Map([]) }
 }
 
 ///|

@@ -482,7 +482,7 @@ async test "read reports directories with an actionable hint" {
 
 ///|
 async test "read rejects missing path" {
-  let result = execute({})
+  let result = execute(Json::object(Map([])))
   guard result is Respond(output) else { fail("expected Respond") }
   assert_true(output.content.contains("error: read requires"))
   assert_true(output.content.contains("arguments.path"))

@@ -154,7 +154,7 @@ test "valid_session_id mirrors the store's id rules" {
 ///|
 test "explicit --session-root drops the default cwd scan" {
   // Default invocation keeps the `.` scan so nearby stores are discovered.
-  let default_run = cli_command().parse(argv=[], env={})
+  let default_run = cli_command().parse(argv=[], env=Map([]))
   @debug.debug_inspect(
     effective_search_dirs(default_run),
     content=(
@@ -164,7 +164,7 @@ test "explicit --session-root drops the default cwd scan" {
   // An explicit root means "serve this", not "this plus wherever I'm standing".
   let flag_root = cli_command().parse(
     argv=["--session-root", "/srv/app/.openseek"],
-    env={},
+    env=Map([]),
   )
   @debug.debug_inspect(effective_search_dirs(flag_root), content="[]")
   // The env var counts as explicit too.
@@ -175,7 +175,7 @@ test "explicit --session-root drops the default cwd scan" {
   // An explicit --search-dir always wins: both flags means root plus scans.
   let both = cli_command().parse(
     argv=["--session-root", "/srv/app/.openseek", "--search-dir", "/srv/lib"],
-    env={},
+    env=Map([]),
   )
   @debug.debug_inspect(
     effective_search_dirs(both),

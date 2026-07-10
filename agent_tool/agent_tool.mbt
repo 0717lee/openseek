@@ -206,7 +206,7 @@ pub struct Tools {
 /// since the model dispatches by name and a silent override would mask one
 /// of the tools.
 pub fn Tools::Tools(definitions : Array[AgentToolDefinition]) -> Tools raise {
-  let by_name : Map[String, AgentToolDefinition] = {}
+  let by_name : Map[String, AgentToolDefinition] = Map([])
   for definition in definitions {
     if by_name.contains(definition.name) {
       fail("duplicate tool name: \{definition.name}")
@@ -420,7 +420,10 @@ test "Tools::function_tools preserves description and schema" {
     {
       name: "echo",
       description: "Echo what comes in.",
-      schema: JsonSchema({ "type": "object", "properties": {} }),
+      schema: JsonSchema({
+        "type": "object",
+        "properties": Json::object(Map([])),
+      }),
       execute: Sync(_args => ToolAction::respond("ok")),
       control: false,
     },

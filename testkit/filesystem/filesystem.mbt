@@ -29,7 +29,7 @@ pub fn FileSystem::from_json(json : Json) -> FileSystem raise {
 pub fn FileSystem::from_pairs(
   files : Array[(String, String)],
 ) -> FileSystem raise {
-  let object : Map[String, Json] = {}
+  let object : Map[String, Json] = Map([])
   for file in files {
     let (path, content) = file
     validate_relative_path(path)

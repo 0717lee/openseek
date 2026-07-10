@@ -35,7 +35,7 @@ test "decode defaults optional limits" {
 
 ///|
 test "decode rejects missing path" {
-  try @decode.decode({}) catch {
+  try @decode.decode(Json::object(Map([]))) catch {
     error => assert_true("\{error}".contains("arguments.path"))
   } noraise {
     _ => fail("missing path decoded")

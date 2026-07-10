@@ -272,7 +272,7 @@ import {
 }
 
 async fn main {
-  let seen = {}
+  let seen = Map([])
   while @stdio.stdin.read_until("\n") is Some(line) {
     try @json.parse(line.trim()) catch {
       _ => ()
@@ -1038,7 +1038,7 @@ test "multi-line string literals" {
 test "map literals and common operations" {
   // Map literal syntax
   let map : Map[String, Int] = { "a": 1, "b": 2, "c": 3 }
-  let empty : Map[String, Int] = {} // Empty map, preferred
+  let empty : Map[String, Int] = Map([]) // Empty map, preferred
   let also_empty : Map[String, Int] = Map([])
   // From array of pairs
   let from_pairs : Map[String, Int] = Map::from_array([("x", 1), ("y", 2)])

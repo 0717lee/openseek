@@ -71,7 +71,7 @@ fn assert_decode_error(arguments : Json, expected : String) -> Unit raise {
 
 ///|
 test "decode rejects missing steps" {
-  assert_decode_error({}, "arguments.steps to be an array")
+  assert_decode_error(Json::object(Map([])), "arguments.steps to be an array")
 }
 
 ///|

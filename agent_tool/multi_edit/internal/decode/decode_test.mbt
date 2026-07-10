@@ -54,7 +54,7 @@ test "decode_args accepts inline edits and an edits_file together" {
 
 ///|
 test "decode_args allows absent or empty edits (combined-empty is the tool's check)" {
-  let nothing = @decode.decode_args({})
+  let nothing = @decode.decode_args(Json::object(Map([])))
   assert_eq(nothing.inline.length(), 0)
   assert_true(nothing.edits_file is None)
   let empty_array = @decode.decode_args({ "edits": [] })

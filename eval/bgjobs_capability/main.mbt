@@ -173,7 +173,7 @@ async fn[G] Engine::spawn(group : @async.TaskGroup[G]) -> Engine {
   let (reader, child_stdout) = @process.read_from_process()
   let (stderr_reader, child_stderr) = @process.read_from_process()
   let parent = @env.get_env_vars()
-  let child_env : Map[String, String] = {}
+  let child_env : Map[String, String] = Map([])
   for name in ["PATH", "HOME", "TMPDIR", "DEEPSEEK"] {
     if parent.get(name) is Some(value) {
       child_env[name] = value

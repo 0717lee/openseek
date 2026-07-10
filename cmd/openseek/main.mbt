@@ -369,7 +369,7 @@ test "root command rejects an unknown subcommand" {
   // argparse owns this now (no hand-rolled dispatch): a bare non-subcommand word
   // is refused rather than silently opening the UI as a free-form prompt.
   let outcome = try {
-    root_command().parse(argv=["serv"], env={}) |> ignore
+    root_command().parse(argv=["serv"], env=Map([])) |> ignore
     "parsed"
   } catch {
     e => "\{e}"
@@ -1152,13 +1152,16 @@ test "cli uses KIMI only for Kimi models" {
 ///|
 test "explicit --concurrency selects fleet mode even at 1" {
   // Any explicit --concurrency copies --dir; 1 is not an in-place special case.
-  let explicit_one = run_matches(argv=["--concurrency", "1", "task"], env={})
+  let explicit_one = run_matches(
+    argv=["--concurrency", "1", "task"],
+    env=Map([]),
+  )
   assert_true(fleet_mode(explicit_one, 1))
   // The env var counts as explicit too.
   let via_env = run_matches(argv=["task"], env={ "OPENSEEK_CONCURRENCY": "1" })
   assert_true(fleet_mode(via_env, 1))
   // Only the flagless default runs in place.
-  let default_run = run_matches(argv=["task"], env={})
+  let default_run = run_matches(argv=["task"], env=Map([]))
   assert_false(fleet_mode(default_run, 1))
   // N >= 2 is fleet mode regardless of how it was set.
   assert_true(fleet_mode(default_run, 2))
@@ -1166,7 +1169,7 @@ test "explicit --concurrency selects fleet mode even at 1" {
 
 ///|
 test "cli rejects unknown options before task text" {
-  let _ = run_matches(argv=["--xxy", "he"], env={}) catch {
+  let _ = run_matches(argv=["--xxy", "he"], env=Map([])) catch {
     error => {
       assert_true("\{error}".contains("unexpected argument '--xxy' found"))
       return
@@ -1177,7 +1180,7 @@ test "cli rejects unknown options before task text" {
 
 ///|
 test "cli accepts hyphen-leading task text after option delimiter" {
-  let parsed = run_matches(argv=["--", "--xxy", "he"], env={})
+  let parsed = run_matches(argv=["--", "--xxy", "he"], env=Map([]))
   assert_eq(task_text(parsed), "--xxy he")
 }
 
@@ -1185,7 +1188,7 @@ test "cli accepts hyphen-leading task text after option delimiter" {
 test "sessions list needs no api key or task" {
   // The `sessions` subcommands do not declare api-key/task at all, so listing
   // works with no DeepSeek setup.
-  let parsed = sessions_leaf_matches(sub="list", argv=[], env={})
+  let parsed = sessions_leaf_matches(sub="list", argv=[], env=Map([]))
   assert_eq(@cli.value(parsed, "format"), "text")
   assert_eq(@cli.value(parsed, "session-root"), ".openseek")
 }
@@ -1286,7 +1289,11 @@ test "session root resolves relative to workspace root" {
 
 ///|
 async test "session commands reject empty session root" {
-  let parsed = sessions_leaf_matches(sub="list", argv=["--session-root", ""], env={})
+  let parsed = sessions_leaf_matches(
+    sub="list",
+    argv=["--session-root", ""],
+    env=Map([]),
+  )
   let _ = sessions_list(parsed) catch {
     error => {
       assert_true("\{error}".contains("--session-root"))
@@ -1298,7 +1305,7 @@ async test "session commands reject empty session root" {
 
 ///|
 test "agent runs require api key" {
-  let parsed = run_matches(argv=["write", "MoonBit"], env={})
+  let parsed = run_matches(argv=["write", "MoonBit"], env=Map([]))
   let _ = @agentcli.api_key(parsed, Deepseek(V4Pro)) catch {
     error => {
       assert_true("\{error}".contains("DEEPSEEK"))
@@ -1633,7 +1640,7 @@ async test "session list command does not require deepseek setup" {
     let parsed = sessions_leaf_matches(
       sub="list",
       argv=["--session-root", root],
-      env={},
+      env=Map([]),
     )
     // Prints the listing and succeeds with no DeepSeek setup.
     sessions_list(parsed)
@@ -1642,15 +1649,19 @@ async test "session list command does not require deepseek setup" {
 
 ///|
 test "session list format defaults to text and rejects unknown values" {
-  let default_format = sessions_leaf_matches(sub="list", argv=[], env={})
+  let default_format = sessions_leaf_matches(sub="list", argv=[], env=Map([]))
   assert_true(session_list_format(default_format) is Text)
   let json_format = sessions_leaf_matches(
     sub="list",
     argv=["--format", "json"],
-    env={},
+    env=Map([]),
   )
   assert_true(session_list_format(json_format) is Json)
-  let bogus = sessions_leaf_matches(sub="list", argv=["--format", "yaml"], env={})
+  let bogus = sessions_leaf_matches(
+    sub="list",
+    argv=["--format", "yaml"],
+    env=Map([]),
+  )
   let _ = session_list_format(bogus) catch {
     error => {
       assert_true("\{error}".contains("--format must be text or json"))
@@ -1739,7 +1750,7 @@ async test "session compact command appends summary without api key" {
         "cli-test", "--session-root", root, "--file", summary_path, "--from", "1",
         "--to", "2",
       ],
-      env={},
+      env=Map([]),
     )
     sessions_compact(parsed)
     let loaded = store.load(SessionId("cli-test"))
@@ -1774,7 +1785,7 @@ async test "session compact file resolves relative to workspace root" {
         "cli-test", "--dir", workspace, "--file", "summary.txt", "--from", "1", "--to",
         "2",
       ],
-      env={},
+      env=Map([]),
     )
     sessions_compact(parsed)
     let loaded = store.load(SessionId("cli-test"))
@@ -1790,7 +1801,7 @@ async test "session compaction rejects missing summary file" {
   let parsed = sessions_leaf_matches(
     sub="compact",
     argv=["cli-test", "--from", "1", "--to", "2"],
-    env={},
+    env=Map([]),
   )
   let _ = sessions_compact(parsed) catch {
     error => {
