@@ -156,13 +156,15 @@ async fn AgentLoop::checkpoint_at_ceiling(
     to_sequence~,
   )
   let compacted = self.append(session, item)
-  // The checkpoint's fit postcondition, as telemetry: the compacted
-  // projection is what seeds every following request, so its measured size
-  // belongs next to the checkpoint that produced it. The pressure warning
-  // uses the loop's conservative 1 char >= 1 token accounting — a
-  // projection this size could not fit a next request even under the
-  // charitable reading, meaning the summary did not actually relieve the
-  // ceiling it was generated for.
+  // Checkpoint output telemetry: the compacted projection measured at
+  // checkpoint time. The surrounding shapes append suffixes afterwards
+  // (late steers, kept answers, goal-check notices), so this is a LOWER
+  // bound on the next request's seed — which keeps the warning's trigger
+  // direction sound: a bound the suffixes only grow. The char proxy
+  // itself overestimates tokens (a mostly-ASCII token spans several
+  // chars), so crossing the window is NOT proven overflow — it means the
+  // conservative accounting can no longer prove the next request fits,
+  // and the event name says exactly that.
   let projection_chars = projected_chars(compacted)
   @xlog.info() <?
     {
@@ -172,14 +174,14 @@ async fn AgentLoop::checkpoint_at_ceiling(
       "summary": summary.content,
       "usage": summary.usage,
       "duration_ms": summary.duration_ms,
-      "post_projection_chars": projection_chars,
+      "compacted_projection_chars": projection_chars,
     }
   let window = self.client.model.context_window().to_int64()
   if projection_chars >= window {
     @xlog.warn() <?
       {
-        "event": "auto_compaction_still_pressured",
-        "post_projection_chars": projection_chars,
+        "event": "auto_compaction_fit_unproven",
+        "compacted_projection_chars": projection_chars,
         "context_window": window,
       }
   }
@@ -188,9 +190,10 @@ async fn AgentLoop::checkpoint_at_ceiling(
 
 ///|
 /// Every model-visible character of the session's projection: content,
-/// reasoning, and tool-call names and arguments. The conservative proxy
-/// (1 char >= 1 token for mostly-ASCII histories) for what the next
-/// request resends.
+/// reasoning, and tool-call names and arguments. A char proxy for what
+/// the next request resends: tokens never exceed chars for mostly-ASCII
+/// histories, so a projection whose chars fit provably fits, while one
+/// whose chars do not fit is merely unproven.
 fn projected_chars(session : @agent_session.Session) -> Int64 {
   let mut total : Int64 = 0
   for message in session.chat_messages() {

@@ -100,7 +100,16 @@ pub fn encode_chat_request(
         ),
         ("stream", Json::boolean(stream)),
         ..if max_tokens is Some(limit) {
-          [("max_tokens", Json::number(limit.to_double()))]
+          match model {
+            // Kimi cannot honor `thinking=No`, and its legacy `max_tokens`
+            // budget is shared with reasoning_content — reasoning could
+            // spend the whole cap and hand back empty visible content.
+            // `max_completion_tokens` caps the completion without starving
+            // it (subal review).
+            Kimi(_) =>
+              [("max_completion_tokens", Json::number(limit.to_double()))]
+            Deepseek(_) => [("max_tokens", Json::number(limit.to_double()))]
+          }
         },
         ..if response_format is Some(format) {
           [("response_format", ({ "type": format.to_string() } : Json))]

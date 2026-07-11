@@ -309,3 +309,23 @@ test "max_tokens caps the completion only when passed" {
   ]
   assert_false(uncapped.stringify().contains("max_tokens"))
 }
+
+///|
+/// Kimi's legacy `max_tokens` budget is shared with reasoning_content (and
+/// Kimi ignores `thinking=No`), so a cap there can starve the visible
+/// completion to empty; the cap must go out as `max_completion_tokens`.
+test "kimi caps encode as max_completion_tokens" {
+  let capped = @deepseek.encode_chat_request(
+    model=Kimi(K27Code),
+    max_tokens=8192,
+  ) <| [
+    ChatMessage(User, content="ping"),
+  ]
+  json_inspect(capped, content={
+    "model": "kimi-k2.7-code",
+    "messages": [{ "role": "user", "content": "ping" }],
+    "stream": false,
+    "max_completion_tokens": 8192,
+  })
+  assert_false(capped.stringify().contains("\"max_tokens\""))
+}
