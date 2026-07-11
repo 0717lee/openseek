@@ -471,10 +471,15 @@ extern "js" fn restore_scroll_to_hash_seq() -> Unit =
 extern "js" fn install_position_tracker() -> Unit =
   #|() => {
   #|  if (typeof document === 'undefined') return;
-  #|  const anchors = () => Array.from(document.querySelectorAll('[id^="seq-"]'));
+  #|  // Hidden cards (errors-only filter, collapsed turns) report zeroed
+  #|  // rects, which would let the scan pick an anchor no scroll can reveal —
+  #|  // only visible anchors count.
+  #|  const visible = (el) => el && el.getClientRects().length > 0;
+  #|  const anchors = () =>
+  #|    Array.from(document.querySelectorAll('[id^="seq-"]')).filter(visible);
   #|  window.__openseekNearestSeq = (want) => {
   #|    const exact = document.getElementById('seq-' + want);
-  #|    if (exact) return exact;
+  #|    if (visible(exact)) return exact;
   #|    const all = anchors();
   #|    return all.find((el) => parseInt(el.id.slice(4), 10) >= want) || all[all.length - 1] || null;
   #|  };
@@ -494,10 +499,13 @@ extern "js" fn install_position_tracker() -> Unit =
   #|      ticking = false;
   #|      const all = anchors();
   #|      if (!all.length) return;
-  #|      // The current card: the last anchor at or above the sticky toolbar.
+  #|      // The current card: the last anchor at or above the reading line.
+  #|      // The cutoff must sit BELOW the anchors' scroll-margin-top (105px in
+  #|      // the stylesheet): a jump parks its target exactly at the margin,
+  #|      // and a tighter cutoff would record the preceding card instead.
   #|      let best = null;
   #|      for (const el of all) {
-  #|        if (el.getBoundingClientRect().top <= 100) best = el;
+  #|        if (el.getBoundingClientRect().top <= 110) best = el;
   #|        else break;
   #|      }
   #|      const seq = (best || all[0]).id.slice(4);

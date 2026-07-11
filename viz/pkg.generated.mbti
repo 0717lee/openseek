@@ -19,6 +19,8 @@ pub fn rendered_error_count(@agent_session.Session, ViewMode) -> Int
 
 pub fn session_from_parse(@log.ParsedLog, id~ : String, system_prompt~ : String) -> @agent_session.Session
 
+pub fn step_scrubber(@agent_session.Session) -> @html.Html
+
 // Errors
 
 // Types and methods
@@ -30,3 +32,4 @@ pub(all) enum ViewMode {
 // Type aliases
 
 // Traits
+
