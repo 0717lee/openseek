@@ -2,29 +2,26 @@
 test "parse_load lifts the system prompt from the header line" {
   let text =
     #|{"found":true,"events":"{\"version\":1,\"id\":\"demo\",\"system_prompt\":\"SYS\"}\n{\"sequence\":1,\"ts\":0,\"item\":{\"kind\":\"user\",\"payload\":{\"content\":\"hi\"}}}\n","events_bytes":77}
-  match parse_load(text) {
-    Loaded(parsed, system_prompt, header_present, log_bytes) => {
-      inspect(parsed.events.length(), content="1")
-      inspect(system_prompt, content="SYS")
-      inspect(header_present, content="true")
-      inspect(log_bytes, content="77")
-    }
-    _ => fail("expected Loaded")
+  guard parse_load(text)
+    is Loaded(parsed, system_prompt, header_present, log_bytes) else {
+    fail("expected Loaded")
   }
+  inspect(parsed.events.length(), content="1")
+  inspect(system_prompt, content="SYS")
+  inspect(header_present, content="true")
+  inspect(log_bytes, content="77")
 }
 
 ///|
 test "parse_load treats a header-less file as events-only" {
   let text =
     #|{"found":true,"events":""}
-  match parse_load(text) {
-    Loaded(_, system_prompt, header_present, log_bytes) => {
-      inspect(system_prompt, content="")
-      inspect(header_present, content="false")
-      inspect(log_bytes, content="0")
-    }
-    _ => fail("expected Loaded")
+  guard parse_load(text) is Loaded(_, system_prompt, header_present, log_bytes) else {
+    fail("expected Loaded")
   }
+  inspect(system_prompt, content="")
+  inspect(header_present, content="false")
+  inspect(log_bytes, content="0")
 }
 
 ///|
@@ -43,15 +40,13 @@ fn parsed_log(session : @agent_session.Session) -> @session_log.ParsedLog {
 test "session metadata counts steps and total runtime" {
   let text =
     #|{"found":true,"events":"{\"sequence\":1,\"ts\":100000,\"item\":{\"kind\":\"user\",\"payload\":{\"content\":\"hi\"}}}\n{\"sequence\":2,\"ts\":101500,\"item\":{\"kind\":\"assistant\",\"payload\":{\"content\":\"\",\"tool_calls\":[]}}}\n{\"sequence\":3,\"ts\":170300,\"item\":{\"kind\":\"terminal\",\"payload\":{\"kind\":\"finished\",\"message\":\"done\"}}}\n","events_bytes":307}
-  match parse_load(text) {
-    Loaded(parsed, _, _, log_bytes) => {
-      inspect(format_log_size(log_bytes), content="307 B")
-      inspect(agent_step_count(parsed), content="1")
-      inspect(runtime_label(parsed), content="70.3s")
-      inspect(end_time_label(parsed), content="1970-01-01 00:02 UTC")
-    }
-    _ => fail("expected Loaded")
+  guard parse_load(text) is Loaded(parsed, _, _, log_bytes) else {
+    fail("expected Loaded")
   }
+  inspect(format_log_size(log_bytes), content="307 B")
+  inspect(agent_step_count(parsed), content="1")
+  inspect(runtime_label(parsed), content="70.3s")
+  inspect(end_time_label(parsed), content="1970-01-01 00:02 UTC")
 }
 
 ///|
@@ -142,7 +137,7 @@ test "dropped display id prefers the header identity over the file name" {
 
 ///|
 test "stale dropped-file reads are discarded" {
-  let emit : @cmd.Emit[Msg] = Emit(_ => @cmd.none)
+  let emit = stub_emit()
   let model = { ..init_model(), drop_ticket: 2 }
   // A read issued before the user moved on carries an old ticket: ignored.
   let (_, unchanged) = update(
@@ -162,7 +157,7 @@ test "stale dropped-file reads are discarded" {
 
 ///|
 test "a late session list does not clobber the dropped-file status" {
-  let emit : @cmd.Emit[Msg] = Emit(_ => @cmd.none)
+  let emit = stub_emit()
   let dropped = apply_dropped_file(
     init_model(),
     "run.jsonl",
@@ -183,7 +178,7 @@ test "a late session list does not clobber the dropped-file status" {
 
 ///|
 test "selecting a session invalidates an in-flight dropped-file read" {
-  let emit : @cmd.Emit[Msg] = Emit(_ => @cmd.none)
+  let emit = stub_emit()
   let model = { ..init_model(), drop_ticket: 5 }
   let (_, selected) = update(emit, Select("0|remote"), model)
   inspect(selected.drop_ticket, content="6")
@@ -270,6 +265,17 @@ fn marker_row(key : String, id : String, root_label : String) -> SessionRow {
 }
 
 ///|
+fn direct_row(key : String, id : String, root_label : String) -> SessionRow {
+  { key, id, root_label, last_active: None, is_marker: false, first_prompt: "" }
+}
+
+///|
+/// A no-op `Emit` for `update` tests that ignore the emitted commands.
+fn stub_emit() -> @cmd.Emit[Msg] {
+  Emit(_ => @cmd.none)
+}
+
+///|
 test "session grouping derives container, row label, and heading" {
   // A nested run workspace (marker store): grouped by container, labelled by
   // workspace name.
@@ -321,22 +327,8 @@ test "session grouping derives container, row label, and heading" {
 ///|
 test "sidebar_groups keeps unrelated direct stores separate" {
   let rows = [
-    {
-      key: "0|a",
-      id: "a",
-      root_label: "/srv/store-a",
-      last_active: None,
-      is_marker: false,
-      first_prompt: "",
-    },
-    {
-      key: "1|b",
-      id: "b",
-      root_label: "/srv/store-b",
-      last_active: None,
-      is_marker: false,
-      first_prompt: "",
-    },
+    direct_row("0|a", "a", "/srv/store-a"),
+    direct_row("1|b", "b", "/srv/store-b"),
   ]
   @debug.debug_inspect(
     sidebar_groups(rows),
@@ -392,7 +384,7 @@ test "standalone exports default raw while the live viewer defaults model" {
 /// whether or not it matches, so a stale key cannot re-fire on refreshes of
 /// the list.
 test "the hash session key restores the selection on the first listing" {
-  let emit : @cmd.Emit[Msg] = Emit(_ => @cmd.none)
+  let emit = stub_emit()
   let listing =
     #|[{"key":"k1","id":"s1"},{"key":"k2","id":"s2"}]
   let pending = { ..init_model(), pending_restore_key: Some("k2") }
@@ -432,14 +424,7 @@ test "the hash view mode wins over the defaults" {
 /// auto-opens; a live server list, several sessions, an existing selection,
 /// or a dropped file all keep the explicit click.
 test "single-session standalone exports auto-open their session" {
-  let row : SessionRow = {
-    key: "k1",
-    id: "s1",
-    root_label: "",
-    last_active: None,
-    is_marker: false,
-    first_prompt: "",
-  }
+  let row = direct_row("k1", "s1", "")
   let other = { ..row, key: "k2", id: "s2" }
   assert_true(should_auto_open(true, [row], selected=None, dropped=None))
   assert_false(should_auto_open(false, [row], selected=None, dropped=None))

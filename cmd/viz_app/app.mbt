@@ -802,12 +802,7 @@ fn session_label(model : Model, key : String) -> String {
 
 ///|
 fn session_row(model : Model, key : String) -> SessionRow? {
-  for row in model.sessions {
-    if row.key == key {
-      return Some(row)
-    }
-  }
-  None
+  model.sessions.iter().find_first(row => row.key == key)
 }
 
 ///|
@@ -834,12 +829,20 @@ fn view(emit : @cmd.Emit[Msg], model : Model) -> @html.Html {
 }
 
 ///|
-fn app_class(model : Model) -> String {
-  if model.sidebar_visible {
-    "app"
+/// A base class with `modifier` appended when `on` — the conditional-class
+/// idiom shared by the theme/mode/args buttons, the session rows, the app
+/// shell, and the error toggle.
+fn class_with(base : String, modifier : String, on : Bool) -> String {
+  if on {
+    "\{base} \{modifier}"
   } else {
-    "app sidebar-hidden"
+    base
   }
+}
+
+///|
+fn app_class(model : Model) -> String {
+  class_with("app", "sidebar-hidden", !model.sidebar_visible)
 }
 
 ///|
@@ -894,11 +897,7 @@ fn theme_button(
   theme : Theme,
   label : String,
 ) -> @html.Html {
-  let classes = if model.theme == theme {
-    "theme-button active"
-  } else {
-    "theme-button"
-  }
+  let classes = class_with("theme-button", "active", model.theme == theme)
   @html.button(class=classes, on_click=emit(SetTheme(theme))) <| label
 }
 
@@ -915,7 +914,7 @@ fn sidebar_list(emit : @cmd.Emit[Msg], model : Model) -> @html.Html {
     let collapsed = root_collapsed(model, group)
     let display = group_display(group)
     sections.push(
-      @html.div(class=session_root_class(collapsed)) <| [
+      @html.div(class=class_with("session-root", "collapsed", collapsed)) <| [
         @html.button(
           class="session-root-toggle",
           title=if collapsed {
@@ -942,15 +941,6 @@ fn sidebar_list(emit : @cmd.Emit[Msg], model : Model) -> @html.Html {
     )
   }
   @html.div(class="session-list") <| sections
-}
-
-///|
-fn session_root_class(collapsed : Bool) -> String {
-  if collapsed {
-    "session-root collapsed"
-  } else {
-    "session-root"
-  }
 }
 
 ///|
@@ -1107,7 +1097,7 @@ fn sidebar_row(
   } else {
     row.first_prompt
   }
-  let classes = if selected { "session-item selected" } else { "session-item" }
+  let classes = class_with("session-item", "selected", selected)
   @html.li(class=classes, on_click=emit(Select(row.key))) <| [
     @html.div(class="session-item-label") <| label,
     @html.div(class="session-item-meta") <| [
@@ -1258,11 +1248,11 @@ fn args_button(
   show_original : Bool,
   label : String,
 ) -> @html.Html {
-  let classes = if model.show_original_args == show_original {
-    "mode-button active"
-  } else {
-    "mode-button"
-  }
+  let classes = class_with(
+    "mode-button",
+    "active",
+    model.show_original_args == show_original,
+  )
   @html.button(class=classes, on_click=emit(SetArgsView(show_original))) <| label
 }
 
@@ -1273,11 +1263,7 @@ fn mode_button(
   mode : @viz.ViewMode,
   label : String,
 ) -> @html.Html {
-  let classes = if model.view_mode == mode {
-    "mode-button active"
-  } else {
-    "mode-button"
-  }
+  let classes = class_with("mode-button", "active", model.view_mode == mode)
   @html.button(class=classes, on_click=emit(SetMode(mode))) <| label
 }
 
@@ -1481,11 +1467,7 @@ fn error_bar(emit : @cmd.Emit[Msg], model : Model, count : Int) -> @html.Html {
   if count == 0 && !model.errors_only {
     return @html.nothing
   }
-  let toggle_class = if model.errors_only {
-    "error-toggle active"
-  } else {
-    "error-toggle"
-  }
+  let toggle_class = class_with("error-toggle", "active", model.errors_only)
   let children : Array[@html.Html] = []
   if count > 0 {
     children.push(
