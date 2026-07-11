@@ -142,8 +142,7 @@ fn format_diagnostic_line(fields : Map[String, Json]) -> String {
 ///|
 fn json_string_field(fields : Map[String, Json], name : String) -> String {
   match fields.get(name) {
-    Some(String(value)) => value
-    _ => ""
+    Some(String(value)) | _ with value = "" => value
   }
 }
 

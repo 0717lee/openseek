@@ -1323,13 +1323,11 @@ fn session_row_of(json : Json) -> SessionRow? {
     Some(String(value)) => value
     _ =>
       match fields.get("root") {
-        Some(String(value)) => value
-        _ => ""
+        Some(String(value)) | _ with value = "" => value
       }
   }
   let first_prompt = match fields.get("first_prompt") {
-    Some(String(value)) => value
-    _ => ""
+    Some(String(value)) | _ with value = "" => value
   }
   let last_active = match fields.get("last_active") {
     Some(Number(value, ..)) => Some(value.to_int64())
