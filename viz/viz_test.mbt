@@ -1144,6 +1144,80 @@ test "duplicate and empty plan-call ids render without delta chips" {
 }
 
 ///|
+/// Goal set/cleared/blocked markers — parsed by the shared
+/// `@agent_session.goal_marker` decoder — get dedicated cards with the goal
+/// text (or reason) as the payload instead of a generic runtime notice.
+test "goal markers render dedicated set, cleared, and blocked cards" {
+  let session = @agent_session.Session(SessionId("goal"), system_prompt="")
+    .append(
+      Runtime(
+        RuntimeNotice(
+          "\{@agent_session.GoalPrefix}\nShip the parser rewrite\nwith tests passing",
+        ),
+      ),
+    )
+    .append(
+      Runtime(
+        RuntimeNotice(
+          "\{@agent_session.GoalBlockedPrefix}\nupstream API is down",
+        ),
+      ),
+    )
+    .append(Runtime(RuntimeNotice(@agent_session.GoalClearedNotice)))
+  let html = render(@viz.render_session(session, RawLog))
+  assert_true(html.contains("class=\"card runtime goal-set\""))
+  assert_true(html.contains("Goal set"))
+  assert_true(html.contains("class=\"goal-text\""))
+  // Multi-line goal text survives inside the marked block.
+  assert_true(html.contains("Ship the parser rewrite\nwith tests passing"))
+  assert_true(html.contains("class=\"card runtime goal-blocked\""))
+  assert_true(html.contains("upstream API is down"))
+  assert_true(html.contains("class=\"card runtime goal-cleared\""))
+  assert_true(html.contains("standing goal cleared"))
+}
+
+///|
+/// Goal reminders and finish-time goal checks surface the goal text as the
+/// card's payload and fold the fixed assessment boilerplate away; a notice
+/// whose shape is not recognized keeps its verbatim text. The bodies mirror
+/// `goal_reminder_text` / `goal_check_text` in `agent`.
+test "goal reminders and checks show the goal and fold the boilerplate" {
+  let reminder =
+    $|\{@agent_session.GoalReminderPrefix}
+    $|The standing goal for this session:
+    $|Ship the parser rewrite with tests passing
+    $|Assess it briefly at this turn boundary:
+    $|- Fully met? Verify per the goal's own criteria first, then
+    $|  record that by calling the goal tool with status "met", then finish.
+    $|- Otherwise continue working toward it.
+  let check =
+    $|\{@agent_session.GoalCheckPrefix}
+    $|The standing goal for this session:
+    $|Ship the parser rewrite with tests passing
+    $|You attempted to finish. If the goal is fully met, record that by
+    $|calling the goal tool with status "met", then finish.
+  let odd =
+    $|\{@agent_session.GoalReminderPrefix}
+    $|some future body this build does not know
+  let session = @agent_session.Session(SessionId("remind"), system_prompt="")
+    .append(Runtime(RuntimeNotice(reminder)))
+    .append(Runtime(RuntimeNotice(check)))
+    .append(Runtime(RuntimeNotice(odd)))
+  let html = render(@viz.render_session(session, RawLog))
+  assert_true(html.contains("class=\"card runtime goal-reminder\""))
+  assert_true(html.contains("Goal reminder"))
+  assert_true(html.contains("class=\"card runtime goal-check\""))
+  assert_true(html.contains("Goal check"))
+  // Both recognized notices surface the goal in the marked block and keep
+  // the verbatim notice one fold away.
+  assert_eq(occurrences(html, "class=\"goal-text\""), 2)
+  assert_eq(occurrences(html, "class=\"goal-boilerplate\""), 2)
+  assert_true(html.contains("Ship the parser rewrite with tests passing"))
+  // The unrecognized shape falls back to verbatim text, no goal block.
+  assert_true(html.contains("some future body this build does not know"))
+}
+
+///|
 /// The reminder meter parses each line's leading status bracket, so a title
 /// that mentions "[completed]" is not miscounted, and an unknown status word
 /// renders literally instead of being disguised as a pending ring.

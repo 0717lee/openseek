@@ -335,16 +335,48 @@ fn event_card(
 }
 
 ///|
-/// Render a `RuntimeNotice` card. A plan-cadence reminder — recognized by the
-/// `@agent_session.PlanReminderPrefix` first line the agent loop stamps on it
-/// — gets its own label and, when it re-surfaces a recorded checklist
-/// ("Current plan:" followed by `N. [status] title` lines), the steps render
-/// as a status-classed list instead of raw text. Any other runtime notice
-/// keeps the generic card.
+/// Render a `RuntimeNotice` card. Notices the agent loop stamps with a known
+/// first line get dedicated cards: plan-cadence reminders render their
+/// checklist, and the goal-command family — set/cleared/blocked markers
+/// (recognized by the shared `@agent_session.goal_marker` decoder, so the
+/// view can never disagree with the engine about what a marker means) plus
+/// goal reminders and finish-time goal checks — surfaces the goal text
+/// itself instead of a wall of boilerplate. Any other runtime notice keeps
+/// the generic card.
 fn runtime_card(seq : Int, time : String, content : String) -> @html.Html {
-  if !content.has_prefix(@agent_session.PlanReminderPrefix) {
-    return card("runtime", "Runtime notice", seq, time~, [text_block(content)])
+  if content.has_prefix(@agent_session.PlanReminderPrefix) {
+    return plan_reminder_card(seq, time, content)
   }
+  match @agent_session.goal_marker(content) {
+    Some(GoalSet(text)) =>
+      return card("runtime goal-set", "Goal set", seq, time~, [
+        goal_text_block(text),
+      ])
+    Some(GoalCleared) =>
+      return card("runtime goal-cleared", "Goal cleared", seq, time~, [
+        @html.span(class="goal-cleared-note") <| "standing goal cleared",
+      ])
+    Some(GoalBlocked(reason)) =>
+      return card("runtime goal-blocked", "Goal blocked", seq, time~, [
+        text_block(reason),
+      ])
+    None => ()
+  }
+  if content.has_prefix(@agent_session.GoalReminderPrefix) {
+    return goal_notice_card(
+      "goal-reminder", "Goal reminder", seq, time, content,
+    )
+  }
+  if content.has_prefix(@agent_session.GoalCheckPrefix) {
+    return goal_notice_card("goal-check", "Goal check", seq, time, content)
+  }
+  card("runtime", "Runtime notice", seq, time~, [text_block(content)])
+}
+
+///|
+/// A plan-cadence reminder card: prose kept verbatim, the re-surfaced
+/// checklist (when present) as a progress meter plus status-classed rows.
+fn plan_reminder_card(seq : Int, time : String, content : String) -> @html.Html {
   let body : Array[@html.Html] = []
   match split_plan_checklist(content) {
     Some((prose, steps)) => {
@@ -364,6 +396,68 @@ fn runtime_card(seq : Int, time : String, content : String) -> @html.Html {
     None => body.push(text_block(content))
   }
   card("runtime plan-reminder", "Plan reminder", seq, time~, body)
+}
+
+///|
+/// A goal reminder / goal check card. The goal text is the only part that
+/// varies — the surrounding assessment instructions are identical on every
+/// card — so the goal renders prominently and the verbatim notice folds away
+/// beneath it. An unrecognized shape falls back to the plain text block so
+/// the card never drops content.
+fn goal_notice_card(
+  kind : String,
+  label : String,
+  seq : Int,
+  time : String,
+  content : String,
+) -> @html.Html {
+  let body : Array[@html.Html] = match split_goal_notice(content) {
+    Some(goal) =>
+      [
+        goal_text_block(goal),
+        @html.details(class="goal-boilerplate") <| [
+          @html.summary("full notice"),
+          text_block(content),
+        ],
+      ]
+    None => [text_block(content)]
+  }
+  card("runtime \{kind}", label, seq, time~, body)
+}
+
+///|
+/// The goal text inside a reminder/check notice: the lines between the
+/// "The standing goal for this session:" header and the first boilerplate
+/// line ("Assess it briefly…" for reminders, "You attempted to finish…" for
+/// checks — mirroring `goal_reminder_text` / `goal_check_text` in `agent`).
+/// `None` when the shape is not recognized.
+fn split_goal_notice(content : String) -> String? {
+  let lines = string_lines(content)
+  guard lines.length() >= 3 && lines[1] == "The standing goal for this session:" else {
+    return None
+  }
+  let goal : Array[String] = []
+  for line in lines[2:] {
+    if line.has_prefix("Assess it briefly") ||
+      line.has_prefix("You attempted to finish") {
+      if goal.is_empty() {
+        return None
+      }
+      return Some(goal.join("\n").trim().to_owned())
+    }
+    goal.push(line)
+  }
+  None
+}
+
+///|
+/// The standing goal, rendered as the card's payload: a marked block that
+/// stands out from boilerplate prose.
+fn goal_text_block(text : String) -> @html.Html {
+  @html.div(class="goal-text") <| [
+    @html.span(class="goal-icon", title="standing goal") <| "🎯",
+    @html.pre(class="goal-text-body") <| text,
+  ]
 }
 
 ///|
