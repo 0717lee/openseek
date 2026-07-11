@@ -228,13 +228,7 @@ fn turn_block(
 ///|
 /// Number of failed tool results in a turn, for the turn header's error badge.
 fn count_turn_tool_errors(turn : Array[@agent_session.SessionEvent]) -> Int {
-  for event in turn; count = 0 {
-    if event.item() is Tool(result) && result.is_error() {
-      continue count + 1
-    }
-  } nobreak {
-    count
-  }
+  turn.count_if(event => event.item() is Tool(result) && result.is_error())
 }
 
 ///|
@@ -663,9 +657,7 @@ fn plan_evolves(
   baseline : Array[@steps.PlanStep]?,
 ) -> Bool {
   guard baseline is Some(prev) && !prev.is_empty() else { return false }
-  let carried = steps.count_if(step => {
-    prev.iter().any(old => old.title == step.title)
-  })
+  let carried = steps.count_if(step => prev.any(old => old.title == step.title))
   let smaller = if steps.length() < prev.length() {
     steps.length()
   } else {
@@ -790,7 +782,7 @@ fn dropped_steps(
   baseline : Array[@steps.PlanStep]?,
 ) -> Array[@steps.PlanStep] {
   guard baseline is Some(prev) else { return [] }
-  prev.filter(old => !steps.iter().any(step => step.title == old.title))
+  prev.filter(old => !steps.any(step => step.title == old.title))
 }
 
 ///|
@@ -1833,23 +1825,18 @@ pub fn rendered_error_count(
 ) -> Int {
   match mode {
     RawLog =>
-      for event in session.events(); count = 0 {
-        if event.item() is Tool(result) && result.is_error() {
-          continue count + 1
-        }
-      } nobreak {
-        count
-      }
+      session
+      .events()
+      .iter()
+      .count_if(event => event.item() is Tool(result) && result.is_error())
     ModelView => {
       let tool_results = tool_results_by_id(session)
-      for message in session.chat_messages(); count = 0 {
-        if model_shown_result(message, tool_results) is Some(result) &&
-          result.is_error() {
-          continue count + 1
-        }
-      } nobreak {
-        count
-      }
+      session
+      .chat_messages()
+      .count_if(message => {
+        model_shown_result(message, tool_results) is Some(result) &&
+        result.is_error()
+      })
     }
   }
 }

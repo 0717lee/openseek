@@ -60,6 +60,51 @@ fn render(html : @html.Html) -> String {
 }
 
 ///|
+/// Raw-view HTML for a session holding a single tool call. The session and call
+/// ids never appear in these assertions, so they are fixed.
+fn render_tool_call(name : String, arguments : String) -> String {
+  let session = @agent_session.Session(SessionId("s"), system_prompt="").append(
+    Assistant(
+      AssistantMessage("", tool_calls=[ToolCall(id="c1", name~, arguments~)]),
+    ),
+  )
+  render(@viz.render_session(session, RawLog))
+}
+
+///|
+/// Raw-view HTML for two successive `plan` calls — a baseline plan followed by a
+/// revised one — the shape the plan-diff rendering (rewrite notes, delta chips)
+/// is exercised against.
+fn two_plan_calls_raw(before : String, after : String) -> String {
+  let session = @agent_session.Session(SessionId("plan2"), system_prompt="")
+    .append(
+      Assistant(
+        AssistantMessage("", tool_calls=[
+          ToolCall(id="p1", name="plan", arguments=before),
+        ]),
+      ),
+    )
+    .append(
+      Assistant(
+        AssistantMessage("", tool_calls=[
+          ToolCall(id="p2", name="plan", arguments=after),
+        ]),
+      ),
+    )
+  render(@viz.render_session(session, RawLog))
+}
+
+///|
+/// Compact away the sequence-2 event (a tool result in these fixtures) with a
+/// "covered" summary — the projection then heals the call with a synthetic
+/// result the model never saw.
+fn compact_second_event(
+  session : @agent_session.Session,
+) -> @agent_session.Session raise {
+  session.compact(content="covered", from_sequence=2, to_sequence=2)
+}
+
+///|
 /// A session whose tool result failed, plus a tool call with arguments and one
 /// without, to exercise the fold/flag rendering.
 fn error_tool_session() -> @agent_session.Session {
@@ -231,18 +276,9 @@ test "tool args render verbatim, keeping the raw JSON for debugging" {
   // must show it as real text (no JSON quoting/escaping), while the original
   // pretty-printed JSON stays in the DOM, hidden behind the `.show-original`
   // toggle, so the raw escaped form is still available for debugging.
-  let session = @agent_session.Session(SessionId("w"), system_prompt="").append(
-    Assistant(
-      AssistantMessage("", tool_calls=[
-        ToolCall(
-          id="w1",
-          name="write_file",
-          arguments="{\"path\":\"notes.txt\",\"content\":\"alpha\\nbeta\"}",
-        ),
-      ]),
-    ),
+  let html = render_tool_call(
+    "write_file", "{\"path\":\"notes.txt\",\"content\":\"alpha\\nbeta\"}",
   )
-  let html = render(@viz.render_session(session, RawLog))
   // Friendly form: a key/value row per field, the body shown verbatim with a real
   // newline — not the JSON-escaped `alpha\nbeta`.
   assert_true(html.contains("class=\"tool-call-args-rendered\""))
@@ -260,14 +296,7 @@ test "non-object tool args fall back to JSON in both forms" {
   // Arguments that are not a JSON object (here a bare array) have no key/value
   // fields, so the friendly view falls back to pretty JSON rather than inventing
   // a structure.
-  let session = @agent_session.Session(SessionId("arr"), system_prompt="").append(
-    Assistant(
-      AssistantMessage("", tool_calls=[
-        ToolCall(id="a1", name="batch", arguments="[1,2,3]"),
-      ]),
-    ),
-  )
-  let html = render(@viz.render_session(session, RawLog))
+  let html = render_tool_call("batch", "[1,2,3]")
   assert_true(html.contains("class=\"tool-call-args tool-call-args-rendered\""))
   assert_true(html.contains("tool-call-args-original"))
   assert_false(html.contains("arg-key"))
@@ -277,18 +306,9 @@ test "non-object tool args fall back to JSON in both forms" {
 test "a nested object argument recurses into indented key/value rows" {
   // A nested object must not collapse to one escaped JSON blob: it recurses
   // into the same key/value rows, indented, with string leaves shown verbatim.
-  let session = @agent_session.Session(SessionId("nest"), system_prompt="").append(
-    Assistant(
-      AssistantMessage("", tool_calls=[
-        ToolCall(
-          id="n1",
-          name="configure",
-          arguments="{\"name\":\"probe\",\"opts\":{\"retries\":3,\"label\":\"fast\"}}",
-        ),
-      ]),
-    ),
+  let html = render_tool_call(
+    "configure", "{\"name\":\"probe\",\"opts\":{\"retries\":3,\"label\":\"fast\"}}",
   )
-  let html = render(@viz.render_session(session, RawLog))
   assert_true(html.contains("class=\"arg-key\">name"))
   assert_true(html.contains("class=\"arg-key\">opts"))
   // The nested object recurses rather than dumping stringified JSON.
@@ -302,18 +322,9 @@ test "a nested object argument recurses into indented key/value rows" {
 test "an array-of-objects argument renders one item per element" {
   // Each array element renders as its own item, recursing into the element's
   // fields — the general shape `multi_edit`'s `edits` benefits from.
-  let session = @agent_session.Session(SessionId("arr2"), system_prompt="").append(
-    Assistant(
-      AssistantMessage("", tool_calls=[
-        ToolCall(
-          id="a2",
-          name="batch",
-          arguments="{\"steps\":[{\"op\":\"add\",\"n\":1},{\"op\":\"del\",\"n\":2}]}",
-        ),
-      ]),
-    ),
+  let html = render_tool_call(
+    "batch", "{\"steps\":[{\"op\":\"add\",\"n\":1},{\"op\":\"del\",\"n\":2}]}",
   )
-  let html = render(@viz.render_session(session, RawLog))
   assert_true(html.contains("class=\"arg-key\">steps"))
   assert_true(html.contains("class=\"arg-array\""))
   // Two elements → two items, each with its own recursed fields.
@@ -326,18 +337,9 @@ test "an array-of-objects argument renders one item per element" {
 test "edit args gain a synthesized generated_diff, keeping the originals" {
   // The original old_string/new_string rows are kept AND a generated_diff field
   // is added, rendered as a colored diff (- removed / + added).
-  let session = @agent_session.Session(SessionId("ed"), system_prompt="").append(
-    Assistant(
-      AssistantMessage("", tool_calls=[
-        ToolCall(
-          id="e1",
-          name="edit",
-          arguments="{\"path\":\"lib/parser.mbt\",\"old_string\":\"args.length()\",\"new_string\":\"args.len()\",\"start_line\":12}",
-        ),
-      ]),
-    ),
+  let html = render_tool_call(
+    "edit", "{\"path\":\"lib/parser.mbt\",\"old_string\":\"args.length()\",\"new_string\":\"args.len()\",\"start_line\":12}",
   )
-  let html = render(@viz.render_session(session, RawLog))
   // Originals kept.
   assert_true(html.contains("class=\"arg-key\">old_string"))
   assert_true(html.contains("class=\"arg-key\">new_string"))
@@ -351,18 +353,9 @@ test "edit args gain a synthesized generated_diff, keeping the originals" {
 
 ///|
 test "multi_edit gains a generated_diff per edit" {
-  let session = @agent_session.Session(SessionId("med"), system_prompt="").append(
-    Assistant(
-      AssistantMessage("", tool_calls=[
-        ToolCall(
-          id="m1",
-          name="multi_edit",
-          arguments="{\"edits\":[{\"file\":\"a.mbt\",\"old_string\":\"foo\",\"new_string\":\"bar\",\"start_line\":1},{\"file\":\"b.mbt\",\"old_string\":\"x\",\"new_string\":\"y\",\"start_line\":2}]}",
-        ),
-      ]),
-    ),
+  let html = render_tool_call(
+    "multi_edit", "{\"edits\":[{\"file\":\"a.mbt\",\"old_string\":\"foo\",\"new_string\":\"bar\",\"start_line\":1},{\"file\":\"b.mbt\",\"old_string\":\"x\",\"new_string\":\"y\",\"start_line\":2}]}",
   )
-  let html = render(@viz.render_session(session, RawLog))
   // One diff per edit.
   assert_eq(occurrences(html, "class=\"arg-key\">generated_diff"), 2)
   assert_true(html.contains("class=\"diff-del\">- foo"))
@@ -375,18 +368,9 @@ test "multi_edit gains a generated_diff per edit" {
 test "an insertion edit diffs as added-only lines" {
   // Empty old_string → the generated_diff is all `+` lines, shown verbatim
   // across real newlines, with no removed side.
-  let session = @agent_session.Session(SessionId("insd"), system_prompt="").append(
-    Assistant(
-      AssistantMessage("", tool_calls=[
-        ToolCall(
-          id="i1",
-          name="edit",
-          arguments="{\"path\":\"a.mbt\",\"old_string\":\"\",\"new_string\":\"let x = 1\\nlet y = 2\",\"start_line\":5}",
-        ),
-      ]),
-    ),
+  let html = render_tool_call(
+    "edit", "{\"path\":\"a.mbt\",\"old_string\":\"\",\"new_string\":\"let x = 1\\nlet y = 2\",\"start_line\":5}",
   )
-  let html = render(@viz.render_session(session, RawLog))
   assert_true(html.contains("class=\"diff-add\">+ let x = 1"))
   assert_true(html.contains("class=\"diff-add\">+ let y = 2"))
   assert_false(html.contains("class=\"diff-del\""))
@@ -499,11 +483,7 @@ test "model view does not flag a result the projection skipped" {
   // dangling call c1 with a synthetic error message, so the model never saw the
   // real "boom" result. The view must not attach that result's flag/name to the
   // synthetic message — it would misrepresent what the model was fed.
-  let compacted = error_tool_session().compact(
-    content="covered",
-    from_sequence=2,
-    to_sequence=2,
-  )
+  let compacted = compact_second_event(error_tool_session())
   let model = render(@viz.render_session(compacted, ModelView))
   assert_true(model.contains("previous agent process exited"))
   assert_false(model.contains("tool-flag"))
@@ -618,11 +598,7 @@ test "model view omits a brief whose result was compacted away" {
     )
   // Compact away only the result (seq 2): the model projection heals the call
   // with a synthetic result, so the model never saw this brief.
-  let compacted = session.compact(
-    content="covered",
-    from_sequence=2,
-    to_sequence=2,
-  )
+  let compacted = compact_second_event(session)
   // Raw shows the durable brief on the call; the model view must not.
   assert_true(
     render(@viz.render_session(compacted, RawLog)).contains(
@@ -655,11 +631,7 @@ test "rendered_error_count matches the failures each view draws" {
 
 ///|
 test "model error count excludes a compacted-away failure raw still shows" {
-  let compacted = error_tool_session().compact(
-    content="covered",
-    from_sequence=2,
-    to_sequence=2,
-  )
+  let compacted = compact_second_event(error_tool_session())
   // Raw still renders the durable errored result; the model view healed the
   // dangling call, so it has no error card to count.
   inspect(@viz.rendered_error_count(compacted, RawLog), content="1")
@@ -971,30 +943,10 @@ test "a plan rewrite chips what changed and keeps dropped steps visible" {
 /// "new"/"dropped" chips; reworded titles are indistinguishable from
 /// replacements, so the diff backs off entirely.
 test "a wholesale plan rewrite shows a note instead of per-step chips" {
-  let session = @agent_session.Session(SessionId("rewrite"), system_prompt="")
-    .append(
-      Assistant(
-        AssistantMessage("", tool_calls=[
-          ToolCall(
-            id="p1",
-            name="plan",
-            arguments="{\"steps\":[{\"title\":\"old step one\",\"status\":\"in_progress\"},{\"title\":\"old step two\",\"status\":\"pending\"}]}",
-          ),
-        ]),
-      ),
-    )
-    .append(
-      Assistant(
-        AssistantMessage("", tool_calls=[
-          ToolCall(
-            id="p2",
-            name="plan",
-            arguments="{\"steps\":[{\"title\":\"reworded step one\",\"status\":\"in_progress\"},{\"title\":\"reworded step two\",\"status\":\"pending\"}]}",
-          ),
-        ]),
-      ),
-    )
-  let html = render(@viz.render_session(session, RawLog))
+  let html = two_plan_calls_raw(
+    "{\"steps\":[{\"title\":\"old step one\",\"status\":\"in_progress\"},{\"title\":\"old step two\",\"status\":\"pending\"}]}",
+    "{\"steps\":[{\"title\":\"reworded step one\",\"status\":\"in_progress\"},{\"title\":\"reworded step two\",\"status\":\"pending\"}]}",
+  )
   assert_true(html.contains("plan-rewrite-note"))
   assert_false(html.contains("step-delta"))
   assert_false(html.contains("plan-step dropped"))
@@ -1008,22 +960,7 @@ test "a wholesale plan rewrite shows a note instead of per-step chips" {
 test "extending a plan keeps delta chips instead of a rewrite note" {
   let before = "{\"steps\":[{\"title\":\"step a\",\"status\":\"in_progress\"}]}"
   let after = "{\"steps\":[{\"title\":\"step a\",\"status\":\"completed\"},{\"title\":\"step b\",\"status\":\"in_progress\"},{\"title\":\"step c\",\"status\":\"pending\"}]}"
-  let session = @agent_session.Session(SessionId("extend"), system_prompt="")
-    .append(
-      Assistant(
-        AssistantMessage("", tool_calls=[
-          ToolCall(id="p1", name="plan", arguments=before),
-        ]),
-      ),
-    )
-    .append(
-      Assistant(
-        AssistantMessage("", tool_calls=[
-          ToolCall(id="p2", name="plan", arguments=after),
-        ]),
-      ),
-    )
-  let html = render(@viz.render_session(session, RawLog))
+  let html = two_plan_calls_raw(before, after)
   assert_false(html.contains("plan-rewrite-note"))
   assert_true(html.contains("step-delta-done"))
   assert_true(html.contains("step-delta-new"))
@@ -1036,22 +973,7 @@ test "extending a plan keeps delta chips instead of a rewrite note" {
 test "delta chips distinguish reopened and paused from started" {
   let before = "{\"steps\":[{\"title\":\"step a\",\"status\":\"completed\"},{\"title\":\"step b\",\"status\":\"in_progress\"}]}"
   let after = "{\"steps\":[{\"title\":\"step a\",\"status\":\"in_progress\"},{\"title\":\"step b\",\"status\":\"pending\"}]}"
-  let session = @agent_session.Session(SessionId("regress"), system_prompt="")
-    .append(
-      Assistant(
-        AssistantMessage("", tool_calls=[
-          ToolCall(id="p1", name="plan", arguments=before),
-        ]),
-      ),
-    )
-    .append(
-      Assistant(
-        AssistantMessage("", tool_calls=[
-          ToolCall(id="p2", name="plan", arguments=after),
-        ]),
-      ),
-    )
-  let html = render(@viz.render_session(session, RawLog))
+  let html = two_plan_calls_raw(before, after)
   assert_true(html.contains("step-delta-reopened"))
   assert_true(html.contains("step-delta-paused"))
   assert_false(html.contains("step-delta-started"))
@@ -1270,29 +1192,13 @@ test "reminder meter parses statuses and unknown statuses stay visible" {
 /// empty checklist, and malformed plan arguments keep the generic rendering —
 /// the viewer never guesses at a plan the tool would have rejected.
 test "cleared and malformed plans degrade gracefully" {
-  let cleared = @agent_session.Session(SessionId("clear"), system_prompt="").append(
-    Assistant(
-      AssistantMessage("", tool_calls=[
-        ToolCall(id="p1", name="plan", arguments="{\"steps\":[]}"),
-      ]),
-    ),
-  )
-  let cleared_html = render(@viz.render_session(cleared, RawLog))
+  let cleared_html = render_tool_call("plan", "{\"steps\":[]}")
   assert_true(cleared_html.contains("plan cleared"))
   assert_false(cleared_html.contains("plan-ribbon"))
   assert_false(cleared_html.contains("plan-progress"))
-  let malformed = @agent_session.Session(SessionId("bad"), system_prompt="").append(
-    Assistant(
-      AssistantMessage("", tool_calls=[
-        ToolCall(
-          id="p1",
-          name="plan",
-          arguments="{\"steps\":[{\"title\":\"x\",\"status\":\"doing\"}]}",
-        ),
-      ]),
-    ),
+  let malformed_html = render_tool_call(
+    "plan", "{\"steps\":[{\"title\":\"x\",\"status\":\"doing\"}]}",
   )
-  let malformed_html = render(@viz.render_session(malformed, RawLog))
   assert_false(malformed_html.contains("plan-args"))
   assert_true(malformed_html.contains("class=\"arg-key\""))
 }
