@@ -184,7 +184,7 @@ async test "edit inserts when old_string is empty" {
       "start_line": 2,
     })
     assert_false(output.is_error)
-    assert_true(output.content.contains("ok: inserted at line 2"))
+    assert_true(output.content.contains("ok: inserted line 2 in"))
     let updated = @fs.read_file(path).text()
     assert_eq(updated, "line1\ninserted\nline2\n")
   })
@@ -202,7 +202,64 @@ async test "edit can append at end of file via start_line past the last line" {
       "start_line": 99,
     })
     assert_false(output.is_error)
+    // The summary reports where the content actually landed (the requested
+    // line was clamped), so the model gets real coordinates for follow-ups.
+    assert_true(output.content.contains("ok: appended line 3 at end of file"))
     assert_eq(@fs.read_file(path).text(), "a\nb\nc\n")
+  })
+}
+
+///|
+async test "edit reports the inclusive line range of a multi-line insert" {
+  @vfs.with_tmpdir(dir => {
+    let path = "\{dir}/span.txt"
+    @fs.write_file(path, "one\ntwo\nthree\n", create_mode=CreateOrTruncate)
+    let output = run_edit({
+      "path": path,
+      "old_string": "",
+      "new_string": "x\ny\n",
+      "start_line": 2,
+    })
+    assert_false(output.is_error)
+    assert_true(output.content.contains("ok: inserted lines 2-3 in"))
+    assert_eq(@fs.read_file(path).text(), "one\nx\ny\ntwo\nthree\n")
+  })
+}
+
+///|
+async test "edit reports the inclusive line range of a multi-line append" {
+  @vfs.with_tmpdir(dir => {
+    let path = "\{dir}/span-append.txt"
+    @fs.write_file(path, "a\nb\n", create_mode=CreateOrTruncate)
+    let output = run_edit({
+      "path": path,
+      "old_string": "",
+      "new_string": "c\nd\n",
+      "start_line": 999999,
+    })
+    assert_false(output.is_error)
+    assert_true(
+      output.content.contains("ok: appended lines 3-4 at end of file"),
+    )
+    assert_eq(@fs.read_file(path).text(), "a\nb\nc\nd\n")
+  })
+}
+
+///|
+async test "edit append onto a file without a trailing newline shares the last line" {
+  @vfs.with_tmpdir(dir => {
+    let path = "\{dir}/glue.txt"
+    // "b" has no trailing newline, so appended text glues onto line 2.
+    @fs.write_file(path, "a\nb", create_mode=CreateOrTruncate)
+    let output = run_edit({
+      "path": path,
+      "old_string": "",
+      "new_string": "c\n",
+      "start_line": 999999,
+    })
+    assert_false(output.is_error)
+    assert_true(output.content.contains("ok: appended line 2 at end of file"))
+    assert_eq(@fs.read_file(path).text(), "a\nbc\n")
   })
 }
 

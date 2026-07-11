@@ -48,6 +48,12 @@ full diagnostics.
     fall on the same line (or in one tight span), combine them into a single edit
     whose `old_string` covers the whole span — adjacent edits collide and the
     batch is rejected.
+  - To add NEW top-level code (functions, tests, types) to an existing file,
+    append at end of file: `edit` with an empty `old_string` and any
+    `start_line` past the last line (e.g. 999999) — top-level order does not
+    matter in MoonBit, and an append cannot mismatch an anchor. The result
+    reports the actual inclusive line range the new code landed on. Insert
+    mid-file only when grouping related code.
   - `shell` for all Moon commands, including `moon check` for compiler
     feedback; pass the tool's `cwd` field, or use `moon -C dir check` instead
     of embedding repeated `cd ... &&` strings.

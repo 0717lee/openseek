@@ -3,8 +3,9 @@
 ///
 /// ## Arguments
 /// - `path` (string, required): filesystem path to edit.
-/// - `old_string` (string, required): exact text to replace. It must be
-///   non-empty.
+/// - `old_string` (string, required): exact text to replace. Empty selects
+///   insertion mode: `new_string` is inserted at the start of `start_line`,
+///   and a `start_line` past the last line appends at end of file.
 /// - `new_string` (string, required): replacement text. It must differ from
 ///   `old_string`.
 /// - `start_line` (integer, required): 1-based inclusive first line to search.
@@ -20,7 +21,10 @@
 ///
 /// ## Result
 /// - `Respond(ToolOutput("ok: replaced <n> occurrence(s) at line <line> in <path>"))`
-///   on success.
+///   on success. Insertions report the actual inclusive line range the new
+///   content occupies — `ok: inserted line(s) <range> in <path>`, or
+///   `ok: appended line(s) <range> at end of file in <path>` when the
+///   (possibly clamped) insertion point is end of file.
 /// - `Respond(ToolOutput("rejected: the edit would introduce ...", is_error=true))`
 ///   when the parse gate refused an edit whose result does not parse.
 /// - `Respond(ToolOutput("error editing <path>: ...", is_error=true))` for
@@ -32,7 +36,7 @@ pub fn definition(
 ) -> @agent_tool.AgentToolDefinition {
   AgentToolDefinition(
     name="edit",
-    description="Replace the first exact text span at or after arguments.start_line in arguments.path with arguments.new_string. Optional end_line restricts the search to a 1-based inclusive line range. Because start_line anchors the location, old_string can be a small exact span instead of a large context block. To INSERT new code instead of replacing, set old_string to the empty string: new_string is inserted at the start of start_line (use start_line = last line + 1 to append at end of file). An edit that would introduce lex/parse errors into a syntax-checkable file (.mbt, .mbt.md, moon.mod, moon.pkg) is rejected BEFORE writing and the parse errors are returned — see revert_on_parse_errors. For multiple compiler-feedback fixes in one file, use multi_edit with explicit line-anchored edits.",
+    description="Replace the first exact text span at or after arguments.start_line in arguments.path with arguments.new_string. Optional end_line restricts the search to a 1-based inclusive line range. Because start_line anchors the location, old_string can be a small exact span instead of a large context block. To INSERT new code instead of replacing, set old_string to the empty string: new_string is inserted at the start of start_line. To APPEND at end of file, pass any start_line past the last line (e.g. 999999) — no need to know the file's length; the result reports the actual inclusive line range the new content landed on. In MoonBit top-level order does not matter, so add new functions, tests, or types by appending at end of file — an append cannot mismatch an anchor; reserve mid-file insertion for grouping related code. An edit that would introduce lex/parse errors into a syntax-checkable file (.mbt, .mbt.md, moon.mod, moon.pkg) is rejected BEFORE writing and the parse errors are returned — see revert_on_parse_errors. For multiple compiler-feedback fixes in one file, use multi_edit with explicit line-anchored edits.",
     schema=JsonSchema({
       "type": "object",
       "properties": {
@@ -104,11 +108,38 @@ async fn edit_file(
   }
   if input.old_string == "" {
     // Insertion: insert new_string at the start of start_line (a zero-width
-    // edit); use start_line = last line + 1 to append at end of file.
+    // edit). Any start_line past the last line clamps to end of file, so a
+    // deliberately large value appends without knowing the file's length; the
+    // summary reports the actual inclusive line range the new content
+    // occupies — real coordinates the model can anchor follow-up edits on,
+    // not the (possibly clamped) requested line.
     let at = line_start_offset(content, input.start_line).clamp(
       min=0,
       max=content.length(),
     )
+    let first_line = line_number_at_offset(content, at)
+    let last_line = first_line + inserted_line_span(input.new_string) - 1
+    let span = if last_line > first_line {
+      "lines \{first_line}-\{last_line}"
+    } else {
+      "line \{first_line}"
+    }
+    let brief_span = if last_line > first_line {
+      "\{first_line}-\{last_line}"
+    } else {
+      "\{first_line}"
+    }
+    let (summary, ok_brief) = if at == content.length() {
+      (
+        "ok: appended \{span} at end of file in \{path}",
+        "edited \{@agent_tool.brief_basename(path)}:\{brief_span} (append)",
+      )
+    } else {
+      (
+        "ok: inserted \{span} in \{path}",
+        "edited \{@agent_tool.brief_basename(path)}:\{brief_span} (insert)",
+      )
+    }
     let new_content = "\{content.unsafe_substring(start=0, end=at)}\{input.new_string}\{content.unsafe_substring(start=at, end=content.length())}"
     return commit_edit(
       path,
@@ -116,8 +147,8 @@ async fn edit_file(
       new_content~,
       revert_on_parse_errors=input.revert_on_parse_errors,
       fail_brief~,
-      summary="ok: inserted at line \{input.start_line} in \{path}",
-      ok_brief="edited \{@agent_tool.brief_basename(path)}:\{input.start_line} (insert)",
+      summary~,
+      ok_brief~,
     )
   }
   let region = select_edit_region(content, input)
@@ -371,6 +402,25 @@ fn line_end_offset(content : String, line : Int) -> Int {
 }
 
 ///|
+/// How many lines `new_string` occupies once inserted: one per newline, plus
+/// one for a trailing fragment that does not end in a newline (that fragment
+/// shares its line with whatever follows the insertion point). `new_string`
+/// is non-empty on the insertion path — both-empty edits are rejected first.
+fn inserted_line_span(new_string : String) -> Int {
+  let mut newlines = 0
+  for ch in new_string {
+    if ch == '\n' {
+      newlines += 1
+    }
+  }
+  if new_string.has_suffix("\n") {
+    newlines
+  } else {
+    newlines + 1
+  }
+}
+
+///|
 fn line_number_at_offset(content : String, offset : Int) -> Int {
   let bounded_offset = offset.clamp(min=0, max=content.length())
   let mut line = 1
@@ -388,6 +438,16 @@ fn range_detail(input : @decode.EditInput) -> String {
     Some(end) => " in line range \{input.start_line}-\{end}"
     None => " from line \{input.start_line}"
   }
+}
+
+///|
+test "inserted_line_span counts the lines the insert occupies" {
+  // Newline-terminated: one line per newline.
+  assert_eq(inserted_line_span("a\n"), 1)
+  assert_eq(inserted_line_span("a\nb\n"), 2)
+  // A trailing fragment without a newline still occupies a (shared) line.
+  assert_eq(inserted_line_span("a"), 1)
+  assert_eq(inserted_line_span("a\nb"), 2)
 }
 
 ///|
