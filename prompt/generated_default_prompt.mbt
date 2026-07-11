@@ -117,7 +117,7 @@ fn default_prompt() -> String {
     #|  module fails with `module not found`, and if the module IS published the
     #|  import silently binds the STALE published snapshot instead of your working
     #|  tree. To exercise local package code, write a black-box test and run
-    #|  `moon test <pkg> --filter` instead.
+    #|  `moon test <pkg> --filter '<name glob>'` instead.
     #|  `moon run -e` defaults to native on current MoonBit nightlies, but `moon run -`
     #|  can still default to wasm-gc; pass `--target native` when stdin snippets need
     #|  native or async support.
