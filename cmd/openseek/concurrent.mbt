@@ -9,21 +9,29 @@
 async fn run_fleet(matches : @argparse.Matches, concurrency~ : Int) -> Unit {
   // Fleet mode owns session creation and is a one-shot batch, so it conflicts
   // with the single-session and no-session modes of `openseek run`.
-  guard @agentcli.session_id(matches) is None else {
-    fail("--concurrency runs independent sessions; remove --session")
-  }
   guard !(matches is { flags: { "no-session": true, .. }, .. }) else {
     fail("--concurrency records each run; remove --no-session")
   }
   let task = task_text(matches)
-  let api_url = @agentcli.api_url(matches)
-  let (model, thinking) = model_and_thinking(matches)
+  let (model, thinking, api_url) = agent_settings(matches)
   let api_key = @agentcli.api_key(matches, model)
   let max_steps = max_steps(matches)
-  let (dir_input, session_root_input) = match matches {
-    { values: { "dir": [dir, ..], "session-root": [session_root, ..], .. }, .. } =>
-      (dir, session_root)
+  let (session, dir_input, session_root_input) = match matches {
+    {
+      values: {
+        "session"? : Some([session, ..])
+        | (Some([])
+        | None) with session = "",
+        "dir": [dir, ..],
+        "session-root": [session_root, ..],
+        ..
+      },
+      ..,
+    } => (session.trim(), dir, session_root)
     _ => fail("missing parsed fleet defaults")
+  }
+  guard session.is_empty() else {
+    fail("--concurrency runs independent sessions; remove --session")
   }
   let dir = trim_trailing_path_separators("\{dir_input.trim()}")
   let (run_dirs, source) = resolve_run_dirs(dir, concurrency)

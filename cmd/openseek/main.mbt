@@ -131,8 +131,7 @@ async fn run_task_command(matches : @argparse.Matches) -> Unit {
       return
     }
     let workspace_root = prepare_workspace_root(matches, log_created=true)
-    let api_url = @agentcli.api_url(matches)
-    let (model, thinking) = model_and_thinking(matches)
+    let (model, thinking, api_url) = agent_settings(matches)
     let api_key = @agentcli.api_key(matches, model)
     let max_steps = max_steps(matches)
     let task = task_text(matches)
@@ -312,17 +311,27 @@ async fn sessions_compact(matches : @argparse.Matches) -> Unit {
 async fn resolved_session_id(
   matches : @argparse.Matches,
 ) -> @agent_session.SessionId? {
-  let no_session = match matches {
+  let (session, no_session) = match matches {
     {
+      values: {
+        "session"? : Some([session, ..])
+        | (Some([])
+        | None) with session = "",
+        ..
+      },
       flags: {
         "no-session"? : Some(no_session)
         | None with no_session = false,
         ..
       },
       ..,
-    } => no_session
+    } => (session.trim(), no_session)
   }
-  match (@agentcli.session_id(matches), no_session) {
+  let session_id = match session {
+    "" => None
+    session => Some(@agent_session.SessionId("\{session}"))
+  }
+  match (session_id, no_session) {
     (Some(_), true) =>
       fail("--no-session contradicts --session; pick one behavior")
     (Some(id), false) => Some(id)
@@ -614,13 +623,28 @@ fn explicitly_provided(matches : @argparse.Matches, name : String) -> Bool {
 }
 
 ///|
-fn model_and_thinking(
+fn agent_settings(
   matches : @argparse.Matches,
-) -> (@deepseek.Model, @deepseek.ThinkingMode) raise {
+) -> (@deepseek.Model, @deepseek.ThinkingMode, String?) raise {
   match matches {
-    { values: { "model": [model, ..], "thinking": [thinking, ..], .. }, .. } =>
-      (@deepseek.Model::parse(model), @deepseek.ThinkingMode::parse(thinking))
-    _ => fail("missing parsed model or thinking default")
+    {
+      values: {
+        "model": [model, ..],
+        "thinking": [thinking, ..],
+        "api-url": [api_url, ..],
+        ..
+      },
+      ..,
+    } =>
+      (
+        @deepseek.Model::parse(model),
+        @deepseek.ThinkingMode::parse(thinking),
+        match api_url.trim() {
+          "" => None
+          url => Some("\{url}")
+        },
+      )
+    _ => fail("missing parsed agent defaults")
   }
 }
 
@@ -1156,8 +1180,9 @@ test "cli parses env backed options and task" {
     "OPENSEEK_SESSION_ROOT": "/tmp/openseek-sessions",
   })
   assert_eq(@agentcli.api_key(parsed, Deepseek(V4Pro)), "test-key")
-  assert_eq(@cli.value(parsed, "model"), "deepseek-v4-pro")
-  guard @agentcli.api_url(parsed) is Some(url) else { fail("expected api url") }
+  let (model, _, api_url) = agent_settings(parsed)
+  assert_true(model is Deepseek(V4Pro))
+  guard api_url is Some(url) else { fail("expected api url") }
   assert_eq(url, "https://proxy.example/v1/chat/completions")
   assert_eq(@cli.value(parsed, "dir"), "/tmp/openseek-workspace")
   assert_true(max_steps(parsed) is Some(120))
@@ -1166,10 +1191,7 @@ test "cli parses env backed options and task" {
     @cli.value(parsed, "system-prompt-addendum-file"),
     "/tmp/prompt-b.md",
   )
-  guard @agentcli.session_id(parsed) is Some(id) else {
-    fail("expected session id")
-  }
-  assert_eq(id.value(), "demo")
+  assert_true(parsed is { values: { "session": ["demo", ..], .. }, .. })
   assert_eq(session_root(parsed), "/tmp/openseek-sessions")
   assert_eq(task_text(parsed), "write MoonBit")
 }
@@ -1180,11 +1202,12 @@ test "cli defaults model and max steps" {
     "DEEPSEEK": "test-key",
   })
   assert_eq(@agentcli.api_key(parsed, Deepseek(V4Pro)), "test-key")
-  assert_eq(@cli.value(parsed, "model"), "deepseek-v4-pro")
-  assert_true(@agentcli.api_url(parsed) is None)
+  let (model, _, api_url) = agent_settings(parsed)
+  assert_true(model is Deepseek(V4Pro))
+  assert_true(api_url is None)
   assert_eq(@cli.value(parsed, "dir"), ".")
   assert_true(max_steps(parsed) is None)
-  assert_true(@agentcli.session_id(parsed) is None)
+  assert_true(parsed is { values: { "session"? : None, .. }, .. })
   assert_eq(session_root(parsed), ".openseek")
 }
 

@@ -20,15 +20,29 @@ async fn run_review_cli(
   matches : @argparse.Matches,
   workspace_root~ : String,
 ) -> Unit {
-  let api_url = @agentcli.api_url(matches)
   // Reviews always run on the strongest model; flash is too shallow for the
   // judgement a code review needs, so --model is not consulted here.
   let model = @deepseek.Deepseek(V4Pro)
   let api_key = @agentcli.api_key(matches, model)
   let max_steps = max_steps(matches)
-  let (thinking, base) = match matches {
-    { values: { "thinking": [thinking, ..], "base": [base, ..], .. }, .. } =>
-      (@deepseek.ThinkingMode::parse(thinking), base)
+  let (thinking, base, api_url) = match matches {
+    {
+      values: {
+        "thinking": [thinking, ..],
+        "base": [base, ..],
+        "api-url": [api_url, ..],
+        ..
+      },
+      ..,
+    } =>
+      (
+        @deepseek.ThinkingMode::parse(thinking),
+        base,
+        match api_url.trim() {
+          "" => None
+          url => Some("\{url}")
+        },
+      )
     _ => fail("missing parsed review defaults")
   }
   if base.trim() == "" {

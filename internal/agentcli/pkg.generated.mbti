@@ -2,19 +2,12 @@
 package "bobzhang/openseek/internal/agentcli"
 
 import {
-  "bobzhang/openseek/agent_session",
   "bobzhang/openseek/deepseek",
   "moonbitlang/core/argparse",
 }
 
 // Values
 pub fn api_key(@argparse.Matches, @deepseek.Model) -> String raise
-
-pub fn api_key_env_for_model(@deepseek.Model) -> String
-
-pub fn api_url(@argparse.Matches) -> String? raise
-
-pub fn session_id(@argparse.Matches) -> @agent_session.SessionId?
 
 // Errors
 

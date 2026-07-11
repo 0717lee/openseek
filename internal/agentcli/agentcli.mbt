@@ -7,26 +7,6 @@
 /// package removes.
 
 ///|
-/// Environment variable that carries the API key for `model`'s provider.
-/// Spawned engine processes inherit their key through this variable, so it
-/// must stay in lockstep with `api_key`'s lookup order.
-pub fn api_key_env_for_model(model : @deepseek.Model) -> String {
-  match model {
-    Kimi(_) => "KIMI"
-    Deepseek(_) => "DEEPSEEK"
-  }
-}
-
-///|
-/// Human-readable provider name for `model`, used in error guidance.
-fn api_key_provider_for_model(model : @deepseek.Model) -> String {
-  match model {
-    Kimi(_) => "Kimi"
-    Deepseek(_) => "DeepSeek"
-  }
-}
-
-///|
 /// Resolve the API key for `model`: an explicit `--api-key` wins, then the
 /// provider-specific option (which each command table backs with the
 /// provider's environment variable). Fails with provider-specific guidance
@@ -55,52 +35,14 @@ pub fn api_key(
   if !generic_key.is_empty() {
     return "\{generic_key}"
   }
-  let provider_key = match model {
-    Kimi(_) => kimi_key
-    Deepseek(_) => deepseek_key
+  let (provider_key, provider, env_var) = match model {
+    Kimi(_) => (kimi_key, "Kimi", "KIMI")
+    Deepseek(_) => (deepseek_key, "DeepSeek", "DEEPSEEK")
   }
   if !provider_key.is_empty() {
     return "\{provider_key}"
   }
   fail(
-    "an API key is required for \{api_key_provider_for_model(model)} models: pass --api-key or set \{api_key_env_for_model(model)}",
+    "an API key is required for \{provider} models: pass --api-key or set \{env_var}",
   )
-}
-
-///|
-/// `--api-url` as an override: unset or whitespace-only means "use the
-/// provider default".
-pub fn api_url(matches : @argparse.Matches) -> String? raise {
-  let url = match matches {
-    { values: { "api-url": [url, ..], .. }, .. } => url.trim()
-    _ => fail("missing parsed argument: api-url")
-  }
-  if url.is_empty() {
-    None
-  } else {
-    Some("\{url}")
-  }
-}
-
-///|
-/// `--session` as a durable session id. `--session` is a root global without
-/// a default, so read it gracefully: it is absent (not empty) in a
-/// subcommand's matches when unset.
-pub fn session_id(matches : @argparse.Matches) -> @agent_session.SessionId? {
-  let id = match matches {
-    {
-      values: {
-        "session"? : Some([session, ..])
-        | (Some([])
-        | None) with session = "",
-        ..
-      },
-      ..,
-    } => session.trim()
-  }
-  if id.is_empty() {
-    None
-  } else {
-    Some(SessionId("\{id}"))
-  }
 }

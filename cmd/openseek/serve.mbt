@@ -486,11 +486,25 @@ async fn run_serve(
   matches : @argparse.Matches,
   workspace_root~ : String,
 ) -> Unit {
-  let api_url = @agentcli.api_url(matches)
-  let (model, thinking) = model_and_thinking(matches)
+  let (model, thinking, api_url) = agent_settings(matches)
   let api_key = @agentcli.api_key(matches, model)
   let max_steps = max_steps(matches)
-  let (store, initial_session) = match @agentcli.session_id(matches) {
+  let session_id = match matches {
+    {
+      values: {
+        "session"? : Some([session, ..])
+        | (Some([])
+        | None) with session = "",
+        ..
+      },
+      ..,
+    } =>
+      match session.trim() {
+        "" => None
+        session => Some(@agent_session.SessionId("\{session}"))
+      }
+  }
+  let (store, initial_session) = match session_id {
     Some(id) => {
       let store = @store.SessionStore(session_root(matches, workspace_root~))
       (

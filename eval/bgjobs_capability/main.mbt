@@ -16,9 +16,8 @@
 ///
 ///   moon run --target native eval/bgjobs_capability
 async fn main {
-  // `DEEPSEEK` is the engine's API-key env var (see
-  // @agentcli.api_key_env_for_model); blank means the engine would reject it
-  // at startup, so both count as unset.
+  // `DEEPSEEK` is the engine's API-key env var; blank means the engine would
+  // reject it at startup, so both count as unset.
   guard @env.get_env_var("DEEPSEEK") is Some(key) && !key.trim().is_empty() else {
     println("SKIP: DEEPSEEK is not set; this eval drives the live engine")
     return
