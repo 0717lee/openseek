@@ -551,6 +551,10 @@ extern "js" fn install_position_tracker() -> Unit =
   #|    tip.style.top = (rect.bottom + 6) + 'px';
   #|  });
   #|  document.addEventListener('scroll', hideTip, { capture: true, passive: true });
+  #|  // The scrubber sits near the top edge, so the pointer can exit straight
+  #|  // into browser chrome — no further mouseover ever fires to hide the tip.
+  #|  document.addEventListener('mouseleave', hideTip);
+  #|  window.addEventListener('blur', hideTip);
   #|}
 
 ///|
