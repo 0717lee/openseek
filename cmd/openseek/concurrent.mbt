@@ -12,20 +12,22 @@ async fn run_fleet(matches : @argparse.Matches, concurrency~ : Int) -> Unit {
   guard @agentcli.session_id(matches) is None else {
     fail("--concurrency runs independent sessions; remove --session")
   }
-  guard !@cli.flag(matches, "no-session") else {
+  guard !(matches is { flags: { "no-session": true, .. }, .. }) else {
     fail("--concurrency records each run; remove --no-session")
   }
   let task = task_text(matches)
   let api_url = @agentcli.api_url(matches)
-  let model = @deepseek.Model::parse(@cli.value(matches, "model"))
+  let (model, thinking) = model_and_thinking(matches)
   let api_key = @agentcli.api_key(matches, model)
   let max_steps = max_steps(matches)
-  let thinking = @deepseek.ThinkingMode::parse(@cli.value(matches, "thinking"))
-  let dir = trim_trailing_path_separators(
-    "\{@cli.value(matches, "dir").trim()}",
-  )
+  let (dir_input, session_root_input) = match matches {
+    { values: { "dir": [dir, ..], "session-root": [session_root, ..], .. }, .. } =>
+      (dir, session_root)
+    _ => fail("missing parsed fleet defaults")
+  }
+  let dir = trim_trailing_path_separators("\{dir_input.trim()}")
   let (run_dirs, source) = resolve_run_dirs(dir, concurrency)
-  let session_root_value = "\{@cli.value(matches, "session-root").trim()}"
+  let session_root_value = "\{session_root_input.trim()}"
   // Skip the configured session store (not just the default) so a custom
   // --session-root does not copy stale source sessions into every trial.
   let sessions_rel = workspace_sessions_rel(session_root_value)

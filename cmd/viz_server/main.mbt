@@ -13,53 +13,108 @@
 /// Session discovery is intentionally file-oriented: only
 /// `openseek_session-*.jsonl` files are listed, so `.DS_Store`, lock files, and
 /// malformed/husk directories do not show up as sessions.
+priv struct VizConfig {
+  port : Int
+  host : String
+  session_root : String
+  session_root_name : String
+  search_dirs : Array[String]
+  web_dir : String
+  bundle : String
+  export_path : String
+}
+
+///|
+fn viz_config_from_matches(matches : @argparse.Matches) -> VizConfig raise {
+  let (port, host, session_root, session_root_name, web_dir, bundle, export_path
+  ) = match matches {
+    {
+      values: {
+        "port": [port, ..],
+        "host": [host, ..],
+        "session-root": [session_root, ..],
+        "session-root-name": [session_root_name, ..],
+        "web-dir": [web_dir, ..],
+        "bundle": [bundle, ..],
+        "export": [export_path, ..],
+        ..
+      },
+      ..,
+    } =>
+      (
+        port, host, session_root, session_root_name, web_dir, bundle, export_path,
+      )
+    _ => fail("missing parsed visualizer defaults")
+  }
+  let host = host.trim()
+  guard !host.is_empty() else {
+    fail("--host or OPENSEEK_VIZ_HOST must not be empty")
+  }
+  let session_root = session_root.trim()
+  guard !session_root.is_empty() else {
+    fail("--session-root or OPENSEEK_SESSION_ROOT must not be empty")
+  }
+  let session_root_name = session_root_name.trim()
+  guard !session_root_name.is_empty() else {
+    fail(
+      "--session-root-name or OPENSEEK_VIZ_SESSION_ROOT_NAME must not be empty",
+    )
+  }
+  {
+    port: parse_port(port),
+    host: "\{host}",
+    session_root: "\{session_root}",
+    session_root_name: "\{session_root_name}",
+    search_dirs: effective_search_dirs(matches),
+    web_dir,
+    bundle,
+    export_path,
+  }
+}
+
+///|
 async fn main {
   let matches = cli_command().parse(env=@env.get_env_vars())
-  let port = parse_port(@cli.value(matches, "port"))
-  let host = @cli.require_non_empty(
-    matches, "host", "--host or OPENSEEK_VIZ_HOST must not be empty",
-  )
-  let session_root = @cli.require_non_empty(
-    matches, "session-root", "--session-root or OPENSEEK_SESSION_ROOT must not be empty",
-  )
-  let session_root_name = @cli.require_non_empty(
-    matches, "session-root-name", "--session-root-name or OPENSEEK_VIZ_SESSION_ROOT_NAME must not be empty",
-  )
+  let config = viz_config_from_matches(matches)
   // Keep main's fix (f26def11): an explicit --session-root drops the default
   // cwd scan. effective_search_dirs encodes that; do not revert to a bare
   // non_empty_values(matches, "search-dir").
-  let search_dirs = effective_search_dirs(matches)
-  let web_dir = @cli.value(matches, "web-dir")
-  let bundle = @cli.value(matches, "bundle")
   let module_root = match @env.args() {
     [exe, ..] => module_root_from_exe(exe)
     [] => None
   }
-  let shell = shell_candidates(web_dir, module_root)
-  let bundle_paths = bundle_candidates(bundle, web_dir, module_root)
-  let catalog = session_catalog(session_root, search_dirs, session_root_name)
+  let shell = shell_candidates(config.web_dir, module_root)
+  let bundle_paths = bundle_candidates(
+    config.bundle,
+    config.web_dir,
+    module_root,
+  )
+  let catalog = session_catalog(
+    config.session_root,
+    config.search_dirs,
+    config.session_root_name,
+  )
   // Export mode: freeze the sessions the server would serve into one standalone
   // HTML and exit, rather than run_forever. The exported file is decoupled from
   // this server and from the current parser — it carries its own bundle + data.
-  let export_path = @cli.value(matches, "export")
-  if export_path != "" {
+  if config.export_path != "" {
     let rows = catalog.rows()
     let html = build_export_html(rows, shell, bundle_paths)
-    @fs.write_file(export_path, html, create_mode=CreateOrTruncate)
+    @fs.write_file(config.export_path, html, create_mode=CreateOrTruncate)
     println(
-      "openseek viz: wrote standalone export '\{export_path}' (\{rows.length()} session(s), \{html.length()} chars)",
+      "openseek viz: wrote standalone export '\{config.export_path}' (\{rows.length()} session(s), \{html.length()} chars)",
     )
     return
   }
-  let addr = @socket.Addr::parse("\{host}:\{port}") catch {
-    _ => fail("invalid --host/--port: \{host}:\{port}")
+  let addr = @socket.Addr::parse("\{config.host}:\{config.port}") catch {
+    _ => fail("invalid --host/--port: \{config.host}:\{config.port}")
   }
   println("openseek viz: serving \{catalog.roots.length()} session root(s)")
   for root in catalog.roots {
     println("openseek viz: sessions under '\{root.path}'")
   }
   println("openseek viz: shell from '\{shell[0]}'")
-  print_open_urls(host, port)
+  print_open_urls(config.host, config.port)
   let server = @http.Server(addr)
   server.run_forever((request, _body, conn) => {
     handle(request, conn, catalog, shell, bundle_paths)
@@ -1141,34 +1196,19 @@ fn cli_command() -> @argparse.Command {
 /// explicit `--search-dir` always wins: giving both flags means "that root,
 /// plus these scans".
 fn effective_search_dirs(matches : @argparse.Matches) -> Array[String] {
-  if explicitly_provided(matches, "session-root") &&
-    !explicitly_provided(matches, "search-dir") {
-    []
-  } else {
-    non_empty_values(matches, "search-dir")
-  }
-}
-
-///|
-/// Whether the user supplied `name` on the command line or via its
-/// environment variable, rather than the built-in default filling it in.
-fn explicitly_provided(matches : @argparse.Matches, name : String) -> Bool {
-  matches.sources.get(name) is (Some(Argv) | Some(Env))
-}
-
-///|
-fn non_empty_values(
-  matches : @argparse.Matches,
-  name : String,
-) -> Array[String] {
-  match matches.values.get(name) {
-    Some(values) =>
+  match matches {
+    {
+      values: { "search-dir": _, .. },
+      sources: { "session-root": Argv | Env, "search-dir": Default, .. },
+      ..,
+    } => []
+    { values: { "search-dir": values, .. }, .. } =>
       [
         for value in values if !value.trim().is_empty() => {
           value.trim().to_owned()
         }
       ]
-    None => []
+    _ => []
   }
 }
 
