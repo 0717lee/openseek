@@ -22,6 +22,10 @@ struct SessionRow {
 struct Model {
   sessions : Array[SessionRow]
   selected : String?
+  // Session key parsed from the URL hash at startup, waiting for the first
+  // session listing so a refresh can land back on the same session. Consumed
+  // (set to None) by the first `SessionsFetched`.
+  pending_restore_key : String?
   // Name of a locally dropped session file being viewed instead of a server
   // session. Mutually exclusive with `selected`.
   dropped : String?
@@ -122,17 +126,44 @@ fn should_auto_open(
 }
 
 ///|
+/// The view mode to start in: an explicit `v=` in the URL hash (a restored
+/// refresh) wins over the standalone/live defaults.
+fn restored_view_mode(hash_view : String, standalone : Bool) -> @viz.ViewMode {
+  match hash_view {
+    "raw" => RawLog
+    "model" => ModelView
+    _ => initial_view_mode(standalone)
+  }
+}
+
+///|
+/// The hash spelling of a view mode (the `v=` value the scrollspy state keeps).
+fn view_mode_value(mode : @viz.ViewMode) -> String {
+  match mode {
+    RawLog => "raw"
+    ModelView => "model"
+  }
+}
+
+///|
 fn init_model() -> Model {
   {
     sessions: [],
     selected: None,
+    pending_restore_key: match hash_param("s") {
+      "" => None
+      key => Some(key)
+    },
     dropped: None,
     drop_ticket: 0,
     parsed: None,
     system_prompt: "",
     header_present: false,
     log_bytes: 0L,
-    view_mode: initial_view_mode(embedded_has("/api/sessions")),
+    view_mode: restored_view_mode(
+      hash_param("v"),
+      embedded_has("/api/sessions"),
+    ),
     theme: System,
     sidebar_visible: true,
     collapsed_roots: [],
@@ -154,25 +185,33 @@ fn update(emit : @cmd.Emit[Msg], msg : Msg, model : Model) -> (@cmd.Cmd, Model) 
           let listed = {
             ..model,
             sessions,
+            pending_restore_key: None,
             collapsed_roots: prune_collapsed_roots(
               model.collapsed_roots,
               sessions,
             ),
             status: list_status(model, "\{sessions.length()} session(s)"),
           }
-          // A standalone export is a frozen archive; when it holds exactly one
-          // session, open it immediately so the reader lands on the log
-          // instead of an empty pane. Live servers keep the explicit click —
-          // their list refreshes must never yank the user off a session.
-          if should_auto_open(
-              embedded_has("/api/sessions"),
-              sessions,
-              selected=model.selected,
-              dropped=model.dropped,
-            ) {
-            update(emit, Select(sessions[0].key), listed)
-          } else {
-            (@cmd.none, listed)
+          // A refresh restores the session named in the URL hash — in the
+          // live viewer and in exports alike. Otherwise a standalone export
+          // holding exactly one session opens it immediately; live servers
+          // keep the explicit click, since their list refreshes must never
+          // yank the user off a session.
+          let untouched = model.selected is None && model.dropped is None
+          match model.pending_restore_key {
+            Some(key) if untouched && sessions.iter().any(row => row.key == key) =>
+              update(emit, Select(key), listed)
+            _ =>
+              if should_auto_open(
+                  embedded_has("/api/sessions"),
+                  sessions,
+                  selected=model.selected,
+                  dropped=model.dropped,
+                ) {
+                update(emit, Select(sessions[0].key), listed)
+              } else {
+                (@cmd.none, listed)
+              }
           }
         }
         None =>
@@ -197,8 +236,12 @@ fn update(emit : @cmd.Emit[Msg], msg : Msg, model : Model) -> (@cmd.Cmd, Model) 
       let command = fetch_text(emit, session_url(key), result => {
         SessionFetched(key, result)
       })
+      // Record the selection in the URL hash so a refresh lands back here.
+      // Selecting a different session drops the stale seq= position (the
+      // extern compares keys); re-selecting the same one keeps it.
+      let mode = view_mode_value(model.view_mode)
       (
-        command,
+        @cmd.batch([command, @cmd.effect(() => set_hash_session(key, mode))]),
         {
           ..model,
           selected: Some(key),
@@ -230,7 +273,9 @@ fn update(emit : @cmd.Emit[Msg], msg : Msg, model : Model) -> (@cmd.Cmd, Model) 
             match parse_load(text) {
               Loaded(parsed, system_prompt, header_present, log_bytes) =>
                 (
-                  @cmd.none,
+                  // The log renders in this same cycle; once it is in the
+                  // DOM, scroll back to the seq= position saved in the hash.
+                  @cmd.effect(() => restore_scroll_to_hash_seq()),
                   {
                     ..model,
                     parsed: Some(parsed),
@@ -298,7 +343,19 @@ fn update(emit : @cmd.Emit[Msg], msg : Msg, model : Model) -> (@cmd.Cmd, Model) 
             )
         }
       }
-    SetMode(mode) => (@cmd.none, { ..model, view_mode: mode })
+    SetMode(mode) => {
+      // Keep the hash's v= current, and re-anchor the scroll position: the
+      // seq= anchors are shared across views where the event projects, so
+      // switching modes stays on (or near) the same event.
+      let value = view_mode_value(mode)
+      (
+        @cmd.batch([
+          @cmd.effect(() => set_hash_view(value)),
+          @cmd.effect(() => restore_scroll_to_hash_seq()),
+        ]),
+        { ..model, view_mode: mode },
+      )
+    }
     SetArgsView(show_original) =>
       (@cmd.none, { ..model, show_original_args: show_original })
     ToggleErrorsOnly =>
@@ -336,6 +393,134 @@ fn update(emit : @cmd.Emit[Msg], msg : Msg, model : Model) -> (@cmd.Cmd, Model) 
 /// Set `data-theme` on the document root. `light`/`dark` pick a fixed palette;
 /// `system` defers to the OS via the stylesheet's `prefers-color-scheme` query.
 extern "js" fn set_document_theme(theme : String) -> Unit = "(t) => document.documentElement.setAttribute('data-theme', t)"
+
+// ---- URL-hash position state -------------------------------------------------
+// The hash carries `s=<session key>&v=<raw|model>&seq=<n>` so a refresh (or a
+// shared link) lands back on the same session, view, and step. `seq` is a
+// durable event sequence — the `seq-N` card anchors — so it survives log
+// growth; all writes use replaceState so scrolling never spams history.
+
+///|
+/// One decoded parameter from the location hash, `""` when absent (or when
+/// running without a browser, e.g. under tests).
+extern "js" fn hash_param(name : String) -> String =
+  #|(name) => {
+  #|  if (typeof location === 'undefined') return '';
+  #|  try {
+  #|    return new URLSearchParams(location.hash.slice(1)).get(name) || '';
+  #|  } catch (e) {
+  #|    return '';
+  #|  }
+  #|}
+
+///|
+/// Record the selected session (and current view) in the hash. Switching from
+/// one session to a DIFFERENT one drops the stale `seq=` position;
+/// re-selecting the same one keeps it, and so does the first selection of the
+/// page (no `s=` yet — an auto-opened export restoring `#seq=` relies on it).
+extern "js" fn set_hash_session(key : String, view : String) -> Unit =
+  #|(key, view) => {
+  #|  if (typeof location === 'undefined') return;
+  #|  const params = new URLSearchParams(location.hash.slice(1));
+  #|  const previous = params.get('s');
+  #|  if (previous !== null && previous !== key) params.delete('seq');
+  #|  params.set('s', key);
+  #|  params.set('v', view);
+  #|  history.replaceState(null, '', '#' + params.toString());
+  #|}
+
+///|
+/// Record the active view mode in the hash, keeping session and position.
+extern "js" fn set_hash_view(view : String) -> Unit =
+  #|(view) => {
+  #|  if (typeof location === 'undefined') return;
+  #|  const params = new URLSearchParams(location.hash.slice(1));
+  #|  params.set('v', view);
+  #|  history.replaceState(null, '', '#' + params.toString());
+  #|}
+
+///|
+/// Scroll the log back to the hash's `seq=` position. A large log may take
+/// several frames to commit, so this polls briefly until the `seq-` anchors
+/// exist. The exact anchor may be absent in the current view (compacted away
+/// in the model projection, or a result card that carries a pair id
+/// instead), so the lookup falls back to the nearest following anchor.
+extern "js" fn restore_scroll_to_hash_seq() -> Unit =
+  #|() => {
+  #|  if (typeof location === 'undefined') return;
+  #|  const attempt = (tries) => {
+  #|    const params = new URLSearchParams(location.hash.slice(1));
+  #|    const want = parseInt(params.get('seq') || '', 10);
+  #|    if (!Number.isFinite(want)) return;
+  #|    const el = window.__openseekNearestSeq && window.__openseekNearestSeq(want);
+  #|    if (el) {
+  #|      el.scrollIntoView({ block: 'start' });
+  #|      return;
+  #|    }
+  #|    if (tries > 0) setTimeout(() => attempt(tries - 1), 100);
+  #|  };
+  #|  requestAnimationFrame(() => requestAnimationFrame(() => attempt(50)));
+  #|}
+
+///|
+/// Install the position tracker: a rAF-throttled scroll listener that writes
+/// the topmost visible `seq-` anchor into the hash's `seq=` (replaceState, no
+/// history spam) and moves the scrubber's `current` mark, plus a delegated
+/// click handler that makes `.step-seg` segments jump to their step. Also
+/// defines the shared nearest-anchor lookup `restore_scroll_to_hash_seq` uses.
+extern "js" fn install_position_tracker() -> Unit =
+  #|() => {
+  #|  if (typeof document === 'undefined') return;
+  #|  const anchors = () => Array.from(document.querySelectorAll('[id^="seq-"]'));
+  #|  window.__openseekNearestSeq = (want) => {
+  #|    const exact = document.getElementById('seq-' + want);
+  #|    if (exact) return exact;
+  #|    const all = anchors();
+  #|    return all.find((el) => parseInt(el.id.slice(4), 10) >= want) || all[all.length - 1] || null;
+  #|  };
+  #|  const markScrubber = (seq) => {
+  #|    let current = null;
+  #|    for (const seg of document.querySelectorAll('.step-seg')) {
+  #|      seg.classList.remove('current');
+  #|      if (+seg.dataset.seq <= seq) current = seg;
+  #|    }
+  #|    if (current) current.classList.add('current');
+  #|  };
+  #|  let ticking = false;
+  #|  document.addEventListener('scroll', () => {
+  #|    if (ticking) return;
+  #|    ticking = true;
+  #|    requestAnimationFrame(() => {
+  #|      ticking = false;
+  #|      const all = anchors();
+  #|      if (!all.length) return;
+  #|      // The current card: the last anchor at or above the sticky toolbar.
+  #|      let best = null;
+  #|      for (const el of all) {
+  #|        if (el.getBoundingClientRect().top <= 100) best = el;
+  #|        else break;
+  #|      }
+  #|      const seq = (best || all[0]).id.slice(4);
+  #|      const params = new URLSearchParams(location.hash.slice(1));
+  #|      if (params.get('seq') !== seq) {
+  #|        params.set('seq', seq);
+  #|        history.replaceState(null, '', '#' + params.toString());
+  #|      }
+  #|      markScrubber(+seq);
+  #|    });
+  #|  }, { capture: true, passive: true });
+  #|  document.addEventListener('click', (event) => {
+  #|    if (!(event.target instanceof Element)) return;
+  #|    const seg = event.target.closest('.step-seg');
+  #|    if (!seg || !seg.dataset.seq) return;
+  #|    const el = window.__openseekNearestSeq(+seg.dataset.seq);
+  #|    if (!el) return;
+  #|    const params = new URLSearchParams(location.hash.slice(1));
+  #|    params.set('seq', el.id.slice(4));
+  #|    history.replaceState(null, '', '#' + params.toString());
+  #|    el.scrollIntoView({ block: 'start' });
+  #|  });
+  #|}
 
 ///|
 fn apply_theme(theme : Theme) -> @cmd.Cmd {
@@ -969,7 +1154,7 @@ fn session_pane(
     // Pin the view/args toggles and the error bar to the top of the
     // scroll area so they stay reachable while reading a long log.
     @html.div(class="sticky-toolbar") <| [
-      mode_row(emit, model, parsed),
+      mode_row(emit, model, parsed, @viz.step_scrubber(session)),
       error_bar(emit, model, error_count),
     ],
     @viz.render_notices(parsed),
@@ -1007,12 +1192,14 @@ fn mode_row(
   emit : @cmd.Emit[Msg],
   model : Model,
   parsed : @session_log.ParsedLog,
+  scrubber : @html.Html,
 ) -> @html.Html {
   @html.div(class="mode-row") <| [
     @html.div(class="mode-cluster") <| [
       mode_toggle(emit, model),
       args_toggle(emit, model),
     ],
+    scrubber,
     session_metadata(model, parsed),
   ]
 }

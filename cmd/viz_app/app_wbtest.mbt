@@ -387,6 +387,47 @@ test "standalone exports default raw while the live viewer defaults model" {
 }
 
 ///|
+/// An `s=` session key parsed from the URL hash is honored by the first
+/// session listing — in the live viewer and exports alike — and consumed
+/// whether or not it matches, so a stale key cannot re-fire on refreshes of
+/// the list.
+test "the hash session key restores the selection on the first listing" {
+  let emit : @cmd.Emit[Msg] = Emit(_ => @cmd.none)
+  let listing =
+    #|[{"key":"k1","id":"s1"},{"key":"k2","id":"s2"}]
+  let pending = { ..init_model(), pending_restore_key: Some("k2") }
+  let (_, restored) = update(emit, SessionsFetched(Ok(listing)), pending)
+  debug_inspect(restored.selected, content="Some(\"k2\")")
+  debug_inspect(restored.pending_restore_key, content="None")
+  // An unknown key is consumed without selecting anything.
+  let stale = { ..init_model(), pending_restore_key: Some("gone") }
+  let (_, ignored) = update(emit, SessionsFetched(Ok(listing)), stale)
+  debug_inspect(ignored.selected, content="None")
+  debug_inspect(ignored.pending_restore_key, content="None")
+  // An existing selection is never yanked by a late restore key.
+  let busy = {
+    ..init_model(),
+    pending_restore_key: Some("k2"),
+    selected: Some("k1"),
+  }
+  let (_, kept) = update(emit, SessionsFetched(Ok(listing)), busy)
+  debug_inspect(kept.selected, content="Some(\"k1\")")
+}
+
+///|
+/// The hash's `v=` overrides the standalone/live view-mode defaults on
+/// restore; anything else falls through to them.
+test "the hash view mode wins over the defaults" {
+  assert_true(restored_view_mode("raw", false) == RawLog)
+  assert_true(restored_view_mode("model", true) == ModelView)
+  assert_true(restored_view_mode("", true) == RawLog)
+  assert_true(restored_view_mode("", false) == ModelView)
+  assert_true(restored_view_mode("nonsense", false) == ModelView)
+  inspect(view_mode_value(RawLog), content="raw")
+  inspect(view_mode_value(ModelView), content="model")
+}
+
+///|
 /// Only a standalone export with exactly one session and an untouched pane
 /// auto-opens; a live server list, several sessions, an existing selection,
 /// or a dropped file all keep the explicit click.

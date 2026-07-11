@@ -1298,6 +1298,81 @@ test "cleared and malformed plans degrade gracefully" {
 }
 
 ///|
+/// Every raw-view card anchors at its durable sequence (`seq-N`), the ids the
+/// scrollspy, refresh restore, and step scrubber navigate by. A paired tool
+/// result keeps its pair anchor (the call↔result cross-link targets it);
+/// unpaired results fall back to the sequence anchor.
+test "raw cards carry stable seq anchors" {
+  let html = render(@viz.render_session(multi_step_session(), RawLog))
+  assert_true(html.contains("id=\"seq-1\"")) // user
+  assert_true(html.contains("id=\"seq-2\"")) // assistant
+  assert_true(html.contains("id=\"seq-4\"")) // terminal
+  // The tool result at seq 3 is paired: pair anchor wins, no seq id.
+  assert_true(html.contains("id=\"tool-result-1\""))
+  assert_false(html.contains("id=\"seq-3\""))
+  // An unpaired (orphan) result anchors at its sequence instead.
+  let orphan = render(@viz.render_session(unpairable_session(), RawLog))
+  assert_true(orphan.contains("id=\"seq-2\""))
+}
+
+///|
+/// Model-view cards anchor at the sequence of the event backing them; the
+/// system prompt and synthetic repair messages have no durable event, so
+/// they carry no seq anchor.
+test "model cards anchor event-backed messages only" {
+  let html = render(@viz.render_session(multi_step_session(), ModelView))
+  assert_true(html.contains("id=\"seq-1\""))
+  assert_true(html.contains("id=\"seq-2\""))
+  assert_true(html.contains("id=\"seq-4\""))
+  // The healed synthetic result of a dangling call gets no seq anchor (it
+  // pairs, so it carries the pair id instead).
+  let healed = render(@viz.render_session(dangling_call_session(), ModelView))
+  assert_true(healed.contains("id=\"tool-result-1\""))
+}
+
+///|
+/// The step scrubber renders one `data-seq` segment per agent step, tints
+/// segments whose range contains a failed tool result, and disappears for
+/// sessions with fewer than two steps.
+test "step scrubber marks steps and their failures" {
+  // Two steps: the assistant at seq 2 (whose shell call fails at seq 3) and
+  // the assistant at seq 4. The terminal right after an assistant message is
+  // that step's own answer, not a new step.
+  let session = @agent_session.Session(SessionId("scrub"), system_prompt="")
+    .append(User(UserMessage("go")))
+    .append(
+      Assistant(
+        AssistantMessage("", tool_calls=[
+          ToolCall(id="c1", name="shell", arguments="{\"cmd\":\"boom\"}"),
+        ]),
+      ),
+    )
+    .append(
+      Tool(
+        ToolResult(
+          tool_call_id="c1",
+          tool_name="shell",
+          content="exit 1",
+          is_error=true,
+        ),
+      ),
+    )
+    .append(Assistant(AssistantMessage("recovered")))
+    .append(Terminal(Finished("done")))
+  let html = render(@viz.step_scrubber(session))
+  assert_true(html.contains("class=\"step-scrubber\""))
+  assert_eq(occurrences(html, "data-seq="), 2)
+  assert_true(html.contains("data-seq=\"2\""))
+  assert_true(html.contains("data-seq=\"4\""))
+  assert_true(html.contains("title=\"Step 1/2\""))
+  // Only the first step's range contains the failed result.
+  assert_eq(occurrences(html, "step-seg has-error"), 1)
+  // A one-step session has nothing to scrub.
+  let single = render(@viz.step_scrubber(error_tool_session()))
+  assert_false(single.contains("step-scrubber"))
+}
+
+///|
 /// Stamped events render relative offsets and a turn duration; unstamped
 /// events (the 0 sentinel) render no time chips at all.
 test "raw view shows total-second offsets and turn duration from ts" {

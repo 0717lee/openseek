@@ -15,6 +15,9 @@ fn main {
     @cmd.batch([
       fetch_text(emit, "/api/sessions", result => SessionsFetched(result)),
       install_shortcuts(emit),
+      // Position tracking: keep `seq=` in the URL hash while scrolling and
+      // make step-scrubber segments jump, so a refresh restores the spot.
+      @cmd.effect(() => install_position_tracker()),
     ]),
   )
   app.mount("app")

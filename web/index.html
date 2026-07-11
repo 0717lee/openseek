@@ -257,6 +257,31 @@
     }
     .mode-button:hover { border-color: var(--accent); }
     .mode-button.active { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+    /* step scrubber: one segment per agent step; click jumps to that step's
+       card (via the seq-N anchors), red segments carry failed tool results,
+       and the scrollspy marks the segment you are reading */
+    .step-scrubber {
+      display: flex;
+      align-items: stretch;
+      flex: 1 1 180px;
+      min-width: 120px;
+      max-width: 420px;
+      height: 14px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: var(--panel);
+      overflow: hidden;
+      cursor: pointer;
+    }
+    .step-seg { flex: 1 1 auto; min-width: 1px; }
+    .step-seg:hover { background: var(--accent); }
+    .step-seg.has-error { background: var(--error); opacity: .45; }
+    .step-seg.has-error:hover { background: var(--error); opacity: 1; }
+    .step-seg.current { background: var(--accent); }
+
+    /* anchored cards scroll to just below the sticky toolbar */
+    [id^="seq-"] { scroll-margin-top: 105px; }
+
     .session-metadata {
       display: flex;
       align-items: center;

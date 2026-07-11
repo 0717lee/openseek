@@ -1196,10 +1196,16 @@ fn tool_card(
   }
   let flag = failed_flag(is_error)
   // Pair this result back to the call that produced it (same `call N` tag).
+  // The pair anchor wins the element's single id (the cross-link targets
+  // it); an unpaired result anchors at its sequence like every other card —
+  // scroll restore only needs a nearby anchor, not one on every card.
   let pair = tags.get(result.tool_call_id())
   let link = result_back_link(pair)
-  let anchor = pair.map(n => tool_result_anchor(n))
-  @html.details(id?=anchor, class="card \{kind}") <| [
+  let anchor = match pair {
+    Some(n) => tool_result_anchor(n)
+    None => seq_anchor(seq)
+  }
+  @html.details(id=anchor, class="card \{kind}") <| [
     @html.summary(class="card-label") <| card_head(
       label,
       seq,
@@ -1271,6 +1277,60 @@ fn terminal_card(
   card("terminal", "Turn ended", seq, time~, body, step_label~)
 }
 
+// ---- step scrubber -----------------------------------------------------------
+
+///|
+/// A click-to-jump scrubber over the session's agent steps: one segment per
+/// step in log order, each carrying `data-seq` (the step event's durable
+/// sequence) so the shell can scroll to — or near — its card via the `seq-N`
+/// anchors. A segment is error-tinted when a failed tool result lands in
+/// that step's range, so failure clusters are visible on the bar itself.
+/// Renders nothing for sessions with fewer than two steps.
+pub fn step_scrubber(session : @agent_session.Session) -> @html.Html {
+  let seqs = agent_step_sequences(session)
+  let total = seqs.length()
+  if total < 2 {
+    return @html.nothing
+  }
+  let flagged = steps_with_errors(session, seqs)
+  @html.div(class="step-scrubber", title="Steps — click to jump") <| [
+    for index, seq in seqs => {
+      let cls = if flagged.contains(index) {
+        "step-seg has-error"
+      } else {
+        "step-seg"
+      }
+      @html.span(
+        class=cls,
+        title="Step \{index + 1}/\{total}",
+        attrs=@html.Attrs::build().data_set("seq", "\{seq}"),
+      ) <| ""
+    }
+  ]
+}
+
+///|
+/// Indices of steps whose range — from the step's own event up to (but not
+/// including) the next step's — contains a failed tool result. Results are
+/// appended after the assistant step that called them, so the owning step is
+/// the last one at or before the error.
+fn steps_with_errors(
+  session : @agent_session.Session,
+  seqs : Array[Int],
+) -> Map[Int, Unit] {
+  let flagged : Map[Int, Unit] = Map([])
+  for event in session.events() {
+    guard event.item() is Tool(result) && result.is_error() else { continue }
+    for index = seqs.length() - 1; index >= 0; index = index - 1 {
+      if seqs[index] <= event.sequence() {
+        flagged.set(index, ())
+        break
+      }
+    }
+  }
+  flagged
+}
+
 // ---- model projection view -------------------------------------------------
 
 ///|
@@ -1290,10 +1350,15 @@ fn render_model(session : @agent_session.Session) -> @html.Html {
   let briefs = model_tool_call_briefs(messages, tool_results)
   let tags = model_pair_tags(messages)
   let plans = model_plan_baselines(messages, failed)
+  let anchor_seqs = model_message_anchor_seqs(session)
   let cards : Array[@html.Html] = [
     for index, message in messages => {
       let time = time_labels.get(index).unwrap_or("")
       let step_label = step_labels.get(index).unwrap_or("")
+      let anchor = match anchor_seqs.get(index) {
+        Some(seq) if !seq.is_empty() => Some("seq-\{seq}")
+        _ => None
+      }
       message_card(
         message,
         tool_results,
@@ -1303,6 +1368,7 @@ fn render_model(session : @agent_session.Session) -> @html.Html {
         plans,
         time~,
         step_label~,
+        anchor~,
       )
     }
   ]
@@ -1431,6 +1497,16 @@ fn model_message_step_labels(session : @agent_session.Session) -> Array[String] 
   model_message_labels(session, label_of=event => event_label(steps, event), tool_label_of=_ => {
     ""
   })
+}
+
+///|
+/// Durable sequence numbers parallel to `Session::chat_messages()`, as anchor
+/// strings: every event-backed message gets its event's sequence, while the
+/// system prompt and synthetic repair messages (which have no durable event
+/// to anchor at) get `""`.
+fn model_message_anchor_seqs(session : @agent_session.Session) -> Array[String] {
+  let seq_of = (event : @agent_session.SessionEvent) => "\{event.sequence()}"
+  model_message_labels(session, label_of=seq_of, tool_label_of=seq_of)
 }
 
 ///|
@@ -1671,6 +1747,7 @@ fn message_card(
   plans : Map[String, Array[@steps.PlanStep]],
   time~ : String,
   step_label~ : String,
+  anchor~ : String?,
 ) -> @html.Html {
   match message.role {
     System =>
@@ -1694,6 +1771,7 @@ fn message_card(
         plans,
         time~,
         step_label~,
+        anchor~,
       )
     Assistant =>
       model_card(
@@ -1706,6 +1784,7 @@ fn message_card(
         plans,
         time~,
         step_label~,
+        anchor~,
       )
     Tool(_) =>
       model_tool_card(
@@ -1713,6 +1792,7 @@ fn message_card(
         model_shown_result(message, tool_results),
         tags,
         time~,
+        anchor~,
       )
   }
 }
@@ -1785,6 +1865,7 @@ fn model_tool_card(
   shown : @agent_session.ToolResult?,
   tags : Map[String, Int],
   time~ : String,
+  anchor~ : String?,
 ) -> @html.Html {
   let is_error = shown is Some(r) && r.is_error()
   let name = match shown {
@@ -1799,12 +1880,17 @@ fn model_tool_card(
   }
   // The pair tag comes from the message's own id (structural), independent of
   // whether `model_shown_result` trusts the durable result for enrichment.
+  // Like the raw view, the pair anchor wins the element's single id; the
+  // sequence anchor is the fallback for unpaired results.
   let pair = match message.role {
     Tool(id) => tags.get(id)
     _ => None
   }
   let link = result_back_link(pair)
-  let anchor = pair.map(n => tool_result_anchor(n))
+  let anchor = match pair {
+    Some(n) => Some(tool_result_anchor(n))
+    None => anchor
+  }
   @html.details(id?=anchor, class="card \{kind}") <| [
     @html.summary(class="card-label") <| model_card_head(
       label,
@@ -1829,6 +1915,7 @@ fn model_card(
   plans : Map[String, Array[@steps.PlanStep]],
   time~ : String,
   step_label~ : String,
+  anchor~ : String?,
 ) -> @html.Html {
   let body : Array[@html.Html] = []
   if message.reasoning_content is Some(reasoning) &&
@@ -1851,7 +1938,7 @@ fn model_card(
     ]
     body.push(@html.div(class="tool-calls") <| call_views)
   }
-  @html.section(class="card \{kind}") <| [
+  @html.section(id?=anchor, class="card \{kind}") <| [
     @html.div(class="card-label") <| model_card_head(label, time~, step_label~),
     @html.div(class="card-body") <| body,
   ]
@@ -1886,10 +1973,20 @@ fn card(
   body : Array[@html.Html],
   step_label? : String = "",
 ) -> @html.Html {
-  @html.section(class="card \{kind}") <| [
+  // Every raw-view card anchors at its durable sequence: the id is what the
+  // shell's scrollspy/restore and the step scrubber navigate by, and the
+  // sequence is stable across refreshes because it comes from the
+  // append-only log.
+  @html.section(id=seq_anchor(seq), class="card \{kind}") <| [
     @html.div(class="card-label") <| card_head(label, seq, time~, step_label~),
     @html.div(class="card-body") <| body,
   ]
+}
+
+///|
+/// DOM anchor id for the card of the event with durable sequence `seq`.
+fn seq_anchor(seq : Int) -> String {
+  "seq-\{seq}"
 }
 
 ///|
