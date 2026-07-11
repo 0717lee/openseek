@@ -171,9 +171,17 @@ fn contains_token(haystack : String, needle : String) -> Bool {
     if left_ok && right_ok {
       return true
     }
-    base = start + 1
+    // Advance past the rejected match start by a whole code point: stepping
+    // one UTF-16 unit into a surrogate pair would make the next slice panic.
+    base = start +
+      (if is_high_surrogate(haystack[start].to_int()) { 2 } else { 1 })
   }
   false
+}
+
+///|
+fn is_high_surrogate(code : Int) -> Bool {
+  code >= 0xD800 && code <= 0xDBFF
 }
 
 ///|

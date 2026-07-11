@@ -44,7 +44,20 @@ test "followup content never replants planted facts" {
     for item in fixture.followup {
       let text = match item {
         User(message) => message.content()
-        Assistant(message) => message.content()
+        // Everything the projection replays to the summarizer counts:
+        // visible content, reasoning, and tool-call names and arguments all
+        // reach the second compaction request.
+        Assistant(message) => {
+          let parts = [message.content()]
+          if message.reasoning_content() is Some(reasoning) {
+            parts.push(reasoning)
+          }
+          for call in message.tool_calls() {
+            parts.push(call.name)
+            parts.push(call.arguments)
+          }
+          parts.join("\n")
+        }
         Tool(result) => result.content()
         Runtime(notice) => notice.content()
         Summary(summary) => summary.content()
