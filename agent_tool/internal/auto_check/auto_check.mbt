@@ -108,15 +108,23 @@ pub fn tally_diagnostics(text : String, truncated~ : Bool) -> CheckErrors {
       continue
     }
     let json = @json.parse(raw.to_owned()) catch { _ => continue }
-    guard json is Object(fields) else { continue }
-    match fields.get("level") {
-      Some(String("error")) => {
+    match json {
+      {
+        "level": String("error"),
+        "path"? : Some(String(path))
+        | _ with path = "",
+        "loc"? : Some(String(loc))
+        | _ with loc = "",
+        "message"? : Some(String(message))
+        | _ with message = "",
+        ..
+      } => {
         error_count = error_count + 1
         if first_errors.length() < RevertErrorDisplayLimit {
-          first_errors.push(format_diagnostic_line(fields))
+          first_errors.push(format_diagnostic_line(path, loc, message))
         }
       }
-      Some(String("warning")) => warning_count = warning_count + 1
+      { "level": String("warning"), .. } => warning_count = warning_count + 1
       _ => ()
     }
   }
@@ -127,22 +135,16 @@ pub fn tally_diagnostics(text : String, truncated~ : Bool) -> CheckErrors {
 /// Render one diagnostic object as `path:loc: message`, the same shape the
 /// human `moon check` output uses, so a reverted batch points the model
 /// straight at the offending sites.
-fn format_diagnostic_line(fields : Map[String, Json]) -> String {
-  let path = json_string_field(fields, "path")
-  let loc = json_string_field(fields, "loc")
-  let message = json_string_field(fields, "message")
+fn format_diagnostic_line(
+  path : String,
+  loc : String,
+  message : String,
+) -> String {
   let where_ = if loc == "" { path } else { "\{path}:\{loc}" }
   if message == "" {
     where_
   } else {
     "\{where_}: \{message}"
-  }
-}
-
-///|
-fn json_string_field(fields : Map[String, Json], name : String) -> String {
-  match fields.get(name) {
-    Some(String(value)) | _ with value = "" => value
   }
 }
 

@@ -34,14 +34,9 @@ const ParseErrorCodeMin : Int = 3000
 const ParseErrorCodeMax : Int = 3999
 
 ///|
-fn is_parse_error_code(fields : Map[String, Json]) -> Bool {
-  match fields.get("error_code") {
-    Some(Number(code, ..)) => {
-      let code = code.to_int()
-      code >= ParseErrorCodeMin && code <= ParseErrorCodeMax
-    }
-    _ => false
-  }
+fn is_parse_error_code(code : Double) -> Bool {
+  let code = code.to_int()
+  code >= ParseErrorCodeMin && code <= ParseErrorCodeMax
 }
 
 ///|
@@ -209,14 +204,19 @@ fn decide_parse_gate(
       continue
     }
     let json = @json.parse(raw.to_owned()) catch { _ => continue }
-    guard json is Object(fields) else { continue }
-    if fields.get("level") is Some(String("error")) &&
-      is_parse_error_code(fields) {
-      errors.push({
-        loc: json_string_field(fields, "loc"),
-        message: json_string_field(fields, "message"),
-        context: json_string_field(fields, "context"),
-      })
+    match json {
+      {
+        "level": String("error"),
+        "error_code": Number(code, ..),
+        "loc"? : Some(String(loc))
+        | _ with loc = "",
+        "message"? : Some(String(message))
+        | _ with message = "",
+        "context"? : Some(String(context))
+        | _ with context = "",
+        ..
+      } if is_parse_error_code(code) => errors.push({ loc, message, context })
+      _ => ()
     }
   }
   if errors.length() > 0 {

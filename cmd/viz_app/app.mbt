@@ -1313,27 +1313,29 @@ fn parse_session_rows(text : String) -> Array[SessionRow]? {
 
 ///|
 fn session_row_of(json : Json) -> SessionRow? {
-  guard json is Object(fields) else { return None }
-  guard fields.get("id") is Some(String(id)) else { return None }
-  let key = match fields.get("key") {
-    Some(String(value)) => value
+  guard json
+    is {
+      "id": String(id),
+      "first_prompt"? : Some(String(first_prompt))
+      | _ with first_prompt = "",
+      ..
+    } else {
+    return None
+  }
+  let key = match json {
+    { "key": String(value), .. } => value
     _ => id
   }
-  let root_label = match fields.get("root_label") {
-    Some(String(value)) => value
-    _ =>
-      match fields.get("root") {
-        Some(String(value)) | _ with value = "" => value
-      }
+  let root_label = match json {
+    { "root_label": String(value), .. } => value
+    { "root"? : Some(String(value)) | _ with value = "", .. } => value
+    _ => ""
   }
-  let first_prompt = match fields.get("first_prompt") {
-    Some(String(value)) | _ with value = "" => value
-  }
-  let last_active = match fields.get("last_active") {
-    Some(Number(value, ..)) => Some(value.to_int64())
+  let last_active = match json {
+    { "last_active": Number(value, ..), .. } => Some(value.to_int64())
     _ => None
   }
-  let is_marker = fields.get("is_marker") is Some(True)
+  let is_marker = json is { "is_marker": True, .. }
   Some({ key, id, root_label, last_active, is_marker, first_prompt })
 }
 
@@ -1344,26 +1346,19 @@ fn session_row_of(json : Json) -> SessionRow? {
 /// the model view.
 fn parse_load(text : String) -> LoadOutcome {
   let json = @json.parse(text) catch { _ => return Malformed }
-  guard json is Object(fields) else { return Malformed }
-  let found = match fields.get("found") {
-    Some(True) => true
-    Some(False) => false
-    _ => return Malformed
+  match json {
+    { "found": False, .. } => NotFound
+    { "found": True, "events": String(events_text), .. } => {
+      let parsed = @viz.parse_events(events_text)
+      let (system_prompt, header_present) = header_info(parsed)
+      let log_bytes = match json {
+        { "events_bytes": Number(value, ..), .. } => value.to_int64()
+        _ => events_text.length().to_int64()
+      }
+      Loaded(parsed, system_prompt, header_present, log_bytes)
+    }
+    _ => Malformed
   }
-  if !found {
-    return NotFound
-  }
-  let events_text = match fields.get("events") {
-    Some(String(value)) => value
-    _ => return Malformed
-  }
-  let parsed = @viz.parse_events(events_text)
-  let (system_prompt, header_present) = header_info(parsed)
-  let log_bytes = match fields.get("events_bytes") {
-    Some(Number(value, ..)) => value.to_int64()
-    _ => events_text.length().to_int64()
-  }
-  Loaded(parsed, system_prompt, header_present, log_bytes)
 }
 
 ///|

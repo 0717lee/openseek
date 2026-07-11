@@ -60,7 +60,7 @@ pub fn decode(arguments : Json) -> PlanInput raise {
       fail("arguments to have only the steps field")
     }
   }
-  guard fields.get("steps") is Some(Array(items)) else {
+  guard fields is { "steps": Array(items), .. } else {
     fail("arguments.steps to be an array of steps")
   }
   if items.length() > MAX_STEPS {
@@ -93,22 +93,23 @@ fn decode_step(index : Int, item : Json) -> PlanStep raise {
       fail("arguments.steps[\{index}] to have only title and status fields")
     }
   }
-  let raw_title = match fields.get("title") {
-    Some(String(value)) => value
-    Some(_) => fail("arguments.steps[\{index}].title to be a string")
-    None => fail("arguments.steps[\{index}].title to be present")
+  let raw_title = match fields {
+    { "title": String(value), .. } => value
+    { "title": _, .. } => fail("arguments.steps[\{index}].title to be a string")
+    _ => fail("arguments.steps[\{index}].title to be present")
   }
   let title = normalize_title(index, raw_title)
-  let status = match fields.get("status") {
-    Some(String("pending")) => PlanStatus::Pending
-    Some(String("in_progress")) => InProgress
-    Some(String("completed")) => Completed
-    Some(String(_)) =>
+  let status = match fields {
+    { "status": String("pending"), .. } => PlanStatus::Pending
+    { "status": String("in_progress"), .. } => InProgress
+    { "status": String("completed"), .. } => Completed
+    { "status": String(_), .. } =>
       fail(
         "arguments.steps[\{index}].status to be one of pending|in_progress|completed",
       )
-    Some(_) => fail("arguments.steps[\{index}].status to be a string")
-    None => fail("arguments.steps[\{index}].status to be present")
+    { "status": _, .. } =>
+      fail("arguments.steps[\{index}].status to be a string")
+    _ => fail("arguments.steps[\{index}].status to be present")
   }
   { title, status }
 }

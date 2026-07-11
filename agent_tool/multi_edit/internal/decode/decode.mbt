@@ -41,32 +41,32 @@ pub struct MultiEditArgs {
 pub fn decode_args(arguments : Json) -> MultiEditArgs raise {
   match arguments {
     Object(fields) => {
-      let inline = match fields.get("edits") {
-        Some(Array(items)) => decode_edit_array(items)
-        Some(Null) | None => []
-        Some(_) => fail("arguments.edits to be an array of edit objects")
+      let inline = match fields {
+        { "edits": Array(items), .. } => decode_edit_array(items)
+        { "edits"? : Some(Null) | None, .. } => []
+        _ => fail("arguments.edits to be an array of edit objects")
       }
-      let edits_file = match fields.get("edits_file") {
-        Some(String(path)) => Some(path)
-        Some(Null) | None => None
-        Some(_) => fail("arguments.edits_file to be a string path")
+      let edits_file = match fields {
+        { "edits_file": String(path), .. } => Some(path)
+        { "edits_file"? : Some(Null) | None, .. } => None
+        _ => fail("arguments.edits_file to be a string path")
       }
-      let revert_when_errors_above = match
-        fields.get("revert_when_errors_above") {
-        Some(Number(value, ..)) => {
+      let revert_when_errors_above = match fields {
+        { "revert_when_errors_above": Number(value, ..), .. } => {
           let int_value = value.to_int()
           if int_value.to_double() != value {
             fail("arguments.revert_when_errors_above to be an integer")
           }
           Some(int_value)
         }
-        Some(Null) | None => None
-        Some(_) => fail("arguments.revert_when_errors_above to be an integer")
+        { "revert_when_errors_above"? : Some(Null) | None, .. } => None
+        _ => fail("arguments.revert_when_errors_above to be an integer")
       }
-      let revert_on_parse_errors = match fields.get("revert_on_parse_errors") {
-        Some(True) | Some(Null) | None => true
-        Some(False) => false
-        Some(_) => fail("arguments.revert_on_parse_errors to be a boolean")
+      let revert_on_parse_errors = match fields {
+        { "revert_on_parse_errors"? : Some(True) | Some(Null) | None, .. } =>
+          true
+        { "revert_on_parse_errors": False, .. } => false
+        _ => fail("arguments.revert_on_parse_errors to be a boolean")
       }
       { inline, edits_file, revert_when_errors_above, revert_on_parse_errors }
     }

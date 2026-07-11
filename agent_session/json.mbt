@@ -131,9 +131,9 @@ pub impl FromJson for SessionItem with fn from_json(
   path : @json.JsonPath,
 ) -> SessionItem {
   let fields = expect_object(json, path)
-  let payload = match fields.get("payload") {
-    Some(payload) => payload
-    None => json_decode_error(path.add_key("payload"), "expected payload")
+  let payload = match fields {
+    { "payload": payload, .. } => payload
+    _ => json_decode_error(path.add_key("payload"), "expected payload")
   }
   match string_field(fields, path, "kind") {
     "user" => User(@json.from_json(payload, path=path.add_key("payload")))
@@ -189,12 +189,12 @@ pub impl FromJson for Session with fn from_json(
         "unsupported session version: \{other}",
       )
   }
-  let id : SessionId = match fields.get("id") {
-    Some(id) => @json.from_json(id, path=path.add_key("id"))
-    None => json_decode_error(path.add_key("id"), "expected id")
+  let id : SessionId = match fields {
+    { "id": id, .. } => @json.from_json(id, path=path.add_key("id"))
+    _ => json_decode_error(path.add_key("id"), "expected id")
   }
-  let events = match fields.get("events") {
-    Some(Array(values)) => {
+  let events = match fields {
+    { "events": Array(values), .. } => {
       let decoded : Array[SessionEvent] = [
         for index, value in values => {
           @json.from_json(value, path=path.add_key("events").add_index(index))
@@ -202,9 +202,9 @@ pub impl FromJson for Session with fn from_json(
       ]
       @vector.from_array(decoded)
     }
-    Some(_) =>
+    { "events": _, .. } =>
       json_decode_error(path.add_key("events"), "expected events array")
-    None => @vector.new()
+    _ => @vector.new()
   }
   Session(
     id,

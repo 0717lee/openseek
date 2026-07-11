@@ -68,8 +68,8 @@ fn optional_string(fields : Map[String, Json], name : String) -> String? raise {
 
 ///|
 fn reject_paths(fields : Map[String, Json]) -> Unit raise {
-  match fields.get("paths") {
-    Some(Null) | None => ()
+  match fields {
+    { "paths"? : Some(Null) | None, .. } => ()
     _ =>
       fail(
         "arguments.paths is not supported; batch separate read calls in one assistant response",

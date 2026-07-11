@@ -46,18 +46,17 @@ pub(all) enum HeaderParse {
 /// header from a format this build does not read — `UnsupportedVersion` —
 /// even though its remaining fields cannot be interpreted.
 pub fn classify_header(json : Json) -> HeaderParse {
-  guard json is Object(fields) else { return NotHeader }
-  guard fields.get("version") is Some(Number(version, ..)) else {
-    return NotHeader
+  match json {
+    { "version": Number(version, ..), .. } if version.to_int() !=
+      session_file_version => UnsupportedVersion(version.to_int())
+    {
+      "version": Number(_, ..),
+      "id": String(id),
+      "system_prompt": String(system_prompt),
+      ..
+    } => Header({ id, system_prompt })
+    _ => NotHeader
   }
-  if version.to_int() != session_file_version {
-    return UnsupportedVersion(version.to_int())
-  }
-  guard fields.get("id") is Some(String(id)) else { return NotHeader }
-  guard fields.get("system_prompt") is Some(String(system_prompt)) else {
-    return NotHeader
-  }
-  Header({ id, system_prompt })
 }
 
 ///|

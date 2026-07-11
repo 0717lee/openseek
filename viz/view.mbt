@@ -535,18 +535,14 @@ fn arg_field(key : String, value : Json) -> @html.Html {
 fn augment_with_diffs(tool_name : String, json : Json) -> Json {
   match tool_name {
     "edit" => add_edit_diff(json)
-    "multi_edit" =>
-      match json {
-        Object(fields) => {
-          if fields.get("edits") is Some(Array(items)) {
-            for item in items {
-              add_edit_diff(item) |> ignore
-            }
-          }
-          json
+    "multi_edit" => {
+      if json is { "edits": Array(items), .. } {
+        for item in items {
+          add_edit_diff(item) |> ignore
         }
-        _ => json
       }
+      json
+    }
     _ => json
   }
 }
@@ -557,8 +553,9 @@ fn augment_with_diffs(tool_name : String, json : Json) -> Json {
 /// are absent, not strings, or equal (a no-op the tool would reject anyway).
 fn add_edit_diff(json : Json) -> Json {
   guard json is Object(fields) else { return json }
-  guard fields.get("old_string") is Some(String(old)) else { return json }
-  guard fields.get("new_string") is Some(String(new)) else { return json }
+  guard json is { "old_string": String(old), "new_string": String(new), .. } else {
+    return json
+  }
   if old != new {
     fields["generated_diff"] = Json::string(generate_diff(old, new))
   }
