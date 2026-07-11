@@ -92,13 +92,27 @@ Common `moon` subcommands:
   `--target` and `--diagnostic-limit <N>`.
 - shell `moon test`: targeted or full tests; run plain `moon test` before
   `moon test --update`. Example: `moon test parser --filter "Parser::*"
-  --diagnostic-limit 5`. Filters support glob syntax.
+  --diagnostic-limit 5`. Filters support glob syntax. This is THE way to
+  exercise local package code: write a black-box `_test.mbt` test and run it
+  with `--filter` — never probe local packages through `moon run -e` (see
+  below). To keep a test but not run it, annotate it `#skip("reason")`: still
+  type-checked, but run only with `--include-skipped` (or `-i <index>`, which
+  implies it) — plain `moon test --filter` will not run it. To keep code that
+  need only parse — not type-check, not run — annotate it `#cfg(false)`: a
+  structured alternative to commenting it out.
 - shell `moon run`: executable package and CLI probes; package path goes before
   `--`, program arguments go after `--`. Example:
   `moon run --target native cmd/tomljson -- /tmp/input.toml`.
 - shell `moon run -e` or `moon run -`: quick language/API snippets.
   Verified examples: `moon run -e 'fn main { println("ok") }'`
   and `moon run - <<'EOF'`.
+  Snippets may open with a multi-line `import { ... }` block, but those
+  imports resolve ONLY from the mooncakes.io registry — never from the local
+  workspace. Probing local packages this way is always wrong: an unpublished
+  module fails with `module not found`, and if the module IS published the
+  import silently binds the STALE published snapshot instead of your working
+  tree. To exercise local package code, write a black-box test and run
+  `moon test <pkg> --filter` instead.
   `moon run -e` defaults to native on current MoonBit nightlies, but `moon run -`
   can still default to wasm-gc; pass `--target native` when stdin snippets need
   native or async support.
