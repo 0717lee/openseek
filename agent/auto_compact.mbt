@@ -156,6 +156,14 @@ async fn AgentLoop::checkpoint_at_ceiling(
     to_sequence~,
   )
   let compacted = self.append(session, item)
+  // The checkpoint's fit postcondition, as telemetry: the compacted
+  // projection is what seeds every following request, so its measured size
+  // belongs next to the checkpoint that produced it. The pressure warning
+  // uses the loop's conservative 1 char >= 1 token accounting — a
+  // projection this size could not fit a next request even under the
+  // charitable reading, meaning the summary did not actually relieve the
+  // ceiling it was generated for.
+  let projection_chars = projected_chars(compacted)
   @xlog.info() <?
     {
       "event": "auto_compaction_finished",
@@ -164,8 +172,38 @@ async fn AgentLoop::checkpoint_at_ceiling(
       "summary": summary.content,
       "usage": summary.usage,
       "duration_ms": summary.duration_ms,
+      "post_projection_chars": projection_chars,
     }
+  let window = self.client.model.context_window().to_int64()
+  if projection_chars >= window {
+    @xlog.warn() <?
+      {
+        "event": "auto_compaction_still_pressured",
+        "post_projection_chars": projection_chars,
+        "context_window": window,
+      }
+  }
   (compacted, true)
+}
+
+///|
+/// Every model-visible character of the session's projection: content,
+/// reasoning, and tool-call names and arguments. The conservative proxy
+/// (1 char >= 1 token for mostly-ASCII histories) for what the next
+/// request resends.
+fn projected_chars(session : @agent_session.Session) -> Int64 {
+  let mut total : Int64 = 0
+  for message in session.chat_messages() {
+    total += message.content.length().to_int64()
+    if message.reasoning_content is Some(reasoning) {
+      total += reasoning.length().to_int64()
+    }
+    for call in message.tool_calls {
+      total += call.name.length().to_int64() +
+        call.arguments.length().to_int64()
+    }
+  }
+  total
 }
 
 ///|

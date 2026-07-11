@@ -84,6 +84,7 @@ pub fn encode_chat_request(
   thinking? : ThinkingMode,
   stream? : Bool = false,
   response_format? : ResponseFormat,
+  max_tokens? : Int,
   model? : Model = Deepseek(V4Pro),
   messages : Array[ChatMessage],
 ) -> Json {
@@ -98,6 +99,9 @@ pub fn encode_chat_request(
           ],
         ),
         ("stream", Json::boolean(stream)),
+        ..if max_tokens is Some(limit) {
+          [("max_tokens", Json::number(limit.to_double()))]
+        },
         ..if response_format is Some(format) {
           [("response_format", ({ "type": format.to_string() } : Json))]
         },

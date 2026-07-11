@@ -289,3 +289,23 @@ test "multiple tool definitions are all encoded" {
     ],
   })
 }
+
+///|
+test "max_tokens caps the completion only when passed" {
+  let capped = @deepseek.encode_chat_request(
+    model=Deepseek(V4Flash),
+    max_tokens=8192,
+  ) <| [
+    ChatMessage(User, content="ping"),
+  ]
+  json_inspect(capped, content={
+    "model": "deepseek-v4-flash",
+    "messages": [{ "role": "user", "content": "ping" }],
+    "stream": false,
+    "max_tokens": 8192,
+  })
+  let uncapped = @deepseek.encode_chat_request(model=Deepseek(V4Flash)) <| [
+    ChatMessage(User, content="ping"),
+  ]
+  assert_false(uncapped.stringify().contains("max_tokens"))
+}
