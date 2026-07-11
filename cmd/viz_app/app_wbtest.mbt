@@ -378,6 +378,8 @@ test "theme values map to the data-theme attribute" {
 }
 
 ///|
-test "visualizer defaults to model view" {
+test "standalone exports default raw while the live viewer defaults model" {
+  assert_true(initial_view_mode(true) == RawLog)
+  assert_true(initial_view_mode(false) == ModelView)
   assert_true(init_model().view_mode == ModelView)
 }

@@ -10,6 +10,10 @@ toggle:
   summaries replace the events they cover, and tool calls left dangling by a
   crashed process show the synthesized "previous agent process exited…" marker.
 
+A standalone export opens on **Raw log** so loading an archived trace never
+appears to discard history. The live viewer retains its **Model view** default;
+either view remains available from the toggle.
+
 A Light / Dark / System theme toggle sits in the sidebar (default Light;
 System follows the OS via `prefers-color-scheme`).
 

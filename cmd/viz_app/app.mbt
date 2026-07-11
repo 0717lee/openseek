@@ -97,6 +97,18 @@ enum LoadOutcome {
 }
 
 ///|
+/// A standalone archive is primarily a complete durable trace, so open it on
+/// the append-only raw log. The live viewer keeps its established model-view
+/// default for inspecting the context sent to the next request.
+fn initial_view_mode(standalone : Bool) -> @viz.ViewMode {
+  if standalone {
+    RawLog
+  } else {
+    ModelView
+  }
+}
+
+///|
 fn init_model() -> Model {
   {
     sessions: [],
@@ -107,7 +119,7 @@ fn init_model() -> Model {
     system_prompt: "",
     header_present: false,
     log_bytes: 0L,
-    view_mode: ModelView,
+    view_mode: initial_view_mode(embedded_has("/api/sessions")),
     theme: Light,
     sidebar_visible: true,
     collapsed_roots: [],
