@@ -98,8 +98,13 @@ async fn with_jsonl_stdout(body : async () -> Unit) -> Unit {
 /// `--no-session` combined with an explicit `--session` is a contradiction
 /// every mode rejects up front, before any workspace or session work.
 fn reject_session_contradiction(matches : @argparse.Matches) -> Unit raise {
-  if @cli.flag(matches, "no-session") &&
-    @agentcli.session_id(matches) is Some(_) {
+  if matches
+    is {
+      flags: { "no-session": true, .. },
+      values: { "session": [session, ..], .. },
+      ..,
+    } &&
+    !session.trim().is_empty() {
     fail("--no-session contradicts --session; pick one behavior")
   }
 }
@@ -114,9 +119,12 @@ async fn run_task_command(matches : @argparse.Matches) -> Unit {
     // Best-of-N fleet mode owns its own workspace materialization and session
     // creation, so it branches before prepare_workspace_root (which would
     // create a single --dir).
+    let concurrency_input = match matches {
+      { values: { "concurrency": [input, ..], .. }, .. } => input
+      _ => fail("missing parsed argument: concurrency")
+    }
     let concurrency = @cli.parse_positive_int(
-      @cli.value(matches, "concurrency"),
-      "--concurrency",
+      concurrency_input, "--concurrency",
     )
     if fleet_mode(matches, concurrency) {
       run_fleet(matches, concurrency~)
@@ -124,12 +132,9 @@ async fn run_task_command(matches : @argparse.Matches) -> Unit {
     }
     let workspace_root = prepare_workspace_root(matches, log_created=true)
     let api_url = @agentcli.api_url(matches)
-    let model = @deepseek.Model::parse(@cli.value(matches, "model"))
+    let (model, thinking) = model_and_thinking(matches)
     let api_key = @agentcli.api_key(matches, model)
     let max_steps = max_steps(matches)
-    let thinking = @deepseek.ThinkingMode::parse(
-      @cli.value(matches, "thinking"),
-    )
     let task = task_text(matches)
     match resolved_session_id(matches) {
       None => {
@@ -225,8 +230,9 @@ async fn run_sessions_command(matches : @argparse.Matches) -> Unit {
 fn sessions_target_id(
   matches : @argparse.Matches,
 ) -> @agent_session.SessionId raise {
-  match @cli.values(matches, "id") {
-    [id, ..] if !id.trim().is_empty() => SessionId(id.trim().to_owned())
+  match matches {
+    { values: { "id": [id, ..], .. }, .. } if !id.trim().is_empty() =>
+      SessionId(id.trim().to_owned())
     _ => fail("a session id is required (e.g. `openseek sessions show <id>`)")
   }
 }
@@ -256,14 +262,23 @@ async fn sessions_compact(matches : @argparse.Matches) -> Unit {
   let workspace_root = prepare_workspace_root(matches, log_created=false)
   let store = @store.SessionStore(session_root(matches, workspace_root~))
   let id = sessions_target_id(matches)
-  let compact_file = @cli.require_non_empty(
-    matches, "file", "`openseek sessions compact` requires --file",
-  )
-  let from_sequence = required_positive_int(
-    @cli.value(matches, "from"),
-    "--from",
-  )
-  let to_sequence = required_positive_int(@cli.value(matches, "to"), "--to")
+  let (compact_file, from_input, to_input) = match matches {
+    {
+      values: {
+        "file": [compact_file, ..],
+        "from": [from_input, ..],
+        "to": [to_input, ..],
+        ..
+      },
+      ..,
+    } => (compact_file.trim().to_owned(), from_input, to_input)
+    _ => fail("missing parsed session compaction arguments")
+  }
+  guard !compact_file.is_empty() else {
+    fail("`openseek sessions compact` requires --file")
+  }
+  let from_sequence = required_positive_int(from_input, "--from")
+  let to_sequence = required_positive_int(to_input, "--to")
   let summary_path = @workspace_path.resolve(workspace_root, compact_file)
   let summary = @fs.read_file(summary_path).text()
   let compacted = store.compact(
@@ -297,7 +312,17 @@ async fn sessions_compact(matches : @argparse.Matches) -> Unit {
 async fn resolved_session_id(
   matches : @argparse.Matches,
 ) -> @agent_session.SessionId? {
-  match (@agentcli.session_id(matches), @cli.flag(matches, "no-session")) {
+  let no_session = match matches {
+    {
+      flags: {
+        "no-session"? : Some(no_session)
+        | None with no_session = false,
+        ..
+      },
+      ..,
+    } => no_session
+  }
+  match (@agentcli.session_id(matches), no_session) {
     (Some(_), true) =>
       fail("--no-session contradicts --session; pick one behavior")
     (Some(id), false) => Some(id)
@@ -589,15 +614,33 @@ fn explicitly_provided(matches : @argparse.Matches, name : String) -> Bool {
 }
 
 ///|
+fn model_and_thinking(
+  matches : @argparse.Matches,
+) -> (@deepseek.Model, @deepseek.ThinkingMode) raise {
+  match matches {
+    { values: { "model": [model, ..], "thinking": [thinking, ..], .. }, .. } =>
+      (@deepseek.Model::parse(model), @deepseek.ThinkingMode::parse(thinking))
+    _ => fail("missing parsed model or thinking default")
+  }
+}
+
+///|
 /// `None` — no flag, no env — means turns bounded by the model's context
 /// window (the engine's own default), not by a step count.
 fn max_steps(matches : @argparse.Matches) -> Int? raise {
-  @cli.parse_optional_positive_int(matches, "max-steps", "--max-steps")
+  match matches {
+    { values: { "max-steps": [input, ..], .. }, .. } =>
+      Some(@cli.parse_positive_int(input, "--max-steps"))
+    _ => None
+  }
 }
 
 ///|
 fn task_text(matches : @argparse.Matches) -> String raise {
-  let task = @cli.values(matches, "task").join(" ").trim()
+  let task = match matches {
+    { values: { "task": words, .. }, .. } => words.join(" ").trim()
+    _ => ""
+  }
   if task.is_empty() {
     fail("task description is required for agent runs")
   }
@@ -609,9 +652,11 @@ async fn prepare_workspace_root(
   matches : @argparse.Matches,
   log_created? : Bool = true,
 ) -> String {
-  let dir = trim_trailing_path_separators(
-    "\{@cli.value(matches, "dir").trim()}",
-  )
+  let dir_input = match matches {
+    { values: { "dir": [dir, ..], .. }, .. } => dir
+    _ => fail("missing parsed argument: dir")
+  }
+  let dir = trim_trailing_path_separators("\{dir_input.trim()}")
   if dir.is_empty() {
     fail("--dir or OPENSEEK_DIR must not be empty")
   }
@@ -668,9 +713,13 @@ fn session_root(
   matches : @argparse.Matches,
   workspace_root? : String = ".",
 ) -> String raise {
-  let root = @cli.require_non_empty(
-    matches, "session-root", "--session-root or OPENSEEK_SESSION_ROOT must not be empty",
-  )
+  let root = match matches {
+    { values: { "session-root": [root, ..], .. }, .. } => root.trim().to_owned()
+    _ => fail("missing parsed argument: session-root")
+  }
+  guard !root.is_empty() else {
+    fail("--session-root or OPENSEEK_SESSION_ROOT must not be empty")
+  }
   @workspace_path.resolve(workspace_root, root)
 }
 
@@ -748,10 +797,12 @@ priv enum SessionListFormat {
 
 ///|
 fn session_list_format(matches : @argparse.Matches) -> SessionListFormat raise {
-  match @cli.value(matches, "format") {
-    "text" => Text
-    "json" => Json
-    other => fail("--format must be text or json, got: \{other}")
+  match matches {
+    { values: { "format": ["text", ..], .. }, .. } => Text
+    { values: { "format": ["json", ..], .. }, .. } => Json
+    { values: { "format": [other, ..], .. }, .. } =>
+      fail("--format must be text or json, got: \{other}")
+    _ => fail("missing parsed argument: format")
   }
 }
 
@@ -841,8 +892,18 @@ async fn configured_system_prompt(
   model : @deepseek.Model,
   workspace_root? : String = ".",
 ) -> String {
-  let base_path = @cli.value(matches, "system-prompt-file")
-  let addendum_path = @cli.value(matches, "system-prompt-addendum-file")
+  let (base_path, addendum_path, global_skills_dir) = match matches {
+    {
+      values: {
+        "system-prompt-file": [base_path, ..],
+        "system-prompt-addendum-file": [addendum_path, ..],
+        "global-skills-dir": [global_skills_dir, ..],
+        ..
+      },
+      ..,
+    } => (base_path, addendum_path, global_skills_dir)
+    _ => fail("missing parsed system-prompt defaults")
+  }
   let base = if base_path == "" {
     @prompt.system_prompt_for_model(model)
   } else {
@@ -875,10 +936,7 @@ async fn configured_system_prompt(
   // edited), so they must sit after all globally shared text to keep it
   // prefix-cache hittable.
   match
-    skills_prompt_section_for_cwd(
-      global_dir=@cli.value(matches, "global-skills-dir"),
-      workspace_root~,
-    ) {
+    skills_prompt_section_for_cwd(global_dir=global_skills_dir, workspace_root~) {
     Some(section) =>
       (
         $|\{tail}

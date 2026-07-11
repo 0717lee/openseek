@@ -5,7 +5,6 @@ import {
 
 import {
   "bobzhang/openseek/agent_session",
-  "bobzhang/openseek/internal/cli",
   "moonbitlang/async",
   "moonbitlang/async/http",
   "moonbitlang/async/socket",

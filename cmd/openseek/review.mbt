@@ -26,8 +26,11 @@ async fn run_review_cli(
   let model = @deepseek.Deepseek(V4Pro)
   let api_key = @agentcli.api_key(matches, model)
   let max_steps = max_steps(matches)
-  let thinking = @deepseek.ThinkingMode::parse(@cli.value(matches, "thinking"))
-  let base = @cli.value(matches, "base")
+  let (thinking, base) = match matches {
+    { values: { "thinking": [thinking, ..], "base": [base, ..], .. }, .. } =>
+      (@deepseek.ThinkingMode::parse(thinking), base)
+    _ => fail("missing parsed review defaults")
+  }
   if base.trim() == "" {
     @stdio.stderr.write("review failed: --base must be a non-empty git ref\n")
     @sys.exit(1)
