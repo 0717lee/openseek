@@ -34,6 +34,35 @@ test "planted facts appear in the raw projection" {
 }
 
 ///|
+/// Follow-up items must never replant a planted fact: the decay round
+/// re-scores the ORIGINAL facts against the second summary, and a follow-up
+/// that restates a needle (or a superstring of one, like a version bumped
+/// from `0.9.2` to `0.9.2-rc1`) would let the second summary pass a fact it
+/// actually forgot.
+test "followup content never replants planted facts" {
+  for fixture in @fixture.all_fixtures() {
+    for item in fixture.followup {
+      let text = match item {
+        User(message) => message.content()
+        Assistant(message) => message.content()
+        Tool(result) => result.content()
+        Runtime(notice) => notice.content()
+        Summary(summary) => summary.content()
+        Terminal(Finished(answer)) => answer
+        Terminal(Aborted(reason) | Interrupted(reason) | Failed(reason)) =>
+          reason
+      }
+      for fact in fixture.facts {
+        assert_false(
+          text.contains(fact.needle),
+          msg="fixture \{fixture.name} followup replants \{fact.label} (\{fact.needle}): \{text}",
+        )
+      }
+    }
+  }
+}
+
+///|
 /// The follow-up items for the decay round must append cleanly onto a
 /// compacted session and end with a terminal, so the second checkpoint
 /// request sees a well-formed tail.

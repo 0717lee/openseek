@@ -141,16 +141,47 @@ fn score_facts(
 }
 
 ///|
-/// True when the answer contains any accepted phrasing, compared
-/// ASCII-case-insensitively.
+/// True when the answer contains any accepted phrasing as a standalone
+/// token, compared ASCII-case-insensitively. Plain substring matching
+/// scores "yes, it is now fixed" as containing "no"; the boundary check
+/// rejects matches embedded in a longer word or number.
 fn answer_accepted(answer : String, accept : Array[String]) -> Bool {
   let lowered = ascii_lower(answer)
   for needle in accept {
-    if lowered.contains(ascii_lower(needle)) {
+    if contains_token(lowered, ascii_lower(needle)) {
       return true
     }
   }
   false
+}
+
+///|
+/// True when `needle` occurs in `haystack` delimited by non-word characters
+/// or the string edges: "no" must not match inside "now" or "unknown", and
+/// "cli/emit.mbt:42" must not match "cli/emit.mbt:428".
+fn contains_token(haystack : String, needle : String) -> Bool {
+  guard !needle.is_empty() else { return false }
+  let mut base = 0
+  while haystack[base:].find(needle) is Some(offset) {
+    let start = base + offset
+    let end = start + needle.length()
+    let left_ok = start == 0 || !is_word_char(haystack[start - 1].to_int())
+    let right_ok = end == haystack.length() ||
+      !is_word_char(haystack[end].to_int())
+    if left_ok && right_ok {
+      return true
+    }
+    base = start + 1
+  }
+  false
+}
+
+///|
+/// Whether a UTF-16 code unit is an ASCII letter or digit.
+fn is_word_char(code : Int) -> Bool {
+  (code >= 'a'.to_int() && code <= 'z'.to_int()) ||
+  (code >= 'A'.to_int() && code <= 'Z'.to_int()) ||
+  (code >= '0'.to_int() && code <= '9'.to_int())
 }
 
 ///|

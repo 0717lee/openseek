@@ -193,7 +193,7 @@ pub fn redirect_fixture() -> Fixture {
     followup: [
       User(
         UserMessage(
-          "Also bump the version string to 0.9.2-rc1 in cmd/version.mbt.",
+          "Also bump the version string to 1.0.0-rc1 in cmd/version.mbt.",
         ),
       ),
       Assistant(
@@ -209,10 +209,10 @@ pub fn redirect_fixture() -> Fixture {
         ToolResult(
           tool_call_id="call_5",
           tool_name="edit",
-          content="edited cmd/version.mbt: version = \"0.9.2-rc1\"",
+          content="edited cmd/version.mbt: version = \"1.0.0-rc1\"",
         ),
       ),
-      Terminal(Finished("Version bumped to 0.9.2-rc1.")),
+      Terminal(Finished("Version bumped to 1.0.0-rc1.")),
     ],
   }
 }
