@@ -1,25 +1,33 @@
 ///|
-/// Reads an integer-valued field from a JSON object, returning 0 when the field
-/// is absent or is not a number.
-fn json_object_int(json : Json, key : String) -> Int {
+fn Usage::from_json(
+  json : Json,
+  path : @json.JsonPath,
+) -> Usage raise @json.JsonDecodeError {
   match json {
-    Object(fields) =>
-      match fields.get(key) {
-        Some(Number(n, ..)) => n.to_int()
-        _ => 0
+    {
+      "prompt_tokens"? : Some(Number(prompt_tokens, ..))
+      | None with prompt_tokens = 0,
+      "completion_tokens"? : Some(Number(completion_tokens, ..))
+      | None with completion_tokens = 0,
+      "total_tokens"? : Some(Number(total_tokens, ..))
+      | None with total_tokens = 0,
+      "prompt_cache_hit_tokens"? : Some(Number(prompt_cache_hit_tokens, ..))
+      | None with prompt_cache_hit_tokens = 0,
+      "prompt_cache_miss_tokens"? : Some(Number(prompt_cache_miss_tokens, ..))
+      | None with prompt_cache_miss_tokens = 0,
+      ..
+    } =>
+      {
+        prompt_tokens: prompt_tokens.to_int(),
+        completion_tokens: completion_tokens.to_int(),
+        total_tokens: total_tokens.to_int(),
+        prompt_cache_hit_tokens: prompt_cache_hit_tokens.to_int(),
+        prompt_cache_miss_tokens: prompt_cache_miss_tokens.to_int(),
       }
-    _ => 0
-  }
-}
-
-///|
-fn Usage::from_json(json : Json) -> Usage {
-  {
-    prompt_tokens: json_object_int(json, "prompt_tokens"),
-    completion_tokens: json_object_int(json, "completion_tokens"),
-    total_tokens: json_object_int(json, "total_tokens"),
-    prompt_cache_hit_tokens: json_object_int(json, "prompt_cache_hit_tokens"),
-    prompt_cache_miss_tokens: json_object_int(json, "prompt_cache_miss_tokens"),
+    _ =>
+      json_decode_error(
+        path, "Usage::from_json: expected object with numeric fields",
+      )
   }
 }
 
@@ -44,13 +52,13 @@ fn[T] json_decode_error(
 
 ///|
 /// Public so wire consumers (the TUI decodes the engine's `usage` log event)
-/// can round-trip the same schema `ToJson` emits. Lenient by design: absent
-/// or malformed fields decode as 0, and no shape ever raises.
+/// can round-trip the same schema `ToJson` emits. Absent counters decode as 0;
+/// malformed counters or a non-object value raise `JsonDecodeError`.
 pub impl FromJson for Usage with fn from_json(
   json : Json,
-  _path : @json.JsonPath,
+  path : @json.JsonPath,
 ) -> Usage {
-  Usage::from_json(json)
+  Usage::from_json(json, path)
 }
 
 ///|
@@ -94,11 +102,9 @@ pub impl FromJson for ChatResponse with fn from_json(
   let (message_fields, usage_json) : (Map[String, Json], Json?) = match json {
     {
       "choices": [{ "message": Object(message_fields), .. }, ..],
-      "usage": usage_json,
+      "usage"? : usage_json,
       ..
-    } => (message_fields, Some(usage_json))
-    { "choices": [{ "message": Object(message_fields), .. }, ..], .. } =>
-      (message_fields, None)
+    } => (message_fields, usage_json)
     { "choices": [], .. } =>
       json_decode_error(
         path.add_key("choices"),
@@ -142,14 +148,14 @@ pub impl FromJson for ChatResponse with fn from_json(
     _ => []
   }
   let content = match message_fields {
-    { "content": String(content), .. } => content
-    { "content": Null, .. } => ""
-    { "content": _, .. } =>
+    { "content"? : Some(String(content)) | Some(Null) with content = "", .. } =>
+      content
+    { "content"? : None, .. } if tool_calls.length() > 0 => ""
+    { "content"? : None, .. } =>
       json_decode_error(
         message_path.add_key("content"),
         "ChatResponse::from_json: expected message content",
       )
-    _ if tool_calls.length() > 0 => ""
     _ =>
       json_decode_error(
         message_path.add_key("content"),
@@ -157,14 +163,17 @@ pub impl FromJson for ChatResponse with fn from_json(
       )
   }
   let reasoning_content = match message_fields {
-    { "reasoning_content": String(reasoning_content), .. } => reasoning_content
-    { "reasoning_content": Null, .. } => ""
-    { "reasoning_content": _, .. } =>
+    {
+      "reasoning_content"? : Some(String(reasoning_content))
+      | (Some(Null)
+      | None) with reasoning_content = "",
+      ..
+    } => reasoning_content
+    _ =>
       json_decode_error(
         message_path.add_key("reasoning_content"),
         "ChatResponse::from_json: expected reasoning_content string",
       )
-    _ => ""
   }
   let usage = match usage_json {
     Some(usage) => FromJson::from_json(usage, path.add_key("usage"))
