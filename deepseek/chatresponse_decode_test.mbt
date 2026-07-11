@@ -56,6 +56,32 @@ test "chat response decode allows tool call without content or usage" {
 }
 
 ///|
+test "chat response decode rejects present null usage" {
+  try
+    decode_chat_response(
+      (
+        #|{"choices":[{"message":{"content":"ok"}}],"usage":null}
+      ),
+    )
+  catch {
+    e =>
+      debug_inspect(
+        e,
+        content=(
+          #|JsonDecodeError(
+          #|  (
+          #|    Key(Root, key="usage"),
+          #|    "Usage::from_json: expected object with numeric fields",
+          #|  ),
+          #|)
+        ),
+      )
+  } noraise {
+    _ => fail("expected present null usage to fail")
+  }
+}
+
+///|
 test "chat response decode keeps multiple tool calls in order" {
   let response = decode_chat_response(
     (
