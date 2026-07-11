@@ -278,6 +278,21 @@
     .step-seg.has-error { background: var(--error); opacity: .45; }
     .step-seg.has-error:hover { background: var(--error); opacity: 1; }
     .step-seg.current { background: var(--accent); }
+    /* instant hover tooltip (positioned by the shell): "Step N/M" */
+    .scrubber-tip {
+      position: fixed;
+      z-index: 20;
+      pointer-events: none;
+      padding: 3px 9px;
+      background: var(--panel);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, .18);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 11px;
+      white-space: nowrap;
+    }
 
     /* anchored cards scroll to just below the sticky toolbar */
     [id^="seq-"] { scroll-margin-top: 105px; }

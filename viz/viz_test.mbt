@@ -1364,7 +1364,11 @@ test "step scrubber marks steps and their failures" {
   assert_eq(occurrences(html, "data-seq="), 2)
   assert_true(html.contains("data-seq=\"2\""))
   assert_true(html.contains("data-seq=\"4\""))
-  assert_true(html.contains("title=\"Step 1/2\""))
+  // Hover labels ride data-label (instant shell tooltip, not native title);
+  // the failing step's label names the failure.
+  assert_true(html.contains("data-label=\"Step 1/2 · has failures\""))
+  assert_true(html.contains("data-label=\"Step 2/2\""))
+  assert_false(html.contains("title="))
   // Only the first step's range contains the failed result.
   assert_eq(occurrences(html, "step-seg has-error"), 1)
   // A one-step session has nothing to scrub.

@@ -528,6 +528,29 @@ extern "js" fn install_position_tracker() -> Unit =
   #|    history.replaceState(null, '', '#' + params.toString());
   #|    el.scrollIntoView({ block: 'start' });
   #|  });
+  #|  // Instant scrubber tooltip: shows each segment's data-label ("Step
+  #|  // N/M[ · has failures]") the moment the pointer touches it — a native
+  #|  // title tooltip would lag behind the OS hover delay while sweeping.
+  #|  const tip = document.createElement('div');
+  #|  tip.className = 'scrubber-tip';
+  #|  tip.style.display = 'none';
+  #|  document.body.appendChild(tip);
+  #|  const hideTip = () => { tip.style.display = 'none'; };
+  #|  document.addEventListener('mouseover', (event) => {
+  #|    if (!(event.target instanceof Element)) return hideTip();
+  #|    const seg = event.target.closest('.step-seg');
+  #|    if (!seg || !seg.dataset.label) return hideTip();
+  #|    tip.textContent = seg.dataset.label;
+  #|    tip.style.display = 'block';
+  #|    const rect = seg.getBoundingClientRect();
+  #|    const x = Math.min(
+  #|      Math.max(rect.left + rect.width / 2 - tip.offsetWidth / 2, 8),
+  #|      window.innerWidth - tip.offsetWidth - 8,
+  #|    );
+  #|    tip.style.left = x + 'px';
+  #|    tip.style.top = (rect.bottom + 6) + 'px';
+  #|  });
+  #|  document.addEventListener('scroll', hideTip, { capture: true, passive: true });
   #|}
 
 ///|

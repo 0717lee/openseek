@@ -1293,17 +1293,22 @@ pub fn step_scrubber(session : @agent_session.Session) -> @html.Html {
     return @html.nothing
   }
   let flagged = steps_with_errors(session, seqs)
-  @html.div(class="step-scrubber", title="Steps — click to jump") <| [
+  // Labels ride a data attribute, not `title`: the shell shows them in an
+  // instant tooltip that follows the pointer across the bar, where a native
+  // title tooltip only appears after the OS hover delay (and would double up
+  // with the custom one).
+  @html.div(class="step-scrubber") <| [
     for index, seq in seqs => {
-      let cls = if flagged.contains(index) {
-        "step-seg has-error"
+      let (cls, label) = if flagged.contains(index) {
+        ("step-seg has-error", "Step \{index + 1}/\{total} · has failures")
       } else {
-        "step-seg"
+        ("step-seg", "Step \{index + 1}/\{total}")
       }
       @html.span(
         class=cls,
-        title="Step \{index + 1}/\{total}",
-        attrs=@html.Attrs::build().data_set("seq", "\{seq}"),
+        attrs=@html.Attrs::build()
+          .data_set("seq", "\{seq}")
+          .data_set("label", label),
       ) <| ""
     }
   ]
