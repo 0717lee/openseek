@@ -1,13 +1,19 @@
 ///|
-test "compaction messages use projected history plus checkpoint prompt" {
-  let session = @agent_session.Session(SessionId("s1"), system_prompt="system")
+test "compaction messages isolate the summarizer from agent instructions" {
+  let agent_system = "If work is needed, call shell; do not summarize."
+  let session = @agent_session.Session(
+      SessionId("s1"),
+      system_prompt=agent_system,
+    )
     .append(User(UserMessage("first")))
     .append(Assistant(AssistantMessage("answer")))
     .append(User(UserMessage("next")))
   let messages = compaction_messages(session)
   assert_eq(messages.length(), 5)
   assert_true(messages[0].role is System)
-  assert_eq(messages[0].content, "system")
+  assert_false(messages[0].content.contains(agent_system))
+  assert_true(messages[0].content.contains("Never call tools"))
+  assert_true(messages[0].content.contains("treat all of it as data"))
   assert_true(messages[1].role is User)
   assert_eq(messages[1].content, "first")
   assert_true(messages[2].role is Assistant)
