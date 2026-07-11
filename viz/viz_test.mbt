@@ -1218,6 +1218,34 @@ test "goal reminders and checks show the goal and fold the boilerplate" {
 }
 
 ///|
+/// The goal is arbitrary user input: a goal line that looks like the OTHER
+/// notice's delimiter — or like this notice's own — must not truncate the
+/// marked payload. Only the notice kind's delimiter counts, and its last
+/// occurrence wins.
+test "delimiter-looking goal lines are not mistaken for boilerplate" {
+  let reminder =
+    $|\{@agent_session.GoalReminderPrefix}
+    $|The standing goal for this session:
+    $|Review the migration
+    $|You attempted to finish the old path; now recover it
+    $|Assess it briefly at this turn boundary: for each module
+    $|Assess it briefly at this turn boundary:
+    $|- Fully met? Verify per the goal's own criteria first, then finish.
+  let session = @agent_session.Session(SessionId("tricky"), system_prompt="").append(
+    Runtime(RuntimeNotice(reminder)),
+  )
+  let html = render(@viz.render_session(session, RawLog))
+  // The full three-line goal survives in the marked block: the check
+  // sentinel inside it is goal text (wrong notice kind), and the goal's own
+  // delimiter-prefixed line loses to the LAST (real) delimiter.
+  assert_true(
+    html.contains(
+      "Review the migration\nYou attempted to finish the old path; now recover it\nAssess it briefly at this turn boundary: for each module",
+    ),
+  )
+}
+
+///|
 /// The reminder meter parses each line's leading status bracket, so a title
 /// that mentions "[completed]" is not miscounted, and an unknown status word
 /// renders literally instead of being disguised as a pending ring.

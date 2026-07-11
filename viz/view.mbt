@@ -364,11 +364,23 @@ fn runtime_card(seq : Int, time : String, content : String) -> @html.Html {
   }
   if content.has_prefix(@agent_session.GoalReminderPrefix) {
     return goal_notice_card(
-      "goal-reminder", "Goal reminder", seq, time, content,
+      "goal-reminder",
+      "Goal reminder",
+      seq,
+      time,
+      content,
+      boilerplate="Assess it briefly at this turn boundary:",
     )
   }
   if content.has_prefix(@agent_session.GoalCheckPrefix) {
-    return goal_notice_card("goal-check", "Goal check", seq, time, content)
+    return goal_notice_card(
+      "goal-check",
+      "Goal check",
+      seq,
+      time,
+      content,
+      boilerplate="You attempted to finish.",
+    )
   }
   card("runtime", "Runtime notice", seq, time~, [text_block(content)])
 }
@@ -410,8 +422,10 @@ fn goal_notice_card(
   seq : Int,
   time : String,
   content : String,
+  boilerplate~ : String,
 ) -> @html.Html {
-  let body : Array[@html.Html] = match split_goal_notice(content) {
+  let body : Array[@html.Html] = match
+    split_goal_notice(content, boilerplate~) {
     Some(goal) =>
       [
         goal_text_block(goal),
@@ -427,25 +441,22 @@ fn goal_notice_card(
 
 ///|
 /// The goal text inside a reminder/check notice: the lines between the
-/// "The standing goal for this session:" header and the first boilerplate
-/// line ("Assess it briefly…" for reminders, "You attempted to finish…" for
-/// checks — mirroring `goal_reminder_text` / `goal_check_text` in `agent`).
-/// `None` when the shape is not recognized.
-fn split_goal_notice(content : String) -> String? {
+/// "The standing goal for this session:" header and this notice kind's own
+/// boilerplate delimiter (mirroring `goal_reminder_text` / `goal_check_text`
+/// in `agent`). The goal is arbitrary user input and may itself contain
+/// delimiter-looking lines, so only the caller's delimiter is recognized and
+/// its LAST occurrence wins — the loop appends the instructions after the
+/// goal, so everything above that line is goal text. `None` when the shape
+/// is not recognized.
+fn split_goal_notice(content : String, boilerplate~ : String) -> String? {
   let lines = string_lines(content)
   guard lines.length() >= 3 && lines[1] == "The standing goal for this session:" else {
     return None
   }
-  let goal : Array[String] = []
-  for line in lines[2:] {
-    if line.has_prefix("Assess it briefly") ||
-      line.has_prefix("You attempted to finish") {
-      if goal.is_empty() {
-        return None
-      }
-      return Some(goal.join("\n").trim().to_owned())
+  for index = lines.length() - 1; index > 2; index = index - 1 {
+    if lines[index].has_prefix(boilerplate) {
+      return Some(lines[2:index].join("\n").trim().to_owned())
     }
-    goal.push(line)
   }
   None
 }
