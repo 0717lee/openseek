@@ -15,15 +15,17 @@
 /// Each removal carries a required `reason`, recorded in the (durable) result so
 /// a destructive action can be audited later.
 ///
-/// `Created` is advisory, not a bare delete capability (see `FileStateMap`). Two
-/// guards keep the gate honest: this tool drops the provenance when it removes a
-/// file (`forget`), so a path recreated after a removal is no longer seen as
-/// agent-created; and the kind check does not follow symlinks, so a path replaced
-/// by a link is refused rather than followed. The map is keyed by the same
-/// resolved path `write` used, so an unrecognized spelling reads as unknown and
-/// is conservatively refused. The narrow residual — an external process replacing
-/// an un-removed `Created` file in place — is left to a later hardening (stored
-/// file identity, or soft-delete).
+/// `Created` alone is not a delete capability (see `FileStateMap`). Three guards
+/// keep the gate honest: the gate is `created_and_unchanged`, which pairs the
+/// `Created` provenance with a content digest — `remove` reads the file back and
+/// hashes it, so a path rebound to different content since the agent wrote it (a
+/// `git checkout` restoring a tracked file, a `mv` onto the path) is refused, and
+/// an `edit` cannot launder a rebind into a deletable `Created` (`record_edited`
+/// downgrades it); this tool drops the provenance when it removes a file
+/// (`forget`), so a path recreated after a removal reads as unknown; and the kind
+/// check does not follow symlinks, so a path replaced by a link is refused rather
+/// than followed. The digest is a content version — a byte-identical different
+/// file passes, which is harmless — suited to the cooperative environment.
 ///
 /// ## Result
 /// - `Respond(ToolOutput("ok: removed <path> (reason: <reason>)"))` when the file
@@ -31,7 +33,8 @@
 ///   feedback.
 /// - `Respond(ToolOutput("error removing <path>: <reason>", is_error=true))` for
 ///   a missing file, a non-regular file, a file the agent did not create this
-///   session, or a filesystem failure.
+///   session (or created but whose content has changed since), or a filesystem
+///   failure.
 /// - `Respond(ToolOutput("error: remove requires ...", is_error=true))` for
 ///   invalid arguments.
 pub fn definition(
@@ -109,13 +112,31 @@ async fn remove_file(
   guard kind is Regular else {
     return err("not a regular file; remove deletes regular files")
   }
-  // The gate: only a file the agent CREATED this session may be removed.
-  // `record_modified` never downgrades `Created`, so a file the agent created and
-  // then edited still qualifies; a file it only modified, or never touched, does
-  // not.
+  // The gate is two steps. First the CHEAP provenance check: a path the agent
+  // never created (or only modified) is rejected without reading the file — so a
+  // mistaken call against a large or binary pre-existing asset does not load and
+  // decode it just to reject it.
   guard file_state.get(path) is Some(Created) else {
     return err(
       "not created by the agent this session — only a file the agent itself created this session can be removed; change existing source with edit/multi_edit",
+    )
+  }
+  // It IS recorded `Created`. Now confirm its CONTENT is still what the agent
+  // wrote: read the file back and digest it. A path rebound to different content
+  // since the agent wrote it (a `git checkout` restoring a tracked file, a `mv`)
+  // fails this and is refused. `record_edited` already downgrades a `Created`
+  // file rebound before an edit, so an edit cannot launder a rebind either.
+  let current_text = @fs.read_file(path).text() catch {
+    error if @async.is_being_cancelled() => raise error
+    error =>
+      return err("could not read the file to verify its identity: \{error}")
+  }
+  guard file_state.created_and_unchanged(
+    path,
+    @agent_tool.content_digest(current_text),
+  ) else {
+    return err(
+      "the agent created this file this session but its content has changed since (rebound or externally modified) — refusing to remove what may no longer be the file it created",
     )
   }
   @fs.remove(path) catch {
@@ -135,6 +156,18 @@ async fn remove_file(
     content,
     brief=@agent_tool.brief_line("removed \{input.path}"),
   )
+}
+
+///|
+/// The digest `remove` will compute for the file at `path` — read it back and
+/// hash it — so a test records the same identity the delete gate revalidates
+/// against. Returns `""` for a path that cannot be read (e.g. a missing-file
+/// test, where the gate is never reached).
+async fn recorded_digest(path : String) -> String {
+  @agent_tool.content_digest(@fs.read_file(path).text()) catch {
+    error if @async.is_being_cancelled() => raise error
+    _ => ""
+  }
 }
 
 ///|
@@ -161,7 +194,7 @@ async test "remove deletes a file the agent created this session, recording why"
     )
     // The map records the create, as `write` would have.
     let state = @agent_tool.FileStateMap::new()
-    state.record_created(path)
+    state.record_created(path, recorded_digest(path))
     let result = run_remove(state, {
       "path": path,
       "reason": "scratch no longer needed",
@@ -188,8 +221,8 @@ async test "remove keeps deleting a created file it later edited" {
     )
     let state = @agent_tool.FileStateMap::new()
     // Created then modified this session: record_modified must not downgrade it.
-    state.record_created(path)
-    state.record_modified(path)
+    state.record_created(path, recorded_digest(path))
+    state.record_modified(path, recorded_digest(path))
     let result = run_remove(state, { "path": path, "reason": "undo" })
     guard result is Respond(output) else { fail("expected Respond") }
     assert_false(output.is_error)
@@ -205,7 +238,7 @@ async test "remove deletes a non-source file the agent created" {
     let path = "\{dir}/notes.txt"
     @fs.write_file(path, "scratch", create_mode=CreateOrTruncate)
     let state = @agent_tool.FileStateMap::new()
-    state.record_created(path)
+    state.record_created(path, recorded_digest(path))
     let result = run_remove(state, { "path": path, "reason": "temp file" })
     guard result is Respond(output) else { fail("expected Respond") }
     assert_false(output.is_error)
@@ -244,7 +277,7 @@ async test "remove refuses a file the agent only modified" {
       create_mode=CreateOrTruncate,
     )
     let state = @agent_tool.FileStateMap::new()
-    state.record_modified(path)
+    state.record_modified(path, recorded_digest(path))
     let result = run_remove(state, { "path": path, "reason": "cleanup" })
     guard result is Respond(output) else { fail("expected Respond") }
     assert_true(output.is_error)
@@ -256,11 +289,37 @@ async test "remove refuses a file the agent only modified" {
 }
 
 ///|
+async test "remove refuses a created file whose identity no longer matches" {
+  @vfs.with_tmpdir(dir => {
+    let path = "\{dir}/lib.mbt"
+    @fs.write_file(
+      path,
+      "pub fn f() -> Int { 1 }\n",
+      create_mode=CreateOrTruncate,
+    )
+    let state = @agent_tool.FileStateMap::new()
+    // Record a digest that cannot match the file's actual content, standing in
+    // for a path rebound to a DIFFERENT file since the agent wrote it (e.g. a
+    // `git checkout` restoring a tracked file). The gate must refuse rather than
+    // delete what may no longer be the agent's file.
+    state.record_created(
+      path,
+      @agent_tool.content_digest("different content\n"),
+    )
+    let result = run_remove(state, { "path": path, "reason": "cleanup" })
+    guard result is Respond(output) else { fail("expected Respond") }
+    assert_true(output.is_error)
+    assert_true(output.content.contains("content has changed since"))
+    assert_true(@fs.exists(path))
+  })
+}
+
+///|
 async test "remove reports a missing file" {
   @vfs.with_tmpdir(dir => {
     let path = "\{dir}/ghost.mbt"
     let state = @agent_tool.FileStateMap::new()
-    state.record_created(path)
+    state.record_created(path, recorded_digest(path))
     let result = run_remove(state, { "path": path, "reason": "cleanup" })
     guard result is Respond(output) else { fail("expected Respond") }
     assert_true(output.is_error)
@@ -274,7 +333,7 @@ async test "remove refuses a directory" {
     let path = "\{dir}/pkg.mbt"
     @fs.mkdir(path, recursive=true)
     let state = @agent_tool.FileStateMap::new()
-    state.record_created(path)
+    state.record_created(path, recorded_digest(path))
     let result = run_remove(state, { "path": path, "reason": "cleanup" })
     guard result is Respond(output) else { fail("expected Respond") }
     assert_true(output.is_error)
@@ -293,7 +352,7 @@ async test "remove refuses a path recreated after an earlier removal" {
       create_mode=CreateOrTruncate,
     )
     let state = @agent_tool.FileStateMap::new()
-    state.record_created(path)
+    state.record_created(path, recorded_digest(path))
     // The first removal succeeds and drops the provenance.
     let first = run_remove(state, { "path": path, "reason": "undo" })
     guard first is Respond(ok) else { fail("expected Respond") }
@@ -329,7 +388,7 @@ async test "remove refuses a path replaced by a symlink" {
     let link = "\{dir}/alias.mbt"
     @fs.symlink(target~, link)
     let state = @agent_tool.FileStateMap::new()
-    state.record_created(link)
+    state.record_created(link, recorded_digest(link))
     let result = run_remove(state, { "path": link, "reason": "cleanup" })
     guard result is Respond(output) else { fail("expected Respond") }
     assert_true(output.is_error)
@@ -360,7 +419,7 @@ async test "remove rejects a missing reason" {
       create_mode=CreateOrTruncate,
     )
     let state = @agent_tool.FileStateMap::new()
-    state.record_created(path)
+    state.record_created(path, recorded_digest(path))
     // A destructive action must carry a rationale — no delete without one.
     let result = run_remove(state, { "path": path })
     guard result is Respond(output) else { fail("expected Respond") }
@@ -380,7 +439,7 @@ async test "remove rejects a blank reason" {
       create_mode=CreateOrTruncate,
     )
     let state = @agent_tool.FileStateMap::new()
-    state.record_created(path)
+    state.record_created(path, recorded_digest(path))
     // A whitespace-only rationale would produce an empty audit entry, so it is
     // rejected just like a missing one. Includes Unicode whitespace (a
     // non-breaking and an ideographic space) that ASCII `trim` would miss.

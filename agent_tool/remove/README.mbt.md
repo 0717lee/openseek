@@ -29,30 +29,30 @@ is recorded in the (durable) success message — `ok: removed <path> (reason:
 
 ## Safety Model
 
-`Created` is treated as an **advisory** signal, not a bare delete capability
-(see the [`FileStateMap`](../file_state.mbt) docs). Two guards keep the gate
-honest on top of the `Created` check:
+`Created` alone is not a delete capability (see the
+[`FileStateMap`](../file_state.mbt) docs). Three guards gate a removal:
 
+- **Content revalidation.** The gate is `created_and_unchanged`, which pairs the
+  `Created` provenance with a content digest (SHA-256) of what the agent last
+  wrote. `remove` reads the file back at delete time, hashes it, and refuses on a
+  mismatch, so a path *rebound to different content* since the agent wrote it — a
+  `git checkout -- x.mbt` restoring a tracked file the agent had recreated, or a
+  `mv` onto the path — is not deleted. And a targeted `edit` cannot launder a
+  rebind: `record_edited` downgrades a `Created` file whose pre-edit content is
+  not what the agent last wrote. A read failure at delete time also refuses.
 - **Forget on delete.** After a successful removal the provenance is dropped
-  (`FileStateMap::forget`), so if the same path is later recreated by something
-  other than the agent's tools, a second `remove` sees it as unknown and
-  refuses — it never deletes a different file that happens to land at a path the
-  agent once created.
-- **No symlink following.** The regular-file check uses
-  `follow_symlink=false`, so a path that was a file when `write` recorded it but
-  has since been replaced by a symlink is refused rather than followed to its
-  target.
+  (`FileStateMap::forget`), so a path recreated after a removal reads as unknown
+  and a second `remove` refuses it.
+- **No symlink following.** The regular-file check uses `follow_symlink=false`,
+  so a path replaced by a symlink is refused rather than followed to its target.
 
-The residual the guards do not cover is a path replaced *in place* while it sits
-un-removed, without going through the agent's tools — so `FileStateMap` keeps the
-stale `Created`. This is possible for any file type, source included: the sandbox
-blocks a direct shell write or move onto a source path, but a permitted operation
-can still rebind a created path without updating the map — a `git checkout --
-x.mbt` restoring a tracked file the agent had recreated, or a `shell mv` onto a
-non-source path. Closing it needs stored file identity (revalidate the file at
-delete time) or recoverable/soft deletion; that hardening is deferred. Keys are
-the exact resolved path `write` used, so an unrecognized spelling reads as
-unknown and is conservatively refused rather than risking a wrong-file
+The digest is captured from the content the tools already hold in memory — so
+identity capture never stats the filesystem and never races cancellation — and,
+being a content *version*, it cannot collide the way coarse-resolution or
+`mv`-preserved mtimes can. A different file with byte-identical content passes,
+which is harmless (deleting identical bytes deletes the agent's own content).
+Keys are the exact resolved path `write` used, so an unrecognized spelling reads
+as unknown and is conservatively refused rather than risking a wrong-file
 deletion.
 
 ## Arguments
@@ -107,9 +107,13 @@ async test "remove deletes an agent-created file through the registry" {
       "pub fn f() -> Int { 1 }\n",
       create_mode=CreateOrTruncate,
     )
-    // The session recorded that the agent created this file, as `write` would.
+    // The session recorded that the agent created this file, as `write` would,
+    // capturing its content digest so the delete gate can revalidate it.
     let file_state = @agent_tool.FileStateMap::new()
-    file_state.record_created(path)
+    file_state.record_created(
+      path,
+      @agent_tool.content_digest(@fs.read_file(path).text()),
+    )
     let tools = @agent_tool.Tools([@remove.definition(file_state~)])
     // Build the arguments as JSON and stringify: a Windows temp path would
     // otherwise form an invalid escape inside a JSON string literal.

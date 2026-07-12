@@ -42,6 +42,38 @@ async test "edit records the file it changed as Modified" {
 }
 
 ///|
+async test "edit downgrades a Created file that was rebound before the edit" {
+  @vfs.with_tmpdir(dir => {
+    let path = "\{dir}/lib.mbt"
+    // The agent created this path with content A (recorded), but the file on disk
+    // is now different content B — as if a `git checkout` rebound it. Editing B
+    // must NOT keep `Created`: the result is mostly B, not the agent's file.
+    @fs.write_file(
+      path,
+      "pub fn b() -> Int { 2 }\n",
+      create_mode=CreateOrTruncate,
+    )
+    let state = @agent_tool.FileStateMap::new()
+    state.record_created(
+      path,
+      @agent_tool.content_digest("pub fn a() -> Int { 1 }\n"),
+    )
+    let run = match @edit.definition(file_state=state).execute {
+      Async(execute) => execute
+      Sync(_) => fail("edit tool should be async")
+    }
+    let _ = run({
+      "path": path,
+      "old_string": "2",
+      "new_string": "3",
+      "start_line": 1,
+    })
+    // The edit read content B, not the agent's recorded A, so Created is dropped.
+    assert_true(state.get(path) is Some(Modified))
+  })
+}
+
+///|
 async test "a failed edit names the file in its brief" {
   @vfs.with_tmpdir(dir => {
     // Editing a missing file fails; the error still briefs the target file so

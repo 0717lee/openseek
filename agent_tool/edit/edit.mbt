@@ -214,10 +214,15 @@ async fn commit_edit(
   }
   try {
     @fs.write_file(path, new_content, create_mode=CreateOrTruncate)
-    // An edit always changes a file that already existed (its content was read
-    // above), so record it as modified — record_modified preserves a stronger
-    // `Created` state if the agent created this file earlier this session.
-    file_state.record_modified(path)
+    // A targeted edit preserves most of the file, so provenance depends on
+    // whether the content it read (original_content) is still what the agent last
+    // wrote: record_edited keeps a stronger `Created` only then, and otherwise
+    // downgrades (the file was rebound to different content before this edit).
+    file_state.record_edited(
+      path,
+      @agent_tool.content_digest(original_content),
+      @agent_tool.content_digest(new_content),
+    )
     let response = @auto_check.append_summary(path, summary)
     @agent_tool.ToolAction::respond(response, brief=ok_brief)
   } catch {

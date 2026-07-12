@@ -11,6 +11,8 @@ pub fn brief_basename(String) -> String
 
 pub fn brief_line(String, limit? : Int) -> String
 
+pub fn content_digest(String) -> String
+
 pub async fn execute_tool_call(AgentToolCall, Tools) -> ToolAction
 
 // Errors
@@ -45,11 +47,13 @@ pub(all) enum FileState {
 pub struct FileStateMap {
   // private fields
 }
+pub fn FileStateMap::created_and_unchanged(Self, String, String) -> Bool
 pub fn FileStateMap::forget(Self, String) -> Unit
 pub fn FileStateMap::get(Self, String) -> FileState?
 pub fn FileStateMap::new() -> Self
-pub fn FileStateMap::record_created(Self, String) -> Unit
-pub fn FileStateMap::record_modified(Self, String) -> Unit
+pub fn FileStateMap::record_created(Self, String, String) -> Unit
+pub fn FileStateMap::record_edited(Self, String, String, String) -> Unit
+pub fn FileStateMap::record_modified(Self, String, String) -> Unit
 
 pub(all) struct JsonSchema(Json) derive(@debug.Debug)
 

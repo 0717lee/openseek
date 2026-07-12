@@ -282,11 +282,6 @@ async fn multi_edit_files(
           brief~,
         )
     }
-    // multi_edit only rewrites files it read, so each is a modification (never
-    // a create). record_modified preserves a stronger `Created` state if the
-    // agent created this file earlier this session. A later auto-revert may
-    // restore the content, but the tool did write the path this session.
-    file_state.record_modified(write.path)
   }
   // The batch is on disk. Run the auto-revert guard from the first written
   // file's module: it appends `moon check` feedback and, if this batch
@@ -295,7 +290,7 @@ async fn multi_edit_files(
   // is acceptable for the in-project repair case. `writes` is non-empty here (a
   // non-empty batch with no failures always renders at least one write), but
   // match defensively rather than index blindly.
-  match writes.get(0) {
+  let response = match writes.get(0) {
     Some(first) =>
       revert_guarded_response(
         first.path,
@@ -308,6 +303,34 @@ async fn multi_edit_files(
         brief=success_brief(writes),
       )
   }
+  // Record each file's provenance and content digest AFTER the auto-revert guard
+  // above, which may have rewritten some files back to their pre-batch content —
+  // so read each file's FINAL content rather than assuming the new content stuck.
+  // A targeted edit's continuity turns on the PRE-batch content (original_content
+  // = what the tool read): a `Created` file keeps that provenance only if the tool
+  // saw the agent's own content, so a file rebound before the batch is downgraded
+  // and not deletable. (A write that fails mid-batch returns earlier, before this
+  // loop, leaving the already-written files unrecorded — a safe under-record for
+  // that error case.)
+  for write in writes {
+    let seen_digest = @agent_tool.content_digest(write.original_content)
+    let new_digest = @agent_tool.content_digest(write.new_content)
+    let final_content = @fs.read_file(write.path).text() catch {
+      error if @async.is_being_cancelled() => raise error
+      _ => write.new_content
+    }
+    let final_digest = @agent_tool.content_digest(final_content)
+    // Only record when the file's final content is one the tool itself left: the
+    // applied `new_content` (kept), or the `original_content` (rolled back by the
+    // revert guard). If it is neither, an external writer changed the file during
+    // the guard's `moon check` window — leave any prior entry untouched (its
+    // recorded digest will not match the replacement, so `remove` refuses) rather
+    // than bless the external content as the agent's.
+    if final_digest == new_digest || final_digest == seen_digest {
+      file_state.record_edited(write.path, seen_digest, final_digest)
+    }
+  }
+  response
 }
 
 ///|

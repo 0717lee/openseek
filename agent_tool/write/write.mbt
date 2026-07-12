@@ -162,12 +162,16 @@ async fn write_file(
         CreateNew
       },
     )
-    // Record this write's provenance for the session so `remove` can later tell
-    // a file the agent created from one it merely overwrote.
+    // Record this write's provenance and content digest for the session so
+    // `remove` can later tell a file the agent created from one it merely
+    // overwrote, and confirm its content has not been rebound since. A write is
+    // a wholesale replacement, so the file now holds the agent's content
+    // regardless of what was there — no continuity check is needed.
+    let digest = @agent_tool.content_digest(input.content)
     if existed {
-      file_state.record_modified(path)
+      file_state.record_modified(path, digest)
     } else {
-      file_state.record_created(path)
+      file_state.record_created(path, digest)
     }
     let chars = input.content.length()
     let summary = if existed {
