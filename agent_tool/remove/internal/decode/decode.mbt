@@ -18,7 +18,10 @@ pub struct RemoveInput {
 pub fn decode(arguments : Json) -> RemoveInput raise {
   match arguments {
     { "path": String(path), "reason": String(reason), .. } => {
-      guard !reason.trim().is_empty() else {
+      // Unicode-correct blank check: `String::trim` strips only ASCII
+      // whitespace, so a reason of only non-breaking or ideographic spaces would
+      // slip through and record a visually blank audit entry.
+      guard !reason.all(ch => ch.is_whitespace()) else {
         fail("arguments.reason to be a non-empty explanation")
       }
       { path, reason }

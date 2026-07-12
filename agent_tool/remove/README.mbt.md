@@ -59,7 +59,7 @@ deletion.
 
 | Name     | Type   | Required | Notes |
 | -------- | ------ | -------- | ----- |
-| `path`   | string | yes | Filesystem path. Relative paths resolve against the workspace root. Must name an existing regular file the agent created this session that is not a generated pre-build output. |
+| `path`   | string | yes | Filesystem path. Relative paths resolve against the workspace root. Must name an existing regular file the agent created this session. A generated `.mbt`/`.mbt.md` pre-build output is refused (see below). |
 | `reason` | string | yes | A short, **non-empty** explanation of why the file is being deleted, recorded with the result for auditing. A blank (whitespace-only) reason is rejected. |
 
 ## Action
@@ -77,9 +77,11 @@ otherwise. The body has one of these shapes:
 - `"error removing <path>: no such file"` / `"... not a regular file; remove
   deletes regular files"` — the path is missing, a directory, or a symlink.
 - `"error removing <path>: the module's pre-build step regenerated it, ..."` —
-  the target is a generated pre-build output; the post-delete `moon check`
-  regenerated it, so it was not effectively removed. Generated files are managed
-  by the build, not deleted directly.
+  the target is a generated `.mbt`/`.mbt.md` pre-build output; the post-delete
+  `moon check` regenerated it, so it was not effectively removed. (A *non-source*
+  generated output is not caught this way — no `moon check` runs for it — so
+  removing it succeeds and it regenerates on the next build, the normal
+  generated-file lifecycle.)
 - `"error removing <path>: <error>"` — the unlink itself failed (e.g. permission
   denied).
 - `"error: remove requires arguments.path"` / `"... arguments.reason"` /

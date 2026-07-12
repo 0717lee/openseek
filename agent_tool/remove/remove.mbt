@@ -40,7 +40,7 @@ pub fn definition(
 ) -> @agent_tool.AgentToolDefinition {
   AgentToolDefinition(
     name="remove",
-    description="Delete a file the agent created earlier THIS session (tracked in the session's file-state record). Only a file the agent itself created this session can be removed — a pre-existing file is refused, since deleting it could lose work the agent never made; change existing source with edit/multi_edit. Handles any file type: the only in-workflow way to delete a source file (the shell sandbox blocks rm on source paths), and the provenance-gated path for other files too. Deleting a .mbt/.mbt.md file runs moon check so any break it causes is reported. Requires a `reason` — a short, non-empty explanation of why the file is deleted — recorded with the result for auditing this destructive action; a blank reason is rejected. The path must name an existing regular file; a generated pre-build output cannot be removed (the build regenerates it).",
+    description="Delete a file the agent created earlier THIS session (tracked in the session's file-state record). Only a file the agent itself created this session can be removed — a pre-existing file is refused, since deleting it could lose work the agent never made; change existing source with edit/multi_edit. Handles any file type: the only in-workflow way to delete a source file (the shell sandbox blocks rm on source paths), and the provenance-gated path for other files too. Deleting a .mbt/.mbt.md file runs moon check so any break it causes is reported. Requires a `reason` — a short, non-empty explanation of why the file is deleted — recorded with the result for auditing this destructive action; a blank reason is rejected. The path must name an existing regular file; a generated .mbt/.mbt.md pre-build output is refused (the removal's moon check regenerates it).",
     schema=JsonSchema({
       "type": "object",
       "properties": {
@@ -131,10 +131,13 @@ async fn remove_file(
   // the build just as an edit can.
   let summary = "ok: removed \{path} (reason: \{input.reason})"
   let content = @auto_check.append_summary(path, summary)
-  // The `moon check` above runs the module's pre-build step, which regenerates a
-  // missing pre-build output. If the path came back, it is a generated build
-  // artifact, not source the agent owns: report that it was not removed rather
-  // than a false success (the build manages it).
+  // The `moon check` above (run only for source paths) runs the module's
+  // pre-build step, which regenerates a missing pre-build output. If a source
+  // path came back, it is a generated build artifact, not source the agent owns:
+  // report that it was not removed rather than a false success. A non-source
+  // generated output is not caught here (no moon check runs for it); removing it
+  // succeeds and it regenerates on the next build, the normal generated-file
+  // lifecycle.
   let regenerated = @fs.exists(path) catch {
     error if @async.is_being_cancelled() => raise error
     _ => false
@@ -395,8 +398,12 @@ async test "remove rejects a blank reason" {
     let state = @agent_tool.FileStateMap::new()
     state.record_created(path)
     // A whitespace-only rationale would produce an empty audit entry, so it is
-    // rejected just like a missing one.
-    let result = run_remove(state, { "path": path, "reason": "   " })
+    // rejected just like a missing one. Includes Unicode whitespace (a
+    // non-breaking and an ideographic space) that ASCII `trim` would miss.
+    let result = run_remove(state, {
+      "path": path,
+      "reason": "\u{00a0} \u{3000}",
+    })
     guard result is Respond(output) else { fail("expected Respond") }
     assert_eq(
       output.content,
