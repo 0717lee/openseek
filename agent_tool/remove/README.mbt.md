@@ -43,15 +43,17 @@ honest on top of the `Created` check:
   has since been replaced by a symlink is refused rather than followed to its
   target.
 
-For **source** files the `Created` signal is strong: the sandbox blocks the
-shell from writing or moving onto a source path, so a recorded source path
-cannot be rebound to a different file while it sits un-removed. For **non-source**
-files that protection does not apply — a permitted `shell mv` could replace an
-un-removed created path in place — so the residual case (an external process
-replacing an un-removed `Created` file) is left to a later hardening (stored
-file identity, or recoverable/soft delete). Keys are the exact resolved path
-`write` used, so an unrecognized spelling reads as unknown and is
-conservatively refused rather than risking a wrong-file deletion.
+The residual the guards do not cover is a path replaced *in place* while it sits
+un-removed, without going through the agent's tools — so `FileStateMap` keeps the
+stale `Created`. This is possible for any file type, source included: the sandbox
+blocks a direct shell write or move onto a source path, but a permitted operation
+can still rebind a created path without updating the map — a `git checkout --
+x.mbt` restoring a tracked file the agent had recreated, or a `shell mv` onto a
+non-source path. Closing it needs stored file identity (revalidate the file at
+delete time) or recoverable/soft deletion; that hardening is deferred. Keys are
+the exact resolved path `write` used, so an unrecognized spelling reads as
+unknown and is conservatively refused rather than risking a wrong-file
+deletion.
 
 ## Arguments
 
@@ -110,7 +112,10 @@ async test "remove deletes an agent-created file through the registry" {
     let tools = @agent_tool.Tools([@remove.definition(file_state~)])
     // Build the arguments as JSON and stringify: a Windows temp path would
     // otherwise form an invalid escape inside a JSON string literal.
-    let arguments : Json = { "path": path, "reason": "scratch no longer needed" }
+    let arguments : Json = {
+      "path": path,
+      "reason": "scratch no longer needed",
+    }
     let call = @agent_tool.AgentToolCall(
       ToolCall(id="call_remove", name="remove", arguments=arguments.stringify()),
     )
@@ -149,7 +154,9 @@ async test "remove refuses a file the agent did not create" {
     let result = @agent_tool.execute_tool_call(call, tools)
     guard result is Respond(output) else { fail("expected Respond") }
     assert_true(output.is_error)
-    assert_true(output.content.contains("not created by the agent this session"))
+    assert_true(
+      output.content.contains("not created by the agent this session"),
+    )
     // The file is untouched.
     assert_true(@fs.exists(path))
   })
