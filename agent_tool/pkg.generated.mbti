@@ -45,6 +45,7 @@ pub(all) enum FileState {
 pub struct FileStateMap {
   // private fields
 }
+pub fn FileStateMap::forget(Self, String) -> Unit
 pub fn FileStateMap::get(Self, String) -> FileState?
 pub fn FileStateMap::new() -> Self
 pub fn FileStateMap::record_created(Self, String) -> Unit

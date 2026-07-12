@@ -11,12 +11,17 @@
 /// did not create this session) is refused — change it with `edit`, or delete it
 /// outside the agent.
 ///
-/// The `Created` gate is sound for source files without a soft-delete: the
-/// sandbox blocks the shell from writing or moving onto a source path, so a
-/// recorded source path cannot be rebound to a different file after `write`
-/// recorded it. The map is keyed by the same resolved path `write` used, so the
-/// lookup matches the recording spelling-for-spelling (an equivalent spelling
-/// reads as unknown and is conservatively refused).
+/// `Created` is advisory, not a bare delete capability (see `FileStateMap`).
+/// Three things keep the gate honest: this tool drops the provenance when it
+/// removes a file (`forget`), so a path recreated after a removal is no longer
+/// seen as agent-created; the kind check does not follow symlinks, so a source
+/// path replaced by a link is refused rather than followed; and the shell
+/// sandbox blocks writing or moving onto a source path, so an un-removed
+/// `Created` source file cannot be rebound through the shell. The narrow
+/// residual — an external process replacing an un-removed `Created` file in
+/// place — is left to a later hardening (stored file identity, or soft-delete).
+/// The map is keyed by the same resolved path `write` used, so an unrecognized
+/// spelling reads as unknown and is conservatively refused.
 ///
 /// ## Result
 /// - `Respond(ToolOutput("ok: removed <path>"))` when the file is deleted.
@@ -107,10 +112,10 @@ async fn remove_file(
   if !exists {
     return err("no such file")
   }
-  // `kind` does not follow the final symlink, so a symlink named `x.mbt` reports
-  // `SymLink` (not a source file to delete through) and, were it removed, only
-  // the link would be unlinked — its target untouched.
-  let kind = @fs.kind(path) catch {
+  // Classify the final component WITHOUT following a symlink: a path that was a
+  // source file when `write` recorded it but has since been replaced by a
+  // symlink must be refused, not followed to whatever it now points at.
+  let kind = @fs.kind(path, follow_symlink=false) catch {
     error if @async.is_being_cancelled() => raise error
     error => return err("\{error}")
   }
@@ -130,6 +135,10 @@ async fn remove_file(
     error if @async.is_being_cancelled() => raise error
     error => return err("\{error}")
   }
+  // Drop the provenance so a path recreated after this removal is not treated
+  // as still agent-created — otherwise a later remove could delete a different
+  // file that happens to land at the same path.
+  file_state.forget(path)
   @agent_tool.ToolAction::respond(
     "ok: removed \{path}",
     brief=@agent_tool.brief_line("removed \{requested}"),
@@ -281,6 +290,64 @@ async test "remove refuses a directory" {
     assert_true(output.is_error)
     assert_true(output.content.contains("not a regular file"))
     assert_true(@fs.exists(path))
+  })
+}
+
+///|
+async test "remove refuses a path recreated after an earlier removal" {
+  @vfs.with_tmpdir(dir => {
+    let path = "\{dir}/redo.mbt"
+    @fs.write_file(
+      path,
+      "pub fn a() -> Int { 1 }\n",
+      create_mode=CreateOrTruncate,
+    )
+    let state = @agent_tool.FileStateMap::new()
+    state.record_created(path)
+    // The first removal succeeds and drops the provenance.
+    let first = run_remove(state, { "path": path })
+    guard first is Respond(ok) else { fail("expected Respond") }
+    assert_false(ok.is_error)
+    assert_false(@fs.exists(path))
+    // Something OTHER than the agent's tools recreates the same path.
+    @fs.write_file(
+      path,
+      "pub fn b() -> Int { 2 }\n",
+      create_mode=CreateOrTruncate,
+    )
+    // The stale Created must not authorize deleting this different file.
+    let second = run_remove(state, { "path": path })
+    guard second is Respond(output) else { fail("expected Respond") }
+    assert_true(output.is_error)
+    assert_true(
+      output.content.contains("not created by the agent this session"),
+    )
+    assert_true(@fs.exists(path))
+  })
+}
+
+///|
+async test "remove refuses a source path replaced by a symlink" {
+  @vfs.with_tmpdir(dir => {
+    let target = "\{dir}/target.mbt"
+    @fs.write_file(
+      target,
+      "pub fn t() -> Int { 0 }\n",
+      create_mode=CreateOrTruncate,
+    )
+    // The .mbt path the agent created is now a symlink to another file.
+    let link = "\{dir}/alias.mbt"
+    @fs.symlink(target~, link)
+    let state = @agent_tool.FileStateMap::new()
+    state.record_created(link)
+    let result = run_remove(state, { "path": link })
+    guard result is Respond(output) else { fail("expected Respond") }
+    assert_true(output.is_error)
+    assert_true(output.content.contains("not a regular file"))
+    // The kind check does not follow the link, so neither it nor its target is
+    // removed.
+    assert_true(@fs.exists(link))
+    assert_true(@fs.exists(target))
   })
 }
 

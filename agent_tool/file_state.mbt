@@ -87,6 +87,15 @@ pub fn FileStateMap::get(self : FileStateMap, path : String) -> FileState? {
 }
 
 ///|
+/// Drop any recorded state for `path`. `remove` calls this after deleting a file
+/// so the `Created` provenance does not outlive the file: if the same path is
+/// later recreated by something other than the agent's tools, it reads as
+/// unknown again rather than as still-agent-created.
+pub fn FileStateMap::forget(self : FileStateMap, path : String) -> Unit {
+  self.entries.remove(path)
+}
+
+///|
 test "record_created marks a path and survives a later modify" {
   let state = FileStateMap::new()
   state.record_created("lib/new.mbt")
@@ -125,6 +134,15 @@ test "handles share one underlying map (no Ref needed)" {
   let b = a
   b.record_created("lib/shared.mbt")
   assert_true(a.get("lib/shared.mbt") is Some(Created))
+}
+
+///|
+test "forget drops a path's provenance" {
+  let state = FileStateMap::new()
+  state.record_created("lib/gone.mbt")
+  state.forget("lib/gone.mbt")
+  // A path recreated after being forgotten reads as unknown, not Created.
+  assert_true(state.get("lib/gone.mbt") is None)
 }
 
 ///|
