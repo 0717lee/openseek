@@ -40,14 +40,14 @@ pub fn definition(
 ) -> @agent_tool.AgentToolDefinition {
   AgentToolDefinition(
     name="remove",
-    description="Delete a file the agent created earlier THIS session (tracked in the session's file-state record). Only a file the agent itself created this session can be removed — a pre-existing file is refused, since deleting it could lose work the agent never made; change existing source with edit/multi_edit. Handles any file type: the only in-workflow way to delete a source file (the shell sandbox blocks rm on source paths), and the provenance-gated path for other files too. Deleting a .mbt/.mbt.md file runs moon check so any break it causes is reported. Requires a short `reason` explaining why the file is deleted — it is recorded with the result for auditing this destructive action. The path must name an existing regular file.",
+    description="Delete a file the agent created earlier THIS session (tracked in the session's file-state record). Only a file the agent itself created this session can be removed — a pre-existing file is refused, since deleting it could lose work the agent never made; change existing source with edit/multi_edit. Handles any file type: the only in-workflow way to delete a source file (the shell sandbox blocks rm on source paths), and the provenance-gated path for other files too. Deleting a .mbt/.mbt.md file runs moon check so any break it causes is reported. Requires a `reason` — a short, non-empty explanation of why the file is deleted — recorded with the result for auditing this destructive action; a blank reason is rejected. The path must name an existing regular file.",
     schema=JsonSchema({
       "type": "object",
       "properties": {
         "path": { "type": "string" },
         "reason": {
           "type": "string",
-          "description": "A short explanation of why this file is being deleted, recorded in the result so a destructive action can be audited later.",
+          "description": "A short, non-empty explanation of why this file is being deleted, recorded in the result so a destructive action can be audited later. A blank reason is rejected.",
         },
       },
       "required": ["path", "reason"],
@@ -365,6 +365,34 @@ async test "remove rejects a missing reason" {
     let result = run_remove(state, { "path": path })
     guard result is Respond(output) else { fail("expected Respond") }
     assert_eq(output.content, "error: remove requires arguments.reason")
+    assert_true(output.is_error)
+    assert_true(@fs.exists(path))
+  })
+}
+
+///|
+async test "remove rejects a blank reason" {
+  @vfs.with_tmpdir(dir => {
+    let path = "\{dir}/y.mbt"
+    @fs.write_file(
+      path,
+      "pub fn y() -> Int { 0 }\n",
+      create_mode=CreateOrTruncate,
+    )
+    let state = @agent_tool.FileStateMap::new()
+    state.record_created(path)
+    // A whitespace-only rationale would produce an empty audit entry, so it is
+    // rejected just like a missing one. Includes Unicode whitespace (a
+    // non-breaking and an ideographic space) that ASCII `trim` would miss.
+    let result = run_remove(state, {
+      "path": path,
+      "reason": "\u{00a0} \u{3000}",
+    })
+    guard result is Respond(output) else { fail("expected Respond") }
+    assert_eq(
+      output.content,
+      "error: remove requires arguments.reason to be a non-empty explanation",
+    )
     assert_true(output.is_error)
     assert_true(@fs.exists(path))
   })

@@ -60,7 +60,7 @@ deletion.
 | Name     | Type   | Required | Notes |
 | -------- | ------ | -------- | ----- |
 | `path`   | string | yes | Filesystem path. Relative paths resolve against the workspace root. Must name an existing regular file the agent created this session. |
-| `reason` | string | yes | A short explanation of why the file is being deleted, recorded with the result for auditing. |
+| `reason` | string | yes | A short, **non-empty** explanation of why the file is being deleted, recorded with the result for auditing. A blank (whitespace-only) reason is rejected. |
 
 ## Action
 
@@ -79,7 +79,8 @@ otherwise. The body has one of these shapes:
 - `"error removing <path>: <error>"` — the unlink itself failed (e.g. permission
   denied).
 - `"error: remove requires arguments.path"` / `"... arguments.reason"` /
-  `"... object arguments"` — invalid payload.
+  `"... arguments.reason to be a non-empty explanation"` / `"... object
+  arguments"` — invalid payload.
 
 ## Examples
 
