@@ -102,7 +102,8 @@ async fn[X] shell_tools(
 ///
 /// The returned registry contains the built-in local tools: `shell` (plus
 /// `shell_output` and `shell_stop` where background jobs are supported — see
-/// `shell_tools`), `read`, `edit`, `multi_edit`, `write`, `plan`, and `finish`.
+/// `shell_tools`), `read`, `edit`, `multi_edit`, `write`, `remove`, `plan`, and
+/// `finish`.
 /// Each tool lives in its own subpackage of `agent_tool` and exposes a
 /// `definition()` constructor; this function bundles them into the `Tools`
 /// value the loop dispatches against. File-oriented tools capture
@@ -123,8 +124,8 @@ pub async fn[X] build_tools(
   let workspace_root = runtime.workspace_root()
   // One session-scoped file-state map, shared by the file-writing tools so they
   // record which paths the agent created vs. modified this session — the record
-  // a future `remove` reads to tell an agent-created file (safe to delete) from
-  // a pre-existing one.
+  // `remove` reads to tell an agent-created file (safe to delete) from a
+  // pre-existing one.
   let file_state = @agent_tool.FileStateMap::new()
   Tools(
     shell_tools(runtime, scope, on_background_wake?) +
@@ -133,6 +134,7 @@ pub async fn[X] build_tools(
       @edit.definition(workspace_root~, file_state~),
       @multi_edit.definition(workspace_root~, file_state~),
       @write.definition(workspace_root~, file_state~),
+      @remove.definition(workspace_root~, file_state~),
       @plan.definition(),
       @goal.definition(),
       @finish.definition(),
@@ -146,7 +148,7 @@ async test "agent registers the expected tool names" {
   @async.with_task_group() <| group => {
     let tools = build_tools(AgentRuntime(), AgentTaskScope(group))
     let function_tools = tools.function_tools()
-    assert_eq(function_tools.length(), 10)
+    assert_eq(function_tools.length(), 11)
     let names = [ for t in function_tools => t.name ]
     assert_true(names.contains("shell"))
     assert_true(names.contains("shell_output"))
@@ -155,6 +157,7 @@ async test "agent registers the expected tool names" {
     assert_true(names.contains("edit"))
     assert_true(names.contains("multi_edit"))
     assert_true(names.contains("write"))
+    assert_true(names.contains("remove"))
     assert_true(names.contains("plan"))
     assert_true(names.contains("goal"))
     assert_true(names.contains("finish"))
@@ -173,7 +176,7 @@ async test "agent registers the expected tool names on windows" {
   @async.with_task_group() <| group => {
     let tools = build_tools(AgentRuntime(), AgentTaskScope(group))
     let function_tools = tools.function_tools()
-    assert_eq(function_tools.length(), 8)
+    assert_eq(function_tools.length(), 9)
     let names = [ for t in function_tools => t.name ]
     assert_true(names.contains("shell"))
     assert_false(names.contains("shell_output"))
@@ -182,6 +185,7 @@ async test "agent registers the expected tool names on windows" {
     assert_true(names.contains("edit"))
     assert_true(names.contains("multi_edit"))
     assert_true(names.contains("write"))
+    assert_true(names.contains("remove"))
     assert_true(names.contains("plan"))
     assert_true(names.contains("goal"))
     assert_true(names.contains("finish"))

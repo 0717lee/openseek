@@ -1,0 +1,18 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "bobzhang/openseek/agent_tool/remove"
+
+import {
+  "bobzhang/openseek/agent_tool",
+}
+
+// Values
+pub fn definition(workspace_root? : String, file_state? : @agent_tool.FileStateMap) -> @agent_tool.AgentToolDefinition
+
+// Errors
+
+// Types and methods
+
+// Type aliases
+
+// Traits
+

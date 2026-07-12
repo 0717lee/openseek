@@ -45,14 +45,19 @@ fn default_prompt() -> String {
     #|  ignore it for trivial work — never answer it with assistant text or call
     #|  `plan` only to silence it.
     #|- Use the right tool for the job:
-    #|  - `read`, `edit`, `multi_edit`, and `write` for files. Use `edit` for a single
-    #|    span; use `multi_edit` to apply several line-anchored fixes to one file in
-    #|    one call. To fix several files at once, issue one `multi_edit` per file in
-    #|    the same step rather than editing files one turn at a time. Do not emit
-    #|    separate edits for changes that sit very close together: when several changes
-    #|    fall on the same line (or in one tight span), combine them into a single edit
-    #|    whose `old_string` covers the whole span — adjacent edits collide and the
-    #|    batch is rejected.
+    #|  - `read`, `edit`, `multi_edit`, `write`, and `remove` for files. Use `edit` for
+    #|    a single span; use `multi_edit` to apply several line-anchored fixes to one
+    #|    file in one call. To fix several files at once, issue one `multi_edit` per
+    #|    file in the same step rather than editing files one turn at a time. Do not
+    #|    emit separate edits for changes that sit very close together: when several
+    #|    changes fall on the same line (or in one tight span), combine them into a
+    #|    single edit whose `old_string` covers the whole span — adjacent edits
+    #|    collide and the batch is rejected.
+    #|  - `remove` deletes a `.mbt`/`.mbt.md` source file you created earlier this
+    #|    session (shell cannot `rm` source files). It refuses a pre-existing source
+    #|    file — one you did not create this session — so it only ever undoes your own
+    #|    work; change existing source with `edit`, and delete non-source files with
+    #|    `shell`.
     #|  - To add NEW top-level code (functions, tests, types) to an existing file,
     #|    append at end of file: `edit` with an empty `old_string` and any
     #|    `start_line` past the last line (e.g. 999999) — top-level order does not
