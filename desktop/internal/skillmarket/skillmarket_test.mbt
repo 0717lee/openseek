@@ -70,18 +70,15 @@ async fn fake_registry(group : @async.TaskGroup[Unit]) -> String? {
         if path == "/api/v0/skills" {
           conn.send_response(200, "OK", extra_headers=json_headers)
           conn.write_string(catalog_body())
-        } else if path.has_prefix(SkillsPrefix) &&
-          skills.contains(path[SkillsPrefix.length():].to_owned()) {
+        } else if path.strip_prefix(SkillsPrefix) is Some(skill) &&
+          skills.contains(skill.to_owned()) {
           // The per-skill API only confirms the entry is a skill; the install
           // ignores the body.
           conn.send_response(200, "OK", extra_headers=json_headers)
           conn.write_string("{}")
-        } else if path.has_prefix(AssetsPrefix) &&
-          path.has_suffix(SkillMdSuffix) &&
-          skills.get(
-            path[AssetsPrefix.length():path.length() - SkillMdSuffix.length()].to_owned(),
-          )
-          is Some(true) {
+        } else if path.strip_prefix(AssetsPrefix) is Some(asset) &&
+          asset.strip_suffix(SkillMdSuffix) is Some(skill) &&
+          skills.get(skill.to_owned()) is Some(true) {
           conn.send_response(200, "OK")
           conn.write(skill_body)
         } else {

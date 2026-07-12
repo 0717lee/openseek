@@ -995,8 +995,8 @@ fn path_basename(p : String) -> String {
 /// `./app` workspace is `.`, which would merge every direct workspace under one
 /// `.` heading.
 fn strip_dot_prefix(p : String) -> String {
-  if p.has_prefix("./") {
-    p[2:].to_owned()
+  if p.strip_prefix("./") is Some(p) {
+    p.to_owned()
   } else {
     p
   }

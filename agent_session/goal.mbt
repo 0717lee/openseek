@@ -96,10 +96,10 @@ pub fn goal_marker(content : String) -> GoalMarker? {
     Some(GoalCleared)
   } else if content == GoalUnblockedNotice {
     Some(GoalUnblocked)
-  } else if content.has_prefix("\{GoalBlockedPrefix}\n") {
-    Some(GoalBlocked(content[GoalBlockedPrefix.length() + 1:].to_owned()))
-  } else if content.has_prefix("\{GoalPrefix}\n") {
-    Some(GoalSet(content[GoalPrefix.length() + 1:].to_owned()))
+  } else if content.strip_prefix("\{GoalBlockedPrefix}\n") is Some(content) {
+    Some(GoalBlocked(content.to_owned()))
+  } else if content.strip_prefix("\{GoalPrefix}\n") is Some(content) {
+    Some(GoalSet(content.to_owned()))
   } else {
     None
   }

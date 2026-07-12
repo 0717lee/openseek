@@ -98,10 +98,12 @@ fn sed_option_consumes_next(arg : String) -> Bool {
   if arg == "--expression" || arg == "--file" {
     return true
   }
-  if !arg.has_prefix("-") || arg.has_prefix("--") || arg == "-" {
+  guard arg.strip_prefix("-") is Some(options) &&
+    !options.has_prefix("-") &&
+    !options.is_empty() else {
     return false
   }
-  for view = arg[1:] {
+  for view = options {
     match view {
       // `e`/`f` consume the remainder of the token; if they are the last char,
       // the value is the next word.
@@ -134,10 +136,12 @@ fn is_sed_in_place_flag(arg : String) -> Bool {
   if arg == "--in-place" || arg.has_prefix("--in-place=") {
     return true
   }
-  if !arg.has_prefix("-") || arg.has_prefix("--") || arg == "-" {
+  guard arg.strip_prefix("-") is Some(options) &&
+    !options.has_prefix("-") &&
+    !options.is_empty() else {
     return false
   }
-  for ch in arg[1:] {
+  for ch in options {
     match ch {
       'i' => return true
       'e' | 'f' => return false

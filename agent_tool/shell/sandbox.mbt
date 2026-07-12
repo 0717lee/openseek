@@ -2138,8 +2138,8 @@ fn command_word_matches_one_heredoc_target(
 ///|
 fn strip_leading_dot_slash(path : String) -> String {
   let mut result = path
-  while result.has_prefix("./") {
-    result = result[2:].to_owned()
+  while result.strip_prefix("./") is Some(rest) {
+    result = rest.to_owned()
   }
   result
 }
@@ -2879,21 +2879,27 @@ fn parse_powershell_path_operands(
 
 ///|
 fn powershell_attached_parameter(arg : String) -> (String, String)? {
-  guard arg.has_prefix("-") && arg != "-" else { return None }
-  match arg.find(":") {
-    Some(colon) if colon > 1 =>
-      Some((arg[1:colon].to_owned().to_lower(), arg[colon + 1:].to_owned()))
+  guard arg.strip_prefix("-") is Some(parameter) && !parameter.is_empty() else {
+    return None
+  }
+  match parameter.find(":") {
+    Some(colon) if colon > 0 =>
+      Some(
+        (
+          parameter[:colon].to_owned().to_lower(),
+          parameter[colon + 1:].to_owned(),
+        ),
+      )
     _ => None
   }
 }
 
 ///|
 fn powershell_parameter_name(arg : String) -> String? {
-  if !arg.has_prefix("-") || arg == "-" {
-    None
-  } else {
-    Some(arg[1:].to_owned().to_lower())
+  guard arg.strip_prefix("-") is Some(name) && !name.is_empty() else {
+    return None
   }
+  Some(name.to_owned().to_lower())
 }
 
 ///|
@@ -3104,10 +3110,12 @@ fn shell_attached_value_option(arg : String) -> Bool {
 
 ///|
 fn shell_short_option_cluster_has_c(arg : String) -> Bool {
-  if !arg.has_prefix("-") || arg.has_prefix("--") || arg.length() <= 2 {
+  guard arg.strip_prefix("-") is Some(options) &&
+    !options.has_prefix("-") &&
+    options.length() > 1 else {
     return false
   }
-  arg[1:].contains("c")
+  options.contains("c")
 }
 
 ///|
@@ -3612,10 +3620,12 @@ fn sed_option_supplies_script(arg : String) -> Bool {
     arg.has_prefix("--file=") {
     return true
   }
-  if !arg.has_prefix("-") || arg.has_prefix("--") || arg == "-" {
+  guard arg.strip_prefix("-") is Some(options) &&
+    !options.has_prefix("-") &&
+    !options.is_empty() else {
     return false
   }
-  for ch in arg[1:] {
+  for ch in options {
     match ch {
       'e' | 'f' => return true
       'i' => return false
@@ -3627,10 +3637,12 @@ fn sed_option_supplies_script(arg : String) -> Bool {
 
 ///|
 fn sed_readonly_option(arg : String) -> Bool {
-  if !arg.has_prefix("-") || arg.has_prefix("--") || arg == "-" {
+  guard arg.strip_prefix("-") is Some(options) &&
+    !options.has_prefix("-") &&
+    !options.is_empty() else {
     return false
   }
-  for ch in arg[1:] {
+  for ch in options {
     match ch {
       'n' | 'E' | 'r' | 's' | 'u' | 'l' => ()
       _ => return false
@@ -3730,8 +3742,8 @@ fn awk_option_is_inline_program(arg : String) -> Bool {
 
 ///|
 fn awk_attached_inline_program(arg : String) -> String? {
-  if arg.has_prefix("--source=") {
-    Some(arg["--source=".length():].to_owned())
+  if arg.strip_prefix("--source=") is Some(program) {
+    Some(program.to_owned())
   } else {
     None
   }
@@ -4512,12 +4524,14 @@ fn mkdir_attached_value_option(arg : String) -> Bool {
   if arg.has_prefix("--mode=") || arg.has_prefix("--context=") {
     return true
   }
-  if !arg.has_prefix("-") || arg.has_prefix("--") || arg.length() <= 2 {
+  guard arg.strip_prefix("-") is Some(options) &&
+    !options.has_prefix("-") &&
+    options.length() > 1 else {
     return false
   }
-  for index, ch in arg[1:] {
+  for index, ch in options {
     if ch == 'm' || ch == 'Z' {
-      return index + 2 < arg.length()
+      return index + 1 < options.length()
     }
   }
   false
@@ -4532,10 +4546,10 @@ fn mkdir_supported_no_arg_option(arg : String) -> Bool {
     "--parents" | "--verbose" => return true
     _ => ()
   }
-  if !arg.has_prefix("-") || arg.has_prefix("--") {
+  guard arg.strip_prefix("-") is Some(options) && !options.has_prefix("-") else {
     return false
   }
-  for ch in arg[1:] {
+  for ch in options {
     match ch {
       'p' | 'v' => ()
       _ => return false
@@ -4597,10 +4611,10 @@ fn mv_option_consumes_next(arg : String) -> Bool {
 
 ///|
 fn mv_attached_target_directory_option(arg : String) -> String? {
-  if arg.has_prefix("-t") && arg.length() > 2 {
-    Some(arg[2:].to_owned())
-  } else if arg.has_prefix("--target-directory=") {
-    Some(arg["--target-directory=".length():].to_owned())
+  if arg.strip_prefix("-t") is Some(target) && !target.is_empty() {
+    Some(target.to_owned())
+  } else if arg.strip_prefix("--target-directory=") is Some(target) {
+    Some(target.to_owned())
   } else {
     None
   }
@@ -4627,10 +4641,10 @@ fn mv_supported_no_arg_option(arg : String) -> Bool {
     | "--verbose" => return true
     _ => ()
   }
-  if !arg.has_prefix("-") || arg.has_prefix("--") {
+  guard arg.strip_prefix("-") is Some(options) && !options.has_prefix("-") else {
     return false
   }
-  for ch in arg[1:] {
+  for ch in options {
     match ch {
       'b' | 'f' | 'i' | 'n' | 'v' | 'T' | 'u' | 'Z' => ()
       _ => return false
@@ -4760,10 +4774,10 @@ fn cp_option_consumes_next(arg : String) -> Bool {
 
 ///|
 fn cp_attached_target_directory_option(arg : String) -> String? {
-  if arg.has_prefix("-t") && arg.length() > 2 {
-    Some(arg[2:].to_owned())
-  } else if arg.has_prefix("--target-directory=") {
-    Some(arg["--target-directory=".length():].to_owned())
+  if arg.strip_prefix("-t") is Some(target) && !target.is_empty() {
+    Some(target.to_owned())
+  } else if arg.strip_prefix("--target-directory=") is Some(target) {
+    Some(target.to_owned())
   } else {
     None
   }
@@ -4800,10 +4814,10 @@ fn cp_supported_no_arg_option(arg : String) -> Bool {
     | "--one-file-system" => return true
     _ => ()
   }
-  if !arg.has_prefix("-") || arg.has_prefix("--") {
+  guard arg.strip_prefix("-") is Some(options) && !options.has_prefix("-") else {
     return false
   }
-  for ch in arg[1:] {
+  for ch in options {
     match ch {
       'R'
       | 'r'
@@ -4956,10 +4970,10 @@ fn install_option_consumes_next(arg : String) -> Bool {
 
 ///|
 fn install_attached_target_directory_option(arg : String) -> String? {
-  if arg.has_prefix("-t") && arg.length() > 2 {
-    Some(arg[2:].to_owned())
-  } else if arg.has_prefix("--target-directory=") {
-    Some(arg["--target-directory=".length():].to_owned())
+  if arg.strip_prefix("-t") is Some(target) && !target.is_empty() {
+    Some(target.to_owned())
+  } else if arg.strip_prefix("--target-directory=") is Some(target) {
+    Some(target.to_owned())
   } else {
     None
   }
@@ -4997,11 +5011,13 @@ fn install_short_cluster_ends_with_consuming_option(arg : String) -> Bool {
 
 ///|
 fn install_short_cluster_consuming_option_index(arg : String) -> Int? {
-  if !arg.has_prefix("-") || arg.has_prefix("--") || arg.length() <= 2 {
+  guard arg.strip_prefix("-") is Some(options) &&
+    !options.has_prefix("-") &&
+    options.length() > 1 else {
     return None
   }
   let mut index = 1
-  for ch in arg[1:] {
+  for ch in options {
     match ch {
       'g' | 'm' | 'o' | 'S' => return Some(index)
       'C' | 'D' | 'd' | 'p' | 's' | 'v' => ()
@@ -5014,10 +5030,10 @@ fn install_short_cluster_consuming_option_index(arg : String) -> Int? {
 
 ///|
 fn install_short_option_cluster_has(arg : String, needle : Char) -> Bool {
-  if !arg.has_prefix("-") || arg.has_prefix("--") {
+  guard arg.strip_prefix("-") is Some(options) && !options.has_prefix("-") else {
     return false
   }
-  for ch in arg[1:] {
+  for ch in options {
     if ch == needle {
       return true
     }
@@ -5041,10 +5057,10 @@ fn install_supported_no_arg_option(arg : String) -> Bool {
     | "--verbose" => return true
     _ => ()
   }
-  if !arg.has_prefix("-") || arg.has_prefix("--") {
+  guard arg.strip_prefix("-") is Some(options) && !options.has_prefix("-") else {
     return false
   }
-  for ch in arg[1:] {
+  for ch in options {
     match ch {
       'C' | 'D' | 'd' | 'p' | 's' | 'v' => ()
       _ => return false
@@ -5154,10 +5170,12 @@ fn touch_supported_no_arg_option(arg : String) -> Bool {
     "--no-create" | "--no-dereference" | "--help" | "--version" => return true
     _ => ()
   }
-  if !arg.has_prefix("-") || arg.has_prefix("--") || arg == "-" {
+  guard arg.strip_prefix("-") is Some(options) &&
+    !options.has_prefix("-") &&
+    !options.is_empty() else {
     return false
   }
-  for ch in arg[1:] {
+  for ch in options {
     match ch {
       'a' | 'c' | 'm' | 'h' | 'f' => ()
       _ => return false
@@ -5225,10 +5243,10 @@ fn tee_supported_no_arg_option(arg : String) -> Bool {
     "--append" | "--ignore-interrupts" | "--help" | "--version" => return true
     _ => ()
   }
-  if !arg.has_prefix("-") || arg.has_prefix("--") {
+  guard arg.strip_prefix("-") is Some(options) && !options.has_prefix("-") else {
     return false
   }
-  for ch in arg[1:] {
+  for ch in options {
     match ch {
       'a' | 'i' | 'p' => ()
       _ => return false

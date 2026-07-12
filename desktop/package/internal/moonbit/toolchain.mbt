@@ -261,8 +261,8 @@ async fn compiler_version(
     )
   }
   let version = output.text().trim().split(" ").collect()[0].to_owned()
-  if version.has_prefix("v") {
-    version[1:].to_owned()
+  if version.strip_prefix("v") is Some(version) {
+    version.to_owned()
   } else {
     version
   }

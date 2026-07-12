@@ -20,8 +20,10 @@ fn frame_message(body : String) -> String {
 fn parse_content_length(line : String) -> Int? {
   let trimmed = line.trim(char_set="\r\n ")
   let prefix = "content-length:"
-  guard trimmed.to_lower().has_prefix(prefix) else { return None }
-  Some(@string.parse_int(trimmed[prefix.length():].trim(), base=10)) catch {
+  guard trimmed.to_lower().strip_prefix(prefix) is Some(length) else {
+    return None
+  }
+  Some(@string.parse_int(length.trim(), base=10)) catch {
     _ => None
   }
 }

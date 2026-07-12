@@ -346,8 +346,8 @@ fn global_no_arg_option(arg : String) -> Bool {
 
 ///|
 fn attached_cwd_option(arg : String) -> String? {
-  if arg.has_prefix("-C") && arg != "-C" {
-    Some(arg[2:].to_owned())
+  if arg.strip_prefix("-C") is Some(value) && !value.is_empty() {
+    Some(value.to_owned())
   } else {
     None
   }
@@ -355,8 +355,8 @@ fn attached_cwd_option(arg : String) -> String? {
 
 ///|
 fn attached_work_tree_option(arg : String) -> String? {
-  if arg.has_prefix("--work-tree=") {
-    Some(arg["--work-tree=".length():].to_owned())
+  if arg.strip_prefix("--work-tree=") is Some(value) {
+    Some(value.to_owned())
   } else {
     None
   }
