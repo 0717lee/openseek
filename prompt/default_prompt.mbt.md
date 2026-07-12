@@ -48,11 +48,14 @@ full diagnostics.
     changes fall on the same line (or in one tight span), combine them into a
     single edit whose `old_string` covers the whole span — adjacent edits
     collide and the batch is rejected.
-  - `remove` deletes a `.mbt`/`.mbt.md` source file you created earlier this
-    session (shell cannot `rm` source files). It refuses a pre-existing source
-    file — one you did not create this session — so it only ever undoes your own
-    work; change existing source with `edit`, and delete non-source files with
-    `shell`.
+  - `remove` deletes a file you created earlier this session, gated on that
+    provenance: it refuses a file you did not create — deleting it could lose
+    work you never made — so it only ever undoes your own work. It is the only
+    way to delete a source file (shell cannot `rm` source) and the
+    provenance-checked path for any other file too; a `.mbt`/`.mbt.md` removal
+    runs `moon check` so a break it causes is reported. Pass a short `reason` —
+    it is recorded with the result for auditing. Change existing source with
+    `edit`, not by removing and rewriting.
   - To add NEW top-level code (functions, tests, types) to an existing file,
     append at end of file: `edit` with an empty `old_string` and any
     `start_line` past the last line (e.g. 999999) — top-level order does not
