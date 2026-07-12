@@ -1589,12 +1589,12 @@ fn command_text_env_assignment_word(word : String) -> Bool {
   if parts.length() < 2 {
     return false
   }
-  command_text_valid_env_name(parts[0].to_owned())
+  command_text_valid_env_name(parts[0])
 }
 
 ///|
-fn command_text_valid_env_name(name : String) -> Bool {
-  if name == "" {
+fn command_text_valid_env_name(name : StringView) -> Bool {
+  if name.is_empty() {
     return false
   }
   let mut index = 0

@@ -345,18 +345,20 @@ fn global_no_arg_option(arg : String) -> Bool {
 }
 
 ///|
-fn attached_cwd_option(arg : String) -> String? {
+/// Returns a view into `arg` (not an owned copy): every caller only tests
+/// `is Some(_)`, so materializing the value would allocate for nothing.
+fn attached_cwd_option(arg : String) -> StringView? {
   if arg.strip_prefix("-C") is Some(value) && !value.is_empty() {
-    Some(value.to_owned())
+    Some(value)
   } else {
     None
   }
 }
 
 ///|
-fn attached_work_tree_option(arg : String) -> String? {
+fn attached_work_tree_option(arg : String) -> StringView? {
   if arg.strip_prefix("--work-tree=") is Some(value) {
-    Some(value.to_owned())
+    Some(value)
   } else {
     None
   }

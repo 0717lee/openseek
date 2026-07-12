@@ -155,7 +155,7 @@ fn is_sed_in_place_flag(arg : String) -> Bool {
 fn shell_words(cmd : String) -> Array[String] {
   let words : Array[String] = []
   for piece in cmd.split(" ") {
-    let word = clean_shell_word(piece.to_owned())
+    let word = clean_shell_word(piece)
     if word != "" {
       words.push(word)
     }
@@ -164,7 +164,7 @@ fn shell_words(cmd : String) -> Array[String] {
 }
 
 ///|
-fn clean_shell_word(word : String) -> String {
+fn clean_shell_word(word : StringView) -> String {
   "\{word.trim(chars="\t\r\n ").trim(chars=";&|()")}"
 }
 
