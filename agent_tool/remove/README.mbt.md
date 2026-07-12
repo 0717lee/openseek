@@ -1,0 +1,157 @@
+# Remove Tool
+
+`remove` deletes a file the agent created earlier this session, gated on that
+provenance and carrying a required rationale for the audit trail. It is the
+delete verb of the tool-mediated file API: `read`, `write`, and
+`edit`/`multi_edit` already exist, but there was no in-workflow way to delete a
+file — the shell sandbox blocks `rm` on source paths, and routing other
+deletions through `shell` bypasses provenance entirely.
+
+`remove` deletes a path **only** when the session's
+[`FileStateMap`](../file_state.mbt) records it as `Created` — one the agent
+itself created this session — so removing it merely undoes the agent's own
+work. A pre-existing file (one the agent never created, or only modified) is
+refused.
+
+## Design Rationale
+
+The gate is provenance, not file type. `remove` handles any file the agent
+created: for a source file it is the *only* way to delete it (the sandbox
+blocks `rm` on `.mbt`/`.mbt.md`/manifest paths), and for any other file it is
+the *provenance-checked* path where a bare `shell rm` is not. Deleting a
+`.mbt`/`.mbt.md` file runs module `moon check` and appends the feedback, so a
+break the deletion causes surfaces in the result exactly as it does after
+`write`/`edit`.
+
+Because deletion is irreversible, every call carries a `reason`. The rationale
+is recorded in the (durable) success message — `ok: removed <path> (reason:
+…)` — so a destructive action can be audited after the fact.
+
+## Safety Model
+
+`Created` is treated as an **advisory** signal, not a bare delete capability
+(see the [`FileStateMap`](../file_state.mbt) docs). Two guards keep the gate
+honest on top of the `Created` check:
+
+- **Forget on delete.** After a successful removal the provenance is dropped
+  (`FileStateMap::forget`), so if the same path is later recreated by something
+  other than the agent's tools, a second `remove` sees it as unknown and
+  refuses — it never deletes a different file that happens to land at a path the
+  agent once created.
+- **No symlink following.** The regular-file check uses
+  `follow_symlink=false`, so a path that was a file when `write` recorded it but
+  has since been replaced by a symlink is refused rather than followed to its
+  target.
+
+For **source** files the `Created` signal is strong: the sandbox blocks the
+shell from writing or moving onto a source path, so a recorded source path
+cannot be rebound to a different file while it sits un-removed. For **non-source**
+files that protection does not apply — a permitted `shell mv` could replace an
+un-removed created path in place — so the residual case (an external process
+replacing an un-removed `Created` file) is left to a later hardening (stored
+file identity, or recoverable/soft delete). Keys are the exact resolved path
+`write` used, so an unrecognized spelling reads as unknown and is
+conservatively refused rather than risking a wrong-file deletion.
+
+## Arguments
+
+| Name     | Type   | Required | Notes |
+| -------- | ------ | -------- | ----- |
+| `path`   | string | yes | Filesystem path. Relative paths resolve against the workspace root. Must name an existing regular file the agent created this session. |
+| `reason` | string | yes | A short explanation of why the file is being deleted, recorded with the result for auditing. |
+
+## Action
+
+The action is always `Respond(ToolOutput(...))`; the agent loop forwards
+`ToolOutput.content` to the model. `is_error` is `false` on success and `true`
+otherwise. The body has one of these shapes:
+
+- `"ok: removed <path> (reason: <reason>)"` — the file was deleted. When the
+  target is a `.mbt`/`.mbt.md` file inside a MoonBit module, bounded module-root
+  `moon check` feedback is appended after the success line, starting with
+  `"moon check:"`.
+- `"error removing <path>: not created by the agent this session — ..."` — the
+  gate refused: the file is pre-existing, or the agent only modified it.
+- `"error removing <path>: no such file"` / `"... not a regular file; remove
+  deletes regular files"` — the path is missing, a directory, or a symlink.
+- `"error removing <path>: <error>"` — the unlink itself failed (e.g. permission
+  denied).
+- `"error: remove requires arguments.path"` / `"... arguments.reason"` /
+  `"... object arguments"` — invalid payload.
+
+## Examples
+
+```moonbit check
+///|
+test "remove tool advertises the expected schema" {
+  let tool = @remove.definition()
+  assert_eq(tool.name, "remove")
+  let JsonSchema(schema) = tool.schema
+  let text = schema.stringify()
+  assert_true(text.contains("\"path\""))
+  assert_true(text.contains("\"reason\""))
+  assert_true(text.contains("\"required\""))
+}
+```
+
+```moonbit check
+///|
+async test "remove deletes an agent-created file through the registry" {
+  @vfs.with_tmpdir(prefix="openseek-remove-readme-", dir => {
+    let path = "\{dir}/scratch.mbt"
+    @fs.write_file(
+      path,
+      "pub fn f() -> Int { 1 }\n",
+      create_mode=CreateOrTruncate,
+    )
+    // The session recorded that the agent created this file, as `write` would.
+    let file_state = @agent_tool.FileStateMap::new()
+    file_state.record_created(path)
+    let tools = @agent_tool.Tools([@remove.definition(file_state~)])
+    // Build the arguments as JSON and stringify: a Windows temp path would
+    // otherwise form an invalid escape inside a JSON string literal.
+    let arguments : Json = { "path": path, "reason": "scratch no longer needed" }
+    let call = @agent_tool.AgentToolCall(
+      ToolCall(id="call_remove", name="remove", arguments=arguments.stringify()),
+    )
+    let result = @agent_tool.execute_tool_call(call, tools)
+    guard result is Respond(output) else { fail("expected Respond") }
+    assert_false(output.is_error)
+    assert_eq(
+      output.content,
+      "ok: removed \{path} (reason: scratch no longer needed)",
+    )
+    assert_false(@fs.exists(path))
+  })
+}
+```
+
+```moonbit check
+///|
+async test "remove refuses a file the agent did not create" {
+  @vfs.with_tmpdir(prefix="openseek-remove-readme-refuse-", dir => {
+    let path = "\{dir}/lib.mbt"
+    @fs.write_file(
+      path,
+      "pub fn g() -> Int { 0 }\n",
+      create_mode=CreateOrTruncate,
+    )
+    // An empty file-state map: the agent never created this file this session.
+    let tools = @agent_tool.Tools([@remove.definition()])
+    let arguments : Json = { "path": path, "reason": "cleanup" }
+    let call = @agent_tool.AgentToolCall(
+      ToolCall(
+        id="call_remove_refuse",
+        name="remove",
+        arguments=arguments.stringify(),
+      ),
+    )
+    let result = @agent_tool.execute_tool_call(call, tools)
+    guard result is Respond(output) else { fail("expected Respond") }
+    assert_true(output.is_error)
+    assert_true(output.content.contains("not created by the agent this session"))
+    // The file is untouched.
+    assert_true(@fs.exists(path))
+  })
+}
+```
