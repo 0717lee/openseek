@@ -21,6 +21,8 @@ pub const GoalPrefix : String = "[goal]"
 
 pub const GoalReminderPrefix : String = "[goal reminder]"
 
+pub const GoalUnblockedNotice : String = "[goal unblocked]"
+
 pub const PlanReminderPrefix : String = "[plan reminder]"
 
 pub fn goal_marker(String) -> GoalMarker?
@@ -40,6 +42,7 @@ pub(all) enum GoalMarker {
   GoalSet(String)
   GoalCleared
   GoalBlocked(String)
+  GoalUnblocked
 } derive(@debug.Debug)
 
 pub struct RuntimeNotice {

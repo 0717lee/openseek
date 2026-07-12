@@ -20,6 +20,13 @@ pub const GoalClearedNotice : String = "[goal cleared]"
 pub const GoalBlockedPrefix : String = "[goal blocked]"
 
 ///|
+/// Exact content of the marker that RESCINDS a prior `[goal blocked]`: the
+/// model resumed work on the still-standing goal (via `goal(continuing)`), so
+/// auto-continuation must resume too. A pure state transition, so it carries
+/// no reason payload — exact content, like `[goal cleared]`.
+pub const GoalUnblockedNotice : String = "[goal unblocked]"
+
+///|
 /// First line of the reminder notice the agent loop re-injects so a
 /// long-running conversation keeps the standing goal near the context tail.
 pub const GoalReminderPrefix : String = "[goal reminder]"
@@ -74,16 +81,21 @@ pub(all) enum GoalMarker {
   GoalSet(String)
   GoalCleared
   GoalBlocked(String)
+  GoalUnblocked
 } derive(Debug)
 
 ///|
 /// Parse a runtime-notice content as a goal marker, if it is one. The set
-/// marker requires the exact `[goal]` first line and the tombstone requires
-/// exact content, so other notices (plan reminders, goal reminders, goal
-/// checks) never match.
+/// marker requires the exact `[goal]` first line and the tombstone/unblock
+/// markers require exact content, so other notices (plan reminders, goal
+/// reminders, goal checks) never match. Unknown content is not a marker
+/// (`None`), so a reader from an older build treats `[goal unblocked]` as a
+/// plain notice and keeps the goal blocked — a safe degradation.
 pub fn goal_marker(content : String) -> GoalMarker? {
   if content == GoalClearedNotice {
     Some(GoalCleared)
+  } else if content == GoalUnblockedNotice {
+    Some(GoalUnblocked)
   } else if content.has_prefix("\{GoalBlockedPrefix}\n") {
     Some(GoalBlocked(content[GoalBlockedPrefix.length() + 1:].to_owned()))
   } else if content.has_prefix("\{GoalPrefix}\n") {
@@ -105,6 +117,10 @@ pub fn Session::current_goal(self : Session) -> StandingGoal? {
   let events = self.events()
   let mut answered = false
   let mut blocked = false
+  // The newest of the block/unblock pair wins: scanning newest-first, the
+  // first one encountered before the set marker decides `blocked`, and
+  // `blocked_decided` freezes it so an older transition cannot override it.
+  let mut blocked_decided = false
   let covered : Array[(Int, Int)] = []
   for index = events.length() - 1; index >= 0; index = index - 1 {
     let event = events[index]
@@ -120,9 +136,19 @@ pub fn Session::current_goal(self : Session) -> StandingGoal? {
       Runtime(notice) =>
         match goal_marker(notice.content()) {
           Some(GoalCleared) => return None
-          // Newest-first: a blocked marker precedes the set it follows
-          // temporally; a NEWER set is found first and naturally resets it.
-          Some(GoalBlocked(_)) => blocked = true
+          // Newest-first: a blocked/unblocked marker precedes the set it
+          // follows temporally; a NEWER set is found first and naturally
+          // resets both. Between them, whichever is newer wins.
+          Some(GoalBlocked(_)) =>
+            if !blocked_decided {
+              blocked = true
+              blocked_decided = true
+            }
+          Some(GoalUnblocked) =>
+            if !blocked_decided {
+              blocked = false
+              blocked_decided = true
+            }
           Some(GoalSet(text)) => {
             let sequence = event.sequence()
             let is_covered = covered.any(range => {

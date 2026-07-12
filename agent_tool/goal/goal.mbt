@@ -57,7 +57,7 @@ pub fn definition() -> @agent_tool.AgentToolDefinition {
   AgentToolDefinition(
     name="goal",
     description=(
-      #|Record the status of the standing session goal. Call with status "met" only when the goal is fully achieved and verified — this durably clears it. Call with status "continuing" plus a short "remaining" summary when you finish a task while goal work remains. Call with status "blocked" plus a "reason" when the goal cannot proceed (impossible, blocked, or superseded) — the goal keeps standing for the user, but autonomous continuation pauses. Only meaningful when a standing goal is set.
+      #|Record the status of the standing session goal. Call with status "met" only when the goal is fully achieved and verified — this durably clears it. Call with status "continuing" plus a short "remaining" summary when you finish a task while goal work remains; if the goal was previously marked "blocked" and you have resumed work, "continuing" clears that blocked status and resumes autonomous continuation. Call with status "blocked" plus a "reason" ONLY when real progress is impossible without user action or an external-state change (e.g. missing credentials or access, a required decision only the user can make, a genuinely unrecoverable dependency), or the goal has been superseded — NOT for a transient or recoverable problem you can work around yourself (a failed command, a tool error, a corrupted file you can rewrite). Blocking keeps the goal standing for the user but pauses autonomous continuation, so reserve it for when you truly cannot proceed. Only meaningful when a standing goal is set.
     ),
     schema=JsonSchema({
       "type": "object",

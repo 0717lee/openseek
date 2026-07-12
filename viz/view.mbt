@@ -354,6 +354,10 @@ fn runtime_card(seq : Int, time : String, content : String) -> @html.Html {
       return card("runtime goal-blocked", "Goal blocked", seq, time~, [
         text_block(reason),
       ])
+    Some(GoalUnblocked) =>
+      return card("runtime goal-unblocked", "Goal unblocked", seq, time~, [
+        @html.span(class="goal-cleared-note") <| "goal resumed; auto-continuation re-enabled",
+      ])
     None => ()
   }
   if content.has_prefix(@agent_session.GoalReminderPrefix) {

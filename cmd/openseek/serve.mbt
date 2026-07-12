@@ -392,6 +392,51 @@ test "a context-yield turn chains: finished derivation and standing goal" {
 }
 
 ///|
+test "an unblocked goal resumes auto-continuation at the boundary" {
+  // serve gates auto-continue on `goal_standing = standing is Some && !blocked`
+  // read fresh from current_goal() each TurnDone. A goal blocked then unblocked
+  // reads as standing-and-not-blocked, so continuation resumes with no serve
+  // change — the whole point of the [goal unblocked] marker.
+  let base = @agent_session.Session(SessionId("resume"), system_prompt="system")
+    .append(Runtime(RuntimeNotice("\{@agent_session.GoalPrefix}\nobjective")))
+    .append(User(UserMessage("work")))
+    .append(
+      Runtime(RuntimeNotice("\{@agent_session.GoalBlockedPrefix}\nstuck")),
+    )
+    .append(Terminal(Finished("turn answer")))
+  let goal_standing = fn(session : @agent_session.Session) -> Bool {
+    session.current_goal() is Some(goal) && !goal.blocked()
+  }
+  // While blocked, the boundary does NOT auto-continue.
+  assert_false(goal_standing(base))
+  assert_false(
+    should_auto_continue(
+      auto=true,
+      finished=true,
+      idle=true,
+      shutting_down=false,
+      goal_standing=goal_standing(base),
+      turns_remaining=1,
+    ),
+  )
+  // After the unblock marker lands, the same boundary resumes.
+  let resumed = base.append(
+    Runtime(RuntimeNotice(@agent_session.GoalUnblockedNotice)),
+  )
+  assert_true(goal_standing(resumed))
+  assert_true(
+    should_auto_continue(
+      auto=true,
+      finished=true,
+      idle=true,
+      shutting_down=false,
+      goal_standing=goal_standing(resumed),
+      turns_remaining=1,
+    ),
+  )
+}
+
+///|
 test "auto-continue requires a finished idle serving turn with budget" {
   assert_true(
     should_auto_continue(
@@ -660,10 +705,10 @@ async fn run_serve(
           @xlog.info() <? { "event": "goal_updated", "goal": text }
         Some(GoalCleared) =>
           @xlog.info() <? { "event": "goal_updated", "goal": (None : String?) }
-        // A blocked marker pauses auto-continuation but the goal stands:
-        // it is reported by the loop's own goal_blocked event, not as a
-        // goal_updated (the goal did not change).
-        Some(GoalBlocked(_)) | None => ()
+        // Block/unblock markers change auto-continuation policy but not the
+        // goal itself; they are reported by the loop's own goal_blocked /
+        // goal_unblocked events, not as goal_updated.
+        Some(GoalBlocked(_)) | Some(GoalUnblocked) | None => ()
       }
     }
 

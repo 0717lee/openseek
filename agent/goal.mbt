@@ -17,10 +17,12 @@ fn goal_reminder_text(goal : String, tool_registered~ : Bool) -> String {
     $|Assess it briefly at this turn boundary:
     $|- Fully met? Verify per the goal's own criteria first, then
     $|  \{met_action}.
-    $|- Unable to proceed (blocked, impossible, or superseded)? Record that
-    $|  — call the goal tool with status "blocked" and a reason if it is
-    $|  available, otherwise say why — then finish; the user decides what
-    $|  is next.
+    $|- Truly cannot proceed — progress needs user action or an external
+    $|  change (access, a decision only the user can make, an unrecoverable
+    $|  dependency), or the goal is superseded? Record that with status
+    $|  "blocked" and a reason, then finish; the user decides what is next.
+    $|  Do NOT block for a problem you can work around yourself (a failed
+    $|  command, a tool error, a file you can rewrite).
     $|- Otherwise continue working toward it. If the current task conflicts
     $|  with the goal, the current task wins; note the conflict briefly.
   )
@@ -36,10 +38,13 @@ fn goal_check_text(goal : String, tool_registered~ : Bool) -> String {
       $|You attempted to finish. If the goal is fully met, record that by
       $|calling the goal tool with status "met", then finish. If this task
       $|is complete but the goal is not, call the goal tool with status
-      $|"continuing" and what remains, then finish. If the goal cannot
-      $|proceed (blocked, impossible, or superseded), call the goal tool
-      $|with status "blocked" and a reason, then finish — the user decides
-      $|what is next. Otherwise continue working toward the goal.
+      $|"continuing" and what remains, then finish (this also clears a prior
+      $|"blocked" status and resumes autonomous continuation). Only if real
+      $|progress is impossible without user action or an external change, or
+      $|the goal is superseded, call the goal tool with status "blocked" and
+      $|a reason, then finish — the user decides what is next; do not block
+      $|for a problem you can work around yourself. Otherwise continue
+      $|working toward the goal.
     )
   } else {
     (
@@ -52,6 +57,20 @@ fn goal_check_text(goal : String, tool_registered~ : Bool) -> String {
       $|the goal.
     )
   }
+}
+
+///|
+/// The block/unblock marker a batch will land at its next batch-safe
+/// boundary. At most one such transition is pending per batch, so this is a
+/// single field rather than two independent flags: `continuing` after a block
+/// in the same batch rewrites it, never leaving a stale half-state.
+priv enum PendingBlockTransition {
+  NoBlockTransition
+  /// A goal(blocked) verdict awaiting its durable `[goal blocked]` marker.
+  PendingBlock(String)
+  /// A goal(continuing) that resumes a durably blocked goal, awaiting its
+  /// durable `[goal unblocked]` marker.
+  PendingUnblock
 }
 
 ///|
@@ -73,9 +92,15 @@ priv struct GoalCadence {
   mut goal : String?
   mut remind_now : Bool
   mut finish_checked : Bool
-  /// A blocked verdict awaiting its durable marker at a batch-safe
-  /// boundary, exactly like the met tombstone.
-  mut pending_blocked_reason : String?
+  /// Cache of the DURABLE blocked state (whether a live `[goal blocked]`
+  /// stands in the log). Seeded from the standing goal and updated only after
+  /// a marker durably lands (flush) or a durable notice is observed — never
+  /// optimistically from an unflushed batch verdict, so `continuing` can tell
+  /// a prior-batch block (which needs an unblock marker) from a same-batch one
+  /// (which just cancels).
+  mut durably_blocked : Bool
+  /// The block/unblock marker awaiting the next batch-safe boundary.
+  mut pending_block : PendingBlockTransition
   /// A goal(met) call was recorded mid-batch; the durable [goal cleared]
   /// tombstone must land only at a batch-safe boundary (next step start or
   /// turn finish) — a mid-batch runtime notice would make replay synthesize
@@ -94,7 +119,8 @@ fn GoalCadence::GoalCadence(
     goal: standing.map(goal => goal.text()),
     remind_now: standing.map(goal => goal.answered_since_set()).unwrap_or(false),
     finish_checked: false,
-    pending_blocked_reason: None,
+    durably_blocked: standing.map(goal => goal.blocked()).unwrap_or(false),
+    pending_block: NoBlockTransition,
     pending_tombstone: false,
   }
 }
@@ -113,17 +139,40 @@ fn GoalCadence::due_finish_check(self : GoalCadence) -> String? {
 ///|
 /// A structured goal(met) call: the goal stops standing immediately (the
 /// finish check disarms) and the durable tombstone is deferred to the next
-/// batch-safe boundary.
+/// batch-safe boundary. Any pending block/unblock is abandoned — the goal is
+/// going away, so its blocked state is moot.
 fn GoalCadence::record_goal_met(self : GoalCadence) -> Unit {
   self.goal = None
+  self.pending_block = NoBlockTransition
   self.pending_tombstone = true
 }
 
 ///|
-/// A structured goal(continuing) call answers exactly what the finish check
-/// would ask, so the check disarms for the rest of the turn.
+/// A structured goal(continuing) call answers the finish check (disarming it
+/// for the rest of the turn) and, if the goal is durably blocked, resumes
+/// auto-continuation by scheduling a `[goal unblocked]` marker. Keying off
+/// `durably_blocked` (not the pending field) is what makes a continue after a
+/// PRIOR-batch block emit the marker, while a block+continue within one batch
+/// simply cancels to nothing durable.
 fn GoalCadence::record_goal_continuing(self : GoalCadence) -> Unit {
   self.finish_checked = true
+  if self.durably_blocked {
+    self.pending_block = PendingUnblock
+  } else if self.pending_block is PendingBlock(_) {
+    self.pending_block = NoBlockTransition
+  }
+}
+
+///|
+/// A structured goal(blocked) call: pauses auto-continuation. Like a finish
+/// check answer it disarms the turn's finish check, and it schedules a durable
+/// `[goal blocked]` marker (superseding any same-batch pending unblock).
+fn GoalCadence::record_goal_blocked(
+  self : GoalCadence,
+  reason : String,
+) -> Unit {
+  self.finish_checked = true
+  self.pending_block = PendingBlock(reason)
 }
 
 ///|
@@ -174,45 +223,71 @@ fn GoalCadence::observe_notice(self : GoalCadence, content : String) -> Unit {
       // flushing it after the new marker would wipe the new goal (last
       // marker wins in the scan).
       self.pending_tombstone = false
-      // Same for a deferred blocked verdict: flushing it after the new
-      // marker would mark the REPLACEMENT goal blocked.
-      self.pending_blocked_reason = None
+      // Same for a deferred block/unblock verdict: it belonged to the goal
+      // this set supersedes; a new goal starts unblocked.
+      self.pending_block = NoBlockTransition
+      self.durably_blocked = false
       @xlog.info() <? { "event": "goal_updated", "goal": text }
     }
     Some(GoalCleared) => {
       self.goal = None
       // A durable clear just landed; a second tombstone would be noise.
       self.pending_tombstone = false
-      self.pending_blocked_reason = None
+      self.pending_block = NoBlockTransition
+      self.durably_blocked = false
       @xlog.info() <? { "event": "goal_updated", "goal": (None : String?) }
     }
-    // A blocked marker changes auto-continuation policy (serve reads it
-    // from the standing goal), not the cadence: the goal still stands.
-    Some(GoalBlocked(_)) => ()
+    // A block/unblock marker landing durably (this loop's own flush, or a
+    // steer observed after its append) toggles the cached durable state; the
+    // goal still stands, so the rest of the cadence is untouched.
+    Some(GoalBlocked(_)) => self.durably_blocked = true
+    Some(GoalUnblocked) => self.durably_blocked = false
     None => ()
   }
 }
 
 ///|
-/// Flush a deferred goal tombstone at a batch-safe boundary: the durable
-/// `[goal cleared]` clear for a goal(met) recorded mid-batch, appended
-/// through the loop's persistence seam and reported as `goal_updated` only
-/// after that append succeeds.
+/// Flush the goal markers a batch deferred, at a batch-safe boundary: the
+/// `[goal blocked]` / `[goal unblocked]` transition, then the `[goal cleared]`
+/// tombstone. Each is appended through the loop's persistence seam and its
+/// pending flag cleared only AFTER the append succeeds — a failed append must
+/// leave the flag set so the error-path retry re-lands the marker, otherwise
+/// a durable goal-tool result would coexist with a stale standing state on
+/// resume. The two markers cannot both be pending (met abandons a pending
+/// block, and a set/clear supersedes it), so their order does not conflict.
 async fn AgentLoop::flush_goal_tombstone(
   self : Self,
   session : @agent_session.Session,
 ) -> @agent_session.Session {
-  let session = if self.goal_cadence.pending_blocked_reason is Some(reason) {
-    let next = self.append_runtime_notice(
-      session,
-      "\{@agent_session.GoalBlockedPrefix}\n\{reason}",
-    )
-    // Cleared only AFTER the durable append, like the tombstone.
-    self.goal_cadence.pending_blocked_reason = None
-    @xlog.info() <? { "event": "goal_blocked", "reason": reason }
-    next
-  } else {
-    session
+  let session = match self.goal_cadence.pending_block {
+    PendingBlock(reason) => {
+      let next = self.append_runtime_notice(
+        session,
+        "\{@agent_session.GoalBlockedPrefix}\n\{reason}",
+      )
+      self.goal_cadence.pending_block = NoBlockTransition
+      self.goal_cadence.durably_blocked = true
+      @xlog.info() <? { "event": "goal_blocked", "reason": reason }
+      next
+    }
+    // A continue that resumes a durably blocked goal: land the unblock marker
+    // so serve's next auto-continue check reads the goal as no longer blocked.
+    PendingUnblock if self.goal_cadence.durably_blocked => {
+      let next = self.append_runtime_notice(
+        session,
+        @agent_session.GoalUnblockedNotice,
+      )
+      self.goal_cadence.pending_block = NoBlockTransition
+      self.goal_cadence.durably_blocked = false
+      @xlog.info() <? { "event": "goal_unblocked" }
+      next
+    }
+    // A no-op unblock (the goal was not durably blocked): nothing to rescind.
+    PendingUnblock => {
+      self.goal_cadence.pending_block = NoBlockTransition
+      session
+    }
+    NoBlockTransition => session
   }
   if !self.goal_cadence.pending_tombstone {
     return session
@@ -221,9 +296,6 @@ async fn AgentLoop::flush_goal_tombstone(
     session,
     @agent_session.GoalClearedNotice,
   )
-  // Cleared only AFTER the durable append: a failed append must leave the
-  // flag set so the error-path retry still lands the tombstone — otherwise
-  // a durable goal(met) result coexists with a resurrected goal on resume.
   self.goal_cadence.pending_tombstone = false
   @xlog.info() <? { "event": "goal_updated", "goal": (None : String?) }
   next
@@ -248,13 +320,23 @@ async fn AgentLoop::handle_goal_tool_call(
     @goal.decode_status(tool_call.arguments),
     self.goal_cadence.goal,
   )
+  // A continue that resumes a durably blocked goal reports the resume, so the
+  // transcript shows auto-continuation coming back rather than silently.
+  let resumes_block = self.goal_cadence.durably_blocked
   let (content, is_error) = match verdict {
     (Err(message), _) => ("error: \{message}", true)
     (Ok(_), None) => ("error: no standing goal is set", true)
     (Ok(Met), Some(_)) =>
       ("goal recorded as met; the standing goal is now cleared", false)
     (Ok(Continuing(remaining)), Some(_)) =>
-      ("goal status recorded as continuing: \{remaining}", false)
+      if resumes_block {
+        (
+          "goal status recorded as continuing: \{remaining}. The goal is no longer blocked; auto-continuation resumes",
+          false,
+        )
+      } else {
+        ("goal status recorded as continuing: \{remaining}", false)
+      }
     (Ok(Blocked(reason)), Some(_)) =>
       (
         "goal recorded as blocked: \{reason}. The goal still stands; auto-continuation is paused for the user",
@@ -273,13 +355,13 @@ async fn AgentLoop::handle_goal_tool_call(
   // then durably clear a goal whose met verdict was never persisted).
   match verdict {
     (Ok(Met), Some(_)) => self.goal_cadence.record_goal_met()
+    // Continuing answers the finish check and, if the goal is durably
+    // blocked, schedules a `[goal unblocked]` marker so serve resumes.
     (Ok(Continuing(_)), Some(_)) => self.goal_cadence.record_goal_continuing()
-    // Blocked answers the check like continuing, and lands a durable
+    // Blocked answers the check and schedules a durable `[goal blocked]`
     // marker so serve pauses auto-continuation while the goal stands.
-    (Ok(Blocked(reason)), Some(_)) => {
-      self.goal_cadence.record_goal_continuing()
-      self.goal_cadence.pending_blocked_reason = Some(reason)
-    }
+    (Ok(Blocked(reason)), Some(_)) =>
+      self.goal_cadence.record_goal_blocked(reason)
     _ => ()
   }
   @xlog.info() <?
