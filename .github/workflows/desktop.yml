@@ -22,18 +22,29 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
 
-      # The lepus submodule is a private repo, so the default workflow token
-      # cannot clone it. LEPUS_READ_TOKEN is a fine-grained PAT with read-only
-      # access to moonbit-community/lepus. Note: this secret is unavailable to
-      # pull requests from forks, where this job will fail at this step.
+      # The lepus and editor submodules are private repos, so the default
+      # workflow token cannot clone them. Mint a short-lived installation
+      # token (~1h, read-only Contents on moonbit-community/{lepus,editor})
+      # from the org's GitHub App — nothing long-lived is exposed to the job.
+      # Note: these secrets are unavailable to pull requests from forks,
+      # where this job will fail at this step.
+      - name: Mint lepus read token
+        id: lepus-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.LEPUS_APP_ID }}
+          private-key: ${{ secrets.LEPUS_APP_PRIVATE_KEY }}
+          owner: moonbit-community
+          repositories: lepus,editor
+
       - name: Check out the lepus submodule
         env:
-          LEPUS_READ_TOKEN: ${{ secrets.LEPUS_READ_TOKEN }}
+          LEPUS_READ_TOKEN: ${{ steps.lepus-token.outputs.token }}
         run: |
-          # Inject the PAT only for this one command via `git -c`, so it never
-          # lands in ~/.gitconfig — where later steps that run PR-controlled
-          # build scripts could read it. (Fork PRs receive no secret and fail
-          # here, as before.)
+          # Inject the token only for this one command via `git -c`, so it
+          # never lands in ~/.gitconfig — where later steps that run
+          # PR-controlled build scripts could read it. (Fork PRs receive no
+          # secrets and already failed at the mint step above.)
           # Init only our submodules, non-recursively: the editor submodule
           # nests microsoft/vscode + codemirror as reference-only mirrors
           # (huge, LFS-gated) we never build against; lepus has no nested
@@ -114,14 +125,23 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
 
+      - name: Mint lepus read token
+        id: lepus-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.LEPUS_APP_ID }}
+          private-key: ${{ secrets.LEPUS_APP_PRIVATE_KEY }}
+          owner: moonbit-community
+          repositories: lepus,editor
+
       - name: Check out the lepus submodule
         env:
-          LEPUS_READ_TOKEN: ${{ secrets.LEPUS_READ_TOKEN }}
+          LEPUS_READ_TOKEN: ${{ steps.lepus-token.outputs.token }}
         run: |
-          # Inject the PAT only for this one command via `git -c`, so it never
-          # lands in ~/.gitconfig — where later steps that run PR-controlled
-          # build scripts could read it. (Fork PRs receive no secret and fail
-          # here, as before.)
+          # Inject the token only for this one command via `git -c`, so it
+          # never lands in ~/.gitconfig — where later steps that run
+          # PR-controlled build scripts could read it. (Fork PRs receive no
+          # secrets and already failed at the mint step above.)
           # Init only our submodules, non-recursively: the editor submodule
           # nests microsoft/vscode + codemirror as reference-only mirrors
           # (huge, LFS-gated) we never build against; lepus has no nested
@@ -168,18 +188,29 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
 
-      # The lepus submodule is a private repo, so the default workflow token
-      # cannot clone it. LEPUS_READ_TOKEN is a fine-grained PAT with read-only
-      # access to moonbit-community/lepus. Note: this secret is unavailable to
-      # pull requests from forks, where this job will fail at this step.
+      # The lepus and editor submodules are private repos, so the default
+      # workflow token cannot clone them. Mint a short-lived installation
+      # token (~1h, read-only Contents on moonbit-community/{lepus,editor})
+      # from the org's GitHub App — nothing long-lived is exposed to the job.
+      # Note: these secrets are unavailable to pull requests from forks,
+      # where this job will fail at this step.
+      - name: Mint lepus read token
+        id: lepus-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.LEPUS_APP_ID }}
+          private-key: ${{ secrets.LEPUS_APP_PRIVATE_KEY }}
+          owner: moonbit-community
+          repositories: lepus,editor
+
       - name: Check out the lepus submodule
         env:
-          LEPUS_READ_TOKEN: ${{ secrets.LEPUS_READ_TOKEN }}
+          LEPUS_READ_TOKEN: ${{ steps.lepus-token.outputs.token }}
         run: |
-          # Inject the PAT only for this one command via `git -c`, so it never
-          # lands in ~/.gitconfig — where later steps that run PR-controlled
-          # build scripts could read it. (Fork PRs receive no secret and fail
-          # here, as before.)
+          # Inject the token only for this one command via `git -c`, so it
+          # never lands in ~/.gitconfig — where later steps that run
+          # PR-controlled build scripts could read it. (Fork PRs receive no
+          # secrets and already failed at the mint step above.)
           # Init only our submodules, non-recursively: the editor submodule
           # nests microsoft/vscode + codemirror as reference-only mirrors
           # (huge, LFS-gated) we never build against; lepus has no nested
@@ -245,18 +276,29 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
 
-      # The lepus submodule is a private repo, so the default workflow token
-      # cannot clone it. LEPUS_READ_TOKEN is a fine-grained PAT with read-only
-      # access to moonbit-community/lepus. Note: this secret is unavailable to
-      # pull requests from forks, where this job will fail at this step.
+      # The lepus and editor submodules are private repos, so the default
+      # workflow token cannot clone them. Mint a short-lived installation
+      # token (~1h, read-only Contents on moonbit-community/{lepus,editor})
+      # from the org's GitHub App — nothing long-lived is exposed to the job.
+      # Note: these secrets are unavailable to pull requests from forks,
+      # where this job will fail at this step.
+      - name: Mint lepus read token
+        id: lepus-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.LEPUS_APP_ID }}
+          private-key: ${{ secrets.LEPUS_APP_PRIVATE_KEY }}
+          owner: moonbit-community
+          repositories: lepus,editor
+
       - name: Check out the lepus submodule
         env:
-          LEPUS_READ_TOKEN: ${{ secrets.LEPUS_READ_TOKEN }}
+          LEPUS_READ_TOKEN: ${{ steps.lepus-token.outputs.token }}
         run: |
-          # Inject the PAT only for this one command via `git -c`, so it never
-          # lands in ~/.gitconfig — where later steps that run PR-controlled
-          # build scripts could read it. (Fork PRs receive no secret and fail
-          # here, as before.)
+          # Inject the token only for this one command via `git -c`, so it
+          # never lands in ~/.gitconfig — where later steps that run
+          # PR-controlled build scripts could read it. (Fork PRs receive no
+          # secrets and already failed at the mint step above.)
           # Init only our submodules, non-recursively: the editor submodule
           # nests microsoft/vscode + codemirror as reference-only mirrors
           # (huge, LFS-gated) we never build against; lepus has no nested
@@ -313,19 +355,30 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
 
-      # The lepus submodule is a private repo, so the default workflow token
-      # cannot clone it. LEPUS_READ_TOKEN is a fine-grained PAT with read-only
-      # access to moonbit-community/lepus. Note: this secret is unavailable to
-      # pull requests from forks, where this job will fail at this step.
+      # The lepus and editor submodules are private repos, so the default
+      # workflow token cannot clone them. Mint a short-lived installation
+      # token (~1h, read-only Contents on moonbit-community/{lepus,editor})
+      # from the org's GitHub App — nothing long-lived is exposed to the job.
+      # Note: these secrets are unavailable to pull requests from forks,
+      # where this job will fail at this step.
+      - name: Mint lepus read token
+        id: lepus-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.LEPUS_APP_ID }}
+          private-key: ${{ secrets.LEPUS_APP_PRIVATE_KEY }}
+          owner: moonbit-community
+          repositories: lepus,editor
+
       - name: Check out the lepus submodule
         shell: bash
         env:
-          LEPUS_READ_TOKEN: ${{ secrets.LEPUS_READ_TOKEN }}
+          LEPUS_READ_TOKEN: ${{ steps.lepus-token.outputs.token }}
         run: |
-          # Inject the PAT only for this one command via `git -c`, so it never
-          # lands in ~/.gitconfig — where later steps that run PR-controlled
-          # build scripts could read it. (Fork PRs receive no secret and fail
-          # here, as before.)
+          # Inject the token only for this one command via `git -c`, so it
+          # never lands in ~/.gitconfig — where later steps that run
+          # PR-controlled build scripts could read it. (Fork PRs receive no
+          # secrets and already failed at the mint step above.)
           # Init only our submodules, non-recursively: the editor submodule
           # nests microsoft/vscode + codemirror as reference-only mirrors
           # (huge, LFS-gated) we never build against; lepus has no nested
