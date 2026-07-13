@@ -128,10 +128,7 @@ test "transcript mapping replays a context checkpoint and yield guidance" {
   guard items[1].kind is Assistant(false) else {
     fail("expected context-yield guidance")
   }
-  inspect(
-    items[1].content,
-    content="[context ceiling] continue in a new turn",
-  )
+  inspect(items[1].content, content="[context ceiling] continue in a new turn")
 }
 
 ///|

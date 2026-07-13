@@ -15,7 +15,8 @@ warnings = "+missing_doc+test_unqualified_package+unnecessary_annotation+unneces
 
 supported_targets = "native"
 
+pkgtype(kind: "executable")
+
 options(
-  "is-main": true,
   targets: { "main.mbt": [ "native" ] },
 )

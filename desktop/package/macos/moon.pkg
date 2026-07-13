@@ -13,6 +13,4 @@ warnings = "+test_unqualified_package+unnecessary_annotation+unnecessary_view_op
 
 supported_targets = "native"
 
-options(
-  "is-main": true,
-)
+pkgtype(kind: "executable")

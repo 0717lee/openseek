@@ -21,9 +21,7 @@ async test "context yield reports a terminal finished event" {
   let emitted : Array[EngineEvent] = []
   let sink = EventSink(fn(event) { emitted.push(event) })
   let answer = "[context ceiling] checkpointed"
-  assert_true(
-    handle_decoded_event(sink, 17, ContextYield(answer)),
-  )
+  assert_true(handle_decoded_event(sink, 17, ContextYield(answer)))
   guard emitted is [Finished(payload)] else {
     fail("expected one finished event")
   }
