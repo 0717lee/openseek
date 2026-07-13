@@ -36,6 +36,10 @@ jobs:
           private-key: ${{ secrets.LEPUS_APP_PRIVATE_KEY }}
           owner: moonbit-community
           repositories: lepus
+          # Pin the minted token to read-only Contents even if the App
+          # installation grants (or later gains) broader permissions — the
+          # token flows into PR-controlled build/test steps below.
+          permission-contents: read
 
       - name: Check out the lepus submodule
         env:
@@ -131,6 +135,10 @@ jobs:
           private-key: ${{ secrets.LEPUS_APP_PRIVATE_KEY }}
           owner: moonbit-community
           repositories: lepus
+          # Pin the minted token to read-only Contents even if the App
+          # installation grants (or later gains) broader permissions — the
+          # token flows into PR-controlled build/test steps below.
+          permission-contents: read
 
       - name: Check out the lepus submodule
         env:
@@ -198,6 +206,10 @@ jobs:
           private-key: ${{ secrets.LEPUS_APP_PRIVATE_KEY }}
           owner: moonbit-community
           repositories: lepus
+          # Pin the minted token to read-only Contents even if the App
+          # installation grants (or later gains) broader permissions — the
+          # token flows into PR-controlled build/test steps below.
+          permission-contents: read
 
       - name: Check out the lepus submodule
         env:
@@ -284,6 +296,10 @@ jobs:
           private-key: ${{ secrets.LEPUS_APP_PRIVATE_KEY }}
           owner: moonbit-community
           repositories: lepus
+          # Pin the minted token to read-only Contents even if the App
+          # installation grants (or later gains) broader permissions — the
+          # token flows into PR-controlled build/test steps below.
+          permission-contents: read
 
       - name: Check out the lepus submodule
         env:
@@ -361,6 +377,10 @@ jobs:
           private-key: ${{ secrets.LEPUS_APP_PRIVATE_KEY }}
           owner: moonbit-community
           repositories: lepus
+          # Pin the minted token to read-only Contents even if the App
+          # installation grants (or later gains) broader permissions — the
+          # token flows into PR-controlled build/test steps below.
+          permission-contents: read
 
       - name: Check out the lepus submodule
         shell: bash
