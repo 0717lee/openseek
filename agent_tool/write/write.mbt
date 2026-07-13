@@ -18,9 +18,11 @@
 ///   fixture).
 ///
 /// ## Result
-/// - `Respond(ToolOutput("ok: wrote <n> chars to <path>"))` when a new file is
-///   created; the message gains ` (overwrote existing file)` when the path
-///   already existed, so the model can tell it clobbered prior content.
+/// - `Respond(ToolOutput("ok: wrote <n> line(s) (<m> chars) to <path>"))` when a
+///   new file is created; the message gains ` (overwrote existing file)` when the
+///   path already existed, so the model can tell it clobbered prior content. The
+///   line count matches what `read` reports for the same file (empty content is
+///   0 lines; a trailing newline counts a final empty segment).
 /// - `Respond(ToolOutput("rejected: the content for <path> ...", is_error=true))`
 ///   when the parse gate refused non-parsing content.
 /// - `Respond(ToolOutput("error writing <path>: <error>", is_error=true))`
@@ -174,16 +176,34 @@ async fn write_file(
       file_state.record_created(path, digest)
     }
     let chars = input.content.length()
-    let summary = if existed {
-      "ok: wrote \{chars} chars to \{path} (overwrote existing file)"
+    // Line count matches read's `split("\n")` total, so the numbers agree across
+    // tools: empty content is 0 lines, and a trailing newline counts a final
+    // empty segment (e.g. "a\nb\n" is 3 lines). Computed in constant space —
+    // count newline delimiters in a single pass rather than materializing a
+    // per-line array just to read its length, since a large generated write can
+    // hold very many lines.
+    let lines = if input.content == "" {
+      0
     } else {
-      "ok: wrote \{chars} chars to \{path}"
+      let mut newlines = 0
+      for ch in input.content {
+        if ch == '\n' {
+          newlines += 1
+        }
+      }
+      newlines + 1
+    }
+    let line_word = if lines == 1 { "line" } else { "lines" }
+    let summary = if existed {
+      "ok: wrote \{lines} \{line_word} (\{chars} chars) to \{path} (overwrote existing file)"
+    } else {
+      "ok: wrote \{lines} \{line_word} (\{chars} chars) to \{path}"
     }
     let ok_brief = @agent_tool.brief_line(
       if existed {
-        "overwrote \{input.path}"
+        "overwrote \{input.path} (\{lines} \{line_word})"
       } else {
-        "wrote \{chars} chars to \{input.path}"
+        "wrote \{lines} \{line_word} to \{input.path}"
       },
     )
     let content = @auto_check.append_summary(path, summary)
@@ -287,7 +307,7 @@ async test "write creates missing parent directories" {
     let result = execute({ "path": path, "content": "import {}\n" })
     guard result is Respond(output) else { fail("expected Respond") }
     assert_false(output.is_error)
-    assert_eq(output.content, "ok: wrote 10 chars to \{path}")
+    assert_eq(output.content, "ok: wrote 2 lines (10 chars) to \{path}")
     assert_eq(@fs.read_file(path).text(), "import {}\n")
   })
 }
@@ -306,7 +326,7 @@ async test "write creates a file with the given content" {
     let path = "\{dir}/test.txt"
     let result = execute({ "path": path, "content": "hello write" })
     guard result is Respond(output) else { fail("expected Respond") }
-    assert_eq(output.content, "ok: wrote 11 chars to \{path}")
+    assert_eq(output.content, "ok: wrote 1 line (11 chars) to \{path}")
     assert_false(output.is_error)
     let read_back = @fs.read_file(path).text()
     assert_eq(read_back, "hello write")
@@ -324,7 +344,7 @@ async test "write resolves relative paths under the workspace root" {
     guard result is Respond(output) else { fail("expected Respond") }
     let path = "\{dir}/note.txt"
     assert_false(output.is_error)
-    assert_eq(output.content, "ok: wrote 9 chars to \{path}")
+    assert_eq(output.content, "ok: wrote 1 line (9 chars) to \{path}")
     assert_eq(@fs.read_file(path).text(), "workspace")
   })
 }
@@ -339,7 +359,7 @@ async test "write truncates existing files" {
     // The path already existed, so the result flags the overwrite.
     assert_eq(
       output.content,
-      "ok: wrote 5 chars to \{path} (overwrote existing file)",
+      "ok: wrote 1 line (5 chars) to \{path} (overwrote existing file)",
     )
     assert_false(output.is_error)
     let read_back = @fs.read_file(path).text()
@@ -354,13 +374,13 @@ async test "write reports whether it created or overwrote a file" {
     // First write to a fresh path: a plain "created" result, no overwrite note.
     let created = execute({ "path": path, "content": "v1" })
     guard created is Respond(first) else { fail("expected Respond") }
-    assert_eq(first.content, "ok: wrote 2 chars to \{path}")
+    assert_eq(first.content, "ok: wrote 1 line (2 chars) to \{path}")
     // Writing again clobbers the existing file, which the result now calls out.
     let overwritten = execute({ "path": path, "content": "v2!" })
     guard overwritten is Respond(second) else { fail("expected Respond") }
     assert_eq(
       second.content,
-      "ok: wrote 3 chars to \{path} (overwrote existing file)",
+      "ok: wrote 1 line (3 chars) to \{path} (overwrote existing file)",
     )
   })
 }
@@ -374,7 +394,7 @@ async test "write accepts empty content" {
     guard result is Respond(output) else { fail("expected Respond") }
     assert_eq(
       output.content,
-      "ok: wrote 0 chars to \{path} (overwrote existing file)",
+      "ok: wrote 0 lines (0 chars) to \{path} (overwrote existing file)",
     )
     assert_false(output.is_error)
     let read_back = @fs.read_file(path).text()

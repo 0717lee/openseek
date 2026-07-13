@@ -71,8 +71,10 @@ The action is always `Respond(ToolOutput(...))` — the agent loop forwards
 `false` on success and `true` for write or argument failures. The string body
 has one of these shapes:
 
-- `"ok: wrote <n> chars to <path>"` when a new file is created — `n` is the
-  character count of the written content. When the path already existed the
+- `"ok: wrote <n> line(s) (<m> chars) to <path>"` when a new file is created —
+  `n` is the line count (matching what `read` reports for the same file: empty
+  content is 0 lines, a trailing newline counts a final empty segment) and `m`
+  the character count of the written content. When the path already existed the
   line ends with ` (overwrote existing file)` so the model can tell it clobbered
   prior content.
   If the target is `moon.mod`, `moon.pkg`, `.mbt`, or `.mbt.md` inside a
@@ -133,7 +135,7 @@ async test "write tool updates an implementation note through the registry" {
     // The note already existed, so the result flags the overwrite.
     assert_eq(
       output.content,
-      "ok: wrote 11 chars to \{path} (overwrote existing file)",
+      "ok: wrote 1 line (11 chars) to \{path} (overwrote existing file)",
     )
     assert_false(output.is_error)
     assert_eq(@fs.read_file(path).text(), "tests green")
