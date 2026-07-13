@@ -437,7 +437,7 @@ test "sync reconciles the watcher with the panel and its tabs" {
     ..watched,
     open: false,
     tabs: [loaded_tab("a.mbt", "a.mbt")],
-    children: {},
+    children: Map([]),
     loading: [],
   }
   let (still, _) = sync(emit, closed, test_ctx())

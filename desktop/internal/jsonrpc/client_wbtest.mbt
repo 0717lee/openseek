@@ -51,8 +51,8 @@ async test "concurrent requests each get their own reply even when answered out 
       inbound.put(reply_for(second_seen))
       inbound.put(reply_for(first_seen))
     })
-    let first = group.spawn(() => client.request(method_="first", params={}))
-    let second = group.spawn(() => client.request(method_="second", params={}))
+    let first = group.spawn(() => client.request(method_="first", params=Json::empty_object()))
+    let second = group.spawn(() => client.request(method_="second", params=Json::empty_object()))
     assert_true(first.wait() is { "method": String("first"), .. })
     assert_true(second.wait() is { "method": String("second"), .. })
   })
@@ -70,7 +70,7 @@ async test "a request fails with Closed when the transport ends without a reply"
       inbound.close()
     })
     let outcome = try {
-      client.request(method_="ping", params={}) |> ignore
+      client.request(method_="ping", params=Json::empty_object()) |> ignore
       "no error raised"
     } catch {
       Closed => "closed"

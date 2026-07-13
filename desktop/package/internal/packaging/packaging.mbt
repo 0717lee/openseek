@@ -291,7 +291,7 @@ const ProtonNativeBuildDir : String = "target/proton-native/build"
 pub async fn rebuild_libproton(
   ws : Workspace,
   artifacts : Array[(String, String)],
-  extra_env? : Map[String, String] = {},
+  extra_env? : Map[String, String] = Map([]),
 ) -> Unit {
   let platform = proton_runtime_field(ws, "platform")
   let cef_version = proton_runtime_field(ws, "cef_version")
@@ -357,7 +357,7 @@ pub async fn run_checked(
   command : String,
   args : Array[String],
   dir~ : String,
-  extra_env? : Map[String, String] = {},
+  extra_env? : Map[String, String] = Map([]),
 ) -> Unit {
   let joined_args = args.join(" ")
   println("$ [\{dir}] \{command} \{joined_args}")
@@ -480,7 +480,7 @@ async fn restore_client_token(ws : Workspace, original : String?) -> Unit {
 pub async fn build_native_host(
   ws : Workspace,
   extra_args? : Array[String] = [],
-  extra_env? : Map[String, String] = {},
+  extra_env? : Map[String, String] = Map([]),
   disable_mimalloc? : Bool = false,
 ) -> Unit {
   // Stamp before any global state is swapped: a malformed token (or a
@@ -604,7 +604,7 @@ async fn restore_mimalloc(swap : MimallocSwap?) -> Unit {
 /// always matches the checkout instead of whatever happens to be on PATH.
 pub async fn build_engine(
   ws : Workspace,
-  extra_env? : Map[String, String] = {},
+  extra_env? : Map[String, String] = Map([]),
 ) -> Unit {
   run_checked(
     "moon",

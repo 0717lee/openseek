@@ -22,7 +22,7 @@ async test "a session initializes, syncs a document, and returns a hover" {
             server.send({
               "jsonrpc": "2.0",
               "id": id,
-              "result": { "capabilities": {} },
+              "result": { "capabilities": Json::empty_object() },
             })
           { "id": id, "method": String("textDocument/hover"), .. } =>
             server.send({

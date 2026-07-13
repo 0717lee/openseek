@@ -24,7 +24,7 @@ async test "a jsonrpc client over a stream transport completes a framed request"
       }
       server.send({ "jsonrpc": "2.0", "id": id, "result": { "ok": true } })
     })
-    let result = client.request(method_="ping", params={})
+    let result = client.request(method_="ping", params=Json::empty_object())
     assert_true(result is { "ok": True, .. })
   })
 }

@@ -53,7 +53,7 @@ struct Client {
 pub fn[T : Transport] Client::new(transport : T) -> Client {
   {
     transport: transport as &Transport,
-    pending: {},
+    pending: Map([]),
     read_lock: Semaphore(1, initial_value=1),
     next_id: 1,
     closed: false,

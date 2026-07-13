@@ -30,8 +30,8 @@ struct Session {
 pub fn Session::new(client : @jsonrpc.Client) -> Session {
   let session = {
     client,
-    opened: {},
-    diagnostics: {},
+    opened: Map([]),
+    diagnostics: Map([]),
     initialized: false,
     on_publish: (_, _) => (),
   }
@@ -89,7 +89,7 @@ pub async fn Session::initialize(self : Session, root_uri~ : String) -> Unit {
     },
   }
   self.client.request(method_="initialize", params~) |> ignore
-  self.client.notify(method_="initialized", params={})
+  self.client.notify(method_="initialized", params=Json::empty_object())
   self.initialized = true
 }
 

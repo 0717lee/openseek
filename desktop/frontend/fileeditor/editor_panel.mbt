@@ -63,7 +63,7 @@ let viewer_state : ViewerHost = {
   absolute: None,
   relative: None,
   version: 0,
-  view_states: {},
+  view_states: Map([]),
 }
 
 ///|

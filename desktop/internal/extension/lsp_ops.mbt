@@ -99,7 +99,7 @@ fn new_lsp_manager(engine : String, runtime_dir? : @path.Path) -> LspManager {
     runtime_dir,
     command: "",
     spawn_env: None,
-    servers: {},
+    servers: Map([]),
     order: [],
     create_lock: Semaphore(1, initial_value=1),
     commands: Queue(kind=Unbounded),
@@ -612,7 +612,7 @@ async fn[G] spawn_workspace(
     process,
     stdin: stdin_writer,
     stdout: stdout_reader,
-    synced: {},
+    synced: Map([]),
   })
 }
 
