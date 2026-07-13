@@ -1,4 +1,4 @@
-/* editor/internal/shell/workbench/theme.css */
+/* internal/shell/workbench/theme.css */
 /*
  * Workbench theming for the readonly editor.
  *
@@ -31,6 +31,15 @@
   --vscode-editor-selectionBackground: #264f78;
   --vscode-editor-hoverHighlightBackground: #264f7840;
   --vscode-editor-rangeHighlightBackground: #ffffff0b;
+  /* editor.foldBackground = transparent(editor.selectionBackground, 0.3),
+     editor.foldPlaceholderForeground = #808080,
+     editorGutter.foldingControlForeground = iconForeground
+     (foldingDecorations.ts registerColor calls). */
+  --vscode-editor-foldBackground: #264f784d;
+  --vscode-editor-foldPlaceholderForeground: #808080;
+  --vscode-editorGutter-foldingControlForeground: var(
+    --vscode-icon-foreground
+  );
   /* editorCursor.foreground / editor.lineHighlightBorder registry defaults
      (editorColorRegistry.ts:16,22); Dark Modern does not override them.
      editor.lineHighlightBackground stays null like VS Code's defaults, so the
@@ -76,6 +85,11 @@
      `editorForeground`. */
   --vscode-editorGutter-commentRangeForeground: #37373d;
   --vscode-editorGutter-commentGlyphForeground: #cccccc;
+  /* editorGutter.added/modified/deletedBackground: Dark Modern overrides
+     the quickDiff.ts registry defaults (dark_modern.json:39-41). */
+  --vscode-editorGutter-addedBackground: #2ea043;
+  --vscode-editorGutter-modifiedBackground: #0078d4;
+  --vscode-editorGutter-deletedBackground: #f85149;
   --vscode-toolbar-hoverBackground: #ffffff1a;
   --vscode-textLink-foreground: #4e94ce;
   --vscode-textLink-activeForeground: #4e94ce;
@@ -141,6 +155,12 @@
   --vscode-editor-selectionBackground: #add6ff;
   --vscode-editor-hoverHighlightBackground: #add6ff26;
   --vscode-editor-rangeHighlightBackground: #fdff0033;
+  /* See the Dark Modern block above (folding colors). */
+  --vscode-editor-foldBackground: #add6ff4d;
+  --vscode-editor-foldPlaceholderForeground: #808080;
+  --vscode-editorGutter-foldingControlForeground: var(
+    --vscode-icon-foreground
+  );
   /* See the Dark Modern block above (light defaults: black caret, #eeeeee
      line-highlight border). */
   --vscode-editorCursor-foreground: #000000;
@@ -174,6 +194,10 @@
   --vscode-descriptionForeground: #3b3b3b;
   --vscode-editorGutter-commentRangeForeground: #d5d8e9;
   --vscode-editorGutter-commentGlyphForeground: #3b3b3b;
+  /* editorGutter.added/modified/deletedBackground (light_modern.json:39-41). */
+  --vscode-editorGutter-addedBackground: #2ea043;
+  --vscode-editorGutter-modifiedBackground: #005fb8;
+  --vscode-editorGutter-deletedBackground: #f85149;
   --vscode-toolbar-hoverBackground: #00000014;
   --vscode-textLink-foreground: #006ab1;
   --vscode-textLink-activeForeground: #0000ff;
@@ -213,7 +237,7 @@
   --monaco-monospace-font: var(--editor-font-family);
 }
 
-/* editor/viewer/browser/view/codicon/codicon.css */
+/* viewer/browser/view/codicon/codicon.css */
 /* Ported from vscode/src/vs/base/browser/ui/codicons/codicon/codicon.css
    (the @font-face + base class), with the icon content rules the viewer
    uses inlined from the codepoints in
@@ -250,7 +274,27 @@
   content: "\eab6";
 }
 
-/* editor/viewer/browser/view/editor.css */
+/* The folding icons registered in foldingDecorations.ts:
+   folding-expanded = chevron-down, folding-collapsed = chevron-right, and
+   the manual variants alias them (registerIcon(...) — Monaco emits these
+   through the theme service's icon stylesheet). */
+.codicon-folding-expanded:before {
+  content: "\eab4";
+}
+
+.codicon-folding-collapsed:before {
+  content: "\eab6";
+}
+
+.codicon-folding-manual-expanded:before {
+  content: "\eab4";
+}
+
+.codicon-folding-manual-collapsed:before {
+  content: "\eab6";
+}
+
+/* viewer/browser/view/editor.css */
 /* The island root owns a Monaco-shaped view tree. Clipping belongs to
    .overflow-guard so future overflowing widget slots can escape it. */
 .moonbit-viewer.readonly-editor {
@@ -287,7 +331,7 @@
   font-size: 14px;
 }
 
-/* editor/viewer/ui/scrollbar/scrollable_element.css */
+/* viewer/ui/scrollbar/scrollable_element.css */
 /* Shared Monaco scrollbars driven by the ScrollbarState arithmetic. */
 .monaco-scrollable-element {
   position: relative;
@@ -403,7 +447,7 @@
   background: var(--vscode-scrollbarSlider-activeBackground);
 }
 
-/* editor/viewer/browser/view_parts/view_lines/view_lines.css */
+/* viewer/browser/view_parts/view_lines/view_lines.css */
 /* Lines content starts after the margin; text-like child layers carry
    the synthetic scroll transform. */
 .lines-content {
@@ -453,7 +497,7 @@
   color: var(--vscode-editorWhitespace-foreground, #e3e4e229) !important;
 }
 
-/* editor/viewer/browser/view_parts/selections/view_overlays.css */
+/* viewer/browser/view_parts/selections/view_overlays.css */
 .view-overlays {
   position: absolute;
   top: 0;
@@ -474,7 +518,7 @@
   width: 100%;
 }
 
-/* editor/viewer/browser/view_parts/view_zones/view_zones.css */
+/* viewer/browser/view_parts/view_zones/view_zones.css */
 .view-zones {
   position: absolute;
   top: 0;
@@ -491,7 +535,7 @@
   overflow: hidden;
 }
 
-/* editor/viewer/browser/view_parts/content_widgets/content_widgets.css */
+/* viewer/browser/view_parts/content_widgets/content_widgets.css */
 .contentWidgets {
   position: absolute;
   top: 0;
@@ -507,7 +551,7 @@
   pointer-events: none;
 }
 
-/* editor/viewer/browser/view_parts/overlay_widgets/overlay_widgets.css */
+/* viewer/browser/view_parts/overlay_widgets/overlay_widgets.css */
 .overlayWidgets {
   position: absolute;
   inset: 0;
@@ -522,7 +566,7 @@
   pointer-events: none;
 }
 
-/* editor/viewer/browser/view_parts/selections/selections.css */
+/* viewer/browser/view_parts/selections/selections.css */
 /* Ported from vscode/src/vs/editor/browser/viewParts/selections/selections.css
    (cslr = core selections layer rendering) plus the .monaco-editor-background
    piece color (Monaco's editor-wide background class, reused by the
@@ -566,7 +610,7 @@
   background: var(--vscode-editor-selectionBackground);
 }
 
-/* editor/viewer/browser/view_parts/current_line_highlight/current_line_highlight.css */
+/* viewer/browser/view_parts/current_line_highlight/current_line_highlight.css */
 /* Ported from
    vscode/src/vs/editor/browser/viewParts/currentLineHighlight/currentLineHighlight.css
    plus the registerThemingParticipant rules (currentLineHighlight.ts:237-264),
@@ -623,7 +667,7 @@
   border: 2px solid var(--vscode-editor-lineHighlightBorder);
 }
 
-/* editor/viewer/browser/view_parts/decorations/decorations.css */
+/* viewer/browser/view_parts/decorations/decorations.css */
 /* Ported from vscode/src/vs/editor/browser/viewParts/decorations/decorations.css.
  * cdr = core decorations rendering (div); pieces sit inside the per-line
  * overlay rows, so `height: 100%` is the row's line height. */
@@ -640,7 +684,7 @@
   background-color: var(--vscode-editor-rangeHighlightBackground);
 }
 
-/* editor/viewer/browser/view_parts/view_cursors/view_cursors.css */
+/* viewer/browser/view_parts/view_cursors/view_cursors.css */
 /* Ported from
    vscode/src/vs/editor/browser/viewParts/viewCursors/viewCursors.css (base
    rules) plus the caret color rule from the registerThemingParticipant in
@@ -672,7 +716,7 @@
   color: var(--vscode-editor-background);
 }
 
-/* editor/viewer/browser/view_parts/margin/margin.css */
+/* viewer/browser/view_parts/margin/margin.css */
 /* Margin layer: viewport-fixed clip that occludes horizontally scrolled
    content; the inner rows container translates vertically only. */
 .margin {
@@ -711,7 +755,7 @@
   user-select: none;
 }
 
-/* editor/viewer/browser/view_parts/margin/lines_decorations.css */
+/* viewer/browser/view_parts/margin/lines_decorations.css */
 /* The line-decorations gutter lane pieces (Monaco `linesDecorations.css` +
    `glyphMargin.css` `.cldr`), inside the margin overlay rows: inline
    left/width from `LinesDecorationsOverlay`, height from the row. */
@@ -720,7 +764,7 @@
   height: 100%;
 }
 
-/* editor/viewer/browser/view_parts/view_lines/tokens.css */
+/* viewer/browser/view_parts/view_lines/tokens.css */
 /* Monaco theme color map (`mtk<colorId>`). These mirror the byte-for-byte
    output of `view_model.token_theme_style_block(default_token_color_map())`:
    the production token model classes each span as `mtk<foregroundColorId>`
@@ -796,7 +840,7 @@
   text-decoration: line-through;
 }
 
-/* editor/viewer/browser/view_parts/view_lines/inlay_hints.css */
+/* viewer/browser/view_parts/view_lines/inlay_hints.css */
 .inlay-hint {
   color: var(--vscode-descriptionForeground);
   font-style: normal;
@@ -808,7 +852,7 @@
   color: var(--vscode-descriptionForeground);
 }
 
-/* editor/viewer/browser/view_parts/view_lines/markers.css */
+/* viewer/browser/view_parts/view_lines/markers.css */
 /*
  * Marker squiggle decorations, ported line-for-line from
  * vscode/src/vs/editor/browser/widget/codeEditor/editor.css:81-120.
@@ -881,7 +925,7 @@
   text-decoration-color: var(--vscode-editor-foreground, inherit);
 }
 
-/* editor/viewer/contrib/hover/hover.css */
+/* viewer/contrib/hover/hover.css */
 .hoverHighlight {
   background: var(--vscode-editor-hoverHighlightBackground);
 }
@@ -892,14 +936,15 @@
  * "shift up by own height" trick was tried here previously and reproducibly
  * corrupted this element's background paint in Chromium under the sizing
  * cluster's synchronous style churn.
- * `min-width` transcribes the constructor's `minimumWidth = 150`
- * (`contentHoverWidget.ts:67`); `z-index: 50` its
- * `_resizableNode.domNode.style.zIndex = '50'`. */
+ * No `min-width`: the constructor's `minimumWidth = 150` is
+ * `_resizableNode.minSize`, a sash-drag clamp only (sashes unported) — the
+ * layout pass always sizes this wrapper and `.monaco-hover` identically, and
+ * a CSS floor on the wrapper alone leaves a dead strip past the hover.
+ * `z-index: 50` transcribes `_resizableNode.domNode.style.zIndex = '50'`. */
 .monaco-resizable-hover {
   position: absolute;
   z-index: 50;
   pointer-events: auto;
-  min-width: 150px;
   cursor: default;
   user-select: text;
   box-sizing: content-box;
@@ -1102,7 +1147,7 @@
   outline-offset: -1px;
 }
 
-/* editor/viewer/contrib/agent_feedback/browser/agent_feedback.css */
+/* viewer/contrib/agent_feedback/browser/agent_feedback.css */
 /* Agent-feedback contrib styling: a transcription of vscode
    sessions/contrib/agentFeedback/browser/media/agentFeedbackEditorInput.css.
    The upstream file leans on the new design-token vars
