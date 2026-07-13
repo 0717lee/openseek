@@ -11,30 +11,37 @@ const FrontendBundleOutput : String = "frontend.js"
 
 ///|
 /// The stylesheet the embedded code viewer needs, assembled from the editor
-/// submodule's CSS. `index.html` links it by this name next to `frontend.js`.
+/// dependency's CSS. `index.html` links it by this name next to `frontend.js`.
 const ViewerStyleOutput : String = "viewer.css"
 
 ///|
-/// The editor submodule's CSS files the embedded viewer depends on, in cascade
-/// order: `theme.css` first (it defines the `--vscode-*` / `--editor-*`
-/// variables, scoped to `.editor-shell`), then every viewer-owned stylesheet.
-/// Mirrors the submodule's own `scripts/build-web.mbtx` `css_sources()` —
-/// re-sync on a submodule bump. The IDE shell chrome (`shell.css`) and the
-/// editor's own file tree (`file_tree.css`) are deliberately omitted — the
-/// desktop app supplies its own panel layout and file tree.
+/// Where `moon install` materializes the `moonbit-community/editor` registry
+/// dependency inside the desktop workspace; the viewer's CSS and font assets
+/// are read from this checkout.
+const EditorDepRoot : String = ".mooncakes/moonbit-community/editor"
+
+///|
+/// The editor dependency's CSS files the embedded viewer depends on (relative
+/// to `EditorDepRoot`), in cascade order: `theme.css` first (it defines the
+/// `--vscode-*` / `--editor-*` variables, scoped to `.editor-shell`), then
+/// every viewer-owned stylesheet. Mirrors the editor's own
+/// `scripts/build-web.mbtx` `css_sources()` — re-sync on a version bump. The
+/// IDE shell chrome (`shell.css`) and the editor's own file tree
+/// (`file_tree.css`) are deliberately omitted — the desktop app supplies its
+/// own panel layout and file tree.
 fn viewer_css_sources() -> Array[String] {
   [
-    "editor/internal/shell/workbench/theme.css", "editor/viewer/browser/view/codicon/codicon.css",
-    "editor/viewer/browser/view/editor.css", "editor/viewer/ui/scrollbar/scrollable_element.css",
-    "editor/viewer/browser/view_parts/view_lines/view_lines.css", "editor/viewer/browser/view_parts/selections/view_overlays.css",
-    "editor/viewer/browser/view_parts/view_zones/view_zones.css", "editor/viewer/browser/view_parts/content_widgets/content_widgets.css",
-    "editor/viewer/browser/view_parts/overlay_widgets/overlay_widgets.css", "editor/viewer/browser/view_parts/selections/selections.css",
-    "editor/viewer/browser/view_parts/current_line_highlight/current_line_highlight.css",
-    "editor/viewer/browser/view_parts/decorations/decorations.css", "editor/viewer/browser/view_parts/view_cursors/view_cursors.css",
-    "editor/viewer/browser/view_parts/margin/margin.css", "editor/viewer/browser/view_parts/margin/lines_decorations.css",
-    "editor/viewer/browser/view_parts/view_lines/tokens.css", "editor/viewer/browser/view_parts/view_lines/inlay_hints.css",
-    "editor/viewer/browser/view_parts/view_lines/markers.css", "editor/viewer/contrib/hover/hover.css",
-    "editor/viewer/contrib/agent_feedback/browser/agent_feedback.css",
+    "internal/shell/workbench/theme.css", "viewer/browser/view/codicon/codicon.css",
+    "viewer/browser/view/editor.css", "viewer/ui/scrollbar/scrollable_element.css",
+    "viewer/browser/view_parts/view_lines/view_lines.css", "viewer/browser/view_parts/selections/view_overlays.css",
+    "viewer/browser/view_parts/view_zones/view_zones.css", "viewer/browser/view_parts/content_widgets/content_widgets.css",
+    "viewer/browser/view_parts/overlay_widgets/overlay_widgets.css", "viewer/browser/view_parts/selections/selections.css",
+    "viewer/browser/view_parts/current_line_highlight/current_line_highlight.css",
+    "viewer/browser/view_parts/decorations/decorations.css", "viewer/browser/view_parts/view_cursors/view_cursors.css",
+    "viewer/browser/view_parts/margin/margin.css", "viewer/browser/view_parts/margin/lines_decorations.css",
+    "viewer/browser/view_parts/view_lines/tokens.css", "viewer/browser/view_parts/view_lines/inlay_hints.css",
+    "viewer/browser/view_parts/view_lines/markers.css", "viewer/contrib/hover/hover.css",
+    "viewer/contrib/agent_feedback/browser/agent_feedback.css",
   ]
 }
 
@@ -45,7 +52,7 @@ fn viewer_css_sources() -> Array[String] {
 /// `proton://app/` origin and maps it to the asset directory root, so the
 /// desktop ships the upstream CSS unmodified and just places the font next
 /// to `viewer.css`.
-const CodiconFontSource : String = "editor/viewer/browser/view/codicon/codicon.ttf"
+const CodiconFontSource : String = "viewer/browser/view/codicon/codicon.ttf"
 
 ///|
 const CodiconFontOutput : String = "codicon.ttf"
@@ -381,14 +388,14 @@ pub async fn build_frontend_bundle(ws : Workspace) -> Unit {
 
 ///|
 /// Concatenate the embedded viewer's CSS into a single `viewer.css` next to the
-/// frontend bundle, mirroring the editor submodule's own `scripts/build-web`
-/// step. The viewer ships its styles as many files, none of which are loaded
-/// unless assembled here; without them the viewer paints its raw measurement
-/// probes over the panel instead of a styled editor.
+/// frontend bundle, mirroring the editor's own `scripts/build-web` step. The
+/// viewer ships its styles as many files, none of which are loaded unless
+/// assembled here; without them the viewer paints its raw measurement probes
+/// over the panel instead of a styled editor.
 pub async fn build_viewer_stylesheet(ws : Workspace) -> Unit {
   let css = StringBuilder::new()
   for source in viewer_css_sources() {
-    let absolute = ws.at(source)
+    let absolute = ws.at("\{EditorDepRoot}/\{source}")
     if !@asyncfs.exists(absolute) {
       raise PackageError("viewer stylesheet not found: \{absolute}")
     }
@@ -401,7 +408,10 @@ pub async fn build_viewer_stylesheet(ws : Workspace) -> Unit {
     css.write_string("\n")
   }
   write_text(ws.at(ViewerStyleOutput), css.to_string())
-  copy_file(ws.at(CodiconFontSource), ws.at(CodiconFontOutput))
+  copy_file(
+    ws.at("\{EditorDepRoot}/\{CodiconFontSource}"),
+    ws.at(CodiconFontOutput),
+  )
 }
 
 ///|

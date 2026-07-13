@@ -22,9 +22,9 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
 
-      # The lepus and editor submodules are private repos, so the default
-      # workflow token cannot clone them. Mint a short-lived installation
-      # token (~1h, read-only Contents on moonbit-community/{lepus,editor})
+      # The lepus submodule is a private repo, so the default workflow token
+      # cannot clone it. Mint a short-lived installation token (~1h,
+      # read-only Contents on moonbit-community/lepus)
       # from the org's GitHub App — nothing long-lived is exposed to the job.
       # Note: these secrets are unavailable to pull requests from forks,
       # where this job will fail at this step.
@@ -35,7 +35,7 @@ jobs:
           app-id: ${{ secrets.LEPUS_APP_ID }}
           private-key: ${{ secrets.LEPUS_APP_PRIVATE_KEY }}
           owner: moonbit-community
-          repositories: lepus,editor
+          repositories: lepus
 
       - name: Check out the lepus submodule
         env:
@@ -45,13 +45,11 @@ jobs:
           # never lands in ~/.gitconfig — where later steps that run
           # PR-controlled build scripts could read it. (Fork PRs receive no
           # secrets and already failed at the mint step above.)
-          # Init only our submodules, non-recursively: the editor submodule
-          # nests microsoft/vscode + codemirror as reference-only mirrors
-          # (huge, LFS-gated) we never build against; lepus has no nested
-          # submodules, so a plain --init covers both.
+          # Init only our submodule, non-recursively: lepus has no nested
+          # submodules, so a plain --init covers it.
           git \
             -c "url.https://x-access-token:${LEPUS_READ_TOKEN}@github.com/.insteadOf=https://github.com/" \
-            submodule update --init desktop/lepus desktop/editor
+            submodule update --init desktop/lepus
 
       - name: Set up MoonBit (nightly)
         run: |
@@ -86,9 +84,9 @@ jobs:
         run: moon -C desktop/lepus install ./cli --bin target/lepus-tools
 
       - name: Check formatting
-        # Scope to this module's own packages: the vendored editor submodule is
-        # a workspace member but was formatted with a different toolchain, so a
-        # workspace-wide `fmt --check` would flag its source we don't own.
+        # Scope to this module's own packages: lepus/proton is a workspace
+        # member inside the lepus submodule, so a workspace-wide `fmt --check`
+        # would flag source we don't own.
         run: moon -C desktop fmt --check . frontend internal package
 
       - name: Check (deny warnings)
@@ -132,7 +130,7 @@ jobs:
           app-id: ${{ secrets.LEPUS_APP_ID }}
           private-key: ${{ secrets.LEPUS_APP_PRIVATE_KEY }}
           owner: moonbit-community
-          repositories: lepus,editor
+          repositories: lepus
 
       - name: Check out the lepus submodule
         env:
@@ -142,13 +140,11 @@ jobs:
           # never lands in ~/.gitconfig — where later steps that run
           # PR-controlled build scripts could read it. (Fork PRs receive no
           # secrets and already failed at the mint step above.)
-          # Init only our submodules, non-recursively: the editor submodule
-          # nests microsoft/vscode + codemirror as reference-only mirrors
-          # (huge, LFS-gated) we never build against; lepus has no nested
-          # submodules, so a plain --init covers both.
+          # Init only our submodule, non-recursively: lepus has no nested
+          # submodules, so a plain --init covers it.
           git \
             -c "url.https://x-access-token:${LEPUS_READ_TOKEN}@github.com/.insteadOf=https://github.com/" \
-            submodule update --init desktop/lepus desktop/editor
+            submodule update --init desktop/lepus
 
       - name: Set up MoonBit (nightly)
         run: |
@@ -188,9 +184,9 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
 
-      # The lepus and editor submodules are private repos, so the default
-      # workflow token cannot clone them. Mint a short-lived installation
-      # token (~1h, read-only Contents on moonbit-community/{lepus,editor})
+      # The lepus submodule is a private repo, so the default workflow token
+      # cannot clone it. Mint a short-lived installation token (~1h,
+      # read-only Contents on moonbit-community/lepus)
       # from the org's GitHub App — nothing long-lived is exposed to the job.
       # Note: these secrets are unavailable to pull requests from forks,
       # where this job will fail at this step.
@@ -201,7 +197,7 @@ jobs:
           app-id: ${{ secrets.LEPUS_APP_ID }}
           private-key: ${{ secrets.LEPUS_APP_PRIVATE_KEY }}
           owner: moonbit-community
-          repositories: lepus,editor
+          repositories: lepus
 
       - name: Check out the lepus submodule
         env:
@@ -211,13 +207,11 @@ jobs:
           # never lands in ~/.gitconfig — where later steps that run
           # PR-controlled build scripts could read it. (Fork PRs receive no
           # secrets and already failed at the mint step above.)
-          # Init only our submodules, non-recursively: the editor submodule
-          # nests microsoft/vscode + codemirror as reference-only mirrors
-          # (huge, LFS-gated) we never build against; lepus has no nested
-          # submodules, so a plain --init covers both.
+          # Init only our submodule, non-recursively: lepus has no nested
+          # submodules, so a plain --init covers it.
           git \
             -c "url.https://x-access-token:${LEPUS_READ_TOKEN}@github.com/.insteadOf=https://github.com/" \
-            submodule update --init desktop/lepus desktop/editor
+            submodule update --init desktop/lepus
 
       - name: Set up MoonBit (nightly)
         run: |
@@ -276,9 +270,9 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
 
-      # The lepus and editor submodules are private repos, so the default
-      # workflow token cannot clone them. Mint a short-lived installation
-      # token (~1h, read-only Contents on moonbit-community/{lepus,editor})
+      # The lepus submodule is a private repo, so the default workflow token
+      # cannot clone it. Mint a short-lived installation token (~1h,
+      # read-only Contents on moonbit-community/lepus)
       # from the org's GitHub App — nothing long-lived is exposed to the job.
       # Note: these secrets are unavailable to pull requests from forks,
       # where this job will fail at this step.
@@ -289,7 +283,7 @@ jobs:
           app-id: ${{ secrets.LEPUS_APP_ID }}
           private-key: ${{ secrets.LEPUS_APP_PRIVATE_KEY }}
           owner: moonbit-community
-          repositories: lepus,editor
+          repositories: lepus
 
       - name: Check out the lepus submodule
         env:
@@ -299,13 +293,11 @@ jobs:
           # never lands in ~/.gitconfig — where later steps that run
           # PR-controlled build scripts could read it. (Fork PRs receive no
           # secrets and already failed at the mint step above.)
-          # Init only our submodules, non-recursively: the editor submodule
-          # nests microsoft/vscode + codemirror as reference-only mirrors
-          # (huge, LFS-gated) we never build against; lepus has no nested
-          # submodules, so a plain --init covers both.
+          # Init only our submodule, non-recursively: lepus has no nested
+          # submodules, so a plain --init covers it.
           git \
             -c "url.https://x-access-token:${LEPUS_READ_TOKEN}@github.com/.insteadOf=https://github.com/" \
-            submodule update --init desktop/lepus desktop/editor
+            submodule update --init desktop/lepus
 
       - name: Set up MoonBit (nightly)
         run: |
@@ -355,9 +347,9 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
 
-      # The lepus and editor submodules are private repos, so the default
-      # workflow token cannot clone them. Mint a short-lived installation
-      # token (~1h, read-only Contents on moonbit-community/{lepus,editor})
+      # The lepus submodule is a private repo, so the default workflow token
+      # cannot clone it. Mint a short-lived installation token (~1h,
+      # read-only Contents on moonbit-community/lepus)
       # from the org's GitHub App — nothing long-lived is exposed to the job.
       # Note: these secrets are unavailable to pull requests from forks,
       # where this job will fail at this step.
@@ -368,7 +360,7 @@ jobs:
           app-id: ${{ secrets.LEPUS_APP_ID }}
           private-key: ${{ secrets.LEPUS_APP_PRIVATE_KEY }}
           owner: moonbit-community
-          repositories: lepus,editor
+          repositories: lepus
 
       - name: Check out the lepus submodule
         shell: bash
@@ -379,13 +371,11 @@ jobs:
           # never lands in ~/.gitconfig — where later steps that run
           # PR-controlled build scripts could read it. (Fork PRs receive no
           # secrets and already failed at the mint step above.)
-          # Init only our submodules, non-recursively: the editor submodule
-          # nests microsoft/vscode + codemirror as reference-only mirrors
-          # (huge, LFS-gated) we never build against; lepus has no nested
-          # submodules, so a plain --init covers both.
+          # Init only our submodule, non-recursively: lepus has no nested
+          # submodules, so a plain --init covers it.
           git \
             -c "url.https://x-access-token:${LEPUS_READ_TOKEN}@github.com/.insteadOf=https://github.com/" \
-            submodule update --init desktop/lepus desktop/editor
+            submodule update --init desktop/lepus
 
       - name: Set up MoonBit (nightly)
         shell: pwsh

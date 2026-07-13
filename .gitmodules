@@ -2,6 +2,3 @@
 	path = desktop/lepus
 	url = https://github.com/moonbit-community/lepus.git
 	branch = haoxiang/openseek-desktop-proton
-[submodule "desktop/editor"]
-	path = desktop/editor
-	url = https://github.com/moonbit-community/editor.git

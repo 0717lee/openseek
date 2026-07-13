@@ -162,18 +162,17 @@ toolchain seed. Development uses the same bundle flow — see
 
 ```sh
 git clone <this-repo>
-# From the repository root, initialize only the desktop's top-level submodules:
-git submodule update --init desktop/lepus desktop/editor
+# From the repository root, initialize the desktop's lepus submodule:
+git submodule update --init desktop/lepus
 ```
 
-Do not add `--recursive`: `desktop/editor` contains the reference-only `vscode`
-and `codemirror` submodules. The desktop build does not use them, and cloning
-them makes setup substantially slower.
+The editor is not vendored: `moonbit-community/editor` is a regular registry
+dependency resolved from mooncakes.io by `moon`.
 
 Why the bootstrap is a little involved:
 
-- `lepus/` and `editor/` are git submodules, so a plain clone does not contain
-  their sources until those two top-level submodules are initialized.
+- `lepus/` is a git submodule, so a plain clone does not contain its sources
+  until the submodule is initialized.
 - The clipboard extension uses Lepus build-time codegen. A fresh checkout must
   build and stage the Lepus CLI before the native app can compile.
 - Windows native builds include WebView2 COM headers. The headers are not kept
@@ -265,13 +264,12 @@ there, and passes the writable copy as `MOON_HOME` to the engine.
 
 The manual steps below are useful when debugging the package script.
 
-From the repository root, initialize the two top-level desktop submodules
-without recursing into the editor's reference-only submodules. If Git for
-Windows cannot run `git submodule` from PowerShell because Unix helper tools are
+From the repository root, initialize the lepus submodule. If Git for Windows
+cannot run `git submodule` from PowerShell because Unix helper tools are
 missing from `PATH`, run the command from Git Bash instead.
 
 ```powershell
-git submodule update --init desktop/lepus desktop/editor
+git submodule update --init desktop/lepus
 ```
 
 Install the Lepus codegen CLI:
