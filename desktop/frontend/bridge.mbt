@@ -5,9 +5,9 @@
 // `__MoonBit__.events` and is decoded here into messages.
 
 ///|
-/// Both bridge handles, present only when the surface the frontend relies
-/// on is fully injected.
-fn bridge_handles() -> (@js.Value, @js.Value)? {
+/// The bridge event handle, present only when the host-call surface and event
+/// bus the frontend relies on are fully injected.
+fn bridge_events() -> @js.Value? {
   guard @interop.openseek_api() is Some(api) &&
     @interop.moonbit_bridge_root() is Some(root) &&
     @interop.js_prop(root, "events") is Some(events) &&
@@ -17,7 +17,7 @@ fn bridge_handles() -> (@js.Value, @js.Value)? {
     @interop.js_prop(events, "on") is Some(_) else {
     return None
   }
-  Some((api, events))
+  Some(events)
 }
 
 ///|
@@ -35,7 +35,7 @@ fn install_bridge(dispatch : @cmd.Emit[Msg]) -> @cmd.Cmd {
 ///|
 fn install_bridge_attempt(dispatch : @cmd.Emit[Msg], attempt : Int) -> @cmd.Cmd {
   @cmd.custom_cmd(scheduler => {
-    guard bridge_handles() is Some((api, events)) else {
+    guard bridge_events() is Some(events) else {
       if attempt > 120 {
         scheduler.add(dispatch(BridgeUnavailable("Bridge unavailable")))
       } else {
@@ -48,7 +48,7 @@ fn install_bridge_attempt(dispatch : @cmd.Emit[Msg], attempt : Int) -> @cmd.Cmd 
     if !bridge_events_wired.val {
       bridge_events_wired.val = true
       wire_engine_events(scheduler, dispatch, events)
-      open_engine_host(scheduler, dispatch, api)
+      open_engine_host(scheduler, dispatch)
     }
   })
 }
@@ -61,14 +61,10 @@ fn install_bridge_attempt(dispatch : @cmd.Emit[Msg], attempt : Int) -> @cmd.Cmd 
 fn open_engine_host(
   scheduler : &@cmd.Scheduler,
   dispatch : @cmd.Emit[Msg],
-  api : @js.Value,
 ) -> Unit {
   @js.async_run(() => {
-    let _ : @js.Value = @interop.js_method_promise(
-      api,
-      "connect",
-      @js.Object::new().to_value(),
-    ).wait() catch {
+    let payload = @protocol.EmptyPayload::{  }
+    let _ : @js.Value = @interop.bridge_request("connect", payload) catch {
       error => {
         scheduler.add(
           dispatch(BridgeUnavailable(@interop.bridge_error_text(error))),
@@ -198,14 +194,14 @@ fn connected_msg(_payload : Map[String, Json]) -> Msg? {
 /// carries the absolute `path` and the raw LSP `diagnostics` array; the update
 /// filters it to the file on screen.
 fn diagnostics_msg(payload : Map[String, Json]) -> Msg? {
-  guard @jsonx.json_text(payload, "path") is Some(path) && !path.is_empty() else {
-    return None
+  let push : @protocol.DiagnosticsPush = @json.from_json(Json::object(payload)) catch {
+    _ => return None
   }
   Some(
     FileEditor(
       DiagnosticsPublished(
-        absolute=Absolute(path),
-        diagnostics=payload.get("diagnostics").unwrap_or([]),
+        absolute=Absolute(push.path),
+        diagnostics=push.diagnostics,
       ),
     ),
   )
@@ -216,7 +212,11 @@ fn diagnostics_msg(payload : Map[String, Json]) -> Msg? {
 /// payload's `root` is not carried — the panel re-checks against whatever
 /// conversation is current, so a push that raced a switch stats the right
 /// files anyway.
-fn fs_changed_msg(_payload : Map[String, Json]) -> Msg? {
+fn fs_changed_msg(payload : Map[String, Json]) -> Msg? {
+  let push : @protocol.FsChangedPayload = @json.from_json(Json::object(payload)) catch {
+    _ => return None
+  }
+  ignore(push)
   Some(FileEditor(FsChanged))
 }
 
@@ -289,56 +289,59 @@ fn start_payload(
   wsl_enabled~ : Bool,
   wsl_distro~ : String,
   wsl_engine~ : String,
-) -> @js.Value {
-  let payload = @js.Object::new()
-  payload["task"] = task
-  set_engine_settings(
-    payload,
-    model=selected_model,
-    max_steps~,
-    api_key~,
-    api_url~,
-    session~,
-    workspace?,
-    wsl_enabled~,
-    wsl_distro~,
-    wsl_engine~,
-  )
-  payload.to_value()
+) -> @protocol.StartPayload {
+  {
+    task,
+    api_key: trimmed_payload_text(api_key),
+    api_url: trimmed_payload_text(api_url),
+    model: trimmed_payload_text(selected_model),
+    max_steps: parsed_max_steps(max_steps),
+    session: trimmed_payload_text(session),
+    session_root: None,
+    workspace: workspace_hint(workspace),
+    wsl: wsl_payload(wsl_enabled, wsl_distro, wsl_engine),
+  }
 }
 
 ///|
-/// Fill `payload` with the engine settings shared by `start` and `compact` —
-/// everything the host needs to spawn a serve engine, minus the task.
-fn set_engine_settings(
-  payload : @js.Object,
-  model~ : String,
-  max_steps~ : String,
-  api_key~ : String,
-  api_url~ : String,
-  session~ : String,
-  workspace? : @pathx.Absolute,
-  wsl_enabled~ : Bool,
-  wsl_distro~ : String,
-  wsl_engine~ : String,
-) -> Unit {
-  @interop.set_trimmed(payload, "model", model)
-  @interop.set_trimmed(payload, "api_key", api_key)
-  @interop.set_trimmed(payload, "api_url", api_url)
-  @interop.set_trimmed(payload, "session", session)
-  @interop.set_workspace(payload, workspace)
-  if parsed_max_steps(max_steps) is Some(steps) {
-    payload["max_steps"] = steps
+/// A host payload's optional text field: trimmed and omitted when blank.
+fn trimmed_payload_text(value : String) -> String? {
+  let text = value.trim().to_owned()
+  if text.is_empty() {
+    None
+  } else {
+    Some(text)
+  }
+}
+
+///|
+/// The optional attached workspace in its normalized wire form.
+fn workspace_hint(workspace : @pathx.Absolute?) -> String? {
+  if workspace is Some(workspace) {
+    trimmed_payload_text(workspace.0)
+  } else {
+    None
+  }
+}
+
+///|
+/// The WSL engine placement, present only when the user opted in. Blank
+/// distro/engine fields stay omitted so the host applies its defaults.
+fn wsl_payload(
+  enabled : Bool,
+  distro : String,
+  engine : String,
+) -> @protocol.WslPayload? {
+  if !enabled {
+    return None
   }
   // The presence of `wsl` is the opt-in; blank distro/engine fields are
   // omitted so the host applies its defaults (default distro, `openseek`
   // on the distro's PATH).
-  if wsl_enabled {
-    let wsl = @js.Object::new()
-    @interop.set_trimmed(wsl, "distro", wsl_distro)
-    @interop.set_trimmed(wsl, "engine", wsl_engine)
-    payload["wsl"] = wsl.to_value()
-  }
+  Some({
+    distro: trimmed_payload_text(distro),
+    engine: trimmed_payload_text(engine),
+  })
 }
 
 ///|
@@ -370,17 +373,19 @@ async fn refresh_sessions_into(
   scheduler : &@cmd.Scheduler,
   dispatch : @cmd.Emit[Msg],
 ) -> Unit noraise {
-  let reply = @interop.bridge_request(
-    "list_sessions",
-    @js.Object::new().to_value(),
-  ) catch {
+  let payload = @protocol.EmptyPayload::{  }
+  let raw_reply = @interop.bridge_request("list_sessions", payload) catch {
     error => {
       scheduler.add(dispatch(SessionsFailed(@interop.bridge_error_text(error))))
       return
     }
   }
-  match @transcript.decode_sessions_reply(@interop.reply_json_text(reply)) {
-    Some(items) => scheduler.add(dispatch(SessionsLoaded(items)))
+  let reply : @protocol.SessionsReply? = @interop.bridge_reply(raw_reply)
+  match reply {
+    Some(reply) =>
+      scheduler.add(
+        dispatch(SessionsLoaded(@transcript.sessions_from_reply(reply))),
+      )
     None => scheduler.add(dispatch(SessionsFailed("malformed session list")))
   }
 }
@@ -396,10 +401,11 @@ fn open_session(
 ) -> @cmd.Cmd {
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
-      let payload = @js.Object::new()
-      payload["session"] = session_id
-      @interop.set_trimmed(payload, "workspace", workspace)
-      let reply = @interop.bridge_request("load_session", payload.to_value()) catch {
+      let payload : @protocol.LoadSessionPayload = {
+        session: session_id,
+        workspace: trimmed_payload_text(workspace),
+      }
+      let raw_reply = @interop.bridge_request("load_session", payload) catch {
         error => {
           scheduler.add(
             dispatch(
@@ -413,10 +419,13 @@ fn open_session(
           return
         }
       }
-      match
-        @transcript.transcript_from_session_json(
-          @interop.reply_json_text(reply),
-        ) {
+      let reply : @protocol.LoadSessionReply? = @interop.bridge_reply(raw_reply)
+      let items = if reply is Some(reply) {
+        @transcript.transcript_from_session_json(reply.session)
+      } else {
+        None
+      }
+      match items {
         Some(items) =>
           scheduler.add(dispatch(SessionLoaded(session=session_id, items~)))
         None =>
@@ -457,12 +466,10 @@ fn steer_openseek(
 
 ///|
 async fn steer_delivered(text : String, run_id : Int) -> Bool {
-  let payload = @js.Object::new()
-  payload["text"] = text
-  payload["run_id"] = run_id
-  let reply = @interop.bridge_request("steer", payload.to_value())
-  @interop.js_prop(reply, "steered") is Some(flag) &&
-  (@js.Cast::into(flag) : Bool?) is Some(true)
+  let payload : @protocol.SteerPayload = { text, run_id: Some(run_id) }
+  let raw_reply = @interop.bridge_request("steer", payload)
+  let reply : @protocol.SteerReply? = @interop.bridge_reply(raw_reply)
+  reply is Some({ steered: true, .. })
 }
 
 ///|
@@ -485,14 +492,12 @@ fn compact_openseek(
   wsl_distro~ : String,
   wsl_engine~ : String,
 ) -> @cmd.Cmd {
-  let payload = @js.Object::new()
-  set_engine_settings(
-    payload,
+  let payload = compact_payload(
+    session~,
     model~,
     max_steps~,
     api_key~,
     api_url~,
-    session~,
     workspace?,
     wsl_enabled~,
     wsl_distro~,
@@ -500,7 +505,7 @@ fn compact_openseek(
   )
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
-      let _ : @js.Value = @interop.bridge_request("compact", payload.to_value()) catch {
+      let _ : @js.Value = @interop.bridge_request("compact", payload) catch {
         error => {
           // Routed by session, not as a generic Error: the rejection must
           // also clear the conversation's queued/compacting notice, which
@@ -521,12 +526,38 @@ fn compact_openseek(
 }
 
 ///|
+/// Normalize the engine settings carried by a compaction request. Unlike a
+/// start payload, `session` is required by the wire type, but it follows the
+/// same trim policy before it is used as the host's engine-slot key.
+fn compact_payload(
+  session~ : String,
+  model~ : String,
+  max_steps~ : String,
+  api_key~ : String,
+  api_url~ : String,
+  workspace? : @pathx.Absolute,
+  wsl_enabled~ : Bool,
+  wsl_distro~ : String,
+  wsl_engine~ : String,
+) -> @protocol.CompactPayload {
+  {
+    session: session.trim().to_owned(),
+    api_key: trimmed_payload_text(api_key),
+    api_url: trimmed_payload_text(api_url),
+    model: trimmed_payload_text(model),
+    max_steps: parsed_max_steps(max_steps),
+    session_root: None,
+    workspace: workspace_hint(workspace),
+    wsl: wsl_payload(wsl_enabled, wsl_distro, wsl_engine),
+  }
+}
+
+///|
 fn cancel_openseek(dispatch : @cmd.Emit[Msg], run_id : Int) -> @cmd.Cmd {
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
-      let payload = @js.Object::new()
-      payload["run_id"] = run_id
-      let _ : @js.Value = @interop.bridge_request("cancel", payload.to_value()) catch {
+      let payload : @protocol.CancelPayload = { run_id: Some(run_id) }
+      let _ : @js.Value = @interop.bridge_request("cancel", payload) catch {
         error => {
           scheduler.add(
             dispatch(
@@ -552,10 +583,8 @@ fn cancel_openseek(dispatch : @cmd.Emit[Msg], run_id : Int) -> @cmd.Cmd {
 fn apply_update(dispatch : @cmd.Emit[Msg]) -> @cmd.Cmd {
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
-      let _ : @js.Value = @interop.bridge_request(
-        "apply_update",
-        @js.Object::new().to_value(),
-      ) catch {
+      let payload = @protocol.EmptyPayload::{  }
+      let _ : @js.Value = @interop.bridge_request("apply_update", payload) catch {
         error => {
           scheduler.add(
             dispatch(UpdateFailed(message=@interop.bridge_error_text(error))),
@@ -594,14 +623,12 @@ fn open_file(
 ) -> @cmd.Cmd {
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
-      let payload = @js.Object::new()
-      payload["session"] = session
-      payload["cwd"] = workspace_token(cwd)
-      payload["path"] = path
-      let _ : @js.Value = @interop.bridge_request(
-        "open_path",
-        payload.to_value(),
-      ) catch {
+      let payload : @protocol.OpenPathPayload = {
+        session,
+        cwd: workspace_token(cwd),
+        path,
+      }
+      let _ : @js.Value = @interop.bridge_request("open_path", payload) catch {
         error => {
           scheduler.add(
             dispatch(HostActionFailed(@interop.bridge_error_text(error))),

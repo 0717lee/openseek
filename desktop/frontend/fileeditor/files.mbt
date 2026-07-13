@@ -6,6 +6,19 @@
 // it answers so a reply that lost a conversation switch can be discarded.
 
 ///|
+/// The optional workspace hint as it appears on the bridge. An empty hint is
+/// omitted, matching the old object-building path's wire behavior.
+fn workspace_hint(workspace : @pathx.Absolute?) -> String? {
+  guard workspace is Some(workspace) else { return None }
+  let path = workspace.0.trim().to_owned()
+  if path.is_empty() {
+    None
+  } else {
+    Some(path)
+  }
+}
+
+///|
 /// List `path` (relative to the conversation workspace; "" is the root) and
 /// fold the entries back as `DirLoaded`.
 fn read_directory(
@@ -16,11 +29,12 @@ fn read_directory(
 ) -> @cmd.Cmd {
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
-      let payload = @js.Object::new()
-      payload["session"] = session
-      payload["path"] = path.0
-      @interop.set_workspace(payload, workspace)
-      let reply = @interop.bridge_request("read_directory", payload.to_value()) catch {
+      let payload : @protocol.ReadDirPayload = {
+        session,
+        path: path.0,
+        workspace: workspace_hint(workspace),
+      }
+      let raw_reply = @interop.bridge_request("read_directory", payload) catch {
         error => {
           scheduler.add(
             dispatch(
@@ -34,15 +48,16 @@ fn read_directory(
           return
         }
       }
-      match decode_dir_entries(@interop.reply_json_text(reply), path) {
-        Some(entries) =>
-          scheduler.add(dispatch(DirLoaded(session~, path~, entries~)))
-        None =>
-          scheduler.add(
-            dispatch(
-              DirFailed(session~, path~, message="could not read directory"),
-            ),
-          )
+      let reply : @protocol.ReadDirReply? = @interop.bridge_reply(raw_reply)
+      if reply is Some(reply) {
+        let entries = decode_dir_entries(reply, path)
+        scheduler.add(dispatch(DirLoaded(session~, path~, entries~)))
+      } else {
+        scheduler.add(
+          dispatch(
+            DirFailed(session~, path~, message="could not read directory"),
+          ),
+        )
       }
     })
   })
@@ -59,19 +74,22 @@ fn list_files(
 ) -> @cmd.Cmd {
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
-      let payload = @js.Object::new()
-      payload["session"] = session
-      @interop.set_workspace(payload, workspace)
-      let reply = @interop.bridge_request("list_files", payload.to_value()) catch {
+      let payload : @protocol.ListFilesPayload = {
+        session,
+        workspace: workspace_hint(workspace),
+      }
+      let raw_reply = @interop.bridge_request("list_files", payload) catch {
         _ => {
           scheduler.add(dispatch(FileIndexFailed(session~)))
           return
         }
       }
-      match decode_file_index(@interop.reply_json_text(reply)) {
-        Some((files, truncated)) =>
-          scheduler.add(dispatch(FilesIndexed(session~, files~, truncated~)))
-        None => scheduler.add(dispatch(FileIndexFailed(session~)))
+      let reply : @protocol.ListFilesReply? = @interop.bridge_reply(raw_reply)
+      if reply is Some(reply) {
+        let (files, truncated) = decode_file_index(reply)
+        scheduler.add(dispatch(FilesIndexed(session~, files~, truncated~)))
+      } else {
+        scheduler.add(dispatch(FileIndexFailed(session~)))
       }
     })
   })
@@ -79,18 +97,10 @@ fn list_files(
 
 ///|
 /// Parse a `list_files` reply into relative paths plus the truncation flag.
-fn decode_file_index(text : String) -> (Array[@pathx.Relative], Bool)? {
-  let json = @json.parse(text) catch { _ => return None }
-  guard json is Object(reply) else { return None }
-  guard reply.get("files") is Some(Array(items)) else { return None }
-  let files : Array[@pathx.Relative] = []
-  for item in items {
-    guard item is String(path) else { continue }
-    if !path.is_empty() {
-      files.push(Relative(path))
-    }
-  }
-  Some((files, reply.get("truncated") is Some(True)))
+fn decode_file_index(
+  reply : @protocol.ListFilesReply,
+) -> (Array[@pathx.Relative], Bool) {
+  (reply.files.map(path => Relative(path)), reply.truncated)
 }
 
 ///|
@@ -111,11 +121,12 @@ pub fn read_file(
 ) -> @cmd.Cmd {
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
-      let payload = @js.Object::new()
-      payload["session"] = session
-      payload["path"] = path.0
-      @interop.set_workspace(payload, workspace)
-      let reply = @interop.bridge_request("read_file", payload.to_value()) catch {
+      let payload : @protocol.ReadFilePayload = {
+        session,
+        path: path.0,
+        workspace: workspace_hint(workspace),
+      }
+      let raw_reply = @interop.bridge_request("read_file", payload) catch {
         error => {
           scheduler.add(
             dispatch(
@@ -125,17 +136,18 @@ pub fn read_file(
           return
         }
       }
-      match decode_file_content(@interop.reply_json_text(reply)) {
-        Some(file) =>
-          scheduler.add(
-            dispatch(
-              FileLoaded(session~, path~, name~, file~, range~, annotation~),
-            ),
-          )
-        None =>
-          scheduler.add(
-            dispatch(FileFailed(session~, message="could not read file")),
-          )
+      let reply : @protocol.ReadFileReply? = @interop.bridge_reply(raw_reply)
+      if reply is Some(reply) {
+        let file = decode_file_content(reply)
+        scheduler.add(
+          dispatch(
+            FileLoaded(session~, path~, name~, file~, range~, annotation~),
+          ),
+        )
+      } else {
+        scheduler.add(
+          dispatch(FileFailed(session~, message="could not read file")),
+        )
       }
     })
   })
@@ -164,46 +176,30 @@ fn child_path(parent : @pathx.Relative, name : String) -> @pathx.Relative {
 
 ///|
 /// Parse a `read_directory` reply into entries carrying full relative paths.
-/// `None` only for structurally unusable JSON; a malformed row is skipped.
+/// The shared protocol decoder has already rejected a malformed envelope and
+/// skipped malformed rows.
 fn decode_dir_entries(
-  text : String,
+  reply : @protocol.ReadDirReply,
   parent : @pathx.Relative,
-) -> Array[FileEntry]? {
-  let json = @json.parse(text) catch { _ => return None }
-  guard json is Object(reply) else { return None }
-  guard reply.get("entries") is Some(Array(items)) else { return None }
+) -> Array[FileEntry] {
   let entries : Array[FileEntry] = []
-  for item in items {
-    guard item is Object(fields) else { continue }
-    // The host writes both fields on every entry.
-    guard @jsonx.json_text(fields, "name") is Some(name) && !name.is_empty() else {
-      continue
-    }
-    guard @jsonx.json_bool(fields, "is_dir") is Some(is_dir) else { continue }
-    entries.push({ name, path: child_path(parent, name), is_dir })
+  for entry in reply.entries {
+    entries.push({
+      name: entry.name,
+      path: child_path(parent, entry.name),
+      is_dir: entry.is_dir,
+    })
   }
-  Some(entries)
+  entries
 }
 
 ///|
-fn decode_file_content(text : String) -> FileContent? {
-  let json = @json.parse(text) catch { _ => return None }
-  guard json is Object(reply) else { return None }
-  guard @jsonx.json_text(reply, "kind") is Some(kind) else { return None }
-  match kind {
-    "binary" => Some(Binary)
-    "oversized" => Some(Oversized)
-    "content" => {
-      // The `content` variant always carries all three fields.
-      guard @jsonx.json_text(reply, "content") is Some(content) &&
-        @jsonx.json_text(reply, "absolute") is Some(absolute) &&
-        @jsonx.json_text(reply, "sig") is Some(sig) else {
-        return None
-      }
-      guard !absolute.is_empty() else { return None }
-      Some(Content(content~, absolute=Absolute(absolute), sig~))
-    }
-    _ => None
+fn decode_file_content(reply : @protocol.ReadFileReply) -> FileContent {
+  match reply {
+    @protocol.Binary => Binary
+    @protocol.Oversized => Oversized
+    @protocol.Content(content~, absolute~, sig~) =>
+      Content(content~, absolute=Absolute(absolute), sig~)
   }
 }
 
@@ -218,38 +214,29 @@ fn stat_files(
 ) -> @cmd.Cmd {
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
-      let payload = @js.Object::new()
-      payload["session"] = session
-      payload["paths"] = paths.map(path => path.0)
-      @interop.set_workspace(payload, workspace)
-      let reply = @interop.bridge_request("stat_files", payload.to_value()) catch {
+      let payload : @protocol.StatFilesPayload = {
+        session,
+        paths: paths.map(path => path.0),
+        workspace: workspace_hint(workspace),
+      }
+      let raw_reply = @interop.bridge_request("stat_files", payload) catch {
         _ => return
       }
-      guard decode_file_stats(@interop.reply_json_text(reply)) is Some(stats) else {
-        return
-      }
+      let reply : @protocol.StatFilesReply? = @interop.bridge_reply(raw_reply)
+      guard reply is Some(reply) else { return }
+      let stats = decode_file_stats(reply)
       scheduler.add(dispatch(StatsLoaded(session~, stats~)))
     })
   })
 }
 
 ///|
-fn decode_file_stats(text : String) -> Array[FileStat]? {
-  let json = @json.parse(text) catch { _ => return None }
-  guard json is Object(reply) else { return None }
-  guard reply.get("stats") is Some(Array(items)) else { return None }
+fn decode_file_stats(reply : @protocol.StatFilesReply) -> Array[FileStat] {
   let stats : Array[FileStat] = []
-  for item in items {
-    guard item is Object(fields) else { continue }
-    // Both fields are always on the wire; `sig` is "" for a file the host
-    // could not stat.
-    guard @jsonx.json_text(fields, "path") is Some(path) && !path.is_empty() else {
-      continue
-    }
-    guard @jsonx.json_text(fields, "sig") is Some(sig) else { continue }
-    stats.push({ path: Relative(path), sig })
+  for stat in reply.stats {
+    stats.push({ path: Relative(stat.path), sig: stat.sig })
   }
-  Some(stats)
+  stats
 }
 
 ///|
@@ -259,13 +246,11 @@ fn decode_file_stats(text : String) -> Array[FileStat]? {
 fn watch_workspace(session : String, workspace~ : @pathx.Absolute?) -> @cmd.Cmd {
   @cmd.custom_cmd(_scheduler => {
     @js.async_run(() => {
-      let payload = @js.Object::new()
-      payload["session"] = session
-      @interop.set_workspace(payload, workspace)
-      let _ : @js.Value = @interop.bridge_request(
-        "watch_workspace",
-        payload.to_value(),
-      ) catch {
+      let payload : @protocol.WatchWorkspacePayload = {
+        session,
+        workspace: workspace_hint(workspace),
+      }
+      let _ : @js.Value = @interop.bridge_request("watch_workspace", payload) catch {
         _ => return
       }
     })

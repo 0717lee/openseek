@@ -10,19 +10,15 @@ fn fetch_workspaces(dispatch : @cmd.Emit[Msg]) -> @cmd.Cmd {
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
       // A host without the op just reads as "no workspaces attached".
-      let reply = @interop.bridge_request(
-        "list_workspaces",
-        @js.Object::new().to_value(),
-      ) catch {
+      let payload = @protocol.EmptyPayload::{  }
+      let raw_reply = @interop.bridge_request("list_workspaces", payload) catch {
         _ => return
       }
       // A malformed reply is dropped like a failed op: the sidebar keeps
       // whatever list it already shows.
-      guard decode_workspaces(@interop.reply_json_text(reply))
-        is Some(workspaces) else {
-        return
-      }
-      scheduler.add(dispatch(WorkspacesLoaded(workspaces)))
+      let reply : @protocol.WorkspacesReply? = @interop.bridge_reply(raw_reply)
+      guard reply is Some(reply) else { return }
+      scheduler.add(dispatch(WorkspacesLoaded(reply.workspaces)))
     })
   })
 }
@@ -44,21 +40,17 @@ fn remove_workspace(dispatch : @cmd.Emit[Msg], path : String) -> @cmd.Cmd {
 fn pick_workspace(dispatch : @cmd.Emit[Msg]) -> @cmd.Cmd {
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
-      let reply = @interop.bridge_request(
-        "pick_workspace",
-        @js.Object::new().to_value(),
-      ) catch {
+      let payload = @protocol.EmptyPayload::{  }
+      let raw_reply = @interop.bridge_request("pick_workspace", payload) catch {
         _ => {
           scheduler.add(dispatch(OpenWorkspaceInput))
           return
         }
       }
-      let json = @json.parse(@interop.reply_json_text(reply)) catch {
-        _ => return
-      }
-      guard json is Object(fields) &&
-        fields.get("path") is Some(String(path)) &&
-        !path.is_empty() else {
+      let reply : @protocol.PickWorkspaceReply? = @interop.bridge_reply(
+        raw_reply,
+      )
+      guard reply is Some({ path: Some(path) }) && !path.is_empty() else {
         return
       }
       workspace_action_into(scheduler, dispatch, "add_workspace", path)
@@ -84,9 +76,8 @@ async fn workspace_action_into(
   op : String,
   path : String,
 ) -> Unit noraise {
-  let payload = @js.Object::new()
-  payload["path"] = path
-  let reply = @interop.bridge_request(op, payload.to_value()) catch {
+  let payload : @protocol.WorkspacePayload = { path, }
+  let raw_reply = @interop.bridge_request(op, payload) catch {
     error => {
       scheduler.add(
         dispatch(WorkspaceFailed(@interop.bridge_error_text(error))),
@@ -94,29 +85,14 @@ async fn workspace_action_into(
       return
     }
   }
-  match decode_workspaces(@interop.reply_json_text(reply)) {
-    Some(workspaces) => scheduler.add(dispatch(WorkspacesLoaded(workspaces)))
+  let reply : @protocol.WorkspacesReply? = @interop.bridge_reply(raw_reply)
+  match reply {
+    Some(reply) => scheduler.add(dispatch(WorkspacesLoaded(reply.workspaces)))
     None => scheduler.add(dispatch(WorkspaceFailed("malformed workspace list")))
   }
   // The registry changed, so the sidebar has a session group to gain or
   // drop; refresh the list that carries them.
   refresh_sessions_into(scheduler, dispatch)
-}
-
-///|
-/// The reply's registered workspace paths; `None` only for structurally
-/// unusable JSON.
-fn decode_workspaces(text : String) -> Array[String]? {
-  let json = @json.parse(text) catch { _ => return None }
-  guard json is Object(reply) else { return None }
-  guard reply.get("workspaces") is Some(Array(items)) else { return None }
-  let paths : Array[String] = []
-  for item in items {
-    if item is String(path) && !path.is_empty() {
-      paths.push(path)
-    }
-  }
-  Some(paths)
 }
 
 ///|

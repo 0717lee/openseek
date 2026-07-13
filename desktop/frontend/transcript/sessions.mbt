@@ -6,25 +6,16 @@
 // conversation.
 
 ///|
-/// Parse a `list_sessions` reply into sidebar entries: the host groups
+/// Map a decoded `list_sessions` reply into sidebar entries: the host groups
 /// sessions by workspace store, and each entry carries its group's workspace
-/// so the sidebar can section them. `None` only for structurally unusable
-/// JSON; unrecognized entries (and failed groups — their error is the group's
-/// own affair) are skipped so one odd session cannot blank the whole sidebar.
-pub fn decode_sessions_reply(text : String) -> Array[SessionListItem]? {
-  let json = @json.parse(text) catch { _ => return None }
-  guard json is Object(reply) else { return None }
-  guard reply.get("groups") is Some(Array(groups)) else { return None }
+/// so the sidebar can section them. The shared decoder skips malformed groups;
+/// raw engine session rows stay `Json` and retain their local tolerant mapping.
+pub fn sessions_from_reply(
+  reply : @protocol.SessionsReply,
+) -> Array[SessionListItem] {
   let items : Array[SessionListItem] = []
-  for group in groups {
-    guard group is Object(group_fields) else { continue }
-    // The host emits both group fields unconditionally ("" names the global
-    // scratch group); a group missing either is malformed and skipped whole.
-    guard @jsonx.json_text(group_fields, "workspace") is Some(workspace) &&
-      @jsonx.json_text(group_fields, "name") is Some(workspace_name) else {
-      continue
-    }
-    guard group_fields.get("sessions") is Some(Array(entries)) else { continue }
+  for group in reply.groups {
+    guard group.sessions is Array(entries) else { continue }
     for entry in entries {
       guard entry is Object(fields) else { continue }
       guard fields.get("id") is Some(String(id)) && !id.is_empty() else {
@@ -33,12 +24,12 @@ pub fn decode_sessions_reply(text : String) -> Array[SessionListItem]? {
       items.push({
         id,
         title: @jsonx.json_text(fields, "title"),
-        workspace,
-        workspace_name,
+        workspace: group.workspace,
+        workspace_name: group.name,
       })
     }
   }
-  Some(items)
+  items
 }
 
 ///|
@@ -46,10 +37,8 @@ pub fn decode_sessions_reply(text : String) -> Array[SessionListItem]? {
 /// items, reconstructing what the live transcript showed while the
 /// conversation was running: reasoning before the answer, tool cards,
 /// runtime updates, and error bubbles for turns that did not finish.
-pub fn transcript_from_session_json(text : String) -> Array[TranscriptItem]? {
-  let json = @json.parse(text) catch { _ => return None }
-  guard json is Object(reply) else { return None }
-  guard reply.get("session") is Some(Object(session)) else { return None }
+pub fn transcript_from_session_json(json : Json) -> Array[TranscriptItem]? {
+  guard json is Object(session) else { return None }
   guard session.get("events") is Some(Array(events)) else { return Some([]) }
   let items : Array[TranscriptItem] = []
   for event in events {

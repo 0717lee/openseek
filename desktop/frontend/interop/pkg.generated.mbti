@@ -4,7 +4,7 @@ package "openseek_desktop/frontend/interop"
 import {
   "moonbit-community/rabbita/dom",
   "moonbit-community/rabbita/js",
-  "openseek_desktop/internal/pathx",
+  "moonbitlang/core/json",
 }
 
 // Values
@@ -12,7 +12,9 @@ pub fn add_capture_listener(@js.Value, String, (@dom.Event) -> Unit) -> Unit
 
 pub fn bridge_error_text(Error) -> String
 
-pub async fn bridge_request(String, @js.Value) -> @js.Value
+pub fn[R : @json.FromJson] bridge_reply(@js.Value) -> R?
+
+pub async fn[P : ToJson] bridge_request(String, P) -> @js.Value
 
 pub fn js_method_promise(@js.Value, String, @js.Value) -> @js.Promise raise @js.Error_
 
@@ -21,12 +23,6 @@ pub fn js_prop(@js.Value, String) -> @js.Value?
 pub fn moonbit_bridge_root() -> @js.Value?
 
 pub fn openseek_api() -> @js.Value?
-
-pub fn reply_json_text(@js.Value) -> String
-
-pub fn set_trimmed(@js.Object, String, String) -> Unit
-
-pub fn set_workspace(@js.Object, @pathx.Absolute?) -> Unit
 
 // Errors
 

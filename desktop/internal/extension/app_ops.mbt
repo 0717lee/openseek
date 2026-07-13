@@ -3,13 +3,15 @@
 // delegate detection and launching to the `applauncher` package.
 
 ///|
-async fn list_apps_op() -> ListAppsReply {
+async fn list_apps_op() -> @protocol.ListAppsReply {
   let apps = @applauncher.list()
   { apps: apps.map(app => { id: app.id, name: app.name, icon: app.icon }) }
 }
 
 ///|
-async fn launch_app_op(payload : LaunchAppPayload) -> LaunchAppReply {
+async fn launch_app_op(
+  payload : @protocol.LaunchAppPayload,
+) -> @protocol.LaunchAppReply {
   // A live run hands us its cwd; a resumed conversation has none, so fall back
   // to the directory the session's engine runs in (same as `open_path`).
   let dir = if payload.cwd.is_empty() {

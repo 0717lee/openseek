@@ -245,7 +245,7 @@ test "a draft of chips alone is not sendable" {
 }
 
 ///|
-test "decode_symbols parses rows and skips malformed ones" {
+test "workspace symbol replies map rows and skip malformed ones" {
   let text =
     #|{"symbols":[
     #|{"name":"parse_hover","kind":12,"container":"Lsp","path":"a/b.mbt",
@@ -253,7 +253,10 @@ test "decode_symbols parses rows and skips malformed ones" {
     #|{"name":"","path":"x.mbt"},
     #|{"path":"y.mbt"}
     #|]}
-  guard decode_symbols(text) is Some(items) else { fail("expected rows") }
+  let reply : @protocol.WorkspaceSymbolsReply = @json.from_json(
+    @json.parse(text),
+  )
+  let items = symbols_from_reply(reply)
   // The blank-name and name-less rows are dropped; one good row remains.
   assert_eq(items.length(), 1)
   assert_eq(items[0].label, "parse_hover")
@@ -264,5 +267,4 @@ test "decode_symbols parses rows and skips malformed ones" {
     items[0].range is Some(range) &&
     range.equals_range(@common.Range::Range(5, 3, 5, 14)),
   )
-  assert_true(decode_symbols("not json") is None)
 }

@@ -41,74 +41,47 @@ pub fn market_source_label(item : MarketSkillItem) -> String {
 }
 
 ///|
-/// Parse a `skills_catalog` reply. `None` only for structurally unusable
-/// JSON; unrecognized entries are skipped so one odd skill cannot blank the
-/// whole catalog.
-pub fn decode_skills_catalog_reply(text : String) -> Array[MarketSkillItem]? {
-  let json = @json.parse(text) catch { _ => return None }
-  guard json is Object(reply) else { return None }
-  guard reply.get("skills") is Some(Array(entries)) else { return None }
+/// Map a decoded skill catalog into display rows. The shared protocol decoder
+/// owns the wire shape and skips malformed rows before they reach this layer.
+pub fn skills_catalog_from_reply(
+  reply : @protocol.SkillsCatalogReply,
+) -> Array[MarketSkillItem] {
   let items : Array[MarketSkillItem] = []
-  for entry in entries {
-    guard entry is Object(fields) else { continue }
-    // The host emits every field unconditionally (blank means "none", e.g. a
-    // root skill's package_path); an entry missing one is malformed.
-    guard @jsonx.json_text(fields, "module_name") is Some(module_name) &&
-      @jsonx.json_text(fields, "version") is Some(version) &&
-      @jsonx.json_text(fields, "name") is Some(name) &&
-      @jsonx.json_text(fields, "package_path") is Some(package_path) &&
-      @jsonx.json_text(fields, "description") is Some(description) &&
-      @jsonx.json_text(fields, "author") is Some(author) &&
-      @jsonx.json_text(fields, "repository") is Some(repository) else {
-      continue
-    }
-    guard !module_name.is_empty() && !version.is_empty() else { continue }
+  for skill in reply.skills {
     items.push({
-      name: if name.trim().is_empty() {
-        module_name
+      name: if skill.name.trim().is_empty() {
+        skill.module_name
       } else {
-        name
+        skill.name
       },
-      module_name,
-      package_path,
-      version,
-      description,
-      author,
-      repository,
+      module_name: skill.module_name,
+      package_path: skill.package_path,
+      version: skill.version,
+      description: skill.description,
+      author: skill.author,
+      repository: skill.repository,
     })
   }
-  Some(items)
+  items
 }
 
 ///|
-/// Parse a `skills_installed` reply.
-pub fn decode_installed_skills_reply(
-  text : String,
-) -> Array[InstalledSkillItem]? {
-  let json = @json.parse(text) catch { _ => return None }
-  guard json is Object(reply) else { return None }
-  guard reply.get("skills") is Some(Array(entries)) else { return None }
+/// Map a decoded installed-skill list into display rows.
+pub fn installed_skills_from_reply(
+  reply : @protocol.InstalledSkillsReply,
+) -> Array[InstalledSkillItem] {
   let items : Array[InstalledSkillItem] = []
-  for entry in entries {
-    guard entry is Object(fields) else { continue }
-    guard @jsonx.json_text(fields, "id") is Some(id) && !id.is_empty() else {
-      continue
-    }
-    guard @jsonx.json_text(fields, "name") is Some(name) &&
-      @jsonx.json_text(fields, "description") is Some(description) &&
-      @jsonx.json_text(fields, "source") is Some(source) else {
-      continue
-    }
+  for skill in reply.skills {
     items.push({
-      id,
-      name: if name.trim().is_empty() {
-        id
+      id: skill.id,
+      name: if skill.name.trim().is_empty() {
+        skill.id
       } else {
-        name
+        skill.name
       },
-      description,
-      source,
+      description: skill.description,
+      source: skill.source,
     })
   }
-  Some(items)
+  items
 }

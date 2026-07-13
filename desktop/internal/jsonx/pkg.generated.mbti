@@ -1,7 +1,15 @@
 // Generated using `moon info`, DON'T EDIT IT
 package "openseek_desktop/internal/jsonx"
 
+import {
+  "moonbitlang/core/json",
+}
+
 // Values
+pub fn[T] decode_error(@json.JsonPath, String) -> T raise @json.JsonDecodeError
+
+pub fn expect_object(Json, @json.JsonPath) -> Map[String, Json] raise @json.JsonDecodeError
+
 pub fn json_bool(Map[String, Json], String) -> Bool?
 
 pub fn json_first_text(Map[String, Json], String, String) -> String?
@@ -9,6 +17,20 @@ pub fn json_first_text(Map[String, Json], String, String) -> String?
 pub fn json_int(Map[String, Json], String) -> Int?
 
 pub fn json_text(Map[String, Json], String) -> String?
+
+pub fn object(Array[(String, Json)]) -> Json
+
+pub fn[T : @json.FromJson] optional(Map[String, Json], @json.JsonPath, String) -> T? raise @json.JsonDecodeError
+
+pub fn[T : ToJson] put_optional(Map[String, Json], String, T?) -> Unit
+
+pub fn[T : @json.FromJson] required(Map[String, Json], @json.JsonPath, String) -> T raise @json.JsonDecodeError
+
+pub fn required_bool(Map[String, Json], @json.JsonPath, String) -> Bool raise @json.JsonDecodeError
+
+pub fn required_string(Map[String, Json], @json.JsonPath, String) -> String raise @json.JsonDecodeError
+
+pub fn[T : @json.FromJson] tolerant_rows(Map[String, Json], @json.JsonPath, String) -> Array[T] raise @json.JsonDecodeError
 
 // Errors
 

@@ -10,7 +10,9 @@
 const MaxReadFileBytes = 1048576
 
 ///|
-async fn read_directory_op(payload : ReadDirPayload) -> ReadDirReply {
+async fn read_directory_op(
+  payload : @protocol.ReadDirPayload,
+) -> @protocol.ReadDirReply {
   guard @engine.resolve_in_workspace(
       payload.session,
       payload.path,
@@ -33,7 +35,7 @@ async fn read_directory_op(payload : ReadDirPayload) -> ReadDirReply {
   // String's `Compare`, which is shortlex — length before content — and
   // reads wrong in a file listing ("z.mbt" before "main.mbt").
   names.sort_by((a, b) => a.lexical_compare(b))
-  let entries : Array[DirEntry] = []
+  let entries : Array[@protocol.DirEntry] = []
   for name in names {
     let child = dir.join((name : @path.Path)).to_string()
     let is_dir = (@fs.kind(child) catch {
@@ -60,7 +62,9 @@ const MaxIndexedFiles = 20000
 /// Enumerate every file under the conversation's workspace for the panel's
 /// fuzzy finder: depth-first, each directory's entries in lexicographic
 /// order, pruning the same churn directories the watcher skips.
-async fn list_files_op(payload : ListFilesPayload) -> ListFilesReply {
+async fn list_files_op(
+  payload : @protocol.ListFilesPayload,
+) -> @protocol.ListFilesReply {
   guard @engine.resolve_in_workspace(
       payload.session,
       "",
@@ -132,7 +136,9 @@ async fn collect_files(
 }
 
 ///|
-async fn read_file_op(payload : ReadFilePayload) -> ReadFileReply {
+async fn read_file_op(
+  payload : @protocol.ReadFilePayload,
+) -> @protocol.ReadFileReply {
   guard @engine.resolve_in_workspace(
       payload.session,
       payload.path,
@@ -173,8 +179,10 @@ async fn read_file_op(payload : ReadFilePayload) -> ReadFileReply {
 /// A path that stopped resolving inside the workspace reads as missing
 /// rather than an error: to the panel, a file it can no longer address is a
 /// deleted file.
-async fn stat_files_op(payload : StatFilesPayload) -> StatFilesReply {
-  let stats : Array[FileStat] = []
+async fn stat_files_op(
+  payload : @protocol.StatFilesPayload,
+) -> @protocol.StatFilesReply {
+  let stats : Array[@protocol.FileStat] = []
   for path in payload.paths {
     let sig = match
       @engine.resolve_in_workspace(

@@ -6,7 +6,7 @@
 ///|
 async fn archived_sessions_op(
   manager : @engine.EngineManager,
-) -> @engine.SessionsReply {
+) -> @protocol.SessionsReply {
   @engine.archived_sessions(manager) catch {
     @engine.EngineError(message) => raise HostError(message)
     error => raise error
@@ -16,8 +16,8 @@ async fn archived_sessions_op(
 ///|
 async fn archive_session_op(
   manager : @engine.EngineManager,
-  payload : ArchiveSessionPayload,
-) -> @engine.SessionsReply {
+  payload : @protocol.ArchiveSessionPayload,
+) -> @protocol.SessionsReply {
   @engine.archive_session(manager, payload.session) catch {
     @engine.EngineError(message) => raise HostError(message)
     error => raise error
@@ -27,8 +27,8 @@ async fn archive_session_op(
 ///|
 async fn unarchive_session_op(
   manager : @engine.EngineManager,
-  payload : ArchiveSessionPayload,
-) -> @engine.SessionsReply {
+  payload : @protocol.ArchiveSessionPayload,
+) -> @protocol.SessionsReply {
   @engine.unarchive_session(manager, payload.session) catch {
     @engine.EngineError(message) => raise HostError(message)
     error => raise error

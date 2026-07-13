@@ -4,8 +4,8 @@
 
 ///|
 async fn workspace_branch_op(
-  payload : WorkspaceBranchPayload,
-) -> WorkspaceBranchReply {
+  payload : @protocol.WorkspaceBranchPayload,
+) -> @protocol.WorkspaceBranchReply {
   // A live run hands us its cwd; a resumed conversation has none, so fall
   // back to the directory the session's engine runs in (mirrors `open_path`).
   let base = if payload.cwd.is_empty() {

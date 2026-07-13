@@ -1,7 +1,7 @@
 import {
   "moonbit-community/rabbita/dom",
   "moonbit-community/rabbita/js",
-  "openseek_desktop/internal/pathx",
+  "moonbitlang/core/json",
 }
 
 supported_targets = "js"

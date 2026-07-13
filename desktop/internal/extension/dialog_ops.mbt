@@ -7,15 +7,10 @@
 // to its manual path input.
 
 ///|
-priv struct PickFolderReply {
-  path : String?
-} derive(ToJson)
-
-///|
 #cfg(not(platform="windows"))
 async fn pick_workspace_op(
   request_context : @app.AppCommandRequestContext,
-) -> Result[PickFolderReply, String] {
+) -> Result[@protocol.PickWorkspaceReply, String] {
   guard @platform.is_darwin() else {
     return Err("no system folder picker on this platform")
   }
@@ -38,7 +33,7 @@ async fn pick_workspace_op(
 #cfg(platform="windows")
 async fn pick_workspace_op(
   request_context : @app.AppCommandRequestContext,
-) -> Result[PickFolderReply, String] {
+) -> Result[@protocol.PickWorkspaceReply, String] {
   ignore(request_context)
   // -STA: FolderBrowserDialog needs a single-threaded apartment.
   let script = "Add-Type -AssemblyName System.Windows.Forms; " +

@@ -78,7 +78,7 @@ priv struct LspManager {
   // path, awaiting forwarding to the webview by `run_diagnostics_pump`. Bounded
   // and drop-oldest so a diagnostics storm can never outrun the drain and grow
   // without bound.
-  diagnostics : @async.Queue[DiagnosticsPush]
+  diagnostics : @async.Queue[@protocol.DiagnosticsPush]
   // Set while the pump loop is running; a spawn request is only enqueued when a
   // pump is there to service it.
   mut pump_running : Bool
@@ -166,8 +166,8 @@ async fn moon_lsp_command(manager : LspManager) -> String {
 /// no session is involved, so the viewer can ask about any attached file.
 async fn lsp_hover_op(
   manager : LspManager,
-  payload : LspHoverPayload,
-) -> LspHoverReply {
+  payload : @protocol.LspHoverPayload,
+) -> @protocol.LspHoverReply {
   guard @engine.attached_workspace_dir(payload.path) is Some(dir) else {
     raise HostError("path is outside every attached workspace")
   }
@@ -201,8 +201,8 @@ async fn lsp_hover_op(
 /// changes arrive as `diagnostics` events.
 async fn lsp_open_op(
   manager : LspManager,
-  payload : LspOpenPayload,
-) -> LspDiagnosticsReply {
+  payload : @protocol.LspOpenPayload,
+) -> @protocol.LspDiagnosticsReply {
   guard @engine.attached_workspace_dir(payload.path) is Some(dir) else {
     raise HostError("path is outside every attached workspace")
   }
@@ -229,7 +229,7 @@ async fn lsp_open_op(
 /// `diagnostics` events. Returns only when the group is torn down.
 async fn run_diagnostics_pump(
   manager : LspManager,
-  emit : async (DiagnosticsPush) -> Unit,
+  emit : async (@protocol.DiagnosticsPush) -> Unit,
 ) -> Unit {
   for ;; {
     emit(manager.diagnostics.get())
@@ -244,8 +244,8 @@ async fn run_diagnostics_pump(
 /// indexed all yield no symbols.
 async fn workspace_symbols_op(
   manager : LspManager,
-  payload : WorkspaceSymbolsPayload,
-) -> WorkspaceSymbolsReply {
+  payload : @protocol.WorkspaceSymbolsPayload,
+) -> @protocol.WorkspaceSymbolsReply {
   // An empty query is valid — it asks the server for every symbol, which backs
   // the bare `#` menu (capped like any other result).
   guard @engine.resolve_in_workspace(
@@ -257,7 +257,7 @@ async fn workspace_symbols_op(
     return { symbols: [] }
   }
   let workspace_dir = dir.to_string()
-  let symbols : Array[SymbolItem] = []
+  let symbols : Array[@protocol.SymbolItem] = []
   // Fan the query across every module's server and merge, relativizing each
   // result against the conversation workspace (the common ancestor) so rows
   // from `<cwd>/a` and `<cwd>/b` come back as `a/...` and `b/...`. Sequential
@@ -285,9 +285,12 @@ async fn workspace_symbols_op(
 /// the flat reply the front-end consumes, relativizing each location's path
 /// against the workspace and capping the count. A row missing a name or
 /// location is skipped; an unrecognized shape yields no symbols.
-fn parse_symbols(raw : Json?, workspace_dir : String) -> WorkspaceSymbolsReply {
+fn parse_symbols(
+  raw : Json?,
+  workspace_dir : String,
+) -> @protocol.WorkspaceSymbolsReply {
   guard raw is Some(Array(items)) else { return { symbols: [] } }
-  let symbols : Array[SymbolItem] = []
+  let symbols : Array[@protocol.SymbolItem] = []
   for item in items {
     // A small cap keeps the menu usable and the reply bounded; moon-lsp can
     // return far more for a short query.
@@ -316,7 +319,7 @@ fn parse_symbols(raw : Json?, workspace_dir : String) -> WorkspaceSymbolsReply {
 ///|
 /// A symbol's zero-based `location.range`, or an all-zeros range when the
 /// location carries none (some servers return a bare `uri`).
-fn symbol_range(location : Map[String, Json]) -> SymbolRange {
+fn symbol_range(location : Map[String, Json]) -> @protocol.SymbolRange {
   guard location.get("range")
     is Some(
       Object(
@@ -631,7 +634,7 @@ async fn read_text(file : @path.Path) -> String? {
 
 ///|
 /// An empty hover reply — "nothing to show here".
-fn no_hover() -> LspHoverReply {
+fn no_hover() -> @protocol.LspHoverReply {
   {
     value: "",
     markdown: false,
@@ -646,7 +649,7 @@ fn no_hover() -> LspHoverReply {
 ///|
 /// Normalize an LSP hover result into the flat reply the front-end consumes.
 /// `None`, an empty value, or an unrecognized shape all collapse to `no_hover`.
-fn parse_hover(hover : Json?) -> LspHoverReply {
+fn parse_hover(hover : Json?) -> @protocol.LspHoverReply {
   guard hover is Some(json) else { return no_hover() }
   let (value, markdown) = parse_contents(json)
   guard !value.is_empty() else { return no_hover() }

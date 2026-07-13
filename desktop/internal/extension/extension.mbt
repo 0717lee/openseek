@@ -83,7 +83,7 @@ pub fn openseek_extension(
     ],
     context => {
       let sink = event_sink(context)
-      context.op_async("connect", (_ : Json) => {
+      context.op_async("connect", (_ : @protocol.EmptyPayload) => {
         // The connect op is the app-lifetime host task, so its group owns the
         // moon-lsp servers too: they run alongside the engine pump and are torn
         // down together when the webview disconnects. The LSP pump is
@@ -113,147 +113,171 @@ pub fn openseek_extension(
           }
         })
       })
-      context.op_async("start", (payload : StartPayload) => {
-        @engine.start_run(sink, manager, payload.to_request()) catch {
+      context.op_async("start", (payload : @protocol.StartPayload) => {
+        @engine.start_run(sink, manager, payload) catch {
           @engine.EngineError(message) => raise HostError(message)
           error => raise error
         }
       })
-      context.op_async("cancel", async fn(payload : CancelPayload) {
-        @engine.cancel_run(manager, payload.to_request()) catch {
+      context.op_async("cancel", async fn(payload : @protocol.CancelPayload) {
+        @engine.cancel_run(manager, payload) catch {
           @engine.EngineError(message) => raise HostError(message)
           error => raise error
         }
       })
-      context.op_async("steer", async fn(payload : SteerPayload) {
-        @engine.steer_run(manager, payload.to_request()) catch {
+      context.op_async("steer", async fn(payload : @protocol.SteerPayload) {
+        @engine.steer_run(manager, payload) catch {
           @engine.EngineError(message) => raise HostError(message)
           error => raise error
         }
       })
-      context.op_async("compact", async fn(payload : CompactPayload) {
-        @engine.compact_run(manager, payload.to_request()) catch {
+      context.op_async("compact", async fn(payload : @protocol.CompactPayload) {
+        @engine.compact_run(manager, payload) catch {
           @engine.EngineError(message) => raise HostError(message)
           error => raise error
         }
       })
-      context.op_async("list_sessions", async fn(_ : Json) {
+      context.op_async("list_sessions", async fn(_ : @protocol.EmptyPayload) {
         @engine.list_sessions(manager) catch {
           @engine.EngineError(message) => raise HostError(message)
           error => raise error
         }
       })
-      context.op_async("load_session", async fn(payload : LoadSessionPayload) {
-        @engine.load_session(manager, payload.to_request()) catch {
+      context.op_async("load_session", async fn(
+        payload : @protocol.LoadSessionPayload,
+      ) {
+        @engine.load_session(manager, payload) catch {
           @engine.EngineError(message) => raise HostError(message)
           error => raise error
         }
       })
-      context.op_async("list_workspaces", async fn(_ : Json) {
+      context.op_async("list_workspaces", async fn(_ : @protocol.EmptyPayload) {
         @engine.list_workspaces() catch {
           @engine.EngineError(message) => raise HostError(message)
           error => raise error
         }
       })
-      context.op_async("add_workspace", async fn(payload : WorkspacePayload) {
-        @engine.attach_workspace(payload.path) catch {
+      context.op_async("add_workspace", async fn(
+        payload : @protocol.WorkspacePayload,
+      ) {
+        @engine.attach_workspace(payload) catch {
           @engine.EngineError(message) => raise HostError(message)
           error => raise error
         }
       })
       context.op_async("remove_workspace", async fn(
-        payload : WorkspacePayload,
+        payload : @protocol.WorkspacePayload,
       ) {
-        @engine.detach_workspace(payload.path) catch {
+        @engine.detach_workspace(payload) catch {
           @engine.EngineError(message) => raise HostError(message)
           error => raise error
         }
       })
       context.op_async_result_with_context("pick_workspace", async fn(
         request_context : @app.AppCommandRequestContext,
-        _ : Json,
+        _ : @protocol.EmptyPayload,
       ) {
         pick_workspace_op(request_context)
       })
-      context.op_async("skills_catalog", async fn(_ : Json) {
+      context.op_async("skills_catalog", async fn(_ : @protocol.EmptyPayload) {
         skills_catalog_op()
       })
       context.op_async("skill_install", async fn(
-        payload : InstallSkillPayload,
+        payload : @protocol.InstallSkillPayload,
       ) {
         install_skill_op(payload)
       })
-      context.op_async("skills_installed", async fn(_ : Json) {
+      context.op_async("skills_installed", async fn(
+        _ : @protocol.EmptyPayload,
+      ) {
         installed_skills_op()
       })
       context.op_async("skill_uninstall", async fn(
-        payload : UninstallSkillPayload,
+        payload : @protocol.UninstallSkillPayload,
       ) {
         uninstall_skill_op(payload)
       })
-      context.op_async("open_path", async fn(payload : OpenPathPayload) {
+      context.op_async("open_path", async fn(
+        payload : @protocol.OpenPathPayload,
+      ) {
         open_path_op(payload)
       })
       context.op_async("check_update", async fn(
-        payload : UpdateChannelPayload,
+        payload : @protocol.UpdateChannelPayload,
       ) {
         check_update_op(updates, payload)
       })
       context.op_async("download_update", async fn(
-        payload : UpdateChannelPayload,
+        payload : @protocol.UpdateChannelPayload,
       ) {
         download_update_op(updates, payload)
       })
-      context.op_async("apply_update", async fn(_ : Json) {
+      context.op_async("apply_update", async fn(_ : @protocol.EmptyPayload) {
         apply_update_op(updates)
       })
       context.op_async("workspace_branch", async fn(
-        payload : WorkspaceBranchPayload,
+        payload : @protocol.WorkspaceBranchPayload,
       ) {
         workspace_branch_op(payload)
       })
       context.op_async("archive_session", async fn(
-        payload : ArchiveSessionPayload,
+        payload : @protocol.ArchiveSessionPayload,
       ) {
         archive_session_op(manager, payload)
       })
       context.op_async("unarchive_session", async fn(
-        payload : ArchiveSessionPayload,
+        payload : @protocol.ArchiveSessionPayload,
       ) {
         unarchive_session_op(manager, payload)
       })
-      context.op_async("archived_sessions", async fn(_ : Json) {
+      context.op_async("archived_sessions", async fn(
+        _ : @protocol.EmptyPayload,
+      ) {
         archived_sessions_op(manager)
       })
-      context.op_async("list_apps", async fn(_ : Json) { list_apps_op() })
-      context.op_async("launch_app", async fn(payload : LaunchAppPayload) {
+      context.op_async("list_apps", async fn(_ : @protocol.EmptyPayload) {
+        list_apps_op()
+      })
+      context.op_async("launch_app", async fn(
+        payload : @protocol.LaunchAppPayload,
+      ) {
         launch_app_op(payload)
       })
-      context.op_async("read_directory", async fn(payload : ReadDirPayload) {
+      context.op_async("read_directory", async fn(
+        payload : @protocol.ReadDirPayload,
+      ) {
         read_directory_op(payload)
       })
-      context.op_async("list_files", async fn(payload : ListFilesPayload) {
+      context.op_async("list_files", async fn(
+        payload : @protocol.ListFilesPayload,
+      ) {
         list_files_op(payload)
       })
-      context.op_async("read_file", async fn(payload : ReadFilePayload) {
+      context.op_async("read_file", async fn(
+        payload : @protocol.ReadFilePayload,
+      ) {
         read_file_op(payload)
       })
-      context.op_async("stat_files", async fn(payload : StatFilesPayload) {
+      context.op_async("stat_files", async fn(
+        payload : @protocol.StatFilesPayload,
+      ) {
         stat_files_op(payload)
       })
       context.op_async("watch_workspace", async fn(
-        payload : WatchWorkspacePayload,
+        payload : @protocol.WatchWorkspacePayload,
       ) {
         watch_workspace_op(watches, payload)
       })
-      context.op_async("hover", async fn(payload : LspHoverPayload) {
+      context.op_async("hover", async fn(payload : @protocol.LspHoverPayload) {
         lsp_hover_op(lsp, payload)
       })
-      context.op_async("lsp_open", async fn(payload : LspOpenPayload) {
+      context.op_async("lsp_open", async fn(
+        payload : @protocol.LspOpenPayload,
+      ) {
         lsp_open_op(lsp, payload)
       })
       context.op_async("workspace_symbols", async fn(
-        payload : WorkspaceSymbolsPayload,
+        payload : @protocol.WorkspaceSymbolsPayload,
       ) {
         workspace_symbols_op(lsp, payload)
       })

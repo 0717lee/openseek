@@ -11,33 +11,23 @@ pub(all) struct LauncherAppItem {
 }
 
 ///|
-/// Parse a `list_apps` reply. `None` only for structurally unusable JSON;
-/// entries without an id are skipped so one odd row cannot blank the menu.
-pub fn decode_apps_reply(text : String) -> Array[LauncherAppItem]? {
-  let json = @json.parse(text) catch { _ => return None }
-  guard json is Object(reply) else { return None }
-  guard reply.get("apps") is Some(Array(entries)) else { return None }
+/// Map a decoded `list_apps` reply into display rows. Wire validation and
+/// tolerant row decoding belong to the shared protocol package; this layer
+/// only applies the launcher's display-name fallback.
+pub fn apps_from_reply(
+  reply : @protocol.ListAppsReply,
+) -> Array[LauncherAppItem] {
   let items : Array[LauncherAppItem] = []
-  for entry in entries {
-    guard entry is Object(fields) else { continue }
-    guard @jsonx.json_text(fields, "id") is Some(id) && !id.is_empty() else {
-      continue
-    }
-    // Both are emitted unconditionally; `icon` is "" when the host could not
-    // extract one.
-    guard @jsonx.json_text(fields, "name") is Some(name) &&
-      @jsonx.json_text(fields, "icon") is Some(icon) else {
-      continue
-    }
+  for app in reply.apps {
     items.push({
-      id,
-      name: if name.trim().is_empty() {
-        id
+      id: app.id,
+      name: if app.name.trim().is_empty() {
+        app.id
       } else {
-        name
+        app.name
       },
-      icon,
+      icon: app.icon,
     })
   }
-  Some(items)
+  items
 }

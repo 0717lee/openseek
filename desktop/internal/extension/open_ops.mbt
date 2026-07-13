@@ -5,7 +5,9 @@
 // user clicked it, so there is no workspace-containment check.
 
 ///|
-async fn open_path_op(payload : OpenPathPayload) -> OpenPathReply {
+async fn open_path_op(
+  payload : @protocol.OpenPathPayload,
+) -> @protocol.OpenPathReply {
   // A live run hands us its cwd; a resumed conversation has none, so fall back
   // to the directory the session's engine runs in.
   let base = if payload.cwd.is_empty() {

@@ -1,6 +1,11 @@
 // Generated using `moon info`, DON'T EDIT IT
 package "openseek_desktop/internal/protocol"
 
+import {
+  "moonbitlang/core/debug",
+  "moonbitlang/core/json",
+}
+
 // Values
 pub fn cancel() -> EngineCommand
 
@@ -13,8 +18,451 @@ pub fn steer(String) -> EngineCommand
 // Errors
 
 // Types and methods
+pub(all) struct AppEntry {
+  id : String
+  name : String
+  icon : String
+} derive(Eq, @debug.Debug)
+pub impl ToJson for AppEntry
+pub impl @json.FromJson for AppEntry
+
+pub(all) struct ApplyUpdateReply {
+  applied : Bool
+} derive(Eq, @debug.Debug)
+pub impl ToJson for ApplyUpdateReply
+pub impl @json.FromJson for ApplyUpdateReply
+
+pub(all) struct ArchiveSessionPayload {
+  session : String
+} derive(Eq, @debug.Debug)
+pub impl ToJson for ArchiveSessionPayload
+pub impl @json.FromJson for ArchiveSessionPayload
+
+pub(all) struct CancelPayload {
+  run_id : Int?
+} derive(Eq, @debug.Debug)
+pub impl ToJson for CancelPayload
+pub impl @json.FromJson for CancelPayload
+
+pub(all) struct CancelReply {
+  cancelled : Bool
+  run_id : Int?
+} derive(Eq, @debug.Debug)
+pub impl ToJson for CancelReply
+pub impl @json.FromJson for CancelReply
+
+pub(all) enum CheckUpdateReply {
+  UpToDate
+  Available(version~ : String, installable~ : Bool)
+  Unreachable(reason~ : String)
+  Malformed(reason~ : String)
+  Broken(version~ : String, reason~ : String)
+} derive(Eq, @debug.Debug)
+pub impl ToJson for CheckUpdateReply
+pub impl @json.FromJson for CheckUpdateReply
+
+pub(all) struct CompactPayload {
+  session : String
+  api_key : String?
+  api_url : String?
+  model : String?
+  max_steps : Int?
+  session_root : String?
+  workspace : String?
+  wsl : WslPayload?
+} derive(Eq, @debug.Debug)
+pub impl ToJson for CompactPayload
+pub impl @json.FromJson for CompactPayload
+
+pub(all) struct CompactReply {
+  compacting : Bool
+} derive(Eq, @debug.Debug)
+pub impl ToJson for CompactReply
+pub impl @json.FromJson for CompactReply
+
+pub(all) struct ConnectReply {
+  disconnected : Bool
+} derive(Eq, @debug.Debug)
+pub impl ToJson for ConnectReply
+pub impl @json.FromJson for ConnectReply
+
+pub(all) struct DiagnosticsPush {
+  path : String
+  diagnostics : Json
+}
+pub impl ToJson for DiagnosticsPush
+pub impl @json.FromJson for DiagnosticsPush
+
+pub(all) struct DirEntry {
+  name : String
+  is_dir : Bool
+} derive(Eq, @debug.Debug)
+pub impl ToJson for DirEntry
+pub impl @json.FromJson for DirEntry
+
+pub(all) struct DownloadUpdateReply {
+  version : String
+} derive(Eq, @debug.Debug)
+pub impl ToJson for DownloadUpdateReply
+pub impl @json.FromJson for DownloadUpdateReply
+
+pub(all) struct EmptyPayload {
+} derive(Eq, @debug.Debug)
+pub impl ToJson for EmptyPayload
+pub impl @json.FromJson for EmptyPayload
+
 type EngineCommand
 pub fn EngineCommand::to_jsonl(Self) -> String
+
+pub(all) struct FileStat {
+  path : String
+  sig : String
+} derive(Eq, @debug.Debug)
+pub impl ToJson for FileStat
+pub impl @json.FromJson for FileStat
+
+pub(all) struct FsChangedPayload {
+  root : String
+} derive(Eq, @debug.Debug)
+pub impl ToJson for FsChangedPayload
+pub impl @json.FromJson for FsChangedPayload
+
+pub(all) struct InstallSkillPayload {
+  module_name : String
+  version : String
+  package_path : String?
+} derive(Eq, @debug.Debug)
+pub impl ToJson for InstallSkillPayload
+pub impl @json.FromJson for InstallSkillPayload
+
+pub(all) struct InstallSkillReply {
+  installed : InstalledSkill
+} derive(Eq, @debug.Debug)
+pub impl ToJson for InstallSkillReply
+pub impl @json.FromJson for InstallSkillReply
+
+pub(all) struct InstalledSkill {
+  id : String
+  name : String
+  description : String
+  source : String
+} derive(Eq, @debug.Debug)
+pub impl ToJson for InstalledSkill
+pub impl @json.FromJson for InstalledSkill
+
+pub(all) struct InstalledSkillsReply {
+  skills : Array[InstalledSkill]
+} derive(Eq, @debug.Debug)
+pub impl ToJson for InstalledSkillsReply
+pub impl @json.FromJson for InstalledSkillsReply
+
+pub(all) struct LaunchAppPayload {
+  session : String
+  cwd : String
+  app : String
+} derive(Eq, @debug.Debug)
+pub impl ToJson for LaunchAppPayload
+pub impl @json.FromJson for LaunchAppPayload
+
+pub(all) struct LaunchAppReply {
+  launched : Bool
+} derive(Eq, @debug.Debug)
+pub impl ToJson for LaunchAppReply
+pub impl @json.FromJson for LaunchAppReply
+
+pub(all) struct ListAppsReply {
+  apps : Array[AppEntry]
+} derive(Eq, @debug.Debug)
+pub impl ToJson for ListAppsReply
+pub impl @json.FromJson for ListAppsReply
+
+pub(all) struct ListFilesPayload {
+  session : String
+  workspace : String?
+} derive(Eq, @debug.Debug)
+pub impl ToJson for ListFilesPayload
+pub impl @json.FromJson for ListFilesPayload
+
+pub(all) struct ListFilesReply {
+  files : Array[String]
+  truncated : Bool
+} derive(Eq, @debug.Debug)
+pub impl ToJson for ListFilesReply
+pub impl @json.FromJson for ListFilesReply
+
+pub(all) struct LoadSessionPayload {
+  session : String
+  workspace : String?
+} derive(Eq, @debug.Debug)
+pub impl ToJson for LoadSessionPayload
+pub impl @json.FromJson for LoadSessionPayload
+
+pub(all) struct LoadSessionReply {
+  session : Json
+}
+pub impl ToJson for LoadSessionReply
+pub impl @json.FromJson for LoadSessionReply
+
+pub(all) struct LspDiagnosticsReply {
+  diagnostics : Json
+}
+pub impl ToJson for LspDiagnosticsReply
+pub impl @json.FromJson for LspDiagnosticsReply
+
+pub(all) struct LspHoverPayload {
+  path : String
+  line : Int
+  character : Int
+} derive(Eq, @debug.Debug)
+pub impl ToJson for LspHoverPayload
+pub impl @json.FromJson for LspHoverPayload
+
+pub(all) struct LspHoverReply {
+  value : String
+  markdown : Bool
+  has_range : Bool
+  start_line : Int
+  start_character : Int
+  end_line : Int
+  end_character : Int
+} derive(Eq, @debug.Debug)
+pub impl ToJson for LspHoverReply
+pub impl @json.FromJson for LspHoverReply
+
+pub(all) struct LspOpenPayload {
+  path : String
+} derive(Eq, @debug.Debug)
+pub impl ToJson for LspOpenPayload
+pub impl @json.FromJson for LspOpenPayload
+
+pub(all) struct MarketSkill {
+  name : String
+  module_name : String
+  package_path : String
+  version : String
+  description : String
+  author : String
+  repository : String
+} derive(Eq, @debug.Debug)
+pub impl ToJson for MarketSkill
+pub impl @json.FromJson for MarketSkill
+
+pub(all) struct OpenPathPayload {
+  session : String
+  cwd : String
+  path : String
+} derive(Eq, @debug.Debug)
+pub impl ToJson for OpenPathPayload
+pub impl @json.FromJson for OpenPathPayload
+
+pub(all) struct OpenPathReply {
+  opened : Bool
+} derive(Eq, @debug.Debug)
+pub impl ToJson for OpenPathReply
+pub impl @json.FromJson for OpenPathReply
+
+pub(all) struct PickWorkspaceReply {
+  path : String?
+} derive(Eq, @debug.Debug)
+pub impl ToJson for PickWorkspaceReply
+pub impl @json.FromJson for PickWorkspaceReply
+
+pub(all) struct ReadDirPayload {
+  session : String
+  path : String
+  workspace : String?
+} derive(Eq, @debug.Debug)
+pub impl ToJson for ReadDirPayload
+pub impl @json.FromJson for ReadDirPayload
+
+pub(all) struct ReadDirReply {
+  entries : Array[DirEntry]
+} derive(Eq, @debug.Debug)
+pub impl ToJson for ReadDirReply
+pub impl @json.FromJson for ReadDirReply
+
+pub(all) struct ReadFilePayload {
+  session : String
+  path : String
+  workspace : String?
+} derive(Eq, @debug.Debug)
+pub impl ToJson for ReadFilePayload
+pub impl @json.FromJson for ReadFilePayload
+
+pub(all) enum ReadFileReply {
+  Binary
+  Oversized
+  Content(content~ : String, absolute~ : String, sig~ : String)
+} derive(Eq, @debug.Debug)
+pub impl ToJson for ReadFileReply
+pub impl @json.FromJson for ReadFileReply
+
+pub(all) struct SessionGroup {
+  workspace : String
+  name : String
+  session_root : String
+  sessions : Json
+  error : String
+}
+pub impl ToJson for SessionGroup
+pub impl @json.FromJson for SessionGroup
+
+pub(all) struct SessionsReply {
+  groups : Array[SessionGroup]
+}
+pub impl ToJson for SessionsReply
+pub impl @json.FromJson for SessionsReply
+
+pub(all) struct SkillsCatalogReply {
+  skills : Array[MarketSkill]
+} derive(Eq, @debug.Debug)
+pub impl ToJson for SkillsCatalogReply
+pub impl @json.FromJson for SkillsCatalogReply
+
+pub(all) struct StartPayload {
+  task : String
+  api_key : String?
+  api_url : String?
+  model : String?
+  max_steps : Int?
+  session : String?
+  session_root : String?
+  workspace : String?
+  wsl : WslPayload?
+} derive(Eq, @debug.Debug)
+pub impl ToJson for StartPayload
+pub impl @json.FromJson for StartPayload
+
+pub(all) struct StartReply {
+  run_id : Int
+  status : String
+  exit_code : Int
+} derive(Eq, @debug.Debug)
+pub impl ToJson for StartReply
+pub impl @json.FromJson for StartReply
+
+pub(all) struct StatFilesPayload {
+  session : String
+  paths : Array[String]
+  workspace : String?
+} derive(Eq, @debug.Debug)
+pub impl ToJson for StatFilesPayload
+pub impl @json.FromJson for StatFilesPayload
+
+pub(all) struct StatFilesReply {
+  stats : Array[FileStat]
+} derive(Eq, @debug.Debug)
+pub impl ToJson for StatFilesReply
+pub impl @json.FromJson for StatFilesReply
+
+pub(all) struct SteerPayload {
+  text : String
+  run_id : Int?
+} derive(Eq, @debug.Debug)
+pub impl ToJson for SteerPayload
+pub impl @json.FromJson for SteerPayload
+
+pub(all) struct SteerReply {
+  steered : Bool
+  run_id : Int?
+} derive(Eq, @debug.Debug)
+pub impl ToJson for SteerReply
+pub impl @json.FromJson for SteerReply
+
+pub(all) struct SymbolItem {
+  name : String
+  kind : Int?
+  container : String?
+  path : String
+  range : SymbolRange
+} derive(Eq, @debug.Debug)
+pub impl ToJson for SymbolItem
+pub impl @json.FromJson for SymbolItem
+
+pub(all) struct SymbolPosition {
+  line : Int
+  col : Int
+} derive(Eq, @debug.Debug)
+pub impl ToJson for SymbolPosition
+pub impl @json.FromJson for SymbolPosition
+
+pub(all) struct SymbolRange {
+  start : SymbolPosition
+  end : SymbolPosition
+} derive(Eq, @debug.Debug)
+pub impl ToJson for SymbolRange
+pub impl @json.FromJson for SymbolRange
+
+pub(all) struct UninstallSkillPayload {
+  id : String
+} derive(Eq, @debug.Debug)
+pub impl ToJson for UninstallSkillPayload
+pub impl @json.FromJson for UninstallSkillPayload
+
+pub(all) struct UninstallSkillReply {
+  removed : Bool
+} derive(Eq, @debug.Debug)
+pub impl ToJson for UninstallSkillReply
+pub impl @json.FromJson for UninstallSkillReply
+
+pub(all) struct UpdateChannelPayload {
+  channel : String?
+} derive(Eq, @debug.Debug)
+pub impl ToJson for UpdateChannelPayload
+pub impl @json.FromJson for UpdateChannelPayload
+
+pub(all) struct WatchWorkspacePayload {
+  session : String
+  workspace : String?
+} derive(Eq, @debug.Debug)
+pub impl ToJson for WatchWorkspacePayload
+pub impl @json.FromJson for WatchWorkspacePayload
+
+pub(all) struct WorkspaceBranchPayload {
+  session : String
+  cwd : String
+} derive(Eq, @debug.Debug)
+pub impl ToJson for WorkspaceBranchPayload
+pub impl @json.FromJson for WorkspaceBranchPayload
+
+pub(all) struct WorkspaceBranchReply {
+  branch : String
+} derive(Eq, @debug.Debug)
+pub impl ToJson for WorkspaceBranchReply
+pub impl @json.FromJson for WorkspaceBranchReply
+
+pub(all) struct WorkspacePayload {
+  path : String
+} derive(Eq, @debug.Debug)
+pub impl ToJson for WorkspacePayload
+pub impl @json.FromJson for WorkspacePayload
+
+pub(all) struct WorkspaceSymbolsPayload {
+  session : String
+  query : String
+  workspace : String?
+} derive(Eq, @debug.Debug)
+pub impl ToJson for WorkspaceSymbolsPayload
+pub impl @json.FromJson for WorkspaceSymbolsPayload
+
+pub(all) struct WorkspaceSymbolsReply {
+  symbols : Array[SymbolItem]
+} derive(Eq, @debug.Debug)
+pub impl ToJson for WorkspaceSymbolsReply
+pub impl @json.FromJson for WorkspaceSymbolsReply
+
+pub(all) struct WorkspacesReply {
+  workspaces : Array[String]
+} derive(Eq, @debug.Debug)
+pub impl ToJson for WorkspacesReply
+pub impl @json.FromJson for WorkspacesReply
+
+pub(all) struct WslPayload {
+  distro : String?
+  engine : String?
+} derive(Eq, @debug.Debug)
+pub impl ToJson for WslPayload
+pub impl @json.FromJson for WslPayload
 
 // Type aliases
 

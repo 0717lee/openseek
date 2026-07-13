@@ -16,7 +16,8 @@ test "skills catalog replies decode and skip odd entries" {
       "nonsense",
     ],
   }
-  guard decode_skills_catalog_reply(reply.stringify()) is Some([item]) else {
+  let decoded : @protocol.SkillsCatalogReply = @json.from_json(reply)
+  guard skills_catalog_from_reply(decoded) is [item] else {
     fail("expected exactly one catalog item")
   }
   assert_eq(item.name, "acme/widget")
@@ -24,8 +25,6 @@ test "skills catalog replies decode and skip odd entries" {
   assert_eq(item.version, "1.0.0")
   assert_eq(item.description, "Build widgets fast.")
   assert_eq(market_source_label(item), "acme/widget@1.0.0")
-  assert_true(decode_skills_catalog_reply("[]") is None)
-  assert_true(decode_skills_catalog_reply("not json") is None)
 }
 
 ///|
@@ -43,7 +42,8 @@ test "subpackage skills carry their package path in the source label" {
       },
     ],
   }
-  guard decode_skills_catalog_reply(reply.stringify()) is Some([item]) else {
+  let decoded : @protocol.SkillsCatalogReply = @json.from_json(reply)
+  guard skills_catalog_from_reply(decoded) is [item] else {
     fail("expected one catalog item")
   }
   assert_eq(market_source_label(item), "alice/alpha@0.2.0/cmd/run")
@@ -64,8 +64,8 @@ test "installed skill replies decode, with name falling back to id" {
       { "name": "no-id" },
     ],
   }
-  guard decode_installed_skills_reply(reply.stringify())
-    is Some([widget, handmade]) else {
+  let decoded : @protocol.InstalledSkillsReply = @json.from_json(reply)
+  guard installed_skills_from_reply(decoded) is [widget, handmade] else {
     fail("expected two installed items")
   }
   assert_eq(widget.id, "acme-widget")
@@ -73,5 +73,4 @@ test "installed skill replies decode, with name falling back to id" {
   assert_eq(widget.source, "acme/widget@1.0.0")
   assert_eq(handmade.name, "handmade")
   assert_eq(handmade.source, "")
-  assert_true(decode_installed_skills_reply("{}") is None)
 }

@@ -83,7 +83,10 @@ fn configured_max_steps(value : Int?) -> Int raise EngineError {
 }
 
 ///|
-async fn run_config(payload : StartRequest, engine : String) -> RunConfig {
+async fn run_config(
+  payload : @protocol.StartPayload,
+  engine : String,
+) -> RunConfig {
   let task = payload.task.trim().to_owned()
   guard !task.is_empty() else { raise EngineError("task must not be empty") }
   serve_config(
@@ -106,7 +109,10 @@ async fn run_config(payload : StartRequest, engine : String) -> RunConfig {
 /// the same settings a start carries, pinned to the compacted session. The
 /// blank task is never sent — `compact_run` writes only the compact command,
 /// and the fingerprint deliberately excludes the task.
-async fn compact_config(payload : CompactRequest, engine : String) -> RunConfig {
+async fn compact_config(
+  payload : @protocol.CompactPayload,
+  engine : String,
+) -> RunConfig {
   guard !payload.session.is_empty() else {
     raise EngineError("session id must not be empty")
   }
@@ -137,7 +143,7 @@ async fn serve_config(
   session? : String,
   session_root? : String,
   workspace? : String,
-  wsl? : WslRequest,
+  wsl? : @protocol.WslPayload,
 ) -> RunConfig {
   // Only the official endpoint strictly needs a key; a custom endpoint
   // decides for itself, so a missing key becomes a placeholder there. Do

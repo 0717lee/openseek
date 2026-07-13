@@ -48,47 +48,15 @@ async fn cleanup_updates(state : UpdateState) -> Unit {
 }
 
 ///|
-/// The channel half of `check_update` / `download_update`. Anything but the
-/// literal "staging" reads as production, so a stale stored value can only
-/// fall back to the safe default.
-priv struct UpdateChannelPayload {
-  channel : String?
-} derive(FromJson)
-
-///|
-fn UpdateChannelPayload::to_channel(
-  self : UpdateChannelPayload,
+/// Resolve the shared wire channel into the native updater's channel. Anything
+/// but the literal "staging" reads as production, so a stale stored value can
+/// only fall back to the safe default.
+fn update_channel(
+  payload : @protocol.UpdateChannelPayload,
 ) -> @update.UpdateChannel {
-  match self.channel {
+  match payload.channel {
     Some("staging") => Staging
     _ => Production
-  }
-}
-
-///|
-/// Reply to `check_update`, discriminated on the wire by a `kind` field.
-/// Every outcome is data — the op only rejects on cancellation — because
-/// each kind is worth a different amount of noise: `broken` can only be the
-/// publisher's fault (toast material), `malformed` also happens under
-/// captive portals (log material), `unreachable` is routine offline life.
-priv enum CheckUpdateReply {
-  UpToDate
-  Available(version~ : String, installable~ : Bool)
-  Unreachable(reason~ : String)
-  Malformed(reason~ : String)
-  Broken(version~ : String, reason~ : String)
-}
-
-///|
-impl ToJson for CheckUpdateReply with fn to_json(self) {
-  match self {
-    UpToDate => { "kind": "up_to_date" }
-    Available(version~, installable~) =>
-      { "kind": "available", "version": version, "installable": installable }
-    Unreachable(reason~) => { "kind": "unreachable", "reason": reason }
-    Malformed(reason~) => { "kind": "malformed", "reason": reason }
-    Broken(version~, reason~) =>
-      { "kind": "broken", "version": version, "reason": reason }
   }
 }
 
@@ -98,11 +66,11 @@ impl ToJson for CheckUpdateReply with fn to_json(self) {
 /// with a package published for this platform.
 async fn check_update_op(
   state : UpdateState,
-  payload : UpdateChannelPayload,
-) -> CheckUpdateReply {
+  payload : @protocol.UpdateChannelPayload,
+) -> @protocol.CheckUpdateReply {
   let info = @update.check_for_update(
     current=@version.AppVersion,
-    channel=payload.to_channel(),
+    channel=update_channel(payload),
   ) catch {
     @update.Unreachable(reason~) => return Unreachable(reason~)
     @update.MalformedManifest(reason~) => {
@@ -130,12 +98,6 @@ async fn check_update_op(
 }
 
 ///|
-/// Reply to `download_update`: the version now staged and verified.
-priv struct DownloadUpdateReply {
-  version : String
-} derive(ToJson)
-
-///|
 /// Download and verify the channel's package, leaving it staged for
 /// `apply_update`. Deliberately re-checks the manifest rather than trusting
 /// what the frontend saw earlier — the release may have moved between the
@@ -143,14 +105,14 @@ priv struct DownloadUpdateReply {
 /// rejection message is the user-facing answer (and goes to the log too).
 async fn download_update_op(
   state : UpdateState,
-  payload : UpdateChannelPayload,
-) -> DownloadUpdateReply {
+  payload : @protocol.UpdateChannelPayload,
+) -> @protocol.DownloadUpdateReply {
   guard state.work_dir is Some(dir) && state.bundle_path is Some(bundle) else {
     raise HostError("this build cannot install updates")
   }
   let info = @update.check_for_update(
     current=@version.AppVersion,
-    channel=payload.to_channel(),
+    channel=update_channel(payload),
   ) catch {
     @update.Unreachable(reason~) => raise HostError(reason)
     @update.MalformedManifest(reason~) => raise HostError(reason)
@@ -183,7 +145,7 @@ async fn download_update_op(
 /// Swap the staged bundle into place and arrange the relaunch. The reply
 /// tells the frontend to close the window; the actual reopen happens in
 /// `main` once the run loop has exited.
-async fn apply_update_op(state : UpdateState) -> ApplyUpdateReply {
+async fn apply_update_op(state : UpdateState) -> @protocol.ApplyUpdateReply {
   guard state.staged is Some(staged) &&
     state.work_dir is Some(dir) &&
     state.bundle_path is Some(bundle) else {

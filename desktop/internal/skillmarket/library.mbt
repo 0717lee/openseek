@@ -22,7 +22,7 @@ pub struct InstalledSkill {
   // `module@version[/package]` recorded at install time; "" for a skill the
   // user wrote by hand (which this package will never touch).
   source : String
-} derive(ToJson)
+}
 
 ///|
 /// Where the library lives: `OPENSEEK_GLOBAL_SKILLS_DIR`, else the user's

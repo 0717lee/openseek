@@ -411,7 +411,7 @@ fn host_reports_terminal_error(decoded : @event.AgentEvent) -> Bool {
 pub async fn run_engine_pump(
   sink : EventSink,
   manager : EngineManager,
-) -> PumpReply {
+) -> @protocol.ConnectReply {
   guard manager.pump is Stopped else {
     raise EngineError("engine host is already connected")
   }

@@ -62,33 +62,14 @@ priv enum UpdateCheck {
 }
 
 ///|
-fn decode_update_check(text : String) -> UpdateCheck? {
-  // Every kind's fields are unconditional on the wire; a reply missing one
-  // is malformed and reads as `None` (the caller folds that into
-  // `CheckUnreachable`).
-  let json = @json.parse(text) catch { _ => return None }
-  guard json is Object(reply) else { return None }
-  let reason = @jsonx.json_text(reply, "reason")
-  guard @jsonx.json_text(reply, "kind") is Some(kind) else { return None }
-  match kind {
-    "up_to_date" => Some(CheckUpToDate)
-    "available" => {
-      guard @jsonx.json_text(reply, "version") is Some(version) &&
-        @jsonx.json_bool(reply, "installable") is Some(installable) else {
-        return None
-      }
-      Some(CheckFound(version~, installable~))
-    }
-    "unreachable" => reason.map(reason => CheckUnreachable(reason~))
-    "malformed" => reason.map(reason => CheckMalformed(reason~))
-    "broken" => {
-      guard @jsonx.json_text(reply, "version") is Some(version) &&
-        reason is Some(reason) else {
-        return None
-      }
-      Some(CheckBroken(version~, reason~))
-    }
-    _ => None
+fn update_check_from_reply(reply : @protocol.CheckUpdateReply) -> UpdateCheck {
+  match reply {
+    @protocol.UpToDate => CheckUpToDate
+    @protocol.Available(version~, installable~) =>
+      CheckFound(version~, installable~)
+    @protocol.Unreachable(reason~) => CheckUnreachable(reason~)
+    @protocol.Malformed(reason~) => CheckMalformed(reason~)
+    @protocol.Broken(version~, reason~) => CheckBroken(version~, reason~)
   }
 }
 
@@ -103,12 +84,16 @@ fn check_for_updates(
 ) -> @cmd.Cmd {
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
-      let payload = @js.Object::new()
-      payload["channel"] = channel.wire()
+      let payload : @protocol.UpdateChannelPayload = {
+        channel: Some(channel.wire()),
+      }
       let result = try {
-        let reply = @interop.bridge_request("check_update", payload.to_value())
-        match decode_update_check(@interop.reply_json_text(reply)) {
-          Some(result) => result
+        let raw_reply = @interop.bridge_request("check_update", payload)
+        let reply : @protocol.CheckUpdateReply? = @interop.bridge_reply(
+          raw_reply,
+        )
+        match reply {
+          Some(reply) => update_check_from_reply(reply)
           None => CheckUnreachable(reason="the host answered unintelligibly")
         }
       } catch {
@@ -128,12 +113,10 @@ fn download_update(
 ) -> @cmd.Cmd {
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
-      let payload = @js.Object::new()
-      payload["channel"] = channel.wire()
-      let _ : @js.Value = @interop.bridge_request(
-        "download_update",
-        payload.to_value(),
-      ) catch {
+      let payload : @protocol.UpdateChannelPayload = {
+        channel: Some(channel.wire()),
+      }
+      let _ : @js.Value = @interop.bridge_request("download_update", payload) catch {
         error => {
           scheduler.add(
             dispatch(UpdateFailed(message=@interop.bridge_error_text(error))),

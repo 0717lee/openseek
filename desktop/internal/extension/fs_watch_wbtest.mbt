@@ -18,7 +18,7 @@ test "ignored_watch_path prunes cache and build subtrees at any depth" {
 
 ///|
 test "stat_files payload decodes with and without a workspace hint" {
-  let payload : StatFilesPayload = @json.from_json({
+  let payload : @protocol.StatFilesPayload = @json.from_json({
     "session": "s-1",
     "paths": ["a.mbt", "src/b.mbt"],
     "workspace": "/work/project",
@@ -26,7 +26,7 @@ test "stat_files payload decodes with and without a workspace hint" {
   assert_eq(payload.session, "s-1")
   assert_true(payload.paths == ["a.mbt", "src/b.mbt"])
   assert_true(payload.workspace is Some("/work/project"))
-  let bare : WatchWorkspacePayload = @json.from_json({ "session": "" })
+  let bare : @protocol.WatchWorkspacePayload = @json.from_json({ "session": "" })
   assert_eq(bare.session, "")
   assert_true(bare.workspace is None)
 }

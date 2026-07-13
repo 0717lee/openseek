@@ -15,9 +15,8 @@ test "session list decoding keeps well-formed entries and skips the rest" {
     #|  ]},
     #|  {"workspace":"/home/user/broken","name":"broken","session_root":"/home/user/broken/.openseek","error":"session list failed","sessions":[]}
     #|]}
-  guard decode_sessions_reply(text) is Some(items) else {
-    fail("expected a decoded list")
-  }
+  let reply : @protocol.SessionsReply = @json.from_json(@json.parse(text))
+  let items = sessions_from_reply(reply)
   inspect(items.length(), content="2")
   inspect(items[0].id, content="desktop-b")
   assert_true(items[0].title is Some("newest"))
@@ -31,19 +30,15 @@ test "session list decoding keeps well-formed entries and skips the rest" {
 }
 
 ///|
-test "session list decoding rejects structurally unusable replies" {
-  assert_true(decode_sessions_reply("not json") is None)
-  assert_true(decode_sessions_reply("{\"groups\":42}") is None)
-  assert_true(decode_sessions_reply("[]") is None)
-}
-
-///|
-fn session_reply(events_json : String) -> String {
+fn session_json(events_json : String) -> Json raise {
   let prefix =
     #|{"session":{"version":1,"id":"desktop-x","system_prompt":"system","events":[
   let suffix =
     #|]}}
-  prefix + events_json + suffix
+  let reply : @protocol.LoadSessionReply = @json.from_json(
+    @json.parse(prefix + events_json + suffix),
+  )
+  reply.session
 }
 
 ///|
@@ -53,7 +48,7 @@ test "transcript mapping replays a finished conversation" {
     #|{"sequence":2,"item":{"kind":"tool_result","payload":{"tool_call_id":"c1","tool_name":"shell","content":"output","is_error":true,"brief":"ran ls → exit 1"}}},
     #|{"sequence":3,"item":{"kind":"assistant","payload":{"content":"answer","tool_calls":[],"reasoning_content":"thought"}}},
     #|{"sequence":4,"item":{"kind":"terminal","payload":{"kind":"finished","message":"answer"}}}
-  guard transcript_from_session_json(session_reply(events)) is Some(items) else {
+  guard transcript_from_session_json(session_json(events)) is Some(items) else {
     fail("expected transcript items")
   }
   inspect(items.length(), content="4")
@@ -75,7 +70,7 @@ test "transcript mapping deduplicates the finished answer" {
   let events =
     #|{"sequence":1,"item":{"kind":"assistant","payload":{"content":"answer","tool_calls":[]}}},
     #|{"sequence":2,"item":{"kind":"terminal","payload":{"kind":"finished","message":"answer"}}}
-  guard transcript_from_session_json(session_reply(events)) is Some(items) else {
+  guard transcript_from_session_json(session_json(events)) is Some(items) else {
     fail("expected transcript items")
   }
   inspect(items.length(), content="1")
@@ -87,7 +82,7 @@ test "transcript mapping renders non-finished terminals as error bubbles" {
     #|{"sequence":1,"item":{"kind":"terminal","payload":{"kind":"interrupted","message":""}}},
     #|{"sequence":2,"item":{"kind":"terminal","payload":{"kind":"aborted","message":"the agent gave up"}}},
     #|{"sequence":3,"item":{"kind":"terminal","payload":{"kind":"failed","message":"engine error"}}}
-  guard transcript_from_session_json(session_reply(events)) is Some(items) else {
+  guard transcript_from_session_json(session_json(events)) is Some(items) else {
     fail("expected transcript items")
   }
   inspect(items.length(), content="3")
@@ -103,7 +98,7 @@ test "transcript mapping keeps summaries and meaningful runtime notices" {
     #|{"sequence":1,"item":{"kind":"summary","payload":{"content":"earlier turns compacted","from_sequence":1,"to_sequence":8}}},
     #|{"sequence":2,"item":{"kind":"runtime_notice","payload":{"content":"[moon_check update]\nstatus=failed\nmain.mbt:1 error"}}},
     #|{"sequence":3,"item":{"kind":"runtime_notice","payload":{"content":""}}}
-  guard transcript_from_session_json(session_reply(events)) is Some(items) else {
+  guard transcript_from_session_json(session_json(events)) is Some(items) else {
     fail("expected transcript items")
   }
   inspect(items.length(), content="2")
@@ -119,7 +114,7 @@ test "transcript mapping replays a context checkpoint and yield guidance" {
   let events =
     #|{"sequence":1,"item":{"kind":"summary","payload":{"content":"checkpoint recap","from_sequence":1,"to_sequence":8}}},
     #|{"sequence":2,"item":{"kind":"terminal","payload":{"kind":"finished","message":"[context ceiling] continue in a new turn"}}}
-  guard transcript_from_session_json(session_reply(events)) is Some(items) else {
+  guard transcript_from_session_json(session_json(events)) is Some(items) else {
     fail("expected transcript items")
   }
   inspect(items.length(), content="2")
@@ -128,14 +123,12 @@ test "transcript mapping replays a context checkpoint and yield guidance" {
   guard items[1].kind is Assistant(false) else {
     fail("expected context-yield guidance")
   }
-  inspect(
-    items[1].content,
-    content="[context ceiling] continue in a new turn",
-  )
+  inspect(items[1].content, content="[context ceiling] continue in a new turn")
 }
 
 ///|
-test "transcript mapping rejects structurally unusable replies" {
-  assert_true(transcript_from_session_json("not json") is None)
-  assert_true(transcript_from_session_json("{\"other\":1}") is None)
+test "transcript mapping rejects a non-session value" {
+  let not_a_session : Json = "not a session"
+  assert_true(transcript_from_session_json(not_a_session) is None)
+  assert_true(transcript_from_session_json(Json::empty_object()) is Some([]))
 }

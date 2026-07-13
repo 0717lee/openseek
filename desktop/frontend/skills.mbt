@@ -7,10 +7,8 @@
 fn fetch_skills_catalog(dispatch : @cmd.Emit[Msg]) -> @cmd.Cmd {
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
-      let reply = @interop.bridge_request(
-        "skills_catalog",
-        @js.Object::new().to_value(),
-      ) catch {
+      let payload = @protocol.EmptyPayload::{  }
+      let raw_reply = @interop.bridge_request("skills_catalog", payload) catch {
         error => {
           scheduler.add(
             dispatch(SkillsCatalogFailed(@interop.bridge_error_text(error))),
@@ -18,9 +16,16 @@ fn fetch_skills_catalog(dispatch : @cmd.Emit[Msg]) -> @cmd.Cmd {
           return
         }
       }
-      match
-        @transcript.decode_skills_catalog_reply(@interop.reply_json_text(reply)) {
-        Some(items) => scheduler.add(dispatch(SkillsCatalogLoaded(items)))
+      let reply : @protocol.SkillsCatalogReply? = @interop.bridge_reply(
+        raw_reply,
+      )
+      match reply {
+        Some(reply) =>
+          scheduler.add(
+            dispatch(
+              SkillsCatalogLoaded(@transcript.skills_catalog_from_reply(reply)),
+            ),
+          )
         None =>
           scheduler.add(
             dispatch(SkillsCatalogFailed("malformed skill catalog")),
@@ -35,10 +40,8 @@ fn fetch_skills_catalog(dispatch : @cmd.Emit[Msg]) -> @cmd.Cmd {
 fn fetch_installed_skills(dispatch : @cmd.Emit[Msg]) -> @cmd.Cmd {
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
-      let reply = @interop.bridge_request(
-        "skills_installed",
-        @js.Object::new().to_value(),
-      ) catch {
+      let payload = @protocol.EmptyPayload::{  }
+      let raw_reply = @interop.bridge_request("skills_installed", payload) catch {
         error => {
           scheduler.add(
             dispatch(SkillsNotice(@interop.bridge_error_text(error))),
@@ -46,11 +49,18 @@ fn fetch_installed_skills(dispatch : @cmd.Emit[Msg]) -> @cmd.Cmd {
           return
         }
       }
-      match
-        @transcript.decode_installed_skills_reply(
-          @interop.reply_json_text(reply),
-        ) {
-        Some(items) => scheduler.add(dispatch(InstalledSkillsLoaded(items)))
+      let reply : @protocol.InstalledSkillsReply? = @interop.bridge_reply(
+        raw_reply,
+      )
+      match reply {
+        Some(reply) =>
+          scheduler.add(
+            dispatch(
+              InstalledSkillsLoaded(
+                @transcript.installed_skills_from_reply(reply),
+              ),
+            ),
+          )
         None =>
           scheduler.add(
             dispatch(SkillsNotice("malformed installed-skill list")),
@@ -70,16 +80,16 @@ fn install_skill(
   let key = @transcript.market_source_label(item)
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
-      let payload = @js.Object::new()
-      payload["module_name"] = item.module_name
-      payload["version"] = item.version
-      if !item.package_path.is_empty() {
-        payload["package_path"] = item.package_path
+      let payload : @protocol.InstallSkillPayload = {
+        module_name: item.module_name,
+        version: item.version,
+        package_path: if item.package_path.is_empty() {
+          None
+        } else {
+          Some(item.package_path)
+        },
       }
-      let _ : @js.Value = @interop.bridge_request(
-        "skill_install",
-        payload.to_value(),
-      ) catch {
+      let _ : @js.Value = @interop.bridge_request("skill_install", payload) catch {
         error => {
           scheduler.add(
             dispatch(
@@ -100,12 +110,8 @@ fn install_skill(
 fn uninstall_skill(dispatch : @cmd.Emit[Msg], id : String) -> @cmd.Cmd {
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
-      let payload = @js.Object::new()
-      payload["id"] = id
-      let _ : @js.Value = @interop.bridge_request(
-        "skill_uninstall",
-        payload.to_value(),
-      ) catch {
+      let payload : @protocol.UninstallSkillPayload = { id, }
+      let _ : @js.Value = @interop.bridge_request("skill_uninstall", payload) catch {
         error => {
           scheduler.add(
             dispatch(

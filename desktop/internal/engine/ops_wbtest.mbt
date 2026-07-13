@@ -35,3 +35,25 @@ fn restore_openseek_dir(previous : String?) -> Unit {
     @sys.unset_env_var("OPENSEEK_DIR")
   }
 }
+
+///|
+async test "compaction rejects an empty session before addressing a slot" {
+  let manager = new_engine_manager("unused")
+  let payload : @protocol.CompactPayload = {
+    session: "",
+    api_key: None,
+    api_url: None,
+    model: None,
+    max_steps: None,
+    session_root: None,
+    workspace: None,
+    wsl: None,
+  }
+  let message = try compact_run(manager, payload) catch {
+    EngineError(message) => message
+    _ => fail("expected EngineError")
+  } noraise {
+    _ => ""
+  }
+  assert_eq(message, "session id must not be empty")
+}

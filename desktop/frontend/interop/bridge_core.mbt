@@ -17,13 +17,24 @@ pub fn openseek_api() -> @js.Value? {
 }
 
 ///|
-/// Call one engine-host op and wait for its reply. Raises when the bridge
-/// is missing, the call throws, or the op rejects.
-pub async fn bridge_request(op : String, payload : @js.Value) -> @js.Value {
+/// Call one engine-host op with a typed payload and wait for its raw reply.
+/// Raises when encoding fails, the bridge is missing, the call throws, or the
+/// op rejects. Reply decoding stays separate so each caller can preserve its
+/// feature-specific malformed-reply fallback.
+pub async fn[P : ToJson] bridge_request(op : String, payload : P) -> @js.Value {
   guard openseek_api() is Some(api) && js_prop(api, op) is Some(_) else {
     raise BridgeError("OpenSeek bridge unavailable")
   }
-  js_method_promise(api, op, payload).wait()
+  js_method_promise(api, op, @js.Value::from_json(payload.to_json())).wait()
+}
+
+///|
+/// Decode one successful op reply into its shared response type. Conversion
+/// failures are `None`, distinct from a rejected bridge request.
+pub fn[R : FromJson] bridge_reply(reply : @js.Value) -> R? {
+  let json = reply.to_json() catch { _ => return None }
+  let decoded : R = @json.from_json(json) catch { _ => return None }
+  Some(decoded)
 }
 
 ///|
@@ -41,40 +52,5 @@ pub fn bridge_error_text(error : Error) -> String {
         value.to_string()
       }
     _ => "\{error}"
-  }
-}
-
-///|
-/// The op reply as JSON text for the reply decoders. A reply of
-/// `undefined`/`null` (an op that returned nothing) reads as the empty
-/// object; an unserializable reply reads as malformed input.
-pub fn reply_json_text(reply : @js.Value) -> String {
-  if reply.is_undefined() || reply.is_null() {
-    return "{}"
-  }
-  reply.to_json_string() catch {
-    _ => ""
-  }
-}
-
-///|
-/// Set `payload[key]` to the trimmed `value`, omitting it entirely when
-/// blank — the host documents that a present field always carries
-/// non-blank text.
-pub fn set_trimmed(payload : @js.Object, key : String, value : String) -> Unit {
-  let text = value.trim().to_owned()
-  if !text.is_empty() {
-    payload[key] = text
-  }
-}
-
-///|
-/// Attach the workspace hint to an op payload, when the conversation has one.
-pub fn set_workspace(
-  payload : @js.Object,
-  workspace : @pathx.Absolute?,
-) -> Unit {
-  if workspace is Some(workspace) {
-    set_trimmed(payload, "workspace", workspace.0)
   }
 }

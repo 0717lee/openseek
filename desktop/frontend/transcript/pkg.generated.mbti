@@ -1,16 +1,16 @@
 // Generated using `moon info`, DON'T EDIT IT
 package "openseek_desktop/frontend/transcript"
 
+import {
+  "openseek_desktop/internal/protocol",
+}
+
 // Values
-pub fn decode_apps_reply(String) -> Array[LauncherAppItem]?
+pub fn apps_from_reply(@protocol.ListAppsReply) -> Array[LauncherAppItem]
 
 pub fn decode_engine_event(Map[String, Json]) -> EngineEvent?
 
-pub fn decode_installed_skills_reply(String) -> Array[InstalledSkillItem]?
-
-pub fn decode_sessions_reply(String) -> Array[SessionListItem]?
-
-pub fn decode_skills_catalog_reply(String) -> Array[MarketSkillItem]?
+pub fn installed_skills_from_reply(@protocol.InstalledSkillsReply) -> Array[InstalledSkillItem]
 
 pub fn market_source_label(MarketSkillItem) -> String
 
@@ -18,7 +18,11 @@ pub fn parse_runtime_update(String) -> RuntimeUpdateView
 
 pub fn runtime_update_title(RuntimeUpdateView) -> String
 
-pub fn transcript_from_session_json(String) -> Array[TranscriptItem]?
+pub fn sessions_from_reply(@protocol.SessionsReply) -> Array[SessionListItem]
+
+pub fn skills_catalog_from_reply(@protocol.SkillsCatalogReply) -> Array[MarketSkillItem]
+
+pub fn transcript_from_session_json(Json) -> Array[TranscriptItem]?
 
 // Errors
 

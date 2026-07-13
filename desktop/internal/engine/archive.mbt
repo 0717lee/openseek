@@ -23,14 +23,16 @@ fn archived_session_root(root : @path.Path) -> @path.Path {
 ///|
 /// The archived conversations, one group per session store — the same reply
 /// shape as `list_sessions`, listing each store's `archived` twin instead.
-pub async fn archived_sessions(manager : EngineManager) -> SessionsReply {
+pub async fn archived_sessions(
+  manager : EngineManager,
+) -> @protocol.SessionsReply {
   migrate_legacy_archive(manager)
   guard resolved_session_root() is Some(root) else {
     raise EngineError(
       "cannot determine a session root; set OPENSEEK_SESSION_ROOT",
     )
   }
-  let groups : Array[SessionGroup] = [
+  let groups : Array[@protocol.SessionGroup] = [
     session_group(manager, "", archived_session_root(root)),
   ]
   for path in registered_workspaces() {
@@ -55,7 +57,7 @@ pub async fn archived_sessions(manager : EngineManager) -> SessionsReply {
 pub async fn archive_session(
   manager : EngineManager,
   session : String,
-) -> SessionsReply {
+) -> @protocol.SessionsReply {
   let session = session.trim().to_owned()
   guard !session.is_empty() && safe_workspace_id(session) else {
     raise EngineError("invalid session id")
@@ -117,7 +119,7 @@ pub async fn archive_session(
 pub async fn unarchive_session(
   manager : EngineManager,
   session : String,
-) -> SessionsReply {
+) -> @protocol.SessionsReply {
   let session = session.trim().to_owned()
   guard !session.is_empty() && safe_workspace_id(session) else {
     raise EngineError("invalid session id")

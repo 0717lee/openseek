@@ -28,7 +28,7 @@ pub struct MarketSkill {
   description : String
   author : String
   repository : String
-} derive(ToJson)
+}
 
 ///|
 /// GET `url`, returning the status code and body. Transport failures (DNS,

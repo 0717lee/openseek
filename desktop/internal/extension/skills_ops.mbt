@@ -5,16 +5,28 @@
 // conversations keep the prompt they started with.
 
 ///|
-async fn skills_catalog_op() -> SkillsCatalogReply {
-  let skills = @skillmarket.fetch_catalog() catch {
+async fn skills_catalog_op() -> @protocol.SkillsCatalogReply {
+  let catalog = @skillmarket.fetch_catalog() catch {
     @skillmarket.SkillMarketError(message) => raise HostError(message)
     error => raise error
   }
-  { skills, }
+  {
+    skills: catalog.map(skill => {
+      name: skill.name,
+      module_name: skill.module_name,
+      package_path: skill.package_path,
+      version: skill.version,
+      description: skill.description,
+      author: skill.author,
+      repository: skill.repository,
+    }),
+  }
 }
 
 ///|
-async fn install_skill_op(payload : InstallSkillPayload) -> InstallSkillReply {
+async fn install_skill_op(
+  payload : @protocol.InstallSkillPayload,
+) -> @protocol.InstallSkillReply {
   let installed = @skillmarket.install_skill(
     module_name=payload.module_name,
     version=payload.version,
@@ -23,22 +35,36 @@ async fn install_skill_op(payload : InstallSkillPayload) -> InstallSkillReply {
     @skillmarket.SkillMarketError(message) => raise HostError(message)
     error => raise error
   }
-  { installed, }
+  {
+    installed: {
+      id: installed.id,
+      name: installed.name,
+      description: installed.description,
+      source: installed.source,
+    },
+  }
 }
 
 ///|
-async fn installed_skills_op() -> InstalledSkillsReply {
-  let skills = @skillmarket.installed_skills() catch {
+async fn installed_skills_op() -> @protocol.InstalledSkillsReply {
+  let installed = @skillmarket.installed_skills() catch {
     @skillmarket.SkillMarketError(message) => raise HostError(message)
     error => raise error
   }
-  { skills, }
+  {
+    skills: installed.map(skill => {
+      id: skill.id,
+      name: skill.name,
+      description: skill.description,
+      source: skill.source,
+    }),
+  }
 }
 
 ///|
 async fn uninstall_skill_op(
-  payload : UninstallSkillPayload,
-) -> UninstallSkillReply {
+  payload : @protocol.UninstallSkillPayload,
+) -> @protocol.UninstallSkillReply {
   @skillmarket.uninstall_skill(payload.id) catch {
     @skillmarket.SkillMarketError(message) => raise HostError(message)
     error => raise error

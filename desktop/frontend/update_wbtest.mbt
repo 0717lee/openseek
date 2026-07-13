@@ -1951,38 +1951,24 @@ test "switching the update channel forgets the previous answer" {
 }
 
 ///|
-test "check_update replies decode by kind" {
+test "check_update replies map by kind" {
+  assert_true(update_check_from_reply(@protocol.UpToDate) is CheckUpToDate)
   assert_true(
-    decode_update_check("{\"kind\":\"up_to_date\"}") is Some(CheckUpToDate),
-  )
-  assert_true(
-    decode_update_check(
-      "{\"kind\":\"available\",\"version\":\"0.2.0\",\"installable\":true}",
+    update_check_from_reply(
+      @protocol.Available(version="0.2.0", installable=true),
     )
-    is Some(CheckFound(version="0.2.0", installable=true)),
-  )
-  // The host always writes `installable` on an `available` reply; one
-  // without it is malformed rather than "not installable".
-  assert_true(
-    decode_update_check("{\"kind\":\"available\",\"version\":\"0.2.0\"}")
-    is None,
+    is CheckFound(version="0.2.0", installable=true),
   )
   assert_true(
-    decode_update_check("{\"kind\":\"unreachable\",\"reason\":\"offline\"}")
-    is Some(CheckUnreachable(reason="offline")),
+    update_check_from_reply(@protocol.Unreachable(reason="offline"))
+    is CheckUnreachable(reason="offline"),
   )
   assert_true(
-    decode_update_check("{\"kind\":\"malformed\",\"reason\":\"not json\"}")
-    is Some(CheckMalformed(reason="not json")),
+    update_check_from_reply(@protocol.Malformed(reason="not json"))
+    is CheckMalformed(reason="not json"),
   )
   assert_true(
-    decode_update_check(
-      "{\"kind\":\"broken\",\"version\":\"0.2.0\",\"reason\":\"bad url\"}",
-    )
-    is Some(CheckBroken(version="0.2.0", reason="bad url")),
+    update_check_from_reply(@protocol.Broken(version="0.2.0", reason="bad url"))
+    is CheckBroken(version="0.2.0", reason="bad url"),
   )
-  // Unknown kinds and structurally unusable replies are indecipherable.
-  assert_true(decode_update_check("{\"kind\":\"available\"}") is None)
-  assert_true(decode_update_check("{\"kind\":\"surprise\"}") is None)
-  assert_true(decode_update_check("garbage") is None)
 }

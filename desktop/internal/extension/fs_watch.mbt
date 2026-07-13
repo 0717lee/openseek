@@ -25,7 +25,7 @@ fn new_watch_state() -> WatchState {
 /// schedule.
 async fn watch_workspace_op(
   watches : WatchState,
-  payload : WatchWorkspacePayload,
+  payload : @protocol.WatchWorkspacePayload,
 ) -> Unit {
   if payload.session.is_empty() {
     watches.requests.put("")
@@ -69,7 +69,7 @@ fn ignored_watch_path(path : String) -> Bool {
 /// quiet / 200ms max delay), so a build storm emits a trickle, not a flood.
 async fn watch_root(
   root : String,
-  emit : async (FsChangedPayload) -> Unit,
+  emit : async (@protocol.FsChangedPayload) -> Unit,
 ) -> Unit {
   let watcher = @fs.Watcher::Watcher(root, ignored_paths=ignored_watch_path)
   defer watcher.close()
@@ -92,7 +92,7 @@ async fn watch_root(
 /// the connection.
 async fn run_watch_pump(
   watches : WatchState,
-  emit : async (FsChangedPayload) -> Unit,
+  emit : async (@protocol.FsChangedPayload) -> Unit,
 ) -> Unit {
   let mut root = watches.requests.get()
   for ;; {

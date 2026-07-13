@@ -1,6 +1,7 @@
 import {
   "moonbitlang/core/json",
   "openseek_desktop/internal/jsonx",
+  "openseek_desktop/internal/protocol",
 }
 
 supported_targets = "js"

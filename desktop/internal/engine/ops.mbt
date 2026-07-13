@@ -14,8 +14,8 @@
 pub async fn start_run(
   sink : EventSink,
   manager : EngineManager,
-  payload : StartRequest,
-) -> StartReply {
+  payload : @protocol.StartPayload,
+) -> @protocol.StartReply {
   let sessions = manager.serving()
   let config = run_config(payload, manager.engine)
   let key = session_key(config)
@@ -126,8 +126,8 @@ pub async fn start_run(
 /// to cancel.
 pub async fn cancel_run(
   manager : EngineManager,
-  payload : CancelRequest,
-) -> CancelReply {
+  payload : @protocol.CancelPayload,
+) -> @protocol.CancelReply {
   guard open_run_engine(manager, run_id?=payload.run_id) is Some(live) else {
     return { cancelled: false, run_id: None }
   }
@@ -184,8 +184,14 @@ async fn request_spawn(manager : EngineManager, config : RunConfig) -> Unit {
 /// the command reached a live engine.
 pub async fn compact_run(
   manager : EngineManager,
-  payload : CompactRequest,
-) -> CompactReply {
+  payload : @protocol.CompactPayload,
+) -> @protocol.CompactReply {
+  // The typed frontend cannot omit this required field, so a blank composer
+  // value reaches the host as "". Reject it before it can address the
+  // session-less engine slot.
+  guard !payload.session.is_empty() else {
+    raise EngineError("session id must not be empty")
+  }
   let sessions = manager.serving()
   let slot = slot_for(sessions, payload.session)
   // Claim before anything else — even with a live engine. A start between
@@ -258,8 +264,8 @@ pub async fn compact_run(
 /// emitting any settling event, which would leave a phantom acknowledgment.
 pub async fn steer_run(
   manager : EngineManager,
-  payload : SteerRequest,
-) -> SteerReply {
+  payload : @protocol.SteerPayload,
+) -> @protocol.SteerReply {
   guard !payload.text.trim().is_empty() else {
     return { steered: false, run_id: None }
   }
@@ -322,13 +328,15 @@ async fn engine_stdout(manager : EngineManager, args : Array[String]) -> String 
 /// first (scratch conversations), then each registered workspace's in-project
 /// store, in registration order. A group whose listing fails reports the
 /// failure in its `error` field rather than failing the whole reply.
-pub async fn list_sessions(manager : EngineManager) -> SessionsReply {
+pub async fn list_sessions(manager : EngineManager) -> @protocol.SessionsReply {
   guard resolved_session_root() is Some(root) else {
     raise EngineError(
       "cannot determine a session root; set OPENSEEK_SESSION_ROOT",
     )
   }
-  let groups : Array[SessionGroup] = [session_group(manager, "", root)]
+  let groups : Array[@protocol.SessionGroup] = [
+    session_group(manager, "", root),
+  ]
   for path in registered_workspaces() {
     let workspace : @path.Path = Path(path)
     groups.push(session_group(manager, path, workspace_session_root(workspace)))
@@ -341,14 +349,14 @@ async fn session_group(
   manager : EngineManager,
   workspace : String,
   root : @path.Path,
-) -> SessionGroup {
+) -> @protocol.SessionGroup {
   let name = if workspace.is_empty() {
     ""
   } else {
     (workspace : @path.Path).basename().to_owned()
   }
   let root = root.to_string()
-  fn failed(error : String) -> SessionGroup {
+  fn failed(error : String) -> @protocol.SessionGroup {
     { workspace, name, session_root: root, sessions: Json::array([]), error }
   }
 
@@ -368,8 +376,8 @@ async fn session_group(
 ///|
 pub async fn load_session(
   manager : EngineManager,
-  payload : LoadSessionRequest,
-) -> LoadSessionReply {
+  payload : @protocol.LoadSessionPayload,
+) -> @protocol.LoadSessionReply {
   let session = payload.session.trim().to_owned()
   guard !session.is_empty() else {
     raise EngineError("session id must not be empty")
@@ -405,16 +413,20 @@ pub async fn load_session(
 }
 
 ///|
-pub async fn list_workspaces() -> WorkspacesReply {
+pub async fn list_workspaces() -> @protocol.WorkspacesReply {
   { workspaces: registered_workspaces() }
 }
 
 ///|
-pub async fn attach_workspace(path : String) -> WorkspacesReply {
-  { workspaces: add_workspace(path) }
+pub async fn attach_workspace(
+  payload : @protocol.WorkspacePayload,
+) -> @protocol.WorkspacesReply {
+  { workspaces: add_workspace(payload.path) }
 }
 
 ///|
-pub async fn detach_workspace(path : String) -> WorkspacesReply {
-  { workspaces: remove_workspace(path) }
+pub async fn detach_workspace(
+  payload : @protocol.WorkspacePayload,
+) -> @protocol.WorkspacesReply {
+  { workspaces: remove_workspace(payload.path) }
 }

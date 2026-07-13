@@ -12,20 +12,17 @@ fn fetch_archived(dispatch : @cmd.Emit[Msg]) -> @cmd.Cmd {
     @js.async_run(() => {
       // A host without the op (or without a session store) just reads as an
       // empty Archived group.
-      let reply = @interop.bridge_request(
-        "archived_sessions",
-        @js.Object::new().to_value(),
-      ) catch {
+      let payload = @protocol.EmptyPayload::{  }
+      let raw_reply = @interop.bridge_request("archived_sessions", payload) catch {
         _ => return
       }
-      scheduler.add(
-        dispatch(
-          ArchivedLoaded(
-            @transcript.decode_sessions_reply(@interop.reply_json_text(reply)).unwrap_or([],
-            ),
-          ),
-        ),
-      )
+      let reply : @protocol.SessionsReply? = @interop.bridge_reply(raw_reply)
+      let items = if reply is Some(reply) {
+        @transcript.sessions_from_reply(reply)
+      } else {
+        []
+      }
+      scheduler.add(dispatch(ArchivedLoaded(items)))
     })
   })
 }
@@ -48,9 +45,8 @@ fn archive_action(
 ) -> @cmd.Cmd {
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
-      let payload = @js.Object::new()
-      payload["session"] = session
-      let reply = @interop.bridge_request(op, payload.to_value()) catch {
+      let payload : @protocol.ArchiveSessionPayload = { session, }
+      let raw_reply = @interop.bridge_request(op, payload) catch {
         error => {
           scheduler.add(
             dispatch(ArchiveFailed(@interop.bridge_error_text(error))),
@@ -58,20 +54,17 @@ fn archive_action(
           return
         }
       }
-      scheduler.add(
-        dispatch(
-          ArchivedLoaded(
-            @transcript.decode_sessions_reply(@interop.reply_json_text(reply)).unwrap_or([],
-            ),
-          ),
-        ),
-      )
+      let reply : @protocol.SessionsReply? = @interop.bridge_reply(raw_reply)
+      let items = if reply is Some(reply) {
+        @transcript.sessions_from_reply(reply)
+      } else {
+        []
+      }
+      scheduler.add(dispatch(ArchivedLoaded(items)))
       // The record moved between the live and archived stores; the sidebar's
       // live list is stale until re-fetched.
-      let sessions = @interop.bridge_request(
-        "list_sessions",
-        @js.Object::new().to_value(),
-      ) catch {
+      let empty = @protocol.EmptyPayload::{  }
+      let raw_sessions = @interop.bridge_request("list_sessions", empty) catch {
         error => {
           scheduler.add(
             dispatch(SessionsFailed(@interop.bridge_error_text(error))),
@@ -79,9 +72,14 @@ fn archive_action(
           return
         }
       }
-      match
-        @transcript.decode_sessions_reply(@interop.reply_json_text(sessions)) {
-        Some(items) => scheduler.add(dispatch(SessionsLoaded(items)))
+      let sessions : @protocol.SessionsReply? = @interop.bridge_reply(
+        raw_sessions,
+      )
+      match sessions {
+        Some(reply) =>
+          scheduler.add(
+            dispatch(SessionsLoaded(@transcript.sessions_from_reply(reply))),
+          )
         None =>
           scheduler.add(dispatch(SessionsFailed("malformed session list")))
       }

@@ -82,7 +82,9 @@ impl @language.HoverProvider for LspHoverProvider with fn provide_hover(
   ) catch {
     _ => return None
   }
-  decode_hover(@interop.reply_json_text(reply), model)
+  let reply : @protocol.LspHoverReply? = @interop.bridge_reply(reply)
+  guard reply is Some(reply) else { return None }
+  decode_hover(reply, model)
 }
 
 ///|
@@ -103,28 +105,24 @@ async fn request_hover(
   line~ : Int,
   character~ : Int,
 ) -> @js.Value {
-  let payload = @js.Object::new()
-  payload["path"] = path.0
-  payload["line"] = line
-  payload["character"] = character
-  @interop.bridge_request("hover", payload.to_value())
+  let payload : @protocol.LspHoverPayload = { path: path.0, line, character }
+  @interop.bridge_request("hover", payload)
 }
 
 ///|
 /// Decode the host's flat hover reply into a viewer `Hover`. `None` when the
 /// reply has no text. The range comes back as LSP line/character positions,
 /// which the model's snapshot converts to the document offsets `Range` uses.
-fn decode_hover(text : String, model : @model.TextModel) -> @language.Hover? {
-  let json = @json.parse(text) catch { _ => return None }
-  guard json is Object(reply) else { return None }
+fn decode_hover(
+  reply : @protocol.LspHoverReply,
+  model : @model.TextModel,
+) -> @language.Hover? {
   // `value` is always on the wire; the host says "no hover here" with "".
-  guard @jsonx.json_text(reply, "value") is Some(value) && !value.is_empty() else {
-    return None
-  }
-  let content = if reply.get("markdown") is Some(True) {
-    @language.HoverContent::Markdown(value)
+  guard !reply.value.is_empty() else { return None }
+  let content = if reply.markdown {
+    @language.HoverContent::Markdown(reply.value)
   } else {
-    @language.HoverContent::PlainText(value)
+    @language.HoverContent::PlainText(reply.value)
   }
   Some(@language.Hover::{
     range: hover_range(reply, model),
@@ -137,22 +135,21 @@ fn decode_hover(text : String, model : @model.TextModel) -> @language.Hover? {
 /// start when the reply carries none (`has_range` unset) — or when a
 /// position field is malformed, which reads the same way.
 fn hover_range(
-  reply : Map[String, Json],
+  reply : @protocol.LspHoverReply,
   model : @model.TextModel,
 ) -> @common.Range {
   let snapshot = model.snapshot()
-  guard reply.get("has_range") is Some(True) &&
-    @jsonx.json_int(reply, "start_line") is Some(start_line) &&
-    @jsonx.json_int(reply, "start_character") is Some(start_character) &&
-    @jsonx.json_int(reply, "end_line") is Some(end_line) &&
-    @jsonx.json_int(reply, "end_character") is Some(end_character) else {
+  guard reply.has_range else {
     let origin = snapshot.get_position_at(0)
     return @common.Range::from_positions(origin, origin)
   }
   // The reply carries 0-based LSP positions; shift to the viewer's 1-based
   // line/column, then round-trip through offsets so the range stays clamped.
-  let start = snapshot.get_offset_at(start_line + 1, start_character + 1)
-  let end = snapshot.get_offset_at(end_line + 1, end_character + 1)
+  let start = snapshot.get_offset_at(
+    reply.start_line + 1,
+    reply.start_character + 1,
+  )
+  let end = snapshot.get_offset_at(reply.end_line + 1, reply.end_character + 1)
   @common.Range::from_positions(
     snapshot.get_position_at(start),
     snapshot.get_position_at(end),
@@ -172,8 +169,11 @@ fn request_diagnostics(
 ) -> @cmd.Cmd {
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
-      let reply = request_lsp_open(path=absolute) catch { _ => return }
-      let diagnostics = reply_diagnostics(@interop.reply_json_text(reply))
+      let raw_reply = request_lsp_open(path=absolute) catch { _ => return }
+      let reply : @protocol.LspDiagnosticsReply? = @interop.bridge_reply(
+        raw_reply,
+      )
+      let diagnostics = reply_diagnostics(reply)
       scheduler.add(dispatch(DiagnosticsPublished(absolute~, diagnostics~)))
     })
   })
@@ -182,20 +182,18 @@ fn request_diagnostics(
 ///|
 /// Call the host `lsp_open` op for the absolute `path`.
 async fn request_lsp_open(path~ : @pathx.Absolute) -> @js.Value {
-  let payload = @js.Object::new()
-  payload["path"] = path.0
-  @interop.bridge_request("lsp_open", payload.to_value())
+  @interop.bridge_request("lsp_open", @protocol.LspOpenPayload::{ path: path.0 })
 }
 
 ///|
 /// The `diagnostics` array from an `lsp_open` reply; an empty array when the
 /// reply is malformed or the server has none.
-fn reply_diagnostics(text : String) -> Json {
-  let json = @json.parse(text) catch { _ => return [] }
-  guard json is Object(reply) && reply.get("diagnostics") is Some(diagnostics) else {
-    return []
+fn reply_diagnostics(reply : @protocol.LspDiagnosticsReply?) -> Json {
+  if reply is Some(reply) {
+    reply.diagnostics
+  } else {
+    []
   }
-  diagnostics
 }
 
 ///|

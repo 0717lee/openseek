@@ -25,7 +25,7 @@ pub struct InstalledSkill {
   name : String
   description : String
   source : String
-} derive(ToJson)
+}
 
 pub struct MarketSkill {
   name : String
@@ -35,7 +35,7 @@ pub struct MarketSkill {
   description : String
   author : String
   repository : String
-} derive(ToJson)
+}
 
 // Type aliases
 
