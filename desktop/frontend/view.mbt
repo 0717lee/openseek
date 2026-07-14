@@ -1628,13 +1628,14 @@ fn settings_page(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
     )
   }
   // The OpenSeek proxy ignores keys, so the key field only appears for the
-  // endpoints that can use one. The saved key is never echoed back into the
-  // field; saving a new one overwrites it.
+  // endpoints that can use one. The key lives on the host and is never
+  // echoed back — the page only knows one is saved; saving a new one
+  // overwrites it.
   if !(model.api_provider is Openseek) {
-    let saved_key = if model.api_provider is Custom {
-      model.custom_api_key
+    let key_saved = if model.api_provider is Custom {
+      model.custom_key_saved
     } else {
-      model.api_key
+      model.deepseek_key_saved
     }
     api_rows.push(
       setting_row(
@@ -1647,10 +1648,10 @@ fn settings_page(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
           @html.input(
             input_type=@html.InputType::Password,
             value=model.setup_api_key,
-            placeholder=if saved_key.trim().is_empty() {
-              "sk-..."
-            } else {
+            placeholder=if key_saved {
               "saved — enter to replace"
+            } else {
+              "sk-..."
             },
             on_input=dispatch.map(value => SetupApiKeyChanged(value)),
           ),
@@ -1664,7 +1665,7 @@ fn settings_page(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
             "Save API key",
           ),
         ],
-        desc="Stored on this machine and sent only with API requests.",
+        desc="Stored on the OpenSeek host machine and sent only with API requests.",
         stack=true,
       ),
     )
@@ -1703,8 +1704,10 @@ fn settings_page(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
       ]),
     )
   }
-  // WSL is Windows-only; elsewhere the section would be dead weight.
-  if model.is_windows {
+  // WSL exists only on a Windows host (the host's capability from
+  // `host.meta`, not this page's platform); elsewhere the section would be
+  // dead weight.
+  if model.host_wsl {
     let engine_rows : Array[@html.Html] = [
       setting_row(
         "Engine environment",
