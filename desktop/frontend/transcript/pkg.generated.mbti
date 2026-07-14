@@ -95,6 +95,7 @@ pub(all) struct SessionListItem {
 pub struct SessionLoadView {
   items : Array[TranscriptItem]
   watermark : Int
+  event_boundaries : Array[(Int, Bool, Int)]
 }
 
 pub(all) struct TranscriptItem {
@@ -105,4 +106,3 @@ pub(all) struct TranscriptItem {
 // Type aliases
 
 // Traits
-
