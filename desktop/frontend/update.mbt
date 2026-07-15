@@ -17,9 +17,9 @@ fn session_snapshot_command(
 ) -> @cmd.Cmd {
   let workspace = model.session_workspace(session)
   if activate_on_success {
-    open_session(dispatch, session, workspace~, generation~)
+    open_session(dispatch, model.focused, session, workspace~, generation~)
   } else {
-    refresh_session(dispatch, session, workspace~, generation~)
+    refresh_session(dispatch, model.focused, session, workspace~, generation~)
   }
 }
 
@@ -33,7 +33,12 @@ fn request_sessions_refresh(
 ) -> (@cmd.Cmd, Model) {
   let request_generation = model.sessions_request_generation + 1
   (
-    fetch_sessions(dispatch, model.connection_generation, request_generation),
+    fetch_sessions(
+      dispatch,
+      model.focused,
+      model.connection_generation,
+      request_generation,
+    ),
     { ..model, sessions_request_generation: request_generation },
   )
 }
@@ -48,7 +53,12 @@ fn request_archived_refresh(
 ) -> (@cmd.Cmd, Model) {
   let request_generation = model.archived_request_generation + 1
   (
-    fetch_archived(dispatch, model.connection_generation, request_generation),
+    fetch_archived(
+      dispatch,
+      model.focused,
+      model.connection_generation,
+      request_generation,
+    ),
     { ..model, archived_request_generation: request_generation },
   )
 }
@@ -182,7 +192,7 @@ fn apply_session_snapshot(
     commands.push(scroll_transcript_after_render())
     // The host derives the resumed workspace from the session id, so the
     // branch probe sends no cwd.
-    commands.push(fetch_branch(dispatch, session, None))
+    commands.push(fetch_branch(dispatch, model.focused, session, None))
   } else {
     commands.push(scroll_if_active(next, session))
   }
@@ -399,6 +409,7 @@ fn symbol_fetch_cmd(
   }
   read_workspace_symbols(
     dispatch,
+    model.focused,
     session,
     query,
     workspace=workspace_root(model.session_workspace(session)),
@@ -466,6 +477,7 @@ fn run_slash_command(
         (
           compact_openseek(
             dispatch,
+            model.focused,
             session=conv.session_id,
             model=model.selected_model,
             max_steps=model.max_steps,
@@ -609,6 +621,7 @@ fn apply_engine_event(
 fn file_ctx(model : Model) -> @fileeditor.Ctx {
   let conv = model.active()
   {
+    channel: model.focused,
     session: conv.session_id,
     workspace: conv.workspace,
     dark_mode: model.dark_mode,
@@ -716,6 +729,7 @@ fn push_wsl_settings(
   (
     push_host_settings(
       dispatch,
+      model.focused,
       wsl_settings_patch(
         enabled=model.wsl_enabled,
         distro=model.wsl_distro,
@@ -743,7 +757,7 @@ fn update_msg(
       } else {
         (
           @cmd.batch([
-            install_bridge(dispatch),
+            install_bridge(dispatch, model.focused),
             load_saved_settings(dispatch),
             watch_transcript_scroll(dispatch),
             watch_color_scheme(dispatch),
@@ -779,23 +793,32 @@ fn update_msg(
       // load synchronously at Init, so they are in by bridge time.
       let commands = [
         fetch_sessions(
-          dispatch, connection_generation, sessions_request_generation,
+          dispatch,
+          model.focused,
+          connection_generation,
+          sessions_request_generation,
         ),
         // In-flight runs, so a page that joined (or reconnected) mid-run
         // learns each live run's identity — the resync half of the
         // protocol's reconnect story (docs/remote-protocol.md).
-        fetch_runs(dispatch, run_frontier, connection_generation),
-        fetch_host_meta(dispatch),
-        fetch_host_settings(dispatch, connection_generation),
+        fetch_runs(dispatch, model.focused, run_frontier, connection_generation),
+        fetch_host_meta(dispatch, model.focused),
+        fetch_host_settings(dispatch, model.focused, connection_generation),
         // Legacy client-stored engine settings: the desktop migrates them
         // up to the host, a browser purges them (see `LegacySettingsRead`).
         read_legacy_engine_settings(dispatch),
-        fetch_installed_skills(dispatch),
+        fetch_installed_skills(dispatch, model.focused),
         fetch_archived(
-          dispatch, connection_generation, archived_request_generation,
+          dispatch,
+          model.focused,
+          connection_generation,
+          archived_request_generation,
         ),
         fetch_workspaces(
-          dispatch, connection_generation, workspaces_request_generation,
+          dispatch,
+          model.focused,
+          connection_generation,
+          workspaces_request_generation,
         ),
       ]
       // Self-update and the relay sign-in are the desktop window's alone
@@ -995,7 +1018,11 @@ fn update_msg(
         // An authoritative get (same-revision statuses are accepted) restores
         // host truth after a definite or ambiguous write failure.
         commands.push(
-          fetch_host_settings(dispatch, model.connection_generation),
+          fetch_host_settings(
+            dispatch,
+            model.focused,
+            model.connection_generation,
+          ),
         )
       }
       (@cmd.batch(commands), notified)
@@ -1042,6 +1069,7 @@ fn update_msg(
         (
           push_host_settings(
             dispatch,
+            model.focused,
             patch,
             model.connection_generation,
             cleans_legacy=true,
@@ -1173,6 +1201,7 @@ fn update_msg(
       (
         push_host_settings(
           dispatch,
+          model.focused,
           provider_settings_patch(provider),
           model.connection_generation,
         ),
@@ -1189,6 +1218,7 @@ fn update_msg(
       (
         push_host_settings(
           dispatch,
+          model.focused,
           custom_url_settings_patch(value),
           model.connection_generation,
         ),
@@ -1472,6 +1502,7 @@ fn update_msg(
             (
               push_host_settings(
                 dispatch,
+                model.focused,
                 api_key_settings_patch(provider, api_key),
                 model.connection_generation,
               ),
@@ -1488,11 +1519,14 @@ fn update_msg(
       // failure); the installed list is cheap and refreshes on every open.
       let (catalog_cmd, skills_catalog) = match model.skills_catalog {
         CatalogIdle | CatalogFailed(_) =>
-          (fetch_skills_catalog(dispatch), CatalogLoading)
+          (fetch_skills_catalog(dispatch, model.focused), CatalogLoading)
         current => (@cmd.none, current)
       }
       (
-        @cmd.batch([catalog_cmd, fetch_installed_skills(dispatch)]),
+        @cmd.batch([
+          catalog_cmd,
+          fetch_installed_skills(dispatch, model.focused),
+        ]),
         { ..model, screen: Skills, skills_catalog, skills_notice: "" },
       )
     }
@@ -1512,7 +1546,7 @@ fn update_msg(
         let skills_busy = model.skills_busy.copy()
         skills_busy.push(key)
         (
-          install_skill(dispatch, item),
+          install_skill(dispatch, model.focused, item),
           { ..model, skills_busy, skills_notice: "" },
         )
       }
@@ -1524,7 +1558,7 @@ fn update_msg(
         let skills_busy = model.skills_busy.copy()
         skills_busy.push(id)
         (
-          uninstall_skill(dispatch, id),
+          uninstall_skill(dispatch, model.focused, id),
           { ..model, skills_busy, skills_notice: "" },
         )
       }
@@ -1533,7 +1567,10 @@ fn update_msg(
       if error.is_empty() {
         // The library changed; what the panel shows must come from disk,
         // not from a client-side guess.
-        (fetch_installed_skills(dispatch), { ..model, skills_busy, })
+        (
+          fetch_installed_skills(dispatch, model.focused),
+          { ..model, skills_busy, },
+        )
       } else {
         (@cmd.none, { ..model, skills_busy, skills_notice: error })
       }
@@ -1580,6 +1617,7 @@ fn update_msg(
             @cmd.batch([
               steer_openseek(
                 dispatch,
+                model.focused,
                 conv.session_id,
                 submission_id,
                 task,
@@ -1631,6 +1669,7 @@ fn update_msg(
           @cmd.batch([
             start_openseek(
               dispatch,
+              model.focused,
               task,
               submission_id,
               model.selected_model,
@@ -1703,7 +1742,7 @@ fn update_msg(
       let conv = model.active()
       if conv.run is Open(run_id~, ..) {
         (
-          cancel_openseek(dispatch, run_id),
+          cancel_openseek(dispatch, model.focused, run_id),
           model.replace_conversation({
             ..conv,
             run: Open(run_id~, stage=Cancelling),
@@ -1856,7 +1895,12 @@ fn update_msg(
     PickWorkspace => {
       let picker = opening_workspace_picker()
       (
-        browse_directory(dispatch, "", generation=picker.generation),
+        browse_directory(
+          dispatch,
+          model.focused,
+          "",
+          generation=picker.generation,
+        ),
         { ..model, workspace_picker: Some(picker) },
       )
     }
@@ -1865,7 +1909,7 @@ fn update_msg(
         Some(picker) => {
           let generation = picker.generation + 1
           (
-            browse_directory(dispatch, path, generation~),
+            browse_directory(dispatch, model.focused, path, generation~),
             {
               ..model,
               workspace_picker: Some({ ..picker, loading: true, generation }),
@@ -1929,13 +1973,14 @@ fn update_msg(
         // the field navigates (and validates) first.
         Some(picker) if !picker.path.is_empty() =>
           (
-            add_workspace(dispatch, picker.path),
+            add_workspace(dispatch, model.focused, picker.path),
             { ..model, workspace_picker: None },
           )
         _ => (@cmd.none, model)
       }
     WorkspacePickerClose => (@cmd.none, { ..model, workspace_picker: None })
-    RemoveWorkspace(path) => (remove_workspace(dispatch, path), model)
+    RemoveWorkspace(path) =>
+      (remove_workspace(dispatch, model.focused, path), model)
     WorkspaceFailed(message) =>
       model.notify_error(dispatch, "Workspace error: \{message}")
     ArchiveSession(session_id) => {
@@ -1944,6 +1989,7 @@ fn update_msg(
       (
         archive_session(
           dispatch,
+          model.focused,
           session_id,
           model.connection_generation,
           sessions_request_generation,
@@ -1958,6 +2004,7 @@ fn update_msg(
       (
         unarchive_session(
           dispatch,
+          model.focused,
           session_id,
           model.connection_generation,
           sessions_request_generation,
@@ -2345,14 +2392,17 @@ fn update_msg(
       // the directory the host derives from the session id. Absolute paths
       // open directly. No workspace containment — the agent surfaced it.
       let conv = model.active()
-      (open_file(dispatch, conv.session_id, cwd=conv.cwd, path), model)
+      (
+        open_file(dispatch, model.focused, conv.session_id, cwd=conv.cwd, path),
+        model,
+      )
     }
     ToggleLauncher => {
       let opening = !model.launcher.open
       // Probe the host the first time the menu opens (and again after a
       // failure); the result is kept for the app run.
       let cmd = if opening && !(model.launcher.apps is AppsFetched(_)) {
-        fetch_apps(dispatch)
+        fetch_apps(dispatch, model.focused)
       } else {
         @cmd.none
       }
@@ -2371,7 +2421,7 @@ fn update_msg(
     LaunchApp(app) => {
       let conv = model.active()
       (
-        launch_app(dispatch, conv.session_id, cwd=conv.cwd, app),
+        launch_app(dispatch, model.focused, conv.session_id, cwd=conv.cwd, app),
         { ..model, launcher: { ..model.launcher, open: false } },
       )
     }
@@ -2542,7 +2592,7 @@ fn update_msg(
       }
       // The run's workspace directory now exists, so the branch chip can be
       // probed (and refreshed — a rerun may follow a checkout).
-      let commands = [fetch_branch(dispatch, session, cwd)]
+      let commands = [fetch_branch(dispatch, model.focused, session, cwd)]
       if generation is Some(generation) {
         commands.push(
           session_snapshot_command(
@@ -2962,7 +3012,9 @@ fn update_msg(
         } else {
           (model.replace_conversation(next), None)
         }
-        let commands = [fetch_branch(dispatch, session, settled.cwd)]
+        let commands = [
+          fetch_branch(dispatch, model.focused, session, settled.cwd),
+        ]
         if generation is Some(generation) {
           commands.push(
             session_snapshot_command(
@@ -3027,6 +3079,7 @@ fn update_msg(
           sessions,
           fetch_runs(
             dispatch,
+            model.focused,
             model.run_snapshot_frontier(),
             model.connection_generation,
           ),
@@ -3075,6 +3128,7 @@ fn update_msg(
             sessions,
             fetch_runs(
               dispatch,
+              model.focused,
               updated.run_snapshot_frontier(),
               model.connection_generation,
             ),
@@ -3268,7 +3322,7 @@ fn update_msg(
         next = requested
         let commands = [
           sessions,
-          fetch_branch(dispatch, conv.session_id, conv.cwd),
+          fetch_branch(dispatch, model.focused, conv.session_id, conv.cwd),
         ]
         if first_finish && !exact_empty_eof && !base.session_id.is_empty() {
           match base.sync {
@@ -3366,6 +3420,7 @@ fn update_msg(
         (
           fetch_runs(
             dispatch,
+            model.focused,
             model.run_snapshot_frontier(),
             model.connection_generation,
           ),
