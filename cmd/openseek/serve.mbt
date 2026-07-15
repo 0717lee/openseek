@@ -605,17 +605,14 @@ async fn run_serve(
       @jsonl.each(@stdio.stdin, json => {
         match decode_serve_command(json) {
           Ok(command) => steps.try_put(Wire(command)) |> ignore
-          Err(message) =>
-            @xlog.error() <? { "event": "command_error", "error": message }
+          Err(message) => @emit.emit(CommandError(error=message))
         }
       }) catch {
         error if @async.is_being_cancelled() ||
           @async.is_cancellation_error(error) => raise error
         // A malformed (non-JSON) line is a controller bug: report it and
         // stop reading commands, which shuts the server down gracefully.
-        error =>
-          @xlog.error() <?
-            { "event": "command_error", "error": "command stream: \{error}" }
+        error => @emit.emit(CommandError(error="command stream: \{error}"))
       }
       steps.try_put(Shutdown) |> ignore
     }
@@ -663,7 +660,7 @@ async fn run_serve(
         error if @async.is_being_cancelled() ||
           @async.is_cancellation_error(error) => raise error
         error => {
-          @xlog.error() <? { "event": "compaction_failed", "error": "\{error}" }
+          @emit.emit(CompactionFailed(error="\{error}"))
           current
         }
       }
@@ -682,11 +679,7 @@ async fn run_serve(
           error if @async.is_being_cancelled() ||
             @async.is_cancellation_error(error) => raise error
           error => {
-            @xlog.error() <?
-              {
-                "event": "session_error",
-                "error": "failed to append \{what}: \{error}",
-              }
+            @emit.emit(SessionError(error="failed to append \{what}: \{error}"))
             return false
           }
         }
@@ -698,8 +691,7 @@ async fn run_serve(
 
     async fn append_command_context(text : String, kind : String) -> Unit {
       if append_idle_item(User(UserMessage(text)), "command context") {
-        @xlog.info() <?
-          { "event": "steer_applied", "kind": kind, "content": text }
+        @emit.emit(SteerApplied(kind~, content=text))
       }
     }
 
@@ -709,10 +701,8 @@ async fn run_serve(
     // was actually persisted.
     fn report_goal_update(content : String) -> Unit {
       match @agent_session.goal_marker(content) {
-        Some(GoalSet(text)) =>
-          @xlog.info() <? { "event": "goal_updated", "goal": text }
-        Some(GoalCleared) =>
-          @xlog.info() <? { "event": "goal_updated", "goal": (None : String?) }
+        Some(GoalSet(text)) => @emit.emit(GoalUpdated(goal=Some(text)))
+        Some(GoalCleared) => @emit.emit(GoalUpdated(goal=None))
         // Block/unblock markers change auto-continuation policy but not the
         // goal itself; they are reported by the loop's own goal_blocked /
         // goal_unblocked events, not as goal_updated.
@@ -741,7 +731,7 @@ async fn run_serve(
     // event.
     async fn append_background_notice(text : String) -> Unit {
       if append_idle_item(Runtime(RuntimeNotice(text)), "background notice") {
-        @xlog.info() <? { "event": "background_notice", "content": text }
+        @emit.emit(BackgroundNotice(content=text))
       }
     }
 
@@ -754,8 +744,7 @@ async fn run_serve(
       input : @agent_runtime.SteerInput,
     ) -> Unit {
       match input {
-        Prompt(text) =>
-          @xlog.warn() <? { "event": "steer_dropped", "content": text }
+        Prompt(text) => @emit.emit(SteerDropped(content=text))
         Command(text) => append_command_context(text, "command")
         Notice(text) =>
           match @agent_session.goal_marker(text) {
@@ -824,10 +813,9 @@ async fn run_serve(
             // event so the controller can close the run.
             if @async.is_being_cancelled() ||
               @async.is_cancellation_error(error) {
-              @xlog.warn() <?
-                { "event": "agent_aborted", "reason": "interrupted" }
+              @emit.emit(AgentAborted(reason="interrupted"))
             } else {
-              @xlog.error() <? { "event": "turn_failed", "error": "\{error}" }
+              @emit.emit(TurnFailed(error="\{error}"))
             }
             ignore(steps.try_put(TurnDone(finished=false)) catch { _ => false })
             return
@@ -846,13 +834,11 @@ async fn run_serve(
         let next = compact_and_report(current) catch {
           error if @async.is_being_cancelled() ||
             @async.is_cancellation_error(error) => {
-            @xlog.warn() <?
-              { "event": "compaction_failed", "error": "cancelled" }
+            @emit.emit(CompactionFailed(error="cancelled"))
             current
           }
           error => {
-            @xlog.error() <?
-              { "event": "compaction_failed", "error": "\{error}" }
+            @emit.emit(CompactionFailed(error="\{error}"))
             current
           }
         }
@@ -922,8 +908,7 @@ async fn run_serve(
                     // prompt steering into a prompt: the only way it arrives
                     // here is racing a turn's terminal event through the pipes.
                     // Reject it so the controller can ask for a resubmit.
-                    @xlog.warn() <?
-                      { "event": "steer_dropped", "content": text }
+                    @emit.emit(SteerDropped(content=text))
                   }
               }
             Command(text) =>
@@ -1052,8 +1037,7 @@ async fn run_serve(
               turns_remaining=goal_turns_remaining,
             ) {
             goal_turns_remaining -= 1
-            @xlog.info() <?
-              { "event": "goal_continue", "remaining": goal_turns_remaining }
+            @emit.emit(GoalContinue(remaining=goal_turns_remaining))
             active_work = Some(ActiveTurn(start_turn(GoalContinuePrompt)))
           } else if armed &&
             finished &&
@@ -1064,11 +1048,7 @@ async fn run_serve(
             // The loop ran its full budget without the goal being met:
             // disarm and tell the controller, once.
             goal_auto_target = None
-            @xlog.warn() <?
-              {
-                "event": "goal_budget_exhausted",
-                "turns": GoalAutoContinueMaxTurns,
-              }
+            @emit.emit(GoalBudgetExhausted(turns=GoalAutoContinueMaxTurns))
           }
           if active_work is None && pending.length() == 0 && shutting_down {
             break serve~

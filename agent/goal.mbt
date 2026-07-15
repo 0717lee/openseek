@@ -227,7 +227,7 @@ fn GoalCadence::observe_notice(self : GoalCadence, content : String) -> Unit {
       // this set supersedes; a new goal starts unblocked.
       self.pending_block = NoBlockTransition
       self.durably_blocked = false
-      @xlog.info() <? { "event": "goal_updated", "goal": text }
+      @emit.emit(GoalUpdated(goal=Some(text)))
     }
     Some(GoalCleared) => {
       self.goal = None
@@ -235,7 +235,7 @@ fn GoalCadence::observe_notice(self : GoalCadence, content : String) -> Unit {
       self.pending_tombstone = false
       self.pending_block = NoBlockTransition
       self.durably_blocked = false
-      @xlog.info() <? { "event": "goal_updated", "goal": (None : String?) }
+      @emit.emit(GoalUpdated(goal=None))
     }
     // A block/unblock marker landing durably (this loop's own flush, or a
     // steer observed after its append) toggles the cached durable state; the
@@ -267,7 +267,7 @@ async fn AgentLoop::flush_goal_tombstone(
       )
       self.goal_cadence.pending_block = NoBlockTransition
       self.goal_cadence.durably_blocked = true
-      @xlog.info() <? { "event": "goal_blocked", "reason": reason }
+      @emit.emit(GoalBlocked(reason~))
       next
     }
     // A continue that resumes a durably blocked goal: land the unblock marker
@@ -279,7 +279,7 @@ async fn AgentLoop::flush_goal_tombstone(
       )
       self.goal_cadence.pending_block = NoBlockTransition
       self.goal_cadence.durably_blocked = false
-      @xlog.info() <? { "event": "goal_unblocked" }
+      @emit.emit(GoalUnblocked)
       next
     }
     // A no-op unblock (the goal was not durably blocked): nothing to rescind.
@@ -297,7 +297,7 @@ async fn AgentLoop::flush_goal_tombstone(
     @agent_session.GoalClearedNotice,
   )
   self.goal_cadence.pending_tombstone = false
-  @xlog.info() <? { "event": "goal_updated", "goal": (None : String?) }
+  @emit.emit(GoalUpdated(goal=None))
   next
 }
 
@@ -364,14 +364,15 @@ async fn AgentLoop::handle_goal_tool_call(
       self.goal_cadence.record_goal_blocked(reason)
     _ => ()
   }
-  @xlog.info() <?
-    {
-      "event": "tool_result",
-      "tool_call_id": native_call.id,
-      "tool_name": tool_call.name,
-      "is_error": is_error,
-      "content": content,
-    }
+  @emit.emit(
+    ToolResult(
+      tool_call_id=native_call.id,
+      tool_name=tool_call.name,
+      is_error~,
+      content~,
+      brief=None,
+    ),
+  )
   ContinueToolBatch(session)
 }
 

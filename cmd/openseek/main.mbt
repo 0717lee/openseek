@@ -131,11 +131,9 @@ async fn run_task_command(matches : @argparse.Matches) -> Unit {
       // Fleet members own separate materialized workspaces; per-member MCP
       // connections are not wired, so say so instead of silently ignoring.
       if mcp_config_path(matches) != "" {
-        @xlog.warn() <?
-          {
-            "event": "mcp_config_ignored",
-            "reason": "fleet mode does not support MCP servers",
-          }
+        @emit.emit(
+          McpConfigIgnored(reason="fleet mode does not support MCP servers"),
+        )
       }
       run_fleet(matches, concurrency~)
       return
@@ -173,13 +171,13 @@ async fn run_task_command(matches : @argparse.Matches) -> Unit {
         // Name the recording up front so a user scanning the event stream —
         // or its OPENSEEK_LOG_FILE mirror — knows where to find this run
         // later (`sessions show`, the viz server, or resuming by id).
-        @xlog.info() <?
-          {
-            "event": "session_started",
-            "session": id.value(),
-            "session_root": session_root(matches, workspace_root~),
-            "workspace_root": workspace_root,
-          }
+        @emit.emit(
+          SessionStarted(
+            session=id.value(),
+            session_root=session_root(matches, workspace_root~),
+            workspace_root~,
+          ),
+        )
         let store = @store.SessionStore(session_root(matches, workspace_root~))
         let session = load_or_new_session(
           store,
@@ -778,7 +776,7 @@ async fn prepare_workspace_root(
   @fs.mkdir(dir)
   let root = @fs.realpath(dir)
   if log_created {
-    @xlog.info() <? { "event": "workspace_created", "dir": root }
+    @emit.emit(WorkspaceCreated(dir=root))
   }
   root
 }

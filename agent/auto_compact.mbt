@@ -123,12 +123,7 @@ async fn AgentLoop::checkpoint_at_ceiling(
   let to_sequence = session.last_sequence()
   let covered = session
   let session = self.apply_steer_inputs(session, steers)
-  @xlog.info() <?
-    {
-      "event": "auto_compaction_started",
-      "from_sequence": 1,
-      "to_sequence": to_sequence,
-    }
+  @emit.emit(AutoCompactionStarted(from_sequence=1, to_sequence~))
   let summary = @compact.generate_compaction_summary(
     client=self.summary_client,
     covered,
@@ -137,7 +132,7 @@ async fn AgentLoop::checkpoint_at_ceiling(
       if @async.is_being_cancelled() || @async.is_cancellation_error(error) {
         raise error
       }
-      @xlog.warn() <? { "event": "auto_compaction_failed", "error": "\{error}" }
+      @emit.emit(AutoCompactionFailed(error="\{error}"))
       return (session, false)
     }
   }
@@ -147,13 +142,7 @@ async fn AgentLoop::checkpoint_at_ceiling(
     to_sequence~,
   )
   let compacted = self.append(session, item)
-  @xlog.info() <?
-    {
-      "event": "auto_compaction_finished",
-      "from_sequence": 1,
-      "to_sequence": to_sequence,
-      "summary": summary,
-    }
+  @emit.emit(AutoCompactionFinished(from_sequence=1, to_sequence~, summary~))
   (compacted, true)
 }
 
@@ -220,7 +209,6 @@ async fn AgentLoop::finish_context_yield(
   // No push_finished_message: the yield status is not an assistant message
   // — the model-facing projection skips it too (the loop ends here, but the
   // buffer must never disagree with Session::chat_messages).
-  @xlog.info() <?
-    { "event": "context_yield", "to_sequence": to_sequence, "answer": answer }
+  @emit.emit(ContextYield(to_sequence~, answer~))
   session
 }

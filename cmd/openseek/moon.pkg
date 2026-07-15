@@ -14,6 +14,8 @@ import {
   "bobzhang/openseek/cmd/tui",
   "bobzhang/openseek/deepseek",
   "bobzhang/openseek/prompt",
+  "bobzhang/openseek_protocol",
+  "bobzhang/openseek_protocol/emit",
   "bobzhang/openseek/testkit/filesystem" @vfs,
   "bobzhang/openseek/internal/agentcli",
   "bobzhang/openseek/internal/cli",

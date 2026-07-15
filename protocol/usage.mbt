@@ -1,0 +1,16 @@
+///|
+/// Token counts for one model response, as the `usage` event carries them.
+///
+/// Structurally identical to `@deepseek.Usage` — same field names, same order,
+/// so the same JSON — but owned here on purpose. This type IS the wire format
+/// for the event; leaving it as the vendor's response struct meant renaming a
+/// DeepSeek field silently changed the contract every client parses, and it
+/// would tie this module to the engine's provider layer. The engine converts at
+/// the one site that reports usage.
+pub(all) struct Usage {
+  prompt_tokens : Int
+  completion_tokens : Int
+  total_tokens : Int
+  prompt_cache_hit_tokens : Int
+  prompt_cache_miss_tokens : Int
+} derive(Eq, Debug, ToJson, FromJson)

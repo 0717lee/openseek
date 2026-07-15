@@ -32,16 +32,14 @@ async fn[X] resolve_mcp_tools(
   let text = @fs.read_file(path).text() catch {
     error if @async.is_being_cancelled() => raise error
     error => {
-      @xlog.warn() <?
-        { "event": "mcp_config_unreadable", "path": path, "error": "\{error}" }
+      @emit.emit(McpConfigUnreadable(path~, error="\{error}"))
       return []
     }
   }
   let servers = @mcpconfig.decode(@json.parse(text)) catch {
     error if @async.is_being_cancelled() => raise error
     error => {
-      @xlog.warn() <?
-        { "event": "mcp_config_invalid", "path": path, "error": "\{error}" }
+      @emit.emit(McpConfigInvalid(path~, error="\{error}"))
       return []
     }
   }
@@ -52,15 +50,13 @@ async fn[X] resolve_mcp_tools(
     client_version=McpClientVersion,
     workspace_root~,
   )
-  @xlog.info() <?
-    {
-      "event": "mcp_tools_registered",
-      "servers": servers.length(),
-      "tools": tools.length(),
-      "names": [
-        for tool in tools => Json::string(tool.name)
-      ],
-    }
+  @emit.emit(
+    McpToolsRegistered(
+      servers=servers.length(),
+      tools=tools.length(),
+      names=[ for tool in tools => tool.name ],
+    ),
+  )
   tools
 }
 

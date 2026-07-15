@@ -49,8 +49,7 @@ async fn run_fleet(matches : @argparse.Matches, concurrency~ : Int) -> Unit {
       None => @fs.mkdir(run_dir, recursive=true)
     }
   }
-  @xlog.info() <?
-    { "event": "fleet_started", "runs": concurrency, "task": task }
+  @emit.emit(FleetStarted(runs=concurrency, task~))
   let outcomes : Array[AttemptOutcome?] = Array::make(concurrency, None)
   @async.with_task_group(group => {
     for i in 0..<concurrency {

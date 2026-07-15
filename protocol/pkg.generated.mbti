@@ -1,0 +1,77 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "bobzhang/openseek_protocol"
+
+import {
+  "moonbitlang/core/debug",
+  "moonbitlang/core/json",
+}
+
+// Values
+pub fn parse(Json) -> Event?
+
+// Errors
+
+// Types and methods
+pub(all) enum Event {
+  AgentSetupFailed(error~ : String)
+  AgentStep(step~ : Int)
+  AgentAborted(reason~ : String)
+  AgentFinished(answer~ : String)
+  MaxStepsExhausted
+  TurnFailed(error~ : String)
+  AssistantDelta(content~ : String)
+  AssistantMessage(content~ : String)
+  ReasoningMessage(content~ : String)
+  Usage(usage~ : Usage)
+  ToolResult(tool_call_id~ : String, tool_name~ : String, is_error~ : Bool, content~ : String, brief~ : String?)
+  ToolCallDecodeError(tool_call_id~ : String, tool_name~ : String, error~ : String)
+  SteerApplied(kind~ : String, content~ : String)
+  SteerDropped(content~ : String)
+  BackgroundNotice(content~ : String)
+  GoalUpdated(goal~ : String?)
+  GoalBlocked(reason~ : String)
+  GoalUnblocked
+  GoalCheck(content~ : String)
+  GoalReminder(content~ : String)
+  GoalContinue(remaining~ : Int)
+  GoalBudgetExhausted(turns~ : Int)
+  PlanReminder(content~ : String)
+  CompactionStarted(from_sequence~ : Int, to_sequence~ : Int)
+  CompactionFinished(from_sequence~ : Int, to_sequence~ : Int, summary~ : String)
+  CompactionFailed(error~ : String)
+  AutoCompactionStarted(from_sequence~ : Int, to_sequence~ : Int)
+  AutoCompactionFinished(from_sequence~ : Int, to_sequence~ : Int, summary~ : String)
+  AutoCompactionFailed(error~ : String)
+  ContextYield(to_sequence~ : Int, answer~ : String)
+  SessionStarted(session~ : String, session_root~ : String, workspace_root~ : String)
+  SessionError(error~ : String)
+  WorkspaceCreated(dir~ : String)
+  CommandError(error~ : String)
+  FleetStarted(runs~ : Int, task~ : String)
+  McpConfigIgnored(reason~ : String)
+  McpConfigUnreadable(path~ : String, error~ : String)
+  McpConfigInvalid(path~ : String, error~ : String)
+  McpToolsRegistered(servers~ : Int, tools~ : Int, names~ : Array[String])
+  McpToolDuplicate(server~ : String, tool~ : String)
+  McpToolRenamed(from~ : String, to~ : String)
+  McpToolsCapped(server~ : String, kept~ : Int)
+  McpServerSkippedOverCap(server~ : String)
+  McpConnectFailed(server~ : String, error~ : String?)
+  McpListToolsFailed(server~ : String, error~ : String)
+  McpListToolsTimeout(server~ : String)
+  McpNoTools(server~ : String)
+} derive(Eq, @debug.Debug)
+pub fn Event::name(Self) -> String
+
+pub(all) struct Usage {
+  prompt_tokens : Int
+  completion_tokens : Int
+  total_tokens : Int
+  prompt_cache_hit_tokens : Int
+  prompt_cache_miss_tokens : Int
+} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
+
+// Type aliases
+
+// Traits
+

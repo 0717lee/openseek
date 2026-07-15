@@ -4,7 +4,8 @@ import {
   "bobzhang/openseek/agent_session/store",
   "bobzhang/openseek/deepseek",
   "bobzhang/openseek/deepseek/client",
-  "tonyfettes/xlog",
+  "bobzhang/openseek_protocol",
+  "bobzhang/openseek_protocol/emit",
 }
 
 import {

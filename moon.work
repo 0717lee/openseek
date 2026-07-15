@@ -1,4 +1,5 @@
 members = [
   ".",
+  "./protocol",
   "./cmd/viz_app",
 ]

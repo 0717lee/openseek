@@ -111,8 +111,7 @@ pub async fn tools_for_client(
   let bridged = []
   for tool in client.list_tools() {
     if seen_raw.contains(tool.name) {
-      @xlog.warn() <?
-        { "event": "mcp_tool_duplicate", "server": server, "tool": tool.name }
+      @emit.emit(McpToolDuplicate(server~, tool=tool.name))
       continue
     }
     seen_raw[tool.name] = ()
@@ -175,8 +174,7 @@ pub async fn[X] build_grouped(
     groups.push((server.name(), mine))
     // Budget exhausted: don't launch servers whose tools could not register.
     if total >= MaxTotalMcpTools {
-      @xlog.warn() <?
-        { "event": "mcp_server_skipped_over_cap", "server": server.name() }
+      @emit.emit(McpServerSkippedOverCap(server=server.name()))
       continue
     }
     let discovered = connect_server(
@@ -191,20 +189,14 @@ pub async fn[X] build_grouped(
       // The provider accepts at most 128 function definitions per request; the
       // MCP budget leaves room for the built-ins. Beyond it, drop with a log.
       if total >= MaxTotalMcpTools {
-        @xlog.warn() <?
-          {
-            "event": "mcp_tools_capped",
-            "server": server.name(),
-            "kept": MaxTotalMcpTools,
-          }
+        @emit.emit(McpToolsCapped(server=server.name(), kept=MaxTotalMcpTools))
         break
       }
       // Sanitization/capping can make two distinct MCP tools collide; keep both
       // callable under suffixed names rather than dropping one.
       let name = uniquify(seen, tool.name)
       if name != tool.name {
-        @xlog.warn() <?
-          { "event": "mcp_tool_renamed", "from": tool.name, "to": name }
+        @emit.emit(McpToolRenamed(from=tool.name, to=name))
       }
       seen[name] = ()
       total = total + 1
@@ -264,13 +256,12 @@ async fn[X] connect_server(
   } catch {
     error if @async.is_being_cancelled() => raise error
     error => {
-      @xlog.warn() <?
-        { "event": "mcp_connect_failed", "server": name, "error": "\{error}" }
+      @emit.emit(McpConnectFailed(server=name, error=Some("\{error}")))
       return []
     }
   }
   guard connection is Some((client, shutdown)) else {
-    @xlog.warn() <? { "event": "mcp_connect_failed", "server": name }
+    @emit.emit(McpConnectFailed(server=name, error=None))
     return []
   }
   let discovered = @async.with_timeout_opt(discovery_timeout_ms, () => {
@@ -278,25 +269,20 @@ async fn[X] connect_server(
   }) catch {
     error if @async.is_being_cancelled() => raise error
     error => {
-      @xlog.warn() <?
-        {
-          "event": "mcp_list_tools_failed",
-          "server": name,
-          "error": "\{error}",
-        }
+      @emit.emit(McpListToolsFailed(server=name, error="\{error}"))
       shutdown()
       return []
     }
   }
   guard discovered is Some(discovered) else {
-    @xlog.warn() <? { "event": "mcp_list_tools_timeout", "server": name }
+    @emit.emit(McpListToolsTimeout(server=name))
     shutdown()
     return []
   }
   // A server with nothing to offer is useless for the rest of the session:
   // release its process and tasks instead of holding them on the scope.
   if discovered.is_empty() {
-    @xlog.warn() <? { "event": "mcp_no_tools", "server": name }
+    @emit.emit(McpNoTools(server=name))
     shutdown()
   }
   discovered

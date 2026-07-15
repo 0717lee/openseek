@@ -91,12 +91,7 @@ pub async fn compact_session(
   if to_sequence <= 0 {
     fail("session compaction requires at least one event")
   }
-  @xlog.info() <?
-    {
-      "event": "compaction_started",
-      "from_sequence": from_sequence,
-      "to_sequence": to_sequence,
-    }
+  @emit.emit(CompactionStarted(from_sequence~, to_sequence~))
   let client = @client.Client(api_key~, model~, api_url?, thinking=No)
   let summary = generate_compaction_summary(client~, session)
   let next = append_compaction_summary(
@@ -106,12 +101,6 @@ pub async fn compact_session(
     from_sequence~,
     to_sequence~,
   )
-  @xlog.info() <?
-    {
-      "event": "compaction_finished",
-      "from_sequence": from_sequence,
-      "to_sequence": to_sequence,
-      "summary": summary,
-    }
+  @emit.emit(CompactionFinished(from_sequence~, to_sequence~, summary~))
   next
 }

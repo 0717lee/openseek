@@ -17,10 +17,11 @@ import {
   "bobzhang/openseek/agent_tool/write",
   "bobzhang/openseek/deepseek",
   "bobzhang/openseek/deepseek/client",
+  "bobzhang/openseek_protocol" @protocol,
+  "bobzhang/openseek_protocol/emit",
   "moonbitlang/async",
   "moonbitlang/async/fs",
   "moonbitlang/core/json",
-  "tonyfettes/xlog",
 }
 
 import {

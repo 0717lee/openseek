@@ -237,7 +237,7 @@ async fn AgentLoop::run(
         session,
         Terminal(Failed("max steps exhausted")),
       )
-      @xlog.warn() <? { "event": "max_steps_exhausted" }
+      @emit.emit(MaxStepsExhausted)
       session
     }
   } catch {
@@ -338,7 +338,7 @@ async fn AgentLoop::apply_steer_inputs(
     }
     let next = self.append(current, item)
     self.messages.push(ChatMessage(User, content=text))
-    @xlog.info() <? { "event": "steer_applied", "kind": kind, "content": text }
+    @emit.emit(SteerApplied(kind~, content=text))
     if input is Notice(text) {
       self.goal_cadence.observe_notice(text)
     }
@@ -368,13 +368,13 @@ async fn AgentLoop::prepare_step(
       tool_registered=self.goal_cadence.tool_registered,
     )
     session = self.append_runtime_notice(session, reminder)
-    @xlog.info() <? { "event": "goal_reminder", "content": reminder }
+    @emit.emit(GoalReminder(content=reminder))
     self.goal_cadence.record_reminder()
   }
   if self.plan_cadence.should_remind() {
     let reminder = self.plan_cadence.reminder_text()
     session = self.append_runtime_notice(session, reminder)
-    @xlog.info() <? { "event": "plan_reminder", "content": reminder }
+    @emit.emit(PlanReminder(content=reminder))
     self.plan_cadence.record_reminder()
   }
   self.plan_cadence.record_model_request()
@@ -383,13 +383,13 @@ async fn AgentLoop::prepare_step(
 
 ///|
 async fn AgentLoop::chat(self : Self, step : Int) -> @deepseek.ChatResponse {
-  @xlog.info() <? { "event": "agent_step", "step": step + 1 }
+  @emit.emit(AgentStep(step=step + 1))
   let response = self.client.chat(
     self.messages,
     tools=self.tools.function_tools(),
     stream=StreamHandler(on_content_delta=delta => {
       if delta != "" {
-        @xlog.info() <? { "event": "assistant_delta", "content": delta }
+        @emit.emit(AssistantDelta(content=delta))
       }
     }),
   )
@@ -403,14 +403,12 @@ fn @deepseek.ChatResponse::log_and_reasoning_content(
   // Reasoning first, so a consumer appending events in order shows the
   // thinking above the answer it led to.
   if response.reasoning_content != "" {
-    @xlog.info() <?
-      { "event": "reasoning_message", "content": response.reasoning_content }
+    @emit.emit(ReasoningMessage(content=response.reasoning_content))
   }
   if response.content != "" {
-    @xlog.info() <?
-      { "event": "assistant_message", "content": response.content }
+    @emit.emit(AssistantMessage(content=response.content))
   }
-  @xlog.info() <? { "event": "usage", "usage": response.usage }
+  @emit.emit(Usage(usage=wire_usage(response.usage)))
   response
 }
 
@@ -467,13 +465,13 @@ async fn AgentLoop::handle_tool_calls(
           content~,
           is_error=true,
         )
-        @xlog.error() <?
-          {
-            "event": "tool_call_decode_error",
-            "tool_call_id": native_call.id,
-            "tool_name": native_call.name,
-            "error": "\{error}",
-          }
+        @emit.emit(
+          ToolCallDecodeError(
+            tool_call_id=native_call.id,
+            tool_name=native_call.name,
+            error="\{error}",
+          ),
+        )
         continue session
       }
     }
@@ -616,7 +614,7 @@ async fn AgentLoop::execute_tool_call(
       // its durable clear before the terminal.
       let session = self.flush_goal_tombstone(session)
       let session = self.append(session, Terminal(Aborted(reason)))
-      @xlog.warn() <? { "event": "agent_aborted", "reason": reason }
+      @emit.emit(AgentAborted(reason~))
       return FinishAgentLoop(session)
     }
     Respond(output) => {
@@ -667,14 +665,15 @@ async fn AgentLoop::close_skipped_tool_calls(
       content=note,
       is_error=true,
     )
-    @xlog.info() <?
-      {
-        "event": "tool_result",
-        "tool_call_id": skipped.id,
-        "tool_name": skipped.name,
-        "is_error": true,
-        "content": note,
-      }
+    @emit.emit(
+      ToolResult(
+        tool_call_id=skipped.id,
+        tool_name=skipped.name,
+        is_error=true,
+        content=note,
+        brief=None,
+      ),
+    )
     continue session
   } nobreak {
     session
@@ -979,7 +978,7 @@ async fn AgentLoop::inject_goal_check(
     tool_registered=self.goal_cadence.tool_registered,
   )
   let session = self.append_runtime_notice(session, check)
-  @xlog.info() <? { "event": "goal_check", "content": check }
+  @emit.emit(GoalCheck(content=check))
   self.goal_cadence.record_finish_check()
   // The check must stay the newest instruction: a plan reminder landing at
   // the same cadence boundary would bury it — the model would answer the
@@ -1063,7 +1062,7 @@ async fn AgentLoop::finish_turn(
   }
   let session = self.append(session, Terminal(Finished(answer)))
   self.push_finished_message(answer)
-  @xlog.info() <? { "event": "agent_finished", "answer": answer }
+  @emit.emit(AgentFinished(answer~))
   Sealed(session)
 }
 
@@ -1075,19 +1074,32 @@ fn log_tool_result(
   content~ : String,
   brief~ : String?,
 ) -> Unit {
-  @xlog.info() <?
-    {
-      "event": "tool_result",
-      "tool_call_id": native_call.id,
-      "tool_name": tool_call.name,
-      "is_error": is_error,
-      "content": content,
-      "brief": if brief is Some(brief) {
-        Json::string(brief)
-      } else {
-        Json::null()
-      },
-    }
+  @emit.emit(
+    ToolResult(
+      tool_call_id=native_call.id,
+      tool_name=tool_call.name,
+      is_error~,
+      content~,
+      brief~,
+    ),
+  )
+}
+
+///|
+/// The provider's token counts as the protocol carries them.
+///
+/// `@protocol.Usage` is structurally identical, and deliberately separate: the
+/// event stream's shape must not be whatever the vendor's response struct
+/// happens to be this week, and `protocol` is a leaf module that cannot depend
+/// on the provider layer. This is the only place the two meet.
+fn wire_usage(usage : @deepseek.Usage) -> @protocol.Usage {
+  {
+    prompt_tokens: usage.prompt_tokens,
+    completion_tokens: usage.completion_tokens,
+    total_tokens: usage.total_tokens,
+    prompt_cache_hit_tokens: usage.prompt_cache_hit_tokens,
+    prompt_cache_miss_tokens: usage.prompt_cache_miss_tokens,
+  }
 }
 
 ///|

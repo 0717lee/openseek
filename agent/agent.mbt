@@ -311,7 +311,7 @@ pub async fn[X] run_turn_in_scope(
     }
   } catch {
     error => {
-      @xlog.error() <? { "event": "agent_setup_failed", "error": "\{error}" }
+      @emit.emit(AgentSetupFailed(error="\{error}"))
       return session
         |> append_item(Terminal(Failed("agent setup failed: \{error}")))
     }
