@@ -85,9 +85,26 @@ pub fn Command::to_jsonl(self : Command) -> String {
 /// a line to ignore, but an unreadable command is a request that will never be
 /// answered, and silence is the one reply a controller cannot act on.
 ///
-/// `steer` without a `kind` is `Prompt`. That is not leniency for its own sake:
-/// the desktop has always sent exactly that, and it is what every controller
-/// meant before the field existed.
+/// ## When a field may be absent
+///
+/// The same rule `parse` states for events, and both of its cases apply here —
+/// one field each, verified against `git log -S` for the field versus its
+/// command's introducing commit:
+///
+/// 1. **Added after its command existed.** `steer`'s `kind` arrived in
+///    9b2f6c43; `steer` itself in 17562cc1. An engine from between them is sent
+///    a `kind` it ignores, and a controller older than the field sends none —
+///    so absent means `Prompt`, which is what every controller meant before
+///    there was a choice. The desktop was still sending exactly that.
+/// 2. **Optional since the command shipped.** `goal`'s `auto` arrived *with*
+///    `goal` (c8cc6ad7), so case (1) does not cover it — but the engine has
+///    read `auto` as absent-means-false from the first line it ever decoded.
+///    It is a flag with a default, not a value that can go missing.
+///
+/// The distinction matters because only (1) is about talking to an old
+/// binary. A field that is merely unread — `text` on a command nobody
+/// inspects — is still required: its absence means the line is not what it
+/// claims.
 pub fn Command::parse(line : Json) -> Result[Command, String] {
   match line {
     { "command": "prompt", "text": String(text), .. } => Ok(Prompt(text~))

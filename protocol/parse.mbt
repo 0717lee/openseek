@@ -12,10 +12,17 @@
 ///
 /// ## When a field may be absent
 ///
-/// A field is defaulted **if and only if it was added after its event already
-/// existed**, because engines older than that field still emit the event
-/// without it — and the TUI and desktop launch whichever `openseek` is on
-/// PATH, so a new reader against an old engine is a real pairing.
+/// A field is defaulted only when one of two things is true of it:
+///
+/// 1. **It was added after its event already existed**, so engines older than
+///    the field still emit the event without it — and the TUI and desktop
+///    launch whichever `openseek` is on PATH, making a new reader against an
+///    old engine a real pairing. Every event field defaulted here is this case.
+/// 2. **The engine has treated it as optional since the event shipped** — a
+///    flag whose absence has always meant something definite, rather than a
+///    value gone missing. No *event* field is this case; `Command`'s `auto` is,
+///    which is why that rule is stated separately in `command.mbt` rather than
+///    by pointing here.
 ///
 /// Everything else is required. "No reader uses it" is *not* a reason to
 /// default a field: `tool_call_id`, `usage`'s cache counters and
@@ -24,9 +31,10 @@
 /// absence means the line is not what it claims to be. Guessing there would
 /// hide a real wire break behind a fabricated value.
 ///
-/// Three fields qualify today, each verified against `git log -S` for the field
-/// versus its event's introducing commit — the check to run before adding a
-/// fourth, and the one that catches a field wrongly made required:
+/// Three fields qualify today, all under (1), each verified against `git log -S`
+/// for the field versus its event's introducing commit — the check to run
+/// before adding a fourth, and the one that catches a field wrongly made
+/// required, as `workspace_root` was:
 ///
 /// - `steer_applied`'s `kind` — added 9b2f6c43 (2026-06-25) to an event from
 ///   56140618.
