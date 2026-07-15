@@ -146,8 +146,8 @@ fn parse_steer(line : Json) -> Result[Command, String] {
     return Err("expected a string \"text\" field")
   }
   match line {
-    { "kind": String("prompt"), .. } => Ok(Steer(kind=Prompt, text~))
-    { "kind": String("command"), .. } => Ok(Steer(kind=Command, text~))
+    { "kind": "prompt", .. } => Ok(Steer(kind=Prompt, text~))
+    { "kind": "command", .. } => Ok(Steer(kind=Command, text~))
     { "kind": String(other), .. } => Err("unknown steer kind: \{other}")
     { "kind": _, .. } => Err("expected a string \"kind\" field")
     // A steer with no kind at all is a prompt steer: see the rule above.
