@@ -90,10 +90,7 @@ fn decode_initialize_result(result : Json) -> InitializeResult raise {
     { "serverInfo": { "version": String(version), .. }, .. } => version
     _ => ""
   }
-  let instructions = match result {
-    { "instructions": String(text), .. } => Some(text)
-    _ => None
-  }
+  let instructions = optional_string(result, "instructions")
   { protocol_version, server_name, server_version, instructions }
 }
 
@@ -105,14 +102,8 @@ fn decode_tools_page(result : Json) -> (Array[McpTool], String?) raise {
   guard result is { "tools": Array(entries), .. } else {
     raise Protocol("tools/list result is missing a `tools` array")
   }
-  let tools = []
-  for entry in entries {
-    tools.push(decode_tool(entry))
-  }
-  let cursor = match result {
-    { "nextCursor": String(cursor), .. } => Some(cursor)
-    _ => None
-  }
+  let tools = entries.map(decode_tool)
+  let cursor = optional_string(result, "nextCursor")
   (tools, cursor)
 }
 
@@ -122,10 +113,7 @@ fn decode_tool(entry : Json) -> McpTool raise {
   guard entry is { "name": String(name), .. } else {
     raise Protocol("tool entry is missing a string `name`")
   }
-  let description = match entry {
-    { "description": String(description), .. } => description
-    _ => ""
-  }
+  let description = optional_string(entry, "description").unwrap_or("")
   let input_schema = match entry {
     { "inputSchema": schema, .. } => schema
     _ => default_object_schema()
@@ -165,21 +153,12 @@ fn decode_content_block(block : Json) -> ContentBlock raise {
   match block {
     { "type": String("text"), "text": String(text), .. } => Text(text)
     { "type": String("image"), .. } => {
-      let mime_type = match block {
-        { "mimeType": String(mime_type), .. } => mime_type
-        _ => ""
-      }
+      let mime_type = optional_string(block, "mimeType").unwrap_or("")
       Image(mime_type~)
     }
     { "type": String("resource"), "resource": resource, .. } => {
-      let uri = match resource {
-        { "uri": String(uri), .. } => uri
-        _ => ""
-      }
-      let text = match resource {
-        { "text": String(text), .. } => Some(text)
-        _ => None
-      }
+      let uri = optional_string(resource, "uri").unwrap_or("")
+      let text = optional_string(resource, "text")
       Resource(uri~, text~)
     }
     { "type": String(kind), .. } => Other(kind~)
@@ -229,4 +208,16 @@ pub fn CallToolResult::render_text(self : CallToolResult) -> String {
     }
     None => text
   }
+} ///|
+/// The string at `key`, or nothing when the field is absent or not a string.
+///
+/// Only for the fields MCP lets a server omit — every `guard ... else raise
+/// Protocol` in this file stays exactly as strict as it was.
+
+///|
+fn optional_string(json : Json, key : String) -> String? {
+  guard json is Object(fields) && fields.get(key) is Some(String(text)) else {
+    return None
+  }
+  Some(text)
 }

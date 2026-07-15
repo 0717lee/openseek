@@ -14,7 +14,9 @@ pub const ProtocolVersion : String = "2025-11-25"
 /// The tool surface (`tools/list`, `tools/call`) is stable across these
 /// revisions.
 fn is_supported_version(version : String) -> Bool {
-  version == "2025-11-25" ||
+  // The preferred version is named, not respelled: this list is the one place
+  // a bump to `ProtocolVersion` would otherwise silently leave behind.
+  version == ProtocolVersion ||
   version == "2025-06-18" ||
   version == "2025-03-26" ||
   version == "2024-11-05"
@@ -79,9 +81,7 @@ pub async fn McpClient::list_tools(self : McpClient) -> Array[McpTool] {
     }
     let result = self.rpc.request(method_="tools/list", params~)
     let (page, next) = decode_tools_page(result)
-    for tool in page {
-      tools.push(tool)
-    }
+    tools.append(page)
     match next {
       Some(next) => cursor = Some(next)
       None => break

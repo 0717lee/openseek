@@ -81,18 +81,7 @@ fn decode_server(name : String, entry : Json) -> McpServer raise {
       args.push(arg)
     }
   }
-  let env : Map[String, String] = Map([])
-  if entry is { "env": env_value, .. } {
-    guard env_value is Object(vars) else {
-      raise Invalid("server `\{name}`: `env` must be an object of strings")
-    }
-    for key, value in vars {
-      guard value is String(text) else {
-        raise Invalid("server `\{name}`: every `env` value must be a string")
-      }
-      env[key] = text
-    }
-  }
+  let env = decode_string_map(name, entry, "env")
   Stdio(name~, command~, args~, env~)
 }
 
@@ -108,19 +97,32 @@ fn decode_http_server(name : String, entry : Json) -> McpServer raise {
       "server `\{name}`: give `command` (stdio) or `url` (http), not both",
     )
   }
-  let headers : Map[String, String] = Map([])
-  if entry is { "headers": headers_value, .. } {
-    guard headers_value is Object(vars) else {
-      raise Invalid("server `\{name}`: `headers` must be an object of strings")
-    }
-    for key, value in vars {
-      guard value is String(text) else {
-        raise Invalid(
-          "server `\{name}`: every `headers` value must be a string",
-        )
-      }
-      headers[key] = text
-    }
-  }
+  let headers = decode_string_map(name, entry, "headers")
   Http(name~, url~, headers~)
+} ///|
+/// An optional object-of-strings field: absent yields empty, present-but-
+/// mistyped is an error. `env` and `headers` were the same twelve lines twice,
+/// differing only in the field name — which already appeared verbatim inside
+/// both of their error messages.
+
+///|
+fn decode_string_map(
+  name : String,
+  entry : Json,
+  field : String,
+) -> Map[String, String] raise {
+  let out : Map[String, String] = Map([])
+  guard entry is Object(fields) && fields.get(field) is Some(value) else {
+    return out
+  }
+  guard value is Object(vars) else {
+    raise Invalid("server `\{name}`: `\{field}` must be an object of strings")
+  }
+  for key, item in vars {
+    guard item is String(text) else {
+      raise Invalid("server `\{name}`: every `\{field}` value must be a string")
+    }
+    out[key] = text
+  }
+  out
 }
