@@ -133,44 +133,33 @@ priv enum ServeStep {
 /// is an `Err` whose text is emitted as a `command_error` event — a controller
 /// bug must be visible on the wire, not silently swallowed, but it must not kill
 /// the session either.
+/// Map one controller line onto the loop's own command type.
+///
+/// `@protocol.Command` owns the wire — the same type the TUI and the desktop
+/// now encode with, so the engine's reader and its controllers cannot spell a
+/// command differently. They did: the desktop sent `steer` without a `kind` and
+/// worked only because this decoder happened to default it.
+///
+/// The mapping stays here because `SteerInput` is the runtime's, and the
+/// protocol is a leaf module that must not depend on the engine — the same
+/// reason every client keeps its own view model.
 fn decode_serve_command(json : Json) -> Result[ServeCommand, String] {
-  match json {
-    { "command": "prompt", "text": String(text), .. } => Ok(Prompt(text))
-    { "command": "steer", .. } =>
-      decode_steer_input(json).map(input => Steer(input))
-    { "command": "prompt", .. } => Err("expected a string \"text\" field")
-    { "command": "compact", .. } => Ok(Compact)
-    { "command": "cancel", .. } => Ok(Cancel)
-    { "command": "goal", "action": "set", "text": String(text), .. } =>
-      if text.trim().is_empty() {
-        Err("goal text must not be blank")
-      } else {
-        Ok(Goal(SetGoal(text, auto=json is { "auto": True, .. })))
-      }
-    { "command": "goal", "action": "clear", .. } => Ok(Goal(ClearGoal))
-    { "command": "goal", .. } =>
-      Err(
-        "expected {\"action\": \"set\", \"text\": ...} or {\"action\": \"clear\"}",
-      )
-    { "command": String(other), .. } => Err("unknown command: \{other}")
-    _ => Err("expected a {\"command\": ...} object")
-  }
-}
-
-///|
-fn decode_steer_input(json : Json) -> Result[@agent_runtime.SteerInput, String] {
-  match json {
-    { "kind": String(kind), "text": String(text), .. } =>
-      match kind {
-        "prompt" => Ok(Prompt(text))
-        "command" => Ok(Command(text))
-        other => Err("unknown steer kind: \{other}")
-      }
-    { "kind": _, "text": String(_), .. } =>
-      Err("expected a string \"kind\" field")
-    { "text": String(text), .. } => Ok(Prompt(text))
-    _ => Err("expected a string \"text\" field")
-  }
+  @protocol.Command::parse(json).map(command => {
+    match command {
+      Prompt(text~) => Prompt(text)
+      Steer(kind~, text~) =>
+        Steer(
+          match kind {
+            Prompt => Prompt(text)
+            Command => Command(text)
+          },
+        )
+      Compact => Compact
+      Cancel => Cancel
+      GoalSet(text~, auto~) => Goal(SetGoal(text, auto~))
+      GoalClear => Goal(ClearGoal)
+    }
+  })
 }
 
 ///|

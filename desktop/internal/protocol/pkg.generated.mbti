@@ -1,20 +1,22 @@
 // Generated using `moon info`, DON'T EDIT IT
 package "openseek_desktop/internal/protocol"
 
+import {
+  "bobzhang/openseek_protocol",
+}
+
 // Values
-pub fn cancel() -> EngineCommand
+pub fn cancel() -> @openseek_protocol.Command
 
-pub fn compact() -> EngineCommand
+pub fn compact() -> @openseek_protocol.Command
 
-pub fn prompt(String) -> EngineCommand
+pub fn prompt(String) -> @openseek_protocol.Command
 
-pub fn steer(String) -> EngineCommand
+pub fn steer(String) -> @openseek_protocol.Command
 
 // Errors
 
 // Types and methods
-type EngineCommand
-pub fn EngineCommand::to_jsonl(Self) -> String
 
 // Type aliases
 
