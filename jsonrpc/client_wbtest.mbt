@@ -137,8 +137,8 @@ async test "concurrent requests each get their own reply even when answered out 
     let second = group.spawn(() => {
       client.request(method_="second", params=Json::empty_object())
     })
-    assert_true(first.wait() is { "method": String("first"), .. })
-    assert_true(second.wait() is { "method": String("second"), .. })
+    assert_true(first.wait() is { "method": "first", .. })
+    assert_true(second.wait() is { "method": "second", .. })
   })
 }
 
@@ -162,12 +162,12 @@ async test "a delivered reply never waits behind other outstanding requests" {
     let mut third_request = Json::null()
     for _ in 0..<3 {
       let sent = transport.outbound.get()
-      if sent is { "method": String("third"), .. } {
+      if sent is { "method": "third", .. } {
         third_request = sent
       }
     }
     transport.inbound.put(reply_for(third_request))
-    assert_true(third.wait() is { "method": String("third"), .. })
+    assert_true(third.wait() is { "method": "third", .. })
   })
 }
 
@@ -247,8 +247,8 @@ async test "a batched array reply routes each element" {
     let b = group.spawn(() => {
       client.request(method_="b", params=Json::empty_object())
     })
-    assert_true(a.wait() is { "method": String("a"), .. })
-    assert_true(b.wait() is { "method": String("b"), .. })
+    assert_true(a.wait() is { "method": "a", .. })
+    assert_true(b.wait() is { "method": "b", .. })
   })
 }
 
@@ -292,7 +292,7 @@ async test "a reply for an unknown id is dropped and the client stays usable" {
       transport.inbound.put(reply_for(request))
     })
     let result = client.request(method_="real", params=Json::empty_object())
-    assert_true(result is { "method": String("real"), .. })
+    assert_true(result is { "method": "real", .. })
   })
 }
 
@@ -401,7 +401,7 @@ async test "notify enqueues an id-less message the writer sends" {
       params=Json::empty_object(),
     )
     let sent = transport.outbound.get()
-    assert_true(sent is { "method": String("notifications/initialized"), .. })
+    assert_true(sent is { "method": "notifications/initialized", .. })
     assert_true(!(sent is { "id": _, .. }))
   })
 }

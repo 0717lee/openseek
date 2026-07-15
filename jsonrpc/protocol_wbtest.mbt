@@ -7,8 +7,8 @@ test "build_request carries jsonrpc, numeric id, method and params" {
     is {
       "jsonrpc": String("2.0"),
       "id": Number(7, ..),
-      "method": String("tools/list"),
-      "params": { "name": String("list"), "cursor": String("abc"), .. },
+      "method": "tools/list",
+      "params": { "name": "list", "cursor": "abc", .. },
       ..
     },
   )
@@ -20,7 +20,7 @@ test "build_notification omits the id" {
     "notifications/initialized",
     Json::empty_object(),
   )
-  assert_true(note is { "method": String("notifications/initialized"), .. })
+  assert_true(note is { "method": "notifications/initialized", .. })
   assert_true(!(note is { "id": _, .. }))
 }
 
