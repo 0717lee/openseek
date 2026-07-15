@@ -9,7 +9,7 @@ test "decode_tool reads all fields" {
   })
   assert_eq(tool.name, "search")
   assert_eq(tool.description, "Search the web")
-  assert_true(tool.input_schema is { "type": String("object"), .. })
+  assert_true(tool.input_schema is { "type": "object", .. })
 }
 
 ///|
@@ -17,7 +17,7 @@ test "decode_tool defaults a missing description and schema" {
   let tool = decode_tool({ "name": "bare" })
   assert_eq(tool.name, "bare")
   assert_eq(tool.description, "")
-  assert_true(tool.input_schema is { "type": String("object"), .. })
+  assert_true(tool.input_schema is { "type": "object", .. })
 }
 
 ///|

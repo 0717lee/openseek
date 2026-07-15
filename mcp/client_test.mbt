@@ -223,8 +223,8 @@ async test "list_tools returns tools with pass-through schemas" {
     assert_true(
       tools[0].input_schema
       is {
-        "type": String("object"),
-        "properties": { "text": { "type": String("string"), .. }, .. },
+        "type": "object",
+        "properties": { "text": { "type": "string", .. }, .. },
         ..
       },
     )

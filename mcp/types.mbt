@@ -151,12 +151,12 @@ fn decode_call_result(result : Json) -> CallToolResult raise {
 /// `type`.
 fn decode_content_block(block : Json) -> ContentBlock raise {
   match block {
-    { "type": String("text"), "text": String(text), .. } => Text(text)
-    { "type": String("image"), .. } => {
+    { "type": "text", "text": String(text), .. } => Text(text)
+    { "type": "image", .. } => {
       let mime_type = optional_string(block, "mimeType").unwrap_or("")
       Image(mime_type~)
     }
-    { "type": String("resource"), "resource": resource, .. } => {
+    { "type": "resource", "resource": resource, .. } => {
       let uri = optional_string(resource, "uri").unwrap_or("")
       let text = optional_string(resource, "text")
       Resource(uri~, text~)
