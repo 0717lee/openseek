@@ -68,3 +68,85 @@ test "goal tool schema" {
   })
 }
 ```
+
+## Decoded Verdicts
+
+`decode_status` is the public facade used by the agent loop. It preserves the
+package-owned `GoalStatus` type while delegating raw JSON validation to the
+internal decoder:
+
+```mbt check
+///|
+test "decode every goal verdict" {
+  debug_inspect(
+    [
+      @goal.decode_status({ "status": "met" }),
+      @goal.decode_status({
+        "status": "continuing",
+        "remaining": "run the integration tests",
+      }),
+      @goal.decode_status({
+        "status": "blocked",
+        "reason": "waiting for repository access",
+      }),
+    ],
+    content=(
+      #|[
+      #|  Met,
+      #|  Continuing("run the integration tests"),
+      #|  Blocked("waiting for repository access"),
+      #|]
+    ),
+  )
+}
+```
+
+## Stateless Fallback
+
+Normal agent-loop dispatch intercepts `goal` and performs the lifecycle effects
+described above. Direct registry dispatch uses the definition's stateless
+fallback instead: valid arguments receive an acknowledgment, while malformed
+arguments receive an actionable error without changing standing-goal state.
+
+```mbt check
+///|
+async test "goal fallback validates registry calls" {
+  let tools = @agent_tool.Tools([@goal.definition()])
+  let accepted = @agent_tool.AgentToolCall(
+    ToolCall(
+      id="call_goal_met",
+      name="goal",
+      arguments=(
+        #|{ "status": "met" }
+      ),
+    ),
+  )
+  let rejected = @agent_tool.AgentToolCall(
+    ToolCall(
+      id="call_goal_continuing",
+      name="goal",
+      arguments=(
+        #|{ "status": "continuing" }
+      ),
+    ),
+  )
+  debug_inspect(
+    [
+      @agent_tool.execute_tool_call(accepted, tools),
+      @agent_tool.execute_tool_call(rejected, tools),
+    ],
+    content=(
+      #|[
+      #|  Respond({ content: "goal status recorded", is_error: false, brief: None }),
+      #|  Respond(
+      #|    {
+      #|      content: "error: goal requires a string \"remaining\" when status is \"continuing\"",
+      #|      is_error: true,
+      #|      brief: None,
+      #|    },
+      #|  ),
+      #|]
+    ),
+  )
+}
+```
