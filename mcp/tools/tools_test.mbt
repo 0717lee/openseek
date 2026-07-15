@@ -119,7 +119,7 @@ async test "tools_for_client bridges tools with namespaced names and schemas" {
     assert_eq(tools[0].name, "mcp__srv__echo")
     assert_eq(tools[0].description, "Echoes")
     let @agent_tool.JsonSchema(schema) = tools[0].schema
-    assert_true(schema is { "type": String("object"), .. })
+    assert_true(schema is { "type": "object", .. })
   })
 }
 
@@ -276,9 +276,9 @@ async test "build bridges and dispatches tools from an http server" {
             _ => Json::null()
           }
           match message {
-            { "method": String("initialize"), .. } =>
+            { "method": "initialize", .. } =>
               respond_json(conn, id, { "protocolVersion": "2025-11-25" })
-            { "method": String("tools/list"), .. } =>
+            { "method": "tools/list", .. } =>
               respond_json(conn, id, {
                 "tools": [
                   {
@@ -288,7 +288,7 @@ async test "build bridges and dispatches tools from an http server" {
                   },
                 ],
               })
-            { "method": String("tools/call"), .. } =>
+            { "method": "tools/call", .. } =>
               respond_json(conn, id, {
                 "content": [{ "type": "text", "text": "pong" }],
               })
