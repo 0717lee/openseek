@@ -87,19 +87,6 @@ async fn mock_mcp_endpoint(
                 _ => ()
               }
             }
-            let reply : Json = {
-              "jsonrpc": "2.0",
-              "id": id,
-              "result": {
-                "tools": [
-                  {
-                    "name": "fetch",
-                    "description": "Fetch a URL",
-                    "inputSchema": { "type": "object" },
-                  },
-                ],
-              },
-            }
             conn.send_response(200, "OK", extra_headers={
               "Content-Type": "text/event-stream",
             })
@@ -111,8 +98,9 @@ async fn mock_mcp_endpoint(
             )
             conn.flush()
             // Split at a token boundary: SSE joins the lines with a newline,
-            // which JSON tolerates only between tokens.
-            ignore(reply)
+            // which JSON tolerates only between tokens. The reply is spelled
+            // out here rather than built and stringified, because the split is
+            // the point of the test.
             conn.write(
               "data: {\"jsonrpc\":\"2.0\",\"id\":\{id.stringify()},\r\ndata: \"result\":{\"tools\":[{\"name\":\"fetch\",\"description\":\"Fetch a URL\",\"inputSchema\":{\"type\":\"object\"}}]}}\r\n\r\n",
             )
@@ -135,16 +123,7 @@ async fn mock_mcp_endpoint(
 async test "http connect handshakes, lists tools over SSE, and echoes session headers" {
   @async.with_task_group() <| group => {
     guard mock_mcp_endpoint(group) is Some((url, seen)) else { return }
-    guard @streamhttp.connect(
-        group,
-        url~,
-        client_name="openseek",
-        client_version="0.1",
-        handshake_timeout_ms=10000,
-      )
-      is Some(conn) else {
-      fail("expected the http connect to succeed")
-    }
+    let conn = connect_or_fail(group, url)
     assert_eq(conn.init().server_name, "http-mock")
     assert_eq(conn.init().protocol_version, "2025-11-25")
     let tools = conn.client().list_tools()
@@ -202,17 +181,8 @@ async test "a server ping mid-stream is answered while the stream is open" {
             _ => Json::null()
           }
           match message {
-            { "method": String("initialize"), "id": id, .. } => {
-              let reply : Json = {
-                "jsonrpc": "2.0",
-                "id": id,
-                "result": { "protocolVersion": "2025-11-25" },
-              }
-              conn.send_response(200, "OK", extra_headers={
-                "Content-Type": "application/json",
-              })
-              conn.write(reply.stringify())
-            }
+            { "method": String("initialize"), "id": id, .. } =>
+              answer_initialize(conn, id)
             { "method": String("tools/list"), "id": id, .. } => {
               conn.send_response(200, "OK", extra_headers={
                 "Content-Type": "text/event-stream",
@@ -244,16 +214,10 @@ async test "a server ping mid-stream is answered while the stream is open" {
         max_connections=8,
       )
     }
-    guard @streamhttp.connect(
-        group,
-        url="http://127.0.0.1:\{server.addr.port()}/mcp",
-        client_name="openseek",
-        client_version="0.1",
-        handshake_timeout_ms=10000,
-      )
-      is Some(conn) else {
-      fail("expected the http connect to succeed")
-    }
+    let conn = connect_or_fail(
+      group,
+      "http://127.0.0.1:\{server.addr.port()}/mcp",
+    )
     let tools = @async.with_timeout_opt(10000, () => conn.client().list_tools())
     guard tools is Some(tools) else {
       fail("tools/list deadlocked behind the mid-stream ping")
@@ -279,17 +243,8 @@ async test "an http error fails the request fast" {
             _ => Json::null()
           }
           match message {
-            { "method": String("initialize"), "id": id, .. } => {
-              let reply : Json = {
-                "jsonrpc": "2.0",
-                "id": id,
-                "result": { "protocolVersion": "2025-11-25" },
-              }
-              conn.send_response(200, "OK", extra_headers={
-                "Content-Type": "application/json",
-              })
-              conn.write(reply.stringify())
-            }
+            { "method": String("initialize"), "id": id, .. } =>
+              answer_initialize(conn, id)
             { "method": String("tools/list"), .. } => {
               conn.send_response(500, "Internal Server Error", extra_headers={
                 "Content-Type": "text/plain",
@@ -302,16 +257,10 @@ async test "an http error fails the request fast" {
         max_connections=8,
       )
     }
-    guard @streamhttp.connect(
-        group,
-        url="http://127.0.0.1:\{server.addr.port()}/mcp",
-        client_name="openseek",
-        client_version="0.1",
-        handshake_timeout_ms=10000,
-      )
-      is Some(conn) else {
-      fail("expected the http connect to succeed")
-    }
+    let conn = connect_or_fail(
+      group,
+      "http://127.0.0.1:\{server.addr.port()}/mcp",
+    )
     // Bounded well below any outer timeout: the failure must arrive promptly.
     let outcome = @async.with_timeout_opt(5000, () => {
       try {
@@ -350,17 +299,8 @@ async test "tools/list waits for the initialized notification to complete" {
             _ => Json::null()
           }
           match message {
-            { "method": String("initialize"), "id": id, .. } => {
-              let reply : Json = {
-                "jsonrpc": "2.0",
-                "id": id,
-                "result": { "protocolVersion": "2025-11-25" },
-              }
-              conn.send_response(200, "OK", extra_headers={
-                "Content-Type": "application/json",
-              })
-              conn.write(reply.stringify())
-            }
+            { "method": String("initialize"), "id": id, .. } =>
+              answer_initialize(conn, id)
             { "method": String("notifications/initialized"), .. } => {
               // A slow lifecycle handler: without the transport's gate, the
               // detached tools/list POST overtakes this notification.
@@ -386,19 +326,48 @@ async test "tools/list waits for the initialized notification to complete" {
         max_connections=8,
       )
     }
-    guard @streamhttp.connect(
-        group,
-        url="http://127.0.0.1:\{server.addr.port()}/mcp",
-        client_name="openseek",
-        client_version="0.1",
-        handshake_timeout_ms=10000,
-      )
-      is Some(conn) else {
-      fail("expected the http connect to succeed")
-    }
+    let conn = connect_or_fail(
+      group,
+      "http://127.0.0.1:\{server.addr.port()}/mcp",
+    )
     let tools = conn.client().list_tools()
     assert_eq(tools[0].name, "ordered")
     assert_true(list_saw_initialized.val)
     conn.shutdown()
   }
+} ///|
+/// Connect to a mock endpoint, failing the test rather than returning None.
+/// Every test but the unreachable-endpoint one wants exactly this.
+
+///|
+async fn connect_or_fail(
+  group : @async.TaskGroup[Unit],
+  url : String,
+) -> @streamhttp.HttpConnection {
+  guard @streamhttp.connect(
+      group,
+      url~,
+      client_name="openseek",
+      client_version="0.1",
+      handshake_timeout_ms=10000,
+    )
+    is Some(conn) else {
+    fail("expected the http connect to succeed")
+  }
+  conn
+}
+
+///|
+/// Answer a handshake the way every mock here does: 200, JSON, the protocol
+/// version the client asked for.
+async fn answer_initialize(conn : @http.ServerConnection, id : Json) -> Unit {
+  let reply : Json = {
+    "jsonrpc": "2.0",
+    "id": id,
+    "result": { "protocolVersion": "2025-11-25" },
+  }
+  conn.send_response(200, "OK", extra_headers={
+    "Content-Type": "application/json",
+  })
+  conn.write(reply.stringify())
 }
