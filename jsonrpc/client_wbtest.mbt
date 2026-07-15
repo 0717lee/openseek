@@ -102,6 +102,23 @@ fn error_for(request : Json, code : Int, message : String) -> Json {
 }
 
 ///|
+/// Issue a request expected to fail, rendering the outcome as a comparable
+/// string — so an unexpected success is a readable assertion rather than a
+/// hang. The cancellation guard is the easy thing to forget when adding the
+/// next one of these; it lives here now, once.
+async fn request_outcome(client : Client, method_ : String) -> String {
+  try {
+    client.request(method_~, params=Json::empty_object()) |> ignore
+    "no error raised"
+  } catch {
+    Failed(code~, message~) => "failed \{code} \{message}"
+    Closed => "closed"
+    error if @async.is_being_cancelled() => raise error
+    _ => "other error"
+  }
+}
+
+///|
 async test "concurrent requests each get their own reply even when answered out of order" {
   @async.with_task_group(group => {
     let transport = new_transport()
@@ -163,15 +180,7 @@ async test "a request raises Failed on a JSON-RPC error reply" {
     group.spawn_bg(no_wait=true, allow_failure=true, () => {
       transport.inbound.put(error_for(transport.outbound.get(), -32601, "nope"))
     })
-    let outcome = try {
-      client.request(method_="tools/call", params=Json::empty_object())
-      |> ignore
-      "no error raised"
-    } catch {
-      Failed(code~, message~) => "failed \{code} \{message}"
-      error if @async.is_being_cancelled() => raise error
-      _ => "other error"
-    }
+    let outcome = request_outcome(client, "tools/call")
     assert_eq(outcome, "failed -32601 nope")
   })
 }
@@ -193,14 +202,7 @@ async test "a reply with both result and error surfaces the error" {
         "error": { "code": -32000, "message": "both" },
       })
     })
-    let outcome = try {
-      client.request(method_="x", params=Json::empty_object()) |> ignore
-      "no error raised"
-    } catch {
-      Failed(code~, message~) => "failed \{code} \{message}"
-      error if @async.is_being_cancelled() => raise error
-      _ => "other error"
-    }
+    let outcome = request_outcome(client, "x")
     assert_eq(outcome, "failed -32000 both")
   })
 }
@@ -320,14 +322,7 @@ async test "a request fails with Closed when the transport ends without a reply"
       transport.outbound.get() |> ignore
       transport.inbound.close()
     })
-    let outcome = try {
-      client.request(method_="ping", params=Json::empty_object()) |> ignore
-      "no error raised"
-    } catch {
-      Closed => "closed"
-      error if @async.is_being_cancelled() => raise error
-      _ => "other error"
-    }
+    let outcome = request_outcome(client, "ping")
     assert_eq(outcome, "closed")
     assert_true(client.is_closed())
   })
@@ -343,14 +338,7 @@ async test "a failed send closes the client and stops both tasks" {
     })
     let pump = group.spawn(() => client.run_message_pump())
     let writer = group.spawn(() => client.run_writer())
-    let outcome = try {
-      client.request(method_="ping", params=Json::empty_object()) |> ignore
-      "no error raised"
-    } catch {
-      Closed => "closed"
-      error if @async.is_being_cancelled() => raise error
-      _ => "other error"
-    }
+    let outcome = request_outcome(client, "ping")
     assert_eq(outcome, "closed")
     assert_true(client.is_closed())
     pump.wait()
@@ -391,14 +379,7 @@ async test "a request after close raises Closed and notify is a no-op" {
     let client = Client::new(transport)
     client.close()
     assert_true(client.is_closed())
-    let outcome = try {
-      client.request(method_="ping", params=Json::empty_object()) |> ignore
-      "returned"
-    } catch {
-      Closed => "closed"
-      error if @async.is_being_cancelled() => raise error
-      _ => "other error"
-    }
+    let outcome = request_outcome(client, "ping")
     assert_eq(outcome, "closed")
     // notify after close must not raise.
     client.notify(

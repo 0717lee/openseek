@@ -160,10 +160,7 @@ test "classify_incoming treats a present null id as a peer request" {
 
 ///|
 test "classify_incoming treats an id-less, method-less message as unknown" {
-  match classify_incoming({ "jsonrpc": "2.0" }) {
-    Unknown => ()
-    _ => fail("expected Unknown")
-  }
+  assert_true(classify_incoming({ "jsonrpc": "2.0" }) is Unknown)
 }
 
 ///|
