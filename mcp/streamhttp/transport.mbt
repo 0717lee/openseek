@@ -182,15 +182,14 @@ pub impl @jsonrpc.Transport for HttpTransport with fn send(self, message) {
   }
   // Remember the initialize request's id so its reply can fix the negotiated
   // protocol version for later headers.
-  if message is { "method": String("initialize"), "id": id, .. } {
+  if message is { "method": "initialize", "id": id, .. } {
     self.initialize_id = Some(id)
   }
   // The lifecycle notification opens the ordering gate; every later POST must
   // wait behind it (see `initialized_gate`). Which gate (if any) this POST
   // awaits is decided HERE, at dispatch order, not when the task first runs.
   let gate = self.initialized_gate
-  let opens_gate = message
-    is { "method": String("notifications/initialized"), .. }
+  let opens_gate = message is { "method": "notifications/initialized", .. }
   let completion : @async.Queue[Unit]? = if opens_gate {
     let completion : @async.Queue[Unit] = Queue(kind=Unbounded)
     self.initialized_gate = Some(completion)
@@ -386,7 +385,7 @@ async fn HttpTransport::exchange(
   let response = client.end_request()
   // The spec assigns the session id on the initialize response only; capturing
   // it elsewhere would let a later (or misbehaving) response rebind the session.
-  if message is { "method": String("initialize"), .. } &&
+  if message is { "method": "initialize", .. } &&
     header_value(response.headers, "Mcp-Session-Id") is Some(session_id) {
     self.session_id = Some(session_id)
   }

@@ -63,7 +63,7 @@ async fn mock_mcp_endpoint(
         }
         let message = @json.parse(text) catch { _ => Json::null() }
         match message {
-          { "method": String("initialize"), "id": id, .. } => {
+          { "method": "initialize", "id": id, .. } => {
             let reply : Json = {
               "jsonrpc": "2.0",
               "id": id,
@@ -78,7 +78,7 @@ async fn mock_mcp_endpoint(
             })
             conn.write(reply.stringify())
           }
-          { "method": String("tools/list"), "id": id, .. } => {
+          { "method": "tools/list", "id": id, .. } => {
             for key, value in request.headers {
               match key.to_lower() {
                 "mcp-session-id" => seen.session_id = value
@@ -181,9 +181,9 @@ async test "a server ping mid-stream is answered while the stream is open" {
             _ => Json::null()
           }
           match message {
-            { "method": String("initialize"), "id": id, .. } =>
+            { "method": "initialize", "id": id, .. } =>
               answer_initialize(conn, id)
-            { "method": String("tools/list"), "id": id, .. } => {
+            { "method": "tools/list", "id": id, .. } => {
               conn.send_response(200, "OK", extra_headers={
                 "Content-Type": "text/event-stream",
               })
@@ -195,7 +195,7 @@ async test "a server ping mid-stream is answered while the stream is open" {
               )
               conn.flush()
               let pong = pongs.get()
-              assert_true(pong is { "id": String("srv-ping"), "result": _, .. })
+              assert_true(pong is { "id": "srv-ping", "result": _, .. })
               let reply : Json = {
                 "jsonrpc": "2.0",
                 "id": id,
@@ -204,7 +204,7 @@ async test "a server ping mid-stream is answered while the stream is open" {
               conn.write("data: \{reply.stringify()}\n\n")
             }
             // The pong (a response, no method) — route it to the stream handler.
-            { "id": String("srv-ping"), .. } => {
+            { "id": "srv-ping", .. } => {
               pongs.put(message)
               conn.send_response(202, "Accepted")
             }
@@ -243,9 +243,9 @@ async test "an http error fails the request fast" {
             _ => Json::null()
           }
           match message {
-            { "method": String("initialize"), "id": id, .. } =>
+            { "method": "initialize", "id": id, .. } =>
               answer_initialize(conn, id)
-            { "method": String("tools/list"), .. } => {
+            { "method": "tools/list", .. } => {
               conn.send_response(500, "Internal Server Error", extra_headers={
                 "Content-Type": "text/plain",
               })
@@ -299,16 +299,16 @@ async test "tools/list waits for the initialized notification to complete" {
             _ => Json::null()
           }
           match message {
-            { "method": String("initialize"), "id": id, .. } =>
+            { "method": "initialize", "id": id, .. } =>
               answer_initialize(conn, id)
-            { "method": String("notifications/initialized"), .. } => {
+            { "method": "notifications/initialized", .. } => {
               // A slow lifecycle handler: without the transport's gate, the
               // detached tools/list POST overtakes this notification.
               @async.sleep(150)
               initialized_done.val = true
               conn.send_response(202, "Accepted")
             }
-            { "method": String("tools/list"), "id": id, .. } => {
+            { "method": "tools/list", "id": id, .. } => {
               list_saw_initialized.val = initialized_done.val
               let reply : Json = {
                 "jsonrpc": "2.0",
