@@ -61,6 +61,7 @@ pub(all) enum Event {
   McpListToolsTimeout(server~ : String)
   McpNoTools(server~ : String)
 } derive(Eq, @debug.Debug)
+pub fn Event::to_json(Self) -> Json
 
 pub(all) struct Usage {
   prompt_tokens : Int

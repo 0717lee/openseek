@@ -259,6 +259,26 @@ exit-non-zero
 cli-<stamp>
 ```
 
+The stdout stream is a protocol, not a log, so a logging environment variable
+must not be able to silence it. `@xlog`'s root level comes from `MOON_XLOG`, and
+every event is info/warn/error — so `MOON_XLOG=warn` once dropped the whole
+stream, and a TUI attached to that engine rendered nothing with no error to
+explain it. The engine pins its own level instead.
+
+```mooncram
+$ sh <<'EOF'
+> tmp=$(mktemp -d)
+> cd "$tmp"
+> for level in warn error; do
+>   env DEEPSEEK=test-key MOON_XLOG=$level openseek.exe run --api-url "http://127.0.0.1:9/chat/completions" --dir "$tmp/$level" "say hi" > "out-$level.jsonl" 2>/dev/null
+>   echo "$level: $(grep -c '"event":"agent_step"' "out-$level.jsonl")"
+> done
+> rm -rf "$tmp"
+> EOF
+warn: 1
+error: 1
+```
+
 `--no-session` turns recording off: the same failing run leaves no session root
 behind.
 

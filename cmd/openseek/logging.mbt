@@ -68,6 +68,15 @@ fn FlushedStdout::close(self : FlushedStdout) -> Unit {
 /// stdout-only rather than failing the run.
 fn configure_logging() -> FlushedStdout {
   let stdout = FlushedStdout()
+  // The stdout stream is a PROTOCOL, not a log: its level is not the user's to
+  // lower. `@xlog`'s root level otherwise comes from `MOON_XLOG`, and every
+  // protocol event is info/warn/error — so `MOON_XLOG=warn openseek serve`
+  // dropped `assistant_delta`, `agent_step`, `usage` and `session_started`, and
+  // a TUI attached to that engine rendered nothing at all, with no error to
+  // explain it. Nothing here logs below `Info`, so pinning it costs no
+  // diagnostics; a line the level admits that is not an event still decodes to
+  // `None` at every reader.
+  @xlog.global().set_level(Info)
   guard @env.get_env_var("OPENSEEK_LOG_FILE") is Some(path) && path != "" else {
     @xlog.global().set_handler(stdout)
     return stdout
