@@ -1,47 +1,70 @@
-# `goal` — the structured goal-status tool
+# Goal Tool
 
-The `goal` tool is how the model reports where the **standing session goal**
-stands, as data instead of prose. It exists so the engine can stop, chain, or
-keep working on a durable signal — never on parsing the model's phrasing.
+`goal` reports a structured verdict about the standing session goal. The
+agent loop uses that verdict to decide whether to stop autonomous work,
+continue it in another turn, or pause for the user. It never has to infer goal
+state from prose in the assistant response.
+
+The tool is registered only while a goal stands. Calling it without a standing
+goal is a semantic error handled by the agent loop.
 
 ## Arguments
 
-- `status` (string, required): `"met"` or `"continuing"`.
-- `remaining` (string, required when `status` is `"continuing"`): what is
-  still left to do — must be non-blank, because this text is the durable
-  record whoever (or whatever turn) resumes the goal will read.
+| `status` | Required companion field | Meaning |
+| --- | --- | --- |
+| `"met"` | none | The goal is fully achieved and verified. |
+| `"continuing"` | `remaining` (non-blank string) | Work remains and can continue autonomously. |
+| `"blocked"` | `reason` (non-blank string) | Progress requires user action or an external-state change. |
 
-## Result
+`blocked` is for a genuine impasse, not a failed command or another recoverable
+problem. A later `continuing` verdict resumes a blocked goal.
 
-This package only **decodes**; the action is the agent loop's. The loop
-intercepts a `goal` call instead of dispatching it like an ordinary tool:
+The JSON schema declares unknown fields invalid. Conditional requirements for
+`remaining` and `reason` are enforced by the decoder in
+`agent_tool/goal/internal/decode`.
 
-- `goal(met)` — the standing goal stops standing immediately (the finish
-  check disarms) and a durable `[goal cleared]` tombstone lands at the next
-  batch-safe boundary. Under auto-continue this is the **structural stop**:
-  the chain ends on the tombstone, not on trusting an answer's wording.
-- `goal(continuing)` — answers exactly what the finish check asks, so the
-  check disarms for the rest of the turn and the turn may end with the goal
-  still standing; `remaining` is recorded for the next turn.
-- Invalid arguments come back as an error tool result naming the exact
-  problem, so the model can re-issue the call without guessing.
+## Lifecycle Effects
 
-The tool is registered only while a goal stands; `GoalCadence` selects the
-tool-aware finish-check wording when it is (see `agent/goal.mbt`).
+- `met` clears the standing goal. The loop writes a durable `[goal cleared]`
+  marker at the next batch-safe boundary; under auto-continuation, that marker
+  is the structural stop signal.
+- `continuing` records the actionable remainder and satisfies the finish check
+  for the current turn. The goal remains standing. If it was blocked, the loop
+  also records `[goal unblocked]` and resumes auto-continuation.
+- `blocked` records why work cannot proceed and writes `[goal blocked]`. The
+  goal remains standing for the user, but auto-continuation pauses.
 
-## Example
+The agent loop intercepts `goal` calls because it owns the standing state and
+durable log. The definition's executor is only a stateless fallback for direct
+registry dispatch: it validates the arguments and responds without changing
+goal state.
 
-```moonbit check
+## Schema
+
+This checked example doubles as a readable snapshot of the tool's public JSON
+contract:
+
+```mbt check
 ///|
-test "goal arguments decode to structured verdicts" {
-  assert_true(@goal.decode_status({ "status": "met" }) is Ok(Met))
-  assert_true(
-    @goal.decode_status({ "status": "continuing", "remaining": "wire the CLI" })
-    is Ok(Continuing("wire the CLI")),
-  )
-  // A blank `remaining` is rejected: the durable record must be actionable.
-  assert_true(
-    @goal.decode_status({ "status": "continuing", "remaining": "  " }) is Err(_),
-  )
+test "goal tool schema" {
+  let tool = @goal.definition()
+  assert_eq(tool.name, "goal")
+  assert_true(tool.control)
+  json_inspect(tool.schema.0, content={
+    "type": "object",
+    "properties": {
+      "status": { "type": "string", "enum": ["met", "continuing", "blocked"] },
+      "remaining": {
+        "type": "string",
+        "description": "Required when status is \"continuing\": one or two lines on what is left to reach the goal.",
+      },
+      "reason": {
+        "type": "string",
+        "description": "Why the goal cannot proceed; required with status \"blocked\".",
+      },
+    },
+    "required": ["status"],
+    "additionalProperties": false,
+  })
 }
 ```

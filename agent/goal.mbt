@@ -310,6 +310,29 @@ async fn AgentLoop::flush_goal_tombstone(
 /// finish check. Either with no standing goal is an error result — a
 /// semantic assertion against missing state should read as model confusion
 /// in the transcript, not success.
+fn decode_goal_status(arguments : Json) -> Result[@goal.GoalStatus, String] {
+  try @goal.decode_status(arguments) catch {
+    error => Err(goal_decode_failure_message("\{error}"))
+  } noraise {
+    status => Ok(status)
+  }
+}
+
+///|
+/// Strip MoonBit's source-bearing `fail(...)` wrapper at the agent boundary.
+/// Tool packages normally share `agent_tool/internal/error`, but the agent is
+/// outside that internal visibility boundary.
+fn goal_decode_failure_message(error_text : String) -> String {
+  let marker = " FAILED: "
+  guard error_text.rev_find(marker) is Some(cut) else { return error_text }
+  let message = error_text[cut + marker.length():]
+  match message.strip_suffix(")") {
+    Some(trimmed) => trimmed.to_owned()
+    None => message.to_owned()
+  }
+}
+
+///|
 async fn AgentLoop::handle_goal_tool_call(
   self : Self,
   session : @agent_session.Session,
@@ -317,7 +340,7 @@ async fn AgentLoop::handle_goal_tool_call(
   tool_call : @agent_tool.AgentToolCall,
 ) -> ToolCallOutcome {
   let verdict = (
-    @goal.decode_status(tool_call.arguments),
+    decode_goal_status(tool_call.arguments),
     self.goal_cadence.goal,
   )
   // A continue that resumes a durably blocked goal reports the resume, so the
