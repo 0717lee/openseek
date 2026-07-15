@@ -3,7 +3,6 @@ package "bobzhang/openseek_protocol"
 
 import {
   "moonbitlang/core/debug",
-  "moonbitlang/core/json",
 }
 
 // Values
@@ -69,7 +68,7 @@ pub(all) struct Usage {
   total_tokens : Int
   prompt_cache_hit_tokens : Int
   prompt_cache_miss_tokens : Int
-} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
+} derive(Eq, ToJson, @debug.Debug)
 
 // Type aliases
 
