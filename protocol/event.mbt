@@ -77,10 +77,13 @@ pub(all) enum Event {
   ContextYield(to_sequence~ : Int, answer~ : String)
 
   // ── session / workspace ────────────────────────────────────────────────
+  /// `workspace_root` is optional because it postdates the event: engines
+  /// between d11e04c2 (which added `session_started`) and d5d0b208 (which
+  /// added `--dir`) emit only `session` and `session_root`. No client reads it.
   SessionStarted(
     session~ : String,
     session_root~ : String,
-    workspace_root~ : String
+    workspace_root~ : String?
   )
   SessionError(error~ : String)
   WorkspaceCreated(dir~ : String)

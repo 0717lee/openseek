@@ -106,7 +106,7 @@ pub fn Event::to_json(self : Event) -> Json {
         "event": "session_started",
         "session": session,
         "session_root": session_root,
-        "workspace_root": workspace_root,
+        "workspace_root": or_null(workspace_root),
       }
     SessionError(error~) => { "event": "session_error", "error": error }
     WorkspaceCreated(dir~) => { "event": "workspace_created", "dir": dir }

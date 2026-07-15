@@ -175,7 +175,7 @@ async fn run_task_command(matches : @argparse.Matches) -> Unit {
           SessionStarted(
             session=id.value(),
             session_root=session_root(matches, workspace_root~),
-            workspace_root~,
+            workspace_root=Some(workspace_root),
           ),
         )
         let store = @store.SessionStore(session_root(matches, workspace_root~))

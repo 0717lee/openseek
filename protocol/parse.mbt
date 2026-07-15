@@ -24,9 +24,15 @@
 /// absence means the line is not what it claims to be. Guessing there would
 /// hide a real wire break behind a fabricated value.
 ///
-/// Today exactly one field qualifies: `steer_applied`'s `kind` (added
-/// 2026-06-25 in 9b2f6c43, to an event from 56140618). Check `git log -S` for
-/// the field against the event's introducing commit before adding another.
+/// Three fields qualify today, each verified against `git log -S` for the field
+/// versus its event's introducing commit — the check to run before adding a
+/// fourth, and the one that catches a field wrongly made required:
+///
+/// - `steer_applied`'s `kind` — added 9b2f6c43 (2026-06-25) to an event from
+///   56140618.
+/// - `session_started`'s `workspace_root` — added d5d0b208 (2026-06-13, with
+///   `--dir`) to an event from d11e04c2 (2026-06-12).
+/// - `tool_result`'s `brief` — added 4eacdc95 to an event from 1f761102.
 pub fn parse(line : Json) -> Event? {
   guard line is Object(fields) else { return None }
   guard text(fields, "event") is Some(name) else { return None }
@@ -46,10 +52,28 @@ pub fn parse(line : Json) -> Event? {
       text(fields, "content").map(content => AssistantMessage(content~))
     "reasoning_message" =>
       text(fields, "content").map(content => ReasoningMessage(content~))
+    // Decoded field by field rather than through `Usage`'s derived `FromJson`,
+    // which reads a fractional number as an `Int` by truncating it: a counter
+    // of `1.5` is not a token count, and every other integer on the wire is
+    // rejected for exactly that. `int` is the same check used at the top level.
     "usage" => {
-      guard fields.get("usage") is Some(usage) else { return None }
-      let usage : Usage = @json.from_json(usage) catch { _ => return None }
-      Some(Usage(usage~))
+      guard fields.get("usage") is Some(Object(usage)) &&
+        int(usage, "prompt_tokens") is Some(prompt_tokens) &&
+        int(usage, "completion_tokens") is Some(completion_tokens) &&
+        int(usage, "total_tokens") is Some(total_tokens) &&
+        int(usage, "prompt_cache_hit_tokens") is Some(prompt_cache_hit_tokens) &&
+        int(usage, "prompt_cache_miss_tokens") is Some(prompt_cache_miss_tokens) else {
+        return None
+      }
+      Some(
+        Usage(usage={
+          prompt_tokens,
+          completion_tokens,
+          total_tokens,
+          prompt_cache_hit_tokens,
+          prompt_cache_miss_tokens,
+        }),
+      )
     }
     "tool_result" => {
       guard text(fields, "tool_call_id") is Some(tool_call_id) &&
@@ -142,11 +166,16 @@ pub fn parse(line : Json) -> Event? {
     }
     "session_started" => {
       guard text(fields, "session") is Some(session) &&
-        text(fields, "session_root") is Some(session_root) &&
-        text(fields, "workspace_root") is Some(workspace_root) else {
+        text(fields, "session_root") is Some(session_root) else {
         return None
       }
-      Some(SessionStarted(session~, session_root~, workspace_root~))
+      Some(
+        SessionStarted(
+          session~,
+          session_root~,
+          workspace_root=text(fields, "workspace_root"),
+        ),
+      )
     }
     "session_error" => text(fields, "error").map(error => SessionError(error~))
     "workspace_created" =>

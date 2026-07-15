@@ -125,6 +125,45 @@ test "an older engine's steer_applied still decodes" {
 }
 
 ///|
+/// `session_started` predates `--dir`: engines between d11e04c2 (which added the
+/// event) and d5d0b208 (which added the workspace option) emit only `session`
+/// and `session_root`. Same rule as `steer_applied`'s `kind` — a field added
+/// after its event must not decide whether the event decodes.
+test "an older engine's session_started still decodes" {
+  debug_inspect(
+    decode(
+      (
+        #|{"event":"session_started","session":"cli-1","session_root":".openseek"}
+      ),
+    ),
+    content=(
+      #|Some(
+      #|  SessionStarted(
+      #|    session="cli-1",
+      #|    session_root=".openseek",
+      #|    workspace_root=None,
+      #|  ),
+      #|)
+    ),
+  )
+}
+
+///|
+/// A token counter is an integer. `Usage`'s derived `FromJson` would read `1.5`
+/// as `1`; every other integer on the wire is rejected instead of truncated, and
+/// a fabricated count is worse than a dropped line.
+test "a fractional usage counter is rejected, not truncated" {
+  assert_eq(
+    decode(
+      (
+        #|{"event":"usage","usage":{"prompt_tokens":1.5,"completion_tokens":2,"total_tokens":3,"prompt_cache_hit_tokens":0,"prompt_cache_miss_tokens":1}}
+      ),
+    ),
+    None,
+  )
+}
+
+///|
 /// A line from a newer engine, or one that is not an event at all, is ignored
 /// rather than failing the reader.
 test "unknown and malformed lines are ignored" {

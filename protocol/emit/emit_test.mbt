@@ -115,7 +115,12 @@ fn all_events() -> Array[@protocol.Event] {
     SessionStarted(
       session="cli-1",
       session_root=".openseek",
-      workspace_root="/w",
+      workspace_root=Some("/w"),
+    ),
+    SessionStarted(
+      session="cli-1",
+      session_root=".openseek",
+      workspace_root=None,
     ),
     SessionError(error="failed to append user"),
     WorkspaceCreated(dir="/w"),
@@ -231,6 +236,27 @@ test "usage carries the protocol struct verbatim" {
     wire(Usage(usage=usage_sample())),
     content=(
       #|{"level":"INFO","event":"usage","usage":{"prompt_tokens":11,"completion_tokens":22,"total_tokens":33,"prompt_cache_hit_tokens":4,"prompt_cache_miss_tokens":7}}
+    ),
+  )
+}
+
+///|
+/// `workspace_root` is `String?` because it postdates the event, but a current
+/// engine always has one — so the line a current engine writes is the bare
+/// string, byte for byte what it was before the field became optional. This is
+/// what stops "make it optional for old engines" from quietly changing the wire
+/// for new ones.
+test "session_started still writes workspace_root as a bare string" {
+  inspect(
+    wire(
+      SessionStarted(
+        session="cli-1",
+        session_root=".openseek",
+        workspace_root=Some("/w"),
+      ),
+    ),
+    content=(
+      #|{"level":"INFO","event":"session_started","session":"cli-1","session_root":".openseek","workspace_root":"/w"}
     ),
   )
 }

@@ -43,7 +43,7 @@ pub(all) enum Event {
   AutoCompactionFinished(from_sequence~ : Int, to_sequence~ : Int, summary~ : String)
   AutoCompactionFailed(error~ : String)
   ContextYield(to_sequence~ : Int, answer~ : String)
-  SessionStarted(session~ : String, session_root~ : String, workspace_root~ : String)
+  SessionStarted(session~ : String, session_root~ : String, workspace_root~ : String?)
   SessionError(error~ : String)
   WorkspaceCreated(dir~ : String)
   CommandError(error~ : String)
