@@ -56,11 +56,7 @@ pub fn tool_name(server : String, tool : String) -> String {
 fn sanitize_segment(segment : String) -> String {
   let out = StringBuilder()
   for ch in segment {
-    if (ch >= 'a' && ch <= 'z') ||
-      (ch >= 'A' && ch <= 'Z') ||
-      (ch >= '0' && ch <= '9') ||
-      ch == '_' ||
-      ch == '-' {
+    if ch.is_ascii_alphabetic() || ch.is_ascii_digit() || ch == '_' || ch == '-' {
       out.write_char(ch)
     } else {
       out.write_char('-')
@@ -145,9 +141,7 @@ pub async fn[X] build(
       discovery_timeout_ms~,
     ) {
     let (_, contributed) = entry
-    for tool in contributed {
-      tools.push(tool)
-    }
+    tools.append(contributed)
   }
   tools
 }
