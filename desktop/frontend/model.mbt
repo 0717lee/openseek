@@ -201,7 +201,6 @@ priv struct Conversation {
   // `assistant_delta` / `reasoning_delta` events and cleared once the engine
   // commits the full message (or the step/run ends). Empty means not streaming.
   streaming_response : String
-  streaming_reasoning : String
   // Steering input sent to the running turn but not yet settled by the
   // engine: it echoes each steer back as `steer_applied` (folded into the
   // turn at a step boundary) or `steer_dropped` (raced the turn's end).
@@ -728,7 +727,6 @@ fn empty_conversation(
     branch: None,
     watcher_status: "",
     streaming_response: "",
-    streaming_reasoning: "",
     pending_steers: [],
     messages: [],
   }
@@ -1028,7 +1026,7 @@ fn Conversation::is_running(self : Conversation) -> Bool {
 
 ///|
 fn Conversation::clear_streams(self : Conversation) -> Conversation {
-  { ..self, streaming_response: "", streaming_reasoning: "" }
+  { ..self, streaming_response: "" }
 }
 
 ///|

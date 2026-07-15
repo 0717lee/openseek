@@ -4,11 +4,11 @@
 /// each case carries only the fields that event actually uses and the match
 /// is exhaustive.
 pub(all) enum EngineEvent {
-  // The 1-based step counter (`step`); `None` for an engine build that does
-  // not number its steps.
+  // The 1-based step counter. Optional only because the run stage that
+  // carries it (`AtStep`) is: every engine that emits `agent_step` has
+  // numbered it (1f761102, the commit that introduced both).
   AgentStep(Int?)
   AssistantDelta(String)
-  ReasoningDelta(String)
   ReasoningMessage(String)
   AssistantMessage(String)
   RuntimeUpdate(String)
@@ -51,78 +51,76 @@ pub(all) enum EngineEvent {
 /// stringly-typed tag nor a fabricated placeholder ever escapes into the
 /// update logic.
 pub fn decode_engine_event(raw : Map[String, Json]) -> EngineEvent? {
-  // Older engine builds wrote `error` where current ones write `reason`
-  // (the host's synthesized `compaction_failed` also says `reason`); the
-  // current name wins when both are present.
-  let content = @jsonx.json_text(raw, "content")
-  let reason = @jsonx.json_first_text(raw, "reason", "error")
-  guard @jsonx.json_text(raw, "event") is Some(event) else { return None }
+  guard @protocol.parse(Json::object(raw)) is Some(event) else { return None }
   match event {
-    "agent_step" => Some(AgentStep(@jsonx.json_int(raw, "step")))
-    "assistant_delta" => content.map(content => AssistantDelta(content))
-    "reasoning_delta" => content.map(content => ReasoningDelta(content))
-    "reasoning_message" => content.map(content => ReasoningMessage(content))
-    "assistant_message" => content.map(content => AssistantMessage(content))
+    AgentStep(step~) => Some(AgentStep(Some(step)))
+    AssistantDelta(content~) => Some(AssistantDelta(content))
+    ReasoningMessage(content~) => Some(ReasoningMessage(content))
+    AssistantMessage(content~) => Some(AssistantMessage(content))
     // A background job's completion notice (the `moon_check --watch` stream),
-    // emitted while the engine is idle. `runtime_update` is the event's
-    // legacy name. The engine's `plan_reminder` is deliberately not decoded:
-    // it is model-directed text, not a notice for the user (the TUI drops it
-    // too).
-    "background_notice" => content.map(content => RuntimeUpdate(content))
-    "runtime_update" => content.map(content => RuntimeUpdate(content))
-    "usage" => {
-      // The engine nests the counters under a `usage` object
-      // (`print_usage` serializes the DeepSeek `Usage` struct verbatim,
-      // whose counters are plain always-present ints).
-      guard raw.get("usage") is Some(Object(usage)) &&
-        @jsonx.json_int(usage, "prompt_tokens") is Some(prompt_tokens) &&
-        @jsonx.json_int(usage, "completion_tokens") is Some(completion_tokens) else {
-        return None
-      }
-      Some(Usage(prompt_tokens~, completion_tokens~))
-    }
-    "tool_result" => {
-      guard @jsonx.json_text(raw, "tool_name") is Some(tool_name) &&
-        @jsonx.json_bool(raw, "is_error") is Some(is_error) &&
-        @jsonx.json_text(raw, "content") is Some(content) else {
-        return None
-      }
+    // emitted while the engine is idle. `RuntimeUpdate` is this view's older
+    // name for it, kept because the transcript item and its parser use it.
+    BackgroundNotice(content~) => Some(RuntimeUpdate(content))
+    Usage(usage~) =>
       Some(
-        ToolResult(
-          tool_name~,
-          is_error~,
-          content~,
-          brief=@jsonx.json_text(raw, "brief"),
+        Usage(
+          prompt_tokens=usage.prompt_tokens,
+          completion_tokens=usage.completion_tokens,
         ),
       )
-    }
-    "tool_call_decode_error" => {
-      guard @jsonx.json_text(raw, "tool_name") is Some(tool_name) &&
-        reason is Some(reason) else {
-        return None
-      }
-      Some(ToolCallDecodeError(tool_name~, reason~))
-    }
-    "agent_finished" =>
-      @jsonx.json_text(raw, "answer").map(answer => AgentFinished(answer))
-    "context_yield" =>
-      @jsonx.json_text(raw, "answer").map(answer => ContextYield(answer))
-    "agent_aborted" => reason.map(reason => AgentAborted(reason))
-    "max_steps_exhausted" => Some(MaxStepsExhausted)
-    "agent_setup_failed" => reason.map(reason => AgentSetupFailed(reason))
-    "steer_applied" => content.map(content => SteerApplied(content))
-    "steer_dropped" => content.map(content => SteerDropped(content))
-    "auto_compaction_finished" =>
-      @jsonx.json_text(raw, "summary").map(summary => {
-        AutoCompactionFinished(summary)
-      })
-    "compaction_started" => Some(CompactionStarted)
-    "compaction_finished" =>
-      @jsonx.json_text(raw, "summary").map(summary => {
-        CompactionFinished(summary)
-      })
-    "compaction_failed" => reason.map(reason => CompactionFailed(reason))
-    _ => None
+    ToolResult(tool_name~, is_error~, content~, brief~, ..) =>
+      Some(ToolResult(tool_name~, is_error~, content~, brief~))
+    ToolCallDecodeError(tool_name~, error~, ..) =>
+      Some(ToolCallDecodeError(tool_name~, reason=error))
+    AgentFinished(answer~) => Some(AgentFinished(answer))
+    ContextYield(answer~, ..) => Some(ContextYield(answer))
+    AgentAborted(reason~) => Some(AgentAborted(reason))
+    MaxStepsExhausted => Some(MaxStepsExhausted)
+    AgentSetupFailed(error~) => Some(AgentSetupFailed(error))
+    SteerApplied(content~, ..) => Some(SteerApplied(content))
+    SteerDropped(content~) => Some(SteerDropped(content))
+    AutoCompactionFinished(summary~, ..) => Some(AutoCompactionFinished(summary))
+    CompactionStarted(..) => Some(CompactionStarted)
+    CompactionFinished(summary~, ..) => Some(CompactionFinished(summary))
+    CompactionFailed(error~) => Some(CompactionFailed(error))
+    // Not shown, and now each one a recorded decision rather than a line the
+    // view drops unnoticed. `plan_reminder`, the goal reminders/checks and the
+    // block/unblock markers are model-directed text, not news for the user (the
+    // TUI drops them too); `goal_updated` and the auto-continue budget are
+    // headless-run concerns the desktop does not drive; `session_error`,
+    // `turn_failed` and `command_error` reach the view as the host's normalized
+    // error, not as stream events; `auto_compaction_started/failed` are internal
+    // to an open turn, unlike the finish this view previews;
+    // `session_started`/`workspace_created`/`fleet_started` describe a headless
+    // run's setup; the MCP events are engine-side registry diagnostics.
+    GoalUpdated(..)
+    | GoalBlocked(..)
+    | GoalUnblocked
+    | GoalCheck(..)
+    | GoalReminder(..)
+    | GoalContinue(..)
+    | GoalBudgetExhausted(..)
+    | PlanReminder(..)
+    | SessionError(..)
+    | TurnFailed(..)
+    | CommandError(..)
+    | AutoCompactionStarted(..)
+    | AutoCompactionFailed(..)
+    | SessionStarted(..)
+    | WorkspaceCreated(..)
+    | FleetStarted(..)
+    | McpConfigIgnored(..)
+    | McpConfigUnreadable(..)
+    | McpConfigInvalid(..)
+    | McpToolsRegistered(..)
+    | McpToolDuplicate(..)
+    | McpToolRenamed(..)
+    | McpToolsCapped(..)
+    | McpServerSkippedOverCap(..)
+    | McpConnectFailed(..)
+    | McpListToolsFailed(..)
+    | McpListToolsTimeout(..)
+    | McpNoTools(..) => None
   }
 }
 
@@ -141,12 +139,6 @@ test "decode recognizes the streaming events" {
     fail("assistant_delta not decoded")
   }
   guard decode_engine_event(
-      event_fields({ "event": "reasoning_delta", "content": "th" }),
-    )
-    is Some(ReasoningDelta("th")) else {
-    fail("reasoning_delta not decoded")
-  }
-  guard decode_engine_event(
       event_fields({ "event": "reasoning_message", "content": "all" }),
     )
     is Some(ReasoningMessage("all")) else {
@@ -155,28 +147,16 @@ test "decode recognizes the streaming events" {
 }
 
 ///|
-test "decode normalizes legacy names, numbers, and unknown events" {
-  // The engine numbers its steps; a build that does not still yields the
-  // event, just without a counter.
+test "decode normalizes numbers and unknown events" {
   assert_true(
     decode_engine_event(event_fields({ "event": "agent_step", "step": 3 }))
     is Some(AgentStep(Some(3))),
   )
-  assert_true(
-    decode_engine_event(event_fields({ "event": "agent_step" }))
-    is Some(AgentStep(None)),
-  )
-  // Older engines wrote `error` where current ones write `reason`; the
-  // current name wins when both are present.
+  // `agent_aborted` has carried `reason` since it existed (1f761102); the
+  // `error` spelling this decoder used to also accept was never emitted.
   assert_true(
     decode_engine_event(
-      event_fields({ "event": "agent_aborted", "error": "boom" }),
-    )
-    is Some(AgentAborted("boom")),
-  )
-  assert_true(
-    decode_engine_event(
-      event_fields({ "event": "agent_aborted", "reason": "now", "error": "old" }),
+      event_fields({ "event": "agent_aborted", "reason": "now" }),
     )
     is Some(AgentAborted("now")),
   )
@@ -184,7 +164,13 @@ test "decode normalizes legacy names, numbers, and unknown events" {
     decode_engine_event(
       event_fields({
         "event": "usage",
-        "usage": { "prompt_tokens": 5, "completion_tokens": 7 },
+        "usage": {
+          "prompt_tokens": 5,
+          "completion_tokens": 7,
+          "total_tokens": 12,
+          "prompt_cache_hit_tokens": 0,
+          "prompt_cache_miss_tokens": 5,
+        },
       }),
     )
     is Some(Usage(prompt_tokens=5, completion_tokens=7)),
@@ -215,6 +201,7 @@ test "decode normalizes legacy names, numbers, and unknown events" {
     decode_engine_event(
       event_fields({
         "event": "tool_result",
+        "tool_call_id": "call_1",
         "tool_name": "read",
         "is_error": false,
         "content": "…",
@@ -227,6 +214,7 @@ test "decode normalizes legacy names, numbers, and unknown events" {
     decode_engine_event(
       event_fields({
         "event": "tool_result",
+        "tool_call_id": "call_1",
         "tool_name": "read",
         "is_error": false,
         "content": "…",
@@ -239,8 +227,9 @@ test "decode normalizes legacy names, numbers, and unknown events" {
 
 ///|
 test "decode maps background notices onto the runtime-update path" {
-  // Current engines say `background_notice`; `runtime_update` is the same
-  // event's legacy name. Both carry the watcher text verbatim.
+  // `RuntimeUpdate` is this view's older name for a background notice; the
+  // `runtime_update` wire event itself has not been emitted since 4b1ec831
+  // (2026-07-05) removed its producer.
   guard decode_engine_event(
       event_fields({
         "event": "background_notice",
@@ -249,12 +238,6 @@ test "decode maps background notices onto the runtime-update path" {
     )
     is Some(RuntimeUpdate("[moon_check update]")) else {
     fail("background_notice not decoded")
-  }
-  guard decode_engine_event(
-      event_fields({ "event": "runtime_update", "content": "notice" }),
-    )
-    is Some(RuntimeUpdate("notice")) else {
-    fail("runtime_update not decoded")
   }
   // The engine's plan reminder is model-directed text, not a user notice.
   assert_true(
@@ -286,6 +269,8 @@ test "decode recognizes automatic checkpoint and context yield events" {
   guard decode_engine_event(
       event_fields({
         "event": "auto_compaction_finished",
+        "from_sequence": 1,
+        "to_sequence": 12,
         "summary": "checkpoint recap",
       }),
     )
@@ -295,6 +280,7 @@ test "decode recognizes automatic checkpoint and context yield events" {
   guard decode_engine_event(
       event_fields({
         "event": "context_yield",
+        "to_sequence": 30,
         "answer": "[context ceiling] continue in a new turn",
       }),
     )
@@ -305,12 +291,23 @@ test "decode recognizes automatic checkpoint and context yield events" {
 
 ///|
 test "decode recognizes the compaction lifecycle events" {
-  guard decode_engine_event(event_fields({ "event": "compaction_started" }))
+  guard decode_engine_event(
+      event_fields({
+        "event": "compaction_started",
+        "from_sequence": 1,
+        "to_sequence": 9,
+      }),
+    )
     is Some(CompactionStarted) else {
     fail("compaction_started not decoded")
   }
   guard decode_engine_event(
-      event_fields({ "event": "compaction_finished", "summary": "recap" }),
+      event_fields({
+        "event": "compaction_finished",
+        "from_sequence": 1,
+        "to_sequence": 9,
+        "summary": "recap",
+      }),
     )
     is Some(CompactionFinished("recap")) else {
     fail("compaction_finished not decoded")

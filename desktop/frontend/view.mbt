@@ -1053,29 +1053,6 @@ fn summary_card_view(
 }
 
 ///|
-/// The live reasoning stream: muted prose in the activity indent, with no
-/// role label or avatar — the thought reads as quiet work and tucks into the
-/// turn's folded activity card once it commits, so nothing shown here
-/// vanishes or restyles at that point. It stays expanded while it streams:
-/// folding text that is still arriving would hide the one thing the user is
-/// watching.
-fn reasoning_view(
-  content : String,
-  streaming~ : Bool,
-  on_open : (String) -> @cmd.Cmd,
-) -> @html.Html {
-  let msg_class = if streaming { "msg streaming" } else { "msg" }
-  @html.div(class="activity-row", [
-    @html.div(class=msg_class, [
-      @html.div(
-        class="msg-content markdown activity-thinking",
-        @markdown.markdown_nodes(content, open_file=on_open),
-      ),
-    ]),
-  ])
-}
-
-///|
 /// The in-flight assistant turn, rendered live from the engine's streamed
 /// deltas. The committed `assistant_message` replaces it in the transcript.
 /// The partial text is re-parsed as markdown on every delta; an unterminated
@@ -1151,18 +1128,6 @@ fn transcript_view(
       }
       push_run(items, run, on_open)
     }
-  }
-  // Both buffers can be non-empty at once: the answer starts streaming
-  // before the engine commits the reasoning. Only the bubble that text is
-  // currently appearing in gets the caret.
-  if !conv.streaming_reasoning.is_empty() {
-    items.push(
-      reasoning_view(
-        conv.streaming_reasoning,
-        streaming=conv.streaming_response.is_empty(),
-        on_open,
-      ),
-    )
   }
   if !conv.streaming_response.is_empty() {
     items.push(streaming_response_view(conv.streaming_response, on_open))

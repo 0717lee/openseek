@@ -329,20 +329,11 @@ fn apply_engine_event(
           { ..conv, streaming_response: conv.streaming_response + content },
         )
       }
-    ReasoningDelta(content) =>
-      if content.is_empty() {
-        (false, conv)
-      } else {
-        (
-          true,
-          { ..conv, streaming_reasoning: conv.streaming_reasoning + content },
-        )
-      }
     // The turn's full reasoning, emitted once its streaming ends and before
     // the assistant message commits — so the transcript reads thought →
     // answer.
     ReasoningMessage(content) => {
-      let next = { ..conv, streaming_reasoning: "" }
+      let next = conv
       let content = content.trim().to_owned()
       if content.is_empty() {
         (false, next)
@@ -1678,18 +1669,14 @@ test "deltas from an unknown run are dropped" {
 }
 
 ///|
-test "reasoning message commits a thinking item and clears its stream" {
+test "reasoning message commits a thinking item" {
   let dispatch = test_dispatch()
-  let model = running_model().replace_conversation({
-    ..running_conversation(),
-    streaming_reasoning: "thinking…",
-  })
+  let model = running_model()
   let (_, next) = update(
     dispatch,
     Engine(7, ReasoningMessage("full thought"), session=None),
     model,
   )
-  inspect(next.active().streaming_reasoning, content="")
   inspect(next.active().messages.length(), content="1")
   guard next.active().messages[0].kind is Reasoning else {
     fail("expected reasoning")
@@ -1703,7 +1690,6 @@ test "assistant message replaces the live stream with a committed item" {
   let model = running_model().replace_conversation({
     ..running_conversation(),
     streaming_response: "answ",
-    streaming_reasoning: "thought",
   })
   let (_, next) = update(
     dispatch,
@@ -1711,18 +1697,16 @@ test "assistant message replaces the live stream with a committed item" {
     model,
   )
   inspect(next.active().streaming_response, content="")
-  inspect(next.active().streaming_reasoning, content="")
   inspect(next.active().messages.length(), content="1")
   inspect(next.active().messages[0].content, content="answer")
 }
 
 ///|
-test "a new agent step clears both live streams" {
+test "a new agent step clears the live stream" {
   let dispatch = test_dispatch()
   let model = running_model().replace_conversation({
     ..running_conversation(),
     streaming_response: "left",
-    streaming_reasoning: "over",
   })
   let (_, next) = update(
     dispatch,
@@ -1730,7 +1714,6 @@ test "a new agent step clears both live streams" {
     model,
   )
   inspect(next.active().streaming_response, content="")
-  inspect(next.active().streaming_reasoning, content="")
 }
 
 ///|
@@ -3222,7 +3205,6 @@ test "update is pure: context yield appends continuation guidance" {
   let model = running_model().replace_conversation({
     ..running_conversation(),
     streaming_response: "partial",
-    streaming_reasoning: "thinking",
   })
   let (_, once) = update(
     dispatch,
@@ -3251,8 +3233,6 @@ test "update is pure: context yield appends continuation guidance" {
   )
   inspect(once.active().streaming_response, content="")
   inspect(twice.active().streaming_response, content="")
-  inspect(once.active().streaming_reasoning, content="")
-  inspect(twice.active().streaming_reasoning, content="")
   assert_true(once.active().is_running() && twice.active().is_running())
 }
 
