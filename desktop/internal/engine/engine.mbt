@@ -844,10 +844,18 @@ async fn serve_engine_consumer(
 
 ///|
 /// A synthetic `compaction_failed` stream event for a compaction whose
-/// engine died before reporting one itself — the same wire shape the engine
-/// emits, so the frontend's one decoder clears its compacting notice either
-/// way. Routed like every compaction event: by the engine's session, with
-/// the latest run id as the frontend's fallback.
+/// engine died before reporting one itself, so the frontend's one decoder
+/// clears its compacting notice either way. Routed like every compaction
+/// event: by the engine's session, with the latest run id as the frontend's
+/// fallback.
+///
+/// The payload is built from `@protocol.Event` rather than written by hand.
+/// It used to be a literal keyed `reason`, under a comment claiming it was
+/// "the same wire shape the engine emits" — which it was not: the engine
+/// emits `error`. Nothing caught it because the frontend's decoder happened
+/// to accept either spelling, so a host-made event and an engine-made one
+/// had quietly different shapes. Going through the type makes that class of
+/// claim checkable instead of aspirational.
 async fn emit_compaction_failed(
   sink : EventSink,
   engine : ServeEngine,
@@ -858,7 +866,7 @@ async fn emit_compaction_failed(
     StreamEvent({
       run_id: engine.latest_run,
       session: engine.session_key,
-      event: { "event": "compaction_failed", "reason": Json::string(reason) },
+      event: (CompactionFailed(error=reason) : @wire.Event).to_json(),
     }),
   )
 }

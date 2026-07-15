@@ -1,4 +1,5 @@
 import {
+  "bobzhang/openseek_protocol" @wire,
   "bobzhang/jsonl",
   "openseek_desktop/internal/env",
   "openseek_desktop/internal/event",
