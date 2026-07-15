@@ -110,13 +110,16 @@ model the commands itself. They drifted exactly as the events had: the TUI sent
 the engine's decoder happened to default it.
 
 ```mbt nocheck
-// A controller writes a line.
-let line = (Prompt(text="do it") : @protocol.Command).to_jsonl()
+// A controller writes a line: `to_jsonl` serializes and appends the newline.
+let line : String = (Prompt(text="do it") : @protocol.Command).to_jsonl()
 
-// The engine reads one back. `Err` is a line it cannot read — and only that:
-// whether a readable command is *acceptable* is the engine's to say, which is
-// why `serve`, not `parse`, refuses a blank goal.
-match @protocol.Command::parse(line) {
+// The engine reads one back. `parse` takes the decoded value, not the line —
+// framing is the transport's job, so `serve` hands it whatever `@jsonl` gave.
+//
+// `Err` is a line this protocol cannot read, and only that: whether a readable
+// command is *acceptable* is the engine's to say, which is why `serve`, not
+// `parse`, refuses a blank goal.
+match @protocol.Command::parse(@json.parse(line)) {
   Ok(Prompt(text~)) => start_turn(text)
   Ok(_) => ()
   Err(message) => report(message)
