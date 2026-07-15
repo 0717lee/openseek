@@ -55,6 +55,11 @@ pub(all) enum ChannelId {
 pub fn ChannelId::from_uri_authority(String) -> Self?
 pub fn ChannelId::uri_authority(Self) -> String
 
+pub(all) struct ConversationKey {
+  channel : ChannelId
+  session : String
+} derive(Eq, Hash, @debug.Debug)
+
 // Type aliases
 
 // Traits

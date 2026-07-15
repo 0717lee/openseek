@@ -257,7 +257,11 @@ test "a workspace new chat rotates into that workspace" {
   inspect(chosen.dev().active_workspace, content="/home/u/proj")
   // The rotation lands like any other; the fresh conversation carries the
   // active workspace, and the next plain "New chat" stays there.
-  let (_, rotated) = update(dispatch, SessionRotated("desktop-ws"), chosen)
+  let (_, rotated) = update(
+    dispatch,
+    SessionRotated({ channel: @interop.ChannelId::Local, session: "desktop-ws" }),
+    chosen,
+  )
   assert_true(rotated.active().workspace is Some(Absolute("/home/u/proj")))
   inspect(rotated.active_session, content="desktop-ws")
   inspect(rotated.dev().active_workspace, content="/home/u/proj")
@@ -266,7 +270,11 @@ test "a workspace new chat rotates into that workspace" {
 ///|
 test "a scratch rotation leaves the conversation in the default store" {
   let dispatch = test_dispatch()
-  let (_, next) = update(dispatch, SessionRotated("desktop-s"), test_model())
+  let (_, next) = update(
+    dispatch,
+    SessionRotated({ channel: @interop.ChannelId::Local, session: "desktop-s" }),
+    test_model(),
+  )
   assert_true(next.active().workspace is None)
 }
 
@@ -398,7 +406,10 @@ test "opening a stored session adopts its workspace" {
     model,
   )
   inspect(opening.dev().active_workspace, content="/proj")
-  inspect(opening.loading_session, content="desktop-w")
+  assert_true(
+    opening.loading_conversation
+    is Some({ channel: Local, session: "desktop-w" }),
+  )
   let (_, loaded) = update_dev(
     dispatch,
     SessionLoaded(

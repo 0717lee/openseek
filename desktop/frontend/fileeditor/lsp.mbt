@@ -195,16 +195,18 @@ fn hover_range(
 /// with a server behind the op.
 fn request_diagnostics(
   dispatch : @cmd.Emit[Msg],
-  channel~ : @interop.ChannelId,
+  owner : @interop.ConversationKey,
   absolute : @pathx.Absolute,
 ) -> @cmd.Cmd {
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
-      let reply = request_lsp_open(channel~, path=absolute) catch {
+      let reply = request_lsp_open(channel=owner.channel, path=absolute) catch {
         _ => return
       }
       let diagnostics = reply_diagnostics(@interop.reply_json_text(reply))
-      scheduler.add(dispatch(DiagnosticsPublished(absolute~, diagnostics~)))
+      scheduler.add(
+        dispatch(DiagnosticsLoaded(owner~, absolute~, diagnostics~)),
+      )
     })
   })
 }

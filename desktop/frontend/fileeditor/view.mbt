@@ -183,7 +183,7 @@ fn tree_pane(dispatch : @cmd.Emit[Msg], state : State, ctx : Ctx) -> @html.Html 
   } else {
     Some(@fuzzy_match.Query::new(state.filter.trim().to_owned()))
   }
-  let tree_children = if ctx.session.is_empty() {
+  let tree_children = if ctx.owner.session.is_empty() {
     [@html.div(class="file-panel-empty", "No conversation selected.")]
   } else if !state.children.contains("") {
     [@html.div(class="file-panel-empty", "Loading…")]

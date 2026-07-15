@@ -38,7 +38,9 @@ fn bridge_msg(
         None
       }
     "lsp.diagnostics" =>
-      diagnostics_msg(payload).map(msg => FromDevice(channel, FilePanel(msg)))
+      diagnostics_msg(channel, payload).map(msg => {
+        FromDevice(channel, FilePanel(msg))
+      })
     "fs.changed" => Some(FromDevice(channel, FilePanel(FsChanged)))
     _ => device_msg(method_, payload).map(msg => FromDevice(channel, msg))
   }
@@ -578,12 +580,16 @@ fn durable_boundary_msg(payload : Map[String, Json]) -> DeviceMsg? {
 /// A `diagnostics` push: the language server re-analyzed a file. The payload
 /// carries the absolute `path` and the raw LSP `diagnostics` array; the update
 /// filters it to the file on screen.
-fn diagnostics_msg(payload : Map[String, Json]) -> @fileeditor.Msg? {
+fn diagnostics_msg(
+  channel : @interop.ChannelId,
+  payload : Map[String, Json],
+) -> @fileeditor.Msg? {
   guard @jsonx.json_text(payload, "path") is Some(path) && !path.is_empty() else {
     return None
   }
   Some(
     DiagnosticsPublished(
+      channel~,
       absolute=Absolute(path),
       diagnostics=payload.get("diagnostics").unwrap_or([]),
     ),

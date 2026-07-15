@@ -499,18 +499,19 @@ priv struct Completion {
 ///|
 /// The last workspace-symbol results, cached so the `#` menu can show them
 /// without refetching while the query is unchanged. `session` records which
-/// conversation they belong to, so switching conversations refetches rather
-/// than showing another workspace's symbols; `query` is the trigger text they
-/// answer, the key that decides whether a keystroke needs a fresh fetch.
+/// conversation they belong to, so switching either device or session
+/// refetches rather than showing another workspace's symbols; `query` is the
+/// trigger text they answer, the key that decides whether a keystroke needs a
+/// fresh fetch.
 priv struct SymbolCache {
-  session : String
+  owner : @interop.ConversationKey?
   query : String
   items : Array[CompletionItem]
 }
 
 ///|
 fn empty_symbol_cache() -> SymbolCache {
-  { session: "", query: "", items: [] }
+  { owner: None, query: "", items: [] }
 }
 
 ///|
@@ -694,9 +695,10 @@ priv struct Model {
   // The conversation on screen; always present in `conversations` once the
   // startup session rotation lands.
   active_session : String
-  // Durable session currently being fetched from the host, if any. Sidebar
-  // selections can race; only the latest request may activate a stored session.
-  loading_session : String
+  // Durable conversation currently being fetched from its host, if any.
+  // Sidebar selections can race across devices; only the latest full identity
+  // may activate a stored conversation.
+  loading_conversation : @interop.ConversationKey?
   // Last token allocated to a transcript snapshot request in this app run.
   // This lives above individual conversations so pruning, archive removal,
   // and reopening cannot reuse a token that an older host reply still carries.
@@ -903,16 +905,16 @@ priv enum Msg {
   // also carries its comment text, re-shown as an editor bubble over that
   // range.
   JumpToLocation(path~ : String, range~ : @common.Range?, annotation~ : String?)
-  // A `workspace_symbols` reply: `session`/`query` say which request it answers
-  // so a reply that lost a conversation switch or a later keystroke is dropped.
+  // A `workspace_symbols` reply: `owner`/`query` say which request it answers
+  // so a reply that lost a device/session switch or later keystroke is dropped.
   SymbolsLoaded(
-    session~ : String,
+    owner~ : @interop.ConversationKey,
     query~ : String,
     items~ : Array[CompletionItem]
   )
   // A failed search reads as "no symbols", so it carries no message to show —
-  // only the `session`/`query` needed to settle the right menu.
-  SymbolsFailed(session~ : String, query~ : String)
+  // only the `owner`/`query` needed to settle the right menu.
+  SymbolsFailed(owner~ : @interop.ConversationKey, query~ : String)
   ModelChanged(String)
   MaxStepsChanged(String)
   SetupApiKeyChanged(String)
@@ -990,7 +992,9 @@ priv enum Msg {
   Send
   Stop
   NewChat
-  SessionRotated(String)
+  // The channel is captured when rotation is requested, so a focus move can
+  // fence the delayed id instead of activating it on the newly focused host.
+  SessionRotated(@interop.ConversationKey)
   // Open a conversation on one device's channel; clicking another
   // device's row is also the console's focus switch.
   OpenSession(@interop.ChannelId, String)
@@ -1392,7 +1396,7 @@ fn initial_model() -> Model {
     chats_collapsed: false,
     workspaces_collapsed: false,
     active_session: "",
-    loading_session: "",
+    loading_conversation: None,
     transcript_request_generation: 0,
     submission_namespace: generated_session_id() + "-submission",
     submission_sequence: 0,
@@ -1467,16 +1471,6 @@ fn Model::focused_connection_generation(self : Model) -> Int {
   match self.focused_device() {
     Some(dev) => dev.connection_generation
     None => 0
-  }
-}
-
-///|
-/// The focused channel's "New chat" placement ("" = the default store) —
-/// what the composer and sidebar act on.
-fn Model::focused_active_workspace(self : Model) -> String {
-  match self.focused_device() {
-    Some(dev) => dev.active_workspace
-    None => ""
   }
 }
 

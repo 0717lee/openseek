@@ -371,9 +371,9 @@ fn apply_roster(
     if !booted {
       booted = true
       commands.push(watch_transcript_scroll(dispatch))
-      commands.push(rotate_session(dispatch))
+      commands.push(rotate_session(dispatch, focused))
     } else if refocused {
-      commands.push(rotate_session(dispatch))
+      commands.push(rotate_session(dispatch, focused))
     }
   }
   (
@@ -388,10 +388,10 @@ fn apply_roster(
       } else {
         model.active_session
       },
-      loading_session: if refocused {
-        ""
+      loading_conversation: if refocused {
+        None
       } else {
-        model.loading_session
+        model.loading_conversation
       },
       console: Some({
         ..console,
@@ -742,7 +742,7 @@ fn console_signed_out(
       devices: [],
       focused: @interop.ChannelId::Local,
       active_session: "",
-      loading_session: "",
+      loading_conversation: None,
       conversations: [],
       console: Some({
         ..console,

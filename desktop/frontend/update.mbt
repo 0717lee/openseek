@@ -50,7 +50,7 @@ fn focus_channel(
       ..model,
       focused: channel,
       active_session: "",
-      loading_session: "",
+      loading_conversation: None,
       settings_saves: 0,
       host_settings_revision: -1,
       deferred_host_settings: None,
@@ -60,7 +60,7 @@ fn focus_channel(
       completion: None,
       // Forgetting what was watched makes the post-dispatch panel sync
       // re-root `fs.watch` against the newly focused host.
-      file_panel: { ..model.file_panel, watching: "" },
+      file_panel: { ..model.file_panel, watching: None },
     },
   )
 }
@@ -74,6 +74,7 @@ fn open_session_on(
   model : Model,
   session_id : String,
 ) -> (@cmd.Cmd, Model) {
+  let owner : @interop.ConversationKey = { channel, session: session_id }
   if session_id == model.active_session {
     let base = { ..model, screen: Chat, completion: None }
     // Re-selecting is an explicit catch-up point for writes made by an
@@ -84,7 +85,7 @@ fn open_session_on(
       Some(conv) if !(conv.sync is Reloading(..)) &&
         model.can_reload_transcript(conv) => {
         let (next, generation) = base.begin_transcript_reload(conv)
-        let next = { ..next, loading_session: session_id }
+        let next = { ..next, loading_conversation: Some(owner) }
         if generation is Some(generation) {
           (
             session_snapshot_command(
@@ -101,10 +102,10 @@ fn open_session_on(
           @cmd.none,
           {
             ..base,
-            loading_session: if base.loading_session == session_id {
-              session_id
+            loading_conversation: if base.loading_conversation == Some(owner) {
+              Some(owner)
             } else {
-              ""
+              None
             },
           },
         )
@@ -126,10 +127,10 @@ fn open_session_on(
       ..model.activate(channel, session_id),
       screen: Chat,
       transcript_pinned: true,
-      loading_session: if generation is Some(_) {
-        session_id
+      loading_conversation: if generation is Some(_) {
+        Some(owner)
       } else {
-        ""
+        None
       },
       completion: None,
     }.with_active_workspace(workspace_token(conv.workspace))
@@ -149,7 +150,7 @@ fn open_session_on(
     let (model, generation) = model.begin_transcript_reload(
       empty_conversation(channel, session_id, workspace~),
     )
-    let next = { ..model, screen: Chat, loading_session: session_id }.with_active_workspace(
+    let next = { ..model, screen: Chat, loading_conversation: Some(owner) }.with_active_workspace(
       workspace,
     )
     if generation is Some(generation) {
@@ -296,14 +297,18 @@ fn retry_session_snapshot(
     }.append_local_notice_once(Assistant(true), TranscriptRefreshFailedNotice)
     let next = model.replace_conversation(failed)
     let scroll = if failed.overlay.length() > conv.overlay.length() {
-      scroll_if_active(next, session)
+      scroll_if_active(next, channel, session)
     } else {
       @cmd.none
     }
-    if activate_on_success && model.loading_session == session {
+    let owner : @interop.ConversationKey = { channel, session }
+    if activate_on_success && model.loading_conversation == Some(owner) {
       let (toast, next) = next.notify_error(dispatch, message)
       let (sessions, next) = request_sessions_refresh(dispatch, channel, next)
-      (@cmd.batch([toast, sessions, scroll]), { ..next, loading_session: "" })
+      (
+        @cmd.batch([toast, sessions, scroll]),
+        { ..next, loading_conversation: None },
+      )
     } else {
       (scroll, next)
     }
@@ -314,7 +319,7 @@ fn retry_session_snapshot(
 /// Fold one current-generation snapshot into its conversation. Lower
 /// watermarks retry instead of rolling the transcript back; stale generations
 /// are no-ops. Buffered gaps start one new background generation. A
-/// foreground result activates only if it still owns `loading_session`.
+/// foreground result activates only if it still owns `loading_conversation`.
 fn apply_session_snapshot(
   dispatch : @cmd.Emit[Msg],
   channel : @interop.ChannelId,
@@ -345,11 +350,12 @@ fn apply_session_snapshot(
   let (conv, gapped) = conv.adopt_snapshot(items, watermark, event_boundaries)
   let mut next = model.replace_conversation(conv)
   let commands : Array[@cmd.Cmd] = []
-  if activate_on_success && model.loading_session == session {
+  let owner : @interop.ConversationKey = { channel, session }
+  if activate_on_success && model.loading_conversation == Some(owner) {
     next = {
       ..next.activate(channel, session),
       transcript_pinned: true,
-      loading_session: "",
+      loading_conversation: None,
       completion: None,
     }
     commands.push(scroll_transcript_after_render())
@@ -357,7 +363,7 @@ fn apply_session_snapshot(
     // branch probe sends no cwd.
     commands.push(fetch_branch(dispatch, channel, session, None))
   } else {
-    commands.push(scroll_if_active(next, session))
+    commands.push(scroll_if_active(next, channel, session))
   }
   if gapped || reload_after_current {
     guard next.find_conversation(channel, session) is Some(conv) else {
@@ -381,8 +387,14 @@ fn apply_session_snapshot(
 /// screen — a background conversation's stream must not yank the visible
 /// scroll position around — and only while the user is at the bottom:
 /// someone who scrolled up to read history stays where they are.
-fn scroll_if_active(model : Model, session_id : String) -> @cmd.Cmd {
-  if session_id == model.active_session && model.transcript_pinned {
+fn scroll_if_active(
+  model : Model,
+  channel : @interop.ChannelId,
+  session_id : String,
+) -> @cmd.Cmd {
+  if channel == model.focused &&
+    session_id == model.active_session &&
+    model.transcript_pinned {
     scroll_transcript_after_render()
   } else {
     @cmd.none
@@ -518,14 +530,18 @@ fn open_editor_at(
   annotation? : String,
 ) -> (@cmd.Cmd, Model) {
   let conv = model.active()
+  let owner : @interop.ConversationKey = {
+    channel: model.focused,
+    session: conv.session_id,
+  }
   let femit = dispatch.map(msg => FileEditor(msg))
   // Re-root only when the panel's cached tree belongs to another
   // conversation; otherwise `sync_file_panel`'s post-dispatch pass would
   // see a session mismatch and wipe the tab/`open` set below.
-  let panel = if model.file_panel.session == conv.session_id {
+  let panel = if model.file_panel.owner == Some(owner) {
     model.file_panel
   } else {
-    { ..@fileeditor.State::empty(), session: conv.session_id }
+    { ..@fileeditor.State::empty(), owner: Some(owner) }
   }
   guard conversation_relative(conv, path) is Some(relative) else {
     return (
@@ -560,22 +576,24 @@ fn symbol_fetch_cmd(
   dispatch : @cmd.Emit[Msg],
   model : Model,
   value : String,
-  session : String,
+  owner : @interop.ConversationKey,
 ) -> @cmd.Cmd {
   guard CompletionTrigger::parse(value) is Some(trigger) &&
     trigger.kind is Symbols else {
     return @cmd.none
   }
   let query = trigger.query
-  if model.symbol_cache.session == session && model.symbol_cache.query == query {
+  if model.symbol_cache.owner == Some(owner) &&
+    model.symbol_cache.query == query {
     return @cmd.none
   }
   read_workspace_symbols(
     dispatch,
-    model.focused,
-    session,
+    owner,
     query,
-    workspace=workspace_root(model.session_workspace(model.focused, session)),
+    workspace=workspace_root(
+      model.session_workspace(owner.channel, owner.session),
+    ),
   )
 }
 
@@ -586,18 +604,19 @@ fn symbol_fetch_cmd(
 /// keystroke is dropped, the same staleness guard the file panel uses.
 fn apply_symbol_reply(
   model : Model,
-  session : String,
+  owner : @interop.ConversationKey,
   query : String,
   items : Array[CompletionItem],
 ) -> (@cmd.Cmd, Model) {
   let draft = model.active().task
-  guard session == model.active().session_id &&
+  guard owner.channel == model.focused &&
+    owner.session == model.active().session_id &&
     CompletionTrigger::parse(draft) is Some(trigger) &&
     trigger.kind is Symbols &&
     trigger.query == query else {
     return (@cmd.none, model)
   }
-  let cache : SymbolCache = { session, query, items }
+  let cache : SymbolCache = { owner: Some(owner), query, items }
   (
     @cmd.none,
     {
@@ -607,7 +626,7 @@ fn apply_symbol_reply(
         draft,
         model.installed_skills,
         cache,
-        session,
+        owner,
       ),
     },
   )
@@ -784,8 +803,7 @@ fn apply_engine_event(
 fn file_ctx(model : Model) -> @fileeditor.Ctx {
   let conv = model.active()
   {
-    channel: model.focused,
-    session: conv.session_id,
+    owner: { channel: model.focused, session: conv.session_id },
     workspace: conv.workspace,
     dark_mode: model.dark_mode,
     tree_layout: model.tree_layout,
@@ -815,22 +833,21 @@ fn sync_file_panel(
 /// and identity notifications because either can win their delivery race.
 fn replace_archived_active(
   model : Model,
+  channel : @interop.ChannelId,
   session : String,
   fresh_session : String,
   workspace : String,
 ) -> Model {
-  guard model.active_session == session &&
-    model.find_conversation(model.focused, session) is Some(archived_conv) else {
+  guard channel == model.focused &&
+    model.active_session == session &&
+    model.find_conversation(channel, session) is Some(archived_conv) else {
     return model
   }
   let (restored_task, restored_mentions, pending_initial) = archived_conv.archive_salvage()
   let conversations = model.conversations.filter(conv => {
-    conv.session_id != session
+    conv.device != channel || conv.session_id != session
   })
-  let activated = { ..model, conversations, }.activate(
-    model.focused,
-    fresh_session,
-  )
+  let activated = { ..model, conversations, }.activate(channel, fresh_session)
   let fresh = activated.active()
   let task = if fresh.task.is_empty() {
     restored_task
@@ -852,7 +869,7 @@ fn replace_archived_active(
   {
     ..activated.replace_conversation(fresh).with_active_workspace(workspace),
     screen: Chat,
-    loading_session: "",
+    loading_conversation: None,
     transcript_pinned: true,
     completion: None,
   }
@@ -874,6 +891,7 @@ fn update(
     model.sidebar_open &&
     (
       model.active_session != previous.active_session ||
+      model.focused != previous.focused ||
       model.screen != previous.screen
     ) {
     { ..model, sidebar_open: false }
@@ -936,7 +954,7 @@ fn update_msg(
               load_saved_settings(dispatch),
               watch_transcript_scroll(dispatch),
               watch_color_scheme(dispatch),
-              rotate_session(dispatch),
+              rotate_session(dispatch, model.focused),
             ]),
             model,
           )
@@ -1008,16 +1026,19 @@ fn update_msg(
         (clear_legacy_engine_settings(), model)
       }
     TaskChanged(value) => {
-      let session = model.active().session_id
+      let owner : @interop.ConversationKey = {
+        channel: model.focused,
+        session: model.active().session_id,
+      }
       (
-        symbol_fetch_cmd(dispatch, model, value, session),
+        symbol_fetch_cmd(dispatch, model, value, owner),
         {
           ..model.replace_conversation({ ..model.active(), task: value }),
           completion: compute_completion(
             value,
             model.installed_skills,
             model.symbol_cache,
-            session,
+            owner,
           ),
         },
       )
@@ -1107,12 +1128,11 @@ fn update_msg(
       } else {
         (@cmd.none, { ..model, completion: None })
       }
-    SymbolsLoaded(session~, query~, items~) =>
-      apply_symbol_reply(model, session, query, items)
+    SymbolsLoaded(owner~, query~, items~) =>
+      apply_symbol_reply(model, owner, query, items)
     // A failed search reads as "no symbols": cache an empty result for the
     // query so the menu settles on "No symbols" rather than spinning.
-    SymbolsFailed(session~, query~) =>
-      apply_symbol_reply(model, session, query, [])
+    SymbolsFailed(owner~, query~) => apply_symbol_reply(model, owner, query, [])
     ModelChanged(value) => (@cmd.none, { ..model, selected_model: value })
     MaxStepsChanged(value) => (@cmd.none, { ..model, max_steps: value })
     SetupApiKeyChanged(value) => (@cmd.none, { ..model, setup_api_key: value })
@@ -1635,7 +1655,10 @@ fn update_msg(
       // A fresh conversation can start at any time: the current one keeps
       // running in the background and stays one sidebar click away. It lands
       // in the active workspace — the one the on-screen conversation uses.
-      (rotate_session(dispatch), { ..model, loading_session: "" })
+      (
+        rotate_session(dispatch, model.focused),
+        { ..model, loading_conversation: None },
+      )
     NewChatIn(channel, workspace) => {
       // A workspace section's own "new chat": the fresh conversation lands in
       // that project, and the workspace stays active for the next one. A new
@@ -1644,28 +1667,33 @@ fn update_msg(
       // On the console, another device's ＋ first moves focus there.
       let (focus_cmd, model) = focus_channel(dispatch, model, channel)
       (
-        @cmd.batch([focus_cmd, rotate_session(dispatch)]),
+        @cmd.batch([focus_cmd, rotate_session(dispatch, channel)]),
         {
           ..model.with_active_workspace(workspace),
-          loading_session: "",
+          loading_conversation: None,
           chats_collapsed: model.chats_collapsed && !workspace.is_empty(),
           workspaces_collapsed: model.workspaces_collapsed &&
           workspace.is_empty(),
         },
       )
     }
-    SessionRotated(session_id) => {
-      let activated = model.activate(model.focused, session_id)
+    SessionRotated(owner) => {
+      // A delayed rotation is owned by the channel that requested it. A focus
+      // switch overtakes it; activating the old owner's id here would yank the
+      // user back to the host they already left.
+      guard owner.channel == model.focused &&
+        model.device_state(owner.channel) is Some(dev) else {
+        return (@cmd.none, model)
+      }
+      let activated = model.activate(owner.channel, owner.session)
       // A rotation creates the conversation, so stamp it with the workspace
       // it was asked into; an existing conversation keeps its own.
       let conversations = activated.conversations.map(conv => {
-        if conv.session_id == session_id &&
+        if conv.device == owner.channel &&
+          conv.session_id == owner.session &&
           conv.messages.length() == 0 &&
           !conv.is_running() {
-          {
-            ..conv,
-            workspace: workspace_root(model.focused_active_workspace()),
-          }
+          { ..conv, workspace: workspace_root(dev.active_workspace) }
         } else {
           conv
         }
@@ -1677,7 +1705,7 @@ fn update_msg(
           conversations,
           screen: Chat,
           transcript_pinned: true,
-          loading_session: "",
+          loading_conversation: None,
           completion: None,
         },
       )
@@ -1989,12 +2017,18 @@ fn update_device_msg(
       let reconnect_snapshot_generation = model.transcript_request_generation +
         1
       let conversations = model.conversations.map(conv => {
-        ..conv
-        .clear_streams()
-        .mark_awaiting_inputs_unconfirmed(
-          snapshot_generation=reconnect_snapshot_generation,
-        ),
-        compaction: NotCompacting,
+        if conv.device == channel {
+          {
+            ..conv
+            .clear_streams()
+            .mark_awaiting_inputs_unconfirmed(
+              snapshot_generation=reconnect_snapshot_generation,
+            ),
+            compaction: NotCompacting,
+          }
+        } else {
+          conv
+        }
       })
       let model = model.replace_device({
         ..dev,
@@ -2029,33 +2063,37 @@ fn update_device_msg(
       // exactly where this client was absent: the conversation on screen
       // re-reads now, every other one re-reads when opened (`OpenSession`
       // always reloads). An in-flight user load keeps right of way.
-      let model = match model.find_conversation(channel, model.active_session) {
-        Some(conv) if (
-            model.can_reload_transcript(conv) || conv.sync is Reloading(..)
-          ) &&
-          model.loading_session.is_empty() => {
-          // A real engine pump can restart while the transport remains open.
-          // If an older read is already in flight, it may carry a pre-ready
-          // cut, so require one follow-up generation rather than treating the
-          // old single-flight request as sufficient.
-          let (model, generation) = model.ensure_transcript_reload_after_current(
-            conv,
-          )
-          if generation is Some(generation) {
-            commands.push(
-              session_snapshot_command(
-                dispatch,
-                channel,
-                model,
-                conv.session_id,
-                generation,
-                false,
-              ),
+      let model = if channel == model.focused {
+        match model.find_conversation(channel, model.active_session) {
+          Some(conv) if (
+              model.can_reload_transcript(conv) || conv.sync is Reloading(..)
+            ) &&
+            model.loading_conversation is None => {
+            // A real engine pump can restart while the transport remains
+            // open. If an older read is already in flight, it may carry a
+            // pre-ready cut, so require one follow-up generation rather than
+            // treating the old single-flight request as sufficient.
+            let (model, generation) = model.ensure_transcript_reload_after_current(
+              conv,
             )
+            if generation is Some(generation) {
+              commands.push(
+                session_snapshot_command(
+                  dispatch,
+                  channel,
+                  model,
+                  conv.session_id,
+                  generation,
+                  false,
+                ),
+              )
+            }
+            model
           }
-          model
+          _ => model
         }
-        _ => model
+      } else {
+        model
       }
       guard channel == model.focused else {
         return (@cmd.batch(commands), model)
@@ -2069,7 +2107,7 @@ fn update_device_msg(
           // makes the post-dispatch panel sync re-issue `fs.watch` instead
           // of reading the stale record as "already placed".
           ,
-          file_panel: { ..model.file_panel, watching: "" },
+          file_panel: { ..model.file_panel, watching: None },
           // An unusable endpoint routes straight to Settings — the composer
           // could do nothing anyway.
           screen: if model.api_ready() {
@@ -2235,7 +2273,10 @@ fn update_device_msg(
         if !changed {
           (@cmd.none, model)
         } else {
-          (scroll_if_active(model, session), model.replace_conversation(next))
+          (
+            scroll_if_active(model, channel, session),
+            model.replace_conversation(next),
+          )
         }
       } else {
         (@cmd.none, model)
@@ -2251,7 +2292,10 @@ fn update_device_msg(
           steer_dropped_notice(text),
         )
         if removed {
-          (scroll_if_active(model, session), model.replace_conversation(next))
+          (
+            scroll_if_active(model, channel, session),
+            model.replace_conversation(next),
+          )
         } else {
           (@cmd.none, model)
         }
@@ -2285,18 +2329,24 @@ fn update_device_msg(
       // empty workspace hint here would otherwise fork the same session into
       // the default store.
       let conversations = model.conversations.map(conv => {
-        let mut workspace = conv.workspace
-        for item in items {
-          if item.id == conv.session_id {
-            workspace = workspace_root(item.workspace)
+        if conv.device == channel {
+          let mut workspace = conv.workspace
+          for item in items {
+            if item.id == conv.session_id {
+              workspace = workspace_root(item.workspace)
+            }
           }
+          { ..conv, workspace, }
+        } else {
+          conv
         }
-        { ..conv, workspace, }
       })
       let mut active_workspace = dev.active_workspace
-      for item in items {
-        if item.id == model.active_session {
-          active_workspace = item.workspace
+      if channel == model.focused {
+        for item in items {
+          if item.id == model.active_session {
+            active_workspace = item.workspace
+          }
         }
       }
       let mut next = {
@@ -2309,7 +2359,8 @@ fn update_device_msg(
       // The session list is later durable proof that a record now exists: use
       // that edge to retry exactly unresolved start recoveries.
       for conv in next.conversations {
-        if conv.has_recovering_initial() &&
+        if conv.device == channel &&
+          conv.has_recovering_initial() &&
           !(conv.sync is Reloading(..)) &&
           items.iter().any(item => item.id == conv.session_id) {
           let (updated, generation) = next.begin_transcript_reload(conv)
@@ -2402,13 +2453,14 @@ fn update_device_msg(
         }
         next = replace_archived_active(
           next,
+          channel,
           next.active_session,
           fresh_session,
           workspace,
         )
       }
       let conversations = next.conversations.filter(conv => {
-        !archived_now(conv.session_id)
+        conv.device != channel || !archived_now(conv.session_id)
       })
       guard next.device_state(channel) is Some(ndev) else {
         return (@cmd.none, { ..next, conversations, })
@@ -2465,7 +2517,7 @@ fn update_device_msg(
       let workspace = model.session_workspace(channel, session)
       let sessions = dev.sessions.filter(item => item.id != session)
       let conversations = model.conversations.filter(conv => {
-        conv.session_id != session
+        conv.device != channel || conv.session_id != session
       })
       let archived = dev.archived.copy()
       if !archived.iter().any(item => item.id == session) {
@@ -2489,14 +2541,20 @@ fn update_device_msg(
       }
       let next = {
         ..overridden,
-        conversations: if model.active_session == session {
+        conversations: if channel == model.focused &&
+          model.active_session == session {
           model.conversations
         } else {
           conversations
         },
       }
-      if model.active_session == session && fresh_session is Some(fresh) {
-        (commands, replace_archived_active(next, session, fresh, workspace))
+      if channel == model.focused &&
+        model.active_session == session &&
+        fresh_session is Some(fresh) {
+        (
+          commands,
+          replace_archived_active(next, channel, session, fresh, workspace),
+        )
       } else {
         (commands, { ..next, conversations, })
       }
@@ -2589,7 +2647,7 @@ fn update_device_msg(
               let (grew, next) = conv.apply_commit(sequence, kind, payload)
               (
                 if grew {
-                  scroll_if_active(model, session)
+                  scroll_if_active(model, channel, session)
                 } else {
                   @cmd.none
                 },
@@ -2808,7 +2866,7 @@ fn update_device_msg(
       // the conversation on screen. A slow background start (the user switched
       // chats mid-spawn) must not overwrite settings the user has since
       // changed for the now-active conversation.
-      if session == updated.active_session {
+      if channel == updated.focused && session == updated.active_session {
         (
           @cmd.batch(commands),
           { ..updated, selected_model, max_steps: max_steps.to_string() },
@@ -2955,6 +3013,9 @@ fn update_device_msg(
       let boundary_reloads : Array[String] = []
       let snapshot_generation = model.transcript_request_generation + 1
       let settled = model.conversations.map(conv => {
+        if conv.device != channel {
+          return conv
+        }
         for captured in frontier {
           if captured.session == conv.session_id {
             return match captured.state {
@@ -3119,7 +3180,7 @@ fn update_device_msg(
         let (transcript_grew, next) = apply_engine_event(conv, event, run_id)
         (
           if transcript_grew {
-            scroll_if_active(model, conv.session_id)
+            scroll_if_active(model, channel, conv.session_id)
           } else {
             @cmd.none
           },
@@ -3335,7 +3396,7 @@ fn update_device_msg(
             ),
           ]
           if changed {
-            commands.push(scroll_if_active(model, session))
+            commands.push(scroll_if_active(model, channel, session))
           }
           (@cmd.batch(commands), updated)
         }
@@ -3359,7 +3420,10 @@ fn update_device_msg(
           } else {
             rejected
           }
-          (scroll_if_active(model, session), model.replace_conversation(next))
+          (
+            scroll_if_active(model, channel, session),
+            model.replace_conversation(next),
+          )
         }
       } else {
         (@cmd.none, model)
@@ -3375,8 +3439,10 @@ fn update_device_msg(
         } else {
           model.conversation_by_last_run(channel, run_id)
         }
-      } else {
+      } else if channel == model.focused {
         Some(model.active())
+      } else {
+        None
       }
       if conv is Some(conv) {
         if run_id is Some(_) && exit_code is None {
@@ -3394,7 +3460,7 @@ fn update_device_msg(
           conv.append_local_notice(Assistant(true), content)
         }
         (
-          scroll_if_active(model, conv.session_id),
+          scroll_if_active(model, channel, conv.session_id),
           model.replace_conversation(
             if next.run is NoRun(..) {
               { ..next, run: NoRun(ended=Some(RunErrored)) }
@@ -3410,7 +3476,7 @@ fn update_device_msg(
     CompactRejected(session~, message~) =>
       if model.find_conversation(channel, session) is Some(conv) {
         (
-          scroll_if_active(model, conv.session_id),
+          scroll_if_active(model, channel, conv.session_id),
           model.replace_conversation({
             ..conv.append_local_notice(Assistant(true), message),
             compaction: NotCompacting,
@@ -3498,7 +3564,8 @@ fn update_device_msg(
           last_run_id: Some(run_id),
           // A finish the user watched happen needs no reminder; one landing
           // in a background conversation leaves a dot until they visit.
-          unseen_finish: conv.session_id != model.active_session,
+          unseen_finish: conv.device != model.focused ||
+          conv.session_id != model.active_session,
         }
         // An exact zero EOF cut proves that a fresh failed run created no
         // durable record. Cancel its now-obsolete speculative snapshot read:
@@ -3562,7 +3629,7 @@ fn update_device_msg(
           }
         }
         if base.overlay.length() > conv.overlay.length() {
-          commands.push(scroll_if_active(model, conv.session_id))
+          commands.push(scroll_if_active(model, channel, conv.session_id))
         }
         (@cmd.batch(commands), next)
       } else {
@@ -4297,10 +4364,13 @@ test "an idle background notice routes by the last run id" {
 ///|
 test "new chat keeps the model intact until the rotation lands" {
   let dispatch = test_dispatch()
-  let model = { ..running_model(), loading_session: "desktop-stale" }
+  let model = {
+    ..running_model(),
+    loading_conversation: Some({ channel: Local, session: "desktop-stale" }),
+  }
   let (_, next) = update(dispatch, NewChat, model)
   inspect(next.active().is_running(), content="true")
-  inspect(next.loading_session, content="")
+  assert_true(next.loading_conversation is None)
 }
 
 ///|
@@ -4334,7 +4404,11 @@ test "session rotation activates a fresh conversation, keeping the old one" {
     ..running_conversation(),
     messages: [{ kind: User, content: "hi" }],
   })
-  let (_, next) = update(dispatch, SessionRotated("desktop-fresh"), model)
+  let (_, next) = update(
+    dispatch,
+    SessionRotated({ channel: Local, session: "desktop-fresh" }),
+    model,
+  )
   inspect(next.active_session, content="desktop-fresh")
   inspect(next.active().messages.length(), content="0")
   inspect(next.active().usage_tokens, content="0")
@@ -4351,11 +4425,74 @@ test "session rotation activates a fresh conversation, keeping the old one" {
 ///|
 test "session rotation prunes abandoned empty conversations" {
   let dispatch = test_dispatch()
-  let (_, first) = update(dispatch, SessionRotated("desktop-a"), test_model())
-  let (_, second) = update(dispatch, SessionRotated("desktop-b"), first)
+  let (_, first) = update(
+    dispatch,
+    SessionRotated({ channel: Local, session: "desktop-a" }),
+    test_model(),
+  )
+  let (_, second) = update(
+    dispatch,
+    SessionRotated({ channel: Local, session: "desktop-b" }),
+    first,
+  )
   // "desktop-test" and "desktop-a" had no transcript, no draft, no run.
   inspect(second.conversations.length(), content="1")
   inspect(second.active_session, content="desktop-b")
+}
+
+///|
+test "a delayed rotation cannot steal focus from another channel" {
+  let dispatch = test_dispatch()
+  let remote : @interop.ChannelId = Remote("d-remote")
+  let model = {
+    ..test_model(),
+    devices: [
+      { ..empty_device_state(@interop.ChannelId::Local), bridge: Connected },
+      { ..empty_device_state(remote), bridge: Connected },
+    ],
+  }
+  let (_, next) = update(
+    dispatch,
+    SessionRotated({ channel: remote, session: "remote-late" }),
+    model,
+  )
+  assert_true(next.focused is Local)
+  inspect(next.active_session, content="desktop-test")
+  assert_true(next.find_conversation(remote, "remote-late") is None)
+}
+
+///|
+test "a symbol reply with the same session id but another channel is stale" {
+  let dispatch = test_dispatch()
+  let local_owner : @interop.ConversationKey = {
+    channel: Local,
+    session: "desktop-test",
+  }
+  let remote_owner : @interop.ConversationKey = {
+    channel: Remote("d-remote"),
+    session: "desktop-test",
+  }
+  let (_, querying) = update(dispatch, TaskChanged("#parse"), test_model())
+  let items = symbol_cache(local_owner, "parse", ["parse_file"]).items
+  let (_, stale) = update(
+    dispatch,
+    SymbolsLoaded(owner=remote_owner, query="parse", items~),
+    querying,
+  )
+  guard stale.completion is Some(stale_menu) else {
+    fail("symbol menu disappeared")
+  }
+  assert_true(stale_menu.loading)
+  let (_, settled) = update(
+    dispatch,
+    SymbolsLoaded(owner=local_owner, query="parse", items~),
+    stale,
+  )
+  guard settled.completion is Some(menu) else {
+    fail("symbol menu disappeared")
+  }
+  assert_false(menu.loading)
+  inspect(menu.items[0].label, content="parse_file")
 }
 
 ///|
@@ -4413,6 +4550,55 @@ test "session list assigns a commit-first conversation to its durable workspace"
   inspect(workspace_token(reconciled.workspace), content="/work/foreign")
   inspect(listed.dev().active_workspace, content="/work/foreign")
   assert_true(encoded_start_workspace(reconciled) is Some("/work/foreign"))
+}
+
+///|
+test "a background session list updates only its channel's same-id workspace" {
+  let dispatch = test_dispatch()
+  let remote : @interop.ChannelId = Remote("d-remote")
+  let local_conv = {
+    ..empty_conversation(@interop.ChannelId::Local, "shared"),
+    workspace: Some(Absolute("/local")),
+  }
+  let remote_conv = {
+    ..empty_conversation(remote, "shared"),
+    workspace: Some(Absolute("/remote-old")),
+  }
+  let model = {
+    ..test_model(),
+    devices: [
+      { ..empty_device_state(@interop.ChannelId::Local), bridge: Connected },
+      { ..empty_device_state(remote), bridge: Connected },
+    ],
+    active_session: "shared",
+    conversations: [local_conv, remote_conv],
+  }
+  let (_, next) = update(
+    dispatch,
+    FromDevice(
+      remote,
+      SessionsLoaded(
+        [
+          {
+            id: "shared",
+            title: Some("remote"),
+            workspace: "/remote-new",
+            workspace_name: "remote-new",
+          },
+        ],
+        connection_generation=0,
+        request_generation=0,
+      ),
+    ),
+    model,
+  )
+  guard next.find_conversation(@interop.ChannelId::Local, "shared")
+    is Some(local_conv) &&
+    next.find_conversation(remote, "shared") is Some(remote_conv) else {
+    fail("same-id conversations disappeared")
+  }
+  inspect(workspace_token(local_conv.workspace), content="/local")
+  inspect(workspace_token(remote_conv.workspace), content="/remote-new")
 }
 
 ///|
@@ -4517,7 +4703,9 @@ test "open session keeps live state on screen while re-reading the store" {
   // (this client may have been absent for part of this conversation).
   inspect(once.active().streaming_response, content="mid-stream")
   inspect(once.active().is_running(), content="true")
-  inspect(once.loading_session, content="desktop-bg")
+  assert_true(
+    once.loading_conversation is Some({ channel: Local, session: "desktop-bg" }),
+  )
   // The previous conversation is still running in the background.
   guard once.find_conversation(@interop.ChannelId::Local, "desktop-test")
     is Some(old) else {
@@ -4576,6 +4764,41 @@ test "BridgeReady clears every non-replayable stream and compaction phase" {
     inspect(conv.streaming_response, content="")
     assert_true(conv.compaction is NotCompacting)
   }
+}
+
+///|
+test "BridgeReady resets only conversations owned by its channel" {
+  let dispatch = test_dispatch()
+  let background : @interop.ChannelId = Remote("d-bg")
+  let local_conv = {
+    ..empty_conversation(@interop.ChannelId::Local, "shared"),
+    streaming_response: "local answer",
+    compaction: Queued,
+  }
+  let remote = {
+    ..empty_conversation(background, "shared"),
+    streaming_response: "remote answer",
+    compaction: Compacting,
+  }
+  let model = {
+    ..test_model(),
+    devices: [
+      { ..empty_device_state(@interop.ChannelId::Local), bridge: Connected },
+      { ..empty_device_state(background), bridge: Connected },
+    ],
+    active_session: "shared",
+    conversations: [local_conv, remote],
+  }
+  let (_, next) = update(dispatch, FromDevice(background, BridgeReady), model)
+  guard next.find_conversation(@interop.ChannelId::Local, "shared")
+    is Some(kept) &&
+    next.find_conversation(background, "shared") is Some(reset) else {
+    fail("same-id conversations were not preserved")
+  }
+  inspect(kept.streaming_response, content="local answer")
+  assert_true(kept.compaction is Queued)
+  inspect(reset.streaming_response, content="")
+  assert_true(reset.compaction is NotCompacting)
 }
 
 ///|
@@ -4813,13 +5036,19 @@ test "open session tracks the latest load and ignores stale replies" {
     test_model(),
   )
   inspect(loading_a.active_session, content="desktop-test")
-  inspect(loading_a.loading_session, content="desktop-a")
+  assert_true(
+    loading_a.loading_conversation
+    is Some({ channel: Local, session: "desktop-a" }),
+  )
   let (_, loading_b) = update(
     dispatch,
     OpenSession(@interop.ChannelId::Local, "desktop-b"),
     loading_a,
   )
-  inspect(loading_b.loading_session, content="desktop-b")
+  assert_true(
+    loading_b.loading_conversation
+    is Some({ channel: Local, session: "desktop-b" }),
+  )
   let a_items : Array[@transcript.TranscriptItem] = [
     { kind: User, content: "old selection" },
   ]
@@ -4835,7 +5064,10 @@ test "open session tracks the latest load and ignores stale replies" {
     loading_b,
   )
   inspect(after_a.active_session, content="desktop-test")
-  inspect(after_a.loading_session, content="desktop-b")
+  assert_true(
+    after_a.loading_conversation
+    is Some({ channel: Local, session: "desktop-b" }),
+  )
   let b_items : Array[@transcript.TranscriptItem] = [
     { kind: User, content: "latest selection" },
   ]
@@ -4851,8 +5083,69 @@ test "open session tracks the latest load and ignores stale replies" {
     after_a,
   )
   inspect(after_b.active_session, content="desktop-b")
-  inspect(after_b.loading_session, content="")
+  assert_true(after_b.loading_conversation is None)
   inspect(after_b.active().messages[0].content, content="latest selection")
+}
+
+///|
+test "same-id session loads are fenced by channel owner" {
+  let dispatch = test_dispatch()
+  let remote : @interop.ChannelId = Remote("d-remote")
+  let local_conv = {
+    ..empty_conversation(@interop.ChannelId::Local, "shared"),
+    messages: [{ kind: User, content: "local" }],
+  }
+  let remote_conv = {
+    ..empty_conversation(remote, "shared"),
+    messages: [{ kind: User, content: "remote" }],
+  }
+  let model = {
+    ..test_model(),
+    devices: [
+      { ..empty_device_state(@interop.ChannelId::Local), bridge: Connected },
+      { ..empty_device_state(remote), bridge: Connected },
+    ],
+    active_session: "shared",
+    conversations: [local_conv, remote_conv],
+  }
+  let (_, loading_remote) = update(
+    dispatch,
+    OpenSession(remote, "shared"),
+    model,
+  )
+  let (_, loading_local) = update(
+    dispatch,
+    OpenSession(@interop.ChannelId::Local, "shared"),
+    loading_remote,
+  )
+  assert_true(
+    loading_local.loading_conversation
+    is Some({ channel: Local, session: "shared" }),
+  )
+  let (_, remote_reply) = update(
+    dispatch,
+    FromDevice(
+      remote,
+      SessionLoaded(
+        session="shared",
+        items=[{ kind: Assistant(false), content: "remote loaded" }],
+        watermark=1,
+        event_boundaries=[],
+        generation=1,
+      ),
+    ),
+    loading_local,
+  )
+  assert_true(remote_reply.focused is Local)
+  inspect(remote_reply.active().messages[0].content, content="local")
+  assert_true(
+    remote_reply.loading_conversation
+    is Some({ channel: Local, session: "shared" }),
+  )
+  guard remote_reply.find_conversation(remote, "shared") is Some(loaded) else {
+    fail("remote conversation disappeared")
+  }
+  inspect(loaded.messages[0].content, content="remote loaded")
 }
 
 ///|
@@ -4869,7 +5162,10 @@ test "reselecting a synced active session reloads idle external writes" {
     OpenSession(@interop.ChannelId::Local, "desktop-test"),
     model,
   )
-  inspect(reloading.loading_session, content="desktop-test")
+  assert_true(
+    reloading.loading_conversation
+    is Some({ channel: Local, session: "desktop-test" }),
+  )
   guard reloading.active().sync is Reloading(generation=1, attempt=1, ..) else {
     fail("expected active reselect to catch up")
   }
@@ -4916,7 +5212,7 @@ test "returning to a fresh active chat does not load a missing session" {
     model,
   )
   assert_true(next.screen is Chat)
-  inspect(next.loading_session, content="")
+  assert_true(next.loading_conversation is None)
   inspect(next.transcript_request_generation, content="0")
   assert_true(next.active().sync is Synced)
   inspect(next.active().task, content="unsent draft")
@@ -4961,7 +5257,10 @@ test "pruning and reopening cannot reuse a transcript request token" {
     ),
     reopened,
   )
-  inspect(stale.loading_session, content="desktop-pruned")
+  assert_true(
+    stale.loading_conversation
+    is Some({ channel: Local, session: "desktop-pruned" }),
+  )
   guard stale.find_conversation(@interop.ChannelId::Local, "desktop-pruned")
     is Some(current) &&
     current.sync is Reloading(generation=2, ..) else {
@@ -5053,7 +5352,7 @@ test "an abandoned session load retries silently" {
     ),
     abandoned,
   )
-  inspect(next.loading_session, content="")
+  assert_true(next.loading_conversation is None)
   inspect(next.active().messages.length(), content="0")
   inspect(next.notifications.length(), content="0")
 }
@@ -5072,7 +5371,10 @@ test "a foreground load preserves state through retries and reports exhaustion" 
     generation=1,
   )
   let (_, retrying2) = update_dev(dispatch, failure, loading)
-  inspect(retrying2.loading_session, content="desktop-a")
+  assert_true(
+    retrying2.loading_conversation
+    is Some({ channel: Local, session: "desktop-a" }),
+  )
   inspect(retrying2.notifications.length(), content="0")
   guard retrying2.find_conversation(@interop.ChannelId::Local, "desktop-a")
     is Some(conv2) &&
@@ -5086,7 +5388,7 @@ test "a foreground load preserves state through retries and reports exhaustion" 
     fail("expected the third foreground attempt")
   }
   let (_, next) = update_dev(dispatch, failure, retrying3)
-  inspect(next.loading_session, content="")
+  assert_true(next.loading_conversation is None)
   inspect(next.notifications.length(), content="1")
   inspect(
     next.notifications[0].message,
@@ -5289,7 +5591,7 @@ test "session loaded adopts the store transcript and keeps live run state" {
       ..streaming.active(),
       sync: test_reloading([]),
     }),
-    loading_session: "desktop-test",
+    loading_conversation: Some({ channel: Local, session: "desktop-test" }),
   }
   let (_, same) = update_dev(
     dispatch,
@@ -5336,7 +5638,7 @@ test "started routes by session and records the host's workspace" {
   // on-screen conversation re-reads it in the background, buffering commits
   // until the snapshot lands. The user-load marker stays free.
   assert_true(next.active().sync is Reloading(..))
-  inspect(next.loading_session, content="")
+  assert_true(next.loading_conversation is None)
 }
 
 ///|
@@ -9205,7 +9507,11 @@ test "changing settings mid-run leaves the run status alone" {
 test "sidebar navigation leaves the settings page" {
   let dispatch = test_dispatch()
   let model = { ..test_model(), api_provider: Deepseek, screen: Settings }
-  let (_, next) = update(dispatch, SessionRotated("s-fresh"), model)
+  let (_, next) = update(
+    dispatch,
+    SessionRotated({ channel: Local, session: "s-fresh" }),
+    model,
+  )
   assert_true(next.screen is Chat)
 }
 
@@ -9424,6 +9730,50 @@ test "an archive notification wins over a stale live-list reply" {
   )
   assert_true(stale.dev().archived.iter().any(current => current.id == item.id))
   inspect(stale.active_session, content="desktop-safe")
+}
+
+///|
+test "a background archive removes only its channel's same-id conversation" {
+  let dispatch = test_dispatch()
+  let remote : @interop.ChannelId = Remote("d-remote")
+  let local_conv = {
+    ..empty_conversation(@interop.ChannelId::Local, "shared"),
+    messages: [{ kind: User, content: "local" }],
+  }
+  let remote_conv = {
+    ..empty_conversation(remote, "shared"),
+    messages: [{ kind: User, content: "remote" }],
+  }
+  let model = {
+    ..test_model(),
+    devices: [
+      { ..empty_device_state(@interop.ChannelId::Local), bridge: Connected },
+      { ..empty_device_state(remote), bridge: Connected },
+    ],
+    active_session: "shared",
+    conversations: [local_conv, remote_conv],
+  }
+  let (_, next) = update(
+    dispatch,
+    FromDevice(
+      remote,
+      ArchivedLoaded(
+        [archived_item("shared")],
+        connection_generation=0,
+        request_generation=0,
+        fresh_session="remote-fresh",
+      ),
+    ),
+    model,
+  )
+  assert_true(next.focused is Local)
+  inspect(next.active_session, content="shared")
+  guard next.find_conversation(@interop.ChannelId::Local, "shared")
+    is Some(kept) else {
+    fail("the focused same-id conversation was removed")
+  }
+  inspect(kept.messages[0].content, content="local")
+  assert_true(next.find_conversation(remote, "shared") is None)
 }
 
 ///|
@@ -9725,10 +10075,11 @@ test "explicit user actions re-pin the transcript" {
     loading_old,
   )
   inspect(loaded.transcript_pinned, content="true")
-  let (_, rotated) = update(dispatch, SessionRotated("desktop-fresh"), {
-    ..test_model(),
-    transcript_pinned: false,
-  })
+  let (_, rotated) = update(
+    dispatch,
+    SessionRotated({ channel: Local, session: "desktop-fresh" }),
+    { ..test_model(), transcript_pinned: false },
+  )
   inspect(rotated.transcript_pinned, content="true")
 }
 
@@ -9781,7 +10132,11 @@ test "selecting a conversation returns from the skills page to the chat" {
   assert_true(back.screen is Chat)
 
   // …and so is rotating to a fresh one.
-  let (_, rotated) = update(dispatch, SessionRotated("desktop-fresh"), opened)
+  let (_, rotated) = update(
+    dispatch,
+    SessionRotated({ channel: Local, session: "desktop-fresh" }),
+    opened,
+  )
   assert_true(rotated.screen is Chat)
 }
 
@@ -10001,7 +10356,7 @@ test "RevealDirectory(\"\") opens the tree pane without a highlight" {
   let panel = {
     ..model.file_panel,
     open: true,
-    session: "desktop-test",
+    owner: Some({ channel: Local, session: "desktop-test" }),
     tree_open: false,
     active: Some(Relative("README.md")),
     highlighted: Some(Relative("src")),
@@ -10021,7 +10376,11 @@ test "RevealDirectory(\"\") opens the tree pane without a highlight" {
 test "RevealDirectory expands an uncached ancestor and highlights the target" {
   let dispatch = test_dispatch()
   let model = test_model()
-  let panel = { ..model.file_panel, open: true, session: "desktop-test" }
+  let panel = {
+    ..model.file_panel,
+    open: true,
+    owner: Some({ channel: Local, session: "desktop-test" }),
+  }
   let (_, next) = update(
     dispatch,
     FileEditor(RevealDirectory(Relative("src/foo"))),
@@ -10042,7 +10401,7 @@ test "RevealDirectory on an already-cached ancestor needs no reload" {
   let panel = {
     ..model.file_panel,
     open: true,
-    session: "desktop-test",
+    owner: Some({ channel: Local, session: "desktop-test" }),
     children,
   }
   let (_, next) = update(
@@ -10062,7 +10421,7 @@ test "HighlightCleared only clears a highlight that still matches" {
   // panel and clears the highlight itself.
   let panel = {
     ..model.file_panel,
-    session: "desktop-test",
+    owner: Some({ channel: Local, session: "desktop-test" }),
     highlighted: Some(Relative("src")),
   }
   let (_, stale) = update(
@@ -10918,7 +11277,10 @@ test "reopening an active failed reload retries and preserves other local notice
     OpenSession(@interop.ChannelId::Local, "desktop-test"),
     model,
   )
-  inspect(reopened.loading_session, content="desktop-test")
+  assert_true(
+    reopened.loading_conversation
+    is Some({ channel: Local, session: "desktop-test" }),
+  )
   guard reopened.active().sync
     is Reloading(generation=2, attempt=1, buffered~, ..) else {
     fail("expected the active click to restart the reload")
@@ -10935,7 +11297,7 @@ test "reopening an active failed reload retries and preserves other local notice
     ),
     reopened,
   )
-  inspect(loaded.loading_session, content="")
+  assert_true(loaded.loading_conversation is None)
   inspect(loaded.active().messages.length(), content="2")
   inspect(loaded.active().watermark, content="2")
   // Success clears only the exact refresh-state warning.
