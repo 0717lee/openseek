@@ -16,6 +16,7 @@ entry point so request encoding can be tested without network access.
 | `bobzhang/openseek/agent_session/store` | Native filesystem-backed append-only session store. | `agent_session/store/README.mbt.md` |
 | `bobzhang/openseek/agent_tool` | Tool registry, executor, output, and control-action types. | `agent_tool/README.mbt.md` |
 | `bobzhang/openseek_protocol` | Typed engine event stream (own module): the `openseek run`/`serve` stdout wire contract, decodable on every backend. | `protocol/README.mbt.md` |
+| `bobzhang/openseek_protocol/emit` | Native-only writer for that stream: owns each event's log level. | `protocol/emit/README.mbt.md` |
 | `bobzhang/openseek/agent` | Native-only OpenSeek agent loop and local tool dispatch. | `agent/README.mbt.md` |
 | `bobzhang/openseek/cmd/openseek` | Native-only command-line entry point. | `cmd/openseek/README.md` |
 | `bobzhang/openseek/cmd/tui` | Native-only terminal UI library, the default mode of `openseek` (and `openseek tui`). | `cmd/tui/README.md` |
