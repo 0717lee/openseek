@@ -131,9 +131,9 @@ tool. This keeps the surface small; revisit if a concrete need appears.
 The terminal UI is the **default** mode of the single `openseek` binary (the
 `cmd/tui` library, also reachable as `openseek tui`): a scrolling transcript with
 a live composer. It spawns the `openseek` engine (by default this same binary in
-`serve` mode) and renders its JSONL event stream — streamed thinking and answer
-text appear live on the activity line, and each turn's reasoning is kept as a dim
-`✻` transcript aside above its answer.
+`serve` mode) and renders its JSONL event stream — streamed answer text appears
+live on the activity line, and each turn's reasoning is kept as a dim `✻`
+transcript aside above its answer.
 
 ```bash
 export DEEPSEEK=sk-...

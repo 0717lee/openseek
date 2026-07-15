@@ -58,13 +58,15 @@ pub fn parse(line : Json) -> Event? {
       }
       Some(ToolCallDecodeError(tool_call_id~, tool_name~, error~))
     }
-    "steer_applied" => {
-      guard text(fields, "kind") is Some(kind) &&
-        text(fields, "content") is Some(content) else {
-        return None
-      }
-      Some(SteerApplied(kind~, content~))
-    }
+    // `kind` is defaulted, not required: engines older than 2026-06-25
+    // (9b2f6c43, which added it) emit `steer_applied` with only `content`, and
+    // the TUI launches whichever `openseek` is on PATH — so a new reader against
+    // an old engine is a real pairing. "prompt" reproduces what those engines
+    // meant, and is what every client defaulted to before this package existed.
+    "steer_applied" =>
+      text(fields, "content").map(content => {
+        SteerApplied(kind=text(fields, "kind").unwrap_or("prompt"), content~)
+      })
     "steer_dropped" =>
       text(fields, "content").map(content => SteerDropped(content~))
     "background_notice" =>
@@ -155,16 +157,20 @@ pub fn parse(line : Json) -> Event? {
       }
       Some(McpConfigInvalid(path~, error~))
     }
+    // `names` is defaulted to empty rather than required: it is the one field
+    // here no reader uses (the TUI renders only the two counts), so demanding it
+    // would let a field nobody reads decide whether the notice appears at all.
     "mcp_tools_registered" => {
       guard int(fields, "servers") is Some(servers) &&
-        int(fields, "tools") is Some(tools) &&
-        fields.get("names") is Some(Array(names)) else {
+        int(fields, "tools") is Some(tools) else {
         return None
       }
       let decoded = []
-      for name in names {
-        guard name is String(name) else { return None }
-        decoded.push(name)
+      if fields.get("names") is Some(Array(names)) {
+        for name in names {
+          guard name is String(name) else { return None }
+          decoded.push(name)
+        }
       }
       Some(McpToolsRegistered(servers~, tools~, names=decoded))
     }

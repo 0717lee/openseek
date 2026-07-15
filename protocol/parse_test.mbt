@@ -106,6 +106,41 @@ test "a null optional field reads as absent" {
 }
 
 ///|
+/// An engine older than 2026-06-25 (9b2f6c43) emits `steer_applied` with only
+/// `content`. The TUI launches whichever `openseek` is on PATH, so that pairing
+/// is real, and a reader that dropped those lines would silently lose steers.
+/// `kind` therefore defaults instead of being required — the rule every client
+/// applied by hand before this package, now written down once and tested.
+test "an older engine's steer_applied still decodes" {
+  debug_inspect(
+    decode(
+      (
+        #|{"event":"steer_applied","content":"go left"}
+      ),
+    ),
+    content=(
+      #|Some(SteerApplied(kind="prompt", content="go left"))
+    ),
+  )
+}
+
+///|
+/// `names` is the one payload field no reader uses, so its absence must not
+/// decide whether the event decodes at all.
+test "mcp_tools_registered decodes without the names it nobody reads" {
+  debug_inspect(
+    decode(
+      (
+        #|{"event":"mcp_tools_registered","servers":2,"tools":5}
+      ),
+    ),
+    content=(
+      #|Some(McpToolsRegistered(servers=2, tools=5, names=[]))
+    ),
+  )
+}
+
+///|
 /// A line from a newer engine, or one that is not an event at all, is ignored
 /// rather than failing the reader.
 test "unknown and malformed lines are ignored" {
