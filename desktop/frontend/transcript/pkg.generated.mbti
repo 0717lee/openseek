@@ -26,7 +26,6 @@ pub fn transcript_from_session_json(String) -> Array[TranscriptItem]?
 pub(all) enum EngineEvent {
   AgentStep(Int?)
   AssistantDelta(String)
-  ReasoningDelta(String)
   ReasoningMessage(String)
   AssistantMessage(String)
   RuntimeUpdate(String)
