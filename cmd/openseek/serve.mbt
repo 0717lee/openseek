@@ -143,23 +143,38 @@ priv enum ServeStep {
 /// The mapping stays here because `SteerInput` is the runtime's, and the
 /// protocol is a leaf module that must not depend on the engine — the same
 /// reason every client keeps its own view model.
+///
+/// So is the blank-goal refusal. `{"action":"set","text":"  "}` is a
+/// well-formed command that this engine will not stand: the shape is the
+/// protocol's to read, whether it is acceptable is this loop's to say. Keeping
+/// the check in `parse` would have made `GoalSet(text="  ")` a value the
+/// protocol's own type holds and `to_json` writes but `parse` rejects.
 fn decode_serve_command(json : Json) -> Result[ServeCommand, String] {
-  @protocol.Command::parse(json).map(command => {
-    match command {
-      Prompt(text~) => Prompt(text)
-      Steer(kind~, text~) =>
+  let command = match @protocol.Command::parse(json) {
+    Ok(command) => command
+    Err(message) => return Err(message)
+  }
+  match command {
+    Prompt(text~) => Ok(Prompt(text))
+    Steer(kind~, text~) =>
+      Ok(
         Steer(
           match kind {
             Prompt => Prompt(text)
             Command => Command(text)
           },
-        )
-      Compact => Compact
-      Cancel => Cancel
-      GoalSet(text~, auto~) => Goal(SetGoal(text, auto~))
-      GoalClear => Goal(ClearGoal)
-    }
-  })
+        ),
+      )
+    Compact => Ok(Compact)
+    Cancel => Ok(Cancel)
+    GoalSet(text~, auto~) =>
+      if text.trim().is_empty() {
+        Err("goal text must not be blank")
+      } else {
+        Ok(Goal(SetGoal(text, auto~)))
+      }
+    GoalClear => Ok(Goal(ClearGoal))
+  }
 }
 
 ///|

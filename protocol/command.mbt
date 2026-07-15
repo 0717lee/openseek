@@ -81,6 +81,13 @@ pub fn Command::to_jsonl(self : Command) -> String {
 /// `command_error` event, so these strings are themselves wire contract, not
 /// diagnostics — they are what a controller reads to learn what it got wrong.
 ///
+/// It reports a line this protocol cannot read, and nothing else. Whether a
+/// readable command is *acceptable* is the engine's to say: a blank goal is
+/// well-formed and refused, and `serve` refuses it. Were that check here,
+/// `GoalSet(text="  ")` would be a value this type holds and `to_json` writes
+/// but `parse` rejects — breaking the round-trip below for a value the type
+/// itself offers.
+///
 /// Unlike `parse` for events, this returns a `Result`: an unreadable event is
 /// a line to ignore, but an unreadable command is a request that will never be
 /// answered, and silence is the one reply a controller cannot act on.
@@ -112,12 +119,14 @@ pub fn Command::parse(line : Json) -> Result[Command, String] {
     { "command": "prompt", .. } => Err("expected a string \"text\" field")
     { "command": "compact", .. } => Ok(Compact)
     { "command": "cancel", .. } => Ok(Cancel)
+    // A blank goal decodes: `{"action":"set","text":"  "}` is a well-formed
+    // command, and refusing it is the engine's policy, not the wire's shape.
+    // Keeping the check here would make `GoalSet(text="  ")` a value this type
+    // can hold, `to_json` can write, and `parse` then rejects — a round-trip
+    // the type advertises and would not have. `serve` rejects it, in the same
+    // words, where the policy lives.
     { "command": "goal", "action": "set", "text": String(text), .. } =>
-      if text.trim().is_empty() {
-        Err("goal text must not be blank")
-      } else {
-        Ok(GoalSet(text~, auto=line is { "auto": True, .. }))
-      }
+      Ok(GoalSet(text~, auto=line is { "auto": True, .. }))
     { "command": "goal", "action": "clear", .. } => Ok(GoalClear)
     { "command": "goal", .. } =>
       Err(

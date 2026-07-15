@@ -20,6 +20,11 @@ fn all_commands() -> Array[@openseek_protocol.Command] {
     Cancel,
     GoalSet(text="ship it", auto=false),
     GoalSet(text="grind it out", auto=true),
+    // Well-formed and unacceptable are different things: `serve` refuses a
+    // blank goal, but the wire carries it, so this type must hold it and
+    // round-trip it. Keeping that refusal here would have made this sample
+    // a value `to_json` writes and `parse` rejects.
+    GoalSet(text="   ", auto=false),
     GoalClear,
   ]
 }
@@ -103,16 +108,6 @@ test "a rejected command explains itself in the engine's own words" {
     ),
     content=(
       #|Err("expected a string \"kind\" field")
-    ),
-  )
-  debug_inspect(
-    cmd(
-      (
-        #|{"command":"goal","action":"set","text":"   "}
-      ),
-    ),
-    content=(
-      #|Err("goal text must not be blank")
     ),
   )
   debug_inspect(
