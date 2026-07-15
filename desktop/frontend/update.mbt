@@ -116,7 +116,7 @@ fn retry_session_snapshot(
   activate_on_success : Bool,
   message : String,
 ) -> (@cmd.Cmd, Model) {
-  guard model.find_conversation(session) is Some(conv) &&
+  guard model.find_conversation(model.focused, session) is Some(conv) &&
     conv.sync
     is Reloading(generation=current, attempt~, buffered~, reload_after_current~) &&
     current == generation else {
@@ -186,7 +186,7 @@ fn apply_session_snapshot(
   generation : Int,
   activate_on_success : Bool,
 ) -> (@cmd.Cmd, Model) {
-  guard model.find_conversation(session) is Some(conv) &&
+  guard model.find_conversation(model.focused, session) is Some(conv) &&
     conv.sync is Reloading(generation=current, reload_after_current~, ..) &&
     current == generation else {
     return (@cmd.none, model)
@@ -206,7 +206,7 @@ fn apply_session_snapshot(
   let commands : Array[@cmd.Cmd] = []
   if activate_on_success && model.loading_session == session {
     next = {
-      ..next.activate(session),
+      ..next.activate(model.focused, session),
       transcript_pinned: true,
       loading_session: "",
       completion: None,
@@ -219,7 +219,7 @@ fn apply_session_snapshot(
     commands.push(scroll_if_active(next, session))
   }
   if gapped || reload_after_current {
-    guard next.find_conversation(session) is Some(conv) else {
+    guard next.find_conversation(model.focused, session) is Some(conv) else {
       return (@cmd.batch(commands), next)
     }
     let (reloading, next_generation) = next.begin_transcript_reload(conv)
@@ -679,14 +679,17 @@ fn replace_archived_active(
   workspace : String,
 ) -> Model {
   guard model.active_session == session &&
-    model.find_conversation(session) is Some(archived_conv) else {
+    model.find_conversation(model.focused, session) is Some(archived_conv) else {
     return model
   }
   let (restored_task, restored_mentions, pending_initial) = archived_conv.archive_salvage()
   let conversations = model.conversations.filter(conv => {
     conv.session_id != session
   })
-  let activated = { ..model, conversations, }.activate(fresh_session)
+  let activated = { ..model, conversations, }.activate(
+    model.focused,
+    fresh_session,
+  )
   let fresh = activated.active()
   let task = if fresh.task.is_empty() {
     restored_task
@@ -1508,7 +1511,7 @@ fn update_msg(
         },
       )
     SessionRotated(session_id) => {
-      let activated = model.activate(session_id)
+      let activated = model.activate(model.focused, session_id)
       // A rotation creates the conversation, so stamp it with the workspace
       // it was asked into; an existing conversation keeps its own.
       let conversations = activated.conversations.map(conv => {
@@ -1672,10 +1675,11 @@ fn update_msg(
       // The run has finished by the time its notification is clicked, so the
       // owner usually matches by last run id; a still-running owner (steered
       // runs re-notify per turn) matches by active run.
-      let conv = if model.conversation_by_last_run(run_id) is Some(conv) {
+      let conv = if model.conversation_by_last_run(model.focused, run_id)
+        is Some(conv) {
         Some(conv)
       } else {
-        model.conversation_by_run(run_id)
+        model.conversation_by_run(model.focused, run_id)
       }
       if conv is Some(conv) {
         update_msg(dispatch, OpenSession(conv.session_id), model)
@@ -1694,7 +1698,7 @@ fn update_msg(
         // idle CLI or another client. It also restarts an exhausted retry
         // round; an existing request stays single-flight. A fresh chat has no
         // durable record to read, including when returning here from Skills.
-        match model.find_conversation(session_id) {
+        match model.find_conversation(model.focused, session_id) {
           Some(conv) if !(conv.sync is Reloading(..)) &&
             model.can_reload_transcript(conv) => {
             let (next, generation) = base.begin_transcript_reload(conv)
@@ -1723,7 +1727,7 @@ fn update_msg(
               },
             )
         }
-      } else if model.find_conversation(session_id) is Some(conv) {
+      } else if model.find_conversation(model.focused, session_id) is Some(conv) {
         // Switching focus; the transcript re-pins at the tail. The store is
         // also re-read behind the switch — the local copy may date from
         // before a reconnect, or another client may be driving this
@@ -1737,7 +1741,7 @@ fn update_msg(
           (model.replace_conversation(conv), None)
         }
         let next = {
-          ..model.activate(session_id),
+          ..model.activate(model.focused, session_id),
           screen: Chat,
           transcript_pinned: true,
           loading_session: if generation is Some(_) {
@@ -1761,7 +1765,7 @@ fn update_msg(
         // also makes its workspace the active one, so "New chat" follows.
         let workspace = model.session_workspace(session_id)
         let (model, generation) = model.begin_transcript_reload(
-          empty_conversation(session_id, workspace~),
+          empty_conversation(model.focused, session_id, workspace~),
         )
         let next = { ..model, screen: Chat, loading_session: session_id }.with_active_workspace(
           workspace,
@@ -1860,7 +1864,7 @@ fn update_device_msg(
       // Capture the exact per-session lifecycle frontier before issuing the
       // unversioned runs snapshot. A live Started or Finished received before
       // its reply then wins over both stale positive rows and stale absence.
-      let run_frontier = model.run_snapshot_frontier()
+      let run_frontier = model.run_snapshot_frontier(channel)
       let commands = [
         fetch_sessions(
           dispatch, channel, connection_generation, sessions_request_generation,
@@ -1956,7 +1960,7 @@ fn update_device_msg(
       // exactly where this client was absent: the conversation on screen
       // re-reads now, every other one re-reads when opened (`OpenSession`
       // always reloads). An in-flight user load keeps right of way.
-      let model = match model.find_conversation(model.active_session) {
+      let model = match model.find_conversation(channel, model.active_session) {
         Some(conv) if (
             model.can_reload_transcript(conv) || conv.sync is Reloading(..)
           ) &&
@@ -2098,7 +2102,7 @@ fn update_device_msg(
       // The response path failed, but the host may have accepted the steer;
       // keep its exact-id ledger entry and let only a late id-bearing receipt
       // retract the truthful unconfirmed notice.
-      if model.find_conversation(session) is Some(conv) {
+      if model.find_conversation(channel, session) is Some(conv) {
         let changed = conv.input_ledger
           .iter()
           .any(input => {
@@ -2128,7 +2132,7 @@ fn update_device_msg(
     SteerRejected(session~, submission_id~, text~, run_id~) =>
       // A concrete `steered:false` cannot later commit. Retire the ledger entry
       // and restore its exact draft; a later same-text submission is unrelated.
-      if model.find_conversation(session) is Some(conv) {
+      if model.find_conversation(channel, session) is Some(conv) {
         let (next, removed) = conv.reject_submission(
           submission_id,
           SteerInput,
@@ -2426,9 +2430,10 @@ fn update_device_msg(
       // list or run resync reaches this page. Materialize hidden client state
       // from the commit itself: sequence 1 projects immediately; a later
       // sequence exposes a gap and follows the normal snapshot recovery path.
-      let model = if model.find_conversation(session) is None {
+      let model = if model.find_conversation(channel, session) is None {
         model.replace_conversation(
           empty_conversation(
+            channel,
             session,
             workspace=model.session_workspace(session),
           ),
@@ -2436,7 +2441,7 @@ fn update_device_msg(
       } else {
         model
       }
-      if model.find_conversation(session) is Some(conv) {
+      if model.find_conversation(channel, session) is Some(conv) {
         let commit : BufferedCommit = { sequence, kind, payload }
         match conv.sync {
           // A read is in flight: buffer — its snapshot's watermark decides
@@ -2479,7 +2484,7 @@ fn update_device_msg(
               // subscriber, a host restart, an external writer). The record
               // is the source of truth — re-read it, buffering from here.
               let (model, generation) = model.begin_transcript_reload(conv)
-              guard model.find_conversation(session) is Some(reloading) else {
+              guard model.find_conversation(channel, session) is Some(reloading) else {
                 return (@cmd.none, model)
               }
               let model = model.replace_conversation(
@@ -2502,7 +2507,7 @@ fn update_device_msg(
       }
     }
     BranchLoaded(session~, branch~) =>
-      if model.find_conversation(session) is Some(conv) {
+      if model.find_conversation(channel, session) is Some(conv) {
         (@cmd.none, model.replace_conversation({ ..conv, branch, }))
       } else {
         (@cmd.none, model)
@@ -2525,10 +2530,11 @@ fn update_device_msg(
       // send handler flips the phase before the request leaves). Repeating
       // the same open id is idempotent; a distinct id replacing a stale open
       // run is foreign and first settles that old run's transient state.
-      let existing = match model.find_conversation(session) {
+      let existing = match model.find_conversation(channel, session) {
         Some(conv) => conv
         None =>
           empty_conversation(
+            channel,
             session,
             workspace=model.session_workspace(session),
           )
@@ -2710,7 +2716,8 @@ fn update_device_msg(
         if !accepted_settlements
           .iter()
           .any(item => item.run_id == settlement.run_id) &&
-          model.matched_settlement_frontier(frontier, settlement) is Some(_) {
+          model.matched_settlement_frontier(channel, frontier, settlement)
+          is Some(_) {
           accepted_settlements.push(settlement)
           if !settled_sessions.contains(settlement.session) {
             settled_sessions.push(settlement.session)
@@ -2729,7 +2736,7 @@ fn update_device_msg(
           .any(item => item.session == run.session && item.run_id == run.run_id)
         if !duplicates_settlement &&
           !admitted_run_sessions.contains(run.session) &&
-          model.matches_run_snapshot_frontier(frontier, run.session) {
+          model.matches_run_snapshot_frontier(channel, frontier, run.session) {
           accepted_runs.push(run)
           admitted_run_sessions.push(run.session)
         }
@@ -2744,24 +2751,24 @@ fn update_device_msg(
       // submission-owned completion that controls the current composer gate.
       let ordered_settlements : Array[RecoveredSettlement] = []
       for settlement in accepted_settlements {
-        if model.matched_settlement_frontier(frontier, settlement)
+        if model.matched_settlement_frontier(channel, frontier, settlement)
           is Some(SettlementByRun) {
           ordered_settlements.push(settlement)
         }
       }
       for settlement in accepted_settlements {
-        if model.matched_settlement_frontier(frontier, settlement)
+        if model.matched_settlement_frontier(channel, frontier, settlement)
           is Some(SettlementBySubmission(_)) {
           ordered_settlements.push(settlement)
         }
       }
       for settlement in ordered_settlements {
-        guard model.matched_settlement_frontier(frontier, settlement)
+        guard model.matched_settlement_frontier(channel, frontier, settlement)
           is Some(owner) else {
           continue
         }
         if owner is SettlementBySubmission(submission_id) &&
-          next.find_conversation(settlement.session) is Some(conv) {
+          next.find_conversation(channel, settlement.session) is Some(conv) {
           let bound = conv.bind_initial_submission_to_run(
             submission_id,
             settlement.run_id,
@@ -2938,7 +2945,7 @@ fn update_device_msg(
       let commands : Array[@cmd.Cmd] = []
       let mut next = { ..model, conversations: settled }
       for session in boundary_reloads {
-        if next.find_conversation(session) is Some(conv) {
+        if next.find_conversation(channel, session) is Some(conv) {
           let (updated, generation) = next.ensure_transcript_reload_after_current(
             conv,
           )
@@ -2962,7 +2969,7 @@ fn update_device_msg(
       // that case too; the conversation that last held the id remains the
       // fallback for unstamped events.
       let conv = if run_id is Some(id) &&
-        model.conversation_by_run(id) is Some(conv) {
+        model.conversation_by_run(channel, id) is Some(conv) {
         Some(conv)
       } else if is_steer_receipt(event) && run_id is Some(id) {
         // Host settling receipts may intentionally trail the terminal event;
@@ -2970,22 +2977,22 @@ fn update_device_msg(
         // the exact local ownership ledger before the legacy run fallback.
         let exact = match event {
           SteerApplied(submission_id=Some(submission_id), ..) =>
-            model.conversation_by_pending_steer(submission_id, id)
+            model.conversation_by_pending_steer(channel, submission_id, id)
           SteerDropped(submission_id=Some(submission_id), ..) =>
-            model.conversation_by_pending_steer(submission_id, id)
+            model.conversation_by_pending_steer(channel, submission_id, id)
           _ => None
         }
         if exact is Some(conv) {
           Some(conv)
         } else {
-          model.conversation_by_last_run(id)
+          model.conversation_by_last_run(channel, id)
         }
       } else if is_idle_event(event) {
         if session is Some(session) &&
-          model.find_conversation(session) is Some(conv) {
+          model.find_conversation(channel, session) is Some(conv) {
           Some(conv)
         } else if run_id is Some(id) {
-          model.conversation_by_last_run(id)
+          model.conversation_by_last_run(channel, id)
         } else {
           None
         }
@@ -3009,7 +3016,7 @@ fn update_device_msg(
     // Everything else the panel owns (tree, viewer, diagnostics) is the
     // fileeditor package's business; route it there and adopt its state.
     StartResponded(session~, submission_id~, run_id~, status~, exit_code~) => {
-      guard model.find_conversation(session) is Some(conv) &&
+      guard model.find_conversation(channel, session) is Some(conv) &&
         conv.has_initial_submission(submission_id) else {
         return (@cmd.none, model)
       }
@@ -3156,7 +3163,7 @@ fn update_device_msg(
           fetch_runs(
             dispatch,
             channel,
-            model.run_snapshot_frontier(),
+            model.run_snapshot_frontier(channel),
             dev.connection_generation,
           ),
         ]
@@ -3171,7 +3178,7 @@ fn update_device_msg(
       }
     }
     StartUndelivered(session~, submission_id~, message~) =>
-      if model.find_conversation(session) is Some(conv) {
+      if model.find_conversation(channel, session) is Some(conv) {
         let owns_submission = conv.has_initial_submission(submission_id)
         let mut prompt = ""
         for input in conv.input_ledger {
@@ -3207,7 +3214,7 @@ fn update_device_msg(
             fetch_runs(
               dispatch,
               channel,
-              updated.run_snapshot_frontier(),
+              updated.run_snapshot_frontier(channel),
               dev.connection_generation,
             ),
           ]
@@ -3220,7 +3227,7 @@ fn update_device_msg(
         (@cmd.none, model)
       }
     StartRejected(session~, submission_id~, message~) =>
-      if model.find_conversation(session) is Some(conv) {
+      if model.find_conversation(channel, session) is Some(conv) {
         let (rejected, removed) = conv.reject_submission(
           submission_id,
           InitialPrompt,
@@ -3247,10 +3254,10 @@ fn update_device_msg(
       // diagnostics carry `exit_code` and have no durable twin, so they remain
       // a local notice.
       let conv = if run_id is Some(run_id) {
-        if model.conversation_by_run(run_id) is Some(conv) {
+        if model.conversation_by_run(channel, run_id) is Some(conv) {
           Some(conv)
         } else {
-          model.conversation_by_last_run(run_id)
+          model.conversation_by_last_run(channel, run_id)
         }
       } else {
         Some(model.active())
@@ -3285,7 +3292,7 @@ fn update_device_msg(
       }
     }
     CompactRejected(session~, message~) =>
-      if model.find_conversation(session) is Some(conv) {
+      if model.find_conversation(channel, session) is Some(conv) {
         (
           scroll_if_active(model, conv.session_id),
           model.replace_conversation({
@@ -3297,12 +3304,12 @@ fn update_device_msg(
         (@cmd.none, model)
       }
     Finished(run_id~, status~, answer~, durable_sequence~) =>
-      if (if model.conversation_by_run(run_id) is Some(conv) {
+      if (if model.conversation_by_run(channel, run_id) is Some(conv) {
           Some(conv)
         } else {
           // RunsSettled may have closed the phase first; Finished is still the
           // authoritative outcome for the conversation that last owned it.
-          model.conversation_by_last_run(run_id)
+          model.conversation_by_last_run(channel, run_id)
         })
         is Some(conv) {
         // The answer is durable transcript data; `Finished` only settles run
@@ -3447,7 +3454,7 @@ fn update_device_msg(
         request_sessions_refresh(dispatch, channel, model)
       }
     DurableBoundary(run_id~, session~, sequence~) =>
-      if model.find_conversation(session) is Some(conv) &&
+      if model.find_conversation(channel, session) is Some(conv) &&
         conv.last_run_id is Some(owner) &&
         owner == run_id {
         let anchored = conv
@@ -3494,13 +3501,13 @@ fn update_device_msg(
         // notification reaches us; ask once more with the still-exact
         // submission selector so its now-replayable settlement can bind the
         // run and apply the frontier (including exact zero).
-      } else if model.find_conversation(session) is Some(conv) &&
+      } else if model.find_conversation(channel, session) is Some(conv) &&
         conv.has_recovering_initial() {
         (
           fetch_runs(
             dispatch,
             channel,
-            model.run_snapshot_frontier(),
+            model.run_snapshot_frontier(channel),
             dev.connection_generation,
           ),
           model,
@@ -3538,7 +3545,7 @@ fn update_dev(
 
 ///|
 fn test_conversation() -> Conversation {
-  empty_conversation("desktop-test")
+  empty_conversation(@interop.ChannelId::Local, "desktop-test")
 }
 
 ///|
@@ -3669,25 +3676,27 @@ fn encoded_start_workspace(conv : Conversation) -> String? {
 ///|
 test "runs resync names exact Starting Open and Idle owners" {
   let starting = {
-    ..empty_conversation("starting-session"),
+    ..empty_conversation(@interop.ChannelId::Local, "starting-session"),
     run: Starting(submission_id="submission-starting"),
   }
   let open = {
-    ..empty_conversation("open-session"),
+    ..empty_conversation(@interop.ChannelId::Local, "open-session"),
     run: Open(run_id="run-open", stage=Opened),
   }
   let idle = {
-    ..empty_conversation("idle-session"),
+    ..empty_conversation(@interop.ChannelId::Local, "idle-session"),
     last_run_id: Some("run-idle"),
   }
-  let empty = empty_conversation("never-started")
+  let empty = empty_conversation(@interop.ChannelId::Local, "never-started")
   let model = test_model()
     .replace_conversation(starting)
     .replace_conversation(open)
     .replace_conversation(idle)
     .replace_conversation(empty)
   let json = @json.parse(
-    @interop.reply_json_text(runs_payload(model.run_snapshot_frontier())),
+    @interop.reply_json_text(
+      runs_payload(model.run_snapshot_frontier(@interop.ChannelId::Local)),
+    ),
   ) catch {
     _ => fail("runs payload was not JSON")
   }
@@ -4134,12 +4143,14 @@ test "a background finish marks its conversation until it is opened" {
     ),
     model,
   )
-  guard next.find_conversation("desktop-test") is Some(conv) else {
+  guard next.find_conversation(@interop.ChannelId::Local, "desktop-test")
+    is Some(conv) else {
     fail("conversation missing")
   }
   inspect(conv.unseen_finish, content="true")
-  let opened = next.activate("desktop-test")
-  guard opened.find_conversation("desktop-test") is Some(seen) else {
+  let opened = next.activate(@interop.ChannelId::Local, "desktop-test")
+  guard opened.find_conversation(@interop.ChannelId::Local, "desktop-test")
+    is Some(seen) else {
     fail("conversation missing after activate")
   }
   inspect(seen.unseen_finish, content="false")
@@ -4210,7 +4221,8 @@ test "session rotation activates a fresh conversation, keeping the old one" {
   inspect(next.active().usage_tokens, content="0")
   assert_true(next.display_status() is Ready)
   // The previous conversation keeps running in the background.
-  guard next.find_conversation("desktop-test") is Some(old) else {
+  guard next.find_conversation(@interop.ChannelId::Local, "desktop-test")
+    is Some(old) else {
     fail("expected the old conversation to survive")
   }
   inspect(old.is_running(), content="true")
@@ -4255,7 +4267,11 @@ test "session list assigns a commit-first conversation to its durable workspace"
     }),
     test_model(),
   )
-  guard committed.find_conversation("desktop-foreign") is Some(provisional) else {
+  guard committed.find_conversation(
+      @interop.ChannelId::Local,
+      "desktop-foreign",
+    )
+    is Some(provisional) else {
     fail("commit did not materialize its conversation")
   }
   assert_true(provisional.workspace is None)
@@ -4269,9 +4285,10 @@ test "session list assigns a commit-first conversation to its durable workspace"
         workspace_name: "foreign",
       },
     ]),
-    committed.activate("desktop-foreign"),
+    committed.activate(@interop.ChannelId::Local, "desktop-foreign"),
   )
-  guard listed.find_conversation("desktop-foreign") is Some(reconciled) else {
+  guard listed.find_conversation(@interop.ChannelId::Local, "desktop-foreign")
+    is Some(reconciled) else {
     fail("listed conversation disappeared")
   }
   inspect(workspace_token(reconciled.workspace), content="/work/foreign")
@@ -4295,7 +4312,11 @@ test "session list assigns a Started-first conversation to its durable workspace
     ),
     test_model(),
   )
-  guard started.find_conversation("desktop-started-first") is Some(provisional) else {
+  guard started.find_conversation(
+      @interop.ChannelId::Local,
+      "desktop-started-first",
+    )
+    is Some(provisional) else {
     fail("Started did not materialize its conversation")
   }
   assert_true(provisional.workspace is None)
@@ -4311,7 +4332,11 @@ test "session list assigns a Started-first conversation to its durable workspace
     ]),
     started,
   )
-  guard listed.find_conversation("desktop-started-first") is Some(reconciled) else {
+  guard listed.find_conversation(
+      @interop.ChannelId::Local,
+      "desktop-started-first",
+    )
+    is Some(reconciled) else {
     fail("listed conversation disappeared")
   }
   inspect(workspace_token(reconciled.workspace), content="/work/started-first")
@@ -4348,7 +4373,7 @@ test "open session is a no-op for the current session" {
 test "open session keeps live state on screen while re-reading the store" {
   let dispatch = test_dispatch()
   let background = {
-    ..empty_conversation("desktop-bg"),
+    ..empty_conversation(@interop.ChannelId::Local, "desktop-bg"),
     run: Open(run_id="r9", stage=Opened),
     streaming_response: "mid-stream",
     messages: [{ kind: User, content: "background task" }],
@@ -4363,7 +4388,8 @@ test "open session keeps live state on screen while re-reading the store" {
   inspect(once.active().is_running(), content="true")
   inspect(once.loading_session, content="desktop-bg")
   // The previous conversation is still running in the background.
-  guard once.find_conversation("desktop-test") is Some(old) else {
+  guard once.find_conversation(@interop.ChannelId::Local, "desktop-test")
+    is Some(old) else {
     fail("expected the old conversation to survive")
   }
   inspect(old.is_running(), content="true")
@@ -4407,7 +4433,7 @@ test "BridgeReady clears every non-replayable stream and compaction phase" {
     compaction: Queued,
   }
   let background = {
-    ..empty_conversation("desktop-bg"),
+    ..empty_conversation(@interop.ChannelId::Local, "desktop-bg"),
     streaming_response: "background answer",
     compaction: Compacting,
   }
@@ -4710,14 +4736,19 @@ test "pruning and reopening cannot reuse a transcript request token" {
     OpenSession("desktop-pruned"),
     test_model(),
   )
-  guard opening.find_conversation("desktop-pruned") is Some(first) &&
+  guard opening.find_conversation(@interop.ChannelId::Local, "desktop-pruned")
+    is Some(first) &&
     first.sync is Reloading(generation=1, ..) else {
     fail("expected the original request")
   }
-  let pruned = opening.activate("desktop-other")
-  assert_true(pruned.find_conversation("desktop-pruned") is None)
+  let pruned = opening.activate(@interop.ChannelId::Local, "desktop-other")
+  assert_true(
+    pruned.find_conversation(@interop.ChannelId::Local, "desktop-pruned")
+    is None,
+  )
   let (_, reopened) = update(dispatch, OpenSession("desktop-pruned"), pruned)
-  guard reopened.find_conversation("desktop-pruned") is Some(second) &&
+  guard reopened.find_conversation(@interop.ChannelId::Local, "desktop-pruned")
+    is Some(second) &&
     second.sync is Reloading(generation=2, ..) else {
     fail("reopened conversation reused its old request token")
   }
@@ -4733,7 +4764,8 @@ test "pruning and reopening cannot reuse a transcript request token" {
     reopened,
   )
   inspect(stale.loading_session, content="desktop-pruned")
-  guard stale.find_conversation("desktop-pruned") is Some(current) &&
+  guard stale.find_conversation(@interop.ChannelId::Local, "desktop-pruned")
+    is Some(current) &&
     current.sync is Reloading(generation=2, ..) else {
     fail("late reply changed the reopened conversation")
   }
@@ -4767,14 +4799,21 @@ test "archive removal and reopening cannot reuse a transcript request token" {
     archived_loaded([archived_item("desktop-archived")]),
     opening,
   )
-  assert_true(archived.find_conversation("desktop-archived") is None)
+  assert_true(
+    archived.find_conversation(@interop.ChannelId::Local, "desktop-archived")
+    is None,
+  )
   let (_, restored) = update(dispatch, archived_loaded([]), archived)
   let (_, reopened) = update(
     dispatch,
     OpenSession("desktop-archived"),
     restored,
   )
-  guard reopened.find_conversation("desktop-archived") is Some(current) &&
+  guard reopened.find_conversation(
+      @interop.ChannelId::Local,
+      "desktop-archived",
+    )
+    is Some(current) &&
     current.sync is Reloading(generation=2, ..) else {
     fail("archive removal allowed a request token to be reused")
   }
@@ -4789,7 +4828,8 @@ test "archive removal and reopening cannot reuse a transcript request token" {
     ),
     reopened,
   )
-  guard stale.find_conversation("desktop-archived") is Some(unchanged) &&
+  guard stale.find_conversation(@interop.ChannelId::Local, "desktop-archived")
+    is Some(unchanged) &&
     unchanged.sync is Reloading(generation=2, ..) else {
     fail("late pre-archive reply changed the reopened conversation")
   }
@@ -4828,12 +4868,14 @@ test "a foreground load preserves state through retries and reports exhaustion" 
   let (_, retrying2) = update_dev(dispatch, failure, loading)
   inspect(retrying2.loading_session, content="desktop-a")
   inspect(retrying2.notifications.length(), content="0")
-  guard retrying2.find_conversation("desktop-a") is Some(conv2) &&
+  guard retrying2.find_conversation(@interop.ChannelId::Local, "desktop-a")
+    is Some(conv2) &&
     conv2.sync is Reloading(attempt=2, ..) else {
     fail("expected the second foreground attempt")
   }
   let (_, retrying3) = update_dev(dispatch, failure, retrying2)
-  guard retrying3.find_conversation("desktop-a") is Some(conv3) &&
+  guard retrying3.find_conversation(@interop.ChannelId::Local, "desktop-a")
+    is Some(conv3) &&
     conv3.sync is Reloading(attempt=3, ..) else {
     fail("expected the third foreground attempt")
   }
@@ -4844,7 +4886,8 @@ test "a foreground load preserves state through retries and reports exhaustion" 
     next.notifications[0].message,
     content="failed to load session desktop-a: no such file",
   )
-  guard next.find_conversation("desktop-a") is Some(failed) else {
+  guard next.find_conversation(@interop.ChannelId::Local, "desktop-a")
+    is Some(failed) else {
     fail("expected the failed conversation")
   }
   assert_true(failed.sync is ReloadFailed(..))
@@ -5019,7 +5062,8 @@ test "session loaded adopts the store transcript and keeps live run state" {
     loading_other,
   )
   inspect(other.active_session, content="desktop-stored")
-  guard other.find_conversation("desktop-test") is Some(live) else {
+  guard other.find_conversation(@interop.ChannelId::Local, "desktop-test")
+    is Some(live) else {
     fail("expected the running conversation to survive")
   }
   inspect(live.is_running(), content="true")
@@ -5117,7 +5161,8 @@ test "started for an unknown session materializes its conversation" {
   )
   // Another client's run is now trackable here: cancellable, steerable,
   // and its events route to a real conversation.
-  guard next.find_conversation("desktop-ghost") is Some(ghost) else {
+  guard next.find_conversation(@interop.ChannelId::Local, "desktop-ghost")
+    is Some(ghost) else {
     fail("expected the foreign run's conversation to materialize")
   }
   inspect(ghost.is_running(), content="true")
@@ -5590,14 +5635,14 @@ test "runs settled closes runs the host no longer has, sparing live and starting
   // A run that ended while this client was away: its terminal event is
   // gone for good, so only the `agent.runs` reply can close it.
   let stale = {
-    ..empty_conversation("desktop-stale"),
+    ..empty_conversation(@interop.ChannelId::Local, "desktop-stale"),
     run: Open(run_id="r9", stage=AtStep(Some(4))),
     streaming_response: "mid-step",
   }
   // A send still in flight has no run id yet; its own `started` (or
   // failure) is coming and must be the one to settle it.
   let starting = {
-    ..empty_conversation("desktop-starting"),
+    ..empty_conversation(@interop.ChannelId::Local, "desktop-starting"),
     run: Starting(submission_id="pending-start"),
   }
   let model = running_model()
@@ -5623,7 +5668,8 @@ test "runs settled closes runs the host no longer has, sparing live and starting
   )
   // Run 7 is still in flight on the host: untouched.
   inspect(next.active().is_running(), content="true")
-  guard next.find_conversation("desktop-stale") is Some(settled) else {
+  guard next.find_conversation(@interop.ChannelId::Local, "desktop-stale")
+    is Some(settled) else {
     fail("expected the stale conversation")
   }
   inspect(settled.is_running(), content="false")
@@ -5631,7 +5677,8 @@ test "runs settled closes runs the host no longer has, sparing live and starting
   guard settled.run is NoRun(ended=None) else {
     fail("expected the stale run to settle without a verdict")
   }
-  guard next.find_conversation("desktop-starting") is Some(sending) else {
+  guard next.find_conversation(@interop.ChannelId::Local, "desktop-starting")
+    is Some(sending) else {
     fail("expected the starting conversation")
   }
   assert_true(sending.run is Starting(..))
@@ -5653,7 +5700,10 @@ test "reconnect runs snapshot settles only its captured Starting submission" {
   assert_true(bridged.active().input_ledger[0].state is Unconfirmed)
   let (_, settled) = update_dev(
     dispatch,
-    RunsSettled(live=[], frontier=bridged.run_snapshot_frontier()),
+    RunsSettled(
+      live=[],
+      frontier=bridged.run_snapshot_frontier(@interop.ChannelId::Local),
+    ),
     bridged,
   )
   assert_true(settled.active().run is NoRun(ended=None))
@@ -5736,7 +5786,7 @@ test "an older start rejection cannot close the current start" {
 ///|
 test "a Started racing ahead of an older runs response stays open" {
   let dispatch = test_dispatch()
-  let frontier = test_model().run_snapshot_frontier()
+  let frontier = test_model().run_snapshot_frontier(@interop.ChannelId::Local)
   let (_, started) = update_dev(
     dispatch,
     Started(
@@ -5778,7 +5828,7 @@ test "a stale runs snapshot cannot replay a foreign run after BridgeReady" {
     ],
     settled=[],
     live=["old-run"],
-    frontier=generation_one.run_snapshot_frontier(),
+    frontier=generation_one.run_snapshot_frontier(@interop.ChannelId::Local),
     connection_generation=generation_one.dev().connection_generation,
   )
   let (_, generation_two) = update_dev(dispatch, BridgeReady, generation_one)
@@ -5790,15 +5840,19 @@ test "a stale runs snapshot cannot replay a foreign run after BridgeReady" {
       runs=[],
       settled=[],
       live=[],
-      frontier=generation_two.run_snapshot_frontier(),
+      frontier=generation_two.run_snapshot_frontier(@interop.ChannelId::Local),
       connection_generation=generation_two.dev().connection_generation,
     ),
     generation_two,
   )
   let (_, once) = update_dev(dispatch, stale, current)
   let (_, twice) = update_dev(dispatch, stale, current)
-  assert_true(once.find_conversation("old-session") is None)
-  assert_true(twice.find_conversation("old-session") is None)
+  assert_true(
+    once.find_conversation(@interop.ChannelId::Local, "old-session") is None,
+  )
+  assert_true(
+    twice.find_conversation(@interop.ChannelId::Local, "old-session") is None,
+  )
   inspect(once.dev().connection_generation, content="2")
   inspect(twice.dev().connection_generation, content="2")
 }
@@ -5814,7 +5868,7 @@ test "runs settlement restores a Starting prompt that reached exact-zero EOF off
       "restore after reconnect",
     ),
   )
-  let frontier = before.run_snapshot_frontier()
+  let frontier = before.run_snapshot_frontier(@interop.ChannelId::Local)
   let (_, bridged) = update_dev(dispatch, BridgeReady, before)
   assert_true(bridged.active().sync is Reloading(..))
   let (_, recovered) = update_dev(
@@ -5856,7 +5910,7 @@ test "a late durable boundary refetches a Starting settlement hidden by the firs
       "restore after the boundary",
     ),
   )
-  let first_frontier = before.run_snapshot_frontier()
+  let first_frontier = before.run_snapshot_frontier(@interop.ChannelId::Local)
   // Finished has already removed the run, but its failed final scan has not
   // made the abnormal settlement replayable yet.
   let (_, absent) = update_dev(
@@ -5886,7 +5940,9 @@ test "a late durable boundary refetches a Starting settlement hidden by the firs
     absent,
   )
   assert_true(after_boundary.active().last_run_id is None)
-  let second_frontier = after_boundary.run_snapshot_frontier()
+  let second_frontier = after_boundary.run_snapshot_frontier(
+    @interop.ChannelId::Local,
+  )
   guard second_frontier is [captured] else {
     fail("late boundary lost the settlement selector")
   }
@@ -5941,7 +5997,7 @@ test "runs settlement recovers a transport-undelivered prompt by submission id" 
   )
   assert_true(undelivered.active().run is NoRun(ended=Some(RunFailed)))
   assert_true(undelivered.active().input_ledger[0].run_id is None)
-  let frontier = undelivered.run_snapshot_frontier()
+  let frontier = undelivered.run_snapshot_frontier(@interop.ChannelId::Local)
   let selectors = @json.parse(@interop.reply_json_text(runs_payload(frontier))) catch {
     _ => fail("runs payload was not JSON")
   }
@@ -5992,7 +6048,7 @@ test "runs settlement restores an Open prompt whose zero boundary was missed" {
   let before = fresh_started_model(
     "offline-open", "run-offline-open", "restore open after reconnect",
   )
-  let frontier = before.run_snapshot_frontier()
+  let frontier = before.run_snapshot_frontier(@interop.ChannelId::Local)
   let (_, bridged) = update_dev(dispatch, BridgeReady, before)
   let (_, recovered) = update_dev(
     dispatch,
@@ -6024,7 +6080,7 @@ test "one runs snapshot keeps an active successor after settling its predecessor
   let before = fresh_started_model(
     "old-submission", "run-predecessor", "restore predecessor prompt",
   )
-  let frontier = before.run_snapshot_frontier()
+  let frontier = before.run_snapshot_frontier(@interop.ChannelId::Local)
   let (_, next) = update_dev(
     dispatch,
     RunsLoaded(
@@ -6076,7 +6132,9 @@ test "a settlement captured for an older Starting owner cannot close its success
     "old-owner",
     "old prompt",
   )
-  let frontier = test_model().replace_conversation(old).run_snapshot_frontier()
+  let frontier = test_model()
+    .replace_conversation(old)
+    .run_snapshot_frontier(@interop.ChannelId::Local)
   let current = with_initial_submission(
     { ..old, run: Starting(submission_id="new-owner") },
     "new-owner",
@@ -6110,7 +6168,7 @@ test "a settlement captured for an older Starting owner cannot close its success
 test "an older positive runs row cannot replace a newer Started" {
   let dispatch = test_dispatch()
   let model = running_model()
-  let frontier = model.run_snapshot_frontier()
+  let frontier = model.run_snapshot_frontier(@interop.ChannelId::Local)
   let (_, finished) = update_dev(
     dispatch,
     Finished(run_id="r7", status="finished", answer=None, durable_sequence=None),
@@ -6158,7 +6216,7 @@ test "an older positive runs row cannot replace a newer Started" {
 test "an older positive runs row cannot resurrect a finished run" {
   let dispatch = test_dispatch()
   let model = running_model()
-  let frontier = model.run_snapshot_frontier()
+  let frontier = model.run_snapshot_frontier(@interop.ChannelId::Local)
   let (_, finished) = update_dev(
     dispatch,
     Finished(run_id="r7", status="finished", answer=None, durable_sequence=None),
@@ -6198,7 +6256,10 @@ test "Finished after RunsSettled fills the last run outcome idempotently" {
   })
   let (_, settled) = update_dev(
     dispatch,
-    RunsSettled(live=[], frontier=model.run_snapshot_frontier()),
+    RunsSettled(
+      live=[],
+      frontier=model.run_snapshot_frontier(@interop.ChannelId::Local),
+    ),
     model,
   )
   assert_true(settled.active().run is NoRun(ended=None))
@@ -6417,7 +6478,7 @@ test "a newer Started retires an older unconfirmed start ledger entry" {
 test "concurrent conversations keep their streams apart" {
   let dispatch = test_dispatch()
   let second = {
-    ..empty_conversation("desktop-second"),
+    ..empty_conversation(@interop.ChannelId::Local, "desktop-second"),
     run: Open(run_id="r8", stage=Opened),
   }
   let model = running_model().replace_conversation(second)
@@ -6428,7 +6489,8 @@ test "concurrent conversations keep their streams apart" {
   )
   // Run 8 belongs to the background conversation; the active one is untouched.
   inspect(next.active().streaming_response, content="")
-  guard next.find_conversation("desktop-second") is Some(bg) else {
+  guard next.find_conversation(@interop.ChannelId::Local, "desktop-second")
+    is Some(bg) else {
     fail("expected the background conversation")
   }
   inspect(bg.streaming_response, content="for B")
@@ -6438,7 +6500,7 @@ test "concurrent conversations keep their streams apart" {
 test "a background run finishes without disturbing the conversation on screen" {
   let dispatch = test_dispatch()
   let second = {
-    ..empty_conversation("desktop-second"),
+    ..empty_conversation(@interop.ChannelId::Local, "desktop-second"),
     run: Open(run_id="r8", stage=Opened),
     messages: [{ kind: User, content: "background ask" }],
   }
@@ -6453,7 +6515,8 @@ test "a background run finishes without disturbing the conversation on screen" {
     ),
     model,
   )
-  guard next.find_conversation("desktop-second") is Some(bg) else {
+  guard next.find_conversation(@interop.ChannelId::Local, "desktop-second")
+    is Some(bg) else {
     fail("expected the background conversation")
   }
   inspect(bg.is_running(), content="false")
@@ -6500,7 +6563,7 @@ test "a cancelling turn cannot be steered; the text stays in the composer" {
 test "the composer draft stays with its conversation across a switch" {
   let dispatch = test_dispatch()
   let model = test_model().replace_conversation({
-    ..empty_conversation("desktop-second"),
+    ..empty_conversation(@interop.ChannelId::Local, "desktop-second"),
     messages: [{ kind: User, content: "earlier" }],
   })
   let (_, drafted) = update(dispatch, TaskChanged("half a thought"), model)
@@ -7351,7 +7414,7 @@ test "a foreign background run waits for a snapshot cut after Started" {
   let dispatch = test_dispatch()
   let session = "desktop-background"
   let conv = {
-    ..empty_conversation(session),
+    ..empty_conversation(@interop.ChannelId::Local, session),
     watermark: 1,
     last_terminal_sequence: 1,
     sync: test_reloading([]),
@@ -7382,7 +7445,8 @@ test "a foreign background run waits for a snapshot cut after Started" {
     ),
     buffered_answer,
   )
-  guard started.find_conversation(session) is Some(started_conv) else {
+  guard started.find_conversation(@interop.ChannelId::Local, session)
+    is Some(started_conv) else {
     fail("missing background conversation")
   }
   assert_true(started_conv.run_durable_floor is None)
@@ -7418,7 +7482,8 @@ test "a foreign background run waits for a snapshot cut after Started" {
     ),
     buffered_user,
   )
-  guard after_old_cut.find_conversation(session) is Some(after_old) else {
+  guard after_old_cut.find_conversation(@interop.ChannelId::Local, session)
+    is Some(after_old) else {
     fail("missing conversation after old snapshot")
   }
   assert_true(after_old.run_durable_floor is None)
@@ -7444,7 +7509,8 @@ test "a foreign background run waits for a snapshot cut after Started" {
     ),
     after_old_cut,
   )
-  guard causal.find_conversation(session) is Some(current) else {
+  guard causal.find_conversation(@interop.ChannelId::Local, session)
+    is Some(current) else {
     fail("missing conversation after causal snapshot")
   }
   assert_true(current.run_durable_floor is Some(3))
@@ -7623,7 +7689,7 @@ test "runs settled keeps exact steer ownership without notice growth" {
   let model = running_model().replace_conversation(
     with_pending_steers(running_conversation(), ["lost"]),
   )
-  let frontier = model.run_snapshot_frontier()
+  let frontier = model.run_snapshot_frontier(@interop.ChannelId::Local)
   let (_, once) = update_dev(dispatch, RunsSettled(live=[], frontier~), model)
   inspect(once.active().input_ledger.length(), content="1")
   assert_true(once.active().input_ledger[0].state is Unconfirmed)
@@ -7642,7 +7708,7 @@ test "a trailing applied receipt settles after an empty runs snapshot" {
   let model = running_model().replace_conversation(
     with_pending_steers(running_conversation(), ["late applied"]),
   )
-  let frontier = model.run_snapshot_frontier()
+  let frontier = model.run_snapshot_frontier(@interop.ChannelId::Local)
   let (_, settled) = update_dev(
     dispatch,
     RunsSettled(live=[], frontier~),
@@ -7667,7 +7733,7 @@ test "a trailing dropped receipt restores input after an empty runs snapshot" {
   let model = running_model().replace_conversation(
     with_pending_steers(running_conversation(), ["late dropped"]),
   )
-  let frontier = model.run_snapshot_frontier()
+  let frontier = model.run_snapshot_frontier(@interop.ChannelId::Local)
   let (_, settled) = update_dev(
     dispatch,
     RunsSettled(live=[], frontier~),
@@ -7694,7 +7760,7 @@ test "a successor step cannot retire an older steer before its RPC rejection" {
   let model = running_model().replace_conversation(
     with_pending_steers(running_conversation(), ["late rejection"]),
   )
-  let frontier = model.run_snapshot_frontier()
+  let frontier = model.run_snapshot_frontier(@interop.ChannelId::Local)
   let (_, settled) = update_dev(
     dispatch,
     RunsSettled(live=[], frontier~),
@@ -7738,7 +7804,7 @@ test "a successor step cannot retire an older steer before its RPC rejection" {
 test "a runs snapshot cannot retire a steer submitted after its frontier" {
   let dispatch = test_dispatch()
   let model = running_model()
-  let frontier = model.run_snapshot_frontier()
+  let frontier = model.run_snapshot_frontier(@interop.ChannelId::Local)
   let (_, drafted) = update(dispatch, TaskChanged("post-snapshot steer"), model)
   let (_, steered) = update(dispatch, Send, drafted)
   guard steered.active().input_ledger is [pending] else {
@@ -7784,7 +7850,7 @@ test "a runs snapshot cannot retire a steer submitted after its frontier" {
   // With no transcript, draft, overlay, or live run, exact ownership is the
   // only reason this conversation survives a switch.
   let other = {
-    ..empty_conversation("desktop-other"),
+    ..empty_conversation(@interop.ChannelId::Local, "desktop-other"),
     messages: [{ kind: User, content: "other conversation" }],
   }
   let (_, switched) = update(
@@ -7792,7 +7858,8 @@ test "a runs snapshot cannot retire a steer submitted after its frontier" {
     OpenSession("desktop-other"),
     after_r2.replace_conversation(other),
   )
-  guard switched.find_conversation("desktop-test") is Some(retained) else {
+  guard switched.find_conversation(@interop.ChannelId::Local, "desktop-test")
+    is Some(retained) else {
     fail("switching conversations pruned exact steer ownership")
   }
   assert_true(retained.has_begun())
@@ -7806,7 +7873,8 @@ test "a runs snapshot cannot retire a steer submitted after its frontier" {
     ),
     switched,
   )
-  guard rejected.find_conversation("desktop-test") is Some(restored) else {
+  guard rejected.find_conversation(@interop.ChannelId::Local, "desktop-test")
+    is Some(restored) else {
     fail("late rejection lost its conversation")
   }
   inspect(restored.input_ledger.length(), content="0")
@@ -7830,7 +7898,7 @@ test "runs settlement releases after a causal cut and keeps exact receipt" {
     ..running_model().replace_conversation(conv),
     transcript_request_generation: 1,
   }
-  let frontier = model.run_snapshot_frontier()
+  let frontier = model.run_snapshot_frontier(@interop.ChannelId::Local)
   let (_, snapshot_first) = update_dev(
     dispatch,
     SessionRefreshed(
@@ -7895,7 +7963,7 @@ test "a late normal Finished upgrades a runs-settled uncertain steer" {
     ["captured steer"],
   )
   let model = running_model().replace_conversation(conv)
-  let frontier = model.run_snapshot_frontier()
+  let frontier = model.run_snapshot_frontier(@interop.ChannelId::Local)
   let (_, settled) = update_dev(
     dispatch,
     RunsSettled(live=[], frontier~),
@@ -7956,7 +8024,7 @@ test "a late failed Finished preserves a runs-settled snapshot cut" {
   let dispatch = test_dispatch()
   let conv = with_pending_steers(running_conversation(), ["captured steer"])
   let model = running_model().replace_conversation(conv)
-  let frontier = model.run_snapshot_frontier()
+  let frontier = model.run_snapshot_frontier(@interop.ChannelId::Local)
   let (_, settled) = update_dev(
     dispatch,
     RunsSettled(live=[], frontier~),
@@ -7995,7 +8063,7 @@ test "runs settlement follows an older in-flight transcript cut" {
     ..running_model().replace_conversation(conv),
     transcript_request_generation: 1,
   }
-  let frontier = model.run_snapshot_frontier()
+  let frontier = model.run_snapshot_frontier(@interop.ChannelId::Local)
   let (_, settled) = update_dev(
     dispatch,
     RunsSettled(live=[], frontier~),
@@ -8078,7 +8146,10 @@ test "runs settlement causally freezes bound initial prompts from open and idle 
   let open_model = running_model().replace_conversation(open_conv)
   let (_, open_settled) = update_dev(
     dispatch,
-    RunsSettled(live=[], frontier=open_model.run_snapshot_frontier()),
+    RunsSettled(
+      live=[],
+      frontier=open_model.run_snapshot_frontier(@interop.ChannelId::Local),
+    ),
     open_model,
   )
   assert_true(open_settled.active().run is NoRun(ended=None))
@@ -8115,7 +8186,10 @@ test "runs settlement causally freezes bound initial prompts from open and idle 
   let idle_model = test_model().replace_conversation(idle_conv)
   let (_, idle_settled) = update_dev(
     dispatch,
-    RunsSettled(live=[], frontier=idle_model.run_snapshot_frontier()),
+    RunsSettled(
+      live=[],
+      frontier=idle_model.run_snapshot_frontier(@interop.ChannelId::Local),
+    ),
     idle_model,
   )
   assert_true(idle_settled.active().input_ledger[0].state is Unconfirmed)
@@ -8964,7 +9038,10 @@ test "archive broadcast invalidates the active send target before list replies" 
     model,
   )
   inspect(invalidated.active_session, content="desktop-fresh")
-  assert_true(invalidated.find_conversation("desktop-test") is None)
+  assert_true(
+    invalidated.find_conversation(@interop.ChannelId::Local, "desktop-test")
+    is None,
+  )
   inspect(invalidated.active().session_id, content="desktop-fresh")
   inspect(invalidated.dev().active_workspace, content="/work/archived")
   inspect(
@@ -8993,7 +9070,9 @@ test "archive broadcast invalidates the active send target before list replies" 
   inspect(sent.active_session, content="desktop-fresh")
   inspect(sent.active().session_id, content="desktop-fresh")
   assert_true(sent.active().run is Starting(..))
-  assert_true(sent.find_conversation("desktop-test") is None)
+  assert_true(
+    sent.find_conversation(@interop.ChannelId::Local, "desktop-test") is None,
+  )
 }
 
 ///|
@@ -9229,7 +9308,10 @@ test "an archived background session drops its live state, active stays" {
   let dispatch = test_dispatch()
   let model = {
     ..test_model(),
-    conversations: [test_conversation(), empty_conversation("desktop-old")],
+    conversations: [
+      test_conversation(),
+      empty_conversation(@interop.ChannelId::Local, "desktop-old"),
+    ],
   }
   let (_, next) = update(
     dispatch,
@@ -9238,7 +9320,9 @@ test "an archived background session drops its live state, active stays" {
   )
   inspect(next.dev().archived.length(), content="1")
   inspect(next.dev().archived[0].id, content="desktop-old")
-  assert_true(next.find_conversation("desktop-old") is None)
+  assert_true(
+    next.find_conversation(@interop.ChannelId::Local, "desktop-old") is None,
+  )
   inspect(next.active_session, content="desktop-test")
 }
 
@@ -9250,7 +9334,9 @@ test "an archived-list reply immediately replaces the active conversation" {
     archived_loaded([archived_item("desktop-test")]),
     test_model(),
   )
-  assert_true(next.find_conversation("desktop-test") is None)
+  assert_true(
+    next.find_conversation(@interop.ChannelId::Local, "desktop-test") is None,
+  )
   inspect(next.active_session, content="desktop-archive-replacement")
   inspect(next.dev().archived[0].id, content="desktop-test")
 }
@@ -9353,7 +9439,9 @@ test "explicit user actions re-pin the transcript" {
 
   // Switching to a conversation that has live state lands at its tail.
   let two = {
-    ..test_model().replace_conversation(empty_conversation("desktop-other")),
+    ..test_model().replace_conversation(
+      empty_conversation(@interop.ChannelId::Local, "desktop-other"),
+    ),
     transcript_pinned: false,
   }
   let (_, switched) = update(dispatch, OpenSession("desktop-other"), two)
@@ -10833,7 +10921,8 @@ test "a sequence-one commit materializes an unknown hidden conversation" {
   )
   inspect(next.conversations.length(), content="2")
   inspect(next.active().messages.length(), content="0")
-  guard next.find_conversation("desktop-elsewhere") is Some(hidden) else {
+  guard next.find_conversation(@interop.ChannelId::Local, "desktop-elsewhere")
+    is Some(hidden) else {
     fail("unknown commit did not materialize its session")
   }
   inspect(hidden.messages.length(), content="1")
@@ -10851,7 +10940,8 @@ test "a gapped commit for an unknown session materializes then reloads" {
     }),
     test_model(),
   )
-  guard next.find_conversation("desktop-gap") is Some(hidden) else {
+  guard next.find_conversation(@interop.ChannelId::Local, "desktop-gap")
+    is Some(hidden) else {
     fail("gapped commit did not materialize its session")
   }
   inspect(hidden.messages.length(), content="0")
@@ -10884,7 +10974,10 @@ test "a late commit cannot resurrect a locally known archived session" {
     }),
     model,
   )
-  assert_true(next.find_conversation("desktop-archived") is None)
+  assert_true(
+    next.find_conversation(@interop.ChannelId::Local, "desktop-archived")
+    is None,
+  )
   inspect(next.conversations.length(), content="1")
 }
 
@@ -10899,7 +10992,10 @@ test "an archive tombstone blocks commits before the archived list refreshes" {
     }),
     model,
   )
-  assert_true(next.find_conversation("desktop-tombstoned") is None)
+  assert_true(
+    next.find_conversation(@interop.ChannelId::Local, "desktop-tombstoned")
+    is None,
+  )
   inspect(next.conversations.length(), content="1")
 }
 
