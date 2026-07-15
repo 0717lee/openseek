@@ -126,17 +126,15 @@ fn HttpTransport::request_headers(self : HttpTransport) -> Map[String, String] {
 /// layer computes. Case-insensitive (differently cased user keys would
 /// otherwise emit conflicting duplicates on the wire).
 fn reserved_header(name : String) -> Bool {
-  match name.to_lower() {
-    "content-type"
-    | "accept"
-    | "accept-encoding"
-    | "mcp-session-id"
-    | "mcp-protocol-version"
-    | "content-length"
-    | "transfer-encoding"
-    | "host" => true
-    _ => false
-  }
+  name.to_lower()
+  is ("content-type"
+  | "accept"
+  | "accept-encoding"
+  | "mcp-session-id"
+  | "mcp-protocol-version"
+  | "content-length"
+  | "transfer-encoding"
+  | "host")
 }
 
 ///|
@@ -176,14 +174,9 @@ pub impl @jsonrpc.Transport for HttpTransport with fn send(self, message) {
   // rather than growing tasks and connections without bound.
   if self.pending_posts.length() >= MaxInFlightExchanges {
     if request_id is Some(id) {
-      self.deliver({
-        "jsonrpc": "2.0",
-        "id": id,
-        "error": {
-          "code": -32000,
-          "message": "too many in-flight MCP exchanges (server flooding or stalling)",
-        },
-      })
+      self.deliver_error(
+        id, "too many in-flight MCP exchanges (server flooding or stalling)",
+      )
     }
     return
   }
@@ -353,42 +346,28 @@ async fn HttpTransport::run_post(
       // has nothing to answer.
       if request_id is Some(id) && !answered {
         answered = true
-        self.deliver({
-          "jsonrpc": "2.0",
-          "id": id,
-          "error": {
-            "code": -32000,
-            "message": "MCP endpoint exchange failed: \{error}",
-          },
-        })
+        self.deliver_error(id, "MCP endpoint exchange failed: \{error}")
       }
       return
     }
   }
-  // Deadline expiry: the endpoint held the exchange open past any useful
-  // lifetime; fail the request and release this slot.
-  if bounded is None && request_id is Some(id) && !answered {
-    answered = true
-    self.deliver({
-      "jsonrpc": "2.0",
-      "id": id,
-      "error": {
-        "code": -32000,
-        "message": "MCP endpoint exchange exceeded \{ExchangeTimeoutMs / 1000}s",
-      },
-    })
-  }
-  // The response ended without answering the request (e.g. an SSE stream closed
-  // early): fail it rather than leaving the caller to an outer timeout.
+  // A request the exchange never answered: fail it rather than leave the caller
+  // to an outer timeout. `bounded is None` is the deadline expiring — the
+  // endpoint held the exchange open past any useful lifetime — and otherwise
+  // the response simply ended first, e.g. an SSE stream closed early.
+  //
+  // These were two blocks, the first assigning `answered` for no reason but to
+  // make the second skip. They are one decision on `bounded`, and nothing
+  // suspends between them.
   if request_id is Some(id) && !answered {
-    self.deliver({
-      "jsonrpc": "2.0",
-      "id": id,
-      "error": {
-        "code": -32000,
-        "message": "MCP endpoint response ended without answering the request",
+    self.deliver_error(
+      id,
+      if bounded is None {
+        "MCP endpoint exchange exceeded \{ExchangeTimeoutMs / 1000}s"
+      } else {
+        "MCP endpoint response ended without answering the request"
       },
-    })
+    )
   }
 }
 
@@ -425,7 +404,7 @@ async fn HttpTransport::exchange(
     .unwrap_or("")
     .to_lower()
   if content_type.contains("text/event-stream") {
-    self.read_sse_stream(client, deliver, answered~)
+    read_sse_stream(client, deliver, answered~)
   } else if content_type.contains("application/json") {
     let text = client.read_all().text()
     deliver(@json.parse(text))
@@ -440,13 +419,11 @@ async fn HttpTransport::exchange(
 /// message. Multi-line `data:` fields are joined with newlines per the SSE spec;
 /// `event:`/`id:`/comment lines are ignored. Raises on a read failure (which
 /// fails the owning request) rather than masking it as a clean end of stream.
-async fn HttpTransport::read_sse_stream(
-  self : HttpTransport,
+async fn read_sse_stream(
   client : @http.Client,
   deliver : (Json) -> Unit,
   answered~ : () -> Bool,
 ) -> Unit {
-  ignore(self)
   let data = StringBuilder()
   let mut has_data = false
   let lines = SseLineReader::new(client)
@@ -581,6 +558,23 @@ fn SseLineReader::take(
   self.start = consumed
   self.scan = consumed
   @utf8.decode(bytes)
+}
+
+///|
+/// Fail a pending request with a synthesized JSON-RPC error. The endpoint
+/// never answered, so this is the only reply its caller will get; -32000 is
+/// the code the transport uses for every one of them, and it was spelled out
+/// at each site.
+fn HttpTransport::deliver_error(
+  self : HttpTransport,
+  id : Json,
+  message : String,
+) -> Unit {
+  self.deliver({
+    "jsonrpc": "2.0",
+    "id": id,
+    "error": { "code": -32000, "message": message },
+  })
 }
 
 ///|
