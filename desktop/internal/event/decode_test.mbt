@@ -1,10 +1,16 @@
 ///|
 test "decode usage event" {
-  // The engine nests the counters under a `usage` object (`print_usage`
-  // serializes the DeepSeek `Usage` struct verbatim).
+  // The engine nests the counters under a `usage` object, serialized from the
+  // protocol's `Usage` struct — so all five are always present on the wire.
   let event = @event.decode_event({
     "event": "usage",
-    "usage": { "prompt_tokens": 9, "completion_tokens": 3, "total_tokens": 12 },
+    "usage": {
+      "prompt_tokens": 9,
+      "completion_tokens": 3,
+      "total_tokens": 12,
+      "prompt_cache_hit_tokens": 0,
+      "prompt_cache_miss_tokens": 9,
+    },
   })
   match event {
     Some(Usage(info)) => assert_eq(info.total_tokens, 12)
@@ -13,16 +19,11 @@ test "decode usage event" {
 }
 
 ///|
-test "decode assistant and runtime events" {
+test "decode assistant events" {
   match
     @event.decode_event({ "event": "assistant_message", "content": "hello" }) {
     Some(AssistantMessage(text)) => assert_eq(text, "hello")
     _ => fail("expected assistant message")
-  }
-  match
-    @event.decode_event({ "event": "runtime_update", "content": "watch update" }) {
-    Some(RuntimeUpdate(text)) => assert_eq(text, "watch update")
-    _ => fail("expected runtime update")
   }
 }
 
@@ -44,6 +45,7 @@ test "decode tool and terminal events" {
   match
     @event.decode_event({
       "event": "tool_result",
+      "tool_call_id": "call_1",
       "tool_name": "shell",
       "content": "ok",
       "is_error": false,

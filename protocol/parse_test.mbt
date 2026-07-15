@@ -125,22 +125,6 @@ test "an older engine's steer_applied still decodes" {
 }
 
 ///|
-/// `names` is the one payload field no reader uses, so its absence must not
-/// decide whether the event decodes at all.
-test "mcp_tools_registered decodes without the names it nobody reads" {
-  debug_inspect(
-    decode(
-      (
-        #|{"event":"mcp_tools_registered","servers":2,"tools":5}
-      ),
-    ),
-    content=(
-      #|Some(McpToolsRegistered(servers=2, tools=5, names=[]))
-    ),
-  )
-}
-
-///|
 /// A line from a newer engine, or one that is not an event at all, is ignored
 /// rather than failing the reader.
 test "unknown and malformed lines are ignored" {

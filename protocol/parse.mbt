@@ -9,6 +9,24 @@
 /// missing `event` key, or a payload whose required fields are absent or
 /// mistyped. Clients stay tolerant of a newer engine by treating `None` as
 /// "ignore this line" rather than as a failure.
+///
+/// ## When a field may be absent
+///
+/// A field is defaulted **if and only if it was added after its event already
+/// existed**, because engines older than that field still emit the event
+/// without it — and the TUI and desktop launch whichever `openseek` is on
+/// PATH, so a new reader against an old engine is a real pairing.
+///
+/// Everything else is required. "No reader uses it" is *not* a reason to
+/// default a field: `tool_call_id`, `usage`'s cache counters and
+/// `mcp_tools_registered`'s `names` are all unread by every current client, yet
+/// every engine that ever emitted those events emitted those fields, so their
+/// absence means the line is not what it claims to be. Guessing there would
+/// hide a real wire break behind a fabricated value.
+///
+/// Today exactly one field qualifies: `steer_applied`'s `kind` (added
+/// 2026-06-25 in 9b2f6c43, to an event from 56140618). Check `git log -S` for
+/// the field against the event's introducing commit before adding another.
 pub fn parse(line : Json) -> Event? {
   guard line is Object(fields) else { return None }
   guard text(fields, "event") is Some(name) else { return None }
@@ -157,20 +175,16 @@ pub fn parse(line : Json) -> Event? {
       }
       Some(McpConfigInvalid(path~, error~))
     }
-    // `names` is defaulted to empty rather than required: it is the one field
-    // here no reader uses (the TUI renders only the two counts), so demanding it
-    // would let a field nobody reads decide whether the notice appears at all.
     "mcp_tools_registered" => {
       guard int(fields, "servers") is Some(servers) &&
-        int(fields, "tools") is Some(tools) else {
+        int(fields, "tools") is Some(tools) &&
+        fields.get("names") is Some(Array(names)) else {
         return None
       }
       let decoded = []
-      if fields.get("names") is Some(Array(names)) {
-        for name in names {
-          guard name is String(name) else { return None }
-          decoded.push(name)
-        }
+      for name in names {
+        guard name is String(name) else { return None }
+        decoded.push(name)
       }
       Some(McpToolsRegistered(servers~, tools~, names=decoded))
     }

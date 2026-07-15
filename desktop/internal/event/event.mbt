@@ -19,7 +19,6 @@ pub(all) struct ToolResultEvent {
 pub(all) enum AgentEvent {
   AgentStep
   AssistantMessage(String)
-  RuntimeUpdate(String)
   SteerApplied(String)
   SteerDropped(String)
   Usage(UsageInfo)

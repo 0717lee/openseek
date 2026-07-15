@@ -4,6 +4,7 @@ version = "0.1.0"
 
 import {
   "bobzhang/jsonl@0.2.0",
+  "bobzhang/openseek_protocol@0.1.0",
   "moonbit-community/cmark@0.4.4",
   "moonbit-community/editor@0.1.0",
   "moonbit-community/fuzzy_match@0.2.5",

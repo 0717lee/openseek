@@ -1,4 +1,5 @@
 members = [
   ".",
+  "../protocol",
   "./lepus/proton",
 ]

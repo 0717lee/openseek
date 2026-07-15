@@ -210,6 +210,7 @@ test "decode_event surfaces MCP diagnostics as notices" {
       "event": "mcp_tools_registered",
       "servers": 2,
       "tools": 5,
+      "names": ["a", "b", "c", "d", "e"],
     })
     is Some(BackgroundNotice(registered)) else {
     fail("expected a notice")
