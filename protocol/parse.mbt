@@ -2,7 +2,8 @@
 /// Read one JSONL line from the engine's stdout stream back into an `Event`.
 ///
 /// The inverse of `emit`: `parse(json) == Some(event)` for every line `emit`
-/// writes, which `protocol_test.mbt` pins per variant. Fields are read from the
+/// writes, which `emit/emit_test.mbt` pins per variant — it needs both halves,
+/// so it lives with the writer. Fields are read from the
 /// top level, matching the hoisting `@xlog`'s handler performs.
 ///
 /// `None` means "not an event this engine emits" — an unknown `event` name, a

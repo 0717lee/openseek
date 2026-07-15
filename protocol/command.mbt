@@ -139,16 +139,18 @@ pub fn Command::parse(line : Json) -> Result[Command, String] {
 
 ///|
 fn parse_steer(line : Json) -> Result[Command, String] {
+  // `text` is required whatever the kind says, so it is checked once here
+  // rather than restated in three arms, where the precedence between "no text"
+  // and "bad kind" was emergent from their order.
+  guard line is { "text": String(text), .. } else {
+    return Err("expected a string \"text\" field")
+  }
   match line {
-    { "kind": String(kind), "text": String(text), .. } =>
-      match kind {
-        "prompt" => Ok(Steer(kind=Prompt, text~))
-        "command" => Ok(Steer(kind=Command, text~))
-        other => Err("unknown steer kind: \{other}")
-      }
-    { "kind": _, "text": String(_), .. } =>
-      Err("expected a string \"kind\" field")
-    { "text": String(text), .. } => Ok(Steer(kind=Prompt, text~))
-    _ => Err("expected a string \"text\" field")
+    { "kind": String("prompt"), .. } => Ok(Steer(kind=Prompt, text~))
+    { "kind": String("command"), .. } => Ok(Steer(kind=Command, text~))
+    { "kind": String(other), .. } => Err("unknown steer kind: \{other}")
+    { "kind": _, .. } => Err("expected a string \"kind\" field")
+    // A steer with no kind at all is a prompt steer: see the rule above.
+    _ => Ok(Steer(kind=Prompt, text~))
   }
 }

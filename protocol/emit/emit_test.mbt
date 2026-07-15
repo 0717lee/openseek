@@ -59,9 +59,16 @@ fn usage_sample() -> @protocol.Usage {
 
 ///|
 /// One sample per `Event` variant. `derive(Eq)` plus the round-trip test below
-/// makes this list the encoder/decoder contract; MoonBit's exhaustiveness
-/// checks `emit`/`parse`/`name`, but nothing forces a new variant to be added
-/// here, so a variant added without a sample is silently untested.
+/// makes this list the encoder/decoder contract.
+///
+/// Two gaps this list does not close, both worth knowing before adding a
+/// variant. Exhaustiveness covers `to_json` and `parse` — `emit` itself matches
+/// nothing, it delegates — but nothing forces a new variant to be added *here*,
+/// so one added without a sample is silently untested. And `level`'s `_ => Info`
+/// catch-all means nothing forces it a severity either: a new event that should
+/// warn ships at `Info` with no error. One variant still cannot hold two levels,
+/// which is what this package set out to stop; being made to choose one is a
+/// weaker promise than the comment here used to imply.
 fn all_events() -> Array[@protocol.Event] {
   [
     AgentSetupFailed(error="boom"),

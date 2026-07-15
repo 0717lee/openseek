@@ -1,15 +1,16 @@
 # OpenSeek Protocol
 
-`bobzhang/openseek_protocol` owns the engine's stdout event stream — the wire
-contract between `openseek run` / `openseek serve` and everything that reads
-them: the TUI, the desktop host, and any script consuming `run`'s stdout.
+`bobzhang/openseek_protocol` owns **both directions** of the serve protocol: the
+stdout event stream the engine reports (`Event`), and the stdin command stream it
+is told (`Command`). Between them they are the whole wire contract with the TUI,
+the desktop host, the desktop frontend, and any script driving `run` or `serve`.
 
 It is a **leaf module with no openseek dependencies**, split so the decoder is
 portable:
 
 | Package | Contents | Targets | Deps |
 | --- | --- | --- | --- |
-| `bobzhang/openseek_protocol` | `Event`, `Usage`, `to_json`, `parse` | js, wasm, wasm-gc, native | `core/json` |
+| `bobzhang/openseek_protocol` | `Event`, `Usage`, `Command`, `SteerKind`, `to_json`, `parse` | js, wasm, wasm-gc, native | `core/json` |
 | `bobzhang/openseek_protocol/emit` | `emit` (level + `to_json` + log) | native | `xlog`, above |
 
 Only the *writer* needs `@xlog`, which is native-only. Keeping it in its own
@@ -86,23 +87,53 @@ line's `source` still points at the reporting code rather than at `emit.mbt`.
 
 ## When a field may be absent
 
-A field is defaulted **iff it was added after its event already existed** —
-engines older than the field still emit the event without it, and the clients
-launch whichever `openseek` is on `PATH`. Exactly one qualifies today:
-`steer_applied`'s `kind` (added 2026-06-25 in 9b2f6c43, to an event from
-56140618).
+**The rule and the fields it covers live in `parse`'s doc comment** (events) and
+`Command::parse`'s (commands) — beside the code that enforces them, and nowhere
+else. This file used to restate the rule and the list, and within a month it was
+wrong on both: it still said "exactly one field qualifies" after the count went
+to three, and stated an "iff" after a second case was found. A rule copied is a
+rule that drifts, which is the failure this package exists to prevent — so the
+copy is gone rather than corrected.
 
-"No reader uses it" is *not* a reason. `tool_call_id`, `usage`'s cache counters
-and `mcp_tools_registered`'s `names` are unread by every client, yet every engine
-that emitted those events emitted those fields — so absence means the line is not
-what it claims, and defaulting would hide a real break behind a fabricated value.
-Check `git log -S` for the field against its event's introducing commit before
-adding another.
+What is worth knowing here: a field is defaulted only for a reason the git
+history can settle, never because no reader happens to use it. Run `git log -S`
+for the field against its event's introducing commit before adding another; the
+doc comment says what to look for.
+
+## The command direction
+
+`Command` is the same shape for the opposite direction: one type, one encoder
+(`to_json`/`to_jsonl`), one decoder (`Command::parse`), and every controller
+encodes through it — `cmd/tui` and the desktop host both, where each used to
+model the commands itself. They drifted exactly as the events had: the TUI sent
+`steer` with a `kind` and the desktop sent it without one, working only because
+the engine's decoder happened to default it.
+
+```mbt nocheck
+// A controller writes a line.
+let line = (Prompt(text="do it") : @protocol.Command).to_jsonl()
+
+// The engine reads one back. `Err` is a line it cannot read — and only that:
+// whether a readable command is *acceptable* is the engine's to say, which is
+// why `serve`, not `parse`, refuses a blank goal.
+match @protocol.Command::parse(line) {
+  Ok(Prompt(text~)) => start_turn(text)
+  Ok(_) => ()
+  Err(message) => report(message)
+}
+```
+
+`Command::parse` returns `Result`, not `Option`, unlike `parse` for events. An
+unreadable event is a line to ignore; an unreadable command is a request that
+will never be answered, and silence is the one reply a controller cannot act on.
+Its `Err` strings reach the controller as `command_error`, so they are wire
+contract too.
 
 ## Invariants
 
-- **`parse` is `emit`'s inverse** for every variant. `protocol_test.mbt` pins
-  this per sample; it is the property the package exists to provide.
+- **`parse` is `emit`'s inverse** for every variant. `emit/emit_test.mbt` pins
+  this per sample — it needs both halves, so it lives with the writer; it is the
+  property the package exists to provide.
 - **Optional string fields are written as the value or `null`, never omitted.**
   A field's own `ToJson` would encode `Some(v)` as the one-element array `[v]`,
   which every decoder's string lookup rejects — silently turning a present field
