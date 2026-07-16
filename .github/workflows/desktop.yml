@@ -1,7 +1,8 @@
 name: Desktop
 
 # Kept separate from the root CI (ci.yml): the desktop module is its own
-# MoonBit workspace (desktop/moon.work, with the Proton submodule as members)
+# MoonBit workspace (desktop/moon.work, with the Proton and async submodules as
+# members)
 # and is not part of the root moon.work, so the root checks never see it.
 on:
   push:
@@ -36,10 +37,10 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
 
-      # The repository moved from private lepus to public Proton, so the
-      # pinned submodule commit can be fetched without a repository secret.
-      - name: Check out the Proton submodule
-        run: git submodule update --init desktop/lepus
+      # Both pinned repositories are public, so CI can fetch them without a
+      # repository secret.
+      - name: Check out desktop submodules
+        run: git submodule update --init desktop/vendor/moonbitlang-async desktop/lepus
 
       - name: Set up MoonBit (${{ matrix.moonbit-channel }})
         run: |
@@ -74,9 +75,9 @@ jobs:
         run: moon -C desktop/lepus install ./cli --bin target/lepus-tools
 
       - name: Check formatting
-        # Scope to this module's own packages: lepus/proton is a workspace
-        # member inside the Proton submodule, so a workspace-wide `fmt --check`
-        # would flag source we don't own.
+        # Scope to this module's own packages: the external submodules contain
+        # workspace members, so a workspace-wide `fmt --check` would flag
+        # source we don't own.
         #
         # Stable only, matching the root CI: the nightly formatter's output
         # drifts, so gating on it red-lines the build for files nobody touched.
@@ -102,9 +103,9 @@ jobs:
         if: matrix.moonbit-channel == 'nightly'
         run: |
           moon -C desktop info --target native
-          # The Proton submodule's own .mbti live inside the submodule and are
-          # not tracked as files by this repo, so this pathspec only validates
-          # the desktop module's own generated interfaces.
+          # The submodules' own .mbti live inside the submodules and are not
+          # tracked as files by this repo, so this pathspec only validates the
+          # desktop module's own generated interfaces.
           if [ -n "$(git status --porcelain -- '*.mbti')" ]; then
             git status --short -- '*.mbti'
             git diff -- '*.mbti'
@@ -132,8 +133,10 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
 
-      - name: Check out the Proton submodule
-        run: git submodule update --init desktop/lepus
+      # Both pinned repositories are public, so CI can fetch them without a
+      # repository secret.
+      - name: Check out desktop submodules
+        run: git submodule update --init desktop/vendor/moonbitlang-async desktop/lepus
 
       - name: Set up MoonBit (${{ matrix.moonbit-channel }})
         run: |
@@ -173,8 +176,10 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
 
-      - name: Check out the Proton submodule
-        run: git submodule update --init desktop/lepus
+      # Both pinned repositories are public, so CI can fetch them without a
+      # repository secret.
+      - name: Check out desktop submodules
+        run: git submodule update --init desktop/vendor/moonbitlang-async desktop/lepus
 
       - name: Set up MoonBit (nightly)
         run: |
@@ -233,8 +238,10 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
 
-      - name: Check out the Proton submodule
-        run: git submodule update --init desktop/lepus
+      # Both pinned repositories are public, so CI can fetch them without a
+      # repository secret.
+      - name: Check out desktop submodules
+        run: git submodule update --init desktop/vendor/moonbitlang-async desktop/lepus
 
       - name: Set up MoonBit (nightly)
         run: |
@@ -285,8 +292,10 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
 
-      - name: Check out the Proton submodule
-        run: git submodule update --init desktop/lepus
+      # Both pinned repositories are public, so CI can fetch them without a
+      # repository secret.
+      - name: Check out desktop submodules
+        run: git submodule update --init desktop/vendor/moonbitlang-async desktop/lepus
 
       - name: Set up MoonBit (nightly)
         shell: pwsh

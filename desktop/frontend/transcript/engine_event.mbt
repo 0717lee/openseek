@@ -93,7 +93,8 @@ pub fn decode_engine_event(raw : Map[String, Json]) -> EngineEvent? {
           submission_id=@jsonx.json_text(raw, "submission_id"),
         ),
       )
-    AutoCompactionFinished(summary~, ..) => Some(AutoCompactionFinished(summary))
+    AutoCompactionFinished(summary~, ..) =>
+      Some(AutoCompactionFinished(summary))
     CompactionStarted(..) => Some(CompactionStarted)
     CompactionFinished(summary~, ..) => Some(CompactionFinished(summary))
     CompactionFailed(error~) => Some(CompactionFailed(error))

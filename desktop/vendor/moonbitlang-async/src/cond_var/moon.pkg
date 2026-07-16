@@ -1,9 +1,0 @@
-import {
-  "moonbitlang/core/deque",
-  "moonbitlang/async/internal/coroutine",
-}
-
-import {
-  "moonbitlang/async",
-  "moonbitlang/async/internal/test_util",
-} for "test"

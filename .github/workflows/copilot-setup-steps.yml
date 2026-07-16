@@ -29,6 +29,9 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
 
+      - name: Check out async submodule
+        run: git submodule update --init desktop/vendor/moonbitlang-async
+
       - name: Set up MoonBit
         run: |
           curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash
