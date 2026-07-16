@@ -2606,6 +2606,14 @@ fn update_device_msg(
       if archived {
         return (@cmd.none, model)
       }
+      let first_commit_unseen = match
+        model.find_conversation(channel, session) {
+        Some(conv) => !conv.has_seen_durable_sequence(sequence)
+        None => true
+      }
+      let refresh_sessions = sequence == 1 &&
+        !dev.sessions.iter().any(item => item.id == session) &&
+        first_commit_unseen
       // A short foreign run can commit and finish before either the session
       // list or run resync reaches this page. Materialize hidden client state
       // from the commit itself: sequence 1 projects immediately; a later
@@ -2621,7 +2629,8 @@ fn update_device_msg(
       } else {
         model
       }
-      if model.find_conversation(channel, session) is Some(conv) {
+      let (commit_cmd, next) = if model.find_conversation(channel, session)
+        is Some(conv) {
         let commit : BufferedCommit = { sequence, kind, payload }
         match conv.sync {
           // A read is in flight: buffer — its snapshot's watermark decides
@@ -2685,6 +2694,17 @@ fn update_device_msg(
       } else {
         (@cmd.none, model)
       }
+      // A live Started can overtake the store write and the BridgeReady list
+      // request can therefore miss a newly-created session. Sequence one is
+      // the first durable proof that the record exists; refresh the list so
+      // older hosts without Started.session_root, and clients that learned
+      // the commit first, still converge on the store's workspace grouping.
+      if refresh_sessions {
+        let (sessions, next) = request_sessions_refresh(dispatch, channel, next)
+        (@cmd.batch([commit_cmd, sessions]), next)
+      } else {
+        (commit_cmd, next)
+      }
     }
     BranchLoaded(session~, branch~) =>
       if model.find_conversation(channel, session) is Some(conv) {
@@ -2698,6 +2718,7 @@ fn update_device_msg(
       model=selected_model,
       max_steps~,
       cwd~,
+      session_root~,
       task~,
       submission_id~
     ) => {
@@ -2718,6 +2739,10 @@ fn update_device_msg(
             session,
             workspace=model.session_workspace(channel, session),
           )
+      }
+      let existing = match dev.workspace_for_session_root(session_root) {
+        Some(workspace) => { ..existing, workspace: workspace_root(workspace) }
+        None => existing
       }
       let owned = submission_id is Some(id) &&
         existing.has_initial_submission(id)
@@ -2985,6 +3010,7 @@ fn update_device_msg(
             model=run.model,
             max_steps=run.max_steps,
             cwd=run.cwd,
+            session_root=run.session_root,
             task=run.task,
             submission_id=run.submission_id,
           ),
@@ -3960,6 +3986,7 @@ fn fresh_started_model(
       model="deepseek-v4-pro",
       max_steps=1000,
       cwd=None,
+      session_root=None,
       task=Some(prompt),
       submission_id=Some(submission_id),
     ),
@@ -3986,6 +4013,7 @@ fn second_run_started_before_first_response() -> (Model, String)? {
       model="deepseek-v4-pro",
       max_steps=1000,
       cwd=None,
+      session_root=None,
       task=Some("first prompt"),
       submission_id=Some("first-start"),
     ),
@@ -4036,6 +4064,7 @@ fn second_run_started_before_first_response() -> (Model, String)? {
       model="deepseek-v4-pro",
       max_steps=1000,
       cwd=None,
+      session_root=None,
       task=Some("second prompt"),
       submission_id=Some(second_submission),
     ),
@@ -4080,6 +4109,7 @@ fn second_run_started_before_first_steer_receipt() -> Model? {
       model="deepseek-v4-pro",
       max_steps=1000,
       cwd=None,
+      session_root=None,
       task=Some("second prompt"),
       submission_id=Some(second_submission),
     ),
@@ -4539,14 +4569,17 @@ test "session list assigns a commit-first conversation to its durable workspace"
   assert_true(provisional.workspace is None)
   let (_, listed) = update(
     dispatch,
-    sessions_loaded([
-      {
-        id: "desktop-foreign",
-        title: Some("arrived before the list"),
-        workspace: "/work/foreign",
-        workspace_name: "foreign",
-      },
-    ]),
+    sessions_loaded(
+      [
+        {
+          id: "desktop-foreign",
+          title: Some("arrived before the list"),
+          workspace: "/work/foreign",
+          workspace_name: "foreign",
+        },
+      ],
+      request_generation=committed.dev().sessions_request_generation,
+    ),
     committed.activate(@interop.ChannelId::Local, "desktop-foreign"),
   )
   guard listed.find_conversation(@interop.ChannelId::Local, "desktop-foreign")
@@ -4618,6 +4651,7 @@ test "session list assigns a Started-first conversation to its durable workspace
       model="deepseek-v4-pro",
       max_steps=1000,
       cwd=None,
+      session_root=None,
       task=Some("arrived before the list"),
       submission_id=None,
     ),
@@ -4654,6 +4688,38 @@ test "session list assigns a Started-first conversation to its durable workspace
   assert_true(
     encoded_start_workspace(reconciled) is Some("/work/started-first"),
   )
+}
+
+///|
+test "Started places a foreign conversation from its host session root" {
+  let dispatch = test_dispatch()
+  let model = test_model().with_dev(dev => {
+    ..dev,
+    workspaces: ["C:\\work\\core"],
+  })
+  let (_, started) = update_dev(
+    dispatch,
+    Started(
+      run_id="foreign-run",
+      session="desktop-workspace-run",
+      model="deepseek-v4-pro",
+      max_steps=1000,
+      cwd=Some(Absolute("C:/work/core")),
+      session_root=Some(Absolute("C:/work/core/.openseek")),
+      task=Some("arrived before the list"),
+      submission_id=None,
+    ),
+    model,
+  )
+  guard started.find_conversation(
+      @interop.ChannelId::Local,
+      "desktop-workspace-run",
+    )
+    is Some(foreign) else {
+    fail("Started did not materialize its conversation")
+  }
+  assert_eq(workspace_token(foreign.workspace), "C:\\work\\core")
+  inspect(started.active_session, content="desktop-test")
 }
 
 ///|
@@ -5633,6 +5699,7 @@ test "started routes by session and records the host's workspace" {
       model="deepseek-v4-pro",
       max_steps=1000,
       cwd=Some(Absolute("/home/u/Documents/OpenSeek/desktop-test")),
+      session_root=None,
       task=None,
       submission_id=None,
     ),
@@ -5654,16 +5721,23 @@ test "started routes by session and records the host's workspace" {
 }
 
 ///|
-test "started decoder preserves an optional submission id" {
+test "started decoder preserves optional placement and submission id" {
   guard started_msg({
       "run_id": Json::string("r7"),
       "session": Json::string("desktop-test"),
       "model": Json::string("deepseek-v4-pro"),
       "max_steps": Json::number(1000),
+      "session_root": Json::string("/work/core/.openseek"),
       "submission_id": Json::string("submission-7"),
     })
-    is Some(Started(submission_id=Some("submission-7"), ..)) else {
-    fail("submission id was lost while decoding Started")
+    is Some(
+      Started(
+        session_root=Some(Absolute("/work/core/.openseek")),
+        submission_id=Some("submission-7"),
+        ..
+      )
+    ) else {
+    fail("placement or submission id was lost while decoding Started")
   }
 }
 
@@ -5678,6 +5752,7 @@ test "started for an unknown session materializes its conversation" {
       model="deepseek-v4-pro",
       max_steps=1000,
       cwd=None,
+      session_root=None,
       task=Some("fix the flaky test"),
       submission_id=None,
     ),
@@ -5724,6 +5799,7 @@ test "a distinct started id replaces a stale open run as foreign" {
       model="deepseek-v4-pro",
       max_steps=1000,
       cwd=None,
+      session_root=None,
       task=Some("new foreign prompt"),
       submission_id=None,
     ),
@@ -5761,6 +5837,7 @@ test "a repeated started id is idempotent" {
       model="deepseek-v4-pro",
       max_steps=1000,
       cwd=None,
+      session_root=None,
       task=None,
       submission_id=None,
     ),
@@ -5793,6 +5870,7 @@ test "a start failure cannot close a run opened by a winning push" {
       model="deepseek-v4-pro",
       max_steps=1000,
       cwd=None,
+      session_root=None,
       task=Some("the other client's prompt"),
       submission_id=Some("theirs"),
     ),
@@ -5919,6 +5997,7 @@ test "a matching Started establishes the run without consuming its prompt" {
       model="deepseek-v4-pro",
       max_steps=1000,
       cwd=None,
+      session_root=None,
       task=Some("accepted prompt"),
       submission_id=Some("prompt-id"),
     ),
@@ -5970,6 +6049,7 @@ test "an accepted start response opens the run without Started" {
       model="deepseek-v4-pro",
       max_steps=1000,
       cwd=None,
+      session_root=None,
       task=Some("prompt"),
       submission_id=Some("prompt-id"),
     ),
@@ -6071,6 +6151,7 @@ test "an old-host Started without an id is settled by the exact start response" 
       model="deepseek-v4-pro",
       max_steps=1000,
       cwd=None,
+      session_root=None,
       task=Some("prompt"),
       submission_id=None,
     ),
@@ -6319,6 +6400,7 @@ test "a Started racing ahead of an older runs response stays open" {
       model="deepseek-v4-pro",
       max_steps=1000,
       cwd=None,
+      session_root=None,
       task=Some("new foreign run"),
       submission_id=Some("foreign-new"),
     ),
@@ -6346,6 +6428,7 @@ test "a stale runs snapshot cannot replay a foreign run after BridgeReady" {
         model: "deepseek-v4-pro",
         max_steps: 1000,
         cwd: None,
+        session_root: None,
         task: Some("from the old engine epoch"),
         submission_id: None,
       },
@@ -6615,6 +6698,7 @@ test "one runs snapshot keeps an active successor after settling its predecessor
           model: "deepseek-v4-pro",
           max_steps: 1000,
           cwd: None,
+          session_root: None,
           task: Some("foreign successor"),
           submission_id: Some("foreign-submission"),
         },
@@ -6706,6 +6790,7 @@ test "an older positive runs row cannot replace a newer Started" {
       model="deepseek-v4-pro",
       max_steps=1000,
       cwd=None,
+      session_root=None,
       task=Some("newer run"),
       submission_id=None,
     ),
@@ -6721,6 +6806,7 @@ test "an older positive runs row cannot replace a newer Started" {
           model: "deepseek-v4-pro",
           max_steps: 1000,
           cwd: None,
+          session_root: None,
           task: Some("older run"),
           submission_id: None,
         },
@@ -6756,6 +6842,7 @@ test "an older positive runs row cannot resurrect a finished run" {
           model: "deepseek-v4-pro",
           max_steps: 1000,
           cwd: None,
+          session_root: None,
           task: Some("already finished"),
           submission_id: None,
         },
@@ -6856,6 +6943,7 @@ test "a failed start response keeps its prompt through an empty snapshot" {
       model="deepseek-v4-pro",
       max_steps=1000,
       cwd=Some(Absolute("/workspace")),
+      session_root=None,
       task=Some("prompt"),
       submission_id=Some("failed-start"),
     ),
@@ -6881,6 +6969,7 @@ test "a failed response after durable Finished cannot resurrect its prompt" {
       model="deepseek-v4-pro",
       max_steps=1000,
       cwd=None,
+      session_root=None,
       task=Some("fast prompt"),
       submission_id=Some("fast-start"),
     ),
@@ -6987,6 +7076,7 @@ test "a newer Started retires an older unconfirmed start ledger entry" {
       model="deepseek-v4-pro",
       max_steps=1000,
       cwd=None,
+      session_root=None,
       task=Some("new prompt"),
       submission_id=Some("new-start"),
     ),
@@ -7690,6 +7780,7 @@ test "a successor resolves an old terminal tail only from its causal snapshot" {
       model="deepseek-v4-pro",
       max_steps=1000,
       cwd=None,
+      session_root=None,
       task=Some("second question"),
       submission_id=None,
     ),
@@ -7800,6 +7891,7 @@ test "a successor terminal cannot claim a setup-failed run's snapshot cut" {
       model="deepseek-v4-pro",
       max_steps=1000,
       cwd=None,
+      session_root=None,
       task=Some("next question"),
       submission_id=None,
     ),
@@ -7918,6 +8010,7 @@ test "a foreign run gains a floor only after snapshot data follows the prior ter
       model="deepseek-v4-pro",
       max_steps=1000,
       cwd=None,
+      session_root=None,
       task=Some("current"),
       submission_id=None,
     ),
@@ -7972,6 +8065,7 @@ test "a foreign background run waits for a snapshot cut after Started" {
       model="deepseek-v4-pro",
       max_steps=1000,
       cwd=None,
+      session_root=None,
       task=Some("current question"),
       submission_id=None,
     ),
@@ -8306,6 +8400,7 @@ test "a successor step cannot retire an older steer before its RPC rejection" {
       model="deepseek-v4-pro",
       max_steps=1000,
       cwd=None,
+      session_root=None,
       task=Some("foreign next run"),
       submission_id=None,
     ),
@@ -8363,6 +8458,7 @@ test "a runs snapshot cannot retire a steer submitted after its frontier" {
       model="deepseek-v4-pro",
       max_steps=1000,
       cwd=None,
+      session_root=None,
       task=Some("foreign next run"),
       submission_id=None,
     ),
@@ -8819,6 +8915,7 @@ test "foreign Started reanchors a reconnected initial before retiring its owners
       model="deepseek-v4-pro",
       max_steps=1000,
       cwd=None,
+      session_root=None,
       task=Some("foreign prompt"),
       submission_id=Some("foreign-prompt"),
     ),
@@ -8884,6 +8981,7 @@ test "an exact zero abnormal EOF releases a fresh prompt for another send" {
       model="deepseek-v4-pro",
       max_steps=1000,
       cwd=None,
+      session_root=None,
       task=Some("prompt before setup failure"),
       submission_id=Some("fresh-prompt"),
     ),
@@ -11576,6 +11674,15 @@ test "a sequence-one commit materializes an unknown hidden conversation" {
   inspect(hidden.messages.length(), content="1")
   inspect(hidden.messages[0].content, content="hi")
   inspect(hidden.watermark, content="1")
+  inspect(next.dev().sessions_request_generation, content="1")
+  let (_, repeated) = update_dev(
+    dispatch,
+    SessionCommitted(session="desktop-elsewhere", sequence=1, kind="user", payload={
+      "content": Json::string("hi"),
+    }),
+    next,
+  )
+  inspect(repeated.dev().sessions_request_generation, content="1")
 }
 
 ///|

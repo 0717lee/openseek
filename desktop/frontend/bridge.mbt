@@ -427,9 +427,10 @@ fn fetch_host_meta(
 fn started_msg(payload : Map[String, Json]) -> DeviceMsg? {
   // `run_id`/`session`/`model`/`max_steps` are unconditional on this event
   // (the app's own start op always names a session); a payload missing one
-  // is malformed and dropped. `cwd` is genuinely optional — omitted for a
-  // scratch conversation — and the host resolved it itself, so this is the
-  // decode boundary where its absolute provenance is collapsed into the type.
+  // is malformed and dropped. `cwd` and the durable `session_root` are
+  // genuinely optional, and the host resolved both itself, so this is the
+  // decode boundary where their absolute provenance is collapsed into the
+  // type.
   recovered_run(payload).map(run => {
     Started(
       run_id=run.run_id,
@@ -437,6 +438,7 @@ fn started_msg(payload : Map[String, Json]) -> DeviceMsg? {
       model=run.model,
       max_steps=run.max_steps,
       cwd=run.cwd,
+      session_root=run.session_root,
       task=run.task,
       submission_id=run.submission_id,
     )
@@ -460,6 +462,9 @@ fn recovered_run(payload : Map[String, Json]) -> RecoveredRun? {
     model,
     max_steps,
     cwd: @jsonx.json_text(payload, "cwd").map(path => Absolute(path)),
+    session_root: @jsonx.json_text(payload, "session_root").map(path => {
+      Absolute(path)
+    }),
     task: @jsonx.json_text(payload, "task"),
     submission_id: @jsonx.json_text(payload, "submission_id"),
   })

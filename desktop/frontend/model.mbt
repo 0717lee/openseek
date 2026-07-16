@@ -177,6 +177,7 @@ priv struct RecoveredRun {
   model : String
   max_steps : Int
   cwd : @pathx.Absolute?
+  session_root : @pathx.Absolute?
   task : String?
   submission_id : String?
 }
@@ -1205,6 +1206,7 @@ priv enum DeviceMsg {
     model~ : String,
     max_steps~ : Int,
     cwd~ : @pathx.Absolute?,
+    session_root~ : @pathx.Absolute?,
     task~ : String?,
     submission_id~ : String?
   )
@@ -1773,6 +1775,24 @@ fn Model::session_workspace(
     Some(conv) => workspace_token(conv.workspace)
     None => ""
   }
+}
+
+///|
+/// Resolve a host-reported durable session root back to a registered
+/// workspace. Workspace conversations live at `<workspace>/.openseek`;
+/// scratch conversations use the unrelated global root and therefore do not
+/// match anything here. The lexical helper normalizes Windows separators.
+fn DeviceState::workspace_for_session_root(
+  self : DeviceState,
+  session_root : @pathx.Absolute?,
+) -> String? {
+  guard session_root is Some(session_root) else { return None }
+  for workspace in self.workspaces {
+    if @pathx.relative_to(session_root.0, root=workspace) is Some(".openseek") {
+      return Some(workspace)
+    }
+  }
+  None
 }
 
 ///|
@@ -3193,6 +3213,25 @@ fn Conversation::buffer_commit(
       { ..self, sync: ReloadFailed(generation~, buffered~) }
     }
     Synced => self
+  }
+}
+
+///|
+/// Whether this client has already applied or buffered a durable sequence.
+/// The store may rebroadcast a commit, so callers that attach one-time work
+/// to its first observation must check both the applied watermark and the
+/// unresolved snapshot buffer.
+fn Conversation::has_seen_durable_sequence(
+  self : Conversation,
+  sequence : Int,
+) -> Bool {
+  if sequence <= self.watermark {
+    return true
+  }
+  match self.sync {
+    Reloading(buffered~, ..) | ReloadFailed(buffered~, ..) =>
+      buffered.iter().any(commit => commit.sequence == sequence)
+    Synced => false
   }
 }
 
