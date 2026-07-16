@@ -2315,10 +2315,11 @@ fn heredoc_line_matches_delimiter(
 
 ///|
 fn strip_trailing_cr(line : String) -> String {
-  if line.has_suffix("\r") {
-    line[:line.length() - 1].to_owned()
-  } else {
-    line
+  // `\r` is one code unit and one Char, so dropping the trailing Char here is
+  // exactly the old `line[:length-1]` code-unit slice.
+  match line {
+    [.. rest, '\r'] => rest.to_owned()
+    _ => line
   }
 }
 

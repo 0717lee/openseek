@@ -280,7 +280,7 @@ pub fn format_parse_gate_errors(
 /// the excerpt stays faithful.
 fn indent_context(context : String) -> String {
   let lines = split_owned(context, "\n")
-  if !lines.is_empty() && lines[lines.length() - 1] == "" {
+  if lines is [.., ""] {
     let _ = lines.pop()
   }
   [ for line in lines => "  \{line}" ].join("\n")

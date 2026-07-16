@@ -337,7 +337,7 @@ fn workspace_sessions_rel(session_root_value : String) -> String {
 /// Whether `data` starts with a `#!` shebang, marking an executable script whose
 /// executable bit should survive the copy.
 fn has_shebang(data : Bytes) -> Bool {
-  data.length() >= 2 && data[0].to_int() == 0x23 && data[1].to_int() == 0x21
+  data is [b'#', b'!', ..]
 }
 
 ///|

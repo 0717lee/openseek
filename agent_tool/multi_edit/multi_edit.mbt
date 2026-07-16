@@ -703,8 +703,8 @@ fn success_summary(writes : Array[PreparedWrite]) -> String {
 ///|
 fn success_brief(writes : Array[PreparedWrite]) -> String {
   let total = total_edit_count(writes)
-  if writes.length() == 1 {
-    "multi_edit \{@agent_tool.brief_basename(writes[0].path)} (\{total}×)"
+  if writes is [only] {
+    "multi_edit \{@agent_tool.brief_basename(only.path)} (\{total}×)"
   } else {
     "multi_edit \{writes.length()} files (\{total}×)"
   }
