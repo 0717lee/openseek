@@ -19,7 +19,12 @@ async fn main {
     None => abort("current executable command is unavailable")
   }
   let log = launch_logger()
-  log.info() <? { "message": "start" }
+  log.info() <?
+    {
+      "event": "desktop_main_start",
+      "message": "start",
+      "log_path": @env.get_env_var("OPENSEEK_DESKTOP_LOG").unwrap_or(""),
+    }
   // A Finder/Dock launch inherits only launchd's minimal environment; graft
   // the user's login-shell environment (PATH, custom variables) onto this
   // process before anything downstream — engine, LSP, shell tool — spawns.
@@ -67,15 +72,38 @@ async fn main {
         log.info() <? { "message": "relay registered", "device": device }
       })
     })
+    log.info() <? { "event": "desktop_app_run_start" }
     match app.run() {
-      Ok(_) => log.info() <? { "message": "host process exit ok" }
+      Ok(_) =>
+        log.info() <?
+          {
+            "event": "desktop_app_run_return",
+            "result": "ok",
+            "message": "host process exit ok",
+          }
       Err(error) =>
-        log.error() <? { "message": "host process error", "error": error }
+        log.error() <?
+          {
+            "event": "desktop_app_run_return",
+            "result": "error",
+            "message": "host process error",
+            "error": error,
+          }
     }
     // The window is closed: tear the pumps (and with them every serve
     // engine) down rather than wait on their tasks forever.
     group.return_immediately(())
-  })
+  }) catch {
+    error if @async.is_being_cancelled() => {
+      log.error() <? { "event": "desktop_main_cancelled", "error": "\{error}" }
+      raise error
+    }
+    error => {
+      log.error() <? { "event": "desktop_main_failed", "error": "\{error}" }
+      raise error
+    }
+  }
+  log.info() <? { "event": "desktop_task_group_return" }
   // A successful `update.apply` swapped the bundle on disk and left a
   // relaunch marker: reopen the new version now that the run loop is done.
   // `open -n` hands the launch to LaunchServices, so the new instance is
@@ -93,6 +121,7 @@ async fn main {
       log.error() <? { "message": "relaunch failed", "code": code }
     }
   }
+  log.info() <? { "event": "desktop_main_return" }
 }
 
 ///|

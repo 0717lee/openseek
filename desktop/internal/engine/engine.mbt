@@ -106,6 +106,13 @@ async fn ServeEngine::close_and_wait(self : ServeEngine) -> Unit {
     self.exit.wait()
     return
   }
+  @xlog.warn() <?
+    {
+      "event": "desktop_engine_cancel",
+      "reason": "graceful close timeout",
+      "session": self.session_key,
+      "pid": self.process.pid,
+    }
   self.process.cancel()
   guard @async.with_timeout_opt(ServeCancelWaitMs, () => {
       self.exit.wait_process()
@@ -142,6 +149,13 @@ async fn retire_failed_command(
       true
     } catch {
       error => {
+        @xlog.warn() <?
+          {
+            "event": "desktop_engine_cancel",
+            "reason": "failed command shutdown error",
+            "session": engine.session_key,
+            "pid": engine.process.pid,
+          }
         engine.process.cancel()
         @xlog.debug() <?
           {
@@ -910,6 +924,12 @@ async fn read_engine_stdout(
     error if @async.is_being_cancelled() => raise error
     _ => {
       messages.put(StreamReaderFailed("engine wrote malformed JSONL"))
+      @xlog.warn() <?
+        {
+          "event": "desktop_engine_cancel",
+          "reason": "malformed stdout JSONL",
+          "pid": process.pid,
+        }
       process.cancel()
     }
   }
@@ -1258,6 +1278,13 @@ async fn[G] start_serve_engine(
   defer (if !startup_committed {
     if startup_engine is Some(engine) {
       engine.writer.close()
+      @xlog.debug() <?
+        {
+          "event": "desktop_engine_cancel",
+          "reason": "startup rollback",
+          "session": engine.session_key,
+          "pid": engine.process.pid,
+        }
       engine.process.cancel()
       if slot.engine is Some(current) && physical_equal(current, engine) {
         slot.engine = None
@@ -1277,6 +1304,7 @@ async fn[G] start_serve_engine(
   // does not exist on the Windows side, so chdir'ing wsl.exe into it would
   // fail the spawn.
   let spawn_cwd = if config.host is Wsl(..) { None } else { config.cwd }
+  let graceful_cancel = @process.graceful_cancel(timeout=1000)
   @xlog.debug() <?
     {
       "event": "desktop_engine_spawn",
@@ -1300,9 +1328,25 @@ async fn[G] start_serve_engine(
     stdout=child_stdout,
     stderr=child_stderr,
     cwd?=spawn_cwd.map(cwd => cwd.to_string().view()),
-    cancel_handler=@process.graceful_cancel(timeout=1000),
+    cancel_handler=CancellationHandler(pid => {
+      @xlog.warn() <?
+        {
+          "event": "desktop_engine_process_task_cancelled",
+          "session_key": session_key(config),
+          "pid": pid,
+        }
+      graceful_cancel(pid)
+    }),
     no_wait=true,
   )
+  @xlog.info() <?
+    {
+      "event": "desktop_engine_spawned",
+      "host": config.host.fingerprint(),
+      "program": program,
+      "session_key": session_key(config),
+      "pid": process.pid,
+    }
   let engine : ServeEngine = {
     session_key: session_key(config),
     session_root: config.session_root,
@@ -1453,6 +1497,14 @@ async fn serve_engine_consumer(
         }
       }
       StreamExited(code) => {
+        @xlog.info() <?
+          {
+            "event": "desktop_engine_exited",
+            "session": engine.session_key,
+            "pid": engine.process.pid,
+            "exit_code": code,
+            "run_id": engine.latest_run.unwrap_or(""),
+          }
         engine.accepts_commands = false
         // Capture ownership only if the slot still contains THIS engine by
         // identity. Correct replacement waits on this handle through final
