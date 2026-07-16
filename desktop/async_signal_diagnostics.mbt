@@ -36,3 +36,20 @@ extern "C" fn async_signal_diagnostic_signal_in_waitset() -> Int = "moonbitlang_
 
 ///|
 extern "C" fn async_signal_diagnostic_sigusr2_blocked() -> Int = "moonbitlang_async_signal_diagnostic_sigusr2_blocked"
+
+///|
+extern "C" fn async_signal_diagnostic_cancel_requests_at_return() -> Int = "moonbitlang_async_signal_diagnostic_cancel_requests_at_return"
+
+///|
+extern "C" fn async_signal_diagnostic_sigwait_cancel_requests_at_return() -> Int = "moonbitlang_async_signal_diagnostic_sigwait_cancel_requests_at_return"
+
+///|
+extern "C" fn async_worker_cancel_diagnostic_request_count() -> Int = "moonbitlang_async_worker_cancel_diagnostic_request_count"
+
+///|
+extern "C" fn async_worker_cancel_diagnostic_recent_bytes() -> Bytes = "moonbitlang_async_worker_cancel_diagnostic_recent"
+
+///|
+fn async_worker_cancel_diagnostic_recent() -> String {
+  @utf8.decode_lossy(async_worker_cancel_diagnostic_recent_bytes())
+}

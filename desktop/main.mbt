@@ -110,6 +110,10 @@ async fn main {
           "async_sigmask_result": async_signal_diagnostic_mask_result(),
           "async_signal_in_waitset": async_signal_diagnostic_signal_in_waitset(),
           "async_sigusr2_blocked": async_signal_diagnostic_sigusr2_blocked(),
+          "async_cancel_requests_at_signal_return": async_signal_diagnostic_cancel_requests_at_return(),
+          "async_sigwait_cancel_requests_at_signal_return": async_signal_diagnostic_sigwait_cancel_requests_at_return(),
+          "async_worker_cancel_request_count": async_worker_cancel_diagnostic_request_count(),
+          "async_worker_cancel_recent": async_worker_cancel_diagnostic_recent(),
         }
       raise error
     }
