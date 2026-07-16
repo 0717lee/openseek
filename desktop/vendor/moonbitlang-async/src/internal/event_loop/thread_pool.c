@@ -446,7 +446,16 @@ int32_t moonbitlang_async_cancel_worker(struct worker *worker) {
 
 #else
 
-  pthread_kill(worker->id, SIGUSR2);
+  int result = pthread_kill(worker->id, SIGUSR2);
+  async_trace(
+    "worker_cancel",
+    "target_thread=0x%llx job_id=%d waiting=%d signal=%d result=%d",
+    (unsigned long long)(uintptr_t)worker->id,
+    worker->job_id,
+    worker->waiting,
+    SIGUSR2,
+    result
+  );
   return 0;
 
 #endif
@@ -2764,6 +2773,7 @@ BOOL WINAPI moonbitlang_async_console_control_handler(DWORD ctrl_type) {
 struct sigwait_job {
   struct job job;
   sigset_t signals;
+  int setup_error;
 };
 
 static
@@ -2773,9 +2783,28 @@ static
 void sigwait_job_worker(struct job *job) {
   struct sigwait_job *sigwait_job = (struct sigwait_job*)job;
 
-  siginfo_t info;
+  if (sigwait_job->setup_error != 0) {
+    job->err = sigwait_job->setup_error;
+    return;
+  }
+
+  sigset_t old_sigmask;
+  // POSIX requires every signal passed to sigwait to be blocked in the
+  // calling thread. Other workers keep SIGUSR2 unblocked so that it can
+  // interrupt blocking IO; only the signal waiter needs the full set blocked.
+  int mask_error = pthread_sigmask(
+    SIG_BLOCK,
+    &sigwait_job->signals,
+    &old_sigmask
+  );
+  if (mask_error != 0) {
+    job->err = mask_error;
+    return;
+  }
+
   while (1) {
-    int sig;
+    int sig = 0;
+    errno = 0;
     int err = sigwait(&sigwait_job->signals, &sig);
     int sigwait_errno = errno;
     if (err == 0) {
@@ -2794,9 +2823,28 @@ void sigwait_job_worker(struct job *job) {
         sigwait_errno
       );
     }
-    if (err > 0) {
-      job->err = err;
-      return;
+    if (err != 0) {
+      if (err > 0)
+        job->err = err;
+      else if (sigwait_errno != 0)
+        job->err = sigwait_errno;
+      else
+        job->err = EINVAL;
+      break;
+    }
+
+    // Darwin's sigwait wrapper can translate an underlying EINTR to success
+    // without writing the signal output. Never turn an unchanged value into a
+    // synthetic signal event.
+    if (sig <= 0 || sigismember(&sigwait_job->signals, sig) != 1) {
+      async_trace(
+        "sigwait_invalid_signal",
+        "result=%d signal=%d errno=%d",
+        err,
+        sig,
+        sigwait_errno
+      );
+      continue;
     }
 
     if (sig == SIGUSR2) {
@@ -2804,8 +2852,13 @@ void sigwait_job_worker(struct job *job) {
       break;
     }
 
-    sig |= 1 << 31;
-    notify_completion("signal", sig);
+    int32_t encoded_signal = (int32_t)((uint32_t)sig | 0x80000000u);
+    notify_completion("signal", encoded_signal);
+  }
+
+  mask_error = pthread_sigmask(SIG_SETMASK, &old_sigmask, NULL);
+  if (mask_error != 0 && job->err == 0) {
+    job->err = mask_error;
   }
 }
 
@@ -2813,11 +2866,17 @@ MOONBIT_FFI_EXPORT
 struct sigwait_job *moonbitlang_async_make_sigwait_job(int *signals) {
   struct sigwait_job *job = MAKE_JOB(sigwait);
 
+  job->setup_error = 0;
   sigemptyset(&job->signals);
-  for (int i = 0; i < Moonbit_array_length(signals); ++i)
-    sigaddset(&job->signals, signals[i]);
+  for (int i = 0; i < Moonbit_array_length(signals); ++i) {
+    if (signals[i] < 0)
+      continue;
+    if (sigaddset(&job->signals, signals[i]) != 0 && job->setup_error == 0)
+      job->setup_error = errno;
+  }
 
-  sigaddset(&job->signals, SIGUSR2);
+  if (sigaddset(&job->signals, SIGUSR2) != 0 && job->setup_error == 0)
+    job->setup_error = errno;
 
   return job;
 }
