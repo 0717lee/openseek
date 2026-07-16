@@ -373,9 +373,12 @@ fn row(
 ///|
 fn short_text(text : String) -> String {
   let squashed = text.replace_all(old="\n", new=" ")
-  if squashed.length() <= 160 {
-    squashed
-  } else {
-    "\{squashed[:160]}..."
+  // Truncate at a scalar boundary, not a code-unit one: `[:160]` could slice
+  // inside a surrogate pair (this is free tool/model text). `offset_of_nth_char`
+  // is `Some` only when there are more than 160 chars — the same shape
+  // `agent_tool/shell` `text_prefix_by_chars` uses.
+  match squashed.offset_of_nth_char(160) {
+    Some(end) => "\{squashed[:end]}..."
+    None => squashed
   }
 }
