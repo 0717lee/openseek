@@ -95,7 +95,22 @@ async fn main {
     group.return_immediately(())
   }) catch {
     error if @async.is_being_cancelled() => {
-      log.error() <? { "event": "desktop_main_cancelled", "error": "\{error}" }
+      let signal_event = async_signal_diagnostic_event()
+      log.error() <?
+        {
+          "event": "desktop_main_cancelled",
+          "error": "\{error}",
+          "async_signal_diagnostic_event": async_signal_diagnostic_event_name(
+            signal_event,
+          ),
+          "async_signal_diagnostic_event_code": signal_event,
+          "async_signal": async_signal_diagnostic_signal(),
+          "async_sigwait_result": async_signal_diagnostic_wait_result(),
+          "async_sigwait_errno": async_signal_diagnostic_wait_errno(),
+          "async_sigmask_result": async_signal_diagnostic_mask_result(),
+          "async_signal_in_waitset": async_signal_diagnostic_signal_in_waitset(),
+          "async_sigusr2_blocked": async_signal_diagnostic_sigusr2_blocked(),
+        }
       raise error
     }
     error => {
