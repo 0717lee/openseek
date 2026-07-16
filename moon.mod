@@ -10,7 +10,7 @@ import {
   "tonyfettes/xlog@0.4.0",
   "bobzhang/jsonl@0.2.0",
   "bobzhang/openseek_protocol@0.1.0",
-  "moonbit-community/rabbita@0.12.4",
+  "moonbit-community/rabbita@0.13.0",
 }
 
 readme = "README.mbt.md"
