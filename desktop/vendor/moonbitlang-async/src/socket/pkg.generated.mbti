@@ -20,7 +20,7 @@ pub suberror ResolveHostnameError {
 pub impl Show for ResolveHostnameError
 
 // Types and methods
-type Addr derive(Compare, Eq, Hash)
+type Addr derive(Compare, Eq, Hash, @debug.Debug)
 pub fn Addr::ip(Self) -> UInt
 pub fn Addr::is_ipv6(Self) -> Bool
 pub fn Addr::is_multicast(Self) -> Bool

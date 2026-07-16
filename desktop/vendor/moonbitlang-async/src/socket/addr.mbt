@@ -19,7 +19,7 @@ priv enum AddrFamily {
 }
 
 ///|
-struct Addr(Bytes) derive(Eq, Compare, Hash)
+struct Addr(Bytes) derive(Debug, Eq, Compare, Hash)
 
 ///|
 #cfg(target="native")
