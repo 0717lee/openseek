@@ -644,10 +644,13 @@ fn tool_group_summary(items : Array[@transcript.TranscriptItem]) -> String {
 
 ///|
 fn capitalize(text : String) -> String {
-  if text.iter().next() is Some(first) {
-    "\{first.to_ascii_uppercase()}" + text[1:].to_owned()
-  } else {
-    text
+  // `[first, .. rest]` binds the first Unicode scalar and the true remainder.
+  // The old `iter().next()` + `text[1:]` mixed a scalar with a code-unit slice:
+  // a non-BMP first char left `text[1:]` inside its surrogate pair, corrupting
+  // the tail on native and *panicking* on js (StringView sub mid-surrogate).
+  match text {
+    [first, .. rest] => "\{first.to_ascii_uppercase()}" + rest.to_owned()
+    [] => text
   }
 }
 
@@ -2301,6 +2304,15 @@ fn tool_item(
   is_error? : Bool = false,
 ) -> @transcript.TranscriptItem {
   { kind: Tool(name~, is_error~, brief=None), content: "output" }
+}
+
+///|
+test "capitalize is Unicode-safe on a non-BMP first char" {
+  inspect(capitalize("hello world"), content="Hello world")
+  // 🎉 = U+1F389, a surrogate pair. The old text[1:] sliced into it — corrupt
+  // on native, a panic on js. It must survive whole with the remainder intact.
+  inspect(capitalize("🎉 done"), content="🎉 done")
+  inspect(capitalize(""), content="")
 }
 
 ///|
