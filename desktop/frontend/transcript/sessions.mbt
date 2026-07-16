@@ -190,10 +190,7 @@ fn append_terminal_item(
 
 ///|
 fn ends_with_assistant(items : Array[TranscriptItem], content : String) -> Bool {
-  match items.get(items.length() - 1) {
-    Some(item) => item.kind is Assistant(_) && item.content == content
-    None => false
-  }
+  items is [.., item] && item.kind is Assistant(_) && item.content == content
 }
 
 // Tests for decoding the host's session replies: the sidebar list and the
