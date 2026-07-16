@@ -112,11 +112,11 @@ pub fn tally_diagnostics(text : String, truncated~ : Bool) -> CheckErrors {
       {
         "level": String("error"),
         "path"? : Some(String(path))
-        | _ with path = "",
+        | (_ with path = ""),
         "loc"? : Some(String(loc))
-        | _ with loc = "",
+        | (_ with loc = ""),
         "message"? : Some(String(message))
-        | _ with message = "",
+        | (_ with message = ""),
         ..
       } => {
         error_count = error_count + 1

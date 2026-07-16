@@ -378,13 +378,12 @@ async fn resolved_session_id(
     {
       values: {
         "session"? : Some([session, ..])
-        | (Some([])
-        | None) with session = "",
+        | (Some([]) | None with session = ""),
         ..
       },
       flags: {
         "no-session"? : Some(no_session)
-        | None with no_session = false,
+        | (None with no_session = false),
         ..
       },
       ..,

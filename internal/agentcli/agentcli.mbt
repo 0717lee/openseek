@@ -19,14 +19,11 @@ pub fn api_key(
     {
       values: {
         "api-key"? : Some([generic_key, ..])
-        | (Some([])
-        | None) with generic_key = "",
+        | (Some([]) | None with generic_key = ""),
         "deepseek-api-key"? : Some([deepseek_key, ..])
-        | (Some([])
-        | None) with deepseek_key = "",
+        | (Some([]) | None with deepseek_key = ""),
         "kimi-api-key"? : Some([kimi_key, ..])
-        | (Some([])
-        | None) with kimi_key = "",
+        | (Some([]) | None with kimi_key = ""),
         ..
       },
       ..,

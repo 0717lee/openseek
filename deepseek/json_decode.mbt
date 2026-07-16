@@ -6,15 +6,15 @@ fn Usage::from_json(
   match json {
     {
       "prompt_tokens"? : Some(Number(prompt_tokens, ..))
-      | None with prompt_tokens = 0,
+      | (None with prompt_tokens = 0),
       "completion_tokens"? : Some(Number(completion_tokens, ..))
-      | None with completion_tokens = 0,
+      | (None with completion_tokens = 0),
       "total_tokens"? : Some(Number(total_tokens, ..))
-      | None with total_tokens = 0,
+      | (None with total_tokens = 0),
       "prompt_cache_hit_tokens"? : Some(Number(prompt_cache_hit_tokens, ..))
-      | None with prompt_cache_hit_tokens = 0,
+      | (None with prompt_cache_hit_tokens = 0),
       "prompt_cache_miss_tokens"? : Some(Number(prompt_cache_miss_tokens, ..))
-      | None with prompt_cache_miss_tokens = 0,
+      | (None with prompt_cache_miss_tokens = 0),
       ..
     } =>
       {
@@ -148,7 +148,7 @@ pub impl FromJson for ChatResponse with fn from_json(
     _ => []
   }
   let content = match message_fields {
-    { "content"? : Some(String(content)) | Some(Null) with content = "", .. } =>
+    { "content"? : Some(String(content)) | (Some(Null) with content = ""), .. } =>
       content
     { "content"? : None, .. } if tool_calls.length() > 0 => ""
     { "content"? : None, .. } =>
@@ -165,8 +165,7 @@ pub impl FromJson for ChatResponse with fn from_json(
   let reasoning_content = match message_fields {
     {
       "reasoning_content"? : Some(String(reasoning_content))
-      | (Some(Null)
-      | None) with reasoning_content = "",
+      | (Some(Null) | None with reasoning_content = ""),
       ..
     } => reasoning_content
     _ =>

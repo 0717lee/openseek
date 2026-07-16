@@ -20,8 +20,7 @@ async fn run_fleet(matches : @argparse.Matches, concurrency~ : Int) -> Unit {
     {
       values: {
         "session"? : Some([session, ..])
-        | (Some([])
-        | None) with session = "",
+        | (Some([]) | None with session = ""),
         "dir": [dir, ..],
         "session-root": [session_root, ..],
         ..

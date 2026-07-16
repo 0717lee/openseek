@@ -209,11 +209,11 @@ fn decide_parse_gate(
         "level": String("error"),
         "error_code": Number(code, ..),
         "loc"? : Some(String(loc))
-        | _ with loc = "",
+        | (_ with loc = ""),
         "message"? : Some(String(message))
-        | _ with message = "",
+        | (_ with message = ""),
         "context"? : Some(String(context))
-        | _ with context = "",
+        | (_ with context = ""),
         ..
       } if is_parse_error_code(code) => errors.push({ loc, message, context })
       _ => ()

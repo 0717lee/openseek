@@ -542,8 +542,7 @@ async fn run_serve(
     {
       values: {
         "session"? : Some([session, ..])
-        | (Some([])
-        | None) with session = "",
+        | (Some([]) | None with session = ""),
         ..
       },
       ..,

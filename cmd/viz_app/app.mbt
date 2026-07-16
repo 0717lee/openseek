@@ -1558,7 +1558,7 @@ fn session_row_of(json : Json) -> SessionRow? {
     is {
       "id": String(id),
       "first_prompt"? : Some(String(first_prompt))
-      | _ with first_prompt = "",
+      | (_ with first_prompt = ""),
       ..
     } else {
     return None
@@ -1569,7 +1569,7 @@ fn session_row_of(json : Json) -> SessionRow? {
   }
   let root_label = match json {
     { "root_label": String(value), .. } => value
-    { "root"? : Some(String(value)) | _ with value = "", .. } => value
+    { "root"? : Some(String(value)) | (_ with value = ""), .. } => value
     _ => ""
   }
   let last_active = match json {
