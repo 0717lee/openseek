@@ -34,6 +34,17 @@ pub fn device_url(server_url : String, device : String) -> String {
 }
 
 ///|
+/// The console root for `server_url` — where a completed browser sign-in
+/// lands after the loopback done page.
+fn console_url(server_url : String) -> String {
+  let origin = match server_url.strip_suffix("/") {
+    Some(origin) => origin.to_owned()
+    None => server_url
+  }
+  "\{origin}/"
+}
+
+///|
 /// The server origin implied by a full tunnel URL — the status shape's
 /// `server_url` when the connector runs from the environment override,
 /// whose `OPENSEEK_RELAY_URL` is the `ws(s)` URL, not the origin.

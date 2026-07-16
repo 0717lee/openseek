@@ -68,7 +68,11 @@ pub async fn AuthStore::sign_in(self : AuthStore, server_url~ : String) -> Unit 
     () => {
       match
         @async.with_timeout_opt(SignInTimeoutMs, () => {
-          wait_for_code(server, oauth_state~)
+          wait_for_code(
+            server,
+            oauth_state~,
+            console_url=console_url(server_url),
+          )
         }) {
         Some(code) => GotCode(code)
         None => TimedOut
@@ -160,10 +164,14 @@ priv enum ExchangeWait {
 /// Stray requests (favicon probes, forged or stale redirects) get a 404
 /// and the wait continues — a loopback guesser can neither cancel nor
 /// complete the flow. A denial from the consent page raises.
-async fn wait_for_code(server : @http.Server, oauth_state~ : String) -> String {
+async fn wait_for_code(
+  server : @http.Server,
+  oauth_state~ : String,
+  console_url~ : String,
+) -> String {
   for ;; {
     let (conn, _) = server.accept()
-    let outcome = serve_callback(conn, oauth_state~) catch {
+    let outcome = serve_callback(conn, oauth_state~, console_url~) catch {
       error if @async.is_being_cancelled() => raise error
       // A broken socket must not kill the flow; keep listening.
       _ => continue
@@ -182,12 +190,13 @@ async fn wait_for_code(server : @http.Server, oauth_state~ : String) -> String {
 async fn serve_callback(
   conn : @http.ServerConnection,
   oauth_state~ : String,
+  console_url~ : String,
 ) -> Callback {
   defer conn.close()
   let request = conn.read_request()
   let outcome = parse_callback(request.path, oauth_state~)
   match outcome {
-    Granted(_) => respond_html(conn, 200, "OK", SignInDonePage)
+    Granted(_) => respond_html(conn, 200, "OK", sign_in_done_page(console_url))
     Denied(_) => respond_html(conn, 200, "OK", SignInDeniedPage)
     Stray => respond_html(conn, 404, "Not Found", "not found")
   }
@@ -210,10 +219,45 @@ async fn respond_html(
 }
 
 ///|
-const SignInDonePage : String = "<!doctype html><meta charset=\"utf-8\"><title>Signed in</title><body style=\"font-family: system-ui; margin: 4rem auto; max-width: 30rem\"><h1>You're signed in</h1><p>Return to OpenSeek Desktop — you can close this tab.</p>"
+/// The console's look (desktop/index.html) reduced to what a static
+/// loopback page needs: paper surfaces, hairline border, mono stack. The
+/// bundled Geist Mono lives on the relay origin, so these pages fall back
+/// to the system mono fonts of the same stack.
+const SignInPageStyle : String = "<style>:root{color-scheme:light dark;--paper:#fbfbf9;--surface:#ffffff;--ink:#16171a;--ink-2:#5c5f66;--line:#e9e8e3;--accent:#2a55cc}@media (prefers-color-scheme:dark){:root{--paper:#16181d;--surface:#1c1f26;--ink:#e9ebf0;--ink-2:#a3a8b4;--line:#2c313b;--accent:#9db8ff}}html{background:var(--paper)}body{font-family:\"Geist Mono\",\"SF Mono\",ui-monospace,\"Cascadia Mono\",Menlo,Consolas,monospace;background:var(--surface);color:var(--ink);max-width:26rem;margin:6rem auto;padding:2rem;border:1px solid var(--line);border-radius:10px}h1{font-size:1.05rem;margin:0 0 .75rem}p{margin:.5rem 0;color:var(--ink-2);font-size:.85rem;line-height:1.6}a{color:var(--accent)}</style>"
 
 ///|
-const SignInDeniedPage : String = "<!doctype html><meta charset=\"utf-8\"><title>Sign-in cancelled</title><body style=\"font-family: system-ui; margin: 4rem auto; max-width: 30rem\"><h1>Sign-in cancelled</h1><p>Nothing was connected. You can close this tab.</p>"
+/// The post-consent landing page: confirm the sign-in, then send the
+/// browser on to the console. The one-second pause covers the desktop's
+/// code-for-token exchange, so the console already lists the new device
+/// when it loads.
+fn sign_in_done_page(console_url : String) -> String {
+  let href = html_attr_escape(console_url)
+  "<!doctype html><meta charset=\"utf-8\"><meta http-equiv=\"refresh\" content=\"1;url=\{href}\"><title>Signed in</title>" +
+  SignInPageStyle +
+  "<body><h1>You're signed in</h1><p>Taking you to your console…</p><p><a href=\"\{href}\">Continue</a></p>"
+}
+
+///|
+const SignInDeniedPage : String = "<!doctype html><meta charset=\"utf-8\"><title>Sign-in cancelled</title>" +
+  SignInPageStyle +
+  "<body><h1>Sign-in cancelled</h1><p>Nothing was connected. You can close this tab.</p>"
+
+///|
+/// Escape a value for an HTML attribute. The console URL derives from the
+/// user's server selection, so nothing about its charset is guaranteed.
+fn html_attr_escape(text : String) -> String {
+  let builder = StringBuilder::new()
+  for c in text {
+    match c {
+      '&' => builder.write_string("&amp;")
+      '<' => builder.write_string("&lt;")
+      '>' => builder.write_string("&gt;")
+      '"' => builder.write_string("&quot;")
+      c => builder.write_char(c)
+    }
+  }
+  builder.to_string()
+}
 
 ///|
 /// Swap the one-time code (plus the PKCE verifier) for a device token —
