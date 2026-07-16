@@ -1083,8 +1083,7 @@ fn Conversation::sweep_pending_steers(self : Conversation) -> Conversation {
 
 ///|
 fn Conversation::last_assistant_content(self : Conversation) -> String? {
-  if self.messages.get(self.messages.length() - 1) is Some(item) &&
-    item.kind is Assistant(_) {
+  if self.messages is [.., item] && item.kind is Assistant(_) {
     Some(item.content)
   } else {
     None

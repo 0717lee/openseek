@@ -147,7 +147,7 @@ pub fn read_file(
 pub fn basename(path : @pathx.Relative) -> String {
   match path.0.split("/").collect() {
     [] => path.0
-    segments => segments[segments.length() - 1].to_owned()
+    [.., last] => last.to_owned()
   }
 }
 

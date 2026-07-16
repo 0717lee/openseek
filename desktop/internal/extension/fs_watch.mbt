@@ -51,15 +51,9 @@ async fn watch_workspace_op(
 /// under it, so matching the leaf segment is enough.
 fn ignored_watch_path(path : String) -> Bool {
   match path.split("/").collect() {
-    [] => false
-    segments =>
-      segments[segments.length() - 1]
-      is (".git"
-      | "target"
-      | "_build"
-      | "node_modules"
-      | ".mooncakes"
-      | ".repos")
+    [.., ".git" | "target" | "_build" | "node_modules" | ".mooncakes" | ".repos"] =>
+      true
+    _ => false
   }
 }
 
