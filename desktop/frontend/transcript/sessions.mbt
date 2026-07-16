@@ -157,7 +157,7 @@ fn append_session_item(
       if content is Some(content) {
         let content = content.trim().to_owned()
         if !content.is_empty() {
-          items.push({ kind: Assistant(false), content })
+          items.push({ kind: Assistant(is_danger=false), content })
         }
       }
     }
@@ -225,11 +225,11 @@ fn append_terminal_item(
     // message; only a differing terminal message adds a bubble.
     "finished" =>
       if !message.is_empty() && !ends_with_assistant(items, message) {
-        items.push({ kind: Assistant(false), content: message })
+        items.push({ kind: Assistant(is_danger=false), content: message })
       }
     "aborted" =>
       items.push({
-        kind: Assistant(true),
+        kind: Assistant(is_danger=true),
         content: if message.is_empty() {
           "aborted"
         } else {
@@ -238,7 +238,7 @@ fn append_terminal_item(
       })
     "interrupted" =>
       items.push({
-        kind: Assistant(true),
+        kind: Assistant(is_danger=true),
         content: if message.is_empty() {
           "cancelled"
         } else {
@@ -247,7 +247,7 @@ fn append_terminal_item(
       })
     "failed" =>
       items.push({
-        kind: Assistant(true),
+        kind: Assistant(is_danger=true),
         content: if message.is_empty() {
           "failed"
         } else {
@@ -364,7 +364,9 @@ test "transcript mapping replays a finished conversation" {
   inspect(items[1].content, content="output")
   guard items[2].kind is Reasoning else { fail("expected reasoning item") }
   inspect(items[2].content, content="thought")
-  guard items[3].kind is Assistant(false) else { fail("expected assistant") }
+  guard items[3].kind is Assistant(is_danger=false) else {
+    fail("expected assistant")
+  }
   inspect(items[3].content, content="answer")
 }
 
@@ -389,7 +391,9 @@ test "transcript mapping renders non-finished terminals as error bubbles" {
     fail("expected transcript items")
   }
   inspect(items.length(), content="3")
-  guard items[0].kind is Assistant(true) else { fail("expected error bubble") }
+  guard items[0].kind is Assistant(is_danger=true) else {
+    fail("expected error bubble")
+  }
   inspect(items[0].content, content="cancelled")
   inspect(items[1].content, content="aborted: the agent gave up")
   inspect(items[2].content, content="engine error")
@@ -423,7 +427,7 @@ test "transcript mapping replays a context checkpoint and yield guidance" {
   inspect(items.length(), content="2")
   guard items[0].kind is Summary else { fail("expected checkpoint summary") }
   inspect(items[0].content, content="checkpoint recap")
-  guard items[1].kind is Assistant(false) else {
+  guard items[1].kind is Assistant(is_danger=false) else {
     fail("expected context-yield guidance")
   }
   inspect(items[1].content, content="[context ceiling] continue in a new turn")

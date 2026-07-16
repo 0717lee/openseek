@@ -902,16 +902,19 @@ fn failed_badge(failed : Int) -> @html.Html {
 }
 
 ///|
-/// One turn's work — reasoning, tool results, and any interim assistant
-/// narration between tool calls — folded behind a single summary line ("Read
-/// 3 files, ran 1 command"), the way Codex folds a turn behind "Worked for
-/// 46s". Expanding shows the work log in order: reasoning as muted prose —
-/// never a labelled "Thinking" row of its own — narration as plain prose,
-/// each burst of tool calls as a one-line sublist. A turn that only thought
-/// folds behind a plain "Thought" line. Failures never force the fold open;
-/// they badge the summary instead. The open state is the browser's
+/// A stretch of a turn's work — reasoning and tool results — folded behind a
+/// single summary line ("Read 3 files, ran 1 command"), the way Codex folds a
+/// turn behind "Worked for 46s". Expanding shows the work log in order:
+/// reasoning as muted prose — never a labelled "Thinking" row of its own —
+/// each burst of tool calls as a one-line sublist. A stretch that only
+/// thought folds behind a plain "Thought" line. Failures never force the fold
+/// open; they badge the summary instead. The open state is the browser's
 /// (`<details>`), so a reader's toggle survives re-renders and the run
 /// growing while live.
+///
+/// Assistant prose is never in here: every assistant message is its own
+/// visible bubble, so a turn reads as narration, work, narration, work,
+/// answer — the agent's own words are never behind a fold.
 fn activity_view(
   items : Array[@transcript.TranscriptItem],
   on_open : (String) -> @cmd.Cmd,
@@ -927,16 +930,11 @@ fn activity_view(
       }
       log.push(tool_line_view(tools))
     } else {
-      // Reasoning or interim assistant narration; callers never pass user
-      // messages or error bubbles.
-      let prose_class = if items[index].kind is Assistant(_) {
-        "msg-content markdown activity-response"
-      } else {
-        "msg-content markdown activity-thinking"
-      }
+      // Reasoning; callers never pass user messages, assistant prose, or
+      // error bubbles.
       log.push(
         @html.div(
-          class=prose_class,
+          class="msg-content markdown activity-thinking",
           @markdown.markdown_nodes(items[index].content, open_file=on_open),
         ),
       )
@@ -964,29 +962,6 @@ fn activity_view(
       @html.div(class="activity-body", log),
     ]),
   ])
-}
-
-///|
-/// A turn's work folded behind one collapsed activity card, rendered the same
-/// whether the turn is still streaming or long settled; only the run's
-/// trailing assistant message (the answer) pops out as a visible bubble.
-/// Folding identically in both states is deliberate: the transcript never
-/// shows anything live that would vanish or restyle once the turn lands.
-fn push_run(
-  items : Array[@html.Html],
-  run : Array[@transcript.TranscriptItem],
-  on_open : (String) -> @cmd.Cmd,
-) -> Unit {
-  let mut work_end = run.length()
-  if run[work_end - 1].kind is Assistant(_) {
-    work_end = work_end - 1
-  }
-  if work_end > 0 {
-    items.push(activity_view(run[0:work_end].to_owned(), on_open))
-  }
-  if work_end < run.length() {
-    items.push(transcript_item_view(run[work_end], on_open))
-  }
 }
 
 ///|
@@ -1225,7 +1200,7 @@ fn transcript_item_view(
 ) -> @html.Html {
   match item.kind {
     User => user_message_view(item.content, on_jump?)
-    Assistant(is_danger) => {
+    Assistant(is_danger~) => {
       // Errors and abort notices are plain text; only real assistant replies
       // are markdown.
       let content = if is_danger {
@@ -1245,9 +1220,8 @@ fn transcript_item_view(
       ])
     }
     // Unreachable in practice — the transcript loop batches every reasoning
-    // and tool item into a run and `push_run` folds those into the activity
-    // card itself — but the match must cover them, so a stray item gets the
-    // same one-item card.
+    // and tool item into a run and builds the activity card itself — but the
+    // match must cover them, so a stray item gets the same one-item card.
     Reasoning => activity_view([item], on_open)
     Tool(..) => activity_view([item], on_open)
     Summary => summary_card_view(item.content, on_open)
@@ -1324,16 +1298,16 @@ fn transcript_view(
       ]),
     )
   } else {
-    // A turn's work — reasoning, tool results, and any interim assistant
-    // narration between tool calls — folds behind one collapsed activity
-    // card; only the run's trailing assistant message (the answer) stays
-    // out. The same fold renders whether the turn is still streaming or long
-    // settled, so nothing shown live vanishes or restyles when the turn
-    // lands. User messages and error bubbles always break the run and stay
-    // visible.
+    // Reasoning and tool results fold behind collapsed activity cards;
+    // everything the agent says stays out. Assistant messages break the run
+    // like user messages and error bubbles do, so a turn reads as narration,
+    // work, narration, work, answer rather than hiding the interim narration
+    // inside the fold above the final answer. The same fold renders whether
+    // the turn is still streaming or long settled, so nothing shown live
+    // vanishes or restyles when the turn lands.
     let mut index = 0
     while index < visible.length() {
-      guard visible[index].kind is (Tool(..) | Reasoning | Assistant(false)) else {
+      guard visible[index].kind is (Tool(..) | Reasoning) else {
         items.push(
           transcript_item_view(visible[index], on_open, on_jump=target => {
             dispatch(
@@ -1350,11 +1324,11 @@ fn transcript_view(
       }
       let run : Array[@transcript.TranscriptItem] = []
       while index < visible.length() &&
-            visible[index].kind is (Tool(..) | Reasoning | Assistant(false)) {
+            visible[index].kind is (Tool(..) | Reasoning) {
         run.push(visible[index])
         index = index + 1
       }
-      push_run(items, run, on_open)
+      items.push(activity_view(run, on_open))
     }
   }
   if !conv.streaming_response.is_empty() {

@@ -2092,7 +2092,7 @@ fn Conversation::append_run_diagnostic(
   content : String,
 ) -> Conversation {
   self.append_run_tail_notice(
-    Assistant(true),
+    Assistant(is_danger=true),
     content,
     RunDiagnostic(run_id),
     terminal_expected=false,
@@ -2410,14 +2410,18 @@ fn Conversation::mark_submission_unconfirmed(
       }
       let next = if run_tail {
         next.append_run_tail_notice(
-          Assistant(true),
+          Assistant(is_danger=true),
           content,
           Submission(submission_id),
           terminal_expected~,
           terminal_snapshot_generation?,
         )
       } else {
-        next.append_notice(Assistant(true), content, Submission(submission_id))
+        next.append_notice(
+          Assistant(is_danger=true),
+          content,
+          Submission(submission_id),
+        )
       }
       return (next, true)
     }
@@ -2677,7 +2681,7 @@ fn Conversation::reject_submission(
       return (
         next
         .restore_submission(input)
-        .append_local_notice(Assistant(true), notice),
+        .append_local_notice(Assistant(is_danger=true), notice),
         true,
       )
     }

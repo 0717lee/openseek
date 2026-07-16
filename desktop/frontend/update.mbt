@@ -294,7 +294,10 @@ fn retry_session_snapshot(
     let failed = {
       ..conv,
       sync: ReloadFailed(generation~, buffered=buffered.copy()),
-    }.append_local_notice_once(Assistant(true), TranscriptRefreshFailedNotice)
+    }.append_local_notice_once(
+      Assistant(is_danger=true),
+      TranscriptRefreshFailedNotice,
+    )
     let next = model.replace_conversation(failed)
     let scroll = if failed.overlay.length() > conv.overlay.length() {
       scroll_if_active(next, channel, session)
@@ -788,7 +791,7 @@ fn apply_engine_event(
       (
         true,
         { ..conv, compaction: NotCompacting }.append_local_notice(
-          Assistant(true),
+          Assistant(is_danger=true),
           content,
         ),
       )
@@ -862,7 +865,10 @@ fn replace_archived_active(
   }
   let fresh = { ..fresh, task, mentions, workspace: workspace_root(workspace) }
   let fresh = if pending_initial {
-    fresh.append_local_notice(Assistant(true), ArchivedPendingInputNotice)
+    fresh.append_local_notice(
+      Assistant(is_danger=true),
+      ArchivedPendingInputNotice,
+    )
   } else {
     fresh
   }
@@ -3457,7 +3463,7 @@ fn update_device_msg(
         let next = if run_id is Some(owner) && exit_code is Some(_) {
           conv.append_run_diagnostic(owner, content)
         } else {
-          conv.append_local_notice(Assistant(true), content)
+          conv.append_local_notice(Assistant(is_danger=true), content)
         }
         (
           scroll_if_active(model, channel, conv.session_id),
@@ -3478,7 +3484,7 @@ fn update_device_msg(
         (
           scroll_if_active(model, channel, conv.session_id),
           model.replace_conversation({
-            ..conv.append_local_notice(Assistant(true), message),
+            ..conv.append_local_notice(Assistant(is_danger=true), message),
             compaction: NotCompacting,
           }),
         )
@@ -4239,7 +4245,7 @@ test "finished run reloads the named durable session for an old host" {
       session="desktop-test",
       items=[
         { kind: User, content: "question" },
-        { kind: Assistant(false), content: "done" },
+        { kind: Assistant(is_danger=false), content: "done" },
       ],
       watermark=3,
       event_boundaries=[(3, true, 2)],
@@ -4878,7 +4884,10 @@ test "BridgeReady fences an awaiting initial after disconnected canonical items"
       items=[
         { kind: User, content: "before disconnect" },
         { kind: User, content: "canonical prompt from the gap" },
-        { kind: Assistant(false), content: "canonical answer from the gap" },
+        {
+          kind: Assistant(is_danger=false),
+          content: "canonical answer from the gap",
+        },
       ],
       watermark=3,
       event_boundaries=[(1, false, 1), (2, false, 2), (3, false, 3)],
@@ -4921,7 +4930,10 @@ test "BridgeReady fences an awaiting steer after disconnected canonical items" {
       items=[
         { kind: User, content: "before disconnect" },
         { kind: User, content: "canonical steer from the gap" },
-        { kind: Assistant(false), content: "canonical output from the gap" },
+        {
+          kind: Assistant(is_danger=false),
+          content: "canonical output from the gap",
+        },
       ],
       watermark=3,
       event_boundaries=[(1, false, 1), (2, false, 2), (3, false, 3)],
@@ -5128,7 +5140,7 @@ test "same-id session loads are fenced by channel owner" {
       remote,
       SessionLoaded(
         session="shared",
-        items=[{ kind: Assistant(false), content: "remote loaded" }],
+        items=[{ kind: Assistant(is_danger=false), content: "remote loaded" }],
         watermark=1,
         event_boundaries=[],
         generation=1,
@@ -5183,7 +5195,7 @@ test "reselecting a synced active session reloads idle external writes" {
     dispatch,
     SessionLoaded(
       session="desktop-test",
-      items=[{ kind: Assistant(false), content: "written elsewhere" }],
+      items=[{ kind: Assistant(is_danger=false), content: "written elsewhere" }],
       watermark=1,
       event_boundaries=[],
       generation=1,
@@ -5514,7 +5526,7 @@ test "session loaded swaps the active conversation onto the stored session" {
   )
   let items : Array[@transcript.TranscriptItem] = [
     { kind: User, content: "stored question" },
-    { kind: Assistant(false), content: "stored answer" },
+    { kind: Assistant(is_danger=false), content: "stored answer" },
   ]
   let (_, once) = update_dev(
     dispatch,
@@ -5973,7 +5985,7 @@ test "an accepted start response opens the run without Started" {
       session="desktop-test",
       items=[
         { kind: User, content: "external prompt" },
-        { kind: Assistant(false), content: "external answer" },
+        { kind: Assistant(is_danger=false), content: "external answer" },
         { kind: User, content: "prompt" },
       ],
       watermark=4,
@@ -7258,7 +7270,7 @@ test "steer_dropped settles the pending steer with a visible notice" {
   inspect(next.active().pending_steers().length(), content="0")
   inspect(next.active().overlay.length(), content="1")
   inspect(next.active().task, content="go left")
-  guard next.active().overlay[0].kind is Assistant(true) else {
+  guard next.active().overlay[0].kind is Assistant(is_danger=true) else {
     fail("expected an error bubble")
   }
   assert_true(next.active().overlay[0].content.contains("go left"))
@@ -7305,7 +7317,7 @@ test "an undelivered steer is reported instead of vanishing" {
   inspect(next.active().input_ledger.length(), content="1")
   assert_true(next.active().input_ledger[0].state is Unconfirmed)
   inspect(next.active().overlay.length(), content="1")
-  guard next.active().overlay[0].kind is Assistant(true) else {
+  guard next.active().overlay[0].kind is Assistant(is_danger=true) else {
     fail("expected an error bubble")
   }
   assert_true(next.active().overlay[0].content.contains("lost"))
@@ -7330,7 +7342,7 @@ test "a run that ends with steers in flight marks delivery unconfirmed" {
   inspect(next.active().pending_steers().length(), content="0")
   inspect(next.active().input_ledger.length(), content="1")
   inspect(next.active().is_running(), content="false")
-  guard next.active().overlay[0].kind is Assistant(true) else {
+  guard next.active().overlay[0].kind is Assistant(is_danger=true) else {
     fail("expected an error bubble")
   }
   assert_true(next.active().overlay[0].content.contains("orphaned"))
@@ -7454,7 +7466,7 @@ test "run-end unconfirmed notice follows assistant and terminal before freezing"
       session="desktop-test",
       items=[
         { kind: User, content: "question" },
-        { kind: Assistant(false), content: "answer" },
+        { kind: Assistant(is_danger=false), content: "answer" },
       ],
       watermark=3,
       event_boundaries=[(3, true, 2)],
@@ -7502,9 +7514,9 @@ test "a snapshot freezes a prior run-tail notice before its next turn" {
       session="desktop-test",
       items=[
         { kind: User, content: "question" },
-        { kind: Assistant(false), content: "first answer" },
+        { kind: Assistant(is_danger=false), content: "first answer" },
         { kind: User, content: "next question" },
-        { kind: Assistant(false), content: "next answer" },
+        { kind: Assistant(is_danger=false), content: "next answer" },
       ],
       watermark=7,
       event_boundaries=[(3, true, 2), (7, true, 4)],
@@ -7568,7 +7580,7 @@ test "a snapshot does not mistake a same-run steer User for the terminal boundar
       items=[
         { kind: User, content: "question" },
         { kind: User, content: "late steer" },
-        { kind: Assistant(false), content: "answer" },
+        { kind: Assistant(is_danger=false), content: "answer" },
       ],
       watermark=4,
       event_boundaries=[(4, true, 3)],
@@ -7591,7 +7603,7 @@ test "a terminal committed before Finished still owns the run-tail notice" {
       ..running_conversation(),
       messages: [
         { kind: User, content: "question" },
-        { kind: Assistant(false), content: "answer" },
+        { kind: Assistant(is_danger=false), content: "answer" },
       ],
       watermark: 2,
     },
@@ -7617,7 +7629,7 @@ test "a terminal committed before Finished still owns the run-tail notice" {
       session="desktop-test",
       items=[
         { kind: User, content: "question" },
-        { kind: Assistant(false), content: "answer" },
+        { kind: Assistant(is_danger=false), content: "answer" },
       ],
       watermark=3,
       event_boundaries=[(3, true, 2)],
@@ -7639,7 +7651,7 @@ test "a successor resolves an old terminal tail only from its causal snapshot" {
       ..running_conversation(),
       messages: [
         { kind: User, content: "first question" },
-        { kind: Assistant(false), content: "first answer" },
+        { kind: Assistant(is_danger=false), content: "first answer" },
       ],
       watermark: 2,
       run_durable_floor: Some(0),
@@ -7710,7 +7722,7 @@ test "a successor resolves an old terminal tail only from its causal snapshot" {
       session="desktop-test",
       items=[
         { kind: User, content: "first question" },
-        { kind: Assistant(false), content: "first answer" },
+        { kind: Assistant(is_danger=false), content: "first answer" },
       ],
       watermark=2,
       event_boundaries=[(1, false, 1), (2, false, 2)],
@@ -7726,9 +7738,9 @@ test "a successor resolves an old terminal tail only from its causal snapshot" {
       session="desktop-test",
       items=[
         { kind: User, content: "first question" },
-        { kind: Assistant(false), content: "first answer" },
+        { kind: Assistant(is_danger=false), content: "first answer" },
         { kind: User, content: "second question" },
-        { kind: Assistant(false), content: "second answer" },
+        { kind: Assistant(is_danger=false), content: "second answer" },
       ],
       watermark=5,
       event_boundaries=[
@@ -7817,7 +7829,7 @@ test "a successor terminal cannot claim a setup-failed run's snapshot cut" {
       session="desktop-test",
       items=[
         { kind: User, content: "next question" },
-        { kind: Assistant(false), content: "next answer" },
+        { kind: Assistant(is_danger=false), content: "next answer" },
       ],
       watermark=3,
       event_boundaries=[(1, true, 0), (2, false, 1), (3, true, 2)],
@@ -7859,7 +7871,7 @@ test "an offline successor snapshot fences without claiming its terminal" {
       session="desktop-test",
       items=[
         { kind: User, content: "offline successor" },
-        { kind: Assistant(false), content: "successor answer" },
+        { kind: Assistant(is_danger=false), content: "successor answer" },
       ],
       watermark=3,
       event_boundaries=[(1, true, 0), (2, false, 1), (3, true, 2)],
@@ -7893,7 +7905,7 @@ test "a foreign run gains a floor only after snapshot data follows the prior ter
   let dispatch = test_dispatch()
   let conv = {
     ..test_conversation(),
-    messages: [{ kind: Assistant(false), content: "previous" }],
+    messages: [{ kind: Assistant(is_danger=false), content: "previous" }],
     watermark: 2,
     last_terminal_sequence: 2,
     sync: test_reloading([]),
@@ -7917,7 +7929,7 @@ test "a foreign run gains a floor only after snapshot data follows the prior ter
     SessionRefreshed(
       session="desktop-test",
       items=[
-        { kind: Assistant(false), content: "previous" },
+        { kind: Assistant(is_danger=false), content: "previous" },
         { kind: User, content: "current" },
       ],
       watermark=3,
@@ -8015,7 +8027,7 @@ test "a foreign background run waits for a snapshot cut after Started" {
     SessionRefreshed(
       session~,
       items=[
-        { kind: Assistant(false), content: "previous answer" },
+        { kind: Assistant(is_danger=false), content: "previous answer" },
         { kind: User, content: "current question" },
       ],
       watermark=4,
@@ -8138,7 +8150,7 @@ test "a late durable EOF finalizes an unconfirmed steer without a terminal" {
     dispatch,
     SessionRefreshed(
       session="desktop-test",
-      items=[{ kind: Assistant(false), content: "partial answer" }],
+      items=[{ kind: Assistant(is_danger=false), content: "partial answer" }],
       watermark=2,
       event_boundaries=[(1, true, 0), (2, false, 1)],
       generation=1,
@@ -8157,12 +8169,12 @@ test "a late durable EOF finalizes an unconfirmed steer without a terminal" {
 ///|
 test "two run-tail notice groups freeze only at their own terminals" {
   let first = { ..test_conversation(), run_durable_floor: Some(1) }.append_run_tail_notice(
-    Assistant(true),
+    Assistant(is_danger=true),
     "first",
     Retained,
   )
   let second = { ..first, run_durable_floor: Some(5) }.append_run_tail_notice(
-    Assistant(true),
+    Assistant(is_danger=true),
     "second",
     Retained,
   )
@@ -8177,7 +8189,7 @@ test "two run-tail notice groups freeze only at their own terminals" {
 ///|
 test "only a causal gap-free snapshot may abandon a missing prior terminal" {
   let prior = { ..test_conversation(), run_durable_floor: Some(1) }
-    .append_run_tail_notice(Assistant(true), "old notice", Retained)
+    .append_run_tail_notice(Assistant(is_danger=true), "old notice", Retained)
     .prepare_tail_notices_for_successor(2)
   let old_cut = prior
     .freeze_run_tail_notices_from_snapshot([], 1)
@@ -8525,7 +8537,7 @@ test "a late normal Finished upgrades a runs-settled uncertain steer" {
     dispatch,
     SessionRefreshed(
       session="desktop-test",
-      items=[{ kind: Assistant(false), content: "answer" }],
+      items=[{ kind: Assistant(is_danger=false), content: "answer" }],
       watermark=2,
       event_boundaries=[(1, true, 0), (2, true, 1)],
       generation=2,
@@ -8722,7 +8734,9 @@ test "runs settlement causally freezes bound initial prompts from open and idle 
     dispatch,
     SessionRefreshed(
       session="desktop-test",
-      items=[{ kind: Assistant(false), content: "idle-run durable tail" }],
+      items=[
+        { kind: Assistant(is_danger=false), content: "idle-run durable tail" },
+      ],
       watermark=1,
       event_boundaries=[(1, false, 1)],
       generation=1,
@@ -11117,7 +11131,7 @@ test "a snapshot drains buffered commits in sequence order" {
       session="desktop-test",
       items=[
         { kind: User, content: "one" },
-        { kind: Assistant(false), content: "two" },
+        { kind: Assistant(is_danger=false), content: "two" },
       ],
       watermark=2,
       event_boundaries=[],
@@ -11258,13 +11272,13 @@ test "reopening an active failed reload retries and preserves other local notice
     ]),
     overlay: [
       {
-        kind: Assistant(true),
+        kind: Assistant(is_danger=true),
         content: TranscriptRefreshFailedNotice,
         anchor: AfterMessages(1),
         reconciliation: Retained,
       },
       {
-        kind: Assistant(true),
+        kind: Assistant(is_danger=true),
         content: "local steer loss",
         anchor: AfterMessages(1),
         reconciliation: Retained,
@@ -11471,7 +11485,7 @@ test "a fixed local notice stays before later durable turns" {
     ..test_conversation(),
     messages: [{ kind: User, content: "question" }],
     watermark: 1,
-  }.append_local_notice(Assistant(true), "local failure")
+  }.append_local_notice(Assistant(is_danger=true), "local failure")
   let (_, committed) = update_dev(
     dispatch,
     SessionCommitted(session="desktop-test", sequence=2, kind="assistant", payload={
@@ -11493,7 +11507,7 @@ test "a durable commit never retires a same-class local notice" {
     ..test_conversation(),
     overlay: [
       {
-        kind: Assistant(true),
+        kind: Assistant(is_danger=true),
         content: "local-only failure",
         anchor: AfterMessages(0),
         reconciliation: Retained,
