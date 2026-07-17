@@ -113,7 +113,8 @@ calls `@agent.run`, but that decision lives outside the `agent` package.
 - `write`: overwrite a file;
 - `remove`: delete a file the agent itself created earlier in the session;
 - `plan`: record or replace the step-by-step plan for a multi-step task;
-- `goal`: set or clear the standing goal for the session;
+- `goal`: report standing-goal status (`met`, `continuing`, or `blocked`;
+  `met` clears the goal — setting one is the serve `goal` command's job);
 - `finish`: end the task with a final answer.
 
 File-oriented tools capture `runtime.workspace_root()` when the registry is

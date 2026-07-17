@@ -8,7 +8,9 @@ natively by GitHub.
 
 ## System overview
 
-One binary, three frontends. `cmd/openseek` is the engine: its `serve` mode
+One shared engine, three frontends. `cmd/openseek` is the engine (the TUI
+and headless modes live in the same binary; the desktop app and the viz
+server are separate executables that spawn or read from it): its `serve` mode
 reads JSONL commands on stdin and streams typed JSONL events
 (`bobzhang/openseek_protocol`) on stdout. The terminal UI, the desktop app,
 and headless `run` all drive that same engine and event stream. Durable state
@@ -169,15 +171,23 @@ sequenceDiagram
     Turn->>DS: chat(messages, tool schemas)
     DS-->>Turn: streamed deltas, then the assistant message
     Turn-->>UI: AssistantDelta stream · ReasoningMessage · AssistantMessage
-    Turn->>Store: append Assistant (message + tool calls)
-    Turn->>Tool: execute_tool_call(name, args)
-    Tool-->>Turn: ToolAction (Respond / Control)
-    Turn->>Store: append Tool result
-    Turn-->>UI: ToolResult event
+    alt assistant returned tool calls
+      Turn->>Store: append Assistant (message + tool calls)
+      Turn->>Tool: execute_tool_call(name, args)
+      Tool-->>Turn: ToolAction (Respond / Control)
+      Turn->>Store: append Tool result
+      Turn-->>UI: ToolResult event (Respond actions)
+    else plain final answer
+      Note over Turn,Store: no Assistant append — the answer persists only in the Terminal
+    end
     Note over Turn: queued steers/notices are folded in between steps
   end
   Turn->>Store: append Terminal(Finished(answer))
-  Turn-->>UI: AgentFinished(answer)
+  alt normal completion
+    Turn-->>UI: AgentFinished(answer)
+  else context ceiling
+    Turn-->>UI: ContextYield ("[context ceiling]" answer)
+  end
 ```
 
 Two pressure valves shape long turns:
