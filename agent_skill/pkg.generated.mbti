@@ -8,16 +8,14 @@ import {
 // Values
 pub async fn discover_skills(String) -> Array[Skill]
 
-pub fn merge_skills(Array[Skill], overrides~ : Array[Skill]) -> Array[Skill]
+pub fn merge_skills(ArrayView[Skill], overrides~ : ArrayView[Skill]) -> Array[Skill]
 
 pub fn skills_prompt_section(Array[Skill]) -> String?
 
 // Errors
 
 // Types and methods
-pub struct Skill {
-  // private fields
-} derive(@debug.Debug)
+type Skill derive(@debug.Debug)
 pub fn Skill::description(Self) -> String
 pub fn Skill::name(Self) -> String
 pub fn Skill::path(Self) -> String

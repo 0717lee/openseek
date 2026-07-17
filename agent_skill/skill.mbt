@@ -4,10 +4,10 @@
 /// one-line description, and the file path to `read` — the body itself stays
 /// out of the prompt until the model decides it is relevant, so a large
 /// skill library costs a few listing lines, not its full text.
-pub struct Skill {
-  priv name : String
-  priv description : String
-  priv path : String
+struct Skill {
+  name : String
+  description : String
+  path : String
 } derive(Debug)
 
 ///|
@@ -42,7 +42,7 @@ pub fn Skill::path(self : Skill) -> String {
 fn parse_frontmatter(text : String, fallback_name : String) -> (String, String) {
   let mut name = fallback_name
   let mut description = ""
-  let lines = text.split("\n").collect()
+  let lines = [..text.split("\n")]
   guard lines is [first, .. rest] && first.trim() == "---" else {
     return (name, description)
   }
@@ -134,15 +134,11 @@ async fn add_skill_file(skills : Array[Skill], path : String) -> Unit {
 /// re-sorted by name, keeping the prompt listing deterministic regardless
 /// of which library each skill came from.
 pub fn merge_skills(
-  base : Array[Skill],
-  overrides~ : Array[Skill],
+  base : ArrayView[Skill],
+  overrides~ : ArrayView[Skill],
 ) -> Array[Skill] {
-  let merged : Array[Skill] = []
-  let taken : Set[String] = Set([])
-  for skill in overrides {
-    taken.add(skill.name)
-    merged.push(skill)
-  }
+  let merged = overrides.to_owned()
+  let taken : Set[String] = Set([ for skill in overrides => skill.name ])
   for skill in base {
     if !taken.contains(skill.name) {
       merged.push(skill)
@@ -158,19 +154,28 @@ pub fn merge_skills(
 /// use a skill: read the listed file first, then follow it.
 pub fn skills_prompt_section(skills : Array[Skill]) -> String? {
   guard skills.length() > 0 else { return None }
-  let lines : Array[String] = []
-  lines.push("## Skills")
-  lines.push("")
-  lines.push(
-    "Reusable skills are available. When a task matches one, read its file with the read tool BEFORE doing the work, then follow it. Listed skill files are pre-approved reads even when they sit outside the working directory.",
-  )
-  for skill in skills {
-    let description = if skill.description() == "" {
-      "(no description)"
-    } else {
-      skill.description()
+  // Stream the listing into the multiline block's writer: the `$|` separator
+  // supplies the newline before the first entry, so each entry only needs a
+  // leading newline once another already precedes it.
+  fn list(out : StringBuilder) {
+    for index, skill in skills {
+      let description = if skill.description() == "" {
+        "(no description)"
+      } else {
+        skill.description()
+      }
+      if index > 0 {
+        out <+ "\n"
+      }
+      out <+ "- \{skill.name()} — \{description} (file: \{skill.path()})"
     }
-    lines.push("- \{skill.name()} — \{description} (file: \{skill.path()})")
   }
-  Some(lines.join("\n"))
+
+  let sb = StringBuilder()
+  sb <+
+    $|## Skills
+    $|
+    $|Reusable skills are available. When a task matches one, read its file with the read tool BEFORE doing the work, then follow it. Listed skill files are pre-approved reads even when they sit outside the working directory.
+    $|\{out => list(out)}
+  Some(sb.to_string())
 }

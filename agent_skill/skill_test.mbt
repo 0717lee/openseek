@@ -7,7 +7,7 @@ async fn write_skill(path : String, text : String) -> Unit {
 async test "discovery reads flat files and SKILL.md directories, sorted" {
   @vfs.with_tmpdir(prefix="openseek-skills-", dir => {
     write_skill(
-      dir + "/zeta.md",
+      "\{dir}/zeta.md",
       (
         #|---
         #|name: zeta-protocol
@@ -16,9 +16,9 @@ async test "discovery reads flat files and SKILL.md directories, sorted" {
         #|Body text.
       ),
     )
-    @fs.mkdir(dir + "/alpha", recursive=true)
+    @fs.mkdir("\{dir}/alpha", recursive=true)
     write_skill(
-      dir + "/alpha/SKILL.md",
+      "\{dir}/alpha/SKILL.md",
       (
         #|---
         #|description: Alpha steps.
@@ -27,25 +27,31 @@ async test "discovery reads flat files and SKILL.md directories, sorted" {
       ),
     )
     // No frontmatter at all: still listed under its file stem.
-    write_skill(dir + "/bare.md", "Just instructions, no header.")
+    write_skill("\{dir}/bare.md", "Just instructions, no header.")
     // A dotted directory name survives intact ("node.js", not "node").
-    @fs.mkdir(dir + "/node.js", recursive=true)
-    write_skill(dir + "/node.js/SKILL.md", "Node skill body.")
+    @fs.mkdir("\{dir}/node.js", recursive=true)
+    write_skill("\{dir}/node.js/SKILL.md", "Node skill body.")
     // A non-skill directory and a stray file are ignored.
-    @fs.mkdir(dir + "/not-a-skill", recursive=true)
-    write_skill(dir + "/notes.txt", "not markdown")
+    @fs.mkdir("\{dir}/not-a-skill", recursive=true)
+    write_skill("\{dir}/notes.txt", "not markdown")
     let skills = @agent_skill.discover_skills(dir)
     assert_eq(skills.length(), 4)
+    let prompt = @agent_skill.skills_prompt_section(skills).unwrap()
     // Sorted by name (String order is length-first, so "bare" precedes
-    // "alpha"); the SKILL.md layout names itself after its directory.
-    assert_eq(skills[0].name(), "bare")
-    assert_eq(skills[0].description(), "")
-    assert_eq(skills[1].name(), "alpha")
-    assert_eq(skills[1].description(), "Alpha steps.")
-    assert_eq(skills[1].path(), dir + "/alpha/SKILL.md")
-    assert_eq(skills[2].name(), "node.js")
-    assert_eq(skills[3].name(), "zeta-protocol")
-    assert_eq(skills[3].description(), "How to zeta.")
+    // "alpha"); the SKILL.md layout names itself after its directory
+    // ("node.js", not "node").
+    inspect(
+      prompt,
+      content=(
+        $|## Skills
+        $|
+        $|Reusable skills are available. When a task matches one, read its file with the read tool BEFORE doing the work, then follow it. Listed skill files are pre-approved reads even when they sit outside the working directory.
+        $|- bare — (no description) (file: \{dir}/bare.md)
+        $|- alpha — Alpha steps. (file: \{dir}/alpha/SKILL.md)
+        $|- node.js — (no description) (file: \{dir}/node.js/SKILL.md)
+        $|- zeta-protocol — How to zeta. (file: \{dir}/zeta.md)
+      ),
+    )
   })
 }
 
@@ -54,7 +60,7 @@ async test "a malformed frontmatter never hides the skill" {
   @vfs.with_tmpdir(prefix="openseek-skills-malformed-", dir => {
     // Opening --- with no closing fence: keys still parse until EOF.
     write_skill(
-      dir + "/open.md",
+      "\{dir}/open.md",
       (
         #|---
         #|name: still-found
@@ -72,23 +78,23 @@ async test "workspace skills shadow same-named global skills on merge" {
   @vfs.with_tmpdir(prefix="openseek-skills-global-", global_dir => {
     @vfs.with_tmpdir(prefix="openseek-skills-workspace-", workspace_dir => {
       write_skill(
-        global_dir + "/deploy.md",
+        "\{global_dir}/deploy.md",
         (
           #|---
           #|description: Generic deploy steps.
           #|---
         ),
       )
-      write_skill(global_dir + "/lint.md", "Global lint steps.")
+      write_skill("\{global_dir}/lint.md", "Global lint steps.")
       write_skill(
-        workspace_dir + "/deploy.md",
+        "\{workspace_dir}/deploy.md",
         (
           #|---
           #|description: This project's deploy steps.
           #|---
         ),
       )
-      write_skill(workspace_dir + "/triage.md", "Workspace triage steps.")
+      write_skill("\{workspace_dir}/triage.md", "Workspace triage steps.")
       let merged = @agent_skill.merge_skills(
         @agent_skill.discover_skills(global_dir),
         overrides=@agent_skill.discover_skills(workspace_dir),
@@ -97,10 +103,10 @@ async test "workspace skills shadow same-named global skills on merge" {
       // global library; everything stays name-sorted across both sources.
       assert_eq(merged.length(), 3)
       assert_eq(merged[0].name(), "lint")
-      assert_eq(merged[0].path(), global_dir + "/lint.md")
+      assert_eq(merged[0].path(), "\{global_dir}/lint.md")
       assert_eq(merged[1].name(), "deploy")
       assert_eq(merged[1].description(), "This project's deploy steps.")
-      assert_eq(merged[1].path(), workspace_dir + "/deploy.md")
+      assert_eq(merged[1].path(), "\{workspace_dir}/deploy.md")
       assert_eq(merged[2].name(), "triage")
     })
   })
@@ -117,7 +123,7 @@ async test "a missing skills directory is an empty library" {
 async test "the prompt section lists usage, names, and paths" {
   @vfs.with_tmpdir(prefix="openseek-skills-prompt-", dir => {
     write_skill(
-      dir + "/release.md",
+      "\{dir}/release.md",
       (
         #|---
         #|name: release
@@ -130,11 +136,13 @@ async test "the prompt section lists usage, names, and paths" {
     guard @agent_skill.skills_prompt_section(skills) is Some(section) else {
       fail("expected a section")
     }
-    assert_true(section.contains("## Skills"))
-    assert_true(section.contains("read its file with the read tool"))
-    assert_true(
-      section.contains(
-        "- release — Cut a release of this project. (file: \{dir}/release.md)",
+    inspect(
+      section,
+      content=(
+        $|## Skills
+        $|
+        $|Reusable skills are available. When a task matches one, read its file with the read tool BEFORE doing the work, then follow it. Listed skill files are pre-approved reads even when they sit outside the working directory.
+        $|- release — Cut a release of this project. (file: \{dir}/release.md)
       ),
     )
   })
