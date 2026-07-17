@@ -164,7 +164,7 @@ sequenceDiagram
   UI->>Serve: {"command":"prompt","text":…}
   Serve->>Turn: run_turn_in_scope(session, task)
   Turn->>Store: append User(task)
-  loop until a control tool or the context ceiling
+  loop until a plain final answer, a control tool, or the context ceiling
     Turn->>DS: chat(messages, tool schemas)
     DS-->>Turn: assistant delta / tool_calls
     Turn-->>UI: AssistantDelta · ReasoningMessage · AgentStep
@@ -200,4 +200,7 @@ Two pressure valves shape long turns:
 ```
 
 The visualizer (`openseek` sessions in a browser: `cmd/viz_server`) and
-`sessions list` both read these files directly; nothing else is persisted.
+`sessions list` both read these files directly. The engine persists nothing
+else; the desktop app additionally keeps its own metadata under the session
+root (`workspaces.json`, `archived/sessions`) and its settings in webview
+localStorage.

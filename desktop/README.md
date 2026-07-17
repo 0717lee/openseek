@@ -3,7 +3,8 @@
 A [Lepus](https://github.com/moonbit-community/lepus) + [Rabbita](https://mooncakes.io/docs/moonbit-community/rabbita) desktop client for the OpenSeek agent, written in MoonBit.
 
 - `main.mbt` — entry point: wires the window manifest, the IPC extensions, the per-user runtime directory, and the launch log.
-- `internal/engine/` — the native host: keeps one persistent `openseek serve` engine per conversation, streams its JSONL events to the webview, exposes `connect` / `start` / `steer` / `cancel` / `list_sessions` / `load_session` commands plus the `skills_*` / `skill_*` ops backing the Skills panel; also owns where conversations live on disk (per-session workspace directories and the durable session store root) and the bundled frontend/engine lookup.
+- `internal/engine/` — the native host: keeps one persistent `openseek serve` engine per conversation, streams its JSONL events to the webview, and owns where conversations live on disk (per-session workspace directories, the durable session store root, and archiving).
+- `internal/extension/` — the IPC bridge registration: the `connect` / `start` / `steer` / `cancel` / `list_sessions` / `load_session` handlers, the `skills_*` / `skill_*` ops backing the Skills panel, and bundled frontend asset lookup.
 - `internal/skillmarket/` — the mooncakes.io skill registry client and the local skills-library manager: catalog browsing, digest-verified installs into the engine's global skills directory, and uninstall of what the app itself installed.
 - `internal/env/` — process-environment reads (blank means unset).
 - `internal/home/` — the user's home directory and `~` expansion.
