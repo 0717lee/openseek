@@ -245,7 +245,7 @@ async fn run_task_turn(
 
 ///|
 /// `openseek serve` — the persistent JSONL command server the TUI drives: read
-/// prompt/steer/cancel/compact on stdin, stream events on stdout.
+/// prompt/steer/cancel/compact/goal on stdin, stream events on stdout.
 async fn run_serve_command(matches : @argparse.Matches) -> Unit {
   // Serve is ephemeral by default (durable only with --session); --no-session
   // makes that explicit and, as in every mode, contradicts an explicit --session.
@@ -595,7 +595,7 @@ fn root_command() -> @argparse.Command {
       ),
       Command(
         "serve",
-        about="Session server: read JSONL commands (prompt/steer/cancel/compact) from stdin.",
+        about="Session server: read JSONL commands (prompt/steer/cancel/compact/goal) from stdin.",
         options=agent_options(),
         flags=[
           FlagArg(

@@ -26,7 +26,7 @@ DeepSeek-backed MoonBit coding agent — runs the interactive UI by default.
 Commands:
   tui       OpenSeek terminal UI.
   run       Run one task headlessly; stream JSONL events on stdout.
-  serve     Session server: read JSONL commands (prompt/steer/cancel/compact) from stdin.
+  serve     Session server: read JSONL commands (prompt/steer/cancel/compact/goal) from stdin.
   mcp       List configured MCP servers and the tools they expose.
   review    Read-only code review of base...HEAD; prints a JSON ReviewReport.
   sessions  Manage durable sessions.

@@ -102,8 +102,8 @@ async fn[X] shell_tools(
 ///
 /// The returned registry contains the built-in local tools: `shell` (plus
 /// `shell_output` and `shell_stop` where background jobs are supported — see
-/// `shell_tools`), `read`, `edit`, `multi_edit`, `write`, `remove`, `plan`, and
-/// `finish`.
+/// `shell_tools`), `read`, `edit`, `multi_edit`, `write`, `remove`, `plan`,
+/// `goal`, and `finish`.
 /// Each tool lives in its own subpackage of `agent_tool` and exposes a
 /// `definition()` constructor; this function bundles them into the `Tools`
 /// value the loop dispatches against. File-oriented tools capture

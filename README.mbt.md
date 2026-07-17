@@ -4,6 +4,10 @@ OpenSeek is a small MoonBit foundation for a DeepSeek-backed coding agent. The
 module is split into pure data, HTTP transport, agent orchestration, and a CLI
 entry point so request encoding can be tested without network access.
 
+For a picture of how the pieces fit together — module architecture, the core
+data model, and the life of one agent turn — see
+[`docs/architecture.md`](docs/architecture.md).
+
 ## Packages
 
 | Package | Purpose | Docs |
@@ -14,18 +18,33 @@ entry point so request encoding can be tested without network access.
 | `bobzhang/openseek/agent_runtime` | Native-only agent task-group and extensible runtime event queue. | `agent_runtime/README.mbt.md` |
 | `bobzhang/openseek/agent_session` | Typed durable conversation state and DeepSeek message projection. | `agent_session/README.mbt.md` |
 | `bobzhang/openseek/agent_session/store` | Native filesystem-backed append-only session store. | `agent_session/store/README.mbt.md` |
-| `bobzhang/openseek/agent_tool` | Tool registry, executor, output, and control-action types. | `agent_tool/README.mbt.md` |
+| `bobzhang/openseek/agent_session/log` | Lenient session-file reader: header plus events, with per-line error capture. | — |
+| `bobzhang/openseek/agent_session/compact` | Context-checkpoint (compaction) request building and summary handling. | — |
+| `bobzhang/openseek/agent_tool` | Tool registry, executor, output, and control-action types; one subpackage per built-in tool. | `agent_tool/README.mbt.md` |
+| `bobzhang/openseek/agent_skill` | Workspace skills: markdown playbooks discovered from skill libraries and listed in the system prompt. | `agent_skill/README.mbt.md` |
+| `bobzhang/openseek/jsonrpc` | Duplex JSON-RPC 2.0 client (concurrent requests, notifications, out-of-order replies). | — |
+| `bobzhang/openseek/mcp` (+ `config`, `stdio`, `streamhttp`, `tools`) | MCP client: `mcp.json` decoding, stdio and Streamable HTTP transports, and the bridge that namespaces server tools into the registry. | — |
+| `bobzhang/openseek/prompt` | Built-in system prompt text (generated from Markdown) and prompt-selection policy. | `prompt/README.mbt.md` |
 | `bobzhang/openseek_protocol` | Typed engine event stream (own module): the `openseek run`/`serve` stdout wire contract, decodable on every backend. | `protocol/README.mbt.md` |
 | `bobzhang/openseek_protocol/emit` | Native-only writer for that stream: owns each event's log level. | `protocol/emit/README.mbt.md` |
 | `bobzhang/openseek/agent` | Native-only OpenSeek agent loop and local tool dispatch. | `agent/README.mbt.md` |
+| `bobzhang/openseek/agent_review` | Read-only, compiler-grounded code-review engine behind `openseek review`. | `agent_review/README.mbt.md` |
 | `bobzhang/openseek/cmd/openseek` | Native-only command-line entry point. | `cmd/openseek/README.md` |
 | `bobzhang/openseek/cmd/tui` | Native-only terminal UI library, the default mode of `openseek` (and `openseek tui`). | `cmd/tui/README.md` |
+| `bobzhang/openseek/tui` | Reusable terminal-UI framework (transcript, composer, rendering) the OpenSeek TUI builds on. | `tui/README.md` |
+| `bobzhang/openseek/viz` | Browser viewer for durable session logs (JS). | `viz/README.md` |
+| `bobzhang/openseek/cmd/viz_server` | Native HTTP server that serves the visualizer over recorded sessions. | `cmd/viz_server/README.md` |
+| `bobzhang/openseek/cmd/viz_app` | JS entry point compiled into the visualizer bundle. | `viz/README.md` |
+| `bobzhang/openseek/internal/{cli,agentcli,workspace_path}` | Shared CLI accessors and workspace-path resolution for the command mains. | — |
 | `bobzhang/openseek/testkit/filesystem` | JSON-backed virtual filesystem for tests and eval fixtures. | `testkit/filesystem/README.mbt.md` |
 | `bobzhang/openseek/eval/report` | Shared Markdown/JSON report primitive for deterministic and model evals. | `eval/report/README.mbt.md` |
 | `bobzhang/openseek/eval/tool_harness` | Deterministic host-side harness that dispatches every built-in tool. | `eval/tool_harness/README.mbt.md` |
 | `bobzhang/openseek/eval/file_edit/cases` | Deterministic file-editing eval case definitions. | `eval/file_edit/README.md` |
 | `bobzhang/openseek/eval/file_edit/harness` | Reusable file-editing eval runner, oracle, and reporter. | `eval/file_edit/README.md` |
 | `bobzhang/openseek/eval/file_edit/cmd/main` | Native-only CLI wrapper for the file-editing eval harness. | `eval/file_edit/README.md` |
+| `bobzhang/openseek/eval/prompt_task/harness` | Prompt-task eval: runs the real agent over isolated per-trial workspaces. | `eval/prompt_task/README.md` |
+| `bobzhang/openseek/eval/session_analyzer` | Post-hoc session-log analyzer producing Markdown/HTML/JSON reports. | — |
+| `openseek_desktop` (in `desktop/`, own module) | Desktop app: CEF shell (lepus submodule) plus a JS frontend driving the engine over JSONL. | `desktop/README.md` |
 
 The `deepseek` subpackage is pure and exposes chat data plus JSON helpers:
 
@@ -67,9 +86,11 @@ filesystem, and process APIs.
 
 The `cmd/openseek` package is the single-binary entry point — a subcommand tree
 (default: the terminal UI; `run`/`serve`/`review`/`sessions` for the headless
-engine). `openseek run` parses arguments and runs the agent package. The agent
-sends DeepSeek native function tools and supports seven local tools: `shell`,
-`read`, `edit`, `multi_edit`, `write`, `plan`, and `finish`.
+engine; `mcp` to validate MCP configuration). `openseek run` parses arguments
+and runs the agent package. The agent sends DeepSeek native function tools and
+supports eleven local tools: `shell` (with `shell_output` and `shell_stop` for
+background jobs — on Windows the plain foreground shell only), `read`, `edit`,
+`multi_edit`, `write`, `remove`, `plan`, `goal`, and `finish`.
 
 ```bash
 export DEEPSEEK=sk-...
@@ -126,6 +147,16 @@ moon run cmd/openseek -- mcp --mcp-config mcp.json
 Resources and prompts (the other MCP capabilities) are not consumed: openseek's
 agent is tool-driven, and a server that wants to feed it context can expose a
 tool. This keeps the surface small; revisit if a concrete need appears.
+
+## Skills
+
+Reusable markdown playbooks the agent loads on demand. A skill is a
+`<name>.md` file or a `<name>/SKILL.md` directory layout with optional
+`name:`/`description:` frontmatter. Two libraries are merged: the global one
+(`~/.openseek/skills`, or `--global-skills-dir`) and the workspace one
+(`.openseek/skills`), with workspace skills shadowing same-named global ones.
+The system prompt lists each skill's name, description, and file path; the
+agent reads the file before applying it. See `agent_skill/README.mbt.md`.
 
 ## Terminal UI
 
