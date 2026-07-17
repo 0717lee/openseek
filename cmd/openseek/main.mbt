@@ -444,9 +444,7 @@ fn failure_message(error_text : String) -> String {
     return "\{message}"
   }
   let marker = " FAILED: "
-  guard error_text.split(marker).collect() is [_, .., last] else {
-    return error_text
-  }
+  guard [..error_text.split(marker)] is [_, .., last] else { return error_text }
   "\{last.strip_suffix(")").unwrap_or(last)}"
 }
 

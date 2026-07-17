@@ -209,15 +209,13 @@ fn is_fd_word(word : String) -> Bool {
 
 ///|
 fn split_env_assignment(word : String) -> EnvAssignment? {
-  let parts = word.split("=").collect()
-  if parts.length() < 2 {
+  guard [..word.split("=")] is [first, .. values] && !values.is_empty() else {
     return None
   }
-  let name = parts[0].to_owned()
+  let name = first.to_owned()
   if !is_valid_env_name(name) {
     return None
   }
-  let values = [ for part in parts[1:] => part.to_owned() ]
   Some({ name, value: values.join("=") })
 }
 

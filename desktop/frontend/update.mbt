@@ -1798,10 +1798,7 @@ test "new chat keeps the model intact until the rotation lands" {
 ///|
 test "generated session ids include a random suffix" {
   let id = generated_session_id()
-  let parts : Array[String] = id
-    .split("-")
-    .map(piece => piece.to_owned())
-    .collect()
+  let parts = [..id.split("-")]
   inspect(parts.length(), content="5")
   inspect(parts[0], content="desktop")
   inspect(parts[1].length(), content="8")

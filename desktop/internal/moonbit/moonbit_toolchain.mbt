@@ -56,7 +56,7 @@ async fn get_moonc_version(
       "failed to read bundled MoonBit compiler version: \{output.text().trim()}",
     )
   }
-  match output.text().trim().split(" ").collect() {
+  match [..output.text().trim().split(" ")] {
     [['v', .. version], ..] => version.to_owned()
     [version, ..] => version.to_owned()
     [] => ""

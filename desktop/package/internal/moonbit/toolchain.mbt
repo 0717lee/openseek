@@ -260,7 +260,7 @@ async fn compiler_version(
       "failed to read MoonBit compiler version from \{compiler}: \{output.text().trim()}",
     )
   }
-  let version = output.text().trim().split(" ").collect()[0].to_owned()
+  let version = output.text().trim().split(" ").head().unwrap_or("").to_owned()
   if version.strip_prefix("v") is Some(version) {
     version.to_owned()
   } else {

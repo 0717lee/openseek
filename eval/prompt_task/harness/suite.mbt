@@ -793,9 +793,8 @@ fn suite_success_summary(report : SuiteReport) -> String {
 
 ///|
 fn problem_id_from_report(report : EvalReport) -> String {
-  let pieces = report.prompt_label.split(":").collect()
-  if pieces.length() > 0 {
-    pieces[0].to_owned()
+  if report.prompt_label.split(":").head() is Some(first) {
+    first.to_owned()
   } else {
     report.prompt_label
   }
@@ -890,7 +889,7 @@ fn resolve_relative_path(base_dir : String, path : String) -> String {
 
 ///|
 fn dirname(path : String) -> String {
-  let pieces = path.split("/").collect()
+  let pieces = [..path.split("/")]
   if pieces.length() <= 1 {
     return "."
   }

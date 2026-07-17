@@ -72,7 +72,7 @@ pub fn FileSystem::validate(self : FileSystem) -> Unit raise {
 /// Raises when the JSON violates the filesystem convention.
 pub fn FileSystem::entries(self : FileSystem) -> Array[FileEntry] raise {
   let fields = self.object_fields()
-  let paths = fields.keys().collect()
+  let paths = [..fields.keys()]
   paths.sort()
   [
     for path in paths => {

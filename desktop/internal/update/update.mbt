@@ -227,7 +227,7 @@ fn parse_version(text : String) -> (Int, Int, Int)? {
       view = view[:index]
     }
   }
-  let parts = view.split(".").collect()
+  let parts = [..view.split(".")]
   guard parts.length() == 3 else { return None }
   let numbers = []
   for part in parts {

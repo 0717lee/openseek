@@ -183,6 +183,5 @@ fn looks_like_env_assignment(word : String) -> Bool {
   if word.contains("/") || word.contains("-") {
     return false
   }
-  let parts = word.split("=").collect()
-  parts.length() == 2 && parts[0] != "" && parts[1] != ""
+  [..word.split("=")] is [name, value] && !name.is_empty() && !value.is_empty()
 }

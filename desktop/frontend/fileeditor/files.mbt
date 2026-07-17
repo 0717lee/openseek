@@ -145,7 +145,7 @@ pub fn read_file(
 /// A workspace-relative path's final `/`-segment, for a mention chip's jump
 /// target — it carries only the path, not a display name.
 pub fn basename(path : @pathx.Relative) -> String {
-  match path.0.split("/").collect() {
+  match [..path.0.split("/")] {
     [] => path.0
     [.., last] => last.to_owned()
   }

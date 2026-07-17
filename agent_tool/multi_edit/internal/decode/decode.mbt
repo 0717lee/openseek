@@ -136,7 +136,7 @@ fn missing_field(
   name : String,
   prefix : String,
 ) -> String {
-  let keys = fields.keys().collect()
+  let keys = [..fields.keys()]
   keys.sort()
   "\{prefix} to include \{name} (present keys: \{keys.join(", ")})"
 }

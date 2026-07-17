@@ -50,7 +50,7 @@ async fn watch_workspace_op(
 /// watch root and `/`-separated; pruning a directory prunes everything
 /// under it, so matching the leaf segment is enough.
 fn ignored_watch_path(path : String) -> Bool {
-  match path.split("/").collect() {
+  match [..path.split("/")] {
     [.., ".git" | "target" | "_build" | "node_modules" | ".mooncakes" | ".repos"] =>
       true
     _ => false

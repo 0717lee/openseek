@@ -486,7 +486,7 @@ fn prepend_to_path_env(bin_dir : String, current_path : String?) -> String {
 ///|
 fn first_path_entry(path : String?) -> String {
   guard path is Some(path) else { return "" }
-  match path.split(PathSep).collect() {
+  match [..path.split(PathSep)] {
     [first, ..] => first.to_owned()
     [] => ""
   }

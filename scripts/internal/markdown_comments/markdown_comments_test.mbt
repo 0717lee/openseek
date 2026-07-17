@@ -5,7 +5,7 @@ fn strip(markdown : String) -> String {
 
 ///|
 fn visible_cr(markdown : String) -> String {
-  markdown.split("\r").collect().join("|")
+  [..markdown.split("\r")].join("|")
 }
 
 ///|

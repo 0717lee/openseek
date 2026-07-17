@@ -1582,11 +1582,7 @@ fn command_text_env_no_arg_option(arg : String) -> Bool {
 
 ///|
 fn command_text_env_assignment_word(word : String) -> Bool {
-  let parts = word.split("=").collect()
-  if parts.length() < 2 {
-    return false
-  }
-  command_text_valid_env_name(parts[0])
+  [..word.split("=")] is [name, _, ..] && command_text_valid_env_name(name)
 }
 
 ///|
