@@ -3,7 +3,7 @@
 `agent_review` is OpenSeek's **code-review engine**. It runs a read-only,
 compiler-grounded review of a change set and returns a single structured
 `ReviewReport`. The engine is deliberately front-end-agnostic: the headless
-`openseek --review` CLI is one caller today, and the same `ReviewReport` JSON is
+`openseek review` CLI is one caller today, and the same `ReviewReport` JSON is
 the boundary other coding agents (e.g. Codex, Claude) spawn and consume when they
 dispatch a review to OpenSeek.
 
@@ -83,14 +83,14 @@ clean), exit code by severity:
 ```bash
 # 0 = clean or non-blocking findings, 1 = the review produced no report,
 # 2 = blocker findings present
-openseek --review --base origin/main
+openseek review --base origin/main
 ```
 
 Because the report is a stable JSON document on stdout, any orchestrator that can
 run a subprocess can use it:
 
 ```bash
-openseek --review --base origin/main | jq '.findings[] | select(.severity=="blocker")'
+openseek review --base origin/main | jq '.findings[] | select(.severity=="blocker")'
 ```
 
 ## Ensembling for confidence

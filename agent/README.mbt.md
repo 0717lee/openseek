@@ -104,12 +104,16 @@ calls `@agent.run`, but that decision lives outside the `agent` package.
 `build_tools(runtime, scope)` returns the standard local tool registry:
 
 - `shell`: run a command under the workspace root or an explicit cwd (including
-  `moon check` for compiler feedback);
+  `moon check` for compiler feedback), with `run_in_background` support;
+- `shell_output` / `shell_stop`: read or stop a background shell job (omitted on
+  Windows, where background jobs are not wired);
 - `read`: read a text file;
 - `edit`: replace exact text in a file;
 - `multi_edit`: apply several explicit line-anchored replacements to one file;
 - `write`: overwrite a file;
+- `remove`: delete a file the agent created (or that git tracks);
 - `plan`: record or replace the step-by-step plan for a multi-step task;
+- `goal`: set or clear the standing goal for the session;
 - `finish`: end the task with a final answer.
 
 File-oriented tools capture `runtime.workspace_root()` when the registry is

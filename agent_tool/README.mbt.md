@@ -10,8 +10,11 @@ Concrete built-in tools live in subpackages:
 - `agent_tool/edit`
 - `agent_tool/multi_edit`
 - `agent_tool/write`
-- `agent_tool/shell`
+- `agent_tool/remove`
+- `agent_tool/shell` (with `agent_tool/shell_output` and `agent_tool/shell_stop`
+  for background jobs, and `agent_tool/bgjobs` as their shared runtime)
 - `agent_tool/plan`
+- `agent_tool/goal`
 - `agent_tool/finish`
 
 ## API Shape

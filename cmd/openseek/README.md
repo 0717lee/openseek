@@ -4,8 +4,9 @@ This package is the native-only entry point for OpenSeek — the single `opensee
 binary. It is a subcommand tree: the interactive terminal UI is the **default**
 (see [`cmd/tui`](../tui/README.md)), and the headless engine lives under named
 subcommands. It parses arguments with `moonbitlang/core/argparse`, reads defaults
-from environment variables, and calls `bobzhang/openseek/agent.run` for one-shot
-tasks or `agent.run_turn_with_append` for durable sessions.
+from environment variables, and drives turns through
+`bobzhang/openseek/agent.run_turn_in_scope` (both one-shot `run` and durable
+sessions; fleet mode's independent attempts use `agent.run_turn_with_append`).
 
 ```
 openseek [--prompt "…"]        interactive UI (default)
