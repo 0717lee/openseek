@@ -510,7 +510,9 @@ fn split_plan_checklist(content : String) -> (String, Array[String])? {
   for index, line in lines {
     if line.trim_end().has_suffix("Current plan:") {
       let steps = [
-        for step in lines[index + 1:] if !step.trim().is_empty() => step
+        for step in lines[index + 1:] if !step.trim().is_empty() => {
+          step.to_owned()
+        }
       ]
       if steps.is_empty() {
         return None
@@ -1082,15 +1084,15 @@ fn generate_diff(old : String, new : String) -> String {
 }
 
 ///|
-/// Split `text` into lines on `\n`.
-fn string_lines(text : String) -> Array[String] {
-  text.split("\n").map(line => line.to_owned()).collect()
+/// Split `text` into lines on `\n`, as views into `text`.
+fn string_lines(text : String) -> Array[StringView] {
+  [..text.split("\n")]
 }
 
 ///|
 /// Prefix every line of `text` with `marker` (for all-added / all-removed diffs).
 fn prefix_lines(text : String, marker : String) -> String {
-  string_lines(text).map(line => marker + line).join("\n")
+  string_lines(text).map(line => "\{marker}\{line}").join("\n")
 }
 
 ///|
