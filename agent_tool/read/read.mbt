@@ -197,9 +197,10 @@ async test "read renders a whole file as numbered lines with a status footer" {
     assert_eq(brief, "read test.txt")
     assert_eq(
       output.content,
-      [
-        "1 |hello read", "<system>start_line=1 shown_lines=1 total_lines=1 truncated=false</system>",
-      ].join("\n"),
+      (
+        #|1 |hello read
+        #|<system>start_line=1 shown_lines=1 total_lines=1 truncated=false</system>
+      ),
     )
   })
 }
@@ -221,9 +222,10 @@ async test "read resolves relative paths under the workspace root" {
     assert_false(output.is_error)
     assert_eq(
       output.content,
-      [
-        "1 |workspace read", "<system>start_line=1 shown_lines=1 total_lines=1 truncated=false</system>",
-      ].join("\n"),
+      (
+        #|1 |workspace read
+        #|<system>start_line=1 shown_lines=1 total_lines=1 truncated=false</system>
+      ),
     )
   })
 }
@@ -254,9 +256,11 @@ async test "read treats a single-newline file as one blank line, not empty" {
     // "\n" splits into two empty lines, so this is not the empty-file case.
     assert_eq(
       output.content,
-      [
-        "1 |", "2 |", "<system>start_line=1 shown_lines=2 total_lines=2 truncated=false</system>",
-      ].join("\n"),
+      (
+        #|1 |
+        #|2 |
+        #|<system>start_line=1 shown_lines=2 total_lines=2 truncated=false</system>
+      ),
     )
   })
 }
@@ -275,9 +279,13 @@ async test "read numbers every line including a trailing blank from a final newl
     assert_false(output.is_error)
     assert_eq(
       output.content,
-      [
-        "1 |line one", "2 |line two", "3 |line three", "4 |", "<system>start_line=1 shown_lines=4 total_lines=4 truncated=false</system>",
-      ].join("\n"),
+      (
+        #|1 |line one
+        #|2 |line two
+        #|3 |line three
+        #|4 |
+        #|<system>start_line=1 shown_lines=4 total_lines=4 truncated=false</system>
+      ),
     )
   })
 }
@@ -298,9 +306,11 @@ async test "read returns a requested line range and reports more lines remain" {
     // still unread; there is no separate `line_limited` flag.
     assert_eq(
       output.content,
-      [
-        "2 |line two", "3 |line three", "<system>start_line=2 shown_lines=2 total_lines=4 truncated=false</system>",
-      ].join("\n"),
+      (
+        #|2 |line two
+        #|3 |line three
+        #|<system>start_line=2 shown_lines=2 total_lines=4 truncated=false</system>
+      ),
     )
   })
 }
@@ -334,9 +344,10 @@ async test "read caps oversized output without marking it as an error" {
     assert_eq(brief, "read capped.txt (truncated)")
     assert_eq(
       output.content,
-      [
-        "1 |a", "<system>start_line=1 shown_lines=1 total_lines=1 truncated=true</system>",
-      ].join("\n"),
+      (
+        #|1 |a
+        #|<system>start_line=1 shown_lines=1 total_lines=1 truncated=true</system>
+      ),
     )
   })
 }
@@ -357,9 +368,13 @@ async test "read counts the line-number gutter against the output budget" {
     // included); the fifth gutter would overrun, so the body stops at line 4.
     assert_eq(
       output.content,
-      [
-        " 1 |x", " 2 |x", " 3 |x", " 4 |x", "<system>start_line=1 shown_lines=4 total_lines=80 truncated=true</system>",
-      ].join("\n"),
+      (
+        #| 1 |x
+        #| 2 |x
+        #| 3 |x
+        #| 4 |x
+        #|<system>start_line=1 shown_lines=4 total_lines=80 truncated=true</system>
+      ),
     )
   })
 }
@@ -376,9 +391,10 @@ async test "read caps unicode content on character boundaries" {
     assert_false(output.is_error)
     assert_eq(
       output.content,
-      [
-        "1 |😀", "<system>start_line=1 shown_lines=1 total_lines=1 truncated=true</system>",
-      ].join("\n"),
+      (
+        #|1 |😀
+        #|<system>start_line=1 shown_lines=1 total_lines=1 truncated=true</system>
+      ),
     )
     // Budget 4 leaves one unit after the gutter, which would split "😀". Rather
     // than emit a lone surrogate (a slice mid-pair actually panics), the whole
@@ -389,9 +405,10 @@ async test "read caps unicode content on character boundaries" {
     assert_false(output.content.contains("😀"))
     assert_eq(
       output.content,
-      [
-        "1 |", "<system>start_line=1 shown_lines=1 total_lines=1 truncated=true</system>",
-      ].join("\n"),
+      (
+        #|1 |
+        #|<system>start_line=1 shown_lines=1 total_lines=1 truncated=true</system>
+      ),
     )
   })
 }
@@ -524,9 +541,11 @@ async test "a huge max_lines returns the remaining lines without overflow" {
     assert_false(output.is_error)
     assert_eq(
       output.content,
-      [
-        "2 |b", "3 |c", "<system>start_line=2 shown_lines=2 total_lines=3 truncated=false</system>",
-      ].join("\n"),
+      (
+        #|2 |b
+        #|3 |c
+        #|<system>start_line=2 shown_lines=2 total_lines=3 truncated=false</system>
+      ),
     )
   })
 }

@@ -366,23 +366,28 @@ async fn print_fleet_summary(
   let finished = outcomes
     .iter()
     .count_if(outcome => outcome is Some(result) && result.ok)
-  let lines : Array[String] = [
-    "",
-    "openseek: \{total} run(s) of \"\{one_line_brief(task, 60)}\" — \{finished} finished, \{total - finished} not",
-  ]
-  for outcome in outcomes {
-    match outcome {
-      Some(result) =>
-        lines.push(
-          "  #\{result.index + 1}  \{result.status}  \{result.session}  \{result.dir}  \{one_line_brief(result.detail, 60)}",
-        )
-      None => lines.push("  (run did not report)")
+  // Each row writes its own leading newline, so a fleet with no rows leaves
+  // the scaffold untouched.
+  fn rows(out : StringBuilder) {
+    for outcome in outcomes {
+      match outcome {
+        Some(result) =>
+          out <+
+            "\n  #\{result.index + 1}  \{result.status}  \{result.session}  \{result.dir}  \{one_line_brief(result.detail, 60)}"
+        None => out <+ "\n  (run did not report)"
+      }
     }
   }
-  lines.push("")
-  lines.push("inspect a run:  \{inspect_hint(session_root_value)}")
-  lines.push("")
-  @stdio.stderr.write(lines.join("\n")) catch {
+
+  @stdio.stderr.write(
+    (
+      $|
+      $|openseek: \{total} run(s) of "\{one_line_brief(task, 60)}" — \{finished} finished, \{total - finished} not\{out => rows(out)}
+      $|
+      $|inspect a run:  \{inspect_hint(session_root_value)}
+      $|
+    ),
+  ) catch {
     _ => ()
   }
 }

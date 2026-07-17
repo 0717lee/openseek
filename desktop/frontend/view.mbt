@@ -817,16 +817,15 @@ fn tool_call_view(item : @transcript.TranscriptItem) -> @html.Html {
 fn truncate_output(content : String) -> String {
   let head_limit = 60
   let tail_limit = 40
-  let lines = content.split("\n").map(line => line.to_owned()).to_array()
+  let lines = [..content.split("\n")]
   if lines.length() <= head_limit + tail_limit + 1 {
     return content
   }
-  let parts = lines[0:head_limit].to_owned()
-  parts.push(
+  [
+    ..lines[0:head_limit],
     "⋯ \{lines.length() - head_limit - tail_limit} lines skipped ⋯",
-  )
-  parts.append(lines[lines.length() - tail_limit:].to_owned())
-  parts.join("\n")
+    ..lines[lines.length() - tail_limit:],
+  ].join("\n")
 }
 
 ///|
