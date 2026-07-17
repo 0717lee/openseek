@@ -14,7 +14,7 @@ async fn write_report_files(report : EvalReport) -> Unit {
 ///|
 async fn write_eval_result_files(out_dir : String, result : EvalResult) -> Unit {
   @report.write_files(
-    out_dir + "/eval_results/" + eval_result_artifact_name(result),
+    "\{out_dir}/eval_results/\{eval_result_artifact_name(result)}",
     result.markdown(),
     result.to_json(),
     html=result.html(),
@@ -167,7 +167,7 @@ fn EvalResult::as_report(
   out_dir~ : String,
 ) -> @report.Report {
   Report(
-    title="Prompt Task Eval Result: " + eval_result_name(self),
+    title="Prompt Task Eval Result: \{eval_result_name(self)}",
     summary=[
       Metric(name="session", value=empty_dash(self.session_id)),
       Metric(name="prompt", value=empty_dash(self.prompt_label)),
@@ -303,7 +303,7 @@ fn relative_artifact_path(out_dir : String, path : String) -> String {
   if out_dir == "" || path == "" {
     return path
   }
-  let prefix = out_dir + "/"
+  let prefix = "\{out_dir}/"
   match path.strip_prefix(prefix) {
     Some(rest) => "\{rest}"
     None => path

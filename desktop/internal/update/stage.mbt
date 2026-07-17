@@ -30,7 +30,7 @@ pub struct StagedUpdate {
 /// The staging directory under the app's per-user work directory. Wiped
 /// before every download and by `cleanup_leftovers`.
 fn staging_dir(work_dir : String) -> String {
-  work_dir + "/update"
+  "\{work_dir}/update"
 }
 
 ///|
@@ -52,10 +52,10 @@ pub async fn stage_update(
   let staging = staging_dir(work_dir)
   remove_tree(staging)
   @fs.mkdir(staging, recursive=true)
-  let archive = staging + "/package.zip"
+  let archive = "\{staging}/package.zip"
   download(artifact.url, archive)
   verify_digest(archive, artifact.sha256)
-  let extract_dir = staging + "/extract"
+  let extract_dir = "\{staging}/extract"
   run_tool("ditto", ["-x", "-k", archive, extract_dir])
   let app_path = extracted_app(extract_dir)
   // The zip may carry quarantine attributes; the bundle is notarized, but
@@ -95,7 +95,7 @@ async fn verify_digest(archive : String, expected : String) -> Unit {
 async fn extracted_app(extract_dir : String) -> String {
   for entry in @fs.readdir(extract_dir) {
     if entry.has_suffix(".app") {
-      return extract_dir + "/" + entry
+      return "\{extract_dir}/\{entry}"
     }
   }
   raise UpdateError("the update package contains no .app bundle")

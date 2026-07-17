@@ -356,7 +356,7 @@ async fn session_group(
     "sessions", "list", "--session-root", root, "--format", "json",
   ]) catch {
     error if @async.is_being_cancelled() => raise error
-    EngineError(detail) => return failed("session list failed: " + detail)
+    EngineError(detail) => return failed("session list failed: \{detail}")
     error => return failed("session list failed: \{error}")
   }
   let sessions = @json.parse(output) catch {
@@ -395,7 +395,7 @@ pub async fn load_session(
     "--session-root",
     root.to_string(),
   ]) catch {
-    EngineError(detail) => raise EngineError("session load failed: " + detail)
+    EngineError(detail) => raise EngineError("session load failed: \{detail}")
     error => raise error
   }
   let json = @json.parse(output) catch {
@@ -425,7 +425,7 @@ async test "one-shot session engine overrides ambient OPENSEEK_DIR" {
   let previous = @sys.get_env_var("OPENSEEK_DIR")
   @sys.set_env_var("OPENSEEK_DIR", "/missing/openseek-dir")
   let dir = @fs.tmpdir(prefix="openseek-session-env-")
-  let engine = dir + "/engine.sh"
+  let engine = "\{dir}/engine.sh"
   @fs.write_file(
     engine,
     "#!/bin/sh\nprintf '%s' \"$OPENSEEK_DIR\"\n",

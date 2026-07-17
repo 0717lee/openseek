@@ -189,7 +189,7 @@ pub fn SuiteReport::SuiteReport(
 ///|
 /// Path to the suite manifest under a suite output directory.
 pub fn suite_manifest_path(out_dir : String) -> String {
-  out_dir + "/" + suite_manifest_file_name
+  "\{out_dir}/\{suite_manifest_file_name}"
 }
 
 ///|
@@ -350,7 +350,7 @@ async fn prepare_suite_output_dir(out_dir : String) -> Unit {
   if @fs.exists(out_dir) {
     @fs.rmdir(out_dir, recursive=true)
   }
-  @fs.mkdir(out_dir + "/combos", recursive=true)
+  @fs.mkdir("\{out_dir}/combos", recursive=true)
 }
 
 ///|
@@ -395,7 +395,7 @@ async fn run_suite_job(
     out_dir=job.out_dir,
     repo_root=suite.repo_root,
     engine=suite.engine,
-    prompt_label=job.problem.prompt_label + ":" + job.model.to_string(),
+    prompt_label="\{job.problem.prompt_label}:\{job.model}",
     task_file=job.problem.task_file,
     validation_probes=job.problem.validation_probes,
     system_prompt_file=suite.system_prompt_file,
@@ -428,7 +428,7 @@ async fn write_suite_manifests(
           }
         }
       }
-      let prompt_label = problem.prompt_label + ":" + model_name
+      let prompt_label = "\{problem.prompt_label}:\{model_name}"
       let manifest = RunManifest(
         model=model_name,
         problem_id=problem.id,
@@ -883,7 +883,7 @@ fn resolve_relative_path(base_dir : String, path : String) -> String {
   if path.has_prefix("/") || base_dir == "." {
     path
   } else {
-    base_dir + "/" + path
+    "\{base_dir}/\{path}"
   }
 }
 

@@ -18,7 +18,7 @@ fn aside_path(bundle_path : String) -> String {
 /// The marker `main` consults after the run loop exits: present means
 /// "relaunch this bundle". Written only after a successful swap.
 fn relaunch_marker_path(work_dir : String) -> String {
-  work_dir + "/relaunch"
+  "\{work_dir}/relaunch"
 }
 
 ///|

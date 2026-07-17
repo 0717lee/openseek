@@ -219,7 +219,7 @@ fn show_file_in_viewer(
     // scheme never parses as a model path and hover stays off.
     let uri = match absolute {
       Some(absolute) => model_uri_of(absolute)
-      None => app_uri("openseek-notice", "/" + name)
+      None => app_uri("openseek-notice", "/\{name}")
     }
     // Whether anything needs redrawing is decided here, against the document
     // the viewer really shows — the update loop only says "show this", it

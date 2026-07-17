@@ -163,7 +163,7 @@ fn append_terminal_item(
         content: if message.is_empty() {
           "aborted"
         } else {
-          "aborted: " + message
+          "aborted: \{message}"
         },
       })
     "interrupted" =>
@@ -172,7 +172,7 @@ fn append_terminal_item(
         content: if message.is_empty() {
           "cancelled"
         } else {
-          "cancelled: " + message
+          "cancelled: \{message}"
         },
       })
     "failed" =>

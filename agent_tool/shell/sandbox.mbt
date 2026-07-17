@@ -287,7 +287,7 @@ async fn cached_source_write_profile_valid(
 fn source_write_regex(real_workspace_root : String) -> String {
   let root = regex_escape(strip_trailing_slash(real_workspace_root))
   let source_file = "([^/]*(\\.mbt\\.md|\\.mbt|\\.mbti)|(moon\\.mod\\.json|moon\\.pkg\\.json|moon\\.mod|moon\\.pkg|moon\\.work))"
-  "^" + root + "(/|$)(.*/)?\{source_file}$"
+  "^\{root}(/|$)(.*/)?\{source_file}$"
 }
 
 ///|
@@ -298,7 +298,7 @@ fn source_write_regex(real_workspace_root : String) -> String {
 /// `is_moon_managed_workspace_path`.
 fn source_write_build_carveout_regex(real_workspace_root : String) -> String {
   let root = regex_escape(strip_trailing_slash(real_workspace_root))
-  "^" + root + "/(.*/)?(_build|\\.mooncakes)(/|$)"
+  "^\{root}/(.*/)?(_build|\\.mooncakes)(/|$)"
 }
 
 ///|

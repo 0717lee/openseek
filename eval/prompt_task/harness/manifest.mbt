@@ -122,7 +122,7 @@ pub fn RunManifest::RunManifest(
 ///|
 /// Path to the run manifest under an eval output directory.
 pub fn manifest_path(out_dir : String) -> String {
-  out_dir + "/" + manifest_file_name
+  "\{out_dir}/\{manifest_file_name}"
 }
 
 ///|

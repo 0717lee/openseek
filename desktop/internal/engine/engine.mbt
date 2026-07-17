@@ -828,7 +828,7 @@ async fn serve_engine_consumer(
             let reason = if diagnostics.is_empty() {
               "engine exited during compaction"
             } else {
-              "engine exited during compaction:\n" + diagnostics
+              "engine exited during compaction:\n\{diagnostics}"
             }
             emit_compaction_failed(sink, engine, reason)
           }

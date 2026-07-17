@@ -1842,7 +1842,7 @@ async test "session list json reports titles newest first with husks last" {
     store.create(newer)
     // A directory with no session files at all still appears — last, with no
     // timestamp — matching the human-readable listing's behavior.
-    @fs.mkdir(root + "/sessions/husk", recursive=true)
+    @fs.mkdir("\{root}/sessions/husk", recursive=true)
     guard session_list_json(store) is Array(entries) else {
       fail("expected a JSON array")
     }

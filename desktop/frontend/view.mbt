@@ -649,7 +649,7 @@ fn capitalize(text : String) -> String {
   // a non-BMP first char left `text[1:]` inside its surrogate pair, corrupting
   // the tail on native and *panicking* on js (StringView sub mid-surrogate).
   match text {
-    [first, .. rest] => "\{first.to_ascii_uppercase()}" + rest.to_owned()
+    [first, .. rest] => "\{first.to_ascii_uppercase()}\{rest}"
     [] => text
   }
 }
@@ -850,7 +850,7 @@ fn inline_code_nodes(content : String) -> Array[@html.Html] {
       }
       None => {
         if in_code {
-          nodes.push(@html.text("`" + rest))
+          nodes.push(@html.text("`\{rest}"))
         } else if !rest.is_empty() {
           nodes.push(@html.text(rest))
         }

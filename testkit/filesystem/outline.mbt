@@ -42,7 +42,7 @@ async fn collect_dirs(
     let child = "\{dir}/\{name}"
     let kind = @fs.kind(child, follow_symlink=false) catch { _ => continue }
     guard kind is Directory else { continue }
-    out.push(outline_indent(depth) + sanitize_name(name) + "/")
+    out.push("\{outline_indent(depth)}\{sanitize_name(name)}/")
     collect_dirs(child, depth + 1, max_depth, max_dirs, out)
   }
 }

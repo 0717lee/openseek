@@ -46,10 +46,10 @@ pub fn decode_event(object : Json) -> AgentEvent? {
     ContextYield(answer~, ..) => Some(ContextYield(answer))
     AgentAborted(reason~) => Some(AgentAborted(reason))
     MaxStepsExhausted => Some(MaxStepsExhausted)
-    AgentSetupFailed(error~) => Some(AgentError("agent setup failed: " + error))
+    AgentSetupFailed(error~) => Some(AgentError("agent setup failed: \{error}"))
     // A serve-mode turn that died with a non-cancellation error. Terminal for
     // the run even though the engine process lives on.
-    TurnFailed(error~) => Some(AgentError("turn failed: " + error))
+    TurnFailed(error~) => Some(AgentError("turn failed: \{error}"))
     // Compaction lifecycle: `started` is informational; finished/failed mean the
     // engine is done touching the durable record, which the host gates archiving
     // on. Not terminal for any run — compaction happens between turns.

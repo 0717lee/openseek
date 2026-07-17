@@ -112,7 +112,7 @@ async fn collect_files(
     let relative = if prefix.is_empty() {
       entry.name
     } else {
-      prefix + "/" + entry.name
+      "\{prefix}/\{entry.name}"
     }
     if entry.is_dir {
       if ignored_watch_path(relative) {

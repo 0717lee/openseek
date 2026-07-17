@@ -158,7 +158,7 @@ fn child_path(parent : @pathx.Relative, name : String) -> @pathx.Relative {
   if parent.is_root() {
     Relative(name)
   } else {
-    Relative(parent.0 + "/" + name)
+    Relative("\{parent.0}/\{name}")
   }
 }
 

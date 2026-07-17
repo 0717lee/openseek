@@ -40,7 +40,7 @@ fn random_salt() -> String {
 fn pad(value : Int, width : Int) -> String {
   let mut text = value.to_string()
   while text.length() < width {
-    text = "0" + text
+    text = "0\{text}"
   }
   text
 }

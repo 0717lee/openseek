@@ -186,7 +186,7 @@ const WslEnvPassthrough : String = "DEEPSEEK/u:OPENSEEK_MODEL/u:OPENSEEK_MAX_STE
 /// extended with the engine's variables.
 fn wslenv_with_passthrough(existing : String?) -> String {
   match existing {
-    Some(value) if !value.trim().is_empty() => value + ":" + WslEnvPassthrough
+    Some(value) if !value.trim().is_empty() => "\{value}:\{WslEnvPassthrough}"
     _ => WslEnvPassthrough
   }
 }

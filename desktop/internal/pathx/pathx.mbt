@@ -71,7 +71,7 @@ pub fn relative_to(path : String, root~ : String) -> String? {
   if path == root {
     return Some("")
   }
-  let prefix = if root.has_suffix("/") { root } else { root + "/" }
+  let prefix = if root.has_suffix("/") { root } else { "\{root}/" }
   match path.strip_prefix(prefix) {
     Some(rest) => Some(rest.to_owned())
     None => None

@@ -234,7 +234,7 @@ fn relocate_workspace_path(
   if relocated != trial.workspace {
     relocated
   } else if old_out_dir != new_out_dir {
-    new_out_dir + "/workspaces/" + padded_index(trial.index)
+    "\{new_out_dir}/workspaces/\{padded_index(trial.index)}"
   } else {
     trial.workspace
   }
@@ -249,7 +249,7 @@ fn relocate_output_path(
   if path == "" || old_out_dir == "" || old_out_dir == new_out_dir {
     return path
   }
-  let prefix = old_out_dir + "/"
+  let prefix = "\{old_out_dir}/"
   match path.strip_prefix(prefix) {
     Some(rest) => "\{new_out_dir}/\{rest}"
     None => path
@@ -418,7 +418,7 @@ fn path_under_dir(path : String, dir : String) -> Bool {
   if path == "" || dir == "" {
     return false
   }
-  path == dir || path.has_prefix(dir + "/")
+  path == dir || path.has_prefix("\{dir}/")
 }
 
 ///|
@@ -444,7 +444,7 @@ async fn validate_workspace(
   ]
   let failures = [
     for result in results if !result.passed => {
-      result.name + ": " + result.reason
+      "\{result.name}: \{result.reason}"
     }
   ]
   {
@@ -516,7 +516,7 @@ fn probe_output_result(
     return ProbeResult(
       name=spec.name,
       passed=false,
-      reason="debug/panic output leaked: " + summarize(combined),
+      reason="debug/panic output leaked: \{summarize(combined)}",
     )
   }
   if spec.expect_exit >= 0 && code != spec.expect_exit {
@@ -561,7 +561,7 @@ fn probe_output_result(
         return ProbeResult(
           name=spec.name,
           passed=false,
-          reason="stdout is not JSON: \{error}; stdout=" + summarize(stdout),
+          reason="stdout is not JSON: \{error}; stdout=\{summarize(stdout)}",
         )
     }
   }
@@ -586,7 +586,7 @@ fn workspace_path(workspace : String, path : String) -> String {
   if path.has_prefix("/") {
     path
   } else {
-    workspace + "/" + path
+    "\{workspace}/\{path}"
   }
 }
 

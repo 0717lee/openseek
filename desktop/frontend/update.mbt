@@ -425,7 +425,7 @@ fn apply_engine_event(
       let content = if reason.trim().is_empty() {
         "aborted"
       } else {
-        "aborted: " + reason
+        "aborted: \{reason}"
       }
       (true, conv.clear_streams().append_item(Assistant(true), content))
     }
@@ -438,7 +438,7 @@ fn apply_engine_event(
       let content = if reason.trim().is_empty() {
         "setup failed"
       } else {
-        "setup failed: " + reason
+        "setup failed: \{reason}"
       }
       (true, conv.clear_streams().append_item(Assistant(true), content))
     }
@@ -484,7 +484,7 @@ fn apply_engine_event(
       let content = if reason.trim().is_empty() {
         "compaction failed"
       } else {
-        "compaction failed: " + reason
+        "compaction failed: \{reason}"
       }
       (
         true,
@@ -1514,7 +1514,7 @@ fn update_msg(
       if conv is Some(conv) {
         let content = if diagnostics is Some(diagnostics) &&
           !diagnostics.trim().is_empty() {
-          message + "\n\n" + diagnostics
+          "\{message}\n\n\{diagnostics}"
         } else {
           message
         }

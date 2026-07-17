@@ -222,7 +222,7 @@ fn app_search_dirs() -> Array[String] {
     "/Applications", "/System/Applications", "/System/Applications/Utilities", "/System/Library/CoreServices",
   ]
   if @home.dir() is Some(home) {
-    dirs.push(home.to_string() + "/Applications")
+    dirs.push("\{home}/Applications")
   }
   dirs
 }
@@ -295,7 +295,7 @@ async fn app_icon_data_url(id : String, app_path : String) -> String {
 #cfg(not(platform="windows"))
 fn icon_cache_dir() -> String? {
   if @home.dir() is Some(home) {
-    Some(home.to_string() + "/Library/Caches/OpenSeek/app-icons")
+    Some("\{home}/Library/Caches/OpenSeek/app-icons")
   } else {
     None
   }

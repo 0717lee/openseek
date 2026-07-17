@@ -1067,16 +1067,16 @@ fn generate_diff(old : String, new : String) -> String {
   }
   [
     ..[
-      for line in old_lines[:pre] => "  " + line
+      for line in old_lines[:pre] => "  \{line}"
     ],
     ..[
-      for line in old_lines[pre:n - suf] => "- " + line
+      for line in old_lines[pre:n - suf] => "- \{line}"
     ],
     ..[
-      for line in new_lines[pre:m - suf] => "+ " + line
+      for line in new_lines[pre:m - suf] => "+ \{line}"
     ],
     ..[
-      for line in old_lines[n - suf:] => "  " + line
+      for line in old_lines[n - suf:] => "  \{line}"
     ],
   ].join("\n")
 }
