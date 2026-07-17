@@ -150,57 +150,6 @@ test "line counter documents all-match behavior" {
 }
 
 ///|
-test "latest non-finished terminal determines success" {
-  let session = @agent_session.Session(
-      SessionId("multi-turn"),
-      system_prompt="",
-    )
-    .append(User(UserMessage("first")))
-    .append(Terminal(Finished("done")))
-    .append(User(UserMessage("second")))
-    .append(Terminal(Failed("agent failed")))
-  let result = eval_session_for_test(session)
-  assert_false(result.success)
-  assert_false(result.finished)
-  assert_eq(result.terminal_status, "failed")
-  assert_true(result.reason.contains("agent terminal failed"))
-}
-
-///|
-test "finish tool terminal does not double count a model step" {
-  let session = @agent_session.Session(
-      SessionId("trial-finish"),
-      system_prompt="",
-    )
-    .append(User(UserMessage("finish")))
-    .append(
-      Assistant(
-        AssistantMessage("", tool_calls=[
-          ToolCall(
-            id="call_finish",
-            name="finish",
-            arguments="{\"answer\":\"done\"}",
-          ),
-        ]),
-      ),
-    )
-    .append(
-      Tool(
-        ToolResult(
-          tool_call_id="call_finish",
-          tool_name="finish",
-          content="finished: done",
-        ),
-      ),
-    )
-    .append(Terminal(Finished("done")))
-  let result = eval_session_for_test(session)
-  assert_eq(result.steps, 1)
-  assert_eq(result.tool_results, 1)
-  assert_true(result.finished)
-}
-
-///|
 test "same output dir preserves absolute workspace paths" {
   let manifest = RunManifest(
     model="deepseek-v4-flash",

@@ -1,0 +1,14 @@
+import {
+  "moonbitlang/async",
+  "moonbitlang/async/fs",
+}
+
+import {
+  "moonbitlang/async" @async_test,
+  "moonbitlang/async/fs" @fs_test,
+  "bobzhang/openseek/testkit/filesystem" @vfs,
+} for "test"
+
+warnings = "+unnecessary_annotation"
+
+supported_targets = "+native"

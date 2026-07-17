@@ -313,7 +313,7 @@ fn relative_artifact_path(out_dir : String, path : String) -> String {
 ///|
 fn eval_result_name(result : EvalResult) -> String {
   if result.index > 0 {
-    "trial-\{padded_index(result.index)}"
+    "trial-\{@runner.padded_index(result.index)}"
   } else if result.session_id != "" {
     result.session_id
   } else {

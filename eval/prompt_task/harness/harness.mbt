@@ -5,11 +5,13 @@
 /// validation or report analysis is performed in this phase.
 pub async fn run_experiments(config : Config) -> RunManifest {
   require_api_access(config.api_key, config.model)
-  prepare_output_dir(config.out_dir)
+  @runner.prepare_output_dir(config.out_dir)
   let task_template = @fs.read_file(config.task_file).text()
-  let trials = run_indexed_with_concurrency(config.runs, config.concurrency, index => {
-    run_trial(config, task_template, index)
-  })
+  let trials = @runner.run_indexed_with_concurrency(
+    config.runs,
+    config.concurrency,
+    index => run_trial(config, task_template, index),
+  )
   let manifest = RunManifest(
     model=config.model.to_string(),
     problem_id=config.problem_id,
@@ -28,41 +30,12 @@ pub async fn run_experiments(config : Config) -> RunManifest {
 }
 
 ///|
-async fn prepare_output_dir(out_dir : String) -> Unit {
-  if @fs.exists(out_dir) {
-    @fs.rmdir(out_dir, recursive=true)
-  }
-  @fs.mkdir("\{out_dir}/workspaces", recursive=true)
-  @fs.mkdir("\{out_dir}/logs", recursive=true)
-}
-
-///|
-async fn[X] run_indexed_with_concurrency(
-  count : Int,
-  concurrency : Int,
-  run : async (Int) -> X,
-) -> Array[X] {
-  let limit = @async.Semaphore(concurrency)
-  @async.all(
-    [
-      for index in 0..<count => {
-        () => {
-          limit.acquire()
-          defer limit.release()
-          run(index)
-        }
-      }
-    ],
-  )
-}
-
-///|
 async fn run_trial(
   config : Config,
   task_template : String,
   index : Int,
 ) -> TrialArtifact {
-  let trial_name = padded_index(index + 1)
+  let trial_name = @runner.padded_index(index + 1)
   let workspace = "\{config.out_dir}/workspaces/\{trial_name}"
   @fs.mkdir(workspace, recursive=true)
   let real_workspace = @fs.realpath(workspace)
@@ -228,9 +201,4 @@ fn should_skip_scan_dir(name : String) -> Bool {
   name == "node_modules" ||
   name == ".mooncakes" ||
   name == "_build"
-}
-
-///|
-fn padded_index(value : Int) -> String {
-  value.to_string().pad_start(2, '0')
 }

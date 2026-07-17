@@ -234,7 +234,7 @@ fn relocate_workspace_path(
   if relocated != trial.workspace {
     relocated
   } else if old_out_dir != new_out_dir {
-    "\{new_out_dir}/workspaces/\{padded_index(trial.index)}"
+    "\{new_out_dir}/workspaces/\{@runner.padded_index(trial.index)}"
   } else {
     trial.workspace
   }

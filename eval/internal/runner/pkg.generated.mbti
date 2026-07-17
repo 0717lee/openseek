@@ -1,0 +1,18 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "bobzhang/openseek/eval/internal/runner"
+
+// Values
+pub fn padded_index(Int) -> String
+
+pub async fn prepare_output_dir(String) -> Unit
+
+pub async fn[X] run_indexed_with_concurrency(Int, Int, async (Int) -> X) -> Array[X]
+
+// Errors
+
+// Types and methods
+
+// Type aliases
+
+// Traits
+

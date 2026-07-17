@@ -61,10 +61,12 @@ priv struct AgentLogSummary {
 /// aggregated report; rendering and exit-status decisions stay with the
 /// caller.
 pub async fn run_suite(config : Config) -> EvalReport {
-  prepare_output_dir(config.out_dir)
-  let results = run_indexed_with_concurrency(config.runs, config.concurrency, index => {
-    run_trial(config, index)
-  })
+  @runner.prepare_output_dir(config.out_dir)
+  let results = @runner.run_indexed_with_concurrency(
+    config.runs,
+    config.concurrency,
+    index => run_trial(config, index),
+  )
   let report : EvalReport = {
     model: config.model.to_string(),
     prompt_label: config.prompt_label,
@@ -80,38 +82,9 @@ pub async fn run_suite(config : Config) -> EvalReport {
 }
 
 ///|
-async fn[X] run_indexed_with_concurrency(
-  count : Int,
-  concurrency : Int,
-  run : async (Int) -> X,
-) -> Array[X] {
-  let limit = @async.Semaphore(concurrency)
-  @async.all(
-    [
-      for index in 0..<count => {
-        () => {
-          limit.acquire()
-          defer limit.release()
-          run(index)
-        }
-      }
-    ],
-  )
-}
-
-///|
-async fn prepare_output_dir(out_dir : String) -> Unit {
-  if @fs.exists(out_dir) {
-    @fs.rmdir(out_dir, recursive=true)
-  }
-  @fs.mkdir("\{out_dir}/workspaces", recursive=true)
-  @fs.mkdir("\{out_dir}/logs", recursive=true)
-}
-
-///|
 async fn run_trial(config : Config, index : Int) -> TrialResult {
   let case = @cases.case_for_trial(index)
-  let workspace = "\{config.out_dir}/workspaces/\{padded_index(index + 1)}-\{case.id}"
+  let workspace = "\{config.out_dir}/workspaces/\{@runner.padded_index(index + 1)}-\{case.id}"
   @fs.mkdir(workspace, recursive=true)
   case.initial.write_to(workspace)
   let real_workspace = @fs.realpath(workspace)
@@ -151,7 +124,7 @@ async fn run_trial(config : Config, index : Int) -> TrialResult {
     cwd=real_workspace,
   )
   let log_text = output.text()
-  let log_path = "\{config.out_dir}/logs/\{padded_index(index + 1)}-\{case.id}.log"
+  let log_path = "\{config.out_dir}/logs/\{@runner.padded_index(index + 1)}-\{case.id}.log"
   @fs.write_file(log_path, log_text, create_mode=CreateOrTruncate)
   evaluate_trial(
     config.prompt_label,
@@ -368,21 +341,6 @@ async fn run_validation(
 }
 
 ///|
-fn padded_index(value : Int) -> String {
-  value.to_string().pad_start(2, '0')
-}
-
-///|
-async test "prepare output dir creates a missing output directory" {
-  @vfs.with_tmpdir(prefix="openseek-file-edit-output", root => {
-    let out_dir = root + "/out"
-    prepare_output_dir(out_dir)
-    assert_true(@fs.exists(out_dir + "/workspaces"))
-    assert_true(@fs.exists(out_dir + "/logs"))
-  })
-}
-
-///|
 async test "dry run exact replacement oracle" {
   @vfs.with_tmpdir(prefix="openseek-file-edit-harness", root => {
     let case = @cases.case_for_trial(0)
@@ -459,23 +417,6 @@ async test "dry run exact replacement oracle with jsonl agent log" {
     assert_true(result.marker_present)
     assert_eq(result.warnings, "shell tool used 1 time(s)")
   })
-}
-
-///|
-async test "indexed runner honors concurrency and preserves order" {
-  let mut active = 0
-  let mut max_active = 0
-  let results = run_indexed_with_concurrency(5, 2, index => {
-    active += 1
-    if active > max_active {
-      max_active = active
-    }
-    @async.sleep(20)
-    active -= 1
-    index
-  })
-  json_inspect(results, content=[0, 1, 2, 3, 4])
-  assert_eq(max_active, 2)
 }
 
 ///|

@@ -171,15 +171,15 @@ fn eval_result_for_suite_test(index : Int, success : Bool) -> EvalResult {
     } else {
       "validation failed"
     },
-    workspace: "out/workspaces/" + padded_index(index),
-    log_path: "out/logs/" + padded_index(index) + ".log",
-    session_id: "trial-" + padded_index(index),
+    workspace: "out/workspaces/" + @runner.padded_index(index),
+    log_path: "out/logs/" + @runner.padded_index(index) + ".log",
+    session_id: "trial-" + @runner.padded_index(index),
     events_path: "out/workspaces/" +
-    padded_index(index) +
+    @runner.padded_index(index) +
     "/.openseek/sessions/trial-" +
-    padded_index(index) +
+    @runner.padded_index(index) +
     "/openseek_session-trial-" +
-    padded_index(index) +
+    @runner.padded_index(index) +
     ".jsonl",
     exit_code: 0,
     steps: index * 2,

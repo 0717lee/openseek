@@ -335,7 +335,7 @@ pub async fn run_suite(config : SuiteConfig) -> SuiteManifest {
   prepare_suite_output_dir(config.out_dir)
   let jobs = suite_jobs(config)
   prepare_combo_output_dirs(jobs)
-  let artifacts = run_indexed_with_concurrency(
+  let artifacts = @runner.run_indexed_with_concurrency(
     jobs.length(),
     config.concurrency,
     index => run_suite_job(config, jobs[index]),
@@ -359,7 +359,7 @@ async fn prepare_combo_output_dirs(jobs : Array[SuiteJob]) -> Unit {
   for job in jobs {
     if !seen.contains(job.out_dir) {
       seen.push(job.out_dir)
-      prepare_output_dir(job.out_dir)
+      @runner.prepare_output_dir(job.out_dir)
     }
   }
 }
