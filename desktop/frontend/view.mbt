@@ -511,15 +511,20 @@ fn push_group_rows(
   archived~ : (String) -> Bool,
   nested? : Bool = false,
 ) -> Unit {
-  // Only conversations that have gotten under way get a row — a fresh
-  // "New chat" is already on screen, and a row for it is just noise until
-  // its first send.
+  // Conversations that have gotten under way get a row, plus the one fresh
+  // "New chat" on screen: it owns a row from the moment its ＋ was clicked,
+  // so the rotation has visible feedback in the list; the row takes the real
+  // title at the first send. Stale husks (a fresh chat the user navigated
+  // away from) stay hidden.
+  let composing = model.composing_new_chat()
   for conv in model.conversations.rev_iter() {
-    if conv.device == dev.channel &&
-      workspace_token(conv.workspace) == workspace &&
-      conv.has_begun() &&
-      !listed(conv.session_id) &&
-      !archived(conv.session_id) {
+    if conv.device != dev.channel ||
+      workspace_token(conv.workspace) != workspace ||
+      listed(conv.session_id) ||
+      archived(conv.session_id) {
+      continue
+    }
+    if conv.has_begun() {
       rows.push(
         session_row(
           dispatch,
@@ -527,6 +532,19 @@ fn push_group_rows(
           dev.channel,
           conv.session_id,
           conversation_title(conv),
+          nested~,
+        ),
+      )
+    } else if composing &&
+      conv.device == model.focused &&
+      conv.session_id == model.active_session {
+      rows.push(
+        session_row(
+          dispatch,
+          model,
+          dev.channel,
+          conv.session_id,
+          "New chat",
           nested~,
         ),
       )
@@ -601,9 +619,7 @@ fn section_heading(
 /// conversations nested beneath it. Hover controls start a new chat in the
 /// project or detach it (registry only; the folder and its sessions stay).
 /// The active workspace — where a plain "New chat" lands — reads as the
-/// darker label; while a fresh "New chat" is on screen there (no sidebar row
-/// of its own yet) the workspace row wears the selected conversation's
-/// accent pill in its place.
+/// darker label.
 fn workspace_row(
   dispatch : @cmd.Emit[Msg],
   model : Model,
@@ -613,9 +629,6 @@ fn workspace_row(
   let mut class = "workspace-row"
   if dev.channel == model.focused && path == dev.active_workspace {
     class = class + " active"
-    if model.composing_new_chat() {
-      class = class + " composing"
-    }
   }
   @html.div(class~, title=path, [
     @html.span(class="sidebar-icon", icon(icon_folder)),

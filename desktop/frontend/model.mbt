@@ -1868,9 +1868,9 @@ fn Model::active(self : Model) -> Conversation {
 
 ///|
 /// Whether the conversation on screen is a fresh "New chat" — nothing sent
-/// yet and no stored record, so it owns no sidebar row of its own. While this
-/// holds, the active workspace's row carries the sidebar's selection
-/// highlight in its place.
+/// yet and no stored record. While this holds, the conversation owns a
+/// "New chat" sidebar row in its workspace's group, taking a real title at
+/// the first send.
 fn Model::composing_new_chat(self : Model) -> Bool {
   let conv = self.active()
   if conv.has_begun() {
@@ -2006,8 +2006,8 @@ fn Conversation::draft_sendable(self : Conversation) -> Bool {
 ///|
 /// Whether the conversation has actually gotten under way — a run, durable
 /// transcript, local notice, or exact submission ownership. A fresh "New
-/// chat" (even with a typed draft) has not, and stays out of the sidebar until
-/// its first send.
+/// chat" (even with a typed draft) has not; the one on screen still owns a
+/// "New chat" sidebar row, but stale husks stay out of the list.
 fn Conversation::has_begun(self : Conversation) -> Bool {
   self.is_running() ||
   self.messages.length() > 0 ||
