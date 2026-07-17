@@ -25,7 +25,7 @@ flowchart LR
   subgraph engine ["openseek engine (cmd/openseek)"]
     SERVE["serve / run / review / sessions / mcp"]
     AGENT["agent — turn loop"]
-    TOOLS["agent_tool — registry:<br/>shell·read·edit·multi_edit·write<br/>remove·plan·goal·finish"]
+    TOOLS["agent_tool — registry:<br/>shell·shell_output·shell_stop<br/>read·edit·multi_edit·write<br/>remove·plan·goal·finish"]
     MCP["mcp — client + tool bridge<br/>(mcp__server__tool)"]
     PROMPT["prompt + agent_skill —<br/>system prompt & skills"]
     SESSION["agent_session (+ store) —<br/>durable event log"]
@@ -165,12 +165,14 @@ sequenceDiagram
   Serve->>Turn: run_turn_in_scope(session, task)
   Turn->>Store: append User(task)
   loop until a plain final answer, a control tool, or the context ceiling
+    Turn-->>UI: AgentStep
     Turn->>DS: chat(messages, tool schemas)
-    DS-->>Turn: assistant delta / tool_calls
-    Turn-->>UI: AssistantDelta · ReasoningMessage · AgentStep
+    DS-->>Turn: streamed deltas, then the assistant message
+    Turn-->>UI: AssistantDelta stream · ReasoningMessage · AssistantMessage
+    Turn->>Store: append Assistant (message + tool calls)
     Turn->>Tool: execute_tool_call(name, args)
     Tool-->>Turn: ToolAction (Respond / Control)
-    Turn->>Store: append Assistant + Tool items
+    Turn->>Store: append Tool result
     Turn-->>UI: ToolResult event
     Note over Turn: queued steers/notices are folded in between steps
   end
@@ -195,12 +197,13 @@ Two pressure valves shape long turns:
 .openseek/                       # per-workspace session root (--session-root)
   sessions/<id>/
     openseek_session-<id>.jsonl  # header line + append-only events
+    session.lock                 # store coordination file
 .openseek/skills/<name>.md       # workspace skills (shadow global ones)
 ~/.openseek/skills/              # global skill library (--global-skills-dir)
 ```
 
 The visualizer (`openseek` sessions in a browser: `cmd/viz_server`) and
-`sessions list` both read these files directly. The engine persists nothing
-else; the desktop app additionally keeps its own metadata under the session
-root (`workspaces.json`, `archived/sessions`) and its settings in webview
-localStorage.
+`sessions list` both read these files directly. The engine's durable state is
+exactly these per-session directories; the desktop app additionally keeps its
+own metadata under the session root (`workspaces.json`, `archived/sessions`)
+and its settings in webview localStorage.
