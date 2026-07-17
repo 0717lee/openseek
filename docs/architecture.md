@@ -45,7 +45,7 @@ flowchart LR
   PROMPT --> AGENT
   AGENT -- "chat + tool schemas" --> API
   AGENT -- dispatch --> TOOLS
-  AGENT -- dispatch --> MCP
+  MCP -- "tool definitions<br/>(extra_tools)" --> TOOLS
   MCP --> MCPSRV
   AGENT -- append --> SESSION
   SESSION --> FILES
@@ -134,8 +134,10 @@ Key invariants:
 
 - **The session is the only memory.** `Session::chat_messages()` projects the
   event log into the provider's chat shape each turn; nothing conversational
-  lives outside the log. Compaction rewrites a `[from, to]` range into one
-  `Summary` item, and the projection starts from the latest summary.
+  lives outside the log. Compaction appends a `Summary` item covering a
+  `[from, to]` range — raw events are never rewritten — and the projection
+  replaces covered events with their summary while keeping uncovered events
+  and every surviving summary.
 - **Events are append-only and sequenced.** `SessionEvent.sequence` is
   contiguous; the store (`agent_session/store`) persists a header line plus
   one JSON event per line, so a torn final line is recoverable
@@ -191,7 +193,8 @@ Two pressure valves shape long turns:
 
 ```text
 .openseek/                       # per-workspace session root (--session-root)
-  openseek_session-<id>.jsonl    # header line + append-only events
+  sessions/<id>/
+    openseek_session-<id>.jsonl  # header line + append-only events
 .openseek/skills/<name>.md       # workspace skills (shadow global ones)
 ~/.openseek/skills/              # global skill library (--global-skills-dir)
 ```

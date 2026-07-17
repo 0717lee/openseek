@@ -111,7 +111,7 @@ calls `@agent.run`, but that decision lives outside the `agent` package.
 - `edit`: replace exact text in a file;
 - `multi_edit`: apply several explicit line-anchored replacements to one file;
 - `write`: overwrite a file;
-- `remove`: delete a file the agent created (or that git tracks);
+- `remove`: delete a file the agent itself created earlier in the session;
 - `plan`: record or replace the step-by-step plan for a multi-step task;
 - `goal`: set or clear the standing goal for the session;
 - `finish`: end the task with a final answer.
