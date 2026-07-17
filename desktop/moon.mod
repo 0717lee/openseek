@@ -6,7 +6,7 @@ import {
   "bobzhang/jsonl@0.2.0",
   "bobzhang/openseek_protocol@0.1.0",
   "moonbit-community/cmark@0.4.4",
-  "moonbit-community/editor@0.1.0",
+  "moonbit-community/editor@0.1.1",
   "moonbit-community/fuzzy_match@0.2.5",
   "moonbit-community/rabbita@0.13.0",
   "moonbitlang/x@0.4.46",

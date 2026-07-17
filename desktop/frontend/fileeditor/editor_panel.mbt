@@ -28,12 +28,16 @@ priv struct ViewerHost {
   // batched behind a mount request whose after-render tick precedes the async
   // reply, so by the time a document arrives the viewer exists.
   mut viewer : @viewer.Viewer?
-  // The viewer's services, built here rather than defaulted inside the viewer
-  // so we keep a handle on the `MarkerService` — the viewer holds them
-  // privately. The host pushes diagnostics through it (`apply_diagnostics`),
-  // and the viewer renders the squiggles for whichever resource its model
-  // currently shows.
-  mut services : @viewer.ViewerServices?
+  // The diagnostics store the host pushes the language server's diagnostics
+  // into (`apply_diagnostics`); the viewer renders its squiggles through the
+  // services bundle it was handed at mount. Built here rather than defaulted
+  // inside the viewer so the host keeps a handle on it.
+  mut markers : @markers.MarkerService?
+  // The comment store behind the viewer's feedback handle (see
+  // `feedback_store.mbt`): the host files, clears, and removes comment
+  // bubbles through it, and listens for user-filed comments to turn them
+  // into composer chips.
+  mut feedback : AgentFeedbackStore?
   // The absolute path of the file the viewer currently shows, so a
   // diagnostics push that arrives for a different file (or after the panel
   // cleared its document) is dropped rather than drawn over the wrong
@@ -59,7 +63,8 @@ priv struct ViewerHost {
 ///|
 let viewer_state : ViewerHost = {
   viewer: None,
-  services: None,
+  markers: None,
+  feedback: None,
   absolute: None,
   relative: None,
   version: 0,
@@ -78,18 +83,15 @@ fn mounted_viewer() -> @viewer.Viewer? {
 fn register_tokenizers() -> Unit {
   @languages.languages.set_tokens_provider(
     "moonbit",
-    @lang_moonbit.MoonbitTokenizer::new(),
+    @lang_moonbit.MoonbitTokenizer(),
   )
   |> ignore
   @languages.languages.set_tokens_provider(
     "javascript",
-    @lang_javascript.JavascriptTokenizer::new(),
+    @lang_javascript.JavascriptTokenizer(),
   )
   |> ignore
-  @languages.languages.set_tokens_provider(
-    "json",
-    @lang_json.JsonTokenizer::new(),
-  )
+  @languages.languages.set_tokens_provider("json", @lang_json.JsonTokenizer())
   |> ignore
 }
 
@@ -110,8 +112,14 @@ fn request_viewer_mount(dispatch : @cmd.Emit[Msg]) -> @cmd.Cmd {
         is Some(host) {
         register_tokenizers()
         register_hover_provider()
-        let services = @viewer.ViewerServices::new()
-        viewer_state.services = Some(services)
+        let markers = @markers.MarkerService()
+        let feedback = AgentFeedbackStore::new()
+        viewer_state.markers = Some(markers)
+        viewer_state.feedback = Some(feedback)
+        let services = @viewer.ViewerServices(
+          markers=MarkerStore(markers.marker_service_handle()),
+          agent_feedback=feedback.agent_feedback_handle(),
+        )
         let viewer = @viewer.Viewer::create(
           host,
           services~,
@@ -121,7 +129,7 @@ fn request_viewer_mount(dispatch : @cmd.Emit[Msg]) -> @cmd.Cmd {
           ),
         )
         viewer_state.viewer = Some(viewer)
-        services.agent_feedback.on_did_add_feedback(event => {
+        feedback.on_did_add_feedback(event => {
           // Only user comments on a file this app put on screen (a URI it
           // minted) become chips; anything else is not ours to carry.
           guard event.feedback.kind is UserReview else { return }
@@ -169,11 +177,11 @@ pub fn remove_editor_feedback(
   feedback_id : String,
 ) -> @cmd.Cmd {
   @cmd.custom_cmd(_scheduler => {
-    guard viewer_state.services is Some(services) else { return }
+    guard viewer_state.feedback is Some(feedback) else { return }
     // The string is the `to_string()` of a URI this package minted, so the
     // re-parse cannot fail; a stray unparsable string has no bubble anyway.
     let uri = @common.Uri::parse(resource.0) catch { _ => return }
-    services.agent_feedback.remove_feedback(uri, feedback_id)
+    feedback.remove_feedback(uri, feedback_id)
   })
 }
 
@@ -237,7 +245,7 @@ fn show_file_in_viewer(
     if !same_document {
       // Park the outgoing document's scroll position for its tab's return.
       if viewer_state.relative is Some(prev) &&
-        viewer.has_model() &&
+        viewer.get_model() is Some(_) &&
         viewer.save_view_state() is Some(view_state) {
         viewer_state.view_states[prev.0] = view_state
       }
@@ -268,8 +276,8 @@ fn show_file_in_viewer(
     viewer_state.relative = relative
     // Commenting (select → inline input → composer chip) is for real files;
     // a notice document has nothing behind it to comment on.
-    if viewer_state.services is Some(services) {
-      services.agent_feedback.set_feedback_enabled(uri, absolute is Some(_))
+    if viewer_state.feedback is Some(feedback) {
+      feedback.set_feedback_enabled(uri, absolute is Some(_))
       if absolute is Some(_) {
         // A fresh document view starts with no bubbles (comments become
         // chips the moment they are filed, so anything lingering here is a
@@ -281,15 +289,9 @@ fn show_file_in_viewer(
         // jump that carries an annotation — a plain unchanged reload must
         // not clear what the user is looking at (or typing into).
         if !same_document || annotation is Some(_) {
-          services.agent_feedback.clear_feedback(uri)
+          feedback.clear_feedback(uri)
           if annotation is Some(text) && range is Some(range) {
-            services.agent_feedback.add_feedback(
-              uri,
-              range,
-              text,
-              state=Submitted,
-            )
-            |> ignore
+            feedback.add_feedback(uri, range, text, state=Submitted) |> ignore
           }
         }
       }
@@ -364,9 +366,9 @@ fn apply_diagnostics(
   @cmd.custom_cmd(_scheduler => {
     if viewer_state.absolute is Some(current) &&
       current == absolute &&
-      viewer_state.services is Some(services) {
+      viewer_state.markers is Some(markers) {
       let uri = model_uri_of(channel, absolute)
-      services.markers.set_diagnostics(
+      markers.set_diagnostics(
         DiagnosticsOwner,
         uri,
         decode_diagnostics(diagnostics),
