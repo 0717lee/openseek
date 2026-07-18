@@ -21,7 +21,7 @@ pub(all) enum Model {
 
 ///|
 /// Returns the wire name for a DeepSeek chat model variant.
-pub impl Show for DsVariant with fn to_string(self : DsVariant) -> String {
+impl Show for DsVariant with fn to_string(self : DsVariant) -> String {
   match self {
     V4Flash => "deepseek-v4-flash"
     V4Pro => "deepseek-v4-pro"
@@ -30,7 +30,7 @@ pub impl Show for DsVariant with fn to_string(self : DsVariant) -> String {
 
 ///|
 /// Returns the wire name for a Kimi chat model variant.
-pub impl Show for KimiVariant with fn to_string(self : KimiVariant) -> String {
+impl Show for KimiVariant with fn to_string(self : KimiVariant) -> String {
   match self {
     K27Code => "kimi-k2.7-code"
     K27CodeHighSpeed => "kimi-k2.7-code-highspeed"
@@ -41,8 +41,8 @@ pub impl Show for KimiVariant with fn to_string(self : KimiVariant) -> String {
 /// Returns the wire name for a chat model.
 pub impl Show for Model with fn to_string(self : Model) -> String {
   match self {
-    Deepseek(variant) => variant.to_string()
-    Kimi(variant) => variant.to_string()
+    Deepseek(variant) => Show::to_string(variant)
+    Kimi(variant) => Show::to_string(variant)
   }
 }
 
@@ -121,7 +121,7 @@ pub(all) enum ResponseFormat {
 
 ///|
 /// Returns the DeepSeek wire name for a response format.
-pub impl Show for ResponseFormat with fn to_string(self : ResponseFormat) -> String {
+impl Show for ResponseFormat with fn to_string(self : ResponseFormat) -> String {
   match self {
     JsonObject => "json_object"
   }
@@ -141,7 +141,7 @@ pub(all) enum Role {
 
 ///|
 /// Returns the DeepSeek wire name for a chat message role.
-pub impl Show for Role with fn to_string(self : Role) -> String {
+impl Show for Role with fn to_string(self : Role) -> String {
   match self {
     System => "system"
     User => "user"
@@ -203,3 +203,16 @@ pub struct ChatResponse {
   /// Token usage metadata reported for the chat completion.
   usage : Usage
 } derive(Debug)
+
+///|
+test "chat message constructor" {
+  let user = ChatMessage(User, content="hello")
+  assert_eq(user.role |> Show::to_string, "user")
+  assert_eq(user.content, "hello")
+  let assistant = ChatMessage(Assistant, content="done")
+  assert_eq(assistant.role |> Show::to_string, "assistant")
+  assert_eq(assistant.content, "done")
+  let tool = ChatMessage(Tool("call_123"), content="tool result")
+  assert_eq(tool.role |> Show::to_string, "tool")
+  assert_eq(tool.content, "tool result")
+}

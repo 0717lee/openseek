@@ -51,17 +51,6 @@ fn[T] json_decode_error(
 }
 
 ///|
-/// Public so wire consumers (the TUI decodes the engine's `usage` log event)
-/// can round-trip the same schema `ToJson` emits. Absent counters decode as 0;
-/// malformed counters or a non-object value raise `JsonDecodeError`.
-pub impl FromJson for Usage with fn from_json(
-  json : Json,
-  path : @json.JsonPath,
-) -> Usage {
-  Usage::from_json(json, path)
-}
-
-///|
 impl FromJson for ToolCall with fn from_json(json : Json, path : @json.JsonPath) -> ToolCall {
   match json {
     {

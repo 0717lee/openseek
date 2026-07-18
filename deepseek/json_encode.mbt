@@ -31,7 +31,7 @@ fn ChatMessage::to_json_for_model(message : ChatMessage, model : Model) -> Json 
   Json::object(
     Map(
       [
-        ("role", Json::string(message.role.to_string())),
+        ("role", Json::string(Show::to_string(message.role))),
         ("content", content),
         ..if message.role is Tool(tool_call_id) {
           [("tool_call_id", Json::string(tool_call_id))]
@@ -99,7 +99,7 @@ pub fn encode_chat_request(
         ),
         ("stream", Json::boolean(stream)),
         ..if response_format is Some(format) {
-          [("response_format", ({ "type": format.to_string() } : Json))]
+          [("response_format", ({ "type": Show::to_string(format) } : Json))]
         },
         ..if stream {
           [("stream_options", ({ "include_usage": true } : Json))]
