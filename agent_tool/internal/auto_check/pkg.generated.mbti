@@ -6,10 +6,6 @@ import {
 }
 
 // Values
-pub const ParseErrorDisplayLimit : Int = 5
-
-pub const RevertErrorDisplayLimit : Int = 10
-
 pub async fn append_summary(String, String) -> String
 
 pub async fn content_parse_errors(String, String) -> ParseGate?
@@ -19,10 +15,6 @@ pub async fn count_errors(String) -> CheckErrors?
 pub fn format_parse_gate_errors(String, String, Array[ParseGateError]) -> Array[String]
 
 pub fn gate_paths(String, String) -> Array[String]
-
-pub fn is_gateable_path(String) -> Bool
-
-pub fn tally_diagnostics(String, truncated~ : Bool) -> CheckErrors
 
 // Errors
 

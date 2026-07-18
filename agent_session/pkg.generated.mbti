@@ -81,7 +81,6 @@ pub struct SessionId {
 pub fn SessionId::SessionId(String) -> Self
 pub fn SessionId::generated(prefix~ : String, now_ms~ : Int64, salt? : String) -> Self
 pub fn SessionId::value(Self) -> String
-pub impl ToJson for SessionId
 pub impl @json.FromJson for SessionId
 
 pub(all) enum SessionItem {
@@ -92,7 +91,6 @@ pub(all) enum SessionItem {
   Summary(SessionSummary)
   Terminal(TurnTerminal)
 } derive(@debug.Debug)
-pub impl ToJson for SessionItem
 pub impl @json.FromJson for SessionItem
 
 pub struct SessionSummary {
@@ -127,7 +125,6 @@ pub(all) enum TurnTerminal {
   Interrupted(String)
   Failed(String)
 } derive(@debug.Debug)
-pub impl ToJson for TurnTerminal
 pub impl @json.FromJson for TurnTerminal
 
 pub struct UserMessage {

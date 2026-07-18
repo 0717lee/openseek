@@ -46,7 +46,7 @@ fn int_field(
 ///
 /// No escaping beyond normal JSON string encoding is applied, and no filesystem
 /// validation is performed here.
-pub impl ToJson for SessionId with fn to_json(id : SessionId) -> Json {
+impl ToJson for SessionId with fn to_json(id : SessionId) -> Json {
   Json::string(id.value())
 }
 
@@ -70,7 +70,7 @@ pub impl FromJson for SessionId with fn from_json(
 ///
 /// `kind` is one of `finished`, `aborted`, `interrupted`, or `failed`. The
 /// variant payload is stored in `message`.
-pub impl ToJson for TurnTerminal with fn to_json(terminal : TurnTerminal) -> Json {
+impl ToJson for TurnTerminal with fn to_json(terminal : TurnTerminal) -> Json {
   let (kind, message) = match terminal {
     Finished(message) => ("finished", message)
     Aborted(message) => ("aborted", message)
@@ -108,14 +108,14 @@ pub impl FromJson for TurnTerminal with fn from_json(
 /// The JSON shape is `{ "kind": <tag>, "payload": <variant-json> }`. Tags are
 /// stable storage strings such as `user`, `assistant`, `tool_result`,
 /// `runtime_notice`, `summary`, and `terminal`.
-pub impl ToJson for SessionItem with fn to_json(item : SessionItem) -> Json {
+impl ToJson for SessionItem with fn to_json(item : SessionItem) -> Json {
   let (kind, payload) = match item {
     User(message) => ("user", message.to_json())
     Assistant(message) => ("assistant", message.to_json())
     Tool(result) => ("tool_result", result.to_json())
     Runtime(notice) => ("runtime_notice", notice.to_json())
     Summary(summary) => ("summary", summary.to_json())
-    Terminal(terminal) => ("terminal", terminal.to_json())
+    Terminal(terminal) => ("terminal", ToJson::to_json(terminal))
   }
   { "kind": kind, "payload": payload }
 }

@@ -18,7 +18,7 @@ const MooncSyncheckCommand : String = "moonc syncheck -error-format json"
 /// How many lex/parse errors a reject report surfaces. Each entry carries a
 /// source excerpt, and parse errors cascade — a handful shows the shape of the
 /// breakage without dumping pages.
-pub const ParseErrorDisplayLimit : Int = 5
+const ParseErrorDisplayLimit : Int = 5
 
 ///|
 /// The `error_code` range for lexer and parser diagnostics (e.g. 3001 "Lexing
@@ -84,7 +84,7 @@ pub(all) struct ParseGateError {
 ///|
 /// Whether the parse gate applies to `path` — i.e. `moonc syncheck` accepts its
 /// input kind: `.mbt`, `.mbt.md`, or an exact `moon.mod` / `moon.pkg`.
-pub fn is_gateable_path(path : String) -> Bool {
+fn is_gateable_path(path : String) -> Bool {
   gate_scratch_name(path) is Some(_)
 }
 

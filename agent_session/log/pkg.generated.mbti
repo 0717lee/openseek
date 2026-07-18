@@ -11,8 +11,6 @@ pub fn classify_header(Json) -> HeaderParse
 
 pub fn parse_events(String) -> ParsedLog
 
-pub fn parse_header(Json) -> SessionFileHeader?
-
 pub fn session_from_parse(ParsedLog, id~ : String, system_prompt~ : String) -> @agent_session.Session
 
 // Errors

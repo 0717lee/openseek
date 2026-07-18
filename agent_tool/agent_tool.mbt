@@ -104,7 +104,7 @@ pub struct ToolOutput {
 /// Constructs typed tool output. `is_error` defaults to `false` for ordinary
 /// successful tool responses; `brief` is omitted unless the tool supplies a
 /// one-line summary.
-pub fn ToolOutput::ToolOutput(
+fn ToolOutput::ToolOutput(
   content : String,
   is_error? : Bool = false,
   brief? : String,
@@ -189,7 +189,7 @@ pub fn ToolAction::finish(answer : String) -> ToolAction {
 
 ///|
 /// Builds an action that aborts the agent loop.
-pub fn ToolAction::abort(reason : String) -> ToolAction {
+fn ToolAction::abort(reason : String) -> ToolAction {
   Control(Abort(reason))
 }
 

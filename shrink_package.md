@@ -13,9 +13,15 @@ packages actually use. Repo-agnostic; drive it with `moon ide analyze`.
    first.
 2. **Classify each zero-real symbol** — the deny-warn gate forces exactly
    three outcomes:
-   - **Test-only usage (`N > 0, N == M`)** → remove `pub`; move the blackbox
-     tests that used it into the package (whitebox `_wbtest.mbt` or inline
-     `test` blocks). Test usage is not API justification.
+   - **Test-only usage (`N > 0, N == M`)** → first check HOW consumers import
+     the package: `import { ... } for "test"` in their `moon.pkg` means the
+     package is a test kit by design — exempt it wholesale (e.g. a
+     `testkit/`). Otherwise decide seam vs incident: a symbol many packages'
+     tests lean on (a store seeder, a fixture constructor, a policy probe) is
+     a deliberate test seam → `exports.mbt`, documented. A getter poked by
+     one adjacent test is incidental → remove `pub` and move that test into
+     the package (whitebox/inline). Test usage is never API justification by
+     itself.
    - **No usage at all (`N == 0`), plausibly intentional** (documented
      tunables, one of a symmetric family, protocol surface) → keep `pub` but
      move the block to `exports.mbt` in that package. The file IS the
@@ -42,16 +48,30 @@ packages actually use. Repo-agnostic; drive it with `moon ide analyze`.
 - **Blackbox tests break at compile time** when their symbol goes priv —
   that's the signal, not a problem. Convert those tests rather than keeping
   the export.
-- **Struct fields**: on a `pub` struct, a zero-real-usage field can go `priv`
-  (external code loses only read access). But `pub(all)` structs constructed
-  outside the package need every labeled field visible — check construction
-  sites before touching fields.
+- **Struct fields**: don't bother marking fields `priv` on a plain `pub`
+  struct — the 2026 toolchain flags the modifier as redundant there
+  (deny-warn fails). Field-level shrink only matters for `pub(all)` structs,
+  where external construction needs every labeled field; check construction
+  sites before narrowing those.
+- **Shrinking surfaces dead code beyond visibility.** Once a constructor goes
+  package-private, `unused_default_value` and friends start firing — e.g. a
+  parameter default that no caller ever exercised (an upstream wrapper owned
+  the real default). Treat these warnings as findings: delete the dead
+  default (make the parameter required), don't suppress the warning.
 - **Analyzer notes are hints, not proofs.** `(all) or (open) can be removed`
   and usage counts can miss reflection-ish uses (derive output consumed as
   JSON keys, wire contracts). Compile + full tests after each package.
 - **Dead packages**: a package whose every export is unused may itself be
   unimported — check `moon.pkg` importers; deleting the package beats
   shrinking it.
+- **`pub impl` (trait impls, incl. derive-adjacent Show/ToJson/FromJson)**
+  with zero external usage usually demote to plain `impl` — in-package and
+  derive-chain uses don't need `pub`. But round-trip impls on durable-record
+  types are protocol surface: keep them, in `exports.mbt`, even at zero
+  measured usage.
+- **Enum variants and `pub(all)` struct fields** are not individually
+  shrinkable — act on the analyzer's narrowability flag for the whole type,
+  and skip per-variant/per-field rows unless the type is plain `pub`.
 
 ## Order of work
 

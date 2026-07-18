@@ -1,7 +1,7 @@
 ///|
 /// Rendered content size (UTF-16 code units) one `read` call returns when the
 /// model does not pick a `max_output_chars` budget itself.
-pub let default_max_output_chars : Int = 12000
+let default_max_output_chars : Int = 12000
 
 ///|
 /// Ceiling a caller-supplied `max_output_chars` is clamped to, so a single

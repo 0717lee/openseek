@@ -61,7 +61,6 @@ pub(all) enum ToolAction {
   Respond(ToolOutput)
   Control(AgentControl)
 } derive(@debug.Debug)
-pub fn ToolAction::abort(String) -> Self
 pub fn ToolAction::finish(String) -> Self
 pub fn ToolAction::respond(String, is_error? : Bool, brief? : String) -> Self
 
@@ -75,7 +74,6 @@ pub struct ToolOutput {
   is_error : Bool
   brief : String?
 } derive(@debug.Debug)
-pub fn ToolOutput::ToolOutput(String, is_error? : Bool, brief? : String) -> Self
 
 pub struct Tools {
   // private fields

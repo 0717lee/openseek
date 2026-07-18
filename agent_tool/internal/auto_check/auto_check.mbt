@@ -57,7 +57,7 @@ const MoonCheckJsonMaxOutputChars : Int = 400000
 ///|
 /// How many individual error diagnostics a revert report surfaces; enough to
 /// show the shape of an over-match without dumping a broken build.
-pub const RevertErrorDisplayLimit : Int = 10
+const RevertErrorDisplayLimit : Int = 10
 
 ///|
 /// A tally of `moon check` diagnostics by severity, with a few formatted error
@@ -97,7 +97,7 @@ pub async fn count_errors(path : String) -> CheckErrors? {
 /// Tally `moon check --output-json` output (JSON Lines: one diagnostic object
 /// per line) by severity. Lines that are not diagnostic objects — a trailing
 /// human summary, a blank line — are ignored, so they never disturb the count.
-pub fn tally_diagnostics(text : String, truncated~ : Bool) -> CheckErrors {
+fn tally_diagnostics(text : String, truncated~ : Bool) -> CheckErrors {
   let mut error_count = 0
   let mut warning_count = 0
   let first_errors : Array[String] = []

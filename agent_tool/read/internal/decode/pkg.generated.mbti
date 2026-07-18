@@ -8,8 +8,6 @@ import {
 // Values
 pub fn decode(Json) -> ReadInput raise
 
-pub let default_max_output_chars : Int
-
 pub let hard_max_output_chars : Int
 
 // Errors
