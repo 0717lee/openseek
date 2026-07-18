@@ -55,7 +55,11 @@ async fn plan_test_server(
           conn.write("\n\n")
         } else {
           conn.write(
-            "data: {\"choices\":[{\"delta\":{\"content\":\"done\"}}]}\n\n",
+            (
+              #|data: {"choices":[{"delta":{"content":"done"}}]}
+              #|
+              #|
+            ),
           )
         }
         conn.write("data: [DONE]\n\n")

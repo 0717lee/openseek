@@ -22,7 +22,12 @@ async test "multi_edit applies multiple line-anchored replacements" {
   @vfs.with_tmpdir(dir => {
     let path = "\{dir}/fixes.mbt"
     @vfs.FileSystem({
-      "fixes.mbt": "let a = old_a\nlet b = keep\nlet c = old_c\n",
+      "fixes.mbt": (
+        #|let a = old_a
+        #|let b = keep
+        #|let c = old_c
+        #|
+      ),
     }).write_to(dir)
     let output = run_multi_edit({
       "edits": [
@@ -48,7 +53,12 @@ async test "multi_edit applies multiple line-anchored replacements" {
     assert_false(output.is_error)
     assert_eq(
       @fs.read_file(path).text(),
-      "let a = new_a\nlet b = keep\nlet c = new_c\n",
+      (
+        #|let a = new_a
+        #|let b = keep
+        #|let c = new_c
+        #|
+      ),
     )
   })
 }
@@ -60,7 +70,11 @@ async test "multi_edit applies a batch spanning several files" {
     let second = "\{dir}/second.mbt"
     @vfs.FileSystem({
       "first.mbt": "let a = old_a\n",
-      "second.mbt": "let b = old_b\nlet c = old_c\n",
+      "second.mbt": (
+        #|let b = old_b
+        #|let c = old_c
+        #|
+      ),
     }).write_to(dir)
     let output = run_multi_edit({
       "edits": [
@@ -98,7 +112,13 @@ async test "multi_edit applies a batch spanning several files" {
 async test "multi_edit collapses aliased spellings of one file into a single group" {
   @vfs.with_tmpdir(dir => {
     let path = "\{dir}/note.txt"
-    @vfs.FileSystem({ "note.txt": "alpha\nbeta\n" }).write_to(dir)
+    @vfs.FileSystem({
+      "note.txt": (
+        #|alpha
+        #|beta
+        #|
+      ),
+    }).write_to(dir)
     // `note.txt` and `./note.txt` resolve to the same file. They must form one
     // group so both edits land; otherwise the second write would clobber the
     // first and silently drop an edit.
@@ -172,7 +192,12 @@ async test "multi_edit inserts when old_string is empty, alongside a replacement
   @vfs.with_tmpdir(dir => {
     let path = "\{dir}/insert.mbt"
     @vfs.FileSystem({
-      "insert.mbt": "let a = old_a\nlet b = keep\nlet c = old_c\n",
+      "insert.mbt": (
+        #|let a = old_a
+        #|let b = keep
+        #|let c = old_c
+        #|
+      ),
     }).write_to(dir)
     let output = run_multi_edit({
       "edits": [
@@ -193,7 +218,13 @@ async test "multi_edit inserts when old_string is empty, alongside a replacement
     assert_false(output.is_error)
     assert_eq(
       @fs.read_file(path).text(),
-      "let a = new_a\nlet x = new\nlet b = keep\nlet c = old_c\n",
+      (
+        #|let a = new_a
+        #|let x = new
+        #|let b = keep
+        #|let c = old_c
+        #|
+      ),
     )
   })
 }
@@ -244,7 +275,12 @@ async test "multi_edit applies edits against original offsets despite length cha
     assert_false(output.is_error)
     assert_eq(
       @fs.read_file(path).text(),
-      "let a = 1000\nlet bb = 2\nlet c = 3\n",
+      (
+        #|let a = 1000
+        #|let bb = 2
+        #|let c = 3
+        #|
+      ),
     )
   })
 }
@@ -253,7 +289,13 @@ async test "multi_edit applies edits against original offsets despite length cha
 async test "multi_edit matches the original file, not text introduced by earlier edits" {
   @vfs.with_tmpdir(dir => {
     let path = "\{dir}/cascade.mbt"
-    @vfs.FileSystem({ "cascade.mbt": "alpha\nbeta\n" }).write_to(dir)
+    @vfs.FileSystem({
+      "cascade.mbt": (
+        #|alpha
+        #|beta
+        #|
+      ),
+    }).write_to(dir)
     // edit[0] rewrites line 1 to "beta"; a sequential rewrite could then let
     // edit[1] match that introduced text. Validating against the original keeps
     // edit[1] anchored to line 2's real "beta".
@@ -284,7 +326,14 @@ async test "multi_edit matches the original file, not text introduced by earlier
 async test "multi_edit uses line anchors to disambiguate duplicate spans" {
   @vfs.with_tmpdir(dir => {
     let path = "\{dir}/dup.mbt"
-    @vfs.FileSystem({ "dup.mbt": "x = dup\ny = dup\nz = dup\n" }).write_to(dir)
+    @vfs.FileSystem({
+      "dup.mbt": (
+        #|x = dup
+        #|y = dup
+        #|z = dup
+        #|
+      ),
+    }).write_to(dir)
     // The same span appears on three lines; each edit's anchor selects exactly
     // one, leaving the unanchored line 2 untouched.
     let output = run_multi_edit({
@@ -314,7 +363,13 @@ async test "multi_edit uses line anchors to disambiguate duplicate spans" {
 async test "multi_edit resolves relative paths under the workspace root" {
   @vfs.with_tmpdir(prefix="openseek-multi-edit-workspace-", dir => {
     let path = "\{dir}/note.txt"
-    @vfs.FileSystem({ "note.txt": "alpha\nbeta\n" }).write_to(dir)
+    @vfs.FileSystem({
+      "note.txt": (
+        #|alpha
+        #|beta
+        #|
+      ),
+    }).write_to(dir)
     let output = run_multi_edit_in_workspace(dir, {
       "edits": [
         {

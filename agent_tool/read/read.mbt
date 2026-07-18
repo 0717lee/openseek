@@ -527,7 +527,13 @@ async test "read rejects non-object arguments" {
 async test "a huge max_lines returns the remaining lines without overflow" {
   @vfs.with_tmpdir(dir => {
     let path = "\{dir}/huge-max.txt"
-    @vfs.FileSystem({ "huge-max.txt": "a\nb\nc" }).write_to(dir)
+    @vfs.FileSystem({
+      "huge-max.txt": (
+        #|a
+        #|b
+        #|c
+      ),
+    }).write_to(dir)
     let result = execute({
       "path": path,
       "start_line": 2,

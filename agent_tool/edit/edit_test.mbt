@@ -86,7 +86,14 @@ async test "a failed edit names the file in its brief" {
 async test "edit replaces a unique exact match" {
   @vfs.with_tmpdir(dir => {
     let path = "\{dir}/unique.txt"
-    @vfs.FileSystem({ "unique.txt": "alpha\nbeta\ngamma\n" }).write_to(dir)
+    @vfs.FileSystem({
+      "unique.txt": (
+        #|alpha
+        #|beta
+        #|gamma
+        #|
+      ),
+    }).write_to(dir)
     let output = run_edit({
       "path": path,
       "old_string": "beta",
@@ -108,7 +115,14 @@ async test "edit replaces a unique exact match" {
 async test "edit range limits a unique replacement" {
   @vfs.with_tmpdir(dir => {
     let path = "\{dir}/range.txt"
-    @vfs.FileSystem({ "range.txt": "target\nkeep\ntarget\n" }).write_to(dir)
+    @vfs.FileSystem({
+      "range.txt": (
+        #|target
+        #|keep
+        #|target
+        #|
+      ),
+    }).write_to(dir)
     let output = run_edit({
       "path": path,
       "old_string": "target",
@@ -130,7 +144,13 @@ async test "edit rejects replace_all even with a range" {
   @vfs.with_tmpdir(dir => {
     let path = "\{dir}/range-replace-all.txt"
     @vfs.FileSystem({
-      "range-replace-all.txt": "token\ninside token\ninside token\noutside token\n",
+      "range-replace-all.txt": (
+        #|token
+        #|inside token
+        #|inside token
+        #|outside token
+        #|
+      ),
     }).write_to(dir)
     let output = run_edit({
       "path": path,
@@ -147,7 +167,13 @@ async test "edit rejects replace_all even with a range" {
     assert_true(output.is_error)
     assert_eq(
       @fs.read_file(path).text(),
-      "token\ninside token\ninside token\noutside token\n",
+      (
+        #|token
+        #|inside token
+        #|inside token
+        #|outside token
+        #|
+      ),
     )
   })
 }
@@ -219,7 +245,13 @@ async test "edit rejects non-object arguments" {
 async test "edit inserts when old_string is empty" {
   @vfs.with_tmpdir(dir => {
     let path = "\{dir}/insert.txt"
-    @vfs.FileSystem({ "insert.txt": "line1\nline2\n" }).write_to(dir)
+    @vfs.FileSystem({
+      "insert.txt": (
+        #|line1
+        #|line2
+        #|
+      ),
+    }).write_to(dir)
     // insert before line 2
     let output = run_edit({
       "path": path,
@@ -238,7 +270,13 @@ async test "edit inserts when old_string is empty" {
 async test "edit can append at end of file via start_line past the last line" {
   @vfs.with_tmpdir(dir => {
     let path = "\{dir}/append.txt"
-    @vfs.FileSystem({ "append.txt": "a\nb\n" }).write_to(dir)
+    @vfs.FileSystem({
+      "append.txt": (
+        #|a
+        #|b
+        #|
+      ),
+    }).write_to(dir)
     let output = run_edit({
       "path": path,
       "old_string": "",
@@ -257,11 +295,22 @@ async test "edit can append at end of file via start_line past the last line" {
 async test "edit reports the inclusive line range of a multi-line insert" {
   @vfs.with_tmpdir(dir => {
     let path = "\{dir}/span.txt"
-    @vfs.FileSystem({ "span.txt": "one\ntwo\nthree\n" }).write_to(dir)
+    @vfs.FileSystem({
+      "span.txt": (
+        #|one
+        #|two
+        #|three
+        #|
+      ),
+    }).write_to(dir)
     let output = run_edit({
       "path": path,
       "old_string": "",
-      "new_string": "x\ny\n",
+      "new_string": (
+        #|x
+        #|y
+        #|
+      ),
       "start_line": 2,
     })
     assert_false(output.is_error)
@@ -274,11 +323,21 @@ async test "edit reports the inclusive line range of a multi-line insert" {
 async test "edit reports the inclusive line range of a multi-line append" {
   @vfs.with_tmpdir(dir => {
     let path = "\{dir}/span-append.txt"
-    @vfs.FileSystem({ "span-append.txt": "a\nb\n" }).write_to(dir)
+    @vfs.FileSystem({
+      "span-append.txt": (
+        #|a
+        #|b
+        #|
+      ),
+    }).write_to(dir)
     let output = run_edit({
       "path": path,
       "old_string": "",
-      "new_string": "c\nd\n",
+      "new_string": (
+        #|c
+        #|d
+        #|
+      ),
       "start_line": 999999,
     })
     assert_false(output.is_error)
@@ -454,7 +513,14 @@ async test "edit replaces first match inside range" {
   @vfs.with_tmpdir(dir => {
     let path = "\{dir}/range-first-match.txt"
     @vfs.FileSystem({
-      "range-first-match.txt": "beta\nbeta\nmiddle\nbeta\nbeta\n",
+      "range-first-match.txt": (
+        #|beta
+        #|beta
+        #|middle
+        #|beta
+        #|beta
+        #|
+      ),
     }).write_to(dir)
     let output = run_edit({
       "path": path,
@@ -476,7 +542,17 @@ async test "edit replaces first match inside range" {
 async test "edit replaces first repeated match only" {
   @vfs.with_tmpdir(dir => {
     let path = "\{dir}/many-matches.txt"
-    @vfs.FileSystem({ "many-matches.txt": "x\nx\nx\nx\nx\nx\n" }).write_to(dir)
+    @vfs.FileSystem({
+      "many-matches.txt": (
+        #|x
+        #|x
+        #|x
+        #|x
+        #|x
+        #|x
+        #|
+      ),
+    }).write_to(dir)
     let output = run_edit({
       "path": path,
       "old_string": "x",

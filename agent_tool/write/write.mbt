@@ -616,7 +616,13 @@ async test "write gates .mbt content through moonc before writing" {
     // Broken .mbt: rejected, nothing on disk (not even parent dirs).
     let broken = execute({
       "path": "\{dir}/lib/broken.mbt",
-      "content": "///|\npub fn f() -> Int {\n  let x =\n}\n",
+      "content": (
+        #|///|
+        #|pub fn f() -> Int {
+        #|  let x =
+        #|}
+        #|
+      ),
     })
     guard broken is Respond(out) else { fail("expected Respond") }
     assert_true(out.is_error)
@@ -627,7 +633,13 @@ async test "write gates .mbt content through moonc before writing" {
     // Clean .mbt: written.
     let clean = execute({
       "path": "\{dir}/lib/clean.mbt",
-      "content": "///|\npub fn g() -> Int {\n  42\n}\n",
+      "content": (
+        #|///|
+        #|pub fn g() -> Int {
+        #|  42
+        #|}
+        #|
+      ),
     })
     guard clean is Respond(ok) else { fail("expected Respond") }
     assert_false(ok.is_error)
@@ -644,7 +656,12 @@ async test "write gates .mbt content through moonc before writing" {
     // .mbt.md prose (no checked block): parses clean, written untouched.
     let doc = execute({
       "path": "\{dir}/lib/doc.mbt.md",
-      "content": "# Doc\n\nprose only\n",
+      "content": (
+        #|# Doc
+        #|
+        #|prose only
+        #|
+      ),
     })
     guard doc is Respond(md) else { fail("expected Respond") }
     assert_false(md.is_error)
@@ -652,7 +669,17 @@ async test "write gates .mbt content through moonc before writing" {
     // .mbt.md with a broken ```mbt check block: gated like source, rejected.
     let broken_doc = execute({
       "path": "\{dir}/lib/broken.mbt.md",
-      "content": "# Doc\n\n```mbt check\n///|\npub fn h() -> Int {\n  let x =\n}\n```\n",
+      "content": (
+        #|# Doc
+        #|
+        #|```mbt check
+        #|///|
+        #|pub fn h() -> Int {
+        #|  let x =
+        #|}
+        #|```
+        #|
+      ),
     })
     guard broken_doc is Respond(bad) else { fail("expected Respond") }
     assert_true(bad.is_error)

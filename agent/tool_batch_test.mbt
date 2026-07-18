@@ -18,13 +18,21 @@ async fn tool_batch_test_server(group : @async.TaskGroup[Unit]) -> String? {
           assert_true(request_body.contains("\"name\":\"first_test\""))
           assert_true(request_body.contains("\"name\":\"second_test\""))
           conn.write(
-            "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_first\",\"type\":\"function\",\"function\":{\"name\":\"first_test\",\"arguments\":\"{}\"}},{\"index\":1,\"id\":\"call_second\",\"type\":\"function\",\"function\":{\"name\":\"second_test\",\"arguments\":\"{}\"}}]}}]}\n\n",
+            (
+              #|data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_first","type":"function","function":{"name":"first_test","arguments":"{}"}},{"index":1,"id":"call_second","type":"function","function":{"name":"second_test","arguments":"{}"}}]}}]}
+              #|
+              #|
+            ),
           )
         } else {
           assert_true(request_body.contains("first-result"))
           assert_true(request_body.contains("second-result"))
           conn.write(
-            "data: {\"choices\":[{\"delta\":{\"content\":\"done\"}}]}\n\n",
+            (
+              #|data: {"choices":[{"delta":{"content":"done"}}]}
+              #|
+              #|
+            ),
           )
         }
         conn.write("data: [DONE]\n\n")
@@ -124,7 +132,11 @@ async fn max_step_exhaustion_test_server(
           "Content-Type": "text/event-stream",
         })
         conn.write(
-          "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_continue\",\"type\":\"function\",\"function\":{\"name\":\"continue_test\",\"arguments\":\"{}\"}}]}}]}\n\n",
+          (
+            #|data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_continue","type":"function","function":{"name":"continue_test","arguments":"{}"}}]}}]}
+            #|
+            #|
+          ),
         )
         conn.write("data: [DONE]\n\n")
       },
@@ -200,7 +212,11 @@ async fn append_failure_test_server(group : @async.TaskGroup[Unit]) -> String? {
           "Content-Type": "text/event-stream",
         })
         conn.write(
-          "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_ok\",\"type\":\"function\",\"function\":{\"name\":\"ok_test\",\"arguments\":\"{}\"}}]}}]}\n\n",
+          (
+            #|data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_ok","type":"function","function":{"name":"ok_test","arguments":"{}"}}]}}]}
+            #|
+            #|
+          ),
         )
         conn.write("data: [DONE]\n\n")
       },

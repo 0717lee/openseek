@@ -996,7 +996,11 @@ async test "shell sandbox preblocks masked heredoc source redirects" {
   @vfs.with_tmpdir(prefix="openseek-shell-sandbox-heredoc-source-", dir => {
     write_answer_main(dir)
     let result = run_shell_in_workspace(dir, {
-      "cmd": "cat 2>/dev/null > main.mbt <<'EOF' || true\npub fn answer() -> Int { 43 }\nEOF",
+      "cmd": (
+        #|cat 2>/dev/null > main.mbt <<'EOF' || true
+        #|pub fn answer() -> Int { 43 }
+        #|EOF
+      ),
       "cwd": dir,
     })
     expect_source_write_blocked(result)

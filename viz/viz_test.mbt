@@ -714,7 +714,11 @@ test "model view substitutes a summary for the events it covers" {
 ///|
 test "notices surface partial tails and bad lines" {
   let parsed = @viz.parse_events(
-    "garbage line\n{\"sequence\":1,\"item\":{\"kind\":\"user\",\"payload\":{\"content\":\"hi\"}}}\n{bad tail",
+    (
+      #|garbage line
+      #|{"sequence":1,"item":{"kind":"user","payload":{"content":"hi"}}}
+      #|{bad tail
+    ),
   )
   let html = render(@viz.render_notices(parsed))
   assert_true(html.contains("could not be decoded"))
@@ -1162,7 +1166,11 @@ test "delimiter-looking goal lines are not mistaken for boilerplate" {
   // delimiter-prefixed line loses to the LAST (real) delimiter.
   assert_true(
     html.contains(
-      "Review the migration\nYou attempted to finish the old path; now recover it\nAssess it briefly at this turn boundary: for each module",
+      (
+        #|Review the migration
+        #|You attempted to finish the old path; now recover it
+        #|Assess it briefly at this turn boundary: for each module
+      ),
     ),
   )
 }

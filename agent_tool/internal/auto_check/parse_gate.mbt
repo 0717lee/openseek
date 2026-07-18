@@ -424,7 +424,11 @@ test "format_parse_gate_errors prefers the compiler's own context excerpt" {
     {
       loc: "4:1-4:2",
       message: "Parse error, unexpected token `}`.",
-      context: "3 |  let x =\n4 |}\n",
+      context: (
+        #|3 |  let x =
+        #|4 |}
+        #|
+      ),
     },
   ])
   assert_eq(

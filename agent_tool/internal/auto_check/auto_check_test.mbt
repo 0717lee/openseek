@@ -107,7 +107,11 @@ async test "append_summary preserves module dependency graph failure text" {
   @vfs.with_tmpdir(prefix="openseek-auto-check-deps-", dir => {
     let path = "\{dir}/moon.mod"
     @vfs.FileSystem({
-      "moon.mod": "name = \"tmp/auto_check_deps\"\nimport { \"moonbitlang/async\" }\n",
+      "moon.mod": (
+        #|name = "tmp/auto_check_deps"
+        #|import { "moonbitlang/async" }
+        #|
+      ),
     }).write_to(dir)
     let result = @auto_check.append_summary(path, "ok: wrote manifest")
     assert_true(result.has_prefix("ok: wrote manifest\nmoon check:\nexit=255"))
