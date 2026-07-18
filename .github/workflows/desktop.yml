@@ -412,8 +412,19 @@ jobs:
       - name: Install NSIS
         shell: pwsh
         run: |
-          choco install nsis -y --no-progress
-          "C:\Program Files (x86)\NSIS" | Out-File -FilePath $env:GITHUB_PATH -Append
+          # Retry up to 3 times: the Chocolatey community feed occasionally
+          # returns 503, causing a silent zero-exit install that leaves
+          # makensis.exe absent. Verify the binary exists before moving on.
+          for ($attempt = 1; $attempt -le 3; $attempt++) {
+            choco install nsis -y --no-progress
+            if (Test-Path "C:\Program Files (x86)\NSIS\makensis.exe") {
+              "C:\Program Files (x86)\NSIS" | Out-File -FilePath $env:GITHUB_PATH -Append
+              exit 0
+            }
+            Write-Warning "NSIS not installed after attempt $attempt."
+            if ($attempt -lt 3) { Start-Sleep -Seconds ($attempt * 15) }
+          }
+          exit 1
 
       - name: Show MoonBit version
         shell: pwsh
