@@ -447,13 +447,14 @@ async test "execute_tool_call dispatches to async executor" {
 }
 
 ///|
-async fn async_boom(_args : Json) -> ToolAction {
-  @async.pause()
-  fail("disk on fire")
-}
-
-///|
 async test "execute_tool_call turns a tool failure into a recoverable error result" {
+  // Local to the test on purpose: an always-failing executor must not be
+  // callable from anywhere else in the package.
+  async fn async_boom(_args : Json) -> ToolAction {
+    @async.pause()
+    fail("disk on fire")
+  }
+
   let tools = Tools([
     {
       name: "boom",
