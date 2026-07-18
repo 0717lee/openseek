@@ -14,16 +14,6 @@ pub struct FileEntry {
 pub(all) struct FileSystem(Json)
 
 ///|
-/// Wrap an already-encoded JSON filesystem, validating the convention up
-/// front (object shape, relative string paths, string contents) so later
-/// reads cannot fail on malformed fixture data.
-pub fn FileSystem::from_json(json : Json) -> FileSystem raise {
-  let filesystem = FileSystem(json)
-  filesystem.validate()
-  filesystem
-}
-
-///|
 /// Build a filesystem from `(path, content)` pairs — the convenient form for
 /// literal fixtures in test code. Rejects invalid paths and duplicates.
 pub fn FileSystem::from_pairs(
@@ -42,14 +32,6 @@ pub fn FileSystem::from_pairs(
 }
 
 ///|
-/// The underlying JSON object, e.g. for embedding the fixture in a larger
-/// eval-case document.
-pub fn FileSystem::to_json(self : FileSystem) -> Json {
-  let FileSystem(json) = self
-  json
-}
-
-///|
 /// The underlying JSON object's fields, raising when the top-level JSON is not
 /// an object as the convention requires.
 fn FileSystem::object_fields(self : FileSystem) -> Map[String, Json] raise {
@@ -65,24 +47,6 @@ fn FileSystem::object_fields(self : FileSystem) -> Map[String, Json] raise {
 /// violation. Equivalent to `entries()` with the result discarded.
 pub fn FileSystem::validate(self : FileSystem) -> Unit raise {
   let _ = self.entries()
-}
-
-///|
-/// Every file as a `FileEntry`, sorted by path for deterministic iteration.
-/// Raises when the JSON violates the filesystem convention.
-pub fn FileSystem::entries(self : FileSystem) -> Array[FileEntry] raise {
-  let fields = self.object_fields()
-  let paths = [..fields.keys()]
-  paths.sort()
-  [
-    for path in paths => {
-      validate_relative_path(path)
-      match fields[path] {
-        String(content) => { path, content }
-        _ => fail("file content for `\{path}` must be a string")
-      }
-    }
-  ]
 }
 
 ///|

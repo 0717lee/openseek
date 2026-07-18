@@ -66,9 +66,13 @@ packages actually use. Repo-agnostic; drive it with `moon ide analyze`.
   shrinking it.
 - **`pub impl` (trait impls, incl. derive-adjacent Show/ToJson/FromJson)**
   with zero external usage usually demote to plain `impl` — in-package and
-  derive-chain uses don't need `pub`. But round-trip impls on durable-record
-  types are protocol surface: keep them, in `exports.mbt`, even at zero
-  measured usage.
+  derive-chain uses don't need `pub`. Two exceptions: (a) round-trip impls on
+  durable-record types are protocol surface — keep them (exports.mbt);
+  (b) a trait impl whose trait OBJECT crosses the package boundary cannot
+  demote — the consumer package invoking through `&Trait` needs the
+  conformance public ("implementation of method X is private" is the
+  compiler telling you this). Derive-generated impls have no block to edit;
+  their visibility follows the type — skip them.
 - **Enum variants and `pub(all)` struct fields** are not individually
   shrinkable — act on the analyzer's narrowability flag for the whole type,
   and skip per-variant/per-field rows unless the type is plain `pub`.
