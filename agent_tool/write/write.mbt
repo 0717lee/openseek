@@ -85,138 +85,129 @@ async fn write_file(
   path~ : String,
   file_state~ : @agent_tool.FileStateMap,
 ) -> @agent_tool.ToolAction {
-  try {
-    if @manifest_error.write_error(path, input.content) is Some(message) {
-      return @agent_tool.ToolAction::respond(
-        "error writing \{path}: \{message}",
-        is_error=true,
-        brief="write \{@agent_tool.brief_basename(path)}",
-      )
-    }
-    // Resolve symlinks once, up front: the realpath decides both whether this
-    // is an existing-source overwrite to reject and — for the syntax gate below
-    // — what KIND the written file really is. A brand-new path has no target, so
-    // realpath fails and it falls back to its own name.
-    let target = @fs.realpath(path) catch {
-      error if @async.is_being_cancelled() => raise error
-      _ => path
-    }
-    // Guard the last unguarded source-write path: `write` is not sandboxed (it
-    // is an in-process file write, unlike `shell`), so overwriting an existing
-    // `.mbt`/`.mbt.md` file here would bypass the line-anchored edit discipline
-    // and risk silently dropping content. Existing source must change through
-    // `edit`/`multi_edit` (which also insert). Creating a NEW source file, or
-    // writing non-source files, is still allowed. Resolving the symlink first
-    // stops a link named `x.txt` pointing at `lib.mbt` from slipping past the
-    // suffix check and truncating the source through CreateOrTruncate below.
-    if @fs.exists(path) && (is_mbt_source(path) || is_mbt_source(target)) {
-      return @agent_tool.ToolAction::respond(
-        "error writing \{path}: existing source file — use edit or multi_edit to change it (an empty old_string inserts new code); write is for creating new files",
-        is_error=true,
-        brief="write \{@agent_tool.brief_basename(path)}",
-      )
-    }
-    // Pre-write syntax gate for syncheck inputs (`.mbt`, `.mbt.md`, `moon.mod`,
-    // `moon.pkg`): parse the candidate content in a scratch file first (moonc
-    // syncheck needs no project context), so malformed content is rejected
-    // before anything — parent directories included — is created on disk. Gate
-    // under every kind this file could be classified as (from both the path and
-    // its symlink target), so malformed content written THROUGH a link (e.g.
-    // `alias.txt -> moon.pkg`) is caught too. A non-parsing file is never a
-    // valid intermediate state, and since `write` refuses to overwrite existing
-    // source, the natural retry is another `write` with corrected content.
-    // Fail-open: when the gate cannot run (moonc missing), write as usual.
-    if input.revert_on_parse_errors {
-      for gate_path in @auto_check.gate_paths(path, target) {
-        let gate = @auto_check.content_parse_errors(gate_path, input.content) catch {
-          error if @async.is_being_cancelled() => raise error
-          _ => None
-        }
-        if gate is Some(gate) && gate.errors.length() > 0 {
-          let bound = if gate.truncated { "≥" } else { "" }
-          return @agent_tool.ToolAction::respond(
-            write_reject_report(path, input.content, gate),
-            is_error=true,
-            brief="write rejected (\{bound}\{gate.errors.length()} parse error(s))",
-          )
-        }
-      }
-    }
-    create_parent_dirs(path)
-    // Probe before writing so the result can tell the model whether it created a
-    // new file or clobbered an existing one — a wholesale `write` over content it
-    // never read is a common way to lose work. A non-ENOENT `exists` error (e.g.
-    // ENOTDIR) falls through to the write below and the `catch` reports it.
-    let existed = @fs.exists(path)
-    // Truncation is allowed ONLY for a genuine pre-existing non-source file;
-    // everything else commits to CreateNew, which fails instead of writing
-    // through when (a) the "new" path gained a file since the probe — for a
-    // source path that racer's file would otherwise be truncated despite the
-    // guard above — or (b) a DANGLING symlink lurks at the path (`exists`
-    // follows links, so it reads false, but O_CREAT would create the link's
-    // target, e.g. alias.txt -> lib/new.mbt landing ungated source).
-    @fs.write_file(
-      path,
-      input.content,
-      create_mode=if existed && !is_mbt_source(path) {
-        CreateOrTruncate
-      } else {
-        CreateNew
-      },
+  if @manifest_error.write_error(path, input.content) is Some(message) {
+    return @agent_tool.ToolAction::respond(
+      "error writing \{path}: \{message}",
+      is_error=true,
+      brief="write \{@agent_tool.brief_basename(path)}",
     )
-    // Record this write's provenance and content digest for the session so
-    // `remove` can later tell a file the agent created from one it merely
-    // overwrote, and confirm its content has not been rebound since. A write is
-    // a wholesale replacement, so the file now holds the agent's content
-    // regardless of what was there — no continuity check is needed.
-    let digest = @agent_tool.content_digest(input.content)
-    if existed {
-      file_state.record_modified(path, digest)
-    } else {
-      file_state.record_created(path, digest)
-    }
-    let chars = input.content.length()
-    // Line count matches read's `split("\n")` total, so the numbers agree across
-    // tools: empty content is 0 lines, and a trailing newline counts a final
-    // empty segment (e.g. "a\nb\n" is 3 lines). Computed in constant space —
-    // count newline delimiters in a single pass rather than materializing a
-    // per-line array just to read its length, since a large generated write can
-    // hold very many lines.
-    let lines = if input.content == "" {
-      0
-    } else {
-      let mut newlines = 0
-      for ch in input.content {
-        if ch == '\n' {
-          newlines += 1
-        }
-      }
-      newlines + 1
-    }
-    let line_word = if lines == 1 { "line" } else { "lines" }
-    let summary = if existed {
-      "ok: wrote \{lines} \{line_word} (\{chars} chars) to \{path} (overwrote existing file)"
-    } else {
-      "ok: wrote \{lines} \{line_word} (\{chars} chars) to \{path}"
-    }
-    let ok_brief = @agent_tool.brief_line(
-      if existed {
-        "overwrote \{input.path} (\{lines} \{line_word})"
-      } else {
-        "wrote \{lines} \{line_word} to \{input.path}"
-      },
-    )
-    let content = @auto_check.append_summary(path, summary)
-    @agent_tool.ToolAction::respond(content, brief=ok_brief)
-  } catch {
-    error if @async.is_being_cancelled() => raise error
-    error =>
-      @agent_tool.ToolAction::respond(
-        "error writing \{path}: \{error}",
-        is_error=true,
-        brief="write \{@agent_tool.brief_basename(path)}",
-      )
   }
+  // Resolve symlinks once, up front: the realpath decides both whether this
+  // is an existing-source overwrite to reject and — for the syntax gate below
+  // — what KIND the written file really is. A brand-new path has no target, so
+  // realpath fails and it falls back to its own name.
+  let target = @fs.realpath(path) catch {
+    error if @async.is_being_cancelled() => raise error
+    _ => path
+  }
+  // Guard the last unguarded source-write path: `write` is not sandboxed (it
+  // is an in-process file write, unlike `shell`), so overwriting an existing
+  // `.mbt`/`.mbt.md` file here would bypass the line-anchored edit discipline
+  // and risk silently dropping content. Existing source must change through
+  // `edit`/`multi_edit` (which also insert). Creating a NEW source file, or
+  // writing non-source files, is still allowed. Resolving the symlink first
+  // stops a link named `x.txt` pointing at `lib.mbt` from slipping past the
+  // suffix check and truncating the source through CreateOrTruncate below.
+  if @fs.exists(path) && (is_mbt_source(path) || is_mbt_source(target)) {
+    return @agent_tool.ToolAction::respond(
+      "error writing \{path}: existing source file — use edit or multi_edit to change it (an empty old_string inserts new code); write is for creating new files",
+      is_error=true,
+      brief="write \{@agent_tool.brief_basename(path)}",
+    )
+  }
+  // Pre-write syntax gate for syncheck inputs (`.mbt`, `.mbt.md`, `moon.mod`,
+  // `moon.pkg`): parse the candidate content in a scratch file first (moonc
+  // syncheck needs no project context), so malformed content is rejected
+  // before anything — parent directories included — is created on disk. Gate
+  // under every kind this file could be classified as (from both the path and
+  // its symlink target), so malformed content written THROUGH a link (e.g.
+  // `alias.txt -> moon.pkg`) is caught too. A non-parsing file is never a
+  // valid intermediate state, and since `write` refuses to overwrite existing
+  // source, the natural retry is another `write` with corrected content.
+  // Fail-open: when the gate cannot run (moonc missing), write as usual.
+  if input.revert_on_parse_errors {
+    for gate_path in @auto_check.gate_paths(path, target) {
+      let gate = @auto_check.content_parse_errors(gate_path, input.content) catch {
+        error if @async.is_being_cancelled() => raise error
+        _ => None
+      }
+      if gate is Some(gate) && gate.errors.length() > 0 {
+        let bound = if gate.truncated { "≥" } else { "" }
+        return @agent_tool.ToolAction::respond(
+          write_reject_report(path, input.content, gate),
+          is_error=true,
+          brief="write rejected (\{bound}\{gate.errors.length()} parse error(s))",
+        )
+      }
+    }
+  }
+  create_parent_dirs(path)
+  // Probe before writing so the result can tell the model whether it created a
+  // new file or clobbered an existing one — a wholesale `write` over content it
+  // never read is a common way to lose work. A non-ENOENT `exists` error (e.g.
+  // ENOTDIR) falls through to the write below, and the dispatch boundary in
+  // `@agent_tool.execute_tool_call` reports the fault.
+  let existed = @fs.exists(path)
+  // Truncation is allowed ONLY for a genuine pre-existing non-source file;
+  // everything else commits to CreateNew, which fails instead of writing
+  // through when (a) the "new" path gained a file since the probe — for a
+  // source path that racer's file would otherwise be truncated despite the
+  // guard above — or (b) a DANGLING symlink lurks at the path (`exists`
+  // follows links, so it reads false, but O_CREAT would create the link's
+  // target, e.g. alias.txt -> lib/new.mbt landing ungated source).
+  @fs.write_file(
+    path,
+    input.content,
+    create_mode=if existed && !is_mbt_source(path) {
+      CreateOrTruncate
+    } else {
+      CreateNew
+    },
+  )
+  // Record this write's provenance and content digest for the session so
+  // `remove` can later tell a file the agent created from one it merely
+  // overwrote, and confirm its content has not been rebound since. A write is
+  // a wholesale replacement, so the file now holds the agent's content
+  // regardless of what was there — no continuity check is needed.
+  let digest = @agent_tool.content_digest(input.content)
+  if existed {
+    file_state.record_modified(path, digest)
+  } else {
+    file_state.record_created(path, digest)
+  }
+  let chars = input.content.length()
+  // Line count matches read's `split("\n")` total, so the numbers agree across
+  // tools: empty content is 0 lines, and a trailing newline counts a final
+  // empty segment (e.g. "a\nb\n" is 3 lines). Computed in constant space —
+  // count newline delimiters in a single pass rather than materializing a
+  // per-line array just to read its length, since a large generated write can
+  // hold very many lines.
+  let lines = if input.content == "" {
+    0
+  } else {
+    let mut newlines = 0
+    for ch in input.content {
+      if ch == '\n' {
+        newlines += 1
+      }
+    }
+    newlines + 1
+  }
+  let line_word = if lines == 1 { "line" } else { "lines" }
+  let summary = if existed {
+    "ok: wrote \{lines} \{line_word} (\{chars} chars) to \{path} (overwrote existing file)"
+  } else {
+    "ok: wrote \{lines} \{line_word} (\{chars} chars) to \{path}"
+  }
+  let ok_brief = @agent_tool.brief_line(
+    if existed {
+      "overwrote \{input.path} (\{lines} \{line_word})"
+    } else {
+      "wrote \{lines} \{line_word} to \{input.path}"
+    },
+  )
+  let content = @auto_check.append_summary(path, summary)
+  @agent_tool.ToolAction::respond(content, brief=ok_brief)
 }
 
 ///|
@@ -515,10 +506,13 @@ async test "write fails on a dangling symlink instead of creating its target" {
     @fs.mkdir("\{dir}/lib", recursive=true)
     let link = "\{dir}/alias.txt"
     @fs.symlink(target="lib/new.mbt", link)
-    let result = execute({ "path": link, "content": "not moonbit (" })
+    let result = execute_via_boundary({
+      "path": link,
+      "content": "not moonbit (",
+    })
     guard result is Respond(output) else { fail("expected Respond") }
     assert_true(output.is_error)
-    assert_true(output.content.contains("error writing"))
+    assert_true(output.content.contains("write failed"))
     assert_false(@fs.exists("\{dir}/lib/new.mbt"))
   })
 }
@@ -669,14 +663,29 @@ async test "write gates .mbt content through moonc before writing" {
 }
 
 ///|
-async test "write surfaces filesystem errors" {
+/// Execute through the registry so filesystem faults — which raise out of the
+/// executor — are converted by the dispatch boundary in
+/// `@agent_tool.execute_tool_call`, the same path production takes.
+async fn execute_via_boundary(arguments : Json) -> @agent_tool.ToolAction {
+  let tools = @agent_tool.Tools([definition()])
+  let call = @agent_tool.AgentToolCall(
+    ToolCall(id="call_1", name="write", arguments=Json::stringify(arguments)),
+  )
+  @agent_tool.execute_tool_call(call, tools)
+}
+
+///|
+async test "write surfaces filesystem errors through the dispatch boundary" {
   @vfs.with_tmpdir(dir => {
     // A parent component that is a regular file cannot be created or written
     // through, so the write fails (missing parent *directories* are created).
     @fs.write_file("\{dir}/afile", "x", create_mode=CreateOrTruncate)
-    let result = execute({ "path": "\{dir}/afile/child.txt", "content": "x" })
+    let result = execute_via_boundary({
+      "path": "\{dir}/afile/child.txt",
+      "content": "x",
+    })
     guard result is Respond(output) else { fail("expected Respond") }
-    assert_true(output.content.contains("error writing"))
+    assert_true(output.content.contains("write failed"))
     assert_true(output.is_error)
   })
 }

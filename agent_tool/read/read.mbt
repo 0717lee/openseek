@@ -89,14 +89,7 @@ async fn read_file(
       brief~,
     )
   }
-  let content = @fs.read_file(path).text() catch {
-    error =>
-      return @agent_tool.ToolAction::respond(
-        "error reading \{path}: \{error}",
-        is_error=true,
-        brief~,
-      )
-  }
+  let content = @fs.read_file(path).text()
   // A zero-byte file would otherwise render as a phantom blank line `1 |`;
   // report it explicitly so the model doesn't read that as real content. A file
   // containing only a newline is not empty (it has blank lines) and renders
@@ -477,12 +470,24 @@ async test "read rejects paths array and explains batching" {
 }
 
 ///|
-async test "read surfaces filesystem errors" {
+/// Filesystem faults raise out of the executor; the dispatch boundary in
+/// `@agent_tool.execute_tool_call` converts them into recoverable error
+/// results, so the contract is asserted through the registry.
+async test "read surfaces filesystem errors through the dispatch boundary" {
   @vfs.with_tmpdir(dir => {
-    let result = execute({ "path": "\{dir}/does-not-exist" })
+    let tools = @agent_tool.Tools([definition()])
+    let call = @agent_tool.AgentToolCall(
+      ToolCall(
+        id="call_1",
+        name="read",
+        arguments=Json::stringify({ "path": "\{dir}/does-not-exist" }),
+      ),
+    )
+    let result = @agent_tool.execute_tool_call(call, tools)
     guard result is Respond(output) else { fail("expected Respond") }
-    assert_true(output.content.contains("error reading"))
     assert_true(output.is_error)
+    assert_true(output.content.contains("read failed"))
+    assert_true(output.content.contains("does-not-exist"))
   })
 }
 

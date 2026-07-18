@@ -260,9 +260,18 @@ pub async fn execute_tool_call(
           if @async.is_being_cancelled() || @async.is_cancellation_error(error) {
             raise error
           } else {
+            // Keep the transcript label the local catches used to provide:
+            // most file tools carry a `path` argument, so the brief can still
+            // name the file the failed call was about.
+            let brief = match call.arguments {
+              { "path": String(path), .. } =>
+                Some("\{call.name} \{brief_basename(path)}")
+              _ => None
+            }
             ToolAction::respond(
               "error: \{call.name} failed: \{error}",
               is_error=true,
+              brief?,
             )
           }
       }

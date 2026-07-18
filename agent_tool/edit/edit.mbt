@@ -107,10 +107,7 @@ async fn edit_file(
   if input.old_string == input.new_string {
     return err("old_string and new_string are identical")
   }
-  let content = @fs.read_file(path).text() catch {
-    error if @async.is_being_cancelled() => raise error
-    error => return err("error reading file: \{error}")
-  }
+  let content = @fs.read_file(path).text()
   if input.old_string == "" {
     // Insertion: insert new_string at the start of start_line (a zero-width
     // edit). Any start_line past the last line clamps to end of file, so a
@@ -207,28 +204,18 @@ async fn commit_edit(
     is Some(rejection) {
     return rejection
   }
-  try {
-    @fs.write_file(path, new_content, create_mode=CreateOrTruncate)
-    // A targeted edit preserves most of the file, so provenance depends on
-    // whether the content it read (original_content) is still what the agent last
-    // wrote: record_edited keeps a stronger `Created` only then, and otherwise
-    // downgrades (the file was rebound to different content before this edit).
-    file_state.record_edited(
-      path,
-      @agent_tool.content_digest(original_content),
-      @agent_tool.content_digest(new_content),
-    )
-    let response = @auto_check.append_summary(path, summary)
-    @agent_tool.ToolAction::respond(response, brief=ok_brief)
-  } catch {
-    error if @async.is_being_cancelled() => raise error
-    error =>
-      @agent_tool.ToolAction::respond(
-        "error editing \{path}: error writing file: \{error}",
-        is_error=true,
-        brief=fail_brief,
-      )
-  }
+  @fs.write_file(path, new_content, create_mode=CreateOrTruncate)
+  // A targeted edit preserves most of the file, so provenance depends on
+  // whether the content it read (original_content) is still what the agent last
+  // wrote: record_edited keeps a stronger `Created` only then, and otherwise
+  // downgrades (the file was rebound to different content before this edit).
+  file_state.record_edited(
+    path,
+    @agent_tool.content_digest(original_content),
+    @agent_tool.content_digest(new_content),
+  )
+  let response = @auto_check.append_summary(path, summary)
+  @agent_tool.ToolAction::respond(response, brief=ok_brief)
 }
 
 ///|

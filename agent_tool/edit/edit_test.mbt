@@ -74,11 +74,25 @@ async test "edit downgrades a Created file that was rebound before the edit" {
 }
 
 ///|
+/// Run through the registry: filesystem faults raise out of the executor and
+/// the dispatch boundary in `@agent_tool.execute_tool_call` converts them —
+/// the same path production takes.
+async fn run_edit_via_boundary(arguments : Json) -> @agent_tool.ToolOutput {
+  let tools = @agent_tool.Tools([@edit.definition()])
+  let call = @agent_tool.AgentToolCall(
+    ToolCall(id="call_1", name="edit", arguments=Json::stringify(arguments)),
+  )
+  let action = @agent_tool.execute_tool_call(call, tools)
+  guard action is Respond(output) else { fail("expected Respond") }
+  output
+}
+
+///|
 async test "a failed edit names the file in its brief" {
   @vfs.with_tmpdir(dir => {
-    // Editing a missing file fails; the error still briefs the target file so
-    // the viz shows `→ edit · edit ghost.mbt 🚩`.
-    let output = run_edit({
+    // Editing a missing file fails; the dispatch boundary still briefs the
+    // target file so the viz shows `→ edit · edit ghost.mbt 🚩`.
+    let output = run_edit_via_boundary({
       "path": "\{dir}/ghost.mbt",
       "old_string": "a",
       "new_string": "b",
@@ -529,16 +543,16 @@ async test "edit rejects non-boolean replace_all" {
 }
 
 ///|
-async test "edit surfaces read errors" {
+async test "edit surfaces read errors through the dispatch boundary" {
   @vfs.with_tmpdir(dir => {
-    let output = run_edit({
+    let output = run_edit_via_boundary({
       "path": "\{dir}/does-not-exist.txt",
       "old_string": "x",
       "new_string": "y",
       "start_line": 1,
     })
-    assert_true(output.content.contains("error editing"))
-    assert_true(output.content.contains("error reading file"))
+    assert_true(output.content.contains("edit failed"))
+    assert_true(output.content.contains("does-not-exist.txt"))
     assert_true(output.is_error)
   })
 }
