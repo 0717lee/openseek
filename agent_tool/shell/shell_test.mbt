@@ -1134,11 +1134,9 @@ async test "shell sandbox preblocks scripted external source directory imports" 
         "pub fn generated() -> Int { 1 }\n",
         create_mode=CreateOrTruncate,
       )
-      @fs.write_file(
-        generated_file,
-        "pub fn generated_file() -> Int { 1 }\n",
-        create_mode=CreateOrTruncate,
-      )
+      @vfs.FileSystem({
+        "generated.mbt": "pub fn generated_file() -> Int { 1 }\n",
+      }).write_to(root)
       let result = run_shell_in_workspace(workspace, {
         "cmd": "python3 -c 'import shutil; shutil.move(\"\{generated}\", \"pkg\")'",
         "cwd": workspace,
@@ -1419,10 +1417,8 @@ async test "shell sandbox preblocks incoming source files moved into workspace d
     @fs.mkdir(workspace)
     @fs.mkdir("\{workspace}/pkg")
     let generated = "\{root}/generated.mbt"
-    @fs.write_file(
-      generated,
-      "pub fn generated() -> Int { 1 }\n",
-      create_mode=CreateOrTruncate,
+    @vfs.FileSystem({ "generated.mbt": "pub fn generated() -> Int { 1 }\n" }).write_to(
+      root,
     )
     let output = run_shell_in_workspace(workspace, {
       "cmd": "mv -t pkg \{generated}",

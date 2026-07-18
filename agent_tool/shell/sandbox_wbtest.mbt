@@ -421,11 +421,9 @@ async test "sandbox preblocks scripted external source tree imports" {
       "pub fn generated() -> Int { 1 }\n",
       create_mode=CreateOrTruncate,
     )
-    @fs.write_file(
-      generated_file,
-      "pub fn generated_file() -> Int { 1 }\n",
-      create_mode=CreateOrTruncate,
-    )
+    @vfs.FileSystem({
+      "generated.mbt": "pub fn generated_file() -> Int { 1 }\n",
+    }).write_to(root)
     let target = tree_target(
       "python3 -c 'import shutil; shutil.move(\"\{generated}\", \"pkg\")'",
       workspace,

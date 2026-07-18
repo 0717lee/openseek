@@ -21,11 +21,9 @@ async fn run_multi_edit_in_workspace(
 async test "multi_edit applies multiple line-anchored replacements" {
   @vfs.with_tmpdir(dir => {
     let path = "\{dir}/fixes.mbt"
-    @fs.write_file(
-      path,
-      "let a = old_a\nlet b = keep\nlet c = old_c\n",
-      create_mode=CreateOrTruncate,
-    )
+    @vfs.FileSystem({
+      "fixes.mbt": "let a = old_a\nlet b = keep\nlet c = old_c\n",
+    }).write_to(dir)
     let output = run_multi_edit({
       "edits": [
         {
@@ -60,12 +58,10 @@ async test "multi_edit applies a batch spanning several files" {
   @vfs.with_tmpdir(dir => {
     let first = "\{dir}/first.mbt"
     let second = "\{dir}/second.mbt"
-    @fs.write_file(first, "let a = old_a\n", create_mode=CreateOrTruncate)
-    @fs.write_file(
-      second,
-      "let b = old_b\nlet c = old_c\n",
-      create_mode=CreateOrTruncate,
-    )
+    @vfs.FileSystem({
+      "first.mbt": "let a = old_a\n",
+      "second.mbt": "let b = old_b\nlet c = old_c\n",
+    }).write_to(dir)
     let output = run_multi_edit({
       "edits": [
         {
@@ -102,7 +98,7 @@ async test "multi_edit applies a batch spanning several files" {
 async test "multi_edit collapses aliased spellings of one file into a single group" {
   @vfs.with_tmpdir(dir => {
     let path = "\{dir}/note.txt"
-    @fs.write_file(path, "alpha\nbeta\n", create_mode=CreateOrTruncate)
+    @vfs.FileSystem({ "note.txt": "alpha\nbeta\n" }).write_to(dir)
     // `note.txt` and `./note.txt` resolve to the same file. They must form one
     // group so both edits land; otherwise the second write would clobber the
     // first and silently drop an edit.
@@ -175,11 +171,9 @@ async test "multi_edit rejects a file whose edits are not contiguous" {
 async test "multi_edit inserts when old_string is empty, alongside a replacement" {
   @vfs.with_tmpdir(dir => {
     let path = "\{dir}/insert.mbt"
-    @fs.write_file(
-      path,
-      "let a = old_a\nlet b = keep\nlet c = old_c\n",
-      create_mode=CreateOrTruncate,
-    )
+    @vfs.FileSystem({
+      "insert.mbt": "let a = old_a\nlet b = keep\nlet c = old_c\n",
+    }).write_to(dir)
     let output = run_multi_edit({
       "edits": [
         {
@@ -208,7 +202,7 @@ async test "multi_edit inserts when old_string is empty, alongside a replacement
 async test "multi_edit rejects an edit with empty old_string and new_string" {
   @vfs.with_tmpdir(dir => {
     let path = "\{dir}/empty.mbt"
-    @fs.write_file(path, "let a = 1\n", create_mode=CreateOrTruncate)
+    @vfs.FileSystem({ "empty.mbt": "let a = 1\n" }).write_to(dir)
     let output = run_multi_edit({
       "edits": [
         { "file": path, "old_string": "", "new_string": "", "start_line": 1 },
@@ -223,10 +217,8 @@ async test "multi_edit rejects an edit with empty old_string and new_string" {
 async test "multi_edit applies edits against original offsets despite length changes" {
   @vfs.with_tmpdir(dir => {
     let path = "\{dir}/offsets.mbt"
-    @fs.write_file(
-      path,
-      "let a = 1\nlet bb = 2\nlet ccc = 3\n",
-      create_mode=CreateOrTruncate,
+    @vfs.FileSystem({ "offsets.mbt": "let a = 1\nlet bb = 2\nlet ccc = 3\n" }).write_to(
+      dir,
     )
     // edit[0] grows line 1 and edit[1] shrinks line 3. A naive left-to-right
     // apply would shift the later span; planning against the original keeps both
@@ -261,7 +253,7 @@ async test "multi_edit applies edits against original offsets despite length cha
 async test "multi_edit matches the original file, not text introduced by earlier edits" {
   @vfs.with_tmpdir(dir => {
     let path = "\{dir}/cascade.mbt"
-    @fs.write_file(path, "alpha\nbeta\n", create_mode=CreateOrTruncate)
+    @vfs.FileSystem({ "cascade.mbt": "alpha\nbeta\n" }).write_to(dir)
     // edit[0] rewrites line 1 to "beta"; a sequential rewrite could then let
     // edit[1] match that introduced text. Validating against the original keeps
     // edit[1] anchored to line 2's real "beta".
@@ -292,11 +284,7 @@ async test "multi_edit matches the original file, not text introduced by earlier
 async test "multi_edit uses line anchors to disambiguate duplicate spans" {
   @vfs.with_tmpdir(dir => {
     let path = "\{dir}/dup.mbt"
-    @fs.write_file(
-      path,
-      "x = dup\ny = dup\nz = dup\n",
-      create_mode=CreateOrTruncate,
-    )
+    @vfs.FileSystem({ "dup.mbt": "x = dup\ny = dup\nz = dup\n" }).write_to(dir)
     // The same span appears on three lines; each edit's anchor selects exactly
     // one, leaving the unanchored line 2 untouched.
     let output = run_multi_edit({
@@ -326,7 +314,7 @@ async test "multi_edit uses line anchors to disambiguate duplicate spans" {
 async test "multi_edit resolves relative paths under the workspace root" {
   @vfs.with_tmpdir(prefix="openseek-multi-edit-workspace-", dir => {
     let path = "\{dir}/note.txt"
-    @fs.write_file(path, "alpha\nbeta\n", create_mode=CreateOrTruncate)
+    @vfs.FileSystem({ "note.txt": "alpha\nbeta\n" }).write_to(dir)
     let output = run_multi_edit_in_workspace(dir, {
       "edits": [
         {
@@ -478,10 +466,8 @@ async test "multi_edit rejects an edit that omits its file" {
 async test "multi_edit applies a batch from a response file (edits_file)" {
   @vfs.with_tmpdir(dir => {
     let path = "\{dir}/fixed.mbt"
-    @fs.write_file(
-      path,
-      "let a = old_a\nlet b = old_b\n",
-      create_mode=CreateOrTruncate,
+    @vfs.FileSystem({ "fixed.mbt": "let a = old_a\nlet b = old_b\n" }).write_to(
+      dir,
     )
     let spec_path = "\{dir}/fixes.json"
     let spec : Json = [
@@ -513,10 +499,8 @@ async test "multi_edit applies a batch from a response file (edits_file)" {
 async test "multi_edit concatenates inline edits with an edits_file" {
   @vfs.with_tmpdir(dir => {
     let path = "\{dir}/both.mbt"
-    @fs.write_file(
-      path,
-      "let a = old_a\nlet b = old_b\n",
-      create_mode=CreateOrTruncate,
+    @vfs.FileSystem({ "both.mbt": "let a = old_a\nlet b = old_b\n" }).write_to(
+      dir,
     )
     let spec_path = "\{dir}/more.json"
     let spec : Json = [
@@ -573,7 +557,7 @@ async test "multi_edit reports an unreadable response file" {
 async test "multi_edit reports a response file that is not valid JSON" {
   @vfs.with_tmpdir(dir => {
     let spec_path = "\{dir}/broken.json"
-    @fs.write_file(spec_path, "{ not json", create_mode=CreateOrTruncate)
+    @vfs.FileSystem({ "broken.json": "{ not json" }).write_to(dir)
     let output = run_multi_edit({ "edits_file": spec_path })
     assert_true(output.is_error)
     assert_true(output.content.contains("is not valid JSON"))

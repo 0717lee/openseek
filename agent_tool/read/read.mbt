@@ -188,7 +188,7 @@ async fn read_file(
 async test "read renders a whole file as numbered lines with a status footer" {
   @vfs.with_tmpdir(dir => {
     let path = "\{dir}/test.txt"
-    @fs.write_file(path, "hello read", create_mode=CreateOrTruncate)
+    @vfs.FileSystem({ "test.txt": "hello read" }).write_to(dir)
     let result = execute({ "path": path })
     guard result is Respond(output) else { fail("expected Respond") }
     assert_false(output.is_error)
@@ -234,7 +234,7 @@ async test "read resolves relative paths under the workspace root" {
 async test "read reports a zero-byte file explicitly" {
   @vfs.with_tmpdir(dir => {
     let path = "\{dir}/empty.txt"
-    @fs.write_file(path, "", create_mode=CreateOrTruncate)
+    @vfs.FileSystem({ "empty.txt": "" }).write_to(dir)
     let result = execute({ "path": path })
     guard result is Respond(output) else { fail("expected Respond") }
     assert_false(output.is_error)
@@ -249,7 +249,7 @@ async test "read reports a zero-byte file explicitly" {
 async test "read treats a single-newline file as one blank line, not empty" {
   @vfs.with_tmpdir(dir => {
     let path = "\{dir}/newline.txt"
-    @fs.write_file(path, "\n", create_mode=CreateOrTruncate)
+    @vfs.FileSystem({ "newline.txt": "\n" }).write_to(dir)
     let result = execute({ "path": path })
     guard result is Respond(output) else { fail("expected Respond") }
     assert_false(output.is_error)
@@ -269,10 +269,8 @@ async test "read treats a single-newline file as one blank line, not empty" {
 async test "read numbers every line including a trailing blank from a final newline" {
   @vfs.with_tmpdir(dir => {
     let path = "\{dir}/multiline.txt"
-    @fs.write_file(
-      path,
-      "line one\nline two\nline three\n",
-      create_mode=CreateOrTruncate,
+    @vfs.FileSystem({ "multiline.txt": "line one\nline two\nline three\n" }).write_to(
+      dir,
     )
     let result = execute({ "path": path })
     guard result is Respond(output) else { fail("expected Respond") }
@@ -294,10 +292,8 @@ async test "read numbers every line including a trailing blank from a final newl
 async test "read returns a requested line range and reports more lines remain" {
   @vfs.with_tmpdir(dir => {
     let path = "\{dir}/range.txt"
-    @fs.write_file(
-      path,
-      "line one\nline two\nline three\nline four",
-      create_mode=CreateOrTruncate,
+    @vfs.FileSystem({ "range.txt": "line one\nline two\nline three\nline four" }).write_to(
+      dir,
     )
     let result = execute({ "path": path, "start_line": 2, "max_lines": 2 })
     guard result is Respond(output) else { fail("expected Respond") }
@@ -319,7 +315,7 @@ async test "read returns a requested line range and reports more lines remain" {
 async test "read returns a footer only when the range starts past EOF" {
   @vfs.with_tmpdir(dir => {
     let path = "\{dir}/short.txt"
-    @fs.write_file(path, "a\nb", create_mode=CreateOrTruncate)
+    @vfs.FileSystem({ "short.txt": "a\nb" }).write_to(dir)
     let result = execute({ "path": path, "start_line": 10 })
     guard result is Respond(output) else { fail("expected Respond") }
     assert_false(output.is_error)
@@ -334,7 +330,7 @@ async test "read returns a footer only when the range starts past EOF" {
 async test "read caps oversized output without marking it as an error" {
   @vfs.with_tmpdir(dir => {
     let path = "\{dir}/capped.txt"
-    @fs.write_file(path, "abcdef", create_mode=CreateOrTruncate)
+    @vfs.FileSystem({ "capped.txt": "abcdef" }).write_to(dir)
     let result = execute({ "path": path, "max_output_chars": 4 })
     guard result is Respond(output) else { fail("expected Respond") }
     // The prefix was read successfully; the footer (for the model) and the
@@ -384,7 +380,7 @@ async test "read caps unicode content on character boundaries" {
   @vfs.with_tmpdir(dir => {
     let path = "\{dir}/unicode.txt"
     // "😀" is one code point but two UTF-16 code units; "😀Z" has length 3.
-    @fs.write_file(path, "😀Z", create_mode=CreateOrTruncate)
+    @vfs.FileSystem({ "unicode.txt": "😀Z" }).write_to(dir)
     // Budget 5 = "1 |" (3 units) + "😀" (2 units): the emoji fits whole, Z drops.
     let fits = execute({ "path": path, "max_lines": 1, "max_output_chars": 5 })
     guard fits is Respond(output) else { fail("expected Respond") }
@@ -531,7 +527,7 @@ async test "read rejects non-object arguments" {
 async test "a huge max_lines returns the remaining lines without overflow" {
   @vfs.with_tmpdir(dir => {
     let path = "\{dir}/huge-max.txt"
-    @fs.write_file(path, "a\nb\nc", create_mode=CreateOrTruncate)
+    @vfs.FileSystem({ "huge-max.txt": "a\nb\nc" }).write_to(dir)
     let result = execute({
       "path": path,
       "start_line": 2,

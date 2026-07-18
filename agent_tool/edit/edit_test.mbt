@@ -22,11 +22,7 @@ async test "edit records the file it changed as Modified" {
   @vfs.with_tmpdir(dir => {
     let state = @agent_tool.FileStateMap::new()
     let path = "\{dir}/lib.mbt"
-    @fs.write_file(
-      path,
-      "pub fn f() -> Int { 1 }\n",
-      create_mode=CreateOrTruncate,
-    )
+    @vfs.FileSystem({ "lib.mbt": "pub fn f() -> Int { 1 }\n" }).write_to(dir)
     let run = match @edit.definition(file_state=state).execute {
       Async(execute) => execute
       Sync(_) => fail("edit tool should be async")
@@ -48,11 +44,7 @@ async test "edit downgrades a Created file that was rebound before the edit" {
     // The agent created this path with content A (recorded), but the file on disk
     // is now different content B — as if a `git checkout` rebound it. Editing B
     // must NOT keep `Created`: the result is mostly B, not the agent's file.
-    @fs.write_file(
-      path,
-      "pub fn b() -> Int { 2 }\n",
-      create_mode=CreateOrTruncate,
-    )
+    @vfs.FileSystem({ "lib.mbt": "pub fn b() -> Int { 2 }\n" }).write_to(dir)
     let state = @agent_tool.FileStateMap::new()
     state.record_created(
       path,
@@ -94,7 +86,7 @@ async test "a failed edit names the file in its brief" {
 async test "edit replaces a unique exact match" {
   @vfs.with_tmpdir(dir => {
     let path = "\{dir}/unique.txt"
-    @fs.write_file(path, "alpha\nbeta\ngamma\n", create_mode=CreateOrTruncate)
+    @vfs.FileSystem({ "unique.txt": "alpha\nbeta\ngamma\n" }).write_to(dir)
     let output = run_edit({
       "path": path,
       "old_string": "beta",
@@ -116,7 +108,7 @@ async test "edit replaces a unique exact match" {
 async test "edit range limits a unique replacement" {
   @vfs.with_tmpdir(dir => {
     let path = "\{dir}/range.txt"
-    @fs.write_file(path, "target\nkeep\ntarget\n", create_mode=CreateOrTruncate)
+    @vfs.FileSystem({ "range.txt": "target\nkeep\ntarget\n" }).write_to(dir)
     let output = run_edit({
       "path": path,
       "old_string": "target",
@@ -137,11 +129,9 @@ async test "edit range limits a unique replacement" {
 async test "edit rejects replace_all even with a range" {
   @vfs.with_tmpdir(dir => {
     let path = "\{dir}/range-replace-all.txt"
-    @fs.write_file(
-      path,
-      "token\ninside token\ninside token\noutside token\n",
-      create_mode=CreateOrTruncate,
-    )
+    @vfs.FileSystem({
+      "range-replace-all.txt": "token\ninside token\ninside token\noutside token\n",
+    }).write_to(dir)
     let output = run_edit({
       "path": path,
       "old_string": "token",
@@ -166,7 +156,7 @@ async test "edit rejects replace_all even with a range" {
 async test "edit resolves relative paths under the workspace root" {
   @vfs.with_tmpdir(prefix="openseek-edit-workspace-", dir => {
     let path = "\{dir}/note.txt"
-    @fs.write_file(path, "before", create_mode=CreateOrTruncate)
+    @vfs.FileSystem({ "note.txt": "before" }).write_to(dir)
     let output = run_edit_in_workspace(dir, {
       "path": "note.txt",
       "old_string": "before",
@@ -186,10 +176,8 @@ async test "edit resolves relative paths under the workspace root" {
 async test "edit preserves surrounding multiline content" {
   @vfs.with_tmpdir(dir => {
     let path = "\{dir}/multiline.txt"
-    @fs.write_file(
-      path,
-      "fn main {\n  println(\"old\")\n}\n",
-      create_mode=CreateOrTruncate,
+    @vfs.FileSystem({ "multiline.txt": "fn main {\n  println(\"old\")\n}\n" }).write_to(
+      dir,
     )
     let output = run_edit({
       "path": path,
@@ -231,7 +219,7 @@ async test "edit rejects non-object arguments" {
 async test "edit inserts when old_string is empty" {
   @vfs.with_tmpdir(dir => {
     let path = "\{dir}/insert.txt"
-    @fs.write_file(path, "line1\nline2\n", create_mode=CreateOrTruncate)
+    @vfs.FileSystem({ "insert.txt": "line1\nline2\n" }).write_to(dir)
     // insert before line 2
     let output = run_edit({
       "path": path,
@@ -250,7 +238,7 @@ async test "edit inserts when old_string is empty" {
 async test "edit can append at end of file via start_line past the last line" {
   @vfs.with_tmpdir(dir => {
     let path = "\{dir}/append.txt"
-    @fs.write_file(path, "a\nb\n", create_mode=CreateOrTruncate)
+    @vfs.FileSystem({ "append.txt": "a\nb\n" }).write_to(dir)
     let output = run_edit({
       "path": path,
       "old_string": "",
@@ -269,7 +257,7 @@ async test "edit can append at end of file via start_line past the last line" {
 async test "edit reports the inclusive line range of a multi-line insert" {
   @vfs.with_tmpdir(dir => {
     let path = "\{dir}/span.txt"
-    @fs.write_file(path, "one\ntwo\nthree\n", create_mode=CreateOrTruncate)
+    @vfs.FileSystem({ "span.txt": "one\ntwo\nthree\n" }).write_to(dir)
     let output = run_edit({
       "path": path,
       "old_string": "",
@@ -286,7 +274,7 @@ async test "edit reports the inclusive line range of a multi-line insert" {
 async test "edit reports the inclusive line range of a multi-line append" {
   @vfs.with_tmpdir(dir => {
     let path = "\{dir}/span-append.txt"
-    @fs.write_file(path, "a\nb\n", create_mode=CreateOrTruncate)
+    @vfs.FileSystem({ "span-append.txt": "a\nb\n" }).write_to(dir)
     let output = run_edit({
       "path": path,
       "old_string": "",
@@ -306,7 +294,7 @@ async test "edit append onto a file without a trailing newline shares the last l
   @vfs.with_tmpdir(dir => {
     let path = "\{dir}/glue.txt"
     // "b" has no trailing newline, so appended text glues onto line 2.
-    @fs.write_file(path, "a\nb", create_mode=CreateOrTruncate)
+    @vfs.FileSystem({ "glue.txt": "a\nb" }).write_to(dir)
     let output = run_edit({
       "path": path,
       "old_string": "",
@@ -323,7 +311,7 @@ async test "edit append onto a file without a trailing newline shares the last l
 async test "edit rejects empty old_string and new_string" {
   @vfs.with_tmpdir(dir => {
     let path = "\{dir}/empty-both.txt"
-    @fs.write_file(path, "content", create_mode=CreateOrTruncate)
+    @vfs.FileSystem({ "empty-both.txt": "content" }).write_to(dir)
     let output = run_edit({
       "path": path,
       "old_string": "",
@@ -342,7 +330,7 @@ async test "edit rejects empty old_string and new_string" {
 async test "edit rejects identical replacement" {
   @vfs.with_tmpdir(dir => {
     let path = "\{dir}/identical.txt"
-    @fs.write_file(path, "content", create_mode=CreateOrTruncate)
+    @vfs.FileSystem({ "identical.txt": "content" }).write_to(dir)
     let output = run_edit({
       "path": path,
       "old_string": "content",
@@ -361,10 +349,8 @@ async test "edit rejects identical replacement" {
 async test "edit rejects invalid moon.pkg comment rewrite" {
   @vfs.with_tmpdir(prefix="openseek-edit-manifest-", dir => {
     let path = "\{dir}/moon.pkg"
-    @fs.write_file(
-      path,
-      "warnings = \"+unnecessary_annotation\"",
-      create_mode=CreateOrTruncate,
+    @vfs.FileSystem({ "moon.pkg": "warnings = \"+unnecessary_annotation\"" }).write_to(
+      dir,
     )
     let output = run_edit({
       "path": path,
@@ -385,7 +371,7 @@ async test "edit rejects invalid moon.pkg comment rewrite" {
 async test "edit rejects generated mbti files" {
   @vfs.with_tmpdir(prefix="openseek-edit-generated-", dir => {
     let path = "\{dir}/pkg.generated.mbti"
-    @fs.write_file(path, "package old\n", create_mode=CreateOrTruncate)
+    @vfs.FileSystem({ "pkg.generated.mbti": "package old\n" }).write_to(dir)
     let output = run_edit({
       "path": path,
       "old_string": "old",
@@ -403,7 +389,7 @@ async test "edit rejects generated mbti files" {
 async test "edit rejects missing match" {
   @vfs.with_tmpdir(dir => {
     let path = "\{dir}/missing.txt"
-    @fs.write_file(path, "alpha", create_mode=CreateOrTruncate)
+    @vfs.FileSystem({ "missing.txt": "alpha" }).write_to(dir)
     let output = run_edit({
       "path": path,
       "old_string": "beta",
@@ -422,7 +408,9 @@ async test "edit rejects missing match" {
 async test "edit reports range for missing match" {
   @vfs.with_tmpdir(dir => {
     let path = "\{dir}/range-missing.txt"
-    @fs.write_file(path, "alpha\nbeta\nalpha\n", create_mode=CreateOrTruncate)
+    @vfs.FileSystem({ "range-missing.txt": "alpha\nbeta\nalpha\n" }).write_to(
+      dir,
+    )
     let output = run_edit({
       "path": path,
       "old_string": "alpha",
@@ -443,10 +431,8 @@ async test "edit reports range for missing match" {
 async test "edit replaces first match from start line" {
   @vfs.with_tmpdir(dir => {
     let path = "\{dir}/first-match.txt"
-    @fs.write_file(
-      path,
-      "alpha beta\nmiddle\nbeta",
-      create_mode=CreateOrTruncate,
+    @vfs.FileSystem({ "first-match.txt": "alpha beta\nmiddle\nbeta" }).write_to(
+      dir,
     )
     let output = run_edit({
       "path": path,
@@ -467,11 +453,9 @@ async test "edit replaces first match from start line" {
 async test "edit replaces first match inside range" {
   @vfs.with_tmpdir(dir => {
     let path = "\{dir}/range-first-match.txt"
-    @fs.write_file(
-      path,
-      "beta\nbeta\nmiddle\nbeta\nbeta\n",
-      create_mode=CreateOrTruncate,
-    )
+    @vfs.FileSystem({
+      "range-first-match.txt": "beta\nbeta\nmiddle\nbeta\nbeta\n",
+    }).write_to(dir)
     let output = run_edit({
       "path": path,
       "old_string": "beta",
@@ -492,7 +476,7 @@ async test "edit replaces first match inside range" {
 async test "edit replaces first repeated match only" {
   @vfs.with_tmpdir(dir => {
     let path = "\{dir}/many-matches.txt"
-    @fs.write_file(path, "x\nx\nx\nx\nx\nx\n", create_mode=CreateOrTruncate)
+    @vfs.FileSystem({ "many-matches.txt": "x\nx\nx\nx\nx\nx\n" }).write_to(dir)
     let output = run_edit({
       "path": path,
       "old_string": "x",
@@ -512,7 +496,7 @@ async test "edit replaces first repeated match only" {
 async test "edit rejects non-boolean replace_all" {
   @vfs.with_tmpdir(dir => {
     let path = "\{dir}/bad-replace-all.txt"
-    @fs.write_file(path, "alpha", create_mode=CreateOrTruncate)
+    @vfs.FileSystem({ "bad-replace-all.txt": "alpha" }).write_to(dir)
     let output = run_edit({
       "path": path,
       "old_string": "alpha",

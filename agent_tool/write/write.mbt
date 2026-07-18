@@ -353,7 +353,7 @@ async test "write resolves relative paths under the workspace root" {
 async test "write truncates existing files" {
   @vfs.with_tmpdir(dir => {
     let path = "\{dir}/truncate.txt"
-    @fs.write_file(path, "long original content", create_mode=CreateOrTruncate)
+    @vfs.FileSystem({ "truncate.txt": "long original content" }).write_to(dir)
     let result = execute({ "path": path, "content": "short" })
     guard result is Respond(output) else { fail("expected Respond") }
     // The path already existed, so the result flags the overwrite.
@@ -389,7 +389,7 @@ async test "write reports whether it created or overwrote a file" {
 async test "write accepts empty content" {
   @vfs.with_tmpdir(dir => {
     let path = "\{dir}/empty.txt"
-    @fs.write_file(path, "previous", create_mode=CreateOrTruncate)
+    @vfs.FileSystem({ "empty.txt": "previous" }).write_to(dir)
     let result = execute({ "path": path, "content": "" })
     guard result is Respond(output) else { fail("expected Respond") }
     assert_eq(
@@ -428,7 +428,7 @@ async test "write rejects json style moon.mod" {
 async test "write rejects generated mbti files" {
   @vfs.with_tmpdir(prefix="openseek-write-manifest-", dir => {
     let path = "\{dir}/pkg.generated.mbti"
-    @fs.write_file(path, "old interface", create_mode=CreateOrTruncate)
+    @vfs.FileSystem({ "pkg.generated.mbti": "old interface" }).write_to(dir)
     let result = execute({ "path": path, "content": "new interface" })
     guard result is Respond(output) else { fail("expected Respond") }
     assert_true(output.is_error)
@@ -441,11 +441,7 @@ async test "write rejects generated mbti files" {
 async test "write rejects overwriting an existing .mbt source file" {
   @vfs.with_tmpdir(dir => {
     let path = "\{dir}/lib.mbt"
-    @fs.write_file(
-      path,
-      "pub fn f() -> Int { 1 }\n",
-      create_mode=CreateOrTruncate,
-    )
+    @vfs.FileSystem({ "lib.mbt": "pub fn f() -> Int { 1 }\n" }).write_to(dir)
     let result = execute({
       "path": path,
       "content": "pub fn f() -> Int { 2 }\n",
@@ -476,7 +472,7 @@ async test "write still creates a NEW .mbt source file" {
 async test "write rejects overwriting an existing .mbt.md doc file" {
   @vfs.with_tmpdir(dir => {
     let path = "\{dir}/doc.mbt.md"
-    @fs.write_file(path, "# old\n", create_mode=CreateOrTruncate)
+    @vfs.FileSystem({ "doc.mbt.md": "# old\n" }).write_to(dir)
     let result = execute({ "path": path, "content": "# new\n" })
     guard result is Respond(output) else { fail("expected Respond") }
     assert_true(output.is_error)
@@ -488,11 +484,7 @@ async test "write rejects overwriting an existing .mbt.md doc file" {
 async test "write rejects overwriting source through a symlink" {
   @vfs.with_tmpdir(dir => {
     let src = "\{dir}/lib.mbt"
-    @fs.write_file(
-      src,
-      "pub fn f() -> Int { 1 }\n",
-      create_mode=CreateOrTruncate,
-    )
+    @vfs.FileSystem({ "lib.mbt": "pub fn f() -> Int { 1 }\n" }).write_to(dir)
     // link.txt -> lib.mbt: the .txt name must not let the write slip past the
     // guard and truncate the real source.
     let link = "\{dir}/link.txt"
@@ -731,7 +723,7 @@ async test "write records an overwrite of a pre-existing file as Modified" {
     let state = @agent_tool.FileStateMap::new()
     let path = "\{dir}/pre.txt"
     // The file exists before the agent touches it this session.
-    @fs.write_file(path, "old", create_mode=CreateOrTruncate)
+    @vfs.FileSystem({ "pre.txt": "old" }).write_to(dir)
     let run = match definition(file_state=state).execute {
       Async(run) => run
       Sync(_) => fail("write tool should be async")

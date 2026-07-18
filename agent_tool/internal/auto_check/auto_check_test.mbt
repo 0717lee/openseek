@@ -19,10 +19,8 @@ async test "append_summary runs compact check for MoonBit source" {
   @vfs.with_tmpdir(prefix="openseek-auto-check-", dir => {
     write_module(dir, "tmp/auto_check")
     let path = "\{dir}/main.mbt"
-    @fs.write_file(
-      path,
-      "fn main {\n  let x = missing\n}\n",
-      create_mode=CreateOrTruncate,
+    @vfs.FileSystem({ "main.mbt": "fn main {\n  let x = missing\n}\n" }).write_to(
+      dir,
     )
     let result = @auto_check.append_summary(
       path,
@@ -48,10 +46,8 @@ async test "append_summary checks from module root for nested source" {
     )
     @fs.mkdir("\{dir}/scratch")
     let path = "\{dir}/scratch/note.mbt"
-    @fs.write_file(
-      path,
-      "pub fn draft() -> Int { 1 }\n",
-      create_mode=CreateOrTruncate,
+    @vfs.FileSystem({ "scratch/note.mbt": "pub fn draft() -> Int { 1 }\n" }).write_to(
+      dir,
     )
     let result = @auto_check.append_summary(path, "ok: wrote nested source")
     assert_true(
@@ -95,10 +91,8 @@ async test "append_summary surfaces raw moon check failure" {
       create_mode=CreateOrTruncate,
     )
     let path = "\{dir}/moon.pkg"
-    @fs.write_file(
-      path,
-      "warnings = \"+unnecessary_annotation\n",
-      create_mode=CreateOrTruncate,
+    @vfs.FileSystem({ "moon.pkg": "warnings = \"+unnecessary_annotation\n" }).write_to(
+      dir,
     )
     let result = @auto_check.append_summary(path, "ok: wrote manifest")
     assert_true(result.has_prefix("ok: wrote manifest\nmoon check:\nexit="))
@@ -112,11 +106,9 @@ async test "append_summary surfaces raw moon check failure" {
 async test "append_summary preserves module dependency graph failure text" {
   @vfs.with_tmpdir(prefix="openseek-auto-check-deps-", dir => {
     let path = "\{dir}/moon.mod"
-    @fs.write_file(
-      path,
-      "name = \"tmp/auto_check_deps\"\nimport { \"moonbitlang/async\" }\n",
-      create_mode=CreateOrTruncate,
-    )
+    @vfs.FileSystem({
+      "moon.mod": "name = \"tmp/auto_check_deps\"\nimport { \"moonbitlang/async\" }\n",
+    }).write_to(dir)
     let result = @auto_check.append_summary(path, "ok: wrote manifest")
     assert_true(result.has_prefix("ok: wrote manifest\nmoon check:\nexit=255"))
     assert_true(result.contains("Error: Failed to calculate build plan"))
@@ -137,7 +129,7 @@ async test "append_summary preserves module dependency graph failure text" {
 async test "append_summary checks from moon.work workspace root" {
   @vfs.with_tmpdir(prefix="openseek-auto-check-workspace-", dir => {
     let path = "\{dir}/moon.work"
-    @fs.write_file(path, "members = [\"pkg\"\n", create_mode=CreateOrTruncate)
+    @vfs.FileSystem({ "moon.work": "members = [\"pkg\"\n" }).write_to(dir)
     let result = @auto_check.append_summary(path, "ok: wrote workspace")
     assert_true(result.has_prefix("ok: wrote workspace\nmoon check:\nexit=255"))
     assert_true(result.contains("failed to parse workspace file"))
@@ -192,10 +184,8 @@ async test "append_summary runs for MoonBit source without local package" {
     )
     @fs.mkdir("\{dir}/scratch")
     let path = "\{dir}/scratch/main.mbt"
-    @fs.write_file(
-      path,
-      "pub fn bad() -> Int { missing }\n",
-      create_mode=CreateOrTruncate,
+    @vfs.FileSystem({ "scratch/main.mbt": "pub fn bad() -> Int { missing }\n" }).write_to(
+      dir,
     )
     let result = @auto_check.append_summary(path, "ok: wrote unpackaged source")
     assert_true(result.has_prefix("ok: wrote unpackaged source\nmoon check:"))
