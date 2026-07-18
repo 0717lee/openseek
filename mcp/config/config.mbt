@@ -28,7 +28,7 @@ pub fn McpServer::name(self : McpServer) -> String {
 
 ///|
 /// A malformed MCP configuration.
-pub(all) suberror ConfigError {
+pub suberror ConfigError {
   Invalid(String)
 }
 

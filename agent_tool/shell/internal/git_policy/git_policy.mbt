@@ -6,7 +6,7 @@
 
 ///|
 /// A parsed git invocation: the subcommand and its index in `argv`.
-pub(all) struct Invocation {
+pub struct Invocation {
   subcommand : String
   subcommand_index : Int
 }

@@ -77,7 +77,7 @@ pub fn StandingGoal::blocked(self : StandingGoal) -> Bool {
 
 ///|
 /// A goal marker recognized in a runtime notice.
-pub(all) enum GoalMarker {
+pub enum GoalMarker {
   GoalSet(String)
   GoalCleared
   GoalBlocked(String)

@@ -29,7 +29,7 @@ pub(all) struct Redirect {
   target : String
 } derive(Eq, @debug.Debug)
 
-pub(all) struct SimpleCommand {
+pub struct SimpleCommand {
   argv : Array[String]
   env : Array[EnvAssignment]
   redirects : Array[Redirect]

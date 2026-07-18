@@ -5,7 +5,7 @@
 ///|
 /// Why a request did not yield a result: the peer answered with a JSON-RPC error
 /// object, or the transport ended before any reply arrived.
-pub(all) suberror ResponseError {
+pub suberror ResponseError {
   /// The peer answered with a JSON-RPC error object, carrying its `code` and
   /// `message`.
   Failed(code~ : Int, message~ : String)

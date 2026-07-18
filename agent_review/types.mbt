@@ -6,7 +6,7 @@
 
 ///|
 /// A single review finding at an optional source location.
-pub(all) struct Finding {
+pub struct Finding {
   file : String
   line : Int?
   severity : String
@@ -18,7 +18,7 @@ pub(all) struct Finding {
 
 ///|
 /// The change set the review covered.
-pub(all) struct ReviewScope {
+pub struct ReviewScope {
   base : String
   head : String
   files : Array[String]
@@ -27,7 +27,7 @@ pub(all) struct ReviewScope {
 ///|
 /// Deterministic preflight signals that ground the review in the compiler/tests
 /// rather than model opinion.
-pub(all) struct ReviewStats {
+pub struct ReviewStats {
   files_reviewed : Int
   findings : Int
   build : String
@@ -36,7 +36,7 @@ pub(all) struct ReviewStats {
 
 ///|
 /// The full review report.
-pub(all) struct ReviewReport {
+pub struct ReviewReport {
   schema_version : Int
   scope : ReviewScope
   findings : Array[Finding]

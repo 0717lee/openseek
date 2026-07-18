@@ -20,7 +20,7 @@ pub suberror ReviewError {
 }
 
 // Types and methods
-pub(all) struct Finding {
+pub struct Finding {
   file : String
   line : Int?
   severity : String
@@ -30,7 +30,7 @@ pub(all) struct Finding {
   suggestion : String?
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 
-pub(all) struct ReviewReport {
+pub struct ReviewReport {
   schema_version : Int
   scope : ReviewScope
   findings : Array[Finding]
@@ -41,13 +41,13 @@ pub fn ReviewReport::parse(Json) -> Result[Self, String]
 pub fn ReviewReport::to_json_string(Self) -> String
 pub fn ReviewReport::validate(Self) -> Array[String]
 
-pub(all) struct ReviewScope {
+pub struct ReviewScope {
   base : String
   head : String
   files : Array[String]
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 
-pub(all) struct ReviewStats {
+pub struct ReviewStats {
   files_reviewed : Int
   findings : Int
   build : String

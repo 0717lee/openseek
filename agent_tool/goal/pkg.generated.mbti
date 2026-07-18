@@ -14,7 +14,7 @@ pub fn definition() -> @agent_tool.AgentToolDefinition
 // Errors
 
 // Types and methods
-pub(all) enum GoalStatus {
+pub enum GoalStatus {
   Met
   Continuing(String)
   Blocked(String)

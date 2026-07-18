@@ -4,7 +4,7 @@ package "bobzhang/openseek/jsonrpc"
 // Values
 
 // Errors
-pub(all) suberror ResponseError {
+pub suberror ResponseError {
   Failed(code~ : Int, message~ : String)
   Closed
 }

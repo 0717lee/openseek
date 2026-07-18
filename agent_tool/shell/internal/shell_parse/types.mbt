@@ -21,7 +21,7 @@ pub(all) enum ParseResult {
 /// top-level operator before this command (`&&`, `||`, `;`, or `|`), if any.
 /// `source` is a compact normalized rendering for diagnostics; it is not
 /// guaranteed to byte-match the input.
-pub(all) struct SimpleCommand {
+pub struct SimpleCommand {
   argv : Array[String]
   env : Array[EnvAssignment]
   redirects : Array[Redirect]

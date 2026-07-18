@@ -114,7 +114,7 @@ fn ToolOutput::ToolOutput(
 
 ///|
 /// Agent-level control requested by a tool action.
-pub(all) enum AgentControl {
+pub enum AgentControl {
   /// Stop the loop and surface the string as the final answer to the user.
   Finish(String)
   /// Stop the loop because execution cannot usefully continue.
@@ -124,7 +124,7 @@ pub(all) enum AgentControl {
 ///|
 /// The action returned by a tool executor. Normal tools respond to the model;
 /// control tools request an agent-loop state transition.
-pub(all) enum ToolAction {
+pub enum ToolAction {
   /// Append the output as a `Tool(id)` chat message and keep looping.
   Respond(ToolOutput)
   /// Request a loop-control action such as finishing the task.

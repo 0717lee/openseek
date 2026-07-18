@@ -4,7 +4,7 @@
 /// This public type is owned by the `goal` package because the agent loop
 /// consumes it. Raw JSON decoding is delegated to `internal/decode` and mapped
 /// into this package-owned API.
-pub(all) enum GoalStatus {
+pub enum GoalStatus {
   /// The goal is fully achieved and verified.
   Met
   /// Work remains and can continue autonomously.

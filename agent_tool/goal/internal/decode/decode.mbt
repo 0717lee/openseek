@@ -1,6 +1,6 @@
 ///|
 /// A decoded verdict about the standing session goal.
-pub(all) enum GoalStatus {
+pub enum GoalStatus {
   /// The goal is fully achieved and verified.
   Met
   /// Work remains and can continue autonomously.

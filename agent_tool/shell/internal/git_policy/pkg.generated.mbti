@@ -17,7 +17,7 @@ pub fn text_should_preblock(Array[String], Int, Int) -> Bool
 // Errors
 
 // Types and methods
-pub(all) struct Invocation {
+pub struct Invocation {
   subcommand : String
   subcommand_index : Int
 }

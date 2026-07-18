@@ -11,7 +11,7 @@ pub fn decode(Json) -> GoalStatus raise
 // Errors
 
 // Types and methods
-pub(all) enum GoalStatus {
+pub enum GoalStatus {
   Met
   Continuing(String)
   Blocked(String)

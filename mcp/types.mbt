@@ -5,7 +5,7 @@
 /// An MCP-layer failure: the server sent a response that could not be read as
 /// the expected MCP shape. A JSON-RPC *error* reply surfaces separately as
 /// `@jsonrpc.ResponseError`.
-pub(all) suberror McpError {
+pub suberror McpError {
   /// The server's response did not match the expected MCP shape; the string
   /// says what was wrong.
   Protocol(String)
@@ -34,7 +34,7 @@ pub struct McpTool {
 /// One block of a `tools/call` result's `content` array. openseek's model view
 /// is text, so non-text blocks are kept as compact descriptors — image/audio
 /// bytes are noted, not forwarded.
-pub(all) enum ContentBlock {
+pub enum ContentBlock {
   /// A text block and its text.
   Text(String)
   /// An image block; only its MIME type is surfaced (the base64 payload is not

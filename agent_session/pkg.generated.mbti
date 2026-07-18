@@ -38,7 +38,7 @@ pub fn AssistantMessage::content(Self) -> String
 pub fn AssistantMessage::reasoning_content(Self) -> String?
 pub fn AssistantMessage::tool_calls(Self) -> Array[@deepseek.ToolCall]
 
-pub(all) enum GoalMarker {
+pub enum GoalMarker {
   GoalSet(String)
   GoalCleared
   GoalBlocked(String)

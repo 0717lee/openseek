@@ -9,7 +9,7 @@ import {
 pub fn decode(Json) -> Array[McpServer] raise
 
 // Errors
-pub(all) suberror ConfigError {
+pub suberror ConfigError {
   Invalid(String)
 }
 

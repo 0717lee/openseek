@@ -77,6 +77,13 @@ packages actually use. Repo-agnostic; drive it with `moon ide analyze`.
   shrinkable — act on the analyzer's narrowability flag for the whole type,
   and skip per-variant/per-field rows unless the type is plain `pub`.
 
+- **Make edit tooling fail on no-change.** A regex that silently matches
+  nothing turns a whole category of edits into no-ops that still report
+  success (this sweep's `pub(all)` narrowing was a no-op for three batches
+  before the residual-stats check caught it). Count *changed* files/lines,
+  not matched declarations — and re-run the analyzer at the end as an
+  independent audit of what actually changed.
+
 ## Order of work
 
 Pilot one leaf package end-to-end (smallest blast radius, validates the
