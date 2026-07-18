@@ -313,37 +313,25 @@ fn excerpt_for_loc(lines : Array[String], loc : String) -> String {
 /// The inclusive 1-based `(first, last)` line pair named by a compiler `loc`
 /// like `7:1-9:2` (or a bare `7:1`). `None` when the loc is malformed.
 fn loc_line_span(loc : String) -> (Int, Int)? {
-  let parts = split_owned(loc, "-")
-  guard parts.length() >= 1 && parts[0] != "" else { return None }
-  guard leading_line_number(parts[0]) is Some(start) else { return None }
-  let end = if parts.length() >= 2 {
-    match leading_line_number(parts[1]) {
-      Some(end) => end
-      None => start
+  // Two anchored shapes: `start[:col]-end[:col]` and a bare `start[:col]`.
+  // An end that does not open with digits (or is missing) falls back to the
+  // start line, matching the compiler's lenient loc forms; parse failures on
+  // validated digit runs can only be overflow, which is malformed too.
+  lexscan loc {
+    (re"^[0-9]+" as start) +
+    re"(:[^\-]*)?-" +
+    (re"[0-9]+" as end_) +
+    re"(:.*)?$" => {
+      let start = @string.parse_int(start) catch { _ => return None }
+      let end_ = @string.parse_int(end_) catch { _ => return None }
+      Some((start, if end_ < start { start } else { end_ }))
     }
-  } else {
-    start
-  }
-  Some((start, if end < start { start } else { end }))
-}
-
-///|
-fn leading_line_number(part : String) -> Int? {
-  let digits = match part.find(":") {
-    Some(cut) => part[:cut].to_owned()
-    None => part
-  }
-  if digits == "" {
-    return None
-  }
-  let mut value = 0
-  for ch in digits {
-    if ch < '0' || ch > '9' {
-      return None
+    (re"^[0-9]+" as start) + re"(:.*|-)?$" => {
+      let start = @string.parse_int(start) catch { _ => return None }
+      Some((start, start))
     }
-    value = value * 10 + (ch.to_int() - '0'.to_int())
+    _ => None
   }
-  Some(value)
 }
 
 ///|

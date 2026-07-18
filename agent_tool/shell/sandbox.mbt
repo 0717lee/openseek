@@ -641,15 +641,10 @@ fn redirect_writes_file(redirect : @shell_parse.Redirect) -> Bool {
 
 ///|
 fn is_fd_redirect_target(target : String) -> Bool {
-  if target == "-" || target == "" {
-    return true
+  lexscan target {
+    re"^(-|[0-9]*)$" => true
+    _ => false
   }
-  for ch in target {
-    if !(ch is ('0'..='9')) {
-      return false
-    }
-  }
-  true
 }
 
 ///|
@@ -1596,22 +1591,10 @@ fn command_text_env_assignment_word(word : String) -> Bool {
 
 ///|
 fn command_text_valid_env_name(name : StringView) -> Bool {
-  if name.is_empty() {
-    return false
+  lexscan name {
+    re"^[A-Za-z_][A-Za-z0-9_]*$" => true
+    _ => false
   }
-  let mut index = 0
-  for ch in name {
-    let valid = if index == 0 {
-      ch is ('a'..='z') || ch is ('A'..='Z') || ch == '_'
-    } else {
-      ch is ('a'..='z') || ch is ('A'..='Z') || ch is ('0'..='9') || ch == '_'
-    }
-    if !valid {
-      return false
-    }
-    index += 1
-  }
-  true
 }
 
 ///|

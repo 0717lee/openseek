@@ -226,20 +226,10 @@ fn is_env_assignment_word(word : String) -> Bool {
 
 ///|
 fn is_valid_env_name(name : String) -> Bool {
-  if name == "" {
-    return false
+  lexscan name {
+    re"^[A-Za-z_][A-Za-z0-9_]*$" => true
+    _ => false
   }
-  for index, ch in name {
-    let valid = if index == 0 {
-      ch is ('a'..='z') || ch is ('A'..='Z') || ch == '_'
-    } else {
-      ch is ('a'..='z') || ch is ('A'..='Z') || ch is ('0'..='9') || ch == '_'
-    }
-    if !valid {
-      return false
-    }
-  }
-  true
 }
 
 ///|
