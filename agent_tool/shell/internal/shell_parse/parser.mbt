@@ -196,15 +196,10 @@ fn is_fd_redirect_op(op : String) -> Bool {
 
 ///|
 fn is_fd_word(word : String) -> Bool {
-  if word == "" {
-    return false
+  lexscan word {
+    re"^[0-9]+$" => true
+    _ => false
   }
-  for ch in word {
-    if !(ch is ('0'..='9')) {
-      return false
-    }
-  }
-  true
 }
 
 ///|

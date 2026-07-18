@@ -440,12 +440,14 @@ async fn random_salt() -> String {
 
 ///|
 fn failure_message(error_text : String) -> String {
-  if error_text.strip_prefix("error: ") is Some(message) {
-    return "\{message}"
+  lexscan error_text {
+    (re"^error: ", after=message) => message.to_owned()
+    // `(.|\n)*` is greedy across lines, so the remainder follows the LAST
+    // marker occurrence — the same piece the split-and-take-last form chose.
+    (re"^(.|\n)* FAILED: ", after=last) =>
+      last.strip_suffix(")").unwrap_or(last).to_owned()
+    _ => error_text
   }
-  let marker = " FAILED: "
-  guard [..error_text.split(marker)] is [_, .., last] else { return error_text }
-  "\{last.strip_suffix(")").unwrap_or(last)}"
 }
 
 ///|

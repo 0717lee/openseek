@@ -79,24 +79,13 @@ fn scan_sed_args_for_in_place(args : Array[String], start : Int) -> Bool {
 /// scanner must skip that operand): a `-e`/`-f` cluster whose `e`/`f` is the last
 /// character, or `--expression`/`--file` without an attached `=value`.
 fn sed_option_consumes_next(arg : String) -> Bool {
-  if arg == "--expression" || arg == "--file" {
-    return true
-  }
-  guard arg.strip_prefix("-") is Some(options) &&
-    !options.has_prefix("-") &&
-    !options.is_empty() else {
-    return false
-  }
-  for view = options {
-    match view {
-      // `e`/`f` consume the remainder of the token; if they are the last char,
-      // the value is the next word.
-      ['e' | 'f', .. rest] => break rest is []
-      // `i` consumes the remainder as its in-place suffix, not the next word.
-      ['i', ..] => break false
-      [_, .. rest] => continue rest
-      [] => break false
-    }
+  lexscan arg {
+    re"^--(expression|file)$" => true
+    // A short cluster whose first `e`/`f`/`i` is an `e` or `f` in final
+    // position: that flag consumes the NEXT word as its value. An `i` first,
+    // or an `e`/`f` with an attached value, consumes nothing.
+    re"^-([ef]|[^ief\-][^ief]*[ef])$" => true
+    _ => false
   }
 }
 
@@ -105,9 +94,10 @@ fn sed_option_consumes_next(arg : String) -> Bool {
 /// (`/usr/bin/sed`, `./sed`) compares equal to `sed`. Handles both separators.
 fn command_basename(name : String) -> String {
   let normalized = name.replace_all(old="\\", new="/")
-  match normalized.rev_find("/") {
-    Some(slash) => normalized[slash + 1:].to_owned()
-    None => name
+  lexscan normalized {
+    // Greedy `.*` runs to the LAST slash; the remainder is the basename.
+    (re"^.*/", after=base) => base.to_owned()
+    _ => name
   }
 }
 
@@ -117,22 +107,14 @@ fn command_basename(name : String) -> String {
 /// `-Ei`). `-e`/`-f` consume the rest of the token as their value, so an `i`
 /// inside a script like `-e's/i/x/'` is not mistaken for `-i`.
 fn is_sed_in_place_flag(arg : String) -> Bool {
-  if arg == "--in-place" || arg.has_prefix("--in-place=") {
-    return true
+  lexscan arg {
+    re"^--in-place(=.*)?$" => true
+    // A short cluster whose first `e`/`f`/`i` is an `i` (any position — the
+    // rest of the token is its in-place suffix, e.g. `-i.bak`). Start-anchored
+    // prefix match on purpose: the suffix after `i` is arbitrary.
+    (re"^-([^ief\-][^ief]*)?i", after=_) => true
+    _ => false
   }
-  guard arg.strip_prefix("-") is Some(options) &&
-    !options.has_prefix("-") &&
-    !options.is_empty() else {
-    return false
-  }
-  for ch in options {
-    match ch {
-      'i' => return true
-      'e' | 'f' => return false
-      _ => ()
-    }
-  }
-  false
 }
 
 ///|
