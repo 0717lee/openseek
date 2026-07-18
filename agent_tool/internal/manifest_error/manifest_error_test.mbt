@@ -34,7 +34,7 @@ async test "manifest error rejects new moon.mod.json" {
 async test "manifest error allows existing moon.mod.json" {
   @vfs.with_tmpdir(prefix="openseek-edit-manifest-error-", dir => {
     let path = "\{dir}/moon.mod.json"
-    @fs.write_file(path, "{}", create_mode=CreateOrTruncate)
+    @vfs.FileSystem({ "moon.mod.json": "{}" }).write_to(dir)
     let error = @manifest_error.write_error(path, "{}")
     assert_true(error is None)
   })

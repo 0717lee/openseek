@@ -127,11 +127,9 @@ test "edit tool advertises the expected schema" {
 async test "edit tool applies a focused code change through the registry" {
   @vfs.with_tmpdir(tmpdir => {
     let path = "\{tmpdir}/openseek-edit-readme-example.mbt"
-    @fs.write_file(
-      path,
-      "fn greet() -> String {\n  \"hello\"\n}\n",
-      create_mode=CreateOrTruncate,
-    )
+    @vfs.FileSystem({
+      "openseek-edit-readme-example.mbt": "fn greet() -> String {\n  \"hello\"\n}\n",
+    }).write_to(tmpdir)
 
     let tools = @agent_tool.Tools([@edit.definition()])
     let arguments : Json = {

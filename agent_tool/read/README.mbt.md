@@ -173,11 +173,7 @@ async test "read tool reads a workspace note through the registry" {
 async test "read tool supports focused range reads" {
   @vfs.with_tmpdir(prefix="openseek-read-readme-", dir => {
     let path = "\{dir}/range.txt"
-    @fs.write_file(
-      path,
-      "alpha\nbeta\ngamma\ndelta",
-      create_mode=CreateOrTruncate,
-    )
+    @vfs.FileSystem({ "range.txt": "alpha\nbeta\ngamma\ndelta" }).write_to(dir)
 
     let tools = @agent_tool.Tools([@read.definition()])
     let arguments : Json = { "path": path, "start_line": 2, "max_lines": 2 }

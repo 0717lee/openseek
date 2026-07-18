@@ -116,7 +116,7 @@ test "write tool advertises the expected schema" {
 async test "write tool updates an implementation note through the registry" {
   @vfs.with_tmpdir(prefix="openseek-write-readme-", dir => {
     let path = "\{dir}/note.txt"
-    @fs.write_file(path, "old note", create_mode=CreateOrTruncate)
+    @vfs.FileSystem({ "note.txt": "old note" }).write_to(dir)
 
     let tools = @agent_tool.Tools([@write.definition()])
     // Build the arguments as JSON and stringify them, rather than embedding the

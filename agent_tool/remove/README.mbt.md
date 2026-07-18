@@ -102,10 +102,8 @@ test "remove tool advertises the expected schema" {
 async test "remove deletes an agent-created file through the registry" {
   @vfs.with_tmpdir(prefix="openseek-remove-readme-", dir => {
     let path = "\{dir}/scratch.mbt"
-    @fs.write_file(
-      path,
-      "pub fn f() -> Int { 1 }\n",
-      create_mode=CreateOrTruncate,
+    @vfs.FileSystem({ "scratch.mbt": "pub fn f() -> Int { 1 }\n" }).write_to(
+      dir,
     )
     // The session recorded that the agent created this file, as `write` would,
     // capturing its content digest so the delete gate can revalidate it.
@@ -141,11 +139,7 @@ async test "remove deletes an agent-created file through the registry" {
 async test "remove refuses a file the agent did not create" {
   @vfs.with_tmpdir(prefix="openseek-remove-readme-refuse-", dir => {
     let path = "\{dir}/lib.mbt"
-    @fs.write_file(
-      path,
-      "pub fn g() -> Int { 0 }\n",
-      create_mode=CreateOrTruncate,
-    )
+    @vfs.FileSystem({ "lib.mbt": "pub fn g() -> Int { 0 }\n" }).write_to(dir)
     // An empty file-state map: the agent never created this file this session.
     let tools = @agent_tool.Tools([@remove.definition()])
     let arguments : Json = { "path": path, "reason": "cleanup" }

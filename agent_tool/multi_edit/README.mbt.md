@@ -105,11 +105,9 @@ original edit index:
 async test "multi_edit applies fixes through the registry" {
   @vfs.with_tmpdir(tmpdir => {
     let path = "\{tmpdir}/multi-edit-readme-example.mbt"
-    @fs.write_file(
-      path,
-      "let a = old_a\nlet b = old_b\n",
-      create_mode=CreateOrTruncate,
-    )
+    @vfs.FileSystem({
+      "multi-edit-readme-example.mbt": "let a = old_a\nlet b = old_b\n",
+    }).write_to(tmpdir)
 
     let tools = @agent_tool.Tools([@multi_edit.definition()])
     let arguments : Json = {

@@ -77,7 +77,7 @@ Use `with_tmpdir` to get a self-cleaning scratch directory — no hardcoded
 async test "write and read back under a temporary directory" {
   @filesystem.with_tmpdir(dir => {
     let path = "\{dir}/note.txt"
-    @fs.write_file(path, "hello", create_mode=CreateOrTruncate)
+    @filesystem.FileSystem({ "note.txt": "hello" }).write_to(dir)
     assert_eq(@fs.read_file(path).text(), "hello")
   })
 }
