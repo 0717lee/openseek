@@ -21,7 +21,7 @@ pub struct ValidationProbeSpec {
 
 ///|
 /// Build a validation probe spec. Empty strings disable optional checks.
-pub fn ValidationProbeSpec::ValidationProbeSpec(
+fn ValidationProbeSpec::ValidationProbeSpec(
   name~ : String,
   command~ : Array[String],
   stdin? : String = "",
@@ -62,7 +62,7 @@ pub struct TrialArtifact {
 
 ///|
 /// Build a trial artifact entry for a completed prompt-task experiment trial.
-pub fn TrialArtifact::TrialArtifact(
+fn TrialArtifact::TrialArtifact(
   index~ : Int,
   workspace~ : String,
   log_path~ : String,
@@ -91,7 +91,7 @@ pub struct RunManifest {
 
 ///|
 /// Build a manifest for a completed prompt-task experiment run.
-pub fn RunManifest::RunManifest(
+fn RunManifest::RunManifest(
   model~ : String,
   problem_id~ : String,
   prompt_label~ : String,

@@ -13,20 +13,6 @@ pub struct EvalCase {
 }
 
 ///|
-/// The fixed case suite, ordered: exact replace, ambiguous replace,
-/// multiline replace, file creation, and a compile fix — one case per
-/// editing skill the `edit`/`write` tools must get right.
-pub fn eval_cases() -> Array[EvalCase] {
-  [
-    exact_replace_case(),
-    ambiguous_replace_case(),
-    multiline_replace_case(),
-    create_file_case(),
-    compile_fix_case(),
-  ]
-}
-
-///|
 /// The case trial `index` runs, cycling through `eval_cases()` so any trial
 /// count covers the suite evenly.
 pub fn case_for_trial(index : Int) -> EvalCase {

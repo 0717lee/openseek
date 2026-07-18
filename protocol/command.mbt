@@ -69,12 +69,6 @@ pub fn Command::to_json(self : Command) -> Json {
 }
 
 ///|
-/// The command as a JSONL line, newline included.
-pub fn Command::to_jsonl(self : Command) -> String {
-  self.to_json().stringify() + "\n"
-}
-
-///|
 /// Read one stdin line back into a `Command`.
 ///
 /// `Err` carries the text the engine reports to its controller as a

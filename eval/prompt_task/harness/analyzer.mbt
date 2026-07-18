@@ -9,7 +9,7 @@ pub struct ProbeResult {
 
 ///|
 /// Build one validation probe result.
-pub fn ProbeResult::ProbeResult(
+fn ProbeResult::ProbeResult(
   name~ : String,
   passed~ : Bool,
   reason~ : String,

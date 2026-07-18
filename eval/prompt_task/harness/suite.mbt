@@ -12,7 +12,7 @@ pub struct ProblemSpec {
 
 ///|
 /// Build one benchmark problem. Empty `prompt_label` falls back to `id`.
-pub fn ProblemSpec::ProblemSpec(
+fn ProblemSpec::ProblemSpec(
   id~ : String,
   prompt_label? : String = "",
   task_file~ : String,
@@ -51,7 +51,7 @@ pub struct SuiteConfig {
 
 ///|
 /// Build a suite configuration for many model/problem/repeat jobs.
-pub fn SuiteConfig::SuiteConfig(
+fn SuiteConfig::SuiteConfig(
   api_key~ : String,
   name~ : String,
   models~ : Array[@deepseek.Model],
@@ -96,7 +96,7 @@ pub struct ComboRun {
 
 ///|
 /// Build a suite combo manifest entry.
-pub fn ComboRun::ComboRun(
+fn ComboRun::ComboRun(
   model~ : String,
   problem_id~ : String,
   prompt_label~ : String,
@@ -124,7 +124,7 @@ pub struct SuiteManifest {
 
 ///|
 /// Build a durable suite manifest.
-pub fn SuiteManifest::SuiteManifest(
+fn SuiteManifest::SuiteManifest(
   name~ : String,
   out_dir~ : String,
   runs_per_combo~ : Int,
@@ -176,7 +176,7 @@ pub struct SuiteReport {
 
 ///|
 /// Build a combined suite analysis report.
-pub fn SuiteReport::SuiteReport(
+fn SuiteReport::SuiteReport(
   name~ : String,
   out_dir~ : String,
   runs_per_combo~ : Int,
@@ -710,7 +710,7 @@ pub fn SuiteReport::markdown(self : SuiteReport) -> String {
 
 ///|
 /// Render the suite report as standalone HTML.
-pub fn SuiteReport::html(self : SuiteReport) -> String {
+fn SuiteReport::html(self : SuiteReport) -> String {
   self.as_report().html()
 }
 

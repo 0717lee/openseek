@@ -119,19 +119,19 @@ pub fn EvalReport::markdown(self : EvalReport) -> String {
 
 ///|
 /// Render this prompt-task analysis report as standalone HTML.
-pub fn EvalReport::html(self : EvalReport) -> String {
+fn EvalReport::html(self : EvalReport) -> String {
   self.as_report().html()
 }
 
 ///|
 /// Render this single-session eval result as Markdown.
-pub fn EvalResult::markdown(self : EvalResult) -> String {
+fn EvalResult::markdown(self : EvalResult) -> String {
   self.as_report(out_dir="").markdown()
 }
 
 ///|
 /// Render this single-session eval result as standalone HTML.
-pub fn EvalResult::html(self : EvalResult) -> String {
+fn EvalResult::html(self : EvalResult) -> String {
   self.as_report(out_dir="").html()
 }
 

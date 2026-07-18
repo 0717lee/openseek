@@ -32,13 +32,11 @@ pub(all) enum DsVariant {
   V4Flash
   V4Pro
 } derive(Eq, @debug.Debug)
-pub impl Show for DsVariant
 
 pub(all) enum KimiVariant {
   K27Code
   K27CodeHighSpeed
 } derive(Eq, @debug.Debug)
-pub impl Show for KimiVariant
 
 pub(all) enum Model {
   Deepseek(DsVariant)
@@ -51,7 +49,6 @@ pub impl Show for Model
 pub(all) enum ResponseFormat {
   JsonObject
 } derive(Eq, @debug.Debug)
-pub impl Show for ResponseFormat
 
 pub(all) enum Role {
   System
@@ -59,7 +56,6 @@ pub(all) enum Role {
   Assistant
   Tool(String)
 } derive(Eq, @debug.Debug)
-pub impl Show for Role
 
 pub(all) enum ThinkingMode {
   No
