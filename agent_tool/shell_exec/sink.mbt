@@ -3,7 +3,7 @@
 /// larger output spills to a file and is rendered as a pointer plus a head
 /// preview. Matches the `shell` tool's foreground default so a command reads the
 /// same whether it runs in the foreground or the background.
-pub let default_inline_cap : Int = 12000
+let default_inline_cap : Int = 12000
 
 ///|
 /// Default hard cap: the sink retains at most this many characters of full
@@ -54,8 +54,8 @@ pub struct ShellOutputSink {
 ///|
 /// Create an empty sink. Non-positive caps are clamped to 1. With `spill_path`
 /// set, output past `inline_cap` spills there; without it the sink is memory-only.
-pub fn ShellOutputSink::new(
-  inline_cap? : Int = default_inline_cap,
+fn ShellOutputSink::new(
+  inline_cap~ : Int,
   hard_cap? : Int = default_hard_cap,
   spill_path? : String,
 ) -> ShellOutputSink {
@@ -86,7 +86,7 @@ pub fn ShellOutputSink::new(
 ///|
 /// Feed a raw output chunk from the process reader, decoding UTF-8 across chunk
 /// boundaries — an incomplete trailing sequence is carried to the next chunk.
-pub async fn ShellOutputSink::append_chunk(
+async fn ShellOutputSink::append_chunk(
   self : ShellOutputSink,
   chunk : Bytes,
 ) -> Unit {
@@ -106,7 +106,7 @@ pub async fn ShellOutputSink::append_chunk(
 /// `inline_cap`), keeps the first `inline_cap` characters in the memory head, and
 /// drops output past `hard_cap` (setting `truncated`). `seq` bumps when retained
 /// output grows.
-pub async fn ShellOutputSink::append_text(
+async fn ShellOutputSink::append_text(
   self : ShellOutputSink,
   text : String,
 ) -> Unit {
@@ -181,7 +181,7 @@ async fn ShellOutputSink::open_spill(
 ///|
 /// Flush any incomplete trailing UTF-8 bytes at end of stream (decoded lossily),
 /// so a multi-byte character that never completed is surfaced rather than lost.
-pub async fn ShellOutputSink::finish(self : ShellOutputSink) -> Unit {
+async fn ShellOutputSink::finish(self : ShellOutputSink) -> Unit {
   guard self.pending.length() > 0 else { return }
   // A non-empty pending buffer at end of stream is an incomplete (or invalid)
   // sequence — strict decoding would have rejected it, so mark it binary.
@@ -193,7 +193,7 @@ pub async fn ShellOutputSink::finish(self : ShellOutputSink) -> Unit {
 
 ///|
 /// Release the spill file descriptor. Reads after this fall back to the head.
-pub fn ShellOutputSink::close(self : ShellOutputSink) -> Unit {
+fn ShellOutputSink::close(self : ShellOutputSink) -> Unit {
   if self.file is Some(file) {
     file.close()
     self.file = None
@@ -204,7 +204,7 @@ pub fn ShellOutputSink::close(self : ShellOutputSink) -> Unit {
 /// Close and delete the spill file — for a retained execution that completed in
 /// the foreground (never adopted as a background job), so its temp file does not
 /// leak. Full output is no longer readable after this (the head remains).
-pub async fn ShellOutputSink::discard(self : ShellOutputSink) -> Unit {
+async fn ShellOutputSink::discard(self : ShellOutputSink) -> Unit {
   guard self.file is Some(_) else { return }
   self.close()
   if self.spill_path is Some(path) {
@@ -216,46 +216,46 @@ pub async fn ShellOutputSink::discard(self : ShellOutputSink) -> Unit {
 
 ///|
 /// Total full-output length in characters (≤ hard_cap).
-pub fn ShellOutputSink::size(self : ShellOutputSink) -> Int {
+fn ShellOutputSink::size(self : ShellOutputSink) -> Int {
   self.total_chars
 }
 
 ///|
 /// Output version, bumped whenever retained output grows.
-pub fn ShellOutputSink::seq(self : ShellOutputSink) -> Int {
+fn ShellOutputSink::seq(self : ShellOutputSink) -> Int {
   self.seq
 }
 
 ///|
 /// Whether full output was dropped at the hard cap.
-pub fn ShellOutputSink::truncated(self : ShellOutputSink) -> Bool {
+fn ShellOutputSink::truncated(self : ShellOutputSink) -> Bool {
   self.truncated
 }
 
 ///|
 /// Whether any invalid (non-UTF-8 / binary) bytes were decoded — the consumer
 /// may surface this as a "binary output" error instead of showing replacements.
-pub fn ShellOutputSink::had_invalid_utf8(self : ShellOutputSink) -> Bool {
+fn ShellOutputSink::had_invalid_utf8(self : ShellOutputSink) -> Bool {
   self.had_invalid
 }
 
 ///|
 /// The in-memory head: the first `inline_cap` characters. This is the *full*
 /// output when it fits inline; otherwise a preview. Synchronous.
-pub fn ShellOutputSink::head(self : ShellOutputSink) -> String {
+fn ShellOutputSink::head(self : ShellOutputSink) -> String {
   self.head.to_string()
 }
 
 ///|
 /// Whether output exceeded the inline cap (so a consumer should render a pointer,
 /// and full output lives in the spill file).
-pub fn ShellOutputSink::over_inline_cap(self : ShellOutputSink) -> Bool {
+fn ShellOutputSink::over_inline_cap(self : ShellOutputSink) -> Bool {
   self.total_chars > self.inline_cap
 }
 
 ///|
 /// The spill file's path, if output spilled to disk; `None` for memory-only.
-pub fn ShellOutputSink::spill_path(self : ShellOutputSink) -> String? {
+fn ShellOutputSink::spill_path(self : ShellOutputSink) -> String? {
   if self.file is Some(_) {
     self.spill_path
   } else {
@@ -267,7 +267,7 @@ pub fn ShellOutputSink::spill_path(self : ShellOutputSink) -> String? {
 /// The full retained output. Reads the spill file when output spilled; otherwise
 /// returns the in-memory head (which is the full output for a small command). On
 /// a read error it degrades to the head rather than raising.
-pub async fn ShellOutputSink::read_all(self : ShellOutputSink) -> String {
+async fn ShellOutputSink::read_all(self : ShellOutputSink) -> String {
   match self.file {
     Some(file) => {
       let bytes = file.read_exactly_at(self.file_bytes.to_int(), position=0) catch {
@@ -284,10 +284,7 @@ pub async fn ShellOutputSink::read_all(self : ShellOutputSink) -> String {
 /// a (possibly still-running) job, read from the tail of the spill file so a
 /// poller sees progress rather than the unchanging prefix. Degrades to the head
 /// on a read error or a memory-only sink.
-pub async fn ShellOutputSink::read_tail(
-  self : ShellOutputSink,
-  n : Int,
-) -> String {
+async fn ShellOutputSink::read_tail(self : ShellOutputSink, n : Int) -> String {
   guard n > 0 else { return "" }
   match self.file {
     Some(file) => {

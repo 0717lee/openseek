@@ -15,7 +15,7 @@ let reader_drain_grace_ms : Int = 200
 /// - `Exited(code)`: the child exited on its own with `code`.
 /// - `Killed`: the child was cancelled (`stop`, a reader error, or session
 ///   teardown) before a natural exit — no exit code is available.
-pub(all) enum ExecStatus {
+pub enum ExecStatus {
   Running
   Backgrounded
   Exited(Int)
@@ -24,7 +24,7 @@ pub(all) enum ExecStatus {
 
 ///|
 /// Whether a status is terminal (the child is gone).
-pub fn ExecStatus::is_terminal(self : ExecStatus) -> Bool {
+fn ExecStatus::is_terminal(self : ExecStatus) -> Bool {
   match self {
     Exited(_) | Killed => true
     Running | Backgrounded => false
@@ -314,7 +314,7 @@ pub fn ShellExecution::over_inline_cap(self : ShellExecution) -> Bool {
 
 ///|
 /// The spill file's path, if output spilled to disk.
-pub fn ShellExecution::spill_path(self : ShellExecution) -> String? {
+fn ShellExecution::spill_path(self : ShellExecution) -> String? {
   self.sink.spill_path()
 }
 

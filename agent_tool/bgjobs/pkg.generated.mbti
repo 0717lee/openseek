@@ -7,7 +7,6 @@ import {
 }
 
 // Values
-pub let default_hard_timeout_ms : Int
 
 // Errors
 
@@ -44,7 +43,7 @@ pub struct BgJobSnapshot {
   killed_by_time_limit : Bool
 }
 
-pub(all) enum BgJobStatus {
+pub enum BgJobStatus {
   Running
   Exited(Int)
   Stopped

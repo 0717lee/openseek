@@ -4,19 +4,19 @@
 /// (nothing is lost, the turn stays alive — issue #419: two real multi-hour
 /// silent stalls came from unbounded foreground waits), so the default can
 /// be tight. Without one the deadline kills, so it is generous.
-pub const DefaultForegroundTimeoutMs : Int = 120_000
+const DefaultForegroundTimeoutMs : Int = 120_000
 
 ///|
 /// Default foreground wait when no background runtime is wired (Windows and
 /// standalone registries): the deadline kills rather than detaches, so it is
 /// generous. Longer legitimate work must pass an explicit `timeout_ms`.
-pub const DefaultUnwiredForegroundTimeoutMs : Int = 600_000
+const DefaultUnwiredForegroundTimeoutMs : Int = 600_000
 
 ///|
 /// Ceiling for explicit `timeout_ms`. Longer work belongs in
 /// `run_in_background`, so an explicit value above this is an error rather
 /// than a silent clamp — a wait request is a semantic contract.
-pub const HardMaxForegroundTimeoutMs : Int = 600_000
+const HardMaxForegroundTimeoutMs : Int = 600_000
 
 ///|
 /// Tool definition for `shell`: runs `arguments.cmd` through the platform

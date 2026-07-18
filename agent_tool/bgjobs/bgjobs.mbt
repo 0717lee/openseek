@@ -12,7 +12,7 @@ let default_max_output_chars : Int = 12000
 ///   `Running` — a poller has no separate "detached" state).
 /// - `Exited(code)`: exited on its own with `code`.
 /// - `Stopped`: cancelled (`stop`, a reader error, or teardown) before exit.
-pub(all) enum BgJobStatus {
+pub enum BgJobStatus {
   Running
   Exited(Int)
   Stopped
@@ -22,7 +22,7 @@ pub(all) enum BgJobStatus {
 /// Default wall-clock lifetime for a background job (thirty minutes): long
 /// enough for real builds and suites, short enough that a runaway spinner —
 /// issue #419 saw one burn 131 minutes unnoticed — is reaped and surfaced.
-pub let default_hard_timeout_ms : Int = 1_800_000
+let default_hard_timeout_ms : Int = 1_800_000
 
 ///|
 /// Session-scoped registry of background ("detached") jobs, each backed by one
@@ -405,14 +405,6 @@ pub async fn BgJobRuntime::wait_exit(
       @async.with_timeout_opt(timeout_ms, () => job.exec.wait()) is Some(_)
     None => false
   }
-}
-
-///|
-/// Snapshots of every job the session has started.
-pub fn BgJobRuntime::list(self : BgJobRuntime) -> Array[BgJobSnapshot] {
-  [
-    for _, job in self.jobs => job.to_snapshot()
-  ]
 }
 
 ///|
