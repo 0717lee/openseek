@@ -1,6 +1,6 @@
 ///|
 /// System prompt for review mode: a read-only, compiler-grounded reviewer.
-pub fn review_system_prompt() -> String {
+fn review_system_prompt() -> String {
   (
     #|You are OpenSeek in code-review mode. You review code changes; you do not modify them.
     #|
@@ -14,7 +14,7 @@ pub fn review_system_prompt() -> String {
 
 ///|
 /// The review task: inspect the change set between `base` and HEAD.
-pub fn review_task(base : String) -> String {
+fn review_task(base : String) -> String {
   (
     $|Review the code changes between \{base} and HEAD in the current repository.
     $|

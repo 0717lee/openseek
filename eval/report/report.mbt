@@ -69,19 +69,6 @@ pub fn Report::Report(
 }
 
 ///|
-/// How many rows passed.
-pub fn Report::successes(self : Report) -> Int {
-  self.rows.count_if(row => row.success)
-}
-
-///|
-/// Whether every row passed — the run's exit-status verdict. Vacuously true
-/// for a report with no rows.
-pub fn Report::all_passed(self : Report) -> Bool {
-  self.successes() == self.rows.length()
-}
-
-///|
 /// Render the report as a human-facing markdown document: title, summary
 /// bullets, the trial table, and a log-paths section when any row kept one.
 pub fn Report::markdown(self : Report) -> String {
@@ -117,7 +104,7 @@ pub fn Report::markdown(self : Report) -> String {
 ///|
 /// Render the report as JSON for tooling (diffing runs, dashboards), with
 /// the success count precomputed alongside the raw rows.
-pub fn Report::to_json(self : Report) -> Json {
+fn Report::to_json(self : Report) -> Json {
   {
     "title": self.title,
     "summary": ([ for metric in self.summary => metric.to_json() ] : Json),
@@ -243,13 +230,6 @@ pub fn Report::html(self : Report) -> String {
   }
   out.write_string("</main></body></html>\n")
   out.to_string()
-}
-
-///|
-/// Write both renderings of this report under `out_dir` — the standard
-/// artifact layout eval runners leave behind.
-pub async fn Report::write_files(self : Report, out_dir : String) -> Unit {
-  write_files(out_dir, self.markdown(), self.to_json(), html=self.html())
 }
 
 ///|
@@ -458,7 +438,7 @@ fn markdown_fence(text : String) -> String {
 /// Make free text safe inside a markdown table cell: escape `|` and flatten
 /// newlines to spaces. Failure reasons quote arbitrary model and tool
 /// output, which would otherwise break the table layout.
-pub fn escape_table_cell(text : String) -> String {
+fn escape_table_cell(text : String) -> String {
   text
   |> String::replace_all(old="|", new="\\|")
   |> String::replace_all(old="\n", new=" ")

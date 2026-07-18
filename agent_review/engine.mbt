@@ -8,7 +8,7 @@ pub suberror ReviewError {
 
 ///|
 /// Default step budget for one review run.
-pub let default_review_max_steps : Int = 120
+let default_review_max_steps : Int = 120
 
 ///|
 /// Run a code review of the changes between `base` and HEAD and return the

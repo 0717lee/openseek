@@ -4,7 +4,7 @@
 /// validates the arguments, captures a valid report into `captured`, and ends
 /// the run via Finish. Malformed output is rejected with an error so the model
 /// retries instead of finishing with no report.
-pub fn submit_review_tool(
+fn submit_review_tool(
   captured : Ref[ReviewReport?],
 ) -> @agent_tool.AgentToolDefinition {
   AgentToolDefinition(

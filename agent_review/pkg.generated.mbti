@@ -2,27 +2,17 @@
 package "bobzhang/openseek/agent_review"
 
 import {
-  "bobzhang/openseek/agent_tool",
   "bobzhang/openseek/deepseek",
   "moonbitlang/core/debug",
   "moonbitlang/core/json",
-  "moonbitlang/core/ref",
 }
 
 // Values
 pub let current_schema_version : Int
 
-pub let default_review_max_steps : Int
-
-pub fn review_system_prompt() -> String
-
-pub fn review_task(String) -> String
-
 pub async fn run_review(String, @deepseek.Model, String, workspace_root? : String, max_steps? : Int, thinking? : @deepseek.ThinkingMode, api_url? : String) -> ReviewReport
 
 pub fn severities() -> Array[String]
-
-pub fn submit_review_tool(@ref.Ref[ReviewReport?]) -> @agent_tool.AgentToolDefinition
 
 // Errors
 pub suberror ReviewError {

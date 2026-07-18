@@ -7,7 +7,6 @@ import {
 }
 
 // Values
-pub const ProtocolVersion : String = "2025-11-25"
 
 // Errors
 pub(all) suberror McpError {

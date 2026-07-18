@@ -2,8 +2,6 @@
 package "bobzhang/openseek/eval/report"
 
 // Values
-pub fn escape_table_cell(String) -> String
-
 pub async fn write_files(String, String, Json, html? : String) -> Unit
 
 // Errors
@@ -26,7 +24,6 @@ pub fn Report::all_passed(Self) -> Bool
 pub fn Report::html(Self) -> String
 pub fn Report::markdown(Self) -> String
 pub fn Report::successes(Self) -> Int
-pub fn Report::to_json(Self) -> Json
 pub async fn Report::write_files(Self, String) -> Unit
 
 pub struct ReportRow {

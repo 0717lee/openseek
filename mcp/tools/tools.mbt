@@ -10,13 +10,13 @@ const MaxToolOutputChars : Int = 50000
 ///|
 /// The deadline for a connected server to answer `tools/list` (including
 /// pagination), so a wedged server delays engine startup instead of hanging it.
-pub const DefaultDiscoveryTimeoutMs : Int = 30000
+const DefaultDiscoveryTimeoutMs : Int = 30000
 
 ///|
 /// The deadline for one proxied `tools/call`: a wedged-but-alive server becomes
 /// a tool error instead of parking the turn forever (matching the repo rule that
 /// every hang-capable tool call is bounded, like the shell's).
-pub const CallTimeoutMs : Int = 120000
+const CallTimeoutMs : Int = 120000
 
 ///|
 /// Cap on one tool's description forwarded to the model — every request carries
@@ -39,17 +39,6 @@ const MaxTotalMcpTools : Int = 100
 /// Provider function-name cap: DeepSeek/Kimi function names are limited to 64
 /// characters of `[A-Za-z0-9_-]`.
 const MaxFunctionNameChars : Int = 64
-
-///|
-/// The namespaced, provider-safe tool name openseek exposes for `tool` from
-/// server `server`: `mcp__<server>__<tool>` with every character outside the
-/// provider's `[A-Za-z0-9_-]` function-name alphabet replaced by `-`, capped at
-/// 64 characters. The `mcp__` prefix keeps MCP tools from colliding with
-/// built-ins, and the server segment keeps two servers' identically named tools
-/// distinct. (Uniqueness after sanitization is enforced by `build`.)
-pub fn tool_name(server : String, tool : String) -> String {
-  cap_name("mcp__\{sanitize_segment(server)}__\{sanitize_segment(tool)}")
-}
 
 ///|
 /// Replace every character outside the provider function-name alphabet with `-`.
@@ -91,29 +80,6 @@ fn uniquify(seen : Map[String, Unit], name : String) -> String {
       return candidate
     }
   }
-}
-
-///|
-/// Discover `client`'s tools and wrap each as a namespaced agent tool. Raises if
-/// the server's `tools/list` fails.
-pub async fn tools_for_client(
-  server : String,
-  client : @mcp.McpClient,
-) -> Array[@agent_tool.AgentToolDefinition] {
-  // Skip exact repeats of one raw name (a misbehaving server aliasing one
-  // method) so they cannot eat the tool budget; `build`'s suffixing stays
-  // reserved for *distinct* names that collide after sanitization.
-  let seen_raw : Map[String, Unit] = Map([])
-  let bridged = []
-  for tool in client.list_tools() {
-    if seen_raw.contains(tool.name) {
-      @emit.emit(McpToolDuplicate(server~, tool=tool.name))
-      continue
-    }
-    seen_raw[tool.name] = ()
-    bridged.push(bridge_tool(server, client, tool))
-  }
-  bridged
 }
 
 ///|

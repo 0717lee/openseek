@@ -91,25 +91,6 @@ pub fn[T : Transport] Client::new(transport : T) -> Client {
 }
 
 ///|
-/// Install the handler run for each peer-initiated notification (`method`,
-/// `params`). Replaces any previous handler; it runs on the reader task, so it
-/// must not block on I/O.
-pub fn Client::set_notification_handler(
-  self : Client,
-  handler : (String, Json) -> Unit,
-) -> Unit {
-  self.on_notification = handler
-}
-
-///|
-/// Whether the client has closed. A closed client never answers again — every
-/// later request fails fast with `Closed` — so a pool holding one should discard
-/// it and connect afresh.
-pub fn Client::is_closed(self : Client) -> Bool {
-  self.closed
-}
-
-///|
 /// Issue a request and await its result. Concurrency-safe and order-independent:
 /// many requests may be outstanding at once, and each reply is routed to its
 /// request by id by the reader. Requires running `run_message_pump` and

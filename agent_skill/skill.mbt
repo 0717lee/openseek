@@ -16,25 +16,6 @@ fn Skill::Skill(name~ : String, description~ : String, path~ : String) -> Skill 
 }
 
 ///|
-/// The skill's short identifier, from frontmatter `name:` or the file stem.
-pub fn Skill::name(self : Skill) -> String {
-  self.name
-}
-
-///|
-/// One-line summary the model uses to decide relevance, from frontmatter
-/// `description:` (empty when the file declares none).
-pub fn Skill::description(self : Skill) -> String {
-  self.description
-}
-
-///|
-/// Path of the markdown file holding the full skill body.
-pub fn Skill::path(self : Skill) -> String {
-  self.path
-}
-
-///|
 /// Parse `name:` and `description:` from a markdown frontmatter block — the
 /// lines between a leading `---` and the next `---`. Anything missing falls
 /// back to `fallback_name` / empty: a malformed header demotes the skill's

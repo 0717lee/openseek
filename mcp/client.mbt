@@ -5,7 +5,7 @@
 ///|
 /// The MCP protocol version this client prefers and advertises in `initialize`
 /// (the current revision as of this writing).
-pub const ProtocolVersion : String = "2025-11-25"
+const ProtocolVersion : String = "2025-11-25"
 
 ///|
 /// Whether this client can speak `version`. The server echoes our preferred

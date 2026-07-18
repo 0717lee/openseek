@@ -4,7 +4,7 @@
 /// The default handshake deadline: a server that does not answer `initialize`
 /// within this many milliseconds is abandoned (so a non-MCP or wedged child
 /// cannot hang the caller).
-pub const DefaultHandshakeTimeoutMs : Int = 30000
+const DefaultHandshakeTimeoutMs : Int = 30000
 
 ///|
 /// A live stdio MCP connection: the initialized client plus an idempotent
@@ -20,12 +20,6 @@ struct StdioConnection {
 /// The initialized MCP client to issue `list_tools` / `call_tool` against.
 pub fn StdioConnection::client(self : StdioConnection) -> @mcp.McpClient {
   self.client
-}
-
-///|
-/// What the server reported from `initialize`.
-pub fn StdioConnection::init(self : StdioConnection) -> @mcp.InitializeResult {
-  self.init
 }
 
 ///|

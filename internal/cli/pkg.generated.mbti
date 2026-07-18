@@ -6,19 +6,9 @@ import {
 }
 
 // Values
-pub fn flag(@argparse.Matches, String) -> Bool
-
-pub fn non_empty_value(@argparse.Matches, String) -> String? raise
-
-pub fn parse_optional_positive_int(@argparse.Matches, String, String) -> Int? raise
-
 pub fn parse_positive_int(String, String) -> Int raise
 
-pub fn require_non_empty(@argparse.Matches, String, String) -> String raise
-
 pub fn value(@argparse.Matches, String) -> String raise
-
-pub fn values(@argparse.Matches, String) -> Array[String]
 
 // Errors
 

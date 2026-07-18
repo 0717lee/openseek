@@ -2,7 +2,7 @@
 
 ///|
 /// The default handshake deadline, matching the stdio transport's.
-pub const DefaultHandshakeTimeoutMs : Int = 30000
+const DefaultHandshakeTimeoutMs : Int = 30000
 
 ///|
 /// A live Streamable HTTP MCP connection: the initialized client plus an
@@ -19,12 +19,6 @@ struct HttpConnection {
 /// The initialized MCP client to issue `list_tools` / `call_tool` against.
 pub fn HttpConnection::client(self : HttpConnection) -> @mcp.McpClient {
   self.client
-}
-
-///|
-/// What the server reported from `initialize`.
-pub fn HttpConnection::init(self : HttpConnection) -> @mcp.InitializeResult {
-  self.init
 }
 
 ///|

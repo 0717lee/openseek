@@ -76,10 +76,10 @@ struct HttpTransport {
 /// runs one POST exchange as a cancellable task on the connection's group
 /// (`connect` wires it); `extra_headers` (e.g. `Authorization`) are added to
 /// every request.
-pub fn HttpTransport::new(
+fn HttpTransport::new(
   url : String,
   spawn~ : (async () -> Unit) -> @async.Task[Unit],
-  extra_headers? : Map[String, String] = Map([]),
+  extra_headers~ : Map[String, String],
 ) -> HttpTransport {
   {
     url,

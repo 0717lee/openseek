@@ -20,7 +20,7 @@ struct NdjsonTransport {
 /// subprocess transport cancels its reader/writer tasks — and should close the
 /// endpoints (and terminate any process). There is deliberately no default: a
 /// no-op `on_close` would leave the client's tasks and fds alive.
-pub fn NdjsonTransport::new(
+fn NdjsonTransport::new(
   reader : &@io.Reader,
   writer : &@io.Writer,
   on_close~ : () -> Unit,
