@@ -237,12 +237,35 @@ pub fn Tools::function_tools(self : Tools) -> Array[@deepseek.ToolDefinition] {
 ///|
 /// Dispatches a parsed tool call against `tools`. Returns an error response
 /// action when no definition matches.
+///
+/// A tool's own execution failure is caught HERE and turned into an error
+/// `ToolAction`, so the model sees it as an ordinary (recoverable) tool result
+/// and the turn continues — one boundary that spares every tool from wrapping
+/// each of its own filesystem/IO calls just to report a failure.
+///
+/// Cancellation is the exception: it is re-raised so the loop can abort the
+/// turn (see the terminal handler in `AgentLoop`, which maps it to
+/// `Interrupted`). That is also why this function stays raise-able rather than
+/// `noraise`: since `async` defaults to raising, marking it `noraise` would
+/// force cancellation to be caught and swallowed here too, and the turn would
+/// no longer be cancellable mid-tool-call.
 pub async fn execute_tool_call(
   call : AgentToolCall,
   tools : Tools,
 ) -> ToolAction {
   match tools.find(call.name) {
-    Some(tool) => tool.execute.run(call.arguments)
+    Some(tool) =>
+      tool.execute.run(call.arguments) catch {
+        error =>
+          if @async.is_being_cancelled() || @async.is_cancellation_error(error) {
+            raise error
+          } else {
+            ToolAction::respond(
+              "error: \{call.name} failed: \{error}",
+              is_error=true,
+            )
+          }
+      }
     None =>
       ToolAction::respond("error: unknown tool \{call.name}", is_error=true)
   }
@@ -412,6 +435,32 @@ async test "execute_tool_call dispatches to async executor" {
   guard result is Respond(output) else { fail("expected Respond") }
   assert_eq(output.content, "async-hi")
   assert_false(output.is_error)
+}
+
+///|
+async fn async_boom(_args : Json) -> ToolAction {
+  @async.pause()
+  fail("disk on fire")
+}
+
+///|
+async test "execute_tool_call turns a tool failure into a recoverable error result" {
+  let tools = Tools([
+    {
+      name: "boom",
+      description: "Always fails.",
+      schema: JsonSchema({ "type": "object" }),
+      execute: Async(async_boom),
+      control: false,
+    },
+  ])
+  let call = AgentToolCall(ToolCall(id="call_1", name="boom", arguments="{}"))
+  // The tool's failure is caught at the dispatch boundary and returned as an
+  // error action the model can react to — the turn is NOT aborted.
+  let result = execute_tool_call(call, tools)
+  guard result is Respond(output) else { fail("expected Respond") }
+  assert_true(output.is_error)
+  assert_true(output.content.contains("boom failed"))
 }
 
 ///|

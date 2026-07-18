@@ -95,20 +95,14 @@ async fn remove_file(
     )
   }
 
-  let exists = @fs.exists(path) catch {
-    error if @async.is_being_cancelled() => raise error
-    error => return err("\{error}")
-  }
+  let exists = @fs.exists(path)
   if !exists {
     return err("no such file")
   }
   // Classify the final component WITHOUT following a symlink: a path replaced by
   // a symlink since `write` recorded it must be refused, not followed to whatever
   // it now points at.
-  let kind = @fs.kind(path, follow_symlink=false) catch {
-    error if @async.is_being_cancelled() => raise error
-    error => return err("\{error}")
-  }
+  let kind = @fs.kind(path, follow_symlink=false)
   guard kind is Regular else {
     return err("not a regular file; remove deletes regular files")
   }
@@ -126,11 +120,7 @@ async fn remove_file(
   // since the agent wrote it (a `git checkout` restoring a tracked file, a `mv`)
   // fails this and is refused. `record_edited` already downgrades a `Created`
   // file rebound before an edit, so an edit cannot launder a rebind either.
-  let current_text = @fs.read_file(path).text() catch {
-    error if @async.is_being_cancelled() => raise error
-    error =>
-      return err("could not read the file to verify its identity: \{error}")
-  }
+  let current_text = @fs.read_file(path).text()
   guard file_state.created_and_unchanged(
     path,
     @agent_tool.content_digest(current_text),
@@ -139,10 +129,7 @@ async fn remove_file(
       "the agent created this file this session but its content has changed since (rebound or externally modified) — refusing to remove what may no longer be the file it created",
     )
   }
-  @fs.remove(path) catch {
-    error if @async.is_being_cancelled() => raise error
-    error => return err("\{error}")
-  }
+  @fs.remove(path)
   // Drop the provenance so a path recreated after this removal is not treated as
   // still agent-created — otherwise a later remove could delete a different file
   // that happens to land at the same path.
