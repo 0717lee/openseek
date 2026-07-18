@@ -210,6 +210,20 @@ async test "read-only shell blocks source-mutating moon commands" {
 }
 
 ///|
+/// Orchestrates one shell call: argument guards, the background-vs-foreground
+/// split, the run itself, then formats the outcome into a `ToolAction`.
+///
+/// Flow (agent path; `collect_shell_output` is the raw, guardrail-free reuse
+/// entry, e.g. the TUI `!` command, and joins at `collect_process_output`):
+///
+///   execute_with_workspace
+///     └─ shell
+///          ├─ run_in_background → start_background
+///          └─ foreground        → run_agent_shell_with_tree_precheck
+///               ├─ spawn=Some (session group) → detach on timeout
+///               └─ spawn=None (per-call)      → collect_process_output
+///   result → ShellRunResult { Executed | TimedOut | Detached | BinaryOutput
+///            | PreblockedSourceTree } → shell formats → ToolAction
 async fn shell(
   input : @decode.ShellInput,
   parsed_command : @shell_parse.ParseResult,
@@ -227,15 +241,13 @@ async fn shell(
     )
   }
   if cwd is Some(cwd) {
-    let exists = @fs.exists(cwd)
-    if !exists {
+    guard @fs.exists(cwd) else {
       return @agent_tool.ToolAction::respond(
         "error: cwd does not exist: \{cwd}",
         is_error=true,
       )
     }
-    let kind = @fs.kind(cwd)
-    if kind != Directory {
+    guard @fs.kind(cwd) is Directory else {
       return @agent_tool.ToolAction::respond(
         "error: cwd is not a directory: \{cwd}",
         is_error=true,

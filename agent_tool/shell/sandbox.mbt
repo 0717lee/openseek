@@ -625,25 +625,18 @@ fn is_source_readonly_moon_subcommand(
 }
 
 ///|
+/// Whether `redirect` writes a file (so its target may need source-write
+/// guarding), skipping any leading fd number. `>&` is a file write only when
+/// its target is a path, not an fd dup (`2>&1`). Each arm anchors with `$` so
+/// the operator must match in full — the exact-string equivalent of the
+/// original strip-then-literal-match, not a looser prefix; the end anchor also
+/// makes the arms mutually exclusive (`>` backtracks to `>>` on `">>"`).
 fn redirect_writes_file(redirect : @shell_parse.Redirect) -> Bool {
-  match strip_fd_prefix(redirect.op) {
-    ">" | ">|" | ">>" | "<>" | "&>" | "&>>" => true
-    ">&" => !is_fd_redirect_target(redirect.target)
+  lexscan redirect.op {
+    re"^[0-9]*" + re">&$" => !is_fd_redirect_target(redirect.target)
+    re"^[0-9]*" + re"(>|>\||>>|<>|&>|&>>)$" => true
     _ => false
   }
-}
-
-///|
-fn strip_fd_prefix(op : String) -> String {
-  let mut index = 0
-  for ch in op {
-    if ch is ('0'..='9') {
-      index += 1
-    } else {
-      break
-    }
-  }
-  op[index:].to_owned()
 }
 
 ///|
@@ -660,6 +653,22 @@ fn is_fd_redirect_target(target : String) -> Bool {
 }
 
 ///|
+/// The protected workspace source file a write redirect in `parsed` would
+/// clobber, or `None` when no simple command redirects into one. Backs
+/// `shell`'s "source file write redirect" pre-run block: a redirect like
+/// `echo x > src/foo.mbt` or `moon fmt >> lib.mbt` sidesteps the
+/// `edit`/`multi_edit` tools that source changes must go through, so `shell`
+/// refuses it up front rather than let it overwrite tracked source. The scan
+/// covers the write forms `redirect_writes_file` recognizes (`>`, `>|`, `>>`,
+/// `<>`, `&>`, `&>>`, and `>&` to a path) and returns on the first target that
+/// `is_protected_workspace_source_path` flags.
+///
+/// Only `Simple` command lines are inspected (a non-simple parse returns
+/// `None`); the sandbox's `deny file-write*` rules on protected source paths are
+/// the runtime backstop for what this parse-based pass cannot see.
+/// `workspace_root` and `cwd` are canonicalized and existing symlinks followed
+/// first, so a redirect that reaches source through an existing link is still
+/// caught, and the result is the resolved real path of that target.
 async fn direct_source_write_redirect_target(
   parsed : @shell_parse.ParseResult,
   workspace_root : String,
