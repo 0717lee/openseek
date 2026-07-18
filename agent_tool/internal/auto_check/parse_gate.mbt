@@ -326,7 +326,7 @@ fn loc_line_span(loc : String) -> (Int, Int)? {
       let end_ = @string.parse_int(end_) catch { _ => return None }
       Some((start, if end_ < start { start } else { end_ }))
     }
-    (re"^[0-9]+" as start) + re"(:.*|-)?$" => {
+    (re"^[0-9]+" as start) + re"(:.*|-.*)?$" => {
       let start = @string.parse_int(start) catch { _ => return None }
       Some((start, start))
     }
@@ -577,4 +577,23 @@ async test "content_parse_errors gates .mbt.md, moon.mod and moon.pkg" {
   assert_true(pkg_bad.errors.length() > 0)
   // A non-syncheck path never runs the gate — the caller fails open.
   assert_true(content_parse_errors("moon.work", "members = [ ]\n") is None)
+}
+
+///|
+/// Fidelity table for the compiler's lenient loc forms: bare starts, missing
+/// or malformed ends (which fall back to the start line), and reversed spans
+/// (clamped to the start).
+test "loc_line_span accepts every lenient loc form" {
+  debug_inspect(loc_line_span("7:1-9:2"), content="Some((7, 9))")
+  debug_inspect(loc_line_span("7:1"), content="Some((7, 7))")
+  debug_inspect(loc_line_span("7"), content="Some((7, 7))")
+  debug_inspect(loc_line_span("7-9"), content="Some((7, 9))")
+  debug_inspect(loc_line_span("7-x"), content="Some((7, 7))")
+  debug_inspect(loc_line_span("7-"), content="Some((7, 7))")
+  debug_inspect(loc_line_span("7:1-x"), content="Some((7, 7))")
+  debug_inspect(loc_line_span("7:1-"), content="Some((7, 7))")
+  debug_inspect(loc_line_span("9:2-7:1"), content="Some((9, 9))")
+  debug_inspect(loc_line_span("x"), content="None")
+  debug_inspect(loc_line_span(""), content="None")
+  debug_inspect(loc_line_span(":1"), content="None")
 }
