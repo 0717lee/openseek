@@ -281,13 +281,12 @@ async fn create_parent_dirs(path : String) -> Unit {
 /// The directory portion of `path` (before the last `/` or `\`), or `""` when
 /// the path has no directory component or is at the filesystem root.
 fn parent_dir(path : String) -> String {
-  let slash = path.rev_find("/").unwrap_or(-1)
-  let backslash = path.rev_find("\\").unwrap_or(-1)
-  let cut = if slash > backslash { slash } else { backslash }
-  if cut <= 0 {
-    ""
-  } else {
-    path[:cut].to_owned()
+  // Everything before the last `/` or `\` — greedy prefix, then a separator,
+  // then a separator-free tail. No separator (or one at index 0) means no
+  // directory component.
+  lexscan path {
+    (re"^(.|\n)*" as dir) + re"[/\\][^/\\]*$" => dir.to_owned()
+    _ => ""
   }
 }
 

@@ -3,12 +3,12 @@
 /// rendering. This keeps tool argument errors stable when validation lives in
 /// an internal package and the raw error string includes source locations.
 pub fn failure_message(error_text : String) -> String {
-  let marker = " FAILED: "
-  guard error_text.rev_find(marker) is Some(cut) else { return error_text }
-  let message = error_text[cut + marker.length():]
-  match message.strip_suffix(")") {
-    Some(trimmed) => trimmed.to_owned()
-    None => message.to_owned()
+  lexscan error_text {
+    // Greedy across lines to the LAST ` FAILED: ` marker — the same piece
+    // rev_find chose.
+    (re"^(.|\n)* FAILED: ", after=message) =>
+      message.strip_suffix(")").unwrap_or(message).to_owned()
+    _ => error_text
   }
 }
 

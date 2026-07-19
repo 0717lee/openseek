@@ -909,18 +909,10 @@ fn root_label(path : String) -> String {
 ///|
 fn path_tail(path : String) -> String {
   let trimmed = trim_trailing_path_separators(path)
-  match last_path_separator(trimmed) {
-    Some(index) => trimmed[index + 1:].to_owned()
-    None => trimmed
-  }
-}
-
-///|
-fn last_path_separator(path : String) -> Int? {
-  match (path.rev_find("/"), path.rev_find("\\")) {
-    (Some(a), Some(b)) => Some(if a > b { a } else { b })
-    (Some(a), None) | (None, Some(a)) => Some(a)
-    (None, None) => None
+  if trimmed =~ (re"^(.|\n)*[/\\]", after~) {
+    after.to_owned()
+  } else {
+    trimmed
   }
 }
 

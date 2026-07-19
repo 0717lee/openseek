@@ -957,35 +957,22 @@ fn sidebar_groups(rows : Array[SessionRow]) -> Array[String] {
 }
 
 ///|
-/// Index of the last `/` or `\` in `p`, or -1 when there is none.
-fn last_separator(p : String) -> Int {
-  match (p.rev_find("/"), p.rev_find("\\")) {
-    (Some(a), Some(b)) => if a > b { a } else { b }
-    (Some(a), None) | (None, Some(a)) => a
-    (None, None) => -1
-  }
-}
-
-///|
-/// The directory portion of `p` (before the last separator), or `""` when `p`
-/// has no directory component.
+/// The directory portion of `p` (before the last `/` or `\`), or `""` when
+/// `p` has no directory component.
 fn parent_dir(p : String) -> String {
-  let i = last_separator(p)
-  if i < 0 {
-    ""
-  } else {
-    p[:i].to_owned()
+  lexscan p {
+    (re"^(.|\n)*" as dir) + re"[/\\][^/\\]*$" => dir.to_owned()
+    _ => ""
   }
 }
 
 ///|
 /// The last path segment of `p`.
 fn path_basename(p : String) -> String {
-  let i = last_separator(p)
-  if i < 0 {
-    p
+  if p =~ (re"^(.|\n)*[/\\]", after~) {
+    after.to_owned()
   } else {
-    p[i + 1:].to_owned()
+    p
   }
 }
 

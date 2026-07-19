@@ -196,29 +196,14 @@ fn server_label(server : @mcpconfig.McpServer) -> String {
 /// scheme, host, and path — enough to identify the endpoint without echoing
 /// embedded credentials.
 fn redact_url(url : String) -> String {
-  let cut_query = match url.find("?") {
-    Some(q) => url[:q].to_owned()
-    None => url
-  }
-  let cut_fragment = match cut_query.find("#") {
-    Some(h) => cut_query[:h].to_owned()
-    None => cut_query
-  }
-  // The authority starts after `://` when a scheme is present, else at the
-  // string's start — a schemeless `user:pass@host/…` (which the decoder
-  // accepts) must be redacted too.
-  let host_start = match cut_fragment.find("://") {
-    Some(scheme_end) => scheme_end + 3
-    None => 0
-  }
-  let authority_end = match cut_fragment[host_start:].find("/") {
-    Some(slash) => host_start + slash
-    None => cut_fragment.length()
-  }
-  match cut_fragment[host_start:authority_end].find("@") {
-    Some(at) =>
-      cut_fragment[:host_start].to_owned() +
-      cut_fragment[host_start + at + 1:].to_owned()
-    None => cut_fragment
+  // Keep everything before the first `?` or `#`, then drop a `userinfo@` in
+  // the authority (after an optional scheme, before the first `/`). The
+  // scheme arm requires `://` before any `/`, so an `@` later in the path
+  // never redacts.
+  let kept = if url =~ (re"[?#]", before~, after=_) { before } else { url }
+  lexscan kept {
+    (re"^([^/]*://)?" as scheme) + re"[^/@]*@" + (re"(.|\n)*$" as rest) =>
+      "\{scheme}\{rest}"
+    _ => kept.to_owned()
   }
 }
