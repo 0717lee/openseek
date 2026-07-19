@@ -539,7 +539,7 @@ test "auto-continue requires a finished idle serving turn with budget" {
 ///              background-job exits ───── BackgroundNotice
 ///   pump: for ;; match step
 ///     ├─ Wire(Prompt)          ── active? queue pending : start turn
-///     ├─ Wire(Steer(Prompt))   ── turn running? queue steer : reject (resubmit)
+///     ├─ Wire(Steer(Prompt))   ── turn running │ prompt queued? queue steer : reject
 ///     ├─ Wire(Steer(Command│Notice)) ── queue losslessly; idle ⇒ drain to log
 ///     ├─ Wire(Cancel)          ── cancel active work; disarm auto-continue
 ///     ├─ Wire(Compact)         ── idle? start compact : queue
