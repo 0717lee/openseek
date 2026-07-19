@@ -99,6 +99,27 @@ fn ToolCallOutcome::of_finish(outcome : FinishOutcome) -> ToolCallOutcome {
 let ceiling_skip_note : String = "skipped: the turn is yielding at the context ceiling; re-issue after the checkpoint if still needed"
 
 ///|
+/// Turn skeleton — one provider round per step; every exit lands in exactly
+/// one labeled terminal:
+///
+///   for step < max_steps:
+///     prepare_step ── chat(step)
+///     ├─ no tool calls
+///     │   ├─ no steers ── goal unchecked? ─ goal-check round ─ (seal │ continue)
+///     │   │               else finish_turn ─────────────────── (seal │ continue)
+///     │   └─ steers ── record answer as a plain assistant message
+///     │                ├─ soft ceiling ── yield (checkpoint; steers survive)
+///     │                └─ apply steers ── continue
+///     ├─ hard ceiling ── record assistant ── salvage a finish?
+///     │   ├─ salvaged ── (done │ continue │ yield)
+///     │   └─ close the batch with skip notes ── yield
+///     └─ tool batch ── handle_tool_calls ── (continue │ done │ budget yield)
+///   nobreak ── Terminal(Failed("max steps exhausted"))
+///   catch   ── Terminal(Interrupted │ Failed) ── re-raise
+///
+/// "seal │ continue": finishing consults the checkpoint policy — a turn that
+/// completes at the ceiling checkpoints first, and a steer landing during that
+/// checkpoint converts the finish into a continuation.
 async fn AgentLoop::run(
   self : Self,
   session : @agent_session.Session,

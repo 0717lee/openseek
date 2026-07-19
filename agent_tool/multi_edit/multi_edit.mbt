@@ -174,6 +174,17 @@ priv struct PreparedFile {
 /// file first; if any edit fails (or any file can't be read or is write-guarded)
 /// nothing is written. Writes happen only once the entire batch is clean, which
 /// keeps partial application limited to a raw filesystem write error.
+/// Batch pipeline — validate everything, gate, then write; failures before the
+/// first write always mean "no changes applied":
+///
+///   resolve paths ── group contiguous edits per resolved file
+///   validate every group ── load ── anchor-check each edit ── plan the write
+///     └─ ANY failure ── aggregate all failures ── report; nothing written
+///   parse gate ── would-be content worse than the original? ── reject batch
+///   apply writes in file order
+///     └─ IO fault mid-batch ── report with "earlier files may be written"
+///   auto check (source files) ── errors above revert_when_errors_above?
+///     └─ revert every written file ── report per-file revert status
 async fn multi_edit_files(
   workspace_root : String,
   edits : Array[@decode.MultiEditItem],

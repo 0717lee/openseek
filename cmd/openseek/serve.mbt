@@ -531,6 +531,24 @@ test "auto-continue requires a finished idle serving turn with budget" {
 /// did not ask for. `cancel` interrupts the current active work but never the
 /// process. stdin EOF is the shutdown signal: the running work finishes
 /// first, then the loop drains and exits.
+/// Session-server skeleton — one steps queue, three producers, one pump;
+/// `active_work` is the only mode state (turn │ compact │ idle):
+///
+///   producers: stdin reader ──────────── Wire(command)
+///              turn/compact completions ─ TurnDone(finished~) │ CompactDone
+///              background-job exits ───── BackgroundNotice
+///   pump: for ;; match step
+///     ├─ Wire(Prompt)          ── active? queue pending : start turn
+///     ├─ Wire(Steer(Prompt))   ── turn running? queue steer : reject (resubmit)
+///     ├─ Wire(Steer(Command│Notice)) ── queue losslessly; idle ⇒ drain to log
+///     ├─ Wire(Cancel)          ── cancel active work; disarm auto-continue
+///     ├─ Wire(Compact)         ── idle? start compact : queue
+///     ├─ Wire(Goal)            ── durable marker; auto=true arms auto-continue
+///     ├─ BackgroundNotice      ── idle? drain queued context to the log
+///     ├─ TurnDone              ── drain context ── start next pending work
+///     │                           └─ armed goal(auto) unmet ⇒ auto-continue
+///     ├─ CompactDone           ── adopt compacted session ── start next pending
+///     └─ Shutdown              ── exit serve~
 async fn run_serve(
   matches : @argparse.Matches,
   workspace_root~ : String,
