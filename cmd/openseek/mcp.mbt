@@ -196,14 +196,20 @@ fn server_label(server : @mcpconfig.McpServer) -> String {
 /// scheme, host, and path — enough to identify the endpoint without echoing
 /// embedded credentials.
 fn redact_url(url : String) -> String {
-  // Keep everything before the first `?` or `#`, then drop a `userinfo@` in
-  // the authority (after an optional scheme, before the first `/`). The
-  // scheme arm requires `://` before any `/`, so an `@` later in the path
-  // never redacts.
+  // Cut at the first `?` or `#`, then locate the authority after the FIRST
+  // `://` anywhere — matching the decoder's leniency and staying fail-closed
+  // for malformed values like `/https://user:secret@host` — and drop a
+  // `userinfo@` that precedes any `/` in what follows. The userinfo arm is
+  // start-anchored on purpose: an unanchored lexscan arm SEARCHES, and would
+  // redact an `@` sitting in the path.
   let kept = if url =~ (re"[?#]", before~, after=_) { before } else { url }
-  lexscan kept {
-    (re"^([^/]*://)?" as scheme) + re"[^/@]*@" + (re"(.|\n)*$" as rest) =>
-      "\{scheme}\{rest}"
-    _ => kept.to_owned()
+  let (prefix, rest) = if kept =~ (re"://", before~, after~) {
+    ("\{before}://", after)
+  } else {
+    ("", kept)
+  }
+  lexscan rest {
+    re"^[^/@]*@" + (re"(.|\n)*$" as tail) => "\{prefix}\{tail}"
+    _ => "\{prefix}\{rest}"
   }
 }
