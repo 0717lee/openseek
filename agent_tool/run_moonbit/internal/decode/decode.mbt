@@ -1,10 +1,12 @@
 ///|
 /// Decoded arguments of the `run_moonbit` tool: a self-contained MoonBit
-/// program (`.mbtx` single-file script) to compile and run, plus the backend
-/// `target` to run it on.
+/// program (`.mbtx` single-file script) to compile and run, the backend
+/// `target` to run it on, and an optional `cwd` (the working directory the
+/// program runs in; `None` means the workspace root).
 pub struct RunMoonbitInput {
   source : String
   target : String
+  cwd : String?
 } derive(Debug)
 
 ///|
@@ -18,7 +20,8 @@ fn valid_target(target : String) -> Bool {
 /// Decode `run_moonbit` tool-call arguments. `source` is a required string
 /// holding a full `.mbtx` program (an optional leading `import { … }` block,
 /// then the program including its own `main`). `target` is an optional backend
-/// name defaulting to `native`. Failures name the offending field.
+/// name defaulting to `native`. `cwd` is an optional working directory for the
+/// program (defaults to the workspace root). Failures name the offending field.
 pub fn decode(arguments : Json) -> RunMoonbitInput raise {
   match arguments {
     { "source": String(source), .. } => {
@@ -31,7 +34,13 @@ pub fn decode(arguments : Json) -> RunMoonbitInput raise {
       guard valid_target(target) else {
         fail("arguments.target to be one of native, wasm, wasm-gc, js, llvm")
       }
-      { source, target }
+      let cwd = match arguments {
+        { "cwd": String(c), .. } => Some(c)
+        { "cwd": Null, .. } => None
+        { "cwd": _, .. } => fail("arguments.cwd to be a string")
+        _ => None
+      }
+      { source, target, cwd }
     }
     Object(_) => fail("arguments.source")
     _ => fail("object arguments")
@@ -49,6 +58,23 @@ test "decode reads source with the default native target" {
 test "decode accepts an explicit target" {
   let input = decode({ "source": "fn main {  }", "target": "wasm-gc" })
   assert_eq(input.target, "wasm-gc")
+}
+
+///|
+test "decode defaults cwd to None and reads an explicit cwd" {
+  assert_true(decode({ "source": "x" }).cwd is None)
+  assert_eq(decode({ "source": "x", "cwd": "sub/dir" }).cwd, Some("sub/dir"))
+}
+
+///|
+test "decode rejects a non-string cwd" {
+  let failed = try {
+    decode({ "source": "x", "cwd": 3 }) |> ignore
+    false
+  } catch {
+    _ => true
+  }
+  assert_true(failed)
 }
 
 ///|

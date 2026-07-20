@@ -14,6 +14,7 @@ pub fn decode(Json) -> RunMoonbitInput raise
 pub struct RunMoonbitInput {
   source : String
   target : String
+  cwd : String?
 } derive(@debug.Debug)
 
 // Type aliases

@@ -6,7 +6,7 @@ import {
 }
 
 // Values
-pub fn definition() -> @agent_tool.AgentToolDefinition
+pub fn definition(workspace_root~ : String) -> @agent_tool.AgentToolDefinition
 
 // Errors
 

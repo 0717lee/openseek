@@ -143,7 +143,7 @@ pub async fn[X] build_tools(
       @remove.definition(workspace_root~, file_state~),
       @plan.definition(),
       @goal.definition(),
-      @run_moonbit.definition(),
+      @run_moonbit.definition(workspace_root~),
       @finish.definition(),
     ] +
     extra_tools,

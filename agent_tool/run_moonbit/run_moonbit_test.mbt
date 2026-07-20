@@ -1,7 +1,21 @@
 ///|
+/// Run `source` in a fresh, auto-cleaned workspace, which is also the default
+/// working directory the program runs in.
 async fn run(source : String) -> @agent_tool.ToolOutput {
-  let action = match @run_moonbit.definition().execute {
-    Async(execute) => execute({ "source": source })
+  @vfs.with_tmpdir(prefix="run-moonbit-ws-", ws => {
+    run_in(ws, { "source": source })
+  })
+}
+
+///|
+/// Run with an explicit `workspace_root` and raw arguments (for cwd / target /
+/// decode-failure cases).
+async fn run_in(
+  workspace_root : String,
+  arguments : Json,
+) -> @agent_tool.ToolOutput {
+  let action = match @run_moonbit.definition(workspace_root~).execute {
+    Async(execute) => execute(arguments)
     Sync(_) => fail("run_moonbit should be async")
   }
   guard action is Respond(output) else { fail("expected Respond") }
@@ -25,49 +39,77 @@ async test "surfaces a compile error via moon's own diagnostics" {
 }
 
 ///|
-async test "reads a file through an inline import block" {
-  @vfs.with_tmpdir(dir => {
-    @fs.write_file(
-      "\{dir}/note.txt",
-      "one\ntwo\n",
-      create_mode=CreateOrTruncate,
-    )
-    let out = run(
-      (
+async test "reads a workspace file by a RELATIVE path (default cwd = workspace)" {
+  @vfs.with_tmpdir(ws => {
+    @fs.write_file("\{ws}/note.txt", "one\ntwo\n", create_mode=CreateOrTruncate)
+    let out = run_in(ws, {
+      "source": (
         #|import { "moonbitlang/async", "moonbitlang/async/fs", "moonbitlang/async/stdio" }
         #|
         #|async fn main {
-        #|  let text = @fs.read_file("$P").text()
+        #|  let text = @fs.read_file("note.txt").text()
         #|  @stdio.stdout.write("lines=\{[..text.split("\n")].filter(l => !l.is_empty()).length()}\n")
         #|}
-      ).replace_all(old="$P", new="\{dir}/note.txt"),
-    )
+      ),
+    })
     assert_false(out.is_error)
     assert_true(out.content.contains("lines=2"))
   })
 }
 
 ///|
+async test "cwd argument overrides the working directory" {
+  @vfs.with_tmpdir(elsewhere => {
+    @vfs.with_tmpdir(target => {
+      @fs.write_file(
+        "\{target}/marker.txt",
+        "CWD-OK\n",
+        create_mode=CreateOrTruncate,
+      )
+      // workspace_root is `elsewhere` (no marker), but cwd points at `target`.
+      let out = run_in(elsewhere, {
+        "source": (
+          #|import { "moonbitlang/async", "moonbitlang/async/fs", "moonbitlang/async/stdio" }
+          #|
+          #|async fn main {
+          #|  @stdio.stdout.write(@fs.read_file("marker.txt").text())
+          #|}
+        ),
+        "cwd": target,
+      })
+      assert_false(out.is_error)
+      assert_true(out.content.contains("CWD-OK"))
+    })
+  })
+}
+
+///|
+async test "a non-existent cwd is reported, not run" {
+  let out = run_in(".", {
+    "source": "fn main { println(1) }",
+    "cwd": "/no/such/run-moonbit/dir",
+  })
+  assert_true(out.is_error)
+  assert_true(out.content.contains("does not exist"))
+}
+
+///|
 async test "rejects non-string source arguments" {
-  let action = match @run_moonbit.definition().execute {
-    Async(execute) => execute({ "code": "x" })
-    Sync(_) => fail("run_moonbit should be async")
-  }
-  guard action is Respond(output) else { fail("expected Respond") }
-  assert_true(output.is_error)
-  assert_true(output.content.contains("run_moonbit requires"))
+  let out = run_in(".", { "code": "x" })
+  assert_true(out.is_error)
+  assert_true(out.content.contains("run_moonbit requires"))
 }
 
 ///|
 async test "runs a pure snippet on a non-native target" {
-  let action = match @run_moonbit.definition().execute {
-    Async(execute) =>
-      execute({ "source": "fn main { println(6 * 7) }", "target": "js" })
-    Sync(_) => fail("run_moonbit should be async")
-  }
-  guard action is Respond(output) else { fail("expected Respond") }
-  assert_false(output.is_error)
-  assert_true(output.content.contains("42"))
+  @vfs.with_tmpdir(ws => {
+    let out = run_in(ws, {
+      "source": "fn main { println(6 * 7) }",
+      "target": "js",
+    })
+    assert_false(out.is_error)
+    assert_true(out.content.contains("42"))
+  })
 }
 
 ///|
@@ -77,7 +119,7 @@ async test "error diagnostics name `source`, not the throwaway temp path" {
   // the model reads a path about its own input, not /tmp/openseek-run-moonbit-*
   assert_true(out.content.contains("source:"))
   assert_false(out.content.contains("openseek-run-moonbit-"))
-  assert_false(out.content.contains("_build/snippet.mbt"))
+  assert_false(out.content.contains("snippet.mbt"))
 }
 
 ///|

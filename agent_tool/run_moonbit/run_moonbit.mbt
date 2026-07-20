@@ -38,24 +38,27 @@ fn native_escape(source : String) -> String? {
 /// The program is a `.mbtx` single-file script — it may open with an inline
 /// `import { "pkg", … }` block (comma-separated module paths) naming the
 /// standard packages it uses, followed by the program including its own
-/// `main`. It runs via `moon run` in a throwaway temp directory that is not
-/// part of the working-tree module, so it is not part of your
-/// module — its build artifacts never touch your `_build`, and any
-/// local-package import resolves to the published registry snapshot (so this
-/// is for self-contained scripts; use a `*_test.mbt` + `moon test` for
-/// working-tree code). Third-party imports likewise resolve to their LATEST
-/// registry version, which can differ from your workspace's pinned versions, so
-/// a dependency-API probe here may not match what the workspace builds against —
-/// verify those against the workspace, not run_moonbit.
+/// `main`. It runs via `moon run` with your workspace as the working directory
+/// by default — so relative `@fs` paths (e.g. `@fs.read_file("data.json")`)
+/// resolve to workspace files, and any output the program writes lands in the
+/// workspace. Pass `cwd` to run somewhere else. Build artifacts stay in a
+/// throwaway temp directory (via `--target-dir`), so they never touch your
+/// `_build` and the working tree is left clean.
+///
+/// Dependency resolution is still isolated: a local-package import resolves to
+/// the published registry snapshot, not your uncommitted edits (so this is for
+/// self-contained scripts; use a `*_test.mbt` + `moon test` for working-tree
+/// code), and third-party imports resolve to their LATEST registry version,
+/// which can differ from your workspace's pinned versions — verify
+/// dependency-API probes against the workspace, not run_moonbit.
 ///
 /// Note: the snippet runs on the native backend today with no capability
-/// sandbox — the isolation is the throwaway package. Hard containment is
-/// deferred to the planned wasm backend, where the runtime is safe by
-/// construction and policy is applied there.
-pub fn definition() -> @agent_tool.AgentToolDefinition {
+/// sandbox. Hard containment is deferred to the planned wasm backend, where the
+/// runtime is safe by construction and policy is applied there.
+pub fn definition(workspace_root~ : String) -> @agent_tool.AgentToolDefinition {
   AgentToolDefinition(
     name="run_moonbit",
-    description="Compile and run a self-contained MoonBit program (a `.mbtx` single-file script) and return its merged stdout/stderr and exit status. Use this for scripting automation (read/transform files, parse JSON, compute) and for probing MoonBit language behavior — PREFER it over shell python/node so the automation is MoonBit. `source` may begin with an inline `import { \"pkg\", ... }` block (comma-separated module paths such as `\"moonbitlang/async\", \"moonbitlang/async/fs\", \"moonbitlang/core/json\"`) followed by the program including its own `main`; use `async fn main` for IO (add `\"moonbitlang/async\"` to the import block for it). It runs isolated from your working tree: a local-package import resolves to the published registry snapshot (NOT your uncommitted edits), so use this for self-contained scripts — to exercise your working-tree code, add a `*_test.mbt` to that package and run `moon test` via shell instead. Bounded to 60s.",
+    description="Compile and run a self-contained MoonBit program (a `.mbtx` single-file script) and return its merged stdout/stderr and exit status. Use this for scripting automation (read/transform files, parse JSON, compute) and for probing MoonBit language behavior — PREFER it over shell python/node so the automation is MoonBit. `source` may begin with an inline `import { \"pkg\", ... }` block (comma-separated module paths such as `\"moonbitlang/async\", \"moonbitlang/async/fs\", \"moonbitlang/core/json\"`) followed by the program including its own `main`; use `async fn main` for IO (add `\"moonbitlang/async\"` to the import block for it). It runs with your workspace as the working directory by default, so RELATIVE paths like `@fs.read_file(\"data.json\")` reach workspace files and files the program writes land in the workspace; pass `cwd` to run elsewhere. Build artifacts stay in a temp dir (your `_build` is untouched), and imports resolve against the registry (NOT your uncommitted edits) — to exercise working-tree code, add a `*_test.mbt` to that package and run `moon test` via shell instead. Bounded to 60s.",
     schema=JsonSchema({
       "type": "object",
       "properties": {
@@ -65,15 +68,22 @@ pub fn definition() -> @agent_tool.AgentToolDefinition {
           "enum": ["native", "wasm", "wasm-gc", "js", "llvm"],
           "description": "Backend to run on; defaults to native (required for the async @fs/@stdio/@process IO batteries).",
         },
+        "cwd": {
+          "type": "string",
+          "description": "Working directory the program runs in (relative paths resolve against the workspace root); defaults to the workspace root.",
+        },
       },
       "required": ["source"],
     }),
-    execute=Async(execute),
+    execute=Async(arguments => execute(workspace_root, arguments)),
   )
 }
 
 ///|
-async fn execute(arguments : Json) -> @agent_tool.ToolAction {
+async fn execute(
+  workspace_root : String,
+  arguments : Json,
+) -> @agent_tool.ToolAction {
   let input = @decode.decode(arguments) catch {
     error =>
       return @agent_tool.ToolAction::respond(
@@ -87,11 +97,30 @@ async fn execute(arguments : Json) -> @agent_tool.ToolAction {
       is_error=true,
     )
   }
-  // Run the snippet as a `.mbtx` single-file script in a throwaway directory:
-  // moon's single-file runner handles the inline import block, so there is no
-  // module to scaffold. The temp dir is managed by hand (not `@vfs.with_tmpdir`)
+  // The program's working directory (default: the workspace root, so relative
+  // `@fs` paths reach workspace files). An explicit relative `cwd` resolves
+  // against the workspace, like the shell tool.
+  let run_cwd = @workspace_path.resolve_cwd(workspace_root, input.cwd)
+  if run_cwd is Some(c) {
+    guard @fs.exists(c) else {
+      return @agent_tool.ToolAction::respond(
+        "error: run_moonbit cwd does not exist: \{c}",
+        is_error=true,
+      )
+    }
+    guard @fs.kind(c) is Directory else {
+      return @agent_tool.ToolAction::respond(
+        "error: run_moonbit cwd is not a directory: \{c}",
+        is_error=true,
+      )
+    }
+  }
+  // The snippet and all build artifacts live in a throwaway temp dir (passed as
+  // `--target-dir`), while the program itself runs with `run_cwd` as its working
+  // directory — so relative `@fs` paths reach workspace files yet nothing lands
+  // in the working tree. The temp dir is managed by hand (not `@vfs.with_tmpdir`)
   // so its cleanup can be shielded from cancellation — that helper re-raises on
-  // cancel WITHOUT removing the dir, which would leak the snippet, `_build`, and
+  // cancel WITHOUT removing the dir, which would leak the snippet, artifacts, and
   // a possibly-large output log when a turn is cancelled mid-run. The timeout
   // wraps only the process body; output is redirected to a file (not buffered in
   // memory) and read back capped, so a flood cannot exhaust memory.
@@ -135,8 +164,15 @@ async fn execute(arguments : Json) -> @agent_tool.ToolAction {
     let result = @async.with_timeout_opt(RunTimeoutMs, () => {
       let exit_code = @process.run(
         "moon",
-        ["run", "snippet.mbtx", "--target", input.target],
-        cwd=dir,
+        [
+          "run",
+          "\{dir}/snippet.mbtx",
+          "--target",
+          input.target,
+          "--target-dir",
+          dir,
+        ],
+        cwd=run_cwd.unwrap_or("."),
         inherit_env=true,
         stdin=@process.redirect_from_file(empty_stdin),
         stdout=@process.redirect_to_file(log, append=true),
@@ -207,9 +243,13 @@ fn rewrite_temp_paths(text : String, bases : Array[String]) -> String {
   let mut out = text
   for base in bases {
     for sep in ["/", "\\"] {
+      // `.mbtx` first: replacing `snippet.mbt` before it would leave a stray
+      // `x` (`sourcex`). `snippet.mbt` is the generated file at the top of the
+      // target-dir; `_build/snippet.mbt` covers the older build layout.
       out = out
-        .replace_all(old="\{base}\{sep}_build\{sep}snippet.mbt", new="source")
         .replace_all(old="\{base}\{sep}snippet.mbtx", new="source")
+        .replace_all(old="\{base}\{sep}_build\{sep}snippet.mbt", new="source")
+        .replace_all(old="\{base}\{sep}snippet.mbt", new="source")
     }
   }
   out

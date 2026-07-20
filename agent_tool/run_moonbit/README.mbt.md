@@ -11,10 +11,14 @@ wasm backend (planned) makes it the natural sandboxed automation surface.
 
 The `source` is a `.mbtx` **single-file script** — MoonBit's own one-file
 program format. The tool does nothing clever: it writes `source` to a throwaway
-temp file, runs `moon run <file>.mbtx --target <target>`, returns what moon
-prints, removes the temp file, and enforces a 60s bound. moon's single-file
-runner handles the inline import block; moon's own compiler diagnostics are the
-error message when something does not build.
+temp file and runs `moon run <file>.mbtx --target <target> --target-dir <temp>`
+**with your workspace as the working directory**, returns what moon prints,
+removes the temp dir, and enforces a 60s bound. Because the working directory is
+the workspace, relative paths like `@fs.read_file("data.json")` reach workspace
+files and anything the program writes lands in the workspace — while all build
+artifacts stay in the temp dir, so your `_build` is never touched. moon's
+single-file runner handles the inline import block; moon's own compiler
+diagnostics are the error message when something does not build.
 
 ## Arguments
 
@@ -25,11 +29,17 @@ error message when something does not build.
 - `target` (string, optional, default `native`): the backend — one of
   `native`, `wasm`, `wasm-gc`, `js`, `llvm`. The async IO packages
   (`@fs`, `@stdio`, `@process`) require `native`.
+- `cwd` (string, optional, default workspace root): the working directory the
+  program runs in. A relative `cwd` resolves against the workspace root, like
+  the `shell` tool.
 
-It runs isolated from your working tree, so a local-package import resolves to
-the **published registry snapshot** (not your uncommitted edits). Use it for
-self-contained scripts; to exercise your working-tree code, add a `*_test.mbt`
-to that package and run `moon test` via shell.
+Only **dependency resolution** is isolated: a local-package import resolves to
+the **published registry snapshot** (not your uncommitted edits), and a
+third-party import resolves to its **latest** registry version, which can differ
+from your workspace's pinned versions — so verify dependency-API probes against
+the workspace, not run_moonbit. Use it for self-contained scripts; to exercise
+your working-tree code, add a `*_test.mbt` to that package and run `moon test`
+via shell.
 
 ## Examples
 
@@ -38,7 +48,7 @@ A quick language probe — no imports, pure core:
 ```mbt check
 ///|
 async test "run_moonbit runs a pure-core probe" {
-  let action = match @run_moonbit.definition().execute {
+  let action = match @run_moonbit.definition(workspace_root=".").execute {
     Async(execute) =>
       execute({ "source": "fn main { println([1, 2, 3].map(x => x * x)) }" })
     Sync(_) => fail("run_moonbit is async")
