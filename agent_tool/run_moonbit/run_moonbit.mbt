@@ -7,8 +7,10 @@ const AsyncVersion : String = "0.20.1"
 ///|
 /// The battery allowlist: `@alias` → (module path, whether it needs the async
 /// dependency in `moon.mod`). This map IS the sandbox boundary — a snippet may
-/// only import these standard automation packages. An `@alias` that is not
-/// here (a local package like `@agent_tool`, or an unmapped one) is refused
+/// only import these standard automation packages — notably NOT process
+/// spawning, which stays behind the sandboxed `shell` tool, so a snippet
+/// cannot escape to arbitrary commands. An `@alias` that is not here (a local
+/// package like `@agent_tool`, or process spawning, or an unmapped one) is refused
 /// with a pointer to the test-file path, which is how local code is exercised.
 fn battery(pkg_alias : String) -> (String, Bool)? {
   match pkg_alias {
@@ -16,7 +18,6 @@ fn battery(pkg_alias : String) -> (String, Bool)? {
     "fs" => Some(("moonbitlang/async/fs", true))
     "stdio" => Some(("moonbitlang/async/stdio", true))
     "io" => Some(("moonbitlang/async/io", true))
-    "process" => Some(("moonbitlang/async/process", true))
     "json" => Some(("moonbitlang/core/json", false))
     "strconv" => Some(("moonbitlang/core/strconv", false))
     "math" => Some(("moonbitlang/core/math", false))
@@ -82,7 +83,7 @@ fn resolve_imports(source : String) -> Result[(Array[String], Bool), String] {
       }
       None =>
         return Err(
-          "run_moonbit imports only the standard automation packages (fs, stdio, io, process, json, strconv, math, buffer, env, random, list). `@\{pkg_alias}` is not one of them — if it is a local package, exercise it by adding a `*_test.mbt` to that package and running `moon test -p <pkg>`; run_moonbit is for self-contained scripts and language probes.",
+          "run_moonbit imports only the standard automation packages (fs, stdio, io, json, strconv, math, buffer, env, random, list). `@\{pkg_alias}` is not one of them — if it is a local package, exercise it by adding a `*_test.mbt` to that package and running `moon test -p <pkg>`; run_moonbit is for self-contained scripts and language probes.",
         )
     }
   }
@@ -154,7 +155,7 @@ fn package_manifest(imports : Array[String], needs_async : Bool) -> String {
 pub fn definition() -> @agent_tool.AgentToolDefinition {
   AgentToolDefinition(
     name="run_moonbit",
-    description="Compile and run a self-contained MoonBit program and return its merged stdout/stderr and exit status. Use this for scripting automation (read/transform files, parse JSON, compute) and for probing MoonBit language behavior — PREFER it over shell python/node so the automation is MoonBit. `source` is a full top-level program including its own `main`; use `async fn main` for IO. Reference standard packages as `@fs`, `@json`, `@stdio`, `@strconv`, `@math`, `@buffer`, `@env`, `@process`, `@io`, `@random`, `@list` — they are imported automatically. It runs in an isolated ephemeral package and CANNOT import local packages: to exercise a local package, add a `*_test.mbt` to it and run `moon test` via shell instead.",
+    description="Compile and run a self-contained MoonBit program and return its merged stdout/stderr and exit status. Use this for scripting automation (read/transform files, parse JSON, compute) and for probing MoonBit language behavior — PREFER it over shell python/node so the automation is MoonBit. `source` is a full top-level program including its own `main`; use `async fn main` for IO. Reference standard packages as `@fs`, `@json`, `@stdio`, `@strconv`, `@math`, `@buffer`, `@env`, `@io`, `@random`, `@list` — they are imported automatically. It runs in an isolated ephemeral package and CANNOT import local packages: to exercise a local package, add a `*_test.mbt` to it and run `moon test` via shell instead.",
     schema=JsonSchema({
       "type": "object",
       "properties": { "source": { "type": "string" } },

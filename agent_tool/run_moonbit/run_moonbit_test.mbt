@@ -65,3 +65,11 @@ async test "rejects non-string source arguments" {
   assert_true(output.is_error)
   assert_true(output.content.contains("run_moonbit requires"))
 }
+
+///|
+async test "refuses process spawning to keep the sandbox (shell owns that)" {
+  let out = run("async fn main { @process.run(\"ls\", []) |> ignore }")
+  assert_true(out.is_error)
+  assert_true(out.content.contains("run_moonbit imports only"))
+  assert_true(out.content.contains("process"))
+}

@@ -12,8 +12,9 @@ Why a dedicated tool:
   quotes, `$`, backticks, and `\{}` interpolation goes straight to disk — no
   double-escaping through the shell.
 - **Sandboxed by an allowlist.** The snippet may import only a curated set of
-  standard *batteries* (below). A non-battery `@alias` — a local package like
-  `@agent_tool`, say — is refused with a pointer to the test-file path.
+  standard *batteries* (below) — notably NOT process spawning, which stays
+  behind the sandboxed `shell` tool. A non-battery `@alias` — a local package
+  like `@agent_tool`, or `@process` — is refused with a pointer elsewhere.
 - **Worktree-safe, never stale.** It runs in an isolated module (its own
   `moon.mod`/`_build`/lock in a temp dir) that imports only pinned registry
   batteries. It never touches the working-tree module, so it cannot pick up a
@@ -31,7 +32,7 @@ Why a dedicated tool:
 
 ## Batteries (the allowlist)
 
-`fs`, `stdio`, `io`, `process` (from `moonbitlang/async`), and `json`,
+`fs`, `stdio`, `io` (from `moonbitlang/async`), and `json`,
 `strconv`, `math`, `buffer`, `env`, `random`, `list` (from `moonbitlang/core`).
 Anything else is refused — for a **local** package, exercise it by adding a
 `*_test.mbt` to that package and running `moon test`, which has full,
