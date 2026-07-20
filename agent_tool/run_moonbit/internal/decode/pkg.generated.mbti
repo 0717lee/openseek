@@ -1,0 +1,21 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "bobzhang/openseek/agent_tool/run_moonbit/internal/decode"
+
+import {
+  "moonbitlang/core/debug",
+}
+
+// Values
+pub fn decode(Json) -> RunMoonbitInput raise
+
+// Errors
+
+// Types and methods
+pub struct RunMoonbitInput {
+  source : String
+} derive(@debug.Debug)
+
+// Type aliases
+
+// Traits
+

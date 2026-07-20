@@ -103,7 +103,7 @@ async fn[X] shell_tools(
 /// The returned registry contains the built-in local tools: `shell` (plus
 /// `shell_output` and `shell_stop` where background jobs are supported — see
 /// `shell_tools`), `read`, `edit`, `multi_edit`, `write`, `remove`, `plan`,
-/// `goal`, and `finish`.
+/// `goal`, `run_moonbit`, and `finish`.
 /// Each tool lives in its own subpackage of `agent_tool` and exposes a
 /// `definition()` constructor; this function bundles them into the `Tools`
 /// value the loop dispatches against. File-oriented tools capture
@@ -143,6 +143,7 @@ pub async fn[X] build_tools(
       @remove.definition(workspace_root~, file_state~),
       @plan.definition(),
       @goal.definition(),
+      @run_moonbit.definition(),
       @finish.definition(),
     ] +
     extra_tools,
@@ -155,7 +156,7 @@ async test "agent registers the expected tool names" {
   @async.with_task_group() <| group => {
     let tools = build_tools(AgentRuntime(), AgentTaskScope(group))
     let function_tools = tools.function_tools()
-    assert_eq(function_tools.length(), 11)
+    assert_eq(function_tools.length(), 12)
     let names = [ for t in function_tools => t.name ]
     assert_true(names.contains("shell"))
     assert_true(names.contains("shell_output"))
@@ -167,6 +168,7 @@ async test "agent registers the expected tool names" {
     assert_true(names.contains("remove"))
     assert_true(names.contains("plan"))
     assert_true(names.contains("goal"))
+    assert_true(names.contains("run_moonbit"))
     assert_true(names.contains("finish"))
     assert_false(names.contains("moon_check"))
     assert_false(names.contains("moon_cmd"))
@@ -183,7 +185,7 @@ async test "agent registers the expected tool names on windows" {
   @async.with_task_group() <| group => {
     let tools = build_tools(AgentRuntime(), AgentTaskScope(group))
     let function_tools = tools.function_tools()
-    assert_eq(function_tools.length(), 9)
+    assert_eq(function_tools.length(), 10)
     let names = [ for t in function_tools => t.name ]
     assert_true(names.contains("shell"))
     assert_false(names.contains("shell_output"))
@@ -195,6 +197,7 @@ async test "agent registers the expected tool names on windows" {
     assert_true(names.contains("remove"))
     assert_true(names.contains("plan"))
     assert_true(names.contains("goal"))
+    assert_true(names.contains("run_moonbit"))
     assert_true(names.contains("finish"))
     guard tools.find("shell") is Some(shell) else { fail("shell tool missing") }
     assert_false(shell.description.contains("run_in_background"))

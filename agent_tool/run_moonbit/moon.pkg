@@ -1,0 +1,17 @@
+import {
+  "bobzhang/openseek/agent_tool",
+  "bobzhang/openseek/agent_tool/run_moonbit/internal/decode",
+  "bobzhang/openseek/agent_tool/internal/error" @tool_error,
+  "bobzhang/openseek/testkit/filesystem" @vfs,
+  "moonbitlang/async/fs",
+  "moonbitlang/async/process",
+  "moonbitlang/core/json",
+}
+
+warnings = "+unnecessary_annotation"
+
+supported_targets = "+native"
+
+import {
+  "moonbitlang/async",
+} for "test"
