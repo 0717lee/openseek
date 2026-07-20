@@ -90,9 +90,22 @@ async test "refuses a program that spawns processes (shell owns commands)" {
     ),
   )
   assert_true(out.is_error)
-  assert_true(
-    out.content.contains("does not run programs that spawn processes"),
+  assert_true(out.content.contains("spawns processes"))
+}
+
+///|
+async test "refuses native FFI (extern can bind libc system)" {
+  // `extern` sidesteps the @process import check, so it is refused too — the
+  // static boundary is best-effort until the wasm sandbox lands.
+  let out = run(
+    (
+      #|extern "c" fn c_system(cmd : Bytes) -> Int = "system"
+      #|
+      #|fn main { c_system("true") |> ignore }
+    ),
   )
+  assert_true(out.is_error)
+  assert_true(out.content.contains("native FFI"))
 }
 
 ///|

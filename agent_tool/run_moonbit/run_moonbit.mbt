@@ -9,16 +9,26 @@ const RunTimeoutMs : Int = 60_000
 /// that floods stdout (e.g. `while true { println(…) }`) cannot exhaust the
 /// agent's memory before the timeout fires. Only this many bytes are read back
 /// — the rest is dropped with a truncation marker.
-const OutputCapBytes : Int = 96_000
+const OutputCapBytes : Int = 48_000
 
 ///|
-/// Process spawning is refused: run_moonbit is the safe compute/IO surface, and
-/// the sandboxed `shell` tool owns command execution. Refusing this import also
-/// means the snippet has no descendant processes that could outlive the
-/// timeout. (Full capability containment is deferred to the planned wasm
-/// backend; this is the cheap boundary until then.)
-fn spawns_processes(source : String) -> Bool {
-  source.contains("moonbitlang/async/process")
+/// Best-effort refusal of the two obvious native escapes: process spawning
+/// (`moonbitlang/async/process` — the `shell` tool owns commands) and native
+/// FFI (`extern`, which can bind libc `system`). A substring scan is NOT a
+/// real boundary — a determined native snippet can still escape — so HARD
+/// containment is deferred to the planned wasm backend (safe by construction).
+/// Until then this closes the trivial escapes and keeps descendant processes
+/// from outliving the timeout. Returns the reason to report, or None.
+fn native_escape(source : String) -> String? {
+  if source.contains("moonbitlang/async/process") {
+    Some(
+      "spawns processes (moonbitlang/async/process) — use the shell tool for commands",
+    )
+  } else if source.contains("extern") {
+    Some("uses native FFI (extern), which the wasm sandbox will contain later")
+  } else {
+    None
+  }
 }
 
 ///|
@@ -68,30 +78,29 @@ async fn execute(arguments : Json) -> @agent_tool.ToolAction {
         is_error=true,
       )
   }
-  guard !spawns_processes(input.source) else {
+  guard native_escape(input.source) is None else {
     return @agent_tool.ToolAction::respond(
-      "run_moonbit does not run programs that spawn processes (moonbitlang/async/process) — use the shell tool for commands; run_moonbit is the compute/IO surface.",
+      "run_moonbit refuses this program: it \{native_escape(input.source).unwrap()}. run_moonbit is the compute/IO surface; deeper containment arrives with the wasm backend.",
       is_error=true,
     )
   }
   // Run the snippet as a `.mbtx` single-file script in a throwaway directory:
-  // moon's own single-file runner handles the inline import block, so there is
-  // no module to scaffold. The temp dir gives the snippet an isolated cwd (for
-  // relative `@fs` paths) and keeps build artifacts off the working tree.
-  // Output is redirected to a file (not buffered in memory) and read back
-  // capped, so a flood cannot exhaust memory before the timeout.
-  let result = @async.with_timeout_opt(RunTimeoutMs, () => {
-    @vfs.with_tmpdir(prefix="openseek-run-moonbit-", dir => {
-      @fs.write_file(
-        "\{dir}/snippet.mbtx",
-        input.source,
-        create_mode=CreateOrTruncate,
-      )
-      let log = "\{dir}/output.log"
-      // Pre-create the merged output file so both redirects open it; both
-      // append so stdout and stderr interleave in write order (as the previous
-      // merged capture did).
-      @fs.write_file(log, "", create_mode=CreateOrTruncate)
+  // moon's single-file runner handles the inline import block, so there is no
+  // module to scaffold. `with_tmpdir` is the OUTER scope so its cleanup runs on
+  // the normal (uncancelled) path even when the timeout fires; the timeout
+  // wraps only the process body. Output is redirected to a file (not buffered
+  // in memory) and read back capped, so a flood cannot exhaust memory.
+  @vfs.with_tmpdir(prefix="openseek-run-moonbit-", dir => {
+    @fs.write_file(
+      "\{dir}/snippet.mbtx",
+      input.source,
+      create_mode=CreateOrTruncate,
+    )
+    let log = "\{dir}/output.log"
+    // Pre-create the merged output file so both redirects open it; both append
+    // so stdout and stderr interleave in write order.
+    @fs.write_file(log, "", create_mode=CreateOrTruncate)
+    let result = @async.with_timeout_opt(RunTimeoutMs, () => {
       let exit_code = @process.run(
         "moon",
         ["run", "snippet.mbtx", "--target", input.target],
@@ -100,44 +109,44 @@ async fn execute(arguments : Json) -> @agent_tool.ToolAction {
         stdout=@process.redirect_to_file(log, append=true),
         stderr=@process.redirect_to_file(log, append=true),
       )
-      (exit_code, read_capped(log), dir)
+      (exit_code, read_capped(log))
     })
-  })
-  match result {
-    Some((exit_code, raw, dir)) => {
-      // moon's diagnostics point at the throwaway temp file (the source is
-      // copied into `_build/snippet.mbt` for the build, and line:col stay
-      // faithful to the source). Rewrite that path to `source` so the model
-      // reads `source:LINE:COL` about its own input, not a random temp path.
-      let real = @fs.realpath(dir) catch { _ => dir }
-      let text = raw
-        .replace_all(old="\{real}/_build/snippet.mbt", new="source")
-        .replace_all(old="\{real}/snippet.mbtx", new="source")
-        .replace_all(old="\{dir}/_build/snippet.mbt", new="source")
-        .replace_all(old="\{dir}/snippet.mbtx", new="source")
-      // The exit status must be in the CONTENT the model reads (the brief is
-      // display-only), so a program that prints and then exits non-zero is not
-      // mistaken for a success with the same output.
-      let body = if text.trim() == "" {
-        "run_moonbit: program exited \{exit_code} with no output"
-      } else if exit_code != 0 {
-        "\{text}\n[run_moonbit: exited \{exit_code}]"
-      } else {
-        text
+    match result {
+      Some((exit_code, raw)) => {
+        // moon's diagnostics point at the throwaway temp file (the source is
+        // copied into `_build/snippet.mbt`; line:col stay faithful to the
+        // source). Rewrite that path to `source` so the model reads
+        // `source:LINE:COL` about its own input, not a random temp path.
+        let real = @fs.realpath(dir) catch { _ => dir }
+        let text = raw
+          .replace_all(old="\{real}/_build/snippet.mbt", new="source")
+          .replace_all(old="\{real}/snippet.mbtx", new="source")
+          .replace_all(old="\{dir}/_build/snippet.mbt", new="source")
+          .replace_all(old="\{dir}/snippet.mbtx", new="source")
+        // PREPEND the exit status so it survives the agent loop's outer 60k
+        // result clamp (which cuts the tail); the output cap is below 60k so
+        // both the status line and the body are retained.
+        let body = if text.trim() == "" {
+          "run_moonbit: program exited \{exit_code} with no output"
+        } else if exit_code != 0 {
+          "[run_moonbit: exited \{exit_code}]\n\{text}"
+        } else {
+          text
+        }
+        @agent_tool.ToolAction::respond(
+          body,
+          is_error=exit_code != 0,
+          brief="run_moonbit (exit=\{exit_code})",
+        )
       }
-      @agent_tool.ToolAction::respond(
-        body,
-        is_error=exit_code != 0,
-        brief="run_moonbit (exit=\{exit_code})",
-      )
+      None =>
+        @agent_tool.ToolAction::respond(
+          "run_moonbit: timed out after \{RunTimeoutMs / 1000}s and was cancelled — the program did not finish (an infinite loop, or a build that never completed).",
+          is_error=true,
+          brief="run_moonbit (timeout)",
+        )
     }
-    None =>
-      @agent_tool.ToolAction::respond(
-        "run_moonbit: timed out after \{RunTimeoutMs / 1000}s and was cancelled — the program did not finish (an infinite loop, or a build that never completed).",
-        is_error=true,
-        brief="run_moonbit (timeout)",
-      )
-  }
+  })
 }
 
 ///|
