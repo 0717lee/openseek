@@ -1,48 +1,5 @@
 ///|
-const SandboxExecPath : String = "/usr/bin/sandbox-exec"
-
-///|
 const SandboxSourceWriteFeedback : String = "shell sandbox: source file writes from shell are blocked. Editing source through the shell is not how this project works — it is discouraged, not a temporary obstacle to route around. Our practice is to make source changes with line-anchored `edit` (or `multi_edit` for several fixes in one file) so each change stays small and reviewable. For compiler-feedback or mechanical fixes, use `edit`, not shell-generated rewrites. Do NOT try to work around this block (redirects, `sed`/`awk`/scripts, `git apply`, or stage-then-checkout tricks) — apply the change with `edit`. Keep `shell` for read-only analysis and validation commands."
-
-///|
-let source_write_profile_cache : Map[String, CachedSourceWriteProfile] = Map([])
-
-///|
-let sandbox_exec_available_cache : Ref[Bool?] = { val: None }
-
-///|
-priv struct WatchedSourceProfileDir {
-  path : String
-  mtime_s : Int64
-  mtime_ns : Int
-}
-
-///|
-priv struct SourceWriteProfileScan {
-  literal_paths : Array[String]
-  watched_dirs : Array[WatchedSourceProfileDir]
-  cacheable : Bool
-}
-
-///|
-priv struct SourceWriteProfileScanBuilder {
-  literal_paths : Array[String]
-  watched_dirs : Array[WatchedSourceProfileDir]
-  mut cacheable : Bool
-}
-
-///|
-priv struct CachedSourceWriteProfile {
-  profile : String
-  watched_dirs : Array[WatchedSourceProfileDir]
-  denial_subjects : Array[String]
-}
-
-///|
-priv struct SourceWriteProfileData {
-  profile : String
-  denial_subjects : Array[String]
-}
 
 ///|
 priv enum SourceWriteMode {
@@ -78,323 +35,23 @@ async fn agent_shell_launch(
     None => None
   }
   let mode = source_write_mode_for_parse(parsed, real_workspace_root, real_cwd)
-  if mode is TrustedSourceWrite || !sandbox_exec_available() {
+  if mode is TrustedSourceWrite || !@sandbox.sandbox_exec_available() {
     return {
-      program: PlatformShellProgram,
-      args: platform_shell_args(cmd),
+      program: @sandbox.PlatformShellProgram,
+      args: @sandbox.platform_shell_args(cmd),
       source_write_sandboxed: false,
       sandbox_denial_subjects: [],
     }
   }
-  let profile_data = source_write_readonly_profile_data(real_workspace_root)
+  let profile_data = @sandbox.source_write_readonly_profile_data(
+    real_workspace_root,
+  )
   {
-    program: SandboxExecPath,
-    args: sandbox_exec_args(profile_data.profile, cmd),
+    program: @sandbox.SandboxExecPath,
+    args: @sandbox.sandbox_exec_args(profile_data.profile, cmd),
     source_write_sandboxed: true,
     sandbox_denial_subjects: profile_data.denial_subjects,
   }
-}
-
-///|
-/// Argument vector for running `cmd` through `sandbox-exec` under `profile`.
-fn sandbox_exec_args(profile : String, cmd : String) -> Array[String] {
-  ["-p", profile, PlatformShellProgram, ..platform_shell_args(cmd)]
-}
-
-///|
-async fn sandbox_exec_available() -> Bool {
-  match sandbox_exec_available_cache.val {
-    Some(value) => value
-    None => {
-      let value = probe_sandbox_exec_available()
-      sandbox_exec_available_cache.val = Some(value)
-      value
-    }
-  }
-}
-
-///|
-async fn probe_sandbox_exec_available() -> Bool {
-  if !@fs.exists(SandboxExecPath) {
-    return false
-  }
-  let probe_dir = @fs.tmpdir(prefix="openseek-sandbox-probe-") catch {
-    error if @async.is_being_cancelled() => raise error
-    _ => return false
-  }
-  // sandbox-exec matches `file-write*` rules against the *realpath* of the
-  // target. Temp dirs live under symlinked prefixes on macOS (`/tmp` ->
-  // `/private/tmp`, `$TMPDIR` under `/private/var/...`), so a deny rule built
-  // from the unresolved path never matches the resolved write. That made the
-  // probe believe the sandbox was unenforced and disabled it process-wide.
-  // Resolve the dir first, exactly like the real source-write profile does for
-  // the workspace root.
-  let probe_dir = @fs.realpath(probe_dir) catch {
-    error if @async.is_being_cancelled() => raise error
-    _ => probe_dir
-  }
-  let blocked_path = @path.Path(probe_dir)
-    .join(Path("blocked"))
-    .normalize()
-    .to_string()
-  let probe_profile = sandbox_denial_probe_profile(blocked_path)
-  let output = collect_process_output(
-    SandboxExecPath,
-    sandbox_exec_args(probe_profile, PlatformNoopCommand),
-    max_output_chars=200,
-  ) catch {
-    error if @async.is_being_cancelled() => raise error
-    _ => {
-      cleanup_sandbox_probe(probe_dir, blocked_path)
-      return false
-    }
-  }
-  if output.exit_code != Some(0) {
-    cleanup_sandbox_probe(probe_dir, blocked_path)
-    return false
-  }
-  let write_output = collect_process_output(
-    SandboxExecPath,
-    sandbox_exec_args(
-      probe_profile,
-      "printf probe > \{shell_quote(blocked_path)}",
-    ),
-    max_output_chars=400,
-  ) catch {
-    error if @async.is_being_cancelled() => raise error
-    _ => {
-      cleanup_sandbox_probe(probe_dir, blocked_path)
-      return false
-    }
-  }
-  let denied = write_output.exit_code != Some(0) && !@fs.exists(blocked_path)
-  cleanup_sandbox_probe(probe_dir, blocked_path)
-  denied
-}
-
-///|
-#cfg(platform="windows")
-const PlatformNoopCommand : String = "exit 0"
-
-///|
-#cfg(not(platform="windows"))
-const PlatformNoopCommand : String = ":"
-
-///|
-fn sandbox_denial_probe_profile(blocked_path : String) -> String {
-  (
-    $|(version 1)
-    $|(allow default)
-    $|(deny file-write* (literal "\{sbpl_string_escape(blocked_path)}"))
-  )
-}
-
-///|
-fn shell_quote(text : String) -> String {
-  "'\{text.replace_all(old="'", new="'\\''")}'"
-}
-
-///|
-async fn cleanup_sandbox_probe(
-  probe_dir : String,
-  blocked_path : String,
-) -> Unit {
-  ignore(@fs.remove(blocked_path) catch { _ => () })
-  ignore(@fs.rmdir(probe_dir) catch { _ => () })
-}
-
-///|
-async fn source_write_readonly_profile_data(
-  real_workspace_root : String,
-) -> SourceWriteProfileData {
-  let real_workspace_root = strip_trailing_slash(
-    @path.Path(real_workspace_root).normalize().to_string(),
-  )
-  match source_write_profile_cache.get(real_workspace_root) {
-    Some(cached) if cached_source_write_profile_valid(cached) =>
-      return {
-        profile: cached.profile,
-        denial_subjects: cached.denial_subjects,
-      }
-    Some(_) => ()
-    None => ()
-  }
-  let scan = protected_source_tree_profile_scan(real_workspace_root)
-  let denial_subjects = source_write_denial_subjects(scan.literal_paths)
-  let source_regex = source_write_regex(real_workspace_root)
-  let build_carveout_regex = source_write_build_carveout_regex(
-    real_workspace_root,
-  )
-  let profile = StringBuilder()
-  profile.write_string("(version 1)\n")
-  profile.write_string("(allow default)\n")
-  // `file-write*` already covers `file-write-create`, so this single deny blocks
-  // both rewriting existing source and creating new source files. SBPL is
-  // last-match-wins, so the following carve-out re-allows Moon-managed build and
-  // cache trees without the deny regex having to special-case them.
-  profile.write_string(
-    "(deny file-write* (regex \"\{sbpl_string_escape(source_regex)}\"))\n",
-  )
-  profile.write_string(
-    "(allow file-write* (regex \"\{sbpl_string_escape(build_carveout_regex)}\"))\n",
-  )
-  for dir in scan.literal_paths {
-    profile.write_string(
-      "(deny file-write* (literal \"\{sbpl_string_escape(dir)}\"))\n",
-    )
-  }
-  let profile = profile.to_string()
-  if scan.cacheable {
-    source_write_profile_cache[real_workspace_root] = {
-      profile,
-      watched_dirs: scan.watched_dirs,
-      denial_subjects,
-    }
-  }
-  { profile, denial_subjects }
-}
-
-///|
-fn source_write_denial_subjects(literal_paths : Array[String]) -> Array[String] {
-  let subjects : Array[String] = []
-  for path in literal_paths {
-    subjects.push(path)
-    let base = path_basename(path)
-    if base != path {
-      subjects.push(base)
-    }
-  }
-  subjects
-}
-
-///|
-async fn cached_source_write_profile_valid(
-  cached : CachedSourceWriteProfile,
-) -> Bool {
-  for watched in cached.watched_dirs {
-    let (mtime_s, mtime_ns) = @fs.mtime(watched.path, follow_symlink=false) catch {
-      error if @async.is_being_cancelled() => raise error
-      _ => return false
-    }
-    if mtime_s != watched.mtime_s || mtime_ns != watched.mtime_ns {
-      return false
-    }
-  }
-  true
-}
-
-///|
-fn source_write_regex(real_workspace_root : String) -> String {
-  let root = regex_escape(strip_trailing_slash(real_workspace_root))
-  let source_file = "([^/]*(\\.mbt\\.md|\\.mbt|\\.mbti)|(moon\\.mod\\.json|moon\\.pkg\\.json|moon\\.mod|moon\\.pkg|moon\\.work))"
-  "^\{root}(/|$)(.*/)?\{source_file}$"
-}
-
-///|
-/// Paths under a Moon-managed `_build` or `.mooncakes` directory, where Moon
-/// itself writes generated `.mbt` sources. Emitted as an `allow` rule after the
-/// source deny so the sandbox blocks hand-written source rewrites while leaving
-/// Moon's own build/cache writes untouched. Mirrors the component names in
-/// `is_moon_managed_workspace_path`.
-fn source_write_build_carveout_regex(real_workspace_root : String) -> String {
-  let root = regex_escape(strip_trailing_slash(real_workspace_root))
-  "^\{root}/(.*/)?(_build|\\.mooncakes)(/|$)"
-}
-
-///|
-async fn protected_source_tree_profile_scan(
-  real_workspace_root : String,
-) -> SourceWriteProfileScan {
-  let root = strip_trailing_slash(
-    @path.Path(real_workspace_root).normalize().to_string(),
-  )
-  let state : SourceWriteProfileScanBuilder = {
-    literal_paths: [],
-    watched_dirs: [],
-    cacheable: true,
-  }
-  ignore(collect_protected_source_tree_profile_scan(root, root, state))
-  {
-    literal_paths: state.literal_paths,
-    watched_dirs: state.watched_dirs,
-    cacheable: state.cacheable,
-  }
-}
-
-///|
-async fn collect_protected_source_tree_profile_scan(
-  root : String,
-  dir : String,
-  state : SourceWriteProfileScanBuilder,
-) -> Bool {
-  if dir != root && is_moon_managed_workspace_path(root, dir) {
-    return false
-  }
-  if dir != root && should_prune_profile_scan_path(root, dir) {
-    return false
-  }
-  let (mtime_s, mtime_ns) = @fs.mtime(dir, follow_symlink=false) catch {
-    error if @async.is_being_cancelled() => raise error
-    _ => {
-      state.cacheable = false
-      return false
-    }
-  }
-  state.watched_dirs.push({ path: dir, mtime_s, mtime_ns })
-  let entries = @fs.readdir(dir, include_hidden=true) catch {
-    error if @async.is_being_cancelled() => raise error
-    _ => {
-      state.cacheable = false
-      return false
-    }
-  }
-  let mut contains_protected = false
-  for entry in entries {
-    let child = @path.Path(dir).join(Path(entry)).normalize().to_string()
-    if is_moon_managed_workspace_path(root, child) {
-      continue
-    }
-    if is_protected_workspace_source_path(root, child) {
-      contains_protected = true
-      continue
-    }
-    let kind = @fs.kind(child, follow_symlink=false) catch {
-      error if @async.is_being_cancelled() => raise error
-      _ => {
-        state.cacheable = false
-        continue
-      }
-    }
-    match kind {
-      Directory =>
-        if collect_protected_source_tree_profile_scan(root, child, state) {
-          contains_protected = true
-        }
-      _ => ()
-    }
-  }
-  if contains_protected && dir != root {
-    state.literal_paths.push(dir)
-  }
-  contains_protected
-}
-
-///|
-fn should_prune_profile_scan_path(root : String, path : String) -> Bool {
-  guard is_under_workspace_root(root, path) && path != root else {
-    return false
-  }
-  let relative = path[root.length() + 1:].to_owned()
-  relative
-  .replace_all(old="\\", new="/")
-  .split("/")
-  .any(part => {
-    part == ".git" ||
-    part == ".hg" ||
-    part == ".svn" ||
-    part == ".jj" ||
-    part == "node_modules"
-  })
 }
 
 ///|
@@ -656,7 +313,7 @@ fn is_fd_redirect_target(target : String) -> Bool {
 /// refuses it up front rather than let it overwrite tracked source. The scan
 /// covers the write forms `redirect_writes_file` recognizes (`>`, `>|`, `>>`,
 /// `<>`, `&>`, `&>>`, and `>&` to a path) and returns on the first target that
-/// `is_protected_workspace_source_path` flags.
+/// `@sandbox.is_protected_workspace_source_path` flags.
 ///
 /// Only `Simple` command lines are inspected (a non-simple parse returns
 /// `None`); the sandbox's `deny file-write*` rules on protected source paths are
@@ -732,7 +389,9 @@ fn direct_source_write_redirect_target_in_commands(
             cwd,
             redirect.target,
           )
-          if is_protected_workspace_source_path(real_workspace_root, target) {
+          if @sandbox.is_protected_workspace_source_path(
+              real_workspace_root, target,
+            ) {
             return Some(target)
           }
         }
@@ -766,7 +425,9 @@ async fn direct_source_write_redirect_target_in_commands_following_existing_link
             cwd,
             redirect.target,
           )
-          if is_protected_workspace_source_path(real_workspace_root, target) {
+          if @sandbox.is_protected_workspace_source_path(
+              real_workspace_root, target,
+            ) {
             return Some(target)
           }
           match
@@ -925,7 +586,7 @@ async fn existing_path_resolves_to_protected_workspace_source(
     error if @async.is_being_cancelled() => raise error
     _ => return None
   }
-  if is_protected_workspace_source_path(real_workspace_root, resolved) {
+  if @sandbox.is_protected_workspace_source_path(real_workspace_root, resolved) {
     Some(resolved)
   } else {
     None
@@ -1122,7 +783,7 @@ fn command_text_source_literals_are_only_absolute_outside_workspace(
       if source_literals.any(source_literal => {
           let path : @path.Path = source_literal
           !path.is_absolute() ||
-          is_protected_workspace_source_path(
+          @sandbox.is_protected_workspace_source_path(
             real_workspace_root, source_literal,
           )
         }) {
@@ -2117,7 +1778,8 @@ fn command_word_matches_one_heredoc_target(
 ) -> Bool {
   let word = strip_leading_dot_slash(word)
   let target = strip_leading_dot_slash(target)
-  word == target || path_basename(word) == path_basename(target)
+  word == target ||
+  @sandbox.path_basename(word) == @sandbox.path_basename(target)
 }
 
 ///|
@@ -2656,7 +2318,7 @@ async fn powershell_write_target(
     return git_workspace_scope_target(real_workspace_root, cwd)
   }
   for target in powershell_new_item_targets(operands, cwd) {
-    if is_protected_workspace_source_path(real_workspace_root, target) {
+    if @sandbox.is_protected_workspace_source_path(real_workspace_root, target) {
       return Some(target)
     }
     match
@@ -3203,7 +2865,7 @@ fn git_workspace_scope_target(
     @path.Path(real_workspace_root).normalize().to_string(),
   )
   let target = source_write_detection_cwd(real_workspace_root, Some(cwd))
-  if is_under_workspace_root(root, target) {
+  if @sandbox.is_under_workspace_root(root, target) {
     Some(target)
   } else {
     None
@@ -3228,10 +2890,10 @@ async fn source_tree_find_target(
   let starts = if starts.length() == 0 { ["."] } else { starts }
   for start in starts {
     let target = resolve_source_write_redirect_target(cwd, start)
-    if is_under_workspace_root(real_workspace_root, target) &&
+    if @sandbox.is_under_workspace_root(real_workspace_root, target) &&
       (
         !has_filter ||
-        is_protected_workspace_source_path(real_workspace_root, target) ||
+        @sandbox.is_protected_workspace_source_path(real_workspace_root, target) ||
         protected_workspace_source_or_tree_path(real_workspace_root, target)
       ) {
       return Some(target)
@@ -3467,7 +3129,7 @@ fn find_pattern_excludes_protected_source(
   case_insensitive~ : Bool,
 ) -> Bool {
   let pattern = if case_insensitive { pattern.to_lower() } else { pattern }
-  let base = path_basename(pattern)
+  let base = @sandbox.path_basename(pattern)
   match find_glob_literal_suffix(base) {
     Some(suffix) if suffix != "" => !protected_source_suffix_can_match(suffix)
     _ => false
@@ -3579,7 +3241,7 @@ fn sed_targets_only_find_results(
         arg,
         case_insensitive=false,
       ) ||
-      is_protected_source_path(arg) {
+      @sandbox.is_protected_source_path(arg) {
       return false
     } else {
       return false
@@ -3841,7 +3503,7 @@ fn awk_redirect_literal_target(
   match collect_quoted_literal_from(program, index, quote) {
     Some(literal) => {
       let target = resolve_source_write_redirect_target(cwd, literal)
-      if is_protected_workspace_source_path(root, target) {
+      if @sandbox.is_protected_workspace_source_path(root, target) {
         Some(target)
       } else {
         None
@@ -3956,8 +3618,8 @@ async fn script_generated_tree_transfer_literal_pair_can_create_workspace_source
     ) {
     return false
   }
-  is_protected_source_path(source) ||
-  is_protected_source_path(dest) ||
+  @sandbox.is_protected_source_path(source) ||
+  @sandbox.is_protected_source_path(dest) ||
   (
     !looks_like_non_source_file_path(source) &&
     !looks_like_non_source_file_path(dest)
@@ -3993,14 +3655,14 @@ async fn script_generated_tree_transfer_can_create_workspace_source(
 ) -> Bool {
   let source = @path.Path(source).normalize().to_string()
   let dest = @path.Path(dest).normalize().to_string()
-  if !is_under_workspace_root(root, dest) ||
-    is_moon_managed_workspace_path(root, dest) {
+  if !@sandbox.is_under_workspace_root(root, dest) ||
+    @sandbox.is_moon_managed_workspace_path(root, dest) {
     return false
   }
-  if !is_under_workspace_root(root, source) {
+  if !@sandbox.is_under_workspace_root(root, source) {
     return source_path_or_tree_contains_protected_source(source)
   }
-  if !is_moon_managed_workspace_path(root, source) {
+  if !@sandbox.is_moon_managed_workspace_path(root, source) {
     return source_path_or_tree_contains_protected_source(source)
   }
   !(looks_like_non_source_file_path(source) &&
@@ -4024,10 +3686,10 @@ fn script_source_literal_preblock_target(
     if script_text_mentions_source_path(literal) {
       saw_source_literal = true
       let target = resolve_source_write_redirect_target(cwd, literal)
-      if is_protected_workspace_source_path(root, target) {
+      if @sandbox.is_protected_workspace_source_path(root, target) {
         return Some(target)
       }
-      if is_under_workspace_root(root, target) {
+      if @sandbox.is_under_workspace_root(root, target) {
         saw_workspace_source_literal = true
       } else if @path.Path(literal).is_absolute() {
         saw_absolute_outside_source_literal = true
@@ -4038,7 +3700,7 @@ fn script_source_literal_preblock_target(
     Some(cwd)
   } else if saw_source_literal && saw_absolute_outside_source_literal {
     None
-  } else if is_under_workspace_root(root, cwd) {
+  } else if @sandbox.is_under_workspace_root(root, cwd) {
     Some(cwd)
   } else {
     None
@@ -4277,7 +3939,9 @@ async fn source_tree_move_target(
   }
   match dest_target {
     Some(target) =>
-      if is_protected_workspace_source_path(real_workspace_root, target) {
+      if @sandbox.is_protected_workspace_source_path(
+          real_workspace_root, target,
+        ) {
         Some(target)
       } else {
         None
@@ -4289,7 +3953,7 @@ async fn source_tree_move_target(
 ///|
 async fn source_path_or_tree_contains_protected_source(target : String) -> Bool {
   let target = @path.Path(target).normalize().to_string()
-  if is_protected_source_path(target) {
+  if @sandbox.is_protected_source_path(target) {
     return true
   }
   let kind = @fs.kind(target, follow_symlink=false) catch {
@@ -4317,7 +3981,7 @@ async fn directory_contains_protected_source_path(dir : String) -> Bool {
   }
   for entry in entries {
     let child = @path.Path(dir).join(Path(entry)).normalize().to_string()
-    if is_protected_source_path(child) {
+    if @sandbox.is_protected_source_path(child) {
       return true
     }
     let kind = @fs.kind(child, follow_symlink=false) catch {
@@ -4343,15 +4007,15 @@ async fn move_destination_can_create_workspace_source(
   source_contains_protected~ : Bool,
   predicted_dirs~ : Array[String],
 ) -> Bool {
-  if is_protected_workspace_source_path(real_workspace_root, dest) {
+  if @sandbox.is_protected_workspace_source_path(real_workspace_root, dest) {
     return true
   }
   let root = strip_trailing_slash(
     @path.Path(real_workspace_root).normalize().to_string(),
   )
   let dest = @path.Path(dest).normalize().to_string()
-  if !is_under_workspace_root(root, dest) ||
-    is_moon_managed_workspace_path(root, dest) {
+  if !@sandbox.is_under_workspace_root(root, dest) ||
+    @sandbox.is_moon_managed_workspace_path(root, dest) {
     return false
   }
   let source_kind = @fs.kind(source, follow_symlink=true) catch {
@@ -4383,16 +4047,19 @@ async fn missing_move_source_can_create_workspace_source(
     path_is_predicted_directory(dest, predicted_dirs)
   let source = @path.Path(source).normalize().to_string()
   let final_dest = if dest_is_directory {
-    @path.Path(dest).join(Path(path_basename(source))).normalize().to_string()
+    @path.Path(dest)
+    .join(Path(@sandbox.path_basename(source)))
+    .normalize()
+    .to_string()
   } else {
     dest
   }
-  if is_protected_workspace_source_path(root, final_dest) {
+  if @sandbox.is_protected_workspace_source_path(root, final_dest) {
     return true
   }
   if dest_is_directory &&
-    is_under_workspace_root(root, source) &&
-    is_moon_managed_workspace_path(root, source) {
+    @sandbox.is_under_workspace_root(root, source) &&
+    @sandbox.is_moon_managed_workspace_path(root, source) {
     return true
   }
   if path_is_predicted_directory(source, predicted_dirs) {
@@ -4404,10 +4071,10 @@ async fn missing_move_source_can_create_workspace_source(
 
 ///|
 fn looks_like_non_source_file_path(path : String) -> Bool {
-  let base = path_basename(path)
+  let base = @sandbox.path_basename(path)
   match base.rev_find(".") {
     Some(dot) if dot + 1 < base.length() =>
-      !is_protected_source_path(base) &&
+      !@sandbox.is_protected_source_path(base) &&
       looks_like_file_extension(base[dot + 1:].to_owned())
     _ => false
   }
@@ -4421,15 +4088,6 @@ fn looks_like_file_extension(ext : String) -> Bool {
     }
   }
   ext.length() > 0
-}
-
-///|
-fn path_basename(path : String) -> String {
-  let normalized = strip_trailing_slash(path.replace_all(old="\\", new="/"))
-  match normalized.rev_find("/") {
-    Some(slash) => normalized[slash + 1:].to_owned()
-    None => normalized
-  }
 }
 
 ///|
@@ -4698,7 +4356,9 @@ async fn source_tree_copy_destination_target(
   }
   match dest_target {
     Some(target) =>
-      if is_protected_workspace_source_path(real_workspace_root, target) {
+      if @sandbox.is_protected_workspace_source_path(
+          real_workspace_root, target,
+        ) {
         Some(target)
       } else {
         None
@@ -5068,7 +4728,7 @@ async fn source_tree_touch_target(
   }
   for operand in operands {
     let target = resolve_source_write_redirect_target(cwd, operand)
-    if is_protected_workspace_source_path(real_workspace_root, target) {
+    if @sandbox.is_protected_workspace_source_path(real_workspace_root, target) {
       return Some(target)
     }
     if follow_symlinks {
@@ -5182,7 +4842,7 @@ async fn source_tree_tee_target(
   }
   for operand in operands {
     let target = resolve_source_write_redirect_target(cwd, operand)
-    if is_protected_workspace_source_path(real_workspace_root, target) {
+    if @sandbox.is_protected_workspace_source_path(real_workspace_root, target) {
       return Some(target)
     }
     match
@@ -5437,46 +5097,19 @@ fn resolve_source_write_redirect_target(
 }
 
 ///|
-fn is_protected_workspace_source_path(
-  real_workspace_root : String,
-  target : String,
-) -> Bool {
-  let root = strip_trailing_slash(
-    @path.Path(real_workspace_root).normalize().to_string(),
-  )
-  let target = @path.Path(target).normalize().to_string()
-  is_under_workspace_root(root, target) &&
-  !is_moon_managed_workspace_path(root, target) &&
-  is_protected_source_path(target)
-}
-
-///|
-fn is_under_workspace_root(root : String, path : String) -> Bool {
-  let root = workspace_compare_path(root)
-  let path = workspace_compare_path(path)
-  if path == root {
-    true
-  } else if root == "/" {
-    path.has_prefix("/")
-  } else {
-    path.has_prefix("\{root}/")
-  }
-}
-
-///|
 async fn protected_workspace_source_or_tree_path(
   real_workspace_root : String,
   target : String,
 ) -> Bool {
-  if is_protected_workspace_source_path(real_workspace_root, target) {
+  if @sandbox.is_protected_workspace_source_path(real_workspace_root, target) {
     return true
   }
   let root = strip_trailing_slash(
     @path.Path(real_workspace_root).normalize().to_string(),
   )
   let target = @path.Path(target).normalize().to_string()
-  if !is_under_workspace_root(root, target) ||
-    is_moon_managed_workspace_path(root, target) {
+  if !@sandbox.is_under_workspace_root(root, target) ||
+    @sandbox.is_moon_managed_workspace_path(root, target) {
     return false
   }
   let kind = @fs.kind(target, follow_symlink=false) catch {
@@ -5500,7 +5133,7 @@ async fn directory_contains_protected_workspace_source(
   }
   for entry in entries {
     let child = @path.Path(dir).join(Path(entry)).normalize().to_string()
-    if is_protected_workspace_source_path(root, child) {
+    if @sandbox.is_protected_workspace_source_path(root, child) {
       return true
     }
     let kind = @fs.kind(child, follow_symlink=false) catch {
@@ -5516,49 +5149,6 @@ async fn directory_contains_protected_workspace_source(
     }
   }
   false
-}
-
-///|
-fn is_moon_managed_workspace_path(root : String, path : String) -> Bool {
-  let root = workspace_compare_path(root)
-  let path = workspace_compare_path(path)
-  if path == root {
-    return false
-  }
-  if !is_under_workspace_root(root, path) {
-    return false
-  }
-  let relative_start = if root == "/" { 1 } else { root.length() + 1 }
-  let relative = path[relative_start:].to_owned()
-  for part in relative.split("/") {
-    if part == "_build" || part == ".mooncakes" {
-      return true
-    }
-  }
-  false
-}
-
-///|
-fn workspace_compare_path(path : String) -> String {
-  strip_trailing_slash(path.replace_all(old="\\", new="/"))
-}
-
-///|
-fn is_protected_source_path(path : String) -> Bool {
-  let path = path.replace_all(old="\\", new="/")
-  path.has_suffix(".mbt.md") ||
-  path.has_suffix(".mbt") ||
-  path.has_suffix(".mbti") ||
-  path == "moon.mod" ||
-  path.has_suffix("/moon.mod") ||
-  path == "moon.pkg" ||
-  path.has_suffix("/moon.pkg") ||
-  path == "moon.mod.json" ||
-  path.has_suffix("/moon.mod.json") ||
-  path == "moon.pkg.json" ||
-  path.has_suffix("/moon.pkg.json") ||
-  path == "moon.work" ||
-  path.has_suffix("/moon.work")
 }
 
 ///|
@@ -5677,51 +5267,4 @@ fn sandbox_denial_line_has_denial_colon_before_subject(
   line.contains("Operation not permitted:") ||
   line.contains("operation not permitted:") ||
   line.contains("Permission denied:")
-}
-
-///|
-fn regex_escape(text : String) -> String {
-  let escaped = StringBuilder()
-  for ch in text {
-    match ch {
-      '\\'
-      | '.'
-      | '+'
-      | '*'
-      | '?'
-      | '^'
-      | '$'
-      | '('
-      | ')'
-      | '['
-      | ']'
-      | '{'
-      | '}'
-      | '|'
-      | '/' => {
-        escaped.write_char('\\')
-        escaped.write_char(ch)
-      }
-      _ => escaped.write_char(ch)
-    }
-  }
-  escaped.to_string()
-}
-
-///|
-fn sbpl_string_escape(text : String) -> String {
-  let escaped = StringBuilder()
-  for ch in text {
-    match ch {
-      '"' | '\\' => {
-        escaped.write_char('\\')
-        escaped.write_char(ch)
-      }
-      '\n' => escaped.write_string("\\n")
-      '\r' => escaped.write_string("\\r")
-      '\t' => escaped.write_string("\\t")
-      _ => escaped.write_char(ch)
-    }
-  }
-  escaped.to_string()
 }

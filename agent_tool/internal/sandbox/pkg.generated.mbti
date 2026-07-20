@@ -1,0 +1,38 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "bobzhang/openseek/agent_tool/internal/sandbox"
+
+// Values
+pub const PlatformShellProgram : String = "sh"
+
+pub const SandboxExecPath : String = "/usr/bin/sandbox-exec"
+
+pub fn is_moon_managed_workspace_path(String, String) -> Bool
+
+pub fn is_protected_source_path(String) -> Bool
+
+pub fn is_protected_workspace_source_path(String, String) -> Bool
+
+pub fn is_under_workspace_root(String, String) -> Bool
+
+pub fn path_basename(String) -> String
+
+pub fn platform_shell_args(String) -> Array[String]
+
+pub fn sandbox_exec_args(String, String) -> Array[String]
+
+pub async fn sandbox_exec_available() -> Bool
+
+pub async fn source_write_readonly_profile_data(String) -> SourceWriteProfileData
+
+// Errors
+
+// Types and methods
+pub(all) struct SourceWriteProfileData {
+  profile : String
+  denial_subjects : Array[String]
+}
+
+// Type aliases
+
+// Traits
+

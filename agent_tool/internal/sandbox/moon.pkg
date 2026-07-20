@@ -1,0 +1,15 @@
+import {
+  "moonbitlang/async",
+  "moonbitlang/async/fs",
+  "moonbitlang/async/process",
+  "moonbitlang/x/path",
+  "bobzhang/openseek/internal/workspace_path",
+}
+
+import {
+  "bobzhang/openseek/testkit/filesystem" @vfs,
+} for "wbtest"
+
+warnings = "+unnecessary_annotation"
+
+supported_targets = "+native"

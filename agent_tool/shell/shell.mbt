@@ -634,8 +634,8 @@ pub async fn collect_shell_output(
   max_output_chars? : Int = @decode.default_max_output_chars,
 ) -> ShellOutput {
   collect_process_output(
-    PlatformShellProgram,
-    platform_shell_args(cmd),
+    @sandbox.PlatformShellProgram,
+    @sandbox.platform_shell_args(cmd),
     cwd?,
     max_output_chars~,
   )
@@ -673,26 +673,6 @@ async fn collect_process_output(
       output_limit_reached: prefix.output_limit_reached,
     }
   }
-}
-
-///|
-#cfg(platform="windows")
-const PlatformShellProgram : String = "pwsh"
-
-///|
-#cfg(not(platform="windows"))
-const PlatformShellProgram : String = "sh"
-
-///|
-#cfg(platform="windows")
-fn platform_shell_args(cmd : String) -> Array[String] {
-  ["-NoProfile", "-Command", cmd]
-}
-
-///|
-#cfg(not(platform="windows"))
-fn platform_shell_args(cmd : String) -> Array[String] {
-  ["-c", cmd]
 }
 
 ///|
