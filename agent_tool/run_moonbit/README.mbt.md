@@ -1,46 +1,39 @@
 # run_moonbit
 
-Compile and run a **self-contained MoonBit program** in an ephemeral, isolated
-package, returning its merged stdout/stderr and exit status. It is the agent's
-way to *script in MoonBit* — for automation (read and transform files, parse
-JSON, compute) and for probing how a MoonBit language feature behaves —
-instead of reaching for shell `python`/`node`.
+Compile and run a **self-contained MoonBit program** and return its merged
+stdout/stderr and exit status. It is the agent's way to *script in MoonBit* —
+for automation (read and transform files, parse JSON, compute) and for probing
+how a language feature behaves — instead of reaching for shell `python`/`node`.
+The more the agent scripts in MoonBit, the more fluent it gets, and the safe
+wasm backend (planned) makes it the natural sandboxed automation surface.
 
-Why a dedicated tool:
+## How it works
 
-- **No shell quoting.** `source` is a structured argument, so a program with
-  quotes, `$`, backticks, and `\{}` interpolation goes straight to disk — no
-  double-escaping through the shell.
-- **Sandboxed by an allowlist.** The snippet may import only a curated set of
-  standard *batteries* (below) — notably NOT process spawning, which stays
-  behind the sandboxed `shell` tool. A non-battery `@alias` — a local package
-  like `@agent_tool`, or `@process` — is refused with a pointer elsewhere.
-- **Worktree-safe, never stale.** It runs in an isolated module (its own
-  `moon.mod`/`_build`/lock in a temp dir) that imports only pinned registry
-  batteries. It never touches the working-tree module, so it cannot pick up a
-  stale snapshot or contend with your `moon build` — unlike `moon run -e`.
-- **MoonBit is the point.** Every script the agent writes here is MoonBit
-  practice, and moon's own compiler diagnostics are captured verbatim as the
-  feedback when something does not compile.
+The `source` is a `.mbtx` **single-file script** — MoonBit's own one-file
+program format. The tool does nothing clever: it writes `source` to a throwaway
+temp file, runs `moon run <file>.mbtx --target <target>`, returns what moon
+prints, removes the temp file, and enforces a 60s bound. moon's single-file
+runner handles the inline import block; moon's own compiler diagnostics are the
+error message when something does not build.
 
-## Argument
+## Arguments
 
-- `source` (string, required): a full top-level MoonBit program including its
-  own `main`. Use `async fn main` for filesystem/stdio/process work (the
-  package builds on the native target). Reference batteries as `@fs`, `@json`,
-  `@stdio`, …; they are imported automatically from your `@alias.` uses.
+- `source` (string, required): a full `.mbtx` program. It may open with an
+  inline `import { "pkg", "pkg", … }` block (comma-separated module paths),
+  then the program including its own `main`. Use `async fn main` for
+  filesystem/stdio work.
+- `target` (string, optional, default `native`): the backend — one of
+  `native`, `wasm`, `wasm-gc`, `js`, `llvm`. The async IO packages
+  (`@fs`, `@stdio`, `@process`) require `native`.
 
-## Batteries (the allowlist)
-
-`fs`, `stdio`, `io` (from `moonbitlang/async`), and `json`,
-`strconv`, `math`, `buffer`, `env`, `random`, `list` (from `moonbitlang/core`).
-Anything else is refused — for a **local** package, exercise it by adding a
-`*_test.mbt` to that package and running `moon test`, which has full,
-worktree-safe access to it.
+It runs isolated from your working tree, so a local-package import resolves to
+the **published registry snapshot** (not your uncommitted edits). Use it for
+self-contained scripts; to exercise your working-tree code, add a `*_test.mbt`
+to that package and run `moon test` via shell.
 
 ## Examples
 
-A quick language probe — no batteries, pure core:
+A quick language probe — no imports, pure core:
 
 ```mbt check
 ///|
@@ -56,15 +49,16 @@ async test "run_moonbit runs a pure-core probe" {
 }
 ```
 
-Reading and transforming a file (what you pass as `source`):
+Reading and transforming a file (what you pass as `source`) — note the inline
+import block, with `moonbitlang/async` present so `async fn main` compiles:
 
 ```mbt nocheck
-///|
+import { "moonbitlang/async", "moonbitlang/async/fs", "moonbitlang/async/stdio" }
+
 async fn main {
-  let text = @fs.read_file("data.json").text()
-  let json = @json.parse(text)
-  guard json is Array(items) else { return }
-  @stdio.stdout.write("items=\{items.length()}\n")
+  let text = @fs.read_file("data.txt").text()
+  let lines = [..text.split("\n")].filter(l => !l.is_empty())
+  @stdio.stdout.write("lines=\{lines.length()}\n")
 }
 ```
 
@@ -73,7 +67,6 @@ Probing a language feature (what you pass as `source`):
 ```mbt nocheck
 ///|
 fn main {
-  // Does a range pattern match the way I expect?
   let classify = c => {
     match c {
       'a'..='z' => "lower"
@@ -84,13 +77,4 @@ fn main {
   println(classify('k'))
   println(classify('7'))
 }
-```
-
-A non-battery import is refused rather than silently resolved:
-
-```mbt nocheck
-// source: fn main { println(@agent_tool.brief_basename("a/b")) }
-// -> error: run_moonbit imports only the standard automation packages …
-//    `@agent_tool` is not one of them — if it is a local package, exercise it
-//    by adding a `*_test.mbt` to that package and running `moon test`.
 ```

@@ -13,6 +13,7 @@ pub fn decode(Json) -> RunMoonbitInput raise
 // Types and methods
 pub struct RunMoonbitInput {
   source : String
+  target : String
 } derive(@debug.Debug)
 
 // Type aliases

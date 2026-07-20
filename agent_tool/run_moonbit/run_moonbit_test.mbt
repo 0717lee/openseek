@@ -16,17 +16,16 @@ async test "runs a pure-core program and returns its output" {
 }
 
 ///|
-async test "surfaces a compile error as an error result (moon's diagnostics)" {
-  let out = run("fn main { let x : Int = \"nope\" }")
+async test "surfaces a compile error via moon's own diagnostics" {
+  let out = run("fn main { let _x : Int = \"nope\" }")
   assert_true(out.is_error)
-  // moon's own type-mismatch diagnostic is the teaching signal
   assert_true(
     out.content.to_lower().contains("type") || out.content.contains("String"),
   )
 }
 
 ///|
-async test "reads a file through the async fs battery" {
+async test "reads a file through an inline import block" {
   @vfs.with_tmpdir(dir => {
     @fs.write_file(
       "\{dir}/note.txt",
@@ -35,6 +34,8 @@ async test "reads a file through the async fs battery" {
     )
     let out = run(
       (
+        #|import { "moonbitlang/async", "moonbitlang/async/fs", "moonbitlang/async/stdio" }
+        #|
         #|async fn main {
         #|  let text = @fs.read_file("$P").text()
         #|  @stdio.stdout.write("lines=\{[..text.split("\n")].filter(l => !l.is_empty()).length()}\n")
@@ -44,15 +45,6 @@ async test "reads a file through the async fs battery" {
     assert_false(out.is_error)
     assert_true(out.content.contains("lines=2"))
   })
-}
-
-///|
-async test "refuses a local package and points at the test-file path" {
-  let out = run("fn main { println(@agent_tool.brief_basename(\"a/b\")) }")
-  assert_true(out.is_error)
-  assert_true(out.content.contains("run_moonbit imports only"))
-  assert_true(out.content.contains("*_test.mbt"))
-  assert_true(out.content.contains("agent_tool"))
 }
 
 ///|
@@ -67,9 +59,23 @@ async test "rejects non-string source arguments" {
 }
 
 ///|
-async test "refuses process spawning to keep the sandbox (shell owns that)" {
-  let out = run("async fn main { @process.run(\"ls\", []) |> ignore }")
+async test "runs a pure snippet on a non-native target" {
+  let action = match @run_moonbit.definition().execute {
+    Async(execute) =>
+      execute({ "source": "fn main { println(6 * 7) }", "target": "js" })
+    Sync(_) => fail("run_moonbit should be async")
+  }
+  guard action is Respond(output) else { fail("expected Respond") }
+  assert_false(output.is_error)
+  assert_true(output.content.contains("42"))
+}
+
+///|
+async test "error diagnostics name `source`, not the throwaway temp path" {
+  let out = run("fn main {\n  let _x : Int = \"nope\"\n}")
   assert_true(out.is_error)
-  assert_true(out.content.contains("run_moonbit imports only"))
-  assert_true(out.content.contains("process"))
+  // the model reads a path about its own input, not /tmp/openseek-run-moonbit-*
+  assert_true(out.content.contains("source:"))
+  assert_false(out.content.contains("openseek-run-moonbit-"))
+  assert_false(out.content.contains("_build/snippet.mbt"))
 }
