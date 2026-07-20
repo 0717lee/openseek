@@ -15,6 +15,7 @@ Concrete built-in tools live in subpackages:
   for background jobs, and `agent_tool/bgjobs` as their shared runtime)
 - `agent_tool/plan`
 - `agent_tool/goal`
+- `agent_tool/run_moonbit`
 - `agent_tool/finish`
 
 ## API Shape

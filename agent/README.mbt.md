@@ -115,6 +115,9 @@ calls `@agent.run`, but that decision lives outside the `agent` package.
 - `plan`: record or replace the step-by-step plan for a multi-step task;
 - `goal`: report standing-goal status (`met`, `continuing`, or `blocked`;
   `met` clears the goal — setting one is the serve `goal` command's job);
+- `run_moonbit`: compile and run a self-contained MoonBit program in an
+  isolated package (automation and language probes; standard batteries only,
+  no local packages);
 - `finish`: end the task with a final answer.
 
 File-oriented tools capture `runtime.workspace_root()` when the registry is
@@ -146,6 +149,7 @@ async test "standard tools are registered in dispatch order" {
         #|  "remove",
         #|  "plan",
         #|  "goal",
+        #|  "run_moonbit",
         #|  "finish",
         #|]
       ),
