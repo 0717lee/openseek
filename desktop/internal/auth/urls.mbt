@@ -1,4 +1,4 @@
-// URL derivations shared by the sign-in flow, the connector supervisor,
+// URL derivations shared by the sign-in flow, the relay actor,
 // and the status shape. The server origin itself comes from the engine
 // settings' server selection (or the environment override) — this package
 // only derives from it.

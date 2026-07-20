@@ -1,7 +1,7 @@
 // The auth.* op bodies (docs/remote-protocol.md): they run the sign-in
 // flows in `internal/auth` and translate its errors into the transports'
 // `HostError` vocabulary. They live here — not in `internal/auth` — so
-// `auth.changed` can go through the hub, and the connector supervisor
+// `auth.changed` can go through the hub, and the relay actor
 // (internal/remote, which imports this package) stays cycle-free.
 
 ///|

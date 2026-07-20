@@ -1,4 +1,4 @@
-// The connector supervisor: the one task that owns "is this host
+// The relay actor: the one task that owns "is this host
 // registered with a relay". It keeps the running connector matching the
 // auth store's desired config — the signed-in session or the environment
 // override — restarting on every store poke (sign-in, sign-out, server
@@ -14,14 +14,27 @@ priv enum SessionEnd {
 }
 
 ///|
-/// Run for the host's lifetime (spawned once from main). `announce`
-/// preserves the startup log line: it fires with the device id on every
-/// successful registration.
-pub async fn run_supervisor(
+/// The app-lifetime owner of the relay control connection and every data
+/// WebSocket accepted through it. Auth operations communicate desired-state
+/// changes through `AuthStore`'s coalescing wakeup mailbox.
+struct RelayActor {
+  state : @api.ApiState
+  announce : (String) -> Unit
+}
+
+///|
+pub fn RelayActor::new(
   state : @api.ApiState,
   announce~ : (String) -> Unit,
-) -> Unit {
-  let store = state.auth_store()
+) -> RelayActor {
+  { state, announce }
+}
+
+///|
+/// Run for the host's lifetime (spawned once from main). `announce` preserves
+/// the startup log line on every successful registration.
+pub async fn RelayActor::run(self : RelayActor) -> Unit {
+  let store = self.state.auth_store()
   for ;; {
     match store.desired_connector() {
       // Idle: nothing to run until someone pokes the store.
@@ -32,27 +45,7 @@ pub async fn run_supervisor(
             store.wakeups().get()
             Poked
           },
-          () => {
-            Refused(
-              run_connector(
-                state,
-                relay_url=config.relay_url,
-                device_token=config.device_token,
-                device_name=config.device_name,
-                on_registered=device => {
-                  announce(device)
-                  if store.mark_registered(device) {
-                    state.publish("auth.changed", auth_changed_params(state))
-                  }
-                },
-                on_dropped=() => {
-                  if store.mark_dropped() {
-                    state.publish("auth.changed", auth_changed_params(state))
-                  }
-                },
-              ),
-            )
-          },
+          () => Refused(self.run_connector(config)),
         ])
         match end {
           // The config changed: `any` already cancelled the old connector
@@ -62,7 +55,7 @@ pub async fn run_supervisor(
             @xlog.warn(category="remote") <?
               { "message": "relay refused registration", "error": message }
             store.handle_refusal()
-            state.publish("auth.changed", auth_changed_params(state))
+            self.state.publish("auth.changed", auth_changed_params(self.state))
           }
         }
       }
@@ -71,8 +64,23 @@ pub async fn run_supervisor(
 }
 
 ///|
+fn RelayActor::registered(self : RelayActor, device : String) -> Unit {
+  (self.announce)(device)
+  if self.state.auth_store().mark_registered(device) {
+    self.state.publish("auth.changed", auth_changed_params(self.state))
+  }
+}
+
+///|
+fn RelayActor::dropped(self : RelayActor) -> Unit {
+  if self.state.auth_store().mark_dropped() {
+    self.state.publish("auth.changed", auth_changed_params(self.state))
+  }
+}
+
+///|
 /// The `auth.changed` params: the store's status shape. Notifications the
-/// supervisor pushes never carry a fallback `server_url` — when nothing is
+/// actor pushes never carry a fallback `server_url` — when nothing is
 /// signed in the Settings page derives the selectable server itself.
 fn auth_changed_params(state : @api.ApiState) -> Json {
   state.auth_store().status_json()

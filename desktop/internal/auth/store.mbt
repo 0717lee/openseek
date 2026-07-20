@@ -1,6 +1,6 @@
 // The host's sign-in state: one signed-in session (or the environment
 // override), the connector's registration status, and the wakeup channel
-// the connector supervisor parks on. Single-threaded event-loop semantics:
+// the relay actor parks on. Single-threaded event-loop semantics:
 // plain `mut` fields, no locks — the one re-entrancy hazard (two
 // concurrent `auth.connect` calls) is guarded by `sign_in_active`.
 
@@ -42,12 +42,12 @@ priv struct AuthSession {
 ///|
 /// See the package docs above. Constructed once at startup by
 /// `AuthStore::load` and shared by the dispatcher (auth.* ops) and the
-/// connector supervisor. Opaque: the token and the state flags never
+/// relay actor. Opaque: the token and the state flags never
 /// appear outside this package.
 struct AuthStore {
   runtime_dir : @path.Path?
   env_override : ConnectorConfig?
-  // The supervisor's coalescing poke channel: `DiscardOldest(1)` never
+  // The relay actor's coalescing poke channel: `DiscardOldest(1)` never
   // blocks a producer and buffers at most one pending wakeup.
   wakeups : @async.Queue[Unit]
   mut session : AuthSession?
@@ -130,7 +130,7 @@ pub fn AuthStore::poke(self : AuthStore) -> Unit {
 }
 
 ///|
-/// The supervisor's park/wakeup channel.
+/// The relay actor's park/wakeup channel.
 pub fn AuthStore::wakeups(self : AuthStore) -> @async.Queue[Unit] {
   self.wakeups
 }
@@ -160,7 +160,7 @@ pub fn AuthStore::mark_dropped(self : AuthStore) -> Bool {
 ///|
 /// The relay refused registration as terminal (bad or revoked token). In
 /// override mode nothing can repair the config at runtime, so the store
-/// only parks the supervisor; a signed-in session is cleared like a
+/// only parks the relay actor; a signed-in session is cleared like a
 /// sign-out, minus the revoke round-trip the relay already answered for.
 pub async fn AuthStore::handle_refusal(self : AuthStore) -> Unit {
   self.connected = false

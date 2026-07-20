@@ -26,7 +26,7 @@ struct ApiState {
   manager : @engine.EngineManager
   host : @host.HostState
   hub : Hub
-  // The host's relay sign-in state, shared with the connector supervisor.
+  // The host's relay sign-in state, shared with the relay actor.
   auth : @auth.AuthStore
   // Called for every finished run, alongside the notification fan-out — the
   // desktop posts its system notification here.
@@ -60,7 +60,7 @@ pub fn ApiState::new(
 }
 
 ///|
-/// The sign-in store, for the connector supervisor running beside the
+/// The sign-in store, for the relay actor running beside the
 /// dispatcher.
 pub fn ApiState::auth_store(self : ApiState) -> @auth.AuthStore {
   self.auth

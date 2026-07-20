@@ -28,30 +28,24 @@ const ReconnectDelayMs = 3_000
 ///|
 /// Keep one control connection registered, retrying transient failures
 /// forever. Returns only on a terminal `fail` control frame — the relay
-/// rejected this token — with the relay's message; the supervisor decides
-/// what that means. `on_registered` fires with the device id on every
-/// successful registration, `on_dropped` after every ended control
-/// session (a retry follows).
-async fn run_connector(
-  state : @api.ApiState,
-  relay_url~ : String,
-  device_token~ : String,
-  device_name~ : String,
-  on_registered~ : (String) -> Unit,
-  on_dropped~ : () -> Unit,
+/// rejected this token — with the relay's message; `RelayActor::run` decides
+/// what that means.
+async fn RelayActor::run_connector(
+  self : RelayActor,
+  config : @auth.ConnectorConfig,
 ) -> String {
   for ;; {
-    connect_once(state, relay_url, device_token, device_name, on_registered) catch {
+    self.connect_once(config) catch {
       error if @async.is_being_cancelled() => raise error
       RegistrationRefused(message) => {
-        on_dropped()
+        self.dropped()
         return message
       }
       error =>
         @xlog.warn(category="remote") <?
           { "message": "relay connection lost", "error": "\{error}" }
     }
-    on_dropped()
+    self.dropped()
     @async.sleep(ReconnectDelayMs)
   }
 }
@@ -59,17 +53,16 @@ async fn run_connector(
 ///|
 /// One control session: register, then serve `open` announcements until the
 /// connection drops, which raises out of here for `run_connector` to retry.
-async fn connect_once(
-  state : @api.ApiState,
-  relay_url : String,
-  device_token : String,
-  device_name : String,
-  announce : (String) -> Unit,
+async fn RelayActor::connect_once(
+  self : RelayActor,
+  config : @auth.ConnectorConfig,
 ) -> Unit {
-  let control = @websocket.Conn::connect(relay_url)
+  let control = @websocket.Conn::connect(config.relay_url)
   defer control.close()
   control.send_text(
-    (Register(token=device_token, name=device_name) : @tunnel.Frame).encode(),
+    (
+      Register(token=config.device_token, name=config.device_name) :
+      @tunnel.Frame).encode(),
   )
   guard @tunnel.Frame::decode(control.recv().read_all().text()) is Some(frame) else {
     raise ConnectorError("relay sent an undecodable control frame")
@@ -80,7 +73,7 @@ async fn connect_once(
     Register(..) | Open(..) =>
       raise ConnectorError("relay broke the control protocol")
   }
-  announce(device)
+  self.registered(device)
   @async.with_task_group(group => {
     group.spawn_bg(() => {
       for ;; {
@@ -99,7 +92,7 @@ async fn connect_once(
         // clients.
         Open(stream~) =>
           group.spawn_bg(allow_failure=true, () => {
-            serve_stream(state, data_url(relay_url, stream))
+            WsClientActor::new(self.state, data_url(config.relay_url, stream)).run()
           })
         // A mid-session fail is the relay revoking this registration —
         // terminal like a refused one.
@@ -109,18 +102,6 @@ async fn connect_once(
       }
     }
   })
-}
-
-///|
-async fn serve_stream(state : @api.ApiState, url : String) -> Unit {
-  let conn = @websocket.Conn::connect(url)
-  defer conn.close()
-  serve_client(state, conn) catch {
-    error if @async.is_being_cancelled() => raise error
-    // A remote client hanging up mid-run is routine, not a connector
-    // failure.
-    _ => ()
-  }
 }
 
 ///|

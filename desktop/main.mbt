@@ -42,6 +42,9 @@ async fn main {
     notify_run_finished(payload)
   })
   let bridge = @extension.DesktopBridgeActor::new(state)
+  let relay = @remote.RelayActor::new(state, announce=device => {
+    log.info() <? { "message": "relay registered", "device": device }
+  })
   // Proton exposes the `__MoonBit__` bridge — both the ops and the event
   // channel the frontend listens on — only to the `proton://app/` origin its
   // asset entry serves from. The window is bridge-only: it makes no HTTP
@@ -69,14 +72,10 @@ async fn main {
     @host.spawn_host_pumps(group, state.host_state(), (method_, params) => {
       state.publish(method_, params)
     })
-    // The connector supervisor runs for the app's lifetime: it registers
+    // The relay actor runs for the app's lifetime: it registers
     // this host whenever a sign-in (or the environment override) says so,
     // and idles otherwise.
-    group.spawn_bg(allow_failure=true, () => {
-      @remote.run_supervisor(state, announce=device => {
-        log.info() <? { "message": "relay registered", "device": device }
-      })
-    })
+    group.spawn_bg(allow_failure=true, () => relay.run())
     log.info() <? { "event": "desktop_app_run_start" }
     match app.run() {
       Ok(_) =>
