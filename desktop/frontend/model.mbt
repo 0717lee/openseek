@@ -1004,8 +1004,13 @@ priv enum Msg {
   // brought forward natively).
   NotificationClicked(run_id~ : String)
   // A host-side action with no conversation of its own (opening a file in
-  // the system app, launching an app) failed: pops an error toast.
+  // the system app, opening an external URL, launching an app) failed: pops
+  // an error toast.
   HostActionFailed(String)
+  // A safe external anchor was clicked in the Proton page. The document-level
+  // capture listener emits this for both Rabbita transcript links and the
+  // editor hover's foreign DOM; browser pages keep native new-tab behavior.
+  ExternalLinkClicked(String)
   // Open the in-app folder picker against one device's host (browsing
   // starts at that host's home directory); on the console this also
   // focuses the device the picker will register the workspace on.

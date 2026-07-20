@@ -1939,6 +1939,7 @@ fn update_msg(
       (cmd, { ..model, file_panel: panel })
     }
     HostActionFailed(message) => model.notify_error(dispatch, message)
+    ExternalLinkClicked(url) => (open_external_link(dispatch, url), model)
     FromDevice(channel, msg) => update_device_msg(dispatch, channel, msg, model)
   }
 }
@@ -5494,6 +5495,26 @@ test "a host action failure pops a toast" {
   )
   inspect(next.notifications.length(), content="1")
   inspect(next.notifications[0].message, content="open path failed: no opener")
+}
+
+///|
+test "opening an external link is a pure model transition" {
+  let dispatch = test_dispatch()
+  let base = test_model()
+  let (_, first) = update(
+    dispatch,
+    ExternalLinkClicked("https://example.com/docs"),
+    base,
+  )
+  let (_, second) = update(
+    dispatch,
+    ExternalLinkClicked("https://example.com/docs"),
+    base,
+  )
+  inspect(first.active_session, content="desktop-test")
+  inspect(second.active_session, content="desktop-test")
+  inspect(first.notifications.length(), content="0")
+  inspect(second.notifications.length(), content="0")
 }
 
 ///|

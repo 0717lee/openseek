@@ -31,9 +31,12 @@ pub fn boot() -> Unit {
       // The narrow-layout flag must track the window: rotating a phone or
       // resizing a desktop window across the breakpoint re-lays the app out.
       subscriptions=(emit, _) => {
-        @sub.on_resize(
-          emit.map(viewport => ViewportResized(width=viewport.width)),
-        )
+        @sub.batch([
+          @sub.on_resize(
+            emit.map(viewport => ViewportResized(width=viewport.width)),
+          ),
+          external_link_subscription(emit.map(url => ExternalLinkClicked(url))),
+        ])
       },
     )
     model.map(model => view(emit, model.0))

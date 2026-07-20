@@ -22,6 +22,12 @@ const ExtensionNamespace = "openseek"
 const ConnectMethod = "host.connect"
 
 ///|
+/// Open an external URL on the machine displaying the Proton window. Unlike
+/// the shared host catalog, this command is deliberately local-only: a relay
+/// browser must never make another device launch a URL.
+const OpenExternalMethod = "shell.open_external"
+
+///|
 /// A page attachment waiting for the bridge actor to install it. The reply
 /// makes `host.connect` a finite readiness handshake: success means the
 /// actor has already emitted `agent.connected` to this page.
@@ -77,6 +83,7 @@ pub fn openseek_extension(
     @app.AppCommandApiDescriptor::new(name)
   })
   descriptors.push(@app.AppCommandApiDescriptor::new(ConnectMethod))
+  descriptors.push(@app.AppCommandApiDescriptor::new(OpenExternalMethod))
   @app.AppCommandExtensionSpec::new(
     ExtensionId,
     ExtensionNamespace,
@@ -91,6 +98,7 @@ pub fn openseek_extension(
         bridge.attach(context)
         Json::empty_object()
       })
+      context.op_async(OpenExternalMethod, open_external)
       Ok(())
     },
   )
