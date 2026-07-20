@@ -19,10 +19,12 @@ impl Show for UnknownMethod with fn output(self, logger) {
 }
 
 ///|
-/// Everything the methods operate on: the engine manager (one serve process
-/// per conversation), the host-op state (LSP pool, updates, watcher), and
-/// the notification hub. One per host process.
+/// Everything the methods operate on: the app-lifetime engine actor and its
+/// request-side manager (one serve process per conversation), the host-op
+/// state (LSP pool, updates, watcher), and the notification hub. One per host
+/// process.
 struct ApiState {
+  engine : @engine.EngineActor
   manager : @engine.EngineManager
   host : @host.HostState
   hub : Hub
@@ -47,8 +49,10 @@ pub fn ApiState::new(
   auth? : @auth.AuthStore,
   on_finished? : (@engine.FinishedPayload) -> Unit,
 ) -> ApiState {
+  let engine_actor = @engine.new_engine_actor(engine, runtime_dir?)
   {
-    manager: @engine.new_engine_manager(engine, runtime_dir?),
+    engine: engine_actor,
+    manager: engine_actor.manager(),
     host: @host.new_host_state(engine, runtime_dir?, executable?),
     hub: Hub::new(),
     auth: match auth {
@@ -57,6 +61,13 @@ pub fn ApiState::new(
     },
     on_finished,
   }
+}
+
+///|
+/// The app-lifetime engine actor. Its `run` task owns all serve processes and
+/// per-session follower children.
+pub fn ApiState::engine_actor(self : ApiState) -> @engine.EngineActor {
+  self.engine
 }
 
 ///|
@@ -109,7 +120,7 @@ pub fn ApiState::host_state(self : ApiState) -> @host.HostState {
 }
 
 ///|
-/// The engine manager, for the engine pump that owns the serve processes.
+/// The request-side engine coordination handle.
 pub fn ApiState::manager(self : ApiState) -> @engine.EngineManager {
   self.manager
 }
