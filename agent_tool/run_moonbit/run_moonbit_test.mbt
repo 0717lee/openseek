@@ -79,3 +79,27 @@ async test "error diagnostics name `source`, not the throwaway temp path" {
   assert_false(out.content.contains("openseek-run-moonbit-"))
   assert_false(out.content.contains("_build/snippet.mbt"))
 }
+
+///|
+async test "refuses a program that spawns processes (shell owns commands)" {
+  let out = run(
+    (
+      #|import { "moonbitlang/async", "moonbitlang/async/process" }
+      #|
+      #|async fn main { @process.run("ls", []) |> ignore }
+    ),
+  )
+  assert_true(out.is_error)
+  assert_true(
+    out.content.contains("does not run programs that spawn processes"),
+  )
+}
+
+///|
+async test "a non-zero exit shows the exit code in the content, not just the brief" {
+  // prints, then aborts: the model must see the failure in what it reads
+  let out = run("fn main { println(\"before\"); panic() }")
+  assert_true(out.is_error)
+  assert_true(out.content.contains("before"))
+  assert_true(out.content.contains("exited"))
+}

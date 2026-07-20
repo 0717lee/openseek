@@ -5,6 +5,23 @@
 const RunTimeoutMs : Int = 60_000
 
 ///|
+/// Output is streamed to a file on disk, not buffered in memory, so a snippet
+/// that floods stdout (e.g. `while true { println(…) }`) cannot exhaust the
+/// agent's memory before the timeout fires. Only this many bytes are read back
+/// — the rest is dropped with a truncation marker.
+const OutputCapBytes : Int = 96_000
+
+///|
+/// Process spawning is refused: run_moonbit is the safe compute/IO surface, and
+/// the sandboxed `shell` tool owns command execution. Refusing this import also
+/// means the snippet has no descendant processes that could outlive the
+/// timeout. (Full capability containment is deferred to the planned wasm
+/// backend; this is the cheap boundary until then.)
+fn spawns_processes(source : String) -> Bool {
+  source.contains("moonbitlang/async/process")
+}
+
+///|
 /// Tool definition for `run_moonbit`: compile and run a self-contained MoonBit
 /// program and return its merged stdout/stderr and exit status.
 ///
@@ -51,10 +68,18 @@ async fn execute(arguments : Json) -> @agent_tool.ToolAction {
         is_error=true,
       )
   }
+  guard !spawns_processes(input.source) else {
+    return @agent_tool.ToolAction::respond(
+      "run_moonbit does not run programs that spawn processes (moonbitlang/async/process) — use the shell tool for commands; run_moonbit is the compute/IO surface.",
+      is_error=true,
+    )
+  }
   // Run the snippet as a `.mbtx` single-file script in a throwaway directory:
   // moon's own single-file runner handles the inline import block, so there is
   // no module to scaffold. The temp dir gives the snippet an isolated cwd (for
   // relative `@fs` paths) and keeps build artifacts off the working tree.
+  // Output is redirected to a file (not buffered in memory) and read back
+  // capped, so a flood cannot exhaust memory before the timeout.
   let result = @async.with_timeout_opt(RunTimeoutMs, () => {
     @vfs.with_tmpdir(prefix="openseek-run-moonbit-", dir => {
       @fs.write_file(
@@ -62,30 +87,41 @@ async fn execute(arguments : Json) -> @agent_tool.ToolAction {
         input.source,
         create_mode=CreateOrTruncate,
       )
-      let (exit_code, output) = @process.collect_output_merged(
+      let log = "\{dir}/output.log"
+      // Pre-create the merged output file so both redirects open it; both
+      // append so stdout and stderr interleave in write order (as the previous
+      // merged capture did).
+      @fs.write_file(log, "", create_mode=CreateOrTruncate)
+      let exit_code = @process.run(
         "moon",
         ["run", "snippet.mbtx", "--target", input.target],
         cwd=dir,
         inherit_env=true,
+        stdout=@process.redirect_to_file(log, append=true),
+        stderr=@process.redirect_to_file(log, append=true),
       )
+      (exit_code, read_capped(log), dir)
+    })
+  })
+  match result {
+    Some((exit_code, raw, dir)) => {
       // moon's diagnostics point at the throwaway temp file (the source is
       // copied into `_build/snippet.mbt` for the build, and line:col stay
       // faithful to the source). Rewrite that path to `source` so the model
       // reads `source:LINE:COL` about its own input, not a random temp path.
       let real = @fs.realpath(dir) catch { _ => dir }
-      let cleaned = output
-        .text()
+      let text = raw
         .replace_all(old="\{real}/_build/snippet.mbt", new="source")
         .replace_all(old="\{real}/snippet.mbtx", new="source")
         .replace_all(old="\{dir}/_build/snippet.mbt", new="source")
         .replace_all(old="\{dir}/snippet.mbtx", new="source")
-      (exit_code, cleaned)
-    })
-  })
-  match result {
-    Some((exit_code, text)) => {
+      // The exit status must be in the CONTENT the model reads (the brief is
+      // display-only), so a program that prints and then exits non-zero is not
+      // mistaken for a success with the same output.
       let body = if text.trim() == "" {
         "run_moonbit: program exited \{exit_code} with no output"
+      } else if exit_code != 0 {
+        "\{text}\n[run_moonbit: exited \{exit_code}]"
       } else {
         text
       }
@@ -101,5 +137,30 @@ async fn execute(arguments : Json) -> @agent_tool.ToolAction {
         is_error=true,
         brief="run_moonbit (timeout)",
       )
+  }
+}
+
+///|
+/// Read at most `OutputCapBytes` from the process output file, decoding lossily
+/// and appending a marker when there was more. The file — not memory — absorbs
+/// a flood; only this bounded prefix is ever materialized.
+async fn read_capped(path : String) -> String {
+  let file = @fs.open(path, mode=ReadOnly) catch { _ => return "" }
+  defer file.close()
+  let buf = FixedArray::make(OutputCapBytes, b'\x00')
+  let mut filled = 0
+  while filled < OutputCapBytes {
+    let n = file.read(buf, offset=filled, max_len=OutputCapBytes - filled)
+    if n <= 0 {
+      break
+    }
+    filled += n
+  }
+  let text = @utf8.decode_lossy(Bytes::from_array(buf[:filled]))
+  // If we filled the cap there may be more; note the truncation.
+  if filled == OutputCapBytes {
+    "\{text}\n[run_moonbit: output truncated at \{OutputCapBytes} bytes]"
+  } else {
+    text
   }
 }
