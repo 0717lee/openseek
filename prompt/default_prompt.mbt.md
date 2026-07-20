@@ -111,22 +111,20 @@ Common `moon` subcommands:
 - shell `moon run`: executable package and CLI probes; package path goes before
   `--`, program arguments go after `--`. Example:
   `moon run --target native cmd/tomljson -- /tmp/input.toml`.
-- shell `moon run -e` or `moon run -`: quick language/API snippets.
-  Verified examples: `moon run -e 'fn main { println("ok") }'`
-  and `moon run - <<'EOF'`.
-  Snippets may open with a multi-line `import { ... }` block, but those
-  imports resolve ONLY from the mooncakes.io registry — never from the local
-  workspace. Probing local packages this way is always wrong: an unpublished
-  module fails with `module not found`, and if the module IS published the
-  import silently binds the STALE published snapshot instead of your working
-  tree. To exercise local package code, write a black-box test and run
-  `moon test <pkg> --filter '<name glob>'` instead.
-  `moon run -e` defaults to native on current MoonBit nightlies, but `moon run -`
-  can still default to wasm-gc; pass `--target native` when stdin snippets need
-  native or async support.
-  MoonBit also supports `fn main raise`; for example,
-  `moon run --warn-list -a -e 'fn main raise { fail("bad input") }'` reports
-  the error with a stack trace.
+- `run_moonbit` tool: PREFER it over shell `python`/`node`/`moon run -e` for
+  scripting automation (read and transform files, parse JSON, compute) and for
+  quick language/API probes — it keeps the automation in MoonBit, takes the
+  program as a structured `source` (no shell quoting), is bounded to 60s, and
+  rewrites diagnostics to `source:LINE:COL` about your input. `source` is a
+  `.mbtx` script: an optional inline `import { "a", "b" }` block (comma-separated
+  module paths), then the program with its own `main`. Use `async fn main` and
+  include `"moonbitlang/async"` in the import block for `@fs`/`@stdio`/IO;
+  `target` defaults to native. It runs isolated, so a local-package import binds
+  the STALE mooncakes.io snapshot, never your working tree — to exercise local
+  package code, write a black-box `_test.mbt` and run `moon test <pkg> --filter`
+  (above). Shell `moon run -e`/`moon run -` remain only for what the tool cannot
+  express (e.g. a `fn main raise` stack-trace probe:
+  `moon run --warn-list -a -e 'fn main raise { fail("bad input") }'`).
 - shell `moon cram test`: durable CLI transcript tests under `tests/cram`;
   use `mooncram` blocks for stable help, examples, stdout/stderr, and exits.
   Example: `moon cram test tests/cram`.
@@ -241,7 +239,8 @@ options(
   `moon ide peek-def Symbol --loc file.mbt:line:col` for definitions,
   `moon ide find-references Symbol`, and `moon ide hover Symbol --loc
   file.mbt:line:col` for types.
-- Use `moon run -e` for quick core-language probes. Do not use `moon run -c`;
+- Use the `run_moonbit` tool for quick core-language probes and MoonBit
+  automation, in preference to shell `python`/`node`. Do not use `moon run -c`;
   `-c` is easy to confuse with `-C`.
 - `-e` requires the MoonBit code as the next command argument, for example
   `moon run -e 'fn main { println("ok") }'`. Do not run `moon run -e` and
