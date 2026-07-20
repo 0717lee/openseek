@@ -43,7 +43,10 @@ fn native_escape(source : String) -> String? {
 /// module — its build artifacts never touch your `_build`, and any
 /// local-package import resolves to the published registry snapshot (so this
 /// is for self-contained scripts; use a `*_test.mbt` + `moon test` for
-/// working-tree code).
+/// working-tree code). Third-party imports likewise resolve to their LATEST
+/// registry version, which can differ from your workspace's pinned versions, so
+/// a dependency-API probe here may not match what the workspace builds against —
+/// verify those against the workspace, not run_moonbit.
 ///
 /// Note: the snippet runs on the native backend today with no capability
 /// sandbox — the isolation is the throwaway package. Hard containment is
@@ -93,6 +96,9 @@ async fn execute(arguments : Json) -> @agent_tool.ToolAction {
   // wraps only the process body; output is redirected to a file (not buffered in
   // memory) and read back capped, so a flood cannot exhaust memory.
   let dir = @fs.tmpdir(prefix="openseek-run-moonbit-") catch {
+    // Let a cancellation propagate to the loop's Interrupted terminal instead of
+    // swallowing it into an ordinary tool error.
+    error if @async.is_being_cancelled() => raise error
     _ =>
       return @agent_tool.ToolAction::respond(
         "run_moonbit: could not create a temporary working directory.",
@@ -119,12 +125,20 @@ async fn execute(arguments : Json) -> @agent_tool.ToolAction {
     // Pre-create the merged output file so both redirects open it; both append
     // so stdout and stderr interleave in write order.
     @fs.write_file(log, "", create_mode=CreateOrTruncate)
+    // Give the snippet an EMPTY stdin (immediate EOF) rather than inheriting fd 0:
+    // under `openseek serve`/TUI that fd is the JSONL control channel, and a
+    // snippet reading `@stdio.stdin` would otherwise consume the engine's
+    // prompt/steer/cancel commands (or block until the timeout). An empty temp
+    // file is portable (no `/dev/null`/`NUL` special-casing).
+    let empty_stdin = "\{dir}/stdin.empty"
+    @fs.write_file(empty_stdin, "", create_mode=CreateOrTruncate)
     let result = @async.with_timeout_opt(RunTimeoutMs, () => {
       let exit_code = @process.run(
         "moon",
         ["run", "snippet.mbtx", "--target", input.target],
         cwd=dir,
         inherit_env=true,
+        stdin=@process.redirect_from_file(empty_stdin),
         stdout=@process.redirect_to_file(log, append=true),
         stderr=@process.redirect_to_file(log, append=true),
       )
@@ -154,12 +168,25 @@ async fn execute(arguments : Json) -> @agent_tool.ToolAction {
           brief="run_moonbit (exit=\{exit_code})",
         )
       }
-      None =>
+      None => {
+        // The snippet may have printed useful output before it hung; the log is
+        // still on disk (cleanup runs below), so surface the captured prefix
+        // instead of discarding it behind a generic timeout message. The status
+        // line stays first so it survives the outer result clamp.
+        let real = @fs.realpath(dir) catch { _ => dir }
+        let partial = rewrite_temp_paths(read_capped(log), [real, dir])
+        let head = "run_moonbit: timed out after \{RunTimeoutMs / 1000}s and was cancelled — the program did not finish (an infinite loop, or a build that never completed)."
+        let body = if partial.trim() == "" {
+          head
+        } else {
+          "\{head}\n[partial output before the timeout]\n\{partial}"
+        }
         @agent_tool.ToolAction::respond(
-          "run_moonbit: timed out after \{RunTimeoutMs / 1000}s and was cancelled — the program did not finish (an infinite loop, or a build that never completed).",
+          body,
           is_error=true,
           brief="run_moonbit (timeout)",
         )
+      }
     }
     cleanup()
     action

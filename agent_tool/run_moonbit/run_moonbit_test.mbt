@@ -109,6 +109,24 @@ async test "refuses native FFI (extern can bind libc system)" {
 }
 
 ///|
+async test "snippet stdin is an empty file (EOF), not the engine's inherited fd 0" {
+  // A snippet that reads stdin must get immediate EOF, not block on (or steal
+  // from) the parent's fd 0 — which under serve/TUI is the control channel.
+  let out = run(
+    (
+      #|import { "moonbitlang/async", "moonbitlang/async/stdio" }
+      #|
+      #|async fn main {
+      #|  let line = @stdio.stdin.read_until("\n")
+      #|  @stdio.stdout.write("got=\{line is Some(_)}\n")
+      #|}
+    ),
+  )
+  assert_false(out.is_error)
+  assert_true(out.content.contains("got=false"))
+}
+
+///|
 async test "a non-zero exit shows the exit code in the content, not just the brief" {
   // prints, then aborts: the model must see the failure in what it reads
   let out = run("fn main { println(\"before\"); panic() }")
