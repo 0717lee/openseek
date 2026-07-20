@@ -41,6 +41,7 @@ async fn main {
   let state = @api.ApiState::new(engine~, runtime_dir?, executable~, auth~, on_finished=payload => {
     notify_run_finished(payload)
   })
+  let bridge = @extension.DesktopBridgeActor::new(state)
   // Proton exposes the `__MoonBit__` bridge — both the ops and the event
   // channel the frontend listens on — only to the `proton://app/` origin its
   // asset entry serves from. The window is bridge-only: it makes no HTTP
@@ -55,12 +56,15 @@ async fn main {
     )
     .debug_level(1)
     .extension(
-      @proton_extension.from_command_spec(@extension.openseek_extension(state)),
+      @proton_extension.from_command_spec(
+        @extension.openseek_extension(state, bridge),
+      ),
     )
   @async.with_task_group(group => {
-    // The engine pump and the host pumps run for the app's lifetime — they
-    // feed every client (the window and any remote browser), not just the
-    // webview connection.
+    // The bridge actor, engine pump, and host pumps run for the app's
+    // lifetime — they feed every page/client rather than borrowing a
+    // `host.connect` request task as their owner.
+    group.spawn_bg(allow_failure=true, () => bridge.run())
     group.spawn_bg(allow_failure=true, () => run_engine_pump_forever(state))
     @host.spawn_host_pumps(group, state.host_state(), (method_, params) => {
       state.publish(method_, params)
