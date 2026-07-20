@@ -33,8 +33,6 @@ async fn main {
   let engine = @engine.engine_command(executable)
   log.info() <? { "message": "host process start" }
   log.info() <? { "message": "frontend entry", "path": frontend_entry }
-  let frontend_asset_dir = @host.frontend_asset_dir(frontend_entry)
-  log.info() <? { "message": "frontend asset dir", "path": frontend_asset_dir }
   log.info() <? { "message": "engine", "path": engine }
   let runtime_dir = @host.prepared_runtime_dir()
   // The relay sign-in store: a persisted session from auth.json, unless the
@@ -45,13 +43,16 @@ async fn main {
   })
   // Proton exposes the `__MoonBit__` bridge — both the ops and the event
   // channel the frontend listens on — only to the `proton://app/` origin its
-  // `html()` entry serves from. The window is bridge-only: it makes no HTTP
+  // asset entry serves from. The window is bridge-only: it makes no HTTP
   // requests at all (a proton:// page's http fetches stall inside CEF's
   // network service). Remote browsers use the same method catalog over the
   // relay WebSocket instead (docs/remote-protocol.md).
-  let document = @host.frontend_document(frontend_entry)
-  let app = @proton.html("OpenSeek Desktop", document, width=1120, height=760)
-    .asset_dir(frontend_asset_dir)
+  let app = @proton.asset(
+      "OpenSeek Desktop",
+      frontend_entry,
+      width=1120,
+      height=760,
+    )
     .debug_level(1)
     .extension(
       @proton_extension.from_command_spec(@extension.openseek_extension(state)),
