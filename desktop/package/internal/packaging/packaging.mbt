@@ -20,6 +20,12 @@ const FrontendBundleOutput : String = "frontend.js"
 const ViewerStyleOutput : String = "viewer.css"
 
 ///|
+/// The app-owned theme variables prepended to the editor dependency's viewer
+/// styles. The editor registry package intentionally excludes its internal
+/// shell theme, so the embedder owns this stable theming boundary.
+const ViewerThemeSource : String = "viewer-theme.css"
+
+///|
 /// Where moon materializes the `moonbit-community/editor` registry dependency
 /// — `.mooncakes` under the monorepo root, where the single root moon.work
 /// resolves all registry checkouts; the viewer's CSS and font assets are read
@@ -28,27 +34,23 @@ const EditorDepRoot : String = ".mooncakes/moonbit-community/editor"
 
 ///|
 /// The editor dependency's CSS files the embedded viewer depends on (relative
-/// to `EditorDepRoot`), in cascade order: `theme.css` first (it defines the
-/// `--vscode-*` / `--editor-*` variables, scoped to `.editor-shell`), then
-/// every viewer-owned stylesheet. Mirrors the editor's own
-/// `scripts/build-web.mbtx` `css_sources()` — re-sync on a version bump. The
-/// IDE shell chrome (`shell.css`) and the editor's own file tree
-/// (`file_tree.css`) are deliberately omitted — the desktop app supplies its
-/// own panel layout and file tree.
+/// to `EditorDepRoot`), in cascade order. `ViewerThemeSource` is prepended by
+/// `build_viewer_stylesheet`; the remaining list mirrors the editor's own
+/// viewer stylesheet set and must be re-synced on a version bump. The editor's
+/// internal shell chrome and file tree are deliberately omitted — the desktop
+/// app supplies its own panel layout, tree, and theme variables.
 fn viewer_css_sources() -> Array[String] {
   [
-    "internal/shell/workbench/theme.css", "viewer/browser/view/codicon/codicon.css",
-    "viewer/browser/view/editor.css", "viewer/ui/scrollbar/scrollable_element.css",
-    "viewer/browser/view_parts/view_lines/view_lines.css", "viewer/browser/view_parts/selections/view_overlays.css",
-    "viewer/browser/view_parts/view_zones/view_zones.css", "viewer/browser/view_parts/content_widgets/content_widgets.css",
+    "viewer/browser/view/codicon/codicon.css", "viewer/browser/view/editor.css",
+    "viewer/ui/scrollbar/scrollable_element.css", "viewer/browser/view_parts/view_lines/view_lines.css",
+    "viewer/browser/view_parts/selections/view_overlays.css", "viewer/browser/view_parts/content_widgets/content_widgets.css",
     "viewer/browser/view_parts/overlay_widgets/overlay_widgets.css", "viewer/browser/view_parts/selections/selections.css",
     "viewer/browser/view_parts/current_line_highlight/current_line_highlight.css",
     "viewer/browser/view_parts/decorations/decorations.css", "viewer/browser/view_parts/view_cursors/view_cursors.css",
     "viewer/browser/view_parts/margin/margin.css", "viewer/browser/view_parts/margin/lines_decorations.css",
-    "viewer/browser/view_parts/view_lines/tokens.css", "viewer/browser/view_parts/view_lines/inlay_hints.css",
-    "viewer/browser/view_parts/view_lines/markers.css", "viewer/contrib/folding/browser/folding.css",
-    "viewer/contrib/hover/hover.css", "viewer/contrib/quick_diff/browser/quick_diff.css",
-    "viewer/contrib/agent_feedback/browser/agent_feedback.css",
+    "viewer/browser/view_parts/view_lines/tokens.css", "viewer/browser/view_parts/view_lines/markers.css",
+    "viewer/contrib/folding/browser/folding.css", "viewer/contrib/hover/hover.css",
+    "viewer/contrib/quick_diff/browser/quick_diff.css", "viewer/contrib/agent_feedback/browser/agent_feedback.css",
   ]
 }
 
@@ -399,6 +401,17 @@ pub async fn build_frontend_bundle(ws : Workspace) -> Unit {
 /// over the panel instead of a styled editor.
 pub async fn build_viewer_stylesheet(ws : Workspace) -> Unit {
   let css = StringBuilder::new()
+  let theme = ws.at(ViewerThemeSource)
+  if !@asyncfs.exists(theme) {
+    raise PackageError("viewer theme stylesheet not found: \{theme}")
+  }
+  css.write_string("/* " + ViewerThemeSource + " */\n")
+  let theme_text = @asyncfs.read_file(theme).text()
+  css.write_string(theme_text)
+  if !theme_text.has_suffix("\n") {
+    css.write_string("\n")
+  }
+  css.write_string("\n")
   for source in viewer_css_sources() {
     let absolute = ws.repo_at("\{EditorDepRoot}/\{source}")
     if !@asyncfs.exists(absolute) {

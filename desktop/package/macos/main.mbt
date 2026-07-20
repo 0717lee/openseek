@@ -45,6 +45,12 @@ const HelperExecutableBaseName : String = "OpenSeek Desktop Helper"
 const HelperProtonRPath : String = "@loader_path/../../../../Resources/proton/lib"
 
 ///|
+/// The host resolves libproton from the runtime copied into its app bundle.
+/// Supplying this at link time avoids rewriting a finished Mach-O, which may
+/// not have enough load-command padding for a longer path.
+const HostProtonRPath : String = "@executable_path/../Resources/proton/lib"
+
+///|
 /// Frontend assets live under Resources, not MacOS: codesign without the
 /// deprecated `--deep` treats everything in `Contents/MacOS/` as code and
 /// rejects plain data files there.
@@ -144,6 +150,10 @@ fn CefHelperVariant::executable_path(self : CefHelperVariant) -> String {
 ///|
 async fn build_outputs(ws : @packaging.Workspace) -> Unit {
   let env = { "MACOSX_DEPLOYMENT_TARGET": MinMacOSVersion }
+  let host_env = {
+    "MACOSX_DEPLOYMENT_TARGET": MinMacOSVersion,
+    "PROTON_PACKAGE_RPATH": HostProtonRPath,
+  }
   // Assemble the CEF runtime first: native_link_config reads
   // `.proton/runtime.json` to link the host against libproton/CEF.
   assemble_macos_cef_runtime(ws, env)
@@ -164,7 +174,7 @@ async fn build_outputs(ws : @packaging.Workspace) -> Unit {
   @packaging.build_frontend_bundle(ws)
   // Build the host without mimalloc: its static malloc/free override crashes
   // against CEF's PartitionAlloc default zone on the first `@fs.realpath`.
-  @packaging.build_native_host(ws, extra_env=env, disable_mimalloc=true)
+  @packaging.build_native_host(ws, extra_env=host_env, disable_mimalloc=true)
   @packaging.build_engine(ws, extra_env=env)
 }
 
@@ -242,26 +252,12 @@ async fn copy_bundle_files(ws : @packaging.Workspace) -> Unit {
 }
 
 ///|
-/// Copy the assembled Proton runtime into the bundle and repoint the host's
-/// libproton rpath at it. native_link_config bakes an absolute rpath to the
-/// dev dist's `lib/`; that only resolves on the build machine, so swap it for
-/// an `@executable_path`-relative one that points at the copied runtime.
+/// Copy the assembled Proton runtime into the bundle. The host is linked with
+/// `HostProtonRPath` by `build_outputs`, so it already resolves libproton from
+/// this copied tree without a post-link Mach-O rewrite.
 async fn bundle_proton_runtime(ws : @packaging.Workspace) -> Unit {
   let dist = @packaging.proton_runtime_dist(ws)
   @packaging.copy_tree(dist, ws.at(ProtonRuntimePath))
-  let host = MacOSPath + "/openseek-desktop"
-  // The dev rpath only exists on the build machine; deleting it is best-effort.
-  let _ = @process.run(
-    "install_name_tool",
-    ["-delete_rpath", dist + "/lib", ws.at(host)],
-    inherit_env=true,
-    cwd=ws.dir().view(),
-  )
-  @packaging.run_checked(
-    "install_name_tool",
-    ["-add_rpath", "@executable_path/../Resources/proton/lib", ws.at(host)],
-    dir=ws.dir(),
-  )
   stage_cef_helper_app(ws)
 }
 
@@ -945,6 +941,11 @@ test "macos base helper path points at chromium helper executable name" {
 ///|
 test "macos helper executable rpath points back to bundled proton runtime" {
   assert_eq(HelperProtonRPath, "@loader_path/../../../../Resources/proton/lib")
+}
+
+///|
+test "macos host executable rpath points at bundled proton runtime" {
+  assert_eq(HostProtonRPath, "@executable_path/../Resources/proton/lib")
 }
 
 ///|
