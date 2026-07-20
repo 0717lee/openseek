@@ -37,12 +37,12 @@ impl Show for PayloadError with fn output(self, logger) {
 
 ///|
 /// The host ops' shared state: the language-server pool, the self-update
-/// staging state, and the workspace watcher's mailbox. One per host process,
+/// staging state, and the workspace watcher actor. One per host process,
 /// created beside the engine manager.
 struct HostState {
   lsp : LspManager
   updates : UpdateState
-  watches : WatchState
+  fs_watch : FsWatchActor
 }
 
 ///|
@@ -65,7 +65,7 @@ pub fn new_host_state(
   {
     lsp,
     updates: new_update_state(runtime_dir, executable),
-    watches: new_watch_state(),
+    fs_watch: FsWatchActor::new(),
   }
 }
 
@@ -89,9 +89,7 @@ pub fn[G] spawn_host_pumps(
     })
   })
   group.spawn_bg(allow_failure=true, () => {
-    run_watch_pump(state.watches, async fn(push) {
-      emit("fs.changed", push.to_json())
-    })
+    state.fs_watch.run(async fn(push) { emit("fs.changed", push.to_json()) })
   })
   group.spawn_bg(allow_failure=true, () => cleanup_updates(state.updates))
 }
@@ -130,11 +128,11 @@ pub async fn host_op(state : HostState, op : String, payload : Json) -> Json? {
     "fs.read_file" => Some(read_file_op(decode_payload(payload)).to_json())
     "fs.stat_files" => Some(stat_files_op(decode_payload(payload)).to_json())
     "fs.watch" => {
-      watch_workspace_op(state.watches, decode_payload(payload))
+      state.fs_watch.watch(decode_payload(payload))
       Some(Json::empty_object())
     }
     "fs.unwatch" => {
-      unwatch_workspace_op(state.watches)
+      state.fs_watch.unwatch()
       Some(Json::empty_object())
     }
     "lsp.hover" =>
