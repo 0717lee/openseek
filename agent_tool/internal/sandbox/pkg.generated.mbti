@@ -22,6 +22,8 @@ pub fn sandbox_exec_args(String, String) -> Array[String]
 
 pub async fn sandbox_exec_available() -> Bool
 
+pub fn sbpl_string_escape(String) -> String
+
 pub async fn source_write_readonly_profile_data(String) -> SourceWriteProfileData
 
 // Errors
