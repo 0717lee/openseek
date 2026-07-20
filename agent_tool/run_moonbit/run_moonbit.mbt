@@ -12,6 +12,32 @@ const RunTimeoutMs : Int = 60_000
 const OutputCapBytes : Int = 48_000
 
 ///|
+/// macOS sandbox wrapper. When present, the snippet runs under a profile that
+/// forbids overwriting protected MoonBit source files anywhere on disk (except
+/// the throwaway build dir), matching the shell tool's `SourceReadOnly` policy.
+/// Absent (Linux/Windows), the run is unsandboxed until the wasm backend lands.
+const SandboxExec : String = "/usr/bin/sandbox-exec"
+
+///|
+/// A Seatbelt (SBPL) profile: allow everything, then DENY writes to protected
+/// source files (`*.mbt`, `*.mbti`, `*.mbt.md`, `moon.mod/pkg/work`), then
+/// re-allow the throwaway build dir so moon can still emit the generated
+/// `snippet.mbt` and its artifacts there. Reads and non-source writes stay
+/// permitted, so a file-transformation snippet can still produce output.
+fn sandbox_profile(build_dir : String) -> String {
+  // Static rules as a raw string (backslashes literal); the build-dir allow is
+  // concatenated so the path interpolates without escaping the regex.
+  let rules =
+    #|(version 1)
+    #|(allow default)
+    #|(deny file-write*
+    #|  (regex #"\.mbti?$")
+    #|  (regex #"\.mbt\.md$")
+    #|  (regex #"/moon\.(mod|pkg|work)$"))
+  rules + "\n(allow file-write* (subpath \"" + build_dir + "\"))\n"
+}
+
+///|
 /// Best-effort refusal of the two obvious native escapes: process spawning
 /// (`moonbitlang/async/process` — the `shell` tool owns commands) and native
 /// FFI (`extern`, which can bind libc `system`). A substring scan is NOT a
@@ -52,9 +78,12 @@ fn native_escape(source : String) -> String? {
 /// which can differ from your workspace's pinned versions — verify
 /// dependency-API probes against the workspace, not run_moonbit.
 ///
-/// Note: the snippet runs on the native backend today with no capability
-/// sandbox. Hard containment is deferred to the planned wasm backend, where the
-/// runtime is safe by construction and policy is applied there.
+/// Note: on macOS the run is wrapped in `sandbox-exec` so a snippet cannot
+/// overwrite or delete protected source files (`*.mbt`, `*.mbti`, `*.mbt.md`,
+/// `moon.mod/pkg/work`) — matching the shell tool's read-only-source policy —
+/// while non-source output stays permitted. Broader capability containment is
+/// deferred to the planned wasm backend, where the runtime is safe by
+/// construction.
 pub fn definition(workspace_root~ : String) -> @agent_tool.AgentToolDefinition {
   AgentToolDefinition(
     name="run_moonbit",
@@ -161,17 +190,34 @@ async fn execute(
     // file is portable (no `/dev/null`/`NUL` special-casing).
     let empty_stdin = "\{dir}/stdin.empty"
     @fs.write_file(empty_stdin, "", create_mode=CreateOrTruncate)
+    // moon's diagnostics point at the copied source under the build dir; the
+    // canonical path also anchors the sandbox profile's write-allow subpath.
+    let real = @fs.realpath(dir) catch { _ => dir }
+    let moon_argv = [
+      "run",
+      "\{dir}/snippet.mbtx",
+      "--target",
+      input.target,
+      "--target-dir",
+      dir,
+    ]
+    // Wrap `moon run` in sandbox-exec where available (macOS) so the snippet
+    // cannot overwrite protected source files; elsewhere run moon directly.
+    let (prog, argv) = if (@fs.exists(SandboxExec) catch { _ => false }) {
+      let profile = "\{dir}/sandbox.sb"
+      @fs.write_file(
+        profile,
+        sandbox_profile(real),
+        create_mode=CreateOrTruncate,
+      )
+      (SandboxExec, ["-f", profile, "moon", ..moon_argv])
+    } else {
+      ("moon", moon_argv)
+    }
     let result = @async.with_timeout_opt(RunTimeoutMs, () => {
       let exit_code = @process.run(
-        "moon",
-        [
-          "run",
-          "\{dir}/snippet.mbtx",
-          "--target",
-          input.target,
-          "--target-dir",
-          dir,
-        ],
+        prog,
+        argv,
         cwd=run_cwd.unwrap_or("."),
         inherit_env=true,
         stdin=@process.redirect_from_file(empty_stdin),
@@ -182,11 +228,8 @@ async fn execute(
     })
     let action = match result {
       Some((exit_code, raw)) => {
-        // moon's diagnostics point at the throwaway temp file (the source is
-        // copied into `_build/snippet.mbt`; line:col stay faithful to the
-        // source). Rewrite that path to `source` so the model reads
+        // Rewrite the throwaway temp path to `source` so the model reads
         // `source:LINE:COL` about its own input, not a random temp path.
-        let real = @fs.realpath(dir) catch { _ => dir }
         let text = rewrite_temp_paths(raw, [real, dir])
         // PREPEND the exit status so it survives the agent loop's outer 60k
         // result clamp (which cuts the tail); the output cap is below 60k so
@@ -209,7 +252,6 @@ async fn execute(
         // still on disk (cleanup runs below), so surface the captured prefix
         // instead of discarding it behind a generic timeout message. The status
         // line stays first so it survives the outer result clamp.
-        let real = @fs.realpath(dir) catch { _ => dir }
         let partial = rewrite_temp_paths(read_capped(log), [real, dir])
         let head = "run_moonbit: timed out after \{RunTimeoutMs / 1000}s and was cancelled — the program did not finish (an infinite loop, or a build that never completed)."
         let body = if partial.trim() == "" {

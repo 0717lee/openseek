@@ -41,6 +41,17 @@ the workspace, not run_moonbit. Use it for self-contained scripts; to exercise
 your working-tree code, add a `*_test.mbt` to that package and run `moon test`
 via shell.
 
+## Source-file protection
+
+Because the program runs in your workspace, on **macOS** the run is wrapped in
+`sandbox-exec` with a profile that **denies writes to protected source files**
+(`*.mbt`, `*.mbti`, `*.mbt.md`, `moon.mod`/`moon.pkg`/`moon.work`) anywhere
+except the throwaway build dir — the same read-only-source policy the `shell`
+tool enforces. A snippet can still read anything and write non-source outputs
+(e.g. `people.json`), but it cannot clobber your sources. On other platforms the
+run is currently unsandboxed; the planned wasm backend carries this policy
+cross-platform.
+
 ## Examples
 
 A quick language probe — no imports, pure core:

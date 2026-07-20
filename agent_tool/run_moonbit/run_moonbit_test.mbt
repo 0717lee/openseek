@@ -94,6 +94,42 @@ async test "a non-existent cwd is reported, not run" {
 }
 
 ///|
+async test "sandbox blocks overwriting a protected source file in the workspace" {
+  // Only meaningful where sandbox-exec exists (macOS); skip elsewhere (the wasm
+  // backend will carry this policy cross-platform).
+  guard (@fs.exists("/usr/bin/sandbox-exec") catch { _ => false }) else {
+    return
+  }
+  @vfs.with_tmpdir(ws => {
+    @fs.write_file(
+      "\{ws}/keep.mbt",
+      "fn main {  }\n",
+      create_mode=CreateOrTruncate,
+    )
+    let out = run_in(ws, {
+      "source": (
+        #|import { "moonbitlang/async", "moonbitlang/async/fs", "moonbitlang/async/stdio" }
+        #|
+        #|async fn main {
+        #|  let blocked = try {
+        #|    @fs.write_file("keep.mbt", "// CORRUPTED\n", create_mode=CreateOrTruncate)
+        #|    false
+        #|  } catch { _ => true }
+        #|  // a non-source output is still allowed
+        #|  @fs.write_file("out.txt", "ok\n", create_mode=CreateOrTruncate)
+        #|  @stdio.stdout.write("blocked=\{blocked}\n")
+        #|}
+      ),
+    })
+    assert_false(out.is_error)
+    assert_true(out.content.contains("blocked=true"))
+    // the protected source file is untouched; the non-source output landed
+    assert_true(@fs.read_file("\{ws}/keep.mbt").text().contains("fn main {  }"))
+    assert_true(@fs.exists("\{ws}/out.txt"))
+  })
+}
+
+///|
 async test "rejects non-string source arguments" {
   let out = run_in(".", { "code": "x" })
   assert_true(out.is_error)
