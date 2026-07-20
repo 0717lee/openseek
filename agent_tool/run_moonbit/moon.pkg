@@ -2,7 +2,6 @@ import {
   "bobzhang/openseek/agent_tool",
   "bobzhang/openseek/agent_tool/run_moonbit/internal/decode",
   "bobzhang/openseek/agent_tool/internal/error" @tool_error,
-  "bobzhang/openseek/testkit/filesystem" @vfs,
   "moonbitlang/async",
   "moonbitlang/async/fs",
   "moonbitlang/async/process",
@@ -16,4 +15,5 @@ supported_targets = "+native"
 
 import {
   "moonbitlang/async",
+  "bobzhang/openseek/testkit/filesystem" @vfs,
 } for "test"

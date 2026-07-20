@@ -86,11 +86,30 @@ async fn execute(arguments : Json) -> @agent_tool.ToolAction {
   }
   // Run the snippet as a `.mbtx` single-file script in a throwaway directory:
   // moon's single-file runner handles the inline import block, so there is no
-  // module to scaffold. `with_tmpdir` is the OUTER scope so its cleanup runs on
-  // the normal (uncancelled) path even when the timeout fires; the timeout
-  // wraps only the process body. Output is redirected to a file (not buffered
-  // in memory) and read back capped, so a flood cannot exhaust memory.
-  @vfs.with_tmpdir(prefix="openseek-run-moonbit-", dir => {
+  // module to scaffold. The temp dir is managed by hand (not `@vfs.with_tmpdir`)
+  // so its cleanup can be shielded from cancellation — that helper re-raises on
+  // cancel WITHOUT removing the dir, which would leak the snippet, `_build`, and
+  // a possibly-large output log when a turn is cancelled mid-run. The timeout
+  // wraps only the process body; output is redirected to a file (not buffered in
+  // memory) and read back capped, so a flood cannot exhaust memory.
+  let dir = @fs.tmpdir(prefix="openseek-run-moonbit-") catch {
+    _ =>
+      return @agent_tool.ToolAction::respond(
+        "run_moonbit: could not create a temporary working directory.",
+        is_error=true,
+      )
+  }
+  async fn cleanup() -> Unit {
+    // rmdir is async, so it cannot run in a `defer`; shield it from cancellation
+    // so an interrupted run still removes its temp dir.
+    @async.protect_from_cancel(() => {
+      @fs.rmdir(dir, recursive=true) catch {
+        _ => ()
+      }
+    })
+  }
+
+  try {
     @fs.write_file(
       "\{dir}/snippet.mbtx",
       input.source,
@@ -111,18 +130,14 @@ async fn execute(arguments : Json) -> @agent_tool.ToolAction {
       )
       (exit_code, read_capped(log))
     })
-    match result {
+    let action = match result {
       Some((exit_code, raw)) => {
         // moon's diagnostics point at the throwaway temp file (the source is
         // copied into `_build/snippet.mbt`; line:col stay faithful to the
         // source). Rewrite that path to `source` so the model reads
         // `source:LINE:COL` about its own input, not a random temp path.
         let real = @fs.realpath(dir) catch { _ => dir }
-        let text = raw
-          .replace_all(old="\{real}/_build/snippet.mbt", new="source")
-          .replace_all(old="\{real}/snippet.mbtx", new="source")
-          .replace_all(old="\{dir}/_build/snippet.mbt", new="source")
-          .replace_all(old="\{dir}/snippet.mbtx", new="source")
+        let text = rewrite_temp_paths(raw, [real, dir])
         // PREPEND the exit status so it survives the agent loop's outer 60k
         // result clamp (which cuts the tail); the output cap is below 60k so
         // both the status line and the body are retained.
@@ -146,7 +161,31 @@ async fn execute(arguments : Json) -> @agent_tool.ToolAction {
           brief="run_moonbit (timeout)",
         )
     }
-  })
+    cleanup()
+    action
+  } catch {
+    error => {
+      cleanup()
+      raise error
+    }
+  }
+}
+
+///|
+/// Rewrite moon's throwaway temp paths back to `source` in its diagnostics, for
+/// both `/` and `\` separators — moon reports the canonical native path (with
+/// backslashes on Windows), so `source:LINE:COL` shows on every host rather than
+/// a random `_build` path leaking through.
+fn rewrite_temp_paths(text : String, bases : Array[String]) -> String {
+  let mut out = text
+  for base in bases {
+    for sep in ["/", "\\"] {
+      out = out
+        .replace_all(old="\{base}\{sep}_build\{sep}snippet.mbt", new="source")
+        .replace_all(old="\{base}\{sep}snippet.mbtx", new="source")
+    }
+  }
+  out
 }
 
 ///|
