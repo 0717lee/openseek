@@ -32,8 +32,8 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
 
-      - name: Check out desktop submodules
-        run: git submodule update --init desktop/lepus desktop/vendor/moonbitlang-async
+      - name: Check out Proton submodule
+        run: git submodule update --init desktop/lepus
 
       - name: Set up MoonBit (${{ matrix.moonbit-channel }})
         run: |

@@ -13,7 +13,6 @@ import {
   "openseek_desktop/internal/shellenv",
   "openseek_desktop/internal/update",
   "moonbitlang/async/process",
-  "moonbitlang/core/encoding/utf8",
   "moonbitlang/core/env",
   "tonyfettes/xlog",
 }

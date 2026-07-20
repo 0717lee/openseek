@@ -8,7 +8,3 @@
 [submodule "editor/vscode"]
 	path = editor/vscode
 	url = https://github.com/microsoft/vscode.git
-[submodule "desktop/vendor/moonbitlang-async"]
-	path = desktop/vendor/moonbitlang-async
-	url = https://github.com/moonbitlang/async.git
-	branch = main

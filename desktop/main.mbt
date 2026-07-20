@@ -93,36 +93,7 @@ async fn main {
     // The window is closed: tear the pumps (and with them every serve
     // engine) down rather than wait on their tasks forever.
     group.return_immediately(())
-  }) catch {
-    error if @async.is_being_cancelled() => {
-      let signal_event = async_signal_diagnostic_event()
-      log.error() <?
-        {
-          "event": "desktop_main_cancelled",
-          "error": "\{error}",
-          "async_signal_diagnostic_event": async_signal_diagnostic_event_name(
-            signal_event,
-          ),
-          "async_signal_diagnostic_event_code": signal_event,
-          "async_signal": async_signal_diagnostic_signal(),
-          "async_sigwait_result": async_signal_diagnostic_wait_result(),
-          "async_sigwait_errno": async_signal_diagnostic_wait_errno(),
-          "async_sigmask_result": async_signal_diagnostic_mask_result(),
-          "async_signal_in_waitset": async_signal_diagnostic_signal_in_waitset(),
-          "async_sigusr2_blocked": async_signal_diagnostic_sigusr2_blocked(),
-          "async_cancel_requests_at_signal_return": async_signal_diagnostic_cancel_requests_at_return(),
-          "async_sigwait_cancel_requests_at_signal_return": async_signal_diagnostic_sigwait_cancel_requests_at_return(),
-          "async_worker_cancel_request_count": async_worker_cancel_diagnostic_request_count(),
-          "async_worker_cancel_recent": async_worker_cancel_diagnostic_recent(),
-        }
-      raise error
-    }
-    error => {
-      log.error() <? { "event": "desktop_main_failed", "error": "\{error}" }
-      raise error
-    }
-  }
-  log.info() <? { "event": "desktop_task_group_return" }
+  })
   // A successful `update.apply` swapped the bundle on disk and left a
   // relaunch marker: reopen the new version now that the run loop is done.
   // `open -n` hands the launch to LaunchServices, so the new instance is
