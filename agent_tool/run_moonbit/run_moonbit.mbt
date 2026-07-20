@@ -52,12 +52,14 @@ fn native_escape(source : String) -> String? {
 /// which can differ from your workspace's pinned versions — verify
 /// dependency-API probes against the workspace, not run_moonbit.
 ///
-/// Note: on macOS the run is wrapped in `sandbox-exec` so a snippet cannot
-/// overwrite or delete protected source files (`*.mbt`, `*.mbti`, `*.mbt.md`,
-/// `moon.mod/pkg/work`) — matching the shell tool's read-only-source policy —
-/// while non-source output stays permitted. Broader capability containment is
-/// deferred to the planned wasm backend, where the runtime is safe by
-/// construction.
+/// Note: on macOS the run is wrapped in `sandbox-exec` with the shell tool's
+/// source-write-readonly profile, so a snippet is blocked from directly writing
+/// protected source files (`*.mbt`, `*.mbti`, `*.mbt.md`, `moon.mod/pkg/work`)
+/// while non-source output stays permitted. This is best-effort, not a hard
+/// boundary — an arbitrary snippet can still smuggle sources via directory
+/// renames (which `shell` catches by preflighting its command text, impossible
+/// for arbitrary code). Full capability containment is deferred to the planned
+/// wasm backend, where the runtime is safe by construction.
 pub fn definition(workspace_root~ : String) -> @agent_tool.AgentToolDefinition {
   AgentToolDefinition(
     name="run_moonbit",
@@ -176,16 +178,24 @@ async fn execute(
       dir,
     ]
     // Wrap `moon run` in sandbox-exec where it can actually enforce (macOS) so a
-    // snippet cannot overwrite protected source files — reusing the shell tool's
-    // source-write-readonly profile keyed on the workspace root. The temp
-    // `--target-dir` lives outside that root, so moon's own writes there are
-    // unaffected by the deny. Elsewhere (or in a nested sandbox) run moon direct.
+    // snippet cannot directly overwrite protected source files — reusing the
+    // shell tool's source-write-readonly profile keyed on the workspace root.
+    // This is best-effort, not a hard boundary: unlike `shell` (which statically
+    // preflights the command) an arbitrary snippet can still smuggle sources via
+    // directory renames; full containment is the wasm backend's job. Elsewhere
+    // (or in a nested sandbox where it cannot enforce) run moon directly.
     let (prog, argv) = if @sandbox.sandbox_exec_available() {
-      let profile = @sandbox.source_write_readonly_profile_data(
+      let base = @sandbox.source_write_readonly_profile_data(
           @fs.realpath(workspace_root) catch {
             _ => workspace_root
           },
         ).profile
+      // Re-allow the throwaway build dir: if it falls INSIDE the workspace root
+      // (e.g. `workspace_root=/tmp`, where `@fs.tmpdir` lands under it) the shared
+      // deny would otherwise block moon's own generated `snippet.mbt`. SBPL is
+      // last-match-wins, so this appended allow overrides the deny for `dir` only.
+      let profile = base +
+        "\n(allow file-write* (subpath \"\{@sandbox.sbpl_string_escape(real)}\"))\n"
       (@sandbox.SandboxExecPath, ["-p", profile, "moon", ..moon_argv])
     } else {
       ("moon", moon_argv)

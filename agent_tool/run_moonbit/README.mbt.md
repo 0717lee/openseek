@@ -44,13 +44,19 @@ via shell.
 ## Source-file protection
 
 Because the program runs in your workspace, on **macOS** the run is wrapped in
-`sandbox-exec` with a profile that **denies writes to protected source files**
-(`*.mbt`, `*.mbti`, `*.mbt.md`, `moon.mod`/`moon.pkg`/`moon.work`) anywhere
-except the throwaway build dir — the same read-only-source policy the `shell`
-tool enforces. A snippet can still read anything and write non-source outputs
-(e.g. `people.json`), but it cannot clobber your sources. On other platforms the
-run is currently unsandboxed; the planned wasm backend carries this policy
-cross-platform.
+`sandbox-exec` with a profile that **denies direct writes to protected source
+files** (`*.mbt`, `*.mbti`, `*.mbt.md`, `moon.mod`/`moon.pkg`/`moon.work`)
+anywhere except the throwaway build dir — the same profile the `shell` tool
+uses. A snippet can still read anything and write non-source outputs (e.g.
+`people.json`).
+
+This is **best-effort, not a hard boundary**: `shell` also statically preflights
+its command text to catch directory-rename tricks, which is impossible for an
+arbitrary snippet — so a determined program can still smuggle sources in or out
+via directory renames. Treat it as a guard against accidental source clobbering,
+not a security boundary; full containment is the planned wasm backend's job. On
+non-macOS hosts (or inside a nested sandbox that cannot enforce) the run is
+unsandboxed.
 
 ## Examples
 

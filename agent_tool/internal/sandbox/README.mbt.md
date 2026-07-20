@@ -7,7 +7,14 @@ profile scan needs.
 
 Both the `shell` tool and the `run_moonbit` tool run their child process under
 this profile so a command or snippet can read the workspace and write non-source
-outputs, but cannot overwrite or delete protected MoonBit sources.
+outputs while being blocked from directly overwriting protected MoonBit sources.
+
+The profile is a **best-effort** guard, not a hard boundary: it denies writes to
+protected source *paths*, but a process that can rename directories can still
+move sources in or out of the workspace-anchored region. `shell` closes that gap
+by statically preflighting its command text (see its `tree_target` analysis);
+callers running arbitrary code (`run_moonbit`) cannot, and rely on the planned
+wasm backend for full containment.
 
 ## What it protects
 

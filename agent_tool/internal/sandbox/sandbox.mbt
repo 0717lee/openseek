@@ -491,7 +491,9 @@ fn regex_escape(text : String) -> String {
 }
 
 ///|
-fn sbpl_string_escape(text : String) -> String {
+/// Escape a string for use inside an SBPL `"..."` literal (e.g. a `subpath`
+/// operand): backslashes, quotes, and control characters.
+pub fn sbpl_string_escape(text : String) -> String {
   let escaped = StringBuilder()
   for ch in text {
     match ch {

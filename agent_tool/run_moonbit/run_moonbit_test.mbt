@@ -95,11 +95,11 @@ async test "a non-existent cwd is reported, not run" {
 
 ///|
 async test "sandbox blocks overwriting a protected source file in the workspace" {
-  // Only meaningful where sandbox-exec exists (macOS); skip elsewhere (the wasm
-  // backend will carry this policy cross-platform).
-  guard (@fs.exists("/usr/bin/sandbox-exec") catch { _ => false }) else {
-    return
-  }
+  // Only meaningful where the sandbox can actually enforce (macOS, not nested);
+  // gate on the SAME probe `execute` uses so a host where sandbox-exec exists but
+  // cannot apply a nested profile (production runs unsandboxed there) skips
+  // rather than fails. The wasm backend carries this policy cross-platform.
+  guard @sandbox.sandbox_exec_available() else { return }
   @vfs.with_tmpdir(ws => {
     @fs.write_file(
       "\{ws}/keep.mbt",
