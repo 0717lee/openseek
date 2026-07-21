@@ -22,11 +22,20 @@ priv struct VizConfig {
   web_dir : String
   bundle : String
   export_path : String
+  export_session : String
 }
 
 ///|
 fn viz_config_from_matches(matches : @argparse.Matches) -> VizConfig raise {
-  let (port, host, session_root, session_root_name, web_dir, bundle, export_path
+  let (
+    port,
+    host,
+    session_root,
+    session_root_name,
+    web_dir,
+    bundle,
+    export_path,
+    export_session,
   ) = match matches {
     {
       values: {
@@ -37,14 +46,19 @@ fn viz_config_from_matches(matches : @argparse.Matches) -> VizConfig raise {
         "web-dir": [web_dir, ..],
         "bundle": [bundle, ..],
         "export": [export_path, ..],
+        "export-session": [export_session, ..],
         ..
       },
       ..,
     } =>
       (
         port, host, session_root, session_root_name, web_dir, bundle, export_path,
+        export_session,
       )
     _ => fail("missing parsed visualizer defaults")
+  }
+  guard "\{export_session}".trim() == "" || "\{export_path}".trim() != "" else {
+    fail("--export-session requires --export")
   }
   let host = host.trim()
   guard !host.is_empty() else {
@@ -69,6 +83,7 @@ fn viz_config_from_matches(matches : @argparse.Matches) -> VizConfig raise {
     web_dir,
     bundle,
     export_path,
+    export_session: "\{export_session}".trim().to_owned(),
   }
 }
 
@@ -99,6 +114,22 @@ async fn main {
   // this server and from the current parser — it carries its own bundle + data.
   if config.export_path != "" {
     let rows = catalog.rows()
+    // --export-session scopes the freeze to one parent and its subagent
+    // children — one run, one tidy file — instead of every session the
+    // scan found.
+    let rows = if config.export_session == "" {
+      rows
+    } else {
+      let scoped = rows.filter(row => {
+        in_export_scope(row.id, config.export_session)
+      })
+      guard scoped.iter().any(row => row.id == config.export_session) else {
+        fail(
+          "openseek viz: no session '\{config.export_session}' in the scanned roots",
+        )
+      }
+      scoped
+    }
     let html = build_export_html(rows, shell, bundle_paths)
     @fs.write_file(config.export_path, html, create_mode=CreateOrTruncate)
     println(
@@ -1176,8 +1207,42 @@ fn cli_command() -> @argparse.Command {
         default_values=[""],
         about="Write a self-contained standalone HTML (all discovered sessions embedded, no server needed) to this path and exit, instead of serving.",
       ),
+      OptionArg(
+        "export-session",
+        long="export-session",
+        env="OPENSEEK_VIZ_EXPORT_SESSION",
+        default_values=[""],
+        about="Scope --export to this session id plus its subagent children (<id>-sr-N) instead of every discovered session.",
+      ),
     ],
   )
+}
+
+///|
+/// Whether a session belongs to a scoped export: the target itself or one
+/// of its `<target>-sr-N` subagent children — the naming contract the
+/// subrun runner derives child session ids by, matched one level deep,
+/// like the substrate spawns them.
+fn in_export_scope(id : String, target : String) -> Bool {
+  if id == target {
+    return true
+  }
+  guard id.strip_prefix("\{target}-sr-") is Some(digits) else { return false }
+  !digits.is_empty() && digits.iter().all(c => c.is_ascii_digit())
+}
+
+///|
+test "in_export_scope keeps the parent and exactly its own children" {
+  assert_true(in_export_scope("run", "run"))
+  assert_true(in_export_scope("run-sr-1", "run"))
+  assert_true(in_export_scope("run-sr-12", "run"))
+  // Another parent's child, a lookalike prefix, a non-numeric suffix, and
+  // a grandchild-shaped id all stay out of scope.
+  assert_false(in_export_scope("run2-sr-1", "run"))
+  assert_false(in_export_scope("run-sr-", "run"))
+  assert_false(in_export_scope("run-sr-x", "run"))
+  assert_false(in_export_scope("run-sr-1-sr-2", "run"))
+  assert_true(in_export_scope("run-sr-1-sr-2", "run-sr-1"))
 }
 
 ///|
