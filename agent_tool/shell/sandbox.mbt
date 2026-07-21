@@ -174,8 +174,29 @@ fn trusted_moon_command_class(
         command.argv,
         invocation.subcommand_index,
       ) => TrustedCommandRead
+    Some(invocation) if is_moon_scaffold_subcommand(
+        command.argv,
+        invocation.subcommand_index,
+      ) => TrustedCommandWrite
     _ => UntrustedCommand
   }
+}
+
+///|
+/// Whether the moon subcommand scaffolds a new project — `moon new`, which
+/// writes `moon.mod` and starter `.mbt` files into a fresh directory. That is a
+/// legitimate source write, so it must be trusted; otherwise the sandbox's
+/// source-write deny blocks the generated files and `moon new` fails. Kept
+/// separate from `is_auto_check_moon_subcommand` so it grants ONLY the sandbox
+/// trust here, without also triggering a post-command `moon check` (which would
+/// run against the current package, not the freshly created one). A `--help`
+/// invocation writes nothing, so it is not treated as a source write.
+fn is_moon_scaffold_subcommand(
+  argv : Array[String],
+  subcommand_index : Int,
+) -> Bool {
+  argv[subcommand_index] == "new" &&
+  !argv_contains_help_flag(argv, subcommand_index + 1)
 }
 
 ///|

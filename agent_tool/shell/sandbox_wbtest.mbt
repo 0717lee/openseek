@@ -1,6 +1,10 @@
 ///|
 test "sandbox trusts only narrow moon source-writing commands" {
   assert_true(mode_for("moon fmt") is TrustedSourceWrite)
+  assert_true(mode_for("moon new my_project") is TrustedSourceWrite)
+  assert_true(mode_for("moon new ./pkg") is TrustedSourceWrite)
+  assert_true(mode_for("cd sub && moon new app") is TrustedSourceWrite)
+  assert_true(mode_for("moon new --help") is SourceReadOnly)
   assert_true(mode_for("moon info") is TrustedSourceWrite)
   assert_true(
     mode_for("moon ide rename old new --loc main.mbt:1:8 --apply")
