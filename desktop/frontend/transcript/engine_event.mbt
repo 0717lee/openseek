@@ -83,6 +83,14 @@ pub fn decode_engine_event(raw : Map[String, Json]) -> EngineEvent? {
     CompactionStarted(..) => Some(CompactionStarted)
     CompactionFinished(summary~, ..) => Some(CompactionFinished(summary))
     CompactionFailed(error~) => Some(CompactionFailed(error))
+    // A sub-run's lifecycle brackets, rendered as runtime notices so the
+    // child's interleaved tool results read as belonging to the sub-run —
+    // the same treatment the TUI gives them. The id and token counts are
+    // wire-only pairing/accounting data.
+    SubrunStarted(kind~, label~, ..) =>
+      Some(RuntimeUpdate("\{kind} subrun started: \{label}"))
+    SubrunFinished(status~, steps~, ..) =>
+      Some(RuntimeUpdate("subrun finished: \{status} (\{steps} step(s))"))
     // Not shown, and now each one a recorded decision rather than a line the
     // view drops unnoticed. `plan_reminder`, the goal reminders/checks and the
     // block/unblock markers are model-directed text, not news for the user (the
@@ -318,5 +326,33 @@ test "decode recognizes the compaction lifecycle events" {
     )
     is Some(CompactionFailed("empty summary")) else {
     fail("compaction_failed not decoded")
+  }
+}
+
+///|
+test "decode maps subrun brackets onto the runtime-update path" {
+  guard decode_engine_event(
+      event_fields({
+        "event": "subrun_started",
+        "id": "sr-1",
+        "kind": "review",
+        "label": "goal review",
+      }),
+    )
+    is Some(RuntimeUpdate("review subrun started: goal review")) else {
+    fail("subrun_started not decoded")
+  }
+  guard decode_engine_event(
+      event_fields({
+        "event": "subrun_finished",
+        "id": "sr-1",
+        "status": "captured",
+        "steps": 12,
+        "prompt_tokens": 34000,
+        "completion_tokens": 5600,
+      }),
+    )
+    is Some(RuntimeUpdate("subrun finished: captured (12 step(s))")) else {
+    fail("subrun_finished not decoded")
   }
 }

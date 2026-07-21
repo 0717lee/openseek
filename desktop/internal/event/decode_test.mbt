@@ -92,3 +92,29 @@ test "context_yield is its own run terminal" {
     _ => fail("expected context yield")
   }
 }
+
+///|
+test "subrun brackets are the webview's, not the host's" {
+  // The outer run reads busy to the host throughout a sub-run; the webview
+  // renders the brackets itself off the raw stream.
+  assert_true(
+    @event.decode_event({
+      "event": "subrun_started",
+      "id": "sr-1",
+      "kind": "review",
+      "label": "goal review",
+    })
+    is None,
+  )
+  assert_true(
+    @event.decode_event({
+      "event": "subrun_finished",
+      "id": "sr-1",
+      "status": "captured",
+      "steps": 12,
+      "prompt_tokens": 34000,
+      "completion_tokens": 5600,
+    })
+    is None,
+  )
+}

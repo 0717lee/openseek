@@ -58,13 +58,17 @@ pub fn decode_event(object : Json) -> AgentEvent? {
     CompactionFailed(_) => Some(CompactionFailed)
     // Not the host's business. Streaming text, reasoning, notices and every
     // goal/plan signal are the webview's to render off the raw stream; the
+    // sub-run lifecycle brackets are likewise the webview's (the outer run
+    // already reads busy to the host throughout a sub-run); the
     // auto-compaction lifecycle is internal to a turn and never gates
     // archiving the way an explicit compaction does; `session_started`,
     // `workspace_created` and `fleet_started` describe a headless run's setup,
     // which the host performs itself; `command_error` reports a rejected
     // control command, which the host learns from the command's own reply; the
     // MCP registry events are diagnostics the UI surfaces.
-    AssistantDelta(..)
+    SubrunStarted(..)
+    | SubrunFinished(..)
+    | AssistantDelta(..)
     | ReasoningMessage(..)
     | BackgroundNotice(..)
     | SessionError(..)
