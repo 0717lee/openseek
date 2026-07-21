@@ -190,6 +190,12 @@ async test "build suffixes tools whose sanitized names collide" {
     }
     let names = [ for tool in tools => tool.name ]
     assert_eq(names, ["mcp__s__a-b", "mcp__s__a-b-2"])
+    // The control invariant must hold through build_grouped's RE-construction
+    // too (it rebuilds every bridged definition under the uniquified name) —
+    // pinning only the inner bridge would let a flag slip in at the re-wrap.
+    for tool in tools {
+      assert_false(tool.is_control())
+    }
   })
 }
 
@@ -318,6 +324,8 @@ async test "build bridges and dispatches tools from an http server" {
     )
     assert_eq(tools.length(), 1)
     assert_eq(tools[0].name, "mcp__remote__ping")
+    // Full production path (build -> build_grouped re-wrap): still no control.
+    assert_false(tools[0].is_control())
     guard tools[0].execute is @agent_tool.Async(exec) else {
       fail("expected an async executor")
     }
