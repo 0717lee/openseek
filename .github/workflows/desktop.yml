@@ -1,7 +1,7 @@
 name: Desktop
 
 # Kept separate from the root CI (ci.yml): the desktop module is its own
-# MoonBit workspace (desktop/moon.work, with the lepus submodule as members)
+# MoonBit workspace (desktop/moon.work, with the Proton submodule as members)
 # and is not part of the root moon.work, so the root checks never see it.
 on:
   push:
@@ -22,38 +22,10 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
 
-      # The lepus submodule is a private repo, so the default workflow token
-      # cannot clone it. Mint a short-lived installation token (~1h,
-      # read-only Contents on moonbit-community/lepus)
-      # from the org's GitHub App — nothing long-lived is exposed to the job.
-      # Note: these secrets are unavailable to pull requests from forks,
-      # where this job will fail at this step.
-      - name: Mint lepus read token
-        id: lepus-token
-        uses: actions/create-github-app-token@v2
-        with:
-          app-id: ${{ secrets.LEPUS_APP_ID }}
-          private-key: ${{ secrets.LEPUS_APP_PRIVATE_KEY }}
-          owner: moonbit-community
-          repositories: lepus
-          # Pin the minted token to read-only Contents even if the App
-          # installation grants (or later gains) broader permissions — the
-          # token flows into PR-controlled build/test steps below.
-          permission-contents: read
-
-      - name: Check out the lepus submodule
-        env:
-          LEPUS_READ_TOKEN: ${{ steps.lepus-token.outputs.token }}
-        run: |
-          # Inject the token only for this one command via `git -c`, so it
-          # never lands in ~/.gitconfig — where later steps that run
-          # PR-controlled build scripts could read it. (Fork PRs receive no
-          # secrets and already failed at the mint step above.)
-          # Init only our submodule, non-recursively: lepus has no nested
-          # submodules, so a plain --init covers it.
-          git \
-            -c "url.https://x-access-token:${LEPUS_READ_TOKEN}@github.com/.insteadOf=https://github.com/" \
-            submodule update --init desktop/lepus
+      # The repository moved from private lepus to public Proton, so the
+      # pinned submodule commit can be fetched without a repository secret.
+      - name: Check out the Proton submodule
+        run: git submodule update --init desktop/lepus
 
       - name: Set up MoonBit (nightly)
         run: |
@@ -89,7 +61,7 @@ jobs:
 
       - name: Check formatting
         # Scope to this module's own packages: lepus/proton is a workspace
-        # member inside the lepus submodule, so a workspace-wide `fmt --check`
+        # member inside the Proton submodule, so a workspace-wide `fmt --check`
         # would flag source we don't own.
         run: moon -C desktop fmt --check . frontend internal package
 
@@ -105,7 +77,7 @@ jobs:
       - name: Check generated interfaces
         run: |
           moon -C desktop info --target native
-          # The lepus submodule's own .mbti live inside the submodule and are
+          # The Proton submodule's own .mbti live inside the submodule and are
           # not tracked as files by this repo, so this pathspec only validates
           # the desktop module's own generated interfaces.
           if [ -n "$(git status --porcelain -- '*.mbti')" ]; then
@@ -117,7 +89,7 @@ jobs:
   desktop-test:
     name: desktop test (release)
     # macOS, not headless Linux: several runtime tests drive a real webview via
-    # app.run(), which needs a GUI session. lepus's own CI skips those tests on
+    # app.run(), which needs a GUI session. Proton's own CI skips those tests on
     # Linux for the same reason. --release links with the system toolchain (the
     # debug `tcc` path cannot resolve the WebKit/GTK framework flags).
     runs-on: macos-latest
@@ -127,32 +99,8 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
 
-      - name: Mint lepus read token
-        id: lepus-token
-        uses: actions/create-github-app-token@v2
-        with:
-          app-id: ${{ secrets.LEPUS_APP_ID }}
-          private-key: ${{ secrets.LEPUS_APP_PRIVATE_KEY }}
-          owner: moonbit-community
-          repositories: lepus
-          # Pin the minted token to read-only Contents even if the App
-          # installation grants (or later gains) broader permissions — the
-          # token flows into PR-controlled build/test steps below.
-          permission-contents: read
-
-      - name: Check out the lepus submodule
-        env:
-          LEPUS_READ_TOKEN: ${{ steps.lepus-token.outputs.token }}
-        run: |
-          # Inject the token only for this one command via `git -c`, so it
-          # never lands in ~/.gitconfig — where later steps that run
-          # PR-controlled build scripts could read it. (Fork PRs receive no
-          # secrets and already failed at the mint step above.)
-          # Init only our submodule, non-recursively: lepus has no nested
-          # submodules, so a plain --init covers it.
-          git \
-            -c "url.https://x-access-token:${LEPUS_READ_TOKEN}@github.com/.insteadOf=https://github.com/" \
-            submodule update --init desktop/lepus
+      - name: Check out the Proton submodule
+        run: git submodule update --init desktop/lepus
 
       - name: Set up MoonBit (nightly)
         run: |
@@ -192,38 +140,8 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
 
-      # The lepus submodule is a private repo, so the default workflow token
-      # cannot clone it. Mint a short-lived installation token (~1h,
-      # read-only Contents on moonbit-community/lepus)
-      # from the org's GitHub App — nothing long-lived is exposed to the job.
-      # Note: these secrets are unavailable to pull requests from forks,
-      # where this job will fail at this step.
-      - name: Mint lepus read token
-        id: lepus-token
-        uses: actions/create-github-app-token@v2
-        with:
-          app-id: ${{ secrets.LEPUS_APP_ID }}
-          private-key: ${{ secrets.LEPUS_APP_PRIVATE_KEY }}
-          owner: moonbit-community
-          repositories: lepus
-          # Pin the minted token to read-only Contents even if the App
-          # installation grants (or later gains) broader permissions — the
-          # token flows into PR-controlled build/test steps below.
-          permission-contents: read
-
-      - name: Check out the lepus submodule
-        env:
-          LEPUS_READ_TOKEN: ${{ steps.lepus-token.outputs.token }}
-        run: |
-          # Inject the token only for this one command via `git -c`, so it
-          # never lands in ~/.gitconfig — where later steps that run
-          # PR-controlled build scripts could read it. (Fork PRs receive no
-          # secrets and already failed at the mint step above.)
-          # Init only our submodule, non-recursively: lepus has no nested
-          # submodules, so a plain --init covers it.
-          git \
-            -c "url.https://x-access-token:${LEPUS_READ_TOKEN}@github.com/.insteadOf=https://github.com/" \
-            submodule update --init desktop/lepus
+      - name: Check out the Proton submodule
+        run: git submodule update --init desktop/lepus
 
       - name: Set up MoonBit (nightly)
         run: |
@@ -249,7 +167,7 @@ jobs:
           done
           exit 1
 
-      # libx11-dev: the packager rebuilds libproton from the lepus sources,
+      # libx11-dev: the packager rebuilds libproton from the Proton sources,
       # whose CMake build pkg-config-checks gtk+-3.0 and x11.
       - name: Install GTK and WebKitGTK dev packages
         run: |
@@ -282,38 +200,8 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
 
-      # The lepus submodule is a private repo, so the default workflow token
-      # cannot clone it. Mint a short-lived installation token (~1h,
-      # read-only Contents on moonbit-community/lepus)
-      # from the org's GitHub App — nothing long-lived is exposed to the job.
-      # Note: these secrets are unavailable to pull requests from forks,
-      # where this job will fail at this step.
-      - name: Mint lepus read token
-        id: lepus-token
-        uses: actions/create-github-app-token@v2
-        with:
-          app-id: ${{ secrets.LEPUS_APP_ID }}
-          private-key: ${{ secrets.LEPUS_APP_PRIVATE_KEY }}
-          owner: moonbit-community
-          repositories: lepus
-          # Pin the minted token to read-only Contents even if the App
-          # installation grants (or later gains) broader permissions — the
-          # token flows into PR-controlled build/test steps below.
-          permission-contents: read
-
-      - name: Check out the lepus submodule
-        env:
-          LEPUS_READ_TOKEN: ${{ steps.lepus-token.outputs.token }}
-        run: |
-          # Inject the token only for this one command via `git -c`, so it
-          # never lands in ~/.gitconfig — where later steps that run
-          # PR-controlled build scripts could read it. (Fork PRs receive no
-          # secrets and already failed at the mint step above.)
-          # Init only our submodule, non-recursively: lepus has no nested
-          # submodules, so a plain --init covers it.
-          git \
-            -c "url.https://x-access-token:${LEPUS_READ_TOKEN}@github.com/.insteadOf=https://github.com/" \
-            submodule update --init desktop/lepus
+      - name: Check out the Proton submodule
+        run: git submodule update --init desktop/lepus
 
       - name: Set up MoonBit (nightly)
         run: |
@@ -363,39 +251,8 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
 
-      # The lepus submodule is a private repo, so the default workflow token
-      # cannot clone it. Mint a short-lived installation token (~1h,
-      # read-only Contents on moonbit-community/lepus)
-      # from the org's GitHub App — nothing long-lived is exposed to the job.
-      # Note: these secrets are unavailable to pull requests from forks,
-      # where this job will fail at this step.
-      - name: Mint lepus read token
-        id: lepus-token
-        uses: actions/create-github-app-token@v2
-        with:
-          app-id: ${{ secrets.LEPUS_APP_ID }}
-          private-key: ${{ secrets.LEPUS_APP_PRIVATE_KEY }}
-          owner: moonbit-community
-          repositories: lepus
-          # Pin the minted token to read-only Contents even if the App
-          # installation grants (or later gains) broader permissions — the
-          # token flows into PR-controlled build/test steps below.
-          permission-contents: read
-
-      - name: Check out the lepus submodule
-        shell: bash
-        env:
-          LEPUS_READ_TOKEN: ${{ steps.lepus-token.outputs.token }}
-        run: |
-          # Inject the token only for this one command via `git -c`, so it
-          # never lands in ~/.gitconfig — where later steps that run
-          # PR-controlled build scripts could read it. (Fork PRs receive no
-          # secrets and already failed at the mint step above.)
-          # Init only our submodule, non-recursively: lepus has no nested
-          # submodules, so a plain --init covers it.
-          git \
-            -c "url.https://x-access-token:${LEPUS_READ_TOKEN}@github.com/.insteadOf=https://github.com/" \
-            submodule update --init desktop/lepus
+      - name: Check out the Proton submodule
+        run: git submodule update --init desktop/lepus
 
       - name: Set up MoonBit (nightly)
         shell: pwsh
