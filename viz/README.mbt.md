@@ -79,3 +79,14 @@ for the full list.
 that exited between writing an event and its newline) is reported as a benign
 truncated tail, and any single line that fails to decode becomes an inline error
 card while the rest of the conversation still renders.
+
+## Subagent transcripts
+
+A sub-run (explore/review child) of a durable session persists its own
+transcript as a sibling session named `<parent id>-sr-N`. The parent's tool
+results carry the sub-run id in their display-only `brief`; the viewer turns
+that into a `↳ subagent` chip on the result card (an in-page `#s=<child id>`
+navigation) and — in the raw view, once the app has loaded the child — nests
+the child's full transcript inside the card. The model view stays chip-only:
+the child's turn is nothing the parent's model was fed. The sidebar lists
+child sessions indented under their parent.

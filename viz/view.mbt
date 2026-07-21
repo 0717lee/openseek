@@ -13,10 +13,15 @@ pub(all) enum ViewMode {
 pub fn render_session(
   session : @agent_session.Session,
   mode : ViewMode,
+  subrun_children? : Map[String, @agent_session.Session] = Map([]),
 ) -> @html.Html {
+  let subrun = SubrunView::{
+    parent: session.id().value(),
+    children: subrun_children,
+  }
   match mode {
-    RawLog => render_raw(session)
-    ModelView => render_model(session)
+    RawLog => render_raw(session, subrun)
+    ModelView => render_model(session, subrun)
   }
 }
 
@@ -57,7 +62,10 @@ pub fn render_notices(parsed : @session_log.ParsedLog) -> @html.Html {
 // ---- raw log view ----------------------------------------------------------
 
 ///|
-fn render_raw(session : @agent_session.Session) -> @html.Html {
+fn render_raw(
+  session : @agent_session.Session,
+  subrun : SubrunView,
+) -> @html.Html {
   let briefs = tool_call_briefs(session)
   let failed = raw_failed_call_ids(session)
   let tags = raw_pair_tags(session)
@@ -66,7 +74,16 @@ fn render_raw(session : @agent_session.Session) -> @html.Html {
   let turns = group_turns(session.events())
   let blocks : Array[@html.Html] = [
     for index, turn in turns => {
-      turn_block(index + 1, turn, briefs, failed, tags, plans, step_labels)
+      turn_block(
+        index + 1,
+        turn,
+        briefs,
+        failed,
+        tags,
+        plans,
+        step_labels,
+        subrun,
+      )
     }
   ]
   if blocks.is_empty() {
@@ -220,6 +237,7 @@ fn turn_block(
   tags : Map[String, Int],
   plans : Map[String, Array[@steps.PlanStep]],
   step_labels : Map[Int, String],
+  subrun : SubrunView,
 ) -> @html.Html {
   // Offsets are relative to the turn's first stamped event: for reading a
   // log, "how far into the turn" answers latency questions directly, where
@@ -235,6 +253,7 @@ fn turn_block(
         tags,
         plans,
         step_label=step_labels.get(event.sequence()).unwrap_or(""),
+        subrun,
       )
     }
   ]
@@ -337,6 +356,7 @@ fn event_card(
   tags : Map[String, Int],
   plans : Map[String, Array[@steps.PlanStep]],
   step_label~ : String,
+  subrun : SubrunView,
 ) -> @html.Html {
   let seq = event.sequence()
   match event.item() {
@@ -353,7 +373,7 @@ fn event_card(
         plans,
         step_label~,
       )
-    Tool(result) => tool_card(seq, time, result, tags)
+    Tool(result) => tool_card(seq, time, result, tags, subrun)
     Runtime(notice) => runtime_card(seq, time, notice.content())
     Summary(summary) => summary_card(seq, time, summary)
     Terminal(terminal) => terminal_card(seq, time, terminal, step_label~)
@@ -1212,6 +1232,7 @@ fn tool_card(
   time : String,
   result : @agent_session.ToolResult,
   tags : Map[String, Int],
+  subrun : SubrunView,
 ) -> @html.Html {
   let is_error = result.is_error()
   let kind = if is_error { "tool error" } else { "tool" }
@@ -1231,17 +1252,19 @@ fn tool_card(
     Some(n) => tool_result_anchor(n)
     None => seq_anchor(seq)
   }
+  let summary = card_head(label, seq, time~, flag~, link~)
+  let body : Array[@html.Html] = [text_block(result.content())]
+  // A subrun result gets a chip to its child session and — when the caller
+  // loaded that child — the transcript itself, nested inside this card.
+  if subrun_child_id(result, subrun.parent) is Some(child_id) {
+    summary.push(subrun_chip(child_id))
+    if subrun.children.get(child_id) is Some(child) {
+      body.push(subrun_transcript(child))
+    }
+  }
   @html.details(id=anchor, class="card \{kind}") <| [
-    @html.summary(class="card-label") <| card_head(
-      label,
-      seq,
-      time~,
-      flag~,
-      link~,
-    ),
-    @html.div(class="card-body") <| [
-      text_block(result.content()),
-    ],
+    @html.summary(class="card-label") <| summary,
+    @html.div(class="card-body") <| body,
   ]
 }
 
@@ -1365,7 +1388,10 @@ fn steps_with_errors(
 // ---- model projection view -------------------------------------------------
 
 ///|
-fn render_model(session : @agent_session.Session) -> @html.Html {
+fn render_model(
+  session : @agent_session.Session,
+  subrun : SubrunView,
+) -> @html.Html {
   // The projection keys each tool message only by id and drops is_error / tool
   // name, so recover them from the durable events for display (the messages fed
   // to the model are unchanged — this is view-only enrichment).
@@ -1397,6 +1423,7 @@ fn render_model(session : @agent_session.Session) -> @html.Html {
         briefs,
         tags,
         plans,
+        subrun~,
         time~,
         step_label~,
         anchor~,
@@ -1779,6 +1806,7 @@ fn message_card(
   time~ : String,
   step_label~ : String,
   anchor~ : String?,
+  subrun~ : SubrunView,
 ) -> @html.Html {
   match message.role {
     System =>
@@ -1822,6 +1850,7 @@ fn message_card(
         message,
         model_shown_result(message, tool_results),
         tags,
+        subrun,
         time~,
         anchor~,
       )
@@ -1890,6 +1919,7 @@ fn model_tool_card(
   message : @deepseek.ChatMessage,
   shown : @agent_session.ToolResult?,
   tags : Map[String, Int],
+  subrun : SubrunView,
   time~ : String,
   anchor~ : String?,
 ) -> @html.Html {
@@ -1917,13 +1947,15 @@ fn model_tool_card(
     Some(n) => Some(tool_result_anchor(n))
     None => anchor
   }
+  let summary = model_card_head(label, time~, flag=failed_flag(is_error), link~)
+  // Chip only, no nested transcript: the model view shows what the model
+  // was fed, and the child's transcript never was.
+  if shown is Some(result) &&
+    subrun_child_id(result, subrun.parent) is Some(child_id) {
+    summary.push(subrun_chip(child_id))
+  }
   @html.details(id?=anchor, class="card \{kind}") <| [
-    @html.summary(class="card-label") <| model_card_head(
-      label,
-      time~,
-      flag=failed_flag(is_error),
-      link~,
-    ),
+    @html.summary(class="card-label") <| summary,
     @html.div(class="card-body") <| [
       text_block(message.content),
     ],
@@ -2097,4 +2129,93 @@ test "one_line collapses newlines and trims whitespace" {
 test "truncate caps by character without splitting surrogate pairs" {
   assert_eq(truncate("hello world", 5), "hello…")
   assert_eq(truncate("a🤣b", 2), "a🤣…")
+}
+
+// ---- subagent transcripts ---------------------------------------------------
+
+///|
+/// Rendering context for subagent (sub-run) transcripts: the parent
+/// session's id — the prefix of every child session id — plus any child
+/// sessions the caller already loaded for inline display. An empty context
+/// renders plain tool cards.
+pub struct SubrunView {
+  parent : String
+  children : Map[String, @agent_session.Session]
+}
+
+///|
+/// The child session id a subrun tool result names, or `None` for every
+/// other result. The contract is the brief the explore/review tools stamp:
+/// `"<tool> sr-N (…)"` — display-only metadata, so parsing it here never
+/// touches what the model saw.
+fn subrun_child_id(
+  result : @agent_session.ToolResult,
+  parent : String,
+) -> String? {
+  guard result.tool_name() is ("explore" | "review") else { return None }
+  guard result.brief() is Some(brief) else { return None }
+  let tokens = brief.split(" ").collect()
+  guard tokens.get(1) is Some(token) else { return None }
+  guard token.has_prefix("sr-") else { return None }
+  let digits = token.view(start_offset=3)
+  guard !digits.is_empty() && digits.iter().all(c => c.is_ascii_digit()) else {
+    return None
+  }
+  Some("\{parent}-\{token}")
+}
+
+///|
+/// The folded-card chip linking a subrun result to its child session: an
+/// in-page `#s=<child id>` navigation the app resolves against its session
+/// listing. Rendered whenever the brief names a sub-run — if the child
+/// never persisted (ephemeral parent), following the link reports "session
+/// not found" rather than hiding that a transcript could have existed.
+fn subrun_chip(child_id : String) -> @html.Html {
+  @html.a(
+    class="subrun-link",
+    href="#s=\{child_id}",
+    title="Open the subagent's own transcript",
+  ) <| "↳ subagent"
+}
+
+///|
+/// The inline child transcript for an expanded subrun card: the child's
+/// full raw log (its own turn structure, cards, and anchors) nested inside
+/// the parent's card body. Children cannot spawn sub-runs of their own, so
+/// the nesting is one level deep by construction.
+fn subrun_transcript(child : @agent_session.Session) -> @html.Html {
+  let steps = child
+    .events()
+    .iter()
+    .count_if(event => event.item() is Assistant(_))
+  let tools = child.events().iter().count_if(event => event.item() is Tool(_))
+  @html.details(class="subrun-transcript") <| [
+    @html.summary(class="subrun-transcript-label") <| [
+      @html.text(
+        "Subagent transcript · \{child.id().value()} · \{steps} step\{plural(steps)} · \{tools} tool call\{plural(tools)}",
+      ),
+    ],
+    @html.div(class="subrun-transcript-body") <| [
+      render_raw(child, { parent: child.id().value(), children: Map([]) }),
+    ],
+  ]
+}
+
+///|
+/// Every child session id this session's subrun tool results reference, in
+/// first-appearance order — the set a viewer prefetches for inline
+/// transcripts.
+pub fn subrun_child_ids(
+  session : @agent_session.Session,
+  parent : String,
+) -> Array[String] {
+  let ids : Array[String] = []
+  for event in session.events() {
+    if event.item() is Tool(result) &&
+      subrun_child_id(result, parent) is Some(child_id) &&
+      !ids.contains(child_id) {
+      ids.push(child_id)
+    }
+  }
+  ids
 }

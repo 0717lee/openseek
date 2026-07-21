@@ -48,6 +48,10 @@ struct Model {
   // Tool-call arguments rendering: the human-friendly form (values shown verbatim,
   // no JSON quoting) by default, or the original pretty-printed JSON for debugging.
   show_original_args : Bool
+  // Child sessions (subagent transcripts) loaded for the selected parent,
+  // keyed by child session id — rendered inline inside the parent's subrun
+  // tool cards. Cleared on every selection change.
+  subrun_children : Map[String, @agent_session.Session]
 }
 
 ///|
@@ -78,6 +82,12 @@ enum Msg {
   SessionsFetched(Result[String, Error])
   Select(String)
   SessionFetched(String, Result[String, Error])
+  // A subrun chip (or any in-page `#s=` anchor) changed the hash: resolve
+  // the value against the listing and select.
+  HashNavigated(String)
+  // One child (subagent) session fetched for the selected parent:
+  // (parent key, child session id, response).
+  SubrunFetched(String, String, Result[String, Error])
   FileDropped(String, Int64, @dom.Blob)
   DroppedFileRead(Int, String, Int64, Result[String, Error])
   SetMode(@viz.ViewMode)
@@ -171,6 +181,7 @@ fn init_model() -> Model {
     status: "loading sessions…",
     errors_only: false,
     show_original_args: false,
+    subrun_children: Map([]),
   }
 }
 
@@ -199,8 +210,9 @@ fn update(emit : @cmd.Emit[Msg], msg : Msg, model : Model) -> (@cmd.Cmd, Model) 
           // yank the user off a session.
           let untouched = model.selected is None && model.dropped is None
           match model.pending_restore_key {
-            Some(key) if untouched && sessions.iter().any(row => row.key == key) =>
-              update(emit, Select(key), listed)
+            Some(key) if untouched &&
+              resolve_session_key(sessions, key) is Some(resolved) =>
+              update(emit, Select(resolved), listed)
             _ =>
               if should_auto_open(
                   embedded_has("/api/sessions"),
@@ -254,9 +266,44 @@ fn update(emit : @cmd.Emit[Msg], msg : Msg, model : Model) -> (@cmd.Cmd, Model) 
           log_bytes: 0L,
           loading: true,
           status: "loading \{label}…",
+          subrun_children: Map([]),
         },
       )
     }
+    HashNavigated(value) =>
+      // Resolve like the startup restore; an unknown value (an element
+      // anchor's hash, an unlisted id) is ignored rather than clearing the
+      // current session.
+      match resolve_session_key(model.sessions, value) {
+        Some(key) if model.selected != Some(key) =>
+          update(emit, Select(key), model)
+        _ => (@cmd.none, model)
+      }
+    SubrunFetched(parent_key, child_id, result) =>
+      // A child transcript for a parent the user already left is stale;
+      // a failed or malformed child fetch simply leaves the chip link-only.
+      if model.selected != Some(parent_key) {
+        (@cmd.none, model)
+      } else {
+        match result {
+          Err(_) => (@cmd.none, model)
+          Ok(text) =>
+            match parse_load(text) {
+              Loaded(parsed, system_prompt, _header_present, _bytes) => {
+                let children : Map[String, @agent_session.Session] = Map([])
+                for id, child in model.subrun_children {
+                  children.set(id, child)
+                }
+                children.set(
+                  child_id,
+                  @viz.session_from_parse(parsed, id=child_id, system_prompt~),
+                )
+                (@cmd.none, { ..model, subrun_children: children })
+              }
+              NotFound | Malformed => (@cmd.none, model)
+            }
+        }
+      }
     SessionFetched(key, result) =>
       // Drop a response for a session the user already navigated away from.
       if model.selected != Some(key) {
@@ -271,11 +318,25 @@ fn update(emit : @cmd.Emit[Msg], msg : Msg, model : Model) -> (@cmd.Cmd, Model) 
             )
           Ok(text) =>
             match parse_load(text) {
-              Loaded(parsed, system_prompt, header_present, log_bytes) =>
+              Loaded(parsed, system_prompt, header_present, log_bytes) => {
+                // Prefetch any subagent transcripts this session references
+                // (subrun briefs → sibling sessions in the listing), so the
+                // raw view can nest them inline as they arrive.
+                let child_fetches = subrun_child_refs(model, key, parsed).map(child => {
+                  let (child_id, child_key) = child
+                  fetch_text(emit, session_url(child_key), result => {
+                    SubrunFetched(key, child_id, result)
+                  })
+                })
                 (
                   // The log renders in this same cycle; once it is in the
                   // DOM, scroll back to the seq= position saved in the hash.
-                  @cmd.effect(() => restore_scroll_to_hash_seq()),
+                  @cmd.batch(
+                    [
+                      @cmd.effect(() => restore_scroll_to_hash_seq()),
+                      ..child_fetches,
+                    ],
+                  ),
                   {
                     ..model,
                     parsed: Some(parsed),
@@ -286,6 +347,7 @@ fn update(emit : @cmd.Emit[Msg], msg : Msg, model : Model) -> (@cmd.Cmd, Model) 
                     status: events_status(parsed),
                   },
                 )
+              }
               NotFound =>
                 (
                   @cmd.none,
@@ -793,6 +855,71 @@ fn session_url(id : String) -> String {
 }
 
 ///|
+/// Resolve a hash `s=` value to a listed row key: exact key first, then by
+/// bare session id — subrun chips link `#s=<child session id>`, which the
+/// server resolves as a legacy key but a standalone export's embedded data
+/// map does not.
+fn resolve_session_key(sessions : Array[SessionRow], value : String) -> String? {
+  if sessions.iter().any(row => row.key == value) {
+    return Some(value)
+  }
+  match sessions.iter().find_first(row => row.id == value) {
+    Some(row) => Some(row.key)
+    None => None
+  }
+}
+
+///|
+/// The child sessions a freshly loaded parent references via subrun briefs,
+/// resolved against the current listing: `(child session id, row key)` for
+/// each child that actually exists as a sibling session. Ephemeral children
+/// (never persisted) resolve to nothing and stay chip-only.
+fn subrun_child_refs(
+  model : Model,
+  parent_key : String,
+  parsed : @session_log.ParsedLog,
+) -> Array[(String, String)] {
+  guard session_row(model, parent_key) is Some(parent_row) else { return [] }
+  let session = @viz.session_from_parse(
+    parsed,
+    id=parent_row.id,
+    system_prompt="",
+  )
+  let refs : Array[(String, String)] = []
+  for child_id in @viz.subrun_child_ids(session, parent_row.id) {
+    if resolve_session_key(model.sessions, child_id) is Some(key) {
+      refs.push((child_id, key))
+    }
+  }
+  refs
+}
+
+///|
+/// In-page session navigation: subrun chips are plain `#s=…` anchors, so a
+/// click only changes the hash — this listener turns that into a selection.
+/// App-initiated hash writes use replaceState, which never fires
+/// `hashchange`, so navigation cannot loop.
+fn install_hash_navigation(emit : @cmd.Emit[Msg]) -> @cmd.Cmd {
+  @cmd.custom_cmd(scheduler => {
+    install_hashchange_listener(key => scheduler.add(emit(HashNavigated(key))))
+  })
+}
+
+///|
+extern "js" fn install_hashchange_listener(
+  on_session : (String) -> Unit,
+) -> Unit =
+  #|(cb) => {
+  #|  if (typeof window === 'undefined') return;
+  #|  window.addEventListener('hashchange', () => {
+  #|    try {
+  #|      const s = new URLSearchParams(location.hash.slice(1)).get('s') || '';
+  #|      if (s) cb(s);
+  #|    } catch (e) {}
+  #|  });
+  #|}
+
+///|
 fn session_label(model : Model, key : String) -> String {
   match session_row(model, key) {
     Some(row) => row.id
@@ -908,9 +1035,13 @@ fn sidebar_list(emit : @cmd.Emit[Msg], model : Model) -> @html.Html {
   }
   let sections : Array[@html.Html] = []
   for group in sidebar_groups(model.sessions) {
-    let rows = model.sessions
-      .filter(row => session_group(row.root_label, row.is_marker) == group)
-      .map(row => sidebar_row(emit, model, row))
+    let rows = sidebar_nested_rows(
+      emit,
+      model,
+      model.sessions.filter(row => {
+        session_group(row.root_label, row.is_marker) == group
+      }),
+    )
     let collapsed = root_collapsed(model, group)
     let display = group_display(group)
     sections.push(
@@ -941,6 +1072,48 @@ fn sidebar_list(emit : @cmd.Emit[Msg], model : Model) -> @html.Html {
     )
   }
   @html.div(class="session-list") <| sections
+}
+
+///|
+/// One group's sidebar rows with subagent children nested under their
+/// parent: a `<parent id>-sr-N` row whose parent is listed in the same
+/// group renders indented right after it (in listing order) instead of as
+/// a stray sibling; an orphan child (parent not listed) stays top-level.
+fn sidebar_nested_rows(
+  emit : @cmd.Emit[Msg],
+  model : Model,
+  rows : Array[SessionRow],
+) -> Array[@html.Html] {
+  let ids = rows.map(row => row.id)
+  fn nested_parent(id : String) -> String? {
+    match subrun_parent_id(id) {
+      Some(parent) if ids.contains(parent) => Some(parent)
+      _ => None
+    }
+  }
+  let out : Array[@html.Html] = []
+  for row in rows {
+    if nested_parent(row.id) is Some(_) {
+      continue
+    }
+    out.push(sidebar_row(emit, model, row))
+    for child in rows {
+      if nested_parent(child.id) is Some(parent) && parent == row.id {
+        out.push(sidebar_row(emit, model, child, child=true))
+      }
+    }
+  }
+  out
+}
+
+///|
+/// The parent session id a subrun child session id derives from
+/// (`<parent>-sr-N`), or `None` for every other id.
+fn subrun_parent_id(id : String) -> String? {
+  lexscan id {
+    (re"^(.|\n)*" as parent) + re"-sr-[0-9]+$" => Some(parent.to_owned())
+    _ => None
+  }
 }
 
 ///|
@@ -1077,6 +1250,7 @@ fn sidebar_row(
   emit : @cmd.Emit[Msg],
   model : Model,
   row : SessionRow,
+  child? : Bool = false,
 ) -> @html.Html {
   let selected = model.selected == Some(row.key)
   let label = if row.first_prompt.trim().is_empty() {
@@ -1084,7 +1258,11 @@ fn sidebar_row(
   } else {
     row.first_prompt
   }
-  let classes = class_with("session-item", "selected", selected)
+  let classes = class_with(
+    class_with("session-item", "session-child", child),
+    "selected",
+    selected,
+  )
   @html.li(class=classes, on_click=emit(Select(row.key))) <| [
     @html.div(class="session-item-label") <| label,
     @html.div(class="session-item-meta") <| [
@@ -1499,7 +1677,11 @@ fn session_log_view(
   if model.errors_only && count == 0 {
     @html.div(class="errors-only-empty") <| "No failed tool results in this view."
   } else {
-    @viz.render_session(session, model.view_mode)
+    @viz.render_session(
+      session,
+      model.view_mode,
+      subrun_children=model.subrun_children,
+    )
   }
 }
 

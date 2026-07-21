@@ -535,6 +535,27 @@
       text-transform: none; letter-spacing: 0; opacity: .85; white-space: nowrap;
     }
     .tool-link:hover { text-decoration: underline; opacity: 1; }
+    /* subagent chip on explore/review result cards: navigates (via #s=) to
+       the child's own session; the inline transcript nests the child's raw
+       log inside the parent card, visually set off by an accent rail. */
+    .subrun-link {
+      font-family: ui-monospace, monospace; font-size: 11px;
+      color: var(--accent); text-decoration: none; margin-left: 8px;
+      text-transform: none; letter-spacing: 0; opacity: .85; white-space: nowrap;
+    }
+    .subrun-link:hover { text-decoration: underline; opacity: 1; }
+    .subrun-transcript {
+      margin-top: 10px; border-left: 3px solid var(--accent);
+      padding-left: 10px; background: var(--panel-2); border-radius: 4px;
+    }
+    .subrun-transcript-label {
+      cursor: pointer; font-size: 12px; color: var(--muted);
+      padding: 6px 4px; user-select: none;
+    }
+    .subrun-transcript-body { padding: 4px 6px 8px; }
+    .subrun-transcript-body .log { margin: 0; }
+    /* a subagent session nested under its parent in the sidebar */
+    .session-item.session-child { margin-left: 14px; opacity: .9; }
     /* highlight the call/result you jumped to via a pairing chip (the class
        form is what the click handler sets — it cannot use location.hash,
        which carries the viewer's s/v/seq position state) */

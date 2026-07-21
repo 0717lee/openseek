@@ -1310,3 +1310,72 @@ test "raw view shows total-second offsets and turn duration from ts" {
   let plain = render(@viz.render_session(unstamped, RawLog))
   assert_false(plain.contains("card-ts"))
 }
+
+///|
+/// A parent session holding one explore call/result pair whose brief names
+/// sub-run sr-2 — the stamp the explore tool writes on its results.
+fn subrun_sample_session() -> @agent_session.Session {
+  @agent_session.Session(SessionId("run"), system_prompt="sys")
+  .append(User(UserMessage("find the API")))
+  .append(
+    Assistant(
+      AssistantMessage("", tool_calls=[
+        ToolCall(id="c1", name="explore", arguments="{\"query\": \"how\"}"),
+      ]),
+    ),
+  )
+  .append(
+    Tool(
+      ToolResult(
+        tool_call_id="c1",
+        tool_name="explore",
+        content="Answer: like this.",
+        brief="explore sr-2 (1 citation(s), 7 step(s))",
+      ),
+    ),
+  )
+  .append(Terminal(Finished("done")))
+}
+
+///|
+test "a subrun result links its child session and nests a loaded transcript" {
+  let session = subrun_sample_session()
+  // Chip in both views: the href targets the child session id derived from
+  // the parent id plus the brief's sr-N stamp.
+  let raw = render(@viz.render_session(session, RawLog))
+  assert_true(raw.contains("subrun-link"))
+  assert_true(raw.contains("href=\"#s=run-sr-2\""))
+  let model = render(@viz.render_session(session, ModelView))
+  assert_true(model.contains("href=\"#s=run-sr-2\""))
+  // No child loaded: chip only, no nested transcript.
+  assert_false(raw.contains("subrun-transcript"))
+  // With the child supplied, the raw view nests its transcript; the model
+  // view stays chip-only (the child's turn is nothing the model was fed).
+  let child = @agent_session.Session(
+      SessionId("run-sr-2"),
+      system_prompt="scout",
+    )
+    .append(User(UserMessage("q")))
+    .append(Assistant(AssistantMessage("looking")))
+    .append(Terminal(Finished("submitted")))
+  let children : Map[String, @agent_session.Session] = Map([])
+  children.set("run-sr-2", child)
+  let nested = render(
+    @viz.render_session(session, RawLog, subrun_children=children),
+  )
+  assert_true(nested.contains("subrun-transcript"))
+  assert_true(nested.contains("Subagent transcript · run-sr-2"))
+  assert_false(
+    render(@viz.render_session(session, ModelView, subrun_children=children)).contains(
+      "subrun-transcript",
+    ),
+  )
+  // An ordinary tool result never grows a chip.
+  assert_false(
+    render(@viz.render_session(clean_sample_session(), RawLog)).contains(
+      "subrun-link",
+    ),
+  )
+  // The prefetch scanner surfaces the same reference.
+  assert_eq(@viz.subrun_child_ids(session, "run"), ["run-sr-2"])
+}
