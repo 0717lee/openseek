@@ -1,0 +1,22 @@
+import {
+  "bobzhang/openseek/agent",
+  "bobzhang/openseek/agent_runtime",
+  "bobzhang/openseek/agent_session",
+  "bobzhang/openseek/agent_tool",
+  "bobzhang/openseek/deepseek",
+  "bobzhang/openseek_protocol" @protocol,
+  "moonbitlang/async",
+  "moonbitlang/async/process",
+  "moonbitlang/async/io",
+  "moonbitlang/core/json",
+}
+
+import {
+  "bobzhang/openseek/agent_tool",
+  "moonbitlang/async",
+  "moonbitlang/async/http",
+  "moonbitlang/async/socket",
+  "moonbitlang/core/json",
+} for "test"
+
+supported_targets = "+native"

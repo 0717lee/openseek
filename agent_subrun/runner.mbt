@@ -1,0 +1,271 @@
+///|
+/// After the wall deadline closes the child's stdin (the graceful-cancel
+/// signal), the child gets this long to flush and exit before the runner
+/// terminates it. A well-behaved child cancels its turn on EOF and exits
+/// quickly; the kill is the backstop.
+pub let cancel_grace_ms : Int = 5_000
+
+///|
+/// How a sub-run ended. External cancellation of the CALLER is deliberately
+/// not a terminal: it re-raises out of `run_subrun` (tearing the child down
+/// on the way) so structured concurrency sees it, per the engine-wide rule
+/// that cancellation is never folded into an ordinary failure.
+pub(all) enum SubrunTerminal {
+  /// The child submitted a valid report before exiting.
+  Captured
+  /// The child exited cleanly without ever submitting a report.
+  NoReport
+  /// The child exhausted its step budget without a report.
+  MaxSteps
+  /// The child yielded at its context ceiling without a report.
+  ContextYield
+  /// The runner's wall deadline expired: stdin was closed (graceful cancel)
+  /// and the child was terminated after the grace period. A report that
+  /// arrived before the cut still reports `Captured`.
+  TimedOut
+  /// The child failed: spawn failure, a turn/setup failure it reported, a
+  /// garbled report, or an exit with none of the above observed.
+  Failed(String)
+} derive(Debug, Eq)
+
+///|
+/// The outcome of one sub-run: the parsed report when there is one, plus the
+/// cost the child actually spent — observed from the child's own event
+/// stream (`usage` summed, `agent_step` maxed), so it is exact for the
+/// requests the child made.
+pub struct SubrunResult[T] {
+  value : T?
+  terminal : SubrunTerminal
+  steps_used : Int
+  prompt_tokens : Int
+  completion_tokens : Int
+} derive(Debug)
+
+///|
+/// The parsed report, when the child submitted one.
+pub fn[T] SubrunResult::value(self : SubrunResult[T]) -> T? {
+  self.value
+}
+
+///|
+/// How the sub-run ended.
+pub fn[T] SubrunResult::terminal(self : SubrunResult[T]) -> SubrunTerminal {
+  self.terminal
+}
+
+///|
+/// Model requests the child actually made.
+pub fn[T] SubrunResult::steps_used(self : SubrunResult[T]) -> Int {
+  self.steps_used
+}
+
+///|
+/// Provider prompt tokens the child consumed, summed over its requests.
+pub fn[T] SubrunResult::prompt_tokens(self : SubrunResult[T]) -> Int {
+  self.prompt_tokens
+}
+
+///|
+/// Provider completion tokens the child consumed, summed over its requests.
+pub fn[T] SubrunResult::completion_tokens(self : SubrunResult[T]) -> Int {
+  self.completion_tokens
+}
+
+///|
+/// What the runner accumulates while draining the child's stdout.
+priv struct ChildObservations {
+  mut steps : Int
+  mut prompt_tokens : Int
+  mut completion_tokens : Int
+  mut max_steps_exhausted : Bool
+  mut context_yield : Bool
+  mut failure : String?
+  mut report : Json?
+  mut garbled_report : String?
+}
+
+///|
+/// Classify one child stdout line. The child's stdout carries its xlog JSONL
+/// event stream (each line an envelope whose event fields are hoisted to the
+/// top level — `@protocol.parse` reads exactly that shape) and, last, the
+/// distinguished `{"subrun_report": ...}` line. Non-JSON lines are skipped:
+/// a tool subprocess that leaks to stdout must not poison the run.
+fn ChildObservations::observe(self : ChildObservations, line : String) -> Unit {
+  let trimmed = line.trim(chars="\r\n")
+  if trimmed == "" {
+    return
+  }
+  guard (Some(@json.parse(trimmed.to_owned())) catch { _ => None })
+    is Some(json) else {
+    return
+  }
+  if parse_report_line(json) is Some(report) {
+    self.report = Some(report)
+    return
+  }
+  match @protocol.parse(json) {
+    Some(AgentStep(step~)) => if step > self.steps { self.steps = step }
+    Some(Usage(usage~)) => {
+      self.prompt_tokens += usage.prompt_tokens
+      self.completion_tokens += usage.completion_tokens
+    }
+    Some(MaxStepsExhausted) => self.max_steps_exhausted = true
+    Some(ContextYield(..)) => self.context_yield = true
+    Some(TurnFailed(error~)) | Some(AgentSetupFailed(error~)) =>
+      self.failure = Some(error)
+    Some(AgentAborted(reason~)) => self.failure = Some(reason)
+    _ => ()
+  }
+}
+
+///|
+/// Run one sub-run in a DEDICATED CHILD PROCESS and report what happened and
+/// what it cost.
+///
+/// `command`/`args` name the child — in production the parent's own
+/// executable with `["subrun", <kind>, ...]` (same binary, so the report's
+/// derived JSON codecs cannot drift), in tests any script that speaks the
+/// contract. The runner writes `input` as one JSON line on the child's
+/// stdin and HOLDS THE PIPE OPEN: closing it is the graceful-cancel signal.
+/// It drains the child's stdout, summing `usage` and `agent_step` events
+/// for cost and capturing the final `{"subrun_report": ...}` line, which
+/// `parse_report` turns into the typed value (rejects become `Failed`).
+///
+/// Deadline: after `wall_deadline_ms` the runner closes stdin and gives the
+/// child `cancel_grace_ms` to flush and exit — a report that lands during
+/// the grace still counts — then terminates it. External cancellation of
+/// the caller re-raises after teardown; it is never folded into a terminal.
+pub async fn[T] run_subrun(
+  command~ : String,
+  args~ : Array[String],
+  input~ : Json,
+  parse_report~ : (Json) -> Result[T, String],
+  wall_deadline_ms~ : Int,
+  cwd? : String,
+) -> SubrunResult[T] {
+  let observations = ChildObservations::{
+    steps: 0,
+    prompt_tokens: 0,
+    completion_tokens: 0,
+    max_steps_exhausted: false,
+    context_yield: false,
+    failure: None,
+    report: None,
+    garbled_report: None,
+  }
+  let mut timed_out = false
+  @async.with_task_group() <| group => {
+    let (child_stdin, stdin_writer) = @process.write_to_process() catch {
+      error if @async.is_being_cancelled() => raise error
+      error => {
+        observations.failure = Some("subrun pipes unavailable: \{error}")
+        return
+      }
+    }
+    let (stdout_reader, child_stdout) = @process.read_from_process() catch {
+      error if @async.is_being_cancelled() => {
+        stdin_writer.close()
+        raise error
+      }
+      error => {
+        stdin_writer.close()
+        observations.failure = Some("subrun pipes unavailable: \{error}")
+        return
+      }
+    }
+    // `no_wait`: the group terminates the child at teardown rather than
+    // waiting for an exit that may only come once its stdin is closed.
+    let process = @process.spawn(
+      group,
+      command,
+      args,
+      inherit_env=true,
+      stdin=child_stdin,
+      stdout=child_stdout,
+      cwd?=cwd.map(dir => dir.view()),
+      no_wait=true,
+    ) catch {
+      error if @async.is_being_cancelled() => {
+        stdout_reader.close()
+        stdin_writer.close()
+        raise error
+      }
+      error => {
+        stdout_reader.close()
+        stdin_writer.close()
+        observations.failure = Some("subrun spawn failed: \{error}")
+        return
+      }
+    }
+    async fn drain() -> Unit {
+      while stdout_reader.read_until("\n") is Some(line) {
+        observations.observe(line)
+      }
+    }
+    try {
+      // One input line; the pipe stays open — EOF is the cancel signal, not
+      // the end of input.
+      stdin_writer.write("\{input.stringify()}\n")
+      match @async.with_timeout_opt(wall_deadline_ms, drain) {
+        Some(_) => ()
+        None => {
+          // Deadline: graceful cancel first — close stdin, let the child
+          // flush; a report arriving in the grace window still counts.
+          timed_out = true
+          stdin_writer.close()
+          let _ = @async.with_timeout_opt(cancel_grace_ms, drain)
+        }
+      }
+    } catch {
+      error => {
+        // External cancellation (or a pipe failure): tear the child down and
+        // re-raise cancellation; fold anything else into the terminal.
+        @async.protect_from_cancel(() => {
+          stdout_reader.close()
+          stdin_writer.close()
+          process.cancel()
+        })
+        if @async.is_being_cancelled() {
+          raise error
+        }
+        if observations.failure is None {
+          observations.failure = Some("subrun stream failed: \{error}")
+        }
+        return
+      }
+    }
+    stdout_reader.close()
+    stdin_writer.close()
+    process.cancel()
+  }
+  let value : T? = match observations.report {
+    Some(report) =>
+      match parse_report(report) {
+        Ok(value) => Some(value)
+        Err(problem) => {
+          observations.garbled_report = Some(problem)
+          None
+        }
+      }
+    None => None
+  }
+  let terminal = match (value, observations.garbled_report) {
+    (Some(_), _) => Captured
+    (None, Some(problem)) => Failed("subrun report rejected: \{problem}")
+    (None, None) =>
+      match observations.failure {
+        Some(error) => Failed(error)
+        None if timed_out => TimedOut
+        None if observations.max_steps_exhausted => MaxSteps
+        None if observations.context_yield => ContextYield
+        None => NoReport
+      }
+  }
+  {
+    value,
+    terminal,
+    steps_used: observations.steps,
+    prompt_tokens: observations.prompt_tokens,
+    completion_tokens: observations.completion_tokens,
+  }
+}

@@ -19,6 +19,11 @@ let default_review_max_steps : Int = 120
 /// pre-build source generation, so the checkout is not guaranteed byte-for-byte
 /// unchanged. Raises `ReviewError` if the model finishes without submitting a
 /// report.
+///
+/// Runs the review kind IN THIS PROCESS via `@agent_subrun.execute_kind`: the
+/// standalone CLI is already a dedicated process, and a future in-session
+/// gate spawns `openseek subrun review` — a child process whose dispatch
+/// calls this same code path.
 pub async fn run_review(
   api_key : String,
   model : @deepseek.Model,
@@ -28,34 +33,25 @@ pub async fn run_review(
   thinking? : @deepseek.ThinkingMode = Max,
   api_url? : String,
 ) -> ReviewReport {
-  let captured : Ref[ReviewReport?] = { val: None }
-  let tools = @agent_tool.Tools([
-    @read.definition(workspace_root~),
-    @shell.definition(workspace_root~, read_only=true),
-    submit_review_tool(captured),
-  ])
-  let session = @agent_session.Session(
-    @agent_session.SessionId("review"),
+  let report = @agent_subrun.execute_kind(
+    session_id="review",
     system_prompt=review_system_prompt(),
+    task=review_task(base),
+    tools=captured => {
+      @agent_tool.Tools([
+        @read.definition(workspace_root~),
+        @shell.definition(workspace_root~, read_only=true),
+        submit_review_tool(captured),
+      ])
+    },
+    max_steps~,
+    api_key~,
+    model~,
+    thinking~,
+    api_url?,
+    workspace_root~,
   )
-  let task = review_task(base)
-  // Review is read-only and ephemeral; the final session is not persisted.
-  let _ : @agent_session.Session = @async.with_task_group() <| group => {
-    @agent.run_turn_in_scope(
-      runtime=@agent_runtime.AgentRuntime(workspace_root~),
-      scope=@agent_runtime.AgentTaskScope(group),
-      api_key~,
-      model~,
-      session~,
-      task~,
-      append_item=(s, i) => s.append(i),
-      max_steps~,
-      thinking~,
-      api_url?,
-      tools~,
-    )
-  }
-  match captured.val {
+  match report {
     Some(report) => report
     None =>
       raise ReviewError(

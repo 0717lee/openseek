@@ -30,6 +30,7 @@ async fn dispatch() -> Unit {
     Some(("run", m)) => run_task_command(m)
     Some(("serve", m)) => run_serve_command(m)
     Some(("review", m)) => run_review_command(m)
+    Some(("subrun", m)) => run_subrun_command(m)
     Some(("mcp", m)) => run_mcp_command(m)
     Some(("sessions", m)) => run_sessions_command(m)
     // argparse rejects unknown subcommands during parse, so this is unreachable.
@@ -223,7 +224,18 @@ async fn run_task_turn(
   @async.with_task_group() <| group => {
     let runtime = @agent_runtime.AgentRuntime(workspace_root~)
     let scope = @agent_runtime.AgentTaskScope(group)
-    let extra_tools = resolve_mcp_tools(matches, scope, workspace_root~)
+    // One-shot = one turn, so a fresh per-turn subrun budget needs no reset.
+    let subrun_budget = @agent_subrun.SubrunBudget()
+    let extra_tools = resolve_mcp_tools(matches, scope, workspace_root~) +
+      [
+        @agent_explore.definition(
+          self_exe=self_executable(),
+          model~,
+          workspace_root~,
+          budget=subrun_budget,
+          api_url?,
+        ),
+      ]
     let tools = @agent.build_tools(runtime, scope, extra_tools~)
     ignore(
       @agent.run_turn_in_scope(
@@ -622,6 +634,18 @@ fn root_command() -> @argparse.Command {
             long="base",
             default_values=["origin/main"],
             about="Base ref: review the diff base...HEAD.",
+          ),
+        ],
+      ),
+      Command(
+        "subrun",
+        about="INTERNAL: run one subagent kind as a child of this engine (input JSON on stdin; stdin EOF cancels).",
+        options=agent_options(),
+        positionals=[
+          PositionArg(
+            "kind",
+            num_args=ValueRange(lower=1),
+            about="Subagent kind: explore | echo.",
           ),
         ],
       ),

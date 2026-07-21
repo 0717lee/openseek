@@ -1,0 +1,58 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "bobzhang/openseek/agent_explore"
+
+import {
+  "bobzhang/openseek/agent_subrun",
+  "bobzhang/openseek/agent_tool",
+  "bobzhang/openseek/deepseek",
+  "moonbitlang/core/debug",
+  "moonbitlang/core/json",
+}
+
+// Values
+pub let current_schema_version : Int
+
+pub let default_explore_deadline_ms : Int
+
+pub let default_explore_max_steps : Int
+
+pub fn definition(self_exe~ : String, model~ : @deepseek.Model, workspace_root~ : String, budget~ : @agent_subrun.SubrunBudget, api_url? : String) -> @agent_tool.AgentToolDefinition
+
+pub let max_answer_chars : Int
+
+pub let max_citation_file_chars : Int
+
+pub let max_citation_note_chars : Int
+
+pub let max_citations : Int
+
+pub let max_hints_chars : Int
+
+pub let max_query_chars : Int
+
+pub let max_unresolved_chars : Int
+
+pub async fn run_child(Json, api_key~ : String, model~ : @deepseek.Model, max_steps~ : Int, thinking? : @deepseek.ThinkingMode, api_url? : String, workspace_root? : String) -> ExploreReport?
+
+// Errors
+
+// Types and methods
+pub(all) struct Citation {
+  file : String
+  line : Int?
+  note : String?
+} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
+
+pub(all) struct ExploreReport {
+  schema_version : Int
+  answer : String
+  citations : Array[Citation]
+  unresolved : String?
+} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
+pub fn ExploreReport::parse(Json) -> Result[Self, String]
+pub fn ExploreReport::validate(Self) -> Array[String]
+
+// Type aliases
+
+// Traits
+

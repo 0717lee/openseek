@@ -613,7 +613,19 @@ async fn run_serve(
     // completion instead of leaving it queued until the next prompt.
     // Tools from any configured MCP servers, connected once per engine (their
     // reader/writer tasks live on this group) and reused across turns.
-    let extra_tools = resolve_mcp_tools(matches, scope, workspace_root~)
+    // The subrun budget is shared by every subrun tool and refills at each
+    // turn start (see start_turn) — the registry itself lives across turns.
+    let subrun_budget = @agent_subrun.SubrunBudget()
+    let extra_tools = resolve_mcp_tools(matches, scope, workspace_root~) +
+      [
+        @agent_explore.definition(
+          self_exe=self_executable(),
+          model~,
+          workspace_root~,
+          budget=subrun_budget,
+          api_url?,
+        ),
+      ]
     let tools = @agent.build_tools(
       runtime,
       scope,
@@ -806,6 +818,9 @@ async fn run_serve(
     }
 
     fn start_turn(task_text : String) -> @async.Task[Unit] {
+      // Each turn refills the shared subrun allowance; the registry (and the
+      // budget object the explore tool holds) lives across turns.
+      subrun_budget.reset_turn()
       group.spawn() <| () => {
         let _ = @agent.run_turn_in_scope(
           runtime~,

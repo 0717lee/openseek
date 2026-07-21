@@ -13,42 +13,34 @@
 fn submit_review_tool(
   captured : Ref[ReviewReport?],
 ) -> @agent_tool.AgentToolDefinition {
-  AgentToolDefinition(
+  @agent_subrun.capture_tool(
     name="submit_review",
     description="Submit the final structured code-review report and end the review. Call this exactly once, when the review is complete. Every finding must cite a file (and a line when known) and a severity of blocker|high|medium|low|nit.",
     schema=JsonSchema(report_schema()),
-    execute=Sync(args => submit(captured, args)),
-    control=true,
+    parse=parse_submission,
+    captured,
+    finished_note=report => {
+      "review submitted (\{report.findings.length()} finding(s))"
+    },
   )
 }
 
 ///|
-fn submit(captured : Ref[ReviewReport?], args : Json) -> @agent_tool.ToolAction {
+/// Parse-and-validate for the capture tool: JSON decode problems and contract
+/// violations both reject, so the model retries instead of finishing with no
+/// report.
+fn parse_submission(args : Json) -> Result[ReviewReport, Array[String]] {
   match ReviewReport::parse(args) {
-    Err(msg) => reject(msg)
+    Err(msg) => Err([msg])
     Ok(report) => {
       let problems = report.validate()
       if problems.length() > 0 {
-        reject(problems.join("; "))
+        Err(problems)
       } else {
-        captured.val = Some(report)
-        @agent_tool.ToolAction::finish(
-          "review submitted (\{report.findings.length()} finding(s))",
-        )
+        Ok(report)
       }
     }
   }
-}
-
-///|
-/// Reject malformed `submit_review` output with an error response so the model
-/// retries instead of finishing with no report.
-fn reject(reason : String) -> @agent_tool.ToolAction {
-  @agent_tool.ToolAction::respond(
-    "submit_review rejected: \{reason}",
-    is_error=true,
-    brief="submit_review",
-  )
 }
 
 ///|
@@ -103,6 +95,18 @@ fn report_schema() -> Json {
 }
 
 ///|
+/// Run the submit tool's Sync executor directly, as the loop would.
+fn submit_action(
+  captured : Ref[ReviewReport?],
+  args : Json,
+) -> @agent_tool.ToolAction raise {
+  guard submit_review_tool(captured).execute is Sync(execute) else {
+    fail("submit_review should be a Sync executor")
+  }
+  execute(args)
+}
+
+///|
 test "submit_review declares itself a control tool" {
   // The ceiling salvage honors control-declared completions; without this
   // a review hitting the context ceiling on its submitting step would
@@ -114,8 +118,9 @@ test "submit_review declares itself a control tool" {
 ///|
 test "submit captures a valid report and finishes" {
   let captured : Ref[ReviewReport?] = { val: None }
-  let action = submit(captured, sample_report().to_json())
-  guard action is Control(Finish(_)) else { fail("expected Finish") }
+  let action = submit_action(captured, sample_report().to_json())
+  guard action is Control(Finish(note)) else { fail("expected Finish") }
+  assert_true(note.contains("2 finding(s)"))
   guard captured.val is Some(_) else { fail("expected captured report") }
 }
 
@@ -136,8 +141,9 @@ test "submit rejects an invalid report without capturing" {
       },
     ],
   }
-  let action = submit(captured, bad.to_json())
+  let action = submit_action(captured, bad.to_json())
   guard action is Respond(output) else { fail("expected Respond") }
   assert_true(output.is_error)
+  assert_true(output.content.contains("submit_review rejected"))
   guard captured.val is None else { fail("must not capture an invalid report") }
 }
