@@ -128,6 +128,12 @@ fn default_prompt() -> String {
     #|  the STALE mooncakes.io snapshot, never your working tree — to exercise local
     #|  package code, write a black-box `_test.mbt` and run `moon test <pkg> --filter`
     #|  (above).
+    #|- `review` tool: before declaring substantial work or a standing goal
+    #|  complete, request an independent worktree audit — a review subagent reads
+    #|  the files, runs the project's own checks, hunts for vacuous success, and
+    #|  returns severity-tagged findings with file:line citations. A blocker
+    #|  finding means the claim does not hold yet. Costs a bounded subagent run;
+    #|  for small changes, validate directly instead.
     #|- `explore` tool: delegate ONE self-contained question to a read-only scout
     #|  subagent when answering it yourself would mean reading MANY files or a
     #|  fan-out search — "where is X handled", "how does Y flow end to end", "what

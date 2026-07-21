@@ -227,6 +227,16 @@ async fn run_task_turn(
     // One-shot = one turn, so a fresh per-turn subrun budget needs no reset.
     let subrun_budget = @agent_subrun.SubrunBudget()
     let exe = self_executable()
+    // Mirror the latest appended session so the review tool audits against
+    // the LIVE standing goal, not the turn-start snapshot.
+    let latest_session : Ref[@agent_session.Session] = { val: session }
+    let review_context = () => {
+      let goal = latest_session.val.current_goal()
+      (
+        goal.map(goal => goal.text()),
+        latest_session.val.current_goal_baseline(),
+      )
+    }
     let extra_tools = resolve_mcp_tools(matches, scope, workspace_root~) +
       [
         @agent_explore.definition(
@@ -234,6 +244,14 @@ async fn run_task_turn(
           model~,
           workspace_root~,
           budget=subrun_budget,
+          api_url?,
+        ),
+        review_tool_definition(
+          self_exe=exe,
+          model~,
+          workspace_root~,
+          budget=subrun_budget,
+          context=review_context,
           api_url?,
         ),
       ]
@@ -259,7 +277,11 @@ async fn run_task_turn(
         model~,
         session~,
         task~,
-        append_item~,
+        append_item=(current, item) => {
+          let next = append_item(current, item)
+          latest_session.val = next
+          next
+        },
         max_steps?,
         thinking~,
         api_url?,

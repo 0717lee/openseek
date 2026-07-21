@@ -620,6 +620,14 @@ async fn run_serve(
     // turn start (see start_turn) — the registry itself lives across turns.
     let subrun_budget = @agent_subrun.SubrunBudget()
     let exe = self_executable()
+    // The callable review tool audits against the LIVE standing goal: the
+    // closure reads the loop-updated session at call time, never a
+    // snapshot.
+    let review_context = () => {
+      let goal = session.current_goal()
+      (goal.map(goal => goal.text()), session.current_goal_baseline())
+    }
+
     let extra_tools = resolve_mcp_tools(matches, scope, workspace_root~) +
       [
         @agent_explore.definition(
@@ -627,6 +635,14 @@ async fn run_serve(
           model~,
           workspace_root~,
           budget=subrun_budget,
+          api_url?,
+        ),
+        review_tool_definition(
+          self_exe=exe,
+          model~,
+          workspace_root~,
+          budget=subrun_budget,
+          context=review_context,
           api_url?,
         ),
       ]

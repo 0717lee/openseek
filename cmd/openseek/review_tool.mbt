@@ -1,0 +1,159 @@
+///|
+/// Tool definition for `review`: a model-initiated worktree audit — the
+/// same reviewer child the goal-met gate spawns, callable mid-run before
+/// claiming substantial work complete.
+///
+/// `context` supplies the live standing goal and its baseline (serve wires
+/// a closure over its session; one-shot mirrors the latest appended
+/// session). The model may narrow the audit with `focus`; with neither a
+/// focus nor a standing goal the child audits against the task's own
+/// success criteria as stated in `focus` — so the parameter is required
+/// exactly when no goal stands.
+pub fn review_tool_definition(
+  self_exe~ : String,
+  model~ : @deepseek.Model,
+  workspace_root~ : String,
+  budget~ : @agent_subrun.SubrunBudget,
+  context~ : () -> (String?, @agent_session.GoalBaseline?),
+  api_url? : String,
+) -> @agent_tool.AgentToolDefinition {
+  AgentToolDefinition(
+    name="review",
+    description="Request an INDEPENDENT audit of the current worktree by a review subagent — use it before declaring substantial work or a standing goal complete, or when you want a skeptical second reading of what you built. The auditor reads files, runs the project's own checks, hunts for vacuous success (tests asserting nothing, hardcoded outputs, quietly narrowed criteria), and returns severity-tagged findings with file:line citations. It audits against the standing goal when one exists; pass `focus` to narrow or replace the criteria. Costs a bounded subagent run from the shared per-turn budget.",
+    schema=JsonSchema({
+      "type": "object",
+      "properties": {
+        "focus": {
+          "type": "string",
+          "description": "What to audit against: specific criteria, a component, or a claim to verify. Optional when a standing goal exists (the goal is the default criteria).",
+        },
+      },
+    }),
+    execute=Async(arguments => {
+      execute_review(
+        self_exe, model, workspace_root, budget, context, api_url, arguments,
+      )
+    }),
+  )
+}
+
+///|
+async fn execute_review(
+  self_exe : String,
+  model : @deepseek.Model,
+  workspace_root : String,
+  budget : @agent_subrun.SubrunBudget,
+  context : () -> (String?, @agent_session.GoalBaseline?),
+  api_url : String?,
+  arguments : Json,
+) -> @agent_tool.ToolAction {
+  let focus : String? = match arguments {
+    { "focus": String(focus), .. } if focus.trim() != "" =>
+      Some(focus.to_string())
+    _ => None
+  }
+  let (standing_goal, baseline) = context()
+  let criteria = match (focus, standing_goal) {
+    (Some(focus), Some(goal)) => "\{goal}\n\nAudit focus:\n\{focus}"
+    (Some(focus), None) => focus
+    (None, Some(goal)) => goal
+    (None, None) =>
+      return @agent_tool.ToolAction::respond(
+        "error: no standing goal exists — pass `focus` with the criteria to audit against",
+        is_error=true,
+      )
+  }
+  guard budget.reserve(@agent_review.default_audit_max_steps)
+    is Some(granted_steps) else {
+    return @agent_tool.ToolAction::respond(
+      "review budget exhausted for this turn — validate directly (run the checks yourself).",
+      is_error=true,
+      brief="review (budget exhausted)",
+    )
+  }
+  let args = [
+    "subrun",
+    "review",
+    "--model",
+    "\{model}",
+    "--max-steps",
+    "\{granted_steps}",
+  ]
+  if api_url is Some(url) {
+    args.push("--api-url")
+    args.push(url)
+  }
+  let input : Json = match baseline {
+    Some(baseline) =>
+      { "goal": criteria, "sha": baseline.sha, "dirty": baseline.dirty }
+    None => { "goal": criteria }
+  }
+  let result = @agent_subrun.run_subrun(
+    command=self_exe,
+    args~,
+    input~,
+    parse_report=parse_audit_report,
+    wall_deadline_ms=GateDeadlineMs,
+    kind="review",
+    label=@agent_tool.brief_line(criteria, limit=48),
+    cwd=workspace_root,
+  )
+  budget.reconcile(reserved=granted_steps, used=result.steps_used())
+  match result.value() {
+    Some(report) =>
+      @agent_tool.ToolAction::respond(
+        report.digest(),
+        is_error=report.findings.filter(f => f.severity == "blocker").length() >
+          0,
+        brief="review (\{report.findings.length()} finding(s), \{result.steps_used()} step(s))",
+      )
+    None =>
+      @agent_tool.ToolAction::respond(
+        "review produced no report (\{@agent_tool.brief_line("\{to_repr(result.terminal())}", limit=200)}) — validate directly instead.",
+        is_error=true,
+        brief="review (no report)",
+      )
+  }
+}
+
+///|
+async test "review without a goal or focus errors before spending anything" {
+  let budget = @agent_subrun.SubrunBudget(
+    max_calls_per_turn=1,
+    max_steps_per_turn=100,
+  )
+  let tool = review_tool_definition(
+    self_exe="/nonexistent/openseek-not-here",
+    model=Deepseek(V4Flash),
+    workspace_root=".",
+    budget~,
+    context=() => (None, None),
+  )
+  guard tool.execute is Async(execute) else { fail("review should be async") }
+  let action = execute(Json::empty_object())
+  guard action is Respond(output) else { fail("expected Respond") }
+  assert_true(output.is_error)
+  assert_true(output.content.contains("no standing goal"))
+  // Nothing was reserved or spawned.
+  assert_true(budget.reserve(10) is Some(10))
+}
+
+///|
+async test "review budget exhaustion refuses before spawning" {
+  let budget = @agent_subrun.SubrunBudget(
+    max_calls_per_turn=0,
+    max_steps_per_turn=100,
+  )
+  let tool = review_tool_definition(
+    self_exe="/nonexistent/openseek-not-here",
+    model=Deepseek(V4Flash),
+    workspace_root=".",
+    budget~,
+    context=() => (Some("ship it"), None),
+  )
+  guard tool.execute is Async(execute) else { fail("review should be async") }
+  let action = execute(Json::empty_object())
+  guard action is Respond(output) else { fail("expected Respond") }
+  assert_true(output.is_error)
+  assert_true(output.content.contains("budget exhausted"))
+}
