@@ -11,6 +11,8 @@ import {
 // Values
 pub const ContextYieldAnswerPrefix : String = "[context ceiling]"
 
+pub const GoalBaselinePrefix : String = "[goal baseline]"
+
 pub const GoalBlockedPrefix : String = "[goal blocked]"
 
 pub const GoalCheckPrefix : String = "[goal check]"
@@ -25,7 +27,11 @@ pub const GoalUnblockedNotice : String = "[goal unblocked]"
 
 pub const PlanReminderPrefix : String = "[plan reminder]"
 
+pub fn goal_baseline_notice(sha~ : String, dirty~ : Bool) -> String
+
 pub fn goal_marker(String) -> GoalMarker?
+
+pub fn parse_goal_baseline(String) -> GoalBaseline?
 
 // Errors
 
@@ -37,6 +43,11 @@ pub fn AssistantMessage::AssistantMessage(String, tool_calls? : Array[@deepseek.
 pub fn AssistantMessage::content(Self) -> String
 pub fn AssistantMessage::reasoning_content(Self) -> String?
 pub fn AssistantMessage::tool_calls(Self) -> Array[@deepseek.ToolCall]
+
+pub(all) struct GoalBaseline {
+  sha : String
+  dirty : Bool
+} derive(Eq, @debug.Debug)
 
 pub enum GoalMarker {
   GoalSet(String)
@@ -60,6 +71,7 @@ pub fn Session::append_event(Self, SessionItem, unix_ms? : Int64) -> (Self, Sess
 pub fn Session::chat_messages(Self) -> Array[@deepseek.ChatMessage]
 pub fn Session::compact(Self, content~ : String, from_sequence~ : Int, to_sequence~ : Int, unix_ms? : Int64) -> Self raise
 pub fn Session::current_goal(Self) -> StandingGoal?
+pub fn Session::current_goal_baseline(Self) -> GoalBaseline?
 pub fn Session::events(Self) -> @vector.Vector[SessionEvent]
 pub fn Session::id(Self) -> SessionId
 pub fn Session::last_sequence(Self) -> Int

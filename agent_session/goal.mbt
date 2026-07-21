@@ -169,3 +169,68 @@ pub fn Session::current_goal(self : Session) -> StandingGoal? {
   }
   None
 }
+
+///|
+/// The goal-baseline marker prefix: `[goal baseline] sha=<sha> dirty=<bool>`,
+/// appended IMMEDIATELY BEFORE its `[goal]` set marker by every goal-set
+/// path. Single-line by design (unlike the set marker, it carries no user
+/// text). Unknown to older readers, it degrades to a plain notice.
+pub const GoalBaselinePrefix : String = "[goal baseline]"
+
+///|
+/// The workspace snapshot recorded when a goal was set: the commit the
+/// worktree sat on, and whether the worktree was already dirty — the
+/// review gate's audit anchor and its attribution caveat.
+pub(all) struct GoalBaseline {
+  sha : String
+  dirty : Bool
+} derive(Debug, Eq)
+
+///|
+/// Render the baseline notice content for `sha`/`dirty`.
+pub fn goal_baseline_notice(sha~ : String, dirty~ : Bool) -> String {
+  "\{GoalBaselinePrefix} sha=\{sha} dirty=\{dirty}"
+}
+
+///|
+/// Parse a runtime-notice content as a goal baseline, if it is one. Strict
+/// on shape (both fields, in order) so a mangled line degrades to a plain
+/// notice rather than a half-parsed baseline.
+pub fn parse_goal_baseline(content : String) -> GoalBaseline? {
+  guard content.strip_prefix("\{GoalBaselinePrefix} sha=") is Some(rest) else {
+    return None
+  }
+  guard rest.find(" dirty=") is Some(cut) else { return None }
+  let sha = rest[:cut].to_owned()
+  let dirty = match rest[cut + 7:].to_owned() {
+    "true" => true
+    "false" => false
+    _ => return None
+  }
+  if sha.is_empty() {
+    return None
+  }
+  Some({ sha, dirty })
+}
+
+///|
+/// The baseline recorded for the CURRENT standing goal, or `None` when no
+/// goal stands or its set marker has no baseline immediately before it.
+/// Pairing is by adjacency: every goal-set path appends the baseline notice
+/// and the set marker back to back with nothing in between (the serve loop
+/// is the single appender on the idle/drain paths, and the steer path
+/// applies its drained inputs sequentially), so the event directly
+/// preceding the set marker either is this goal's baseline or the goal has
+/// none. An orphan baseline (its set marker's append failed) is never
+/// returned: it precedes nothing that stands.
+pub fn Session::current_goal_baseline(self : Session) -> GoalBaseline? {
+  guard self.current_goal() is Some(goal) else { return None }
+  let events = self.events()
+  for index in (events.length() - 1)>=..1 {
+    if events[index].sequence() == goal.set_sequence() {
+      guard events[index - 1].item() is Runtime(notice) else { return None }
+      return parse_goal_baseline(notice.content())
+    }
+  }
+  None
+}

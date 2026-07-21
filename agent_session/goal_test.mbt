@@ -96,3 +96,107 @@ test "a compaction summary covering the set marker does not hide the goal" {
   assert_eq(goal.text(), "long objective")
   assert_true(goal.answered_since_set())
 }
+
+///|
+test "goal baseline round-trips through its notice" {
+  let notice = @agent_session.goal_baseline_notice(sha="abc123", dirty=false)
+  assert_eq(notice, "[goal baseline] sha=abc123 dirty=false")
+  debug_inspect(
+    @agent_session.parse_goal_baseline(notice),
+    content=(
+      #|Some({ sha: "abc123", dirty: false })
+    ),
+  )
+  // Strict shape: mangled lines degrade to plain notices.
+  assert_true(@agent_session.parse_goal_baseline("[goal baseline]") is None)
+  assert_true(
+    @agent_session.parse_goal_baseline("[goal baseline] sha= dirty=true")
+    is None,
+  )
+  assert_true(
+    @agent_session.parse_goal_baseline("[goal baseline] sha=x dirty=maybe")
+    is None,
+  )
+}
+
+///|
+test "current_goal_baseline pairs by adjacency" {
+  let session = @agent_session.Session(SessionId("b1"), system_prompt="sys")
+    .append(
+      Runtime(
+        RuntimeNotice(
+          @agent_session.goal_baseline_notice(sha="abc123", dirty=true),
+        ),
+      ),
+    )
+    .append(Runtime(RuntimeNotice("[goal]\nship it")))
+  debug_inspect(
+    session.current_goal_baseline(),
+    content=(
+      #|Some({ sha: "abc123", dirty: true })
+    ),
+  )
+}
+
+///|
+test "a set marker without an adjacent baseline has none" {
+  // Baseline exists but something landed between it and the marker: the
+  // adjacency contract is broken, so no baseline is claimed.
+  let session = @agent_session.Session(SessionId("b2"), system_prompt="sys")
+    .append(
+      Runtime(
+        RuntimeNotice(
+          @agent_session.goal_baseline_notice(sha="abc123", dirty=false),
+        ),
+      ),
+    )
+    .append(User(UserMessage("interleaved")))
+    .append(Runtime(RuntimeNotice("[goal]\nship it")))
+  assert_true(session.current_goal_baseline() is None)
+}
+
+///|
+test "an orphan baseline is never returned" {
+  // The set marker's append failed: the baseline precedes nothing.
+  let session = @agent_session.Session(SessionId("b3"), system_prompt="sys").append(
+    Runtime(
+      RuntimeNotice(
+        @agent_session.goal_baseline_notice(sha="abc123", dirty=false),
+      ),
+    ),
+  )
+  assert_true(session.current_goal() is None)
+  assert_true(session.current_goal_baseline() is None)
+}
+
+///|
+test "a replacement goal pairs with ITS baseline, and a clear drops it" {
+  let session = @agent_session.Session(SessionId("b4"), system_prompt="sys")
+    .append(
+      Runtime(
+        RuntimeNotice(
+          @agent_session.goal_baseline_notice(sha="old000", dirty=false),
+        ),
+      ),
+    )
+    .append(Runtime(RuntimeNotice("[goal]\nfirst")))
+    .append(
+      Runtime(
+        RuntimeNotice(
+          @agent_session.goal_baseline_notice(sha="new111", dirty=true),
+        ),
+      ),
+    )
+    .append(Runtime(RuntimeNotice("[goal]\nsecond")))
+  debug_inspect(
+    session.current_goal_baseline(),
+    content=(
+      #|Some({ sha: "new111", dirty: true })
+    ),
+  )
+  // A replacement WITHOUT a baseline must not inherit the old one.
+  let replaced = session.append(Runtime(RuntimeNotice("[goal]\nthird")))
+  assert_true(replaced.current_goal_baseline() is None)
+  let cleared = session.append(Runtime(RuntimeNotice("[goal cleared]")))
+  assert_true(cleared.current_goal_baseline() is None)
+}
