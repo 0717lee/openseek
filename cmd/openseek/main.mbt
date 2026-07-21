@@ -257,15 +257,7 @@ async fn run_task_turn(
       ]
     let tools = @agent.build_tools(runtime, scope, extra_tools~)
     let on_goal_met = if review_gate_enabled(matches) {
-      Some(
-        build_goal_met_gate(
-          self_exe=exe,
-          model~,
-          api_url~,
-          budget=subrun_budget,
-          workspace_root~,
-        ),
-      )
+      Some(build_goal_met_gate(self_exe=exe, model~, api_url~, workspace_root~))
     } else {
       None
     }

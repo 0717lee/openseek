@@ -1,7 +1,10 @@
 ///|
 /// Wall deadline for one gate audit: a reviewer that has not reported in
-/// ten minutes is stuck, not thorough.
-const GateDeadlineMs : Int = 600_000
+/// fifteen minutes is stuck, not thorough. Sized with the step ceiling:
+/// audit steps run several seconds each (and slow as the child's context
+/// grows), so the clock must comfortably cover a full step allowance —
+/// dying by deadline instead of ceiling reports nothing either way.
+const GateDeadlineMs : Int = 900_000
 
 ///|
 /// Whether `--review-gate` was passed: the advisory goal-met audit is
@@ -32,31 +35,31 @@ fn parse_audit_report(
 ///|
 /// Build the advisory goal-met gate: on a durably recorded met, spawn the
 /// `subrun review` child against the goal's baseline and return the bounded
-/// digest notice. Advisory by contract — every failure shape (budget
-/// exhausted, no report, timeout, spawn trouble) degrades to an
-/// `[review] unavailable` notice; only external cancellation re-raises
-/// (through run_subrun's own contract).
+/// digest notice. Advisory by contract — every failure shape (no report,
+/// timeout, spawn trouble) degrades to an `[review] unavailable` notice;
+/// only external cancellation re-raises (through run_subrun's own
+/// contract).
+///
+/// The gate does NOT draw from the shared `SubrunBudget`: that pool
+/// meters MODEL-initiated delegation, while the gate is engine-initiated
+/// and fires at most once per met claim. Sharing let a turn's explore
+/// calls starve the audit into an underpowered run that died at its step
+/// ceiling unreported (ccomp-run10) — the one subrun that must not be
+/// shortchanged is the one auditing the claim everything else rests on.
 fn build_goal_met_gate(
   self_exe~ : String,
   model~ : @deepseek.Model,
   api_url~ : String?,
-  budget~ : @agent_subrun.SubrunBudget,
   workspace_root~ : String,
 ) -> async (String, @agent_session.GoalBaseline?) -> String? {
   (goal, baseline) => {
-    guard budget.reserve(@agent_review.default_audit_max_steps)
-      is Some(granted_steps) else {
-      return Some(
-        "[review] unavailable: subrun budget exhausted for this turn — the met claim is unaudited.",
-      )
-    }
     let args = [
       "subrun",
       "review",
       "--model",
       "\{model}",
       "--max-steps",
-      "\{granted_steps}",
+      "\{@agent_review.default_audit_max_steps}",
     ]
     if api_url is Some(url) {
       args.push("--api-url")
@@ -77,7 +80,6 @@ fn build_goal_met_gate(
       label=@agent_tool.brief_line(goal, limit=48),
       cwd=workspace_root,
     )
-    budget.reconcile(reserved=granted_steps, used=result.steps_used())
     match result.value() {
       Some(report) => Some(report.digest())
       None =>

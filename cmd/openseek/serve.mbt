@@ -647,17 +647,10 @@ async fn run_serve(
         ),
       ]
     // The advisory goal-met gate (--review-gate): built once, shared by
-    // every turn; it draws from the same per-turn subrun budget as explore.
+    // every turn; engine-initiated, so it runs on its own allowance
+    // rather than the model's per-turn subrun budget.
     let on_goal_met = if review_gate_enabled(matches) {
-      Some(
-        build_goal_met_gate(
-          self_exe=exe,
-          model~,
-          api_url~,
-          budget=subrun_budget,
-          workspace_root~,
-        ),
-      )
+      Some(build_goal_met_gate(self_exe=exe, model~, api_url~, workspace_root~))
     } else {
       None
     }

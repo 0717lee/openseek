@@ -1,12 +1,16 @@
 ///|
-/// Step ceiling requested for one explore child. Exploration must stay
-/// cheap: it reads and cites, it does not build.
-pub let default_explore_max_steps : Int = 40
+/// Step ceiling requested for one explore child. Generous enough that a
+/// scout answering a real question never dies mid-search (a truncated child
+/// burns its whole allowance and returns nothing); the answer-early rule in
+/// the prompt, not this ceiling, is what keeps exploration cheap.
+pub let default_explore_max_steps : Int = 100
 
 ///|
 /// Wall deadline for one explore child. A scout that has not answered in
-/// five minutes is lost, not thorough.
-pub let default_explore_deadline_ms : Int = 300_000
+/// ten minutes is lost, not thorough. Sized with the step ceiling: at the
+/// few seconds per step observed in dogfood runs, a child must be able to
+/// spend its full step allowance without dying by the clock instead.
+pub let default_explore_deadline_ms : Int = 600_000
 
 ///|
 /// Input caps: a question is a question, not a document.

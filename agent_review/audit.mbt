@@ -1,7 +1,9 @@
 ///|
 /// Default step budget for one goal audit: leaner than a full review — the
 /// audit reads the worktree against one goal, it does not survey a branch.
-pub let default_audit_max_steps : Int = 80
+/// Sized so auditing a real workspace (read sources, run the project's own
+/// checks) fits without the child dying at its ceiling unreported.
+pub let default_audit_max_steps : Int = 100
 
 ///|
 /// System prompt for the goal audit: a read-only skeptic asking one
@@ -27,6 +29,11 @@ fn audit_system_prompt() -> String {
     #|- Be precise and skeptical; prefer few real findings over many
     #|  speculative ones. Severity: blocker|high|medium|low|nit — a blocker
     #|  means the goal is NOT met.
+    #|- Your step budget is bounded, and an audit that dies at its ceiling
+    #|  unsubmitted verifies NOTHING. Triage the criteria first, spend your
+    #|  steps on what could actually falsify the claim, and submit the
+    #|  findings you have before the budget runs out — a partial audit
+    #|  with real findings beats a thorough one that never reports.
     #|- When done, call submit_review exactly once with the full structured
     #|  report (schema_version 1); set scope.head to "WORKTREE". Do not
     #|  finish with plain text.

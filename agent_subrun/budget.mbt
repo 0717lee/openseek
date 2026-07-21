@@ -5,10 +5,12 @@
 pub let min_useful_subrun_steps : Int = 8
 
 ///|
-/// The per-turn allowance shared by EVERY subrun tool in a session (explore,
-/// the goal-review gate, callable review): one child must not be able to
+/// The per-turn allowance shared by every MODEL-initiated subrun tool in a
+/// session (explore, callable review): one child must not be able to
 /// stretch a turn unboundedly, and the tools must not each carry a private
-/// quota that sums to one.
+/// quota that sums to one. Engine-initiated subruns (the goal-met gate)
+/// run on their own allowance instead — the model's delegation habits must
+/// not be able to starve the audit of its own met claim.
 ///
 /// The owner is the CLI layer: it creates one budget per session, passes it
 /// to every subrun tool definition, and calls `reset_turn` at each turn
@@ -25,11 +27,15 @@ pub struct SubrunBudget {
 }
 
 ///|
-/// Defaults sized for explore-style children: a few delegations per turn,
-/// each bounded well below a whole child allowance.
+/// Defaults sized so the step pool can fund every allowed call at its
+/// kind's full ceiling (4 calls x 100 steps): the pool is a backstop
+/// against pathological requests, not a scheduler — a later call must
+/// never be silently truncated to the crumbs earlier calls left behind
+/// (a starved child dies at its ceiling and reports nothing, the worst
+/// spend of all).
 pub fn SubrunBudget::SubrunBudget(
   max_calls_per_turn? : Int = 4,
-  max_steps_per_turn? : Int = 120,
+  max_steps_per_turn? : Int = 400,
 ) -> SubrunBudget {
   { max_calls_per_turn, max_steps_per_turn, used_calls: 0, reserved_steps: 0 }
 }

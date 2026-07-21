@@ -25,6 +25,11 @@ fn explore_system_prompt() -> String {
     #|Rules:
     #|- Ground every claim. Workspace claims cite file:line; stdlib and
     #|  dependency claims cite the doc/source path your instrument reported.
+    #|- Answer EARLY: the moment your instruments settle the question,
+    #|  submit — do not keep surveying for completeness the caller never
+    #|  asked for. Your step budget is bounded; a scout that dies at its
+    #|  ceiling mid-survey returns NOTHING, which is strictly worse than
+    #|  the partial answer it already had.
     #|- Prefer a precise partial answer over a padded complete-looking one.
     #|  What you could not determine goes in `unresolved` — stated ignorance
     #|  beats a fabricated claim.
