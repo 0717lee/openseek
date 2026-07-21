@@ -216,13 +216,18 @@ pub fn parse_goal_baseline(content : String) -> GoalBaseline? {
 ///|
 /// The baseline recorded for the CURRENT standing goal, or `None` when no
 /// goal stands or its set marker has no baseline immediately before it.
-/// Pairing is by adjacency: every goal-set path appends the baseline notice
+/// Pairing is by adjacency: every goal-set path appends a baseline record
 /// and the set marker back to back with nothing in between (the serve loop
 /// is the single appender on the idle/drain paths, and the steer path
-/// applies its drained inputs sequentially), so the event directly
-/// preceding the set marker either is this goal's baseline or the goal has
-/// none. An orphan baseline (its set marker's append failed) is never
-/// returned: it precedes nothing that stands.
+/// applies its drained inputs sequentially). A failed CAPTURE still appends
+/// an `unavailable` record, so the marker's preceding slot is owned by its
+/// own set and a stale orphan from an earlier fault cannot be inherited by
+/// position. Residual honesty: if a baseline APPEND lands durably and its
+/// marker's append is then lost (store fault or torn tail), AND a later
+/// set's own record append also fails, that later marker could sit
+/// directly after the stale orphan and claim it — a double store fault.
+/// Consumers must treat the baseline as an advisory audit anchor, never a
+/// correctness input.
 pub fn Session::current_goal_baseline(self : Session) -> GoalBaseline? {
   guard self.current_goal() is Some(goal) else { return None }
   let events = self.events()

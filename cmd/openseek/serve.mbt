@@ -1038,9 +1038,12 @@ async fn run_serve(
           }
           // Captured at COMMAND RECEIPT (bounded; see baseline.mbt) so every
           // path records the worktree as it stood when the user set the
-          // goal, not when the marker eventually lands.
+          // goal, not when the marker eventually lands. For a QUEUED goal
+          // behind a long turn this anchor may predate that turn's commits
+          // — a known divergence: the gate treats the baseline as advisory
+          // context for a current-worktree audit, never exact attribution.
           let baseline : String? = match action {
-            SetGoal(_, ..) => capture_goal_baseline(workspace_root)
+            SetGoal(_, ..) => Some(capture_goal_baseline(workspace_root))
             ClearGoal => None
           }
           if pending.length() > 0 || active_work is Some(ActiveCompact(_)) {

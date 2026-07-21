@@ -113,7 +113,13 @@ fn append_session_item(
       })
     }
     "runtime_notice" =>
-      if content is Some(content) && !content.trim().is_empty() {
+      // Goal-family notices are transport (set/clear/block markers, the
+      // baseline pairing record) or model-directed text — never display
+      // cards. Local prefix check: this js-only package cannot depend on
+      // agent_session's parsers.
+      if content is Some(content) &&
+        !content.trim().is_empty() &&
+        !content.has_prefix("[goal") {
         let update = parse_runtime_update(content)
         if !update.status.is_empty() || update.diagnostics.length() > 0 {
           items.push({

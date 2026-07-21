@@ -358,6 +358,15 @@ async fn AgentLoop::apply_steer_inputs(
       Notice(text) => ("notice", text, Runtime(RuntimeNotice(text)))
     }
     let next = self.append(current, item)
+    // A goal-baseline notice is transport for the durable pairing record:
+    // it must land in the session (adjacent to its marker) but carries
+    // nothing for the model — a commit sha as user input is pure noise —
+    // and nothing for controllers, who would only have to filter it back
+    // out of every echo path.
+    if input is Notice(text) &&
+      @agent_session.parse_goal_baseline(text) is Some(_) {
+      continue next
+    }
     self.messages.push(ChatMessage(User, content=text))
     @emit.emit(SteerApplied(kind~, content=text))
     if input is Notice(text) {
