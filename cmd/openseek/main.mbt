@@ -223,7 +223,18 @@ async fn run_task_turn(
   @async.with_task_group() <| group => {
     let runtime = @agent_runtime.AgentRuntime(workspace_root~)
     let scope = @agent_runtime.AgentTaskScope(group)
-    let extra_tools = resolve_mcp_tools(matches, scope, workspace_root~)
+    // One-shot = one turn, so a fresh per-turn subrun budget needs no reset.
+    let subrun_budget = @agent_subrun.SubrunBudget()
+    let extra_tools = resolve_mcp_tools(matches, scope, workspace_root~) +
+      [
+        @agent_explore.definition(
+          api_key~,
+          model~,
+          workspace_root~,
+          budget=subrun_budget,
+          api_url?,
+        ),
+      ]
     let tools = @agent.build_tools(runtime, scope, extra_tools~)
     ignore(
       @agent.run_turn_in_scope(

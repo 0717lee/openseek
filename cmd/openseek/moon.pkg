@@ -1,6 +1,8 @@
 import {
   "bobzhang/jsonl",
   "bobzhang/openseek/agent",
+  "bobzhang/openseek/agent_explore",
+  "bobzhang/openseek/agent_subrun",
   "bobzhang/openseek/agent_review",
   "bobzhang/openseek/agent_runtime",
   "bobzhang/openseek/agent_tool",

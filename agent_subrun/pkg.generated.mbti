@@ -12,6 +12,8 @@ import {
 // Values
 pub fn[T] capture_tool(name~ : String, description~ : String, schema~ : @agent_tool.JsonSchema, parse~ : (Json) -> Result[T, Array[String]], @ref.Ref[T?], finished_note? : (T) -> String) -> @agent_tool.AgentToolDefinition
 
+pub let min_useful_subrun_steps : Int
+
 pub async fn[T] run_subrun(SubrunSpec[T], api_key~ : String, model~ : @deepseek.Model, thinking? : @deepseek.ThinkingMode, api_url? : String, workspace_root? : String, event_sink? : @emit.EventSink) -> SubrunResult[T]
 
 pub fn suppressing_sink() -> @emit.EventSink
@@ -19,6 +21,17 @@ pub fn suppressing_sink() -> @emit.EventSink
 // Errors
 
 // Types and methods
+pub struct SubrunBudget {
+  max_calls_per_turn : Int
+  max_steps_per_turn : Int
+  mut used_calls : Int
+  mut reserved_steps : Int
+}
+pub fn SubrunBudget::SubrunBudget(max_calls_per_turn? : Int, max_steps_per_turn? : Int) -> Self
+pub fn SubrunBudget::reconcile(Self, reserved~ : Int, used~ : Int) -> Unit
+pub fn SubrunBudget::reserve(Self, Int) -> Int?
+pub fn SubrunBudget::reset_turn(Self) -> Unit
+
 pub struct SubrunResult[T] {
   value : T?
   terminal : SubrunTerminal

@@ -123,6 +123,15 @@ Common `moon` subcommands:
   the STALE mooncakes.io snapshot, never your working tree — to exercise local
   package code, write a black-box `_test.mbt` and run `moon test <pkg> --filter`
   (above).
+- `explore` tool: delegate ONE self-contained question to a read-only scout
+  subagent when answering it yourself would mean reading MANY files or a
+  fan-out search — "where is X handled", "how does Y flow end to end", "what
+  does this package offer for Z" — and you want the cited conclusion, not the
+  file contents in your context. For a single direct lookup (one
+  `moon ide doc` query, one file read), do it yourself instead. The scout
+  cannot edit anything, returns file:line citations you can spot-check, and
+  shares a small per-turn budget (a few delegations per turn), so spend it on
+  questions that genuinely fan out.
 - shell `moon cram test`: durable CLI transcript tests under `tests/cram`;
   use `mooncram` blocks for stable help, examples, stdout/stderr, and exits.
   Example: `moon cram test tests/cram`.
