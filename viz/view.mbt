@@ -1758,13 +1758,13 @@ fn model_pair_tags(messages : Array[@deepseek.ChatMessage]) -> Map[String, Int] 
 ///|
 /// DOM anchor id for a tool call, keyed by pair number.
 fn tool_call_anchor(n : Int) -> String {
-  "tool-call-\{n}"
+  "\{anchor_namespace.val}tool-call-\{n}"
 }
 
 ///|
 /// DOM anchor id for a tool result, keyed by pair number.
 fn tool_result_anchor(n : Int) -> String {
-  "tool-result-\{n}"
+  "\{anchor_namespace.val}tool-result-\{n}"
 }
 
 ///|
@@ -2044,7 +2044,7 @@ fn card(
 ///|
 /// DOM anchor id for the card of the event with durable sequence `seq`.
 fn seq_anchor(seq : Int) -> String {
-  "seq-\{seq}"
+  "\{anchor_namespace.val}seq-\{seq}"
 }
 
 ///|
@@ -2173,10 +2173,64 @@ fn subrun_child_id(
 fn subrun_chip(child_id : String) -> @html.Html {
   @html.a(
     class="subrun-link",
-    href="#s=\{child_id}",
+    href="#s=\{encode_hash_component(child_id)}",
     title="Open the subagent's own transcript",
   ) <| "↳ subagent"
 }
+
+///|
+/// Percent-encode a value for a `#key=value` hash parameter. The reader is
+/// `URLSearchParams`, which decodes `%XX` and turns a bare `+` into a
+/// space — parent session ids are user-chosen and unrestricted, so
+/// everything outside the RFC 3986 unreserved set is encoded, UTF-8
+/// bytewise.
+fn encode_hash_component(value : String) -> String {
+  let hex = [
+    "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "A", "B", "C", "D", "E", "F",
+  ]
+  let out = StringBuilder()
+  fn put_byte(b : Int) -> Unit {
+    out <+ "%\{hex[b >> 4 & 0xF]}\{hex[b & 0xF]}"
+  }
+
+  for c in value {
+    let code = c.to_int()
+    if (code >= 0x61 && code <= 0x7A) ||
+      (code >= 0x41 && code <= 0x5A) ||
+      (code >= 0x30 && code <= 0x39) ||
+      code == 0x2D ||
+      code == 0x5F ||
+      code == 0x2E ||
+      code == 0x7E {
+      out <+ "\{c}"
+    } else if code < 0x80 {
+      put_byte(code)
+    } else if code < 0x800 {
+      put_byte(0xC0 | (code >> 6))
+      put_byte(0x80 | (code & 0x3F))
+    } else if code < 0x10000 {
+      put_byte(0xE0 | (code >> 12))
+      put_byte(0x80 | ((code >> 6) & 0x3F))
+      put_byte(0x80 | (code & 0x3F))
+    } else {
+      put_byte(0xF0 | (code >> 18))
+      put_byte(0x80 | ((code >> 12) & 0x3F))
+      put_byte(0x80 | ((code >> 6) & 0x3F))
+      put_byte(0x80 | (code & 0x3F))
+    }
+  }
+  out.to_string()
+}
+
+///|
+/// DOM-anchor namespace for the render in progress: empty at top level,
+/// `<child id>--` while a child transcript is being nested — WITHOUT it,
+/// a nested child would re-emit the parent's `seq-N`/`tool-call-N`/
+/// `tool-result-N` ids (duplicate DOM ids; in-child pair links resolving
+/// to parent elements). Rendering is pure and synchronous, and this
+/// package is single-threaded js, so a save/restore around the one
+/// nesting entry point (`subrun_transcript`) is race-free.
+let anchor_namespace : Ref[String] = { val: "" }
 
 ///|
 /// The inline child transcript for an expanded subrun card: the child's
@@ -2189,6 +2243,13 @@ fn subrun_transcript(child : @agent_session.Session) -> @html.Html {
     .iter()
     .count_if(event => event.item() is Assistant(_))
   let tools = child.events().iter().count_if(event => event.item() is Tool(_))
+  // Namespace every anchor the child render emits (and the pair links
+  // referencing them), so the nested transcript never duplicates the
+  // parent document's ids.
+  let saved = anchor_namespace.val
+  anchor_namespace.val = "\{child.id().value()}--"
+  let body = render_raw(child, { parent: child.id().value(), children: Map([]) })
+  anchor_namespace.val = saved
   @html.details(class="subrun-transcript") <| [
     @html.summary(class="subrun-transcript-label") <| [
       @html.text(
@@ -2196,7 +2257,7 @@ fn subrun_transcript(child : @agent_session.Session) -> @html.Html {
       ),
     ],
     @html.div(class="subrun-transcript-body") <| [
-      render_raw(child, { parent: child.id().value(), children: Map([]) }),
+      body,
     ],
   ]
 }

@@ -1379,3 +1379,42 @@ test "a subrun result links its child session and nests a loaded transcript" {
   // The prefetch scanner surfaces the same reference.
   assert_eq(@viz.subrun_child_ids(session, "run"), ["run-sr-2"])
 }
+
+///|
+test "nested transcripts namespace their anchors; chip hrefs are encoded" {
+  let session = subrun_sample_session()
+  let child = @agent_session.Session(
+      SessionId("run-sr-2"),
+      system_prompt="scout",
+    )
+    .append(User(UserMessage("q")))
+    .append(Terminal(Finished("submitted")))
+  let children : Map[String, @agent_session.Session] = Map([])
+  children.set("run-sr-2", child)
+  let nested = render(
+    @viz.render_session(session, RawLog, subrun_children=children),
+  )
+  // The child's cards anchor under its own namespace; the parent document
+  // keeps exactly one bare seq-1 (K3 review: duplicate DOM ids).
+  assert_true(nested.contains("id=\"run-sr-2--seq-1\""))
+  let bare = nested.split("id=\"seq-1\"").count() - 1
+  assert_eq(bare, 1)
+  // After the nested render, top-level anchors are back to bare form.
+  let again = render(@viz.render_session(session, RawLog))
+  assert_true(again.contains("id=\"seq-1\""))
+  assert_false(again.contains("--seq-"))
+  // A parent id outside the unreserved set is percent-encoded in the chip
+  // href (URLSearchParams would corrupt a raw '+', '&', or space).
+  let odd = @agent_session.Session(SessionId("a+b c"), system_prompt="").append(
+    Tool(
+      ToolResult(
+        tool_call_id="c9",
+        tool_name="explore",
+        content="ok",
+        brief="explore sr-4 (0 citation(s), 3 step(s))",
+      ),
+    ),
+  )
+  let html = render(@viz.render_session(odd, RawLog))
+  assert_true(html.contains("href=\"#s=a%2Bb%20c-sr-4\""))
+}
