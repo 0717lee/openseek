@@ -51,6 +51,7 @@ fn build_goal_met_gate(
   model~ : @deepseek.Model,
   api_url~ : String?,
   workspace_root~ : String,
+  child_session? : @agent_subrun.ChildSession,
 ) -> async (String, @agent_session.GoalBaseline?) -> String? {
   (goal, baseline) => {
     let args = [
@@ -79,6 +80,7 @@ fn build_goal_met_gate(
       kind="review",
       label=@agent_tool.brief_line(goal, limit=48),
       cwd=workspace_root,
+      child_session?,
     )
     match result.value() {
       Some(report) => Some(report.digest())

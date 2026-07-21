@@ -90,9 +90,12 @@ pub async fn run_goal_audit(
   thinking? : @deepseek.ThinkingMode = Max,
   api_url? : String,
   workspace_root? : String = ".",
+  session_id? : String = "goal-audit",
+  append_item? : async (@agent_session.Session, @agent_session.SessionItem) -> @agent_session.Session,
 ) -> ReviewReport? {
   @agent_subrun.execute_kind(
-    session_id="goal-audit",
+    session_id~,
+    append_item?,
     system_prompt=audit_system_prompt(),
     task=audit_task(goal, baseline),
     tools=captured => {

@@ -621,6 +621,18 @@ async fn run_serve(
     // itself lives across turns. The goal-met gate bypasses it.
     let subrun_budget = @agent_subrun.SubrunBudget()
     let exe = self_executable()
+    // A durable serve session makes its children durable siblings
+    // (`<id>-sr-N` in the same root); --no-session keeps them in-memory.
+    let child_session = match store {
+      Some(store) =>
+        Some(
+          @agent_subrun.ChildSession(
+            root=store.root(),
+            parent=initial_session.id().value(),
+          ),
+        )
+      None => None
+    }
     // The callable review tool audits against the LIVE standing goal: the
     // closure reads the loop-updated session at call time, never a
     // snapshot.
@@ -637,6 +649,7 @@ async fn run_serve(
           workspace_root~,
           budget=subrun_budget,
           api_url?,
+          child_session?,
         ),
         review_tool_definition(
           self_exe=exe,
@@ -645,13 +658,22 @@ async fn run_serve(
           budget=subrun_budget,
           context=review_context,
           api_url?,
+          child_session?,
         ),
       ]
     // The advisory goal-met gate (--review-gate): built once, shared by
     // every turn; engine-initiated, so it runs on its own allowance
     // rather than the model's per-turn subrun budget.
     let on_goal_met = if review_gate_enabled(matches) {
-      Some(build_goal_met_gate(self_exe=exe, model~, api_url~, workspace_root~))
+      Some(
+        build_goal_met_gate(
+          self_exe=exe,
+          model~,
+          api_url~,
+          workspace_root~,
+          child_session?,
+        ),
+      )
     } else {
       None
     }

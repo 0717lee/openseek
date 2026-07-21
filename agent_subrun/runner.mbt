@@ -39,6 +39,7 @@ pub struct SubrunResult[T] {
   steps_used : Int
   prompt_tokens : Int
   completion_tokens : Int
+  subrun_id : String
 } derive(Debug)
 
 ///|
@@ -67,6 +68,16 @@ pub fn[T] SubrunResult::prompt_tokens(self : SubrunResult[T]) -> Int {
 
 ///|
 /// Provider completion tokens the child consumed, summed over its requests.
+/// The runner-assigned sub-run id ("sr-N"): the same id the
+/// SubrunStarted/SubrunFinished brackets carried, and — when the child was
+/// launched with a `ChildSession` — the suffix of the child's durable
+/// session id.
+pub fn[T] SubrunResult::subrun_id(self : SubrunResult[T]) -> String {
+  self.subrun_id
+}
+
+///|
+/// Completion tokens summed from the child's observed usage events.
 pub fn[T] SubrunResult::completion_tokens(self : SubrunResult[T]) -> Int {
   self.completion_tokens
 }
@@ -154,9 +165,18 @@ pub async fn[T] run_subrun(
   kind~ : String,
   label~ : String,
   cwd? : String,
+  child_session? : ChildSession,
   emit_event? : (@protocol.Event) -> Unit = event => @emit.emit(event),
 ) -> SubrunResult[T] {
   let id = next_subrun_id()
+  // The child persists its own transcript under `<parent>-<id>` when the
+  // parent is durable: the id exists only after allocation, so the session
+  // argv is the runner's to append, not the caller's.
+  let args = match child_session {
+    Some(spec) =>
+      [..args, "--session", "\{spec.parent}-\{id}", "--session-root", spec.root]
+    None => args
+  }
   emit_event(
     SubrunStarted(id~, kind~, label=@agent_tool.brief_line(label, limit=72)),
   )
@@ -333,7 +353,28 @@ pub async fn[T] run_subrun(
     steps_used: observations.steps,
     prompt_tokens: observations.prompt_tokens,
     completion_tokens: observations.completion_tokens,
+    subrun_id: id,
   }
+}
+
+///|
+/// Where a child persists its own transcript: the parent's session root
+/// plus the parent's session id. The runner derives the child's session id
+/// as `<parent>-<subrun id>` — a sibling of the parent's session in the
+/// same root, so session tooling (the viewer, `openseek sessions`)
+/// discovers child transcripts with no extra plumbing.
+pub struct ChildSession {
+  root : String
+  parent : String
+}
+
+///|
+/// See `ChildSession`.
+pub fn ChildSession::ChildSession(
+  root~ : String,
+  parent~ : String,
+) -> ChildSession {
+  { root, parent }
 }
 
 ///|

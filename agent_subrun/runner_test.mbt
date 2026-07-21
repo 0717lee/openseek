@@ -381,3 +381,35 @@ async test "an observed context yield closes with its status" {
     fail("expected a context_yield pair, got \{to_repr(events)}")
   }
 }
+
+///|
+/// With a `ChildSession` the runner appends the child's durable-session
+/// argv AFTER allocating the sub-run id: the scripted child's positional
+/// view of its own argv pins both flag names and the `<parent>-<id>`
+/// derivation, and the result carries the same id.
+async test "child_session appends session argv derived from the sub-run id" {
+  let script =
+    #|read line
+    #|printf '{"subrun_report": {"answer": "%s %s %s %s"}}\n' "$0" "$1" "$2" "$3"
+  guard can_spawn_sh() else {
+    println("skipped: cannot spawn sh")
+    return
+  }
+  let result = @agent_subrun.run_subrun(
+    command="sh",
+    args=["-c", script],
+    input={ "query": "q" },
+    parse_report=parse_answer,
+    wall_deadline_ms=10_000,
+    kind="test-kind",
+    label="argv probe",
+    child_session=ChildSession(root="/tmp/subrun-root", parent="parent-id"),
+  )
+  guard result.value() is Some(argv) else {
+    fail("expected a captured report, got \{to_repr(result.terminal())}")
+  }
+  assert_eq(
+    argv,
+    "--session parent-id-\{result.subrun_id()} --session-root /tmp/subrun-root",
+  )
+}

@@ -14,6 +14,7 @@ fn review_tool_definition(
   budget~ : @agent_subrun.SubrunBudget,
   context~ : () -> (String?, @agent_session.GoalBaseline?),
   api_url? : String,
+  child_session? : @agent_subrun.ChildSession,
 ) -> @agent_tool.AgentToolDefinition {
   AgentToolDefinition(
     name="review",
@@ -29,7 +30,8 @@ fn review_tool_definition(
     }),
     execute=Async(arguments => {
       execute_review(
-        self_exe, model, workspace_root, budget, context, api_url, arguments,
+        self_exe, model, workspace_root, budget, context, api_url, child_session,
+        arguments,
       )
     }),
   )
@@ -43,6 +45,7 @@ async fn execute_review(
   budget : @agent_subrun.SubrunBudget,
   context : () -> (String?, @agent_session.GoalBaseline?),
   api_url : String?,
+  child_session : @agent_subrun.ChildSession?,
   arguments : Json,
 ) -> @agent_tool.ToolAction {
   let focus : String? = match arguments {
@@ -95,20 +98,24 @@ async fn execute_review(
     kind="review",
     label=@agent_tool.brief_line(criteria, limit=48),
     cwd=workspace_root,
+    child_session?,
   )
+  // The sub-run id in the brief pairs the result with its lifecycle
+  // brackets and names the child's sibling session for the viewer.
+  // Display-only: the model never sees briefs.
   match result.value() {
     Some(report) =>
       @agent_tool.ToolAction::respond(
         report.digest(),
         is_error=report.findings.filter(f => f.severity == "blocker").length() >
           0,
-        brief="review (\{report.findings.length()} finding(s), \{result.steps_used()} step(s))",
+        brief="review \{result.subrun_id()} (\{report.findings.length()} finding(s), \{result.steps_used()} step(s))",
       )
     None =>
       @agent_tool.ToolAction::respond(
         "review produced no report (\{@agent_tool.brief_line("\{to_repr(result.terminal())}", limit=200)}) — validate directly instead.",
         is_error=true,
-        brief="review (no report)",
+        brief="review \{result.subrun_id()} (no report)",
       )
   }
 }

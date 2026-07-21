@@ -44,6 +44,7 @@ pub fn definition(
   workspace_root~ : String,
   budget~ : @agent_subrun.SubrunBudget,
   api_url? : String,
+  child_session? : @agent_subrun.ChildSession,
 ) -> @agent_tool.AgentToolDefinition {
   @agent_tool.AgentToolDefinition(
     name="explore",
@@ -63,7 +64,9 @@ pub fn definition(
       "required": ["query"],
     }),
     execute=Async(arguments => {
-      execute(self_exe, model, workspace_root, budget, api_url, arguments)
+      execute(
+        self_exe, model, workspace_root, budget, api_url, child_session, arguments,
+      )
     }),
   )
 }
@@ -75,6 +78,7 @@ async fn execute(
   workspace_root : String,
   budget : @agent_subrun.SubrunBudget,
   api_url : String?,
+  child_session : @agent_subrun.ChildSession?,
   arguments : Json,
 ) -> @agent_tool.ToolAction {
   guard arguments is { "query": String(query), .. } && query.trim() != "" else {
@@ -134,21 +138,26 @@ async fn execute(
     kind="explore",
     label=@agent_tool.brief_line(query, limit=48),
     cwd=workspace_root,
+    child_session?,
   )
   // On external cancellation run_subrun re-raises before this line: the
   // reservation stays debited for the rest of the turn — deliberately
   // conservative, since the dead child's true spend is unknown.
+  // The sub-run id in the brief pairs the result with its lifecycle
+  // brackets — and, when the child persisted a transcript, names the
+  // sibling session the viewer links to. Display-only: the model never
+  // sees briefs.
   match result.value() {
     Some(report) =>
       @agent_tool.ToolAction::respond(
         render_report(report),
-        brief="explore (\{report.citations.length()} citation(s), \{result.steps_used()} step(s))",
+        brief="explore \{result.subrun_id()} (\{report.citations.length()} citation(s), \{result.steps_used()} step(s))",
       )
     None =>
       @agent_tool.ToolAction::respond(
         "explore produced no report (\{to_repr(result.terminal())}) — fall back to reading directly.",
         is_error=true,
-        brief="explore (no report)",
+        brief="explore \{result.subrun_id()} (no report)",
       )
   }
 }
@@ -185,6 +194,8 @@ pub async fn run_child(
   thinking? : @deepseek.ThinkingMode = Max,
   api_url? : String,
   workspace_root? : String = ".",
+  session_id? : String = "explore",
+  append_item? : async (@agent_session.Session, @agent_session.SessionItem) -> @agent_session.Session,
 ) -> ExploreReport? {
   guard input is { "query": String(query), .. } && query.trim() != "" else {
     return None
@@ -194,7 +205,8 @@ pub async fn run_child(
     _ => None
   }
   @agent_subrun.execute_kind(
-    session_id="explore",
+    session_id~,
+    append_item?,
     system_prompt=explore_system_prompt(),
     task=explore_task(query, hints),
     tools=captured => {

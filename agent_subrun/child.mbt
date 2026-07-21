@@ -23,6 +23,7 @@ pub async fn[T] execute_kind(
   thinking? : @deepseek.ThinkingMode = Max,
   api_url? : String,
   workspace_root? : String = ".",
+  append_item? : async (@agent_session.Session, @agent_session.SessionItem) -> @agent_session.Session,
 ) -> T? {
   let captured : Ref[T?] = { val: None }
   let tools = tools(captured)
@@ -30,6 +31,13 @@ pub async fn[T] execute_kind(
     @agent_session.SessionId(session_id),
     system_prompt~,
   )
+  // Default: the transcript lives and dies with this process. A caller
+  // wires a store-backed append (the `subrun` child mode when the parent
+  // is durable) to make the child's transcript a first-class session.
+  let append = match append_item {
+    Some(append) => append
+    None => (session, item) => session.append(item)
+  }
   let _ : @agent_session.Session = @async.with_task_group() <| group => {
     @agent.run_turn_in_scope(
       runtime=@agent_runtime.AgentRuntime(workspace_root~),
@@ -38,7 +46,7 @@ pub async fn[T] execute_kind(
       model~,
       session~,
       task~,
-      append_item=(session, item) => session.append(item),
+      append_item=append,
       max_steps~,
       thinking~,
       api_url?,

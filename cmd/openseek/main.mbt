@@ -155,6 +155,8 @@ async fn run_task_command(matches : @argparse.Matches) -> Unit {
           SessionId("one-shot"),
           system_prompt=system_prompt_text,
         )
+        // Ephemeral parent: children keep their transcripts in-memory too —
+        // a sibling session of a parent that never persisted would dangle.
         run_task_turn(
           matches,
           session,
@@ -198,6 +200,7 @@ async fn run_task_command(matches : @argparse.Matches) -> Unit {
           thinking~,
           api_url?,
           workspace_root~,
+          child_session=ChildSession(root=store.root(), parent=id.value()),
         )
       }
     }
@@ -220,6 +223,7 @@ async fn run_task_turn(
   thinking~ : @deepseek.ThinkingMode,
   api_url? : String,
   workspace_root~ : String,
+  child_session? : @agent_subrun.ChildSession,
 ) -> Unit {
   @async.with_task_group() <| group => {
     let runtime = @agent_runtime.AgentRuntime(workspace_root~)
@@ -245,6 +249,7 @@ async fn run_task_turn(
           workspace_root~,
           budget=subrun_budget,
           api_url?,
+          child_session?,
         ),
         review_tool_definition(
           self_exe=exe,
@@ -253,11 +258,20 @@ async fn run_task_turn(
           budget=subrun_budget,
           context=review_context,
           api_url?,
+          child_session?,
         ),
       ]
     let tools = @agent.build_tools(runtime, scope, extra_tools~)
     let on_goal_met = if review_gate_enabled(matches) {
-      Some(build_goal_met_gate(self_exe=exe, model~, api_url~, workspace_root~))
+      Some(
+        build_goal_met_gate(
+          self_exe=exe,
+          model~,
+          api_url~,
+          workspace_root~,
+          child_session?,
+        ),
+      )
     } else {
       None
     }

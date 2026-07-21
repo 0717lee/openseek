@@ -244,3 +244,55 @@ async test "a capture at the context ceiling is salvaged" {
     )
   }
 }
+
+///|
+/// `append_item` makes the child's transcript durable: with a store-backed
+/// append the session file materializes as the turn runs, holding the same
+/// items an in-memory child accumulates — system prompt, task, tool
+/// round-trip, terminal.
+async test "a store-backed append_item persists the child transcript" {
+  @async.with_task_group() <| group => {
+    let handle : (Json) -> MockReply raise = _request => {
+      Sse(
+        sse_tool_calls(
+          [("call_1", "submit", "{\"answer\": \"persisted\"}")],
+          100_000,
+        ),
+      )
+    }
+    guard child_test_server(group, handle) is Some(url) else { return }
+    let store = @store.SessionStore(@fs.tmpdir(prefix="openseek-subrun-child-"))
+    let value = @agent_subrun.execute_kind(
+      session_id="parent-sr-1",
+      system_prompt="You are a test subagent.",
+      task="Answer via the submit tool.",
+      tools=captured => {
+        @agent_tool.Tools([
+          @agent_subrun.capture_tool(
+            name="submit",
+            description="Submit the final answer.",
+            schema=JsonSchema({ "type": "object" }),
+            parse=args => {
+              match args {
+                { "answer": String(answer), .. } => Ok(answer)
+                _ => Err(["answer must be a string"])
+              }
+            },
+            captured,
+          ),
+        ])
+      },
+      max_steps=8,
+      api_key="test-key",
+      model=Deepseek(V4Flash),
+      api_url=url,
+      append_item=(session, item) => store.append(session, item),
+    )
+    assert_true(value is Some("persisted"))
+    let loaded = store.load(@agent_session.SessionId("parent-sr-1"))
+    assert_eq(loaded.system_prompt(), "You are a test subagent.")
+    // The durable transcript holds the whole turn, not just a header.
+    assert_true(loaded.events().length() >= 3)
+    @fs.rmdir(store.root(), recursive=true)
+  }
+}

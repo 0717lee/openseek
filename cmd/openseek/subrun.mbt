@@ -85,6 +85,21 @@ async fn run_subrun_command(matches : @argparse.Matches) -> Unit {
 }
 
 ///|
+/// The child's durable-session target, when the parent passed one: the
+/// `--session` id (blank means none, the same reading the parent CLIs use)
+/// paired with the resolved `--session-root`.
+fn child_durable_session(
+  matches : @argparse.Matches,
+  workspace_root~ : String,
+) -> (String, String)? raise {
+  match matches {
+    { values: { "session": [session, ..], .. }, .. } if session.trim() != "" =>
+      Some(("\{session}", session_root(matches, workspace_root~)))
+    _ => None
+  }
+}
+
+///|
 /// Run one kind in this process and return its report, if any.
 async fn dispatch_kind(
   kind : String,
@@ -95,6 +110,17 @@ async fn dispatch_kind(
   api_url : String?,
   workspace_root : String,
 ) -> Json? {
+  // A durable parent passes `--session <parent>-<sr-id> --session-root`
+  // (appended by the runner): this child then persists its own transcript
+  // as a sibling session — inspectable, linkable, and crash-honest, since
+  // items append as the turn runs. Without the flags the transcript stays
+  // in-memory, exactly as before.
+  let durable = child_durable_session(matches, workspace_root~)
+  let session_id = durable.map(pair => pair.0)
+  let append_item = durable.map(pair => {
+    let store = @store.SessionStore(pair.1)
+    (session, item) => store.append(session, item)
+  })
   match kind {
     "explore" => {
       let api_key = @agentcli.api_key(matches, model)
@@ -108,6 +134,8 @@ async fn dispatch_kind(
         thinking~,
         api_url?,
         workspace_root~,
+        session_id?,
+        append_item?,
       )
       report.map(report => report.to_json())
     }
@@ -135,6 +163,8 @@ async fn dispatch_kind(
         thinking~,
         api_url?,
         workspace_root~,
+        session_id?,
+        append_item?,
       )
       report.map(report => report.to_json())
     }

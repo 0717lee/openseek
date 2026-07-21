@@ -2,6 +2,7 @@
 package "bobzhang/openseek/agent_subrun"
 
 import {
+  "bobzhang/openseek/agent_session",
   "bobzhang/openseek/agent_tool",
   "bobzhang/openseek/deepseek",
   "bobzhang/openseek_protocol",
@@ -14,7 +15,7 @@ pub let cancel_grace_ms : Int
 
 pub fn[T] capture_tool(name~ : String, description~ : String, schema~ : @agent_tool.JsonSchema, parse~ : (Json) -> Result[T, Array[String]], @ref.Ref[T?], finished_note? : (T) -> String) -> @agent_tool.AgentToolDefinition
 
-pub async fn[T] execute_kind(session_id~ : String, system_prompt~ : String, task~ : String, tools~ : (@ref.Ref[T?]) -> @agent_tool.Tools raise, max_steps~ : Int, api_key~ : String, model~ : @deepseek.Model, thinking? : @deepseek.ThinkingMode, api_url? : String, workspace_root? : String) -> T?
+pub async fn[T] execute_kind(session_id~ : String, system_prompt~ : String, task~ : String, tools~ : (@ref.Ref[T?]) -> @agent_tool.Tools raise, max_steps~ : Int, api_key~ : String, model~ : @deepseek.Model, thinking? : @deepseek.ThinkingMode, api_url? : String, workspace_root? : String, append_item? : async (@agent_session.Session, @agent_session.SessionItem) -> @agent_session.Session) -> T?
 
 pub let min_useful_subrun_steps : Int
 
@@ -22,11 +23,17 @@ pub fn parse_report_line(Json) -> Json?
 
 pub fn report_line(Json) -> String
 
-pub async fn[T] run_subrun(command~ : String, args~ : Array[String], input~ : Json, parse_report~ : (Json) -> Result[T, String], wall_deadline_ms~ : Int, kind~ : String, label~ : String, cwd? : String, emit_event? : (@openseek_protocol.Event) -> Unit) -> SubrunResult[T]
+pub async fn[T] run_subrun(command~ : String, args~ : Array[String], input~ : Json, parse_report~ : (Json) -> Result[T, String], wall_deadline_ms~ : Int, kind~ : String, label~ : String, cwd? : String, child_session? : ChildSession, emit_event? : (@openseek_protocol.Event) -> Unit) -> SubrunResult[T]
 
 // Errors
 
 // Types and methods
+pub struct ChildSession {
+  root : String
+  parent : String
+}
+pub fn ChildSession::ChildSession(root~ : String, parent~ : String) -> Self
+
 pub struct SubrunBudget {
   max_calls_per_turn : Int
   mut used_calls : Int
@@ -41,10 +48,12 @@ pub struct SubrunResult[T] {
   steps_used : Int
   prompt_tokens : Int
   completion_tokens : Int
+  subrun_id : String
 } derive(@debug.Debug)
 pub fn[T] SubrunResult::completion_tokens(Self[T]) -> Int
 pub fn[T] SubrunResult::prompt_tokens(Self[T]) -> Int
 pub fn[T] SubrunResult::steps_used(Self[T]) -> Int
+pub fn[T] SubrunResult::subrun_id(Self[T]) -> String
 pub fn[T] SubrunResult::terminal(Self[T]) -> SubrunTerminal
 pub fn[T] SubrunResult::value(Self[T]) -> T?
 
