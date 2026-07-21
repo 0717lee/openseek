@@ -1,12 +1,10 @@
 import {
-  "bobzhang/openseek/agent",
-  "bobzhang/openseek/agent_runtime",
-  "bobzhang/openseek/agent_session",
+  "bobzhang/openseek/agent_subrun",
   "bobzhang/openseek/agent_tool",
   "bobzhang/openseek/agent_tool/read",
   "bobzhang/openseek/agent_tool/shell",
   "bobzhang/openseek/deepseek",
-  "moonbitlang/async",
+  "bobzhang/openseek_protocol/emit",
   "moonbitlang/core/json",
 }
 

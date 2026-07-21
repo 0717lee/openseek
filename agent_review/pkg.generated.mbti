@@ -10,6 +10,8 @@ import {
 // Values
 pub let current_schema_version : Int
 
+pub let default_review_max_steps : Int
+
 pub async fn run_review(String, @deepseek.Model, String, workspace_root? : String, max_steps? : Int, thinking? : @deepseek.ThinkingMode, api_url? : String) -> ReviewReport
 
 pub fn severities() -> Array[String]
