@@ -258,6 +258,13 @@ fn moon_new_target(
 /// `moon new --name main <dir-with-loose-source>`). A genuinely new or empty
 /// target has nothing to clobber and stays trusted; an unsafe or undeterminable
 /// target is reported so the caller re-applies the source-write sandbox.
+///
+/// This is a best-effort, good-will-agent guard: it catches an honest `moon new`
+/// aimed at an existing directory. The target is resolved lexically against the
+/// parsed cwd, so an agent deliberately defeating it (symlink tricks, a
+/// preceding `cd`, or a chain that repopulates the target between this check and
+/// launch) could still slip through — hard, race-free containment is the planned
+/// wasm backend's job.
 async fn parse_scaffolds_unsafe_target(
   parsed : @shell_parse.ParseResult,
   base_cwd : String,
@@ -277,7 +284,12 @@ async fn parse_scaffolds_unsafe_target(
       None => return true
       Some(target) =>
         if @fs.exists(target) {
-          let entries = @fs.readdir(target) catch { _ => return true }
+          let entries = @fs.readdir(target) catch {
+            // A cancellation must abort the launch, not be turned into a
+            // "treat as unsafe" verdict that lets setup continue.
+            error if @async.is_being_cancelled() => raise error
+            _ => return true
+          }
           if entries.length() > 0 {
             return true
           }
