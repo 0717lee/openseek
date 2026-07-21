@@ -29,6 +29,7 @@ Commands:
   serve     Session server: read JSONL commands (prompt/steer/cancel/compact/goal) from stdin.
   mcp       List configured MCP servers and the tools they expose.
   review    Read-only code review of base...HEAD; prints a JSON ReviewReport.
+  subrun    INTERNAL: run one subagent kind as a child of this engine (input JSON on stdin; stdin EOF cancels).
   sessions  Manage durable sessions.
 
 Options:
