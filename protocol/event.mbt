@@ -82,8 +82,11 @@ pub(all) enum Event {
   /// its finish; `kind` names the surface ("review", "explore"); `label` is
   /// a short, bounded display string — never the raw query or prompt.
   SubrunStarted(id~ : String, kind~ : String, label~ : String)
-  /// The paired completion — emitted on success, failure, AND cancellation,
-  /// so a reader never shows a sub-run as running forever. `status` is the
+  /// The paired completion. The emitter's contract (the sub-run runner —
+  /// wire-first: this variant ships ahead of it): emit on success, failure,
+  /// AND cancellation, and BEFORE the parent turn's own terminal event (the
+  /// TUI's stale-run guard drops run-tagged events after a terminal), so a
+  /// reader never shows a sub-run as running forever. `status` is the
   /// sub-run terminal in snake_case ("captured", "no_report", "max_steps",
   /// "context_yield", "timed_out", "failed", "cancelled"); `steps` and the
   /// token counts are the child's actual spend, for cost attribution.
