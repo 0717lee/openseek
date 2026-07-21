@@ -29,7 +29,9 @@ pub let max_hints_chars : Int = 2_000
 /// the report's derived JSON codecs cannot drift) invoked as
 /// `subrun explore`. The child's toolset is `read`,
 /// `shell(read_only=true)` (its instrument for `moon ide doc` and friends),
-/// and `submit_answer` — no edit tools, no nested subagent tools. The
+/// `run_moonbit` (run a self-contained snippet to check language/stdlib
+/// behavior), and `submit_answer` — no edit tools, no nested subagent
+/// tools. The
 /// child inherits the environment for its API key; model and endpoint ride
 /// argv. Launching consumes one slot of the shared per-turn `SubrunBudget`
 /// call allowance BEFORE the child exists; the child runs at its full step
@@ -201,6 +203,7 @@ pub async fn run_child(
       @agent_tool.Tools([
         @read.definition(workspace_root~),
         @shell.definition(workspace_root~, read_only=true),
+        @run_moonbit.definition(workspace_root~),
         submit_answer_tool(captured),
       ])
     },

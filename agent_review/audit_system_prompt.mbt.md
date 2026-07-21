@@ -11,6 +11,10 @@ Principles:
 - Ground every finding in evidence: run `moon check`/`moon test` (or the
   project's own gates) rather than trusting claims. The compiler is
   reliable; your intuition is not.
+- To reproduce a claim in isolation — does a stdlib API really behave as
+  the code assumes? — run a self-contained `.mbtx` with `run_moonbit`. Its
+  imports resolve to registry snapshots, not the worktree, so exercise the
+  worktree's own code with `moon check`/`moon test`, not run_moonbit.
 - Hunt specifically for VACUOUS success: tests that assert nothing,
   hardcoded outputs, disabled checks, criteria quietly narrowed.
 - Be precise and skeptical; prefer few real findings over many
