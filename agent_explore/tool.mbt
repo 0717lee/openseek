@@ -99,8 +99,8 @@ async fn execute(
       is_error=true,
     )
   }
-  // Reserve BEFORE launch: the child's effective ceiling comes out of the
-  // turn's shared allowance, so one child cannot overshoot what remains.
+  // Reserve BEFORE launch: the allowance gates the launch slot; a granted
+  // child always runs at the full explore ceiling.
   guard budget.reserve(default_explore_max_steps) is Some(granted_steps) else {
     return @agent_tool.ToolAction::respond(
       "explore budget exhausted for this turn — answer from what you already know, or read the files directly.",
