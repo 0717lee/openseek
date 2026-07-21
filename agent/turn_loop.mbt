@@ -735,8 +735,10 @@ async fn AgentLoop::close_skipped_tool_calls(
 /// running budget stopped execution mid-batch — calls before it already
 /// executed and have results (their growth arrives as
 /// `spent_result_chars`, so a salvaged completion still checkpoints).
-/// Control calls are exempt from the budget: their results are a few bytes
-/// of loop flow, not tool output.
+/// Control calls are exempt from the PRE-execution fit check (their
+/// results are bounded by contract), but a non-sealing control's recorded
+/// result still accumulates into the running total, so a later sealing
+/// control sizes its checkpoint against what was actually appended.
 async fn AgentLoop::salvage_control_calls_at_ceiling(
   self : Self,
   session : @agent_session.Session,
@@ -753,7 +755,7 @@ async fn AgentLoop::salvage_control_calls_at_ceiling(
   }) else {
     return None
   }
-  let session = for index = from, session = session {
+  let session = for index = from, session = session, spent = spent_result_chars {
     if index >= response.tool_calls.length() {
       break session
     }
@@ -773,10 +775,23 @@ async fn AgentLoop::salvage_control_calls_at_ceiling(
               index,
               call,
               tool_call,
-              spent_result_chars~,
+              spent_result_chars=spent,
               last_step~,
             ) {
-            ContinueToolBatch(next) => continue index + 1, next
+            // A non-sealing control appended an ordinary result (a goal
+            // verdict echo, a rejected submit): its growth must ride along
+            // like an executed prefix's, or a LATER sealing control would
+            // size its compact-on-finish decision against stale usage
+            // while the reserved checkpoint headroom is already spent.
+            ContinueToolBatch(next) => {
+              let growth = if next.events().peek() is Some(event) &&
+                event.item() is Tool(result) {
+                result.content().length().to_int64()
+              } else {
+                0
+              }
+              continue index + 1, next, spent + growth
+            }
             // The control already closed the batch remainder and prepared a
             // continuation (e.g. a control finish converted into a goal
             // check): re-scanning the same calls would duplicate results
@@ -798,7 +813,8 @@ async fn AgentLoop::salvage_control_calls_at_ceiling(
         session,
         response.tool_calls[index:index + 1],
         note=ceiling_skip_note,
-      )
+      ),
+      spent
   }
   // Controls ran but none sealed or continued the turn: every call is
   // closed (executed or skip-noted), so yield at the ceiling with the
