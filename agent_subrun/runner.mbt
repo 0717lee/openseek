@@ -155,107 +155,122 @@ pub async fn[T] run_subrun(
     garbled_report: None,
   }
   let mut timed_out = false
-  @async.with_task_group() <| group => {
-    let (child_stdin, stdin_writer) = @process.write_to_process() catch {
-      error if @async.is_being_cancelled() => raise error
-      error => {
-        observations.failure = Some("subrun pipes unavailable: \{error}")
-        return
-      }
-    }
-    let (stdout_reader, child_stdout) = @process.read_from_process() catch {
-      error if @async.is_being_cancelled() => {
-        stdin_writer.close()
-        raise error
-      }
-      error => {
-        stdin_writer.close()
-        observations.failure = Some("subrun pipes unavailable: \{error}")
-        return
-      }
-    }
-    // `no_wait`: the group terminates the child at teardown rather than
-    // waiting for an exit that may only come once its stdin is closed.
-    let process = @process.spawn(
-      group,
-      command,
-      args,
-      inherit_env=true,
-      stdin=child_stdin,
-      stdout=child_stdout,
-      cwd?=cwd.map(dir => dir.view()),
-      no_wait=true,
-    ) catch {
-      error if @async.is_being_cancelled() => {
-        stdout_reader.close()
-        stdin_writer.close()
-        raise error
-      }
-      error => {
-        stdout_reader.close()
-        stdin_writer.close()
-        observations.failure = Some("subrun spawn failed: \{error}")
-        return
-      }
-    }
-    async fn drain() -> Unit {
-      while stdout_reader.read_until("\n") is Some(line) {
-        observations.observe(line)
-      }
-    }
-    async fn feed_and_drain() -> Unit {
-      // One input line; the pipe stays open — EOF is the cancel signal, not
-      // the end of input. The write sits INSIDE the deadline scope: an input
-      // larger than the pipe capacity against a child that never reads must
-      // hit the wall deadline, not block forever (review finding).
-      stdin_writer.write("\{input.stringify()}\n")
-      drain()
-    }
-    try {
-      match @async.with_timeout_opt(wall_deadline_ms, feed_and_drain) {
-        Some(_) =>
-          // Clean EOF: the child closed stdout. Read its exit status — a
-          // crash-class failure (panic, signal, nonzero exit) emits no
-          // failure event, and without this the runner is structurally
-          // blind to it and would misclassify the run as NoReport. Bounded:
-          // a child that closed stdout but lingers falls through to the
-          // cancel below.
-          match @async.with_timeout_opt(2_000, () => process.wait()) {
-            Some(code) if code != 0 &&
-              observations.report is None &&
-              observations.failure is None =>
-              observations.failure = Some("subrun exited \{code}")
-            _ => ()
-          }
-        None => {
-          // Deadline: graceful cancel first — close stdin, let the child
-          // flush; a report arriving in the grace window still counts.
-          timed_out = true
-          stdin_writer.close()
-          let _ = @async.with_timeout_opt(cancel_grace_ms, drain)
+  // The group call is itself fold-guarded: a spawn failure can surface
+  // ASYNCHRONOUSLY (the spawn's internal reaper task raising at group
+  // exit, e.g. EAGAIN under fork pressure), bypassing the per-call
+  // catches inside. Cancellation still re-raises; anything else becomes
+  // a Failed terminal — a loaded machine must degrade the sub-run, never
+  // crash the parent's turn.
+  try
+    @async.with_task_group() <| group => {
+      let (child_stdin, stdin_writer) = @process.write_to_process() catch {
+        error if @async.is_being_cancelled() => raise error
+        error => {
+          observations.failure = Some("subrun pipes unavailable: \{error}")
+          return
         }
       }
-    } catch {
-      error => {
-        // External cancellation (or a pipe failure): tear the child down and
-        // re-raise cancellation; fold anything else into the terminal.
-        @async.protect_from_cancel(() => {
-          stdout_reader.close()
+      let (stdout_reader, child_stdout) = @process.read_from_process() catch {
+        error if @async.is_being_cancelled() => {
           stdin_writer.close()
-          process.cancel()
-        })
-        if @async.is_being_cancelled() {
           raise error
         }
-        if observations.failure is None {
-          observations.failure = Some("subrun stream failed: \{error}")
+        error => {
+          stdin_writer.close()
+          observations.failure = Some("subrun pipes unavailable: \{error}")
+          return
         }
-        return
       }
+      // `no_wait`: the group terminates the child at teardown rather than
+      // waiting for an exit that may only come once its stdin is closed.
+      let process = @process.spawn(
+        group,
+        command,
+        args,
+        inherit_env=true,
+        stdin=child_stdin,
+        stdout=child_stdout,
+        cwd?=cwd.map(dir => dir.view()),
+        no_wait=true,
+      ) catch {
+        error if @async.is_being_cancelled() => {
+          stdout_reader.close()
+          stdin_writer.close()
+          raise error
+        }
+        error => {
+          stdout_reader.close()
+          stdin_writer.close()
+          observations.failure = Some("subrun spawn failed: \{error}")
+          return
+        }
+      }
+      async fn drain() -> Unit {
+        while stdout_reader.read_until("\n") is Some(line) {
+          observations.observe(line)
+        }
+      }
+      async fn feed_and_drain() -> Unit {
+        // One input line; the pipe stays open — EOF is the cancel signal, not
+        // the end of input. The write sits INSIDE the deadline scope: an input
+        // larger than the pipe capacity against a child that never reads must
+        // hit the wall deadline, not block forever (review finding).
+        stdin_writer.write("\{input.stringify()}\n")
+        drain()
+      }
+      try {
+        match @async.with_timeout_opt(wall_deadline_ms, feed_and_drain) {
+          Some(_) =>
+            // Clean EOF: the child closed stdout. Read its exit status — a
+            // crash-class failure (panic, signal, nonzero exit) emits no
+            // failure event, and without this the runner is structurally
+            // blind to it and would misclassify the run as NoReport. Bounded:
+            // a child that closed stdout but lingers falls through to the
+            // cancel below.
+            match @async.with_timeout_opt(2_000, () => process.wait()) {
+              Some(code) if code != 0 &&
+                observations.report is None &&
+                observations.failure is None =>
+                observations.failure = Some("subrun exited \{code}")
+              _ => ()
+            }
+          None => {
+            // Deadline: graceful cancel first — close stdin, let the child
+            // flush; a report arriving in the grace window still counts.
+            timed_out = true
+            stdin_writer.close()
+            let _ = @async.with_timeout_opt(cancel_grace_ms, drain)
+          }
+        }
+      } catch {
+        error => {
+          // External cancellation (or a pipe failure): tear the child down and
+          // re-raise cancellation; fold anything else into the terminal.
+          @async.protect_from_cancel(() => {
+            stdout_reader.close()
+            stdin_writer.close()
+            process.cancel()
+          })
+          if @async.is_being_cancelled() {
+            raise error
+          }
+          if observations.failure is None {
+            observations.failure = Some("subrun stream failed: \{error}")
+          }
+          return
+        }
+      }
+      stdout_reader.close()
+      stdin_writer.close()
+      process.cancel()
     }
-    stdout_reader.close()
-    stdin_writer.close()
-    process.cancel()
+  catch {
+    error if @async.is_being_cancelled() || @async.is_cancellation_error(error) =>
+      raise error
+    error =>
+      if observations.failure is None {
+        observations.failure = Some("subrun runner failed: \{error}")
+      }
   }
   let value : T? = match observations.report {
     Some(report) =>

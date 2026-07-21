@@ -34,7 +34,9 @@ async fn can_spawn_sh() -> Bool {
   let script =
     #|read line
     #|printf '{"subrun_report": {"answer": "probe"}}\n'
-  let result = run_script(script)
+  // The probe must never throw: under fork pressure (EAGAIN) or a
+  // spawn-hostile sandbox it reports false and the test skips.
+  let result = run_script(script) catch { _ => return false }
   result.value() is Some("probe")
 }
 
