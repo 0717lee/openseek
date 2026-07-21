@@ -136,14 +136,41 @@ fn ChildObservations::observe(self : ChildObservations, line : String) -> Unit {
 /// child `cancel_grace_ms` to flush and exit — a report that lands during
 /// the grace still counts — then terminates it. External cancellation of
 /// the caller re-raises after teardown; it is never folded into a terminal.
+///
+/// Lifecycle brackets: the runner emits `SubrunStarted{id, kind, label}`
+/// before anything else and a PAIRED `SubrunFinished{id, status, costs}` on
+/// every exit — success, failure, and cancellation (emitted before the
+/// re-raise) — so a reader never shows a sub-run as running forever. Both
+/// land during the parent's tool call, well before the parent turn's own
+/// terminal event, which the TUI's stale-run guard requires. `label` is
+/// display-bounded here defensively; `emit_event` is a test seam that
+/// defaults to the process log.
 pub async fn[T] run_subrun(
   command~ : String,
   args~ : Array[String],
   input~ : Json,
   parse_report~ : (Json) -> Result[T, String],
   wall_deadline_ms~ : Int,
+  kind~ : String,
+  label~ : String,
   cwd? : String,
+  emit_event? : (@protocol.Event) -> Unit = event => @emit.emit(event),
 ) -> SubrunResult[T] {
+  let id = next_subrun_id()
+  emit_event(
+    SubrunStarted(id~, kind~, label=@agent_tool.brief_line(label, limit=72)),
+  )
+  fn finished(status : String, observations : ChildObservations) -> Unit {
+    emit_event(
+      SubrunFinished(
+        id~,
+        status~,
+        steps=observations.steps,
+        prompt_tokens=observations.prompt_tokens,
+        completion_tokens=observations.completion_tokens,
+      ),
+    )
+  }
   let observations = ChildObservations::{
     steps: 0,
     prompt_tokens: 0,
@@ -265,8 +292,12 @@ pub async fn[T] run_subrun(
       process.cancel()
     }
   catch {
-    error if @async.is_being_cancelled() || @async.is_cancellation_error(error) =>
+    error if @async.is_being_cancelled() || @async.is_cancellation_error(error) => {
+      // The balanced finish bracket on the cancellation path: emitted
+      // BEFORE the re-raise, with whatever costs were observed.
+      finished("cancelled", observations)
       raise error
+    }
     error =>
       if observations.failure is None {
         observations.failure = Some("subrun runner failed: \{error}")
@@ -295,11 +326,37 @@ pub async fn[T] run_subrun(
         None => NoReport
       }
   }
+  finished(status_of(terminal), observations)
   {
     value,
     terminal,
     steps_used: observations.steps,
     prompt_tokens: observations.prompt_tokens,
     completion_tokens: observations.completion_tokens,
+  }
+}
+
+///|
+/// Per-process monotonic sub-run ids: unique within one engine's stream,
+/// which is all the pairing contract needs.
+let subrun_ids : Ref[Int] = { val: 0 }
+
+///|
+fn next_subrun_id() -> String {
+  subrun_ids.val += 1
+  "sr-\{subrun_ids.val}"
+}
+
+///|
+/// The wire status vocabulary for a terminal (the "cancelled" status has no
+/// terminal — cancellation re-raises — and is emitted at its catch site).
+fn status_of(terminal : SubrunTerminal) -> String {
+  match terminal {
+    Captured => "captured"
+    NoReport => "no_report"
+    MaxSteps => "max_steps"
+    ContextYield => "context_yield"
+    TimedOut => "timed_out"
+    Failed(_) => "failed"
   }
 }

@@ -4,6 +4,7 @@ package "bobzhang/openseek/agent_subrun"
 import {
   "bobzhang/openseek/agent_tool",
   "bobzhang/openseek/deepseek",
+  "bobzhang/openseek_protocol",
   "moonbitlang/core/debug",
   "moonbitlang/core/ref",
 }
@@ -21,7 +22,7 @@ pub fn parse_report_line(Json) -> Json?
 
 pub fn report_line(Json) -> String
 
-pub async fn[T] run_subrun(command~ : String, args~ : Array[String], input~ : Json, parse_report~ : (Json) -> Result[T, String], wall_deadline_ms~ : Int, cwd? : String) -> SubrunResult[T]
+pub async fn[T] run_subrun(command~ : String, args~ : Array[String], input~ : Json, parse_report~ : (Json) -> Result[T, String], wall_deadline_ms~ : Int, kind~ : String, label~ : String, cwd? : String, emit_event? : (@openseek_protocol.Event) -> Unit) -> SubrunResult[T]
 
 // Errors
 

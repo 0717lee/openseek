@@ -5,6 +5,7 @@ import {
   "bobzhang/openseek/agent_tool",
   "bobzhang/openseek/deepseek",
   "bobzhang/openseek_protocol" @protocol,
+  "bobzhang/openseek_protocol/emit",
   "moonbitlang/async",
   "moonbitlang/async/process",
   "moonbitlang/async/io",
@@ -13,6 +14,7 @@ import {
 
 import {
   "bobzhang/openseek/agent_tool",
+  "bobzhang/openseek_protocol" @protocol,
   "moonbitlang/async",
   "moonbitlang/async/http",
   "moonbitlang/async/socket",

@@ -126,6 +126,8 @@ async fn execute(
     input~,
     parse_report=parse_child_report,
     wall_deadline_ms=default_explore_deadline_ms,
+    kind="explore",
+    label=@agent_tool.brief_line(query, limit=48),
     cwd=workspace_root,
   )
   // On external cancellation run_subrun re-raises before this line: the

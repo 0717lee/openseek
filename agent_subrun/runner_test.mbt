@@ -15,6 +15,7 @@ fn parse_answer(json : Json) -> Result[String, String] {
 async fn run_script(
   script : String,
   wall_deadline_ms? : Int = 10_000,
+  emit_event? : (@protocol.Event) -> Unit,
 ) -> @agent_subrun.SubrunResult[String] {
   @agent_subrun.run_subrun(
     command="sh",
@@ -22,6 +23,9 @@ async fn run_script(
     input={ "query": "q" },
     parse_report=parse_answer,
     wall_deadline_ms~,
+    kind="test-kind",
+    label="scripted child",
+    emit_event?,
   )
 }
 
@@ -49,6 +53,8 @@ async test "a spawn failure folds into Failed" {
     input={ "query": "q" },
     parse_report=parse_answer,
     wall_deadline_ms=2_000,
+    kind="test-kind",
+    label="spawn failure",
   )
   guard result.terminal() is Failed(reason) else {
     // Some sandboxes surface spawn refusal as an immediate empty exit:
@@ -222,4 +228,121 @@ async test "a nonzero exit without a report is Failed by exit status" {
   let result = run_script(script)
   guard result.terminal() is Failed(reason) else { fail("expected Failed") }
   assert_true(reason.contains("exited 3"))
+}
+
+///|
+/// Collect the subrun bracket events one run emits, in order.
+fn bracket_collector(
+  into : Array[@protocol.Event],
+) -> (@protocol.Event) -> Unit {
+  event => {
+    match event {
+      SubrunStarted(..) | SubrunFinished(..) => into.push(event)
+      _ => ()
+    }
+  }
+}
+
+///|
+async test "a run emits a matched started/finished bracket pair" {
+  guard can_spawn_sh() else {
+    println("skipped: cannot spawn sh")
+    return
+  }
+  let script =
+    #|read line
+    #|printf '{"timestamp":"t","level":"INFO","source":"s","event":"agent_step","step":2}\n'
+    #|printf '{"timestamp":"t","level":"INFO","source":"s","event":"usage","usage":{"prompt_tokens":90,"completion_tokens":10,"total_tokens":100,"prompt_cache_hit_tokens":0,"prompt_cache_miss_tokens":90}}\n'
+    #|printf '{"subrun_report": {"answer": "forty-two"}}\n'
+  let events : Array[@protocol.Event] = []
+  let result = run_script(script, emit_event=bracket_collector(events))
+  debug_inspect(result.terminal(), content="Captured")
+  guard events
+    is [
+      SubrunStarted(id=started_id, kind="test-kind", label="scripted child"),
+      SubrunFinished(
+        id=finished_id,
+        status="captured",
+        steps=2,
+        prompt_tokens=90,
+        completion_tokens=10
+      ),
+    ] else {
+    fail("expected exactly one started/finished pair, got \{to_repr(events)}")
+  }
+  assert_eq(started_id, finished_id)
+}
+
+///|
+async test "a timed-out run still closes its bracket" {
+  guard can_spawn_sh() else {
+    println("skipped: cannot spawn sh")
+    return
+  }
+  let script =
+    #|read line
+    #|sleep 60
+  let events : Array[@protocol.Event] = []
+  let result = run_script(
+    script,
+    wall_deadline_ms=300,
+    emit_event=bracket_collector(events),
+  )
+  debug_inspect(result.terminal(), content="TimedOut")
+  guard events is [SubrunStarted(..), SubrunFinished(status="timed_out", ..)] else {
+    fail("expected a timed_out pair, got \{to_repr(events)}")
+  }
+}
+
+///|
+/// Cancellation must still close the bracket — emitted BEFORE the re-raise,
+/// so a reader never shows the sub-run as running forever.
+async test "external cancellation closes the bracket before re-raising" {
+  guard can_spawn_sh() else {
+    println("skipped: cannot spawn sh")
+    return
+  }
+  let script =
+    #|read line
+    #|sleep 60
+  let events : Array[@protocol.Event] = []
+  @async.with_task_group() <| group => {
+    let task = group.spawn(() => {
+      run_script(
+        script,
+        wall_deadline_ms=30_000,
+        emit_event=bracket_collector(events),
+      )
+    })
+    @async.sleep(300)
+    task.cancel()
+    let _ = Some(task.wait()) catch { _ => None }
+  }
+  guard events is [SubrunStarted(..), SubrunFinished(status="cancelled", ..)] else {
+    fail("expected a cancelled pair, got \{to_repr(events)}")
+  }
+}
+
+///|
+async test "sub-run ids are unique across runs" {
+  guard can_spawn_sh() else {
+    println("skipped: cannot spawn sh")
+    return
+  }
+  let script =
+    #|read line
+    #|printf '{"subrun_report": {"answer": "ok"}}\n'
+  let events : Array[@protocol.Event] = []
+  let _ = run_script(script, emit_event=bracket_collector(events))
+  let _ = run_script(script, emit_event=bracket_collector(events))
+  guard events
+    is [
+      SubrunStarted(id=first, ..),
+      SubrunFinished(..),
+      SubrunStarted(id=second, ..),
+      SubrunFinished(..),
+    ] else {
+    fail("expected two pairs, got \{to_repr(events)}")
+  }
+  assert_true(first != second)
 }
