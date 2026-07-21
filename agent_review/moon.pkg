@@ -8,4 +8,16 @@ import {
   "moonbitlang/core/json",
 }
 
+dev_build(
+  rule: "md_to_mbt_string",
+  input: "review_system_prompt.mbt.md",
+  output: "generated_review_system_prompt.mbt",
+)
+
+dev_build(
+  rule: "md_to_mbt_string",
+  input: "audit_system_prompt.mbt.md",
+  output: "generated_audit_system_prompt.mbt",
+)
+
 supported_targets = "+native"

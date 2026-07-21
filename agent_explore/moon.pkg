@@ -15,4 +15,10 @@ import {
   "moonbitlang/core/json",
 } for "test"
 
+dev_build(
+  rule: "md_to_mbt_string",
+  input: "explore_system_prompt.mbt.md",
+  output: "generated_explore_system_prompt.mbt",
+)
+
 supported_targets = "+native"
