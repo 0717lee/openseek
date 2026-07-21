@@ -31,8 +31,9 @@ pub let max_hints_chars : Int = 2_000
 /// `shell(read_only=true)` (its instrument for `moon ide doc` and friends),
 /// and `submit_answer` — no edit tools, no nested subagent tools. The
 /// child inherits the environment for its API key; model and endpoint ride
-/// argv. Its cost is reserved from the shared per-turn `SubrunBudget`
-/// BEFORE launch and reconciled after from the observed event stream.
+/// argv. Launching consumes one slot of the shared per-turn `SubrunBudget`
+/// call allowance BEFORE the child exists; the child runs at its full step
+/// ceiling.
 ///
 /// Failure is graceful by contract: a child that produces no report, times
 /// out, or exhausts the budget returns an is_error result telling the
@@ -137,7 +138,6 @@ async fn execute(
   // On external cancellation run_subrun re-raises before this line: the
   // reservation stays debited for the rest of the turn — deliberately
   // conservative, since the dead child's true spend is unknown.
-  budget.reconcile(reserved=granted_steps, used=result.steps_used())
   match result.value() {
     Some(report) =>
       @agent_tool.ToolAction::respond(

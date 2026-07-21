@@ -19,8 +19,10 @@ Layers:
   and a `capture_tool` submit channel — run by the `subrun` child mode, by
   the standalone review CLI (already its own process), and by unit tests
   (the full capture/retry/ceiling-salvage lifecycle needs no spawning).
-- `SubrunBudget`: the per-turn allowance shared by every subrun tool,
-  reserve-before-launch with post-run reconciliation.
+- `SubrunBudget`: the per-turn CALL allowance shared by model-initiated
+  subrun tools — a runaway backstop, reserved before launch; every granted
+  child runs at its kind's full step ceiling (engine-initiated subruns
+  like the goal-met gate bypass it).
 - `capture_tool`: parse/validate, reject-with-retry, capture +
   `Control(Finish)`, `control=true` so the loop's ceiling salvage honors a
   pending submission.

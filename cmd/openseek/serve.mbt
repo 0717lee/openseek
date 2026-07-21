@@ -616,8 +616,9 @@ async fn run_serve(
     // completion instead of leaving it queued until the next prompt.
     // Tools from any configured MCP servers, connected once per engine (their
     // reader/writer tasks live on this group) and reused across turns.
-    // The subrun budget is shared by every subrun tool and refills at each
-    // turn start (see start_turn) — the registry itself lives across turns.
+    // The subrun budget caps how many children the model may launch per
+    // turn and refills at each turn start (see start_turn) — the registry
+    // itself lives across turns. The goal-met gate bypasses it.
     let subrun_budget = @agent_subrun.SubrunBudget()
     let exe = self_executable()
     // The callable review tool audits against the LIVE standing goal: the

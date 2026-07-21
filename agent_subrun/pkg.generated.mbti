@@ -29,12 +29,9 @@ pub async fn[T] run_subrun(command~ : String, args~ : Array[String], input~ : Js
 // Types and methods
 pub struct SubrunBudget {
   max_calls_per_turn : Int
-  max_steps_per_turn : Int
   mut used_calls : Int
-  mut reserved_steps : Int
 }
-pub fn SubrunBudget::SubrunBudget(max_calls_per_turn? : Int, max_steps_per_turn? : Int) -> Self
-pub fn SubrunBudget::reconcile(Self, reserved~ : Int, used~ : Int) -> Unit
+pub fn SubrunBudget::SubrunBudget(max_calls_per_turn? : Int) -> Self
 pub fn SubrunBudget::reserve(Self, Int) -> Int?
 pub fn SubrunBudget::reset_turn(Self) -> Unit
 

@@ -40,7 +40,7 @@ fn parse_audit_report(
 /// only external cancellation re-raises (through run_subrun's own
 /// contract).
 ///
-/// The gate does NOT draw from the shared `SubrunBudget`: that pool
+/// The gate does NOT draw from the shared `SubrunBudget`: that allowance
 /// meters MODEL-initiated delegation, while the gate is engine-initiated
 /// and fires at most once per met claim. Sharing let a turn's explore
 /// calls starve the audit into an underpowered run that died at its step

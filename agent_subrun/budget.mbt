@@ -1,137 +1,86 @@
 ///|
-/// Below this many remaining steps a child cannot do useful work (read a few
-/// files and submit), so `reserve` refuses rather than launching a doomed
-/// run that burns its allowance on a truncated attempt.
+/// Below this many steps a child cannot do useful work (read a few files
+/// and submit), so `reserve` refuses the request rather than launching a
+/// doomed run. Requests come from per-kind constants, not the model — this
+/// floor is a guard against a miswired constant, and against a
+/// pathological negative request reaching a child's `--max-steps`.
 pub let min_useful_subrun_steps : Int = 8
 
 ///|
-/// The per-turn allowance shared by every MODEL-initiated subrun tool in a
-/// session (explore, callable review): one child must not be able to
-/// stretch a turn unboundedly, and the tools must not each carry a private
-/// quota that sums to one. Engine-initiated subruns (the goal-met gate)
-/// run on their own allowance instead — the model's delegation habits must
-/// not be able to starve the audit of its own met claim.
+/// The per-turn subrun call allowance shared by every MODEL-initiated
+/// subrun tool in a session (explore, callable review).
 ///
-/// The owner is the CLI layer: it creates one budget per session, passes it
-/// to every subrun tool definition, and calls `reset_turn` at each turn
-/// start. Enforcement is reserve-BEFORE-launch: the executor reserves the
-/// child's requested steps up front — deriving the child's effective
-/// `max_steps` from what remains — and `reconcile`s the unused part after
-/// the run. Debit-only-after-return would let one child overshoot the whole
-/// remaining allowance.
+/// This is a runaway backstop, not a cost scheduler. Each child is already
+/// individually bounded by its kind's step ceiling and wall deadline; what
+/// nothing else bounds is how many children one turn can launch — and goal
+/// runs execute unattended for hours, where a confused model in a
+/// delegation loop would otherwise spawn children indefinitely. A step
+/// pool was tried first and starved the wrong child: shared steps let
+/// early calls truncate later ones to crumbs, and a truncated child dies
+/// at its ceiling reporting nothing — the worst spend of all. Every
+/// granted call now runs at its full requested ceiling.
+///
+/// Engine-initiated subruns (the goal-met gate) bypass this allowance
+/// entirely: the model's delegation habits must not be able to starve the
+/// audit of its own met claim.
+///
+/// The owner is the CLI layer: it creates one budget per session, passes
+/// it to every subrun tool definition, and calls `reset_turn` at each turn
+/// start. Enforcement is reserve-BEFORE-launch.
 pub struct SubrunBudget {
   max_calls_per_turn : Int
-  max_steps_per_turn : Int
   mut used_calls : Int
-  mut reserved_steps : Int
 }
 
 ///|
-/// Defaults sized so the step pool can fund every allowed call at its
-/// kind's full ceiling (4 calls x 100 steps): the pool is a backstop
-/// against pathological requests, not a scheduler — a later call must
-/// never be silently truncated to the crumbs earlier calls left behind
-/// (a starved child dies at its ceiling and reports nothing, the worst
-/// spend of all).
+/// The default cap is deliberately generous — ten delegations funds heavy
+/// legitimate use (dogfood turns used three) while still cutting off a
+/// runaway loop within one turn.
 pub fn SubrunBudget::SubrunBudget(
-  max_calls_per_turn? : Int = 4,
-  max_steps_per_turn? : Int = 400,
+  max_calls_per_turn? : Int = 10,
 ) -> SubrunBudget {
-  { max_calls_per_turn, max_steps_per_turn, used_calls: 0, reserved_steps: 0 }
+  { max_calls_per_turn, used_calls: 0 }
 }
 
 ///|
 /// Start a new parent turn: the allowance refills.
 pub fn SubrunBudget::reset_turn(self : SubrunBudget) -> Unit {
   self.used_calls = 0
-  self.reserved_steps = 0
 }
 
 ///|
-/// Reserve capacity for one child BEFORE launching it. Returns the child's
-/// effective step ceiling — `requested_steps` clamped to the remaining
-/// allowance — or `None` when the per-turn call count is spent or the
-/// remaining steps could not fund a useful run. The reservation holds until
-/// `reconcile` returns the unused portion.
+/// Reserve one launch slot BEFORE spawning a child. Returns the child's
+/// step ceiling — always the full `requested_steps` — or `None` when the
+/// per-turn call count is spent or the request is below the useful floor.
+/// A granted call is never truncated: the caller's per-kind ceiling is the
+/// only step bound the child sees.
 pub fn SubrunBudget::reserve(
   self : SubrunBudget,
   requested_steps : Int,
 ) -> Int? {
-  // A request below the useful floor (including a pathological negative one,
-  // which would MINT steps through the clamp) is refused outright.
   if requested_steps < min_useful_subrun_steps {
     return None
   }
   if self.used_calls >= self.max_calls_per_turn {
     return None
   }
-  let remaining = self.max_steps_per_turn - self.reserved_steps
-  if remaining < min_useful_subrun_steps {
-    return None
-  }
-  let effective = if requested_steps < remaining {
-    requested_steps
-  } else {
-    remaining
-  }
   self.used_calls += 1
-  self.reserved_steps += effective
-  Some(effective)
+  Some(requested_steps)
 }
 
 ///|
-/// Return a reservation's unused part after the child ran. `reserved` is
-/// what `reserve` granted; `used` is the child's actual `steps_used` (from
-/// its `SubrunResult`). Steps the child never took flow back into the
-/// turn's allowance; the call count does not.
-pub fn SubrunBudget::reconcile(
-  self : SubrunBudget,
-  reserved~ : Int,
-  used~ : Int,
-) -> Unit {
-  let spent = if used < 0 {
-    0
-  } else if used > reserved {
-    reserved
-  } else {
-    used
-  }
-  self.reserved_steps -= reserved - spent
+test "the call count is the only ceiling and grants are never truncated" {
+  let budget = SubrunBudget(max_calls_per_turn=2)
+  // Full grant every time, regardless of how much earlier calls asked for.
+  assert_true(budget.reserve(1_000) is Some(1_000))
+  assert_true(budget.reserve(100) is Some(100))
+  // The third call is refused: slots, not steps, are the resource.
+  assert_true(budget.reserve(8) is None)
 }
 
 ///|
-test "reserve clamps to the remaining allowance and refuses dust" {
-  let budget = SubrunBudget(max_calls_per_turn=3, max_steps_per_turn=50)
-  // First reservation: full request fits.
-  assert_true(budget.reserve(40) is Some(40))
-  // Second: only 10 remain, clamped.
-  assert_true(budget.reserve(40) is Some(10))
-  // Third: nothing useful remains.
-  assert_true(budget.reserve(40) is None)
-}
-
-///|
-test "the call count is its own ceiling" {
-  let budget = SubrunBudget(max_calls_per_turn=2, max_steps_per_turn=1_000)
-  assert_true(budget.reserve(10) is Some(10))
-  assert_true(budget.reserve(10) is Some(10))
-  assert_true(budget.reserve(10) is None)
-}
-
-///|
-test "reconcile returns unused steps but never the call slot" {
-  let budget = SubrunBudget(max_calls_per_turn=2, max_steps_per_turn=40)
-  guard budget.reserve(30) is Some(granted) else { fail("expected a grant") }
-  // The child used 5 of its 30: 25 flow back.
-  budget.reconcile(reserved=granted, used=5)
-  assert_true(budget.reserve(40) is Some(35))
-  // Both call slots are now spent regardless of steps returned.
-  assert_true(budget.reserve(10) is None)
-}
-
-///|
-test "reset_turn refills everything" {
-  let budget = SubrunBudget(max_calls_per_turn=1, max_steps_per_turn=20)
+test "reset_turn refills the allowance" {
+  let budget = SubrunBudget(max_calls_per_turn=1)
   assert_true(budget.reserve(20) is Some(20))
   assert_true(budget.reserve(20) is None)
   budget.reset_turn()
@@ -139,19 +88,20 @@ test "reset_turn refills everything" {
 }
 
 ///|
-test "reconcile clamps a pathological used count" {
-  let budget = SubrunBudget(max_calls_per_turn=2, max_steps_per_turn=30)
-  guard budget.reserve(20) is Some(granted) else { fail("expected a grant") }
-  // used > reserved must not mint steps; used < 0 must not either.
-  budget.reconcile(reserved=granted, used=99)
-  assert_true(budget.reserve(30) is Some(10))
+test "a request below the useful floor is refused without spending a slot" {
+  let budget = SubrunBudget(max_calls_per_turn=1)
+  assert_true(budget.reserve(-50) is None)
+  assert_true(budget.reserve(0) is None)
+  assert_true(budget.reserve(min_useful_subrun_steps - 1) is None)
+  // The refusals consumed nothing.
+  assert_true(budget.reserve(min_useful_subrun_steps) is Some(8))
 }
 
 ///|
-test "a pathological reserve request cannot mint steps" {
-  let budget = SubrunBudget(max_calls_per_turn=2, max_steps_per_turn=30)
-  assert_true(budget.reserve(-50) is None)
-  assert_true(budget.reserve(0) is None)
-  // The refusals consumed nothing.
-  assert_true(budget.reserve(30) is Some(30))
+test "the default cap funds heavy legitimate use" {
+  let budget = SubrunBudget()
+  for _i in 0..<10 {
+    assert_true(budget.reserve(100) is Some(100))
+  }
+  assert_true(budget.reserve(100) is None)
 }

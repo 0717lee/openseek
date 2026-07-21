@@ -16,7 +16,8 @@ Contract highlights:
   tools, no nested subagent tools.
 - Every report field is capped at submission (`ExploreReport::validate`), so
   the rendered result stays far below the loop's tool-result clamp.
-- Cost is reserved from the shared per-turn `SubrunBudget` BEFORE launch and
-  reconciled after; an exhausted budget refuses without spending anything.
+- Launching takes one slot of the shared per-turn `SubrunBudget` call
+  allowance BEFORE the child exists; an exhausted allowance refuses without
+  spending anything, and a granted child always runs at its full ceiling.
 - Failure is graceful: no report / timeout / budget exhaustion all return an
   is_error result telling the parent to fall back to reading directly.

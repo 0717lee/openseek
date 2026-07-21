@@ -96,7 +96,6 @@ async fn execute_review(
     label=@agent_tool.brief_line(criteria, limit=48),
     cwd=workspace_root,
   )
-  budget.reconcile(reserved=granted_steps, used=result.steps_used())
   match result.value() {
     Some(report) =>
       @agent_tool.ToolAction::respond(
@@ -116,10 +115,7 @@ async fn execute_review(
 
 ///|
 async test "review without a goal or focus errors before spending anything" {
-  let budget = @agent_subrun.SubrunBudget(
-    max_calls_per_turn=1,
-    max_steps_per_turn=100,
-  )
+  let budget = @agent_subrun.SubrunBudget(max_calls_per_turn=1)
   let tool = review_tool_definition(
     self_exe="/nonexistent/openseek-not-here",
     model=Deepseek(V4Flash),
@@ -138,10 +134,7 @@ async test "review without a goal or focus errors before spending anything" {
 
 ///|
 async test "review budget exhaustion refuses before spawning" {
-  let budget = @agent_subrun.SubrunBudget(
-    max_calls_per_turn=0,
-    max_steps_per_turn=100,
-  )
+  let budget = @agent_subrun.SubrunBudget(max_calls_per_turn=0)
   let tool = review_tool_definition(
     self_exe="/nonexistent/openseek-not-here",
     model=Deepseek(V4Flash),
