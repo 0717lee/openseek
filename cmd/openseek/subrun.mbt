@@ -85,6 +85,57 @@ async fn run_subrun_command(matches : @argparse.Matches) -> Unit {
 }
 
 ///|
+/// The lowest child ordinal no session `<parent>-sr-N` in the store has
+/// used yet: the floor a resumed parent hands the runner so a restarted
+/// engine process never reuses a persisted child session id.
+async fn first_free_child_ordinal(
+  store : @store.SessionStore,
+  parent : String,
+) -> Int {
+  let mut highest = 0
+  for id in store.list() {
+    if child_session_ordinal(id.value(), parent) is Some(ordinal) &&
+      ordinal > highest {
+      highest = ordinal
+    }
+  }
+  highest + 1
+}
+
+///|
+/// The N of a `<parent>-sr-N` child session id, or `None` for any other id
+/// (bounded to 9 digits so a pathological name cannot overflow).
+fn child_session_ordinal(id : String, parent : String) -> Int? {
+  guard id.strip_prefix("\{parent}-sr-") is Some(digits) else { return None }
+  guard !digits.is_empty() &&
+    digits.length() <= 9 &&
+    digits.iter().all(c => c.is_ascii_digit()) else {
+    return None
+  }
+  let mut value = 0
+  for c in digits {
+    value = value * 10 + (c.to_int() - '0'.to_int())
+  }
+  Some(value)
+}
+
+///|
+test "child_session_ordinal parses exactly the runner's derivation" {
+  assert_eq(child_session_ordinal("run-sr-3", "run"), Some(3))
+  assert_eq(child_session_ordinal("run-sr-12", "run"), Some(12))
+  // A child of a DIFFERENT parent, a non-numeric suffix, a bare parent,
+  // and an id that merely contains the parent all parse to nothing.
+  assert_eq(child_session_ordinal("other-sr-3", "run"), None)
+  assert_eq(child_session_ordinal("run-sr-x", "run"), None)
+  assert_eq(child_session_ordinal("run", "run"), None)
+  assert_eq(child_session_ordinal("run-sr-", "run"), None)
+  assert_eq(child_session_ordinal("run-sr-9999999999", "run"), None)
+  // A grandchild-shaped id (`run-sr-1-sr-2`) belongs to parent `run-sr-1`.
+  assert_eq(child_session_ordinal("run-sr-1-sr-2", "run"), None)
+  assert_eq(child_session_ordinal("run-sr-1-sr-2", "run-sr-1"), Some(2))
+}
+
+///|
 /// The child's durable-session target, when the parent passed one: the
 /// `--session` id (blank means none, the same reading the parent CLIs use)
 /// paired with the resolved `--session-root`.

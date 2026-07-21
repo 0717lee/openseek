@@ -200,7 +200,11 @@ async fn run_task_command(matches : @argparse.Matches) -> Unit {
           thinking~,
           api_url?,
           workspace_root~,
-          child_session=ChildSession(root=store.root(), parent=id.value()),
+          child_session=ChildSession(
+            root=store.root(),
+            parent=id.value(),
+            first_free=first_free_child_ordinal(store, id.value()),
+          ),
         )
       }
     }

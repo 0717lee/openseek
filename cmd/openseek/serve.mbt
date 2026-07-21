@@ -623,14 +623,19 @@ async fn run_serve(
     let exe = self_executable()
     // A durable serve session makes its children durable siblings
     // (`<id>-sr-N` in the same root); --no-session keeps them in-memory.
+    // The ordinal floor keeps a resumed session from reusing a child id an
+    // earlier engine process persisted.
     let child_session = match store {
-      Some(store) =>
+      Some(store) => {
+        let parent = initial_session.id().value()
         Some(
           @agent_subrun.ChildSession(
             root=store.root(),
-            parent=initial_session.id().value(),
+            parent~,
+            first_free=first_free_child_ordinal(store, parent),
           ),
         )
+      }
       None => None
     }
     // The callable review tool audits against the LIVE standing goal: the

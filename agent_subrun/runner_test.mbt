@@ -413,3 +413,45 @@ async test "child_session appends session argv derived from the sub-run id" {
     "--session parent-id-\{result.subrun_id()} --session-root /tmp/subrun-root",
   )
 }
+
+///|
+/// The ChildSession ordinal floor bumps the process counter monotonically:
+/// a resumed parent that scanned 49_999 persisted children never hands out
+/// a session id an earlier process already used. (The floor is absurdly
+/// high so no other test's allocations can reach it first.)
+async test "child_session's ordinal floor skips persisted ids" {
+  let script =
+    #|read line
+    #|printf '{"subrun_report": {"answer": "%s"}}\n' "$1"
+  guard can_spawn_sh() else {
+    println("skipped: cannot spawn sh")
+    return
+  }
+  let result = @agent_subrun.run_subrun(
+    command="sh",
+    args=["-c", script],
+    input={ "query": "q" },
+    parse_report=parse_answer,
+    wall_deadline_ms=10_000,
+    kind="test-kind",
+    label="ordinal floor",
+    child_session=ChildSession(
+      root="/tmp/subrun-root",
+      parent="resumed",
+      first_free=50_000,
+    ),
+  )
+  guard result.value() is Some(session_arg) else {
+    fail("expected a captured report, got \{to_repr(result.terminal())}")
+  }
+  // $1 is the --session value: parent + the allocated id, at or past the floor.
+  assert_eq(session_arg, "resumed-\{result.subrun_id()}")
+  guard result.subrun_id().strip_prefix("sr-") is Some(digits) else {
+    fail("unexpected subrun id \{result.subrun_id()}")
+  }
+  let mut ordinal = 0
+  for c in digits {
+    ordinal = ordinal * 10 + (c.to_int() - '0'.to_int())
+  }
+  assert_true(ordinal >= 50_000)
+}

@@ -31,8 +31,9 @@ pub async fn[T] run_subrun(command~ : String, args~ : Array[String], input~ : Js
 pub struct ChildSession {
   root : String
   parent : String
+  first_free : Int
 }
-pub fn ChildSession::ChildSession(root~ : String, parent~ : String) -> Self
+pub fn ChildSession::ChildSession(root~ : String, parent~ : String, first_free? : Int) -> Self
 
 pub struct SubrunBudget {
   max_calls_per_turn : Int

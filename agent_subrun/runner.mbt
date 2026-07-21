@@ -168,6 +168,12 @@ pub async fn[T] run_subrun(
   child_session? : ChildSession,
   emit_event? : (@protocol.Event) -> Unit = event => @emit.emit(event),
 ) -> SubrunResult[T] {
+  // Bump the process counter past any child ordinal an earlier engine
+  // process already persisted for this parent — monotonic, so it can only
+  // skip ids, never reuse one.
+  if child_session is Some(spec) && subrun_ids.val < spec.first_free - 1 {
+    subrun_ids.val = spec.first_free - 1
+  }
   let id = next_subrun_id()
   // The child persists its own transcript under `<parent>-<id>` when the
   // parent is durable: the id exists only after allocation, so the session
@@ -363,9 +369,16 @@ pub async fn[T] run_subrun(
 /// as `<parent>-<subrun id>` — a sibling of the parent's session in the
 /// same root, so session tooling (the viewer, `openseek sessions`)
 /// discovers child transcripts with no extra plumbing.
+///
+/// `first_free` is the lowest child ordinal no earlier engine process has
+/// persisted for this parent (the CLI scans the store at startup). The
+/// sub-run counter is per-process, so without this floor a RESUMED durable
+/// session would reuse `sr-1` — and the fresh child session would die on
+/// its first append against the old child's file (stale-snapshot check).
 pub struct ChildSession {
   root : String
   parent : String
+  first_free : Int
 }
 
 ///|
@@ -373,8 +386,9 @@ pub struct ChildSession {
 pub fn ChildSession::ChildSession(
   root~ : String,
   parent~ : String,
+  first_free? : Int = 1,
 ) -> ChildSession {
-  { root, parent }
+  { root, parent, first_free }
 }
 
 ///|
