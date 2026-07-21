@@ -9,9 +9,11 @@ pub let default_audit_max_steps : Int = 80
 /// recorded as met?
 fn audit_system_prompt() -> String {
   (
-    #|You are OpenSeek in goal-audit mode. An agent just recorded a standing
-    #|goal as MET. Your one question: does the CURRENT WORKTREE actually
-    #|satisfy that goal? You review; you do not modify.
+    #|You are OpenSeek in audit mode. An agent asked for an independent
+    #|audit of its work — typically a standing goal it believes met, or
+    #|criteria it wants checked before claiming completion. Your one
+    #|question: does the CURRENT WORKTREE actually satisfy the stated
+    #|criteria? You review; you do not modify.
     #|
     #|Principles:
     #|- Audit the worktree as it stands. The agent edits without committing,
@@ -57,7 +59,8 @@ fn audit_task(goal : String, baseline : @agent_session.GoalBaseline?) -> String 
       )
   }
   (
-    $|The goal recorded as met:
+    $|The criteria under audit (a standing goal, or the caller's stated
+    $|focus):
     $|\{goal}
     $|
     $|\{anchor}
@@ -123,7 +126,7 @@ pub fn ReviewReport::digest(self : ReviewReport) -> String {
   let blockers = self.findings.filter(f => f.severity == "blocker").length()
   let highs = self.findings.filter(f => f.severity == "high").length()
   let out = StringBuilder()
-  out <+ "[review] goal-met audit: \{self.findings.length()} finding(s)"
+  out <+ "[review] worktree audit: \{self.findings.length()} finding(s)"
   if blockers > 0 || highs > 0 {
     out <+ " (\{blockers} blocker, \{highs} high)"
   }
@@ -156,7 +159,7 @@ pub fn ReviewReport::digest(self : ReviewReport) -> String {
   }
   if blockers > 0 {
     out <+
-      "\nA blocker means the goal is NOT met: address it or explain why the audit is wrong before finishing."
+      "\nA blocker means the audited claim does NOT hold: address it or explain why the audit is wrong before finishing."
   }
   out.to_string()
 }
@@ -188,9 +191,11 @@ test "digest is bounded and counts severities" {
   }
   let digest = report.digest()
   assert_true(digest.length() <= digest_max_chars)
-  assert_true(digest.contains("25 finding(s) (2 blocker, 0 high)"))
+  assert_true(
+    digest.contains("worktree audit: 25 finding(s) (2 blocker, 0 high)"),
+  )
   assert_true(digest.contains("+15 more finding(s)"))
-  assert_true(digest.contains("NOT met"))
+  assert_true(digest.contains("does NOT hold"))
 }
 
 ///|

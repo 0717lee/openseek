@@ -5,11 +5,9 @@
 ///
 /// `context` supplies the live standing goal and its baseline (serve wires
 /// a closure over its session; one-shot mirrors the latest appended
-/// session). The model may narrow the audit with `focus`; with neither a
-/// focus nor a standing goal the child audits against the task's own
-/// success criteria as stated in `focus` — so the parameter is required
-/// exactly when no goal stands.
-pub fn review_tool_definition(
+/// session). The model may narrow the audit with `focus`; when no goal
+/// stands, `focus` supplies the criteria outright and is required.
+fn review_tool_definition(
   self_exe~ : String,
   model~ : @deepseek.Model,
   workspace_root~ : String,
@@ -19,7 +17,7 @@ pub fn review_tool_definition(
 ) -> @agent_tool.AgentToolDefinition {
   AgentToolDefinition(
     name="review",
-    description="Request an INDEPENDENT audit of the current worktree by a review subagent — use it before declaring substantial work or a standing goal complete, or when you want a skeptical second reading of what you built. The auditor reads files, runs the project's own checks, hunts for vacuous success (tests asserting nothing, hardcoded outputs, quietly narrowed criteria), and returns severity-tagged findings with file:line citations. It audits against the standing goal when one exists; pass `focus` to narrow or replace the criteria. Costs a bounded subagent run from the shared per-turn budget.",
+    description="Request an INDEPENDENT audit of the current worktree by a review subagent — use it before declaring substantial work or a standing goal complete, or when you want a skeptical second reading of what you built. The auditor reads files, runs the project's own checks, hunts for vacuous success (tests asserting nothing, hardcoded outputs, quietly narrowed criteria), and returns severity-tagged findings with file:line citations. It audits against the standing goal when one exists; pass `focus` to narrow the criteria (with no standing goal, `focus` IS the criteria). Costs a bounded subagent run from the shared per-turn budget.",
     schema=JsonSchema({
       "type": "object",
       "properties": {

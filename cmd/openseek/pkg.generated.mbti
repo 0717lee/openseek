@@ -1,15 +1,7 @@
 // Generated using `moon info`, DON'T EDIT IT
 package "bobzhang/openseek/cmd/openseek"
 
-import {
-  "bobzhang/openseek/agent_session",
-  "bobzhang/openseek/agent_subrun",
-  "bobzhang/openseek/agent_tool",
-  "bobzhang/openseek/deepseek",
-}
-
 // Values
-pub fn review_tool_definition(self_exe~ : String, model~ : @deepseek.Model, workspace_root~ : String, budget~ : @agent_subrun.SubrunBudget, context~ : () -> (String?, @agent_session.GoalBaseline?), api_url? : String) -> @agent_tool.AgentToolDefinition
 
 // Errors
 
