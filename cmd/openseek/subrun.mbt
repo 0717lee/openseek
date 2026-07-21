@@ -146,6 +146,13 @@ async fn self_executable() -> String {
     [first, ..] => first
     _ => "openseek"
   }
+  // Under `moon run` on the tcc debug path argv0 is the generated .c
+  // SOURCE, not an executable: spawning it would fail every explore call.
+  // Fall back to PATH resolution — the same case the TUI handles for its
+  // engine spawn (cmd/tui `moon_native_tcc_run_args`).
+  if argv0.has_suffix(".c") {
+    return "openseek"
+  }
   if argv0.contains("/") || argv0.contains("\\") {
     @fs.realpath(argv0) catch {
       _ => argv0
