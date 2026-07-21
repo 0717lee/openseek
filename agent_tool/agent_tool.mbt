@@ -155,9 +155,22 @@ pub fn ToolAction::respond(
 ///|
 /// Build a one-line tool brief: collapse `text` to a single line, trim it, and
 /// cap it to `limit` characters (appending `…` when cut). Iterates by character
-/// so a cap never splits a surrogate pair. Helper for tools assembling a brief.
+/// so a cap never splits a surrogate pair. Line breaks and tabs become spaces;
+/// other C0 controls and DEL are dropped — briefs and labels reach terminals
+/// raw, so `\r`/ESC must not survive into a "single line". Helper for tools
+/// assembling a brief.
 pub fn brief_line(text : String, limit? : Int = 72) -> String {
-  let one = text.replace_all(old="\n", new=" ").trim()
+  let sanitized = StringBuilder()
+  for ch in text {
+    if ch is ('\n' | '\r' | '\t') {
+      sanitized.write_char(' ')
+    } else if ch.to_int() < 0x20 || ch.to_int() == 0x7F {
+      continue
+    } else {
+      sanitized.write_char(ch)
+    }
+  }
+  let one = sanitized.to_string().trim()
   if one.length() <= limit {
     "\{one}"
   } else {

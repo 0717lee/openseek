@@ -80,7 +80,8 @@ pub(all) enum Event {
   /// A nested sub-run (a review, an explore) began inside this run. `id` is
   /// unique within the stream so overlapping sub-runs pair each start with
   /// its finish; `kind` names the surface ("review", "explore"); `label` is
-  /// a short, bounded display string — never the raw query or prompt.
+  /// a short, DISPLAY-BOUNDED string (typically a truncated, sanitized
+  /// query) — never unbounded raw input.
   SubrunStarted(id~ : String, kind~ : String, label~ : String)
   /// The paired completion. The emitter's contract (the sub-run runner —
   /// wire-first: this variant ships ahead of it): emit on success, failure,

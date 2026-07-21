@@ -47,6 +47,7 @@ async fn can_spawn_sh() -> Bool {
 ///|
 /// A child that could not even spawn is a Failed terminal, not a crash.
 async test "a spawn failure folds into Failed" {
+  let events : Array[@protocol.Event] = []
   let result = @agent_subrun.run_subrun(
     command="/nonexistent/openseek-not-here",
     args=[],
@@ -55,14 +56,20 @@ async test "a spawn failure folds into Failed" {
     wall_deadline_ms=2_000,
     kind="test-kind",
     label="spawn failure",
+    emit_event=bracket_collector(events),
   )
+  guard events is [SubrunStarted(..), SubrunFinished(status=bracket_status, ..)] else {
+    fail("expected one bracket pair, got \{to_repr(events)}")
+  }
   guard result.terminal() is Failed(reason) else {
     // Some sandboxes surface spawn refusal as an immediate empty exit:
     // accept NoReport there but never a hang or crash.
     assert_true(result.terminal() is NoReport)
+    assert_eq(bracket_status, "no_report")
     return
   }
   assert_true(reason.contains("spawn") || reason.contains("subrun"))
+  assert_eq(bracket_status, "failed")
 }
 
 ///|
@@ -96,9 +103,13 @@ async test "a clean exit without a report is NoReport" {
     println("skipped: cannot spawn sh")
     return
   }
-  let result = run_script(script)
+  let events : Array[@protocol.Event] = []
+  let result = run_script(script, emit_event=bracket_collector(events))
   assert_true(result.value() is None)
   debug_inspect(result.terminal(), content="NoReport")
+  guard events is [SubrunStarted(..), SubrunFinished(status="no_report", ..)] else {
+    fail("expected a no_report pair, got \{to_repr(events)}")
+  }
 }
 
 ///|
@@ -110,8 +121,12 @@ async test "an observed step exhaustion without a report is MaxSteps" {
     println("skipped: cannot spawn sh")
     return
   }
-  let result = run_script(script)
+  let events : Array[@protocol.Event] = []
+  let result = run_script(script, emit_event=bracket_collector(events))
   debug_inspect(result.terminal(), content="MaxSteps")
+  guard events is [SubrunStarted(..), SubrunFinished(status="max_steps", ..)] else {
+    fail("expected a max_steps pair, got \{to_repr(events)}")
+  }
 }
 
 ///|
@@ -338,11 +353,31 @@ async test "sub-run ids are unique across runs" {
   guard events
     is [
       SubrunStarted(id=first, ..),
-      SubrunFinished(..),
+      SubrunFinished(id=first_done, ..),
       SubrunStarted(id=second, ..),
-      SubrunFinished(..),
+      SubrunFinished(id=second_done, ..),
     ] else {
     fail("expected two pairs, got \{to_repr(events)}")
   }
   assert_true(first != second)
+  assert_eq(first, first_done)
+  assert_eq(second, second_done)
+}
+
+///|
+async test "an observed context yield closes with its status" {
+  guard can_spawn_sh() else {
+    println("skipped: cannot spawn sh")
+    return
+  }
+  let script =
+    #|read line
+    #|printf '{"timestamp":"t","level":"INFO","source":"s","event":"context_yield","to_sequence":9,"answer":"partial"}\n'
+  let events : Array[@protocol.Event] = []
+  let result = run_script(script, emit_event=bracket_collector(events))
+  debug_inspect(result.terminal(), content="ContextYield")
+  guard events
+    is [SubrunStarted(..), SubrunFinished(status="context_yield", ..)] else {
+    fail("expected a context_yield pair, got \{to_repr(events)}")
+  }
 }
