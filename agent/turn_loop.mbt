@@ -150,10 +150,7 @@ async fn AgentLoop::run(
         let steer_inputs = self.runtime.pending_steers()
         if steer_inputs.is_empty() {
           if step + 1 < max_steps &&
-            (
-              self.goal_cadence.due_finish_check() is Some(_) ||
-              self.goal_cadence.due_review()
-            ) {
+            self.goal_cadence.due_finish_check() is Some(_) {
             // The model considers itself done, but the standing goal is
             // unconfirmed: keep the would-be answer as an ordinary assistant
             // message and ask once whether the goal is met. The model may
@@ -931,8 +928,7 @@ async fn AgentLoop::record_tool_result(
 /// without a pending review or a callback. Failure folding: external
 /// cancellation re-raises; any other reviewer failure becomes an
 /// `[review] unavailable` notice — the gate is advisory and must never
-/// break the turn. A goal set or cleared while the reviewer ran bumps the
-/// cadence generation and the stale audit is discarded unappended.
+/// break the turn.
 async fn AgentLoop::run_pending_review(
   self : Self,
   session : @agent_session.Session,
@@ -942,16 +938,18 @@ async fn AgentLoop::run_pending_review(
   }
   self.goal_cadence.pending_review = None
   guard self.on_goal_met is Some(callback) else { return session }
-  let generation = self.goal_cadence.review_generation
+  // The audit is bound to the MET CLAIM, not to whichever goal currently
+  // stands: a replacement queued while the reviewer runs is applied at the
+  // next boundary, AFTER this notice — chronologically truthful ordering.
+  // (Pre-launch economy is separate: a replacement observed before this
+  // point already cleared the pending slot and no audit was spawned.)
   let notice = callback(goal, baseline) catch {
     error if @async.is_being_cancelled() || @async.is_cancellation_error(error) =>
       raise error
-    error => Some("[review] unavailable: \{error}")
-  }
-  if self.goal_cadence.review_generation != generation {
-    // Superseded while the reviewer ran: the audit describes a goal the
-    // user has already replaced.
-    return session
+    error =>
+      Some(
+        "[review] unavailable: \{@agent_tool.brief_line("\{error}", limit=200)}",
+      )
   }
   match notice {
     Some(text) => self.append_runtime_notice(session, text)
@@ -969,6 +967,14 @@ async fn AgentLoop::continue_into_goal_check(
   keep_only_when_compacted~ : Bool,
   reasoning_content? : String,
 ) -> FinishOutcome {
+  // Flush the deferred goal tombstone FIRST: the review-gate disjunct
+  // makes this flow reachable with a pending tombstone (same-batch
+  // goal(met)+finish), and the fail-open arm below seals via
+  // finish_context_yield — sealing without the flush would resurrect a
+  // met goal for auto-continue, and the flush-first order also keeps
+  // [goal cleared] ahead of the [review] notice in the durable log. A
+  // no-op on every pre-gate entry.
+  let session = self.flush_goal_tombstone(session)
   let at_ceiling = self.at_soft_context_ceiling(
     usage,
     extra_result_chars=spent_result_chars,
@@ -998,6 +1004,9 @@ async fn AgentLoop::continue_into_goal_check(
       session,
       self.runtime.pending_steers(),
     )
+    // The owed audit still runs on this fail-open seal: its durable digest
+    // is what the next (auto-continued) turn inherits.
+    let session = self.run_pending_review(session)
     return Sealed(
       self.finish_context_yield(session, to_sequence, compacted=false),
     )
@@ -1032,8 +1041,7 @@ async fn AgentLoop::continue_into_goal_check(
   }
   // The owed goal-met review lands here too: same batch-safe boundary,
   // same continuation — the model sees the audit before it may finish
-  // again. Runs after the check injection; a superseding set during the
-  // reviewer's await discards the stale audit via the generation guard.
+  // again.
   let session = self.run_pending_review(session)
   if at_ceiling {
     // Re-seed the in-flight buffer from the compacted projection: the
@@ -1092,6 +1100,12 @@ async fn AgentLoop::finish_turn(
   spent_result_chars? : Int64 = 0,
   reasoning_content? : String,
 ) -> FinishOutcome {
+  // A met claim reaching a seal that skipped the review continuation (the
+  // last bounded step) still gets its audit: the model cannot react this
+  // turn, but the durable digest is exactly what the user — or the next
+  // auto-continued turn — needs to judge the claim. No-op when nothing is
+  // owed.
+  let session = self.run_pending_review(session)
   // A goal met in the turn's final batch still needs its durable clear
   // before the terminal seals the turn — and before any compact-on-finish
   // checkpoint, so the tombstone is covered like the rest of the history.

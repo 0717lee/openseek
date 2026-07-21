@@ -143,8 +143,9 @@ pub fn ReviewReport::digest(self : ReviewReport) -> String {
       "[\{finding.severity}] \{finding.file}\{line} — \{finding.title}",
       limit=digest_max_line_chars,
     )
-    // The total cap wins over per-line room: stop before overflowing.
-    if out.to_string().length() + entry.length() + 3 > digest_max_chars {
+    // The total cap wins over per-line room: stop before overflowing,
+    // reserving room for the trailers appended below (~200 chars).
+    if out.to_string().length() + entry.length() + 200 > digest_max_chars {
       out <+ "\n… digest cap reached"
       break
     }

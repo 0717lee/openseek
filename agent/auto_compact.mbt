@@ -168,6 +168,10 @@ async fn AgentLoop::yield_at_context_ceiling(
   // lost — current_goal() would resurrect a goal the model already met,
   // and auto-continue would keep chaining toward it.
   let session = self.flush_goal_tombstone(session)
+  // A met claim yielding at the ceiling still gets its owed audit: the
+  // digest lands durably BEFORE the yield terminal, so the auto-continued
+  // next turn inherits the verdict instead of an unaudited claim.
+  let session = self.run_pending_review(session)
   let to_sequence = session.last_sequence()
   let (session, compacted) = self.checkpoint_at_ceiling(session, steers)
   // The summary request takes seconds; steers submitted while it was in

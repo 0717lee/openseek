@@ -111,10 +111,6 @@ priv struct GoalCadence {
   /// record. Consumed at the next batch-safe boundary; only set when the
   /// loop carries an `on_goal_met` callback.
   mut pending_review : (String, @agent_session.GoalBaseline?)?
-  /// Bumped whenever a durable goal set/clear is observed: a scheduled
-  /// review belongs to the generation it captured, and a goal superseded
-  /// while the reviewer ran must discard the stale audit.
-  mut review_generation : Int
 }
 
 ///|
@@ -132,7 +128,6 @@ fn GoalCadence::GoalCadence(
     pending_block: NoBlockTransition,
     pending_tombstone: false,
     pending_review: None,
-    review_generation: 0,
   }
 }
 
@@ -244,9 +239,10 @@ fn GoalCadence::observe_notice(self : GoalCadence, content : String) -> Unit {
       // this set supersedes; a new goal starts unblocked.
       self.pending_block = NoBlockTransition
       self.durably_blocked = false
-      // A new goal supersedes any still-owed review of the previous one.
+      // A new goal supersedes a still-owed (unlaunched) review of the
+      // previous one; an audit already IN FLIGHT completes and lands
+      // before this marker — bound to the met claim, not to us.
       self.pending_review = None
-      self.review_generation += 1
       @emit.emit(GoalUpdated(goal=Some(text)))
     }
     Some(GoalCleared) => {
@@ -256,7 +252,6 @@ fn GoalCadence::observe_notice(self : GoalCadence, content : String) -> Unit {
       self.pending_block = NoBlockTransition
       self.durably_blocked = false
       self.pending_review = None
-      self.review_generation += 1
       @emit.emit(GoalUpdated(goal=None))
     }
     // A block/unblock marker landing durably (this loop's own flush, or a

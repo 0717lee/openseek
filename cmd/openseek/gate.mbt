@@ -82,7 +82,7 @@ fn build_goal_met_gate(
       Some(report) => Some(report.digest())
       None =>
         Some(
-          "[review] unavailable (\{to_repr(result.terminal())}) — treat the met claim as unaudited.",
+          "[review] unavailable (\{@agent_tool.brief_line("\{to_repr(result.terminal())}", limit=200)}) — treat the met claim as unaudited.",
         )
     }
   }
