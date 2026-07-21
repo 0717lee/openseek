@@ -10,9 +10,18 @@ fn command_is_mutating_moon(command : @shell_parse.SimpleCommand) -> Bool {
       match parse_moon_invocation(command.argv, index, ".") {
         Some(invocation) =>
           !invocation.dry_run &&
-          is_auto_check_moon_subcommand(
-            command.argv,
-            invocation.subcommand_index,
+          (
+            is_auto_check_moon_subcommand(
+              command.argv,
+              invocation.subcommand_index,
+            ) ||
+            // A review is read-only: scaffolding a project (`moon new`) creates
+            // manifests and source and must be blocked here too, independently
+            // of post-command auto-checking.
+            is_moon_scaffold_subcommand(
+              command.argv,
+              invocation.subcommand_index,
+            )
           )
         None => false
       }
@@ -24,7 +33,7 @@ fn command_is_mutating_moon(command : @shell_parse.SimpleCommand) -> Bool {
 /// Whether read-only (review) mode should refuse this parsed command. This is a
 /// best-effort guard, not an airtight guarantee: it blocks the obvious bulk
 /// source-rewriters — a source-mutating moon command (fmt / info / test
-/// --update / ...) anywhere in a `Simple` parse, including `&&`/`;` chains,
+/// --update / `new` scaffolding / ...) anywhere in a `Simple` parse, including `&&`/`;` chains,
 /// pipes, and env prefixes — so a review does not reformat or regenerate the
 /// tree wholesale. Opaque commands (`TooComplex`: subshells, command
 /// substitution) are allowed: a review that runs `moon check`/`moon test` can
@@ -42,6 +51,12 @@ test "read-only guard blocks mutating moon anywhere; allows read-only commands" 
   // mutating moon — plain, chained either way, and env-prefixed (all bypasses)
   assert_true(
     review_read_only_blocks(@shell_parse.parse_for_policy("moon fmt")),
+  )
+  assert_true(
+    review_read_only_blocks(@shell_parse.parse_for_policy("moon new app")),
+  )
+  assert_true(
+    review_read_only_blocks(@shell_parse.parse_for_policy("moon new -- --help")),
   )
   assert_true(
     review_read_only_blocks(@shell_parse.parse_for_policy("moon info")),

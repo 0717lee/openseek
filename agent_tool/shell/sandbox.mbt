@@ -35,6 +35,20 @@ async fn agent_shell_launch(
     None => None
   }
   let mode = source_write_mode_for_parse(parsed, real_workspace_root, real_cwd)
+  // `moon new` is trusted to scaffold, but only into a genuinely new or empty
+  // target. A scaffold that would land in an existing non-empty directory is
+  // downgraded to the source-write sandbox so it cannot overwrite existing
+  // files (moon new refuses an existing Moon project, but overwrites loose
+  // `.mbt` files in a non-project directory).
+  let mode = if mode is TrustedSourceWrite &&
+    parse_scaffolds_unsafe_target(
+      parsed,
+      real_cwd.unwrap_or(real_workspace_root),
+    ) {
+    SourceReadOnly
+  } else {
+    mode
+  }
   if mode is TrustedSourceWrite || !@sandbox.sandbox_exec_available() {
     return {
       program: @sandbox.PlatformShellProgram,
@@ -170,14 +184,17 @@ fn trusted_moon_command_class(
         command.argv,
         invocation.subcommand_index,
       ) => TrustedCommandWrite
-    Some(invocation) if is_source_readonly_moon_subcommand(
-        command.argv,
-        invocation.subcommand_index,
-      ) => TrustedCommandRead
+    // Scaffolding is checked before the read-only arm: `moon new -- --help`
+    // scaffolds a directory named `--help`, but that arm's help scan runs past
+    // `--` and would otherwise misclassify it as read-only.
     Some(invocation) if is_moon_scaffold_subcommand(
         command.argv,
         invocation.subcommand_index,
       ) => TrustedCommandWrite
+    Some(invocation) if is_source_readonly_moon_subcommand(
+        command.argv,
+        invocation.subcommand_index,
+      ) => TrustedCommandRead
     _ => UntrustedCommand
   }
 }
@@ -195,8 +212,79 @@ fn is_moon_scaffold_subcommand(
   argv : Array[String],
   subcommand_index : Int,
 ) -> Bool {
+  // Detect help only BEFORE `--`; `moon new -- --help` scaffolds a directory
+  // literally named `--help`, so that trailing token is a path, not a flag.
   argv[subcommand_index] == "new" &&
-  !argv_contains_help_flag(argv, subcommand_index + 1)
+  !argv_contains_help_flag_before_double_dash(argv, subcommand_index + 1)
+}
+
+///|
+/// The `<PATH>` positional of a `moon new` invocation, resolved against the
+/// command's cwd. Grammar is `moon new [OPTIONS] <PATH>`: `--user`/`--name`/
+/// `--target-dir` take a value, the rest are boolean flags, and every token
+/// after `--` is positional. Returns the first positional as a normalized path,
+/// or None when none is present.
+fn moon_new_target(
+  argv : Array[String],
+  new_index : Int,
+  cwd : String,
+) -> String? {
+  let mut index = new_index + 1
+  let mut after_double_dash = false
+  while index < argv.length() {
+    let arg = argv[index]
+    if !after_double_dash && arg == "--" {
+      after_double_dash = true
+      index += 1
+      continue
+    }
+    if !after_double_dash &&
+      (arg == "--user" || arg == "--name" || arg == "--target-dir") {
+      index += 2
+      continue
+    }
+    if !after_double_dash && arg.has_prefix("-") && arg != "-" {
+      index += 1
+      continue
+    }
+    return Some(@path.Path(cwd).join(Path(arg)).normalize().to_string())
+  }
+  None
+}
+
+///|
+/// Whether the parse scaffolds (`moon new`) into a target that already exists
+/// and is NON-EMPTY — where moon new could overwrite existing files (e.g.
+/// `moon new --name main <dir-with-loose-source>`). A genuinely new or empty
+/// target has nothing to clobber and stays trusted; an unsafe or undeterminable
+/// target is reported so the caller re-applies the source-write sandbox.
+async fn parse_scaffolds_unsafe_target(
+  parsed : @shell_parse.ParseResult,
+  base_cwd : String,
+) -> Bool {
+  guard parsed is Simple(commands) else { return false }
+  for command in commands {
+    guard moon_command_start(command) is Some(moon_index) else { continue }
+    guard parse_moon_invocation(command.argv, moon_index, base_cwd)
+      is Some(invocation) else {
+      continue
+    }
+    guard is_moon_scaffold_subcommand(command.argv, invocation.subcommand_index) else {
+      continue
+    }
+    match
+      moon_new_target(command.argv, invocation.subcommand_index, invocation.cwd) {
+      None => return true
+      Some(target) =>
+        if @fs.exists(target) {
+          let entries = @fs.readdir(target) catch { _ => return true }
+          if entries.length() > 0 {
+            return true
+          }
+        }
+    }
+  }
+  false
 }
 
 ///|

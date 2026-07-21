@@ -5,6 +5,7 @@ test "sandbox trusts only narrow moon source-writing commands" {
   assert_true(mode_for("moon new ./pkg") is TrustedSourceWrite)
   assert_true(mode_for("cd sub && moon new app") is TrustedSourceWrite)
   assert_true(mode_for("moon new --help") is SourceReadOnly)
+  assert_true(mode_for("moon new --name demo -- --help") is TrustedSourceWrite)
   assert_true(mode_for("moon info") is TrustedSourceWrite)
   assert_true(
     mode_for("moon ide rename old new --loc main.mbt:1:8 --apply")
@@ -1487,5 +1488,54 @@ async test "sandbox scans source writes after arithmetic left shifts" {
     // A bare arithmetic command with no source write stays allowed.
     let arith_only = "echo $((1 << 8))\n"
     assert_true(dyn_tree_target(arith_only, real_root, Some(real_root)) is None)
+  })
+}
+
+///|
+async test "moon new is a trusted scaffold only for a new or empty target" {
+  @vfs.with_tmpdir(prefix="moon-new-scaffold-", root => {
+    // a genuinely new target: nothing to overwrite -> safe (stays trusted)
+    assert_false(
+      parse_scaffolds_unsafe_target(
+        @shell_parse.parse_for_policy("moon new \{root}/fresh"),
+        root,
+      ),
+    )
+    // an existing EMPTY directory -> still safe
+    @fs.mkdir("\{root}/emptydir")
+    assert_false(
+      parse_scaffolds_unsafe_target(
+        @shell_parse.parse_for_policy("moon new \{root}/emptydir"),
+        root,
+      ),
+    )
+    // an existing NON-EMPTY directory (loose source) -> UNSAFE: moon new could
+    // overwrite it, so this must fall back to the source-write sandbox
+    @fs.mkdir("\{root}/pkg")
+    @fs.write_file(
+      "\{root}/pkg/main.mbt",
+      "fn main {  }\n",
+      create_mode=CreateOrTruncate,
+    )
+    assert_true(
+      parse_scaffolds_unsafe_target(
+        @shell_parse.parse_for_policy("moon new \{root}/pkg"),
+        root,
+      ),
+    )
+    // no target at all -> undeterminable -> treated as unsafe
+    assert_true(
+      parse_scaffolds_unsafe_target(
+        @shell_parse.parse_for_policy("moon new"),
+        root,
+      ),
+    )
+    // a non-scaffold command is never an unsafe scaffold
+    assert_false(
+      parse_scaffolds_unsafe_target(
+        @shell_parse.parse_for_policy("moon fmt"),
+        root,
+      ),
+    )
   })
 }
