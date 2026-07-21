@@ -76,6 +76,25 @@ pub(all) enum Event {
   AutoCompactionFailed(error~ : String)
   ContextYield(to_sequence~ : Int, answer~ : String)
 
+  // ── subrun ─────────────────────────────────────────────────────────────
+  /// A nested sub-run (a review, an explore) began inside this run. `id` is
+  /// unique within the stream so overlapping sub-runs pair each start with
+  /// its finish; `kind` names the surface ("review", "explore"); `label` is
+  /// a short, bounded display string — never the raw query or prompt.
+  SubrunStarted(id~ : String, kind~ : String, label~ : String)
+  /// The paired completion — emitted on success, failure, AND cancellation,
+  /// so a reader never shows a sub-run as running forever. `status` is the
+  /// sub-run terminal in snake_case ("captured", "no_report", "max_steps",
+  /// "context_yield", "timed_out", "failed", "cancelled"); `steps` and the
+  /// token counts are the child's actual spend, for cost attribution.
+  SubrunFinished(
+    id~ : String,
+    status~ : String,
+    steps~ : Int,
+    prompt_tokens~ : Int,
+    completion_tokens~ : Int
+  )
+
   // ── session / workspace ────────────────────────────────────────────────
   /// `workspace_root` is optional because it postdates the event: engines
   /// between d11e04c2 (which added `session_started`) and d5d0b208 (which

@@ -151,6 +151,26 @@ pub fn parse(line : Json) -> Event? {
     }
     "compaction_failed" =>
       text(fields, "error").map(error => CompactionFailed(error~))
+    "subrun_started" => {
+      guard text(fields, "id") is Some(id) &&
+        text(fields, "kind") is Some(kind) &&
+        text(fields, "label") is Some(label) else {
+        return None
+      }
+      Some(SubrunStarted(id~, kind~, label~))
+    }
+    "subrun_finished" => {
+      guard text(fields, "id") is Some(id) &&
+        text(fields, "status") is Some(status) &&
+        int(fields, "steps") is Some(steps) &&
+        int(fields, "prompt_tokens") is Some(prompt_tokens) &&
+        int(fields, "completion_tokens") is Some(completion_tokens) else {
+        return None
+      }
+      Some(
+        SubrunFinished(id~, status~, steps~, prompt_tokens~, completion_tokens~),
+      )
+    }
     "auto_compaction_started" => {
       guard sequences(fields) is Some((from_sequence, to_sequence)) else {
         return None

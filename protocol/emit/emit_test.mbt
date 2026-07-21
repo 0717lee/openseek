@@ -119,6 +119,14 @@ fn all_events() -> Array[@protocol.Event] {
     AutoCompactionFinished(from_sequence=1, to_sequence=12, summary="recap"),
     AutoCompactionFailed(error="summary boom"),
     ContextYield(to_sequence=30, answer="partial"),
+    SubrunStarted(id="sr-1", kind="review", label="goal review"),
+    SubrunFinished(
+      id="sr-1",
+      status="captured",
+      steps=12,
+      prompt_tokens=34_000,
+      completion_tokens=5_600,
+    ),
     SessionStarted(
       session="cli-1",
       session_root=".openseek",
