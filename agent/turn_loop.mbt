@@ -202,7 +202,7 @@ async fn AgentLoop::run(
           tool_calls=response.tool_calls,
         )
         match
-          self.salvage_finish_at_ceiling(
+          self.salvage_control_calls_at_ceiling(
             session,
             response,
             last_step=step + 1 >= max_steps,
@@ -453,13 +453,14 @@ async fn AgentLoop::handle_tool_calls(
     // pessimizes one call ahead — no pre-execution estimate over the whole
     // batch, no false positives at low usage.
     if !self.next_call_fits(response.usage, spent_result_chars) {
-      // A finish call in the unexecuted remainder is a completion, not
-      // more output — on small-window models the budget can trip well
-      // below the hard ceiling, and skip-closing the finish would turn an
-      // already-completed task into a context yield. The executed prefix's
-      // growth rides along so the salvaged finish still checkpoints.
+      // A control call in the unexecuted remainder is a completion in
+      // progress, not more output — on small-window models the budget can
+      // trip well below the hard ceiling, and skip-closing a finish (or a
+      // goal verdict) would turn an already-completed task into a context
+      // yield. The executed prefix's growth rides along so a salvaged
+      // completion still checkpoints.
       match
-        self.salvage_finish_at_ceiling(
+        self.salvage_control_calls_at_ceiling(
           session,
           response,
           from=call_index,
@@ -702,33 +703,41 @@ async fn AgentLoop::close_skipped_tool_calls(
 }
 
 ///|
-/// At the context ceiling, a batch carrying the built-in `finish` call is a
-/// completion, not more work — honor it instead of discarding it. Calls
-/// before the finish are skip-closed (their results cannot change the
-/// already-decided answer, and executing them would grow the checkpoint
-/// request); the finish call itself executes — a few bytes of result — and
-/// its Control(Finish) path closes the remainder, checkpoints, and seals
-/// the real answer. `finish` is matched by name: it is the loop's
-/// documented structured-completion contract (see agent_tool/finish). A
-/// custom tool returning Control(Finish) under another name still works
-/// whenever its batch executes; it just cannot be salvaged at the ceiling.
+/// At the context ceiling, a batch carrying control-registered calls is a
+/// completion in progress, not more work — honor those calls instead of
+/// discarding them. A control tool's action is loop flow bounded to a few
+/// bytes by contract (see `AgentToolDefinition::control`), so executing it
+/// cannot grow the checkpoint request the way ordinary tool output would.
+/// Non-control calls are skip-closed: their results cannot change an
+/// already-decided completion, and executing them would grow the
+/// checkpoint request. The built-in `finish` seals the turn through its
+/// Control(Finish) path, which also closes the remainder and checkpoints;
+/// `goal(met)` records its durable verdict rather than being skip-closed
+/// into a resurrected goal; a custom completion tool declaring control
+/// (e.g. a review engine's submit tool) seals the same way finish does. A
+/// non-control tool — including one shadowing a control name like
+/// `finish` — is skip-closed like any other call here.
 ///
-/// Returns None when the batch carries no decodable finish call — nothing
-/// was appended and the caller proceeds with the plain yield. Otherwise
-/// the outcome distinguishes a sealed turn (StepDone: finished or yielded)
-/// from a continuation (StepContinue: a steer arriving during the salvaged
-/// finish's checkpoint converted it into ContinueTurn — treating that as a
-/// failed salvage would close already-closed calls again and fold the
-/// steer into a second summary).
+/// Returns None when the batch carries no control-registered call —
+/// nothing was appended and the caller proceeds with the plain yield.
+/// Otherwise the outcome distinguishes a sealed turn (StepDone: finished
+/// or yielded) from a continuation (StepContinue: a steer arriving during
+/// a salvaged completion's checkpoint converted it into ContinueTurn —
+/// treating that as a failed salvage would close already-closed calls
+/// again and fold the steer into a second summary). When the executed
+/// controls all return ordinary results (e.g. a goal verdict with no
+/// finish, or a completion override answering with Respond), every call
+/// ends up closed and the turn yields at the ceiling with those durable
+/// results kept.
 ///
 /// `from` is where the unexecuted remainder starts: 0 when the whole batch
 /// is being skipped (hard ceiling), or the tripping call's index when the
 /// running budget stopped execution mid-batch — calls before it already
 /// executed and have results (their growth arrives as
-/// `spent_result_chars`, so the salvaged finish still checkpoints). The
-/// finish call itself is exempt from the budget: its result is a few bytes
-/// of completion, not tool output.
-async fn AgentLoop::salvage_finish_at_ceiling(
+/// `spent_result_chars`, so a salvaged completion still checkpoints).
+/// Control calls are exempt from the budget: their results are a few bytes
+/// of loop flow, not tool output.
+async fn AgentLoop::salvage_control_calls_at_ceiling(
   self : Self,
   session : @agent_session.Session,
   response : @deepseek.ChatResponse,
@@ -736,28 +745,16 @@ async fn AgentLoop::salvage_finish_at_ceiling(
   spent_result_chars? : Int64 = 0,
   last_step~ : Bool,
 ) -> AgentStepOutcome? {
-  // The registry must declare the finish tool a CONTROL tool: that is how
+  // The registry must declare a call's tool a CONTROL tool: that is how
   // the loop knows — without executing — that honoring the call appends a
-  // few bytes, not tool output. A custom non-control tool shadowing the
-  // name is skip-closed like any other call at the ceiling.
-  guard self.tools.find("finish") is Some(definition) && definition.is_control() else {
+  // few bytes, not tool output.
+  guard response.tool_calls[from:].any(call => {
+    self.tools.find(call.name) is Some(definition) && definition.is_control()
+  }) else {
     return None
   }
-  guard response.tool_calls[from:].search_by(call => call.name == "finish")
-    is Some(offset) else {
-    return None
-  }
-  let finish_index = from + offset
-  let native_call = response.tool_calls[finish_index]
-  let tool_call = @agent_tool.AgentToolCall(native_call) catch {
-    _ => return None
-  }
-  // Control-registered calls in the prefix are bounded by contract and can
-  // carry the completion's substance — the goal check text asks for
-  // goal(met) BEFORE finish, and skip-closing it would resurrect a
-  // completed goal for auto-continue. Execute them; skip everything else.
   let session = for index = from, session = session {
-    if index >= finish_index {
+    if index >= response.tool_calls.length() {
       break session
     }
     let call = response.tool_calls[index]
@@ -785,11 +782,14 @@ async fn AgentLoop::salvage_finish_at_ceiling(
             // check): re-scanning the same calls would duplicate results
             // and bypass the injected check.
             ContinueAgentLoop(next) => return Some(StepContinue(next))
-            // A prefix control that SEALED the turn (e.g. an abort) owns
-            // the terminal: executing the finish after it would append
-            // past a terminal and override the intended outcome.
+            // A control that SEALED the turn (finish, a custom completion,
+            // or an abort) owns the terminal: executing anything after it
+            // would append past a terminal and override the intended
+            // outcome.
             FinishAgentLoop(next) => return Some(StepDone(next))
           }
+        // An undecodable control call cannot be honored; close it like a
+        // skipped call so the batch stays API-valid.
         None => ()
       }
     }
@@ -800,35 +800,14 @@ async fn AgentLoop::salvage_finish_at_ceiling(
         note=ceiling_skip_note,
       )
   }
-  match
-    self.execute_tool_call(
-      session,
-      response,
-      finish_index,
-      native_call,
-      tool_call,
-      spent_result_chars~,
-      last_step~,
-    ) {
-    FinishAgentLoop(next) => Some(StepDone(next))
-    // The finish ran but a steer converted it into a continuation: its
-    // remainder is already closed and the checkpoint appended.
-    ContinueAgentLoop(next) => Some(StepContinue(next))
-    // A tool named `finish` that did not finish (custom override returning
-    // Respond): close the remainder and fall back to the ceiling yield.
-    ContinueToolBatch(next) => {
-      let next = self.close_skipped_tool_calls(
-        next,
-        response.tool_calls[finish_index + 1:],
-        note=ceiling_skip_note,
-      )
-      Some(
-        StepDone(
-          self.yield_at_context_ceiling(next, self.runtime.pending_steers()),
-        ),
-      )
-    }
-  }
+  // Controls ran but none sealed or continued the turn: every call is
+  // closed (executed or skip-noted), so yield at the ceiling with the
+  // recorded results carried into the checkpoint.
+  Some(
+    StepDone(
+      self.yield_at_context_ceiling(session, self.runtime.pending_steers()),
+    ),
+  )
 }
 
 ///|

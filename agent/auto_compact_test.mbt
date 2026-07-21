@@ -586,6 +586,149 @@ async test "a pressured finish batch salvages the completion" {
 }
 
 ///|
+/// A completion tool under a custom name: control-declared, seals via
+/// Control(Finish) exactly like the built-in `finish` — the salvage matches
+/// the control declaration, not the name (a sub-run's submit tool is the
+/// production shape).
+async test "a pressured custom control completion is salvaged at the ceiling" {
+  @async.with_task_group() <| group => {
+    let checkpoint_requests : Array[Json] = []
+    let mut main_requests = 0
+    let handle = request => {
+      if is_checkpoint_request(request) {
+        checkpoint_requests.push(request)
+        Body(checkpoint_body("SUBMIT-SUMMARY"))
+      } else {
+        main_requests += 1
+        Sse(
+          sse_tool_calls(
+            [("call_1", "probe"), ("call_2", "submit_report")],
+            900_000,
+          ),
+        )
+      }
+    }
+    guard auto_compact_test_server(group, handle) is Some(url) else { return }
+    let tools : @agent_tool.Tools = Tools([
+      AgentToolDefinition(
+        name="submit_report",
+        description="Submit the final report.",
+        schema=JsonSchema({ "type": "object" }),
+        execute=Sync(_args => @agent_tool.ToolAction::finish("report captured")),
+        control=true,
+      ),
+      AgentToolDefinition(
+        name="probe",
+        description="Probe tool.",
+        schema=JsonSchema({ "type": "object" }),
+        execute=Sync(_args => @agent_tool.ToolAction::respond("result-1")),
+      ),
+    ])
+    let session = @agent_session.Session(
+      SessionId("custom-completion-pressure"),
+      system_prompt="system",
+    )
+    let result = @agent.run_turn_in_scope(
+      runtime=AgentRuntime(),
+      scope=AgentTaskScope(group),
+      api_key="test-key",
+      model=Deepseek(V4Flash),
+      session~,
+      task="wrap it up",
+      append_item=(session, item) => session.append(item),
+      api_url=url,
+      tools~,
+    )
+    assert_eq(main_requests, 1)
+    assert_eq(checkpoint_requests.length(), 1)
+    // A completed task, not a yield: the custom completion's answer verbatim.
+    assert_eq(finished_answer(result), "report captured")
+    for event in result.events() {
+      if event.item() is Tool(tool_result) {
+        // The probe may not execute: its result could grow the checkpoint
+        // request and cannot change the decided answer.
+        assert_true(tool_result.content() != "result-1")
+      }
+    }
+  }
+}
+
+///|
+/// Control calls without any sealing completion still execute at the
+/// ceiling — skip-closing a durable verdict (the goal(met) shape) would
+/// discard completed work — and the turn then yields as usual.
+async test "a lone control verdict without a finish executes then yields" {
+  @async.with_task_group() <| group => {
+    let checkpoint_requests : Array[Json] = []
+    let mut main_requests = 0
+    let handle = request => {
+      if is_checkpoint_request(request) {
+        checkpoint_requests.push(request)
+        Body(checkpoint_body("VERDICT-SUMMARY"))
+      } else {
+        main_requests += 1
+        Sse(
+          sse_tool_calls([("call_1", "record"), ("call_2", "probe")], 900_000),
+        )
+      }
+    }
+    guard auto_compact_test_server(group, handle) is Some(url) else { return }
+    let tools : @agent_tool.Tools = Tools([
+      AgentToolDefinition(
+        name="record",
+        description="Record a verdict.",
+        schema=JsonSchema({ "type": "object" }),
+        execute=Sync(_args => {
+          @agent_tool.ToolAction::respond("verdict recorded")
+        }),
+        control=true,
+      ),
+      AgentToolDefinition(
+        name="probe",
+        description="Probe tool.",
+        schema=JsonSchema({ "type": "object" }),
+        execute=Sync(_args => @agent_tool.ToolAction::respond("result-1")),
+      ),
+    ])
+    let session = @agent_session.Session(
+      SessionId("control-verdict-pressure"),
+      system_prompt="system",
+    )
+    let result = @agent.run_turn_in_scope(
+      runtime=AgentRuntime(),
+      scope=AgentTaskScope(group),
+      api_key="test-key",
+      model=Deepseek(V4Flash),
+      session~,
+      task="keep grinding",
+      append_item=(session, item) => session.append(item),
+      api_url=url,
+      tools~,
+    )
+    assert_eq(main_requests, 1)
+    assert_eq(checkpoint_requests.length(), 1)
+    let mut verdict_recorded = false
+    let mut probe_skipped = false
+    for event in result.events() {
+      if event.item() is Tool(tool_result) {
+        assert_true(tool_result.content() != "result-1")
+        if tool_result.content() == "verdict recorded" {
+          assert_false(tool_result.is_error())
+          verdict_recorded = true
+        }
+        if tool_result.is_error() &&
+          tool_result.content().contains("yielding at the context ceiling") {
+          probe_skipped = true
+        }
+      }
+    }
+    assert_true(verdict_recorded)
+    assert_true(probe_skipped)
+    assert_true(finished_answer(result).contains("[context ceiling]"))
+  }
+}
+
+///|
 async test "a pressured finish tool losing to a steer yields instead" {
   @async.with_task_group() <| group => {
     let runtime = @agent_runtime.AgentRuntime()

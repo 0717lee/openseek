@@ -4,6 +4,12 @@
 /// validates the arguments, captures a valid report into `captured`, and ends
 /// the run via Finish. Malformed output is rejected with an error so the model
 /// retries instead of finishing with no report.
+///
+/// Declared a control tool: its action is loop flow with a few bytes of
+/// result, so the loop's ceiling salvage honors a pending `submit_review`
+/// instead of skip-closing it — without this, a review that hits the
+/// context ceiling on its submitting step would lose its finished report
+/// and fail with `ReviewError`.
 fn submit_review_tool(
   captured : Ref[ReviewReport?],
 ) -> @agent_tool.AgentToolDefinition {
@@ -12,6 +18,7 @@ fn submit_review_tool(
     description="Submit the final structured code-review report and end the review. Call this exactly once, when the review is complete. Every finding must cite a file (and a line when known) and a severity of blocker|high|medium|low|nit.",
     schema=JsonSchema(report_schema()),
     execute=Sync(args => submit(captured, args)),
+    control=true,
   )
 }
 
@@ -93,6 +100,15 @@ fn report_schema() -> Json {
     },
     "required": ["schema_version", "scope", "findings", "summary", "stats"],
   }
+}
+
+///|
+test "submit_review declares itself a control tool" {
+  // The ceiling salvage honors control-declared completions; without this
+  // a review hitting the context ceiling on its submitting step would
+  // skip-close submit_review and fail with ReviewError.
+  let captured : Ref[ReviewReport?] = { val: None }
+  assert_true(submit_review_tool(captured).is_control())
 }
 
 ///|
