@@ -619,16 +619,32 @@ async fn run_serve(
     // The subrun budget is shared by every subrun tool and refills at each
     // turn start (see start_turn) — the registry itself lives across turns.
     let subrun_budget = @agent_subrun.SubrunBudget()
+    let exe = self_executable()
     let extra_tools = resolve_mcp_tools(matches, scope, workspace_root~) +
       [
         @agent_explore.definition(
-          self_exe=self_executable(),
+          self_exe=exe,
           model~,
           workspace_root~,
           budget=subrun_budget,
           api_url?,
         ),
       ]
+    // The advisory goal-met gate (--review-gate): built once, shared by
+    // every turn; it draws from the same per-turn subrun budget as explore.
+    let on_goal_met = if review_gate_enabled(matches) {
+      Some(
+        build_goal_met_gate(
+          self_exe=exe,
+          model~,
+          api_url~,
+          budget=subrun_budget,
+          workspace_root~,
+        ),
+      )
+    } else {
+      None
+    }
     let tools = @agent.build_tools(
       runtime,
       scope,
@@ -853,6 +869,7 @@ async fn run_serve(
           model~,
           session~,
           task=task_text,
+          on_goal_met?,
           append_item=(current, item) => {
             let next = match store {
               Some(store) => store.append(current, item)

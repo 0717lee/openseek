@@ -1,0 +1,207 @@
+///|
+/// Default step budget for one goal audit: leaner than a full review — the
+/// audit reads the worktree against one goal, it does not survey a branch.
+pub let default_audit_max_steps : Int = 80
+
+///|
+/// System prompt for the goal audit: a read-only skeptic asking one
+/// question — does the worktree actually satisfy the goal the agent just
+/// recorded as met?
+fn audit_system_prompt() -> String {
+  (
+    #|You are OpenSeek in goal-audit mode. An agent just recorded a standing
+    #|goal as MET. Your one question: does the CURRENT WORKTREE actually
+    #|satisfy that goal? You review; you do not modify.
+    #|
+    #|Principles:
+    #|- Audit the worktree as it stands. The agent edits without committing,
+    #|  so committed diffs alone prove nothing: read `git status --porcelain`
+    #|  and the working-tree diffs, and read the files themselves.
+    #|- Ground every finding in evidence: run `moon check`/`moon test` (or the
+    #|  project's own gates) rather than trusting claims. The compiler is
+    #|  reliable; your intuition is not.
+    #|- Hunt specifically for VACUOUS success: tests that assert nothing,
+    #|  hardcoded outputs, disabled checks, criteria quietly narrowed.
+    #|- Be precise and skeptical; prefer few real findings over many
+    #|  speculative ones. Severity: blocker|high|medium|low|nit — a blocker
+    #|  means the goal is NOT met.
+    #|- When done, call submit_review exactly once with the full structured
+    #|  report (schema_version 1); set scope.head to "WORKTREE". Do not
+    #|  finish with plain text.
+  )
+}
+
+///|
+/// The audit task: the goal text plus whatever baseline anchor exists.
+fn audit_task(goal : String, baseline : @agent_session.GoalBaseline?) -> String {
+  let anchor = match baseline {
+    Some(baseline) =>
+      if baseline.dirty {
+        (
+          $|The worktree sat on commit \{baseline.sha} when this goal was set,
+          $|and was ALREADY DIRTY then — `git diff \{baseline.sha}` overstates
+          $|this goal's work; treat it as supporting context only.
+        )
+      } else {
+        (
+          $|The worktree sat on commit \{baseline.sha} (clean) when this goal
+          $|was set: `git diff \{baseline.sha}` plus untracked files is a good
+          $|approximation of this goal's work. Supporting context — the
+          $|worktree itself is what you audit.
+        )
+      }
+    None =>
+      (
+        #|No baseline was captured for this goal: audit the worktree on its
+        #|own terms (`git status --porcelain`, working-tree diffs, the files).
+      )
+  }
+  (
+    $|The goal recorded as met:
+    $|\{goal}
+    $|
+    $|\{anchor}
+    $|
+    $|Audit the current worktree against the goal's own criteria and
+    $|submit_review once, with scope.head = "WORKTREE".
+  )
+}
+
+///|
+/// Run the goal audit IN THIS PROCESS (the `openseek subrun review` child
+/// mode calls this; the standalone shape mirrors `run_review`). `None`
+/// when the auditor finished without a valid submission.
+pub async fn run_goal_audit(
+  goal~ : String,
+  baseline~ : @agent_session.GoalBaseline?,
+  api_key~ : String,
+  model~ : @deepseek.Model,
+  max_steps~ : Int,
+  thinking? : @deepseek.ThinkingMode = Max,
+  api_url? : String,
+  workspace_root? : String = ".",
+) -> ReviewReport? {
+  @agent_subrun.execute_kind(
+    session_id="goal-audit",
+    system_prompt=audit_system_prompt(),
+    task=audit_task(goal, baseline),
+    tools=captured => {
+      @agent_tool.Tools([
+        @read.definition(workspace_root~),
+        @shell.definition(workspace_root~, read_only=true),
+        submit_review_tool(captured),
+      ])
+    },
+    max_steps~,
+    api_key~,
+    model~,
+    thinking~,
+    api_url?,
+    workspace_root~,
+  )
+}
+
+///|
+/// Digest bounds: the gate injects this into the model's context and the
+/// durable log UNCLAMPED, so the caps live here, not in hope.
+pub let digest_max_findings : Int = 10
+
+///|
+/// Per-finding line cap in the digest.
+pub let digest_max_line_chars : Int = 200
+
+///|
+/// Total digest cap: the notice enters model context and the durable log
+/// unclamped, so this bound is the only one.
+pub let digest_max_chars : Int = 4_000
+
+///|
+/// The bounded `[review]` notice for a report: severity tally, trimmed
+/// summary, and up to `digest_max_findings` one-line findings with an
+/// explicit omission count — never more than `digest_max_chars` total.
+pub fn ReviewReport::digest(self : ReviewReport) -> String {
+  let blockers = self.findings.filter(f => f.severity == "blocker").length()
+  let highs = self.findings.filter(f => f.severity == "high").length()
+  let out = StringBuilder()
+  out <+ "[review] goal-met audit: \{self.findings.length()} finding(s)"
+  if blockers > 0 || highs > 0 {
+    out <+ " (\{blockers} blocker, \{highs} high)"
+  }
+  out <+ " — \{@agent_tool.brief_line(self.summary, limit=160)}"
+  let shown = if self.findings.length() < digest_max_findings {
+    self.findings.length()
+  } else {
+    digest_max_findings
+  }
+  for index in 0..<shown {
+    let finding = self.findings[index]
+    let line = match finding.line {
+      Some(line) => ":\{line}"
+      None => ""
+    }
+    let entry = @agent_tool.brief_line(
+      "[\{finding.severity}] \{finding.file}\{line} — \{finding.title}",
+      limit=digest_max_line_chars,
+    )
+    // The total cap wins over per-line room: stop before overflowing.
+    if out.to_string().length() + entry.length() + 3 > digest_max_chars {
+      out <+ "\n… digest cap reached"
+      break
+    }
+    out <+ "\n- \{entry}"
+  }
+  if self.findings.length() > shown {
+    out <+ "\n+\{self.findings.length() - shown} more finding(s) in the audit"
+  }
+  if blockers > 0 {
+    out <+
+      "\nA blocker means the goal is NOT met: address it or explain why the audit is wrong before finishing."
+  }
+  out.to_string()
+}
+
+///|
+test "digest is bounded and counts severities" {
+  let many : Array[Finding] = []
+  for index in 0..<25 {
+    many.push({
+      file: "src/file\{index}.mbt",
+      line: Some(index),
+      severity: if index < 2 {
+        "blocker"
+      } else {
+        "low"
+      },
+      category: "correctness",
+      title: "finding number \{index} with a reasonably descriptive title",
+      detail: "detail",
+      suggestion: None,
+    })
+  }
+  let report : ReviewReport = {
+    schema_version: 1,
+    scope: { base: "abc", head: "WORKTREE", files: [] },
+    findings: many,
+    summary: "many findings",
+    stats: { files_reviewed: 5, findings: 25, build: "pass", tests: "fail" },
+  }
+  let digest = report.digest()
+  assert_true(digest.length() <= digest_max_chars)
+  assert_true(digest.contains("25 finding(s) (2 blocker, 0 high)"))
+  assert_true(digest.contains("+15 more finding(s)"))
+  assert_true(digest.contains("NOT met"))
+}
+
+///|
+test "a clean digest is one line of good news" {
+  let report : ReviewReport = {
+    schema_version: 1,
+    scope: { base: "abc", head: "WORKTREE", files: ["a.mbt"] },
+    findings: [],
+    summary: "goal satisfied; tests pass",
+    stats: { files_reviewed: 3, findings: 0, build: "pass", tests: "pass" },
+  }
+  let digest = report.digest()
+  assert_true(digest.contains("0 finding(s)"))
+  assert_false(digest.contains("blocker"))
+}

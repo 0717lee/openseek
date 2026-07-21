@@ -15,6 +15,11 @@ priv struct AgentLoop {
   messages : Array[@deepseek.ChatMessage]
   plan_cadence : PlanCadence
   goal_cadence : GoalCadence
+  /// The advisory goal-met gate: given the met goal's text and its
+  /// captured baseline, produce the notice to append (or None for
+  /// nothing). Review-neutral by type — the CLI layer supplies a callback
+  /// that runs the reviewer child; the loop only schedules and injects.
+  on_goal_met : (async (String, @agent_session.GoalBaseline?) -> String?)?
   /// Latest session returned by a successful append. The run-level error
   /// handler uses it to persist a terminal failure/interruption even when the
   /// local loop state is behind the last durable session.
@@ -29,6 +34,7 @@ fn AgentLoop::AgentLoop(
   tools~ : @agent_tool.Tools,
   append_item~ : async (@agent_session.Session, @agent_session.SessionItem) -> @agent_session.Session,
   session~ : @agent_session.Session,
+  on_goal_met? : async (String, @agent_session.GoalBaseline?) -> String?,
 ) -> AgentLoop {
   {
     runtime,
@@ -36,6 +42,7 @@ fn AgentLoop::AgentLoop(
     summary_client,
     tools,
     append_item,
+    on_goal_met,
     messages: session.chat_messages(),
     plan_cadence: PlanCadence(registered=tools.find("plan") is Some(_)),
     goal_cadence: GoalCadence(
@@ -143,7 +150,10 @@ async fn AgentLoop::run(
         let steer_inputs = self.runtime.pending_steers()
         if steer_inputs.is_empty() {
           if step + 1 < max_steps &&
-            self.goal_cadence.due_finish_check() is Some(_) {
+            (
+              self.goal_cadence.due_finish_check() is Some(_) ||
+              self.goal_cadence.due_review()
+            ) {
             // The model considers itself done, but the standing goal is
             // unconfirmed: keep the would-be answer as an ordinary assistant
             // message and ask once whether the goal is met. The model may
@@ -388,10 +398,13 @@ async fn AgentLoop::prepare_step(
   let session = self.flush_goal_tombstone(session)
   // Steering first: user-visible mid-turn input should be applied before plan
   // reminders or the next model request.
-  let mut session = self.apply_steer_inputs(
-    session,
-    self.runtime.pending_steers(),
-  )
+  let session = self.apply_steer_inputs(session, self.runtime.pending_steers())
+  // A goal met without a finish attempt still gets its owed review before
+  // the next model request (the finish seams handle the met-then-finish
+  // shapes; this covers met-then-keep-working). AFTER the steers: a queued
+  // replacement goal observed just above clears the pending review, so a
+  // superseded audit is cancelled before it ever launches.
+  let mut session = self.run_pending_review(session)
   if self.goal_cadence.due_reminder() is Some(goal) {
     let reminder = goal_reminder_text(
       goal,
@@ -595,7 +608,11 @@ async fn AgentLoop::execute_tool_call(
         // On the final bounded step there is no request budget left for a
         // check round: injecting one would exit into "max steps exhausted"
         // and turn a successful bounded turn into a failure. Finish.
-        if !last_step && self.goal_cadence.due_finish_check() is Some(_) {
+        if !last_step &&
+          (
+            self.goal_cadence.due_finish_check() is Some(_) ||
+            self.goal_cadence.due_review()
+          ) {
           return ToolCallOutcome::of_finish(
             self.continue_into_goal_check(
               session,
@@ -910,6 +927,39 @@ async fn AgentLoop::record_tool_result(
 /// get. Only the no-tool arm passes reasoning: the finish tool's answer is
 /// synthetic (its reasoning lives on the batch's covered assistant
 /// message; re-attaching it would duplicate what Kimi preserves there).
+/// Run the owed goal-met review, if any, and append its notice. A no-op
+/// without a pending review or a callback. Failure folding: external
+/// cancellation re-raises; any other reviewer failure becomes an
+/// `[review] unavailable` notice — the gate is advisory and must never
+/// break the turn. A goal set or cleared while the reviewer ran bumps the
+/// cadence generation and the stale audit is discarded unappended.
+async fn AgentLoop::run_pending_review(
+  self : Self,
+  session : @agent_session.Session,
+) -> @agent_session.Session {
+  guard self.goal_cadence.pending_review is Some((goal, baseline)) else {
+    return session
+  }
+  self.goal_cadence.pending_review = None
+  guard self.on_goal_met is Some(callback) else { return session }
+  let generation = self.goal_cadence.review_generation
+  let notice = callback(goal, baseline) catch {
+    error if @async.is_being_cancelled() || @async.is_cancellation_error(error) =>
+      raise error
+    error => Some("[review] unavailable: \{error}")
+  }
+  if self.goal_cadence.review_generation != generation {
+    // Superseded while the reviewer ran: the audit describes a goal the
+    // user has already replaced.
+    return session
+  }
+  match notice {
+    Some(text) => self.append_runtime_notice(session, text)
+    None => session
+  }
+}
+
+///|
 async fn AgentLoop::continue_into_goal_check(
   self : Self,
   session : @agent_session.Session,
@@ -980,6 +1030,11 @@ async fn AgentLoop::continue_into_goal_check(
     Some(current) => self.inject_goal_check(session, current)
     None => session
   }
+  // The owed goal-met review lands here too: same batch-safe boundary,
+  // same continuation — the model sees the audit before it may finish
+  // again. Runs after the check injection; a superseding set during the
+  // reviewer's await discards the stale audit via the generation guard.
+  let session = self.run_pending_review(session)
   if at_ceiling {
     // Re-seed the in-flight buffer from the compacted projection: the
     // whole point of the checkpoint is that the check round is small.

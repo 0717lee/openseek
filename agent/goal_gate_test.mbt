@@ -1,0 +1,251 @@
+///|
+/// A session with a baselined standing goal, already answered.
+fn baselined_goal_session(id : String) -> @agent_session.Session {
+  @agent_session.Session(SessionId(id), system_prompt="system")
+  .append(
+    Runtime(
+      RuntimeNotice(
+        @agent_session.goal_baseline_notice(sha="abc123", dirty=false),
+      ),
+    ),
+  )
+  .append(Runtime(RuntimeNotice("\{@agent_session.GoalPrefix}\nship the gate")))
+  .append(Terminal(Finished("earlier answer")))
+}
+
+///|
+fn goal_met_payload() -> String {
+  (
+    #|{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1","function":{"name":"goal","arguments":"{\"status\":\"met\"}"}}]}}],"usage":{"prompt_tokens":9000,"completion_tokens":1000,"total_tokens":10000}}
+  )
+}
+
+///|
+fn gate_final_payload(text : String) -> String {
+  (
+    $|{"choices":[{"delta":{"content":"\{text}"}}],"usage":{"prompt_tokens":9000,"completion_tokens":1000,"total_tokens":10000}}
+  )
+}
+
+///|
+fn review_notice_count(session : @agent_session.Session) -> Int {
+  let mut count = 0
+  for event in session.events() {
+    if event.item() is Runtime(notice) &&
+      notice.content().has_prefix("[review]") {
+      count += 1
+    }
+  }
+  count
+}
+
+///|
+/// goal(met) recorded mid-turn: the gate runs once at the next batch-safe
+/// boundary — before the following model request — and injects its digest
+/// as a durable notice the model then sees.
+async test "a met goal runs the gate once before the next request" {
+  @async.with_task_group() <| group => {
+    let bodies : Array[String] = []
+    guard goal_check_test_server(group, bodies, [
+        goal_met_payload(),
+        gate_final_payload("done"),
+      ])
+      is Some(url) else {
+      return
+    }
+    let calls : Array[(String, String)] = []
+    let result = @agent.run_turn_in_scope(
+      runtime=AgentRuntime(),
+      scope=AgentTaskScope(group),
+      api_key="test-key",
+      model=Deepseek(V4Flash),
+      session=baselined_goal_session("gate-basic"),
+      task="wrap up the goal",
+      append_item=(session, item) => session.append(item),
+      max_steps=6,
+      api_url=url,
+      tools=Tools([@goal.definition()]),
+      on_goal_met=(goal, baseline) => {
+        calls.push((goal, "\{to_repr(baseline)}"))
+        Some("[review] goal-met audit: 0 finding(s) — clean")
+      },
+    )
+    // met batch, then one more request that already sees the notice.
+    assert_eq(bodies.length(), 2)
+    guard calls is [(goal, baseline)] else {
+      fail("expected exactly one gate call, got \{calls.length()}")
+    }
+    assert_eq(goal, "ship the gate")
+    assert_true(baseline.contains("abc123"))
+    assert_true(baseline.contains("dirty: false"))
+    assert_eq(review_notice_count(result), 1)
+    // The request AFTER the gate carried the digest to the model.
+    assert_true(bodies[1].contains("goal-met audit"))
+  }
+}
+
+///|
+/// met and finish in the SAME batch: the finish converts into a review
+/// continuation (mirroring the goal check), the model sees the digest, and
+/// the next finish seals.
+async test "a same-batch met plus finish continues through the gate" {
+  @async.with_task_group() <| group => {
+    let bodies : Array[String] = []
+    let met_then_finish =
+      #|{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1","function":{"name":"goal","arguments":"{\"status\":\"met\"}"}},{"index":1,"id":"c2","function":{"name":"finish","arguments":"{\"answer\":\"all done\"}"}}]}}],"usage":{"prompt_tokens":9000,"completion_tokens":1000,"total_tokens":10000}}
+    guard goal_check_test_server(group, bodies, [
+        met_then_finish,
+        gate_final_payload("confirmed done"),
+      ])
+      is Some(url) else {
+      return
+    }
+    let mut gate_calls = 0
+    let result = @agent.run_turn_in_scope(
+      runtime=AgentRuntime(),
+      scope=AgentTaskScope(group),
+      api_key="test-key",
+      model=Deepseek(V4Flash),
+      session=baselined_goal_session("gate-same-batch"),
+      task="wrap up the goal",
+      append_item=(session, item) => session.append(item),
+      max_steps=6,
+      api_url=url,
+      tools=Tools([@goal.definition(), @finish.definition()]),
+      on_goal_met=(_goal, _baseline) => {
+        gate_calls += 1
+        Some(
+          "[review] goal-met audit: 1 finding(s) (1 blocker, 0 high) — vacuous test",
+        )
+      },
+    )
+    assert_eq(bodies.length(), 2)
+    assert_eq(gate_calls, 1)
+    assert_eq(review_notice_count(result), 1)
+    assert_true(bodies[1].contains("vacuous test"))
+    assert_true(finished_answer(result).contains("confirmed done"))
+  }
+}
+
+///|
+/// The gate is advisory: a reviewer failure folds into an `unavailable`
+/// notice and the turn proceeds.
+async test "a failing gate folds into an unavailable notice" {
+  @async.with_task_group() <| group => {
+    let bodies : Array[String] = []
+    guard goal_check_test_server(group, bodies, [
+        goal_met_payload(),
+        gate_final_payload("done anyway"),
+      ])
+      is Some(url) else {
+      return
+    }
+    let result = @agent.run_turn_in_scope(
+      runtime=AgentRuntime(),
+      scope=AgentTaskScope(group),
+      api_key="test-key",
+      model=Deepseek(V4Flash),
+      session=baselined_goal_session("gate-fail"),
+      task="wrap up the goal",
+      append_item=(session, item) => session.append(item),
+      max_steps=6,
+      api_url=url,
+      tools=Tools([@goal.definition()]),
+      on_goal_met=(_goal, _baseline) => fail("reviewer exploded"),
+    )
+    assert_eq(review_notice_count(result), 1)
+    let mut unavailable = false
+    for event in result.events() {
+      if event.item() is Runtime(notice) &&
+        notice.content().has_prefix("[review] unavailable") {
+        unavailable = true
+      }
+    }
+    assert_true(unavailable)
+    assert_true(finished_answer(result).contains("done anyway"))
+  }
+}
+
+///|
+/// Without a callback the met flow is exactly what it was before the gate.
+async test "no callback means no gate and no notice" {
+  @async.with_task_group() <| group => {
+    let bodies : Array[String] = []
+    guard goal_check_test_server(group, bodies, [
+        goal_met_payload(),
+        gate_final_payload("done"),
+      ])
+      is Some(url) else {
+      return
+    }
+    let result = @agent.run_turn_in_scope(
+      runtime=AgentRuntime(),
+      scope=AgentTaskScope(group),
+      api_key="test-key",
+      model=Deepseek(V4Flash),
+      session=baselined_goal_session("gate-off"),
+      task="wrap up the goal",
+      append_item=(session, item) => session.append(item),
+      max_steps=6,
+      api_url=url,
+      tools=Tools([@goal.definition()]),
+    )
+    assert_eq(review_notice_count(result), 0)
+    assert_eq(bodies.length(), 2)
+  }
+}
+
+///|
+/// A replacement goal queued before the boundary cancels the owed review:
+/// the superseded audit never launches.
+async test "a replacement goal cancels the pending review before launch" {
+  @async.with_task_group() <| group => {
+    let runtime = @agent_runtime.AgentRuntime()
+    let bodies : Array[String] = []
+    let met_then_probe =
+      #|{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1","function":{"name":"goal","arguments":"{\"status\":\"met\"}"}},{"index":1,"id":"c2","function":{"name":"probe","arguments":"{}"}}]}}],"usage":{"prompt_tokens":9000,"completion_tokens":1000,"total_tokens":10000}}
+    guard goal_check_test_server(group, bodies, [
+        met_then_probe,
+        gate_final_payload("onward"),
+        gate_final_payload("done"),
+      ])
+      is Some(url) else {
+      return
+    }
+    let mut gate_calls = 0
+    let result = @agent.run_turn_in_scope(
+      runtime~,
+      scope=AgentTaskScope(group),
+      api_key="test-key",
+      model=Deepseek(V4Flash),
+      session=baselined_goal_session("gate-superseded"),
+      task="wrap up the goal",
+      append_item=(session, item) => session.append(item),
+      max_steps=6,
+      api_url=url,
+      tools=Tools([
+        @goal.definition(),
+        AgentToolDefinition(
+          name="probe",
+          description="Queues a replacement goal mid-batch.",
+          schema=JsonSchema({ "type": "object" }),
+          execute=Sync(_args => {
+            // The replacement arrives WHILE the met batch is executing:
+            // the next boundary applies it before the owed review would
+            // launch, and the superseded audit is cancelled.
+            runtime.queue_steer(
+              Notice("\{@agent_session.GoalPrefix}\na brand new objective"),
+            )
+            @agent_tool.ToolAction::respond("queued")
+          }),
+        ),
+      ]),
+      on_goal_met=(_goal, _baseline) => {
+        gate_calls += 1
+        Some("[review] should never appear")
+      },
+    )
+    assert_eq(gate_calls, 0)
+    assert_eq(review_notice_count(result), 0)
+  }
+}

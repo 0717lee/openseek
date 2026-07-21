@@ -106,6 +106,15 @@ priv struct GoalCadence {
   /// turn finish) — a mid-batch runtime notice would make replay synthesize
   /// exited-errors for the batch's remaining tool calls.
   mut pending_tombstone : Bool
+  /// A goal(met) whose advisory gate review is still owed: the goal text
+  /// and the baseline captured BEFORE the tombstone clears the durable
+  /// record. Consumed at the next batch-safe boundary; only set when the
+  /// loop carries an `on_goal_met` callback.
+  mut pending_review : (String, @agent_session.GoalBaseline?)?
+  /// Bumped whenever a durable goal set/clear is observed: a scheduled
+  /// review belongs to the generation it captured, and a goal superseded
+  /// while the reviewer ran must discard the stale audit.
+  mut review_generation : Int
 }
 
 ///|
@@ -122,6 +131,8 @@ fn GoalCadence::GoalCadence(
     durably_blocked: standing.map(goal => goal.blocked()).unwrap_or(false),
     pending_block: NoBlockTransition,
     pending_tombstone: false,
+    pending_review: None,
+    review_generation: 0,
   }
 }
 
@@ -134,6 +145,12 @@ fn GoalCadence::due_finish_check(self : GoalCadence) -> String? {
   } else {
     self.goal
   }
+}
+
+///|
+/// Whether a goal(met) review is still owed at the next batch-safe boundary.
+fn GoalCadence::due_review(self : GoalCadence) -> Bool {
+  self.pending_review is Some(_)
 }
 
 ///|
@@ -227,6 +244,9 @@ fn GoalCadence::observe_notice(self : GoalCadence, content : String) -> Unit {
       // this set supersedes; a new goal starts unblocked.
       self.pending_block = NoBlockTransition
       self.durably_blocked = false
+      // A new goal supersedes any still-owed review of the previous one.
+      self.pending_review = None
+      self.review_generation += 1
       @emit.emit(GoalUpdated(goal=Some(text)))
     }
     Some(GoalCleared) => {
@@ -235,6 +255,8 @@ fn GoalCadence::observe_notice(self : GoalCadence, content : String) -> Unit {
       self.pending_tombstone = false
       self.pending_block = NoBlockTransition
       self.durably_blocked = false
+      self.pending_review = None
+      self.review_generation += 1
       @emit.emit(GoalUpdated(goal=None))
     }
     // A block/unblock marker landing durably (this loop's own flush, or a
@@ -377,7 +399,17 @@ async fn AgentLoop::handle_goal_tool_call(
   // append must not leave a pending tombstone (the error-path flush would
   // then durably clear a goal whose met verdict was never persisted).
   match verdict {
-    (Ok(Met), Some(_)) => self.goal_cadence.record_goal_met()
+    (Ok(Met), Some(goal_text)) => {
+      self.goal_cadence.record_goal_met()
+      // Schedule the advisory gate review BEFORE the tombstone clears the
+      // durable record: the baseline is readable now or never. Executed at
+      // the next batch-safe boundary, never mid-batch.
+      if !(self.on_goal_met is None) {
+        self.goal_cadence.pending_review = Some(
+          (goal_text, session.current_goal_baseline()),
+        )
+      }
+    }
     // Continuing answers the finish check and, if the goal is durably
     // blocked, schedules a `[goal unblocked]` marker so serve resumes.
     (Ok(Continuing(_)), Some(_)) => self.goal_cadence.record_goal_continuing()

@@ -111,6 +111,33 @@ async fn dispatch_kind(
       )
       report.map(report => report.to_json())
     }
+    "review" => {
+      guard input is { "goal": String(goal), .. } && goal.trim() != "" else {
+        @emit.emit(
+          CommandError(error="subrun review requires a non-empty goal"),
+        )
+        return None
+      }
+      let baseline : @agent_session.GoalBaseline? = match input {
+        { "sha": String(sha), "dirty": dirty, .. } =>
+          Some({ sha: sha.to_string(), dirty: dirty is True })
+        _ => None
+      }
+      let api_key = @agentcli.api_key(matches, model)
+      let report = @agent_review.run_goal_audit(
+        goal~,
+        baseline~,
+        api_key~,
+        model~,
+        max_steps=max_steps(matches).unwrap_or(
+          @agent_review.default_audit_max_steps,
+        ),
+        thinking~,
+        api_url?,
+        workspace_root~,
+      )
+      report.map(report => report.to_json())
+    }
     "echo" => {
       // Modelless probe: two canned events plus the input echoed back —
       // enough to exercise spawn, drain, accounting, and the typed report

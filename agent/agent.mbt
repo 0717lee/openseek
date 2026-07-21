@@ -238,6 +238,7 @@ pub async fn[X] run_turn_in_scope(
   thinking? : @deepseek.ThinkingMode = Max,
   api_url? : String,
   tools? : @agent_tool.Tools,
+  on_goal_met? : async (String, @agent_session.GoalBaseline?) -> String?,
 ) -> @agent_session.Session {
   let client = @client.Client(api_key~, model~, thinking~, api_url?)
   let summary_client = @client.Client(api_key~, model~, api_url?, thinking=No)
@@ -254,9 +255,15 @@ pub async fn[X] run_turn_in_scope(
         |> append_item(Terminal(Failed("agent setup failed: \{error}")))
     }
   }
-  AgentLoop(runtime~, client~, summary_client~, tools~, append_item~, session~).run(
-    session, max_steps,
-  )
+  AgentLoop(
+    runtime~,
+    client~,
+    summary_client~,
+    tools~,
+    append_item~,
+    session~,
+    on_goal_met?,
+  ).run(session, max_steps)
 }
 
 ///|

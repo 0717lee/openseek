@@ -226,10 +226,11 @@ async fn run_task_turn(
     let scope = @agent_runtime.AgentTaskScope(group)
     // One-shot = one turn, so a fresh per-turn subrun budget needs no reset.
     let subrun_budget = @agent_subrun.SubrunBudget()
+    let exe = self_executable()
     let extra_tools = resolve_mcp_tools(matches, scope, workspace_root~) +
       [
         @agent_explore.definition(
-          self_exe=self_executable(),
+          self_exe=exe,
           model~,
           workspace_root~,
           budget=subrun_budget,
@@ -237,6 +238,19 @@ async fn run_task_turn(
         ),
       ]
     let tools = @agent.build_tools(runtime, scope, extra_tools~)
+    let on_goal_met = if review_gate_enabled(matches) {
+      Some(
+        build_goal_met_gate(
+          self_exe=exe,
+          model~,
+          api_url~,
+          budget=subrun_budget,
+          workspace_root~,
+        ),
+      )
+    } else {
+      None
+    }
     ignore(
       @agent.run_turn_in_scope(
         runtime~,
@@ -250,6 +264,7 @@ async fn run_task_turn(
         thinking~,
         api_url?,
         tools~,
+        on_goal_met?,
       ),
     )
   }
@@ -598,6 +613,7 @@ fn root_command() -> @argparse.Command {
             long="no-session",
             about="Run ephemerally: do not record this run to a durable session.",
           ),
+          review_gate_flag(),
         ],
         positionals=[
           PositionArg(
@@ -617,6 +633,7 @@ fn root_command() -> @argparse.Command {
             long="no-session",
             about="Run ephemerally: do not record this server's conversation to a durable session.",
           ),
+          review_gate_flag(),
         ],
       ),
       Command(
