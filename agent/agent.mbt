@@ -226,6 +226,12 @@ async test "run_turn_with_append closes failed persisted turns" {
 /// a fresh registry for this call only. `api_url` is forwarded to the DeepSeek
 /// client. The caller owns the lifetime of `runtime`, `scope`, and any shared
 /// `tools` registry passed here.
+///
+/// `event_sink` is where every protocol event this turn produces goes —
+/// including the pre-loop setup failure. The default forwards to the process
+/// log (today's behavior). A nested sub-run passes an isolating sink so its
+/// lifecycle events (most critically `AgentFinished`) stay out of the
+/// host-facing stream, where they would read as the OUTER run's terminal.
 pub async fn[X] run_turn_in_scope(
   runtime~ : @agent_runtime.AgentRuntime,
   scope~ : @agent_runtime.AgentTaskScope[X],
@@ -238,6 +244,7 @@ pub async fn[X] run_turn_in_scope(
   thinking? : @deepseek.ThinkingMode = Max,
   api_url? : String,
   tools? : @agent_tool.Tools,
+  event_sink? : @emit.EventSink = @emit.EventSink::global(),
 ) -> @agent_session.Session {
   let client = @client.Client(api_key~, model~, thinking~, api_url?)
   let summary_client = @client.Client(api_key~, model~, api_url?, thinking=No)
@@ -249,14 +256,23 @@ pub async fn[X] run_turn_in_scope(
     }
   } catch {
     error => {
-      @emit.emit(AgentSetupFailed(error="\{error}"))
+      // Pre-loop failure: no AgentLoop exists yet, so this site must route
+      // through the sink itself or a sub-run's setup error would leak into
+      // the host-facing stream.
+      event_sink.emit(AgentSetupFailed(error="\{error}"))
       return session
         |> append_item(Terminal(Failed("agent setup failed: \{error}")))
     }
   }
-  AgentLoop(runtime~, client~, summary_client~, tools~, append_item~, session~).run(
-    session, max_steps,
-  )
+  AgentLoop(
+    runtime~,
+    client~,
+    summary_client~,
+    tools~,
+    append_item~,
+    session~,
+    events=event_sink,
+  ).run(session, max_steps)
 }
 
 ///|

@@ -57,3 +57,34 @@ pub fn emit(event : @protocol.Event, loc~ : SourceLoc) -> Unit {
   }
   entry.write_object_end()
 }
+
+///|
+/// A per-loop event destination. The engine's top-level loop uses the
+/// process-log sink (`EventSink::global`); a nested agent loop — a sub-run
+/// such as the review engine, once it runs inside a live session — installs
+/// an isolating sink so its lifecycle and progress events stay out of the
+/// host-facing stream, where a child's `AgentFinished` would read as the
+/// OUTER run's terminal (the TUI and desktop hosts both treat any
+/// `AgentFinished` as run-terminal). The wrapped function receives the
+/// original call site, so forwarded log lines keep pointing at the code
+/// that reported the event, not at the sink.
+pub(all) struct EventSink((@protocol.Event, SourceLoc) -> Unit)
+
+///|
+/// Forward an event to this sink, autofilling the caller's location.
+#callsite(autofill(loc))
+pub fn EventSink::emit(
+  self : EventSink,
+  event : @protocol.Event,
+  loc~ : SourceLoc,
+) -> Unit {
+  (self.0)(event, loc)
+}
+
+///|
+/// The process-log sink: forwards to `emit`, preserving the reporting call
+/// site. Every top-level loop uses this; it is the behavior-preserving
+/// default wherever a sink parameter is accepted.
+pub fn EventSink::global() -> EventSink {
+  EventSink((event, loc) => emit(event, loc~))
+}

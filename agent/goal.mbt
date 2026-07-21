@@ -207,10 +207,15 @@ fn GoalCadence::record_reminder(self : GoalCadence) -> Unit {
 
 ///|
 /// Track a durably applied notice steer. A goal set/clear marker updates the
-/// live cadence and reports the new state as a `goal_updated` event. The
-/// event is emitted here — after the durable append, never at queue time —
-/// so a controller can only learn a goal that was actually persisted.
-fn GoalCadence::observe_notice(self : GoalCadence, content : String) -> Unit {
+/// live cadence and reports the new state as a `goal_updated` event through
+/// the owning loop's sink. The event is emitted here — after the durable
+/// append, never at queue time — so a controller can only learn a goal that
+/// was actually persisted.
+fn GoalCadence::observe_notice(
+  self : GoalCadence,
+  content : String,
+  events~ : @emit.EventSink,
+) -> Unit {
   match @agent_session.goal_marker(content) {
     Some(GoalSet(text)) => {
       self.goal = Some(text)
@@ -227,7 +232,7 @@ fn GoalCadence::observe_notice(self : GoalCadence, content : String) -> Unit {
       // this set supersedes; a new goal starts unblocked.
       self.pending_block = NoBlockTransition
       self.durably_blocked = false
-      @emit.emit(GoalUpdated(goal=Some(text)))
+      events.emit(GoalUpdated(goal=Some(text)))
     }
     Some(GoalCleared) => {
       self.goal = None
@@ -235,7 +240,7 @@ fn GoalCadence::observe_notice(self : GoalCadence, content : String) -> Unit {
       self.pending_tombstone = false
       self.pending_block = NoBlockTransition
       self.durably_blocked = false
-      @emit.emit(GoalUpdated(goal=None))
+      events.emit(GoalUpdated(goal=None))
     }
     // A block/unblock marker landing durably (this loop's own flush, or a
     // steer observed after its append) toggles the cached durable state; the
@@ -267,7 +272,7 @@ async fn AgentLoop::flush_goal_tombstone(
       )
       self.goal_cadence.pending_block = NoBlockTransition
       self.goal_cadence.durably_blocked = true
-      @emit.emit(GoalBlocked(reason~))
+      self.events.emit(GoalBlocked(reason~))
       next
     }
     // A continue that resumes a durably blocked goal: land the unblock marker
@@ -279,7 +284,7 @@ async fn AgentLoop::flush_goal_tombstone(
       )
       self.goal_cadence.pending_block = NoBlockTransition
       self.goal_cadence.durably_blocked = false
-      @emit.emit(GoalUnblocked)
+      self.events.emit(GoalUnblocked)
       next
     }
     // A no-op unblock (the goal was not durably blocked): nothing to rescind.
@@ -297,7 +302,7 @@ async fn AgentLoop::flush_goal_tombstone(
     @agent_session.GoalClearedNotice,
   )
   self.goal_cadence.pending_tombstone = false
-  @emit.emit(GoalUpdated(goal=None))
+  self.events.emit(GoalUpdated(goal=None))
   next
 }
 
@@ -387,7 +392,7 @@ async fn AgentLoop::handle_goal_tool_call(
       self.goal_cadence.record_goal_blocked(reason)
     _ => ()
   }
-  @emit.emit(
+  self.events.emit(
     ToolResult(
       tool_call_id=native_call.id,
       tool_name=tool_call.name,
@@ -409,12 +414,18 @@ test "a new goal observed after met drops the stale tombstone" {
   assert_true(cadence.pending_tombstone)
   // A steered-in set supersedes the met verdict: flushing the old
   // tombstone after the new marker would wipe the new goal.
-  cadence.observe_notice("\{@agent_session.GoalPrefix}\nnew objective")
+  cadence.observe_notice(
+    "\{@agent_session.GoalPrefix}\nnew objective",
+    events=@emit.EventSink::global(),
+  )
   assert_false(cadence.pending_tombstone)
   assert_true(cadence.goal is Some("new objective"))
   // A durable clear also settles a pending tombstone.
   cadence.record_goal_met() |> ignore
-  cadence.observe_notice(@agent_session.GoalClearedNotice)
+  cadence.observe_notice(
+    @agent_session.GoalClearedNotice,
+    events=@emit.EventSink::global(),
+  )
   assert_false(cadence.pending_tombstone)
   assert_true(cadence.goal is None)
 }
@@ -511,7 +522,10 @@ test "met and a superseding set/clear reset the block state" {
   // A superseding set clears the durable-blocked cache for the new goal.
   let other = GoalCadence(blocked_goal_session(), tool_registered=true)
   assert_true(other.durably_blocked)
-  other.observe_notice("\{@agent_session.GoalPrefix}\nnew objective")
+  other.observe_notice(
+    "\{@agent_session.GoalPrefix}\nnew objective",
+    events=@emit.EventSink::global(),
+  )
   assert_false(other.durably_blocked)
   assert_true(other.pending_block is NoBlockTransition)
 }
@@ -523,11 +537,17 @@ test "a goal set after an earlier check re-arms the finish check" {
     system_prompt="sys",
   )
   let cadence = GoalCadence(session, tool_registered=false)
-  cadence.observe_notice("\{@agent_session.GoalPrefix}\nfirst objective")
+  cadence.observe_notice(
+    "\{@agent_session.GoalPrefix}\nfirst objective",
+    events=@emit.EventSink::global(),
+  )
   cadence.record_finish_check()
   assert_true(cadence.due_finish_check() is None)
   // A NEW goal deserves its own check — the earlier one confirmed a
   // different objective.
-  cadence.observe_notice("\{@agent_session.GoalPrefix}\nsecond objective")
+  cadence.observe_notice(
+    "\{@agent_session.GoalPrefix}\nsecond objective",
+    events=@emit.EventSink::global(),
+  )
   assert_true(cadence.due_finish_check() is Some("second objective"))
 }

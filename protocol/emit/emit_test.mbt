@@ -280,3 +280,40 @@ test "source points at the caller, not at emit" {
   }
   assert_true(source.contains("emit_test.mbt"))
 }
+
+///|
+/// A custom sink receives the event and the ORIGINAL call site — the
+/// property that lets a sub-run's isolating sink forward selected events
+/// without every log line blaming the sink itself.
+test "a custom EventSink receives the event and the caller's location" {
+  let seen : Array[(Json, String)] = []
+  let sink = @emit.EventSink((event, loc) => {
+    seen.push((event.to_json(), "\{loc}"))
+  })
+  sink.emit(MaxStepsExhausted)
+  guard seen is [(event_json, loc)] else { fail("expected one sinked event") }
+  assert_true(event_json.stringify().contains("max_steps_exhausted"))
+  assert_true(loc.contains("emit_test.mbt"))
+}
+
+///|
+/// The global sink is `emit` behind a value: same wire line, and the
+/// envelope's `source` still points at the code that reported the event,
+/// not at the sink plumbing.
+test "the global EventSink forwards to emit with the caller's source" {
+  let entries : Array[Json] = []
+  let logger = @xlog.global()
+  defer {
+    logger.set_handler(@xlog.Stdout())
+    logger.set_config(Config())
+  }
+  logger.set_handler(MemoryLogHandler::{ entries, })
+  logger.set_level(Info)
+  @emit.EventSink::global().emit(AgentStep(step=7))
+  guard entries is [Object(fields)] else { fail("expected one logged line") }
+  guard fields.get("source") is Some(String(source)) else {
+    fail("expected a source field")
+  }
+  assert_true(source.contains("emit_test.mbt"))
+  assert_true(fields.get("step") is Some(Number(7, ..)))
+}

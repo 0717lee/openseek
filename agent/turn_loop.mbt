@@ -15,6 +15,10 @@ priv struct AgentLoop {
   messages : Array[@deepseek.ChatMessage]
   plan_cadence : PlanCadence
   goal_cadence : GoalCadence
+  /// Where this loop's protocol events go. The top-level loop forwards to
+  /// the process log; a nested sub-run loop gets an isolating sink so its
+  /// lifecycle events cannot masquerade as the outer run's.
+  events : @emit.EventSink
   /// Latest session returned by a successful append. The run-level error
   /// handler uses it to persist a terminal failure/interruption even when the
   /// local loop state is behind the last durable session.
@@ -29,6 +33,7 @@ fn AgentLoop::AgentLoop(
   tools~ : @agent_tool.Tools,
   append_item~ : async (@agent_session.Session, @agent_session.SessionItem) -> @agent_session.Session,
   session~ : @agent_session.Session,
+  events~ : @emit.EventSink,
 ) -> AgentLoop {
   {
     runtime,
@@ -36,6 +41,7 @@ fn AgentLoop::AgentLoop(
     summary_client,
     tools,
     append_item,
+    events,
     messages: session.chat_messages(),
     plan_cadence: PlanCadence(registered=tools.find("plan") is Some(_)),
     goal_cadence: GoalCadence(
@@ -258,7 +264,7 @@ async fn AgentLoop::run(
         session,
         Terminal(Failed("max steps exhausted")),
       )
-      @emit.emit(MaxStepsExhausted)
+      self.events.emit(MaxStepsExhausted)
       session
     }
   } catch {
@@ -359,9 +365,9 @@ async fn AgentLoop::apply_steer_inputs(
     }
     let next = self.append(current, item)
     self.messages.push(ChatMessage(User, content=text))
-    @emit.emit(SteerApplied(kind~, content=text))
+    self.events.emit(SteerApplied(kind~, content=text))
     if input is Notice(text) {
-      self.goal_cadence.observe_notice(text)
+      self.goal_cadence.observe_notice(text, events=self.events)
     }
     continue next
   } nobreak {
@@ -389,13 +395,13 @@ async fn AgentLoop::prepare_step(
       tool_registered=self.goal_cadence.tool_registered,
     )
     session = self.append_runtime_notice(session, reminder)
-    @emit.emit(GoalReminder(content=reminder))
+    self.events.emit(GoalReminder(content=reminder))
     self.goal_cadence.record_reminder()
   }
   if self.plan_cadence.should_remind() {
     let reminder = self.plan_cadence.reminder_text()
     session = self.append_runtime_notice(session, reminder)
-    @emit.emit(PlanReminder(content=reminder))
+    self.events.emit(PlanReminder(content=reminder))
     self.plan_cadence.record_reminder()
   }
   self.plan_cadence.record_model_request()
@@ -404,32 +410,33 @@ async fn AgentLoop::prepare_step(
 
 ///|
 async fn AgentLoop::chat(self : Self, step : Int) -> @deepseek.ChatResponse {
-  @emit.emit(AgentStep(step=step + 1))
+  self.events.emit(AgentStep(step=step + 1))
   let response = self.client.chat(
     self.messages,
     tools=self.tools.function_tools(),
     stream=StreamHandler(on_content_delta=delta => {
       if delta != "" {
-        @emit.emit(AssistantDelta(content=delta))
+        self.events.emit(AssistantDelta(content=delta))
       }
     }),
   )
-  response.log_and_reasoning_content()
+  response.log_and_reasoning_content(events=self.events)
 }
 
 ///|
 fn @deepseek.ChatResponse::log_and_reasoning_content(
   response : Self,
+  events~ : @emit.EventSink,
 ) -> @deepseek.ChatResponse {
   // Reasoning first, so a consumer appending events in order shows the
   // thinking above the answer it led to.
   if response.reasoning_content != "" {
-    @emit.emit(ReasoningMessage(content=response.reasoning_content))
+    events.emit(ReasoningMessage(content=response.reasoning_content))
   }
   if response.content != "" {
-    @emit.emit(AssistantMessage(content=response.content))
+    events.emit(AssistantMessage(content=response.content))
   }
-  @emit.emit(Usage(usage=wire_usage(response.usage)))
+  events.emit(Usage(usage=wire_usage(response.usage)))
   response
 }
 
@@ -487,7 +494,7 @@ async fn AgentLoop::handle_tool_calls(
           content~,
           is_error=true,
         )
-        @emit.emit(
+        self.events.emit(
           ToolCallDecodeError(
             tool_call_id=native_call.id,
             tool_name=native_call.name,
@@ -636,7 +643,7 @@ async fn AgentLoop::execute_tool_call(
       // its durable clear before the terminal.
       let session = self.flush_goal_tombstone(session)
       let session = self.append(session, Terminal(Aborted(reason)))
-      @emit.emit(AgentAborted(reason~))
+      self.events.emit(AgentAborted(reason~))
       return FinishAgentLoop(session)
     }
     Respond(output) => {
@@ -660,6 +667,7 @@ async fn AgentLoop::execute_tool_call(
         is_error=output.is_error,
         content~,
         brief=output.brief,
+        events=self.events,
       )
       ContinueToolBatch(session)
     }
@@ -687,7 +695,7 @@ async fn AgentLoop::close_skipped_tool_calls(
       content=note,
       is_error=true,
     )
-    @emit.emit(
+    self.events.emit(
       ToolResult(
         tool_call_id=skipped.id,
         tool_name=skipped.name,
@@ -994,7 +1002,7 @@ async fn AgentLoop::inject_goal_check(
     tool_registered=self.goal_cadence.tool_registered,
   )
   let session = self.append_runtime_notice(session, check)
-  @emit.emit(GoalCheck(content=check))
+  self.events.emit(GoalCheck(content=check))
   self.goal_cadence.record_finish_check()
   // The check must stay the newest instruction: a plan reminder landing at
   // the same cadence boundary would bury it — the model would answer the
@@ -1078,7 +1086,7 @@ async fn AgentLoop::finish_turn(
   }
   let session = self.append(session, Terminal(Finished(answer)))
   self.push_finished_message(answer)
-  @emit.emit(AgentFinished(answer~))
+  self.events.emit(AgentFinished(answer~))
   Sealed(session)
 }
 
@@ -1089,8 +1097,9 @@ fn log_tool_result(
   is_error~ : Bool,
   content~ : String,
   brief~ : String?,
+  events~ : @emit.EventSink,
 ) -> Unit {
-  @emit.emit(
+  events.emit(
     ToolResult(
       tool_call_id=native_call.id,
       tool_name=tool_call.name,
