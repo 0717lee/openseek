@@ -127,9 +127,7 @@ fn default_prompt() -> String {
     #|  `target` defaults to native. It runs isolated, so a local-package import binds
     #|  the STALE mooncakes.io snapshot, never your working tree — to exercise local
     #|  package code, write a black-box `_test.mbt` and run `moon test <pkg> --filter`
-    #|  (above). Shell `moon run -e`/`moon run -` remain only for what the tool cannot
-    #|  express (e.g. a `fn main raise` stack-trace probe:
-    #|  `moon run --warn-list -a -e 'fn main raise { fail("bad input") }'`).
+    #|  (above).
     #|- shell `moon cram test`: durable CLI transcript tests under `tests/cram`;
     #|  use `mooncram` blocks for stable help, examples, stdout/stderr, and exits.
     #|  Example: `moon cram test tests/cram`.
@@ -245,17 +243,7 @@ fn default_prompt() -> String {
     #|  `moon ide find-references Symbol`, and `moon ide hover Symbol --loc
     #|  file.mbt:line:col` for types.
     #|- Use the `run_moonbit` tool for quick core-language probes and MoonBit
-    #|  automation, in preference to shell `python`/`node`. Do not use `moon run -c`;
-    #|  `-c` is easy to confuse with `-C`.
-    #|- `-e` requires the MoonBit code as the next command argument, for example
-    #|  `moon run -e 'fn main { println("ok") }'`. Do not run `moon run -e` and
-    #|  send the code on stdin.
-    #|- One-off `moon run -e` or `moon run -` snippets do not see project `moon.pkg`
-    #|  imports by default, but `.mbtx` snippets may include an `import` block for
-    #|  quick dependency probes.
-    #|- For multi-line probes, use shell with a heredoc, for example
-    #|  `moon run - <<'EOF'`. Add `--target native` when the snippet needs async or
-    #|  native-only APIs.
+    #|  automation, in preference to shell `python`/`node`.
     #|- MoonBit has no `await`; async functions/tests are marked with `async`, and
     #|  async calls are written normally.
     #|- Parameter and receiver bindings cannot be `mut`: write `fn f(x : Int)` and
@@ -275,16 +263,12 @@ fn default_prompt() -> String {
     #|}
     #|```
     #|
-    #|## Multi-Line Strings And Probes
+    #|## Multi-Line Strings
     #|
     #|- Raw multi-line strings use `#|`. Each content line starts with `#|`, and
     #|  text is kept literally.
     #|- Interpolated multi-line strings use `$|`. Each content line starts with
     #|  `$|`, and interpolation is written as `\{expr}`.
-    #|- Do not use `moon run -e` for multi-line snippets unless there is a strong
-    #|  reason. Shell quoting around newlines, quotes, backslashes, `#|`, `$|`, and
-    #|  `\{...}` is easy to get wrong. Prefer `moon run - <<'EOF'`
-    #|  for anything longer than one short line.
     #|
     #|```mbt check
     #|///|
@@ -299,21 +283,6 @@ fn default_prompt() -> String {
     #|  assert_true(raw =~ re"second line")
     #|  assert_true(rendered =~ re"hello MoonBit") // re"..." is regex literal
     #|}
-    #|```
-    #|
-    #|Verified async probe with `moon run --target native -` and a heredoc:
-    #|
-    #|```sh
-    #|moon run --target native - <<'EOF'
-    #|import {
-    #|  "moonbitlang/async",
-    #|}
-    #|
-    #|async fn main {
-    #|  @async.sleep(0)
-    #|  println("async ok")
-    #|}
-    #|EOF
     #|```
     #|
     #|## Checked Error Handling
