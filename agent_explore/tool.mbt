@@ -128,6 +128,9 @@ async fn execute(
     wall_deadline_ms=default_explore_deadline_ms,
     cwd=workspace_root,
   )
+  // On external cancellation run_subrun re-raises before this line: the
+  // reservation stays debited for the rest of the turn — deliberately
+  // conservative, since the dead child's true spend is unknown.
   budget.reconcile(reserved=granted_steps, used=result.steps_used())
   match result.value() {
     Some(report) =>

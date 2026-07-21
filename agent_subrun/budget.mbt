@@ -51,6 +51,11 @@ pub fn SubrunBudget::reserve(
   self : SubrunBudget,
   requested_steps : Int,
 ) -> Int? {
+  // A request below the useful floor (including a pathological negative one,
+  // which would MINT steps through the clamp) is refused outright.
+  if requested_steps < min_useful_subrun_steps {
+    return None
+  }
   if self.used_calls >= self.max_calls_per_turn {
     return None
   }
@@ -134,4 +139,13 @@ test "reconcile clamps a pathological used count" {
   // used > reserved must not mint steps; used < 0 must not either.
   budget.reconcile(reserved=granted, used=99)
   assert_true(budget.reserve(30) is Some(10))
+}
+
+///|
+test "a pathological reserve request cannot mint steps" {
+  let budget = SubrunBudget(max_calls_per_turn=2, max_steps_per_turn=30)
+  assert_true(budget.reserve(-50) is None)
+  assert_true(budget.reserve(0) is None)
+  // The refusals consumed nothing.
+  assert_true(budget.reserve(30) is Some(30))
 }

@@ -111,8 +111,9 @@ fn ChildObservations::observe(self : ChildObservations, line : String) -> Unit {
     }
     Some(MaxStepsExhausted) => self.max_steps_exhausted = true
     Some(ContextYield(..)) => self.context_yield = true
-    Some(TurnFailed(error~)) | Some(AgentSetupFailed(error~)) =>
-      self.failure = Some(error)
+    Some(TurnFailed(error~))
+    | Some(AgentSetupFailed(error~))
+    | Some(CommandError(error~)) => self.failure = Some(error)
     Some(AgentAborted(reason~)) => self.failure = Some(reason)
     _ => ()
   }
@@ -202,12 +203,30 @@ pub async fn[T] run_subrun(
         observations.observe(line)
       }
     }
-    try {
+    async fn feed_and_drain() -> Unit {
       // One input line; the pipe stays open — EOF is the cancel signal, not
-      // the end of input.
+      // the end of input. The write sits INSIDE the deadline scope: an input
+      // larger than the pipe capacity against a child that never reads must
+      // hit the wall deadline, not block forever (review finding).
       stdin_writer.write("\{input.stringify()}\n")
-      match @async.with_timeout_opt(wall_deadline_ms, drain) {
-        Some(_) => ()
+      drain()
+    }
+    try {
+      match @async.with_timeout_opt(wall_deadline_ms, feed_and_drain) {
+        Some(_) =>
+          // Clean EOF: the child closed stdout. Read its exit status — a
+          // crash-class failure (panic, signal, nonzero exit) emits no
+          // failure event, and without this the runner is structurally
+          // blind to it and would misclassify the run as NoReport. Bounded:
+          // a child that closed stdout but lingers falls through to the
+          // cancel below.
+          match @async.with_timeout_opt(2_000, () => process.wait()) {
+            Some(code) if code != 0 &&
+              observations.report is None &&
+              observations.failure is None =>
+              observations.failure = Some("subrun exited \{code}")
+            _ => ()
+          }
         None => {
           // Deadline: graceful cancel first — close stdin, let the child
           // flush; a report arriving in the grace window still counts.

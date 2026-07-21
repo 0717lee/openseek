@@ -26,6 +26,19 @@ async fn run_script(
 }
 
 ///|
+/// One-time spawnability probe: a trivial child that must succeed wherever
+/// `sh` can spawn at all. Tests guard on THIS and then assert hard — a
+/// skip-on-Failed guard inside a real test would silently hide a regression
+/// that wrongly folds stream errors into Failed (review finding).
+async fn can_spawn_sh() -> Bool {
+  let script =
+    #|read line
+    #|printf '{"subrun_report": {"answer": "probe"}}\n'
+  let result = run_script(script)
+  result.value() is Some("probe")
+}
+
+///|
 /// A child that could not even spawn is a Failed terminal, not a crash.
 async test "a spawn failure folds into Failed" {
   let result = @agent_subrun.run_subrun(
@@ -54,11 +67,11 @@ async test "events and the report line are drained and accounted" {
     #|printf '{"timestamp":"t","level":"INFO","source":"s","event":"agent_step","step":2}\n'
     #|printf '{"timestamp":"t","level":"INFO","source":"s","event":"usage","usage":{"prompt_tokens":95,"completion_tokens":5,"total_tokens":100,"prompt_cache_hit_tokens":0,"prompt_cache_miss_tokens":95}}\n'
     #|printf '{"subrun_report": {"answer": "forty-two"}}\n'
-  let result = run_script(script)
-  if result.terminal() is Failed(_) {
+  guard can_spawn_sh() else {
     println("skipped: cannot spawn sh")
     return
   }
+  let result = run_script(script)
   assert_true(result.value() is Some("forty-two"))
   debug_inspect(result.terminal(), content="Captured")
   assert_eq(result.steps_used(), 2)
@@ -71,11 +84,11 @@ async test "a clean exit without a report is NoReport" {
   let script =
     #|read line
     #|printf '{"timestamp":"t","level":"INFO","source":"s","event":"agent_step","step":1}\n'
-  let result = run_script(script)
-  if result.terminal() is Failed(_) {
+  guard can_spawn_sh() else {
     println("skipped: cannot spawn sh")
     return
   }
+  let result = run_script(script)
   assert_true(result.value() is None)
   debug_inspect(result.terminal(), content="NoReport")
 }
@@ -85,11 +98,11 @@ async test "an observed step exhaustion without a report is MaxSteps" {
   let script =
     #|read line
     #|printf '{"timestamp":"t","level":"INFO","source":"s","event":"max_steps_exhausted"}\n'
-  let result = run_script(script)
-  if result.terminal() is Failed(_) {
+  guard can_spawn_sh() else {
     println("skipped: cannot spawn sh")
     return
   }
+  let result = run_script(script)
   debug_inspect(result.terminal(), content="MaxSteps")
 }
 
@@ -98,11 +111,11 @@ async test "a garbled report is Failed, never rendered" {
   let script =
     #|read line
     #|printf '{"subrun_report": {"answer": 42}}\n'
-  let result = run_script(script)
-  if result.terminal() is Failed(reason) && reason.contains("spawn") {
+  guard can_spawn_sh() else {
     println("skipped: cannot spawn sh")
     return
   }
+  let result = run_script(script)
   assert_true(result.value() is None)
   guard result.terminal() is Failed(reason) else { fail("expected Failed") }
   assert_true(reason.contains("report rejected"))
@@ -116,11 +129,11 @@ async test "a report arriving in the cancel grace window still captures" {
     #|read line
     #|read _ignored
     #|printf '{"subrun_report": {"answer": "flushed on eof"}}\n'
-  let result = run_script(script, wall_deadline_ms=300)
-  if result.terminal() is Failed(_) {
+  guard can_spawn_sh() else {
     println("skipped: cannot spawn sh")
     return
   }
+  let result = run_script(script, wall_deadline_ms=300)
   assert_true(result.value() is Some("flushed on eof"))
   debug_inspect(result.terminal(), content="Captured")
 }
@@ -132,24 +145,79 @@ async test "a stalling child times out after deadline and grace" {
   let script =
     #|read line
     #|sleep 60
-  let result = run_script(script, wall_deadline_ms=300)
-  if result.terminal() is Failed(_) {
+  guard can_spawn_sh() else {
     println("skipped: cannot spawn sh")
     return
   }
+  let result = run_script(script, wall_deadline_ms=300)
   assert_true(result.value() is None)
   debug_inspect(result.terminal(), content="TimedOut")
 }
 
 ///|
-/// External cancellation re-raises out of run_subrun: an outer timeout gets
-/// its None back, which only happens when the cancellation propagated.
+/// External cancellation must RE-RAISE out of run_subrun, never fold into a
+/// terminal. Pinned by awaiting the cancelled task directly: a runner that
+/// swallowed the cancellation would complete with a SubrunResult and fail
+/// this test. (An outer with_timeout_opt cannot pin this — it returns None
+/// whether or not the body re-raised; review finding.)
 async test "external cancellation re-raises out of the runner" {
+  guard can_spawn_sh() else {
+    println("skipped: cannot spawn sh")
+    return
+  }
   let script =
     #|read line
     #|sleep 60
-  let outcome = @async.with_timeout_opt(300, () => {
-    run_script(script, wall_deadline_ms=30_000)
-  })
-  assert_true(outcome is None)
+  @async.with_task_group() <| group => {
+    let task = group.spawn(() => run_script(script, wall_deadline_ms=30_000))
+    @async.sleep(300)
+    task.cancel()
+    let mut reraised = false
+    let outcome : @agent_subrun.SubrunResult[String]? = Some(task.wait()) catch {
+      error => {
+        reraised = @async.is_cancellation_error(error) ||
+          @async.is_being_cancelled()
+        None
+      }
+    }
+    assert_true(reraised)
+    assert_true(outcome is None)
+  }
+}
+
+///|
+/// The input pipe must stay OPEN after the write — stdin EOF is the cancel
+/// signal, so a runner that closes it early cancels every child at startup.
+/// Pinned via exit-status classification: this child exits 7 the moment its
+/// stdin closes. Held open, that happens only when the DEADLINE closes it,
+/// inside the grace window -> TimedOut. Closed early, the child exits 7
+/// before the deadline -> the normal path reads exit status -> Failed.
+async test "the input pipe stays open until the deadline" {
+  guard can_spawn_sh() else {
+    println("skipped: cannot spawn sh")
+    return
+  }
+  let script =
+    #|read line
+    #|read second || exit 7
+    #|exit 7
+  let result = run_script(script, wall_deadline_ms=500)
+  assert_true(result.value() is None)
+  debug_inspect(result.terminal(), content="TimedOut")
+}
+
+///|
+/// A crash-class child — nonzero exit, no failure event, no report — is
+/// classified Failed via its exit status, never NoReport.
+async test "a nonzero exit without a report is Failed by exit status" {
+  let script =
+    #|read line
+    #|exit 3
+  guard can_spawn_sh() else {
+    println("skipped: cannot spawn sh")
+    return
+  }
+  let result = run_script(script)
+  guard result.terminal() is Failed(reason) else { fail("expected Failed") }
+  assert_true(reason.contains("exited 3"))
 }
