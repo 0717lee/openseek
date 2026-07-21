@@ -120,6 +120,10 @@ async test "tools_for_client bridges tools with namespaced names and schemas" {
     assert_eq(tools[0].description, "Echoes")
     let @agent_tool.JsonSchema(schema) = tools[0].schema
     assert_true(schema is { "type": "object", .. })
+    // The control flag is a built-in-only privilege: the ceiling salvage
+    // executes control-registered calls sight-unseen, so a server-supplied
+    // definition must never carry it.
+    assert_false(tools[0].is_control())
   })
 }
 

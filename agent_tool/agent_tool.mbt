@@ -47,6 +47,13 @@ pub struct AgentToolDefinition {
   /// WITHOUT executing, that a call is safe to honor at the context
   /// ceiling: the built-in `finish` declares it, and a custom completion
   /// override must too or it is skip-closed like any other call there.
+  ///
+  /// This is a BUILT-IN-ONLY privilege: the ceiling salvage executes every
+  /// control-registered call sight-unseen precisely when context headroom
+  /// is gone, so a definition built from dynamic input (an MCP server's
+  /// listing, any config-supplied tool) must never set it — arbitrary work
+  /// with unbounded output at the ceiling is exactly what the salvage
+  /// guard exists to prevent (see mcp/tools, which pins this with a test).
   control : Bool
 } derive(Debug(ignore=ToolExecutor))
 
