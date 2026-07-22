@@ -175,8 +175,10 @@ async test "an uncaught sandbox denial is explained, not left as a bare EPERM" {
 ///|
 async test "warnings are suppressed by default and shown with warning=on" {
   @vfs.with_tmpdir(ws => {
-    // `x` is unused: warns under `warning: "on"`, silent by default.
-    let source = "fn main {\n  let x = 1\n  println(2)\n}"
+    // `x` is unused (id 2) and `{}` is ambiguous_braces (id 82, in the
+    // 80..83 block a stale ceiling once missed): both warn under
+    // `warning: "on"`, both silent by default.
+    let source = "fn main {\n  let x = 1\n  let y = {}\n  ignore(y)\n  println(2)\n}"
     let quiet = run_in(ws, { "source": source })
     assert_false(quiet.is_error)
     assert_true(quiet.content.contains("2"))

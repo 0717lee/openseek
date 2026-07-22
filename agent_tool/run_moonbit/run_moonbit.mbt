@@ -26,10 +26,11 @@ const SandboxSourceWriteFeedback : String = "run_moonbit sandbox: the \"Operatio
 /// program that previously failed to compile reach a runtime panic. `-a` is
 /// unusable for this: a later `@id` re-enable does not survive it (probed
 /// live), so the warn-state IDs are disabled by explicit ranges instead.
-/// 79 is the current highest warning number (`moonc build-package
-/// -warn-help`); IDs a future compiler adds past it stay visible until this
-/// list is refreshed — fail-open, never silently error-eating.
-const WarnOffList : String = "-1..10-12..14-16..39-41..43-45..54-56..79"
+/// 83 is the highest warning number of the CURRENT bundled moonc (`moonc
+/// build-package -warn-help`; an id past the compiler's max is rejected, so
+/// never overshoot). IDs a future compiler adds past it stay visible until
+/// this list is refreshed — fail-open, never silently error-eating.
+const WarnOffList : String = "-1..10-12..14-16..39-41..43-45..54-56..83"
 
 ///|
 /// Best-effort refusal of the two obvious native escapes: process spawning
