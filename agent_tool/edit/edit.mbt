@@ -226,20 +226,25 @@ async fn preview_replace_all(
 ) -> @agent_tool.ToolAction {
   let content = @fs.read_file(path).text()
   let region = select_edit_region(content, input)
-  let (offsets, more) = find_matches(
-    region.body,
-    input.old_string,
-    PreviewSiteCap,
-  )
-  guard offsets.length() > 0 else {
-    return err("old_string not found\{range_detail(input)}")
-  }
+  // The cap bounds emitted SITES, not raw matches: matches arrive in order, so
+  // same-line matches always merge into the LAST site, and only a match that
+  // would open a new site past the cap stops the scan. Capping raw matches
+  // instead would let one many-match line starve every later site (and
+  // under-count the merges of the line it did emit).
   let single_line = !input.old_string.contains("\n")
   let sites : Array[PreviewSite] = []
   let notes : Array[String] = []
   let mut total_matches = 0
-  for offset in offsets {
-    total_matches += 1
+  let mut more = false
+  let mut from = 0
+  for ;; {
+    let tail = region.body.unsafe_substring(
+      start=from,
+      end=region.body.length(),
+    )
+    guard tail.find(input.old_string) is Some(found) else { break }
+    let offset = from + found
+    from = offset + input.old_string.length()
     let global = region.prefix.length() + offset
     let first_line = line_number_at_offset(content, global)
     let last_line = line_number_at_offset(
@@ -263,6 +268,7 @@ async fn preview_replace_all(
             new=input.new_string,
           ),
         }
+        total_matches += 1
       } else {
         notes.push(
           "line \{first_line}: an additional multiline match starts on this line — not expressible as a separate line-anchored edit; re-run the preview after applying the first",
@@ -270,6 +276,11 @@ async fn preview_replace_all(
       }
       continue
     }
+    if sites.length() == PreviewSiteCap {
+      more = true
+      break
+    }
+    total_matches += 1
     sites.push({
       first_line,
       last_line,
@@ -278,11 +289,14 @@ async fn preview_replace_all(
       new_string: input.new_string,
     })
   }
+  guard sites.length() > 0 else {
+    return err("old_string not found\{range_detail(input)}")
+  }
   let total_lines = total_line_count(content)
   let report = StringBuilder()
   if more {
     report.write_string(
-      "preview: \{PreviewSiteCap}+ matches for old_string in \{path} (file NOT modified) — showing the first \{sites.length()} site(s); narrow with start_line/end_line to see the rest\n",
+      "preview: showing the first \{sites.length()} match site(s) for old_string in \{path} (file NOT modified) — more sites exist; narrow with start_line/end_line to see the rest\n",
     )
   } else {
     report.write_string(
@@ -326,26 +340,6 @@ priv struct PreviewSite {
   match_count : Int
   old_string : String
   new_string : String
-}
-
-///|
-/// Offsets of the first `cap` non-overlapping matches of `needle` in `body`,
-/// plus whether more matches exist past the cap.
-fn find_matches(
-  body : String,
-  needle : String,
-  cap : Int,
-) -> (Array[Int], Bool) {
-  let offsets : Array[Int] = []
-  let mut from = 0
-  while offsets.length() < cap {
-    let tail = body.unsafe_substring(start=from, end=body.length())
-    guard tail.find(needle) is Some(found) else { return (offsets, false) }
-    offsets.push(from + found)
-    from = from + found + needle.length()
-  }
-  let tail = body.unsafe_substring(start=from, end=body.length())
-  (offsets, tail.find(needle) is Some(_))
 }
 
 ///|
@@ -399,11 +393,18 @@ fn preview_pad(value : Int, width : Int) -> String {
 
 ///|
 fn preview_display_line(text : String) -> String {
-  if text.length() > PreviewLineDisplayCap {
-    "\{text.unsafe_substring(start=0, end=PreviewLineDisplayCap)}…"
-  } else {
-    text
+  if text.length() <= PreviewLineDisplayCap {
+    return text
   }
+  // Never split a surrogate pair: when the cut lands right after a high
+  // surrogate, back up one unit so the ellipsis replaces the whole character
+  // instead of leaving a corrupt half.
+  let mut end = PreviewLineDisplayCap
+  let unit = text[end - 1].to_int()
+  if unit >= 0xD800 && unit <= 0xDBFF {
+    end -= 1
+  }
+  "\{text.unsafe_substring(start=0, end~)}…"
 }
 
 ///|
@@ -778,4 +779,18 @@ test "edit_reject_report pushes smaller edits and names pre-existing errors" {
     before_count=0,
   )
   assert_true(clipped.contains("would introduce at least 1 new parse error(s)"))
+}
+
+///|
+test "preview_display_line truncates on a character boundary" {
+  // short lines pass through untouched
+  assert_eq(preview_display_line("plain"), "plain")
+  // an over-long ASCII line keeps exactly the cap plus the ellipsis
+  assert_eq(preview_display_line(String::make(250, 'x')).length(), 201)
+  // an astral character straddling the cap is dropped whole, never split
+  let straddling = "\{String::make(199, 'x')}😀tail"
+  let cut = preview_display_line(straddling)
+  assert_true(cut.has_suffix("…"))
+  assert_false(cut.contains("😀"))
+  assert_eq(cut.length(), 200)
 }

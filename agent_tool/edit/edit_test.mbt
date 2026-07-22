@@ -886,7 +886,7 @@ async test "replace_all_preview caps the site list and says how to see more" {
       "replace_all_preview": true,
     })
     assert_false(preview.is_error)
-    assert_true(preview.content.contains("40+ matches"))
+    assert_true(preview.content.contains("more sites exist"))
     assert_true(preview.content.contains("narrow with start_line/end_line"))
     // sites past the cap yield no entries (line 40's context may still show
     // neighboring lines, so pin on the entry anchor, not the line text)
@@ -918,5 +918,35 @@ async test "replace_all_preview errors on no matches and on empty old_string" {
     })
     assert_true(insertion.is_error)
     assert_true(insertion.content.contains("non-empty old_string"))
+  })
+}
+
+///|
+async test "a many-match line does not starve later sites of the cap" {
+  @vfs.with_tmpdir(dir => {
+    let path = "\{dir}/dense.txt"
+    // Line 1 carries 45 matches on its own — far past the site cap counted as
+    // raw matches — followed by two ordinary one-match lines. The cap bounds
+    // SITES, so all three sites are emitted with exact counts.
+    let lines = StringBuilder()
+    for _ in 1..<=45 {
+      lines.write_string("q ")
+    }
+    lines.write_string("\nq alone\nq also\n")
+    @fs.write_file(path, lines.to_string(), create_mode=CreateOrTruncate)
+    let preview = run_edit({
+      "path": path,
+      "old_string": "q",
+      "new_string": "z",
+      "start_line": 1,
+      "replace_all_preview": true,
+    })
+    assert_false(preview.is_error)
+    assert_true(preview.content.contains("47 match(es) at 3 site(s)"))
+    assert_false(preview.content.contains("more sites exist"))
+    // line 1 collapses to one whole-line entry with every match applied
+    assert_true(preview.content.contains("45 matches"))
+    assert_true(preview.content.contains("\"start_line\":2"))
+    assert_true(preview.content.contains("\"start_line\":3"))
   })
 }
