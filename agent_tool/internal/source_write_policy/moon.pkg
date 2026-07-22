@@ -1,0 +1,8 @@
+import {
+  "bobzhang/openseek/internal/workspace_path",
+  "moonbitlang/x/path",
+}
+
+warnings = "+unnecessary_annotation"
+
+supported_targets = "+native"

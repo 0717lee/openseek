@@ -1,5 +1,5 @@
 ///|
-test "sandbox source write regex covers moonbit source and manifests" {
+test "sandbox source write profile regex covers source and manifests" {
   let regex = source_write_regex("/tmp/a.b")
   // The deny regex matches source files at any depth and no longer special-cases
   // build directories; `_build`/`.mooncakes` are re-allowed by the carve-out.
@@ -7,60 +7,6 @@ test "sandbox source write regex covers moonbit source and manifests" {
   assert_false(regex.contains("_build"))
   let carveout = source_write_build_carveout_regex("/tmp/a.b")
   assert_true(carveout.contains("_build|\\.mooncakes"))
-  assert_true(
-    is_protected_workspace_source_path("/workspace", "/workspace/moon.mod"),
-  )
-  assert_true(
-    is_protected_workspace_source_path("/workspace", "/workspace/pkg/moon.pkg"),
-  )
-  assert_true(
-    is_protected_workspace_source_path("/workspace", "/workspace/pkg/main.mbt"),
-  )
-  assert_true(
-    is_protected_workspace_source_path(
-      "/workspace", "/workspace/pkg/_build.mbt",
-    ),
-  )
-  assert_true(
-    is_protected_workspace_source_path(
-      "/workspace", "/workspace/.mooncakes.mbt",
-    ),
-  )
-  assert_false(
-    is_protected_workspace_source_path(
-      "/workspace", "/workspace/backup-moon.mod",
-    ),
-  )
-  assert_false(
-    is_protected_workspace_source_path(
-      "/workspace", "/workspace/_build/wasm-gc/release/format/main.mbt",
-    ),
-  )
-  assert_false(
-    is_protected_workspace_source_path(
-      "/workspace", "/workspace/.mooncakes/moonbitlang/core/main.mbt",
-    ),
-  )
-  assert_false(
-    is_protected_workspace_source_path(
-      "/workspace", "/workspace/pkg/_build/main.mbt",
-    ),
-  )
-  assert_false(
-    is_protected_workspace_source_path(
-      "/workspace", "/workspace/scripts/.mooncakes/pkg/main.mbt",
-    ),
-  )
-  assert_true(is_under_workspace_root("C:\\repo", "C:\\repo\\main.mbt"))
-  assert_true(
-    is_protected_workspace_source_path("C:\\repo", "C:\\repo\\main.mbt"),
-  )
-  assert_true(
-    is_protected_workspace_source_path("C:\\repo", "C:\\repo\\pkg\\moon.pkg"),
-  )
-  assert_false(
-    is_protected_workspace_source_path("C:\\repo", "C:\\repo\\_build\\main.mbt"),
-  )
 }
 
 ///|

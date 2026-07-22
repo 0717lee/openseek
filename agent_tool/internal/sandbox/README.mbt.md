@@ -1,55 +1,100 @@
 # agent_tool/internal/sandbox
 
-Shared macOS **sandbox** machinery for the agent's tools. It builds an SBPL
-(Seatbelt) "source-write read-only" profile, probes whether `sandbox-exec` can
-actually enforce it on this host, and exposes the workspace path predicates the
-profile scan needs.
+Internal macOS sandbox integration shared by the `shell` and `run_moonbit`
+agent tools. The package builds an SBPL (Seatbelt) profile from the separate
+source-write policy and runs shell command text through `sandbox-exec` when
+enforcement is available.
 
-Both the `shell` tool and the `run_moonbit` tool run their child process under
-this profile so a command or snippet can read the workspace and write non-source
-outputs while being blocked from directly overwriting protected MoonBit sources.
+This package does not own workspace path manipulation or protection-policy
+predicates. Generic lexical operations live in `internal/workspace_path`, while
+MoonBit source classification lives in `agent_tool/internal/source_write_policy`.
 
-The profile is a **best-effort** guard, not a hard boundary: it denies writes to
-protected source *paths*, but a process that can rename directories can still
-move sources in or out of the workspace-anchored region. `shell` closes that gap
-by statically preflighting its command text (see its `tree_target` analysis);
-callers running arbitrary code (`run_moonbit`) cannot, and rely on the planned
-wasm backend for full containment.
+## Implementation layout
 
-## What it protects
+The directory is one MoonBit package; the files are organizational boundaries,
+not separate namespaces:
 
-`source_write_readonly_profile_data(real_workspace_root)` returns an SBPL profile
-that, under `(allow default)`:
+- `sandbox_exec.mbt` probes `/usr/bin/sandbox-exec` and constructs its command
+  line;
+- `source_write_profile.mbt` scans the workspace, caches scan results, and emits
+  the SBPL profile;
+- `denial_output.mbt` recognizes protection failures in child-process output;
+- `sandbox_wbtest.mbt` tests the profile, cache, and diagnostics.
 
-- **denies** writes to protected source files anywhere under the workspace root —
-  `*.mbt`, `*.mbti`, `*.mbt.md`, and the manifests `moon.mod`, `moon.pkg`,
-  `moon.work`, plus the legacy `moon.mod.json` / `moon.pkg.json`;
-- **re-allows** `_build` / `.mooncakes` trees (Moon writes generated sources
-  there);
-- emits **literal denies for source-containing directories**, so moving or
-  deleting a whole directory (`rename`/`unlink`) cannot smuggle sources out.
+## Execution contract
 
-The result is cached per normalized workspace root and invalidated by directory
-mtime changes.
+Callers follow four steps:
 
-## Availability probe
-
-`sandbox_exec_available()` (cached) returns true only when `/usr/bin/sandbox-exec`
-exists **and** a trivial profile actually applies and enforces a deny here — so a
-process already running inside a sandbox (where re-sandboxing is refused) reports
-false and callers fall back to running unsandboxed. On non-macOS hosts it is
-always false; cross-platform containment is the planned wasm backend's job.
-
-## Usage
+1. Resolve the workspace root to an absolute real path.
+2. Call `sandbox_exec_available()`. A `false` result means this package cannot
+   enforce a profile; callers must choose their own fallback.
+3. Build `SourceWriteProfileData` with
+   `source_write_readonly_profile_data(real_workspace_root)` and pass its
+   `profile` to `sandbox_exec_args`.
+4. If the child fails, pass its output and the profile's `denial_subjects` to
+   `source_write_denied_in_text` before presenting a more specific diagnostic.
 
 ```mbt nocheck
+let real_root = @fs.realpath(workspace_root)
 if @sandbox.sandbox_exec_available() {
-  let profile = @sandbox.source_write_readonly_profile_data(workspace_root).profile
-  // run under: sandbox-exec -p <profile> <program> <args...>
-  @process.run(@sandbox.SandboxExecPath, ["-p", profile, program, ..args])
+  let data = @sandbox.source_write_readonly_profile_data(real_root)
+  let args = @sandbox.sandbox_exec_args(data.profile, command)
+  let result = @process.run(@sandbox.SandboxExecPath, args)
+  if @sandbox.source_write_denied_in_text(
+    result.stdout + result.stderr,
+    data.denial_subjects,
+  ) {
+    // Report that the command attempted to modify protected source.
+  }
 }
 ```
 
-The path predicates (`is_protected_workspace_source_path`, `is_under_workspace_root`,
-`is_moon_managed_workspace_path`, `is_protected_source_path`, `path_basename`) are
-also exported for callers that need to reason about protected paths directly.
+`sandbox_exec_args` deliberately accepts shell command text. It inserts
+`PlatformShellProgram` and `platform_shell_args(command)` after the inline SBPL
+profile; it does not accept an executable plus an already-tokenized argument
+vector.
+
+## Source-write profile
+
+The generated profile starts from `(allow default)` and then:
+
+- denies writes to `*.mbt`, `*.mbti`, `*.mbt.md`, `moon.mod`, `moon.pkg`, and
+  `moon.work`, including the legacy JSON manifests, under the workspace root;
+- re-allows `_build` and `.mooncakes` trees where Moon writes generated sources;
+- denies source-containing directories literally, preventing a direct rename or
+  removal of those directories.
+
+The base profile is cached by normalized workspace root. Directory mtimes from
+the source-tree scan invalidate the cache when the tree changes.
+
+The optional `writable_lab` argument appends a last-match-wins allow rule for an
+entire scratch subtree. The builder normalizes that path but does not prove that
+it belongs to the workspace. Callers must supply a trusted, narrowly scoped lab
+path.
+
+## Policy dependency
+
+The profile builder calls `@source_write_policy` to classify protected source
+names and Moon-managed build trees. That package combines the generic
+`@workspace_path.is_under_workspace_root` containment helper with
+MoonBit-specific naming rules. Callers performing static command preflight use
+those packages directly; the sandbox package does not re-export their APIs.
+
+## Availability and limitations
+
+`sandbox_exec_available()` caches a behavioral probe, not just an existence
+check. It requires an allowed no-op to succeed and a denied temporary write to
+fail. Nested sandboxes that prohibit re-sandboxing therefore report unavailable.
+
+The profile is a best-effort write guard, not a complete process-security
+boundary:
+
+- reads and non-source writes remain allowed;
+- callers may run unsandboxed when the availability probe returns `false`;
+- filesystem aliasing and directory operations can exceed purely path-based
+  policy assumptions;
+- `shell` supplements the runtime profile with static command preflight, while
+  arbitrary code run by `run_moonbit` cannot receive the same analysis.
+
+`sbpl_string_escape` only escapes the contents of an SBPL quoted string. It does
+not add quotes or validate a complete SBPL expression.

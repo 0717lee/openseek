@@ -108,19 +108,22 @@ fn mutating_moon_blocked(
           continue
         }
         has_path_target = true
-        guard @sandbox.path_is_under_lab(
+        guard @source_write_policy.path_is_under_lab(
           resolve_command_cwd(invocation.cwd, argument),
           lab,
         ) else {
           return true
         }
       }
-      guard has_path_target || @sandbox.path_is_under_lab(invocation.cwd, lab) else {
+      guard has_path_target ||
+        @source_write_policy.path_is_under_lab(invocation.cwd, lab) else {
         return true
       }
     } else {
       // A mutating (non-scaffold) moon command is judged by where it RUNS.
-      guard @sandbox.path_is_under_lab(invocation.cwd, lab) else { return true }
+      guard @source_write_policy.path_is_under_lab(invocation.cwd, lab) else {
+        return true
+      }
     }
   }
   false

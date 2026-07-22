@@ -1,0 +1,20 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "bobzhang/openseek/agent_tool/internal/source_write_policy"
+
+// Values
+pub fn is_moon_managed_workspace_path(String, String) -> Bool
+
+pub fn is_protected_source_path(String) -> Bool
+
+pub fn is_protected_workspace_source_path(String, String) -> Bool
+
+pub fn path_is_under_lab(String, String) -> Bool
+
+// Errors
+
+// Types and methods
+
+// Type aliases
+
+// Traits
+

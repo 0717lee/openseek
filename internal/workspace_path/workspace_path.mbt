@@ -22,6 +22,44 @@ pub fn strip_trailing_slash(path : String) -> String {
 }
 
 ///|
+/// Return the final lexical component of `path`.
+///
+/// Backslashes are treated as separators and trailing slashes are removed
+/// without collapsing a filesystem root. The path is not resolved against the
+/// filesystem and `.` or `..` components are not normalized.
+pub fn path_basename(path : String) -> String {
+  let normalized = strip_trailing_slash(path.replace_all(old="\\", new="/"))
+  match normalized.rev_find("/") {
+    Some(slash) => normalized[slash + 1:].to_owned()
+    None => normalized
+  }
+}
+
+///|
+/// Return whether `path` is `root` itself or lexically below it.
+///
+/// Comparison is case-sensitive. Backslashes are treated as separators and
+/// trailing slashes are ignored, but `.` and `..` components and symlinks are
+/// not resolved. Callers comparing user input should normalize or resolve it
+/// first.
+pub fn is_under_workspace_root(root : String, path : String) -> Bool {
+  let root = workspace_compare_path(root)
+  let path = workspace_compare_path(path)
+  if path == root {
+    true
+  } else if root == "/" {
+    path.has_prefix("/")
+  } else {
+    path.has_prefix("\{root}/")
+  }
+}
+
+///|
+fn workspace_compare_path(path : String) -> String {
+  strip_trailing_slash(path.replace_all(old="\\", new="/"))
+}
+
+///|
 /// Return the lexical parent of a POSIX or Windows-style path.
 pub fn parent_dir(path : String) -> String? {
   let normalized = strip_trailing_slash(path.replace_all(old="\\", new="/"))
@@ -102,4 +140,10 @@ test "lexical path helpers preserve roots and normalize separators" {
   assert_true(parent_dir("C:\\work\\lib\\") is Some("C:/work"))
   assert_eq(join_child(".", "moon.mod"), "moon.mod")
   assert_eq(join_child("/work/", "moon.mod"), "/work/moon.mod")
+  assert_eq(path_basename("/work/pkg/"), "pkg")
+  assert_eq(path_basename("C:\\work\\main.mbt"), "main.mbt")
+  assert_true(is_under_workspace_root("/work", "/work"))
+  assert_true(is_under_workspace_root("/work/", "/work/pkg/main.mbt"))
+  assert_false(is_under_workspace_root("/work", "/workspace/main.mbt"))
+  assert_true(is_under_workspace_root("C:\\work", "C:\\work\\main.mbt"))
 }

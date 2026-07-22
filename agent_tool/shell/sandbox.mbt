@@ -34,7 +34,9 @@ fn preblock_target_outside_lab(
   scratch_dir : String?,
 ) -> String? {
   match (target, scratch_dir) {
-    (Some(target), Some(lab)) if @sandbox.path_is_under_lab(target, lab) => None
+    (Some(target), Some(lab)) if @source_write_policy.path_is_under_lab(
+        target, lab,
+      ) => None
     (target, _) => target
   }
 }
@@ -473,7 +475,7 @@ fn is_fd_redirect_target(target : String) -> Bool {
 /// refuses it up front rather than let it overwrite tracked source. The scan
 /// covers the write forms `redirect_writes_file` recognizes (`>`, `>|`, `>>`,
 /// `<>`, `&>`, `&>>`, and `>&` to a path) and returns on the first target that
-/// `@sandbox.is_protected_workspace_source_path` flags.
+/// `@source_write_policy.is_protected_workspace_source_path` flags.
 ///
 /// Only `Simple` command lines are inspected (a non-simple parse returns
 /// `None`); the sandbox's `deny file-write*` rules on protected source paths are
@@ -549,7 +551,7 @@ fn direct_source_write_redirect_target_in_commands(
             cwd,
             redirect.target,
           )
-          if @sandbox.is_protected_workspace_source_path(
+          if @source_write_policy.is_protected_workspace_source_path(
               real_workspace_root, target,
             ) {
             return Some(target)
@@ -585,7 +587,7 @@ async fn direct_source_write_redirect_target_in_commands_following_existing_link
             cwd,
             redirect.target,
           )
-          if @sandbox.is_protected_workspace_source_path(
+          if @source_write_policy.is_protected_workspace_source_path(
               real_workspace_root, target,
             ) {
             return Some(target)
@@ -746,7 +748,9 @@ async fn existing_path_resolves_to_protected_workspace_source(
     error if @async.is_being_cancelled() => raise error
     _ => return None
   }
-  if @sandbox.is_protected_workspace_source_path(real_workspace_root, resolved) {
+  if @source_write_policy.is_protected_workspace_source_path(
+      real_workspace_root, resolved,
+    ) {
     Some(resolved)
   } else {
     None
@@ -943,7 +947,7 @@ fn command_text_source_literals_are_only_absolute_outside_workspace(
       if source_literals.any(source_literal => {
           let path : @path.Path = source_literal
           !path.is_absolute() ||
-          @sandbox.is_protected_workspace_source_path(
+          @source_write_policy.is_protected_workspace_source_path(
             real_workspace_root, source_literal,
           )
         }) {
@@ -1939,7 +1943,7 @@ fn command_word_matches_one_heredoc_target(
   let word = strip_leading_dot_slash(word)
   let target = strip_leading_dot_slash(target)
   word == target ||
-  @sandbox.path_basename(word) == @sandbox.path_basename(target)
+  @workspace_path.path_basename(word) == @workspace_path.path_basename(target)
 }
 
 ///|
@@ -2478,7 +2482,9 @@ async fn powershell_write_target(
     return git_workspace_scope_target(real_workspace_root, cwd)
   }
   for target in powershell_new_item_targets(operands, cwd) {
-    if @sandbox.is_protected_workspace_source_path(real_workspace_root, target) {
+    if @source_write_policy.is_protected_workspace_source_path(
+        real_workspace_root, target,
+      ) {
       return Some(target)
     }
     match
@@ -3025,7 +3031,7 @@ fn git_workspace_scope_target(
     @path.Path(real_workspace_root).normalize().to_string(),
   )
   let target = source_write_detection_cwd(real_workspace_root, Some(cwd))
-  if @sandbox.is_under_workspace_root(root, target) {
+  if @workspace_path.is_under_workspace_root(root, target) {
     Some(target)
   } else {
     None
@@ -3050,10 +3056,12 @@ async fn source_tree_find_target(
   let starts = if starts.length() == 0 { ["."] } else { starts }
   for start in starts {
     let target = resolve_source_write_redirect_target(cwd, start)
-    if @sandbox.is_under_workspace_root(real_workspace_root, target) &&
+    if @workspace_path.is_under_workspace_root(real_workspace_root, target) &&
       (
         !has_filter ||
-        @sandbox.is_protected_workspace_source_path(real_workspace_root, target) ||
+        @source_write_policy.is_protected_workspace_source_path(
+          real_workspace_root, target,
+        ) ||
         protected_workspace_source_or_tree_path(real_workspace_root, target)
       ) {
       return Some(target)
@@ -3289,7 +3297,7 @@ fn find_pattern_excludes_protected_source(
   case_insensitive~ : Bool,
 ) -> Bool {
   let pattern = if case_insensitive { pattern.to_lower() } else { pattern }
-  let base = @sandbox.path_basename(pattern)
+  let base = @workspace_path.path_basename(pattern)
   match find_glob_literal_suffix(base) {
     Some(suffix) if suffix != "" => !protected_source_suffix_can_match(suffix)
     _ => false
@@ -3401,7 +3409,7 @@ fn sed_targets_only_find_results(
         arg,
         case_insensitive=false,
       ) ||
-      @sandbox.is_protected_source_path(arg) {
+      @source_write_policy.is_protected_source_path(arg) {
       return false
     } else {
       return false
@@ -3663,7 +3671,7 @@ fn awk_redirect_literal_target(
   match collect_quoted_literal_from(program, index, quote) {
     Some(literal) => {
       let target = resolve_source_write_redirect_target(cwd, literal)
-      if @sandbox.is_protected_workspace_source_path(root, target) {
+      if @source_write_policy.is_protected_workspace_source_path(root, target) {
         Some(target)
       } else {
         None
@@ -3778,8 +3786,8 @@ async fn script_generated_tree_transfer_literal_pair_can_create_workspace_source
     ) {
     return false
   }
-  @sandbox.is_protected_source_path(source) ||
-  @sandbox.is_protected_source_path(dest) ||
+  @source_write_policy.is_protected_source_path(source) ||
+  @source_write_policy.is_protected_source_path(dest) ||
   (
     !looks_like_non_source_file_path(source) &&
     !looks_like_non_source_file_path(dest)
@@ -3815,14 +3823,14 @@ async fn script_generated_tree_transfer_can_create_workspace_source(
 ) -> Bool {
   let source = @path.Path(source).normalize().to_string()
   let dest = @path.Path(dest).normalize().to_string()
-  if !@sandbox.is_under_workspace_root(root, dest) ||
-    @sandbox.is_moon_managed_workspace_path(root, dest) {
+  if !@workspace_path.is_under_workspace_root(root, dest) ||
+    @source_write_policy.is_moon_managed_workspace_path(root, dest) {
     return false
   }
-  if !@sandbox.is_under_workspace_root(root, source) {
+  if !@workspace_path.is_under_workspace_root(root, source) {
     return source_path_or_tree_contains_protected_source(source)
   }
-  if !@sandbox.is_moon_managed_workspace_path(root, source) {
+  if !@source_write_policy.is_moon_managed_workspace_path(root, source) {
     return source_path_or_tree_contains_protected_source(source)
   }
   !(looks_like_non_source_file_path(source) &&
@@ -3846,10 +3854,10 @@ fn script_source_literal_preblock_target(
     if script_text_mentions_source_path(literal) {
       saw_source_literal = true
       let target = resolve_source_write_redirect_target(cwd, literal)
-      if @sandbox.is_protected_workspace_source_path(root, target) {
+      if @source_write_policy.is_protected_workspace_source_path(root, target) {
         return Some(target)
       }
-      if @sandbox.is_under_workspace_root(root, target) {
+      if @workspace_path.is_under_workspace_root(root, target) {
         saw_workspace_source_literal = true
       } else if @path.Path(literal).is_absolute() {
         saw_absolute_outside_source_literal = true
@@ -3860,7 +3868,7 @@ fn script_source_literal_preblock_target(
     Some(cwd)
   } else if saw_source_literal && saw_absolute_outside_source_literal {
     None
-  } else if @sandbox.is_under_workspace_root(root, cwd) {
+  } else if @workspace_path.is_under_workspace_root(root, cwd) {
     Some(cwd)
   } else {
     None
@@ -4099,7 +4107,7 @@ async fn source_tree_move_target(
   }
   match dest_target {
     Some(target) =>
-      if @sandbox.is_protected_workspace_source_path(
+      if @source_write_policy.is_protected_workspace_source_path(
           real_workspace_root, target,
         ) {
         Some(target)
@@ -4113,7 +4121,7 @@ async fn source_tree_move_target(
 ///|
 async fn source_path_or_tree_contains_protected_source(target : String) -> Bool {
   let target = @path.Path(target).normalize().to_string()
-  if @sandbox.is_protected_source_path(target) {
+  if @source_write_policy.is_protected_source_path(target) {
     return true
   }
   let kind = @fs.kind(target, follow_symlink=false) catch {
@@ -4141,7 +4149,7 @@ async fn directory_contains_protected_source_path(dir : String) -> Bool {
   }
   for entry in entries {
     let child = @path.Path(dir).join(Path(entry)).normalize().to_string()
-    if @sandbox.is_protected_source_path(child) {
+    if @source_write_policy.is_protected_source_path(child) {
       return true
     }
     let kind = @fs.kind(child, follow_symlink=false) catch {
@@ -4167,15 +4175,17 @@ async fn move_destination_can_create_workspace_source(
   source_contains_protected~ : Bool,
   predicted_dirs~ : Array[String],
 ) -> Bool {
-  if @sandbox.is_protected_workspace_source_path(real_workspace_root, dest) {
+  if @source_write_policy.is_protected_workspace_source_path(
+      real_workspace_root, dest,
+    ) {
     return true
   }
   let root = strip_trailing_slash(
     @path.Path(real_workspace_root).normalize().to_string(),
   )
   let dest = @path.Path(dest).normalize().to_string()
-  if !@sandbox.is_under_workspace_root(root, dest) ||
-    @sandbox.is_moon_managed_workspace_path(root, dest) {
+  if !@workspace_path.is_under_workspace_root(root, dest) ||
+    @source_write_policy.is_moon_managed_workspace_path(root, dest) {
     return false
   }
   let source_kind = @fs.kind(source, follow_symlink=true) catch {
@@ -4208,18 +4218,18 @@ async fn missing_move_source_can_create_workspace_source(
   let source = @path.Path(source).normalize().to_string()
   let final_dest = if dest_is_directory {
     @path.Path(dest)
-    .join(Path(@sandbox.path_basename(source)))
+    .join(Path(@workspace_path.path_basename(source)))
     .normalize()
     .to_string()
   } else {
     dest
   }
-  if @sandbox.is_protected_workspace_source_path(root, final_dest) {
+  if @source_write_policy.is_protected_workspace_source_path(root, final_dest) {
     return true
   }
   if dest_is_directory &&
-    @sandbox.is_under_workspace_root(root, source) &&
-    @sandbox.is_moon_managed_workspace_path(root, source) {
+    @workspace_path.is_under_workspace_root(root, source) &&
+    @source_write_policy.is_moon_managed_workspace_path(root, source) {
     return true
   }
   if path_is_predicted_directory(source, predicted_dirs) {
@@ -4231,10 +4241,10 @@ async fn missing_move_source_can_create_workspace_source(
 
 ///|
 fn looks_like_non_source_file_path(path : String) -> Bool {
-  let base = @sandbox.path_basename(path)
+  let base = @workspace_path.path_basename(path)
   match base.rev_find(".") {
     Some(dot) if dot + 1 < base.length() =>
-      !@sandbox.is_protected_source_path(base) &&
+      !@source_write_policy.is_protected_source_path(base) &&
       looks_like_file_extension(base[dot + 1:].to_owned())
     _ => false
   }
@@ -4516,7 +4526,7 @@ async fn source_tree_copy_destination_target(
   }
   match dest_target {
     Some(target) =>
-      if @sandbox.is_protected_workspace_source_path(
+      if @source_write_policy.is_protected_workspace_source_path(
           real_workspace_root, target,
         ) {
         Some(target)
@@ -4888,7 +4898,9 @@ async fn source_tree_touch_target(
   }
   for operand in operands {
     let target = resolve_source_write_redirect_target(cwd, operand)
-    if @sandbox.is_protected_workspace_source_path(real_workspace_root, target) {
+    if @source_write_policy.is_protected_workspace_source_path(
+        real_workspace_root, target,
+      ) {
       return Some(target)
     }
     if follow_symlinks {
@@ -5002,7 +5014,9 @@ async fn source_tree_tee_target(
   }
   for operand in operands {
     let target = resolve_source_write_redirect_target(cwd, operand)
-    if @sandbox.is_protected_workspace_source_path(real_workspace_root, target) {
+    if @source_write_policy.is_protected_workspace_source_path(
+        real_workspace_root, target,
+      ) {
       return Some(target)
     }
     match
@@ -5261,15 +5275,17 @@ async fn protected_workspace_source_or_tree_path(
   real_workspace_root : String,
   target : String,
 ) -> Bool {
-  if @sandbox.is_protected_workspace_source_path(real_workspace_root, target) {
+  if @source_write_policy.is_protected_workspace_source_path(
+      real_workspace_root, target,
+    ) {
     return true
   }
   let root = strip_trailing_slash(
     @path.Path(real_workspace_root).normalize().to_string(),
   )
   let target = @path.Path(target).normalize().to_string()
-  if !@sandbox.is_under_workspace_root(root, target) ||
-    @sandbox.is_moon_managed_workspace_path(root, target) {
+  if !@workspace_path.is_under_workspace_root(root, target) ||
+    @source_write_policy.is_moon_managed_workspace_path(root, target) {
     return false
   }
   let kind = @fs.kind(target, follow_symlink=false) catch {
@@ -5293,7 +5309,7 @@ async fn directory_contains_protected_workspace_source(
   }
   for entry in entries {
     let child = @path.Path(dir).join(Path(entry)).normalize().to_string()
-    if @sandbox.is_protected_workspace_source_path(root, child) {
+    if @source_write_policy.is_protected_workspace_source_path(root, child) {
       return true
     }
     let kind = @fs.kind(child, follow_symlink=false) catch {
