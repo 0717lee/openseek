@@ -19,3 +19,7 @@ import {
   "moonbitlang/async",
   "bobzhang/openseek/testkit/filesystem" @vfs,
 } for "test"
+
+import {
+  "bobzhang/openseek/testkit/filesystem" @vfs,
+} for "wbtest"

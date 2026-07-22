@@ -233,9 +233,10 @@ async fn execute(
     // (the raw OS error is otherwise a dead end) and treat the run as failed
     // even if the snippet swallowed the error and exited 0 — the same
     // semantics the shell tool applies to its command output. Detection scans
-    // the WHOLE on-disk log, not the capped display prefix, and runs for the
-    // timeout arm too: a snippet can flood past the cap before hitting the
-    // denial, or print a caught denial and then hang.
+    // the on-disk log far past the capped display prefix (bounded to a fixed
+    // head+tail byte budget), and runs for the timeout arm too: a snippet can
+    // flood past the cap before hitting the denial, or print a caught denial
+    // and then hang.
     let sandbox_denied = sandbox_data is Some(data) &&
       log_shows_source_write_denial(log, data.denial_subjects)
     let action = match result {
@@ -320,32 +321,82 @@ fn rewrite_temp_paths(text : String, bases : Array[String]) -> String {
 }
 
 ///|
-/// Chunk size for the full-log denial scan, and the carry kept when a single
-/// line outgrows a chunk — the tail is far larger than any denial pattern, so
-/// only a pattern split exactly at a trim point of a >64KB line is missed.
+/// Chunk size for the log denial scan, and the carry kept when a single line
+/// outgrows a chunk — the tail is far larger than any denial pattern, so only
+/// a pattern split exactly at a trim point of a >64KB line is missed.
 const DenialScanChunkBytes : Int = 65_536
 
 ///|
 const DenialScanCarryTailChars : Int = 4_096
 
 ///|
-/// Whether the on-disk output log shows a source-write denial, scanning the
-/// WHOLE file in bounded memory — the display cap must not bound detection.
-/// Chunked with a trailing-partial-line carry, so a denial line split across
-/// chunk boundaries is reassembled before the line-level detector sees it.
+/// Byte budget for the denial scan at EACH end of the log. The scan runs after
+/// the run's 60s deadline has already expired, so its work must not scale with
+/// how hard a snippet flooded stdout — a fixed budget keeps the tool call's
+/// wall-clock bounded whatever the log's size.
+const DenialScanBudgetBytes : Int = 16_777_216
+
+///|
+/// Whether the on-disk output log shows a source-write denial. Detection must
+/// not be bounded by the 48KB display cap (a snippet can flood past it before
+/// the denied write), but it must stay bounded in bytes and time: a log larger
+/// than twice `DenialScanBudgetBytes` is scanned at its head and tail only. An
+/// uncaught denial crashes the snippet, so its OSError line is the log's tail;
+/// a caught-and-printed denial lands where it happened, inside the head for
+/// realistic probes. Only a denial buried in the MIDDLE of a >32MB flood is
+/// missed — the price of a bounded scan. `budget_bytes` is parameterized for
+/// tests only.
 async fn log_shows_source_write_denial(
   path : String,
   denial_subjects : Array[String],
+  budget_bytes? : Int = DenialScanBudgetBytes,
 ) -> Bool {
   let file = @fs.open(path, mode=ReadOnly) catch { _ => return false }
   defer file.close()
+  let size = file.size() catch {
+    error if @async.is_being_cancelled() => raise error
+    _ => return false
+  }
+  let budget = budget_bytes.to_int64()
+  if size <= budget * 2 {
+    denial_scan_region(file, 0, size, denial_subjects)
+  } else {
+    denial_scan_region(file, 0, budget, denial_subjects) ||
+    denial_scan_region(file, size - budget, budget, denial_subjects)
+  }
+}
+
+///|
+/// Scan `len` bytes of `file` starting at `start` for a source-write denial,
+/// chunked with a trailing-partial-line carry so a denial line split across
+/// chunk boundaries is reassembled before the line-level detector sees it. (A
+/// region that starts mid-line can only truncate a pattern, never fabricate
+/// one, so the tail region needs no line alignment.)
+async fn denial_scan_region(
+  file : @fs.File,
+  start : Int64,
+  len : Int64,
+  denial_subjects : Array[String],
+) -> Bool {
   let buf = FixedArray::make(DenialScanChunkBytes, b'\x00')
   let mut carry = ""
-  for ;; {
-    let n = file.read(buf, max_len=DenialScanChunkBytes)
+  let mut position = start
+  let end = start + len
+  while position < end {
+    let remaining = end - position
+    let want = if remaining < DenialScanChunkBytes.to_int64() {
+      remaining.to_int()
+    } else {
+      DenialScanChunkBytes
+    }
+    let n = file.read_at(buf, position~, len=want) catch {
+      error if @async.is_being_cancelled() => raise error
+      _ => break
+    }
     if n <= 0 {
       break
     }
+    position += n.to_int64()
     let text = carry + @utf8.decode_lossy(Bytes::from_array(buf[:n]))
     match text.rev_find("\n") {
       Some(cut) => {
