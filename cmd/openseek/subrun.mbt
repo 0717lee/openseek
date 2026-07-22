@@ -151,6 +151,30 @@ fn child_durable_session(
 }
 
 ///|
+/// Create a child's scratch lab, realpath'd so the path the child is told,
+/// the read-only guard, and the sandbox profile all name the SAME
+/// kernel-canonical directory (macOS `/tmp` → `/private/tmp`) — otherwise
+/// the sandbox's allow-subpath would never match the writes it means to
+/// permit.
+async fn new_scratch_lab(prefix : String) -> String {
+  let dir = @fs.tmpdir(prefix~)
+  @fs.realpath(dir) catch {
+    _ => dir
+  }
+}
+
+///|
+/// Remove a child's scratch lab after it finishes: `moon check` inside a
+/// lab leaves a `_build` tree, so a long run's labs would otherwise
+/// accumulate until the OS cleans temp. Best-effort — a failed cleanup is
+/// not worth failing the sub-run over.
+async fn remove_scratch_lab(dir : String) -> Unit {
+  @fs.rmdir(dir, recursive=true) catch {
+    _ => ()
+  }
+}
+
+///|
 /// Run one kind in this process and return its report, if any.
 async fn dispatch_kind(
   kind : String,
@@ -179,7 +203,7 @@ async fn dispatch_kind(
   match kind {
     "explore" => {
       let api_key = @agentcli.api_key(matches, model)
-      let scratch_dir = @fs.tmpdir(prefix="openseek-explore-lab-")
+      let scratch_dir = new_scratch_lab("openseek-explore-lab-")
       let report = @agent_explore.run_child(
         input,
         api_key~,
@@ -194,6 +218,9 @@ async fn dispatch_kind(
         append_item?,
         scratch_dir~,
       )
+      // `defer` cannot host an async cleanup; a child cancelled mid-run
+      // re-raises before here and its lab is left to OS temp-cleaning.
+      remove_scratch_lab(scratch_dir)
       report.map(report => report.to_json())
     }
     "review" => {
@@ -209,7 +236,7 @@ async fn dispatch_kind(
         _ => None
       }
       let api_key = @agentcli.api_key(matches, model)
-      let scratch_dir = @fs.tmpdir(prefix="openseek-review-lab-")
+      let scratch_dir = new_scratch_lab("openseek-review-lab-")
       let report = @agent_review.run_goal_audit(
         goal~,
         baseline~,
@@ -225,6 +252,7 @@ async fn dispatch_kind(
         append_item?,
         scratch_dir~,
       )
+      remove_scratch_lab(scratch_dir)
       report.map(report => report.to_json())
     }
     "echo" => {

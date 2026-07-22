@@ -1539,3 +1539,38 @@ async test "moon new is a trusted scaffold only for a new or empty target" {
     )
   })
 }
+
+///|
+/// The scratch-lab backstop (K3 review): with a lab present, a "trusted"
+/// source-writing moon command (e.g. `moon new`) that would otherwise
+/// launch UNSANDBOXED is forced onto the sandboxed profile — so the kernel,
+/// not just the static guard, denies any workspace-source write. Without a
+/// lab the same command stays trusted/unsandboxed.
+async test "a scratch lab forces trusted source-writes onto the sandbox" {
+  guard @sandbox.sandbox_exec_available() else {
+    println("sandbox-exec unavailable; skipping")
+    return
+  }
+  let ws = @fs.tmpdir(prefix="openseek-lab-ws-")
+  let lab = @fs.tmpdir(prefix="openseek-lab-scratch-")
+  // No lab: `moon new` in the lab is the trusted, unsandboxed path.
+  let without = agent_shell_launch(
+    ws,
+    "moon new \{lab}/probe",
+    @shell_parse.parse_for_policy("moon new \{lab}/probe"),
+    cwd=lab,
+  )
+  assert_false(without.source_write_sandboxed)
+  // With the lab wired, the same command is sandboxed instead — the
+  // profile allows lab writes, the kernel denies workspace writes.
+  let with_lab = agent_shell_launch(
+    ws,
+    "moon new \{lab}/probe",
+    @shell_parse.parse_for_policy("moon new \{lab}/probe"),
+    cwd=lab,
+    scratch_dir=lab,
+  )
+  assert_true(with_lab.source_write_sandboxed)
+  @fs.rmdir(ws, recursive=true)
+  @fs.rmdir(lab, recursive=true)
+}

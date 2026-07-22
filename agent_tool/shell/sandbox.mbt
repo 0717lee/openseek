@@ -52,6 +52,13 @@ async fn agent_shell_launch(
     Some(cwd) => Some(@fs.realpath(cwd) catch { _ => cwd })
     None => None
   }
+  // The lab is realpath'd because sandbox-exec matches `file-write*` rules
+  // against the kernel-canonical path (macOS `/tmp` → `/private/tmp`): the
+  // allow-subpath must name the real path or it never matches.
+  let scratch_dir = match scratch_dir {
+    Some(lab) => Some(@fs.realpath(lab) catch { _ => lab })
+    None => None
+  }
   let mode = source_write_mode_for_parse(parsed, real_workspace_root, real_cwd)
   // `moon new` is trusted to scaffold, but only into a genuinely new or empty
   // target. A scaffold that would land in an existing non-empty directory is
@@ -63,6 +70,19 @@ async fn agent_shell_launch(
       parsed,
       real_cwd.unwrap_or(real_workspace_root),
     ) {
+    SourceReadOnly
+  } else {
+    mode
+  }
+  // A scratch lab means this is a read-only subagent child whose ONLY
+  // sanctioned writes are lab-local. The static guard admitted this
+  // command as lab-bound, but "trusted" moon writes (e.g. `moon new`) would
+  // otherwise run UNSANDBOXED — making the guard the sole defense (K3
+  // review). Force the sandbox with the lab-allow profile so the kernel
+  // denies any workspace-source write regardless of guard precision.
+  let mode = if scratch_dir is Some(_) &&
+    mode is TrustedSourceWrite &&
+    @sandbox.sandbox_exec_available() {
     SourceReadOnly
   } else {
     mode
