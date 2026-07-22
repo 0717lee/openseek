@@ -16,6 +16,8 @@ pub fn is_under_workspace_root(String, String) -> Bool
 
 pub fn path_basename(String) -> String
 
+pub fn path_is_under_lab(String, String) -> Bool
+
 pub fn platform_shell_args(String) -> Array[String]
 
 pub fn sandbox_exec_args(String, String) -> Array[String]
@@ -24,7 +26,7 @@ pub async fn sandbox_exec_available() -> Bool
 
 pub fn sbpl_string_escape(String) -> String
 
-pub async fn source_write_readonly_profile_data(String) -> SourceWriteProfileData
+pub async fn source_write_readonly_profile_data(String, writable_lab? : String) -> SourceWriteProfileData
 
 // Errors
 

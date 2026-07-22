@@ -179,6 +179,32 @@ async fn cleanup_sandbox_probe(
 /// (reads and non-source writes). Also returns the denied subjects.
 pub async fn source_write_readonly_profile_data(
   real_workspace_root : String,
+  writable_lab? : String,
+) -> SourceWriteProfileData {
+  let base = source_write_readonly_profile_base(real_workspace_root)
+  match writable_lab {
+    None => base
+    // SBPL is last-match-wins: one allow-subpath appended AFTER every deny
+    // re-opens exactly the lab — a per-child scratch directory where a
+    // read-only subagent may scaffold projects and write source to verify
+    // claims empirically. The composed profile is not cached (labs are
+    // per-child temp dirs); the base underneath still is.
+    Some(lab) => {
+      let lab = @workspace_path.strip_trailing_slash(
+        @path.Path(lab).normalize().to_string(),
+      )
+      {
+        profile: base.profile +
+        "(allow file-write* (subpath \"\{sbpl_string_escape(lab)}\"))\n",
+        denial_subjects: base.denial_subjects,
+      }
+    }
+  }
+}
+
+///|
+async fn source_write_readonly_profile_base(
+  real_workspace_root : String,
 ) -> SourceWriteProfileData {
   let real_workspace_root = @workspace_path.strip_trailing_slash(
     @path.Path(real_workspace_root).normalize().to_string(),
@@ -389,6 +415,23 @@ pub fn path_basename(path : String) -> String {
 ///|
 /// Whether `target` is a protected MoonBit source file inside the workspace
 /// and not under a Moon-managed `_build`/`.mooncakes` tree.
+/// Whether `target` sits under `lab` (inclusive), after normalizing both.
+/// The policy predicate for scratch-lab carve-outs: a path under the lab is
+/// the child's to write, whatever its name looks like.
+pub fn path_is_under_lab(target : String, lab : String) -> Bool {
+  let lab = @workspace_path.strip_trailing_slash(
+    @path.Path(lab).normalize().to_string(),
+  )
+  guard !lab.is_empty() && lab != "/" else { return false }
+  let target = @workspace_path.strip_trailing_slash(
+    @path.Path(target).normalize().to_string(),
+  )
+  target == lab || target.has_prefix("\{lab}/")
+}
+
+///|
+/// Whether `target` names a protected MoonBit source path of the workspace
+/// (by location under the root or by protected-source naming).
 pub fn is_protected_workspace_source_path(
   real_workspace_root : String,
   target : String,

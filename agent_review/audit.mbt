@@ -13,7 +13,22 @@ pub let default_audit_max_steps : Int = 100
 
 ///|
 /// The audit task: the goal text plus whatever baseline anchor exists.
-fn audit_task(goal : String, baseline : @agent_session.GoalBaseline?) -> String {
+fn audit_task(
+  goal : String,
+  baseline : @agent_session.GoalBaseline?,
+  scratch_dir : String?,
+) -> String {
+  let lab = match scratch_dir {
+    Some(lab) =>
+      (
+        $|
+        $|Your scratch lab (writable): \{lab}
+        $|Create files and projects THERE and run any moon command there to
+        $|verify a claim empirically before reporting it. The worktree under
+        $|audit stays read-only.
+      )
+    None => ""
+  }
   let anchor = match baseline {
     Some(baseline) =>
       if baseline.dirty {
@@ -42,7 +57,7 @@ fn audit_task(goal : String, baseline : @agent_session.GoalBaseline?) -> String 
     $|\{goal}
     $|
     $|\{anchor}
-    $|
+    $|\{lab}
     $|Audit the current worktree against the goal's own criteria and
     $|submit_review once, with scope.head = "WORKTREE".
   )
@@ -63,16 +78,17 @@ pub async fn run_goal_audit(
   workspace_root? : String = ".",
   session_id? : String = "goal-audit",
   append_item? : async (@agent_session.Session, @agent_session.SessionItem) -> @agent_session.Session,
+  scratch_dir? : String,
 ) -> ReviewReport? {
   @agent_subrun.execute_kind(
     session_id~,
     append_item?,
     system_prompt=audit_system_prompt(),
-    task=audit_task(goal, baseline),
+    task=audit_task(goal, baseline, scratch_dir),
     tools=captured => {
       @agent_tool.Tools([
         @read.definition(workspace_root~),
-        @shell.definition(workspace_root~, read_only=true),
+        @shell.definition(workspace_root~, read_only=true, scratch_dir?),
         @run_moonbit.definition(workspace_root~),
         submit_review_tool(captured),
       ])

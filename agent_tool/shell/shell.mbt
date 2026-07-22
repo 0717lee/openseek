@@ -57,6 +57,7 @@ pub fn definition(
   read_only? : Bool = false,
   bg_runtime? : @bgjobs.BgJobRuntime,
   default_timeout_ms? : Int,
+  scratch_dir? : String,
 ) -> @agent_tool.AgentToolDefinition {
   AgentToolDefinition(
     name="shell",
@@ -113,6 +114,7 @@ pub fn definition(
         read_only~,
         bg_runtime?,
         default_timeout_ms?,
+        scratch_dir?,
       )
     }),
   )
@@ -147,6 +149,7 @@ async fn execute_with_workspace(
   read_only~ : Bool,
   bg_runtime? : @bgjobs.BgJobRuntime,
   default_timeout_ms? : Int,
+  scratch_dir? : String,
 ) -> @agent_tool.ToolAction {
   let input = @decode.decode(arguments) catch {
     error => {
@@ -164,9 +167,16 @@ async fn execute_with_workspace(
   // best-effort: opaque commands are allowed and `moon check`/`moon test` may
   // still pre-build, so it only stops a review from reformatting/regenerating
   // the tree wholesale, not every possible mutation.
-  if read_only && review_read_only_blocks(parsed_command) {
+  if read_only &&
+    review_read_only_blocks(
+      parsed_command,
+      base_cwd=@workspace_path.resolve_cwd(workspace_root, input.cwd).unwrap_or(
+        workspace_root,
+      ),
+      scratch_dir~,
+    ) {
     return @agent_tool.ToolAction::respond(
-      "blocked in read-only review mode: `\{input.cmd}` runs a source-mutating moon command (fmt/info/test --update); a review reports rather than rewrites the tree. Use plain `moon check`/`moon test` (no --update), `git`, or `read`.",
+      "blocked in read-only review mode: `\{input.cmd}` runs a source-mutating moon command (fmt/info/test --update) outside your scratch lab; a review reports rather than rewrites the tree. Use plain `moon check`/`moon test` (no --update), `git`, `read` — or run the experiment inside your scratch lab.",
       is_error=true,
     )
   }
@@ -185,6 +195,7 @@ async fn execute_with_workspace(
     workspace_root,
     bg_runtime?,
     default_timeout_ms?,
+    scratch_dir?,
   ) catch {
     error =>
       @agent_tool.ToolAction::respond(
@@ -229,6 +240,7 @@ async fn shell(
   parsed_command : @shell_parse.ParseResult,
   cwd : String?,
   workspace_root : String,
+  scratch_dir? : String,
   bg_runtime? : @bgjobs.BgJobRuntime,
   default_timeout_ms? : Int,
 ) -> @agent_tool.ToolAction {
@@ -254,7 +266,10 @@ async fn shell(
       )
     }
   }
-  if direct_source_write_redirect_target(parsed_command, workspace_root, cwd)
+  if preblock_target_outside_lab(
+      direct_source_write_redirect_target(parsed_command, workspace_root, cwd),
+      scratch_dir,
+    )
     is Some(target) {
     return @agent_tool.ToolAction::respond(
       direct_source_blocked_content("source file write redirect", target),
@@ -441,12 +456,22 @@ async fn run_agent_shell_with_tree_precheck(
   timeout_ms~ : Int,
   foreground_spawn? : async (String, Array[String], String?, Int) -> @shell_exec.ShellExecution,
   on_timeout_detach? : (@shell_exec.ShellExecution, AgentShellLaunch) -> String,
+  scratch_dir? : String,
 ) -> ShellRunResult {
-  if source_tree_operation_target(parsed_command, cmd, workspace_root, cwd)
+  if preblock_target_outside_lab(
+      source_tree_operation_target(parsed_command, cmd, workspace_root, cwd),
+      scratch_dir,
+    )
     is Some(target) {
     return ShellPreblockedSourceTree(target)
   }
-  let launch = agent_shell_launch(workspace_root, cmd, parsed_command, cwd?)
+  let launch = agent_shell_launch(
+    workspace_root,
+    cmd,
+    parsed_command,
+    cwd?,
+    scratch_dir?,
+  )
   match foreground_spawn {
     // Foreground on the shared execution model: spawn on the session group and
     // await it (up to `timeout_ms`). The session-group process outlives this
@@ -545,6 +570,7 @@ async fn start_background(
   parsed_command : @shell_parse.ParseResult,
   cwd : String?,
   workspace_root : String,
+  scratch_dir? : String,
   bg_runtime? : @bgjobs.BgJobRuntime,
 ) -> @agent_tool.ToolAction {
   guard bg_runtime is Some(runtime) else {
@@ -559,11 +585,14 @@ async fn start_background(
       is_error=true,
     )
   }
-  if source_tree_operation_target(
-      parsed_command,
-      input.cmd,
-      workspace_root,
-      cwd,
+  if preblock_target_outside_lab(
+      source_tree_operation_target(
+        parsed_command,
+        input.cmd,
+        workspace_root,
+        cwd,
+      ),
+      scratch_dir,
     )
     is Some(target) {
     return @agent_tool.ToolAction::respond(
@@ -577,6 +606,7 @@ async fn start_background(
     input.cmd,
     parsed_command,
     cwd?,
+    scratch_dir?,
   )
   let id = runtime.start(
     program=launch.program,
@@ -805,4 +835,31 @@ test "shell formats output limit metadata" {
     ).content,
     "abc\n<system>exit=0 truncated=true output_limit_reached=true shown_chars=3 max_output_chars=3</system>",
   )
+}
+
+///|
+/// The read-only gate admits lab-bound moon commands end to end: with a
+/// scratch lab configured, `moon new <lab>/probe` passes the guard (the
+/// command actually runs and scaffolds), while the same scaffold aimed
+/// anywhere else still refuses before any process spawns.
+async test "read-only shell admits lab scaffolds and still blocks the rest" {
+  let lab = @fs.tmpdir(prefix="openseek-shell-lab-")
+  let allowed = execute_with_workspace(
+    ".",
+    { "cmd": "moon new \{lab}/probe --user t --name probe 2>&1 | tail -1" },
+    read_only=true,
+    scratch_dir=lab,
+  )
+  guard allowed is Respond(output) else { fail("expected Respond") }
+  assert_false(output.content.contains("read-only review mode"))
+  let blocked = execute_with_workspace(
+    ".",
+    { "cmd": "moon new /tmp/openseek-shell-lab-escape" },
+    read_only=true,
+    scratch_dir=lab,
+  )
+  guard blocked is Respond(output) else { fail("expected Respond") }
+  assert_true(output.is_error)
+  assert_true(output.content.contains("read-only review mode"))
+  @fs.rmdir(lab, recursive=true)
 }

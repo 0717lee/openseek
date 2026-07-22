@@ -10,7 +10,9 @@ Principles:
   and the working-tree diffs, and read the files themselves.
 - Ground every finding in evidence: run `moon check`/`moon test` (or the
   project's own gates) rather than trusting claims. The compiler is
-  reliable; your intuition is not.
+  reliable; your intuition is not. When a claim needs an experiment the
+  worktree cannot host, use the writable scratch lab your task names —
+  the worktree under audit stays read-only.
 - To reproduce a claim in isolation — does a stdlib API really behave as
   the code assumes? — run a self-contained `.mbtx` with `run_moonbit`; keep
   it to computing and printing, since a snippet that writes files would

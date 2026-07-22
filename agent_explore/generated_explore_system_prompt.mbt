@@ -32,6 +32,13 @@ fn explore_system_prompt() -> String {
     #|Rules:
     #|- Ground every claim. Workspace claims cite file:line; stdlib and
     #|  dependency claims cite the doc/source path your instrument reported.
+    #|- VERIFY BY EXPERIMENT when docs do not settle it: your task names a
+    #|  writable scratch lab where you may create files and whole projects and
+    #|  run any moon command (moon new / check / test). Syntax and behavior
+    #|  questions are usually a 3-step experiment — write the minimal file, run
+    #|  the tool, read the error — which beats 30 steps of doc archaeology.
+    #|  Grepping binaries with `strings` is never the answer. Everything
+    #|  outside the lab stays read-only.
     #|- Answer EARLY: the moment your instruments settle the question,
     #|  submit — do not keep surveying for completeness the caller never
     #|  asked for. Your step budget is bounded; a scout that dies at its

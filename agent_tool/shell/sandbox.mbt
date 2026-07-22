@@ -23,11 +23,29 @@ priv struct AgentShellOutput {
 }
 
 ///|
+/// A pre-block target that sits inside the child's scratch lab is not a
+/// violation: the lab is the one place a read-only subagent MAY fabricate
+/// and rewrite source to verify claims empirically. Everything else keeps
+/// the pre-block. (Mixed commands that also touch real source still run
+/// SANDBOXED, and the SBPL profile allows writes only under the lab — the
+/// kernel enforces what this static filter waives.)
+fn preblock_target_outside_lab(
+  target : String?,
+  scratch_dir : String?,
+) -> String? {
+  match (target, scratch_dir) {
+    (Some(target), Some(lab)) if @sandbox.path_is_under_lab(target, lab) => None
+    (target, _) => target
+  }
+}
+
+///|
 async fn agent_shell_launch(
   workspace_root : String,
   cmd : String,
   parsed : @shell_parse.ParseResult,
   cwd? : String,
+  scratch_dir? : String,
 ) -> AgentShellLaunch {
   let real_workspace_root = @fs.realpath(workspace_root)
   let real_cwd = match cwd {
@@ -59,6 +77,7 @@ async fn agent_shell_launch(
   }
   let profile_data = @sandbox.source_write_readonly_profile_data(
     real_workspace_root,
+    writable_lab?=scratch_dir,
   )
   {
     program: @sandbox.SandboxExecPath,

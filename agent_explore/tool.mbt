@@ -28,7 +28,9 @@ pub let max_hints_chars : Int = 2_000
 /// own executable — never PATH, so parent and child are the same binary and
 /// the report's derived JSON codecs cannot drift) invoked as
 /// `subrun explore`. The child's toolset is `read`,
-/// `shell(read_only=true)` (its instrument for `moon ide doc` and friends),
+/// `shell(read_only=true)` (its instrument for `moon ide doc` and friends;
+/// a per-child scratch lab is the one writable place, where the scout may
+/// scaffold throwaway projects to verify claims empirically),
 /// `run_moonbit` (run a self-contained snippet to check language/stdlib
 /// behavior), and `submit_answer` — no edit tools, no nested subagent
 /// tools. The
@@ -199,6 +201,7 @@ pub async fn run_child(
   workspace_root? : String = ".",
   session_id? : String = "explore",
   append_item? : async (@agent_session.Session, @agent_session.SessionItem) -> @agent_session.Session,
+  scratch_dir? : String,
 ) -> ExploreReport? {
   guard input is { "query": String(query), .. } && query.trim() != "" else {
     return None
@@ -211,11 +214,11 @@ pub async fn run_child(
     session_id~,
     append_item?,
     system_prompt=explore_system_prompt(),
-    task=explore_task(query, hints),
+    task=explore_task(query, hints, scratch_dir),
     tools=captured => {
       @agent_tool.Tools([
         @read.definition(workspace_root~),
-        @shell.definition(workspace_root~, read_only=true),
+        @shell.definition(workspace_root~, read_only=true, scratch_dir?),
         @run_moonbit.definition(workspace_root~),
         submit_answer_tool(captured),
       ])

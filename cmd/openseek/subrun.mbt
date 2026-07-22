@@ -172,9 +172,14 @@ async fn dispatch_kind(
     let store = @store.SessionStore(pair.1)
     (session, item) => store.append(session, item)
   })
+  // Every model-driven kind gets its own scratch lab: a temp directory
+  // where the otherwise read-only child MAY scaffold projects and write
+  // source to verify claims empirically (the sr-2 lesson: denied the
+  // 3-step experiment, a scout greps compiler binaries for 60 steps).
   match kind {
     "explore" => {
       let api_key = @agentcli.api_key(matches, model)
+      let scratch_dir = @fs.tmpdir(prefix="openseek-explore-lab-")
       let report = @agent_explore.run_child(
         input,
         api_key~,
@@ -187,6 +192,7 @@ async fn dispatch_kind(
         workspace_root~,
         session_id?,
         append_item?,
+        scratch_dir~,
       )
       report.map(report => report.to_json())
     }
@@ -203,6 +209,7 @@ async fn dispatch_kind(
         _ => None
       }
       let api_key = @agentcli.api_key(matches, model)
+      let scratch_dir = @fs.tmpdir(prefix="openseek-review-lab-")
       let report = @agent_review.run_goal_audit(
         goal~,
         baseline~,
@@ -216,6 +223,7 @@ async fn dispatch_kind(
         workspace_root~,
         session_id?,
         append_item?,
+        scratch_dir~,
       )
       report.map(report => report.to_json())
     }

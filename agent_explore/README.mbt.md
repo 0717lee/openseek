@@ -13,7 +13,9 @@ spot-check — conclusions enter the parent's context, never file dumps.
 Contract highlights:
 
 - Child toolset: `read` + `shell(read_only=true)` + `submit_answer` — no edit
-  tools, no nested subagent tools.
+  tools, no nested subagent tools. A per-child scratch lab (temp dir) is
+  the one writable place: the scout may scaffold throwaway projects and
+  run any moon command there to verify claims empirically.
 - Every report field is capped at submission (`ExploreReport::validate`), so
   the rendered result stays far below the loop's tool-result clamp.
 - Launching takes one slot of the shared per-turn `SubrunBudget` call
