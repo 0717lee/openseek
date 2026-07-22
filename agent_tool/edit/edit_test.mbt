@@ -950,3 +950,31 @@ async test "a many-match line does not starve later sites of the cap" {
     assert_true(preview.content.contains("\"start_line\":3"))
   })
 }
+
+///|
+async test "a minified dense line stays fast and yields a note, not a huge entry" {
+  @vfs.with_tmpdir(dir => {
+    let path = "\{dir}/minified.txt"
+    // 100k one-char matches on a single line: the scan must stay linear (the
+    // per-match tail-copy + from-zero line-count version was quadratic here),
+    // and the whole-line entry would embed the 100k-char line twice — so the
+    // site is reported with a note instead of an entry.
+    let dense = String::make(100_000, 'q')
+    @fs.write_file(path, "\{dense}\nq alone\n", create_mode=CreateOrTruncate)
+    let preview = run_edit({
+      "path": path,
+      "old_string": "q",
+      "new_string": "z",
+      "start_line": 1,
+      "replace_all_preview": true,
+    })
+    assert_false(preview.is_error)
+    assert_true(preview.content.contains("100001 match(es) at 2 site(s)"))
+    assert_true(
+      preview.content.contains("too long to emit as a whole-line entry"),
+    )
+    // the dense line yields NO entry; the ordinary line 2 still does
+    assert_false(preview.content.contains("\"start_line\":1"))
+    assert_true(preview.content.contains("\"start_line\":2"))
+  })
+}

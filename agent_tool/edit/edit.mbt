@@ -211,6 +211,13 @@ const PreviewContextLines : Int = 2
 const PreviewLineDisplayCap : Int = 200
 
 ///|
+/// Longest line a many-match site may embed as a whole-line entry: past this,
+/// the entry would carry the line twice and can push the report into the
+/// outer result clamp, which would cut the JSON array mid-entry and corrupt
+/// every entry. Such sites are reported with a note instead of an entry.
+const PreviewEntryCharsCap : Int = 4_096
+
+///|
 /// `replace_all_preview=true`: report every match of `old_string` in the
 /// selected line range — surrounding context for review plus a ready-to-use
 /// `multi_edit` edits array — WITHOUT modifying the file. The selection step
@@ -230,45 +237,73 @@ async fn preview_replace_all(
   // same-line matches always merge into the LAST site, and only a match that
   // would open a new site past the cap stops the scan. Capping raw matches
   // instead would let one many-match line starve every later site (and
-  // under-count the merges of the line it did emit).
+  // under-count the merges of the line it did emit). The scan is LINEAR in
+  // the body however dense the matches: views (no tail copies), line numbers
+  // counted incrementally, and a many-match line's whole-line entry built
+  // once at site finalization — a one-char needle over minified text must not
+  // stall the tool.
   let single_line = !input.old_string.contains("\n")
   let sites : Array[PreviewSite] = []
   let notes : Array[String] = []
   let mut total_matches = 0
   let mut more = false
+  // Incremental line tracking; match offsets only move forward.
+  let mut scan_offset = 0
+  let mut scan_line = 1
+  fn line_at(offset : Int) -> Int {
+    while scan_offset < offset {
+      if content[scan_offset] == '\n' {
+        scan_line += 1
+      }
+      scan_offset += 1
+    }
+    scan_line
+  }
+
+  // Same-line merges only bump this counter; the site's whole-line entry (or
+  // its too-long note) is built ONCE when the site is finalized.
+  let mut last_site_extra_matches = 0
+  fn finalize_last_site() -> Unit {
+    guard last_site_extra_matches > 0 else { return }
+    let site = sites[sites.length() - 1]
+    let match_count = 1 + last_site_extra_matches
+    last_site_extra_matches = 0
+    let line = line_text(content, site.first_line)
+    if line.length() > PreviewEntryCharsCap {
+      // Embedding a huge minified line twice in the edits array would blow the
+      // response (and an outer clamp cutting JSON mid-array corrupts ALL
+      // entries); report the site without an entry instead.
+      notes.push(
+        "line \{site.first_line}: \{match_count} matches, but the line is \{line.length()} chars — too long to emit as a whole-line entry; narrow old_string (with more surrounding context) or edit that line manually",
+      )
+      sites[sites.length() - 1] = { ..site, match_count, emit: false }
+      return
+    }
+    sites[sites.length() - 1] = {
+      ..site,
+      match_count,
+      old_string: line,
+      new_string: line.replace_all(old=input.old_string, new=input.new_string),
+    }
+  }
+
+  let prefix_length = region.prefix.length()
+  let needle = input.old_string[:]
   let mut from = 0
   for ;; {
-    let tail = region.body.unsafe_substring(
-      start=from,
-      end=region.body.length(),
-    )
-    guard tail.find(input.old_string) is Some(found) else { break }
+    guard region.body[from:].find(needle) is Some(found) else { break }
     let offset = from + found
     from = offset + input.old_string.length()
-    let global = region.prefix.length() + offset
-    let first_line = line_number_at_offset(content, global)
-    let last_line = line_number_at_offset(
-      content,
-      global + input.old_string.length() - 1,
-    )
+    let global = prefix_length + offset
+    let first_line = line_at(global)
+    let last_line = line_at(global + input.old_string.length() - 1)
     if sites.length() > 0 && sites[sites.length() - 1].first_line == first_line {
       if single_line {
         // A second match on the same line: two line-anchored edits with the
         // same anchor would both hit the first occurrence, so the site becomes
         // one whole-line entry with every match on the line applied.
-        let previous = sites[sites.length() - 1]
-        let line = line_text(content, first_line)
-        sites[sites.length() - 1] = {
-          first_line,
-          last_line,
-          match_count: previous.match_count + 1,
-          old_string: line,
-          new_string: line.replace_all(
-            old=input.old_string,
-            new=input.new_string,
-          ),
-        }
         total_matches += 1
+        last_site_extra_matches += 1
       } else {
         notes.push(
           "line \{first_line}: an additional multiline match starts on this line — not expressible as a separate line-anchored edit; re-run the preview after applying the first",
@@ -280,6 +315,7 @@ async fn preview_replace_all(
       more = true
       break
     }
+    finalize_last_site()
     total_matches += 1
     sites.push({
       first_line,
@@ -287,8 +323,10 @@ async fn preview_replace_all(
       match_count: 1,
       old_string: input.old_string,
       new_string: input.new_string,
+      emit: true,
     })
   }
+  finalize_last_site()
   guard sites.length() > 0 else {
     return err("old_string not found\{range_detail(input)}")
   }
@@ -313,14 +351,15 @@ async fn preview_replace_all(
   report.write_string(
     "\nmulti_edit edits array — line numbers refer to the file AS IT IS NOW; review, keep the entries to apply, drop the rest:\n[\n",
   )
-  for index, site in sites {
+  let emitted = sites.filter(site => site.emit)
+  for index, site in emitted {
     let entry : Json = {
       "file": input.path.to_json(),
       "old_string": site.old_string.to_json(),
       "new_string": site.new_string.to_json(),
       "start_line": site.first_line.to_json(),
     }
-    let separator = if index + 1 < sites.length() { "," } else { "" }
+    let separator = if index + 1 < emitted.length() { "," } else { "" }
     report.write_string("  \{entry.stringify()}\{separator}\n")
   }
   report.write_string("]\n")
@@ -340,11 +379,16 @@ priv struct PreviewSite {
   match_count : Int
   old_string : String
   new_string : String
+  // False for a site shown in the report but excluded from the edits array
+  // (a many-match line too long to emit as a whole-line entry).
+  emit : Bool
 }
 
 ///|
 fn preview_site_header(site : PreviewSite) -> String {
-  if site.match_count > 1 {
+  if site.match_count > 1 && !site.emit {
+    "line \{site.first_line} (\{site.match_count} matches — no entry emitted; see the note below):"
+  } else if site.match_count > 1 {
     "line \{site.first_line} (\{site.match_count} matches — the entry below replaces the WHOLE line with all of them applied; edit its new_string to change fewer):"
   } else if site.last_line > site.first_line {
     "lines \{site.first_line}-\{site.last_line}:"
