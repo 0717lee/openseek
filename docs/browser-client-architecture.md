@@ -243,9 +243,9 @@ stream id, defined in `desktop/tunnel` and shared by both sides:
   `abort` frame cancels an in-flight stream (an SSE stream never ends on its
   own). SSE bodies are forwarded line by line (each line is a complete UTF-8
   sequence ending in `\n`), so the byte stream reconstructs faithfully.
-- The **relay** (`desktop/cmd/relay`) accepts tunnels at `/tunnel`, serves
-  the frontend bundle itself under `/d/<device>/` (binary assets never cross
-  the tunnel), and tunnels only `/d/<device>/api/*` and `.../healthz`. It
+- The historical in-repo **relay** accepted tunnels at `/tunnel`, served the
+  frontend bundle itself under `/d/<device>/` (binary assets never crossed
+  the tunnel), and tunneled only `/d/<device>/api/*` and `.../healthz`. It
   maps each device token to a stable random id (reused across reconnects, so
   the URL survives a restart) and never inspects the payloads it forwards.
   A dropped tunnel wakes every waiting browser handler with a 502 rather
@@ -313,9 +313,9 @@ and embedded cases at `/` are unaffected.
    extension layer deleted; host ops moved to `internal/host` behind
    `/api/v1/ops/<op>`; window on `proton://app/` with the gateway address
    and token spliced into the document, gateway CORS-enabled). ✅
-4. **Relay service** — the reverse-tunnel core (`desktop/tunnel`,
-   `desktop/gateway/connect.mbt`, `desktop/cmd/relay`): a gateway dials the
-   relay with `--relay-url`/`--device-token` and browsers reach it at
-   `/d/<device>/`. Covers modes 2 and 3 at the tunnel layer; the account
-   layer in front is future work. ✅
+4. **Relay service** — the historical reverse-tunnel core used
+   `desktop/tunnel` and `desktop/gateway/connect.mbt`: a gateway dialed the
+   relay with `--relay-url`/`--device-token` and browsers reached it at
+   `/d/<device>/`. The in-repo service was later removed when the deployed
+   implementation moved to openseek-api. ✅
 5. **Container image**: gateway + engine, wired to the control plane.

@@ -92,10 +92,11 @@ not secrets — the barrier is ownership:
   directly (bypassing sign-in), and `OPENSEEK_SERVER_URL` points the
   sign-in flow at an ad-hoc server regardless of the settings' selection.
 
-The relay's own HTTP surface (OAuth routes, the devices API, schema) is
-specified in the openseek-api repo's `docs/relay-auth-design.md`. The
-development relay in `desktop/cmd/relay` serves the same paths without
-any auth checks — it is a splicer for local work, never for deployment.
+The relay's server implementation and HTTP surface (OAuth routes, the devices
+API, and schema) live in the openseek-api repository; its
+`docs/relay-auth-design.md` specifies that account layer. This repository keeps
+only the desktop-side connection code in `desktop/internal/remote` and the four
+control-frame definitions in `desktop/tunnel`.
 
 ## Errors
 

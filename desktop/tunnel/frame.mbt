@@ -1,24 +1,26 @@
-// The relay tunnel's control protocol, shared by the host's connector and
-// the relay (docs/remote-protocol.md). It only arranges connections — the
-// client protocol itself crosses the relay opaquely, spliced frame-for-frame
-// between a browser's WebSocket and a data WebSocket the host dials back.
+// The control messages exchanged by the desktop process and openseek-api on
+// the long-lived `/v1/tunnel` WebSocket (docs/remote-protocol.md). This package
+// only defines their JSON representation: socket ownership, authentication,
+// retries, and stream pairing live on their respective sides.
 //
-// Control frames are JSON text messages on the long-lived `/v1/tunnel`
-// WebSocket the host keeps open to the relay.
+// Once `Open` causes the desktop to dial `/v1/tunnel/<stream>`, that data
+// WebSocket carries the normal client protocol unchanged. Nothing in this
+// package decodes or routes those client messages. See README.md for the full
+// connection flow and ownership boundaries.
 
 ///|
 pub(all) enum Frame {
-  // Host → relay, the first frame: claim a device slot. The relay maps the
-  // token to a stable device id (its public route), so the same machine
-  // keeps its URL across reconnects.
+  /// Desktop → service, the first frame: register this machine. The service
+  /// maps the token to a stable device id, so reconnecting keeps the same
+  /// browser destination.
   Register(token~ : String, name~ : String)
-  // Relay → host: the slot is held; `device` is the id in the browser URL.
+  /// Service → desktop: registration succeeded; `device` is the public id.
   Registered(device~ : String)
-  // Relay → host: a browser connected to `/v1/devices/<device>/ws`; dial
-  // `GET /v1/tunnel/<stream>` back to serve it.
+  /// Service → desktop: a browser connected to `/v1/devices/<device>/ws`;
+  /// open the matching `/v1/tunnel/<stream>` data WebSocket.
   Open(stream~ : String)
-  // Relay → host: registration rejected (bad token, malformed frame). The
-  // host logs it, closes, and retries with backoff.
+  /// Service → desktop: registration was rejected. The desktop stops using
+  /// these credentials and waits for a new sign-in instead of retrying them.
   Fail(message~ : String)
 }
 
@@ -36,7 +38,7 @@ pub fn Frame::encode(self : Frame) -> String {
 
 ///|
 /// Decode one control frame; None for anything malformed or unknown — the
-/// receiving side treats that as a fatal tunnel error.
+/// receiving side terminates the current control connection.
 pub fn Frame::decode(text : String) -> Frame? {
   let json = @json.parse(text) catch { _ => return None }
   match json {
