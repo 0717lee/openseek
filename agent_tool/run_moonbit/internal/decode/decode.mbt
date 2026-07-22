@@ -7,6 +7,9 @@ pub struct RunMoonbitInput {
   source : String
   target : String
   cwd : String?
+  /// Whether compiler warnings appear in the run output — decoded from the
+  /// `"on"`/`"off"` tool argument, defaulting to `"off"` (suppressed).
+  warning : Bool
 } derive(Debug)
 
 ///|
@@ -40,7 +43,15 @@ pub fn decode(arguments : Json) -> RunMoonbitInput raise {
         { "cwd": _, .. } => fail("arguments.cwd to be a string")
         _ => None
       }
-      { source, target, cwd }
+      let warning = match arguments {
+        { "warning": String("on"), .. } => true
+        { "warning": String("off"), .. } => false
+        { "warning": Null, .. } => false
+        { "warning": _, .. } =>
+          fail("arguments.warning to be \"on\" or \"off\"")
+        _ => false
+      }
+      { source, target, cwd, warning }
     }
     Object(_) => fail("arguments.source")
     _ => fail("object arguments")
@@ -64,6 +75,24 @@ test "decode accepts an explicit target" {
 test "decode defaults cwd to None and reads an explicit cwd" {
   assert_true(decode({ "source": "x" }).cwd is None)
   assert_eq(decode({ "source": "x", "cwd": "sub/dir" }).cwd, Some("sub/dir"))
+}
+
+///|
+test "decode defaults warning to off and reads on/off" {
+  assert_false(decode({ "source": "x" }).warning)
+  assert_false(decode({ "source": "x", "warning": "off" }).warning)
+  assert_true(decode({ "source": "x", "warning": "on" }).warning)
+}
+
+///|
+test "decode rejects an unknown warning value" {
+  let failed = try {
+    decode({ "source": "x", "warning": "loud" }) |> ignore
+    false
+  } catch {
+    _ => true
+  }
+  assert_true(failed)
 }
 
 ///|

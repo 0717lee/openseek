@@ -59,6 +59,11 @@ fn native_escape(source : String) -> String? {
 /// which can differ from your workspace's pinned versions — verify
 /// dependency-API probes against the workspace, not run_moonbit.
 ///
+/// Compiler warnings are suppressed by default (`--warn-list -a`): snippets
+/// are throwaway scripts, so unused-value style noise would only pollute the
+/// output. Passing `warning: "on"` restores them, for when the warnings
+/// themselves are the thing being probed. Errors are unaffected either way.
+///
 /// Note: on macOS the run is wrapped in `sandbox-exec` with the shell tool's
 /// source-write-readonly profile, so a snippet is blocked from directly writing
 /// protected source files (`*.mbt`, `*.mbti`, `*.mbt.md`, `moon.mod/pkg/work`)
@@ -70,7 +75,7 @@ fn native_escape(source : String) -> String? {
 pub fn definition(workspace_root~ : String) -> @agent_tool.AgentToolDefinition {
   AgentToolDefinition(
     name="run_moonbit",
-    description="Compile and run a self-contained MoonBit program (a `.mbtx` single-file script) and return its merged stdout/stderr and exit status. Use this for scripting automation (read/transform files, parse JSON, compute) and for probing MoonBit language behavior — PREFER it over shell python/node so the automation is MoonBit. `source` may begin with an inline `import { \"pkg\", ... }` block (comma-separated module paths such as `\"moonbitlang/async\", \"moonbitlang/async/fs\", \"moonbitlang/core/json\"`) followed by the program including its own `main`; use `async fn main` for IO (add `\"moonbitlang/async\"` to the import block for it). It runs with your workspace as the working directory by default, so RELATIVE paths like `@fs.read_file(\"data.json\")` reach workspace files and files the program writes land in the workspace; pass `cwd` to run elsewhere. Build artifacts stay in a temp dir (your `_build` is untouched), and imports resolve against the registry (NOT your uncommitted edits) — to exercise working-tree code, add a `*_test.mbt` to that package and run `moon test` via shell instead. Bounded to 60s. When probing language or API behavior, don't probe serially one turn at a time: emit SEVERAL independent run_moonbit calls in the SAME assistant turn — one small program per hypothesis — and read all the results together; batching saves a full model round-trip per hypothesis and keeps each probe minimal instead of one growing mega-program.",
+    description="Compile and run a self-contained MoonBit program (a `.mbtx` single-file script) and return its merged stdout/stderr and exit status. Use this for scripting automation (read/transform files, parse JSON, compute) and for probing MoonBit language behavior — PREFER it over shell python/node so the automation is MoonBit. `source` may begin with an inline `import { \"pkg\", ... }` block (comma-separated module paths such as `\"moonbitlang/async\", \"moonbitlang/async/fs\", \"moonbitlang/core/json\"`) followed by the program including its own `main`; use `async fn main` for IO (add `\"moonbitlang/async\"` to the import block for it). It runs with your workspace as the working directory by default, so RELATIVE paths like `@fs.read_file(\"data.json\")` reach workspace files and files the program writes land in the workspace; pass `cwd` to run elsewhere. Build artifacts stay in a temp dir (your `_build` is untouched), and imports resolve against the registry (NOT your uncommitted edits) — to exercise working-tree code, add a `*_test.mbt` to that package and run `moon test` via shell instead. Compiler warnings are suppressed by default (throwaway scripts trip unused-value noise constantly); pass `warning: \"on\"` when the warnings are what you want to see. Bounded to 60s. When probing language or API behavior, don't probe serially one turn at a time: emit SEVERAL independent run_moonbit calls in the SAME assistant turn — one small program per hypothesis — and read all the results together; batching saves a full model round-trip per hypothesis and keeps each probe minimal instead of one growing mega-program.",
     schema=JsonSchema({
       "type": "object",
       "properties": {
@@ -83,6 +88,11 @@ pub fn definition(workspace_root~ : String) -> @agent_tool.AgentToolDefinition {
         "cwd": {
           "type": "string",
           "description": "Working directory the program runs in (relative paths resolve against the workspace root); defaults to the workspace root.",
+        },
+        "warning": {
+          "type": "string",
+          "enum": ["off", "on"],
+          "description": "Whether compiler warnings appear in the output; defaults to off (a snippet is a throwaway script, so unused-variable style noise is suppressed). Set \"on\" only when the warnings themselves are what you are probing.",
         },
       },
       "required": ["source"],
@@ -184,6 +194,15 @@ async fn execute(
       "--target-dir",
       dir,
     ]
+    // Warnings default OFF (`--warn-list -a` disables them all at the
+    // compiler): a snippet is a throwaway probe/script, so unused-variable
+    // style noise only burns context and can drown the program's real output.
+    // `warning: "on"` skips the flag, for when the warnings themselves are the
+    // thing being probed. Errors are unaffected either way.
+    if !input.warning {
+      moon_argv.push("--warn-list")
+      moon_argv.push("-a")
+    }
     // Wrap `moon run` in sandbox-exec where it can actually enforce (macOS) so a
     // snippet cannot directly overwrite protected source files — reusing the
     // shell tool's source-write-readonly profile keyed on the workspace root.

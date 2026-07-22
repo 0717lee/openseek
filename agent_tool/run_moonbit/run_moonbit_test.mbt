@@ -173,6 +173,24 @@ async test "an uncaught sandbox denial is explained, not left as a bare EPERM" {
 }
 
 ///|
+async test "warnings are suppressed by default and shown with warning=on" {
+  @vfs.with_tmpdir(ws => {
+    // `x` is unused: warns under `warning: "on"`, silent by default.
+    let source = "fn main {\n  let x = 1\n  println(2)\n}"
+    let quiet = run_in(ws, { "source": source })
+    assert_false(quiet.is_error)
+    assert_true(quiet.content.contains("2"))
+    assert_false(quiet.content.contains("Warning"))
+    let loud = run_in(ws, { "source": source, "warning": "on" })
+    assert_false(loud.is_error)
+    assert_true(loud.content.contains("Warning"))
+    assert_true(loud.content.contains("Unused variable"))
+    // warning diagnostics get the same source:LINE:COL rewrite as errors
+    assert_true(loud.content.contains("source:"))
+  })
+}
+
+///|
 async test "a denial past the display cap is still detected and explained" {
   guard @sandbox.sandbox_exec_available() else { return }
   @vfs.with_tmpdir(ws => {
@@ -206,6 +224,13 @@ async test "a denial past the display cap is still detected and explained" {
     assert_true(out.content.contains("run_moonbit sandbox"))
     assert_true(@fs.read_file("\{ws}/keep.mbt").text().contains("fn main {  }"))
   })
+}
+
+///|
+async test "rejects an unknown warning value" {
+  let out = run_in(".", { "source": "fn main {  }", "warning": "loud" })
+  assert_true(out.is_error)
+  assert_true(out.content.contains("run_moonbit requires"))
 }
 
 ///|

@@ -32,6 +32,10 @@ diagnostics are the error message when something does not build.
 - `cwd` (string, optional, default workspace root): the working directory the
   program runs in. A relative `cwd` resolves against the workspace root, like
   the `shell` tool.
+- `warning` (string, optional, `"off"`/`"on"`, default `"off"`): whether
+  compiler warnings appear in the output. Snippets are throwaway scripts, so
+  unused-value style noise is suppressed (`--warn-list -a`) unless the
+  warnings themselves are what you are probing. Errors are unaffected.
 
 Only **dependency resolution** is isolated: a local-package import resolves to
 the **published registry snapshot** (not your uncommitted edits), and a
