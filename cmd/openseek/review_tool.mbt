@@ -18,6 +18,7 @@ fn review_tool_definition(
 ) -> @agent_tool.AgentToolDefinition {
   AgentToolDefinition(
     name="review",
+    concurrent_safe=true,
     description="Request an INDEPENDENT audit of the current worktree by a review subagent — use it before declaring substantial work or a standing goal complete, or when you want a skeptical second reading of what you built. The auditor reads files, runs the project's own checks, hunts for vacuous success (tests asserting nothing, hardcoded outputs, quietly narrowed criteria), and returns severity-tagged findings with file:line citations. It audits against the standing goal when one exists; pass `focus` to narrow the criteria (with no standing goal, `focus` IS the criteria). Costs a bounded subagent run from the shared per-turn budget.",
     schema=JsonSchema({
       "type": "object",

@@ -57,6 +57,16 @@ pub struct AgentToolDefinition {
   /// pins this with tests on BOTH construction sites: the bridge and the
   /// build_grouped re-wrap).
   control : Bool
+  /// Safe to execute CONCURRENTLY with adjacent same-flagged calls in one
+  /// tool batch: the tool must not mutate the workspace or loop state,
+  /// must not return `Control` actions, and its result must not depend on
+  /// a sibling call's result. The built-in subagent launchers (explore,
+  /// the callable review) declare it — each runs an isolated child
+  /// process — so a batch of independent delegations overlaps instead of
+  /// serializing. Like `control`, this is a BUILT-IN-ONLY privilege:
+  /// never set it on a definition built from dynamic input (MCP listings,
+  /// config-supplied tools).
+  concurrent_safe : Bool
 } derive(Debug(ignore=ToolExecutor))
 
 ///|
@@ -68,14 +78,24 @@ pub fn AgentToolDefinition::AgentToolDefinition(
   schema~ : JsonSchema,
   execute~ : ToolExecutor,
   control? : Bool = false,
+  concurrent_safe? : Bool = false,
 ) -> AgentToolDefinition {
-  { name, description, schema, execute, control }
+  { name, description, schema, execute, control, concurrent_safe }
 }
 
 ///|
 /// Whether this tool declared itself a control tool (see the field doc).
 pub fn AgentToolDefinition::is_control(self : AgentToolDefinition) -> Bool {
   self.control
+}
+
+///|
+/// Whether this tool declared itself safe for adjacent-call concurrency
+/// (see the field doc).
+pub fn AgentToolDefinition::is_concurrent_safe(
+  self : AgentToolDefinition,
+) -> Bool {
+  self.concurrent_safe
 }
 
 ///|
@@ -351,6 +371,7 @@ test "Tools::function_tools converts the registry to deepseek tool definitions" 
       schema: JsonSchema({ "type": "object" }),
       execute: Sync(_args => ToolAction::respond("ok")),
       control: false,
+      concurrent_safe: false,
     },
   ])
   let function_tools = tools.function_tools()
@@ -367,6 +388,7 @@ test "Tools::find returns the registered definition by name" {
       schema: JsonSchema({ "type": "object" }),
       execute: Sync(_args => ToolAction::respond("ok")),
       control: false,
+      concurrent_safe: false,
     },
   ])
   guard tools.find("echo") is Some(definition) else { fail("missing echo") }
@@ -383,6 +405,7 @@ test "Tools::Tools raises on duplicate tool names" {
       schema: JsonSchema({ "type": "object" }),
       execute: Sync(_args => ToolAction::respond("first")),
       control: false,
+      concurrent_safe: false,
     },
     {
       name: "echo",
@@ -390,6 +413,7 @@ test "Tools::Tools raises on duplicate tool names" {
       schema: JsonSchema({ "type": "object" }),
       execute: Sync(_args => ToolAction::respond("second")),
       control: false,
+      concurrent_safe: false,
     },
   ]) catch {
     error => {
@@ -425,6 +449,7 @@ async test "execute_tool_call dispatches to registered executor" {
         }
       }),
       control: false,
+      concurrent_safe: false,
     },
   ])
   let call = AgentToolCall(
@@ -454,6 +479,7 @@ async test "execute_tool_call dispatches to async executor" {
       schema: JsonSchema({ "type": "object" }),
       execute: Async(async_echo),
       control: false,
+      concurrent_safe: false,
     },
   ])
   let call = AgentToolCall(
@@ -481,6 +507,7 @@ async test "execute_tool_call turns a tool failure into a recoverable error resu
       schema: JsonSchema({ "type": "object" }),
       execute: Async(async_boom),
       control: false,
+      concurrent_safe: false,
     },
   ])
   let call = AgentToolCall(ToolCall(id="call_1", name="boom", arguments="{}"))
@@ -504,6 +531,7 @@ test "Tools::function_tools preserves description and schema" {
       }),
       execute: Sync(_args => ToolAction::respond("ok")),
       control: false,
+      concurrent_safe: false,
     },
   ])
   let function_tools = tools.function_tools()
@@ -530,6 +558,7 @@ test "Tools::function_tools yields one entry per definition" {
       schema: JsonSchema({ "type": "object" }),
       execute: Sync(_args => ToolAction::respond("1")),
       control: false,
+      concurrent_safe: false,
     },
     {
       name: "second",
@@ -537,6 +566,7 @@ test "Tools::function_tools yields one entry per definition" {
       schema: JsonSchema({ "type": "object" }),
       execute: Sync(_args => ToolAction::respond("2")),
       control: false,
+      concurrent_safe: false,
     },
     {
       name: "third",
@@ -544,6 +574,7 @@ test "Tools::function_tools yields one entry per definition" {
       schema: JsonSchema({ "type": "object" }),
       execute: Sync(_args => ToolAction::respond("3")),
       control: false,
+      concurrent_safe: false,
     },
   ])
   let function_tools = tools.function_tools()

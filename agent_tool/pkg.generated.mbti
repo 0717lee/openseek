@@ -35,8 +35,10 @@ pub struct AgentToolDefinition {
   schema : JsonSchema
   execute : ToolExecutor
   control : Bool
+  concurrent_safe : Bool
 } derive(@debug.Debug)
-pub fn AgentToolDefinition::AgentToolDefinition(name~ : String, description~ : String, schema~ : JsonSchema, execute~ : ToolExecutor, control? : Bool) -> Self
+pub fn AgentToolDefinition::AgentToolDefinition(name~ : String, description~ : String, schema~ : JsonSchema, execute~ : ToolExecutor, control? : Bool, concurrent_safe? : Bool) -> Self
+pub fn AgentToolDefinition::is_concurrent_safe(Self) -> Bool
 pub fn AgentToolDefinition::is_control(Self) -> Bool
 
 pub enum FileState {

@@ -464,6 +464,7 @@ async fn AgentLoop::handle_tool_calls(
     response,
     tool_calls=response.tool_calls,
   )
+  let prefetched = self.prefetch_concurrent_results(response)
   let mut spent_result_chars : Int64 = 0
   for call_index, native_call in response.tool_calls; session = session {
     // Running batch budget: stop BEFORE a call whose worst case could push
@@ -525,6 +526,7 @@ async fn AgentLoop::handle_tool_calls(
         tool_call,
         spent_result_chars~,
         last_step~,
+        prefetched?=prefetched.get(call_index),
       ) {
       ContinueToolBatch(next) => {
         // Account the result actually recorded for this call (the loop
@@ -554,6 +556,72 @@ async fn AgentLoop::handle_tool_calls(
 }
 
 ///|
+/// Execute maximal runs of ADJACENT concurrent-safe tool calls up front,
+/// concurrently, returning their actions keyed by batch index. The
+/// sequential batch loop then consumes the cached actions in call order,
+/// so recording, budget accounting, ceiling handling, and result ordering
+/// are byte-identical to sequential execution — only the waiting overlaps.
+///
+/// A group prefetches only when the ENTIRE batch prefix through its last
+/// call fits the running batch budget worst-case: a child must never be
+/// launched for a call the ceiling would then skip-close (its spend would
+/// be silently wasted). Goal calls (loop-intercepted), undecodable calls,
+/// and unknown tools never prefetch — the loop's own paths handle them.
+/// Only cancellation escapes a prefetch; tool failures fold into the
+/// action `execute_tool_call` already returns.
+async fn AgentLoop::prefetch_concurrent_results(
+  self : Self,
+  response : @deepseek.ChatResponse,
+) -> Map[Int, @agent_tool.ToolAction] {
+  let results : Map[Int, @agent_tool.ToolAction] = Map([])
+  let groups : Array[Array[(Int, @agent_tool.AgentToolCall)]] = []
+  let current : Array[(Int, @agent_tool.AgentToolCall)] = []
+  fn flush() -> Unit {
+    if current.length() >= 2 {
+      groups.push(current.copy())
+    }
+    current.clear()
+  }
+
+  for index, native in response.tool_calls {
+    let safe = self.tools.find(native.name) is Some(tool) &&
+      tool.is_concurrent_safe() &&
+      !(native.name == "goal" && self.goal_cadence.tool_registered)
+    guard safe else {
+      flush()
+      continue
+    }
+    let call = @agent_tool.AgentToolCall(native) catch {
+      error if @async.is_being_cancelled() ||
+        @async.is_cancellation_error(error) => raise error
+      _ => {
+        flush()
+        continue
+      }
+    }
+    current.push((index, call))
+  }
+  flush()
+  for group in groups {
+    guard group.last() is Some((last_index, _)) else { continue }
+    // Worst case for every call before and inside the group: each records
+    // a full clamped result. Conservative — refusing a prefetch only means
+    // the calls run sequentially, exactly as before.
+    let worst_prior = last_index.to_int64() * max_tool_result_chars.to_int64()
+    guard self.next_call_fits(response.usage, worst_prior) else { continue }
+    @async.with_task_group() <| scope => {
+      for entry in group {
+        let (index, call) = entry
+        scope.spawn_bg(() => {
+          results.set(index, @agent_tool.execute_tool_call(call, self.tools))
+        })
+      }
+    }
+  }
+  results
+}
+
+///|
 async fn AgentLoop::execute_tool_call(
   self : Self,
   session : @agent_session.Session,
@@ -563,6 +631,7 @@ async fn AgentLoop::execute_tool_call(
   tool_call : @agent_tool.AgentToolCall,
   spent_result_chars~ : Int64,
   last_step~ : Bool,
+  prefetched? : @agent_tool.ToolAction,
 ) -> ToolCallOutcome {
   // The goal status tool is loop-intercepted: only the loop knows whether a
   // goal currently stands, and the durable clear must be sequenced by the
@@ -572,7 +641,12 @@ async fn AgentLoop::execute_tool_call(
   if tool_call.name == "goal" && self.goal_cadence.tool_registered {
     return self.handle_goal_tool_call(session, native_call, tool_call)
   }
-  let result = @agent_tool.execute_tool_call(tool_call, self.tools)
+  let result = match prefetched {
+    // Already executed concurrently with its batch siblings; recording and
+    // accounting proceed exactly as for a fresh execution.
+    Some(action) => action
+    None => @agent_tool.execute_tool_call(tool_call, self.tools)
+  }
   match result {
     Control(Finish(answer)) => {
       let session = self.record_tool_result(
