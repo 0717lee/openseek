@@ -10,7 +10,18 @@ packages actually use. Repo-agnostic; drive it with `moon ide analyze`.
    `usage: N (M in test)`. Real usage = `N − M`. It also flags `pub(all)` /
    `pub(open)` that can narrow to `pub`. Script the sweep: run it over every
    package first and rank packages by zero-real-usage count — fix the worst
-   first.
+   first. Two count semantics to internalize:
+   - **Counts are cross-package only.** Same-package references never count,
+     so a symbol used ten times in its own package still shows `usage: 0`.
+     Those are the easiest wins: drop `pub` and nothing else moves (the
+     definition stays used, so no unused-symbol warning fires).
+   - **Blessed exports still list — filter on the annotation.** A symbol
+     kept in `exports.mbt` is NOT dropped from the output; it appears with
+     `, in exports.mbt` appended to its usage comment. A sweep script that
+     strips or ignores everything after `//` (this round's did) re-surfaces
+     every deliberately kept export as a zero-usage candidate and drowns the
+     ranking in already-classified keeps. Parse the annotation and subtract
+     those rows first.
 2. **Classify each zero-real symbol** — the deny-warn gate forces exactly
    three outcomes:
    - **Test-only usage (`N > 0, N == M`)** → first check HOW consumers import
@@ -40,8 +51,19 @@ packages actually use. Repo-agnostic; drive it with `moon ide analyze`.
   `moon.work`, a JS app module, a desktop shell) shows zero usage here while
   being load-bearing there. Union usage from every workspace that imports it
   before shrinking — and put the symbols such a consumer needs in
-  `exports.mbt` with a comment naming that consumer. `moon ide analyze`
-  respects the convention, so they stop showing up as shrink candidates.
+  `exports.mbt` with a comment naming that consumer. (The analyzer keeps
+  listing them, annotated `, in exports.mbt` — see step 1; filter on that
+  marker in the sweep script.)
+- **Target-only consumers are invisible too — including to the narrowability
+  flags.** A JS-only package errors out of `moon ide analyze` ("no package
+  directories found in input paths") AND its usages of everything else are
+  missing from the counts and from the `(all) or (open) can be removed`
+  hints. Real case: `ParsedLog` was flagged narrowable while the js-only viz
+  app constructs it with a struct literal — narrowing compiles clean under
+  native `moon check --deny-warn` (which never builds the js app) and breaks
+  the bundle build. Grep js/web consumers for every candidate, and verify
+  with `moon check --target js` (or the app's bundle build) after any
+  narrowing a js package might construct.
 - **Published modules**: if the module is on a registry, everything `pub` is
   potentially someone's dependency. Get the owner's explicit OK that
   in-repo usage is the yardstick (here: yes).

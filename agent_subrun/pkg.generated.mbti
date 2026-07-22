@@ -11,15 +11,9 @@ import {
 }
 
 // Values
-pub let cancel_grace_ms : Int
-
 pub fn[T] capture_tool(name~ : String, description~ : String, schema~ : @agent_tool.JsonSchema, parse~ : (Json) -> Result[T, Array[String]], @ref.Ref[T?], finished_note? : (T) -> String) -> @agent_tool.AgentToolDefinition
 
 pub async fn[T] execute_kind(session_id~ : String, system_prompt~ : String, task~ : String, tools~ : (@ref.Ref[T?]) -> @agent_tool.Tools raise, max_steps~ : Int, api_key~ : String, model~ : @deepseek.Model, thinking? : @deepseek.ThinkingMode, api_url? : String, workspace_root? : String, append_item? : async (@agent_session.Session, @agent_session.SessionItem) -> @agent_session.Session) -> T?
-
-pub let min_useful_subrun_steps : Int
-
-pub fn parse_report_line(Json) -> Json?
 
 pub fn report_line(Json) -> String
 
@@ -58,7 +52,7 @@ pub fn[T] SubrunResult::subrun_id(Self[T]) -> String
 pub fn[T] SubrunResult::terminal(Self[T]) -> SubrunTerminal
 pub fn[T] SubrunResult::value(Self[T]) -> T?
 
-pub(all) enum SubrunTerminal {
+pub enum SubrunTerminal {
   Captured
   NoReport
   MaxSteps

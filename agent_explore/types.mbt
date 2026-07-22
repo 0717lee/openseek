@@ -7,32 +7,32 @@
 
 ///|
 /// The schema version this build emits and accepts.
-pub let current_schema_version : Int = 1
+let current_schema_version : Int = 1
 
 ///|
 /// Field and count ceilings, enforced by `validate`.
-pub let max_answer_chars : Int = 8_000
+let max_answer_chars : Int = 8_000
 
 ///|
 /// Citation-count ceiling, enforced by `validate`.
-pub let max_citations : Int = 20
+let max_citations : Int = 20
 
 ///|
 /// Per-citation file-path length ceiling.
-pub let max_citation_file_chars : Int = 300
+let max_citation_file_chars : Int = 300
 
 ///|
 /// Per-citation note length ceiling.
-pub let max_citation_note_chars : Int = 200
+let max_citation_note_chars : Int = 200
 
 ///|
 /// `unresolved` length ceiling.
-pub let max_unresolved_chars : Int = 1_000
+let max_unresolved_chars : Int = 1_000
 
 ///|
 /// One supporting reference: a workspace `file:line`, or the source/`.mbti`
 /// path `moon ide doc` reported for a stdlib or dependency claim.
-pub(all) struct Citation {
+pub struct Citation {
   file : String
   line : Int?
   note : String?
@@ -41,7 +41,7 @@ pub(all) struct Citation {
 ///|
 /// The child's full answer. `unresolved` names what it could NOT determine —
 /// stated ignorance beats a fabricated claim.
-pub(all) struct ExploreReport {
+pub struct ExploreReport {
   schema_version : Int
   answer : String
   citations : Array[Citation]
@@ -53,7 +53,7 @@ pub(all) struct ExploreReport {
 /// empty list means the report is valid. The `submit_answer` capture tool
 /// uses this to reject oversized or empty output so the model retries with
 /// a bounded report instead of finishing with an unusable one.
-pub fn ExploreReport::validate(self : ExploreReport) -> Array[String] {
+fn ExploreReport::validate(self : ExploreReport) -> Array[String] {
   let problems : Array[String] = []
   if self.schema_version != current_schema_version {
     problems.push(
@@ -95,7 +95,7 @@ pub fn ExploreReport::validate(self : ExploreReport) -> Array[String] {
 
 ///|
 /// Parse a report from JSON, returning the report or a human-readable error.
-pub fn ExploreReport::parse(json : Json) -> Result[ExploreReport, String] {
+fn ExploreReport::parse(json : Json) -> Result[ExploreReport, String] {
   let report : ExploreReport = @json.from_json(json) catch {
     e => return Err("invalid explore report JSON: \{e}")
   }

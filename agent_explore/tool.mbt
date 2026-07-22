@@ -10,15 +10,15 @@ pub let default_explore_max_steps : Int = 100
 /// ten minutes is lost, not thorough. Sized with the step ceiling: at the
 /// few seconds per step observed in dogfood runs, a child must be able to
 /// spend its full step allowance without dying by the clock instead.
-pub let default_explore_deadline_ms : Int = 600_000
+let default_explore_deadline_ms : Int = 600_000
 
 ///|
 /// Input caps: a question is a question, not a document.
-pub let max_query_chars : Int = 2_000
+let max_query_chars : Int = 2_000
 
 ///|
 /// Hints cap, same reasoning as the query cap.
-pub let max_hints_chars : Int = 2_000
+let max_hints_chars : Int = 2_000
 
 ///|
 /// Tool definition for `explore`: delegate one self-contained question to a

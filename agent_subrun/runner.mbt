@@ -3,14 +3,14 @@
 /// signal), the child gets this long to flush and exit before the runner
 /// terminates it. A well-behaved child cancels its turn on EOF and exits
 /// quickly; the kill is the backstop.
-pub let cancel_grace_ms : Int = 5_000
+let cancel_grace_ms : Int = 5_000
 
 ///|
 /// How a sub-run ended. External cancellation of the CALLER is deliberately
 /// not a terminal: it re-raises out of `run_subrun` (tearing the child down
 /// on the way) so structured concurrency sees it, per the engine-wide rule
 /// that cancellation is never folded into an ordinary failure.
-pub(all) enum SubrunTerminal {
+pub enum SubrunTerminal {
   /// The child submitted a valid report before exiting.
   Captured
   /// The child exited cleanly without ever submitting a report.
@@ -61,25 +61,12 @@ pub fn[T] SubrunResult::steps_used(self : SubrunResult[T]) -> Int {
 }
 
 ///|
-/// Provider prompt tokens the child consumed, summed over its requests.
-pub fn[T] SubrunResult::prompt_tokens(self : SubrunResult[T]) -> Int {
-  self.prompt_tokens
-}
-
-///|
-/// Provider completion tokens the child consumed, summed over its requests.
 /// The runner-assigned sub-run id ("sr-N"): the same id the
 /// SubrunStarted/SubrunFinished brackets carried, and — when the child was
 /// launched with a `ChildSession` — the suffix of the child's durable
 /// session id.
 pub fn[T] SubrunResult::subrun_id(self : SubrunResult[T]) -> String {
   self.subrun_id
-}
-
-///|
-/// Completion tokens summed from the child's observed usage events.
-pub fn[T] SubrunResult::completion_tokens(self : SubrunResult[T]) -> Int {
-  self.completion_tokens
 }
 
 ///|

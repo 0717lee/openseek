@@ -4,7 +4,7 @@
 /// doomed run. Requests come from per-kind constants, not the model — this
 /// floor is a guard against a miswired constant, and against a
 /// pathological negative request reaching a child's `--max-steps`.
-pub let min_useful_subrun_steps : Int = 8
+let min_useful_subrun_steps : Int = 8
 
 ///|
 /// The per-turn subrun call allowance shared by every MODEL-initiated

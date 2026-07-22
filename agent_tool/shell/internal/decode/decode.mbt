@@ -4,11 +4,6 @@
 pub let default_max_output_chars : Int = 12000
 
 ///|
-/// Ceiling a caller-supplied `max_output_chars` is clamped to, so a single
-/// command's output can never flood the conversation.
-pub let hard_max_output_chars : Int = 50000
-
-///|
 /// Decoded arguments of the `shell` tool: run `cmd` through the platform
 /// shell, in `cwd` when given, killed after `timeout_ms` when given, with
 /// captured output truncated to `max_output_chars` characters.

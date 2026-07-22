@@ -68,7 +68,7 @@ pub fn report_line(report : Json) -> String {
 ///|
 /// The report a parent extracts from one child stdout line, or `None` for
 /// every other line (protocol events, stray output).
-pub fn parse_report_line(line : Json) -> Json? {
+fn parse_report_line(line : Json) -> Json? {
   match line {
     { "subrun_report": report, .. } => Some(report)
     _ => None

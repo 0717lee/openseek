@@ -105,16 +105,16 @@ pub async fn run_goal_audit(
 ///|
 /// Digest bounds: the gate injects this into the model's context and the
 /// durable log UNCLAMPED, so the caps live here, not in hope.
-pub let digest_max_findings : Int = 10
+let digest_max_findings : Int = 10
 
 ///|
 /// Per-finding line cap in the digest.
-pub let digest_max_line_chars : Int = 200
+let digest_max_line_chars : Int = 200
 
 ///|
 /// Total digest cap: the notice enters model context and the durable log
 /// unclamped, so this bound is the only one.
-pub let digest_max_chars : Int = 4_000
+let digest_max_chars : Int = 4_000
 
 ///|
 /// The bounded `[review]` notice for a report: severity tally, trimmed

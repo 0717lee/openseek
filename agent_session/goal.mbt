@@ -175,7 +175,7 @@ pub fn Session::current_goal(self : Session) -> StandingGoal? {
 /// appended IMMEDIATELY BEFORE its `[goal]` set marker by every goal-set
 /// path. Single-line by design (unlike the set marker, it carries no user
 /// text). Unknown to older readers, it degrades to a plain notice.
-pub const GoalBaselinePrefix : String = "[goal baseline]"
+const GoalBaselinePrefix : String = "[goal baseline]"
 
 ///|
 /// The workspace snapshot recorded when a goal was set: the commit the

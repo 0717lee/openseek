@@ -4,11 +4,6 @@
 let default_max_output_chars : Int = 12000
 
 ///|
-/// Ceiling a caller-supplied `max_output_chars` is clamped to, so a single
-/// tool call can never flood the conversation with an arbitrarily large file.
-pub let hard_max_output_chars : Int = 50000
-
-///|
 /// Decoded arguments of the `read` tool: one file path, starting from the
 /// 1-based `start_line`, at most `max_lines` lines (unbounded when `None`),
 /// truncated to `max_output_chars` rendered UTF-16 code units.

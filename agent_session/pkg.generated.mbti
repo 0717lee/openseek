@@ -11,8 +11,6 @@ import {
 // Values
 pub const ContextYieldAnswerPrefix : String = "[context ceiling]"
 
-pub const GoalBaselinePrefix : String = "[goal baseline]"
-
 pub const GoalBlockedPrefix : String = "[goal blocked]"
 
 pub const GoalCheckPrefix : String = "[goal check]"

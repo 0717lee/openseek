@@ -31,7 +31,7 @@ pub async fn source_write_readonly_profile_data(String, writable_lab? : String) 
 // Errors
 
 // Types and methods
-pub(all) struct SourceWriteProfileData {
+pub struct SourceWriteProfileData {
   profile : String
   denial_subjects : Array[String]
 }

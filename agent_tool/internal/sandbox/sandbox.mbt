@@ -38,7 +38,7 @@ priv struct CachedSourceWriteProfile {
 
 ///|
 /// A built SBPL profile plus the source subjects it denies writes to.
-pub(all) struct SourceWriteProfileData {
+pub struct SourceWriteProfileData {
   profile : String
   denial_subjects : Array[String]
 }
