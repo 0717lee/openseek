@@ -16,6 +16,7 @@ pub struct EditInput {
   old_string : String
   new_string : String
   replace_all : Bool
+  replace_all_preview : Bool
   start_line : Int
   end_line : Int?
   revert_on_parse_errors : Bool

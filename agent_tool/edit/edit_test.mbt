@@ -176,7 +176,7 @@ async test "edit rejects replace_all even with a range" {
     })
     assert_eq(
       output.content,
-      "error editing \{path}: replace_all=true is no longer supported; use multi_edit with explicit line-anchored edits",
+      "error editing \{path}: replace_all=true is no longer supported; use replace_all_preview=true to review every match as a multi_edit edits array, or multi_edit with explicit line-anchored edits",
     )
     assert_true(output.is_error)
     assert_eq(
@@ -739,5 +739,184 @@ async test "edit gates by the link kind through a .mbt-named symlink" {
     assert_true(out.is_error)
     assert_true(out.content.contains("rejected: the edit would introduce"))
     assert_eq(@fs.read_file(target).text(), original)
+  })
+}
+
+///|
+async test "replace_all_preview lists every site and round-trips into multi_edit" {
+  @vfs.with_tmpdir(dir => {
+    let path = "\{dir}/notes.txt"
+    let original =
+      #|alpha one
+      #|keep one here
+      #|beta one
+      #|
+    @fs.write_file(path, original, create_mode=CreateOrTruncate)
+    let preview = run_edit({
+      "path": path,
+      "old_string": "one",
+      "new_string": "uno",
+      "start_line": 1,
+      "replace_all_preview": true,
+    })
+    assert_false(preview.is_error)
+    assert_true(preview.content.contains("3 match(es) at 3 site(s)"))
+    assert_true(preview.content.contains("file NOT modified"))
+    // the preview never writes
+    assert_eq(@fs.read_file(path).text(), original)
+    // extract the emitted edits array, then DROP the middle site (line 2) —
+    // the selection step is the feature's point
+    guard preview.content.find("multi_edit edits array") is Some(marker) else {
+      fail("expected the edits array section")
+    }
+    let tail = preview.content.unsafe_substring(
+      start=marker,
+      end=preview.content.length(),
+    )
+    guard tail.find("[") is Some(open) else { fail("expected [") }
+    guard tail.rev_find("]") is Some(close) else { fail("expected ]") }
+    let edits_text = tail.unsafe_substring(start=open, end=close + 1)
+    guard @json.parse(edits_text) is Array(entries) else {
+      fail("expected a JSON array of edits")
+    }
+    assert_eq(entries.length(), 3)
+    let selected : Array[Json] = []
+    for entry in entries {
+      guard entry is { "start_line": Number(line, ..), .. } else {
+        fail("entry without start_line")
+      }
+      if line != 2.0 {
+        selected.push(entry)
+      }
+    }
+    assert_eq(selected.length(), 2)
+    let action = match @multi_edit.definition().execute {
+      Async(execute) => execute({ "edits": selected.to_json() })
+      Sync(_) => fail("multi_edit should be async")
+    }
+    guard action is Respond(applied) else { fail("expected Respond") }
+    assert_false(applied.is_error)
+    let text = @fs.read_file(path).text()
+    assert_true(text.contains("alpha uno"))
+    // the dropped entry was NOT applied
+    assert_true(text.contains("keep one here"))
+    assert_true(text.contains("beta uno"))
+  })
+}
+
+///|
+async test "replace_all_preview honors the range and collapses same-line matches" {
+  @vfs.with_tmpdir(dir => {
+    let path = "\{dir}/doc.txt"
+    @fs.write_file(
+      path,
+      (
+        #|foo before range
+        #|foo and foo again
+        #|foo after
+        #|
+      ),
+      create_mode=CreateOrTruncate,
+    )
+    let preview = run_edit({
+      "path": path,
+      "old_string": "foo",
+      "new_string": "bar",
+      "start_line": 2,
+      "end_line": 2,
+      "replace_all_preview": true,
+    })
+    assert_false(preview.is_error)
+    // only line 2 is in range; its two matches collapse into ONE whole-line
+    // entry (two edits with the same anchor would both hit the first match)
+    assert_true(preview.content.contains("2 match(es) at 1 site(s)"))
+    assert_true(
+      preview.content.contains("the entry below replaces the WHOLE line"),
+    )
+    assert_true(preview.content.contains("bar and bar again"))
+    // out-of-range lines may appear as CONTEXT, but never as entries
+    assert_true(preview.content.contains("\"start_line\":2"))
+    assert_false(preview.content.contains("\"start_line\":1"))
+    assert_false(preview.content.contains("\"start_line\":3"))
+  })
+}
+
+///|
+async test "replace_all_preview shows a multiline match as a line span" {
+  @vfs.with_tmpdir(dir => {
+    let path = "\{dir}/span.txt"
+    @fs.write_file(
+      path,
+      (
+        #|head
+        #|one
+        #|two
+        #|tail
+        #|
+      ),
+      create_mode=CreateOrTruncate,
+    )
+    let preview = run_edit({
+      "path": path,
+      "old_string": "one\ntwo",
+      "new_string": "merged",
+      "start_line": 1,
+      "replace_all_preview": true,
+    })
+    assert_false(preview.is_error)
+    assert_true(preview.content.contains("lines 2-3:"))
+    assert_true(preview.content.contains("\"start_line\":2"))
+  })
+}
+
+///|
+async test "replace_all_preview caps the site list and says how to see more" {
+  @vfs.with_tmpdir(dir => {
+    let path = "\{dir}/many.txt"
+    let lines = StringBuilder()
+    for index in 1..<=45 {
+      lines.write_string("line \{index} zap\n")
+    }
+    @fs.write_file(path, lines.to_string(), create_mode=CreateOrTruncate)
+    let preview = run_edit({
+      "path": path,
+      "old_string": "zap",
+      "new_string": "zip",
+      "start_line": 1,
+      "replace_all_preview": true,
+    })
+    assert_false(preview.is_error)
+    assert_true(preview.content.contains("40+ matches"))
+    assert_true(preview.content.contains("narrow with start_line/end_line"))
+    // sites past the cap yield no entries (line 40's context may still show
+    // neighboring lines, so pin on the entry anchor, not the line text)
+    assert_true(preview.content.contains("\"start_line\":40"))
+    assert_false(preview.content.contains("\"start_line\":41"))
+  })
+}
+
+///|
+async test "replace_all_preview errors on no matches and on empty old_string" {
+  @vfs.with_tmpdir(dir => {
+    let path = "\{dir}/plain.txt"
+    @fs.write_file(path, "nothing here\n", create_mode=CreateOrTruncate)
+    let missing = run_edit({
+      "path": path,
+      "old_string": "ghost",
+      "new_string": "spirit",
+      "start_line": 1,
+      "replace_all_preview": true,
+    })
+    assert_true(missing.is_error)
+    assert_true(missing.content.contains("old_string not found"))
+    let insertion = run_edit({
+      "path": path,
+      "old_string": "",
+      "new_string": "text",
+      "start_line": 1,
+      "replace_all_preview": true,
+    })
+    assert_true(insertion.is_error)
+    assert_true(insertion.content.contains("non-empty old_string"))
   })
 }

@@ -11,6 +11,9 @@ pub struct EditInput {
   old_string : String
   new_string : String
   replace_all : Bool
+  /// When true, the edit is NOT applied: every match of `old_string` in the
+  /// line range is reported instead, as a reviewable `multi_edit` edits array.
+  replace_all_preview : Bool
   start_line : Int
   end_line : Int?
   revert_on_parse_errors : Bool
@@ -38,6 +41,7 @@ fn parse_fields(fields : Map[String, Json]) -> EditInput raise {
   let old_string = required_string(fields, "old_string")
   let new_string = required_string(fields, "new_string")
   let replace_all = optional_bool(fields, "replace_all", false)
+  let replace_all_preview = optional_bool(fields, "replace_all_preview", false)
   let start_line = required_positive_int(fields, "start_line", "arguments")
   let end_line = optional_positive_int_option(fields, "end_line")
   let revert_on_parse_errors = optional_bool(
@@ -53,6 +57,7 @@ fn parse_fields(fields : Map[String, Json]) -> EditInput raise {
     old_string,
     new_string,
     replace_all,
+    replace_all_preview,
     start_line,
     end_line,
     revert_on_parse_errors,

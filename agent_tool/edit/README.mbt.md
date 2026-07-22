@@ -72,10 +72,28 @@ and the edit should stay inside a tighter range:
 | `start_line`  | integer | yes | 1-based first line of the search/replace range. The first match at or after this line is replaced. |
 | `end_line`    | integer | no  | 1-based last line of the search/replace range. Defaults to the file end. |
 | `revert_on_parse_errors` | boolean | no (default `true`) | Reject an edit whose result would introduce new lex/parse errors into a syncheck input (`.mbt`, `.mbt.md`, `moon.mod`, `moon.pkg`), leaving the file untouched and returning the errors with excerpts. In `.mbt.md` only the checked fenced blocks are parsed. Set `false` only to intentionally produce non-parsing content. |
+| `replace_all_preview` | boolean | no (default `false`) | Preview mode: the file is **not** modified. Every match of `old_string` in the range is listed with surrounding context lines, plus a ready-to-review `multi_edit` edits array (capped at 40 sites; several matches on one line collapse into a single whole-line entry). |
 
 Legacy calls with `replace_all=false` are tolerated, but `replace_all=true` is
 rejected. Use `multi_edit` when a compiler diagnostic suggests several known
 locations in one file should be fixed efficiently.
+
+## Preview → select → apply → verify
+
+`replace_all_preview=true` exists for the edits the compiler cannot vet:
+comments, doc prose, `.mbt.md` text, string literals. The pipeline is
+complementary, not overlapping — the **preview** shows every textual match so
+the agent can filter the sites the type checker will never flag; the selected
+subset is applied with **`multi_edit`** (line numbers refer to the file as
+previewed); and `multi_edit`'s own gates — the pre-write parse gate and the
+post-write `moon check` auto-revert — **verify** what the compiler *can* see.
+Neither step substitutes for the other.
+
+For typed-code renames the compiler loop stays the better tool (add the new
+name, deprecate the old, fix what `moon check` flags): text matches cannot see
+types. A useful secondary effect of the preview is exactly that signal — a
+match list that turns out to be code-heavy or type-ambiguous is the cue to
+switch to the compiler loop *before* any damage.
 
 ## Action
 
@@ -95,7 +113,8 @@ has one of these shapes:
   file is untouched; the body excerpts the would-be content at each error and
   says how to retry.
 - `"error editing <path>: old_string not found"` — no exact match was found in the selected range.
-- `"error editing <path>: replace_all=true is no longer supported; use multi_edit with explicit line-anchored edits"` — the call requested a global replacement.
+- `"preview: <n> match(es) at <k> site(s) for old_string in <path> (file NOT modified)"` — `replace_all_preview=true`; the body lists each site with context and ends with the reviewable `multi_edit` edits array.
+- `"error editing <path>: replace_all=true is no longer supported; use replace_all_preview=true to review every match as a multi_edit edits array, or multi_edit with explicit line-anchored edits"` — the call requested a blind global replacement.
 - `"error editing <path>: moon.pkg use // for comment syntax, not #"` or similar
   manifest-guard messages — the replacement would likely break MoonBit package
   discovery.

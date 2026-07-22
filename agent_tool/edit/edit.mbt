@@ -12,6 +12,16 @@
 /// - `end_line` (integer, optional): 1-based inclusive last line to search.
 /// - `replace_all=true` is rejected. Use `multi_edit` for multiple explicit
 ///   line-anchored replacements.
+/// - `replace_all_preview` (boolean, optional, default false): preview mode —
+///   the file is NOT modified. Every match of `old_string` in the line range
+///   is reported with surrounding context, plus a ready-to-review `multi_edit`
+///   edits array; the agent keeps the entries to apply and drops the rest.
+///   The pipeline is complementary, not overlapping: the preview filters what
+///   the compiler cannot see (comments, docs, `.mbt.md` prose, string
+///   literals), and `multi_edit` verifies the applied subset with its parse
+///   gate and moon check auto-revert. For typed-code renames the compiler
+///   loop (deprecated alias + fix what `moon check` flags) remains the better
+///   tool — seeing a code-heavy match list is the cue to switch to it.
 /// - `revert_on_parse_errors` (boolean, optional, default true): before an
 ///   edit to a syncheck input (`.mbt`, `.mbt.md`, `moon.mod`, `moon.pkg`) is
 ///   written, the edited result is parsed standalone (`moonc syncheck`); an
@@ -37,7 +47,7 @@ pub fn definition(
 ) -> @agent_tool.AgentToolDefinition {
   AgentToolDefinition(
     name="edit",
-    description="Replace the first exact text span at or after arguments.start_line in arguments.path with arguments.new_string. Optional end_line restricts the search to a 1-based inclusive line range. Because start_line anchors the location, old_string can be a small exact span instead of a large context block. To INSERT new code instead of replacing, set old_string to the empty string: new_string is inserted at the start of start_line. To APPEND at end of file, pass any start_line past the last line (e.g. 999999) — no need to know the file's length; the result reports the actual inclusive line range the new content landed on. In MoonBit top-level order does not matter, so add new functions, tests, or types by appending at end of file — an append cannot mismatch an anchor; reserve mid-file insertion for grouping related code. An edit that would introduce lex/parse errors into a syntax-checkable file (.mbt, .mbt.md, moon.mod, moon.pkg) is rejected BEFORE writing and the parse errors are returned — see revert_on_parse_errors. For multiple compiler-feedback fixes in one file, use multi_edit with explicit line-anchored edits.",
+    description="Replace the first exact text span at or after arguments.start_line in arguments.path with arguments.new_string. Optional end_line restricts the search to a 1-based inclusive line range. Because start_line anchors the location, old_string can be a small exact span instead of a large context block. To INSERT new code instead of replacing, set old_string to the empty string: new_string is inserted at the start of start_line. To APPEND at end of file, pass any start_line past the last line (e.g. 999999) — no need to know the file's length; the result reports the actual inclusive line range the new content landed on. In MoonBit top-level order does not matter, so add new functions, tests, or types by appending at end of file — an append cannot mismatch an anchor; reserve mid-file insertion for grouping related code. An edit that would introduce lex/parse errors into a syntax-checkable file (.mbt, .mbt.md, moon.mod, moon.pkg) is rejected BEFORE writing and the parse errors are returned — see revert_on_parse_errors. For multiple compiler-feedback fixes in one file, use multi_edit with explicit line-anchored edits. To change EVERY occurrence of a string, pass replace_all_preview=true: the file is not modified; instead every match site is listed with context plus a ready-to-review multi_edit edits array — keep the entries to apply, drop the rest. That preview-select-apply path is for text the compiler cannot see (comments, docs, .mbt.md prose, string literals); for typed-code renames prefer the compiler loop (add the new name, deprecate the old, fix what moon check flags).",
     schema=JsonSchema({
       "type": "object",
       "properties": {
@@ -50,6 +60,11 @@ pub fn definition(
           "type": "boolean",
           "description": "Syntax gate, on by default. Before the edit is written to a syntax-checkable file (.mbt, .mbt.md, moon.mod, moon.pkg), the edited result is parsed standalone (moonc syncheck); an edit that would INTRODUCE new lex/parse errors — measured against the pre-edit content parsed the same way, so pre-existing parse errors are ignored — is REJECTED, the file is left untouched, and the call returns the errors with excerpts of the would-be content. Type errors never trigger the gate (they may be a legitimate transient state); in .mbt.md only the checked (`mbt check` / `moonbit check`) fenced blocks are parsed. Set false only to intentionally produce content that does not parse (e.g. a fixture).",
           "examples": [false],
+        },
+        "replace_all_preview": {
+          "type": "boolean",
+          "description": "Preview mode: the file is NOT modified. Every match of old_string in the start_line/end_line range is listed with surrounding context lines, plus a ready-to-use multi_edit `edits` array — REVIEW the sites, keep the entries to apply, drop the rest, and pass them to multi_edit (which then verifies the batch with moon check). Use this where the compiler cannot see — comments, doc prose, .mbt.md text, string literals; for typed-code renames prefer the compiler loop (add the new name, deprecate the old, fix what moon check flags), and if the match list turns out to be code-heavy or type-ambiguous, switch to that loop instead of applying.",
+          "examples": [true],
         },
       },
       "required": ["path", "old_string", "new_string", "start_line"],
@@ -98,7 +113,7 @@ async fn edit_file(
 
   if input.replace_all {
     return err(
-      "replace_all=true is no longer supported; use multi_edit with explicit line-anchored edits",
+      "replace_all=true is no longer supported; use replace_all_preview=true to review every match as a multi_edit edits array, or multi_edit with explicit line-anchored edits",
     )
   }
   if input.old_string == "" && input.new_string == "" {
@@ -106,6 +121,14 @@ async fn edit_file(
   }
   if input.old_string == input.new_string {
     return err("old_string and new_string are identical")
+  }
+  if input.replace_all_preview {
+    guard input.old_string != "" else {
+      return err(
+        "replace_all_preview requires a non-empty old_string (an insertion has no match sites to preview)",
+      )
+    }
+    return preview_replace_all(input, path~, err)
   }
   let content = @fs.read_file(path).text()
   if input.old_string == "" {
@@ -170,6 +193,247 @@ async fn edit_file(
     ok_brief="edited \{@agent_tool.brief_basename(path)}:\{match_line} (1×)",
     file_state~,
   )
+}
+
+///|
+/// At most this many match sites are rendered (and emitted as edits) in one
+/// preview; matches beyond the cap are reported as a count with a nudge to
+/// narrow the line range, so a pathological pattern cannot flood the turn.
+const PreviewSiteCap : Int = 40
+
+///|
+/// Context lines shown above and below each match site.
+const PreviewContextLines : Int = 2
+
+///|
+/// Longest rendered context line; longer lines are cut with an ellipsis. The
+/// emitted edits always carry the exact strings — only the display truncates.
+const PreviewLineDisplayCap : Int = 200
+
+///|
+/// `replace_all_preview=true`: report every match of `old_string` in the
+/// selected line range — surrounding context for review plus a ready-to-use
+/// `multi_edit` edits array — WITHOUT modifying the file. The selection step
+/// is the point: the compiler cannot vet prose/comment/string sites, so the
+/// agent filters those, and `multi_edit`'s own gates (parse gate, moon check
+/// auto-revert) verify the applied batch afterwards. Several matches on one
+/// line collapse into a single whole-line entry, because two line-anchored
+/// edits with the same anchor would both hit the first occurrence.
+async fn preview_replace_all(
+  input : @decode.EditInput,
+  path~ : String,
+  err : (String) -> @agent_tool.ToolAction,
+) -> @agent_tool.ToolAction {
+  let content = @fs.read_file(path).text()
+  let region = select_edit_region(content, input)
+  let (offsets, more) = find_matches(
+    region.body,
+    input.old_string,
+    PreviewSiteCap,
+  )
+  guard offsets.length() > 0 else {
+    return err("old_string not found\{range_detail(input)}")
+  }
+  let single_line = !input.old_string.contains("\n")
+  let sites : Array[PreviewSite] = []
+  let notes : Array[String] = []
+  let mut total_matches = 0
+  for offset in offsets {
+    total_matches += 1
+    let global = region.prefix.length() + offset
+    let first_line = line_number_at_offset(content, global)
+    let last_line = line_number_at_offset(
+      content,
+      global + input.old_string.length() - 1,
+    )
+    if sites.length() > 0 && sites[sites.length() - 1].first_line == first_line {
+      if single_line {
+        // A second match on the same line: two line-anchored edits with the
+        // same anchor would both hit the first occurrence, so the site becomes
+        // one whole-line entry with every match on the line applied.
+        let previous = sites[sites.length() - 1]
+        let line = line_text(content, first_line)
+        sites[sites.length() - 1] = {
+          first_line,
+          last_line,
+          match_count: previous.match_count + 1,
+          old_string: line,
+          new_string: line.replace_all(
+            old=input.old_string,
+            new=input.new_string,
+          ),
+        }
+      } else {
+        notes.push(
+          "line \{first_line}: an additional multiline match starts on this line — not expressible as a separate line-anchored edit; re-run the preview after applying the first",
+        )
+      }
+      continue
+    }
+    sites.push({
+      first_line,
+      last_line,
+      match_count: 1,
+      old_string: input.old_string,
+      new_string: input.new_string,
+    })
+  }
+  let total_lines = total_line_count(content)
+  let report = StringBuilder()
+  if more {
+    report.write_string(
+      "preview: \{PreviewSiteCap}+ matches for old_string in \{path} (file NOT modified) — showing the first \{sites.length()} site(s); narrow with start_line/end_line to see the rest\n",
+    )
+  } else {
+    report.write_string(
+      "preview: \{total_matches} match(es) at \{sites.length()} site(s) for old_string in \{path} (file NOT modified)\n",
+    )
+  }
+  for site in sites {
+    report.write_string("\n\{preview_site_header(site)}\n")
+    render_site_context(report, content, site, total_lines)
+  }
+  for note in notes {
+    report.write_string("\nnote: \{note}\n")
+  }
+  report.write_string(
+    "\nmulti_edit edits array — line numbers refer to the file AS IT IS NOW; review, keep the entries to apply, drop the rest:\n[\n",
+  )
+  for index, site in sites {
+    let entry : Json = {
+      "file": input.path.to_json(),
+      "old_string": site.old_string.to_json(),
+      "new_string": site.new_string.to_json(),
+      "start_line": site.first_line.to_json(),
+    }
+    let separator = if index + 1 < sites.length() { "," } else { "" }
+    report.write_string("  \{entry.stringify()}\{separator}\n")
+  }
+  report.write_string("]\n")
+  report.write_string(
+    "\nreview guidance: text matches cannot see types — for typed-code renames prefer the compiler loop (add the new name, deprecate the old, fix what moon check flags), and if this list is code-heavy or type-ambiguous, switch to it instead of applying. Preview-select-apply is for what the compiler cannot check (comments, docs, .mbt.md prose, string literals); multi_edit re-verifies the applied batch (parse gate + moon check auto-revert).\n",
+  )
+  @agent_tool.ToolAction::respond(
+    report.to_string(),
+    brief="edit preview \{@agent_tool.brief_basename(path)} (\{sites.length()} site(s))",
+  )
+}
+
+///|
+priv struct PreviewSite {
+  first_line : Int
+  last_line : Int
+  match_count : Int
+  old_string : String
+  new_string : String
+}
+
+///|
+/// Offsets of the first `cap` non-overlapping matches of `needle` in `body`,
+/// plus whether more matches exist past the cap.
+fn find_matches(
+  body : String,
+  needle : String,
+  cap : Int,
+) -> (Array[Int], Bool) {
+  let offsets : Array[Int] = []
+  let mut from = 0
+  while offsets.length() < cap {
+    let tail = body.unsafe_substring(start=from, end=body.length())
+    guard tail.find(needle) is Some(found) else { return (offsets, false) }
+    offsets.push(from + found)
+    from = from + found + needle.length()
+  }
+  let tail = body.unsafe_substring(start=from, end=body.length())
+  (offsets, tail.find(needle) is Some(_))
+}
+
+///|
+fn preview_site_header(site : PreviewSite) -> String {
+  if site.match_count > 1 {
+    "line \{site.first_line} (\{site.match_count} matches — the entry below replaces the WHOLE line with all of them applied; edit its new_string to change fewer):"
+  } else if site.last_line > site.first_line {
+    "lines \{site.first_line}-\{site.last_line}:"
+  } else {
+    "line \{site.first_line}:"
+  }
+}
+
+///|
+fn render_site_context(
+  report : StringBuilder,
+  content : String,
+  site : PreviewSite,
+  total_lines : Int,
+) -> Unit {
+  let from = (site.first_line - PreviewContextLines).clamp(
+    min=1,
+    max=site.first_line,
+  )
+  let to = (site.last_line + PreviewContextLines).clamp(
+    min=site.last_line,
+    max=total_lines,
+  )
+  let width = "\{to}".length()
+  for line in from..<=to {
+    let marker = if line >= site.first_line && line <= site.last_line {
+      ">"
+    } else {
+      " "
+    }
+    report.write_string(
+      "\{marker} \{preview_pad(line, width)} | \{preview_display_line(line_text(content, line))}\n",
+    )
+  }
+}
+
+///|
+fn preview_pad(value : Int, width : Int) -> String {
+  let text = "\{value}"
+  let mut padded = text
+  while padded.length() < width {
+    padded = " " + padded
+  }
+  padded
+}
+
+///|
+fn preview_display_line(text : String) -> String {
+  if text.length() > PreviewLineDisplayCap {
+    "\{text.unsafe_substring(start=0, end=PreviewLineDisplayCap)}…"
+  } else {
+    text
+  }
+}
+
+///|
+fn line_text(content : String, line : Int) -> String {
+  let start = line_start_offset(content, line)
+  let end = line_end_offset(content, line)
+  let text = content.unsafe_substring(start~, end~)
+  if text.has_suffix("\n") {
+    text.unsafe_substring(start=0, end=text.length() - 1)
+  } else {
+    text
+  }
+}
+
+///|
+fn total_line_count(content : String) -> Int {
+  if content == "" {
+    return 0
+  }
+  let mut count = 0
+  for ch in content {
+    if ch == '\n' {
+      count += 1
+    }
+  }
+  if content.has_suffix("\n") {
+    count
+  } else {
+    count + 1
+  }
 }
 
 ///|

@@ -11,6 +11,7 @@ import {
 }
 
 import {
+  "bobzhang/openseek/agent_tool/multi_edit",
   "bobzhang/openseek/testkit/filesystem" @vfs,
 } for "test"
 
