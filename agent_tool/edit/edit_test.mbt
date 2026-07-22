@@ -970,11 +970,101 @@ async test "a minified dense line stays fast and yields a note, not a huge entry
     })
     assert_false(preview.is_error)
     assert_true(preview.content.contains("100001 match(es) at 2 site(s)"))
-    assert_true(
-      preview.content.contains("too long to emit as a whole-line entry"),
-    )
+    assert_true(preview.content.contains("too large to emit"))
     // the dense line yields NO entry; the ordinary line 2 still does
     assert_false(preview.content.contains("\"start_line\":1"))
     assert_true(preview.content.contains("\"start_line\":2"))
+  })
+}
+
+///|
+async test "a huge expanded replacement is estimated, never materialized" {
+  @vfs.with_tmpdir(dir => {
+    let path = "\{dir}/expand.txt"
+    // The line itself is small (100 chars), but 100 matches x a 2000-char
+    // replacement would expand to ~200k — the estimate must catch it BEFORE
+    // replace_all builds the string, and the site yields a note, no entry.
+    @fs.write_file(
+      path,
+      "\{String::make(100, 'q')}\nq alone\n",
+      create_mode=CreateOrTruncate,
+    )
+    let preview = run_edit({
+      "path": path,
+      "old_string": "q",
+      "new_string": String::make(2000, 'z'),
+      "start_line": 1,
+      "replace_all_preview": true,
+    })
+    assert_false(preview.is_error)
+    assert_true(preview.content.contains("too large to emit"))
+    assert_false(preview.content.contains("\"start_line\":1"))
+    assert_true(preview.content.contains("\"start_line\":2"))
+  })
+}
+
+///|
+async test "the entries array stays parseable under the result cap" {
+  @vfs.with_tmpdir(dir => {
+    let path = "\{dir}/wide.txt"
+    // 40 sites x a ~1000-char replacement ≈ 40k of entry text — over the
+    // entries budget. Some entries must be omitted WITH a note, and the array
+    // that IS emitted must still parse.
+    let lines = StringBuilder()
+    for index in 1..<=40 {
+      lines.write_string("hit \{index}\n")
+    }
+    @fs.write_file(path, lines.to_string(), create_mode=CreateOrTruncate)
+    let preview = run_edit({
+      "path": path,
+      "old_string": "hit",
+      "new_string": String::make(1000, 'r'),
+      "start_line": 1,
+      "replace_all_preview": true,
+    })
+    assert_false(preview.is_error)
+    assert_true(preview.content.contains("omitted to keep the array parseable"))
+    guard preview.content.find("multi_edit edits array") is Some(marker) else {
+      fail("expected the edits array section")
+    }
+    let tail = preview.content.unsafe_substring(
+      start=marker,
+      end=preview.content.length(),
+    )
+    guard tail.find("[") is Some(open) else { fail("expected [") }
+    guard tail.rev_find("]") is Some(close) else { fail("expected ]") }
+    guard @json.parse(tail.unsafe_substring(start=open, end=close + 1))
+      is Array(entries) else {
+      fail("expected a parseable JSON array")
+    }
+    assert_true(entries.length() > 0)
+    assert_true(entries.length() < 40)
+  })
+}
+
+///|
+async test "context blocks are budgeted; entries still cover every site" {
+  @vfs.with_tmpdir(dir => {
+    let path = "\{dir}/long-lines.txt"
+    // 40 sites on ~250-char lines: the rendered context (~1k per site) blows
+    // the context budget, so later blocks are omitted with a note — but the
+    // entries (tiny old/new) all fit and still cover every site.
+    let filler = String::make(240, 'x')
+    let lines = StringBuilder()
+    for index in 1..<=40 {
+      lines.write_string("\{filler} hit \{index}\n")
+    }
+    @fs.write_file(path, lines.to_string(), create_mode=CreateOrTruncate)
+    let preview = run_edit({
+      "path": path,
+      "old_string": "hit",
+      "new_string": "hot",
+      "start_line": 1,
+      "replace_all_preview": true,
+    })
+    assert_false(preview.is_error)
+    assert_true(preview.content.contains("context for"))
+    assert_true(preview.content.contains("site(s) omitted"))
+    assert_true(preview.content.contains("\"start_line\":40"))
   })
 }

@@ -211,11 +211,24 @@ const PreviewContextLines : Int = 2
 const PreviewLineDisplayCap : Int = 200
 
 ///|
-/// Longest line a many-match site may embed as a whole-line entry: past this,
-/// the entry would carry the line twice and can push the report into the
-/// outer result clamp, which would cut the JSON array mid-entry and corrupt
-/// every entry. Such sites are reported with a note instead of an entry.
+/// Longest line a many-match site may embed as a whole-line entry, and the
+/// same bound applied to the ESTIMATED expanded replacement (line length plus
+/// per-match growth, computed arithmetically BEFORE `replace_all` so a long
+/// `new_string` times thousands of matches can never materialize hundreds of
+/// MB). Sites past either bound are reported with a note instead of an entry.
 const PreviewEntryCharsCap : Int = 4_096
+
+///|
+/// Budget for the rendered context blocks, and separately for the entries
+/// array text. The production turn loop clamps tool results at 60k units and
+/// cuts the TAIL — an unbudgeted report would lose the end of the JSON array
+/// and corrupt every entry. Context blocks and entries are each capped so the
+/// whole report stays safely under the clamp; omissions are counted and
+/// stated, and the array always closes validly.
+const PreviewContextBudgetChars : Int = 24_000
+
+///|
+const PreviewEntriesBudgetChars : Int = 24_000
 
 ///|
 /// `replace_all_preview=true`: report every match of `old_string` in the
@@ -260,21 +273,30 @@ async fn preview_replace_all(
     scan_line
   }
 
+  // One O(file) pass; per-line lookups during finalization and context
+  // rendering are then O(1) instead of rescanning from the file start (40
+  // sites × 5 context lines was ~400 full-file scans on a large file).
+  let line_starts = line_start_index(content)
   // Same-line merges only bump this counter; the site's whole-line entry (or
-  // its too-long note) is built ONCE when the site is finalized.
+  // its too-large note) is built ONCE when the site is finalized.
   let mut last_site_extra_matches = 0
   fn finalize_last_site() -> Unit {
     guard last_site_extra_matches > 0 else { return }
     let site = sites[sites.length() - 1]
     let match_count = 1 + last_site_extra_matches
     last_site_extra_matches = 0
-    let line = line_text(content, site.first_line)
-    if line.length() > PreviewEntryCharsCap {
-      // Embedding a huge minified line twice in the edits array would blow the
-      // response (and an outer clamp cutting JSON mid-array corrupts ALL
-      // entries); report the site without an entry instead.
+    let line = line_text_at(content, line_starts, site.first_line)
+    // Estimate the expanded replacement ARITHMETICALLY before building it: a
+    // long new_string times thousands of matches must never be materialized
+    // just to be found oversized (4k one-char matches × a 50k replacement is
+    // ~200M units). Embedding a huge line (or expansion) twice in the edits
+    // array would also blow the response past the outer clamp.
+    let growth = input.new_string.length() - input.old_string.length()
+    let expanded = line.length() +
+      match_count * (if growth > 0 { growth } else { 0 })
+    if line.length() > PreviewEntryCharsCap || expanded > PreviewEntryCharsCap {
       notes.push(
-        "line \{site.first_line}: \{match_count} matches, but the line is \{line.length()} chars — too long to emit as a whole-line entry; narrow old_string (with more surrounding context) or edit that line manually",
+        "line \{site.first_line}: \{match_count} matches, but the whole-line entry would be too large to emit (line \{line.length()} chars, combined replacement ≈ \{expanded}) — narrow old_string (with more surrounding context) or edit that line manually",
       )
       sites[sites.length() - 1] = { ..site, match_count, emit: false }
       return
@@ -341,28 +363,60 @@ async fn preview_replace_all(
       "preview: \{total_matches} match(es) at \{sites.length()} site(s) for old_string in \{path} (file NOT modified)\n",
     )
   }
+  let mut context_chars = 0
+  let mut context_omitted = 0
   for site in sites {
-    report.write_string("\n\{preview_site_header(site)}\n")
-    render_site_context(report, content, site, total_lines)
+    let block = StringBuilder()
+    block.write_string("\n\{preview_site_header(site)}\n")
+    render_site_context(block, content, line_starts, site, total_lines)
+    let text = block.to_string()
+    if context_chars + text.length() > PreviewContextBudgetChars {
+      context_omitted += 1
+      continue
+    }
+    context_chars += text.length()
+    report.write_string(text)
+  }
+  if context_omitted > 0 {
+    report.write_string(
+      "\n(context for \{context_omitted} site(s) omitted to keep this response within the result cap — their entries below still cover them)\n",
+    )
   }
   for note in notes {
     report.write_string("\nnote: \{note}\n")
   }
-  report.write_string(
-    "\nmulti_edit edits array — line numbers refer to the file AS IT IS NOW; review, keep the entries to apply, drop the rest:\n[\n",
-  )
-  let emitted = sites.filter(site => site.emit)
-  for index, site in emitted {
+  let entry_texts : Array[String] = []
+  let mut entries_chars = 0
+  let mut entries_omitted = 0
+  for site in sites {
+    guard site.emit else { continue }
     let entry : Json = {
       "file": input.path.to_json(),
       "old_string": site.old_string.to_json(),
       "new_string": site.new_string.to_json(),
       "start_line": site.first_line.to_json(),
     }
-    let separator = if index + 1 < emitted.length() { "," } else { "" }
-    report.write_string("  \{entry.stringify()}\{separator}\n")
+    let text = entry.stringify()
+    if entries_chars + text.length() > PreviewEntriesBudgetChars {
+      entries_omitted += 1
+      continue
+    }
+    entries_chars += text.length()
+    entry_texts.push(text)
+  }
+  report.write_string(
+    "\nmulti_edit edits array — line numbers refer to the file AS IT IS NOW; review, keep the entries to apply, drop the rest:\n[\n",
+  )
+  for index, text in entry_texts {
+    let separator = if index + 1 < entry_texts.length() { "," } else { "" }
+    report.write_string("  \{text}\{separator}\n")
   }
   report.write_string("]\n")
+  if entries_omitted > 0 {
+    report.write_string(
+      "(\{entries_omitted} entr(y/ies) omitted to keep the array parseable under the result cap — narrow with start_line/end_line and preview again for the rest)\n",
+    )
+  }
   report.write_string(
     "\nreview guidance: text matches cannot see types — for typed-code renames prefer the compiler loop (add the new name, deprecate the old, fix what moon check flags), and if this list is code-heavy or type-ambiguous, switch to it instead of applying. Preview-select-apply is for what the compiler cannot check (comments, docs, .mbt.md prose, string literals); multi_edit re-verifies the applied batch (parse gate + moon check auto-revert).\n",
   )
@@ -401,6 +455,7 @@ fn preview_site_header(site : PreviewSite) -> String {
 fn render_site_context(
   report : StringBuilder,
   content : String,
+  line_starts : Array[Int],
   site : PreviewSite,
   total_lines : Int,
 ) -> Unit {
@@ -420,7 +475,7 @@ fn render_site_context(
       " "
     }
     report.write_string(
-      "\{marker} \{preview_pad(line, width)} | \{preview_display_line(line_text(content, line))}\n",
+      "\{marker} \{preview_pad(line, width)} | \{preview_display_line(line_text_at(content, line_starts, line))}\n",
     )
   }
 }
@@ -452,9 +507,33 @@ fn preview_display_line(text : String) -> String {
 }
 
 ///|
-fn line_text(content : String, line : Int) -> String {
-  let start = line_start_offset(content, line)
-  let end = line_end_offset(content, line)
+/// Start offset of every 1-based line, in one pass. A file ending in `\n`
+/// yields a phantom trailing start equal to the length; `line_text_at`
+/// resolves it to the empty string, and render ranges are clamped to
+/// `total_line_count` anyway.
+fn line_start_index(content : String) -> Array[Int] {
+  let starts = [0]
+  for index in 0..<content.length() {
+    if content[index] == '\n' {
+      starts.push(index + 1)
+    }
+  }
+  starts
+}
+
+///|
+fn line_text_at(
+  content : String,
+  line_starts : Array[Int],
+  line : Int,
+) -> String {
+  guard line >= 1 && line <= line_starts.length() else { return "" }
+  let start = line_starts[line - 1]
+  let end = if line < line_starts.length() {
+    line_starts[line]
+  } else {
+    content.length()
+  }
   let text = content.unsafe_substring(start~, end~)
   if text.has_suffix("\n") {
     text.unsafe_substring(start=0, end=text.length() - 1)
