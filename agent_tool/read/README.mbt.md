@@ -127,7 +127,6 @@ test "read tool advertises the expected schema" {
       #|  control: false,
       #|  concurrent_safe: false,
       #|}
-
     ),
   )
 }
