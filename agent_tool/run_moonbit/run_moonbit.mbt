@@ -18,7 +18,6 @@ const OutputCapBytes : Int = 48_000
 /// the sandbox — instead of using `edit`.
 const SandboxSourceWriteFeedback : String = "run_moonbit sandbox: the \"Operation not permitted\" failure above is this tool's sandbox denying a write to a protected MoonBit source file (`*.mbt`, `*.mbti`, `*.mbt.md`, `moon.mod`/`moon.pkg`/`moon.work`) — not a filesystem or permissions problem to debug. Snippets run source-write-readonly by design; writing non-source files (data, logs, reports) stays allowed. Do NOT try to work around the block from inside a snippet (renames, copies, temp-then-move, or other sandbox escapes) — make source changes with the line-anchored `edit` tool instead, and keep run_moonbit for compute, probing, and non-source IO."
 
-
 ///|
 /// Cached `--warn-list` spec for `warning: "off"` — derived once per process.
 /// `""` means derivation failed: pass no flag and leave warnings visible
@@ -41,15 +40,27 @@ async fn warn_off_list() -> String {
   match warn_off_list_cache.val {
     Some(spec) => spec
     None => {
-      let help = capture_merged_output("moonc", ["build-package", "-warn-help"]).unwrap_or(
-        "",
-      )
+      // The probe runs OUTSIDE the snippet's own 60s deadline, so it carries
+      // its own bound: a wedged moonc (or PATH wrapper) is torn down after
+      // this and the run proceeds with no flag rather than stalling the turn.
+      let help = match
+        @async.with_timeout_opt(WarnProbeTimeoutMs, () => {
+          capture_merged_output("moonc", ["build-package", "-warn-help"])
+        }) {
+        Some(Some(help)) => help
+        _ => ""
+      }
       let spec = parse_warn_off_list(help)
       warn_off_list_cache.val = Some(spec)
       spec
     }
   }
 }
+
+///|
+/// Deadline for the one-shot warning-table probe — generous (the real command
+/// answers in milliseconds) but hard, so it can never hold the tool turn.
+const WarnProbeTimeoutMs : Int = 10_000
 
 ///|
 /// Parse `moonc build-package -warn-help` output into the warn-off spec:
@@ -61,6 +72,13 @@ fn parse_warn_off_list(help : String) -> String {
   let mut max_id = 0
   let error_ids : Array[Int] = []
   for line in help.split("\n") {
+    // A Windows toolchain emits CRLF; without stripping the `\r` every state
+    // token reads `warn\r` and the whole table fails to parse.
+    let line = if line.has_suffix("\r") {
+      line[:line.length() - 1]
+    } else {
+      line
+    }
     let parts = [..line.split(" ")].filter(part => !part.is_empty())
     guard parts.length() >= 2 else { continue }
     let state = parts[parts.length() - 1]

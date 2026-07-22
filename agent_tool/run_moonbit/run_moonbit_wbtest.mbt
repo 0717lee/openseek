@@ -67,4 +67,6 @@ test "warn-off spec derivation from the toolchain warning table" {
   assert_eq(parse_warn_off_list("a x 1 error\nb y 2 warn\nc z 3 error"), "-2")
   // a lone single-id gap renders as "-n", not a degenerate range
   assert_eq(parse_warn_off_list("a x 2 error\nb y 3 warn"), "-1-3")
+  // CRLF output (Windows toolchains) parses identically
+  assert_eq(parse_warn_off_list("a x 2 error\r\nb y 3 warn\r\n"), "-1-3")
 }
