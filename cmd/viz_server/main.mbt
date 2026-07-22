@@ -130,10 +130,17 @@ async fn main {
       }
       scoped
     }
-    let html = build_export_html(rows, shell, bundle_paths)
+    guard locate_bundle(bundle_paths) is Some(bundle_path) else {
+      fail(
+        "could not locate the viz_app.js bundle (build with `moon build cmd/viz_app --target js` or pass --bundle)",
+      )
+    }
+    let html = build_export_html(rows, shell, bundle_path)
     @fs.write_file(config.export_path, html, create_mode=CreateOrTruncate)
+    // Name the embedded bundle: a stale artifact silently shadowing a
+    // fresh build is invisible in the output file, but not in this line.
     println(
-      "openseek viz: wrote standalone export '\{config.export_path}' (\{rows.length()} session(s), \{html.length()} chars)",
+      "openseek viz: wrote standalone export '\{config.export_path}' (\{rows.length()} session(s), \{html.length()} chars; bundle: \{bundle_path})",
     )
     return
   }
@@ -280,9 +287,13 @@ async fn build_reply(
         shell, "text/html; charset=utf-8", "index.html not found; pass --web-dir or run from the openseek checkout",
       )
     "/viz_app.js" =>
-      search_reply(
-        bundle, "text/javascript; charset=utf-8", "viz_app.js not found; build it with: moon build",
-      )
+      match locate_bundle(bundle) {
+        Some(path) => asset_reply(path, "text/javascript; charset=utf-8")
+        None =>
+          text_reply(
+            404, "Not Found", "viz_app.js not found; build it with: moon build",
+          )
+      }
     "/api/sessions" => session_list_reply(catalog)
     _ =>
       match path.strip_prefix("/api/sessions/") {
@@ -385,14 +396,12 @@ fn session_list_json(rows : Array[SessionListRow]) -> Json {
 async fn build_export_html(
   rows : Array[SessionListRow],
   shell : Array[String],
-  bundle : Array[String],
+  bundle_path : String,
 ) -> String {
   let shell_html = read_first_existing(
     shell, "index.html shell (build with `moon build` or pass --web-dir)",
   )
-  let bundle_js = read_first_existing(
-    bundle, "viz_app.js bundle (build with `moon build` or pass --bundle)",
-  )
+  let bundle_js = read_text_lossy(bundle_path)
   // Bake the two live endpoints the frontend fetches: the sidebar listing and
   // one envelope per session, keyed exactly as the frontend requests them.
   let data : Map[String, Json] = Map([])
@@ -430,6 +439,47 @@ async fn read_first_existing(
     Some(path) => read_text_lossy(path)
     None => fail("could not locate \{what}")
   }
+}
+
+///|
+/// The bundle to serve/embed: an explicit `--bundle` (the first candidate,
+/// blank when unset) wins outright when it exists; otherwise the FRESHEST
+/// existing candidate by mtime — not the first. List order once let an
+/// 11-day-old `release` artifact silently shadow a fresh `debug` build,
+/// shipping a stale frontend into an export; for build outputs, recency is
+/// the signal that matters. Ties keep candidate order.
+async fn locate_bundle(candidates : Array[String]) -> String? {
+  guard candidates is [explicit, .. rest] else { return None }
+  if explicit != "" && @fs.exists(explicit) {
+    return Some(explicit)
+  }
+  let mut best : (String, Int64, Int)? = None
+  for candidate in rest {
+    if candidate == "" || !@fs.exists(candidate) {
+      continue
+    }
+    guard file_mtime(candidate) is Some((seconds, nanoseconds)) else {
+      continue
+    }
+    let newer = match best {
+      None => true
+      Some((_, best_seconds, best_nanoseconds)) =>
+        seconds > best_seconds ||
+        (seconds == best_seconds && nanoseconds > best_nanoseconds)
+    }
+    if newer {
+      best = Some((candidate, seconds, nanoseconds))
+    }
+  }
+  best.map(entry => entry.0)
+}
+
+///|
+async fn file_mtime(path : String) -> (Int64, Int)? {
+  let file = @fs.open(path, mode=ReadOnly) catch { _ => return None }
+  defer file.close()
+  let stamp = file.mtime() catch { _ => return None }
+  Some(stamp)
 }
 
 ///|
@@ -1274,4 +1324,23 @@ fn parse_port(text : String) -> Int raise {
   @string.parse_int(text) catch {
     _ => fail("--port or OPENSEEK_VIZ_PORT must be an integer, got: \{text}")
   }
+}
+
+///|
+async test "locate_bundle prefers the freshest artifact; explicit wins" {
+  let root = @fs.tmpdir(prefix="openseek-viz-bundle-")
+  let old_path = "\{root}/old.js"
+  let new_path = "\{root}/new.js"
+  @fs.write_file(old_path, "old", create_mode=CreateOrTruncate)
+  // Written after, so strictly newer (APFS nanosecond mtimes).
+  @fs.write_file(new_path, "new", create_mode=CreateOrTruncate)
+  // No explicit bundle: recency beats candidate order.
+  assert_eq(locate_bundle(["", old_path, new_path]), Some(new_path))
+  assert_eq(locate_bundle(["", new_path, old_path]), Some(new_path))
+  // An explicit --bundle wins outright, even when older.
+  assert_eq(locate_bundle([old_path, new_path]), Some(old_path))
+  // Missing candidates are skipped; nothing existing is None.
+  assert_eq(locate_bundle(["", "\{root}/absent.js", old_path]), Some(old_path))
+  assert_eq(locate_bundle(["", "\{root}/absent.js"]), None)
+  @fs.rmdir(root, recursive=true)
 }
