@@ -562,13 +562,20 @@ async fn AgentLoop::handle_tool_calls(
 /// so recording, budget accounting, ceiling handling, and result ordering
 /// are byte-identical to sequential execution — only the waiting overlaps.
 ///
-/// A group prefetches only when the ENTIRE batch prefix through its last
-/// call fits the running batch budget worst-case: a child must never be
-/// launched for a call the ceiling would then skip-close (its spend would
-/// be silently wasted). Goal calls (loop-intercepted), undecodable calls,
-/// and unknown tools never prefetch — the loop's own paths handle them.
-/// Only cancellation escapes a prefetch; tool failures fold into the
-/// action `execute_tool_call` already returns.
+/// A group prefetches only when a call sequential execution might skip
+/// cannot be in it: the ENTIRE batch prefix through the group's last call
+/// must fit the running batch budget worst-case (no child for a call the
+/// ceiling would skip-close), and NOTHING after a control-registered call
+/// in the batch prefetches at all — a sealing finish/abort ends the batch
+/// early, and sequential execution would never have launched the calls
+/// behind it. Goal calls (loop-intercepted), control tools, undecodable
+/// calls, and unknown tools never prefetch — the loop's own paths handle
+/// them. Only cancellation escapes a prefetch; tool failures fold into
+/// the action `execute_tool_call` already returns.
+///
+/// The durable session is byte-identical to sequential execution; the
+/// LIVE event stream is not — a prefetched group's child brackets emit
+/// while earlier batch calls are still recording. Readers pair by id.
 async fn AgentLoop::prefetch_concurrent_results(
   self : Self,
   response : @deepseek.ChatResponse,
@@ -584,8 +591,16 @@ async fn AgentLoop::prefetch_concurrent_results(
   }
 
   for index, native in response.tool_calls {
-    let safe = self.tools.find(native.name) is Some(tool) &&
+    let tool = self.tools.find(native.name)
+    // Nothing prefetches from behind a batch-sealing call; the group
+    // already accumulated BEFORE it executes either way, so it stays.
+    if tool is Some(tool) && tool.is_control() {
+      flush()
+      break
+    }
+    let safe = tool is Some(tool) &&
       tool.is_concurrent_safe() &&
+      !tool.is_control() &&
       !(native.name == "goal" && self.goal_cadence.tool_registered)
     guard safe else {
       flush()

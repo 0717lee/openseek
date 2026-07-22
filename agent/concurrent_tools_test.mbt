@@ -20,7 +20,7 @@ fn probe_tool(
   journal : Array[String],
   concurrent_safe~ : Bool,
 ) -> @agent_tool.AgentToolDefinition {
-  @agent_tool.AgentToolDefinition(
+  AgentToolDefinition(
     name="probe",
     description="Probe tool.",
     schema=JsonSchema({ "type": "object" }),
@@ -70,10 +70,7 @@ async test "adjacent concurrent-safe calls overlap and keep result order" {
       scope=AgentTaskScope(group),
       api_key="test-key",
       model=Deepseek(V4Flash),
-      session=@agent_session.Session(
-        SessionId("concurrent-probes"),
-        system_prompt="system",
-      ),
+      session=Session(SessionId("concurrent-probes"), system_prompt="system"),
       task="probe twice",
       append_item=(session, item) => session.append(item),
       max_steps=4,
@@ -104,10 +101,7 @@ async test "unflagged adjacent calls stay sequential" {
       scope=AgentTaskScope(group),
       api_key="test-key",
       model=Deepseek(V4Flash),
-      session=@agent_session.Session(
-        SessionId("sequential-probes"),
-        system_prompt="system",
-      ),
+      session=Session(SessionId("sequential-probes"), system_prompt="system"),
       task="probe twice",
       append_item=(session, item) => session.append(item),
       max_steps=4,
@@ -116,5 +110,44 @@ async test "unflagged adjacent calls stay sequential" {
     )
     assert_eq(journal, ["start-a", "end-a", "start-b", "end-b"])
     assert_eq(probe_results(result), ["ok-a", "ok-b"])
+  }
+}
+
+///|
+/// Calls behind a batch-sealing control call never prefetch: the sealed
+/// batch discards its remainder, and children sequential execution never
+/// launches must not run. The finish at index 0 seals; neither probe
+/// journals anything.
+async test "no prefetch behind a batch-sealing control call" {
+  @async.with_task_group() <| group => {
+    let bodies : Array[String] = []
+    let finish_then_probes =
+      #|{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c0","function":{"name":"finish","arguments":"{\"answer\":\"done early\"}"}},{"index":1,"id":"c1","function":{"name":"probe","arguments":"{\"tag\": \"a\"}"}},{"index":2,"id":"c2","function":{"name":"probe","arguments":"{\"tag\": \"b\"}"}}]}}],"usage":{"prompt_tokens":9000,"completion_tokens":1000,"total_tokens":10000}}
+    guard goal_check_test_server(group, bodies, [finish_then_probes])
+      is Some(url) else {
+      return
+    }
+    let journal : Array[String] = []
+    let result = @agent.run_turn_in_scope(
+      runtime=AgentRuntime(),
+      scope=AgentTaskScope(group),
+      api_key="test-key",
+      model=Deepseek(V4Flash),
+      session=Session(SessionId("sealed-batch"), system_prompt="system"),
+      task="finish immediately",
+      append_item=(session, item) => session.append(item),
+      max_steps=4,
+      api_url=url,
+      tools=Tools([
+        probe_tool(journal, concurrent_safe=true),
+        @finish.definition(),
+      ]),
+    )
+    assert_eq(journal, ([] : Array[String]))
+    guard result.events().iter().last() is Some(event) &&
+      event.item() is Terminal(Finished(answer)) else {
+      fail("expected a sealed finish")
+    }
+    assert_eq(answer, "done early")
   }
 }
