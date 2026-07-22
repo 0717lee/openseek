@@ -34,10 +34,13 @@ diagnostics are the error message when something does not build.
   the `shell` tool.
 - `warning` (string, optional, `"off"`/`"on"`, default `"off"`): whether
   compiler warnings appear in the output. Snippets are throwaway scripts, so
-  unused-value style noise is suppressed (a `--warn-list` spec disabling every
-  warn-state diagnostic) unless the warnings themselves are what you are
-  probing. Errors are unaffected — warning IDs whose default state is `error`
-  (e.g. `partial_match`) still fail compilation with warnings off.
+  unused-value style noise is suppressed — via a `--warn-list` spec derived
+  from the toolchain's own warning table (`moonc build-package -warn-help`,
+  probed once per process) — unless the warnings themselves are what you are
+  probing. Errors are unaffected: warning IDs whose default state is `error`
+  (e.g. `partial_match`) still fail compilation with warnings off, and if the
+  table cannot be probed the tool passes no flag at all, leaving warnings
+  visible rather than ever breaking the run.
 
 Only **dependency resolution** is isolated: a local-package import resolves to
 the **published registry snapshot** (not your uncommitted edits), and a

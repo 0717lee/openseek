@@ -4,6 +4,7 @@ import {
   "bobzhang/openseek/agent_tool/internal/error" @tool_error,
   "bobzhang/openseek/agent_tool/internal/sandbox",
   "bobzhang/openseek/internal/workspace_path",
+  "moonbitlang/core/string",
   "moonbitlang/async",
   "moonbitlang/async/fs",
   "moonbitlang/async/process",

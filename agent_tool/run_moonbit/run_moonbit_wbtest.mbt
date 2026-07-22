@@ -34,3 +34,37 @@ async test "denial scan is bounded to the log's head and tail" {
     assert_false(scan("clean", filler(64)))
   })
 }
+
+///|
+/// The warn-off spec must come from the toolchain's own table: moonc rejects
+/// ids beyond its maximum, so a hardcoded ceiling breaks every default run on
+/// an older toolchain (the desktop runtime pins one), and a too-low ceiling
+/// leaks newer warnings. The parser disables 1..max by ranges skipping the
+/// error-state ids, and yields "" (no flag at all) when nothing parses.
+test "warn-off spec derivation from the toolchain warning table" {
+  let help =
+    #|Available warnings:
+    #|mnemonic                   description                 id state
+    #|unused_value               Unused variable.             2 warn
+    #|partial_match              Partial pattern matching.   11 error
+    #|unused_mut                 Unused mutability.          15 error
+    #|deprecated                 Deprecated API usage.       20 warn
+    #|unused_default_value       Default value never used.   32 off
+    #|multiline_string_escape    Deprecated escape.          40 error
+    #|invalid_inline_wasm        Invalid inline-wasm.        44 error
+    #|unannotated_ffi            Unannotated FFI param type  55 error
+    #|type_param_method          Deprecated call.            83 warn
+    #|A                          all warnings
+    #|state: warn = enabled, error = promoted to error, off = disabled
+  assert_eq(
+    parse_warn_off_list(help),
+    "-1..10-12..14-16..39-41..43-45..54-56..83",
+  )
+  // no parsable table → no flag at all (fail-open to visible warnings)
+  assert_eq(parse_warn_off_list(""), "")
+  assert_eq(parse_warn_off_list("mnemonic id state\nnothing here"), "")
+  // error ids at the edges produce no empty or inverted ranges
+  assert_eq(parse_warn_off_list("a x 1 error\nb y 2 warn\nc z 3 error"), "-2")
+  // a lone single-id gap renders as "-n", not a degenerate range
+  assert_eq(parse_warn_off_list("a x 2 error\nb y 3 warn"), "-1-3")
+}

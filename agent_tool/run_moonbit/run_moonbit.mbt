@@ -18,19 +18,136 @@ const OutputCapBytes : Int = 48_000
 /// the sandbox — instead of using `edit`.
 const SandboxSourceWriteFeedback : String = "run_moonbit sandbox: the \"Operation not permitted\" failure above is this tool's sandbox denying a write to a protected MoonBit source file (`*.mbt`, `*.mbti`, `*.mbt.md`, `moon.mod`/`moon.pkg`/`moon.work`) — not a filesystem or permissions problem to debug. Snippets run source-write-readonly by design; writing non-source files (data, logs, reports) stays allowed. Do NOT try to work around the block from inside a snippet (renames, copies, temp-then-move, or other sandbox escapes) — make source changes with the line-anchored `edit` tool instead, and keep run_moonbit for compute, probing, and non-source IO."
 
+
 ///|
-/// The `--warn-list` spec for `warning: "off"`: every warn-state diagnostic
-/// disabled, while the five whose DEFAULT state is `error` (11 partial_match,
-/// 15 unused_mut, 40 multiline_string_escape, 44 invalid_inline_wasm,
-/// 55 unannotated_ffi) keep erroring — "warnings off" must never let a
-/// program that previously failed to compile reach a runtime panic. `-a` is
-/// unusable for this: a later `@id` re-enable does not survive it (probed
-/// live), so the warn-state IDs are disabled by explicit ranges instead.
-/// 83 is the highest warning number of the CURRENT bundled moonc (`moonc
-/// build-package -warn-help`; an id past the compiler's max is rejected, so
-/// never overshoot). IDs a future compiler adds past it stay visible until
-/// this list is refreshed — fail-open, never silently error-eating.
-const WarnOffList : String = "-1..10-12..14-16..39-41..43-45..54-56..83"
+/// Cached `--warn-list` spec for `warning: "off"` — derived once per process.
+/// `""` means derivation failed: pass no flag and leave warnings visible
+/// (fail-open, never a broken run).
+let warn_off_list_cache : Ref[String?] = { val: None }
+
+///|
+/// The `--warn-list` spec for `warning: "off"`: every id in the toolchain's
+/// warning table disabled EXCEPT those whose default state is `error`
+/// (partial_match and friends) — "warnings off" must never let a program that
+/// previously failed to compile reach a runtime panic instead. The spec is
+/// derived from `moonc build-package -warn-help` rather than hardcoded,
+/// because moonc REJECTS ids beyond its own maximum: a static list breaks
+/// every default run on any toolchain older than the list (the desktop
+/// runtime pins one), while a too-low ceiling silently leaks newer warnings.
+/// `moonc` is resolved from PATH like the `moon` the run spawns — both live
+/// in the same toolchain bin directory. `-a` cannot be used for this: a later
+/// `@id` re-enable does not survive it (probed live).
+async fn warn_off_list() -> String {
+  match warn_off_list_cache.val {
+    Some(spec) => spec
+    None => {
+      let help = capture_merged_output("moonc", ["build-package", "-warn-help"]).unwrap_or(
+        "",
+      )
+      let spec = parse_warn_off_list(help)
+      warn_off_list_cache.val = Some(spec)
+      spec
+    }
+  }
+}
+
+///|
+/// Parse `moonc build-package -warn-help` output into the warn-off spec:
+/// table rows end with `<id> <state>` (state ∈ warn|error|off); every id from
+/// 1 through the table's maximum is disabled by ranges that skip the
+/// error-state ids. Returns `""` when no row parses — the caller then passes
+/// no flag at all.
+fn parse_warn_off_list(help : String) -> String {
+  let mut max_id = 0
+  let error_ids : Array[Int] = []
+  for line in help.split("\n") {
+    let parts = [..line.split(" ")].filter(part => !part.is_empty())
+    guard parts.length() >= 2 else { continue }
+    let state = parts[parts.length() - 1]
+    guard state == "warn" || state == "error" || state == "off" else {
+      continue
+    }
+    let id = @string.parse_int(parts[parts.length() - 2]) catch {
+      _ => continue
+    }
+    guard id > 0 else { continue }
+    if id > max_id {
+      max_id = id
+    }
+    if state == "error" {
+      error_ids.push(id)
+    }
+  }
+  guard max_id > 0 else { return "" }
+  error_ids.sort()
+  let spec = StringBuilder()
+  fn emit(from : Int, to : Int) {
+    if from == to {
+      spec.write_string("-\{from}")
+    } else {
+      spec.write_string("-\{from}..\{to}")
+    }
+  }
+
+  let mut start = 1
+  for error_id in error_ids {
+    guard error_id >= start else { continue }
+    if start <= error_id - 1 {
+      emit(start, error_id - 1)
+    }
+    start = error_id + 1
+  }
+  if start <= max_id {
+    emit(start, max_id)
+  }
+  spec.to_string()
+}
+
+///|
+/// Run `program args` and return its merged stdout+stderr (capped at 256KB,
+/// drained past the cap so the child cannot deadlock on a full pipe), or
+/// `None` on spawn failure or non-zero exit. One-shot toolchain probe.
+async fn capture_merged_output(
+  program : String,
+  args : Array[String],
+) -> String? {
+  (@async.with_task_group() <| group => {
+    let (reader, writer) = @process.read_from_process()
+    defer reader.close()
+    let process = @process.spawn(
+      group,
+      program,
+      args,
+      stdout=writer,
+      stderr=writer,
+      cancel_handler=@process.hard_cancel(),
+      no_wait=true,
+    )
+    let cap = 262_144
+    let buf = FixedArray::make(cap, b'\x00')
+    let mut filled = 0
+    for ;; {
+      match reader.read_some(max_len=4096) {
+        None => break
+        Some(chunk) =>
+          for byte in chunk {
+            if filled < cap {
+              buf[filled] = byte
+              filled += 1
+            }
+          }
+      }
+    }
+    if process.wait() == 0 {
+      Some(@utf8.decode_lossy(Bytes::from_array(buf[:filled])))
+    } else {
+      None
+    }
+  }) catch {
+    error if @async.is_being_cancelled() => raise error
+    _ => None
+  }
+}
 
 ///|
 /// Best-effort refusal of the two obvious native escapes: process spawning
@@ -78,7 +195,7 @@ fn native_escape(source : String) -> String? {
 /// Passing `warning: "on"` restores them, for when the warnings themselves
 /// are the thing being probed. Errors are unaffected either way — including
 /// warning IDs whose default state is `error` (e.g. `partial_match`), which
-/// keep failing compilation with warnings off (see `WarnOffList`).
+/// keep failing compilation with warnings off (see `warn_off_list`).
 ///
 /// Note: on macOS the run is wrapped in `sandbox-exec` with the shell tool's
 /// source-write-readonly profile, so a snippet is blocked from directly writing
@@ -214,10 +331,13 @@ async fn execute(
     // unused-variable style noise only burns context and can drown the
     // program's real output. `warning: "on"` skips the flag, for when the
     // warnings themselves are the thing being probed. Errors are unaffected
-    // either way — see `WarnOffList` for why this is NOT `-a`.
+    // either way — see `warn_off_list` for why the spec is derived, not `-a`.
     if !input.warning {
-      moon_argv.push("--warn-list")
-      moon_argv.push(WarnOffList)
+      let spec = warn_off_list()
+      if spec != "" {
+        moon_argv.push("--warn-list")
+        moon_argv.push(spec)
+      }
     }
     // Wrap `moon run` in sandbox-exec where it can actually enforce (macOS) so a
     // snippet cannot directly overwrite protected source files — reusing the
