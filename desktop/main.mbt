@@ -64,7 +64,9 @@ async fn main {
     // `host.connect` request task as their owner.
     group.spawn_bg(allow_failure=true, () => bridge.run())
     group.spawn_bg(allow_failure=true, () => {
-      state.engine_actor().run(state.sink(), message => {
+      state
+      .engine_actor()
+      .run(state.sink(), message => {
         state.publish("agent.error", { "message": Json::string(message) })
       })
     })
