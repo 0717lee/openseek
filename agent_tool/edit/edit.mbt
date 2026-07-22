@@ -290,11 +290,14 @@ async fn preview_replace_all(
     // long new_string times thousands of matches must never be materialized
     // just to be found oversized (4k one-char matches × a 50k replacement is
     // ~200M units). Embedding a huge line (or expansion) twice in the edits
-    // array would also blow the response past the outer clamp.
-    let growth = input.new_string.length() - input.old_string.length()
-    let expanded = line.length() +
-      match_count * (if growth > 0 { growth } else { 0 })
-    if line.length() > PreviewEntryCharsCap || expanded > PreviewEntryCharsCap {
+    // array would also blow the response past the outer clamp. Int64: the
+    // estimate itself must not overflow — 4096 matches × 2^19 growth wraps a
+    // 32-bit Int negative and would sail PAST the guard it exists for.
+    let growth = (input.new_string.length() - input.old_string.length()).to_int64()
+    let expanded = line.length().to_int64() +
+      match_count.to_int64() * (if growth > 0 { growth } else { 0 })
+    if line.length() > PreviewEntryCharsCap ||
+      expanded > PreviewEntryCharsCap.to_int64() {
       notes.push(
         "line \{site.first_line}: \{match_count} matches, but the whole-line entry would be too large to emit (line \{line.length()} chars, combined replacement ≈ \{expanded}) — narrow old_string (with more surrounding context) or edit that line manually",
       )

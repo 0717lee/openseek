@@ -1068,3 +1068,32 @@ async test "context blocks are budgeted; entries still cover every site" {
     assert_true(preview.content.contains("\"start_line\":40"))
   })
 }
+
+///|
+async test "the expansion estimate does not overflow 32-bit arithmetic" {
+  @vfs.with_tmpdir(dir => {
+    let path = "\{dir}/overflow.txt"
+    // 4096 one-char matches x ~2^19 growth = 2^31: a 32-bit estimate wraps
+    // negative and sails past the guard, then replace_all would attempt a
+    // ~2GiB string. The Int64 estimate must reject the site with a note.
+    @fs.write_file(
+      path,
+      "\{String::make(4096, 'q')}\nq alone\n",
+      create_mode=CreateOrTruncate,
+    )
+    let preview = run_edit({
+      "path": path,
+      "old_string": "q",
+      "new_string": String::make(524_289, 'z'),
+      "start_line": 1,
+      "replace_all_preview": true,
+    })
+    assert_false(preview.is_error)
+    assert_true(preview.content.contains("too large to emit"))
+    assert_false(preview.content.contains("\"start_line\":1"))
+    // line 2's single-match entry carries the 524k-char new_string, so the
+    // ENTRIES budget omits it too — this test only pins that the estimate
+    // rejects the dense site without ever building a ~2GiB string
+    assert_true(preview.content.contains("omitted to keep the array parseable"))
+  })
+}
