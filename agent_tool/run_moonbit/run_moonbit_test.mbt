@@ -130,6 +130,16 @@ async test "sandbox blocks overwriting a protected source file in the workspace"
 }
 
 ///|
+test "the description encourages batched same-turn probing" {
+  // The batching guidance lives in the tool description (and the default
+  // prompt): several independent probes in ONE assistant turn, not serial
+  // single-probe turns.
+  let description = @run_moonbit.definition(workspace_root=".").description
+  assert_true(description.contains("SAME assistant turn"))
+  assert_true(description.contains("one small program per hypothesis"))
+}
+
+///|
 async test "rejects non-string source arguments" {
   let out = run_in(".", { "code": "x" })
   assert_true(out.is_error)

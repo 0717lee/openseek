@@ -127,7 +127,10 @@ fn default_prompt() -> String {
     #|  `target` defaults to native. It runs isolated, so a local-package import binds
     #|  the STALE mooncakes.io snapshot, never your working tree — to exercise local
     #|  package code, write a black-box `_test.mbt` and run `moon test <pkg> --filter`
-    #|  (above).
+    #|  (above). When probing, emit several independent `run_moonbit` calls in the
+    #|  SAME turn — one small program per hypothesis — rather than one probe per turn
+    #|  or one mega-program: batched probes come back together, cost one round-trip,
+    #|  and a failing hypothesis never blocks the others from answering.
     #|- `review` tool: before declaring substantial work or a standing goal
     #|  complete, request an independent worktree audit — a review subagent reads
     #|  the files, runs the project's own checks, hunts for vacuous success, and
