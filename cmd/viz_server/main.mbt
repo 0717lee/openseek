@@ -450,8 +450,15 @@ async fn read_first_existing(
 /// the signal that matters. Ties keep candidate order.
 async fn locate_bundle(candidates : Array[String]) -> String? {
   guard candidates is [explicit, .. rest] else { return None }
-  if explicit != "" && @fs.exists(explicit) {
-    return Some(explicit)
+  if explicit != "" {
+    if @fs.exists(explicit) {
+      return Some(explicit)
+    }
+    // An explicitly requested bundle that is missing must not silently
+    // become a different one: say so, then fall back to auto-location.
+    println(
+      "openseek viz: warning: --bundle '\{explicit}' does not exist; auto-locating instead",
+    )
   }
   let mut best : (String, Int64, Int)? = None
   for candidate in rest {
@@ -484,8 +491,8 @@ async fn file_mtime(path : String) -> (Int64, Int)? {
 
 ///|
 /// The first non-empty candidate path that names an existing file, or `None`.
-/// Shared by the live asset route and the exporter so they resolve candidates
-/// identically.
+/// Used for the SHELL (a curated file, where list order is the intent);
+/// the bundle resolves by recency via `locate_bundle` instead.
 async fn first_existing(candidates : Array[String]) -> String? {
   for candidate in candidates {
     if candidate != "" && @fs.exists(candidate) {
@@ -1059,12 +1066,14 @@ fn shell_candidates(web_dir : String, module_root : String?) -> Array[String] {
 }
 
 ///|
-/// Where to look for the compiled frontend bundle, in order: an explicit
-/// `--bundle` path, `<web-dir>/viz_app.js`, moon's release and debug outputs
-/// for the standalone frontend module, legacy in-module frontend build outputs,
-/// then the same paths under the executable-derived checkout root. This lets
-/// `moon build` followed by `moon run --target native cmd/viz_server` work
-/// with no copy step — from any directory.
+/// Where to look for the compiled frontend bundle. Element 0 is the
+/// explicit `--bundle` path (blank when unset) — the one position that
+/// matters, since `locate_bundle` resolves the rest by mtime, not list
+/// order: `<web-dir>/viz_app.js`, moon's release and debug outputs for the
+/// standalone frontend module, legacy in-module frontend build outputs,
+/// and the same paths under the executable-derived checkout root. This
+/// lets `moon build` followed by `moon run --target native cmd/viz_server`
+/// work with no copy step — from any directory.
 fn bundle_candidates(
   bundle : String,
   web_dir : String,

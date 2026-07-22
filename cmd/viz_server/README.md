@@ -13,7 +13,7 @@ moon build
 ```
 
 This builds both the native server and the JavaScript visualizer app. The server
-auto-locates the frontend bundle from Moon's build output, normally:
+auto-locates the frontend bundle from Moon's build output (freshest artifact by mtime wins, so a stale release build never shadows a fresh debug one; an explicit --bundle overrides), normally:
 
 ```text
 _build/js/debug/build/bobzhang/openseek-viz-app/openseek-viz-app.js
