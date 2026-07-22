@@ -86,7 +86,7 @@ async fn execute(
   // job — so a full read is done only in that rare case.
   let sandbox_denied = if snapshot.source_write_sandboxed {
     let full = bg_runtime.read_output(job_id).unwrap_or(output)
-    @shell.source_write_denied_in_text(full, snapshot.sandbox_denial_subjects)
+    @sandbox.source_write_denied_in_text(full, snapshot.sandbox_denial_subjects)
   } else {
     false
   }

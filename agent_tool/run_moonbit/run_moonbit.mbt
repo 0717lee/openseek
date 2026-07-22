@@ -12,6 +12,13 @@ const RunTimeoutMs : Int = 60_000
 const OutputCapBytes : Int = 48_000
 
 ///|
+/// Guidance appended when a sandboxed run's output shows a source-write denial
+/// ("Operation not permitted" on a protected source path). Without it the model
+/// reads a bare OS error and debugs the filesystem — or worse, tries to escape
+/// the sandbox — instead of using `edit`.
+const SandboxSourceWriteFeedback : String = "run_moonbit sandbox: the \"Operation not permitted\" failure above is this tool's sandbox denying a write to a protected MoonBit source file (`*.mbt`, `*.mbti`, `*.mbt.md`, `moon.mod`/`moon.pkg`/`moon.work`) — not a filesystem or permissions problem to debug. Snippets run source-write-readonly by design; writing non-source files (data, logs, reports) stays allowed. Do NOT try to work around the block from inside a snippet (renames, copies, temp-then-move, or other sandbox escapes) — make source changes with the line-anchored `edit` tool instead, and keep run_moonbit for compute, probing, and non-source IO."
+
+///|
 /// Best-effort refusal of the two obvious native escapes: process spawning
 /// (`moonbitlang/async/process` — the `shell` tool owns commands) and native
 /// FFI (`extern`, which can bind libc `system`). A substring scan is NOT a
@@ -184,21 +191,30 @@ async fn execute(
     // preflights the command) an arbitrary snippet can still smuggle sources via
     // directory renames; full containment is the wasm backend's job. Elsewhere
     // (or in a nested sandbox where it cannot enforce) run moon directly.
-    let (prog, argv) = if @sandbox.sandbox_exec_available() {
-      let base = @sandbox.source_write_readonly_profile_data(
+    // The profile data is kept (not just its text) so a denial showing up in the
+    // program's output can be recognized and explained below.
+    let sandbox_data = if @sandbox.sandbox_exec_available() {
+      Some(
+        @sandbox.source_write_readonly_profile_data(
           @fs.realpath(workspace_root) catch {
             _ => workspace_root
           },
-        ).profile
-      // Re-allow the throwaway build dir: if it falls INSIDE the workspace root
-      // (e.g. `workspace_root=/tmp`, where `@fs.tmpdir` lands under it) the shared
-      // deny would otherwise block moon's own generated `snippet.mbt`. SBPL is
-      // last-match-wins, so this appended allow overrides the deny for `dir` only.
-      let profile = base +
-        "\n(allow file-write* (subpath \"\{@sandbox.sbpl_string_escape(real)}\"))\n"
-      (@sandbox.SandboxExecPath, ["-p", profile, "moon", ..moon_argv])
+        ),
+      )
     } else {
-      ("moon", moon_argv)
+      None
+    }
+    let (prog, argv) = match sandbox_data {
+      Some(data) => {
+        // Re-allow the throwaway build dir: if it falls INSIDE the workspace root
+        // (e.g. `workspace_root=/tmp`, where `@fs.tmpdir` lands under it) the shared
+        // deny would otherwise block moon's own generated `snippet.mbt`. SBPL is
+        // last-match-wins, so this appended allow overrides the deny for `dir` only.
+        let profile = data.profile +
+          "\n(allow file-write* (subpath \"\{@sandbox.sbpl_string_escape(real)}\"))\n"
+        (@sandbox.SandboxExecPath, ["-p", profile, "moon", ..moon_argv])
+      }
+      None => ("moon", moon_argv)
     }
     let result = @async.with_timeout_opt(RunTimeoutMs, () => {
       let exit_code = @process.run(
@@ -217,6 +233,13 @@ async fn execute(
         // Rewrite the throwaway temp path to `source` so the model reads
         // `source:LINE:COL` about its own input, not a random temp path.
         let text = rewrite_temp_paths(raw, [real, dir])
+        // A "not permitted" line naming a protected source path in a sandboxed
+        // run is the source-write policy firing, not an environment fault:
+        // explain it (the raw OS error is otherwise a dead end) and treat the
+        // run as failed even if the snippet swallowed the error and exited 0 —
+        // the same semantics the shell tool applies to its command output.
+        let sandbox_denied = sandbox_data is Some(data) &&
+          @sandbox.source_write_denied_in_text(text, data.denial_subjects)
         // PREPEND the exit status so it survives the agent loop's outer 60k
         // result clamp (which cuts the tail); the output cap is below 60k so
         // both the status line and the body are retained.
@@ -227,9 +250,14 @@ async fn execute(
         } else {
           text
         }
+        let body = if sandbox_denied {
+          "\{body}\n\n\{SandboxSourceWriteFeedback}"
+        } else {
+          body
+        }
         @agent_tool.ToolAction::respond(
           body,
-          is_error=exit_code != 0,
+          is_error=exit_code != 0 || sandbox_denied,
           brief="run_moonbit (exit=\{exit_code})",
         )
       }

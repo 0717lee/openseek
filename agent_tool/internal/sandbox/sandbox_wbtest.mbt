@@ -111,6 +111,57 @@ async test "sandbox profile blocks existing directories that contain source" {
 }
 
 ///|
+test "source-write denial detection in command output" {
+  // run_moonbit's shape: a MoonBit runtime error for a denied source write.
+  assert_true(
+    source_write_denied_in_text(
+      "OSError(\"@fs.open(): \\\"keep.mbt\\\": Operation not permitted\")",
+      [],
+    ),
+  )
+  assert_true(
+    source_write_denied_in_text("sh: main.mbt: Operation not permitted\n", []),
+  )
+  assert_true(
+    source_write_denied_in_text("sh: moon.work: Operation not permitted\n", []),
+  )
+  // Generic denials and prose mentions are not source-write denials.
+  assert_false(source_write_denied_in_text("Permission denied\n", []))
+  assert_false(
+    source_write_denied_in_text("Permission denied while reading main.mbt\n", []),
+  )
+  assert_false(
+    source_write_denied_in_text(
+      "Permission denied while reading 'main.mbt'\n",
+      [],
+    ),
+  )
+  // The subject may follow the denial (python's errno shape, plain colon).
+  assert_true(
+    source_write_denied_in_text(
+      "PermissionError: [Errno 1] Operation not permitted: 'main.mbt'\n",
+      [],
+    ),
+  )
+  assert_true(
+    source_write_denied_in_text("Operation not permitted: main.mbt\n", []),
+  )
+  assert_true(source_write_denied_in_text("Permission denied: main.mbt\n", []))
+  // A denied directory is recognized only as a known denial subject.
+  let dir_rename = "PermissionError: [Errno 1] Operation not permitted: 'pkg'\n"
+  assert_false(source_write_denied_in_text(dir_rename, []))
+  assert_true(source_write_denied_in_text(dir_rename, ["pkg"]))
+  assert_false(
+    source_write_denied_in_text("foo: Operation not permitted\n", []),
+  )
+  assert_false(
+    source_write_denied_in_text("foo: Operation not permitted\n", ["pkg"]),
+  )
+  // A source path without any denial wording is not a denial either.
+  assert_false(source_write_denied_in_text("compiled keep.mbt: ok", []))
+}
+
+///|
 async test "sandbox profile cache invalidates when source tree changes" {
   @vfs.with_tmpdir(prefix="openseek-shell-sandbox-profile-invalidate-", root => {
     @fs.mkdir("\{root}/assets")

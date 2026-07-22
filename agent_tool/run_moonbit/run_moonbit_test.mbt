@@ -140,6 +140,39 @@ test "the description encourages batched same-turn probing" {
 }
 
 ///|
+async test "an uncaught sandbox denial is explained, not left as a bare EPERM" {
+  guard @sandbox.sandbox_exec_available() else { return }
+  @vfs.with_tmpdir(ws => {
+    @fs.write_file(
+      "\{ws}/keep.mbt",
+      "fn main {  }\n",
+      create_mode=CreateOrTruncate,
+    )
+    // Unlike the test above, the snippet does NOT catch the write failure, so
+    // the run dies with the raw OS error — the case where the model previously
+    // saw only `Operation not permitted` with no idea the sandbox caused it.
+    let out = run_in(ws, {
+      "source": (
+        #|import { "moonbitlang/async", "moonbitlang/async/fs" }
+        #|
+        #|async fn main {
+        #|  @fs.write_file("keep.mbt", "// CORRUPTED\n", create_mode=CreateOrTruncate)
+        #|}
+      ),
+    })
+    assert_true(out.is_error)
+    // the raw OS error stays visible...
+    assert_true(out.content.contains("Operation not permitted"))
+    // ...now followed by the sandbox explanation and anti-workaround guidance
+    assert_true(out.content.contains("run_moonbit sandbox"))
+    assert_true(out.content.contains("Do NOT try to work around"))
+    assert_true(out.content.contains("`edit`"))
+    // the protected source file is untouched
+    assert_true(@fs.read_file("\{ws}/keep.mbt").text().contains("fn main {  }"))
+  })
+}
+
+///|
 async test "rejects non-string source arguments" {
   let out = run_in(".", { "code": "x" })
   assert_true(out.is_error)

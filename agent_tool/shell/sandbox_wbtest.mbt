@@ -1184,12 +1184,14 @@ fn is_some_path(value : String?, expected : String) -> Bool {
 
 ///|
 test "sandbox denial detection ignores masked exit code" {
+  // Line-level detection pins live with `source_write_denied_in_text` in
+  // `agent_tool/internal/sandbox`; here only the shell-side gate is covered:
+  // the denial fires despite exit_code 0, and only for a sandboxed command.
   let output = {
     exit_code: Some(0),
     text: "sh: main.mbt: Operation not permitted\n",
     output_limit_reached: false,
   }
-  assert_true(sandbox_denied_source_write(output, []))
   assert_true(
     agent_output_has_shell_sandbox_denial({
       output,
@@ -1204,79 +1206,35 @@ test "sandbox denial detection ignores masked exit code" {
       sandbox_denial_subjects: [],
     }),
   )
-  let generic = {
-    exit_code: Some(0),
-    text: "Permission denied\n",
-    output_limit_reached: false,
-  }
-  assert_false(sandbox_denied_source_write(generic, []))
-  let prose = {
-    exit_code: Some(0),
-    text: "Permission denied while reading main.mbt\n",
-    output_limit_reached: false,
-  }
-  assert_false(sandbox_denied_source_write(prose, []))
-  let quoted_prose = {
-    exit_code: Some(0),
-    text: "Permission denied while reading 'main.mbt'\n",
-    output_limit_reached: false,
-  }
-  assert_false(sandbox_denied_source_write(quoted_prose, []))
-  let python = {
-    exit_code: Some(0),
-    text: "PermissionError: [Errno 1] Operation not permitted: 'main.mbt'\n",
-    output_limit_reached: false,
-  }
-  assert_true(sandbox_denied_source_write(python, []))
-  let subject_after_denial = {
-    exit_code: Some(0),
-    text: "Operation not permitted: main.mbt\n",
-    output_limit_reached: false,
-  }
-  assert_true(sandbox_denied_source_write(subject_after_denial, []))
-  let permission_subject = {
-    exit_code: Some(0),
-    text: "Permission denied: main.mbt\n",
-    output_limit_reached: false,
-  }
-  assert_true(sandbox_denied_source_write(permission_subject, []))
-  let directory_rename_subject = {
-    exit_code: Some(0),
-    text: "PermissionError: [Errno 1] Operation not permitted: 'pkg'\n",
-    output_limit_reached: false,
-  }
-  assert_false(sandbox_denied_source_write(directory_rename_subject, []))
-  assert_true(sandbox_denied_source_write(directory_rename_subject, ["pkg"]))
   assert_true(
     agent_output_has_shell_sandbox_denial({
-      output: directory_rename_subject,
+      output: {
+        exit_code: Some(0),
+        text: "PermissionError: [Errno 1] Operation not permitted: 'pkg'\n",
+        output_limit_reached: false,
+      },
       source_write_sandboxed: true,
       sandbox_denial_subjects: ["pkg"],
     }),
   )
-  let unrelated_readonly_output = {
-    exit_code: Some(0),
-    text: "foo: Operation not permitted\n",
-    output_limit_reached: false,
-  }
-  assert_false(sandbox_denied_source_write(unrelated_readonly_output, []))
-  assert_false(sandbox_denied_source_write(unrelated_readonly_output, ["pkg"]))
   assert_false(
     agent_output_has_shell_sandbox_denial({
-      output: unrelated_readonly_output,
+      output: {
+        exit_code: Some(0),
+        text: "foo: Operation not permitted\n",
+        output_limit_reached: false,
+      },
       source_write_sandboxed: true,
       sandbox_denial_subjects: ["pkg"],
     }),
   )
-  let moon_work = {
-    exit_code: Some(0),
-    text: "sh: moon.work: Operation not permitted\n",
-    output_limit_reached: false,
-  }
-  assert_true(sandbox_denied_source_write(moon_work, []))
   assert_false(
     agent_output_has_shell_sandbox_denial({
-      output: generic,
+      output: {
+        exit_code: Some(0),
+        text: "Permission denied\n",
+        output_limit_reached: false,
+      },
       source_write_sandboxed: true,
       sandbox_denial_subjects: [],
     }),

@@ -5339,37 +5339,10 @@ fn agent_output_has_shell_sandbox_denial(
   agent_output : AgentShellOutput,
 ) -> Bool {
   agent_output.source_write_sandboxed &&
-  sandbox_denied_source_write(
-    agent_output.output,
+  @sandbox.source_write_denied_in_text(
+    agent_output.output.text,
     agent_output.sandbox_denial_subjects,
   )
-}
-
-///|
-fn sandbox_denied_source_write(
-  output : ShellOutput,
-  denial_subjects : Array[String],
-) -> Bool {
-  source_write_denied_in_text(output.text, denial_subjects)
-}
-
-///|
-/// Whether `output_text` shows a sandboxed source-write denial for
-/// `denial_subjects`. Exposed so `shell_output` can apply the same detection to a
-/// background job's output that the foreground path applies inline.
-pub fn source_write_denied_in_text(
-  output_text : String,
-  denial_subjects : Array[String],
-) -> Bool {
-  output_text
-  .split("\n")
-  .any(line => {
-    sandbox_denial_line_mentions_denial(line) &&
-    (
-      sandbox_denial_line_mentions_source_path(line) ||
-      sandbox_denial_line_mentions_known_subject(line, denial_subjects)
-    )
-  })
 }
 
 ///|
@@ -5377,54 +5350,4 @@ pub fn source_write_denied_in_text(
 /// source-write denial. Exposed for `shell_output`.
 pub fn source_write_denial_feedback() -> String {
   SandboxSourceWriteFeedback
-}
-
-///|
-fn sandbox_denial_line_mentions_known_subject(
-  line : StringView,
-  denial_subjects : Array[String],
-) -> Bool {
-  denial_subjects.any(subject => {
-    subject != "" && sandbox_denial_line_mentions_literal_subject(line, subject)
-  })
-}
-
-///|
-fn sandbox_denial_line_mentions_literal_subject(
-  line : StringView,
-  subject : String,
-) -> Bool {
-  line.contains("\{subject}:") ||
-  line.contains("\{subject}'") ||
-  line.contains("\{subject}\"") ||
-  line.contains("\{subject}`") ||
-  (
-    sandbox_denial_line_has_denial_colon_before_subject(line) &&
-    line.has_suffix(subject)
-  )
-}
-
-///|
-fn sandbox_denial_line_mentions_source_path(line : StringView) -> Bool {
-  [
-    ".mbt.md", ".mbt", ".mbti", "moon.mod.json", "moon.pkg.json", "moon.mod", "moon.pkg",
-    "moon.work",
-  ].any(suffix => sandbox_denial_line_mentions_literal_subject(line, suffix))
-}
-
-///|
-fn sandbox_denial_line_mentions_denial(line : StringView) -> Bool {
-  line.contains("Operation not permitted") ||
-  line.contains("operation not permitted") ||
-  line.contains(": Permission denied") ||
-  line.contains("Permission denied:")
-}
-
-///|
-fn sandbox_denial_line_has_denial_colon_before_subject(
-  line : StringView,
-) -> Bool {
-  line.contains("Operation not permitted:") ||
-  line.contains("operation not permitted:") ||
-  line.contains("Permission denied:")
 }

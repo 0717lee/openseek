@@ -50,6 +50,14 @@ anywhere except the throwaway build dir — the same profile the `shell` tool
 uses. A snippet can still read anything and write non-source outputs (e.g.
 `people.json`).
 
+A denied write surfaces inside the program as a bare OS error (e.g.
+`OSError("@fs.open(): \"keep.mbt\": Operation not permitted")`), which on its
+own reads like a filesystem fault. When a sandboxed run's output shows such a
+denial on a protected source path, the tool result appends an explanation: the
+sandbox denied the write by design, the snippet should not try to work around
+it, and source changes belong to the `edit` tool. The run is reported as an
+error even if the snippet caught the failure and exited 0, matching `shell`.
+
 This is **best-effort, not a hard boundary**: `shell` also statically preflights
 its command text to catch directory-rename tricks, which is impossible for an
 arbitrary snippet — so a determined program can still smuggle sources in or out

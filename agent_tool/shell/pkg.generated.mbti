@@ -13,8 +13,6 @@ pub fn definition(workspace_root? : String, read_only? : Bool, bg_runtime? : @bg
 
 pub fn source_write_denial_feedback() -> String
 
-pub fn source_write_denied_in_text(String, Array[String]) -> Bool
-
 // Errors
 
 // Types and methods
