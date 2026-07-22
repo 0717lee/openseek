@@ -34,8 +34,10 @@ diagnostics are the error message when something does not build.
   the `shell` tool.
 - `warning` (string, optional, `"off"`/`"on"`, default `"off"`): whether
   compiler warnings appear in the output. Snippets are throwaway scripts, so
-  unused-value style noise is suppressed (`--warn-list -a`) unless the
-  warnings themselves are what you are probing. Errors are unaffected.
+  unused-value style noise is suppressed (a `--warn-list` spec disabling every
+  warn-state diagnostic) unless the warnings themselves are what you are
+  probing. Errors are unaffected — warning IDs whose default state is `error`
+  (e.g. `partial_match`) still fail compilation with warnings off.
 
 Only **dependency resolution** is isolated: a local-package import resolves to
 the **published registry snapshot** (not your uncommitted edits), and a

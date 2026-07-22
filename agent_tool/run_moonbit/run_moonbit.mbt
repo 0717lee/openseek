@@ -19,6 +19,19 @@ const OutputCapBytes : Int = 48_000
 const SandboxSourceWriteFeedback : String = "run_moonbit sandbox: the \"Operation not permitted\" failure above is this tool's sandbox denying a write to a protected MoonBit source file (`*.mbt`, `*.mbti`, `*.mbt.md`, `moon.mod`/`moon.pkg`/`moon.work`) — not a filesystem or permissions problem to debug. Snippets run source-write-readonly by design; writing non-source files (data, logs, reports) stays allowed. Do NOT try to work around the block from inside a snippet (renames, copies, temp-then-move, or other sandbox escapes) — make source changes with the line-anchored `edit` tool instead, and keep run_moonbit for compute, probing, and non-source IO."
 
 ///|
+/// The `--warn-list` spec for `warning: "off"`: every warn-state diagnostic
+/// disabled, while the five whose DEFAULT state is `error` (11 partial_match,
+/// 15 unused_mut, 40 multiline_string_escape, 44 invalid_inline_wasm,
+/// 55 unannotated_ffi) keep erroring — "warnings off" must never let a
+/// program that previously failed to compile reach a runtime panic. `-a` is
+/// unusable for this: a later `@id` re-enable does not survive it (probed
+/// live), so the warn-state IDs are disabled by explicit ranges instead.
+/// 79 is the current highest warning number (`moonc build-package
+/// -warn-help`); IDs a future compiler adds past it stay visible until this
+/// list is refreshed — fail-open, never silently error-eating.
+const WarnOffList : String = "-1..10-12..14-16..39-41..43-45..54-56..79"
+
+///|
 /// Best-effort refusal of the two obvious native escapes: process spawning
 /// (`moonbitlang/async/process` — the `shell` tool owns commands) and native
 /// FFI (`extern`, which can bind libc `system`). A substring scan is NOT a
@@ -59,10 +72,12 @@ fn native_escape(source : String) -> String? {
 /// which can differ from your workspace's pinned versions — verify
 /// dependency-API probes against the workspace, not run_moonbit.
 ///
-/// Compiler warnings are suppressed by default (`--warn-list -a`): snippets
-/// are throwaway scripts, so unused-value style noise would only pollute the
-/// output. Passing `warning: "on"` restores them, for when the warnings
-/// themselves are the thing being probed. Errors are unaffected either way.
+/// Compiler warnings are suppressed by default: snippets are throwaway
+/// scripts, so unused-value style noise would only pollute the output.
+/// Passing `warning: "on"` restores them, for when the warnings themselves
+/// are the thing being probed. Errors are unaffected either way — including
+/// warning IDs whose default state is `error` (e.g. `partial_match`), which
+/// keep failing compilation with warnings off (see `WarnOffList`).
 ///
 /// Note: on macOS the run is wrapped in `sandbox-exec` with the shell tool's
 /// source-write-readonly profile, so a snippet is blocked from directly writing
@@ -194,14 +209,14 @@ async fn execute(
       "--target-dir",
       dir,
     ]
-    // Warnings default OFF (`--warn-list -a` disables them all at the
-    // compiler): a snippet is a throwaway probe/script, so unused-variable
-    // style noise only burns context and can drown the program's real output.
-    // `warning: "on"` skips the flag, for when the warnings themselves are the
-    // thing being probed. Errors are unaffected either way.
+    // Warnings default OFF: a snippet is a throwaway probe/script, so
+    // unused-variable style noise only burns context and can drown the
+    // program's real output. `warning: "on"` skips the flag, for when the
+    // warnings themselves are the thing being probed. Errors are unaffected
+    // either way — see `WarnOffList` for why this is NOT `-a`.
     if !input.warning {
       moon_argv.push("--warn-list")
-      moon_argv.push("-a")
+      moon_argv.push(WarnOffList)
     }
     // Wrap `moon run` in sandbox-exec where it can actually enforce (macOS) so a
     // snippet cannot directly overwrite protected source files — reusing the

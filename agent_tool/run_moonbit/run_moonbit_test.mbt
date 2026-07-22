@@ -227,6 +227,20 @@ async test "a denial past the display cap is still detected and explained" {
 }
 
 ///|
+async test "warning off keeps error-state diagnostics failing (partial_match)" {
+  @vfs.with_tmpdir(ws => {
+    // partial_match (warning 11) defaults to the `error` state: with warnings
+    // off it must STILL fail compilation, not compile into a runtime panic.
+    let out = run_in(ws, {
+      "source": "fn f(x : Int?) -> Int {\n  match x {\n    Some(v) => v\n  }\n}\n\nfn main {\n  println(f(None))\n}",
+    })
+    assert_true(out.is_error)
+    assert_true(out.content.contains("partial_match"))
+    assert_false(out.content.contains("PanicError"))
+  })
+}
+
+///|
 async test "rejects an unknown warning value" {
   let out = run_in(".", { "source": "fn main {  }", "warning": "loud" })
   assert_true(out.is_error)
