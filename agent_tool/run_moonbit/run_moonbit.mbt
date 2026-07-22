@@ -16,7 +16,15 @@ const OutputCapBytes : Int = 48_000
 /// ("Operation not permitted" on a protected source path). Without it the model
 /// reads a bare OS error and debugs the filesystem — or worse, tries to escape
 /// the sandbox — instead of using `edit`.
-const SandboxSourceWriteFeedback : String = "run_moonbit sandbox: the \"Operation not permitted\" failure above is this tool's sandbox denying a write to a protected MoonBit source file (`*.mbt`, `*.mbti`, `*.mbt.md`, `moon.mod`/`moon.pkg`/`moon.work`) — not a filesystem or permissions problem to debug. Snippets run source-write-readonly by design; writing non-source files (data, logs, reports) stays allowed. Do NOT try to work around the block from inside a snippet (renames, copies, temp-then-move, or other sandbox escapes) — make source changes with the line-anchored `edit` tool instead, and keep run_moonbit for compute, probing, and non-source IO."
+const SandboxSourceWriteFeedback : String =
+  #|run_moonbit sandbox: the "Operation not permitted" failure above is this tool's
+  #|sandbox denying a write to a protected MoonBit source file (`*.mbt`, `*.mbti`,
+  #|`*.mbt.md`, `moon.mod`/`moon.pkg`/`moon.work`) — not a filesystem or permissions
+  #|problem to debug. Snippets run source-write-readonly by design; writing non-source
+  #|files (data, logs, reports) stays allowed. Do NOT try to work around the block from
+  #|inside a snippet (renames, copies, temp-then-move, or other sandbox escapes) — make
+  #|source changes with the line-anchored `edit` tool instead, and keep run_moonbit for
+  #|compute, probing, and non-source IO.
 
 ///|
 /// Cached `--warn-list` spec for `warning: "off"` — derived once per process.
@@ -226,7 +234,29 @@ fn native_escape(source : String) -> String? {
 pub fn definition(workspace_root~ : String) -> @agent_tool.AgentToolDefinition {
   AgentToolDefinition(
     name="run_moonbit",
-    description="Compile and run a self-contained MoonBit program (a `.mbtx` single-file script) and return its merged stdout/stderr and exit status. Use this for scripting automation (read/transform files, parse JSON, compute) and for probing MoonBit language behavior — PREFER it over shell python/node so the automation is MoonBit. `source` may begin with an inline `import { \"pkg\", ... }` block (comma-separated module paths such as `\"moonbitlang/async\", \"moonbitlang/async/fs\", \"moonbitlang/core/json\"`) followed by the program including its own `main`; use `async fn main` for IO (add `\"moonbitlang/async\"` to the import block for it). It runs with your workspace as the working directory by default, so RELATIVE paths like `@fs.read_file(\"data.json\")` reach workspace files and files the program writes land in the workspace; pass `cwd` to run elsewhere. Build artifacts stay in a temp dir (your `_build` is untouched), and imports resolve against the registry (NOT your uncommitted edits) — to exercise working-tree code, add a `*_test.mbt` to that package and run `moon test` via shell instead. Compiler warnings are suppressed by default (throwaway scripts trip unused-value noise constantly); pass `warning: \"on\"` when the warnings are what you want to see. Bounded to 60s. When probing language or API behavior, don't probe serially one turn at a time: emit SEVERAL independent run_moonbit calls in the SAME assistant turn — one small program per hypothesis — and read all the results together; batching saves a full model round-trip per hypothesis and keeps each probe minimal instead of one growing mega-program.",
+    description=(
+      #|Compile and run a self-contained MoonBit program (a `.mbtx` single-file script)
+      #|and return its merged stdout/stderr and exit status. Use this for scripting
+      #|automation (read/transform files, parse JSON, compute) and for probing MoonBit
+      #|language behavior — PREFER it over shell python/node so the automation is MoonBit.
+      #|`source` may begin with an inline `import { "pkg", ... }` block (comma-separated
+      #|module paths such as `"moonbitlang/async", "moonbitlang/async/fs",
+      #|"moonbitlang/core/json"`) followed by the program including its own `main`; use
+      #|`async fn main` for IO (add `"moonbitlang/async"` to the import block for it). It
+      #|runs with your workspace as the working directory by default, so RELATIVE paths
+      #|like `@fs.read_file("data.json")` reach workspace files and files the program
+      #|writes land in the workspace; pass `cwd` to run elsewhere. Build artifacts stay in
+      #|a temp dir (your `_build` is untouched), and imports resolve against the registry
+      #|(NOT your uncommitted edits) — to exercise working-tree code, add a `*_test.mbt`
+      #|to that package and run `moon test` via shell instead. Compiler warnings are
+      #|suppressed by default (throwaway scripts trip unused-value noise constantly); pass
+      #|`warning: "on"` when the warnings are what you want to see. Bounded to 60s. When
+      #|probing language or API behavior, don't probe serially one turn at a time: emit
+      #|SEVERAL independent run_moonbit calls in the SAME assistant turn — one small
+      #|program per hypothesis — and read all the results together; batching saves a full
+      #|model round-trip per hypothesis and keeps each probe minimal instead of one
+      #|growing mega-program.
+    ),
     schema=JsonSchema({
       "type": "object",
       "properties": {
@@ -243,7 +273,11 @@ pub fn definition(workspace_root~ : String) -> @agent_tool.AgentToolDefinition {
         "warning": {
           "type": "string",
           "enum": ["off", "on"],
-          "description": "Whether compiler warnings appear in the output; defaults to off (a snippet is a throwaway script, so unused-variable style noise is suppressed). Set \"on\" only when the warnings themselves are what you are probing.",
+          "description": (
+            #|Whether compiler warnings appear in the output; defaults to off (a snippet
+            #|is a throwaway script, so unused-variable style noise is suppressed). Set
+            #|"on" only when the warnings themselves are what you are probing.
+          ),
         },
       },
       "required": ["source"],

@@ -15,7 +15,11 @@ fn submit_review_tool(
 ) -> @agent_tool.AgentToolDefinition {
   @agent_subrun.capture_tool(
     name="submit_review",
-    description="Submit the final structured code-review report and end the review. Call this exactly once, when the review is complete. Every finding must cite a file (and a line when known) and a severity of blocker|high|medium|low|nit.",
+    description=(
+      #|Submit the final structured code-review report and end the review. Call this
+      #|exactly once, when the review is complete. Every finding must cite a file (and a
+      #|line when known) and a severity of blocker|high|medium|low|nit.
+    ),
     schema=JsonSchema(report_schema()),
     parse=parse_submission,
     captured,

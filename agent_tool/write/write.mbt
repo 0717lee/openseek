@@ -35,7 +35,16 @@ pub fn definition(
 ) -> @agent_tool.AgentToolDefinition {
   AgentToolDefinition(
     name="write",
-    description="Create a new file at arguments.path with arguments.content (missing parent directories are created), or overwrite an existing non-source file. Overwriting an existing .mbt/.mbt.md source file is rejected: use edit or multi_edit to change existing source (an empty old_string inserts new code). New syntax-checkable content (.mbt, .mbt.md, moon.mod, moon.pkg) that fails to lex/parse is rejected BEFORE writing and the parse errors are returned — see revert_on_parse_errors. Do not use write to route shell-generated rewrites back into source files. Do not create Markdown or README files unless the user explicitly asks for them.",
+    description=(
+      #|Create a new file at arguments.path with arguments.content (missing parent
+      #|directories are created), or overwrite an existing non-source file. Overwriting an
+      #|existing .mbt/.mbt.md source file is rejected: use edit or multi_edit to change
+      #|existing source (an empty old_string inserts new code). New syntax-checkable
+      #|content (.mbt, .mbt.md, moon.mod, moon.pkg) that fails to lex/parse is rejected
+      #|BEFORE writing and the parse errors are returned — see revert_on_parse_errors. Do
+      #|not use write to route shell-generated rewrites back into source files. Do not
+      #|create Markdown or README files unless the user explicitly asks for them.
+    ),
     schema=JsonSchema({
       "type": "object",
       "properties": {
@@ -43,7 +52,19 @@ pub fn definition(
         "content": { "type": "string" },
         "revert_on_parse_errors": {
           "type": "boolean",
-          "description": "Syntax gate, on by default. Before a new syntax-checkable file (.mbt, .mbt.md, moon.mod, moon.pkg) is written, its content is parsed standalone (moonc syncheck); content with lex/parse errors is REJECTED — nothing is written — and the call returns the errors with excerpts of the offending lines. A file that does not parse is never a valid intermediate state, and write cannot overwrite existing source, so the retry is another write with corrected content. Type errors never trigger the gate (they may be a legitimate transient state during multi-file work); in .mbt.md only the checked (`mbt check` / `moonbit check`) fenced blocks are parsed. Set false only to intentionally create a file that does not parse (e.g. a test fixture).",
+          "description": (
+            #|Syntax gate, on by default. Before a new syntax-checkable file (.mbt,
+            #|.mbt.md, moon.mod, moon.pkg) is written, its content is parsed standalone
+            #|(moonc syncheck); content with lex/parse errors is REJECTED — nothing is
+            #|written — and the call returns the errors with excerpts of the offending
+            #|lines. A file that does not parse is never a valid intermediate state, and
+            #|write cannot overwrite existing source, so the retry is another write with
+            #|corrected content. Type errors never trigger the gate (they may be a
+            #|legitimate transient state during multi-file work); in .mbt.md only the
+            #|checked (`mbt check` / `moonbit check`) fenced blocks are parsed. Set false
+            #|only to intentionally create a file that does not parse (e.g. a test
+            #|fixture).
+          ),
           "examples": [false],
         },
       },

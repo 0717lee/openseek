@@ -7,14 +7,26 @@ pub fn definition(
 ) -> @agent_tool.AgentToolDefinition {
   AgentToolDefinition(
     name="shell_output",
-    description="Read a background shell job's recent output and status by its job_id (returned by shell run_in_background, or by a command moved to the background on timeout). Returns the most recent window of captured output (with truncation metadata naming the total size when output exceeds the window) and whether the job is still running. If you need the job's result before you can continue and have no other work to do, pass wait_ms to block until it finishes instead of checking repeatedly.",
+    description=(
+      #|Read a background shell job's recent output and status by its job_id (returned by
+      #|shell run_in_background, or by a command moved to the background on timeout).
+      #|Returns the most recent window of captured output (with truncation metadata naming
+      #|the total size when output exceeds the window) and whether the job is still
+      #|running. If you need the job's result before you can continue and have no other
+      #|work to do, pass wait_ms to block until it finishes instead of checking
+      #|repeatedly.
+    ),
     schema=JsonSchema({
       "type": "object",
       "properties": {
         "job_id": { "type": "string" },
         "wait_ms": {
           "type": "number",
-          "description": "Wait up to this many milliseconds (capped at 120000) for the job to finish before reading. Use when you need the result now and have nothing else to do; never poll in a loop.",
+          "description": (
+            #|Wait up to this many milliseconds (capped at 120000) for the job to finish
+            #|before reading. Use when you need the result now and have nothing else to
+            #|do; never poll in a loop.
+          ),
         },
       },
       "required": ["job_id"],

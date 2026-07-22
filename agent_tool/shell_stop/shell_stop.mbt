@@ -5,7 +5,11 @@ pub fn definition(
 ) -> @agent_tool.AgentToolDefinition {
   AgentToolDefinition(
     name="shell_stop",
-    description="Stop a running background shell job by its job_id (from shell run_in_background, or a command moved to the background on timeout). Cancels the process; a job that already finished is a no-op.",
+    description=(
+      #|Stop a running background shell job by its job_id (from shell run_in_background,
+      #|or a command moved to the background on timeout). Cancels the process; a job that
+      #|already finished is a no-op.
+    ),
     schema=JsonSchema({
       "type": "object",
       "properties": { "job_id": { "type": "string" } },

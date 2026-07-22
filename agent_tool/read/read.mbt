@@ -38,7 +38,14 @@ pub fn definition(
 ) -> @agent_tool.AgentToolDefinition {
   AgentToolDefinition(
     name="read",
-    description="Read arguments.path as text. For several known independent files, batch separate read tool calls in one assistant response when possible. Do not use read for directories: inspect them with `ls` or `tree`, then read specific files. Supports optional start_line, max_lines, and max_output_chars for focused single-file reads. Output is right-aligned `<line-number> |<content>` numbered lines followed by a `<system>` status footer.",
+    description=(
+      #|Read arguments.path as text. For several known independent files, batch separate
+      #|read tool calls in one assistant response when possible. Do not use read for
+      #|directories: inspect them with `ls` or `tree`, then read specific files. Supports
+      #|optional start_line, max_lines, and max_output_chars for focused single-file
+      #|reads. Output is right-aligned `<line-number> |<content>` numbered lines followed
+      #|by a `<system>` status footer.
+    ),
     schema=JsonSchema({
       "type": "object",
       "required": ["path"],
@@ -431,8 +438,11 @@ async test "read numbers lines with an aligned gutter and no header block" {
 ///|
 test "read description encourages batched reads and directory inspection" {
   let tool = definition()
-  assert_true(tool.description.contains("batch separate read tool calls"))
-  assert_true(tool.description.contains("Do not use read for directories"))
+  // The description is a wrapped `#|` block, so newlines fall mid-phrase;
+  // normalize them to spaces before matching the guidance phrases.
+  let desc = tool.description.replace_all(old="\n", new=" ")
+  assert_true(desc.contains("batch separate read tool calls"))
+  assert_true(desc.contains("Do not use read for directories"))
   let JsonSchema(schema) = tool.schema
   let schema_text = schema.stringify()
   assert_true(schema_text.contains("\"path\""))

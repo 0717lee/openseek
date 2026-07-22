@@ -101,7 +101,7 @@ test "read tool advertises the expected schema" {
     content=(
       #|{
       #|  name: "read",
-      #|  description: "Read arguments.path as text. For several known independent files, batch separate read tool calls in one assistant response when possible. Do not use read for directories: inspect them with `ls` or `tree`, then read specific files. Supports optional start_line, max_lines, and max_output_chars for focused single-file reads. Output is right-aligned `<line-number> |<content>` numbered lines followed by a `<system>` status footer.",
+      #|  description: "Read arguments.path as text. For several known independent files, batch separate\nread tool calls in one assistant response when possible. Do not use read for\ndirectories: inspect them with `ls` or `tree`, then read specific files. Supports\noptional start_line, max_lines, and max_output_chars for focused single-file\nreads. Output is right-aligned `<line-number> |<content>` numbered lines followed\nby a `<system>` status footer.",
       #|  schema: JsonSchema(
       #|    Object(
       #|      {

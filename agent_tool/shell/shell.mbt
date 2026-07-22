@@ -86,7 +86,11 @@ pub fn definition(
             "max_output_chars": { "type": "number" },
             "run_in_background": {
               "type": "boolean",
-              "description": "Run as a background job: returns a job id immediately and a completion notice arrives when it exits. Use for long-running commands instead of blocking or sleeping.",
+              "description": (
+                #|Run as a background job: returns a job id immediately and a completion
+                #|notice arrives when it exits. Use for long-running commands instead of
+                #|blocking or sleeping.
+              ),
             },
           },
           "required": ["cmd"],
@@ -127,19 +131,38 @@ pub fn definition(
 /// a notice, so `sleep N && cmd` chains and shell_output polling loops are both
 /// unnecessary and wasteful.
 fn background_description() -> String {
-  " For long-running work (builds, long test suites, servers, watchers) set run_in_background=true: the call returns a job id immediately and a notice arrives automatically when the job finishes — so never block the turn waiting on time (no `sleep N && cmd` chains, no repeated polling); keep working, or finish the turn, and act on the completion notice. Read a job's recent output with shell_output and cancel it with shell_stop. A foreground command that outlives timeout_ms (default 120000ms when omitted) is moved to the background as a job (not killed); pass a larger timeout_ms (up to 600000) only when you must block on the result."
+  (
+    #| For long-running work (builds, long test suites, servers, watchers) set
+    #|run_in_background=true: the call returns a job id immediately and a notice arrives
+    #|automatically when the job finishes — so never block the turn waiting on time (no
+    #|`sleep N && cmd` chains, no repeated polling); keep working, or finish the turn, and
+    #|act on the completion notice. Read a job's recent output with shell_output and
+    #|cancel it with shell_stop. A foreground command that outlives timeout_ms (default
+    #|120000ms when omitted) is moved to the background as a job (not killed); pass a
+    #|larger timeout_ms (up to 600000) only when you must block on the result.
+  )
 }
 
 ///|
 #cfg(platform="windows")
 fn shell_description() -> String {
-  "Run arguments.cmd through PowerShell (pwsh -NoProfile -Command), optionally in arguments.cwd, and return exit code plus output. Use PowerShell syntax and cmdlets in arguments.cmd. Source file edits for compiler feedback belong in line-anchored edit (or multi_edit for several fixes in one file); do not use shell rewrites."
+  (
+    #|Run arguments.cmd through PowerShell (pwsh -NoProfile -Command), optionally in
+    #|arguments.cwd, and return exit code plus output. Use PowerShell syntax and cmdlets
+    #|in arguments.cmd. Source file edits for compiler feedback belong in line-anchored
+    #|edit (or multi_edit for several fixes in one file); do not use shell rewrites.
+  )
 }
 
 ///|
 #cfg(not(platform="windows"))
 fn shell_description() -> String {
-  "Run arguments.cmd through the POSIX shell (sh -c), optionally in arguments.cwd, and return exit code plus output. Use POSIX shell syntax in arguments.cmd. Source file edits for compiler feedback belong in line-anchored edit (or multi_edit for several fixes in one file); do not use shell rewrites."
+  (
+    #|Run arguments.cmd through the POSIX shell (sh -c), optionally in arguments.cwd, and
+    #|return exit code plus output. Use POSIX shell syntax in arguments.cmd. Source file
+    #|edits for compiler feedback belong in line-anchored edit (or multi_edit for several
+    #|fixes in one file); do not use shell rewrites.
+  )
 }
 
 ///|

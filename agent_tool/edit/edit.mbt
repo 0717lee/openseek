@@ -47,7 +47,29 @@ pub fn definition(
 ) -> @agent_tool.AgentToolDefinition {
   AgentToolDefinition(
     name="edit",
-    description="Replace the first exact text span at or after arguments.start_line in arguments.path with arguments.new_string. Optional end_line restricts the search to a 1-based inclusive line range. Because start_line anchors the location, old_string can be a small exact span instead of a large context block. To INSERT new code instead of replacing, set old_string to the empty string: new_string is inserted at the start of start_line. To APPEND at end of file, pass any start_line past the last line (e.g. 999999) — no need to know the file's length; the result reports the actual inclusive line range the new content landed on. In MoonBit top-level order does not matter, so add new functions, tests, or types by appending at end of file — an append cannot mismatch an anchor; reserve mid-file insertion for grouping related code. An edit that would introduce lex/parse errors into a syntax-checkable file (.mbt, .mbt.md, moon.mod, moon.pkg) is rejected BEFORE writing and the parse errors are returned — see revert_on_parse_errors. For multiple compiler-feedback fixes in one file, use multi_edit with explicit line-anchored edits. To change EVERY occurrence of a string, pass replace_all_preview=true: the file is not modified; instead every match site is listed with context plus a ready-to-review multi_edit edits array — keep the entries to apply, drop the rest. That preview-select-apply path is for text the compiler cannot see (comments, docs, .mbt.md prose, string literals); for typed-code renames prefer the compiler loop (add the new name, deprecate the old, fix what moon check flags).",
+    description=(
+      #|Replace the first exact text span at or after arguments.start_line in
+      #|arguments.path with arguments.new_string. Optional end_line restricts the search
+      #|to a 1-based inclusive line range. Because start_line anchors the location,
+      #|old_string can be a small exact span instead of a large context block. To INSERT
+      #|new code instead of replacing, set old_string to the empty string: new_string is
+      #|inserted at the start of start_line. To APPEND at end of file, pass any start_line
+      #|past the last line (e.g. 999999) — no need to know the file's length; the result
+      #|reports the actual inclusive line range the new content landed on. In MoonBit
+      #|top-level order does not matter, so add new functions, tests, or types by
+      #|appending at end of file — an append cannot mismatch an anchor; reserve mid-file
+      #|insertion for grouping related code. An edit that would introduce lex/parse errors
+      #|into a syntax-checkable file (.mbt, .mbt.md, moon.mod, moon.pkg) is rejected
+      #|BEFORE writing and the parse errors are returned — see revert_on_parse_errors. For
+      #|multiple compiler-feedback fixes in one file, use multi_edit with explicit
+      #|line-anchored edits. To change EVERY occurrence of a string, pass
+      #|replace_all_preview=true: the file is not modified; instead every match site is
+      #|listed with context plus a ready-to-review multi_edit edits array — keep the
+      #|entries to apply, drop the rest. That preview-select-apply path is for text the
+      #|compiler cannot see (comments, docs, .mbt.md prose, string literals); for
+      #|typed-code renames prefer the compiler loop (add the new name, deprecate the old,
+      #|fix what moon check flags).
+    ),
     schema=JsonSchema({
       "type": "object",
       "properties": {
@@ -58,12 +80,33 @@ pub fn definition(
         "end_line": { "type": "integer" },
         "revert_on_parse_errors": {
           "type": "boolean",
-          "description": "Syntax gate, on by default. Before the edit is written to a syntax-checkable file (.mbt, .mbt.md, moon.mod, moon.pkg), the edited result is parsed standalone (moonc syncheck); an edit that would INTRODUCE new lex/parse errors — measured against the pre-edit content parsed the same way, so pre-existing parse errors are ignored — is REJECTED, the file is left untouched, and the call returns the errors with excerpts of the would-be content. Type errors never trigger the gate (they may be a legitimate transient state); in .mbt.md only the checked (`mbt check` / `moonbit check`) fenced blocks are parsed. Set false only to intentionally produce content that does not parse (e.g. a fixture).",
+          "description": (
+            #|Syntax gate, on by default. Before the edit is written to a syntax-checkable
+            #|file (.mbt, .mbt.md, moon.mod, moon.pkg), the edited result is parsed
+            #|standalone (moonc syncheck); an edit that would INTRODUCE new lex/parse
+            #|errors — measured against the pre-edit content parsed the same way, so
+            #|pre-existing parse errors are ignored — is REJECTED, the file is left
+            #|untouched, and the call returns the errors with excerpts of the would-be
+            #|content. Type errors never trigger the gate (they may be a legitimate
+            #|transient state); in .mbt.md only the checked (`mbt check` / `moonbit
+            #|check`) fenced blocks are parsed. Set false only to intentionally produce
+            #|content that does not parse (e.g. a fixture).
+          ),
           "examples": [false],
         },
         "replace_all_preview": {
           "type": "boolean",
-          "description": "Preview mode: the file is NOT modified. Every match of old_string in the start_line/end_line range is listed with surrounding context lines, plus a ready-to-use multi_edit `edits` array — REVIEW the sites, keep the entries to apply, drop the rest, and pass them to multi_edit (which then verifies the batch with moon check). Use this where the compiler cannot see — comments, doc prose, .mbt.md text, string literals; for typed-code renames prefer the compiler loop (add the new name, deprecate the old, fix what moon check flags), and if the match list turns out to be code-heavy or type-ambiguous, switch to that loop instead of applying.",
+          "description": (
+            #|Preview mode: the file is NOT modified. Every match of old_string in the
+            #|start_line/end_line range is listed with surrounding context lines, plus a
+            #|ready-to-use multi_edit `edits` array — REVIEW the sites, keep the entries
+            #|to apply, drop the rest, and pass them to multi_edit (which then verifies
+            #|the batch with moon check). Use this where the compiler cannot see —
+            #|comments, doc prose, .mbt.md text, string literals; for typed-code renames
+            #|prefer the compiler loop (add the new name, deprecate the old, fix what moon
+            #|check flags), and if the match list turns out to be code-heavy or
+            #|type-ambiguous, switch to that loop instead of applying.
+          ),
           "examples": [true],
         },
       },

@@ -14,7 +14,31 @@ pub fn definition(
 ) -> @agent_tool.AgentToolDefinition {
   AgentToolDefinition(
     name="multi_edit",
-    description="Apply many exact line-anchored replacements across one or more files in a single validated batch — the efficient path for compiler-feedback repair: when `moon check` (or another analyzer) reports several known locations, fix them all in one call instead of many separate `edit` calls. Supply the edits two ways and either or both are used (they are concatenated): `edits` is an inline array of edit objects; `edits_file` is the path to a JSON file holding an array of the same objects — for large batches, generate that file from compiler diagnostics with a script and pass its path. Each edit is {file, old_string, new_string, start_line, optional end_line}: `file` is the path to change; `start_line` (1-based) anchors the search and `end_line` bounds it, so old_string can be the small exact span instead of a large context block; each edit replaces the first matching span in its range. Make old_string uniquely identify the flagged code — include the receiver, e.g. `args.length()` — so a rename cannot stray onto a same-named call elsewhere on the line. List all edits for a given file contiguously. To INSERT instead of replace, set old_string to the empty string: new_string is inserted at the start of start_line (any start_line past the last line appends at end of file — e.g. 999999; in MoonBit top-level order does not matter, so append new functions and tests at end of file rather than inserting mid-file). Combine changes on the same line (or one tight span) into a single edit, because adjacent or overlapping edits collide and the whole batch is rejected. Every edit is validated against the original files before anything is written; a batch that would introduce lex/parse errors into a .mbt file is also rejected BEFORE writing (see revert_on_parse_errors); if any edit fails, no files are changed.",
+    description=(
+      #|Apply many exact line-anchored replacements across one or more files in a single
+      #|validated batch — the efficient path for compiler-feedback repair: when `moon
+      #|check` (or another analyzer) reports several known locations, fix them all in one
+      #|call instead of many separate `edit` calls. Supply the edits two ways and either
+      #|or both are used (they are concatenated): `edits` is an inline array of edit
+      #|objects; `edits_file` is the path to a JSON file holding an array of the same
+      #|objects — for large batches, generate that file from compiler diagnostics with a
+      #|script and pass its path. Each edit is {file, old_string, new_string, start_line,
+      #|optional end_line}: `file` is the path to change; `start_line` (1-based) anchors
+      #|the search and `end_line` bounds it, so old_string can be the small exact span
+      #|instead of a large context block; each edit replaces the first matching span in
+      #|its range. Make old_string uniquely identify the flagged code — include the
+      #|receiver, e.g. `args.length()` — so a rename cannot stray onto a same-named call
+      #|elsewhere on the line. List all edits for a given file contiguously. To INSERT
+      #|instead of replace, set old_string to the empty string: new_string is inserted at
+      #|the start of start_line (any start_line past the last line appends at end of file
+      #|— e.g. 999999; in MoonBit top-level order does not matter, so append new functions
+      #|and tests at end of file rather than inserting mid-file). Combine changes on the
+      #|same line (or one tight span) into a single edit, because adjacent or overlapping
+      #|edits collide and the whole batch is rejected. Every edit is validated against the
+      #|original files before anything is written; a batch that would introduce lex/parse
+      #|errors into a .mbt file is also rejected BEFORE writing (see
+      #|revert_on_parse_errors); if any edit fails, no files are changed.
+    ),
     schema=JsonSchema({
       "type": "object",
       "properties": {
@@ -45,17 +69,42 @@ pub fn definition(
         },
         "edits_file": {
           "type": "string",
-          "description": "Path to a JSON file holding an array of the same edit objects — a response file for large, script-generated batches. Concatenated with inline edits when both are given.",
+          "description": (
+            #|Path to a JSON file holding an array of the same edit objects — a response
+            #|file for large, script-generated batches. Concatenated with inline edits
+            #|when both are given.
+          ),
           "examples": ["fixes.json"],
         },
         "revert_when_errors_above": {
           "type": "integer",
-          "description": "Auto-revert safety net. After the batch is written, `moon check` runs; if this batch INTRODUCES more than this many new compile errors (measured against the pre-batch error count, so pre-existing errors and all warnings are ignored), the entire batch is rolled back to its pre-batch contents and the call returns an error listing the first few new errors — so an over-matching replace cannot leave a broken tree to untangle. Default 5; the host caps the effective value (you can make it stricter, e.g. 0 to revert on any new error, but cannot disable it). A batch that keeps or reduces the error count is never reverted.",
+          "description": (
+            #|Auto-revert safety net. After the batch is written, `moon check` runs; if
+            #|this batch INTRODUCES more than this many new compile errors (measured
+            #|against the pre-batch error count, so pre-existing errors and all warnings
+            #|are ignored), the entire batch is rolled back to its pre-batch contents and
+            #|the call returns an error listing the first few new errors — so an
+            #|over-matching replace cannot leave a broken tree to untangle. Default 5; the
+            #|host caps the effective value (you can make it stricter, e.g. 0 to revert on
+            #|any new error, but cannot disable it). A batch that keeps or reduces the
+            #|error count is never reverted.
+          ),
           "examples": [5],
         },
         "revert_on_parse_errors": {
           "type": "boolean",
-          "description": "Syntax gate, on by default. Before the batch is written, each edited syntax-checkable file's (.mbt, .mbt.md, moon.mod, moon.pkg) rendered result is parsed standalone (moonc syncheck); if any file would gain new lex/parse errors — measured against its pre-batch content parsed the same way, so pre-existing parse errors are ignored — the WHOLE batch is rejected with no files changed, and the call returns the errors with excerpts of the would-be content. Type errors never trigger this gate (the post-write revert_when_errors_above guard covers those); in .mbt.md only the checked (`mbt check` / `moonbit check`) fenced blocks are parsed. Set false only to intentionally produce content that does not parse (e.g. a fixture).",
+          "description": (
+            #|Syntax gate, on by default. Before the batch is written, each edited
+            #|syntax-checkable file's (.mbt, .mbt.md, moon.mod, moon.pkg) rendered result
+            #|is parsed standalone (moonc syncheck); if any file would gain new lex/parse
+            #|errors — measured against its pre-batch content parsed the same way, so
+            #|pre-existing parse errors are ignored — the WHOLE batch is rejected with no
+            #|files changed, and the call returns the errors with excerpts of the would-be
+            #|content. Type errors never trigger this gate (the post-write
+            #|revert_when_errors_above guard covers those); in .mbt.md only the checked
+            #|(`mbt check` / `moonbit check`) fenced blocks are parsed. Set false only to
+            #|intentionally produce content that does not parse (e.g. a fixture).
+          ),
           "examples": [false],
         },
       },

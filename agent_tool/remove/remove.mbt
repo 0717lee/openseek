@@ -43,14 +43,29 @@ pub fn definition(
 ) -> @agent_tool.AgentToolDefinition {
   AgentToolDefinition(
     name="remove",
-    description="Delete a file the agent created earlier THIS session (tracked in the session's file-state record). Only a file the agent itself created this session can be removed — a pre-existing file is refused, since deleting it could lose work the agent never made; change existing source with edit/multi_edit. Handles any file type: the only in-workflow way to delete a source file (the shell sandbox blocks rm on source paths), and the provenance-gated path for other files too. Deleting a .mbt/.mbt.md file runs moon check so any break it causes is reported. Requires a `reason` — a short, non-empty explanation of why the file is deleted — recorded with the result for auditing this destructive action; a blank reason is rejected. The path must name an existing regular file.",
+    description=(
+      #|Delete a file the agent created earlier THIS session (tracked in the session's
+      #|file-state record). Only a file the agent itself created this session can be
+      #|removed — a pre-existing file is refused, since deleting it could lose work the
+      #|agent never made; change existing source with edit/multi_edit. Handles any file
+      #|type: the only in-workflow way to delete a source file (the shell sandbox blocks
+      #|rm on source paths), and the provenance-gated path for other files too. Deleting a
+      #|.mbt/.mbt.md file runs moon check so any break it causes is reported. Requires a
+      #|`reason` — a short, non-empty explanation of why the file is deleted — recorded
+      #|with the result for auditing this destructive action; a blank reason is rejected.
+      #|The path must name an existing regular file.
+    ),
     schema=JsonSchema({
       "type": "object",
       "properties": {
         "path": { "type": "string" },
         "reason": {
           "type": "string",
-          "description": "A short, non-empty explanation of why this file is being deleted, recorded in the result so a destructive action can be audited later. A blank reason is rejected.",
+          "description": (
+            #|A short, non-empty explanation of why this file is being deleted, recorded
+            #|in the result so a destructive action can be audited later. A blank reason
+            #|is rejected.
+          ),
         },
       },
       "required": ["path", "reason"],
@@ -126,7 +141,11 @@ async fn remove_file(
     @agent_tool.content_digest(current_text),
   ) else {
     return err(
-      "the agent created this file this session but its content has changed since (rebound or externally modified) — refusing to remove what may no longer be the file it created",
+      (
+        #|the agent created this file this session but its content has changed since
+        #|(rebound or externally modified) — refusing to remove what may no longer be the
+        #|file it created
+      ),
     )
   }
   @fs.remove(path)
