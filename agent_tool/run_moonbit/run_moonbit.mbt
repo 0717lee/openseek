@@ -228,18 +228,21 @@ async fn execute(
       )
       (exit_code, read_capped(log))
     })
+    // A "not permitted" line naming a protected source path in a sandboxed run
+    // is the source-write policy firing, not an environment fault: explain it
+    // (the raw OS error is otherwise a dead end) and treat the run as failed
+    // even if the snippet swallowed the error and exited 0 — the same
+    // semantics the shell tool applies to its command output. Detection scans
+    // the WHOLE on-disk log, not the capped display prefix, and runs for the
+    // timeout arm too: a snippet can flood past the cap before hitting the
+    // denial, or print a caught denial and then hang.
+    let sandbox_denied = sandbox_data is Some(data) &&
+      log_shows_source_write_denial(log, data.denial_subjects)
     let action = match result {
       Some((exit_code, raw)) => {
         // Rewrite the throwaway temp path to `source` so the model reads
         // `source:LINE:COL` about its own input, not a random temp path.
         let text = rewrite_temp_paths(raw, [real, dir])
-        // A "not permitted" line naming a protected source path in a sandboxed
-        // run is the source-write policy firing, not an environment fault:
-        // explain it (the raw OS error is otherwise a dead end) and treat the
-        // run as failed even if the snippet swallowed the error and exited 0 —
-        // the same semantics the shell tool applies to its command output.
-        let sandbox_denied = sandbox_data is Some(data) &&
-          @sandbox.source_write_denied_in_text(text, data.denial_subjects)
         // PREPEND the exit status so it survives the agent loop's outer 60k
         // result clamp (which cuts the tail); the output cap is below 60k so
         // both the status line and the body are retained.
@@ -272,6 +275,11 @@ async fn execute(
           head
         } else {
           "\{head}\n[partial output before the timeout]\n\{partial}"
+        }
+        let body = if sandbox_denied {
+          "\{body}\n\n\{SandboxSourceWriteFeedback}"
+        } else {
+          body
         }
         @agent_tool.ToolAction::respond(
           body,
@@ -309,6 +317,58 @@ fn rewrite_temp_paths(text : String, bases : Array[String]) -> String {
     }
   }
   out
+}
+
+///|
+/// Chunk size for the full-log denial scan, and the carry kept when a single
+/// line outgrows a chunk — the tail is far larger than any denial pattern, so
+/// only a pattern split exactly at a trim point of a >64KB line is missed.
+const DenialScanChunkBytes : Int = 65_536
+
+///|
+const DenialScanCarryTailChars : Int = 4_096
+
+///|
+/// Whether the on-disk output log shows a source-write denial, scanning the
+/// WHOLE file in bounded memory — the display cap must not bound detection.
+/// Chunked with a trailing-partial-line carry, so a denial line split across
+/// chunk boundaries is reassembled before the line-level detector sees it.
+async fn log_shows_source_write_denial(
+  path : String,
+  denial_subjects : Array[String],
+) -> Bool {
+  let file = @fs.open(path, mode=ReadOnly) catch { _ => return false }
+  defer file.close()
+  let buf = FixedArray::make(DenialScanChunkBytes, b'\x00')
+  let mut carry = ""
+  for ;; {
+    let n = file.read(buf, max_len=DenialScanChunkBytes)
+    if n <= 0 {
+      break
+    }
+    let text = carry + @utf8.decode_lossy(Bytes::from_array(buf[:n]))
+    match text.rev_find("\n") {
+      Some(cut) => {
+        if @sandbox.source_write_denied_in_text(
+            text[:cut].to_owned(),
+            denial_subjects,
+          ) {
+          return true
+        }
+        carry = text[cut + 1:].to_owned()
+      }
+      None => carry = text
+    }
+    // A single line larger than a chunk must not grow the carry unboundedly:
+    // scan what accumulated, keep only a pattern-sized tail.
+    if carry.length() > DenialScanChunkBytes {
+      if @sandbox.source_write_denied_in_text(carry, denial_subjects) {
+        return true
+      }
+      carry = carry[carry.length() - DenialScanCarryTailChars:].to_owned()
+    }
+  }
+  @sandbox.source_write_denied_in_text(carry, denial_subjects)
 }
 
 ///|

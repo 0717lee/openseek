@@ -173,6 +173,42 @@ async test "an uncaught sandbox denial is explained, not left as a bare EPERM" {
 }
 
 ///|
+async test "a denial past the display cap is still detected and explained" {
+  guard @sandbox.sandbox_exec_available() else { return }
+  @vfs.with_tmpdir(ws => {
+    @fs.write_file(
+      "\{ws}/keep.mbt",
+      "fn main {  }\n",
+      create_mode=CreateOrTruncate,
+    )
+    // ~200KB of flood BEFORE the uncaught denied write: the OSError line lands
+    // beyond the 48KB display cap (and beyond one 64KB scan chunk), so only
+    // the full-log scan can see it.
+    let out = run_in(ws, {
+      "source": (
+        #|import { "moonbitlang/async", "moonbitlang/async/fs", "moonbitlang/async/stdio" }
+        #|
+        #|async fn main {
+        #|  let filler = String::make(1000, 'x')
+        #|  for _i in 0..<200 {
+        #|    @stdio.stdout.write("\{filler}\n")
+        #|  }
+        #|  @fs.write_file("keep.mbt", "// CORRUPTED\n", create_mode=CreateOrTruncate)
+        #|}
+      ),
+    })
+    assert_true(out.is_error)
+    // the displayed prefix is the truncated flood, not the denial line (the
+    // feedback itself quotes "Operation not permitted", so pin on OSError)...
+    assert_true(out.content.contains("output truncated"))
+    assert_false(out.content.contains("OSError"))
+    // ...yet the guidance still lands, from the full-log scan
+    assert_true(out.content.contains("run_moonbit sandbox"))
+    assert_true(@fs.read_file("\{ws}/keep.mbt").text().contains("fn main {  }"))
+  })
+}
+
+///|
 async test "rejects non-string source arguments" {
   let out = run_in(".", { "code": "x" })
   assert_true(out.is_error)
