@@ -528,12 +528,7 @@ fn render_site_context(
 
 ///|
 fn preview_pad(value : Int, width : Int) -> String {
-  let text = "\{value}"
-  let mut padded = text
-  while padded.length() < width {
-    padded = " " + padded
-  }
-  padded
+  "\{value}".pad_start(width, ' ')
 }
 
 ///|

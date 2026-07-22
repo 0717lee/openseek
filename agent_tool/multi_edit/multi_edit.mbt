@@ -564,10 +564,7 @@ async fn revert_guarded_response(
   // fires on errors this batch INTRODUCED, not on ones that were already there.
   let restore_failures = write_files(writes, write => write.original_content)
   let before = count_errors_or_none(check_path)
-  let before_count = match before {
-    Some(before) => before.error_count
-    None => 0
-  }
+  let before_count = before.map(b => b.error_count).unwrap_or(0)
   let introduced = after.error_count - before_count
   if introduced > threshold {
     // Real breakage. Stay reverted (the originals are already back on disk).

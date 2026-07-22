@@ -35,7 +35,7 @@ async fn run_capture(
     _ => return None
   }
   match outcome {
-    Some((0, data)) => Some(data.text().to_string())
+    Some((0, data)) => Some(data.text())
     _ => None
   }
 }
@@ -55,11 +55,9 @@ async fn capture_goal_baseline(workspace_root : String) -> String {
   if sha.is_empty() {
     return GoalBaselineUnavailable
   }
-  let dirty = match
-    run_capture("git", ["status", "--porcelain"], workspace_root) {
-    Some(status) => !status.trim().is_empty()
-    None => true
-  }
+  let dirty = run_capture("git", ["status", "--porcelain"], workspace_root)
+    .map(status => !status.trim().is_empty())
+    .unwrap_or(true)
   @agent_session.goal_baseline_notice(sha~, dirty~)
 }
 

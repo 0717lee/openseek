@@ -252,14 +252,8 @@ fn render_report(report : ExploreReport) -> String {
   if report.citations.length() > 0 {
     out <+ "\n\nCitations:"
     for citation in report.citations {
-      let line = match citation.line {
-        Some(line) => ":\{line}"
-        None => ""
-      }
-      let note = match citation.note {
-        Some(note) => " — \{note}"
-        None => ""
-      }
+      let line = citation.line.map(line => ":\{line}").unwrap_or("")
+      let note = citation.note.map(note => " — \{note}").unwrap_or("")
       out <+ "\n- \{citation.file}\{line}\{note}"
     }
   }

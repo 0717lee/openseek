@@ -59,8 +59,7 @@ async fn execute_review(
   arguments : Json,
 ) -> @agent_tool.ToolAction {
   let focus : String? = match arguments {
-    { "focus": String(focus), .. } if focus.trim() != "" =>
-      Some(focus.to_string())
+    { "focus": String(focus), .. } if focus.trim() != "" => Some(focus)
     _ => None
   }
   let (standing_goal, baseline) = context()
@@ -117,8 +116,7 @@ async fn execute_review(
     Some(report) =>
       @agent_tool.ToolAction::respond(
         report.digest(),
-        is_error=report.findings.filter(f => f.severity == "blocker").length() >
-          0,
+        is_error=report.findings.any(f => f.severity == "blocker"),
         brief="review \{result.subrun_id()} (\{report.findings.length()} finding(s), \{result.steps_used()} step(s))",
       )
     None =>

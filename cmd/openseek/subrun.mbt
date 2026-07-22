@@ -232,7 +232,7 @@ async fn dispatch_kind(
       }
       let baseline : @agent_session.GoalBaseline? = match input {
         { "sha": String(sha), "dirty": dirty, .. } =>
-          Some({ sha: sha.to_string(), dirty: dirty is True })
+          Some({ sha, dirty: dirty is True })
         _ => None
       }
       let api_key = @agentcli.api_key(matches, model)

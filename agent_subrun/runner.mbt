@@ -102,7 +102,7 @@ fn ChildObservations::observe(self : ChildObservations, line : String) -> Unit {
     return
   }
   match @protocol.parse(json) {
-    Some(AgentStep(step~)) => if step > self.steps { self.steps = step }
+    Some(AgentStep(step~)) => self.steps = self.steps.max(step)
     Some(Usage(usage~)) => {
       self.prompt_tokens += usage.prompt_tokens
       self.completion_tokens += usage.completion_tokens

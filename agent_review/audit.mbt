@@ -129,17 +129,10 @@ pub fn ReviewReport::digest(self : ReviewReport) -> String {
     out <+ " (\{blockers} blocker, \{highs} high)"
   }
   out <+ " — \{@agent_tool.brief_line(self.summary, limit=160)}"
-  let shown = if self.findings.length() < digest_max_findings {
-    self.findings.length()
-  } else {
-    digest_max_findings
-  }
+  let shown = self.findings.length().min(digest_max_findings)
   for index in 0..<shown {
     let finding = self.findings[index]
-    let line = match finding.line {
-      Some(line) => ":\{line}"
-      None => ""
-    }
+    let line = finding.line.map(line => ":\{line}").unwrap_or("")
     let entry = @agent_tool.brief_line(
       "[\{finding.severity}] \{finding.file}\{line} — \{finding.title}",
       limit=digest_max_line_chars,
