@@ -16,7 +16,6 @@ import {
   "moonbitlang/async/fs",
   "moonbitlang/async/os_error",
   "moonbitlang/async/process",
-  "moonbitlang/async/semaphore",
   "moonbitlang/core/json",
   "moonbitlang/x/path",
   "tonyfettes/xlog",

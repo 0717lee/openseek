@@ -8,17 +8,12 @@
 // out to that workspace's servers. Everything is best-effort — no module yet,
 // a failed spawn, a server error, or a non-text file all just yield nothing.
 //
-// Servers live in one global pool keyed by module root, so conversations
-// sharing a project share its servers. Roots are re-detected on each request:
-// a project created mid conversation is picked up, one whose module moved is
-// retired, and the pool caps at MaxLspServers by retiring the least recently
-// used. A moon-lsp process must outlive the individual request that first
-// needs it, so — mirroring the engine pump — it is owned by the long-lived
-// task group of the `connect` op, not a per-request one: `ensure_servers`
-// hands each spawn to that group's LSP pump over a queue and waits for the
-// server back. Retiring a server closes the host's stdin end (EOF, so
-// moon-lsp exits) and cancels the process; dropping the `connect` group tears
-// every server down with it.
+// Servers live in one app-lifetime pool actor keyed by module root, so
+// conversations sharing a project share its servers. Roots are re-detected on
+// each request: a project created mid conversation is picked up, one whose
+// module moved is retired, and the pool caps at MaxLspServers by retiring the
+// least recently used. Each pooled root is a child `LspServerActor` that owns
+// its moon-lsp process, stdio, session, and synced-document state.
 
 ///|
 /// The largest number of pooled `moon-lsp` servers. A workspace rarely holds
@@ -33,131 +28,595 @@ const MaxLspServers = 6
 const MaxSymbolResults = 50
 
 ///|
-/// One language server rooted at a single module directory.
-priv struct LspWorkspace {
-  session : @lsp.Session
-  // The module directory moon-lsp is rooted at — an ancestor of the files it
-  // answers for, and the key that decides whether a re-detected layout still
-  // wants this server.
+/// One request handled by a single language-server actor. Every variant uses
+/// the same raw-JSON reply shape: `None` means the server stopped or had no
+/// answer.
+priv enum LspServerCommand {
+  Hover(String, String, Int, Int, @async.Queue[Json?])
+  Open(String, String, @async.Queue[Json?])
+  Symbols(String, @async.Queue[Json?])
+}
+
+///|
+priv enum LspServerInput {
+  ServerCommand(LspServerCommand)
+  StopServer
+}
+
+///|
+priv enum LspServerOutcome {
+  ServerCompleted(Json?)
+  ServerStopped
+}
+
+///|
+/// The handle for one module-root actor. Only immutable identity and control
+/// channels leave `run`; process/session/document state stays inside it.
+priv struct LspServerActor {
   root : String
-  // The moon-lsp process, owned by the connect op's task group. Retiring this
-  // server cancels it; the connect group tears it down on disconnect.
+  inbox : @async.Queue[LspServerCommand]
+  stop : @async.Queue[Unit]
+  started : @async.Queue[Bool]
+  closed : Ref[Bool]
+}
+
+///|
+/// Resources and mutable protocol state owned by `LspServerActor::run`.
+priv struct LspServerRuntime {
+  session : @lsp.Session
   process : @process.Process
-  // The host's ends of the server's pipes. Closing the stdin end EOFs moon-lsp
-  // so it exits when this server is retired.
   stdin : @process.WriteToProcess
   stdout : @process.ReadFromProcess
-  // Last text synced per file uri, so an unchanged file is not re-sent.
   synced : Map[String, String]
 }
 
 ///|
-/// Lazily-started `moon-lsp` instances in one global pool keyed by module
-/// root — conversations sharing a project share its servers.
-priv struct LspManager {
-  // The engine executable, anchoring the bundled-toolchain lookup for `moon-lsp`.
+priv struct LspSpawnConfig {
+  command : String
+  env : Map[String, String]?
+}
+
+///|
+priv enum LspPoolCommand {
+  Reconcile(String, Array[String], @async.Queue[Unit])
+  Acquire(String, @async.Queue[LspServerActor?])
+  Spawned(String, LspServerActor?)
+  Evict(Array[String], @async.Queue[Unit])
+}
+
+///|
+/// External handle for the app-lifetime LSP pool actor. The diagnostics queue
+/// is a separate bounded output lane; all pool mutations go through `inbox`.
+priv struct LspPoolActor {
   engine : String
   runtime_dir : @path.Path?
-  // The resolved `moon-lsp` to spawn, computed once on first use; "" until then.
-  mut command : String
-  // The child environment for spawning `command`, resolved with it. Set (and
-  // passed with `inherit_env=false`) when the command is the bundled moon-lsp,
-  // which must not see a shell-exported `MOON_HOME`; `None` for the PATH
-  // fallback of a dev run, which inherits the environment as-is.
-  mut spawn_env : Map[String, String]?
-  servers : Map[String, LspWorkspace]
-  // Pool recency, freshest first — the MaxLspServers eviction order.
-  order : Array[String]
-  // Serializes server reconciliation so two concurrent requests don't spawn two
-  // servers for the same root.
-  create_lock : @semaphore.Semaphore
-  // Spawn requests from per-request ops to the LSP pump, which owns the moon-lsp
-  // processes in the `connect` op's long-lived task group.
-  commands : @async.Queue[LspCommand]
-  // Diagnostics published by any pooled server, tagged with the file's absolute
-  // path, awaiting forwarding to the webview by `run_diagnostics_pump`. Bounded
-  // and drop-oldest so a diagnostics storm can never outrun the drain and grow
-  // without bound.
+  inbox : @async.Queue[LspPoolCommand]
   diagnostics : @async.Queue[DiagnosticsPush]
-  // Set while the pump loop is running; a spawn request is only enqueued when a
-  // pump is there to service it.
-  mut pump_running : Bool
 }
 
 ///|
-/// A request to the LSP pump: spawn a `moon-lsp` server rooted at the given
-/// directory into the pump's task group, delivering the started server (or
-/// `None` on failure) back over the queue.
-priv enum LspCommand {
-  SpawnWorkspace(@path.Path, @async.Queue[LspWorkspace?])
+/// Mutable state local to `LspPoolActor::run`.
+priv struct LspPoolState {
+  mut spawn_config : LspSpawnConfig?
+  servers : Map[String, LspServerActor]
+  order : Array[String]
+  pending : Map[String, Array[@async.Queue[LspServerActor?]]]
 }
 
 ///|
-fn new_lsp_manager(engine : String, runtime_dir? : @path.Path) -> LspManager {
+fn LspPoolActor::new(
+  engine : String,
+  runtime_dir? : @path.Path,
+) -> LspPoolActor {
   {
     engine,
     runtime_dir,
-    command: "",
-    spawn_env: None,
-    servers: Map([]),
-    order: [],
-    create_lock: Semaphore(1, initial_value=1),
-    commands: Queue(kind=Unbounded),
+    inbox: Queue(kind=Blocking(64)),
     diagnostics: Queue(kind=DiscardOldest(256)),
-    pump_running: false,
   }
 }
 
 ///|
-/// The LSP host loop: runs inside the `connect` op's task group for the app's
-/// lifetime, servicing spawn requests so each `moon-lsp` is owned by that
-/// long-lived group rather than the per-request task that first needed it.
-/// Returns only when the group is torn down (webview disconnect), which cancels
-/// every server it started.
-async fn[G] run_lsp_pump(
-  group : @async.TaskGroup[G],
-  manager : LspManager,
-) -> Unit {
-  manager.pump_running = true
-  defer {
-    manager.pump_running = false
-    // The group teardown cancels the pooled processes themselves.
-    manager.servers.clear()
-    manager.order.clear()
+fn LspServerActor::new(root : String) -> LspServerActor {
+  {
+    root,
+    inbox: Queue(kind=Blocking(32)),
+    stop: Queue(kind=DiscardOldest(1)),
+    started: Queue(kind=Blocking(1)),
+    closed: Ref(false),
   }
+}
+
+///|
+async fn LspPoolActor::run(self : LspPoolActor) -> Unit {
+  let state = LspPoolState::{
+    spawn_config: None,
+    servers: Map([]),
+    order: [],
+    pending: Map([]),
+  }
+  defer {
+    state.stop_all()
+    state.fail_pending_spawns()
+    while (self.inbox.try_get() catch { _ => None }) is Some(command) {
+      command.cancel()
+    }
+    self.inbox.close()
+  }
+  @async.with_task_group(group => {
+    for ;; {
+      match self.inbox.get() {
+        Reconcile(dir, roots, reply) => {
+          state.reconcile(dir, roots)
+          ignore(reply.try_put(()) catch { _ => false })
+        }
+        Acquire(root, reply) => state.acquire(self, group, root, reply)
+        Spawned(root, server) => state.finish_spawn(root, server)
+        Evict(keep, reply) => {
+          state.evict(keep)
+          ignore(reply.try_put(()) catch { _ => false })
+        }
+      }
+    }
+  })
+}
+
+///|
+async fn LspPoolState::resolve_spawn_config(
+  self : LspPoolState,
+  actor : LspPoolActor,
+) -> LspSpawnConfig {
+  if self.spawn_config is Some(config) {
+    return config
+  }
+  let config = if @moonbit.bundled_moon_lsp(
+      actor.engine,
+      runtime_dir?=actor.runtime_dir,
+    )
+    is Some(path) {
+    {
+      command: path.to_string(),
+      env: Some(@moonbit.bundled_tool_env(path.dirname())),
+    }
+  } else {
+    { command: "moon-lsp", env: None }
+  }
+  self.spawn_config = Some(config)
+  config
+}
+
+///|
+async fn LspPoolActor::reconcile(
+  self : LspPoolActor,
+  dir : String,
+  roots : Array[String],
+) -> Unit {
+  let reply : @async.Queue[Unit] = Queue(kind=Blocking(1))
+  self.inbox.put(Reconcile(dir, roots, reply)) catch {
+    error if @async.is_being_cancelled() => raise error
+    _ => return
+  }
+  reply.get() catch {
+    error if @async.is_being_cancelled() => raise error
+    _ => ()
+  }
+}
+
+///|
+async fn LspPoolActor::acquire(
+  self : LspPoolActor,
+  root : String,
+) -> LspServerActor? {
+  let reply : @async.Queue[LspServerActor?] = Queue(kind=Blocking(1))
+  self.inbox.put(Acquire(root, reply)) catch {
+    error if @async.is_being_cancelled() => raise error
+    _ => return None
+  }
+  reply.get() catch {
+    error if @async.is_being_cancelled() => raise error
+    _ => None
+  }
+}
+
+///|
+async fn LspPoolActor::evict(self : LspPoolActor, keep : Array[String]) -> Unit {
+  let reply : @async.Queue[Unit] = Queue(kind=Blocking(1))
+  self.inbox.put(Evict(keep, reply)) catch {
+    error if @async.is_being_cancelled() => raise error
+    _ => return
+  }
+  reply.get() catch {
+    error if @async.is_being_cancelled() => raise error
+    _ => ()
+  }
+}
+
+///|
+/// Forward the pool's bounded diagnostics output for the app lifetime.
+async fn LspPoolActor::forward_diagnostics(
+  self : LspPoolActor,
+  emit : async (DiagnosticsPush) -> Unit,
+) -> Unit {
   for ;; {
-    match manager.commands.get() {
-      SpawnWorkspace(root, ack) =>
-        ack.put(spawn_workspace(group, manager, root))
+    emit(self.diagnostics.get())
+  }
+}
+
+///|
+fn LspPoolState::reconcile(
+  self : LspPoolState,
+  dir : String,
+  roots : Array[String],
+) -> Unit {
+  let stale : Array[String] = []
+  for root, _ in self.servers {
+    if @pathx.contains(dir, root) && roots.search(root) is None {
+      stale.push(root)
+    }
+  }
+  for root in stale {
+    self.retire(root)
+  }
+}
+
+///|
+async fn[G] LspPoolState::acquire(
+  self : LspPoolState,
+  actor : LspPoolActor,
+  group : @async.TaskGroup[G],
+  root : String,
+  reply : @async.Queue[LspServerActor?],
+) -> Unit {
+  if self.servers.get(root) is Some(server) {
+    if !server.closed.val {
+      self.touch(root)
+      ignore(reply.try_put(Some(server)) catch { _ => false })
+      return
+    }
+    self.retire(root)
+  }
+  if self.pending.get(root) is Some(waiters) {
+    waiters.push(reply)
+    return
+  }
+  self.pending.set(root, [reply])
+  let config = self.resolve_spawn_config(actor)
+  let server = LspServerActor::new(root)
+  group.spawn_bg(allow_failure=true, () => server.run(config, actor.diagnostics))
+  group.spawn_bg(allow_failure=true, () => {
+    let started = server.started.get() catch {
+      error if @async.is_being_cancelled() => raise error
+      _ => false
+    }
+    actor.inbox.put(Spawned(root, if started { Some(server) } else { None }))
+  })
+}
+
+///|
+fn LspPoolState::finish_spawn(
+  self : LspPoolState,
+  root : String,
+  candidate : LspServerActor?,
+) -> Unit {
+  let waiters = self.pending.get(root).unwrap_or([])
+  self.pending.remove(root)
+  guard !waiters.is_empty() else {
+    if candidate is Some(server) {
+      server.stop()
+    }
+    return
+  }
+  let server = match candidate {
+    Some(server) if !server.closed.val => {
+      self.servers.set(root, server)
+      self.touch(root)
+      Some(server)
+    }
+    Some(server) => {
+      server.stop()
+      None
+    }
+    None => None
+  }
+  for reply in waiters {
+    ignore(reply.try_put(server) catch { _ => false })
+  }
+}
+
+///|
+fn LspPoolState::touch(self : LspPoolState, root : String) -> Unit {
+  if self.order.search(root) is Some(index) {
+    self.order.remove(index) |> ignore
+  }
+  self.order.insert(0, root)
+}
+
+///|
+fn LspPoolState::retire(self : LspPoolState, root : String) -> Unit {
+  guard self.servers.get(root) is Some(server) else { return }
+  server.stop()
+  self.servers.remove(root)
+  if self.order.search(root) is Some(index) {
+    self.order.remove(index) |> ignore
+  }
+}
+
+///|
+fn LspPoolState::evict(self : LspPoolState, keep : Array[String]) -> Unit {
+  for root in self.order.copy().rev() {
+    if self.servers.length() <= MaxLspServers {
+      break
+    }
+    if keep.search(root) is Some(_) {
+      continue
+    }
+    self.retire(root)
+  }
+}
+
+///|
+fn LspPoolState::stop_all(self : LspPoolState) -> Unit {
+  for _, server in self.servers {
+    server.stop()
+  }
+  self.servers.clear()
+  self.order.clear()
+}
+
+///|
+fn LspPoolState::fail_pending_spawns(self : LspPoolState) -> Unit {
+  for _, waiters in self.pending {
+    for reply in waiters {
+      ignore(reply.try_put(None) catch { _ => false })
+    }
+  }
+  self.pending.clear()
+}
+
+///|
+fn LspPoolCommand::cancel(self : LspPoolCommand) -> Unit {
+  match self {
+    Reconcile(_, _, reply) | Evict(_, reply) =>
+      ignore(reply.try_put(()) catch { _ => false })
+    Acquire(_, reply) => ignore(reply.try_put(None) catch { _ => false })
+    Spawned(_, server) => if server is Some(server) { server.stop() }
+  }
+}
+
+///|
+fn LspServerActor::stop(self : LspServerActor) -> Unit {
+  ignore(self.stop.try_put(()) catch { _ => false })
+}
+
+///|
+async fn LspServerActor::call(
+  self : LspServerActor,
+  build : (@async.Queue[Json?]) -> LspServerCommand,
+) -> Json? {
+  guard !self.closed.val else { return None }
+  let reply : @async.Queue[Json?] = Queue(kind=Blocking(1))
+  self.inbox.put(build(reply)) catch {
+    error if @async.is_being_cancelled() => raise error
+    _ => return None
+  }
+  reply.get() catch {
+    error if @async.is_being_cancelled() => raise error
+    _ => None
+  }
+}
+
+///|
+async fn LspServerActor::hover(
+  self : LspServerActor,
+  uri : String,
+  text : String,
+  line : Int,
+  character : Int,
+) -> Json? {
+  self.call(reply => Hover(uri, text, line, character, reply))
+}
+
+///|
+async fn LspServerActor::open(
+  self : LspServerActor,
+  uri : String,
+  text : String,
+) -> Json? {
+  self.call(reply => Open(uri, text, reply))
+}
+
+///|
+async fn LspServerActor::symbols(
+  self : LspServerActor,
+  query : String,
+) -> Json? {
+  self.call(reply => Symbols(query, reply))
+}
+
+///|
+fn LspServerCommand::reply(self : LspServerCommand, result : Json?) -> Unit {
+  let reply = match self {
+    Hover(_, _, _, _, reply) => reply
+    Open(_, _, reply) => reply
+    Symbols(_, reply) => reply
+  }
+  ignore(reply.try_put(result) catch { _ => false })
+}
+
+///|
+/// Own one moon-lsp process and its protocol state until stopped, the
+/// transport closes, or the app-lifetime pool is cancelled.
+async fn LspServerActor::run(
+  self : LspServerActor,
+  config : LspSpawnConfig,
+  diagnostics : @async.Queue[DiagnosticsPush],
+) -> Unit {
+  let announced = Ref(false)
+  defer {
+    if !announced.val {
+      ignore(self.started.try_put(false) catch { _ => false })
+    }
+    self.closed.val = true
+    while (self.inbox.try_get() catch { _ => None }) is Some(command) {
+      command.reply(None)
+    }
+    self.inbox.close()
+    self.stop.close()
+    self.started.close()
+  }
+  @async.with_task_group(group => {
+    self.run_in_group(group, config, diagnostics, announced)
+    group.return_immediately(())
+  })
+}
+
+///|
+async fn[G] LspServerActor::run_in_group(
+  self : LspServerActor,
+  group : @async.TaskGroup[G],
+  config : LspSpawnConfig,
+  diagnostics : @async.Queue[DiagnosticsPush],
+  announced : Ref[Bool],
+) -> Unit {
+  guard self.start_runtime(group, config, diagnostics) is Some(runtime) else {
+    ignore(self.started.try_put(false) catch { _ => false })
+    announced.val = true
+    return
+  }
+  defer runtime.close()
+  ignore(self.started.try_put(true) catch { _ => false })
+  announced.val = true
+  for ;; {
+    match self.next_input() {
+      StopServer => return
+      ServerCommand(command) => {
+        let outcome : LspServerOutcome = @async.any([
+          () => ServerCompleted(runtime.execute(command)),
+          () => {
+            self.stop.get()
+            ServerStopped
+          },
+        ])
+        match outcome {
+          ServerCompleted(result) => command.reply(result)
+          ServerStopped => {
+            command.reply(None)
+            return
+          }
+        }
+      }
     }
   }
 }
 
 ///|
-/// The `moon-lsp` command to spawn, resolved once and cached. Prefer the binary
-/// inside the bundled MoonBit toolchain (a packaged app), so hover works when
-/// the app is launched normally with no `moon-lsp` on PATH; fall back to
-/// `moon-lsp` on PATH for a dev run with no bundle. Resolution is serialized by
-/// the caller's `create_lock`, so the cached write needs no lock of its own.
-async fn moon_lsp_command(manager : LspManager) -> String {
-  if !manager.command.is_empty() {
-    return manager.command
+async fn LspServerActor::next_input(self : LspServerActor) -> LspServerInput {
+  if (self.stop.try_get() catch { _ => None }) is Some(_) {
+    return StopServer
   }
-  let command = if @moonbit.bundled_moon_lsp(
-      manager.engine,
-      runtime_dir?=manager.runtime_dir,
-    )
-    is Some(path) {
-    // The bundled binary must not run against a `MOON_HOME` the launching
-    // shell exported — sanitize the child environment the way the engine
-    // spawn does, with the bundled bin dir on the path variable.
-    manager.spawn_env = Some(@moonbit.bundled_tool_env(path.dirname()))
-    path.to_string()
-  } else {
-    "moon-lsp"
+  @async.any([
+    () => ServerCommand(self.inbox.get()),
+    () => {
+      self.stop.get()
+      StopServer
+    },
+  ])
+}
+
+///|
+async fn[G] LspServerActor::start_runtime(
+  self : LspServerActor,
+  group : @async.TaskGroup[G],
+  config : LspSpawnConfig,
+  diagnostics : @async.Queue[DiagnosticsPush],
+) -> LspServerRuntime? {
+  let (child_stdin, stdin_writer) = @process.write_to_process()
+  let (stdout_reader, child_stdout) = @process.read_from_process()
+  let process = @process.spawn(
+    group,
+    config.command,
+    ["--stdio"],
+    extra_env?=config.env,
+    inherit_env=config.env is None,
+    stdin=child_stdin,
+    stdout=child_stdout,
+    cwd=self.root,
+    no_wait=true,
+  ) catch {
+    error if @async.is_being_cancelled() => raise error
+    _ => {
+      stdin_writer.close()
+      stdout_reader.close()
+      return None
+    }
   }
-  manager.command = command
-  command
+  let client = @jsonrpc.Client::new(
+    @lsp.StreamTransport::new(stdout_reader, stdin_writer, label=self.root),
+  )
+  let session = @lsp.Session::new(client)
+  session.on_publish_diagnostics((uri, diags) => {
+    (diagnostics.try_put({ path: @uri.file_uri_path(uri), diagnostics: diags }) catch {
+      _ => false
+    })
+    |> ignore
+  })
+  group.spawn_bg(allow_failure=true, () => {
+    client.run_message_pump() catch {
+      error if @async.is_being_cancelled() => raise error
+      _ => ()
+    }
+    ignore(self.stop.try_put(()) catch { _ => false })
+  })
+  session.initialize(root_uri=@uri.file_uri(self.root)) catch {
+    error if @async.is_being_cancelled() => raise error
+    _ => ()
+  }
+  Some({
+    session,
+    process,
+    stdin: stdin_writer,
+    stdout: stdout_reader,
+    synced: Map([]),
+  })
+}
+
+///|
+async fn LspServerRuntime::execute(
+  self : LspServerRuntime,
+  command : LspServerCommand,
+) -> Json? {
+  match command {
+    Hover(uri, text, line, character, _) => {
+      self.sync(uri, text)
+      self.session.hover(uri~, line~, character~)
+    }
+    Open(uri, text, _) => {
+      self.sync(uri, text)
+      self.session.diagnostics_for(uri~)
+    }
+    Symbols(query, _) => self.session.workspace_symbols(query~)
+  }
+}
+
+///|
+/// Sync a changed document exactly once before the command that needs it.
+async fn LspServerRuntime::sync(
+  self : LspServerRuntime,
+  uri : String,
+  text : String,
+) -> Unit {
+  guard !(self.synced.get(uri) is Some(synced) && synced == text) else {
+    return
+  }
+  self.session.sync_document(uri~, language_id="moonbit", text~)
+  self.synced.set(uri, text)
+}
+
+///|
+fn LspServerRuntime::close(self : LspServerRuntime) -> Unit {
+  self.process.cancel()
+  self.stdin.close()
+  self.stdout.close()
 }
 
 ///|
@@ -165,7 +624,7 @@ async fn moon_lsp_command(manager : LspManager) -> String {
 /// then the deepest module root within it. The path is the whole address:
 /// no session is involved, so the viewer can ask about any attached file.
 async fn lsp_hover_op(
-  manager : LspManager,
+  pool : LspPoolActor,
   payload : LspHoverPayload,
 ) -> LspHoverReply {
   guard @engine.attached_workspace_dir(payload.path) is Some(dir) else {
@@ -173,24 +632,13 @@ async fn lsp_hover_op(
   }
   let file : @path.Path = Path(payload.path)
   let file = file.normalize()
-  let servers = ensure_servers(manager, dir)
-  guard server_for_file(servers, file.to_string()) is Some(workspace) else {
+  let servers = ensure_servers(pool, dir)
+  guard server_for_file(servers, file.to_string()) is Some(server) else {
     return no_hover()
   }
   guard read_text(file) is Some(text) else { return no_hover() }
   let uri = @uri.file_uri(file.to_string())
-  // Re-sync only when the file's text actually changed since the last hover.
-  if !(workspace.synced.get(uri) is Some(synced) && synced == text) {
-    workspace.session.sync_document(uri~, language_id="moonbit", text~)
-    workspace.synced.set(uri, text)
-  }
-  parse_hover(
-    workspace.session.hover(
-      uri~,
-      line=payload.line,
-      character=payload.character,
-    ),
-  )
+  parse_hover(server.hover(uri, text, payload.line, payload.character))
 }
 
 ///|
@@ -200,7 +648,7 @@ async fn lsp_hover_op(
 /// workspace, no server, or a non-text file yields no diagnostics. Later
 /// changes arrive as `diagnostics` events.
 async fn lsp_open_op(
-  manager : LspManager,
+  pool : LspPoolActor,
   payload : LspOpenPayload,
 ) -> LspDiagnosticsReply {
   guard @engine.attached_workspace_dir(payload.path) is Some(dir) else {
@@ -208,32 +656,13 @@ async fn lsp_open_op(
   }
   let file : @path.Path = Path(payload.path)
   let file = file.normalize()
-  let servers = ensure_servers(manager, dir)
-  guard server_for_file(servers, file.to_string()) is Some(workspace) else {
+  let servers = ensure_servers(pool, dir)
+  guard server_for_file(servers, file.to_string()) is Some(server) else {
     return { diagnostics: [] }
   }
   guard read_text(file) is Some(text) else { return { diagnostics: [] } }
   let uri = @uri.file_uri(file.to_string())
-  // Re-sync only when the file's text actually changed since the last request.
-  if !(workspace.synced.get(uri) is Some(synced) && synced == text) {
-    workspace.session.sync_document(uri~, language_id="moonbit", text~)
-    workspace.synced.set(uri, text)
-  }
-  { diagnostics: workspace.session.diagnostics_for(uri~).unwrap_or([]) }
-}
-
-///|
-/// Forward published diagnostics to the webview. Runs in the connect op's task
-/// group alongside the LSP pump for the app's lifetime: each server's handler
-/// enqueues onto `manager.diagnostics`, and this loop emits them as
-/// `diagnostics` events. Returns only when the group is torn down.
-async fn run_diagnostics_pump(
-  manager : LspManager,
-  emit : async (DiagnosticsPush) -> Unit,
-) -> Unit {
-  for ;; {
-    emit(manager.diagnostics.get())
-  }
+  { diagnostics: server.open(uri, text).unwrap_or([]) }
 }
 
 ///|
@@ -243,7 +672,7 @@ async fn run_diagnostics_pump(
 /// Best-effort: an empty query, a missing workspace, a dead server, or nothing
 /// indexed all yield no symbols.
 async fn workspace_symbols_op(
-  manager : LspManager,
+  pool : LspPoolActor,
   payload : WorkspaceSymbolsPayload,
 ) -> WorkspaceSymbolsReply {
   // An empty query is valid — it asks the server for every symbol, which backs
@@ -262,14 +691,11 @@ async fn workspace_symbols_op(
   // result against the conversation workspace (the common ancestor) so rows
   // from `<cwd>/a` and `<cwd>/b` come back as `a/...` and `b/...`. Sequential
   // is fine for the usual one or two servers.
-  for workspace in ensure_servers(manager, dir) {
+  for server in ensure_servers(pool, dir) {
     if symbols.length() >= MaxSymbolResults {
       break
     }
-    let reply = parse_symbols(
-      workspace.session.workspace_symbols(query=payload.query),
-      workspace_dir,
-    )
+    let reply = parse_symbols(server.symbols(payload.query), workspace_dir)
     for symbol in reply.symbols {
       if symbols.length() >= MaxSymbolResults {
         break
@@ -358,94 +784,29 @@ fn workspace_relative(uri : String, workspace_dir : String) -> String {
 ///|
 /// The pooled servers answering for `dir`'s module roots: a live pooled root
 /// is reused (two conversations on the same project share one moon-lsp), a
-/// missing or dead one spawns via the pump, a pooled server under `dir` whose
+/// missing or dead one spawns as a child actor, a pooled server under `dir` whose
 /// module vanished retires, and the pool caps at MaxLspServers by retiring the
 /// least recently used. Empty when the directory holds no module yet — the
 /// caller waits rather than rooting a server at a non-project directory.
 async fn ensure_servers(
-  manager : LspManager,
+  pool : LspPoolActor,
   dir : @path.Path,
-) -> Array[LspWorkspace] {
+) -> Array[LspServerActor] {
   // A conversation's directory is created on its first run; before then
   // there is nothing to analyze.
   guard @fs.exists(dir.to_string()) else { return [] }
-  let roots = lsp_roots(dir)
-  manager.create_lock.acquire()
-  defer manager.create_lock.release()
-  // Retire pooled servers rooted under `dir` whose module is gone — the
-  // per-request re-detection that picks up mid-conversation layout changes.
-  let stale : Array[String] = []
-  for root, _ in manager.servers {
-    if @pathx.contains(dir.to_string(), root) && !roots_contains(roots, root) {
-      stale.push(root)
-    }
-  }
-  for root in stale {
-    retire_server(manager, root)
-  }
-  // Reuse or spawn — via the pump, so a new process is owned by the connect
-  // op's task group and outlives this request. With no pump running (the
-  // webview never called `connect`) there is nothing to analyze against
-  // anyway, so skip rather than block on a spawn no one will service.
-  let live : Array[LspWorkspace] = []
+  // Directory discovery is deliberately outside the pool actor: filesystem
+  // I/O must not block unrelated acquire/retire messages.
+  let roots = lsp_roots(dir).map(root => root.to_string())
+  pool.reconcile(dir.to_string(), roots)
+  let live : Array[LspServerActor] = []
   for root in roots {
-    let key = root.to_string()
-    if manager.servers.get(key) is Some(server) {
-      // A pooled server whose transport already ended (moon-lsp crashed or
-      // exited) would answer nothing forever — retire it and fall through to
-      // spawn a fresh one.
-      if !server.session.is_closed() {
-        touch_server(manager, key)
-        live.push(server)
-        continue
-      }
-      retire_server(manager, key)
+    if pool.acquire(root) is Some(server) {
+      live.push(server)
     }
-    guard manager.pump_running else { continue }
-    let ack : @async.Queue[LspWorkspace?] = Queue(kind=Unbounded)
-    manager.commands.put(SpawnWorkspace(root, ack))
-    guard ack.get() is Some(server) else { continue }
-    manager.servers.set(key, server)
-    manager.order.insert(0, key)
-    live.push(server)
   }
-  evict_over_cap(manager, keep=live)
+  pool.evict(live.map(server => server.root))
   live
-}
-
-///|
-/// Move a pooled root to the front of the recency order.
-fn touch_server(manager : LspManager, root : String) -> Unit {
-  if manager.order.search(root) is Some(index) {
-    manager.order.remove(index) |> ignore
-  }
-  manager.order.insert(0, root)
-}
-
-///|
-/// Close and forget a pooled server.
-fn retire_server(manager : LspManager, root : String) -> Unit {
-  guard manager.servers.get(root) is Some(server) else { return }
-  close_workspace(server)
-  manager.servers.remove(root)
-  if manager.order.search(root) is Some(index) {
-    manager.order.remove(index) |> ignore
-  }
-}
-
-///|
-/// Retire the least recently used pooled servers until the pool fits the
-/// cap, never touching the ones the current request is about to use.
-fn evict_over_cap(manager : LspManager, keep~ : Array[LspWorkspace]) -> Unit {
-  for root in manager.order.copy().rev() {
-    if manager.servers.length() <= MaxLspServers {
-      break
-    }
-    if keep.iter().any(server => server.root == root) {
-      continue
-    }
-    retire_server(manager, root)
-  }
 }
 
 ///|
@@ -453,38 +814,18 @@ fn evict_over_cap(manager : LspManager, keep~ : Array[LspWorkspace]) -> Unit {
 /// deepest matching root wins, so a file inside a nested module is answered by
 /// that module's server rather than an ancestor's.
 fn server_for_file(
-  servers : Array[LspWorkspace],
+  servers : Array[LspServerActor],
   file : String,
-) -> LspWorkspace? {
-  let mut best : LspWorkspace? = None
-  for workspace in servers {
-    guard @pathx.contains(workspace.root, file) else { continue }
-    if best is Some(current) && current.root.length() >= workspace.root.length() {
+) -> LspServerActor? {
+  let mut best : LspServerActor? = None
+  for server in servers {
+    guard @pathx.contains(server.root, file) else { continue }
+    if best is Some(current) && current.root.length() >= server.root.length() {
       continue
     }
-    best = Some(workspace)
+    best = Some(server)
   }
   best
-}
-
-///|
-/// Whether `root` is one of the wanted roots.
-fn roots_contains(roots : Array[@path.Path], root : String) -> Bool {
-  for candidate in roots {
-    if candidate.to_string() == root {
-      return true
-    }
-  }
-  false
-}
-
-///|
-/// Retire a server: cancel the process and close the host's pipe ends (the EOF
-/// on stdin is moon-lsp's own exit signal; the cancel is the backstop).
-fn close_workspace(workspace : LspWorkspace) -> Unit {
-  workspace.process.cancel()
-  workspace.stdin.close()
-  workspace.stdout.close()
 }
 
 ///|
@@ -548,72 +889,6 @@ async fn manifest_mtime(dir : @path.Path) -> Int64? {
     }
   }
   newest
-}
-
-///|
-/// Spawn `moon-lsp` rooted at the module directory `root` into `group` and run
-/// the initialize handshake. `None` if the process could not start. Called only
-/// from the pump, whose `group` owns the process for the app's lifetime.
-async fn[G] spawn_workspace(
-  group : @async.TaskGroup[G],
-  manager : LspManager,
-  root : @path.Path,
-) -> LspWorkspace? {
-  let directory = root.to_string()
-  let command = moon_lsp_command(manager)
-  let (child_stdin, stdin_writer) = @process.write_to_process()
-  let (stdout_reader, child_stdout) = @process.read_from_process()
-  // `no_wait`: the group cancels the server at teardown rather than waiting for
-  // an exit that only comes once its stdin is closed.
-  let process = @process.spawn(
-    group,
-    command,
-    ["--stdio"],
-    extra_env?=manager.spawn_env,
-    inherit_env=manager.spawn_env is None,
-    stdin=child_stdin,
-    stdout=child_stdout,
-    cwd=directory,
-    no_wait=true,
-  ) catch {
-    error if @async.is_being_cancelled() => raise error
-    _ => return None
-  }
-  let client = @jsonrpc.Client::new(
-    @lsp.StreamTransport::new(stdout_reader, stdin_writer, label=directory),
-  )
-  let session_object = @lsp.Session::new(client)
-  // Forward the server's diagnostics to the webview, keyed by the file's
-  // absolute path (the model URI's address) — no session, since a pooled server
-  // is shared across conversations and the path is the whole address. The
-  // handler runs on the client's reader task, so it only enqueues.
-  session_object.on_publish_diagnostics((uri, diags) => {
-    (manager.diagnostics.try_put({
-      path: @uri.file_uri_path(uri),
-      diagnostics: diags,
-    }) catch {
-      _ => false
-    })
-    |> ignore
-  })
-  // A standing reader in the pump's group, so the server's `publishDiagnostics`
-  // notifications are read as they arrive — not only while a hover/symbol
-  // request happens to be in flight. It shares routing with those requests, so
-  // their replies still reach them; it ends when the transport closes.
-  group.spawn_bg(allow_failure=true, () => client.run_message_pump())
-  // A failed handshake is non-fatal: later requests simply return nothing.
-  session_object.initialize(root_uri=@uri.file_uri(directory)) catch {
-    error if @async.is_being_cancelled() => raise error
-    _ => ()
-  }
-  Some({
-    session: session_object,
-    root: directory,
-    process,
-    stdin: stdin_writer,
-    stdout: stdout_reader,
-    synced: Map([]),
-  })
 }
 
 ///|

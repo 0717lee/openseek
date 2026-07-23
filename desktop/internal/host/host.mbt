@@ -40,7 +40,7 @@ impl Show for PayloadError with fn output(self, logger) {
 /// staging state, and the workspace watcher actor. One per host process,
 /// created beside the engine manager.
 struct HostState {
-  lsp : LspManager
+  lsp : LspPoolActor
   updates : UpdateState
   fs_watch : FsWatchActor
 }
@@ -55,7 +55,7 @@ pub fn new_host_state(
   runtime_dir? : @path.Path,
   executable? : String,
 ) -> HostState {
-  let lsp = new_lsp_manager(engine, runtime_dir?)
+  let lsp = LspPoolActor::new(engine, runtime_dir?)
   // Mirror LSP wire traffic to its own log next to the host's runtime
   // state, so a broken hover/symbol round-trip can be read back without the
   // per-message noise landing in the main app log.
@@ -71,7 +71,7 @@ pub fn new_host_state(
 
 ///|
 /// The background tasks behind the host ops, spawned into the caller's
-/// app-lifetime task group: the LSP pump, the diagnostics forwarder, the
+/// app-lifetime task group: the LSP pool actor, the diagnostics forwarder, the
 /// workspace watcher, and the one-shot update-leftover sweep. `emit` pushes
 /// a notification (method, params) to the client channel — `lsp.diagnostics`
 /// and `fs.changed`, the catalog's names. Every pump is best-effort: a
@@ -82,9 +82,9 @@ pub fn[G] spawn_host_pumps(
   state : HostState,
   emit : async (String, Json) -> Unit,
 ) -> Unit {
-  group.spawn_bg(allow_failure=true, () => run_lsp_pump(group, state.lsp))
+  group.spawn_bg(allow_failure=true, () => state.lsp.run())
   group.spawn_bg(allow_failure=true, () => {
-    run_diagnostics_pump(state.lsp, async fn(push) {
+    state.lsp.forward_diagnostics(async fn(push) {
       emit("lsp.diagnostics", push.to_json())
     })
   })
