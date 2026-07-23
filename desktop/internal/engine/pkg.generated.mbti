@@ -30,7 +30,7 @@ pub async fn list_workspaces() -> WorkspacesReply
 
 pub async fn load_session(EngineManager, LoadSessionRequest) -> LoadSessionReply
 
-pub fn new_engine_manager(String, runtime_dir? : @path.Path) -> EngineManager
+pub fn new_engine_actor(String, runtime_dir? : @path.Path) -> EngineActor
 
 pub fn open_target(String, String) -> String
 
@@ -39,8 +39,6 @@ pub async fn registered_workspaces() -> Array[String]
 pub async fn remove_workspace(String, (Array[String]) -> Unit) -> Array[String]
 
 pub async fn resolve_in_workspace(String, String, workspace? : String) -> @path.Path?
-
-pub async fn run_engine_pump(EventSink, EngineManager) -> PumpReply
 
 pub async fn session_cwd(String) -> String
 
@@ -81,6 +79,10 @@ type ConnectedPayload derive(ToJson)
 
 type DurableBoundaryPayload derive(ToJson)
 
+type EngineActor
+pub fn EngineActor::manager(Self) -> EngineManager
+pub async fn EngineActor::run(Self, EventSink, (String) -> Unit) -> Unit
+
 pub(all) enum EngineEvent {
   Connected(ConnectedPayload)
   Started(StartedPayload)
@@ -113,8 +115,6 @@ pub(all) struct LoadSessionRequest {
   session : String
   workspace : String?
 }
-
-type PumpReply derive(ToJson)
 
 type SessionCommitPayload derive(ToJson)
 

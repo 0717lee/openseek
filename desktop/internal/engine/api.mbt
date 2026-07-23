@@ -131,11 +131,6 @@ struct CompactReply {
 } derive(ToJson)
 
 ///|
-struct PumpReply {
-  disconnected : Bool
-} derive(ToJson)
-
-///|
 /// One sidebar group of `list_sessions`: the conversations stored under one
 /// session root. `workspace` is the project directory ("" for the default
 /// group of scratch conversations) and `name` its display label (the folder's

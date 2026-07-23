@@ -1,9 +1,4 @@
 ///|
-/// Restart delay for the engine pump after a failure — long enough not to
-/// spin, short enough that the next prompt finds a live engine host.
-const PumpRestartDelayMs = 1_000
-
-///|
 async fn main {
   // Hidden probe target: the login-shell environment probe re-execs this
   // binary through the user's shell; print the marker-wrapped JSON
@@ -52,11 +47,15 @@ async fn main {
       ),
     )
   @async.with_task_group(group => {
-    // The bridge actor, engine pump, and host pumps run for the app's
+    // The bridge actor, engine actor, and host actors run for the app's
     // lifetime — they feed every page/client rather than borrowing a
     // `host.connect` request task as their owner.
     group.spawn_bg(allow_failure=true, () => bridge.run())
-    group.spawn_bg(allow_failure=true, () => run_engine_pump_forever(state))
+    group.spawn_bg(allow_failure=true, () => {
+      state.engine_actor().run(state.sink(), message => {
+        state.publish("agent.error", { "message": Json::string(message) })
+      })
+    })
     @host.spawn_host_pumps(group, state.host_state(), (method_, params) => {
       state.publish(method_, params)
     })
@@ -120,24 +119,4 @@ fn relay_settings() -> (String, String, String)? {
     None => "desktop"
   }
   Some((relay_url, device_token, device_name))
-}
-
-///|
-/// Keep the engine pump alive for the app's lifetime. The pump's task group
-/// owns every serve subprocess; a failure is reported to every client as an
-/// `agent.error` and retried.
-async fn run_engine_pump_forever(state : @api.ApiState) -> Unit {
-  for ;; {
-    let _ = @engine.run_engine_pump(state.sink(), state.manager()) catch {
-      error if @async.is_being_cancelled() => raise error
-      error => {
-        state.publish("agent.error", {
-          "message": Json::string("engine host failed: \{error}"),
-        })
-        @async.sleep(PumpRestartDelayMs)
-        continue
-      }
-    }
-    @async.sleep(PumpRestartDelayMs)
-  }
 }

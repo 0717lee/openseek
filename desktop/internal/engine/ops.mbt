@@ -225,13 +225,15 @@ async fn request_spawn(
   claim : PendingClaim,
   config : RunConfig,
 ) -> Unit {
-  let ack : @async.Queue[EngineError?] = Queue(kind=Unbounded)
+  let ack : @async.Queue[EngineError?] = Queue(kind=Blocking(1))
   @async.protect_from_cancel(() => {
     claim.require_current(manager)
-    // The queue is unbounded, so this put cannot suspend between the epoch
-    // check and insertion. Once inserted, pump reset guarantees the ack even
-    // when teardown cancels the active handler or strands this command queued.
-    manager.commands.put(SpawnEngine(claim, config, ack))
+    // The bounded actor mailbox may backpressure here. The identity-bearing
+    // claim remains visible while it waits; a restarted generation rejects
+    // the stale epoch, and permanent actor shutdown closes the queue.
+    manager.commands.put(SpawnEngine(claim, config, ack)) catch {
+      _ => raise EngineError("engine host stopped before spawn was accepted")
+    }
     if ack.get() is Some(error) {
       raise error
     }
@@ -740,7 +742,8 @@ async test "start echoes the client submission id in Started" {
     create_mode=CreateOrTruncate,
   )
   assert_eq(@process.run("chmod", ["+x", engine.to_string()]), 0)
-  let manager = new_engine_manager(engine.to_string(), runtime_dir=runtime)
+  let actor = new_engine_actor(engine.to_string(), runtime_dir=runtime)
+  let manager = actor.manager()
   ignore(
     update_settings(manager, {
       provider: Some("custom"),
@@ -754,7 +757,7 @@ async test "start echoes the client submission id in Started" {
   let sink = EventSink(fn(event) { emitted.push(event) })
   @async.with_task_group(group => {
     group.spawn_bg(no_wait=true, allow_failure=true, () => {
-      ignore(run_engine_pump(sink, manager))
+      actor.run(sink, fn(_) { () })
     })
     while manager.pump is Stopped {
       @async.sleep(1)
@@ -803,7 +806,8 @@ async test "setup failure retires the writer before an immediate next start" {
     create_mode=CreateOrTruncate,
   )
   assert_eq(@process.run("chmod", ["+x", engine.to_string()]), 0)
-  let manager = new_engine_manager(engine.to_string(), runtime_dir=runtime)
+  let actor = new_engine_actor(engine.to_string(), runtime_dir=runtime)
+  let manager = actor.manager()
   ignore(
     update_settings(manager, {
       provider: Some("custom"),
@@ -817,7 +821,7 @@ async test "setup failure retires the writer before an immediate next start" {
   let sink = EventSink(fn(event) { emitted.push(event) })
   @async.with_task_group(group => {
     group.spawn_bg(no_wait=true, allow_failure=true, () => {
-      ignore(run_engine_pump(sink, manager))
+      actor.run(sink, fn(_) { () })
     })
     while manager.pump is Stopped {
       @async.sleep(1)
@@ -893,7 +897,8 @@ async test "cancelling a backpressured prompt retires its partial writer" {
     create_mode=CreateOrTruncate,
   )
   assert_eq(@process.run("chmod", ["+x", engine.to_string()]), 0)
-  let manager = new_engine_manager(engine.to_string(), runtime_dir=runtime)
+  let actor = new_engine_actor(engine.to_string(), runtime_dir=runtime)
+  let manager = actor.manager()
   ignore(
     update_settings(manager, {
       provider: Some("custom"),
@@ -913,7 +918,7 @@ async test "cancelling a backpressured prompt retires its partial writer" {
   })
   @async.with_task_group(group => {
     group.spawn_bg(no_wait=true, allow_failure=true, () => {
-      ignore(run_engine_pump(sink, manager))
+      actor.run(sink, fn(_) { () })
     })
     while manager.pump is Stopped {
       @async.sleep(1)
@@ -1001,7 +1006,8 @@ async test "named session retries after its first prompt creates no record" {
     create_mode=CreateOrTruncate,
   )
   assert_eq(@process.run("chmod", ["+x", engine.to_string()]), 0)
-  let manager = new_engine_manager(engine.to_string(), runtime_dir=runtime)
+  let actor = new_engine_actor(engine.to_string(), runtime_dir=runtime)
+  let manager = actor.manager()
   ignore(
     update_settings(manager, {
       provider: Some("custom"),
@@ -1021,7 +1027,7 @@ async test "named session retries after its first prompt creates no record" {
   })
   @async.with_task_group(group => {
     group.spawn_bg(no_wait=true, allow_failure=true, () => {
-      ignore(run_engine_pump(sink, manager))
+      actor.run(sink, fn(_) { () })
     })
     while manager.pump is Stopped {
       @async.sleep(1)
@@ -1187,7 +1193,8 @@ async test "workspace detach refuses a running conversation without hiding it" {
     create_mode=CreateOrTruncate,
   )
   assert_eq(@process.run("chmod", ["+x", engine.to_string()]), 0)
-  let manager = new_engine_manager(engine.to_string(), runtime_dir=runtime)
+  let actor = new_engine_actor(engine.to_string(), runtime_dir=runtime)
+  let manager = actor.manager()
   ignore(
     update_settings(manager, {
       provider: Some("custom"),
@@ -1200,7 +1207,7 @@ async test "workspace detach refuses a running conversation without hiding it" {
   let sink = EventSink(fn(_) { () })
   @async.with_task_group(group => {
     group.spawn_bg(no_wait=true, allow_failure=true, () => {
-      ignore(run_engine_pump(sink, manager))
+      actor.run(sink, fn(_) { () })
     })
     while manager.pump is Stopped {
       @async.sleep(1)
@@ -1265,7 +1272,8 @@ async test "workspace detach drains an idle writer and its follower first" {
     create_mode=CreateOrTruncate,
   )
   assert_eq(@process.run("chmod", ["+x", engine.to_string()]), 0)
-  let manager = new_engine_manager(engine.to_string(), runtime_dir=runtime)
+  let actor = new_engine_actor(engine.to_string(), runtime_dir=runtime)
+  let manager = actor.manager()
   ignore(
     update_settings(manager, {
       provider: Some("custom"),
@@ -1279,7 +1287,7 @@ async test "workspace detach drains an idle writer and its follower first" {
   let sink = EventSink(fn(event) { events.push(event) })
   @async.with_task_group(group => {
     group.spawn_bg(no_wait=true, allow_failure=true, () => {
-      ignore(run_engine_pump(sink, manager))
+      actor.run(sink, fn(_) { () })
     })
     while manager.pump is Stopped {
       @async.sleep(1)

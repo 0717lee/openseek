@@ -431,13 +431,30 @@ fn event_with_submission_id(raw : Json, submission_id : String?) -> Json {
 }
 
 ///|
-priv enum PumpCommand {
+priv enum EngineActorCommand {
   // Replace the conversation's engine (if any) with one spawned for this
   // config; the queue carries the spawn failure — or None for success —
   // back to the requesting `start` op. The identity-bearing claim carries
   // both the pump epoch and exact slot ownership across every suspension.
   SpawnEngine(PendingClaim, RunConfig, @async.Queue[EngineError?])
 }
+
+///|
+/// Lifecycle commands are rare (only a missing or incompatible per-session
+/// engine spawns one), but the mailbox is bounded so stalled process teardown
+/// can backpressure request tasks instead of growing the host indefinitely.
+const EngineActorQueueSize = 64
+
+///|
+/// A serve process may briefly produce events faster than its sink can publish
+/// them. Backpressure the process stdout at this bound; engine events are
+/// lossless and therefore must never use a discard queue.
+const EngineStreamQueueSize = 256
+
+///|
+/// Delay before starting a fresh process-owning generation after an
+/// unexpected actor failure.
+const EngineActorRestartDelayMs = 1000
 
 ///|
 /// An operation holding a conversation's slot between config validation and
@@ -587,7 +604,7 @@ struct EngineManager {
   // after a host restart, while the credential file's v1 format stays
   // unchanged.
   mut settings_revision : Int
-  commands : @async.Queue[PumpCommand]
+  commands : @async.Queue[EngineActorCommand]
   mut pump : PumpState
   // Record arbitration must survive pump replacement: a load started under
   // generation A is still a reader that generation B's archive must await.
@@ -599,6 +616,14 @@ struct EngineManager {
   // wholesale (the group's cancellation kills the actors without their
   // self-removal running).
   followers : Map[String, SessionFollower]
+}
+
+///|
+/// App-lifetime owner of every desktop-managed engine process. Request tasks
+/// collaborate through `manager`; only `run` creates the structured task
+/// group that owns serve processes and their follower actors.
+struct EngineActor {
+  manager : EngineManager
 }
 
 ///|
@@ -832,7 +857,7 @@ priv enum StreamMessage {
 }
 
 ///|
-pub fn new_engine_manager(
+fn new_engine_manager(
   engine : String,
   runtime_dir? : @path.Path,
 ) -> EngineManager {
@@ -842,11 +867,25 @@ pub fn new_engine_manager(
     workspace_lifecycle_lock: Mutex(),
     settings_lock: Mutex(),
     settings_revision: 0,
-    commands: Queue(kind=Unbounded),
+    commands: Queue(kind=Blocking(EngineActorQueueSize)),
     pump: Stopped,
     record_guards: Map([]),
     followers: Map([]),
   }
+}
+
+///|
+pub fn new_engine_actor(
+  engine : String,
+  runtime_dir? : @path.Path,
+) -> EngineActor {
+  { manager: new_engine_manager(engine, runtime_dir?) }
+}
+
+///|
+/// The request-side coordination handle belonging to this actor.
+pub fn EngineActor::manager(self : EngineActor) -> EngineManager {
+  self.manager
 }
 
 ///|
@@ -906,7 +945,12 @@ async fn read_engine_stdout(
   process : @process.Process,
   messages : @async.Queue[StreamMessage],
 ) -> Unit {
-  @jsonl.each(reader, json => ignore(messages.try_put(StreamEvent(json)))) catch {
+  (for ;; {
+    guard reader.read_until("\n") is Some(line) else { break }
+    for json in @jsonl.parse(line) {
+      messages.put(StreamEvent(json))
+    }
+  }) catch {
     error if @async.is_being_cancelled() => raise error
     _ => {
       messages.put(StreamReaderFailed("engine wrote malformed JSONL"))
@@ -968,16 +1012,42 @@ fn host_reports_terminal_error(decoded : @event.AgentEvent) -> Bool {
 }
 
 ///|
-/// The `connect` op: the long-lived host half of the persistent-engine
-/// design. Lepus runs each IPC request as its own task, so this op's task
-/// group is the only context in which a serve process can outlive individual
-/// `start`/`cancel` calls — the frontend invokes it once at startup and the
-/// call stays open for the app's lifetime. When the webview connection drops
-/// the task group is torn down, taking the engine with it.
-pub async fn run_engine_pump(
+/// Run the engine actor for the app lifetime. A failed process-owning
+/// generation is reported through `on_failed`, then restarted after a short
+/// delay. Closing the app cancels this task, which tears down every child
+/// serve process and follower before the actor returns.
+pub async fn EngineActor::run(
+  self : EngineActor,
   sink : EventSink,
-  manager : EngineManager,
-) -> PumpReply {
+  on_failed : (String) -> Unit,
+) -> Unit {
+  defer {
+    // Refuse a producer that was backpressured on the bounded lifecycle
+    // mailbox, then settle every command that was accepted before closure.
+    self.manager.commands.close()
+    reset_engine_generation(self.manager, Ref(None))
+  }
+  for ;; {
+    let _ = self.run_generation(sink) catch {
+      error if @async.is_being_cancelled() => raise error
+      error => {
+        on_failed("engine host failed: \{error}")
+        @async.sleep(EngineActorRestartDelayMs)
+        continue
+      }
+    }
+    @async.sleep(EngineActorRestartDelayMs)
+  }
+}
+
+///|
+/// One process-owning generation of the engine actor. All children are scoped
+/// to this task group; reset publishes `Stopped` only after they have unwound.
+async fn EngineActor::run_generation(
+  self : EngineActor,
+  sink : EventSink,
+) -> Unit {
+  let manager = self.manager
   guard manager.pump is Stopped else {
     raise EngineError("engine host is already connected")
   }
@@ -988,12 +1058,12 @@ pub async fn run_engine_pump(
   // claim. Queued commands are failed by the same reset path.
   let active_spawn : Ref[@async.Queue[EngineError?]?] = Ref(None)
   fn reset() -> Unit {
-    reset_engine_pump(manager, active_spawn)
+    reset_engine_generation(manager, active_spawn)
   }
 
   manager.pump = Serving(sessions~)
-  emit(sink, Connected({ ready: true }))
   defer reset()
+  emit(sink, Connected({ ready: true }))
   @async.with_task_group(group => {
     for ;; {
       match manager.commands.get() {
@@ -1015,7 +1085,6 @@ pub async fn run_engine_pump(
       }
     }
   })
-  { disconnected: true }
 }
 
 ///|
@@ -1024,7 +1093,7 @@ pub async fn run_engine_pump(
 /// the shielded current requester and every queued requester with an error;
 /// draining the cross-reconnect queue also prevents a successor pump from
 /// executing commands prepared against the departed sessions map.
-fn reset_engine_pump(
+fn reset_engine_generation(
   manager : EngineManager,
   active_spawn : Ref[@async.Queue[EngineError?]?],
 ) -> Unit {
@@ -1034,7 +1103,9 @@ fn reset_engine_pump(
     ignore(try! ack.try_put(stopped))
     active_spawn.val = None
   }
-  while (try! manager.commands.try_get()) is Some(SpawnEngine(_, _, ack)) {
+  while (manager.commands.try_get() catch { _ => None }) is Some(
+    SpawnEngine(_, _, ack),
+  ) {
     ignore(try! ack.try_put(stopped))
   }
   // Actor defers normally retire themselves. Defensively retire any identity
@@ -1370,7 +1441,9 @@ async fn[G] start_serve_engine(
   }
   startup_engine = Some(engine)
   slot.engine = Some(engine)
-  let messages : @async.Queue[StreamMessage] = Queue(kind=Unbounded)
+  let messages : @async.Queue[StreamMessage] = Queue(
+    kind=Blocking(EngineStreamQueueSize),
+  )
   let stderr_task = group.spawn(no_wait=true) <| () => {
     stderr_reader.read_all().text() catch {
       error if @async.is_being_cancelled() => raise error
@@ -1381,7 +1454,7 @@ async fn[G] start_serve_engine(
     read_engine_stdout(reader, process, messages)
   })
   group.spawn_bg(no_wait=true, allow_failure=true, () => {
-    serve_engine_consumer(sink, manager, engine, messages, stderr_task)
+    engine.run(manager, messages, stderr_task)
   })
   startup_committed = true
 }
@@ -1391,13 +1464,14 @@ async fn[G] start_serve_engine(
 /// raw event to the webview stamped with the engine's current run, close
 /// runs on terminal events, and report a mid-turn death as that run's
 /// failure. Runs until the engine's stdout reader sees EOF.
-async fn serve_engine_consumer(
-  sink : EventSink,
+async fn ServeEngine::run(
+  self : ServeEngine,
   manager : EngineManager,
-  engine : ServeEngine,
   messages : @async.Queue[StreamMessage],
   stderr_task : @async.Task[String],
 ) -> Unit {
+  let engine = self
+  let sink = self.sink
   for ;; {
     match messages.get() {
       StreamEvent(raw) => {
@@ -2206,13 +2280,13 @@ async test "pump reset acks active and queued spawn requests" {
     "queued",
     StartPending,
   )
-  let active_ack : @async.Queue[EngineError?] = Queue(kind=Unbounded)
-  let queued_ack : @async.Queue[EngineError?] = Queue(kind=Unbounded)
+  let active_ack : @async.Queue[EngineError?] = Queue(kind=Blocking(1))
+  let queued_ack : @async.Queue[EngineError?] = Queue(kind=Blocking(1))
   manager.commands.put(
     SpawnEngine(queued_claim, pump_test_config("queued"), queued_ack),
   )
   let active = Ref(Some(active_ack))
-  reset_engine_pump(manager, active)
+  reset_engine_generation(manager, active)
   assert_true(manager.pump is Stopped)
   assert_true(active_ack.try_get() is Some(Some(EngineError(_))))
   assert_true(queued_ack.try_get() is Some(Some(EngineError(_))))

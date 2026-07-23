@@ -262,12 +262,13 @@ async fn SessionFollower::scan(
 /// the inbox serially until a Stop, with a poll ticker as the kick fallback.
 /// The ready ack releases the spawn path only after the baseline, so the
 /// engine cannot append before the follower is watching.
-async fn run_follower(
+async fn SessionFollower::run(
+  self : SessionFollower,
   sink : EventSink,
   manager : EngineManager,
-  follower : SessionFollower,
   ready : @async.Queue[Unit],
 ) -> Unit {
+  let follower = self
   // Cancellation can land during baseline, a blocking store scan, or an
   // in-flight load generation. Every exit retires this exact identity and
   // completes queued readers with LoadStopped instead of stranding reply.get.
@@ -535,7 +536,7 @@ async fn[G] ensure_follower(
   manager.followers[session] = follower
   let ready : @async.Queue[Unit] = Queue(kind=Blocking(1))
   group.spawn_bg(no_wait=true, allow_failure=true, () => {
-    run_follower(sink, manager, follower, ready)
+    follower.run(sink, manager, ready)
   })
   ready.get() catch {
     error => {
@@ -1059,10 +1060,12 @@ async test "abrupt EOF retains a failed final drain for later boundary retry" {
     let slot = slot_for(sessions, session)
     slot.engine = Some(engine)
     manager.pump = Serving(sessions~)
-    let messages : @async.Queue[StreamMessage] = Queue(kind=Unbounded)
+    let messages : @async.Queue[StreamMessage] = Queue(
+      kind=Blocking(EngineStreamQueueSize),
+    )
     messages.put(StreamExited(7))
     let stderr_task = group.spawn(no_wait=true, () => "")
-    serve_engine_consumer(sink, manager, engine, messages, stderr_task)
+    engine.run(manager, messages, stderr_task)
 
     assert_true(engine.exit.done)
     assert_true(slot.engine is None)
@@ -1551,7 +1554,7 @@ test "pump reset completes every queued follower load" {
   assert_true(follower.load_requests.try_put(request))
   manager.followers["s-reset"] = follower
   manager.pump = Serving(sessions=Map([]))
-  reset_engine_pump(manager, Ref(None))
+  reset_engine_generation(manager, Ref(None))
   assert_true(manager.pump is Stopped)
   assert_true(manager.followers.get("s-reset") is None)
   assert_false(request.active)
