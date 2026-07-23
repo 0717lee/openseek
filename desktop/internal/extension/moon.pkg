@@ -1,6 +1,7 @@
 import {
   "justjavac/proton/command" @app,
   "openseek_desktop/internal/api",
+  "moonbitlang/async",
   "moonbitlang/core/json",
 }
 

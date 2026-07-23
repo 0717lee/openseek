@@ -105,10 +105,9 @@ fn install_proton_bridge(dispatch : @cmd.Emit[Msg], attempt : Int) -> @cmd.Cmd {
 }
 
 ///|
-/// Open the host's notification subscription: a single long-lived call
-/// whose lifetime is the webview's. The promise only settles if the host
-/// stops, so the rejection itself carries no extra signal beyond
-/// "unavailable".
+/// Attach this page to the host's app-lifetime notification actor. The call
+/// resolves once the actor has emitted its readiness event; a rejection means
+/// the page could not attach to the native bridge.
 fn open_host_connection(
   scheduler : &@cmd.Scheduler,
   dispatch : @cmd.Emit[Msg],

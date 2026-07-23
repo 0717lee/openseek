@@ -9,11 +9,14 @@ import {
 // Values
 pub const ExtensionId : String = "openseek-desktop"
 
-pub fn openseek_extension(@api.ApiState) -> @command.AppCommandExtensionSpec
+pub fn openseek_extension(@api.ApiState, DesktopBridgeActor) -> @command.AppCommandExtensionSpec
 
 // Errors
 
 // Types and methods
+type DesktopBridgeActor
+pub fn DesktopBridgeActor::new(@api.ApiState) -> Self
+pub async fn DesktopBridgeActor::run(Self) -> Unit
 
 // Type aliases
 
