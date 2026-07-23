@@ -24,9 +24,25 @@ priv struct ClientSubscription {
 }
 
 ///|
-async fn open_client_subscription(state : @api.ApiState) -> ClientSubscription {
+/// One remote data WebSocket actor. It creates and closes the socket inside
+/// `run`; its subscription, outbound queue, writer, notification forwarder,
+/// pinger, and request tasks cannot outlive that run.
+priv struct WsClientActor {
+  state : @api.ApiState
+  url : String
+}
+
+///|
+fn WsClientActor::new(state : @api.ApiState, url : String) -> WsClientActor {
+  { state, url }
+}
+
+///|
+async fn WsClientActor::open_subscription(
+  self : WsClientActor,
+) -> ClientSubscription {
   let out : @async.Queue[Outgoing] = Queue(kind=Blocking(OutboundQueueCapacity))
-  let notifications = state.subscribe()
+  let notifications = self.state.subscribe()
   // Readiness doubles as the resync hint: the client treats
   // `agent.connected` as "state may have changed, reload". Queue it before
   // any notification forwarder exists, making it this subscription's first
@@ -67,6 +83,19 @@ const PingIntervalMs = 30_000
 const OutboundQueueCapacity = 64
 
 ///|
+/// Enforce one outbound bound for notifications and responses. A producer
+/// must never park behind a stalled socket: raising from any request task or
+/// the notification pump tears down the task group and reconnects cleanly.
+fn enqueue_outgoing(
+  out : @async.Queue[Outgoing],
+  item : Outgoing,
+) -> Unit raise {
+  guard out.try_put(item) else {
+    raise SlowClient("client not draining outbound frames")
+  }
+}
+
+///|
 /// JSON-RPC error codes (docs/remote-protocol.md).
 const CodeParseError = -32700
 
@@ -89,17 +118,29 @@ const CodeEngineError = -32000
 const CodeHostError = -32001
 
 ///|
-/// Serve one client connection until it closes (or the hub kicks it for
-/// not draining notifications). Raises when the connection dies; the
-/// caller owns reconnection policy.
-pub async fn serve_client(
-  state : @api.ApiState,
+/// Dial and serve one announced remote client. A client hanging up mid-run
+/// is routine and only retires this actor; cancelling the parent relay actor
+/// still propagates so every owned resource is closed immediately.
+async fn WsClientActor::run(self : WsClientActor) -> Unit {
+  let conn = @websocket.Conn::connect(self.url)
+  defer conn.close()
+  self.serve(conn) catch {
+    error if @async.is_being_cancelled() => raise error
+    _ => ()
+  }
+}
+
+///|
+/// Serve the actor's connected socket until it closes (or the hub kicks it
+/// for not draining notifications).
+async fn WsClientActor::serve(
+  self : WsClientActor,
   conn : @websocket.Conn,
 ) -> Unit {
-  let subscription = open_client_subscription(state)
+  let subscription = self.open_subscription()
   let out = subscription.out
   let notifications = subscription.notifications
-  defer state.unsubscribe(notifications)
+  defer self.state.unsubscribe(notifications)
   @async.with_task_group(group => {
     group.spawn_bg(() => {
       for ;; {
@@ -118,9 +159,7 @@ pub async fn serve_client(
         guard notification_for_client(notification) is Some(notification) else {
           continue
         }
-        guard out.try_put(Notify(notification)) else {
-          raise SlowClient("client not draining notifications")
-        }
+        enqueue_outgoing(out, Notify(notification))
       }
     })
     group.spawn_bg(() => {
@@ -144,17 +183,22 @@ pub async fn serve_client(
           // start, a big file read) never blocks the reader; replies are
           // correlated by id, not order.
           group.spawn_bg(() => {
-            out.put(Response(run_request(state, id, method_, params)))
+            enqueue_outgoing(
+              out,
+              Response(run_request(self.state, id, method_, params)),
+            )
           })
         ClientNotification => ()
         Unparsable =>
-          out.put(
+          enqueue_outgoing(
+            out,
             Response(
               error_envelope(Json::null(), CodeParseError, "unparsable frame"),
             ),
           )
         Invalid =>
-          out.put(
+          enqueue_outgoing(
+            out,
             Response(
               error_envelope(
                 Json::null(),
@@ -298,7 +342,7 @@ fn error_envelope(id : Json, code : Int, message : String) -> Json {
 ///|
 async test "readiness precedes the first forwarded hub notification" {
   let state = @api.ApiState::new(engine="unused")
-  let subscription = open_client_subscription(state)
+  let subscription = WsClientActor::new(state, "unused").open_subscription()
   defer state.unsubscribe(subscription.notifications)
   state.publish("session.event", { "sequence": 1 })
   let notification = subscription.notifications.get()
@@ -311,6 +355,18 @@ async test "readiness precedes the first forwarded hub notification" {
     fail("expected forwarded notification")
   }
   assert_eq(forwarded.method_, "session.event")
+}
+
+///|
+test "a full outbound queue rejects responses instead of blocking tasks" {
+  let out : @async.Queue[Outgoing] = Queue(kind=Blocking(1))
+  enqueue_outgoing(out, Response(Json::null()))
+  try enqueue_outgoing(out, Response(Json::null())) catch {
+    SlowClient(_) => ()
+    error => raise error
+  } noraise {
+    _ => fail("a full outbound queue accepted another response")
+  }
 }
 
 ///|
@@ -417,10 +473,7 @@ test "remote lifecycle frames keep state and trim transcript text" {
       method_: "agent.event",
       params: {
         "session": "session-1",
-        "event": {
-          "event": "compaction_finished",
-          "summary": "large summary",
-        },
+        "event": { "event": "compaction_finished", "summary": "large summary" },
       },
     }),
   )
@@ -455,10 +508,7 @@ test "remote delivery preserves session-less transcript events" {
     "task": "ephemeral prompt",
   }
   let started = expect_notification(
-    notification_for_client({
-      method_: "agent.started",
-      params: started_params,
-    }),
+    notification_for_client({ method_: "agent.started", params: started_params }),
   )
   assert_eq(started.params, started_params)
   for

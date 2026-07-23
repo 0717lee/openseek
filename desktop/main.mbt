@@ -63,10 +63,17 @@ async fn main {
     // Remote access is opt-in: point the host at a relay through the
     // environment and it registers itself at startup.
     if relay_settings() is Some((relay_url, device_token, device_name)) {
-      group.spawn_bg(allow_failure=true, () => {
-        @remote.run_connector(state, relay_url~, device_token~, device_name~, announce=device => {
+      let relay = @remote.RelayActor::new(
+        state,
+        relay_url~,
+        device_token~,
+        device_name~,
+        announce=device => {
           log.info() <? { "message": "relay registered", "device": device }
-        })
+        },
+      )
+      group.spawn_bg(allow_failure=true, () => {
+        relay.run()
       })
     }
     match app.run() {

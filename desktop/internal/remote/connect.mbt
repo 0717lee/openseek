@@ -19,19 +19,36 @@ impl Show for ConnectorError with fn output(self, logger) {
 const ReconnectDelayMs = 3_000
 
 ///|
-/// Run the connector for the host's lifetime: keep one control connection
-/// registered, reconnecting after any drop. `announce` is called with the
-/// device id each time the relay registers this machine, so the caller can
-/// surface the reachable URL.
-pub async fn run_connector(
+/// The app-lifetime owner of the relay control connection and every data
+/// WebSocket accepted through it. This branch deliberately gets its fixed
+/// connector configuration from the environment; sign-in and Remote access
+/// product state belong to a later change.
+struct RelayActor {
+  state : @api.ApiState
+  relay_url : String
+  device_token : String
+  device_name : String
+  announce : (String) -> Unit
+}
+
+///|
+pub fn RelayActor::new(
   state : @api.ApiState,
   relay_url~ : String,
   device_token~ : String,
   device_name~ : String,
   announce~ : (String) -> Unit,
-) -> Unit {
+) -> RelayActor {
+  { state, relay_url, device_token, device_name, announce }
+}
+
+///|
+/// Run for the host's lifetime: keep one control connection registered,
+/// reconnecting after any drop. `announce` receives the device id after
+/// every successful registration.
+pub async fn RelayActor::run(self : RelayActor) -> Unit {
   for ;; {
-    connect_once(state, relay_url, device_token, device_name, announce) catch {
+    self.connect_once() catch {
       error if @async.is_being_cancelled() => raise error
       error =>
         @xlog.warn(category="remote") <?
@@ -43,18 +60,15 @@ pub async fn run_connector(
 
 ///|
 /// One control session: register, then serve `open` announcements until the
-/// connection drops, which raises out of here for `run_connector` to retry.
-async fn connect_once(
-  state : @api.ApiState,
-  relay_url : String,
-  device_token : String,
-  device_name : String,
-  announce : (String) -> Unit,
-) -> Unit {
-  let control = @websocket.Conn::connect(relay_url)
+/// connection drops, which raises out of here for `RelayActor::run` to
+/// retry.
+async fn RelayActor::connect_once(self : RelayActor) -> Unit {
+  let control = @websocket.Conn::connect(self.relay_url)
   defer control.close()
   control.send_text(
-    (Register(token=device_token, name=device_name) : @tunnel.Frame).encode(),
+    (
+      Register(token=self.device_token, name=self.device_name) :
+      @tunnel.Frame).encode(),
   )
   guard @tunnel.Frame::decode(control.recv().read_all().text()) is Some(frame) else {
     raise ConnectorError("relay sent an undecodable control frame")
@@ -66,7 +80,7 @@ async fn connect_once(
     Register(..) | Open(..) =>
       raise ConnectorError("relay broke the control protocol")
   }
-  announce(device)
+  (self.announce)(device)
   @async.with_task_group(group => {
     group.spawn_bg(() => {
       for ;; {
@@ -85,7 +99,7 @@ async fn connect_once(
         // clients.
         Open(stream~) =>
           group.spawn_bg(allow_failure=true, () => {
-            serve_stream(state, data_url(relay_url, stream))
+            WsClientActor::new(self.state, self.data_url(stream)).run()
           })
         Fail(message~) =>
           raise ConnectorError("relay reported failure: \{message}")
@@ -97,23 +111,11 @@ async fn connect_once(
 }
 
 ///|
-async fn serve_stream(state : @api.ApiState, url : String) -> Unit {
-  let conn = @websocket.Conn::connect(url)
-  defer conn.close()
-  serve_client(state, conn) catch {
-    error if @async.is_being_cancelled() => raise error
-    // A remote client hanging up mid-run is routine, not a connector
-    // failure.
-    _ => ()
-  }
-}
-
-///|
 /// The data WebSocket for one announced stream: the control URL with the
 /// stream id appended (`…/tunnel` → `…/tunnel/<stream>`).
-fn data_url(relay_url : String, stream : String) -> String {
-  match relay_url.strip_suffix("/") {
+fn RelayActor::data_url(self : RelayActor, stream : String) -> String {
+  match self.relay_url.strip_suffix("/") {
     Some(base) => "\{base}/\{stream}"
-    None => "\{relay_url}/\{stream}"
+    None => "\{self.relay_url}/\{stream}"
   }
 }
