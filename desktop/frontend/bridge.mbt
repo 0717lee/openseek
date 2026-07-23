@@ -222,10 +222,10 @@ fn wire_proton_events(
   for method_ in proton_event_methods() {
     on("openseek." + method_, payload => bridge_msg(Local, method_, payload))
   }
-  // Emitted by proton itself (not the openseek extension) when the user
-  // clicks a system notification; the payload is the run id the host
-  // stamped on the notification. Desktop-only by nature.
-  on("proton.notification_clicked", notification_clicked_msg)
+  // Emitted by the notification extension when the user clicks a system
+  // notification; the payload is the run id this frontend stamped on it.
+  // Desktop-only by nature.
+  on("notification.click", notification_clicked_msg)
 }
 
 ///|
@@ -601,9 +601,9 @@ fn diagnostics_msg(
 }
 
 ///|
-/// A clicked notification's payload is the run id `notify.mbt` stamped on
-/// it; an empty payload is dropped (a stale notification from an older
-/// build, or a payload another surface posted).
+/// A clicked notification's payload is the run id `system_notification.mbt`
+/// stamped on it; an empty payload is dropped (a stale notification from an
+/// older build, or a payload another surface posted).
 fn notification_clicked_msg(payload : Map[String, Json]) -> Msg? {
   guard @jsonx.json_text(payload, "payload") is Some(run_id) &&
     !run_id.is_empty() else {

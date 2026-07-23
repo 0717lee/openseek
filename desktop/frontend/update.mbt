@@ -3527,9 +3527,6 @@ fn update_device_msg(
           model.conversation_by_last_run(channel, run_id)
         })
         is Some(conv) {
-        // The answer is durable transcript data; `Finished` only settles run
-        // lifecycle, regardless of whether its payload repeats that answer.
-        ignore(answer)
         let first_finish = !(conv.run is NoRun(ended=Some(RunFinished(_))) &&
           conv.last_run_id is Some(last) &&
           last == run_id)
@@ -3626,6 +3623,14 @@ fn update_device_msg(
           sessions,
           fetch_branch(dispatch, channel, conv.session_id, conv.cwd),
         ]
+        // Only the embedded desktop page owns system notifications. Remote
+        // browser pages never have the notification extension, and replaying
+        // the same Finished boundary must not post a second notification.
+        if first_finish && channel is Local {
+          commands.push(
+            FinishedSystemNotification::{ run_id, status, answer }.command(),
+          )
+        }
         if first_finish && !exact_empty_eof && !base.session_id.is_empty() {
           match base.sync {
             Reloading(generation~, attempt~, buffered~, reload_after_current~) =>

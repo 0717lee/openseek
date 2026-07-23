@@ -999,9 +999,9 @@ priv enum Msg {
   // Open a conversation on one device's channel; clicking another
   // device's row is also the console's focus switch.
   OpenSession(@interop.ChannelId, String)
-  // The user clicked the system notification a finished run posted: jump to
-  // the conversation that owned that run (the window itself is already
-  // brought forward natively).
+  // The user clicked the system notification posted through Proton's
+  // notification extension: jump to the conversation that owned that run.
+  // The native extension brings the window forward before emitting the click.
   NotificationClicked(run_id~ : String)
   // A host-side action with no conversation of its own (opening a file in
   // the system app, opening an external URL, launching an app) failed: pops
