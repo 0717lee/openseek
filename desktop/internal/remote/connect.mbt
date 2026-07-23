@@ -66,9 +66,7 @@ async fn RelayActor::connect_once(self : RelayActor) -> Unit {
   let control = @websocket.Conn::connect(self.relay_url)
   defer control.close()
   control.send_text(
-    (
-      Register(token=self.device_token, name=self.device_name) :
-      @tunnel.Frame).encode(),
+    (Register(token=self.device_token, name=self.device_name) : @tunnel.Frame).encode(),
   )
   guard @tunnel.Frame::decode(control.recv().read_all().text()) is Some(frame) else {
     raise ConnectorError("relay sent an undecodable control frame")

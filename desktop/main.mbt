@@ -53,7 +53,9 @@ async fn main {
     // `host.connect` request task as their owner.
     group.spawn_bg(allow_failure=true, () => bridge.run())
     group.spawn_bg(allow_failure=true, () => {
-      state.engine_actor().run(state.sink(), message => {
+      state
+      .engine_actor()
+      .run(state.sink(), message => {
         state.publish("agent.error", { "message": Json::string(message) })
       })
     })
@@ -72,9 +74,7 @@ async fn main {
           log.info() <? { "message": "relay registered", "device": device }
         },
       )
-      group.spawn_bg(allow_failure=true, () => {
-        relay.run()
-      })
+      group.spawn_bg(allow_failure=true, () => relay.run())
     }
     match app.run() {
       Ok(_) => log.info() <? { "message": "host process exit ok" }

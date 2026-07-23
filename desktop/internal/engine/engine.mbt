@@ -945,12 +945,14 @@ async fn read_engine_stdout(
   process : @process.Process,
   messages : @async.Queue[StreamMessage],
 ) -> Unit {
-  (for ;; {
-    guard reader.read_until("\n") is Some(line) else { break }
-    for json in @jsonl.parse(line) {
-      messages.put(StreamEvent(json))
+  try {
+    for ;; {
+      guard reader.read_until("\n") is Some(line) else { break }
+      for json in @jsonl.parse(line) {
+        messages.put(StreamEvent(json))
+      }
     }
-  }) catch {
+  } catch {
     error if @async.is_being_cancelled() => raise error
     _ => {
       messages.put(StreamReaderFailed("engine wrote malformed JSONL"))
@@ -1103,9 +1105,8 @@ fn reset_engine_generation(
     ignore(try! ack.try_put(stopped))
     active_spawn.val = None
   }
-  while (manager.commands.try_get() catch { _ => None }) is Some(
-    SpawnEngine(_, _, ack),
-  ) {
+  while (manager.commands.try_get() catch { _ => None })
+        is Some(SpawnEngine(_, _, ack)) {
     ignore(try! ack.try_put(stopped))
   }
   // Actor defers normally retire themselves. Defensively retire any identity
