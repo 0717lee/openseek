@@ -28,6 +28,8 @@ pub fn set_trimmed(@js.Object, String, String) -> Unit
 
 pub fn set_workspace(@js.Object, @pathx.Absolute?) -> Unit
 
+pub fn using_proton_bridge() -> Bool
+
 // Errors
 
 // Types and methods
@@ -35,4 +37,3 @@ pub fn set_workspace(@js.Object, @pathx.Absolute?) -> Unit
 // Type aliases
 
 // Traits
-
