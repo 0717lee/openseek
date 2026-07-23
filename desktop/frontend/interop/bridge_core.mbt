@@ -63,6 +63,19 @@ pub fn bridge_error_text(error : Error) -> String {
 }
 
 ///|
+/// Whether a failed bridge call is a definitive host refusal. In the
+/// embedded proton bridge, a present method's rejected promise is the
+/// direct host answer, while a missing bridge is the separate ambiguous
+/// `BridgeError` case.
+pub fn bridge_error_is_definite(error : Error) -> Bool {
+  match error {
+    BridgeError(_) => false
+    @js.Error_(_) => true
+    _ => false
+  }
+}
+
+///|
 /// The op reply as JSON text for the reply decoders. A reply of
 /// `undefined`/`null` (an op that returned nothing) reads as the empty
 /// object; an unserializable reply reads as malformed input.

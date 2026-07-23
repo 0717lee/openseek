@@ -21,13 +21,41 @@ fn bridge_msg(method_ : String, payload : Map[String, Json]) -> Msg? {
     "agent.event" => engine_msg(payload)
     "agent.error" => error_msg(payload)
     "agent.finished" => finished_msg(payload)
-    "session.changed" => Some(SessionsChanged)
+    "agent.durable" => durable_boundary_msg(payload)
+    "session.event" => session_event_msg(payload)
+    "session.changed" => session_changed_msg(payload)
+    "workspace.changed" =>
+      workspaces_from_fields(payload).map(paths => WorkspacesChanged(paths))
     "settings.changed" =>
-      decode_host_settings(payload).map(settings => HostSettingsLoaded(settings))
+      decode_host_settings(payload).map(settings => {
+        HostSettingsLoaded(settings, connection_generation=None)
+      })
     "lsp.diagnostics" => diagnostics_msg(payload)
     "fs.changed" => fs_changed_msg(payload)
     _ => None
   }
+}
+
+///|
+/// Decode archive invalidation synchronously. A fresh id is allocated at the
+/// event boundary (outside `update`) so archiving the active conversation can
+/// switch immediately without a render where Send still targets the stale id.
+fn session_changed_msg(payload : Map[String, Json]) -> Msg? {
+  guard @jsonx.json_text(payload, "change") is Some(change) &&
+    @jsonx.json_text(payload, "session") is Some(session) else {
+    return None
+  }
+  Some(
+    SessionsChanged(
+      change~,
+      session~,
+      fresh_session=if change == "archived" {
+        Some(generated_session_id())
+      } else {
+        None
+      },
+    ),
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -103,6 +131,17 @@ fn open_host_connection(
 }
 
 ///|
+/// Notification methods exposed by the host extension. Proton requires an
+/// explicit listener for each one.
+fn proton_event_methods() -> Array[String] {
+  [
+    "agent.connected", "agent.started", "agent.event", "agent.error", "agent.finished",
+    "agent.durable", "session.event", "session.changed", "workspace.changed", "settings.changed",
+    "lsp.diagnostics", "fs.changed",
+  ]
+}
+
+///|
 fn wire_proton_events(
   scheduler : &@cmd.Scheduler,
   dispatch : @cmd.Emit[Msg],
@@ -120,12 +159,7 @@ fn wire_proton_events(
     ])
   }
 
-  for
-    method_ in (
-      [
-        "agent.connected", "agent.started", "agent.event", "agent.error", "agent.finished",
-        "session.changed", "settings.changed", "lsp.diagnostics", "fs.changed",
-      ] : Array[String]) {
+  for method_ in proton_event_methods() {
     on("openseek." + method_, payload => bridge_msg(method_, payload))
   }
   // Emitted by proton itself (not the openseek extension) when the user
@@ -158,32 +192,95 @@ fn event_payload(event : @js.Value) -> Map[String, Json]? {
 /// this client still shows that the host no longer has ended while the
 /// client was away. Nothing is dispatched when the op fails: a missing
 /// answer says nothing about the runs.
-fn fetch_runs(dispatch : @cmd.Emit[Msg]) -> @cmd.Cmd {
+fn fetch_runs(
+  dispatch : @cmd.Emit[Msg],
+  frontier : Array[RunSnapshotFrontier],
+  connection_generation : Int,
+) -> @cmd.Cmd {
+  let payload = runs_payload(frontier)
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
-      let reply = @interop.bridge_request(
-        "agent.runs",
-        @js.Object::new().to_value(),
-      ) catch {
+      let reply = @interop.bridge_request("agent.runs", payload) catch {
         _ => return
       }
       let json = @json.parse(@interop.reply_json_text(reply)) catch {
         _ => return
       }
-      guard json is { "runs": Array(runs), .. } else { return }
+      guard json is Object(fields) && fields.get("runs") is Some(Array(runs)) else {
+        return
+      }
       let live : Array[String] = []
+      let recovered : Array[RecoveredRun] = []
       for item in runs {
         guard item is Object(fields) else { continue }
         if @jsonx.json_text(fields, "run_id") is Some(run_id) {
           live.push(run_id)
         }
-        if started_msg(fields) is Some(msg) {
-          scheduler.add(dispatch(msg))
+        if recovered_run(fields) is Some(run) {
+          recovered.push(run)
         }
       }
-      scheduler.add(dispatch(RunsSettled(live~)))
+      let settled : Array[RecoveredSettlement] = []
+      if fields.get("settled") is Some(Array(items)) {
+        for item in items {
+          if item is Object(fields) &&
+            recovered_settlement(fields) is Some(settlement) {
+            settled.push(settlement)
+          }
+        }
+      }
+      scheduler.add(
+        dispatch(
+          RunsLoaded(
+            runs=recovered,
+            settled~,
+            live~,
+            frontier~,
+            connection_generation~,
+          ),
+        ),
+      )
     })
   })
+}
+
+///|
+/// Encode only lifecycle owners this page can still identify. The host uses
+/// these selectors to return matching process-lifetime settlements without
+/// exposing an unbounded completion history or guessing which local input a
+/// same-text prompt belonged to.
+fn runs_payload(frontier : Array[RunSnapshotFrontier]) -> @js.Value {
+  let known : Array[@js.Value] = []
+  for captured in frontier {
+    let lifecycle_submission : String? = match captured.state {
+      SnapshotStarting(submission_id~) => {
+        let selector = @js.Object::new()
+        selector["session"] = captured.session
+        selector["submission_id"] = submission_id
+        known.push(selector.to_value())
+        Some(submission_id)
+      }
+      SnapshotOpen(run_id~) | SnapshotIdle(last_run_id=Some(run_id)) => {
+        let selector = @js.Object::new()
+        selector["session"] = captured.session
+        selector["run_id"] = run_id
+        known.push(selector.to_value())
+        None
+      }
+      SnapshotIdle(last_run_id=None) => None
+    }
+    for submission_id in captured.initial_ids {
+      if lifecycle_submission != Some(submission_id) {
+        let selector = @js.Object::new()
+        selector["session"] = captured.session
+        selector["submission_id"] = submission_id
+        known.push(selector.to_value())
+      }
+    }
+  }
+  let payload = @js.Object::new()
+  payload["known"] = known
+  payload.to_value()
 }
 
 ///|
@@ -215,22 +312,83 @@ fn started_msg(payload : Map[String, Json]) -> Msg? {
   // is malformed and dropped. `cwd` is genuinely optional — omitted for a
   // scratch conversation — and the host resolved it itself, so this is the
   // decode boundary where its absolute provenance is collapsed into the type.
+  recovered_run(payload).map(run => {
+    Started(
+      run_id=run.run_id,
+      session=run.session,
+      model=run.model,
+      max_steps=run.max_steps,
+      cwd=run.cwd,
+      task=run.task,
+      submission_id=run.submission_id,
+    )
+  })
+}
+
+///|
+/// Decode the common `agent.started` / `agent.runs` row shape without
+/// dispatching it. Snapshot rows remain plain data until `update` accepts the
+/// reply's connection generation.
+fn recovered_run(payload : Map[String, Json]) -> RecoveredRun? {
   guard @jsonx.json_text(payload, "run_id") is Some(run_id) &&
     @jsonx.json_text(payload, "session") is Some(session) &&
     @jsonx.json_text(payload, "model") is Some(model) &&
     @jsonx.json_int(payload, "max_steps") is Some(max_steps) else {
     return None
   }
-  Some(
-    Started(
-      run_id~,
-      session~,
-      model~,
-      max_steps~,
-      cwd=@jsonx.json_text(payload, "cwd").map(path => Absolute(path)),
-      task=@jsonx.json_text(payload, "task"),
-    ),
-  )
+  Some({
+    run_id,
+    session,
+    model,
+    max_steps,
+    cwd: @jsonx.json_text(payload, "cwd").map(path => Absolute(path)),
+    task: @jsonx.json_text(payload, "task"),
+    submission_id: @jsonx.json_text(payload, "submission_id"),
+  })
+}
+
+///|
+/// Decode one selector-matched completion from `agent.runs`. A normal
+/// terminal-backed status is durable by construction; every abnormal or
+/// future status requires the host's exact EOF sequence before it is safe to
+/// replay. This keeps a malformed/older host from turning an absence into a
+/// false zero-durable conclusion.
+fn recovered_settlement(payload : Map[String, Json]) -> RecoveredSettlement? {
+  guard @jsonx.json_text(payload, "run_id") is Some(run_id) &&
+    @jsonx.json_text(payload, "session") is Some(session) &&
+    @jsonx.json_text(payload, "status") is Some(status) else {
+    return None
+  }
+  let durable_sequence = @jsonx.json_int(payload, "durable_sequence")
+  let terminal_backed = status == "finished" ||
+    status == "context_yield" ||
+    status == "max_steps_exhausted"
+  guard terminal_backed || durable_sequence is Some(_) else { return None }
+  Some({
+    run_id,
+    session,
+    submission_id: @jsonx.json_text(payload, "submission_id"),
+    status,
+    durable_sequence,
+  })
+}
+
+///|
+/// One `session.event` commit: the store event rides in `event` verbatim
+/// (`{"sequence", "ts", "item"}`), and the item's `{kind, payload}` is what
+/// the transcript projector consumes. A payload missing any of it is
+/// malformed and dropped — the watermark gap it leaves behind is answered by
+/// a reload, so nothing is lost silently.
+fn session_event_msg(payload : Map[String, Json]) -> Msg? {
+  guard @jsonx.json_text(payload, "session") is Some(session) &&
+    @jsonx.json_int(payload, "sequence") is Some(sequence) &&
+    payload.get("event") is Some(Object(event)) &&
+    event.get("item") is Some(Object(item)) &&
+    @jsonx.json_text(item, "kind") is Some(kind) &&
+    item.get("payload") is Some(Object(item_payload)) else {
+    return None
+  }
+  Some(SessionCommitted(session~, sequence~, kind~, payload=item_payload))
 }
 
 ///|
@@ -268,6 +426,7 @@ fn error_msg(payload : Map[String, Json]) -> Msg? {
       run_id=@jsonx.json_text(payload, "run_id"),
       message~,
       diagnostics=@jsonx.json_text(payload, "diagnostics"),
+      exit_code=@jsonx.json_int(payload, "exit_code"),
     ),
   )
 }
@@ -279,7 +438,24 @@ fn finished_msg(payload : Map[String, Json]) -> Msg? {
     @jsonx.json_text(payload, "status") is Some(status) else {
     return None
   }
-  Some(Finished(run_id~, status~, answer=@jsonx.json_text(payload, "answer")))
+  Some(
+    Finished(
+      run_id~,
+      status~,
+      answer=@jsonx.json_text(payload, "answer"),
+      durable_sequence=@jsonx.json_int(payload, "durable_sequence"),
+    ),
+  )
+}
+
+///|
+fn durable_boundary_msg(payload : Map[String, Json]) -> Msg? {
+  guard @jsonx.json_text(payload, "run_id") is Some(run_id) &&
+    @jsonx.json_text(payload, "session") is Some(session) &&
+    @jsonx.json_int(payload, "sequence") is Some(sequence) else {
+    return None
+  }
+  Some(DurableBoundary(run_id~, session~, sequence~))
 }
 
 ///|
@@ -325,6 +501,7 @@ fn notification_clicked_msg(payload : Map[String, Json]) -> Msg? {
 fn start_openseek(
   dispatch : @cmd.Emit[Msg],
   task : String,
+  submission_id : String,
   selected_model : String,
   max_steps : String,
   session : String,
@@ -335,20 +512,60 @@ fn start_openseek(
     selected_model,
     max_steps,
     session,
+    submission_id,
     workspace~,
   )
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
-      let _ : @js.Value = @interop.bridge_request("agent.start", payload) catch {
+      let reply = @interop.bridge_request("agent.start", payload) catch {
         error => {
+          let message = @interop.bridge_error_text(error)
           scheduler.add(
             dispatch(
-              Failed(session~, message=@interop.bridge_error_text(error)),
+              if @interop.bridge_error_is_definite(error) {
+                StartRejected(session~, submission_id~, message~)
+              } else {
+                StartUndelivered(session~, submission_id~, message~)
+              },
             ),
           )
           return
         }
       }
+      let json = @json.parse(@interop.reply_json_text(reply)) catch {
+        _ => {
+          scheduler.add(
+            dispatch(
+              StartUndelivered(
+                session~,
+                submission_id~,
+                message="malformed agent.start reply",
+              ),
+            ),
+          )
+          return
+        }
+      }
+      guard json is Object(fields) &&
+        @jsonx.json_text(fields, "run_id") is Some(run_id) &&
+        @jsonx.json_text(fields, "status") is Some(status) &&
+        @jsonx.json_int(fields, "exit_code") is Some(exit_code) else {
+        scheduler.add(
+          dispatch(
+            StartUndelivered(
+              session~,
+              submission_id~,
+              message="malformed agent.start reply",
+            ),
+          ),
+        )
+        return
+      }
+      scheduler.add(
+        dispatch(
+          StartResponded(session~, submission_id~, run_id~, status~, exit_code~),
+        ),
+      )
     })
   })
 }
@@ -365,10 +582,12 @@ fn start_payload(
   selected_model : String,
   max_steps : String,
   session : String,
+  submission_id : String,
   workspace~ : @pathx.Absolute?,
 ) -> @js.Value {
   let payload = @js.Object::new()
   payload["task"] = task
+  payload["submission_id"] = submission_id
   set_engine_settings(
     payload,
     model=selected_model,
@@ -412,9 +631,17 @@ fn parsed_max_steps(text : String) -> Int? {
 
 ///|
 /// Refresh the sidebar's session list from the engine's durable store.
-fn fetch_sessions(dispatch : @cmd.Emit[Msg]) -> @cmd.Cmd {
+fn fetch_sessions(
+  dispatch : @cmd.Emit[Msg],
+  connection_generation : Int,
+  request_generation : Int,
+) -> @cmd.Cmd {
   @cmd.custom_cmd(scheduler => {
-    @js.async_run(() => refresh_sessions_into(scheduler, dispatch))
+    @js.async_run(() => {
+      refresh_sessions_into(
+        scheduler, dispatch, connection_generation, request_generation,
+      )
+    })
   })
 }
 
@@ -425,6 +652,8 @@ fn fetch_sessions(dispatch : @cmd.Emit[Msg]) -> @cmd.Cmd {
 async fn refresh_sessions_into(
   scheduler : &@cmd.Scheduler,
   dispatch : @cmd.Emit[Msg],
+  connection_generation : Int,
+  request_generation : Int,
 ) -> Unit noraise {
   let reply = @interop.bridge_request(
     "session.list",
@@ -436,7 +665,12 @@ async fn refresh_sessions_into(
     }
   }
   match @transcript.decode_sessions_reply(@interop.reply_json_text(reply)) {
-    Some(items) => scheduler.add(dispatch(SessionsLoaded(items)))
+    Some(items) =>
+      scheduler.add(
+        dispatch(
+          SessionsLoaded(items, connection_generation~, request_generation~),
+        ),
+      )
     None => scheduler.add(dispatch(SessionsFailed("malformed session list")))
   }
 }
@@ -449,6 +683,70 @@ fn open_session(
   dispatch : @cmd.Emit[Msg],
   session_id : String,
   workspace~ : String,
+  generation~ : Int,
+) -> @cmd.Cmd {
+  load_session_cmd(
+    session_id,
+    workspace~,
+    on_loaded=view => {
+      dispatch(
+        SessionLoaded(
+          session=session_id,
+          items=view.items,
+          watermark=view.watermark,
+          event_boundaries=view.event_boundaries,
+          generation~,
+        ),
+      )
+    },
+    on_failed=detail => {
+      dispatch(
+        SessionLoadFailed(
+          session=session_id,
+          message="failed to load session \{session_id}: " + detail,
+          generation~,
+        ),
+      )
+    },
+  )
+}
+
+///|
+/// Re-read a conversation's durable record in the background — a commit-gap
+/// resync, or catching up on a foreign run — without activating it or
+/// stealing the screen.
+fn refresh_session(
+  dispatch : @cmd.Emit[Msg],
+  session_id : String,
+  workspace~ : String,
+  generation~ : Int,
+) -> @cmd.Cmd {
+  load_session_cmd(
+    session_id,
+    workspace~,
+    on_loaded=view => {
+      dispatch(
+        SessionRefreshed(
+          session=session_id,
+          items=view.items,
+          watermark=view.watermark,
+          event_boundaries=view.event_boundaries,
+          generation~,
+        ),
+      )
+    },
+    on_failed=_ => {
+      dispatch(SessionRefreshFailed(session=session_id, generation~))
+    },
+  )
+}
+
+///|
+fn load_session_cmd(
+  session_id : String,
+  workspace~ : String,
+  on_loaded~ : (@transcript.SessionLoadView) -> @cmd.Cmd,
+  on_failed~ : (String) -> @cmd.Cmd,
 ) -> @cmd.Cmd {
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
@@ -457,33 +755,14 @@ fn open_session(
       @interop.set_trimmed(payload, "workspace", workspace)
       let reply = @interop.bridge_request("session.load", payload.to_value()) catch {
         error => {
-          scheduler.add(
-            dispatch(
-              SessionLoadFailed(
-                session=session_id,
-                message="failed to load session \{session_id}: " +
-                  @interop.bridge_error_text(error),
-              ),
-            ),
-          )
+          scheduler.add(on_failed(@interop.bridge_error_text(error)))
           return
         }
       }
       match
-        @transcript.transcript_from_session_json(
-          @interop.reply_json_text(reply),
-        ) {
-        Some(items) =>
-          scheduler.add(dispatch(SessionLoaded(session=session_id, items~)))
-        None =>
-          scheduler.add(
-            dispatch(
-              SessionLoadFailed(
-                session=session_id,
-                message="failed to load session \{session_id}: malformed data",
-              ),
-            ),
-          )
+        @transcript.decode_session_load_reply(@interop.reply_json_text(reply)) {
+        Some(view) => scheduler.add(on_loaded(view))
+        None => scheduler.add(on_failed("malformed data"))
       }
     })
   })
@@ -492,29 +771,49 @@ fn open_session(
 ///|
 /// Inject steering input into the running turn. Delivery is acknowledged by
 /// the engine's own `steer_applied`/`steer_dropped` events; this command only
-/// reports the cases where no such event will ever come — the host refused
-/// the steer (turn already closed, engine dead) or the bridge call failed —
-/// so the pending acknowledgment can settle either way.
+/// distinguishes a definitive host refusal from an indeterminate transport
+/// failure: only the latter may still be followed by an exact engine receipt.
 fn steer_openseek(
   dispatch : @cmd.Emit[Msg],
   session : String,
+  submission_id : String,
   text : String,
   run_id : String,
 ) -> @cmd.Cmd {
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
-      let delivered = steer_delivered(text, run_id) catch { _ => false }
+      let delivered = steer_delivered(text, submission_id, run_id) catch {
+        error => {
+          scheduler.add(
+            dispatch(
+              if @interop.bridge_error_is_definite(error) {
+                SteerRejected(session~, submission_id~, text~, run_id~)
+              } else {
+                SteerUndelivered(session~, submission_id~, text~, run_id~)
+              },
+            ),
+          )
+          return
+        }
+      }
       if !delivered {
-        scheduler.add(dispatch(SteerUndelivered(session~, text~)))
+        scheduler.add(
+          dispatch(SteerRejected(session~, submission_id~, text~, run_id~)),
+        )
       }
     })
   })
 }
 
 ///|
-async fn steer_delivered(text : String, run_id : String) -> Bool {
+async fn steer_delivered(
+  text : String,
+  submission_id : String,
+  run_id : String,
+) -> Bool {
   let payload = @js.Object::new()
   payload["text"] = text
+  payload["submission_id"] = submission_id
   payload["run_id"] = run_id
   let reply = @interop.bridge_request("agent.steer", payload.to_value())
   @interop.js_prop(reply, "steered") is Some(flag) &&
@@ -576,10 +875,8 @@ fn cancel_openseek(dispatch : @cmd.Emit[Msg], run_id : String) -> @cmd.Cmd {
         error => {
           scheduler.add(
             dispatch(
-              Error(
-                run_id=Some(run_id),
-                message=@interop.bridge_error_text(error),
-                diagnostics=None,
+              HostActionFailed(
+                "Failed to cancel the run: " + @interop.bridge_error_text(error),
               ),
             ),
           )

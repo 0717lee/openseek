@@ -86,7 +86,9 @@ fn model_select(dispatch : @cmd.Emit[Msg], selected : String) -> @html.Html {
 
 ///|
 fn conversation_title(conv : Conversation) -> String {
-  for item in conv.messages {
+  // Titles follow the committed user transcript. Client-local failure notices
+  // are visible too but never qualify as a title.
+  for item in conv.visible_items() {
     if item.kind is User {
       // A prompt sent with chips titles by what was typed (or, chips alone,
       // by their labels) — never by the raw `<user_mentions>` envelope.
@@ -1049,7 +1051,11 @@ fn transcript_view(
   on_open : (String) -> @cmd.Cmd,
 ) -> @html.Html {
   let items : Array[@html.Html] = []
-  if conv.messages.is_empty() {
+  // The durable transcript plus client-local notices, rendered through one
+  // folding pass. Live semantic events never synthesize durable-looking
+  // items here; their store commits populate the transcript.
+  let visible = conv.visible_items()
+  if visible.is_empty() {
     items.push(
       @html.div(class="empty", [
         @html.div(class="empty-badge", [icon(icon_logo)]),
@@ -1069,11 +1075,10 @@ fn transcript_view(
     // lands. User messages and error bubbles always break the run and stay
     // visible.
     let mut index = 0
-    while index < conv.messages.length() {
-      guard conv.messages[index].kind
-        is (Tool(..) | Reasoning | Assistant(false)) else {
+    while index < visible.length() {
+      guard visible[index].kind is (Tool(..) | Reasoning | Assistant(false)) else {
         items.push(
-          transcript_item_view(conv.messages[index], on_open, on_jump=target => {
+          transcript_item_view(visible[index], on_open, on_jump=target => {
             dispatch(
               JumpToLocation(
                 path=target.file,
@@ -1087,10 +1092,9 @@ fn transcript_view(
         continue
       }
       let run : Array[@transcript.TranscriptItem] = []
-      while index < conv.messages.length() &&
-            conv.messages[index].kind
-            is (Tool(..) | Reasoning | Assistant(false)) {
-        run.push(conv.messages[index])
+      while index < visible.length() &&
+            visible[index].kind is (Tool(..) | Reasoning | Assistant(false)) {
+        run.push(visible[index])
         index = index + 1
       }
       push_run(items, run, on_open)
@@ -1126,7 +1130,7 @@ fn transcript_view(
 /// (`steer_applied` commits it as a real user message).
 fn pending_steers_panel(conv : Conversation) -> @html.Html {
   let rows : Array[@html.Html] = []
-  for text in conv.pending_steers {
+  for text in conv.pending_steers() {
     let shown = user_display_text(text)
     rows.push(
       @html.div(class="pending-steer-row", title=shown, [
@@ -1295,8 +1299,11 @@ fn mention_tray(dispatch : @cmd.Emit[Msg], conv : Conversation) -> @html.Html {
 ///|
 fn composer_view(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
   let conv = model.active()
+  let transcript_ready = conv.sync is Synced &&
+    !conv.has_unresolved_run_tail_notice()
   let has_input = model.bridge is Connected &&
     model.api_ready() &&
+    transcript_ready &&
     conv.draft_sendable()
   // A compacting conversation cannot accept a prompt either: the serve
   // engine would queue it behind the compaction, where Stop cannot reach it.
@@ -1320,12 +1327,14 @@ fn composer_view(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
     @html.div(class="composer-status", status),
   ]
   if conv.is_running() {
-    // One morphing button while this conversation's turn runs: a sendable
-    // draft (typed text) turns it into a steer submit, anything else —
-    // empty, or chips still waiting for their instruction — leaves it as the
-    // interrupt. A turn being cancelled cannot be steered, so the button
-    // waits with the user's draft in the composer.
-    if !conv.draft_sendable() {
+    // One morphing button while this conversation's turn runs. It becomes a
+    // steer submit only when the durable boundary is ready too; a draft must
+    // never hide Stop behind a disabled Send during reload/reconciliation.
+    let can_steer = has_input &&
+      conv.run_durable_floor is Some(_) &&
+      conv.run is Open(stage~, ..) &&
+      !(stage is Cancelling)
+    if !can_steer {
       controls.push(
         @html.button(
           id="stop",
@@ -1337,13 +1346,12 @@ fn composer_view(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
         ),
       )
     } else {
-      let can_steer = has_input && !(conv.run is Open(stage=Cancelling, ..))
       controls.push(
         @html.button(
           id="send",
           class="icon-button send-button",
           title="Steer the running task",
-          disabled=!can_steer,
+          disabled=false,
           on_click=dispatch(Send),
           icon(icon_arrow_up),
         ),
@@ -1362,7 +1370,7 @@ fn composer_view(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
     )
   }
   let children : Array[@html.Html] = []
-  if conv.pending_steers.length() > 0 {
+  if !conv.pending_steers().is_empty() {
     children.push(pending_steers_panel(conv))
   }
   // The requested phase reads as compacting already: the distinction (the
@@ -2050,7 +2058,7 @@ fn launcher_view(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
   // A conversation's workspace exists only once it has run; a fresh chat with
   // no turn yet has nothing to open, so the launcher is disabled until then.
   let conv = model.active()
-  let ready = !conv.messages.is_empty() || conv.is_running()
+  let ready = !conv.visible_items().is_empty() || conv.is_running()
   let children : Array[@html.Html] = [
     @html.button(
       class=if model.launcher.open {
