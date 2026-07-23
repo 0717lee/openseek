@@ -4,11 +4,14 @@ on:
   workflow_dispatch:
 
 jobs:
-  publish:
+  publish-editor:
     # Use macos-latest or windows-latest if you want to publish to those platforms
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    env:
+      # Keep editor checks scoped to its module instead of the parent workspace.
+      MOON_WORK: off
     steps:
       - uses: actions/checkout@v6
         with:
@@ -23,24 +26,23 @@ jobs:
       - name: post install
         run: |
           moon version --all
-          moon update
+          moon -C editor update
 
-      # Add -C if your moon.mod.json or moon.pkg.json is not in the root directory
       - name: prepublish check
         run: |
-          moon check
-          moon test
+          moon -C editor check
+          moon -C editor test
 
       - name: publish
         env:
-          SECRET: ${{ secrets.MOONCAKES_MOONBIT_COMMUNITY_TOKEN }}
+          SECRET: ${{ secrets.MOONCAKES_MOONBITLANG_TOKEN }}
         shell: bash
         run: |
           if [ -z "$SECRET" ]; then
-            echo "Error: MOONCAKES_MOONBIT_COMMUNITY_TOKEN secret is not set."
+            echo "Error: MOONCAKES_MOONBITLANG_TOKEN secret is not set."
             echo "Please contact an admin to grant access to this secret."
             exit 1
           fi
           echo "$SECRET" > ~/.moon/credentials.json
-          moon publish
+          moon -C editor publish
           rm ~/.moon/credentials.json
