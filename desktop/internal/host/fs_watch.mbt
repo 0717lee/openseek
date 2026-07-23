@@ -1,29 +1,30 @@
 // The workspace file watcher behind the editor panel's live updates. The
 // frontend points it at the active conversation's workspace through the
-// `fs.watch` method (and parks it with `fs.unwatch`); a background pump runs
+// `fs.watch` method (and parks it with `fs.unwatch`); a background actor runs
 // one recursive `@fs.Watcher` on that root and pushes a coarse `fs.changed`
-// notification on every change. The watcher reports no paths — the frontend
-// re-stats its open tabs (`fs.stat_files`) and re-lists its expanded
-// directories to find out what moved.
+// notification on every change. `FsWatchActor` owns both the desired-root
+// mailbox and the active watcher resource. The watcher reports no paths —
+// the frontend re-stats its open tabs (`fs.stat_files`) and re-lists its
+// expanded directories to find out what moved.
 
 ///|
-/// The pump's mailbox: the latest requested watch root (None = stop
+/// The actor handle and its mailbox: the latest requested watch root (None = stop
 /// watching). `DiscardOldest(1)` because only the newest target matters — a
 /// burst of conversation switches must not queue up stale watches.
-priv struct WatchState {
+priv struct FsWatchActor {
   requests : @async.Queue[String?]
 }
 
 ///|
-fn new_watch_state() -> WatchState {
+fn FsWatchActor::new() -> FsWatchActor {
   { requests: Queue(kind=DiscardOldest(1)) }
 }
 
 ///|
 /// Point the watcher at `payload.session`'s workspace root. Resolution only
-/// — the pump swaps watchers on its own schedule.
-async fn watch_workspace_op(
-  watches : WatchState,
+/// — the actor swaps watchers on its own schedule.
+async fn FsWatchActor::watch(
+  self : FsWatchActor,
   payload : WatchWorkspacePayload,
 ) -> Unit {
   guard @engine.resolve_in_workspace(
@@ -34,13 +35,13 @@ async fn watch_workspace_op(
     is Some(root) else {
     raise HostError("path is outside the conversation workspace")
   }
-  watches.requests.put(Some(root.to_string()))
+  self.requests.put(Some(root.to_string()))
 }
 
 ///|
 /// Park the watcher — the editor panel closed with no tabs open.
-async fn unwatch_workspace_op(watches : WatchState) -> Unit {
-  watches.requests.put(None)
+async fn FsWatchActor::unwatch(self : FsWatchActor) -> Unit {
+  self.requests.put(None)
 }
 
 ///|
@@ -82,7 +83,7 @@ async fn watch_root(
 }
 
 ///|
-/// The pump: hold one watcher on the latest requested root, swapping when a
+/// The actor loop: hold one watcher on the latest requested root, swapping when a
 /// new request arrives. Each watcher runs in a child task group whose body
 /// blocks on the next request — `return_immediately` then cancels the
 /// blocked `wait_any` deterministically (`Watcher::close` alone is not
@@ -92,14 +93,14 @@ async fn watch_root(
 /// watcher task is `allow_failure` so a watcher error (say, fd exhaustion
 /// on a huge tree) degrades to "no live updates" instead of tearing down
 /// the connection.
-async fn run_watch_pump(
-  watches : WatchState,
+async fn FsWatchActor::run(
+  self : FsWatchActor,
   emit : async (FsChangedPayload) -> Unit,
 ) -> Unit {
-  let mut root = watches.requests.get()
+  let mut root = self.requests.get()
   for ;; {
     guard root is Some(target) else {
-      root = watches.requests.get()
+      root = self.requests.get()
       continue
     }
     root = @async.with_task_group(group => {
@@ -118,7 +119,7 @@ async fn run_watch_pump(
         }
         watch_root(target, emit)
       })
-      let next = watches.requests.get()
+      let next = self.requests.get()
       group.return_immediately(next)
       next
     })
