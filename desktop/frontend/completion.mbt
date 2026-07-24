@@ -1,8 +1,8 @@
-// The composer's completion menu: typing a leading `/` lists built-in
-// conversation commands, a leading `$` lists installed skills whose name is
-// dropped into the prompt. Both filter as the user types and are driven from
-// the model so the keyboard (↑/↓, Enter/Tab, Esc) and the popup view stay in
-// sync.
+// The composer's completion menu: a leading `/` lists built-in conversation
+// commands, while a trailing `$` or `#` token lists installed skills or
+// workspace symbols after ordinary prompt text. All three filter as the user
+// types and are driven from the model so the keyboard (↑/↓, Enter/Tab, Esc)
+// and the popup view stay in sync.
 
 ///|
 /// The built-in slash commands, in menu order. `command` is the id
@@ -22,13 +22,52 @@ fn slash_command_items() -> Array[CompletionItem] {
 }
 
 ///|
+/// The live completion token at the end of a draft. Slash commands keep their
+/// whole-draft semantics and therefore only parse at the beginning; `$` and
+/// `#` mentions parse after any whitespace so they can follow ordinary prompt
+/// text. `task_without_token` is the exact preceding text that accepting a
+/// mention preserves.
+priv struct CompletionTrigger {
+  kind : CompletionKind
+  query : String
+  task_without_token : String
+}
+
+///|
+fn CompletionTrigger::parse(text : String) -> CompletionTrigger? {
+  if text =~ (re"^/", after=query) && query =~ re"^[^[:space:]]*$" {
+    return Some({
+      kind: SlashCommands,
+      query: query.to_owned(),
+      task_without_token: "",
+    })
+  }
+  // The trailing anchor skips earlier `$`/`#` text. The separate boundary
+  // check rejects a marker embedded in a word without consuming the whitespace
+  // that accepting the completion must preserve.
+  guard text =~ (re"[$#][^[:space:]]*$" as token, before=task) &&
+    (task.is_empty() || task =~ re"[[:space:]]$") &&
+    token =~ (re"^[$#]" as trigger, after=query) else {
+    return None
+  }
+  Some({
+    kind: if trigger is '$' {
+      SkillMentions
+    } else {
+      Symbols
+    },
+    query: query.to_owned(),
+    task_without_token: task.to_owned(),
+  })
+}
+
+///|
 /// Build the composer completion menu for a draft, or `None` when the draft
-/// does not begin with a live trigger. The menu opens on a leading `/`
-/// (commands), `$` (installed skills), or `#` (workspace symbols) and stays
-/// open only while the token after the trigger holds no spaces — once the user
-/// types past the word, the command/mention/reference is complete and the menu
-/// closes. The highlight resets to the first row on every rebuild, since
-/// filtering reorders what is shown.
+/// has no live trigger. The menu opens on a leading `/` command or a trailing
+/// `$`/`#` token after any whitespace. Once the user types whitespace past the
+/// token, the mention/reference is complete and the menu closes. The highlight
+/// resets to the first row on every rebuild, since filtering reorders what is
+/// shown.
 ///
 /// Symbols differ from the other two: their rows are fetched asynchronously and
 /// arrive via `SymbolsLoaded`, so they come from `symbols` (cached against
@@ -40,53 +79,68 @@ fn compute_completion(
   symbols : SymbolCache,
   session : String,
 ) -> Completion? {
-  if text.has_prefix("/") {
-    let query = trigger_query(text)
-    guard query is Some(query) else { return None }
-    let items = slash_command_items().filter(item => {
-      completion_matches(query, [item.label])
-    })
-    if items.is_empty() {
-      None
-    } else {
-      Some({ kind: SlashCommands, items, selected: 0, loading: false })
-    }
-  } else if text.has_prefix("$") {
-    let query = trigger_query(text)
-    guard query is Some(query) else { return None }
-    let items : Array[CompletionItem] = []
-    for skill in installed {
-      if completion_matches(query, [skill.name, skill.description]) {
-        items.push({
-          label: "$" + skill.name,
-          detail: skill.description,
-          command: "",
-          insert: skill.name + " ",
-          path: None,
-          range: None,
+  guard CompletionTrigger::parse(text) is Some(trigger) else { return None }
+  match trigger.kind {
+    SlashCommands => {
+      let items = slash_command_items().filter(item => {
+        completion_matches(trigger.query, [item.label])
+      })
+      if items.is_empty() {
+        None
+      } else {
+        Some({
+          kind: SlashCommands,
+          items,
+          selected: 0,
+          loading: false,
+          task_without_token: trigger.task_without_token,
         })
       }
     }
-    if items.is_empty() {
-      None
-    } else {
-      Some({ kind: SkillMentions, items, selected: 0, loading: false })
+    SkillMentions => {
+      let items : Array[CompletionItem] = []
+      for skill in installed {
+        if completion_matches(trigger.query, [skill.name, skill.description]) {
+          items.push({
+            label: "$\{skill.name}",
+            detail: skill.description,
+            command: "",
+            insert: "\{skill.name} ",
+            path: None,
+            range: None,
+          })
+        }
+      }
+      if items.is_empty() {
+        None
+      } else {
+        Some({
+          kind: SkillMentions,
+          items,
+          selected: 0,
+          loading: false,
+          task_without_token: trigger.task_without_token,
+        })
+      }
     }
-  } else if text.has_prefix("#") {
-    let query = trigger_query(text)
-    guard query is Some(query) else { return None }
-    // A bare `#` lists everything — an empty query asks the server for all
-    // symbols — and narrows as the user types.
-    let items = symbols.items.filter(item => {
-      completion_matches(query, [item.label, item.detail])
-    })
-    // The cache answers this exact query for this conversation only when both
-    // match; otherwise a fetch is in flight (or about to be) and the menu shows
-    // whatever the cache narrows to meanwhile, marked loading.
-    let loading = symbols.session != session || symbols.query != query
-    Some({ kind: Symbols, items, selected: 0, loading })
-  } else {
-    None
+    Symbols => {
+      // A bare `#` lists everything — an empty query asks the server for all
+      // symbols — and narrows as the user types.
+      let items = symbols.items.filter(item => {
+        completion_matches(trigger.query, [item.label, item.detail])
+      })
+      // The cache answers this exact query for this conversation only when both
+      // match; otherwise a fetch is in flight (or about to be) and the menu
+      // shows whatever the cache narrows to meanwhile, marked loading.
+      let loading = symbols.session != session || symbols.query != trigger.query
+      Some({
+        kind: Symbols,
+        items,
+        selected: 0,
+        loading,
+        task_without_token: trigger.task_without_token,
+      })
+    }
   }
 }
 
@@ -114,20 +168,6 @@ fn push_mention(mentions : Array[Mention], mention : Mention) -> Array[Mention] 
 /// With no chips this is just the text.
 fn compose_prompt(mentions : Array[Mention], task : String) -> String {
   @mention_context.encode(mentions.map(mention => mention.ref_), task)
-}
-
-///|
-/// The text after a single-character trigger, or `None` once it contains a
-/// space — the marker the user has finished the command/mention word and the
-/// menu should close. The trigger is ASCII (`/` or `$`), so slicing one code
-/// unit off the front is safe.
-fn trigger_query(text : String) -> String? {
-  let rest = text[1:].to_owned()
-  if rest.contains(" ") {
-    None
-  } else {
-    Some(rest)
-  }
 }
 
 ///|
@@ -247,6 +287,34 @@ test "dollar trigger lists installed skills, name or description matching" {
 }
 
 ///|
+test "skill completion follows prompt text and preserves that text" {
+  let skills = [installed_skill("review-pr", "Review a pull request")]
+  guard menu_for("Please use $rev", skills) is Some(menu) else {
+    fail("a skill token after prompt text should open the menu")
+  }
+  assert_true(menu.kind is SkillMentions)
+  assert_eq(menu.items[0].label, "$review-pr")
+  assert_eq(menu.task_without_token, "Please use ")
+  // Newlines are valid token boundaries too.
+  guard menu_for("First line\n$rev", skills) is Some(after_newline) else {
+    fail("a skill token after a newline should open the menu")
+  }
+  assert_eq(after_newline.task_without_token, "First line\n")
+}
+
+///|
+test "inline completion requires a trailing whitespace-delimited token" {
+  let skills = [installed_skill("review-pr", "Review a pull request")]
+  // A trigger embedded in a word is ordinary prompt text.
+  assert_true(menu_for("price$rev", skills) is None)
+  // Once more text follows the token, it is no longer the live trailing token.
+  assert_true(menu_for("Use $rev for this", skills) is None)
+  // Slash commands retain whole-draft semantics: accepting one never discards
+  // prompt text that happened to precede it.
+  assert_true(menu_for("Please /comp", skills) is None)
+}
+
+///|
 test "plain text opens no completion menu" {
   assert_true(menu_for("hello world", []) is None)
   assert_true(menu_for("", []) is None)
@@ -282,6 +350,18 @@ test "hash trigger lists cached symbols, filtered, marked not loading on match" 
   assert_eq(menu.items[0].label, "parse_hover")
   // Accepting drops a backticked reference plus location into the composer.
   assert_eq(menu.items[0].insert, "`parse_hover` — src/main.mbt:1 ")
+}
+
+///|
+test "symbol completion follows prompt text and preserves that text" {
+  let cache = symbol_cache("s1", "parse", ["parse_hover"])
+  guard compute_completion("Inspect #parse", [], cache, "s1") is Some(menu) else {
+    fail("a symbol token after prompt text should open the menu")
+  }
+  assert_true(menu.kind is Symbols)
+  assert_false(menu.loading)
+  assert_eq(menu.items[0].label, "parse_hover")
+  assert_eq(menu.task_without_token, "Inspect ")
 }
 
 ///|

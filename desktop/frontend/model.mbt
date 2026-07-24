@@ -268,15 +268,17 @@ priv struct Mention {
 
 ///|
 /// The composer's open completion menu: the trigger that opened it, the
-/// currently matching rows, and which row is highlighted. Absent when the
-/// composer text does not begin with a live trigger. `loading` is set only for
-/// a `#` menu whose results for the current query have not arrived yet, so the
-/// empty menu can say "Searching…" rather than "No symbols".
+/// currently matching rows, which row is highlighted, and the exact draft text
+/// before the live token. Absent when the composer has no live trigger.
+/// `loading` is set only for a `#` menu whose results for the current query have
+/// not arrived yet, so the empty menu can say "Searching…" rather than
+/// "No symbols".
 priv struct Completion {
   kind : CompletionKind
   items : Array[CompletionItem]
   selected : Int
   loading : Bool
+  task_without_token : String
 }
 
 ///|
