@@ -246,6 +246,9 @@ pub async fn installed_skills(
       skills.push({ id: entry, name, description, source })
     }
   }
+  // Sort like the engine's discovery does: readdir order is platform-defined,
+  // and the marketplace listing should be stable across runs and platforms.
+  skills.sort_by((a, b) => a.name.compare(b.name))
   skills
 }
 

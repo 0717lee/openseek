@@ -260,6 +260,30 @@ async test "a skill whose SKILL.md is missing reports it plainly" {
 }
 
 ///|
+/// Regression test: the listing used to surface raw readdir order, which is
+/// platform-defined (insertion order on some filesystems, name hash on
+/// others) — the suite passed on macOS and failed on Linux ext4. The listing
+/// must be name-sorted like the engine's own discovery.
+async test "listing is name-sorted regardless of creation order" {
+  let lib = @fs.tmpdir(prefix="skillmarket-")
+  for name in ["ddd", "aaa", "eee", "ccc"] {
+    @fs.mkdir("\{lib}/\{name}", recursive=true)
+    @fs.write_file(
+      "\{lib}/\{name}/SKILL.md",
+      "---\nname: \{name}\ndescription: d\n---\nbody",
+      create_mode=CreateOrTruncate,
+    )
+  }
+  @fs.write_file(
+    "\{lib}/bbb.md",
+    "---\nname: bbb\ndescription: d\n---\nbody",
+    create_mode=CreateOrTruncate,
+  )
+  let ids = @skillmarket.installed_skills(library_dir=lib).map(skill => skill.id)
+  assert_eq(ids, ["aaa", "bbb", "ccc", "ddd", "eee"])
+}
+
+///|
 async test "listing mirrors the engine's discovery for hand-written skills" {
   let lib = @fs.tmpdir(prefix="skillmarket-")
   @fs.write_file(
