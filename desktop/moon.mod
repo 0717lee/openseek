@@ -11,7 +11,7 @@ import {
   "moonbit-community/rabbita@0.13.0",
   "moonbitlang/x@0.4.46",
   "moonbitlang/async@0.20.1",
-  "justjavac/proton@0.1.11",
+  "justjavac/proton@0.1.12",
   "justjavac/proton_ext@0.1.7",
   "tonyfettes/platform@0.1.1",
   "tonyfettes/xlog@0.4.0",
