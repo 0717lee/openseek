@@ -41,7 +41,7 @@ fn is_idle_event(event : @transcript.EngineEvent) -> Bool {
 /// Apply an accepted completion row: a slash command runs its action, while a
 /// skill mention or symbol reference becomes a chip in the composer's mention
 /// tray (its expansion is spliced into the prompt on send). Either way the menu
-/// closes and the typed trigger token is cleared from the textarea.
+/// closes and only the typed trigger token is removed from the textarea.
 fn accept_completion(
   dispatch : @cmd.Emit[Msg],
   model : Model,
@@ -58,6 +58,7 @@ fn accept_completion(
         model,
         Skill(name=item.insert.trim().to_owned()),
         range=None,
+        task=menu.task_without_token,
       )
     Symbols => {
       let (file, line) = if item.path is Some(path) && item.range is Some(range) {
@@ -69,6 +70,7 @@ fn accept_completion(
         model,
         Symbol(name=item.label, file~, line~),
         range=item.range,
+        task=menu.task_without_token,
       )
     }
   }
@@ -76,18 +78,20 @@ fn accept_completion(
 
 ///|
 /// Attach a mention chip to the active conversation's draft (deduplicated),
-/// clear the typed trigger token, and close the menu.
+/// remove the typed trigger token while preserving preceding prompt text, and
+/// close the menu.
 fn accept_mention(
   model : Model,
   ref_ : @mention_context.MentionRef,
   range~ : @common.Range?,
+  task~ : String,
 ) -> (@cmd.Cmd, Model) {
   let conv = model.active()
   let mentions = push_mention(conv.mentions, { ref_, range })
   (
     @cmd.none,
     {
-      ..model.replace_conversation({ ..conv, task: "", mentions }),
+      ..model.replace_conversation({ ..conv, task, mentions }),
       completion: None,
     },
   )
@@ -177,18 +181,20 @@ fn open_editor_at(
 
 ///|
 /// The command, if any, to fetch workspace symbols for a changed draft. Fires
-/// only when the draft is a live `#` query (a non-empty token, no spaces) whose
-/// results are not already cached for this conversation — so a fresh keystroke
-/// refetches but a repeat of the same query does not.
+/// only when the draft ends in a live `#` query whose results are not already
+/// cached for this conversation — so a fresh keystroke refetches but a repeat
+/// of the same query does not.
 fn symbol_fetch_cmd(
   dispatch : @cmd.Emit[Msg],
   model : Model,
   value : String,
   session : String,
 ) -> @cmd.Cmd {
-  guard value.has_prefix("#") && trigger_query(value) is Some(query) else {
+  guard CompletionTrigger::parse(value) is Some(trigger) &&
+    trigger.kind is Symbols else {
     return @cmd.none
   }
+  let query = trigger.query
   if model.symbol_cache.session == session && model.symbol_cache.query == query {
     return @cmd.none
   }
@@ -213,9 +219,9 @@ fn apply_symbol_reply(
 ) -> (@cmd.Cmd, Model) {
   let draft = model.active().task
   guard session == model.active().session_id &&
-    draft.has_prefix("#") &&
-    trigger_query(draft) is Some(live) &&
-    live == query else {
+    CompletionTrigger::parse(draft) is Some(trigger) &&
+    trigger.kind is Symbols &&
+    trigger.query == query else {
     return (@cmd.none, model)
   }
   let cache : SymbolCache = { session, query, items }
@@ -2208,6 +2214,66 @@ test "the composer draft stays with its conversation across a switch" {
   let (_, back) = update(dispatch, OpenSession("desktop-test"), switched)
   // … and the original draft is still waiting where it was typed.
   inspect(back.active().task, content="half a thought")
+}
+
+///|
+test "update is pure: accepting an inline skill preserves prompt text" {
+  let dispatch = test_dispatch()
+  let model = {
+    ..test_model(),
+    installed_skills: [installed_skill("review-pr", "Review a pull request")],
+  }
+  let (_, drafted) = update(dispatch, TaskChanged("Please use $rev"), model)
+  guard drafted.completion is Some(menu) else {
+    fail("the inline skill token should open completion")
+  }
+  assert_eq(menu.task_without_token, "Please use ")
+  let (_, once) = update(dispatch, CompletionAccept, drafted)
+  let (_, twice) = update(dispatch, CompletionAccept, drafted)
+  // The same message and model always produce the same plain-data state.
+  assert_eq(once.active().task, "Please use ")
+  assert_eq(twice.active().task, "Please use ")
+  assert_eq(once.active().mentions.length(), 1)
+  assert_eq(twice.active().mentions.length(), 1)
+  assert_true(
+    once.active().mentions[0].ref_ is Skill(name="review-pr") &&
+    twice.active().mentions[0].ref_ is Skill(name="review-pr"),
+  )
+  assert_true(once.completion is None && twice.completion is None)
+}
+
+///|
+test "an inline symbol reply rebuilds the live completion menu" {
+  let dispatch = test_dispatch()
+  let (_, searching) = update(
+    dispatch,
+    TaskChanged("Inspect #parse"),
+    test_model(),
+  )
+  guard searching.completion is Some(pending) else {
+    fail("the inline symbol token should open completion")
+  }
+  assert_true(pending.kind is Symbols)
+  assert_true(pending.loading)
+  assert_eq(pending.task_without_token, "Inspect ")
+  let item = symbol_item(
+    "parse_hover",
+    container=None,
+    path="src/main.mbt",
+    range=@common.Range::Range(4, 2, 4, 13),
+  )
+  let (_, loaded) = update(
+    dispatch,
+    SymbolsLoaded(session="desktop-test", query="parse", items=[item]),
+    searching,
+  )
+  guard loaded.completion is Some(menu) else {
+    fail("the matching inline symbol reply should rebuild completion")
+  }
+  assert_false(menu.loading)
+  assert_eq(menu.items.length(), 1)
+  assert_eq(menu.items[0].label, "parse_hover")
+  assert_eq(menu.task_without_token, "Inspect ")
 }
 
 ///|
