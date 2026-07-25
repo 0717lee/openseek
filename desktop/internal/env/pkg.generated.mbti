@@ -4,7 +4,7 @@ package "openseek_desktop/internal/env"
 // Values
 pub fn get(String) -> String?
 
-pub fn path_sep() -> String
+pub let path_sep : String
 
 pub fn prepend_path_entry(Map[String, String], String) -> String
 
