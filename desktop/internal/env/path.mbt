@@ -17,8 +17,7 @@ const PathSep : String = ":"
 /// Deliberately a function, not a `pub const`. A public `#cfg` const bakes
 /// whichever value survived into `pkg.generated.mbti`, so regenerating the
 /// interface on Windows rewrites it and the committed one no longer matches
-/// — every other `#cfg` const here (`ExecutableSuffix`) stays private for the
-/// same reason.
+/// — `ExecutableSuffix` next door stays private for the same reason.
 pub fn path_sep() -> String {
   PathSep
 }

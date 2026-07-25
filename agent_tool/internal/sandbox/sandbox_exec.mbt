@@ -152,22 +152,25 @@ async fn cleanup_sandbox_probe(
 }
 
 ///|
-/// The platform shell program used to interpret command text.
-///
-/// This is `pwsh` on Windows and `sh` on other targets. It is used by both
-/// `sandbox_exec_args` and callers that need the same unsandboxed command
-/// semantics.
 #cfg(platform="windows")
-pub const PlatformShellProgram : String = "pwsh"
+const PlatformShellProgram : String = "pwsh"
 
 ///|
-/// The platform shell program used to interpret command text.
-///
-/// This is `pwsh` on Windows and `sh` on other targets. It is used by both
-/// `sandbox_exec_args` and callers that need the same unsandboxed command
-/// semantics.
 #cfg(not(platform="windows"))
-pub const PlatformShellProgram : String = "sh"
+const PlatformShellProgram : String = "sh"
+
+///|
+/// The platform shell program used to interpret command text: `pwsh` on
+/// Windows and `sh` on other targets. Used by `sandbox_exec_args` and by
+/// callers that need the same unsandboxed command semantics.
+///
+/// Deliberately a function, not a `pub const`. A public `#cfg` const bakes
+/// whichever value survived into `pkg.generated.mbti`, so regenerating the
+/// interface on Windows rewrites it to `"pwsh"` and the committed one no
+/// longer matches.
+pub fn platform_shell_program() -> String {
+  PlatformShellProgram
+}
 
 ///|
 /// Build arguments that make `PlatformShellProgram` interpret `cmd` as shell
