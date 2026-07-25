@@ -31,7 +31,7 @@ async fn prepare_tool_stdin(
   let path = if runtime_dir is Some(dir) {
     dir.join("moonbit-tool.stdin")
   } else {
-    command.to_string() + ".stdin"
+    "\{command}.stdin"
   }
   @fs.write_file(path.to_string(), "", create_mode=CreateOrTruncate)
   @process.redirect_from_file(path.to_string())

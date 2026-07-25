@@ -424,10 +424,10 @@ test "a malformed platforms entry raises with what is wrong" {
 ///|
 test "manifest digests normalize to bare lowercase hex" {
   @debug.assert_eq(
-    normalized_sha256("sha256:" + TestSha.to_upper()),
+    normalized_sha256("sha256:\{TestSha.to_upper()}"),
     Some(TestSha),
   )
   @debug.assert_eq(normalized_sha256(TestSha), Some(TestSha))
-  @debug.assert_eq(normalized_sha256("zz" + TestSha), None)
+  @debug.assert_eq(normalized_sha256("zz\{TestSha}"), None)
   @debug.assert_eq(normalized_sha256("deadbeef"), None)
 }

@@ -36,7 +36,7 @@ pub fn decode_event(object : Json) -> AgentEvent? {
       Some(
         ToolResult({
           name: tool_name,
-          content: "error: " + error,
+          content: "error: \{error}",
           is_error: true,
         }),
       )

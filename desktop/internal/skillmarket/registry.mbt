@@ -244,7 +244,7 @@ test "slug validation rejects anything that could escape the library" {
   assert_false(valid_slug("a b"))
   let mut long = ""
   for _ in 0..<65 {
-    long = long + "a"
+    long = "\{long}a"
   }
   assert_false(valid_slug(long))
 }

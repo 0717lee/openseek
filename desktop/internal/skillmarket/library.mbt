@@ -94,7 +94,7 @@ fn slugify(name : String) -> String {
 /// provenance sidecar. The registry's per-skill API exposes no SKILL.md digest
 /// to verify against, so this is our own record of what we wrote, not a check.
 fn content_digest(content : Bytes) -> String {
-  "sha256:" + @crypto.bytes_to_hex_string(@crypto.sha256(content))
+  "sha256:\{@crypto.bytes_to_hex_string(@crypto.sha256(content))}"
 }
 
 ///|
