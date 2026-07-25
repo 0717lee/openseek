@@ -557,7 +557,7 @@ async fn run_serve(
   workspace_root~ : String,
 ) -> Unit {
   let (model, thinking, api_url) = agent_settings(matches)
-  let api_key = @agentcli.api_key(matches, model)
+  let api_key = model.api_key(matches)
   let max_steps = max_steps(matches)
   let session_id = match matches {
     {

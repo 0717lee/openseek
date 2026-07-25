@@ -1,8 +1,0 @@
-import {
-  "bobzhang/openseek/deepseek",
-  "moonbitlang/core/argparse",
-}
-
-warnings = "+unnecessary_annotation"
-
-supported_targets = "+native"

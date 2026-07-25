@@ -35,7 +35,7 @@ data model, and the life of one agent turn — see
 | `bobzhang/openseek/viz` | Browser viewer for durable session logs (JS). | `viz/README.md` |
 | `bobzhang/openseek/cmd/viz_server` | Native HTTP server that serves the visualizer over recorded sessions. | `cmd/viz_server/README.md` |
 | `bobzhang/openseek-viz-app` (in `cmd/viz_app/`, own module) | JS entry point compiled into the visualizer bundle. | `viz/README.md` |
-| `bobzhang/openseek/internal/{cli,agentcli,workspace_path}` | Shared CLI accessors and workspace-path resolution for the command mains. | — |
+| `bobzhang/openseek/internal/{cli,workspace_path}` | Shared CLI accessors and workspace-path resolution for the command mains. | — |
 | `bobzhang/openseek/testkit/filesystem` | JSON-backed virtual filesystem for tests and eval fixtures. | `testkit/filesystem/README.mbt.md` |
 | `bobzhang/openseek/eval/report` | Shared Markdown/JSON report primitive for deterministic and model evals. | `eval/report/README.mbt.md` |
 | `bobzhang/openseek/eval/tool_harness` | Deterministic host-side harness that dispatches every built-in tool. | `eval/tool_harness/README.mbt.md` |

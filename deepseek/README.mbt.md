@@ -12,6 +12,13 @@ The HTTP client lives in `bobzhang/openseek/deepseek/client`.
 
 - `Model`: provider-tagged chat models, e.g. `Deepseek(V4Pro)` and
   `Kimi(K27Code)`, with `Show` for wire strings and `Debug` for inspection.
+- `Model::api_key(matches)`: resolves the key a command main should send for
+  this model — an explicit `--api-key` first, then the provider-specific
+  option (`--deepseek-api-key` / `--kimi-api-key`, which the command tables
+  back with `DEEPSEEK` / `KIMI`). Raises with provider-specific guidance when
+  neither is set. This is the one place in the package that reads parsed CLI
+  options; it lives here because the model tag is what decides which provider
+  a key belongs to.
 - `ThinkingMode`: typed control for DeepSeek V4 thinking (`No`, `High`, or
   `Max`).
 - `Role`: `System`, `User`, `Assistant`, and `Tool(tool_call_id)`, with `Show`
