@@ -14,10 +14,24 @@ on:
 
 jobs:
   desktop-check:
-    name: desktop check (fmt, check, info)
+    name: desktop check (fmt, check, info) (${{ matrix.moonbit-channel }})
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    strategy:
+      # Same split as the root CI (ci.yml): running both channels independently
+      # says at a glance whether a failure is a nightly-toolchain regression or
+      # our own bug. Warnings are denied on stable only — nightly adds new ones
+      # ahead of anything we could have fixed.
+      fail-fast: false
+      matrix:
+        include:
+          - moonbit-channel: nightly
+            moonbit-version: nightly
+            deny-warn: ""
+          - moonbit-channel: stable
+            moonbit-version: latest
+            deny-warn: "--deny-warn"
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
@@ -27,9 +41,9 @@ jobs:
       - name: Check out the Proton submodule
         run: git submodule update --init desktop/lepus
 
-      - name: Set up MoonBit (nightly)
+      - name: Set up MoonBit (${{ matrix.moonbit-channel }})
         run: |
-          curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash -s -- nightly
+          curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash -s -- "${{ matrix.moonbit-version }}"
           echo "$HOME/.moon/bin" >> $GITHUB_PATH
 
       - name: Show MoonBit version
@@ -65,16 +79,23 @@ jobs:
         # would flag source we don't own.
         run: moon -C desktop fmt --check . frontend internal package
 
-      - name: Check (deny warnings)
-        run: moon -C desktop check --target native --deny-warn
+      - name: Check
+        # `--deny-warn` on stable only; see the matrix note.
+        run: moon -C desktop check --target native ${{ matrix.deny-warn }}
 
       # The frontend builds to JS; this guards the JS side (and catches native
       # imports leaking into target-agnostic packages, e.g. a missing
       # supported_targets) that the native check above cannot see.
-      - name: Check JS target (deny warnings)
-        run: moon -C desktop check --target js --deny-warn
+      - name: Check JS target
+        run: moon -C desktop check --target js ${{ matrix.deny-warn }}
 
       - name: Check generated interfaces
+        # `moon info` formats abstract types differently across toolchain
+        # versions (`type X` on nightly vs `pub struct X { // private fields }`
+        # on stable), and the committed `.mbti` are nightly-generated — so this
+        # consistency check is only meaningful on nightly. Same reasoning as
+        # the root CI's equivalent step.
+        if: matrix.moonbit-channel == 'nightly'
         run: |
           moon -C desktop info --target native
           # The Proton submodule's own .mbti live inside the submodule and are
@@ -87,7 +108,7 @@ jobs:
           fi
 
   desktop-test:
-    name: desktop test (release)
+    name: desktop test (release) (${{ matrix.moonbit-channel }})
     # macOS, not headless Linux: several runtime tests drive a real webview via
     # app.run(), which needs a GUI session. Proton's own CI skips those tests on
     # Linux for the same reason. --release links with the system toolchain (the
@@ -95,6 +116,14 @@ jobs:
     runs-on: macos-latest
     permissions:
       contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - moonbit-channel: nightly
+            moonbit-version: nightly
+          - moonbit-channel: stable
+            moonbit-version: latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
@@ -102,9 +131,9 @@ jobs:
       - name: Check out the Proton submodule
         run: git submodule update --init desktop/lepus
 
-      - name: Set up MoonBit (nightly)
+      - name: Set up MoonBit (${{ matrix.moonbit-channel }})
         run: |
-          curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash -s -- nightly
+          curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash -s -- "${{ matrix.moonbit-version }}"
           echo "$HOME/.moon/bin" >> $GITHUB_PATH
 
       - name: Show MoonBit version

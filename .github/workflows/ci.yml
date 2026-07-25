@@ -18,10 +18,16 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # Warnings are denied on stable only. Nightly adds new warnings ahead
+          # of anything we could have fixed, so denying them there turns the job
+          # red for code that is fine and trains us to ignore it; stable is the
+          # gate that keeps warnings out of the tree.
           - moonbit-channel: nightly
             moonbit-version: nightly
+            deny-warn: ""
           - moonbit-channel: stable
             moonbit-version: latest
+            deny-warn: "--deny-warn"
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
@@ -104,8 +110,9 @@ jobs:
       - name: Check formatting
         run: moon fmt --check
 
-      - name: Check (deny warnings)
-        run: moon check --deny-warn
+      - name: Check
+        # `--deny-warn` on stable only; see the matrix note.
+        run: moon check ${{ matrix.deny-warn }}
 
       - name: Check generated interfaces
         # `moon info` formats abstract types differently across toolchain
