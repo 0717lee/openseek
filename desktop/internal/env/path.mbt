@@ -4,30 +4,35 @@
 // the platform separator and on the Windows `Path`-vs-`PATH` rule.
 
 ///|
-#cfg(platform="windows")
-const PathSep : String = ";"
-
-///|
-#cfg(not(platform="windows"))
-const PathSep : String = ":"
-
-///|
 /// The platform's path-variable separator: `;` on Windows, `:` elsewhere.
 ///
-/// Deliberately a function, not a `pub const`. A public `#cfg` const bakes
-/// whichever value survived into `pkg.generated.mbti`, so regenerating the
-/// interface on Windows rewrites it and the committed one no longer matches
-/// — `ExecutableSuffix` next door stays private for the same reason.
-pub fn path_sep() -> String {
-  PathSep
-}
+/// A `pub let`, not a `pub const`. A public `#cfg` const bakes whichever value
+/// survived into `pkg.generated.mbti`, so regenerating the interface on Windows
+/// rewrites it and the committed one no longer matches. A `let` records only
+/// `path_sep : String`, which is identical on every platform.
+/// `ExecutableSuffix` in `internal/moonbit` has the same `#cfg` shape but is
+/// private, so it never reaches an interface at all.
+///
+/// TODO(upstream): support `declare pub let`, so this note can sit on one
+/// declaration instead of above the arms.
+// declare pub let path_sep : String
+
+///|
+/// `;` on Windows — see the note above.
+#cfg(platform="windows")
+pub let path_sep : String = ";"
+
+///|
+/// `:` on non-Windows targets — see the note above.
+#cfg(not(platform="windows"))
+pub let path_sep : String = ":"
 
 ///|
 /// `bin_dir` prepended to `current_path`, or `bin_dir` alone when there is no
 /// path to extend.
 pub fn prepend_to_path_env(bin_dir : String, current_path : String?) -> String {
   if current_path is Some(path) && !path.is_empty() {
-    "\{bin_dir}\{PathSep}\{path}"
+    "\{bin_dir}\{path_sep}\{path}"
   } else {
     bin_dir
   }
