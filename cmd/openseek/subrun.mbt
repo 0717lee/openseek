@@ -202,7 +202,7 @@ async fn dispatch_kind(
   // 3-step experiment, a scout greps compiler binaries for 60 steps).
   match kind {
     "explore" => {
-      let api_key = @agentcli.api_key(matches, model)
+      let api_key = model.api_key(matches)
       let scratch_dir = new_scratch_lab("openseek-explore-lab-")
       let report = @agent_explore.run_child(
         input,
@@ -235,7 +235,7 @@ async fn dispatch_kind(
           Some({ sha, dirty: dirty is True })
         _ => None
       }
-      let api_key = @agentcli.api_key(matches, model)
+      let api_key = model.api_key(matches)
       let scratch_dir = new_scratch_lab("openseek-review-lab-")
       let report = @agent_review.run_goal_audit(
         goal~,

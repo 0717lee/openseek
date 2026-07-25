@@ -19,7 +19,6 @@ import {
   "bobzhang/openseek_protocol" @protocol,
   "bobzhang/openseek_protocol/emit",
   "bobzhang/openseek/testkit/filesystem" @vfs,
-  "bobzhang/openseek/internal/agentcli",
   "bobzhang/openseek/internal/cli",
   "bobzhang/openseek/internal/workspace_path",
   "moonbitlang/async",
