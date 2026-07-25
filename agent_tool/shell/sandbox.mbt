@@ -99,7 +99,7 @@ async fn agent_shell_launch(
   }
   if mode is TrustedSourceWrite || !@sandbox.sandbox_exec_available() {
     return {
-      program: @sandbox.platform_shell_program(),
+      program: @sandbox.platform_shell_program,
       args: @sandbox.platform_shell_args(cmd),
       source_write_sandboxed: false,
       sandbox_denial_subjects: [],
