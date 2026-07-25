@@ -23,7 +23,9 @@ async fn run_review_cli(
   // Reviews always run on the strongest model; flash is too shallow for the
   // judgement a code review needs, so --model is not consulted here.
   let model = @deepseek.Deepseek(V4Pro)
-  let api_key = model.api_key(matches)
+  guard model.api_key(matches) is Some(api_key) else {
+    fail("an API key is required for \{model}: pass --api-key")
+  }
   let max_steps = max_steps(matches)
   let (thinking, base, api_url) = match matches {
     {
