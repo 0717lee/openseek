@@ -1,62 +1,38 @@
 ///|
 /// Agent-facing API-key resolution for the command mains that launch or resume
-/// agent runs (`cmd/openseek`, `cmd/tui`). This lived in
-/// `internal/agentcli` because it was duplicated byte-for-byte across the
-/// mains — including both error strings — and silent drift between the copies
-/// (e.g. one main learning a new provider fallback and the other not) is the
-/// hazard the shared definition removes. It sits on `Model` because the
-/// provider a key belongs to is exactly what the model tag decides.
+/// agent runs (`cmd/openseek`, `cmd/tui`). This lived in `internal/agentcli`
+/// because the resolution order was duplicated byte-for-byte across the mains,
+/// and silent drift between the copies — one main learning a new provider
+/// fallback and the other not — is the hazard the shared definition removes.
+/// It sits on `Model` because the provider a key belongs to is exactly what
+/// the model tag decides.
+///
+/// Only the resolution is shared. Returning an option leaves each main to
+/// decide whether a missing key is fatal and to word its own diagnostic, so
+/// the arms below are the single source of truth for *where* a key may come
+/// from, not for what to say when there is none.
 
 ///|
 /// Resolve the API key for this model: an explicit `--api-key` wins, then the
 /// provider-specific option (which each command table backs with the
-/// provider's environment variable). Fails with provider-specific guidance
-/// when neither is set.
+/// provider's environment variable). `None` when neither is set — whether that
+/// is fatal is the caller's call.
 ///
-/// The model and the parsed options are matched together so each arm reads
-/// only the option that provider actually uses, and keeps that option's name
-/// next to the provider's display name and environment variable. Adding a
-/// provider is then one new arm rather than an edit in three places.
-pub fn Model::api_key(
-  self : Model,
-  matches : @argparse.Matches,
-) -> String raise {
-  let (generic_key, provider_key, provider, env_var) = match (self, matches) {
-    (
-      Deepseek(_),
-      {
-        values: {
-          "api-key"? : Some([generic, ..])
-          | (Some([]) | None with generic = ""),
-          "deepseek-api-key"? : Some([key, ..])
-          | (Some([]) | None with key = ""),
-          ..
-        },
-        ..,
-      },
-    ) => (generic.trim(), key.trim(), "DeepSeek", "DEEPSEEK")
-    (
-      Kimi(_),
-      {
-        values: {
-          "api-key"? : Some([generic, ..])
-          | (Some([]) | None with generic = ""),
-          "kimi-api-key"? : Some([key, ..])
-          | (Some([]) | None with key = ""),
-          ..
-        },
-        ..,
-      },
-    ) => (generic.trim(), key.trim(), "Kimi", "KIMI")
-  }
+/// Matching the model together with the parsed options makes the whole
+/// resolution one ordered list of arms: the first arm to match is the key to
+/// use, and only the arm for this model's provider can read that provider's
+/// option. Returning an option is what keeps it that short — an unset, empty,
+/// or blank option just fails to match and falls through, so no arm has to
+/// default it to `""` and re-test that afterwards.
+pub fn Model::api_key(self : Model, matches : @argparse.Matches) -> String? {
   // `trim` yields a borrowed view; the caller owns the key, so copy out.
-  if !generic_key.is_empty() {
-    return generic_key.to_owned()
+  match (self, matches.values) {
+    (_, { "api-key": [k, ..], .. }) if k.trim() != "" =>
+      Some(k.trim().to_owned())
+    (Deepseek(_), { "deepseek-api-key": [k, ..], .. }) if k.trim() != "" =>
+      Some(k.trim().to_owned())
+    (Kimi(_), { "kimi-api-key": [k, ..], .. }) if k.trim() != "" =>
+      Some(k.trim().to_owned())
+    _ => None
   }
-  if !provider_key.is_empty() {
-    return provider_key.to_owned()
-  }
-  fail(
-    "an API key is required for \{provider} models: pass --api-key or set \{env_var}",
-  )
 }

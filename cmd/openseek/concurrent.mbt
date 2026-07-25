@@ -14,7 +14,9 @@ async fn run_fleet(matches : @argparse.Matches, concurrency~ : Int) -> Unit {
   }
   let task = task_text(matches)
   let (model, thinking, api_url) = agent_settings(matches)
-  let api_key = model.api_key(matches)
+  guard model.api_key(matches) is Some(api_key) else {
+    fail("an API key is required for \{model}: pass --api-key")
+  }
   let max_steps = max_steps(matches)
   let (session, dir_input, session_root_input) = match matches {
     {
