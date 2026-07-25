@@ -10,6 +10,24 @@ test "sandbox source write profile regex covers source and manifests" {
 }
 
 ///|
+/// Pins the emitted SBPL byte for byte. The `contains` assertions elsewhere
+/// would not notice a lost trailing newline, and
+/// `source_write_readonly_profile_data` appends the lab rule straight onto this
+/// text, so the final newline is load-bearing.
+async test "sandbox profile text" {
+  inspect(
+    source_write_readonly_profile_data("/workspace").profile,
+    content=(
+      #|(version 1)
+      #|(allow default)
+      #|(deny file-write* (regex "^\\/workspace(/|$)(.*/)?([^/]*(\\.mbt\\.md|\\.mbt|\\.mbti)|(moon\\.mod\\.json|moon\\.pkg\\.json|moon\\.mod|moon\\.pkg|moon\\.work))$"))
+      #|(allow file-write* (regex "^\\/workspace/(.*/)?(_build|\\.mooncakes)(/|$)"))
+      #|
+    ),
+  )
+}
+
+///|
 async test "sandbox profile is cached per normalized workspace root" {
   let profile = source_write_readonly_profile_data("/workspace").profile
   let cached = source_write_readonly_profile_data("/workspace/").profile
