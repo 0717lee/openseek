@@ -361,9 +361,9 @@ fn moon_attached_cwd_option(option : String) -> String? {
 ///|
 fn moon_attached_value_option(option : String, name : String) -> Bool {
   if name.has_prefix("--") {
-    option_value_after_prefix(option, name + "=") is Some(_)
-  } else if option.has_prefix(name + "=") {
-    option_value_after_prefix(option, name + "=") is Some(_)
+    option_value_after_prefix(option, "\{name}=") is Some(_)
+  } else if option.has_prefix("\{name}=") {
+    option_value_after_prefix(option, "\{name}=") is Some(_)
   } else {
     option_value_after_prefix(option, name) is Some(_)
   }

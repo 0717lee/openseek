@@ -335,7 +335,7 @@ async fn prepare_engine_stdin(
   let path = if runtime_dir is Some(dir) {
     dir.join("engine.stdin")
   } else {
-    engine.to_string() + ".stdin"
+    "\{engine}.stdin"
   }
   @fs.write_file(path.to_string(), "", create_mode=CreateOrTruncate)
   @process.redirect_from_file(path.to_string())
@@ -375,7 +375,7 @@ async fn handle_decoded_event(
       true
     }
     AgentAborted(reason) => {
-      emit_error(sink, "agent aborted: " + reason, run_id~)
+      emit_error(sink, "agent aborted: \{reason}", run_id~)
       emit_finished(sink, run_id, Aborted)
       true
     }
@@ -752,7 +752,7 @@ async fn serve_engine_consumer(
             } else {
               emit_error(
                 sink,
-                "engine exited without a result:\n" + diagnostics,
+                "engine exited without a result:\n\{diagnostics}",
                 run_id=engine.latest_run,
                 exit_code=code,
                 diagnostics~,
@@ -940,7 +940,7 @@ async test "native engine env has one authoritative bundled moon path" {
   @fs.rmdir(root.to_string(), recursive=true)
   let moon_bin = moon_home.join("bin").to_string()
   let expected_path = if ambient_path is Some(path) && !path.is_empty() {
-    moon_bin + @env.path_sep + path
+    "\{moon_bin}\{@env.path_sep}\{path}"
   } else {
     moon_bin
   }

@@ -211,7 +211,7 @@ async fn migrate_legacy_archive(manager : EngineManager) -> Unit {
       _ => ()
     }
   } else {
-    @fsx.write_text(list, remaining.join("\n") + "\n") catch {
+    @fsx.write_text(list, "\{remaining.join("\n")}\n") catch {
       error if @async.is_being_cancelled() => raise error
       _ => ()
     }

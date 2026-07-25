@@ -7,7 +7,7 @@ async test "bundle replacement checks the containing directory" {
       @fs.chmod(root, 0o700)
       @fs.rmdir(root, recursive=true)
     })
-    let bundle = root + "/OpenSeek Desktop.app"
+    let bundle = "\{root}/OpenSeek Desktop.app"
     @fs.mkdir(bundle)
     @debug.assert_eq(bundle_replacement_failure(bundle), None)
     @fs.chmod(root, 0o500)
@@ -27,15 +27,15 @@ async test "an unavailable destination stops apply before any mutation" {
       @fs.chmod(root, 0o700)
       @fs.rmdir(root, recursive=true)
     })
-    let bundle = root + "/OpenSeek Desktop.app"
-    let staged = root + "/Staged.app"
+    let bundle = "\{root}/OpenSeek Desktop.app"
+    let staged = "\{root}/Staged.app"
     let aside = aside_path(bundle)
     @fs.mkdir(bundle)
     @fs.mkdir(staged)
     @fs.mkdir(aside)
-    @fs.write_file(bundle + "/version", "current", create_mode=CreateOrTruncate)
-    @fs.write_file(staged + "/version", "staged", create_mode=CreateOrTruncate)
-    @fs.write_file(aside + "/version", "parked", create_mode=CreateOrTruncate)
+    @fs.write_file("\{bundle}/version", "current", create_mode=CreateOrTruncate)
+    @fs.write_file("\{staged}/version", "staged", create_mode=CreateOrTruncate)
+    @fs.write_file("\{aside}/version", "parked", create_mode=CreateOrTruncate)
     @fs.chmod(root, 0o500)
     try apply_staged(staged_app=staged, bundle_path=bundle) catch {
       UpdateError(message) =>
@@ -44,8 +44,8 @@ async test "an unavailable destination stops apply before any mutation" {
     } noraise {
       _ => fail("apply unexpectedly accepted an unwritable destination")
     }
-    assert_eq(@fs.read_file(bundle + "/version").text(), "current")
-    assert_eq(@fs.read_file(staged + "/version").text(), "staged")
-    assert_eq(@fs.read_file(aside + "/version").text(), "parked")
+    assert_eq(@fs.read_file("\{bundle}/version").text(), "current")
+    assert_eq(@fs.read_file("\{staged}/version").text(), "staged")
+    assert_eq(@fs.read_file("\{aside}/version").text(), "parked")
   }
 }

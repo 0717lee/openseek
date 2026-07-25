@@ -77,8 +77,7 @@ pub async fn source_write_readonly_profile_data(
         @path.Path(lab).normalize().to_string(),
       )
       {
-        profile: base.profile +
-        "(allow file-write* (subpath \"\{sbpl_string_escape(lab)}\"))\n",
+        profile: "\{base.profile}(allow file-write* (subpath \"\{sbpl_string_escape(lab)}\"))\n",
         denial_subjects: base.denial_subjects,
       }
     }

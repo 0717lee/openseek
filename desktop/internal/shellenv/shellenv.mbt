@@ -140,7 +140,7 @@ fn session_local(key : String) -> Bool {
 /// Single-quote `text` for a POSIX shell command line, escaping embedded
 /// single quotes as `'\''`.
 fn shell_quote(text : String) -> String {
-  "'" + text.replace_all(old="'", new="'\\''") + "'"
+  "'\{text.replace_all(old="'", new="'\\''")}'"
 }
 
 ///|

@@ -245,7 +245,7 @@ test "wslenv extends the user's own sharing list" {
   assert_eq(wslenv_with_passthrough(Some("  ")), WslEnvPassthrough)
   assert_eq(
     wslenv_with_passthrough(Some("MYVAR/u")),
-    "MYVAR/u:" + WslEnvPassthrough,
+    "MYVAR/u:\{WslEnvPassthrough}",
   )
 }
 

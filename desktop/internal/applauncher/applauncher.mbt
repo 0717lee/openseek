@@ -310,7 +310,7 @@ async fn find_app_icns(app_path : String) -> String? {
   let resources = "\{app_path}/Contents/Resources"
   let named = read_icon_name("\{app_path}/Contents/Info")
   if !named.is_empty() {
-    let file = if named.has_suffix(".icns") { named } else { named + ".icns" }
+    let file = if named.has_suffix(".icns") { named } else { "\{named}.icns" }
     let path = "\{resources}/\{file}"
     if (@fs.exists(path) catch { _ => false }) {
       return Some(path)

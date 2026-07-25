@@ -193,9 +193,9 @@ async fn exclude_store_from_git(dir : @path.Path) -> Unit {
     }
   }
   let updated = if existing.is_empty() || existing.has_suffix("\n") {
-    existing + ".openseek/\n"
+    "\{existing}.openseek/\n"
   } else {
-    existing + "\n.openseek/\n"
+    "\{existing}\n.openseek/\n"
   }
   @fsx.ensure_dir(git_dir.join("info")) catch {
     error if @async.is_being_cancelled() => raise error

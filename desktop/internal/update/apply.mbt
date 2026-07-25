@@ -11,7 +11,7 @@
 /// Where the old bundle is parked during a swap; removed by
 /// `cleanup_leftovers` on the next launch, once no process runs from it.
 fn aside_path(bundle_path : String) -> String {
-  bundle_path + ".old"
+  "\{bundle_path}.old"
 }
 
 ///|
