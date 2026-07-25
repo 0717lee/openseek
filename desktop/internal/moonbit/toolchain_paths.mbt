@@ -153,4 +153,3 @@ fn moonbit_native_bundle_probe_path(moon_home : @path.Path) -> @path.Path {
 fn moonbit_wasm_gc_bundle_probe_path(moon_home : @path.Path) -> @path.Path {
   moon_home.join("lib/core/_build/wasm-gc/release/bundle/prelude/prelude.mi")
 }
-
