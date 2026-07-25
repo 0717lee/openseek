@@ -154,19 +154,3 @@ fn moonbit_wasm_gc_bundle_probe_path(moon_home : @path.Path) -> @path.Path {
   moon_home.join("lib/core/_build/wasm-gc/release/bundle/prelude/prelude.mi")
 }
 
-///|
-#cfg(platform="windows")
-const PathSep : String = ";"
-
-///|
-#cfg(not(platform="windows"))
-const PathSep : String = ":"
-
-///|
-fn prepend_to_path_env(bin_dir : String, current_path : String?) -> String {
-  if current_path is Some(path) && !path.is_empty() {
-    "\{bin_dir}\{PathSep}\{path}"
-  } else {
-    bin_dir
-  }
-}

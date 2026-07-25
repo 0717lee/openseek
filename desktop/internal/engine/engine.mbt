@@ -467,26 +467,9 @@ fn resolved_global_skills_dir() -> @path.Path? {
 }
 
 ///|
-#cfg(platform="windows")
-const PathSep : String = ";"
-
-///|
-#cfg(not(platform="windows"))
-const PathSep : String = ":"
-
-///|
-fn prepend_to_path_env(bin_dir : String, current_path : String?) -> String {
-  if current_path is Some(path) && !path.is_empty() {
-    "\{bin_dir}\{PathSep}\{path}"
-  } else {
-    bin_dir
-  }
-}
-
-///|
 fn first_path_entry(path : String?) -> String {
   guard path is Some(path) else { return "" }
-  match [..path.split(PathSep)] {
+  match [..path.split(@env.PathSep)] {
     [first, ..] => first.to_owned()
     [] => ""
   }
@@ -502,39 +485,6 @@ fn path_env_value(env : Map[String, String]) -> String? {
     }
   }
   None
-}
-
-///|
-/// Prepend `bin_dir` to the environment block's path variable, in place, and
-/// return the updated value. Windows blocks commonly spell the key `Path`
-/// (and `@sys.get_env_vars` preserves that spelling); the block is passed to
-/// the child with `inherit_env=false`, so writing a separate uppercase
-/// `PATH` beside it would leave two path variables and make which one the
-/// child observes a runtime coin toss. Update the spelling that already
-/// exists and drop any duplicates.
-fn prepend_path_env_entry(
-  env : Map[String, String],
-  bin_dir : String,
-) -> String {
-  let mut key = "PATH"
-  let mut current : String? = None
-  let duplicates : Array[String] = []
-  for name, value in env {
-    if name.to_upper() == "PATH" {
-      if current is None {
-        key = name
-        current = Some(value)
-      } else {
-        duplicates.push(name)
-      }
-    }
-  }
-  for name in duplicates {
-    env.remove(name)
-  }
-  let joined = prepend_to_path_env(bin_dir, current)
-  env[key] = joined
-  joined
 }
 
 ///|
@@ -557,12 +507,12 @@ async fn add_moonbit_path_for_native_engine(
   let moon_exe = moon_bin_dir.join("moon.exe")
   // The agent tools spawn `moon` by name, so prepend the bundled bin to the
   // path variable (updating `Path` in place on Windows — see
-  // `prepend_path_env_entry`). Deliberately do not set `MOON_HOME` (it would
+  // `@env.prepend_path_entry`). Deliberately do not set `MOON_HOME` (it would
   // redirect registry/cache lookup into the bundled payload) and drop any
   // ambient `MOON_HOME` the launching shell exported: moon prefers it over
   // the executable-relative home and would otherwise run the bundled binary
   // against the user's (possibly missing or incompatible) MoonBit home.
-  let path = prepend_path_env_entry(env, moon_bin_dir.to_string())
+  let path = @env.prepend_path_entry(env, moon_bin_dir.to_string())
   env.remove("MOON_HOME")
   @xlog.debug() <?
     {
@@ -944,16 +894,6 @@ test "new turn events clear stale settling state" {
 }
 
 ///|
-test "bundled moonbit bin is prepended to native engine path" {
-  assert_eq(prepend_to_path_env("/toolchain/bin", None), "/toolchain/bin")
-  assert_eq(prepend_to_path_env("/toolchain/bin", Some("")), "/toolchain/bin")
-  assert_eq(
-    prepend_to_path_env("/toolchain/bin", Some("/usr/bin")),
-    "/toolchain/bin\{PathSep}/usr/bin",
-  )
-}
-
-///|
 async test "native engine env has one authoritative bundled moon path" {
   let ambient_path = @sys.get_env_var("PATH")
   let root = @path.Path(@fs.tmpdir(prefix="openseek-engine-env-"))
@@ -1000,7 +940,7 @@ async test "native engine env has one authoritative bundled moon path" {
   @fs.rmdir(root.to_string(), recursive=true)
   let moon_bin = moon_home.join("bin").to_string()
   let expected_path = if ambient_path is Some(path) && !path.is_empty() {
-    moon_bin + PathSep + path
+    moon_bin + @env.PathSep + path
   } else {
     moon_bin
   }

@@ -2,7 +2,7 @@
 fn moonbit_process_env(moon_home : @path.Path) -> Map[String, String] {
   {
     "MOON_HOME": moon_home.to_string(),
-    "PATH": prepend_to_path_env(
+    "PATH": @env.prepend_to_path_env(
       moonbit_bin_dir(moon_home).to_string(),
       @env.get("PATH"),
     ),
@@ -274,23 +274,7 @@ pub async fn prepare_bundled_home(
 /// exists and drop any duplicates, so the child sees exactly one path variable.
 pub fn bundled_tool_env(bin_dir : @path.Path) -> Map[String, String] {
   let env = @sys.get_env_vars()
-  let mut key = "PATH"
-  let mut current : String? = None
-  let duplicates : Array[String] = []
-  for name, value in env {
-    if name.to_upper() == "PATH" {
-      if current is None {
-        key = name
-        current = Some(value)
-      } else {
-        duplicates.push(name)
-      }
-    }
-  }
-  for name in duplicates {
-    env.remove(name)
-  }
-  env[key] = prepend_to_path_env(bin_dir.to_string(), current)
+  @env.prepend_path_entry(env, bin_dir.to_string()) |> ignore
   env.remove("MOON_HOME")
   env
 }
