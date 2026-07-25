@@ -66,7 +66,10 @@ async fn probe_sandbox_exec_available() -> Bool {
     .join(Path("blocked"))
     .normalize()
     .to_string()
-  let probe_profile = sandbox_denial_probe_profile(blocked_path)
+  let probe_profile =
+    $|(version 1)
+    $|(allow default)
+    $|(deny file-write* (literal "\{sbpl_string_escape(blocked_path)}"))
   let noop_exit = run_probe_exit(
     SandboxExecPath,
     sandbox_exec_args(probe_profile, PlatformNoopCommand),
@@ -127,15 +130,6 @@ const PlatformNoopCommand : String = "exit 0"
 ///|
 #cfg(not(platform="windows"))
 const PlatformNoopCommand : String = ":"
-
-///|
-fn sandbox_denial_probe_profile(blocked_path : String) -> String {
-  (
-    $|(version 1)
-    $|(allow default)
-    $|(deny file-write* (literal "\{sbpl_string_escape(blocked_path)}"))
-  )
-}
 
 ///|
 fn shell_quote(text : String) -> String {
