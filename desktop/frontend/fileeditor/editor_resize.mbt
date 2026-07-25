@@ -64,7 +64,7 @@ fn request_resize_handle_mount() -> @cmd.Cmd {
       )
       let document : @js.Value = @js.globalThis.get_with_string("document")
       @interop.add_capture_listener(document, "mousemove", on_resize_move)
-      @interop.add_capture_listener(document, "mouseup", end_resize)
+      @interop.add_capture_listener(document, "mouseup", _ => end_drag(resizing))
       resize_installed.val = true
     },
     kind=@cmd.after_render,
@@ -96,27 +96,38 @@ fn on_resize_move(event : @dom.Event) -> Unit {
     return
   }
   let rect = content.get_bounding_client_rect()
-  let floor = MinEditorWidth.to_double()
-  let max = rect.get_width() - MinChatWidth.to_double()
-  // On a very narrow window the floor wins, even past the ceiling.
+  set_editor_width(
+    drag_size(
+      rect.get_right() - mouse.get_client_x().to_double(),
+      floor=MinEditorWidth.to_double(),
+      max=rect.get_width() - MinChatWidth.to_double(),
+    ),
+  )
+  schedule_remeasure()
+}
+
+///|
+/// Clamp a dragged edge-to-cursor distance into the pane's allowed range.
+/// Shared by the editor's width drag and both of the tree panel's axes.
+/// On a very narrow window the floor wins, even past the ceiling.
+fn drag_size(raw : Double, floor~ : Double, max~ : Double) -> Int {
   let ceiling = if max > floor { max } else { floor }
-  let raw = rect.get_right() - mouse.get_client_x().to_double()
-  let width = if raw < floor {
+  let size = if raw < floor {
     floor
   } else if raw > ceiling {
     ceiling
   } else {
     raw
   }
-  set_editor_width(width.to_int())
-  schedule_remeasure()
+  size.to_int()
 }
 
 ///|
-/// End the drag and give the viewer a final, exact re-measure.
-fn end_resize(_event : @dom.Event) -> Unit {
-  guard resizing.val else { return }
-  resizing.val = false
+/// End a drag and give the viewer a final, exact re-measure. `active` is the
+/// drag flag of whichever resizer is ending — see `resizing` / `tree_resizing`.
+fn end_drag(active : Ref[Bool]) -> Unit {
+  guard active.val else { return }
+  active.val = false
   set_root_class("")
   if mounted_viewer() is Some(viewer) {
     viewer.layout()

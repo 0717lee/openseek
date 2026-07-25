@@ -5,16 +5,16 @@ fn is_submit_shortcut(event : @dom.KeyboardEvent) -> Bool {
 
 ///|
 fn scroll_transcript_after_render() -> @cmd.Cmd {
-  @cmd.custom_cmd(_ => scroll_transcript(), kind=@cmd.after_render)
-}
-
-///|
-fn scroll_transcript() -> Unit {
-  match @dom.document().get_element_by_id("transcript").to_option() {
-    Some(transcript) =>
-      transcript.set_scroll_top(transcript.get_scroll_height())
-    None => ()
-  }
+  @cmd.custom_cmd(
+    _ => {
+      match @dom.document().get_element_by_id("transcript").to_option() {
+        Some(transcript) =>
+          transcript.set_scroll_top(transcript.get_scroll_height())
+        None => ()
+      }
+    },
+    kind=@cmd.after_render,
+  )
 }
 
 ///|
