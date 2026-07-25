@@ -30,7 +30,10 @@ pub fn prepend_to_path_env(bin_dir : String, current_path : String?) -> String {
 /// beside it would leave two path variables and make which one the child
 /// observes a runtime coin toss. Update the spelling that already exists and
 /// drop any duplicates.
-pub fn prepend_path_entry(env : Map[String, String], bin_dir : String) -> String {
+pub fn prepend_path_entry(
+  env : Map[String, String],
+  bin_dir : String,
+) -> String {
   let mut key = "PATH"
   let mut current : String? = None
   let duplicates : Array[String] = []

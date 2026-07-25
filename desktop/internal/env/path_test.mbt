@@ -1,9 +1,6 @@
 ///|
 test "a bin dir is prepended to the path, and stands alone when there is none" {
-  assert_eq(
-    @env.prepend_to_path_env("/toolchain/bin", None),
-    "/toolchain/bin",
-  )
+  assert_eq(@env.prepend_to_path_env("/toolchain/bin", None), "/toolchain/bin")
   assert_eq(
     @env.prepend_to_path_env("/toolchain/bin", Some("")),
     "/toolchain/bin",
