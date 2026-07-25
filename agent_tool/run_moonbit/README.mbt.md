@@ -97,8 +97,14 @@ Reading and transforming a file (what you pass as `source`) — note the inline
 import block, with `moonbitlang/async` present so `async fn main` compiles:
 
 ```mbt nocheck
-import { "moonbitlang/async", "moonbitlang/async/fs", "moonbitlang/async/stdio" }
+///|
+import {
+  "moonbitlang/async",
+  "moonbitlang/async/fs",
+  "moonbitlang/async/stdio",
+}
 
+///|
 async fn main {
   let text = @fs.read_file("data.txt").text()
   let lines = [..text.split("\n")].filter(l => !l.is_empty())

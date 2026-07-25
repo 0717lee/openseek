@@ -77,6 +77,10 @@ jobs:
         # Scope to this module's own packages: lepus/proton is a workspace
         # member inside the Proton submodule, so a workspace-wide `fmt --check`
         # would flag source we don't own.
+        #
+        # Stable only, matching the root CI: the nightly formatter's output
+        # drifts, so gating on it red-lines the build for files nobody touched.
+        if: matrix.moonbit-channel == 'stable'
         run: moon -C desktop fmt --check . frontend internal package
 
       - name: Check
