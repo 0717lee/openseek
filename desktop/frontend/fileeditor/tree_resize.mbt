@@ -74,9 +74,9 @@ fn request_tree_resize_mount() -> @cmd.Cmd {
       )
       let document : @js.Value = @js.globalThis.get_with_string("document")
       @interop.add_capture_listener(document, "mousemove", on_tree_resize_move)
-      @interop.add_capture_listener(document, "mouseup", _ => end_drag(
-        tree_resizing,
-      ))
+      @interop.add_capture_listener(document, "mouseup", _ => {
+        end_drag(tree_resizing)
+      })
       tree_resize_installed.val = true
     },
     kind=@cmd.after_render,
