@@ -108,6 +108,14 @@ jobs:
           nm -D "$dist/lib/libproton.so" | grep -q proton_runtime_set_menu_json
 
       - name: Check formatting
+        # Stable only, for the same reason as `--deny-warn` below. `moon fmt` is
+        # a moving target on nightly: its output for markdown `mbt` blocks
+        # changed between 2026-07-15 and 2026-07-25, which red-lined this step
+        # for a file no one had touched. And because the step ran on both
+        # channels, the repo could only ever satisfy it while the two
+        # formatters agreed — once they disagree there is no committed form
+        # that passes, which is not a state CI should be able to reach.
+        if: matrix.moonbit-channel == 'stable'
         run: moon fmt --check
 
       - name: Check
