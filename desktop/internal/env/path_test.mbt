@@ -7,7 +7,7 @@ test "a bin dir is prepended to the path, and stands alone when there is none" {
   )
   assert_eq(
     @env.prepend_to_path_env("/toolchain/bin", Some("/usr/bin")),
-    "/toolchain/bin\{@env.PathSep}/usr/bin",
+    "/toolchain/bin\{@env.path_sep()}/usr/bin",
   )
 }
 
@@ -18,9 +18,9 @@ test "prepending updates the existing spelling" {
   let env = { "Path": "/usr/bin" }
   assert_eq(
     @env.prepend_path_entry(env, "/toolchain/bin"),
-    "/toolchain/bin\{@env.PathSep}/usr/bin",
+    "/toolchain/bin\{@env.path_sep()}/usr/bin",
   )
-  assert_eq(env.get("Path"), Some("/toolchain/bin\{@env.PathSep}/usr/bin"))
+  assert_eq(env.get("Path"), Some("/toolchain/bin\{@env.path_sep()}/usr/bin"))
   assert_eq(env.get("PATH"), None)
   assert_eq(env.length(), 1)
 }
@@ -35,8 +35,8 @@ test "a duplicate path key is dropped so the child sees exactly one" {
   let joined = @env.prepend_path_entry(env, "/toolchain/bin")
   assert_eq(env.length(), 1)
   assert_true(
-    joined == "/toolchain/bin\{@env.PathSep}/usr/bin" ||
-    joined == "/toolchain/bin\{@env.PathSep}/opt/bin",
+    joined == "/toolchain/bin\{@env.path_sep()}/usr/bin" ||
+    joined == "/toolchain/bin\{@env.path_sep()}/opt/bin",
   )
   for key, value in env {
     assert_true(key == "Path" || key == "PATH")
