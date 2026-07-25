@@ -469,7 +469,7 @@ fn resolved_global_skills_dir() -> @path.Path? {
 ///|
 fn first_path_entry(path : String?) -> String {
   guard path is Some(path) else { return "" }
-  match [..path.split(@env.PathSep)] {
+  match [..path.split(@env.path_sep())] {
     [first, ..] => first.to_owned()
     [] => ""
   }
@@ -940,7 +940,7 @@ async test "native engine env has one authoritative bundled moon path" {
   @fs.rmdir(root.to_string(), recursive=true)
   let moon_bin = moon_home.join("bin").to_string()
   let expected_path = if ambient_path is Some(path) && !path.is_empty() {
-    moon_bin + @env.PathSep + path
+    moon_bin + @env.path_sep() + path
   } else {
     moon_bin
   }

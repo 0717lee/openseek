@@ -5,11 +5,23 @@
 
 ///|
 #cfg(platform="windows")
-pub const PathSep : String = ";"
+const PathSep : String = ";"
 
 ///|
 #cfg(not(platform="windows"))
-pub const PathSep : String = ":"
+const PathSep : String = ":"
+
+///|
+/// The platform's path-variable separator: `;` on Windows, `:` elsewhere.
+///
+/// Deliberately a function, not a `pub const`. A public `#cfg` const bakes
+/// whichever value survived into `pkg.generated.mbti`, so regenerating the
+/// interface on Windows rewrites it and the committed one no longer matches
+/// — every other `#cfg` const here (`ExecutableSuffix`) stays private for the
+/// same reason.
+pub fn path_sep() -> String {
+  PathSep
+}
 
 ///|
 /// `bin_dir` prepended to `current_path`, or `bin_dir` alone when there is no
