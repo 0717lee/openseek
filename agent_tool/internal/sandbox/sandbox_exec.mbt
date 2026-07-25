@@ -18,7 +18,7 @@ let sandbox_exec_available_cache : Ref[Bool?] = { val: None }
 /// `cmd` is shell text, not an executable path or a pre-tokenized argument
 /// vector. This function does not validate the profile or probe availability.
 pub fn sandbox_exec_args(profile : String, cmd : String) -> Array[String] {
-  ["-p", profile, PlatformShellProgram, ..platform_shell_args(cmd)]
+  ["-p", profile, platform_shell_program, ..platform_shell_args(cmd)]
 }
 
 ///|
@@ -149,41 +149,4 @@ async fn cleanup_sandbox_probe(
 ) -> Unit {
   ignore(@fs.remove(blocked_path) catch { _ => () })
   ignore(@fs.rmdir(probe_dir) catch { _ => () })
-}
-
-///|
-#cfg(platform="windows")
-const PlatformShellProgram : String = "pwsh"
-
-///|
-#cfg(not(platform="windows"))
-const PlatformShellProgram : String = "sh"
-
-///|
-/// The platform shell program used to interpret command text: `pwsh` on
-/// Windows and `sh` on other targets. Used by `sandbox_exec_args` and by
-/// callers that need the same unsandboxed command semantics.
-///
-/// Deliberately a function, not a `pub const`. A public `#cfg` const bakes
-/// whichever value survived into `pkg.generated.mbti`, so regenerating the
-/// interface on Windows rewrites it to `"pwsh"` and the committed one no
-/// longer matches.
-pub fn platform_shell_program() -> String {
-  PlatformShellProgram
-}
-
-///|
-/// Build arguments that make `PlatformShellProgram` interpret `cmd` as shell
-/// text (`-NoProfile -Command` for PowerShell).
-#cfg(platform="windows")
-pub fn platform_shell_args(cmd : String) -> Array[String] {
-  ["-NoProfile", "-Command", cmd]
-}
-
-///|
-/// Build arguments that make `PlatformShellProgram` interpret `cmd` as shell
-/// text (`-c` for `sh`).
-#cfg(not(platform="windows"))
-pub fn platform_shell_args(cmd : String) -> Array[String] {
-  ["-c", cmd]
 }
