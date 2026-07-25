@@ -107,22 +107,20 @@ async fn source_write_readonly_profile_base(
     real_workspace_root,
   )
   let profile = StringBuilder()
-  profile.write_string("(version 1)\n")
-  profile.write_string("(allow default)\n")
   // `file-write*` already covers `file-write-create`, so this single deny blocks
   // both rewriting existing source and creating new source files. SBPL is
   // last-match-wins, so the following carve-out re-allows Moon-managed build and
   // cache trees without the deny regex having to special-case them.
-  profile.write_string(
-    "(deny file-write* (regex \"\{sbpl_string_escape(source_regex)}\"))\n",
-  )
-  profile.write_string(
-    "(allow file-write* (regex \"\{sbpl_string_escape(build_carveout_regex)}\"))\n",
-  )
+  profile <+
+    $|(version 1)
+    $|(allow default)
+    $|(deny file-write* (regex "\{sbpl_string_escape(source_regex)}"))
+    $|(allow file-write* (regex "\{sbpl_string_escape(build_carveout_regex)}"))
+    $|
   for dir in scan.literal_paths {
-    profile.write_string(
-      "(deny file-write* (literal \"\{sbpl_string_escape(dir)}\"))\n",
-    )
+    profile <+
+      $|(deny file-write* (literal "\{sbpl_string_escape(dir)}"))
+      $|
   }
   let profile = profile.to_string()
   if scan.cacheable {
