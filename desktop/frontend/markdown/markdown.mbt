@@ -26,20 +26,12 @@ pub fn markdown_nodes(
   open_file? : (String) -> @cmd.Cmd,
 ) -> Array[@html.Html] {
   @js.Error_::wrap(() => {
-    @js.Value::cast_from(parsed_markdown_nodes(source, open_file?))
+    let doc = @cmark.Doc::from_string(source, strict=false)
+    let render = MarkdownRender::{ defs: doc.defs, open_file }
+    @js.Value::cast_from(render.block_nodes(doc.block))
   }) catch {
     _ => [@html.pre(class="markdown-fallback", source)]
   }
-}
-
-///|
-fn parsed_markdown_nodes(
-  source : String,
-  open_file? : (String) -> @cmd.Cmd,
-) -> Array[@html.Html] {
-  let doc = @cmark.Doc::from_string(source, strict=false)
-  let render = MarkdownRender::{ defs: doc.defs, open_file }
-  render.block_nodes(doc.block)
 }
 
 ///|

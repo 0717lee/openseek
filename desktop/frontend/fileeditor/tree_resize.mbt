@@ -74,7 +74,9 @@ fn request_tree_resize_mount() -> @cmd.Cmd {
       )
       let document : @js.Value = @js.globalThis.get_with_string("document")
       @interop.add_capture_listener(document, "mousemove", on_tree_resize_move)
-      @interop.add_capture_listener(document, "mouseup", end_tree_resize)
+      @interop.add_capture_listener(document, "mouseup", _ => end_drag(
+        tree_resizing,
+      ))
       tree_resize_installed.val = true
     },
     kind=@cmd.after_render,
@@ -108,44 +110,21 @@ fn on_tree_resize_move(event : @dom.Event) -> Unit {
   }
   let rect = body.get_bounding_client_rect()
   if tree_docked_right() {
-    let floor = MinTreeWidth.to_double()
-    let max = rect.get_width() - MinViewerWidth.to_double()
-    // On a very narrow window the floor wins, even past the ceiling.
-    let ceiling = if max > floor { max } else { floor }
-    let raw = rect.get_right() - mouse.get_client_x().to_double()
-    let width = if raw < floor {
-      floor
-    } else if raw > ceiling {
-      ceiling
-    } else {
-      raw
-    }
-    set_tree_width(width.to_int())
+    set_tree_width(
+      drag_size(
+        rect.get_right() - mouse.get_client_x().to_double(),
+        floor=MinTreeWidth.to_double(),
+        max=rect.get_width() - MinViewerWidth.to_double(),
+      ),
+    )
   } else {
-    let floor = MinTreeHeight.to_double()
-    let max = rect.get_height() - MinViewerHeight.to_double()
-    // On a very short window the floor wins, even past the ceiling.
-    let ceiling = if max > floor { max } else { floor }
-    let raw = rect.get_bottom() - mouse.get_client_y().to_double()
-    let height = if raw < floor {
-      floor
-    } else if raw > ceiling {
-      ceiling
-    } else {
-      raw
-    }
-    set_tree_height(height.to_int())
+    set_tree_height(
+      drag_size(
+        rect.get_bottom() - mouse.get_client_y().to_double(),
+        floor=MinTreeHeight.to_double(),
+        max=rect.get_height() - MinViewerHeight.to_double(),
+      ),
+    )
   }
   schedule_remeasure()
-}
-
-///|
-/// End the drag and give the viewer a final, exact re-measure.
-fn end_tree_resize(_event : @dom.Event) -> Unit {
-  guard tree_resizing.val else { return }
-  tree_resizing.val = false
-  set_root_class("")
-  if mounted_viewer() is Some(viewer) {
-    viewer.layout()
-  }
 }
