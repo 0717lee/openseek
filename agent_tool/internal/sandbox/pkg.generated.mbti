@@ -2,11 +2,11 @@
 package "bobzhang/openseek/agent_tool/internal/sandbox"
 
 // Values
-pub const PlatformShellProgram : String = "sh"
-
 pub const SandboxExecPath : String = "/usr/bin/sandbox-exec"
 
 pub fn platform_shell_args(String) -> Array[String]
+
+pub fn platform_shell_program() -> String
 
 pub fn sandbox_exec_args(String, String) -> Array[String]
 
