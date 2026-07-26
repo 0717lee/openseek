@@ -2,17 +2,6 @@
 package "bobzhang/openseek/agent_tool/internal/sandbox"
 
 // Values
-pub const SandboxExecPath : String = "/usr/bin/sandbox-exec"
-
-pub fn sandbox_exec_args(String, String) -> Array[String]
-
-pub async fn sandbox_exec_available() -> Bool
-
-pub fn sbpl_string_escape(String) -> String
-
-pub fn source_write_denied_in_text(String, Array[String]) -> Bool
-
-pub async fn source_write_readonly_profile_data(String, writable_lab? : String) -> SourceWriteProfileData
 
 // Errors
 
@@ -30,11 +19,6 @@ pub struct SandboxedCommand {
 type SourceWriteDenialClassifier
 pub fn SourceWriteDenialClassifier::output_reports_denial(Self, String) -> Bool
 pub fn SourceWriteDenialClassifier::with_subjects(Array[String]) -> Self
-
-pub struct SourceWriteProfileData {
-  profile : String
-  denial_subjects : Array[String]
-}
 
 type SourceWriteSandbox
 pub async fn SourceWriteSandbox::create_if_available(String, writable_subtree? : String) -> Self?

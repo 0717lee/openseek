@@ -1184,8 +1184,8 @@ fn is_some_path(value : String?, expected : String) -> Bool {
 
 ///|
 test "sandbox denial detection ignores masked exit code" {
-  // Line-level detection pins live with `source_write_denied_in_text` in
-  // `agent_tool/internal/sandbox`; here only the shell-side gate is covered:
+  // Line-level classification pins live in `agent_tool/internal/sandbox`
+  // (`denial_output_test.mbt`); here only the shell-side gate is covered:
   // the denial fires despite exit_code 0, and only for a sandboxed command.
   let output = {
     exit_code: Some(0),
@@ -1513,11 +1513,14 @@ async test "moon new is a trusted scaffold only for a new or empty target" {
 /// not just the static guard, denies any workspace-source write. Without a
 /// lab the same command stays trusted/unsandboxed.
 async test "a scratch lab forces trusted source-writes onto the sandbox" {
-  guard @sandbox.sandbox_exec_available() else {
+  let ws = @fs.tmpdir(prefix="openseek-lab-ws-")
+  guard @sandbox.SourceWriteSandbox::create_if_available(ws) is Some(_) else {
     println("sandbox-exec unavailable; skipping")
+    @fs.rmdir(ws, recursive=true) catch {
+      _ => ()
+    }
     return
   }
-  let ws = @fs.tmpdir(prefix="openseek-lab-ws-")
   let lab = @fs.tmpdir(prefix="openseek-lab-scratch-")
   // No lab: `moon new` in the lab is the trusted, unsandboxed path.
   let without = agent_shell_launch(

@@ -36,7 +36,7 @@ priv struct CachedSourceWriteProfile {
 /// `profile` is complete SBPL source suitable for `sandbox_exec_args`.
 /// `denial_subjects` contains protected directory paths and basenames that
 /// `source_write_denied_in_text` can match in child-process output.
-pub struct SourceWriteProfileData {
+priv struct SourceWriteProfileData {
   /// Complete SBPL source passed to `sandbox_exec_args`.
   profile : String
   /// Protected paths and basenames used to recognize denial diagnostics.
@@ -60,7 +60,7 @@ pub struct SourceWriteProfileData {
 /// Base profiles are cached by normalized workspace root. Directory mtimes
 /// invalidate cached scans when the protected source tree changes. The result
 /// is a best-effort write guard, not a complete process-security boundary.
-pub async fn source_write_readonly_profile_data(
+async fn source_write_readonly_profile_data(
   real_workspace_root : String,
   writable_lab? : String,
 ) -> SourceWriteProfileData {
@@ -316,7 +316,7 @@ fn regex_escape(text : String) -> String {
 /// Quotes, backslashes, newlines, carriage returns, and tabs are escaped. The
 /// returned text does not include surrounding quotes and is not a complete
 /// SBPL expression.
-pub fn sbpl_string_escape(text : String) -> String {
+fn sbpl_string_escape(text : String) -> String {
   let escaped = StringBuilder()
   for ch in text {
     match ch {

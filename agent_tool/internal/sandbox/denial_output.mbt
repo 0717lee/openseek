@@ -9,97 +9,18 @@ let protected_source_subjects : ReadOnlyArray[String] = [
 
 ///|
 /// Return whether child-process output contains a likely protected-source
-/// write denial.
+/// write denial. The engine behind
+/// `SourceWriteDenialClassifier::output_reports_denial`, whose docstring
+/// carries the worked examples; `denial_output_test.mbt` holds the exhaustive
+/// line-level pins.
 ///
 /// Matching is line-oriented. A line must contain a recognized
 /// "Operation not permitted" or "Permission denied" form and name either a
-/// protected source suffix or one of `denial_subjects`. Pass the subjects from
-/// the `SourceWriteProfileData` used for that child. Unrelated permission
+/// protected source suffix or one of `denial_subjects` (the directories the
+/// profile denies literally — a denied directory carries no protected
+/// suffix, so only its subject can recognize it). Unrelated permission
 /// errors and mentions of source files without a denial are ignored.
-///
-/// A protected source name is recognized on its own, so the common denials need
-/// no subjects at all — including the shape MoonBit's own runtime produces,
-/// where the path is wrapped in escaped quotes:
-///
-/// ```mbt check
-/// test "denials that name a protected source file" {
-///   inspect(
-///     @sandbox.source_write_denied_in_text(
-///       "sh: main.mbt: Operation not permitted\n",
-///       [],
-///     ),
-///     content="true",
-///   )
-///   inspect(
-///     @sandbox.source_write_denied_in_text(
-///       "sh: moon.work: Operation not permitted\n",
-///       [],
-///     ),
-///     content="true",
-///   )
-///   // run_moonbit's shape: a MoonBit runtime error for a denied source write.
-///   inspect(
-///     @sandbox.source_write_denied_in_text(
-///       "OSError(\"@fs.open(): \\\"keep.mbt\\\": Operation not permitted\")",
-///       [],
-///     ),
-///     content="true",
-///   )
-///   // The subject may also follow the denial (python's errno shape).
-///   inspect(
-///     @sandbox.source_write_denied_in_text(
-///       "PermissionError: [Errno 1] Operation not permitted: 'main.mbt'\n",
-///       [],
-///     ),
-///     content="true",
-///   )
-/// }
-/// ```
-///
-/// Both halves must hold on the same line. That is what keeps an unrelated
-/// permission error, or a build log that merely mentions a source file, from
-/// reading as a sandbox denial:
-///
-/// ```mbt check
-/// test "a denial alone, or a source name alone, is not a source-write denial" {
-///   inspect(
-///     @sandbox.source_write_denied_in_text("Permission denied\n", []),
-///     content="false",
-///   )
-///   inspect(
-///     @sandbox.source_write_denied_in_text(
-///       "Permission denied while reading main.mbt\n",
-///       [],
-///     ),
-///     content="false",
-///   )
-///   inspect(
-///     @sandbox.source_write_denied_in_text("compiled keep.mbt: ok\n", []),
-///     content="false",
-///   )
-/// }
-/// ```
-///
-/// A denied *directory* carries no protected suffix, so it is recognized only
-/// when the profile's own subjects name it. This is why callers must pass the
-/// `denial_subjects` from the `SourceWriteProfileData` they ran the child with,
-/// rather than an empty array:
-///
-/// ```mbt check
-/// test "a directory denial is recognized only through its subject" {
-///   let denial = "PermissionError: [Errno 1] Operation not permitted: 'pkg'\n"
-///   inspect(@sandbox.source_write_denied_in_text(denial, []), content="false")
-///   inspect(@sandbox.source_write_denied_in_text(denial, ["pkg"]), content="true")
-///   // An unrelated name is not rescued by having subjects.
-///   inspect(
-///     @sandbox.source_write_denied_in_text("foo: Operation not permitted\n", [
-///       "pkg",
-///     ]),
-///     content="false",
-///   )
-/// }
-/// ```
-pub fn source_write_denied_in_text(
+fn source_write_denied_in_text(
   output_text : String,
   denial_subjects : Array[String],
 ) -> Bool {

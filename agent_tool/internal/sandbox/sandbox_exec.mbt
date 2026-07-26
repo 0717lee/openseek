@@ -1,10 +1,8 @@
 ///|
-/// The standard absolute path of the macOS `sandbox-exec` binary.
-///
-/// The path is exposed so callers can pass it to `@process.spawn` or
-/// `@process.run`. Its presence alone does not mean sandboxing works in the
-/// current process; call `sandbox_exec_available` before using it.
-pub const SandboxExecPath : String = "/usr/bin/sandbox-exec"
+/// The standard absolute path of the macOS `sandbox-exec` binary. Its
+/// presence alone does not mean sandboxing works in the current process;
+/// `sandbox_exec_available` probes that.
+const SandboxExecPath : String = "/usr/bin/sandbox-exec"
 
 ///|
 let sandbox_exec_available_cache : Ref[Bool?] = { val: None }
@@ -18,7 +16,7 @@ let sandbox_exec_available_cache : Ref[Bool?] = { val: None }
 /// Therefore `cmd` is shell text, not an executable path or a pre-tokenized
 /// argument vector. This function does not validate the profile or probe
 /// availability.
-pub fn sandbox_exec_args(profile : String, cmd : String) -> Array[String] {
+fn sandbox_exec_args(profile : String, cmd : String) -> Array[String] {
   ["-p", profile, @platform_shell.program, ..@platform_shell.args(cmd)]
 }
 
@@ -32,7 +30,7 @@ pub fn sandbox_exec_args(profile : String, cmd : String) -> Array[String] {
 /// that forbid nested sandboxing produce `false`; cancellation still
 /// propagates. The result is cached process-wide, so later calls do not probe
 /// again.
-pub async fn sandbox_exec_available() -> Bool {
+async fn sandbox_exec_available() -> Bool {
   match sandbox_exec_available_cache.val {
     Some(value) => value
     None => {
