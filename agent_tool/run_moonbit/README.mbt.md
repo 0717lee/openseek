@@ -84,9 +84,18 @@ async test "run_moonbit runs a pure-core probe" {
       execute({ "source": "fn main { println([1, 2, 3].map(x => x * x)) }" })
     Sync(_) => fail("run_moonbit is async")
   }
-  guard action is Respond(output) else { fail("expected Respond") }
-  assert_false(output.is_error)
-  assert_true(output.content.contains("[1, 4, 9]"))
+  debug_inspect(
+    action,
+    content=(
+      #|Respond(
+      #|  {
+      #|    content: "[1, 4, 9]\n",
+      #|    is_error: false,
+      #|    brief: Some("run_moonbit (exit=0)"),
+      #|  },
+      #|)
+    ),
+  )
 }
 ```
 
@@ -115,9 +124,18 @@ async test "run_moonbit reads a workspace file" {
       Async(execute) => execute({ "source": source })
       Sync(_) => fail("run_moonbit is async")
     }
-    guard action is Respond(output) else { fail("expected Respond") }
-    assert_false(output.is_error)
-    assert_true(output.content.contains("lines=2"))
+    debug_inspect(
+      action,
+      content=(
+        #|Respond(
+        #|  {
+        #|    content: "lines=2\n",
+        #|    is_error: false,
+        #|    brief: Some("run_moonbit (exit=0)"),
+        #|  },
+        #|)
+      ),
+    )
   })
 }
 ```
@@ -132,9 +150,18 @@ async test "run_moonbit accepts an explicit target" {
       execute({ "source": "fn main { println(6 * 7) }", "target": "js" })
     Sync(_) => fail("run_moonbit is async")
   }
-  guard action is Respond(output) else { fail("expected Respond") }
-  assert_false(output.is_error)
-  assert_true(output.content.contains("42"))
+  debug_inspect(
+    action,
+    content=(
+      #|Respond(
+      #|  {
+      #|    content: "42\n",
+      #|    is_error: false,
+      #|    brief: Some("run_moonbit (exit=0)"),
+      #|  },
+      #|)
+    ),
+  )
 }
 ```
 
