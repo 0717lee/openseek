@@ -144,6 +144,80 @@ pub fn SourceWriteDenialClassifier::with_subjects(
 /// this classifier was issued for. Heuristic line-oriented recognition — a
 /// `true` is strong evidence, not proof, and unrelated permission errors are
 /// deliberately ignored.
+///
+/// A protected source name is recognized on its own, in every denial shape
+/// the tools actually produce — including MoonBit's own runtime error, where
+/// the path arrives wrapped in escaped quotes:
+///
+/// ```mbt check
+/// test "denials that name a protected source file" {
+///   let classifier = @sandbox.SourceWriteDenialClassifier::with_subjects([])
+///   inspect(
+///     classifier.output_reports_denial("sh: main.mbt: Operation not permitted\n"),
+///     content="true",
+///   )
+///   // run_moonbit's shape: a MoonBit runtime error for a denied source write.
+///   inspect(
+///     classifier.output_reports_denial(
+///       "OSError(\"@fs.open(): \\\"keep.mbt\\\": Operation not permitted\")",
+///     ),
+///     content="true",
+///   )
+///   // The subject may also follow the denial (python's errno shape).
+///   inspect(
+///     classifier.output_reports_denial(
+///       "PermissionError: [Errno 1] Operation not permitted: 'main.mbt'\n",
+///     ),
+///     content="true",
+///   )
+/// }
+/// ```
+///
+/// Both halves — a denial form AND a protected name — must hold on the same
+/// line, which is what keeps an unrelated permission error, or a build log
+/// that merely mentions a source file, from reading as a sandbox denial:
+///
+/// ```mbt check
+/// test "a denial alone, or a source name alone, is not a denial report" {
+///   let classifier = @sandbox.SourceWriteDenialClassifier::with_subjects([])
+///   inspect(
+///     classifier.output_reports_denial("Permission denied\n"),
+///     content="false",
+///   )
+///   inspect(
+///     classifier.output_reports_denial(
+///       "Permission denied while reading main.mbt\n",
+///     ),
+///     content="false",
+///   )
+///   inspect(
+///     classifier.output_reports_denial("compiled keep.mbt: ok\n"),
+///     content="false",
+///   )
+/// }
+/// ```
+///
+/// A denied *directory* carries no protected suffix, so it is recognized only
+/// through the profile's own subjects — which is why the classifier travels
+/// with the command it was issued for:
+///
+/// ```mbt check
+/// test "a directory denial is recognized only through its subject" {
+///   let denial = "PermissionError: [Errno 1] Operation not permitted: 'pkg'\n"
+///   inspect(
+///     @sandbox.SourceWriteDenialClassifier::with_subjects([]).output_reports_denial(
+///       denial,
+///     ),
+///     content="false",
+///   )
+///   inspect(
+///     @sandbox.SourceWriteDenialClassifier::with_subjects(["pkg"]).output_reports_denial(
+///       denial,
+///     ),
+///     content="true",
+///   )
+/// }
+/// ```
 pub fn SourceWriteDenialClassifier::output_reports_denial(
   self : SourceWriteDenialClassifier,
   output : String,

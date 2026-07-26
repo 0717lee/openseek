@@ -94,12 +94,26 @@ async test "a non-existent cwd is reported, not run" {
 }
 
 ///|
+/// Gate on the same acquisition `execute` performs — skip where enforcement is
+/// unavailable (not macOS, or a nested sandbox). Probed against a throwaway
+/// root so no real workspace is scanned.
+async fn sandbox_enforcement_available() -> Bool {
+  let dir = @fs.tmpdir(prefix="openseek-run-moonbit-gate-")
+  let available = @sandbox.SourceWriteSandbox::create_if_available(dir)
+    is Some(_)
+  @fs.rmdir(dir, recursive=true) catch {
+    _ => ()
+  }
+  available
+}
+
+///|
 async test "sandbox blocks overwriting a protected source file in the workspace" {
   // Only meaningful where the sandbox can actually enforce (macOS, not nested);
   // gate on the SAME probe `execute` uses so a host where sandbox-exec exists but
   // cannot apply a nested profile (production runs unsandboxed there) skips
   // rather than fails. The wasm backend carries this policy cross-platform.
-  guard @sandbox.sandbox_exec_available() else { return }
+  guard sandbox_enforcement_available() else { return }
   @vfs.with_tmpdir(ws => {
     @fs.write_file(
       "\{ws}/keep.mbt",
@@ -146,7 +160,7 @@ test "the description encourages batched same-turn probing" {
 
 ///|
 async test "an uncaught sandbox denial is explained, not left as a bare EPERM" {
-  guard @sandbox.sandbox_exec_available() else { return }
+  guard sandbox_enforcement_available() else { return }
   @vfs.with_tmpdir(ws => {
     @fs.write_file(
       "\{ws}/keep.mbt",
@@ -199,7 +213,7 @@ async test "warnings are suppressed by default and shown with warning=on" {
 
 ///|
 async test "a denial past the display cap is still detected and explained" {
-  guard @sandbox.sandbox_exec_available() else { return }
+  guard sandbox_enforcement_available() else { return }
   @vfs.with_tmpdir(ws => {
     @fs.write_file(
       "\{ws}/keep.mbt",
