@@ -19,7 +19,11 @@ async test "denial scan is bounded to the log's head and tail" {
     async fn scan(name : String, content : String) -> Bool {
       let path = "\{dir}/\{name}.log"
       @fs.write_file(path, content, create_mode=CreateOrTruncate)
-      log_shows_source_write_denial(path, [], budget_bytes=1024)
+      log_shows_source_write_denial(
+        path,
+        @sandbox.SourceWriteDenialClassifier::with_subjects([]),
+        budget_bytes=1024,
+      )
     }
 
     // within budget (<= 2KB): scanned whole, wherever the denial sits
