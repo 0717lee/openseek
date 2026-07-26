@@ -17,10 +17,28 @@ pub async fn source_write_readonly_profile_data(String, writable_lab? : String) 
 // Errors
 
 // Types and methods
+pub struct ProcessCommand {
+  program : String
+  args : Array[String]
+}
+
+pub struct SandboxedCommand {
+  command : ProcessCommand
+  denial_classifier : SourceWriteDenialClassifier
+}
+
+type SourceWriteDenialClassifier
+pub fn SourceWriteDenialClassifier::output_reports_denial(Self, String) -> Bool
+
 pub struct SourceWriteProfileData {
   profile : String
   denial_subjects : Array[String]
 }
+
+type SourceWriteSandbox
+pub async fn SourceWriteSandbox::create_if_available(String, writable_subtree? : String) -> Self?
+pub fn SourceWriteSandbox::wrap_program(Self, String, Array[String]) -> SandboxedCommand
+pub fn SourceWriteSandbox::wrap_shell_command(Self, String) -> SandboxedCommand
 
 // Type aliases
 
