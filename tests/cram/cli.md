@@ -150,7 +150,10 @@ Options:
 ## API Key Is Required For Agent Runs
 
 With no `--api-key` flag and no `DEEPSEEK` in the environment, a run reports the
-missing key and exits non-zero.
+missing key and exits non-zero. The message names the model that wanted a key,
+not the variable that would have supplied one — `DEEPSEEK` here, `KIMI` for a
+Kimi model. Those options are hidden from `--help`, so this is where they are
+written down.
 
 ```mooncram
 $ sh <<'EOF'
@@ -162,7 +165,7 @@ $ sh <<'EOF'
 > rm -f "$stdout" "$stderr"
 > EOF
 exit-non-zero
-error: an API key is required for DeepSeek models: pass --api-key or set DEEPSEEK
+error: an API key is required for deepseek-v4-pro: pass --api-key
 stdout-empty
 ```
 
@@ -199,7 +202,7 @@ $ sh <<'EOF'
 > rm -f "$stdout" "$stderr"
 > EOF
 exit-non-zero
-error: an API key is required for DeepSeek models: pass --api-key or set DEEPSEEK
+error: an API key is required for deepseek-v4-pro: pass --api-key
 stdout-empty
 ```
 
