@@ -397,29 +397,18 @@ async fn execute(
     // preflights the command) an arbitrary snippet can still smuggle sources via
     // directory renames; full containment is the wasm backend's job. Elsewhere
     // (or in a nested sandbox where it cannot enforce) run moon directly.
-    // The profile data is kept (not just its text) so a denial showing up in the
-    // program's output can be recognized and explained below.
-    let sandbox_data = if @sandbox.sandbox_exec_available() {
-      Some(
-        @sandbox.source_write_readonly_profile_data(
-          @fs.realpath(workspace_root) catch {
-            _ => workspace_root
-          },
-        ),
-      )
-    } else {
-      None
-    }
-    let (prog, argv) = match sandbox_data {
-      Some(data) => {
-        // Re-allow the throwaway build dir: if it falls INSIDE the workspace root
-        // (e.g. `workspace_root=/tmp`, where `@fs.tmpdir` lands under it) the shared
-        // deny would otherwise block moon's own generated `snippet.mbt`. SBPL is
-        // last-match-wins, so this appended allow overrides the deny for `dir` only.
-        let profile = data.profile +
-          "\n(allow file-write* (subpath \"\{@sandbox.sbpl_string_escape(real)}\"))\n"
-        (@sandbox.SandboxExecPath, ["-p", profile, "moon", ..moon_argv])
-      }
+    // The wrapped command carries its denial classifier, so a denial showing
+    // up in the program's output can be recognized and explained below. The
+    // throwaway build dir is the writable subtree: if it falls INSIDE the
+    // workspace root (e.g. `workspace_root=/tmp`, where `@fs.tmpdir` lands
+    // under it) the shared deny would otherwise block moon's own generated
+    // `snippet.mbt`.
+    let wrapped = @sandbox.SourceWriteSandbox::create_if_available(
+      workspace_root,
+      writable_subtree=dir,
+    ).map(sandbox => sandbox.wrap_program("moon", moon_argv))
+    let (prog, argv) = match wrapped {
+      Some(wrapped) => (wrapped.command.program, wrapped.command.args)
       None => ("moon", moon_argv)
     }
     let result = @async.with_timeout_opt(RunTimeoutMs, () => {
@@ -443,8 +432,8 @@ async fn execute(
     // head+tail byte budget), and runs for the timeout arm too: a snippet can
     // flood past the cap before hitting the denial, or print a caught denial
     // and then hang.
-    let sandbox_denied = sandbox_data is Some(data) &&
-      log_shows_source_write_denial(log, data.denial_subjects)
+    let sandbox_denied = wrapped is Some(wrapped) &&
+      log_shows_source_write_denial(log, wrapped.denial_classifier)
     let action = match result {
       Some((exit_code, raw)) => {
         // Rewrite the throwaway temp path to `source` so the model reads
@@ -554,7 +543,7 @@ const DenialScanBudgetBytes : Int = 16_777_216
 /// tests only.
 async fn log_shows_source_write_denial(
   path : String,
-  denial_subjects : Array[String],
+  classifier : @sandbox.SourceWriteDenialClassifier,
   budget_bytes? : Int = DenialScanBudgetBytes,
 ) -> Bool {
   let file = @fs.open(path, mode=ReadOnly) catch { _ => return false }
@@ -565,10 +554,10 @@ async fn log_shows_source_write_denial(
   }
   let budget = budget_bytes.to_int64()
   if size <= budget * 2 {
-    denial_scan_region(file, 0, size, denial_subjects)
+    denial_scan_region(file, 0, size, classifier)
   } else {
-    denial_scan_region(file, 0, budget, denial_subjects) ||
-    denial_scan_region(file, size - budget, budget, denial_subjects)
+    denial_scan_region(file, 0, budget, classifier) ||
+    denial_scan_region(file, size - budget, budget, classifier)
   }
 }
 
@@ -582,7 +571,7 @@ async fn denial_scan_region(
   file : @fs.File,
   start : Int64,
   len : Int64,
-  denial_subjects : Array[String],
+  classifier : @sandbox.SourceWriteDenialClassifier,
 ) -> Bool {
   let buf = FixedArray::make(DenialScanChunkBytes, b'\x00')
   let mut carry = ""
@@ -608,10 +597,7 @@ async fn denial_scan_region(
     // detector can judge now, everything after is the partial line to carry.
     match text.rev_split_once("\n") {
       Some((whole_lines, partial_line)) => {
-        if @sandbox.source_write_denied_in_text(
-            whole_lines.to_owned(),
-            denial_subjects,
-          ) {
+        if classifier.output_reports_denial(whole_lines.to_owned()) {
           return true
         }
         carry = partial_line.to_owned()
@@ -621,13 +607,13 @@ async fn denial_scan_region(
     // A single line larger than a chunk must not grow the carry unboundedly:
     // scan what accumulated, keep only a pattern-sized tail.
     if carry.length() > DenialScanChunkBytes {
-      if @sandbox.source_write_denied_in_text(carry, denial_subjects) {
+      if classifier.output_reports_denial(carry) {
         return true
       }
       carry = carry[carry.length() - DenialScanCarryTailChars:].to_owned()
     }
   }
-  @sandbox.source_write_denied_in_text(carry, denial_subjects)
+  classifier.output_reports_denial(carry)
 }
 
 ///|
