@@ -29,8 +29,8 @@ pub fn strip_trailing_slash(path : String) -> String {
 /// filesystem and `.` or `..` components are not normalized.
 pub fn path_basename(path : String) -> String {
   let normalized = strip_trailing_slash(path.replace_all(old="\\", new="/"))
-  match normalized.rev_find("/") {
-    Some(slash) => normalized[slash + 1:].to_owned()
+  match normalized.rev_after("/") {
+    Some(base) => base.to_owned()
     None => normalized
   }
 }
@@ -69,9 +69,11 @@ pub fn parent_dir(path : String) -> String? {
     (normalized.length() == 2 && normalized[1] == ':') {
     return None
   }
-  match normalized.rev_find("/") {
-    Some(0) => Some("/")
-    Some(cut) => Some(normalized[:cut].to_owned())
+  // An empty part before the last slash means the slash was the leading one,
+  // so the parent is the root itself rather than "".
+  match normalized.rev_split_once("/") {
+    Some(([], _)) => Some("/")
+    Some((dir, _)) => Some(dir.to_owned())
     None => Some(".")
   }
 }
@@ -134,6 +136,12 @@ test "lexical path helpers preserve roots and normalize separators" {
   assert_eq(strip_trailing_slash("/work///"), "/work")
   assert_eq(strip_trailing_slash("/"), "/")
   assert_true(parent_dir("/") is None)
+  // A leading slash is the whole parent: the part before it is empty, and the
+  // answer is the root rather than "".
+  assert_true(parent_dir("/work") is Some("/"))
+  assert_true(parent_dir("/work/lib") is Some("/work"))
+  assert_true(parent_dir("relative/lib") is Some("relative"))
+  assert_true(parent_dir("bare") is Some("."))
   assert_true(parent_dir("C:") is None)
   assert_true(parent_dir("C:/") is None)
   assert_true(parent_dir("C:/work") is Some("C:"))
@@ -142,6 +150,8 @@ test "lexical path helpers preserve roots and normalize separators" {
   assert_eq(join_child("/work/", "moon.mod"), "/work/moon.mod")
   assert_eq(path_basename("/work/pkg/"), "pkg")
   assert_eq(path_basename("C:\\work\\main.mbt"), "main.mbt")
+  assert_eq(path_basename("bare"), "bare")
+  assert_eq(path_basename("/main.mbt"), "main.mbt")
   assert_true(is_under_workspace_root("/work", "/work"))
   assert_true(is_under_workspace_root("/work/", "/work/pkg/main.mbt"))
   assert_false(is_under_workspace_root("/work", "/workspace/main.mbt"))
