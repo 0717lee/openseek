@@ -4061,8 +4061,8 @@ fn script_tree_transfer_markers() -> Array[String] {
 ///|
 fn command_basename(name : String) -> String {
   let normalized = name.replace_all(old="\\", new="/")
-  match normalized.rev_find("/") {
-    Some(slash) => normalized[slash + 1:].to_owned()
+  match normalized.rev_after("/") {
+    Some(base) => base.to_owned()
     None => name
   }
 }
@@ -4257,10 +4257,11 @@ async fn missing_move_source_can_create_workspace_source(
 ///|
 fn looks_like_non_source_file_path(path : String) -> Bool {
   let base = @workspace_path.path_basename(path)
-  match base.rev_find(".") {
-    Some(dot) if dot + 1 < base.length() =>
+  // A trailing dot yields an empty extension, which is not one.
+  match base.rev_after(".") {
+    Some(ext) if !ext.is_empty() =>
       !@source_write_policy.is_protected_source_path(base) &&
-      looks_like_file_extension(base[dot + 1:].to_owned())
+      looks_like_file_extension(ext.to_owned())
     _ => false
   }
 }

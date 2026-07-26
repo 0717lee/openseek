@@ -59,8 +59,8 @@ pub async fn apply_login_shell_env(
   let command = "\{shell_quote(executable)} --print-env-json \{mark}"
   // csh/tcsh reject the separate `-l` flag; every other shell in practice
   // (bash, zsh, fish, dash) takes interactive+login+command this way.
-  let shell_name = match shell.rev_find("/") {
-    Some(index) => shell[index + 1:].to_owned()
+  let shell_name = match shell.rev_after("/") {
+    Some(name) => name.to_owned()
     None => shell
   }
   let args : Array[String] = if shell_name is ("csh" | "tcsh") {

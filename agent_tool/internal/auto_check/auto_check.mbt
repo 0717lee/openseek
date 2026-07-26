@@ -176,9 +176,11 @@ fn is_moonbit_source_path(path : String) -> Bool {
 ///|
 fn containing_dir(path : String) -> String {
   let path = path.replace_all(old="\\", new="/")
-  match path.rev_find("/") {
-    Some(0) => "/"
-    Some(cut) => path[:cut].to_owned()
+  // An empty part before the last slash means the slash was the leading one,
+  // so the containing directory is the root itself rather than "".
+  match path.rev_split_once("/") {
+    Some(([], _)) => "/"
+    Some((dir, _)) => dir.to_owned()
     None => "."
   }
 }
@@ -192,6 +194,16 @@ test "relevant path detection covers MoonBit source and manifests" {
   assert_true(is_relevant_moonbit_path("lib/README.mbt.md"))
   assert_false(is_relevant_moonbit_path("lib/parser.mbti"))
   assert_false(is_relevant_moonbit_path("README.md"))
+}
+
+///|
+test "containing dir keeps the root and normalizes separators" {
+  assert_eq(containing_dir("lib/parser.mbt"), "lib")
+  assert_eq(containing_dir("lib\\parser.mbt"), "lib")
+  // A leading slash leaves nothing before it, and the answer is the root.
+  assert_eq(containing_dir("/parser.mbt"), "/")
+  assert_eq(containing_dir("/work/parser.mbt"), "/work")
+  assert_eq(containing_dir("moon.mod"), ".")
 }
 
 ///|

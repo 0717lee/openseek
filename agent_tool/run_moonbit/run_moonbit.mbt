@@ -605,15 +605,17 @@ async fn denial_scan_region(
     }
     position += n.to_int64()
     let text = carry + @utf8.decode_lossy(Bytes::from_array(buf[:n]))
-    match text.rev_find("\n") {
-      Some(cut) => {
+    // Split at the last newline: everything before it is whole lines the
+    // detector can judge now, everything after is the partial line to carry.
+    match text.rev_split_once("\n") {
+      Some((whole_lines, partial_line)) => {
         if @sandbox.source_write_denied_in_text(
-            text[:cut].to_owned(),
+            whole_lines.to_owned(),
             denial_subjects,
           ) {
           return true
         }
-        carry = text[cut + 1:].to_owned()
+        carry = partial_line.to_owned()
       }
       None => carry = text
     }

@@ -1540,3 +1540,16 @@ async test "a scratch lab forces trusted source-writes onto the sandbox" {
   @fs.rmdir(ws, recursive=true)
   @fs.rmdir(lab, recursive=true)
 }
+
+///|
+test "a file path needs a non-empty alphabetic extension to look non-source" {
+  assert_true(looks_like_non_source_file_path("notes/readme.txt"))
+  assert_true(looks_like_non_source_file_path("archive.tar"))
+  // A trailing dot leaves an empty extension, which is not an extension.
+  assert_false(looks_like_non_source_file_path("weird."))
+  // No dot at all, and digits or symbols in place of an extension.
+  assert_false(looks_like_non_source_file_path("Makefile"))
+  assert_false(looks_like_non_source_file_path("archive.tar.7z"))
+  // Protected MoonBit sources stay source-looking however they are spelled.
+  assert_false(looks_like_non_source_file_path("lib/parser.mbt"))
+}
