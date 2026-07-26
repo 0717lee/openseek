@@ -160,8 +160,8 @@ async fn discover_session_events(
 ) -> String {
   let matches : Array[String] = []
   collect_session_events(workspace, session_id, matches)
-  if matches.length() > 0 {
-    matches[0]
+  if matches is [first, ..] {
+    first
   } else {
     fallback
   }

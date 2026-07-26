@@ -2609,8 +2609,7 @@ async fn powershell_rename_target(
   }
   let new_name = match parsed.new_name {
     Some(new_name) => new_name
-    None if parsed.paths.length() >= 2 =>
-      parsed.paths[parsed.paths.length() - 1]
+    None if parsed.paths is [_, .., last] => last
     None =>
       return powershell_remove_target(argv, arg_start, real_workspace_root, cwd)
   }
@@ -5098,12 +5097,12 @@ fn operands_with_optional_dest(
 ) -> MvOperands? {
   match target_directory {
     Some(dest) => Some({ sources: operands, dest: Some(dest) })
+    // Without an explicit target, the last operand is the destination and the
+    // rest are sources — but only if there IS a rest: a lone operand is a
+    // source with nowhere to go, not a destination.
     None =>
-      if operands.length() >= 2 {
-        let sources = [
-          for index in 0..<(operands.length() - 1) => operands[index]
-        ]
-        Some({ sources, dest: Some(operands[operands.length() - 1]) })
+      if operands is [.. sources, dest] && !sources.is_empty() {
+        Some({ sources: sources.to_owned(), dest: Some(dest) })
       } else {
         Some({ sources: [], dest: None })
       }
@@ -5211,7 +5210,7 @@ fn cwd_command_effect_from_unknown_base(
   command : @shell_parse.SimpleCommand,
 ) -> CwdCommandEffect {
   let argv = command.argv
-  if argv.length() > 0 && argv[0] == "env" {
+  if argv is ["env", ..] {
     return NotCwdCommand
   }
   match command.command_index() {

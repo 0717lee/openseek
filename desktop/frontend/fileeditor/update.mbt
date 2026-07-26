@@ -475,8 +475,8 @@ pub fn update(
       let target = match cursor_index(state, entries) {
         Some(index) => Some(entries[index].0)
         None =>
-          if !state.filter.trim().is_empty() && entries.length() > 0 {
-            Some(entries[0].0)
+          if !state.filter.trim().is_empty() && entries is [(entry, _), ..] {
+            Some(entry)
           } else {
             None
           }

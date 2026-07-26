@@ -445,3 +445,62 @@ test "allow trailing semicolon and blank input" {
   }
   assert_eq(blank.length(), 0)
 }
+
+///|
+/// The `builtin` wrapper's boundaries, which the common `builtin cd …` cases
+/// never reach: a bare wrapper with nothing to run, and a `--` end-of-options
+/// marker with and without a command behind it.
+test "builtin wrapper resolves its own edge shapes" {
+  fn index_of(command : String) -> Int? raise {
+    guard @shell_parse.parse_for_policy(command) is Simple(commands) else {
+      fail("expected simple command")
+    }
+    commands[0].command_index()
+  }
+
+  fn name_of(command : String) -> String? raise {
+    guard @shell_parse.parse_for_policy(command) is Simple(commands) else {
+      fail("expected simple command")
+    }
+    commands[0].command_name()
+  }
+
+  // A command behind `--` is the effective command.
+  assert_true(index_of("builtin -- cd pkg") is Some(2))
+  assert_true(name_of("builtin -- cd pkg") is Some("cd"))
+  // `--` with nothing behind it leaves the wrapper itself as the command.
+  assert_true(index_of("builtin --") is Some(0))
+  assert_true(name_of("builtin --") is Some("builtin"))
+  // A bare wrapper likewise resolves to itself, not to None.
+  assert_true(index_of("builtin") is Some(0))
+  assert_true(name_of("builtin") is Some("builtin"))
+  // Without `--`, the very next word is the command.
+  assert_true(index_of("builtin cd pkg") is Some(1))
+  assert_true(name_of("builtin cd pkg") is Some("cd"))
+  // `command` and `env` wrappers keep their own resolution.
+  assert_true(index_of("command cd pkg") is Some(1))
+  assert_true(index_of("env FOO=bar cd pkg") is Some(2))
+}
+
+///|
+/// `builtin`/`command` can hide a shell control word from the too-complex
+/// check, so the wrapper's edge shapes matter here too: `--` with a control
+/// word behind it must still be seen, and a wrapper with nothing behind it
+/// must not be mistaken for one.
+test "control word detection sees through builtin wrappers" {
+  // The wrapper is seen through with and without `--`, so the control word
+  // behind it is still refused.
+  assert_true(
+    @shell_parse.parse_for_policy("builtin -- while true; do x; done")
+    is TooComplex(_),
+  )
+  assert_true(
+    @shell_parse.parse_for_policy("builtin while true; do x; done")
+    is TooComplex(_),
+  )
+  // Nothing behind the wrapper is no control word at all.
+  assert_true(@shell_parse.parse_for_policy("builtin --") is Simple(_))
+  assert_true(@shell_parse.parse_for_policy("builtin") is Simple(_))
+  // A plain command behind the wrapper stays simple.
+  assert_true(@shell_parse.parse_for_policy("builtin -- cd pkg") is Simple(_))
+}

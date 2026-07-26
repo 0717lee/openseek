@@ -212,7 +212,7 @@ fn cwd_command_effect(
   base_cwd : String,
 ) -> CwdCommandEffect {
   let argv = command.argv
-  if argv.length() > 0 && argv[0] == "env" {
+  if argv is ["env", ..] {
     return NotCwdCommand
   }
   match command.command_index() {

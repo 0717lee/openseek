@@ -1553,3 +1553,18 @@ test "a file path needs a non-empty alphabetic extension to look non-source" {
   // Protected MoonBit sources stay source-looking however they are spelled.
   assert_false(looks_like_non_source_file_path("lib/parser.mbt"))
 }
+
+///|
+/// `mv`/`cp` with a single operand names a source and no destination, so there
+/// is no tree transfer to point at. The two-operand forms are covered above;
+/// this pins the boundary between them, which is what tells the last operand
+/// apart from the only operand.
+async test "a lone operand is a source with no destination" {
+  @vfs.with_tmpdir(prefix="openseek-shell-lone-operand-", root => {
+    @fs.mkdir("\{root}/pkg")
+    let real_root = @fs.realpath(root)
+    assert_true(tree_target("mv pkg", real_root, Some(real_root)) is None)
+    assert_true(tree_target("cp pkg", real_root, Some(real_root)) is None)
+    assert_true(tree_target("mv -f pkg", real_root, Some(real_root)) is None)
+  })
+}
