@@ -34,13 +34,10 @@ diagnostics are the error message when something does not build.
   the `shell` tool.
 - `warning` (string, optional, `"off"`/`"on"`, default `"off"`): whether
   compiler warnings appear in the output. Snippets are throwaway scripts, so
-  unused-value style noise is suppressed — via a `--warn-list` spec derived
-  from the toolchain's own warning table (`moonc build-package -warn-help`,
-  probed once per process) — unless the warnings themselves are what you are
-  probing. Errors are unaffected: warning IDs whose default state is `error`
-  (e.g. `partial_match`) still fail compilation with warnings off, and if the
-  table cannot be probed the tool passes no flag at all, leaving warnings
-  visible rather than ever breaking the run.
+  unused-value style noise is suppressed unless the warnings themselves are
+  what you are probing. Selected correctness diagnostics whose default state
+  is `error` (such as `partial_match`) are maintained as explicit mnemonic
+  exceptions and still fail compilation with warnings off.
 
 Only **dependency resolution** is isolated: a local-package import resolves to
 the **published registry snapshot** (not your uncommitted edits), and a
@@ -90,6 +87,78 @@ async test "run_moonbit runs a pure-core probe" {
   guard action is Respond(output) else { fail("expected Respond") }
   assert_false(output.is_error)
   assert_true(output.content.contains("[1, 4, 9]"))
+}
+```
+
+The workspace root is also the snippet's default working directory, so a
+checked example can exercise real file IO through a relative path:
+
+```mbt check
+///|
+async test "run_moonbit reads a workspace file" {
+  @vfs.with_tmpdir(prefix="run-moonbit-readme-io-", workspace => {
+    @fs.write_file(
+      workspace + "/data.txt",
+      "Ada\nGrace\n",
+      create_mode=CreateOrTruncate,
+    )
+    let source =
+      #|import { "moonbitlang/async", "moonbitlang/async/fs", "moonbitlang/async/stdio" }
+      #|
+      #|async fn main {
+      #|  let text = @fs.read_file("data.txt").text()
+      #|  let lines = [..text.split("\n")].filter(line => !line.is_empty())
+      #|  @stdio.stdout.write("lines=\{lines.length()}\n")
+      #|}
+    let action = match
+      @run_moonbit.definition(workspace_root=workspace).execute {
+      Async(execute) => execute({ "source": source })
+      Sync(_) => fail("run_moonbit is async")
+    }
+    guard action is Respond(output) else { fail("expected Respond") }
+    assert_false(output.is_error)
+    assert_true(output.content.contains("lines=2"))
+  })
+}
+```
+
+Pure snippets can select another supported backend explicitly:
+
+```mbt check
+///|
+async test "run_moonbit accepts an explicit target" {
+  let action = match @run_moonbit.definition(workspace_root=".").execute {
+    Async(execute) =>
+      execute({ "source": "fn main { println(6 * 7) }", "target": "js" })
+    Sync(_) => fail("run_moonbit is async")
+  }
+  guard action is Respond(output) else { fail("expected Respond") }
+  assert_false(output.is_error)
+  assert_true(output.content.contains("42"))
+}
+```
+
+Warnings are quiet by default and can be restored for diagnostic probes:
+
+```mbt check
+///|
+async test "run_moonbit can show compiler warnings" {
+  @vfs.with_tmpdir(prefix="run-moonbit-readme-warning-", workspace => {
+    let execute = match
+      @run_moonbit.definition(workspace_root=workspace).execute {
+      Async(execute) => execute
+      Sync(_) => fail("run_moonbit is async")
+    }
+    let source = "fn main { let unused = 1; println(\"done\") }"
+    let quiet = execute({ "source": source })
+    let loud = execute({ "source": source, "warning": "on" })
+    guard quiet is Respond(quiet_output) else { fail("expected Respond") }
+    guard loud is Respond(loud_output) else { fail("expected Respond") }
+    assert_false(quiet_output.is_error)
+    assert_false(quiet_output.content.contains("Warning"))
+    assert_false(loud_output.is_error)
+    assert_true(loud_output.content.contains("unused"))
+  })
 }
 ```
 
