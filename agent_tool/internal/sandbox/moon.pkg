@@ -12,6 +12,14 @@ import {
   "bobzhang/openseek/testkit/filesystem" @vfs,
 } for "wbtest"
 
+import {
+  "bobzhang/openseek/testkit/filesystem" @vfs,
+  "moonbitlang/async",
+  "moonbitlang/async/fs",
+  "moonbitlang/async/process",
+  "moonbitlang/core/encoding/utf8",
+} for "test"
+
 warnings = "+unnecessary_annotation"
 
 supported_targets = "+native"
