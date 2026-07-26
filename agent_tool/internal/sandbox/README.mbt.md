@@ -1,9 +1,10 @@
 # agent_tool/internal/sandbox
 
 The source-write sandbox as a capability. `shell`, `run_moonbit`, `bgjobs`,
-and `shell_output` share one macOS `sandbox-exec` integration through three
-opaque types: acquire a `SourceWriteSandbox` for a workspace, wrap a command
-in it, and judge that command's output with the classifier it came with.
+and `shell_output` share one macOS `sandbox-exec` integration through two
+opaque types and two command records: acquire a `SourceWriteSandbox` for a
+workspace, wrap a command in it, and judge that command's output with the
+classifier it came with.
 Everything SBPL-specific — profile text, escaping, the `sandbox-exec` path,
 the availability probe — stays behind the API.
 

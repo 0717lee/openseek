@@ -82,10 +82,17 @@ async fn agent_shell_launch(
   } else {
     mode
   }
-  let sandbox = @sandbox.SourceWriteSandbox::create_if_available(
-    real_workspace_root,
-    writable_subtree?=scratch_dir,
-  )
+  // A trusted command with no scratch lab can never end up sandboxed, so
+  // skip acquisition entirely — a process that only ever runs trusted
+  // commands never pays the profile's workspace scan.
+  let sandbox = match (mode, scratch_dir) {
+    (TrustedSourceWrite, None) => None
+    _ =>
+      @sandbox.SourceWriteSandbox::create_if_available(
+        real_workspace_root,
+        writable_subtree?=scratch_dir,
+      )
+  }
   // A scratch lab means this is a read-only subagent child whose ONLY
   // sanctioned writes are lab-local. The static guard admitted this
   // command as lab-bound, but "trusted" moon writes (e.g. `moon new`) would
