@@ -87,15 +87,14 @@ fn parse_warn_off_list(help : String) -> String {
     } else {
       line
     }
+    // A table row ends with the two columns this cares about, whatever
+    // precedes them: `… <id> <state>`.
     let parts = [..line.split(" ")].filter(part => !part.is_empty())
-    guard parts.length() >= 2 else { continue }
-    let state = parts[parts.length() - 1]
+    guard parts is [.., id_column, state] else { continue }
     guard state == "warn" || state == "error" || state == "off" else {
       continue
     }
-    let id = @string.parse_int(parts[parts.length() - 2]) catch {
-      _ => continue
-    }
+    let id = @string.parse_int(id_column) catch { _ => continue }
     guard id > 0 else { continue }
     if id > max_id {
       max_id = id

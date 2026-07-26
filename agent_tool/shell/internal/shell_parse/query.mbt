@@ -34,23 +34,16 @@ pub fn contains_command(result : ParseResult, name : String) -> Bool {
 
 ///|
 fn effective_command_index(argv : Array[String]) -> Int? {
-  if argv.length() == 0 {
-    return None
-  }
-  match argv[0] {
-    "env" => env_wrapped_command_index(argv)
-    "command" => command_wrapped_command_index(argv)
-    "builtin" =>
-      if argv.length() > 1 {
-        let index = if argv[1] == "--" { 2 } else { 1 }
-        if index < argv.length() {
-          Some(index)
-        } else {
-          Some(0)
-        }
-      } else {
-        Some(0)
-      }
+  // Each arm is the argv shape it handles. The `builtin --` arm has to precede
+  // the general `builtin` one: `--` with nothing behind it is not an
+  // end-of-options marker for a command, it leaves the wrapper as the command.
+  match argv {
+    [] => None
+    ["env", ..] => env_wrapped_command_index(argv)
+    ["command", ..] => command_wrapped_command_index(argv)
+    ["builtin", "--", _, ..] => Some(2)
+    ["builtin", "--"] => Some(0)
+    ["builtin", _, ..] => Some(1)
     _ => Some(0)
   }
 }

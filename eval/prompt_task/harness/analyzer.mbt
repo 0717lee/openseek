@@ -398,8 +398,8 @@ async fn resolve_events_path(trial : TrialArtifact) -> String {
   }
   let matches : Array[String] = []
   collect_session_events(trial.workspace, trial.session_id, matches)
-  if matches.length() > 0 {
-    matches[0]
+  if matches is [first, ..] {
+    first
   } else if trial.events_path != "" &&
     path_under_dir(trial.events_path, trial.workspace) {
     trial.events_path

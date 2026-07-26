@@ -365,7 +365,7 @@ async fn preview_replace_all(
     let global = prefix_length + offset
     let first_line = line_at(global)
     let last_line = line_at(global + input.old_string.length() - 1)
-    if sites.length() > 0 && sites[sites.length() - 1].first_line == first_line {
+    if sites is [.., last_site] && last_site.first_line == first_line {
       if single_line {
         // A second match on the same line: two line-anchored edits with the
         // same anchor would both hit the first occurrence, so the site becomes

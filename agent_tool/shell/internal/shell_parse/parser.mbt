@@ -270,25 +270,14 @@ fn too_complex_shell_control_word(argv : Array[String]) -> String? {
 
 ///|
 fn effective_shell_control_word_index(argv : Array[String]) -> Int? {
-  if argv.length() == 0 {
-    return None
-  }
-  match argv[0] {
-    "command" => command_payload_index(argv)
-    "builtin" =>
-      if argv.length() > 1 {
-        if argv[1] == "--" {
-          if argv.length() > 2 {
-            Some(2)
-          } else {
-            None
-          }
-        } else {
-          Some(1)
-        }
-      } else {
-        None
-      }
+  // Unlike `effective_command_index`, a wrapper with nothing to run is no
+  // control word at all rather than the wrapper itself — hence `None` for both
+  // `builtin` and `builtin --`, which the `_ ..` arms below fall through to.
+  match argv {
+    ["command", ..] => command_payload_index(argv)
+    ["builtin", "--", _, ..] => Some(2)
+    ["builtin", "--"] | ["builtin"] | [] => None
+    ["builtin", _, ..] => Some(1)
     _ => Some(0)
   }
 }
