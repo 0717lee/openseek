@@ -1195,16 +1195,13 @@ test "sandbox denial detection ignores masked exit code" {
   assert_true(
     agent_output_has_shell_sandbox_denial({
       output,
-      source_write_sandboxed: true,
-      sandbox_denial_subjects: [],
+      denial_classifier: Some(
+        @sandbox.SourceWriteDenialClassifier::with_subjects([]),
+      ),
     }),
   )
   assert_false(
-    agent_output_has_shell_sandbox_denial({
-      output,
-      source_write_sandboxed: false,
-      sandbox_denial_subjects: [],
-    }),
+    agent_output_has_shell_sandbox_denial({ output, denial_classifier: None }),
   )
   assert_true(
     agent_output_has_shell_sandbox_denial({
@@ -1213,8 +1210,9 @@ test "sandbox denial detection ignores masked exit code" {
         text: "PermissionError: [Errno 1] Operation not permitted: 'pkg'\n",
         output_limit_reached: false,
       },
-      source_write_sandboxed: true,
-      sandbox_denial_subjects: ["pkg"],
+      denial_classifier: Some(
+        @sandbox.SourceWriteDenialClassifier::with_subjects(["pkg"]),
+      ),
     }),
   )
   assert_false(
@@ -1224,8 +1222,9 @@ test "sandbox denial detection ignores masked exit code" {
         text: "foo: Operation not permitted\n",
         output_limit_reached: false,
       },
-      source_write_sandboxed: true,
-      sandbox_denial_subjects: ["pkg"],
+      denial_classifier: Some(
+        @sandbox.SourceWriteDenialClassifier::with_subjects(["pkg"]),
+      ),
     }),
   )
   assert_false(
@@ -1235,8 +1234,9 @@ test "sandbox denial detection ignores masked exit code" {
         text: "Permission denied\n",
         output_limit_reached: false,
       },
-      source_write_sandboxed: true,
-      sandbox_denial_subjects: [],
+      denial_classifier: Some(
+        @sandbox.SourceWriteDenialClassifier::with_subjects([]),
+      ),
     }),
   )
 }
@@ -1526,7 +1526,7 @@ async test "a scratch lab forces trusted source-writes onto the sandbox" {
     @shell_parse.parse_for_policy("moon new \{lab}/probe"),
     cwd=lab,
   )
-  assert_false(without.source_write_sandboxed)
+  assert_true(without.denial_classifier is None)
   // With the lab wired, the same command is sandboxed instead — the
   // profile allows lab writes, the kernel denies workspace writes.
   let with_lab = agent_shell_launch(
@@ -1536,7 +1536,7 @@ async test "a scratch lab forces trusted source-writes onto the sandbox" {
     cwd=lab,
     scratch_dir=lab,
   )
-  assert_true(with_lab.source_write_sandboxed)
+  assert_true(with_lab.denial_classifier is Some(_))
   @fs.rmdir(ws, recursive=true)
   @fs.rmdir(lab, recursive=true)
 }
