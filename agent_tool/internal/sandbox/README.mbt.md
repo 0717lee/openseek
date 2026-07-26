@@ -50,7 +50,7 @@ if @sandbox.sandbox_exec_available() {
 ```
 
 `sandbox_exec_args` deliberately accepts shell command text. It inserts
-`PlatformShellProgram` and `platform_shell_args(command)` after the inline SBPL
+`@platform_shell.program` and `@platform_shell.args(command)` after the inline SBPL
 profile; it does not accept an executable plus an already-tokenized argument
 vector.
 

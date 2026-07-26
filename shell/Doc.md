@@ -60,10 +60,10 @@ OpenSeek's shell tool is simpler but follows the same basic direction:
 
 The relevant implementation points are:
 
-- `PlatformShellProgram = "pwsh"` on Windows.
-- `platform_shell_args(cmd) = ["-NoProfile", "-Command", cmd]` on Windows.
-- `PlatformShellProgram = "sh"` elsewhere.
-- `platform_shell_args(cmd) = ["-c", cmd]` elsewhere.
+- `@platform_shell.program = "pwsh"` on Windows.
+- `@platform_shell.args(cmd) = ["-NoProfile", "-Command", cmd]` on Windows.
+- `@platform_shell.program = "sh"` elsewhere.
+- `@platform_shell.args(cmd) = ["-c", cmd]` elsewhere.
 
 ## Similarities
 

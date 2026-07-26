@@ -14,11 +14,12 @@ let sandbox_exec_available_cache : Ref[Bool?] = { val: None }
 /// under an inline SBPL `profile`.
 ///
 /// The returned vector has the shape
-/// `[-p, profile, PlatformShellProgram, ..platform_shell_args(cmd)]`. Therefore
-/// `cmd` is shell text, not an executable path or a pre-tokenized argument
-/// vector. This function does not validate the profile or probe availability.
+/// `[-p, profile, @platform_shell.program, ..@platform_shell.args(cmd)]`.
+/// Therefore `cmd` is shell text, not an executable path or a pre-tokenized
+/// argument vector. This function does not validate the profile or probe
+/// availability.
 pub fn sandbox_exec_args(profile : String, cmd : String) -> Array[String] {
-  ["-p", profile, platform_shell_program, ..platform_shell_args(cmd)]
+  ["-p", profile, @platform_shell.program, ..@platform_shell.args(cmd)]
 }
 
 ///|
