@@ -90,36 +90,18 @@ async fn probe_sandbox_exec_available() -> Bool {
 }
 
 ///|
-/// Spawn `program args`, drain merged stdout+stderr so a child that fills the
-/// pipe buffer cannot deadlock against `wait`, then wait and return the exit
-/// code. Returns `None` when the spawn (or an unexpected IO error) fails; a
-/// cancellation still propagates. The sandbox-availability probe only needs the
-/// exit status plus a follow-up `@fs.exists` check, so the drained bytes are
-/// discarded rather than decoded.
+/// Exit code of `program args`, or `None` when the spawn (or an unexpected IO
+/// error) fails; a cancellation still propagates. A thin wrapper over
+/// `@process.collect_output_merged`, which already drains merged stdout+stderr
+/// before waiting, so a child that fills the pipe buffer cannot deadlock
+/// against `wait`. The sandbox-availability probe only needs the exit status
+/// plus a follow-up `@fs.exists` check, so the collected bytes are discarded.
 async fn run_probe_exit(program : String, args : Array[String]) -> Int? {
-  (@async.with_task_group() <| group => {
-    let (reader, writer) = @process.read_from_process()
-    defer reader.close()
-    let process = @process.spawn(
-      group,
-      program,
-      args,
-      stdout=writer,
-      stderr=writer,
-      cancel_handler=@process.hard_cancel(),
-      no_wait=true,
-    )
-    for ;; {
-      match reader.read_some(max_len=1024) {
-        None => break
-        Some(_) => ()
-      }
-    }
-    Some(process.wait())
-  }) catch {
+  let (exit_code, _) = @process.collect_output_merged(program, args) catch {
     error if @async.is_being_cancelled() => raise error
-    _ => None
+    _ => return None
   }
+  Some(exit_code)
 }
 
 ///|
