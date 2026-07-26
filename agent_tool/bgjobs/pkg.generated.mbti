@@ -3,6 +3,7 @@ package "bobzhang/openseek/agent_tool/bgjobs"
 
 import {
   "bobzhang/openseek/agent_runtime",
+  "bobzhang/openseek/agent_tool/internal/sandbox",
   "bobzhang/openseek/agent_tool/shell_exec",
 }
 
@@ -14,14 +15,14 @@ import {
 pub struct BgJobRuntime {
   // private fields
 }
-pub fn BgJobRuntime::adopt(Self, @shell_exec.ShellExecution, command~ : String, cwd? : String, source_write_sandboxed? : Bool, sandbox_denial_subjects? : Array[String]) -> String
+pub fn BgJobRuntime::adopt(Self, @shell_exec.ShellExecution, command~ : String, cwd? : String, denial_classifier? : @sandbox.SourceWriteDenialClassifier) -> String
 pub fn BgJobRuntime::list(Self) -> Array[BgJobSnapshot]
 pub fn[X] BgJobRuntime::new(@agent_runtime.AgentTaskScope[X], spill_dir? : String, hard_output_cap? : Int, hard_timeout_ms? : Int, on_job_exit? : (BgJobSnapshot) -> Unit) -> Self
 pub async fn BgJobRuntime::read_output(Self, String) -> String?
 pub async fn BgJobRuntime::read_output_tail(Self, String, Int) -> String?
 pub fn BgJobRuntime::snapshot(Self, String) -> BgJobSnapshot?
 pub async fn BgJobRuntime::spawn_foreground_retained(Self, String, Array[String], String?, Int) -> @shell_exec.ShellExecution
-pub async fn BgJobRuntime::start(Self, program~ : String, args~ : Array[String], command~ : String, cwd? : String, max_output_chars? : Int, source_write_sandboxed? : Bool, sandbox_denial_subjects? : Array[String]) -> String
+pub async fn BgJobRuntime::start(Self, program~ : String, args~ : Array[String], command~ : String, cwd? : String, max_output_chars? : Int, denial_classifier? : @sandbox.SourceWriteDenialClassifier) -> String
 pub async fn BgJobRuntime::stop(Self, String) -> Bool
 pub async fn BgJobRuntime::wait_exit(Self, String, Int) -> Bool
 
@@ -37,8 +38,7 @@ pub struct BgJobSnapshot {
   seq : Int
   exit_code : Int?
   had_invalid_utf8 : Bool
-  source_write_sandboxed : Bool
-  sandbox_denial_subjects : Array[String]
+  denial_classifier : @sandbox.SourceWriteDenialClassifier?
   killed_by_output_limit : Bool
   killed_by_time_limit : Bool
 }

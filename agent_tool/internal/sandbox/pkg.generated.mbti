@@ -17,7 +17,7 @@ pub async fn source_write_readonly_profile_data(String, writable_lab? : String) 
 // Errors
 
 // Types and methods
-pub struct ProcessCommand {
+pub(all) struct ProcessCommand {
   program : String
   args : Array[String]
 }
@@ -29,6 +29,7 @@ pub struct SandboxedCommand {
 
 type SourceWriteDenialClassifier
 pub fn SourceWriteDenialClassifier::output_reports_denial(Self, String) -> Bool
+pub fn SourceWriteDenialClassifier::with_subjects(Array[String]) -> Self
 
 pub struct SourceWriteProfileData {
   profile : String

@@ -17,17 +17,16 @@ priv enum SourceWriteMode {
 
 ///|
 priv struct AgentShellLaunch {
-  program : String
-  args : Array[String]
-  source_write_sandboxed : Bool
-  sandbox_denial_subjects : Array[String]
+  command : @sandbox.ProcessCommand
+  // `Some` exactly when the command runs under the source-write sandbox; the
+  // classifier judges that command's output for kernel denials.
+  denial_classifier : @sandbox.SourceWriteDenialClassifier?
 }
 
 ///|
 priv struct AgentShellOutput {
   output : ShellOutput
-  source_write_sandboxed : Bool
-  sandbox_denial_subjects : Array[String]
+  denial_classifier : @sandbox.SourceWriteDenialClassifier?
 }
 
 ///|
@@ -62,9 +61,8 @@ async fn agent_shell_launch(
     Some(cwd) => Some(@fs.realpath(cwd) catch { _ => cwd })
     None => None
   }
-  // The lab is realpath'd because sandbox-exec matches `file-write*` rules
-  // against the kernel-canonical path (macOS `/tmp` → `/private/tmp`): the
-  // allow-subpath must name the real path or it never matches.
+  // The lab is realpath'd for the static-policy checks below; the sandbox
+  // capability resolves it again on its own before emitting any rule.
   let scratch_dir = match scratch_dir {
     Some(lab) => Some(@fs.realpath(lab) catch { _ => lab })
     None => None
@@ -84,6 +82,10 @@ async fn agent_shell_launch(
   } else {
     mode
   }
+  let sandbox = @sandbox.SourceWriteSandbox::create_if_available(
+    real_workspace_root,
+    writable_subtree?=scratch_dir,
+  )
   // A scratch lab means this is a read-only subagent child whose ONLY
   // sanctioned writes are lab-local. The static guard admitted this
   // command as lab-bound, but "trusted" moon writes (e.g. `moon new`) would
@@ -92,28 +94,27 @@ async fn agent_shell_launch(
   // denies any workspace-source write regardless of guard precision.
   let mode = if scratch_dir is Some(_) &&
     mode is TrustedSourceWrite &&
-    @sandbox.sandbox_exec_available() {
+    sandbox is Some(_) {
     SourceReadOnly
   } else {
     mode
   }
-  if mode is TrustedSourceWrite || !@sandbox.sandbox_exec_available() {
-    return {
-      program: @platform_shell.program,
-      args: @platform_shell.args(cmd),
-      source_write_sandboxed: false,
-      sandbox_denial_subjects: [],
+  match (mode, sandbox) {
+    (TrustedSourceWrite, _) | (_, None) =>
+      {
+        command: {
+          program: @platform_shell.program,
+          args: @platform_shell.args(cmd),
+        },
+        denial_classifier: None,
+      }
+    (SourceReadOnly, Some(sandbox)) => {
+      let wrapped = sandbox.wrap_shell_command(cmd)
+      {
+        command: wrapped.command,
+        denial_classifier: Some(wrapped.denial_classifier),
+      }
     }
-  }
-  let profile_data = @sandbox.source_write_readonly_profile_data(
-    real_workspace_root,
-    writable_lab?=scratch_dir,
-  )
-  {
-    program: @sandbox.SandboxExecPath,
-    args: @sandbox.sandbox_exec_args(profile_data.profile, cmd),
-    source_write_sandboxed: true,
-    sandbox_denial_subjects: profile_data.denial_subjects,
   }
 }
 
@@ -5370,11 +5371,8 @@ fn append_shell_sandbox_feedback_if_needed(
 fn agent_output_has_shell_sandbox_denial(
   agent_output : AgentShellOutput,
 ) -> Bool {
-  agent_output.source_write_sandboxed &&
-  @sandbox.source_write_denied_in_text(
-    agent_output.output.text,
-    agent_output.sandbox_denial_subjects,
-  )
+  agent_output.denial_classifier is Some(classifier) &&
+  classifier.output_reports_denial(agent_output.output.text)
 }
 
 ///|

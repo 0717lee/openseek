@@ -88,8 +88,7 @@ priv struct BgJob {
   exec : @shell_exec.ShellExecution
   // Sandbox metadata carried from the launch (opaque to bgjobs) so a reader can
   // apply the same source-write-denial detection the foreground path does.
-  source_write_sandboxed : Bool
-  sandbox_denial_subjects : Array[String]
+  denial_classifier : @sandbox.SourceWriteDenialClassifier?
 }
 
 ///|
@@ -110,8 +109,7 @@ pub struct BgJobSnapshot {
   // Preserved so a reader can match the foreground path's error semantics: mark
   // binary output as an error, and detect a sandboxed source-write denial.
   had_invalid_utf8 : Bool
-  source_write_sandboxed : Bool
-  sandbox_denial_subjects : Array[String]
+  denial_classifier : @sandbox.SourceWriteDenialClassifier?
   // The job was killed by the output-limit watchdog (flooded past the hard cap),
   // not stopped on request — surfaced so the kill is never silent.
   killed_by_output_limit : Bool
@@ -226,22 +224,14 @@ pub async fn BgJobRuntime::start(
   command~ : String,
   cwd? : String,
   max_output_chars? : Int = default_max_output_chars,
-  source_write_sandboxed? : Bool = false,
-  sandbox_denial_subjects? : Array[String] = [],
+  denial_classifier? : @sandbox.SourceWriteDenialClassifier,
 ) -> String {
   // Reserve one id and use it for both the spill file and the registry entry, so
   // the job id and its `<id>.out` file never diverge.
   let id = self.next_id()
   let spill_path = self.spill_dir.map(dir => "\{dir}/\{id}.out")
   let exec = (self.spawn_exec)(program, args, cwd, max_output_chars, spill_path)
-  self.register(
-    id,
-    exec,
-    command~,
-    cwd?,
-    source_write_sandboxed~,
-    sandbox_denial_subjects~,
-  )
+  self.register(id, exec, command~, cwd?, denial_classifier?)
   id
 }
 
@@ -255,18 +245,10 @@ pub fn BgJobRuntime::adopt(
   exec : @shell_exec.ShellExecution,
   command~ : String,
   cwd? : String,
-  source_write_sandboxed? : Bool = false,
-  sandbox_denial_subjects? : Array[String] = [],
+  denial_classifier? : @sandbox.SourceWriteDenialClassifier,
 ) -> String {
   let id = self.next_id()
-  self.register(
-    id,
-    exec,
-    command~,
-    cwd?,
-    source_write_sandboxed~,
-    sandbox_denial_subjects~,
-  )
+  self.register(id, exec, command~, cwd?, denial_classifier?)
   id
 }
 
@@ -278,17 +260,9 @@ fn BgJobRuntime::register(
   exec : @shell_exec.ShellExecution,
   command~ : String,
   cwd? : String,
-  source_write_sandboxed~ : Bool,
-  sandbox_denial_subjects~ : Array[String],
+  denial_classifier? : @sandbox.SourceWriteDenialClassifier,
 ) -> Unit {
-  self.jobs[id] = {
-    id,
-    command,
-    cwd,
-    exec,
-    source_write_sandboxed,
-    sandbox_denial_subjects,
-  }
+  self.jobs[id] = { id, command, cwd, exec, denial_classifier }
   // Watch for the job ending on its own and fire `on_job_exit` once: a natural
   // exit, or the output-limit watchdog killing a flooding job — both must be
   // surfaced (a watchdog kill silently eating an unwatched job would look like
@@ -346,8 +320,7 @@ fn BgJob::to_snapshot(self : BgJob) -> BgJobSnapshot {
     seq: self.exec.seq(),
     exit_code: self.exec.exit_code(),
     had_invalid_utf8: self.exec.had_invalid_utf8(),
-    source_write_sandboxed: self.source_write_sandboxed,
-    sandbox_denial_subjects: self.sandbox_denial_subjects,
+    denial_classifier: self.denial_classifier,
     killed_by_output_limit: self.exec.killed_by_output_limit(),
     killed_by_time_limit: self.exec.killed_by_time_limit(),
   }
@@ -651,7 +624,7 @@ async test "an adopted job keeps its original wall-clock deadline" {
     let exec = rt.spawn_foreground_retained("sh", ["-c", "sleep 5"], None, 200)
     @async.sleep(120)
     let _ = exec.background()
-    let id = rt.adopt(exec, command="sleep 5", source_write_sandboxed=false, sandbox_denial_subjects=[])
+    let id = rt.adopt(exec, command="sleep 5")
     // Deadline measured from process start: ~30ms remain, not a fresh 150ms —
     // the poll budget below is far under 150ms of slack either way.
     let snapshot = poll_until_terminal(rt, id, ticks=40)

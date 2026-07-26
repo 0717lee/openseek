@@ -81,23 +81,59 @@ async test "wrap_program produces the argv shape without a shell" {
 }
 
 ///|
+/// Raises on every platform: input validation runs before the availability
+/// probe, so a caller bug cannot hide behind `None` where enforcement
+/// happens to be unavailable.
 async test "a writable subtree covering the root is a caller bug, not a profile" {
   @vfs.with_tmpdir(prefix="openseek-sandbox-capability-cover-", dir => {
-    // Only meaningful where the probe passes; elsewhere the guard skips.
-    guard @sandbox.SourceWriteSandbox::create_if_available(dir) is Some(_) else {
+    @fs.mkdir("\{dir}/nested")
+    // The root itself...
+    assert_true(create_raises(dir, writable_subtree=dir))
+    // ...and an ancestor of the root both re-allow everything: rejected.
+    assert_true(create_raises("\{dir}/nested", writable_subtree=dir))
+    // A sibling subtree is legitimate.
+    assert_false(create_raises("\{dir}/nested", writable_subtree=dir + "/lab"))
+  })
+}
+
+///|
+async fn create_raises(root : String, writable_subtree~ : String) -> Bool {
+  try {
+    ignore(
+      @sandbox.SourceWriteSandbox::create_if_available(root, writable_subtree~),
+    )
+    false
+  } catch {
+    _ => true
+  }
+}
+
+///|
+/// The subjects a profile scan discovers must reach the classifier: a denied
+/// DIRECTORY carries no protected suffix, so only the flowed-through subject
+/// can recognize it. The canned line is the real errno shape a directory
+/// rename denial produces.
+async test "profile subjects flow into the classifier" {
+  @vfs.with_tmpdir(prefix="openseek-sandbox-capability-subjects-", dir => {
+    @fs.mkdir("\{dir}/pkg")
+    @fs.write_file(
+      "\{dir}/pkg/x.mbt",
+      "pub fn x() -> Int { 1 }\n",
+      create_mode=CreateOrTruncate,
+    )
+    guard @sandbox.SourceWriteSandbox::create_if_available(dir) is Some(sandbox) else {
       return
     }
-    let covering = try {
-      ignore(
-        @sandbox.SourceWriteSandbox::create_if_available(
-          dir,
-          writable_subtree=dir,
-        ),
-      )
-      false
-    } catch {
-      _ => true
-    }
-    assert_true(covering)
+    let wrapped = sandbox.wrap_shell_command(":")
+    let real_root = @fs.realpath(dir)
+    let canned = "PermissionError: [Errno 1] Operation not permitted: '\{real_root}/pkg'\n"
+    // Recognized only through the profile's own subjects...
+    assert_true(wrapped.denial_classifier.output_reports_denial(canned))
+    // ...as proven by an empty-subject classifier missing the same line.
+    assert_false(
+      @sandbox.SourceWriteDenialClassifier::with_subjects([]).output_reports_denial(
+        canned,
+      ),
+    )
   })
 }

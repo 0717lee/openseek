@@ -1,8 +1,8 @@
 ///|
 /// A program-plus-arguments pair ready to hand to `@process.spawn`/`run`.
-/// Fields are readable so launchers can destructure them; construction stays
-/// inside this package.
-pub struct ProcessCommand {
+/// Plain data — `pub(all)` so an unsandboxed launcher can build the same
+/// shape this package's wrappers produce.
+pub(all) struct ProcessCommand {
   program : String
   args : Array[String]
 }
@@ -58,7 +58,9 @@ pub async fn SourceWriteSandbox::create_if_available(
   workspace_root : String,
   writable_subtree? : String,
 ) -> SourceWriteSandbox? {
-  guard sandbox_exec_available() else { return None }
+  // Inputs are validated BEFORE the availability probe, so a caller bug is
+  // reported identically on every platform instead of hiding behind `None`
+  // wherever enforcement happens to be unavailable.
   let real_root = @fs.realpath(workspace_root)
   let subtree = match writable_subtree {
     Some(dir) => {
@@ -79,13 +81,16 @@ pub async fn SourceWriteSandbox::create_if_available(
     }
     None => None
   }
+  guard sandbox_exec_available() else { return None }
   let data = source_write_readonly_profile_data(
     real_root,
     writable_lab?=subtree,
   )
   Some({
     profile: data.profile,
-    classifier: { denial_subjects: data.denial_subjects },
+    // Copied: the profile cache hands out its own array, and a classifier
+    // must keep classifying with the subjects its command actually ran under.
+    classifier: { denial_subjects: data.denial_subjects.copy() },
   })
 }
 
@@ -121,6 +126,17 @@ pub fn SourceWriteSandbox::wrap_program(
     },
     denial_classifier: self.classifier,
   }
+}
+
+///|
+/// Build a classifier directly from denial subjects. This exists for tests
+/// and fixtures that exercise denial detection without a live sandbox (the
+/// wiring must stay covered on platforms where the probe cannot pass);
+/// production code receives its classifier from a `SandboxedCommand`.
+pub fn SourceWriteDenialClassifier::with_subjects(
+  denial_subjects : Array[String],
+) -> SourceWriteDenialClassifier {
+  { denial_subjects, }
 }
 
 ///|

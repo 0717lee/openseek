@@ -357,8 +357,7 @@ async fn shell(
           exec,
           command=input.cmd,
           cwd?,
-          source_write_sandboxed=launch.source_write_sandboxed,
-          sandbox_denial_subjects=launch.sandbox_denial_subjects,
+          denial_classifier?=launch.denial_classifier,
         )
       }
     },
@@ -501,7 +500,12 @@ async fn run_agent_shell_with_tree_precheck(
     // await, so a timeout must stop it here — not leak it — and a turn
     // cancellation must too (the catch stops it before re-raising).
     Some(spawn) => {
-      let exec = spawn(launch.program, launch.args, cwd, max_output_chars)
+      let exec = spawn(
+        launch.command.program,
+        launch.command.args,
+        cwd,
+        max_output_chars,
+      )
       let finished = @async.with_timeout_opt(timeout_ms, () => {
         exec.wait_or_invalid()
       }) catch {
@@ -543,8 +547,8 @@ async fn run_agent_shell_with_tree_precheck(
     None => {
       let collected = @async.with_timeout_opt(timeout_ms, () => {
         collect_process_output(
-          launch.program,
-          launch.args,
+          launch.command.program,
+          launch.command.args,
           cwd?,
           max_output_chars~,
         )
@@ -552,11 +556,7 @@ async fn run_agent_shell_with_tree_precheck(
       match collected {
         None => ShellTimedOut
         Some(output) =>
-          ShellExecuted({
-            output,
-            source_write_sandboxed: launch.source_write_sandboxed,
-            sandbox_denial_subjects: launch.sandbox_denial_subjects,
-          })
+          ShellExecuted({ output, denial_classifier: launch.denial_classifier })
       }
     }
   }
@@ -580,8 +580,7 @@ fn agent_shell_output_from_exec(
       // memory-only one was killed at it (truncated, hard cap == inline cap).
       output_limit_reached: exec.over_inline_cap() || exec.output_truncated(),
     },
-    source_write_sandboxed: launch.source_write_sandboxed,
-    sandbox_denial_subjects: launch.sandbox_denial_subjects,
+    denial_classifier: launch.denial_classifier,
   }
 }
 
@@ -632,13 +631,12 @@ async fn start_background(
     scratch_dir?,
   )
   let id = runtime.start(
-    program=launch.program,
-    args=launch.args,
+    program=launch.command.program,
+    args=launch.command.args,
     command=input.cmd,
     cwd?,
     max_output_chars=input.max_output_chars,
-    source_write_sandboxed=launch.source_write_sandboxed,
-    sandbox_denial_subjects=launch.sandbox_denial_subjects,
+    denial_classifier?=launch.denial_classifier,
   )
   @agent_tool.ToolAction::respond(
     "started background job \{id}: `\{input.cmd}`. Read its output with shell_output (job_id=\"\{id}\") and stop it with shell_stop (job_id=\"\{id}\").",
