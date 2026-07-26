@@ -13,8 +13,18 @@ pub(all) enum Command {
 /// denial subjects stay together so output is always classified against the
 /// profile that produced it.
 struct SandboxedCommand {
+  /// Executable to spawn for this prepared invocation. It is the first half of
+  /// the process command and must be passed together with `args`. When sandbox
+  /// enforcement is available, this is the platform's `sandbox-exec` binary.
   program : String
+  /// Companion argument vector for `program`: the generated profile followed
+  /// by either the platform-shell invocation or the requested `Exec`
+  /// program/argv. For example, `Shell("moon check")` prepares approximately
+  /// `program = "/usr/bin/sandbox-exec"` with
+  /// `args = ["-p", "<profile>", "sh", "-c", "moon check"]` on macOS.
   args : Array[String]
+  /// Protected paths and basenames derived from the same profile encoded in
+  /// `args`, retained so denial reporting cannot use metadata from another run.
   denial_subjects : Array[String]
 }
 
