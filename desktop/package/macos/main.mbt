@@ -652,6 +652,33 @@ async fn write_jit_entitlements(ws : @packaging.Workspace) -> String {
 }
 
 ///|
+priv struct ArtifactPlan {
+  dmg : Bool
+  zip : Bool
+} derive(Debug, Eq)
+
+///|
+fn parse_artifact_plan(values : ArrayView[String]) -> ArtifactPlan raise {
+  if values.is_empty() {
+    return { dmg: true, zip: true }
+  }
+  let mut dmg = false
+  let mut zip = false
+  for value in values {
+    match value {
+      "app" => ()
+      "dmg" => dmg = true
+      "zip" => zip = true
+      value =>
+        raise @packaging.PackageError(
+          "unsupported macOS package target '\{value}'; expected app, dmg, or zip",
+        )
+    }
+  }
+  { dmg, zip }
+}
+
+///|
 /// Signing configuration from the package arguments: `--sign <identity>` names
 /// a Developer ID Application identity for distribution, `--notarize <profile>`
 /// names a notarytool keychain profile.
@@ -661,11 +688,22 @@ priv struct SignConfig {
 }
 
 ///|
+priv struct PackageOptions {
+  artifacts : ArtifactPlan
+  sign : SignConfig
+}
+
+///|
 fn package_command() -> @argparse.Command {
   Command(
     "package/macos",
     about="Build the macOS app bundle, DMG, and zip archive.",
     options=[
+      OptionArg(
+        "target",
+        action=Append,
+        about="Artifact to produce: app, dmg, or zip. Repeatable; defaults to dmg and zip.",
+      ),
       OptionArg(
         "sign",
         about="Developer ID Application identity for distribution signing.",
@@ -697,12 +735,20 @@ fn parsed_option_value(
 }
 
 ///|
-fn parse_sign_config(argv? : ArrayView[String]) -> SignConfig raise {
+fn parse_package_options(argv? : ArrayView[String]) -> PackageOptions raise {
   let matches = package_command().parse(argv?)
-  {
+  let artifacts = match matches.values.get("target") {
+    Some(values) => parse_artifact_plan(values)
+    None => parse_artifact_plan([])
+  }
+  let sign = {
     identity: parsed_option_value(matches, "sign"),
     notary_profile: parsed_option_value(matches, "notarize"),
   }
+  if sign.notary_profile is Some(_) && !artifacts.dmg {
+    raise @packaging.PackageError("--notarize requires --target dmg")
+  }
+  { artifacts, sign }
 }
 
 ///|
@@ -856,17 +902,25 @@ async fn notarize_if_configured(
 }
 
 ///|
-async fn sign_and_package(ws : @packaging.Workspace, sign : SignConfig) -> Unit {
+async fn sign_and_package(
+  ws : @packaging.Workspace,
+  sign : SignConfig,
+  artifacts : ArtifactPlan,
+) -> Unit {
   sign_app(ws, sign)
-  create_dmg(ws, sign)
-  notarize_if_configured(ws, sign)
-  zip_app(ws)
+  if artifacts.dmg {
+    create_dmg(ws, sign)
+    notarize_if_configured(ws, sign)
+  }
+  if artifacts.zip {
+    zip_app(ws)
+  }
 }
 
 ///|
 async fn main {
   // Parse first: a mistyped flag must fail before the build, not after it.
-  let sign = parse_sign_config()
+  let options = parse_package_options()
   let ws = @packaging.locate_workspace()
   @packaging.ensure_cmake(ws)
   build_outputs(ws)
@@ -874,20 +928,25 @@ async fn main {
   reset_bundle_dirs(ws)
   copy_bundle_files(ws)
   write_bundle_metadata(ws)
-  sign_and_package(ws, sign)
+  sign_and_package(ws, options.sign, options.artifacts)
   println("generated \{ws.at(AppPath)}")
-  println("generated \{ws.at(DmgPath)}")
-  println("generated \{ws.at(ZipPath)}")
-  println(
-    "release with scripts/publish-release.sh — it uploads the zip to openseek-api and publishes the version",
-  )
+  if options.artifacts.dmg {
+    println("generated \{ws.at(DmgPath)}")
+  }
+  if options.artifacts.zip {
+    println("generated \{ws.at(ZipPath)}")
+    println(
+      "release with scripts/publish-release.sh — it uploads the zip to openseek-api and publishes the version",
+    )
+  }
 }
 
 ///|
 test "macos package args default to ad-hoc signing" {
-  let config = parse_sign_config(argv=[])
-  assert_true(config.identity is None)
-  assert_true(config.notary_profile is None)
+  let options = parse_package_options(argv=[])
+  assert_true(options.sign.identity is None)
+  assert_true(options.sign.notary_profile is None)
+  assert_eq(options.artifacts, { dmg: true, zip: true })
 }
 
 ///|
@@ -949,16 +1008,18 @@ test "macos helper executable rpath points back to bundled proton runtime" {
 
 ///|
 test "macos package args parse signing and notarization" {
-  let config = parse_sign_config(argv=[
+  let options = parse_package_options(argv=[
     "--sign", "Developer ID Application: Example", "--notarize", "notary",
   ])
-  assert_true(config.identity is Some("Developer ID Application: Example"))
-  assert_true(config.notary_profile is Some("notary"))
+  assert_true(
+    options.sign.identity is Some("Developer ID Application: Example"),
+  )
+  assert_true(options.sign.notary_profile is Some("notary"))
 }
 
 ///|
 test "macos notarization requires distribution signing" {
-  try parse_sign_config(argv=["--notarize", "notary"]) catch {
+  try parse_package_options(argv=["--notarize", "notary"]) catch {
     err =>
       assert_true(
         err
@@ -969,5 +1030,56 @@ test "macos notarization requires distribution signing" {
       )
   } noraise {
     _ => fail("expected --notarize without --sign to fail")
+  }
+}
+
+///|
+test "macos package target app skips distribution archives" {
+  let options = parse_package_options(argv=["--target", "app"])
+  assert_eq(options.artifacts, { dmg: false, zip: false })
+}
+
+///|
+test "macos package target dmg includes the app but skips zip" {
+  let options = parse_package_options(argv=["--target", "dmg"])
+  assert_eq(options.artifacts, { dmg: true, zip: false })
+}
+
+///|
+test "macos package targets can be repeated" {
+  let options = parse_package_options(argv=[
+    "--target", "app", "--target", "zip",
+  ])
+  assert_eq(options.artifacts, { dmg: false, zip: true })
+}
+
+///|
+test "macos package rejects an unsupported target" {
+  try parse_package_options(argv=["--target", "pkg"]) catch {
+    err =>
+      assert_true(
+        err
+        .to_string()
+        .contains(
+          "unsupported macOS package target 'pkg'; expected app, dmg, or zip",
+        ),
+      )
+  } noraise {
+    _ => fail("expected unsupported target to fail")
+  }
+}
+
+///|
+test "macos notarization requires the dmg target" {
+  try
+    parse_package_options(argv=[
+      "--target", "app", "--sign", "Developer ID Application: Example", "--notarize",
+      "notary",
+    ])
+  catch {
+    err =>
+      assert_true(err.to_string().contains("--notarize requires --target dmg"))
+  } noraise {
+    _ => fail("expected app-only notarization to fail")
   }
 }
