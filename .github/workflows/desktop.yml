@@ -1,8 +1,8 @@
 name: Desktop
 
 # Root CI owns workspace-wide formatting, generated-interface checks, and the
-# native/JS check and test matrix. This workflow keeps the Desktop-specific
-# macOS release test and platform bundle builds.
+# native/JS check and test matrix. This workflow keeps Proton's macOS release
+# tests and the platform bundle builds.
 on:
   push:
     branches: [main]
@@ -20,22 +20,15 @@ concurrency:
 
 jobs:
   desktop-test:
-    name: desktop test (release) (${{ matrix.moonbit-channel }})
-    # macOS, not headless Linux: several runtime tests drive a real webview via
-    # app.run(), which needs a GUI session. Proton's own CI skips those tests on
-    # Linux for the same reason. --release links with the system toolchain (the
-    # debug `tcc` path cannot resolve the WebKit/GTK framework flags).
+    name: proton macOS release test (stable)
+    # Keep stable coverage separate; the nightly run shares the macOS artifact
+    # job below. These runtime/window tests need a macOS GUI session, and
+    # --release links with the system toolchain (the debug `tcc` path cannot
+    # resolve the WebKit framework flags). Scope the command to Proton so this
+    # workflow does not repeat root CI's workspace-wide native tests.
     runs-on: macos-latest
     permissions:
       contents: read
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - moonbit-channel: nightly
-            moonbit-version: nightly
-          - moonbit-channel: stable
-            moonbit-version: latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
@@ -43,9 +36,9 @@ jobs:
       - name: Check out the Proton submodule
         run: git submodule update --init desktop/lepus
 
-      - name: Set up MoonBit (${{ matrix.moonbit-channel }})
+      - name: Set up MoonBit (stable)
         run: |
-          curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash -s -- "${{ matrix.moonbit-version }}"
+          curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash -s -- latest
           echo "$HOME/.moon/bin" >> $GITHUB_PATH
 
       - name: Show MoonBit version
@@ -66,11 +59,8 @@ jobs:
           done
           exit 1
 
-      - name: Install Lepus codegen tool
-        run: moon -C desktop/lepus install ./cli --bin target/lepus-tools
-
-      - name: Test (release)
-        run: moon -C desktop test --target native --release
+      - name: Test Proton runtime (release)
+        run: moon test --target native --release -p justjavac/proton/native
 
   desktop-appimage:
     name: desktop appimage (linux)
@@ -167,6 +157,12 @@ jobs:
             sleep $((attempt * 10))
           done
           exit 1
+
+      # The stable run is a separate job above. Run nightly here so both
+      # toolchain channels still cover Proton without reserving a third macOS
+      # runner or repeating root CI's workspace-wide native tests.
+      - name: Test Proton runtime (release)
+        run: moon test --target native --release -p justjavac/proton/native
 
       # No --sign or --notarize argument, so the app is only ad-hoc signed,
       # the DMG container is unsigned, and neither artifact is intended for
