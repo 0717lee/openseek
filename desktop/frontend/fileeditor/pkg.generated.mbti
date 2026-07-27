@@ -2,9 +2,9 @@
 package "openseek_desktop/frontend/fileeditor"
 
 import {
-  "moonbit-community/editor/base/common",
   "moonbit-community/rabbita/cmd",
   "moonbit-community/rabbita/html",
+  "moonbitlang/editor/base/common",
   "openseek_desktop/internal/pathx",
 }
 

@@ -58,7 +58,7 @@
   /* editorError/Warning/Info/Hint.border are null in VS Code's normal (non-HC)
      themes, so they stay unset here too — the visible squiggle is the runtime
      inline-SVG background computed from the *-foreground tokens above
-     (viewer/browser/view/squiggly_theme.mbt), not this border rule. The
+     (internal/viewer/browser/view/squiggly_theme.mbt), not this border rule. The
      border-double/dotted CSS in markers.css is a faithful copy of the HC
      fallback and is correctly inert (this viewer has no high-contrast theme). */
   --vscode-editorUnnecessaryCode-opacity: 0.67;
@@ -448,13 +448,12 @@
 }
 
 /* viewer/browser/view_parts/view_lines/view_lines.css */
-/* Lines content starts after the margin; text-like child layers carry
-   the synthetic scroll transform. */
+/* Monaco's sole synthetic-scroll rail. The editor-scrollable wrapper starts
+   after the margin; cached top/left writes move this 2^24px surface. */
 .lines-content {
   position: absolute;
   top: 0;
-  right: 0;
-  bottom: 0;
+  left: 0;
   z-index: 1;
 }
 
@@ -462,7 +461,6 @@
   position: absolute;
   top: 0;
   left: 0;
-  will-change: transform;
   z-index: 1;
   user-select: none;
 }
@@ -502,7 +500,6 @@
   position: absolute;
   top: 0;
   left: 0;
-  will-change: transform;
   /* Selection paints behind the text (below .view-lines, z-index 1), matching
      Monaco: the glyphs render on top of an opaque selection background. */
   z-index: 0;
@@ -518,29 +515,11 @@
   width: 100%;
 }
 
-/* viewer/browser/view_parts/view_zones/view_zones.css */
-.view-zones {
-  position: absolute;
-  top: 0;
-  left: 0;
-  will-change: transform;
-  z-index: 3;
-}
-
-.view-zone {
-  position: absolute;
-  left: 0;
-  right: 0;
-  box-sizing: border-box;
-  overflow: hidden;
-}
-
 /* viewer/browser/view_parts/content_widgets/content_widgets.css */
 .contentWidgets {
   position: absolute;
   top: 0;
   left: 0;
-  will-change: transform;
   z-index: 50;
 }
 
@@ -700,9 +679,10 @@
   top: 0;
   /* Deviations from Monaco (which stacks by DOM order and hit-tests through
      its own target classification): the port's layers carry explicit
-     z-indices (view-overlays 0 < view-lines 1 < view-zones 3 < caret 4 <
-     contentWidgets 50), and the caret must not intercept the DOM caret
-     hit-testing (caretPositionFromPoint) the port's selection uses. */
+     z-indices (view-overlays 0 < view-lines 1 < caret 4 < contentWidgets 50),
+     while ViewZones deliberately keeps the source's DOM-order stacking. The
+     caret must not intercept the DOM caret hit-testing
+     (caretPositionFromPoint) the port's selection uses. */
   z-index: 4;
   pointer-events: none;
 }
@@ -840,18 +820,6 @@
   text-decoration: line-through;
 }
 
-/* viewer/browser/view_parts/view_lines/inlay_hints.css */
-.inlay-hint {
-  color: var(--vscode-descriptionForeground);
-  font-style: normal;
-  opacity: 0.9;
-}
-
-.inlay-hint-type,
-.inlay-hint-parameter {
-  color: var(--vscode-descriptionForeground);
-}
-
 /* viewer/browser/view_parts/view_lines/markers.css */
 /*
  * Marker squiggle decorations, ported line-for-line from
@@ -927,7 +895,7 @@
 
 /* viewer/contrib/folding/browser/folding.css */
 /* Ported from vscode/src/vs/editor/contrib/folding/browser/folding.css
-   (vscode submodule commit 294fb350837dbaee37b949533fead4df4e0e8971),
+   (checked-in vscode submodule),
    minus the `.monaco-editor` scope prefix (the viewer's convention) and the
    `.monaco-reduce-motion` override (no reduce-motion root class). The
    chevron nodes are the margin rows' `.cldr` divs
@@ -1127,6 +1095,17 @@
   font-family: var(--monaco-monospace-font);
 }
 
+.monaco-hover .markdown-hover .hover-contents .moonbit-viewer-markdown-diagram {
+  max-width: 100%;
+  overflow: auto;
+}
+
+.monaco-hover .markdown-hover .hover-contents .moonbit-viewer-markdown-diagram > svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
 /* No box styling (background/padding/radius): the editor hover renders
  * tokenized code directly on the widget background; `textCodeBlock-background`
  * applies only to inline `code` above. The font-family stands in for Monaco's
@@ -1200,7 +1179,7 @@
 
 /* viewer/contrib/quick_diff/browser/quick_diff.css */
 /* Port of `vscode/src/vs/workbench/contrib/scm/browser/media/
-   dirtydiffDecorator.css` (vscode 294fb350), trimmed to the classes the
+   dirtydiffDecorator.css` (vscode checked-in source), trimmed to the classes the
    viewer emits: `primary` only, no `pattern`/`secondary` variants (single
    provider, no gutter-pattern setting) and no peek-widget/`monaco-workbench`
    motion rules. The `QuickDiffWorkbenchController` dynamic stylesheet's
@@ -1704,6 +1683,20 @@
   background: color-mix(in srgb, var(--vscode-editorWidget-border, var(--vscode-widget-border)) 25%, transparent);
 }
 
+.agent-feedback-widget .agent-feedback-widget-text .moonbit-viewer-markdown-diagram,
+.agent-feedback-widget .agent-feedback-widget-reply-text .moonbit-viewer-markdown-diagram {
+  max-width: 100%;
+  max-height: min(50vh, 480px);
+  overflow: auto;
+}
+
+.agent-feedback-widget .agent-feedback-widget-text .moonbit-viewer-markdown-diagram > svg,
+.agent-feedback-widget .agent-feedback-widget-reply-text .moonbit-viewer-markdown-diagram > svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
 /* Gutter decoration for the hovered item's range indicator */
 .agent-feedback-widget-range-glyph {
   margin-left: 8px;
@@ -1799,4 +1792,3 @@
 .agent-feedback-widget-button-delete:hover {
   background: var(--vscode-button-secondaryHoverBackground);
 }
-
