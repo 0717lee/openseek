@@ -17,7 +17,7 @@ pub(all) struct ParsedLog {
   events : Array[@agent_session.SessionEvent]
   errors : Array[LineError]
   partial_tail : Bool
-} derive(Debug)
+} derive(Eq, Debug)
 
 ///|
 /// Parse a session file into a header record and typed `SessionEvent`s,

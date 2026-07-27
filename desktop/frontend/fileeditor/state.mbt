@@ -14,7 +14,7 @@ pub(all) struct FileEntry {
   name : String
   path : @pathx.Relative
   is_dir : Bool
-}
+} derive(Eq)
 
 ///|
 /// A decoded `read_file` reply. Withheld files are their own cases — the
@@ -49,7 +49,7 @@ pub(all) enum TabState {
   // user's bookmark — showing a notice until the file reappears or the tab
   // is closed.
   TabDeleted
-}
+} derive(Eq)
 
 ///|
 /// One open file in the editor's tab strip. Identified by its
@@ -62,7 +62,7 @@ pub(all) struct Tab {
   // The file changed on disk while the tab was in the background; reloaded
   // on activation rather than eagerly, so a build storm costs one read.
   stale : Bool
-}
+} derive(Eq)
 
 ///|
 /// A conversation's tab set, remembered across conversation switches. Only
@@ -72,13 +72,13 @@ pub(all) struct Tab {
 pub(all) struct RememberedTab {
   path : @pathx.Relative
   name : String
-}
+} derive(Eq)
 
 ///|
 pub(all) struct RememberedTabs {
   entries : Array[RememberedTab]
   active : @pathx.Relative?
-}
+} derive(Eq)
 
 ///|
 /// One file's decoded `stat_files` result: its current mtime signature, or
@@ -104,7 +104,7 @@ pub(all) enum FileIndex {
   // `truncated` set means the walk hit the host's cap, so matches may be
   // missing; the filter footer says so.
   IndexReady(files~ : Array[@pathx.Relative], truncated~ : Bool)
-}
+} derive(Eq)
 
 ///|
 /// The editor side-panel's state: a lazily-loaded file tree of the active
@@ -155,7 +155,7 @@ pub(all) struct State {
   cursor : @pathx.Relative?
   // The last directory/file failure, surfaced in the panel header.
   error : String
-}
+} derive(Eq)
 
 ///|
 pub fn State::empty() -> State {
@@ -187,7 +187,7 @@ pub fn State::empty() -> State {
 pub(all) enum TreeLayout {
   BottomPanel
   RightSidebar
-}
+} derive(Eq)
 
 ///|
 /// The stored wire name's inverse; an unknown value falls back to the

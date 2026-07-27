@@ -26,19 +26,19 @@ pub struct LineError {
   line_number : Int
   content : String
   message : String
-} derive(@debug.Debug)
+} derive(Eq, @debug.Debug)
 
 pub(all) struct ParsedLog {
   header : SessionFileHeader?
   events : Array[@agent_session.SessionEvent]
   errors : Array[LineError]
   partial_tail : Bool
-} derive(@debug.Debug)
+} derive(Eq, @debug.Debug)
 
 pub(all) struct SessionFileHeader {
   id : String
   system_prompt : String
-} derive(@debug.Debug)
+} derive(Eq, @debug.Debug)
 pub impl ToJson for SessionFileHeader
 
 // Type aliases

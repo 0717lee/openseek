@@ -25,7 +25,7 @@ pub const ContextYieldAnswerPrefix : String = "[context ceiling]"
 /// paths. Use `generated` for ids created by OpenSeek itself.
 pub struct SessionId {
   priv value : String
-} derive(Debug)
+} derive(Eq, Debug)
 
 ///|
 /// Wrap a raw id string exactly as supplied.
@@ -99,14 +99,14 @@ pub fn SessionId::generated(
 /// `Session::chat_messages`.
 pub struct UserMessage {
   priv content : String
-} derive(Debug, ToJson, FromJson)
+} derive(Eq, Debug, ToJson, FromJson)
 
 ///|
 priv struct SessionToolCall {
   id : String
   name : String
   arguments : String
-} derive(Debug, ToJson, FromJson)
+} derive(Eq, Debug, ToJson, FromJson)
 
 ///|
 fn SessionToolCall::from_deepseek(call : @deepseek.ToolCall) -> SessionToolCall {
@@ -143,7 +143,7 @@ pub struct AssistantMessage {
   priv content : String
   priv tool_calls : Array[SessionToolCall]
   priv reasoning_content : String?
-} derive(Debug, ToJson, FromJson)
+} derive(Eq, Debug, ToJson, FromJson)
 
 ///|
 /// Build an assistant event payload from model response parts.
@@ -211,7 +211,7 @@ pub struct ToolResult {
   priv content : String
   priv is_error : Bool
   priv brief : String?
-} derive(Debug, ToJson, FromJson)
+} derive(Eq, Debug, ToJson, FromJson)
 
 ///|
 /// Record the outcome of one tool execution.
@@ -268,7 +268,7 @@ pub fn ToolResult::is_error(self : ToolResult) -> Bool {
 /// originate from the user's prompt.
 pub struct RuntimeNotice {
   priv content : String
-} derive(Debug, ToJson, FromJson)
+} derive(Eq, Debug, ToJson, FromJson)
 
 ///|
 /// First line of the runtime notices the agent loop injects as plan-cadence
@@ -299,7 +299,7 @@ pub struct SessionSummary {
   priv content : String
   priv from_sequence : Int
   priv to_sequence : Int
-} derive(Debug, ToJson, FromJson)
+} derive(Eq, Debug, ToJson, FromJson)
 
 ///|
 /// Return the summary text used in model-facing projection.
@@ -341,7 +341,7 @@ pub(all) enum TurnTerminal {
   /// The turn ended because an unexpected error escaped the agent loop. The
   /// failure message projects as an assistant status message.
   Failed(String)
-} derive(Debug)
+} derive(Eq, Debug)
 
 ///|
 /// Payload vocabulary for one `SessionEvent`.
@@ -376,7 +376,7 @@ pub(all) enum SessionItem {
   /// `Finished(text)` can project as a final assistant message; aborted,
   /// interrupted, and failed terminals project assistant status messages.
   Terminal(TurnTerminal)
-} derive(Debug)
+} derive(Eq, Debug)
 
 ///|
 /// One append-only event in a session log.
@@ -395,7 +395,7 @@ pub struct SessionEvent {
   // string); milliseconds are exactly representable until year ~2255.
   priv ts : Double
   priv item : SessionItem
-} derive(Debug, ToJson, FromJson)
+} derive(Eq, Debug, ToJson, FromJson)
 
 ///|
 fn SessionEvent::SessionEvent(
@@ -438,7 +438,7 @@ pub struct Session {
   priv system_prompt : String
   priv events : @vector.Vector[SessionEvent]
   priv last_sequence : Int
-} derive(Debug)
+} derive(Eq, Debug)
 
 ///|
 /// Build a session from identity, system prompt, and an optional event log.

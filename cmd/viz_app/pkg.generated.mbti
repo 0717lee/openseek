@@ -8,11 +8,11 @@ package "bobzhang/openseek-viz-app"
 // Types and methods
 type LoadOutcome
 
-type Model
+type Model derive(Eq)
 
 type Msg
 
-type SessionRow
+type SessionRow derive(Eq)
 
 type Theme derive(Eq)
 

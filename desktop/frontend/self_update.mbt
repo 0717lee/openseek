@@ -10,7 +10,7 @@
 priv enum UpdateChannel {
   Production
   Staging
-}
+} derive(Eq)
 
 ///|
 fn UpdateChannel::parse(value : String) -> UpdateChannel {
@@ -47,7 +47,7 @@ priv enum UpdateUx {
   RestartingForUpdate(version~ : String)
   // What the Settings row shows when a check could not answer.
   UpdateCheckFailed(message~ : String)
-}
+} derive(Eq)
 
 ///|
 /// A decoded `check_update` reply. Kinds mirror the wire contract; see the

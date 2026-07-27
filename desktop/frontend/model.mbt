@@ -56,7 +56,7 @@ priv enum ApiProvider {
   Openseek
   Deepseek
   Custom
-}
+} derive(Eq)
 
 ///|
 fn ApiProvider::wire(self : ApiProvider) -> String {
@@ -102,7 +102,7 @@ priv enum CompactionPhase {
   // The engine reported `compaction_started` and has not yet reported the
   // summary or a failure.
   Compacting
-}
+} derive(Eq)
 
 ///|
 /// The run lifecycle of one conversation, as a single value: the old
@@ -119,7 +119,7 @@ priv enum RunPhase {
   Starting
   // The host's `started` event opened run `run_id`.
   Open(run_id~ : Int, stage~ : TurnStage)
-}
+} derive(Eq)
 
 ///|
 /// How far an open turn has progressed — one axis, like the old status
@@ -134,7 +134,7 @@ priv enum TurnStage {
   AtStep(Int?)
   // A Stop was sent and the engine has not yet honored it.
   Cancelling
-}
+} derive(Eq)
 
 ///|
 /// How a finished run closed, kept for the topbar/sidebar after the run
@@ -143,7 +143,7 @@ priv enum RunEnd {
   RunFailed
   RunErrored
   RunFinished(RunOutcome)
-}
+} derive(Eq)
 
 ///|
 /// One conversation's full client-side state. Each conversation maps to a
@@ -208,7 +208,7 @@ priv struct Conversation {
   // notices when the run ends, so the text never vanishes silently.
   pending_steers : Array[String]
   messages : Array[@transcript.TranscriptItem]
-}
+} derive(Eq)
 
 ///|
 /// What the main area shows: the active conversation, the Skills page, or
@@ -219,7 +219,7 @@ priv enum Screen {
   Chat
   Skills
   Settings
-}
+} derive(Eq)
 
 ///|
 /// Which trigger opened the composer's completion menu: `/` lists built-in
@@ -230,7 +230,7 @@ priv enum CompletionKind {
   SlashCommands
   SkillMentions
   Symbols
-}
+} derive(Eq)
 
 ///|
 /// One row of the composer completion menu.
@@ -251,7 +251,7 @@ priv struct CompletionItem {
   // range anchored at its line.
   path : String?
   range : @common.Range?
-}
+} derive(Eq)
 
 ///|
 /// One accepted mention, shown as a chip above the composer and folded into
@@ -264,7 +264,7 @@ priv struct CompletionItem {
 priv struct Mention {
   ref_ : @mention_context.MentionRef
   range : @common.Range?
-}
+} derive(Eq)
 
 ///|
 /// The composer's open completion menu: the trigger that opened it, the
@@ -279,7 +279,7 @@ priv struct Completion {
   selected : Int
   loading : Bool
   task_without_token : String
-}
+} derive(Eq)
 
 ///|
 /// The last workspace-symbol results, cached so the `#` menu can show them
@@ -291,7 +291,7 @@ priv struct SymbolCache {
   session : String
   query : String
   items : Array[CompletionItem]
-}
+} derive(Eq)
 
 ///|
 fn empty_symbol_cache() -> SymbolCache {
@@ -306,7 +306,7 @@ priv enum SkillsCatalog {
   CatalogLoading
   CatalogReady(Array[@transcript.MarketSkillItem])
   CatalogFailed(String)
-}
+} derive(Eq)
 
 ///|
 /// Whether the host bridge is up — three states the old `bridge_ready` bool
@@ -316,7 +316,7 @@ priv enum BridgeState {
   Connecting
   Connected
   BridgeLost(String)
-}
+} derive(Eq)
 
 ///|
 priv struct Model {
@@ -433,7 +433,7 @@ priv struct Model {
   // download to the restart. One enum, so "checking", "downloading" and
   // "confirming" cannot overlap.
   update_ux : UpdateUx
-}
+} derive(Eq)
 
 ///|
 /// The topbar app launcher's state: whether its menu is open, the detected
@@ -442,7 +442,7 @@ priv struct Model {
 priv struct Launcher {
   open : Bool
   apps : LauncherApps
-}
+} derive(Eq)
 
 ///|
 /// The launcher's probe of the host's installed apps. There is no separate
@@ -453,7 +453,7 @@ priv enum LauncherApps {
   AppsNotFetched
   AppsFetched(Array[@transcript.LauncherAppItem])
   AppsFailed(String)
-}
+} derive(Eq)
 
 ///|
 priv enum Msg {
@@ -1123,7 +1123,7 @@ priv enum RunOutcome {
   Cancelled
   MaxStepsExhausted
   Unknown(String)
-}
+} derive(Eq)
 
 ///|
 fn RunOutcome::parse(wire : String) -> RunOutcome {

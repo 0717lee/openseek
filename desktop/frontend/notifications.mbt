@@ -13,7 +13,7 @@ const NotificationLifetimeMs : Int = 6000
 priv struct Notification {
   id : Int
   message : String
-}
+} derive(Eq)
 
 ///|
 /// The window corner where toasts stack — a Settings choice, persisted under
@@ -24,7 +24,7 @@ priv enum NotificationCorner {
   TopRight
   BottomLeft
   BottomRight
-}
+} derive(Eq)
 
 ///|
 fn NotificationCorner::parse(value : String) -> NotificationCorner {

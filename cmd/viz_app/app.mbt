@@ -12,7 +12,7 @@ struct SessionRow {
   // sidebar strips the last path segment when grouping. Absent → `false`.
   is_marker : Bool
   first_prompt : String
-}
+} derive(Eq)
 
 ///|
 /// The whole viewer state. The current session is kept as the parsed log plus a
@@ -52,7 +52,7 @@ struct Model {
   // keyed by child session id — rendered inline inside the parent's subrun
   // tool cards. Cleared on every selection change.
   subrun_children : Map[String, @agent_session.Session]
-}
+} derive(Eq)
 
 ///|
 /// Colour theme. `System` is the default and follows the OS via a CSS
