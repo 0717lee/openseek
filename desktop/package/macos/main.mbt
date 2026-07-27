@@ -868,6 +868,7 @@ async fn main {
   // Parse first: a mistyped flag must fail before the build, not after it.
   let sign = parse_sign_config()
   let ws = @packaging.locate_workspace()
+  @packaging.ensure_cmake(ws)
   build_outputs(ws)
   println("built openseek engine: \{ws.engine_binary()}")
   reset_bundle_dirs(ws)

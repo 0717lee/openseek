@@ -20,6 +20,8 @@ pub async fn copy_tree(String, String) -> Unit
 
 pub fn engine_package() -> String
 
+pub async fn ensure_cmake(Workspace, command? : String) -> Unit
+
 pub async fn ensure_dir(String) -> Unit
 
 pub async fn ensure_proton_cli(Workspace, String) -> Unit

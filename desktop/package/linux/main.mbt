@@ -198,6 +198,7 @@ async fn build_appimage(ws : @packaging.Workspace, tool : String) -> Unit {
 ///|
 async fn main {
   let ws = @packaging.locate_workspace()
+  @packaging.ensure_cmake(ws)
   build_outputs(ws)
   println("built openseek engine: \{ws.engine_binary()}")
   reset_bundle_dirs(ws)
