@@ -56,7 +56,7 @@ fn events_jsonl(session : @agent_session.Session) -> String {
 ///|
 #warnings("-alert_unstable")
 fn render(html : @html.Html) -> String {
-  @rabbita.render_to_string(@rabbita.static_cell(html))
+  @rabbita.render_to_string(() => @rabbita.Val::constant(html))
 }
 
 ///|
