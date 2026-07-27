@@ -352,6 +352,23 @@ moon run --target native package/macos
 moon -C desktop run --target native package/macos
 ```
 
+For local testing, build and sign only the app bundle:
+
+```sh
+moon run --target native package/macos -- --target app
+```
+
+To build the app and a specific distribution artifact, select `dmg` or `zip`:
+
+```sh
+moon run --target native package/macos -- --target dmg
+moon run --target native package/macos -- --target zip
+```
+
+`--target` is repeatable. The `dmg` and `zip` targets always include the app
+bundle they package. With no `--target`, the command keeps its release-oriented
+default and produces the app, DMG, and ZIP.
+
 The bundled engine is built from the same checkout, so the desktop app and its
 engine never drift out of version with each other.
 
