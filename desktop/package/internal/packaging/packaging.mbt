@@ -17,11 +17,10 @@ const FrontendBundleOutput : String = "frontend.js"
 const ViewerStyleOutput : String = "viewer.css"
 
 ///|
-/// Where moon materializes the `moonbit-community/editor` registry dependency
-/// — `.mooncakes` under the monorepo root, where the single root moon.work
-/// resolves all registry checkouts; the viewer's CSS and font assets are read
-/// from this checkout (resolve via `repo_at`, not `at`).
-const EditorDepRoot : String = ".mooncakes/moonbit-community/editor"
+/// The editor workspace member whose CSS and font assets are bundled with the
+/// desktop frontend. The path is relative to the monorepo root and therefore
+/// resolves through `repo_at`, not `at`.
+const EditorDepRoot : String = "editor"
 
 ///|
 /// The editor dependency's CSS files the embedded viewer depends on (relative
@@ -37,15 +36,13 @@ fn viewer_css_sources() -> Array[String] {
     "internal/shell/workbench/theme.css", "viewer/browser/view/codicon/codicon.css",
     "viewer/browser/view/editor.css", "viewer/ui/scrollbar/scrollable_element.css",
     "viewer/browser/view_parts/view_lines/view_lines.css", "viewer/browser/view_parts/selections/view_overlays.css",
-    "viewer/browser/view_parts/view_zones/view_zones.css", "viewer/browser/view_parts/content_widgets/content_widgets.css",
-    "viewer/browser/view_parts/overlay_widgets/overlay_widgets.css", "viewer/browser/view_parts/selections/selections.css",
-    "viewer/browser/view_parts/current_line_highlight/current_line_highlight.css",
+    "viewer/browser/view_parts/content_widgets/content_widgets.css", "viewer/browser/view_parts/overlay_widgets/overlay_widgets.css",
+    "viewer/browser/view_parts/selections/selections.css", "viewer/browser/view_parts/current_line_highlight/current_line_highlight.css",
     "viewer/browser/view_parts/decorations/decorations.css", "viewer/browser/view_parts/view_cursors/view_cursors.css",
     "viewer/browser/view_parts/margin/margin.css", "viewer/browser/view_parts/margin/lines_decorations.css",
-    "viewer/browser/view_parts/view_lines/tokens.css", "viewer/browser/view_parts/view_lines/inlay_hints.css",
-    "viewer/browser/view_parts/view_lines/markers.css", "viewer/contrib/folding/browser/folding.css",
-    "viewer/contrib/hover/hover.css", "viewer/contrib/quick_diff/browser/quick_diff.css",
-    "viewer/contrib/agent_feedback/browser/agent_feedback.css",
+    "viewer/browser/view_parts/view_lines/tokens.css", "viewer/browser/view_parts/view_lines/markers.css",
+    "viewer/contrib/folding/browser/folding.css", "viewer/contrib/hover/hover.css",
+    "viewer/contrib/quick_diff/browser/quick_diff.css", "viewer/contrib/agent_feedback/browser/agent_feedback.css",
   ]
 }
 

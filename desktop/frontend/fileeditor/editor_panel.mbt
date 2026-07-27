@@ -1,4 +1,4 @@
-// The embedded read-only code viewer (moonbit-community/editor). Rabbita has
+// The embedded read-only code viewer (moonbitlang/editor). Rabbita has
 // no escape hatch for a foreign DOM widget, so the viewer owns one stable,
 // never-diffed host element: the view renders `<div id="viewer-host">` empty,
 // and after the first paint the viewer attaches its imperative DOM into it.
@@ -28,12 +28,10 @@ priv struct ViewerHost {
   // batched behind a mount request whose after-render tick precedes the async
   // reply, so by the time a document arrives the viewer exists.
   mut viewer : @viewer.Viewer?
-  // The viewer's services, built here rather than defaulted inside the viewer
-  // so we keep a handle on the `MarkerService` — the viewer holds them
-  // privately. The host pushes diagnostics through it (`apply_diagnostics`),
-  // and the viewer renders the squiggles for whichever resource its model
-  // currently shows.
-  mut services : @viewer.ViewerServices?
+  // Desktop owns the concrete marker and feedback stores passed through the
+  // Viewer's public handle API. They receive language-server diagnostics and
+  // turn inline reviews into composer chips without requiring editor internals.
+  mut services : DesktopViewerServices?
   // The absolute path of the file the viewer currently shows, so a
   // diagnostics push that arrives for a different file (or after the panel
   // cleared its document) is dropped rather than drawn over the wrong
@@ -78,18 +76,15 @@ fn mounted_viewer() -> @viewer.Viewer? {
 fn register_tokenizers() -> Unit {
   @languages.languages.set_tokens_provider(
     "moonbit",
-    @lang_moonbit.MoonbitTokenizer::new(),
+    @lang_moonbit.MoonbitTokenizer(),
   )
   |> ignore
   @languages.languages.set_tokens_provider(
     "javascript",
-    @lang_javascript.JavascriptTokenizer::new(),
+    @lang_javascript.JavascriptTokenizer(),
   )
   |> ignore
-  @languages.languages.set_tokens_provider(
-    "json",
-    @lang_json.JsonTokenizer::new(),
-  )
+  @languages.languages.set_tokens_provider("json", @lang_json.JsonTokenizer())
   |> ignore
 }
 
@@ -110,21 +105,23 @@ fn request_viewer_mount(dispatch : @cmd.Emit[Msg]) -> @cmd.Cmd {
         is Some(host) {
         register_tokenizers()
         register_hover_provider()
-        let services = @viewer.ViewerServices::new()
+        let services = DesktopViewerServices()
         viewer_state.services = Some(services)
         let viewer = @viewer.Viewer::create(
           host,
-          services~,
+          services=services.viewer_services,
           options=@viewer.ViewerOptions(
             theme="light",
             placeholder="Select a file to view",
           ),
         )
         viewer_state.viewer = Some(viewer)
-        services.agent_feedback.on_did_add_feedback(event => {
+        services.feedback.on_did_add_feedback(event => {
           // Only user comments on a file this app put on screen (a URI it
           // minted) become chips; anything else is not ours to carry.
-          guard event.feedback.kind is UserReview else { return }
+          guard event.feedback.kind is @agent_feedback_api.UserReview else {
+            return
+          }
           guard model_uri_path(event.feedback.resource) is Some(_) else {
             return
           }
@@ -173,7 +170,7 @@ pub fn remove_editor_feedback(
     // The string is the `to_string()` of a URI this package minted, so the
     // re-parse cannot fail; a stray unparsable string has no bubble anyway.
     let uri = @common.Uri::parse(resource.0) catch { _ => return }
-    services.agent_feedback.remove_feedback(uri, feedback_id)
+    services.feedback.remove_feedback(uri, feedback_id)
   })
 }
 
@@ -234,7 +231,7 @@ fn show_file_in_viewer(
     if !same_document {
       // Park the outgoing document's scroll position for its tab's return.
       if viewer_state.relative is Some(prev) &&
-        viewer.has_model() &&
+        viewer.get_model() is Some(_) &&
         viewer.save_view_state() is Some(view_state) {
         viewer_state.view_states[prev.0] = view_state
       }
@@ -266,7 +263,7 @@ fn show_file_in_viewer(
     // Commenting (select → inline input → composer chip) is for real files;
     // a notice document has nothing behind it to comment on.
     if viewer_state.services is Some(services) {
-      services.agent_feedback.set_feedback_enabled(uri, absolute is Some(_))
+      services.feedback.set_feedback_enabled(uri, absolute is Some(_))
       if absolute is Some(_) {
         // A fresh document view starts with no bubbles (comments become
         // chips the moment they are filed, so anything lingering here is a
@@ -278,13 +275,13 @@ fn show_file_in_viewer(
         // jump that carries an annotation — a plain unchanged reload must
         // not clear what the user is looking at (or typing into).
         if !same_document || annotation is Some(_) {
-          services.agent_feedback.clear_feedback(uri)
+          services.feedback.clear_feedback(uri)
           if annotation is Some(text) && range is Some(range) {
-            services.agent_feedback.add_feedback(
+            services.feedback.add_feedback(
               uri,
               range,
               text,
-              state=Submitted,
+              state=@agent_feedback_api.Submitted,
             )
             |> ignore
           }
