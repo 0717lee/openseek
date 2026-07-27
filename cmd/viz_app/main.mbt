@@ -1,7 +1,8 @@
 ///|
 /// Rabbita 0.13 only propagates a state value when its `Eq` comparison changes.
-/// The visualizer model still contains mutable collections and intentionally
-/// preserves the old full-view refresh after every accepted message.
+/// The visualizer rebuilds mutable containers before changing them, but its
+/// parsed-log and session types do not expose structural `Eq` yet. Preserve the
+/// old full-view refresh until equality is available through that type graph.
 priv struct AppState(Model)
 
 ///|
