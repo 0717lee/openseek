@@ -207,7 +207,7 @@ jobs:
       - name: Build the Windows ZIP
         if: github.event_name == 'pull_request'
         shell: pwsh
-        run: moon -C desktop run --target native package/windows -- --zip-only
+        run: moon -C desktop run --target native package/windows -- --target zip
 
       - name: Build the Windows app bundle and installer
         if: github.event_name != 'pull_request'

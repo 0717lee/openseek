@@ -31,18 +31,54 @@ const ProgramFilesMakensis : String = "C:/Program Files/NSIS/makensis.exe"
 const AppAssetDir : String = BundleDir + "/assets"
 
 ///|
+priv struct ArtifactPlan {
+  zip : Bool
+  installer : Bool
+} derive(Debug, Eq)
+
+///|
+fn ArtifactPlan::parse(values : ArrayView[String]) -> ArtifactPlan raise {
+  if values.is_empty() {
+    return { zip: true, installer: true }
+  }
+  let mut zip = false
+  let mut installer = false
+  for value in values {
+    match value {
+      "app" => ()
+      "zip" => zip = true
+      "installer" => installer = true
+      value =>
+        raise @packaging.PackageError(
+          "unsupported Windows package target '\{value}'; expected app, zip, or installer",
+        )
+    }
+  }
+  { zip, installer }
+}
+
+///|
 fn package_command() -> @argparse.Command {
   Command(
     "package/windows",
     about="Build the Windows app bundle, portable zip, and NSIS installer.",
-    flags=[
-      FlagArg(
-        "zip-only",
-        long="zip-only",
-        about="Build the app bundle and portable zip without the NSIS installer",
+    options=[
+      OptionArg(
+        "target",
+        action=Append,
+        about="Artifact to produce: app, zip, or installer. Repeatable; defaults to zip and installer.",
       ),
     ],
   )
+}
+
+///|
+fn ArtifactPlan::parse_args(argv? : ArrayView[String]) -> ArtifactPlan raise {
+  let matches = package_command().parse(argv?)
+  match matches.values.get("target") {
+    Some(values) => ArtifactPlan::parse(values)
+    None => ArtifactPlan::parse([])
+  }
 }
 
 ///|
@@ -286,11 +322,11 @@ async fn build_installer(ws : @packaging.Workspace) -> Unit {
 
 ///|
 async fn main {
-  let matches = package_command().parse()
-  let zip_only = matches.flags.get("zip-only").unwrap_or(false)
+  // Parse first: a mistyped target must fail before the build, not after it.
+  let artifacts = ArtifactPlan::parse_args()
   let ws = @packaging.locate_workspace()
   @packaging.ensure_cmake(ws)
-  if !zip_only {
+  if artifacts.installer {
     ensure_makensis(ws)
   }
   let with_wsl_engine = build_outputs(ws)
@@ -300,9 +336,11 @@ async fn main {
   }
   reset_bundle_dirs(ws)
   copy_bundle_files(ws, with_wsl_engine~)
-  zip_bundle(ws)
-  println("generated \{ws.at(ZipPath)}")
-  if !zip_only {
+  if artifacts.zip {
+    zip_bundle(ws)
+    println("generated \{ws.at(ZipPath)}")
+  }
+  if artifacts.installer {
     build_installer(ws)
     println("generated \{ws.at(InstallerPath)}")
   }
@@ -310,39 +348,68 @@ async fn main {
 }
 
 ///|
-test "windows package args accept no mode arguments" {
-  let matches = package_command().parse(argv=[])
-  assert_eq(matches.flags.get("zip-only").unwrap_or(false), false)
+test "windows package args default to zip and installer" {
+  assert_eq(ArtifactPlan::parse_args(argv=[]), { zip: true, installer: true })
 }
 
 ///|
-test "windows package args accept zip-only mode" {
-  let matches = package_command().parse(argv=["--zip-only"])
-  assert_eq(matches.flags.get("zip-only"), Some(true))
+test "windows package target app skips distribution archives" {
+  assert_eq(ArtifactPlan::parse_args(argv=["--target", "app"]), {
+    zip: false,
+    installer: false,
+  })
 }
 
 ///|
-test "windows package args reject removed installer flag" {
-  try package_command().parse(argv=["--installer"]) catch {
-    err =>
-      assert_true(
-        err.to_string().contains("unexpected argument '--installer' found"),
-      )
-  } noraise {
-    _ => fail("expected removed --installer flag to fail")
-  }
+test "windows package target zip skips installer" {
+  assert_eq(ArtifactPlan::parse_args(argv=["--target", "zip"]), {
+    zip: true,
+    installer: false,
+  })
 }
 
 ///|
-test "windows package args reject removed bare mode" {
-  try package_command().parse(argv=["installer"]) catch {
+test "windows package target installer skips zip" {
+  assert_eq(ArtifactPlan::parse_args(argv=["--target", "installer"]), {
+    zip: false,
+    installer: true,
+  })
+}
+
+///|
+test "windows package targets can be repeated" {
+  assert_eq(
+    ArtifactPlan::parse_args(argv=[
+      "--target", "app", "--target", "zip", "--target", "installer",
+    ]),
+    { zip: true, installer: true },
+  )
+}
+
+///|
+test "windows package rejects an unsupported target" {
+  try ArtifactPlan::parse_args(argv=["--target", "msi"]) catch {
     err =>
       assert_true(
         err
         .to_string()
-        .contains("unexpected value 'installer' found; no more were expected"),
+        .contains(
+          "unsupported Windows package target 'msi'; expected app, zip, or installer",
+        ),
       )
   } noraise {
-    _ => fail("expected removed installer mode to fail")
+    _ => fail("expected unsupported Windows package target to fail")
+  }
+}
+
+///|
+test "windows package args reject removed zip-only flag" {
+  try ArtifactPlan::parse_args(argv=["--zip-only"]) catch {
+    err =>
+      assert_true(
+        err.to_string().contains("unexpected argument '--zip-only' found"),
+      )
+  } noraise {
+    _ => fail("expected removed --zip-only flag to fail")
   }
 }

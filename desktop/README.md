@@ -247,10 +247,12 @@ Without additional arguments, the command builds every output: the
 `dist/OpenSeek Desktop-windows-x64.zip` portable zip, and the
 `dist/OpenSeek-Desktop-Setup.exe` NSIS installer.
 
-Pass `--zip-only` when the installer is not needed:
+Use repeatable `--target` options to select `app`, `zip`, or `installer`.
+The app bundle is always built; selecting `app` alone skips both distribution
+archives. For example, build only the bundle and portable zip with:
 
 ```powershell
-moon -C desktop run --target native package/windows -- --zip-only
+moon -C desktop run --target native package/windows -- --target zip
 ```
 
 This still builds the bundle directory and portable zip, but does not require
