@@ -10,7 +10,7 @@ let session_file_version : Int = 1
 pub(all) struct SessionFileHeader {
   id : String
   system_prompt : String
-} derive(Debug)
+} derive(Eq, Debug)
 
 ///|
 /// Encode a header record as the JSON stored on a session file's first line.
@@ -78,7 +78,7 @@ pub struct LineError {
   line_number : Int
   content : String
   message : String
-} derive(Debug)
+} derive(Eq, Debug)
 
 ///|
 /// Build an immutable `Session` from parsed events plus the header values the

@@ -8,7 +8,7 @@ pub(all) struct LauncherAppItem {
   id : String
   name : String
   icon : String
-}
+} derive(Eq)
 
 ///|
 /// Parse a `list_apps` reply. `None` only for structurally unusable JSON;

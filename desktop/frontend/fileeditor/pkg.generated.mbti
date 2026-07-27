@@ -45,13 +45,13 @@ pub(all) struct FileEntry {
   name : String
   path : @pathx.Relative
   is_dir : Bool
-}
+} derive(Eq)
 
 pub(all) enum FileIndex {
   IndexEmpty
   IndexLoading
   IndexReady(files~ : Array[@pathx.Relative], truncated~ : Bool)
-}
+} derive(Eq)
 
 pub(all) struct FileStat {
   path : @pathx.Relative
@@ -89,12 +89,12 @@ pub(all) enum Msg {
 pub(all) struct RememberedTab {
   path : @pathx.Relative
   name : String
-}
+} derive(Eq)
 
 pub(all) struct RememberedTabs {
   entries : Array[RememberedTab]
   active : @pathx.Relative?
-}
+} derive(Eq)
 
 pub(all) struct State {
   open : Bool
@@ -112,7 +112,7 @@ pub(all) struct State {
   index : FileIndex
   cursor : @pathx.Relative?
   error : String
-}
+} derive(Eq)
 pub fn State::empty() -> Self
 
 pub(all) struct Tab {
@@ -120,7 +120,7 @@ pub(all) struct Tab {
   name : String
   state : TabState
   stale : Bool
-}
+} derive(Eq)
 
 pub(all) enum TabState {
   TabLoading
@@ -128,12 +128,12 @@ pub(all) enum TabState {
   TabBinary
   TabOversized
   TabDeleted
-}
+} derive(Eq)
 
 pub(all) enum TreeLayout {
   BottomPanel
   RightSidebar
-}
+} derive(Eq)
 pub fn TreeLayout::parse(String) -> Self
 pub fn TreeLayout::wire(Self) -> String
 
