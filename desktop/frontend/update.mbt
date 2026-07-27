@@ -7271,7 +7271,11 @@ test "an inline symbol reply rebuilds the live completion menu" {
   )
   let (_, loaded) = update(
     dispatch,
-    SymbolsLoaded(session="desktop-test", query="parse", items=[item]),
+    SymbolsLoaded(
+      owner={ channel: Local, session: "desktop-test" },
+      query="parse",
+      items=[item],
+    ),
     searching,
   )
   guard loaded.completion is Some(menu) else {

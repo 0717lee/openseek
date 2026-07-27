@@ -157,6 +157,16 @@ priv struct EmbedModel {
 }
 
 ///|
+/// Preserve the example shell's full-render behavior while composing the
+/// explorer through Rabbita's reactive value API.
+priv struct EmbedState(EmbedModel)
+
+///|
+impl Eq for EmbedState with fn equal(_, _) {
+  false
+}
+
+///|
 priv enum EmbedMsg {
   Boot
   OpenFile(@base_common.Uri)
@@ -289,6 +299,7 @@ fn open_embed_document_cmd(uri : @base_common.Uri) -> @rabbita.Cmd {
 fn view_embed(
   _emit : @rabbita.Emit[EmbedMsg],
   model : EmbedModel,
+  tree : @html.Html,
 ) -> @html.Html {
   @html.main_(
     class="editor-shell",
@@ -304,7 +315,7 @@ fn view_embed(
             @html.div(class="workspace-title", [
               @html.span(class="workspace-title-label", "Explorer"),
             ]),
-            embed_tree().view(),
+            tree,
           ],
         ),
         // The stable view host: the viewer attaches its imperative DOM
@@ -329,29 +340,36 @@ fn main {
     @lang_moonbit.MoonbitTokenizer(),
   )
   |> ignore
-  let (_, cell) = @rabbita.cell_with_emit(
-    model={ status: "loading" },
-    update=update_embed,
-    view=view_embed,
-    subscriptions=(emit, _model) => {
-      startup_sub(
-        @cmd.custom_cmd(scheduler => {
-          embed_dispatch.val = Some(msg => scheduler.add(emit(msg)))
-          // Boot after the first paint: the view host and the tree cell
-          // must be in the DOM before the viewer attaches and opens.
-          scheduler.add(
-            @cmd.custom_cmd(
-              after => {
-                embed_viewer() |> ignore
-                after.add(emit(Boot))
-              },
-              kind=@cmd.after_render,
-            ),
-          )
-        }),
-      )
-    },
-  )
-  let app = @rabbita.new(cell)
+  let app = @rabbita.new(() => {
+    let tree = embed_tree()
+    let (model, emit) = @rabbita.create_state(
+      EmbedState({ status: "loading" }),
+      update=(emit, msg, state : EmbedState) => {
+        let (cmd, model) = update_embed(emit, msg, state.0)
+        (EmbedState(model), cmd)
+      },
+      subscriptions=(emit, _state) => {
+        startup_sub(
+          @cmd.custom_cmd(scheduler => {
+            embed_dispatch.val = Some(msg => scheduler.add(emit(msg)))
+            // Boot after the first paint: the viewer host and the tree
+            // component must be in the DOM before the viewer attaches.
+            scheduler.add(
+              @cmd.custom_cmd(
+                after => {
+                  embed_viewer() |> ignore
+                  after.add(emit(Boot))
+                },
+                kind=@cmd.after_render,
+              ),
+            )
+          }),
+        )
+      },
+    )
+    model.view2(tree.view(), (state, tree_view) => {
+      view_embed(emit, state.0, tree_view)
+    })
+  })
   app.mount("app")
 }

@@ -8,7 +8,18 @@
 /// never opens documents itself.
 pub struct FileTree {
   priv emit : @rabbita.Emit[FileTreeMsg]
-  priv cell : @rabbita.Cell
+  priv component : () -> @rabbita.Val[@html.Html]
+}
+
+///|
+/// The tree model predates Rabbita's value-level change detection and mutates
+/// its cached nodes in place. Report every transition as changed so the new
+/// component API preserves the old cell's rendering behavior.
+priv struct FileTreeState(FileTreeModel)
+
+///|
+impl Eq for FileTreeState with fn equal(_, _) {
+  false
 }
 
 ///|
@@ -32,20 +43,22 @@ pub fn FileTree::FileTree(
     selected: None,
     pending_reveal: None,
   }
-  let (emit, cell) = @rabbita.cell_with_emit(
-    model~,
-    update=(emit, msg, model) => {
-      update_file_tree(provider, on_open, emit, msg, model)
-    },
-    view=view_file_tree,
-  )
-  { emit, cell }
+  let (state, emit) = @rabbita.create_state(FileTreeState(model), update=(
+    emit,
+    msg,
+    state : FileTreeState,
+  ) => {
+    let (cmd, model) = update_file_tree(provider, on_open, emit, msg, state.0)
+    (FileTreeState(model), cmd)
+  })
+  let component = () => state.view(state => view_file_tree(emit, state.0))
+  { emit, component }
 }
 
 ///|
-/// Embeds the tree as a Rabbita child cell.
-pub fn FileTree::view(self : FileTree) -> @html.Html {
-  self.cell.view()
+/// Returns the tree's reactive Rabbita child component.
+pub fn FileTree::view(self : FileTree) -> @rabbita.Val[@html.Html] {
+  (self.component)()
 }
 
 ///|

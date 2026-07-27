@@ -85,11 +85,13 @@ pub fn[G] spawn_host_pumps(
   group.spawn_bg(allow_failure=true, () => state.lsp.run())
   group.spawn_bg(allow_failure=true, () => {
     state.lsp.forward_diagnostics(async fn(push) {
-      emit("lsp.diagnostics", push.to_json())
+      emit("lsp.diagnostics", ToJson::to_json(push))
     })
   })
   group.spawn_bg(allow_failure=true, () => {
-    state.fs_watch.run(async fn(push) { emit("fs.changed", push.to_json()) })
+    state.fs_watch.run(async fn(push) {
+      emit("fs.changed", ToJson::to_json(push))
+    })
   })
   group.spawn_bg(allow_failure=true, () => cleanup_updates(state.updates))
 }
@@ -107,26 +109,38 @@ fn[T : @json.FromJson] decode_payload(payload : Json) -> T raise {
 /// as an unknown method rather than a failed op.
 pub async fn host_op(state : HostState, op : String, payload : Json) -> Json? {
   match op {
-    "skills.catalog" => Some(skills_catalog_op().to_json())
+    "skills.catalog" => Some(ToJson::to_json(skills_catalog_op()))
     "skills.install" =>
-      Some(install_skill_op(decode_payload(payload)).to_json())
-    "skills.installed" => Some(installed_skills_op().to_json())
+      Some(ToJson::to_json(install_skill_op(decode_payload(payload))))
+    "skills.installed" => Some(ToJson::to_json(installed_skills_op()))
     "skills.uninstall" =>
-      Some(uninstall_skill_op(decode_payload(payload)).to_json())
-    "host.open_path" => Some(open_path_op(decode_payload(payload)).to_json())
+      Some(ToJson::to_json(uninstall_skill_op(decode_payload(payload))))
+    "host.open_path" =>
+      Some(ToJson::to_json(open_path_op(decode_payload(payload))))
     "update.check" =>
-      Some(check_update_op(state.updates, decode_payload(payload)).to_json())
+      Some(
+        ToJson::to_json(check_update_op(state.updates, decode_payload(payload))),
+      )
     "update.download" =>
-      Some(download_update_op(state.updates, decode_payload(payload)).to_json())
-    "update.apply" => Some(apply_update_op(state.updates).to_json())
-    "git.branch" => Some(git_branch_op(decode_payload(payload)).to_json())
-    "app.list" => Some(list_apps_op().to_json())
-    "app.launch" => Some(launch_app_op(decode_payload(payload)).to_json())
+      Some(
+        ToJson::to_json(
+          download_update_op(state.updates, decode_payload(payload)),
+        ),
+      )
+    "update.apply" => Some(ToJson::to_json(apply_update_op(state.updates)))
+    "git.branch" =>
+      Some(ToJson::to_json(git_branch_op(decode_payload(payload))))
+    "app.list" => Some(ToJson::to_json(list_apps_op()))
+    "app.launch" =>
+      Some(ToJson::to_json(launch_app_op(decode_payload(payload))))
     "fs.read_directory" =>
-      Some(read_directory_op(decode_payload(payload)).to_json())
-    "fs.list_files" => Some(list_files_op(decode_payload(payload)).to_json())
-    "fs.read_file" => Some(read_file_op(decode_payload(payload)).to_json())
-    "fs.stat_files" => Some(stat_files_op(decode_payload(payload)).to_json())
+      Some(ToJson::to_json(read_directory_op(decode_payload(payload))))
+    "fs.list_files" =>
+      Some(ToJson::to_json(list_files_op(decode_payload(payload))))
+    "fs.read_file" =>
+      Some(ToJson::to_json(read_file_op(decode_payload(payload))))
+    "fs.stat_files" =>
+      Some(ToJson::to_json(stat_files_op(decode_payload(payload))))
     "fs.watch" => {
       state.fs_watch.watch(decode_payload(payload))
       Some(Json::empty_object())
@@ -136,12 +150,17 @@ pub async fn host_op(state : HostState, op : String, payload : Json) -> Json? {
       Some(Json::empty_object())
     }
     "lsp.hover" =>
-      Some(lsp_hover_op(state.lsp, decode_payload(payload)).to_json())
+      Some(ToJson::to_json(lsp_hover_op(state.lsp, decode_payload(payload))))
     "lsp.open" =>
-      Some(lsp_open_op(state.lsp, decode_payload(payload)).to_json())
+      Some(ToJson::to_json(lsp_open_op(state.lsp, decode_payload(payload))))
     "lsp.workspace_symbols" =>
-      Some(workspace_symbols_op(state.lsp, decode_payload(payload)).to_json())
-    "fs.browse" => Some(browse_directory_op(decode_payload(payload)).to_json())
+      Some(
+        ToJson::to_json(
+          workspace_symbols_op(state.lsp, decode_payload(payload)),
+        ),
+      )
+    "fs.browse" =>
+      Some(ToJson::to_json(browse_directory_op(decode_payload(payload))))
     _ => None
   }
 }

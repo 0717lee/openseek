@@ -24,6 +24,16 @@ priv struct WorkbenchModel {
 }
 
 ///|
+/// Preserve the pre-0.13 shell behavior: every message recomputes the whole
+/// shell while the explorer remains an independently reactive component.
+priv struct WorkbenchState(WorkbenchModel)
+
+///|
+impl Eq for WorkbenchState with fn equal(_, _) {
+  false
+}
+
+///|
 /// The shell's scroll policy for an incoming document read: a reload of the
 /// open document keeps the viewport (`save_view_state`/`restore_view_state`
 /// around `set_model`, the Monaco host pattern), a newly opened document
@@ -224,34 +234,41 @@ fn install_language_tokenizers(services : WorkbenchServices) -> Unit {
 /// Mounts the Rabbita workbench shell and attaches the viewer view after the
 /// first shell paint.
 pub fn mount_app() -> Unit {
-  let (_, cell) = @rabbita.cell_with_emit(
-    model=initial_workbench_model(),
-    update=update_workbench,
-    view=view_workbench,
-    subscriptions=(emit, _model) => {
-      @sub.batch([
-        startup_sub(
-          @cmd.custom_cmd(scheduler => {
-            workbench_dispatch.val = Some(msg => scheduler.add(emit(msg)))
-            protocol_send.val = Some(packet => {
-              scheduler.add(send_client_packet_cmd(emit, packet))
-            })
-            scheduler.add(emit(ConnectProtocol))
-            // The viewer view mounts into the stable host element after the
-            // shell's first paint; the shell never renders children into it.
-            scheduler.add(
-              @cmd.custom_cmd(
-                _ => attach_workbench_viewer(),
-                kind=@cmd.after_render,
-              ),
-            )
-          }),
-        ),
-        @sub.on_resize(emit.map(_ => WindowResized)),
-      ])
-    },
-  )
-  let app = @rabbita.new(cell)
+  let app = @rabbita.new(() => {
+    let tree = workspace_file_tree()
+    let (model, emit) = @rabbita.create_state(
+      WorkbenchState(initial_workbench_model()),
+      update=(emit, msg, state : WorkbenchState) => {
+        let (cmd, model) = update_workbench(emit, msg, state.0)
+        (WorkbenchState(model), cmd)
+      },
+      subscriptions=(emit, _state) => {
+        @sub.batch([
+          startup_sub(
+            @cmd.custom_cmd(scheduler => {
+              workbench_dispatch.val = Some(msg => scheduler.add(emit(msg)))
+              protocol_send.val = Some(packet => {
+                scheduler.add(send_client_packet_cmd(emit, packet))
+              })
+              scheduler.add(emit(ConnectProtocol))
+              // The viewer view mounts into the stable host element after the
+              // shell's first paint; the shell never renders children into it.
+              scheduler.add(
+                @cmd.custom_cmd(
+                  _ => attach_workbench_viewer(),
+                  kind=@cmd.after_render,
+                ),
+              )
+            }),
+          ),
+          @sub.on_resize(emit.map(_ => WindowResized)),
+        ])
+      },
+    )
+    model.view2(tree.view(), (state, tree_view) => {
+      view_workbench(emit, state.0, tree_view)
+    })
+  })
   app.mount("app")
 }
 
@@ -703,11 +720,12 @@ fn text_model_harness_json(model : @model.TextModel) -> String {
 fn view_workbench(
   emit : @rabbita.Emit[WorkbenchMsg],
   model : WorkbenchModel,
+  tree : @html.Html,
 ) -> @html.Html {
   @html.main_(class="editor-shell", attrs=shell_attrs(model), [
     view_topbar(model),
     @html.div(class="editor-main", [
-      view_sidebar(emit, model),
+      view_sidebar(emit, model, tree),
       // The stable viewer host: the viewer attaches its imperative DOM
       // into this element after mount, and the shell must never render
       // vdom children into it (Rabbita's diff would not know them).
@@ -750,6 +768,7 @@ fn view_topbar(model : WorkbenchModel) -> @html.Html {
 fn view_sidebar(
   emit : @rabbita.Emit[WorkbenchMsg],
   _model : WorkbenchModel,
+  tree : @html.Html,
 ) -> @html.Html {
   @html.aside(
     class="workspace-sidebar",
@@ -768,7 +787,7 @@ fn view_sidebar(
           icon_color_mode(),
         ),
       ]),
-      workspace_file_tree().view(),
+      tree,
     ],
   )
 }
