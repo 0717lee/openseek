@@ -162,6 +162,7 @@ jobs:
         uses: ilammy/msvc-dev-cmd@v1
 
       - name: Install NSIS
+        if: github.event_name != 'pull_request'
         shell: pwsh
         run: |
           # Retry up to 3 times: the Chocolatey community feed occasionally
@@ -200,8 +201,16 @@ jobs:
           }
           exit 1
 
+      # Pull requests upload only the portable ZIP, so they do not spend time
+      # installing NSIS or recompressing the same bundle as an installer.
       # Unstamped — no OPENSEEK_CLIENT_TOKEN in CI; see the Linux job's note.
-      - name: Build the Windows app bundle
+      - name: Build the Windows ZIP
+        if: github.event_name == 'pull_request'
+        shell: pwsh
+        run: moon -C desktop run --target native package/windows -- --zip-only
+
+      - name: Build the Windows app bundle and installer
+        if: github.event_name != 'pull_request'
         shell: pwsh
         run: moon -C desktop run --target native package/windows
 

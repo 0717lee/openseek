@@ -35,6 +35,13 @@ fn package_command() -> @argparse.Command {
   Command(
     "package/windows",
     about="Build the Windows app bundle, portable zip, and NSIS installer.",
+    flags=[
+      FlagArg(
+        "zip-only",
+        long="zip-only",
+        about="Build the app bundle and portable zip without the NSIS installer",
+      ),
+    ],
   )
 }
 
@@ -279,10 +286,13 @@ async fn build_installer(ws : @packaging.Workspace) -> Unit {
 
 ///|
 async fn main {
-  ignore(package_command().parse())
+  let matches = package_command().parse()
+  let zip_only = matches.flags.get("zip-only").unwrap_or(false)
   let ws = @packaging.locate_workspace()
   @packaging.ensure_cmake(ws)
-  ensure_makensis(ws)
+  if !zip_only {
+    ensure_makensis(ws)
+  }
   let with_wsl_engine = build_outputs(ws)
   println("built openseek engine: \{ws.engine_binary()}")
   if with_wsl_engine {
@@ -292,14 +302,23 @@ async fn main {
   copy_bundle_files(ws, with_wsl_engine~)
   zip_bundle(ws)
   println("generated \{ws.at(ZipPath)}")
-  build_installer(ws)
-  println("generated \{ws.at(InstallerPath)}")
+  if !zip_only {
+    build_installer(ws)
+    println("generated \{ws.at(InstallerPath)}")
+  }
   println("generated \{ws.at(BundleDir)}")
 }
 
 ///|
 test "windows package args accept no mode arguments" {
-  ignore(package_command().parse(argv=[]))
+  let matches = package_command().parse(argv=[])
+  assert_eq(matches.flags.get("zip-only").unwrap_or(false), false)
+}
+
+///|
+test "windows package args accept zip-only mode" {
+  let matches = package_command().parse(argv=["--zip-only"])
+  assert_eq(matches.flags.get("zip-only"), Some(true))
 }
 
 ///|
