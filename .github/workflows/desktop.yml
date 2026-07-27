@@ -2,7 +2,7 @@ name: Desktop
 
 # Root CI owns workspace-wide formatting, generated-interface checks, and the
 # native/JS check and test matrix. This workflow keeps Proton's macOS release
-# tests and the platform bundle builds.
+# test and the platform bundle builds.
 on:
   push:
     branches: [main]
@@ -19,49 +19,6 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  desktop-test:
-    name: proton macOS release test (stable)
-    # Keep stable coverage separate; the nightly run shares the macOS artifact
-    # job below. These runtime/window tests need a macOS GUI session, and
-    # --release links with the system toolchain (the debug `tcc` path cannot
-    # resolve the WebKit framework flags). Scope the command to Proton so this
-    # workflow does not repeat root CI's workspace-wide native tests.
-    runs-on: macos-latest
-    permissions:
-      contents: read
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v5
-
-      - name: Check out the Proton submodule
-        run: git submodule update --init desktop/lepus
-
-      - name: Set up MoonBit (stable)
-        run: |
-          curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash -s -- latest
-          echo "$HOME/.moon/bin" >> $GITHUB_PATH
-
-      - name: Show MoonBit version
-        run: moon version --all
-
-      - name: Seed MoonBit registry index
-        run: |
-          mkdir -p "$HOME/.moon/registry"
-          for attempt in 1 2 3; do
-            rm -rf "$HOME/.moon/registry/index"
-            if git \
-              -c http.lowSpeedLimit=1000 \
-              -c http.lowSpeedTime=60 \
-              clone --depth 1 https://mooncakes.io/git/index "$HOME/.moon/registry/index"; then
-              exit 0
-            fi
-            sleep $((attempt * 10))
-          done
-          exit 1
-
-      - name: Test Proton runtime (release)
-        run: moon test --target native --release -p justjavac/proton/native
-
   desktop-appimage:
     name: desktop appimage (linux)
     runs-on: ubuntu-latest
@@ -158,9 +115,9 @@ jobs:
           done
           exit 1
 
-      # The stable run is a separate job above. Run nightly here so both
-      # toolchain channels still cover Proton without reserving a third macOS
-      # runner or repeating root CI's workspace-wide native tests.
+      # Exercise Proton's runtime/window path on macOS before packaging. Scope
+      # the command to Proton instead of repeating root CI's workspace-wide
+      # native tests.
       - name: Test Proton runtime (release)
         run: moon test --target native --release -p justjavac/proton/native
 
