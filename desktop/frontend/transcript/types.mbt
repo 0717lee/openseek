@@ -18,13 +18,13 @@ pub(all) enum ItemKind {
   // would read as an anonymous tool call and swallow the preceding answer
   // bubble into the fold.
   Summary
-}
+} derive(Eq)
 
 ///|
 pub(all) struct TranscriptItem {
   kind : ItemKind
   content : String
-}
+} derive(Eq)
 
 ///|
 /// A `runtime_update` notice split into the watcher's status and the
@@ -46,4 +46,4 @@ pub(all) struct SessionListItem {
   title : String?
   workspace : String
   workspace_name : String
-}
+} derive(Eq)

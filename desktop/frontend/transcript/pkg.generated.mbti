@@ -50,7 +50,7 @@ pub(all) struct InstalledSkillItem {
   name : String
   description : String
   source : String
-}
+} derive(Eq)
 
 pub(all) enum ItemKind {
   User
@@ -58,13 +58,13 @@ pub(all) enum ItemKind {
   Reasoning
   Tool(name~ : String, is_error~ : Bool, brief~ : String?)
   Summary
-}
+} derive(Eq)
 
 pub(all) struct LauncherAppItem {
   id : String
   name : String
   icon : String
-}
+} derive(Eq)
 
 pub(all) struct MarketSkillItem {
   name : String
@@ -74,7 +74,7 @@ pub(all) struct MarketSkillItem {
   description : String
   author : String
   repository : String
-}
+} derive(Eq)
 
 pub struct RuntimeUpdateView {
   status : String
@@ -86,12 +86,12 @@ pub(all) struct SessionListItem {
   title : String?
   workspace : String
   workspace_name : String
-}
+} derive(Eq)
 
 pub(all) struct TranscriptItem {
   kind : ItemKind
   content : String
-}
+} derive(Eq)
 
 // Type aliases
 

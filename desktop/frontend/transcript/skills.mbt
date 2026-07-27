@@ -14,7 +14,7 @@ pub(all) struct MarketSkillItem {
   description : String
   author : String
   repository : String
-}
+} derive(Eq)
 
 ///|
 /// One entry of the local skills library.
@@ -27,7 +27,7 @@ pub(all) struct InstalledSkillItem {
   // `module@version[/package]` for registry installs; "" for a skill the
   // user wrote by hand (which the app never uninstalls).
   source : String
-}
+} derive(Eq)
 
 ///|
 /// The source label a catalog entry would carry once installed — the link
