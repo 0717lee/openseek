@@ -12,6 +12,12 @@ on:
   # they lived in ci.yml) rather than enumerate a brittle dependency path list.
   pull_request:
 
+# A newer PR head supersedes its older builds. Keep main runs complete so every
+# merged commit still produces its platform validation and artifacts.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   desktop-test:
     name: desktop test (release) (${{ matrix.moonbit-channel }})
