@@ -281,6 +281,7 @@ async fn build_installer(ws : @packaging.Workspace) -> Unit {
 async fn main {
   ignore(package_command().parse())
   let ws = @packaging.locate_workspace()
+  @packaging.ensure_cmake(ws)
   ensure_makensis(ws)
   let with_wsl_engine = build_outputs(ws)
   println("built openseek engine: \{ws.engine_binary()}")

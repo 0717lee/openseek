@@ -186,12 +186,13 @@ pub fn engine_package() -> String {
 }
 
 ///|
-/// The workspace-local Proton CLI (`cef setup`, codegen).
+/// The Proton CLI (`cef setup`, codegen) built from the checked-out Lepus
+/// submodule.
 const ProtonCliSource : String = "./lepus/cli"
 
 ///|
-/// Marker for the installed Proton CLI source, so stale registry-installed
-/// binaries are replaced after the workspace switches to the Lepus submodule.
+/// Marker for the installed Proton CLI source, so a registry-installed binary
+/// is replaced by the CLI from the checked-out Lepus submodule.
 const ProtonCliSourceMarker : String = "target/proton-tools/.proton_cli_source"
 
 ///|
@@ -349,6 +350,30 @@ pub async fn copy_tree(source : String, destination : String) -> Unit {
 /// Resolve a path to an absolute path using the host filesystem rules.
 pub fn absolute_path(path : String) -> String {
   (path : @path.Path).resolve().to_string()
+}
+
+///|
+const CmakeUnavailableMessage : String = "CMake is required to package OpenSeek Desktop, but `cmake --version` could not be run. Install CMake and ensure `cmake` is on PATH, then rerun the package command. On macOS with Homebrew, run `brew install cmake`."
+
+///|
+/// Verify CMake can be launched before a packager performs any build or
+/// download work that depends on it. `command` defaults to the executable on
+/// `PATH` and is injectable so tests can exercise the missing-command path.
+pub async fn ensure_cmake(ws : Workspace, command? : String = "cmake") -> Unit {
+  println("$ [\{ws.dir()}] \{command} --version")
+  let code = @process.run(
+    command,
+    ["--version"],
+    inherit_env=true,
+    cwd=ws.dir().view(),
+  ) catch {
+    _ => raise PackageError(CmakeUnavailableMessage)
+  }
+  if code != 0 {
+    raise PackageError(
+      "CMake was found, but `cmake --version` failed with exit code \{code}. Fix the CMake installation and rerun the package command.",
+    )
+  }
 }
 
 ///|
@@ -692,6 +717,19 @@ async test "client token needle matches the committed host source" {
   let ws = locate_workspace()
   let source = @asyncfs.read_file(ws.at(ClientTokenSource)).text()
   assert_true(source.contains(ClientTokenNeedle))
+}
+
+///|
+async test "missing CMake reports an actionable package error" {
+  let ws = locate_workspace()
+  try
+    ensure_cmake(ws, command="openseek-cmake-probe-command-that-does-not-exist")
+  catch {
+    error =>
+      assert_eq(error.to_string(), "package error: " + CmakeUnavailableMessage)
+  } noraise {
+    _ => fail("expected the missing CMake probe to fail")
+  }
 }
 
 ///|
