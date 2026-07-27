@@ -42,7 +42,7 @@ test "markdown links do not navigate the app frame" {
   let expected =
     #|<a href="https://example.com" target="_blank" rel="noopener noreferrer">example</a>
   inspect(
-    @rabbita.render_to_string(@rabbita.static_cell(node)),
+    @rabbita.render_to_string(() => @rabbita.Val::constant(node)),
     content=expected,
   )
 }
