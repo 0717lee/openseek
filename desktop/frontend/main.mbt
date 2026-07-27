@@ -1,7 +1,9 @@
 ///|
 /// Rabbita 0.13 compares component state before propagating it. The desktop
-/// model still contains mutable collections and JS-backed values, so preserving
-/// its existing whole-view refresh requires treating every result as changed.
+/// model's arrays and maps are updated copy-on-write, and the imperative viewer
+/// lives outside the model; the remaining blocker to structural equality is
+/// that several nested data types do not expose `Eq`. Until that type graph is
+/// completed, preserve the former whole-view refresh after every message.
 priv struct AppState(Model)
 
 ///|
