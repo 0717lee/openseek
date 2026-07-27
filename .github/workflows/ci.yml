@@ -118,9 +118,15 @@ jobs:
         if: matrix.moonbit-channel == 'stable'
         run: moon fmt --check
 
-      - name: Check
-        # `--deny-warn` on stable only; see the matrix note.
-        run: moon check ${{ matrix.deny-warn }}
+      - name: Check native target
+        # `--deny-warn` on stable only; see the matrix note. Keep the target
+        # explicit because this workspace contains both native and JS packages.
+        run: moon check --target native ${{ matrix.deny-warn }}
+
+      - name: Check JS target
+        # JS-only packages such as the Desktop frontend are skipped by the
+        # native check, even though their modules are root workspace members.
+        run: moon check --target js ${{ matrix.deny-warn }}
 
       - name: Check generated interfaces
         # `moon info` formats abstract types differently across toolchain
@@ -136,10 +142,15 @@ jobs:
             exit 1
           fi
 
-      - name: Test
+      - name: Test native target
         # xvfb: the desktop/Proton windowed tests create real CEF windows (the
         # Linux engine is compiled with CEF_X11), and the runner is headless.
-        run: xvfb-run -a moon test
+        run: xvfb-run -a moon test --target native
+
+      - name: Test JS target
+        # Run JS-only package tests from the same root workspace. These do not
+        # create Proton windows and therefore do not need Xvfb.
+        run: moon test --target js
 
       - name: Cram (offline CLI docs)
         run: moon cram test tests/cram
