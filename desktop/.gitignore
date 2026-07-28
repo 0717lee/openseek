@@ -11,8 +11,8 @@ target/
 
 # Generated frontend bundle (built by `moon run --target native build_frontend.mbtx`)
 /frontend.js
-# Embedded viewer stylesheet, assembled from the editor submodule by the packager.
+# Embedded viewer stylesheet, assembled from the editor dependency by the packager.
 /viewer.css
-# The codicon icon font, copied from the editor submodule next to viewer.css so
+# The codicon icon font, copied from the editor dependency next to viewer.css so
 # proton serves it at the site root (`/codicon.ttf`).
 /codicon.ttf

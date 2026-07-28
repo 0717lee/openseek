@@ -17,32 +17,36 @@ const FrontendBundleOutput : String = "frontend.js"
 const ViewerStyleOutput : String = "viewer.css"
 
 ///|
-/// The editor workspace member whose CSS and font assets are bundled with the
-/// desktop frontend. The path is relative to the monorepo root and therefore
-/// resolves through `repo_at`, not `at`.
-const EditorDepRoot : String = "editor"
+/// Where the root Moon workspace materializes the published editor dependency.
+/// The viewer's reusable CSS and font assets are read directly from this
+/// checkout. The path is relative to the monorepo root and therefore resolves
+/// through `repo_at`, not `at`.
+const EditorDepRoot : String = ".mooncakes/moonbitlang/editor"
 
 ///|
-/// The editor dependency's CSS files the embedded viewer depends on (relative
-/// to `EditorDepRoot`), in cascade order: `theme.css` first (it defines the
-/// `--vscode-*` / `--editor-*` variables, scoped to `.editor-shell`), then
-/// every viewer-owned stylesheet. Mirrors the editor's own
-/// `scripts/build-web.mbtx` `css_sources()` — re-sync on a version bump. The
-/// IDE shell chrome (`shell.css`) and the editor's own file tree
-/// (`file_tree.css`) are deliberately omitted — the desktop app supplies its
-/// own panel layout and file tree.
+/// The published editor package deliberately excludes its reference shell,
+/// including that shell's theme. The desktop owns this small theme bridge so
+/// the reusable viewer styles still receive their `--vscode-*` variables.
+const ViewerThemeSource : String = "viewer_theme.css"
+
+///|
+/// The published editor CSS files the embedded viewer depends on (relative to
+/// `EditorDepRoot`), in cascade order. Re-sync this list on an editor version
+/// bump. Reference-shell CSS is deliberately absent from the package; the
+/// desktop supplies its own theme, panel layout, and file tree.
 fn viewer_css_sources() -> Array[String] {
   [
-    "internal/shell/workbench/theme.css", "viewer/browser/view/codicon/codicon.css",
-    "viewer/browser/view/editor.css", "viewer/ui/scrollbar/scrollable_element.css",
-    "viewer/browser/view_parts/view_lines/view_lines.css", "viewer/browser/view_parts/selections/view_overlays.css",
-    "viewer/browser/view_parts/content_widgets/content_widgets.css", "viewer/browser/view_parts/overlay_widgets/overlay_widgets.css",
-    "viewer/browser/view_parts/selections/selections.css", "viewer/browser/view_parts/current_line_highlight/current_line_highlight.css",
+    "viewer/browser/view/codicon/codicon.css", "viewer/browser/view/editor.css",
+    "viewer/ui/scrollbar/scrollable_element.css", "viewer/browser/view_parts/view_lines/view_lines.css",
+    "viewer/browser/view_parts/selections/view_overlays.css", "viewer/browser/view_parts/content_widgets/content_widgets.css",
+    "viewer/browser/view_parts/overlay_widgets/overlay_widgets.css", "viewer/browser/view_parts/selections/selections.css",
+    "viewer/browser/view_parts/current_line_highlight/current_line_highlight.css",
     "viewer/browser/view_parts/decorations/decorations.css", "viewer/browser/view_parts/view_cursors/view_cursors.css",
     "viewer/browser/view_parts/margin/margin.css", "viewer/browser/view_parts/margin/lines_decorations.css",
     "viewer/browser/view_parts/view_lines/tokens.css", "viewer/browser/view_parts/view_lines/markers.css",
     "viewer/contrib/folding/browser/folding.css", "viewer/contrib/hover/hover.css",
     "viewer/contrib/quick_diff/browser/quick_diff.css", "viewer/contrib/agent_feedback/browser/agent_feedback.css",
+    "viewer/contrib/markdown_comments/browser/markdown_comments.css",
   ]
 }
 
@@ -448,7 +452,30 @@ pub async fn build_frontend_bundle(ws : Workspace) -> Unit {
 /// assembled here; without them the viewer paints its raw measurement probes
 /// over the panel instead of a styled editor.
 pub async fn build_viewer_stylesheet(ws : Workspace) -> Unit {
+  write_text(ws.at(ViewerStyleOutput), assembled_viewer_stylesheet(ws))
+  copy_file(
+    ws.repo_at("\{EditorDepRoot}/\{CodiconFontSource}"),
+    ws.at(CodiconFontOutput),
+  )
+}
+
+///|
+/// Read and concatenate the desktop-owned theme followed by every published
+/// viewer stylesheet. Keeping assembly separate from the output write lets
+/// tests exercise the real dependency files without mutating the checkout.
+async fn assembled_viewer_stylesheet(ws : Workspace) -> String {
   let css = StringBuilder::new()
+  let theme_path = ws.at(ViewerThemeSource)
+  if !@asyncfs.exists(theme_path) {
+    raise PackageError("viewer theme not found: \{theme_path}")
+  }
+  let theme = @asyncfs.read_file(theme_path).text()
+  css.write_string("/* " + ViewerThemeSource + " */\n")
+  css.write_string(theme)
+  if !theme.has_suffix("\n") {
+    css.write_string("\n")
+  }
+  css.write_string("\n")
   for source in viewer_css_sources() {
     let absolute = ws.repo_at("\{EditorDepRoot}/\{source}")
     if !@asyncfs.exists(absolute) {
@@ -462,11 +489,7 @@ pub async fn build_viewer_stylesheet(ws : Workspace) -> Unit {
     }
     css.write_string("\n")
   }
-  write_text(ws.at(ViewerStyleOutput), css.to_string())
-  copy_file(
-    ws.repo_at("\{EditorDepRoot}/\{CodiconFontSource}"),
-    ws.at(CodiconFontOutput),
-  )
+  css.to_string()
 }
 
 ///|
@@ -748,6 +771,22 @@ test "workspace path join preserves spaces and nested segments" {
     "/w/dist/OpenSeek Desktop.app/Contents/Resources/toolchains/moonbit/macos-arm64",
   )
   assert_false(ws.invoked_from_repo_root())
+}
+
+///|
+async test "viewer stylesheet assembles from the published editor dependency" {
+  let ws = locate_workspace()
+  let css = assembled_viewer_stylesheet(ws)
+  assert_true(css.contains("/* viewer_theme.css */"))
+  assert_true(
+    css.contains(
+      "/* viewer/contrib/markdown_comments/browser/markdown_comments.css */",
+    ),
+  )
+  let font = ws.repo_at("\{EditorDepRoot}/\{CodiconFontSource}")
+  guard @asyncfs.exists(font) else {
+    fail("missing published viewer font: \{font}")
+  }
 }
 
 ///|
