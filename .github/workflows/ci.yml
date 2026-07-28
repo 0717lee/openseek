@@ -13,16 +13,18 @@ concurrency:
 
 jobs:
   check:
-    name: check (${{ matrix.moonbit-channel }})
+    name: check (${{ matrix.moonbit-channel }}, ${{ matrix.target }})
     runs-on: ubuntu-latest
     permissions:
       contents: read
     strategy:
-      # Run both channels independently (fail-fast: false): a stable/nightly
-      # green-red split tells us at a glance whether a failure is a
-      # nightly-toolchain regression or our own bug.
+      # Run both channels and targets independently (fail-fast: false): the
+      # stable/nightly split identifies toolchain regressions, while the
+      # native/JS split lets the two test suites run in parallel.
       fail-fast: false
       matrix:
+        moonbit-channel: [nightly, stable]
+        target: [native, js]
         include:
           # Warnings are denied on stable only. Nightly adds new warnings ahead
           # of anything we could have fixed, so denying them there turns the job
@@ -75,18 +77,21 @@ jobs:
       # desktop/.proton/runtime.json, which Proton's link config prefers over
       # the incomplete checked-in prebuilt.
       - name: Install Proton native build dependencies
+        if: matrix.target == 'native'
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             pkg-config libgtk-3-dev libx11-dev xvfb
 
       - name: Cache CEF distribution
+        if: matrix.target == 'native'
         uses: actions/cache@v4
         with:
           path: desktop/.proton/cache
           key: cef-linux-x64-${{ hashFiles('desktop/lepus/cli/cef/cef_platform.mbt') }}
 
       - name: Assemble Proton CEF runtime
+        if: matrix.target == 'native'
         # Proton's link config discovers the assembled runtime by walking up
         # from the proton module root, so once runtime.json exists every moon
         # invocation links it instead of the incomplete checked-in prebuilt.
@@ -121,25 +126,20 @@ jobs:
         # channels, the repo could only ever satisfy it while the two
         # formatters agreed — once they disagree there is no committed form
         # that passes, which is not a state CI should be able to reach.
-        if: matrix.moonbit-channel == 'stable'
+        if: matrix.moonbit-channel == 'stable' && matrix.target == 'native'
         run: moon fmt --check
 
-      - name: Check native target
-        # `--deny-warn` on stable only; see the matrix note. Keep the target
-        # explicit because this workspace contains both native and JS packages.
-        run: moon check --target native ${{ matrix.deny-warn }}
-
-      - name: Check JS target
-        # JS-only packages such as the Desktop frontend are skipped by the
-        # native check, even though their modules are root workspace members.
-        run: moon check --target js ${{ matrix.deny-warn }}
+      - name: Check ${{ matrix.target }} target
+        # `--deny-warn` on stable only; see the matrix note. Keeping the target
+        # explicit also makes each matrix row own one complete check/test pair.
+        run: moon check --target ${{ matrix.target }} ${{ matrix.deny-warn }}
 
       - name: Check generated interfaces
         # `moon info` formats abstract types differently across toolchain
         # versions (`type X` on nightly vs `pub struct X { // private fields }`
         # on stable), and the committed `.mbti` are nightly-generated — so this
         # consistency check is only meaningful on nightly.
-        if: matrix.moonbit-channel == 'nightly'
+        if: matrix.moonbit-channel == 'nightly' && matrix.target == 'native'
         run: |
           moon info
           if [ -n "$(git status --porcelain -- '*.mbti')" ]; then
@@ -151,12 +151,15 @@ jobs:
       - name: Test native target
         # xvfb: the desktop/Proton windowed tests create real CEF windows (the
         # Linux engine is compiled with CEF_X11), and the runner is headless.
+        if: matrix.target == 'native'
         run: xvfb-run -a moon test --target native
 
       - name: Test JS target
         # Run JS-only package tests from the same root workspace. These do not
         # create Proton windows and therefore do not need Xvfb.
+        if: matrix.target == 'js'
         run: moon test --target js
 
       - name: Cram (offline CLI docs)
+        if: matrix.target == 'native'
         run: moon cram test tests/cram
