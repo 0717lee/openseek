@@ -1,4 +1,0 @@
-import {
-  "moonbitlang/editor/base/common" @base_common,
-  "moonbit-community/piediff",
-}

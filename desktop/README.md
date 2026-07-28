@@ -165,9 +165,8 @@ git clone <this-repo>
 git submodule update --init desktop/lepus
 ```
 
-The read-only editor is the `moonbitlang/editor` workspace member at
-`../editor`; the desktop frontend imports it directly, and packaging bundles
-its checked-in CSS and font assets.
+The desktop frontend imports the published `moonbitlang/editor` package
+declared in `moon.mod`; packaging bundles the package's CSS and font assets.
 
 Why the bootstrap is a little involved:
 
