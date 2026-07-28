@@ -206,16 +206,13 @@ pub fn ContentHoverWidget::ContentHoverWidget(
     // anything else bubbles to the editor's `MouseHandler`, which classifies
     // it `CONTENT_WIDGET` (fingerprint walk) and starts no selection —
     // Monaco's hover widget equally forwards nothing.
-    if hover_mousedown_is_interactive(event) {
+    if @base_browser.event_target_has_matching_ancestor(
+        event, wrapper, "button, a, input, textarea, select, [role='button'], .hover-copy-button",
+      ) {
       event.stop_propagation()
     }
   })
-  wrapper.add_event_listener("click", event => {
-    if handle_hover_copy_click(event) {
-      event.prevent_default()
-    }
-    event.stop_propagation()
-  })
+  wrapper.add_event_listener("click", event => event.stop_propagation())
   wrapper.add_event_listener("contextmenu", event => event.stop_propagation())
   wrapper.add_event_listener("focusin", event => event.stop_propagation())
   wrapper.add_event_listener("focusout", event => event.stop_propagation())
@@ -290,7 +287,7 @@ fn prepare_hover_content(
     let row = match part {
       MarkdownHover(contents~, ..) =>
         render_markdown_hover_row(disposables, contents, language_id)
-      MarkerHover(marker~, ..) => marker_hover_row(marker.message)
+      MarkerHover(marker~, ..) => marker_hover_row(disposables, marker.message)
       LoadingHover(message~, ..) => standard_hover_row(message)
     }
     row.set_attribute("tabindex", "0")
@@ -405,8 +402,12 @@ fn standard_hover_row(text : String) -> @rdom.Element {
 
 ///|
 /// Marker rows remain ordinary retained DOM and keep the existing diagnostic
-/// copy affordance. Text nodes and attribute writes replace manual escaping.
-fn marker_hover_row(text : String) -> @rdom.Element {
+/// copy affordance. MoonBit owns the listener and its render lifetime; the
+/// browser boundary only performs the clipboard side effect.
+fn marker_hover_row(
+  render_disposables : Array[@base_common.Disposable],
+  text : String,
+) -> @rdom.Element {
   let document = @rdom.document()
   let row = document.create_element("div")
   row.set_attribute("class", "hover-row hover-row-with-copy")
@@ -422,6 +423,16 @@ fn marker_hover_row(text : String) -> @rdom.Element {
   icon.set_attribute("class", "codicon codicon-copy")
   icon.set_attribute("aria-hidden", "true")
   copy.append_child(icon.as_node())
+  let copy_listener = (event : @rdom.Event) => {
+    event.prevent_default()
+    write_hover_clipboard_text(text)
+  }
+  copy.add_event_listener("click", copy_listener)
+  render_disposables.push(
+    @base_common.Disposable::from(() => {
+      copy.remove_event_listener("click", copy_listener)
+    }),
+  )
   row.append_child(marker.as_node())
   row.append_child(copy.as_node())
   row
@@ -846,31 +857,17 @@ fn dom_node_page_top(node : @rdom.Element) -> Double {
 }
 
 ///|
-extern "js" fn handle_hover_copy_click(event : @rdom.Event) -> Bool =
-  #| (event) => {
-  #|   const target = event?.target;
-  #|   const button = target?.closest?.(".hover-copy-button");
-  #|   if (!button || !button.closest?.('.monaco-resizable-hover')) {
-  #|     return false;
-  #|   }
-  #|   const row = button.closest(".hover-row");
-  #|   const content = button.getAttribute("data-hover-copy") || row?.innerText || "";
+extern "js" fn write_hover_clipboard_text(content : String) -> Unit =
+  #| (content) => {
   #|   globalThis.__readonlyEditorCopiedText = content;
   #|   try {
-  #|     const write = globalThis.navigator?.clipboard?.writeText;
+  #|     const clipboard = globalThis.navigator?.clipboard;
+  #|     const write = clipboard?.writeText;
   #|     if (typeof write === "function") {
-  #|       write.call(globalThis.navigator.clipboard, content).catch(() => {});
+  #|       write.call(clipboard, content).catch(() => {});
   #|     }
   #|   } catch {
   #|   }
-  #|   return true;
-  #| }
-
-///|
-extern "js" fn hover_mousedown_is_interactive(event : @rdom.Event) -> Bool =
-  #| (event) => {
-  #|   const target = event?.target;
-  #|   return Boolean(target?.closest?.("button, a, input, textarea, select, [role='button'], .hover-copy-button"));
   #| }
 
 ///|

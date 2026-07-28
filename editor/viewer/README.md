@@ -234,9 +234,12 @@ arithmetic parity: real DOM `FontInfo` replaces the initial estimate in the
 first mounted read phase, and wrap-column computation retains the documented
 local reduced formula. The browser scheduler selects one native-idle or 15 ms
 timeout fallback implementation, exposes cancellable idle/zero/delay handles,
-and lets the model backend bound and cancel background work. The root consumes
-the ViewModel's typed outgoing token event only after the browser ViewEvent has
-been delivered; it does not subscribe directly to TextModel token events.
+and lets the model backend bound and cancel background work. MoonBit owns that
+once-selected branch, fallback deadline arithmetic, cancellation state, and
+disposable lifetime; narrow JS bindings only inspect or invoke the realm's
+idle, timer, deadline, and wall-clock primitives. The root consumes the
+ViewModel's typed outgoing token event only after the browser ViewEvent has been
+delivered; it does not subscribe directly to TextModel token events.
 
 ## Boundaries and checks
 

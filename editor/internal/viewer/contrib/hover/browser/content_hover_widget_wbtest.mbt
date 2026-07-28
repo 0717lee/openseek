@@ -125,7 +125,8 @@ test "hover DOM keeps one grouped row and one wrapper per Markdown content" {
 ///|
 test "marker hover keeps its copy affordance without an HTML string path" {
   install_hover_row_test_document()
-  let row = marker_hover_row("Configured <diagnostic>")
+  let lifetimes : Array[@base_common.Disposable] = []
+  let row = marker_hover_row(lifetimes, "Configured <diagnostic>")
   assert_eq(hover_test_class_count(row, "hover-row-with-copy"), 1)
   assert_eq(hover_test_class_count(row, "marker"), 1)
   assert_eq(hover_test_class_count(row, "hover-copy-button"), 1)
@@ -135,6 +136,22 @@ test "marker hover keeps its copy affordance without an HTML string path" {
     hover_test_attribute(row, "hover-copy-button", "data-hover-copy"),
     "Configured <diagnostic>",
   )
+  assert_eq(lifetimes.length(), 1)
+  assert_eq(hover_test_listener_count(row, "hover-copy-button", "click"), 1)
+
+  // The event originates at the nested icon and bubbles through the button.
+  // The MoonBit-owned listener uses the original diagnostic text rather than
+  // reconstructing it from mutable DOM.
+  assert_true(hover_test_dispatch_nested_copy_click(row))
+  assert_eq(hover_test_copied_text(), "Configured <diagnostic>")
+
+  // Replacing or hiding a render removes its listener; a stale detached row
+  // must no longer perform clipboard effects.
+  dispose_hover_render_disposables(lifetimes)
+  assert_eq(hover_test_listener_count(row, "hover-copy-button", "click"), 0)
+  clear_hover_test_copied_text()
+  assert_false(hover_test_dispatch_nested_copy_click(row))
+  assert_eq(hover_test_copied_text(), "")
   restore_hover_row_test_document()
 }
 
@@ -148,9 +165,19 @@ extern "js" fn install_hover_row_test_document() -> Unit =
   #|     attributes: Object.create(null),
   #|     children: [],
   #|     childNodes: [],
+  #|     listeners: new Map(),
   #|     setAttribute(name, value) { this.attributes[name] = String(value); },
+  #|     addEventListener(type, listener) {
+  #|       let listeners = this.listeners.get(type);
+  #|       if (!listeners) this.listeners.set(type, listeners = new Set());
+  #|       listeners.add(listener);
+  #|     },
+  #|     removeEventListener(type, listener) {
+  #|       this.listeners.get(type)?.delete(listener);
+  #|     },
   #|     appendChild(child) {
   #|       child.parentNode = this;
+  #|       child.parentElement = this;
   #|       this.childNodes.push(child);
   #|       if (child.nodeType === 1) this.children.push(child);
   #|       return child;
@@ -159,9 +186,15 @@ extern "js" fn install_hover_row_test_document() -> Unit =
   #|       this.childNodes = this.childNodes.filter((item) => item !== child);
   #|       this.children = this.children.filter((item) => item !== child);
   #|       child.parentNode = null;
+  #|       child.parentElement = null;
   #|       return child;
   #|     },
   #|   });
+  #|   globalThis.__hoverRowHadCopiedText =
+  #|     Object.prototype.hasOwnProperty.call(globalThis, '__readonlyEditorCopiedText');
+  #|   globalThis.__hoverRowPreviousCopiedText =
+  #|     globalThis.__readonlyEditorCopiedText;
+  #|   delete globalThis.__readonlyEditorCopiedText;
   #|   globalThis.document = {
   #|     createElement: element,
   #|     createTextNode(text) {
@@ -176,7 +209,15 @@ extern "js" fn restore_hover_row_test_document() -> Unit =
   #|   const previous = globalThis.__hoverRowPreviousDocument;
   #|   if (previous === undefined) delete globalThis.document;
   #|   else globalThis.document = previous;
+  #|   if (globalThis.__hoverRowHadCopiedText) {
+  #|     globalThis.__readonlyEditorCopiedText =
+  #|       globalThis.__hoverRowPreviousCopiedText;
+  #|   } else {
+  #|     delete globalThis.__readonlyEditorCopiedText;
+  #|   }
   #|   delete globalThis.__hoverRowPreviousDocument;
+  #|   delete globalThis.__hoverRowHadCopiedText;
+  #|   delete globalThis.__hoverRowPreviousCopiedText;
   #| }
 
 ///|
@@ -224,3 +265,57 @@ extern "js" fn hover_test_attribute(
   #|   };
   #|   return find(root)?.attributes?.[attribute] || '';
   #| }
+
+///|
+extern "js" fn hover_test_listener_count(
+  root : @rdom.Element,
+  class_name : String,
+  event_type : String,
+) -> Int =
+  #| (root, className, eventType) => {
+  #|   const find = (node) => {
+  #|     const classes = (node?.attributes?.class || '').split(/\s+/);
+  #|     if (classes.includes(className)) return node;
+  #|     for (const child of node?.childNodes || []) {
+  #|       const found = find(child);
+  #|       if (found) return found;
+  #|     }
+  #|     return null;
+  #|   };
+  #|   return find(root)?.listeners?.get(eventType)?.size || 0;
+  #| }
+
+///|
+extern "js" fn hover_test_dispatch_nested_copy_click(
+  root : @rdom.Element,
+) -> Bool =
+  #| (root) => {
+  #|   const find = (node, className) => {
+  #|     const classes = (node?.attributes?.class || '').split(/\s+/);
+  #|     if (classes.includes(className)) return node;
+  #|     for (const child of node?.childNodes || []) {
+  #|       const found = find(child, className);
+  #|       if (found) return found;
+  #|     }
+  #|     return null;
+  #|   };
+  #|   const button = find(root, 'hover-copy-button');
+  #|   const icon = find(button, 'codicon-copy');
+  #|   const event = {
+  #|     target: icon,
+  #|     defaultPrevented: false,
+  #|     preventDefault() { this.defaultPrevented = true; },
+  #|   };
+  #|   for (const listener of [...(button?.listeners?.get('click') || [])]) {
+  #|     listener(event);
+  #|   }
+  #|   return event.defaultPrevented;
+  #| }
+
+///|
+extern "js" fn hover_test_copied_text() -> String =
+  #| () => globalThis.__readonlyEditorCopiedText || ''
+
+///|
+extern "js" fn clear_hover_test_copied_text() -> Unit =
+  #| () => { delete globalThis.__readonlyEditorCopiedText; }

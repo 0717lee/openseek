@@ -473,13 +473,67 @@ priv struct BoxLayoutResult {
 }
 
 ///|
+/// A paired browser client box. MoonBit keeps the candidate ordering and
+/// JavaScript-number truthiness rules; the browser boundary only reads raw
+/// dimensions.
+priv struct BrowserClientArea {
+  width : Double
+  height : Double
+}
+
+///|
+fn js_layout_number_is_truthy(value : Double) -> Bool {
+  value != 0.0 && !value.is_nan()
+}
+
+///|
+fn BrowserClientArea::is_truthy_pair(self : BrowserClientArea) -> Bool {
+  js_layout_number_is_truthy(self.width) &&
+  js_layout_number_is_truthy(self.height)
+}
+
+///|
+fn BrowserClientArea::as_tuple(self : BrowserClientArea) -> (Double, Double) {
+  (self.width, self.height)
+}
+
+///|
+fn is_ios_client_area_environment(
+  user_agent : String,
+  max_touch_points : Double,
+) -> Bool {
+  max_touch_points > 0.0 &&
+  (
+    user_agent.contains("Macintosh") ||
+    user_agent.contains("iPad") ||
+    user_agent.contains("iPhone")
+  )
+}
+
+///|
 /// Monaco `Widget._getMaxWidth` (`contentWidgets.ts:283-291`).
 fn content_widget_max_width(
   dom_node : @rdom.Element,
   allow_editor_overflow : Bool,
   content_width : Double,
 ) -> Double {
-  owner_document_max_width(dom_node, allow_editor_overflow, content_width)
+  if !allow_editor_overflow {
+    return content_width
+  }
+  let document = element_owner_document(dom_node)
+  let inner_width = owner_window_inner_width(document)
+  if js_layout_number_is_truthy(inner_width) {
+    return inner_width
+  }
+  let document_element_width = owner_document_element_offset_width(document)
+  if js_layout_number_is_truthy(document_element_width) {
+    return document_element_width
+  }
+  let body_width = owner_document_body_offset_width(document)
+  if js_layout_number_is_truthy(body_width) {
+    return body_width
+  }
+  0.0
 }
 
 ///|
@@ -1039,20 +1093,89 @@ fn safe_invoke_after_render(
 }
 
 ///|
-/// Monaco `_getMaxWidth`: use the widget node's owner document/window, never
-/// the ambient global window. JavaScript `||` intentionally treats a zero
-/// `innerWidth` as unavailable before the two offset-width fallbacks.
-extern "js" fn owner_document_max_width(
+/// Reads the stable owner-document handle. All max-width and client-area
+/// selection remains in MoonBit; the following externs expose only browser
+/// object links and scalar properties.
+extern "js" fn element_owner_document(
   element : @rdom.Element,
-  allow_editor_overflow : Bool,
-  content_width : Double,
+) -> @rdom.Document =
+  #| (element) => element.ownerDocument
+
+///|
+extern "js" fn owner_document_has_default_view(
+  document : @rdom.Document,
+) -> Bool =
+  #| (document) => Boolean(document?.defaultView)
+
+///|
+extern "js" fn owner_window_inner_width(document : @rdom.Document) -> Double =
+  #| (document) => document?.defaultView?.innerWidth ?? 0
+
+///|
+extern "js" fn owner_window_inner_height(document : @rdom.Document) -> Double =
+  #| (document) => document?.defaultView?.innerHeight ?? 0
+
+///|
+extern "js" fn owner_window_has_visual_viewport(
+  document : @rdom.Document,
+) -> Bool =
+  #| (document) => Boolean(document?.defaultView?.visualViewport)
+
+///|
+extern "js" fn owner_visual_viewport_width(document : @rdom.Document) -> Double =
+  #| (document) => document?.defaultView?.visualViewport?.width ?? 0
+
+///|
+extern "js" fn owner_visual_viewport_height(
+  document : @rdom.Document,
 ) -> Double =
-  #| (element, allowOverflow, contentWidth) => {
-  #|   if (!allowOverflow) return contentWidth;
-  #|   const doc = element.ownerDocument;
-  #|   const win = doc?.defaultView;
-  #|   return (win?.innerWidth || doc?.documentElement?.offsetWidth || doc?.body?.offsetWidth || 0);
-  #| }
+  #| (document) => document?.defaultView?.visualViewport?.height ?? 0
+
+///|
+extern "js" fn browser_user_agent() -> String =
+  #| () => globalThis.navigator?.userAgent ?? ''
+
+///|
+extern "js" fn browser_max_touch_points() -> Double =
+  #| () => globalThis.navigator?.maxTouchPoints ?? 0
+
+///|
+fn owner_document_element_offset_width(document : @rdom.Document) -> Double {
+  match document.get_document_element() {
+    Some(element) => @base_browser.element_offset_width(element)
+    None => 0.0
+  }
+}
+
+///|
+fn owner_document_body_offset_width(document : @rdom.Document) -> Double {
+  match document.get_body() {
+    Some(body) => @base_browser.element_offset_width(body.as_element())
+    None => 0.0
+  }
+}
+
+///|
+fn owner_document_body_client_area(
+  document : @rdom.Document,
+) -> BrowserClientArea {
+  match document.get_body() {
+    Some(body) =>
+      { width: body.get_client_width(), height: body.get_client_height() }
+    None => { width: 0.0, height: 0.0 }
+  }
+}
+
+///|
+fn owner_document_element_client_area(
+  document : @rdom.Document,
+) -> BrowserClientArea {
+  match document.get_document_element() {
+    Some(element) =>
+      { width: element.get_client_width(), height: element.get_client_height() }
+    None => { width: 0.0, height: 0.0 }
+  }
+}
 
 ///|
 /// Owner-window page scroll with the source's exact `defaultView ?? 0`
@@ -1076,46 +1199,37 @@ extern "js" fn dom_helper_window_scroll_y(element : @rdom.Element) -> Double =
 /// Monaco `dom.getClientArea(elDocument.body)`: the page box the overflowing
 /// placement is clamped to.
 fn body_client_area(node : @rdom.Element) -> (Double, Double) {
-  (body_client_width(node), body_client_height(node))
+  let document = element_owner_document(node)
+  // `getClientArea(doc.body)` sees a detached body as a non-main-body element
+  // after `getWindow` falls back, and returns its exact client box, including
+  // zeroes, without consulting global-window facts.
+  if !owner_document_has_default_view(document) {
+    return owner_document_body_client_area(document).as_tuple()
+  }
+  if is_ios_client_area_environment(
+      browser_user_agent(),
+      browser_max_touch_points(),
+    ) &&
+    owner_window_has_visual_viewport(document) {
+    return (
+      owner_visual_viewport_width(document),
+      owner_visual_viewport_height(document),
+    )
+  }
+  let inner : BrowserClientArea = {
+    width: owner_window_inner_width(document),
+    height: owner_window_inner_height(document),
+  }
+  if inner.is_truthy_pair() {
+    return inner.as_tuple()
+  }
+  let body = owner_document_body_client_area(document)
+  if body.is_truthy_pair() {
+    return body.as_tuple()
+  }
+  let document_element = owner_document_element_client_area(document)
+  if document_element.is_truthy_pair() {
+    return document_element.as_tuple()
+  }
+  abort("Unable to figure out browser width and height")
 }
-
-///|
-extern "js" fn body_client_width(node : @rdom.Element) -> Double =
-  #| (node) => {
-  #|   const doc = node.ownerDocument;
-  #|   const win = doc?.defaultView;
-  #|   // `getClientArea(doc.body)` sees a detached body as a non-main-body
-  #|   // element after `getWindow` falls back, and returns its client box
-  #|   // immediately — including an exact zero.
-  #|   if (!win) return doc?.body?.clientWidth ?? 0;
-  #|   const userAgent = globalThis.navigator?.userAgent ?? '';
-  #|   const isIOS = (
-  #|     userAgent.includes('Macintosh') ||
-  #|     userAgent.includes('iPad') ||
-  #|     userAgent.includes('iPhone')
-  #|   ) && (globalThis.navigator?.maxTouchPoints ?? 0) > 0;
-  #|   if (isIOS && win.visualViewport) return win.visualViewport.width;
-  #|   if (win?.innerWidth && win?.innerHeight) return win.innerWidth;
-  #|   if (doc?.body?.clientWidth && doc?.body?.clientHeight) return doc.body.clientWidth;
-  #|   if (doc?.documentElement?.clientWidth && doc?.documentElement?.clientHeight) return doc.documentElement.clientWidth;
-  #|   throw new Error('Unable to figure out browser width and height');
-  #| }
-
-///|
-extern "js" fn body_client_height(node : @rdom.Element) -> Double =
-  #| (node) => {
-  #|   const doc = node.ownerDocument;
-  #|   const win = doc?.defaultView;
-  #|   if (!win) return doc?.body?.clientHeight ?? 0;
-  #|   const userAgent = globalThis.navigator?.userAgent ?? '';
-  #|   const isIOS = (
-  #|     userAgent.includes('Macintosh') ||
-  #|     userAgent.includes('iPad') ||
-  #|     userAgent.includes('iPhone')
-  #|   ) && (globalThis.navigator?.maxTouchPoints ?? 0) > 0;
-  #|   if (isIOS && win.visualViewport) return win.visualViewport.height;
-  #|   if (win?.innerWidth && win?.innerHeight) return win.innerHeight;
-  #|   if (doc?.body?.clientWidth && doc?.body?.clientHeight) return doc.body.clientHeight;
-  #|   if (doc?.documentElement?.clientWidth && doc?.documentElement?.clientHeight) return doc.documentElement.clientHeight;
-  #|   throw new Error('Unable to figure out browser width and height');
-  #| }

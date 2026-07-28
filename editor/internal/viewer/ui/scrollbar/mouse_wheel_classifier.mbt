@@ -66,16 +66,10 @@ pub fn MouseWheelClassifier::accept_standard_wheel_event(
   self : MouseWheelClassifier,
   event : StandardWheelEvent,
 ) -> Unit {
-  let page_zoom_factor = if classifier_is_chrome() {
-    classifier_page_zoom_factor()
-  } else {
-    1.0
-  }
-  self.accept(
-    @base_browser.wall_clock_now_ms(),
-    event.delta_x * page_zoom_factor,
-    event.delta_y * page_zoom_factor,
-  )
+  // VS Code applies the configured page zoom only in Chrome. The viewer has
+  // no configured browser zoom, so that factor is always 1 and the normalized
+  // event deltas can be classified directly.
+  self.accept(@base_browser.wall_clock_now_ms(), event.delta_x, event.delta_y)
 }
 
 ///|
@@ -131,8 +125,8 @@ fn MouseWheelClassifier::compute_score(
       let min_delta_y = abs_delta_y.min(abs_previous_delta_y).max(1.0)
       let max_delta_x = abs_delta_x.max(abs_previous_delta_x)
       let max_delta_y = abs_delta_y.max(abs_previous_delta_y)
-      let is_same_modulo = double_remainder(max_delta_x, min_delta_x) == 0.0 &&
-        double_remainder(max_delta_y, min_delta_y) == 0.0
+      let is_same_modulo = max_delta_x.mod(min_delta_x) == 0.0 &&
+        max_delta_y.mod(min_delta_y) == 0.0
       if is_same_modulo {
         score -= 0.5
       }
@@ -159,19 +153,3 @@ let mouse_wheel_classifier_instance : MouseWheelClassifier = MouseWheelClassifie
 pub fn global_mouse_wheel_classifier() -> MouseWheelClassifier {
   mouse_wheel_classifier_instance
 }
-
-///|
-extern "js" fn double_remainder(left : Double, right : Double) -> Double =
-  #| (left, right) => left % right
-
-///|
-extern "js" fn classifier_is_chrome() -> Bool =
-  #| () => !!globalThis.navigator?.userAgentData?.brands?.some(
-  #|   brand => brand.brand === 'Google Chrome'
-  #| ) || /Chrome\//.test(globalThis.navigator?.userAgent ?? '')
-
-///|
-// The viewer has no configured browser zoom level, so VS Code's
-// `getZoomFactor(window)` resolves to its source default of 1.
-extern "js" fn classifier_page_zoom_factor() -> Double =
-  #| () => 1
