@@ -93,6 +93,21 @@ extern "js" fn content_widgets_test_make_document(
   #| }
 
 ///|
+extern "js" fn content_widgets_test_set_client_areas(
+  document : @rdom.Document,
+  body_width : Double,
+  body_height : Double,
+  document_element_width : Double,
+  document_element_height : Double,
+) -> Unit =
+  #| (document, bodyWidth, bodyHeight, documentElementWidth, documentElementHeight) => {
+  #|   document.body.clientWidth = bodyWidth;
+  #|   document.body.clientHeight = bodyHeight;
+  #|   document.documentElement.clientWidth = documentElementWidth;
+  #|   document.documentElement.clientHeight = documentElementHeight;
+  #| }
+
+///|
 extern "js" fn content_widgets_test_set_rect(
   element : @rdom.Element,
   left : Double,
@@ -1818,6 +1833,21 @@ test "viewport layout clamps a nonzero scroll window at inclusive edges" {
 }
 
 ///|
+test "browser layout truthiness and iOS classification stay in MoonBit" {
+  assert_false(js_layout_number_is_truthy(0.0))
+  assert_false(js_layout_number_is_truthy(-0.0))
+  assert_false(js_layout_number_is_truthy(0.0 / 0.0))
+  assert_true(js_layout_number_is_truthy(-1.0))
+  assert_true(js_layout_number_is_truthy(1.0))
+
+  assert_true(is_ios_client_area_environment("Macintosh", 1.0))
+  assert_true(is_ios_client_area_environment("iPad", 2.0))
+  assert_true(is_ios_client_area_environment("iPhone", 3.0))
+  assert_false(is_ios_client_area_environment("iPhone", 0.0))
+  assert_false(is_ios_client_area_environment("Linux", 5.0))
+}
+
+///|
 test "owner document supplies max width, page scroll, and paired clamps" {
   install_content_widgets_test_browser()
   let owner = content_widgets_test_make_document(
@@ -1847,6 +1877,41 @@ test "owner document supplies max width, page scroll, and paired clamps" {
   assert_eq(
     content_widget_max_width(body_fallback.create_element("div"), true, 123.0),
     600.0,
+  )
+  let (body_fallback_width, body_fallback_height) = body_client_area(
+    body_fallback.create_element("div"),
+  )
+  assert_eq(body_fallback_width, 600.0)
+  assert_eq(body_fallback_height, 600.0)
+  let document_element_fallback = content_widgets_test_make_document(
+    true, 0.0, 0.0, 0.0, 640.0, 600.0,
+  )
+  content_widgets_test_set_client_areas(
+    document_element_fallback, 600.0, 0.0, 640.0, 480.0,
+  )
+  let (document_element_width, document_element_height) = body_client_area(
+    document_element_fallback.create_element("div"),
+  )
+  assert_eq(document_element_width, 640.0)
+  assert_eq(document_element_height, 480.0)
+  let nan_inner = content_widgets_test_make_document(
+    true,
+    0.0 / 0.0,
+    0.0,
+    0.0,
+    650.0,
+    600.0,
+  )
+  assert_eq(
+    content_widget_max_width(nan_inner.create_element("div"), true, 123.0),
+    650.0,
+  )
+  let no_width = content_widgets_test_make_document(
+    true, 0.0, 0.0, 0.0, 0.0, 0.0,
+  )
+  assert_eq(
+    content_widget_max_width(no_width.create_element("div"), true, 123.0),
+    0.0,
   )
   assert_eq(content_widget_max_width(node, false, 123.0), 123.0)
 
@@ -1908,6 +1973,13 @@ test "iOS owner visual viewport precedes inner and document client areas" {
   })
   assert_eq(visual_width.val, 321.0)
   assert_eq(visual_height.val, 123.0)
+  content_widgets_test_with_ios_visual_viewport(owner, 0.0, 0.0, () => {
+    let (width, height) = body_client_area(node)
+    visual_width.val = width
+    visual_height.val = height
+  })
+  assert_eq(visual_width.val, 0.0)
+  assert_eq(visual_height.val, 0.0)
   let (restored_width, restored_height) = body_client_area(node)
   assert_eq(restored_width, 700.0)
   assert_eq(restored_height, 700.0)

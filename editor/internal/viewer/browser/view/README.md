@@ -154,8 +154,10 @@ widgets remain in `internal/viewer/contrib/hover/browser`.
 - Overflow width and explicit page-layout scroll subtraction use each node's
   `ownerDocument` and `defaultView`, with zero fallbacks for a detached
   document. The external page-position helper instead falls back to the main
-  window when the owner is detached. Client-area lookup preserves the iOS
-  `visualViewport` preference and returns a detached body's own client box.
+  window when the owner is detached. MoonBit owns overflow-width fallbacks,
+  JavaScript-number truthiness, iOS detection, and the ordered client-area
+  candidates; narrow browser bindings only read owner-window, visual-viewport,
+  and navigator facts. Detached documents return their body's own client box.
 
 Supplied widget nodes remain raw Rabbita elements, so style writes do not
 claim Monaco `FastDomNode`'s per-property cache. Lifecycle equality and dirty
