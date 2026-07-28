@@ -135,6 +135,11 @@ extern "js" fn install_markdown_test_dom() -> Unit =
   #|       this.ownerDocument = this;
   #|     }
   #|     createElement(tag) { return new FakeElement(this, tag); }
+  #|     getElementById(id) {
+  #|       return this.querySelectorAll("*").find(
+  #|         (element) => element.getAttribute("id") === id,
+  #|       ) || null;
+  #|     }
   #|   }
   #|
   #|   globalThis.document = new FakeDocument();
@@ -167,6 +172,9 @@ extern "js" fn markdown_test_attribute(
   element : @rdom.Element,
   name : String,
 ) -> String = "(element, name) => element.getAttribute(name) ?? ''"
+
+///|
+extern "js" fn markdown_test_text_content(element : @rdom.Element) -> String = "(element) => element.textContent"
 
 ///|
 extern "js" fn markdown_test_listener_count(
@@ -242,6 +250,237 @@ extern "js" fn markdown_test_dispatch_vertical_wheel(
   #|   element.dispatchEvent(event);
   #|   return (event.cancelBubble ? 1 : 0) | (event.defaultPrevented ? 2 : 0);
   #| }
+
+///|
+fn markdown_test_render_code_block(
+  code_block : @markdown_core.MarkdownCodeBlock,
+  active_language_id : String?,
+) -> String {
+  let fallback = @markdown_core.render_tokenized_code_block(
+    code_block, active_language_id,
+  )
+  match code_block.language_id {
+    Some("mermaid") =>
+      "<div class=\"moonbit-viewer-markdown-diagram\" " +
+      "data-diagram-language=\"mermaid\" " +
+      "data-mermaid-state=\"fallback\">\n" +
+      fallback +
+      "\n</div>\n"
+    _ => fallback
+  }
+}
+
+///|
+/// Each installation creates a new loader identity so the product's
+/// loader-keyed module cache cannot leak between tests.
+extern "js" fn markdown_test_mermaid_loader(
+  load_mode : String,
+  render_mode : String,
+) -> MermaidModuleLoader =
+  #| (loadMode, renderMode) => {
+  #|   const state = {
+  #|     loadMode,
+  #|     renderMode,
+  #|     urls: [],
+  #|     initializations: [],
+  #|     renders: [],
+  #|     binds: [],
+  #|     pendingRenders: [],
+  #|     currentTheme: "",
+  #|   };
+  #|   const escaped = (value) => String(value)
+  #|     .replaceAll("&", "&amp;")
+  #|     .replaceAll("\"", "&quot;")
+  #|     .replaceAll("<", "&lt;")
+  #|     .replaceAll(">", "&gt;");
+  #|   const renderResult = (entry) => ({
+  #|     svg:
+  #|       `<svg data-test-render-index="${entry.index}" ` +
+  #|       `data-test-mermaid-id="${escaped(entry.id)}" ` +
+  #|       `data-test-mermaid-theme="${escaped(entry.theme)}">` +
+  #|       `<text>rendered ${entry.index}</text></svg>`,
+  #|     bindFunctions(wrapper) {
+  #|       state.binds.push(wrapper);
+  #|       wrapper.setAttribute("data-test-mermaid-bound", String(entry.index));
+  #|     },
+  #|   });
+  #|   const api = {
+  #|     initialize(config) {
+  #|       state.currentTheme = String(config?.theme ?? "");
+  #|       state.initializations.push(config);
+  #|     },
+  #|     render(id, source) {
+  #|       const entry = {
+  #|         index: state.renders.length,
+  #|         id: String(id),
+  #|         source: String(source),
+  #|         theme: state.currentTheme,
+  #|       };
+  #|       state.renders.push(entry);
+  #|       if (state.renderMode === "reject") {
+  #|         return Promise.reject(new Error("test Mermaid render failure"));
+  #|       }
+  #|       if (state.renderMode === "defer") {
+  #|         return new Promise((resolve, reject) => {
+  #|           state.pendingRenders.push({ entry, resolve, reject });
+  #|         });
+  #|       }
+  #|       return Promise.resolve(renderResult(entry));
+  #|     },
+  #|   };
+  #|   const loader = (url) => {
+  #|     state.urls.push(String(url));
+  #|     if (state.loadMode === "reject") {
+  #|       return Promise.reject(new Error("test Mermaid load failure"));
+  #|     }
+  #|     return Promise.resolve({ default: api });
+  #|   };
+  #|   state.renderResult = renderResult;
+  #|   globalThis.__moonbitMarkdownMermaidTestState = state;
+  #|   return loader;
+  #| }
+
+///|
+extern "js" fn markdown_test_set_mermaid_load_mode(mode : String) -> Unit =
+  #| mode => {
+  #|   globalThis.__moonbitMarkdownMermaidTestState.loadMode = mode;
+  #| }
+
+///|
+extern "js" fn markdown_test_set_mermaid_render_mode(mode : String) -> Unit =
+  #| mode => {
+  #|   globalThis.__moonbitMarkdownMermaidTestState.renderMode = mode;
+  #| }
+
+///|
+/// MoonBit's focused JS tests are synchronous, while the product deliberately
+/// uses real Promise chains. Node exposes this microtask checkpoint to its own
+/// runtime; repeated checkpoints make every currently runnable continuation
+/// observable without replacing the product queue with a synchronous fake.
+extern "js" fn markdown_test_flush_mermaid_microtasks() -> Unit =
+  #| () => {
+  #|   for (let index = 0; index < 20; index += 1) {
+  #|     process._tickCallback();
+  #|   }
+  #| }
+
+///|
+extern "js" fn markdown_test_mermaid_load_count() -> Int = "() => globalThis.__moonbitMarkdownMermaidTestState.urls.length"
+
+///|
+extern "js" fn markdown_test_mermaid_url(index : Int) -> String = "(index) => globalThis.__moonbitMarkdownMermaidTestState.urls[index] ?? ''"
+
+///|
+extern "js" fn markdown_test_mermaid_initialize_count() -> Int = "() => globalThis.__moonbitMarkdownMermaidTestState.initializations.length"
+
+///|
+extern "js" fn markdown_test_mermaid_config_string(
+  index : Int,
+  field : String,
+) -> String =
+  #| (index, field) => {
+  #|   const value = globalThis.__moonbitMarkdownMermaidTestState.initializations[index]?.[field];
+  #|   return value === undefined || value === null ? "" : String(value);
+  #| }
+
+///|
+extern "js" fn markdown_test_mermaid_config_bool(
+  index : Int,
+  field : String,
+) -> Bool =
+  #| (index, field) =>
+  #|   globalThis.__moonbitMarkdownMermaidTestState.initializations[index]?.[field] === true
+
+///|
+extern "js" fn markdown_test_mermaid_config_has_secure(
+  index : Int,
+  field : String,
+) -> Bool =
+  #| (index, field) => {
+  #|   const secure = globalThis.__moonbitMarkdownMermaidTestState.initializations[index]?.secure;
+  #|   return Array.isArray(secure) && secure.includes(field);
+  #| }
+
+///|
+extern "js" fn markdown_test_mermaid_render_count() -> Int = "() => globalThis.__moonbitMarkdownMermaidTestState.renders.length"
+
+///|
+extern "js" fn markdown_test_mermaid_render_id(index : Int) -> String = "(index) => globalThis.__moonbitMarkdownMermaidTestState.renders[index]?.id ?? ''"
+
+///|
+extern "js" fn markdown_test_mermaid_render_source(index : Int) -> String = "(index) => globalThis.__moonbitMarkdownMermaidTestState.renders[index]?.source ?? ''"
+
+///|
+extern "js" fn markdown_test_mermaid_render_theme(index : Int) -> String = "(index) => globalThis.__moonbitMarkdownMermaidTestState.renders[index]?.theme ?? ''"
+
+///|
+extern "js" fn markdown_test_mermaid_bind_count() -> Int = "() => globalThis.__moonbitMarkdownMermaidTestState.binds.length"
+
+///|
+extern "js" fn markdown_test_mermaid_pending_render_count() -> Int = "() => globalThis.__moonbitMarkdownMermaidTestState.pendingRenders.length"
+
+///|
+extern "js" fn markdown_test_install_mermaid_id_collisions() -> Unit =
+  #| () => {
+  #|   for (const id of [
+  #|     "moonbit-markdown-mermaid-collision-1",
+  #|     "dmoonbit-markdown-mermaid-collision-2",
+  #|     "imoonbit-markdown-mermaid-collision-3",
+  #|   ]) {
+  #|     const element = document.createElement("div");
+  #|     element.setAttribute("id", id);
+  #|     document.appendChild(element);
+  #|   }
+  #| }
+
+///|
+fn markdown_test_seed_mermaid_id_collisions() -> Unit {
+  mermaid_runtime.id_nonce = "collision"
+  mermaid_runtime.next_diagram_id = 0
+  markdown_test_install_mermaid_id_collisions()
+}
+
+///|
+extern "js" fn markdown_test_document_has_id(id : String) -> Bool = "(id) => document.getElementById(id) !== null"
+
+///|
+extern "js" fn markdown_test_resolve_next_mermaid_render() -> Unit =
+  #| () => {
+  #|   const state = globalThis.__moonbitMarkdownMermaidTestState;
+  #|   const pending = state.pendingRenders.shift();
+  #|   if (!pending) throw new Error("no pending Mermaid render");
+  #|   pending.resolve(state.renderResult(pending.entry));
+  #| }
+
+///|
+extern "js" fn markdown_test_count_mermaid_wrappers(
+  target : @rdom.Element,
+) -> Int =
+  #| target => target.querySelectorAll("div").filter((element) => {
+  #|   const classes = (element.getAttribute("class") || "").split(/\s+/);
+  #|   return classes.includes("moonbit-viewer-markdown-diagram") &&
+  #|     element.getAttribute("data-diagram-language") === "mermaid";
+  #| }).length
+
+///|
+extern "js" fn markdown_test_mermaid_wrapper_at(
+  target : @rdom.Element,
+  index : Int,
+) -> @rdom.Element =
+  #| (target, index) => target.querySelectorAll("div").filter((element) => {
+  #|   const classes = (element.getAttribute("class") || "").split(/\s+/);
+  #|   return classes.includes("moonbit-viewer-markdown-diagram") &&
+  #|     element.getAttribute("data-diagram-language") === "mermaid";
+  #| })[index]
+
+///|
+extern "js" fn markdown_test_count_tokenized_fallbacks(
+  target : @rdom.Element,
+) -> Int =
+  #| target => target.querySelectorAll("div").filter((element) => {
+  #|   const classes = (element.getAttribute("class") || "").split(/\s+/);
+  #|   return classes.includes("monaco-tokenized-source");
+  #| }).length
 
 ///|
 test "safe DOM and native-link URI policy resolve only allowed schemes" {
