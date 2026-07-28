@@ -1,8 +1,8 @@
 name: Desktop
 
-# Kept separate from the root CI (ci.yml): the desktop module is its own
-# MoonBit workspace (desktop/moon.work, with the Proton submodule as members)
-# and is not part of the root moon.work, so the root checks never see it.
+# Root CI owns workspace-wide formatting, generated-interface checks, and the
+# native/JS check and test matrix. This workflow keeps Proton's macOS release
+# test and the platform bundle builds.
 on:
   push:
     branches: [main]
@@ -12,158 +12,13 @@ on:
   # they lived in ci.yml) rather than enumerate a brittle dependency path list.
   pull_request:
 
+# A newer PR head supersedes its older builds. Keep main runs complete so every
+# merged commit still produces its platform validation and artifacts.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
-  desktop-check:
-    name: desktop check (fmt, check, info) (${{ matrix.moonbit-channel }})
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    strategy:
-      # Same split as the root CI (ci.yml): running both channels independently
-      # says at a glance whether a failure is a nightly-toolchain regression or
-      # our own bug. Warnings are denied on stable only — nightly adds new ones
-      # ahead of anything we could have fixed.
-      fail-fast: false
-      matrix:
-        include:
-          - moonbit-channel: nightly
-            moonbit-version: nightly
-            deny-warn: ""
-          - moonbit-channel: stable
-            moonbit-version: latest
-            deny-warn: "--deny-warn"
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v5
-
-      # The repository moved from private lepus to public Proton, so the
-      # pinned submodule commit can be fetched without a repository secret.
-      - name: Check out the Proton submodule
-        run: git submodule update --init desktop/lepus
-
-      - name: Set up MoonBit (${{ matrix.moonbit-channel }})
-        run: |
-          curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash -s -- "${{ matrix.moonbit-version }}"
-          echo "$HOME/.moon/bin" >> $GITHUB_PATH
-
-      - name: Show MoonBit version
-        run: moon version --all
-
-      - name: Seed MoonBit registry index
-        run: |
-          mkdir -p "$HOME/.moon/registry"
-          for attempt in 1 2 3; do
-            rm -rf "$HOME/.moon/registry/index"
-            if git \
-              -c http.lowSpeedLimit=1000 \
-              -c http.lowSpeedTime=60 \
-              clone --depth 1 https://mooncakes.io/git/index "$HOME/.moon/registry/index"; then
-              exit 0
-            fi
-            sleep $((attempt * 10))
-          done
-          exit 1
-
-      - name: Install GTK and WebKitGTK dev packages
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev
-
-      - name: Install Lepus codegen tool
-        run: moon -C desktop/lepus install ./cli --bin target/lepus-tools
-
-      - name: Check formatting
-        # Scope to this module's own packages: lepus/proton is a workspace
-        # member inside the Proton submodule, so a workspace-wide `fmt --check`
-        # would flag source we don't own.
-        #
-        # Stable only, matching the root CI: the nightly formatter's output
-        # drifts, so gating on it red-lines the build for files nobody touched.
-        if: matrix.moonbit-channel == 'stable'
-        run: moon -C desktop fmt --check . frontend internal package
-
-      - name: Check
-        # `--deny-warn` on stable only; see the matrix note.
-        run: moon -C desktop check --target native ${{ matrix.deny-warn }}
-
-      # The frontend builds to JS; this guards the JS side (and catches native
-      # imports leaking into target-agnostic packages, e.g. a missing
-      # supported_targets) that the native check above cannot see.
-      - name: Check JS target
-        run: moon -C desktop check --target js ${{ matrix.deny-warn }}
-
-      - name: Check generated interfaces
-        # `moon info` formats abstract types differently across toolchain
-        # versions (`type X` on nightly vs `pub struct X { // private fields }`
-        # on stable), and the committed `.mbti` are nightly-generated — so this
-        # consistency check is only meaningful on nightly. Same reasoning as
-        # the root CI's equivalent step.
-        if: matrix.moonbit-channel == 'nightly'
-        run: |
-          moon -C desktop info --target native
-          # The Proton submodule's own .mbti live inside the submodule and are
-          # not tracked as files by this repo, so this pathspec only validates
-          # the desktop module's own generated interfaces.
-          if [ -n "$(git status --porcelain -- '*.mbti')" ]; then
-            git status --short -- '*.mbti'
-            git diff -- '*.mbti'
-            exit 1
-          fi
-
-  desktop-test:
-    name: desktop test (release) (${{ matrix.moonbit-channel }})
-    # macOS, not headless Linux: several runtime tests drive a real webview via
-    # app.run(), which needs a GUI session. Proton's own CI skips those tests on
-    # Linux for the same reason. --release links with the system toolchain (the
-    # debug `tcc` path cannot resolve the WebKit/GTK framework flags).
-    runs-on: macos-latest
-    permissions:
-      contents: read
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - moonbit-channel: nightly
-            moonbit-version: nightly
-          - moonbit-channel: stable
-            moonbit-version: latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v5
-
-      - name: Check out the Proton submodule
-        run: git submodule update --init desktop/lepus
-
-      - name: Set up MoonBit (${{ matrix.moonbit-channel }})
-        run: |
-          curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash -s -- "${{ matrix.moonbit-version }}"
-          echo "$HOME/.moon/bin" >> $GITHUB_PATH
-
-      - name: Show MoonBit version
-        run: moon version --all
-
-      - name: Seed MoonBit registry index
-        run: |
-          mkdir -p "$HOME/.moon/registry"
-          for attempt in 1 2 3; do
-            rm -rf "$HOME/.moon/registry/index"
-            if git \
-              -c http.lowSpeedLimit=1000 \
-              -c http.lowSpeedTime=60 \
-              clone --depth 1 https://mooncakes.io/git/index "$HOME/.moon/registry/index"; then
-              exit 0
-            fi
-            sleep $((attempt * 10))
-          done
-          exit 1
-
-      - name: Install Lepus codegen tool
-        run: moon -C desktop/lepus install ./cli --bin target/lepus-tools
-
-      - name: Test (release)
-        run: moon -C desktop test --release
-
   desktop-appimage:
     name: desktop appimage (linux)
     runs-on: ubuntu-latest
@@ -260,6 +115,12 @@ jobs:
           done
           exit 1
 
+      # Exercise Proton's runtime/window path on macOS before packaging. Scope
+      # the command to Proton instead of repeating root CI's workspace-wide
+      # native tests.
+      - name: Test Proton runtime (release)
+        run: moon test --target native --release -p justjavac/proton/native
+
       # No --sign or --notarize argument, so the app is only ad-hoc signed,
       # the DMG container is unsigned, and neither artifact is intended for
       # end-user distribution.
@@ -301,6 +162,7 @@ jobs:
         uses: ilammy/msvc-dev-cmd@v1
 
       - name: Install NSIS
+        if: github.event_name != 'pull_request'
         shell: pwsh
         run: |
           # Retry up to 3 times: the Chocolatey community feed occasionally
@@ -339,8 +201,16 @@ jobs:
           }
           exit 1
 
+      # Pull requests upload only the portable ZIP, so they do not spend time
+      # installing NSIS or recompressing the same bundle as an installer.
       # Unstamped — no OPENSEEK_CLIENT_TOKEN in CI; see the Linux job's note.
-      - name: Build the Windows app bundle
+      - name: Build the Windows ZIP
+        if: github.event_name == 'pull_request'
+        shell: pwsh
+        run: moon -C desktop run --target native package/windows -- --target zip
+
+      - name: Build the Windows app bundle and installer
+        if: github.event_name != 'pull_request'
         shell: pwsh
         run: moon -C desktop run --target native package/windows
 
