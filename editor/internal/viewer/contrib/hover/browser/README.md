@@ -15,6 +15,11 @@ replacement, hide, and retained-widget teardown. Browser view and scrollbar
 dependencies are internal packages under `internal/viewer/**`. The emitted
 stylesheet remains at `viewer/contrib/hover/hover.css`.
 
+Marker-copy event routing and listener lifetime also stay in MoonBit: each
+render registers its copy-button listener in that render's disposable set.
+JavaScript is limited to the browser clipboard write and its test-observation
+hook.
+
 Exact callable types are in `pkg.generated.mbti`. Run focused tests with:
 
 ```sh

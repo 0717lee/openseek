@@ -181,6 +181,10 @@ test('runs MoonBit viewer API component checks in the browser', async ({ page },
 
     await page.mouse.move(keepsPoint.x, keepsPoint.y);
     await expectCompleteHover();
+    const firstCopyButton = visibleHover.locator('.hover-copy-button');
+    await expect(firstCopyButton).toHaveCount(1);
+    const retainedCopyButton = await firstCopyButton.elementHandle();
+    expect(retainedCopyButton).not.toBeNull();
 
     // The widget remains mounted while hidden. Leave the editor, then return
     // to the exact same glyph coordinate so the second render replaces two
@@ -191,9 +195,26 @@ test('runs MoonBit viewer API component checks in the browser', async ({ page },
     }));
     await page.mouse.move(exitPoint.x, exitPoint.y);
     await expect(hover).toHaveClass(/\bhidden\b/, { timeout: 2_000 });
+    await page.evaluate(() => {
+      delete globalThis.__readonlyEditorCopiedText;
+    });
+    await retainedCopyButton.evaluate((button) => {
+      button.querySelector('.codicon-copy').click();
+    });
+    expect(
+      await page.evaluate(() => globalThis.__readonlyEditorCopiedText || ''),
+    ).toBe('');
+    await retainedCopyButton.dispose();
 
     await page.mouse.move(keepsPoint.x, keepsPoint.y);
     await expectCompleteHover();
+    await visibleHover.locator('.hover-row-with-copy').hover();
+    const copyButton = visibleHover.locator('.hover-copy-button');
+    await expect(copyButton).toBeVisible();
+    await copyButton.click();
+    expect(
+      await page.evaluate(() => globalThis.__readonlyEditorCopiedText || ''),
+    ).toBe('wrapped component diagnostic');
   } finally {
     reporter.dispose();
   }
