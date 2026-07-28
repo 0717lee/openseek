@@ -14,7 +14,7 @@ import {
   "justjavac/proton_ext@0.1.7",
   "tonyfettes/platform@0.1.1",
   "tonyfettes/xlog@0.4.0",
-  "moonbitlang/editor@0.2.2",
+  "moonbitlang/editor@0.2.3",
 }
 
 readme = "README.md"
