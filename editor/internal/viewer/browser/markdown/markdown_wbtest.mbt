@@ -706,3 +706,389 @@ test "postprocess removes non-checkbox inputs and disables task checkboxes" {
   // Boolean disabled attributes serialize as the empty string in the fake DOM.
   assert_eq(markdown_test_attribute(checkbox, "disabled"), "")
 }
+
+///|
+test "Mermaid is exact-lowercase and the option controls all CDN work" {
+  install_markdown_test_dom()
+  let mermaid_loader = markdown_test_mermaid_loader("resolve", "resolve")
+  let target = markdown_test_target()
+  let source = "<script>alert('escaped')</script>&"
+  let markdown = "```mermaid\n" +
+    source +
+    "\n```\n\n```Mermaid\ncase-sensitive\n```\n\n```mermaid-extra\nother\n```"
+  let rendered = render_markdown_with_mermaid_loader(
+    markdown,
+    mermaid_loader,
+    options=MarkdownRenderOptions(
+      code_block_renderer=markdown_test_render_code_block,
+    ),
+    target~,
+  )
+  assert_eq(markdown_test_count_mermaid_wrappers(target), 1)
+  assert_eq(markdown_test_count_tokenized_fallbacks(target), 3)
+  assert_eq(markdown_test_count(target, "script"), 0)
+  let wrapper = markdown_test_mermaid_wrapper_at(target, 0)
+  assert_true(markdown_test_text_content(wrapper).contains(source))
+  markdown_test_flush_mermaid_microtasks()
+  assert_eq(markdown_test_mermaid_load_count(), 0)
+  assert_eq(markdown_test_count(target, "svg"), 0)
+
+  // A renderer created without the option stays opted out even if a caller
+  // later asks its generic lifetime to rerender.
+  rendered.rerender_mermaid(Dark)
+  markdown_test_flush_mermaid_microtasks()
+  assert_eq(markdown_test_mermaid_load_count(), 0)
+  assert_eq(markdown_test_count(target, "svg"), 0)
+  rendered.dispose.dispose()
+
+  let enabled_target = markdown_test_target()
+  let enabled = render_markdown_with_mermaid_loader(
+    markdown,
+    mermaid_loader,
+    options=MarkdownRenderOptions(
+      code_block_renderer=markdown_test_render_code_block,
+      mermaid_theme=Light,
+    ),
+    target=enabled_target,
+  )
+  assert_eq(markdown_test_count_mermaid_wrappers(enabled_target), 1)
+  assert_eq(markdown_test_count_tokenized_fallbacks(enabled_target), 3)
+  assert_eq(markdown_test_count(enabled_target, "script"), 0)
+  markdown_test_flush_mermaid_microtasks()
+  assert_eq(markdown_test_mermaid_load_count(), 1)
+  assert_eq(markdown_test_mermaid_render_count(), 1)
+  assert_eq(markdown_test_mermaid_render_source(0), source + "\n")
+  assert_eq(markdown_test_count(enabled_target, "svg"), 1)
+  enabled.dispose.dispose()
+}
+
+///|
+test "successful Mermaid commits use the pinned CDN config unique ids and size callback" {
+  install_markdown_test_dom()
+  let mermaid_loader = markdown_test_mermaid_loader("resolve", "resolve")
+  let target = markdown_test_target()
+  let size_changes = Ref(0)
+  let rendered = render_markdown_with_mermaid_loader(
+    "```mermaid\ngraph TD\n  A --> B\n```\n\n" +
+    "```mermaid\nsequenceDiagram\n  A->>B: hello\n```",
+    mermaid_loader,
+    options=MarkdownRenderOptions(
+      code_block_renderer=markdown_test_render_code_block,
+      on_size_changed=() => size_changes.val += 1,
+      mermaid_theme=Light,
+    ),
+    target~,
+  )
+  // Safe source remains visible while the asynchronous renderer is pending.
+  assert_eq(markdown_test_count_tokenized_fallbacks(target), 2)
+  assert_eq(markdown_test_count(target, "svg"), 0)
+  assert_eq(size_changes.val, 0)
+  markdown_test_flush_mermaid_microtasks()
+
+  assert_eq(markdown_test_mermaid_load_count(), 1)
+  assert_eq(
+    markdown_test_mermaid_url(0),
+    "https://cdn.jsdelivr.net/npm/mermaid@11.16.0/dist/mermaid.esm.min.mjs",
+  )
+  assert_eq(markdown_test_mermaid_initialize_count(), 2)
+  assert_eq(markdown_test_mermaid_render_count(), 2)
+  assert_eq(markdown_test_mermaid_bind_count(), 2)
+  assert_eq(markdown_test_count(target, "svg"), 2)
+  assert_eq(size_changes.val, 2)
+  assert_eq(markdown_test_mermaid_config_string(0, "startOnLoad"), "false")
+  assert_eq(markdown_test_mermaid_config_string(0, "securityLevel"), "strict")
+  assert_true(markdown_test_mermaid_config_bool(0, "suppressErrorRendering"))
+  assert_eq(markdown_test_mermaid_config_string(0, "theme"), "default")
+  assert_true(markdown_test_mermaid_config_has_secure(0, "theme"))
+  assert_true(markdown_test_mermaid_config_has_secure(0, "themeVariables"))
+  assert_true(markdown_test_mermaid_config_has_secure(0, "themeCSS"))
+  assert_true(markdown_test_mermaid_config_has_secure(0, "darkMode"))
+  assert_eq(markdown_test_mermaid_render_source(0), "graph TD\n  A --> B\n")
+  assert_eq(
+    markdown_test_mermaid_render_source(1),
+    "sequenceDiagram\n  A->>B: hello\n",
+  )
+  assert_false(
+    markdown_test_mermaid_render_id(0) == markdown_test_mermaid_render_id(1),
+  )
+  assert_true(
+    markdown_test_mermaid_render_id(0).contains("moonbit-markdown-mermaid-"),
+  )
+  rendered.dispose.dispose()
+}
+
+///|
+test "Mermaid ids avoid host and temporary-element collisions" {
+  install_markdown_test_dom()
+  let mermaid_loader = markdown_test_mermaid_loader("resolve", "resolve")
+  markdown_test_seed_mermaid_id_collisions()
+  let target = markdown_test_target()
+  let rendered = render_markdown_with_mermaid_loader(
+    "```mermaid\ngraph TD\n  A --> B\n```",
+    mermaid_loader,
+    options=MarkdownRenderOptions(
+      code_block_renderer=markdown_test_render_code_block,
+      mermaid_theme=Light,
+    ),
+    target~,
+  )
+  markdown_test_flush_mermaid_microtasks()
+  assert_eq(
+    markdown_test_mermaid_render_id(0),
+    "moonbit-markdown-mermaid-collision-4",
+  )
+  assert_true(
+    markdown_test_document_has_id("moonbit-markdown-mermaid-collision-1"),
+  )
+  assert_true(
+    markdown_test_document_has_id("dmoonbit-markdown-mermaid-collision-2"),
+  )
+  assert_true(
+    markdown_test_document_has_id("imoonbit-markdown-mermaid-collision-3"),
+  )
+  rendered.dispose.dispose()
+}
+
+///|
+test "Mermaid load and syntax failures keep fallback and retry cleanly" {
+  install_markdown_test_dom()
+  let load_mermaid_loader = markdown_test_mermaid_loader("reject", "resolve")
+  let load_target = markdown_test_target()
+  let load_size_changes = Ref(0)
+  let load_failure = render_markdown_with_mermaid_loader(
+    "```mermaid\ngraph TD\n  offline --> fallback\n```",
+    load_mermaid_loader,
+    options=MarkdownRenderOptions(
+      code_block_renderer=markdown_test_render_code_block,
+      on_size_changed=() => load_size_changes.val += 1,
+      mermaid_theme=Light,
+    ),
+    target=load_target,
+  )
+  markdown_test_flush_mermaid_microtasks()
+  assert_eq(markdown_test_mermaid_load_count(), 1)
+  assert_eq(markdown_test_mermaid_render_count(), 0)
+  assert_eq(markdown_test_count(load_target, "svg"), 0)
+  assert_eq(markdown_test_count_tokenized_fallbacks(load_target), 1)
+  assert_eq(load_size_changes.val, 0)
+
+  // A rejected module promise is evicted, so the same loader identity can
+  // succeed when a later theme rerender retries it.
+  markdown_test_set_mermaid_load_mode("resolve")
+  load_failure.rerender_mermaid(Dark)
+  markdown_test_flush_mermaid_microtasks()
+  assert_eq(markdown_test_mermaid_load_count(), 2)
+  assert_eq(markdown_test_mermaid_render_count(), 1)
+  assert_eq(markdown_test_mermaid_render_theme(0), "dark")
+  assert_eq(markdown_test_count(load_target, "svg"), 1)
+  assert_eq(load_size_changes.val, 1)
+  load_failure.dispose.dispose()
+
+  let syntax_mermaid_loader = markdown_test_mermaid_loader("resolve", "reject")
+  let syntax_target = markdown_test_target()
+  let syntax_size_changes = Ref(0)
+  let syntax_failure = render_markdown_with_mermaid_loader(
+    "```mermaid\nthis is invalid Mermaid\n```",
+    syntax_mermaid_loader,
+    options=MarkdownRenderOptions(
+      code_block_renderer=markdown_test_render_code_block,
+      on_size_changed=() => syntax_size_changes.val += 1,
+      mermaid_theme=Light,
+    ),
+    target=syntax_target,
+  )
+  markdown_test_flush_mermaid_microtasks()
+  assert_eq(markdown_test_mermaid_load_count(), 1)
+  assert_eq(markdown_test_mermaid_render_count(), 1)
+  assert_eq(markdown_test_count(syntax_target, "svg"), 0)
+  assert_eq(markdown_test_count_tokenized_fallbacks(syntax_target), 1)
+  assert_eq(syntax_size_changes.val, 0)
+
+  // A render rejection does not poison either the module cache or render
+  // queue; the next request uses the cached module and succeeds.
+  markdown_test_set_mermaid_render_mode("resolve")
+  syntax_failure.rerender_mermaid(Dark)
+  markdown_test_flush_mermaid_microtasks()
+  assert_eq(markdown_test_mermaid_load_count(), 1)
+  assert_eq(markdown_test_mermaid_initialize_count(), 2)
+  assert_eq(markdown_test_mermaid_render_count(), 2)
+  assert_eq(markdown_test_mermaid_render_theme(1), "dark")
+  assert_eq(markdown_test_count(syntax_target, "svg"), 1)
+  assert_eq(syntax_size_changes.val, 1)
+  syntax_failure.dispose.dispose()
+}
+
+///|
+test "target reuse and dispose reject late Mermaid render commits" {
+  install_markdown_test_dom()
+  let mermaid_loader = markdown_test_mermaid_loader("resolve", "defer")
+  let target = markdown_test_target()
+  let first_size_changes = Ref(0)
+  let first = render_markdown_with_mermaid_loader(
+    "```mermaid\ngraph TD\n  old --> stale\n```",
+    mermaid_loader,
+    options=MarkdownRenderOptions(
+      code_block_renderer=markdown_test_render_code_block,
+      on_size_changed=() => first_size_changes.val += 1,
+      mermaid_theme=Light,
+    ),
+    target~,
+  )
+  markdown_test_flush_mermaid_microtasks()
+  assert_eq(markdown_test_mermaid_pending_render_count(), 1)
+  let first_wrapper = markdown_test_mermaid_wrapper_at(target, 0)
+
+  let second_size_changes = Ref(0)
+  let second = render_markdown_with_mermaid_loader(
+    "```mermaid\ngraph TD\n  current --> visible\n```",
+    mermaid_loader,
+    options=MarkdownRenderOptions(
+      code_block_renderer=markdown_test_render_code_block,
+      on_size_changed=() => second_size_changes.val += 1,
+      mermaid_theme=Dark,
+    ),
+    target~,
+  )
+  assert_true(markdown_test_same_element(first.element, second.element))
+  let second_wrapper = markdown_test_mermaid_wrapper_at(target, 0)
+  assert_false(markdown_test_same_element(first_wrapper, second_wrapper))
+
+  // The global queue is still waiting for the old target lifetime.
+  markdown_test_flush_mermaid_microtasks()
+  assert_eq(markdown_test_mermaid_pending_render_count(), 1)
+  markdown_test_resolve_next_mermaid_render()
+  markdown_test_flush_mermaid_microtasks()
+  assert_eq(first_size_changes.val, 0)
+  assert_eq(markdown_test_count(target, "svg"), 0)
+  assert_eq(markdown_test_mermaid_pending_render_count(), 1)
+
+  // The current target lifetime may commit normally after the stale work has
+  // drained.
+  markdown_test_resolve_next_mermaid_render()
+  markdown_test_flush_mermaid_microtasks()
+  assert_eq(second_size_changes.val, 1)
+  assert_eq(markdown_test_count(target, "svg"), 1)
+  assert_eq(markdown_test_mermaid_bind_count(), 1)
+  assert_eq(markdown_test_mermaid_render_count(), 2)
+  assert_false(
+    markdown_test_mermaid_render_id(0) == markdown_test_mermaid_render_id(1),
+  )
+
+  let third_size_changes = Ref(0)
+  let third = render_markdown_with_mermaid_loader(
+    "```mermaid\ngraph TD\n  disposed --> fallback\n```",
+    mermaid_loader,
+    options=MarkdownRenderOptions(
+      code_block_renderer=markdown_test_render_code_block,
+      on_size_changed=() => third_size_changes.val += 1,
+      mermaid_theme=Light,
+    ),
+    target~,
+  )
+  markdown_test_flush_mermaid_microtasks()
+  assert_eq(markdown_test_mermaid_pending_render_count(), 1)
+  third.dispose.dispose()
+  third.dispose.dispose()
+  markdown_test_resolve_next_mermaid_render()
+  markdown_test_flush_mermaid_microtasks()
+  assert_eq(third_size_changes.val, 0)
+  assert_eq(markdown_test_count(target, "svg"), 0)
+  assert_eq(markdown_test_count_tokenized_fallbacks(target), 1)
+  assert_eq(markdown_test_mermaid_bind_count(), 1)
+
+  // Superseded handles remain idempotent and cannot dispose another lifetime.
+  first.dispose.dispose()
+  second.dispose.dispose()
+  assert_eq(markdown_test_count_tokenized_fallbacks(target), 1)
+}
+
+///|
+test "theme rerender keeps the last SVG until the newest epoch succeeds" {
+  install_markdown_test_dom()
+  let mermaid_loader = markdown_test_mermaid_loader("resolve", "resolve")
+  let target = markdown_test_target()
+  let size_changes = Ref(0)
+  let rendered = render_markdown_with_mermaid_loader(
+    "```mermaid\ngraph TD\n  theme --> redraw\n```",
+    mermaid_loader,
+    options=MarkdownRenderOptions(
+      code_block_renderer=markdown_test_render_code_block,
+      on_size_changed=() => size_changes.val += 1,
+      mermaid_theme=Light,
+    ),
+    target~,
+  )
+  markdown_test_flush_mermaid_microtasks()
+  assert_eq(markdown_test_count(target, "svg"), 1)
+  assert_eq(size_changes.val, 1)
+  let initial_svg = markdown_test_at(target, "svg", 0)
+  let initial_render = markdown_test_attribute(
+    initial_svg, "data-test-render-index",
+  )
+  assert_eq(
+    markdown_test_attribute(initial_svg, "data-test-mermaid-theme"),
+    "default",
+  )
+
+  // A failed dark redraw retains the last successful light SVG and does not
+  // report a size change.
+  markdown_test_set_mermaid_render_mode("reject")
+  rendered.rerender_mermaid(Dark)
+  markdown_test_flush_mermaid_microtasks()
+  assert_eq(markdown_test_count(target, "svg"), 1)
+  assert_eq(
+    markdown_test_attribute(
+      markdown_test_at(target, "svg", 0),
+      "data-test-render-index",
+    ),
+    initial_render,
+  )
+  assert_eq(size_changes.val, 1)
+
+  // Two rapid redraws serialize through Mermaid, but only the newest epoch may
+  // replace the SVG after both promises eventually resolve.
+  markdown_test_set_mermaid_render_mode("defer")
+  rendered.rerender_mermaid(Dark)
+  markdown_test_flush_mermaid_microtasks()
+  assert_eq(markdown_test_mermaid_pending_render_count(), 1)
+  rendered.rerender_mermaid(Light)
+  markdown_test_resolve_next_mermaid_render()
+  markdown_test_flush_mermaid_microtasks()
+  assert_eq(markdown_test_mermaid_pending_render_count(), 1)
+  assert_eq(
+    markdown_test_attribute(
+      markdown_test_at(target, "svg", 0),
+      "data-test-render-index",
+    ),
+    initial_render,
+  )
+  assert_eq(size_changes.val, 1)
+
+  markdown_test_resolve_next_mermaid_render()
+  markdown_test_flush_mermaid_microtasks()
+  let final_svg = markdown_test_at(target, "svg", 0)
+  assert_false(
+    markdown_test_attribute(final_svg, "data-test-render-index") ==
+    initial_render,
+  )
+  assert_eq(
+    markdown_test_attribute(final_svg, "data-test-mermaid-theme"),
+    "default",
+  )
+  assert_eq(size_changes.val, 2)
+  assert_eq(markdown_test_mermaid_bind_count(), 2)
+  assert_eq(markdown_test_mermaid_render_count(), 4)
+  assert_eq(markdown_test_mermaid_render_theme(1), "dark")
+  assert_eq(markdown_test_mermaid_render_theme(2), "dark")
+  assert_eq(markdown_test_mermaid_render_theme(3), "default")
+  assert_false(
+    markdown_test_mermaid_render_id(2) == markdown_test_mermaid_render_id(3),
+  )
+
+  rendered.dispose.dispose()
+  rendered.dispose.dispose()
+  rendered.rerender_mermaid(Dark)
+  markdown_test_flush_mermaid_microtasks()
+  assert_eq(markdown_test_mermaid_render_count(), 4)
+  assert_eq(markdown_test_count(target, "svg"), 1)
+}
