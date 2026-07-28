@@ -166,7 +166,10 @@ git submodule update --init desktop/lepus
 ```
 
 The desktop frontend imports the published `moonbitlang/editor` package
-declared in `moon.mod`; packaging bundles the package's CSS and font assets.
+declared in `moon.mod`. Packaging reads its reusable CSS and codicon font
+directly from `.mooncakes/moonbitlang/editor`; `viewer_theme.css` supplies the
+desktop-owned theme variables because the published package excludes its
+reference shell.
 
 Why the bootstrap is a little involved:
 
