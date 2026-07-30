@@ -1,11 +1,16 @@
-// The panel's update loop. One deliberate property: the shell OUTLIVES
-// conversation switches. Its running jobs, history, and working directory
-// are the user's work, so nothing here retires a session just because the
-// active conversation changed — the titlebar names the workspace the shell
-// lives in instead (see `panel_view`), and a restart after the shell exits
-// respawns in whatever conversation is active then. Sessions end when their
-// child exits, when the user restarts, or when the webview disconnects (the
-// host tears its task group down).
+// The panel's update loop. Two deliberate properties:
+//
+// Shells OUTLIVE conversation switches. Their running jobs, history, and
+// working directories are the user's work, so nothing here retires a
+// session because the active conversation changed — switching workspaces
+// only changes which tab group the panel shows, and each group's shells
+// keep running (and rendering into their hidden emulators) meanwhile.
+//
+// A tab never migrates: it is bound at creation to the conversation and
+// workspace it was opened for, and a restart after its shell exits reuses
+// that binding. Sessions end when their child exits, when the user closes
+// the tab or restarts it, or when the webview disconnects (the host tears
+// its task group down).
 
 ///|
 /// The display label for the active conversation's workspace: the project
@@ -23,6 +28,29 @@ fn workspace_label(ctx : Ctx) -> String {
 }
 
 ///|
+/// Create a tab bound to the active conversation's workspace and mount its
+/// emulator (whose ready report spawns the session).
+fn open_new_tab(
+  dispatch : @cmd.Emit[Msg],
+  state : State,
+  ctx : Ctx,
+) -> (@cmd.Cmd, State) {
+  let key = state.next_key
+  let group = workspace_key(ctx)
+  let tab : Tab = {
+    key,
+    id: None,
+    workspace: group,
+    workspace_label: workspace_label(ctx),
+    session: ctx.session,
+    workspace_path: ctx.workspace,
+    status: TabOpening,
+  }
+  let state = { ..state, next_key: key + 1, tabs: state.tabs + [tab] }
+  (mount_tab(dispatch, key, ctx.dark_mode), state.remember_active(group, key))
+}
+
+///|
 pub fn update(
   dispatch : @cmd.Emit[Msg],
   msg : Msg,
@@ -32,97 +60,135 @@ pub fn update(
   match msg {
     ToggleTerminal =>
       if state.open {
-        // Hide only — the shell keeps running for the panel's return.
+        // Hide only — every shell keeps running for the panel's return.
         (@cmd.none, { ..state, open: false })
       } else {
-        // Mount reports `EmulatorReady`, which spawns a session if none
-        // runs; an existing session just gets re-fit and refocused.
+        match state.active_tab(ctx) {
+          // This workspace group already has shells: reveal its tab.
+          Some(tab) => (activate_tab(tab.key), { ..state, open: true })
+          // First open in this workspace: start its first shell.
+          None => {
+            let (cmd, state) = open_new_tab(dispatch, state, ctx)
+            (cmd, { ..state, open: true })
+          }
+        }
+      }
+    NewTerminal => open_new_tab(dispatch, state, ctx)
+    TabSelected(key~) => {
+      guard state.tab_by_key(key) is Some(tab) else {
+        return (@cmd.none, state)
+      }
+      (activate_tab(key), state.remember_active(tab.workspace, key))
+    }
+    TabClosed(key~) => {
+      guard state.tab_by_key(key) is Some(tab) else {
+        return (@cmd.none, state)
+      }
+      let cmds = [dispose_tab(key)]
+      if tab.id is Some(id) {
+        cmds.push(send_close(id))
+      }
+      let state = {
+        ..state,
+        tabs: state.tabs.filter(entry => entry.key != key),
+        active: state.active.filter(entry => entry.1 != key),
+      }
+      // Reveal the group's fallback tab, if the closed one was on screen.
+      if state.active_tab(ctx) is Some(next) {
+        cmds.push(activate_tab(next.key))
+      }
+      (@cmd.batch(cmds), state)
+    }
+    EmulatorReady(key~, cols~, rows~) => {
+      // Ready reports are idempotent (mount_tab re-reports on reveal); only
+      // a tab still waiting for its first session spawns one.
+      guard state.tab_by_key(key) is Some(tab) else {
+        return (@cmd.none, state)
+      }
+      if tab.status is TabOpening && tab.id is None {
         (
-          @cmd.batch([request_terminal_mount(dispatch, ctx), focus_terminal()]),
-          { ..state, open: true },
+          open_session(
+            dispatch,
+            key,
+            tab.session,
+            tab.workspace_path,
+            cols,
+            rows,
+          ),
+          state,
         )
-      }
-    EmulatorReady(cols~, rows~) =>
-      match state.phase {
-        Idle | Exited(..) | Failed(..) =>
-          (
-            open_session(dispatch, ctx, cols, rows),
-            {
-              ..state,
-              phase: Opening(
-                session=ctx.session,
-                workspace=workspace_label(ctx),
-              ),
-            },
-          )
-        Opening(..) | Running(..) => (@cmd.none, state)
-      }
-    Opened(session~, id~) =>
-      if state.phase is Opening(session=expected, workspace~) &&
-        expected == session {
-        (wire_session(), { ..state, phase: Running(session~, workspace~, id~) })
-      } else {
-        // A stale reply (the panel restarted meanwhile); the session
-        // belongs to nobody, so retire it on the host.
-        (send_close(id), state)
-      }
-    OpenFailed(session~, message~) =>
-      if state.phase is Opening(session=expected, workspace~) &&
-        expected == session {
-        (@cmd.none, { ..state, phase: Failed(session~, workspace~, message~) })
-      } else if state.phase is Running(session=expected, workspace~, ..) &&
-        expected == session {
-        // A steady-state op (input) failed against a session the host no
-        // longer has.
-        (@cmd.none, { ..state, phase: Failed(session~, workspace~, message~) })
       } else {
         (@cmd.none, state)
       }
-    UserInput(data~) =>
-      if state.phase is Running(session~, id~, ..) {
-        (send_input(dispatch, session, id, data), state)
+    }
+    Opened(key~, id~) =>
+      if state.tab_by_key(key) is Some(tab) && tab.status is TabOpening {
+        (
+          @cmd.batch([flush_pending(dispatch, key, id), activate_tab(key)]),
+          state.replace_tab({ ..tab, id: Some(id), status: TabRunning }),
+        )
+      } else {
+        // The tab was closed while the open was in flight; the session
+        // belongs to nobody, so retire it on the host.
+        (@cmd.batch([send_close(id), drop_pending(dispatch, id)]), state)
+      }
+    OpenFailed(key~, message~) =>
+      if state.tab_by_key(key) is Some(tab) {
+        (@cmd.none, state.replace_tab({ ..tab, status: TabFailed(message~) }))
+      } else {
+        (@cmd.none, state)
+      }
+    UserInput(key~, data~) =>
+      if state.tab_by_key(key) is Some(tab) &&
+        tab.status is TabRunning &&
+        tab.id is Some(id) {
+        (send_input(dispatch, key, id, data), state)
       } else {
         // Typing into an exited/unopened terminal has nowhere to go.
         (@cmd.none, state)
       }
-    ViewportResized(cols~, rows~) =>
-      if state.phase is Running(id~, ..) {
+    ViewportResized(key~, cols~, rows~) =>
+      if state.tab_by_key(key) is Some(tab) &&
+        tab.status is TabRunning &&
+        tab.id is Some(id) {
         (send_resize(id, cols, rows), state)
       } else {
         (@cmd.none, state)
       }
-    // The host starts reading the PTY as soon as it spawns, so a session's
-    // first output — including the launcher's own diagnostics when the shell
-    // cannot start — can reach the panel before the `terminal_open` reply
-    // names its id. While opening, this panel has no other session the host
-    // could be reporting, so render it; anything else is a retired session's
-    // tail, which must still be acknowledged or the host's flow-control
-    // window leaks and the session eventually stalls.
     Output(id~, data~, bytes~) =>
-      match state.phase {
-        Opening(..) => (write_output(dispatch, id, data, bytes), state)
-        Running(id=running, ..) if running == id =>
-          (write_output(dispatch, id, data, bytes), state)
-        _ => (send_ack(id, bytes), state)
+      match state.tab_by_id(id) {
+        Some(tab) => (write_to_tab(dispatch, tab.key, id, data, bytes), state)
+        // No tab claims this session yet. While an open is in flight this
+        // is almost certainly its first output racing the reply, so hold
+        // the chunk for the claim; otherwise acknowledge and drop it (an
+        // unacknowledged chunk leaks the host's flow-control window).
+        None =>
+          if state.tabs.iter().any(tab => tab.status is TabOpening) {
+            (buffer_pending(id, data, bytes), state)
+          } else {
+            (send_ack(id, bytes), state)
+          }
       }
     OutputRendered(id~, bytes~) => (send_ack(id, bytes), state)
     SessionExited(id~, code~) =>
-      if state.phase is Running(session~, workspace~, id=running) &&
-        running == id {
-        (@cmd.none, { ..state, phase: Exited(session~, workspace~, code~) })
-      } else {
-        (@cmd.none, state)
+      match state.tab_by_id(id) {
+        Some(tab) =>
+          (@cmd.none, state.replace_tab({ ..tab, status: TabExited(code~) }))
+        None => (drop_pending(dispatch, id), state)
       }
-    RestartTerminal =>
-      match state.phase {
-        Exited(..) | Failed(..) =>
-          // Respawn for the CURRENT conversation — after an exit this is
-          // how a shell moves to the workspace the user is looking at.
+    RestartTab(key~) => {
+      guard state.tab_by_key(key) is Some(tab) else {
+        return (@cmd.none, state)
+      }
+      match tab.status {
+        TabExited(..) | TabFailed(..) =>
+          // Same binding, fresh shell: the tab stays in its workspace.
           (
-            @cmd.batch([reset_emulator(), request_terminal_mount(dispatch, ctx)]),
-            { ..state, phase: Idle },
+            @cmd.batch([reset_tab(key), mount_tab(dispatch, key, ctx.dark_mode)]),
+            state.replace_tab({ ..tab, id: None, status: TabOpening }),
           )
-        Idle | Opening(..) | Running(..) => (@cmd.none, state)
+        TabOpening | TabRunning => (@cmd.none, state)
       }
+    }
   }
 }

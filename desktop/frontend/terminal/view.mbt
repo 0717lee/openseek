@@ -1,7 +1,42 @@
-// The panel: a titlebar (status + restart/hide) over the emulator's stable
-// host element. Rendered on every screen from the first paint — CSS hides
-// the whole panel while closed — so the attached emulator is never torn
-// down (see host.mbt).
+// The panel: a titlebar with the workspace group's tab strip over the
+// emulators' stable container element. Rendered on every screen from the
+// first paint — CSS hides the whole panel while closed — so the attached
+// emulators are never torn down (see host.mbt).
+
+///|
+fn tab_view(dispatch : @cmd.Emit[Msg], tab : Tab, active : Bool) -> @html.Html {
+  let classes = StringBuilder::new()
+  classes.write_string("terminal-tab")
+  if active {
+    classes.write_string(" active")
+  }
+  let title = match tab.status {
+    TabOpening => "starting…"
+    TabRunning => tab.workspace_label
+    TabExited(code~) => "exited (\{code})"
+    TabFailed(message~) => message
+  }
+  let status : Array[@html.Html] = []
+  match tab.status {
+    TabExited(..) => status.push(@html.span(class="terminal-tab-dead", "○"))
+    TabFailed(..) => status.push(@html.span(class="terminal-tab-failed", "!"))
+    TabOpening | TabRunning => ()
+  }
+  @html.div(class=classes.to_string(), [
+    @html.button(
+      class="terminal-tab-select",
+      title~,
+      on_click=dispatch(TabSelected(key=tab.key)),
+      [@html.span(class="terminal-tab-label", tab.workspace_label), ..status],
+    ),
+    @html.button(
+      class="terminal-tab-close",
+      title="Close terminal",
+      on_click=dispatch(TabClosed(key=tab.key)),
+      "✕",
+    ),
+  ])
+}
 
 ///|
 pub fn panel_view(
@@ -12,41 +47,48 @@ pub fn panel_view(
   let items : Array[@html.Html] = [
     @html.span(class="terminal-title", "Terminal"),
   ]
-  // The shell outlives conversation switches, so the titlebar names the
-  // workspace it lives in — and flags it when that is not the conversation
-  // on screen.
-  if state.phase.binding() is Some((session, workspace)) {
-    items.push(@html.span(class="terminal-workspace", workspace))
-    if session != ctx.session {
-      items.push(
-        @html.span(class="terminal-status", "from another conversation"),
-      )
-    }
+  let visible = state.visible_tabs(ctx)
+  let active = state.active_tab(ctx)
+  for tab in visible {
+    items.push(
+      tab_view(dispatch, tab, active is Some(current) && current.key == tab.key),
+    )
   }
-  match state.phase {
-    Opening(..) =>
-      items.push(@html.span(class="terminal-status", "starting…"))
-    Exited(code~, ..) => {
-      items.push(@html.span(class="terminal-status", "exited (\{code})"))
-      items.push(
-        @html.button(
-          class="terminal-action",
-          on_click=dispatch(RestartTerminal),
-          "Restart",
-        ),
-      )
+  items.push(
+    @html.button(
+      class="terminal-new",
+      title="New terminal in this workspace",
+      on_click=dispatch(NewTerminal),
+      "+",
+    ),
+  )
+  // The visible tab's failure/exit detail and its restart, at the right edge.
+  if active is Some(tab) {
+    match tab.status {
+      TabOpening =>
+        items.push(@html.span(class="terminal-status", "starting…"))
+      TabExited(code~) => {
+        items.push(@html.span(class="terminal-status", "exited (\{code})"))
+        items.push(
+          @html.button(
+            class="terminal-action",
+            on_click=dispatch(RestartTab(key=tab.key)),
+            "Restart",
+          ),
+        )
+      }
+      TabFailed(message~) => {
+        items.push(@html.span(class="terminal-status terminal-error", message))
+        items.push(
+          @html.button(
+            class="terminal-action",
+            on_click=dispatch(RestartTab(key=tab.key)),
+            "Retry",
+          ),
+        )
+      }
+      TabRunning => ()
     }
-    Failed(message~, ..) => {
-      items.push(@html.span(class="terminal-status terminal-error", message))
-      items.push(
-        @html.button(
-          class="terminal-action",
-          on_click=dispatch(RestartTerminal),
-          "Retry",
-        ),
-      )
-    }
-    Idle | Running(..) => ()
   }
   items.push(
     @html.button(
@@ -56,8 +98,8 @@ pub fn panel_view(
       "✕",
     ),
   )
-  // The stable element the emulator attaches into; it must stay empty and
-  // never be re-keyed (see host.mbt).
+  // The stable container the tab emulators attach into; it must stay empty
+  // in the virtual DOM and never be re-keyed (see host.mbt).
   let host = @html.div(
     attrs=@html.Attrs::build().id(TerminalHostId).class("terminal-host"),
     ([] : Array[@html.Html]),

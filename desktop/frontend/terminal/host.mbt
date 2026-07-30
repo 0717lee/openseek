@@ -1,28 +1,41 @@
-// The embedded terminal emulator (vendored xterm.js, loaded as the
+// The embedded terminal emulators (vendored xterm.js, loaded as the
 // `__openseek_xterm` global by an index.html script tag). Rabbita has no
-// escape hatch for a foreign DOM widget, so the emulator owns one stable,
-// never-diffed host element — the same pattern as the file editor's viewer
-// host: the view renders `<div id="terminal-host">` empty and always (CSS
-// hides the closed panel), and the widget attaches into it once, after a
-// paint.
+// escape hatch for foreign DOM widgets, so the panel owns one stable,
+// never-diffed container element (`#terminal-host`), and each tab attaches
+// its own imperative child element with its own xterm instance — hidden,
+// not disposed, while another tab (or none) shows, so every shell's screen
+// and scrollback survive tab and conversation switches.
 
 ///|
-/// The id of the stable element the emulator attaches into; the panel view
-/// must render exactly one empty element with this id.
+/// The id of the stable container the tab emulators attach into; the panel
+/// view must render exactly one empty element with this id.
 const TerminalHostId = "terminal-host"
 
 ///|
-/// The emulator's imperative state. None of this may live in the Rabbita
-/// model, so it is collected into this one module-level instance.
-priv struct TermHost {
-  /// The single xterm `Terminal` instance, `None` until the first mount.
-  mut term : @js.Value?
-  /// Its fit addon, sized to the host element by `fit()`.
-  mut fit : @js.Value?
+priv struct TermEntry {
+  term : @js.Value
+  fit : @js.Value
+  element : @js.Value
 }
 
 ///|
-let term_host : TermHost = { term: None, fit: None }
+/// The emulators' imperative state, keyed by tab key. `pending` buffers
+/// output chunks that arrived before any tab claimed their session id (the
+/// host streams from spawn, so a session's first output can beat the
+/// `terminal_open` reply that names it); `Opened` flushes them into the
+/// claiming tab.
+priv struct TermHost {
+  entries : Map[Int, TermEntry]
+  pending : Map[Int, Array[(String, Int)]]
+  mut resize_wired : Bool
+}
+
+///|
+let term_host : TermHost = {
+  entries: Map([]),
+  pending: Map([]),
+  resize_wired: false,
+}
 
 ///|
 /// The vendored bundle's export object (`{ Terminal, FitAddon, writeBase64 }`).
@@ -49,142 +62,153 @@ fn terminal_theme(dark_mode : Bool) -> @js.Object {
 }
 
 ///|
-/// Mount the emulator into its host element after the next paint (a no-op
-/// mount if it already exists), re-fit it to the panel's current size, and
-/// report the resulting grid through `EmulatorReady`. The update loop calls
-/// this on panel open and on restart; whether a ready report should spawn a
-/// session is its decision, so re-reports are harmless.
-fn request_terminal_mount(dispatch : @cmd.Emit[Msg], ctx : Ctx) -> @cmd.Cmd {
+fn no_args() -> Array[@js.Value] {
+  []
+}
+
+///|
+/// Show `key`'s element, hide the rest, then re-fit and focus the shown one
+/// (its `onResize` keeps the PTY's grid in sync). Imperative display state:
+/// the elements are outside the virtual DOM.
+fn show_only(key : Int) -> Unit {
+  for entry_key, entry in term_host.entries {
+    let style : @js.Value = entry.element.get_with_string("style")
+    style.set_with_string(
+      "display",
+      if entry_key == key {
+        "block"
+      } else {
+        "none"
+      },
+    )
+  }
+  guard term_host.entries.get(key) is Some(entry) else { return }
+  let width : Int = entry.element.get_with_string("clientWidth")
+  if width > 0 {
+    let _ : @js.Value = entry.fit.apply_with_string("fit", no_args())
+  }
+  let _ : @js.Value = entry.term.apply_with_string("focus", no_args())
+}
+
+///|
+/// Re-fit whichever tab element is currently visible (window resizes change
+/// the panel's CSS layout without any tab switch).
+fn refit_visible() -> Unit {
+  for _, entry in term_host.entries {
+    let width : Int = entry.element.get_with_string("clientWidth")
+    if width > 0 {
+      let _ : @js.Value = entry.fit.apply_with_string("fit", no_args())
+    }
+  }
+}
+
+///|
+/// Mount the tab's emulator into the container (a no-op if it already
+/// exists), make it the visible one, and report its grid size through
+/// `EmulatorReady`. Idempotent: the update loop decides whether a ready
+/// report should spawn a session, so re-reports are harmless.
+fn mount_tab(
+  dispatch : @cmd.Emit[Msg],
+  key : Int,
+  dark_mode : Bool,
+) -> @cmd.Cmd {
   @cmd.custom_cmd(
     scheduler => {
       guard xterm_module() is Some(module_) else { return }
-      if term_host.term is None &&
-        @dom.document().get_element_by_id(TerminalHostId).to_option()
-        is Some(host) {
+      if term_host.entries.get(key) is None {
+        guard @dom.document().get_element_by_id(TerminalHostId).to_option()
+          is Some(host) else {
+          return
+        }
+        let document = @js.Value::cast_from(@dom.document())
+        let element : @js.Value = document.apply_with_string("createElement", [
+          @js.Value::cast_from("div"),
+        ])
+        element.set_with_string("className", "terminal-instance")
+        let _ : @js.Value = @js.Value::cast_from(host).apply_with_string(
+          "appendChild",
+          [element],
+        )
         let options = @js.Object::new()
         options["cursorBlink"] = true
         options["fontSize"] = 13
         options["fontFamily"] = "\"Geist Mono\", Menlo, monospace"
         options["scrollback"] = 10000
-        options["theme"] = terminal_theme(ctx.dark_mode).to_value()
+        options["theme"] = terminal_theme(dark_mode).to_value()
         let ctor : @js.Value = module_.get_with_string("Terminal")
         let term : @js.Value = ctor.new([options.to_value()])
         let fit_ctor : @js.Value = module_.get_with_string("FitAddon")
-        let fit : @js.Value = fit_ctor.new(([] : Array[@js.Value]))
+        let fit : @js.Value = fit_ctor.new(no_args())
         let _ : @js.Value = term.apply_with_string("loadAddon", [fit])
-        let _ : @js.Value = term.apply_with_string("open", [
-          @js.Value::cast_from(host),
-        ])
+        let _ : @js.Value = term.apply_with_string("open", [element])
         // Keystrokes (already encoded as terminal input by xterm) go to the
-        // update loop; whether a session receives them is its decision.
+        // update loop tagged with this tab.
         let on_data = (data : @js.Value) => {
           let text : String = data.cast()
-          scheduler.add(dispatch(UserInput(data=text)))
+          scheduler.add(dispatch(UserInput(key~, data=text)))
         }
         let _ : @js.Value = term.apply_with_string("onData", [
           @js.Value::cast_from(on_data),
         ])
-        // Every re-fit lands here, including the initial one below; the
-        // update loop forwards it to the PTY while a session runs.
+        // Every re-fit lands here, including reveal-time ones; the update
+        // loop forwards it to the tab's PTY while its session runs.
         let on_resize = (size : @js.Value) => {
           let cols : Int = size.get_with_string("cols")
           let rows : Int = size.get_with_string("rows")
-          scheduler.add(dispatch(ViewportResized(cols~, rows~)))
+          scheduler.add(dispatch(ViewportResized(key~, cols~, rows~)))
         }
         let _ : @js.Value = term.apply_with_string("onResize", [
           @js.Value::cast_from(on_resize),
         ])
-        // The panel is laid out by CSS, so window resizes must re-measure
-        // the emulator; the resulting onResize forwards to the PTY.
-        @interop.add_capture_listener(@js.globalThis, "resize", _event => {
-          refit()
-        })
-        term_host.term = Some(term)
-        term_host.fit = Some(fit)
+        term_host.entries[key] = { term, fit, element }
+        if !term_host.resize_wired {
+          term_host.resize_wired = true
+          @interop.add_capture_listener(@js.globalThis, "resize", _event => {
+            refit_visible()
+          })
+        }
       }
-      refit()
-      guard term_host.term is Some(term) else { return }
-      let cols : Int = term.get_with_string("cols")
-      let rows : Int = term.get_with_string("rows")
-      scheduler.add(dispatch(EmulatorReady(cols~, rows~)))
+      show_only(key)
+      guard term_host.entries.get(key) is Some(entry) else { return }
+      let cols : Int = entry.term.get_with_string("cols")
+      let rows : Int = entry.term.get_with_string("rows")
+      scheduler.add(dispatch(EmulatorReady(key~, cols~, rows~)))
     },
     kind=@cmd.after_render,
   )
 }
 
 ///|
-/// Re-measure the emulator against its host element. A no-op while the
-/// panel is hidden (`display: none` gives a zero-size host, which the fit
-/// addon cannot measure).
-fn refit() -> Unit {
-  guard term_host.fit is Some(fit) else { return }
-  guard @dom.document().get_element_by_id(TerminalHostId).to_option()
-    is Some(host) else {
-    return
-  }
-  let width : Int = @js.Value::cast_from(host).get_with_string("clientWidth")
-  if width <= 0 {
-    return
-  }
-  let _ : @js.Value = fit.apply_with_string("fit", ([] : Array[@js.Value]))
+/// Reveal an existing tab (a tab switch or the panel reopening).
+fn activate_tab(key : Int) -> @cmd.Cmd {
+  @cmd.custom_cmd(_scheduler => show_only(key), kind=@cmd.after_render)
 }
 
 ///|
-/// Focus the emulator for a freshly opened PTY session.
-fn wire_session() -> @cmd.Cmd {
-  @cmd.custom_cmd(_scheduler => {
-    if term_host.term is Some(term) {
-      let _ : @js.Value = term.apply_with_string(
-        "focus",
-        ([] : Array[@js.Value]),
-      )
-    }
-  })
-}
-
-///|
-/// Re-fit (the panel just became visible again) and focus.
-fn focus_terminal() -> @cmd.Cmd {
-  @cmd.custom_cmd(
-    _scheduler => {
-      refit()
-      if term_host.term is Some(term) {
-        let _ : @js.Value = term.apply_with_string(
-          "focus",
-          ([] : Array[@js.Value]),
-        )
-      }
-    },
-    kind=@cmd.after_render,
-  )
-}
-
-///|
-/// Decode one base64 output chunk into the emulator and report its byte
-/// count back once xterm finished rendering it (the flow-control ack).
-///
-/// Whether a chunk belongs to this panel's session is the update loop's
-/// call; this only writes. An unwritable chunk (no emulator yet) is still
-/// acknowledged with the length the host reported, because a chunk that is
-/// never acknowledged leaks the host's flow-control window and eventually
+/// Decode one base64 output chunk into the tab's emulator and report its
+/// byte count back once xterm finished rendering it (the flow-control ack).
+/// A chunk with no emulator to land in is acknowledged outright — an
+/// unacknowledged chunk leaks the host's flow-control window and eventually
 /// stalls the session.
-fn write_output(
+fn write_to_tab(
   dispatch : @cmd.Emit[Msg],
+  key : Int,
   id : Int,
   data : String,
   bytes : Int,
 ) -> @cmd.Cmd {
   @cmd.custom_cmd(_scheduler => {
-    guard term_host.term is Some(term) && xterm_module() is Some(module_) else {
+    guard term_host.entries.get(key) is Some(entry) &&
+      xterm_module() is Some(module_) else {
       _scheduler.add(dispatch(OutputRendered(id~, bytes~)))
       return
     }
     let done = (length : @js.Value) => {
-      let bytes : Int = length.cast()
-      _scheduler.add(dispatch(OutputRendered(id~, bytes~)))
+      let rendered : Int = length.cast()
+      _scheduler.add(dispatch(OutputRendered(id~, bytes=rendered)))
     }
     let _ : @js.Value = module_.apply_with_string("writeBase64", [
-      term,
+      entry.term,
       @js.Value::cast_from(data),
       @js.Value::cast_from(done),
     ])
@@ -192,15 +216,59 @@ fn write_output(
 }
 
 ///|
-/// Blank the emulator (a conversation switch or restart): the widget
-/// survives, the screen and scrollback do not.
-fn reset_emulator() -> @cmd.Cmd {
+/// Stash an output chunk whose session id no tab has claimed yet.
+fn buffer_pending(id : Int, data : String, bytes : Int) -> @cmd.Cmd {
   @cmd.custom_cmd(_scheduler => {
-    if term_host.term is Some(term) {
-      let _ : @js.Value = term.apply_with_string(
-        "reset",
-        ([] : Array[@js.Value]),
-      )
+    let chunks = term_host.pending.get(id).unwrap_or([])
+    chunks.push((data, bytes))
+    term_host.pending[id] = chunks
+  })
+}
+
+///|
+/// Flush chunks buffered for `id` into the tab that just claimed it. Every
+/// flushed chunk goes through the normal write path, so each one is
+/// acknowledged as it renders.
+fn flush_pending(dispatch : @cmd.Emit[Msg], key : Int, id : Int) -> @cmd.Cmd {
+  @cmd.custom_cmd(scheduler => {
+    guard term_host.pending.get(id) is Some(chunks) else { return }
+    term_host.pending.remove(id)
+    for chunk in chunks {
+      scheduler.add(write_to_tab(dispatch, key, id, chunk.0, chunk.1))
     }
+  })
+}
+
+///|
+/// Drop any buffer for a session that ended unclaimed, acknowledging the
+/// bytes so the host's window is released before the session's teardown.
+fn drop_pending(dispatch : @cmd.Emit[Msg], id : Int) -> @cmd.Cmd {
+  @cmd.custom_cmd(scheduler => {
+    guard term_host.pending.get(id) is Some(chunks) else { return }
+    term_host.pending.remove(id)
+    for chunk in chunks {
+      scheduler.add(dispatch(OutputRendered(id~, bytes=chunk.1)))
+    }
+  })
+}
+
+///|
+/// Blank a tab's emulator for a restart: the widget survives, the screen
+/// and scrollback do not.
+fn reset_tab(key : Int) -> @cmd.Cmd {
+  @cmd.custom_cmd(_scheduler => {
+    guard term_host.entries.get(key) is Some(entry) else { return }
+    let _ : @js.Value = entry.term.apply_with_string("reset", no_args())
+  })
+}
+
+///|
+/// Dispose a closed tab's emulator and remove its element.
+fn dispose_tab(key : Int) -> @cmd.Cmd {
+  @cmd.custom_cmd(_scheduler => {
+    guard term_host.entries.get(key) is Some(entry) else { return }
+    term_host.entries.remove(key)
+    let _ : @js.Value = entry.term.apply_with_string("dispose", no_args())
+    let _ : @js.Value = entry.element.apply_with_string("remove", no_args())
   })
 }

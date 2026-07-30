@@ -1,18 +1,18 @@
-// The panel's bridge calls. `terminal_open` folds its reply back into the
-// update loop; the steady-state ops (input, resize, ack, close) are
-// fire-and-forget — input failures surface as `OpenFailed` so the panel
-// shows what broke, resize/ack/close failures are dropped (their loss only
-// degrades, and a dead session reports itself through `terminal_exit`).
+// The panel's bridge calls, routed by tab key. `terminal_open` folds its
+// reply back into the update loop; the steady-state ops are fire-and-forget
+// — input failures surface as `OpenFailed` so the tab shows what broke,
+// resize/ack/close failures are dropped (their loss only degrades, and a
+// dead session reports itself through `terminal_exit`).
 
 ///|
 fn open_session(
   dispatch : @cmd.Emit[Msg],
-  ctx : Ctx,
+  key : Int,
+  session : String,
+  workspace : @pathx.Absolute?,
   cols : Int,
   rows : Int,
 ) -> @cmd.Cmd {
-  let session = ctx.session
-  let workspace = ctx.workspace
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
       let payload = @js.Object::new()
@@ -24,7 +24,7 @@ fn open_session(
         error => {
           scheduler.add(
             dispatch(
-              OpenFailed(session~, message=@interop.bridge_error_text(error)),
+              OpenFailed(key~, message=@interop.bridge_error_text(error)),
             ),
           )
           return
@@ -32,14 +32,12 @@ fn open_session(
       }
       guard @interop.js_prop(reply, "id") is Some(value) else {
         scheduler.add(
-          dispatch(
-            OpenFailed(session~, message="malformed terminal_open reply"),
-          ),
+          dispatch(OpenFailed(key~, message="malformed terminal_open reply")),
         )
         return
       }
       let id : Int = value.cast()
-      scheduler.add(dispatch(Opened(session~, id~)))
+      scheduler.add(dispatch(Opened(key~, id~)))
     })
   })
 }
@@ -47,7 +45,7 @@ fn open_session(
 ///|
 fn send_input(
   dispatch : @cmd.Emit[Msg],
-  session : String,
+  key : Int,
   id : Int,
   data : String,
 ) -> @cmd.Cmd {
@@ -63,7 +61,7 @@ fn send_input(
         error => {
           scheduler.add(
             dispatch(
-              OpenFailed(session~, message=@interop.bridge_error_text(error)),
+              OpenFailed(key~, message=@interop.bridge_error_text(error)),
             ),
           )
           return

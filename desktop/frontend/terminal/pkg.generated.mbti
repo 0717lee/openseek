@@ -23,30 +23,49 @@ pub(all) struct Ctx {
 
 pub(all) enum Msg {
   ToggleTerminal
-  EmulatorReady(cols~ : Int, rows~ : Int)
-  Opened(session~ : String, id~ : Int)
-  OpenFailed(session~ : String, message~ : String)
-  UserInput(data~ : String)
-  ViewportResized(cols~ : Int, rows~ : Int)
+  NewTerminal
+  TabSelected(key~ : Int)
+  TabClosed(key~ : Int)
+  EmulatorReady(key~ : Int, cols~ : Int, rows~ : Int)
+  Opened(key~ : Int, id~ : Int)
+  OpenFailed(key~ : Int, message~ : String)
+  UserInput(key~ : Int, data~ : String)
+  ViewportResized(key~ : Int, cols~ : Int, rows~ : Int)
   Output(id~ : Int, data~ : String, bytes~ : Int)
   OutputRendered(id~ : Int, bytes~ : Int)
   SessionExited(id~ : Int, code~ : Int)
-  RestartTerminal
+  RestartTab(key~ : Int)
 }
-
-pub(all) enum Phase {
-  Idle
-  Opening(session~ : String, workspace~ : String)
-  Running(session~ : String, workspace~ : String, id~ : Int)
-  Exited(session~ : String, workspace~ : String, code~ : Int)
-  Failed(session~ : String, workspace~ : String, message~ : String)
-} derive(Eq)
 
 pub(all) struct State {
   open : Bool
-  phase : Phase
+  next_key : Int
+  tabs : Array[Tab]
+  active : Array[(WorkspaceKey, Int)]
 } derive(Eq)
 pub fn State::empty() -> Self
+
+pub(all) struct Tab {
+  key : Int
+  id : Int?
+  workspace : WorkspaceKey
+  workspace_label : String
+  session : String
+  workspace_path : @pathx.Absolute?
+  status : TabStatus
+} derive(Eq)
+
+pub(all) enum TabStatus {
+  TabOpening
+  TabRunning
+  TabExited(code~ : Int)
+  TabFailed(message~ : String)
+} derive(Eq)
+
+pub(all) enum WorkspaceKey {
+  Project(String)
+  Scratch(String)
+} derive(Eq)
 
 // Type aliases
 
