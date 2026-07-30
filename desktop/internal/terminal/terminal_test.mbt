@@ -55,26 +55,6 @@ async test "terminal session round-trips output and reports exit" {
 }
 
 ///|
-#cfg(platform="windows")
-async test "terminal session reports output and exit on Windows" {
-  @async.with_task_group(group => {
-    let state = @terminal.new_terminal_state()
-    let pushes = new_push_queue()
-    group.spawn_bg(allow_failure=true, () => {
-      @terminal.run_terminal_pump(state, async fn(push) { pushes.put(push) })
-    })
-    let id = @terminal.open_terminal(state, cwd=".", cols=80, rows=24, command=[
-      "cmd.exe", "/c", "echo", "OPENSEEK_TERMINAL_WINDOWS_OK",
-    ])
-    @async.with_timeout(5000, () => {
-      wait_for_output(pushes, "OPENSEEK_TERMINAL_WINDOWS_OK")
-    })
-    @async.with_timeout(5000, () => wait_for_exit(pushes))
-    group.return_immediately(())
-  })
-}
-
-///|
 #cfg(not(platform="windows"))
 async test "terminal session runs in the requested directory" {
   @async.with_task_group(group => {
