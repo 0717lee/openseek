@@ -151,7 +151,9 @@ async fn build_wsl_engine(ws : @packaging.Workspace) -> Bool {
 /// Build everything the bundle needs; returns whether the optional WSL Linux
 /// engine was built and should be staged. CEF replaces WebView2, so no
 /// WebView2 SDK headers are fetched.
-async fn build_outputs(ws : @packaging.Workspace) -> Bool {
+async fn build_outputs(
+  ws : @packaging.Workspace,
+) -> (Bool, @xterm_assets.Assets) {
   // Assemble the CEF runtime first so the native host links against it.
   @packaging.assemble_cef_runtime(ws, @packaging.windows_proton_cli())
   // Then replace the assembled dist's proton library with one built from the
@@ -164,9 +166,13 @@ async fn build_outputs(ws : @packaging.Workspace) -> Bool {
     ("lib/Release/proton.lib", "lib/proton.lib"),
   ])
   @packaging.build_frontend_bundle(ws)
+  let terminal_assets = @xterm_assets.build(
+    ws,
+    @xterm_assets.windows_x64_target(),
+  )
   @packaging.build_native_host(ws, extra_args=["--warn-list", "-20"])
   @packaging.build_engine(ws)
-  build_wsl_engine(ws)
+  (build_wsl_engine(ws), terminal_assets)
 }
 
 ///|
@@ -180,6 +186,7 @@ async fn reset_bundle_dirs(ws : @packaging.Workspace) -> Unit {
 ///|
 async fn copy_bundle_files(
   ws : @packaging.Workspace,
+  terminal_assets : @xterm_assets.Assets,
   with_wsl_engine~ : Bool,
 ) -> Unit {
   let native_binary = ws.native_binary()
@@ -219,10 +226,16 @@ async fn copy_bundle_files(
     ws.at(AppAssetDir + "/frontend.js"),
   )
   @packaging.copy_file(ws.at("viewer.css"), ws.at(AppAssetDir + "/viewer.css"))
-  // The vendored terminal emulator bundle and its stylesheet (see
-  // scripts/vendor-xterm.sh), loaded by index.html before frontend.js.
-  @packaging.copy_file(ws.at("xterm.js"), ws.at(AppAssetDir + "/xterm.js"))
-  @packaging.copy_file(ws.at("xterm.css"), ws.at(AppAssetDir + "/xterm.css"))
+  // The verified terminal emulator assets generated during this packaging run
+  // are loaded by index.html before frontend.js.
+  @packaging.copy_file(
+    terminal_assets.javascript,
+    ws.at(AppAssetDir + "/xterm.js"),
+  )
+  @packaging.copy_file(
+    terminal_assets.stylesheet,
+    ws.at(AppAssetDir + "/xterm.css"),
+  )
   // The codicon font is served at the site root (`/codicon.ttf`), so it sits
   // next to `viewer.css` rather than under `fonts/`.
   @packaging.copy_file(
@@ -334,13 +347,13 @@ async fn main {
   if artifacts.installer {
     ensure_makensis(ws)
   }
-  let with_wsl_engine = build_outputs(ws)
+  let (with_wsl_engine, terminal_assets) = build_outputs(ws)
   println("built openseek engine: \{ws.engine_binary()}")
   if with_wsl_engine {
     println("built WSL Linux engine: \{ws.repo_at(WslEngineBinary)}")
   }
   reset_bundle_dirs(ws)
-  copy_bundle_files(ws, with_wsl_engine~)
+  copy_bundle_files(ws, terminal_assets, with_wsl_engine~)
   if artifacts.zip {
     zip_bundle(ws)
     println("generated \{ws.at(ZipPath)}")

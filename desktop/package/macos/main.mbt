@@ -148,7 +148,7 @@ fn CefHelperVariant::executable_path(self : CefHelperVariant) -> String {
 }
 
 ///|
-async fn build_outputs(ws : @packaging.Workspace) -> Unit {
+async fn build_outputs(ws : @packaging.Workspace) -> @xterm_assets.Assets {
   let env = { "MACOSX_DEPLOYMENT_TARGET": MinMacOSVersion }
   let host_env = {
     "MACOSX_DEPLOYMENT_TARGET": MinMacOSVersion,
@@ -177,10 +177,15 @@ async fn build_outputs(ws : @packaging.Workspace) -> Unit {
     extra_env=env,
   )
   @packaging.build_frontend_bundle(ws)
+  let terminal_assets = @xterm_assets.build(
+    ws,
+    @xterm_assets.macos_arm64_target(),
+  )
   // Build the host without mimalloc: its static malloc/free override crashes
   // against CEF's PartitionAlloc default zone on the first `@fs.realpath`.
   @packaging.build_native_host(ws, extra_env=host_env, disable_mimalloc=true)
   @packaging.build_engine(ws, extra_env=env)
+  terminal_assets
 }
 
 ///|
@@ -198,7 +203,10 @@ async fn reset_bundle_dirs(ws : @packaging.Workspace) -> Unit {
 /// The host binary is the bundle's main executable directly, with no shell
 /// launcher in between. Resource lookups derive from argv[0], and the bundled
 /// engine is resolved by absolute path, so nothing needs a `cd` or PATH entry.
-async fn copy_bundle_files(ws : @packaging.Workspace) -> Unit {
+async fn copy_bundle_files(
+  ws : @packaging.Workspace,
+  terminal_assets : @xterm_assets.Assets,
+) -> Unit {
   let native_binary = ws.native_binary()
   let engine_binary = ws.engine_binary()
   if !@asyncfs.exists(native_binary) {
@@ -218,10 +226,16 @@ async fn copy_bundle_files(ws : @packaging.Workspace) -> Unit {
     ws.at(AppAssetDir + "/frontend.js"),
   )
   @packaging.copy_file(ws.at("viewer.css"), ws.at(AppAssetDir + "/viewer.css"))
-  // The vendored terminal emulator bundle and its stylesheet (see
-  // scripts/vendor-xterm.sh), loaded by index.html before frontend.js.
-  @packaging.copy_file(ws.at("xterm.js"), ws.at(AppAssetDir + "/xterm.js"))
-  @packaging.copy_file(ws.at("xterm.css"), ws.at(AppAssetDir + "/xterm.css"))
+  // The verified terminal emulator assets generated during this packaging run
+  // are loaded by index.html before frontend.js.
+  @packaging.copy_file(
+    terminal_assets.javascript,
+    ws.at(AppAssetDir + "/xterm.js"),
+  )
+  @packaging.copy_file(
+    terminal_assets.stylesheet,
+    ws.at(AppAssetDir + "/xterm.css"),
+  )
   // Checked-in icns built from appicon.svg (the design-system mark on the
   // accent squircle). Regenerate with rsvg-convert at the iconset sizes and
   // `iconutil -c icns` when the mark changes.
@@ -910,10 +924,10 @@ async fn main {
   let options = parse_package_options()
   let ws = @packaging.locate_workspace()
   @packaging.ensure_cmake(ws)
-  build_outputs(ws)
+  let terminal_assets = build_outputs(ws)
   println("built openseek engine: \{ws.engine_binary()}")
   reset_bundle_dirs(ws)
-  copy_bundle_files(ws)
+  copy_bundle_files(ws, terminal_assets)
   write_bundle_metadata(ws)
   sign_and_package(ws, options.sign, options.artifacts)
   println("generated \{ws.at(AppPath)}")

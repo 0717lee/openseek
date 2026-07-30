@@ -1,4 +1,4 @@
-// The embedded terminal emulators (vendored xterm.js, loaded as the
+// The embedded terminal emulators (packaged xterm.js, loaded as the
 // `__openseek_xterm` global by an index.html script tag). Rabbita has no
 // escape hatch for foreign DOM widgets, so the panel owns one stable,
 // never-diffed container element (`#terminal-host`), and each tab attaches
@@ -38,7 +38,7 @@ let term_host : TermHost = {
 }
 
 ///|
-/// The vendored bundle's export object (`{ Terminal, FitAddon, writeBase64 }`).
+/// The packaged bundle's export object (`{ Terminal, FitAddon, writeBase64 }`).
 fn xterm_module() -> @js.Value? {
   @interop.js_prop(@js.globalThis, "__openseek_xterm")
 }

@@ -19,7 +19,7 @@ const AppImageToolCache : String = "dist/tools/appimagetool"
 const AppImageToolUrl : String = "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage"
 
 ///|
-async fn build_outputs(ws : @packaging.Workspace) -> Unit {
+async fn build_outputs(ws : @packaging.Workspace) -> @xterm_assets.Assets {
   // Assemble the CEF runtime first so the native host links against it.
   @packaging.assemble_cef_runtime(ws, @packaging.posix_proton_cli())
   // Then replace the assembled dist's libproton with one built from the
@@ -30,8 +30,13 @@ async fn build_outputs(ws : @packaging.Workspace) -> Unit {
     ("bin/cef_process", "bin/cef_process"),
   ])
   @packaging.build_frontend_bundle(ws)
+  let terminal_assets = @xterm_assets.build(
+    ws,
+    @xterm_assets.linux_x64_target(),
+  )
   @packaging.build_native_host(ws)
   @packaging.build_engine(ws)
+  terminal_assets
 }
 
 ///|
@@ -44,7 +49,10 @@ async fn reset_bundle_dirs(ws : @packaging.Workspace) -> Unit {
 }
 
 ///|
-async fn copy_bundle_files(ws : @packaging.Workspace) -> Unit {
+async fn copy_bundle_files(
+  ws : @packaging.Workspace,
+  terminal_assets : @xterm_assets.Assets,
+) -> Unit {
   let native_binary = ws.native_binary()
   let engine_binary = ws.engine_binary()
   if !@asyncfs.exists(native_binary) {
@@ -67,10 +75,16 @@ async fn copy_bundle_files(ws : @packaging.Workspace) -> Unit {
     ws.at(AppAssetDir + "/frontend.js"),
   )
   @packaging.copy_file(ws.at("viewer.css"), ws.at(AppAssetDir + "/viewer.css"))
-  // The vendored terminal emulator bundle and its stylesheet (see
-  // scripts/vendor-xterm.sh), loaded by index.html before frontend.js.
-  @packaging.copy_file(ws.at("xterm.js"), ws.at(AppAssetDir + "/xterm.js"))
-  @packaging.copy_file(ws.at("xterm.css"), ws.at(AppAssetDir + "/xterm.css"))
+  // The verified terminal emulator assets generated during this packaging run
+  // are loaded by index.html before frontend.js.
+  @packaging.copy_file(
+    terminal_assets.javascript,
+    ws.at(AppAssetDir + "/xterm.js"),
+  )
+  @packaging.copy_file(
+    terminal_assets.stylesheet,
+    ws.at(AppAssetDir + "/xterm.css"),
+  )
   // The codicon font is served at the site root (`/codicon.ttf`), so it sits
   // next to `viewer.css` rather than under `fonts/`.
   @packaging.copy_file(
@@ -204,10 +218,10 @@ async fn build_appimage(ws : @packaging.Workspace, tool : String) -> Unit {
 async fn main {
   let ws = @packaging.locate_workspace()
   @packaging.ensure_cmake(ws)
-  build_outputs(ws)
+  let terminal_assets = build_outputs(ws)
   println("built openseek engine: \{ws.engine_binary()}")
   reset_bundle_dirs(ws)
-  copy_bundle_files(ws)
+  copy_bundle_files(ws, terminal_assets)
   write_bundle_metadata(ws)
   let tool = ensure_appimagetool(ws)
   build_appimage(ws, tool)
