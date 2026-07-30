@@ -42,6 +42,15 @@ pub fn panel_view(
   state : State,
   ctx : Ctx,
 ) -> @html.Html {
+  // Always render the grab strip so its position and the terminal host's
+  // sibling index remain stable across open/close renders. Its listeners are
+  // installed imperatively on the first terminal open (see resize.mbt).
+  let resize_handle = @html.div(
+    attrs=@html.Attrs::build()
+      .id(TerminalResizeHandleId)
+      .class("terminal-resize-handle"),
+    ([] : Array[@html.Html]),
+  )
   let items : Array[@html.Html] = [
     @html.span(class="terminal-title", "Terminal"),
   ]
@@ -87,6 +96,6 @@ pub fn panel_view(
   )
   @html.div(
     class=if state.open { "terminal-panel open" } else { "terminal-panel" },
-    [@html.div(class="terminal-titlebar", items), host],
+    [resize_handle, @html.div(class="terminal-titlebar", items), host],
   )
 }

@@ -147,22 +147,31 @@ let tree_height : Ref[Int?] = Ref(None)
 let tree_width : Ref[Int?] = Ref(None)
 
 ///|
-/// Write the dragged sizes as custom properties on the document element,
-/// where the CSS `clamp(...)`s read them. Set on the root, not on the panes
-/// themselves, so a rabbita re-render never clears them.
+/// Write the dragged sizes as individual custom properties on the document
+/// element, where the CSS `clamp(...)`s read them. Updating properties through
+/// CSSOM preserves sizes owned by other panels, including the terminal height;
+/// setting one shared `style` attribute here would erase those values.
 fn sync_root_style() -> Unit {
   guard document_element() is Some(root) else { return }
-  let style = StringBuilder::new()
+  let style : @js.Value = @js.Value::cast_from(root).get_with_string("style")
   if editor_width.val is Some(width) {
-    style.write_string("--editor-width: \{width}px;")
+    let _ : @js.Value = style.apply_with_string("setProperty", [
+      @js.Value::cast_from("--editor-width"),
+      @js.Value::cast_from("\{width}px"),
+    ])
   }
   if tree_height.val is Some(height) {
-    style.write_string("--tree-height: \{height}px;")
+    let _ : @js.Value = style.apply_with_string("setProperty", [
+      @js.Value::cast_from("--tree-height"),
+      @js.Value::cast_from("\{height}px"),
+    ])
   }
   if tree_width.val is Some(width) {
-    style.write_string("--tree-width: \{width}px;")
+    let _ : @js.Value = style.apply_with_string("setProperty", [
+      @js.Value::cast_from("--tree-width"),
+      @js.Value::cast_from("\{width}px"),
+    ])
   }
-  root.set_attribute("style", style.to_string())
 }
 
 ///|

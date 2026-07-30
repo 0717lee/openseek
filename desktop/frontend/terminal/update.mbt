@@ -54,7 +54,13 @@ fn open_new_tab(
     tabs: state.tabs + [tab],
     shown: Some(key),
   }
-  (mount_tab(dispatch, key, ctx.dark_mode), state.remember_active(group, key))
+  (
+    @cmd.batch([
+      terminal_resizer.mount(),
+      mount_tab(dispatch, key, ctx.dark_mode),
+    ]),
+    state.remember_active(group, key),
+  )
 }
 
 ///|
