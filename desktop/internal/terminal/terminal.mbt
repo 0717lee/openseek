@@ -44,6 +44,9 @@ priv struct TerminalSession {
 ///|
 priv struct OpenRequest {
   id : Int
+  /// The page connection that submitted this request. A later connect
+  /// handshake invalidates it even if the pump has already dequeued it.
+  connection_generation : Int
   argv : Array[String]
   /// The directory passed directly to the PTY process spawn.
   cwd : String
@@ -55,16 +58,24 @@ priv struct OpenRequest {
 
 ///|
 /// The terminal subsystem's shared state: the pump's mailbox of pending
-/// spawns and the table of live sessions.
+/// spawns, the table of live sessions, and the current page connection.
 struct TerminalState {
   requests : @async.Queue[OpenRequest]
   sessions : Map[Int, TerminalSession]
   mut next_id : Int
+  /// Incremented by the connect handshake so opens from an older page cannot
+  /// publish a session after that page has gone away.
+  mut connection_generation : Int
 }
 
 ///|
 pub fn new_terminal_state() -> TerminalState {
-  { requests: Queue(kind=Unbounded), sessions: Map([]), next_id: 1 }
+  {
+    requests: Queue(kind=Unbounded),
+    sessions: Map([]),
+    next_id: 1,
+    connection_generation: 0,
+  }
 }
 
 ///|
@@ -84,7 +95,15 @@ pub async fn open_terminal(
   let id = state.next_id
   state.next_id = id + 1
   let reply : @async.Queue[Result[Unit, String]] = Queue(kind=Blocking(1))
-  state.requests.put({ id, argv, cwd, cols, rows, reply })
+  state.requests.put({
+    id,
+    connection_generation: state.connection_generation,
+    argv,
+    cwd,
+    cols,
+    rows,
+    reply,
+  })
   match reply.get() {
     Ok(_) => id
     Err(message) => raise TerminalError(message)
@@ -149,11 +168,13 @@ pub fn close_terminal(state : TerminalState, id~ : Int) -> Unit {
 }
 
 ///|
-/// Retire every live session. A freshly (re)loaded page cannot reclaim
-/// sessions an earlier page opened — their tabs are gone with it — so the
-/// connect handshake closes them rather than leave orphaned shells running
-/// until the app quits.
+/// Retire every live session and invalidate every open requested by an older
+/// page. A freshly (re)loaded page cannot reclaim the old page's terminal
+/// tabs, including requests the pump has not published as sessions yet.
 pub fn close_all_terminals(state : TerminalState) -> Unit {
+  // Incrementing before the live-session sweep also covers requests that the
+  // pump dequeued but whose PTY spawn has not completed.
+  state.connection_generation += 1
   // Materialized: teardown mutates the table as sessions unwind.
   for id in state.sessions.keys().to_array() {
     close_terminal(state, id~)

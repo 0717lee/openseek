@@ -141,6 +141,41 @@ async test "close_all_terminals retires every live session" {
 }
 
 ///|
+/// An old page can disappear after its open request reaches the host but
+/// before the pump starts it. The next connect handshake must reject that
+/// queued request instead of starting a shell with no tab to own it.
+async test "close_all_terminals cancels queued opens from an older page" {
+  @async.with_task_group(group => {
+    let state = @terminal.new_terminal_state()
+    let pushes = new_push_queue()
+    let cancelled : @async.Queue[Bool] = Queue(kind=Blocking(1))
+    group.spawn_bg(allow_failure=true, () => {
+      let was_cancelled = try {
+        let _ = @terminal.open_terminal(state, cwd="/tmp", cols=80, rows=24, command=[
+          "/bin/cat",
+        ])
+        false
+      } catch {
+        @terminal.TerminalError("terminal open was cancelled by reconnect") =>
+          true
+        _ => false
+      }
+      cancelled.put(was_cancelled)
+    })
+    // Let the opener enqueue its request and block on the reply before the
+    // reconnect sweep advances the page connection.
+    @async.pause()
+    @terminal.close_all_terminals(state)
+    group.spawn_bg(allow_failure=true, () => {
+      @terminal.run_terminal_pump(state, async fn(push) { pushes.put(push) })
+    })
+    let was_cancelled = @async.with_timeout(5000, () => cancelled.get())
+    assert_true(was_cancelled)
+    group.return_immediately(())
+  })
+}
+
+///|
 test "ops on unknown terminal ids degrade cleanly" {
   let state = @terminal.new_terminal_state()
   // ack and close are fire-and-forget: an id that already exited is fine.

@@ -33,6 +33,10 @@ async fn run_session(
   emit : async (TerminalPush) -> Unit,
 ) -> Unit {
   @async.with_task_group(group => {
+    if request.connection_generation != state.connection_generation {
+      request.reply.put(Err("terminal open was cancelled by reconnect"))
+      return
+    }
     let pty = @pty.spawn(
       group,
       request.argv,
@@ -47,6 +51,13 @@ async fn run_session(
         request.reply.put(Err(@debug.render(Repr(error))))
         return
       }
+    }
+    // Spawning suspends, so a reconnect can invalidate the request while the
+    // child is being created. Close it before publishing a stale session.
+    if request.connection_generation != state.connection_generation {
+      request.reply.put(Err("terminal open was cancelled by reconnect"))
+      pty.close()
+      return
     }
     let session : TerminalSession = {
       pty,
