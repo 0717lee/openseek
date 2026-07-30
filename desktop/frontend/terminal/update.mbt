@@ -18,13 +18,15 @@
 fn workspace_label(ctx : Ctx) -> String {
   guard ctx.workspace is Some(workspace) else { return "scratch" }
   let text = workspace.0
-  let mut label = text
-  for part in text.split("/") {
-    if !part.is_empty() {
-      label = part.to_owned()
-    }
+  // A workspace hint may have been produced on another platform. The win32
+  // flavor intentionally accepts both `\` and `/`, without the top-level
+  // `path` package's Node-only runtime platform probe in this browser bundle.
+  let label = @winpath.Path(text).basename()
+  if label.is_empty() {
+    text
+  } else {
+    label.to_owned()
   }
-  label
 }
 
 ///|
@@ -141,7 +143,24 @@ pub fn update(
       }
     }
     Opened(key~, id~) =>
-      if state.tab_by_key(key) is Some(tab) && tab.status is TabOpening {
+      if state.exited_before_open.contains(id) {
+        // `terminal_exit` can beat this reply. Only the reply identifies
+        // which opening tab owned the id, so retire it now and never publish
+        // a `TabRunning` state for a dead PTY.
+        let state = {
+          ..state,
+          exited_before_open: state.exited_before_open.filter(exited => {
+            exited != id
+          }),
+        }
+        if state.tab_by_key(key) is Some(tab) && tab.status is TabOpening {
+          let (cmds, state) = drop_tab(state, ctx, key)
+          cmds.push(drop_pending(dispatch, id))
+          (@cmd.batch(cmds), state)
+        } else {
+          (drop_pending(dispatch, id), state)
+        }
+      } else if state.tab_by_key(key) is Some(tab) && tab.status is TabOpening {
         (
           flush_pending(dispatch, key, id),
           state.replace_tab({ ..tab, id: Some(id), status: TabRunning }),
@@ -161,7 +180,16 @@ pub fn update(
       if state.tab_by_key(key) is Some(tab) &&
         tab.status is TabRunning &&
         tab.id is Some(id) {
-        (send_input(dispatch, key, id, data), state)
+        (send_input(dispatch, key, id, data, false), state)
+      } else {
+        // Typing into an exited/unopened terminal has nowhere to go.
+        (@cmd.none, state)
+      }
+    BinaryInput(key~, data~) =>
+      if state.tab_by_key(key) is Some(tab) &&
+        tab.status is TabRunning &&
+        tab.id is Some(id) {
+        (send_input(dispatch, key, id, data, true), state)
       } else {
         // Typing into an exited/unopened terminal has nowhere to go.
         (@cmd.none, state)
@@ -200,7 +228,19 @@ pub fn update(
           let (cmds, state) = drop_tab(state, ctx, tab.key)
           (@cmd.batch(cmds), state)
         }
-        None => (drop_pending(dispatch, id), state)
+        None =>
+          if state.tabs.iter().any(tab => tab.status is TabOpening) {
+            (
+              drop_pending(dispatch, id),
+              if state.exited_before_open.contains(id) {
+                state
+              } else {
+                { ..state, exited_before_open: state.exited_before_open + [id] }
+              },
+            )
+          } else {
+            (drop_pending(dispatch, id), state)
+          }
       }
   }
 }
@@ -219,6 +259,11 @@ pub fn sync(
 ) -> (State, @cmd.Cmd) {
   if state.open && state.visible_tabs(ctx).is_empty() {
     let (cmd, state) = open_new_tab(dispatch, state, ctx)
+    let theme_changed = state.synced_dark_mode != Some(ctx.dark_mode)
+    let state = { ..state, synced_dark_mode: Some(ctx.dark_mode) }
+    if theme_changed {
+      return (state, @cmd.batch([cmd, apply_theme(ctx.dark_mode)]))
+    }
     return (state, cmd)
   }
   let desired = if state.open {
@@ -226,9 +271,14 @@ pub fn sync(
   } else {
     None
   }
-  if desired == state.shown {
-    (state, @cmd.none)
-  } else {
-    ({ ..state, shown: desired }, apply_shown(desired))
+  let shown_changed = desired != state.shown
+  let theme_changed = state.synced_dark_mode != Some(ctx.dark_mode)
+  let state = { ..state, shown: desired, synced_dark_mode: Some(ctx.dark_mode) }
+  match (shown_changed, theme_changed) {
+    (false, false) => (state, @cmd.none)
+    (true, false) => (state, apply_shown(desired))
+    (false, true) => (state, apply_theme(ctx.dark_mode))
+    (true, true) =>
+      (state, @cmd.batch([apply_shown(desired), apply_theme(ctx.dark_mode)]))
   }
 }

@@ -142,14 +142,28 @@ fn mount_tab(
         let fit : @js.Value = fit_ctor.new(no_args())
         let _ : @js.Value = term.apply_with_string("loadAddon", [fit])
         let _ : @js.Value = term.apply_with_string("open", [element])
-        // Keystrokes (already encoded as terminal input by xterm) go to the
-        // update loop tagged with this tab.
+        // Text input from xterm goes to the update loop tagged with this tab;
+        // the host encodes this path as UTF-8 for the PTY.
         let on_data = (data : @js.Value) => {
           let text : String = data.cast()
           scheduler.add(dispatch(UserInput(key~, data=text)))
         }
         let _ : @js.Value = term.apply_with_string("onData", [
           @js.Value::cast_from(on_data),
+        ])
+        // `onBinary` is deliberately separate from `onData`: each JS string
+        // code unit is already one terminal byte and must not be UTF-8
+        // encoded. Base64 gives the JSON bridge a byte-transparent spelling.
+        let on_binary = (data : @js.Value) => {
+          let binary : String = data.cast()
+          scheduler.add(
+            dispatch(
+              BinaryInput(key~, data=@terminal_input.encode_binary(binary)),
+            ),
+          )
+        }
+        let _ : @js.Value = term.apply_with_string("onBinary", [
+          @js.Value::cast_from(on_binary),
         ])
         // Every re-fit lands here, including reveal-time ones; the update
         // loop forwards it to the tab's PTY while its session runs.
@@ -212,6 +226,20 @@ fn apply_shown(key : Int?) -> @cmd.Cmd {
     },
     kind=@cmd.after_render,
   )
+}
+
+///|
+/// Apply the app's current color scheme to every emulator that already
+/// exists. Newly mounted tabs receive the same theme in `mount_tab`; this
+/// command covers tabs that survive a later light/dark switch.
+fn apply_theme(dark_mode : Bool) -> @cmd.Cmd {
+  @cmd.custom_cmd(_scheduler => {
+    let theme = terminal_theme(dark_mode).to_value()
+    for _, entry in term_host.entries {
+      let options : @js.Value = entry.term.get_with_string("options")
+      options.set_with_string("theme", theme)
+    }
+  })
 }
 
 ///|

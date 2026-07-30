@@ -51,11 +51,27 @@ pub(all) struct State {
   /// when a conversation switch must re-aim the display — the switch itself
   /// produces no terminal message.
   shown : Int?
+  /// Session ids whose exit event beat their `terminal_open` reply. The reply
+  /// is the first event that identifies the opening tab, so it consumes the id
+  /// and retires that tab instead of reviving an already-dead session.
+  exited_before_open : Array[Int]
+  /// The color scheme last applied to every mounted emulator. Keeping this in
+  /// model state lets `sync` refresh existing xterm instances exactly once
+  /// when the application switches between light and dark mode.
+  synced_dark_mode : Bool?
 } derive(Eq)
 
 ///|
 pub fn State::empty() -> State {
-  { open: false, next_key: 1, tabs: [], active: [], shown: None }
+  {
+    open: false,
+    next_key: 1,
+    tabs: [],
+    active: [],
+    shown: None,
+    exited_before_open: [],
+    synced_dark_mode: None,
+  }
 }
 
 ///|
@@ -165,6 +181,9 @@ pub(all) enum Msg {
   OpenFailed(key~ : Int, message~ : String)
   /// Keystrokes from one tab's emulator.
   UserInput(key~ : Int, data~ : String)
+  /// xterm's `onBinary` payload, encoded as base64 so each JS character code
+  /// reaches the PTY as exactly one byte instead of being UTF-8 re-encoded.
+  BinaryInput(key~ : Int, data~ : String)
   /// `terminal_input` failed for the tab: the keystrokes were lost. The
   /// main package surfaces the message as an error toast (the panel has no
   /// toast rail of its own); the tab's status is untouched — a lost

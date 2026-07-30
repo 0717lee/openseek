@@ -19,12 +19,28 @@ priv struct TerminalOpenReply {
 } derive(ToJson)
 
 ///|
-/// User keystrokes as the emulator encoded them (a JS string; the host
-/// re-encodes to UTF-8 bytes for the PTY).
+/// User keystrokes as the emulator encoded them. Text arrives in `data` and
+/// is UTF-8 encoded; xterm `onBinary` input arrives byte-transparent in
+/// `data_base64`. Exactly one field must be present.
 priv struct TerminalInputPayload {
   id : Int
-  data : String
+  data : String?
+  data_base64 : String?
 } derive(FromJson)
+
+///|
+fn TerminalInputPayload::bytes(
+  self : TerminalInputPayload,
+) -> Bytes raise HostError {
+  match (self.data, self.data_base64) {
+    (Some(data), None) => @utf8.encode(data)
+    (None, Some(data)) =>
+      @base64.decode(data) catch {
+        _ => raise HostError("terminal input contains invalid base64")
+      }
+    _ => raise HostError("terminal input must contain exactly one data field")
+  }
+}
 
 ///|
 priv struct TerminalResizePayload {
@@ -104,7 +120,7 @@ async fn terminal_input_op(
   terminals : @terminal.TerminalState,
   payload : TerminalInputPayload,
 ) -> Unit {
-  @terminal.write_terminal(terminals, id=payload.id, @utf8.encode(payload.data)) catch {
+  @terminal.write_terminal(terminals, id=payload.id, payload.bytes()) catch {
     @terminal.TerminalError(message) => raise HostError(message)
     error => raise error
   }

@@ -32,6 +32,7 @@ pub(all) enum Msg {
   Opened(key~ : Int, id~ : Int)
   OpenFailed(key~ : Int, message~ : String)
   UserInput(key~ : Int, data~ : String)
+  BinaryInput(key~ : Int, data~ : String)
   InputFailed(key~ : Int, message~ : String)
   ViewportResized(key~ : Int, cols~ : Int, rows~ : Int)
   Output(id~ : Int, data~ : String, bytes~ : Int)
@@ -45,6 +46,8 @@ pub(all) struct State {
   tabs : Array[Tab]
   active : Array[(WorkspaceKey, Int)]
   shown : Int?
+  exited_before_open : Array[Int]
+  synced_dark_mode : Bool?
 } derive(Eq)
 pub fn State::empty() -> Self
 

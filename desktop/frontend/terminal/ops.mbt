@@ -48,12 +48,17 @@ fn send_input(
   key : Int,
   id : Int,
   data : String,
+  binary : Bool,
 ) -> @cmd.Cmd {
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
       let payload = @js.Object::new()
       payload["id"] = id
-      payload["data"] = data
+      if binary {
+        payload["data_base64"] = data
+      } else {
+        payload["data"] = data
+      }
       let _ : @js.Value = @interop.bridge_request(
         "terminal_input",
         payload.to_value(),
