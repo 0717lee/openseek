@@ -31,7 +31,7 @@ pub fn update(
       }
     Opened(session~, id~) =>
       if state.phase is Opening(session=expected) && expected == session {
-        (wire_session(id), { ..state, phase: Running(session~, id~) })
+        (wire_session(), { ..state, phase: Running(session~, id~) })
       } else {
         // The conversation switched while the open was in flight; the
         // session belongs to nobody now, so retire it on the host.
@@ -56,11 +56,19 @@ pub fn update(
       } else {
         (@cmd.none, state)
       }
-    Output(id~, data~) =>
-      if state.phase is Running(id=running, ..) && running == id {
-        (write_output(dispatch, id, data), state)
-      } else {
-        (@cmd.none, state)
+    // The host starts reading the PTY as soon as it spawns, so a session's
+    // first output — including the launcher's own diagnostics when the shell
+    // cannot start — can reach the panel before the `terminal_open` reply
+    // names its id. While opening, this panel has no other session the host
+    // could be reporting, so render it; anything else is a retired session's
+    // tail, which must still be acknowledged or the host's flow-control
+    // window leaks and the session eventually stalls.
+    Output(id~, data~, bytes~) =>
+      match state.phase {
+        Opening(..) => (write_output(dispatch, id, data, bytes), state)
+        Running(id=running, ..) if running == id =>
+          (write_output(dispatch, id, data, bytes), state)
+        _ => (send_ack(id, bytes), state)
       }
     OutputRendered(id~, bytes~) => (send_ack(id, bytes), state)
     SessionExited(id~, code~) =>

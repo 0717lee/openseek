@@ -19,14 +19,10 @@ priv struct TermHost {
   mut term : @js.Value?
   /// Its fit addon, sized to the host element by `fit()`.
   mut fit : @js.Value?
-  /// The host-side session id the emulator is wired to; output for any
-  /// other id is stale (a session retired by a conversation switch) and
-  /// dropped at the write boundary.
-  mut wired : Int?
 }
 
 ///|
-let term_host : TermHost = { term: None, fit: None, wired: None }
+let term_host : TermHost = { term: None, fit: None }
 
 ///|
 /// The vendored bundle's export object (`{ Terminal, FitAddon, writeBase64 }`).
@@ -134,10 +130,9 @@ fn refit() -> Unit {
 }
 
 ///|
-/// Bind the emulator to a freshly opened PTY session and focus it.
-fn wire_session(id : Int) -> @cmd.Cmd {
+/// Focus the emulator for a freshly opened PTY session.
+fn wire_session() -> @cmd.Cmd {
   @cmd.custom_cmd(_scheduler => {
-    term_host.wired = Some(id)
     if term_host.term is Some(term) {
       let _ : @js.Value = term.apply_with_string(
         "focus",
@@ -167,12 +162,21 @@ fn focus_terminal() -> @cmd.Cmd {
 ///|
 /// Decode one base64 output chunk into the emulator and report its byte
 /// count back once xterm finished rendering it (the flow-control ack).
-/// Dropped when the chunk is for a session the emulator is no longer wired
-/// to.
-fn write_output(dispatch : @cmd.Emit[Msg], id : Int, data : String) -> @cmd.Cmd {
+///
+/// Whether a chunk belongs to this panel's session is the update loop's
+/// call; this only writes. An unwritable chunk (no emulator yet) is still
+/// acknowledged with the length the host reported, because a chunk that is
+/// never acknowledged leaks the host's flow-control window and eventually
+/// stalls the session.
+fn write_output(
+  dispatch : @cmd.Emit[Msg],
+  id : Int,
+  data : String,
+  bytes : Int,
+) -> @cmd.Cmd {
   @cmd.custom_cmd(_scheduler => {
-    guard term_host.wired is Some(wired) && wired == id else { return }
     guard term_host.term is Some(term) && xterm_module() is Some(module_) else {
+      _scheduler.add(dispatch(OutputRendered(id~, bytes~)))
       return
     }
     let done = (length : @js.Value) => {
@@ -188,11 +192,10 @@ fn write_output(dispatch : @cmd.Emit[Msg], id : Int, data : String) -> @cmd.Cmd 
 }
 
 ///|
-/// Unbind and blank the emulator (a conversation switch or restart): the
-/// widget survives, the screen and scrollback do not.
+/// Blank the emulator (a conversation switch or restart): the widget
+/// survives, the screen and scrollback do not.
 fn reset_emulator() -> @cmd.Cmd {
   @cmd.custom_cmd(_scheduler => {
-    term_host.wired = None
     if term_host.term is Some(term) {
       let _ : @js.Value = term.apply_with_string(
         "reset",

@@ -67,7 +67,7 @@ pub(all) enum Msg {
   /// The emulator re-fit to a new grid size.
   ViewportResized(cols~ : Int, rows~ : Int)
   /// `terminal_output` event: base64 of raw PTY bytes.
-  Output(id~ : Int, data~ : String)
+  Output(id~ : Int, data~ : String, bytes~ : Int)
   /// The emulator finished rendering a chunk; flow-control ack.
   OutputRendered(id~ : Int, bytes~ : Int)
   /// `terminal_exit` event.

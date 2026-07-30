@@ -45,6 +45,9 @@ priv struct TerminalSession {
 priv struct OpenRequest {
   id : Int
   argv : Array[String]
+  /// The directory the session starts in — kept for the spawn log, since a
+  /// launcher that cannot enter it is the one failure the log must name.
+  cwd : String
   cols : Int
   rows : Int
   /// Spawn outcome for the waiting `open_terminal` call.
@@ -82,7 +85,7 @@ pub async fn open_terminal(
   let id = state.next_id
   state.next_id = id + 1
   let reply : @async.Queue[Result[Unit, String]] = Queue(kind=Blocking(1))
-  state.requests.put({ id, argv, cols, rows, reply })
+  state.requests.put({ id, argv, cwd, cols, rows, reply })
   match reply.get() {
     Ok(_) => id
     Err(message) => raise TerminalError(message)

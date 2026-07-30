@@ -63,6 +63,9 @@ async fn run_session(
         "id": request.id,
         "pid": pty.pid(),
         "argv0": request.argv.get(0).unwrap_or(""),
+        // The launcher's `cd` target: a session that dies immediately with
+        // status 1 failed exactly here.
+        "cwd": request.cwd,
       }
     let reader = pty.reader()
     let buf : FixedArray[Byte] = FixedArray::make(ReadChunkBytes, b'\x00')

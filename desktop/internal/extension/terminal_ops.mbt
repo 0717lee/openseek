@@ -47,10 +47,15 @@ priv struct TerminalClosePayload {
 } derive(FromJson)
 
 ///|
-/// `terminal_output` event: `data` is base64 of raw PTY bytes.
+/// `terminal_output` event: `data` is base64 of raw PTY bytes, `bytes` their
+/// decoded length. The length rides along so the webview can acknowledge a
+/// chunk it decides not to render (a retired session's tail) without
+/// decoding it — an unacknowledged chunk would leak the host's flow-control
+/// window and eventually stall the session.
 priv struct TerminalOutputPayload {
   id : Int
   data : String
+  bytes : Int
 } derive(ToJson)
 
 ///|
@@ -73,6 +78,14 @@ async fn terminal_open_op(
     )
     is Some(root) else {
     raise HostError("terminal requires a conversation workspace")
+  }
+  // A scratch conversation's workspace directory is created lazily by its
+  // first run, so a terminal opened before that would start in a directory
+  // that does not exist yet. Create it here the same way the engine does —
+  // for a registered workspace this is a no-op.
+  @fsx.ensure_dir(root) catch {
+    error if @async.is_being_cancelled() => raise error
+    error => raise HostError("could not open the workspace directory: \{error}")
   }
   let id = @terminal.open_terminal(
     terminals,
@@ -137,7 +150,11 @@ async fn emit_terminal_push(
 ) -> Unit {
   match push {
     Output(id~, data~) => {
-      let payload : TerminalOutputPayload = { id, data: @base64.encode(data) }
+      let payload : TerminalOutputPayload = {
+        id,
+        data: @base64.encode(data),
+        bytes: data.length(),
+      }
       context.emit("terminal_output", payload)
     }
     Exited(id~, code~) => {

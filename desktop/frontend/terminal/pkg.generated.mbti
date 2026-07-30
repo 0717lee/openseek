@@ -30,7 +30,7 @@ pub(all) enum Msg {
   OpenFailed(session~ : String, message~ : String)
   UserInput(data~ : String)
   ViewportResized(cols~ : Int, rows~ : Int)
-  Output(id~ : Int, data~ : String)
+  Output(id~ : Int, data~ : String, bytes~ : Int)
   OutputRendered(id~ : Int, bytes~ : Int)
   SessionExited(id~ : Int, code~ : Int)
   RestartTerminal
