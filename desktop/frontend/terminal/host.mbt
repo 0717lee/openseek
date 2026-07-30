@@ -272,16 +272,6 @@ fn drop_pending(dispatch : @cmd.Emit[Msg], id : Int) -> @cmd.Cmd {
 }
 
 ///|
-/// Blank a tab's emulator for a restart: the widget survives, the screen
-/// and scrollback do not.
-fn reset_tab(key : Int) -> @cmd.Cmd {
-  @cmd.custom_cmd(_scheduler => {
-    guard term_host.entries.get(key) is Some(entry) else { return }
-    let _ : @js.Value = entry.term.apply_with_string("reset", no_args())
-  })
-}
-
-///|
 /// Dispose a closed tab's emulator and remove its element.
 fn dispose_tab(key : Int) -> @cmd.Cmd {
   @cmd.custom_cmd(_scheduler => {

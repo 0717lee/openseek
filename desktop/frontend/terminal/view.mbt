@@ -13,12 +13,10 @@ fn tab_view(dispatch : @cmd.Emit[Msg], tab : Tab, active : Bool) -> @html.Html {
   let title = match tab.status {
     TabOpening => "starting…"
     TabRunning => tab.workspace_label
-    TabExited(code~) => "exited (\{code})"
     TabFailed(message~) => message
   }
   let status : Array[@html.Html] = []
   match tab.status {
-    TabExited(..) => status.push(@html.span(class="terminal-tab-dead", "○"))
     TabFailed(..) => status.push(@html.span(class="terminal-tab-failed", "!"))
     TabOpening | TabRunning => ()
   }
@@ -62,31 +60,14 @@ pub fn panel_view(
       "+",
     ),
   )
-  // The visible tab's failure/exit detail and its restart, at the right edge.
+  // The visible tab's failure detail at the right edge; a failed tab is
+  // closed with its ✕ and a fresh one opened with "+".
   if active is Some(tab) {
     match tab.status {
       TabOpening =>
         items.push(@html.span(class="terminal-status", "starting…"))
-      TabExited(code~) => {
-        items.push(@html.span(class="terminal-status", "exited (\{code})"))
-        items.push(
-          @html.button(
-            class="terminal-action",
-            on_click=dispatch(RestartTab(key=tab.key)),
-            "Restart",
-          ),
-        )
-      }
-      TabFailed(message~) => {
+      TabFailed(message~) =>
         items.push(@html.span(class="terminal-status terminal-error", message))
-        items.push(
-          @html.button(
-            class="terminal-action",
-            on_click=dispatch(RestartTab(key=tab.key)),
-            "Retry",
-          ),
-        )
-      }
       TabRunning => ()
     }
   }

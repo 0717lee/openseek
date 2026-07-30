@@ -56,6 +56,26 @@ fn open_new_tab(
 }
 
 ///|
+/// Remove a tab and dispose its emulator. Emptying the visible group takes
+/// the panel with it: an open panel over an empty group would immediately
+/// respawn a shell (see `sync`), which must not happen when the user
+/// deliberately ended the last one.
+fn drop_tab(state : State, ctx : Ctx, key : Int) -> (Array[@cmd.Cmd], State) {
+  let cmds = [dispose_tab(key)]
+  let state = {
+    ..state,
+    tabs: state.tabs.filter(entry => entry.key != key),
+    active: state.active.filter(entry => entry.1 != key),
+  }
+  let state = if state.open && state.visible_tabs(ctx).is_empty() {
+    { ..state, open: false }
+  } else {
+    state
+  }
+  (cmds, state)
+}
+
+///|
 pub fn update(
   dispatch : @cmd.Emit[Msg],
   msg : Msg,
@@ -90,14 +110,9 @@ pub fn update(
       guard state.tab_by_key(key) is Some(tab) else {
         return (@cmd.none, state)
       }
-      let cmds = [dispose_tab(key)]
+      let (cmds, state) = drop_tab(state, ctx, key)
       if tab.id is Some(id) {
         cmds.push(send_close(id))
-      }
-      let state = {
-        ..state,
-        tabs: state.tabs.filter(entry => entry.key != key),
-        active: state.active.filter(entry => entry.1 != key),
       }
       // `sync` reveals the group's fallback tab, if the closed one was on
       // screen.
@@ -174,26 +189,16 @@ pub fn update(
           }
       }
     OutputRendered(id~, bytes~) => (send_ack(id, bytes), state)
-    SessionExited(id~, code~) =>
+    SessionExited(id~, code=_) =>
       match state.tab_by_id(id) {
-        Some(tab) =>
-          (@cmd.none, state.replace_tab({ ..tab, status: TabExited(code~) }))
+        // The shell ended (Ctrl+D, `exit`, or a crash): its tab retires,
+        // and the visible group's last tab takes the panel with it.
+        Some(tab) => {
+          let (cmds, state) = drop_tab(state, ctx, tab.key)
+          (@cmd.batch(cmds), state)
+        }
         None => (drop_pending(dispatch, id), state)
       }
-    RestartTab(key~) => {
-      guard state.tab_by_key(key) is Some(tab) else {
-        return (@cmd.none, state)
-      }
-      match tab.status {
-        TabExited(..) | TabFailed(..) =>
-          // Same binding, fresh shell: the tab stays in its workspace.
-          (
-            @cmd.batch([reset_tab(key), mount_tab(dispatch, key, ctx.dark_mode)]),
-            state.replace_tab({ ..tab, id: None, status: TabOpening }),
-          )
-        TabOpening | TabRunning => (@cmd.none, state)
-      }
-    }
   }
 }
 

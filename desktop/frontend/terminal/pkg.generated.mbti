@@ -36,7 +36,6 @@ pub(all) enum Msg {
   Output(id~ : Int, data~ : String, bytes~ : Int)
   OutputRendered(id~ : Int, bytes~ : Int)
   SessionExited(id~ : Int, code~ : Int)
-  RestartTab(key~ : Int)
 }
 
 pub(all) struct State {
@@ -61,7 +60,6 @@ pub(all) struct Tab {
 pub(all) enum TabStatus {
   TabOpening
   TabRunning
-  TabExited(code~ : Int)
   TabFailed(message~ : String)
 } derive(Eq)
 

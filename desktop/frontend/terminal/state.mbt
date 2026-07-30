@@ -18,8 +18,6 @@ pub(all) enum TabStatus {
   /// `terminal_open` is in flight.
   TabOpening
   TabRunning
-  /// The child exited; the tab offers a restart.
-  TabExited(code~ : Int)
   /// Opening or driving the session failed.
   TabFailed(message~ : String)
 } derive(Eq)
@@ -174,8 +172,6 @@ pub(all) enum Msg {
   Output(id~ : Int, data~ : String, bytes~ : Int)
   /// An emulator finished rendering a chunk; flow-control ack.
   OutputRendered(id~ : Int, bytes~ : Int)
-  /// `terminal_exit` event.
+  /// `terminal_exit` event: the shell ended, so its tab retires.
   SessionExited(id~ : Int, code~ : Int)
-  /// Spawn a fresh shell in an exited/failed tab (same workspace binding).
-  RestartTab(key~ : Int)
 }
