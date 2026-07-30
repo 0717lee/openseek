@@ -10,8 +10,6 @@ import {
 // Values
 pub fn panel_view(@cmd.Emit[Msg], State, Ctx) -> @html.Html
 
-pub fn sync(@cmd.Emit[Msg], State, Ctx) -> (State, @cmd.Cmd)
-
 pub fn update(@cmd.Emit[Msg], Msg, State, Ctx) -> (@cmd.Cmd, State)
 
 // Errors
@@ -38,10 +36,10 @@ pub(all) enum Msg {
 
 pub(all) enum Phase {
   Idle
-  Opening(session~ : String)
-  Running(session~ : String, id~ : Int)
-  Exited(session~ : String, code~ : Int)
-  Failed(session~ : String, message~ : String)
+  Opening(session~ : String, workspace~ : String)
+  Running(session~ : String, workspace~ : String, id~ : Int)
+  Exited(session~ : String, workspace~ : String, code~ : Int)
+  Failed(session~ : String, workspace~ : String, message~ : String)
 } derive(Eq)
 
 pub(all) struct State {

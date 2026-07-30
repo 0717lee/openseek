@@ -7,11 +7,22 @@
 pub fn panel_view(
   dispatch : @cmd.Emit[Msg],
   state : State,
-  _ctx : Ctx,
+  ctx : Ctx,
 ) -> @html.Html {
   let items : Array[@html.Html] = [
     @html.span(class="terminal-title", "Terminal"),
   ]
+  // The shell outlives conversation switches, so the titlebar names the
+  // workspace it lives in — and flags it when that is not the conversation
+  // on screen.
+  if state.phase.binding() is Some((session, workspace)) {
+    items.push(@html.span(class="terminal-workspace", workspace))
+    if session != ctx.session {
+      items.push(
+        @html.span(class="terminal-status", "from another conversation"),
+      )
+    }
+  }
   match state.phase {
     Opening(..) =>
       items.push(@html.span(class="terminal-status", "starting…"))

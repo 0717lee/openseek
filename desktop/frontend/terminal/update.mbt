@@ -1,4 +1,26 @@
-// The panel's update loop and its conversation-switch reconciliation.
+// The panel's update loop. One deliberate property: the shell OUTLIVES
+// conversation switches. Its running jobs, history, and working directory
+// are the user's work, so nothing here retires a session just because the
+// active conversation changed — the titlebar names the workspace the shell
+// lives in instead (see `panel_view`), and a restart after the shell exits
+// respawns in whatever conversation is active then. Sessions end when their
+// child exits, when the user restarts, or when the webview disconnects (the
+// host tears its task group down).
+
+///|
+/// The display label for the active conversation's workspace: the project
+/// directory's name, or "scratch" for a conversation without one.
+fn workspace_label(ctx : Ctx) -> String {
+  guard ctx.workspace is Some(workspace) else { return "scratch" }
+  let text = workspace.0
+  let mut label = text
+  for part in text.split("/") {
+    if !part.is_empty() {
+      label = part.to_owned()
+    }
+  }
+  label
+}
 
 ///|
 pub fn update(
@@ -25,26 +47,39 @@ pub fn update(
         Idle | Exited(..) | Failed(..) =>
           (
             open_session(dispatch, ctx, cols, rows),
-            { ..state, phase: Opening(session=ctx.session) },
+            {
+              ..state,
+              phase: Opening(
+                session=ctx.session,
+                workspace=workspace_label(ctx),
+              ),
+            },
           )
         Opening(..) | Running(..) => (@cmd.none, state)
       }
     Opened(session~, id~) =>
-      if state.phase is Opening(session=expected) && expected == session {
-        (wire_session(), { ..state, phase: Running(session~, id~) })
+      if state.phase is Opening(session=expected, workspace~) &&
+        expected == session {
+        (wire_session(), { ..state, phase: Running(session~, workspace~, id~) })
       } else {
-        // The conversation switched while the open was in flight; the
-        // session belongs to nobody now, so retire it on the host.
+        // A stale reply (the panel restarted meanwhile); the session
+        // belongs to nobody, so retire it on the host.
         (send_close(id), state)
       }
     OpenFailed(session~, message~) =>
-      if state.phase.session() is Some(current) && current == session {
-        (@cmd.none, { ..state, phase: Failed(session~, message~) })
+      if state.phase is Opening(session=expected, workspace~) &&
+        expected == session {
+        (@cmd.none, { ..state, phase: Failed(session~, workspace~, message~) })
+      } else if state.phase is Running(session=expected, workspace~, ..) &&
+        expected == session {
+        // A steady-state op (input) failed against a session the host no
+        // longer has.
+        (@cmd.none, { ..state, phase: Failed(session~, workspace~, message~) })
       } else {
         (@cmd.none, state)
       }
     UserInput(data~) =>
-      if state.phase is Running(session~, id~) {
+      if state.phase is Running(session~, id~, ..) {
         (send_input(dispatch, session, id, data), state)
       } else {
         // Typing into an exited/unopened terminal has nowhere to go.
@@ -72,14 +107,17 @@ pub fn update(
       }
     OutputRendered(id~, bytes~) => (send_ack(id, bytes), state)
     SessionExited(id~, code~) =>
-      if state.phase is Running(session~, id=running) && running == id {
-        (@cmd.none, { ..state, phase: Exited(session~, code~) })
+      if state.phase is Running(session~, workspace~, id=running) &&
+        running == id {
+        (@cmd.none, { ..state, phase: Exited(session~, workspace~, code~) })
       } else {
         (@cmd.none, state)
       }
     RestartTerminal =>
       match state.phase {
         Exited(..) | Failed(..) =>
+          // Respawn for the CURRENT conversation — after an exit this is
+          // how a shell moves to the workspace the user is looking at.
           (
             @cmd.batch([reset_emulator(), request_terminal_mount(dispatch, ctx)]),
             { ..state, phase: Idle },
@@ -87,31 +125,4 @@ pub fn update(
         Idle | Opening(..) | Running(..) => (@cmd.none, state)
       }
   }
-}
-
-///|
-/// Reconcile the panel with the active conversation after every message
-/// (the main package calls this like `@fileeditor.sync`): a session opened
-/// for another conversation is retired — closed on the host, its screen
-/// blanked — and an open panel respawns for the new conversation.
-pub fn sync(
-  dispatch : @cmd.Emit[Msg],
-  state : State,
-  ctx : Ctx,
-) -> (State, @cmd.Cmd) {
-  guard state.phase.session() is Some(session) else {
-    return (state, @cmd.none)
-  }
-  if session == ctx.session {
-    return (state, @cmd.none)
-  }
-  let cmds : Array[@cmd.Cmd] = []
-  if state.phase is Running(id~, ..) {
-    cmds.push(send_close(id))
-  }
-  cmds.push(reset_emulator())
-  if state.open {
-    cmds.push(request_terminal_mount(dispatch, ctx))
-  }
-  ({ ..state, phase: Idle }, @cmd.batch(cmds))
 }

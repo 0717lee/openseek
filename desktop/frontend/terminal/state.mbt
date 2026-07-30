@@ -5,20 +5,22 @@
 
 ///|
 /// The lifecycle of the panel's PTY session. Every non-idle phase names the
-/// conversation whose workspace the session was opened in, so a
-/// conversation switch can recognize a stale session and retire it.
+/// conversation the session was opened for and a display label for its
+/// workspace: the shell outlives conversation switches (its running jobs
+/// and history are the user's work), so the titlebar must be able to say
+/// where a shell opened elsewhere actually lives.
 pub(all) enum Phase {
-  /// No session: never opened, or retired by a conversation switch.
+  /// No session opened yet.
   Idle
   /// `terminal_open` is in flight.
-  Opening(session~ : String)
+  Opening(session~ : String, workspace~ : String)
   /// A live PTY session, `id` as the host numbered it.
-  Running(session~ : String, id~ : Int)
+  Running(session~ : String, workspace~ : String, id~ : Int)
   /// The child exited; the panel offers a restart.
-  Exited(session~ : String, code~ : Int)
+  Exited(session~ : String, workspace~ : String, code~ : Int)
   /// Opening or driving the session failed; the panel shows the message
   /// and offers a restart.
-  Failed(session~ : String, message~ : String)
+  Failed(session~ : String, workspace~ : String, message~ : String)
 } derive(Eq)
 
 ///|
@@ -33,14 +35,14 @@ pub fn State::empty() -> State {
 }
 
 ///|
-/// The conversation a non-idle phase belongs to.
-fn Phase::session(self : Phase) -> String? {
+/// The conversation and workspace label a non-idle phase belongs to.
+fn Phase::binding(self : Phase) -> (String, String)? {
   match self {
     Idle => None
-    Opening(session~) => Some(session)
-    Running(session~, ..) => Some(session)
-    Exited(session~, ..) => Some(session)
-    Failed(session~, ..) => Some(session)
+    Opening(session~, workspace~) => Some((session, workspace))
+    Running(session~, workspace~, ..) => Some((session, workspace))
+    Exited(session~, workspace~, ..) => Some((session, workspace))
+    Failed(session~, workspace~, ..) => Some((session, workspace))
   }
 }
 
