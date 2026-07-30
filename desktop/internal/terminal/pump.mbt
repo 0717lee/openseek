@@ -36,6 +36,9 @@ async fn run_session(
     let pty = @pty.spawn(
       group,
       request.argv,
+      // pty 0.2.3 applies the working directory in the platform spawn call,
+      // so neither POSIX nor Windows needs a shell command that performs cd.
+      cwd=request.cwd,
       cols=request.cols,
       rows=request.rows,
     ) catch {
@@ -63,8 +66,7 @@ async fn run_session(
         "id": request.id,
         "pid": pty.pid(),
         "argv0": request.argv.get(0).unwrap_or(""),
-        // The launcher's `cd` target: a session that dies immediately with
-        // status 1 failed exactly here.
+        // The directory passed directly to the platform process spawn.
         "cwd": request.cwd,
       }
     let reader = pty.reader()
@@ -96,42 +98,31 @@ async fn run_session(
 }
 
 ///|
-/// The POSIX launcher: enter the workspace, advertise the emulator's
-/// capabilities, then become the requested program. Argument passing keeps
-/// the working directory and command out of shell-quoting territory.
-const UnixLaunchScript = "cd \"$1\" || exit 1\nexport TERM=xterm-256color COLORTERM=truecolor\nshift\nexec \"$@\""
-
-///|
-/// Build the argv for a session in `cwd`: the user's login shell by default,
-/// or `command` when given.
-fn session_argv(
-  cwd : String,
-  command? : Array[String],
-) -> Array[String] raise TerminalError {
-  if @env.get("OS") is Some("Windows_NT") {
-    // Best-effort Windows path (untested here): ConPTY inherits the host's
-    // working directory, so the session enters the workspace itself.
-    guard command is None else {
-      raise TerminalError(
-        "custom terminal commands are not supported on Windows yet",
-      )
-    }
-    return [
-      "powershell.exe",
-      "-NoLogo",
-      "-NoExit",
-      "-Command",
-      "Set-Location -LiteralPath \"" + cwd + "\"",
-    ]
-  }
-  let launch = if command is Some(argv) {
+/// Build the argv for a Windows session: the requested command when present,
+/// or the system command interpreter from `%COMSPEC%`.
+#cfg(platform="windows")
+fn session_argv(command? : Array[String]) -> Array[String] raise TerminalError {
+  if command is Some(argv) {
     guard !argv.is_empty() else {
       raise TerminalError("terminal command must not be empty")
     }
-    argv
-  } else {
-    let shell = @env.get("SHELL").unwrap_or("/bin/sh")
-    [shell, "-l"]
+    return argv
   }
-  ["/bin/sh", "-c", UnixLaunchScript, "sh", cwd, ..launch]
+  [@env.get("COMSPEC").unwrap_or("cmd.exe")]
+}
+
+///|
+/// Build the argv for a POSIX session: the requested command when present,
+/// or the user's login shell with the terminal emulator capabilities set.
+/// `/usr/bin/env` execs the shell directly without a quoting or `cd` script.
+#cfg(not(platform="windows"))
+fn session_argv(command? : Array[String]) -> Array[String] raise TerminalError {
+  if command is Some(argv) {
+    guard !argv.is_empty() else {
+      raise TerminalError("terminal command must not be empty")
+    }
+    return argv
+  }
+  let shell = @env.get("SHELL").unwrap_or("/bin/sh")
+  ["/usr/bin/env", "TERM=xterm-256color", "COLORTERM=truecolor", shell, "-l"]
 }

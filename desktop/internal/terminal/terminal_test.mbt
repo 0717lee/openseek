@@ -73,30 +73,25 @@ async test "terminal session runs in the requested directory" {
 }
 
 ///|
-/// The `sh -c` launcher turns a missing program into a session that opens
-/// and immediately exits 127 (with sh's diagnostic in the terminal), not a
-/// spawn failure.
-async test "a missing program exits the session with a nonzero code" {
+/// Direct spawning reports a missing executable while opening the session,
+/// instead of first opening a shell that later exits 127.
+async test "a missing program fails while opening the session" {
   @async.with_task_group(group => {
     let state = @terminal.new_terminal_state()
     let pushes = new_push_queue()
     group.spawn_bg(allow_failure=true, () => {
       @terminal.run_terminal_pump(state, async fn(push) { pushes.put(push) })
     })
-    let id = @terminal.open_terminal(state, cwd="/tmp", cols=80, rows=24, command=[
-      "/bin/definitely-missing-program",
-    ])
-    ignore(id)
-    let mut code = 0
-    @async.with_timeout(5000, () => {
-      for ;; {
-        if pushes.get() is Exited(code=exit_code, ..) {
-          code = exit_code
-          break
-        }
-      }
-    })
-    assert_true(code != 0)
+    let failed = try {
+      let _ = @terminal.open_terminal(state, cwd="/tmp", cols=80, rows=24, command=[
+        "/bin/definitely-missing-program",
+      ])
+      false
+    } catch {
+      @terminal.TerminalError(_) => true
+      _ => false
+    }
+    assert_true(failed)
     group.return_immediately(())
   })
 }

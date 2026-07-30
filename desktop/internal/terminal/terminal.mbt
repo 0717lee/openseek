@@ -45,8 +45,7 @@ priv struct TerminalSession {
 priv struct OpenRequest {
   id : Int
   argv : Array[String]
-  /// The directory the session starts in — kept for the spawn log, since a
-  /// launcher that cannot enter it is the one failure the log must name.
+  /// The directory passed directly to the PTY process spawn.
   cwd : String
   cols : Int
   rows : Int
@@ -70,8 +69,8 @@ pub fn new_terminal_state() -> TerminalState {
 
 ///|
 /// Open a terminal session in `cwd` and return its id once the child is
-/// running. Without `command` this launches the user's login shell
-/// (`$SHELL -l`); with it, that argv runs in the session's PTY instead.
+/// running. Without `command`, POSIX launches `$SHELL -l` and Windows launches
+/// `%COMSPEC%`; with it, that argv runs directly in the session's PTY instead.
 /// Requires `run_terminal_pump` to be running (the host services' task
 /// group), otherwise the call waits until it is.
 pub async fn open_terminal(
@@ -81,7 +80,7 @@ pub async fn open_terminal(
   rows~ : Int,
   command? : Array[String],
 ) -> Int {
-  let argv = session_argv(cwd, command?)
+  let argv = session_argv(command?)
   let id = state.next_id
   state.next_id = id + 1
   let reply : @async.Queue[Result[Unit, String]] = Queue(kind=Blocking(1))

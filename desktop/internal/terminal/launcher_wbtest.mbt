@@ -12,7 +12,7 @@ async test "a default session launches a live login shell in the given cwd" {
       run_terminal_pump(state, async fn(push) { pushes.put(push) })
     })
     let id = open_terminal(state, cwd="/tmp", cols=80, rows=24)
-    // A shell that cannot enter the working directory exits immediately, so
+    // The PTY enters the working directory before starting the shell, so
     // "still running after its first output" is the property under test. The
     // timeout is generous because a real login shell runs the user's profile
     // (a slow one is not a failure); an early exit fails through the `Exited`
@@ -40,32 +40,28 @@ async test "a default session launches a live login shell in the given cwd" {
 }
 
 ///|
-/// The launcher enters the working directory itself, so a directory that is
-/// missing (a conversation whose workspace has not been created yet) must be
-/// reported rather than silently producing a shell in the wrong place.
-async test "a session whose cwd does not exist exits nonzero" {
+/// The platform spawn rejects a missing working directory before reporting
+/// the session as open.
+async test "a session whose cwd does not exist fails while opening" {
   @async.with_task_group(group => {
     let state = new_terminal_state()
     let pushes : @async.Queue[TerminalPush] = Queue(kind=Unbounded)
     group.spawn_bg(allow_failure=true, () => {
       run_terminal_pump(state, async fn(push) { pushes.put(push) })
     })
-    let _ = open_terminal(
-      state,
-      cwd="/nonexistent/openseek-terminal-test",
-      cols=80,
-      rows=24,
-    )
-    let mut code = 0
-    @async.with_timeout(5000, () => {
-      for ;; {
-        if pushes.get() is Exited(code=exit_code, ..) {
-          code = exit_code
-          break
-        }
-      }
-    })
-    assert_true(code != 0)
+    let failed = try {
+      let _ = open_terminal(
+        state,
+        cwd="/nonexistent/openseek-terminal-test",
+        cols=80,
+        rows=24,
+      )
+      false
+    } catch {
+      TerminalError(_) => true
+      _ => false
+    }
+    assert_true(failed)
     group.return_immediately(())
   })
 }
