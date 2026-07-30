@@ -48,11 +48,16 @@ pub(all) struct State {
   /// The remembered active tab per workspace group, as an association list
   /// (small; a workspace rarely has more than a handful of tabs).
   active : Array[(WorkspaceKey, Int)]
+  /// The tab whose emulator element is currently displayed (`None` while
+  /// the panel is closed). Mirrors imperative DOM state so `sync` can tell
+  /// when a conversation switch must re-aim the display — the switch itself
+  /// produces no terminal message.
+  shown : Int?
 } derive(Eq)
 
 ///|
 pub fn State::empty() -> State {
-  { open: false, next_key: 1, tabs: [], active: [] }
+  { open: false, next_key: 1, tabs: [], active: [], shown: None }
 }
 
 ///|

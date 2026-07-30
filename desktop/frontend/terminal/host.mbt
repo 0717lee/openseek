@@ -179,9 +179,28 @@ fn mount_tab(
 }
 
 ///|
-/// Reveal an existing tab (a tab switch or the panel reopening).
-fn activate_tab(key : Int) -> @cmd.Cmd {
-  @cmd.custom_cmd(_scheduler => show_only(key), kind=@cmd.after_render)
+fn hide_all() -> Unit {
+  for _, entry in term_host.entries {
+    let style : @js.Value = entry.element.get_with_string("style")
+    style.set_with_string("display", "none")
+  }
+}
+
+///|
+/// Aim the display at one tab's emulator (or none, while the panel is
+/// closed): show it, hide the rest, re-fit and focus. `sync` dispatches
+/// this whenever the tab that should be on screen changes — including
+/// conversation switches, which produce no terminal message of their own.
+fn apply_shown(key : Int?) -> @cmd.Cmd {
+  @cmd.custom_cmd(
+    _scheduler => {
+      match key {
+        Some(key) => show_only(key)
+        None => hide_all()
+      }
+    },
+    kind=@cmd.after_render,
+  )
 }
 
 ///|

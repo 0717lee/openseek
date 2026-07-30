@@ -10,6 +10,8 @@ import {
 // Values
 pub fn panel_view(@cmd.Emit[Msg], State, Ctx) -> @html.Html
 
+pub fn sync(@cmd.Emit[Msg], State, Ctx) -> (State, @cmd.Cmd)
+
 pub fn update(@cmd.Emit[Msg], Msg, State, Ctx) -> (@cmd.Cmd, State)
 
 // Errors
@@ -42,6 +44,7 @@ pub(all) struct State {
   next_key : Int
   tabs : Array[Tab]
   active : Array[(WorkspaceKey, Int)]
+  shown : Int?
 } derive(Eq)
 pub fn State::empty() -> Self
 

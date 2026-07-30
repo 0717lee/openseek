@@ -811,6 +811,23 @@ fn file_ctx(model : Model) -> @fileeditor.Ctx {
 }
 
 ///|
+/// Reconcile the terminal panel's emulator display with the active
+/// conversation after every message (see `@terminal.sync`) — a conversation
+/// switch changes which workspace's terminals belong on screen without
+/// producing any terminal message.
+fn sync_terminal_panel(
+  dispatch : @cmd.Emit[Msg],
+  model : Model,
+) -> (Model, @cmd.Cmd) {
+  let (panel, cmd) = @terminal.sync(
+    dispatch.map(msg => Terminal(msg)),
+    model.terminal_panel,
+    terminal_ctx(model),
+  )
+  ({ ..model, terminal_panel: panel }, cmd)
+}
+
+///|
 /// Reconcile the file panel with the active conversation after every message
 /// (see `@fileeditor.sync`). Centralizing it here keeps every
 /// conversation-switching handler from having to re-root the panel itself.
@@ -901,7 +918,8 @@ fn update(
     model
   }
   let (model, panel_cmd) = sync_file_panel(dispatch, model)
-  (@cmd.batch([cmd, panel_cmd]), model)
+  let (model, terminal_cmd) = sync_terminal_panel(dispatch, model)
+  (@cmd.batch([cmd, panel_cmd, terminal_cmd]), model)
 }
 
 ///|

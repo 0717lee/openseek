@@ -46,7 +46,12 @@ fn open_new_tab(
     workspace_path: ctx.workspace,
     status: TabOpening,
   }
-  let state = { ..state, next_key: key + 1, tabs: state.tabs + [tab] }
+  let state = {
+    ..state,
+    next_key: key + 1,
+    tabs: state.tabs + [tab],
+    shown: Some(key),
+  }
   (mount_tab(dispatch, key, ctx.dark_mode), state.remember_active(group, key))
 }
 
@@ -64,8 +69,9 @@ pub fn update(
         (@cmd.none, { ..state, open: false })
       } else {
         match state.active_tab(ctx) {
-          // This workspace group already has shells: reveal its tab.
-          Some(tab) => (activate_tab(tab.key), { ..state, open: true })
+          // This workspace group already has shells; `sync` reveals its
+          // tab once `open` flips.
+          Some(_) => (@cmd.none, { ..state, open: true })
           // First open in this workspace: start its first shell.
           None => {
             let (cmd, state) = open_new_tab(dispatch, state, ctx)
@@ -78,7 +84,7 @@ pub fn update(
       guard state.tab_by_key(key) is Some(tab) else {
         return (@cmd.none, state)
       }
-      (activate_tab(key), state.remember_active(tab.workspace, key))
+      (@cmd.none, state.remember_active(tab.workspace, key))
     }
     TabClosed(key~) => {
       guard state.tab_by_key(key) is Some(tab) else {
@@ -93,10 +99,8 @@ pub fn update(
         tabs: state.tabs.filter(entry => entry.key != key),
         active: state.active.filter(entry => entry.1 != key),
       }
-      // Reveal the group's fallback tab, if the closed one was on screen.
-      if state.active_tab(ctx) is Some(next) {
-        cmds.push(activate_tab(next.key))
-      }
+      // `sync` reveals the group's fallback tab, if the closed one was on
+      // screen.
       (@cmd.batch(cmds), state)
     }
     EmulatorReady(key~, cols~, rows~) => {
@@ -124,7 +128,7 @@ pub fn update(
     Opened(key~, id~) =>
       if state.tab_by_key(key) is Some(tab) && tab.status is TabOpening {
         (
-          @cmd.batch([flush_pending(dispatch, key, id), activate_tab(key)]),
+          flush_pending(dispatch, key, id),
           state.replace_tab({ ..tab, id: Some(id), status: TabRunning }),
         )
       } else {
@@ -190,5 +194,33 @@ pub fn update(
         TabOpening | TabRunning => (@cmd.none, state)
       }
     }
+  }
+}
+
+///|
+/// Reconcile the emulator display with the active conversation after every
+/// message (the main package calls this like `@fileeditor.sync`). A
+/// conversation switch produces no terminal message, yet it changes which
+/// workspace group — and so which tab's emulator — belongs on screen; and
+/// with the panel open, landing in a workspace that has no shell yet starts
+/// its first one, so every workspace greets the user with its own terminal.
+pub fn sync(
+  dispatch : @cmd.Emit[Msg],
+  state : State,
+  ctx : Ctx,
+) -> (State, @cmd.Cmd) {
+  if state.open && state.visible_tabs(ctx).is_empty() {
+    let (cmd, state) = open_new_tab(dispatch, state, ctx)
+    return (state, cmd)
+  }
+  let desired = if state.open {
+    state.active_tab(ctx).map(tab => tab.key)
+  } else {
+    None
+  }
+  if desired == state.shown {
+    (state, @cmd.none)
+  } else {
+    ({ ..state, shown: desired }, apply_shown(desired))
   }
 }
