@@ -1,0 +1,56 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "openseek_desktop/frontend/terminal"
+
+import {
+  "moonbit-community/rabbita/cmd",
+  "moonbit-community/rabbita/html",
+  "openseek_desktop/internal/pathx",
+}
+
+// Values
+pub fn panel_view(@cmd.Emit[Msg], State, Ctx) -> @html.Html
+
+pub fn sync(@cmd.Emit[Msg], State, Ctx) -> (State, @cmd.Cmd)
+
+pub fn update(@cmd.Emit[Msg], Msg, State, Ctx) -> (@cmd.Cmd, State)
+
+// Errors
+
+// Types and methods
+pub(all) struct Ctx {
+  session : String
+  workspace : @pathx.Absolute?
+  dark_mode : Bool
+}
+
+pub(all) enum Msg {
+  ToggleTerminal
+  EmulatorReady(cols~ : Int, rows~ : Int)
+  Opened(session~ : String, id~ : Int)
+  OpenFailed(session~ : String, message~ : String)
+  UserInput(data~ : String)
+  ViewportResized(cols~ : Int, rows~ : Int)
+  Output(id~ : Int, data~ : String)
+  OutputRendered(id~ : Int, bytes~ : Int)
+  SessionExited(id~ : Int, code~ : Int)
+  RestartTerminal
+}
+
+pub(all) enum Phase {
+  Idle
+  Opening(session~ : String)
+  Running(session~ : String, id~ : Int)
+  Exited(session~ : String, code~ : Int)
+  Failed(session~ : String, message~ : String)
+} derive(Eq)
+
+pub(all) struct State {
+  open : Bool
+  phase : Phase
+} derive(Eq)
+pub fn State::empty() -> Self
+
+// Type aliases
+
+// Traits
+

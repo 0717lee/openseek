@@ -1,0 +1,147 @@
+// The host side of the integrated terminal: a session table plus the ops the
+// IPC layer calls into. PTY processes themselves are owned by the pump
+// (`run_terminal_pump`), which runs inside the webview connection's task
+// group — see pump.mbt.
+
+///|
+/// A host-side failure with a user-facing message; the IPC boundary
+/// translates it into the error the webview displays.
+pub suberror TerminalError {
+  TerminalError(String)
+}
+
+///|
+/// One push from a terminal session to the webview. `Output` carries raw PTY
+/// bytes (chunk boundaries may split UTF-8 sequences, so the wire encoding
+/// must stay byte-transparent); `Exited` reports the child's exit code after
+/// the session drained.
+pub(all) enum TerminalPush {
+  Output(id~ : Int, data~ : Bytes)
+  Exited(id~ : Int, code~ : Int)
+}
+
+///|
+/// Stop reading the PTY once this many emitted bytes are unacknowledged; the
+/// kernel PTY buffer then fills and the child blocks, so a `cat` of a huge
+/// file cannot flood the webview.
+const HighWatermark = 262144
+
+///|
+/// Resume reading once acknowledgements bring the debt below this.
+const LowWatermark = 65536
+
+///|
+priv struct TerminalSession {
+  pty : @pty.Pty
+  /// Bytes emitted to the webview but not yet acknowledged.
+  mut unacked : Int
+  /// Wakes the session's read loop when acknowledgements drain the debt or
+  /// the session starts closing.
+  cond : @cond_var.Cond
+  mut closing : Bool
+}
+
+///|
+priv struct OpenRequest {
+  id : Int
+  argv : Array[String]
+  cols : Int
+  rows : Int
+  /// Spawn outcome for the waiting `open_terminal` call.
+  reply : @async.Queue[Result[Unit, String]]
+}
+
+///|
+/// The terminal subsystem's shared state: the pump's mailbox of pending
+/// spawns and the table of live sessions.
+struct TerminalState {
+  requests : @async.Queue[OpenRequest]
+  sessions : Map[Int, TerminalSession]
+  mut next_id : Int
+}
+
+///|
+pub fn new_terminal_state() -> TerminalState {
+  { requests: Queue(kind=Unbounded), sessions: Map([]), next_id: 1 }
+}
+
+///|
+/// Open a terminal session in `cwd` and return its id once the child is
+/// running. Without `command` this launches the user's login shell
+/// (`$SHELL -l`); with it, that argv runs in the session's PTY instead.
+/// Requires `run_terminal_pump` to be running (the `connect` op's task
+/// group), otherwise the call waits until it is.
+pub async fn open_terminal(
+  state : TerminalState,
+  cwd~ : String,
+  cols~ : Int,
+  rows~ : Int,
+  command? : Array[String],
+) -> Int {
+  let argv = session_argv(cwd, command?)
+  let id = state.next_id
+  state.next_id = id + 1
+  let reply : @async.Queue[Result[Unit, String]] = Queue(kind=Blocking(1))
+  state.requests.put({ id, argv, cols, rows, reply })
+  match reply.get() {
+    Ok(_) => id
+    Err(message) => raise TerminalError(message)
+  }
+}
+
+///|
+/// Write user input (already encoded as terminal input bytes) to a session.
+pub async fn write_terminal(
+  state : TerminalState,
+  id~ : Int,
+  data : Bytes,
+) -> Unit {
+  guard state.sessions.get(id) is Some(session) else {
+    raise TerminalError("terminal \{id} is not open")
+  }
+  session.pty.write(data) catch {
+    error if @async.is_being_cancelled() => raise error
+    error => raise TerminalError(@debug.render(Repr(error)))
+  }
+}
+
+///|
+/// Propagate a webview-side viewport change to the PTY.
+pub fn resize_terminal(
+  state : TerminalState,
+  id~ : Int,
+  cols~ : Int,
+  rows~ : Int,
+) -> Unit raise {
+  guard state.sessions.get(id) is Some(session) else {
+    raise TerminalError("terminal \{id} is not open")
+  }
+  session.pty.resize(cols~, rows~) catch {
+    error => raise TerminalError("terminal resize failed: \{error}")
+  }
+}
+
+///|
+/// Acknowledge `bytes` of output the webview has finished rendering. Frees
+/// the flow-control window so the session's read loop can continue.
+pub fn ack_terminal(state : TerminalState, id~ : Int, bytes~ : Int) -> Unit {
+  guard state.sessions.get(id) is Some(session) else { return }
+  session.unacked -= bytes
+  if session.unacked < 0 {
+    session.unacked = 0
+  }
+  if session.unacked < LowWatermark {
+    session.cond.signal()
+  }
+}
+
+///|
+/// Request a session's shutdown. The session task owns the actual teardown:
+/// cancelling the child makes its read loop drain, emit `Exited`, and
+/// release the PTY. Unknown ids are a no-op (the session already exited).
+pub fn close_terminal(state : TerminalState, id~ : Int) -> Unit {
+  guard state.sessions.get(id) is Some(session) else { return }
+  session.closing = true
+  session.cond.broadcast()
+  session.pty.cancel()
+}

@@ -218,6 +218,10 @@ async fn copy_bundle_files(ws : @packaging.Workspace) -> Unit {
     ws.at(AppAssetDir + "/frontend.js"),
   )
   @packaging.copy_file(ws.at("viewer.css"), ws.at(AppAssetDir + "/viewer.css"))
+  // The vendored terminal emulator bundle and its stylesheet (see
+  // scripts/vendor-xterm.sh), loaded by index.html before frontend.js.
+  @packaging.copy_file(ws.at("xterm.js"), ws.at(AppAssetDir + "/xterm.js"))
+  @packaging.copy_file(ws.at("xterm.css"), ws.at(AppAssetDir + "/xterm.css"))
   // Checked-in icns built from appicon.svg (the design-system mark on the
   // accent squircle). Regenerate with rsvg-convert at the iconset sizes and
   // `iconutil -c icns` when the mark changes.

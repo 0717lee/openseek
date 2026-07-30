@@ -219,6 +219,10 @@ async fn copy_bundle_files(
     ws.at(AppAssetDir + "/frontend.js"),
   )
   @packaging.copy_file(ws.at("viewer.css"), ws.at(AppAssetDir + "/viewer.css"))
+  // The vendored terminal emulator bundle and its stylesheet (see
+  // scripts/vendor-xterm.sh), loaded by index.html before frontend.js.
+  @packaging.copy_file(ws.at("xterm.js"), ws.at(AppAssetDir + "/xterm.js"))
+  @packaging.copy_file(ws.at("xterm.css"), ws.at(AppAssetDir + "/xterm.css"))
   // The codicon font is served at the site root (`/codicon.ttf`), so it sits
   // next to `viewer.css` rather than under `fonts/`.
   @packaging.copy_file(
