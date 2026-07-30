@@ -91,8 +91,9 @@ fn show_only(key : Int) -> Unit {
 }
 
 ///|
-/// Re-fit whichever tab element is currently visible (window resizes change
-/// the panel's CSS layout without any tab switch).
+/// Re-fit whichever tab element is currently visible (the host's size moves
+/// with the window, the panel row, and the editor column, all without any
+/// tab switch).
 fn refit_visible() -> Unit {
   for _, entry in term_host.entries {
     let width : Int = entry.element.get_with_string("clientWidth")
@@ -163,9 +164,19 @@ fn mount_tab(
         term_host.entries[key] = { term, fit, element }
         if !term_host.resize_wired {
           term_host.resize_wired = true
-          @interop.add_capture_listener(@js.globalThis, "resize", _event => {
-            refit_visible()
-          })
+          // The panel's area changes without any window resize — the editor
+          // column opening, closing, or being drag-resized all reshape the
+          // conversation column the panel sits under — so the refit signal
+          // is the host element's own size, not the window's.
+          if @interop.js_prop(@js.globalThis, "ResizeObserver") is Some(ctor) {
+            let on_resize = (_entries : @js.Value) => refit_visible()
+            let observer : @js.Value = ctor.new([
+              @js.Value::cast_from(on_resize),
+            ])
+            let _ : @js.Value = observer.apply_with_string("observe", [
+              @js.Value::cast_from(host),
+            ])
+          }
         }
       }
       show_only(key)
