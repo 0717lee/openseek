@@ -1,6 +1,6 @@
 // Behavioral tests through the public API: a real pump running in a task
-// group, sessions spawning real PTY children. POSIX-only programs
-// (`/bin/cat`, `/bin/sh`) — matching the pty package's own test suite.
+// group, sessions spawning real PTY children. Process-specific cases are
+// platform-gated; lifecycle cases use the platform's default shell.
 
 ///|
 /// Collect pushes from a pump into a queue the test can await on.
@@ -34,6 +34,7 @@ async fn wait_for_exit(pushes : @async.Queue[@terminal.TerminalPush]) -> Unit {
 }
 
 ///|
+#cfg(not(platform="windows"))
 async test "terminal session round-trips output and reports exit" {
   @async.with_task_group(group => {
     let state = @terminal.new_terminal_state()
@@ -54,6 +55,32 @@ async test "terminal session round-trips output and reports exit" {
 }
 
 ///|
+#cfg(platform="windows")
+async test "terminal session round-trips output and reports exit on Windows" {
+  @async.with_task_group(group => {
+    let state = @terminal.new_terminal_state()
+    let pushes = new_push_queue()
+    group.spawn_bg(allow_failure=true, () => {
+      @terminal.run_terminal_pump(state, async fn(push) { pushes.put(push) })
+    })
+    let id = @terminal.open_terminal(state, cwd=".", cols=80, rows=24, command=[
+      "cmd.exe", "/D", "/Q",
+    ])
+    @terminal.write_terminal(
+      state,
+      id~,
+      @utf8.encode("echo OPENSEEK_TERMINAL_WINDOWS_OK\r\nexit\r\n"),
+    )
+    @async.with_timeout(5000, () => {
+      wait_for_output(pushes, "OPENSEEK_TERMINAL_WINDOWS_OK")
+    })
+    @async.with_timeout(5000, () => wait_for_exit(pushes))
+    group.return_immediately(())
+  })
+}
+
+///|
+#cfg(not(platform="windows"))
 async test "terminal session runs in the requested directory" {
   @async.with_task_group(group => {
     let state = @terminal.new_terminal_state()
@@ -83,8 +110,8 @@ async test "a missing program fails while opening the session" {
       @terminal.run_terminal_pump(state, async fn(push) { pushes.put(push) })
     })
     let failed = try {
-      let _ = @terminal.open_terminal(state, cwd="/tmp", cols=80, rows=24, command=[
-        "/bin/definitely-missing-program",
+      let _ = @terminal.open_terminal(state, cwd=".", cols=80, rows=24, command=[
+        "openseek-terminal-test-program-that-does-not-exist",
       ])
       false
     } catch {
@@ -100,7 +127,7 @@ async test "a missing program fails while opening the session" {
 async test "an empty command is rejected before spawning" {
   let state = @terminal.new_terminal_state()
   let failed = try {
-    let _ = @terminal.open_terminal(state, cwd="/tmp", cols=80, rows=24, command=[])
+    let _ = @terminal.open_terminal(state, cwd=".", cols=80, rows=24, command=[])
     false
   } catch {
     @terminal.TerminalError(_) => true
@@ -119,12 +146,8 @@ async test "close_all_terminals retires every live session" {
     group.spawn_bg(allow_failure=true, () => {
       @terminal.run_terminal_pump(state, async fn(push) { pushes.put(push) })
     })
-    let first = @terminal.open_terminal(state, cwd="/tmp", cols=80, rows=24, command=[
-      "/bin/cat",
-    ])
-    let second = @terminal.open_terminal(state, cwd="/tmp", cols=80, rows=24, command=[
-      "/bin/cat",
-    ])
+    let first = @terminal.open_terminal(state, cwd=".", cols=80, rows=24)
+    let second = @terminal.open_terminal(state, cwd=".", cols=80, rows=24)
     @terminal.close_all_terminals(state)
     let exited : Array[Int] = []
     @async.with_timeout(5000, () => {
@@ -151,9 +174,7 @@ async test "close_all_terminals cancels queued opens from an older page" {
     let cancelled : @async.Queue[Bool] = Queue(kind=Blocking(1))
     group.spawn_bg(allow_failure=true, () => {
       let was_cancelled = try {
-        let _ = @terminal.open_terminal(state, cwd="/tmp", cols=80, rows=24, command=[
-          "/bin/cat",
-        ])
+        let _ = @terminal.open_terminal(state, cwd=".", cols=80, rows=24)
         false
       } catch {
         @terminal.TerminalError("terminal open was cancelled by reconnect") =>
