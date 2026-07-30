@@ -1,8 +1,8 @@
-// The pump that owns every PTY child: spawned in the `connect` op's task
+// The pump that owns every PTY child: spawned in the host services' task
 // group (like the LSP and watcher pumps), it consumes `open_terminal`
-// requests and runs one task per session. Webview disconnect cancels the
+// requests and runs one task per session. Closing the window cancels the
 // group, which cancels every session task; each task's `defer` then releases
-// its PTY, so no child outlives the connection.
+// its PTY, so no child outlives the app.
 
 ///|
 /// Read PTY output in chunks this large; a typical child burst fits in one.

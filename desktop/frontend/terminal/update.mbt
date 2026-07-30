@@ -166,6 +166,9 @@ pub fn update(
         // Typing into an exited/unopened terminal has nowhere to go.
         (@cmd.none, state)
       }
+    // The main package pops the toast; the panel's own state has nothing to
+    // record for a lost keystroke.
+    InputFailed(key=_, message=_) => (@cmd.none, state)
     ViewportResized(key~, cols~, rows~) =>
       if state.tab_by_key(key) is Some(tab) &&
         tab.status is TabRunning &&

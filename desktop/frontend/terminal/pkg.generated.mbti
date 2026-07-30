@@ -32,6 +32,7 @@ pub(all) enum Msg {
   Opened(key~ : Int, id~ : Int)
   OpenFailed(key~ : Int, message~ : String)
   UserInput(key~ : Int, data~ : String)
+  InputFailed(key~ : Int, message~ : String)
   ViewportResized(key~ : Int, cols~ : Int, rows~ : Int)
   Output(id~ : Int, data~ : String, bytes~ : Int)
   OutputRendered(id~ : Int, bytes~ : Int)

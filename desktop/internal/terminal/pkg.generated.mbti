@@ -4,6 +4,8 @@ package "openseek_desktop/internal/terminal"
 // Values
 pub fn ack_terminal(TerminalState, id~ : Int, bytes~ : Int) -> Unit
 
+pub fn close_all_terminals(TerminalState) -> Unit
+
 pub fn close_terminal(TerminalState, id~ : Int) -> Unit
 
 pub fn new_terminal_state() -> TerminalState

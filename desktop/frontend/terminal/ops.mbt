@@ -1,6 +1,6 @@
 // The panel's bridge calls, routed by tab key. `terminal_open` folds its
 // reply back into the update loop; the steady-state ops are fire-and-forget
-// — input failures surface as `OpenFailed` so the tab shows what broke,
+// — input failures surface as `InputFailed` (an error toast),
 // resize/ack/close failures are dropped (their loss only degrades, and a
 // dead session reports itself through `terminal_exit`).
 
@@ -61,7 +61,7 @@ fn send_input(
         error => {
           scheduler.add(
             dispatch(
-              OpenFailed(key~, message=@interop.bridge_error_text(error)),
+              InputFailed(key~, message=@interop.bridge_error_text(error)),
             ),
           )
           return

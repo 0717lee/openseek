@@ -165,6 +165,11 @@ pub(all) enum Msg {
   OpenFailed(key~ : Int, message~ : String)
   /// Keystrokes from one tab's emulator.
   UserInput(key~ : Int, data~ : String)
+  /// `terminal_input` failed for the tab: the keystrokes were lost. The
+  /// main package surfaces the message as an error toast (the panel has no
+  /// toast rail of its own); the tab's status is untouched — a lost
+  /// keystroke does not make the session failed.
+  InputFailed(key~ : Int, message~ : String)
   /// One tab's emulator re-fit to a new grid size.
   ViewportResized(key~ : Int, cols~ : Int, rows~ : Int)
   /// `terminal_output` event: base64 of raw PTY bytes, plus their decoded

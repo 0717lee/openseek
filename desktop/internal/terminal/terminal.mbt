@@ -1,7 +1,7 @@
 // The host side of the integrated terminal: a session table plus the ops the
 // IPC layer calls into. PTY processes themselves are owned by the pump
-// (`run_terminal_pump`), which runs inside the webview connection's task
-// group — see pump.mbt.
+// (`run_terminal_pump`), which runs inside the host services' task group —
+// see pump.mbt.
 
 ///|
 /// A host-side failure with a user-facing message; the IPC boundary
@@ -72,7 +72,7 @@ pub fn new_terminal_state() -> TerminalState {
 /// Open a terminal session in `cwd` and return its id once the child is
 /// running. Without `command` this launches the user's login shell
 /// (`$SHELL -l`); with it, that argv runs in the session's PTY instead.
-/// Requires `run_terminal_pump` to be running (the `connect` op's task
+/// Requires `run_terminal_pump` to be running (the host services' task
 /// group), otherwise the call waits until it is.
 pub async fn open_terminal(
   state : TerminalState,
@@ -147,4 +147,16 @@ pub fn close_terminal(state : TerminalState, id~ : Int) -> Unit {
   session.closing = true
   session.cond.broadcast()
   session.pty.cancel()
+}
+
+///|
+/// Retire every live session. A freshly (re)loaded page cannot reclaim
+/// sessions an earlier page opened — their tabs are gone with it — so the
+/// connect handshake closes them rather than leave orphaned shells running
+/// until the app quits.
+pub fn close_all_terminals(state : TerminalState) -> Unit {
+  // Materialized: teardown mutates the table as sessions unwind.
+  for id in state.sessions.keys().to_array() {
+    close_terminal(state, id~)
+  }
 }
