@@ -109,11 +109,23 @@ pub async fn load_entries(
         continue
       }
     }
-    let parsed : SubtaskEntry = @json.from_json(@json.parse(text)) catch {
+    let json = @json.parse(text) catch {
       _ => {
         skipped.push(name)
         continue
       }
+    }
+    let parsed : SubtaskEntry = @json.from_json(json) catch {
+      _ =>
+        // Entries written before `conflict_paths` existed decode with the
+        // field defaulted rather than being skipped: a skipped ACTIVE entry
+        // would hide its reservation from provisioning.
+        @json.from_json(with_default_conflict_paths(json)) catch {
+          _ => {
+            skipped.push(name)
+            continue
+          }
+        }
     }
     if parsed.schema_version == registry_schema_version {
       entries.push(parsed)
@@ -190,4 +202,20 @@ test "path overlap is component-wise in both directions" {
   assert_true(paths_overlap(["a", "b"], ["c", "b/d"]))
   assert_false(paths_overlap(["src"], ["src2"]))
   assert_false(paths_overlap(["a/b"], ["a/c"]))
+}
+
+///|
+fn with_default_conflict_paths(json : Json) -> Json {
+  match json {
+    Object(map) => {
+      // Mutating the matched map mutates the parsed value in place; the
+      // original handle is returned rather than re-wrapped (Json's
+      // constructors are read-only outside core).
+      if !map.contains("conflict_paths") {
+        map["conflict_paths"] = ([] : Array[String]).to_json()
+      }
+      json
+    }
+    other => other
+  }
 }

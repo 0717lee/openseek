@@ -15,6 +15,8 @@ pub async fn git_require(Array[String], cwd~ : String, timeout_ms? : Int) -> Res
 
 pub async fn git_run(Array[String], cwd~ : String, timeout_ms? : Int) -> GitOutcome
 
+pub fn gitlink_introductions_in_raw_z(String) -> Array[String]
+
 pub async fn integrate(Geometry, SubtaskEntry) -> IntegrateOutcome
 
 pub async fn integrate_abort(Geometry, SubtaskEntry) -> IntegrateOutcome
@@ -22,8 +24,6 @@ pub async fn integrate_abort(Geometry, SubtaskEntry) -> IntegrateOutcome
 pub async fn integrate_continue(Geometry, SubtaskEntry) -> IntegrateOutcome
 
 pub async fn load_entries(String) -> (Array[SubtaskEntry], Array[String])
-
-pub fn new_gitlinks_in_raw_z(String) -> Array[String]
 
 pub fn parse_diff_name_status_z(String) -> Array[Change]
 
@@ -92,6 +92,7 @@ pub struct SubtaskEntry {
   parent_session : String?
   commit_oid : String?
   origin_head_before : String?
+  conflict_paths : Array[String]
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 
 pub(all) enum SubtaskState {
