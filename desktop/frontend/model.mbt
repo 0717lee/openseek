@@ -761,6 +761,10 @@ priv struct Model {
   // active conversation changes. Owned by the `fileeditor` package; this
   // model only carries its state and routes `FileEditor` messages to it.
   file_panel : @fileeditor.State
+  // The native window's integrated terminal. It is deliberately desktop-only:
+  // a browser must not render controls for a PTY on a screen the user is not
+  // sitting at.
+  terminal_panel : @terminal.State
   // Transient error toasts, oldest first, and the id the next toast will
   // take. Ids only ever grow, so a toast's auto-dismiss timer can never
   // collide with a later toast.
@@ -1088,6 +1092,9 @@ priv enum Msg {
   // comment becomes a chip on the composer draft, which only the app model
   // knows about.
   FileEditor(@fileeditor.Msg)
+  // The integrated terminal panel's own messages, routed to the `terminal`
+  // package's update.
+  Terminal(@terminal.Msg)
   // A message produced by one device channel's connection — its lifecycle,
   // its notification stream, and every reply fenced by its connection
   // generation — tagged with the channel it came from.
@@ -1446,6 +1453,7 @@ fn initial_model() -> Model {
     symbol_cache: empty_symbol_cache(),
     launcher: { open: false, apps: AppsNotFetched },
     file_panel: @fileeditor.State::empty(),
+    terminal_panel: @terminal.State::empty(),
     notifications: [],
     notification_seq: 0,
     notification_corner: BottomRight,

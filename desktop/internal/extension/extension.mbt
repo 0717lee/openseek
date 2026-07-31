@@ -176,6 +176,9 @@ async fn DesktopBridgeActor::connect(
   self : DesktopBridgeActor,
   context : @proton.CommandContext,
 ) -> Json {
+  // A reloaded page has no references to the previous page's emulator
+  // instances, so its PTYs must not survive the new attachment.
+  self.host_connection.close_terminals()
   let reply : @async.Queue[Unit] = Queue(kind=Blocking(1))
   self.controls.put(PageConnected(context, reply))
   reply.get()

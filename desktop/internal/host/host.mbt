@@ -46,15 +46,16 @@ struct HostState {
 
 ///|
 /// State owned by one client connection. A desktop page and each remote
-/// WebSocket create separate values, so `fs.watch` and `fs.unwatch` can only
-/// replace or stop that client's watcher.
+/// WebSocket create separate values, so filesystem watches and PTY sessions
+/// cannot leak into another client.
 struct HostConnection {
   fs_watch : FsWatchActor
+  terminal : @terminal.TerminalState
 }
 
 ///|
 pub fn HostConnection::new() -> HostConnection {
-  { fs_watch: FsWatchActor::new() }
+  { fs_watch: FsWatchActor::new(), terminal: @terminal.new_terminal_state() }
 }
 
 ///|
@@ -99,14 +100,44 @@ pub fn[G] spawn_host_pumps(
 }
 
 ///|
-/// Run the filesystem watcher owned by this connection. The caller routes
-/// `fs.changed` directly back to the same connection instead of publishing it
-/// through the process-wide notification hub.
+/// Run the filesystem watcher and PTY pump owned by this connection. Their
+/// notifications return only to the same transport instead of entering the
+/// process-wide hub.
 pub async fn HostConnection::run(
   self : HostConnection,
   emit : async (String, Json) -> Unit,
 ) -> Unit {
-  self.fs_watch.run(async fn(push) { emit("fs.changed", ToJson::to_json(push)) })
+  @async.with_task_group(group => {
+    group.spawn_bg(allow_failure=true, () => {
+      @terminal.run_terminal_pump(self.terminal, async fn(push) {
+        match push {
+          Output(id~, sequence~, data~) => {
+            let payload : TerminalOutputPayload = {
+              id,
+              sequence,
+              data: @base64.encode(data),
+            }
+            emit("terminal.output", ToJson::to_json(payload))
+          }
+          Exited(id~, code~) => {
+            let payload : TerminalExitPayload = { id, code }
+            emit("terminal.exit", ToJson::to_json(payload))
+          }
+        }
+      })
+    })
+    self.fs_watch.run(async fn(push) {
+      emit("fs.changed", ToJson::to_json(push))
+    })
+  })
+}
+
+///|
+/// A desktop page reload cannot reclaim its old emulator instances. Retire
+/// those PTYs before attaching the new page; WebSocket-owned sessions are
+/// cancelled automatically with their connection task group.
+pub fn HostConnection::close_terminals(self : HostConnection) -> Unit {
+  @terminal.close_all_terminals(self.terminal)
 }
 
 ///|
@@ -181,6 +212,28 @@ pub async fn host_op(
       connection.fs_watch.unwatch()
       Some(Json::empty_object())
     }
+    "terminal.open" =>
+      Some(
+        ToJson::to_json(
+          terminal_open_op(connection.terminal, decode_payload(payload)),
+        ),
+      )
+    "terminal.input" => {
+      terminal_input_op(connection.terminal, decode_payload(payload))
+      Some(Json::empty_object())
+    }
+    "terminal.resize" => {
+      terminal_resize_op(connection.terminal, decode_payload(payload))
+      Some(Json::empty_object())
+    }
+    "terminal.ack" => {
+      terminal_ack_op(connection.terminal, decode_payload(payload))
+      Some(Json::empty_object())
+    }
+    "terminal.close" => {
+      terminal_close_op(connection.terminal, decode_payload(payload))
+      Some(Json::empty_object())
+    }
     "lsp.hover" =>
       Some(ToJson::to_json(lsp_hover_op(state.lsp, decode_payload(payload))))
     "lsp.open" =>
@@ -203,8 +256,20 @@ pub async fn host_op(
 pub fn host_method_names() -> Array[String] {
   [
     "fs.read_file", "fs.read_directory", "fs.list_files", "fs.stat_files", "fs.watch",
-    "fs.unwatch", "fs.browse", "lsp.open", "lsp.hover", "lsp.workspace_symbols",
+    "fs.unwatch", "fs.browse", "terminal.open", "terminal.input", "terminal.resize",
+    "terminal.ack", "terminal.close", "lsp.open", "lsp.hover", "lsp.workspace_symbols",
     "skills.catalog", "skills.installed", "skills.install", "skills.uninstall", "update.check",
     "update.download", "update.apply", "app.list", "app.launch", "git.branch", "host.open_path",
   ]
+}
+
+///|
+test "host catalog advertises the complete terminal surface" {
+  let methods = host_method_names()
+  for
+    method_ in [
+      "terminal.open", "terminal.input", "terminal.resize", "terminal.ack", "terminal.close",
+    ] {
+    assert_true(methods.contains(method_))
+  }
 }

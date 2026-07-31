@@ -1,13 +1,10 @@
-// The integrated terminal's IPC surface: wire shapes and ops between the
-// webview panel and the host's PTY sessions (internal/terminal). Output
-// bytes cross the bridge base64-encoded — a PTY chunk may split a UTF-8
-// sequence, so the wire stays byte-transparent and the webview feeds the
-// decoded bytes straight into its emulator.
+// The integrated terminal's transport-independent host ops. PTY output stays
+// byte-transparent across JSON by using base64; each emitted chunk also has a
+// per-session sequence so a client can retry an acknowledgement safely.
 
 ///|
 priv struct TerminalOpenPayload {
   session : String
-  // The workspace whose store holds the session, when the client knows it.
   workspace : String?
   cols : Int
   rows : Int
@@ -19,9 +16,6 @@ priv struct TerminalOpenReply {
 } derive(ToJson)
 
 ///|
-/// User keystrokes as the emulator encoded them. Text arrives in `data` and
-/// is UTF-8 encoded; xterm `onBinary` input arrives byte-transparent in
-/// `data_base64`. Exactly one field must be present.
 priv struct TerminalInputPayload {
   id : Int
   data : String?
@@ -50,8 +44,6 @@ priv struct TerminalResizePayload {
 } derive(FromJson)
 
 ///|
-/// Flow control: the webview acknowledges an output chunk after the emulator
-/// finishes rendering it. The sequence makes a retried request idempotent.
 priv struct TerminalAckPayload {
   id : Int
   sequence : Int
@@ -63,8 +55,6 @@ priv struct TerminalClosePayload {
 } derive(FromJson)
 
 ///|
-/// `terminal_output` event: `data` is base64 of raw PTY bytes. `sequence`
-/// identifies the chunk so the webview can safely retry its acknowledgement.
 priv struct TerminalOutputPayload {
   id : Int
   sequence : Int
@@ -72,14 +62,12 @@ priv struct TerminalOutputPayload {
 } derive(ToJson)
 
 ///|
-/// `terminal_exit` event.
 priv struct TerminalExitPayload {
   id : Int
   code : Int
 } derive(ToJson)
 
 ///|
-/// Open a login-shell session rooted in the conversation's workspace.
 async fn terminal_open_op(
   terminals : @terminal.TerminalState,
   payload : TerminalOpenPayload,
@@ -92,10 +80,8 @@ async fn terminal_open_op(
     is Some(root) else {
     raise HostError("terminal requires a conversation workspace")
   }
-  // A scratch conversation's workspace directory is created lazily by its
-  // first run, so a terminal opened before that would start in a directory
-  // that does not exist yet. Create it here the same way the engine does —
-  // for a registered workspace this is a no-op.
+  // Scratch workspaces are created lazily by the first engine run. Opening a
+  // terminal is also a valid first action, so create that directory here.
   @fsx.ensure_dir(root) catch {
     error if @async.is_being_cancelled() => raise error
     error => raise HostError("could not open the workspace directory: \{error}")
@@ -153,26 +139,4 @@ fn terminal_close_op(
   payload : TerminalClosePayload,
 ) -> Unit {
   @terminal.close_terminal(terminals, id=payload.id)
-}
-
-///|
-/// Forward one session push to the webview as its wire event.
-async fn emit_terminal_push(
-  context : @app.AppCommandExtensionContext,
-  push : @terminal.TerminalPush,
-) -> Unit {
-  match push {
-    Output(id~, sequence~, data~) => {
-      let payload : TerminalOutputPayload = {
-        id,
-        sequence,
-        data: @base64.encode(data),
-      }
-      context.emit("terminal_output", payload)
-    }
-    Exited(id~, code~) => {
-      let payload : TerminalExitPayload = { id, code }
-      context.emit("terminal_exit", payload)
-    }
-  }
 }

@@ -1,4 +1,6 @@
-// The panel's bridge calls, routed by tab key. `terminal_open` folds its
+// The desktop panel's bridge calls, routed by tab key. The panel is only
+// rendered in the native window, so every request targets the Local channel.
+// `terminal.open` folds its
 // reply back into the update loop; the steady-state ops are fire-and-forget
 // — input failures surface as `InputFailed` (an error toast),
 // resize/close failures are dropped (their loss only degrades, and a dead
@@ -24,7 +26,11 @@ fn open_session(
       @interop.set_workspace(payload, workspace)
       payload["cols"] = cols
       payload["rows"] = rows
-      let reply = @interop.bridge_request("terminal_open", payload.to_value()) catch {
+      let reply = @interop.bridge_request(
+        @interop.ChannelId::Local,
+        "terminal.open",
+        payload.to_value(),
+      ) catch {
         error => {
           scheduler.add(
             dispatch(
@@ -36,7 +42,7 @@ fn open_session(
       }
       guard @interop.js_prop(reply, "id") is Some(value) else {
         scheduler.add(
-          dispatch(OpenFailed(key~, message="malformed terminal_open reply")),
+          dispatch(OpenFailed(key~, message="malformed terminal.open reply")),
         )
         return
       }
@@ -64,7 +70,8 @@ fn send_input(
         payload["data"] = data
       }
       let _ : @js.Value = @interop.bridge_request(
-        "terminal_input",
+        @interop.ChannelId::Local,
+        "terminal.input",
         payload.to_value(),
       ) catch {
         error => {
@@ -89,7 +96,8 @@ fn send_resize(id : Int, cols : Int, rows : Int) -> @cmd.Cmd {
       payload["cols"] = cols
       payload["rows"] = rows
       let _ : @js.Value = @interop.bridge_request(
-        "terminal_resize",
+        @interop.ChannelId::Local,
+        "terminal.resize",
         payload.to_value(),
       ) catch {
         _ => return
@@ -114,7 +122,8 @@ fn TerminalAck::send(self : TerminalAck) -> @cmd.Cmd {
       payload["id"] = self.id
       payload["sequence"] = self.sequence
       let _ : @js.Value = @interop.bridge_request(
-        "terminal_ack",
+        @interop.ChannelId::Local,
+        "terminal.ack",
         payload.to_value(),
       ) catch {
         _ => {
@@ -135,7 +144,8 @@ fn send_close(id : Int) -> @cmd.Cmd {
       let payload = @js.Object::new()
       payload["id"] = id
       let _ : @js.Value = @interop.bridge_request(
-        "terminal_close",
+        @interop.ChannelId::Local,
+        "terminal.close",
         payload.to_value(),
       ) catch {
         _ => return

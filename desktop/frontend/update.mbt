@@ -811,6 +811,18 @@ fn file_ctx(model : Model) -> @fileeditor.Ctx {
 }
 
 ///|
+/// The terminal package's view of the active local conversation. The panel is
+/// only rendered in the desktop window, whose focused channel is Local.
+fn terminal_ctx(model : Model) -> @terminal.Ctx {
+  let conv = model.active()
+  {
+    session: conv.session_id,
+    workspace: conv.workspace,
+    dark_mode: model.dark_mode,
+  }
+}
+
+///|
 /// Reconcile the terminal panel's emulator display with the active
 /// conversation after every message (see `@terminal.sync`) — a conversation
 /// switch changes which workspace's terminals belong on screen without
@@ -1998,6 +2010,24 @@ fn update_msg(
         file_ctx(model),
       )
       (cmd, { ..model, file_panel: panel })
+    }
+    Terminal(msg) => {
+      let (cmd, panel) = @terminal.update(
+        dispatch.map(msg => Terminal(msg)),
+        msg,
+        model.terminal_panel,
+        terminal_ctx(model),
+      )
+      let model = { ..model, terminal_panel: panel }
+      // A rejected input means those keystrokes were lost; keep the session
+      // alive, but surface the transport error on the app's toast rail.
+      match msg {
+        InputFailed(key=_, message~) => {
+          let (toast, next) = model.notify_error(dispatch, message)
+          (@cmd.batch([cmd, toast]), next)
+        }
+        _ => (cmd, model)
+      }
     }
     HostActionFailed(message) => model.notify_error(dispatch, message)
     ExternalLinkClicked(url) => (open_external_link(dispatch, url), model)

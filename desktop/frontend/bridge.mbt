@@ -43,6 +43,21 @@ fn bridge_msg(
         FromDevice(channel, FilePanel(msg))
       })
     "fs.changed" => Some(FromDevice(channel, FilePanel(FsChanged)))
+    // The integrated terminal is a native-window feature. Ignore terminal
+    // traffic from remote channels even though the shared host catalog can
+    // serve those methods.
+    "terminal.output" =>
+      if channel is Local {
+        terminal_output_msg(payload).map(msg => Terminal(msg))
+      } else {
+        None
+      }
+    "terminal.exit" =>
+      if channel is Local {
+        terminal_exit_msg(payload).map(msg => Terminal(msg))
+      } else {
+        None
+      }
     _ => device_msg(method_, payload).map(msg => FromDevice(channel, msg))
   }
 }
@@ -184,7 +199,8 @@ fn proton_event_methods() -> Array[String] {
   [
     "agent.connected", "agent.started", "agent.event", "agent.error", "agent.finished",
     "agent.durable", "session.event", "session.changed", "workspace.changed", "settings.changed",
-    "skills.changed", "auth.changed", "lsp.diagnostics", "fs.changed",
+    "skills.changed", "auth.changed", "lsp.diagnostics", "fs.changed", "terminal.output",
+    "terminal.exit",
   ]
 }
 
@@ -213,6 +229,16 @@ test "file-panel pushes carry their channel; auth.changed is Local-only" {
   )
   // A remote device's relay registration is its host's business.
   assert_true(bridge_msg(channel, "auth.changed", Map([])) is None)
+}
+
+///|
+test "terminal pushes are accepted only from the local desktop host" {
+  let payload : Map[String, Json] = { "id": 1, "sequence": 2, "data": "YQ==" }
+  assert_true(
+    bridge_msg(Local, "terminal.output", payload)
+    is Some(Terminal(Output(id=1, sequence=2, data="YQ=="))),
+  )
+  assert_true(bridge_msg(Remote("d1"), "terminal.output", payload) is None)
 }
 
 ///|
@@ -620,6 +646,27 @@ fn diagnostics_msg(
       diagnostics=payload.get("diagnostics").unwrap_or([]),
     ),
   )
+}
+
+///|
+/// Decode one raw PTY chunk. `data` remains base64 until xterm writes it, and
+/// `sequence` is echoed by the idempotent flow-control acknowledgement.
+fn terminal_output_msg(payload : Map[String, Json]) -> @terminal.Msg? {
+  guard @jsonx.json_int(payload, "id") is Some(id) &&
+    @jsonx.json_int(payload, "sequence") is Some(sequence) &&
+    @jsonx.json_text(payload, "data") is Some(data) else {
+    return None
+  }
+  Some(Output(id~, sequence~, data~))
+}
+
+///|
+fn terminal_exit_msg(payload : Map[String, Json]) -> @terminal.Msg? {
+  guard @jsonx.json_int(payload, "id") is Some(id) &&
+    @jsonx.json_int(payload, "code") is Some(code) else {
+    return None
+  }
+  Some(SessionExited(id~, code~))
 }
 
 ///|
