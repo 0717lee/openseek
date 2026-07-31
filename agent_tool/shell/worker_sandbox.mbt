@@ -70,11 +70,16 @@ async fn worker_cd_escapes(
       Some(index) if argv[index] == "cd" => {
         match cd_operand(argv, index) {
           CdTo(operand) => {
-            let mut moved : String? = None
-            let mut destination_exists = false
+            // Resolve against EVERY candidate cwd. Each in-tree resolution
+            // is checked; each that is an EXISTING DIRECTORY is a viable
+            // destination (sh's cd fails on anything else — a file or a
+            // missing path never becomes a cwd).
+            let viable : Array[String] = []
+            let mut interpretations = 0
             for cwd in candidates {
               match resolve_worker_operand(cwd, operand) {
                 Some(resolved) => {
+                  interpretations += 1
                   let canonical = canonicalize_if_exists(resolved)
                   let effective = canonical.unwrap_or(
                     @path.Path(resolved).normalize().to_string(),
@@ -84,34 +89,36 @@ async fn worker_cd_escapes(
                     ) {
                     return Some("`cd \{operand}` leaves your worker tree")
                   }
-                  moved = Some(effective)
-                  if canonical is Some(_) {
-                    destination_exists = true
+                  match canonical {
+                    Some(real) =>
+                      if path_is_directory(real) && !viable.contains(effective) {
+                        viable.push(effective)
+                      }
+                    None => ()
                   }
                 }
                 None => ()
               }
             }
-            // Outside a pipeline the destination becomes a candidate. When
-            // the next command is `&&`-chained AND the destination exists,
-            // that command only runs if the cd succeeded, so the pre-cd cwds
-            // drop out (keeping them over-blocks `cd sub && cd ..`); in every
-            // other shape the cd may fail at runtime, so the old cwds stay
-            // candidates too. This is a floor, not an interpreter — the
-            // kernel profile remains the enforcement where one exists.
+            // Candidate propagation (outside a pipeline; a pipeline cd runs
+            // in a subshell and moves nothing). Under `&&`, the chained
+            // command runs only when the cd SUCCEEDED, so its reachable cwds
+            // are exactly the viable destinations — the pre-cd cwds drop
+            // (keeping them over-blocks `cd sub && cd ..`). Under `;`/`||`
+            // the cd may have failed, so the old cwds stay reachable
+            // alongside the viable destinations. This is a floor, not an
+            // interpreter — the kernel profile remains the enforcement where
+            // one exists.
             if !in_pipeline {
               let next_is_and = position + 1 < commands.length() &&
                 commands[position + 1].separator_before == Some("&&")
-              match moved {
-                Some(destination) => {
-                  if next_is_and && destination_exists {
-                    candidates.clear()
-                  }
-                  if !candidates.contains(destination) {
-                    candidates.push(destination)
-                  }
+              if next_is_and && interpretations > 0 && !viable.is_empty() {
+                candidates.clear()
+              }
+              for destination in viable {
+                if !candidates.contains(destination) {
+                  candidates.push(destination)
                 }
-                None => ()
               }
             }
           }
@@ -222,8 +229,7 @@ async fn canonicalize_existing(path : String) -> String {
 }
 
 ///|
-/// `Some(realpath)` when the path exists, `None` otherwise — existence doubles
-/// as the "this cd will succeed" signal for `&&` candidate propagation.
+/// `Some(realpath)` when the path exists, `None` otherwise.
 async fn canonicalize_if_exists(path : String) -> String? {
   Some(@fs.realpath(path)) catch {
     error if @async.is_being_cancelled() => raise error
