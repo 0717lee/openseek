@@ -1,0 +1,21 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "bobzhang/openseek/agent_tool/internal/write_scope"
+
+// Values
+
+// Errors
+
+// Types and methods
+pub struct WriteScope {
+  root : String
+  allowed : Array[Array[String]]
+  allowed_display : String
+}
+pub async fn WriteScope::create(root~ : String, allowed_paths? : Array[String]) -> Result[Self, String]
+pub async fn WriteScope::deny_reason(Self, String) -> String?
+pub fn WriteScope::root(Self) -> String
+
+// Type aliases
+
+// Traits
+

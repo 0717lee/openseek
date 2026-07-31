@@ -40,6 +40,7 @@
 pub fn definition(
   workspace_root? : String = ".",
   file_state? : @agent_tool.FileStateMap = @agent_tool.FileStateMap::new(),
+  write_scope? : @write_scope.WriteScope,
 ) -> @agent_tool.AgentToolDefinition {
   AgentToolDefinition(
     name="remove",
@@ -71,7 +72,12 @@ pub fn definition(
       "required": ["path", "reason"],
     }),
     execute=Async(arguments => {
-      execute_with_workspace(workspace_root, file_state, arguments)
+      execute_with_workspace(
+        workspace_root,
+        file_state,
+        arguments,
+        write_scope?,
+      )
     }),
   )
 }
@@ -81,6 +87,7 @@ async fn execute_with_workspace(
   workspace_root : String,
   file_state : @agent_tool.FileStateMap,
   arguments : Json,
+  write_scope? : @write_scope.WriteScope,
 ) -> @agent_tool.ToolAction {
   let input = @decode.decode(arguments) catch {
     error => {
@@ -92,7 +99,16 @@ async fn execute_with_workspace(
     }
   }
   let path = @workspace_path.resolve(workspace_root, input.path)
-  remove_file(path, input, file_state)
+  // Containment gate for confined (worker) registries: deletion is a
+  // write-class operation. Re-checked immediately before the delete.
+  if write_scope is Some(scope) && scope.deny_reason(path) is Some(reason) {
+    return @agent_tool.ToolAction::respond(
+      "error removing \{path}: write blocked: \{reason}",
+      is_error=true,
+      brief="remove \{@agent_tool.brief_basename(path)}",
+    )
+  }
+  remove_file(path, input, file_state, write_scope?)
 }
 
 ///|
@@ -100,6 +116,7 @@ async fn remove_file(
   path : String,
   input : @decode.RemoveInput,
   file_state : @agent_tool.FileStateMap,
+  write_scope? : @write_scope.WriteScope,
 ) -> @agent_tool.ToolAction {
   let fail_brief = "remove \{@agent_tool.brief_basename(path)}"
   fn err(message : String) -> @agent_tool.ToolAction {
@@ -147,6 +164,11 @@ async fn remove_file(
         #|file it created
       ),
     )
+  }
+  // Containment re-check at the moment of deleting: the early gate decided on
+  // filesystem state that awaits ago may have changed underneath the tool.
+  if write_scope is Some(scope) && scope.deny_reason(path) is Some(reason) {
+    return err("write blocked: \{reason}")
   }
   @fs.remove(path)
   // Drop the provenance so a path recreated after this removal is not treated as
@@ -422,5 +444,45 @@ async test "remove rejects a blank reason" {
     )
     assert_true(output.is_error)
     assert_true(@fs.exists(path))
+  })
+}
+
+///|
+async test "a write scope confines remove to its allowed paths" {
+  @vfs.with_tmpdir(prefix="openseek-remove-scope-", dir => {
+    @vfs.FileSystem({ "lib/mine.txt": "m\n", "other/mine.txt": "m\n" }).write_to(
+      dir,
+    )
+    // Both files carry agent-created provenance, so only the scope decides.
+    let state = @agent_tool.FileStateMap::new()
+    state.record_created(
+      "\{dir}/lib/mine.txt",
+      recorded_digest("\{dir}/lib/mine.txt"),
+    )
+    state.record_created(
+      "\{dir}/other/mine.txt",
+      recorded_digest("\{dir}/other/mine.txt"),
+    )
+    guard @write_scope.WriteScope::create(root=dir, allowed_paths=["lib"])
+      is Ok(scope) else {
+      fail("expected the scope to build")
+    }
+    let run = match
+      definition(workspace_root=dir, file_state=state, write_scope=scope).execute {
+      Async(execute) => execute
+      Sync(_) => fail("remove tool should be async")
+    }
+    guard run({ "path": "other/mine.txt", "reason": "test" })
+      is Respond(blocked) else {
+      fail("expected Respond")
+    }
+    assert_true(blocked.is_error)
+    assert_true(blocked.content.contains("write blocked"))
+    assert_true(@fs.exists("\{dir}/other/mine.txt"))
+    guard run({ "path": "lib/mine.txt", "reason": "test" }) is Respond(admitted) else {
+      fail("expected Respond")
+    }
+    assert_false(admitted.is_error)
+    assert_false(@fs.exists("\{dir}/lib/mine.txt"))
   })
 }
