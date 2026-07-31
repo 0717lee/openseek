@@ -41,11 +41,11 @@ pub fn WorkerInput::parse(input : Json) -> Result[WorkerInput, String] {
     _ => None
   }
   guard input is { "worker_root": String(worker_root), .. } &&
-    worker_root.has_prefix("/") else {
+    @path.Path(worker_root).is_absolute() else {
     return Err("worker input requires an absolute `worker_root`")
   }
   guard input is { "worker_admin_dir": String(worker_admin_dir), .. } &&
-    worker_admin_dir.has_prefix("/") else {
+    @path.Path(worker_admin_dir).is_absolute() else {
     return Err("worker input requires an absolute `worker_admin_dir`")
   }
   guard input is { "base_oid": String(base_oid), .. } && base_oid.trim() != "" else {
@@ -56,7 +56,7 @@ pub fn WorkerInput::parse(input : Json) -> Result[WorkerInput, String] {
     return Err("worker input requires a non-empty `deny_roots` array")
   }
   for root in roots {
-    guard root is String(root) && root.has_prefix("/") else {
+    guard root is String(root) && @path.Path(root).is_absolute() else {
       return Err("worker input deny_roots must be absolute paths")
     }
     deny_roots.push(root)
@@ -170,7 +170,12 @@ pub async fn run_child(
           file_state~,
           write_scope~,
         ),
-        @run_moonbit.definition(workspace_root=input.worker_root),
+        // run_moonbit is deliberately ABSENT: its snippet runner uses the
+        // ordinary source-write sandbox rooted at the workspace, so an
+        // absolute cwd or @fs path in a snippet could write outside the
+        // worker tree. It returns when it can launch under the worker
+        // profile; until then the worker's sandboxed shell covers in-tree
+        // moon work.
         submit_result_tool(captured),
       ])
     },
