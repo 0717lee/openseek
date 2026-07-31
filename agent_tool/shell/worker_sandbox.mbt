@@ -71,28 +71,46 @@ async fn worker_cd_escapes(
         match cd_operand(argv, index) {
           CdTo(operand) => {
             let mut moved : String? = None
+            let mut destination_exists = false
             for cwd in candidates {
               match resolve_worker_operand(cwd, operand) {
                 Some(resolved) => {
-                  let canonical = canonicalize_existing(resolved)
+                  let canonical = canonicalize_if_exists(resolved)
+                  let effective = canonical.unwrap_or(
+                    @path.Path(resolved).normalize().to_string(),
+                  )
                   if !@workspace_path.is_under_workspace_root(
-                      worker_root, canonical,
+                      worker_root, effective,
                     ) {
                     return Some("`cd \{operand}` leaves your worker tree")
                   }
-                  moved = Some(canonical)
+                  moved = Some(effective)
+                  if canonical is Some(_) {
+                    destination_exists = true
+                  }
                 }
                 None => ()
               }
             }
-            // Outside a pipeline the destination becomes a candidate; the
-            // pre-cd cwds stay candidates because the cd may fail.
+            // Outside a pipeline the destination becomes a candidate. When
+            // the next command is `&&`-chained AND the destination exists,
+            // that command only runs if the cd succeeded, so the pre-cd cwds
+            // drop out (keeping them over-blocks `cd sub && cd ..`); in every
+            // other shape the cd may fail at runtime, so the old cwds stay
+            // candidates too. This is a floor, not an interpreter — the
+            // kernel profile remains the enforcement where one exists.
             if !in_pipeline {
+              let next_is_and = position + 1 < commands.length() &&
+                commands[position + 1].separator_before == Some("&&")
               match moved {
-                Some(destination) =>
+                Some(destination) => {
+                  if next_is_and && destination_exists {
+                    candidates.clear()
+                  }
                   if !candidates.contains(destination) {
                     candidates.push(destination)
                   }
+                }
                 None => ()
               }
             }
@@ -198,8 +216,17 @@ fn resolve_worker_operand(cwd : String, operand : String) -> String? {
 /// lexically-normalized spelling otherwise (a nonexistent directory cannot
 /// be a running process's cwd either).
 async fn canonicalize_existing(path : String) -> String {
-  @fs.realpath(path) catch {
+  canonicalize_if_exists(path).unwrap_or(
+    @path.Path(path).normalize().to_string(),
+  )
+}
+
+///|
+/// `Some(realpath)` when the path exists, `None` otherwise — existence doubles
+/// as the "this cd will succeed" signal for `&&` candidate propagation.
+async fn canonicalize_if_exists(path : String) -> String? {
+  Some(@fs.realpath(path)) catch {
     error if @async.is_being_cancelled() => raise error
-    _ => @path.Path(path).normalize().to_string()
+    _ => None
   }
 }

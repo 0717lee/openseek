@@ -2181,10 +2181,16 @@ async test "worker mode tracks cd forms, pipelines, and symlinked cwds" {
     // An in-tree symlink pointing out of the tree fails the canonical check.
     @fs.symlink(target="/tmp", "\{root}/w/way-out")
     blocked({ "cmd": "pwd", "cwd": "way-out" })
-    // Legitimate in-tree chains stay admitted.
+    // Legitimate in-tree chains stay admitted — including a return to the
+    // worker root through `&&`, where the cd's success is guaranteed for
+    // the chained command.
     guard run({ "cmd": "cd sub && printf ok" }) is Respond(fine) else {
       fail("expected Respond")
     }
     assert_false(fine.is_error)
+    guard run({ "cmd": "cd sub && cd .. && printf ok" }) is Respond(back) else {
+      fail("expected Respond")
+    }
+    assert_false(back.is_error)
   })
 }
