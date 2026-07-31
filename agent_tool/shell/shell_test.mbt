@@ -2269,6 +2269,24 @@ async test "worker mode survives logical-cd and failure-rejoin chains" {
     blocked({ "cmd": "cd missing && true; cd .. && touch escaped.txt" })
     // A cd with no viable destination clears nothing.
     blocked({ "cmd": "cd missing && cd .. && touch escaped.txt" })
+    // The rejoin machinery itself: an EXISTING directory passes scan-time
+    // viability (so the `&&`-clearing fires and suspends the pre-cd cwd),
+    // but exec permission makes the runtime cd fail — the `;` continuation
+    // runs from the suspended cwd, and its `cd ..` must still block.
+    @fs.mkdir("\{root}/w/noexec")
+    let chmod_off = @process.collect_stdout(
+      "chmod",
+      ["000", "\{root}/w/noexec"],
+      inherit_env=true,
+    )
+    assert_eq(chmod_off.0, 0)
+    blocked({ "cmd": "cd noexec && true; cd .. && touch escaped.txt" })
+    let chmod_on = @process.collect_stdout(
+      "chmod",
+      ["755", "\{root}/w/noexec"],
+      inherit_env=true,
+    )
+    assert_eq(chmod_on.0, 0)
     // `||` keeps the pre-cd cwd reachable.
     blocked({ "cmd": "cd sub || cd ..; cd .. && touch escaped.txt" })
     assert_false(@fs.exists("\{root}/escaped.txt"))
