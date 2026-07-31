@@ -114,7 +114,7 @@ async test "create validates root and prefixes strictly" {
     assert_true(no_root.contains("does not resolve"))
     for
       bad in [
-        "", ".", "..", "a/../b", "/abs", "a//b", ".git/hooks", ".worktrees/x",
+        "", ".", "..", "a/../b", "/abs", "a//b", ".git/hooks", ".worktrees/x", "src\\generated",
       ] {
       guard @write_scope.WriteScope::create(root~, allowed_paths=[bad])
         is Err(_) else {
