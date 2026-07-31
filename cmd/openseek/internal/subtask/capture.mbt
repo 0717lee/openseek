@@ -46,6 +46,14 @@ pub async fn capture(
     return { entry, evidence, defects }
   }
   let changes = parse_status_z(status.output)
+  if changes.is_empty() && !defects.is_empty() {
+    // A clean tree with a FAILED validation (e.g. HEAD moved off the base)
+    // is abnormal, not a no-op: the worktree may hold the only reference
+    // to whatever happened — keep it and report.
+    let entry = { ..entry, state: Captured }
+    let _ = save_entry(geometry.common_git_dir, entry)
+    return { entry, evidence, defects }
+  }
   if changes.is_empty() {
     // Terminal means undiscoverable by lifecycle actions, so the worktree
     // and branch must go NOW or they leak (and block reusing the name).

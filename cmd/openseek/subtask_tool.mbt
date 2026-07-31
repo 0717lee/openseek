@@ -276,7 +276,7 @@ async fn subtask_launch(
         "worker_root": entry.worker_root,
         "worker_admin_dir": entry.worker_admin_dir,
         "deny_roots": provisioned.geometry.worktree_roots.to_json(),
-        "allowed_paths": allowed_paths.to_json(),
+        "allowed_paths": entry.allowed_paths.to_json(),
         "base_oid": entry.base_oid,
       }
     None =>
@@ -285,7 +285,7 @@ async fn subtask_launch(
         "worker_root": entry.worker_root,
         "worker_admin_dir": entry.worker_admin_dir,
         "deny_roots": provisioned.geometry.worktree_roots.to_json(),
-        "allowed_paths": allowed_paths.to_json(),
+        "allowed_paths": entry.allowed_paths.to_json(),
         "base_oid": entry.base_oid,
       }
   }
