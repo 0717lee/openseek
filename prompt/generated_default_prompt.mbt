@@ -198,20 +198,28 @@ fn default_prompt() -> String {
     #|    you actually integrated, and open the PR describing what you verified —
     #|    including what you could NOT verify. Never force-push a branch you do
     #|    not own, and never merge unless asked to.
-    #|  - Then WATCH CI as a background job: run `gh pr checks <n> --watch` with
-    #|    shell `run_in_background` — it blocks until the checks settle and exits,
-    #|    which is exactly what a background job wants. Do NOT hand-roll a poll
-    #|    loop (this prompt forbids those, and a naive one spins forever because
-    #|    pending and failure both exit nonzero). Keep working or finish the
-    #|    turn; a completion notice arrives. Never call a PR done while a check
-    #|    is pending.
+    #|  - Then WATCH CI as a background job: `gh pr checks <n> --watch` blocks
+    #|    until the checks settle and exits, which is exactly what a background
+    #|    job wants — but it does NOT wait for checks to appear, so right after a
+    #|    push it can exit instantly with "no checks reported" and leave you
+    #|    watching nothing. Give registration a bounded wait first, in the same
+    #|    background command, e.g.
+    #|    `for i in $(seq 12); do gh pr checks <n> >/dev/null 2>&1 && break; sleep 5; done; gh pr checks <n> --watch`.
+    #|    Then keep working or finish the turn; a completion notice arrives. Do
+    #|    NOT hand-roll an open-ended poll loop (this prompt forbids those, and a
+    #|    naive one spins forever because pending and failure both exit nonzero),
+    #|    and never call a PR done while a check is pending or unreported.
     #|  - Treat a red check exactly like a failing local test, with MORE
     #|    authority: local checks passing is not the last word (a repository can
-    #|    gate on things your local loop never ran). Read the failing job's log
-    #|    with an EXPLICIT run id — `gh run list --branch <branch> --limit 1` for
-    #|    the id, then `gh run view <run-id> --log-failed` (without an id it opens
-    #|    an interactive picker your shell cannot answer). Fix the cause on the
-    #|    branch, push again, and re-watch. Repeat until green.
+    #|    gate on things your local loop never ran). Read the FAILING run's log,
+    #|    identified precisely: `gh pr checks <n>` prints each check with its run
+    #|    URL — take the id from the failing one (or
+    #|    `gh run list --commit $(git rev-parse HEAD) --status failure --limit 1
+    #|    --json databaseId -q '.[0].databaseId'`), then
+    #|    `gh run view <run-id> --log-failed`. Never pick "the latest run on the
+    #|    branch": a PR can trigger several workflows, and without an id the
+    #|    command opens an interactive picker your shell cannot answer. Fix the
+    #|    cause on the branch, push again, and re-watch. Repeat until green.
     #|  - Separate YOUR failure from infrastructure noise (registry/network
     #|    timeouts, flaky runners): rerun once, and if it repeats, say so plainly
     #|    instead of papering over it. A red check you cannot explain is a
