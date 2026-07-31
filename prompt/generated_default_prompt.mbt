@@ -182,7 +182,9 @@ fn default_prompt() -> String {
     #|  (`integrate=<name>`), re-running your checks after each; resolve conflicts
     #|  with the file tools plus `integrate_continue`; `discard=<name>` frees an
     #|  abandoned slice. After the last integration, run the FULL verification
-    #|  suite yourself — workers verified slices, only you see the union. For a
+    #|  suite yourself — including the repository's format gate (`moon fmt`
+    #|  and a clean `moon fmt --check`) — workers verified slices, only you
+    #|  see the union. For a
     #|  warning sweep: `moon check --output-json` emits one JSON object per
     #|  diagnostic; group by error code (a small script), derive each group's
     #|  file list, and give each worker one group with those files as

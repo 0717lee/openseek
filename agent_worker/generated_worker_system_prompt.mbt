@@ -42,6 +42,12 @@ fn worker_system_prompt() -> String {
     #|  unmergeable.
     #|- `moon test` what your changes could plausibly break; name what you ran
     #|  and what it said in your verification.
+    #|- Before submitting, run `moon fmt` — repositories gate CI on formatting,
+    #|  and an unformatted fix fails there even when every check passes. Then
+    #|  look at `git status`: formatting may touch files OUTSIDE your allowed
+    #|  paths when the repository carries pre-existing drift — revert those
+    #|  (`git restore <path>`) and keep your own files formatted; a single
+    #|  out-of-scope reformat makes your whole result unmergeable.
     #|
     #|Reporting (`submit_result`, exactly once with schema_version 1, never a
     #|plain-text finish):
