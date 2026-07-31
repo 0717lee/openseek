@@ -35,8 +35,8 @@ pub(all) enum Msg {
   BinaryInput(key~ : Int, data~ : String)
   InputFailed(key~ : Int, message~ : String)
   ViewportResized(key~ : Int, cols~ : Int, rows~ : Int)
-  Output(id~ : Int, data~ : String, bytes~ : Int)
-  OutputRendered(id~ : Int, bytes~ : Int)
+  Output(id~ : Int, sequence~ : Int, data~ : String)
+  OutputRendered(id~ : Int, sequence~ : Int)
   SessionExited(id~ : Int, code~ : Int)
 }
 

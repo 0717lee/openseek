@@ -1,8 +1,12 @@
 // The panel's bridge calls, routed by tab key. `terminal_open` folds its
 // reply back into the update loop; the steady-state ops are fire-and-forget
 // — input failures surface as `InputFailed` (an error toast),
-// resize/ack/close failures are dropped (their loss only degrades, and a
-// dead session reports itself through `terminal_exit`).
+// resize/close failures are dropped (their loss only degrades, and a dead
+// session reports itself through `terminal_exit`). Flow-control acks retry
+// until the host accepts their idempotent output sequence.
+
+///|
+const AckRetryDelayMs = 100
 
 ///|
 fn open_session(
@@ -95,17 +99,30 @@ fn send_resize(id : Int, cols : Int, rows : Int) -> @cmd.Cmd {
 }
 
 ///|
-fn send_ack(id : Int, bytes : Int) -> @cmd.Cmd {
+/// One output acknowledgement. Retrying the same session/sequence pair is
+/// safe because the host removes each outstanding sequence at most once.
+priv struct TerminalAck {
+  id : Int
+  sequence : Int
+}
+
+///|
+fn TerminalAck::send(self : TerminalAck) -> @cmd.Cmd {
   @cmd.custom_cmd(_scheduler => {
     @js.async_run(() => {
       let payload = @js.Object::new()
-      payload["id"] = id
-      payload["bytes"] = bytes
+      payload["id"] = self.id
+      payload["sequence"] = self.sequence
       let _ : @js.Value = @interop.bridge_request(
         "terminal_ack",
         payload.to_value(),
       ) catch {
-        _ => return
+        _ => {
+          // A rejection can mean the host applied the ack but its response was
+          // lost. Retry the same idempotent sequence after a short delay.
+          _scheduler.add(@cmd.delay(self.send(), AckRetryDelayMs))
+          return
+        }
       }
     })
   })

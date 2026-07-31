@@ -2,7 +2,7 @@
 package "openseek_desktop/internal/terminal"
 
 // Values
-pub fn ack_terminal(TerminalState, id~ : Int, bytes~ : Int) -> Unit
+pub fn ack_terminal(TerminalState, id~ : Int, sequence~ : Int) -> Unit
 
 pub fn close_all_terminals(TerminalState) -> Unit
 
@@ -25,7 +25,7 @@ pub suberror TerminalError {
 
 // Types and methods
 pub(all) enum TerminalPush {
-  Output(id~ : Int, data~ : Bytes)
+  Output(id~ : Int, sequence~ : Int, data~ : Bytes)
   Exited(id~ : Int, code~ : Int)
 }
 

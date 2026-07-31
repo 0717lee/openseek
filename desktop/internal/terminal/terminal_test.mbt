@@ -173,10 +173,61 @@ async test "close_all_terminals cancels queued opens from an older page" {
 }
 
 ///|
+/// A bridge timeout can make the webview retry an acknowledgement whose first
+/// request already reached the host. Repeating that sequence must not release
+/// any other chunks or wake the paused reader prematurely.
+#cfg(not(platform="windows"))
+async test "duplicate acknowledgements release an output chunk only once" {
+  @async.with_task_group(group => {
+    let state = @terminal.new_terminal_state()
+    let pushes = new_push_queue()
+    group.spawn_bg(allow_failure=true, () => {
+      @terminal.run_terminal_pump(state, async fn(push) { pushes.put(push) })
+    })
+    let id = @terminal.open_terminal(state, cwd=".", cols=80, rows=24, command=[
+      "/usr/bin/yes", "flow-control",
+    ])
+    let chunks : Array[(Int, Int)] = []
+    let mut received = 0
+    // Match the host's high watermark. Once this much output has arrived, the
+    // reader is parked until unique acknowledgements drain below its low mark.
+    while received < 262144 {
+      match pushes.get() {
+        Output(id=output_id, sequence~, data~) =>
+          if output_id == id {
+            chunks.push((sequence, data.length()))
+            received += data.length()
+          }
+        Exited(code~, ..) =>
+          fail(
+            "terminal exited before filling its flow-control window: \{code}",
+          )
+      }
+    }
+    guard chunks.get(0) is Some(first) else {
+      fail("terminal produced no output chunks")
+    }
+    for _ in 0..<32 {
+      @terminal.ack_terminal(state, id~, sequence=first.0)
+    }
+    let prematurely_resumed = @async.with_timeout_opt(500, () => pushes.get())
+    assert_true(prematurely_resumed is None)
+    for chunk in chunks {
+      @terminal.ack_terminal(state, id~, sequence=chunk.0)
+    }
+    let resumed = @async.with_timeout_opt(5000, () => pushes.get())
+    assert_true(resumed is Some(Output(id=output_id, ..)) && output_id == id)
+    @terminal.close_terminal(state, id~)
+    @async.with_timeout(5000, () => wait_for_exit(pushes))
+    group.return_immediately(())
+  })
+}
+
+///|
 test "ops on unknown terminal ids degrade cleanly" {
   let state = @terminal.new_terminal_state()
   // ack and close are fire-and-forget: an id that already exited is fine.
-  @terminal.ack_terminal(state, id=99, bytes=100)
+  @terminal.ack_terminal(state, id=99, sequence=1)
   @terminal.close_terminal(state, id=99)
   let failed = try {
     @terminal.resize_terminal(state, id=99, cols=80, rows=24)

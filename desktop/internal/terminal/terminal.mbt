@@ -16,7 +16,10 @@ pub suberror TerminalError {
 /// must stay byte-transparent); `Exited` reports the child's exit code after
 /// the session drained.
 pub(all) enum TerminalPush {
-  Output(id~ : Int, data~ : Bytes)
+  /// `sequence` identifies this output chunk within one session. The webview
+  /// echoes it in `terminal_ack`, making retries safe when a bridge response
+  /// is lost after the host already applied the acknowledgement.
+  Output(id~ : Int, sequence~ : Int, data~ : Bytes)
   Exited(id~ : Int, code~ : Int)
 }
 
@@ -35,6 +38,10 @@ priv struct TerminalSession {
   pty : @pty.Pty
   /// Bytes emitted to the webview but not yet acknowledged.
   mut unacked : Int
+  /// Each sequence remains here until its acknowledgement is applied. Removing
+  /// it exactly once makes a retried acknowledgement idempotent.
+  unacked_chunks : Map[Int, Int]
+  mut next_output_sequence : Int
   /// Wakes the session's read loop when acknowledgements drain the debt or
   /// the session starts closing.
   cond : @cond_var.Cond
@@ -143,10 +150,13 @@ pub fn resize_terminal(
 }
 
 ///|
-/// Acknowledge `bytes` of output the webview has finished rendering. Frees
-/// the flow-control window so the session's read loop can continue.
-pub fn ack_terminal(state : TerminalState, id~ : Int, bytes~ : Int) -> Unit {
+/// Acknowledge one output chunk the webview has finished rendering. A sequence
+/// is removed at most once, so retrying after a lost bridge response cannot
+/// double-release the flow-control window.
+pub fn ack_terminal(state : TerminalState, id~ : Int, sequence~ : Int) -> Unit {
   guard state.sessions.get(id) is Some(session) else { return }
+  guard session.unacked_chunks.get(sequence) is Some(bytes) else { return }
+  session.unacked_chunks.remove(sequence)
   session.unacked -= bytes
   if session.unacked < 0 {
     session.unacked = 0

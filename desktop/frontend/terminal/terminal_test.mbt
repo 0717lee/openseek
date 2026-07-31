@@ -65,3 +65,28 @@ test "sync records color-scheme changes even when the shown tab is unchanged" {
   assert_true(dark.shown is None)
   assert_true(dark.synced_dark_mode is Some(true))
 }
+
+///|
+test "output acknowledgement messages leave terminal state unchanged" {
+  let emit : @cmd.Emit[@terminal.Msg] = @cmd.Emit(_ => @cmd.none)
+  let ctx : @terminal.Ctx = {
+    session: "ack-purity",
+    workspace: None,
+    dark_mode: false,
+  }
+  let state = @terminal.State::empty()
+  let (_, first) = @terminal.update(
+    emit,
+    @terminal.OutputRendered(id=7, sequence=11),
+    state,
+    ctx,
+  )
+  let (_, second) = @terminal.update(
+    emit,
+    @terminal.OutputRendered(id=7, sequence=11),
+    state,
+    ctx,
+  )
+  assert_true(first == state)
+  assert_true(second == state)
+}

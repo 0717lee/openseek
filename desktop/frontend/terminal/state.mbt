@@ -191,11 +191,11 @@ pub(all) enum Msg {
   InputFailed(key~ : Int, message~ : String)
   /// One tab's emulator re-fit to a new grid size.
   ViewportResized(key~ : Int, cols~ : Int, rows~ : Int)
-  /// `terminal_output` event: base64 of raw PTY bytes, plus their decoded
-  /// length so a chunk nobody renders can still be acknowledged.
-  Output(id~ : Int, data~ : String, bytes~ : Int)
+  /// `terminal_output` event: base64 of raw PTY bytes plus the host-assigned
+  /// sequence echoed by the acknowledgement.
+  Output(id~ : Int, sequence~ : Int, data~ : String)
   /// An emulator finished rendering a chunk; flow-control ack.
-  OutputRendered(id~ : Int, bytes~ : Int)
+  OutputRendered(id~ : Int, sequence~ : Int)
   /// `terminal_exit` event: the shell ended, so its tab retires.
   SessionExited(id~ : Int, code~ : Int)
 }

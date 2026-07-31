@@ -211,21 +211,23 @@ pub fn update(
       } else {
         (@cmd.none, state)
       }
-    Output(id~, data~, bytes~) =>
+    Output(id~, sequence~, data~) =>
       match state.tab_by_id(id) {
-        Some(tab) => (write_to_tab(dispatch, tab.key, id, data, bytes), state)
+        Some(tab) =>
+          (write_to_tab(dispatch, tab.key, id, sequence, data), state)
         // No tab claims this session yet. While an open is in flight this
         // is almost certainly its first output racing the reply, so hold
         // the chunk for the claim; otherwise acknowledge and drop it (an
         // unacknowledged chunk leaks the host's flow-control window).
         None =>
           if state.tabs.iter().any(tab => tab.status is TabOpening) {
-            (buffer_pending(id, data, bytes), state)
+            (buffer_pending(id, sequence, data), state)
           } else {
-            (send_ack(id, bytes), state)
+            (TerminalAck::{ id, sequence }.send(), state)
           }
       }
-    OutputRendered(id~, bytes~) => (send_ack(id, bytes), state)
+    OutputRendered(id~, sequence~) =>
+      (TerminalAck::{ id, sequence }.send(), state)
     SessionExited(id~, code=_) =>
       match state.tab_by_id(id) {
         // The shell ended (Ctrl+D, `exit`, or a crash): its tab retires,

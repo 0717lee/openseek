@@ -50,11 +50,11 @@ priv struct TerminalResizePayload {
 } derive(FromJson)
 
 ///|
-/// Flow control: the webview acknowledges output bytes after the emulator
-/// finishes rendering them.
+/// Flow control: the webview acknowledges an output chunk after the emulator
+/// finishes rendering it. The sequence makes a retried request idempotent.
 priv struct TerminalAckPayload {
   id : Int
-  bytes : Int
+  sequence : Int
 } derive(FromJson)
 
 ///|
@@ -63,15 +63,12 @@ priv struct TerminalClosePayload {
 } derive(FromJson)
 
 ///|
-/// `terminal_output` event: `data` is base64 of raw PTY bytes, `bytes` their
-/// decoded length. The length rides along so the webview can acknowledge a
-/// chunk it decides not to render (a retired session's tail) without
-/// decoding it — an unacknowledged chunk would leak the host's flow-control
-/// window and eventually stall the session.
+/// `terminal_output` event: `data` is base64 of raw PTY bytes. `sequence`
+/// identifies the chunk so the webview can safely retry its acknowledgement.
 priv struct TerminalOutputPayload {
   id : Int
+  sequence : Int
   data : String
-  bytes : Int
 } derive(ToJson)
 
 ///|
@@ -147,7 +144,7 @@ fn terminal_ack_op(
   terminals : @terminal.TerminalState,
   payload : TerminalAckPayload,
 ) -> Unit {
-  @terminal.ack_terminal(terminals, id=payload.id, bytes=payload.bytes)
+  @terminal.ack_terminal(terminals, id=payload.id, sequence=payload.sequence)
 }
 
 ///|
@@ -165,11 +162,11 @@ async fn emit_terminal_push(
   push : @terminal.TerminalPush,
 ) -> Unit {
   match push {
-    Output(id~, data~) => {
+    Output(id~, sequence~, data~) => {
       let payload : TerminalOutputPayload = {
         id,
+        sequence,
         data: @base64.encode(data),
-        bytes: data.length(),
       }
       context.emit("terminal_output", payload)
     }

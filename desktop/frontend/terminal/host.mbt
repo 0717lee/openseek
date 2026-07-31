@@ -26,7 +26,9 @@ priv struct TermEntry {
 /// claiming tab.
 priv struct TermHost {
   entries : Map[Int, TermEntry]
-  pending : Map[Int, Array[(String, Int)]]
+  /// Output that arrived before `terminal_open` identified its tab:
+  /// `(sequence, base64_data)`.
+  pending : Map[Int, Array[(Int, String)]]
   mut resize_wired : Bool
 }
 
@@ -244,7 +246,7 @@ fn apply_theme(dark_mode : Bool) -> @cmd.Cmd {
 
 ///|
 /// Decode one base64 output chunk into the tab's emulator and report its
-/// byte count back once xterm finished rendering it (the flow-control ack).
+/// sequence back once xterm finished rendering it (the flow-control ack).
 /// A chunk with no emulator to land in is acknowledged outright — an
 /// unacknowledged chunk leaks the host's flow-control window and eventually
 /// stalls the session.
@@ -252,18 +254,17 @@ fn write_to_tab(
   dispatch : @cmd.Emit[Msg],
   key : Int,
   id : Int,
+  sequence : Int,
   data : String,
-  bytes : Int,
 ) -> @cmd.Cmd {
   @cmd.custom_cmd(_scheduler => {
     guard term_host.entries.get(key) is Some(entry) &&
       xterm_module() is Some(module_) else {
-      _scheduler.add(dispatch(OutputRendered(id~, bytes~)))
+      _scheduler.add(dispatch(OutputRendered(id~, sequence~)))
       return
     }
-    let done = (length : @js.Value) => {
-      let rendered : Int = length.cast()
-      _scheduler.add(dispatch(OutputRendered(id~, bytes=rendered)))
+    let done = (_ : @js.Value) => {
+      _scheduler.add(dispatch(OutputRendered(id~, sequence~)))
     }
     let _ : @js.Value = module_.apply_with_string("writeBase64", [
       entry.term,
@@ -275,10 +276,10 @@ fn write_to_tab(
 
 ///|
 /// Stash an output chunk whose session id no tab has claimed yet.
-fn buffer_pending(id : Int, data : String, bytes : Int) -> @cmd.Cmd {
+fn buffer_pending(id : Int, sequence : Int, data : String) -> @cmd.Cmd {
   @cmd.custom_cmd(_scheduler => {
     let chunks = term_host.pending.get(id).unwrap_or([])
-    chunks.push((data, bytes))
+    chunks.push((sequence, data))
     term_host.pending[id] = chunks
   })
 }
@@ -305,7 +306,7 @@ fn drop_pending(dispatch : @cmd.Emit[Msg], id : Int) -> @cmd.Cmd {
     guard term_host.pending.get(id) is Some(chunks) else { return }
     term_host.pending.remove(id)
     for chunk in chunks {
-      scheduler.add(dispatch(OutputRendered(id~, bytes=chunk.1)))
+      scheduler.add(dispatch(OutputRendered(id~, sequence=chunk.0)))
     }
   })
 }
