@@ -36,6 +36,7 @@ pub(all) suberror PayloadError {
 
 // Types and methods
 type HostConnection
+pub fn HostConnection::close_terminals(Self) -> Unit
 pub fn HostConnection::new() -> Self
 pub async fn HostConnection::run(Self, async (String, Json) -> Unit) -> Unit
 

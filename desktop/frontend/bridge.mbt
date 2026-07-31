@@ -43,6 +43,10 @@ fn bridge_msg(
         FromDevice(channel, FilePanel(msg))
       })
     "fs.changed" => Some(FromDevice(channel, FilePanel(FsChanged)))
+    "terminal.output" =>
+      terminal_output_msg(channel, payload).map(msg => Terminal(msg))
+    "terminal.exit" =>
+      terminal_exit_msg(channel, payload).map(msg => Terminal(msg))
     _ => device_msg(method_, payload).map(msg => FromDevice(channel, msg))
   }
 }
@@ -184,7 +188,8 @@ fn proton_event_methods() -> Array[String] {
   [
     "agent.connected", "agent.started", "agent.event", "agent.error", "agent.finished",
     "agent.durable", "session.event", "session.changed", "workspace.changed", "settings.changed",
-    "skills.changed", "auth.changed", "lsp.diagnostics", "fs.changed",
+    "skills.changed", "auth.changed", "lsp.diagnostics", "fs.changed", "terminal.output",
+    "terminal.exit",
   ]
 }
 
@@ -213,6 +218,21 @@ test "file-panel pushes carry their channel; auth.changed is Local-only" {
   )
   // A remote device's relay registration is its host's business.
   assert_true(bridge_msg(channel, "auth.changed", Map([])) is None)
+}
+
+///|
+test "terminal pushes retain the channel that owns their host session" {
+  let payload : Map[String, Json] = { "id": 1, "sequence": 2, "data": "YQ==" }
+  assert_true(
+    bridge_msg(Local, "terminal.output", payload)
+    is Some(Terminal(Output(channel=Local, id=1, sequence=2, data="YQ=="))),
+  )
+  assert_true(
+    bridge_msg(Remote("d1"), "terminal.output", payload)
+    is Some(
+      Terminal(Output(channel=Remote("d1"), id=1, sequence=2, data="YQ=="))
+    ),
+  )
 }
 
 ///|
@@ -620,6 +640,33 @@ fn diagnostics_msg(
       diagnostics=payload.get("diagnostics").unwrap_or([]),
     ),
   )
+}
+
+///|
+/// Decode one raw PTY chunk. `data` remains base64 until xterm writes it, and
+/// `sequence` is echoed by the idempotent flow-control acknowledgement.
+fn terminal_output_msg(
+  channel : @interop.ChannelId,
+  payload : Map[String, Json],
+) -> @terminal.Msg? {
+  guard @jsonx.json_int(payload, "id") is Some(id) &&
+    @jsonx.json_int(payload, "sequence") is Some(sequence) &&
+    @jsonx.json_text(payload, "data") is Some(data) else {
+    return None
+  }
+  Some(Output(channel~, id~, sequence~, data~))
+}
+
+///|
+fn terminal_exit_msg(
+  channel : @interop.ChannelId,
+  payload : Map[String, Json],
+) -> @terminal.Msg? {
+  guard @jsonx.json_int(payload, "id") is Some(id) &&
+    @jsonx.json_int(payload, "code") is Some(code) else {
+    return None
+  }
+  Some(SessionExited(channel~, id~, code~))
 }
 
 ///|

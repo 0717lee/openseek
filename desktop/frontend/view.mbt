@@ -2564,6 +2564,24 @@ fn topbar_view(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
   if model.is_desktop {
     items.push(launcher_view(dispatch, model))
   }
+  // A browser terminal is rendered locally but its PTY lives on the focused
+  // remote device, reached through that device's WebSocket channel.
+  items.push(
+    @html.button(
+      class=if model.terminal_panel.open {
+        "panel-toggle active"
+      } else {
+        "panel-toggle"
+      },
+      title=if model.terminal_panel.open {
+        "Hide terminal"
+      } else {
+        "Show terminal"
+      },
+      on_click=dispatch(Terminal(ToggleTerminal)),
+      icon(icon_terminal),
+    ),
+  )
   // Rightmost: the toggle for the whole right-hand panel — only while the
   // panel is closed; an open panel carries the toggle at the right edge of
   // its breadcrumb instead, keeping this bar uncrowded. Both spots hug the
@@ -2689,14 +2707,29 @@ fn view(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
   // viewer host inside it) is still rendered so the attached viewer is never
   // torn down.
   let panel_open = model.file_panel.open && model.screen is Chat
+  let mut content_class = if panel_open {
+    "content panel-open"
+  } else {
+    "content"
+  }
+  if model.terminal_panel.open {
+    content_class = content_class + " terminal-open"
+  }
   let children : Array[@html.Html] = [
     sidebar_view(dispatch, model),
-    @html.div(class=if panel_open { "content panel-open" } else { "content" }, [
+    @html.div(class=content_class, [
       @html.main_(content),
       @fileeditor.panel_view(
         dispatch.map(msg => FileEditor(msg)),
         model.file_panel,
         file_ctx(model),
+      ),
+      // Keep the stable emulator host mounted while the panel is hidden; its
+      // imperative xterm instances retain their screens and scrollback.
+      @terminal.panel_view(
+        dispatch.map(msg => Terminal(msg)),
+        model.terminal_panel,
+        terminal_ctx(model),
       ),
     ]),
   ]

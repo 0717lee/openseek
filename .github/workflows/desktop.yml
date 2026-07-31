@@ -201,6 +201,13 @@ jobs:
           }
           exit 1
 
+      # Root CI runs native tests on Linux. Exercise the terminal package on
+      # Windows too so platform-specific PTY tests cannot hide behind a
+      # successful production build.
+      - name: Test Windows terminal
+        shell: pwsh
+        run: moon -C desktop test internal/terminal --target native
+
       # Pull requests upload only the portable ZIP, so they do not spend time
       # installing NSIS or recompressing the same bundle as an installer.
       # Unstamped — no OPENSEEK_CLIENT_TOKEN in CI; see the Linux job's note.

@@ -1,0 +1,5 @@
+import {
+  "moonbitlang/core/encoding/base64",
+}
+
+supported_targets = "js"

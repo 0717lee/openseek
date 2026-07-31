@@ -1,0 +1,12 @@
+import {
+  "moonbit-community/rabbita/cmd",
+  "moonbit-community/rabbita/dom",
+  "moonbit-community/rabbita/html",
+  "moonbit-community/rabbita/js",
+  "moonbitlang/x/path/win32" @winpath,
+  "openseek_desktop/frontend/internal/terminal_input",
+  "openseek_desktop/internal/pathx",
+  "openseek_desktop/frontend/interop",
+}
+
+supported_targets = "js"

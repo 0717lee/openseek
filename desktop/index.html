@@ -17,9 +17,13 @@
     <!-- The app's own stylesheet, shared with the browser console page
          (frontend/browser/index.html). -->
     <link rel="stylesheet" href="app.css" />
+    <link rel="stylesheet" href="xterm.css" />
   </head>
   <body>
     <div id="app"></div>
+    <!-- The packager generates the xterm.js bundle and exposes its terminal
+         constructor plus fit addon through the __openseek_xterm global. -->
+    <script src="./xterm.js"></script>
     <script src="./frontend.js"></script>
   </body>
 </html>

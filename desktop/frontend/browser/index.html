@@ -17,9 +17,15 @@
     <!-- The app's own stylesheet, shared with the desktop window
          (desktop/index.html). -->
     <link rel="stylesheet" href="app.css" />
+    <!-- Generated from the same pinned xterm sources as the desktop bundle.
+         The browser packager must ship both sidecars next to this page. -->
+    <link rel="stylesheet" href="xterm.css" />
   </head>
   <body>
     <div id="app"></div>
+    <!-- Defines __openseek_xterm before the MoonBit frontend mounts a
+         terminal emulator. The PTY itself remains on the selected host. -->
+    <script src="./xterm.js"></script>
     <script src="./browser.js"></script>
   </body>
 </html>
