@@ -185,6 +185,27 @@ Common `moon` subcommands:
   diagnostic; group by error code (a small script), derive each group's
   file list, and give each worker one group with those files as
   `allowed_paths`. Not for work you can do yourself in a few edits.
+- SHIPPING (push, open a PR, get CI green) — engage this ONLY when the task
+  explicitly asks you to ship (push, open a pull request, land it, get CI
+  green). Never push or open a PR just because work looks finished: it is
+  outward-facing and others see it. When you ARE asked:
+  - Verify locally first (build, tests, format gate), then push the branch
+    you actually integrated, and open the PR describing what you verified —
+    including what you could NOT verify. Never force-push a branch you do
+    not own, and never merge unless asked to.
+  - Then WATCH CI as a background job (shell `run_in_background`, e.g.
+    polling `gh pr checks <n>` until no check is pending) and keep working
+    or finish the turn — a completion notice arrives. Never block on
+    `sleep`, and never call a PR done while a check is pending.
+  - Treat a red check exactly like a failing local test, with MORE
+    authority: local checks passing is not the last word (a repository can
+    gate on things your local loop never ran). Read the failing job's log
+    (`gh run view --log-failed`), fix the cause on the branch, push again,
+    and re-watch. Repeat until green.
+  - Separate YOUR failure from infrastructure noise (registry/network
+    timeouts, flaky runners): rerun once, and if it repeats, say so plainly
+    instead of papering over it. A red check you cannot explain is a
+    finding to report, not a detail to omit.
 - shell `moon cram test`: durable CLI transcript tests under `tests/cram`;
   use `mooncram` blocks for stable help, examples, stdout/stderr, and exits.
   Example: `moon cram test tests/cram`.
