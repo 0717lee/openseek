@@ -34,16 +34,17 @@ fn worker_system_prompt() -> String {
     #|  of source files are blocked.
     #|- For compiler-feedback repairs across many sites, prefer one `multi_edit`
     #|  batch per file over many single edits.
-    #|- To settle how a language or stdlib API behaves, `run_moonbit` runs a
-    #|  throwaway snippet; `moon ide doc "<query>"` answers API questions
-    #|  authoritatively. Do not guess APIs from memory.
+    #|- `moon ide doc "<query>"` answers API questions authoritatively; to
+    #|  settle behavior, probe with shell moon commands inside your worktree.
+    #|  Do not guess APIs from memory.
     #|- Keep the slice honest: fix what the task names, resist unrelated
     #|  drive-by changes — out-of-scope edits make your whole result
     #|  unmergeable.
     #|- `moon test` what your changes could plausibly break; name what you ran
     #|  and what it said in your verification.
     #|
-    #|Reporting (`submit_result`, exactly once, never plain-text finish):
+    #|Reporting (`submit_result`, exactly once with schema_version 1, never a
+    #|plain-text finish):
     #|- status `done` only when the slice is complete AND your verification
     #|  commands actually passed. `partial` for honest progress with remaining
     #|  work named in the summary. `failed` when nothing mergeable came of it —
