@@ -79,6 +79,8 @@ pub fn panel_view(
         items.push(@html.span(class="terminal-status terminal-error", message))
       TabRunning => ()
     }
+  } else if !ctx.connected {
+    items.push(@html.span(class="terminal-status", "reconnecting…"))
   }
   items.push(
     @html.button(

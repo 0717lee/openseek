@@ -323,12 +323,20 @@ fn apply_roster(
 ) -> (@cmd.Cmd, Model) {
   let commands : Array[@cmd.Cmd] = []
   let mut websocket_epoch = model.websocket_epoch
+  let mut terminal_panel = model.terminal_panel
   // Retire first: revoked or unshared devices close their socket (a
-  // command — update stays pure) and drop their state and conversations.
+  // command — update stays pure), drop their state and conversations, and
+  // dispose the PTYs that belonged to the retired WebSocket.
   let devices : Array[DeviceState] = []
   for dev in model.devices {
     if dev.channel is Remote(id) && !metas.iter().any(meta => meta.id == id) {
       commands.push(close_channel(dev.channel))
+      let (terminal_cmd, next_terminal_panel) = @terminal.disconnect(
+        terminal_panel,
+        dev.channel,
+      )
+      commands.push(terminal_cmd)
+      terminal_panel = next_terminal_panel
     } else {
       devices.push(dev)
     }
@@ -402,6 +410,7 @@ fn apply_roster(
     devices,
     websocket_epoch,
     conversations,
+    terminal_panel,
     console: Some({
       ..console,
       roster: metas,
@@ -862,7 +871,17 @@ fn console_signed_out(
   model : Model,
   console : ConsoleState,
 ) -> (@cmd.Cmd, Model) {
-  let commands = model.devices.map(dev => close_channel(dev.channel))
+  let commands : Array[@cmd.Cmd] = []
+  let mut terminal_panel = model.terminal_panel
+  for dev in model.devices {
+    commands.push(close_channel(dev.channel))
+    let (terminal_cmd, next_terminal_panel) = @terminal.disconnect(
+      terminal_panel,
+      dev.channel,
+    )
+    commands.push(terminal_cmd)
+    terminal_panel = next_terminal_panel
+  }
   (
     @cmd.batch(commands),
     {
@@ -872,6 +891,7 @@ fn console_signed_out(
       active_session: "",
       loading_conversation: None,
       conversations: [],
+      terminal_panel: { ..terminal_panel, open: false, shown: None },
       console: Some({
         ..console,
         auth: AuthSignedOut,

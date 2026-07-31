@@ -4,10 +4,13 @@ package "openseek_desktop/frontend/terminal"
 import {
   "moonbit-community/rabbita/cmd",
   "moonbit-community/rabbita/html",
+  "openseek_desktop/frontend/interop",
   "openseek_desktop/internal/pathx",
 }
 
 // Values
+pub fn disconnect(State, @interop.ChannelId) -> (@cmd.Cmd, State)
+
 pub fn panel_view(@cmd.Emit[Msg], State, Ctx) -> @html.Html
 
 pub fn sync(@cmd.Emit[Msg], State, Ctx) -> (State, @cmd.Cmd)
@@ -18,9 +21,11 @@ pub fn update(@cmd.Emit[Msg], Msg, State, Ctx) -> (@cmd.Cmd, State)
 
 // Types and methods
 pub(all) struct Ctx {
+  channel : @interop.ChannelId
   session : String
   workspace : @pathx.Absolute?
   dark_mode : Bool
+  connected : Bool
 }
 
 pub(all) enum Msg {
@@ -29,15 +34,15 @@ pub(all) enum Msg {
   TabSelected(key~ : Int)
   TabClosed(key~ : Int)
   EmulatorReady(key~ : Int, cols~ : Int, rows~ : Int)
-  Opened(key~ : Int, id~ : Int)
+  Opened(channel~ : @interop.ChannelId, key~ : Int, id~ : Int)
   OpenFailed(key~ : Int, message~ : String)
   UserInput(key~ : Int, data~ : String)
   BinaryInput(key~ : Int, data~ : String)
   InputFailed(key~ : Int, message~ : String)
   ViewportResized(key~ : Int, cols~ : Int, rows~ : Int)
-  Output(id~ : Int, sequence~ : Int, data~ : String)
-  OutputRendered(id~ : Int, sequence~ : Int)
-  SessionExited(id~ : Int, code~ : Int)
+  Output(channel~ : @interop.ChannelId, id~ : Int, sequence~ : Int, data~ : String)
+  OutputRendered(channel~ : @interop.ChannelId, id~ : Int, sequence~ : Int)
+  SessionExited(channel~ : @interop.ChannelId, id~ : Int, code~ : Int)
 }
 
 pub(all) struct State {
@@ -46,7 +51,7 @@ pub(all) struct State {
   tabs : Array[Tab]
   active : Array[(WorkspaceKey, Int)]
   shown : Int?
-  exited_before_open : Array[Int]
+  exited_before_open : Array[(@interop.ChannelId, Int)]
   synced_dark_mode : Bool?
 } derive(Eq)
 pub fn State::empty() -> Self
@@ -68,8 +73,8 @@ pub(all) enum TabStatus {
 } derive(Eq)
 
 pub(all) enum WorkspaceKey {
-  Project(String)
-  Scratch(String)
+  Project(@interop.ChannelId, String)
+  Scratch(@interop.ChannelId, String)
 } derive(Eq)
 
 // Type aliases

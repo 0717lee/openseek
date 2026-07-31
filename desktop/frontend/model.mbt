@@ -761,9 +761,9 @@ priv struct Model {
   // active conversation changes. Owned by the `fileeditor` package; this
   // model only carries its state and routes `FileEditor` messages to it.
   file_panel : @fileeditor.State
-  // The native window's integrated terminal. It is deliberately desktop-only:
-  // a browser must not render controls for a PTY on a screen the user is not
-  // sitting at.
+  // The integrated terminal. Each tab retains the device channel that owns
+  // its PTY, so the desktop uses Local while a browser uses its relay-backed
+  // Remote channel without session-id collisions between devices.
   terminal_panel : @terminal.State
   // Transient error toasts, oldest first, and the id the next toast will
   // take. Ids only ever grow, so a toast's auto-dismiss timer can never

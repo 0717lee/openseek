@@ -2,15 +2,15 @@
 //
 // Shells OUTLIVE conversation switches. Their running jobs, history, and
 // working directories are the user's work, so nothing here retires a
-// session because the active conversation changed — switching workspaces
-// only changes which tab group the panel shows, and each group's shells
-// keep running (and rendering into their hidden emulators) meanwhile.
+// session because the active conversation changed — switching devices or
+// workspaces only changes which tab group the panel shows, and each group's
+// shells keep running (and rendering into their hidden emulators) meanwhile.
 //
 // A tab never migrates: it is bound at creation to the conversation and
 // workspace it was opened for, and a restart after its shell exits reuses
 // that binding. Sessions end when their child exits, when the user closes
-// the tab or restarts it, or when the webview disconnects (the host tears
-// its task group down).
+// the tab or restarts it, or when its owning connection disconnects (the host
+// tears that connection's task group down).
 
 ///|
 /// The display label for the active conversation's workspace: the project
@@ -101,13 +101,22 @@ pub fn update(
           // tab once `open` flips.
           Some(_) => (@cmd.none, { ..state, open: true })
           // First open in this workspace: start its first shell.
-          None => {
+          None if ctx.connected => {
             let (cmd, state) = open_new_tab(dispatch, state, ctx)
             (cmd, { ..state, open: true })
           }
+          // A remote socket can be between attempts. Keep the panel visible
+          // with its disconnected status; `sync` starts a fresh PTY only
+          // after this channel reports ready again.
+          None => (@cmd.none, { ..state, open: true })
         }
       }
-    NewTerminal => open_new_tab(dispatch, state, ctx)
+    NewTerminal =>
+      if ctx.connected {
+        open_new_tab(dispatch, state, ctx)
+      } else {
+        (@cmd.none, state)
+      }
     TabSelected(key~) => {
       guard state.tab_by_key(key) is Some(tab) else {
         return (@cmd.none, state)
@@ -120,7 +129,7 @@ pub fn update(
       }
       let (cmds, state) = drop_tab(state, ctx, key)
       if tab.id is Some(id) {
-        cmds.push(send_close(id))
+        cmds.push(send_close(tab.workspace.channel(), id))
       }
       // `sync` reveals the group's fallback tab, if the closed one was on
       // screen.
@@ -136,6 +145,7 @@ pub fn update(
         (
           open_session(
             dispatch,
+            tab.workspace.channel(),
             key,
             tab.session,
             tab.workspace_path,
@@ -148,34 +158,47 @@ pub fn update(
         (@cmd.none, state)
       }
     }
-    Opened(key~, id~) =>
-      if state.exited_before_open.contains(id) {
+    Opened(channel~, key~, id~) => {
+      let owner = (channel, id)
+      if state.exited_before_open.contains(owner) {
         // `terminal_exit` can beat this reply. Only the reply identifies
         // which opening tab owned the id, so retire it now and never publish
         // a `TabRunning` state for a dead PTY.
         let state = {
           ..state,
           exited_before_open: state.exited_before_open.filter(exited => {
-            exited != id
+            exited != owner
           }),
         }
-        if state.tab_by_key(key) is Some(tab) && tab.status is TabOpening {
+        if state.tab_by_key(key) is Some(tab) &&
+          tab.workspace.channel() == channel &&
+          tab.status is TabOpening {
           let (cmds, state) = drop_tab(state, ctx, key)
-          cmds.push(drop_pending(dispatch, id))
+          cmds.push(drop_pending(dispatch, channel, id))
           (@cmd.batch(cmds), state)
         } else {
-          (drop_pending(dispatch, id), state)
+          (drop_pending(dispatch, channel, id), state)
         }
-      } else if state.tab_by_key(key) is Some(tab) && tab.status is TabOpening {
+      } else if state.tab_by_key(key) is Some(tab) &&
+        tab.workspace.channel() == channel &&
+        tab.status is TabOpening {
         (
-          flush_pending(dispatch, key, id),
+          flush_pending(dispatch, channel, key, id),
           state.replace_tab({ ..tab, id: Some(id), status: TabRunning }),
         )
       } else {
         // The tab was closed while the open was in flight; the session
-        // belongs to nobody, so retire it on the host.
-        (@cmd.batch([send_close(id), drop_pending(dispatch, id)]), state)
+        // belongs to nobody, so retire it on the host connection that opened
+        // it, even if another device is focused now.
+        (
+          @cmd.batch([
+            send_close(channel, id),
+            drop_pending(dispatch, channel, id),
+          ]),
+          state,
+        )
       }
+    }
     OpenFailed(key~, message~) =>
       if state.tab_by_key(key) is Some(tab) {
         (@cmd.none, state.replace_tab({ ..tab, status: TabFailed(message~) }))
@@ -186,7 +209,10 @@ pub fn update(
       if state.tab_by_key(key) is Some(tab) &&
         tab.status is TabRunning &&
         tab.id is Some(id) {
-        (send_input(dispatch, key, id, data, false), state)
+        (
+          send_input(dispatch, tab.workspace.channel(), key, id, data, false),
+          state,
+        )
       } else {
         // Typing into an exited/unopened terminal has nowhere to go.
         (@cmd.none, state)
@@ -195,7 +221,10 @@ pub fn update(
       if state.tab_by_key(key) is Some(tab) &&
         tab.status is TabRunning &&
         tab.id is Some(id) {
-        (send_input(dispatch, key, id, data, true), state)
+        (
+          send_input(dispatch, tab.workspace.channel(), key, id, data, true),
+          state,
+        )
       } else {
         // Typing into an exited/unopened terminal has nowhere to go.
         (@cmd.none, state)
@@ -207,29 +236,33 @@ pub fn update(
       if state.tab_by_key(key) is Some(tab) &&
         tab.status is TabRunning &&
         tab.id is Some(id) {
-        (send_resize(id, cols, rows), state)
+        (send_resize(tab.workspace.channel(), id, cols, rows), state)
       } else {
         (@cmd.none, state)
       }
-    Output(id~, sequence~, data~) =>
-      match state.tab_by_id(id) {
+    Output(channel~, id~, sequence~, data~) =>
+      match state.tab_by_id(channel, id) {
         Some(tab) =>
-          (write_to_tab(dispatch, tab.key, id, sequence, data), state)
+          (write_to_tab(dispatch, channel, tab.key, id, sequence, data), state)
         // No tab claims this session yet. While an open is in flight this
         // is almost certainly its first output racing the reply, so hold
         // the chunk for the claim; otherwise acknowledge and drop it (an
         // unacknowledged chunk leaks the host's flow-control window).
         None =>
-          if state.tabs.iter().any(tab => tab.status is TabOpening) {
-            (buffer_pending(id, sequence, data), state)
+          if state.tabs
+            .iter()
+            .any(tab => {
+              tab.workspace.channel() == channel && tab.status is TabOpening
+            }) {
+            (buffer_pending(channel, id, sequence, data), state)
           } else {
-            (TerminalAck::{ id, sequence }.send(), state)
+            (TerminalAck::{ channel, id, sequence }.send(), state)
           }
       }
-    OutputRendered(id~, sequence~) =>
-      (TerminalAck::{ id, sequence }.send(), state)
-    SessionExited(id~, code=_) =>
-      match state.tab_by_id(id) {
+    OutputRendered(channel~, id~, sequence~) =>
+      (TerminalAck::{ channel, id, sequence }.send(), state)
+    SessionExited(channel~, id~, code=_) =>
+      match state.tab_by_id(channel, id) {
         // The shell ended (Ctrl+D, `exit`, or a crash): its tab retires,
         // and the visible group's last tab takes the panel with it.
         Some(tab) => {
@@ -237,20 +270,64 @@ pub fn update(
           (@cmd.batch(cmds), state)
         }
         None =>
-          if state.tabs.iter().any(tab => tab.status is TabOpening) {
+          if state.tabs
+            .iter()
+            .any(tab => {
+              tab.workspace.channel() == channel && tab.status is TabOpening
+            }) {
+            let owner = (channel, id)
             (
-              drop_pending(dispatch, id),
-              if state.exited_before_open.contains(id) {
+              drop_pending(dispatch, channel, id),
+              if state.exited_before_open.contains(owner) {
                 state
               } else {
-                { ..state, exited_before_open: state.exited_before_open + [id] }
+                {
+                  ..state,
+                  exited_before_open: state.exited_before_open + [owner],
+                }
               },
             )
           } else {
-            (drop_pending(dispatch, id), state)
+            (drop_pending(dispatch, channel, id), state)
           }
       }
   }
+}
+
+///|
+/// Retire all tabs owned by one dead connection. Terminal ids cannot survive a
+/// WebSocket reconnect: the host tears down the old connection's PTYs before
+/// the browser dials again. Keeping another channel's same-numbered tab is
+/// safe because both model lookup and the imperative pre-open buffer use the
+/// `(channel, id)` pair.
+pub fn disconnect(
+  state : State,
+  channel : @interop.ChannelId,
+) -> (@cmd.Cmd, State) {
+  let commands : Array[@cmd.Cmd] = [term_host.clear_pending(channel)]
+  let retired_keys : Array[Int] = []
+  for tab in state.tabs {
+    if tab.workspace.channel() == channel {
+      retired_keys.push(tab.key)
+      commands.push(dispose_tab(tab.key))
+    }
+  }
+  let shown = match state.shown {
+    Some(key) if retired_keys.contains(key) => None
+    shown => shown
+  }
+  (
+    @cmd.batch(commands),
+    {
+      ..state,
+      tabs: state.tabs.filter(tab => tab.workspace.channel() != channel),
+      active: state.active.filter(entry => entry.0.channel() != channel),
+      shown,
+      exited_before_open: state.exited_before_open.filter(owner => {
+        owner.0 != channel
+      }),
+    },
+  )
 }
 
 ///|
@@ -265,7 +342,7 @@ pub fn sync(
   state : State,
   ctx : Ctx,
 ) -> (State, @cmd.Cmd) {
-  if state.open && state.visible_tabs(ctx).is_empty() {
+  if state.open && ctx.connected && state.visible_tabs(ctx).is_empty() {
     let (cmd, state) = open_new_tab(dispatch, state, ctx)
     let theme_changed = state.synced_dark_mode != Some(ctx.dark_mode)
     let state = { ..state, synced_dark_mode: Some(ctx.dark_mode) }

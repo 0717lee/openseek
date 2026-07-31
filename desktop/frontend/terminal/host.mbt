@@ -28,7 +28,7 @@ priv struct TermHost {
   entries : Map[Int, TermEntry]
   /// Output that arrived before `terminal_open` identified its tab:
   /// `(sequence, base64_data)`.
-  pending : Map[Int, Array[(Int, String)]]
+  pending : Map[(@interop.ChannelId, Int), Array[(Int, String)]]
   mut resize_wired : Bool
 }
 
@@ -252,6 +252,7 @@ fn apply_theme(dark_mode : Bool) -> @cmd.Cmd {
 /// stalls the session.
 fn write_to_tab(
   dispatch : @cmd.Emit[Msg],
+  channel : @interop.ChannelId,
   key : Int,
   id : Int,
   sequence : Int,
@@ -260,11 +261,11 @@ fn write_to_tab(
   @cmd.custom_cmd(_scheduler => {
     guard term_host.entries.get(key) is Some(entry) &&
       xterm_module() is Some(module_) else {
-      _scheduler.add(dispatch(OutputRendered(id~, sequence~)))
+      _scheduler.add(dispatch(OutputRendered(channel~, id~, sequence~)))
       return
     }
     let done = (_ : @js.Value) => {
-      _scheduler.add(dispatch(OutputRendered(id~, sequence~)))
+      _scheduler.add(dispatch(OutputRendered(channel~, id~, sequence~)))
     }
     let _ : @js.Value = module_.apply_with_string("writeBase64", [
       entry.term,
@@ -276,11 +277,17 @@ fn write_to_tab(
 
 ///|
 /// Stash an output chunk whose session id no tab has claimed yet.
-fn buffer_pending(id : Int, sequence : Int, data : String) -> @cmd.Cmd {
+fn buffer_pending(
+  channel : @interop.ChannelId,
+  id : Int,
+  sequence : Int,
+  data : String,
+) -> @cmd.Cmd {
   @cmd.custom_cmd(_scheduler => {
-    let chunks = term_host.pending.get(id).unwrap_or([])
+    let owner = (channel, id)
+    let chunks = term_host.pending.get(owner).unwrap_or([])
     chunks.push((sequence, data))
-    term_host.pending[id] = chunks
+    term_host.pending[owner] = chunks
   })
 }
 
@@ -288,12 +295,18 @@ fn buffer_pending(id : Int, sequence : Int, data : String) -> @cmd.Cmd {
 /// Flush chunks buffered for `id` into the tab that just claimed it. Every
 /// flushed chunk goes through the normal write path, so each one is
 /// acknowledged as it renders.
-fn flush_pending(dispatch : @cmd.Emit[Msg], key : Int, id : Int) -> @cmd.Cmd {
+fn flush_pending(
+  dispatch : @cmd.Emit[Msg],
+  channel : @interop.ChannelId,
+  key : Int,
+  id : Int,
+) -> @cmd.Cmd {
   @cmd.custom_cmd(scheduler => {
-    guard term_host.pending.get(id) is Some(chunks) else { return }
-    term_host.pending.remove(id)
+    let owner = (channel, id)
+    guard term_host.pending.get(owner) is Some(chunks) else { return }
+    term_host.pending.remove(owner)
     for chunk in chunks {
-      scheduler.add(write_to_tab(dispatch, key, id, chunk.0, chunk.1))
+      scheduler.add(write_to_tab(dispatch, channel, key, id, chunk.0, chunk.1))
     }
   })
 }
@@ -301,12 +314,38 @@ fn flush_pending(dispatch : @cmd.Emit[Msg], key : Int, id : Int) -> @cmd.Cmd {
 ///|
 /// Drop any buffer for a session that ended unclaimed, acknowledging the
 /// bytes so the host's window is released before the session's teardown.
-fn drop_pending(dispatch : @cmd.Emit[Msg], id : Int) -> @cmd.Cmd {
+fn drop_pending(
+  dispatch : @cmd.Emit[Msg],
+  channel : @interop.ChannelId,
+  id : Int,
+) -> @cmd.Cmd {
   @cmd.custom_cmd(scheduler => {
-    guard term_host.pending.get(id) is Some(chunks) else { return }
-    term_host.pending.remove(id)
+    let owner = (channel, id)
+    guard term_host.pending.get(owner) is Some(chunks) else { return }
+    term_host.pending.remove(owner)
     for chunk in chunks {
-      scheduler.add(dispatch(OutputRendered(id~, sequence=chunk.0)))
+      scheduler.add(dispatch(OutputRendered(channel~, id~, sequence=chunk.0)))
+    }
+  })
+}
+
+///|
+/// Forget pre-open output owned by a dead WebSocket. Its host-side PTYs and
+/// flow-control window disappeared with that connection, so these chunks need
+/// neither rendering nor acknowledgement on the replacement connection.
+fn TermHost::clear_pending(
+  self : TermHost,
+  channel : @interop.ChannelId,
+) -> @cmd.Cmd {
+  @cmd.custom_cmd(_scheduler => {
+    let owners : Array[(@interop.ChannelId, Int)] = []
+    for owner, _ in self.pending {
+      if owner.0 == channel {
+        owners.push(owner)
+      }
+    }
+    for owner in owners {
+      self.pending.remove(owner)
     }
   })
 }

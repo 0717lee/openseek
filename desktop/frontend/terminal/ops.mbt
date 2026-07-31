@@ -1,5 +1,4 @@
-// The desktop panel's bridge calls, routed by tab key. The panel is only
-// rendered in the native window, so every request targets the Local channel.
+// The terminal panel's bridge calls, routed by the channel that owns each tab.
 // `terminal.open` folds its
 // reply back into the update loop; the steady-state ops are fire-and-forget
 // — input failures surface as `InputFailed` (an error toast),
@@ -13,6 +12,7 @@ const AckRetryDelayMs = 100
 ///|
 fn open_session(
   dispatch : @cmd.Emit[Msg],
+  channel : @interop.ChannelId,
   key : Int,
   session : String,
   workspace : @pathx.Absolute?,
@@ -27,7 +27,7 @@ fn open_session(
       payload["cols"] = cols
       payload["rows"] = rows
       let reply = @interop.bridge_request(
-        @interop.ChannelId::Local,
+        channel,
         "terminal.open",
         payload.to_value(),
       ) catch {
@@ -47,7 +47,7 @@ fn open_session(
         return
       }
       let id : Int = value.cast()
-      scheduler.add(dispatch(Opened(key~, id~)))
+      scheduler.add(dispatch(Opened(channel~, key~, id~)))
     })
   })
 }
@@ -55,6 +55,7 @@ fn open_session(
 ///|
 fn send_input(
   dispatch : @cmd.Emit[Msg],
+  channel : @interop.ChannelId,
   key : Int,
   id : Int,
   data : String,
@@ -70,7 +71,7 @@ fn send_input(
         payload["data"] = data
       }
       let _ : @js.Value = @interop.bridge_request(
-        @interop.ChannelId::Local,
+        channel,
         "terminal.input",
         payload.to_value(),
       ) catch {
@@ -88,7 +89,12 @@ fn send_input(
 }
 
 ///|
-fn send_resize(id : Int, cols : Int, rows : Int) -> @cmd.Cmd {
+fn send_resize(
+  channel : @interop.ChannelId,
+  id : Int,
+  cols : Int,
+  rows : Int,
+) -> @cmd.Cmd {
   @cmd.custom_cmd(_scheduler => {
     @js.async_run(() => {
       let payload = @js.Object::new()
@@ -96,7 +102,7 @@ fn send_resize(id : Int, cols : Int, rows : Int) -> @cmd.Cmd {
       payload["cols"] = cols
       payload["rows"] = rows
       let _ : @js.Value = @interop.bridge_request(
-        @interop.ChannelId::Local,
+        channel,
         "terminal.resize",
         payload.to_value(),
       ) catch {
@@ -107,9 +113,11 @@ fn send_resize(id : Int, cols : Int, rows : Int) -> @cmd.Cmd {
 }
 
 ///|
-/// One output acknowledgement. Retrying the same session/sequence pair is
-/// safe because the host removes each outstanding sequence at most once.
+/// One output acknowledgement. Within its owning connection, retrying the
+/// same session/sequence pair is safe because the host removes each
+/// outstanding sequence at most once.
 priv struct TerminalAck {
+  channel : @interop.ChannelId
   id : Int
   sequence : Int
 }
@@ -122,14 +130,18 @@ fn TerminalAck::send(self : TerminalAck) -> @cmd.Cmd {
       payload["id"] = self.id
       payload["sequence"] = self.sequence
       let _ : @js.Value = @interop.bridge_request(
-        @interop.ChannelId::Local,
+        self.channel,
         "terminal.ack",
         payload.to_value(),
       ) catch {
         _ => {
-          // A rejection can mean the host applied the ack but its response was
-          // lost. Retry the same idempotent sequence after a short delay.
-          _scheduler.add(@cmd.delay(self.send(), AckRetryDelayMs))
+          // The in-process bridge keeps one terminal-id namespace, so a lost
+          // reply is safe to retry there. A remote WebSocket failure ends the
+          // namespace together with all of its PTYs; replaying this id after
+          // reconnect could acknowledge an unrelated new terminal.
+          if self.channel is @interop.ChannelId::Local {
+            _scheduler.add(@cmd.delay(self.send(), AckRetryDelayMs))
+          }
           return
         }
       }
@@ -138,13 +150,13 @@ fn TerminalAck::send(self : TerminalAck) -> @cmd.Cmd {
 }
 
 ///|
-fn send_close(id : Int) -> @cmd.Cmd {
+fn send_close(channel : @interop.ChannelId, id : Int) -> @cmd.Cmd {
   @cmd.custom_cmd(_scheduler => {
     @js.async_run(() => {
       let payload = @js.Object::new()
       payload["id"] = id
       let _ : @js.Value = @interop.bridge_request(
-        @interop.ChannelId::Local,
+        channel,
         "terminal.close",
         payload.to_value(),
       ) catch {

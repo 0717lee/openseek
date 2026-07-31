@@ -2563,23 +2563,25 @@ fn topbar_view(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
   // browser the launched app would appear on a screen the user is not at.
   if model.is_desktop {
     items.push(launcher_view(dispatch, model))
-    items.push(
-      @html.button(
-        class=if model.terminal_panel.open {
-          "panel-toggle active"
-        } else {
-          "panel-toggle"
-        },
-        title=if model.terminal_panel.open {
-          "Hide terminal"
-        } else {
-          "Show terminal"
-        },
-        on_click=dispatch(Terminal(ToggleTerminal)),
-        icon(icon_terminal),
-      ),
-    )
   }
+  // A browser terminal is rendered locally but its PTY lives on the focused
+  // remote device, reached through that device's WebSocket channel.
+  items.push(
+    @html.button(
+      class=if model.terminal_panel.open {
+        "panel-toggle active"
+      } else {
+        "panel-toggle"
+      },
+      title=if model.terminal_panel.open {
+        "Hide terminal"
+      } else {
+        "Show terminal"
+      },
+      on_click=dispatch(Terminal(ToggleTerminal)),
+      icon(icon_terminal),
+    ),
+  )
   // Rightmost: the toggle for the whole right-hand panel — only while the
   // panel is closed; an open panel carries the toggle at the right edge of
   // its breadcrumb instead, keeping this bar uncrowded. Both spots hug the
@@ -2710,7 +2712,7 @@ fn view(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
   } else {
     "content"
   }
-  if model.is_desktop && model.terminal_panel.open {
+  if model.terminal_panel.open {
     content_class = content_class + " terminal-open"
   }
   let children : Array[@html.Html] = [

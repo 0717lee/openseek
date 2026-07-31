@@ -811,14 +811,22 @@ fn file_ctx(model : Model) -> @fileeditor.Ctx {
 }
 
 ///|
-/// The terminal package's view of the active local conversation. The panel is
-/// only rendered in the desktop window, whose focused channel is Local.
+/// The terminal package's view of the active conversation. The conversation's
+/// device owns every PTY opened from this context; a remote connection is
+/// considered unavailable from its first socket loss because its old PTYs are
+/// torn down at that boundary, even before the page escalates to BridgeLost.
 fn terminal_ctx(model : Model) -> @terminal.Ctx {
   let conv = model.active()
+  let connected = match model.device_state(conv.device) {
+    Some(dev) => dev.bridge is Connected && dev.reconnect_failures == 0
+    None => false
+  }
   {
+    channel: conv.device,
     session: conv.session_id,
     workspace: conv.workspace,
     dark_mode: model.dark_mode,
+    connected,
   }
 }
 
@@ -2012,6 +2020,23 @@ fn update_msg(
       (cmd, { ..model, file_panel: panel })
     }
     Terminal(msg) => {
+      // Host-originated replies and notifications can already be queued when
+      // a WebSocket closes. Their terminal ids belong to the dead connection,
+      // not to a later connection for the same relay device, so ignore them
+      // from the first loss onward. User actions carry a tab key instead and
+      // continue through the terminal state machine normally.
+      let owner_live = match msg {
+        Opened(channel~, key=_, id=_)
+        | Output(channel~, id=_, sequence=_, data=_)
+        | OutputRendered(channel~, id=_, sequence=_)
+        | SessionExited(channel~, id=_, code=_) =>
+          match model.device_state(channel) {
+            Some(dev) => dev.bridge is Connected && dev.reconnect_failures == 0
+            None => false
+          }
+        _ => true
+      }
+      guard owner_live else { return (@cmd.none, model) }
       let (cmd, panel) = @terminal.update(
         dispatch.map(msg => Terminal(msg)),
         msg,
@@ -2235,8 +2260,19 @@ fn update_device_msg(
       guard channel == model.focused else { return (@cmd.none, model) }
       (@cmd.none, { ..model, host_wsl: wsl })
     }
-    BridgeUnavailable(message) =>
-      (@cmd.none, model.replace_device({ ..dev, bridge: BridgeLost(message) }))
+    BridgeUnavailable(message) => {
+      let (terminal_cmd, terminal_panel) = @terminal.disconnect(
+        model.terminal_panel,
+        channel,
+      )
+      (
+        terminal_cmd,
+        {
+          ..model.replace_device({ ..dev, bridge: BridgeLost(message) }),
+          terminal_panel,
+        },
+      )
+    }
     ChannelDown(websocket_epoch~) => {
       // A close callback may already be queued when sign-out retires a
       // device. If the same relay id is later re-added, it owns a new epoch
@@ -2255,12 +2291,26 @@ fn update_device_msg(
       } else {
         dev.bridge
       }
+      // The whole HostConnection owns the PTY task group. Its first socket
+      // loss therefore invalidates every terminal id immediately, even
+      // though the rest of the UI tolerates two short reconnect failures
+      // before presenting BridgeLost.
+      let (terminal_cmd, terminal_panel) = @terminal.disconnect(
+        model.terminal_panel,
+        channel,
+      )
       (
-        @cmd.delay(
-          dispatch(FromDevice(channel, ReconnectDue(websocket_epoch~))),
-          reconnect_delay(failures),
-        ),
-        model.replace_device({ ..dev, bridge, reconnect_failures: failures }),
+        @cmd.batch([
+          @cmd.delay(
+            dispatch(FromDevice(channel, ReconnectDue(websocket_epoch~))),
+            reconnect_delay(failures),
+          ),
+          terminal_cmd,
+        ]),
+        {
+          ..model.replace_device({ ..dev, bridge, reconnect_failures: failures }),
+          terminal_panel,
+        },
       )
     }
     ReconnectDue(websocket_epoch~) => {
@@ -5033,12 +5083,30 @@ test "socket losses mark the bridge lost at the third consecutive drop" {
     ..initial_model(),
     devices: [{ ..empty_device_state(channel), bridge: Connected }],
     focused: channel,
+    terminal_panel: {
+      ..@terminal.State::empty(),
+      next_key: 2,
+      tabs: [
+        {
+          key: 1,
+          id: Some(1),
+          workspace: @terminal.Project(channel, "/remote"),
+          workspace_label: "remote",
+          session: "remote-session",
+          workspace_path: Some(@pathx.Absolute("/remote")),
+          status: @terminal.TabRunning,
+        },
+      ],
+    },
   }
   let (_, one) = update(
     dispatch,
     FromDevice(channel, ChannelDown(websocket_epoch=0)),
     model,
   )
+  // The first socket loss destroys this HostConnection's PTYs even though
+  // the general page does not escalate to BridgeLost until the third loss.
+  assert_true(one.terminal_panel.tabs.is_empty())
   let (_, two) = update(
     dispatch,
     FromDevice(channel, ChannelDown(websocket_epoch=0)),

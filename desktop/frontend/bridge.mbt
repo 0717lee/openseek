@@ -43,21 +43,10 @@ fn bridge_msg(
         FromDevice(channel, FilePanel(msg))
       })
     "fs.changed" => Some(FromDevice(channel, FilePanel(FsChanged)))
-    // The integrated terminal is a native-window feature. Ignore terminal
-    // traffic from remote channels even though the shared host catalog can
-    // serve those methods.
     "terminal.output" =>
-      if channel is Local {
-        terminal_output_msg(payload).map(msg => Terminal(msg))
-      } else {
-        None
-      }
+      terminal_output_msg(channel, payload).map(msg => Terminal(msg))
     "terminal.exit" =>
-      if channel is Local {
-        terminal_exit_msg(payload).map(msg => Terminal(msg))
-      } else {
-        None
-      }
+      terminal_exit_msg(channel, payload).map(msg => Terminal(msg))
     _ => device_msg(method_, payload).map(msg => FromDevice(channel, msg))
   }
 }
@@ -232,13 +221,18 @@ test "file-panel pushes carry their channel; auth.changed is Local-only" {
 }
 
 ///|
-test "terminal pushes are accepted only from the local desktop host" {
+test "terminal pushes retain the channel that owns their host session" {
   let payload : Map[String, Json] = { "id": 1, "sequence": 2, "data": "YQ==" }
   assert_true(
     bridge_msg(Local, "terminal.output", payload)
-    is Some(Terminal(Output(id=1, sequence=2, data="YQ=="))),
+    is Some(Terminal(Output(channel=Local, id=1, sequence=2, data="YQ=="))),
   )
-  assert_true(bridge_msg(Remote("d1"), "terminal.output", payload) is None)
+  assert_true(
+    bridge_msg(Remote("d1"), "terminal.output", payload)
+    is Some(
+      Terminal(Output(channel=Remote("d1"), id=1, sequence=2, data="YQ=="))
+    ),
+  )
 }
 
 ///|
@@ -651,22 +645,28 @@ fn diagnostics_msg(
 ///|
 /// Decode one raw PTY chunk. `data` remains base64 until xterm writes it, and
 /// `sequence` is echoed by the idempotent flow-control acknowledgement.
-fn terminal_output_msg(payload : Map[String, Json]) -> @terminal.Msg? {
+fn terminal_output_msg(
+  channel : @interop.ChannelId,
+  payload : Map[String, Json],
+) -> @terminal.Msg? {
   guard @jsonx.json_int(payload, "id") is Some(id) &&
     @jsonx.json_int(payload, "sequence") is Some(sequence) &&
     @jsonx.json_text(payload, "data") is Some(data) else {
     return None
   }
-  Some(Output(id~, sequence~, data~))
+  Some(Output(channel~, id~, sequence~, data~))
 }
 
 ///|
-fn terminal_exit_msg(payload : Map[String, Json]) -> @terminal.Msg? {
+fn terminal_exit_msg(
+  channel : @interop.ChannelId,
+  payload : Map[String, Json],
+) -> @terminal.Msg? {
   guard @jsonx.json_int(payload, "id") is Some(id) &&
     @jsonx.json_int(payload, "code") is Some(code) else {
     return None
   }
-  Some(SessionExited(id~, code~))
+  Some(SessionExited(channel~, id~, code~))
 }
 
 ///|

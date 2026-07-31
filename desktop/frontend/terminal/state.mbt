@@ -1,17 +1,26 @@
 // The terminal panel's public state machine: a set of terminal tabs, each
 // backed by one PTY session on the host and one emulator instance in the
-// DOM (see host.mbt). Tabs are grouped by workspace — the panel shows only
-// the active conversation's workspace group, and every group's shells stay
-// alive while the user looks elsewhere.
+// DOM (see host.mbt). Tabs are grouped by device channel and workspace — the
+// panel shows only the active conversation's group, and every group's shells
+// stay alive while the user looks elsewhere.
 
 ///|
-/// Which workspace a tab belongs to. Conversations in the same registered
-/// project directory share one group; a scratch conversation's workspace
-/// directory is its own, so its group is keyed by the conversation.
+/// Which device/workspace a tab belongs to. Host-assigned terminal ids are
+/// scoped to one bridge connection, so the channel is part of the identity:
+/// two devices can both name their first terminal `1` without sharing tabs.
+/// Conversations in the same registered project directory on one device
+/// share a group; a scratch group is keyed by its conversation.
 pub(all) enum WorkspaceKey {
-  Project(String)
-  Scratch(String)
+  Project(@interop.ChannelId, String)
+  Scratch(@interop.ChannelId, String)
 } derive(Eq)
+
+///|
+fn WorkspaceKey::channel(self : WorkspaceKey) -> @interop.ChannelId {
+  match self {
+    Project(channel, _) | Scratch(channel, _) => channel
+  }
+}
 
 ///|
 pub(all) enum TabStatus {
@@ -51,10 +60,11 @@ pub(all) struct State {
   /// when a conversation switch must re-aim the display — the switch itself
   /// produces no terminal message.
   shown : Int?
-  /// Session ids whose exit event beat their `terminal_open` reply. The reply
-  /// is the first event that identifies the opening tab, so it consumes the id
-  /// and retires that tab instead of reviving an already-dead session.
-  exited_before_open : Array[Int]
+  /// Channel/session ids whose exit event beat their `terminal_open` reply.
+  /// The reply is the first event that identifies the opening tab, so it
+  /// consumes the pair and retires that tab instead of reviving an
+  /// already-dead session.
+  exited_before_open : Array[(@interop.ChannelId, Int)]
   /// The color scheme last applied to every mounted emulator. Keeping this in
   /// model state lets `sync` refresh existing xterm instances exactly once
   /// when the application switches between light and dark mode.
@@ -78,17 +88,23 @@ pub fn State::empty() -> State {
 /// The terminal package's view of the active conversation, recomputed per
 /// dispatch by the main package (mirrors `@fileeditor.Ctx`).
 pub(all) struct Ctx {
+  /// The host connection that owns every terminal opened from this context.
+  channel : @interop.ChannelId
   session : String
   workspace : @pathx.Absolute?
   dark_mode : Bool
+  /// False from the first WebSocket loss until that channel reports ready
+  /// again. The old connection's PTYs are already gone, so `sync` must not
+  /// create their replacements on the dead transport.
+  connected : Bool
 }
 
 ///|
 /// The workspace group the active conversation belongs to.
 fn workspace_key(ctx : Ctx) -> WorkspaceKey {
   match ctx.workspace {
-    Some(workspace) => Project(workspace.0)
-    None => Scratch(ctx.session)
+    Some(workspace) => Project(ctx.channel, workspace.0)
+    None => Scratch(ctx.channel, ctx.session)
   }
 }
 
@@ -129,9 +145,15 @@ fn State::tab_by_key(self : State, key : Int) -> Tab? {
 }
 
 ///|
-fn State::tab_by_id(self : State, id : Int) -> Tab? {
+fn State::tab_by_id(
+  self : State,
+  channel : @interop.ChannelId,
+  id : Int,
+) -> Tab? {
   for tab in self.tabs {
-    if tab.id is Some(tab_id) && tab_id == id {
+    if tab.workspace.channel() == channel &&
+      tab.id is Some(tab_id) &&
+      tab_id == id {
       return Some(tab)
     }
   }
@@ -176,8 +198,9 @@ pub(all) enum Msg {
   TabClosed(key~ : Int)
   /// The tab's emulator is mounted, fitted, and reports its grid size.
   EmulatorReady(key~ : Int, cols~ : Int, rows~ : Int)
-  /// `terminal_open` replied for the tab.
-  Opened(key~ : Int, id~ : Int)
+  /// `terminal_open` replied for the tab. The channel is retained because the
+  /// tab may have been closed or the UI may have switched devices meanwhile.
+  Opened(channel~ : @interop.ChannelId, key~ : Int, id~ : Int)
   OpenFailed(key~ : Int, message~ : String)
   /// Keystrokes from one tab's emulator.
   UserInput(key~ : Int, data~ : String)
@@ -193,9 +216,14 @@ pub(all) enum Msg {
   ViewportResized(key~ : Int, cols~ : Int, rows~ : Int)
   /// `terminal_output` event: base64 of raw PTY bytes plus the host-assigned
   /// sequence echoed by the acknowledgement.
-  Output(id~ : Int, sequence~ : Int, data~ : String)
+  Output(
+    channel~ : @interop.ChannelId,
+    id~ : Int,
+    sequence~ : Int,
+    data~ : String
+  )
   /// An emulator finished rendering a chunk; flow-control ack.
-  OutputRendered(id~ : Int, sequence~ : Int)
+  OutputRendered(channel~ : @interop.ChannelId, id~ : Int, sequence~ : Int)
   /// `terminal_exit` event: the shell ended, so its tab retires.
-  SessionExited(id~ : Int, code~ : Int)
+  SessionExited(channel~ : @interop.ChannelId, id~ : Int, code~ : Int)
 }

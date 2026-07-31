@@ -26,8 +26,9 @@ it:
 - `RelayActor` owns the control connection and creates one `WsClientActor`
   for each relayed client.
 - Every Proton or WebSocket client owns a separate `HostConnection`, whose
-  `FsWatchActor` serves only that client's `fs.watch` state and sends
-  `fs.changed` only to that client.
+  `FsWatchActor` serves only that client's `fs.watch` state and whose
+  terminal state owns only that client's PTYs; filesystem and terminal
+  notifications return only to the owning client.
 - `DesktopBridgeActor` owns the current Proton page attachment and forwards
   the shared catalog notifications to it.
 
@@ -426,6 +427,37 @@ Notification:
 | method | params |
 |---|---|
 | `fs.changed` | `{root}` — coarse by design; the client re-stats its open tabs and re-lists expanded directories |
+
+### terminal.* — connection-scoped PTYs
+
+Each client connection owns an independent set of PTYs. Terminal ids are
+unique only within that connection, output returns only to that connection,
+and closing the desktop page or browser WebSocket tears down all of its PTYs.
+A reconnect therefore starts with no terminal sessions; clients must discard
+their old ids and open replacements after `BridgeReady`.
+
+PTY bytes stay byte-transparent over JSON. Output is always base64. Text input
+uses `data`; byte-oriented xterm input uses `data_base64`, and exactly one of
+the two fields must be present. Each output chunk occupies the host's bounded
+flow-control window until the client acknowledges its `sequence`; retrying the
+same acknowledgement within that connection is safe. An acknowledgement from
+a dead connection must not be replayed after reconnect because the new
+connection has an independent terminal-id namespace.
+
+| method | params | result |
+|---|---|---|
+| `terminal.open` | `{session, workspace?, cols, rows}` — resolves the conversation's workspace on the host and creates it if this scratch session has not run yet | `{id}` |
+| `terminal.input` | `{id, data}` \| `{id, data_base64}` | `{}` |
+| `terminal.resize` | `{id, cols, rows}` | `{}` |
+| `terminal.ack` | `{id, sequence}` | `{}` |
+| `terminal.close` | `{id}` | `{}` |
+
+Notifications:
+
+| method | params |
+|---|---|
+| `terminal.output` | `{id, sequence, data}` — `data` is base64 of the raw PTY bytes |
+| `terminal.exit` | `{id, code}` |
 
 ### lsp.*
 
