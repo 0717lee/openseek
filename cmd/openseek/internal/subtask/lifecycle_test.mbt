@@ -157,13 +157,16 @@ async test "an empty worker tree resolves to no_changes and releases the slice" 
     let captured = @subtask.capture(provisioned.geometry, provisioned.entry)
     assert_true(captured.entry.state is NoChanges)
     assert_eq(captured.defects, ([] : Array[String]))
-    // The reservation is released: the same slice provisions again.
-    let _ = must_provision(
+    // Cleanup is immediate (terminal entries are undiscoverable), so the
+    // SAME name and slice provision again — with a natural trailing-slash
+    // spelling, which normalization must accept.
+    let again = must_provision(
       repo,
-      name="retry",
-      allowed_paths=["lib"],
+      name="noop",
+      allowed_paths=["lib/"],
       nonce="n2",
     )
+    assert_eq(again.entry.allowed_paths, ["lib"])
   })
 }
 
@@ -195,9 +198,27 @@ async test "a conflicting merge hands off, continues after resolution" {
     assert_true(conflicted.entry.state is Conflicted)
     assert_true(conflicted.detail[0].contains("lib/a.txt"))
     // Resolve the markers (the parent model's job, via file tools) and
-    // stage the resolution — then the controller commits.
+    // stage the resolution — then the controller commits. A stray staged
+    // file outside the slice + conflict set refuses the continue first.
     @vfs.write_text("\{repo}/lib", "a.txt", "MERGED\n")
-    match @subtask.git_require(["add", "lib/a.txt"], cwd=repo) {
+    @vfs.write_text("\{repo}/other", "stray.txt", "stray\n")
+    for args in [["add", "lib/a.txt"], ["add", "other/stray.txt"]] {
+      match @subtask.git_require(args, cwd=repo) {
+        Ok(_) => ()
+        Err(reason) => fail(reason)
+      }
+    }
+    let strayed = @subtask.integrate_continue(
+      provisioned.geometry,
+      conflicted.entry,
+    )
+    assert_eq(strayed.result, "refused")
+    assert_true(strayed.detail[0].contains("other/stray.txt"))
+    match
+      @subtask.git_require(
+        ["restore", "--staged", "--worktree", "other/stray.txt"],
+        cwd=repo,
+      ) {
       Ok(_) => ()
       Err(reason) => fail(reason)
     }
@@ -243,6 +264,7 @@ async test "integrate refuses a dirty tracked origin; abort restores state" {
       provisioned.geometry,
       conflicted.entry,
     )
+    assert_eq(aborted.result, "aborted")
     assert_true(aborted.entry.state is Committed)
     assert_eq(@fs.read_file("\{repo}/lib/a.txt").text(), "ORIGIN\n")
     // The branch and worktree survive an abort for a later retry.

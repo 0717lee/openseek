@@ -2,10 +2,10 @@
 /// Capture: after the worker child exits, decide from GIT EVIDENCE — never
 /// the child's own report — whether its changes are mergeable, and if so
 /// commit them on the subtask branch. The sequence pins an immutable
-/// snapshot: validate the working tree, stage, REVALIDATE the staged tree
-/// (a straggling process may have raced the first pass), commit with hooks
-/// and signing neutralized, then verify the commit's parent and tree are
-/// exactly what was validated.
+/// snapshot FIRST: stage, `write-tree`, validate THAT tree object (a
+/// straggling worker process racing the index can no longer smuggle
+/// unvalidated paths), then commit exactly the validated tree via plumbing
+/// (`commit-tree` + `update-ref` — no hooks, no index re-read).
 pub struct CaptureOutcome {
   entry : SubtaskEntry
   /// Human-facing evidence lines (bounded by the caller when displayed).
@@ -47,9 +47,17 @@ pub async fn capture(
   }
   let changes = parse_status_z(status.output)
   if changes.is_empty() {
+    // Terminal means undiscoverable by lifecycle actions, so the worktree
+    // and branch must go NOW or they leak (and block reusing the name).
+    @fs.rmdir(entry.worker_root, recursive=true) catch {
+      error if @async.is_being_cancelled() => raise error
+      _ => ()
+    }
+    let _ = git_run(["worktree", "prune"], cwd=geometry.origin_root)
+    let _ = git_run(["branch", "-D", entry.branch], cwd=geometry.origin_root)
     let entry = { ..entry, state: NoChanges }
     let _ = save_entry(geometry.common_git_dir, entry)
-    evidence.push("no changes in the worker tree")
+    evidence.push("no changes in the worker tree; worktree and branch removed")
     return { entry, evidence, defects }
   }
   evidence.push("\{changes.length()} changed path(s)")
@@ -64,7 +72,7 @@ pub async fn capture(
     let _ = save_entry(geometry.common_git_dir, entry)
     return { entry, evidence, defects }
   }
-  // Stage and revalidate the STAGED picture against the same contract.
+  // Stage, pin the immutable tree, and validate the TREE OBJECT itself.
   match git_require(["add", "-A"], cwd=worker) {
     Ok(_) => ()
     Err(reason) => {
@@ -72,12 +80,19 @@ pub async fn capture(
       return { entry, evidence, defects }
     }
   }
+  let tree_oid = match git_require(["write-tree"], cwd=worker) {
+    Ok(output) => output.trim().to_owned()
+    Err(reason) => {
+      defects.push(reason)
+      return { entry, evidence, defects }
+    }
+  }
   let staged = git_run(
-    ["diff", "--cached", "--name-status", "-z", entry.base_oid],
+    ["diff", "--name-status", "-z", entry.base_oid, tree_oid],
     cwd=worker,
   )
   guard staged.exit_code == 0 else {
-    defects.push("git diff --cached failed: \{staged.output.trim()}")
+    defects.push("git diff (tree) failed: \{staged.output.trim()}")
     return { entry, evidence, defects }
   }
   let staged_changes = parse_diff_name_status_z(staged.output)
@@ -87,10 +102,9 @@ pub async fn capture(
       "staged changes escaped scope between validation and staging: \{staged_violations.join(", ")}",
     )
   }
-  match
-    git_run(["diff", "--cached", "--raw", "-z", entry.base_oid], cwd=worker) {
+  match git_run(["diff", "--raw", "-z", entry.base_oid, tree_oid], cwd=worker) {
     raw if raw.exit_code == 0 => {
-      let links = new_gitlinks_in_raw_z(raw.output)
+      let links = gitlink_introductions_in_raw_z(raw.output)
       if !links.is_empty() {
         defects.push(
           "the worker staged embedded repositories as gitlinks: \{links.join(", ")}",
@@ -104,8 +118,20 @@ pub async fn capture(
     let _ = save_entry(geometry.common_git_dir, entry)
     return { entry, evidence, defects }
   }
-  // Pin the exact tree being committed, commit, then verify parent+tree.
-  let tree_oid = match git_require(["write-tree"], cwd=worker) {
+  // Commit EXACTLY the validated tree; then move the branch ref to it,
+  // guarded by the expected old value (the pinned base).
+  let commit_oid = match
+    git_require(
+      [
+        "commit-tree",
+        tree_oid,
+        "-p",
+        entry.base_oid,
+        "-m",
+        "subtask \{entry.name}: worker changes",
+      ],
+      cwd=worker,
+    ) {
     Ok(output) => output.trim().to_owned()
     Err(reason) => {
       defects.push(reason)
@@ -114,15 +140,7 @@ pub async fn capture(
   }
   match
     git_require(
-      [
-        "-c",
-        "core.hooksPath=/dev/null",
-        "commit",
-        "--no-verify",
-        "--no-gpg-sign",
-        "-m",
-        "subtask \{entry.name}: worker changes",
-      ],
+      ["update-ref", "refs/heads/\{entry.branch}", commit_oid, entry.base_oid],
       cwd=worker,
     ) {
     Ok(_) => ()
@@ -130,36 +148,6 @@ pub async fn capture(
       defects.push(reason)
       return { entry, evidence, defects }
     }
-  }
-  let commit_oid = match git_require(["rev-parse", "HEAD"], cwd=worker) {
-    Ok(output) => output.trim().to_owned()
-    Err(reason) => {
-      defects.push(reason)
-      return { entry, evidence, defects }
-    }
-  }
-  match git_require(["rev-parse", "HEAD^{tree}", "HEAD^"], cwd=worker) {
-    Ok(output) => {
-      let lines = output
-        .trim()
-        .to_owned()
-        .split("\n")
-        .map(l => l.to_owned())
-        .collect()
-      if lines.length() != 2 ||
-        lines[0] != tree_oid ||
-        lines[1] != entry.base_oid {
-        defects.push(
-          "the commit does not match the validated snapshot (tree/parent drifted)",
-        )
-      }
-    }
-    Err(reason) => defects.push(reason)
-  }
-  if !defects.is_empty() {
-    let entry = { ..entry, state: Captured }
-    let _ = save_entry(geometry.common_git_dir, entry)
-    return { entry, evidence, defects }
   }
   let diffstat = git_run(
     ["diff", "--stat", entry.base_oid, commit_oid],

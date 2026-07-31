@@ -42,9 +42,8 @@ pub async fn integrate(
   let origin = geometry.origin_root
   let mutex = repo_mutex(geometry.common_git_dir)
   mutex.acquire()
-  let outcome = integrate_locked(geometry, origin, entry)
-  mutex.release()
-  outcome
+  defer mutex.release()
+  integrate_locked(geometry, origin, entry)
 }
 
 ///|
@@ -143,7 +142,7 @@ async fn integrate_locked(
           files.push(change.path)
         }
       }
-      let entry = { ..entry, state: Conflicted }
+      let entry = { ..entry, state: Conflicted, conflict_paths: files.copy() }
       let _ = save_entry(geometry.common_git_dir, entry)
       return {
         entry,
@@ -205,9 +204,8 @@ pub async fn integrate_continue(
   let origin = geometry.origin_root
   let mutex = repo_mutex(geometry.common_git_dir)
   mutex.acquire()
-  let outcome = integrate_continue_locked(geometry, origin, entry)
-  mutex.release()
-  outcome
+  defer mutex.release()
+  integrate_continue_locked(geometry, origin, entry)
 }
 
 ///|
@@ -257,6 +255,34 @@ async fn integrate_continue_locked(
       entry,
       result: "refused",
       detail: ["unresolved conflict entries remain; resolve them all first"],
+    }
+  }
+  // The staged resolution may only touch the slice's scope plus the
+  // recorded conflict set — a stray `git add -A` must not smuggle
+  // unrelated changes into the merge commit.
+  let staged = git_run(
+    ["diff", "--cached", "--name-status", "-z", "HEAD"],
+    cwd=origin,
+  )
+  guard staged.exit_code == 0 else {
+    return {
+      entry,
+      result: "refused",
+      detail: ["git diff --cached failed: \{staged.output.trim()}"],
+    }
+  }
+  let permitted = entry.allowed_paths + entry.conflict_paths
+  let strays = scope_violations(
+    parse_diff_name_status_z(staged.output),
+    permitted,
+  )
+  if !strays.is_empty() {
+    return {
+      entry,
+      result: "refused",
+      detail: [
+        "the staged resolution touches paths outside the slice and its conflict set: \{strays.join(", ")}; unstage them first",
+      ],
     }
   }
   match
@@ -316,7 +342,7 @@ pub async fn integrate_abort(
   let _ = save_entry(geometry.common_git_dir, entry)
   {
     entry,
-    result: "refused",
+    result: "aborted",
     detail: ["merge aborted; the branch and worktree remain"],
   }
 }

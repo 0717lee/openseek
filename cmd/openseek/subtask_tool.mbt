@@ -237,9 +237,13 @@ async fn subtask_launch(
       brief="subtask (slots full)",
     )
   }
+  // Sync and block-scoped: a cancellation re-raised out of run_subrun still
+  // returns the permit — four interrupts must not brick launching for the
+  // rest of the process. (The provisioned worktree and its Running registry
+  // entry survive a cancel by design: discoverable, discard-able.)
+  defer worker_slots.release()
   guard budget.reserve(@agent_worker.default_worker_max_steps)
     is Some(granted_steps) else {
-    worker_slots.release()
     return @agent_tool.ToolAction::respond(
       "subtask budget exhausted for this turn — do the remaining slices yourself or continue next turn.",
       is_error=true,
@@ -256,14 +260,12 @@ async fn subtask_launch(
       parent_session?=child_session.map(session => session.parent),
     ) {
     Ok(provisioned) => provisioned
-    Err(reason) => {
-      worker_slots.release()
+    Err(reason) =>
       return @agent_tool.ToolAction::respond(
         "error: subtask provision: \{reason}",
         is_error=true,
         brief="subtask \{name} (provision refused)",
       )
-    }
   }
   let entry = provisioned.entry
   let input : Json = match context {
@@ -310,7 +312,6 @@ async fn subtask_launch(
     cwd=entry.worker_root,
     child_session?,
   )
-  worker_slots.release()
   // Evidence comes from git regardless of how the child ended.
   let captured = @subtask.capture(provisioned.geometry, entry)
   let out = StringBuilder()

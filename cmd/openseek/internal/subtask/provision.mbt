@@ -41,21 +41,21 @@ pub async fn provision(
       "subtask name must be a short lowercase slug ([a-z0-9][a-z0-9-]{0,39}): \{name}",
     )
   }
+  let allowed_paths = match normalize_allowed_paths(allowed_paths) {
+    Ok(normalized) => normalized
+    Err(reason) => return Err(reason)
+  }
   let geometry = match resolve_geometry(workspace_root) {
     Ok(geometry) => geometry
     Err(reason) => return Err(reason)
   }
   let mutex = repo_mutex(geometry.common_git_dir)
   mutex.acquire()
-  let result = provision_locked(
-    geometry,
-    name~,
-    allowed_paths~,
-    nonce~,
-    parent_session?,
-  )
-  mutex.release()
-  result
+  // Block-scoped and sync, so a raise (cancellation included) still
+  // releases; a cached locked mutex would wedge the repository for the
+  // rest of the process.
+  defer mutex.release()
+  provision_locked(geometry, name~, allowed_paths~, nonce~, parent_session?)
 }
 
 ///|
@@ -141,6 +141,7 @@ async fn provision_locked(
     parent_session,
     commit_oid: None,
     origin_head_before: None,
+    conflict_paths: [],
   }
   match save_entry(geometry.common_git_dir, entry) {
     Ok(_) => ()
@@ -251,4 +252,40 @@ test "subtask names are strict slugs" {
     long.write_char('a')
   }
   assert_false(is_valid_name(long.to_string()))
+}
+
+///|
+/// Normalize model-supplied prefixes into the one spelling BOTH enforcement
+/// layers use: trailing slashes stripped (a natural `lib/` must not become
+/// `lib` + an empty component that rejects everything), no absolute, empty,
+/// `.`/`..`, or backslash components.
+fn normalize_allowed_paths(
+  allowed_paths : Array[String],
+) -> Result[Array[String], String] {
+  let normalized : Array[String] = []
+  for prefix in allowed_paths {
+    let mut cleaned = prefix.trim().to_owned()
+    while cleaned.has_suffix("/") {
+      cleaned = cleaned.view(end_offset=cleaned.length() - 1).to_owned()
+    }
+    guard cleaned != "" && !cleaned.has_prefix("/") else {
+      return Err(
+        "allowed_paths entries must be non-empty relative prefixes: \{prefix}",
+      )
+    }
+    guard !cleaned.contains("\\") else {
+      return Err("allowed_paths entries must use forward slashes: \{prefix}")
+    }
+    for part in cleaned.split("/") {
+      guard !(part.to_owned() is ("" | "." | "..")) else {
+        return Err(
+          "allowed_paths entries must not contain empty, `.`, or `..` components: \{prefix}",
+        )
+      }
+    }
+    if !normalized.contains(cleaned) {
+      normalized.push(cleaned)
+    }
+  }
+  Ok(normalized)
 }

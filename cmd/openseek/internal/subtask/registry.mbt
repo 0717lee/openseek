@@ -41,6 +41,7 @@ pub struct SubtaskEntry {
   parent_session : String?
   commit_oid : String?
   origin_head_before : String?
+  conflict_paths : Array[String]
 } derive(Debug, Eq, ToJson, FromJson)
 
 ///|
@@ -165,6 +166,7 @@ fn sample_entry() -> SubtaskEntry {
     parent_session: Some("run-1"),
     commit_oid: None,
     origin_head_before: None,
+    conflict_paths: [],
   }
 }
 
