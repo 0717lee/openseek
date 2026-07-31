@@ -150,7 +150,11 @@ fn WriteScope::prefix_admits(self : WriteScope, path : String) -> Bool {
   // it there would let a component literally named `src\x` impersonate
   // `src/x` inside an allowed prefix.
   let path = normalize_separators(path)
-  let root = normalize_separators(self.root)
+  // Re-strip after normalizing: a Windows drive/UNC root's realpath ends in
+  // a backslash that `strip_trailing_slash` at create time could not see.
+  let root = @workspace_path.strip_trailing_slash(
+    normalize_separators(self.root),
+  )
   let relative = if path == root {
     ""
   } else {
@@ -238,6 +242,15 @@ async fn path_exists_no_follow(path : String) -> Bool {
 /// slash-normalized, no empty/`.`/`..` components, no NUL, and not rooted at
 /// git or worktree bookkeeping.
 fn validate_prefix(prefix : String) -> Result[Array[String], String] {
+  // On POSIX a backslash-bearing prefix could never authorize anything:
+  // deny_reason fails closed on backslash targets, and a slash-spelled
+  // target cannot match a literal-backslash component. Reject it up front
+  // rather than accept a dead entry. (On Windows it normalizes instead.)
+  guard !backslash_is_hostile(prefix) else {
+    return Err(
+      "allowed_paths entries must not contain backslashes on this platform: \{prefix}",
+    )
+  }
   let normalized = @workspace_path.strip_trailing_slash(
     normalize_separators(prefix),
   )
