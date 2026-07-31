@@ -3,7 +3,7 @@ package "bobzhang/openseek/agent_tool/edit"
 
 import {
   "bobzhang/openseek/agent_tool",
-  "bobzhang/openseek/agent_tool/internal/write_scope",
+  "bobzhang/openseek/agent_tool/write_scope",
 }
 
 // Values

@@ -259,6 +259,40 @@ async fn dispatch_kind(
       remove_scratch_lab(scratch_dir)
       report.map(report => report.to_json())
     }
+    "worker" => {
+      // Input first, key second: a malformed input line reports its exact
+      // defect even in a keyless environment (and the cram can pin it).
+      if @agent_worker.WorkerInput::parse(input) is Err(reason) {
+        @emit.emit(CommandError(error="subrun worker: \{reason}"))
+        return None
+      }
+      guard model.api_key(matches) is Some(api_key) else {
+        fail("an API key is required for \{model}: pass --api-key")
+      }
+      // No scratch lab: the worker's whole worktree is writable, and its
+      // geometry (worktree, denied roots, allowed paths) arrives in the
+      // input line from the subtask controller — the child enforces with
+      // what it was handed rather than deriving anything itself.
+      match
+        @agent_worker.run_child(
+          input,
+          api_key~,
+          model~,
+          max_steps=max_steps(matches).unwrap_or(
+            @agent_worker.default_worker_max_steps,
+          ),
+          thinking~,
+          api_url?,
+          session_id?,
+          append_item?,
+        ) {
+        Ok(report) => report.map(report => report.to_json())
+        Err(reason) => {
+          @emit.emit(CommandError(error="subrun worker: \{reason}"))
+          None
+        }
+      }
+    }
     "echo" => {
       // Modelless probe: two canned events plus the input echoed back —
       // enough to exercise spawn, drain, accounting, and the typed report

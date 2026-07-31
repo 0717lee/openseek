@@ -696,7 +696,7 @@ fn root_command() -> @argparse.Command {
           PositionArg(
             "kind",
             num_args=ValueRange(lower=1),
-            about="Subagent kind: explore | echo.",
+            about="Subagent kind: explore | review | worker | echo.",
           ),
         ],
       ),

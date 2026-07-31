@@ -1,0 +1,42 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "bobzhang/openseek/agent_worker"
+
+import {
+  "bobzhang/openseek/agent_session",
+  "bobzhang/openseek/deepseek",
+  "moonbitlang/core/debug",
+  "moonbitlang/core/json",
+}
+
+// Values
+pub let default_worker_deadline_ms : Int
+
+pub let default_worker_max_steps : Int
+
+pub async fn run_child(Json, api_key~ : String, model~ : @deepseek.Model, max_steps~ : Int, thinking? : @deepseek.ThinkingMode, api_url? : String, session_id? : String, append_item? : async (@agent_session.Session, @agent_session.SessionItem) -> @agent_session.Session) -> Result[WorkerReport?, String]
+
+// Errors
+
+// Types and methods
+pub struct WorkerInput {
+  task : String
+  context : String?
+  worker_root : String
+  worker_admin_dir : String
+  deny_roots : Array[String]
+  allowed_paths : Array[String]
+  base_oid : String
+} derive(Eq, @debug.Debug)
+pub fn WorkerInput::parse(Json) -> Result[Self, String]
+
+pub struct WorkerReport {
+  schema_version : Int
+  status : String
+  summary : String
+  verification : String
+} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
+
+// Type aliases
+
+// Traits
+

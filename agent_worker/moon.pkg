@@ -1,0 +1,33 @@
+import {
+  "bobzhang/openseek/agent_session",
+  "bobzhang/openseek/agent_subrun",
+  "bobzhang/openseek/agent_tool",
+  "bobzhang/openseek/agent_tool/edit",
+  "bobzhang/openseek/agent_tool/multi_edit",
+  "bobzhang/openseek/agent_tool/read",
+  "bobzhang/openseek/agent_tool/remove",
+  "bobzhang/openseek/agent_tool/run_moonbit",
+  "bobzhang/openseek/agent_tool/shell",
+  "bobzhang/openseek/agent_tool/write",
+  "bobzhang/openseek/agent_tool/write_scope",
+  "bobzhang/openseek/deepseek",
+  "moonbitlang/core/json",
+}
+
+import {
+  "bobzhang/openseek/testkit/filesystem" @vfs,
+  "moonbitlang/async",
+  "moonbitlang/async/fs",
+  "moonbitlang/async/http",
+  "moonbitlang/async/socket",
+} for "test"
+
+dev_build(
+  rule: "md_to_mbt_string",
+  input: "worker_system_prompt.mbt.md",
+  output: "generated_worker_system_prompt.mbt",
+)
+
+warnings = "+unnecessary_annotation"
+
+supported_targets = "+native"
