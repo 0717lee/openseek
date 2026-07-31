@@ -45,6 +45,9 @@ priv struct TerminalSession {
   /// Wakes the session's read loop when acknowledgements drain the debt or
   /// the session starts closing.
   cond : @cond_var.Cond
+  /// Carries the one shutdown request to the session task. Process
+  /// cancellation is async, so the synchronous host op only signals here.
+  close_requested : @async.Queue[Unit]
   mut closing : Bool
 }
 
@@ -167,14 +170,17 @@ pub fn ack_terminal(state : TerminalState, id~ : Int, sequence~ : Int) -> Unit {
 }
 
 ///|
-/// Request a session's shutdown. The session task owns the actual teardown:
-/// cancelling the child makes its read loop drain, emit `Exited`, and
-/// release the PTY. Unknown ids are a no-op (the session already exited).
+/// Request a session's shutdown. Its task kills the child immediately, then
+/// the existing read/wait path emits `Exited` and releases the PTY. Unknown
+/// ids are a no-op (the session already exited).
 pub fn close_terminal(state : TerminalState, id~ : Int) -> Unit {
   guard state.sessions.get(id) is Some(session) else { return }
+  guard !session.closing else { return }
   session.closing = true
   session.cond.broadcast()
-  session.pty.cancel()
+  // A full or closed queue means the only shutdown request is already being
+  // handled, so repeated close operations remain harmless.
+  ignore(session.close_requested.try_put(()) catch { _ => false })
 }
 
 ///|

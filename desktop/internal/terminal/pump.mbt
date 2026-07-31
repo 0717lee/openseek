@@ -25,7 +25,7 @@ pub async fn run_terminal_pump(
 
 ///|
 /// One session's lifetime: spawn the PTY child, answer the opener, then loop
-/// reading output until the child exits (or `close_terminal` cancels it),
+/// reading output until the child exits (or `close_terminal` requests it),
 /// pausing whenever the flow-control debt passes the high watermark.
 async fn run_session(
   state : TerminalState,
@@ -65,6 +65,7 @@ async fn run_session(
       unacked_chunks: Map([]),
       next_output_sequence: 1,
       cond: Cond(),
+      close_requested: Queue(kind=Blocking(1)),
       closing: false,
     }
     state.sessions[request.id] = session
@@ -72,6 +73,15 @@ async fn run_session(
       state.sessions.remove(request.id)
       pty.close()
     }
+    // `Pty::cancel` uses the process package's five-second graceful timeout on
+    // Unix. A terminal close is an explicit immediate operation, so a
+    // session-owned task applies the cross-platform hard cancellation handler
+    // while the normal reader and waiter continue to drain and reap the child.
+    group.spawn_bg(no_wait=true, () => {
+      session.close_requested.get()
+      let cancel = @process.hard_cancel()
+      cancel(pty.pid())
+    })
     request.reply.put(Ok(()))
     @xlog.debug() <?
       {
