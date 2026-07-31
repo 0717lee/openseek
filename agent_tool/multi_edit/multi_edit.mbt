@@ -624,12 +624,22 @@ async fn revert_guarded_response(
       write => write.new_content,
       write_scope?,
     )
-    if restore_failures.length() + reapply_failures.length() > 0 {
-      let stuck = restore_failures + reapply_failures
+    if reapply_failures.length() > 0 {
+      // Final contents are uncertain: these files may still hold their
+      // pre-batch text.
       @agent_tool.ToolAction::respond(
-        "error multi_editing: the batch was kept, but re-applying it did not fully succeed — these files may not hold the batch content: \{stuck.join(", ")}; re-read them before further edits",
+        "error multi_editing: the batch was kept, but re-applying it did not fully succeed — these files may not hold the batch content: \{reapply_failures.join(", ")}; re-read them before further edits",
         is_error=true,
         brief="multi_edit partially re-applied",
+      )
+    } else if restore_failures.length() > 0 {
+      // Every final write landed, so the tree holds the batch — but the
+      // baseline this keep decision compared against was measured with these
+      // files unrestored, so the decision itself deserves the caveat.
+      @agent_tool.ToolAction::respond(
+        keep_response(summary, after, threshold, introduced~) +
+        "\nnote: the pre-batch baseline was measured with \{restore_failures.length()} file(s) unrestored (\{restore_failures.join(", ")}), so the introduced-error count may be understated",
+        brief=success_brief(writes),
       )
     } else {
       @agent_tool.ToolAction::respond(

@@ -48,11 +48,7 @@ pub async fn WriteScope::create(
     }
   }
   Ok({
-    // Slash-normalized (Windows realpath returns backslashes) so relative
-    // slicing in `prefix_admits` sees one separator convention.
-    root: @workspace_path.strip_trailing_slash(
-      canonical_root.replace_all(old="\\", new="/"),
-    ),
+    root: @workspace_path.strip_trailing_slash(canonical_root),
     allowed,
     allowed_display: allowed_paths.map(p => p.to_string()).join(", "),
   })
@@ -82,6 +78,16 @@ pub async fn WriteScope::deny_reason(
   self : WriteScope,
   path : String,
 ) -> String? {
+  // On POSIX a backslash is a legal filename byte, but every path helper in
+  // this codebase (and the prefix slicing below) treats it as a separator —
+  // a component literally named `src\x` would resolve as `src/x` and slip
+  // inside an allowed prefix. A confined write has no business targeting
+  // such a name: fail closed instead of normalizing.
+  if backslash_is_hostile(path) {
+    return Some(
+      "path contains a backslash, which this platform treats as a filename byte; confined writes refuse it",
+    )
+  }
   let requested = self.absolutize(path)
   guard resolve_existing_prefix(requested) is Some(resolved) else {
     return Some(
@@ -138,13 +144,17 @@ fn WriteScope::absolutize(self : WriteScope, path : String) -> String {
 /// allowed prefixes, component-wise (`src` never admits `src2`; a path
 /// ABOVE every prefix is not a writable target either).
 fn WriteScope::prefix_admits(self : WriteScope, path : String) -> Bool {
-  // Slash-normalize before slicing: the root is stored normalized, but a
-  // resolved path can arrive backslash-separated on Windows.
-  let path = path.replace_all(old="\\", new="/")
-  let relative = if path == self.root {
+  // Compare on a separator-normalized COPY (the stored root keeps its
+  // canonical realpath spelling): on Windows, realpath returns backslash
+  // separators; on POSIX a backslash is a legal filename byte, so rewriting
+  // it there would let a component literally named `src\x` impersonate
+  // `src/x` inside an allowed prefix.
+  let path = normalize_separators(path)
+  let root = normalize_separators(self.root)
+  let relative = if path == root {
     ""
   } else {
-    path.view(start_offset=self.root.length() + 1).to_owned()
+    path.view(start_offset=root.length() + 1).to_owned()
   }
   let parts = relative.split("/").map(p => p.to_owned()).collect()
   self.allowed.any(prefix => {
@@ -186,6 +196,35 @@ async fn resolve_existing_prefix(path : String) -> String? {
 }
 
 ///|
+/// Path separators for comparison purposes: backslash is a separator only on
+/// Windows; on POSIX it is an ordinary filename byte.
+#cfg(platform="windows")
+fn normalize_separators(path : String) -> String {
+  path.replace_all(old="\\", new="/")
+}
+
+///|
+#cfg(not(platform="windows"))
+fn normalize_separators(path : String) -> String {
+  path
+}
+
+///|
+/// Whether a backslash in `path` must fail closed: true on POSIX (where it is
+/// a filename byte the surrounding path machinery would still treat as a
+/// separator), false on Windows (where it IS the separator and is normalized).
+#cfg(platform="windows")
+fn backslash_is_hostile(_path : String) -> Bool {
+  false
+}
+
+///|
+#cfg(not(platform="windows"))
+fn backslash_is_hostile(path : String) -> Bool {
+  path.contains("\\")
+}
+
+///|
 async fn path_exists_no_follow(path : String) -> Bool {
   let _ = @fs.kind(path, follow_symlink=false) catch {
     error if @async.is_being_cancelled() => raise error
@@ -200,7 +239,7 @@ async fn path_exists_no_follow(path : String) -> Bool {
 /// git or worktree bookkeeping.
 fn validate_prefix(prefix : String) -> Result[Array[String], String] {
   let normalized = @workspace_path.strip_trailing_slash(
-    prefix.replace_all(old="\\", new="/"),
+    normalize_separators(prefix),
   )
   guard normalized != "" else {
     return Err("allowed_paths entries must be non-empty relative paths")
