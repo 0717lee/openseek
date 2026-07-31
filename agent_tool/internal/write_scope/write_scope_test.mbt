@@ -141,3 +141,16 @@ async test "the scope root is canonical so resolved comparisons match" {
     assert_admits(scope, "\{scope.root()}/src/a.mbt")
   })
 }
+
+///|
+#cfg(not(platform="windows"))
+async test "a POSIX backslash is a filename byte, not a separator" {
+  @vfs.with_tmpdir(prefix="write-scope-backslash-", root => {
+    @vfs.FileSystem({ "src/a.mbt": "a" }).write_to(root)
+    let scope = scope_of(root, allowed_paths=["src"])
+    // A single component literally named `src\outside` is not under `src`;
+    // the surrounding path machinery would treat the backslash as a
+    // separator and smuggle it into the allowed prefix, so it fails closed.
+    assert_denies(scope, "\{root}/src\\outside", because="backslash")
+  })
+}
