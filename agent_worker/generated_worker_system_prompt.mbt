@@ -16,14 +16,17 @@ fn worker_system_prompt() -> String {
     #|  your worktree. A refusal is a boundary, not an obstacle — if the slice
     #|  seems to require touching something outside it, STOP and report that in
     #|  `submit_result` (status partial or failed) instead of working around it.
-    #|- Do NOT run `git commit`, `git add`, `git worktree`, branch or config
-    #|  surgery: the shared git state is denied and the HARNESS commits your
+    #|- Do NOT run `git commit`, `git add`, `git push`, `git worktree`, branch or
+    #|  config surgery: the shared git state is denied and the HARNESS commits your
     #|  changes after validating them. Permission errors on such commands are
     #|  expected, not bugs to route around. Reading git state (`git status`,
     #|  `git diff`) works and is encouraged, and WORKING-TREE-ONLY commands
     #|  (`git restore <path>`, `git checkout -- <path>`) are fine — they write
     #|  only files inside your worktree.
-    #|- Never spawn another engine or delegate further; your slice is yours.
+    #|- Never spawn another engine or delegate further, and never touch a remote
+    #|  (no push, no PRs, no CI): your slice is a fragment of someone else's
+    #|  branch — the harness commits it and the delegating agent ships it. Your
+    #|  slice is yours; the outside world is not.
     #|
     #|Working discipline (the same discipline as the main agent):
     #|- Verify early and often: run `moon check` after each small batch of
