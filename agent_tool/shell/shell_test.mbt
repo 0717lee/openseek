@@ -2194,3 +2194,37 @@ async test "worker mode tracks cd forms, pipelines, and symlinked cwds" {
     assert_false(back.is_error)
   })
 }
+
+///|
+/// The review probe that broke the earlier tracker: `cd` into a FILE fails
+/// in sh (cwd unchanged), so the later `&&`-chained `cd ..; cd ..` really
+/// runs from the worker root and escapes. Candidate tracking must know that
+/// only an existing DIRECTORY can become a cwd.
+async test "worker mode blocks the failed-cd-into-file escape chain" {
+  @vfs.with_tmpdir(prefix="openseek-worker-floor3-", dir => {
+    let root = @fs.realpath(dir)
+    @fs.mkdir("\{root}/w")
+    @fs.mkdir("\{root}/w/sub")
+    @fs.write_file("\{root}/w/file", "not a directory", create_mode=CreateNew)
+    @fs.mkdir("\{root}/admin")
+    let scope : @shell.WorkerSandbox = {
+      deny_roots: [root],
+      worker_root: "\{root}/w",
+      worker_admin_dir: "\{root}/admin",
+    }
+    let run = match
+      @shell.definition(workspace_root="\{root}/w", worker_sandbox=scope).execute {
+      Async(execute) => execute
+      Sync(_) => fail("shell tool should be async")
+    }
+    guard run({
+        "cmd": "cd file; cd sub && cd .. && cd .. && touch escaped.txt",
+      })
+      is Respond(output) else {
+      fail("expected Respond")
+    }
+    assert_true(output.is_error)
+    assert_true(output.content.contains("blocked in worker mode"))
+    assert_false(@fs.exists("\{root}/escaped.txt"))
+  })
+}
