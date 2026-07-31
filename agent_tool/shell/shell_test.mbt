@@ -2228,3 +2228,54 @@ async test "worker mode blocks the failed-cd-into-file escape chain" {
     assert_false(@fs.exists("\{root}/escaped.txt"))
   })
 }
+
+///|
+/// The two cross-model-review escape chains: logical `..` through a symlink
+/// (sh's cd is PWD-textual, so `w/link/..` is `w` even when link resolves
+/// elsewhere in-tree — candidates must track spellings), and a failed cd
+/// whose continuation REJOINS at `;` from the pre-cd cwd (suspended
+/// candidates must merge back). Plus the propagation edges around them.
+async test "worker mode survives logical-cd and failure-rejoin chains" {
+  @vfs.with_tmpdir(prefix="openseek-worker-floor4-", dir => {
+    let root = @fs.realpath(dir)
+    @fs.mkdir("\{root}/w")
+    @fs.mkdir("\{root}/w/sub")
+    @fs.mkdir("\{root}/w/sub/deep")
+    @fs.mkdir("\{root}/admin")
+    let scope : @shell.WorkerSandbox = {
+      deny_roots: [root],
+      worker_root: "\{root}/w",
+      worker_admin_dir: "\{root}/admin",
+    }
+    let run = match
+      @shell.definition(workspace_root="\{root}/w", worker_sandbox=scope).execute {
+      Async(execute) => execute
+      Sync(_) => fail("shell tool should be async")
+    }
+    async fn blocked(cmd : Json) -> Unit {
+      guard run(cmd) is Respond(output) else { fail("expected Respond") }
+      assert_true(output.is_error)
+      assert_true(output.content.contains("blocked in worker mode"))
+    }
+
+    // Symlink + logical `..`: link points DEEP in-tree, so sh's `cd ..`
+    // from the link spelling lands at the worker root and one more `..`
+    // escapes — canonical tracking would predict staying under sub/deep.
+    @fs.symlink(target="\{root}/w/sub/deep", "\{root}/w/link")
+    blocked({ "cmd": "cd link && cd .. && cd .. && touch escaped.txt" })
+    // Failure rejoin at `;`: a cd that fails at runtime skips the `&&`
+    // chain, and the `;` continuation runs from the PRE-cd cwd — which must
+    // still be a candidate for the final `cd ..`.
+    blocked({ "cmd": "cd missing && true; cd .. && touch escaped.txt" })
+    // A cd with no viable destination clears nothing.
+    blocked({ "cmd": "cd missing && cd .. && touch escaped.txt" })
+    // `||` keeps the pre-cd cwd reachable.
+    blocked({ "cmd": "cd sub || cd ..; cd .. && touch escaped.txt" })
+    assert_false(@fs.exists("\{root}/escaped.txt"))
+    // The admitted shapes stay admitted.
+    guard run({ "cmd": "cd link && cd .. && printf ok" }) is Respond(fine) else {
+      fail("expected Respond")
+    }
+    assert_false(fine.is_error)
+  })
+}

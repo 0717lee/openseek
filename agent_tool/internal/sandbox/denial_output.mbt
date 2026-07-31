@@ -61,14 +61,6 @@ fn source_write_denied_in_text(
     line.contains("\{subject}:") ||
     line.contains("\{subject}'") ||
     line.contains("\{subject}\"") ||
-    // A subject that is a protected directory names every path below it:
-    // `sh: <subject>/seed.txt: Operation not permitted`. An absolute
-    // subject is inherently anchored; a bare basename (`repo`) matches only
-    // as a COMPLETE leading path component (`repo/file` after a boundary),
-    // so `/tmp/notrepo/file` cannot classify. Same-line denial wording is
-    // still required by the caller.
-    (subject.has_prefix("/") && line.contains("\{subject}/")) ||
-    (!subject.has_prefix("/") && names_component_bounded(line, subject)) ||
     // MoonBit's own OSError Show output escapes the quotes around the path
     // (`@fs.open(): \"keep.mbt\": Operation not permitted`), so the subject is
     // followed by `\"`, not a bare quote — run_moonbit's denial shape.
@@ -82,6 +74,21 @@ fn source_write_denied_in_text(
       ) &&
       line.has_suffix(subject)
     )
+  }
+
+  // A PROFILE subject that is a protected directory names every path below
+  // it: `sh: <subject>/seed.txt: Operation not permitted`. An absolute
+  // subject is inherently anchored; a bare basename (`repo`) matches only as
+  // a COMPLETE path component after a separator boundary, so
+  // `/tmp/notrepo/file` cannot classify. Applied ONLY to the profile's
+  // denial subjects — protected source suffixes (`.mbt`, `moon.mod`) name
+  // files, and a directory that merely ends like one must not classify.
+  fn line_names_denied_dir(line : StringView, subject : String) -> Bool {
+    if subject.has_prefix("/") {
+      line.contains("\{subject}/")
+    } else {
+      names_component_bounded(line, subject)
+    }
   }
 
   output_text
@@ -98,7 +105,11 @@ fn source_write_denied_in_text(
     (
       protected_source_subjects.any(suffix => line_names_subject(line, suffix)) ||
       denial_subjects.any(subject => {
-        subject != "" && line_names_subject(line, subject)
+        subject != "" &&
+        (
+          line_names_subject(line, subject) ||
+          line_names_denied_dir(line, subject)
+        )
       })
     )
   })

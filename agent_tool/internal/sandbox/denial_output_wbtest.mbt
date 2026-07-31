@@ -78,3 +78,23 @@ test "a basename subject matches as a complete leading component" {
     ]),
   )
 }
+
+///|
+test "component boundaries hold across word chars and suffix subjects" {
+  // The word chars that drive the boundary set cannot leak a match.
+  assert_false(
+    source_write_denied_in_text("sh: my-repo/file: Operation not permitted", [
+      "repo",
+    ]),
+  )
+  assert_false(
+    source_write_denied_in_text("sh: not.repo/file: Operation not permitted", [
+      "repo",
+    ]),
+  )
+  // Component matching is a profile-subject affordance: a DIRECTORY named
+  // like a protected source suffix must not classify via the suffix list.
+  assert_false(
+    source_write_denied_in_text("sh: foo.mbt/seed: Operation not permitted", []),
+  )
+}

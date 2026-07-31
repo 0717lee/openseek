@@ -35,13 +35,22 @@ async fn worker_confinement_blocks(
   base_cwd~ : String,
   worker_root~ : String,
 ) -> String? {
-  // Containment is decided on canonical paths: an in-tree symlink pointing
-  // elsewhere, or a lexically-inside `a/../..` spelling, must not pass.
-  let canonical_base = canonicalize_existing(base_cwd)
-  guard @workspace_path.is_under_workspace_root(worker_root, canonical_base) else {
+  // Containment is CHECKED on canonical paths (an in-tree symlink pointing
+  // elsewhere must not pass), but cwd TRACKING uses the lexical spelling:
+  // sh's cd is logical — `cd ..` operates on the PWD text, so `w/link/..`
+  // is `w` at runtime even when `link` resolves elsewhere. Mixing the two
+  // (canonical candidates, lexical `..`) mis-predicts sh.
+  guard @workspace_path.is_under_workspace_root(
+    worker_root,
+    canonicalize_existing(base_cwd),
+  ) else {
     return Some("the command runs outside your worker tree (cwd \{base_cwd})")
   }
-  worker_cd_escapes(parsed, base_cwd=canonical_base, worker_root~)
+  worker_cd_escapes(
+    parsed,
+    base_cwd=@path.Path(base_cwd).normalize().to_string(),
+    worker_root~,
+  )
 }
 
 ///|
@@ -56,9 +65,26 @@ async fn worker_cd_escapes(
   worker_root~ : String,
 ) -> String? {
   guard parsed is Simple(commands) else { return None }
+  // Candidates hold LEXICAL cwd spellings (sh's logical cd semantics);
+  // containment checks canonicalize on the spot. `suspended` holds the
+  // pre-cd cwds dropped by an `&&`-clearing: a failed cd skips the `&&`
+  // chain but the shell REJOINS at the next `;`/`||` from the pre-cd cwd,
+  // so those spellings come back into play there.
   let candidates : Array[String] = [base_cwd]
+  let suspended : Array[String] = []
   for position, command in commands {
     let argv = command.argv
+    match command.separator_before {
+      Some(";") | Some("||") => {
+        for old in suspended {
+          if !candidates.contains(old) {
+            candidates.push(old)
+          }
+        }
+        suspended.clear()
+      }
+      _ => ()
+    }
     let in_pipeline = command.separator_before == Some("|") ||
       (
         position + 1 < commands.length() &&
@@ -70,10 +96,12 @@ async fn worker_cd_escapes(
       Some(index) if argv[index] == "cd" => {
         match cd_operand(argv, index) {
           CdTo(operand) => {
-            // Resolve against EVERY candidate cwd. Each in-tree resolution
-            // is checked; each that is an EXISTING DIRECTORY is a viable
-            // destination (sh's cd fails on anything else — a file or a
-            // missing path never becomes a cwd).
+            // Resolve against EVERY candidate cwd. Containment is checked on
+            // the canonicalized location; the LEXICAL spelling is what a
+            // successful cd contributes as a future cwd (sh's `..` is
+            // logical). A resolution is viable only when its canonical
+            // location is an EXISTING DIRECTORY — sh's cd fails on a file or
+            // a missing path, so those never become cwds.
             let viable : Array[String] = []
             let mut interpretations = 0
             for cwd in candidates {
@@ -81,18 +109,16 @@ async fn worker_cd_escapes(
                 Some(resolved) => {
                   interpretations += 1
                   let canonical = canonicalize_if_exists(resolved)
-                  let effective = canonical.unwrap_or(
-                    @path.Path(resolved).normalize().to_string(),
-                  )
-                  if !@workspace_path.is_under_workspace_root(
-                      worker_root, effective,
-                    ) {
+                  guard @workspace_path.is_under_workspace_root(
+                    worker_root,
+                    canonical.unwrap_or(resolved),
+                  ) else {
                     return Some("`cd \{operand}` leaves your worker tree")
                   }
                   match canonical {
                     Some(real) =>
-                      if path_is_directory(real) && !viable.contains(effective) {
-                        viable.push(effective)
+                      if path_is_directory(real) && !viable.contains(resolved) {
+                        viable.push(resolved)
                       }
                     None => ()
                   }
@@ -101,18 +127,24 @@ async fn worker_cd_escapes(
               }
             }
             // Candidate propagation (outside a pipeline; a pipeline cd runs
-            // in a subshell and moves nothing). Under `&&`, the chained
-            // command runs only when the cd SUCCEEDED, so its reachable cwds
-            // are exactly the viable destinations — the pre-cd cwds drop
-            // (keeping them over-blocks `cd sub && cd ..`). Under `;`/`||`
-            // the cd may have failed, so the old cwds stay reachable
-            // alongside the viable destinations. This is a floor, not an
-            // interpreter — the kernel profile remains the enforcement where
-            // one exists.
+            // in a subshell and moves nothing). Under `&&`, the immediately
+            // chained command runs only when the cd SUCCEEDED, so its
+            // reachable cwds are the viable destinations — the pre-cd cwds
+            // move to `suspended` (a failed cd's continuation REJOINS at the
+            // next `;`/`||`, where they merge back; dropping them outright
+            // admitted a real escape). Under `;`/`||` the cd may have failed
+            // in place, so the old cwds stay candidates alongside the
+            // destinations. This is a floor, not an interpreter — the kernel
+            // profile remains the enforcement where one exists.
             if !in_pipeline {
               let next_is_and = position + 1 < commands.length() &&
                 commands[position + 1].separator_before == Some("&&")
               if next_is_and && interpretations > 0 && !viable.is_empty() {
+                for old in candidates {
+                  if !suspended.contains(old) {
+                    suspended.push(old)
+                  }
+                }
                 candidates.clear()
               }
               for destination in viable {
