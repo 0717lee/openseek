@@ -940,7 +940,7 @@ test "string indexing and utf8 encode/decode" {
   guard b0 is ('\n' | 'h' | 'b' | 'a'..='z') && s is [.. "hello", .. rest] else {
     fail("unexpected string content")
   }
-  guard rest is " world"  // otherwise will crash (guard without else)
+  guard rest is " world" else { fail("unexpected suffix") } // an else keeps the guard total
 
   // In check mode (expression with explicit type), ('\n' : UInt16) is valid.
 
