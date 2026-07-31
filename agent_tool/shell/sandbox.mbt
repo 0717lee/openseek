@@ -61,7 +61,36 @@ async fn agent_shell_launch(
   parsed : @shell_parse.ParseResult,
   cwd? : String,
   scratch_dir? : String,
+  worker_sandbox? : WorkerSandbox,
 ) -> AgentShellLaunch {
+  // Worker mode replaces the whole trust classification: EVERY command —
+  // trusted classes included — launches under the worker write profile, so
+  // the kernel (not the lexical guard) decides what may be written. A
+  // platform without sandbox-exec falls back to unsandboxed execution with
+  // only the static floor — the documented non-macOS posture.
+  if worker_sandbox is Some(scope) {
+    let sandboxed = @sandbox.SandboxedCommand::create_worker_if_available(
+      Shell(cmd),
+      deny_roots=scope.deny_roots,
+      worker_root=scope.worker_root,
+      worker_admin_dir=scope.worker_admin_dir,
+    )
+    return match sandboxed {
+      Some(command) =>
+        {
+          command: { program: command.program(), args: command.args() },
+          sandboxed_command: Some(command),
+        }
+      None =>
+        {
+          command: {
+            program: @platform_shell.program,
+            args: @platform_shell.args(cmd),
+          },
+          sandboxed_command: None,
+        }
+    }
+  }
   let real_workspace_root = @fs.realpath(workspace_root)
   let real_cwd = match cwd {
     Some(cwd) => Some(@fs.realpath(cwd) catch { _ => cwd })

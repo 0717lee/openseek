@@ -1680,3 +1680,89 @@ async test "a lone operand is a source with no destination" {
     assert_true(tree_target("mv -f pkg", real_root, Some(real_root)) is None)
   })
 }
+
+///|
+/// Unsandboxed setup helper for worker-mode fixtures: run git, require success.
+async fn worker_git_setup(args : Array[String], cwd : String) -> String {
+  let (code, data) = @process.collect_stdout(
+    "git",
+    args,
+    inherit_env=true,
+    cwd=cwd.view(),
+  )
+  guard code == 0 else { fail("git failed in \{cwd}: \{data.text()}") }
+  data.text()
+}
+
+///|
+/// Worker mode through the WIRED shell entry: every class — including a
+/// trusted git verb — launches under the worker profile, so origin writes,
+/// shared-store writes, and worktree surgery are kernel-denied while the
+/// worker's own tree stays writable. Mirrors the lab regression tests: the
+/// call sites, not `agent_shell_launch`, are what these pin.
+async test "worker mode confines the wired shell to the worker tree" {
+  @vfs.with_tmpdir(prefix="openseek-worker-mode-", dir => {
+    guard @sandbox.SandboxedCommand::create_if_available(dir, Shell(":"))
+      is Some(_) else {
+      println("sandbox-exec unavailable; skipping")
+      return
+    }
+    let repo = "\{dir}/repo"
+    @fs.mkdir(repo)
+    let _ = worker_git_setup(["init", "-q"], repo)
+    let _ = worker_git_setup(["config", "user.email", "e2e@test"], repo)
+    let _ = worker_git_setup(["config", "user.name", "e2e"], repo)
+    @vfs.write_text(repo, "seed.txt", "seed\n")
+    let _ = worker_git_setup(["add", "-A"], repo)
+    let _ = worker_git_setup(["commit", "-q", "-m", "base"], repo)
+    let _ = worker_git_setup(
+      ["worktree", "add", "-q", ".worktrees/w1", "-b", "w1"],
+      repo,
+    )
+    let origin = @fs.realpath(repo)
+    let worker_root = @fs.realpath("\{repo}/.worktrees/w1")
+    let admin_raw = worker_git_setup(
+      ["rev-parse", "--absolute-git-dir"],
+      worker_root,
+    )
+    let scope : WorkerSandbox = {
+      deny_roots: [@fs.realpath("\{origin}/.git"), origin],
+      worker_root,
+      worker_admin_dir: @fs.realpath(admin_raw.trim().to_owned()),
+    }
+    async fn run(cmd : String) -> @agent_tool.ToolAction {
+      execute_with_workspace(
+        worker_root,
+        { "cmd": cmd },
+        read_only=false,
+        default_timeout_ms=30_000,
+        worker_sandbox=scope,
+      )
+    }
+    // The worker's own tree is writable through the tool.
+    guard run("printf x > \{worker_root}/scratch.txt") is Respond(own) else {
+      fail("expected Respond")
+    }
+    assert_false(own.is_error)
+    assert_true(@fs.exists("\{worker_root}/scratch.txt"))
+    // An absolute-path write into the origin is kernel-denied; the seed
+    // survives (the assertion that carries the test).
+    guard run("printf x > \{origin}/seed.txt") is Respond(against_origin) else {
+      fail("expected Respond")
+    }
+    assert_true(against_origin.is_error)
+    assert_eq(@fs.read_file("\{origin}/seed.txt").text(), "seed\n")
+    // A TRUSTED verb is forced onto the sandbox: `git worktree add` would run
+    // unsandboxed in a normal registry, but here its origin write is denied.
+    guard run("git worktree add \{origin}/evil-wt -b evil") is Respond(surgery) else {
+      fail("expected Respond")
+    }
+    assert_true(surgery.is_error)
+    assert_false(@fs.exists("\{origin}/evil-wt"))
+    // Reads of git state keep working.
+    guard run("git status --porcelain") is Respond(status) else {
+      fail("expected Respond")
+    }
+    assert_false(status.is_error)
+  })
+}
