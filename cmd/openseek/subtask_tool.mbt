@@ -296,7 +296,7 @@ async fn subtask_launch_many(
   child_session : @agent_subrun.ChildSession?,
   specs : Array[LaunchSpec],
 ) -> @agent_tool.ToolAction {
-  let results : Map[Int, @agent_tool.ToolAction] = Map([])
+  let results : Map[Int, SliceOutcome] = Map([])
   @async.with_task_group(scope => {
     for index, spec in specs {
       scope.spawn_bg(() => {
@@ -318,8 +318,9 @@ async fn subtask_launch_many(
   let briefs : Array[String] = []
   for index, spec in specs {
     let (status, errored) = match results.get(index) {
-      Some(Respond(output)) => (slice_status_line(output), output.is_error)
-      _ => ("no result", true)
+      Some(outcome) =>
+        (outcome.status, outcome.action is Respond(output) && output.is_error)
+      None => ("no result", true)
     }
     if errored {
       any_error = true
@@ -328,7 +329,7 @@ async fn subtask_launch_many(
     summary <+ "- \{spec.name}: \{status}\n"
     detail <+ "## \{spec.name}\n"
     match results.get(index) {
-      Some(Respond(output)) => detail <+ "\{output.content}\n\n"
+      Some({ action: Respond(output), .. }) => detail <+ "\{output.content}\n\n"
       _ => detail <+ "(no result)\n\n"
     }
   }
@@ -344,6 +345,15 @@ async fn subtask_launch_many(
 }
 
 ///|
+/// One finished slice: its rendered result plus the AUTHORITATIVE status
+/// the controller derived from git evidence — carried as data so a batch
+/// summary can never re-derive it from worker-authored prose.
+priv struct SliceOutcome {
+  action : @agent_tool.ToolAction
+  status : String
+}
+
+///|
 async fn subtask_launch_one(
   self_exe : String,
   model : @deepseek.Model,
@@ -352,7 +362,7 @@ async fn subtask_launch_one(
   api_url : String?,
   child_session : @agent_subrun.ChildSession?,
   spec : LaunchSpec,
-) -> @agent_tool.ToolAction {
+) -> SliceOutcome {
   let name = spec.name
   let task = spec.task
   let context = spec.context
@@ -360,11 +370,14 @@ async fn subtask_launch_one(
   // Slots and budget are reserved BEFORE any state is created, so every
   // later failure path has exactly one transaction to roll back.
   guard worker_slots.try_acquire() else {
-    return @agent_tool.ToolAction::respond(
-      "subtask worker slots are full (max \{max_active_workers} active) — integrate or await the running slices first.",
-      is_error=true,
-      brief="subtask (slots full)",
-    )
+    return {
+      action: @agent_tool.ToolAction::respond(
+        "subtask worker slots are full (max \{max_active_workers} active) — integrate or await the running slices first.",
+        is_error=true,
+        brief="subtask (slots full)",
+      ),
+      status: "not launched: worker slots full",
+    }
   }
   // Sync and block-scoped: a cancellation re-raised out of run_subrun still
   // returns the permit — four interrupts must not brick launching for the
@@ -373,11 +386,14 @@ async fn subtask_launch_one(
   defer worker_slots.release()
   guard budget.reserve(@agent_worker.default_worker_max_steps)
     is Some(granted_steps) else {
-    return @agent_tool.ToolAction::respond(
-      "subtask budget exhausted for this turn — do the remaining slices yourself or continue next turn.",
-      is_error=true,
-      brief="subtask (budget exhausted)",
-    )
+    return {
+      action: @agent_tool.ToolAction::respond(
+        "subtask budget exhausted for this turn — do the remaining slices yourself or continue next turn.",
+        is_error=true,
+        brief="subtask (budget exhausted)",
+      ),
+      status: "not launched: per-turn subtask budget exhausted",
+    }
   }
   let nonce = random_salt()
   let provisioned = match
@@ -390,11 +406,14 @@ async fn subtask_launch_one(
     ) {
     Ok(provisioned) => provisioned
     Err(reason) =>
-      return @agent_tool.ToolAction::respond(
-        "error: subtask provision: \{reason}",
-        is_error=true,
-        brief="subtask \{name} (provision refused)",
-      )
+      return {
+        action: @agent_tool.ToolAction::respond(
+          "error: subtask provision: \{reason}",
+          is_error=true,
+          brief="subtask \{name} (provision refused)",
+        ),
+        status: "not launched: \{@agent_tool.brief_line(reason, limit=100)}",
+      }
   }
   let entry = provisioned.entry
   let input : Json = match context {
@@ -468,23 +487,12 @@ async fn subtask_launch_one(
   out <+ "\n\{state_line}"
   let mergeable = captured.entry.state is Committed
   let is_error = !mergeable && !(captured.entry.state is NoChanges)
-  @agent_tool.ToolAction::respond(
-    out.to_string(),
-    is_error~,
-    brief="subtask \{result.subrun_id()} \{name} (\{Repr(captured.entry.state)}, \{result.steps_used()} step(s))",
-  )
-}
-
-///|
-/// The one-line state of a finished slice, recovered from its rendered
-/// result: the `state:` line the single-slice renderer emits, or a
-/// truncated first line as a fallback.
-fn slice_status_line(output : @agent_tool.ToolOutput) -> String {
-  for line in output.content.split("\n") {
-    let line = line.to_owned()
-    if line.has_prefix("state: ") {
-      return @agent_tool.brief_line(line, limit=120)
-    }
+  {
+    action: @agent_tool.ToolAction::respond(
+      out.to_string(),
+      is_error~,
+      brief="subtask \{result.subrun_id()} \{name} (\{Repr(captured.entry.state)}, \{result.steps_used()} step(s))",
+    ),
+    status: state_line,
   }
-  @agent_tool.brief_line(output.content, limit=120)
 }
