@@ -22,15 +22,6 @@ async fn main {
     dir=ws.dir(),
   )
   @packaging.build_viewer_stylesheet(ws)
-  // The repository's root moon.work owns `_build` in a normal checkout. The
-  // openseek-api image deliberately copies only this desktop module, in which
-  // case Moon places the same artifact under the module root instead.
-  let repository_bundle = ws.repo_at(BrowserBundleArtifact)
-  let browser_bundle = if @asyncfs.exists(repository_bundle) {
-    repository_bundle
-  } else {
-    ws.at(BrowserBundleArtifact)
-  }
   let esbuild_target = if @platform.linux {
     @xterm_assets.linux_x64_target()
   } else if @platform.apple_os_mac {
@@ -47,7 +38,10 @@ async fn main {
     ws.at("frontend/browser/index.html"),
     ws.at(BrowserDistDir + "/index.html"),
   )
-  @packaging.copy_file(browser_bundle, ws.at(BrowserDistDir + "/browser.js"))
+  @packaging.copy_file(
+    ws.repo_at(BrowserBundleArtifact),
+    ws.at(BrowserDistDir + "/browser.js"),
+  )
   @packaging.copy_file(ws.at("app.css"), ws.at(BrowserDistDir + "/app.css"))
   @packaging.copy_file(
     ws.at("viewer.css"),
