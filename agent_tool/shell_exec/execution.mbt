@@ -103,6 +103,12 @@ pub async fn[X] ShellExecution::start(
   let sandboxed_command = command.sandboxed_command()
   let sink = ShellOutputSink::new(inline_cap~, hard_cap~, spill_path?)
   let started : @async.Queue[ExecutionStart] = Queue(kind=Unbounded)
+  // The caller owns the startup handoff. If it is cancelled before accepting
+  // an execution, closing the queue makes the starter's `put` fail inside
+  // `execution_group`; group teardown then cancels any process already spawned
+  // and removes its sandbox profile. A value already delivered to `get` is
+  // still returned before cancellation propagates, so ownership is not lost.
+  defer started.close()
   session_group.spawn_bg(no_wait=true, allow_failure=true) <| () => {
     @async.with_task_group(execution_group => {
       let mut start_reported = false
