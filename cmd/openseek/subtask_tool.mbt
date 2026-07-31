@@ -47,7 +47,8 @@ fn subtask_tool_definition(
       "properties": {
         "slices": {
           "type": "array",
-          "description": "Parallel launch: several {name, task, allowed_paths, context?} slices run CONCURRENTLY from this one call. Their allowed_paths must be disjoint from each other and from any active subtask.",
+          "description": "Parallel launch: several {name, task, allowed_paths, context?} slices run CONCURRENTLY from this one call (at most 4 — the worker-slot cap). Their allowed_paths must be disjoint from each other and from any active subtask.",
+          "maxItems": 4,
           "items": {
             "type": "object",
             "properties": {
@@ -141,6 +142,15 @@ async fn subtask_execute(
       guard !entries.is_empty() else {
         return @agent_tool.ToolAction::respond(
           "error: subtask `slices` must not be empty",
+          is_error=true,
+        )
+      }
+      // Refuse rather than silently drop: slots are taken with
+      // try_acquire, so entries past the cap would fail as "slots full"
+      // while the call still looked accepted.
+      guard entries.length() <= max_active_workers else {
+        return @agent_tool.ToolAction::respond(
+          "error: subtask `slices` accepts at most \{max_active_workers} slices per call (got \{entries.length()}) — send the rest in a follow-up call once these integrate",
           is_error=true,
         )
       }
@@ -299,25 +309,33 @@ async fn subtask_launch_many(
       })
     }
   })
-  let out = StringBuilder()
+  // A compact status line PER SLICE comes first: four full reports can
+  // exceed the loop's per-tool-result clamp, and a truncated tail would
+  // otherwise erase later slices' state and next steps entirely.
+  let summary = StringBuilder()
+  let detail = StringBuilder()
   let mut any_error = false
   let briefs : Array[String] = []
   for index, spec in specs {
-    out <+ "## \{spec.name}\n"
+    let (status, errored) = match results.get(index) {
+      Some(Respond(output)) => (slice_status_line(output), output.is_error)
+      _ => ("no result", true)
+    }
+    if errored {
+      any_error = true
+    }
+    briefs.push(spec.name)
+    summary <+ "- \{spec.name}: \{status}\n"
+    detail <+ "## \{spec.name}\n"
     match results.get(index) {
-      Some(Respond(output)) => {
-        out <+ "\{output.content}\n\n"
-        if output.is_error {
-          any_error = true
-        }
-        briefs.push(spec.name)
-      }
-      _ => {
-        out <+ "(no result)\n\n"
-        any_error = true
-      }
+      Some(Respond(output)) => detail <+ "\{output.content}\n\n"
+      _ => detail <+ "(no result)\n\n"
     }
   }
+  let out = StringBuilder()
+  out <+
+    "\{specs.length()} slice(s) launched concurrently:\n\{summary.to_string()}\n"
+  out <+ "\{detail.to_string()}"
   @agent_tool.ToolAction::respond(
     out.to_string(),
     is_error=any_error,
@@ -455,4 +473,18 @@ async fn subtask_launch_one(
     is_error~,
     brief="subtask \{result.subrun_id()} \{name} (\{Repr(captured.entry.state)}, \{result.steps_used()} step(s))",
   )
+}
+
+///|
+/// The one-line state of a finished slice, recovered from its rendered
+/// result: the `state:` line the single-slice renderer emits, or a
+/// truncated first line as a fallback.
+fn slice_status_line(output : @agent_tool.ToolOutput) -> String {
+  for line in output.content.split("\n") {
+    let line = line.to_owned()
+    if line.has_prefix("state: ") {
+      return @agent_tool.brief_line(line, limit=120)
+    }
+  }
+  @agent_tool.brief_line(output.content, limit=120)
 }
