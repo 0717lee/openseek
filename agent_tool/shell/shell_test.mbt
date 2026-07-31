@@ -2143,3 +2143,48 @@ async test "worker mode statically blocks obvious escapes" {
     assert_true(plain.content.contains("hi"))
   })
 }
+
+///|
+/// The floor recognizes cd's full surface and real sh cwd semantics.
+async test "worker mode tracks cd forms, pipelines, and symlinked cwds" {
+  @vfs.with_tmpdir(prefix="openseek-worker-floor2-", dir => {
+    let root = @fs.realpath(dir)
+    @fs.mkdir("\{root}/w")
+    @fs.mkdir("\{root}/w/sub")
+    @fs.mkdir("\{root}/admin")
+    let scope : @shell.WorkerSandbox = {
+      deny_roots: [root],
+      worker_root: "\{root}/w",
+      worker_admin_dir: "\{root}/admin",
+    }
+    let run = match
+      @shell.definition(workspace_root="\{root}/w", worker_sandbox=scope).execute {
+      Async(execute) => execute
+      Sync(_) => fail("shell tool should be async")
+    }
+    async fn blocked(cmd : Json) -> Unit {
+      guard run(cmd) is Respond(output) else { fail("expected Respond") }
+      assert_true(output.is_error)
+      assert_true(output.content.contains("blocked in worker mode"))
+    }
+
+    // `--` and wrapper forms still change the shell's cwd.
+    blocked({ "cmd": "cd -- .. && touch escaped.txt" })
+    blocked({ "cmd": "command cd .. && touch escaped.txt" })
+    // Bare `cd` goes to $HOME; `cd -` is unknowable.
+    blocked({ "cmd": "cd && touch escaped.txt" })
+    blocked({ "cmd": "cd - && touch escaped.txt" })
+    // A `cd` inside a pipeline runs in a subshell: the parent cwd stays at
+    // the worker root, so the second `cd ..` leaves the tree.
+    blocked({ "cmd": "cd sub | true; cd ..; touch escaped.txt" })
+    assert_false(@fs.exists("\{root}/escaped.txt"))
+    // An in-tree symlink pointing out of the tree fails the canonical check.
+    @fs.symlink(target="/tmp", "\{root}/w/way-out")
+    blocked({ "cmd": "pwd", "cwd": "way-out" })
+    // Legitimate in-tree chains stay admitted.
+    guard run({ "cmd": "cd sub && printf ok" }) is Respond(fine) else {
+      fail("expected Respond")
+    }
+    assert_false(fine.is_error)
+  })
+}
