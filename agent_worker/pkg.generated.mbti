@@ -35,6 +35,7 @@ pub struct WorkerReport {
   summary : String
   verification : String
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
+pub fn WorkerReport::parse_validated(Json) -> Result[Self, String]
 
 // Type aliases
 

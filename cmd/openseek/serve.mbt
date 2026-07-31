@@ -667,6 +667,14 @@ async fn run_serve(
           api_url?,
           child_session?,
         ),
+        subtask_tool_definition(
+          self_exe=exe,
+          model~,
+          workspace_root~,
+          budget=subrun_budget,
+          api_url?,
+          child_session?,
+        ),
       ]
     // The advisory goal-met gate (--review-gate): built once, shared by
     // every turn; engine-initiated, so it runs on its own allowance
