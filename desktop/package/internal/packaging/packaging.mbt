@@ -1,11 +1,14 @@
 ///|
-const FrontendPackage : String = "frontend"
+/// The desktop shell entry. Its `frontend/browser` sibling is the console
+/// bundle served by openseek-api and is not shipped inside the desktop app.
+const FrontendPackage : String = "frontend/desktop"
 
 ///|
-/// The JS bundle `moon build frontend --target js --release` emits. Build
+/// The JS bundle `moon build frontend/desktop --target js --release` emits.
+/// Build
 /// output lands in the monorepo root's `_build` (the single root moon.work
 /// owns the build directory), so this resolves via `repo_at`, not `at`.
-const FrontendBundleArtifact : String = "_build/js/release/build/openseek_desktop/frontend/frontend.js"
+const FrontendBundleArtifact : String = "_build/js/release/build/openseek_desktop/frontend/desktop/desktop.js"
 
 ///|
 /// The stable path the host and packagers read the frontend bundle from.
@@ -337,21 +340,18 @@ pub async fn rebuild_libproton(
     )
   }
   let build_dir = ws.at(ProtonNativeBuildDir)
-  run_checked(
-    "cmake",
-    [
-      "-S",
-      ws.at("lepus/native"),
-      "-B",
-      build_dir,
-      "-DCMAKE_BUILD_TYPE=Release",
-      "-DBUILD_TESTING=OFF",
-      "-DPROTON_WITH_ENGINE=ON",
-      "-DPROTON_ENGINE_ROOT=" + cef_root,
-    ],
-    dir=ws.dir(),
-    extra_env~,
-  )
+  let configure_args = ["-S", ws.at("lepus/native"), "-B", build_dir]
+  // CMAKE_BUILD_TYPE selects the release configuration for single-config
+  // generators. Visual Studio is multi-config and receives the selection from
+  // `cmake --build --config Release`; passing the cache variable there only
+  // produces CMake's unused-cli warning.
+  if !(@platform.win32 || @platform.win64) {
+    configure_args.push("-DCMAKE_BUILD_TYPE=Release")
+  }
+  configure_args.push("-DBUILD_TESTING=OFF")
+  configure_args.push("-DPROTON_WITH_ENGINE=ON")
+  configure_args.push("-DPROTON_ENGINE_ROOT=" + cef_root)
+  run_checked("cmake", configure_args, dir=ws.dir(), extra_env~)
   run_checked(
     "cmake",
     ["--build", build_dir, "--config", "Release"],
