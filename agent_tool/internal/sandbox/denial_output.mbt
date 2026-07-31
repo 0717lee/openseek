@@ -24,6 +24,33 @@ fn source_write_denied_in_text(
   denial_subjects : Array[String],
 ) -> Bool {
 
+  // Whether `line` contains `subject` as a complete path component followed
+  // by a slash — `repo/` at line start or after a non-path character, but
+  // never inside `notrepo/`. Only the character BEFORE the match needs
+  // checking; the trailing slash bounds the other side.
+  fn names_component_bounded(line : StringView, subject : String) -> Bool {
+    let needle = "\{subject}/"
+    let mut from = 0
+    while true {
+      guard line.view(start_offset=from).find(needle) is Some(offset) else {
+        break
+      }
+      let at = from + offset
+      if at == 0 {
+        return true
+      }
+      // A preceding separator means the component IS the subject
+      // (`./repo/`, `/x/repo/`); any word character means the match sits
+      // inside a longer component (`notrepo/`, `not.repo/`).
+      let before = line[at - 1]
+      if !(before is ('a'..='z' | 'A'..='Z' | '0'..='9' | '_' | '-' | '.')) {
+        return true
+      }
+      from = at + needle.length()
+    }
+    false
+  }
+
   // Whether `line` names `subject` as the object of an error rather than merely
   // containing it as a substring: the tool's own punctuation or quoting follows
   // it, or the line ends with it after a denial's colon.
@@ -34,12 +61,14 @@ fn source_write_denied_in_text(
     line.contains("\{subject}:") ||
     line.contains("\{subject}'") ||
     line.contains("\{subject}\"") ||
-    // An ABSOLUTE subject that is a protected directory names every path
-    // below it: `sh: <subject>/seed.txt: Operation not permitted`. Only
-    // full-root subjects participate (a bare basename like `repo` would
-    // match unrelated paths such as `/tmp/notrepo/file`); same-line denial
-    // wording is still required by the caller.
+    // A subject that is a protected directory names every path below it:
+    // `sh: <subject>/seed.txt: Operation not permitted`. An absolute
+    // subject is inherently anchored; a bare basename (`repo`) matches only
+    // as a COMPLETE leading path component (`repo/file` after a boundary),
+    // so `/tmp/notrepo/file` cannot classify. Same-line denial wording is
+    // still required by the caller.
     (subject.has_prefix("/") && line.contains("\{subject}/")) ||
+    (!subject.has_prefix("/") && names_component_bounded(line, subject)) ||
     // MoonBit's own OSError Show output escapes the quotes around the path
     // (`@fs.open(): \"keep.mbt\": Operation not permitted`), so the subject is
     // followed by `\"`, not a bare quote — run_moonbit's denial shape.

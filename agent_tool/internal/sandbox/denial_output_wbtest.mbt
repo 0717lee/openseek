@@ -58,3 +58,23 @@ test "directory subjects match below their root, basenames never do" {
     ),
   )
 }
+
+///|
+test "a basename subject matches as a complete leading component" {
+  // sh reports relative operands relative: `repo/file: Permission denied`.
+  assert_true(
+    source_write_denied_in_text("sh: repo/file: Permission denied", ["repo"]),
+  )
+  // Mid-path occurrences bounded by a slash stay recognized too.
+  assert_true(
+    source_write_denied_in_text("sh: ./repo/file: Operation not permitted", [
+      "repo",
+    ]),
+  )
+  // But never inside another component.
+  assert_false(
+    source_write_denied_in_text("sh: mynotrepo/file: Operation not permitted", [
+      "repo",
+    ]),
+  )
+}
