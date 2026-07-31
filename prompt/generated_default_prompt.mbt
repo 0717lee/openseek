@@ -207,9 +207,12 @@ fn default_prompt() -> String {
     #|    attach a check late. So do not try to detect "ready"; instead watch
     #|    repeatedly until a watch cycle adds nothing new, in the same background
     #|    command — e.g.
-    #|    `prev=-1; for i in $(seq 5); do gh pr checks <n> --watch >/dev/null 2>&1; n=$(gh pr checks <n> 2>/dev/null | wc -l); [ "$n" = "$prev" ] && break; prev=$n; sleep 10; done; gh pr checks <n>`.
+    #|    `prev=-1; for i in $(seq 6); do gh pr checks <n> --watch >/dev/null 2>&1; n=$(gh pr checks <n> 2>/dev/null | wc -l); [ "$n" -gt 0 ] && [ "$n" = "$prev" ] && break; prev=$n; sleep 10; done; gh pr checks <n>`.
     #|    Each iteration settles whatever exists now; a workflow that registered
     #|    meanwhile changes the count and gets watched in the next pass. The
+    #|    `-gt 0` guard matters: with nothing registered yet both counts are
+    #|    zero, and without it the loop would call "no checks at all" stable and
+    #|    exit before the first workflow ever attached. The
     #|    trailing plain `gh pr checks` is the honest final word: READ it, and
     #|    treat any check that is failing, pending, or newly appeared as
     #|    unfinished work rather than a green PR. Then keep working or finish the
