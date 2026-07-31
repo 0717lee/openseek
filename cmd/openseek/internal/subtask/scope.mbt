@@ -98,10 +98,11 @@ pub fn scope_violations(
 }
 
 ///|
-/// Paths of NEW gitlink (mode 160000) entries in the staged diff — an
-/// embedded repository `git add -A` swallowed as a pointer. Detected from
-/// `git diff --cached --raw -z` records (`:000000 160000 ... A NUL path`).
-pub fn new_gitlinks_in_raw_z(output : String) -> Array[String] {
+/// Paths that TRANSITION INTO gitlink mode (160000) in a raw -z diff — an
+/// embedded repository swallowed as a pointer, whether added over nothing
+/// (`:000000 160000 ... A`) or replacing a regular file (`:100644 160000
+/// ... T`). Pre-existing gitlinks (source already 160000) pass.
+pub fn gitlink_introductions_in_raw_z(output : String) -> Array[String] {
   let links : Array[String] = []
   let fields = output.split("\u{0}").map(f => f.to_owned()).collect()
   let mut index = 0
@@ -115,7 +116,7 @@ pub fn new_gitlinks_in_raw_z(output : String) -> Array[String] {
         .split(" ")
         .map(p => p.to_owned())
         .collect()
-      if parts.length() >= 5 && parts[1] == "160000" && parts[0] == "000000" {
+      if parts.length() >= 5 && parts[1] == "160000" && parts[0] != "160000" {
         links.push(fields[index + 1])
       }
       index += 2
@@ -162,7 +163,9 @@ test "scope violations are component-wise over every side" {
 }
 
 ///|
-test "new gitlinks are detected from raw -z records" {
-  let raw = ":000000 160000 0000000 abc1234 A\u{0}vendor/embedded\u{0}:000000 100644 0000000 def5678 A\u{0}lib/file.txt\u{0}"
-  assert_eq(new_gitlinks_in_raw_z(raw), ["vendor/embedded"])
+test "gitlink introductions are detected from raw -z records" {
+  let raw = ":000000 160000 0000000 abc1234 A\u{0}vendor/embedded\u{0}:000000 100644 0000000 def5678 A\u{0}lib/file.txt\u{0}:100644 160000 aaa1111 bbb2222 T\u{0}lib/swapped\u{0}:160000 160000 ccc3333 ddd4444 M\u{0}vendor/existing\u{0}"
+  assert_eq(gitlink_introductions_in_raw_z(raw), [
+    "vendor/embedded", "lib/swapped",
+  ])
 }
