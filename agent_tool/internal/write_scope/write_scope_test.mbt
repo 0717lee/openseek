@@ -114,7 +114,7 @@ async test "create validates root and prefixes strictly" {
     assert_true(no_root.contains("does not resolve"))
     for
       bad in [
-        "", ".", "..", "a/../b", "/abs", "a//b", ".git/hooks", ".worktrees/x", "src\\generated",
+        "", ".", "..", "a/../b", "/abs", "a//b", ".git/hooks", ".worktrees/x",
       ] {
       guard @write_scope.WriteScope::create(root~, allowed_paths=[bad])
         is Err(_) else {
@@ -152,5 +152,13 @@ async test "a POSIX backslash is a filename byte, not a separator" {
     // the surrounding path machinery would treat the backslash as a
     // separator and smuggle it into the allowed prefix, so it fails closed.
     assert_denies(scope, "\{root}/src\\outside", because="backslash")
+    // And a backslash-bearing prefix could never authorize anything here,
+    // so create rejects it (on Windows it is a separator and normalizes).
+    guard @write_scope.WriteScope::create(root~, allowed_paths=[
+        "src\\generated",
+      ])
+      is Err(_) else {
+      fail("expected a backslash prefix rejected on POSIX")
+    }
   })
 }
