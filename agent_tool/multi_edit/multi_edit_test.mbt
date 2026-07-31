@@ -655,3 +655,46 @@ test "multi_edit tool advertises the expected schema" {
   assert_true(text.contains("\"start_line\""))
   assert_true(text.contains("\"end_line\""))
 }
+
+///|
+async test "a write scope rejects the whole batch on one out-of-scope path" {
+  @vfs.with_tmpdir(prefix="multi-edit-scope-", dir => {
+    @vfs.FileSystem({ "lib/a.txt": "aa\n", "other/b.txt": "bb\n" }).write_to(
+      dir,
+    )
+    guard @write_scope.WriteScope::create(root=dir, allowed_paths=["lib"])
+      is Ok(scope) else {
+      fail("expected the scope to build")
+    }
+    let run = match
+      @multi_edit.definition(workspace_root=dir, write_scope=scope).execute {
+      Async(execute) => execute
+      Sync(_) => fail("multi_edit tool should be async")
+    }
+    guard run({
+        "edits": [
+          {
+            "file": "lib/a.txt",
+            "old_string": "aa",
+            "new_string": "AA",
+            "start_line": 1,
+          },
+          {
+            "file": "other/b.txt",
+            "old_string": "bb",
+            "new_string": "BB",
+            "start_line": 1,
+          },
+        ],
+      })
+      is Respond(output) else {
+      fail("expected Respond")
+    }
+    // All-or-nothing: the out-of-scope member rejects the batch and the
+    // in-scope file stays untouched too.
+    assert_true(output.is_error)
+    assert_true(output.content.contains("write blocked"))
+    assert_true(@fs.read_file("\{dir}/lib/a.txt").text() == "aa\n")
+    assert_true(@fs.read_file("\{dir}/other/b.txt").text() == "bb\n")
+  })
+}

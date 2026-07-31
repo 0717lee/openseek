@@ -1097,3 +1097,58 @@ async test "the expansion estimate does not overflow 32-bit arithmetic" {
     assert_true(preview.content.contains("omitted to keep the array parseable"))
   })
 }
+
+///|
+async test "a write scope confines edit to its allowed paths" {
+  @vfs.with_tmpdir(prefix="edit-scope-", dir => {
+    @vfs.FileSystem({
+      "lib/a.mbt": "pub fn f() -> Int { 1 }\n",
+      "other/b.txt": "hello\n",
+    }).write_to(dir)
+    guard @write_scope.WriteScope::create(root=dir, allowed_paths=["lib"])
+      is Ok(scope) else {
+      fail("expected the scope to build")
+    }
+    let run = match
+      @edit.definition(workspace_root=dir, write_scope=scope).execute {
+      Async(execute) => execute
+      Sync(_) => fail("edit tool should be async")
+    }
+    guard run({
+        "path": "lib/a.mbt",
+        "old_string": "1",
+        "new_string": "2",
+        "start_line": 1,
+      })
+      is Respond(admitted) else {
+      fail("expected Respond")
+    }
+    assert_false(admitted.is_error)
+    guard run({
+        "path": "other/b.txt",
+        "old_string": "hello",
+        "new_string": "bye",
+        "start_line": 1,
+      })
+      is Respond(blocked) else {
+      fail("expected Respond")
+    }
+    assert_true(blocked.is_error)
+    assert_true(blocked.content.contains("write blocked"))
+    assert_true(@fs.read_file("\{dir}/other/b.txt").text() == "hello\n")
+    // An in-scope link to an out-of-scope file is denied on its resolution.
+    @fs.symlink(target="\{dir}/other/b.txt", "\{dir}/lib/link.txt")
+    guard run({
+        "path": "lib/link.txt",
+        "old_string": "hello",
+        "new_string": "bye",
+        "start_line": 1,
+      })
+      is Respond(via_link) else {
+      fail("expected Respond")
+    }
+    assert_true(via_link.is_error)
+    assert_true(via_link.content.contains("write blocked"))
+    assert_true(@fs.read_file("\{dir}/other/b.txt").text() == "hello\n")
+  })
+}

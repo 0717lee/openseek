@@ -44,6 +44,7 @@
 pub fn definition(
   workspace_root? : String = ".",
   file_state? : @agent_tool.FileStateMap = @agent_tool.FileStateMap::new(),
+  write_scope? : @write_scope.WriteScope,
 ) -> @agent_tool.AgentToolDefinition {
   AgentToolDefinition(
     name="edit",
@@ -113,7 +114,12 @@ pub fn definition(
       "required": ["path", "old_string", "new_string", "start_line"],
     }),
     execute=Async(arguments => {
-      execute_with_workspace(workspace_root, file_state, arguments)
+      execute_with_workspace(
+        workspace_root,
+        file_state,
+        arguments,
+        write_scope?,
+      )
     }),
   )
 }
@@ -123,6 +129,7 @@ async fn execute_with_workspace(
   workspace_root : String,
   file_state : @agent_tool.FileStateMap,
   arguments : Json,
+  write_scope? : @write_scope.WriteScope,
 ) -> @agent_tool.ToolAction {
   let input = @decode.decode(arguments) catch {
     error => {
@@ -134,7 +141,19 @@ async fn execute_with_workspace(
     }
   }
   let path = @workspace_path.resolve(workspace_root, input.path)
-  edit_file(input, path~, file_state~)
+  // Containment gate for confined (worker) registries. Previews write
+  // nothing, so they stay readable everywhere; the write itself is gated
+  // again in commit_edit, immediately before the file is touched.
+  if !input.replace_all_preview &&
+    write_scope is Some(scope) &&
+    scope.deny_reason(path) is Some(reason) {
+    return @agent_tool.ToolAction::respond(
+      "error editing \{path}: write blocked: \{reason}",
+      is_error=true,
+      brief="edit \{@agent_tool.brief_basename(path)}",
+    )
+  }
+  edit_file(input, path~, file_state~, write_scope?)
 }
 
 ///|
@@ -142,6 +161,7 @@ async fn edit_file(
   input : @decode.EditInput,
   path~ : String,
   file_state~ : @agent_tool.FileStateMap,
+  write_scope? : @write_scope.WriteScope,
 ) -> @agent_tool.ToolAction {
   // Every failure names the file it tried to edit so the viz can show
   // `→ edit · edit <file> 🚩` on the folded call line.
@@ -213,6 +233,7 @@ async fn edit_file(
       summary~,
       ok_brief~,
       file_state~,
+      write_scope?,
     )
   }
   let region = select_edit_region(content, input)
@@ -235,6 +256,7 @@ async fn edit_file(
     summary="ok: replaced 1 occurrence(s) at line \{match_line} in \{path}",
     ok_brief="edited \{@agent_tool.brief_basename(path)}:\{match_line} (1×)",
     file_state~,
+    write_scope?,
   )
 }
 
@@ -616,6 +638,7 @@ async fn commit_edit(
   summary~ : String,
   ok_brief~ : String,
   file_state~ : @agent_tool.FileStateMap,
+  write_scope? : @write_scope.WriteScope,
 ) -> @agent_tool.ToolAction {
   if @manifest_error.write_error(path, new_content) is Some(message) {
     return @agent_tool.ToolAction::respond(
@@ -632,6 +655,16 @@ async fn commit_edit(
     )
     is Some(rejection) {
     return rejection
+  }
+  // Containment re-check at the moment of writing: the early gate decided on
+  // filesystem state that awaits ago may have changed (a path component
+  // re-linked underneath the tool).
+  if write_scope is Some(scope) && scope.deny_reason(path) is Some(reason) {
+    return @agent_tool.ToolAction::respond(
+      "error editing \{path}: write blocked: \{reason}",
+      is_error=true,
+      brief=fail_brief,
+    )
   }
   @fs.write_file(path, new_content, create_mode=CreateOrTruncate)
   // A targeted edit preserves most of the file, so provenance depends on

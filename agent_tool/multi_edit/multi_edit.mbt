@@ -11,6 +11,7 @@
 pub fn definition(
   workspace_root? : String = ".",
   file_state? : @agent_tool.FileStateMap = @agent_tool.FileStateMap::new(),
+  write_scope? : @write_scope.WriteScope,
 ) -> @agent_tool.AgentToolDefinition {
   AgentToolDefinition(
     name="multi_edit",
@@ -110,7 +111,12 @@ pub fn definition(
       },
     }),
     execute=Async(arguments => {
-      execute_with_workspace(workspace_root, file_state, arguments)
+      execute_with_workspace(
+        workspace_root,
+        file_state,
+        arguments,
+        write_scope?,
+      )
     }),
   )
 }
@@ -120,6 +126,7 @@ async fn execute_with_workspace(
   workspace_root : String,
   file_state : @agent_tool.FileStateMap,
   arguments : Json,
+  write_scope? : @write_scope.WriteScope,
 ) -> @agent_tool.ToolAction {
   let args = @decode.decode_args(arguments) catch {
     error =>
@@ -148,6 +155,7 @@ async fn execute_with_workspace(
     args.revert_when_errors_above,
     revert_on_parse_errors=args.revert_on_parse_errors,
     file_state~,
+    write_scope?,
   )
 }
 
@@ -240,6 +248,7 @@ async fn multi_edit_files(
   revert_when_errors_above : Int?,
   revert_on_parse_errors~ : Bool,
   file_state~ : @agent_tool.FileStateMap,
+  write_scope? : @write_scope.WriteScope,
 ) -> @agent_tool.ToolAction {
   let brief = "multi_edit"
   // Resolve every edit's path up front and key contiguity and grouping on the
@@ -295,11 +304,25 @@ async fn multi_edit_files(
     )
   }
   // Render each file and run the write guard before touching disk, so a guarded
-  // path aborts the whole batch instead of leaving earlier files written.
+  // path aborts the whole batch instead of leaving earlier files written. The
+  // containment gate (confined worker registries) joins the same all-or-nothing
+  // contract: one out-of-scope path rejects the batch with nothing written.
   let writes : Array[PreparedWrite] = []
   for prepared_file in prepared {
     let new_content = apply_plans(prepared_file.content, prepared_file.plans)
-    match @manifest_error.write_error(prepared_file.path, new_content) {
+    let guard_message = match
+      @manifest_error.write_error(prepared_file.path, new_content) {
+      Some(message) => Some(message)
+      None =>
+        if write_scope is Some(scope) {
+          scope
+          .deny_reason(prepared_file.path)
+          .map(reason => "write blocked: \{reason}")
+        } else {
+          None
+        }
+    }
+    match guard_message {
       Some(message) =>
         failures.push({
           file: prepared_file.file,
@@ -333,6 +356,16 @@ async fn multi_edit_files(
     return rejection
   }
   for write in writes {
+    // Containment re-check at the moment of writing: the batch gate above
+    // decided on filesystem state that awaits ago may have changed.
+    if write_scope is Some(scope) &&
+      scope.deny_reason(write.path) is Some(reason) {
+      return @agent_tool.ToolAction::respond(
+        "error multi_editing \{write.path}: write blocked: \{reason}; earlier files in the batch may already be written",
+        is_error=true,
+        brief~,
+      )
+    }
     @fs.write_file(write.path, write.new_content, create_mode=CreateOrTruncate) catch {
       error if @async.is_being_cancelled() => raise error
       error =>
@@ -356,6 +389,7 @@ async fn multi_edit_files(
         first.path,
         writes,
         effective_revert_threshold(revert_when_errors_above),
+        write_scope?,
       )
     None =>
       @agent_tool.ToolAction::respond(
@@ -543,6 +577,7 @@ async fn revert_guarded_response(
   check_path : String,
   writes : Array[PreparedWrite],
   threshold : Int,
+  write_scope? : @write_scope.WriteScope,
 ) -> @agent_tool.ToolAction {
   let summary = success_summary(writes)
   let kept = @agent_tool.ToolAction::respond(
@@ -562,7 +597,11 @@ async fn revert_guarded_response(
   // Suspicious: the post-batch error count is over the line. Measure the
   // pre-batch baseline by restoring the originals and re-checking, so the guard
   // fires on errors this batch INTRODUCED, not on ones that were already there.
-  let restore_failures = write_files(writes, write => write.original_content)
+  let restore_failures = write_files(
+    writes,
+    write => write.original_content,
+    write_scope?,
+  )
   let before = count_errors_or_none(check_path)
   let before_count = before.map(b => b.error_count).unwrap_or(0)
   let introduced = after.error_count - before_count
@@ -575,7 +614,7 @@ async fn revert_guarded_response(
     )
   } else {
     // False alarm: the errors were mostly pre-existing. Re-apply and keep.
-    let _ = write_files(writes, write => write.new_content)
+    let _ = write_files(writes, write => write.new_content, write_scope?)
     @agent_tool.ToolAction::respond(
       keep_response(summary, after, threshold, introduced~),
       brief=success_brief(writes),
@@ -597,13 +636,20 @@ async fn count_errors_or_none(path : String) -> @auto_check.CheckErrors? {
 /// Write `content(write)` to every file, returning the paths that could not be
 /// written (best effort — a restore/re-apply must not raise mid-rollback). A
 /// non-empty result is surfaced in the revert report so a half-restored tree is
-/// never reported as a clean rollback.
+/// never reported as a clean rollback. The containment scope gates these
+/// restore/re-apply writes too — a path whose resolution changed since the
+/// batch was admitted is skipped and reported rather than written blind.
 async fn write_files(
   writes : Array[PreparedWrite],
   content : (PreparedWrite) -> String,
+  write_scope? : @write_scope.WriteScope,
 ) -> Array[String] {
   let failures : Array[String] = []
   for write in writes {
+    if write_scope is Some(scope) && scope.deny_reason(write.path) is Some(_) {
+      failures.push(write.path)
+      continue
+    }
     @fs.write_file(write.path, content(write), create_mode=CreateOrTruncate) catch {
       error if @async.is_being_cancelled() => raise error
       _ => failures.push(write.path)

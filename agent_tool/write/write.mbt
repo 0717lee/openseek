@@ -32,6 +32,7 @@
 pub fn definition(
   workspace_root? : String = ".",
   file_state? : @agent_tool.FileStateMap = @agent_tool.FileStateMap::new(),
+  write_scope? : @write_scope.WriteScope,
 ) -> @agent_tool.AgentToolDefinition {
   AgentToolDefinition(
     name="write",
@@ -71,7 +72,12 @@ pub fn definition(
       "required": ["path", "content"],
     }),
     execute=Async(arguments => {
-      execute_with_workspace(workspace_root, file_state, arguments)
+      execute_with_workspace(
+        workspace_root,
+        file_state,
+        arguments,
+        write_scope?,
+      )
     }),
   )
 }
@@ -86,6 +92,7 @@ async fn execute_with_workspace(
   workspace_root : String,
   file_state : @agent_tool.FileStateMap,
   arguments : Json,
+  write_scope? : @write_scope.WriteScope,
 ) -> @agent_tool.ToolAction {
   let input = @decode.decode(arguments) catch {
     error => {
@@ -97,7 +104,16 @@ async fn execute_with_workspace(
     }
   }
   let path = @workspace_path.resolve(workspace_root, input.path)
-  write_file(input, path~, file_state~)
+  // Containment gate for confined (worker) registries; re-checked below
+  // immediately before the file is written.
+  if write_scope is Some(scope) && scope.deny_reason(path) is Some(reason) {
+    return @agent_tool.ToolAction::respond(
+      "error writing \{path}: write blocked: \{reason}",
+      is_error=true,
+      brief="write \{@agent_tool.brief_basename(path)}",
+    )
+  }
+  write_file(input, path~, file_state~, write_scope?)
 }
 
 ///|
@@ -105,6 +121,7 @@ async fn write_file(
   input : @decode.WriteInput,
   path~ : String,
   file_state~ : @agent_tool.FileStateMap,
+  write_scope? : @write_scope.WriteScope,
 ) -> @agent_tool.ToolAction {
   if @manifest_error.write_error(path, input.content) is Some(message) {
     return @agent_tool.ToolAction::respond(
@@ -161,6 +178,16 @@ async fn write_file(
         )
       }
     }
+  }
+  // Containment re-check at the moment of writing (before parent directories
+  // are created for the target): the early gate decided on filesystem state
+  // that awaits ago may have changed underneath the tool.
+  if write_scope is Some(scope) && scope.deny_reason(path) is Some(reason) {
+    return @agent_tool.ToolAction::respond(
+      "error writing \{path}: write blocked: \{reason}",
+      is_error=true,
+      brief="write \{@agent_tool.brief_basename(path)}",
+    )
   }
   create_parent_dirs(path)
   // Probe before writing so the result can tell the model whether it created a
@@ -786,5 +813,32 @@ async test "write records an overwrite of a pre-existing file as Modified" {
     }
     let _ = run({ "path": path, "content": "new" })
     assert_true(state.get(path) is Some(Modified))
+  })
+}
+
+///|
+async test "a write scope confines write to its allowed paths" {
+  @vfs.with_tmpdir(prefix="openseek-write-scope-", dir => {
+    @vfs.FileSystem({ "lib/keep.txt": "k\n" }).write_to(dir)
+    guard @write_scope.WriteScope::create(root=dir, allowed_paths=["lib"])
+      is Ok(scope) else {
+      fail("expected the scope to build")
+    }
+    let run = match definition(workspace_root=dir, write_scope=scope).execute {
+      Async(execute) => execute
+      Sync(_) => fail("write tool should be async")
+    }
+    guard run({ "path": "lib/new.txt", "content": "n\n" }) is Respond(admitted) else {
+      fail("expected Respond")
+    }
+    assert_false(admitted.is_error)
+    assert_eq(@fs.read_file("\{dir}/lib/new.txt").text(), "n\n")
+    // Out of scope: blocked before parent directories are even created.
+    guard run({ "path": "other/new.txt", "content": "n\n" }) is Respond(blocked) else {
+      fail("expected Respond")
+    }
+    assert_true(blocked.is_error)
+    assert_true(blocked.content.contains("write blocked"))
+    assert_false(@fs.exists("\{dir}/other"))
   })
 }
