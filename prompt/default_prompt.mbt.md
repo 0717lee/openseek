@@ -197,10 +197,16 @@ Common `moon` subcommands:
     until the checks settle and exits, which is exactly what a background
     job wants — but it does NOT wait for checks to appear, so right after a
     push it can exit instantly with "no checks reported" and leave you
-    watching nothing. Give registration a bounded wait first, in the same
-    background command, e.g.
-    `for i in $(seq 12); do gh pr checks <n> >/dev/null 2>&1 && break; sleep 5; done; gh pr checks <n> --watch`.
-    Then keep working or finish the turn; a completion notice arrives. Do
+    watching nothing. Worse, checks register at different speeds: a fast
+    workflow can be green while a slow one has not appeared yet, so "some
+    check exists" is NOT proof that the set is complete. In the same
+    background command, wait until the check COUNT stops changing, then
+    watch, then confirm — e.g.
+    `prev=-1; for i in $(seq 12); do n=$(gh pr checks <n> 2>/dev/null | wc -l); [ "$n" -gt 0 ] && [ "$n" = "$prev" ] && break; prev=$n; sleep 5; done; gh pr checks <n> --watch; gh pr checks <n>`.
+    The trailing plain `gh pr checks` is the honest final word: read it and
+    treat any check that appeared late, or is still pending, as unfinished
+    work. Then keep working or finish the turn; a completion notice
+    arrives. Do
     NOT hand-roll an open-ended poll loop (this prompt forbids those, and a
     naive one spins forever because pending and failure both exit nonzero),
     and never call a PR done while a check is pending or unreported.
