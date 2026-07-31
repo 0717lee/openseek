@@ -36,16 +36,35 @@ fn subtask_tool_definition(
       #|to merge its branch here (re-run your checks after each); on a conflict, resolve
       #|the markers with the file tools, then integrate_continue=<name> (or
       #|integrate_abort=<name>); discard=<name> abandons a slice and frees its paths.
-      #|Independent slices? Issue SEVERAL subtask launches in the same step — they run
-      #|concurrently (2-4 is a good batch; at most 4 run at once). Commit your own work
-      #|first: workers fork this repository's HEAD.
+      #|PARALLELISM: to run several slices at once, pass them as `slices`: an ARRAY of
+      #|{name, task, allowed_paths, context?} objects in ONE call — they are launched
+      #|concurrently and reported together (2-4 per call; at most 4 run at once). Prefer
+      #|this over issuing separate calls, which the loop can only overlap when they land
+      #|in the same step. Commit your own work first: workers fork this repository's HEAD.
     ),
     schema=JsonSchema({
       "type": "object",
       "properties": {
+        "slices": {
+          "type": "array",
+          "description": "Parallel launch: several {name, task, allowed_paths, context?} slices run CONCURRENTLY from this one call. Their allowed_paths must be disjoint from each other and from any active subtask.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": { "type": "string" },
+              "task": { "type": "string" },
+              "allowed_paths": {
+                "type": "array",
+                "items": { "type": "string" },
+              },
+              "context": { "type": "string" },
+            },
+            "required": ["name", "task", "allowed_paths"],
+          },
+        },
         "name": {
           "type": "string",
-          "description": "Launch: short lowercase slug naming the slice (becomes the branch and worktree name).",
+          "description": "Single launch: short lowercase slug naming the slice (becomes the branch and worktree name).",
         },
         "task": {
           "type": "string",
@@ -114,8 +133,40 @@ async fn subtask_execute(
       return subtask_lifecycle(workspace_root, "discard", name)
     _ => ()
   }
-  subtask_launch(
-    self_exe, model, workspace_root, budget, api_url, child_session, arguments,
+  // `slices` launches several confined workers CONCURRENTLY from one call;
+  // a bare name/task/allowed_paths object is the single-slice form.
+  let specs : Array[LaunchSpec] = []
+  match arguments {
+    { "slices": Array(entries), .. } => {
+      guard !entries.is_empty() else {
+        return @agent_tool.ToolAction::respond(
+          "error: subtask `slices` must not be empty",
+          is_error=true,
+        )
+      }
+      for entry in entries {
+        match decode_launch(entry) {
+          Ok(spec) => specs.push(spec)
+          Err(reason) =>
+            return @agent_tool.ToolAction::respond(
+              "error: \{reason}",
+              is_error=true,
+            )
+        }
+      }
+    }
+    _ =>
+      match decode_launch(arguments) {
+        Ok(spec) => specs.push(spec)
+        Err(reason) =>
+          return @agent_tool.ToolAction::respond(
+            "error: \{reason}",
+            is_error=true,
+          )
+      }
+  }
+  subtask_launch_many(
+    self_exe, model, workspace_root, budget, api_url, child_session, specs,
   )
 }
 
@@ -174,60 +225,120 @@ async fn subtask_lifecycle(
 }
 
 ///|
-async fn subtask_launch(
+/// One decoded launch request.
+priv struct LaunchSpec {
+  name : String
+  task : String
+  context : String?
+  allowed_paths : Array[String]
+}
+
+///|
+/// Decode one launch object (the tool's own arguments, or one element of
+/// `slices`). `Err` carries the model-facing message.
+fn decode_launch(spec : Json) -> Result[LaunchSpec, String] {
+  guard spec is { "name": String(name), .. } && name.trim() != "" else {
+    return Err(
+      "subtask requires `name` (launch), `slices` (parallel launch), or one of integrate/integrate_continue/integrate_abort/discard",
+    )
+  }
+  guard spec is { "task": String(task), .. } && task.trim() != "" else {
+    return Err("subtask launch requires a non-empty `task` for \{name}")
+  }
+  guard task.length() <= max_task_chars else {
+    return Err("subtask task for \{name} exceeds \{max_task_chars} chars")
+  }
+  let context : String? = match spec {
+    { "context": String(context), .. } if context.trim() != "" => Some(context)
+    _ => None
+  }
+  guard !(context is Some(c) && c.length() > max_context_chars) else {
+    return Err("subtask context for \{name} exceeds \{max_context_chars} chars")
+  }
+  let allowed_paths : Array[String] = []
+  guard spec is { "allowed_paths": Array(prefixes), .. } && !prefixes.is_empty() else {
+    return Err(
+      "subtask launch \{name} requires a non-empty `allowed_paths` array — the repo-relative prefixes this slice may change",
+    )
+  }
+  for prefix in prefixes {
+    guard prefix is String(prefix) && prefix.trim() != "" else {
+      return Err("allowed_paths entries must be non-empty strings (\{name})")
+    }
+    allowed_paths.push(prefix)
+  }
+  Ok({ name, task, context, allowed_paths })
+}
+
+///|
+/// Launch every slice CONCURRENTLY and render one combined result. This is
+/// the structural answer to a real dogfood finding: batching several
+/// `subtask` calls into one assistant message parallelizes them, but that
+/// is advisory — in a production sweep the model serialized 2 of 3 fan-outs
+/// and paid ~2.7x the wall-clock. One call carrying N slices cannot be
+/// serialized by accident.
+async fn subtask_launch_many(
   self_exe : String,
   model : @deepseek.Model,
   workspace_root : String,
   budget : @agent_subrun.SubrunBudget,
   api_url : String?,
   child_session : @agent_subrun.ChildSession?,
-  arguments : Json,
+  specs : Array[LaunchSpec],
 ) -> @agent_tool.ToolAction {
-  guard arguments is { "name": String(name), .. } && name.trim() != "" else {
-    return @agent_tool.ToolAction::respond(
-      "error: subtask requires `name` (launch) or one of integrate/integrate_continue/integrate_abort/discard",
-      is_error=true,
-    )
-  }
-  guard arguments is { "task": String(task), .. } && task.trim() != "" else {
-    return @agent_tool.ToolAction::respond(
-      "error: subtask launch requires a non-empty `task`",
-      is_error=true,
-    )
-  }
-  guard task.length() <= max_task_chars else {
-    return @agent_tool.ToolAction::respond(
-      "error: subtask task exceeds \{max_task_chars} chars",
-      is_error=true,
-    )
-  }
-  let context : String? = match arguments {
-    { "context": String(context), .. } if context.trim() != "" => Some(context)
-    _ => None
-  }
-  guard !(context is Some(c) && c.length() > max_context_chars) else {
-    return @agent_tool.ToolAction::respond(
-      "error: subtask context exceeds \{max_context_chars} chars",
-      is_error=true,
-    )
-  }
-  let allowed_paths : Array[String] = []
-  guard arguments is { "allowed_paths": Array(prefixes), .. } &&
-    !prefixes.is_empty() else {
-    return @agent_tool.ToolAction::respond(
-      "error: subtask launch requires a non-empty `allowed_paths` array — the repo-relative prefixes this slice may change",
-      is_error=true,
-    )
-  }
-  for prefix in prefixes {
-    guard prefix is String(prefix) && prefix.trim() != "" else {
-      return @agent_tool.ToolAction::respond(
-        "error: allowed_paths entries must be non-empty strings",
-        is_error=true,
-      )
+  let results : Map[Int, @agent_tool.ToolAction] = Map([])
+  @async.with_task_group(scope => {
+    for index, spec in specs {
+      scope.spawn_bg(() => {
+        results.set(
+          index,
+          subtask_launch_one(
+            self_exe, model, workspace_root, budget, api_url, child_session, spec,
+          ),
+        )
+      })
     }
-    allowed_paths.push(prefix)
+  })
+  let out = StringBuilder()
+  let mut any_error = false
+  let briefs : Array[String] = []
+  for index, spec in specs {
+    out <+ "## \{spec.name}\n"
+    match results.get(index) {
+      Some(Respond(output)) => {
+        out <+ "\{output.content}\n\n"
+        if output.is_error {
+          any_error = true
+        }
+        briefs.push(spec.name)
+      }
+      _ => {
+        out <+ "(no result)\n\n"
+        any_error = true
+      }
+    }
   }
+  @agent_tool.ToolAction::respond(
+    out.to_string(),
+    is_error=any_error,
+    brief="subtask \{specs.length()} slices (\{briefs.join(", ")})",
+  )
+}
+
+///|
+async fn subtask_launch_one(
+  self_exe : String,
+  model : @deepseek.Model,
+  workspace_root : String,
+  budget : @agent_subrun.SubrunBudget,
+  api_url : String?,
+  child_session : @agent_subrun.ChildSession?,
+  spec : LaunchSpec,
+) -> @agent_tool.ToolAction {
+  let name = spec.name
+  let task = spec.task
+  let context = spec.context
+  let allowed_paths = spec.allowed_paths
   // Slots and budget are reserved BEFORE any state is created, so every
   // later failure path has exactly one transaction to roll back.
   guard worker_slots.try_acquire() else {

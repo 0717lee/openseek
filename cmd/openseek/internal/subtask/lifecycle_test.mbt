@@ -310,3 +310,39 @@ async test "provision refuses linked-worktree origins and submodule slices" {
     assert_true(linked.contains("MAIN worktree"))
   })
 }
+
+///|
+/// Two disjoint slices provisioned back-to-back both go live — the shape a
+/// one-call `slices` fan-out relies on (the tool layer runs these
+/// concurrently; here the controller-level invariant is what matters).
+async test "disjoint slices coexist as active reservations" {
+  @vfs.with_tmpdir(prefix="openseek-subtask-fanout-", dir => {
+    let repo = seed_repo(dir)
+    let a = must_provision(
+      repo,
+      name="slice-a",
+      allowed_paths=["lib"],
+      nonce="n1",
+    )
+    let b = must_provision(
+      repo,
+      name="slice-b",
+      allowed_paths=["other"],
+      nonce="n2",
+    )
+    assert_true(a.entry.state is Running)
+    assert_true(b.entry.state is Running)
+    assert_true(@fs.exists("\{a.entry.worker_root}/lib/a.txt"))
+    assert_true(@fs.exists("\{b.entry.worker_root}/other/b.txt"))
+    // Both reservations are visible; a third overlapping slice is refused.
+    guard @subtask.provision(
+        repo,
+        name="slice-c",
+        allowed_paths=["lib/deep"],
+        nonce="n3",
+      )
+      is Err(_) else {
+      fail("expected the overlapping third slice to be refused")
+    }
+  })
+}

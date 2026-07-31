@@ -15,4 +15,3 @@ pub fn system_prompt_for_model(@deepseek.Model) -> String
 // Type aliases
 
 // Traits
-
