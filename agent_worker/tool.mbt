@@ -1,0 +1,185 @@
+// `worker_system_prompt()` — the confined write-capable worker's system
+// prompt — is generated from `worker_system_prompt.mbt.md` by the
+// `md_to_mbt_string` dev_build rule (see moon.pkg). Edit the markdown, not
+// the generated `.mbt`.
+
+///|
+/// Step ceiling requested for one worker child. Same reasoning as explore's:
+/// a truncated child burns its allowance and returns nothing, so the ceiling
+/// is generous and the prompt's answer-early rule is what bounds real cost.
+pub let default_worker_max_steps : Int = 100
+
+///|
+/// Wall deadline for one worker child: real edit+verify loops run moon
+/// check/test repeatedly, so a worker gets twice the scout's ten minutes.
+pub let default_worker_deadline_ms : Int = 1_200_000
+
+///|
+/// The geometry and work order a worker child receives from the subtask
+/// controller, decoded from the `subrun worker` input line. Every path is
+/// canonical (the controller realpaths at provision time) — the child does
+/// not re-derive geometry, it enforces with what it was handed.
+pub struct WorkerInput {
+  task : String
+  context : String?
+  worker_root : String
+  worker_admin_dir : String
+  deny_roots : Array[String]
+  allowed_paths : Array[String]
+  base_oid : String
+} derive(Debug, Eq)
+
+///|
+/// Decode and validate the input line. `Err` names the defect — the child
+/// dispatch surfaces it as a command error rather than running unconfined.
+pub fn WorkerInput::parse(input : Json) -> Result[WorkerInput, String] {
+  guard input is { "task": String(task), .. } && task.trim() != "" else {
+    return Err("worker input requires a non-empty `task`")
+  }
+  let context : String? = match input {
+    { "context": String(context), .. } if context.trim() != "" => Some(context)
+    _ => None
+  }
+  guard input is { "worker_root": String(worker_root), .. } &&
+    worker_root.has_prefix("/") else {
+    return Err("worker input requires an absolute `worker_root`")
+  }
+  guard input is { "worker_admin_dir": String(worker_admin_dir), .. } &&
+    worker_admin_dir.has_prefix("/") else {
+    return Err("worker input requires an absolute `worker_admin_dir`")
+  }
+  guard input is { "base_oid": String(base_oid), .. } && base_oid.trim() != "" else {
+    return Err("worker input requires a non-empty `base_oid`")
+  }
+  let deny_roots : Array[String] = []
+  guard input is { "deny_roots": Array(roots), .. } && !roots.is_empty() else {
+    return Err("worker input requires a non-empty `deny_roots` array")
+  }
+  for root in roots {
+    guard root is String(root) && root.has_prefix("/") else {
+      return Err("worker input deny_roots must be absolute paths")
+    }
+    deny_roots.push(root)
+  }
+  let allowed_paths : Array[String] = []
+  guard input is { "allowed_paths": Array(prefixes), .. } &&
+    !prefixes.is_empty() else {
+    return Err("worker input requires a non-empty `allowed_paths` array")
+  }
+  for prefix in prefixes {
+    guard prefix is String(prefix) && prefix.trim() != "" else {
+      return Err("worker input allowed_paths must be non-empty strings")
+    }
+    allowed_paths.push(prefix)
+  }
+  Ok({
+    task,
+    context,
+    worker_root,
+    worker_admin_dir,
+    deny_roots,
+    allowed_paths,
+    base_oid,
+  })
+}
+
+///|
+/// The child's task text: the work order, its boundaries, and the base it
+/// forked from — everything the worker needs to stay honest about scope.
+fn worker_task(input : WorkerInput) -> String {
+  let out = StringBuilder()
+  out <+ "Your assigned slice of work:\n\n\{input.task}\n"
+  if input.context is Some(context) {
+    out <+ "\nContext from the delegating agent:\n\{context}\n"
+  }
+  out <+ "\nYour worktree (your whole writable world): \{input.worker_root}\n"
+  out <+
+    "Allowed paths (relative to the worktree; the file tools enforce these):\n"
+  for prefix in input.allowed_paths {
+    out <+ "- \{prefix}\n"
+  }
+  out <+
+    "\nYou forked from commit \{input.base_oid}. Do not commit — the harness commits and merges validated changes after you submit_result.\n"
+  out.to_string()
+}
+
+///|
+/// The CHILD-side entry for `openseek subrun worker`: decode the input
+/// line, assemble the confined toolset, run the worker's turn in this
+/// process, and return the report (the dispatch prints it as the final
+/// `subrun_report` line). `Err` for malformed input — the child must never
+/// run unconfined; `Ok(None)` when the child finished without a valid
+/// submission.
+pub async fn run_child(
+  input : Json,
+  api_key~ : String,
+  model~ : @deepseek.Model,
+  max_steps~ : Int,
+  thinking? : @deepseek.ThinkingMode = Max,
+  api_url? : String,
+  session_id? : String = "worker",
+  append_item? : async (@agent_session.Session, @agent_session.SessionItem) -> @agent_session.Session,
+) -> Result[WorkerReport?, String] {
+  let input = match WorkerInput::parse(input) {
+    Ok(input) => input
+    Err(reason) => return Err(reason)
+  }
+  let write_scope = match
+    @write_scope.WriteScope::create(
+      root=input.worker_root,
+      allowed_paths=input.allowed_paths,
+    ) {
+    Ok(scope) => scope
+    Err(reason) => return Err(reason)
+  }
+  let worker_sandbox : @shell.WorkerSandbox = {
+    deny_roots: input.deny_roots,
+    worker_root: input.worker_root,
+    worker_admin_dir: input.worker_admin_dir,
+  }
+  // One provenance map across every file tool, as the main registry wires
+  // it: remove's created-only gate and edit's rebind detection only work
+  // when all four tools share the record.
+  let file_state = @agent_tool.FileStateMap::new()
+  let report = @agent_subrun.execute_kind(
+    session_id~,
+    append_item?,
+    system_prompt=worker_system_prompt(),
+    task=worker_task(input),
+    tools=captured => {
+      Tools([
+        @read.definition(workspace_root=input.worker_root),
+        @shell.definition(workspace_root=input.worker_root, worker_sandbox~),
+        @edit.definition(
+          workspace_root=input.worker_root,
+          file_state~,
+          write_scope~,
+        ),
+        @multi_edit.definition(
+          workspace_root=input.worker_root,
+          file_state~,
+          write_scope~,
+        ),
+        @write.definition(
+          workspace_root=input.worker_root,
+          file_state~,
+          write_scope~,
+        ),
+        @remove.definition(
+          workspace_root=input.worker_root,
+          file_state~,
+          write_scope~,
+        ),
+        @run_moonbit.definition(workspace_root=input.worker_root),
+        submit_result_tool(captured),
+      ])
+    },
+    max_steps~,
+    api_key~,
+    model~,
+    thinking~,
+    api_url?,
+    workspace_root=input.worker_root,
+  )
+  Ok(report)
+}

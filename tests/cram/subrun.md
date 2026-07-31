@@ -27,3 +27,13 @@ asynchronously drained queue.
 $ (printf '{}\n'; sleep 1) | openseek.exe subrun nope | sed -E 's/"timestamp":"[^"]*"/"timestamp":"T"/; s/"source":"[^"]*"/"source":"S"/'
 {"timestamp":"T","level":"ERROR","source":"S","event":"command_error","error":"unknown subrun kind: nope"}
 ```
+
+## Worker Kind: Malformed Input Reports Its Exact Defect, Keyless
+
+The worker kind validates its geometry input BEFORE requiring an API key, so
+a miswired controller gets the precise defect rather than a key complaint.
+
+```mooncram
+$ (printf '{"task": "fix things"}\n'; sleep 1) | openseek.exe subrun worker | sed -E 's/"timestamp":"[^"]*"/"timestamp":"T"/; s/"source":"[^"]*"/"source":"S"/'
+{"timestamp":"T","level":"ERROR","source":"S","event":"command_error","error":"subrun worker: worker input requires an absolute `worker_root`"}
+```
