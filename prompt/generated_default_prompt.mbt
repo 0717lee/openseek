@@ -202,16 +202,18 @@ fn default_prompt() -> String {
     #|    until the checks settle and exits, which is exactly what a background
     #|    job wants — but it does NOT wait for checks to appear, so right after a
     #|    push it can exit instantly with "no checks reported" and leave you
-    #|    watching nothing. Worse, checks register at different speeds: a fast
-    #|    workflow can be green while a slow one has not appeared yet, so "some
-    #|    check exists" is NOT proof that the set is complete. In the same
-    #|    background command, wait until the check COUNT stops changing, then
-    #|    watch, then confirm — e.g.
-    #|    `prev=-1; for i in $(seq 12); do n=$(gh pr checks <n> 2>/dev/null | wc -l); [ "$n" -gt 0 ] && [ "$n" = "$prev" ] && break; prev=$n; sleep 5; done; gh pr checks <n> --watch; gh pr checks <n>`.
-    #|    The trailing plain `gh pr checks` is the honest final word: read it and
-    #|    treat any check that appeared late, or is still pending, as unfinished
-    #|    work. Then keep working or finish the turn; a completion notice
-    #|    arrives. Do
+    #|    watching nothing. Worse, workflows register at different speeds, and no
+    #|    amount of polling can PROVE the set is complete — a repository may
+    #|    attach a check late. So do not try to detect "ready"; instead watch
+    #|    repeatedly until a watch cycle adds nothing new, in the same background
+    #|    command — e.g.
+    #|    `prev=-1; for i in $(seq 5); do gh pr checks <n> --watch >/dev/null 2>&1; n=$(gh pr checks <n> 2>/dev/null | wc -l); [ "$n" = "$prev" ] && break; prev=$n; sleep 10; done; gh pr checks <n>`.
+    #|    Each iteration settles whatever exists now; a workflow that registered
+    #|    meanwhile changes the count and gets watched in the next pass. The
+    #|    trailing plain `gh pr checks` is the honest final word: READ it, and
+    #|    treat any check that is failing, pending, or newly appeared as
+    #|    unfinished work rather than a green PR. Then keep working or finish the
+    #|    turn; a completion notice arrives. Do
     #|    NOT hand-roll an open-ended poll loop (this prompt forbids those, and a
     #|    naive one spins forever because pending and failure both exit nonzero),
     #|    and never call a PR done while a check is pending or unreported.
