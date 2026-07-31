@@ -173,9 +173,10 @@ fn default_prompt() -> String {
     #|  must never claim the same paths — overlapping launches are refused, so
     #|  when categories share files, split by package or directory instead, or run
     #|  those categories one after another. Commit your own work first (workers
-    #|  fork this repository's HEAD and never see uncommitted changes). Issue
-    #|  independent launches in the SAME step — they run concurrently (2-4 per
-    #|  batch). Each worker edits inside its own git worktree, cannot commit, and
+    #|  fork this repository's HEAD and never see uncommitted changes). Launch
+    #|  independent slices with ONE call carrying a `slices` array (2-4 per
+    #|  call): that runs them concurrently by construction, where separate calls
+    #|  overlap only when they happen to land in the same step. Each worker edits inside its own git worktree, cannot commit, and
     #|  its changes are validated against `allowed_paths` from git evidence, then
     #|  committed on a branch; the tool result carries the worker's report AND the
     #|  git evidence — trust the evidence. Then integrate ONE subtask at a time

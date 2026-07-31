@@ -110,4 +110,3 @@ pub fn SubtaskState::is_terminal(Self) -> Bool
 // Type aliases
 
 // Traits
-

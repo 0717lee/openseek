@@ -19,4 +19,3 @@ type Theme derive(Eq)
 // Type aliases
 
 // Traits
-
