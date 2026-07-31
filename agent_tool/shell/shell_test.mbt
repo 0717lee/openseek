@@ -2096,3 +2096,50 @@ async test "run_in_background without timeout_ms is unaffected by defaults" {
     let _ = bg.stop(jobs[0].id)
   }
 }
+
+///|
+/// The worker-mode static floor: obvious escapes are refused before launch
+/// with a readable explanation, independent of kernel availability; in-tree
+/// commands run normally.
+async test "worker mode statically blocks obvious escapes" {
+  @vfs.with_tmpdir(prefix="openseek-worker-floor-", dir => {
+    let root = @fs.realpath(dir)
+    @fs.mkdir("\{root}/w")
+    @fs.mkdir("\{root}/admin")
+    let scope : @shell.WorkerSandbox = {
+      deny_roots: [root],
+      worker_root: "\{root}/w",
+      worker_admin_dir: "\{root}/admin",
+    }
+    let run = match
+      @shell.definition(workspace_root="\{root}/w", worker_sandbox=scope).execute {
+      Async(execute) => execute
+      Sync(_) => fail("shell tool should be async")
+    }
+    // A cwd outside the worker tree is refused up front.
+    guard run({ "cmd": "pwd", "cwd": "/tmp" }) is Respond(cwd_escape) else {
+      fail("expected Respond")
+    }
+    assert_true(cwd_escape.is_error)
+    assert_true(cwd_escape.content.contains("blocked in worker mode"))
+    // A statically-spelled `cd` out of the tree is refused.
+    guard run({ "cmd": "cd .. && touch escaped.txt" }) is Respond(cd_escape) else {
+      fail("expected Respond")
+    }
+    assert_true(cd_escape.is_error)
+    assert_true(cd_escape.content.contains("blocked in worker mode"))
+    assert_false(@fs.exists("\{root}/escaped.txt"))
+    // `git -C` pointing outside the tree is refused.
+    guard run({ "cmd": "git -C \{root} status" }) is Respond(dash_c) else {
+      fail("expected Respond")
+    }
+    assert_true(dash_c.is_error)
+    assert_true(dash_c.content.contains("blocked in worker mode"))
+    // Ordinary in-tree work is untouched by the floor.
+    guard run({ "cmd": "printf hi" }) is Respond(plain) else {
+      fail("expected Respond")
+    }
+    assert_false(plain.is_error)
+    assert_true(plain.content.contains("hi"))
+  })
+}

@@ -58,6 +58,7 @@ pub fn definition(
   bg_runtime? : @bgjobs.BgJobRuntime,
   default_timeout_ms? : Int,
   scratch_dir? : String,
+  worker_sandbox? : WorkerSandbox,
 ) -> @agent_tool.AgentToolDefinition {
   AgentToolDefinition(
     name="shell",
@@ -119,6 +120,7 @@ pub fn definition(
         bg_runtime?,
         default_timeout_ms?,
         scratch_dir?,
+        worker_sandbox?,
       )
     }),
   )
@@ -173,6 +175,7 @@ async fn execute_with_workspace(
   bg_runtime? : @bgjobs.BgJobRuntime,
   default_timeout_ms? : Int,
   scratch_dir? : String,
+  worker_sandbox? : WorkerSandbox,
 ) -> @agent_tool.ToolAction {
   let input = @decode.decode(arguments) catch {
     error => {
@@ -184,6 +187,23 @@ async fn execute_with_workspace(
     }
   }
   let parsed_command = @shell_parse.parse_for_policy(input.cmd)
+  // Worker mode: the static confinement floor rejects obvious escapes with a
+  // readable explanation before launch; the kernel profile (attached at
+  // launch) is the actual enforcement on platforms that have one.
+  if worker_sandbox is Some(scope) &&
+    worker_confinement_blocks(
+      parsed_command,
+      base_cwd=@workspace_path.resolve_cwd(workspace_root, input.cwd).unwrap_or(
+        workspace_root,
+      ),
+      worker_root=scope.worker_root,
+    )
+    is Some(reason) {
+    return @agent_tool.ToolAction::respond(
+      "blocked in worker mode: \{reason}; your writes are confined to \{scope.worker_root}",
+      is_error=true,
+    )
+  }
   // Read-only (review) mode: refuse the obvious bulk source-rewriters — a
   // source-mutating moon command (fmt / info / test --update) anywhere in the
   // parsed command, including `&&`/`;` chains, pipes, and env prefixes. This is
@@ -219,6 +239,7 @@ async fn execute_with_workspace(
     bg_runtime?,
     default_timeout_ms?,
     scratch_dir?,
+    worker_sandbox?,
   ) catch {
     error =>
       @agent_tool.ToolAction::respond(
@@ -264,6 +285,7 @@ async fn shell(
   cwd : String?,
   workspace_root : String,
   scratch_dir? : String,
+  worker_sandbox? : WorkerSandbox,
   bg_runtime? : @bgjobs.BgJobRuntime,
   default_timeout_ms? : Int,
 ) -> @agent_tool.ToolAction {
@@ -310,6 +332,7 @@ async fn shell(
       cwd,
       workspace_root,
       scratch_dir?,
+      worker_sandbox?,
       bg_runtime?,
     )
   }
@@ -376,6 +399,7 @@ async fn shell(
     foreground_spawn?,
     on_timeout_detach?,
     scratch_dir?,
+    worker_sandbox?,
   )
   let agent_output = match result {
     ShellExecuted(output) => output
@@ -481,6 +505,7 @@ async fn run_agent_shell_with_tree_precheck(
   foreground_spawn? : async (String, Array[String], String?, Int) -> @shell_exec.ShellExecution,
   on_timeout_detach? : (@shell_exec.ShellExecution, AgentShellLaunch) -> String,
   scratch_dir? : String,
+  worker_sandbox? : WorkerSandbox,
 ) -> ShellRunResult {
   if preblock_target_outside_lab(
       source_tree_operation_target(parsed_command, cmd, workspace_root, cwd),
@@ -495,6 +520,7 @@ async fn run_agent_shell_with_tree_precheck(
     parsed_command,
     cwd?,
     scratch_dir?,
+    worker_sandbox?,
   )
   match foreground_spawn {
     // Foreground on the shared execution model: spawn on the session group and
@@ -595,6 +621,7 @@ async fn start_background(
   cwd : String?,
   workspace_root : String,
   scratch_dir? : String,
+  worker_sandbox? : WorkerSandbox,
   bg_runtime? : @bgjobs.BgJobRuntime,
 ) -> @agent_tool.ToolAction {
   guard bg_runtime is Some(runtime) else {
@@ -631,6 +658,7 @@ async fn start_background(
     parsed_command,
     cwd?,
     scratch_dir?,
+    worker_sandbox?,
   )
   let id = runtime.start(
     program=launch.command.program,

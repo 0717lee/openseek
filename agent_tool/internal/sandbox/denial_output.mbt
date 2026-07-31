@@ -34,6 +34,11 @@ fn source_write_denied_in_text(
     line.contains("\{subject}:") ||
     line.contains("\{subject}'") ||
     line.contains("\{subject}\"") ||
+    // A subject that is a protected DIRECTORY names every path below it:
+    // `sh: <subject>/seed.txt: Operation not permitted`. Same-line denial
+    // wording is still required by the caller, so a mere mention of a path
+    // under the subject cannot classify on its own.
+    line.contains("\{subject}/") ||
     // MoonBit's own OSError Show output escapes the quotes around the path
     // (`@fs.open(): \"keep.mbt\": Operation not permitted`), so the subject is
     // followed by `\"`, not a bare quote — run_moonbit's denial shape.
