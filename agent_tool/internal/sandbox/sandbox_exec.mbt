@@ -8,16 +8,66 @@ const SandboxExecPath : String = "/usr/bin/sandbox-exec"
 let sandbox_exec_available_cache : Ref[Bool?] = { val: None }
 
 ///|
-/// Build the argument vector passed to `SandboxExecPath` to interpret `cmd`
-/// under an inline SBPL `profile`.
+/// One private SBPL file owned by an execution task group.
 ///
-/// The returned vector has the shape
-/// `[-p, profile, @platform_shell.program, ..@platform_shell.args(cmd)]`.
-/// Therefore `cmd` is shell text, not an executable path or a pre-tokenized
-/// argument vector. This function does not validate the profile or probe
-/// availability.
-fn sandbox_exec_args(profile : String, cmd : String) -> Array[String] {
-  ["-p", profile, @platform_shell.program, ..@platform_shell.args(cmd)]
+/// The profile must stay present until `sandbox-exec` exits: removing it just
+/// after spawning races the new process opening `-f`. `prepare_for_spawn`
+/// therefore registers its removal on the task group before returning its path.
+priv struct SandboxProfileFile {
+  directory : String
+  path : String
+}
+
+///|
+/// Write `profile` outside argv so a large source tree cannot make process
+/// creation fail with `E2BIG`. The containing directory is private and unique;
+/// the file itself is created with owner-only permissions.
+async fn SandboxProfileFile::create(profile : String) -> SandboxProfileFile {
+  let directory = @fs.tmpdir(prefix="openseek-sandbox-profile-")
+  let path = "\{directory}/profile.sb"
+  try {
+    @fs.write_file(path, profile, create_mode=CreateNew, permission=0o600)
+    { directory, path }
+  } catch {
+    error => {
+      // Creation may be cancelled after the directory exists. Shield this
+      // small removal so a cancelled tool call does not leak profile text.
+      @async.protect_from_cancel(() => {
+        @fs.rmdir(directory, recursive=true) catch {
+          _ => ()
+        }
+      })
+      raise error
+    }
+  }
+}
+
+///|
+/// Build the argument vector passed to `SandboxExecPath`.
+///
+/// `Shell(cmd)` remains shell text, while `Exec(program, args)` stays an
+/// already-tokenized invocation. In both cases argv contains only the short
+/// profile path, never the potentially megabyte-sized SBPL source.
+fn SandboxProfileFile::arguments(
+  self : SandboxProfileFile,
+  command : Command,
+) -> Array[String] {
+  match command {
+    Shell(cmd) =>
+      ["-f", self.path, @platform_shell.program, ..@platform_shell.args(cmd)]
+    Exec(program, args) => ["-f", self.path, program, ..args]
+  }
+}
+
+///|
+/// Remove the private profile directory. Removal is idempotent and best-effort
+/// because the child has already exited when production callers invoke it.
+async fn SandboxProfileFile::remove(self : SandboxProfileFile) -> Unit {
+  @async.protect_from_cancel(() => {
+    @fs.rmdir(self.directory, recursive=true) catch {
+      _ => ()
+    }
+  })
 }
 
 ///|
@@ -69,24 +119,28 @@ async fn probe_sandbox_exec_available() -> Bool {
     $|(version 1)
     $|(allow default)
     $|(deny file-write* (literal "\{sbpl_string_escape(blocked_path)}"))
-  let noop_exit = run_probe_exit(
-    SandboxExecPath,
-    sandbox_exec_args(probe_profile, PlatformNoopCommand),
-  )
-  if noop_exit != Some(0) {
-    cleanup_sandbox_probe(probe_dir, blocked_path)
-    return false
-  }
-  let write_exit = run_probe_exit(
-    SandboxExecPath,
-    sandbox_exec_args(
-      probe_profile,
-      "printf probe > \{shell_quote(blocked_path)}",
-    ),
-  )
-  let denied = write_exit != Some(0) && !@fs.exists(blocked_path)
-  cleanup_sandbox_probe(probe_dir, blocked_path)
-  denied
+  @async.with_task_group(probe_group => {
+    probe_group.add_defer(() => cleanup_sandbox_probe(probe_dir, blocked_path))
+    let profile_file = SandboxProfileFile::create(probe_profile) catch {
+      error if @async.is_being_cancelled() => raise error
+      _ => return false
+    }
+    probe_group.add_defer(() => profile_file.remove())
+    let noop_exit = run_probe_exit(
+      SandboxExecPath,
+      profile_file.arguments(Shell(PlatformNoopCommand)),
+    )
+    if noop_exit != Some(0) {
+      return false
+    }
+    let write_exit = run_probe_exit(
+      SandboxExecPath,
+      profile_file.arguments(
+        Shell("printf probe > \{shell_quote(blocked_path)}"),
+      ),
+    )
+    write_exit != Some(0) && !@fs.exists(blocked_path)
+  })
 }
 
 ///|
@@ -122,6 +176,8 @@ async fn cleanup_sandbox_probe(
   probe_dir : String,
   blocked_path : String,
 ) -> Unit {
-  ignore(@fs.remove(blocked_path) catch { _ => () })
-  ignore(@fs.rmdir(probe_dir) catch { _ => () })
+  @async.protect_from_cancel(() => {
+    ignore(@fs.remove(blocked_path) catch { _ => () })
+    ignore(@fs.rmdir(probe_dir) catch { _ => () })
+  })
 }

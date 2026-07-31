@@ -45,6 +45,9 @@ fn ExecStatus::is_terminal(self : ExecStatus) -> Bool {
 pub struct ShellExecution {
   priv sink : ShellOutputSink
   priv process : @process.Process
+  // Preserved after launch so a detached job classifies output against the
+  // exact sandbox profile that its process used.
+  priv sandboxed_command : @sandbox.SandboxedCommand?
   priv mut status : ExecStatus
   // Set before the child is cancelled (by `stop`, or by the output-limit kill)
   // so the monitor reports `Killed` rather than the kill signal's exit code.
@@ -72,13 +75,23 @@ pub struct ShellExecution {
 }
 
 ///|
-/// Spawn `program args` on the session group with stdout+stderr merged into a
-/// fresh sink, start a monitor task, and return the live execution. `spill_path`,
-/// when set, is where the sink writes full output once it exceeds `inline_cap`.
+/// Startup handoff from an execution's private task group to its caller.
+priv enum ExecutionStart {
+  Started(ShellExecution)
+  Failed(Error)
+}
+
+///|
+/// Spawn `program args` in a private child task group with stdout+stderr merged
+/// into a fresh sink, then return the live execution. `spill_path`, when set, is
+/// where the sink writes full output once it exceeds `inline_cap`.
+///
+/// A sandbox profile is registered with that same group's defer stack. The
+/// group therefore removes it only after its process and monitor have both
+/// terminated, including for detached background jobs and cancellation.
 pub async fn[X] ShellExecution::start(
   scope : @agent_runtime.AgentTaskScope[X],
-  program~ : String,
-  args~ : Array[String],
+  command~ : ProcessCommand,
   cwd? : String,
   inline_cap? : Int = default_inline_cap,
   hard_cap? : Int = default_hard_cap,
@@ -86,34 +99,55 @@ pub async fn[X] ShellExecution::start(
   kill_when_full? : Bool = false,
   kill_at_hard_cap? : Bool = false,
 ) -> ShellExecution {
-  let group = scope.group()
+  let session_group = scope.group()
+  let sandboxed_command = command.sandboxed_command()
   let sink = ShellOutputSink::new(inline_cap~, hard_cap~, spill_path?)
-  let (reader, writer) = @process.read_from_process()
-  let process = @process.spawn(
-    group,
-    program,
-    args,
-    stdout=writer,
-    stderr=writer,
-    cwd?=cwd.map(cwd => cwd.view()),
-    cancel_handler=@process.hard_cancel(),
-    no_wait=true,
-  )
-  let exec = {
-    sink,
-    process,
-    status: Running,
-    cancel_requested: false,
-    kill_when_full,
-    kill_at_hard_cap,
-    killed_by_output_limit: false,
-    started_at_ms: @env.now().reinterpret_as_int64(),
-    killed_by_time_limit: false,
+  let started : @async.Queue[ExecutionStart] = Queue(kind=Unbounded)
+  session_group.spawn_bg(no_wait=true, allow_failure=true) <| () => {
+    @async.with_task_group(execution_group => {
+      let mut start_reported = false
+      try {
+        let (program, args) = command.prepare_for_spawn(execution_group)
+        let (reader, writer) = @process.read_from_process()
+        let process = @process.spawn(
+          execution_group,
+          program,
+          args,
+          stdout=writer,
+          stderr=writer,
+          cwd?=cwd.map(cwd => cwd.view()),
+          cancel_handler=@process.hard_cancel(),
+          no_wait=true,
+        )
+        let exec = {
+          sink,
+          process,
+          sandboxed_command,
+          status: Running,
+          cancel_requested: false,
+          kill_when_full,
+          kill_at_hard_cap,
+          killed_by_output_limit: false,
+          started_at_ms: @env.now().reinterpret_as_int64(),
+          killed_by_time_limit: false,
+        }
+        started.put(Started(exec))
+        start_reported = true
+        exec.monitor(reader, process)
+      } catch {
+        error => {
+          if !start_reported {
+            ignore(started.try_put(Failed(error)) catch { _ => false })
+          }
+          raise error
+        }
+      }
+    })
   }
-  group.spawn_bg(no_wait=true, allow_failure=true) <| () => {
-    exec.monitor(reader, process)
+  match started.get() {
+    Started(exec) => exec
+    Failed(error) => raise error
   }
-  exec
 }
 
 ///|
@@ -227,6 +261,14 @@ pub async fn ShellExecution::stop(self : ShellExecution) -> Bool {
 pub fn ShellExecution::request_stop(self : ShellExecution) -> Unit {
   self.cancel_requested = true
   self.process.cancel()
+}
+
+///|
+/// Prepared sandbox metadata for the exact process owned by this execution.
+pub fn ShellExecution::sandboxed_command(
+  self : ShellExecution,
+) -> @sandbox.SandboxedCommand? {
+  self.sandboxed_command
 }
 
 ///|
@@ -399,9 +441,10 @@ async fn poll_exec_terminal(exec : ShellExecution, ticks? : Int = 200) -> Unit {
 #cfg(not(platform="windows"))
 async test "execution runs to completion and captures output" {
   @async.with_task_group(group => {
-    let exec = ShellExecution::start(AgentTaskScope(group), program="sh", args=[
-      "-c", "printf hello",
-    ])
+    let exec = ShellExecution::start(
+      AgentTaskScope(group),
+      command=ProcessCommand::plain("sh", ["-c", "printf hello"]),
+    )
     poll_exec_terminal(exec)
     assert_true(exec.status() is Exited(0))
     assert_true(exec.head().contains("hello"))
@@ -413,9 +456,10 @@ async test "execution runs to completion and captures output" {
 #cfg(not(platform="windows"))
 async test "execution records a non-zero exit code" {
   @async.with_task_group(group => {
-    let exec = ShellExecution::start(AgentTaskScope(group), program="sh", args=[
-      "-c", "exit 3",
-    ])
+    let exec = ShellExecution::start(
+      AgentTaskScope(group),
+      command=ProcessCommand::plain("sh", ["-c", "exit 3"]),
+    )
     poll_exec_terminal(exec)
     assert_true(exec.status() is Exited(3))
     assert_true(exec.exit_code() is Some(3))
@@ -423,12 +467,55 @@ async test "execution records a non-zero exit code" {
 }
 
 ///|
+/// Startup errors must cross the private task-group handoff instead of leaving
+/// the caller waiting on an empty queue.
+#cfg(not(platform="windows"))
+async test "execution reports a spawn failure" {
+  @async.with_task_group(group => {
+    let failed = try {
+      ignore(
+        ShellExecution::start(
+          AgentTaskScope(group),
+          command=ProcessCommand::plain("/openseek/no-such-executable", []),
+        ),
+      )
+      false
+    } catch {
+      _ => true
+    }
+    assert_true(failed)
+  })
+}
+
+///|
+/// A sandboxed execution retains the metadata used to classify its output.
+#cfg(not(platform="windows"))
+async test "execution retains its sandbox command" {
+  let workspace = @fs.tmpdir(prefix="openseek-exec-profile-owner-")
+  guard @sandbox.SandboxedCommand::create_if_available(workspace, Shell(":"))
+    is Some(command) else {
+    @fs.rmdir(workspace, recursive=true)
+    return
+  }
+  @async.with_task_group(group => {
+    let exec = ShellExecution::start(
+      AgentTaskScope(group),
+      command=ProcessCommand::sandboxed(command),
+    )
+    assert_true(exec.sandboxed_command() is Some(_))
+    poll_exec_terminal(exec)
+  })
+  @fs.rmdir(workspace, recursive=true)
+}
+
+///|
 #cfg(not(platform="windows"))
 async test "stop and request_stop terminate a running execution" {
   @async.with_task_group(group => {
-    let exec = ShellExecution::start(AgentTaskScope(group), program="sleep", args=[
-      "30",
-    ])
+    let exec = ShellExecution::start(
+      AgentTaskScope(group),
+      command=ProcessCommand::plain("sleep", ["30"]),
+    )
     @async.sleep(50)
     assert_true(exec.status() is Running)
     assert_true(exec.stop())
@@ -441,9 +528,10 @@ async test "stop and request_stop terminate a running execution" {
 #cfg(not(platform="windows"))
 async test "request_stop synchronously terminates a running execution" {
   @async.with_task_group(group => {
-    let exec = ShellExecution::start(AgentTaskScope(group), program="sleep", args=[
-      "30",
-    ])
+    let exec = ShellExecution::start(
+      AgentTaskScope(group),
+      command=ProcessCommand::plain("sleep", ["30"]),
+    )
     @async.sleep(50)
     assert_true(exec.status() is Running)
     exec.request_stop()
@@ -456,9 +544,10 @@ async test "request_stop synchronously terminates a running execution" {
 #cfg(not(platform="windows"))
 async test "background flips to Backgrounded and keeps running" {
   @async.with_task_group(group => {
-    let exec = ShellExecution::start(AgentTaskScope(group), program="sleep", args=[
-      "30",
-    ])
+    let exec = ShellExecution::start(
+      AgentTaskScope(group),
+      command=ProcessCommand::plain("sleep", ["30"]),
+    )
     @async.sleep(50)
     assert_true(exec.background())
     assert_true(exec.status() is Backgrounded)
@@ -473,8 +562,7 @@ async test "kill_when_full stops a runaway once the sink fills" {
   @async.with_task_group(group => {
     let exec = ShellExecution::start(
       AgentTaskScope(group),
-      program="sh",
-      args=["-c", "yes"],
+      command=ProcessCommand::plain("sh", ["-c", "yes"]),
       inline_cap=100,
       hard_cap=100,
       kill_when_full=true,
@@ -492,8 +580,7 @@ async test "large output spills and read_all returns the full output" {
     let path = "/tmp/openseek-exec-spill.out"
     let exec = ShellExecution::start(
       AgentTaskScope(group),
-      program="sh",
-      args=["-c", "seq 1 5000"],
+      command=ProcessCommand::plain("sh", ["-c", "seq 1 5000"]),
       inline_cap=100,
       hard_cap=1000000,
       spill_path=path,

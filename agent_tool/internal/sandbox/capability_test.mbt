@@ -1,5 +1,5 @@
 ///|
-/// Run a prepared command and materialize its merged output as text — the same
+/// Run a prepared command and collect its merged output as text — the same
 /// consumption pattern real callers use, so the tests exercise the capability
 /// exactly as shipped.
 async fn merged_output_text(
@@ -8,10 +8,10 @@ async fn merged_output_text(
   @async.with_task_group() <| group => {
     let (reader, writer) = @process.read_from_process()
     defer reader.close()
-    let args = command.args()
+    let (program, args) = command.prepare_for_spawn(group)
     let child = @process.spawn(
       group,
-      command.program(),
+      program,
       args,
       stdout=writer,
       stderr=writer,
@@ -87,13 +87,19 @@ async test "exec command produces the argv shape without a shell" {
       is Some(command) else {
       return
     }
-    assert_eq(command.program(), "/usr/bin/sandbox-exec")
-    let args = command.args()
-    // [-p, <profile>, moon, check, --target, native]
-    assert_eq(args[0], "-p")
-    assert_eq(args[2], "moon")
-    assert_eq(args[3], "check")
-    assert_eq(args.length(), 6)
+    let mut profile_path = ""
+    @async.with_task_group(group => {
+      let (program, args) = command.prepare_for_spawn(group)
+      assert_eq(program, "/usr/bin/sandbox-exec")
+      // [-f, <profile-path>, moon, check, --target, native]
+      assert_eq(args[0], "-f")
+      profile_path = args[1]
+      assert_true(@fs.exists(profile_path))
+      assert_eq(args[2], "moon")
+      assert_eq(args[3], "check")
+      assert_eq(args.length(), 6)
+    })
+    assert_false(@fs.exists(profile_path))
   })
 }
 

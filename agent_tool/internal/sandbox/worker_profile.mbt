@@ -119,9 +119,5 @@ pub async fn SandboxedCommand::create_worker_if_available(
     worker_admin_dir~,
   )
   guard sandbox_exec_available() else { return None }
-  let args = match command {
-    Shell(cmd) => sandbox_exec_args(data.profile, cmd)
-    Exec(program, args) => ["-p", data.profile, program, ..args]
-  }
-  Some({ program: SandboxExecPath, args, denial_subjects: data.denial_subjects })
+  Some({ command, profile: data.profile, denial_subjects: data.denial_subjects })
 }

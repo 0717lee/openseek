@@ -1532,7 +1532,7 @@ async test "a scratch lab forces trusted source-writes onto the sandbox" {
     @shell_parse.parse_for_policy("moon new \{lab}/probe"),
     cwd=lab,
   )
-  assert_true(without.sandboxed_command is None)
+  assert_true(without.command.sandboxed_command() is None)
   // With the lab wired, the same command is sandboxed instead — the
   // profile allows lab writes, the kernel denies workspace writes.
   let with_lab = agent_shell_launch(
@@ -1542,7 +1542,7 @@ async test "a scratch lab forces trusted source-writes onto the sandbox" {
     cwd=lab,
     scratch_dir=lab,
   )
-  assert_true(with_lab.sandboxed_command is Some(_))
+  assert_true(with_lab.command.sandboxed_command() is Some(_))
   @fs.rmdir(ws, recursive=true)
   @fs.rmdir(lab, recursive=true)
 }

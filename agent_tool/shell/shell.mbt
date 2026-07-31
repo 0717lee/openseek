@@ -365,24 +365,19 @@ async fn shell(
   // keeps a full record if detached — the foreground output-limit is still
   // enforced at display via `over_inline_cap` and the spill is discarded
   // when the command finishes in the foreground.
-  let foreground_spawn : (async (String, Array[String], String?, Int) -> @shell_exec.ShellExecution)? = bg_runtime.map(runtime => {
-      (program, args, cwd, max) => {
-        runtime.spawn_foreground_retained(program, args, cwd, max)
+  let foreground_spawn : (async (@shell_exec.ProcessCommand, String?, Int) -> @shell_exec.ShellExecution)? = bg_runtime.map(runtime => {
+      (command, cwd, max) => {
+        runtime.spawn_foreground_retained(command, cwd, max)
       }
     },
   )
   // Detach-on-timeout: move a command that outlives its timeout to the background
   // instead of killing it — the model keeps watching it with shell_output /
   // shell_stop rather than losing it.
-  let on_timeout_detach : ((@shell_exec.ShellExecution, AgentShellLaunch) -> String)? = bg_runtime.map(runtime => {
-      (exec, launch) => {
+  let on_timeout_detach : ((@shell_exec.ShellExecution) -> String)? = bg_runtime.map(runtime => {
+      exec => {
         let _ = exec.background()
-        runtime.adopt(
-          exec,
-          command=input.cmd,
-          cwd?,
-          sandboxed_command?=launch.sandboxed_command,
-        )
+        runtime.adopt(exec, command=input.cmd, cwd?)
       }
     },
   )
@@ -502,8 +497,8 @@ async fn run_agent_shell_with_tree_precheck(
   cwd? : String,
   max_output_chars~ : Int,
   timeout_ms~ : Int,
-  foreground_spawn? : async (String, Array[String], String?, Int) -> @shell_exec.ShellExecution,
-  on_timeout_detach? : (@shell_exec.ShellExecution, AgentShellLaunch) -> String,
+  foreground_spawn? : async (@shell_exec.ProcessCommand, String?, Int) -> @shell_exec.ShellExecution,
+  on_timeout_detach? : (@shell_exec.ShellExecution) -> String,
   scratch_dir? : String,
   worker_sandbox? : WorkerSandbox,
 ) -> ShellRunResult {
@@ -528,12 +523,7 @@ async fn run_agent_shell_with_tree_precheck(
     // await, so a timeout must stop it here — not leak it — and a turn
     // cancellation must too (the catch stops it before re-raising).
     Some(spawn) => {
-      let exec = spawn(
-        launch.command.program,
-        launch.command.args,
-        cwd,
-        max_output_chars,
-      )
+      let exec = spawn(launch.command, cwd, max_output_chars)
       let finished = @async.with_timeout_opt(timeout_ms, () => {
         exec.wait_or_invalid()
       }) catch {
@@ -545,7 +535,7 @@ async fn run_agent_shell_with_tree_precheck(
       match finished {
         None =>
           match on_timeout_detach {
-            Some(detach) => ShellDetached(detach(exec, launch))
+            Some(detach) => ShellDetached(detach(exec))
             None => {
               let _ = exec.stop()
               ShellTimedOut
@@ -574,17 +564,15 @@ async fn run_agent_shell_with_tree_precheck(
     // the per-call collection path, with the same timeout wrapping as before.
     None => {
       let collected = @async.with_timeout_opt(timeout_ms, () => {
-        collect_process_output(
-          launch.command.program,
-          launch.command.args,
-          cwd?,
-          max_output_chars~,
-        )
+        collect_process_output(launch.command, cwd?, max_output_chars~)
       })
       match collected {
         None => ShellTimedOut
         Some(output) =>
-          ShellExecuted({ output, sandboxed_command: launch.sandboxed_command })
+          ShellExecuted({
+            output,
+            sandboxed_command: launch.command.sandboxed_command(),
+          })
       }
     }
   }
@@ -608,7 +596,7 @@ fn agent_shell_output_from_exec(
       // memory-only one was killed at it (truncated, hard cap == inline cap).
       output_limit_reached: exec.over_inline_cap() || exec.output_truncated(),
     },
-    sandboxed_command: launch.sandboxed_command,
+    sandboxed_command: launch.command.sandboxed_command(),
   }
 }
 
@@ -661,12 +649,12 @@ async fn start_background(
     worker_sandbox?,
   )
   let id = runtime.start(
-    program=launch.command.program,
-    args=launch.command.args,
+    program=@platform_shell.program,
+    args=@platform_shell.args(input.cmd),
     command=input.cmd,
     cwd?,
     max_output_chars=input.max_output_chars,
-    sandboxed_command?=launch.sandboxed_command,
+    sandboxed_command?=launch.command.sandboxed_command(),
   )
   @agent_tool.ToolAction::respond(
     "started background job \{id}: `\{input.cmd}`. Read its output with shell_output (job_id=\"\{id}\") and stop it with shell_stop (job_id=\"\{id}\").",
@@ -715,8 +703,10 @@ pub async fn collect_shell_output(
   max_output_chars? : Int = @decode.default_max_output_chars,
 ) -> ShellOutput {
   collect_process_output(
-    @platform_shell.program,
-    @platform_shell.args(cmd),
+    @shell_exec.ProcessCommand::plain(
+      @platform_shell.program,
+      @platform_shell.args(cmd),
+    ),
     cwd?,
     max_output_chars~,
   )
@@ -724,13 +714,13 @@ pub async fn collect_shell_output(
 
 ///|
 async fn collect_process_output(
-  program : String,
-  args : Array[String],
+  command : @shell_exec.ProcessCommand,
   cwd? : String,
   max_output_chars~ : Int,
 ) -> ShellOutput {
   let (reader, writer) = @process.read_from_process()
   @async.with_task_group() <| group => {
+    let (program, args) = command.prepare_for_spawn(group)
     defer reader.close()
     let process = @process.spawn(
       group,

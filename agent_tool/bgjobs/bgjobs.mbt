@@ -39,18 +39,17 @@ let default_hard_timeout_ms : Int = 1_800_000
 /// the session group in a spawn closure, so the runtime is not generic and can be
 /// an optional tool argument.
 pub struct BgJobRuntime {
-  // Spawn a `ShellExecution` on the captured session group: (program, args, cwd,
-  // inline-preview budget, spill path) -> execution. Captured so the runtime type
-  // is not generic.
-  priv spawn_exec : async (String, Array[String], String?, Int, String?) -> @shell_exec.ShellExecution
+  // Spawn a `ShellExecution` on the captured session group: (command, cwd,
+  // inline-preview budget, spill path) -> execution. Captured so the runtime
+  // type is not generic.
+  priv spawn_exec : async (@shell_exec.ProcessCommand, String?, Int, String?) -> @shell_exec.ShellExecution
   // Spawn a *retained* foreground execution (may be detached on timeout):
   // file-backed with a large hard cap, but still killed on exceeding the inline
   // cap so a timed command that floods output is an immediate output-limit error;
   // `background()` clears that kill so a detached-under-the-limit job keeps
   // growing. The `String?` is the spill path.
   priv spawn_foreground_retained_exec : async (
-    String,
-    Array[String],
+    @shell_exec.ProcessCommand,
     String?,
     Int,
     String?,
@@ -133,14 +132,13 @@ pub fn[X] BgJobRuntime::new(
 ) -> BgJobRuntime {
   let group = scope.group()
   {
-    spawn_exec: (program, args, cwd, max_output_chars, spill_path) => {
+    spawn_exec: (process_command, cwd, max_output_chars, spill_path) => {
       // Background retention: inline preview up to the budget, full output to
       // the spill file, and the hard-cap watchdog so a flooding job is killed
       // (and surfaced) rather than left burning CPU with its output dropped.
       @shell_exec.ShellExecution::start(
         scope,
-        program~,
-        args~,
+        command=process_command,
         cwd?,
         inline_cap=max_output_chars,
         hard_cap=hard_output_cap,
@@ -149,8 +147,7 @@ pub fn[X] BgJobRuntime::new(
       )
     },
     spawn_foreground_retained_exec: (
-      program,
-      args,
+      process_command,
       cwd,
       max_output_chars,
       spill_path,
@@ -159,8 +156,7 @@ pub fn[X] BgJobRuntime::new(
       // `background()`), the job is still bounded in output like any other.
       @shell_exec.ShellExecution::start(
         scope,
-        program~,
-        args~,
+        command=process_command,
         cwd?,
         inline_cap=max_output_chars,
         hard_cap=hard_output_cap,
@@ -198,8 +194,7 @@ fn BgJobRuntime::next_id(self : BgJobRuntime) -> String {
 /// distinct `fg-<n>.out` spill file.
 pub async fn BgJobRuntime::spawn_foreground_retained(
   self : BgJobRuntime,
-  program : String,
-  args : Array[String],
+  command : @shell_exec.ProcessCommand,
   cwd : String?,
   max_output_chars : Int,
 ) -> @shell_exec.ShellExecution {
@@ -209,7 +204,7 @@ pub async fn BgJobRuntime::spawn_foreground_retained(
     "\{dir}/fg-\{index}.out"
   })
   (self.spawn_foreground_retained_exec)(
-    program, args, cwd, max_output_chars, spill_path,
+    command, cwd, max_output_chars, spill_path,
   )
 }
 
@@ -230,7 +225,13 @@ pub async fn BgJobRuntime::start(
   // the job id and its `<id>.out` file never diverge.
   let id = self.next_id()
   let spill_path = self.spill_dir.map(dir => "\{dir}/\{id}.out")
-  let exec = (self.spawn_exec)(program, args, cwd, max_output_chars, spill_path)
+  let process_command = match sandboxed_command {
+    Some(command) => @shell_exec.ProcessCommand::sandboxed(command)
+    None => @shell_exec.ProcessCommand::plain(program, args)
+  }
+  let exec = (self.spawn_exec)(
+    process_command, cwd, max_output_chars, spill_path,
+  )
   self.register(id, exec, command~, cwd?, sandboxed_command?)
   id
 }
@@ -245,10 +246,15 @@ pub fn BgJobRuntime::adopt(
   exec : @shell_exec.ShellExecution,
   command~ : String,
   cwd? : String,
-  sandboxed_command? : @sandbox.SandboxedCommand,
 ) -> String {
   let id = self.next_id()
-  self.register(id, exec, command~, cwd?, sandboxed_command?)
+  self.register(
+    id,
+    exec,
+    command~,
+    cwd?,
+    sandboxed_command?=exec.sandboxed_command(),
+  )
   id
 }
 
@@ -492,9 +498,10 @@ async test "adopt registers an already-running execution as a job" {
   @async.with_task_group(group => {
     let scope : @agent_runtime.AgentTaskScope[Unit] = AgentTaskScope(group)
     let rt = BgJobRuntime::new(scope)
-    let exec = @shell_exec.ShellExecution::start(scope, program="sleep", args=[
-      "30",
-    ])
+    let exec = @shell_exec.ShellExecution::start(
+      scope,
+      command=@shell_exec.ProcessCommand::plain("sleep", ["30"]),
+    )
     let id = rt.adopt(exec, command="sleep 30")
     @async.sleep(50)
     assert_true(rt.snapshot(id).unwrap().status is Running)
@@ -621,7 +628,11 @@ async test "an adopted job keeps its original wall-clock deadline" {
     let rt = BgJobRuntime::new(AgentTaskScope(group), hard_timeout_ms=150)
     // The execution starts OUTSIDE the registry (a foreground command) and
     // burns most of its lifetime before being adopted on detach.
-    let exec = rt.spawn_foreground_retained("sh", ["-c", "sleep 5"], None, 200)
+    let exec = rt.spawn_foreground_retained(
+      @shell_exec.ProcessCommand::plain("sh", ["-c", "sleep 5"]),
+      None,
+      200,
+    )
     @async.sleep(120)
     let _ = exec.background()
     let id = rt.adopt(exec, command="sleep 5")

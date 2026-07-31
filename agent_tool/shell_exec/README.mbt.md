@@ -57,8 +57,10 @@ error instead of silently presenting replacement characters as success.
 
 ## L1 — `ShellExecution`: process + sink + status
 
-`ShellExecution::start` spawns the child on the session task group (so session
-teardown cancels it) and starts a monitor task. The monitor's design point:
+`ShellExecution::start` creates one private execution task group beneath the
+session task group, so session teardown still cancels it. That private group
+owns the process, its monitor, and any temporary sandbox profile; the profile
+is removed only after the process and monitor stop. The monitor's design point:
 **draining the pipe and awaiting the exit are decoupled.** Coupling them (read
 to EOF, then wait) hangs forever when the child exits but a descendant it
 spawned still holds the pipe open — so a concurrent reader drains bytes while

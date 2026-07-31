@@ -3,6 +3,8 @@ package "bobzhang/openseek/agent_tool/shell_exec"
 
 import {
   "bobzhang/openseek/agent_runtime",
+  "bobzhang/openseek/agent_tool/internal/sandbox",
+  "moonbitlang/async",
   "moonbitlang/core/debug",
 }
 
@@ -18,6 +20,12 @@ pub enum ExecStatus {
   Exited(Int)
   Killed
 } derive(Eq, @debug.Debug)
+
+type ProcessCommand
+pub fn ProcessCommand::plain(String, Array[String]) -> Self
+pub async fn[X] ProcessCommand::prepare_for_spawn(Self, @async.TaskGroup[X]) -> (String, Array[String])
+pub fn ProcessCommand::sandboxed(@sandbox.SandboxedCommand) -> Self
+pub fn ProcessCommand::sandboxed_command(Self) -> @sandbox.SandboxedCommand?
 
 pub struct ShellExecution {
   // private fields
@@ -35,9 +43,10 @@ pub fn ShellExecution::over_inline_cap(Self) -> Bool
 pub async fn ShellExecution::read_all(Self) -> String
 pub async fn ShellExecution::read_tail(Self, Int) -> String
 pub fn ShellExecution::request_stop(Self) -> Unit
+pub fn ShellExecution::sandboxed_command(Self) -> @sandbox.SandboxedCommand?
 pub fn ShellExecution::seq(Self) -> Int
 pub fn ShellExecution::size(Self) -> Int
-pub async fn[X] ShellExecution::start(@agent_runtime.AgentTaskScope[X], program~ : String, args~ : Array[String], cwd? : String, inline_cap? : Int, hard_cap? : Int, spill_path? : String, kill_when_full? : Bool, kill_at_hard_cap? : Bool) -> Self
+pub async fn[X] ShellExecution::start(@agent_runtime.AgentTaskScope[X], command~ : ProcessCommand, cwd? : String, inline_cap? : Int, hard_cap? : Int, spill_path? : String, kill_when_full? : Bool, kill_at_hard_cap? : Bool) -> Self
 pub fn ShellExecution::started_at_ms(Self) -> Int64
 pub fn ShellExecution::status(Self) -> ExecStatus
 pub async fn ShellExecution::stop(Self) -> Bool

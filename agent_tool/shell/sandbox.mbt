@@ -16,17 +16,8 @@ priv enum SourceWriteMode {
 }
 
 ///|
-priv struct ProcessCommand {
-  program : String
-  args : Array[String]
-}
-
-///|
 priv struct AgentShellLaunch {
-  command : ProcessCommand
-  // `Some` exactly when `command` was prepared under the source-write sandbox.
-  // It stays intact so output is judged against the profile that produced it.
-  sandboxed_command : @sandbox.SandboxedCommand?
+  command : @shell_exec.ProcessCommand
 }
 
 ///|
@@ -77,17 +68,13 @@ async fn agent_shell_launch(
     )
     return match sandboxed {
       Some(command) =>
-        {
-          command: { program: command.program(), args: command.args() },
-          sandboxed_command: Some(command),
-        }
+        { command: @shell_exec.ProcessCommand::sandboxed(command) }
       None =>
         {
-          command: {
-            program: @platform_shell.program,
-            args: @platform_shell.args(cmd),
-          },
-          sandboxed_command: None,
+          command: @shell_exec.ProcessCommand::plain(
+            @platform_shell.program,
+            @platform_shell.args(cmd),
+          ),
         }
     }
   }
@@ -145,17 +132,13 @@ async fn agent_shell_launch(
   match (mode, sandboxed_command) {
     (TrustedSourceWrite, _) | (_, None) =>
       {
-        command: {
-          program: @platform_shell.program,
-          args: @platform_shell.args(cmd),
-        },
-        sandboxed_command: None,
+        command: @shell_exec.ProcessCommand::plain(
+          @platform_shell.program,
+          @platform_shell.args(cmd),
+        ),
       }
     (SourceReadOnly, Some(command)) =>
-      {
-        command: { program: command.program(), args: command.args() },
-        sandboxed_command: Some(command),
-      }
+      { command: @shell_exec.ProcessCommand::sandboxed(command) }
   }
 }
 

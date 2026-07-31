@@ -4,10 +4,10 @@ The source-write sandbox as one prepared-command capability. `shell`,
 `run_moonbit`, `bgjobs`, and `shell_output` share one macOS `sandbox-exec`
 integration: describe command intent with the `Shell` or `Exec` variants of
 `Command`,
-prepare an opaque `SandboxedCommand`, run its program and arguments, then ask
-that same value to judge the output. Everything SBPL-specific — profile text,
-denial subjects, escaping, the `sandbox-exec` path, and the availability probe
-— stays behind the API.
+prepare an opaque `SandboxedCommand`, prepare its spawn arguments in the task group that
+owns the process, then ask that same value to judge the output. Everything
+SBPL-specific — profile text, denial subjects, escaping, the `sandbox-exec`
+path, profile-file lifetime, and the availability probe — stays behind the API.
 
 This package does not own workspace path manipulation or protection-policy
 predicates. Generic lexical operations live in `internal/workspace_path`,
@@ -27,20 +27,22 @@ async test "prepare, run, and classify a shell command" {
     ".",
     Shell(shell_text),
   )
-  let (program, args) = match prepared {
-    Some(command) => (command.program(), command.args())
-    // Enforcement is unavailable outside macOS and inside some nested
-    // sandboxes. Running without it is an explicit caller policy decision.
-    None => (@platform_shell.program, @platform_shell.args(shell_text))
-  }
-  let (exit_code, output) = @process.collect_output_merged(program, args)
-  let output = output.text()
-  assert_eq(exit_code, 0)
-  assert_eq(output.trim(), "sandbox-ready")
-  if prepared is Some(command) {
-    // Classify with the same value that supplied the executed program/argv.
-    assert_false(command.output_reports_denial(output))
-  }
+  @async.with_task_group(group => {
+    let (program, args) = match prepared {
+      Some(command) => command.prepare_for_spawn(group)
+      // Enforcement is unavailable outside macOS and inside some nested
+      // sandboxes. Running without it is an explicit caller policy decision.
+      None => (@platform_shell.program, @platform_shell.args(shell_text))
+    }
+    let (exit_code, output) = @process.collect_output_merged(program, args)
+    let output = output.text()
+    assert_eq(exit_code, 0)
+    assert_eq(output.trim(), "sandbox-ready")
+    if prepared is Some(command) {
+      // Classify with the same value that supplied the executed program/argv.
+      assert_false(command.output_reports_denial(output))
+    }
+  })
 }
 ```
 
@@ -61,7 +63,9 @@ command runs.
 shell involved — the shape `run_moonbit` uses to run `moon` directly. Both
 produce the same opaque `SandboxedCommand`. Its executable, arguments, and
 denial subjects travel together because classification is meaningful only for
-output produced by that prepared invocation.
+output produced by that prepared invocation. `prepare_for_spawn(group)` writes
+the SBPL to a short-lived file, passes only its path through argv, and
+registers the file's removal on the same group before returning.
 
 `writable_subtree` re-allows one directory tree — a scratch lab for a
 read-only subagent, `run_moonbit`'s throwaway build dir — via a

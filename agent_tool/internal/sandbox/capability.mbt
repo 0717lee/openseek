@@ -13,18 +13,12 @@ pub(all) enum Command {
 /// denial subjects stay together so output is always classified against the
 /// profile that produced it.
 struct SandboxedCommand {
-  /// Executable to spawn for this prepared invocation. It is the first half of
-  /// the process command and must be passed together with `args`. When sandbox
-  /// enforcement is available, this is the platform's `sandbox-exec` binary.
-  program : String
-  /// Companion argument vector for `program`: the generated profile followed
-  /// by either the platform-shell invocation or the requested `Exec`
-  /// program/argv. For example, `Shell("moon check")` prepares approximately
-  /// `program = "/usr/bin/sandbox-exec"` with
-  /// `args = ["-p", "<profile>", "sh", "-c", "moon check"]` on macOS.
-  args : Array[String]
+  /// Original command, kept tokenized until it is prepared for spawn.
+  command : Command
+  /// SBPL source. It is deliberately not placed in argv or written yet.
+  profile : String
   /// Protected paths and basenames derived from the same profile encoded in
-  /// `args`, retained so denial reporting cannot use metadata from another run.
+  /// `profile`, retained so denial reporting cannot use metadata from another run.
   denial_subjects : Array[String]
 }
 
@@ -80,13 +74,9 @@ pub async fn SandboxedCommand::create_if_available(
     real_root,
     writable_lab?=subtree,
   )
-  let args = match command {
-    Shell(cmd) => sandbox_exec_args(data.profile, cmd)
-    Exec(program, args) => ["-p", data.profile, program, ..args]
-  }
   Some({
-    program: SandboxExecPath,
-    args,
+    command,
+    profile: data.profile,
     // Copied: the profile cache hands out its own array, and this command must
     // keep classifying with the subjects of the profile it actually runs under.
     denial_subjects: data.denial_subjects.copy(),
@@ -94,15 +84,18 @@ pub async fn SandboxedCommand::create_if_available(
 }
 
 ///|
-/// The executable of this prepared invocation.
-pub fn SandboxedCommand::program(self : SandboxedCommand) -> String {
-  self.program
-}
-
-///|
-/// A copy of this prepared invocation's argument vector.
-pub fn SandboxedCommand::args(self : SandboxedCommand) -> Array[String] {
-  self.args.copy()
+/// Prepare this command for one execution owned by `group`.
+///
+/// The profile file is created only when execution starts, then registered on
+/// the same group before its path is returned. The group removes it after every
+/// child has terminated, so callers never receive or forward a cleanup action.
+pub async fn[X] SandboxedCommand::prepare_for_spawn(
+  self : SandboxedCommand,
+  group : @async.TaskGroup[X],
+) -> (String, Array[String]) {
+  let profile_file = SandboxProfileFile::create(self.profile)
+  group.add_defer(() => profile_file.remove())
+  (SandboxExecPath, profile_file.arguments(self.command))
 }
 
 ///|

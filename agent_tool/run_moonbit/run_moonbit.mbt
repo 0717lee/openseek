@@ -253,26 +253,29 @@ async fn execute(
     // workspace root (e.g. `workspace_root=/tmp`, where `@fs.tmpdir` lands
     // under it) the shared deny would otherwise block moon's own generated
     // `snippet.mbt`.
-    let sandboxed_command = @sandbox.SandboxedCommand::create_if_available(
-      workspace_root,
-      Exec("moon", moon_argv),
-      writable_subtree=dir,
-    )
-    let (prog, argv) = match sandboxed_command {
-      Some(command) => (command.program(), command.args())
-      None => ("moon", moon_argv)
-    }
-    let result = @async.with_timeout_opt(RunTimeoutMs, () => {
-      let exit_code = @process.run(
-        prog,
-        argv,
-        cwd=run_cwd.unwrap_or("."),
-        inherit_env=true,
-        stdin=@process.redirect_from_file(empty_stdin),
-        stdout=@process.redirect_to_file(log, append=true),
-        stderr=@process.redirect_to_file(log, append=true),
+    let (result, sandboxed_command) = @async.with_task_group(execution_group => {
+      let sandboxed_command = @sandbox.SandboxedCommand::create_if_available(
+        workspace_root,
+        Exec("moon", moon_argv),
+        writable_subtree=dir,
       )
-      (exit_code, read_capped(log))
+      let (prog, argv) = match sandboxed_command {
+        Some(command) => command.prepare_for_spawn(execution_group)
+        None => ("moon", moon_argv)
+      }
+      let result = @async.with_timeout_opt(RunTimeoutMs, () => {
+        let exit_code = @process.run(
+          prog,
+          argv,
+          cwd=run_cwd.unwrap_or("."),
+          inherit_env=true,
+          stdin=@process.redirect_from_file(empty_stdin),
+          stdout=@process.redirect_to_file(log, append=true),
+          stderr=@process.redirect_to_file(log, append=true),
+        )
+        (exit_code, read_capped(log))
+      })
+      (result, sandboxed_command)
     })
     // A "not permitted" line naming a protected source path in a sandboxed run
     // is the source-write policy firing, not an environment fault: explain it
