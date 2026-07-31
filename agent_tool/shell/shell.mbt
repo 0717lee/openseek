@@ -309,6 +309,7 @@ async fn shell(
       parsed_command,
       cwd,
       workspace_root,
+      scratch_dir?,
       bg_runtime?,
     )
   }
@@ -374,6 +375,7 @@ async fn shell(
     timeout_ms=effective_timeout_ms,
     foreground_spawn?,
     on_timeout_detach?,
+    scratch_dir?,
   )
   let agent_output = match result {
     ShellExecuted(output) => output

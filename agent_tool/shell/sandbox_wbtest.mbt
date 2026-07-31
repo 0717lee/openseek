@@ -1548,6 +1548,112 @@ async test "a scratch lab forces trusted source-writes onto the sandbox" {
 }
 
 ///|
+/// The K3 backstop above must hold through the WIRED entry
+/// (`execute_with_workspace`), not just `agent_shell_launch`: `shell`'s
+/// launch call sites must forward `scratch_dir`, or a lab child's trusted
+/// scaffold runs unsandboxed and the lexical guard is the sole defense
+/// again. The probe is the K3 escape itself: `moon new` through an in-lab
+/// symlink pointing at the workspace — admitted lexically, denied only by
+/// the kernel, so workspace survival is the assertion that carries the
+/// test.
+async test "the lab kernel backstop holds through the wired shell entry" {
+  let ws_raw = @fs.tmpdir(prefix="openseek-lab-e2e-ws-")
+  guard @sandbox.SandboxedCommand::create_if_available(ws_raw, Shell(":"))
+    is Some(_) else {
+    println("sandbox-exec unavailable; skipping")
+    @fs.rmdir(ws_raw, recursive=true) catch {
+      _ => ()
+    }
+    return
+  }
+  let ws = @fs.realpath(ws_raw)
+  let lab = @fs.realpath(@fs.tmpdir(prefix="openseek-lab-e2e-lab-"))
+  @fs.symlink(target=ws, "\{lab}/link")
+  let escape = execute_with_workspace(
+    ws,
+    { "cmd": "moon new \{lab}/link/probe" },
+    read_only=true,
+    default_timeout_ms=30_000,
+    scratch_dir=lab,
+  )
+  guard escape is Respond(escape_output) else {
+    fail("expected Respond for the escape probe")
+  }
+  // The kernel, not the guard, stops the escape: nothing reaches the
+  // workspace through the symlink.
+  assert_true(escape_output.is_error)
+  assert_false(@fs.exists("\{ws}/probe/moon.mod"))
+  // The same lab stays genuinely usable through the wired path (the
+  // sandboxed profile does not over-block honest in-lab scaffolds).
+  let honest = execute_with_workspace(
+    ws,
+    { "cmd": "moon new \{lab}/probe2" },
+    read_only=true,
+    default_timeout_ms=30_000,
+    scratch_dir=lab,
+  )
+  guard honest is Respond(honest_output) else {
+    fail("expected Respond for the in-lab probe")
+  }
+  assert_false(honest_output.is_error)
+  assert_true(@fs.exists("\{lab}/probe2/moon.mod"))
+  @fs.rmdir(ws, recursive=true) catch {
+    _ => ()
+  }
+  @fs.rmdir(lab, recursive=true) catch {
+    _ => ()
+  }
+}
+
+///|
+/// The background branch shares the same obligation: `run_in_background`
+/// must forward the lab into `start_background`, so the job launches with
+/// the sandboxed profile (visible on its snapshot) and the kernel denies
+/// the symlink escape there too.
+#cfg(not(platform="windows"))
+async test "the lab kernel backstop holds through the background job path" {
+  let ws_raw = @fs.tmpdir(prefix="openseek-lab-bg-ws-")
+  guard @sandbox.SandboxedCommand::create_if_available(ws_raw, Shell(":"))
+    is Some(_) else {
+    println("sandbox-exec unavailable; skipping")
+    @fs.rmdir(ws_raw, recursive=true) catch {
+      _ => ()
+    }
+    return
+  }
+  let ws = @fs.realpath(ws_raw)
+  let lab = @fs.realpath(@fs.tmpdir(prefix="openseek-lab-bg-lab-"))
+  @fs.symlink(target=ws, "\{lab}/link")
+  @async.with_task_group(group => {
+    let bg = @bgjobs.BgJobRuntime::new(AgentTaskScope(group))
+    let action = execute_with_workspace(
+      ws,
+      { "cmd": "moon new \{lab}/link/probe", "run_in_background": true },
+      read_only=true,
+      bg_runtime=bg,
+      scratch_dir=lab,
+    )
+    guard action is Respond(started) else {
+      fail("expected Respond for the background start")
+    }
+    assert_false(started.is_error)
+    let jobs = bg.list()
+    assert_eq(jobs.length(), 1)
+    // The launch itself carries the sandbox — the direct pin that
+    // `start_background` received the lab.
+    assert_true(jobs[0].sandboxed_command is Some(_))
+    assert_true(bg.wait_exit(jobs[0].id, 30_000))
+    assert_false(@fs.exists("\{ws}/probe/moon.mod"))
+  })
+  @fs.rmdir(ws, recursive=true) catch {
+    _ => ()
+  }
+  @fs.rmdir(lab, recursive=true) catch {
+    _ => ()
+  }
+}
+
+///|
 test "a file path needs a non-empty alphabetic extension to look non-source" {
   assert_true(looks_like_non_source_file_path("notes/readme.txt"))
   assert_true(looks_like_non_source_file_path("archive.tar"))
