@@ -266,6 +266,14 @@ async fn run_task_turn(
           api_url?,
           child_session?,
         ),
+        subtask_tool_definition(
+          self_exe=exe,
+          model~,
+          workspace_root~,
+          budget=subrun_budget,
+          api_url?,
+          child_session?,
+        ),
       ]
     let tools = @agent.build_tools(runtime, scope, extra_tools~)
     let on_goal_met = if review_gate_enabled(matches) {

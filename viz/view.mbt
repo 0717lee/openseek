@@ -2152,7 +2152,9 @@ fn subrun_child_id(
   result : @agent_session.ToolResult,
   parent : String,
 ) -> String? {
-  guard result.tool_name() is ("explore" | "review") else { return None }
+  guard result.tool_name() is ("explore" | "review" | "subtask") else {
+    return None
+  }
   guard result.brief() is Some(brief) else { return None }
   let tokens = brief.split(" ").collect()
   guard tokens.get(1) is Some(token) else { return None }

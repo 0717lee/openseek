@@ -1,0 +1,191 @@
+///|
+/// The controller-owned lifecycle record of one subtask, stored OUTSIDE any
+/// worker-writable path at `<common-git-dir>/openseek/subtasks/<file>.json`.
+/// It is simultaneously the orphan-discovery record (a later session can
+/// enumerate the directory) and the path RESERVATION: entries in
+/// non-terminal states hold their `allowed_paths` against overlapping
+/// launches until integrated, discarded, or found empty.
+///
+/// Writes go through temp-file + rename: atomic against torn reads, NOT a
+/// cross-process lock — two engines driving one repository can still race
+/// silently (documented residual; the single-engine-per-repo assumption).
+pub(all) enum SubtaskState {
+  Provisioning
+  Running
+  Captured
+  Committed
+  Conflicted
+  Integrated
+  Discarded
+  NoChanges
+} derive(Debug, Eq, ToJson, FromJson)
+
+///|
+/// Terminal states hold no path reservation.
+pub fn SubtaskState::is_terminal(self : SubtaskState) -> Bool {
+  self is (Integrated | Discarded | NoChanges)
+}
+
+///|
+/// One subtask's durable lifecycle record; see the file comment.
+pub struct SubtaskEntry {
+  schema_version : Int
+  name : String
+  nonce : String
+  branch : String
+  state : SubtaskState
+  base_oid : String
+  worker_root : String
+  worker_admin_dir : String
+  allowed_paths : Array[String]
+  parent_session : String?
+  commit_oid : String?
+  origin_head_before : String?
+} derive(Debug, Eq, ToJson, FromJson)
+
+///|
+let registry_schema_version : Int = 1
+
+///|
+/// Where entries live under the canonical common git dir.
+pub fn registry_dir(common_git_dir : String) -> String {
+  "\{common_git_dir}/openseek/subtasks"
+}
+
+///|
+fn entry_path(common_git_dir : String, entry : SubtaskEntry) -> String {
+  "\{registry_dir(common_git_dir)}/\{entry.name}--\{entry.nonce}.json"
+}
+
+///|
+/// Persist `entry` atomically (temp + rename in the registry directory).
+pub async fn save_entry(
+  common_git_dir : String,
+  entry : SubtaskEntry,
+) -> Result[Unit, String] {
+  let dir = registry_dir(common_git_dir)
+  @fs.mkdir(dir, recursive=true) catch {
+    error if @async.is_being_cancelled() => raise error
+    _ => ()
+  }
+  let target = entry_path(common_git_dir, entry)
+  let temp = "\{target}.tmp"
+  @fs.write_file(
+    temp,
+    entry.to_json().stringify(),
+    create_mode=CreateOrTruncate,
+  ) catch {
+    error if @async.is_being_cancelled() => raise error
+    error => return Err("could not write registry entry: \{error}")
+  }
+  @fs.rename(temp, target) catch {
+    error if @async.is_being_cancelled() => raise error
+    error => return Err("could not commit registry entry: \{error}")
+  }
+  Ok(())
+}
+
+///|
+/// Load every parseable entry. Unparseable files are skipped (a foreign or
+/// future-schema record must not wedge provisioning) but their NAMES are
+/// reported alongside so a caller can surface them.
+pub async fn load_entries(
+  common_git_dir : String,
+) -> (Array[SubtaskEntry], Array[String]) {
+  let entries : Array[SubtaskEntry] = []
+  let skipped : Array[String] = []
+  let dir = registry_dir(common_git_dir)
+  let names = @fs.readdir(dir) catch {
+    error if @async.is_being_cancelled() => raise error
+    _ => return (entries, skipped)
+  }
+  for name in names {
+    guard name.has_suffix(".json") else { continue }
+    let text = @fs.read_file("\{dir}/\{name}").text() catch {
+      error if @async.is_being_cancelled() => raise error
+      _ => {
+        skipped.push(name)
+        continue
+      }
+    }
+    let parsed : SubtaskEntry = @json.from_json(@json.parse(text)) catch {
+      _ => {
+        skipped.push(name)
+        continue
+      }
+    }
+    if parsed.schema_version == registry_schema_version {
+      entries.push(parsed)
+    } else {
+      skipped.push(name)
+    }
+  }
+  (entries, skipped)
+}
+
+///|
+/// Component-wise prefix overlap between two allowed-path sets: `src`
+/// overlaps `src/lexer` and `src`, never `src2`.
+pub fn paths_overlap(a : Array[String], b : Array[String]) -> Bool {
+  fn components(prefix : String) -> Array[String] {
+    prefix.split("/").map(part => part.to_owned()).collect()
+  }
+
+  fn one_covers(shorter : Array[String], longer : Array[String]) -> Bool {
+    guard shorter.length() <= longer.length() else { return false }
+    for index in 0..<shorter.length() {
+      if shorter[index] != longer[index] {
+        return false
+      }
+    }
+    true
+  }
+
+  a.any(left => {
+    b.any(right => {
+      let l = components(left)
+      let r = components(right)
+      one_covers(l, r) || one_covers(r, l)
+    })
+  })
+}
+
+///|
+fn sample_entry() -> SubtaskEntry {
+  {
+    schema_version: 1,
+    name: "fix-warnings",
+    nonce: "ab12cd",
+    branch: "openseek/fix-warnings--ab12cd",
+    state: Running,
+    base_oid: "0123456789abcdef0123456789abcdef01234567",
+    worker_root: "/repo/.worktrees/fix-warnings",
+    worker_admin_dir: "/repo/.git/worktrees/fix-warnings",
+    allowed_paths: ["lib", "cmd/tool"],
+    parent_session: Some("run-1"),
+    commit_oid: None,
+    origin_head_before: None,
+  }
+}
+
+///|
+test "registry entry round-trips and states classify" {
+  let entry = sample_entry()
+  let parsed : SubtaskEntry = @json.from_json(entry.to_json()) catch {
+    e => fail("round-trip failed: \{e}")
+  }
+  assert_eq(parsed, entry)
+  assert_false(Running.is_terminal())
+  assert_false(Conflicted.is_terminal())
+  assert_true(Integrated.is_terminal())
+  assert_true(NoChanges.is_terminal())
+}
+
+///|
+test "path overlap is component-wise in both directions" {
+  assert_true(paths_overlap(["src"], ["src/lexer"]))
+  assert_true(paths_overlap(["src/lexer"], ["src"]))
+  assert_true(paths_overlap(["a", "b"], ["c", "b/d"]))
+  assert_false(paths_overlap(["src"], ["src2"]))
+  assert_false(paths_overlap(["a/b"], ["a/c"]))
+}

@@ -157,7 +157,31 @@ Common `moon` subcommands:
   `moon ide doc` query, one file read), do it yourself instead. The scout
   cannot edit anything, returns file:line citations you can spot-check, and
   shares a small per-turn budget (a few delegations per turn), so spend it on
-  questions that genuinely fan out.
+  questions that genuinely fan out. Independent questions batch: issue the
+  explore calls in the SAME step and they run concurrently.
+- `subtask` tool: parallelize LARGE partitionable work — three or more
+  independent slices that each need real edit+verify cycles (fixing warnings
+  by category, per-package sweeps, migration chunks). Each launch names a
+  slice (`name`), a self-contained work order (`task` — the worker sees
+  nothing else of this conversation), and `allowed_paths`, the repo-relative
+  prefixes that slice may change. PARTITION BY FILE OWNERSHIP: two slices
+  must never claim the same paths — overlapping launches are refused, so
+  when categories share files, split by package or directory instead, or run
+  those categories one after another. Commit your own work first (workers
+  fork this repository's HEAD and never see uncommitted changes). Issue
+  independent launches in the SAME step — they run concurrently (2-4 per
+  batch). Each worker edits inside its own git worktree, cannot commit, and
+  its changes are validated against `allowed_paths` from git evidence, then
+  committed on a branch; the tool result carries the worker's report AND the
+  git evidence — trust the evidence. Then integrate ONE subtask at a time
+  (`integrate=<name>`), re-running your checks after each; resolve conflicts
+  with the file tools plus `integrate_continue`; `discard=<name>` frees an
+  abandoned slice. After the last integration, run the FULL verification
+  suite yourself — workers verified slices, only you see the union. For a
+  warning sweep: `moon check --output-json` emits one JSON object per
+  diagnostic; group by error code (a small script), derive each group's
+  file list, and give each worker one group with those files as
+  `allowed_paths`. Not for work you can do yourself in a few edits.
 - shell `moon cram test`: durable CLI transcript tests under `tests/cram`;
   use `mooncram` blocks for stable help, examples, stdout/stderr, and exits.
   Example: `moon cram test tests/cram`.

@@ -1,0 +1,17 @@
+import {
+  "bobzhang/openseek/internal/workspace_path",
+  "moonbitlang/async",
+  "moonbitlang/async/fs",
+  "moonbitlang/async/process",
+  "moonbitlang/core/json",
+  "moonbitlang/x/path",
+  "moonbitlang/x/sys" @env,
+}
+
+import {
+  "bobzhang/openseek/testkit/filesystem" @vfs,
+} for "test"
+
+warnings = "+unnecessary_annotation"
+
+supported_targets = "+native"
