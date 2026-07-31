@@ -37,6 +37,7 @@ pub async fn WriteScope::create(
   allowed_paths? : Array[String] = [],
 ) -> Result[WriteScope, String] {
   let canonical_root = @fs.realpath(root) catch {
+    error if @async.is_being_cancelled() => raise error
     _ => return Err("write scope root does not resolve: \{root}")
   }
   let allowed : Array[Array[String]] = []
@@ -47,7 +48,11 @@ pub async fn WriteScope::create(
     }
   }
   Ok({
-    root: @workspace_path.strip_trailing_slash(canonical_root),
+    // Slash-normalized (Windows realpath returns backslashes) so relative
+    // slicing in `prefix_admits` sees one separator convention.
+    root: @workspace_path.strip_trailing_slash(
+      canonical_root.replace_all(old="\\", new="/"),
+    ),
     allowed,
     allowed_display: allowed_paths.map(p => p.to_string()).join(", "),
   })
@@ -133,6 +138,9 @@ fn WriteScope::absolutize(self : WriteScope, path : String) -> String {
 /// allowed prefixes, component-wise (`src` never admits `src2`; a path
 /// ABOVE every prefix is not a writable target either).
 fn WriteScope::prefix_admits(self : WriteScope, path : String) -> Bool {
+  // Slash-normalize before slicing: the root is stored normalized, but a
+  // resolved path can arrive backslash-separated on Windows.
+  let path = path.replace_all(old="\\", new="/")
   let relative = if path == self.root {
     ""
   } else {
@@ -169,6 +177,7 @@ async fn resolve_existing_prefix(path : String) -> String? {
   }
   guard path_exists_no_follow(prefix) else { return None }
   let real = @fs.realpath(if suffix.is_empty() { path } else { prefix }) catch {
+    error if @async.is_being_cancelled() => raise error
     _ => return None
   }
   let mut resolved = @workspace_path.strip_trailing_slash(real)
@@ -178,7 +187,10 @@ async fn resolve_existing_prefix(path : String) -> String? {
 
 ///|
 async fn path_exists_no_follow(path : String) -> Bool {
-  let _ = @fs.kind(path, follow_symlink=false) catch { _ => return false }
+  let _ = @fs.kind(path, follow_symlink=false) catch {
+    error if @async.is_being_cancelled() => raise error
+    _ => return false
+  }
   true
 }
 

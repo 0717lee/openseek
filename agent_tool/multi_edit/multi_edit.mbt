@@ -613,12 +613,30 @@ async fn revert_guarded_response(
       brief="multi_edit reverted (\{introduced} new error(s))",
     )
   } else {
-    // False alarm: the errors were mostly pre-existing. Re-apply and keep.
-    let _ = write_files(writes, write => write.new_content, write_scope?)
-    @agent_tool.ToolAction::respond(
-      keep_response(summary, after, threshold, introduced~),
-      brief=success_brief(writes),
+    // False alarm: the errors were mostly pre-existing. Re-apply and keep —
+    // but claim success only when every file actually made it back. A failed
+    // restore skewed the baseline this decision used, and a failed re-apply
+    // (IO fault, or a path whose resolution fell out of scope mid-flight)
+    // leaves a mixed tree; both must reach the model, not vanish into a
+    // success summary.
+    let reapply_failures = write_files(
+      writes,
+      write => write.new_content,
+      write_scope?,
     )
+    if restore_failures.length() + reapply_failures.length() > 0 {
+      let stuck = restore_failures + reapply_failures
+      @agent_tool.ToolAction::respond(
+        "error multi_editing: the batch was kept, but re-applying it did not fully succeed — these files may not hold the batch content: \{stuck.join(", ")}; re-read them before further edits",
+        is_error=true,
+        brief="multi_edit partially re-applied",
+      )
+    } else {
+      @agent_tool.ToolAction::respond(
+        keep_response(summary, after, threshold, introduced~),
+        brief=success_brief(writes),
+      )
+    }
   }
 }
 
