@@ -56,6 +56,21 @@ fn worker_write_profile_data(
       fail("a denied root sits at or below worker_root: \{root}")
     }
   }
+  // The admin allow is a carve-out INSIDE a denied root (the common git
+  // dir's worktrees/<name> subdirectory). A miscomputed admin path that sits
+  // at a denied root — or above one — would re-open shared objects, refs,
+  // and config wholesale, because SBPL is last-match-wins.
+  guard deny_roots.any(root => {
+    @workspace_path.is_under_workspace_root(root, worker_admin_dir) &&
+    root != worker_admin_dir
+  }) else {
+    fail("worker_admin_dir must be nested below a denied root")
+  }
+  for root in deny_roots {
+    if @workspace_path.is_under_workspace_root(worker_admin_dir, root) {
+      fail("worker_admin_dir covers a denied root: \{root}")
+    }
+  }
   let profile = StringBuilder()
   profile <+
     $|(version 1)

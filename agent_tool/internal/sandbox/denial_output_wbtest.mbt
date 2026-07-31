@@ -40,3 +40,21 @@ test "source-write denial detection in command output" {
   // A source path without any denial wording is not a denial either.
   assert_false(reports([], "compiled keep.mbt: ok"))
 }
+
+///|
+test "directory subjects match below their root, basenames never do" {
+  // An absolute directory subject names every path beneath it.
+  assert_true(
+    source_write_denied_in_text(
+      "sh: /x/repo/seed.txt: Operation not permitted",
+      ["/x/repo"],
+    ),
+  )
+  // A bare basename must not match unrelated paths that merely contain it.
+  assert_false(
+    source_write_denied_in_text(
+      "sh: /tmp/notrepo/file: Operation not permitted",
+      ["repo"],
+    ),
+  )
+}

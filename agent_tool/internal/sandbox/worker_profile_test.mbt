@@ -132,5 +132,15 @@ async test "worker profile validation rejects impossible geometries" {
       _ => None
     }
     assert_true(reopened is None)
+    // A miscomputed admin dir that IS a denied root would re-open it.
+    let admin_reopens = @sandbox.SandboxedCommand::create_worker_if_available(
+      Shell(":"),
+      deny_roots=["\{root}/repo", "\{root}/repo/.git"],
+      worker_root="\{root}/repo/.worktrees/w1",
+      worker_admin_dir="\{root}/repo/.git",
+    ) catch {
+      _ => None
+    }
+    assert_true(admin_reopens is None)
   })
 }
