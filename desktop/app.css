@@ -2534,6 +2534,30 @@ button.secondary:not(:disabled):hover {
   background: var(--surface-2);
 }
 
+/* A Device page is navigation, so it remains an anchor while matching the
+   secondary controls beside it. The desktop's delegated link handler opens it
+   in the system browser instead of navigating the app frame. */
+a.setting-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--ink);
+  padding: 6px 12px;
+  font-size: 12px;
+  line-height: 1.2;
+  text-decoration: none;
+}
+a.setting-link:hover {
+  background: var(--surface-2);
+}
+a.setting-link:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 /* The accent-filled call to action, button.secondary's counterpart:
    Save API key, the self-update controls, modal confirms. As a
    sidebar-button it keeps the sidebar's geometry, only the fill. */
@@ -3419,6 +3443,7 @@ button.danger:not(:disabled):hover {
   }
   button.secondary,
   button.primary:not(.sidebar-button),
+  a.setting-link,
   .portal-menu-item,
   .portal-button-link,
   .modal-actions button {

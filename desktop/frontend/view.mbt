@@ -1853,7 +1853,17 @@ fn remote_access_rows(
           rows.push(
             setting_row(
               "Device page",
-              [],
+              [
+                // The shared external-link listener keeps the desktop webview
+                // in place and hands this URL to the system browser.
+                @html.a(
+                  class="setting-link",
+                  href=url,
+                  target=Blank,
+                  rel="noopener noreferrer",
+                  [icon(icon_link_external), @html.span("Open")],
+                ),
+              ],
               desc="\{name} — open \{url} in a signed-in browser.",
             ),
           )
@@ -1895,6 +1905,29 @@ fn remote_access_rows(
     rows.push(setting_row("Problem", [], desc=message))
   }
   rows
+}
+
+///|
+#warnings("-alert_unstable")
+test "remote access device page renders an external link" {
+  let model = {
+    ..test_model(),
+    remote_access: Some({
+      server_url: Some("https://relay.example"),
+      connected: true,
+      managed_by_env: false,
+      user_login: Some("octocat"),
+      device_name: Some("My Mac"),
+      device_url: Some("https://relay.example/d/d_abc/"),
+    }),
+  }
+  let rendered = @html.div(remote_access_rows(test_dispatch(), model))
+  let markup = @rabbita.render_to_string(() => @rabbita.Val::constant(rendered))
+  assert_true(markup.contains("href=\"https://relay.example/d/d_abc/\""))
+  assert_true(markup.contains("target=\"_blank\""))
+  assert_true(markup.contains("rel=\"noopener noreferrer\""))
+  assert_true(markup.contains("class=\"setting-link\""))
+  assert_true(markup.contains("<span>Open</span>"))
 }
 
 ///|
