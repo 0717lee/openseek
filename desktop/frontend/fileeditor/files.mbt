@@ -221,6 +221,31 @@ fn decode_file_content(text : String) -> FileContent? {
 }
 
 ///|
+/// Read one file for a cross-resource Peek preview without entering the tab
+/// state machine. This deliberately reuses the same `fs.read_file` wire op
+/// and decoder as ordinary file opening, so binary/oversized policy and
+/// workspace containment stay identical. Failures are unavailable previews,
+/// not panel errors, and therefore return `None` to the resolver.
+async fn read_file_snapshot(
+  owner : @interop.ConversationKey,
+  path : @pathx.Relative,
+  workspace~ : @pathx.Absolute?,
+) -> FileContent? {
+  let payload = @js.Object::new()
+  payload["session"] = owner.session
+  payload["path"] = path.0
+  @interop.set_workspace(payload, workspace)
+  let reply = @interop.bridge_request(
+    owner.channel,
+    "fs.read_file",
+    payload.to_value(),
+  ) catch {
+    _ => return None
+  }
+  decode_file_content(@interop.reply_json_text(reply))
+}
+
+///|
 /// Stat the open tabs' files and fold the signatures back as `StatsLoaded`.
 /// Best-effort: a failed call is dropped — the next change push retries.
 fn stat_files(

@@ -40,6 +40,8 @@ impl Show for PayloadError with fn output(self, logger) {
 /// self-update staging state. Filesystem watches are connection-owned below,
 /// because two clients may watch different workspaces at the same time.
 struct HostState {
+  engine : String
+  runtime_dir : @path.Path?
   lsp : LspPoolActor
   updates : UpdateState
 }
@@ -75,7 +77,12 @@ pub fn new_host_state(
   if runtime_dir is Some(dir) {
     @lsp.enable_traffic_log(dir.join("lsp.log").to_string())
   }
-  { lsp, updates: new_update_state(runtime_dir, executable) }
+  {
+    engine,
+    runtime_dir,
+    lsp,
+    updates: new_update_state(runtime_dir, executable),
+  }
 }
 
 ///|
@@ -244,6 +251,14 @@ pub async fn host_op(
           workspace_symbols_op(state.lsp, decode_payload(payload)),
         ),
       )
+    "moonide.definition" =>
+      Some(
+        ToJson::to_json(moonide_definition_op(state, decode_payload(payload))),
+      )
+    "moonide.references" =>
+      Some(
+        ToJson::to_json(moonide_references_op(state, decode_payload(payload))),
+      )
     "fs.browse" =>
       Some(ToJson::to_json(browse_directory_op(decode_payload(payload))))
     _ => None
@@ -258,8 +273,9 @@ pub fn host_method_names() -> Array[String] {
     "fs.read_file", "fs.read_directory", "fs.list_files", "fs.stat_files", "fs.watch",
     "fs.unwatch", "fs.browse", "terminal.open", "terminal.input", "terminal.resize",
     "terminal.ack", "terminal.close", "lsp.open", "lsp.hover", "lsp.workspace_symbols",
-    "skills.catalog", "skills.installed", "skills.install", "skills.uninstall", "update.check",
-    "update.download", "update.apply", "app.list", "app.launch", "git.branch", "host.open_path",
+    "moonide.definition", "moonide.references", "skills.catalog", "skills.installed",
+    "skills.install", "skills.uninstall", "update.check", "update.download", "update.apply",
+    "app.list", "app.launch", "git.branch", "host.open_path",
   ]
 }
 
@@ -272,4 +288,11 @@ test "host catalog advertises the complete terminal surface" {
     ] {
     assert_true(methods.contains(method_))
   }
+}
+
+///|
+test "host catalog advertises Moon IDE navigation" {
+  let methods = host_method_names()
+  assert_true(methods.contains("moonide.definition"))
+  assert_true(methods.contains("moonide.references"))
 }

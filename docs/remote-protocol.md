@@ -473,6 +473,23 @@ Notification:
 |---|---|
 | `lsp.diagnostics` | `{path, diagnostics}` — same array shape as `lsp.open`'s reply |
 
+### moonide.* — workspace navigation
+
+Both methods accept an absolute source `path` plus positive, one-based `line`
+and `column` numbers. The host passes those values unchanged to `moon ide
+--loc`, after resolving the path to its attached workspace, and runs the
+bundled `moon` from that workspace root (`moon` on `PATH` only for a bare
+development host without a packaged toolchain seed). Result paths are
+canonicalized for physical containment, then mapped back under the attached
+workspace's lexical root so they match existing file/model identities. The
+CLI's line and column values are returned unchanged; malformed or
+workspace-escaping locations are omitted.
+
+| method | params | result |
+|---|---|---|
+| `moonide.definition` | `{path, line, column}` (absolute path; positive 1-based position) | `{locations: [{path, start_line, start_column, end_line, end_column}]}` — absolute paths under the attached lexical workspace root, with Moon IDE's numeric ranges |
+| `moonide.references` | `{path, line, column}` (absolute path; positive 1-based position) | `{locations: [{path, start_line, start_column, end_line, end_column}]}` — absolute paths under the attached lexical workspace root, with Moon IDE's numeric ranges |
+
 ### skills.*
 
 | method | params | result |
@@ -617,7 +634,7 @@ changed and why:
   to close exact reconnect ownership (including a zero-commit abnormal exit).
   Full-message events overwrite partial deltas within one step.
 - **Route/op names unified** under dotted namespaces (`agent.*`,
-  `session.*`, `workspace.*`, `git.*`, `fs.*`, `lsp.*`, `skills.*`,
+  `session.*`, `workspace.*`, `git.*`, `fs.*`, `lsp.*`, `moonide.*`, `skills.*`,
   `update.*`, `app.*`, `host.*`), shared verbatim by the bridge and the
   WebSocket.
 - **Most in-band sentinels were removed from the wire**: request `cwd` and

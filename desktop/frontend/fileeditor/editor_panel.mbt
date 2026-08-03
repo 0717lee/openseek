@@ -44,6 +44,10 @@ priv struct ViewerHost {
   // first run reports `cwd`). `None` when the viewer shows a notice or
   // nothing.
   mut relative : @pathx.Relative?
+  // The active host/workspace route for Definition/References targets and
+  // cross-file Peek previews. Cleared together with the document so a late
+  // navigation request can never reopen a previous conversation's file.
+  mut navigation : NavigationContext?
   // Monotonic model version; the viewer treats a new version as a new
   // document.
   mut version : Int
@@ -60,6 +64,7 @@ let viewer_state : ViewerHost = {
   services: None,
   absolute: None,
   relative: None,
+  navigation: None,
   version: 0,
   view_states: Map([]),
 }
@@ -106,7 +111,14 @@ fn request_viewer_mount(dispatch : @cmd.Emit[Msg]) -> @cmd.Cmd {
         is Some(host) {
         register_tokenizers()
         register_hover_provider()
-        let services = DesktopViewerServices()
+        let services = DesktopViewerServices(
+          navigation_location_opener((owner, path, range) => {
+            scheduler.add(
+              dispatch(OpenNavigationLocation(owner~, path~, range~)),
+            )
+          }),
+          navigation_text_model_resolver(),
+        )
         viewer_state.services = Some(services)
         let viewer = @viewer.Viewer::create(
           host,
@@ -200,7 +212,8 @@ pub fn request_viewer_remeasure() -> @cmd.Cmd {
 /// brings the incoming document back to its saved position instead of the
 /// top — the Monaco save/restore-view-state contract around `set_model`.
 fn show_file_in_viewer(
-  channel : @interop.ChannelId,
+  owner : @interop.ConversationKey,
+  workspace : @pathx.Absolute?,
   name : String,
   content : String,
   absolute? : @pathx.Absolute,
@@ -219,7 +232,7 @@ fn show_file_in_viewer(
     // (withheld binary/oversized file) has no file behind it, so its inert
     // scheme never parses as a model path and hover stays off.
     let uri = match absolute {
-      Some(absolute) => model_uri_of(channel, absolute)
+      Some(absolute) => model_uri_of(owner.channel, absolute)
       None => app_uri("openseek-notice", "/" + name)
     }
     // Whether anything needs redrawing is decided here, against the document
@@ -264,6 +277,11 @@ fn show_file_in_viewer(
     // along for comments filed on this document (see `ViewerHost::relative`).
     viewer_state.absolute = absolute
     viewer_state.relative = relative
+    viewer_state.navigation = match (absolute, relative) {
+      (Some(absolute), Some(relative)) =>
+        navigation_context_for_file(owner, workspace, absolute, relative)
+      _ => None
+    }
     // Commenting (select → inline input → composer chip) is for real files;
     // a notice document has nothing behind it to comment on.
     if viewer_state.services is Some(services) {
@@ -321,6 +339,7 @@ fn clear_viewer() -> @cmd.Cmd {
     if viewer_state.viewer is Some(viewer) {
       viewer_state.absolute = None
       viewer_state.relative = None
+      viewer_state.navigation = None
       viewer.set_model(None)
     }
   })
@@ -335,6 +354,7 @@ fn clear_document() -> @cmd.Cmd {
     if viewer_state.viewer is Some(viewer) {
       viewer_state.absolute = None
       viewer_state.relative = None
+      viewer_state.navigation = None
       viewer.set_model(None)
     }
   })

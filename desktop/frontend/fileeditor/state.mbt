@@ -287,6 +287,14 @@ pub(all) enum Msg {
   // A file row was clicked: read it and show it in the viewer. `name` is the
   // entry's display name, kept for the viewer's title and language guess.
   FileSelected(path~ : @pathx.Relative, name~ : String)
+  // A Definition/References result accepted by the Viewer's location opener.
+  // Carry the captured owner so a conversation switch that races the async
+  // request cannot open the target in the next workspace.
+  OpenNavigationLocation(
+    owner~ : @interop.ConversationKey,
+    path~ : @pathx.Relative,
+    range~ : @common.Range
+  )
   // `file` is the decoded reply (content + address, or a withheld-file
   // case). `range`, when present, is a jumped-to symbol's one-based range,
   // revealed in the viewer once the file loads and — unless empty —
