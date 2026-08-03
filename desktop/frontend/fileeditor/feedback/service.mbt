@@ -4,6 +4,16 @@
 // snapshots cannot observe later mutations.
 
 ///|
+/// The payload for a newly accepted item. Desktop declares it because the
+/// event is Desktop's own: `agent_feedback_api` exposes only what the Viewer
+/// consumes, and the editor package keeps its equivalent private to the
+/// viewer's feedback contribution.
+pub(all) struct AgentFeedbackAddedEvent {
+  feedback : @agent_feedback_api.AgentFeedback
+  has_existing_feedback_for_file : Bool
+}
+
+///|
 /// The Desktop-owned backing for the public agent-feedback capability consumed
 /// by the Viewer. The Viewer sees only `AgentFeedbackHandle`; Desktop keeps the
 /// concrete store so it can enable comments and turn accepted user feedback
@@ -13,9 +23,7 @@ struct DesktopFeedbackService {
     @agent_feedback_api.AgentFeedbackChangeEvent,
   ]
   did_change_navigation : @common.Emitter[@common.Uri]
-  did_add_feedback : @common.Emitter[
-    @agent_feedback_api.AgentFeedbackAddedEvent,
-  ]
+  did_add_feedback : @common.Emitter[AgentFeedbackAddedEvent]
   items_by_resource : Map[String, Array[@agent_feedback_api.AgentFeedback]]
   navigation_anchor_by_resource : Map[String, String]
   enabled_resources : Map[String, Bool]
@@ -78,7 +86,7 @@ pub fn DesktopFeedbackService::agent_feedback_handle(
 /// Desktop turns the accepted item into a composer chip.
 pub fn DesktopFeedbackService::on_did_add_feedback(
   self : DesktopFeedbackService,
-  listener : (@agent_feedback_api.AgentFeedbackAddedEvent) -> Unit,
+  listener : (AgentFeedbackAddedEvent) -> Unit,
 ) -> @common.Disposable {
   self.did_add_feedback.event(listener)
 }

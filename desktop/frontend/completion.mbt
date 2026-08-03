@@ -416,9 +416,7 @@ test "symbol_item resolves a jump target only when the symbol has a path" {
     range~,
   )
   assert_true(placed.path is Some("src/main.mbt"))
-  assert_true(
-    placed.range is Some(placed_range) && placed_range.equals_range(range),
-  )
+  assert_true(placed.range is Some(placed_range) && placed_range == range)
   // The reference anchors at the range's (one-based) start line.
   assert_eq(placed.detail, "src/main.mbt:5")
   let unplaced = symbol_item("parse_hover", container=None, path="", range~)
@@ -520,8 +518,7 @@ test "decode_symbols parses rows and skips malformed ones" {
   assert_eq(items[0].detail, "Lsp · a/b.mbt:5")
   // The zero-based wire range arrives as one-based viewer coordinates.
   assert_true(
-    items[0].range is Some(range) &&
-    range.equals_range(@common.Range::Range(5, 3, 5, 14)),
+    items[0].range is Some(range) && range == @common.Range::Range(5, 3, 5, 14),
   )
   assert_true(decode_symbols("not json") is None)
 }

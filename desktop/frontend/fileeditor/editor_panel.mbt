@@ -298,7 +298,7 @@ fn show_file_in_viewer(
         viewer.set_selection(
           @core.Selection::from_positions(
             range.get_start_position(),
-            range.get_end_position(),
+            @common.Position(range.end_line_number, range.end_column),
           ),
         )
       }
