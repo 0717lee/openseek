@@ -7,16 +7,16 @@ const WslEngineBinary : String = "_build/wsl_engine/native/release/build/bobzhan
 const BundledWslEngineName : String = "openseek-linux"
 
 ///|
-const BundleDir : String = "dist/windows-x64/OpenSeek Desktop"
+const BundleDir : String = "dist/windows-x64/SeekMoon"
 
 ///|
-const ZipPath : String = "dist/OpenSeek Desktop-windows-x64.zip"
+const ZipPath : String = "dist/SeekMoon-windows-x64.zip"
 
 ///|
 const InstallerScript : String = "installer/openseek-desktop.nsi"
 
 ///|
-const InstallerPath : String = "dist/OpenSeek-Desktop-Setup.exe"
+const InstallerPath : String = "dist/SeekMoon-Setup.exe"
 
 ///|
 const LocalMakensis : String = "dist/tools/nsis-3.12/makensis.exe"

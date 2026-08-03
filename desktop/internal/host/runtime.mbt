@@ -4,7 +4,7 @@
 /// signed bundle is read-only by convention (and may be mounted read-only under
 /// app translocation), and writing next to the binary also breaks when a
 /// repackage replaces the bundle under a running instance. Uses
-/// `~/Library/Application Support/OpenSeek Desktop` where that layout exists
+/// `~/Library/Application Support/SeekMoon` where that layout exists
 /// (macOS) and `~/.openseek-desktop` elsewhere.
 async fn app_runtime_dir() -> String? {
   guard @home.dir() is Some(home) else { return None }
@@ -14,7 +14,7 @@ async fn app_runtime_dir() -> String? {
     _ => false
   }
   let dir = if app_support_exists {
-    app_support.join("OpenSeek Desktop")
+    app_support.join("SeekMoon")
   } else {
     home_path.join(".openseek-desktop")
   }

@@ -7,7 +7,7 @@ async test "bundle replacement checks the containing directory" {
       @fs.chmod(root, 0o700)
       @fs.rmdir(root, recursive=true)
     })
-    let bundle = "\{root}/OpenSeek Desktop.app"
+    let bundle = "\{root}/SeekMoon.app"
     @fs.mkdir(bundle)
     @debug.assert_eq(bundle_replacement_failure(bundle), None)
     @fs.chmod(root, 0o500)
@@ -27,7 +27,7 @@ async test "an unavailable destination stops apply before any mutation" {
       @fs.chmod(root, 0o700)
       @fs.rmdir(root, recursive=true)
     })
-    let bundle = "\{root}/OpenSeek Desktop.app"
+    let bundle = "\{root}/SeekMoon.app"
     let staged = "\{root}/Staged.app"
     let aside = aside_path(bundle)
     @fs.mkdir(bundle)

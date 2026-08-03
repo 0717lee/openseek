@@ -1,14 +1,14 @@
 ///|
-const AppPath : String = "dist/OpenSeek Desktop.app"
+const AppPath : String = "dist/SeekMoon.app"
 
 ///|
-const ZipPath : String = "dist/OpenSeek Desktop-macos-arm64.zip"
+const ZipPath : String = "dist/SeekMoon-macos-arm64.zip"
 
 ///|
-const DmgPath : String = "dist/OpenSeek Desktop-macos-arm64.dmg"
+const DmgPath : String = "dist/SeekMoon-macos-arm64.dmg"
 
 ///|
-const DmgStagingPath : String = "dist/OpenSeek Desktop-dmg-root"
+const DmgStagingPath : String = "dist/SeekMoon-dmg-root"
 
 ///|
 const ContentsPath : String = AppPath + "/Contents"
@@ -39,7 +39,7 @@ const ProtonRuntimePath : String = ResourcesPath + "/proton"
 const CefProcessName : String = "cef_process"
 
 ///|
-const HelperExecutableBaseName : String = "OpenSeek Desktop Helper"
+const HelperExecutableBaseName : String = "SeekMoon Helper"
 
 ///|
 const HelperProtonRPath : String = "@loader_path/../../../../Resources/proton/lib"
@@ -67,7 +67,7 @@ const AppBundleIdentifier : String = "community.moonbit.proton.openseek-desktop"
 const HelperBundleIdentifier : String = AppBundleIdentifier + ".helper"
 
 ///|
-const SigningEntitlementsPath : String = "dist/OpenSeek Desktop.entitlements"
+const SigningEntitlementsPath : String = "dist/SeekMoon.entitlements"
 
 ///|
 /// Entitlements for the bundled `moonrun`: it JIT-compiles wasm, so under the
@@ -382,12 +382,12 @@ fn info_plist_source() -> String {
     $|<plist version="1.0">
     $|<dict>
     $|  <key>CFBundleDevelopmentRegion</key><string>en</string>
-    $|  <key>CFBundleDisplayName</key><string>OpenSeek Desktop</string>
+    $|  <key>CFBundleDisplayName</key><string>SeekMoon</string>
     $|  <key>CFBundleExecutable</key><string>openseek-desktop</string>
     $|  <key>CFBundleIconFile</key><string>AppIcon</string>
     $|  <key>CFBundleIdentifier</key><string>\{AppBundleIdentifier}</string>
     $|  <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
-    $|  <key>CFBundleName</key><string>OpenSeek Desktop</string>
+    $|  <key>CFBundleName</key><string>SeekMoon</string>
     $|  <key>CFBundlePackageType</key><string>APPL</string>
     $|  <key>CFBundleShortVersionString</key><string>\{@version.AppVersion}</string>
     $|  <key>CFBundleVersion</key><string>\{@version.AppVersion}</string>
@@ -860,7 +860,7 @@ async fn create_dmg(ws : @packaging.Workspace, sign : SignConfig) -> Unit {
   // conventional /Applications shortcut used by drag-to-install DMGs.
   @packaging.run_checked(
     "ditto",
-    [AppPath, DmgStagingPath + "/OpenSeek Desktop.app"],
+    [AppPath, DmgStagingPath + "/SeekMoon.app"],
     dir=ws.dir(),
   )
   @packaging.run_checked(
@@ -873,7 +873,7 @@ async fn create_dmg(ws : @packaging.Workspace, sign : SignConfig) -> Unit {
     [
       "create",
       "-volname",
-      "OpenSeek Desktop",
+      "SeekMoon",
       "-srcfolder",
       DmgStagingPath,
       "-format",
@@ -1004,14 +1004,14 @@ test "macos helper plist describes cef helper app" {
 test "macos renderer helper plist uses cef helper variant name" {
   let helper = cef_helper_variants()[4]
   let plist = helper_info_plist_source(helper)
-  assert_eq(helper.executable_name(), "OpenSeek Desktop Helper (Renderer)")
+  assert_eq(helper.executable_name(), "SeekMoon Helper (Renderer)")
   assert_eq(
     helper.executable_path(),
-    "dist/OpenSeek Desktop.app/Contents/Frameworks/OpenSeek Desktop Helper (Renderer).app/Contents/MacOS/OpenSeek Desktop Helper (Renderer)",
+    "dist/SeekMoon.app/Contents/Frameworks/SeekMoon Helper (Renderer).app/Contents/MacOS/SeekMoon Helper (Renderer)",
   )
   assert_true(
     plist.contains(
-      "<key>CFBundleExecutable</key><string>OpenSeek Desktop Helper (Renderer)</string>",
+      "<key>CFBundleExecutable</key><string>SeekMoon Helper (Renderer)</string>",
     ),
   )
   assert_true(
@@ -1026,7 +1026,7 @@ test "macos base helper path points at chromium helper executable name" {
   let helper = cef_helper_variants()[0]
   assert_eq(
     helper.executable_path(),
-    "dist/OpenSeek Desktop.app/Contents/Frameworks/OpenSeek Desktop Helper.app/Contents/MacOS/OpenSeek Desktop Helper",
+    "dist/SeekMoon.app/Contents/Frameworks/SeekMoon Helper.app/Contents/MacOS/SeekMoon Helper",
   )
 }
 

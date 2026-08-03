@@ -51,12 +51,7 @@ fn main {
     // requests at all (a proton:// page's http fetches stall inside CEF's
     // network service). Remote browsers use the same method catalog over the
     // relay WebSocket instead (docs/remote-protocol.md).
-    let app = @proton.asset(
-        "OpenSeek Desktop",
-        frontend_entry,
-        width=1120,
-        height=760,
-      )
+    let app = @proton.asset("SeekMoon", frontend_entry, width=1120, height=760)
       .debug_level(1)
       .extension(@extension.openseek_extension(state, bridge))
       // System notifications are an ordinary generated extension now: the

@@ -1,4 +1,4 @@
-# OpenSeek Desktop
+# SeekMoon
 
 A [Lepus](https://github.com/moonbit-community/lepus) + [Rabbita](https://mooncakes.io/docs/moonbit-community/rabbita) desktop client for the OpenSeek agent, written in MoonBit.
 
@@ -221,7 +221,7 @@ bundle — for example, on macOS:
 
 ```sh
 moon run --target native package/macos
-open "dist/OpenSeek Desktop.app"
+open "dist/SeekMoon.app"
 ```
 
 (Use `package/linux` for the AppImage or `package/windows` for the Windows
@@ -243,13 +243,13 @@ moon -C desktop run --target native package/windows
 
 It builds the Lepus codegen tool if needed, installs WebView2 SDK headers if
 needed, builds the frontend and native host, builds the `openseek` engine from
-the monorepo root, writes `dist/windows-x64/OpenSeek Desktop/`, and creates
-`dist/OpenSeek Desktop-windows-x64.zip`.
+the monorepo root, writes `dist/windows-x64/SeekMoon/`, and creates
+`dist/SeekMoon-windows-x64.zip`.
 
 Without additional arguments, the command builds every output: the
-`dist/windows-x64/OpenSeek Desktop/` bundle directory, the
-`dist/OpenSeek Desktop-windows-x64.zip` portable zip, and the
-`dist/OpenSeek-Desktop-Setup.exe` NSIS installer.
+`dist/windows-x64/SeekMoon/` bundle directory, the
+`dist/SeekMoon-windows-x64.zip` portable zip, and the
+`dist/SeekMoon-Setup.exe` NSIS installer.
 
 Use repeatable `--target` options to select `app`, `zip`, or `installer`.
 The app bundle is always built; selecting `app` alone skips both distribution
@@ -260,14 +260,14 @@ moon -C desktop run --target native package/windows -- --target zip
 ```
 
 This still builds the bundle directory and portable zip, but does not require
-NSIS and does not create `dist/OpenSeek-Desktop-Setup.exe`.
+NSIS and does not create `dist/SeekMoon-Setup.exe`.
 
 To build the per-user NSIS installer, install NSIS so `makensis.exe` is on
 `PATH`, or extract portable NSIS to
 `desktop/dist/tools/nsis-3.12/makensis.exe`.
 
 The installer installs under
-`%LOCALAPPDATA%\Programs\OpenSeek Desktop`, creates Start Menu shortcuts,
+`%LOCALAPPDATA%\Programs\SeekMoon`, creates Start Menu shortcuts,
 offers optional desktop-shortcut and launch-after-install checkboxes, and
 registers an HKCU uninstall entry, so it does not require administrator
 privileges.
@@ -331,7 +331,7 @@ cd desktop
 For a runnable development bundle, place these files together:
 
 ```text
-dist/windows-x64/OpenSeek Desktop/
+dist/windows-x64/SeekMoon/
   openseek-desktop.exe
   openseek.exe
   assets/index.html
@@ -355,7 +355,7 @@ The target machine also needs Microsoft WebView2 Runtime installed.
 
 `package/macos` runs all of the above (including the codegen bootstrap),
 builds the `openseek` engine from the monorepo's `cmd/openseek` source, and
-produces `dist/OpenSeek Desktop.app` by default:
+produces `dist/SeekMoon.app` by default:
 
 ```sh
 moon run --target native package/macos
@@ -377,10 +377,10 @@ moon run --target native package/macos -- --target dmg
 moon run --target native package/macos -- --target zip
 ```
 
-- `dist/OpenSeek Desktop-macos-arm64.dmg` is for first-time installation. It
+- `dist/SeekMoon-macos-arm64.dmg` is for first-time installation. It
   contains the app and an `/Applications` shortcut so users can install by
   dragging the app into Applications.
-- `dist/OpenSeek Desktop-macos-arm64.zip` carries the same app for in-app
+- `dist/SeekMoon-macos-arm64.zip` carries the same app for in-app
   updates.
 
 `--target` is repeatable. The `dmg` and `zip` targets always include the app
@@ -424,7 +424,7 @@ for distribution.
 
 `package/linux` runs the same build steps (including the codegen
 bootstrap), builds the `openseek` engine from the monorepo's `cmd/openseek`
-source, and produces `dist/OpenSeek-Desktop-linux-x86_64.AppImage`:
+source, and produces `dist/SeekMoon-linux-x86_64.AppImage`:
 
 ```sh
 moon run --target native package/linux
