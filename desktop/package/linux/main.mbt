@@ -1,8 +1,8 @@
 ///|
-const AppDirPath : String = "dist/OpenSeek-Desktop.AppDir"
+const AppDirPath : String = "dist/SeekMoon.AppDir"
 
 ///|
-const AppImagePath : String = "dist/OpenSeek-Desktop-linux-x86_64.AppImage"
+const AppImagePath : String = "dist/SeekMoon-linux-x86_64.AppImage"
 
 ///|
 const UsrBinPath : String = AppDirPath + "/usr/bin"
@@ -131,7 +131,7 @@ fn desktop_entry_source() -> String {
   let source =
     #|[Desktop Entry]
     #|Type=Application
-    #|Name=OpenSeek Desktop
+    #|Name=SeekMoon
     #|Exec=openseek-desktop-bin
     #|Icon=openseek-desktop
     #|Categories=Development;

@@ -23,7 +23,7 @@ readme = "README.md"
 
 license = "Apache-2.0"
 
-description = "OpenSeek Desktop — a Proton + Rabbita desktop client for the OpenSeek agent."
+description = "SeekMoon — a Proton + Rabbita desktop client for the OpenSeek agent."
 
 options(
   "--moonbit-unstable-prebuild": "native_link_config.mjs",

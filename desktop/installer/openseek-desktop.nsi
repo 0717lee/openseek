@@ -9,23 +9,23 @@ SetOverwrite on
 !endif
 
 !ifndef SOURCE_DIR
-!define SOURCE_DIR "dist\windows-x64\OpenSeek Desktop"
+!define SOURCE_DIR "dist\windows-x64\SeekMoon"
 !endif
 
 !ifndef OUTPUT_DIR
 !define OUTPUT_DIR "dist"
 !endif
 
-!define APP_NAME "OpenSeek Desktop"
+!define APP_NAME "SeekMoon"
 !define APP_PUBLISHER "OpenSeek"
 !define APP_EXE "openseek-desktop.exe"
-!define APP_UNINSTALL_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\OpenSeek Desktop"
+!define APP_UNINSTALL_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\SeekMoon"
 
 !include "MUI2.nsh"
 
 Name "${APP_NAME}"
-OutFile "${OUTPUT_DIR}\OpenSeek-Desktop-Setup.exe"
-InstallDir "$LOCALAPPDATA\Programs\OpenSeek Desktop"
+OutFile "${OUTPUT_DIR}\SeekMoon-Setup.exe"
+InstallDir "$LOCALAPPDATA\Programs\SeekMoon"
 BrandingText "${APP_NAME}"
 
 VIProductVersion "${APP_VERSION}.0"
@@ -50,7 +50,7 @@ VIAddVersionKey "LegalCopyright" "${APP_PUBLISHER}"
 
 !insertmacro MUI_LANGUAGE "English"
 
-Section "OpenSeek Desktop" SecInstall
+Section "SeekMoon" SecInstall
   SetShellVarContext current
   SetOutPath "$INSTDIR"
   SectionIn RO
@@ -63,8 +63,8 @@ Section "OpenSeek Desktop" SecInstall
   WriteUninstaller "$INSTDIR\Uninstall.exe"
 
   CreateDirectory "$SMPROGRAMS\OpenSeek"
-  CreateShortcut "$SMPROGRAMS\OpenSeek\OpenSeek Desktop.lnk" "$INSTDIR\${APP_EXE}" "" "$INSTDIR\${APP_EXE}" 0
-  CreateShortcut "$SMPROGRAMS\OpenSeek\Uninstall OpenSeek Desktop.lnk" "$INSTDIR\Uninstall.exe"
+  CreateShortcut "$SMPROGRAMS\OpenSeek\SeekMoon.lnk" "$INSTDIR\${APP_EXE}" "" "$INSTDIR\${APP_EXE}" 0
+  CreateShortcut "$SMPROGRAMS\OpenSeek\Uninstall SeekMoon.lnk" "$INSTDIR\Uninstall.exe"
 
   WriteRegStr HKCU "${APP_UNINSTALL_KEY}" "DisplayName" "${APP_NAME}"
   WriteRegStr HKCU "${APP_UNINSTALL_KEY}" "DisplayVersion" "${APP_VERSION}"
@@ -78,15 +78,15 @@ SectionEnd
 
 Section /o "Desktop Shortcut" SecDesktopShortcut
   SetShellVarContext current
-  CreateShortcut "$DESKTOP\OpenSeek Desktop.lnk" "$INSTDIR\${APP_EXE}" "" "$INSTDIR\${APP_EXE}" 0
+  CreateShortcut "$DESKTOP\SeekMoon.lnk" "$INSTDIR\${APP_EXE}" "" "$INSTDIR\${APP_EXE}" 0
 SectionEnd
 
 Section "Uninstall"
   SetShellVarContext current
 
-  Delete "$DESKTOP\OpenSeek Desktop.lnk"
-  Delete "$SMPROGRAMS\OpenSeek\OpenSeek Desktop.lnk"
-  Delete "$SMPROGRAMS\OpenSeek\Uninstall OpenSeek Desktop.lnk"
+  Delete "$DESKTOP\SeekMoon.lnk"
+  Delete "$SMPROGRAMS\OpenSeek\SeekMoon.lnk"
+  Delete "$SMPROGRAMS\OpenSeek\Uninstall SeekMoon.lnk"
   RMDir "$SMPROGRAMS\OpenSeek"
 
   DeleteRegKey HKCU "${APP_UNINSTALL_KEY}"

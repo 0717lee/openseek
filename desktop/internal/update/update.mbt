@@ -117,7 +117,7 @@ pub async fn check_for_update(
 ///|
 /// The actionable explanation shared by the capability check and the final
 /// apply-time check when the running bundle's directory cannot be changed.
-const BundleReplacementFailureMessage : String = "OpenSeek cannot replace the app in its current location. Move OpenSeek Desktop.app to Applications, reopen it, and try again."
+const BundleReplacementFailureMessage : String = "OpenSeek cannot replace the app in its current location. Move SeekMoon.app to Applications, reopen it, and try again."
 
 ///|
 /// Why `bundle_path` cannot be renamed within its current directory. Rename

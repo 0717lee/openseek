@@ -122,7 +122,7 @@ fn conversation_title(conv : Conversation) -> String {
   }
   let task = conv.task.trim().to_owned()
   if task.is_empty() {
-    "OpenSeek Desktop"
+    "SeekMoon"
   } else {
     task
   }
@@ -247,7 +247,7 @@ fn console_session_rows(
       if console.roster.is_empty() {
         rows.push(
           dim_row(
-            "No devices yet — open OpenSeek Desktop and sign in under Settings → Remote access.",
+            "No devices yet — open SeekMoon and sign in under Settings → Remote access.",
           ),
         )
       }

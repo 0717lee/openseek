@@ -11295,7 +11295,7 @@ test "an unavailable startup update reports why without offering Update" {
     result=CheckFound(
       version="0.2.0",
       installable=false,
-      unavailable_reason=Some("Move OpenSeek Desktop.app to Applications."),
+      unavailable_reason=Some("Move SeekMoon.app to Applications."),
     ),
     explicit=false,
   )
@@ -11308,7 +11308,7 @@ test "an unavailable startup update reports why without offering Update" {
     assert_eq(result.notifications.length(), 1)
     inspect(
       result.notifications[0].message,
-      content="Move OpenSeek Desktop.app to Applications.",
+      content="Move SeekMoon.app to Applications.",
     )
     assert_eq(result.notification_seq, 1)
   }

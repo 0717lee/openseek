@@ -386,7 +386,7 @@ pub fn absolute_path(path : String) -> String {
 }
 
 ///|
-const CmakeUnavailableMessage : String = "CMake is required to package OpenSeek Desktop, but `cmake --version` could not be run. Install CMake and ensure `cmake` is on PATH, then rerun the package command. On macOS with Homebrew, run `brew install cmake`."
+const CmakeUnavailableMessage : String = "CMake is required to package SeekMoon, but `cmake --version` could not be run. Install CMake and ensure `cmake` is on PATH, then rerun the package command. On macOS with Homebrew, run `brew install cmake`."
 
 ///|
 /// Verify CMake can be launched before a packager performs any build or
@@ -762,13 +762,16 @@ test "workspace derives absolute paths from an absolute root" {
 }
 
 ///|
+// The bundle names carry no spaces, but a checkout path still can, so the
+// space this pins is in the workspace root.
 test "workspace path join preserves spaces and nested segments" {
-  let ws : Workspace = { root: "/w", invoked_from_repo_root: false }
+  let ws : Workspace = {
+    root: "/My Checkouts/w",
+    invoked_from_repo_root: false,
+  }
   assert_eq(
-    ws.at(
-      "dist/OpenSeek Desktop.app/Contents/Resources/toolchains/moonbit/macos-arm64",
-    ),
-    "/w/dist/OpenSeek Desktop.app/Contents/Resources/toolchains/moonbit/macos-arm64",
+    ws.at("dist/SeekMoon.app/Contents/Resources/toolchains/moonbit/macos-arm64"),
+    "/My Checkouts/w/dist/SeekMoon.app/Contents/Resources/toolchains/moonbit/macos-arm64",
   )
   assert_false(ws.invoked_from_repo_root())
 }

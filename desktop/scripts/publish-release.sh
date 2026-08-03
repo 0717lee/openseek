@@ -30,10 +30,10 @@ fi
 
 # The artifact publishes under the release naming convention: the
 # `<platform>` infix is the manifest `platforms` key clients look
-# themselves up by, and the name must pass the server's URL path guard
-# (no spaces — hence the rename from the dist zip).
-release_name="OpenSeek-Desktop-macos-arm64.zip"
-default_artifact="$desktop_dir/dist/OpenSeek Desktop-macos-arm64.zip"
+# themselves up by. The name has no spaces, so it passes the server's URL
+# path guard and the dist zip uploads under its own basename.
+release_name="SeekMoon-macos-arm64.zip"
+default_artifact="$desktop_dir/dist/$release_name"
 
 case "${1:-}" in
   upload)
