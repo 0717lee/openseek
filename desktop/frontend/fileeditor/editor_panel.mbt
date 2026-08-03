@@ -86,6 +86,7 @@ fn register_tokenizers() -> Unit {
   |> ignore
   @languages.languages.set_tokens_provider("json", @lang_json.JsonTokenizer())
   |> ignore
+  install_moonbit_markdown_comment_provider()
 }
 
 ///|

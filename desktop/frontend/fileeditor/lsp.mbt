@@ -179,7 +179,7 @@ fn hover_range(
   // line/column, then round-trip through offsets so the range stays clamped.
   let start = snapshot.get_offset_at(start_line + 1, start_character + 1)
   let end = snapshot.get_offset_at(end_line + 1, end_character + 1)
-  snapshot.range_of(@common.OffsetRange(start, end))
+  snapshot.range_of(@common.OffsetRange::from_to(start, end))
 }
 
 ///|
