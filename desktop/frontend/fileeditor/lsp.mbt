@@ -173,17 +173,13 @@ fn hover_range(
     @jsonx.json_int(reply, "start_character") is Some(start_character) &&
     @jsonx.json_int(reply, "end_line") is Some(end_line) &&
     @jsonx.json_int(reply, "end_character") is Some(end_character) else {
-    let origin = snapshot.get_position_at(0)
-    return @common.Range::from_positions(origin, origin)
+    return snapshot.range_of(@common.OffsetRange::empty_at(0))
   }
   // The reply carries 0-based LSP positions; shift to the viewer's 1-based
   // line/column, then round-trip through offsets so the range stays clamped.
   let start = snapshot.get_offset_at(start_line + 1, start_character + 1)
   let end = snapshot.get_offset_at(end_line + 1, end_character + 1)
-  @common.Range::from_positions(
-    snapshot.get_position_at(start),
-    snapshot.get_position_at(end),
-  )
+  snapshot.range_of(@common.OffsetRange(start, end))
 }
 
 ///|
