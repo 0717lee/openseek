@@ -37,6 +37,8 @@ pub fn registry_dir(String) -> String
 
 pub async fn resolve_geometry(String) -> Result[Geometry, String]
 
+pub async fn resume_running(Geometry, String) -> Result[SubtaskEntry, String]
+
 pub async fn rollback_provision(Geometry, SubtaskEntry) -> Unit
 
 pub async fn save_entry(String, SubtaskEntry) -> Result[Unit, String]

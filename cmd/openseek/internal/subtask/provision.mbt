@@ -216,6 +216,15 @@ pub async fn resume_running(
   geometry : Geometry,
   name : String,
 ) -> Result[SubtaskEntry, String] {
+  // The same mutex provision and integrate hold: a continue racing an
+  // in-flight integrate must observe its OUTCOME state (Conflicted refuses
+  // below; Integrated is terminal; a clean merge removed the worktree),
+  // never the pre-merge Committed. A cancelled continue still leaks a
+  // Running entry whose branch holds validated work (capture never ran) —
+  // that residual mirrors the launch-cancel one and only discard clears it.
+  let mutex = repo_mutex(geometry.common_git_dir)
+  mutex.acquire()
+  defer mutex.release()
   let (entries, _) = load_entries(geometry.common_git_dir)
   guard entries.filter(e => e.name == name && !e.state.is_terminal()).last()
     is Some(entry) else {
