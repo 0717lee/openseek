@@ -459,6 +459,10 @@ async test "captured defects repair through resume and re-capture" {
     assert_true(defective.entry.state is Captured)
     assert_eq(defective.entry.commit_oid, Some(commit1))
     // Captured is continuable; the repair worker reverts the intrusion.
+    // other/b.txt is TRACKED (seeded in the base commit) and commit1's
+    // tree holds it at "beta" — restoring that content makes the worktree
+    // status clean again, which is what routes the re-capture through the
+    // idle guard below.
     let resumed = match
       @subtask.resume_running(provisioned.geometry, "fix-lib") {
       Ok(resumed) => resumed
@@ -519,5 +523,36 @@ async test "resume_running refuses conflicted slices and gone worktrees" {
       fail("expected a gone-worktree refusal")
     }
     assert_true(gone.contains("gone"))
+  })
+}
+
+///|
+/// The stale-snapshot gate: lifecycle actions re-read the registry under
+/// the repo mutex, so an entry object captured BEFORE a concurrent
+/// continue flipped the slice to Running cannot merge or discard under the
+/// live child.
+async test "integrate refuses a stale snapshot of a resumed slice" {
+  @vfs.with_tmpdir(prefix="openseek-subtask-stale-", dir => {
+    let repo = seed_repo(dir)
+    let provisioned = must_provision(
+      repo,
+      name="fix-lib",
+      allowed_paths=["lib"],
+      nonce="n1",
+    )
+    @vfs.write_text("\{provisioned.entry.worker_root}/lib", "a.txt", "ALPHA\n")
+    let captured = @subtask.capture(provisioned.geometry, provisioned.entry)
+    assert_true(captured.entry.state is Committed)
+    // A continue flips the slice to Running on disk; the caller still
+    // holds the Committed snapshot.
+    match @subtask.resume_running(provisioned.geometry, "fix-lib") {
+      Ok(_) => ()
+      Err(reason) => fail("resume_running failed: \{reason}")
+    }
+    let refused = @subtask.integrate(provisioned.geometry, captured.entry)
+    assert_eq(refused.result, "refused")
+    assert_true(refused.detail[0].contains("not in a committed state"))
+    // The worktree survives for the (simulated) live child.
+    assert_true(@fs.exists(provisioned.entry.worker_root))
   })
 }
