@@ -33,6 +33,25 @@ fn merge_args(entry : SubtaskEntry, commit_oid : String) -> Array[String] {
 }
 
 ///|
+/// Re-read the caller's entry from the registry: the tool layer loaded its
+/// snapshot BEFORE any mutex was taken, and a concurrent continue may have
+/// advanced the state since (e.g. Committed → Running with a live child).
+/// Operating on the stale snapshot would merge or delete under that child.
+/// A missing record falls back to the snapshot — the state guards at each
+/// call site then decide.
+async fn reload_entry(
+  common_git_dir : String,
+  entry : SubtaskEntry,
+) -> SubtaskEntry {
+  let (entries, _) = load_entries(common_git_dir)
+  match
+    entries.filter(e => e.name == entry.name && e.nonce == entry.nonce).last() {
+    Some(fresh) => fresh
+    None => entry
+  }
+}
+
+///|
 /// Merge a committed subtask into the origin; outcome classified by git
 /// postconditions (integrated | conflicted | refused).
 pub async fn integrate(
@@ -52,6 +71,7 @@ async fn integrate_locked(
   origin : String,
   entry : SubtaskEntry,
 ) -> IntegrateOutcome {
+  let entry = reload_entry(geometry.common_git_dir, entry)
   guard entry.state is Committed && entry.commit_oid is Some(commit_oid) else {
     return {
       entry,
@@ -214,6 +234,7 @@ async fn integrate_continue_locked(
   origin : String,
   entry : SubtaskEntry,
 ) -> IntegrateOutcome {
+  let entry = reload_entry(geometry.common_git_dir, entry)
   guard entry.state is Conflicted && entry.commit_oid is Some(commit_oid) else {
     return {
       entry,
@@ -316,6 +337,10 @@ pub async fn integrate_abort(
   entry : SubtaskEntry,
 ) -> IntegrateOutcome {
   let origin = geometry.origin_root
+  let mutex = repo_mutex(geometry.common_git_dir)
+  mutex.acquire()
+  defer mutex.release()
+  let entry = reload_entry(geometry.common_git_dir, entry)
   guard entry.state is Conflicted && entry.commit_oid is Some(commit_oid) else {
     return {
       entry,
@@ -356,6 +381,14 @@ pub async fn discard(
   entry : SubtaskEntry,
 ) -> Result[Unit, String] {
   let origin = geometry.origin_root
+  // Discard stays the destructive escape hatch for ANY non-terminal state
+  // (it is the documented recovery for a crashed or cancelled child), but
+  // it serializes with the other lifecycle actions and acts on the fresh
+  // record, never a stale snapshot.
+  let mutex = repo_mutex(geometry.common_git_dir)
+  mutex.acquire()
+  defer mutex.release()
+  let entry = reload_entry(geometry.common_git_dir, entry)
   if entry.commit_oid is Some(commit_oid) {
     let merge_head = git_run(
       ["rev-parse", "-q", "--verify", "MERGE_HEAD"],
