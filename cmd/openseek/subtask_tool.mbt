@@ -36,6 +36,10 @@ fn subtask_tool_definition(
       #|to merge its branch here (re-run your checks after each); on a conflict, resolve
       #|the markers with the file tools, then integrate_continue=<name> (or
       #|integrate_abort=<name>); discard=<name> abandons a slice and frees its paths.
+      #|CONTINUE: continue=<name> plus a fresh task (the remainder work order)
+      #|relaunches a NEW worker on a truncated or NOT-mergeable slice's kept worktree;
+      #|its cumulative changes are re-captured on the same branch — prefer this over
+      #|finishing a truncated slice yourself.
       #|PARALLELISM: to run several slices at once, pass them as `slices`: an ARRAY of
       #|{name, task, allowed_paths, context?} objects in ONE call — they are launched
       #|concurrently and reported together (2-4 per call; at most 4 run at once). Prefer
@@ -96,6 +100,10 @@ fn subtask_tool_definition(
           "type": "string",
           "description": "Abandon the named subtask: remove its worktree and branch, free its paths.",
         },
+        "continue": {
+          "type": "string",
+          "description": "Relaunch a fresh worker on the named slice's kept worktree to finish or repair it. Requires `task` (the remainder work order); accepts `context`. New work is captured cumulatively on the same branch.",
+        },
       },
     }),
     execute=Async(arguments => {
@@ -124,6 +132,11 @@ async fn subtask_execute(
 ) -> @agent_tool.ToolAction {
   // Lifecycle actions first: exactly one of them may be present.
   match arguments {
+    { "continue": String(name), .. } if name.trim() != "" =>
+      return subtask_continue(
+        self_exe, model, workspace_root, budget, api_url, child_session, arguments,
+        name,
+      )
     { "integrate": String(name), .. } if name.trim() != "" =>
       return subtask_lifecycle(workspace_root, "integrate", name)
     { "integrate_continue": String(name), .. } if name.trim() != "" =>
@@ -415,7 +428,42 @@ async fn subtask_launch_one(
         status: "not launched: \{@agent_tool.brief_line(reason, limit=100)}",
       }
   }
-  let entry = provisioned.entry
+  run_worker_slice(
+    self_exe,
+    model,
+    api_url,
+    child_session,
+    provisioned.geometry,
+    provisioned.entry,
+    name,
+    task,
+    context,
+    // Resolved BEFORE the worktree existed, so the worker's own root is
+    // naturally absent from this deny list.
+    provisioned.geometry.worktree_roots,
+    granted_steps,
+  )
+}
+
+///|
+/// Run one worker child against a provisioned or resumed slice and capture
+/// the outcome from git evidence. `deny_roots` is the caller's concern:
+/// launch passes the pre-worktree geometry (the worker's own root is
+/// naturally absent); continue passes a fresh resolve with the slice's own
+/// root filtered out.
+async fn run_worker_slice(
+  self_exe : String,
+  model : @deepseek.Model,
+  api_url : String?,
+  child_session : @agent_subrun.ChildSession?,
+  geometry : @subtask.Geometry,
+  entry : @subtask.SubtaskEntry,
+  name : String,
+  task : String,
+  context : String?,
+  deny_roots : Array[String],
+  granted_steps : Int,
+) -> SliceOutcome {
   let input : Json = match context {
     Some(context) =>
       {
@@ -423,7 +471,7 @@ async fn subtask_launch_one(
         "context": context,
         "worker_root": entry.worker_root,
         "worker_admin_dir": entry.worker_admin_dir,
-        "deny_roots": provisioned.geometry.worktree_roots.to_json(),
+        "deny_roots": deny_roots.to_json(),
         "allowed_paths": entry.allowed_paths.to_json(),
         "base_oid": entry.base_oid,
       }
@@ -432,7 +480,7 @@ async fn subtask_launch_one(
         "task": task,
         "worker_root": entry.worker_root,
         "worker_admin_dir": entry.worker_admin_dir,
-        "deny_roots": provisioned.geometry.worktree_roots.to_json(),
+        "deny_roots": deny_roots.to_json(),
         "allowed_paths": entry.allowed_paths.to_json(),
         "base_oid": entry.base_oid,
       }
@@ -461,7 +509,7 @@ async fn subtask_launch_one(
     child_session?,
   )
   // Evidence comes from git regardless of how the child ended.
-  let captured = @subtask.capture(provisioned.geometry, entry)
+  let captured = @subtask.capture(geometry, entry)
   let out = StringBuilder()
   match result.value() {
     Some(report) =>
@@ -479,10 +527,10 @@ async fn subtask_launch_one(
   }
   let state_line = match captured.entry.state {
     Committed =>
-      "state: committed on \{entry.branch} — review the evidence, then subtask integrate=\{name} (worktree kept at \{entry.worker_root} until then)"
+      "state: committed on \{entry.branch} — review the evidence, then subtask integrate=\{name}; if the task is unfinished, continue=\{name} with the remainder (worktree kept at \{entry.worker_root} until then)"
     NoChanges => "state: no changes — the slice's paths are free again"
     _ =>
-      "state: NOT mergeable — inspect \{entry.worker_root}, then discard=\{name} or relaunch"
+      "state: NOT mergeable — inspect \{entry.worker_root}; continue=\{name} with a corrective task can repair it, or discard=\{name}"
   }
   out <+ "\n\{state_line}"
   let mergeable = captured.entry.state is Committed
@@ -495,4 +543,98 @@ async fn subtask_launch_one(
     ),
     status: state_line,
   }
+}
+
+///|
+/// `continue=<name>`: relaunch a fresh worker on an existing slice's kept
+/// worktree — the recovery path for a worker that hit its step ceiling
+/// (state Committed, task unfinished) or captured NOT-mergeable (state
+/// Captured). The slice keeps its name, branch, reservation, and base; the
+/// new child receives the remainder work order and capture() stacks its
+/// validated changes on the same branch.
+async fn subtask_continue(
+  self_exe : String,
+  model : @deepseek.Model,
+  workspace_root : String,
+  budget : @agent_subrun.SubrunBudget,
+  api_url : String?,
+  child_session : @agent_subrun.ChildSession?,
+  arguments : Json,
+  name : String,
+) -> @agent_tool.ToolAction {
+  guard arguments is { "task": String(task), .. } && task.trim() != "" else {
+    return @agent_tool.ToolAction::respond(
+      "error: subtask continue=\{name} requires a `task` — the remainder work order for the fresh worker",
+      is_error=true,
+      brief="subtask continue \{name}",
+    )
+  }
+  guard task.length() <= max_task_chars else {
+    return @agent_tool.ToolAction::respond(
+      "error: subtask task for \{name} exceeds \{max_task_chars} chars",
+      is_error=true,
+      brief="subtask continue \{name}",
+    )
+  }
+  let parent_context : String? = match arguments {
+    { "context": String(context), .. } if context.trim() != "" => Some(context)
+    _ => None
+  }
+  guard !(parent_context is Some(c) && c.length() > max_context_chars) else {
+    return @agent_tool.ToolAction::respond(
+      "error: subtask context for \{name} exceeds \{max_context_chars} chars",
+      is_error=true,
+      brief="subtask continue \{name}",
+    )
+  }
+  let geometry = match @subtask.resolve_geometry(workspace_root) {
+    Ok(geometry) => geometry
+    Err(reason) =>
+      return @agent_tool.ToolAction::respond(
+        "error: subtask continue: \{reason}",
+        is_error=true,
+        brief="subtask continue \{name}",
+      )
+  }
+  guard worker_slots.try_acquire() else {
+    return @agent_tool.ToolAction::respond(
+      "subtask worker slots are full (max \{max_active_workers} active) — integrate or await the running slices first.",
+      is_error=true,
+      brief="subtask continue (slots full)",
+    )
+  }
+  defer worker_slots.release()
+  guard budget.reserve(@agent_worker.default_worker_max_steps)
+    is Some(granted_steps) else {
+    return @agent_tool.ToolAction::respond(
+      "subtask budget exhausted for this turn — do the remaining work yourself or continue next turn.",
+      is_error=true,
+      brief="subtask continue (budget exhausted)",
+    )
+  }
+  let entry = match @subtask.resume_running(geometry, name) {
+    Ok(entry) => entry
+    Err(reason) =>
+      return @agent_tool.ToolAction::respond(
+        "error: subtask continue: \{reason}",
+        is_error=true,
+        brief="subtask continue \{name}",
+      )
+  }
+  // The fresh geometry lists the slice's own worktree; the worker must not
+  // be denied its own root.
+  let deny_roots = geometry.worktree_roots.filter(root => {
+    root != entry.worker_root
+  })
+  let preamble = "RESUMED SLICE: a previous worker already worked this slice; its validated progress is already present in your worktree files. Verify the current state first, then do only what the task still requires."
+  let context = Some(
+    match parent_context {
+      Some(context) => "\{preamble}\n\{context}"
+      None => preamble
+    },
+  )
+  run_worker_slice(
+    self_exe, model, api_url, child_session, geometry, entry, name, task, context,
+    deny_roots, granted_steps,
+  ).action
 }

@@ -24,13 +24,21 @@ pub async fn capture(
   let worker = entry.worker_root
   let evidence : Array[String] = []
   let defects : Array[String] = []
+  // The pin this capture measures HEAD against and stacks its commit on. A
+  // first capture pins the recorded base; a RESUMED slice's worktree
+  // legitimately sits at the previous capture's commit (update-ref moved
+  // the checked-out branch), so later captures pin that commit instead.
+  let pin = match entry.commit_oid {
+    Some(prior) => prior
+    None => entry.base_oid
+  }
   // The worker cannot commit (the sandbox denies the shared object store);
   // a moved HEAD means something abnormal happened — refuse to reason on it.
   match git_require(["rev-parse", "HEAD"], cwd=worker) {
     Ok(head) =>
-      if head.trim() != entry.base_oid {
+      if head.trim() != pin {
         defects.push(
-          "worktree HEAD moved from the pinned base (\{head.trim()} != \{entry.base_oid})",
+          "worktree HEAD moved from the pinned base (\{head.trim()} != \{pin})",
         )
       }
     Err(reason) => defects.push(reason)
@@ -52,6 +60,15 @@ pub async fn capture(
     // to whatever happened — keep it and report.
     let entry = { ..entry, state: Captured }
     let _ = save_entry(geometry.common_git_dir, entry)
+    return { entry, evidence, defects }
+  }
+  if changes.is_empty() && entry.commit_oid is Some(prior) {
+    // A resumed worker that added nothing new: the prior capture still
+    // stands. The terminal cleanup below would delete the branch holding
+    // already-validated work — keep everything and report instead.
+    let entry = { ..entry, state: Committed }
+    let _ = save_entry(geometry.common_git_dir, entry)
+    evidence.push("no additional changes since the prior capture \{prior}")
     return { entry, evidence, defects }
   }
   if changes.is_empty() {
@@ -127,14 +144,14 @@ pub async fn capture(
     return { entry, evidence, defects }
   }
   // Commit EXACTLY the validated tree; then move the branch ref to it,
-  // guarded by the expected old value (the pinned base).
+  // guarded by the expected old value (the pin).
   let commit_oid = match
     git_require(
       [
         "commit-tree",
         tree_oid,
         "-p",
-        entry.base_oid,
+        pin,
         "-m",
         "subtask \{entry.name}: worker changes",
       ],
@@ -148,7 +165,7 @@ pub async fn capture(
   }
   match
     git_require(
-      ["update-ref", "refs/heads/\{entry.branch}", commit_oid, entry.base_oid],
+      ["update-ref", "refs/heads/\{entry.branch}", commit_oid, pin],
       cwd=worker,
     ) {
     Ok(_) => ()
