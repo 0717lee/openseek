@@ -74,7 +74,9 @@ reaches the profile). Ship first, alone.
 10. Prewarm: copy origin `.mooncakes` when present (immutable snapshot;
     measure size, skip over a threshold with a note). `_build` never copied.
 11. Launch `run_subrun` (cwd=wt, `subrun worker --dir <wt>`, child_session?,
-    deadline 20 min, steps 100). Child env additions: `GIT_OPTIONAL_LOCKS=0`.
+    deadline 45 min, steps 300 — resized 2026-08-04 after two sweeps
+    truncated workers at the original 100). Child env additions:
+    `GIT_OPTIONAL_LOCKS=0`.
 
 ## Worker sandbox profile (macOS kernel layer)
 
@@ -193,8 +195,8 @@ subrun tools); substantial worker system prompt (.mbt.md + dev_build; "do
 not run git commit/worktree — the harness commits; permission errors on
 those are expected"); report v1 {status, summary, verification}; child
 session persistence; viz gate + tests; TUI unchanged; about-text fix;
-budget (SubrunBudget shared backstop + 4-slot semaphore, 20 min, 100
-steps); prompt guidance incl. warning-sweep recipe (partitions =
+budget (SubrunBudget shared backstop + 4-slot semaphore, 45 min, 300
+steps since 2026-08-04); prompt guidance incl. warning-sweep recipe (partitions =
 allowed_paths; integrate one at a time re-checking after each); dogfood
 eval with negative controls (seeded out-of-scope worker must yield a
 scope-violation error; final verdict from the checker).
