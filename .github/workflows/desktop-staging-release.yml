@@ -1,0 +1,172 @@
+name: Desktop staging release
+
+run-name: Desktop staging v${{ inputs.version }} by @${{ github.actor }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version to publish to staging, for example 0.1.8
+        required: true
+        type: string
+
+# A release must finish as one upload/publish transaction. A second dispatch
+# waits instead of cancelling a run that may already have uploaded its archive.
+concurrency:
+  group: desktop-staging-release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  release-macos:
+    name: Sign, notarize, and publish macOS
+    if: github.ref == 'refs/heads/main'
+    runs-on: macos-latest
+    timeout-minutes: 120
+    env:
+      APPLE_TEAM_ID: NYZ3LQ5QWC
+      MACOS_SIGNING_IDENTITY: "Developer ID Application: Haoxiang Fei (NYZ3LQ5QWC)"
+      NOTARY_PROFILE: openseek-nightly
+      OPENSEEK_API_ORIGIN: https://openseek-api-staging.moonbitlang.cn
+      RELEASE_VERSION: ${{ inputs.version }}
+
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v5
+
+      - name: Check out the Proton submodule
+        run: git submodule update --init desktop/lepus
+
+      # Stamp only this runner's checkout; the source branch is not modified.
+      - name: Stamp release version
+        shell: bash
+        run: |
+          set -euo pipefail
+          RELEASE_VERSION="$RELEASE_VERSION" perl -0pi -e '
+            s/pub const AppVersion : String = "[^"]+"/pub const AppVersion : String = "$ENV{RELEASE_VERSION}"/
+          ' desktop/internal/version/version.mbt
+          expected="pub const AppVersion : String = \"$RELEASE_VERSION\""
+          grep -Fx "$expected" desktop/internal/version/version.mbt
+
+      - name: Set up MoonBit (nightly)
+        run: |
+          curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash -s -- nightly
+          echo "$HOME/.moon/bin" >> "$GITHUB_PATH"
+
+      - name: Show MoonBit version
+        run: moon version --all
+
+      - name: Update MoonBit package registry
+        run: moon update
+
+      # GitHub's runner starts without the Developer ID identity available on
+      # the developer Mac. Import it into an ephemeral keychain for codesign.
+      - name: Import Developer ID certificate
+        shell: bash
+        env:
+          MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          certificate_path="$RUNNER_TEMP/openseek-developer-id.p12"
+          signing_keychain="$RUNNER_TEMP/openseek-nightly.keychain-db"
+          signing_keychain_password="$(openssl rand -base64 32)"
+          trap 'rm -f "$certificate_path"' EXIT
+
+          printf '%s' "$MACOS_CERTIFICATE_P12" | base64 -D > "$certificate_path"
+          security create-keychain -p "$signing_keychain_password" "$signing_keychain"
+          security set-keychain-settings -lut 7200 "$signing_keychain"
+          security unlock-keychain -p "$signing_keychain_password" "$signing_keychain"
+          security import "$certificate_path" \
+            -k "$signing_keychain" \
+            -P "$MACOS_CERTIFICATE_PASSWORD" \
+            -A -t cert -f pkcs12
+          security set-key-partition-list \
+            -S apple-tool:,apple: \
+            -s \
+            -k "$signing_keychain_password" \
+            "$signing_keychain"
+          security list-keychains -d user -s "$signing_keychain"
+          security find-identity -v -p codesigning "$signing_keychain" |
+            grep -F "$MACOS_SIGNING_IDENTITY"
+          echo "SIGNING_KEYCHAIN=$signing_keychain" >> "$GITHUB_ENV"
+
+      # notarytool validates the Apple account credentials while saving this
+      # profile. The runner is disposable, so the profile is never persisted.
+      - name: Configure Apple notarization
+        shell: bash
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+        run: |
+          xcrun notarytool store-credentials "$NOTARY_PROFILE" \
+            --apple-id "$APPLE_ID" \
+            --team-id "$APPLE_TEAM_ID" \
+            --password "$APPLE_APP_SPECIFIC_PASSWORD"
+
+      - name: Build, sign, and notarize macOS artifacts
+        shell: bash
+        env:
+          OPENSEEK_CLIENT_TOKEN: ${{ secrets.OPENSEEK_CLIENT_TOKEN }}
+        run: |
+          moon -C desktop run --target native --release package/macos -- \
+            --target dmg \
+            --target zip \
+            --sign "$MACOS_SIGNING_IDENTITY" \
+            --notarize "$NOTARY_PROFILE"
+
+      - name: Upload signed artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: SeekMoon-macos-arm64-v${{ inputs.version }}
+          path: |
+            desktop/dist/SeekMoon-macos-arm64.zip
+            desktop/dist/SeekMoon-macos-arm64.dmg
+          if-no-files-found: error
+          retention-days: 14
+
+      # Upload verifies the server-computed digest before publish atomically
+      # switches staging's latest.json to this version.
+      - name: Publish to staging
+        shell: bash
+        env:
+          OPENSEEK_DEPLOY_TOKEN: ${{ secrets.OPENSEEK_DEPLOY_TOKEN }}
+        run: |
+          desktop/scripts/publish-release.sh upload
+          desktop/scripts/publish-release.sh publish "v$RELEASE_VERSION"
+
+      - name: Verify staging manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          manifest="$(curl -fsSL "$OPENSEEK_API_ORIGIN/desktop/releases/latest.json")"
+          archive="desktop/dist/SeekMoon-macos-arm64.zip"
+          archive_sha256="$(shasum -a 256 "$archive" | cut -d' ' -f1)"
+          archive_url="$OPENSEEK_API_ORIGIN/desktop/releases/v$RELEASE_VERSION/SeekMoon-macos-arm64.zip"
+
+          jq -e \
+            --arg version "$RELEASE_VERSION" \
+            --arg url "$archive_url" \
+            --arg sha256 "$archive_sha256" \
+            '.version == $version and
+              .platforms["macos-arm64"].url == $url and
+              .platforms["macos-arm64"].sha256 == $sha256' \
+            <<< "$manifest"
+
+          {
+            echo "## Desktop staging release"
+            echo
+            echo "- Version: \`$RELEASE_VERSION\`"
+            echo "- Artifact: $archive_url"
+            echo "- SHA-256: \`$archive_sha256\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove signing keychain
+        if: always()
+        shell: bash
+        run: |
+          if [[ -n "${SIGNING_KEYCHAIN:-}" && -f "$SIGNING_KEYCHAIN" ]]; then
+            security delete-keychain "$SIGNING_KEYCHAIN"
+          fi
