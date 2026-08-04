@@ -67,7 +67,9 @@ const AppBundleIdentifier : String = "community.moonbit.proton.openseek-desktop"
 const HelperBundleIdentifier : String = AppBundleIdentifier + ".helper"
 
 ///|
-const SigningEntitlementsPath : String = "dist/SeekMoon.entitlements"
+/// The application and CEF helper entitlements are checked in as a plist so
+/// codesign consumes the same reviewable file in local and distribution builds.
+const SigningEntitlementsPath : String = "package/macos/SeekMoon.entitlements"
 
 ///|
 /// Entitlements for the bundled `moonrun`: it JIT-compiles wasm, so under the
@@ -75,7 +77,7 @@ const SigningEntitlementsPath : String = "dist/SeekMoon.entitlements"
 /// pthread_jit_write_protect discipline fall back to unsigned executable
 /// memory). Signed onto the seed binary in both the adhoc and distribution
 /// paths so a locally built bundle behaves like a notarized one.
-const JitEntitlementsPath : String = "dist/moonrun.entitlements"
+const JitEntitlementsPath : String = "package/macos/moonrun.entitlements"
 
 ///|
 /// The seed binaries that execute JIT-compiled code and need
@@ -343,68 +345,30 @@ fn helper_info_plist_source(helper : CefHelperVariant) -> String {
 }
 
 ///|
-fn signing_entitlements_source() -> String {
-  let source =
-    $|<?xml version="1.0" encoding="UTF-8"?>
-    $|<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-    $|<plist version="1.0">
-    $|<dict>
-    $|  <key>com.apple.security.cs.allow-jit</key><true/>
-    $|  <key>com.apple.security.cs.allow-unsigned-executable-memory</key><true/>
-    $|  <key>com.apple.security.cs.disable-executable-page-protection</key><true/>
-    $|  <key>com.apple.security.cs.disable-library-validation</key><true/>
-    $|</dict>
-    $|</plist>
-    $|
-  source
-}
-
-///|
-fn jit_entitlements_source() -> String {
-  let source =
-    $|<?xml version="1.0" encoding="UTF-8"?>
-    $|<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-    $|<plist version="1.0">
-    $|<dict>
-    $|  <key>com.apple.security.cs.allow-jit</key><true/>
-    $|  <key>com.apple.security.cs.allow-unsigned-executable-memory</key><true/>
-    $|</dict>
-    $|</plist>
-    $|
-  source
-}
-
-///|
-fn info_plist_source() -> String {
-  let source =
-    $|<?xml version="1.0" encoding="UTF-8"?>
-    $|<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-    $|<plist version="1.0">
-    $|<dict>
-    $|  <key>CFBundleDevelopmentRegion</key><string>en</string>
-    $|  <key>CFBundleDisplayName</key><string>SeekMoon</string>
-    $|  <key>CFBundleExecutable</key><string>openseek-desktop</string>
-    $|  <key>CFBundleIconFile</key><string>AppIcon</string>
-    $|  <key>CFBundleIdentifier</key><string>\{AppBundleIdentifier}</string>
-    $|  <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
-    $|  <key>CFBundleName</key><string>SeekMoon</string>
-    $|  <key>CFBundlePackageType</key><string>APPL</string>
-    $|  <key>CFBundleShortVersionString</key><string>\{@version.AppVersion}</string>
-    $|  <key>CFBundleVersion</key><string>\{@version.AppVersion}</string>
-    $|  <key>LSMinimumSystemVersion</key><string>\{MinMacOSVersion}</string>
-    $|  <key>NSHighResolutionCapable</key><true/>
-    $|</dict>
-    $|</plist>
-    $|
-  source
-}
+const InfoPlistSource : String =
+  $|<?xml version="1.0" encoding="UTF-8"?>
+  $|<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+  $|<plist version="1.0">
+  $|<dict>
+  $|  <key>CFBundleDevelopmentRegion</key><string>en</string>
+  $|  <key>CFBundleDisplayName</key><string>SeekMoon</string>
+  $|  <key>CFBundleExecutable</key><string>openseek-desktop</string>
+  $|  <key>CFBundleIconFile</key><string>AppIcon</string>
+  $|  <key>CFBundleIdentifier</key><string>\{AppBundleIdentifier}</string>
+  $|  <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+  $|  <key>CFBundleName</key><string>SeekMoon</string>
+  $|  <key>CFBundlePackageType</key><string>APPL</string>
+  $|  <key>CFBundleShortVersionString</key><string>\{@version.AppVersion}</string>
+  $|  <key>CFBundleVersion</key><string>\{@version.AppVersion}</string>
+  $|  <key>LSMinimumSystemVersion</key><string>\{MinMacOSVersion}</string>
+  $|  <key>NSHighResolutionCapable</key><true/>
+  $|</dict>
+  $|</plist>
+  $|
 
 ///|
 async fn write_bundle_metadata(ws : @packaging.Workspace) -> Unit {
-  @packaging.write_text(
-    ws.at(ContentsPath + "/Info.plist"),
-    info_plist_source(),
-  )
+  @packaging.write_text(ws.at(ContentsPath + "/Info.plist"), InfoPlistSource)
   @packaging.run_checked(
     "chmod",
     ["+x", MacOSPath + "/openseek-desktop", MacOSPath + "/openseek"],
@@ -639,20 +603,6 @@ async fn sign_cef_helper(
 }
 
 ///|
-async fn write_signing_entitlements(ws : @packaging.Workspace) -> String {
-  let path = ws.at(SigningEntitlementsPath)
-  @packaging.write_text(path, signing_entitlements_source())
-  path
-}
-
-///|
-async fn write_jit_entitlements(ws : @packaging.Workspace) -> String {
-  let path = ws.at(JitEntitlementsPath)
-  @packaging.write_text(path, jit_entitlements_source())
-  path
-}
-
-///|
 priv struct ArtifactPlan {
   dmg : Bool
   zip : Bool
@@ -772,10 +722,10 @@ async fn sign_app(
   sign : SignConfig,
   artifacts : ArtifactPlan,
 ) -> Unit {
-  let entitlements = write_signing_entitlements(ws)
+  let entitlements = ws.at(SigningEntitlementsPath)
   guard sign.identity is Some(identity) else {
     if artifacts.requires_ad_hoc_bundle_signature() {
-      let jit_entitlements = write_jit_entitlements(ws)
+      let jit_entitlements = ws.at(JitEntitlementsPath)
       sign_moonbit_seed_binaries(ws, "-", jit_entitlements, distribution=false)
     }
     sign_cef_helper(ws, "-", entitlements, distribution=false)
@@ -802,7 +752,7 @@ async fn sign_app(
     )
     return
   }
-  let jit_entitlements = write_jit_entitlements(ws)
+  let jit_entitlements = ws.at(JitEntitlementsPath)
   // Real distribution signing: hardened runtime and a secure timestamp are
   // notarization requirements. Sign inside-out: nested executables first, then
   // the bundle, because deprecated `--deep` signs nested code with the wrong
