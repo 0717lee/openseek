@@ -1,34 +1,36 @@
 // Self-update ops, driven entirely by the webview: `check_update` asks the
 // channel's manifest and reports what it found as data (never an op
 // rejection — every outcome is a state the frontend renders); a user
-// clicking Update runs `download_update` (fetch + verify into the staging
-// dir) and then `apply_update` (swap the bundle and arrange the relaunch
-// that `main` performs once the run loop exits). Nothing here runs on its
-// own: the host's only startup involvement is sweeping leftovers of a
-// previous update.
+// clicking Update hands one download to the app-lifetime pump, which fetches
+// + verifies into the staging dir and reports progress and completion as
+// `update.*` notifications; the `update.downloaded` notification then lets
+// the page run `apply_update` (swap the bundle and arrange the relaunch that
+// `main` performs once the run loop exits). The download cannot live in its
+// `op_async` request: Proton cancels any bridge request that exceeds its
+// finite request deadline.
 
 ///|
-/// What self-update needs to know about this installation, plus the staged
-/// bundle once verification passed. `work_dir`/`bundle_path` are None for
-/// dev binaries and non-macOS layouts, which pins the flow to the
-/// informational fallback.
-priv struct UpdateState {
-  mut staged : @update.StagedUpdate?
+/// Self-update state shared by request tasks and the app-lifetime download
+/// pump. The async runtime is single-threaded and cooperative, so any
+/// check-and-set on these fields that contains no suspension point is atomic;
+/// `busy` is the sole serializer of downloads and applies, which consume the
+/// same staging dir and bundle path.
+priv struct SelfUpdate {
   work_dir : String?
   bundle_path : String?
-  // Cleanup, staging, and bundle replacement all touch the same fixed paths.
-  // One host-wide mutex keeps those mutations from overlapping across desktop
-  // and remote request tasks. Read-only update checks do not take it.
-  mutation_lock : @async.Mutex
+  // At most one payload is ever buffered: `busy` flips in the same atomic
+  // step as the enqueue and clears only when the pump finished the download.
+  downloads : @async.Queue[UpdateChannelPayload]
+  mut staged : @update.StagedUpdate?
+  mut busy : Bool
 }
 
 ///|
-fn new_update_state(
+fn SelfUpdate::new(
   runtime_dir : @path.Path?,
   executable : String?,
-) -> UpdateState {
+) -> SelfUpdate {
   {
-    staged: None,
     work_dir: if runtime_dir is Some(dir) {
       Some(dir.to_string())
     } else {
@@ -39,17 +41,17 @@ fn new_update_state(
     } else {
       None
     },
-    mutation_lock: Mutex(),
+    downloads: Queue(kind=Blocking(1)),
+    staged: None,
+    busy: false,
   }
 }
 
 ///|
 /// Sweep debris a previous update may have left behind (a staging dir, the
 /// old bundle parked aside) — the host's only unprompted update work.
-async fn cleanup_updates(state : UpdateState) -> Unit {
-  state.mutation_lock.acquire()
-  defer state.mutation_lock.release()
-  if state.work_dir is Some(dir) && state.bundle_path is Some(bundle) {
+async fn SelfUpdate::cleanup(self : SelfUpdate) -> Unit {
+  if self.work_dir is Some(dir) && self.bundle_path is Some(bundle) {
     @update.cleanup_leftovers(work_dir=dir, bundle_path=bundle)
   }
 }
@@ -121,8 +123,8 @@ impl ToJson for CheckUpdateReply with fn to_json(self) {
 /// replaceable location, with a package published for this platform. Only a
 /// failed installation preflight carries `unavailable_reason`; a platform
 /// without a package remains the existing informational fallback.
-async fn check_update_op(
-  state : UpdateState,
+async fn SelfUpdate::check(
+  self : SelfUpdate,
   payload : UpdateChannelPayload,
 ) -> CheckUpdateReply {
   let info = @update.check_for_update(
@@ -148,38 +150,87 @@ async fn check_update_op(
   }
   guard info is Some(info) else { return UpToDate }
   let unavailable_reason = if info.artifact is Some(_) &&
-    state.work_dir is Some(_) &&
-    state.bundle_path is Some(bundle) {
+    self.work_dir is Some(_) &&
+    self.bundle_path is Some(bundle) {
     @update.self_update_unavailable_reason(bundle_path=bundle)
   } else {
     None
   }
   let installable = info.artifact is Some(_) &&
-    state.work_dir is Some(_) &&
-    state.bundle_path is Some(_) &&
+    self.work_dir is Some(_) &&
+    self.bundle_path is Some(_) &&
     unavailable_reason is None
   Available(version=info.version, installable~, unavailable_reason~)
 }
 
 ///|
-/// Reply to `download_update`: the version now staged and verified.
+/// The immediate `update.download` reply. Completion arrives separately as
+/// `update.downloaded` or `update.download_failed` from the host-owned pump.
+priv struct DownloadUpdateAcceptedReply {
+  accepted : Bool
+} derive(ToJson)
+
+///|
+/// Reply carried by `update.downloaded`: the version now staged and verified.
 priv struct DownloadUpdateReply {
   version : String
 } derive(ToJson)
 
 ///|
+/// Bytes received for the active package. `total_bytes` is absent only when
+/// the server omitted a usable Content-Length header.
+priv struct DownloadUpdateProgress {
+  downloaded_bytes : Int
+  total_bytes : Int?
+}
+
+///|
+fn DownloadUpdateProgress::to_json(self : DownloadUpdateProgress) -> Json {
+  {
+    "downloaded_bytes": Json::number(self.downloaded_bytes.to_double()),
+    "total_bytes": match self.total_bytes {
+      Some(total) => Json::number(total.to_double())
+      None => Json::null()
+    },
+  }
+}
+
+///|
+/// Accept one download for the app-lifetime pump, or say why not. The
+/// decision, the `busy` flip, and the enqueue contain no suspension point, so
+/// acceptance can neither race another request nor strand an accepted
+/// download when this request is cancelled right after replying.
+fn SelfUpdate::start_download(
+  self : SelfUpdate,
+  payload : UpdateChannelPayload,
+) -> DownloadUpdateAcceptedReply raise {
+  guard self.work_dir is Some(_) && self.bundle_path is Some(_) else {
+    raise HostError("this build cannot install updates")
+  }
+  guard !self.busy else { raise HostError("an update is already in progress") }
+  self.busy = true
+  let enqueued = self.downloads.try_put(payload) catch { _ => false }
+  guard enqueued else {
+    // The pump has stopped and closed its queue; reject rather than parking
+    // `busy` on work nobody will perform.
+    self.busy = false
+    raise HostError("self-update is unavailable")
+  }
+  { accepted: true }
+}
+
+///|
 /// Download and verify the channel's package, leaving it staged for
 /// `apply_update`. Deliberately re-checks the manifest rather than trusting
 /// what the frontend saw earlier — the release may have moved between the
-/// check and the click. Failures raise: the frontend initiated this, so the
-/// rejection message is the user-facing answer (and goes to the log too).
-async fn download_update_op(
-  state : UpdateState,
+/// check and the click. Progress notifications are emitted straight from the
+/// downloader's throttled callback, so they cannot overtake completion.
+async fn SelfUpdate::download_package(
+  self : SelfUpdate,
   payload : UpdateChannelPayload,
-) -> DownloadUpdateReply {
-  state.mutation_lock.acquire()
-  defer state.mutation_lock.release()
-  guard state.work_dir is Some(dir) && state.bundle_path is Some(bundle) else {
+  emit : async (String, Json) -> Unit,
+) -> @update.StagedUpdate {
+  guard self.work_dir is Some(dir) && self.bundle_path is Some(bundle) else {
     raise HostError("this build cannot install updates")
   }
   let info = @update.check_for_update(
@@ -194,7 +245,13 @@ async fn download_update_op(
   guard info is Some(info) else {
     raise HostError("no newer release is published")
   }
-  let staged = @update.stage_update(info, work_dir=dir, bundle_path=bundle) catch {
+  let staged = @update.stage_update(info, work_dir=dir, bundle_path=bundle, on_progress=async fn(
+    downloaded_bytes,
+    total_bytes,
+  ) {
+    let progress : DownloadUpdateProgress = { downloaded_bytes, total_bytes }
+    emit("update.download_progress", progress.to_json())
+  }) catch {
     error if @async.is_being_cancelled() => raise error
     error => {
       @xlog.warn(category="update") <?
@@ -209,57 +266,179 @@ async fn download_update_op(
       }
     }
   }
-  state.staged = Some(staged)
-  { version: staged.version }
+  staged
+}
+
+///|
+/// The app-lifetime pump: sweep leftovers once, then perform accepted
+/// downloads one at a time and report each outcome as a notification. Only
+/// this task downloads and installs staged state, so `busy` stays true from
+/// acceptance until the matching completion notification.
+async fn SelfUpdate::run(
+  self : SelfUpdate,
+  emit : async (String, Json) -> Unit,
+) -> Unit {
+  // A closed queue turns later `update.download` requests into rejections
+  // instead of accepted work nobody will perform.
+  defer self.downloads.close()
+  self.cleanup() catch {
+    error if @async.is_being_cancelled() => raise error
+    error =>
+      @xlog.warn(category="update") <?
+        { "event": "cleanup_failed", "error": "\{error}" }
+  }
+  for ;; {
+    let payload = self.downloads.get()
+    try self.download_package(payload, emit) catch {
+      error if @async.is_being_cancelled() => raise error
+      error => {
+        self.busy = false
+        let message = if error is HostError(message) {
+          message
+        } else {
+          "\{error}"
+        }
+        emit("update.download_failed", { "message": Json::string(message) })
+      }
+    } noraise {
+      staged => {
+        self.staged = Some(staged)
+        self.busy = false
+        let reply : DownloadUpdateReply = { version: staged.version }
+        emit("update.downloaded", ToJson::to_json(reply))
+      }
+    }
+  }
 }
 
 ///|
 /// Swap the staged bundle into place and arrange the relaunch. The reply
 /// tells the frontend to close the window; the actual reopen happens in
-/// `main` once the run loop has exited.
-async fn apply_update_op(state : UpdateState) -> ApplyUpdateReply {
-  state.mutation_lock.acquire()
-  defer state.mutation_lock.release()
-  guard state.staged is Some(staged) &&
-    state.work_dir is Some(dir) &&
-    state.bundle_path is Some(bundle) else {
+/// `main` once the run loop has exited. `busy` covers the swap so no download
+/// can start while the staging dir and bundle path are being consumed.
+async fn SelfUpdate::apply(self : SelfUpdate) -> ApplyUpdateReply {
+  guard !self.busy else {
+    raise HostError("an update download is still in progress")
+  }
+  guard self.staged is Some(staged) &&
+    self.work_dir is Some(dir) &&
+    self.bundle_path is Some(bundle) else {
     raise HostError("No update is staged")
   }
-  // The mutex serializes update requests but does not delay cancellation.
-  // Once the running bundle can move to `.old`, finish the swap, consume the
-  // staged state, and write the relaunch marker even if this request's client
-  // disconnects. Otherwise cancellation during `mv` bypasses rollback and can
-  // leave no launchable bundle at the original path.
+  self.busy = true
+  defer {
+    self.busy = false
+  }
+  // Once the running bundle can move to `.old`, finish the swap and marker
+  // even if app shutdown starts. Otherwise cancellation during `mv` bypasses
+  // rollback and can leave no launchable bundle at the original path.
   @async.protect_from_cancel(() => {
     @update.apply_staged(staged_app=staged.app_path, bundle_path=bundle) catch {
       @update.UpdateError(message) => raise HostError(message)
       error => raise error
     }
-    state.staged = None
+    self.staged = None
     @update.write_relaunch_marker(work_dir=dir, bundle_path=bundle)
   })
   { applied: true }
 }
 
 ///|
-async test "update apply waits for the host-wide mutation lock" {
-  let state = new_update_state(None, None)
-  let started : @async.Queue[Unit] = Queue(kind=Blocking(1))
-  let result : @async.Queue[Bool] = Queue(kind=Blocking(1))
-  state.mutation_lock.acquire()
+test "self-update accepts one download and rejects a second" {
+  let updates : SelfUpdate = {
+    work_dir: Some("/runtime"),
+    bundle_path: Some("/Applications/OpenSeek Desktop.app"),
+    downloads: Queue(kind=Blocking(1)),
+    staged: None,
+    busy: false,
+  }
+  assert_true(updates.start_download({ channel: None }).accepted)
+  assert_true(updates.busy)
+  assert_true(updates.downloads.try_get() is Some(_))
+  let mut rejected = false
+  ignore(updates.start_download({ channel: None })) catch {
+    HostError(message) =>
+      rejected = message == "an update is already in progress"
+    error => raise error
+  }
+  assert_true(rejected)
+}
+
+///|
+test "self-update rejects downloads unsupported by this build" {
+  let updates = SelfUpdate::new(None, None)
+  let mut rejected = false
+  ignore(updates.start_download({ channel: None })) catch {
+    HostError(message) =>
+      rejected = message == "this build cannot install updates"
+    error => raise error
+  }
+  assert_true(rejected)
+  assert_false(updates.busy)
+}
+
+///|
+async test "self-update pump reports download failures" {
+  let updates = SelfUpdate::new(None, None)
+  let events : @async.Queue[(String, Json)] = Queue(kind=Blocking(1))
   @async.with_task_group(group => {
-    group.spawn_bg(() => {
-      started.put(())
-      try apply_update_op(state) catch {
-        HostError(_) => result.put(true)
-        error => raise error
-      } noraise {
-        _ => result.put(false)
-      }
+    group.spawn_bg(allow_failure=true, () => {
+      updates.run(async fn(method_, params) { events.put((method_, params)) })
     })
-    started.get()
-    assert_true(@async.with_timeout_opt(10, () => result.get()) is None)
-    state.mutation_lock.release()
-    assert_true(result.get())
+    // Bypass `start_download` so even this unsupported build reaches the
+    // pump's failure path deterministically, with no network involved.
+    updates.downloads.put({ channel: None })
+    let (method_, params) = @async.with_timeout(1000, () => events.get())
+    assert_eq(method_, "update.download_failed")
+    assert_true(
+      params is { "message": String("this build cannot install updates"), .. },
+    )
+    group.return_immediately(())
   })
+}
+
+///|
+async test "self-update apply refuses while a download is active" {
+  let updates : SelfUpdate = {
+    work_dir: Some("/runtime"),
+    bundle_path: Some("/Applications/OpenSeek Desktop.app"),
+    downloads: Queue(kind=Blocking(1)),
+    staged: None,
+    busy: false,
+  }
+  let mut no_staged = false
+  ignore(updates.apply()) catch {
+    HostError(message) => no_staged = message == "No update is staged"
+    error => raise error
+  }
+  assert_true(no_staged)
+  updates.busy = true
+  let mut still_downloading = false
+  ignore(updates.apply()) catch {
+    HostError(message) =>
+      still_downloading = message == "an update download is still in progress"
+    error => raise error
+  }
+  assert_true(still_downloading)
+}
+
+///|
+test "download progress serializes an optional total" {
+  let known : DownloadUpdateProgress = {
+    downloaded_bytes: 42,
+    total_bytes: Some(100),
+  }
+  assert_true(
+    known.to_json()
+    is {
+      "downloaded_bytes": Number(42.0, ..),
+      "total_bytes": Number(100.0, ..),
+      ..
+    },
+  )
+  let unknown : DownloadUpdateProgress = {
+    downloaded_bytes: 42,
+    total_bytes: None,
+  }
+  assert_true(unknown.to_json() is { "total_bytes": Null, .. })
 }

@@ -977,7 +977,10 @@ priv enum Msg {
   // The interrupt-confirmation modal's two exits.
   ConfirmUpdateRestart
   CancelUpdateRestart
-  // `download_update` finished: the bundle is staged and verified.
+  // The actor-owned download reports throttled byte progress independently
+  // of the short request that accepted it.
+  UpdateDownloadProgress(downloaded_bytes~ : Int, total_bytes~ : Int?)
+  // The host's `update.downloaded` event says the bundle is staged and verified.
   UpdateDownloaded
   // The download or the swap failed; back to Available with a toast.
   UpdateFailed(message~ : String)

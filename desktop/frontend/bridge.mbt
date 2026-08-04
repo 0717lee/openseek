@@ -47,6 +47,32 @@ fn bridge_msg(
       terminal_output_msg(channel, payload).map(msg => Terminal(msg))
     "terminal.exit" =>
       terminal_exit_msg(channel, payload).map(msg => Terminal(msg))
+    "update.downloaded" =>
+      if channel is Local {
+        Some(UpdateDownloaded)
+      } else {
+        None
+      }
+    "update.download_progress" =>
+      if channel is Local &&
+        @jsonx.json_int(payload, "downloaded_bytes") is Some(downloaded_bytes) &&
+        downloaded_bytes >= 0 {
+        let total_bytes = match @jsonx.json_int(payload, "total_bytes") {
+          Some(total) if total > 0 => Some(total)
+          _ => None
+        }
+        Some(UpdateDownloadProgress(downloaded_bytes~, total_bytes~))
+      } else {
+        None
+      }
+    "update.download_failed" =>
+      if channel is Local {
+        @jsonx.json_text(payload, "message").map(message => {
+          UpdateFailed(message~)
+        })
+      } else {
+        None
+      }
     _ => device_msg(method_, payload).map(msg => FromDevice(channel, msg))
   }
 }
@@ -188,8 +214,8 @@ fn proton_event_methods() -> Array[String] {
   [
     "agent.connected", "agent.started", "agent.event", "agent.error", "agent.finished",
     "agent.durable", "session.event", "session.changed", "workspace.changed", "settings.changed",
-    "skills.changed", "auth.changed", "lsp.diagnostics", "fs.changed", "terminal.output",
-    "terminal.exit",
+    "skills.changed", "update.download_progress", "update.downloaded", "update.download_failed",
+    "auth.changed", "lsp.diagnostics", "fs.changed", "terminal.output", "terminal.exit",
   ]
 }
 
@@ -207,6 +233,43 @@ test "skill invalidations are device-scoped catalog events" {
     bridge_msg(Remote("d1"), "skills.changed", Map([]))
     is Some(FromDevice(Remote("d1"), SkillsChanged)),
   )
+}
+
+///|
+test "update download notifications control only the local desktop flow" {
+  assert_true(proton_event_methods().contains("update.download_progress"))
+  assert_true(proton_event_methods().contains("update.downloaded"))
+  assert_true(proton_event_methods().contains("update.download_failed"))
+  assert_true(
+    bridge_msg(Local, "update.download_progress", {
+      "downloaded_bytes": Json::number(42),
+      "total_bytes": Json::number(100),
+    })
+    is Some(UpdateDownloadProgress(downloaded_bytes=42, total_bytes=Some(100))),
+  )
+  assert_true(
+    bridge_msg(Local, "update.downloaded", Map([])) is Some(UpdateDownloaded),
+  )
+  assert_true(
+    bridge_msg(Local, "update.download_failed", {
+      "message": Json::string("digest mismatch"),
+    })
+    is Some(UpdateFailed(message="digest mismatch")),
+  )
+  assert_true(
+    bridge_msg(Local, "update.download_progress", {
+      "downloaded_bytes": Json::number(-1),
+      "total_bytes": Json::null(),
+    })
+    is None,
+  )
+  assert_true(
+    bridge_msg(Remote("d1"), "update.download_progress", {
+      "downloaded_bytes": Json::number(42),
+    })
+    is None,
+  )
+  assert_true(bridge_msg(Remote("d1"), "update.downloaded", Map([])) is None)
 }
 
 ///|

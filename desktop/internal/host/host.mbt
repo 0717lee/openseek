@@ -43,7 +43,7 @@ struct HostState {
   engine : String
   runtime_dir : @path.Path?
   lsp : LspPoolActor
-  updates : UpdateState
+  updates : SelfUpdate
 }
 
 ///|
@@ -81,17 +81,18 @@ pub fn new_host_state(
     engine,
     runtime_dir,
     lsp,
-    updates: new_update_state(runtime_dir, executable),
+    updates: SelfUpdate::new(runtime_dir, executable),
   }
 }
 
 ///|
 /// The background tasks behind the host ops, spawned into the caller's
-/// app-lifetime task group: the LSP pool actor, diagnostics forwarder, and
-/// one-shot update-leftover sweep. These are shared by every connection;
+/// app-lifetime task group: the LSP pool actor, diagnostics forwarder, and the
+/// self-update pump with its startup leftover sweep. These are shared by every
+/// connection;
 /// connection-owned filesystem watcher tasks start in `HostConnection::run`.
-/// Every pump is best-effort: a language-service hiccup degrades that feature,
-/// never the connection.
+/// Every background task is best-effort: a language-service hiccup degrades
+/// that feature, never the connection.
 pub fn[G] spawn_host_pumps(
   group : @async.TaskGroup[G],
   state : HostState,
@@ -103,7 +104,7 @@ pub fn[G] spawn_host_pumps(
       emit("lsp.diagnostics", ToJson::to_json(push))
     })
   })
-  group.spawn_bg(allow_failure=true, () => cleanup_updates(state.updates))
+  group.spawn_bg(allow_failure=true, () => state.updates.run(emit))
 }
 
 ///|
@@ -188,16 +189,12 @@ pub async fn host_op(
     "host.open_path" =>
       Some(ToJson::to_json(open_path_op(decode_payload(payload))))
     "update.check" =>
-      Some(
-        ToJson::to_json(check_update_op(state.updates, decode_payload(payload))),
-      )
+      Some(ToJson::to_json(state.updates.check(decode_payload(payload))))
     "update.download" =>
       Some(
-        ToJson::to_json(
-          download_update_op(state.updates, decode_payload(payload)),
-        ),
+        ToJson::to_json(state.updates.start_download(decode_payload(payload))),
       )
-    "update.apply" => Some(ToJson::to_json(apply_update_op(state.updates)))
+    "update.apply" => Some(ToJson::to_json(state.updates.apply()))
     "git.branch" =>
       Some(ToJson::to_json(git_branch_op(decode_payload(payload))))
     "app.list" => Some(ToJson::to_json(list_apps_op()))
