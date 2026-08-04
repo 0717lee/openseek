@@ -529,8 +529,12 @@ async fn run_worker_slice(
     Committed =>
       "state: committed on \{entry.branch} — review the evidence, then subtask integrate=\{name}; if the task is unfinished, continue=\{name} with the remainder (worktree kept at \{entry.worker_root} until then)"
     NoChanges => "state: no changes — the slice's paths are free again"
+    Captured =>
+      "state: NOT mergeable (captured with defects) — inspect \{entry.worker_root}; continue=\{name} with a corrective task can repair it, or discard=\{name}"
     _ =>
-      "state: NOT mergeable — inspect \{entry.worker_root}; continue=\{name} with a corrective task can repair it, or discard=\{name}"
+      // Early capture failures leave the registry entry Running, which
+      // continue refuses — only discard applies here.
+      "state: NOT mergeable — inspect \{entry.worker_root}, then discard=\{name} or relaunch"
   }
   out <+ "\n\{state_line}"
   let mergeable = captured.entry.state is Committed

@@ -65,10 +65,24 @@ pub async fn capture(
   if changes.is_empty() && entry.commit_oid is Some(prior) {
     // A resumed worker that added nothing new: the prior capture still
     // stands. The terminal cleanup below would delete the branch holding
-    // already-validated work — keep everything and report instead.
-    let entry = { ..entry, state: Committed }
+    // already-validated work — keep everything and report instead. "Still
+    // stands" is verified, not assumed: an externally moved branch must
+    // surface now, not as a later integrate refusal.
+    match git_require(["rev-parse", "refs/heads/\{entry.branch}"], cwd=worker) {
+      Ok(tip) if tip.trim() == prior => {
+        let entry = { ..entry, state: Committed }
+        let _ = save_entry(geometry.common_git_dir, entry)
+        evidence.push("no additional changes since the prior capture \{prior}")
+        return { entry, evidence, defects }
+      }
+      Ok(tip) =>
+        defects.push(
+          "branch \{entry.branch} moved externally (\{tip.trim()} != prior capture \{prior})",
+        )
+      Err(reason) => defects.push(reason)
+    }
+    let entry = { ..entry, state: Captured }
     let _ = save_entry(geometry.common_git_dir, entry)
-    evidence.push("no additional changes since the prior capture \{prior}")
     return { entry, evidence, defects }
   }
   if changes.is_empty() {

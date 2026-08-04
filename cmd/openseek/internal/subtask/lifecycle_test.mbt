@@ -430,3 +430,94 @@ async test "resume_running refuses unknown names and running slices" {
     assert_true(running.contains("Running"))
   })
 }
+
+///|
+/// The repair half of continue: a defective re-capture preserves the prior
+/// commit_oid, resume admits the Captured state, and once the intrusion is
+/// reverted the idle re-capture returns to Committed on the SAME commit.
+async test "captured defects repair through resume and re-capture" {
+  @vfs.with_tmpdir(prefix="openseek-subtask-repair-", dir => {
+    let repo = seed_repo(dir)
+    let provisioned = must_provision(
+      repo,
+      name="fix-lib",
+      allowed_paths=["lib"],
+      nonce="n1",
+    )
+    let entry = provisioned.entry
+    @vfs.write_text("\{entry.worker_root}/lib", "a.txt", "ALPHA\n")
+    let first = @subtask.capture(provisioned.geometry, entry)
+    assert_true(first.entry.state is Committed)
+    guard first.entry.commit_oid is Some(commit1) else {
+      fail("expected a first commit")
+    }
+    // A resumed worker strays out of scope: the re-capture is defective but
+    // must keep the prior commit pinned.
+    @vfs.write_text("\{entry.worker_root}/other", "b.txt", "INTRUDED\n")
+    let defective = @subtask.capture(provisioned.geometry, first.entry)
+    assert_true(defective.defects.length() > 0)
+    assert_true(defective.entry.state is Captured)
+    assert_eq(defective.entry.commit_oid, Some(commit1))
+    // Captured is continuable; the repair worker reverts the intrusion.
+    let resumed = match
+      @subtask.resume_running(provisioned.geometry, "fix-lib") {
+      Ok(resumed) => resumed
+      Err(reason) => fail("resume_running refused a Captured slice: \{reason}")
+    }
+    @vfs.write_text("\{resumed.worker_root}/other", "b.txt", "beta\n")
+    let repaired = @subtask.capture(provisioned.geometry, resumed)
+    assert_eq(repaired.defects, ([] : Array[String]))
+    assert_true(repaired.entry.state is Committed)
+    assert_eq(repaired.entry.commit_oid, Some(commit1))
+    let integrated = @subtask.integrate(provisioned.geometry, repaired.entry)
+    assert_eq(integrated.result, "integrated")
+    assert_eq(@fs.read_file("\{repo}/lib/a.txt").text(), "ALPHA\n")
+    assert_eq(@fs.read_file("\{repo}/other/b.txt").text(), "beta\n")
+  })
+}
+
+///|
+/// The integration-safety gates: a Conflicted slice and a gone worktree
+/// both refuse resume — continue must never race a half-done merge or
+/// relaunch into a deleted tree.
+async test "resume_running refuses conflicted slices and gone worktrees" {
+  @vfs.with_tmpdir(prefix="openseek-subtask-resume-gates-", dir => {
+    let repo = seed_repo(dir)
+    let provisioned = must_provision(
+      repo,
+      name="fix-lib",
+      allowed_paths=["lib"],
+      nonce="n1",
+    )
+    let entry = provisioned.entry
+    @vfs.write_text("\{entry.worker_root}/lib", "a.txt", "WORKER\n")
+    let captured = @subtask.capture(provisioned.geometry, entry)
+    assert_true(captured.entry.state is Committed)
+    // Origin advances the same line: integration conflicts.
+    @vfs.write_text("\{repo}/lib", "a.txt", "ORIGIN\n")
+    for args in [["add", "-A"], ["commit", "-q", "-m", "origin moved"]] {
+      match @subtask.git_require(args, cwd=repo) {
+        Ok(_) => ()
+        Err(reason) => fail(reason)
+      }
+    }
+    let conflicted = @subtask.integrate(provisioned.geometry, captured.entry)
+    assert_eq(conflicted.result, "conflicted")
+    guard @subtask.resume_running(provisioned.geometry, "fix-lib")
+      is Err(midmerge) else {
+      fail("expected a conflicted-state refusal")
+    }
+    assert_true(midmerge.contains("Conflicted"))
+    // Abort the merge, then delete the worktree out from under the entry.
+    let aborted = @subtask.integrate_abort(
+      provisioned.geometry,
+      conflicted.entry,
+    )
+    assert_eq(aborted.result, "aborted")
+    @fs.rmdir(entry.worker_root, recursive=true)
+    guard @subtask.resume_running(provisioned.geometry, "fix-lib") is Err(gone) else {
+      fail("expected a gone-worktree refusal")
+    }
+    assert_true(gone.contains("gone"))
+  })
+}
