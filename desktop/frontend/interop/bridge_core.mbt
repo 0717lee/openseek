@@ -1,9 +1,9 @@
 // The engine-host calling core: one `bridge_request` for every frontend
 // package that talks to a host, routed by channel. `Local` is the desktop
-// window's injected `__MoonBit__.openseek` op; `Remote(id)` is currently a
-// relay device reached over its WebSocket (docs/remote-protocol.md). The method
-// names and payloads are identical either way — callers and reply decoders
-// cannot tell the transports apart.
+// window's own loopback host; `Remote(id)` is a relay device. Both are the
+// same JSON-RPC WebSocket (docs/remote-protocol.md) — the method names,
+// payloads, and transport are identical, so callers and reply decoders
+// cannot tell the channels apart.
 
 ///|
 priv suberror BridgeError {
@@ -18,85 +18,29 @@ impl Show for BridgeError with fn output(self, logger) {
 }
 
 ///|
-/// Whether this page is the desktop webview (served from `proton://app/`,
-/// where the `__MoonBit__` bridge is injected) as opposed to a browser.
-pub fn using_proton_bridge() -> Bool {
-  guard js_prop(@js.globalThis, "location") is Some(location) else {
-    return false
-  }
-  (@js.Cast::into((location.get_with_string("protocol") : @js.Value)) : String?)
-  is Some("proton:")
-}
-
-///|
-/// `globalThis.__MoonBit__.openseek`, once the proton bridge is injected.
-pub fn openseek_api() -> @js.Value? {
-  guard moonbit_bridge_root() is Some(root) else { return None }
-  js_prop(root, "openseek")
-}
-
-///|
 /// Call one engine-host method on a channel and wait for its reply. Raises
-/// when the transport is missing/down, the call throws, or the host rejects
-/// the method.
+/// when the connection is down, the call throws, or the host rejects the
+/// method.
 pub async fn bridge_request(
   channel : ChannelId,
   op : String,
   payload : @js.Value,
 ) -> @js.Value {
-  match channel {
-    Local => {
-      guard openseek_api() is Some(api) && js_prop(api, op) is Some(_) else {
-        raise BridgeError("OpenSeek bridge unavailable")
-      }
-      js_method_promise(api, op, payload).wait()
-    }
-    Remote(_) => ws_request(channel, op, payload)
-  }
+  ws_request(channel, op, payload)
 }
-
-///|
-/// Invoke Proton methods through one promise tail. Proton dispatches bridge
-/// requests in separate native tasks, so two fire-and-forget calls may enter
-/// the host in the opposite order unless the page waits for the first before
-/// issuing the second. The rejected request still releases the tail; its own
-/// promise remains rejected for the MoonBit caller.
-extern "js" fn js_ordered_method_promise(
-  target : @js.Value,
-  name : String,
-  payload : @js.Value,
-) -> @js.Promise =
-  #| (() => {
-  #|   let tail = Promise.resolve();
-  #|   return (target, name, payload) => {
-  #|     const request = tail
-  #|       .catch(() => undefined)
-  #|       .then(() => target[name](payload));
-  #|     tail = request.catch(() => undefined);
-  #|     return request;
-  #|   };
-  #| })()
 
 ///|
 /// Call one host method in the page's issue order. The file-panel watcher is
 /// the only current user: `watch(A)` followed by `unwatch` is desired state,
-/// not two independent queries, so Proton must not reorder their entry into
-/// the connection's actor. Remote requests use the same call site; their
-/// socket reader additionally preserves these two methods' wire order.
+/// not two independent queries. The socket preserves issue order on the
+/// wire, and the host's reader runs these two methods at the read boundary
+/// rather than spawning them, so they enter the connection's actor in order.
 pub async fn bridge_request_in_order(
   channel : ChannelId,
   op : String,
   payload : @js.Value,
 ) -> @js.Value {
-  match channel {
-    Local => {
-      guard openseek_api() is Some(api) && js_prop(api, op) is Some(_) else {
-        raise BridgeError("OpenSeek bridge unavailable")
-      }
-      js_ordered_method_promise(api, op, payload).wait()
-    }
-    Remote(_) => ws_request(channel, op, payload)
-  }
+  ws_request(channel, op, payload)
 }
 
 ///|
@@ -118,16 +62,14 @@ pub fn bridge_error_text(error : Error) -> String {
 }
 
 ///|
-/// Whether a failed bridge call is a definitive host refusal. Browser
-/// JSON-RPC errors carry a marker set by the response decoder; socket close /
-/// down errors do not. In the embedded proton bridge, a present method's
-/// rejected promise is the direct host answer, while a missing bridge is the
-/// separate ambiguous `BridgeError` case.
+/// Whether a failed bridge call is a definitive host refusal. JSON-RPC
+/// errors carry a marker set by the response decoder; socket close / down
+/// errors do not, and neither does the `BridgeError` a request issued while
+/// disconnected fails with.
 pub fn bridge_error_is_definite(error : Error) -> Bool {
   match error {
     BridgeError(_) => false
-    @js.Error_(value) =>
-      using_proton_bridge() || browser_rpc_error_is_definite(value)
+    @js.Error_(value) => browser_rpc_error_is_definite(value)
     _ => false
   }
 }

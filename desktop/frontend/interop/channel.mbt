@@ -5,10 +5,10 @@
 
 ///|
 /// One engine host the page can talk to. `Local` is the page's own host —
-/// the injected proton bridge in the desktop window; `Remote(id)` is a
-/// stable named target. Today browser remotes are relay devices reached over
-/// WebSocket; the identity deliberately does not encode that transport so a
-/// future SSH- or WSL-backed target can use the same channel shape.
+/// the desktop window's loopback origin; `Remote(id)` is a stable named
+/// target. Today browser remotes are relay devices reached over WebSocket;
+/// the identity deliberately does not encode that transport so a future
+/// SSH- or WSL-backed target can use the same channel shape.
 pub(all) enum ChannelId {
   Local
   Remote(String)
@@ -44,18 +44,6 @@ pub fn ChannelId::from_uri_authority(authority : String) -> ChannelId? {
     Some(Local)
   } else if authority.strip_prefix("remote.") is Some(id) && !id.is_empty() {
     Some(Remote(id.to_owned()))
-  } else {
-    None
-  }
-}
-
-///|
-/// The channel this page is born with: the desktop webview talks to its
-/// local host. `None` in a browser — the console at `/` holds no channel
-/// until it fetches the device roster and connects each device.
-pub fn page_channel() -> ChannelId? {
-  if using_proton_bridge() {
-    Some(Local)
   } else {
     None
   }

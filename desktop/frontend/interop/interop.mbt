@@ -14,25 +14,6 @@ pub fn js_prop(value : @js.Value, key : String) -> @js.Value? {
 }
 
 ///|
-/// `Promise.resolve(target[method](payload))`: one settled promise whether
-/// the method returned a promise, returned a plain value, or threw
-/// synchronously — the throw surfaces here as the raised error.
-pub fn js_method_promise(
-  target : @js.Value,
-  name : String,
-  payload : @js.Value,
-) -> @js.Promise raise @js.Error_ {
-  @js.Error_::wrap(
-    () => {
-      let reply : @js.Value = target.apply_with_string(name, [payload])
-      let promise : @js.Value = @js.globalThis.get_with_string("Promise")
-      promise.apply_with_string("resolve", [reply])
-    },
-    map_ok=@js.Value::cast,
-  )
-}
-
-///|
 /// `window.innerWidth` in CSS pixels, `None` where there is no window (a
 /// headless test runtime). Read once at startup to seed the narrow-layout
 /// flag; later changes arrive through the resize subscription.
@@ -41,12 +22,6 @@ pub fn viewport_width() -> Int? {
     let width : Double = width.cast()
     width.to_int()
   })
-}
-
-///|
-/// `globalThis.__MoonBit__` — the API object proton injects into its webview.
-pub fn moonbit_bridge_root() -> @js.Value? {
-  js_prop(@js.globalThis, "__MoonBit__")
 }
 
 ///|

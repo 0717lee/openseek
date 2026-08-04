@@ -1,6 +1,8 @@
-// System notifications are a frontend-owned Proton extension operation.
-// Keeping the operation in a Rabbita command leaves `update` pure and also
-// makes browser pages harmless: they never expose the notification namespace.
+// System notifications are posted through the local host's
+// `notification.show` method — a loopback-only operation the desktop
+// window's own connection exposes. Keeping the operation in a Rabbita
+// command leaves `update` pure; browser pages never emit it (the poster is
+// gated on the Local channel), and their host would refuse it anyway.
 
 ///|
 /// Notification banners get roughly two lines; anything longer is noise.
@@ -49,29 +51,25 @@ fn FinishedSystemNotification::body(
 }
 
 ///|
-/// Post the terminal notification through `__MoonBit__.notification.show`.
-/// A missing extension, denied permission, or rejected promise is deliberately
-/// silent because the transcript remains the authoritative result.
+/// Post the terminal notification through the local host's
+/// `notification.show`. A refused method, denied permission, or lost
+/// connection is deliberately silent because the transcript remains the
+/// authoritative result.
 fn FinishedSystemNotification::command(
   self : FinishedSystemNotification,
 ) -> @cmd.Cmd {
   guard self.title() is Some(title) else { return @cmd.none }
   @cmd.custom_cmd(_scheduler => {
-    guard @interop.moonbit_bridge_root() is Some(root) &&
-      @interop.js_prop(root, "notification") is Some(notification) &&
-      @interop.js_prop(notification, "show") is Some(_) else {
-      return
-    }
     let payload = @js.Object::new()
     payload["title"] = title
     payload["body"] = self.body()
     payload["payload"] = self.run_id
     @js.async_run(() => {
-      let _ : @js.Value = @interop.js_method_promise(
-        notification,
-        "show",
+      let _ : @js.Value = @interop.bridge_request(
+        @interop.ChannelId::Local,
+        "notification.show",
         payload.to_value(),
-      ).wait() catch {
+      ) catch {
         _ => return
       }
     })

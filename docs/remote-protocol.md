@@ -6,10 +6,12 @@ The host runs no server: at startup it dials out to a **relay** and
 registers; browsers reach it through the relay, which serves the frontend
 bundle and splices WebSockets without understanding a byte of the protocol.
 
-The desktop window itself does not use this protocol. It talks to the host
-over proton's in-process `__MoonBit__` bridge — same method catalog, same
-payloads, no wire. The frontend picks its transport by origin: a `proton://`
-page uses the bridge, anything else opens the WebSocket below.
+The desktop window speaks the same protocol. The host serves its own
+frontend bundle over a loopback HTTP origin (`http://127.0.0.1:<port>/`)
+and the window opens the same JSON-RPC WebSocket on that origin's `/ws`
+route — same catalog, same envelope, same delivery profile as a relayed
+browser, plus a handful of loopback-only methods (see "Local-only
+methods"). There is no separate in-process bridge.
 
 This document is the contract. The implementation follows it, not the other
 way around.
@@ -25,12 +27,13 @@ it:
 - `LspPoolActor` owns the language-server actors shared by the host.
 - `RelayActor` owns the control connection and creates one `WsClientActor`
   for each relayed client.
-- Every Proton or WebSocket client owns a separate `HostConnection`, whose
-  `FsWatchActor` serves only that client's `fs.watch` state and whose
-  terminal state owns only that client's PTYs; filesystem and terminal
-  notifications return only to the owning client.
-- `DesktopBridgeActor` owns the current Proton page attachment and forwards
-  the shared catalog notifications to it.
+- `LocalServer` owns the loopback origin: it serves the bundled frontend
+  and upgrades `/ws` into a `WsClientActor` for the desktop window (and
+  every reload of it).
+- Every WebSocket client — loopback or relayed — owns a separate
+  `HostConnection`, whose `FsWatchActor` serves only that client's
+  `fs.watch` state and whose terminal state owns only that client's PTYs;
+  filesystem and terminal notifications return only to the owning client.
 
 Closing the Proton application cancels these owners together. A request may
 post work to them, but cancelling or reloading that request cannot orphan a
@@ -38,8 +41,13 @@ socket, subprocess, or watcher.
 
 ## Transport
 
-All HTTP lives at the relay. Pages and assets are unversioned; JSON/WS
-APIs live under `/v1`:
+**Loopback** (the desktop window): the host binds `127.0.0.1:<port>` and
+serves `GET /` (the entry document plus its sibling assets, each a plain
+visible filename — anything else 404s) and `GET /ws?token=…`, the JSON-RPC
+WebSocket below. One connection per page; a reload is a new connection.
+
+**Relayed** (browsers): all HTTP lives at the relay. Pages and assets are
+unversioned; JSON/WS APIs live under `/v1`:
 
 | Route | What |
 |---|---|
@@ -85,14 +93,28 @@ notification remains, including its optional `answer`;
 `compaction_finished` remains with an empty `summary` so it still closes the
 lifecycle state. Deltas, usage, step progress, tool-decode errors, runtime
 status, steer receipts, and all other run/compaction lifecycle and error events
-are unchanged. The desktop's in-process bridge continues to receive the hub's
-complete stream; this trimming is specific to remote WebSocket delivery.
+are unchanged. The desktop window receives exactly the same delivery
+profile — every client builds its durable transcript from `session.event`
+commits and `session.load` snapshots, so the trimmed copies are redundant
+everywhere. The one loopback/remote difference is `notification.click`,
+which only the loopback connection receives.
 
 ## Authentication
 
-Auth terminates **at the relay**; the JSON-RPC wire above carries no
-credentials and is unchanged by it. Device ids are stable database ids,
-not secrets — the barrier is ownership:
+**The loopback origin** authenticates with a per-launch capability token:
+the host mints a random hex token at startup and puts it in the window's
+entry URL (`http://127.0.0.1:<port>/?token=…`); the WebSocket upgrade on
+`/ws?token=…` requires that exact token, and a present `Origin` header
+must equal the loopback origin itself — which shuts out foreign web pages
+(browsers always send `Origin`) even though they can reach 127.0.0.1.
+Static assets are served without the token; the socket is the capability
+boundary. The port persists across launches (`local_http.json` in the
+runtime dir) only so the origin — and the webview's localStorage — stays
+stable.
+
+For everything relayed, auth terminates **at the relay**; the JSON-RPC
+wire above carries no credentials and is unchanged by it. Device ids are
+stable database ids, not secrets — the barrier is ownership:
 
 - **Browsers** sign in with GitHub OAuth at the relay (`/v1/auth/login` →
   callback → `session` cookie, HttpOnly/SameSite=Lax, 7-day sliding).
@@ -196,10 +218,10 @@ Slow clients are disconnected, not throttled and not silently dropped
 frame-by-frame: when a connection's outbound queue overflows, the host
 closes it, and the client reconnects into the resync path above.
 
-The in-process bridge does not use WebSocket reconnect or capability
-negotiation. It can still be recreated across a host restart: each
-`BridgeReady` transition makes the desktop rebuild host-derived state, so that
-readiness resync follows the same idempotent, race-tolerant rules.
+The desktop window follows the same reconnect loop against its loopback
+host: a page reload or host restart is just a socket loss, and each
+readiness transition makes the window rebuild host-derived state under the
+same idempotent, race-tolerant rules.
 
 ## Method catalog
 
@@ -544,9 +566,9 @@ Notification:
 
 Desktop-window-only by client convention: applying an update swaps the
 bundle under the running process and relaunches through the window's close
-path, which only exists on the in-process bridge. The host serves these on
-both transports (it cannot tell clients apart), but the browser frontend
-never calls them and shows no update UI.
+path. The host serves these to every connection (a relayed client is not
+told apart), but the browser frontend never calls them and shows no update
+UI.
 
 | method | params | result |
 |---|---|---|
@@ -563,10 +585,22 @@ never calls them and shows no update UI.
 | `host.open_path` | `{session, cwd?, path}` | `{opened}` — hand a transcript-referenced path to the system opener; relative paths resolve against the conversation's working directory (`cwd` when the client has it, else derived from `session`); deliberately no workspace containment — the user clicked a path the agent itself surfaced |
 | `host.meta` | `{}` | `{protocol: 2, name, wsl}` — `wsl` is whether the **host** can run the engine inside WSL (a Windows host); clients must consume this rather than sniff their own user agent, since the page may run on any device |
 
-Reserved notification (not yet emitted over the wire):
-`host.notification_clicked` `{session}` — a system notification was clicked.
-On the desktop this arrives through the proton bridge; it appears here once
-remote clients need it.
+### Local-only methods
+
+Served only on the loopback `/ws` connection; a relayed client asking for
+them gets `-32601` because they never enter the shared dispatcher — this
+machine must not launch URLs or post banners for a remote browser.
+
+| method | params | result |
+|---|---|---|
+| `shell.open_external` | `{url}` | `{opened}` — hand an `https://`/`http://`/`mailto:` URL to the system browser; every other scheme is refused |
+| `notification.show` | `{title?, body, payload?}` | `{shown}` — post a system notification; `payload` is opaque and returns with the click |
+
+Loopback-only notification:
+`notification.click` `{payload}` — the user clicked a system notification;
+`payload` is what `notification.show` stamped (the desktop stamps the run
+id). Delivered only to loopback connections: the click happened on this
+machine's screen, and a remote page must not jump its view for it.
 
 ## Relay tunnel
 
@@ -600,8 +634,8 @@ Control-channel frames (JSON text over the `/v1/tunnel` WebSocket):
 
 The data WebSocket (④) carries client protocol frames untouched. On the
 host side each data connection is served by the same JSON-RPC dispatch the
-bridge feeds — the host has no tunnel-specific protocol handling beyond the
-four control frames. Either side closing a spliced socket closes its twin;
+loopback window feeds — the host has no tunnel-specific protocol handling
+beyond the four control frames. Either side closing a spliced socket closes its twin;
 a dropped control connection closes every stream of that device.
 
 The relay serves the frontend bundle itself, at `/` (sign-in + the
@@ -615,12 +649,17 @@ The retired v1 design embedded an HTTP + SSE gateway in the desktop. What
 changed and why:
 
 - **The host process runs no server.** v1 embedded an HTTP gateway in the
-  desktop and pointed the window at `http://127.0.0.1:<port>/`. v2 keeps
-  the original desktop architecture — window on `proton://app/`, in-process
-  bridge — and adds remote access as a pure outbound feature: dial the
-  relay, register, serve each spliced WebSocket. No port, no static file
-  server, no CORS, and the window regains bridge-only capabilities
-  (notification-click focus).
+  desktop and pointed the window at `http://127.0.0.1:<port>/`. v2 first
+  kept the original desktop architecture — window on `proton://app/`,
+  in-process bridge — and added remote access as a pure outbound feature:
+  dial the relay, register, serve each spliced WebSocket.
+  **Reversed in v2.2**: the window moved back onto a loopback origin, but
+  onto the *same* JSON-RPC WebSocket as relayed clients rather than v1's
+  bespoke fetch+SSE gateway — deleting the bridge as a third envelope. The
+  proton:// scheme's CEF request-swallowing (renderer-initiated http from
+  non-http origins never leaves the process) is what forced the move; the
+  bridge-only capabilities became loopback-only methods and the
+  `notification.click` notification.
 - **One transport for the wire instead of three.** v1 ran fetch for
   commands, SSE for events, and a bespoke HTTP-over-WebSocket frame
   protocol (`req`/`resp`/`chunk`/`end`/`abort`) inside the tunnel. v2 is
@@ -635,8 +674,8 @@ changed and why:
   Full-message events overwrite partial deltas within one step.
 - **Route/op names unified** under dotted namespaces (`agent.*`,
   `session.*`, `workspace.*`, `git.*`, `fs.*`, `lsp.*`, `moonide.*`, `skills.*`,
-  `update.*`, `app.*`, `host.*`), shared verbatim by the bridge and the
-  WebSocket.
+  `update.*`, `app.*`, `host.*`), shared verbatim by every client
+  connection.
 - **Most in-band sentinels were removed from the wire**: request `cwd` and
   reply `branch` are optional fields instead of `""`; the missing-file
   `sig: ""` reply remains for client compatibility. Stopping the watcher is `fs.unwatch`

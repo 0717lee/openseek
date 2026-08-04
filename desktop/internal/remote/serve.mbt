@@ -26,18 +26,23 @@ priv struct ClientSubscription {
 }
 
 ///|
-/// One remote data WebSocket actor. It creates and closes the socket inside
-/// `run`; its subscription, outbound queue, writer, notification forwarder,
-/// pinger, and request tasks cannot outlive that run.
+/// One data WebSocket actor — a relay client the host dialed out to, or the
+/// desktop window's own loopback connection. Its subscription, outbound
+/// queue, writer, notification forwarder, pinger, and request tasks cannot
+/// outlive one `run`/`serve`.
 priv struct WsClientActor {
   state : @api.ApiState
   host_connection : @host.HostConnection
-  url : String
+  // The loopback window's extra powers; None on a relay connection.
+  local_extras : LocalExtras?
 }
 
 ///|
-fn WsClientActor::new(state : @api.ApiState, url : String) -> WsClientActor {
-  { state, host_connection: @host.HostConnection::new(), url }
+fn WsClientActor::new(
+  state : @api.ApiState,
+  local_extras? : LocalExtras,
+) -> WsClientActor {
+  { state, host_connection: @host.HostConnection::new(), local_extras }
 }
 
 ///|
@@ -140,8 +145,8 @@ const CodeHostError = -32001
 /// Dial and serve one announced remote client. A client hanging up mid-run
 /// is routine and only retires this actor; cancelling the parent relay actor
 /// still propagates so every owned resource is closed immediately.
-async fn WsClientActor::run(self : WsClientActor) -> Unit {
-  let conn = @websocket.Conn::connect(self.url)
+async fn WsClientActor::run(self : WsClientActor, url : String) -> Unit {
+  let conn = @websocket.Conn::connect(url)
   defer conn.close()
   self.serve(conn) catch {
     error if @async.is_being_cancelled() => raise error
@@ -186,7 +191,11 @@ async fn WsClientActor::serve(
       // protocol promises a disconnect over a silent gap in the stream).
       for ;; {
         let notification = notifications.get()
-        guard notification_for_client(notification) is Some(notification) else {
+        guard notification_for_client(
+            notification,
+            loopback=self.local_extras is Some(_),
+          )
+          is Some(notification) else {
           continue
         }
         enqueue_outgoing(out, Notify(notification))
@@ -246,6 +255,7 @@ async fn WsClientActor::serve(
                   id,
                   method_,
                   params,
+                  self.local_extras,
                 ),
               ),
             )
@@ -267,6 +277,7 @@ async fn WsClientActor::serve(
                     id,
                     method_,
                     params,
+                    self.local_extras,
                   ),
                 ),
               )
@@ -359,17 +370,25 @@ fn classify(text : String) -> Inbound {
 }
 
 ///|
-/// Apply the remote delivery profile at the WebSocket edge.
+/// Apply the delivery profile at the WebSocket edge — the same for the
+/// loopback window and a relay browser, because both build their durable
+/// transcript from `session.event` commits and `session.load` snapshots.
 /// Full semantic transcript objects have a canonical `session.event` twin;
 /// deltas, metrics, errors, acknowledgements, and lifecycle state pass
 /// through. Lifecycle frames carrying large durable text are copied and
-/// trimmed so the hub's original notification stays untouched for local
-/// transports.
+/// trimmed so the hub's original notification stays untouched. The one
+/// local/remote split is the system-notification click: it belongs to the
+/// machine that displayed the banner, so only a loopback connection may
+/// route it.
 fn notification_for_client(
   notification : @api.Notification,
+  loopback~ : Bool,
 ) -> @api.Notification? {
   let method_ = notification.method_
   let params = notification.params
+  if method_ == "notification.click" && !loopback {
+    return None
+  }
   // A session-less run has no store and therefore no `session.event` twin.
   // Keep its complete semantic stream intact; the same browser may interleave
   // durable and ephemeral runs.
@@ -424,14 +443,26 @@ fn notification_for_client(
 
 ///|
 /// Run one request through the dispatcher and shape the outcome as a
-/// JSON-RPC response, mapping each typed failure to its protocol code.
+/// JSON-RPC response, mapping each typed failure to its protocol code. A
+/// loopback connection additionally answers the local-only methods; a relay
+/// client asking for them falls through to the dispatcher's method-not-found.
 async fn run_request(
   state : @api.ApiState,
   connection : @host.HostConnection,
   id : Json,
   method_ : String,
   params : Json,
+  local_extras : LocalExtras?,
 ) -> Json {
+  if local_extras is Some(extras) {
+    let reply = run_local_op(extras, method_, params) catch {
+      error if @async.is_being_cancelled() => raise error
+      error => return error_envelope(id, CodeHostError, "\{error}")
+    }
+    if reply is Some(result) {
+      return { "jsonrpc": "2.0", "id": id, "result": result }
+    }
+  }
   let result = @api.dispatch(state, connection, method_, params) catch {
     error if @async.is_being_cancelled() => raise error
     @api.UnknownMethod(name) =>
@@ -460,7 +491,7 @@ fn error_envelope(id : Json, code : Int, message : String) -> Json {
 ///|
 async test "readiness precedes the first forwarded hub notification" {
   let state = @api.ApiState::new(engine="unused")
-  let subscription = WsClientActor::new(state, "unused").open_subscription()
+  let subscription = WsClientActor::new(state).open_subscription()
   defer state.unsubscribe(subscription.notifications)
   state.publish("session.event", { "sequence": 1 })
   let notification = subscription.notifications.get()
@@ -567,13 +598,16 @@ test "remote delivery omits only canonical transcript duplicates" {
       "tool_result", "auto_compaction_finished", "agent_finished", "context_yield",
     ] {
     assert_true(
-      notification_for_client({
-        method_: "agent.event",
-        params: {
-          "session": "session-1",
-          "event": { "event": Json::string(event_name) },
+      notification_for_client(
+        {
+          method_: "agent.event",
+          params: {
+            "session": "session-1",
+            "event": { "event": Json::string(event_name) },
+          },
         },
-      })
+        loopback=false,
+      )
       is None,
     )
   }
@@ -589,21 +623,24 @@ test "remote delivery retains streaming runtime and error events" {
       "unknown_future_event",
     ] {
     assert_true(
-      notification_for_client({
-        method_: "agent.event",
-        params: {
-          "session": "session-1",
-          "event": { "event": Json::string(event_name) },
+      notification_for_client(
+        {
+          method_: "agent.event",
+          params: {
+            "session": "session-1",
+            "event": { "event": Json::string(event_name) },
+          },
         },
-      })
+        loopback=false,
+      )
       is Some(_),
     )
   }
   assert_true(
-    notification_for_client({
-      method_: "session.event",
-      params: Json::empty_object(),
-    })
+    notification_for_client(
+      { method_: "session.event", params: Json::empty_object() },
+      loopback=false,
+    )
     is Some(_),
   )
 }
@@ -611,14 +648,17 @@ test "remote delivery retains streaming runtime and error events" {
 ///|
 test "remote lifecycle frames keep state and trim transcript text" {
   let started = expect_notification(
-    notification_for_client({
-      method_: "agent.started",
-      params: {
-        "run_id": "run-1",
-        "session": "session-1",
-        "task": "large prompt",
+    notification_for_client(
+      {
+        method_: "agent.started",
+        params: {
+          "run_id": "run-1",
+          "session": "session-1",
+          "task": "large prompt",
+        },
       },
-    }),
+      loopback=false,
+    ),
   )
   assert_eq(started.params, {
     "run_id": "run-1",
@@ -626,14 +666,17 @@ test "remote lifecycle frames keep state and trim transcript text" {
     "task": "",
   })
   let finished = expect_notification(
-    notification_for_client({
-      method_: "agent.finished",
-      params: {
-        "run_id": "run-1",
-        "status": "finished",
-        "answer": "large answer",
+    notification_for_client(
+      {
+        method_: "agent.finished",
+        params: {
+          "run_id": "run-1",
+          "status": "finished",
+          "answer": "large answer",
+        },
       },
-    }),
+      loopback=false,
+    ),
   )
   assert_eq(finished.params, {
     "run_id": "run-1",
@@ -641,13 +684,19 @@ test "remote lifecycle frames keep state and trim transcript text" {
     "answer": "large answer",
   })
   let compacted = expect_notification(
-    notification_for_client({
-      method_: "agent.event",
-      params: {
-        "session": "session-1",
-        "event": { "event": "compaction_finished", "summary": "large summary" },
+    notification_for_client(
+      {
+        method_: "agent.event",
+        params: {
+          "session": "session-1",
+          "event": {
+            "event": "compaction_finished",
+            "summary": "large summary",
+          },
+        },
       },
-    }),
+      loopback=false,
+    ),
   )
   assert_eq(compacted.params, {
     "session": "session-1",
@@ -655,16 +704,19 @@ test "remote lifecycle frames keep state and trim transcript text" {
   })
   for event_name in ["reasoning_message", "assistant_message"] {
     let settled = expect_notification(
-      notification_for_client({
-        method_: "agent.event",
-        params: {
-          "session": "session-1",
-          "event": {
-            "event": Json::string(event_name),
-            "content": "large content",
+      notification_for_client(
+        {
+          method_: "agent.event",
+          params: {
+            "session": "session-1",
+            "event": {
+              "event": Json::string(event_name),
+              "content": "large content",
+            },
           },
         },
-      }),
+        loopback=false,
+      ),
     )
     assert_eq(settled.params, {
       "session": "session-1",
@@ -680,7 +732,10 @@ test "remote delivery preserves session-less transcript events" {
     "task": "ephemeral prompt",
   }
   let started = expect_notification(
-    notification_for_client({ method_: "agent.started", params: started_params }),
+    notification_for_client(
+      { method_: "agent.started", params: started_params },
+      loopback=false,
+    ),
   )
   assert_eq(started.params, started_params)
   for
@@ -695,7 +750,10 @@ test "remote delivery preserves session-less transcript events" {
       },
     }
     let delivered = expect_notification(
-      notification_for_client({ method_: "agent.event", params }),
+      notification_for_client(
+        { method_: "agent.event", params },
+        loopback=false,
+      ),
     )
     assert_eq(delivered.params, params)
   }
@@ -708,7 +766,20 @@ test "empty session is not treated as durable" {
     "event": { "event": "tool_result", "content": "ephemeral result" },
   }
   let delivered = expect_notification(
-    notification_for_client({ method_: "agent.event", params }),
+    notification_for_client({ method_: "agent.event", params }, loopback=false),
   )
   assert_eq(delivered.params, params)
+}
+
+///|
+test "notification clicks reach only the loopback window" {
+  let click : @api.Notification = {
+    method_: "notification.click",
+    params: { "payload": "r1" },
+  }
+  assert_true(notification_for_client(click, loopback=false) is None)
+  let delivered = expect_notification(
+    notification_for_client(click, loopback=true),
+  )
+  assert_eq(delivered.params, click.params)
 }

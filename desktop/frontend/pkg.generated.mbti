@@ -2,7 +2,7 @@
 package "openseek_desktop/frontend"
 
 // Values
-pub fn boot() -> Unit
+pub fn boot(desktop~ : Bool) -> Unit
 
 // Errors
 
@@ -11,4 +11,3 @@ pub fn boot() -> Unit
 // Type aliases
 
 // Traits
-

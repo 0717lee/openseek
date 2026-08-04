@@ -434,11 +434,11 @@ fn apply_roster(
 }
 
 ///|
-/// Test-only: a browser-console-shaped model, as `initial_model()` builds
-/// in a browser before `/v1/auth/me` answers.
+/// Test-only: a browser-console-shaped model, as the browser shell's
+/// `initial_model` builds before `/v1/auth/me` answers.
 fn console_test_model() -> Model {
   {
-    ..initial_model(),
+    ..initial_model(desktop=false),
     devices: [],
     focused: @interop.ChannelId::Local,
     console: Some(empty_console_state(None, None)),

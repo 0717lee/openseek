@@ -1,22 +1,19 @@
 // The engine-host bridge: typed access to the host's methods and
 // notifications (docs/remote-protocol.md). Methods go through
-// `@interop.bridge_request`; notifications arrive either as `openseek.*`
-// proton events (the desktop window) or as JSON-RPC notifications on the
-// page's WebSocket (a browser through the relay), and both feed the same
-// decoders below.
+// `@interop.bridge_request`; notifications arrive as JSON-RPC notifications
+// on the channel's WebSocket — the desktop window dials its own loopback
+// host, a browser dials a relay device, and both feed the same decoders
+// below.
 
 ///|
 /// Wire a host's notification stream into messages, once, over the
-/// channel's transport.
+/// channel's WebSocket.
 fn install_bridge(
   dispatch : @cmd.Emit[Msg],
   channel : @interop.ChannelId,
   websocket_epoch : Int,
 ) -> @cmd.Cmd {
-  match channel {
-    Local => install_proton_bridge(dispatch, 0)
-    Remote(device) => connect_ws(dispatch, device, websocket_epoch)
-  }
+  connect_ws(dispatch, channel, websocket_epoch)
 }
 
 ///|
@@ -47,6 +44,16 @@ fn bridge_msg(
       terminal_output_msg(channel, payload).map(msg => Terminal(msg))
     "terminal.exit" =>
       terminal_exit_msg(channel, payload).map(msg => Terminal(msg))
+    "notification.click" =>
+      // The user clicked a system notification this window posted; the
+      // payload is the run id the poster stamped. The host already delivers
+      // it only to the loopback connection, and a remote page must not jump
+      // its view for a click on the desktop's screen.
+      if channel is Local {
+        notification_clicked_msg(payload)
+      } else {
+        None
+      }
     _ => device_msg(method_, payload).map(msg => FromDevice(channel, msg))
   }
 }
@@ -102,107 +109,8 @@ fn session_changed_msg(payload : Map[String, Json]) -> DeviceMsg? {
   )
 }
 
-// ---------------------------------------------------------------------------
-// The desktop window: the injected proton bridge.
-
-///|
-let bridge_events_wired : Ref[Bool] = Ref(false)
-
-///|
-/// Both bridge handles, present only when the surface the frontend relies
-/// on is fully injected.
-fn bridge_handles() -> (@js.Value, @js.Value)? {
-  guard @interop.openseek_api() is Some(api) &&
-    @interop.moonbit_bridge_root() is Some(root) &&
-    @interop.js_prop(root, "events") is Some(events) &&
-    @interop.js_prop(api, "host.connect") is Some(_) &&
-    @interop.js_prop(api, "agent.start") is Some(_) &&
-    @interop.js_prop(events, "on") is Some(_) else {
-    return None
-  }
-  Some((api, events))
-}
-
-///|
-/// Wait for proton to inject the bridge (it loads alongside this bundle),
-/// wire the notification events into messages once, and open the host
-/// connection. The 25ms retries add up to ~3 seconds before the bridge is
-/// declared unavailable.
-fn install_proton_bridge(dispatch : @cmd.Emit[Msg], attempt : Int) -> @cmd.Cmd {
-  @cmd.custom_cmd(scheduler => {
-    guard bridge_handles() is Some((api, events)) else {
-      if attempt > 120 {
-        scheduler.add(
-          dispatch(FromDevice(Local, BridgeUnavailable("Bridge unavailable"))),
-        )
-      } else {
-        scheduler.add(
-          @cmd.delay(install_proton_bridge(dispatch, attempt + 1), 25),
-        )
-      }
-      return
-    }
-    if !bridge_events_wired.val {
-      bridge_events_wired.val = true
-      wire_proton_events(scheduler, dispatch, events)
-      open_host_connection(scheduler, dispatch, api)
-    }
-  })
-}
-
-///|
-/// Attach this page to the host's app-lifetime notification actor. The call
-/// resolves once the actor has emitted its readiness event; a rejection means
-/// the page could not attach to the native bridge.
-fn open_host_connection(
-  scheduler : &@cmd.Scheduler,
-  dispatch : @cmd.Emit[Msg],
-  api : @js.Value,
-) -> Unit {
-  @js.async_run(() => {
-    let _ : @js.Value = @interop.js_method_promise(
-      api,
-      "host.connect",
-      @js.Object::new().to_value(),
-    ).wait() catch {
-      error => {
-        scheduler.add(
-          dispatch(
-            FromDevice(
-              Local,
-              BridgeUnavailable(@interop.bridge_error_text(error)),
-            ),
-          ),
-        )
-        return
-      }
-    }
-  })
-}
-
-///|
-/// Notification methods exposed by the host extension. Proton requires an
-/// explicit listener for each one, unlike the WebSocket transport's generic
-/// notification callback.
-fn proton_event_methods() -> Array[String] {
-  [
-    "agent.connected", "agent.started", "agent.event", "agent.error", "agent.finished",
-    "agent.durable", "session.event", "session.changed", "workspace.changed", "settings.changed",
-    "skills.changed", "auth.changed", "lsp.diagnostics", "fs.changed", "terminal.output",
-    "terminal.exit",
-  ]
-}
-
-///|
-test "proton subscribes to remote-access status changes" {
-  assert_true(
-    proton_event_methods().iter().any(method_ => method_ == "auth.changed"),
-  )
-}
-
 ///|
 test "skill invalidations are device-scoped catalog events" {
-  assert_true(proton_event_methods().contains("skills.changed"))
   assert_true(
     bridge_msg(Remote("d1"), "skills.changed", Map([]))
     is Some(FromDevice(Remote("d1"), SkillsChanged)),
@@ -235,50 +143,8 @@ test "terminal pushes retain the channel that owns their host session" {
   )
 }
 
-///|
-fn wire_proton_events(
-  scheduler : &@cmd.Scheduler,
-  dispatch : @cmd.Emit[Msg],
-  events : @js.Value,
-) -> Unit {
-  fn on(name : String, decode : (Map[String, Json]) -> Msg?) -> Unit {
-    let handler = (event : @js.Value) => {
-      guard event_payload(event) is Some(payload) else { return }
-      guard decode(payload) is Some(msg) else { return }
-      scheduler.add(dispatch(msg))
-    }
-    let _ : @js.Value = events.apply_with_string("on", [
-      @js.Value::cast_from(name),
-      @js.Value::cast_from(handler),
-    ])
-  }
-
-  for method_ in proton_event_methods() {
-    on("openseek." + method_, payload => bridge_msg(Local, method_, payload))
-  }
-  // Emitted by the notification extension when the user clicks a system
-  // notification; the payload is the run id this frontend stamped on it.
-  // Desktop-only by nature.
-  on("notification.click", notification_clicked_msg)
-}
-
-///|
-/// A proton event's payload as JSON fields. Payloads cross the bridge as
-/// structured clones of the host's JSON, so the round trip back through
-/// JSON is lossless; an event without a decodable payload is dropped —
-/// except a payload-less notification, which reads as empty fields
-/// (`agent.connected` carries none).
-fn event_payload(event : @js.Value) -> Map[String, Json]? {
-  guard @interop.js_prop(event, "payload") is Some(payload) else {
-    return Some(Map([]))
-  }
-  let json = payload.to_json() catch { _ => return None }
-  guard json is Object(fields) else { return None }
-  Some(fields)
-}
-
 // ---------------------------------------------------------------------------
-// A browser: JSON-RPC over the page's WebSocket, with reconnection.
+// JSON-RPC over the channel's WebSocket, with reconnection.
 
 ///|
 /// Consecutive connection losses before the user is told the host is
@@ -287,20 +153,19 @@ fn event_payload(event : @js.Value) -> Map[String, Json]? {
 const WsLostAfter = 3
 
 ///|
-/// Open a device's WebSocket once. Reconnection is model-driven: the socket
-/// closing dispatches `ChannelDown`, whose handler counts the loss and
-/// schedules `ReconnectDue` with backoff — so a device dropped from the
+/// Open a channel's WebSocket once. Reconnection is model-driven: the
+/// socket closing dispatches `ChannelDown`, whose handler counts the loss
+/// and schedules `ReconnectDue` with backoff — so a device dropped from the
 /// model (revoked, signed out) stops reconnecting by itself, and a
 /// successful connection (the host's `agent.connected`) resets the count.
 fn connect_ws(
   dispatch : @cmd.Emit[Msg],
-  device : String,
+  channel : @interop.ChannelId,
   websocket_epoch : Int,
 ) -> @cmd.Cmd {
   @cmd.custom_cmd(scheduler => {
-    let channel : @interop.ChannelId = Remote(device)
     @interop.ws_connect(
-      device,
+      channel,
       on_notification=(method_, params) => {
         if bridge_msg(channel, method_, params) is Some(msg) {
           scheduler.add(dispatch(msg))

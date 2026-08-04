@@ -2260,19 +2260,6 @@ fn update_device_msg(
       guard channel == model.focused else { return (@cmd.none, model) }
       (@cmd.none, { ..model, host_wsl: wsl })
     }
-    BridgeUnavailable(message) => {
-      let (terminal_cmd, terminal_panel) = @terminal.disconnect(
-        model.terminal_panel,
-        channel,
-      )
-      (
-        terminal_cmd,
-        {
-          ..model.replace_device({ ..dev, bridge: BridgeLost(message) }),
-          terminal_panel,
-        },
-      )
-    }
     ChannelDown(websocket_epoch~) => {
       // A close callback may already be queued when sign-out retires a
       // device. If the same relay id is later re-added, it owns a new epoch
@@ -2317,8 +2304,7 @@ fn update_device_msg(
       guard websocket_epoch == dev.websocket_epoch else {
         return (@cmd.none, model)
       }
-      guard channel is Remote(device) else { return (@cmd.none, model) }
-      (connect_ws(dispatch, device, websocket_epoch), model)
+      (connect_ws(dispatch, channel, websocket_epoch), model)
     }
     FilePanel(msg) => {
       // The file panel serves the focused conversation; a background
@@ -3955,10 +3941,9 @@ fn running_conversation() -> Conversation {
 ///|
 fn test_model() -> Model {
   {
-    ..initial_model()
-    // The headless test runtime has no page location, so `initial_model()`
-    // seeds no devices (and, looking like a browser, a console); every test
-    // here runs desktop-shaped, on an explicit Local channel.
+    ..initial_model(desktop=true)
+    // Tests replace the seeded device list wholesale: every test here runs
+    // desktop-shaped, on an explicit Local channel.
     ,
     devices: [
       { ..empty_device_state(@interop.ChannelId::Local), bridge: Connected },
@@ -5080,7 +5065,7 @@ test "socket losses mark the bridge lost at the third consecutive drop" {
   let dispatch = test_dispatch()
   let channel : @interop.ChannelId = Remote("d1")
   let model = {
-    ..initial_model(),
+    ..initial_model(desktop=true),
     devices: [{ ..empty_device_state(channel), bridge: Connected }],
     focused: channel,
     terminal_panel: {
@@ -5127,7 +5112,7 @@ test "BridgeReady resets the reconnect failure count" {
   let dispatch = test_dispatch()
   let channel : @interop.ChannelId = Remote("d1")
   let model = {
-    ..initial_model(),
+    ..initial_model(desktop=true),
     devices: [
       {
         ..empty_device_state(channel),

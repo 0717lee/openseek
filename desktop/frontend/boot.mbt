@@ -1,16 +1,16 @@
 // The app's single entry, shared by the two shell executables:
-// `frontend/desktop` (the proton webview) and `frontend/browser` (the
-// console page openseek-api serves). Which personality the page runs is
-// still decided at runtime by `@interop.page_channel()`.
+// `frontend/desktop` (the window against the host's loopback origin) and
+// `frontend/browser` (the console page openseek-api serves). Both are plain
+// http pages now, so the shell names its own personality here.
 
 ///|
 #warnings("-alert_unstable")
-pub fn boot() -> Unit {
+pub fn boot(desktop~ : Bool) -> Unit {
   let app = @rabbita.new(() => {
     let (state, emit) = @rabbita.create_state_with_init(
       // Init flows through `update` like any other message, as
       // `with_init(dispatch(Init))` did before the 0.13 migration.
-      init=emit => (initial_model(), emit(Init)),
+      init=emit => (initial_model(desktop~), emit(Init)),
       update=(emit, msg, model) => {
         let (cmd, next) = update(emit, msg, model)
         (next, cmd)
@@ -22,7 +22,10 @@ pub fn boot() -> Unit {
           @sub.on_resize(
             emit.map(viewport => ViewportResized(width=viewport.width)),
           ),
-          external_link_subscription(emit.map(url => ExternalLinkClicked(url))),
+          external_link_subscription(
+            desktop~,
+            emit.map(url => ExternalLinkClicked(url)),
+          ),
         ])
       },
     )

@@ -559,11 +559,10 @@ priv struct DeviceState {
   // Page-unique identity of this remote device connection lifecycle. A
   // removed device may later return with the same relay id; delayed socket
   // callbacks and reconnect timers carry the old value and are ignored.
-  // The desktop's non-WebSocket Local channel always uses 0.
+  // The Local channel is never removed, so its epoch stays 0.
   websocket_epoch : Int
   // Consecutive WebSocket losses since the last successful connection.
-  // Drives the reconnect backoff and the BridgeLost threshold; always 0 for
-  // the proton channel, whose bridge never reconnects.
+  // Drives the reconnect backoff and the BridgeLost threshold.
   reconnect_failures : Int
   // Incremented at every BridgeReady. Session-list replies carry the value
   // captured when their request was issued, so a reply from a dead connection
@@ -665,8 +664,8 @@ priv struct Model {
   // the distro's PATH. The host settings store persists all three and shares
   // them with every attached client.
   host_wsl : Bool
-  // Whether this page is the desktop window (the proton webview) rather than
-  // a browser reached through a relay. Probed once at startup. Gates the
+  // Whether this page is the desktop window rather than a browser reached
+  // through a relay. Named by the shell executable at boot. Gates the
   // self-update flow: applying an update swaps the
   // bundle under the desktop process and relaunches through the window's
   // close path — from a browser tab, `window.close()` exits nothing, and the
@@ -1109,7 +1108,6 @@ priv enum Msg {
 /// focused-scoped state stay on `Msg` itself.
 priv enum DeviceMsg {
   BridgeReady
-  BridgeUnavailable(String)
   // The channel's WebSocket closed (or failed to open). The handler counts
   // the loss and schedules `ReconnectDue`, making the model's device list
   // the single authority over which reconnect loops keep running. The epoch
@@ -1375,7 +1373,11 @@ fn empty_conversation(
 }
 
 ///|
-fn initial_model() -> Model {
+/// The initial model. `desktop` is the shell's own identity — the desktop
+/// executable passes true, the browser console false — because both pages
+/// are plain http origins now and nothing about the page can tell them
+/// apart.
+fn initial_model(desktop~ : Bool) -> Model {
   // Read once here (main runs before the first render); afterwards the
   // resize subscription keeps the flag current through `ViewportResized`.
   // No window (a headless test runtime) reads as the wide layout.
@@ -1390,18 +1392,18 @@ fn initial_model() -> Model {
   {
     // The desktop window's one channel; a browser page starts empty and
     // fills `devices` from the fetched roster (`apply_roster`).
-    devices: match @interop.page_channel() {
-      Some(channel) =>
-        [
-          {
-            ..empty_device_state(channel),
-            active_workspace: preselect_workspace.unwrap_or(""),
-          },
-        ]
-      None => []
+    devices: if desktop {
+      [
+        {
+          ..empty_device_state(@interop.ChannelId::Local),
+          active_workspace: preselect_workspace.unwrap_or(""),
+        },
+      ]
+    } else {
+      []
     },
     websocket_epoch: 0,
-    focused: @interop.page_channel().unwrap_or(@interop.ChannelId::Local),
+    focused: @interop.ChannelId::Local,
     selected_model: DefaultModel,
     max_steps: DefaultMaxSteps,
     deepseek_key_saved: false,
@@ -1414,10 +1416,10 @@ fn initial_model() -> Model {
     deferred_host_settings: None,
     legacy_cleanup_pending: false,
     host_wsl: false,
-    is_desktop: @interop.using_proton_bridge(),
+    is_desktop: desktop,
     // Every browser page is the console: it signs in against the relay and
     // fetches the device roster before any channel opens.
-    console: if @interop.using_proton_bridge() {
+    console: if desktop {
       None
     } else {
       Some(

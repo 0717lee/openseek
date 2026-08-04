@@ -385,13 +385,6 @@ test "workspace commit decoder carries the canonical registry list" {
 }
 
 ///|
-test "proton subscribes to canonical durable and workspace notifications" {
-  let methods = proton_event_methods()
-  assert_true(methods.contains("agent.durable"))
-  assert_true(methods.contains("workspace.changed"))
-}
-
-///|
 test "opening a stored session adopts its workspace" {
   let dispatch = test_dispatch()
   let model = test_model().with_dev(dev => {

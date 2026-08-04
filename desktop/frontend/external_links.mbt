@@ -7,7 +7,7 @@ using @cmd {trait Scheduler}
 
 ///|
 priv suberror ExternalLinkSubscription {
-  ExternalLinkSubscription(@cmd.Emit[String])
+  ExternalLinkSubscription(desktop~ : Bool, @cmd.Emit[String])
 }
 
 ///|
@@ -16,13 +16,17 @@ fn external_link_sub_loader(
   scheduler : &Scheduler,
 ) -> @sub.RunningSub? {
   match payload {
-    ExternalLinkSubscription(emit) => {
+    ExternalLinkSubscription(desktop~, emit) => {
       let mut emit = emit
-      let listener = add_external_link_capture(url => scheduler.add(emit(url)))
+      let listener = add_external_link_capture(desktop, url => {
+        scheduler.add(emit(url))
+      })
       Some({
         unload: _ => remove_external_link_capture(listener),
         update_tagger: payload => {
-          guard payload is ExternalLinkSubscription(next) else { return }
+          guard payload is ExternalLinkSubscription(desktop=_, next) else {
+            return
+          }
           emit = next
         },
       })
@@ -32,17 +36,22 @@ fn external_link_sub_loader(
 }
 
 ///|
-fn external_link_subscription(emit : @cmd.Emit[String]) -> @sub.Sub {
+/// The shell identity rides the payload because the page cannot tell — the
+/// desktop window and the browser console are both plain http origins.
+fn external_link_subscription(
+  desktop~ : Bool,
+  emit : @cmd.Emit[String],
+) -> @sub.Sub {
   @sub.custom_sub(
     "external-link-capture",
     Global,
-    ExternalLinkSubscription(emit),
+    ExternalLinkSubscription(desktop~, emit),
     external_link_sub_loader,
   )
 }
 
 ///|
-/// Ask the Proton-local bridge to hand an external URL to the system browser.
+/// Ask the local host to hand an external URL to the system browser.
 /// Failures re-enter update as the same host-action toast used by file/app
 /// openers; the browser page never emits this command.
 fn open_external_link(dispatch : @cmd.Emit[Msg], url : String) -> @cmd.Cmd {
@@ -69,12 +78,14 @@ fn open_external_link(dispatch : @cmd.Emit[Msg], url : String) -> @cmd.Cmd {
 ///|
 /// Install one delegated capture listener and return its identity for removal.
 /// Browser pages preserve ordinary navigation but force safe external targets
-/// into a new tab. Proton pages prevent every anchor navigation (so the app
-/// frame cannot escape) and emit only allowlisted external schemes.
+/// into a new tab. The desktop window prevents every anchor navigation (so
+/// the app frame cannot escape into the webview) and emits only allowlisted
+/// external schemes for the host to open.
 extern "js" fn add_external_link_capture(
+  desktop : Bool,
   on_external : (String) -> Unit,
 ) -> @js.Value =
-  #| (onExternal) => {
+  #| (desktop, onExternal) => {
   #|   const listener = (event) => {
   #|     if (event.defaultPrevented || event.button !== 0) return;
   #|     const anchor = event.target?.closest?.("a[href]");
@@ -88,7 +99,7 @@ extern "js" fn add_external_link_capture(
   #|     const supported = destination.protocol === "http:" ||
   #|       destination.protocol === "https:" ||
   #|       destination.protocol === "mailto:";
-  #|     if (globalThis.location?.protocol === "proton:") {
+  #|     if (desktop) {
   #|       event.preventDefault();
   #|       if (supported) onExternal(destination.href);
   #|       return;

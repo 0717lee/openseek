@@ -19,15 +19,7 @@ pub async fn bridge_request(ChannelId, String, @js.Value) -> @js.Value
 
 pub async fn bridge_request_in_order(ChannelId, String, @js.Value) -> @js.Value
 
-pub fn js_method_promise(@js.Value, String, @js.Value) -> @js.Promise raise @js.Error_
-
 pub fn js_prop(@js.Value, String) -> @js.Value?
-
-pub fn moonbit_bridge_root() -> @js.Value?
-
-pub fn openseek_api() -> @js.Value?
-
-pub fn page_channel() -> ChannelId?
 
 pub fn page_query_param(String) -> String?
 
@@ -39,13 +31,11 @@ pub fn set_trimmed(@js.Object, String, String) -> Unit
 
 pub fn set_workspace(@js.Object, @pathx.Absolute?) -> Unit
 
-pub fn using_proton_bridge() -> Bool
-
 pub fn viewport_width() -> Int?
 
 pub fn ws_close(ChannelId) -> Unit
 
-pub fn ws_connect(String, on_notification~ : (String, Map[String, Json]) -> Unit, on_down~ : () -> Unit) -> Unit
+pub fn ws_connect(ChannelId, on_notification~ : (String, Map[String, Json]) -> Unit, on_down~ : () -> Unit) -> Unit
 
 // Errors
 

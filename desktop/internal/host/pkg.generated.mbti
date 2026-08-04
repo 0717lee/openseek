@@ -19,9 +19,13 @@ pub fn host_method_names() -> Array[String]
 
 pub async fn host_op(HostState, HostConnection, String, Json, (String, Json) -> Unit) -> Json?
 
+pub async fn load_local_http_port(@path.Path) -> Int?
+
 pub fn new_host_state(String, runtime_dir? : @path.Path, executable? : String) -> HostState
 
 pub async fn prepared_runtime_dir() -> @path.Path?
+
+pub async fn save_local_http_port(@path.Path, Int) -> Unit
 
 pub fn[G] spawn_host_pumps(@async.TaskGroup[G], HostState, async (String, Json) -> Unit) -> Unit
 
@@ -45,4 +49,3 @@ type HostState
 // Type aliases
 
 // Traits
-

@@ -1,7 +1,8 @@
-// The browser transport: JSON-RPC 2.0 over one WebSocket per device
-// channel (docs/remote-protocol.md). Requests are correlated by a
-// client-scoped id against the session's pending map; notifications go to
-// the handler installed with that connection. Sockets are JS objects, so
+// The one transport: JSON-RPC 2.0 over one WebSocket per channel
+// (docs/remote-protocol.md). `Local` is the desktop window dialing its own
+// loopback origin; `Remote(id)` is a relay device. Requests are correlated
+// by a client-scoped id against the session's pending map; notifications go
+// to the handler installed with that connection. Sockets are JS objects, so
 // the registry lives here as module state rather than in the Elm model.
 
 ///|
@@ -15,9 +16,8 @@ priv struct RpcSession {
 }
 
 ///|
-/// Every live (or connecting) WebSocket session, one per device channel.
-/// Empty before `ws_connect` (and forever on a proton page, which never
-/// calls it).
+/// Every live (or connecting) WebSocket session, one per channel.
+/// Empty before the first `ws_connect`.
 let channels : Map[ChannelId, RpcSession] = Map([])
 
 ///|
@@ -56,29 +56,35 @@ pub fn page_ws_origin() -> String? {
 }
 
 ///|
-/// A device's protocol WebSocket URL: same origin, the relay's
-/// `/v1/devices/<device>/ws` route.
-fn ws_url(device : String) -> String? {
+/// A channel's protocol WebSocket URL, always on the page's own origin: the
+/// local host's `/ws` route presenting the launch token that rode the entry
+/// URL, or the relay's `/v1/devices/<device>/ws` route.
+fn ws_url(channel : ChannelId) -> String? {
   guard page_ws_origin() is Some(origin) else { return None }
-  Some("\{origin}/v1/devices/\{device}/ws")
+  match channel {
+    Local => {
+      guard page_query_param("token") is Some(token) else { return None }
+      Some("\{origin}/ws?token=\{token}")
+    }
+    Remote(device) => Some("\{origin}/v1/devices/\{device}/ws")
+  }
 }
 
 ///|
-/// Open (or replace) the connection to one device. `on_notification`
+/// Open (or replace) the connection to one channel. `on_notification`
 /// receives every notification this host pushes; `on_down` fires once when
 /// the socket closes for any reason — the caller owns backoff and calls
 /// `ws_connect` again. Requests issued while down fail fast with a
 /// user-facing message.
 pub fn ws_connect(
-  device : String,
+  channel : ChannelId,
   on_notification~ : (String, Map[String, Json]) -> Unit,
   on_down~ : () -> Unit,
 ) -> Unit {
-  guard ws_url(device) is Some(url) else {
+  guard ws_url(channel) is Some(url) else {
     on_down()
     return
   }
-  let channel = Remote(device)
   // Replacing the registry entry alone leaves the previous socket's
   // `onmessage` callback alive. Retire it first so at most one connection can
   // forward notifications or hold pending requests for this device.
