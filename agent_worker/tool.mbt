@@ -4,15 +4,21 @@
 // the generated `.mbt`.
 
 ///|
-/// Step ceiling requested for one worker child. Same reasoning as explore's:
-/// a truncated child burns its allowance and returns nothing, so the ceiling
-/// is generous and the prompt's answer-early rule is what bounds real cost.
-pub let default_worker_max_steps : Int = 100
+/// Step ceiling requested for one worker child. Sized from real sweep
+/// workloads, not the scout's Q&A profile: an edit+verify worker spends
+/// 2-3 steps per fix cluster, and package-sized slices complete at ~80-100
+/// steps — the old ceiling of 100 truncated the overflow tail in two
+/// consecutive production sweeps. 300 is ~3x the observed completion
+/// envelope; the wall deadline below is the hang guard, and the prompt's
+/// answer-early rule is what bounds real cost.
+pub let default_worker_max_steps : Int = 300
 
 ///|
-/// Wall deadline for one worker child: real edit+verify loops run moon
-/// check/test repeatedly, so a worker gets twice the scout's ten minutes.
-pub let default_worker_deadline_ms : Int = 1_200_000
+/// Wall deadline for one worker child. Observed sweep pace is ~6-8s/step,
+/// so the step ceiling above spends at most ~30-40 minutes of steady
+/// progress; 45 minutes keeps the deadline from truncating a worker the
+/// step ceiling would allow, while still cutting off a hung child.
+pub let default_worker_deadline_ms : Int = 2_700_000
 
 ///|
 /// The geometry and work order a worker child receives from the subtask
