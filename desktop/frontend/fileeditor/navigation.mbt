@@ -1,0 +1,317 @@
+// Definition, References, and Peek integration for the embedded Viewer.
+// The language queries go directly to the host's `moonide.*` operations;
+// moon-lsp is deliberately not part of this path. Viewer owns the UI and
+// request lifecycle, while Desktop owns routing, file opening, and preview
+// model leases.
+
+///|
+/// The active workspace identity needed by cross-resource navigation. The
+/// root is host-confirmed: either the attached workspace supplied by `Ctx`,
+/// or the root reconstructed from the absolute/relative pair returned by
+/// `fs.read_file`.
+priv struct NavigationContext {
+  owner : @interop.ConversationKey
+  root : @pathx.Absolute
+} derive(Eq)
+
+///|
+/// Reconstruct the workspace root from one file's host-resolved absolute path
+/// and its workspace-relative name. Separators are normalized so a Windows
+/// host and URI-derived path compare in the same form. This is lexical only;
+/// both values came from the same successful, workspace-contained read.
+fn navigation_root_from_file(
+  absolute : @pathx.Absolute,
+  relative : @pathx.Relative,
+) -> @pathx.Absolute? {
+  let path = @pathx.normalize(absolute.0)
+  let name = @pathx.normalize(relative.0)
+  guard !name.is_empty() else { return None }
+  let suffix = "/" + name
+  guard path.strip_suffix(suffix) is Some(root) else { return None }
+  if root.is_empty() {
+    Some(Absolute("/"))
+  } else {
+    Some(Absolute(root.to_owned()))
+  }
+}
+
+///|
+/// Choose the root for the document now on screen. An explicit workspace is
+/// accepted only when it maps the absolute file back to the exact relative
+/// name; otherwise the host-returned file pair wins (important for canonical
+/// paths behind symlinked workspace hints).
+fn navigation_context_for_file(
+  owner : @interop.ConversationKey,
+  workspace : @pathx.Absolute?,
+  absolute : @pathx.Absolute,
+  relative : @pathx.Relative,
+) -> NavigationContext? {
+  let root = match workspace {
+    Some(root) if absolute.relative_to(root~) == Some(relative) => Some(root)
+    _ => navigation_root_from_file(absolute, relative)
+  }
+  root.map(root => { owner, root })
+}
+
+///|
+/// One implementation serves both editor provider traits. The model URI is
+/// the complete route: it names the absolute file and the local/remote host.
+priv struct MoonIdeNavigationProvider {}
+
+///|
+impl @language.DefinitionProvider for MoonIdeNavigationProvider with fn provide_definition(
+  _self,
+  model,
+  position,
+  token,
+) {
+  if token.is_cancellation_requested() || model.language_id != "moonbit" {
+    return []
+  }
+  guard model_uri_path(model.uri) is Some(path) &&
+    model_uri_channel(model.uri) is Some(channel) else {
+    return []
+  }
+  let locations = request_moon_ide_locations(
+    channel,
+    "moonide.definition",
+    path,
+    position.line_number,
+    position.column,
+  ) catch {
+    _ => return []
+  }
+  if token.is_cancellation_requested() {
+    []
+  } else {
+    locations
+  }
+}
+
+///|
+impl @language.ReferencesProvider for MoonIdeNavigationProvider with fn provide_references(
+  _self,
+  model,
+  position,
+  token,
+) {
+  if token.is_cancellation_requested() || model.language_id != "moonbit" {
+    return []
+  }
+  guard model_uri_path(model.uri) is Some(path) &&
+    model_uri_channel(model.uri) is Some(channel) else {
+    return []
+  }
+  let locations = request_moon_ide_locations(
+    channel,
+    "moonide.references",
+    path,
+    position.line_number,
+    position.column,
+  ) catch {
+    _ => return []
+  }
+  if token.is_cancellation_requested() {
+    []
+  } else {
+    locations
+  }
+}
+
+///|
+/// Register both navigation providers on the process-wide language registry.
+/// The returned handles are retained by `DesktopViewerServices` for the full
+/// lifetime of the one mounted Viewer.
+fn register_moon_ide_navigation_providers() -> Array[@common.Disposable] {
+  let provider = MoonIdeNavigationProvider::{  }
+  [
+    @languages.languages.register_definition_provider(
+      @language.LanguageSelector::LanguageId("moonbit"),
+      provider,
+    ),
+    @languages.languages.register_references_provider(
+      @language.LanguageSelector::LanguageId("moonbit"),
+      provider,
+    ),
+  ]
+}
+
+///|
+async fn request_moon_ide_locations(
+  channel : @interop.ChannelId,
+  op : String,
+  path : @pathx.Absolute,
+  line : Int,
+  column : Int,
+) -> Array[@language.Location] {
+  let payload = @js.Object::new()
+  payload["path"] = path.0
+  payload["line"] = line
+  payload["column"] = column
+  let reply = @interop.bridge_request(channel, op, payload.to_value())
+  decode_moon_ide_locations(@interop.reply_json_text(reply), channel)
+}
+
+///|
+/// Decode the host-normalized location reply. Every coordinate is already a
+/// one-based protocol position, so no client-side column conversion or
+/// LSP-style shifting occurs here.
+fn decode_moon_ide_locations(
+  text : String,
+  channel : @interop.ChannelId,
+) -> Array[@language.Location] {
+  let json = @json.parse(text) catch { _ => return [] }
+  guard json is Object(reply) && reply.get("locations") is Some(Array(items)) else {
+    return []
+  }
+  let result : Array[@language.Location] = []
+  for item in items {
+    guard item is Object(fields) &&
+      @jsonx.json_text(fields, "path") is Some(path) &&
+      !path.is_empty() &&
+      @jsonx.json_int(fields, "start_line") is Some(start_line) &&
+      @jsonx.json_int(fields, "start_column") is Some(start_column) &&
+      @jsonx.json_int(fields, "end_line") is Some(end_line) &&
+      @jsonx.json_int(fields, "end_column") is Some(end_column) else {
+      continue
+    }
+    guard start_line > 0 &&
+      start_column > 0 &&
+      end_line > 0 &&
+      end_column > 0 &&
+      (
+        end_line > start_line ||
+        (end_line == start_line && end_column >= start_column)
+      ) else {
+      continue
+    }
+    result.push(@language.Location::{
+      uri: model_uri_of(channel, Absolute(path)),
+      range: @common.Range::Range(
+        start_line, start_column, end_line, end_column,
+      ),
+    })
+  }
+  result
+}
+
+///|
+/// Desktop opens navigation targets in its current tab group. `Side` is not
+/// accepted because the file panel has no second editor group; returning
+/// false lets Viewer preserve its current state and report that limitation.
+fn navigation_location_opener(
+  open_location : (@interop.ConversationKey, @pathx.Relative, @common.Range) -> Unit,
+) -> @navigation_api.LocationOpenerHandle {
+  LocationOpenerHandle(open=request => {
+    guard request.mode is Current else { return false }
+    guard viewer_state.navigation is Some(context) else { return false }
+    guard model_uri_channel(request.location.uri) == Some(context.owner.channel) &&
+      model_uri_path(request.location.uri) is Some(absolute) &&
+      absolute.relative_to(root=context.root) is Some(relative) &&
+      !relative.is_root() else {
+      return false
+    }
+    open_location(context.owner, relative, request.location.range)
+    true
+  })
+}
+
+///|
+fn navigation_text_model_resolver() -> @navigation_api.TextModelResolverHandle {
+  TextModelResolverHandle(resolve=(resource, token) => {
+    resolve_navigation_preview(resource, token)
+  })
+}
+
+///|
+/// Resolve one cross-file Peek model through OpenSeek's existing safe
+/// workspace read. Each request owns one fresh readonly model; the returned
+/// reference disposes it when Viewer's last use of that request ends. No LSP
+/// document cache or development-shell protocol is involved.
+async fn resolve_navigation_preview(
+  resource : @common.Uri,
+  token : @language.CancellationToken,
+) -> @navigation_api.TextModelReference? noraise {
+  if token.is_cancellation_requested() {
+    return None
+  }
+  guard viewer_state.navigation is Some(context) else { return None }
+  guard model_uri_channel(resource) == Some(context.owner.channel) &&
+    model_uri_path(resource) is Some(absolute) &&
+    absolute.relative_to(root=context.root) is Some(relative) &&
+    !relative.is_root() else {
+    return None
+  }
+  let file = read_file_snapshot(
+    context.owner,
+    relative,
+    workspace=Some(context.root),
+  ) catch {
+    _ => return None
+  }
+  if token.is_cancellation_requested() ||
+    viewer_state.navigation != Some(context) {
+    return None
+  }
+  guard file is Some(Content(content~, absolute=loaded, sig~)) &&
+    loaded == absolute else {
+    return None
+  }
+  let name = basename(relative)
+  let model = @model.TextModel(
+    resource,
+    name,
+    language_id(name),
+    1,
+    sig,
+    content,
+  )
+  Some(
+    TextModelReference(model, release=() => {
+      if !model.is_disposed() {
+        model.dispose()
+      }
+    }),
+  )
+}
+
+///|
+test "navigation root follows host absolute and workspace-relative paths" {
+  assert_true(
+    navigation_root_from_file(
+      Absolute("/ws/project/src/main.mbt"),
+      Relative("src/main.mbt"),
+    ) ==
+    Some(Absolute("/ws/project")),
+  )
+  assert_true(
+    navigation_root_from_file(
+      Absolute("C:\\ws\\project\\src\\main.mbt"),
+      Relative("src/main.mbt"),
+    ) ==
+    Some(Absolute("C:/ws/project")),
+  )
+  assert_true(
+    navigation_root_from_file(
+      Absolute("/other/src/main.mbt"),
+      Relative("lib/main.mbt"),
+    )
+    is None,
+  )
+}
+
+///|
+test "moon ide locations stay one based and channel routed" {
+  let reply =
+    #|{"locations":[{"path":"/ws/lib.mbt","start_line":2,"start_column":3,"end_line":2,"end_column":9},{"path":"/ws/bad.mbt","start_line":0,"start_column":1,"end_line":1,"end_column":1}]}
+  let locations = decode_moon_ide_locations(
+    reply,
+    @interop.ChannelId::Remote("device"),
+  )
+  assert_eq(locations.length(), 1)
+  assert_true(
+    model_uri_channel(locations[0].uri) == Some(Remote("device")) &&
+    model_uri_path(locations[0].uri) == Some(Absolute("/ws/lib.mbt")) &&
+    locations[0].range == @common.Range::Range(2, 3, 2, 9),
+  )
+}

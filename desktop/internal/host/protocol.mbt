@@ -272,6 +272,36 @@ priv struct LspHoverPayload {
 } derive(FromJson)
 
 ///|
+/// A source position for Moon IDE navigation. `line` and `column` are positive,
+/// one-based numbers which the host passes to `moon ide --loc` unchanged.
+/// `path` is absolute and is accepted only when it belongs to an attached
+/// workspace.
+priv struct MoonIdeNavigationPayload {
+  path : String
+  line : Int
+  column : Int
+} derive(FromJson)
+
+///|
+/// One Moon IDE navigation result. The host validates the CLI path against the
+/// physical workspace, then maps it back under the attached workspace's
+/// lexical spelling. Its compact range becomes explicit numeric fields while
+/// line and column values retain the coordinates emitted by Moon IDE.
+priv struct MoonIdeLocation {
+  path : String
+  start_line : Int
+  start_column : Int
+  end_line : Int
+  end_column : Int
+} derive(ToJson)
+
+///|
+/// Shared reply shape for `moonide.definition` and `moonide.references`.
+priv struct MoonIdeLocationsReply {
+  locations : Array[MoonIdeLocation]
+} derive(ToJson)
+
+///|
 /// `lsp_open` tells the host the editor is now showing the file at absolute
 /// `path`, so the language server opens/syncs it and starts publishing
 /// diagnostics. The reply carries whatever the server has already reported;

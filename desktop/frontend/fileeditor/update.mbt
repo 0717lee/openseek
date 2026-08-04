@@ -44,7 +44,8 @@ fn show_tab(dispatch : @cmd.Emit[Msg], ctx : Ctx, tab : Tab) -> @cmd.Cmd {
       )
     TabLoaded(content~, absolute~, ..) => {
       let show = show_file_in_viewer(
-        ctx.owner.channel,
+        ctx.owner,
+        ctx.workspace,
         tab.name,
         content,
         absolute~,
@@ -616,6 +617,12 @@ pub fn update(
       }
     FileSelected(path~, name~) =>
       open_or_activate(dispatch, state, ctx, path, name, range=None)
+    OpenNavigationLocation(owner~, path~, range~) =>
+      if state.owner == Some(owner) && ctx.owner == owner {
+        open_file(dispatch, state, ctx, path, range=Some(range))
+      } else {
+        (@cmd.none, state)
+      }
     FileLoaded(owner~, path~, name~, file~, range~, annotation~) =>
       // A stale read — the conversation switched, or the tab was closed
       // while the read was in flight — must not resurrect state.
@@ -647,7 +654,8 @@ pub fn update(
             // — so only the viewer shows.
             Content(content~, absolute~, ..) => {
               let show = show_file_in_viewer(
-                ctx.owner.channel,
+                ctx.owner,
+                ctx.workspace,
                 name,
                 content,
                 absolute~,
