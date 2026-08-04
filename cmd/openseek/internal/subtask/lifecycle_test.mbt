@@ -346,3 +346,87 @@ async test "disjoint slices coexist as active reservations" {
     }
   })
 }
+
+///|
+/// The resume path's controller half: capture is re-entrant. A second
+/// capture after further edits stacks a child commit on the same branch; a
+/// second capture with nothing new leaves the prior commit standing instead
+/// of tripping the no-changes cleanup (which would delete validated work).
+async test "capture is re-entrant: resumed work stacks on the same branch" {
+  @vfs.with_tmpdir(prefix="openseek-subtask-resume-", dir => {
+    let repo = seed_repo(dir)
+    let provisioned = must_provision(
+      repo,
+      name="fix-lib",
+      allowed_paths=["lib"],
+      nonce="n1",
+    )
+    let entry = provisioned.entry
+    @vfs.write_text("\{entry.worker_root}/lib", "a.txt", "ALPHA\n")
+    let first = @subtask.capture(provisioned.geometry, entry)
+    assert_eq(first.defects, ([] : Array[String]))
+    assert_true(first.entry.state is Committed)
+    guard first.entry.commit_oid is Some(commit1) else {
+      fail("expected a first commit")
+    }
+    // Resume finds the entry continuable and flips it back to Running.
+    let resumed = match
+      @subtask.resume_running(provisioned.geometry, "fix-lib") {
+      Ok(resumed) => resumed
+      Err(reason) => fail("resume_running failed: \{reason}")
+    }
+    assert_true(resumed.state is Running)
+    assert_eq(resumed.commit_oid, Some(commit1))
+    // A resumed worker that adds nothing: the prior capture must stand and
+    // the worktree and branch must survive.
+    let idle = @subtask.capture(provisioned.geometry, resumed)
+    assert_eq(idle.defects, ([] : Array[String]))
+    assert_true(idle.entry.state is Committed)
+    assert_eq(idle.entry.commit_oid, Some(commit1))
+    assert_true(@fs.exists(entry.worker_root))
+    // A resumed worker that adds more work: the second capture stacks a
+    // commit whose parent is the first capture's commit.
+    @vfs.write_text("\{entry.worker_root}/lib", "c.txt", "GAMMA\n")
+    let second = @subtask.capture(provisioned.geometry, idle.entry)
+    assert_eq(second.defects, ([] : Array[String]))
+    assert_true(second.entry.state is Committed)
+    guard second.entry.commit_oid is Some(commit2) else {
+      fail("expected a second commit")
+    }
+    assert_true(commit1 != commit2)
+    match @subtask.git_require(["rev-parse", "\{commit2}^"], cwd=repo) {
+      Ok(parent) => assert_eq(parent.trim().to_owned(), commit1)
+      Err(reason) => fail(reason)
+    }
+    // Integration lands BOTH captures' work.
+    let integrated = @subtask.integrate(provisioned.geometry, second.entry)
+    assert_eq(integrated.result, "integrated")
+    assert_eq(@fs.read_file("\{repo}/lib/a.txt").text(), "ALPHA\n")
+    assert_eq(@fs.read_file("\{repo}/lib/c.txt").text(), "GAMMA\n")
+  })
+}
+
+///|
+/// resume_running refuses what it must: unknown names, and states without a
+/// kept worktree (a Running slice may still have a live child).
+async test "resume_running refuses unknown names and running slices" {
+  @vfs.with_tmpdir(prefix="openseek-subtask-resume-refuse-", dir => {
+    let repo = seed_repo(dir)
+    let provisioned = must_provision(
+      repo,
+      name="fix-lib",
+      allowed_paths=["lib"],
+      nonce="n1",
+    )
+    guard @subtask.resume_running(provisioned.geometry, "nope") is Err(unknown) else {
+      fail("expected an unknown-name refusal")
+    }
+    assert_true(unknown.contains("no active subtask"))
+    // Freshly provisioned means Running — a child may still be live.
+    guard @subtask.resume_running(provisioned.geometry, "fix-lib")
+      is Err(running) else {
+      fail("expected a running-state refusal")
+    }
+    assert_true(running.contains("Running"))
+  })
+}

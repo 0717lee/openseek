@@ -182,7 +182,10 @@ fn default_prompt() -> String {
     #|  git evidence — trust the evidence. Then integrate ONE subtask at a time
     #|  (`integrate=<name>`), re-running your checks after each; resolve conflicts
     #|  with the file tools plus `integrate_continue`; `discard=<name>` frees an
-    #|  abandoned slice. After the last integration, run the FULL verification
+    #|  abandoned slice. A slice that stopped at its step ceiling or captured
+    #|  NOT-mergeable keeps its worktree: `continue=<name>` with a remainder work
+    #|  order relaunches a fresh worker there — prefer that over finishing the
+    #|  slice yourself. After the last integration, run the FULL verification
     #|  suite yourself — including the repository's format gate (`moon fmt`
     #|  and a clean `moon fmt --check`) — workers verified slices, only you
     #|  see the union. For a
