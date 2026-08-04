@@ -739,7 +739,6 @@ fn follower_test_config(
     model: "test",
     max_steps: 1,
     engine,
-    host: Native,
     cwd: None,
     session: Some(session),
     session_root: Some(root),

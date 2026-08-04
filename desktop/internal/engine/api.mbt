@@ -11,14 +11,6 @@ impl Show for EngineError with fn output(self, logger) {
 }
 
 ///|
-/// The engine-host input `settings_wsl_request` builds from the stored
-/// settings; requests no longer carry it.
-priv struct WslRequest {
-  distro : String?
-  engine : String?
-}
-
-///|
 const SubmissionIdMaxBytes = 128
 
 ///|
@@ -50,9 +42,8 @@ fn normalize_submission_id(submission_id : String?) -> String? {
 }
 
 ///|
-/// The endpoint (provider, credentials) and the WSL preference are the
-/// host-owned settings' business — a start names only the work and where it
-/// runs.
+/// The endpoint and credentials are the host-owned settings' business — a
+/// start names only the work and where it runs.
 pub(all) struct StartRequest {
   task : String
   // Optional client-minted lifecycle identity echoed with `agent.started`.

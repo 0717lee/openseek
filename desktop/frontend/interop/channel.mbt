@@ -8,7 +8,7 @@
 /// the injected proton bridge in the desktop window; `Remote(id)` is a
 /// stable named target. Today browser remotes are relay devices reached over
 /// WebSocket; the identity deliberately does not encode that transport so a
-/// future SSH- or WSL-backed target can use the same channel shape.
+/// another remote target can use the same channel shape.
 pub(all) enum ChannelId {
   Local
   Remote(String)
@@ -28,7 +28,7 @@ pub(all) struct ConversationKey {
 ///|
 /// The authority used by app-owned resource URIs for this channel. The
 /// authority is an identity, not a network endpoint: `remote.<id>` stays
-/// stable if the target's transport changes between relay, SSH, and WSL.
+/// stable if the target's transport changes.
 pub fn ChannelId::uri_authority(self : ChannelId) -> String {
   match self {
     Local => "local"

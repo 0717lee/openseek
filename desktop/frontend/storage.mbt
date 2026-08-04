@@ -2,8 +2,8 @@
 // is guarded — a webview profile may deny storage — and a denied store just
 // means the defaults come back next launch.
 //
-// The engine endpoint settings (provider, URLs, API keys, WSL) are NOT
-// here: they live on the host (`settings.get`/`set`), because relay pages
+// The engine endpoint settings (provider, URLs, API keys) are NOT here: they
+// live on the host (`settings.get`/`set`), because relay pages
 // for different devices share one browser origin — a secret in
 // localStorage would leak across hosts. The legacy readers below exist
 // only for the one-time migration (desktop) and purge (browser).
@@ -45,25 +45,12 @@ fn read_legacy_engine_settings(dispatch : @cmd.Emit[Msg]) -> @cmd.Cmd {
     let custom_url = load_setting(LegacyCustomApiUrlStorageKey)
     let api_key = load_setting(LegacyApiKeyStorageKey)
     let custom_api_key = load_setting(LegacyCustomApiKeyStorageKey)
-    let wsl_enabled = load_setting(LegacyWslEnabledStorageKey)
-    let wsl_distro = load_setting(LegacyWslDistroStorageKey)
-    let wsl_engine = load_setting(LegacyWslEngineStorageKey)
-    if [
-        provider, custom_url, api_key, custom_api_key, wsl_enabled, wsl_distro, wsl_engine,
-      ]
+    if [provider, custom_url, api_key, custom_api_key]
       .iter()
       .any(value => !value.trim().is_empty()) {
       scheduler.add(
         dispatch(
-          LegacySettingsRead(
-            provider~,
-            custom_url~,
-            api_key~,
-            custom_api_key~,
-            wsl_enabled~,
-            wsl_distro~,
-            wsl_engine~,
-          ),
+          LegacySettingsRead(provider~, custom_url~, api_key~, custom_api_key~),
         ),
       )
     }
@@ -82,9 +69,6 @@ fn clear_legacy_engine_settings() -> @cmd.Cmd {
         LegacyCustomApiUrlStorageKey,
         LegacyApiKeyStorageKey,
         LegacyCustomApiKeyStorageKey,
-        LegacyWslEnabledStorageKey,
-        LegacyWslDistroStorageKey,
-        LegacyWslEngineStorageKey,
       ] {
       remove_setting(key)
     }

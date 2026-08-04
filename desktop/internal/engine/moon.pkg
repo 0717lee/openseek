@@ -17,7 +17,6 @@ import {
   "moonbitlang/core/json",
   "moonbitlang/core/string",
   "moonbitlang/x/path",
-  "moonbitlang/x/path/posix" @path/posix,
   "tonyfettes/xlog",
 }
 

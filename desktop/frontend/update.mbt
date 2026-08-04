@@ -26,8 +26,8 @@ fn session_snapshot_command(
 
 ///|
 /// Move the UI's focus to `channel`: refetch the focused-scoped mirrors
-/// that BridgeReady only loads for the then-focused device (host meta,
-/// host settings, installed skills) and reset their local bookkeeping, so
+/// that BridgeReady only loads for the then-focused device (host settings,
+/// installed skills) and reset their local bookkeeping, so
 /// nothing of the previous device's host bleeds through. The active
 /// conversation is the caller's to place afterwards (an activation or a
 /// rotation); until it does, nothing is selected. A no-op when focus is
@@ -42,7 +42,6 @@ fn focus_channel(
   }
   (
     @cmd.batch([
-      fetch_host_meta(dispatch, channel),
       fetch_host_settings(dispatch, channel, dev.connection_generation),
       fetch_installed_skills(dispatch, channel),
     ]),
@@ -51,7 +50,6 @@ fn focus_channel(
       focused: channel,
       active_session: "",
       loading_conversation: None,
-      host_wsl: false,
       installed_skills: [],
       completion: None,
       // Forgetting what was watched makes the post-dispatch panel sync
@@ -943,28 +941,6 @@ fn update(
 }
 
 ///|
-/// Push the model's (already-updated) WSL view to the host as one whole
-/// group — the shared tail of the three WSL edit handlers.
-fn push_wsl_settings(
-  dispatch : @cmd.Emit[Msg],
-  model : Model,
-) -> (@cmd.Cmd, Model) {
-  (
-    push_host_settings(
-      dispatch,
-      model.focused,
-      wsl_settings_patch(
-        enabled=model.wsl_enabled,
-        distro=model.wsl_distro,
-        engine=model.wsl_engine,
-      ),
-      model.focused_connection_generation(),
-    ),
-    { ..model, settings_saves: model.settings_saves + 1 },
-  )
-}
-
-///|
 fn update_msg(
   dispatch : @cmd.Emit[Msg],
   msg : Msg,
@@ -1018,15 +994,7 @@ fn update_msg(
     // edit broadcast. Revisions order concurrent clients and RPC replies;
     // while this page has optimistic writes, keep only the newest status and
     // apply it once the last write settles.
-    LegacySettingsRead(
-      provider~,
-      custom_url~,
-      api_key~,
-      custom_api_key~,
-      wsl_enabled~,
-      wsl_distro~,
-      wsl_engine~
-    ) =>
+    LegacySettingsRead(provider~, custom_url~, api_key~, custom_api_key~) =>
       // Only the desktop window migrates: it is the one client whose stored
       // values are unambiguously this host's. A browser page's copy may
       // belong to a different device behind the same origin — pushing it is
@@ -1037,9 +1005,6 @@ fn update_msg(
           custom_url~,
           api_key~,
           custom_api_key~,
-          wsl_enabled~,
-          wsl_distro~,
-          wsl_engine~,
         )
         // Mirror the pushed values optimistically so the Settings page and
         // the ready gate reflect the migration immediately.
@@ -1051,9 +1016,6 @@ fn update_msg(
           !api_key.trim().is_empty(),
           custom_key_saved: model.custom_key_saved ||
           !custom_api_key.trim().is_empty(),
-          wsl_enabled: wsl_enabled == "1",
-          wsl_distro: wsl_distro.trim().to_owned(),
-          wsl_engine: wsl_engine.trim().to_owned(),
           settings_saves: model.settings_saves + 1,
           legacy_cleanup_pending: true,
         }
@@ -1226,18 +1188,6 @@ fn update_msg(
           settings_saves: model.settings_saves + 1,
         },
       )
-    }
-    WslModeChanged(value) => {
-      guard model.host_settings_loaded() else { return (@cmd.none, model) }
-      push_wsl_settings(dispatch, { ..model, wsl_enabled: value == "wsl" })
-    }
-    WslDistroChanged(value) => {
-      guard model.host_settings_loaded() else { return (@cmd.none, model) }
-      push_wsl_settings(dispatch, { ..model, wsl_distro: value })
-    }
-    WslEngineChanged(value) => {
-      guard model.host_settings_loaded() else { return (@cmd.none, model) }
-      push_wsl_settings(dispatch, { ..model, wsl_engine: value })
     }
     NotificationCornerChanged(value) => {
       let corner = NotificationCorner::parse(value)
@@ -2148,13 +2098,12 @@ fn update_device_msg(
           dispatch, channel, connection_generation, workspaces_request_generation,
         ),
       ]
-      // The focused-scoped half: the host-settings mirror, host meta, and
-      // the installed skills (they feed the composer's `$` completion, so
+      // The focused-scoped half: the host-settings mirror and installed
+      // skills (they feed the composer's `$` completion, so
       // they load on connect rather than when the Skills page opens) follow
       // the device the UI acts on — always this one while the app runs a
       // single channel.
       if channel == model.focused {
-        commands.push(fetch_host_meta(dispatch, channel))
         commands.push(
           fetch_host_settings(dispatch, channel, connection_generation),
         )
@@ -2282,12 +2231,6 @@ fn update_device_msg(
           },
         },
       )
-    }
-    HostMetaLoaded(wsl~) => {
-      // `host_wsl` mirrors the focused host; a reply that outlived a focus
-      // switch (or arrived for a background device) must not clobber it.
-      guard channel == model.focused else { return (@cmd.none, model) }
-      (@cmd.none, { ..model, host_wsl: wsl })
     }
     BridgeUnavailable(message) => {
       let (terminal_cmd, terminal_panel) = @terminal.disconnect(
@@ -5054,9 +4997,6 @@ test "BridgeReady clears focused host settings until the refetch lands" {
     custom_key_saved: true,
     setup_api_key: "old-key",
     host_settings_revision: 7,
-    wsl_enabled: true,
-    wsl_distro: "OldDistro",
-    wsl_engine: "/old/openseek",
   }
   let (_, next) = update_dev(dispatch, BridgeReady, model)
   assert_false(next.host_settings_loaded())
@@ -5064,9 +5004,6 @@ test "BridgeReady clears focused host settings until the refetch lands" {
   inspect(next.custom_api_url, content="")
   assert_false(next.custom_key_saved)
   inspect(next.setup_api_key, content="")
-  assert_false(next.wsl_enabled)
-  inspect(next.wsl_distro, content="")
-  inspect(next.wsl_engine, content="")
 }
 
 ///|
@@ -9596,9 +9533,6 @@ fn host_settings(
   provider~ : String,
   revision? : Int = 0,
   has_deepseek_key? : Bool = false,
-  wsl_enabled? : Bool = false,
-  wsl_distro? : String = "",
-  wsl_engine? : String = "",
 ) -> HostSettings {
   {
     revision,
@@ -9606,9 +9540,6 @@ fn host_settings(
     custom_api_url: "",
     has_deepseek_key,
     has_custom_key: false,
-    wsl_enabled,
-    wsl_distro,
-    wsl_engine,
   }
 }
 
@@ -9625,17 +9556,11 @@ test "host settings edits wait for the focused host snapshot" {
     deepseek_key_saved: true,
     setup_api_key: "old-device-key",
     host_settings_revision: -1,
-    wsl_enabled: true,
-    wsl_distro: "OldDistro",
-    wsl_engine: "/old/openseek",
   }
   let messages : Array[Msg] = [
     SetupApiKeyChanged("queued-key"),
     ProviderChanged("custom"),
     CustomApiUrlChanged("https://new.example/chat"),
-    WslModeChanged("native"),
-    WslDistroChanged("NewDistro"),
-    WslEngineChanged("/new/openseek"),
     SaveApiKey,
   ]
   for message in messages {
@@ -9645,16 +9570,10 @@ test "host settings edits wait for the focused host snapshot" {
     assert_eq(once.custom_api_url, loading.custom_api_url)
     assert_eq(once.setup_api_key, loading.setup_api_key)
     assert_eq(once.settings_saves, 0)
-    assert_eq(once.wsl_enabled, loading.wsl_enabled)
-    assert_eq(once.wsl_distro, loading.wsl_distro)
-    assert_eq(once.wsl_engine, loading.wsl_engine)
     assert_true(twice.api_provider == loading.api_provider)
     assert_eq(twice.custom_api_url, loading.custom_api_url)
     assert_eq(twice.setup_api_key, loading.setup_api_key)
     assert_eq(twice.settings_saves, 0)
-    assert_eq(twice.wsl_enabled, loading.wsl_enabled)
-    assert_eq(twice.wsl_distro, loading.wsl_distro)
-    assert_eq(twice.wsl_engine, loading.wsl_engine)
   }
 }
 
@@ -9685,22 +9604,13 @@ test "host settings open the settings page only when incomplete" {
   let (_, restored) = update_dev(
     dispatch,
     HostSettingsLoaded(
-      host_settings(
-        provider="deepseek",
-        has_deepseek_key=true,
-        wsl_enabled=true,
-        wsl_distro="Ubuntu",
-        wsl_engine="/usr/local/bin/openseek",
-      ),
+      host_settings(provider="deepseek", has_deepseek_key=true),
       connection_generation=None,
     ),
     test_model(),
   )
   assert_true(restored.screen is Chat)
   assert_true(restored.deepseek_key_saved)
-  inspect(restored.wsl_enabled, content="true")
-  inspect(restored.wsl_distro, content="Ubuntu")
-  inspect(restored.wsl_engine, content="/usr/local/bin/openseek")
 }
 
 ///|
@@ -9729,16 +9639,6 @@ test "a background device's pushes leave the focused mirrors alone" {
   )
   assert_true(settled.api_provider is Openseek)
   assert_true(settled.screen is Chat)
-  // host.meta from the background device: host_wsl stays the focused host's.
-  let (_, meta) = update(
-    dispatch,
-    FromDevice(background, HostMetaLoaded(wsl=true)),
-    model,
-  )
-  inspect(meta.host_wsl, content="false")
-  // The same push on the focused channel still applies.
-  let (_, focused_meta) = update_dev(dispatch, HostMetaLoaded(wsl=true), model)
-  inspect(focused_meta.host_wsl, content="true")
 }
 
 ///|
@@ -9827,9 +9727,6 @@ test "legacy client settings migrate up only from the desktop window" {
     custom_url="",
     api_key="sk-legacy",
     custom_api_key="",
-    wsl_enabled="1",
-    wsl_distro="Ubuntu",
-    wsl_engine="",
   )
   let (_, desktop) = update(dispatch, legacy, {
     ..test_model(),
@@ -9837,7 +9734,6 @@ test "legacy client settings migrate up only from the desktop window" {
   })
   assert_true(desktop.api_provider is Deepseek)
   assert_true(desktop.deepseek_key_saved)
-  inspect(desktop.wsl_distro, content="Ubuntu")
   inspect(desktop.settings_saves, content="1")
   assert_true(desktop.legacy_cleanup_pending)
   // A browser page only purges — its copy may belong to another device.

@@ -2002,25 +2002,6 @@ fn update_check_controls(
 }
 
 ///|
-
-///|
-fn wsl_select(
-  dispatch : @cmd.Emit[Msg],
-  enabled : Bool,
-  disabled~ : Bool,
-) -> @html.Html {
-  @html.select(
-    disabled~,
-    on_change=dispatch.map(value => WslModeChanged(value)),
-    attrs=@html.Attrs::build().aria_label("Engine environment"),
-    [
-      @html.option(value="native", selected=!enabled, "Windows (native)"),
-      @html.option(value="wsl", selected=enabled, "WSL"),
-    ],
-  )
-}
-
-///|
 fn provider_hint(provider : ApiProvider) -> String {
   match provider {
     Openseek => "Requests go through the OpenSeek service; no key needed."
@@ -2167,55 +2148,6 @@ fn settings_page(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
         ),
       ]),
     )
-  }
-  // WSL exists only on a Windows host (the host's capability from
-  // `host.meta`, not this page's platform); elsewhere the section would be
-  // dead weight.
-  if model.host_wsl {
-    let engine_rows : Array[@html.Html] = [
-      setting_row(
-        "Engine environment",
-        [wsl_select(dispatch, model.wsl_enabled, disabled=!settings_loaded)],
-        desc="WSL runs the agent engine inside the distro, so its shell and tools see the Linux environment. Conversations stay in the shared session store either way.",
-      ),
-    ]
-    if model.wsl_enabled {
-      engine_rows.push(
-        setting_row(
-          "WSL distro",
-          [
-            @html.input(
-              input_type=@html.InputType::Text,
-              value=model.wsl_distro,
-              placeholder="default distro",
-              on_input=dispatch.map(value => WslDistroChanged(value)),
-              attrs=@html.Attrs::build()
-                .aria_label("WSL distro")
-                .disabled(!settings_loaded),
-            ),
-          ],
-          desc="Blank uses the default distro.",
-        ),
-      )
-      engine_rows.push(
-        setting_row(
-          "Engine command in WSL",
-          [
-            @html.input(
-              input_type=@html.InputType::Text,
-              value=model.wsl_engine,
-              placeholder="bundled engine",
-              on_input=dispatch.map(value => WslEngineChanged(value)),
-              attrs=@html.Attrs::build()
-                .aria_label("Engine command in WSL")
-                .disabled(!settings_loaded),
-            ),
-          ],
-          desc="Blank runs the Linux engine bundled with the app, falling back to openseek on the distro's PATH.",
-        ),
-      )
-    }
-    groups.push(settings_group(icon_terminal, "Engine", engine_rows))
   }
   @html.section(class="settings-page", [
     @html.div(class="settings-page-inner", [

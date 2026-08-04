@@ -1,5 +1,5 @@
-// The host-owned engine endpoint settings: which provider runs use, its
-// credentials, and the WSL preference. They live in the host's runtime dir
+// The host-owned engine endpoint settings: which provider runs use and its
+// credentials. They live in the host's runtime dir
 // (`engine-settings.json`) — never in a client — so a browser page cannot
 // leak one host's key to another, and the desktop window and every remote
 // page see the same configuration. Clients edit them through the
@@ -19,7 +19,7 @@
 // - Saves are atomic: temp file + rename, 0600.
 
 ///|
-const EngineSettingsVersion = 1
+const EngineSettingsVersion = 2
 
 ///|
 const EngineSettingsFileName = "engine-settings.json"
@@ -91,9 +91,6 @@ priv struct EngineSettings {
   custom_api_url : String?
   deepseek_api_key : String?
   custom_api_key : String?
-  wsl_enabled : Bool
-  wsl_distro : String?
-  wsl_engine : String?
 }
 
 ///|
@@ -131,16 +128,6 @@ fn settings_text(fields : Map[String, Json], key : String) -> String? {
 
 ///|
 fn decode_settings(raw : Map[String, Json]) -> EngineSettings {
-  let (wsl_enabled, wsl_distro, wsl_engine) = if raw.get("wsl")
-    is Some(Object(wsl)) {
-    (
-      wsl.get("enabled") is Some(True),
-      settings_text(wsl, "distro"),
-      settings_text(wsl, "engine"),
-    )
-  } else {
-    (false, None, None)
-  }
   {
     raw,
     // Missing reads as 1: version stamping arrived with the first format,
@@ -155,30 +142,18 @@ fn decode_settings(raw : Map[String, Json]) -> EngineSettings {
     custom_api_url: settings_text(raw, "custom_api_url"),
     deepseek_api_key: settings_text(raw, "deepseek_api_key"),
     custom_api_key: settings_text(raw, "custom_api_key"),
-    wsl_enabled,
-    wsl_distro,
-    wsl_engine,
   }
 }
 
 ///|
 /// One `settings.set` request, decoded by the transport layer. Every field
 /// is optional: absent = leave unchanged. A present string field is
-/// trimmed; empty after trimming clears the stored value. A present `wsl`
-/// replaces the whole WSL group.
+/// trimmed; empty after trimming clears the stored value.
 pub(all) struct SettingsPatch {
   provider : String?
   custom_api_url : String?
   deepseek_api_key : String?
   custom_api_key : String?
-  wsl : WslPatch?
-}
-
-///|
-pub(all) struct WslPatch {
-  enabled : Bool
-  distro : String?
-  engine : String?
 }
 
 ///|
@@ -195,15 +170,6 @@ fn settings_status_json(settings : EngineSettings, revision : Int) -> Json {
     settings.deepseek_api_key is Some(_),
   )
   status["has_custom_key"] = Json::boolean(settings.custom_api_key is Some(_))
-  let wsl : Map[String, Json] = Map([])
-  wsl["enabled"] = Json::boolean(settings.wsl_enabled)
-  if settings.wsl_distro is Some(distro) {
-    wsl["distro"] = Json::string(distro)
-  }
-  if settings.wsl_engine is Some(engine) {
-    wsl["engine"] = Json::string(engine)
-  }
-  status["wsl"] = Json::object(wsl)
   Json::object(status)
 }
 
@@ -256,8 +222,7 @@ pub async fn update_settings(
     raw.get("provider") is Some(_) ||
     raw.get("custom_api_url") is Some(_) ||
     raw.get("deepseek_api_key") is Some(_) ||
-    raw.get("custom_api_key") is Some(_) ||
-    raw.get("wsl") is Some(_)
+    raw.get("custom_api_key") is Some(_)
   if legacy_migration && store_claimed {
     return settings_status_json(current, manager.settings_revision)
   }
@@ -270,13 +235,9 @@ pub async fn update_settings(
   apply_text_patch(raw, "custom_api_url", patch.custom_api_url)
   apply_text_patch(raw, "deepseek_api_key", patch.deepseek_api_key)
   apply_text_patch(raw, "custom_api_key", patch.custom_api_key)
-  if patch.wsl is Some(wsl) {
-    let group : Map[String, Json] = Map([])
-    group["enabled"] = Json::boolean(wsl.enabled)
-    apply_text_patch(group, "distro", wsl.distro)
-    apply_text_patch(group, "engine", wsl.engine)
-    raw["wsl"] = Json::object(group)
-  }
+  // Version 2 retired the WSL engine mode. A settings write also removes the
+  // old group so the durable file no longer advertises an ignored capability.
+  raw.remove("wsl")
   raw[LegacyMigrationFence] = Json::boolean(true)
   raw["version"] = Json::number(EngineSettingsVersion.to_double())
   write_settings_file(dir, Json::object(raw).stringify(indent=2))
@@ -424,18 +385,6 @@ pub async fn remote_server_base(manager : EngineManager) -> String? {
   proxy.strip_suffix("/chat/completions").map(origin => origin.to_owned())
 }
 
-///|
-/// The WSL request the settings imply. On a host without WSL a stored
-/// preference (say, a profile copied from a Windows machine) degrades to
-/// the native engine instead of failing every run.
-fn settings_wsl_request(settings : EngineSettings) -> WslRequest? {
-  if settings.wsl_enabled && WslSupported {
-    Some({ distro: settings.wsl_distro, engine: settings.wsl_engine })
-  } else {
-    None
-  }
-}
-
 // The settings store's contract: tolerant reads, merge-preserving atomic
 // writes, the version guard, and the run-config resolution built on it.
 
@@ -463,13 +412,11 @@ async test "missing settings read as the zero-config defaults" {
     let settings = load_engine_settings(manager.runtime_dir)
     assert_true(settings.provider is Openseek)
     assert_true(settings.deepseek_api_key is None)
-    assert_false(settings.wsl_enabled)
     json_inspect(settings_status(manager), content={
       "revision": 0,
       "provider": "openseek",
       "has_deepseek_key": false,
       "has_custom_key": false,
-      "wsl": { "enabled": false },
     })
   })
 }
@@ -482,14 +429,12 @@ async test "a saved key round-trips as presence, never as text" {
       custom_api_url: None,
       deepseek_api_key: Some("  sk-secret  "),
       custom_api_key: None,
-      wsl: None,
     })
     json_inspect(status, content={
       "revision": 1,
       "provider": "deepseek",
       "has_deepseek_key": true,
       "has_custom_key": false,
-      "wsl": { "enabled": false },
     })
     // The status never carries the key; the file carries it trimmed.
     assert_false(status.stringify().contains("sk-secret"))
@@ -509,14 +454,12 @@ async test "the staging server round-trips and resolves its own endpoints" {
       custom_api_url: None,
       deepseek_api_key: None,
       custom_api_key: None,
-      wsl: None,
     })
     json_inspect(status, content={
       "revision": 1,
       "provider": "openseek-staging",
       "has_deepseek_key": false,
       "has_custom_key": false,
-      "wsl": { "enabled": false },
     })
     let reloaded = load_engine_settings(manager.runtime_dir)
     assert_true(reloaded.provider is OpenseekStaging)
@@ -529,7 +472,6 @@ async test "the staging server round-trips and resolves its own endpoints" {
       custom_api_url: None,
       deepseek_api_key: None,
       custom_api_key: None,
-      wsl: None,
     })
     debug_inspect(remote_server_base(manager), content="None")
   })
@@ -543,22 +485,43 @@ async test "a present-but-blank field clears the stored value" {
       custom_api_url: Some("https://proxy.example/chat/completions"),
       deepseek_api_key: None,
       custom_api_key: Some("sk-custom"),
-      wsl: None,
     })
     let status = update_settings(manager, {
       provider: None,
       custom_api_url: Some("   "),
       deepseek_api_key: None,
       custom_api_key: Some(""),
-      wsl: None,
     })
     json_inspect(status, content={
       "revision": 2,
       "provider": "custom",
       "has_deepseek_key": false,
       "has_custom_key": false,
-      "wsl": { "enabled": false },
     })
+  })
+}
+
+///|
+async test "a save removes the retired WSL settings group" {
+  with_settings_dir(async fn(dir, manager) {
+    @fsx.write_text(
+      settings_file(dir),
+      "{\"version\": 1, \"provider\": \"deepseek\", \"wsl\": {\"enabled\": true, \"distro\": \"Ubuntu\"}}",
+    )
+    let _ = update_settings(manager, {
+      provider: None,
+      custom_api_url: None,
+      deepseek_api_key: Some("sk-kept"),
+      custom_api_key: None,
+    })
+    guard @json.parse(@fsx.read_text(settings_file(dir))) is Object(fields) else {
+      fail("settings file is not valid JSON")
+    }
+    assert_true(fields.get("wsl") is None)
+    assert_true(
+      fields.get("version") is Some(Number(version, ..)) &&
+      version.to_int() == 2,
+    )
   })
 }
 
@@ -572,7 +535,6 @@ async test "legacy migration cannot replay over a newer settings write" {
         custom_api_url: None,
         deepseek_api_key: Some("sk-old"),
         custom_api_key: None,
-        wsl: None,
       },
       legacy_migration=true,
     )
@@ -582,7 +544,6 @@ async test "legacy migration cannot replay over a newer settings write" {
       custom_api_url: Some("https://new.example/chat"),
       deepseek_api_key: Some(""),
       custom_api_key: Some("sk-new"),
-      wsl: None,
     })
     assert_eq(settings_revision(modern), 2)
     // This is the desktop retry after the first migration's reply was lost.
@@ -595,7 +556,6 @@ async test "legacy migration cannot replay over a newer settings write" {
         custom_api_url: None,
         deepseek_api_key: Some("sk-old"),
         custom_api_key: None,
-        wsl: None,
       },
       legacy_migration=true,
     )
@@ -635,25 +595,19 @@ async test "concurrent disjoint settings patches merge and publish in revision o
             custom_api_url: None,
             deepseek_api_key: Some("sk-concurrent"),
             custom_api_key: None,
-            wsl: None,
           },
           on_committed=fn(status) { committed.push(settings_revision(status)) },
         )
       })
-      let wsl = group.spawn(() => {
+      let custom = group.spawn(() => {
         ready.put(())
         update_settings(
           manager,
           {
             provider: None,
-            custom_api_url: None,
+            custom_api_url: Some("https://custom.example/chat"),
             deepseek_api_key: None,
-            custom_api_key: None,
-            wsl: Some({
-              enabled: true,
-              distro: Some("Ubuntu"),
-              engine: Some("/usr/bin/openseek"),
-            }),
+            custom_api_key: Some("sk-custom"),
           },
           on_committed=fn(status) { committed.push(settings_revision(status)) },
         )
@@ -662,10 +616,10 @@ async test "concurrent disjoint settings patches merge and publish in revision o
       ready.get()
       manager.settings_lock.release()
       let endpoint_status = endpoint.wait()
-      let wsl_status = wsl.wait()
+      let custom_status = custom.wait()
       let revisions = [
         settings_revision(endpoint_status),
-        settings_revision(wsl_status),
+        settings_revision(custom_status),
       ]
       revisions.sort()
       assert_eq(revisions, [1, 2])
@@ -677,11 +631,11 @@ async test "concurrent disjoint settings patches merge and publish in revision o
     }
     assert_true(fields.get("provider") is Some(String("deepseek")))
     assert_true(fields.get("deepseek_api_key") is Some(String("sk-concurrent")))
-    guard fields.get("wsl") is Some(Object(wsl)) else {
-      fail("concurrent WSL patch was lost")
-    }
-    assert_true(wsl.get("enabled") is Some(True))
-    assert_true(wsl.get("distro") is Some(String("Ubuntu")))
+    assert_true(
+      fields.get("custom_api_url")
+      is Some(String("https://custom.example/chat")),
+    )
+    assert_true(fields.get("custom_api_key") is Some(String("sk-custom")))
     // Revision is a host-process epoch, not a persistence-format change.
     assert_true(fields.get("revision") is None)
     assert_eq(settings_revision(settings_status(manager)), 2)
@@ -700,7 +654,6 @@ async test "saves preserve fields a newer build added" {
       custom_api_url: None,
       deepseek_api_key: Some("sk-new"),
       custom_api_key: None,
-      wsl: None,
     })
     let text = @fsx.read_text(settings_file(dir))
     assert_true(text.contains("\"future_field\""))
@@ -730,7 +683,6 @@ async test "a newer-version file is read best-effort but never rewritten" {
         custom_api_url: None,
         deepseek_api_key: None,
         custom_api_key: None,
-        wsl: None,
       })
     catch {
       EngineError(message) => message
@@ -753,7 +705,6 @@ async test "an unknown provider is refused on write, defaulted on read" {
         custom_api_url: None,
         deepseek_api_key: None,
         custom_api_key: None,
-        wsl: None,
       })
     catch {
       EngineError(message) => message
@@ -787,7 +738,6 @@ async test "run config resolves the endpoint from the stored provider" {
       custom_api_url: None,
       deepseek_api_key: Some("sk-stored"),
       custom_api_key: None,
-      wsl: None,
     })
     let config = run_config(manager, {
       task: "hello",
@@ -805,7 +755,6 @@ async test "run config resolves the endpoint from the stored provider" {
       custom_api_url: Some("https://proxy.example/chat/completions"),
       deepseek_api_key: None,
       custom_api_key: None,
-      wsl: None,
     })
     let custom = run_config(manager, {
       task: "hello",
@@ -832,7 +781,6 @@ async test "a custom provider without a URL refuses to start" {
       custom_api_url: None,
       deepseek_api_key: None,
       custom_api_key: None,
-      wsl: None,
     })
     let refused = try
       run_config(manager, {

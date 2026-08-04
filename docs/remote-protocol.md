@@ -235,7 +235,7 @@ echoes.
 
 | method | params | result |
 |---|---|---|
-| `agent.start` | `{task, submission_id?, model?, max_steps?, session?, workspace?}` — no credentials, WSL preference, or store path: the host resolves settings and durable placement; `workspace` is honored only when registered | `{run_id, status, …}` — `accepted` after the complete prompt command is written; a post-`started` write failure returns `failed`, while pre-`started` failures use the error response |
+| `agent.start` | `{task, submission_id?, model?, max_steps?, session?, workspace?}` — no credentials or store path: the host resolves settings and durable placement; `workspace` is honored only when registered | `{run_id, status, …}` — `accepted` after the complete prompt command is written; a post-`started` write failure returns `failed`, while pre-`started` failures use the error response |
 | `agent.cancel` | `{run_id?}` (absent = the latest run) | cancel outcome |
 | `agent.steer` | `{text, run_id?, submission_id?}` | steer outcome |
 | `agent.compact` | `{session, model?, max_steps?, workspace?}` — `agent.start` minus `task`: a conversation resumed after a restart has no live process, and compacting spawns one with these settings | compaction outcome |
@@ -329,9 +329,9 @@ has opened the same run.
 
 ### settings.* — the host-owned engine endpoint settings
 
-The server selection, its credentials, and the WSL preference live on the
-**host** (`engine-settings.json` in its runtime dir, versioned, 0600) —
-never in a client. Clients edit them here and consume them as status; key
+The server selection and its credentials live on the **host**
+(`engine-settings.json` in its runtime dir, versioned, 0600) — never in a
+client. Clients edit them here and consume them as status; key
 material never travels down the wire, only presence. Runs read the store
 at config time, so a change replaces the conversation's engine process on
 its next start.
@@ -346,7 +346,7 @@ session's server signs that session out (`auth.changed` follows).
 | method | params | result |
 |---|---|---|
 | `settings.get` | `{}` | the status shape below |
-| `settings.set` | `{provider?, custom_api_url?, deepseek_api_key?, custom_api_key?, wsl?: {enabled, distro?, engine?}, legacy_migration?}` — absent fields stay unchanged; a present string field is trimmed and, when empty, **clears** the stored value; a present `wsl` replaces the whole group; an unknown `provider` is refused. `legacy_migration:true` is reserved for the bundled desktop's one-time import: once any settings write has claimed the durable store, a replay is acknowledged without changing it. | the status shape below, post-write |
+| `settings.set` | `{provider?, custom_api_url?, deepseek_api_key?, custom_api_key?, legacy_migration?}` — absent fields stay unchanged; a present string field is trimmed and, when empty, **clears** the stored value; an unknown `provider` is refused. `legacy_migration:true` is reserved for the bundled desktop's one-time import: once any settings write has claimed the durable store, a replay is acknowledged without changing it. | the status shape below, post-write |
 
 The status shape, also the params of every `settings.changed` notification:
 
@@ -356,8 +356,7 @@ The status shape, also the params of every `settings.changed` notification:
   "provider": "openseek" | "openseek-staging" | "deepseek" | "custom",
   "custom_api_url": "https://…",   // absent when unset
   "has_deepseek_key": false,       // presence only — the key text never leaves the host
-  "has_custom_key": false,
-  "wsl": {"enabled": false, "distro": "…", "engine": "…"}  // distro/engine absent when unset
+  "has_custom_key": false
 }
 ```
 
@@ -569,7 +568,6 @@ Notification:
 | `app.list` | `{}` | `{apps: [{id, name, icon}]}` — `icon` is a `data:image/png` URL, empty when extraction failed |
 | `app.launch` | `{session, cwd?, app}` | `{launched}` |
 | `host.open_path` | `{session, cwd?, path}` | `{opened}` — hand a transcript-referenced path to the system opener; relative paths resolve against the conversation's working directory (`cwd` when the client has it, else derived from `session`); deliberately no workspace containment — the user clicked a path the agent itself surfaced |
-| `host.meta` | `{}` | `{protocol: 2, name, wsl}` — `wsl` is whether the **host** can run the engine inside WSL (a Windows host); clients must consume this rather than sniff their own user agent, since the page may run on any device |
 
 Reserved notification (not yet emitted over the wire):
 `host.notification_clicked` `{session}` — a system notification was clicked.

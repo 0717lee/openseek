@@ -107,12 +107,6 @@ pub impl Show for PackageError with fn output(self, logger) {
 struct Workspace {
   // Absolute, normalized path to the desktop workspace directory.
   root : String
-  // Whether the packager was invoked from the monorepo root (so the workspace
-  // is the `desktop` subdirectory) rather than from inside the desktop
-  // directory. The WSL engine build inherits the packager's working directory,
-  // not an absolute path, so it needs this to decide whether to climb to the
-  // repo root.
-  invoked_from_repo_root : Bool
 }
 
 ///|
@@ -123,10 +117,7 @@ pub async fn locate_workspace() -> Workspace {
   for candidate in [".", "desktop"] {
     if @asyncfs.exists(candidate + "/moon.mod") &&
       @asyncfs.exists(candidate + "/frontend") {
-      return {
-        root: absolute_path(candidate),
-        invoked_from_repo_root: candidate == "desktop",
-      }
+      return { root: absolute_path(candidate) }
     }
   }
   raise PackageError(
@@ -138,14 +129,6 @@ pub async fn locate_workspace() -> Workspace {
 /// Return the absolute desktop workspace directory.
 pub fn Workspace::dir(self : Workspace) -> String {
   self.root
-}
-
-///|
-/// Whether the packager was invoked from the monorepo root (the workspace is
-/// the `desktop` subdirectory). The WSL engine build inherits the packager's
-/// working directory and uses this to know whether to climb to the repo root.
-pub fn Workspace::invoked_from_repo_root(self : Workspace) -> Bool {
-  self.invoked_from_repo_root
 }
 
 ///|
@@ -752,30 +735,22 @@ pub async fn remove_path_if_exists(path : String) -> Unit {
 /// absolute and independent of any later working-directory change. These pin
 /// the join/parent math the packagers rely on.
 test "workspace derives absolute paths from an absolute root" {
-  let ws : Workspace = {
-    root: "/abs/repo/desktop",
-    invoked_from_repo_root: true,
-  }
+  let ws : Workspace = { root: "/abs/repo/desktop" }
   assert_eq(ws.dir(), "/abs/repo/desktop")
   assert_eq(ws.at("dist/app"), "/abs/repo/desktop/dist/app")
   assert_eq(ws.repo(), "/abs/repo")
   assert_eq(ws.repo_at("cmd/openseek"), "/abs/repo/cmd/openseek")
-  assert_true(ws.invoked_from_repo_root())
 }
 
 ///|
 // The bundle names carry no spaces, but a checkout path still can, so the
 // space this pins is in the workspace root.
 test "workspace path join preserves spaces and nested segments" {
-  let ws : Workspace = {
-    root: "/My Checkouts/w",
-    invoked_from_repo_root: false,
-  }
+  let ws : Workspace = { root: "/My Checkouts/w" }
   assert_eq(
     ws.at("dist/SeekMoon.app/Contents/Resources/toolchains/moonbit/macos-arm64"),
     "/My Checkouts/w/dist/SeekMoon.app/Contents/Resources/toolchains/moonbit/macos-arm64",
   )
-  assert_false(ws.invoked_from_repo_root())
 }
 
 ///|

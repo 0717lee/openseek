@@ -563,7 +563,6 @@ test "a refreshed roster retires revoked devices and refocuses a survivor" {
     ..listed.replace_conversation(
       empty_conversation(@interop.ChannelId::Remote("d_a"), "s1"),
     ),
-    host_wsl: true,
     api_provider: Custom,
     custom_api_url: "https://old.example/chat",
     deepseek_key_saved: true,
@@ -577,14 +576,8 @@ test "a refreshed roster retires revoked devices and refocuses a survivor" {
       custom_api_url: "",
       has_deepseek_key: true,
       has_custom_key: false,
-      wsl_enabled: false,
-      wsl_distro: "",
-      wsl_engine: "",
     }),
     legacy_cleanup_pending: true,
-    wsl_enabled: true,
-    wsl_distro: "OldDistro",
-    wsl_engine: "/old/openseek",
     installed_skills: [
       {
         id: "old-host",
@@ -604,7 +597,6 @@ test "a refreshed roster retires revoked devices and refocuses a survivor" {
   )
   assert_true(refreshed.focused == Remote("d_b"))
   assert_true(refreshed.device_state(Remote("d_a")) is None)
-  assert_false(refreshed.host_wsl)
   assert_eq(refreshed.installed_skills.length(), 0)
   assert_true(refreshed.api_provider is Openseek)
   inspect(refreshed.custom_api_url, content="")
@@ -615,9 +607,6 @@ test "a refreshed roster retires revoked devices and refocuses a survivor" {
   inspect(refreshed.host_settings_revision, content="-1")
   assert_true(refreshed.deferred_host_settings is None)
   assert_false(refreshed.legacy_cleanup_pending)
-  assert_false(refreshed.wsl_enabled)
-  inspect(refreshed.wsl_distro, content="")
-  inspect(refreshed.wsl_engine, content="")
   inspect(
     refreshed.conversations
     .iter()
@@ -688,19 +677,27 @@ test "opening another device's session moves focus and resets the mirrors" {
     ..listed.replace_conversation(
       empty_conversation(@interop.ChannelId::Remote("d_b"), "s-b"),
     ),
-    host_wsl: true,
+    api_provider: Custom,
+    custom_api_url: "https://old.example/chat",
+    host_settings_revision: 7,
   }
   let (_, opened) = update(dispatch, OpenSession(Remote("d_b"), "s-b"), seeded)
   assert_true(opened.focused == Remote("d_b"))
   inspect(opened.active_session, content="s-b")
   // The focused-scoped mirror reset rode the switch.
-  inspect(opened.host_wsl, content="false")
+  assert_true(opened.api_provider is Openseek)
+  inspect(opened.custom_api_url, content="")
+  inspect(opened.host_settings_revision, content="-1")
   // Re-opening on the already-focused device leaves the mirrors alone.
   let (_, again) = update(dispatch, OpenSession(Remote("d_b"), "s-b"), {
     ..opened,
-    host_wsl: true,
+    api_provider: Custom,
+    custom_api_url: "https://kept.example/chat",
+    host_settings_revision: 8,
   })
-  inspect(again.host_wsl, content="true")
+  assert_true(again.api_provider is Custom)
+  inspect(again.custom_api_url, content="https://kept.example/chat")
+  inspect(again.host_settings_revision, content="8")
 }
 
 ///|
