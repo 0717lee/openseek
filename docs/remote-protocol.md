@@ -551,8 +551,16 @@ never calls them and shows no update UI.
 | method | params | result |
 |---|---|---|
 | `update.check` | `{channel?}` (anything but `"staging"` reads as production) | `{kind: "up_to_date" \| "available" \| "unreachable" \| "malformed" \| "broken", …}` |
-| `update.download` | `{channel?}` | staging outcome |
+| `update.download` | `{channel?}` | `{accepted: true}` — starts app-lifetime download/verification work and returns without waiting for it |
 | `update.apply` | `{}` | `{applied}` — the bundle swap succeeded and the window may close |
+
+Notification:
+
+| method | params |
+|---|---|
+| `update.download_progress` | `{downloaded_bytes, total_bytes}` — bytes received for the active package; `total_bytes` is a positive byte count when the response supplies a usable `Content-Length`, otherwise `null` |
+| `update.downloaded` | `{version}` — the package is verified and staged; the desktop may call `update.apply` |
+| `update.download_failed` | `{message}` — the background download, verification, or staging step failed |
 
 ### app.* / host.*
 

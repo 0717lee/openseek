@@ -761,7 +761,7 @@ fn sidebar_footer_buttons(
   let update_label : String? = match model.update_ux {
     UpdateAvailable(installable=true, ..) | ConfirmingRestart(..) =>
       Some("Update")
-    DownloadingUpdate(..) => Some("Downloading…")
+    DownloadingUpdate(progress~, ..) => Some(progress.sidebar_label())
     RestartingForUpdate(..) => Some("Restarting…")
     _ => None
   }
@@ -1966,10 +1966,22 @@ fn update_check_controls(
       // The interrupt modal is up over this row; keep the button visible
       // behind it so the row does not blink while the user decides.
       controls.push(@html.button(class="primary", "Update to \{version}"))
-    DownloadingUpdate(version~) =>
+    DownloadingUpdate(version~, progress~) => {
+      let (fill_class, fill_style) = match progress.percentage() {
+        Some(percent) => ("update-progress-fill", ["width: \{percent}%"])
+        None => ("update-progress-fill indeterminate", [])
+      }
       controls.push(
-        @html.span(class="update-status", "Downloading \{version}…"),
+        @html.div(class="update-progress", [
+          @html.span(class="update-status", progress.status_text(version)),
+          // A CSS div keeps this available on the current Rabbita element
+          // surface; the adjacent text is the accessible progress value.
+          @html.div(class="update-progress-track", [
+            @html.div(class=fill_class, style=fill_style, ""),
+          ]),
+        ]),
       )
+    }
     RestartingForUpdate(version~) =>
       controls.push(
         @html.span(class="update-status", "Restarting into \{version}…"),

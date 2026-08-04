@@ -1409,7 +1409,13 @@ fn update_msg(
         } else {
           (
             download_update(dispatch, model.api_provider.update_channel()),
-            { ..model, update_ux: DownloadingUpdate(version~) },
+            {
+              ..model,
+              update_ux: DownloadingUpdate(version~, progress={
+                downloaded_bytes: 0,
+                total_bytes: None,
+              }),
+            },
           )
         }
       } else {
@@ -1419,7 +1425,13 @@ fn update_msg(
       if model.update_ux is ConfirmingRestart(version~) {
         (
           download_update(dispatch, model.api_provider.update_channel()),
-          { ..model, update_ux: DownloadingUpdate(version~) },
+          {
+            ..model,
+            update_ux: DownloadingUpdate(version~, progress={
+              downloaded_bytes: 0,
+              total_bytes: None,
+            }),
+          },
         )
       } else {
         (@cmd.none, model)
@@ -1433,8 +1445,25 @@ fn update_msg(
       } else {
         (@cmd.none, model)
       }
+    UpdateDownloadProgress(downloaded_bytes~, total_bytes~) =>
+      if model.update_ux is DownloadingUpdate(version~, ..) {
+        (
+          @cmd.none,
+          {
+            ..model,
+            update_ux: DownloadingUpdate(version~, progress={
+              downloaded_bytes,
+              total_bytes,
+            }),
+          },
+        )
+      } else {
+        // A late event must not revive a completed, failed, or never-started
+        // download after the UI has moved to another state.
+        (@cmd.none, model)
+      }
     UpdateDownloaded =>
-      if model.update_ux is DownloadingUpdate(version~) {
+      if model.update_ux is DownloadingUpdate(version~, ..) {
         (
           apply_update(dispatch),
           { ..model, update_ux: RestartingForUpdate(version~) },
@@ -1448,7 +1477,7 @@ fn update_msg(
       // button until a fresh check says otherwise. Both failures say why.
       let (cmd, next) = model.notify_error(dispatch, message)
       let update_ux = match next.update_ux {
-        DownloadingUpdate(version~) =>
+        DownloadingUpdate(version~, ..) =>
           UpdateAvailable(version~, installable=true)
         RestartingForUpdate(version~) =>
           UpdateAvailable(version~, installable=false)
@@ -11397,9 +11426,23 @@ test "clicking Update goes straight to download when nothing runs" {
     update_ux: UpdateAvailable(version="0.2.0", installable=true),
   }
   let (_, clicked) = update(dispatch, UpdateClicked, available)
-  assert_true(clicked.update_ux is DownloadingUpdate(version="0.2.0"))
+  assert_true(clicked.update_ux is DownloadingUpdate(version="0.2.0", ..))
+  let progress = UpdateDownloadProgress(
+    downloaded_bytes=42,
+    total_bytes=Some(100),
+  )
+  let (_, progressed) = update(dispatch, progress, clicked)
+  let (_, replayed) = update(dispatch, progress, clicked)
+  assert_true(progressed.update_ux == replayed.update_ux)
+  assert_true(
+    progressed.update_ux
+    is DownloadingUpdate(
+      version="0.2.0",
+      progress={ downloaded_bytes: 42, total_bytes: Some(100) }
+    ),
+  )
   // Downloaded hands off to apply and marks the restart.
-  let (_, done) = update(dispatch, UpdateDownloaded, clicked)
+  let (_, done) = update(dispatch, UpdateDownloaded, progressed)
   assert_true(done.update_ux is RestartingForUpdate(version="0.2.0"))
 }
 
@@ -11421,7 +11464,7 @@ test "clicking Update asks first while a conversation runs" {
     kept.update_ux is UpdateAvailable(version="0.2.0", installable=true),
   )
   let (_, confirmed) = update(dispatch, ConfirmUpdateRestart, asked)
-  assert_true(confirmed.update_ux is DownloadingUpdate(version="0.2.0"))
+  assert_true(confirmed.update_ux is DownloadingUpdate(version="0.2.0", ..))
 }
 
 ///|
@@ -11429,7 +11472,10 @@ test "a failed download says why and restores the offer" {
   let dispatch = test_dispatch()
   let downloading = {
     ..test_model(),
-    update_ux: DownloadingUpdate(version="0.2.0"),
+    update_ux: DownloadingUpdate(version="0.2.0", progress={
+      downloaded_bytes: 42,
+      total_bytes: Some(100),
+    }),
   }
   let (_, failed) = update(
     dispatch,
@@ -11468,14 +11514,31 @@ test "a stale check reply cannot clobber a download in flight" {
   let dispatch = test_dispatch()
   let downloading = {
     ..test_model(),
-    update_ux: DownloadingUpdate(version="0.2.0"),
+    update_ux: DownloadingUpdate(version="0.2.0", progress={
+      downloaded_bytes: 42,
+      total_bytes: Some(100),
+    }),
   }
   let (_, next) = update(
     dispatch,
     UpdateCheckFinished(result=CheckUpToDate, explicit=false),
     downloading,
   )
-  assert_true(next.update_ux is DownloadingUpdate(version="0.2.0"))
+  assert_true(next.update_ux is DownloadingUpdate(version="0.2.0", ..))
+}
+
+///|
+test "late update progress cannot revive an available release" {
+  let dispatch = test_dispatch()
+  let available = {
+    ..test_model(),
+    update_ux: UpdateAvailable(version="0.2.0", installable=true),
+  }
+  let msg = UpdateDownloadProgress(downloaded_bytes=42, total_bytes=Some(100))
+  let (_, first) = update(dispatch, msg, available)
+  let (_, replayed) = update(dispatch, msg, available)
+  assert_true(first.update_ux == available.update_ux)
+  assert_true(replayed.update_ux == available.update_ux)
 }
 
 ///|

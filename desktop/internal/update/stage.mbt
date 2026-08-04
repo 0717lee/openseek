@@ -38,10 +38,15 @@ fn staging_dir(work_dir : String) -> String {
 /// its digest, code signature, and notarization, and return the staged bundle.
 /// The running bundle must be signed by a real team (an ad-hoc dev build never
 /// self-updates), and the staged bundle must be signed by the same one.
+/// During the archive read, `on_progress(downloaded_bytes, total_bytes)` runs
+/// inline with throttled byte counts; `total_bytes` is absent when the response
+/// has no usable Content-Length. The download waits for this async callback, so
+/// callback errors or cancellation stop staging.
 pub async fn stage_update(
   info : UpdateInfo,
   work_dir~ : String,
   bundle_path~ : String,
+  on_progress~ : async (Int, Int?) -> Unit,
 ) -> StagedUpdate {
   guard info.artifact is Some(artifact) else {
     raise UpdateError("the manifest carries no package for this platform")
@@ -53,7 +58,7 @@ pub async fn stage_update(
   remove_tree(staging)
   @fs.mkdir(staging, recursive=true)
   let archive = "\{staging}/package.zip"
-  download(artifact.url, archive)
+  download(artifact.url, archive, on_progress)
   verify_digest(archive, artifact.sha256)
   let extract_dir = "\{staging}/extract"
   run_tool("ditto", ["-x", "-k", archive, extract_dir])
@@ -73,15 +78,58 @@ pub async fn stage_update(
 }
 
 ///|
-async fn download(url : String, destination : String) -> Unit {
-  let (response, data) = @http.get(url) catch {
+async fn download(
+  url : String,
+  destination : String,
+  on_progress : async (Int, Int?) -> Unit,
+) -> Unit {
+  // Force an identity response so Content-Length describes the exact bytes
+  // written to the archive, even if an intermediary normally compresses it.
+  let (response, client) = @http.get_stream(url, headers={
+    "Accept-Encoding": "identity",
+  }) catch {
     error if @async.is_being_cancelled() => raise error
     error => raise UpdateError("update download failed: \{error}")
   }
+  defer client.close()
   guard response.code == 200 else {
     raise UpdateError("update download returned HTTP \{response.code}")
   }
-  @fs.write_file(destination, data, create_mode=CreateOrTruncate)
+  let total_bytes = match response.headers.get("content-length") {
+    Some(raw) => {
+      let parsed = @string.parse_int(raw.trim(), base=10) catch { _ => 0 }
+      if parsed > 0 {
+        Some(parsed)
+      } else {
+        None
+      }
+    }
+    None => None
+  }
+  let output = @fs.open(
+    destination,
+    mode=WriteOnly,
+    create_mode=CreateOrTruncate,
+  )
+  defer output.close()
+  // Progress starts as soon as the response headers arrive, then advances in
+  // MiB steps — the page derives percentages from the byte counts. This
+  // bounds host/UI traffic for large files.
+  on_progress(0, total_bytes)
+  let mut downloaded_bytes = 0
+  let mut reported_bytes = 0
+  while client.read_some(max_len=256 * 1024) is Some(chunk) {
+    output.write(chunk)
+    downloaded_bytes += chunk.length()
+    if downloaded_bytes - reported_bytes >= 1024 * 1024 {
+      on_progress(downloaded_bytes, total_bytes)
+      reported_bytes = downloaded_bytes
+    }
+  }
+  // A short final chunk may not cross the next MiB step.
+  if downloaded_bytes != reported_bytes {
+    on_progress(downloaded_bytes, total_bytes)
+  }
 }
 
 ///|

@@ -22,6 +22,76 @@ fn UpdateChannel::wire(self : UpdateChannel) -> String {
 }
 
 ///|
+/// Byte progress for the package currently being downloaded. The total is
+/// optional because HTTP permits responses without Content-Length.
+priv struct UpdateDownloadProgress {
+  downloaded_bytes : Int
+  total_bytes : Int?
+} derive(Eq)
+
+///|
+fn UpdateDownloadProgress::percentage(self : UpdateDownloadProgress) -> Int? {
+  match self.total_bytes {
+    Some(total) if total > 0 =>
+      Some(
+        @cmp.minimum(
+          100,
+          (self.downloaded_bytes.to_double() * 100.0 / total.to_double()).to_int(),
+        ),
+      )
+    _ => None
+  }
+}
+
+///|
+fn UpdateDownloadProgress::status_text(
+  self : UpdateDownloadProgress,
+  version : String,
+) -> String {
+  match (self.percentage(), self.total_bytes) {
+    (Some(percent), Some(total)) => {
+      let downloaded_mb = self.downloaded_bytes / (1024 * 1024)
+      let total_mb = @cmp.maximum(1, total / (1024 * 1024))
+      "Downloading \{version}… \{percent}% (\{downloaded_mb} / \{total_mb} MB)"
+    }
+    _ if self.downloaded_bytes > 0 =>
+      "Downloading \{version}… \{self.downloaded_bytes / (1024 * 1024)} MB"
+    _ => "Downloading \{version}…"
+  }
+}
+
+///|
+fn UpdateDownloadProgress::sidebar_label(
+  self : UpdateDownloadProgress,
+) -> String {
+  match self.percentage() {
+    Some(percent) => "Downloading \{percent}%"
+    None => "Downloading…"
+  }
+}
+
+///|
+test "update download progress labels known and unknown totals" {
+  let known : UpdateDownloadProgress = {
+    downloaded_bytes: 50 * 1024 * 1024,
+    total_bytes: Some(100 * 1024 * 1024),
+  }
+  assert_eq(known.percentage(), Some(50))
+  assert_eq(known.sidebar_label(), "Downloading 50%")
+  assert_eq(
+    known.status_text("0.2.0"),
+    "Downloading 0.2.0… 50% (50 / 100 MB)",
+  )
+  let unknown : UpdateDownloadProgress = {
+    downloaded_bytes: 3 * 1024 * 1024,
+    total_bytes: None,
+  }
+  assert_eq(unknown.percentage(), None)
+  assert_eq(unknown.sidebar_label(), "Downloading…")
+  assert_eq(unknown.status_text("0.2.0"), "Downloading 0.2.0… 3 MB")
+}
+
+///|
 /// Where the self-update flow stands. Who asked (the user from Settings or
 /// the app at startup) travels with the request instead — `explicit` on
 /// `UpdateCheckFinished` — since it is a property of the reply's routing,
@@ -35,7 +105,7 @@ priv enum UpdateUx {
   UpdateAvailable(version~ : String, installable~ : Bool)
   // The modal asking to interrupt running conversations is up.
   ConfirmingRestart(version~ : String)
-  DownloadingUpdate(version~ : String)
+  DownloadingUpdate(version~ : String, progress~ : UpdateDownloadProgress)
   // The bundle is swapped; the window is about to close.
   RestartingForUpdate(version~ : String)
   // What the Settings row shows when a check could not answer.
@@ -130,8 +200,10 @@ fn check_for_updates(
 }
 
 ///|
-/// Ask the host to download and verify the channel's package. Success means
-/// a staged bundle is waiting for `apply_update`.
+/// Ask the host-owned update actor to download and verify the channel's package.
+/// A successful reply only means the work was accepted; `update.downloaded`
+/// triggers `UpdateDownloaded` after staging, and `update.download_failed`
+/// carries a background failure.
 fn download_update(
   dispatch : @cmd.Emit[Msg],
   channel : UpdateChannel,
@@ -152,7 +224,6 @@ fn download_update(
           return
         }
       }
-      scheduler.add(dispatch(UpdateDownloaded))
     })
   })
 }
