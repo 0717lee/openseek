@@ -18,55 +18,6 @@ test "file#toString" {
 }
 
 ///|
-test "URI.file (win-special)" {
-  // isWindows branch
-  set_is_windows_for_testing(value=true)
-  assert_eq(Uri::file("c:\\win\\path").to_string(), "file:///c%3A/win/path")
-  assert_eq(Uri::file("c:\\win/path").to_string(), "file:///c%3A/win/path")
-  // non-Windows branch
-  set_is_windows_for_testing(value=false)
-  assert_eq(Uri::file("c:\\win\\path").to_string(), "file:///c%3A%5Cwin%5Cpath")
-  assert_eq(Uri::file("c:\\win/path").to_string(), "file:///c%3A%5Cwin/path")
-  set_is_windows_for_testing()
-}
-
-///|
-test "file#fsPath (win-special)" {
-  set_is_windows_for_testing(value=true)
-  assert_eq(Uri::file("c:\\win\\path").fs_path(), "c:\\win\\path")
-  assert_eq(Uri::file("c:\\win/path").fs_path(), "c:\\win\\path")
-  assert_eq(Uri::file("c:/win/path").fs_path(), "c:\\win\\path")
-  assert_eq(Uri::file("c:/win/path/").fs_path(), "c:\\win\\path\\")
-  assert_eq(Uri::file("C:/win/path").fs_path(), "c:\\win\\path")
-  assert_eq(Uri::file("/c:/win/path").fs_path(), "c:\\win\\path")
-  assert_eq(Uri::file("./c/win/path").fs_path(), "\\.\\c\\win\\path")
-  set_is_windows_for_testing(value=false)
-  assert_eq(Uri::file("c:/win/path").fs_path(), "c:/win/path")
-  assert_eq(Uri::file("c:/win/path/").fs_path(), "c:/win/path/")
-  assert_eq(Uri::file("C:/win/path").fs_path(), "c:/win/path")
-  assert_eq(Uri::file("/c:/win/path").fs_path(), "c:/win/path")
-  assert_eq(Uri::file("./c/win/path").fs_path(), "/./c/win/path")
-  set_is_windows_for_testing()
-}
-
-///|
-test "URI#fsPath - no fsPath when no path" {
-  set_is_windows_for_testing(value=false)
-  let value = Uri::parse(
-    "file://%2Fhome%2Fticino%2Fdesktop%2Fcpluscplus%2Ftest.cpp",
-  )
-  assert_eq(value.authority, "/home/ticino/desktop/cpluscplus/test.cpp")
-  assert_eq(value.path, "/")
-  assert_eq(value.fs_path(), "/")
-  set_is_windows_for_testing(value=true)
-  let value = Uri::parse(
-    "file://%2Fhome%2Fticino%2Fdesktop%2Fcpluscplus%2Ftest.cpp",
-  )
-  assert_eq(value.fs_path(), "\\")
-  set_is_windows_for_testing()
-}
-
-///|
 test "http#toString" {
   assert_eq(
     Uri::from(scheme="http", authority="www.example.com", path="/my/path").to_string(),
@@ -278,176 +229,12 @@ test "with, validation" {
 }
 
 ///|
-test "parse" {
-  let value = Uri::parse("http:/api/files/test.me?t=1234")
-  assert_eq(value.scheme, "http")
-  assert_eq(value.authority, "")
-  assert_eq(value.path, "/api/files/test.me")
-  assert_eq(value.query, "t=1234")
-  assert_eq(value.fragment, "")
-  let value = Uri::parse("http://api/files/test.me?t=1234")
-  assert_eq(value.scheme, "http")
-  assert_eq(value.authority, "api")
-  assert_eq(value.path, "/files/test.me")
-  assert_eq(value.query, "t=1234")
-  assert_eq(value.fragment, "")
-  set_is_windows_for_testing(value=false)
-  let value = Uri::parse("file:///c:/test/me")
-  assert_eq(value.scheme, "file")
-  assert_eq(value.authority, "")
-  assert_eq(value.path, "/c:/test/me")
-  assert_eq(value.fragment, "")
-  assert_eq(value.query, "")
-  assert_eq(value.fs_path(), "c:/test/me")
-  let value = Uri::parse("file://shares/files/c%23/p.cs")
-  assert_eq(value.scheme, "file")
-  assert_eq(value.authority, "shares")
-  assert_eq(value.path, "/files/c#/p.cs")
-  assert_eq(value.fragment, "")
-  assert_eq(value.query, "")
-  assert_eq(value.fs_path(), "//shares/files/c#/p.cs")
-  set_is_windows_for_testing(value=true)
-  assert_eq(Uri::parse("file:///c:/test/me").fs_path(), "c:\\test\\me")
-  assert_eq(
-    Uri::parse("file://shares/files/c%23/p.cs").fs_path(),
-    "\\\\shares\\files\\c#\\p.cs",
-  )
-  set_is_windows_for_testing()
-  let value = Uri::parse(
-    "file:///c:/Source/Z%C3%BCrich%20or%20Zurich%20(%CB%88zj%CA%8A%C9%99r%C9%AAk,/Code/resources/app/plugins/c%23/plugin.json",
-  )
-  assert_eq(value.scheme, "file")
-  assert_eq(value.authority, "")
-  assert_eq(
-    value.path,
-    "/c:/Source/Zürich or Zurich (ˈzjʊərɪk,/Code/resources/app/plugins/c#/plugin.json",
-  )
-  assert_eq(value.fragment, "")
-  assert_eq(value.query, "")
-  let value = Uri::parse("file:///c:/test %25/path")
-  assert_eq(value.scheme, "file")
-  assert_eq(value.authority, "")
-  assert_eq(value.path, "/c:/test %/path")
-  assert_eq(value.fragment, "")
-  assert_eq(value.query, "")
-  let value = Uri::parse("inmemory:")
-  assert_eq(value.scheme, "inmemory")
-  assert_eq(value.authority, "")
-  assert_eq(value.path, "")
-  assert_eq(value.query, "")
-  assert_eq(value.fragment, "")
-  let value = Uri::parse("foo:api/files/test")
-  assert_eq(value.scheme, "foo")
-  assert_eq(value.authority, "")
-  assert_eq(value.path, "api/files/test")
-  assert_eq(value.query, "")
-  assert_eq(value.fragment, "")
-  let value = Uri::parse("file:?q")
-  assert_eq(value.scheme, "file")
-  assert_eq(value.authority, "")
-  assert_eq(value.path, "/")
-  assert_eq(value.query, "q")
-  assert_eq(value.fragment, "")
-  let value = Uri::parse("file:#d")
-  assert_eq(value.scheme, "file")
-  assert_eq(value.authority, "")
-  assert_eq(value.path, "/")
-  assert_eq(value.query, "")
-  assert_eq(value.fragment, "d")
-  let value = Uri::parse("f3ile:#d")
-  assert_eq(value.scheme, "f3ile")
-  assert_eq(value.authority, "")
-  assert_eq(value.path, "")
-  assert_eq(value.query, "")
-  assert_eq(value.fragment, "d")
-  let value = Uri::parse("foo+bar:path")
-  assert_eq(value.scheme, "foo+bar")
-  assert_eq(value.authority, "")
-  assert_eq(value.path, "path")
-  assert_eq(value.query, "")
-  assert_eq(value.fragment, "")
-  let value = Uri::parse("foo-bar:path")
-  assert_eq(value.scheme, "foo-bar")
-  assert_eq(value.authority, "")
-  assert_eq(value.path, "path")
-  assert_eq(value.query, "")
-  assert_eq(value.fragment, "")
-  let value = Uri::parse("foo.bar:path")
-  assert_eq(value.scheme, "foo.bar")
-  assert_eq(value.authority, "")
-  assert_eq(value.path, "path")
-  assert_eq(value.query, "")
-  assert_eq(value.fragment, "")
-}
-
-///|
 test "parse, disallow //path when no authority" {
   try Uri::parse("file:////shares/files/p.cs") |> ignore catch {
     UriError(_) => ()
   } noraise {
     _ => fail("expected parse to raise UriError")
   }
-}
-
-///|
-test "URI#file, win-speciale" {
-  // The JS test is isWindows-gated; run it under the D8 seam.
-  set_is_windows_for_testing(value=true)
-  let value = Uri::file("c:\\test\\drive")
-  assert_eq(value.path, "/c:/test/drive")
-  assert_eq(value.to_string(), "file:///c%3A/test/drive")
-  let value = Uri::file("\\\\shäres\\path\\c#\\plugin.json")
-  assert_eq(value.scheme, "file")
-  assert_eq(value.authority, "shäres")
-  assert_eq(value.path, "/path/c#/plugin.json")
-  assert_eq(value.fragment, "")
-  assert_eq(value.query, "")
-  assert_eq(value.to_string(), "file://sh%C3%A4res/path/c%23/plugin.json")
-  let value = Uri::file("\\\\localhost\\c$\\GitDevelopment\\express")
-  assert_eq(value.scheme, "file")
-  assert_eq(value.path, "/c$/GitDevelopment/express")
-  assert_eq(value.fs_path(), "\\\\localhost\\c$\\GitDevelopment\\express")
-  assert_eq(value.query, "")
-  assert_eq(value.fragment, "")
-  assert_eq(value.to_string(), "file://localhost/c%24/GitDevelopment/express")
-  let value = Uri::file("c:\\test with %\\path")
-  assert_eq(value.path, "/c:/test with %/path")
-  assert_eq(value.to_string(), "file:///c%3A/test%20with%20%25/path")
-  let value = Uri::file("c:\\test with %25\\path")
-  assert_eq(value.path, "/c:/test with %25/path")
-  assert_eq(value.to_string(), "file:///c%3A/test%20with%20%2525/path")
-  let value = Uri::file("c:\\test with %25\\c#code")
-  assert_eq(value.path, "/c:/test with %25/c#code")
-  assert_eq(value.to_string(), "file:///c%3A/test%20with%20%2525/c%23code")
-  let value = Uri::file("\\\\shares")
-  assert_eq(value.scheme, "file")
-  assert_eq(value.authority, "shares")
-  assert_eq(value.path, "/") // slash is always there
-  let value = Uri::file("\\\\shares\\")
-  assert_eq(value.scheme, "file")
-  assert_eq(value.authority, "shares")
-  assert_eq(value.path, "/")
-  set_is_windows_for_testing()
-}
-
-///|
-test "VSCode URI module's driveLetterPath regex is incorrect, #32961" {
-  set_is_windows_for_testing(value=false)
-  assert_eq(Uri::parse("file:///_:/path").fs_path(), "/_:/path")
-  set_is_windows_for_testing(value=true)
-  assert_eq(Uri::parse("file:///_:/path").fs_path(), "\\_:\\path")
-  set_is_windows_for_testing()
-}
-
-///|
-test "URI#file, no path-is-uri check" {
-  set_is_windows_for_testing(value=false)
-  // we don't complain here
-  let value = Uri::file("file://path/to/file")
-  assert_eq(value.scheme, "file")
-  assert_eq(value.authority, "")
-  assert_eq(value.path, "/file://path/to/file")
-  set_is_windows_for_testing()
 }
 
 ///|
@@ -527,44 +314,6 @@ test "URI#toString, user information in authority" {
     value.to_string(),
     "http://f%C3%B6%C3%B6:b%C3%B6r@l%C3%B6calhost:8080/far",
   )
-}
-
-///|
-fn check_file_uri_to_fs_path(input : String, expected : String) -> Unit raise {
-  let value = Uri::parse(input)
-  assert_eq(value.fs_path(), expected, msg="Result for \{input}")
-  let value2 = Uri::file(value.fs_path())
-  assert_eq(value2.fs_path(), expected, msg="Result for \{input}")
-  assert_eq(value.to_string(), value2.to_string())
-}
-
-///|
-test "correctFileUriToFilePath2" {
-  set_is_windows_for_testing(value=false)
-  check_file_uri_to_fs_path("file:///c:/alex.txt", "c:/alex.txt")
-  check_file_uri_to_fs_path(
-    "file:///c:/Source/Z%C3%BCrich%20or%20Zurich%20(%CB%88zj%CA%8A%C9%99r%C9%AAk,/Code/resources/app/plugins",
-    "c:/Source/Zürich or Zurich (ˈzjʊərɪk,/Code/resources/app/plugins",
-  )
-  check_file_uri_to_fs_path(
-    "file://monacotools/folder/isi.txt", "//monacotools/folder/isi.txt",
-  )
-  check_file_uri_to_fs_path(
-    "file://monacotools1/certificates/SSL/", "//monacotools1/certificates/SSL/",
-  )
-  set_is_windows_for_testing(value=true)
-  check_file_uri_to_fs_path("file:///c:/alex.txt", "c:\\alex.txt")
-  check_file_uri_to_fs_path(
-    "file:///c:/Source/Z%C3%BCrich%20or%20Zurich%20(%CB%88zj%CA%8A%C9%99r%C9%AAk,/Code/resources/app/plugins",
-    "c:\\Source\\Zürich or Zurich (ˈzjʊərɪk,\\Code\\resources\\app\\plugins",
-  )
-  check_file_uri_to_fs_path(
-    "file://monacotools/folder/isi.txt", "\\\\monacotools\\folder\\isi.txt",
-  )
-  check_file_uri_to_fs_path(
-    "file://monacotools1/certificates/SSL/", "\\\\monacotools1\\certificates\\SSL\\",
-  )
-  set_is_windows_for_testing()
 }
 
 ///|
@@ -704,37 +453,6 @@ test "panic URI#joinPath, no auto-path + no path (foo://bar)" {
 }
 
 ///|
-test "URI#joinPath (posix)" {
-  set_is_windows_for_testing(value=false)
-  assert_joined("file:///c:/foo/", "../../bazz", "file:///bazz")
-  assert_joined("file://server/share/c:/", "../../bazz", "file://server/bazz")
-  assert_joined("file://server/share/c:", "../../bazz", "file://server/bazz")
-  assert_joined("file://ser/foo/", "../../bazz", "file://ser/bazz")
-  assert_joined("file://ser/foo", "../../bazz", "file://ser/bazz")
-  set_is_windows_for_testing()
-}
-
-///|
-test "URI#joinPath (windows)" {
-  set_is_windows_for_testing(value=true)
-  assert_joined("file:///c:/foo/", "../../bazz", "file:///c:/bazz")
-  assert_joined(
-    "file://server/share/c:/", "../../bazz", "file://server/share/bazz",
-  )
-  assert_joined(
-    "file://server/share/c:", "../../bazz", "file://server/share/bazz",
-  )
-  assert_joined("file://ser/foo/", "../../bazz", "file://ser/foo/bazz")
-  assert_joined("file://ser/foo", "../../bazz", "file://ser/foo/bazz")
-
-  //https://github.com/microsoft/vscode/issues/93831
-  assert_joined(
-    "file:///c:/foo/bar", "./other/foo.img", "file:///c:/foo/bar/other/foo.img",
-  )
-  set_is_windows_for_testing()
-}
-
-///|
 test "vscode-uri: URI.toString() wrongly encode IPv6 literals #154048" {
   assert_eq(
     Uri::parse("http://[FEDC:BA98:7654:3210:FEDC:BA98:7654:3210]:80/index.html").to_string(),
@@ -753,24 +471,6 @@ test "vscode-uri: URI.toString() wrongly encode IPv6 literals #154048" {
     "http://us%5Ber@[fedc:ba98:7654:3210:fedc:ba98:7654:3210]:80/index.html",
   )
 }
-
-///|
-test "File paths containing apostrophes break URI parsing and cannot be opened #276075" {
-  set_is_windows_for_testing(value=true)
-  let file_path = "C:\\Users\\Abd-al-Haseeb's_Dell\\Studio\\w3mage\\wp-content\\database.ht.sqlite"
-  let uri = Uri::file(file_path)
-  assert_eq(
-    uri.path,
-    "/C:/Users/Abd-al-Haseeb's_Dell/Studio/w3mage/wp-content/database.ht.sqlite",
-  )
-  assert_eq(
-    uri.fs_path(),
-    "c:\\Users\\Abd-al-Haseeb's_Dell\\Studio\\w3mage\\wp-content\\database.ht.sqlite",
-  )
-  set_is_windows_for_testing()
-}
-
-// --- MoonBit-specific pins beyond the JS suite (test matrix, D3/D4/D6) ---
 
 ///|
 test "strict-mode and scheme validation errors (each _validateUri branch)" {

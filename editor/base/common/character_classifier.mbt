@@ -60,14 +60,6 @@ pub fn CharacterClassifier::get(
 }
 
 ///|
-fn CharacterClassifier::clear(self : CharacterClassifier) -> Unit {
-  for i in 0..<256 {
-    self.ascii_map[i] = self.default_value
-  }
-  self.map.clear()
-}
-
-///|
 /// A set of char codes, backed by a `CharacterClassifier`.
 struct CharacterSet {
   actual : CharacterClassifier
@@ -86,9 +78,4 @@ fn CharacterSet::add_impl(self : CharacterSet, char_code : Int) -> Unit {
 ///|
 fn CharacterSet::has_impl(self : CharacterSet, char_code : Int) -> Bool {
   self.actual.get(char_code) == 1
-}
-
-///|
-fn CharacterSet::clear(self : CharacterSet) -> Unit {
-  self.actual.clear()
 }

@@ -103,5 +103,5 @@ routing. It must not import browser/workbench/web packages; filesystem, process,
 timer, socket, and concrete tool behavior stay in a host adapter.
 
 Run `moon test server/server`, then the read-only check gate:
-`moon check --target all --warn-list +73` and `moon fmt --check`. See
+`moon check --target all --warn-list +73 --deny-warn` and `moon fmt --check`. See
 `docs/quality.md` for the complete required checks.

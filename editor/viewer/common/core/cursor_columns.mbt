@@ -163,21 +163,3 @@ pub fn column_from_visible_column(
 fn next_render_tab_stop(visible_column : Int, tab_size : Int) -> Int {
   visible_column + tab_size - visible_column % tab_size
 }
-
-///|
-/// ATTENTION: this works with 0-based columns.
-fn next_indent_tab_stop(visible_column : Int, indent_size : Int) -> Int {
-  next_render_tab_stop(visible_column, indent_size)
-}
-
-///|
-/// ATTENTION: this works with 0-based columns.
-fn prev_render_tab_stop(column : Int, tab_size : Int) -> Int {
-  (column - 1 - (column - 1) % tab_size).max(0)
-}
-
-///|
-/// ATTENTION: this works with 0-based columns.
-fn prev_indent_tab_stop(column : Int, indent_size : Int) -> Int {
-  prev_render_tab_stop(column, indent_size)
-}

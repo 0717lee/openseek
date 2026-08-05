@@ -1,14 +1,4 @@
 ///|
-/// Detects configuration-backed whole-line Markdown comments in `model`.
-/// Detection is synchronous and reads one immutable model snapshot.
-fn detect_markdown_comments(
-  model : @model.TextModel,
-  rule : @languages.CommentRule,
-) -> Array[@language.MarkdownCommentBlock] {
-  detect_markdown_comments_in_snapshot(model.snapshot(), rule)
-}
-
-///|
 /// Detects configuration-backed whole-line Markdown comments in `snapshot`.
 /// The scan is deterministic, line-first, and linear in the snapshot text.
 fn detect_markdown_comments_in_snapshot(
@@ -121,20 +111,6 @@ fn detect_markdown_comments_in_snapshot(
     line_index += 1
   }
   result
-}
-
-///|
-/// Resolves the Markdown-comment source for `model` and normalizes it once.
-/// A matching provider is authoritative even when it returns an empty array;
-/// configuration-backed detection is used only when no provider matches.
-fn resolve_markdown_comment_blocks(
-  model : @model.TextModel,
-  languages : @languages.LanguageHandle,
-  log_service : @log.LogHandle,
-) -> Array[@language.MarkdownCommentBlock] {
-  resolve_markdown_comment_blocks_with_presentation(
-    model, languages, log_service,
-  ).blocks
 }
 
 ///|

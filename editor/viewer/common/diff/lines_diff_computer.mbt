@@ -9,9 +9,8 @@
 //   `DefaultLinesDiffComputer::compute_diff`.
 // - `ILinesDiffComputerOptions` — PORTED; `extendToSubwords?` — DEFERRED
 //   (consumed only by the char-level refinement, which is not ported).
-// - `LinesDiff` changes/moves/hitTimeout — PORTED.
-// - `MovedText` lineRangeMapping/changes/flip — PORTED (the viewer's
-//   computer never emits moves yet, see `default_lines_diff_computer.mbt`).
+// - `LinesDiff` changes/hitTimeout — PORTED. Move detection and its result
+//   shape are deferred because the viewer's computer does not implement it.
 
 ///|
 /// `ILinesDiffComputerOptions` (`linesDiffComputer.ts:12`).
@@ -27,37 +26,8 @@ pub(all) struct LinesDiffComputerOptions {
 /// `LinesDiff` (`linesDiffComputer.ts:19`).
 pub struct LinesDiff {
   changes : Array[DetailedLineRangeMapping]
-  /// Sorted by original line ranges. The original line ranges and the
-  /// modified line ranges must be disjoint (but can be touching).
-  priv moves : Array[MovedText]
   /// Indicates if the time out was reached. In that case, the diffs might be
   /// an approximation and the user should be asked to rerun the diff with
   /// more time.
   priv hit_timeout : Bool
 } derive(Eq, Debug)
-
-///|
-/// `MovedText` (`linesDiffComputer.ts:38`).
-priv struct MovedText {
-  line_range_mapping : LineRangeMapping
-  /// The diff from the original text to the moved text. Must be contained in
-  /// the original/modified line range. Can be empty if the text didn't
-  /// change (only moved).
-  changes : Array[DetailedLineRangeMapping]
-} derive(Eq, Debug)
-
-///|
-fn MovedText::MovedText(
-  line_range_mapping : LineRangeMapping,
-  changes : Array[DetailedLineRangeMapping],
-) -> MovedText {
-  { line_range_mapping, changes }
-}
-
-///|
-fn MovedText::flip(self : MovedText) -> MovedText {
-  MovedText(
-    self.line_range_mapping.flip(),
-    self.changes.map(DetailedLineRangeMapping::flip),
-  )
-}

@@ -395,48 +395,6 @@ test "suspicious fallback rereads pixel ratio" {
 }
 
 ///|
-test "folded cache preserves overwrite and remove-readd order" {
-  let measurements = new_font_measurements_for_test(
-    (_bare, _requests) => (),
-    () => 1.0,
-    (_callback, _delay) => (),
-  )
-  let a = trusted_font("A")
-  let b = trusted_font("B")
-  let changed_a = {
-    ..a,
-    typical_halfwidth_character_width: a.typical_halfwidth_character_width + 1.0,
-  }
-  measurements.write_to_cache(a.get_id(), a)
-  measurements.write_to_cache(b.get_id(), b)
-  assert_true(measurements.cache_keys == [a.get_id(), b.get_id()])
-  measurements.write_to_cache(a.get_id(), changed_a)
-  assert_true(measurements.cache_keys == [a.get_id(), b.get_id()])
-  let overwritten = measurements.cached_values()
-  assert_eq(
-    overwritten[0].typical_halfwidth_character_width,
-    changed_a.typical_halfwidth_character_width,
-  )
-  measurements.remove_from_cache(a.get_id())
-  assert_true(measurements.cache_keys == [b.get_id()])
-  measurements.write_to_cache(a.get_id(), changed_a)
-  assert_true(measurements.cache_keys == [b.get_id(), a.get_id()])
-  let ordered = measurements.cached_values()
-  assert_eq(ordered[0].font_family, "B")
-  assert_eq(ordered[1].font_family, "A")
-  let events = Ref(0)
-  let listener = measurements.on_did_change(() => events.val += 1)
-  measurements.clear_all_font_infos()
-  assert_eq(measurements.cache_keys.length(), 0)
-  assert_eq(measurements.cached_values().length(), 0)
-  assert_eq(events.val, 1)
-  // Source clear is unconditional: an already-empty cache still publishes.
-  measurements.clear_all_font_infos()
-  assert_eq(events.val, 2)
-  listener.dispose()
-}
-
-///|
 test "cache hit, one pending retry, callback ordering, and conditional event" {
   let reads = Ref(0)
   let timers : Array[() -> Unit] = []

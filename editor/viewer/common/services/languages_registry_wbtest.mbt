@@ -49,22 +49,6 @@ test "unregistered encodes to 0 until register allocates an id" {
 }
 
 ///|
-test "out-of-range ids decode to null rather than failing" {
-  let codec = LanguageIdCodec()
-  debug_inspect(
-    (
-      codec.decode_language_id(0),
-      codec.decode_language_id(2),
-      codec.decode_language_id(999),
-      codec.decode_language_id(-1),
-    ),
-    content=(
-      #|("null", "moonbit", "null", "null")
-    ),
-  )
-}
-
-///|
 test "separate codecs allocate independently" {
   let first = LanguageIdCodec()
   let second = LanguageIdCodec()

@@ -1,6 +1,6 @@
 ///| Port of `vscode/src/vs/base/common/resources.ts` in the checked-in vscode
-/// source: the `ExtUri` comparison/derivation layer, its three
-/// exported instances, and the bound top-level exports.
+/// source: the reachable `ExtUri` comparison/derivation layer, its three
+/// exported instances, and the bound top-level exports used by the viewer.
 /// `distinctParents`/`DataUri`/`toLocalResource` are DEFERRED (no consumer).
 ///
 /// The `resource.with_(...)` calls re-validate (D6); every path handed to
@@ -334,37 +334,6 @@ fn ExtUri::remove_trailing_path_separator_impl(
 }
 
 ///|
-/// `addTrailingPathSeparator` (resources.ts:302): adds a trailing path
-/// separator if there isn't one already. For example, `c:\` would be
-/// unchanged, but `c:\users` becomes `c:\users\`.
-fn ExtUri::add_trailing_path_separator(
-  self : ExtUri,
-  resource : Uri,
-  sep? : String,
-) -> Uri {
-  ignore(self)
-  let mut sep = match sep {
-    Some(value) => value
-    None => if platform_is_win32() { Win32::sep() } else { Posix::sep() }
-  }
-  let mut is_root_sep = false
-  if resource.scheme == schemas_file {
-    let fsp = original_fs_path(resource)
-    is_root_sep = fsp.length() == get_root(fsp).length() &&
-      js_slice(fsp, fsp.length() - 1) == sep
-  } else {
-    sep = "/"
-    let p = resource.path
-    is_root_sep = p.length() == 1 &&
-      char_code_at(p, p.length() - 1) == char_forward_slash
-  }
-  if !is_root_sep && !has_trailing_path_separator(resource, sep~) {
-    return try! resource.with_(path="\{resource.path}/")
-  }
-  resource
-}
-
-///|
 /// `extUri` (resources.ts:327): unbiased utility that takes uris "as they
 /// are" — interchangeable with `uri.to_string()` usages:
 /// `(a.to_string() == b.to_string()) == ext_uri.is_equal(a, b)`.
@@ -393,53 +362,8 @@ let ext_uri_ignore_path_case_impl : ExtUri = ExtUri(_uri => true)
 // `dirname` and `isEqualOrParent` are omitted here — see the file header.
 
 ///|
-fn is_equal(uri1 : Uri?, uri2 : Uri?, ignore_fragment? : Bool = false) -> Bool {
-  ext_uri_impl.is_equal_impl(uri1, uri2, ignore_fragment~)
-}
-
-///|
-fn get_comparison_key(uri : Uri, ignore_fragment? : Bool = false) -> String {
-  ext_uri_impl.get_comparison_key_impl(uri, ignore_fragment~)
-}
-
-///|
 pub fn basename_or_authority(resource : Uri) -> String {
   ext_uri_impl.basename_or_authority_impl(resource)
-}
-
-///|
-fn basename(resource : Uri) -> String {
-  ext_uri_impl.basename_impl(resource)
-}
-
-///|
-fn extname(resource : Uri) -> String {
-  ext_uri_impl.extname_impl(resource)
-}
-
-///|
-fn join_path(resource : Uri, path_fragment : Array[String]) -> Uri {
-  ext_uri_impl.join_path_impl(resource, path_fragment)
-}
-
-///|
-fn normalize_path(resource : Uri) -> Uri {
-  ext_uri_impl.normalize_path_impl(resource)
-}
-
-///|
-fn relative_path(from : Uri, to : Uri) -> String? {
-  ext_uri_impl.relative_path_impl(from, to)
-}
-
-///|
-fn resolve_path(base : Uri, path : String) -> Uri {
-  ext_uri_impl.resolve_path_impl(base, path)
-}
-
-///|
-fn is_absolute_path(resource : Uri) -> Bool {
-  ext_uri_impl.is_absolute_path_impl(resource)
 }
 
 ///|
@@ -450,14 +374,4 @@ fn is_equal_authority(a1 : String, a2 : String) -> Bool {
 ///|
 fn has_trailing_path_separator(resource : Uri, sep? : String) -> Bool {
   ext_uri_impl.has_trailing_path_separator_impl(resource, sep?)
-}
-
-///|
-fn remove_trailing_path_separator(resource : Uri, sep? : String) -> Uri {
-  ext_uri_impl.remove_trailing_path_separator_impl(resource, sep?)
-}
-
-///|
-fn add_trailing_path_separator(resource : Uri, sep? : String) -> Uri {
-  ext_uri_impl.add_trailing_path_separator(resource, sep?)
 }

@@ -153,11 +153,8 @@ struct MouseHandler {
   listeners : Array[@base_common.Disposable]
   /// The active scrollbar-thumb drag (scrollbar_input.mbt).
   mut drag : @scrollbar.ScrollbarDrag?
-  /// Gesture-level platform predicate. Production installs the host-platform
-  /// implementation; package white-box tests replace it on an isolated
-  /// handler to exercise the Windows reset branch without a public platform
-  /// override.
-  mut scrollbar_drag_should_reset : (Double, Double) -> Bool
+  /// Gesture-level platform predicate installed by the host platform.
+  scrollbar_drag_should_reset : (Double, Double) -> Bool
   mut disposed : Bool
 }
 
@@ -300,40 +297,6 @@ pub fn MouseHandler::dispose(self : MouseHandler) -> Unit {
 /// lifecycle resets (model change/clear) — stops the down-operation monitor.
 pub fn MouseHandler::cancel_selection(self : MouseHandler) -> Unit {
   self.mouse_down_operation.on_pointer_up()
-}
-
-///|
-/// `getTargetAtClientPoint` (mouseHandler.ts:231-242).
-fn MouseHandler::get_target_at_client_point(
-  self : MouseHandler,
-  client_x : Double,
-  client_y : Double,
-) -> @editor_browser.MouseTarget? {
-  let client_pos : @editor_browser.ClientCoordinates = { client_x, client_y }
-  let pos = client_pos.to_page_coordinates()
-  let editor_pos = @editor_browser.create_editor_page_position(
-    self.view_helper.view_dom_node,
-  )
-  if pos.y < editor_pos.y ||
-    pos.y > editor_pos.y + editor_pos.height ||
-    pos.x < editor_pos.x ||
-    pos.x > editor_pos.x + editor_pos.width {
-    return None
-  }
-  let relative_pos = @editor_browser.create_coordinates_relative_to_editor(
-    self.view_helper.view_dom_node,
-    editor_pos,
-    pos,
-  )
-  Some(
-    self.mouse_target_factory.create_mouse_target(
-      (self.view_helper.get_last_render_data)(),
-      editor_pos,
-      pos,
-      relative_pos,
-      None,
-    ),
-  )
 }
 
 ///|

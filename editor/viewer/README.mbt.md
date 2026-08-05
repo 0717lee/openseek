@@ -614,6 +614,6 @@ been delivered; it does not subscribe directly to TextModel token events.
 - Use `just test` for headless/model behavior, `just test-browser-smoke` for
   routine real-DOM input and geometry, and `just test-browser-perf` for opt-in
   performance diagnosis. The read-only check gate is
-  `moon check --target all --warn-list +73` followed by `moon fmt --check`; see
+  `moon check --target all --warn-list +73 --deny-warn` followed by `moon fmt --check`; see
   `docs/quality.md` for the complete required checks and architecture review
   rules.

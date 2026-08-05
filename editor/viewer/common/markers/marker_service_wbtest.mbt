@@ -212,54 +212,6 @@ test "modelVersionId is preserved on IMarker when present in IMarkerData" {
 }
 
 ///|
-test "resource filter hides markers and shows info marker" {
-  let service = MarkerService()
-  let r1 = uri("file:///path/file1.cs")
-  let r2 = uri("file:///path/file2.cs")
-  service.change_one("owner1", r1, [marker_data(Error, "a")])
-  service.change_one("owner1", r2, [marker_data(Error, "b")])
-  assert_eq(service.read(MarkerReadOptions()).length(), 2)
-  let filter = service.install_resource_filter(r1, "Test filter")
-  // r1's real markers replaced by 1 info marker; total still 2
-  assert_eq(service.read(MarkerReadOptions()).length(), 2)
-  let r1_markers = service.read(MarkerReadOptions(resource=r1))
-  assert_eq(r1_markers.length(), 1)
-  assert_true(r1_markers[0].severity == Info)
-  assert_true(r1_markers[0].message.contains("Test filter"))
-  assert_eq(service.read(MarkerReadOptions(resource=r2)).length(), 1)
-  // ignoreResourceFilters bypasses
-  assert_eq(
-    service
-    .read(MarkerReadOptions(resource=r1, ignore_resource_filters=true))
-    .length(),
-    1,
-  )
-  assert_true(
-    service.read(MarkerReadOptions(resource=r1, ignore_resource_filters=true))[0].severity ==
-    Error,
-  )
-  filter.dispose()
-  assert_eq(service.read(MarkerReadOptions(resource=r1)).length(), 1)
-  assert_true(service.read(MarkerReadOptions(resource=r1))[0].severity == Error)
-}
-
-///|
-test "multiple filters for same resource are handled correctly" {
-  let service = MarkerService()
-  let resource = uri("file:///path/file.cs")
-  service.change_one("owner1", resource, [marker_data(Error, "a")])
-  let filter1 = service.install_resource_filter(resource, "First filter")
-  let filter2 = service.install_resource_filter(resource, "Second filter")
-  assert_eq(service.read(MarkerReadOptions(resource~)).length(), 1)
-  assert_true(service.read(MarkerReadOptions(resource~))[0].severity == Info)
-  filter1.dispose()
-  // still filtered (one reason remains)
-  assert_true(service.read(MarkerReadOptions(resource~))[0].severity == Info)
-  filter2.dispose()
-  assert_true(service.read(MarkerReadOptions(resource~))[0].severity == Error)
-}
-
-///|
 test "marker events merge: N changes in one tick fire one event with the URI union" {
   // Manual scheduler standing in for the hardcoded `queueMicrotask`
   // (`event.ts:1610`); flushing by hand keeps the test deterministic on
@@ -288,31 +240,4 @@ test "marker events merge: N changes in one tick fire one event with the URI uni
   scheduled[1]()
   assert_eq(fired.length(), 2)
   inspect(fired[1].map(u => u.to_string()).join(","), content="file:///b.cs")
-}
-
-///|
-test "statistics buckets severities and excludes unsupported schemes" {
-  let service = MarkerService()
-  let file = uri("file:///stats.cs")
-  service.change_one("owner", file, [
-    marker_data(Error, "e1"),
-    marker_data(Error, "e2"),
-    marker_data(Warning, "w1"),
-    marker_data(Info, "i1"),
-  ])
-  let stats = service.statistics()
-  assert_eq(stats.errors, 2)
-  assert_eq(stats.warnings, 1)
-  assert_eq(stats.infos, 1)
-  // unsupported scheme (inmemory) is excluded from stats
-  let scratch = uri("inmemory://scratch")
-  service.change_one("owner", scratch, [marker_data(Error, "e")])
-  let stats2 = service.statistics()
-  assert_eq(stats2.errors, 2)
-  // removing markers decrements
-  service.change_one("owner", file, [])
-  let stats3 = service.statistics()
-  assert_eq(stats3.errors, 0)
-  assert_eq(stats3.warnings, 0)
-  assert_eq(stats3.infos, 0)
 }

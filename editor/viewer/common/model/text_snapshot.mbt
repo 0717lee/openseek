@@ -290,26 +290,6 @@ fn TextSnapshot::get_line_last_non_whitespace_column(
 }
 
 ///|
-/// Whether the snapshot text contains any right-to-left character. Mirrors
-/// `mightContainRTL` (recomputed on demand rather than cached at construction).
-fn TextSnapshot::might_contain_rtl(self : TextSnapshot) -> Bool {
-  @base_common.contains_rtl(self.text)
-}
-
-///|
-/// Whether normalized stored text contains a non-basic-ASCII code unit.
-/// Monaco treats Tab, CR/LF, and printable ASCII 32..126 as basic; CR is
-/// impossible after construction but remains classified consistently here.
-fn TextSnapshot::might_contain_non_basic_ascii(self : TextSnapshot) -> Bool {
-  for code in self.text.code_units() {
-    if code != 9 && code != 10 && code != 13 && (code < 32 || code > 126) {
-      return true
-    }
-  }
-  false
-}
-
-///|
 /// Replaces every CRLF pair or lone CR with one LF. Existing LF and all other
 /// UTF-16 units are preserved. Raw code-unit substrings deliberately avoid the
 /// Unicode-scalar boundary checks of `StringView`, so lone low/high surrogates

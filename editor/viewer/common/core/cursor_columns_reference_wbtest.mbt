@@ -231,55 +231,6 @@ fn assert_next_tab_stop(f : (Int, Int) -> Int) -> Unit raise {
 }
 
 ///|
-fn assert_prev_tab_stop(f : (Int, Int) -> Int) -> Unit raise {
-  assert_eq(f(0, 4), 0)
-  assert_eq(f(1, 4), 0)
-  assert_eq(f(2, 4), 0)
-  assert_eq(f(3, 4), 0)
-  assert_eq(f(4, 4), 0)
-  assert_eq(f(5, 4), 4)
-  assert_eq(f(6, 4), 4)
-  assert_eq(f(7, 4), 4)
-  assert_eq(f(8, 4), 4)
-  assert_eq(f(9, 4), 8)
-  assert_eq(f(0, 2), 0)
-  assert_eq(f(1, 2), 0)
-  assert_eq(f(2, 2), 0)
-  assert_eq(f(3, 2), 2)
-  assert_eq(f(4, 2), 2)
-  assert_eq(f(5, 2), 4)
-  assert_eq(f(6, 2), 4)
-  assert_eq(f(7, 2), 6)
-  assert_eq(f(8, 2), 6)
-  assert_eq(f(9, 2), 8)
-  assert_eq(f(0, 1), 0)
-  assert_eq(f(1, 1), 0)
-  assert_eq(f(2, 1), 1)
-  assert_eq(f(3, 1), 2)
-  assert_eq(f(4, 1), 3)
-  assert_eq(f(5, 1), 4)
-  assert_eq(f(6, 1), 5)
-  assert_eq(f(7, 1), 6)
-  assert_eq(f(8, 1), 7)
-  assert_eq(f(9, 1), 8)
-}
-
-///|
 test "nextRenderTabStop" {
   assert_next_tab_stop(next_render_tab_stop)
-}
-
-///|
-test "nextIndentTabStop" {
-  assert_next_tab_stop(next_indent_tab_stop)
-}
-
-///|
-test "prevRenderTabStop" {
-  assert_prev_tab_stop(prev_render_tab_stop)
-}
-
-///|
-test "prevIndentTabStop" {
-  assert_prev_tab_stop(prev_indent_tab_stop)
 }

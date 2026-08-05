@@ -160,5 +160,5 @@ This package may depend on domain types and `shell/workspace`, but not
 on browser, viewer implementation, server routing, or native effects.
 
 Run `moon test shell/remote_protocol --target js`, then the read-only check
-gate: `moon check --target all --warn-list +73` and `moon fmt --check`. See
+gate: `moon check --target all --warn-list +73 --deny-warn` and `moon fmt --check`. See
 `docs/quality.md` for the complete required checks.

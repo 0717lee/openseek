@@ -3,8 +3,8 @@ default:
 
 # Check the two production targets together and verify repository formatting.
 check:
-    bash scripts/check_workspace_warnings.sh native
-    bash scripts/check_workspace_warnings.sh js
+    moon check --target native --deny-warn
+    moon check --target js --deny-warn
     moon fmt --check
 
 # Build every root workspace member for the production targets.

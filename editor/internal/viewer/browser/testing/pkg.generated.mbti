@@ -22,7 +22,7 @@ pub fn publish_scroll_frame(String, ScrollFramePhase, Double, Double) -> Unit
 
 pub fn publish_view_model_built(String, ViewModelBuiltObservation) -> Unit
 
-pub fn register_viewer(String, has_model~ : () -> Bool, set_hidden_areas~ : (Array[@common.Range], String?, Bool) -> Unit) -> @common.Disposable
+pub fn register_viewer(String, set_hidden_areas~ : (Array[@common.Range], String?, Bool) -> Unit) -> @common.Disposable
 
 // Errors
 

@@ -5,143 +5,6 @@
 /// deferred content emitter, and the disposing guard.
 
 ///|
-enum TransitionEolForm {
-  TransitionLf
-  TransitionCrlf
-  TransitionCr
-  TransitionMixed
-}
-
-///|
-fn transition_text(lines : Array[String], form : TransitionEolForm) -> String {
-  let sb = StringBuilder::new()
-  for i, line in lines {
-    if i > 0 {
-      match form {
-        TransitionLf => sb.write_string("\n")
-        TransitionCrlf => sb.write_string("\r\n")
-        TransitionCr => sb.write_string("\r")
-        TransitionMixed =>
-          match (i - 1) % 3 {
-            0 => sb.write_string("\r\n")
-            1 => sb.write_string("\r")
-            _ => sb.write_string("\n")
-          }
-      }
-    }
-    sb.write_string(line)
-  }
-  sb.to_string()
-}
-
-///|
-fn transition_normalized(lines : Array[String]) -> String {
-  lines.join("\n")
-}
-
-///|
-fn assert_transition_coordinates(model : TextModel) -> Unit raise {
-  let length = model.get_value_length()
-  for offset in 0..<=length {
-    let position = model.get_position_at(offset)
-    assert_eq(model.get_offset_at(position), offset)
-  }
-  let full = model.get_full_model_range()
-  assert_eq(
-    model.get_offset_at(Position(full.end_line_number, full.end_column)),
-    length,
-  )
-}
-
-///|
-/// The complete ordered `oldForm x newForm` matrix from the EOL plan:
-/// LF/CRLF/CR/mixed, once with normalized-equal content and once with changed
-/// logical content. This loop executes 4 * 4 * 2 = 32 independent swaps.
-test "set_value 4x4 EOL transitions cover normalized-equal and changed lanes" {
-  let forms = [TransitionLf, TransitionCrlf, TransitionCr, TransitionMixed]
-  let old_lines = ["alpha", "beta", "gamma", "delta"]
-  let changed_lines = ["new", "logical content", "has", "changed"]
-  let old_normalized = transition_normalized(old_lines)
-  let changed_normalized = transition_normalized(changed_lines)
-  let mut case_count = 0
-  for old_form in forms {
-    for new_form in forms {
-      for changed in [false, true] {
-        case_count += 1
-        let old_input = transition_text(old_lines, old_form)
-        let new_lines = if changed { changed_lines } else { old_lines }
-        let new_input = transition_text(new_lines, new_form)
-        let expected_new = if changed {
-          changed_normalized
-        } else {
-          old_normalized
-        }
-        let model = wb_model(old_input)
-        assert_eq(model.get_value(), old_normalized)
-        assert_eq(model.get_eol(), "\n")
-        assert_transition_coordinates(model)
-        let old_full_range = model.get_full_model_range()
-        let old_length = model.get_value_length()
-        assert_eq(
-          model.get_offset_at(
-            Position(old_full_range.end_line_number, old_full_range.end_column),
-          ),
-          old_length,
-        )
-        let old_version = model.get_version_id()
-        let events : Array[ModelContentChangedEvent] = []
-        let _sub = model.on_did_change_content(e => events.push(e))
-        model.set_value(new_input)
-        assert_eq(events.length(), 1)
-        let event = events[0]
-        assert_eq(event.version_id, old_version + 1)
-        assert_eq(event.eol, "\n")
-        assert_eq(event.is_undoing, false)
-        assert_eq(event.is_redoing, false)
-        assert_eq(event.is_flush, true)
-        assert_eq(event.is_eol_change, false)
-        assert_eq(event.changes.length(), 1)
-        let change = event.changes[0]
-        assert_true(change.range == old_full_range)
-        assert_eq(change.range_offset, 0)
-        assert_eq(change.range_length, old_length)
-        assert_eq(change.text, expected_new)
-        assert_eq(model.get_version_id(), old_version + 1)
-        assert_eq(model.get_value(), expected_new)
-        assert_eq(model.snapshot.text, expected_new)
-        assert_eq(model.get_eol(), "\n")
-        assert_transition_coordinates(model)
-      }
-    }
-  }
-  assert_eq(case_count, 32)
-}
-
-///|
-/// U+FEFF is ordinary Viewer content, so set_value add/remove-BOM transitions
-/// use the same normalized range/length/event contract as any other code unit.
-test "set_value keeps BOM as ordinary content when adding and removing it" {
-  let bom = "\u{FEFF}"
-  let model = wb_model("\{bom}a\r\nb")
-  let events : Array[ModelContentChangedEvent] = []
-  let _sub = model.on_did_change_content(e => events.push(e))
-  let old_range = model.get_full_model_range()
-  let old_length = model.get_value_length()
-  model.set_value("a\r\nb")
-  assert_eq(events.length(), 1)
-  assert_true(events[0].changes[0].range == old_range)
-  assert_eq(events[0].changes[0].range_length, old_length)
-  assert_eq(events[0].changes[0].text, "a\nb")
-  assert_eq(model.get_value(), "a\nb")
-  model.set_value("\{bom}a\rb")
-  assert_eq(events.length(), 2)
-  assert_eq(events[1].changes[0].range_length, "a\nb".length())
-  assert_eq(events[1].changes[0].text, "\{bom}a\nb")
-  assert_eq(model.get_value(), "\{bom}a\nb")
-  assert_eq(model.might_contain_non_basic_ascii(), true)
-}
-
-///|
 test "set_value bumps the version id and swaps the snapshot" {
   let model = wb_model("alpha\nbravo")
   assert_eq(model.get_version_id(), 1)
@@ -172,26 +35,6 @@ test "set_value bumps the version id and swaps the snapshot" {
     ),
   )
   assert_eq(model.get_version_id(), 3)
-}
-
-///|
-test "set_value destroys all decorations; stale ids delta as a no-op" {
-  let model = wb_model("alpha\nbravo")
-  let ids = model.delta_decorations([], [
-    { range: Range(1, 1, 1, 3), options: wb_options("one") },
-    { range: Range(2, 1, 2, 4), options: wb_options("two") },
-  ])
-  assert_eq(model.get_all_decorations().length(), 2)
-  model.set_value("alpha\nbravo")
-  assert_eq(model.decorations.length(), 0)
-  assert_eq(model.get_all_decorations().length(), 0)
-  // the destroyed ids are unknown to the fresh storage: removing them is a
-  // no-op and re-adding through them seeds fresh nodes
-  let replaced = model.delta_decorations(ids, [
-    { range: Range(1, 1, 1, 2), options: wb_options("three") },
-  ])
-  assert_eq(replaced.length(), 1)
-  assert_eq(model.get_all_decorations().length(), 1)
 }
 
 ///|
@@ -274,18 +117,6 @@ test "no content event is emitted while disposing" {
   assert_eq(content_events, 0)
   assert_eq(model.get_value(), "ghost")
   assert_eq(model.get_version_id(), 2)
-}
-
-///|
-test "equals_text_snapshot compares the normalized whole buffer" {
-  let model = wb_model("alpha\r\nbravo")
-  assert_eq(model.equals_text_snapshot(TextSnapshot("alpha\r\nbravo")), true)
-  assert_eq(model.equals_text_snapshot(TextSnapshot("alpha\nbravo")), true)
-  model.set_value("x")
-  assert_eq(model.equals_text_snapshot(TextSnapshot("x")), true)
-  assert_eq(TextSnapshot("a").equals(TextSnapshot("a")), true)
-  assert_eq(TextSnapshot("a").equals(TextSnapshot("b")), false)
-  assert_eq(TextSnapshot("a\r\nb").equals(TextSnapshot("a\nb")), true)
 }
 
 ///|

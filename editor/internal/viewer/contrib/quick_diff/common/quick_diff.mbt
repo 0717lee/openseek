@@ -27,17 +27,6 @@ pub(all) enum ChangeType {
 } derive(Eq, Debug)
 
 ///|
-impl Show for ChangeType with fn output(self, logger) {
-  logger.write_string(
-    match self {
-      Modify => "Modify"
-      Add => "Add"
-      Delete => "Delete"
-    },
-  )
-}
-
-///|
 /// `getChangeType` (`quickDiff.ts:121`).
 pub fn get_change_type(change : @diff.Change) -> ChangeType {
   if change.original_end_line_number == 0 {

@@ -142,16 +142,3 @@ pub fn group_nearby_session_editor_comments(
   groups.push(current_group)
   groups
 }
-
-///|
-/// `getAcceptedAgentFeedbackCommentCount`: how many comments are accepted and
-/// waiting for submission — the count on the host's "Submit N" affordance.
-fn get_accepted_agent_feedback_comment_count(
-  comments : Array[SessionEditorComment],
-) -> Int {
-  for comment in comments; count = 0 {
-    continue count + (if comment.state == Accepted { 1 } else { 0 })
-  } nobreak {
-    count
-  }
-}

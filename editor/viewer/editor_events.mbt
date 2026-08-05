@@ -630,11 +630,7 @@ fn Viewer::compute_hover_sync(
       if !request.is_current(Some(model), hc.hover.operation.token) {
         []
       } else {
-        let source = match hc.hover.operation.options {
-          Some(options) => options.source
-          None => HoverStartMouse
-        }
-        match self.make_hover_computer().compute_sync(model, anchor, source~) {
+        match self.make_hover_computer().compute_sync(model, anchor) {
           Some(hover) => hover.parts
           None => []
         }
@@ -657,16 +653,11 @@ fn Viewer::kick_hover_async(
   match hc.hover.anchor {
     Some(anchor) => {
       let computer = self.make_hover_computer()
-      let source = match hc.hover.operation.options {
-        Some(options) => options.source
-        None => HoverStartMouse
-      }
       (state.launch_async_task)(() => {
         computer.compute_async_each(
           request.model(),
           anchor,
           token=request.cancellation_token(),
-          source~,
           is_current=() => self.is_current_hover_request(request),
           run_tasks=run_async_tasks_concurrently,
           emit=parts => self.hover_async_item(request, parts),

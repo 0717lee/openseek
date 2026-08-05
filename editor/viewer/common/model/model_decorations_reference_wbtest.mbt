@@ -78,52 +78,6 @@ fn add_decoration(
 }
 
 ///|
-/// `modelHasDecorations`: (range, className) rows sorted by range starts.
-fn model_has_decorations(
-  model : TextModel,
-  decorations : Array[(Int, Int, Int, Int, String)],
-) -> Unit raise {
-  let model_decorations = model
-    .get_all_decorations()
-    .map(d => (d.range, d.options.class_name))
-  model_decorations.sort_by((a, b) => {
-    @base_common.Range::compare_ranges_using_starts(a.0, b.0)
-  })
-  let actual = model_decorations.map(pair => {
-    let (range, class_name) = pair
-    (
-      range.start_line_number,
-      range.start_column,
-      range.end_line_number,
-      range.end_column,
-      class_name,
-    )
-  })
-  if actual != decorations {
-    fail("got \{Repr(actual)}, expected \{Repr(decorations)}")
-  }
-}
-
-///|
-fn model_has_decoration(
-  model : TextModel,
-  start_line_number : Int,
-  start_column : Int,
-  end_line_number : Int,
-  end_column : Int,
-  class_name : String,
-) -> Unit raise {
-  model_has_decorations(model, [
-    (start_line_number, start_column, end_line_number, end_column, class_name),
-  ])
-}
-
-///|
-fn model_has_no_decorations(model : TextModel) -> Unit raise {
-  assert_eq(model.get_all_decorations().length(), 0)
-}
-
-///|
 /// `lineHasDecorations`: (startColumn, endColumn, className) rows.
 fn line_has_decorations(
   model : TextModel,
@@ -214,45 +168,6 @@ test "multiple line decoration" {
 }
 
 ///|
-test "decoration gets removed" {
-  let this_model = create_this_model()
-  let dec_id = add_decoration(this_model, 1, 2, 3, 2, "myType")
-  model_has_decoration(this_model, 1, 2, 3, 2, "myType")
-  this_model.change_decorations(accessor => (accessor.remove_decoration)(dec_id))
-  model_has_no_decorations(this_model)
-}
-
-///|
-test "decorations get removed" {
-  let this_model = create_this_model()
-  let dec_id1 = add_decoration(this_model, 1, 2, 3, 2, "myType1")
-  let dec_id2 = add_decoration(this_model, 1, 2, 3, 1, "myType2")
-  model_has_decorations(this_model, [
-    (1, 2, 3, 1, "myType2"),
-    (1, 2, 3, 2, "myType1"),
-  ])
-  this_model.change_decorations(accessor => {
-    (accessor.remove_decoration)(dec_id1)
-  })
-  model_has_decorations(this_model, [(1, 2, 3, 1, "myType2")])
-  this_model.change_decorations(accessor => {
-    (accessor.remove_decoration)(dec_id2)
-  })
-  model_has_no_decorations(this_model)
-}
-
-///|
-test "decoration range can be changed" {
-  let this_model = create_this_model()
-  let dec_id = add_decoration(this_model, 1, 2, 3, 2, "myType")
-  model_has_decoration(this_model, 1, 2, 3, 2, "myType")
-  this_model.change_decorations(accessor => {
-    (accessor.change_decoration)(dec_id, Range(1, 1, 1, 2))
-  })
-  model_has_decoration(this_model, 1, 1, 1, 2, "myType")
-}
-
-///|
 test "decorations emit event on add" {
   let this_model = create_this_model()
   let listener_called = Ref(0)
@@ -308,22 +223,6 @@ test "decorations do not emit event on no-op deltaDecorations" {
 }
 
 ///|
-test "removeAllDecorationsWithOwnerId works" {
-  let this_model = create_this_model()
-  let _ = this_model.delta_decorations(
-    [],
-    [{ range: Range(1, 2, 4, 1), options: dec_options("myType1") }],
-    owner_id=1,
-  )
-  this_model.remove_all_decorations_with_owner_id(1)
-  model_has_no_decorations(this_model)
-}
-
-// #endregion
-
-// #region suite "deltaDecorations"
-
-///|
 /// `ILightWeightDecoration`.
 priv struct LightWeightDecoration {
   id : String
@@ -352,19 +251,6 @@ fn to_model_delta_decoration(
 }
 
 ///|
-fn read_model_decorations(
-  model : TextModel,
-  ids : Array[String],
-) -> Array[(String, @base_common.Range)] {
-  ids.map(id => {
-    (
-      model.get_decoration_options(id).unwrap().class_name,
-      model.get_decoration_range(id).unwrap(),
-    )
-  })
-}
-
-///|
 fn assert_reference_range_opt_eq(
   actual : @base_common.Range?,
   expected : @base_common.Range?,
@@ -372,64 +258,6 @@ fn assert_reference_range_opt_eq(
   if actual != expected {
     fail("got \{Repr(actual)}, expected \{Repr(expected)}")
   }
-}
-
-///|
-fn assert_delta_rows_eq(
-  actual : Array[(String, @base_common.Range)],
-  expected : Array[(String, @base_common.Range)],
-) -> Unit raise {
-  if actual != expected {
-    fail("got \{Repr(actual)}, expected \{Repr(expected)}")
-  }
-}
-
-///|
-/// `testDeltaDecorations`. The ids are single-character strings, so MoonBit's
-/// length-first string compare matches JS strcmp here.
-fn test_delta_decorations(
-  text : Array[String],
-  decorations : Array[LightWeightDecoration],
-  new_decorations : Array[LightWeightDecoration],
-) -> Unit raise {
-  let model = create_text_model(text.join("\n"))
-
-  // Add initial decorations & assert they are added
-  let initial_ids = model.delta_decorations(
-    [],
-    decorations.map(to_model_delta_decoration),
-  )
-  let actual_decorations = read_model_decorations(model, initial_ids)
-  assert_eq(initial_ids.length(), decorations.length())
-  assert_eq(initial_ids.length(), model.get_all_decorations().length())
-  actual_decorations.sort_by((a, b) => {
-    if a.0 == b.0 {
-      0
-    } else if a.0 < b.0 {
-      -1
-    } else {
-      1
-    }
-  })
-  decorations.sort_by((a, b) => {
-    if a.id == b.id {
-      0
-    } else if a.id < b.id {
-      -1
-    } else {
-      1
-    }
-  })
-  assert_delta_rows_eq(
-    actual_decorations,
-    decorations.map(d => (d.id, d.range)),
-  )
-  let new_ids = model.delta_decorations(
-    initial_ids,
-    new_decorations.map(to_model_delta_decoration),
-  )
-  assert_eq(new_ids.length(), new_decorations.length())
-  assert_eq(new_ids.length(), model.get_all_decorations().length())
 }
 
 ///|
@@ -447,89 +275,6 @@ test "result respects input" {
     model.get_decoration_range(ids[1]),
     Some(Range(2, 1, 2, 13)),
   )
-}
-
-///|
-test "deltaDecorations 1" {
-  test_delta_decorations(
-    [
-      "This is a text", "That has multiple lines", "And is very friendly", "Towards testing",
-    ],
-    [
-      decoration("a", 1, 1, 1, 2),
-      decoration("b", 1, 1, 1, 15),
-      decoration("c", 1, 1, 2, 1),
-      decoration("d", 1, 1, 2, 24),
-      decoration("e", 2, 1, 2, 24),
-      decoration("f", 2, 1, 4, 16),
-    ],
-    [
-      decoration("x", 1, 1, 1, 2),
-      decoration("b", 1, 1, 1, 15),
-      decoration("c", 1, 1, 2, 1),
-      decoration("d", 1, 1, 2, 24),
-      decoration("e", 2, 1, 2, 21),
-      decoration("f", 2, 17, 4, 16),
-    ],
-  )
-}
-
-///|
-test "deltaDecorations 2" {
-  test_delta_decorations(
-    [
-      "This is a text", "That has multiple lines", "And is very friendly", "Towards testing",
-    ],
-    [
-      decoration("a", 1, 1, 1, 2),
-      decoration("b", 1, 2, 1, 3),
-      decoration("c", 1, 3, 1, 4),
-      decoration("d", 1, 4, 1, 5),
-      decoration("e", 1, 5, 1, 6),
-    ],
-    [
-      decoration("a", 1, 2, 1, 3),
-      decoration("b", 1, 3, 1, 4),
-      decoration("c", 1, 4, 1, 5),
-      decoration("d", 1, 5, 1, 6),
-    ],
-  )
-}
-
-///|
-test "deltaDecorations 3" {
-  test_delta_decorations(
-    [
-      "This is a text", "That has multiple lines", "And is very friendly", "Towards testing",
-    ],
-    [
-      decoration("a", 1, 1, 1, 2),
-      decoration("b", 1, 2, 1, 3),
-      decoration("c", 1, 3, 1, 4),
-      decoration("d", 1, 4, 1, 5),
-      decoration("e", 1, 5, 1, 6),
-    ],
-    [],
-  )
-}
-
-///|
-test "issue #4317: editor.setDecorations doesn't update the hover message" {
-  let model = create_text_model("Hello world!")
-  let ids = model.delta_decorations([], [
-    {
-      range: Range(1, 1, 100, 1),
-      options: ModelDecorationOptions("", message="hello1", description="test"),
-    },
-  ])
-  let ids2 = model.delta_decorations(ids, [
-    {
-      range: Range(1, 1, 100, 1),
-      options: ModelDecorationOptions("", message="hello2", description="test"),
-    },
-  ])
-  let actual_decoration = model.get_decoration_options(ids2[0])
-  assert_true(actual_decoration.unwrap().message is Some("hello2"))
 }
 
 ///|

@@ -173,5 +173,5 @@ data: adapters create `viewer/common/model.TextModel`; viewer core must not
 import this package.
 
 Run `moon test shell/workspace --target js`, then the read-only check gate:
-`moon check --target all --warn-list +73` and `moon fmt --check`. See
+`moon check --target all --warn-list +73 --deny-warn` and `moon fmt --check`. See
 `docs/quality.md` for the complete required checks.

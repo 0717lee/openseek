@@ -47,4 +47,4 @@ priv struct ScrollFrameObservation {
   phase : ScrollFramePhase
   scroll_top : Double
   scroll_left : Double
-} derive(Debug, Eq)
+}

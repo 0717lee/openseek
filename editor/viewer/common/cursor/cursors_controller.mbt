@@ -193,55 +193,6 @@ pub fn CursorsController::set_cursor_state(
 }
 
 ///|
-/// Applies one model-side state through the common nullable transition entry.
-fn CursorsController::set_model_cursor_state(
-  self : CursorsController,
-  model_state : SingleCursorState,
-  source? : String = "keyboard",
-  reason? : @editor_api.CursorChangeReason = NotSet,
-) -> CursorStateChange? {
-  self.set_cursor_state(
-    Some(CursorState::from_model_state(model_state)),
-    source~,
-    reason~,
-  )
-}
-
-///|
-/// Applies one already-normalized view-side state through the common nullable
-/// transition entry.
-fn CursorsController::set_view_cursor_state(
-  self : CursorsController,
-  view_state : SingleCursorState,
-  source? : String = "keyboard",
-  reason? : @editor_api.CursorChangeReason = NotSet,
-) -> CursorStateChange? {
-  self.set_cursor_state(
-    Some(CursorState::from_view_state(view_state)),
-    source~,
-    reason~,
-  )
-}
-
-///|
-/// Move-to entry used by pointer-style commands. The optional source/reason
-/// defaults retain the old direct test seam; live ViewModel callers pass them
-/// explicitly.
-fn CursorsController::move_to(
-  self : CursorsController,
-  view_position : @base_common.Position,
-  in_selection_mode : Bool,
-  source? : String = "keyboard",
-  reason? : @editor_api.CursorChangeReason = NotSet,
-) -> CursorStateChange? {
-  self.set_view_cursor_state(
-    self.cursor.view_state.moved(in_selection_mode, view_position),
-    source~,
-    reason~,
-  )
-}
-
-///|
 /// Completes an accepted mutation. Full equality is the first gate; public
 /// outgoing delivery is a second gate that ignores view-only reprojections.
 fn CursorsController::finish_transition(

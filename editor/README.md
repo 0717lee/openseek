@@ -145,7 +145,7 @@ system dependencies are not installed yet.
 ## Validation
 
 ```sh
-moon check --target all --warn-list +73
+moon check --target all --warn-list +73 --deny-warn
 moon fmt --check
 just test
 just build

@@ -18,60 +18,12 @@ pub struct ComputedHover {
 } derive(Eq, Debug)
 
 ///|
-/// Inputs shared by synchronous and asynchronous hover participants. Mirrors
-/// Monaco's `(anchor, lineDecorations, source)` compute arguments: it carries
-/// only the hovered state, never a services bag — participants capture the
-/// services they need at construction instead. `line_decorations` is selected
-/// once by the computer and `source` is forwarded unchanged to every
-/// sync/async participant.
+/// Inputs shared by synchronous and asynchronous hover participants. It carries
+/// only the hovered model and anchor; participants capture the services they
+/// need at construction instead.
 priv struct HoverComputeContext {
   model : @model.TextModel
   anchor : HoverAnchor
-  source : HoverStartSource
-  line_decorations : Array[@model.ModelDecoration]
-}
-
-///|
-/// Monaco `ContentHoverComputer._getLineDecorations`: selects the anchor line's
-/// decorations with whole-line acceptance, strict ordinary containment, and
-/// the `showIfCollapsed` one-column relaxation.
-fn hover_line_decorations(
-  model : @model.TextModel,
-  anchor : HoverAnchor,
-) -> Array[@model.ModelDecoration] {
-  if !(anchor is HoverRangeAnchor(..)) && !anchor.supports_marker_hover() {
-    return []
-  }
-  let anchor_range = anchor.range()
-  let line_number = anchor_range.start_line_number
-  if line_number > model.get_line_count() {
-    return []
-  }
-  let max_column = model.get_line_max_column(line_number)
-  model
-  .get_line_decorations(line_number)
-  .filter(decoration => {
-    if decoration.options.is_whole_line {
-      return true
-    }
-    let start_column = if decoration.range.start_line_number == line_number {
-      decoration.range.start_column
-    } else {
-      1
-    }
-    let end_column = if decoration.range.end_line_number == line_number {
-      decoration.range.end_column
-    } else {
-      max_column
-    }
-    if decoration.options.show_if_collapsed {
-      !(start_column > anchor_range.start_column + 1 ||
-      anchor_range.end_column - 1 > end_column)
-    } else {
-      !(start_column > anchor_range.start_column ||
-      anchor_range.end_column > end_column)
-    }
-  })
 }
 
 ///|
@@ -345,14 +297,8 @@ pub fn ContentHoverComputer::compute_sync(
   self : ContentHoverComputer,
   model : @model.TextModel,
   anchor : HoverAnchor,
-  source? : HoverStartSource = HoverStartMouse,
 ) -> ComputedHover? {
-  let ctx : HoverComputeContext = {
-    model,
-    anchor,
-    source,
-    line_decorations: hover_line_decorations(model, anchor),
-  }
+  let ctx : HoverComputeContext = { model, anchor }
   let parts : Array[HoverPart] = []
   for participant in self.participants {
     parts.append((participant.compute_sync)(ctx))
@@ -366,19 +312,13 @@ pub async fn ContentHoverComputer::compute_async(
   self : ContentHoverComputer,
   model : @model.TextModel,
   anchor : HoverAnchor,
-  source? : HoverStartSource = HoverStartMouse,
   token? : @language.CancellationToken = @language.CancellationToken::none(),
   is_current? : () -> Bool = () => true,
 ) -> ComputedHover? noraise {
   if token.is_cancellation_requested() || !is_current() {
     return None
   }
-  let ctx : HoverComputeContext = {
-    model,
-    anchor,
-    source,
-    line_decorations: hover_line_decorations(model, anchor),
-  }
+  let ctx : HoverComputeContext = { model, anchor }
   let parts : Array[HoverPart] = []
   for participant in self.participants {
     match participant.compute_async {
@@ -407,7 +347,6 @@ pub async fn ContentHoverComputer::compute_async_each(
   self : ContentHoverComputer,
   model : @model.TextModel,
   anchor : HoverAnchor,
-  source? : HoverStartSource = HoverStartMouse,
   token? : @language.CancellationToken = @language.CancellationToken::none(),
   is_current? : () -> Bool = () => true,
   run_tasks? : async (Array[async () -> Unit]) -> Unit = @base_common.run_async_tasks_sequentially,
@@ -416,12 +355,7 @@ pub async fn ContentHoverComputer::compute_async_each(
   if token.is_cancellation_requested() || !is_current() {
     return
   }
-  let ctx : HoverComputeContext = {
-    model,
-    anchor,
-    source,
-    line_decorations: hover_line_decorations(model, anchor),
-  }
+  let ctx : HoverComputeContext = { model, anchor }
   // Package callers use the runtime-neutral sequential runner. The browser
   // host injects its Promise runner, starting every participant concurrently
   // without coupling this multi-target package to the JS or moonbitlang/async

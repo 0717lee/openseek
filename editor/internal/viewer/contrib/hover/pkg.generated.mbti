@@ -51,9 +51,9 @@ pub struct ComputedHover {
 
 type ContentHoverComputer
 pub fn ContentHoverComputer::ContentHoverComputer(HoverParticipantServices) -> Self
-pub async fn ContentHoverComputer::compute_async(Self, @model.TextModel, HoverAnchor, source? : HoverStartSource, token? : @language.CancellationToken, is_current? : () -> Bool) -> ComputedHover? noraise
-pub async fn ContentHoverComputer::compute_async_each(Self, @model.TextModel, HoverAnchor, source? : HoverStartSource, token? : @language.CancellationToken, is_current? : () -> Bool, run_tasks? : async (Array[async () -> Unit]) -> Unit, emit~ : (Array[HoverPart]) -> Unit) -> Unit noraise
-pub fn ContentHoverComputer::compute_sync(Self, @model.TextModel, HoverAnchor, source? : HoverStartSource) -> ComputedHover?
+pub async fn ContentHoverComputer::compute_async(Self, @model.TextModel, HoverAnchor, token? : @language.CancellationToken, is_current? : () -> Bool) -> ComputedHover? noraise
+pub async fn ContentHoverComputer::compute_async_each(Self, @model.TextModel, HoverAnchor, token? : @language.CancellationToken, is_current? : () -> Bool, run_tasks? : async (Array[async () -> Unit]) -> Unit, emit~ : (Array[HoverPart]) -> Unit) -> Unit noraise
+pub fn ContentHoverComputer::compute_sync(Self, @model.TextModel, HoverAnchor) -> ComputedHover?
 pub fn ContentHoverComputer::create_loading_message(Self, HoverAnchor) -> HoverPart?
 pub fn ContentHoverComputer::participants(Self) -> Array[HoverParticipantHandle]
 

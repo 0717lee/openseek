@@ -21,17 +21,6 @@ priv enum FoldSource {
 } derive(Eq, Debug)
 
 ///|
-/// `foldSourceAbbr` (`foldingRanges.ts:19`), the one-character source tag of
-/// the debug string format.
-fn FoldSource::abbr(self : FoldSource) -> String {
-  match self {
-    Provider => " "
-    UserDefined => "u"
-    Recovered => "r"
-  }
-}
-
-///|
 /// One fold range with its state — Monaco's `FoldRange`
 /// (`foldingRanges.ts:25`). `type_` is Monaco's `type` (a MoonBit keyword),
 /// the `FoldingRangeKind` id a provider attached. `is_collapsed` and
@@ -233,12 +222,6 @@ pub fn FoldingRegions::get_type(self : FoldingRegions, index : Int) -> String? {
 }
 
 ///|
-/// `hasTypes` (`foldingRanges.ts:127`).
-fn FoldingRegions::has_types(self : FoldingRegions) -> Bool {
-  self.types is Some(_)
-}
-
-///|
 /// `isCollapsed` (`foldingRanges.ts:131`).
 fn FoldingRegions::is_collapsed(self : FoldingRegions, index : Int) -> Bool {
   self.collapse_states.get(index)
@@ -287,27 +270,6 @@ fn FoldingRegions::set_source(
       self.recovered_states.set(index, false)
     }
   }
-}
-
-///|
-/// `setCollapsedAllOfType` (`foldingRanges.ts:177`).
-fn FoldingRegions::set_collapsed_all_of_type(
-  self : FoldingRegions,
-  type_ : String,
-  new_state : Bool,
-) -> Bool {
-  let mut has_changed = false
-  match self.types {
-    Some(types) =>
-      for i in 0..<types.length() {
-        if types[i] is Some(t) && t == type_ {
-          self.set_collapsed(i, new_state)
-          has_changed = true
-        }
-      }
-    None => ()
-  }
-  has_changed
 }
 
 ///|
@@ -382,20 +344,6 @@ fn FoldingRegions::find_range(self : FoldingRegions, line : Int) -> Int {
   } nobreak {
     -1
   }
-}
-
-///|
-/// The `toString` debug format (`foldingRanges.ts:242`):
-/// `[<source><+|->] <start>/<end>` joined with `, `.
-impl Show for FoldingRegions with fn output(self, logger) {
-  let parts : Array[String] = []
-  for i in 0..<self.length() {
-    let collapsed = if self.is_collapsed(i) { "+" } else { "-" }
-    parts.push(
-      "[\{self.get_source(i).abbr()}\{collapsed}] \{self.get_start_line_number(i)}/\{self.get_end_line_number(i)}",
-    )
-  }
-  logger.write_string(parts.join(", "))
 }
 
 ///|
@@ -643,13 +591,5 @@ fn FoldingRegion::contains_line(
   line_number : Int,
 ) -> Bool {
   self.start_line_number() <= line_number &&
-  line_number <= self.end_line_number()
-}
-
-///|
-/// `hidesLine` (`foldingRanges.ts:426`): the fold hides every line after its
-/// (still visible) header.
-fn FoldingRegion::hides_line(self : FoldingRegion, line_number : Int) -> Bool {
-  self.start_line_number() < line_number &&
   line_number <= self.end_line_number()
 }

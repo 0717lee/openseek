@@ -679,23 +679,3 @@ test "isAbsolute" {
     assert_false(Posix::is_absolute(non_absolute_path), msg=non_absolute_path)
   }
 }
-
-///|
-test "path" {
-  // path.sep tests
-  assert_eq(Win32::sep(), "\\")
-  assert_eq(Posix::sep(), "/")
-
-  // path.delimiter tests
-  assert_eq(Win32::delimiter(), ";")
-  assert_eq(Posix::delimiter(), ":")
-
-  // The platform-selected exports follow the D8 seam.
-  set_is_windows_for_testing(value=true)
-  assert_eq(sep(), "\\")
-  assert_eq(normalize("foo/bar"), "foo\\bar")
-  set_is_windows_for_testing(value=false)
-  assert_eq(sep(), "/")
-  assert_eq(normalize("foo//bar"), "foo/bar")
-  set_is_windows_for_testing()
-}

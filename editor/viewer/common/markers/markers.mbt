@@ -34,35 +34,6 @@ fn MarkerSeverity::value(self : MarkerSeverity) -> Int {
 }
 
 ///|
-/// `b - a`, `MarkerSeverity.compare` (`markers.ts:65`).
-fn MarkerSeverity::compare(a : MarkerSeverity, b : MarkerSeverity) -> Int {
-  b.value() - a.value()
-}
-
-///|
-/// Display string, `MarkerSeverity.toString` (`markers.ts:74`). Only
-/// Error/Warning/Info have one; everything else is empty.
-fn MarkerSeverity::label(self : MarkerSeverity) -> String {
-  match self {
-    Error => "Error"
-    Warning => "Warning"
-    Info => "Info"
-    Hint => ""
-  }
-}
-
-///|
-/// Plural display string, `MarkerSeverity.toStringPlural` (`markers.ts:83`).
-fn MarkerSeverity::label_plural(self : MarkerSeverity) -> String {
-  match self {
-    Error => "Errors"
-    Warning => "Warnings"
-    Info => "Infos"
-    Hint => ""
-  }
-}
-
-///|
 /// Bridge `@language.DiagnosticSeverity` → `MarkerSeverity`. Replaces Monaco's
 /// `fromSeverity`, whose `base/common/severity` source enum has no viewer
 /// analog (deferred).
@@ -97,24 +68,6 @@ pub(all) enum MarkerTag {
   Unnecessary
   Deprecated
 } derive(Eq, Debug)
-
-///|
-/// The tag's bit value (`Unnecessary=1, Deprecated=2`), `markers.ts:51`.
-fn MarkerTag::value(self : MarkerTag) -> Int {
-  match self {
-    Unnecessary => 1
-    Deprecated => 2
-  }
-}
-
-///|
-/// Bridge `@language.DiagnosticTag` → `MarkerTag`.
-fn MarkerTag::from_diagnostic_tag(tag : @language.DiagnosticTag) -> MarkerTag {
-  match tag {
-    Unnecessary => Unnecessary
-    Deprecated => Deprecated
-  }
-}
 
 ///|
 /// Inverse bridge for the `to_diagnostic` shim.
@@ -268,15 +221,6 @@ fn Marker::has_tag(self : Marker, tag : MarkerTag) -> Bool {
 }
 
 ///|
-/// Aggregate per-severity counts, `MarkerStatistics` (`markers.ts:146`).
-priv struct MarkerStatistics {
-  mut errors : Int
-  mut warnings : Int
-  mut infos : Int
-  mut unknowns : Int
-} derive(Eq, Debug)
-
-///|
 /// Read filter, `IMarkerReadOptions` (`markers.ts:13`).
 priv struct MarkerReadOptions {
   owner : String?
@@ -284,7 +228,7 @@ priv struct MarkerReadOptions {
   severities : Int?
   take : Int?
   ignore_resource_filters : Bool
-} derive(Eq, Debug)
+}
 
 ///|
 /// Builds a read filter; every field is optional, `ignore_resource_filters`
@@ -297,33 +241,6 @@ fn MarkerReadOptions::MarkerReadOptions(
   ignore_resource_filters? : Bool = false,
 ) -> MarkerReadOptions {
   { owner, resource, severities, take, ignore_resource_filters }
-}
-
-///|
-/// Converts a language diagnostic into a marker owned by a specific provider.
-/// The shim the diagnostics render path uses; the `Marker` carries no marker-only
-/// metadata (code/source) because diagnostics do not supply it.
-fn Marker::from_diagnostic(
-  owner : String,
-  resource : @base_common.Uri,
-  diagnostic : @language.Diagnostic,
-) -> Marker {
-  {
-    owner,
-    resource,
-    severity: MarkerSeverity::from_diagnostic_severity(diagnostic.severity),
-    code: None,
-    message: diagnostic.message,
-    source: None,
-    start_line_number: diagnostic.range.start_line_number,
-    start_column: diagnostic.range.start_column,
-    end_line_number: diagnostic.range.end_line_number,
-    end_column: diagnostic.range.end_column,
-    model_version_id: None,
-    related_information: None,
-    tags: diagnostic.tags.map(tags => tags.map(MarkerTag::from_diagnostic_tag)),
-    origin: None,
-  }
 }
 
 ///|

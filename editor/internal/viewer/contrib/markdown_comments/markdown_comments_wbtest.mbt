@@ -98,14 +98,6 @@ test "blank non-comment and source lines separate line comment blocks" {
 }
 
 ///|
-test "TextModel entry point reads one snapshot and allows leading indent" {
-  let model = test_model("  # title\nvalue")
-  assert_eq(detect_markdown_comments(model, line_comments("#")), [
-    block(1, 2, "title"),
-  ])
-}
-
-///|
 test "empty comment rules detect no blocks" {
   let rule : @languages.CommentRule = {
     line_comment: None,
@@ -360,51 +352,6 @@ test "normalization uses the all-model-lines visibility fallback" {
 }
 
 ///|
-test "resolver falls back to the model language comment configuration" {
-  let registry = @languages.Languages()
-  registry.set_language_configuration("moonbit", {
-    comments: Some(line_comments("//")),
-    folding_rules: None,
-  })
-  let log_handle = @log.LogService().log_handle()
-  let handle = registry.language_handle(log_handle)
-  assert_eq(
-    resolve_markdown_comment_blocks(
-      test_model("// configured\nsource"),
-      handle,
-      log_handle,
-    ),
-    [block(1, 2, "configured")],
-  )
-}
-
-///|
-test "resolver treats an empty provider result as authoritative" {
-  let registry = @languages.Languages()
-  registry.set_language_configuration("moonbit", {
-    comments: Some(line_comments("//")),
-    folding_rules: None,
-  })
-  let calls = Ref(0)
-  let registration = registry.register_markdown_comment_provider(
-    LanguageId("moonbit"),
-    ResolverMarkdownCommentProvider::{ blocks: [], calls },
-  )
-  let log_handle = @log.LogService().log_handle()
-  let handle = registry.language_handle(log_handle)
-  assert_eq(
-    resolve_markdown_comment_blocks(
-      test_model("// configured\nsource"),
-      handle,
-      log_handle,
-    ),
-    [],
-  )
-  assert_eq(calls.val, 1)
-  registration.dispose()
-}
-
-///|
 test "resolver normalizes provider ranges and reports discarded entries" {
   let registry = @languages.Languages()
   let calls = Ref(0)
@@ -443,34 +390,6 @@ test "resolver normalizes provider ranges and reports discarded entries" {
   assert_eq(calls.val, 1)
   assert_eq(memory.entries().length(), 2)
   registration.dispose()
-}
-
-///|
-test "disposing an authoritative provider restores configuration fallback" {
-  let registry = @languages.Languages()
-  registry.set_language_configuration("moonbit", {
-    comments: Some(line_comments("//")),
-    folding_rules: None,
-  })
-  let calls = Ref(0)
-  let registration = registry.register_markdown_comment_provider(
-    LanguageId("moonbit"),
-    ResolverMarkdownCommentProvider::{
-      blocks: [block(2, 3, "provider")],
-      calls,
-    },
-  )
-  let log_handle = @log.LogService().log_handle()
-  let handle = registry.language_handle(log_handle)
-  let model = test_model("// configured\nsource")
-  assert_eq(resolve_markdown_comment_blocks(model, handle, log_handle), [
-    block(2, 3, "provider"),
-  ])
-  registration.dispose()
-  assert_eq(resolve_markdown_comment_blocks(model, handle, log_handle), [
-    block(1, 2, "configured"),
-  ])
-  assert_eq(calls.val, 1)
 }
 
 ///|

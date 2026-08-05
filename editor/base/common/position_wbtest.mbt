@@ -66,14 +66,3 @@ test "compare returns sign by line then column" {
   assert_true(Position::compare(a, a) == 0)
   assert_true(Position::compare(a, c) < 0)
 }
-
-///|
-test "clone copies both axes" {
-  let p = Position::Position(6, 9)
-  assert_true(p.clone().equals(p))
-}
-
-///|
-test "to_string is (line,column)" {
-  assert_eq(Position::Position(3, 7).to_string(), "(3,7)")
-}

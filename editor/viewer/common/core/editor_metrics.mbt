@@ -4,10 +4,6 @@
 // direction back into the root `viewer` package.
 
 ///|
-/// Right padding of `.view-line-content`, part of the horizontal scroll extent.
-let code_right_padding = 16.0
-
-///|
 /// Editor scrollbar defaults from Monaco's `EditorScrollbar` option.
 pub let editor_vertical_scrollbar_size = 14.0
 

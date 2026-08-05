@@ -59,45 +59,6 @@ fn cursor_controller_test_model(text? : String = "abc") -> @model.TextModel {
 }
 
 ///|
-test "model validation resets only residues whose endpoints changed" {
-  let model = cursor_controller_test_model(text="a\u{1F4DA}b")
-  let identity = CursorTestConverter::{ column_delta: 0, range_delta: 0 }
-  let controller = CursorsController(model, identity.context())
-
-  controller.set_model_cursor_state(
-    SingleCursorState(
-      Position(0, 0),
-      Position(1, 4),
-      Simple,
-      Position(1, 4),
-      selection_start_leftover_visible_columns=7,
-      leftover_visible_columns=9,
-    ),
-  )
-  |> ignore
-  let clamped_anchor = controller.model_state()
-  assert_true(clamped_anchor.selection_start_start == Position(1, 1))
-  assert_eq(clamped_anchor.selection_start_leftover_visible_columns, 0)
-  assert_eq(clamped_anchor.leftover_visible_columns, 9)
-
-  controller.set_model_cursor_state(
-    SingleCursorState(
-      Position(1, 2),
-      Position(1, 4),
-      Simple,
-      Position(1, 3),
-      selection_start_leftover_visible_columns=11,
-      leftover_visible_columns=13,
-    ),
-  )
-  |> ignore
-  let snapped_active = controller.model_state()
-  assert_true(snapped_active.position == Position(1, 2))
-  assert_eq(snapped_active.selection_start_leftover_visible_columns, 11)
-  assert_eq(snapped_active.leftover_visible_columns, 0)
-}
-
-///|
 test "partial cursor-state constructors retain exact present and absent sides" {
   let model_state = SingleCursorState(
     Position(1, 2),
@@ -201,73 +162,5 @@ test "central partial transition covers null model view and full shapes" {
     is Some(_),
   )
   assert_true(controller.model_state().position == Position(1, 2))
-  assert_true(controller.view_state().position == Position(1, 3))
-}
-
-///|
-test "single-cursor normalize returns without changing primary state" {
-  let model = cursor_controller_test_model()
-  let identity = CursorTestConverter::{ column_delta: 0, range_delta: 0 }
-  let controller = CursorsController(model, identity.context())
-  controller.set_model_cursor_state(
-    SingleCursorState(
-      Position(1, 1),
-      Position(1, 3),
-      Simple,
-      Position(1, 2),
-      selection_start_leftover_visible_columns=5,
-      leftover_visible_columns=7,
-    ),
-  )
-  |> ignore
-  let before = controller.get_primary_cursor_state()
-  controller.normalize()
-  assert_true(controller.get_primary_cursor_state() == before)
-}
-
-///|
-test "view-only state converts its complete anchor range as one unit" {
-  let model = cursor_controller_test_model()
-  let converter = CursorTestConverter::{ column_delta: 1, range_delta: 2 }
-  let controller = CursorsController(model, converter.context())
-  let view_state = SingleCursorState(
-    Position(1, 4),
-    Position(1, 5),
-    Word,
-    Position(1, 4),
-  )
-  controller.set_view_cursor_state(view_state) |> ignore
-  let model_state = controller.model_state()
-  assert_true(model_state.selection_start_start == Position(1, 2))
-  assert_true(model_state.selection_start_end == Position(1, 3))
-  assert_true(model_state.position == Position(1, 3))
-  assert_true(controller.view_state() == view_state)
-}
-
-///|
-test "mapping reprojection observes handling and pending model-version guards" {
-  let model = cursor_controller_test_model()
-  let identity = CursorTestConverter::{ column_delta: 0, range_delta: 0 }
-  let shifted = CursorTestConverter::{ column_delta: 1, range_delta: 1 }
-  let controller = CursorsController(model, identity.context())
-  controller.set_model_cursor_state(
-    SingleCursorState::collapsed(Position(1, 2)),
-  )
-  |> ignore
-
-  controller.is_handling = true
-  controller.set_context(shifted.context())
-  assert_true(controller.view_state().position == Position(1, 2))
-
-  controller.is_handling = false
-  controller.set_context(shifted.context())
-  assert_true(controller.view_state().position == Position(1, 3))
-
-  // The model is now one internal generation ahead of the controller. A
-  // mapping notification must wait for the content-event lane instead of
-  // reprojecting against torn model/view generations.
-  model.set_value("abcd")
-  let further_shifted = CursorTestConverter::{ column_delta: 2, range_delta: 2 }
-  controller.set_context(further_shifted.context())
   assert_true(controller.view_state().position == Position(1, 3))
 }

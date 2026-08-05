@@ -13,13 +13,6 @@
 // service is DOM-free, so this package stays multi-target.
 
 ///|
-/// Internal payload for a reply appended to an existing thread.
-priv struct AgentFeedbackReplyAddedEvent {
-  feedback : @agent_feedback_api.AgentFeedback
-  reply_count : Int
-} derive(Debug)
-
-///|
 /// The agent-feedback store shared by the host app and the viewer's feedback
 /// contributions, handed in through `ViewerServices`.
 struct AgentFeedbackService {
@@ -30,7 +23,6 @@ struct AgentFeedbackService {
   did_add_feedback : @base_common.Emitter[
     @agent_feedback_api.AgentFeedbackAddedEvent,
   ]
-  did_add_reply : @base_common.Emitter[AgentFeedbackReplyAddedEvent]
   did_submit_feedback : @base_common.Emitter[
     @agent_feedback_api.AgentFeedbackSubmittedEvent,
   ]
@@ -52,7 +44,6 @@ pub fn AgentFeedbackService::AgentFeedbackService() -> AgentFeedbackService {
     did_change_feedback: Emitter(),
     did_change_navigation: Emitter(),
     did_add_feedback: Emitter(),
-    did_add_reply: Emitter(),
     did_submit_feedback: Emitter(),
     items_by_resource: Map([]),
     navigation_anchor_by_resource: Map([]),
@@ -66,7 +57,6 @@ pub fn AgentFeedbackService::dispose(self : AgentFeedbackService) -> Unit {
   self.did_change_feedback.dispose()
   self.did_change_navigation.dispose()
   self.did_add_feedback.dispose()
-  self.did_add_reply.dispose()
   self.did_submit_feedback.dispose()
 }
 
@@ -127,26 +117,6 @@ fn AgentFeedbackService::on_did_change_navigation(
 ) -> @base_common.Disposable {
   self.did_change_navigation.event(listener)
 }
-
-///|
-/// `onDidAddFeedback`: a new item entered the store in the `Accepted` state.
-fn AgentFeedbackService::on_did_add_feedback(
-  self : AgentFeedbackService,
-  listener : (@agent_feedback_api.AgentFeedbackAddedEvent) -> Unit,
-) -> @base_common.Disposable {
-  self.did_add_feedback.event(listener)
-}
-
-///|
-/// `onDidAddReply`: a reply was appended to an existing item.
-fn AgentFeedbackService::on_did_add_reply(
-  self : AgentFeedbackService,
-  listener : (AgentFeedbackReplyAddedEvent) -> Unit,
-) -> @base_common.Disposable {
-  self.did_add_reply.event(listener)
-}
-
-// --- store internals -----------------------------------------------------------
 
 ///|
 /// `_handleBackendChange`: re-broadcast the generic feedback + navigation
@@ -256,20 +226,6 @@ fn AgentFeedbackService::get_feedback(
     None => []
   }
 }
-
-///|
-/// `clearFeedback`: drops all items and the navigation anchor for a resource.
-fn AgentFeedbackService::clear_feedback(
-  self : AgentFeedbackService,
-  resource : @base_common.Uri,
-) -> Unit {
-  let key = resource.to_string()
-  self.navigation_anchor_by_resource.remove(key)
-  self.items_by_resource.remove(key)
-  self.handle_items_changed(resource)
-}
-
-// --- contribution-facing mutations ----------------------------------------------
 
 ///|
 /// `addFeedback` (`agentFeedbackService.ts:385`): stores a new item.
@@ -382,7 +338,6 @@ fn AgentFeedbackService::add_reply(
   replies.push(reply_text)
   let updated : @agent_feedback_api.AgentFeedback = { ..existing, replies, }
   self.replace_item(resource, updated)
-  self.did_add_reply.fire({ feedback: updated, reply_count: replies.length() })
 }
 
 ///|
@@ -457,40 +412,6 @@ fn AgentFeedbackService::set_navigation_anchor(
     None => self.navigation_anchor_by_resource.remove(key)
   }
   self.did_change_navigation.fire(resource)
-}
-
-///|
-/// `getNextNavigableItem` over a caller-supplied id order (upstream is
-/// generic over `INavigableSessionComment`; the viewer navigates plain ids):
-/// steps the anchor forward/backward with wrap-around, re-anchors on the
-/// result, and returns it. An empty list clears the anchor.
-fn AgentFeedbackService::get_next_navigable_item(
-  self : AgentFeedbackService,
-  resource : @base_common.Uri,
-  item_ids : Array[String],
-  next~ : Bool,
-) -> String? {
-  let key = resource.to_string()
-  if item_ids.is_empty() {
-    self.navigation_anchor_by_resource.remove(key)
-    return None
-  }
-  let mut anchor_index = match self.navigation_anchor_by_resource.get(key) {
-    Some(anchor) => item_ids.search_by(id => id == anchor).unwrap_or(-1)
-    None => -1
-  }
-  if anchor_index < 0 && !next {
-    anchor_index = 0
-  }
-  let count = item_ids.length()
-  let next_index = if next {
-    (anchor_index + 1) % count
-  } else {
-    (anchor_index - 1 + count) % count
-  }
-  let item_id = item_ids[next_index]
-  self.set_navigation_anchor(resource, Some(item_id))
-  Some(item_id)
 }
 
 ///|

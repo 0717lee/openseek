@@ -22,7 +22,7 @@ priv struct CursorRenderData {
   padding_left : Double
   width : Double
   height : Int
-} derive(Eq, Debug)
+}
 
 ///|
 /// Public cursor owner for controller callers. Package-local lifecycle code

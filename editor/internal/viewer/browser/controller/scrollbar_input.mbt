@@ -254,17 +254,6 @@ fn MouseHandler::handle_scrollable_drag_mouse(
 }
 
 ///|
-/// Package-private gesture seam for deterministic platform-branch coverage.
-/// Each test owns its handler, so replacing the predicate cannot affect other
-/// viewers or product execution.
-fn MouseHandler::set_scrollbar_drag_should_reset_for_test(
-  self : MouseHandler,
-  predicate : (Double, Double) -> Bool,
-) -> Unit {
-  self.scrollbar_drag_should_reset = predicate
-}
-
-///|
 fn scrollbar_drag_orthogonal_coord(
   mouse : @rdom.MouseEvent,
   vertical : Bool,

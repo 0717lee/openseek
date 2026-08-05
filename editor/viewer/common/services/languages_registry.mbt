@@ -1,6 +1,6 @@
-///| Faithful port of vscode's `LanguageIdCodec` from
+///| Reachable subset of vscode's `LanguageIdCodec` from
 /// `src/vs/editor/common/services/languagesRegistry.ts` (pinned `vscode/`
-/// submodule). Maps string language ids to a stable numeric id (and back), the
+/// submodule). Maps string language ids to a stable numeric id, the
 /// value a token metadata word's low 8 bits carry (`ILanguageIdCodec`,
 /// `common/languages.ts`).
 
@@ -16,8 +16,8 @@ let builtin_language_ids : Array[String] = [
 ]
 
 ///|
-/// Faithful `ILanguageIdCodec` (`languagesRegistry.ts`). Seeded with the
-/// built-in languages; `register` extends it.
+/// Encoding half of `ILanguageIdCodec` (`languagesRegistry.ts`). Seeded with
+/// the built-in languages; `register` extends it.
 struct LanguageIdCodec {
   language_id_to_language : Array[String]
   language_to_language_id : Map[String, Int]
@@ -79,16 +79,4 @@ pub fn LanguageIdCodec::encode_language_id(
   language : String,
 ) -> Int {
   self.language_to_language_id.get(language).unwrap_or(0)
-}
-
-///|
-fn LanguageIdCodec::decode_language_id(
-  self : LanguageIdCodec,
-  language_id : Int,
-) -> String {
-  if language_id >= 0 && language_id < self.language_id_to_language.length() {
-    self.language_id_to_language[language_id]
-  } else {
-    "null"
-  }
 }

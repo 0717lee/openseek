@@ -278,7 +278,7 @@ fn async_feature_state_json(
     "pending": (harness.calls.length() - settled).to_json(),
     "resolveReports": reports.length().to_json(),
     "reports": Json::array(reports.map(report => report.to_json())),
-    "attached": viewer.get_model().is_some().to_json(),
+    "attached": (viewer.get_model() is Some(_)).to_json(),
     "disposed": disposed.val.to_json(),
     "currentModelId": current_model_id.to_json(),
     "currentUri": current_uri.to_json(),

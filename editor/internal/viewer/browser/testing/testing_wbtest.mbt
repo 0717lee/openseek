@@ -20,17 +20,17 @@ test "observations are isolated by viewer id and disposable" {
   defer first_model.dispose()
   let second_model = test_model("second")
   defer second_model.dispose()
-  let first_registration = register_viewer(
-    "observations-first",
-    has_model=() => true,
-    set_hidden_areas=(_ranges, _source, _force) => (),
-  )
+  let first_registration = register_viewer("observations-first", set_hidden_areas=(
+    _ranges,
+    _source,
+    _force,
+  ) => ())
   defer first_registration.dispose()
-  let second_registration = register_viewer(
-    "observations-second",
-    has_model=() => true,
-    set_hidden_areas=(_ranges, _source, _force) => (),
-  )
+  let second_registration = register_viewer("observations-second", set_hidden_areas=(
+    _ranges,
+    _source,
+    _force,
+  ) => ())
   defer second_registration.dispose()
   let build_models : Array[Int] = []
   let build_counts : Array[Int] = []
@@ -92,86 +92,17 @@ test "observations are isolated by viewer id and disposable" {
 }
 
 ///|
-test "controls and replacement cleanup are deterministic" {
-  let present = Ref(true)
-  let captured_ranges : Array[@base_common.Range] = []
-  let captured_source : Ref[String?] = Ref(None)
-  let captured_force = Ref(false)
-  let old_registration = register_viewer(
-    "controls-reused-id",
-    has_model=() => false,
-    set_hidden_areas=(_ranges, _source, _force) => (),
-  )
-  let old_events = Ref(0)
-  let old_subscription = on_did_resolve_hover("controls-reused-id", _ => {
-    old_events.val += 1
-  })
-  let replacement = register_viewer(
-    "controls-reused-id",
-    has_model=() => present.val,
-    set_hidden_areas=(ranges, source, force) => {
-      captured_ranges.clear()
-      captured_ranges.append(ranges)
-      captured_source.val = source
-      captured_force.val = force
-    },
-  )
-  defer replacement.dispose()
-  old_registration.dispose()
-  old_registration.dispose()
-  assert_true(has_model("controls-reused-id"))
-  present.val = false
-  assert_false(has_model("controls-reused-id"))
-  assert_true(
-    set_hidden_areas(
-      "controls-reused-id",
-      [Range(2, 1, 3, 1)],
-      source="folding",
-      force_update=true,
-    ),
-  )
-  assert_eq(captured_ranges.length(), 1)
-  assert_eq(captured_ranges[0].start_line_number, 2)
-  assert_eq(captured_source.val, Some("folding"))
-  assert_true(captured_force.val)
-  publish_hover_resolved("controls-reused-id", {
-    ok: true,
-    revision: "replacement",
-  })
-  assert_eq(old_events.val, 0)
-  old_subscription.dispose()
-  replacement.dispose()
-  replacement.dispose()
-  assert_false(has_model("controls-reused-id"))
-  assert_false(set_hidden_areas("controls-reused-id", [Range(1, 1, 1, 1)]))
-  unregister_viewer("controls-reused-id")
-}
-
-///|
-test "subscriptions to missing ids are inert" {
-  let calls = Ref(0)
-  let subscription = on_did_resolve_hover("never-registered", _ => {
-    calls.val += 1
-  })
-  subscription.dispose()
-  subscription.dispose()
-  publish_hover_resolved("never-registered", { ok: false, revision: "missing" })
-  assert_eq(calls.val, 0)
-  assert_false(has_model("never-registered"))
-}
-
-///|
 test "scroll frame observations preserve order isolation and lifetimes" {
-  let first_registration = register_viewer(
-    "scroll-trace-first",
-    has_model=() => true,
-    set_hidden_areas=(_ranges, _source, _force) => (),
-  )
-  let second_registration = register_viewer(
-    "scroll-trace-second",
-    has_model=() => true,
-    set_hidden_areas=(_ranges, _source, _force) => (),
-  )
+  let first_registration = register_viewer("scroll-trace-first", set_hidden_areas=(
+    _ranges,
+    _source,
+    _force,
+  ) => ())
+  let second_registration = register_viewer("scroll-trace-second", set_hidden_areas=(
+    _ranges,
+    _source,
+    _force,
+  ) => ())
   defer second_registration.dispose()
 
   // A registered viewer without a listener is the ordinary disabled state.
@@ -217,11 +148,11 @@ test "scroll frame observations preserve order isolation and lifetimes" {
 
   // Re-registration disposes old listeners; an older generation handle
   // cannot remove the replacement.
-  let replacement = register_viewer(
-    "scroll-trace-first",
-    has_model=() => true,
-    set_hidden_areas=(_ranges, _source, _force) => (),
-  )
+  let replacement = register_viewer("scroll-trace-first", set_hidden_areas=(
+    _ranges,
+    _source,
+    _force,
+  ) => ())
   defer replacement.dispose()
   first_registration.dispose()
   let replacement_events : Array[ScrollFrameObservation] = []

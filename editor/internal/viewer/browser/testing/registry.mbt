@@ -4,7 +4,6 @@
 /// callback surface, keeping the dependency direction toward root one-way.
 priv struct ViewerTestingEntry {
   registration_id : Int
-  has_model : () -> Bool
   set_hidden_areas : (Array[@base_common.Range], String?, Bool) -> Unit
   did_build_view_model : @base_common.Emitter[ViewModelBuiltObservation]
   did_render_model : @base_common.Emitter[ModelRenderedObservation]
@@ -44,7 +43,6 @@ fn unregister_if_current(viewer_id : String, registration_id : Int) -> Unit {
 /// viewer that happens to reuse the same id.
 pub fn register_viewer(
   viewer_id : String,
-  has_model~ : () -> Bool,
   set_hidden_areas~ : (Array[@base_common.Range], String?, Bool) -> Unit,
 ) -> @base_common.Disposable {
   unregister_viewer(viewer_id)
@@ -52,7 +50,6 @@ pub fn register_viewer(
   let registration_id = next_registration_id.val
   viewer_entries[viewer_id] = {
     registration_id,
-    has_model,
     set_hidden_areas,
     did_build_view_model: Emitter(),
     did_render_model: Emitter(),
@@ -78,16 +75,6 @@ fn unregister_viewer(viewer_id : String) -> Unit {
       entry.dispose()
     }
     None => ()
-  }
-}
-
-///|
-/// Returns whether the registered viewer currently has a model. Missing ids
-/// are treated as detached/disposed viewers.
-fn has_model(viewer_id : String) -> Bool {
-  match viewer_entries.get(viewer_id) {
-    Some(entry) => (entry.has_model)()
-    None => false
   }
 }
 

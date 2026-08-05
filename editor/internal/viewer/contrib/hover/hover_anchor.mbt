@@ -5,13 +5,6 @@
 // spans the position covers.
 
 ///|
-/// `HoverAnchorType` (`hoverTypes.ts:42-45`).
-priv enum HoverAnchorType {
-  Range
-  ForeignElement
-} derive(Eq, Debug)
-
-///|
 /// Stable identity of the participant that owns a foreign-element anchor.
 /// Monaco compares participant objects by identity; the multi-target MoonBit
 /// port mints an explicit identity so copying or rebuilding a participant
@@ -22,14 +15,6 @@ struct HoverParticipantOwner {
 
 ///|
 let next_hover_participant_owner_id : Ref[Int] = Ref(0)
-
-///|
-fn HoverAnchor::anchor_type(self : HoverAnchor) -> HoverAnchorType {
-  match self {
-    HoverRangeAnchor(..) => Range
-    HoverForeignElementAnchor(..) => ForeignElement
-  }
-}
 
 ///|
 pub fn HoverAnchor::priority(self : HoverAnchor) -> Int {
@@ -72,24 +57,6 @@ fn hover_anchor_equals(left : HoverAnchor, right : HoverAnchor) -> Bool {
       right is HoverForeignElementAnchor(owner=right_owner, ..) &&
       left_owner == right_owner
   }
-}
-
-///|
-/// Monaco `HoverAnchor.canAdoptVisibleHover` (`hoverTypes.ts:59-61,:78-80`):
-/// a new range anchor adopts a visible hover shown from a range anchor on the
-/// same line (the source compares against the widget's shown position, which
-/// `computeHoverPositions` clamps to the anchor line — the last anchor's
-/// start line is that line); a new foreign anchor adopts a visible hover
-/// shown from the same owner's foreign anchor.
-fn hover_anchor_can_adopt(
-  new_anchor : HoverAnchor,
-  last_anchor : HoverAnchor,
-) -> Bool {
-  hover_anchor_can_adopt_at(
-    new_anchor,
-    last_anchor,
-    last_anchor.range().get_start_position(),
-  )
 }
 
 ///|

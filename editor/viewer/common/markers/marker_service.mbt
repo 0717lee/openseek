@@ -1,15 +1,5 @@
-// Marker store ported 1:1 from
+// Reachable marker-store subset ported from
 // vscode/src/vs/platform/markers/common/markerService.ts
-
-///|
-/// Schemes excluded from marker statistics, `unsupportedSchemas`
-/// (`markerService.ts:16`). The literal Monaco scheme strings; the viewer's own
-/// document scheme is `memory`, which is *not* among these, so viewer documents
-/// are counted (the faithful outcome).
-let unsupported_schemes : Array[String] = [
-  "inmemory", "vscode-source-control", "walkThrough", "walkThroughSnippet", "vscode-chat-code-block",
-  "vscode-terminal",
-]
 
 ///|
 /// `DoubleResourceMap` (`markerService.ts:25`): markers indexed both by resource
@@ -149,96 +139,6 @@ fn DoubleResourceMap::values_by_owner(
 }
 
 ///|
-/// Live per-severity statistics, `MarkerStats` (`markerService.ts:80`). Subscribes
-/// to the service's change event and accumulates deltas per resource.
-priv struct MarkerStats {
-  mut errors : Int
-  mut warnings : Int
-  mut infos : Int
-  mut unknowns : Int
-  data : Map[String, MarkerStatistics]
-  service : MarkerService
-}
-
-///|
-fn MarkerStats::new(service : MarkerService) -> MarkerStats {
-  let stats = {
-    errors: 0,
-    warnings: 0,
-    infos: 0,
-    unknowns: 0,
-    data: Map([]),
-    service,
-  }
-  service.did_change_markers.event(resources => stats.update(resources))
-  |> ignore
-  stats
-}
-
-///|
-/// `_update` (`markerService.ts:100`).
-fn MarkerStats::update(
-  self : MarkerStats,
-  resources : Array[@base_common.Uri],
-) -> Unit {
-  for resource in resources {
-    match self.data.get(resource.to_string()) {
-      Some(old_stats) => self.subtract(old_stats)
-      None => ()
-    }
-    let new_stats = self.resource_stats(resource)
-    self.add(new_stats)
-    self.data.set(resource.to_string(), new_stats)
-  }
-}
-
-///|
-/// `_resourceStats` (`markerService.ts:112`): skip unsupported schemes; bucket by
-/// severity.
-fn MarkerStats::resource_stats(
-  self : MarkerStats,
-  resource : @base_common.Uri,
-) -> MarkerStatistics {
-  let result : MarkerStatistics = {
-    errors: 0,
-    warnings: 0,
-    infos: 0,
-    unknowns: 0,
-  }
-  // TODO this is a hack (markerService.ts:115)
-  if unsupported_schemes.contains(resource.scheme) {
-    return result
-  }
-  for marker in self.service.read(MarkerReadOptions(resource~)) {
-    match marker.severity {
-      Error => result.errors += 1
-      Warning => result.warnings += 1
-      Info => result.infos += 1
-      _ => result.unknowns += 1
-    }
-  }
-  result
-}
-
-///|
-/// `_substract` (`markerService.ts:135`).
-fn MarkerStats::subtract(self : MarkerStats, op : MarkerStatistics) -> Unit {
-  self.errors -= op.errors
-  self.warnings -= op.warnings
-  self.infos -= op.infos
-  self.unknowns -= op.unknowns
-}
-
-///|
-/// `_add` (`markerService.ts:142`).
-fn MarkerStats::add(self : MarkerStats, op : MarkerStatistics) -> Unit {
-  self.errors += op.errors
-  self.warnings += op.warnings
-  self.infos += op.infos
-  self.unknowns += op.unknowns
-}
-
-///|
 /// `_merge` (`markerService.ts:405`): unions every queued change's URI set,
 /// first-seen order, keyed like `ResourceMap.defaultToKey` (`uri.toString()`).
 fn merge_changed_uris(
@@ -260,7 +160,6 @@ struct MarkerService {
   did_change_markers : @base_common.MicrotaskEmitter[Array[@base_common.Uri]]
   data : DoubleResourceMap
   filtered_resources : Map[String, Array[String]]
-  mut stats : MarkerStats?
 }
 
 ///|
@@ -281,9 +180,7 @@ pub fn MarkerService::MarkerService(
     did_change_markers,
     data: DoubleResourceMap::new(),
     filtered_resources: Map([]),
-    stats: None,
   }
-  service.stats = Some(MarkerStats::new(service))
   service
 }
 
@@ -300,23 +197,6 @@ pub fn MarkerService::on_did_change_markers(
 /// Releases the change emitter.
 pub fn MarkerService::dispose(self : MarkerService) -> Unit {
   self.did_change_markers.dispose()
-}
-
-///|
-/// `getStatistics` (`markerService.ts:169`): a snapshot of the live stats. (Monaco
-/// returns the live object; the snapshot reads identically for any caller that
-/// consumes it immediately.)
-fn MarkerService::statistics(self : MarkerService) -> MarkerStatistics {
-  match self.stats {
-    Some(stats) =>
-      {
-        errors: stats.errors,
-        warnings: stats.warnings,
-        infos: stats.infos,
-        unknowns: stats.unknowns,
-      }
-    None => { errors: 0, warnings: 0, infos: 0, unknowns: 0 }
-  }
 }
 
 ///|
@@ -359,45 +239,6 @@ fn MarkerService::change_one_impl(
     self.data.set(resource, owner, markers)
     self.did_change_markers.fire([resource])
   }
-}
-
-///|
-/// `installResourceFilter` (`markerService.ts:202`): records a filter reason for a
-/// resource and returns a disposable that removes it (D5).
-fn MarkerService::install_resource_filter(
-  self : MarkerService,
-  resource : @base_common.Uri,
-  reason : String,
-) -> @base_common.Disposable {
-  let key = resource.to_string()
-  let reasons = match self.filtered_resources.get(key) {
-    Some(r) => r
-    None => {
-      let r : Array[String] = []
-      self.filtered_resources.set(key, r)
-      r
-    }
-  }
-  reasons.push(reason)
-  self.did_change_markers.fire([resource])
-  @base_common.Disposable::from(() => {
-    match self.filtered_resources.get(key) {
-      None => ()
-      Some(reasons) => {
-        let reason_index = reasons.search(reason)
-        match reason_index {
-          Some(index) => {
-            reasons.remove(index) |> ignore
-            if reasons.length() == 0 {
-              self.filtered_resources.remove(key)
-            }
-            self.did_change_markers.fire([resource])
-          }
-          None => ()
-        }
-      }
-    }
-  })
 }
 
 ///|

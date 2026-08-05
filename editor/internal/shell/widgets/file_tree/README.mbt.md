@@ -49,5 +49,5 @@ attributes.
 The widget may depend on `workspace` and Rabbita, never on `remote_protocol` or
 `viewer`. Run the focused test with
 `moon test internal/shell/widgets/file_tree --target js`. The read-only check
-gate is `moon check --target all --warn-list +73` followed by
+gate is `moon check --target all --warn-list +73 --deny-warn` followed by
 `moon fmt --check`; see `docs/quality.md` for the complete required checks.

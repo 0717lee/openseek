@@ -374,7 +374,7 @@ moon test internal/viewer/browser/view --target js -v
 The structural validation set is:
 
 ```sh
-moon check --target all --warn-list +73
+moon check --target all --warn-list +73 --deny-warn
 moon fmt --check
 just test
 just build

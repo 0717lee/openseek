@@ -1,4 +1,5 @@
-// 1:1 port of Monaco/VS Code's line/column `Range`.
+// Reachable subset of Monaco/VS Code's line/column `Range`; methods with no
+// product caller are deferred.
 //
 // Source: vscode/src/vs/editor/common/core/range.ts
 // (checked-in vscode submodule).
@@ -74,24 +75,6 @@ fn Range::contains_position_in(range : Range, position : Position) -> Bool {
   }
   if position.line_number == range.end_line_number &&
     position.column > range.end_column {
-    return false
-  }
-  true
-}
-
-///|
-/// Test if position is strictly in this range (edges excluded).
-fn Range::strict_contains_position(range : Range, position : Position) -> Bool {
-  if position.line_number < range.start_line_number ||
-    position.line_number > range.end_line_number {
-    return false
-  }
-  if position.line_number == range.start_line_number &&
-    position.column <= range.start_column {
-    return false
-  }
-  if position.line_number == range.end_line_number &&
-    position.column >= range.end_column {
     return false
   }
   true
@@ -241,12 +224,6 @@ fn Range::intersect_ranges_of(a : Range, b : Range) -> Range? {
 }
 
 ///|
-/// Test if this range equals `other`.
-fn Range::equals_range(self : Range, other : Range) -> Bool {
-  self == other
-}
-
-///|
 /// The start position (before or equal to the end position).
 pub fn Range::get_start_position(self : Range) -> Position {
   Position(self.start_line_number, self.start_column)
@@ -260,55 +237,6 @@ pub fn Range::set_end_position(
   end_column : Int,
 ) -> Range {
   Range(self.start_line_number, self.start_column, end_line_number, end_column)
-}
-
-///|
-/// New range with this range's end and the given start position.
-fn Range::set_start_position(
-  self : Range,
-  start_line_number : Int,
-  start_column : Int,
-) -> Range {
-  Range(start_line_number, start_column, self.end_line_number, self.end_column)
-}
-
-///|
-/// New empty range at this range's start.
-fn Range::collapse_to_start(self : Range) -> Range {
-  Range(
-    self.start_line_number,
-    self.start_column,
-    self.start_line_number,
-    self.start_column,
-  )
-}
-
-///|
-/// New empty range at this range's end.
-fn Range::collapse_to_end(self : Range) -> Range {
-  Range(
-    self.end_line_number,
-    self.end_column,
-    self.end_line_number,
-    self.end_column,
-  )
-}
-
-///|
-/// Moves the range by the given number of lines.
-fn Range::delta(self : Range, line_count : Int) -> Range {
-  Range(
-    self.start_line_number + line_count,
-    self.start_column,
-    self.end_line_number + line_count,
-    self.end_column,
-  )
-}
-
-///|
-/// Test if this range starts and ends on the same line.
-fn Range::is_single_line(self : Range) -> Bool {
-  self.start_line_number == self.end_line_number
 }
 
 ///|
@@ -358,27 +286,6 @@ pub fn Range::compare_ranges_using_starts(a : Range, b : Range) -> Int {
     return a.start_column - b.start_column
   }
   a.start_line_number - b.start_line_number
-}
-
-///|
-/// Compare ranges by end position, then start position.
-fn Range::compare_ranges_using_ends(a : Range, b : Range) -> Int {
-  if a.end_line_number == b.end_line_number {
-    if a.end_column == b.end_column {
-      if a.start_line_number == b.start_line_number {
-        return a.start_column - b.start_column
-      }
-      return a.start_line_number - b.start_line_number
-    }
-    return a.end_column - b.end_column
-  }
-  a.end_line_number - b.end_line_number
-}
-
-///|
-/// Test if the range spans multiple lines.
-fn Range::spans_multiple_lines(range : Range) -> Bool {
-  range.end_line_number > range.start_line_number
 }
 
 ///|

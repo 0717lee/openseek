@@ -196,20 +196,6 @@ pub fn Languages::language_handle(
 }
 
 ///|
-/// Returns the first matching Markdown-comment provider's raw result. `None`
-/// means that no provider matched; `Some([])` is an authoritative empty result
-/// and must not be confused with absence.
-fn LanguageHandle::markdown_comment_provider_result(
-  self : LanguageHandle,
-  model : @model.TextModel,
-) -> Array[@language.MarkdownCommentBlock]? {
-  match (self.markdown_comment_provider_result_callback)(model) {
-    Some(result) => Some(result.blocks)
-    None => None
-  }
-}
-
-///|
 /// Returns the first matching provider's blocks and registration-level
 /// foldability from one captured registry entry.
 pub fn LanguageHandle::markdown_comment_provider_render_result(
@@ -363,24 +349,6 @@ pub fn Languages::register_markdown_comment_provider(
 }
 
 ///|
-/// Returns the first matching Markdown-comment provider's raw result. Provider
-/// failure is logged and remains authoritative as `Some([])`.
-fn Languages::markdown_comment_provider_result(
-  self : Languages,
-  model : @model.TextModel,
-  log_service : @log.LogService,
-) -> Array[@language.MarkdownCommentBlock]? {
-  match
-    self.markdown_comment_provider_result_with_log_handle(
-      model,
-      log_service.log_handle(),
-    ) {
-    Some(result) => Some(result.blocks)
-    None => None
-  }
-}
-
-///|
 fn Languages::markdown_comment_provider_result_with_log_handle(
   self : Languages,
   model : @model.TextModel,
@@ -400,18 +368,6 @@ fn Languages::markdown_comment_provider_result_with_log_handle(
     }
   }
   Some({ blocks, foldable: captured.entry.provider.foldable })
-}
-
-///|
-/// Returns the first non-empty hover answer in registry priority.
-async fn Languages::hover_at(
-  self : Languages,
-  model : @model.TextModel,
-  offset : Int,
-  log_service : @log.LogService,
-  token? : @language.CancellationToken = @language.CancellationToken::none(),
-) -> @language.Hover? noraise {
-  self.hover_at_with_log_handle(model, offset, log_service.log_handle(), token~)
 }
 
 ///|
@@ -459,26 +415,6 @@ async fn Languages::hover_at_with_log_handle(
     }
   }
   None
-}
-
-///|
-/// Returns all live definition answers concatenated in registry priority. An
-/// injected runner must return only after every task has terminated.
-async fn Languages::definition_at(
-  self : Languages,
-  model : @model.TextModel,
-  offset : Int,
-  log_service : @log.LogService,
-  token? : @language.CancellationToken = @language.CancellationToken::none(),
-  run_tasks? : async (Array[async () -> Unit]) -> Unit = @base_common.run_async_tasks_sequentially,
-) -> Array[@language.Location] noraise {
-  self.definition_at_with_log_handle(
-    model,
-    offset,
-    log_service.log_handle(),
-    token~,
-    run_tasks~,
-  )
 }
 
 ///|
@@ -551,26 +487,6 @@ fn Languages::has_definition_provider(
 }
 
 ///|
-/// Returns all live reference answers concatenated in registry priority. An
-/// injected runner must return only after every task has terminated.
-async fn Languages::references_at(
-  self : Languages,
-  model : @model.TextModel,
-  offset : Int,
-  log_service : @log.LogService,
-  token? : @language.CancellationToken = @language.CancellationToken::none(),
-  run_tasks? : async (Array[async () -> Unit]) -> Unit = @base_common.run_async_tasks_sequentially,
-) -> Array[@language.Location] noraise {
-  self.references_at_with_log_handle(
-    model,
-    offset,
-    log_service.log_handle(),
-    token~,
-    run_tasks~,
-  )
-}
-
-///|
 async fn Languages::references_at_with_log_handle(
   self : Languages,
   model : @model.TextModel,
@@ -637,36 +553,6 @@ fn Languages::has_references_provider(
   model : @model.TextModel,
 ) -> Bool {
   !self.references_provider.snapshot_matching(model).is_empty()
-}
-
-///|
-/// Concatenates document-symbol results from every provider.
-async fn Languages::document_symbols(
-  self : Languages,
-  model : @model.TextModel,
-  log_service : @log.LogService,
-) -> Array[@language.DocumentSymbol] noraise {
-  let symbols : Array[@language.DocumentSymbol] = []
-  let token = @language.CancellationToken::none()
-  let log_handle = log_service.log_handle()
-  for captured in self.document_symbol_provider.snapshot_matching(model) {
-    let entry = captured.entry
-    let result = entry.provider.provide_document_symbols(model, token) catch {
-      _ => {
-        log_provider_failure(
-          log_handle,
-          "language.documentSymbols",
-          model,
-          captured.provider_index,
-        )
-        []
-      }
-    }
-    if entry.active.val {
-      symbols.append(result)
-    }
-  }
-  symbols
 }
 
 ///|

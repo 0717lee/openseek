@@ -48,14 +48,6 @@ pub fn HiddenRangeModel::on_did_change(
 }
 
 ///|
-/// The `hiddenRanges` getter.
-fn HiddenRangeModel::hidden_ranges(
-  self : HiddenRangeModel,
-) -> Array[@base_common.Range] {
-  self.hidden_ranges
-}
-
-///|
 /// `updateHiddenRanges` (`hiddenRangeModel.ts:44`): one hidden range per
 /// outermost collapsed region (the header line stays visible), reusing the
 /// previous array entries when unchanged so no event fires for no change.

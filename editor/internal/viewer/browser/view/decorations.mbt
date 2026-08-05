@@ -30,7 +30,7 @@ priv struct DecorationOverlayPiece {
   /// (`_renderWholeLineDecorations`) rather than the normal pieces'
   /// `left:{n}px;…` (`_renderNormalDecoration`).
   whole_line : Bool
-} derive(Eq, Debug)
+}
 
 ///|
 /// `prepareRender`'s filter + sort (`decorations.ts:67-113`): keep only

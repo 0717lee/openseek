@@ -256,18 +256,6 @@ pub fn split_lines(text : String) -> Array[String] {
 }
 
 ///|
-/// Mirrors `strings.isLowerAsciiLetter` (strings.ts:428).
-fn is_lower_ascii_letter(code : Int) -> Bool {
-  code is ('a'..='z')
-}
-
-///|
-/// Mirrors `strings.isUpperAsciiLetter` (strings.ts:432).
-fn is_upper_ascii_letter(code : Int) -> Bool {
-  code is ('A'..='Z')
-}
-
-///|
 fn is_lower_ascii_letter_code_unit(code : UInt16) -> Bool {
   code is ('a'..='z')
 }

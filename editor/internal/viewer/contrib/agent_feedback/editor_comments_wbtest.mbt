@@ -91,15 +91,3 @@ test "replies widen the estimated group height" {
     "f1,f2",
   )
 }
-
-///|
-test "get_accepted_agent_feedback_comment_count counts only accepted comments" {
-  let a = uri("memory://session/a.mbt")
-  let comments = get_session_editor_comments([
-    feedback_at("f1", a, 1),
-    feedback_at("f2", a, 3, state=Created),
-    feedback_at("f3", a, 5, state=Submitted),
-    feedback_at("f4", a, 7),
-  ])
-  assert_eq(get_accepted_agent_feedback_comment_count(comments), 2)
-}

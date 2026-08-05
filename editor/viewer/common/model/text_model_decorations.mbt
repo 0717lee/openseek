@@ -1,4 +1,4 @@
-// 1:1 port of Monaco/VS Code's TextModel decoration cluster.
+// Reachable subset of Monaco/VS Code's TextModel decoration cluster.
 //
 // Source: vscode/src/vs/editor/common/model/textModel.ts
 // (checked-in vscode submodule):
@@ -25,6 +25,9 @@
 //   no dispose lifecycle).
 //
 // Out-of-scope members (explicitly deferred/N-A, per plan):
+// - Query helpers with no product caller (`getAllDecorations`,
+//   `getOverviewRulerDecorations`, margin/injected-text interval queries, and
+//   direct decoration-option lookup) are DEFERRED.
 // - `DecorationsTrees.acceptReplace` and the model edit path: N-A — the
 //   readonly viewer never edits a model (the interval tree's edit cluster is
 //   not ported, see `interval_tree.mbt`'s header).
@@ -328,45 +331,6 @@ fn DecorationsTrees::interval_search(
 }
 
 ///|
-/// `getAll` (`textModel.ts:2276-2280`).
-fn DecorationsTrees::get_all(
-  self : DecorationsTrees,
-  host : TextModel,
-  filter_owner_id : Int,
-  filter_out_validation : Bool,
-  filter_font_decorations : Bool,
-  overview_ruler_only : Bool,
-  only_margin_decorations : Bool,
-) -> Array[ModelDecoration] {
-  let version_id = host.get_version_id()
-  let result = self.search(
-    filter_owner_id, filter_out_validation, filter_font_decorations, overview_ruler_only,
-    version_id, only_margin_decorations,
-  )
-  self.ensure_nodes_have_ranges(host, result)
-}
-
-///|
-/// `getInjectedTextInInterval` (`textModel.ts`, DecorationsTrees): the
-/// injected-text tree's interval search with the
-/// `showIfCollapsed || !range.isEmpty()` filter.
-fn DecorationsTrees::get_injected_text_in_interval(
-  self : DecorationsTrees,
-  host : TextModel,
-  start : Int,
-  end : Int,
-  filter_owner_id : Int,
-) -> Array[ModelDecoration] {
-  let version_id = host.get_version_id()
-  let result = self.injected_text_decorations_tree.interval_search(
-    start, end, filter_owner_id, false, false, version_id, false,
-  )
-  self
-  .ensure_nodes_have_ranges(host, result)
-  .filter(d => d.options.show_if_collapsed || !d.range.is_empty())
-}
-
-///|
 /// `getAllInjectedText` (`textModel.ts`, DecorationsTrees).
 fn DecorationsTrees::get_all_injected_text(
   self : DecorationsTrees,
@@ -380,39 +344,6 @@ fn DecorationsTrees::get_all_injected_text(
   self
   .ensure_nodes_have_ranges(host, result)
   .filter(d => d.options.show_if_collapsed || !d.range.is_empty())
-}
-
-///|
-/// `_search` (`textModel.ts:2308-2326`).
-fn DecorationsTrees::search(
-  self : DecorationsTrees,
-  filter_owner_id : Int,
-  filter_out_validation : Bool,
-  filter_font_decorations : Bool,
-  overview_ruler_only : Bool,
-  cached_version_id : Int,
-  only_margin_decorations : Bool,
-) -> Array[IntervalNode] {
-  if overview_ruler_only {
-    self.decorations_tree_1.search(
-      filter_owner_id, filter_out_validation, filter_font_decorations, cached_version_id,
-      only_margin_decorations,
-    )
-  } else {
-    let r0 = self.decorations_tree_0.search(
-      filter_owner_id, filter_out_validation, filter_font_decorations, cached_version_id,
-      only_margin_decorations,
-    )
-    let r1 = self.decorations_tree_1.search(
-      filter_owner_id, filter_out_validation, filter_font_decorations, cached_version_id,
-      only_margin_decorations,
-    )
-    let r2 = self.injected_text_decorations_tree.search(
-      filter_owner_id, filter_out_validation, filter_font_decorations, cached_version_id,
-      only_margin_decorations,
-    )
-    r0 + r1 + r2
-  }
 }
 
 ///|
@@ -639,18 +570,6 @@ pub fn TextModel::remove_all_decorations_with_owner_id(
 }
 
 ///|
-/// `getDecorationOptions` (`textModel.ts:1790-1796`).
-fn TextModel::get_decoration_options(
-  self : TextModel,
-  decoration_id : String,
-) -> ModelDecorationOptions? {
-  match self.decorations.get(decoration_id) {
-    Some(node) => node.options
-    None => None
-  }
-}
-
-///|
 /// `getDecorationRange` (`textModel.ts:1798-1804`).
 pub fn TextModel::get_decoration_range(
   self : TextModel,
@@ -726,35 +645,6 @@ pub fn TextModel::get_decorations_in_range(
 }
 
 ///|
-/// `getOverviewRulerDecorations` (`textModel.ts:1835-1838`) — query surface
-/// only; the overview-ruler view part stays deferred (marker plan Increment
-/// H).
-fn TextModel::get_overview_ruler_decorations(
-  self : TextModel,
-  owner_id? : Int = 0,
-  filter_out_validation? : Bool = false,
-  filter_font_decorations? : Bool = false,
-) -> Array[ModelDecoration] {
-  self.decorations_tree.get_all(
-    self, owner_id, filter_out_validation, filter_font_decorations, true, false,
-  )
-}
-
-///|
-/// `getAllDecorations` (`textModel.ts:1869-1875`) — tree results only
-/// (provider merges N-A).
-fn TextModel::get_all_decorations(
-  self : TextModel,
-  owner_id? : Int = 0,
-  filter_out_validation? : Bool = false,
-  filter_font_decorations? : Bool = false,
-) -> Array[ModelDecoration] {
-  self.decorations_tree.get_all(
-    self, owner_id, filter_out_validation, filter_font_decorations, false, false,
-  )
-}
-
-///|
 /// `getInjectedTextDecorations` (`textModel.ts`): every decoration carrying
 /// `before`/`after` injected-text options. `owner_id = 0` matches all
 /// owners (the tree's filter semantics).
@@ -763,30 +653,6 @@ pub fn TextModel::get_injected_text_decorations(
   owner_id? : Int = 0,
 ) -> Array[ModelDecoration] {
   self.decorations_tree.get_all_injected_text(self, owner_id)
-}
-
-///|
-/// `getInjectedTextInInterval` reduced to a line query — the seam
-/// `_getInjectedTextInLine` (`textModel.ts`) gives the view-model line
-/// projection.
-fn TextModel::get_injected_text_in_interval(
-  self : TextModel,
-  start_offset : Int,
-  end_offset : Int,
-  owner_id? : Int = 0,
-) -> Array[ModelDecoration] {
-  self.decorations_tree.get_injected_text_in_interval(
-    self, start_offset, end_offset, owner_id,
-  )
-}
-
-///|
-/// `getAllMarginDecorations` (`textModel.ts:1876-1879`) — query surface only.
-fn TextModel::get_all_margin_decorations(
-  self : TextModel,
-  owner_id? : Int = 0,
-) -> Array[ModelDecoration] {
-  self.decorations_tree.get_all(self, owner_id, false, false, false, true)
 }
 
 ///|

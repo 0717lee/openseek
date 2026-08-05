@@ -52,30 +52,6 @@ pub let hover_second_wait_ms : Int = hover_delay_ms - hover_first_wait_ms
 pub let hover_loading_message_ms : Int = 3 * hover_delay_ms
 
 ///|
-/// Pure configured-delay arithmetic from Monaco's HoverOperation getters.
-/// Doubles preserve the source's half-millisecond values for odd delays; the
-/// current browser settings use the integral 300ms default above.
-priv struct HoverTiming {
-  hover_time_ms : Double
-  first_wait_ms : Double
-  second_wait_ms : Double
-  loading_message_ms : Double
-} derive(Eq, Debug)
-
-///|
-/// Derives the exact half/full/triple-delay schedule for one configured delay.
-fn HoverTiming::from_delay(delay_ms : Int) -> HoverTiming {
-  let hover_time_ms = delay_ms.to_double()
-  let first_wait_ms = hover_time_ms / 2.0
-  {
-    hover_time_ms,
-    first_wait_ms,
-    second_wait_ms: hover_time_ms - first_wait_ms,
-    loading_message_ms: 3.0 * hover_time_ms,
-  }
-}
-
-///|
 /// VS Code's default `editor.hover.hidingDelay`: once the widget is on screen,
 /// a mouse move off the anchor is debounced by this grace period before the
 /// hover reacts, so the pointer can travel onto the hover widget without it
@@ -179,9 +155,8 @@ pub fn HoverRequestStamp::is_current(
 priv struct HoverResult {
   value : Array[HoverPart]
   is_complete : Bool
-  has_loading_message : Bool
   options : HoverOperationOptions
-} derive(Eq, Debug)
+}
 
 ///|
 /// Host work selected by `HoverOperation::start`. Timers and computation stay
@@ -191,8 +166,8 @@ priv enum HoverOperationStartEffect {
   HoverOperationNoStart
   HoverOperationScheduleDelayed(Int)
   HoverOperationRunAsyncAndSync(Int)
-  HoverOperationRunSync(Int)
-} derive(Eq, Debug)
+  HoverOperationRunSync
+}
 
 ///|
 /// Monaco `HoverOperationState` (`hoverOperation.ts`). `FirstWait` / `SecondWait`
@@ -229,12 +204,6 @@ pub struct HoverOperation {
 /// This is the only operation-state distinction the browser host needs.
 pub fn HoverOperation::shows_loading_message(self : HoverOperation) -> Bool {
   self.state is HoverOpWaitingForAsyncShowingLoading
-}
-
-///|
-/// Creates the initial idle operation at generation zero.
-fn HoverOperation::idle() -> HoverOperation {
-  HoverOperation::idle_at(0)
 }
 
 ///|
@@ -280,10 +249,7 @@ fn HoverOperation::start(
             },
           )
         HoverOpSecondWait =>
-          (
-            HoverOperationRunSync(self.token),
-            { ..self, options: Some(options) },
-          )
+          (HoverOperationRunSync, { ..self, options: Some(options) })
         _ => (HoverOperationNoStart, self)
       }
   }
@@ -307,7 +273,6 @@ fn HoverOperation::result(self : HoverOperation) -> HoverResult? {
   Some({
     value: self.parts.copy(),
     is_complete: self.state is HoverOpIdle,
-    has_loading_message: self.state is HoverOpWaitingForAsyncShowingLoading,
     options,
   })
 }
@@ -618,7 +583,7 @@ fn HoverController::start_hover_operation_if_necessary(
       HoverScheduleDelayed(generation)
     HoverOperationRunAsyncAndSync(generation) =>
       HoverRunAsyncAndSync(generation)
-    HoverOperationNoStart | HoverOperationRunSync(_) => HoverNoEffect
+    HoverOperationNoStart | HoverOperationRunSync => HoverNoEffect
   }
   (
     effect,
@@ -945,27 +910,6 @@ pub struct HoverWidgetView {
   anchor_range : @base_common.Range
   parts : Array[HoverPart]
 } derive(Eq)
-
-///|
-/// Whether a hover widget is currently on screen (resolved content or the
-/// loading placeholder). Monaco's `_contentWidget.isVisible`; the mouse-move
-/// grace period only applies once the widget is shown.
-fn HoverController::widget_visible(self : HoverController) -> Bool {
-  self.widget_view() is Some(_)
-}
-
-///|
-/// Compatibility view derivation using the built-in markdown loading row.
-/// Live Viewer code uses `widget_view_with_loading` so participant selection
-/// remains authoritative.
-fn HoverController::widget_view(self : HoverController) -> HoverWidgetView? {
-  let loading_message = match self.anchor {
-    Some(anchor) =>
-      Some(LoadingHover(range=anchor.range(), message="Loading..."))
-    None => None
-  }
-  self.widget_view_with_loading(loading_message)
-}
 
 ///|
 /// Host-selected loading augmentation. The live Viewer obtains this from the

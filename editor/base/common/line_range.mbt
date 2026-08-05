@@ -1,11 +1,12 @@
-// 1:1 port of Monaco/VS Code's LineRange / LineRangeSet.
+// Reachable subset of Monaco/VS Code's LineRange / LineRangeSet.
 //
 // Source: vscode/src/vs/editor/common/core/ranges/lineRange.ts
 //   with the monotonic binary-search helpers from
 //   vscode/src/vs/base/common/arraysFind.ts
 // (checked-in vscode submodule).
 //
-// Adaptation: upstream's constructor throws on `startLineNumber >
+// Unused comparison/set helpers are deferred until a product caller needs
+// them. Adaptation: upstream's constructor throws on `startLineNumber >
 // endLineNumberExclusive`; this port stores the values without validating
 // (callers pass valid ranges).
 
@@ -25,23 +26,9 @@ pub fn LineRange::LineRange(
 }
 
 ///|
-fn LineRange::contains_range(self : LineRange, other : LineRange) -> Bool {
-  self.start_line_number <= other.start_line_number &&
-  other.end_line_number_exclusive <= self.end_line_number_exclusive
-}
-
-///|
 /// Indicates if this line range is empty.
 pub fn LineRange::is_empty(self : LineRange) -> Bool {
   self.start_line_number == self.end_line_number_exclusive
-}
-
-///|
-fn LineRange::delta(self : LineRange, offset : Int) -> LineRange {
-  LineRange(
-    self.start_line_number + offset,
-    self.end_line_number_exclusive + offset,
-  )
 }
 
 ///|
@@ -62,35 +49,6 @@ pub fn LineRange::join(self : LineRange, other : LineRange) -> LineRange {
 ///|
 pub fn LineRange::to_string(self : LineRange) -> String {
   "[\{self.start_line_number},\{self.end_line_number_exclusive})"
-}
-
-///|
-/// Empty if the ranges touch but do not overlap; `None` if they don't touch.
-fn LineRange::intersect(self : LineRange, other : LineRange) -> LineRange? {
-  let start_line_number = self.start_line_number.max(other.start_line_number)
-  let end_line_number_exclusive = self.end_line_number_exclusive.min(
-    other.end_line_number_exclusive,
-  )
-  if start_line_number <= end_line_number_exclusive {
-    Some(LineRange(start_line_number, end_line_number_exclusive))
-  } else {
-    None
-  }
-}
-
-///|
-fn LineRange::intersects_strict(self : LineRange, other : LineRange) -> Bool {
-  self.start_line_number < other.end_line_number_exclusive &&
-  other.start_line_number < self.end_line_number_exclusive
-}
-
-///|
-fn LineRange::intersects_or_touches(
-  self : LineRange,
-  other : LineRange,
-) -> Bool {
-  self.start_line_number <= other.end_line_number_exclusive &&
-  other.start_line_number <= self.end_line_number_exclusive
 }
 
 ///|
@@ -144,28 +102,6 @@ pub fn LineRangeSet::add_range(self : LineRangeSet, range : LineRange) -> Unit {
       join_range_end_idx_exclusive - join_range_start_idx,
       join_range,
     )
-  }
-}
-
-///|
-fn LineRangeSet::contains(self : LineRangeSet, line_number : Int) -> Bool {
-  match
-    find_last_monotonous(self.normalized_ranges[:], r => {
-      r.start_line_number <= line_number
-    }) {
-    Some(r) => r.end_line_number_exclusive > line_number
-    None => false
-  }
-}
-
-///|
-fn LineRangeSet::intersects(self : LineRangeSet, range : LineRange) -> Bool {
-  match
-    find_last_monotonous(self.normalized_ranges[:], r => {
-      r.start_line_number < range.end_line_number_exclusive
-    }) {
-    Some(r) => r.end_line_number_exclusive > range.start_line_number
-    None => false
   }
 }
 
@@ -224,13 +160,6 @@ fn LineRangeSet::get_union(
 }
 
 ///|
-fn LineRangeSet::to_string(self : LineRangeSet) -> String {
-  [ for r in self.normalized_ranges => r.to_string() ].join(", ")
-}
-
-// --- monotonic binary-search helpers (arraysFind.ts) ---
-
-///|
 fn find_first_idx_monotonous_or_arr_len(
   array : ArrayView[LineRange],
   predicate : (LineRange) -> Bool,
@@ -263,19 +192,6 @@ fn find_last_idx_monotonous(
     i
   }
   i - 1
-}
-
-///|
-fn find_last_monotonous(
-  array : ArrayView[LineRange],
-  predicate : (LineRange) -> Bool,
-) -> LineRange? {
-  let idx = find_last_idx_monotonous(array, predicate)
-  if idx == -1 {
-    None
-  } else {
-    Some(array[idx])
-  }
 }
 
 ///|

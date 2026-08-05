@@ -125,21 +125,6 @@ fn MarkerDecorations::update(
 }
 
 ///|
-/// `getMarker` (`markerDecorationsService.ts:175`): the marker behind a
-/// decoration id, or `None`.
-fn MarkerDecorations::get_marker(
-  self : MarkerDecorations,
-  id : String,
-) -> Marker? {
-  for entry in self.entries {
-    if entry.1 == id {
-      return Some(entry.0)
-    }
-  }
-  None
-}
-
-///|
 /// `getMarkers` (`markerDecorationsService.ts:179`): `(range, marker)` for
 /// each live decoration, the range resolved from the model's storage.
 fn MarkerDecorations::get_markers(

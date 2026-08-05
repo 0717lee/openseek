@@ -132,38 +132,6 @@ fn find_anchor_candidates(
 }
 
 ///|
-/// The callback-level core of `find_anchor_candidates`. Keeping this seam in
-/// the owning browser package lets white-box tests cover absent and present
-/// participant suggestions without making participant constructors or foreign
-/// anchor internals part of the public interface.
-fn find_anchor_candidates_from_suggestions(
-  suggestions : Array[
-    ((@view_model.InjectedText?, @base_common.Range, Double?, Double?) -> @hover.HoverAnchor?)?,
-  ],
-  target : @editor_browser.MouseTarget,
-  typical_halfwidth_character_width : Double,
-  initial_mouse_pos_x? : Double,
-  initial_mouse_pos_y? : Double,
-) -> Array[@hover.HoverAnchor] {
-  let anchor_candidates : Array[@hover.HoverAnchor] = []
-  let injected_text = hover_target_injected_text(target)
-  let target_range = target.range()
-  append_suggested_anchors_from(
-    anchor_candidates,
-    suggestions,
-    suggestion => suggestion,
-    injected_text,
-    target_range,
-    initial_mouse_pos_x,
-    initial_mouse_pos_y,
-  )
-  finish_anchor_candidates(
-    anchor_candidates, target, typical_halfwidth_character_width, initial_mouse_pos_x,
-    initial_mouse_pos_y,
-  )
-}
-
-///|
 fn hover_target_injected_text(
   target : @editor_browser.MouseTarget,
 ) -> @view_model.InjectedText? {

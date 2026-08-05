@@ -1,4 +1,4 @@
-// 1:1 port of Monaco/VS Code's decoration interval tree.
+// Reachable subset of Monaco/VS Code's decoration interval tree.
 //
 // Source: vscode/src/vs/editor/common/model/intervalTree.ts
 // (checked-in vscode submodule).
@@ -50,7 +50,7 @@ const CLASS_NAME_EDITOR_ERROR_DECORATION : String = "squiggly-error"
 priv enum NodeColor {
   Black
   Red
-} derive(Eq, Debug)
+} derive(Eq)
 
 ///|
 /// `Constants` bit layout of the packed `metadata` byte
@@ -469,15 +469,6 @@ fn IntervalTree::collect_nodes_from_owner(
 }
 
 ///|
-/// `collectNodesPostOrder` (`intervalTree.ts:277-279`). Will not set
-/// `cached_absolute_start` nor `cached_absolute_end` on the returned nodes!
-fn IntervalTree::collect_nodes_post_order(
-  self : IntervalTree,
-) -> Array[IntervalNode] {
-  collect_nodes_post_order(self)
-}
-
-///|
 /// `insert` (`intervalTree.ts:281-284`).
 fn IntervalTree::insert(self : IntervalTree, node : IntervalNode) -> Unit {
   ignore(rb_tree_insert(self, node))
@@ -511,12 +502,6 @@ fn IntervalTree::resolve_node(
   let node_start = initial_node.start + delta
   let node_end = initial_node.end + delta
   initial_node.set_cached_offsets(node_start, node_end, cached_version_id)
-}
-
-///|
-/// `getAllInOrder` (`intervalTree.ts:335-337`).
-fn IntervalTree::get_all_in_order(self : IntervalTree) -> Array[IntervalNode] {
-  self.search(0, false, false, 0, false)
 }
 
 ///|
@@ -608,40 +593,6 @@ fn collect_nodes_from_owner(
       node = node.right()
       continue
     }
-  }
-  set_node_is_visited(t.root, false)
-  result
-}
-
-///|
-/// `collectNodesPostOrder` (`intervalTree.ts:676-709`).
-fn collect_nodes_post_order(t : IntervalTree) -> Array[IntervalNode] {
-  let mut node = t.root
-  let result : Array[IntervalNode] = []
-  while !same_interval_node(node, sentinel) {
-    if get_node_is_visited(node) {
-      // going up from this node
-      set_node_is_visited(node.left(), false)
-      set_node_is_visited(node.right(), false)
-      node = node.parent()
-      continue
-    }
-    if !same_interval_node(node.left(), sentinel) &&
-      !get_node_is_visited(node.left()) {
-      // go left
-      node = node.left()
-      continue
-    }
-    if !same_interval_node(node.right(), sentinel) &&
-      !get_node_is_visited(node.right()) {
-      // go right
-      node = node.right()
-      continue
-    }
-
-    // handle current node
-    result.push(node)
-    set_node_is_visited(node, true)
   }
   set_node_is_visited(t.root, false)
   result

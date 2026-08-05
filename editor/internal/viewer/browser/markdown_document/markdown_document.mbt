@@ -712,22 +712,6 @@ pub fn MarkdownDocumentView::set_hidden_root_elements(
 }
 
 ///|
-/// The root-element ordinals currently hidden, in document order. Read back for
-/// tests and for the root Viewer's reconciliation.
-fn MarkdownDocumentView::hidden_root_elements(
-  self : MarkdownDocumentView,
-) -> Array[Int] {
-  let result = []
-  guard !self.disposed else { return result }
-  for index, child in self.article.get_children() {
-    if child.has_attribute(markdown_hidden_element_attribute) {
-      result.push(index)
-    }
-  }
-  result
-}
-
-///|
 /// The attribute `markdown_document.css` maps to `display:none`. Exclusively
 /// owned by `set_hidden_root_elements`, so the renderer's own classes and
 /// inline styles are never disturbed.
@@ -909,13 +893,6 @@ pub fn MarkdownDocumentView::listen_semantic_dom(
       self.article.remove_event_listener(event_name, listener)
     }),
   )
-}
-
-///|
-fn MarkdownDocumentView::resource_kind(
-  self : MarkdownDocumentView,
-) -> @markdown_core.MarkdownResourceKind {
-  self.resource_kind
 }
 
 ///|
@@ -1169,15 +1146,4 @@ pub fn MarkdownDocumentView::set_toc_entries(
   } else {
     self.toc_nav.set_attribute("data-toc-visible", "false")
   }
-}
-
-///|
-/// Test/read-back seam: whether the bar is rendered and expanded.
-fn MarkdownDocumentView::toc_bar_state(
-  self : MarkdownDocumentView,
-) -> (Bool, Bool) {
-  (
-    self.toc_nav.get_attribute("data-toc-visible") == Some("true"),
-    self.toc_nav.get_attribute("data-toc-expanded") == Some("true"),
-  )
 }

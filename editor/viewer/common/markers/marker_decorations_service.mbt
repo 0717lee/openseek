@@ -407,56 +407,6 @@ fn MarkerDecorationsService::update_decorations_once(
 }
 
 ///|
-/// `getMarker` (`markerDecorationsService.ts:52`): the marker behind a decoration
-/// id on `uri`. The URI bucket is scanned in acquisition order; model-generated
-/// decoration ids carry the model identity prefix, so distinct live same-URI
-/// models remain unambiguous.
-fn MarkerDecorationsService::get_marker(
-  self : MarkerDecorationsService,
-  uri : @base_common.Uri,
-  decoration_id : String,
-) -> Marker? {
-  guard self.model_ids_by_uri.get(uri.to_string()) is Some(model_ids) else {
-    return None
-  }
-  for model_id in model_ids {
-    match self.model_registrations.get(model_id) {
-      Some(registration) =>
-        match registration.marker_decorations.get_marker(decoration_id) {
-          Some(marker) => return Some(marker)
-          None => ()
-        }
-      None => ()
-    }
-  }
-  None
-}
-
-///|
-/// `getLiveMarkers` (`markerDecorationsService.ts:57`): `(range, marker)` pairs for
-/// every live identity at the resource, concatenated in acquisition order.
-/// Identity-sensitive consumers such as hover use
-/// `get_live_markers_for_model` instead.
-fn MarkerDecorationsService::get_live_markers(
-  self : MarkerDecorationsService,
-  uri : @base_common.Uri,
-) -> Array[(@base_common.Range, Marker)] {
-  let result : Array[(@base_common.Range, Marker)] = []
-  match self.model_ids_by_uri.get(uri.to_string()) {
-    Some(model_ids) =>
-      for model_id in model_ids {
-        match self.model_registrations.get(model_id) {
-          Some(registration) =>
-            result.append(registration.marker_decorations.get_markers())
-          None => ()
-        }
-      }
-    None => ()
-  }
-  result
-}
-
-///|
 /// Returns only the live marker decorations owned by this exact model
 /// identity. Hover uses this helper so two live models sharing one URI cannot
 /// contribute ranges from each other's snapshots.
@@ -469,48 +419,6 @@ fn MarkerDecorationsService::get_live_markers_for_model(
     None => []
   }
 }
-
-///|
-/// `addMarkerSuppression` (`markerDecorationsService.ts:62`): suppress markers in
-/// `range` on `uri`; the disposable removes the suppression (D5).
-fn MarkerDecorationsService::add_marker_suppression(
-  self : MarkerDecorationsService,
-  uri : @base_common.Uri,
-  range : @base_common.Range,
-) -> @base_common.Disposable {
-  if self.disposed {
-    return @base_common.Disposable::from(() => ())
-  }
-  let key = uri.to_string()
-  let suppressed_ranges = match self.suppressed_ranges.get(key) {
-    Some(r) => r
-    None => {
-      let r : Array[@base_common.Range] = []
-      self.suppressed_ranges.set(key, r)
-      r
-    }
-  }
-  suppressed_ranges.push(range)
-  self.handle_marker_change([uri])
-  @base_common.Disposable::from(() => {
-    match self.suppressed_ranges.get(key) {
-      Some(suppressed_ranges) => {
-        match suppressed_ranges.search(range) {
-          Some(index) => suppressed_ranges.remove(index) |> ignore
-          None => ()
-        }
-        if suppressed_ranges.length() == 0 {
-          self.suppressed_ranges.remove(key)
-        }
-        self.handle_marker_change([uri])
-      }
-      None => ()
-    }
-  })
-}
-
-// Theme-color ids the option matrix carries (inert; plan D4). From
-// editorColorRegistry.ts:74-76 and colors/minimapColors.ts:29-37.
 
 ///|
 let overview_ruler_error : String = "editorOverviewRuler.errorForeground"

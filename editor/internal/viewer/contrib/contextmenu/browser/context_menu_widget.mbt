@@ -97,11 +97,6 @@ pub fn ContextMenuWidget::is_visible(self : ContextMenuWidget) -> Bool {
 }
 
 ///|
-fn ContextMenuWidget::get_dom_node(self : ContextMenuWidget) -> @rdom.Element {
-  self.container
-}
-
-///|
 /// Shows a nonempty menu at a visual-viewport coordinate. Returns false when
 /// disposed, empty, or the owner document has no body.
 pub fn ContextMenuWidget::show(

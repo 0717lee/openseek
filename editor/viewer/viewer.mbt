@@ -214,13 +214,11 @@ fn Viewer::Viewer(
   // they live until `dispose` — `set_model` does not re-create them.
   editor_registry().instantiate_all(viewer)
   viewer.testing_registration = Some(
-    @viewer_testing.register_viewer(
-      viewer.get_id(),
-      has_model=() => viewer.has_model(),
-      set_hidden_areas=(ranges, source, force_update) => {
-        viewer.set_hidden_areas(ranges, source?, force_update~)
-      },
-    ),
+    @viewer_testing.register_viewer(viewer.get_id(), set_hidden_areas=(
+      ranges,
+      source,
+      force_update,
+    ) => viewer.set_hidden_areas(ranges, source?, force_update~)),
   )
   viewer
 }

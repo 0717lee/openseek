@@ -6,7 +6,7 @@ architecture in `docs/architecture.md` and package details in package READMEs.
 ## Required Checks
 
 ```sh
-moon check --target all --warn-list +73
+moon check --target all --warn-list +73 --deny-warn
 moon fmt --check
 just test
 just build
@@ -26,7 +26,7 @@ render-timing, or perf-harness behavior.
 - Shared packages remain FFI-free; js/native-only packages declare their target.
 - Viewer packages use only Rabbita's DOM/JS bindings, not its TEA framework.
 - The shell/backend remains optional to embedders.
-- The check gate is read-only: `moon check --target all --warn-list +73` covers
+- The check gate is read-only: `moon check --target all --warn-list +73 --deny-warn` covers
   every target and `moon fmt --check` verifies formatting.
 - Review `moon.pkg` changes against `docs/architecture.md`, and review public API
   changes through `pkg.generated.mbti`.

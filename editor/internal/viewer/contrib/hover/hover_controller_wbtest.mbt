@@ -94,87 +94,6 @@ test "delayed start arms the operation and suppresses results before the delay" 
 }
 
 ///|
-test "loading message appears only while waiting for a slow async compute" {
-  let (_, armed) = HoverController::empty().start_delayed(3, 7)
-  let (_, second_wait) = armed.op_trigger_async(1)
-  // Sync produced nothing and async is still pending -> WaitingForAsync.
-  let waiting = second_wait.op_trigger_sync(1, [])
-  assert_true(waiting.operation.state is HoverOpWaitingForAsync)
-  assert_true(waiting.view is None)
-  // The loading timer turns the wait into the loading message.
-  let loading = waiting.op_trigger_loading(1)
-  assert_true(loading.operation.state is HoverOpWaitingForAsyncShowingLoading)
-  assert_true(loading.widget_view() is Some(_))
-  match loading.widget_view() {
-    Some(view) => assert_eq(view.parts.length(), 1)
-    None => ()
-  }
-  // A streamed async result is shown while the loading message remains until
-  // the iterable finishes.
-  let resolved = loading.op_async_item(1, [markdown_part(3, 7, "fn main")])
-  assert_true(resolved.view is Some(_))
-  match resolved.widget_view() {
-    Some(view) => {
-      assert_eq(view.parts.length(), 2)
-      assert_true(view.parts[1] is LoadingHover(_))
-    }
-    None => fail("expected partial result plus loading")
-  }
-  let done = resolved.op_async_done(1)
-  assert_true(done.is_complete())
-  match done.widget_view() {
-    Some(view) => assert_eq(view.parts.length(), 1)
-    None => fail("expected resolved hover")
-  }
-}
-
-///|
-test "replacement loading never augments a previous complete hover" {
-  let (_, first) = HoverController::empty().start_delayed(3, 7)
-  let (_, first_async) = first.op_trigger_async(1)
-  let shown = first_async
-    .op_trigger_sync(1, [markdown_part(3, 7, "complete")])
-    .op_async_done(1)
-  let (_, replacement) = shown.start_delayed(4, 5)
-  let (_, replacement_async) = replacement.op_trigger_async(2)
-  let waiting = replacement_async.op_trigger_sync(2, [])
-  let loading = waiting.op_trigger_loading(2)
-  assert_true(loading.operation.state is HoverOpWaitingForAsyncShowingLoading)
-  assert_true(loading.current_complete)
-  match loading.widget_view() {
-    Some(view) => {
-      assert_eq(view.parts.length(), 1)
-      assert_true(view.parts[0] is MarkdownHover(_))
-    }
-    None => fail("expected retained complete hover")
-  }
-}
-
-///|
-test "loading-only live visibility keeps an equal anchor operation" {
-  let anchor = HoverRangeAnchor(
-    priority=0,
-    range=Range(1, 4, 1, 4),
-    initial_mouse_pos_x=None,
-    initial_mouse_pos_y=None,
-  )
-  let (_, armed) = HoverController::empty().start_showing_or_update_hover(
-    anchor, false,
-  )
-  let (_, second_wait) = armed.op_trigger_async(1)
-  let loading = second_wait.op_trigger_sync(1, []).op_trigger_loading(1)
-  assert_true(loading.view is None)
-  assert_true(loading.widget_view() is Some(_))
-  let (effect, unchanged) = loading.start_showing_or_update_hover(
-    anchor,
-    false,
-    live_widget_visible=true,
-  )
-  assert_true(effect is HoverNoEffect)
-  assert_true(unchanged == loading)
-}
-
-///|
 test "immediate path shows the hover synchronously without the schedulers" {
   // Monaco start(Immediate): invoke the async + sync triggers back to back,
   // skipping the waits. The view is shown right away.
@@ -234,29 +153,6 @@ fn operation_options(
 }
 
 ///|
-test "hover timing derives the two waits and loading delay from 300ms" {
-  assert_eq(hover_first_wait_ms, 150)
-  assert_eq(hover_second_wait_ms, 150)
-  assert_eq(hover_first_wait_ms + hover_second_wait_ms, 300)
-  assert_eq(hover_loading_message_ms, 900)
-  let cases : Array[(Int, Double, Double, Double)] = [
-    (0, 0.0, 0.0, 0.0),
-    (1, 0.5, 0.5, 3.0),
-    (2, 1.0, 1.0, 6.0),
-    (300, 150.0, 150.0, 900.0),
-    (301, 150.5, 150.5, 903.0),
-  ]
-  for case in cases {
-    let (delay, first, second, loading) = case
-    let timing = HoverTiming::from_delay(delay)
-    assert_eq(timing.hover_time_ms, delay.to_double())
-    assert_eq(timing.first_wait_ms, first)
-    assert_eq(timing.second_wait_ms, second)
-    assert_eq(timing.loading_message_ms, loading)
-  }
-}
-
-///|
 test "typed operation start covers delayed and every immediate state branch" {
   let options = operation_options(3)
   let idle = HoverOperation::idle_at(7)
@@ -296,7 +192,7 @@ test "typed operation start covers delayed and every immediate state branch" {
     HoverStartImmediate,
     immediate_options,
   )
-  assert_true(immediate_second is HoverOperationRunSync(7))
+  assert_true(immediate_second is HoverOperationRunSync)
   assert_true(second_with_options.options == Some(immediate_options))
 
   // FirstWait and both post-sync waiting states are the complete typed no-op
@@ -354,41 +250,6 @@ test "async item accumulation preserves arrival order around the sync result" {
   }
   let completed = after_two.op_async_done(after_token)
   assert_true(completed.is_complete())
-}
-
-///|
-test "operation result snapshots wait, complete, and loading facts" {
-  let options = operation_options(3, source=HoverStartClick)
-  let part = markdown_part(2, 4, "snapshot")
-  let waiting : HoverOperation = {
-    state: HoverOpWaitingForAsync,
-    token: 3,
-    parts: [part],
-    async_done: false,
-    options: Some(options),
-  }
-  match waiting.result() {
-    Some(result) => {
-      assert_false(result.is_complete)
-      assert_false(result.has_loading_message)
-      assert_true(result.options == options)
-      result.value.push(markdown_part(4, 5, "local mutation"))
-      // Emission snapshots the array; consumers cannot mutate operation state.
-      assert_eq(waiting.parts.length(), 1)
-    }
-    None => fail("expected an incomplete result")
-  }
-  assert_true({ ..waiting, state: HoverOpFirstWait }.result() is None)
-  assert_true({ ..waiting, state: HoverOpSecondWait }.result() is None)
-  match { ..waiting, state: HoverOpWaitingForAsyncShowingLoading }.result() {
-    Some(result) => assert_true(result.has_loading_message)
-    None => fail("expected a loading result")
-  }
-  match { ..waiting, state: HoverOpIdle, async_done: true }.result() {
-    Some(result) => assert_true(result.is_complete)
-    None => fail("expected a complete result")
-  }
-  assert_true(HoverOperation::idle().result() is None)
 }
 
 ///|

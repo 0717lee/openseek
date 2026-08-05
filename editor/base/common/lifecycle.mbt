@@ -20,12 +20,6 @@ pub fn Disposable::from(dispose : () -> Unit) -> Disposable {
 }
 
 ///|
-/// Convenience constructor matching Monaco's `toDisposable` helper name.
-fn to_disposable(dispose : () -> Unit) -> Disposable {
-  Disposable::from(dispose)
-}
-
-///|
 /// Runs the disposable's teardown callback if it has not already run.
 pub fn Disposable::dispose(self : Disposable) -> Unit {
   (self.dispose_handler)()

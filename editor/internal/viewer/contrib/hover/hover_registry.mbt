@@ -50,16 +50,6 @@ fn HoverParticipantRegistry::build_all(
 }
 
 ///|
-/// Returns the mutable backing factory array, matching Monaco's `getAll()`
-/// aliasing contract. `build_all` remains the instance-producing, ordinal-sort
-/// boundary.
-fn HoverParticipantRegistry::get_all(
-  self : HoverParticipantRegistry,
-) -> Array[(HoverParticipantServices) -> HoverParticipantHandle] {
-  self.entries
-}
-
-///|
 /// Process-wide hover participant registry, populated with the built-in
 /// participants. The analog of Monaco's module-level `HoverParticipantRegistry`
 /// plus the `HoverParticipantRegistry.register(...)` calls in

@@ -13,10 +13,6 @@
 const MAX_FOLDING_REGIONS_FOR_INDENT_DEFAULT : Int = 5000
 
 ///|
-/// `ID_INDENT_PROVIDER` (`indentRangeProvider.ts:16`).
-const ID_INDENT_PROVIDER : String = "indent"
-
-///|
 /// The indentation range provider — Monaco's `IndentRangeProvider`
 /// (`indentRangeProvider.ts:18`).
 struct IndentRangeProvider {
@@ -39,12 +35,6 @@ pub fn IndentRangeProvider::IndentRangeProvider(
     folding_ranges_limit,
     tab_size,
   }
-}
-
-///|
-fn IndentRangeProvider::id(self : IndentRangeProvider) -> String {
-  ignore(self)
-  ID_INDENT_PROVIDER
 }
 
 ///|

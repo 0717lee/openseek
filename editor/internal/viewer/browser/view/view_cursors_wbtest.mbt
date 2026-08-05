@@ -22,23 +22,3 @@ test "compute_screen_aware_size snaps to the device pixel grid" {
   // The max(1, …) clamp: half a CSS pixel still paints one device pixel.
   inspect(compute_screen_aware_size(1.0, 0.5), content="1")
 }
-
-///|
-test "prepare_cursor_render_data ports the Line-style arm" {
-  // viewCursor.ts:196-200 — a caret at least 1px in and at least 2px wide
-  // shifts left by a 1px padding so the bar straddles the boundary.
-  debug_inspect(
-    prepare_cursor_render_data(10.0, 36, 18, 1.0),
-    content="{ top: 36, left: 9, padding_left: 1, width: 2, height: 18 }",
-  )
-  // left < 1 → no shift (the caret hugs the line start).
-  debug_inspect(
-    prepare_cursor_render_data(0.0, 0, 18, 1.0),
-    content="{ top: 0, left: 0, padding_left: 0, width: 2, height: 18 }",
-  )
-  // width < 2 after device-pixel snapping → no shift either (`width >= 2`).
-  debug_inspect(
-    prepare_cursor_render_data(10.0, 0, 18, 1.25),
-    content="{ top: 0, left: 10, padding_left: 0, width: 1.6, height: 18 }",
-  )
-}

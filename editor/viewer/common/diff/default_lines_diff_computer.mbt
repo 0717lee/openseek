@@ -12,7 +12,7 @@
 // - char-level inner changes (`refineDiff`, `optimizeSequenceDiffs`,
 //   `extendDiffsToEntireWordIfAppropriate`, `removeShortMatches`,
 //   `removeVeryShortMatching*`) — `inner_changes` is always `None`;
-// - move detection (`computeMovedLines`) — `moves` is always empty and
+// - move detection (`computeMovedLines`) — the result field is not exposed and
 //   `options.compute_moves` is ignored;
 // - the timeout protocol — piediff's `cutoff` bounds the search *depth*, not
 //   wall-clock time, and degrades silently to a correct-but-suboptimal
@@ -52,7 +52,7 @@ pub fn DefaultLinesDiffComputer::compute_diff(
   // `defaultLinesDiffComputer.ts:28`: a trivially-equal (empty or one-line)
   // input diffs to nothing.
   if original_lines.length() <= 1 && original_lines == modified_lines {
-    return { changes: [], moves: [], hit_timeout: false }
+    return { changes: [], hit_timeout: false }
   }
 
   // `defaultLinesDiffComputer.ts:33`: one side being the empty document maps
@@ -82,7 +82,6 @@ pub fn DefaultLinesDiffComputer::compute_diff(
           ]),
         ),
       ],
-      moves: [],
       hit_timeout: false,
     }
   }
@@ -158,5 +157,5 @@ pub fn DefaultLinesDiffComputer::compute_diff(
       }
     }
   }
-  { changes, moves: [], hit_timeout: false }
+  { changes, hit_timeout: false }
 }

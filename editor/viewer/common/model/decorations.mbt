@@ -23,18 +23,6 @@ fn TrackedRangeStickiness::to_int(self : TrackedRangeStickiness) -> Int {
 }
 
 ///|
-/// Inverse of `to_int`. Values outside 0..=3 cannot come out of the 2-bit
-/// metadata field; the fallback mirrors Monaco's numeric default 0.
-fn TrackedRangeStickiness::from_int(value : Int) -> TrackedRangeStickiness {
-  match value {
-    1 => NeverGrowsWhenTypingAtEdges
-    2 => GrowsOnlyWhenTypingBefore
-    3 => GrowsOnlyWhenTypingAfter
-    _ => AlwaysGrowsWhenTypingAtEdges
-  }
-}
-
-///|
 /// Overview-ruler lane, `OverviewRulerLane` (`model.ts`).
 pub(all) enum OverviewRulerLane {
   Left

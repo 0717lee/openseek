@@ -86,67 +86,6 @@ fn join_lines(lines : Array[String]) -> String {
 }
 
 ///|
-/// `TextModelData.fromString / one line text` (`textModel.test.ts:97-108`).
-test "one line text" {
-  let m = wb_model("Hello world!")
-  assert_eq(m.get_eol(), "\n")
-  assert_true(m.get_lines_content() == ["Hello world!"])
-  assert_eq(m.might_contain_rtl(), false)
-  assert_eq(m.might_contain_non_basic_ascii(), false)
-}
-
-///|
-/// `TextModelData.fromString / multiline text` (`:110-125`). Monaco chooses
-/// CRLF by majority; Gate A adapts only that expectation to fixed LF.
-test "multiline text" {
-  let m = wb_model("Hello,\r\ndear friend\nHow\rare\r\nyou?")
-  assert_eq(m.get_eol(), "\n")
-  assert_true(
-    m.get_lines_content() == ["Hello,", "dear friend", "How", "are", "you?"],
-  )
-  assert_eq(m.might_contain_rtl(), false)
-  assert_eq(m.might_contain_non_basic_ascii(), false)
-}
-
-///|
-/// `TextModelData.fromString / Non Basic ASCII 1` (`:127-139`).
-test "Non Basic ASCII 1" {
-  let m = wb_model("Hello,\nZürich")
-  assert_eq(m.get_eol(), "\n")
-  assert_true(m.get_lines_content() == ["Hello,", "Zürich"])
-  assert_eq(m.might_contain_rtl(), false)
-  assert_eq(m.might_contain_non_basic_ascii(), true)
-}
-
-///|
-/// `TextModelData.fromString / containsRTL 1` (`:141-153`).
-test "containsRTL 1" {
-  let m = wb_model("Hello,\nזוהי עובדה מבוססת שדעתו")
-  assert_eq(m.get_eol(), "\n")
-  assert_true(
-    m.get_lines_content() ==
-    ["Hello,", "זוהי עובדה מבוססת שדעתו"],
-  )
-  assert_eq(m.might_contain_rtl(), true)
-  assert_eq(m.might_contain_non_basic_ascii(), true)
-}
-
-///|
-/// `TextModelData.fromString / containsRTL 2` (`:155-167`).
-test "containsRTL 2" {
-  let m = wb_model(
-    "Hello,\nهناك حقيقة مثبتة منذ زمن طويل",
-  )
-  assert_eq(m.get_eol(), "\n")
-  assert_true(
-    m.get_lines_content() ==
-    ["Hello,", "هناك حقيقة مثبتة منذ زمن طويل"],
-  )
-  assert_eq(m.might_contain_rtl(), true)
-  assert_eq(m.might_contain_non_basic_ascii(), true)
-}
-
-///|
 /// `TextModel.getValueLengthInRange` (`textModel.test.ts:189-218`). Both raw
 /// EOL forms enter the same fixed-LF representation under Gate A.
 test "getValueLengthInRange" {
@@ -318,32 +257,6 @@ test "validateRange around high-low surrogate pairs 2" {
 }
 
 ///|
-test "modifyPosition" {
-  let m = wb_model("line one\nline two")
-  assert_pos(m.modify_position(pos(1, 1), 0), 1, 1)
-  assert_pos(m.modify_position(pos(0, 0), 0), 1, 1)
-  assert_pos(m.modify_position(pos(30, 1), 0), 2, 9)
-  assert_pos(m.modify_position(pos(1, 1), 17), 2, 9)
-  assert_pos(m.modify_position(pos(1, 1), 1), 1, 2)
-  assert_pos(m.modify_position(pos(1, 1), 3), 1, 4)
-  assert_pos(m.modify_position(pos(1, 2), 10), 2, 3)
-  assert_pos(m.modify_position(pos(1, 5), 13), 2, 9)
-  assert_pos(m.modify_position(pos(1, 2), 16), 2, 9)
-  assert_pos(m.modify_position(pos(2, 9), -17), 1, 1)
-  assert_pos(m.modify_position(pos(1, 2), -1), 1, 1)
-  assert_pos(m.modify_position(pos(1, 4), -3), 1, 1)
-  assert_pos(m.modify_position(pos(2, 3), -10), 1, 2)
-  assert_pos(m.modify_position(pos(2, 9), -13), 1, 5)
-  assert_pos(m.modify_position(pos(2, 9), -16), 1, 2)
-  assert_pos(m.modify_position(pos(1, 2), 17), 2, 9)
-  assert_pos(m.modify_position(pos(1, 2), 100), 2, 9)
-  assert_pos(m.modify_position(pos(1, 2), -2), 1, 1)
-  assert_pos(m.modify_position(pos(1, 2), -100), 1, 1)
-  assert_pos(m.modify_position(pos(2, 2), -100), 1, 1)
-  assert_pos(m.modify_position(pos(2, 9), -18), 1, 1)
-}
-
-///|
 test "getLineFirstNonWhitespaceColumn" {
   let m = wb_model(
     join_lines([
@@ -385,34 +298,4 @@ test "getLineLastNonWhitespaceColumn" {
   assert_eq(m.get_line_last_non_whitespace_column(10), 4)
   assert_eq(m.get_line_last_non_whitespace_column(11), 0)
   assert_eq(m.get_line_last_non_whitespace_column(12), 0)
-}
-
-///|
-test "mightContainRTL nope" {
-  let m = wb_model("hello world!")
-  assert_eq(m.might_contain_rtl(), false)
-}
-
-///|
-test "mightContainRTL yes" {
-  let m = wb_model("Hello,\nזוהי עובדה מבוססת שדעתו")
-  assert_eq(m.might_contain_rtl(), true)
-}
-
-///|
-test "setValue resets 1" {
-  let m = wb_model("hello world!")
-  assert_eq(m.might_contain_rtl(), false)
-  m.set_value("Hello,\nזוהי עובדה מבוססת שדעתו")
-  assert_eq(m.might_contain_rtl(), true)
-}
-
-///|
-test "setValue resets 2" {
-  let m = wb_model(
-    "Hello,\nهناك حقيقة مثبتة منذ زمن طويل",
-  )
-  assert_eq(m.might_contain_rtl(), true)
-  m.set_value("hello world!")
-  assert_eq(m.might_contain_rtl(), false)
 }

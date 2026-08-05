@@ -501,15 +501,6 @@ fn HitTestContext::get_line_width(
 }
 
 ///|
-/// `isRtl` (mouseTarget.ts:370-373). The viewer renders LTR only
-/// (`getTextDirection` is unported), so this is constant `false` (header
-/// ledger).
-fn HitTestContext::is_rtl(self : HitTestContext, _line_number : Int) -> Bool {
-  ignore(self)
-  false
-}
-
-///|
 fn HitTestContext::visible_range_for_position(
   self : HitTestContext,
   line_number : Int,

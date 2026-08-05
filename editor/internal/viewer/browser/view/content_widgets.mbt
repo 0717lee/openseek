@@ -30,7 +30,7 @@ pub(all) struct ContentWidgetPosition {
 priv struct ContentWidgetDimension {
   width : Double
   height : Double
-} derive(Eq, Debug)
+}
 
 ///|
 /// Monaco `IContentWidgetRenderedCoordinate`, passed to `afterRender` after
@@ -38,7 +38,7 @@ priv struct ContentWidgetDimension {
 priv struct ContentWidgetRenderedCoordinate {
   top : Double
   left : Double
-} derive(Eq, Debug)
+}
 
 ///|
 /// Value-level adapter for Monaco's `IContentWidget` (`editorBrowser.ts`).

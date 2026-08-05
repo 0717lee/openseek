@@ -54,37 +54,6 @@ test "no swap" {
 }
 
 ///|
-test "compareRangesUsingEnds" {
-  assert_true(
-    Range::compare_ranges_using_ends(Range(1, 1, 1, 3), Range(1, 2, 1, 4)) < 0,
-  )
-  assert_true(
-    Range::compare_ranges_using_ends(Range(1, 1, 1, 3), Range(1, 1, 1, 4)) < 0,
-  )
-  assert_true(
-    Range::compare_ranges_using_ends(Range(1, 2, 1, 3), Range(1, 1, 1, 4)) < 0,
-  )
-  assert_true(
-    Range::compare_ranges_using_ends(Range(1, 1, 1, 4), Range(1, 2, 1, 4)) < 0,
-  )
-  assert_true(
-    Range::compare_ranges_using_ends(Range(1, 1, 1, 4), Range(1, 1, 1, 4)) == 0,
-  )
-  assert_true(
-    Range::compare_ranges_using_ends(Range(1, 2, 1, 4), Range(1, 1, 1, 4)) > 0,
-  )
-  assert_true(
-    Range::compare_ranges_using_ends(Range(1, 1, 1, 5), Range(1, 2, 1, 4)) > 0,
-  )
-  assert_true(
-    Range::compare_ranges_using_ends(Range(1, 1, 2, 4), Range(1, 1, 1, 4)) > 0,
-  )
-  assert_true(
-    Range::compare_ranges_using_ends(Range(1, 2, 5, 1), Range(1, 1, 1, 4)) > 0,
-  )
-}
-
-///|
 test "containsPosition" {
   let r = Range::Range(2, 2, 5, 10)
   assert_eq(r.contains_position(Position(1, 3)), false)

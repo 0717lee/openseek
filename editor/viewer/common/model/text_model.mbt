@@ -240,33 +240,9 @@ pub fn TextModel::is_disposed(self : TextModel) -> Bool {
 }
 
 ///|
-/// Constructor-fixed large-file tokenization policy. A later `set_value`
-/// never changes this fact (`textModel.ts:334-346,637-639`).
-fn TextModel::is_too_large_for_tokenization(self : TextModel) -> Bool {
-  self.tokenization_state.too_large
-}
-
-///|
 /// Number of currently attached Viewer instances.
 fn TextModel::get_attached_editor_count(self : TextModel) -> Int {
   self.tokenization_state.attached_count.val
-}
-
-///|
-/// Whether at least one Viewer is attached.
-fn TextModel::is_attached_to_editor(self : TextModel) -> Bool {
-  self.tokenization_state.attached_count.val > 0
-}
-
-///|
-/// Subscribes to the aggregate attachment boundary. The event fires after the
-/// tokenization part has observed exactly `0 -> 1` or `1 -> 0`, matching
-/// `onDidChangeAttached` (`textModel.ts:235-236,607-623`; `model.ts:1365`).
-fn TextModel::on_did_change_attached(
-  self : TextModel,
-  listener : () -> Unit,
-) -> @base_common.Disposable {
-  self.attached_change_emitter.event(_ => listener())
 }
 
 ///|
@@ -379,21 +355,6 @@ pub fn TextModel::get_language_id(self : TextModel) -> String {
 }
 
 ///|
-/// Whether the text contains any right-to-left character. Mirrors
-/// `mightContainRTL` (`textModel.ts:742`).
-fn TextModel::might_contain_rtl(self : TextModel) -> Bool {
-  self.snapshot.might_contain_rtl()
-}
-
-///|
-/// Whether the normalized stored text contains any non-basic-ASCII code unit.
-/// Mirrors `mightContainNonBasicASCII` (`textModel.ts:756`) while recomputing
-/// from the immutable snapshot instead of trusting builder cache metadata.
-fn TextModel::might_contain_non_basic_ascii(self : TextModel) -> Bool {
-  self.snapshot.might_contain_non_basic_ascii()
-}
-
-///|
 /// Clamped document offset of `position`. Mirrors `getOffsetAt`
 /// (`textModel.ts:770`): relaxed-validate, then the buffer's line/column
 /// arity.
@@ -426,13 +387,6 @@ pub fn TextModel::get_position_at(
 /// Viewer content and there is no EOL or preserve-BOM selector.
 pub fn TextModel::get_value(self : TextModel) -> String {
   self.get_value_in_range(self.get_full_model_range())
-}
-
-///|
-/// Length of `get_value` in UTF-16 code units. Mirrors `getValueLength`
-/// (`textModel.ts:819`).
-fn TextModel::get_value_length(self : TextModel) -> Int {
-  self.get_value_length_in_range(self.get_full_model_range())
 }
 
 ///|
@@ -469,13 +423,6 @@ pub fn TextModel::get_line_content(
   line_number : Int,
 ) -> String {
   self.snapshot.get_line_content(line_number)
-}
-
-///|
-/// Content length of the one-based `line_number`, EOL excluded. Mirrors
-/// `getLineLength` (`textModel.ts:860`).
-fn TextModel::get_line_length(self : TextModel, line_number : Int) -> Int {
-  self.snapshot.get_line_length(line_number)
 }
 
 ///|
@@ -680,33 +627,6 @@ fn TextModel::increase_version_id(self : TextModel) -> Unit {
 }
 
 ///|
-/// Position `offset` UTF-16 code units away from `position`, clamped to the
-/// document. Mirrors `modifyPosition` (`textModel.ts:1162`): relaxed-validate,
-/// then offset round-trip.
-fn TextModel::modify_position(
-  self : TextModel,
-  position : @base_common.Position,
-  offset : Int,
-) -> @base_common.Position {
-  let valid = self.validate_position_impl(
-    position.line_number,
-    position.column,
-    false,
-  )
-  let candidate = self.snapshot.get_offset_at(valid.line_number, valid.column) +
-    offset
-  let clamped = candidate.clamp(min=0, max=self.snapshot.get_length())
-  self.snapshot.get_position_at(clamped)
-}
-
-// #endregion
-
-// #region setValue flush lane (textModel.ts:457-545) — plan
-// `monaco-set-value-api-port.md`. Scope cuts recorded there: no undo stack
-// (`_commandManager.clear`, `:531`), no `setEOL` lane (`:547+`), no
-// bracket-pair/font-token parts (`:473-474`), no incremental (tier-2) lane.
-
-///|
 /// Subscribes to content changes — `onDidChangeContent` (`textModel.ts:
 /// 245-247`), unwrapping the internal event to its public payload.
 pub fn TextModel::on_did_change_content(
@@ -714,17 +634,6 @@ pub fn TextModel::on_did_change_content(
   listener : (ModelContentChangedEvent) -> Unit,
 ) -> @base_common.Disposable {
   self.event_emitter.event(e => listener(e.content_changed_event))
-}
-
-///|
-/// Whole-buffer equality against another snapshot — `equalsTextBuffer`
-/// (`textModel.ts:457-460`). The host-side no-op early return before a
-/// refresh belongs to the caller (`modelService.ts:370-373`).
-fn TextModel::equals_text_snapshot(
-  self : TextModel,
-  other : TextSnapshot,
-) -> Bool {
-  self.snapshot.equals(other)
 }
 
 ///|

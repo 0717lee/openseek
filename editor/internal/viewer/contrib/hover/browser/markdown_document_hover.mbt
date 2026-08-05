@@ -88,13 +88,6 @@ fn MarkdownDocumentHoverWidget::listen(
 }
 
 ///|
-fn MarkdownDocumentHoverWidget::is_visible(
-  self : MarkdownDocumentHoverWidget,
-) -> Bool {
-  self.visible
-}
-
-///|
 fn markdown_hover_range_string(range : @base_common.Range) -> String {
   "\{range.start_line_number}:\{range.start_column}-\{range.end_line_number}:\{range.end_column}"
 }
@@ -654,8 +647,7 @@ fn MarkdownDocumentHoverBridge::start_pointer_request(
 ) -> Unit {
   self.request_start_timer = None
   guard self.stamp_is_current(stamp) else { return }
-  let sync_parts = match
-    self.computer.compute_sync(self.model, anchor, source=HoverStartMouse) {
+  let sync_parts = match self.computer.compute_sync(self.model, anchor) {
     Some(computed) => computed.parts
     None => []
   }
@@ -690,7 +682,6 @@ fn MarkdownDocumentHoverBridge::start_pointer_request(
     let computed = computer.compute_async(
       model,
       anchor,
-      source=HoverStartMouse,
       token=stamp.cancellation_token,
       is_current=() => self.stamp_is_current(stamp),
     )
@@ -1204,20 +1195,6 @@ fn MarkdownDocumentHoverBridge::refresh_hover_range(
       }
     }
   }
-}
-
-///|
-fn MarkdownDocumentHoverBridge::request_generation(
-  self : MarkdownDocumentHoverBridge,
-) -> Int {
-  self.request_generation
-}
-
-///|
-fn MarkdownDocumentHoverBridge::widget_visible(
-  self : MarkdownDocumentHoverBridge,
-) -> Bool {
-  self.widget.is_visible()
 }
 
 ///|

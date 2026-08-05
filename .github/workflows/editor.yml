@@ -60,7 +60,11 @@ jobs:
 
       - name: Check
         run: |
-          moon check --target all --warn-list +73
+          if [ "${{ matrix.channel }}" = "stable" ]; then
+            moon check --target all --warn-list +73 --deny-warn
+          else
+            moon check --target all --warn-list +73
+          fi
           moon fmt --check
 
       - name: Test
