@@ -311,15 +311,15 @@ test('uses a restrained, stable Markdown type scale', async ({ page }) => {
     }
   });
 
-  await expect(page.locator(article)).toHaveCSS('font-size', '16px');
-  await expect(page.locator(`${article} h1`)).toHaveCSS('font-size', '28px');
-  await expect(page.locator(`${article} h1`)).toHaveCSS('line-height', '33.6px');
+  await expect(page.locator(article)).toHaveCSS('font-size', '14px');
+  await expect(page.locator(`${article} h1`)).toHaveCSS('font-size', '24.5px');
+  await expect(page.locator(`${article} h1`)).toHaveCSS('line-height', '29.4px');
   for (const [level, fontSize] of [
-    [2, '22px'],
-    [3, '18px'],
-    [4, '16px'],
-    [5, '16px'],
-    [6, '16px'],
+    [2, '19.25px'],
+    [3, '15.75px'],
+    [4, '14px'],
+    [5, '14px'],
+    [6, '14px'],
   ]) {
     await expect(
       page.locator(`[data-type-scale-probe="${level}"]`),
