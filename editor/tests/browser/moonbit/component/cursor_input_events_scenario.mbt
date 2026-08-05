@@ -355,7 +355,10 @@ extern "js" fn install_cursor_input_controls(
   #|       nativeSelection: document.getSelection()?.toString() ?? '',
   #|     });
   #|   });
-  #|   zoneLink.addEventListener('click', () => { zoneLinkActivations += 1; });
+  #|   zoneLink.addEventListener('click', (event) => {
+  #|     event.preventDefault();
+  #|     zoneLinkActivations += 1;
+  #|   });
   #|   globalThis.__cursorInputControls = {
   #|     state: () => JSON.parse(stateJson()),
   #|     events: () => [...globalThis.__cursorInputEventLog],
