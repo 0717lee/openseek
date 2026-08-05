@@ -20,8 +20,107 @@ test "object-store-write classification excludes mv and plumbing" {
   for sub in ["checkout", "switch", "restore", "reset", "stash", "rm"] {
     assert_true(@git_policy.subcommand_writes_from_object_store(sub))
   }
-  for sub in ["mv", "clean", "apply", "am", "status", "checkout-index", "co"] {
+  // rebase is deliberately absent: its recoverable forms are gated by args
+  // (`rebase_args_are_recoverable`), never trusted by name alone.
+  for
+    sub in [
+      "mv", "clean", "apply", "am", "status", "checkout-index", "co", "rebase",
+    ] {
     assert_false(@git_policy.subcommand_writes_from_object_store(sub))
+  }
+  // The custom-environment pre-blocks treat rebase as an object-store writer:
+  // repointed via GIT_DIR/GIT_CONFIG_* it could write source from another repo.
+  assert_true(@git_policy.subcommand_is_object_store_writer("rebase"))
+  assert_true(@git_policy.subcommand_is_object_store_writer("checkout"))
+  assert_false(@git_policy.subcommand_is_object_store_writer("apply"))
+  assert_false(@git_policy.subcommand_is_object_store_writer("clean"))
+}
+
+///|
+test "rebase args: plain and in-progress forms recoverable, rest fails closed" {
+  fn recoverable(args : Array[String]) -> Bool {
+    @git_policy.rebase_args_are_recoverable(args, 0, args.length())
+  }
+
+  // Plain rebases and the in-progress verbs: replayed content comes from the
+  // object store and the pre-rebase tip stays in ORIG_HEAD/the reflog.
+  assert_true(recoverable([]))
+  assert_true(recoverable(["main"]))
+  assert_true(recoverable(["origin/main", "feature"]))
+  assert_true(recoverable(["-"]))
+  assert_true(recoverable(["--onto", "main", "feature~3", "feature"]))
+  assert_true(recoverable(["--onto=main", "feature"]))
+  assert_true(recoverable(["--keep-base", "main"]))
+  assert_true(recoverable(["--fork-point", "main"]))
+  assert_true(recoverable(["--no-fork-point", "main"]))
+  assert_true(recoverable(["--autostash", "main"]))
+  assert_true(recoverable(["--no-autostash", "main"]))
+  assert_true(recoverable(["--continue"]))
+  assert_true(recoverable(["--abort"]))
+  assert_true(recoverable(["--skip"]))
+  assert_true(recoverable(["--quit"]))
+  // Allowlist polarity: anything not an exact known-safe token fails closed —
+  // rebase's surface includes command runners, and git accepts unambiguous
+  // long-option abbreviations, so `--cont` is as untrusted as `--exec`.
+  assert_false(recoverable(["-i", "main"]))
+  assert_false(recoverable(["--interactive", "main"]))
+  assert_false(recoverable(["--exec", "ls", "main"]))
+  assert_false(recoverable(["-x", "ls", "main"]))
+  assert_false(recoverable(["--edit-todo"]))
+  assert_false(recoverable(["--strategy=ours", "main"]))
+  assert_false(recoverable(["--root"]))
+  assert_false(recoverable(["--rebase-merges", "main"]))
+  assert_false(recoverable(["--stat", "main"]))
+  assert_false(recoverable(["--cont"]))
+  assert_false(recoverable(["--onto"]))
+  assert_false(recoverable(["--", "main"]))
+}
+
+///|
+test "should_preblock: rebase command-running and reconfigured forms" {
+  // Blocked: forms that execute external commands (interactive/todo editing,
+  // `--exec`, a merge strategy) — including abbreviations, short clusters, and
+  // attached values — plus any reconfigured rebase.
+  for
+    cmd in [
+      ["git", "rebase", "-i", "main"],
+      ["git", "rebase", "--interactive", "main"],
+      ["git", "rebase", "--int", "main"],
+      ["git", "rebase", "-iv", "main"],
+      ["git", "rebase", "--exec", "ls", "main"],
+      ["git", "rebase", "--exec=ls", "main"],
+      ["git", "rebase", "--exe=ls", "main"],
+      ["git", "rebase", "-x", "ls", "main"],
+      ["git", "rebase", "-xls", "main"],
+      ["git", "rebase", "--edit-todo"],
+      ["git", "rebase", "-s", "ours", "main"],
+      ["git", "rebase", "--strategy=ours", "main"],
+      ["git", "rebase", "-Xtheirs", "main"],
+      ["git", "rebase", "--strategy-option", "theirs", "main"],
+      ["git", "-c", "sequence.editor=x", "rebase", "--continue"],
+      ["git", "-C", "/tmp/x", "rebase", "--abort"],
+      ["git", "--work-tree=/tmp/x", "rebase", "main"],
+    ] {
+    assert_true(@git_policy.should_preblock(cmd, 1))
+  }
+  // Not blocked: the recoverable forms (they run trusted) and the
+  // merely-unrecognized forms (they run sandboxed, where the profile denies
+  // any source write). `--stat`/`--empty` must not false-positive against the
+  // `--strategy`/`--exec` abbreviation prefixes.
+  for
+    cmd in [
+      ["git", "rebase", "main"],
+      ["git", "rebase", "--onto", "main", "feature~3", "feature"],
+      ["git", "rebase", "--continue"],
+      ["git", "rebase", "--abort"],
+      ["git", "rebase", "--autostash", "main"],
+      ["git", "rebase", "--root"],
+      ["git", "rebase", "--rebase-merges", "main"],
+      ["git", "rebase", "--stat", "main"],
+      ["git", "rebase", "--empty=drop", "main"],
+      ["git", "rebase", "--help"],
+    ] {
+    assert_false(@git_policy.should_preblock(cmd, 1))
   }
 }
 

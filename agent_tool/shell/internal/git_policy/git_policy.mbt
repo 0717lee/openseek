@@ -66,12 +66,86 @@ pub fn global_option_reconfigures(arg : String) -> Bool {
 /// a tracked file recoverable from it — reviewable through git, never sourced from
 /// an external file or stdin. Excluded: `mv` (moves arbitrary worktree bytes onto
 /// the destination) and `clean` (deletes UNTRACKED files with no object-store
-/// copy — permanent). `rm` stays: it only deletes tracked files.
+/// copy — permanent). `rm` stays: it only deletes tracked files. `rebase` also
+/// writes from the object store but is trusted only in the argument forms
+/// admitted by `rebase_args_are_recoverable`, so it is not listed here.
 pub fn subcommand_writes_from_object_store(subcommand : String) -> Bool {
   match subcommand {
     "checkout" | "switch" | "restore" | "reset" | "stash" | "rm" => true
     _ => false
   }
+}
+
+///|
+/// Whether `subcommand` writes the worktree from the object store: the
+/// unconditionally recoverable writers plus `rebase`, whose recoverable forms
+/// are gated by `rebase_args_are_recoverable`. Used by the custom-environment
+/// pre-blocks — any of these, repointed via `GIT_DIR`/`GIT_CONFIG_*`/`env`,
+/// could write workspace source from a different repository regardless of its
+/// arguments.
+pub fn subcommand_is_object_store_writer(subcommand : String) -> Bool {
+  subcommand == "rebase" || subcommand_writes_from_object_store(subcommand)
+}
+
+///|
+/// Whether a `git rebase` invocation's arguments (in `words[start..end)`) keep
+/// it a recoverable object-store write: replayed content materializes from
+/// commits, the pre-rebase tip stays reachable via `ORIG_HEAD` and the reflog,
+/// a dirty tree is refused up front (or stashed recoverably with
+/// `--autostash`), and git refuses to overwrite untracked files during replay.
+///
+/// Unlike the checkout guard this is an ALLOWLIST that fails closed on any
+/// unrecognized token: rebase's option surface is large and includes command
+/// runners (`--exec`, `-i`, `--edit-todo`, a `--strategy` resolved from the
+/// exec path), and git accepts unambiguous long-option abbreviations, so only
+/// exact known-safe tokens qualify — the in-progress verbs
+/// (`--continue`/`--abort`/`--skip`/`--quit`), base selection
+/// (`--onto <ref>`/`--onto=<ref>`/`--keep-base`,
+/// `--fork-point`/`--no-fork-point`), `--autostash`/`--no-autostash`, and
+/// positional revisions. Everything else falls through to the sandbox.
+///
+/// `--continue` does resume a rebase started outside the agent, including the
+/// remaining todo steps of a user-started interactive rebase; those steps are
+/// the user's own, and the agent cannot author any because the interactive
+/// forms are pre-blocked (`should_preblock`).
+pub fn rebase_args_are_recoverable(
+  words : Array[String],
+  start : Int,
+  end : Int,
+) -> Bool {
+  let mut index = start
+  while index < end {
+    match words[index] {
+      "--continue"
+      | "--abort"
+      | "--skip"
+      | "--quit"
+      | "--keep-base"
+      | "--fork-point"
+      | "--no-fork-point"
+      | "--autostash"
+      | "--no-autostash" => index += 1
+      // The `--onto` value is a committish resolved from the object store; git
+      // consumes the next word whatever it looks like, and a non-revision fails
+      // resolution before anything is written.
+      "--onto" => {
+        if index + 1 >= end {
+          return false
+        }
+        index += 2
+      }
+      arg =>
+        if arg.has_prefix("--onto=") {
+          index += 1
+        } else if arg.has_prefix("-") && arg != "-" {
+          return false
+        } else {
+          // A positional upstream/branch revision (`-` is the previous branch).
+          index += 1
+        }
+    }
+  }
+  true
 }
 
 ///|
@@ -121,9 +195,11 @@ pub fn worktree_args_are_recoverable(
 /// by design: block the git that mutates source but is NOT a recoverable
 /// object-store write — store feeders (`apply`/`am`/`update-index`/`read-tree`/
 /// `fast-import`), `mv` (moves arbitrary worktree bytes), non-dry-run `clean`
-/// (permanently deletes untracked files), and any object-store writer that is
-/// reconfigured (`git -c filter=… checkout`, `-C`, `--work-tree`). The recoverable
-/// writers (`checkout`/`switch`/`restore`/`reset`/`stash`/`rm`) and read-only git
+/// (permanently deletes untracked files), rebase's command-running forms
+/// (`-i`/`--exec`/`--edit-todo`/a merge strategy), and any object-store writer
+/// that is reconfigured (`git -c filter=… checkout`, `-C`, `--work-tree`). The
+/// recoverable writers (`checkout`/`switch`/`restore`/`reset`/`stash`/`rm`,
+/// rebase in its `rebase_args_are_recoverable` forms) and read-only git
 /// are not pre-blocked; they run (trusted, or sandboxed where they cannot harm).
 pub fn should_preblock(argv : Array[String], arg_start : Int) -> Bool {
   guard parse(argv, arg_start) is Some(invocation) else { return false }
@@ -151,8 +227,8 @@ pub fn text_should_preblock(
 }
 
 ///|
-/// Whether the git subcommand found in `words[start..end)` is a recoverable
-/// object-store writer (checkout/switch/restore/reset/stash/rm). The text path
+/// Whether the git subcommand found in `words[start..end)` is an object-store
+/// writer (checkout/switch/restore/reset/stash/rm, or rebase). The text path
 /// uses this to decide whether a custom environment before `git` (which it cannot
 /// see in `words[start..]`) makes the writer unsafe and must be pre-blocked.
 pub fn text_invocation_writes_from_object_store(
@@ -162,7 +238,7 @@ pub fn text_invocation_writes_from_object_store(
 ) -> Bool {
   match text_subcommand_index(words, start, end) {
     Some(subcommand_index) =>
-      subcommand_writes_from_object_store(words[subcommand_index])
+      subcommand_is_object_store_writer(words[subcommand_index])
     None => false
   }
 }
@@ -193,6 +269,12 @@ fn preblock_for_subcommand(
     "checkout" | "switch" | "restore" =>
       region_reconfigures(words, global_start, subcommand_index) ||
       overwrites_untracked_from_tree(words, args_start, end)
+    // rebase replays object-store commits (recoverable via ORIG_HEAD/reflog),
+    // but its command-running forms execute arbitrary commands and must never
+    // run; a reconfigured rebase is unsafe like the other writers.
+    "rebase" =>
+      region_reconfigures(words, global_start, subcommand_index) ||
+      rebase_args_run_external_commands(words, args_start, end)
     // The other recoverable writers are only unsafe when reconfigured.
     subcommand =>
       subcommand_writes_from_object_store(subcommand) &&
@@ -252,6 +334,65 @@ fn short_cluster_has(arg : String, flag : String) -> Bool {
   !arg.has_prefix("--") &&
   arg != "-" &&
   arg.contains(flag)
+}
+
+///|
+/// Whether a `git rebase` invocation's arguments (in `words[start..end)`)
+/// request running external commands: `-i`/`--interactive` (sequence-editor
+/// driven, `exec` todo lines), `--edit-todo` (opens the todo in an editor),
+/// `-x`/`--exec` (a shell command per commit), or a merge strategy
+/// (`-s`/`--strategy` resolves a `git-merge-<s>` executable from the exec
+/// path; `-X`/`--strategy-option` is grouped with it conservatively). These
+/// are pre-blocked cross-platform: on a platform without `sandbox-exec` they
+/// would otherwise run arbitrary commands. Long options match by prefix
+/// because git accepts unambiguous abbreviations (`--exe=cmd` runs the
+/// command; an ambiguous prefix such as `--e` just errors in git, so
+/// over-matching is harmless in a pre-block); short options match inside
+/// clusters and attached-value forms (`-iv`, `-xcmd`). The scan stops at `--`:
+/// past it every word is a revision, and a revision cannot begin with a dash.
+fn rebase_args_run_external_commands(
+  words : Array[String],
+  start : Int,
+  end : Int,
+) -> Bool {
+  for index in start..<end {
+    let arg = words[index]
+    if arg == "--" {
+      return false
+    }
+    if rebase_arg_runs_external_commands(arg) {
+      return true
+    }
+  }
+  false
+}
+
+///|
+fn rebase_arg_runs_external_commands(arg : String) -> Bool {
+  if arg.has_prefix("--") {
+    return long_option_selects(arg, "--interactive") ||
+      long_option_selects(arg, "--exec") ||
+      long_option_selects(arg, "--edit-todo") ||
+      long_option_selects(arg, "--strategy") ||
+      long_option_selects(arg, "--strategy-option")
+  }
+  short_cluster_has(arg, "i") ||
+  short_cluster_has(arg, "x") ||
+  short_cluster_has(arg, "s") ||
+  short_cluster_has(arg, "X")
+}
+
+///|
+/// Whether `arg` selects the long option `full`, accepting git's
+/// unambiguous-abbreviation forms and an attached value: for
+/// `full == "--exec"`, the args `--exec`, `--exe`, and `--exe=cmd` all match.
+/// The name must extend past the bare `--` terminator, which never matches.
+fn long_option_selects(arg : String, full : String) -> Bool {
+  let name = match [..arg.split("=")] {
+    [name, _, ..] => name.to_owned()
+    _ => arg
+  }
+  name.length() > 2 && full.has_prefix(name)
 }
 
 ///|
