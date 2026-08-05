@@ -88,25 +88,16 @@ fn CompactPayload::to_request(self : CompactPayload) -> @engine.CompactRequest {
 
 ///|
 /// `settings.set`: every field optional (absent = unchanged); a present
-/// string field is trimmed, and empty clears the stored value; a present
-/// `wsl` replaces the whole group.
+/// string field is trimmed, and empty clears the stored value.
 priv struct SettingsSetPayload {
   provider : String?
   custom_api_url : String?
   deepseek_api_key : String?
   custom_api_key : String?
-  wsl : SettingsWslPayload?
   // One-time compatibility import from pre-host-settings desktop builds.
   // The engine store accepts it only before any settings write has claimed
   // the durable store, making a lost reply safe to retry.
   legacy_migration : Bool?
-} derive(FromJson)
-
-///|
-priv struct SettingsWslPayload {
-  enabled : Bool
-  distro : String?
-  engine : String?
 } derive(FromJson)
 
 ///|
@@ -118,11 +109,6 @@ fn SettingsSetPayload::to_patch(
     custom_api_url: self.custom_api_url,
     deepseek_api_key: self.deepseek_api_key,
     custom_api_key: self.custom_api_key,
-    wsl: self.wsl.map(wsl => {
-      (
-        { enabled: wsl.enabled, distro: wsl.distro, engine: wsl.engine } :
-        @engine.WslPatch)
-    }),
   }
 }
 

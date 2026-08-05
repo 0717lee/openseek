@@ -39,4 +39,3 @@ pub(all) struct Notification {
 // Type aliases
 
 // Traits
-

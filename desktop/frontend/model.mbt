@@ -29,15 +29,6 @@ const LegacyApiProviderStorageKey : String = "openseek.api_provider"
 const LegacyCustomApiUrlStorageKey : String = "openseek.custom_api_url"
 
 ///|
-const LegacyWslEnabledStorageKey : String = "openseek.wsl_enabled"
-
-///|
-const LegacyWslDistroStorageKey : String = "openseek.wsl_distro"
-
-///|
-const LegacyWslEngineStorageKey : String = "openseek.wsl_engine"
-
-///|
 const NotificationCornerStorageKey : String = "openseek.notification_corner"
 
 ///|
@@ -657,14 +648,6 @@ priv struct Model {
   // A legacy localStorage migration's push is in flight; its success is
   // what deletes the migrated secrets from localStorage.
   legacy_cleanup_pending : Bool
-  // Run the serve engine inside WSL instead of natively. Windows-host-only:
-  // `host_wsl` (the host's own capability, from `host.meta` at bridge time —
-  // the page may run on any device while the engine runs on the host) gates
-  // both the settings section and what `start` sends. `wsl_distro` empty
-  // means the user's default distro; `wsl_engine` empty means `openseek` on
-  // the distro's PATH. The host settings store persists all three and shares
-  // them with every attached client.
-  host_wsl : Bool
   // Whether this page is the desktop window (the proton webview) rather than
   // a browser reached through a relay. Probed once at startup. Gates the
   // self-update flow: applying an update swaps the
@@ -676,9 +659,6 @@ priv struct Model {
   // roster (see `ConsoleState`). None in the desktop window, whose one
   // Local channel needs no account and no roster.
   console : ConsoleState?
-  wsl_enabled : Bool
-  wsl_distro : String
-  wsl_engine : String
   // Whether the host prefers a dark color scheme. The app's own palette
   // follows `prefers-color-scheme` in CSS; this mirror drives the embedded
   // viewer's `data-theme` attribute, which CSS media queries cannot set.
@@ -867,9 +847,6 @@ priv struct HostSettings {
   custom_api_url : String
   has_deepseek_key : Bool
   has_custom_key : Bool
-  wsl_enabled : Bool
-  wsl_distro : String
-  wsl_engine : String
 } derive(Eq)
 
 ///|
@@ -890,10 +867,7 @@ priv enum Msg {
     provider~ : String,
     custom_url~ : String,
     api_key~ : String,
-    custom_api_key~ : String,
-    wsl_enabled~ : String,
-    wsl_distro~ : String,
-    wsl_engine~ : String
+    custom_api_key~ : String
   )
   TaskChanged(String)
   // Move the completion menu's highlight by a delta (−1 up, +1 down), wrapping
@@ -937,10 +911,6 @@ priv enum Msg {
   SetupApiKeyChanged(String)
   ProviderChanged(String)
   CustomApiUrlChanged(String)
-  // The engine-environment select ("native"/"wsl") and the WSL text fields.
-  WslModeChanged(String)
-  WslDistroChanged(String)
-  WslEngineChanged(String)
   // The Settings choice of which window corner error toasts pop up in.
   NotificationCornerChanged(String)
   // The Settings choice of where the editor's file tree docks.
@@ -1125,10 +1095,6 @@ priv enum DeviceMsg {
   // stamped with its channel: the panel serves the focused conversation,
   // so a background device's filesystem noise is dropped at the arm.
   FilePanel(@fileeditor.Msg)
-  // The host's `host.meta` reply: whether the host itself can run the engine
-  // inside WSL (a Windows host). The page's own platform says nothing — a
-  // phone browser may drive a Windows host and a Windows browser a Mac one.
-  HostMetaLoaded(wsl~ : Bool)
   // The host's settings, from a `settings.get` reply or a peer client's
   // edit broadcast as `settings.changed`. Applied only while no local write
   // is in flight — see `Model::settings_saves`.
@@ -1416,7 +1382,6 @@ fn initial_model() -> Model {
     host_settings_revision: -1,
     deferred_host_settings: None,
     legacy_cleanup_pending: false,
-    host_wsl: false,
     is_desktop: @interop.using_proton_bridge(),
     // Every browser page is the console: it signs in against the relay and
     // fetches the device roster before any channel opens.
@@ -1430,9 +1395,6 @@ fn initial_model() -> Model {
         ),
       )
     },
-    wsl_enabled: false,
-    wsl_distro: "",
-    wsl_engine: "",
     dark_mode: host_prefers_dark(),
     narrow,
     sidebar_open: !narrow,
@@ -1587,9 +1549,6 @@ fn Model::clear_host_settings(self : Model) -> Model {
     host_settings_revision: -1,
     deferred_host_settings: None,
     legacy_cleanup_pending: false,
-    wsl_enabled: false,
-    wsl_distro: "",
-    wsl_engine: "",
   }
 }
 
@@ -1607,9 +1566,6 @@ fn Model::apply_host_settings(self : Model, settings : HostSettings) -> Model {
     custom_api_url: settings.custom_api_url,
     deepseek_key_saved: settings.has_deepseek_key,
     custom_key_saved: settings.has_custom_key,
-    wsl_enabled: settings.wsl_enabled,
-    wsl_distro: settings.wsl_distro,
-    wsl_engine: settings.wsl_engine,
   }
   { ..next, screen: if next.api_ready() { next.screen } else { Settings } }
 }

@@ -204,11 +204,9 @@ pub async fn cancel_run(
 
 ///|
 /// Create the run's working directory so the spawn cannot fail on a missing
-/// cwd. A WSL run's Linux-path cwd lives inside the distro — the host cannot
-/// create it here; `wsl --cd` rejects a missing directory at spawn time.
+/// cwd.
 async fn ensure_run_cwd(config : RunConfig) -> Unit {
-  if config.cwd is Some(cwd) &&
-    !(config.host is Wsl(..) && @path/posix.Path::is_absolute(cwd.0)) {
+  if config.cwd is Some(cwd) {
     @fsx.ensure_dir(cwd) catch {
       error if @async.is_being_cancelled() => raise error
       error =>
@@ -752,7 +750,6 @@ async test "start echoes the client submission id in Started" {
       custom_api_url: Some("https://example.invalid/chat/completions"),
       deepseek_api_key: None,
       custom_api_key: None,
-      wsl: None,
     }),
   )
   let emitted : Array[EngineEvent] = []
@@ -816,7 +813,6 @@ async test "setup failure retires the writer before an immediate next start" {
       custom_api_url: Some("https://example.invalid/chat/completions"),
       deepseek_api_key: None,
       custom_api_key: None,
-      wsl: None,
     }),
   )
   let emitted : Array[EngineEvent] = []
@@ -907,7 +903,6 @@ async test "cancelling a backpressured prompt retires its partial writer" {
       custom_api_url: Some("https://example.invalid/chat/completions"),
       deepseek_api_key: None,
       custom_api_key: None,
-      wsl: None,
     }),
   )
   let emitted : Array[EngineEvent] = []
@@ -1016,7 +1011,6 @@ async test "named session retries after its first prompt creates no record" {
       custom_api_url: Some("https://example.invalid/chat/completions"),
       deepseek_api_key: None,
       custom_api_key: None,
-      wsl: None,
     }),
   )
   let emitted : Array[EngineEvent] = []
@@ -1203,7 +1197,6 @@ async test "workspace detach refuses a running conversation without hiding it" {
       custom_api_url: Some("https://example.invalid/chat/completions"),
       deepseek_api_key: None,
       custom_api_key: None,
-      wsl: None,
     }),
   )
   let sink = EventSink(fn(_) { () })
@@ -1282,7 +1275,6 @@ async test "workspace detach drains an idle writer and its follower first" {
       custom_api_url: Some("https://example.invalid/chat/completions"),
       deepseek_api_key: None,
       custom_api_key: None,
-      wsl: None,
     }),
   )
   let events : Array[EngineEvent] = []

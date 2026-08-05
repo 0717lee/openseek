@@ -229,15 +229,6 @@ pub async fn dispatch(
         })
       }).to_json()
     }
-    "host.meta" =>
-      // `wsl` is the host's own capability: the engine runs here, so the
-      // client must not guess it from the page's user agent (a phone browser
-      // may drive a Windows host, a Windows browser a Mac one).
-      {
-        "protocol": 2,
-        "name": "openseek-host",
-        "wsl": Json::boolean(HostWslCapable),
-      }
     "auth.status" => auth_status(state)
     "auth.connect" => auth_connect(state)
     "auth.disconnect" => auth_disconnect(state)
@@ -252,15 +243,6 @@ pub async fn dispatch(
       }
   }
 }
-
-///|
-/// Whether this host can run the engine inside WSL — a Windows host.
-#cfg(platform="windows")
-const HostWslCapable = true
-
-///|
-#cfg(not(platform="windows"))
-const HostWslCapable = false
 
 ///|
 /// Tell every client a conversation moved between the live and archived
@@ -285,7 +267,7 @@ pub fn method_names() -> Array[String] {
     "agent.start", "agent.cancel", "agent.steer", "agent.compact", "agent.runs",
     "session.list", "session.load", "session.list_archived", "session.archive", "session.unarchive",
     "settings.get", "settings.set", "workspace.list", "workspace.add", "workspace.remove",
-    "host.meta", "auth.status", "auth.connect", "auth.disconnect", "auth.cancel",
+    "auth.status", "auth.connect", "auth.disconnect", "auth.cancel",
   ] +
   @host.host_method_names()
 }

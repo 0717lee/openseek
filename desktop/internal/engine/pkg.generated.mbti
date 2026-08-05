@@ -129,7 +129,6 @@ pub(all) struct SettingsPatch {
   custom_api_url : String?
   deepseek_api_key : String?
   custom_api_key : String?
-  wsl : WslPatch?
 }
 
 type StartReply derive(ToJson)
@@ -155,13 +154,6 @@ pub(all) struct SteerRequest {
 
 type WorkspacesReply derive(ToJson)
 
-pub(all) struct WslPatch {
-  enabled : Bool
-  distro : String?
-  engine : String?
-}
-
 // Type aliases
 
 // Traits
-

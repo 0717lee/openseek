@@ -501,33 +501,6 @@ fn runs_payload(frontier : Array[RunSnapshotFrontier]) -> @js.Value {
 }
 
 ///|
-/// Ask the host what it is: today only whether it can run the engine inside
-/// WSL (a Windows host). The page's own user agent says nothing about the
-/// host, so the capability must come over the wire. A failed or malformed
-/// reply leaves the default (no WSL) in place.
-fn fetch_host_meta(
-  dispatch : @cmd.Emit[Msg],
-  channel : @interop.ChannelId,
-) -> @cmd.Cmd {
-  let dispatch = dispatch.map((msg : DeviceMsg) => FromDevice(channel, msg))
-  @cmd.custom_cmd(scheduler => {
-    @js.async_run(() => {
-      let reply = @interop.bridge_request(
-        channel,
-        "host.meta",
-        @js.Object::new().to_value(),
-      ) catch {
-        _ => return
-      }
-      let json = @json.parse(@interop.reply_json_text(reply)) catch {
-        _ => return
-      }
-      scheduler.add(dispatch(HostMetaLoaded(wsl=json is { "wsl": true, .. })))
-    })
-  })
-}
-
-///|
 fn started_msg(payload : Map[String, Json]) -> DeviceMsg? {
   // `run_id`/`session`/`model`/`max_steps` are unconditional on this event
   // (the app's own start op always names a session); a payload missing one
@@ -824,7 +797,7 @@ fn start_openseek(
 /// the host documents that a present field always carries non-blank text.
 /// It carries no `cwd` (`workspace`, the conversation's attached project,
 /// is the only placement the host takes; everything else it derives from
-/// the session id) and no credentials or WSL preference — the endpoint is
+/// the session id) and no credentials — the endpoint is
 /// resolved host-side from the settings store.
 fn start_payload(
   task : String,

@@ -23,11 +23,6 @@ priv struct RunConfig {
   model : String
   max_steps : Int
   engine : String
-  // Where the engine process runs: natively, or inside a WSL distro. In WSL
-  // mode `engine` above (the bundled Windows binary) still serves the
-  // host's own one-shot session queries; the serve process runs the
-  // distro's engine instead.
-  host : EngineHost
   cwd : @path.Path?
   session : String?
   session_root : @path.Path?
@@ -135,9 +130,9 @@ async fn compact_config(
 
 ///|
 /// The validated configuration shared by every op that can spawn a serve
-/// engine. The endpoint (provider, key, URL) and the WSL preference come
-/// from the host-owned settings store, never from the request — a client
-/// carries no credentials (docs/remote-protocol.md).
+/// engine. The endpoint (provider, key, URL) comes from the host-owned
+/// settings store, never from the request — a client carries no credentials
+/// (docs/remote-protocol.md).
 async fn serve_config(
   task : String,
   manager : EngineManager,
@@ -149,7 +144,6 @@ async fn serve_config(
   let engine = manager.engine
   let (settings, _) = manager.settings_snapshot()
   let endpoint = resolved_endpoint(settings)
-  let host = engine_host(settings_wsl_request(settings), engine)
   // A workspace run happens in the project directory itself, with the
   // session's durable record in the in-project store. Only registered
   // workspaces qualify — the registry, not the payload, decides which
@@ -175,7 +169,6 @@ async fn serve_config(
     },
     max_steps: configured_max_steps(max_steps),
     engine,
-    host,
     cwd: if workspace is Some(dir) {
       Some(dir)
     } else {
@@ -224,7 +217,6 @@ fn session_key(config : RunConfig) -> String {
 fn engine_fingerprint(config : RunConfig) -> String {
   [
     config.engine,
-    config.host.fingerprint(),
     config.api_key,
     config.api_url.unwrap_or(""),
     config.model,
@@ -244,7 +236,6 @@ test "a different endpoint cannot reuse a live engine process" {
     model: "deepseek-v4-pro",
     max_steps: 1000,
     engine: "openseek",
-    host: Native,
     cwd: None,
     session: None,
     session_root: None,
@@ -255,31 +246,6 @@ test "a different endpoint cannot reuse a live engine process" {
   }
   assert_true(engine_fingerprint(base) != engine_fingerprint(custom))
   assert_eq(engine_fingerprint(base), engine_fingerprint({ ..base, task: "u" }))
-}
-
-///|
-test "switching engine hosts cannot reuse a live engine process" {
-  let base : RunConfig = {
-    task: "t",
-    api_key: "k",
-    api_url: None,
-    model: "deepseek-v4-pro",
-    max_steps: 1000,
-    engine: "openseek",
-    host: Native,
-    cwd: None,
-    session: None,
-    session_root: None,
-  }
-  let wsl = { ..base, host: Wsl(distro=Some("Ubuntu"), engine="openseek") }
-  assert_true(engine_fingerprint(base) != engine_fingerprint(wsl))
-  assert_true(
-    engine_fingerprint(wsl) !=
-    engine_fingerprint({
-      ..base,
-      host: Wsl(distro=Some("Debian"), engine="openseek"),
-    }),
-  )
 }
 
 ///|

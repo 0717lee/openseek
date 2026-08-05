@@ -12,24 +12,12 @@ fn decode_host_settings(payload : Map[String, Json]) -> HostSettings? {
   guard @jsonx.json_text(payload, "provider") is Some(provider) else {
     return None
   }
-  let (wsl_enabled, wsl_distro, wsl_engine) = match payload.get("wsl") {
-    Some(Object(wsl)) =>
-      (
-        wsl.get("enabled") is Some(True),
-        @jsonx.json_text(wsl, "distro").unwrap_or(""),
-        @jsonx.json_text(wsl, "engine").unwrap_or(""),
-      )
-    _ => (false, "", "")
-  }
   Some({
     revision: @jsonx.json_int(payload, "revision").unwrap_or(0),
     provider,
     custom_api_url: @jsonx.json_text(payload, "custom_api_url").unwrap_or(""),
     has_deepseek_key: payload.get("has_deepseek_key") is Some(True),
     has_custom_key: payload.get("has_custom_key") is Some(True),
-    wsl_enabled,
-    wsl_distro,
-    wsl_engine,
   })
 }
 
@@ -159,23 +147,6 @@ fn api_key_settings_patch(provider : ApiProvider, key : String) -> @js.Value {
 }
 
 ///|
-/// A present `wsl` replaces the whole group, so every edit sends the
-/// model's full current view of it.
-fn wsl_settings_patch(
-  enabled~ : Bool,
-  distro~ : String,
-  engine~ : String,
-) -> @js.Value {
-  let wsl = @js.Object::new()
-  wsl["enabled"] = enabled
-  wsl["distro"] = distro
-  wsl["engine"] = engine
-  let patch = @js.Object::new()
-  patch["wsl"] = wsl.to_value()
-  patch.to_value()
-}
-
-///|
 /// The migration patch: every legacy value the page still held, in one
 /// write. Blank legacy fields are omitted (nothing stored) rather than
 /// sent as clears — the host may already hold newer values.
@@ -184,9 +155,6 @@ fn legacy_settings_patch(
   custom_url~ : String,
   api_key~ : String,
   custom_api_key~ : String,
-  wsl_enabled~ : String,
-  wsl_distro~ : String,
-  wsl_engine~ : String,
 ) -> @js.Value {
   let patch = @js.Object::new()
   // The host persists a one-shot fence with the first settings write.
@@ -197,31 +165,21 @@ fn legacy_settings_patch(
   @interop.set_trimmed(patch, "custom_api_url", custom_url)
   @interop.set_trimmed(patch, "deepseek_api_key", api_key)
   @interop.set_trimmed(patch, "custom_api_key", custom_api_key)
-  if wsl_enabled == "1" ||
-    !wsl_distro.trim().is_empty() ||
-    !wsl_engine.trim().is_empty() {
-    let wsl = @js.Object::new()
-    wsl["enabled"] = wsl_enabled == "1"
-    @interop.set_trimmed(wsl, "distro", wsl_distro)
-    @interop.set_trimmed(wsl, "engine", wsl_engine)
-    patch["wsl"] = wsl.to_value()
-  }
   patch.to_value()
 }
 
 ///|
-test "legacy migration preserves disabled WSL preferences" {
+test "legacy migration trims the values it preserves" {
   let patch = legacy_settings_patch(
-    provider="",
-    custom_url="",
-    api_key="",
+    provider=" deepseek ",
+    custom_url=" https://example.invalid/chat ",
+    api_key=" sk-legacy ",
     custom_api_key="",
-    wsl_enabled="",
-    wsl_distro=" Ubuntu ",
-    wsl_engine=" /opt/openseek ",
   ).to_json()
   json_inspect(patch, content={
     "legacy_migration": true,
-    "wsl": { "enabled": false, "distro": "Ubuntu", "engine": "/opt/openseek" },
+    "provider": "deepseek",
+    "custom_api_url": "https://example.invalid/chat",
+    "deepseek_api_key": "sk-legacy",
   })
 }

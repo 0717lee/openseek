@@ -1,12 +1,4 @@
 ///|
-const WslEngineBinary : String = "_build/wsl_engine/native/release/build/bobzhang/openseek/cmd/openseek/openseek.exe"
-
-///|
-/// Bundle name of the Linux engine. The desktop host looks for this file
-/// beside `openseek.exe` when a WSL-mode run does not name an engine.
-const BundledWslEngineName : String = "openseek-linux"
-
-///|
 const BundleDir : String = "dist/windows-x64/SeekMoon"
 
 ///|
@@ -97,63 +89,9 @@ async fn run_powershell(ws : @packaging.Workspace, script : String) -> Unit {
 }
 
 ///|
-/// The script run inside WSL's `sh`: moon installs to `~/.moon/bin`, which a
-/// non-login shell does not have on PATH, and a command launched from the
-/// `desktop` directory must climb to the repo root first.
-fn wsl_moon_script(ws : @packaging.Workspace, command : String) -> String {
-  let prefix = if ws.invoked_from_repo_root() { "" } else { "cd .. && " }
-  "PATH=\"$HOME/.moon/bin:$PATH\"; " + prefix + command
-}
-
-///|
-/// Build the Linux engine inside WSL so WSL-mode runs work out of the box.
-/// Best-effort: a packaging machine without WSL, moon, or a C toolchain inside
-/// it skips the binary with a loud notice instead of failing the package.
-async fn build_wsl_engine(ws : @packaging.Workspace) -> Bool {
-  let probe = @process.run(
-    "wsl.exe",
-    ["-e", "sh", "-lc", wsl_moon_script(ws, "command -v moon")],
-    inherit_env=true,
-  ) catch {
-    _ => 1
-  }
-  if probe != 0 {
-    println(
-      "note: WSL with moon is not available; skipping the bundled Linux engine",
-    )
-    return false
-  }
-  let build = wsl_moon_script(
-    ws,
-    "moon build \{@packaging.engine_package()} --target native --release --target-dir _build/wsl_engine",
-  )
-  println("$ wsl.exe -e sh -lc '\{build}'")
-  let code = @process.run(
-    "wsl.exe",
-    ["-e", "sh", "-lc", build],
-    inherit_env=true,
-  ) catch {
-    _ => 1
-  }
-  if code != 0 || !@asyncfs.exists(ws.repo_at(WslEngineBinary)) {
-    println(
-      "warning: the WSL Linux engine build failed; the bundle will not include \{BundledWslEngineName}.",
-    )
-    println(
-      "         Install a C toolchain inside WSL (e.g. sudo apt-get install -y gcc) to bundle it.",
-    )
-    return false
-  }
-  true
-}
-
-///|
-/// Build everything the bundle needs; returns whether the optional WSL Linux
-/// engine was built and should be staged. CEF replaces WebView2, so no
-/// WebView2 SDK headers are fetched.
-async fn build_outputs(
-  ws : @packaging.Workspace,
-) -> (Bool, @xterm_assets.Assets) {
+/// Build everything the bundle needs. CEF replaces WebView2, so no WebView2
+/// SDK headers are fetched.
+async fn build_outputs(ws : @packaging.Workspace) -> @xterm_assets.Assets {
   // Assemble the CEF runtime first so the native host links against it.
   @packaging.assemble_cef_runtime(ws, @packaging.windows_proton_cli())
   // Then replace the assembled dist's proton library with one built from the
@@ -172,7 +110,7 @@ async fn build_outputs(
   )
   @packaging.build_native_host(ws, extra_args=["--warn-list", "-20"])
   @packaging.build_engine(ws)
-  (build_wsl_engine(ws), terminal_assets)
+  terminal_assets
 }
 
 ///|
@@ -187,7 +125,6 @@ async fn reset_bundle_dirs(ws : @packaging.Workspace) -> Unit {
 async fn copy_bundle_files(
   ws : @packaging.Workspace,
   terminal_assets : @xterm_assets.Assets,
-  with_wsl_engine~ : Bool,
 ) -> Unit {
   let native_binary = ws.native_binary()
   let engine_binary = ws.engine_binary()
@@ -211,14 +148,6 @@ async fn copy_bundle_files(
   )
   @packaging.copy_file(engine_binary, ws.at(bundled_engine))
   @pe.set_windows_gui_subsystem(ws.at(bundled_engine))
-  // Only a binary built this run is staged; a stale leftover from an earlier
-  // packaging would silently ship outdated engine code.
-  if with_wsl_engine {
-    @packaging.copy_file(
-      ws.repo_at(WslEngineBinary),
-      ws.at(BundleDir + "/" + BundledWslEngineName),
-    )
-  }
   @packaging.copy_file(ws.at("index.html"), ws.at(AppAssetDir + "/index.html"))
   @packaging.copy_file(ws.at("app.css"), ws.at(AppAssetDir + "/app.css"))
   @packaging.copy_file(
@@ -347,13 +276,10 @@ async fn main {
   if artifacts.installer {
     ensure_makensis(ws)
   }
-  let (with_wsl_engine, terminal_assets) = build_outputs(ws)
+  let terminal_assets = build_outputs(ws)
   println("built openseek engine: \{ws.engine_binary()}")
-  if with_wsl_engine {
-    println("built WSL Linux engine: \{ws.repo_at(WslEngineBinary)}")
-  }
   reset_bundle_dirs(ws)
-  copy_bundle_files(ws, terminal_assets, with_wsl_engine~)
+  copy_bundle_files(ws, terminal_assets)
   if artifacts.zip {
     zip_bundle(ws)
     println("generated \{ws.at(ZipPath)}")

@@ -1243,14 +1243,6 @@ async fn add_moonbit_path_for_native_engine(
   config : RunConfig,
   runtime_dir : @path.Path?,
 ) -> Unit {
-  guard config.host is Native else {
-    @xlog.debug() <?
-      {
-        "event": "desktop_engine_moonbit_path_skipped",
-        "host": config.host.fingerprint(),
-      }
-    return
-  }
   let moon_home = @moonbit.prepare_bundled_home(config.engine, runtime_dir?)
   let moon_bin_dir = moon_home.join("bin")
   let moon = moon_bin_dir.join("moon")
@@ -1267,7 +1259,6 @@ async fn add_moonbit_path_for_native_engine(
   @xlog.debug() <?
     {
       "event": "desktop_engine_moonbit_path",
-      "host": config.host.fingerprint(),
       "moon_home": moon_home.to_string(),
       "moon_bin_dir": moon_bin_dir.to_string(),
       "moon_exists": @fsx.exists(moon),
@@ -1314,9 +1305,6 @@ async fn engine_process_env(
     }
   }
   add_moonbit_path_for_native_engine(env, config, runtime_dir)
-  if config.host is Wsl(..) {
-    env["WSLENV"] = wslenv_with_passthrough(@env.get("WSLENV"))
-  }
   env
 }
 
@@ -1371,18 +1359,14 @@ async fn[G] start_serve_engine(
   let (reader, child_stdout) = @process.read_from_process()
   let (stderr_reader, child_stderr) = @process.read_from_process()
   let env = engine_process_env(config, manager.runtime_dir)
-  let (program, args) = config.host.serve_command(config.engine, config.cwd)
-  // In WSL mode the working directory is `--cd`'s job: a Linux-path cwd
-  // does not exist on the Windows side, so chdir'ing wsl.exe into it would
-  // fail the spawn.
-  let spawn_cwd = if config.host is Wsl(..) { None } else { config.cwd }
+  let program = config.engine
+  let args = ["serve", "--dir", "."]
   let graceful_cancel = @process.graceful_cancel(timeout=1000)
   @xlog.debug() <?
     {
       "event": "desktop_engine_spawn",
-      "host": config.host.fingerprint(),
       "program": program,
-      "cwd": spawn_cwd.map(cwd => cwd.to_string()).unwrap_or(""),
+      "cwd": config.cwd.map(cwd => cwd.to_string()).unwrap_or(""),
       "session_key": session_key(config),
       "runtime_dir": manager.runtime_dir
       .map(dir => dir.to_string())
@@ -1399,7 +1383,7 @@ async fn[G] start_serve_engine(
     stdin=child_stdin,
     stdout=child_stdout,
     stderr=child_stderr,
-    cwd?=spawn_cwd.map(cwd => cwd.to_string().view()),
+    cwd?=config.cwd.map(cwd => cwd.to_string().view()),
     cancel_handler=CancellationHandler(pid => {
       @xlog.warn() <?
         {
@@ -1414,7 +1398,6 @@ async fn[G] start_serve_engine(
   @xlog.info() <?
     {
       "event": "desktop_engine_spawned",
-      "host": config.host.fingerprint(),
       "program": program,
       "session_key": session_key(config),
       "pid": process.pid,
@@ -2051,7 +2034,6 @@ async test "native engine env has one authoritative bundled moon path" {
     model: "m",
     max_steps: 1,
     engine: engine.to_string(),
-    host: Native,
     cwd: None,
     session: None,
     session_root: None,
@@ -2135,7 +2117,6 @@ async test "engine startup rolls back follower on pre-spawn failure" {
     model: "test",
     max_steps: 1,
     engine: dir + "/missing/openseek",
-    host: Native,
     cwd: None,
     session: Some("s-startup-failure"),
     session_root: Some(Path(dir + "/root")),
@@ -2251,7 +2232,6 @@ fn pump_test_config(session : String) -> RunConfig {
     model: "test",
     max_steps: 1,
     engine: "unused",
-    host: Native,
     cwd: None,
     session: Some(session),
     session_root: Some(Path("/tmp/openseek-pump-test")),
