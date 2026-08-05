@@ -250,15 +250,80 @@ priv struct WatchWorkspacePayload {
   session : String
   // The conversation's workspace, when it has one (see `fs.read_directory`).
   workspace : String?
+  // Current clients send both arrays. Their absence retains the older
+  // recursive-watch behavior for protocol compatibility; present arrays are
+  // an explicit selection, including when one of them is empty.
+  files : Array[String]?
+  directories : Array[String]?
 } derive(FromJson)
 
 ///|
-/// The `fs_changed` push: something under `root` changed. Coarse by design —
-/// the watcher reports no paths, so the frontend re-stats its open tabs and
-/// re-lists its expanded directories itself.
+/// One concrete event from `Watcher::wait`. Rename uses `path` for the new
+/// name and `old_path` for the old one; the other kinds omit `old_path`.
+priv struct FsEventPayload {
+  kind_ : String
+  path : String
+  old_path : String?
+} derive(ToJson(fields(kind_(rename="kind"))))
+
+///|
+/// A filesystem change batch. A new watcher emits `baseline=true` once it is
+/// attached, telling the frontend to stat/re-list everything in its selection;
+/// later batches carry the exact debounced events.
 priv struct FsChangedPayload {
+  session : String
   root : String
+  baseline : Bool
+  events : Array[FsEventPayload]
 } derive(ToJson)
+
+///|
+fn FsEventPayload::from_event(event : @fs.FsEvent) -> FsEventPayload {
+  match event {
+    Modify(path) => { kind_: "modify", path, old_path: None }
+    Create(path) => { kind_: "create", path, old_path: None }
+    Remove(path) => { kind_: "remove", path, old_path: None }
+    Rename(old~, new~) => { kind_: "rename", path: new, old_path: Some(old) }
+  }
+}
+
+///|
+test "filesystem events keep their concrete kind and paths on the wire" {
+  assert_eq(
+    ToJson::to_json(
+      FsEventPayload::from_event(Rename(old="src/old.mbt", new="src/new.mbt")),
+    ),
+    { "kind": "rename", "path": "src/new.mbt", "old_path": "src/old.mbt" },
+  )
+  assert_eq(ToJson::to_json(FsEventPayload::from_event(Modify("README.md"))), {
+    "kind": "modify",
+    "path": "README.md",
+  })
+}
+
+///|
+/// A watcher that was accepted but could not attach, or later stopped while
+/// reading filesystem events. `session` lets the frontend discard a failure
+/// that raced a conversation switch.
+priv struct FsWatchFailedPayload {
+  session : String
+  root : String
+  message : String
+} derive(ToJson)
+
+///|
+test "filesystem watcher failures retain their conversation on the wire" {
+  let payload : FsWatchFailedPayload = {
+    session: "s-1",
+    root: "/work/project",
+    message: "File watching stopped: too many open files",
+  }
+  assert_eq(ToJson::to_json(payload), {
+    "session": "s-1",
+    "root": "/work/project",
+    "message": "File watching stopped: too many open files",
+  })
+}
 
 ///|
 /// `hover` asks a language server for hover at a zero-based

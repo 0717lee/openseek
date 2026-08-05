@@ -81,6 +81,7 @@ let notification_events : Map[String, @proton_contract.Event[Json]] = {
   "auth.changed": desktop_contract.event("auth.changed"),
   "lsp.diagnostics": desktop_contract.event("lsp.diagnostics"),
   "fs.changed": desktop_contract.event("fs.changed"),
+  "fs.watch_failed": desktop_contract.event("fs.watch_failed"),
   // PTY output and exit notifications originate from the connection-owned
   // terminal pump, but still need explicit Proton descriptors to reach xterm.
   "terminal.output": desktop_contract.event("terminal.output"),

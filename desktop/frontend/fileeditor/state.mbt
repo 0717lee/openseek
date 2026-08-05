@@ -89,6 +89,28 @@ pub(all) struct FileStat {
 }
 
 ///|
+/// One concrete filesystem event from the host watcher. Paths are relative
+/// to the conversation workspace. A rename keeps both names so the file tree
+/// and any open tab at either address can be reconciled.
+pub(all) enum FileChange {
+  Modified(@pathx.Relative)
+  Created(@pathx.Relative)
+  Removed(@pathx.Relative)
+  Renamed(old~ : @pathx.Relative, new~ : @pathx.Relative)
+} derive(Eq)
+
+///|
+/// The exact watcher configuration most recently sent to one host connection:
+/// every open tab plus the root/expanded directories whose immediate children
+/// the file tree needs to keep current.
+pub(all) struct WatchedPaths {
+  owner : @interop.ConversationKey
+  workspace : @pathx.Absolute?
+  files : Array[@pathx.Relative]
+  directories : Array[@pathx.Relative]
+} derive(Eq)
+
+///|
 /// The workspace file index behind the filter's fuzzy matching: every file
 /// under the workspace (the host walks it recursively, pruning churn
 /// directories and capping the count). Requested lazily on the first
@@ -122,10 +144,14 @@ pub(all) struct State {
   // is shown. A panel preference, not per-conversation state, so it
   // survives conversation switches.
   tree_open : Bool
-  // The conversation whose workspace the host's file watcher currently
-  // follows (`None` = parked). Keeping the channel here lets `sync` explicitly
-  // retire the previous host's watcher before placing the next one.
-  watching : @interop.ConversationKey?
+  // The paths the host's watcher currently follows (`None` = parked). Keeping
+  // the full configuration makes opening/closing a tab or expanding/collapsing
+  // a directory replace the watch even when the conversation did not change.
+  watching : WatchedPaths?
+  // A watcher can fail after `fs.watch` has already replied. Keep that
+  // failure separate from directory/file requests so a later successful
+  // directory listing does not hide the loss of live updates.
+  watch_error : String?
   // Directory paths the user has expanded, and those with a `read_directory`
   // in flight; plain arrays since a workspace tree is small.
   expanded : Array[@pathx.Relative]
@@ -165,6 +191,7 @@ pub fn State::empty() -> State {
     owner: None,
     tree_open: true,
     watching: None,
+    watch_error: None,
     expanded: [],
     loading: [],
     children: Map([]),
@@ -311,10 +338,13 @@ pub(all) enum Msg {
     annotation~ : String?
   )
   FileFailed(owner~ : @interop.ConversationKey, message~ : String)
-  // The host's coarse "something changed under the watched workspace" push.
-  // Carries no paths — the handler re-stats the open tabs and re-lists the
-  // expanded directories to find out what moved.
-  FsChanged
+  // An `fs.watch` request rejection or an asynchronous watcher failure. The
+  // owner fences both paths against a conversation switch.
+  FileWatchFailed(owner~ : @interop.ConversationKey, message~ : String)
+  // A new watcher sends `changes=None` once it is attached, requesting a full
+  // baseline reconciliation. Later pushes contain the exact debounced events.
+  // `session` is absent only for compatibility with an older host.
+  FsChanged(session~ : String?, changes~ : Array[FileChange]?)
   // A `stat_files` reply: each open tab's current mtime signature (`""` =
   // the file is gone). `owner` says which conversation it answers, like
   // every other reply.

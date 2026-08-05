@@ -42,7 +42,57 @@ fn bridge_msg(
       diagnostics_msg(channel, payload).map(msg => {
         FromDevice(channel, FilePanel(msg))
       })
-    "fs.changed" => Some(FromDevice(channel, FilePanel(FsChanged)))
+    "fs.changed" => {
+      let session = @jsonx.json_text(payload, "session")
+      let changes : Array[@fileeditor.FileChange]? = if @jsonx.json_bool(
+          payload, "baseline",
+        ).unwrap_or(false) {
+        None
+      } else if payload.get("events") is Some(Array(items)) {
+        let decoded : Array[@fileeditor.FileChange] = []
+        for item in items {
+          if item is Object(fields) &&
+            @jsonx.json_text(fields, "kind") is Some(kind_) &&
+            @jsonx.json_text(fields, "path") is Some(path) {
+            match kind_ {
+              "modify" =>
+                decoded.push(@fileeditor.Modified(@pathx.Relative(path)))
+              "create" =>
+                decoded.push(@fileeditor.Created(@pathx.Relative(path)))
+              "remove" =>
+                decoded.push(@fileeditor.Removed(@pathx.Relative(path)))
+              "rename" =>
+                if @jsonx.json_text(fields, "old_path") is Some(old) {
+                  decoded.push(
+                    @fileeditor.Renamed(
+                      old=@pathx.Relative(old),
+                      new=@pathx.Relative(path),
+                    ),
+                  )
+                }
+              _ => ()
+            }
+          }
+        }
+        Some(decoded)
+      } else {
+        // An older host sent only `{root}`; preserve its coarse refresh.
+        None
+      }
+      Some(FromDevice(channel, FilePanel(FsChanged(session~, changes~))))
+    }
+    "fs.watch_failed" =>
+      if @jsonx.json_text(payload, "session") is Some(session) &&
+        @jsonx.json_text(payload, "message") is Some(message) {
+        Some(
+          FromDevice(
+            channel,
+            FilePanel(FileWatchFailed(owner={ channel, session }, message~)),
+          ),
+        )
+      } else {
+        None
+      }
     "terminal.output" =>
       terminal_output_msg(channel, payload).map(msg => Terminal(msg))
     "terminal.exit" =>
@@ -215,7 +265,8 @@ fn proton_event_methods() -> Array[String] {
     "agent.connected", "agent.started", "agent.event", "agent.error", "agent.finished",
     "agent.durable", "session.event", "session.changed", "workspace.changed", "settings.changed",
     "skills.changed", "update.download_progress", "update.downloaded", "update.download_failed",
-    "auth.changed", "lsp.diagnostics", "fs.changed", "terminal.output", "terminal.exit",
+    "auth.changed", "lsp.diagnostics", "fs.changed", "fs.watch_failed", "terminal.output",
+    "terminal.exit",
   ]
 }
 
@@ -277,7 +328,57 @@ test "file-panel pushes carry their channel; auth.changed is Local-only" {
   let channel : @interop.ChannelId = Remote("d1")
   assert_true(
     bridge_msg(channel, "fs.changed", Map([]))
-    is Some(FromDevice(Remote("d1"), FilePanel(_))),
+    is Some(
+      FromDevice(Remote("d1"), FilePanel(FsChanged(session=None, changes=None)))
+    ),
+  )
+  assert_true(
+    bridge_msg(channel, "fs.changed", {
+      "session": Json::string("s-1"),
+      "baseline": Json::boolean(false),
+      "events": Json::array([
+        { "kind": "modify", "path": "src/main.mbt" },
+        { "kind": "rename", "path": "src/new.mbt", "old_path": "src/old.mbt" },
+      ]),
+    })
+    is Some(
+      FromDevice(
+        Remote("d1"),
+        FilePanel(
+          FsChanged(
+            session=Some("s-1"),
+            changes=Some(
+              [
+                Modified(Relative("src/main.mbt")),
+                Renamed(
+                  old=Relative("src/old.mbt"),
+                  new=Relative("src/new.mbt")
+                ),
+              ]
+            )
+          )
+        )
+      )
+    ),
+  )
+  assert_true(proton_event_methods().contains("fs.watch_failed"))
+  assert_true(
+    bridge_msg(channel, "fs.watch_failed", {
+      "session": Json::string("s-1"),
+      "root": Json::string("/work/project"),
+      "message": Json::string("File watching stopped"),
+    })
+    is Some(
+      FromDevice(
+        Remote("d1"),
+        FilePanel(
+          FileWatchFailed(
+            owner={ channel: Remote("d1"), session: "s-1" },
+            message="File watching stopped"
+          )
+        )
+      )
+    ),
   )
   // A remote device's relay registration is its host's business.
   assert_true(bridge_msg(channel, "auth.changed", Map([])) is None)

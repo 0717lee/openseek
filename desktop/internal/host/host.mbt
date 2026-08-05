@@ -134,9 +134,10 @@ pub async fn HostConnection::run(
         }
       })
     })
-    self.fs_watch.run(async fn(push) {
-      emit("fs.changed", ToJson::to_json(push))
-    })
+    self.fs_watch.run(
+      async fn(push) { emit("fs.changed", ToJson::to_json(push)) },
+      async fn(failure) { emit("fs.watch_failed", ToJson::to_json(failure)) },
+    )
   })
 }
 

@@ -175,6 +175,12 @@ fn viewer_notice(state : State) -> @html.Html {
 /// edge.
 fn tree_pane(dispatch : @cmd.Emit[Msg], state : State, ctx : Ctx) -> @html.Html {
   let entries = visible_entries(state)
+  // Losing the watcher is more important than a request-local failure: live
+  // updates remain disabled even if a later directory request succeeds.
+  let visible_error = match state.watch_error {
+    Some(message) => Some(message)
+    None => state.error
+  }
   // The filter's query, rebuilt here only to split each row's path into
   // matched/unmatched sections for highlighting — the rows themselves were
   // already ranked by `visible_entries`.
@@ -224,12 +230,12 @@ fn tree_pane(dispatch : @cmd.Emit[Msg], state : State, ctx : Ctx) -> @html.Html 
     @html.div(class="file-tree", tree_children),
     // Rendered even while empty so the row's slot in the pane is stable.
     @html.div(
-      class=if state.error is Some(_) {
+      class=if visible_error is Some(_) {
         "file-panel-error"
       } else {
         "file-panel-error empty"
       },
-      match state.error {
+      match visible_error {
         Some(message) => message
         None => ""
       },

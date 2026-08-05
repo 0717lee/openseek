@@ -188,17 +188,77 @@ pub fn open_file(
 }
 
 ///|
+/// Whether this event can change the file currently addressed by `path`.
+/// Structural directory events cover every descendant; a content modification
+/// applies only to the exact file returned by the watcher.
+fn FileChange::touches(self : FileChange, path : @pathx.Relative) -> Bool {
+  match self {
+    Modified(changed) => changed == path
+    Created(changed) | Removed(changed) => @pathx.contains(changed.0, path.0)
+    Renamed(old~, new~) =>
+      @pathx.contains(old.0, path.0) || @pathx.contains(new.0, path.0)
+  }
+}
+
+///|
+/// The directory containing `path`; a root-level entry belongs to `""`.
+fn FileChange::parent(path : @pathx.Relative) -> @pathx.Relative {
+  let segments = [..path.0.split("/")]
+  ignore(segments.pop())
+  Relative(segments.join("/"))
+}
+
+///|
+/// Listed directories whose immediate rows may have changed. A created or
+/// renamed destination is included too so a directory that disappeared and
+/// later returned does not reuse stale cached children.
+fn FileChange::relist_candidates(self : FileChange) -> Array[@pathx.Relative] {
+  match self {
+    Modified(_) => []
+    Created(path) => [FileChange::parent(path), path]
+    Removed(path) => [FileChange::parent(path)]
+    Renamed(old~, new~) =>
+      [FileChange::parent(old), FileChange::parent(new), new]
+  }
+}
+
+///|
+fn FileChange::changes_file_list(self : FileChange) -> Bool {
+  !(self is Modified(_))
+}
+
+///|
 /// Reconcile the host's workspace watcher with what the panel needs: follow
 /// the active session while the panel is open or tabs remain open in the
 /// background (their staleness must keep being tracked for the reopen), park
 /// it otherwise. Wraps every `sync` exit so the bookkeeping cannot be missed.
-fn with_watch(state : State, ctx : Ctx, cmd : @cmd.Cmd) -> (State, @cmd.Cmd) {
-  let want = if (state.open || !state.tabs.is_empty()) &&
-    !ctx.owner.session.is_empty() {
-    Some(ctx.owner)
-  } else {
-    None
+fn State::watched_paths(self : State, ctx : Ctx) -> WatchedPaths? {
+  if (!self.open && self.tabs.is_empty()) || ctx.owner.session.is_empty() {
+    return None
   }
+  let files = self.tabs.map(tab => tab.path)
+  files.sort_by((left, right) => left.0.lexical_compare(right.0))
+  let directories : Array[@pathx.Relative] = []
+  if self.open {
+    directories.push(@pathx.Relative::root())
+    for directory in self.expanded {
+      if !directories.contains(directory) {
+        directories.push(directory)
+      }
+    }
+    directories.sort_by((left, right) => left.0.lexical_compare(right.0))
+  }
+  Some({ owner: ctx.owner, workspace: ctx.workspace, files, directories })
+}
+
+///|
+fn with_watch(
+  dispatch : @cmd.Emit[Msg],
+  state : State,
+  ctx : Ctx,
+  cmd : @cmd.Cmd,
+) -> (State, @cmd.Cmd) {
+  let want = state.watched_paths(ctx)
   if state.watching == want {
     (state, cmd)
   } else {
@@ -206,21 +266,20 @@ fn with_watch(state : State, ctx : Ctx, cmd : @cmd.Cmd) -> (State, @cmd.Cmd) {
     // A watcher is host-local. Moving across channels must explicitly retire
     // the old host; placing a new watch on another socket cannot replace it.
     if state.watching is Some(current) &&
-      (want is None || (want is Some(next) && current.channel != next.channel)) {
+      (
+        want is None ||
+        (want is Some(next) && current.owner.channel != next.owner.channel)
+      ) {
       commands.push(
-        watch_workspace(channel=current.channel, "", workspace=None),
+        watch_workspace(dispatch, channel=current.owner.channel, None),
       )
     }
     if want is Some(next) {
       commands.push(
-        watch_workspace(
-          channel=next.channel,
-          next.session,
-          workspace=ctx.workspace,
-        ),
+        watch_workspace(dispatch, channel=next.owner.channel, Some(next)),
       )
     }
-    ({ ..state, watching: want }, @cmd.batch(commands))
+    ({ ..state, watching: want, watch_error: None }, @cmd.batch(commands))
   }
 }
 
@@ -297,8 +356,8 @@ pub fn sync(
         open: state.open,
         owner: Some(ctx.owner),
         tree_open: state.tree_open,
-        // What the host actually watches doesn't change with the reroot;
-        // `with_watch` re-points it against this record on the way out.
+        // Preserve the last host configuration long enough for `with_watch`
+        // to retire or replace it on the way out.
         watching: state.watching,
         remembered,
         tabs,
@@ -309,7 +368,7 @@ pub fn sync(
   }
   // A closed panel re-roots (above) and keeps the watcher placed, but the
   // tree itself can wait for the reopen.
-  guard state.open else { return with_watch(state, ctx, reroot_cmd) }
+  guard state.open else { return with_watch(dispatch, state, ctx, reroot_cmd) }
   // Load as soon as there is a conversation: the workspace directory is a pure
   // function of the session id, so the host can list it without waiting for a
   // run to report `cwd` (it reports an empty workspace until the first turn
@@ -317,11 +376,12 @@ pub fn sync(
   if ctx.owner.session.is_empty() ||
     state.children.contains("") ||
     state.loading.contains("") {
-    return with_watch(state, ctx, reroot_cmd)
+    return with_watch(dispatch, state, ctx, reroot_cmd)
   }
   let loading = state.loading.copy()
   loading.push("")
   with_watch(
+    dispatch,
     { ..state, loading, },
     ctx,
     @cmd.batch([
@@ -686,45 +746,70 @@ pub fn update(
       } else {
         (@cmd.none, state)
       }
-    FsChanged => {
-      guard state.owner is Some(owner) else { return (@cmd.none, state) }
-      // Something under the watched workspace moved. Find out what: one
-      // batched stat for the open tabs, and a re-list of the root plus every
-      // expanded directory already on screen (marked loading so a burst of
-      // pushes cannot stack duplicate lists; the watcher already debounces).
-      let cmds = []
-      if !state.tabs.is_empty() {
-        cmds.push(
-          stat_files(
-            dispatch,
-            owner,
-            state.tabs.map(tab => tab.path),
-            workspace=ctx.workspace,
-          ),
-        )
-      }
-      let relist : Array[@pathx.Relative] = []
-      if state.children.contains("") && !state.loading.contains("") {
-        relist.push(@pathx.Relative::root())
-      }
-      for dir in state.expanded {
-        if state.children.contains(dir) && !state.loading.contains(dir) {
-          relist.push(dir)
+    FsChanged(session~, changes~) =>
+      if state.owner is Some(owner) &&
+        (session is None || session == Some(owner.session)) {
+        // A baseline checks the whole selection after watcher replacement.
+        // Concrete batches stat only affected tabs and re-list only directories
+        // whose immediate children changed.
+        let cmds = []
+        let stat_paths : Array[@pathx.Relative] = []
+        let relist : Array[@pathx.Relative] = []
+        let mut refresh_index = false
+        if changes is Some(changes) {
+          for change in changes {
+            for tab in state.tabs {
+              if change.touches(tab.path) && !stat_paths.contains(tab.path) {
+                stat_paths.push(tab.path)
+              }
+            }
+            for directory in change.relist_candidates() {
+              if !relist.contains(directory) &&
+                state.children.contains(directory) &&
+                (directory.is_root() || state.expanded.contains(directory)) &&
+                !state.loading.contains(directory) {
+                relist.push(directory)
+              }
+            }
+            if change.changes_file_list() {
+              refresh_index = true
+            }
+          }
+        } else {
+          for tab in state.tabs {
+            stat_paths.push(tab.path)
+          }
+          if state.children.contains("") && !state.loading.contains("") {
+            relist.push(@pathx.Relative::root())
+          }
+          for directory in state.expanded {
+            if state.children.contains(directory) &&
+              !state.loading.contains(directory) {
+              relist.push(directory)
+            }
+          }
+          refresh_index = true
         }
+        if !stat_paths.is_empty() {
+          cmds.push(
+            stat_files(dispatch, owner, stat_paths, workspace=ctx.workspace),
+          )
+        }
+        let loading = state.loading.copy()
+        for directory in relist {
+          loading.push(directory)
+          cmds.push(
+            read_directory(dispatch, owner, directory, workspace=ctx.workspace),
+          )
+        }
+        // Only structural events can change the fuzzy index's path list.
+        if refresh_index && !(state.index is IndexEmpty) {
+          cmds.push(list_files(dispatch, owner, workspace=ctx.workspace))
+        }
+        (@cmd.batch(cmds), { ..state, loading, })
+      } else {
+        (@cmd.none, state)
       }
-      let loading = state.loading.copy()
-      for dir in relist {
-        loading.push(dir)
-        cmds.push(read_directory(dispatch, owner, dir, workspace=ctx.workspace))
-      }
-      // The fuzzy filter's index goes stale with the tree; rebuild it if
-      // anyone has ever needed it (the reply just replaces the old list, so
-      // the filter keeps showing the previous matches meanwhile).
-      if !(state.index is IndexEmpty) {
-        cmds.push(list_files(dispatch, owner, workspace=ctx.workspace))
-      }
-      (@cmd.batch(cmds), { ..state, loading, })
-    }
     StatsLoaded(owner~, stats~) =>
       if state.owner != Some(owner) {
         (@cmd.none, state)
@@ -803,6 +888,12 @@ pub fn update(
         (@cmd.none, state)
       } else {
         (@cmd.none, { ..state, error: Some(message) })
+      }
+    FileWatchFailed(owner~, message~) =>
+      if state.owner != Some(owner) {
+        (@cmd.none, state)
+      } else {
+        (@cmd.none, { ..state, watch_error: Some(message) })
       }
     // Owned by the main package's update: the comment becomes a composer
     // chip there, which then clears the editor bubble through
@@ -1132,7 +1223,7 @@ test "a closed panel still re-roots when the conversation switches" {
   let state = {
     ..open_state(),
     open: false,
-    watching: Some(test_ctx().owner),
+    watching: open_state().watched_paths(test_ctx()),
     tabs: [loaded_tab("a.mbt", "a.mbt")],
     active: Some(Relative("a.mbt")),
   }
@@ -1158,7 +1249,15 @@ test "a closed panel still re-roots when the conversation switches" {
   assert_true(restored.tabs[0].state is TabLoading)
   assert_true(restored.active is Some(Relative("a.mbt")))
   assert_true(
-    restored.watching is Some({ channel: Local, session: "desktop-test" }),
+    restored.watching
+    is Some(
+      {
+        owner: { channel: Local, session: "desktop-test" },
+        workspace: None,
+        files: [Relative("a.mbt")],
+        directories: [],
+      }
+    ),
   )
   // Reopening is what reads the restored active tab (the command is opaque;
   // the tab stays TabLoading until the reply lands).
@@ -1267,7 +1366,7 @@ test "a deleted tab whose file reappears reloads on the next stats" {
 }
 
 ///|
-test "FsChanged re-lists the root and expanded, already-listed directories" {
+test "watcher baseline re-lists the root and expanded, listed directories" {
   let emit = test_emit()
   let children : Map[@pathx.Relative, Array[FileEntry]] = Map([])
   children[Relative("")] = []
@@ -1277,35 +1376,124 @@ test "FsChanged re-lists the root and expanded, already-listed directories" {
     children,
     expanded: [Relative("src"), Relative("never-listed")],
   }
-  let (_, next) = update(emit, FsChanged, state, test_ctx())
+  let baseline = FsChanged(session=Some("desktop-test"), changes=None)
+  let (_, next) = update(emit, baseline, state, test_ctx())
   // Both known directories are marked in flight; the never-listed one is
   // left to its own first expansion.
   assert_true(next.loading.contains(Relative("")))
   assert_true(next.loading.contains(Relative("src")))
   assert_false(next.loading.contains(Relative("never-listed")))
   // A second push while the lists are in flight stacks nothing.
-  let (_, again) = update(emit, FsChanged, next, test_ctx())
+  let (_, again) = update(emit, baseline, next, test_ctx())
   assert_eq(again.loading.length(), next.loading.length())
+}
+
+///|
+test "concrete watcher events refresh only affected listed directories" {
+  let emit = test_emit()
+  let children : Map[@pathx.Relative, Array[FileEntry]] = Map([])
+  children[Relative("")] = []
+  children[Relative("src")] = []
+  children[Relative("docs")] = []
+  let state = {
+    ..open_state(),
+    children,
+    expanded: [Relative("src"), Relative("docs")],
+  }
+  let message = FsChanged(
+    session=Some("desktop-test"),
+    changes=Some([Created(Relative("src/new.mbt"))]),
+  )
+  let (_, first) = update(emit, message, state, test_ctx())
+  assert_true(first.loading == [Relative("src")])
+  // Rabbita purity: the same message and model produce the same state.
+  let (_, second) = update(emit, message, state, test_ctx())
+  assert_true(first.loading == second.loading)
+  // A late batch from the previous conversation is ignored.
+  let (_, stale) = update(
+    emit,
+    FsChanged(
+      session=Some("previous-session"),
+      changes=Some([Created(Relative("docs/new.md"))]),
+    ),
+    state,
+    test_ctx(),
+  )
+  assert_true(stale.loading.is_empty())
 }
 
 ///|
 test "sync reconciles the watcher with the panel and its tabs" {
   let emit = test_emit()
   // Open panel: watch the active session.
-  let (watched, _) = sync(emit, open_state(), test_ctx())
-  assert_true(watched.watching == Some(test_ctx().owner))
-  // Closed panel with tabs still open: keep watching (staleness tracking).
-  let closed = {
+  let (watched, _) = sync(
+    emit,
+    { ..open_state(), watch_error: Some("old watcher failure") },
+    test_ctx(),
+  )
+  assert_true(
+    watched.watching
+    is Some(
+      {
+        owner: { session: "desktop-test", .. },
+        workspace: None,
+        files: [],
+        directories: [Relative("")],
+      }
+    ),
+  )
+  // Issuing a new watch attempt retires the previous failure.
+  assert_true(watched.watch_error is None)
+  // Opening a tab or expanding a directory replaces the same conversation's
+  // watcher with the new exact selection.
+  let selected = {
     ..watched,
-    open: false,
     tabs: [loaded_tab("a.mbt", "a.mbt")],
-    children: Map([]),
-    loading: [],
+    expanded: [Relative("src")],
   }
+  let (replaced, _) = sync(emit, selected, test_ctx())
+  assert_true(
+    replaced.watching
+    is Some(
+      {
+        files: [Relative("a.mbt")],
+        directories: [Relative(""), Relative("src")],
+        ..,
+      }
+    ),
+  )
+  // Closed panel with tabs still open: keep watching (staleness tracking).
+  let closed = { ..replaced, open: false, children: Map([]), loading: [] }
   let (still, _) = sync(emit, closed, test_ctx())
-  assert_true(still.watching == Some(test_ctx().owner))
+  assert_true(
+    still.watching is Some({ files: [Relative("a.mbt")], directories: [], .. }),
+  )
   // Closed panel, no tabs: park the watcher.
   let empty_panel = { ..still, tabs: [] }
   let (parked, _) = sync(emit, empty_panel, test_ctx())
   assert_true(parked.watching is None)
+}
+
+///|
+test "watcher failures are visible only in their owning conversation" {
+  let emit = test_emit()
+  let owner = test_ctx().owner
+  let (_, failed) = update(
+    emit,
+    FileWatchFailed(owner~, message="File watching stopped"),
+    open_state(),
+    test_ctx(),
+  )
+  assert_true(failed.watch_error is Some("File watching stopped"))
+  let other : @interop.ConversationKey = {
+    channel: @interop.ChannelId::Remote("other"),
+    session: owner.session,
+  }
+  let (_, unchanged) = update(
+    emit,
+    FileWatchFailed(owner=other, message="stale failure"),
+    failed,
+    test_ctx(),
+  )
+  assert_true(unchanged.watch_error is Some("File watching stopped"))
 }

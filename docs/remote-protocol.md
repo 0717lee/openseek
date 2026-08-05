@@ -417,15 +417,22 @@ filesystem for the workspace picker.
 | `fs.read_directory` | `{session, path, workspace?}` (`""` = workspace root) | `{entries: [{name, is_dir}]}`, directories first |
 | `fs.list_files` | `{session, workspace?}` | `{files: […], truncated}` — recursive snapshot for the fuzzy finder |
 | `fs.stat_files` | `{session, paths, workspace?}` | `{stats: [{path, sig}]}` — `sig` is the opaque mtime signature `"{seconds}:{nanos}"`; `""` means the file is missing, retained for client compatibility |
-| `fs.watch` | `{session, workspace?}` | `{}` — points the single workspace watcher at this conversation |
-| `fs.unwatch` | `{}` | `{}` — stops watching (the panel closed) |
+| `fs.watch` | `{session, workspace?, files?, directories?}` | `{}` — replaces the single workspace watcher with the open files and listed directories; each directory keeps its immediate children observable |
+| `fs.unwatch` | `{}` | `{}` — stops watching when the panel is closed and it has no open tabs |
 | `fs.browse` | `{path?}` (absent = home; leading `~` expands) | `{path, parent?, entries}` — subdirectory names, sorted, dotfiles skipped |
 
 Notification:
 
 | method | params |
 |---|---|
-| `fs.changed` | `{root}` — coarse by design; the client re-stats its open tabs and re-lists expanded directories |
+| `fs.changed` | `{session, root, baseline, events: [{kind, path, old_path?}]}` — `baseline=true` follows watcher attachment; later batches use `modify` / `create` / `remove` / `rename` events with workspace-relative paths |
+| `fs.watch_failed` | `{session, root, message}` — the accepted watcher could not attach or later stopped; clients should fence the failure by session |
+
+`files` and `directories` are optional only for compatibility with older
+clients. When both are absent the host retains the previous pruned recursive
+watch; current clients always send both arrays, including empty arrays. A
+watcher replacement emits a baseline after it has scanned the selected paths,
+so the client can reconcile changes that raced the replacement.
 
 ### terminal.* — connection-scoped PTYs
 
