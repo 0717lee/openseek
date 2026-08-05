@@ -112,6 +112,7 @@ jobs:
           OPENSEEK_CLIENT_TOKEN: ${{ secrets.OPENSEEK_CLIENT_TOKEN }}
         run: |
           moon -C desktop run --target native --release package/macos -- \
+            --release \
             --target dmg \
             --target zip \
             --sign "$MACOS_SIGNING_IDENTITY" \
