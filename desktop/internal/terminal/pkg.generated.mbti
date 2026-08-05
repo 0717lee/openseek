@@ -30,8 +30,8 @@ pub(all) enum TerminalPush {
 }
 
 type TerminalState
+pub fn TerminalState::shutdown(Self) -> Unit
 
 // Type aliases
 
 // Traits
-

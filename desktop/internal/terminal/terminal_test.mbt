@@ -38,6 +38,7 @@ async fn wait_for_exit(pushes : @async.Queue[@terminal.TerminalPush]) -> Unit {
 async test "terminal session round-trips output and reports exit" {
   @async.with_task_group(group => {
     let state = @terminal.new_terminal_state()
+    defer state.shutdown()
     let pushes = new_push_queue()
     group.spawn_bg(allow_failure=true, () => {
       @terminal.run_terminal_pump(state, async fn(push) { pushes.put(push) })
@@ -50,7 +51,6 @@ async test "terminal session round-trips output and reports exit" {
     @terminal.resize_terminal(state, id~, cols=100, rows=30)
     @terminal.close_terminal(state, id~)
     @async.with_timeout(5000, () => wait_for_exit(pushes))
-    group.return_immediately(())
   })
 }
 
@@ -59,18 +59,19 @@ async test "terminal session round-trips output and reports exit" {
 async test "terminal session runs in the requested directory" {
   @async.with_task_group(group => {
     let state = @terminal.new_terminal_state()
+    defer state.shutdown()
     let pushes = new_push_queue()
     group.spawn_bg(allow_failure=true, () => {
       @terminal.run_terminal_pump(state, async fn(push) { pushes.put(push) })
     })
-    let id = @terminal.open_terminal(state, cwd="/tmp", cols=80, rows=24, command=[
-      "/bin/sh", "-c", "pwd",
-    ])
+    ignore(
+      @terminal.open_terminal(state, cwd="/tmp", cols=80, rows=24, command=[
+        "/bin/sh", "-c", "pwd",
+      ]),
+    )
     // /tmp is a symlink to /private/tmp on macOS; match the suffix.
     @async.with_timeout(5000, () => wait_for_output(pushes, "tmp"))
     @async.with_timeout(5000, () => wait_for_exit(pushes))
-    ignore(id)
-    group.return_immediately(())
   })
 }
 
@@ -80,6 +81,7 @@ async test "terminal session runs in the requested directory" {
 async test "a missing program fails while opening the session" {
   @async.with_task_group(group => {
     let state = @terminal.new_terminal_state()
+    defer state.shutdown()
     let pushes = new_push_queue()
     group.spawn_bg(allow_failure=true, () => {
       @terminal.run_terminal_pump(state, async fn(push) { pushes.put(push) })
@@ -94,7 +96,6 @@ async test "a missing program fails while opening the session" {
       _ => false
     }
     assert_true(failed)
-    group.return_immediately(())
   })
 }
 
@@ -112,12 +113,61 @@ async test "an empty command is rejected before spawning" {
 }
 
 ///|
+/// Shutdown is the pump's normal stop signal. In particular, an idle pump
+/// blocked on its request queue must let its owning task group finish.
+async test "shutdown wakes an idle terminal pump" {
+  @async.with_timeout(5000, () => {
+    @async.with_task_group(group => {
+      let state = @terminal.new_terminal_state()
+      let pushes = new_push_queue()
+      group.spawn_bg(allow_failure=true, () => {
+        @terminal.run_terminal_pump(state, async fn(push) { pushes.put(push) })
+      })
+      @async.pause()
+      state.shutdown()
+    })
+  })
+}
+
+///|
+/// An opener may already be waiting on its private reply when the connection
+/// ends. Shutdown must reject that call, and all later opens, without a pump.
+async test "shutdown rejects pending and later terminal opens" {
+  @async.with_task_group(group => {
+    let state = @terminal.new_terminal_state()
+    let pending_rejected : @async.Queue[Bool] = Queue(kind=Blocking(1))
+    group.spawn_bg(allow_failure=true, () => {
+      let rejected = try {
+        let _ = @terminal.open_terminal(state, cwd=".", cols=80, rows=24)
+        false
+      } catch {
+        @terminal.TerminalError("terminal service is closed") => true
+        _ => false
+      }
+      pending_rejected.put(rejected)
+    })
+    @async.pause()
+    state.shutdown()
+    assert_true(@async.with_timeout(5000, () => pending_rejected.get()))
+    let later_rejected = try {
+      let _ = @terminal.open_terminal(state, cwd=".", cols=80, rows=24)
+      false
+    } catch {
+      @terminal.TerminalError("terminal service is closed") => true
+      _ => false
+    }
+    assert_true(later_rejected)
+  })
+}
+
+///|
 /// `close_all_terminals` (the connect handshake's sweep) retires every live
 /// session; each one still reports its exit.
 #cfg(not(platform="windows"))
 async test "close_all_terminals retires every live session" {
   @async.with_task_group(group => {
     let state = @terminal.new_terminal_state()
+    defer state.shutdown()
     let pushes = new_push_queue()
     group.spawn_bg(allow_failure=true, () => {
       @terminal.run_terminal_pump(state, async fn(push) { pushes.put(push) })
@@ -135,7 +185,6 @@ async test "close_all_terminals retires every live session" {
     })
     exited.sort()
     assert_eq(exited, [first, second])
-    group.return_immediately(())
   })
 }
 
@@ -146,6 +195,7 @@ async test "close_all_terminals retires every live session" {
 async test "close_all_terminals cancels queued opens from an older page" {
   @async.with_task_group(group => {
     let state = @terminal.new_terminal_state()
+    defer state.shutdown()
     let pushes = new_push_queue()
     let cancelled : @async.Queue[Bool] = Queue(kind=Blocking(1))
     group.spawn_bg(allow_failure=true, () => {
@@ -168,7 +218,6 @@ async test "close_all_terminals cancels queued opens from an older page" {
     })
     let was_cancelled = @async.with_timeout(5000, () => cancelled.get())
     assert_true(was_cancelled)
-    group.return_immediately(())
   })
 }
 
@@ -180,6 +229,7 @@ async test "close_all_terminals cancels queued opens from an older page" {
 async test "duplicate acknowledgements release an output chunk only once" {
   @async.with_task_group(group => {
     let state = @terminal.new_terminal_state()
+    defer state.shutdown()
     let pushes = new_push_queue()
     group.spawn_bg(allow_failure=true, () => {
       @terminal.run_terminal_pump(state, async fn(push) { pushes.put(push) })
@@ -219,7 +269,6 @@ async test "duplicate acknowledgements release an output chunk only once" {
     assert_true(resumed is Some(Output(id=output_id, ..)) && output_id == id)
     @terminal.close_terminal(state, id~)
     @async.with_timeout(5000, () => wait_for_exit(pushes))
-    group.return_immediately(())
   })
 }
 

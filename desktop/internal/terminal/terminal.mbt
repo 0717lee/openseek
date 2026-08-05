@@ -11,6 +11,13 @@ pub suberror TerminalError {
 }
 
 ///|
+/// The request queue uses this private error only to wake and stop its pump.
+/// Callers instead receive `TerminalError` from their individual reply queue.
+priv suberror TerminalPumpClosed {
+  TerminalPumpClosed
+}
+
+///|
 /// One push from a terminal session to the webview. `Output` carries raw PTY
 /// bytes (chunk boundaries may split UTF-8 sequences, so the wire encoding
 /// must stay byte-transparent); `Exited` reports the child's exit code after
@@ -73,6 +80,9 @@ struct TerminalState {
   requests : @async.Queue[OpenRequest]
   sessions : Map[Int, TerminalSession]
   mut next_id : Int
+  /// Once closed, this state cannot serve another connection. Page reconnects
+  /// use `close_all_terminals` instead and leave the pump available.
+  mut closed : Bool
   /// Incremented by the connect handshake so opens from an older page cannot
   /// publish a session after that page has gone away.
   mut connection_generation : Int
@@ -84,6 +94,7 @@ pub fn new_terminal_state() -> TerminalState {
     requests: Queue(kind=Unbounded),
     sessions: Map([]),
     next_id: 1,
+    closed: false,
     connection_generation: 0,
   }
 }
@@ -93,7 +104,8 @@ pub fn new_terminal_state() -> TerminalState {
 /// running. Without `command`, POSIX launches `$SHELL -l` and Windows launches
 /// `%COMSPEC%`; with it, that argv runs directly in the session's PTY instead.
 /// Requires `run_terminal_pump` to be running (the host services' task
-/// group), otherwise the call waits until it is.
+/// group), otherwise the call waits until it is. A permanently shut down state
+/// rejects the request instead of leaving its caller parked.
 pub async fn open_terminal(
   state : TerminalState,
   cwd~ : String,
@@ -101,6 +113,7 @@ pub async fn open_terminal(
   rows~ : Int,
   command? : Array[String],
 ) -> Int {
+  guard !state.closed else { raise TerminalError("terminal service is closed") }
   let argv = session_argv(command?)
   let id = state.next_id
   state.next_id = id + 1
@@ -113,7 +126,10 @@ pub async fn open_terminal(
     cols,
     rows,
     reply,
-  })
+  }) catch {
+    TerminalPumpClosed => raise TerminalError("terminal service is closed")
+    error => raise error
+  }
   match reply.get() {
     Ok(_) => id
     Err(message) => raise TerminalError(message)
@@ -170,9 +186,10 @@ pub fn ack_terminal(state : TerminalState, id~ : Int, sequence~ : Int) -> Unit {
 }
 
 ///|
-/// Request a session's shutdown. Its task kills the child immediately, then
-/// the existing read/wait path emits `Exited` and releases the PTY. Unknown
-/// ids are a no-op (the session already exited).
+/// Request a session's shutdown. Its task stops the child immediately and, on
+/// Windows, cancels the task that issued the blocking ConPTY read; the async
+/// I/O layer can then interrupt that exact read before the session closes its
+/// handles and emits `Exited`. Unknown ids are a no-op (already exited).
 pub fn close_terminal(state : TerminalState, id~ : Int) -> Unit {
   guard state.sessions.get(id) is Some(session) else { return }
   guard !session.closing else { return }
@@ -195,4 +212,23 @@ pub fn close_all_terminals(state : TerminalState) -> Unit {
   for id in state.sessions.keys().to_array() {
     close_terminal(state, id~)
   }
+}
+
+///|
+/// Permanently stop this connection's terminal subsystem. Pending open calls
+/// are rejected before the request queue closes, so neither they nor an idle
+/// pump remain parked. Repeated shutdown calls are harmless.
+pub fn TerminalState::shutdown(self : TerminalState) -> Unit {
+  guard !self.closed else { return }
+  self.closed = true
+  close_all_terminals(self)
+  // A request still in this queue has an opener blocked on its private reply.
+  // Close that reply explicitly before removing the pump's only route to it.
+  while (self.requests.try_get() catch { _ => None }) is Some(request) {
+    request.reply.close(
+      error=TerminalError("terminal service is closed"),
+      clear=true,
+    )
+  }
+  self.requests.close(error=TerminalPumpClosed, clear=true)
 }
