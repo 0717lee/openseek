@@ -2,6 +2,8 @@ members = [
   ".",
   "./protocol",
   "./cmd/viz_app",
+  "./editor",
+  "./editor/server",
   "./desktop",
   "./desktop/lepus/config",
   "./desktop/lepus/extensions",

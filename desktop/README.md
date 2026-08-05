@@ -162,15 +162,18 @@ toolchain seed. Development uses the same bundle flow — see
 
 ```sh
 git clone <this-repo>
-# From the repository root, initialize the desktop's lepus submodule:
+# From the repository root, initialize the desktop's Lepus submodule:
 git submodule update --init desktop/lepus
 ```
 
-The desktop frontend imports the published `moonbitlang/editor` package
-declared in `moon.mod`. Packaging reads its reusable CSS and codicon font
-directly from `.mooncakes/moonbitlang/editor`; `viewer_theme.css` supplies the
-desktop-owned theme variables because the published package excludes its
-reference shell.
+The desktop frontend imports the `moonbitlang/editor` workspace member from
+`../editor`. Packaging reads its reusable CSS and codicon font from that same
+checkout, and invokes the editor-owned Mermaid asset builder to download and
+SHA-256-verify `mermaid@11.16.0`. Every desktop and browser package copies
+that local ESM tree beside the frontend bundle, so MoonBit code and browser
+assets cannot drift between registry and source versions and end users never
+fetch Mermaid from a CDN. `viewer_theme.css` supplies the desktop-owned theme
+variables; the editor's reference-shell theme remains development-only.
 
 Why the bootstrap is a little involved:
 
@@ -182,8 +185,8 @@ Why the bootstrap is a little involved:
   in the repository, so they must be installed from the Microsoft WebView2 NuGet
   package once per checkout.
 - The desktop host expects `assets/index.html`, `assets/app.css`,
-  `assets/frontend.js`, and an `openseek` engine executable beside it when
-  packaged.
+  `assets/frontend.js`, the generated `assets/mermaid/` tree, and an
+  `openseek` engine executable beside it when packaged.
 
 ## Build
 

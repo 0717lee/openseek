@@ -35,6 +35,7 @@ async fn main {
     dir=ws.dir(),
   )
   @packaging.build_viewer_stylesheet(ws)
+  @packaging.build_mermaid_assets(ws)
   let esbuild_target = if @platform.linux {
     @xterm_assets.linux_x64_target()
   } else if @platform.apple_os_mac {
@@ -72,6 +73,7 @@ async fn main {
     terminal_assets.stylesheet,
     ws.at(BrowserDistDir + "/xterm.css"),
   )
+  @packaging.copy_tree(ws.mermaid_assets(), ws.at(BrowserDistDir + "/mermaid"))
   @packaging.copy_tree(ws.at("fonts"), ws.at(BrowserDistDir + "/fonts"))
   println("generated \{ws.at(BrowserDistDir)}")
 }

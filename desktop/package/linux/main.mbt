@@ -95,6 +95,7 @@ async fn copy_bundle_files(
     ws.at("codicon.ttf"),
     ws.at(AppAssetDir + "/codicon.ttf"),
   )
+  @packaging.copy_tree(ws.mermaid_assets(), ws.at(AppAssetDir + "/mermaid"))
   @packaging.copy_tree(ws.at("fonts"), ws.at(AppAssetDir + "/fonts"))
   let target = @moonbit.moonbit_linux_x64_toolchain()
   @moonbit.stage_moonbit_toolchain_seed(

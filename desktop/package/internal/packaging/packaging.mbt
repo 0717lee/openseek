@@ -17,11 +17,11 @@ const FrontendBundleOutput : String = "frontend.js"
 const ViewerStyleOutput : String = "viewer.css"
 
 ///|
-/// Where the root Moon workspace materializes the published editor dependency.
-/// The viewer's reusable CSS and font assets are read directly from this
-/// checkout. The path is relative to the monorepo root and therefore resolves
+/// The editor workspace member. The viewer's reusable CSS and font assets are
+/// read from the same checkout as the desktop that imports its MoonBit
+/// packages. The path is relative to the monorepo root and therefore resolves
 /// through `repo_at`, not `at`.
-const EditorDepRoot : String = ".mooncakes/moonbitlang/editor"
+const EditorDepRoot : String = "editor"
 
 ///|
 /// The published editor package deliberately excludes its reference shell,
@@ -30,7 +30,7 @@ const EditorDepRoot : String = ".mooncakes/moonbitlang/editor"
 const ViewerThemeSource : String = "viewer_theme.css"
 
 ///|
-/// The published editor CSS files the embedded viewer depends on (relative to
+/// The editor CSS files the embedded viewer depends on (relative to
 /// `EditorDepRoot`), in cascade order. Re-sync this list on an editor version
 /// bump. Reference-shell CSS is deliberately absent from the package; the
 /// desktop supplies its own theme, panel layout, and file tree.
@@ -63,6 +63,11 @@ const CodiconFontSource : String = "viewer/browser/view/codicon/codicon.ttf"
 
 ///|
 const CodiconFontOutput : String = "codicon.ttf"
+
+///|
+/// The verified Mermaid runtime staged by the editor-owned asset builder. The
+/// platform packagers copy this tree beside their frontend bundle.
+const MermaidAssetOutput : String = "target/vendor-mermaid/dist"
 
 ///|
 const NativePackage : String = "."
@@ -145,6 +150,12 @@ pub fn Workspace::repo(self : Workspace) -> String {
 /// Resolve a path relative to the monorepo root, as an absolute path.
 pub fn Workspace::repo_at(self : Workspace, relative : String) -> String {
   join_path(self.repo(), relative)
+}
+
+///|
+/// Return the staged local Mermaid runtime directory.
+pub fn Workspace::mermaid_assets(self : Workspace) -> String {
+  self.at(MermaidAssetOutput)
 }
 
 ///|
@@ -432,6 +443,18 @@ pub async fn build_frontend_bundle(ws : Workspace, release~ : Bool) -> Unit {
     ws.at(FrontendBundleOutput),
   )
   build_viewer_stylesheet(ws)
+  build_mermaid_assets(ws)
+}
+
+///|
+/// Download, verify, and stage the editor's pinned official Mermaid ESM
+/// distribution for packaging beside the frontend bundle.
+pub async fn build_mermaid_assets(ws : Workspace) -> Unit {
+  @mermaid_assets.stage(
+    ws.repo_at("\{EditorDepRoot}/target/vendor-mermaid/cache"),
+    ws.mermaid_assets(),
+    ws.dir(),
+  )
 }
 
 ///|
@@ -449,9 +472,9 @@ pub async fn build_viewer_stylesheet(ws : Workspace) -> Unit {
 }
 
 ///|
-/// Read and concatenate the desktop-owned theme followed by every published
-/// viewer stylesheet. Keeping assembly separate from the output write lets
-/// tests exercise the real dependency files without mutating the checkout.
+/// Read and concatenate the desktop-owned theme followed by every editor
+/// workspace stylesheet. Keeping assembly separate from the output write lets
+/// tests exercise the real member files without mutating the checkout.
 async fn assembled_viewer_stylesheet(ws : Workspace) -> String {
   let css = StringBuilder::new()
   let theme_path = ws.at(ViewerThemeSource)
@@ -787,7 +810,7 @@ test "package build paths select debug or release" {
 }
 
 ///|
-async test "viewer stylesheet assembles from the published editor dependency" {
+async test "viewer stylesheet assembles from the editor workspace member" {
   let ws = locate_workspace()
   let css = assembled_viewer_stylesheet(ws)
   assert_true(css.contains("/* viewer_theme.css */"))
@@ -798,7 +821,7 @@ async test "viewer stylesheet assembles from the published editor dependency" {
   )
   let font = ws.repo_at("\{EditorDepRoot}/\{CodiconFontSource}")
   guard @asyncfs.exists(font) else {
-    fail("missing published viewer font: \{font}")
+    fail("missing workspace viewer font: \{font}")
   }
 }
 
