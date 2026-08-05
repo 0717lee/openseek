@@ -116,6 +116,9 @@ pub async fn HostConnection::run(
   emit : async (String, Json) -> Unit,
 ) -> Unit {
   @async.with_task_group(group => {
+    // Closing the request queue is the terminal pump's normal connection-end
+    // signal. It must not be tied to the page-reload session sweep below.
+    defer self.terminal.shutdown()
     group.spawn_bg(allow_failure=true, () => {
       @terminal.run_terminal_pump(self.terminal, async fn(push) {
         match push {

@@ -1,23 +1,26 @@
 // The pump that owns every PTY child: spawned in the host services' task
 // group (like the LSP and watcher pumps), it consumes `open_terminal`
-// requests and runs one task per session. Closing the window cancels the
-// group, which cancels every session task; each task's `defer` then releases
-// its PTY, so no child outlives the app.
+// requests and runs one task per session. The connection owner shuts down the
+// terminal state before its group ends, waking this pump and closing every
+// session; each session's `defer` then releases its PTY.
 
 ///|
 /// Read PTY output in chunks this large; a typical child burst fits in one.
 const ReadChunkBytes = 16384
 
 ///|
-/// Run terminal sessions until cancelled, forwarding every session's pushes
-/// through `emit`.
+/// Run terminal sessions until the state shuts down or this task is cancelled,
+/// forwarding every session's pushes through `emit`.
 pub async fn run_terminal_pump(
   state : TerminalState,
   emit : async (TerminalPush) -> Unit,
 ) -> Unit {
   @async.with_task_group(group => {
     for ;; {
-      let request = state.requests.get()
+      let request = state.requests.get() catch {
+        TerminalPumpClosed => return
+        error => raise error
+      }
       group.spawn_bg(allow_failure=true, () => run_session(state, request, emit))
     }
   })
@@ -34,7 +37,12 @@ async fn run_session(
 ) -> Unit {
   @async.with_task_group(group => {
     if request.connection_generation != state.connection_generation {
-      request.reply.put(Err("terminal open was cancelled by reconnect"))
+      let message = if state.closed {
+        "terminal service is closed"
+      } else {
+        "terminal open was cancelled by reconnect"
+      }
+      request.reply.put(Err(message))
       return
     }
     let pty = @pty.spawn(
@@ -55,7 +63,12 @@ async fn run_session(
     // Spawning suspends, so a reconnect can invalidate the request while the
     // child is being created. Close it before publishing a stale session.
     if request.connection_generation != state.connection_generation {
-      request.reply.put(Err("terminal open was cancelled by reconnect"))
+      let message = if state.closed {
+        "terminal service is closed"
+      } else {
+        "terminal open was cancelled by reconnect"
+      }
+      request.reply.put(Err(message))
       pty.close()
       return
     }

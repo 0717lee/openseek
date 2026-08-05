@@ -7,6 +7,7 @@
 async test "a default session launches a live platform shell" {
   @async.with_task_group(group => {
     let state = new_terminal_state()
+    defer state.shutdown()
     let pushes : @async.Queue[TerminalPush] = Queue(kind=Unbounded)
     group.spawn_bg(allow_failure=true, () => {
       run_terminal_pump(state, async fn(push) { pushes.put(push) })
@@ -34,7 +35,6 @@ async test "a default session launches a live platform shell" {
       }
     })
     close_terminal(state, id~)
-    group.return_immediately(())
   })
 }
 
@@ -44,6 +44,7 @@ async test "a default session launches a live platform shell" {
 async test "a session whose cwd does not exist fails while opening" {
   @async.with_task_group(group => {
     let state = new_terminal_state()
+    defer state.shutdown()
     let pushes : @async.Queue[TerminalPush] = Queue(kind=Unbounded)
     group.spawn_bg(allow_failure=true, () => {
       run_terminal_pump(state, async fn(push) { pushes.put(push) })
@@ -61,6 +62,5 @@ async test "a session whose cwd does not exist fails while opening" {
       _ => false
     }
     assert_true(failed)
-    group.return_immediately(())
   })
 }
