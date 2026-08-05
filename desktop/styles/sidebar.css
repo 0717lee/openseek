@@ -38,13 +38,21 @@ aside {
 
 .sidebar-main {
   display: grid;
-  grid-template-rows: minmax(0, 1fr);
+  /* Codex and OpenSeek are peer conversation sources. Independent scroll
+     lanes keep a long catalog from pushing the other source out of view. */
+  grid-template-rows: minmax(96px, 0.42fr) minmax(120px, 0.58fr);
   align-content: start;
+  gap: 14px;
   min-width: 0;
   min-height: 0;
 }
 
-.sidebar-section.sessions {
+.sidebar-main.codex-empty {
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.sidebar-section.sessions,
+.sidebar-section.codex-sessions {
   overflow-y: auto;
   overflow-x: hidden;
   min-height: 0;

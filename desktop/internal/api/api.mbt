@@ -10,6 +10,10 @@
 /// process; each transport connection supplies its own `HostConnection` when
 /// dispatching filesystem watch methods.
 struct ApiState {
+  // One Codex app-server process for this Desktop process. It is independent
+  // of the OpenSeek engine actor and owns Codex account/thread state through
+  // Codex's own data directory.
+  codex : @codex.Actor
   engine : @engine.EngineActor
   manager : @engine.EngineManager
   host : @host.HostState
@@ -24,12 +28,47 @@ struct ApiState {
 }
 
 ///|
+/// The one filesystem authority extracted from a successful app-server
+/// thread reply. It is never decoded from a Files or Terminal request: only
+/// the native Codex actor's reply can establish this exact thread/cwd pair.
+priv struct CodexWorkspaceBinding {
+  session : String
+  workspace : String?
+}
+
+///|
+fn CodexWorkspaceBinding::decode_reply(value : Json) -> CodexWorkspaceBinding? {
+  guard value is Object(fields) &&
+    fields.get("thread") is Some(Object(thread)) &&
+    thread.get("id") is Some(String(session)) else {
+    return None
+  }
+  let workspace = match thread.get("cwd") {
+    Some(String(cwd)) => Some(cwd)
+    _ => None
+  }
+  Some({ session, workspace })
+}
+
+///|
+/// Apply the app-server reply before it reaches the page, so a Files or
+/// Terminal request caused by that render can resolve the cwd immediately.
+async fn CodexWorkspaceBinding::authorize(self : CodexWorkspaceBinding) -> Unit {
+  match self.workspace {
+    Some(workspace) if !workspace.trim().is_empty() =>
+      @engine.authorize_host_workspace(self.session, workspace)
+    _ => @engine.revoke_host_workspace(self.session)
+  }
+}
+
+///|
 /// `engine` is the engine executable; `executable` is the host's own
 /// binary, which self-update uses to locate the running .app bundle (absent
 /// or non-bundle layouts only lose the in-app install, never the
 /// announcement).
 pub fn ApiState::new(
   engine~ : String,
+  codex? : String = "codex",
   runtime_dir? : @pathx.Path,
   executable? : String,
   auth? : @auth.AuthStore,
@@ -38,6 +77,7 @@ pub fn ApiState::new(
 ) -> ApiState {
   let engine_actor = @engine.new_engine_actor(engine, runtime_dir?)
   {
+    codex: Actor(codex),
     engine: engine_actor,
     manager: engine_actor.manager(),
     host: @host.new_host_state(engine, runtime_dir?, executable?, app_version~),
@@ -49,6 +89,12 @@ pub fn ApiState::new(
     app_version,
     on_finished,
   }
+}
+
+///|
+/// The app-lifetime owner of the Codex app-server child process.
+pub fn ApiState::codex_actor(self : ApiState) -> @codex.Actor {
+  self.codex
 }
 
 ///|
@@ -130,6 +176,37 @@ pub fn endpoints(
   connection : @host.HostConnection,
 ) -> Array[@endpoint.Endpoint] {
   let endpoints = [
+    @endpoint.Endpoint::remote_sync(@commands.codex_status, _ => {
+      state.codex.status()
+    }),
+    @endpoint.Endpoint::remote(@commands.codex_server_request_list, async fn(
+      _,
+    ) {
+      state.codex.requests()
+    }),
+    @endpoint.Endpoint::remote(@commands.codex_server_request_respond, async fn(
+      params,
+    ) {
+      let payload : CodexResponsePayload = @json.from_json(params) catch {
+        _ => raise @host.PayloadError("malformed Codex response payload")
+      }
+      state.codex.respond(request_id=payload.request_id, result=payload.result)
+    }),
+    state.codex_endpoint(@commands.codex_account_read),
+    state.codex_endpoint(@commands.codex_account_login_start),
+    state.codex_endpoint(@commands.codex_account_login_cancel),
+    state.codex_endpoint(@commands.codex_account_logout),
+    state.codex_endpoint(@commands.codex_model_list),
+    state.codex_endpoint(@commands.codex_thread_start),
+    state.codex_endpoint(@commands.codex_thread_resume),
+    state.codex_endpoint(@commands.codex_thread_read),
+    state.codex_endpoint(@commands.codex_thread_list),
+    state.codex_endpoint(@commands.codex_thread_archive),
+    state.codex_endpoint(@commands.codex_thread_unarchive),
+    state.codex_endpoint(@commands.codex_thread_compact),
+    state.codex_endpoint(@commands.codex_turn_start),
+    state.codex_endpoint(@commands.codex_turn_steer),
+    state.codex_endpoint(@commands.codex_turn_interrupt),
     @endpoint.Endpoint::remote(@commands.agent_start, async fn(payload) {
       @engine.start_run(state.sink(), state.manager, payload)
     }),
@@ -311,6 +388,20 @@ pub fn endpoints(
 }
 
 ///|
+/// Pair one reviewed Codex command identity with the app-server forwarding
+/// method. The command name is the Desktop method name used by
+/// `codex_request`; no second catalog can drift from the registered endpoint.
+fn ApiState::codex_endpoint(
+  self : ApiState,
+  command : @commands.Command[Json, Json],
+) -> @endpoint.Endpoint {
+  let desktop_method = command.name()
+  @endpoint.Endpoint::remote(command, async fn(params) {
+    self.codex_request(desktop_method, params)
+  })
+}
+
+///|
 test "remote endpoint catalog has one entry per command name" {
   let state = ApiState::new(engine="unused")
   let connection = @host.HostConnection::new()
@@ -322,7 +413,8 @@ test "remote endpoint catalog has one entry per command name" {
     }
     names.push(name)
   }
-  assert_eq(names.length(), 60)
+  assert_eq(names.length(), 72)
+  assert_true(names.contains("codex.thread.list"))
   assert_true(names.contains("agent.start"))
   assert_true(names.contains("agent.goal"))
   assert_true(names.contains("session.load_archived"))
@@ -339,6 +431,92 @@ test "remote endpoint catalog has one entry per command name" {
   assert_true(names.contains("moonide.references"))
   assert_false(names.contains("host.connect"))
   assert_false(names.contains("shell.open_external"))
+}
+
+///|
+/// Map the Desktop's explicit Codex catalog onto the stable app-server method
+/// names. There is deliberately no arbitrary method proxy: a relay browser can
+/// invoke only the same reviewed surface as the local Proton page.
+async fn ApiState::codex_request(
+  self : ApiState,
+  desktop_method : String,
+  params : Json,
+) -> Json {
+  let app_server_method = match desktop_method {
+    "codex.account.read" => "account/read"
+    "codex.account.login.start" => "account/login/start"
+    "codex.account.login.cancel" => "account/login/cancel"
+    "codex.account.logout" => "account/logout"
+    "codex.model.list" => "model/list"
+    "codex.thread.start" => "thread/start"
+    "codex.thread.resume" => "thread/resume"
+    "codex.thread.read" => "thread/read"
+    "codex.thread.list" => "thread/list"
+    "codex.thread.archive" => "thread/archive"
+    "codex.thread.unarchive" => "thread/unarchive"
+    "codex.thread.compact" => "thread/compact/start"
+    "codex.turn.start" => "turn/start"
+    "codex.turn.steer" => "turn/steer"
+    "codex.turn.interrupt" => "turn/interrupt"
+    _ => raise @host.PayloadError("unknown Codex method: " + desktop_method)
+  }
+  let scoped_params = match (desktop_method, params) {
+    // Custom app-server clients currently persist ordinary interactive
+    // threads as `vscode`, while older/newer records may use `appServer`.
+    // Preserve the caller's source filter (or Codex's interactive default)
+    // instead of hiding threads that OpenSeek itself just created.
+    ("codex.thread.list", Object(fields)) => {
+      let scoped : Map[String, Json] = Map([])
+      for key, value in fields {
+        scoped[key] = value
+      }
+      // JSONL scan-and-repair can exceed the Proton request deadline on a
+      // long-lived Codex home. The Desktop catalog is an interactive state
+      // query, so read the app-server state database without that repair pass.
+      scoped["useStateDbOnly"] = true
+      Json::object(scoped)
+    }
+    ("codex.thread.list", _) => { "useStateDbOnly": true }
+    // Tag new threads with this integration for Codex-side metrics. Preserve
+    // every user-selected model, cwd, sandbox, and approval policy field.
+    ("codex.thread.start", Object(fields)) => {
+      let scoped : Map[String, Json] = Map([])
+      for key, value in fields {
+        scoped[key] = value
+      }
+      scoped["serviceName"] = "openseek_desktop"
+      Json::object(scoped)
+    }
+    ("codex.thread.start", _) => { "serviceName": "openseek_desktop" }
+    _ => params
+  }
+  let reply = self.codex.call(method_=app_server_method, params=scoped_params)
+  match desktop_method {
+    "codex.thread.start" | "codex.thread.resume" | "codex.thread.read" =>
+      if CodexWorkspaceBinding::decode_reply(reply) is Some(binding) {
+        binding.authorize()
+      }
+    "codex.thread.archive" =>
+      if params is Object(fields) &&
+        fields.get("threadId") is Some(String(session)) {
+        @engine.revoke_host_workspace(session)
+      }
+    _ => ()
+  }
+  reply
+}
+
+///|
+test "Codex workspace bindings decode only authoritative thread replies" {
+  let binding = CodexWorkspaceBinding::decode_reply({
+    "thread": { "id": "codex-thread-1", "cwd": "/work/project", "turns": [] },
+  })
+  assert_true(
+    binding
+    is Some({ session: "codex-thread-1", workspace: Some("/work/project") }),
+  )
+  assert_true(CodexWorkspaceBinding::decode_reply({ "thread": {} }) is None)
+  assert_true(CodexWorkspaceBinding::decode_reply({}) is None)
 }
 
 ///|

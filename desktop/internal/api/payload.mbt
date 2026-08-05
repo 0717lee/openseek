@@ -35,6 +35,14 @@ fn SessionPayload::canonical_session(self : SessionPayload) -> String {
 }
 
 ///|
+/// The opaque reverse-request id and the method-specific result selected by
+/// the user. The host matches this id only against its live app-server map.
+priv struct CodexResponsePayload {
+  request_id : Json
+  result : Json
+} derive(FromJson)
+
+///|
 test "start and steer payloads preserve submission ids" {
   let start : @protocol.StartPayload = @json.from_json({
     "task": "hello",

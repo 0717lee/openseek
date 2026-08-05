@@ -18,6 +18,8 @@ pub async fn attach_workspace(String, (Array[String]) -> Unit) -> @protocol.Work
 
 pub async fn attached_workspace_dir(@pathx.Absolute) -> @pathx.Absolute?
 
+pub async fn authorize_host_workspace(String, String) -> Unit
+
 pub async fn cancel_run(EngineManager, @protocol.CancelPayload) -> @protocol.CancelReply
 
 pub async fn compact_run(EngineManager, @protocol.CompactPayload) -> @protocol.CompactReply
@@ -57,6 +59,8 @@ pub async fn remove_worktree(EngineManager, String, String, Bool, (Array[@protoc
 pub async fn resolve_in_workspace(String, String, workspace? : String) -> @pathx.Absolute?
 
 pub async fn scratch_root() -> String
+
+pub async fn revoke_host_workspace(String) -> Unit
 
 pub async fn session_cwd(String) -> @pathx.Absolute?
 

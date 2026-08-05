@@ -866,6 +866,7 @@ priv struct BufferedCommit {
 /// is about; detaching that project falls back to the chat.
 priv enum Screen {
   Chat
+  Codex
   Skills
   Settings
   WorkspaceSettings(channel~ : @interop.ChannelId, workspace~ : @common.Uri)
@@ -1278,6 +1279,10 @@ priv struct Model {
   // and kept for the app run; the installed list refreshes on open and
   // after every successful action.
   screen : Screen
+  // Codex app-server has an independent durable thread/turn/item model. Keep
+  // its page state beside the screen selector instead of folding it into an
+  // OpenSeek Conversation, whose persistence and event protocol are different.
+  codex : @codex.State
   skills_catalog : SkillsCatalog
   installed_skills : Array[@transcript.InstalledSkillItem]
   skills_query : String
@@ -1700,6 +1705,15 @@ priv enum Msg {
   // The host swapped the bundle; close the window so `main` can relaunch.
   UpdateApplied
   OpenSetup
+  // Open the app-server-backed Codex page and refresh its authoritative
+  // account, model, and thread catalogs.
+  OpenCodex
+  CodexNewThread
+  CodexOpenThread(String)
+  CodexArchiveThread(String)
+  // Codex owns every app-server-local transition; the root only wraps the
+  // package message so Rabbita still has one application Msg type.
+  Codex(@codex.Msg)
   ToggleSidebar
   // A Settings selection fixes the page to Light or Dark and persists it.
   ThemeChanged(String)
@@ -2443,6 +2457,7 @@ fn initial_model() -> Model {
     pending_project_adoption: None,
     archive_confirm: None,
     screen: Chat,
+    codex: @codex.State(),
     skills_catalog: CatalogIdle,
     installed_skills: [],
     skills_query: "",

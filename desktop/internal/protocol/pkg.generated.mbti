@@ -477,6 +477,9 @@ pub(all) enum Notification {
   UpdateDownloaded(UpdateDownloadedPayload)
   UpdateDownloadFailed(UpdateDownloadFailedPayload)
   AuthChanged(AuthStatusPayload)
+  CodexStatusChanged(Json)
+  CodexNotification(Json)
+  CodexServerRequest(Json)
   LspDiagnostics(DiagnosticsPayload)
   FsChanged(FsChangedPayload)
   FsWatchFailed(FsWatchFailedPayload)
@@ -507,6 +510,9 @@ pub(all) enum NotificationKind {
   UpdateDownloaded
   UpdateDownloadFailed
   AuthChanged
+  CodexStatusChanged
+  CodexNotification
+  CodexServerRequest
   LspDiagnostics
   FsChanged
   FsWatchFailed

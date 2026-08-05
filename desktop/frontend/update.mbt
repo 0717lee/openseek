@@ -54,6 +54,7 @@ fn focus_channel(
     @cmd.batch([
       fetch_host_settings(dispatch, channel, dev.connection_generation),
       fetch_installed_skills(dispatch, channel),
+      model.codex.refresh(dispatch.map(msg => Codex(msg)), channel),
     ])
   } else if channel == @interop.ChannelId::Local && model.console is Some(_) {
     @cmd.none
@@ -72,6 +73,10 @@ fn focus_channel(
       active_session: "",
       loading_conversation: None,
       installed_skills: [],
+      // Codex is host-owned just like the other focused mirrors. Clear the
+      // previous device's account and conversation list before its replies
+      // can be mistaken for this device's sidebar section.
+      codex: @codex.State(loading=true),
       completion: None,
       // The old HostConnection is already parked. Preserve the remaining
       // owner/root state until the post-dispatch sync retires its file-index
@@ -1395,8 +1400,41 @@ fn apply_engine_event(
 /// The file-editor package's view of the active conversation: which session
 /// the panel serves, the concrete checkout root its file/LSP ops address, the
 /// registered workspace its Git ops use, and the viewer's theme. Recomputed
-/// per dispatch — it is only a projection of the model.
+/// per dispatch — it is only a projection of the model. A Codex task uses its
+/// app-server thread id and cwd instead of an OpenSeek conversation.
 fn file_ctx(model : Model) -> @fileeditor.Ctx {
+  if model.screen is Codex {
+    if model.codex.active_id() is Some(thread_id) &&
+      model.codex.active_workspace(model.focused) is Some(workspace) {
+      return {
+        owner: { channel: model.focused, session: thread_id },
+        request_epoch: model.file_panel.request_epoch,
+        workspace: Some(workspace),
+        checkout: Some(@interop.WorkspaceRoot),
+        dark_mode: model.theme.is_dark(model.system_dark),
+        tree_layout: model.tree_layout,
+        narrow: model.narrow,
+        panel_open: model.dock.open,
+        open_files: @dock.file_paths(model.dock),
+        active_file: @dock.active_file(model.dock),
+      }
+    }
+    // File RPCs require an explicit Codex cwd. Keep the panel rooted at an
+    // inert owner until app-server supplies one instead of listing a guessed
+    // OpenSeek session directory.
+    return {
+      owner: { channel: model.focused, session: "" },
+      request_epoch: model.file_panel.request_epoch,
+      workspace: None,
+      checkout: None,
+      dark_mode: model.theme.is_dark(model.system_dark),
+      tree_layout: model.tree_layout,
+      narrow: model.narrow,
+      panel_open: false,
+      open_files: @dock.file_paths(model.dock),
+      active_file: @dock.active_file(model.dock),
+    }
+  }
   let conv = model.active()
   let checkout = model.checkout_placement(conv)
   let file_body_visible = match model.dock.active {
@@ -1435,11 +1473,36 @@ fn file_ctx(model : Model) -> @fileeditor.Ctx {
 }
 
 ///|
-/// The terminal package's view of the active conversation. The conversation's
-/// device owns every PTY opened from this context; a remote connection is
-/// considered unavailable from its first socket loss because its old PTYs are
-/// torn down at that boundary, even before the page escalates to BridgeLost.
+/// The terminal package's view of the active conversation. On the Codex page,
+/// the selected app-server thread supplies the PTY session id and cwd. The
+/// focused device owns every PTY opened from either source; a remote connection
+/// is considered unavailable from its first socket loss because its old PTYs
+/// are torn down at that boundary, even before the page escalates to BridgeLost.
 fn terminal_ctx(model : Model) -> @terminal.Ctx {
+  if model.screen is Codex {
+    guard model.codex.active_id() is Some(thread_id) else {
+      return {
+        channel: model.focused,
+        session: "",
+        workspace: None,
+        checkout: None,
+        dark_mode: model.theme.is_dark(model.system_dark),
+        connected: false,
+      }
+    }
+    let connected = match model.device_state(model.focused) {
+      Some(dev) => dev.bridge is Connected && dev.reconnect_failures == 0
+      None => false
+    }
+    return {
+      channel: model.focused,
+      session: thread_id,
+      workspace: model.codex.active_workspace(model.focused),
+      checkout: Some(@interop.WorkspaceRoot),
+      dark_mode: model.theme.is_dark(model.system_dark),
+      connected,
+    }
+  }
   let conv = model.active()
   let connected = match model.device_state(conv.device) {
     Some(dev) => dev.bridge is Connected(..) && dev.reconnect_failures == 0
@@ -2038,6 +2101,24 @@ fn update_msg(
         feedback_id~
       )
     ) => {
+      if model.screen is Codex {
+        // Codex does not yet carry OpenSeek's structured mention chips. Keep
+        // the editor comment useful by adding an explicit file/range block to
+        // the Codex draft; never leak it into the hidden OpenSeek composer.
+        return (
+          @fileeditor.remove_editor_feedback(resource, feedback_id),
+          {
+            ..model,
+            codex: model.codex.with_editor_comment(
+              file.0,
+              range.start_line_number,
+              range.end_line_number,
+              comment,
+              quote,
+            ),
+          },
+        )
+      }
       let conv = model.active()
       let mentions = push_mention(conv.mentions, {
         ref_: Annotation(
@@ -2562,6 +2643,89 @@ fn update_msg(
     }
     UpdateApplied => (close_window(), model)
     OpenSetup => (@cmd.none, { ..model, screen: Settings, setup_api_key: "" })
+    OpenCodex => {
+      let (cmd, codex) = @codex.update(
+        dispatch.map(msg => Codex(msg)),
+        @codex.Msg::refresh(),
+        model.codex,
+        model.focused,
+        url => open_external_link(dispatch, url),
+      )
+      (
+        cmd,
+        {
+          ..model,
+          screen: Codex,
+          sidebar_open: model.sidebar_open && !model.narrow,
+          codex,
+        },
+      )
+    }
+    CodexNewThread => {
+      let cwd = match model.focused_device() {
+        Some(dev) =>
+          match dev.active_workspace {
+            Some(workspace) =>
+              @resource.path_for(workspace, model.focused).unwrap_or("")
+            None => ""
+          }
+        None => ""
+      }
+      let (cmd, codex) = @codex.update(
+        dispatch.map(msg => Codex(msg)),
+        @codex.Msg::start_thread(cwd),
+        model.codex,
+        model.focused,
+        url => open_external_link(dispatch, url),
+      )
+      (
+        cmd,
+        {
+          ..model,
+          screen: Codex,
+          sidebar_open: model.sidebar_open && !model.narrow,
+          codex,
+        },
+      )
+    }
+    CodexOpenThread(thread_id) => {
+      let (cmd, codex) = @codex.update(
+        dispatch.map(msg => Codex(msg)),
+        @codex.Msg::open_thread(thread_id),
+        model.codex,
+        model.focused,
+        url => open_external_link(dispatch, url),
+      )
+      (
+        cmd,
+        {
+          ..model,
+          screen: Codex,
+          sidebar_open: model.sidebar_open && !model.narrow,
+          codex,
+        },
+      )
+    }
+    CodexArchiveThread(thread_id) => {
+      let (cmd, codex) = @codex.update(
+        dispatch.map(msg => Codex(msg)),
+        @codex.Msg::archive_thread(thread_id),
+        model.codex,
+        model.focused,
+        url => open_external_link(dispatch, url),
+      )
+      (cmd, { ..model, codex, })
+    }
+    Codex(msg) => {
+      let (cmd, codex) = @codex.update(
+        dispatch.map(next => Codex(next)),
+        msg,
+        model.codex,
+        model.focused,
+        url => open_external_link(dispatch, url),
+      )
+      (cmd, { ..model, codex, })
+    }
     ToggleSidebar => (@cmd.none, { ..model, sidebar_open: !model.sidebar_open })
     ViewportResized(width~) => {
       let narrow = width <= NarrowBreakpoint
@@ -4224,6 +4388,12 @@ fn update_device_msg(
         // up to the host, a browser purges them (see `LegacySettingsRead`).
         commands.push(read_legacy_engine_settings(dispatch))
         commands.push(fetch_installed_skills(dispatch, channel))
+        // Codex conversations are always visible in the global sidebar, so
+        // populate that focused-host catalog on bridge readiness rather than
+        // waiting for a separate Codex page to be opened.
+        commands.push(
+          model.codex.refresh(dispatch.map(msg => Codex(msg)), channel),
+        )
         // Self-update and the relay sign-in are the desktop window's alone
         // (see `is_desktop`); a browser never checks, so neither UI
         // materializes there. The startup update check rides here: settings
@@ -15429,6 +15599,94 @@ test "update is pure: opening the skills page twice is idempotent" {
 }
 
 ///|
+test "Codex sidebar selection uses the main conversation screen" {
+  let dispatch = test_dispatch()
+  let codex = @codex.State::from_thread_snapshot({
+    "thread": {
+      "id": "codex-thread-1",
+      "preview": "Shared sidebar",
+      "cwd": "/work/codex-project",
+      "turns": [],
+    },
+  })
+  let wide = { ..test_model(), codex, sidebar_open: true }
+  let (_, opened) = update(dispatch, CodexOpenThread("codex-thread-1"), wide)
+  assert_true(opened.screen is Codex)
+  assert_true(opened.sidebar_open)
+  assert_true(opened.codex.active_id() is Some("codex-thread-1"))
+  assert_true(
+    opened.file_panel.owner
+    is Some({ channel: Local, session: "codex-thread-1" }),
+  )
+  let workspace = @interop.ChannelId::Local.test_resource("/work/codex-project")
+  assert_eq(file_ctx(opened).workspace, Some(workspace))
+  let opened_terminal = terminal_ctx(opened)
+  inspect(opened_terminal.session, content="codex-thread-1")
+  assert_eq(opened_terminal.workspace, Some(workspace))
+  assert_true(opened_terminal.connected)
+
+  // The same input and model produce the same state; the bridge call remains
+  // an opaque Cmd and is not executed inside the reducer.
+  let (_, opened_again) = update(
+    dispatch,
+    CodexOpenThread("codex-thread-1"),
+    wide,
+  )
+  assert_true(opened_again.screen is Codex)
+  assert_true(opened_again.sidebar_open)
+  assert_true(opened_again.codex.active_id() is Some("codex-thread-1"))
+  assert_true(
+    opened_again.file_panel.owner
+    is Some({ channel: Local, session: "codex-thread-1" }),
+  )
+}
+
+///|
+test "Codex files wait for cwd while terminal keeps a scratch task" {
+  let codex = @codex.State::from_thread_snapshot({
+    "thread": { "id": "codex-scratch-1", "preview": "No cwd yet", "turns": [] },
+  })
+  let model = { ..test_model(), codex, screen: Codex }
+  let files = file_ctx(model)
+  inspect(files.owner.session, content="")
+  assert_true(files.workspace is None)
+
+  // A terminal needs only an active task identity. Without a cwd it belongs
+  // to that task's scratch group instead of borrowing the OpenSeek chat.
+  let terminal = terminal_ctx(model)
+  inspect(terminal.session, content="codex-scratch-1")
+  assert_true(terminal.workspace is None)
+  assert_true(terminal.connected)
+}
+
+///|
+test "Codex sidebar actions close only the narrow drawer" {
+  let dispatch = test_dispatch()
+  let narrow = {
+    ..test_model(),
+    narrow: true,
+    sidebar_open: true,
+    screen: Chat,
+  }
+  let (_, opened) = update(dispatch, OpenCodex, narrow)
+  assert_true(opened.screen is Codex)
+  assert_false(opened.sidebar_open)
+
+  let (_, creating) = update(dispatch, CodexNewThread, narrow)
+  assert_true(creating.screen is Codex)
+  assert_false(creating.sidebar_open)
+
+  // Archiving from the shared sidebar acts on that row without changing the
+  // OpenSeek conversation currently occupying the main pane.
+  let (_, archiving) = update(
+    dispatch,
+    CodexArchiveThread("codex-thread-1"),
+    narrow,
+  )
+  assert_true(archiving.screen is Chat)
+}
+
+///|
 test "the skills search query lands on the model" {
   let dispatch = test_dispatch()
   let (_, typed) = update(dispatch, SkillsQueryChanged("widget"), test_model())
@@ -16154,6 +16412,40 @@ test "original-revision diff comment chip does not navigate into the working fil
   let (_, next) = update(dispatch, JumpToMention(0), model)
   assert_false(next.right_panel_open)
   assert_true(next.dock.active is None)
+}
+
+///|
+test "Codex editor comments go to the Codex draft, not the OpenSeek chat" {
+  let dispatch = test_dispatch()
+  let codex = @codex.State::from_thread_snapshot({
+    "thread": {
+      "id": "codex-thread-1",
+      "cwd": "/work/project",
+      "preview": "Review",
+      "turns": [],
+    },
+  })
+  let model = { ..test_model(), codex, screen: Codex }
+  let msg : Msg = FileEditor(
+    EditorCommentAdded(
+      resource=@fileeditor.ModelUri::of(
+        @interop.ChannelId::Local.test_resource("/work/project/src/main.mbt"),
+      ),
+      file=Relative("src/main.mbt"),
+      range=@common.Range::Range(5, 1, 6, 3),
+      quote="fn parse_hover() {",
+      comment="rename this",
+      feedback_id="viewer-feedback-codex",
+    ),
+  )
+  let (_, once) = update(dispatch, msg, model)
+  let (_, twice) = update(dispatch, msg, model)
+  assert_true(once.active().mentions.is_empty())
+  assert_true(twice.active().mentions.is_empty())
+  assert_eq(once.codex.draft_text(), twice.codex.draft_text())
+  assert_true(once.codex.draft_text().contains("File: src/main.mbt:5-6"))
+  assert_true(once.codex.draft_text().contains("Comment: rename this"))
+  assert_true(once.codex.draft_text().contains("fn parse_hover() {"))
 }
 
 ///|
