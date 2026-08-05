@@ -1,19 +1,27 @@
 # Readonly MoonBit Viewer
 
-The source checkout has two main parts. The reusable viewer is developed as a
-module in the OpenSeek monorepo; the reference shell is repository-only:
+In the OpenSeek monorepo, the reusable Viewer has two deliberately different
+in-tree hosts:
 
 - `viewer`: the reusable MoonBit readonly viewer. It is Monaco-shaped in API
   and behavior where that helps embedders, but it stays MoonBit-owned and does
   not import Monaco, VS Code, or CodeMirror code.
-- `internal/shell`: the reference app/backend used to see the viewer working
-  against a real workspace. It demonstrates one host composition and must use
-  the viewer through public APIs; it is not an external import surface.
+- `internal/shell`: the fast repository-only development, preview, and E2E host.
+  It demonstrates one composition through public Viewer APIs; it is not an
+  external import surface or the product host.
+- OpenSeek's `desktop/frontend/fileeditor`: the primary downstream,
+  user-facing host in this monorepo. It owns its product policy and integrates
+  the viewer through the same public APIs and `ViewerServices` capabilities
+  available to other embedders.
+
+The separate `moonbitlang/editor-server` module supplies the reference backend.
+OpenSeek supplies its own host integrations.
 
 ```d2
 direction: down
 
-embedder: your MoonBit app
+embedder: another MoonBit app
+openseek: OpenSeek desktop file editor — primary product host
 
 repo: this repository {
   viewer: viewer — reusable workspace module {
@@ -21,20 +29,50 @@ repo: this repository {
     common: viewer/common — DOM-free
     browser: browser runtime + contributions
   }
-  shell: internal/shell — reference only {
-    workbench: browser workbench
-    server: host backend
+  reference: editor reference composition {
+    workbench: internal/shell/workbench
+    server: moonbitlang/editor-server
   }
 }
 
 embedder -> repo.viewer.facade: imports moonbitlang/editor in the workspace
-repo.shell.workbench -> repo.viewer.facade: embeds via public API
-repo.shell.workbench <-> repo.shell.server: readonly remote protocol
+openseek -> repo.viewer.facade: public Viewer API + ViewerServices
+repo.reference.workbench -> repo.viewer.facade: embeds via public API
+repo.reference.workbench <-> repo.reference.server: readonly remote protocol
 ```
 
 Monaco/VS Code is the primary design reference. CodeMirror is a secondary
 reference when its simpler state/view split is useful. Both submodules are
 reference-only.
+
+## UI Development Workflow
+
+Use `internal/shell` as the default UI development loop because it builds and
+previews much faster than the full OpenSeek desktop application. OpenSeek is
+still the primary real downstream host and must remain an active consumer of
+the editor's public surface.
+
+- A visual or behavioral improvement to existing Viewer UI should normally
+  appear in OpenSeek through its existing integration with no or minimal host
+  changes. Develop and visually verify it in `internal/shell`, then run the
+  relevant targeted OpenSeek compile/tests and the repository integration
+  gates.
+- A new UI capability may also be developed and previewed first in
+  `internal/shell`. Unless explicitly scoped to editor-only exploration, treat
+  new user-facing Viewer UI as intended for OpenSeek: the same implementation
+  task must add the required public editor seam and the
+  `desktop/frontend/fileeditor` adaptation. Do not defer known provider,
+  service, lifecycle, theme, or asset wiring to an unspecified downstream
+  follow-up.
+- Keep OpenSeek-specific RPC, storage, workspace, and product-shell policy in
+  OpenSeek. The reference shell is a fast host and behavioral proof, not a place
+  to make product-specific behavior part of the reusable Viewer.
+
+A full OpenSeek package/build/preview is a final integration tool when
+OpenSeek-specific layout, effects, assets, or packaging are involved; it is not
+the routine editor UI inner loop. See [docs/harness.md](docs/harness.md) for the
+layered commands and [docs/architecture.md](docs/architecture.md) for the host
+boundary.
 
 ## Browser Runtime
 

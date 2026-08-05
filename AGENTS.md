@@ -51,6 +51,14 @@ You can browse and install extra skills here:
   under `editor/`, also run `just editor-test` for its all-target suite; for
   browser behavior, run `just editor-test-browser` as well.
 
+- OpenSeek's desktop file editor is the primary downstream, user-facing editor
+  host. Use `editor/internal/shell` as the fast build-and-preview loop for
+  editor UI work. Existing Viewer UI improvements should flow into OpenSeek
+  through its current public APIs with little or no host adaptation. When a new
+  editor UI is intended for OpenSeek, implement the corresponding
+  `desktop/frontend/fileeditor` adaptation in the same task; do not make the
+  slower full desktop build and preview the routine editor inner loop.
+
 - Prefer `assert_eq` or `assert_true(pattern is Pattern(...))` for results that
   are stable or very unlikely to change. Use snapshot tests to record current
   behavior. For solid, well-defined results (e.g. scientific computations),

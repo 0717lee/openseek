@@ -11,6 +11,34 @@
 - Active cross-package plans and planning rules: `docs/exec-plans/`
 - Monaco/CodeMirror source maps: `docs/references/{monaco,codemirror}.md`
 
+## UI Development Loop
+
+OpenSeek's desktop file editor (`../desktop/frontend/fileeditor`) is the primary
+downstream, user-facing host. `internal/shell` is the fast development and E2E
+host for the editor; do not use a full OpenSeek build and preview as the routine
+inner loop for editor UI work.
+
+- For a visual or behavioral improvement to existing Viewer UI, implement and
+  preview it in `internal/shell`, keep the existing public host seam stable, and
+  expect OpenSeek to receive the change with no or minimal adaptation. If that
+  is not true, inspect the coupling before expanding either host API.
+- For a new editor UI intended for OpenSeek, inspect
+  `../desktop/frontend/fileeditor/{editor_panel,viewer_services}.mbt` and the
+  relevant provider/capability adapters before finalizing the public contract.
+  Unless the task explicitly scopes a feature to editor-only exploration,
+  treat new user-facing Viewer UI as intended for OpenSeek. Build the generic
+  editor surface and its `internal/shell` preview first, then add the OpenSeek
+  adapter in the same implementation task. Do not leave known downstream
+  adaptation as an unspecified follow-up; separate coherent commits are fine.
+- Keep OpenSeek product policy, host RPC, storage, and workspace behavior under
+  `../desktop/**`. Keep the editor API host-neutral, and use `ViewerServices`
+  and the public `viewer/common/**` capability handles as the integration seam.
+- During iteration, run focused editor tests/browser scenarios and a targeted
+  JS check of every touched OpenSeek adapter package. Run the required editor
+  and root integration gates before declaring the cross-host work complete;
+  package or launch the full desktop app only when OpenSeek-specific layout,
+  effects, assets, or packaging are part of the behavior under test.
+
 ## Architecture Changes
 
 Follow `docs/architecture.md` and review dependency changes in `moon.pkg`.

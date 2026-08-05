@@ -1,11 +1,14 @@
 # Architecture
 
-This repository contains a reusable MoonBit readonly viewer and a reference
-host/backend:
+This editor source contains a reusable MoonBit readonly viewer and an
+editor-owned reference host/backend:
 
 - `viewer` is the js-only public editor facade and browser surface.
 - `internal/shell` is the demo, development, and end-to-end host. It is not an
   external import surface.
+- OpenSeek's `desktop/frontend/fileeditor` is the primary downstream,
+  user-facing host in the surrounding monorepo. It consumes the public Viewer
+  surface and owns its product-specific composition.
 
 For exact APIs use the owning package's `pkg.generated.mbti`; for exact
 dependencies use `moon.pkg`.
@@ -89,10 +92,11 @@ an upper one:
 ```d2
 direction: right
 
-shell: internal/shell {
+product_host: OpenSeek desktop file editor
+reference_host: editor reference composition {
   grid-columns: 1
-  workbench: browser workbench
-  backend: host server
+  workbench: internal/shell/workbench
+  backend: moonbitlang/editor-server
 }
 facade: viewer facade
 inner: internal/viewer {
@@ -115,7 +119,8 @@ foundations: shared foundations {
   log: platform/log
 }
 
-shell -> facade
+product_host -> facade
+reference_host -> facade
 facade -> inner
 inner -> common
 common -> foundations
@@ -428,7 +433,36 @@ height.
 
 Feature-local instance tables must not duplicate this central ownership.
 
-## Reference Shell
+## Development and Product Hosts
+
+OpenSeek and `internal/shell` intentionally serve different roles. OpenSeek's
+desktop file editor is the primary real downstream host used by end users. It
+owns product services, document lifecycle, host RPC, surrounding UI, and
+packaging under `desktop/**`. The reference shell is the faster editor-owned
+host for UI preview, browser scenarios, and end-to-end development; it is not a
+model of OpenSeek's product chrome.
+
+Both hosts consume the public `viewer` and `viewer/common/**` boundaries. This
+gives editor UI work a two-stage delivery path:
+
+1. Develop and visually verify Viewer-owned UI in `internal/shell`. A change to
+   existing UI should normally flow into OpenSeek through the established
+   public surface with no or only small host changes. Requiring a large adapter
+   rewrite for such a change is evidence that the host boundary should be
+   inspected.
+2. Unless explicitly scoped to editor-only exploration, treat new user-facing
+   Viewer UI as intended for OpenSeek. Add any required generic service, event,
+   model-lifetime, or capability contract to the public Viewer surface,
+   exercise it in the reference shell, and implement the corresponding
+   `desktop/frontend/fileeditor` adapter in the same feature task. Known
+   downstream wiring is part of the feature, not an unspecified follow-up.
+
+OpenSeek-specific RPC, storage, workspace, and product-shell behavior stays in
+OpenSeek. OpenSeek must not import `internal/shell/**`; the slower full desktop
+build and preview is a downstream integration tool, not the editor's routine UI
+iteration loop.
+
+### Reference shell
 
 The direct embedding proof is:
 
@@ -500,6 +534,8 @@ script:
 
 - Product code does not import `vscode/` or `codemirror/`.
 - Reusable packages do not import the `internal/shell/**` reference host.
+- The OpenSeek product host consumes public Viewer packages and does not import
+  `internal/shell/**`.
 - `viewer/common/**` and DOM-free internal contribution packages stay
   multi-target; public `viewer/browser`, internal browser runtime and
   contribution-browser packages, and root `viewer` stay js-only.
