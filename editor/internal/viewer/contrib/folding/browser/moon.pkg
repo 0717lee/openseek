@@ -1,0 +1,9 @@
+import {
+  "moonbitlang/editor/base/common" @base_common,
+  "moonbitlang/editor/viewer/common/core",
+  "moonbitlang/editor/viewer/common/editor_api",
+  "moonbitlang/editor/viewer/common/languages",
+  "moonbitlang/editor/viewer/common/model",
+}
+
+supported_targets = "js"

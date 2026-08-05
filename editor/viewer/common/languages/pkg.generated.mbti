@@ -1,0 +1,86 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "moonbitlang/editor/viewer/common/languages"
+
+import {
+  "moonbitlang/core/debug",
+  "moonbitlang/editor/base/common",
+  "moonbitlang/editor/language",
+  "moonbitlang/editor/platform/log",
+  "moonbitlang/editor/syntax",
+  "moonbitlang/editor/viewer/common/model",
+  "moonbitlang/editor/viewer/common/services",
+  "moonbitlang/editor/viewer/common/tokens",
+}
+
+// Values
+pub fn default_languages() -> Languages
+
+pub let languages : Languages
+
+pub fn tokenize_line_to_html(String, @tokens.ViewLineTokens, Array[String], Int, Int, Int, Bool) -> String
+
+pub fn tokenize_to_string(String, @services.LanguageIdCodec, (String) -> Array[UInt]) -> String
+
+// Errors
+
+// Types and methods
+pub(all) struct CharacterPair {
+  open : String
+  close : String
+} derive(Eq, @debug.Debug)
+
+pub(all) struct CommentRule {
+  line_comment : LineCommentRule?
+  block_comment : CharacterPair?
+} derive(Eq, @debug.Debug)
+
+pub(all) struct FoldingMarkers {
+  start : (String) -> Bool
+  end : (String) -> Bool
+}
+
+pub(all) struct FoldingRules {
+  off_side : Bool
+  markers : FoldingMarkers?
+}
+
+pub(all) struct LanguageConfiguration {
+  comments : CommentRule?
+  folding_rules : FoldingRules?
+}
+
+type LanguageHandle
+pub async fn LanguageHandle::definition_at(Self, @model.TextModel, Int, token? : @language.CancellationToken, run_tasks? : async (Array[async () -> Unit]) -> Unit) -> Array[@language.Location] noraise
+pub fn LanguageHandle::get_language_configuration(Self, String) -> LanguageConfiguration
+pub fn LanguageHandle::has_definition_provider(Self, @model.TextModel) -> Bool
+pub fn LanguageHandle::has_references_provider(Self, @model.TextModel) -> Bool
+pub async fn LanguageHandle::hover_at(Self, @model.TextModel, Int, token? : @language.CancellationToken) -> @language.Hover? noraise
+pub fn LanguageHandle::markdown_comment_provider_render_result(Self, @model.TextModel) -> MarkdownCommentProviderResult?
+pub async fn LanguageHandle::references_at(Self, @model.TextModel, Int, token? : @language.CancellationToken, run_tasks? : async (Array[async () -> Unit]) -> Unit) -> Array[@language.Location] noraise
+
+type Languages
+pub fn Languages::Languages() -> Self
+pub fn Languages::language_handle(Self, @log.LogHandle) -> LanguageHandle
+pub fn Languages::register_definition_provider(Self, @language.LanguageSelector, &@language.DefinitionProvider) -> @common.Disposable
+pub fn Languages::register_document_symbol_provider(Self, @language.LanguageSelector, &@language.DocumentSymbolProvider) -> @common.Disposable
+pub fn Languages::register_hover_provider(Self, @language.LanguageSelector, &@language.HoverProvider) -> @common.Disposable
+pub fn Languages::register_markdown_comment_provider(Self, @language.LanguageSelector, &@language.MarkdownCommentProvider, foldable? : Bool) -> @common.Disposable
+pub fn Languages::register_references_provider(Self, @language.LanguageSelector, &@language.ReferencesProvider) -> @common.Disposable
+pub fn Languages::set_language_configuration(Self, String, LanguageConfiguration) -> Unit
+pub fn Languages::set_tokens_provider(Self, String, &@syntax.LineTokenizer) -> @common.Disposable
+
+pub struct LineCommentRule {
+  comment : String
+  // private fields
+} derive(Eq, @debug.Debug)
+pub fn LineCommentRule::LineCommentRule(String, no_indent? : Bool) -> Self
+
+pub struct MarkdownCommentProviderResult {
+  blocks : Array[@language.MarkdownCommentBlock]
+  foldable : Bool
+}
+
+// Type aliases
+
+// Traits
+

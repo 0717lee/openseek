@@ -1,0 +1,41 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "moonbitlang/editor/internal/viewer/contrib/agent_feedback"
+
+import {
+  "moonbitlang/core/debug",
+  "moonbitlang/editor/base/common",
+  "moonbitlang/editor/viewer/common/agent_feedback_api",
+}
+
+// Values
+pub fn get_session_editor_comments(Array[@agent_feedback_api.AgentFeedback]) -> Array[SessionEditorComment]
+
+pub fn group_nearby_session_editor_comments(Array[SessionEditorComment], line_threshold? : Int) -> Array[Array[SessionEditorComment]]
+
+// Errors
+
+// Types and methods
+type AgentFeedbackService
+pub fn AgentFeedbackService::AgentFeedbackService() -> Self
+pub fn AgentFeedbackService::agent_feedback_handle(Self) -> @agent_feedback_api.AgentFeedbackHandle
+pub fn AgentFeedbackService::dispose(Self) -> Unit
+pub fn AgentFeedbackService::on_did_submit_feedback(Self, (@agent_feedback_api.AgentFeedbackSubmittedEvent) -> Unit) -> @common.Disposable
+pub fn AgentFeedbackService::set_feedback_enabled(Self, @common.Uri, Bool) -> Unit
+pub fn AgentFeedbackService::set_feedback_items(Self, @common.Uri, Array[@agent_feedback_api.AgentFeedback]) -> Unit
+pub fn AgentFeedbackService::set_feedback_resolved(Self, @common.Uri, String, Bool) -> Unit
+
+pub struct SessionEditorComment {
+  id : String
+  source_id : String
+  kind : @agent_feedback_api.AgentFeedbackKind
+  resource : @common.Uri
+  range : @common.Range
+  text : String
+  replies : Array[String]
+  state : @agent_feedback_api.AgentFeedbackState
+} derive(@debug.Debug)
+
+// Type aliases
+
+// Traits
+

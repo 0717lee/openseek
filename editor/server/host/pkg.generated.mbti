@@ -1,0 +1,48 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "moonbitlang/editor-server/host"
+
+import {
+  "moonbitlang/core/ref",
+  "moonbitlang/editor-server/server",
+  "moonbitlang/editor/base/common",
+  "moonbitlang/editor/language",
+  "moonbitlang/editor/shell/workspace",
+  "moonbitlang/editor/viewer/common/model",
+}
+
+// Values
+pub fn native_server_host() -> &@server.ServerHost
+
+pub fn parse_moon_check_diagnostics(String, String) -> Map[String, Array[@language.Diagnostic]]
+
+pub fn parse_moon_definition_output(String, String) -> Array[@language.Location]
+
+pub fn parse_moon_hover_output(String, @common.Position) -> @language.Hover?
+
+pub async fn run_native_editor_server(String, host? : String, port? : Int, asset_dir? : String, moon_command? : String, browse_root? : String, log? : (String) -> Unit) -> Unit
+
+// Errors
+
+// Types and methods
+type MoonCheckDiagnostics
+pub fn MoonCheckDiagnostics::MoonCheckDiagnostics(@ref.Ref[String], (@common.Uri, String, Array[@language.Diagnostic]) -> Unit, moon_command? : String) -> Self
+pub fn MoonCheckDiagnostics::note_document(Self, @workspace.DocumentSnapshot) -> Unit
+pub fn MoonCheckDiagnostics::reset(Self) -> Unit
+pub fn MoonCheckDiagnostics::schedule(Self, (async () -> Unit) -> Unit) -> Unit
+
+type MoonWorkspaceLanguageProvider
+pub fn MoonWorkspaceLanguageProvider::MoonWorkspaceLanguageProvider(@ref.Ref[String], moon_command? : String) -> Self
+pub impl @language.DefinitionProvider for MoonWorkspaceLanguageProvider
+pub impl @language.DocumentSymbolProvider for MoonWorkspaceLanguageProvider
+pub impl @language.HoverProvider for MoonWorkspaceLanguageProvider
+pub impl @language.ReferencesProvider for MoonWorkspaceLanguageProvider
+
+type NativeServerHost
+pub fn NativeServerHost::NativeServerHost() -> Self
+pub fn NativeServerHost::with_poll_interval(Int) -> Self
+pub impl @server.ServerHost for NativeServerHost
+
+// Type aliases
+
+// Traits
+

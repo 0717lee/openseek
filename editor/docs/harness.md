@@ -1,0 +1,202 @@
+# Harness
+
+Use the lowest layer that can observe the behavior. Browser tests are for DOM,
+pointer, browser-layout, and full-shell behavior—not for state that a MoonBit
+test can assert directly.
+
+## Commands
+
+```sh
+just test                    # MoonBit correctness
+just test-browser-smoke      # browser correctness: smoke + component
+just test-browser-perf       # opt-in performance diagnostics
+```
+
+`just test-browser` is an alias for `just test-browser-smoke`. Routine
+development does not run the perf suite; use it when investigating performance
+or changing the perf harness and its scroll-frame oracle.
+
+Focused build and development commands are:
+
+```sh
+just build                       # production assets + default Wasm server
+just dist-front-end              # production browser assets only
+just build-browser-tests         # browser-correctness scenario bundles
+just build-browser-perf-tests    # perf scenarios + pinned Monaco oracle
+just                             # build and serve with repository defaults
+just test-browser-component      # direct Viewer subset of browser correctness
+just ROOT=. PORT=5173 dev        # build, serve, and print Local/Network URLs
+just HOST=127.0.0.1 dev          # explicitly restrict access to loopback
+just TARGET=native dev           # opt into the native server backend
+just ROOT=~/git/other-repo dev   # browse another MoonBit repo with this viewer
+just HOST=0.0.0.0 BROWSE_ROOT=~/git dev  # LAN access scoped to one subtree
+just list                        # list every available recipe
+```
+
+Playwright owns `http://127.0.0.1:5174` by default and uses the deterministic
+`tests/fixtures/workspace`. Set `READONLY_EDITOR_BASE_URL` to target an already
+running server explicitly; only that opt-in path may reuse an existing server.
+The direct Playwright CLI starts the default Wasm server without rebuilding
+assets and assumes the matching browser-build profile has already run; use the
+`just test-browser-*` recipes when bundle freshness matters.
+
+`just dev` defaults to `HOST=0.0.0.0`: it binds every IPv4 interface and prints
+reachable Local and detected Network URLs. Set `HOST=127.0.0.1` (before the
+recipe name: `just HOST=127.0.0.1 dev`) to restrict the listener and startup
+output to the Local URL. The server target defaults to Wasm; set
+`TARGET=native` explicitly when native-host behavior is the subject under test.
+
+`ROOT` selects the repository served at startup. The workbench's **Open
+Repository...** picker can re-root the running server without a restart. On a
+loopback listener it may browse the host filesystem; on any other bind it is
+disabled unless `BROWSE_ROOT` grants one realpathed directory and its
+descendants. `ROOT` may be outside that scope, but the picker starts at
+`BROWSE_ROOT` and cannot navigate above it. The reusable server API, direct CLI,
+and lower-level `just serve` recipe remain loopback-only by default.
+
+**Warning:** the reference server has no authentication and exposes workspace
+source files. The default `just dev` launcher is intended only for trusted LANs.
+
+## Test Layers
+
+### MoonBit package tests
+
+Use ordinary tests for DOM-free algorithms and `*_reference_test.mbt` /
+`*_reference_wbtest.mbt` for traceable Monaco conformance ports. See
+`docs/quality.md` for the reference-test contract.
+
+### Headless Viewer tests
+
+`viewer/test_viewer_wbtest.mbt` constructs a real, unattached `Viewer`, installs
+a `TextModel`, and exercises its synchronous model/view-model/cursor/layout
+state. No browser `View`, DOM measurement, or animation frame is created.
+
+Useful white-box seams are:
+
+- `with_test_viewer`
+- `test_view_model` and `test_cursor`
+- `test_window`
+- `test_set_soft_wrap_column`
+- `test_set_viewport`
+
+Use this layer for positions, selections, wrapping, model/view conversion,
+visible windows, scroll/reveal math, decoration inputs, and contribution state.
+
+### Mounted Viewer white-box tests
+
+`with_mounted_test_viewer` is a package-private `_wbtest` fixture, not a public
+Viewer or host API. It installs the smallest fake DOM/browser runtime and holds
+the animation-frame queue so MoonBit tests can inspect synchronous
+model-browser ownership, render/reveal requests, and lifecycle ordering before
+a flush consumes them. Use Playwright component tests instead for real DOM
+layout, focus, pointer input, and native animation-frame behavior.
+
+`viewer/references_peek_wbtest.mbt` uses this layer for the public
+`show_references` guards, copied input, lazy per-group and selected-preview
+resolver slots, exact lease counts, stale/wrong-URI rejection, Definition-intent
+cancellation, reentrant teardown, and mode-neutral opening.
+`viewer/definition_navigation_wbtest.mbt` retains the corresponding
+Definition-provider and shared-Peek regression matrix.
+
+### Browser suites
+
+```text
+tests/browser/
+  smoke/       real workbench/embed workflows and real pointer input
+  component/   direct public-Viewer scenarios reported as compact JSON
+  perf/        opt-in performance diagnostics and scroll-frame traces
+  moonbit/     js-target scenario packages
+  support/     Playwright fixtures, logging, and reporters
+```
+
+The browser-correctness gate runs both `smoke/` and `component/`. Their
+directory names describe how they reach the browser surface, not separate
+top-level quality gates. GitHub Actions retries a failed browser test once in
+a fresh Playwright worker because the hosted macOS runner can transiently stall
+native input, layout, or fixture-watch delivery. Local runs do not retry, and
+the failed CI attempt retains its trace in the job-local output directory; a
+deterministic regression therefore fails both attempts and still fails the
+gate.
+
+Compilation is `moon build`'s job: every js entry point declares
+`supported_targets = "js"`, so one workspace build emits all of them.
+`scripts/build-web.mbtx` assembles the production reference app and embed page,
+then owner-adjacent CSS and codicons, under `web/dist`;
+`scripts/stage_mermaid` adds the pinned, SHA-256-verified local Mermaid ESM
+tree. `scripts/build-browser-tests.mbtx` has separate `smoke` and `perf`
+profiles under `web/dist/browser-tests`. The smoke profile stages the
+MoonBit scenarios used by browser correctness without touching the perf bundle
+or Monaco. The perf profile stages only its local scenarios plus the pinned
+Monaco oracle, which it builds with esbuild from the VS Code submodule. Before
+staging, the browser-test assembler requires every selected bundle and source
+map to exist in exactly one of the module-qualified or unqualified layouts; it
+rejects ambiguous layouts rather than risking a stale artifact from a different
+`moon.work` context.
+
+### Browser scenario ownership
+
+A browser-visible contract normally has two adjacent owners:
+
+- A MoonBit scenario under `tests/browser/moonbit/` constructs the product
+  through the appropriate public surface, owns deterministic setup, and emits a
+  compact JSON report. Keep DOM-free policy and synchronous state-machine
+  assertions in ordinary, headless, or mounted MoonBit tests instead.
+- A Playwright spec under `tests/browser/component/` or
+  `tests/browser/smoke/` supplies the browser-only evidence: real input, DOM and
+  layout observations, host integration, and the final assertions. Use a
+  component test for a direct public Viewer and a smoke test when the workbench,
+  sidebar, remote protocol, file watching, or host tool adapter is part of the
+  behavior.
+
+When adding a scenario package, declare its JS target and add its bundle to the
+appropriate profile in `scripts/build-browser-tests.mbtx`. Keep exact routes,
+query flags, selectors, globals, and focused-run instructions in
+`tests/browser/README.md` or the owning package README. Keep feature behavior in
+the owning package docs and focused tests; do not grow a feature-by-feature
+catalog in this cross-cutting harness guide.
+
+## Browser Rules
+
+- Smoke tests use the sidebar and remote protocol when testing the workbench;
+  the active file is application state, not a URL query/hash.
+- Prefer real gestures and visible outcomes. Use deterministic test globals only
+  when no user path exists.
+- Markdown semantic hover tests derive a point from the rendered text range and
+  move `page.mouse` there. Test globals may hold an async provider completion
+  or expose readback, but must not bypass caret hit testing, coordinate
+  conversion, or presentation routing.
+- Use Playwright for caret-API hit testing, measured selection/widget geometry,
+  browser event wiring, server/file-watch integration, and screenshots/traces.
+- Monaco parity comes from an explicit behavior mapping plus focused
+  conformance evidence, not from copying TypeScript representation or relying
+  on browser DOM snapshots against Monaco. Source-shaped control flow is
+  required only for algorithm-fidelity slices where ordering or arithmetic is
+  part of the contract.
+- A targeted real-commit comparison may observe the same concrete DOM effect
+  in both implementations when that effect is the selected behavior. The
+  scroll-frame oracle records accepted state and local render phases, then
+  observes `.lines-content` `top`/`left` mutations. It groups callbacks by the
+  native rAF timestamp; getter samples alone remain state/cadence evidence, and
+  ambient cadence remains diagnostic rather than a budget. This oracle belongs
+  to the opt-in perf workflow, not the routine correctness gate.
+- The MoonBit reporter only emits data; Playwright validates the report and
+  owns pass/fail.
+
+## Failure Evidence
+
+`tests/browser/support/test.js` writes `runner.log` and a failure screenshot;
+the Playwright configuration retains failure traces and screenshots under
+`test-results/browser/**`. Component and perf suites also attach their JSON
+reports. Shared listeners record console messages, uncaught page errors, failed
+requests, and HTTP responses at status 400 or above for diagnosis. Those events
+do **not** globally fail a test: a spec must assert the relevant failure
+explicitly when it is part of that feature's contract. Set
+`READONLY_EDITOR_TEST_VERBOSE=1` or `PW_VERBOSE=1` to mirror logs to the terminal.
+
+The current monorepo [editor workflow](../../.github/workflows/editor.yml) runs
+the browser gate but does not upload `test-results/**` as CI artifacts. Traces,
+`runner.log`, attached reports, and failure screenshots are therefore local to
+the CI job rather than downloadable after it finishes.
+
+Package globals, selectors, and scenario-authoring details live in
+`tests/browser/README.md`.

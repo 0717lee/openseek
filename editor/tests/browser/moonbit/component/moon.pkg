@@ -1,0 +1,21 @@
+import {
+  "moonbitlang/editor/base/common" @base_common,
+  "moonbitlang/editor/language",
+  "moonbitlang/editor/platform/log",
+  "moonbitlang/editor/viewer",
+  "moonbitlang/editor/internal/viewer/browser/testing" @viewer_testing,
+  "moonbitlang/editor/viewer/common/editor_api",
+  "moonbitlang/editor/viewer/common/languages",
+  "moonbitlang/editor/viewer/common/markers",
+  "moonbitlang/editor/viewer/common/model",
+  "moonbitlang/editor/viewer/common/core",
+  "moonbitlang/editor/syntax/lang_moonbit",
+  "moonbitlang/editor/syntax",
+  "moonbitlang/editor/tests/browser/moonbit/support",
+  "moonbit-community/rabbita/dom" @rdom,
+  "moonbit-community/rabbita/js",
+}
+
+supported_targets = "js"
+
+pkgtype(kind: "executable")

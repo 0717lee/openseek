@@ -1,0 +1,21 @@
+import {
+  "moonbitlang/editor/base/common" @base_common,
+  "moonbitlang/editor/language",
+  "moonbitlang/editor/platform/log",
+  "moonbitlang/editor/syntax",
+  "moonbitlang/editor/viewer/common/model",
+  "moonbitlang/editor/viewer/common/services",
+  "moonbitlang/editor/viewer/common/tokens",
+}
+
+import {
+  "moonbitlang/editor/language",
+  "moonbitlang/editor/syntax/lang_json",
+  "moonbitlang/editor/viewer/common/tokens",
+  "moonbitlang/async",
+} for "test"
+
+import {
+  "moonbitlang/async",
+  "moonbitlang/async/aqueue",
+} for "wbtest"

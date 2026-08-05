@@ -1,0 +1,20 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "moonbitlang/editor/syntax/lang_moonbit"
+
+import {
+  "moonbitlang/editor/syntax",
+}
+
+// Values
+
+// Errors
+
+// Types and methods
+type MoonbitTokenizer
+pub fn MoonbitTokenizer::MoonbitTokenizer() -> Self
+pub impl @syntax.LineTokenizer for MoonbitTokenizer
+
+// Type aliases
+
+// Traits
+

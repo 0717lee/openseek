@@ -1,0 +1,181 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "moonbitlang/editor/internal/viewer/contrib/hover"
+
+import {
+  "moonbitlang/core/debug",
+  "moonbitlang/editor/base/common",
+  "moonbitlang/editor/internal/viewer/markdown",
+  "moonbitlang/editor/language",
+  "moonbitlang/editor/viewer/common/languages",
+  "moonbitlang/editor/viewer/common/markers",
+  "moonbitlang/editor/viewer/common/model",
+  "moonbitlang/editor/viewer/common/view_model",
+}
+
+// Values
+pub fn compare_hover_parts(HoverPart, HoverPart) -> Int
+
+pub fn compute_hover_positions(@common.Range, Array[HoverPositionPart], Int) -> (@common.Position, @common.Position)
+
+pub let hover_first_wait_ms : Int
+
+pub let hover_loading_message_ms : Int
+
+pub let hover_multi_cursor_modifier : MultiCursorModifier
+
+pub fn hover_part_range(HoverPart) -> @common.Range
+
+pub let hover_second_wait_ms : Int
+
+pub let hover_sticky_debug : Bool
+
+pub fn mouse_within_element(Double, Double, Double, Double, Double, Double) -> Bool
+
+pub fn render_hover_code_block(@markdown.MarkdownCodeBlock, String?) -> String
+
+pub fn should_keep_current_hover(Bool, Bool, Bool) -> Bool
+
+pub fn should_keep_hover_widget_visible(Bool) -> Bool
+
+pub fn should_reschedule_hover(Bool, Bool, Int) -> Bool
+
+pub fn should_show_hover(HoverEnabled, MultiCursorModifier, EventModifiers) -> Bool
+
+// Errors
+
+// Types and methods
+pub struct ComputedHover {
+  parts : Array[HoverPart]
+  // private fields
+} derive(Eq, @debug.Debug)
+
+type ContentHoverComputer
+pub fn ContentHoverComputer::ContentHoverComputer(HoverParticipantServices) -> Self
+pub async fn ContentHoverComputer::compute_async(Self, @model.TextModel, HoverAnchor, source? : HoverStartSource, token? : @language.CancellationToken, is_current? : () -> Bool) -> ComputedHover? noraise
+pub async fn ContentHoverComputer::compute_async_each(Self, @model.TextModel, HoverAnchor, source? : HoverStartSource, token? : @language.CancellationToken, is_current? : () -> Bool, run_tasks? : async (Array[async () -> Unit]) -> Unit, emit~ : (Array[HoverPart]) -> Unit) -> Unit noraise
+pub fn ContentHoverComputer::compute_sync(Self, @model.TextModel, HoverAnchor, source? : HoverStartSource) -> ComputedHover?
+pub fn ContentHoverComputer::create_loading_message(Self, HoverAnchor) -> HoverPart?
+pub fn ContentHoverComputer::participants(Self) -> Array[HoverParticipantHandle]
+
+type EventModifiers derive(@debug.Debug)
+pub fn EventModifiers::EventModifiers(Bool, Bool, Bool) -> Self
+pub fn EventModifiers::none() -> Self
+
+pub(all) enum HoverAnchor {
+  HoverRangeAnchor(priority~ : Int, range~ : @common.Range, initial_mouse_pos_x~ : Double?, initial_mouse_pos_y~ : Double?)
+  HoverForeignElementAnchor(priority~ : Int, owner~ : HoverParticipantOwner, injected_text_index~ : Int, range~ : @common.Range, initial_mouse_pos_x~ : Double?, initial_mouse_pos_y~ : Double?, supports_marker_hover~ : Bool)
+} derive(Eq, @debug.Debug)
+pub fn HoverAnchor::priority(Self) -> Int
+
+pub struct HoverController {
+  anchor : HoverAnchor?
+  operation : HoverOperation
+  view : HoverView?
+  // private fields
+} derive(Eq)
+pub fn HoverController::cancel_operation_preserving_view(Self) -> Self
+pub fn HoverController::cleared(Self) -> Self
+pub fn HoverController::empty() -> Self
+pub fn HoverController::highlight_decorations(Self) -> Array[@model.ModelDeltaDecoration]
+pub fn HoverController::is_complete(Self) -> Bool
+pub fn HoverController::op_async_done_request(Self, HoverRequestStamp, @model.TextModel?, Int) -> Self
+pub fn HoverController::op_async_item_request(Self, HoverRequestStamp, @model.TextModel?, Int, Array[HoverPart]) -> Self
+pub fn HoverController::op_trigger_async_request(Self, HoverRequestStamp, @model.TextModel?, Int) -> (Bool, Self)
+pub fn HoverController::op_trigger_loading_request(Self, HoverRequestStamp, @model.TextModel?, Int) -> Self
+pub fn HoverController::op_trigger_sync_request(Self, HoverRequestStamp, @model.TextModel?, Int, Array[HoverPart]) -> Self
+pub fn HoverController::request_stamp(Self, @model.TextModel, @language.CancellationToken) -> HoverRequestStamp
+pub fn HoverController::start_showing_or_update_hover(Self, HoverAnchor, Bool, show_at_position? : @common.Position, mode? : HoverStartMode, source? : HoverStartSource, should_focus? : Bool, live_widget_visible? : Bool) -> (HoverEffect, Self)
+pub fn HoverController::widget_view_with_loading(Self, HoverPart?) -> HoverWidgetView?
+
+type HoverDebouncer derive(Eq, @debug.Debug)
+pub fn HoverDebouncer::HoverDebouncer(default_delay_ms? : Int) -> Self
+pub fn HoverDebouncer::cancel(Self) -> Self
+pub fn HoverDebouncer::schedule(Self, HoverOperationOptions, delay_ms? : Int) -> (Int, Self)
+pub fn HoverDebouncer::take(Self, Int) -> (HoverOperationOptions?, Self)
+
+pub(all) enum HoverEffect {
+  HoverNoEffect
+  HoverScheduleDelayed(Int)
+  HoverRunAsyncAndSync(Int)
+}
+
+type HoverEnabled
+
+pub struct HoverOperation {
+  token : Int
+  options : HoverOperationOptions?
+  // private fields
+} derive(Eq, @debug.Debug)
+pub fn HoverOperation::shows_loading_message(Self) -> Bool
+
+pub struct HoverOperationOptions {
+  source : HoverStartSource
+  // private fields
+} derive(Eq, @debug.Debug)
+
+pub(all) enum HoverPart {
+  MarkdownHover(range~ : @common.Range, contents~ : Array[@language.HoverContent], ordinal~ : Int)
+  MarkerHover(range~ : @common.Range, marker~ : @markers.Marker)
+  LoadingHover(range~ : @common.Range, message~ : String)
+} derive(Eq, @debug.Debug)
+
+pub struct HoverParticipantHandle {
+  suggest_hover_anchor : ((@view_model.InjectedText?, @common.Range, Double?, Double?) -> HoverAnchor?)?
+  // private fields
+}
+
+type HoverParticipantOwner derive(Eq, @debug.Debug)
+pub fn HoverParticipantOwner::HoverParticipantOwner() -> Self
+
+pub(all) struct HoverParticipantServices {
+  languages : @languages.LanguageHandle
+  marker_decorations : @markers.MarkerDecorationsHandle
+}
+
+pub(all) struct HoverPositionPart {
+  range : @common.Range
+  force_show_at_range : Bool
+}
+
+type HoverRequestStamp
+pub fn HoverRequestStamp::cancellation_token(Self) -> @language.CancellationToken
+pub fn HoverRequestStamp::generation(Self) -> Int
+pub fn HoverRequestStamp::is_current(Self, @model.TextModel?, Int) -> Bool
+pub fn HoverRequestStamp::model(Self) -> @model.TextModel
+
+pub struct HoverSettings {
+  enabled : HoverEnabled
+  sticky : Bool
+  hiding_delay : Int
+}
+pub fn HoverSettings::defaults() -> Self
+
+pub(all) enum HoverStartMode {
+  HoverStartDelayed
+  HoverStartImmediate
+} derive(Eq, @debug.Debug)
+
+pub(all) enum HoverStartSource {
+  HoverStartMouse
+  HoverStartClick
+  HoverStartKeyboard
+} derive(Eq, @debug.Debug)
+
+type HoverView derive(Eq)
+
+pub struct HoverWidgetView {
+  anchor_range : @common.Range
+  parts : Array[HoverPart]
+} derive(Eq)
+
+type MouseCloserState
+pub fn MouseCloserState::MouseCloserState() -> Self
+pub fn MouseCloserState::is_mouse_getting_closer(Self, Double, Double, Double, Double, Double, Double) -> Bool
+pub fn MouseCloserState::reset(Self) -> Unit
+
+type MultiCursorModifier
+
+// Type aliases
+
+// Traits
+

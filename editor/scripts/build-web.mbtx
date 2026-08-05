@@ -1,0 +1,211 @@
+import {
+  "moonbitlang/async",
+  "moonbitlang/async/fs",
+}
+
+///|
+async fn build_layout_contains(
+  build_dir : String,
+  artifacts : Array[String],
+) -> Bool {
+  for artifact in artifacts {
+    if !@fs.exists(build_dir + "/" + artifact) {
+      return false
+    }
+  }
+  true
+}
+
+///|
+/// Selects only a complete, unambiguous output layout from the workspace build.
+/// If both layouts contain every requested artifact, one may be stale, so
+/// refuse to stage either instead of silently serving the wrong checkout.
+async fn resolved_build_dir(
+  package_path : String,
+  artifacts : Array[String],
+) -> String {
+  let plain = "_build/js/debug/build/\{package_path}"
+  let module_dir = "_build/js/debug/build/moonbitlang/editor/\{package_path}"
+  match (
+    build_layout_contains(plain, artifacts),
+    build_layout_contains(module_dir, artifacts),
+  ) {
+    (true, false) => plain
+    (false, true) => module_dir
+    (false, false) =>
+      fail("missing js artifacts for \{package_path}; run `moon build` first")
+    (true, true) =>
+      fail(
+        "ambiguous js artifact layouts for \{package_path}; remove stale _build outputs and rebuild",
+      )
+  }
+}
+
+///|
+async fn main {
+  let source_dir = resolved_build_dir(
+    "internal/shell/web",
+    ["web.js", "web.js.map", "moonbit.d.ts", "web.d.ts"],
+  )
+  let embed_source_dir = resolved_build_dir(
+    "internal/shell/examples/embedded_viewer",
+    ["embedded_viewer.js", "embedded_viewer.js.map"],
+  )
+  if !@fs.exists(source_dir) || !@fs.exists(embed_source_dir) {
+    fail("missing js artifacts for the web entry points; run `moon build` first")
+  }
+  let target_dir = "web/dist"
+  if !@fs.exists(target_dir) {
+    @fs.mkdir(target_dir, recursive=true)
+  }
+
+  let generated_js = @fs.read_file("\{source_dir}/web.js").text()
+  @fs.write_file(
+    "\{target_dir}/editor.mjs",
+    generated_js.replace(
+      old="//# sourceMappingURL=web.js.map",
+      new="//# sourceMappingURL=editor.mjs.map",
+    ),
+    create_mode=@fs.CreateOrTruncate,
+  )
+  @fs.write_file(
+    "\{target_dir}/editor.mjs.map",
+    @fs.read_file("\{source_dir}/web.js.map"),
+    create_mode=@fs.CreateOrTruncate,
+  )
+  @fs.write_file(
+    "\{target_dir}/moonbit.d.ts",
+    @fs.read_file("\{source_dir}/moonbit.d.ts"),
+    create_mode=@fs.CreateOrTruncate,
+  )
+  @fs.write_file(
+    "\{target_dir}/web.d.ts",
+    @fs.read_file("\{source_dir}/web.d.ts"),
+    create_mode=@fs.CreateOrTruncate,
+  )
+  @fs.write_file(
+    "\{target_dir}/style.css",
+    assembled_style_css(),
+    create_mode=@fs.CreateOrTruncate,
+  )
+  // The vendored codicon icon font (referenced by codicon.css's @font-face).
+  @fs.write_file(
+    "\{target_dir}/codicon.ttf",
+    @fs.read_file("viewer/browser/view/codicon/codicon.ttf"),
+    create_mode=@fs.CreateOrTruncate,
+  )
+  @fs.write_file(
+    "\{target_dir}/index.html",
+    index_html(),
+    create_mode=@fs.CreateOrTruncate,
+  )
+
+  let embed_js = @fs.read_file("\{embed_source_dir}/embedded_viewer.js").text()
+  @fs.write_file(
+    "\{target_dir}/embed.mjs",
+    embed_js.replace(
+      old="//# sourceMappingURL=embedded_viewer.js.map",
+      new="//# sourceMappingURL=embed.mjs.map",
+    ),
+    create_mode=@fs.CreateOrTruncate,
+  )
+  @fs.write_file(
+    "\{target_dir}/embed.mjs.map",
+    @fs.read_file("\{embed_source_dir}/embedded_viewer.js.map"),
+    create_mode=@fs.CreateOrTruncate,
+  )
+  @fs.write_file(
+    "\{target_dir}/embed.html",
+    embed_html(),
+    create_mode=@fs.CreateOrTruncate,
+  )
+
+  println("Generated production web assets under web/dist")
+}
+
+///|
+fn css_sources() -> Array[String] {
+  [
+    "internal/shell/workbench/theme.css",
+    "internal/shell/workbench/shell.css",
+    "internal/shell/widgets/file_tree/file_tree.css",
+    "viewer/browser/view/codicon/codicon.css",
+    "viewer/browser/view/editor.css",
+    "viewer/ui/scrollbar/scrollable_element.css",
+    "viewer/browser/view_parts/view_lines/view_lines.css",
+    "viewer/browser/view_parts/selections/view_overlays.css",
+    "viewer/browser/view_parts/content_widgets/content_widgets.css",
+    "viewer/browser/view_parts/overlay_widgets/overlay_widgets.css",
+    "viewer/browser/view_parts/selections/selections.css",
+    "viewer/browser/view_parts/current_line_highlight/current_line_highlight.css",
+    "viewer/browser/view_parts/decorations/decorations.css",
+    "viewer/browser/view_parts/view_cursors/view_cursors.css",
+    "viewer/browser/view_parts/margin/margin.css",
+    "viewer/browser/view_parts/margin/lines_decorations.css",
+    "viewer/browser/view_parts/view_lines/tokens.css",
+    "viewer/browser/view_parts/view_lines/markers.css",
+    "viewer/contrib/folding/browser/folding.css",
+    "viewer/contrib/contextmenu/browser/contextmenu.css",
+    "viewer/contrib/definition/browser/definition.css",
+    "viewer/contrib/references/browser/references.css",
+    "viewer/contrib/hover/hover.css",
+    "viewer/contrib/quick_diff/browser/quick_diff.css",
+    "viewer/contrib/agent_feedback/browser/agent_feedback.css",
+    "internal/viewer/browser/markdown/diagram_viewport.css",
+    "viewer/contrib/markdown_comments/browser/markdown_comments.css",
+    "internal/viewer/browser/markdown_document/markdown_document.css",
+  ]
+}
+
+///|
+async fn assembled_style_css() -> String {
+  let css = StringBuilder::new()
+  for source in css_sources() {
+    css.write_string("/* " + source + " */\n")
+    let source_css = @fs.read_file(source).text()
+    css.write_string(source_css)
+    if !source_css.has_suffix("\n") {
+      css.write_string("\n")
+    }
+    css.write_string("\n")
+  }
+  css.to_string()
+}
+
+///|
+fn index_html() -> String {
+  (
+    #|<!doctype html>
+    #|<html lang="en">
+    #|  <head>
+    #|    <meta charset="UTF-8" />
+    #|    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    #|    <title>Readonly MoonBit Editor</title>
+    #|    <link rel="stylesheet" href="/style.css">
+    #|  </head>
+    #|  <body>
+    #|    <div id="app"></div>
+    #|    <script type="module" src="/editor.mjs"></script>
+    #|  </body>
+    #|</html>
+  )
+}
+
+///|
+fn embed_html() -> String {
+  (
+    #|<!doctype html>
+    #|<html lang="en">
+    #|  <head>
+    #|    <meta charset="UTF-8" />
+    #|    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    #|    <title>Embedded Readonly Viewer</title>
+    #|    <link rel="stylesheet" href="/style.css">
+    #|  </head>
+    #|  <body>
+    #|    <div id="app"></div>
+    #|    <script type="module" src="/embed.mjs"></script>
+    #|  </body>
+    #|</html>
+  )
+}

@@ -1,0 +1,89 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "moonbitlang/editor/internal/viewer/browser/controller"
+
+import {
+  "moonbit-community/rabbita/dom",
+  "moonbitlang/core/debug",
+  "moonbitlang/editor/base/common",
+  "moonbitlang/editor/internal/viewer/browser/view",
+  "moonbitlang/editor/internal/viewer/ui/scrollbar",
+  "moonbitlang/editor/viewer/browser",
+  "moonbitlang/editor/viewer/common/config",
+  "moonbitlang/editor/viewer/common/core",
+  "moonbitlang/editor/viewer/common/view_layout",
+  "moonbitlang/editor/viewer/common/view_model",
+}
+
+// Values
+
+// Errors
+
+// Types and methods
+pub(all) struct MouseDispatchData {
+  position : @common.Position
+  mouse_column : Int
+  reveal_type : NavigationCommandRevealType
+  started_on_line_numbers : Bool
+  in_selection_mode : Bool
+  mouse_down_count : Int
+  alt_key : Bool
+  ctrl_key : Bool
+  meta_key : Bool
+  shift_key : Bool
+  left_button : Bool
+  middle_button : Bool
+  on_injected_text : Bool
+}
+
+type MouseHandler
+pub fn MouseHandler::MouseHandler(PointerHandlerHelper) -> Self
+pub fn MouseHandler::cancel_selection(Self) -> Unit
+pub fn MouseHandler::dispose(Self) -> Unit
+pub fn MouseHandler::handle_editor_wheel(Self, @dom.Event, @dom.WheelEvent) -> Bool
+pub fn MouseHandler::hook_browser_desperate_reveal(Self) -> Unit
+pub fn MouseHandler::hook_scrollable_scrollbar_input(Self, @scrollbar.ScrollableElementDom, @scrollbar.ScrollableElementOwner) -> Unit
+
+pub(all) enum NavigationCommandRevealType {
+  Regular
+  Minimal
+  None
+} derive(Eq, @debug.Debug)
+
+pub(all) struct PointerHandlerHelper {
+  view_dom_node : @dom.Element
+  lines_content_dom_node : @dom.Element
+  view_lines_dom_node : @dom.Element
+  focus_text_area : () -> Unit
+  get_last_render_data : () -> PointerHandlerLastRenderData
+  render_now : () -> Unit
+  should_suppress_mouse_down_on_view_zone : (String) -> Bool
+  get_position_from_dom_info : (@dom.Element, Int) -> @common.Position?
+  visible_range_for_position : (Int, Int) -> @view.HorizontalPosition?
+  get_line_width : (Int) -> Double
+  view_model : () -> @view_model.ViewModel?
+  get_layout_info : () -> @config.EditorLayoutInfo
+  get_font_info : () -> @config.FontInfo
+  get_current_selection : () -> @core.Selection?
+  dispatch_mouse : (MouseDispatchData) -> Unit
+  before_mouse_down_selection : (@browser.EditorDomMouseEvent, @browser.MouseTarget) -> Bool
+  emit_mouse_down : (@browser.EditorDomMouseEvent, @browser.MouseTarget) -> Unit
+  emit_mouse_up : (@browser.EditorDomMouseEvent, @browser.MouseTarget) -> Unit
+  emit_mouse_move : (@browser.EditorDomMouseEvent, @browser.MouseTarget) -> Unit
+  emit_context_menu : (@browser.EditorDomMouseEvent, @browser.MouseTarget) -> Unit
+  emit_mouse_drag : (@browser.EditorDomMouseEvent, @browser.MouseTarget) -> Unit
+  emit_mouse_leave : (@browser.EditorDomMouseEvent) -> Unit
+  overflow_guard : @dom.Element
+  editor_scrollable : @scrollbar.ScrollableElementDom
+  hover_scrollable : () -> @scrollbar.ScrollableElementDom?
+  view_layout : () -> @view_layout.ViewLayout?
+  schedule_render : () -> Unit
+}
+
+pub(all) struct PointerHandlerLastRenderData {
+  last_view_cursors_render_data : Array[@view.ViewCursorRenderData]
+}
+
+// Type aliases
+
+// Traits
+

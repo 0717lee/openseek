@@ -1,0 +1,58 @@
+# Quality Gates
+
+Current docs and package READMEs are product contracts. Keep cross-package
+architecture in `docs/architecture.md` and package details in package READMEs.
+
+## Required Checks
+
+```sh
+moon check --target all --warn-list +73
+moon fmt --check
+just test
+just build
+just test-browser-smoke
+```
+
+Run the subset relevant to each milestone; run all of them before declaring a
+cross-package or browser-visible implementation complete.
+
+`just test-browser-perf` is a diagnostic workflow, not a routine development
+gate. Run it when investigating a performance problem or changing scroll-frame,
+render-timing, or perf-harness behavior.
+
+## Guardrails
+
+- Product code never imports `vscode/`, `codemirror/`, or the reference shell.
+- Shared packages remain FFI-free; js/native-only packages declare their target.
+- Viewer packages use only Rabbita's DOM/JS bindings, not its TEA framework.
+- The shell/backend remains optional to embedders.
+- The check gate is read-only: `moon check --target all --warn-list +73` covers
+  every target and `moon fmt --check` verifies formatting.
+- Review `moon.pkg` changes against `docs/architecture.md`, and review public API
+  changes through `pkg.generated.mbti`.
+- Every public declaration should have a non-test production consumer. Tests do
+  not justify public visibility. A deliberate external or staged contract with
+  no repository consumer belongs in the owning package's `exports.mbt`, where
+  `moon ide analyze` records the exception explicitly.
+- Implementation structs and enums default to abstract package types: use a
+  plain `struct X` or `enum X` plus the required public operations. Expose a
+  concrete layout only when production consumers must construct, mutate, or
+  pattern-match it. Retain `derive(Debug)` on debugging-facing types even when
+  no production call site invokes the generated implementation.
+- Do not add architecture lint for a one-time design decision. Automate a
+  boundary only after the same concrete failure recurs, and keep the check
+  generic rather than naming current methods or implementation types.
+
+## Reference Tests
+
+Use `*_reference_test.mbt` / `*_reference_wbtest.mbt` when a test is traceable
+to a pinned Monaco, VS Code, or CodeMirror source test or behavior cluster.
+
+- Name the source path and pinned revision in the file or test comment.
+- Preserve source labels, inputs, outputs, ordering, and boundary values when
+  they are part of the behavior under test.
+- Within the selected source-test or behavior scope, keep unsupported cases
+  visible as `SKIPPED` with a product-boundary reason instead of silently
+  deleting them.
+- Test observable behavior and algorithmic invariants. TypeScript interfaces,
+  class hierarchies, and private field layout are not conformance contracts.

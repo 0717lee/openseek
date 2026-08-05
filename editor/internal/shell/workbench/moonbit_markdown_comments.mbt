@@ -1,0 +1,112 @@
+// MoonBit documentation comments and item separators are anchored by the
+// formatter's top-level `///|` marker — bare, or carrying the file-header
+// summary (`///| Port of …`). The generic `///` detector cannot distinguish
+// that marker from Markdown content, so the reference shell owns this
+// language-specific adapter and keeps the reusable Viewer language-neutral.
+
+///|
+priv struct MoonBitMarkdownCommentProvider {}
+
+///|
+impl @language.MarkdownCommentProvider for MoonBitMarkdownCommentProvider with fn provide_markdown_comments(
+  _self,
+  model,
+) {
+  moonbit_markdown_comments_in_snapshot(model.snapshot())
+}
+
+///|
+fn install_moonbit_markdown_comment_provider(
+  languages : @languages.Languages,
+) -> Unit {
+  languages.register_markdown_comment_provider(
+    LanguageId("moonbit"),
+    MoonBitMarkdownCommentProvider::{  },
+    foldable=true,
+  )
+  |> ignore
+}
+
+///|
+/// Returns anchored MoonBit documentation and item-separator blocks. Every
+/// `///|` marker becomes a Markdown horizontal rule; text after the marker
+/// (the file-header form `///| Summary …`) is the first documentation line,
+/// and consecutive `///` lines follow as the documentation body. The source
+/// marker and documentation lines are hidden together.
+fn moonbit_markdown_comments_in_snapshot(
+  snapshot : @model.TextSnapshot,
+) -> Array[@language.MarkdownCommentBlock] {
+  let blocks : Array[@language.MarkdownCommentBlock] = []
+  let line_count = snapshot.line_count()
+  let mut line_number = 1
+  while line_number <= line_count {
+    guard moonbit_markdown_comment_anchor_content(
+        snapshot.get_line_content(line_number),
+      )
+      is Some(anchor_content) else {
+      line_number += 1
+      continue
+    }
+    let start_line_number = line_number
+    line_number += 1
+    let contents : Array[String] = []
+    if anchor_content != "" {
+      contents.push(anchor_content)
+    }
+    while line_number <= line_count {
+      match
+        moonbit_markdown_comment_line_content(
+          snapshot.get_line_content(line_number),
+        ) {
+        Some(content) => {
+          contents.push(content)
+          line_number += 1
+        }
+        None => break
+      }
+    }
+    blocks.push({
+      line_range: LineRange(start_line_number, line_number),
+      markdown: if contents.is_empty() {
+        "---"
+      } else {
+        (
+          $|---
+          $|
+          $|\{contents.join("\n")}
+        )
+      },
+    })
+  }
+  blocks
+}
+
+///|
+/// The documentation carried on an anchor line itself: `Some("")` for the
+/// bare `///|` separator, the remaining text (after at most one ASCII space)
+/// for the file-header form `///| Summary …`, and `None` for any other line.
+fn moonbit_markdown_comment_anchor_content(line : String) -> String? {
+  if !line.has_prefix("///|") {
+    return None
+  }
+  let mut content_start = 4
+  if content_start < line.length() && line[content_start].to_int() == 32 {
+    content_start += 1
+  }
+  Some(line.unsafe_substring(start=content_start, end=line.length()))
+}
+
+///|
+/// Strips exactly `///` and at most one following ASCII space. Any following
+/// `///|` marker — bare or carrying text — is a new item boundary, not
+/// documentation owned by the current one.
+fn moonbit_markdown_comment_line_content(line : String) -> String? {
+  if line.has_prefix("///|") || !line.has_prefix("///") {
+    return None
+  }
+  let mut content_start = 3
+  if content_start < line.length() && line[content_start].to_int() == 32 {
+    content_start += 1
+  }
+  Some(line.unsafe_substring(start=content_start, end=line.length()))
+}

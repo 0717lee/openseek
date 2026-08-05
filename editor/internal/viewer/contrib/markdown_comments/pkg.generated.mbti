@@ -1,0 +1,25 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "moonbitlang/editor/internal/viewer/contrib/markdown_comments"
+
+import {
+  "moonbitlang/editor/language",
+  "moonbitlang/editor/platform/log",
+  "moonbitlang/editor/viewer/common/languages",
+  "moonbitlang/editor/viewer/common/model",
+}
+
+// Values
+pub fn resolve_markdown_comment_blocks_with_presentation(@model.TextModel, @languages.LanguageHandle, @log.LogHandle) -> ResolvedMarkdownCommentBlocks
+
+// Errors
+
+// Types and methods
+pub struct ResolvedMarkdownCommentBlocks {
+  blocks : Array[@language.MarkdownCommentBlock]
+  foldable : Bool
+}
+
+// Type aliases
+
+// Traits
+
