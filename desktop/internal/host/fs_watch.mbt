@@ -1,12 +1,13 @@
-// The workspace file watcher behind the editor panel's live updates. The
-// Each client connection points its own actor at the active conversation's
+// The workspace file watcher behind the editor panel's live updates. Each
+// client connection points its own actor at the active conversation's
 // workspace through `fs.watch` (and parks it with `fs.unwatch`); the actor
-// runs one recursive `@fs.Watcher` on that root and pushes a coarse
-// `fs.changed` notification back to that connection on every change.
+// runs one recursive `@fs.Watcher` pruned to the file editor's current open
+// files and listed directories. It pushes concrete `fs.changed` events back
+// to that connection on every change, or an
+// `fs.watch_failed` notification when the accepted watcher cannot keep
+// running.
 // `FsWatchActor` owns both the desired-root mailbox and the active watcher
-// resource. The watcher reports no paths — the frontend re-stats its open
-// tabs (`fs.stat_files`) and re-lists its expanded directories to find out
-// what moved.
+// resource.
 
 ///|
 /// One ordered actor request. Resolution happens inside the actor, after the
@@ -24,6 +25,110 @@ priv enum FsWatchRequest {
 /// preferable to silently applying them out of order.
 priv struct FsWatchActor {
   requests : @async.Queue[FsWatchRequest]
+}
+
+///|
+/// The resolved watch address plus the conversation that requested it. The
+/// session travels with asynchronous failures so a late notification cannot
+/// be shown in the next conversation.
+priv struct FsWatchTarget {
+  session : String
+  root : String
+  interest : WatchInterest
+}
+
+///|
+/// The immutable selection captured by one watcher. `paths` contains every
+/// explicitly selected file/directory and its ancestors. `directories`
+/// additionally keeps each selected directory's immediate children so create,
+/// remove, and rename events can be discovered without descending further.
+priv struct WatchInterest {
+  legacy_full_tree : Bool
+  paths : Set[String]
+  directories : Set[String]
+}
+
+///|
+fn WatchInterest::WatchInterest(
+  payload : WatchWorkspacePayload,
+) -> WatchInterest {
+  let interest = {
+    legacy_full_tree: payload.files is None && payload.directories is None,
+    paths: Set([]),
+    directories: Set([]),
+  }
+  if payload.files is Some(files) {
+    for path in files {
+      interest.remember(path)
+    }
+  }
+  if payload.directories is Some(directories) {
+    for path in directories {
+      interest.directories.add(path)
+      interest.remember(path)
+    }
+  }
+  interest
+}
+
+///|
+/// Retain `path` and each directory needed to reach it from the watch root.
+fn WatchInterest::remember(self : WatchInterest, path : String) -> Unit {
+  let mut prefix = ""
+  for segment in path.split("/") {
+    if !segment.is_empty() {
+      prefix = if prefix.is_empty() {
+        segment.to_owned()
+      } else {
+        "\{prefix}/\{segment}"
+      }
+      self.paths.add(prefix)
+    }
+  }
+}
+
+///|
+/// Subtrees omitted by recursive snapshots and legacy full-tree watchers.
+/// Explicit watcher selections do not use this policy: an opened file must
+/// remain watchable even under one of these conventional directory names.
+fn ignored_watch_path(path : String) -> Bool {
+  match [..path.split("/")] {
+    [
+      ..,
+      ".git"
+      | "target"
+      | "_build"
+      | "node_modules"
+      | ".mooncakes"
+      | ".repos",
+    ] => true
+    _ => false
+  }
+}
+
+///|
+/// Keep selected paths, their ancestors, and one level below every selected
+/// directory. A child directory is opened so its own create/remove can be
+/// observed, but its descendants are ignored unless that directory is also
+/// selected or leads to an opened file.
+fn WatchInterest::ignores(self : WatchInterest, path : String) -> Bool {
+  if self.legacy_full_tree {
+    return ignored_watch_path(path)
+  }
+  if self.paths.contains(path) {
+    return false
+  }
+  for directory in self.directories {
+    if directory.is_empty() {
+      if !path.contains("/") {
+        return false
+      }
+    } else if path.strip_prefix("\{directory}/") is Some(rest) &&
+      !rest.contains("/") {
+      return false
+    }
+  }
+  true
 }
 
 ///|
@@ -61,8 +166,8 @@ async fn FsWatchActor::unwatch(self : FsWatchActor) -> Unit {
 /// chosen its next state.
 async fn FsWatchRequest::apply(
   self : FsWatchRequest,
-  current : String?,
-) -> String? {
+  current : FsWatchTarget?,
+) -> FsWatchTarget? {
   match self {
     Unwatch(reply~) => {
       reply.put(None)
@@ -77,7 +182,11 @@ async fn FsWatchRequest::apply(
         ) {
         Some(root) => {
           reply.put(None)
-          Some(root.to_string())
+          Some({
+            session: payload.session,
+            root: root.to_string(),
+            interest: WatchInterest(payload),
+          })
         }
         None => {
           reply.put(Some("path is outside the conversation workspace"))
@@ -88,40 +197,31 @@ async fn FsWatchRequest::apply(
 }
 
 ///|
-/// Subtrees the watcher never descends into. Build output and package
-/// caches churn constantly and would both flood the debouncer and — on the
-/// kqueue backend, which holds one file descriptor per watched node — burn
-/// the process's fd budget on a big workspace. `path` is relative to the
-/// watch root and `/`-separated; pruning a directory prunes everything
-/// under it, so matching the leaf segment is enough.
-fn ignored_watch_path(path : String) -> Bool {
-  match [..path.split("/")] {
-    [
-      ..,
-      ".git"
-      | "target"
-      | "_build"
-      | "node_modules"
-      | ".mooncakes"
-      | ".repos",
-    ] => true
-    _ => false
-  }
-}
-
-///|
-/// Watch `root` until cancelled, pushing one coarse `fs_changed` per
-/// debounced change burst. The `Watcher` itself coalesces events (20ms
-/// quiet / 200ms max delay), so a build storm emits a trickle, not a flood.
+/// Watch one target until cancelled. Construction scans only the selected
+/// paths; once attached, the baseline closes the replacement race and later
+/// notifications preserve `Watcher::wait`'s concrete debounced events.
 async fn watch_root(
-  root : String,
+  target : FsWatchTarget,
   emit : async (FsChangedPayload) -> Unit,
 ) -> Unit {
-  let watcher = @fs.Watcher::Watcher(root, ignored_paths=ignored_watch_path)
+  let watcher = @fs.Watcher::Watcher(target.root, ignored_paths=path => {
+    target.interest.ignores(path)
+  })
   defer watcher.close()
+  emit({
+    session: target.session,
+    root: target.root,
+    baseline: true,
+    events: [],
+  })
   for ;; {
-    watcher.wait_any()
-    emit({ root, })
+    let events = watcher.wait()
+    emit({
+      session: target.session,
+      root: target.root,
+      baseline: false,
+      events: events.map(FsEventPayload::from_event),
+    })
   }
 }
 
@@ -129,36 +229,49 @@ async fn watch_root(
 /// The actor loop: hold one watcher on the latest requested root, swapping when a
 /// new request arrives. Each watcher runs in a child task group whose body
 /// blocks on the next request — `return_immediately` then cancels the
-/// blocked `wait_any` deterministically (`Watcher::close` alone is not
+/// blocked `wait` deterministically (`Watcher::close` alone is not
 /// documented to wake it). A missing root (workspace directories are
 /// created lazily on the first run) is polled until it appears, so the
-/// watcher attaches by itself once the first run creates the directory. The
-/// watcher task is `allow_failure` so a watcher error (say, fd exhaustion
-/// on a huge tree) degrades to "no live updates" instead of tearing down
-/// the connection.
+/// watcher attaches by itself once the first run creates the directory.
+/// Watcher failures are logged and pushed to the file editor instead of being
+/// silently discarded. Cancellation is different: replacing or parking a
+/// watcher deliberately cancels the old child, so that error must propagate
+/// as cancellation and must not reach the UI.
 async fn FsWatchActor::run(
   self : FsWatchActor,
-  emit : async (FsChangedPayload) -> Unit,
+  emit_changed : async (FsChangedPayload) -> Unit,
+  emit_failed : async (FsWatchFailedPayload) -> Unit,
 ) -> Unit {
-  let mut root : String? = None
+  let mut root : FsWatchTarget? = None
   for ;; {
     root = self.requests.get().apply(root)
     guard root is Some(target) else { continue }
     let request = @async.with_task_group(group => {
-      group.spawn_bg(allow_failure=true, () => {
-        if !@fs.exists(target) {
-          for ;; {
-            @async.sleep(2000)
-            if @fs.exists(target) {
-              break
+      group.spawn_bg(() => {
+        try {
+          if !@fs.exists(target.root) {
+            for ;; {
+              @async.sleep(2000)
+              if @fs.exists(target.root) {
+                break
+              }
             }
           }
-          // The root just appeared (the first run created it) — tell the
-          // panel before the watcher attaches, so it re-lists the tree it
-          // showed as empty.
-          emit({ root: target })
+          watch_root(target, emit_changed)
+        } catch {
+          error if @async.is_being_cancelled() => raise error
+          error => {
+            let message = "File watching stopped: \{error}"
+            @xlog.warn(category="filesystem") <?
+              {
+                "event": "watch_failed",
+                "session": target.session,
+                "root": target.root,
+                "error": "\{error}",
+              }
+            emit_failed({ session: target.session, root: target.root, message })
+          }
         }
-        watch_root(target, emit)
       })
       let next = self.requests.get()
       group.return_immediately(next)
@@ -171,19 +284,42 @@ async fn FsWatchActor::run(
 // The watcher's pruning rules and the stat op's wire shapes.
 
 ///|
-test "ignored_watch_path prunes cache and build subtrees at any depth" {
-  assert_true(ignored_watch_path(".git"))
-  assert_true(ignored_watch_path("sub/project/.git"))
-  assert_true(ignored_watch_path("target"))
-  assert_true(ignored_watch_path("deps/node_modules"))
-  assert_true(ignored_watch_path("editor/_build"))
-  assert_true(ignored_watch_path(".mooncakes"))
-  assert_true(ignored_watch_path(".repos"))
-  // Only whole segments match — a file merely named like a cache dir stays.
-  assert_false(ignored_watch_path("targets"))
-  assert_false(ignored_watch_path("src/main.mbt"))
-  assert_false(ignored_watch_path("git/notes.md"))
-  assert_false(ignored_watch_path(""))
+test "watch interest retains selected files, listed children, and ancestors" {
+  let payload : WatchWorkspacePayload = {
+    session: "s-1",
+    workspace: None,
+    files: Some(["src/main.mbt", "node_modules/pkg/index.js"]),
+    directories: Some(["", "docs"]),
+  }
+  let interest = WatchInterest(payload)
+  // Root rows and one level under an expanded directory stay observable.
+  assert_false(interest.ignores("README.md"))
+  assert_false(interest.ignores("src"))
+  assert_false(interest.ignores("docs/guide.md"))
+  assert_false(interest.ignores("docs/reference"))
+  assert_true(interest.ignores("docs/reference/deep.md"))
+  // An opened file and all of its ancestors override conventional churn
+  // directory names without admitting their unrelated siblings.
+  assert_false(interest.ignores("src/main.mbt"))
+  assert_true(interest.ignores("src/other.mbt"))
+  assert_false(interest.ignores("node_modules"))
+  assert_false(interest.ignores("node_modules/pkg"))
+  assert_false(interest.ignores("node_modules/pkg/index.js"))
+  assert_true(interest.ignores("node_modules/other/index.js"))
+}
+
+///|
+test "legacy watch payloads retain the recursive blacklist" {
+  let payload : WatchWorkspacePayload = {
+    session: "s-1",
+    workspace: None,
+    files: None,
+    directories: None,
+  }
+  let interest = WatchInterest(payload)
+  assert_true(interest.legacy_full_tree)
+  assert_true(interest.ignores("deps/node_modules"))
+  assert_false(interest.ignores("src/main.mbt"))
 }
 
 ///|
@@ -206,9 +342,18 @@ test "stat_files payload decodes with and without a workspace hint" {
   assert_eq(payload.session, "s-1")
   assert_true(payload.paths == ["a.mbt", "src/b.mbt"])
   assert_true(payload.workspace is Some("/work/project"))
+  let selected : WatchWorkspacePayload = @json.from_json({
+    "session": "s-2",
+    "files": ["src/main.mbt"],
+    "directories": ["", "src"],
+  })
+  assert_true(selected.files is Some(["src/main.mbt"]))
+  assert_true(selected.directories is Some(["", "src"]))
   let bare : WatchWorkspacePayload = @json.from_json({ "session": "s-2" })
   assert_eq(bare.session, "s-2")
   assert_true(bare.workspace is None)
+  assert_true(bare.files is None)
+  assert_true(bare.directories is None)
 }
 
 ///|

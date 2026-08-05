@@ -1091,7 +1091,8 @@ priv enum DeviceMsg {
   // A scheduled reconnect attempt came due. Dropped harmlessly when the
   // device was removed or re-added in the meantime.
   ReconnectDue(websocket_epoch~ : Int)
-  // A file-panel-scoped host push (`fs.changed`, `lsp.diagnostics`),
+  // A file-panel-scoped host push (`fs.changed`, `fs.watch_failed`,
+  // `lsp.diagnostics`),
   // stamped with its channel: the panel serves the focused conversation,
   // so a background device's filesystem noise is dropped at the arm.
   FilePanel(@fileeditor.Msg)

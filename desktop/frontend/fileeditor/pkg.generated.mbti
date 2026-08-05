@@ -39,6 +39,13 @@ pub(all) struct Ctx {
   narrow : Bool
 }
 
+pub(all) enum FileChange {
+  Modified(@pathx.Relative)
+  Created(@pathx.Relative)
+  Removed(@pathx.Relative)
+  Renamed(old~ : @pathx.Relative, new~ : @pathx.Relative)
+} derive(Eq)
+
 pub(all) enum FileContent {
   Binary
   Oversized
@@ -85,7 +92,8 @@ pub(all) enum Msg {
   OpenNavigationLocation(owner~ : @interop.ConversationKey, path~ : @pathx.Relative, range~ : @common.Range)
   FileLoaded(owner~ : @interop.ConversationKey, path~ : @pathx.Relative, name~ : String, file~ : FileContent, range~ : @common.Range?, annotation~ : String?)
   FileFailed(owner~ : @interop.ConversationKey, message~ : String)
-  FsChanged
+  FileWatchFailed(owner~ : @interop.ConversationKey, message~ : String)
+  FsChanged(session~ : String?, changes~ : Array[FileChange]?)
   StatsLoaded(owner~ : @interop.ConversationKey, stats~ : Array[FileStat])
   DiagnosticsLoaded(owner~ : @interop.ConversationKey, absolute~ : @pathx.Absolute, diagnostics~ : Json)
   DiagnosticsPublished(channel~ : @interop.ChannelId, absolute~ : @pathx.Absolute, diagnostics~ : Json)
@@ -106,7 +114,8 @@ pub(all) struct State {
   open : Bool
   owner : @interop.ConversationKey?
   tree_open : Bool
-  watching : @interop.ConversationKey?
+  watching : WatchedPaths?
+  watch_error : String?
   expanded : Array[@pathx.Relative]
   loading : Array[@pathx.Relative]
   children : Map[@pathx.Relative, Array[FileEntry]]
@@ -142,6 +151,13 @@ pub(all) enum TreeLayout {
 } derive(Eq)
 pub fn TreeLayout::parse(String) -> Self
 pub fn TreeLayout::wire(Self) -> String
+
+pub(all) struct WatchedPaths {
+  owner : @interop.ConversationKey
+  workspace : @pathx.Absolute?
+  files : Array[@pathx.Relative]
+  directories : Array[@pathx.Relative]
+} derive(Eq)
 
 // Type aliases
 

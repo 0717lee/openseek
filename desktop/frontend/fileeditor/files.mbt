@@ -294,17 +294,16 @@ fn decode_file_stats(text : String) -> Array[FileStat]? {
 
 ///|
 /// Point the host's workspace watcher at `session`'s workspace, or park it
-/// (`fs.unwatch`) when the panel no longer needs one. Fire-and-forget:
-/// there is no reply worth folding, and a failure just means no live
-/// updates until the next reconciliation re-sends.
+/// (`fs.unwatch`) when the panel no longer needs one. Parking is best-effort,
+/// but a rejected watch is surfaced because it means live updates are off.
 fn watch_workspace(
+  dispatch : @cmd.Emit[Msg],
   channel~ : @interop.ChannelId,
-  session : String,
-  workspace~ : @pathx.Absolute?,
+  watched : WatchedPaths?,
 ) -> @cmd.Cmd {
-  @cmd.custom_cmd(_scheduler => {
+  @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
-      if session.is_empty() {
+      if watched is None {
         let _ : @js.Value = @interop.bridge_request_in_order(
           channel,
           "fs.unwatch",
@@ -312,16 +311,28 @@ fn watch_workspace(
         ) catch {
           _ => return
         }
-      } else {
+      } else if watched is Some(watched) {
         let payload = @js.Object::new()
-        payload["session"] = session
-        @interop.set_workspace(payload, workspace)
+        payload["session"] = watched.owner.session
+        payload["files"] = watched.files.map(path => path.0)
+        payload["directories"] = watched.directories.map(path => path.0)
+        @interop.set_workspace(payload, watched.workspace)
         let _ : @js.Value = @interop.bridge_request_in_order(
           channel,
           "fs.watch",
           payload.to_value(),
         ) catch {
-          _ => return
+          error => {
+            scheduler.add(
+              dispatch(
+                FileWatchFailed(
+                  owner=watched.owner,
+                  message="File watching failed: \{@interop.bridge_error_text(error)}",
+                ),
+              ),
+            )
+            return
+          }
         }
       }
     })
