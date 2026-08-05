@@ -30,19 +30,28 @@ pub async fn run_terminal_pump(
 /// POSIX closes the PTY slave when the child dies, which wakes the reader and
 /// lets the session drain before its deferred `Pty::close` runs.
 #cfg(not(platform="windows"))
-async fn TerminalSession::close_when_requested(self : TerminalSession) -> Unit {
+async fn TerminalSession::close_when_requested(
+  self : TerminalSession,
+  _output_task : @async.Task[Unit],
+) -> Unit {
   self.close_requested.get()
   let cancel = @process.hard_cancel()
   cancel(self.pty.pid())
 }
 
 ///|
-/// Windows ConPTY keeps its output pipe open after the child dies. Close the
-/// whole PTY so the pending reader is released as well as the child process.
+/// Windows ConPTY keeps its output pipe open after the child dies. Cancelling
+/// the task that submitted the synchronous pipe read lets async call
+/// `CancelSynchronousIo`; closing the HANDLE from this different task does not
+/// wake that read reliably.
 #cfg(platform="windows")
-async fn TerminalSession::close_when_requested(self : TerminalSession) -> Unit {
+async fn TerminalSession::close_when_requested(
+  self : TerminalSession,
+  output_task : @async.Task[Unit],
+) -> Unit {
   self.close_requested.get()
-  self.pty.close()
+  self.pty.cancel()
+  output_task.cancel()
 }
 
 ///|
@@ -105,9 +114,6 @@ async fn run_session(
       state.sessions.remove(request.id)
       pty.close()
     }
-    // The session owns the platform-specific difference between killing a
-    // POSIX child and closing a Windows ConPTY to wake its output reader.
-    group.spawn_bg(no_wait=true, () => session.close_when_requested())
     request.reply.put(Ok(()))
     @xlog.debug() <?
       {
@@ -118,32 +124,40 @@ async fn run_session(
         // The directory passed directly to the platform process spawn.
         "cwd": request.cwd,
       }
-    let reader = pty.reader()
-    let buf : FixedArray[Byte] = FixedArray::make(ReadChunkBytes, b'\x00')
-    for ;; {
-      // A closed master reports the child's exit as EIO on macOS rather
-      // than a clean EOF; both end the session the same way.
-      let n = reader.read(buf) catch {
-        // On Windows, `close_terminal` closes the PTY to wake this read, which
-        // the async stream reports as cancellation. It is normal EOF for this
-        // session, not cancellation of the task that owns it.
-        _ if session.closing => 0
-        error if @async.is_being_cancelled() => raise error
-        _ => 0
+    let output_task = group.spawn(allow_failure=true, () => {
+      let reader = pty.reader()
+      let buf : FixedArray[Byte] = FixedArray::make(ReadChunkBytes, b'\x00')
+      for ;; {
+        // A closed master reports the child's exit as EIO on macOS rather
+        // than a clean EOF; both end the session the same way.
+        let n = reader.read(buf) catch {
+          // Cancelling the Windows output task aborts its synchronous pipe
+          // read. Treat that requested shutdown as EOF for this session.
+          _ if session.closing => 0
+          error if @async.is_being_cancelled() => raise error
+          _ => 0
+        }
+        if n <= 0 {
+          break
+        }
+        let sequence = session.next_output_sequence
+        session.next_output_sequence = sequence + 1
+        // Record the debt before emitting: the webview can acknowledge as soon
+        // as it receives the event, including before this task resumes.
+        session.unacked_chunks[sequence] = n
+        session.unacked += n
+        emit(Output(id=request.id, sequence~, data=Bytes::from_array(buf[:n])))
+        while session.unacked >= HighWatermark && !session.closing {
+          session.cond.wait()
+        }
       }
-      if n <= 0 {
-        break
-      }
-      let sequence = session.next_output_sequence
-      session.next_output_sequence = sequence + 1
-      // Record the debt before emitting: the webview can acknowledge as soon
-      // as it receives the event, including before this task resumes.
-      session.unacked_chunks[sequence] = n
-      session.unacked += n
-      emit(Output(id=request.id, sequence~, data=Bytes::from_array(buf[:n])))
-      while session.unacked >= HighWatermark && !session.closing {
-        session.cond.wait()
-      }
+    })
+    // The session owns the platform-specific difference between waiting for a
+    // POSIX PTY EOF and cancelling a Windows synchronous pipe read.
+    group.spawn_bg(no_wait=true, () => session.close_when_requested(output_task))
+    output_task.wait() catch {
+      _ if session.closing => ()
+      error => raise error
     }
     let code = pty.wait() catch {
       error if @async.is_being_cancelled() => raise error
