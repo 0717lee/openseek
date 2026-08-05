@@ -28,21 +28,20 @@ if [[ -z "$version" ]]; then
   exit 1
 fi
 
-# The artifact publishes under the release naming convention: the
-# `<platform>` infix is the manifest `platforms` key clients look
-# themselves up by. The name has no spaces, so it passes the server's URL
-# path guard and the dist zip uploads under its own basename.
-release_name="SeekMoon-macos-arm64.zip"
-default_artifact="$desktop_dir/dist/$release_name"
+# The default remains the ZIP consumed by the in-app updater. An explicit
+# artifact, such as the DMG offered for manual installation, uploads under
+# its own basename so both files can coexist under the same version.
+default_artifact="$desktop_dir/dist/SeekMoon-macos-arm64.zip"
 
 case "${1:-}" in
   upload)
     artifact="${2:-$default_artifact}"
     if [[ ! -f "$artifact" ]]; then
       echo "artifact not found: $artifact" >&2
-      echo "build it first: moon run ./package/macos -- --release --target zip --sign '...'" >&2
+      echo "build it first: moon run ./package/macos -- --release --target dmg --target zip --sign '...'" >&2
       exit 1
     fi
+    release_name="$(basename "$artifact")"
     url="$origin/desktop/releases/v$version/$release_name"
     echo "uploading $artifact"
     echo "       to $url"

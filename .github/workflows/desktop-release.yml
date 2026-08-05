@@ -152,6 +152,8 @@ jobs:
           OPENSEEK_DEPLOY_TOKEN: ${{ secrets.OPENSEEK_DEPLOY_TOKEN }}
         run: |
           desktop/scripts/publish-release.sh upload
+          desktop/scripts/publish-release.sh upload \
+            desktop/dist/SeekMoon-macos-arm64.dmg
           desktop/scripts/publish-release.sh publish "v$RELEASE_VERSION"
 
       - name: Verify ${{ inputs.channel }} manifest
@@ -162,22 +164,33 @@ jobs:
           archive="desktop/dist/SeekMoon-macos-arm64.zip"
           archive_sha256="$(shasum -a 256 "$archive" | cut -d' ' -f1)"
           archive_url="$OPENSEEK_API_ORIGIN/desktop/releases/v$RELEASE_VERSION/SeekMoon-macos-arm64.zip"
+          dmg="desktop/dist/SeekMoon-macos-arm64.dmg"
+          dmg_sha256="$(shasum -a 256 "$dmg" | cut -d' ' -f1)"
+          dmg_url="$OPENSEEK_API_ORIGIN/desktop/releases/v$RELEASE_VERSION/SeekMoon-macos-arm64.dmg"
 
+          # The updater installs from the bare platform key; the `-dmg`
+          # entry is the manual installer the web console links to.
           jq -e \
             --arg version "$RELEASE_VERSION" \
             --arg url "$archive_url" \
             --arg sha256 "$archive_sha256" \
+            --arg dmg_url "$dmg_url" \
+            --arg dmg_sha256 "$dmg_sha256" \
             '.version == $version and
               .platforms["macos-arm64"].url == $url and
-              .platforms["macos-arm64"].sha256 == $sha256' \
+              .platforms["macos-arm64"].sha256 == $sha256 and
+              .platforms["macos-arm64-dmg"].url == $dmg_url and
+              .platforms["macos-arm64-dmg"].sha256 == $dmg_sha256' \
             <<< "$manifest"
 
           {
             echo "## Desktop $RELEASE_CHANNEL release"
             echo
             echo "- Version: \`$RELEASE_VERSION\`"
-            echo "- Artifact: $archive_url"
-            echo "- SHA-256: \`$archive_sha256\`"
+            echo "- Updater ZIP: $archive_url"
+            echo "- ZIP SHA-256: \`$archive_sha256\`"
+            echo "- Installer DMG: $dmg_url"
+            echo "- DMG SHA-256: \`$dmg_sha256\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Remove signing keychain
