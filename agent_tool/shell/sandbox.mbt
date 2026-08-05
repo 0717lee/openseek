@@ -230,7 +230,9 @@ fn trusted_command_class(
 /// Classify a `git` command for the trusted-source-write path. Trust is granted
 /// only to the recoverable worktree subcommands above plus the recoverable
 /// `git worktree` verbs (`add`/non-force `remove`/`prune`, see
-/// `@git_policy.worktree_args_are_recoverable`), and only when the
+/// `@git_policy.worktree_args_are_recoverable`) and the recoverable `rebase`
+/// forms (an exact-token allowlist, see
+/// `@git_policy.rebase_args_are_recoverable`), and only when the
 /// invocation cannot reconfigure git to write from somewhere other than the
 /// workspace repo's object store: a custom environment (`GIT_CONFIG_*`,
 /// `env ... git`) or a relocating global option could repoint config (enabling a
@@ -253,6 +255,13 @@ fn trusted_git_command_class(
     }
   }
   if @git_policy.subcommand_writes_from_object_store(invocation.subcommand) {
+    TrustedCommandWrite
+  } else if invocation.subcommand == "rebase" &&
+    @git_policy.rebase_args_are_recoverable(
+      command.argv,
+      invocation.subcommand_index + 1,
+      command.argv.length(),
+    ) {
     TrustedCommandWrite
   } else if invocation.subcommand == "worktree" &&
     @git_policy.worktree_args_are_recoverable(
@@ -3082,7 +3091,7 @@ fn git_must_preblock(
   has_custom_env &&
   (match @git_policy.parse(argv, arg_start) {
     Some(invocation) =>
-      @git_policy.subcommand_writes_from_object_store(invocation.subcommand)
+      @git_policy.subcommand_is_object_store_writer(invocation.subcommand)
     None => false
   })
 }

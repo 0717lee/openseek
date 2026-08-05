@@ -570,7 +570,9 @@ async test "sandbox preblocks common source-writing commands" {
         "git clean -e -n -fd", "git -c filter.f.smudge=cmd checkout -- .", "git -C /tmp/x checkout -- .",
         "git checkout -f other", "git restore --source=HEAD~1 -- main.mbt", "GIT_DIR=/tmp/x git checkout -- main.mbt",
         "env GIT_WORK_TREE=. git restore main.mbt", "git checkout HEAD~1 -- main.mbt",
-        "git restore -s HEAD~1 main.mbt",
+        "git restore -s HEAD~1 main.mbt", "git rebase -i main", "git rebase --exec ls main",
+        "git rebase -s ours main", "git rebase --edit-todo", "git -c sequence.editor=x rebase --continue",
+        "GIT_DIR=/tmp/x git rebase main",
       ] {
       assert_true(
         is_some_path(
@@ -611,7 +613,8 @@ async test "sandbox preblocks common source-writing commands" {
         "git checkout -- .", "git checkout feature/foo", "git switch feature/foo",
         "git restore main.mbt", "git reset --hard", "git rm main.mbt", "git stash",
         "git clean -fdn", "git status", "git apply --check patch.diff", "git apply --stat patch.diff",
-        "git worktree add ../wt", "git worktree remove ../wt",
+        "git worktree add ../wt", "git worktree remove ../wt", "git rebase main",
+        "git rebase --continue", "git rebase --onto main feature~3 feature", "git rebase --rebase-merges main",
       ] {
       assert_true(
         tree_target(recoverable_git, real_root, Some(real_root)) is None,
@@ -1397,6 +1400,38 @@ test "sandbox trusts recoverable git, sandboxes patch and reconfiguring git" {
       "git worktree remove --force ../wt", "git worktree remove -f ../wt", "git worktree remove --fo ../wt",
       "git worktree list", "git worktree move ../wt ../wt2", "git worktree", "git -C /tmp/x worktree add ../wt",
       "GIT_DIR=/tmp/x git worktree add ../wt",
+    ] {
+    assert_true(mode_for(cmd) is SourceReadOnly)
+  }
+}
+
+///|
+test "sandbox trusts restricted rebase forms, demotes the rest" {
+  // The recoverable rebase forms are trusted source writers: replayed content
+  // materializes from the object store, the pre-rebase tip stays in
+  // ORIG_HEAD/the reflog, and git refuses to overwrite untracked files during
+  // replay. Conflict resolution still flows through `edit` + sandboxed
+  // `git add`, so this opens no source-editing channel outside the tools.
+  for
+    cmd in [
+      "git rebase", "git rebase main", "git rebase origin/main feature", "git rebase --onto main feature~3 feature",
+      "git rebase --keep-base main", "git rebase --autostash main", "git rebase --fork-point main",
+      "git rebase --continue", "git rebase --abort", "git rebase --skip", "git rebase --quit",
+      "cd pkg && git rebase --continue",
+    ] {
+    assert_true(mode_for(cmd) is TrustedSourceWrite)
+  }
+  // Anything not an exact known-safe token fails closed to the sandbox (git
+  // accepts unambiguous long-option abbreviations, and rebase's surface
+  // includes command runners), as do reconfigured or custom-environment
+  // invocations. The command-running forms are additionally pre-blocked
+  // (`should_preblock`) as the cross-platform floor.
+  for
+    cmd in [
+      "git rebase --rebase-merges main", "git rebase --root", "git rebase --cont",
+      "git rebase -i main", "git rebase --exec ls main", "git rebase -s ours main",
+      "git -c sequence.editor=x rebase main", "git -C /tmp/x rebase --abort", "FOO=bar git rebase main",
+      "env GIT_DIR=/tmp/x git rebase --continue",
     ] {
     assert_true(mode_for(cmd) is SourceReadOnly)
   }
