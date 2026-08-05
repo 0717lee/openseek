@@ -54,6 +54,12 @@ fn package_command() -> @argparse.Command {
   Command(
     "package/windows",
     about="Build the Windows app bundle, portable zip, and NSIS installer.",
+    flags=[
+      FlagArg(
+        "release",
+        about="Build optimized release artifacts instead of debug artifacts.",
+      ),
+    ],
     options=[
       OptionArg(
         "target",
@@ -65,8 +71,9 @@ fn package_command() -> @argparse.Command {
 }
 
 ///|
-fn ArtifactPlan::parse_args(argv? : ArrayView[String]) -> ArtifactPlan raise {
-  let matches = package_command().parse(argv?)
+fn ArtifactPlan::from_matches(
+  matches : @argparse.Matches,
+) -> ArtifactPlan raise {
   match matches.values.get("target") {
     Some(values) => ArtifactPlan::parse(values)
     None => ArtifactPlan::parse([])
@@ -91,7 +98,10 @@ async fn run_powershell(ws : @packaging.Workspace, script : String) -> Unit {
 ///|
 /// Build everything the bundle needs. CEF replaces WebView2, so no WebView2
 /// SDK headers are fetched.
-async fn build_outputs(ws : @packaging.Workspace) -> @xterm_assets.Assets {
+async fn build_outputs(
+  ws : @packaging.Workspace,
+  release~ : Bool,
+) -> @xterm_assets.Assets {
   // Assemble the CEF runtime first so the native host links against it.
   @packaging.assemble_cef_runtime(ws, @packaging.windows_proton_cli())
   // Then replace the assembled dist's proton library with one built from the
@@ -103,13 +113,13 @@ async fn build_outputs(ws : @packaging.Workspace) -> @xterm_assets.Assets {
     ("bin/Release/cef_process.exe", "bin/cef_process.exe"),
     ("lib/Release/proton.lib", "lib/proton.lib"),
   ])
-  @packaging.build_frontend_bundle(ws)
+  @packaging.build_frontend_bundle(ws, release~)
   let terminal_assets = @xterm_assets.build(
     ws,
     @xterm_assets.windows_x64_target(),
   )
-  @packaging.build_native_host(ws, extra_args=["--warn-list", "-20"])
-  @packaging.build_engine(ws)
+  @packaging.build_native_host(ws, release~, extra_args=["--warn-list", "-20"])
+  @packaging.build_engine(ws, release~)
   terminal_assets
 }
 
@@ -125,9 +135,10 @@ async fn reset_bundle_dirs(ws : @packaging.Workspace) -> Unit {
 async fn copy_bundle_files(
   ws : @packaging.Workspace,
   terminal_assets : @xterm_assets.Assets,
+  release~ : Bool,
 ) -> Unit {
-  let native_binary = ws.native_binary()
-  let engine_binary = ws.engine_binary()
+  let native_binary = ws.native_binary(release~)
+  let engine_binary = ws.engine_binary(release~)
   let bundled_engine = BundleDir + "/openseek.exe"
   if !@asyncfs.exists(native_binary) {
     raise @packaging.PackageError("native binary not found: \{native_binary}")
@@ -270,16 +281,18 @@ async fn build_installer(ws : @packaging.Workspace) -> Unit {
 ///|
 async fn main {
   // Parse first: a mistyped target must fail before the build, not after it.
-  let artifacts = ArtifactPlan::parse_args()
+  let matches = package_command().parse()
+  let artifacts = ArtifactPlan::from_matches(matches)
+  let release = matches.flags.get("release").unwrap_or(false)
   let ws = @packaging.locate_workspace()
   @packaging.ensure_cmake(ws)
   if artifacts.installer {
     ensure_makensis(ws)
   }
-  let terminal_assets = build_outputs(ws)
-  println("built openseek engine: \{ws.engine_binary()}")
+  let terminal_assets = build_outputs(ws, release~)
+  println("built openseek engine: \{ws.engine_binary(release~)}")
   reset_bundle_dirs(ws)
-  copy_bundle_files(ws, terminal_assets)
+  copy_bundle_files(ws, terminal_assets, release~)
   if artifacts.zip {
     zip_bundle(ws)
     println("generated \{ws.at(ZipPath)}")
@@ -293,12 +306,24 @@ async fn main {
 
 ///|
 test "windows package args default to zip and installer" {
-  assert_eq(ArtifactPlan::parse_args(argv=[]), { zip: true, installer: true })
+  let matches = package_command().parse(argv=[])
+  let artifacts = ArtifactPlan::from_matches(matches)
+  assert_eq(artifacts, { zip: true, installer: true })
+  assert_false(matches.flags.get("release").unwrap_or(false))
+}
+
+///|
+test "windows package args accept release" {
+  let matches = package_command().parse(argv=["--release", "--target", "app"])
+  let artifacts = ArtifactPlan::from_matches(matches)
+  assert_eq(artifacts, { zip: false, installer: false })
+  assert_true(matches.flags.get("release").unwrap_or(false))
 }
 
 ///|
 test "windows package target app skips distribution archives" {
-  assert_eq(ArtifactPlan::parse_args(argv=["--target", "app"]), {
+  let matches = package_command().parse(argv=["--target", "app"])
+  assert_eq(ArtifactPlan::from_matches(matches), {
     zip: false,
     installer: false,
   })
@@ -306,33 +331,28 @@ test "windows package target app skips distribution archives" {
 
 ///|
 test "windows package target zip skips installer" {
-  assert_eq(ArtifactPlan::parse_args(argv=["--target", "zip"]), {
-    zip: true,
-    installer: false,
-  })
+  let matches = package_command().parse(argv=["--target", "zip"])
+  assert_eq(ArtifactPlan::from_matches(matches), { zip: true, installer: false })
 }
 
 ///|
 test "windows package target installer skips zip" {
-  assert_eq(ArtifactPlan::parse_args(argv=["--target", "installer"]), {
-    zip: false,
-    installer: true,
-  })
+  let matches = package_command().parse(argv=["--target", "installer"])
+  assert_eq(ArtifactPlan::from_matches(matches), { zip: false, installer: true })
 }
 
 ///|
 test "windows package targets can be repeated" {
-  assert_eq(
-    ArtifactPlan::parse_args(argv=[
-      "--target", "app", "--target", "zip", "--target", "installer",
-    ]),
-    { zip: true, installer: true },
-  )
+  let matches = package_command().parse(argv=[
+    "--target", "app", "--target", "zip", "--target", "installer",
+  ])
+  assert_eq(ArtifactPlan::from_matches(matches), { zip: true, installer: true })
 }
 
 ///|
 test "windows package rejects an unsupported target" {
-  try ArtifactPlan::parse_args(argv=["--target", "msi"]) catch {
+  let matches = package_command().parse(argv=["--target", "msi"])
+  try ArtifactPlan::from_matches(matches) catch {
     err =>
       assert_true(
         err
@@ -348,7 +368,7 @@ test "windows package rejects an unsupported target" {
 
 ///|
 test "windows package args reject removed zip-only flag" {
-  try ArtifactPlan::parse_args(argv=["--zip-only"]) catch {
+  try package_command().parse(argv=["--zip-only"]) catch {
     err =>
       assert_true(
         err.to_string().contains("unexpected argument '--zip-only' found"),

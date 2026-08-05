@@ -3,8 +3,8 @@
 const BrowserDistDir : String = "dist/browser"
 
 ///|
-/// The release JS bundle emitted by the root MoonBit workspace.
-const BrowserBundleArtifact : String = "_build/js/release/build/openseek_desktop/frontend/browser/browser.js"
+/// The browser JS bundle's path below its selected debug/release directory.
+const BrowserBundleArtifact : String = "build/openseek_desktop/frontend/browser/browser.js"
 
 ///|
 /// Build and stage every browser asset behind one MoonBit packaging command.
@@ -13,12 +13,25 @@ const BrowserBundleArtifact : String = "_build/js/release/build/openseek_desktop
 /// packager. Production runs inside a Linux x64 Docker build; the other
 /// selections keep the same command usable by the supported desktop hosts.
 async fn main {
+  let matches = @argparse.Command(
+    "package/browser",
+    about="Build and stage the browser frontend assets.",
+    flags=[
+      FlagArg(
+        "release",
+        about="Build optimized release artifacts instead of debug artifacts.",
+      ),
+    ],
+  ).parse()
+  let release = matches.flags.get("release").unwrap_or(false)
+  let release_args = if release { ["--release"] } else { [] }
+  let mode = if release { "release" } else { "debug" }
   let ws = @packaging.locate_workspace()
   @packaging.remove_path_if_exists(ws.at(BrowserDistDir))
   @packaging.ensure_dir(ws.at(BrowserDistDir))
   @packaging.run_checked(
     "moon",
-    ["build", "frontend/browser", "--target", "js", "--release"],
+    ["build", "frontend/browser", "--target", "js", ..release_args],
     dir=ws.dir(),
   )
   @packaging.build_viewer_stylesheet(ws)
@@ -39,7 +52,7 @@ async fn main {
     ws.at(BrowserDistDir + "/index.html"),
   )
   @packaging.copy_file(
-    ws.repo_at(BrowserBundleArtifact),
+    ws.repo_at("_build/js/\{mode}/\{BrowserBundleArtifact}"),
     ws.at(BrowserDistDir + "/browser.js"),
   )
   @packaging.copy_file(ws.at("app.css"), ws.at(BrowserDistDir + "/app.css"))

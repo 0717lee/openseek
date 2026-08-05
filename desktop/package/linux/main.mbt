@@ -19,7 +19,10 @@ const AppImageToolCache : String = "dist/tools/appimagetool"
 const AppImageToolUrl : String = "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage"
 
 ///|
-async fn build_outputs(ws : @packaging.Workspace) -> @xterm_assets.Assets {
+async fn build_outputs(
+  ws : @packaging.Workspace,
+  release~ : Bool,
+) -> @xterm_assets.Assets {
   // Assemble the CEF runtime first so the native host links against it.
   @packaging.assemble_cef_runtime(ws, @packaging.posix_proton_cli())
   // Then replace the assembled dist's libproton with one built from the
@@ -29,13 +32,13 @@ async fn build_outputs(ws : @packaging.Workspace) -> @xterm_assets.Assets {
     ("lib/libproton.so", "lib/libproton.so"),
     ("bin/cef_process", "bin/cef_process"),
   ])
-  @packaging.build_frontend_bundle(ws)
+  @packaging.build_frontend_bundle(ws, release~)
   let terminal_assets = @xterm_assets.build(
     ws,
     @xterm_assets.linux_x64_target(),
   )
-  @packaging.build_native_host(ws)
-  @packaging.build_engine(ws)
+  @packaging.build_native_host(ws, release~)
+  @packaging.build_engine(ws, release~)
   terminal_assets
 }
 
@@ -52,9 +55,10 @@ async fn reset_bundle_dirs(ws : @packaging.Workspace) -> Unit {
 async fn copy_bundle_files(
   ws : @packaging.Workspace,
   terminal_assets : @xterm_assets.Assets,
+  release~ : Bool,
 ) -> Unit {
-  let native_binary = ws.native_binary()
-  let engine_binary = ws.engine_binary()
+  let native_binary = ws.native_binary(release~)
+  let engine_binary = ws.engine_binary(release~)
   if !@asyncfs.exists(native_binary) {
     raise @packaging.PackageError("native binary not found: \{native_binary}")
   }
@@ -216,12 +220,23 @@ async fn build_appimage(ws : @packaging.Workspace, tool : String) -> Unit {
 
 ///|
 async fn main {
+  let matches = @argparse.Command(
+    "package/linux",
+    about="Build the Linux AppImage.",
+    flags=[
+      FlagArg(
+        "release",
+        about="Build optimized release artifacts instead of debug artifacts.",
+      ),
+    ],
+  ).parse()
+  let release = matches.flags.get("release").unwrap_or(false)
   let ws = @packaging.locate_workspace()
   @packaging.ensure_cmake(ws)
-  let terminal_assets = build_outputs(ws)
-  println("built openseek engine: \{ws.engine_binary()}")
+  let terminal_assets = build_outputs(ws, release~)
+  println("built openseek engine: \{ws.engine_binary(release~)}")
   reset_bundle_dirs(ws)
-  copy_bundle_files(ws, terminal_assets)
+  copy_bundle_files(ws, terminal_assets, release~)
   write_bundle_metadata(ws)
   let tool = ensure_appimagetool(ws)
   build_appimage(ws, tool)

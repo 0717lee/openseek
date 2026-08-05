@@ -150,7 +150,10 @@ fn CefHelperVariant::executable_path(self : CefHelperVariant) -> String {
 }
 
 ///|
-async fn build_outputs(ws : @packaging.Workspace) -> @xterm_assets.Assets {
+async fn build_outputs(
+  ws : @packaging.Workspace,
+  release~ : Bool,
+) -> @xterm_assets.Assets {
   let env = { "MACOSX_DEPLOYMENT_TARGET": MinMacOSVersion }
   let host_env = {
     "MACOSX_DEPLOYMENT_TARGET": MinMacOSVersion,
@@ -178,15 +181,20 @@ async fn build_outputs(ws : @packaging.Workspace) -> @xterm_assets.Assets {
     ],
     extra_env=env,
   )
-  @packaging.build_frontend_bundle(ws)
+  @packaging.build_frontend_bundle(ws, release~)
   let terminal_assets = @xterm_assets.build(
     ws,
     @xterm_assets.macos_arm64_target(),
   )
   // Build the host without mimalloc: its static malloc/free override crashes
   // against CEF's PartitionAlloc default zone on the first `@fs.realpath`.
-  @packaging.build_native_host(ws, extra_env=host_env, disable_mimalloc=true)
-  @packaging.build_engine(ws, extra_env=env)
+  @packaging.build_native_host(
+    ws,
+    release~,
+    extra_env=host_env,
+    disable_mimalloc=true,
+  )
+  @packaging.build_engine(ws, release~, extra_env=env)
   terminal_assets
 }
 
@@ -208,9 +216,10 @@ async fn reset_bundle_dirs(ws : @packaging.Workspace) -> Unit {
 async fn copy_bundle_files(
   ws : @packaging.Workspace,
   terminal_assets : @xterm_assets.Assets,
+  release~ : Bool,
 ) -> Unit {
-  let native_binary = ws.native_binary()
-  let engine_binary = ws.engine_binary()
+  let native_binary = ws.native_binary(release~)
+  let engine_binary = ws.engine_binary(release~)
   if !@asyncfs.exists(native_binary) {
     raise @packaging.PackageError("native binary not found: \{native_binary}")
   }
@@ -653,6 +662,7 @@ priv struct SignConfig {
 priv struct PackageOptions {
   artifacts : ArtifactPlan
   sign : SignConfig
+  release : Bool
 }
 
 ///|
@@ -660,6 +670,12 @@ fn package_command() -> @argparse.Command {
   Command(
     "package/macos",
     about="Build the macOS app bundle and optional distribution archives.",
+    flags=[
+      FlagArg(
+        "release",
+        about="Build optimized release artifacts instead of debug artifacts.",
+      ),
+    ],
     options=[
       OptionArg(
         "target",
@@ -710,7 +726,7 @@ fn parse_package_options(argv? : ArrayView[String]) -> PackageOptions raise {
   if sign.notary_profile is Some(_) && !artifacts.dmg {
     raise @packaging.PackageError("--notarize requires --target dmg")
   }
-  { artifacts, sign }
+  { artifacts, sign, release: matches.flags.get("release").unwrap_or(false) }
 }
 
 ///|
@@ -901,10 +917,10 @@ async fn main {
   let options = parse_package_options()
   let ws = @packaging.locate_workspace()
   @packaging.ensure_cmake(ws)
-  let terminal_assets = build_outputs(ws)
-  println("built openseek engine: \{ws.engine_binary()}")
+  let terminal_assets = build_outputs(ws, release=options.release)
+  println("built openseek engine: \{ws.engine_binary(release=options.release)}")
   reset_bundle_dirs(ws)
-  copy_bundle_files(ws, terminal_assets)
+  copy_bundle_files(ws, terminal_assets, release=options.release)
   write_bundle_metadata(ws)
   sign_and_package(ws, options.sign, options.artifacts)
   println("generated \{ws.at(AppPath)}")
@@ -925,6 +941,7 @@ test "macos package args default to local app-only signing" {
   assert_true(options.sign.identity is None)
   assert_true(options.sign.notary_profile is None)
   assert_eq(options.artifacts, { dmg: false, zip: false })
+  assert_false(options.release)
   assert_false(options.artifacts.requires_ad_hoc_bundle_signature())
 }
 
@@ -993,13 +1010,14 @@ test "macos host executable rpath points at bundled proton runtime" {
 ///|
 test "macos package args parse signing and notarization" {
   let options = parse_package_options(argv=[
-    "--target", "dmg", "--sign", "Developer ID Application: Example", "--notarize",
-    "notary",
+    "--release", "--target", "dmg", "--sign", "Developer ID Application: Example",
+    "--notarize", "notary",
   ])
   assert_true(
     options.sign.identity is Some("Developer ID Application: Example"),
   )
   assert_true(options.sign.notary_profile is Some("notary"))
+  assert_true(options.release)
 }
 
 ///|

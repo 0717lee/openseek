@@ -70,7 +70,7 @@ jobs:
       # extractable credential. A stamped bundle requires a manual build
       # with the secret in the environment.
       - name: Build the AppImage
-        run: moon -C desktop run --target native package/linux
+        run: moon -C desktop run --target native package/linux -- --release
 
       - name: Upload AppImage artifact
         uses: actions/upload-artifact@v4
@@ -126,7 +126,7 @@ jobs:
       # end-user distribution.
       # Unstamped — no OPENSEEK_CLIENT_TOKEN in CI; see the Linux job's note.
       - name: Build the macOS artifacts
-        run: moon -C desktop run --target native package/macos -- --target dmg --target zip
+        run: moon -C desktop run --target native package/macos -- --release --target dmg --target zip
 
       - name: Upload macOS artifacts
         uses: actions/upload-artifact@v4
@@ -214,12 +214,12 @@ jobs:
       - name: Build the Windows ZIP
         if: github.event_name == 'pull_request'
         shell: pwsh
-        run: moon -C desktop run --target native package/windows -- --target zip
+        run: moon -C desktop run --target native package/windows -- --release --target zip
 
       - name: Build the Windows app bundle and installer
         if: github.event_name != 'pull_request'
         shell: pwsh
-        run: moon -C desktop run --target native package/windows
+        run: moon -C desktop run --target native package/windows -- --release
 
       - name: Upload Windows app artifact
         uses: actions/upload-artifact@v4
