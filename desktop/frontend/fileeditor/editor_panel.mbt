@@ -271,6 +271,14 @@ fn show_file_in_viewer(
         viewer_state.view_states.get(rel.0) is Some(saved) {
         viewer.restore_view_state(Some(saved))
       }
+      // Match the reference workbench's host policy: ordinary `.mbt` files
+      // open as a top-level outline. `set_model` computes folding ranges
+      // synchronously, so this is stable initialization state rather than a
+      // delayed render effect. Keeping it in the fresh-model branch leaves
+      // folding interactions on the current model entirely user-controlled.
+      if should_auto_fold_top_level(text_model) {
+        viewer.fold_top_level()
+      }
     }
     // Gate incoming diagnostics to the file now on screen (a notice document,
     // with no absolute path, takes no diagnostics). The relative name rides
@@ -324,6 +332,16 @@ fn show_file_in_viewer(
       viewer.reveal_range_in_center(range)
     }
   })
+}
+
+///|
+/// Whether Desktop applies the reference workbench's initial outline policy.
+///
+/// Only ordinary MoonBit `.mbt` source files opt in. Interfaces, literate
+/// documents, extensionless sources, and other languages stay expanded.
+fn should_auto_fold_top_level(text_model : @model.TextModel) -> Bool {
+  text_model.get_language_id() == "moonbit" &&
+  text_model.display_name.has_suffix(".mbt")
 }
 
 ///|
