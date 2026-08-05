@@ -931,7 +931,7 @@ async fn main {
   if options.artifacts.zip {
     println("generated \{ws.at(ZipPath)}")
     println(
-      "release with scripts/publish-release.sh — it uploads the zip to openseek-api and publishes the version",
+      "release with scripts/publish-release.sh — upload each distribution artifact before publishing the version",
     )
   }
 }
