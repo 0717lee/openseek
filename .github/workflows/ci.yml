@@ -87,8 +87,10 @@ jobs:
         if: matrix.target == 'native'
         uses: actions/cache@v4
         with:
-          path: desktop/lepus/.proton/cache
-          key: cef-lepus-linux-x64-${{ hashFiles('desktop/lepus/cli/cef/cef_platform.mbt') }}
+          # Proton shares downloaded CEF distributions between projects here,
+          # then copies the selected version into the project-local runtime.
+          path: ~/.proton/cache/cef
+          key: cef-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('desktop/lepus/cli/cef/cef_platform.mbt') }}
 
       - name: Assemble Proton CEF runtime
         if: matrix.target == 'native'

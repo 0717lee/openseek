@@ -31,6 +31,13 @@ jobs:
       - name: Check out the Proton submodule
         run: git submodule update --init desktop/lepus
 
+      # `cef setup` reads and populates Proton's shared user-level cache.
+      - name: Cache CEF distribution
+        uses: actions/cache@v4
+        with:
+          path: ~/.proton/cache/cef
+          key: cef-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('desktop/lepus/cli/cef/cef_platform.mbt') }}
+
       - name: Set up MoonBit (nightly)
         run: |
           curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash -s -- nightly
@@ -91,6 +98,13 @@ jobs:
       - name: Check out the Proton submodule
         run: git submodule update --init desktop/lepus
 
+      # `cef setup` reads and populates Proton's shared user-level cache.
+      - name: Cache CEF distribution
+        uses: actions/cache@v4
+        with:
+          path: ~/.proton/cache/cef
+          key: cef-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('desktop/lepus/cli/cef/cef_platform.mbt') }}
+
       - name: Set up MoonBit (nightly)
         run: |
           curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash -s -- nightly
@@ -148,6 +162,13 @@ jobs:
 
       - name: Check out the Proton submodule
         run: git submodule update --init desktop/lepus
+
+      # `cef setup` reads and populates Proton's shared user-level cache.
+      - name: Cache CEF distribution
+        uses: actions/cache@v4
+        with:
+          path: ~/.proton/cache/cef
+          key: cef-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('desktop/lepus/cli/cef/cef_platform.mbt') }}
 
       - name: Set up MoonBit (nightly)
         shell: pwsh
