@@ -28,8 +28,8 @@ jobs:
         include:
           # Warnings are denied on stable only. Nightly adds new warnings ahead
           # of anything we could have fixed, so denying them there turns the job
-          # red for code that is fine and trains us to ignore it; stable is the
-          # gate that keeps warnings out of the tree.
+          # red for code that is fine; stable keeps warnings out of every
+          # workspace member, including editor.
           - moonbit-channel: nightly
             moonbit-version: nightly
             deny-warn: ""
@@ -68,8 +68,8 @@ jobs:
           done
           exit 1
 
-      # The desktop and Proton workspace members are tested together with the
-      # root module (single moon.work), and their native test binaries link
+      # OpenSeek, editor, editor-server, desktop, and Proton are tested together
+      # by the root moon.work. The desktop and Proton native test binaries link
       # libproton.so, which on Linux hard-links libcef.so: without an assembled
       # CEF runtime the executables cannot even load. `cef setup` downloads the
       # pinned CEF distribution (cached below), builds libproton from the
@@ -131,16 +131,20 @@ jobs:
         run: moon fmt --check
 
       - name: Check ${{ matrix.target }} target
-        # `--deny-warn` on stable only; see the matrix note. Keeping the target
-        # explicit also makes each matrix row own one complete check/test pair.
+        # This is the local-dependency integration check: desktop must compile
+        # against the editor member from this checkout. Keeping the target
+        # explicit also makes each matrix row own one complete check/test pair;
+        # stable denies warnings across the complete integrated workspace.
         run: moon check --target ${{ matrix.target }} ${{ matrix.deny-warn }}
 
       - name: Check generated interfaces
         # `moon info` formats abstract types differently across toolchain
         # versions (`type X` on nightly vs `pub struct X { // private fields }`
         # on stable), and the committed `.mbti` are nightly-generated — so this
-        # consistency check is only meaningful on nightly. Ignore blank-only
-        # formatter drift, but still reject content changes and new `.mbti`.
+        # consistency check is only meaningful on nightly. This covers the
+        # editor's public interfaces from the same checkout too. Ignore
+        # blank-only formatter drift, but still reject content changes and new
+        # `.mbti`.
         if: matrix.moonbit-channel == 'nightly' && matrix.target == 'native'
         run: |
           moon info

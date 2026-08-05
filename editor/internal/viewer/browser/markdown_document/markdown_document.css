@@ -1,0 +1,437 @@
+.moonbit-viewer-markdown-document {
+  position: relative;
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  color: var(--vscode-editor-foreground, #1f2328);
+  background: var(--vscode-editor-background, #ffffff);
+  outline: none;
+}
+
+.moonbit-viewer-markdown-document[data-theme="dark"] {
+  color: var(--vscode-editor-foreground, #d4d4d4);
+  background: var(--vscode-editor-background, #1e1e1e);
+}
+
+.moonbit-viewer-markdown-document-viewport {
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+/* The article remains the full-width source and pointer surface. Individual
+ * prose blocks are capped at a reading measure below, while diagrams, code,
+ * and tables retain the full inner width. The measure is flush to the inline
+ * start so prose shares one left edge with the full-width blocks; centering it
+ * would leave text floating in the middle of a wide document. The inline
+ * padding doubles as the fold-toggle gutter, so it stays as wide as one. */
+.moonbit-viewer-markdown-document-article {
+  --markdown-prose-measure: 640px;
+  --markdown-figure-measure: 960px;
+
+  box-sizing: border-box;
+  min-height: 100%;
+  padding: 16px 24px 64px;
+  font-size: 16px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+/* The collapsed TOC is deliberately overlaid so it never shifts scroll or
+ * source geometry. Reserve one compact row in the article when it is present;
+ * explicit first-child margins below must not let the title slip under it. */
+.moonbit-viewer-markdown-document:has(
+    > .moonbit-viewer-markdown-toc[data-toc-visible="true"]
+  )
+  .moonbit-viewer-markdown-document-article {
+  padding-top: 32px;
+}
+
+.moonbit-viewer-markdown-document:has(
+    > .moonbit-viewer-markdown-toc[data-toc-visible="true"]
+  )
+  > .moonbit-viewer-markdown-document-viewport {
+  scroll-padding-top: 32px;
+}
+
+.moonbit-viewer-markdown-document-article
+  > :where(h1, h2, h3, h4, h5, h6, p, ul, ol, dl, hr, details) {
+  max-width: var(--markdown-prose-measure);
+  margin-inline: 0 auto;
+}
+
+/* Figures run wider than the reading measure but not to the window's edge: a
+ * diagram stretched across a maximized workbench stops being scannable beside
+ * the prose it belongs to, and the document loses its right edge entirely.
+ * `:is()` keeps this above the viewport's own `max-width: 100%`. */
+.moonbit-viewer-markdown-document-article
+  > :is(
+    pre,
+    table,
+    img,
+    .moonbit-viewer-markdown-code-block,
+    .moonbit-viewer-markdown-diagram
+  ) {
+  max-width: var(--markdown-figure-measure);
+}
+
+/* Use one predictable vertical cadence instead of the browser's element-by-
+ * element defaults: sections get a clear pause, headings stay attached to
+ * their content, and ordinary blocks retain a comfortable reading beat. */
+.moonbit-viewer-markdown-document-article
+  > :where(
+    p,
+    ul,
+    ol,
+    dl,
+    blockquote,
+    pre,
+    hr,
+    table,
+    details,
+    .moonbit-viewer-markdown-code-block,
+    .moonbit-viewer-markdown-diagram
+  ) {
+  margin-block: 0 16px;
+}
+
+/* Mermaid is mounted inside its code-block wrapper, which owns the outer
+ * cadence. Reset the viewport's shared document/comment margin so rendering
+ * the diagram cannot change the surrounding document rhythm. */
+.moonbit-viewer-markdown-document-article
+  > .moonbit-viewer-markdown-code-block
+  > .moonbit-viewer-markdown-diagram {
+  margin-bottom: 0;
+}
+
+.moonbit-viewer-markdown-document-article > :is(h1, h2, h3, h4, h5, h6) {
+  margin-block: 32px 12px;
+}
+
+.moonbit-viewer-markdown-document-article > :first-child {
+  margin-top: 0;
+}
+
+.moonbit-viewer-markdown-document-article
+  > :not([data-markdown-section-hidden]):not(
+    :has(~ :not([data-markdown-section-hidden]))
+  ) {
+  margin-bottom: 0;
+}
+
+/* Keep the quote inset inside the same outer measure, but well short of the
+ * browser's default: a callout that gives up 80px of a 640px measure reads as
+ * a second, narrower column rather than as emphasis. Nested code and diagrams
+ * still fill the quote rather than receiving a second prose constraint. */
+.moonbit-viewer-markdown-document-article blockquote {
+  box-sizing: border-box;
+  padding: 12px;
+  border-left: 3px solid var(--vscode-focusBorder, currentColor);
+  border-radius: 6px;
+  background: color-mix(
+    in srgb,
+    currentColor 6%,
+    var(--vscode-editor-background, #ffffff)
+  );
+}
+
+.moonbit-viewer-markdown-document[data-theme="dark"]
+  .moonbit-viewer-markdown-document-article
+  blockquote {
+  background: color-mix(
+    in srgb,
+    currentColor 6%,
+    var(--vscode-editor-background, #1e1e1e)
+  );
+}
+
+.moonbit-viewer-markdown-document-article > blockquote {
+  max-width: var(--markdown-prose-measure);
+  margin-inline: 0 auto;
+  padding-inline: 20px;
+}
+
+.moonbit-viewer-markdown-document-article blockquote blockquote {
+  margin-inline: 0;
+}
+
+.moonbit-viewer-markdown-document-article blockquote > :first-child {
+  margin-top: 0;
+}
+
+.moonbit-viewer-markdown-document-article blockquote > :last-child {
+  margin-bottom: 0;
+}
+
+/* Keep the document hierarchy readable without letting headings dominate the
+ * workbench. These sizes are intentionally independent of browser defaults so
+ * the same Markdown has a stable visual scale in every embedder. */
+.moonbit-viewer-markdown-document-article h1 {
+  font-size: 1.75em;
+  line-height: 1.2;
+}
+
+.moonbit-viewer-markdown-document-article h2 {
+  font-size: 1.375em;
+  line-height: 1.25;
+}
+
+.moonbit-viewer-markdown-document-article h3 {
+  font-size: 1.125em;
+  line-height: 1.3;
+}
+
+.moonbit-viewer-markdown-document-article :is(h4, h5, h6) {
+  font-size: 1em;
+  line-height: 1.35;
+}
+
+/* Folding controls live in the article's existing left padding so heading
+ * text stays aligned with the prose regardless of the button's DOM order. */
+.moonbit-viewer-markdown-document-article :is(h1, h2, h3, h4, h5, h6) {
+  position: relative;
+}
+
+.moonbit-viewer-markdown-document-article pre {
+  overflow: auto;
+  padding: 12px 16px;
+  border-radius: 6px;
+  background: color-mix(in srgb, currentColor 7%, transparent);
+}
+
+.moonbit-viewer-markdown-document-article code {
+  font-family: var(--editor-font-family, monospace);
+  font-size: var(--editor-font-size, 13px);
+  line-height: var(--editor-line-height, 20px);
+}
+
+.moonbit-viewer-markdown-code-block {
+  position: relative;
+}
+
+.moonbit-viewer-markdown-code-line {
+  position: relative;
+  display: inline-block;
+  min-width: 1ch;
+  min-height: var(--editor-line-height, 20px);
+  overflow-wrap: normal;
+}
+
+/* Semantic MoonBit fences retain their exact `///|` text and source geometry,
+ * but present the formatter-owned item marker as the same horizontal divider
+ * used by the ordinary MoonBit code presentation. */
+.moonbit-viewer-markdown-code-line[data-markdown-phrase-divider="true"] {
+  box-sizing: border-box;
+  width: 100%;
+  color: transparent !important;
+  text-shadow: none !important;
+}
+
+.moonbit-viewer-markdown-code-line[data-markdown-phrase-divider="true"] * {
+  color: transparent !important;
+  text-shadow: none !important;
+}
+
+.moonbit-viewer-markdown-code-line[data-markdown-phrase-divider="true"]::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: 0;
+  left: 0;
+  height: 1px;
+  background: var(
+    --vscode-editorWidget-border,
+    var(--vscode-widget-border, rgba(128, 128, 128, 0.35))
+  );
+  pointer-events: none;
+}
+
+.moonbit-viewer-markdown-document-overlays {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+/* Section folding. Collapsed bodies ride on a dedicated attribute owned by
+   MarkdownDocumentView::set_hidden_root_elements. display:none (not
+   visibility:hidden or a zero height) is load-bearing: it removes the subtree
+   from hit testing and the accessibility tree, so caretPositionFromPoint can
+   never resolve a caret inside collapsed content and the semantic hover
+   bridge fails closed. */
+.moonbit-viewer-markdown-document-article > [data-markdown-section-hidden] {
+  display: none;
+}
+
+.moonbit-viewer-markdown-fold-toggle {
+  position: absolute;
+  top: 0.65em;
+  left: -24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  transform: translateY(-50%);
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  opacity: 0.35;
+}
+
+.moonbit-viewer-markdown-fold-toggle::before {
+  content: "";
+  width: 0;
+  height: 0;
+  border-left: 0.32em solid transparent;
+  border-right: 0.32em solid transparent;
+  border-top: 0.42em solid currentColor;
+}
+
+.moonbit-viewer-markdown-fold-toggle[data-collapsed="true"]::before {
+  border-top: 0.32em solid transparent;
+  border-bottom: 0.32em solid transparent;
+  border-left: 0.42em solid currentColor;
+  border-right: none;
+}
+
+:is(h1, h2, h3, h4, h5, h6):hover > .moonbit-viewer-markdown-fold-toggle,
+.moonbit-viewer-markdown-fold-toggle:focus-visible,
+.moonbit-viewer-markdown-fold-toggle[data-collapsed="true"] {
+  opacity: 1;
+}
+
+.moonbit-viewer-markdown-fold-toggle:focus-visible {
+  outline: 1px solid currentColor;
+  outline-offset: 2px;
+}
+
+/* Pinned table-of-contents panel. A sibling of the viewport, never an article
+   child: article child indexes are projection ordinals the folding and
+   source-anchor machinery depends on. */
+/* Overlaid, not in flow: the panel must never move the viewport. The hover
+   overlay and caret math assume the viewport starts at the root's top, and a
+   panel in normal flow would also clip the 100%-height viewport at the bottom
+   of the fixed-height root. */
+.moonbit-viewer-markdown-toc {
+  display: none;
+  position: absolute;
+  top: 4px;
+  left: 8px;
+  z-index: 30;
+  box-sizing: border-box;
+  flex-direction: column;
+  width: max-content;
+  max-width: calc(100% - 16px);
+  overflow: hidden;
+  background: var(
+    --vscode-editorWidget-background,
+    var(--vscode-editor-background, #ffffff)
+  );
+  border: 1px solid
+    var(--vscode-widget-border, rgba(128, 128, 128, 0.35));
+  border-radius: 7px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.14);
+  font-size: 0.85em;
+}
+
+.moonbit-viewer-markdown-document[data-theme="dark"]
+  .moonbit-viewer-markdown-toc {
+  background: var(
+    --vscode-editorWidget-background,
+    var(--vscode-editor-background, #1e1e1e)
+  );
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.34);
+}
+
+.moonbit-viewer-markdown-toc[data-toc-visible="true"] {
+  display: flex;
+}
+
+.moonbit-viewer-markdown-toc[data-toc-expanded="true"] {
+  width: min(320px, calc(100% - 16px));
+}
+
+.moonbit-viewer-markdown-toc-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.4em;
+  min-height: 26px;
+  padding: 0.2em 0.65em;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: inherit;
+  cursor: pointer;
+  text-align: left;
+  opacity: 0.75;
+}
+
+.moonbit-viewer-markdown-toc-toggle::before {
+  content: "";
+  width: 0;
+  height: 0;
+  border-top: 0.3em solid transparent;
+  border-bottom: 0.3em solid transparent;
+  border-left: 0.4em solid currentColor;
+}
+
+.moonbit-viewer-markdown-toc[data-toc-expanded="true"]
+  .moonbit-viewer-markdown-toc-toggle::before {
+  border-left: 0.3em solid transparent;
+  border-right: 0.3em solid transparent;
+  border-top: 0.4em solid currentColor;
+  border-bottom: none;
+}
+
+.moonbit-viewer-markdown-toc-list {
+  display: none;
+  margin: 0;
+  padding: 0.2em 0 0.35em;
+  border-top: 1px solid
+    var(--vscode-widget-border, rgba(128, 128, 128, 0.25));
+  list-style: none;
+  max-height: min(14em, calc(100vh - 4em));
+  overflow-y: auto;
+}
+
+.moonbit-viewer-markdown-toc[data-toc-expanded="true"]
+  .moonbit-viewer-markdown-toc-list {
+  display: block;
+}
+
+.moonbit-viewer-markdown-toc-row {
+  display: block;
+  width: 100%;
+  padding: 0.2em 0.75em;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: inherit;
+  cursor: pointer;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.moonbit-viewer-markdown-toc-row:hover,
+.moonbit-viewer-markdown-toc-toggle:hover {
+  opacity: 1;
+  background: rgba(128, 128, 128, 0.12);
+}
+
+.moonbit-viewer-markdown-toc-row:focus-visible,
+.moonbit-viewer-markdown-toc-toggle:focus-visible {
+  outline: 1px solid currentColor;
+  outline-offset: -2px;
+}

@@ -1,0 +1,13 @@
+import {
+  "moonbitlang/editor/base/common" @base_common,
+  "moonbitlang/editor/language",
+  "moonbitlang/editor/shell/remote_protocol",
+  "moonbitlang/editor/viewer/common/model",
+  "moonbitlang/editor/shell/workspace",
+}
+
+supported_targets = "native+wasm"
+
+import {
+  "moonbitlang/async",
+} for "test"

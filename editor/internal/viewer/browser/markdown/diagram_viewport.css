@@ -1,0 +1,237 @@
+:is(
+    .moonbit-viewer-markdown-document-article,
+    .moonbit-viewer-markdown-comment-content
+  )
+  .moonbit-viewer-markdown-diagram {
+  max-width: 100%;
+}
+
+:is(
+    .moonbit-viewer-markdown-document-article,
+    .moonbit-viewer-markdown-comment-content
+  )
+  .moonbit-viewer-markdown-diagram:not(
+    .moonbit-viewer-markdown-diagram-viewport
+  ) {
+  max-height: min(50vh, 480px);
+  overflow: auto;
+}
+
+:is(
+    .moonbit-viewer-markdown-document-article,
+    .moonbit-viewer-markdown-comment-content
+  )
+  .moonbit-viewer-markdown-diagram
+  > svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+:is(
+    .moonbit-viewer-markdown-document-article,
+    .moonbit-viewer-markdown-comment-content
+  )
+  .moonbit-viewer-markdown-diagram:not(
+    .moonbit-viewer-markdown-diagram-viewport
+  )
+  > svg {
+  width: auto;
+  max-height: min(50vh, 480px);
+  margin-inline: auto;
+}
+
+.moonbit-viewer-markdown-diagram-viewport {
+  position: relative;
+  z-index: 0;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  margin-bottom: 1.15em;
+  overflow: hidden;
+  border: 0;
+  border-radius: 8px;
+  background: var(
+    --vscode-editorWidget-background,
+    var(--vscode-editor-background)
+  );
+  box-shadow:
+    inset 0 0 0 1px
+      var(
+        --vscode-editorWidget-border,
+        var(--vscode-widget-border, rgb(128 128 128 / 24%))
+      ),
+    0 6px 20px rgb(0 0 0 / 12%);
+  transition: box-shadow 0.16s ease-in-out;
+}
+
+.moonbit-viewer-markdown-diagram-viewport:hover,
+.moonbit-viewer-markdown-diagram-viewport:focus-within {
+  box-shadow:
+    inset 0 0 0 1px
+      var(
+        --vscode-focusBorder,
+        var(--vscode-editorWidget-border, var(--vscode-widget-border))
+      ),
+    0 8px 24px rgb(0 0 0 / 16%);
+}
+
+.moonbit-viewer-markdown-diagram-viewport:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: 2px;
+}
+
+.moonbit-viewer-markdown-comment-content
+  .moonbit-viewer-markdown-diagram-viewport {
+  margin: 8px 0;
+  border-radius: 6px;
+  box-shadow:
+    inset 0 0 0 1px
+      var(
+        --vscode-editorWidget-border,
+        var(--vscode-widget-border, rgb(128 128 128 / 24%))
+      ),
+    0 2px 8px rgb(0 0 0 / 10%);
+}
+
+.moonbit-viewer-markdown-comment-content
+  .moonbit-viewer-markdown-diagram-viewport:hover,
+.moonbit-viewer-markdown-comment-content
+  .moonbit-viewer-markdown-diagram-viewport:focus-within {
+  box-shadow:
+    inset 0 0 0 1px
+      var(
+        --vscode-focusBorder,
+        var(--vscode-editorWidget-border, var(--vscode-widget-border))
+      ),
+    0 3px 12px rgb(0 0 0 / 14%);
+}
+
+.moonbit-viewer-markdown-diagram-content {
+  transform-origin: 0 0;
+}
+
+.moonbit-viewer-markdown-diagram-content > svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+.moonbit-viewer-markdown-diagram-controls {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  width: auto;
+  gap: 1px;
+  padding: 3px;
+  opacity: 0.9;
+  pointer-events: auto;
+  border: 1px solid
+    var(--vscode-editorWidget-border, var(--vscode-widget-border, transparent));
+  border-radius: 8px;
+  color: var(--vscode-editorWidget-foreground, var(--vscode-editor-foreground));
+  background: var(
+    --vscode-editorWidget-background,
+    var(--vscode-editor-background)
+  );
+  box-shadow: 0 3px 12px rgb(0 0 0 / 20%);
+  transition:
+    opacity 0.16s ease-in-out,
+    box-shadow 0.16s ease-in-out;
+}
+
+.moonbit-viewer-markdown-diagram-viewport:hover
+  > .moonbit-viewer-markdown-diagram-controls,
+.moonbit-viewer-markdown-diagram-viewport:focus
+  > .moonbit-viewer-markdown-diagram-controls,
+.moonbit-viewer-markdown-diagram-viewport:focus-within
+  > .moonbit-viewer-markdown-diagram-controls {
+  opacity: 1;
+  box-shadow: 0 4px 16px rgb(0 0 0 / 26%);
+}
+
+.moonbit-viewer-markdown-comment-content
+  .moonbit-viewer-markdown-diagram-controls {
+  top: 5px;
+  right: 5px;
+  padding: 2px;
+  border-radius: 6px;
+}
+
+.moonbit-viewer-markdown-diagram-controls button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  color: var(--vscode-icon-foreground, var(--vscode-editor-foreground));
+  background: transparent;
+  cursor: pointer;
+}
+
+.moonbit-viewer-markdown-diagram-controls button:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: -1px;
+}
+
+.moonbit-viewer-markdown-comment-content
+  .moonbit-viewer-markdown-diagram-controls
+  button {
+  width: 22px;
+  height: 22px;
+}
+
+.moonbit-viewer-markdown-diagram-controls button:hover {
+  background: var(--vscode-toolbar-hoverBackground);
+}
+
+.moonbit-viewer-markdown-diagram-controls button.active {
+  color: var(--vscode-focusBorder);
+  background: var(--vscode-toolbar-activeBackground);
+}
+
+.moonbit-viewer-markdown-diagram-resize-handle {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 50;
+  height: 10px;
+  background: transparent;
+  cursor: ns-resize;
+}
+
+.moonbit-viewer-markdown-diagram-resize-handle::after {
+  position: absolute;
+  bottom: 2px;
+  left: 50%;
+  width: 40px;
+  height: 3px;
+  opacity: 0.32;
+  border-radius: 2px;
+  background: var(
+    --vscode-editorWidget-border,
+    var(--vscode-widget-border, rgb(128 128 128 / 40%))
+  );
+  content: "";
+  transform: translateX(-50%);
+  transition: opacity 0.15s ease-in-out;
+  transition-delay: 0s;
+}
+
+.moonbit-viewer-markdown-diagram-resize-handle:hover::after {
+  opacity: 0.9;
+  transition-delay: 0.3s;
+}
+
+.moonbit-viewer-markdown-diagram-resize-handle:focus::after {
+  opacity: 0.9;
+  transition-delay: 0s;
+}

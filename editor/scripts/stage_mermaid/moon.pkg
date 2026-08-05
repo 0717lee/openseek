@@ -1,0 +1,8 @@
+import {
+  "moonbitlang/editor/scripts/mermaid_assets",
+  "moonbitlang/async",
+}
+
+supported_targets = "native"
+
+pkgtype(kind: "executable")

@@ -1,0 +1,20 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "moonbitlang/editor/syntax/lang_javascript"
+
+import {
+  "moonbitlang/editor/syntax",
+}
+
+// Values
+
+// Errors
+
+// Types and methods
+type JavascriptTokenizer
+pub fn JavascriptTokenizer::JavascriptTokenizer() -> Self
+pub impl @syntax.LineTokenizer for JavascriptTokenizer
+
+// Type aliases
+
+// Traits
+

@@ -8,6 +8,48 @@ For a picture of how the pieces fit together — module architecture, the core
 data model, and the life of one agent turn — see
 [`docs/architecture.md`](docs/architecture.md).
 
+## Monorepo development
+
+The root [`moon.work`](moon.work) develops OpenSeek, the desktop app, and the
+[`moonbitlang/editor`](editor/README.md) source together. The editor keeps its
+smaller `editor/moon.work` as a scoped entry point for editor-only builds and
+browser tests; root Moon commands are the integration gate across both projects.
+
+A fresh checkout needs the MoonBit toolchain and `just`; `just check` also
+requires `jq` to inspect structured compiler diagnostics. Initialize the Lepus
+submodule before running the root integration gates:
+
+```sh
+git submodule update --init desktop/lepus
+just check              # native + JS workspace checks and formatting
+just test               # native + JS workspace tests and OpenSeek cram tests
+just build              # native + JS MoonBit builds
+just editor-build       # editor web distribution and server
+just editor-test        # editor-only tests on every supported target
+just editor-test-browser
+```
+
+The editor browser suites additionally need Node.js 18 or newer, the locked npm
+dependencies, and a Playwright-managed Chromium installation:
+
+```sh
+cd editor
+npm ci
+npx playwright install chromium
+```
+
+Linux hosts that lack Playwright's system dependencies can use the CI form,
+`npx playwright install --with-deps chromium`.
+
+Neither editor reference submodule is needed for the normal build, test, or
+browser smoke gates. Initialize CodeMirror only for source-reference research;
+initialize VS Code only for the opt-in editor performance suite:
+
+```sh
+git submodule update --init editor/codemirror # source-reference research
+git submodule update --init editor/vscode     # opt-in performance suite
+```
+
 ## Packages
 
 | Package | Purpose | Docs |
@@ -35,6 +77,7 @@ data model, and the life of one agent turn — see
 | `bobzhang/openseek/viz` | Browser viewer for durable session logs (JS). | `viz/README.md` |
 | `bobzhang/openseek/cmd/viz_server` | Native HTTP server that serves the visualizer over recorded sessions. | `cmd/viz_server/README.md` |
 | `bobzhang/openseek-viz-app` (in `cmd/viz_app/`, own module) | JS entry point compiled into the visualizer bundle. | `viz/README.md` |
+| `moonbitlang/editor` (in `editor/`, own module) | Reusable readonly editor plus its reference browser shell and server. | `editor/README.md` |
 | `bobzhang/openseek/internal/{cli,workspace_path}` | Shared CLI accessors and workspace-path resolution for the command mains. | — |
 | `bobzhang/openseek/testkit/filesystem` | JSON-backed virtual filesystem for tests and eval fixtures. | `testkit/filesystem/README.mbt.md` |
 | `bobzhang/openseek/eval/report` | Shared Markdown/JSON report primitive for deterministic and model evals. | `eval/report/README.mbt.md` |
@@ -195,11 +238,13 @@ and exposes each on `PATH` as `<name>.exe` (e.g. `openseek.exe`).
 
 - [`tests/cram/cli.md`](tests/cram/cli.md) — offline `openseek` subcommand
   examples (top-level and `run` help, and the `run`/`serve`/`sessions` behaviors).
-  They make no network calls, use no output-processing tools, and run in CI via
-  `moon cram test tests/cram`.
+  They make no network calls and run in CI via `moon cram test tests/cram`.
 - [`tests/cram/tui.md`](tests/cram/tui.md) — offline `openseek tui` examples (the
   help banner and the missing-API-key error). The argument parser runs before the
   terminal UI starts, so these need no API key and no TTY.
+- [`tests/cram/subrun.md`](tests/cram/subrun.md) — the offline internal child-mode
+  wire contract: JSON input on stdin, JSONL events on stdout, typed reports, and
+  failure-event delivery. It uses the modelless `echo` kind and needs no API key.
 - [`tests/live/deepseek.md`](tests/live/deepseek.md) — a real, non-mock DeepSeek
   round trip. It is opt-in (`DEEPSEEK=sk-... moon cram test tests/live`) and
   parses the agent's JSONL log with MoonBit itself: a `moon run -e` script reads

@@ -1,0 +1,89 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "moonbitlang/editor/viewer/common/tokens"
+
+import {
+  "moonbitlang/core/debug",
+  "moonbitlang/editor/viewer/common/services",
+}
+
+// Values
+pub const COLOR_ID_DEFAULT_BACKGROUND : Int = 2
+
+pub const COLOR_ID_DEFAULT_FOREGROUND : Int = 1
+
+pub const FONT_STYLE_NONE : Int = 0
+
+pub const METADATA_BACKGROUND_OFFSET : Int = 24
+
+pub const METADATA_FONT_STYLE_OFFSET : Int = 11
+
+pub const METADATA_FOREGROUND_OFFSET : Int = 15
+
+pub const METADATA_LANGUAGEID_OFFSET : Int = 0
+
+pub const METADATA_TOKEN_TYPE_OFFSET : Int = 8
+
+pub const STANDARD_TOKEN_TYPE_COMMENT : Int = 1
+
+pub const STANDARD_TOKEN_TYPE_OTHER : Int = 0
+
+pub const STANDARD_TOKEN_TYPE_REGEX : Int = 3
+
+pub const STANDARD_TOKEN_TYPE_STRING : Int = 2
+
+// Errors
+
+// Types and methods
+type ContiguousMultilineTokens
+
+type ContiguousMultilineTokensBuilder
+pub fn ContiguousMultilineTokensBuilder::ContiguousMultilineTokensBuilder() -> Self
+pub fn ContiguousMultilineTokensBuilder::add(Self, Int, Array[UInt]) -> Unit
+pub fn ContiguousMultilineTokensBuilder::finalize(Self) -> Array[ContiguousMultilineTokens]
+
+type ContiguousTokensStore
+pub fn ContiguousTokensStore::ContiguousTokensStore(@services.LanguageIdCodec) -> Self
+pub fn ContiguousTokensStore::flush(Self) -> Unit
+pub fn ContiguousTokensStore::get_tokens(Self, String, Int, String) -> LineTokens
+pub fn ContiguousTokensStore::set_multiline_tokens(Self, Array[ContiguousMultilineTokens], String, (Int) -> Int) -> ContiguousTokensStoreUpdate
+
+pub struct ContiguousTokensStoreChange {
+  from_line_number : Int
+  to_line_number : Int
+}
+
+pub struct ContiguousTokensStoreUpdate {
+  changes : Array[ContiguousTokensStoreChange]
+}
+
+type InsertedToken
+pub fn InsertedToken::InsertedToken(Int, String, TokenMetadata) -> Self
+
+type LineTokens derive(@debug.Debug)
+pub fn LineTokens::LineTokens(Array[UInt], String, @services.LanguageIdCodec) -> Self
+pub fn LineTokens::convert_to_end_offset(Array[UInt], Int) -> Unit
+pub fn LineTokens::default_token_metadata() -> TokenMetadata
+pub fn LineTokens::get_count(Self) -> Int
+pub fn LineTokens::get_line_content(Self) -> String
+pub fn LineTokens::get_metadata(Self, Int) -> TokenMetadata
+pub fn LineTokens::get_start_offset(Self, Int) -> Int
+pub fn LineTokens::inflate(Self) -> ViewLineTokens
+pub fn LineTokens::slice_and_inflate(Self, Int, Int, Int) -> ViewLineTokens
+pub fn LineTokens::with_inserted(Self, Array[InsertedToken]) -> Self
+
+pub(all) struct TokenMetadata(UInt) derive(Eq)
+pub fn TokenMetadata::get_class_name(Self) -> String
+pub fn TokenMetadata::to_uint(Self) -> UInt
+
+type ViewLineTokens
+pub fn ViewLineTokens::get_class_name(Self, Int) -> String
+pub fn ViewLineTokens::get_count(Self) -> Int
+pub fn ViewLineTokens::get_end_offset(Self, Int) -> Int
+pub fn ViewLineTokens::get_inline_style(Self, Int, Array[String]) -> String
+pub fn ViewLineTokens::get_line_content(Self) -> String
+pub fn ViewLineTokens::get_token_text(Self, Int) -> String
+
+// Type aliases
+
+// Traits
+

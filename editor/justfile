@@ -1,0 +1,92 @@
+default: dev
+
+list:
+    just --list
+
+
+test-moon:
+    moon test --target all
+
+test: test-moon
+
+# Compilation is plain moon build; the js entry points land under
+# _build/js/debug/build/ and scripts/build-web.mbtx stages them from there.
+# Assemble the JS/CSS/font/HTML outputs and the verified local Mermaid runtime into web/dist
+dist-front-end:
+    moon build
+    moon run --target native scripts/build-web.mbtx
+    moon run --target native scripts/stage_mermaid
+
+# Stage the browser-correctness scenario bundles into web/dist/browser-tests
+build-browser-tests: dist-front-end
+    moon run --target native scripts/build-browser-tests.mbtx -- smoke
+
+# Stage the perf scenarios plus the pinned Monaco oracle into web/dist/browser-tests
+build-browser-perf-tests: dist-front-end
+    moon run --target native scripts/build-browser-tests.mbtx -- perf
+
+# Web assets and the preferred-target server artifact (moon build covers the server member)
+build: dist-front-end
+
+# ---------------------------------------------------------------------------
+# Serving. Override any variable by listing it BEFORE the recipe name
+# (just's native override syntax):
+#
+#   just dev                            # build, then serve this repo on the LAN
+#   just HOST=127.0.0.1 dev             # loopback only
+#   just PORT=8080 serve                # serve without rebuilding
+#   just ROOT=~/git/other-repo dev      # browse ANOTHER MoonBit repo with this
+#                                       # viewer: readonly file tree, syntax
+#                                       # highlighting, and `moon ide` hover /
+#                                       # `moon check` diagnostics run in that
+#                                       # repo's root (via MOON_COMMAND).
+#                                       # ROOT only picks the STARTING repo:
+#                                       # the sidebar's "Open Repository..."
+#                                       # picker browses the host filesystem
+#                                       # and re-roots the running server
+#                                       # without a restart. On loopback the
+#                                       # picker may browse anywhere; on any
+#                                       # other bind it is DISABLED unless
+#                                       # BROWSE_ROOT grants a subtree:
+#   just HOST=0.0.0.0 BROWSE_ROOT=~/git dev
+#   just TARGET=native dev              # run the server on the native backend
+#                                       # (default is wasm: ~3x faster
+#                                       # incremental rebuilds, no C link step)
+#
+# `serve` defaults to loopback; `dev` defaults to 0.0.0.0 for trusted LANs.
+# The reference server has no authentication and exposes ROOT's source files.
+# ---------------------------------------------------------------------------
+
+ROOT := "."
+HOST := ""
+PORT := "5173"
+ASSET_DIR := "web/dist"
+MOON_COMMAND := "moon"
+BROWSE_ROOT := ""
+TARGET := "wasm"
+
+serve:
+    moon run --target {{ TARGET }} server/host/main -- \
+      --root "$(cd '{{ ROOT }}' && pwd)" \
+      --host "{{ if HOST == '' { '127.0.0.1' } else { HOST } }}" \
+      --port {{ PORT }} \
+      --asset-dir "$(cd '{{ ASSET_DIR }}' && pwd)" \
+      --moon-command "{{ MOON_COMMAND }}" \
+      --browse-root "{{ BROWSE_ROOT }}"
+
+dev: build
+    just ROOT='{{ ROOT }}' PORT='{{ PORT }}' ASSET_DIR='{{ ASSET_DIR }}' \
+      MOON_COMMAND='{{ MOON_COMMAND }}' TARGET='{{ TARGET }}' \
+      BROWSE_ROOT='{{ BROWSE_ROOT }}' \
+      HOST='{{ if HOST == '' { '0.0.0.0' } else { HOST } }}' serve
+
+test-browser: test-browser-smoke
+
+test-browser-smoke: build build-browser-tests
+    ./node_modules/.bin/playwright test tests/browser/smoke tests/browser/component
+
+test-browser-component: build build-browser-tests
+    ./node_modules/.bin/playwright test tests/browser/component
+
+test-browser-perf: build build-browser-perf-tests
+    ./node_modules/.bin/playwright test tests/browser/perf

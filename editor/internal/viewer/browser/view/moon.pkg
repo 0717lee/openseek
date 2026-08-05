@@ -1,0 +1,17 @@
+import {
+  "moonbitlang/editor/base/browser" @base_browser,
+  "moonbitlang/editor/base/common" @base_common,
+  "moonbitlang/editor/platform/log",
+  "moonbitlang/editor/viewer/browser" @editor_browser,
+  "moonbitlang/editor/viewer/common" @viewer_common,
+  "moonbitlang/editor/viewer/common/core",
+  "moonbitlang/editor/viewer/common/editor_api",
+  "moonbitlang/editor/viewer/common/markers",
+  "moonbitlang/editor/viewer/common/model",
+  "moonbitlang/editor/viewer/common/view_layout",
+  "moonbitlang/editor/viewer/common/view_model",
+  "moonbitlang/editor/internal/viewer/ui/scrollbar",
+  "moonbit-community/rabbita/dom" @rdom,
+}
+
+supported_targets = "js"

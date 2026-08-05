@@ -1,0 +1,112 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "moonbitlang/editor/viewer/common/markers"
+
+import {
+  "moonbitlang/core/debug",
+  "moonbitlang/editor/base/common",
+  "moonbitlang/editor/language",
+  "moonbitlang/editor/viewer/common/model",
+}
+
+// Values
+pub fn squiggly_theme_css(SquigglyThemeColors) -> String
+
+// Errors
+
+// Types and methods
+pub struct Marker {
+  owner : String
+  resource : @common.Uri
+  severity : MarkerSeverity
+  code : String?
+  message : String
+  source : String?
+  mut start_column : Int
+  start_line_number : Int
+  end_line_number : Int
+  end_column : Int
+  model_version_id : Int?
+  related_information : Array[RelatedInformation]?
+  tags : Array[MarkerTag]?
+  origin : String?
+} derive(Eq, @debug.Debug)
+
+type MarkerData derive(Eq, @debug.Debug)
+pub fn MarkerData::MarkerData(severity~ : MarkerSeverity, message~ : String, start_line_number~ : Int, start_column~ : Int, end_line_number~ : Int, end_column~ : Int, code? : String, source? : String, model_version_id? : Int, related_information? : Array[RelatedInformation], tags? : Array[MarkerTag], origin? : String) -> Self
+
+type MarkerDecorationsHandle
+pub fn MarkerDecorationsHandle::acquire_model(Self, @model.TextModel) -> @common.Disposable
+pub fn MarkerDecorationsHandle::get_live_markers_for_model(Self, @model.TextModel) -> Array[(@common.Range, Marker)]
+pub fn MarkerDecorationsHandle::get_live_resolved_marker_decorations_for_model(Self, @model.TextModel) -> Array[ResolvedMarkerDecoration]
+pub fn MarkerDecorationsHandle::on_did_change_marker_decorations(Self, (@model.TextModel) -> Unit) -> @common.Disposable
+
+type MarkerDecorationsService
+pub fn MarkerDecorationsService::MarkerDecorationsService(MarkerServiceHandle) -> Self
+pub fn MarkerDecorationsService::dispose(Self) -> Unit
+pub fn MarkerDecorationsService::marker_decorations_handle(Self) -> MarkerDecorationsHandle
+pub fn MarkerDecorationsService::on_model_added(Self, @model.TextModel) -> Unit
+pub fn MarkerDecorationsService::on_model_removed(Self, @model.TextModel) -> Unit
+
+pub(all) enum MarkerDecorationsSource {
+  MarkerStore(MarkerServiceHandle)
+  Decorations(MarkerDecorationsHandle)
+}
+
+type MarkerService
+pub fn MarkerService::MarkerService(schedule? : (() -> Unit) -> Unit) -> Self
+pub fn MarkerService::change_all(Self, String, Array[ResourceMarker]) -> Unit
+pub fn MarkerService::change_one(Self, String, @common.Uri, Array[MarkerData]) -> Unit
+pub fn MarkerService::clear_resource(Self, @common.Uri) -> Unit
+pub fn MarkerService::diagnostics_for_resource(Self, @common.Uri) -> Array[@language.Diagnostic]
+pub fn MarkerService::dispose(Self) -> Unit
+pub fn MarkerService::marker_service_handle(Self) -> MarkerServiceHandle
+pub fn MarkerService::markers_for_resource(Self, @common.Uri, limit? : Int) -> Array[Marker]
+pub fn MarkerService::on_did_change_markers(Self, (Array[@common.Uri]) -> Unit) -> @common.Disposable
+pub fn MarkerService::remove_owner_resource(Self, String, @common.Uri) -> Unit
+pub fn MarkerService::set_diagnostics(Self, String, @common.Uri, Array[@language.Diagnostic]) -> Unit
+
+type MarkerServiceHandle
+
+pub(all) enum MarkerSeverity {
+  Hint
+  Info
+  Warning
+  Error
+} derive(Eq, @debug.Debug)
+
+pub(all) enum MarkerTag {
+  Unnecessary
+  Deprecated
+} derive(Eq, @debug.Debug)
+
+pub(all) struct RelatedInformation {
+  resource : @common.Uri
+  message : String
+  start_line_number : Int
+  start_column : Int
+  end_line_number : Int
+  end_column : Int
+} derive(Eq, @debug.Debug)
+
+pub struct ResolvedMarkerDecoration {
+  range : @common.Range
+  marker : Marker
+  options : @model.ModelDecorationOptions
+}
+
+pub(all) struct ResourceMarker {
+  resource : @common.Uri
+  marker : MarkerData
+} derive(Eq, @debug.Debug)
+
+pub(all) struct SquigglyThemeColors {
+  error : String?
+  warning : String?
+  info : String?
+  hint : String?
+} derive(Eq, @debug.Debug)
+
+// Type aliases
+
+// Traits
+

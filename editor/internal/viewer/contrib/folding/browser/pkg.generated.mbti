@@ -1,0 +1,111 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "moonbitlang/editor/internal/viewer/contrib/folding/browser"
+
+import {
+  "moonbitlang/core/debug",
+  "moonbitlang/editor/base/common",
+  "moonbitlang/editor/viewer/common/core",
+  "moonbitlang/editor/viewer/common/editor_api",
+  "moonbitlang/editor/viewer/common/languages",
+  "moonbitlang/editor/viewer/common/model",
+}
+
+// Values
+pub const FOLDING_CONTROLLER_ID : String = "editor.contrib.folding"
+
+pub const MAX_FOLDING_REGIONS : Int = 0xFFFF
+
+pub const OUTLINE_BODY_FOLDING_RANGE_TYPE : String = "editor.outlineBody"
+
+pub fn set_collapse_state_at_level(FoldingModel, Int, Bool, Array[Int]) -> Unit
+
+pub fn set_collapse_state_levels_down(FoldingModel, Bool, levels? : Int, line_numbers? : Array[Int]) -> Unit
+
+pub fn set_collapse_state_up(FoldingModel, Bool, Array[Int]) -> Unit
+
+pub fn to_selected_lines(Array[@core.Selection]) -> SelectedLines
+
+// Errors
+
+// Types and methods
+type FoldRange derive(Eq, @debug.Debug)
+pub fn FoldRange::FoldRange(Int, Int, type_? : String) -> Self
+pub fn FoldRange::end_line_number(Self) -> Int
+pub fn FoldRange::start_line_number(Self) -> Int
+
+pub(all) struct FoldingController {
+  mut folding_model : FoldingModel?
+  mut hidden_range_model : HiddenRangeModel?
+  mut folding_decoration_provider : FoldingDecorationProvider?
+  mut range_provider : IndentRangeProvider?
+  mut mouse_down_info : FoldingMouseDownInfo?
+  local_to_dispose : Array[@common.Disposable]
+}
+pub fn FoldingController::FoldingController() -> Self
+pub fn FoldingController::clear_local(Self) -> Unit
+
+type FoldingDecorationAccess
+
+type FoldingDecorationProvider
+pub fn FoldingDecorationProvider::FoldingDecorationProvider(@model.TextModel, owner_id? : Int) -> Self
+pub fn FoldingDecorationProvider::access(Self) -> FoldingDecorationAccess
+pub fn FoldingDecorationProvider::update_options(Self, show_folding_controls~ : @editor_api.ShowFoldingControls, show_folding_highlights~ : Bool) -> Unit
+
+pub(all) struct FoldingLimitReporter {
+  limit : () -> Int
+  update : (Int, Int?) -> Unit
+}
+
+type FoldingModel
+pub fn FoldingModel::FoldingModel(@model.TextModel, FoldingDecorationAccess) -> Self
+pub fn FoldingModel::get_all_regions_at_line(Self, Int, filter? : (FoldingRegion, Int) -> Bool) -> Array[FoldingRegion]
+pub fn FoldingModel::get_region_at_line(Self, Int) -> FoldingRegion?
+pub fn FoldingModel::get_regions_inside(Self, FoldingRegion?, filter? : RegionFilter) -> Array[FoldingRegion]
+pub fn FoldingModel::regions(Self) -> FoldingRegions
+pub fn FoldingModel::text_model(Self) -> @model.TextModel
+pub fn FoldingModel::toggle_collapse_state(Self, Array[FoldingRegion]) -> Unit
+pub fn FoldingModel::update(Self, FoldingRegions, selection? : SelectedLines) -> Unit
+pub fn FoldingModel::update_post(Self, FoldingRegions) -> Unit
+
+pub(all) struct FoldingMouseDownInfo {
+  line_number : Int
+  icon_clicked : Bool
+}
+
+type FoldingRegion
+pub fn FoldingRegion::contained_by(Self, LineRange) -> Bool
+pub fn FoldingRegion::end_line_number(Self) -> Int
+pub fn FoldingRegion::is_collapsed(Self) -> Bool
+pub fn FoldingRegion::start_line_number(Self) -> Int
+
+type FoldingRegions
+pub fn FoldingRegions::from_fold_ranges(Array[FoldRange]) -> Self
+pub fn FoldingRegions::get_type(Self, Int) -> String?
+pub fn FoldingRegions::length(Self) -> Int
+pub fn FoldingRegions::to_fold_range(Self, Int) -> FoldRange
+
+type HiddenRangeModel
+pub fn HiddenRangeModel::HiddenRangeModel(FoldingModel) -> Self
+pub fn HiddenRangeModel::adjust_selections(Self, Array[@core.Selection]) -> Bool
+pub fn HiddenRangeModel::has_ranges(Self) -> Bool
+pub fn HiddenRangeModel::is_hidden(Self, Int) -> Bool
+pub fn HiddenRangeModel::on_did_change(Self, (Array[@common.Range]) -> Unit) -> @common.Disposable
+
+type IndentRangeProvider
+pub fn IndentRangeProvider::IndentRangeProvider(@model.TextModel, @languages.LanguageHandle, FoldingLimitReporter, tab_size? : Int) -> Self
+pub fn IndentRangeProvider::compute(Self) -> FoldingRegions
+
+pub(all) struct LineRange {
+  start_line_number : Int
+  end_line_number : Int
+} derive(Eq, @debug.Debug)
+
+type RegionFilter
+pub fn RegionFilter::RegionFilter((FoldingRegion) -> Bool) -> Self
+
+type SelectedLines
+
+// Type aliases
+
+// Traits
+

@@ -41,8 +41,23 @@ You can browse and install extra skills here:
   format the code. Check the diffs of `.mbti` file to see if the changes are
   expected.
 
-- Run `moon test` to check tests pass. MoonBit supports snapshot testing; when
-  changes affect outputs, run `moon test --update` to refresh snapshots.
+- Use `moon test` for package- or workspace-scoped MoonBit tests. MoonBit
+  supports snapshot testing; when changes affect outputs, run
+  `moon test --update` to refresh snapshots.
+
+- From the repository root, the integration gates are `just check`, `just
+  test`, and `just build`. They cover the root workspace's native and JS
+  targets; `just test` also runs the offline OpenSeek cram tests. For changes
+  under `editor/`, also run `just editor-test` for its all-target suite; for
+  browser behavior, run `just editor-test-browser` as well.
+
+- OpenSeek's desktop file editor is the primary downstream, user-facing editor
+  host. Use `editor/internal/shell` as the fast build-and-preview loop for
+  editor UI work. Existing Viewer UI improvements should flow into OpenSeek
+  through its current public APIs with little or no host adaptation. When a new
+  editor UI is intended for OpenSeek, implement the corresponding
+  `desktop/frontend/fileeditor` adaptation in the same task; do not make the
+  slower full desktop build and preview the routine editor inner loop.
 
 - Prefer `assert_eq` or `assert_true(pattern is Pattern(...))` for results that
   are stable or very unlikely to change. Use snapshot tests to record current

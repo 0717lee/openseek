@@ -1,0 +1,347 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+}
+
+.editor-shell {
+  /* Pin the workbench to the viewport so the code viewer is the scroll
+     container; line virtualization windows against its height. */
+  height: 100vh;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  background: var(--vscode-editor-background);
+  color: var(--vscode-foreground);
+  font-family: var(--ui-font-family);
+}
+
+.editor-main {
+  --explorer-width: 280px;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: var(--explorer-width) 4px minmax(0, 1fr);
+}
+
+.editor-main.is-explorer-hidden {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.editor-main.is-explorer-hidden .workspace-resize-handle {
+  display: none;
+}
+
+.workspace-resize-handle {
+  position: relative;
+  z-index: 3;
+  width: 4px;
+  cursor: ew-resize;
+  touch-action: none;
+  background: var(--vscode-sideBar-background);
+}
+
+.workspace-resize-handle::before {
+  content: "";
+  position: absolute;
+  inset: 0 1px;
+  background: var(--vscode-sideBar-border);
+}
+
+/* Keep the visible divider compact while giving pointer users a 24px target. */
+.workspace-resize-handle::after {
+  content: "";
+  position: absolute;
+  inset: 0 -10px;
+}
+
+.workspace-resize-handle:hover::before,
+.workspace-resize-handle:focus-visible::before {
+  background: var(--vscode-focusBorder);
+}
+
+.workspace-resize-handle:focus-visible {
+  outline: none;
+}
+
+.topbar {
+  min-height: 35px;
+  padding: 6px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border-bottom: 1px solid var(--vscode-titleBar-border);
+  background: var(--vscode-titleBar-activeBackground);
+  color: var(--vscode-titleBar-activeForeground);
+  font-size: var(--ui-font-size);
+}
+
+.source-title {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.topbar-leading {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.topbar-action {
+  width: 22px;
+  height: 22px;
+  flex: 0 0 22px;
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--vscode-icon-foreground);
+  cursor: pointer;
+}
+
+.topbar-action:hover {
+  background: var(--vscode-list-hoverBackground);
+}
+
+.topbar-action:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: -1px;
+}
+
+.source-title strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.source-title span {
+  flex: 0 0 auto;
+  opacity: 0.7;
+}
+
+.source-status {
+  flex: 0 0 auto;
+  opacity: 0.85;
+}
+
+.source-status-ready {
+  color: var(--vscode-titleBar-activeForeground);
+}
+
+.source-status-loading,
+.source-status-stale {
+  color: var(--vscode-editorWarning-foreground);
+}
+
+.source-status-missing,
+.source-status-error {
+  color: var(--vscode-editorError-foreground);
+}
+
+.topbar strong {
+  margin-right: 10px;
+}
+
+/* The stable element the workbench renders for the viewer island; the
+   island attaches its own DOM inside and the shell never renders
+   children into it. */
+.viewer-host {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  background: var(--vscode-editor-background);
+}
+
+.diagnostics {
+  min-height: 22px;
+  /* A diagnostic flood must not squeeze the editor out of the viewport. */
+  max-height: 25vh;
+  overflow: auto;
+  padding: 2px 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  border-top: 1px solid var(--vscode-sideBar-border);
+  background: var(--vscode-sideBar-background);
+  color: var(--vscode-sideBar-foreground);
+  font-size: 12px;
+}
+
+.diagnostic-item {
+  padding: 1px 6px;
+  color: var(--vscode-editorWarning-foreground);
+}
+
+.workspace-title-actions {
+  display: inline-flex;
+  gap: 2px;
+}
+
+/* The repository picker: a modal directory browser over the server host's
+   filesystem, styled after VS Code's editorWidget surfaces. */
+.repo-picker-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.4);
+}
+
+.repo-picker {
+  width: min(480px, calc(100vw - 32px));
+  max-height: min(520px, calc(100vh - 64px));
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--vscode-editorWidget-border);
+  background: var(--vscode-editorWidget-background);
+  color: var(--vscode-editorWidget-foreground);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  font-size: var(--ui-font-size);
+}
+
+.repo-picker-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: var(--vscode-sideBarSectionHeader-background);
+}
+
+.repo-picker-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.repo-picker-path {
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--vscode-sideBar-border);
+  font-family: var(--editor-font-family, monospace);
+  font-size: 12px;
+  opacity: 0.85;
+  overflow-wrap: anywhere;
+}
+
+.repo-picker-error {
+  padding: 4px 12px;
+  color: var(--vscode-editorError-foreground);
+  font-size: 12px;
+}
+
+.repo-picker-list {
+  flex: 1;
+  min-height: 120px;
+  overflow: auto;
+  padding: 4px 0;
+}
+
+.repo-picker-list.is-loading {
+  opacity: 0.6;
+}
+
+.repo-picker-entry {
+  width: 100%;
+  height: 24px;
+  padding: 0 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.repo-picker-entry:hover {
+  background: var(--vscode-list-hoverBackground);
+}
+
+.repo-picker-entry:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: -1px;
+}
+
+.repo-picker-entry-icon {
+  flex: 0 0 16px;
+  display: inline-grid;
+  place-items: center;
+  color: var(--vscode-icon-foreground);
+}
+
+.repo-picker-entry-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.repo-picker-badge {
+  flex: 0 0 auto;
+  margin-left: auto;
+  padding: 0 6px;
+  border-radius: 8px;
+  background: var(--vscode-button-background);
+  color: var(--vscode-button-foreground);
+  font-size: 10px;
+  line-height: 16px;
+}
+
+.repo-picker-empty {
+  padding: 8px 12px;
+  opacity: 0.7;
+}
+
+.repo-picker-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--vscode-sideBar-border);
+}
+
+.repo-picker-button {
+  padding: 3px 12px;
+  border: 1px solid var(--vscode-input-border);
+  border-radius: 2px;
+  background: var(--vscode-input-background);
+  color: var(--vscode-input-foreground);
+  font: inherit;
+  cursor: pointer;
+}
+
+.repo-picker-button-primary {
+  border-color: transparent;
+  background: var(--vscode-button-background);
+  color: var(--vscode-button-foreground);
+}
+
+.repo-picker-button-primary:hover {
+  background: var(--vscode-button-hoverBackground);
+}
+
+@media (max-width: 680px) {
+  .editor-main {
+    grid-template-columns: 148px minmax(0, 1fr);
+  }
+
+  .workspace-resize-handle {
+    display: none;
+  }
+
+  .topbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}

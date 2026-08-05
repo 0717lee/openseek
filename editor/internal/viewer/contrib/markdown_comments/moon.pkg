@@ -1,0 +1,7 @@
+import {
+  "moonbitlang/editor/base/common" @base_common,
+  "moonbitlang/editor/language",
+  "moonbitlang/editor/platform/log",
+  "moonbitlang/editor/viewer/common/languages",
+  "moonbitlang/editor/viewer/common/model",
+}

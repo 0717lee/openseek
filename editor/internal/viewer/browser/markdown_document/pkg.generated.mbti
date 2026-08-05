@@ -1,0 +1,78 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "moonbitlang/editor/internal/viewer/browser/markdown_document"
+
+import {
+  "moonbit-community/rabbita/dom",
+  "moonbitlang/core/debug",
+  "moonbitlang/editor/base/common",
+  "moonbitlang/editor/internal/viewer/markdown",
+}
+
+// Values
+
+// Errors
+
+// Types and methods
+type MarkdownDocumentView
+pub fn MarkdownDocumentView::MarkdownDocumentView(String, Int, String, @common.Uri, @markdown.MarkdownResourceKind, String, () -> Unit, (Bool) -> Unit, () -> Unit, show_unused? : Bool) -> Self
+pub fn MarkdownDocumentView::append_projected_range_spans(Self, @common.OffsetRange, String) -> Array[@dom.Element]
+pub fn MarkdownDocumentView::apply_marker_unused_visibility(Self, Bool) -> Unit
+pub fn MarkdownDocumentView::apply_theme(Self, String) -> Unit
+pub fn MarkdownDocumentView::content_height(Self) -> Double
+pub fn MarkdownDocumentView::content_width(Self) -> Double
+pub fn MarkdownDocumentView::dispose(Self) -> Unit
+pub fn MarkdownDocumentView::has_rendered_source_anchors(Self) -> Bool
+pub fn MarkdownDocumentView::install_section_fold_controls(Self, Array[MarkdownSectionFoldControl]) -> Unit
+pub fn MarkdownDocumentView::language_id(Self) -> String
+pub fn MarkdownDocumentView::layout(Self, Double, Double) -> Unit
+pub fn MarkdownDocumentView::listen_semantic_dom(Self, String, (@dom.Event) -> Unit) -> Unit
+pub fn MarkdownDocumentView::overlay_mount(Self) -> @dom.Element
+pub fn MarkdownDocumentView::projection(Self) -> @markdown.MarkdownDocumentProjection
+pub fn MarkdownDocumentView::projection_generation(Self) -> Int
+pub fn MarkdownDocumentView::replace_source(Self, String, Int) -> Unit
+pub fn MarkdownDocumentView::reveal_source_offset(Self, Int, String) -> Unit
+pub fn MarkdownDocumentView::root(Self) -> @dom.Element
+pub fn MarkdownDocumentView::scroll_height(Self) -> Double
+pub fn MarkdownDocumentView::scroll_left(Self) -> Double
+pub fn MarkdownDocumentView::scroll_top(Self) -> Double
+pub fn MarkdownDocumentView::scroll_width(Self) -> Double
+pub fn MarkdownDocumentView::semantic_code_lines(Self) -> Array[MarkdownSemanticCodeLineDom]
+pub fn MarkdownDocumentView::semantic_pointer_hit(Self, Double, Double) -> MarkdownSemanticPointerHit?
+pub fn MarkdownDocumentView::set_hidden_root_elements(Self, Array[Int]) -> Unit
+pub fn MarkdownDocumentView::set_scroll_position(Self, scroll_top? : Double, scroll_left? : Double) -> Unit
+pub fn MarkdownDocumentView::set_section_fold_toggle_handler(Self, (Int) -> Unit) -> Unit
+pub fn MarkdownDocumentView::set_toc_entries(Self, Array[MarkdownTocBarEntry], (Int) -> Unit) -> Unit
+pub fn MarkdownDocumentView::source_model_version(Self) -> Int
+pub fn MarkdownDocumentView::viewport(Self) -> @dom.Element
+pub fn MarkdownDocumentView::visible_source_ranges(Self) -> Array[@common.OffsetRange]
+
+pub(all) struct MarkdownSectionFoldControl {
+  heading_element_index : Int
+  section_index : Int
+  collapsed : Bool
+} derive(Eq, @debug.Debug)
+
+pub struct MarkdownSemanticCodeLineDom {
+  block_index : Int
+  block_source_range : @common.OffsetRange
+  line_index : Int
+  element : @dom.Element
+  // private fields
+}
+
+pub struct MarkdownSemanticPointerHit {
+  line : MarkdownSemanticCodeLineDom
+  source_offset : Int
+  pointer_x : Double
+}
+
+pub(all) struct MarkdownTocBarEntry {
+  depth : Int
+  text : String
+  source_offset : Int
+} derive(Eq, @debug.Debug)
+
+// Type aliases
+
+// Traits
+
