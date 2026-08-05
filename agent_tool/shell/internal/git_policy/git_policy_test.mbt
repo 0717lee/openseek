@@ -42,23 +42,44 @@ test "rebase args: plain and in-progress forms recoverable, rest fails closed" {
     @git_policy.rebase_args_are_recoverable(args, 0, args.length())
   }
 
+  fn preblocked(args : Array[String]) -> Bool {
+    let cmd = ["git", "rebase"] + args
+    @git_policy.should_preblock(cmd, 1)
+  }
+
   // Plain rebases and the in-progress verbs: replayed content comes from the
-  // object store and the pre-rebase tip stays in ORIG_HEAD/the reflog.
-  assert_true(recoverable([]))
-  assert_true(recoverable(["main"]))
-  assert_true(recoverable(["origin/main", "feature"]))
-  assert_true(recoverable(["-"]))
-  assert_true(recoverable(["--onto", "main", "feature~3", "feature"]))
-  assert_true(recoverable(["--onto=main", "feature"]))
-  assert_true(recoverable(["--keep-base", "main"]))
-  assert_true(recoverable(["--fork-point", "main"]))
-  assert_true(recoverable(["--no-fork-point", "main"]))
-  assert_true(recoverable(["--autostash", "main"]))
-  assert_true(recoverable(["--no-autostash", "main"]))
-  assert_true(recoverable(["--continue"]))
-  assert_true(recoverable(["--abort"]))
-  assert_true(recoverable(["--skip"]))
-  assert_true(recoverable(["--quit"]))
+  // object store and the pre-rebase tip stays in ORIG_HEAD/the reflog. Every
+  // admitted form must also stay clear of the pre-block (allowlist ∩
+  // pre-block = ∅), or a trusted form would be refused at launch.
+  for
+    args in (
+      [
+        [],
+        ["main"],
+        ["origin/main", "feature"],
+        ["-"],
+        ["--onto", "main", "feature~3", "feature"],
+        ["--onto=main", "feature"],
+        ["--keep-base", "main"],
+        ["--fork-point", "main"],
+        ["--no-fork-point", "main"],
+        ["--autostash", "main"],
+        ["--no-autostash", "main"],
+        ["--continue"],
+        ["--abort"],
+        ["--skip"],
+        ["--quit"],
+      ] : Array[Array[String]]) {
+    assert_true(recoverable(args))
+    assert_false(preblocked(args))
+  }
+  // The one deliberate divergence: an option-looking `--onto` value is
+  // admitted (mirroring git's consume-next parsing; git then fails to resolve
+  // it as a committish), while the pre-block scans the same raw token and
+  // refuses the command first — the pre-block runs before the trust mode at
+  // launch, so nothing executes.
+  assert_true(recoverable(["--onto", "-i", "main"]))
+  assert_true(preblocked(["--onto", "-i", "main"]))
   // Allowlist polarity: anything not an exact known-safe token fails closed —
   // rebase's surface includes command runners, and git accepts unambiguous
   // long-option abbreviations, so `--cont` is as untrusted as `--exec`.
@@ -79,8 +100,8 @@ test "rebase args: plain and in-progress forms recoverable, rest fails closed" {
 ///|
 test "should_preblock: rebase command-running and reconfigured forms" {
   // Blocked: forms that execute external commands (interactive/todo editing,
-  // `--exec`, a merge strategy) — including abbreviations, short clusters, and
-  // attached values — plus any reconfigured rebase.
+  // `--exec`, a merge strategy, gpg signing) — including abbreviations, short
+  // clusters, and attached values — plus any reconfigured rebase.
   for
     cmd in [
       ["git", "rebase", "-i", "main"],
@@ -97,6 +118,11 @@ test "should_preblock: rebase command-running and reconfigured forms" {
       ["git", "rebase", "--strategy=ours", "main"],
       ["git", "rebase", "-Xtheirs", "main"],
       ["git", "rebase", "--strategy-option", "theirs", "main"],
+      ["git", "rebase", "-S", "main"],
+      ["git", "rebase", "-Skey", "main"],
+      ["git", "rebase", "--gpg-sign", "main"],
+      ["git", "rebase", "--gpg-sign=key", "main"],
+      ["git", "rebase", "--gpg-s", "main"],
       ["git", "-c", "sequence.editor=x", "rebase", "--continue"],
       ["git", "-C", "/tmp/x", "rebase", "--abort"],
       ["git", "--work-tree=/tmp/x", "rebase", "main"],
@@ -106,7 +132,8 @@ test "should_preblock: rebase command-running and reconfigured forms" {
   // Not blocked: the recoverable forms (they run trusted) and the
   // merely-unrecognized forms (they run sandboxed, where the profile denies
   // any source write). `--stat`/`--empty` must not false-positive against the
-  // `--strategy`/`--exec` abbreviation prefixes.
+  // `--strategy`/`--exec` abbreviation prefixes, and `--no-gpg-sign` disables
+  // signing rather than requesting it.
   for
     cmd in [
       ["git", "rebase", "main"],
@@ -118,6 +145,7 @@ test "should_preblock: rebase command-running and reconfigured forms" {
       ["git", "rebase", "--rebase-merges", "main"],
       ["git", "rebase", "--stat", "main"],
       ["git", "rebase", "--empty=drop", "main"],
+      ["git", "rebase", "--no-gpg-sign", "main"],
       ["git", "rebase", "--help"],
     ] {
     assert_false(@git_policy.should_preblock(cmd, 1))

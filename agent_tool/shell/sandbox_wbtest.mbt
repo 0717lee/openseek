@@ -1411,7 +1411,9 @@ test "sandbox trusts restricted rebase forms, demotes the rest" {
   // materializes from the object store, the pre-rebase tip stays in
   // ORIG_HEAD/the reflog, and git refuses to overwrite untracked files during
   // replay. Conflict resolution still flows through `edit` + sandboxed
-  // `git add`, so this opens no source-editing channel outside the tools.
+  // `git add`, so worktree bytes stay object-store-sourced — though like all
+  // trusted git, a trusted rebase runs repo-configured hooks and programs
+  // (see the `rebase_args_are_recoverable` docs for that exec surface).
   for
     cmd in [
       "git rebase", "git rebase main", "git rebase origin/main feature", "git rebase --onto main feature~3 feature",

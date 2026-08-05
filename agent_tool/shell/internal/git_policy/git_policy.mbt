@@ -108,6 +108,17 @@ pub fn subcommand_is_object_store_writer(subcommand : String) -> Bool {
 /// remaining todo steps of a user-started interactive rebase; those steps are
 /// the user's own, and the agent cannot author any because the interactive
 /// forms are pre-blocked (`should_preblock`).
+///
+/// Like every trusted git command, a trusted rebase still executes
+/// repo-configured programs: `.git/hooks` (`pre-rebase`/`post-rewrite`, and
+/// commit hooks on `--continue`), merge drivers on a conflicted replay, and —
+/// new with rebase, since no other trusted subcommand creates commits —
+/// `gpg.program` when repo config sets `commit.gpgSign`. `.git` itself is
+/// writable under the source-write sandbox, so this trust (like trusted
+/// `checkout`'s smudge-filter/hook exposure) assumes a good-will agent;
+/// hardening that channel belongs to the sandbox profile, not this argv
+/// policy. The explicit signing flags are still pre-blocked
+/// (`rebase_args_run_external_commands`) as the cross-platform floor.
 pub fn rebase_args_are_recoverable(
   words : Array[String],
   start : Int,
@@ -127,7 +138,10 @@ pub fn rebase_args_are_recoverable(
       | "--no-autostash" => index += 1
       // The `--onto` value is a committish resolved from the object store; git
       // consumes the next word whatever it looks like, and a non-revision fails
-      // resolution before anything is written.
+      // resolution before anything is written. An option-looking value
+      // (`--onto -i`) is admitted here to mirror git's consume-next parsing,
+      // but the pre-block scans the same raw token and refuses the command
+      // first — the layering `run_agent_shell_with_tree_precheck` guarantees.
       "--onto" => {
         if index + 1 >= end {
           return false
@@ -340,16 +354,19 @@ fn short_cluster_has(arg : String, flag : String) -> Bool {
 /// Whether a `git rebase` invocation's arguments (in `words[start..end)`)
 /// request running external commands: `-i`/`--interactive` (sequence-editor
 /// driven, `exec` todo lines), `--edit-todo` (opens the todo in an editor),
-/// `-x`/`--exec` (a shell command per commit), or a merge strategy
+/// `-x`/`--exec` (a shell command per commit), a merge strategy
 /// (`-s`/`--strategy` resolves a `git-merge-<s>` executable from the exec
-/// path; `-X`/`--strategy-option` is grouped with it conservatively). These
-/// are pre-blocked cross-platform: on a platform without `sandbox-exec` they
-/// would otherwise run arbitrary commands. Long options match by prefix
-/// because git accepts unambiguous abbreviations (`--exe=cmd` runs the
-/// command; an ambiguous prefix such as `--e` just errors in git, so
-/// over-matching is harmless in a pre-block); short options match inside
-/// clusters and attached-value forms (`-iv`, `-xcmd`). The scan stops at `--`:
-/// past it every word is a revision, and a revision cannot begin with a dash.
+/// path; `-X`/`--strategy-option` is grouped with it conservatively), or
+/// commit signing (`-S`/`--gpg-sign` spawns `gpg.program`, which repo config
+/// can point anywhere). These are pre-blocked cross-platform: on a platform
+/// without `sandbox-exec` they would otherwise run arbitrary commands. Long
+/// options match by prefix because git accepts unambiguous abbreviations
+/// (`--exe=cmd` runs the command; an ambiguous prefix such as `--e` just
+/// errors in git, so over-matching is harmless in a pre-block); short options
+/// match inside clusters and attached-value forms (`-iv`, `-xcmd`, `-Skey`).
+/// `--no-gpg-sign` disables signing and is deliberately not matched (`--gpg-sign`
+/// is not a prefix of it). The scan stops at `--`: past it every word is a
+/// revision, and a revision cannot begin with a dash.
 fn rebase_args_run_external_commands(
   words : Array[String],
   start : Int,
@@ -374,12 +391,14 @@ fn rebase_arg_runs_external_commands(arg : String) -> Bool {
       long_option_selects(arg, "--exec") ||
       long_option_selects(arg, "--edit-todo") ||
       long_option_selects(arg, "--strategy") ||
-      long_option_selects(arg, "--strategy-option")
+      long_option_selects(arg, "--strategy-option") ||
+      long_option_selects(arg, "--gpg-sign")
   }
   short_cluster_has(arg, "i") ||
   short_cluster_has(arg, "x") ||
   short_cluster_has(arg, "s") ||
-  short_cluster_has(arg, "X")
+  short_cluster_has(arg, "X") ||
+  short_cluster_has(arg, "S")
 }
 
 ///|
