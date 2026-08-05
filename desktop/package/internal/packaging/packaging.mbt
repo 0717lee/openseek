@@ -4,11 +4,8 @@
 const FrontendPackage : String = "frontend/desktop"
 
 ///|
-/// The JS bundle `moon build frontend/desktop --target js --release` emits.
-/// Build
-/// output lands in the monorepo root's `_build` (the single root moon.work
-/// owns the build directory), so this resolves via `repo_at`, not `at`.
-const FrontendBundleArtifact : String = "_build/js/release/build/openseek_desktop/frontend/desktop/desktop.js"
+/// The JS bundle's path below MoonBit's target/profile build directory.
+const FrontendBundleArtifact : String = "build/openseek_desktop/frontend/desktop/desktop.js"
 
 ///|
 /// The stable path the host and packagers read the frontend bundle from.
@@ -71,13 +68,13 @@ const CodiconFontOutput : String = "codicon.ttf"
 const NativePackage : String = "."
 
 ///|
-const NativeBinary : String = "_build/native/release/build/openseek_desktop/openseek_desktop.exe"
+const NativeBinary : String = "build/openseek_desktop/openseek_desktop.exe"
 
 ///|
 const EnginePackage : String = "cmd/openseek"
 
 ///|
-const EngineBinary : String = "_build/native/release/build/bobzhang/openseek/cmd/openseek/openseek.exe"
+const EngineBinary : String = "build/bobzhang/openseek/cmd/openseek/openseek.exe"
 
 ///|
 /// Raised when a packaging helper cannot complete a filesystem, build, or
@@ -158,17 +155,19 @@ fn join_path(base : String, relative : String) -> String {
 }
 
 ///|
-/// Return the release-mode native desktop host binary path under the monorepo
-/// root, where the single root moon.work places all build output.
-pub fn Workspace::native_binary(self : Workspace) -> String {
-  self.repo_at(NativeBinary)
+/// Return the selected-mode native desktop host binary path under the
+/// monorepo root, where the single root moon.work places all build output.
+pub fn Workspace::native_binary(self : Workspace, release~ : Bool) -> String {
+  let mode = if release { "release" } else { "debug" }
+  self.repo_at("_build/native/\{mode}/\{NativeBinary}")
 }
 
 ///|
-/// Return the release-mode openseek engine binary path under the monorepo
+/// Return the selected-mode openseek engine binary path under the monorepo
 /// root.
-pub fn Workspace::engine_binary(self : Workspace) -> String {
-  self.repo_at(EngineBinary)
+pub fn Workspace::engine_binary(self : Workspace, release~ : Bool) -> String {
+  let mode = if release { "release" } else { "debug" }
+  self.repo_at("_build/native/\{mode}/\{EngineBinary}")
 }
 
 ///|
@@ -418,15 +417,20 @@ pub async fn run_checked(
 }
 
 ///|
-/// Build the frontend package and copy the generated JS bundle to the stable
-/// `frontend.js` path the host and packagers consume.
-pub async fn build_frontend_bundle(ws : Workspace) -> Unit {
+/// Build the frontend package in the selected mode and copy the generated
+/// JS bundle to the stable `frontend.js` path the host and packagers consume.
+pub async fn build_frontend_bundle(ws : Workspace, release~ : Bool) -> Unit {
+  let release_args = if release { ["--release"] } else { [] }
   run_checked(
     "moon",
-    ["build", FrontendPackage, "--target", "js", "--release"],
+    ["build", FrontendPackage, "--target", "js", ..release_args],
     dir=ws.dir(),
   )
-  copy_file(ws.repo_at(FrontendBundleArtifact), ws.at(FrontendBundleOutput))
+  let mode = if release { "release" } else { "debug" }
+  copy_file(
+    ws.repo_at("_build/js/\{mode}/\{FrontendBundleArtifact}"),
+    ws.at(FrontendBundleOutput),
+  )
   build_viewer_stylesheet(ws)
 }
 
@@ -535,13 +539,13 @@ async fn restore_client_token(ws : Workspace, original : String?) -> Unit {
 }
 
 ///|
-/// Build the native desktop host in release mode. When the packaging
-/// machine sets OPENSEEK_CLIENT_TOKEN, the token is stamped into the host
-/// source for the build and the committed source is restored afterwards —
-/// even when the build fails — so the token reaches the binary but never
-/// the repository.
+/// Build the native desktop host in the selected mode. When the packaging
+/// machine sets OPENSEEK_CLIENT_TOKEN, the token is stamped into the host source
+/// for the build and the committed source is restored afterwards — even when
+/// the build fails — so the token reaches the binary but never the repository.
 pub async fn build_native_host(
   ws : Workspace,
+  release~ : Bool,
   extra_args? : Array[String] = [],
   extra_env? : Map[String, String] = Map([]),
   disable_mimalloc? : Bool = false,
@@ -582,9 +586,10 @@ pub async fn build_native_host(
     build_env[name] = value
   }
   build_env["PROTON_NATIVE_DIST"] = runtime_dist
+  let release_args = if release { ["--release"] } else { [] }
   run_checked(
     "moon",
-    ["build", NativePackage, "--target", "native", "--release"] + extra_args,
+    ["build", NativePackage, "--target", "native", ..release_args, ..extra_args],
     dir=ws.dir(),
     extra_env=build_env,
   ) catch {
@@ -679,15 +684,17 @@ async fn restore_mimalloc(swap : MimallocSwap?) -> Unit {
 /// always matches the checkout instead of whatever happens to be on PATH.
 pub async fn build_engine(
   ws : Workspace,
+  release~ : Bool,
   extra_env? : Map[String, String] = Map([]),
 ) -> Unit {
+  let release_args = if release { ["--release"] } else { [] }
   run_checked(
     "moon",
-    ["build", EnginePackage, "--target", "native", "--release"],
+    ["build", EnginePackage, "--target", "native", ..release_args],
     dir=ws.repo(),
     extra_env~,
   )
-  let engine_binary = ws.engine_binary()
+  let engine_binary = ws.engine_binary(release~)
   if !@asyncfs.exists(engine_binary) {
     raise PackageError("openseek engine binary not found: \{engine_binary}")
   }
@@ -750,6 +757,23 @@ test "workspace path join preserves spaces and nested segments" {
   assert_eq(
     ws.at("dist/SeekMoon.app/Contents/Resources/toolchains/moonbit/macos-arm64"),
     "/My Checkouts/w/dist/SeekMoon.app/Contents/Resources/toolchains/moonbit/macos-arm64",
+  )
+}
+
+///|
+test "package build paths select debug or release" {
+  let ws : Workspace = { root: "/abs/repo/desktop" }
+  assert_eq(
+    ws.native_binary(release=false),
+    "/abs/repo/_build/native/debug/build/openseek_desktop/openseek_desktop.exe",
+  )
+  assert_eq(
+    ws.engine_binary(release=false),
+    "/abs/repo/_build/native/debug/build/bobzhang/openseek/cmd/openseek/openseek.exe",
+  )
+  assert_eq(
+    ws.native_binary(release=true),
+    "/abs/repo/_build/native/release/build/openseek_desktop/openseek_desktop.exe",
   )
 }
 

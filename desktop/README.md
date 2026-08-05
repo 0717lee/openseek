@@ -206,13 +206,15 @@ restage, clean, and rebuild until the submodule tree stays clean.
 Then build the frontend bundle and the native binary:
 
 ```sh
-moon build frontend/desktop --target js --release
-cp ../_build/js/release/build/openseek_desktop/frontend/desktop/desktop.js frontend.js
-moon build . --target native --release         # build the native binary
+moon build frontend/desktop --target js
+cp ../_build/js/debug/build/openseek_desktop/frontend/desktop/desktop.js frontend.js
+moon build . --target native         # build the native binary
 ```
 
 The native binary is written to
-`_build/native/release/build/openseek_desktop/openseek_desktop.exe`.
+`_build/native/debug/build/openseek_desktop/openseek_desktop.exe`. Add
+`--release` to each build command for optimized output; those artifacts use the
+corresponding `_build/*/release/` directories.
 
 ## Run during development
 
@@ -231,7 +233,8 @@ packaged layout, so running the bare `openseek_desktop` binary unbundled — or
 pointing it at an `openseek` on `PATH` — is not supported. To iterate on the UI,
 rebuild the frontend bundle and re-run the package command; the engine and seed
 are rebuilt and re-staged from the same checkout, so the app never drifts out of
-version with them.
+version with them. Package commands build debug MoonBit artifacts by default;
+pass `--release` after `--` when you need optimized artifacts.
 
 ## Bootstrap desktop submodules on Windows
 
@@ -245,6 +248,9 @@ It builds the Lepus codegen tool if needed, installs WebView2 SDK headers if
 needed, builds the frontend and native host, builds the `openseek` engine from
 the monorepo root, writes `dist/windows-x64/SeekMoon/`, and creates
 `dist/SeekMoon-windows-x64.zip`.
+
+This development command builds debug MoonBit artifacts. Add `-- --release`
+for an optimized bundle and archives.
 
 Without additional arguments, the command builds every output: the
 `dist/windows-x64/SeekMoon/` bundle directory, the
@@ -355,7 +361,7 @@ The target machine also needs Microsoft WebView2 Runtime installed.
 
 `package/macos` runs all of the above (including the codegen bootstrap),
 builds the `openseek` engine from the monorepo's `cmd/openseek` source, and
-produces `dist/SeekMoon.app` by default:
+produces `dist/SeekMoon.app` from debug MoonBit artifacts by default:
 
 ```sh
 moon run --target native package/macos
@@ -368,13 +374,14 @@ re-signs the five CEF helpers whose rpaths the packager modifies. It deliberatel
 does not seal the outer app bundle or re-sign the bundled MoonBit toolchain.
 This faster output is for development on the build machine, not distribution or
 the in-app updater. Scripts may pass `--target app` to request the same output
-explicitly.
+explicitly. Pass `--release` after `--` to build the frontend, host, and engine
+as optimized release artifacts.
 
 To build a distribution artifact, select `dmg` or `zip`:
 
 ```sh
-moon run --target native package/macos -- --target dmg
-moon run --target native package/macos -- --target zip
+moon run --target native package/macos -- --release --target dmg
+moon run --target native package/macos -- --release --target zip
 ```
 
 - `dist/SeekMoon-macos-arm64.dmg` is for first-time installation. It
@@ -405,6 +412,7 @@ timestamp are applied automatically) and notarize:
 # one-time: xcrun notarytool store-credentials openseek \
 #   --apple-id you@example.com --team-id TEAMID --password <app-specific-pw>
 moon run --target native package/macos -- \
+  --release \
   --target dmg \
   --target zip \
   --sign "Developer ID Application: Your Name (TEAMID)" \
@@ -424,12 +432,19 @@ for distribution.
 
 `package/linux` runs the same build steps (including the codegen
 bootstrap), builds the `openseek` engine from the monorepo's `cmd/openseek`
-source, and produces `dist/SeekMoon-linux-x86_64.AppImage`:
+source, and produces `dist/SeekMoon-linux-x86_64.AppImage`. It builds debug
+MoonBit artifacts by default:
 
 ```sh
 moon run --target native package/linux
 # or, from the monorepo root:
 moon -C desktop run --target native package/linux
+```
+
+For an optimized AppImage, pass the package flag after Moon's `--` separator:
+
+```sh
+moon run --target native package/linux -- --release
 ```
 
 Build requirements: `pkg-config` plus the GTK3 and WebKitGTK dev packages
