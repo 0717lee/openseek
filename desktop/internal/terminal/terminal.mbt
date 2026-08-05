@@ -186,9 +186,9 @@ pub fn ack_terminal(state : TerminalState, id~ : Int, sequence~ : Int) -> Unit {
 }
 
 ///|
-/// Request a session's shutdown. Its task kills the child immediately, then
-/// the existing read/wait path emits `Exited` and releases the PTY. Unknown
-/// ids are a no-op (the session already exited).
+/// Request a session's shutdown. Its task stops the child immediately and, on
+/// Windows, closes the ConPTY handles so a pending reader wakes; the existing
+/// wait path then emits `Exited`. Unknown ids are a no-op (already exited).
 pub fn close_terminal(state : TerminalState, id~ : Int) -> Unit {
   guard state.sessions.get(id) is Some(session) else { return }
   guard !session.closing else { return }

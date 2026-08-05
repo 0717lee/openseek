@@ -27,6 +27,25 @@ pub async fn run_terminal_pump(
 }
 
 ///|
+/// POSIX closes the PTY slave when the child dies, which wakes the reader and
+/// lets the session drain before its deferred `Pty::close` runs.
+#cfg(not(platform="windows"))
+async fn TerminalSession::close_when_requested(self : TerminalSession) -> Unit {
+  self.close_requested.get()
+  let cancel = @process.hard_cancel()
+  cancel(self.pty.pid())
+}
+
+///|
+/// Windows ConPTY keeps its output pipe open after the child dies. Close the
+/// whole PTY so the pending reader is released as well as the child process.
+#cfg(platform="windows")
+async fn TerminalSession::close_when_requested(self : TerminalSession) -> Unit {
+  self.close_requested.get()
+  self.pty.close()
+}
+
+///|
 /// One session's lifetime: spawn the PTY child, answer the opener, then loop
 /// reading output until the child exits (or `close_terminal` requests it),
 /// pausing whenever the flow-control debt passes the high watermark.
@@ -86,15 +105,9 @@ async fn run_session(
       state.sessions.remove(request.id)
       pty.close()
     }
-    // `Pty::cancel` uses the process package's five-second graceful timeout on
-    // Unix. A terminal close is an explicit immediate operation, so a
-    // session-owned task applies the cross-platform hard cancellation handler
-    // while the normal reader and waiter continue to drain and reap the child.
-    group.spawn_bg(no_wait=true, () => {
-      session.close_requested.get()
-      let cancel = @process.hard_cancel()
-      cancel(pty.pid())
-    })
+    // The session owns the platform-specific difference between killing a
+    // POSIX child and closing a Windows ConPTY to wake its output reader.
+    group.spawn_bg(no_wait=true, () => session.close_when_requested())
     request.reply.put(Ok(()))
     @xlog.debug() <?
       {
@@ -111,6 +124,10 @@ async fn run_session(
       // A closed master reports the child's exit as EIO on macOS rather
       // than a clean EOF; both end the session the same way.
       let n = reader.read(buf) catch {
+        // On Windows, `close_terminal` closes the PTY to wake this read, which
+        // the async stream reports as cancellation. It is normal EOF for this
+        // session, not cancellation of the task that owns it.
+        _ if session.closing => 0
         error if @async.is_being_cancelled() => raise error
         _ => 0
       }

@@ -35,6 +35,16 @@ async test "a default session launches a live platform shell" {
       }
     })
     close_terminal(state, id~)
+    // Windows keeps ConPTY's output pipe open after cmd.exe alone is killed.
+    // Requiring `Exited` proves terminal close also releases the PTY handles
+    // and wakes the session reader instead of merely signalling the child.
+    @async.with_timeout(5000, () => {
+      for ;; {
+        if pushes.get() is Exited(..) {
+          break
+        }
+      }
+    })
   })
 }
 

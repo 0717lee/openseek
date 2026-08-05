@@ -227,6 +227,7 @@ jobs:
       # successful production build.
       - name: Test Windows terminal
         shell: pwsh
+        timeout-minutes: 5
         run: moon -C desktop test internal/terminal --target native
 
       # Pull requests upload only the portable ZIP, so they do not spend time
