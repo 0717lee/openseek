@@ -83,9 +83,12 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             pkg-config libgtk-3-dev libx11-dev xvfb
 
-      - name: Cache CEF distribution
+      # Pull requests may restore the default branch's cache, but their own
+      # merge-ref caches are private to that PR and cannot warm other branches.
+      - name: Restore CEF distribution
         if: matrix.target == 'native'
-        uses: actions/cache@v4
+        id: cef-cache
+        uses: actions/cache/restore@v4
         with:
           # Proton shares downloaded CEF distributions between projects here,
           # then copies the selected version into the project-local runtime.
@@ -120,6 +123,19 @@ jobs:
           cmake --build desktop/target/proton-native/build --config Release
           cp desktop/target/proton-native/build/lib/libproton.so "$dist/lib/libproton.so"
           nm -D "$dist/lib/libproton.so" | grep -q proton_runtime_set_menu_json
+
+      # The stable/native main job is the sole Linux writer. PR jobs remain
+      # restore-only, and nightly does not race stable to reserve the same key.
+      - name: Save CEF distribution
+        if: >-
+          github.event_name == 'push' &&
+          matrix.moonbit-channel == 'stable' &&
+          matrix.target == 'native' &&
+          steps.cef-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.proton/cache/cef
+          key: ${{ steps.cef-cache.outputs.cache-primary-key }}
 
       - name: Check formatting
         # Stable only, for the same reason as `--deny-warn` below. `moon fmt` is

@@ -31,9 +31,11 @@ jobs:
       - name: Check out the Proton submodule
         run: git submodule update --init desktop/lepus
 
-      # `cef setup` reads and populates Proton's shared user-level cache.
-      - name: Cache CEF distribution
-        uses: actions/cache@v4
+      # Root CI's stable/native main job owns the Linux cache. This packaging
+      # job restores it without creating a workflow- or PR-private duplicate.
+      - name: Restore CEF distribution
+        id: cef-cache
+        uses: actions/cache/restore@v4
         with:
           path: ~/.proton/cache/cef
           key: cef-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('desktop/lepus/cli/cef/cef_platform.mbt') }}
@@ -98,9 +100,11 @@ jobs:
       - name: Check out the Proton submodule
         run: git submodule update --init desktop/lepus
 
-      # `cef setup` reads and populates Proton's shared user-level cache.
-      - name: Cache CEF distribution
-        uses: actions/cache@v4
+      # Pull requests restore the default-branch cache without writing a
+      # merge-ref cache that no other PR can use.
+      - name: Restore CEF distribution
+        id: cef-cache
+        uses: actions/cache/restore@v4
         with:
           path: ~/.proton/cache/cef
           key: cef-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('desktop/lepus/cli/cef/cef_platform.mbt') }}
@@ -142,6 +146,16 @@ jobs:
       - name: Build the macOS artifacts
         run: moon -C desktop run --target native package/macos -- --release --target dmg --target zip
 
+      # Only a trusted push to main publishes the cache shared by later PRs.
+      - name: Save CEF distribution
+        if: >-
+          github.event_name == 'push' &&
+          steps.cef-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.proton/cache/cef
+          key: ${{ steps.cef-cache.outputs.cache-primary-key }}
+
       - name: Upload macOS artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -163,9 +177,11 @@ jobs:
       - name: Check out the Proton submodule
         run: git submodule update --init desktop/lepus
 
-      # `cef setup` reads and populates Proton's shared user-level cache.
-      - name: Cache CEF distribution
-        uses: actions/cache@v4
+      # Pull requests restore the default-branch cache without writing a
+      # merge-ref cache that no other PR can use.
+      - name: Restore CEF distribution
+        id: cef-cache
+        uses: actions/cache/restore@v4
         with:
           path: ~/.proton/cache/cef
           key: cef-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('desktop/lepus/cli/cef/cef_platform.mbt') }}
@@ -242,6 +258,16 @@ jobs:
         if: github.event_name != 'pull_request'
         shell: pwsh
         run: moon -C desktop run --target native package/windows -- --release
+
+      # Only a trusted push to main publishes the cache shared by later PRs.
+      - name: Save CEF distribution
+        if: >-
+          github.event_name == 'push' &&
+          steps.cef-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.proton/cache/cef
+          key: ${{ steps.cef-cache.outputs.cache-primary-key }}
 
       - name: Upload Windows app artifact
         uses: actions/upload-artifact@v4
