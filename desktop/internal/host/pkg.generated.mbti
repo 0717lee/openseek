@@ -4,10 +4,14 @@ package "openseek_desktop/internal/host"
 import {
   "moonbitlang/async",
   "moonbitlang/x/path",
+  "openseek_desktop/internal/endpoint",
+  "openseek_desktop/internal/protocol",
 }
 
 // Values
 pub fn app_bundle_path(String) -> String?
+
+pub fn endpoints(HostState, HostConnection, () -> Unit) -> Array[@endpoint.Endpoint]
 
 pub fn frontend_asset_dir(String) -> String
 
@@ -15,15 +19,11 @@ pub async fn frontend_document(String) -> String
 
 pub async fn frontend_entry_path(String) -> String
 
-pub fn host_method_names() -> Array[String]
-
-pub async fn host_op(HostState, HostConnection, String, Json, (String, Json) -> Unit) -> Json?
-
 pub fn new_host_state(String, runtime_dir? : @path.Path, executable? : String) -> HostState
 
 pub async fn prepared_runtime_dir() -> @path.Path?
 
-pub fn[G] spawn_host_pumps(@async.TaskGroup[G], HostState, async (String, Json) -> Unit) -> Unit
+pub fn[G] spawn_host_pumps(@async.TaskGroup[G], HostState, async (@protocol.Notification) -> Unit) -> Unit
 
 // Errors
 pub(all) suberror HostError {
@@ -38,7 +38,7 @@ pub(all) suberror PayloadError {
 type HostConnection
 pub fn HostConnection::close_terminals(Self) -> Unit
 pub fn HostConnection::new() -> Self
-pub async fn HostConnection::run(Self, async (String, Json) -> Unit) -> Unit
+pub async fn HostConnection::run(Self, async (@protocol.Notification) -> Unit) -> Unit
 
 type HostState
 

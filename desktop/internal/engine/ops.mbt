@@ -14,7 +14,7 @@
 pub async fn start_run(
   sink : EventSink,
   manager : EngineManager,
-  payload : StartRequest,
+  payload : @protocol.StartPayload,
 ) -> StartReply {
   manager.workspace_lifecycle_lock.acquire()
   let mut placement_locked = true
@@ -98,11 +98,11 @@ pub async fn start_run(
       sink,
       Started({
         run_id,
-        task: config.task,
+        task: Some(config.task),
         submission_id,
-        engine: config.engine,
-        model: config.model,
-        max_steps: config.max_steps,
+        engine: Some(config.engine),
+        model: Some(config.model),
+        max_steps: Some(config.max_steps),
         cwd: config.cwd.map(cwd => cwd.to_string()),
         session: config.session,
         session_root: config.session_root.map(root => root.to_string()),
@@ -152,7 +152,7 @@ fn mint_run_id() -> String raise EngineError {
 /// to cancel.
 pub async fn cancel_run(
   manager : EngineManager,
-  payload : CancelRequest,
+  payload : @protocol.CancelPayload,
 ) -> CancelReply {
   guard open_run_engine(manager, run_id?=payload.run_id) is Some(live) else {
     return { cancelled: false, run_id: None }
@@ -250,7 +250,7 @@ async fn request_spawn(
 /// the command reached a live engine.
 pub async fn compact_run(
   manager : EngineManager,
-  payload : CompactRequest,
+  payload : @protocol.CompactPayload,
 ) -> CompactReply {
   manager.workspace_lifecycle_lock.acquire()
   let mut placement_locked = true
@@ -352,7 +352,7 @@ pub async fn compact_run(
 /// emitting any settling event, which would leave a phantom acknowledgment.
 pub async fn steer_run(
   manager : EngineManager,
-  payload : SteerRequest,
+  payload : @protocol.SteerPayload,
 ) -> SteerReply {
   guard !payload.text.trim().is_empty() else {
     return { steered: false, run_id: None }
@@ -553,7 +553,7 @@ async fn session_group(
   }
   let root = root.to_string()
   fn failed(error : String) -> SessionGroup {
-    { workspace, name, session_root: root, sessions: Json::array([]), error }
+    { workspace, name, session_root: root, sessions: [], error }
   }
 
   let output = engine_stdout(manager, [
@@ -563,16 +563,20 @@ async fn session_group(
     EngineError(detail) => return failed("session list failed: \{detail}")
     error => return failed("session list failed: \{error}")
   }
-  let sessions = @json.parse(output) catch {
+  let sessions_json = @json.parse(output) catch {
     _ => return failed("engine returned a malformed session list")
   }
+  guard sessions_json is Array(_) else {
+    return failed("engine returned a malformed session list")
+  }
+  let sessions = @protocol.SessionListEntry::array_from_wire(sessions_json)
   { workspace, name, session_root: root, sessions, error: "" }
 }
 
 ///|
 pub async fn load_session(
   manager : EngineManager,
-  payload : LoadSessionRequest,
+  payload : @protocol.LoadSessionPayload,
 ) -> LoadSessionReply {
   let session = payload.session.trim().to_owned()
   guard !session.is_empty() else {
@@ -604,8 +608,11 @@ pub async fn load_session(
   // that broadcasts `session.event` commits, so the two can never disagree
   // about what has been committed. The reply's watermark tells the client
   // which commits its snapshot already contains.
-  if follower_snapshot(manager, session, root) is Some(json) {
-    return { session: json, watermark: session_max_sequence(json) }
+  if follower_snapshot(manager, session, root) is Some(document) {
+    return {
+      session: document,
+      watermark: Some(session_max_sequence(document)),
+    }
   }
   let output = session_show_stdout(manager, session, root) catch {
     EngineError(detail) => raise EngineError("session load failed: " + detail)
@@ -614,7 +621,10 @@ pub async fn load_session(
   let json = @json.parse(output) catch {
     _ => raise EngineError("engine returned a malformed session")
   }
-  { session: json, watermark: session_max_sequence(json) }
+  let document : @protocol.SessionDocument = @json.from_json(json) catch {
+    _ => raise EngineError("engine returned a malformed session")
+  }
+  { session: document, watermark: Some(session_max_sequence(document)) }
 }
 
 ///|
@@ -624,7 +634,7 @@ async fn follower_snapshot(
   manager : EngineManager,
   session : String,
   root : @path.Path,
-) -> Json? {
+) -> @protocol.SessionDocument? {
   for ;; {
     guard manager.followers.get(session) is Some(follower) else { return None }
     // Session ids can exist in several stores. Never return a snapshot from
@@ -640,7 +650,7 @@ async fn follower_snapshot(
       continue
     }
     match request_follower_load(follower) {
-      LoadOk(json) => return Some(json)
+      LoadOk(document) => return Some(document)
       LoadStopped => continue
       LoadFailed(detail) => raise EngineError("session load failed: " + detail)
     }
@@ -1121,6 +1131,36 @@ async test "timed out sessions show is killed and the next read can run" {
     session_show_stdout(manager, "s-timeout", root, timeout_ms=1000),
     "{\"events\":[]}",
   )
+  @fs.rmdir(dir, recursive=true)
+}
+
+///|
+#cfg(not(platform="windows"))
+async test "session load preserves a future item without hiding known events" {
+  archive_env_test_lock.acquire()
+  defer archive_env_test_lock.release()
+  let previous = @sys.get_env_var("OPENSEEK_SESSION_ROOT")
+  let dir = @fs.tmpdir(prefix="openseek-load-future-item-")
+  let engine = dir + "/engine.sh"
+  @sys.set_env_var("OPENSEEK_SESSION_ROOT", dir)
+  defer restore_session_root_env(previous)
+  @fsx.ensure_dir(Path(dir + "/sessions/s-future"))
+  @fs.write_file(
+    engine,
+    "#!/bin/sh\nprintf '%s' '{\"events\":[{\"sequence\":1,\"item\":{\"kind\":\"user\",\"payload\":{\"content\":\"question\"}}},{\"sequence\":2,\"item\":{\"kind\":\"future_item\",\"payload\":{\"value\":42}}},{\"sequence\":3,\"item\":{\"kind\":\"assistant\",\"payload\":{\"content\":\"answer\"}}}]}'\n",
+    create_mode=CreateOrTruncate,
+  )
+  assert_eq(@process.run("chmod", ["+x", engine]), 0)
+  let reply = load_session(new_engine_manager(engine), {
+    session: "s-future",
+    workspace: None,
+  })
+  guard reply.session.events is Some(events) else {
+    fail("expected session events")
+  }
+  assert_eq(events.length(), 3)
+  assert_true(events[1].item is Unknown(_))
+  assert_eq(reply.watermark, Some(3))
   @fs.rmdir(dir, recursive=true)
 }
 

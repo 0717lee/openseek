@@ -1,9 +1,6 @@
-// The package's public face: the transport-agnostic host ops — everything
-// the desktop host offers a client beyond the engine itself (file browsing,
-// language services, skills, self-update, app launching) — dispatched by
-// method name. The method names and payload shapes are the wire catalog of
-// docs/remote-protocol.md, shared verbatim by the proton bridge and the
-// remote WebSocket.
+// Transport-agnostic host operations: file browsing, language services,
+// skills, self-update, app launching, and connection-owned filesystem/PTY
+// state. Typed payloads enter here only after an Endpoint has decoded them.
 
 ///|
 /// A host-side failure with a user-facing message. Ops raise it; the
@@ -96,12 +93,12 @@ pub fn new_host_state(
 pub fn[G] spawn_host_pumps(
   group : @async.TaskGroup[G],
   state : HostState,
-  emit : async (String, Json) -> Unit,
+  emit : async (@protocol.Notification) -> Unit,
 ) -> Unit {
   group.spawn_bg(allow_failure=true, () => state.lsp.run())
   group.spawn_bg(allow_failure=true, () => {
     state.lsp.forward_diagnostics(async fn(push) {
-      emit("lsp.diagnostics", ToJson::to_json(push))
+      emit(LspDiagnostics({ path: push.path, diagnostics: push.diagnostics }))
     })
   })
   group.spawn_bg(allow_failure=true, () => state.updates.run(emit))
@@ -113,7 +110,7 @@ pub fn[G] spawn_host_pumps(
 /// process-wide hub.
 pub async fn HostConnection::run(
   self : HostConnection,
-  emit : async (String, Json) -> Unit,
+  emit : async (@protocol.Notification) -> Unit,
 ) -> Unit {
   @async.with_task_group(group => {
     // Closing the request queue is the terminal pump's normal connection-end
@@ -128,18 +125,47 @@ pub async fn HostConnection::run(
               sequence,
               data: @base64.encode(data),
             }
-            emit("terminal.output", ToJson::to_json(payload))
+            emit(
+              TerminalOutput({
+                id: payload.id,
+                sequence: payload.sequence,
+                data: payload.data,
+              }),
+            )
           }
           Exited(id~, code~) => {
             let payload : TerminalExitPayload = { id, code }
-            emit("terminal.exit", ToJson::to_json(payload))
+            emit(TerminalExit({ id: payload.id, code: payload.code }))
           }
         }
       })
     })
     self.fs_watch.run(
-      async fn(push) { emit("fs.changed", ToJson::to_json(push)) },
-      async fn(failure) { emit("fs.watch_failed", ToJson::to_json(failure)) },
+      async fn(push) {
+        emit(
+          FsChanged({
+            session: Some(push.session),
+            root: Some(push.root),
+            baseline: Some(push.baseline),
+            events: Some(
+              push.events.map(event => {
+                kind_: event.kind_,
+                path: event.path,
+                old_path: event.old_path,
+              }),
+            ),
+          }),
+        )
+      },
+      async fn(failure) {
+        emit(
+          FsWatchFailed({
+            session: failure.session,
+            root: failure.root,
+            message: failure.message,
+          }),
+        )
+      },
     )
   })
 }
@@ -153,147 +179,107 @@ pub fn HostConnection::close_terminals(self : HostConnection) -> Unit {
 }
 
 ///|
-fn[T : @json.FromJson] decode_payload(payload : Json) -> T raise {
-  @json.from_json(payload) catch {
-    _ => raise PayloadError("malformed request payload")
-  }
-}
-
-///|
-/// Dispatch one host method by its catalog name, returning its JSON reply —
-/// or None for a name this host does not know, which the transport reports
-/// as an unknown method rather than a failed op. `publish` sends shared
-/// invalidations whose filesystem change must stay coupled to its notification.
-pub async fn host_op(
+/// Host-owned endpoints are assembled next to the private operations they
+/// invoke. The API package concatenates this catalog with engine/auth
+/// endpoints, so these operations do not need one public forwarding method
+/// apiece.
+pub fn endpoints(
   state : HostState,
   connection : HostConnection,
-  op : String,
-  payload : Json,
-  publish : (String, Json) -> Unit,
-) -> Json? {
-  match op {
-    "skills.catalog" => Some(ToJson::to_json(skills_catalog_op()))
-    "skills.install" =>
-      Some(
-        ToJson::to_json(
-          install_skill_op(decode_payload(payload), () => {
-            publish("skills.changed", Json::empty_object())
-          }),
-        ),
-      )
-    "skills.installed" => Some(ToJson::to_json(installed_skills_op()))
-    "skills.uninstall" =>
-      Some(
-        ToJson::to_json(
-          uninstall_skill_op(decode_payload(payload), () => {
-            publish("skills.changed", Json::empty_object())
-          }),
-        ),
-      )
-    "host.open_path" =>
-      Some(ToJson::to_json(open_path_op(decode_payload(payload))))
-    "update.check" =>
-      Some(ToJson::to_json(state.updates.check(decode_payload(payload))))
-    "update.download" =>
-      Some(
-        ToJson::to_json(state.updates.start_download(decode_payload(payload))),
-      )
-    "update.apply" => Some(ToJson::to_json(state.updates.apply()))
-    "git.branch" =>
-      Some(ToJson::to_json(git_branch_op(decode_payload(payload))))
-    "app.list" => Some(ToJson::to_json(list_apps_op()))
-    "app.launch" =>
-      Some(ToJson::to_json(launch_app_op(decode_payload(payload))))
-    "fs.read_directory" =>
-      Some(ToJson::to_json(read_directory_op(decode_payload(payload))))
-    "fs.list_files" =>
-      Some(ToJson::to_json(list_files_op(decode_payload(payload))))
-    "fs.read_file" =>
-      Some(ToJson::to_json(read_file_op(decode_payload(payload))))
-    "fs.stat_files" =>
-      Some(ToJson::to_json(stat_files_op(decode_payload(payload))))
-    "fs.watch" => {
-      connection.fs_watch.watch(decode_payload(payload))
-      Some(Json::empty_object())
-    }
-    "fs.unwatch" => {
-      connection.fs_watch.unwatch()
-      Some(Json::empty_object())
-    }
-    "terminal.open" =>
-      Some(
-        ToJson::to_json(
-          terminal_open_op(connection.terminal, decode_payload(payload)),
-        ),
-      )
-    "terminal.input" => {
-      terminal_input_op(connection.terminal, decode_payload(payload))
-      Some(Json::empty_object())
-    }
-    "terminal.resize" => {
-      terminal_resize_op(connection.terminal, decode_payload(payload))
-      Some(Json::empty_object())
-    }
-    "terminal.ack" => {
-      terminal_ack_op(connection.terminal, decode_payload(payload))
-      Some(Json::empty_object())
-    }
-    "terminal.close" => {
-      terminal_close_op(connection.terminal, decode_payload(payload))
-      Some(Json::empty_object())
-    }
-    "lsp.hover" =>
-      Some(ToJson::to_json(lsp_hover_op(state.lsp, decode_payload(payload))))
-    "lsp.open" =>
-      Some(ToJson::to_json(lsp_open_op(state.lsp, decode_payload(payload))))
-    "lsp.workspace_symbols" =>
-      Some(
-        ToJson::to_json(
-          workspace_symbols_op(state.lsp, decode_payload(payload)),
-        ),
-      )
-    "moonide.definition" =>
-      Some(
-        ToJson::to_json(moonide_definition_op(state, decode_payload(payload))),
-      )
-    "moonide.references" =>
-      Some(
-        ToJson::to_json(moonide_references_op(state, decode_payload(payload))),
-      )
-    "fs.browse" =>
-      Some(ToJson::to_json(browse_directory_op(decode_payload(payload))))
-    _ => None
-  }
-}
-
-///|
-/// Every host method name, in catalog order — the transport adapters
-/// register or advertise exactly this set.
-pub fn host_method_names() -> Array[String] {
+  on_skills_changed : () -> Unit,
+) -> Array[@endpoint.Endpoint] {
   [
-    "fs.read_file", "fs.read_directory", "fs.list_files", "fs.stat_files", "fs.watch",
-    "fs.unwatch", "fs.browse", "terminal.open", "terminal.input", "terminal.resize",
-    "terminal.ack", "terminal.close", "lsp.open", "lsp.hover", "lsp.workspace_symbols",
-    "moonide.definition", "moonide.references", "skills.catalog", "skills.installed",
-    "skills.install", "skills.uninstall", "update.check", "update.download", "update.apply",
-    "app.list", "app.launch", "git.branch", "host.open_path",
+    @endpoint.Endpoint::remote(@commands.fs_read_file, async fn(payload) {
+      read_file_op(payload)
+    }),
+    @endpoint.Endpoint::remote(@commands.fs_read_directory, async fn(payload) {
+      read_directory_op(payload)
+    }),
+    @endpoint.Endpoint::remote(@commands.fs_list_files, async fn(payload) {
+      list_files_op(payload)
+    }),
+    @endpoint.Endpoint::remote(@commands.fs_stat_files, async fn(payload) {
+      stat_files_op(payload)
+    }),
+    @endpoint.Endpoint::remote(@commands.fs_watch, async fn(payload) {
+      connection.fs_watch.watch(payload)
+      Acknowledged
+    }),
+    @endpoint.Endpoint::remote(@commands.fs_unwatch, async fn(_) {
+      connection.fs_watch.unwatch()
+      Acknowledged
+    }),
+    @endpoint.Endpoint::remote(@commands.fs_browse, async fn(payload) {
+      browse_directory_op(payload)
+    }),
+    @endpoint.Endpoint::remote(@commands.terminal_open, async fn(payload) {
+      terminal_open_op(connection.terminal, payload)
+    }),
+    @endpoint.Endpoint::remote(@commands.terminal_input, async fn(payload) {
+      terminal_input_op(connection.terminal, payload)
+      Acknowledged
+    }),
+    @endpoint.Endpoint::remote_sync(@commands.terminal_resize, payload => {
+      terminal_resize_op(connection.terminal, payload)
+      Acknowledged
+    }),
+    @endpoint.Endpoint::remote_sync(@commands.terminal_ack, payload => {
+      terminal_ack_op(connection.terminal, payload)
+      Acknowledged
+    }),
+    @endpoint.Endpoint::remote_sync(@commands.terminal_close, payload => {
+      terminal_close_op(connection.terminal, payload)
+      Acknowledged
+    }),
+    @endpoint.Endpoint::remote(@commands.lsp_open, async fn(payload) {
+      lsp_open_op(state.lsp, payload)
+    }),
+    @endpoint.Endpoint::remote(@commands.lsp_hover, async fn(payload) {
+      lsp_hover_op(state.lsp, payload)
+    }),
+    @endpoint.Endpoint::remote(@commands.lsp_workspace_symbols, async fn(
+      payload,
+    ) {
+      workspace_symbols_op(state.lsp, payload)
+    }),
+    @endpoint.Endpoint::remote(@commands.moonide_definition, async fn(payload) {
+      moonide_definition_op(state, payload)
+    }),
+    @endpoint.Endpoint::remote(@commands.moonide_references, async fn(payload) {
+      moonide_references_op(state, payload)
+    }),
+    @endpoint.Endpoint::remote(@commands.skills_catalog, async fn(_) {
+      skills_catalog_op()
+    }),
+    @endpoint.Endpoint::remote(@commands.skills_installed, async fn(_) {
+      installed_skills_op()
+    }),
+    @endpoint.Endpoint::remote(@commands.skills_install, async fn(payload) {
+      install_skill_op(payload, on_skills_changed)
+    }),
+    @endpoint.Endpoint::remote(@commands.skills_uninstall, async fn(payload) {
+      uninstall_skill_op(payload, on_skills_changed)
+    }),
+    @endpoint.Endpoint::remote(@commands.update_check, async fn(payload) {
+      state.updates.check(payload)
+    }),
+    @endpoint.Endpoint::remote_sync(@commands.update_download, payload => {
+      state.updates.start_download(payload)
+    }),
+    @endpoint.Endpoint::remote(@commands.update_apply, async fn(_) {
+      state.updates.apply()
+    }),
+    @endpoint.Endpoint::remote(@commands.app_list, async fn(_) {
+      list_apps_op()
+    }),
+    @endpoint.Endpoint::remote(@commands.app_launch, async fn(payload) {
+      launch_app_op(payload)
+    }),
+    @endpoint.Endpoint::remote(@commands.git_branch, async fn(payload) {
+      git_branch_op(payload)
+    }),
+    @endpoint.Endpoint::remote(@commands.host_open_path, async fn(payload) {
+      open_path_op(payload)
+    }),
   ]
-}
-
-///|
-test "host catalog advertises the complete terminal surface" {
-  let methods = host_method_names()
-  for
-    method_ in [
-      "terminal.open", "terminal.input", "terminal.resize", "terminal.ack", "terminal.close",
-    ] {
-    assert_true(methods.contains(method_))
-  }
-}
-
-///|
-test "host catalog advertises Moon IDE navigation" {
-  let methods = host_method_names()
-  assert_true(methods.contains("moonide.definition"))
-  assert_true(methods.contains("moonide.references"))
 }
