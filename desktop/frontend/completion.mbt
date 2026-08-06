@@ -502,8 +502,8 @@ test "a draft of chips alone is not sendable" {
 }
 
 ///|
-test "typed symbols project rows and skip blank names" {
-  let items = SymbolsProjection({
+test "typed symbols retain kind and project one-based completion rows" {
+  let symbols = SymbolsProjection({
     symbols: [
       {
         name: "parse_hover",
@@ -520,14 +520,16 @@ test "typed symbols project rows and skip blank names" {
         range: { start: { line: 0, col: 0 }, end: { line: 0, col: 0 } },
       },
     ],
-  }).rows()
+  }).symbols()
   // The blank-name row is dropped; one good row remains.
-  assert_eq(items.length(), 1)
-  assert_eq(items[0].label, "parse_hover")
+  assert_eq(symbols.length(), 1)
+  assert_eq(symbols[0].name, "parse_hover")
+  assert_eq(symbols[0].kind, Some(12))
+  let item = symbols[0].completion_item()
   // Detail reads container · path:line (line shown one-based).
-  assert_eq(items[0].detail, "Lsp · a/b.mbt:5")
+  assert_eq(item.detail, "Lsp · a/b.mbt:5")
   // The zero-based wire range arrives as one-based viewer coordinates.
   assert_true(
-    items[0].range is Some(range) && range == @common.Range::Range(5, 3, 5, 14),
+    item.range is Some(range) && range == @common.Range::Range(5, 3, 5, 14),
   )
 }
