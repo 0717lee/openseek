@@ -12,6 +12,12 @@ build:
     moon build --target native
     moon build --target js
 
+# Serve recorded sessions in the browser; flags pass through to the server
+# (e.g. just inspect --session-root path/to/sessions --port 8081).
+inspect *args:
+    moon build cmd/viz_app --target js
+    moon run inspect -- {{ args }}
+
 # Run workspace MoonBit tests plus the offline OpenSeek CLI documentation tests.
 test: test-moon
     moon cram test tests/cram

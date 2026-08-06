@@ -23,7 +23,15 @@ _build/js/debug/build/bobzhang/openseek-viz-app/openseek-viz-app.js
 
 ## Run
 
-Start the server from the repository root:
+The one-command path from the repository root — refreshes the frontend bundle,
+then starts the server, passing any flags through:
+
+```sh
+just inspect --session-root path/to/sessions --port 8081
+```
+
+Or directly (the server itself compiles on demand; only the bundle needs a
+prior `moon build`):
 
 ```sh
 moon run inspect
