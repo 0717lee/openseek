@@ -1,6 +1,6 @@
 name: Desktop release
 
-run-name: Desktop ${{ github.event_name == 'schedule' && 'staging' || inputs.channel }} v${{ github.event_name == 'schedule' && 'daily' || inputs.version }} by @${{ github.actor }}
+run-name: Desktop ${{ github.event_name == 'schedule' && 'stable' || inputs.channel }} v${{ github.event_name == 'schedule' && 'daily' || inputs.version }} by @${{ github.actor }}
 
 on:
   # GitHub cron is UTC; these run at 12:00 and 18:30 in Asia/Shanghai.
@@ -25,7 +25,7 @@ on:
 # A release must finish as one upload/publish transaction. A second dispatch
 # waits instead of cancelling a run that may already have uploaded its archive.
 concurrency:
-  group: desktop-${{ github.event_name == 'schedule' && 'staging' || inputs.channel }}-release
+  group: desktop-${{ github.event_name == 'schedule' && 'stable' || inputs.channel }}-release
   cancel-in-progress: false
 
 permissions:
@@ -40,9 +40,9 @@ jobs:
     env:
       APPLE_TEAM_ID: NYZ3LQ5QWC
       MACOS_SIGNING_IDENTITY: "Developer ID Application: Haoxiang Fei (NYZ3LQ5QWC)"
-      NOTARY_PROFILE: openseek-${{ github.event_name == 'schedule' && 'staging' || inputs.channel }}
-      OPENSEEK_API_ORIGIN: ${{ (github.event_name == 'schedule' || inputs.channel == 'staging') && 'https://openseek-api-staging.moonbitlang.cn' || 'https://openseek-api.moonbitlang.cn' }}
-      RELEASE_CHANNEL: ${{ github.event_name == 'schedule' && 'staging' || inputs.channel }}
+      NOTARY_PROFILE: openseek-${{ github.event_name == 'schedule' && 'stable' || inputs.channel }}
+      OPENSEEK_API_ORIGIN: ${{ (github.event_name != 'schedule' && inputs.channel == 'staging') && 'https://openseek-api-staging.moonbitlang.cn' || 'https://openseek-api.moonbitlang.cn' }}
+      RELEASE_CHANNEL: ${{ github.event_name == 'schedule' && 'stable' || inputs.channel }}
 
     steps:
       - name: Checkout main
@@ -71,7 +71,7 @@ jobs:
                 jq -er '.version | strings'
             )"
             if [[ ! "$current_version" =~ ^([0-9]{1,4})\.([0-9]{1,2})\.([0-9]{1,2})$ ]]; then
-              echo "::error::Published staging version '$current_version' is not an Apple-compatible three-part version"
+              echo "::error::Published $RELEASE_CHANNEL version '$current_version' is not an Apple-compatible three-part version"
               exit 1
             fi
 
@@ -90,7 +90,7 @@ jobs:
               minor_version=0
               patch_version=0
             else
-              echo "::error::Cannot auto-increment maximum staging version '$current_version'"
+              echo "::error::Cannot auto-increment maximum $RELEASE_CHANNEL version '$current_version'"
               exit 1
             fi
             release_version="$major_version.$minor_version.$patch_version"
