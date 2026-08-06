@@ -218,6 +218,20 @@ test('renders MoonBit documentation comments through the real workbench', async 
   await expect(markdown).toHaveAttribute('data-documentation-expanded', 'false');
   await expect(preview).toBeVisible();
   await expect(full).toBeHidden();
+  // Source/body swaps resize the ViewZone on the next animation frame. Wait
+  // for the outer node before using its collapsed height as a baseline.
+  await expect
+    .poll(() =>
+      markdown.evaluate((outer) => {
+        const content = outer.querySelector(
+          '.moonbit-viewer-markdown-comment-content',
+        );
+        return (
+          Math.round(outer.getBoundingClientRect().height) - content.offsetHeight
+        );
+      }),
+    )
+    .toBe(0);
   const collapsedBox = await markdown.boundingBox();
   const toggleBox = await toggle.boundingBox();
   expect(collapsedBox).not.toBeNull();
