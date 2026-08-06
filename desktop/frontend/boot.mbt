@@ -4,62 +4,6 @@
 // still decided at runtime by `@interop.page_channel()`.
 
 ///|
-priv suberror QuickOpenShortcutSubscription {
-  QuickOpenShortcutSubscription(@cmd.Emit[Msg])
-}
-
-///|
-fn quick_open_shortcut_sub_loader(
-  payload : Error,
-  scheduler : &Scheduler,
-) -> @sub.RunningSub? {
-  match payload {
-    QuickOpenShortcutSubscription(emit) => {
-      let mut emit = emit
-      let target = @dom.document().as_event_target()
-      let is_apple = quick_open_platform_is_apple()
-      let listener : @dom.Listener = event => {
-        guard event.to_keyboard_event() is Some(keyboard) &&
-          quick_open_shortcut_mode(keyboard, is_apple) is Some(mode) else {
-          return
-        }
-        event.prevent_default()
-        event.stop_propagation()
-        scheduler.add(emit(QuickOpenOpen(mode)))
-      }
-      target.add_event_listener_with_options("keydown", listener, capture=true)
-      Some({
-        unload: _ => {
-          target.remove_event_listener_with_options(
-            "keydown",
-            listener,
-            capture=true,
-          )
-        },
-        update_tagger: payload => {
-          guard payload is QuickOpenShortcutSubscription(next) else { return }
-          emit = next
-        },
-      })
-    }
-    _ => None
-  }
-}
-
-///|
-/// Subscribe to Cmd+P/T on Apple platforms and Ctrl+P/T elsewhere. `boot` adds
-/// this only for the injected desktop bridge, so a browser tab keeps its
-/// native print/new-tab shortcuts.
-fn quick_open_shortcut_subscription(emit : @cmd.Emit[Msg]) -> @sub.Sub {
-  @sub.custom_sub(
-    "quick-open-shortcut-capture",
-    Global,
-    QuickOpenShortcutSubscription(emit),
-    quick_open_shortcut_sub_loader,
-  )
-}
-
-///|
 /// Browser platform label used to keep Ctrl+T available to terminal programs
 /// on Apple systems while using the conventional Ctrl shortcut elsewhere.
 fn quick_open_browser_platform() -> String {
@@ -88,10 +32,9 @@ fn quick_open_platform_is_apple() -> Bool {
 }
 
 ///|
-/// Map only the platform's exact, non-repeating command chords. The capture
-/// listener calls this before Monaco/xterm or the focused input can consume it.
+/// Map only the platform's exact, non-repeating command chords.
 fn quick_open_shortcut_mode(
-  keyboard : @dom.KeyboardEvent,
+  keyboard : @rabbita/common.Keyboard,
   is_apple : Bool,
 ) -> QuickOpenMode? {
   let command = if is_apple {
@@ -127,16 +70,25 @@ pub fn boot() -> Unit {
       },
       // The narrow-layout flag must track the window: rotating a phone or
       // resizing a desktop window across the breakpoint re-lays the app out.
-      // Ctrl+` follows the terminal buttons' existing toggle path, so the
-      // shortcut works from the composer, editor, and terminal itself.
+      // Global application shortcuts share Rabbita's normalized document
+      // keydown subscription. Quick Open remains desktop-only so a browser
+      // console retains its own Cmd/Ctrl+P/T behavior.
       subscriptions=(emit, model) => {
-        let subscriptions = [
+        let is_apple = if model.is_desktop {
+          quick_open_platform_is_apple()
+        } else {
+          false
+        }
+        @sub.batch([
           @sub.on_resize(
             emit.map(viewport => ViewportResized(width=viewport.width)),
           ),
           @sub.on_key_down(
             @cmd.Emit((keyboard : @rabbita/common.Keyboard) => {
-              if keyboard.code() == "Backquote" &&
+              if model.is_desktop &&
+                quick_open_shortcut_mode(keyboard, is_apple) is Some(mode) {
+                emit(QuickOpenOpen(mode))
+              } else if keyboard.code() == "Backquote" &&
                 keyboard.ctrl_key() &&
                 !keyboard.shift_key() &&
                 !keyboard.alt_key() &&
@@ -150,13 +102,7 @@ pub fn boot() -> Unit {
             }),
           ),
           external_link_subscription(emit.map(url => ExternalLinkClicked(url))),
-        ]
-        // Cmd/Ctrl+P and Cmd/Ctrl+T are application shortcuts only inside the
-        // native webview. A browser console retains its own chords.
-        if model.is_desktop {
-          subscriptions.push(quick_open_shortcut_subscription(emit))
-        }
-        @sub.batch(subscriptions)
+        ])
       },
     )
     state.view(model => view(emit, model))
