@@ -141,6 +141,7 @@ fn session_row(
   label : String,
   archivable? : Bool = false,
   nested? : Bool = false,
+  chip? : String,
 ) -> @html.Html {
   // Session ids can collide across devices, so the accent pill needs the
   // channel to agree too.
@@ -176,6 +177,19 @@ fn session_row(
     class = class + " running"
   }
   let children = [@html.span(class="sidebar-label", label)]
+  // A worktree conversation wears its environment's name, joined from the
+  // registry (or the local binding while the first turn is still on its
+  // way to the store). Display only — the environment lives and dies with
+  // the conversation; archiving removes it.
+  if chip is Some(chip) {
+    children.push(
+      @html.span(
+        class="worktree-chip",
+        title="This chat runs in worktree \{chip}; archiving the chat removes the worktree (its branch survives)",
+        chip,
+      ),
+    )
+  }
   // Status dot and archive button share one fixed trailing slot (stacked in
   // the same grid cell), so the dot sits at the same offset whether or not
   // the row is archivable; hovering an archivable row swaps the dot for the
@@ -542,6 +556,12 @@ fn push_group_rows(
       archived(conv.session_id) {
       continue
     }
+    // A fresh worktree conversation knows its binding locally; once the
+    // first turn is durable the registry mapping takes over.
+    let chip = match conv.worktree {
+      Some(name) => Some(name)
+      None => worktree_name_for(dev, workspace, conv.session_id)
+    }
     if conv.has_begun() {
       rows.push(
         session_row(
@@ -551,6 +571,7 @@ fn push_group_rows(
           conv.session_id,
           conversation_title(conv),
           nested~,
+          chip?,
         ),
       )
     } else if composing &&
@@ -564,6 +585,7 @@ fn push_group_rows(
           conv.session_id,
           "New chat",
           nested~,
+          chip?,
         ),
       )
     }
@@ -588,6 +610,7 @@ fn push_group_rows(
         label,
         archivable=true,
         nested~,
+        chip?=worktree_name_for(dev, workspace, item.id),
       ),
     )
   }
@@ -1605,6 +1628,12 @@ fn composer_view(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
   ]
   if conv.branch is Some(branch) && !branch.is_empty() {
     status.push(@html.span(class="composer-branch", branch))
+  }
+  // The launch mode: a fresh workspace conversation chooses between the
+  // workspace itself and a fresh host-named worktree (its 1:1 execution
+  // environment) here, Codex-style, before its first prompt.
+  if worktree_mode_chip(dispatch, conv) is Some(chip) {
+    status.push(chip)
   }
   let controls : Array[@html.Html] = [
     @html.div(class="composer-status", status),
@@ -2734,6 +2763,9 @@ fn view(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
   }
   if model.workspace_picker is Some(picker) {
     children.push(workspace_picker_modal(dispatch, picker))
+  }
+  if model.archive_confirm is Some(confirm) {
+    children.push(archive_discard_modal(dispatch, confirm))
   }
   // On the desktop a lost connection covers everything: with no event
   // stream and every API call failing, the app behind it can do nothing,

@@ -307,6 +307,33 @@ pub(all) struct WorkspacesReply {
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|
+/// One worktree as ops report it: the registry entry plus its derived
+/// checkout path and whether that directory still exists on disk. `session`
+/// is the one conversation this worktree is the execution environment of;
+/// `None` only between creation and the binding first start.
+pub(all) struct WorktreeInfo {
+  name : String
+  branch : String
+  base : String
+  session : String?
+  path : String
+  present : Bool
+} derive(Debug, Eq, FromJson, ToJson)
+
+///|
+pub(all) struct WorktreesReply {
+  worktrees : Array[WorktreeInfo]
+} derive(Debug, Eq, FromJson, ToJson)
+
+///|
+/// A create's reply names the worktree it made — the client sends no name
+/// and needs the generated one to start the bound conversation.
+pub(all) struct WorktreeCreateReply {
+  name : String
+  worktrees : Array[WorktreeInfo]
+} derive(Debug, Eq, FromJson, ToJson)
+
+///|
 pub(all) struct OpenPathReply {
   opened : Bool
 } derive(Debug, Eq, FromJson, ToJson)

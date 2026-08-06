@@ -9,7 +9,7 @@ import {
 // Values
 pub async fn add_workspace(String, (Array[String]) -> Unit) -> Array[String]
 
-pub async fn archive_session(EngineManager, String, () -> Unit) -> @protocol.SessionsReply
+pub async fn archive_session(EngineManager, String, () -> Unit, force? : Bool, on_worktree_removed? : (String, Array[@protocol.WorktreeInfo]) -> Unit) -> @protocol.SessionsReply
 
 pub async fn archived_sessions(EngineManager, (String) -> Unit) -> @protocol.SessionsReply
 
@@ -21,6 +21,8 @@ pub async fn cancel_run(EngineManager, @protocol.CancelPayload) -> @protocol.Can
 
 pub async fn compact_run(EngineManager, @protocol.CompactPayload) -> @protocol.CompactReply
 
+pub async fn create_worktree(EngineManager, String, String, (Array[@protocol.WorktreeInfo]) -> Unit, name? : String) -> @protocol.WorktreeCreateReply
+
 pub async fn detach_workspace(EngineManager, String, (Array[String]) -> Unit) -> @protocol.WorkspacesReply
 
 pub async fn engine_command(String) -> String
@@ -28,6 +30,8 @@ pub async fn engine_command(String) -> String
 pub async fn list_sessions(EngineManager) -> @protocol.SessionsReply
 
 pub async fn list_workspaces() -> @protocol.WorkspacesReply
+
+pub async fn list_worktrees(String) -> @protocol.WorktreesReply
 
 pub async fn load_session(EngineManager, @protocol.LoadSessionPayload) -> @protocol.LoadSessionReply
 
@@ -40,6 +44,8 @@ pub async fn registered_workspaces() -> Array[String]
 pub async fn remote_server_base(EngineManager) -> String?
 
 pub async fn remove_workspace(String, (Array[String]) -> Unit) -> Array[String]
+
+pub async fn remove_worktree(EngineManager, String, String, Bool, (Array[@protocol.WorktreeInfo]) -> Unit) -> @protocol.WorktreesReply
 
 pub async fn resolve_in_workspace(String, String, workspace? : String) -> @path.Path?
 

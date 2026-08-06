@@ -233,11 +233,36 @@ fn adopt_workspaces(
   } else {
     ""
   }
-  request_sessions_refresh(
+  // Each workspace's worktree list refreshes with the adopted registry; a
+  // detached workspace's cached rows drop with its section. One request
+  // token covers the whole fan-out round.
+  let worktrees_request_generation = dev.worktrees_request_generation + 1
+  let commands : Array[@cmd.Cmd] = []
+  for path in paths {
+    commands.push(
+      fetch_worktrees(
+        dispatch,
+        channel,
+        path,
+        dev.connection_generation,
+        worktrees_request_generation,
+      ),
+    )
+  }
+  let worktrees = dev.worktrees.filter(group => paths.contains(group.workspace))
+  let (refresh_cmd, next) = request_sessions_refresh(
     dispatch,
     channel,
-    model.replace_device({ ..dev, workspaces: paths, active_workspace }),
+    model.replace_device({
+      ..dev,
+      workspaces: paths,
+      active_workspace,
+      worktrees,
+      worktrees_request_generation,
+    }),
   )
+  commands.push(refresh_cmd)
+  (@cmd.batch(commands), next)
 }
 
 ///|
@@ -1642,6 +1667,11 @@ fn update_msg(
         (@cmd.none, model)
       } else {
         let (model, submission_id) = model.allocate_submission_id()
+        // The worktree launch mode acts until a create has bound the
+        // conversation; the eligibility must survive a rejected setup
+        // attempt (see `wants_fresh_worktree`). Read before the ledger
+        // entry below mutates the conversation.
+        let fresh_worktree = conv.wants_fresh_worktree()
         let conv = conv.enqueue_input(
           InitialPrompt,
           submission_id,
@@ -1662,20 +1692,35 @@ fn update_msg(
           run_floor_generation: None,
           usage_tokens: 0,
         }
+        // The worktree launch mode's first submit creates the environment
+        // (the host names it, binds this conversation) and starts inside
+        // it, as one command; every other submit is a plain start — a
+        // bound session's cwd comes from the host's registry.
+        let start_cmd = if fresh_worktree && conv.workspace is Some(workspace) {
+          start_in_new_worktree(
+            dispatch,
+            model.focused,
+            task,
+            submission_id,
+            model.selected_model,
+            model.max_steps,
+            conv.session_id,
+            workspace,
+          )
+        } else {
+          start_openseek(
+            dispatch,
+            model.focused,
+            task,
+            submission_id,
+            model.selected_model,
+            model.max_steps,
+            conv.session_id,
+            workspace=conv.workspace,
+          )
+        }
         (
-          @cmd.batch([
-            start_openseek(
-              dispatch,
-              model.focused,
-              task,
-              submission_id,
-              model.selected_model,
-              model.max_steps,
-              conv.session_id,
-              workspace=conv.workspace,
-            ),
-            scroll_transcript_after_render(),
-          ]),
+          @cmd.batch([start_cmd, scroll_transcript_after_render()]),
           // Submitting is an explicit jump to the conversation's tail, so it
           // re-pins a transcript the user had scrolled away from.
           {
@@ -1726,6 +1771,61 @@ fn update_msg(
         },
       )
     }
+    ToggleWorktreeMode => {
+      // Only a workspace conversation with no durable history (and no
+      // bound environment yet) can still choose where its first prompt
+      // runs. Durable emptiness, not `has_begun` — the toggle must stay
+      // available after a rejected setup attempt's overlay notice, or the
+      // user is locked into the failing mode.
+      let conv = model.active()
+      if conv.workspace is Some(_) &&
+        conv.messages.length() == 0 &&
+        conv.worktree is None {
+        (
+          @cmd.none,
+          model.replace_conversation({
+            ..conv,
+            worktree_mode: !conv.worktree_mode,
+          }),
+        )
+      } else {
+        (@cmd.none, model)
+      }
+    }
+    ConfirmArchiveDiscard =>
+      match model.archive_confirm {
+        Some(confirm) => {
+          // The dialog's confirm IS the force: retry the archive discarding
+          // the worktree's uncommitted changes. Same generation dance as
+          // the plain archive click.
+          guard model.device_state(confirm.channel) is Some(dev) else {
+            return (@cmd.none, { ..model, archive_confirm: None })
+          }
+          let sessions_request_generation = dev.sessions_request_generation + 1
+          let archived_request_generation = dev.archived_request_generation + 1
+          (
+            archive_session(
+              dispatch,
+              confirm.channel,
+              confirm.session,
+              dev.connection_generation,
+              sessions_request_generation,
+              archived_request_generation,
+              force=true,
+            ),
+            {
+              ..model.replace_device({
+                ..dev,
+                sessions_request_generation,
+                archived_request_generation,
+              }),
+              archive_confirm: None,
+            },
+          )
+        }
+        None => (@cmd.none, model)
+      }
+    CancelArchiveDiscard => (@cmd.none, { ..model, archive_confirm: None })
     SessionRotated(owner) => {
       // A delayed rotation is owned by the channel that requested it. A focus
       // switch overtakes it; activating the old owner's id here would yank the
@@ -2551,6 +2651,92 @@ fn update_device_msg(
     }
     WorkspaceFailed(message) =>
       model.notify_error(dispatch, "Workspace error: \{message}")
+    WorktreesLoaded(
+      rows,
+      workspace~,
+      connection_generation~,
+      request_generation~
+    ) => {
+      // The staleness fence is per workspace: this reply is stale only when
+      // THIS workspace's rows were already applied under a newer token — a
+      // broadcast for a sibling workspace must not discard it.
+      guard connection_generation == dev.connection_generation &&
+        request_generation > dev.worktree_generation(workspace) else {
+        return (@cmd.none, model)
+      }
+      (
+        @cmd.none,
+        model.replace_device(
+          dev.with_worktrees(workspace, rows, generation=request_generation),
+        ),
+      )
+    }
+    WorktreesChanged(rows, workspace~) => {
+      // The post-commit broadcast is newer than every list request issued so
+      // far; advance the mint and stamp this workspace's rows with the new
+      // token so an older reply for it can never roll the broadcast back.
+      let worktrees_request_generation = dev.worktrees_request_generation + 1
+      let next = model.replace_device({
+        ..dev.with_worktrees(
+          workspace,
+          rows,
+          generation=worktrees_request_generation,
+        ),
+        worktrees_request_generation,
+      })
+      // A removed worktree unbinds its conversations — the host prunes the
+      // registry mapping the same way — and stands down any staged confirm
+      // for it.
+      let conversations = next.conversations.map(conv => {
+        if conv.device == channel &&
+          conv.worktree is Some(name) &&
+          workspace_token(conv.workspace) == workspace &&
+          !rows.iter().any(row => row.name == name) {
+          // The checkout is gone, so every placement derived from it goes
+          // too: a kept cwd would aim OpenFile/LaunchApp at a deleted
+          // directory and the composer would keep showing the dead branch.
+          // Both re-derive from the host on the next run or open.
+          { ..conv, worktree: None, cwd: None, branch: None }
+        } else {
+          conv
+        }
+      })
+      // An open discard dialog whose mapping just disappeared (another
+      // client removed or force-archived the worktree) must close too:
+      // confirming it later would fire a stale forced archive.
+      let archive_confirm = match next.archive_confirm {
+        Some(confirm) if confirm.channel == channel &&
+          next.find_conversation(channel, confirm.session) is Some(conv) &&
+          workspace_token(conv.workspace) == workspace &&
+          !rows.iter().any(row => row.session == Some(confirm.session)) => None
+        other => other
+      }
+      (@cmd.none, { ..next, conversations, archive_confirm })
+    }
+    WorktreeCreated(workspace~, name~, session~) => {
+      // The chain's checkout exists: bind the composing conversation, so
+      // the chip shows and a retried submit reuses the same environment.
+      guard model.find_conversation(channel, session) is Some(conv) &&
+        workspace_token(conv.workspace) == workspace else {
+        return (@cmd.none, model)
+      }
+      (
+        @cmd.none,
+        model.replace_conversation({
+          ..conv,
+          worktree: Some(name),
+          worktree_mode: false,
+        }),
+      )
+    }
+    ArchiveNeedsForce(session~, message~) =>
+      // The host refused to archive over the worktree's uncommitted
+      // changes; stage the discard-confirmation dialog, whose confirm
+      // retries with force.
+      (
+        @cmd.none,
+        { ..model, archive_confirm: Some({ channel, session, message }) },
+      )
     ArchivedLoaded(
       items,
       connection_generation~,

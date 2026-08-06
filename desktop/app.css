@@ -1216,6 +1216,61 @@ aside {
   visibility: visible;
 }
 
+/* Worktree affordances: the sidebar row's name chip and the composer's
+   launch-mode chip. The archive-discard confirmation reuses the shared
+   modal styles. */
+/* The row's worktree name chip, joined from the registry mapping. Display
+   only — the environment lives and dies with its conversation. */
+.worktree-chip {
+  flex: 0 1 auto;
+  max-width: 45%;
+  overflow: hidden;
+  margin: 0;
+  padding: 0 6px;
+  border: 1px solid var(--accent-line);
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+  font: inherit;
+  font-size: 10px;
+  line-height: 1.6;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The composer's launch-mode chip: Local ⇄ Worktree while the conversation
+   can still choose; fixed to the worktree's name once bound. */
+.composer-worktree {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+  padding: 1px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--ink-3);
+  font: inherit;
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+button.composer-worktree {
+  cursor: pointer;
+}
+button.composer-worktree:hover {
+  border-color: var(--accent-line);
+  color: var(--ink);
+}
+.composer-worktree.on {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+.composer-worktree .icon {
+  width: 12px;
+  height: 12px;
+}
+
 /* A conversation nested under its workspace row. */
 .conversation-row.nested {
   padding-left: 28px;
@@ -2511,6 +2566,12 @@ main {
 }
 
 /* ---------- generic buttons ---------- */
+/* `button` below is the app-wide reset (colors only). `.secondary` /
+   `.primary` are the settings pages' opt-in button system and DO carry
+   metrics (padding, font-size) at element+class specificity — a new
+   component must define its own classes, never reuse these modifier names
+   next to its own (that ambush is how the worktree confirm buttons once
+   came out two sizes). */
 button {
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
@@ -2727,6 +2788,9 @@ h2 {
   align-self: flex-end;
 }
 
+/* App-wide form-control default, `width: 100%` included — settings forms
+   and the pickers rely on it. A control that must NOT fill its row (an
+   inline chip input, say) has to override these explicitly. */
 input,
 textarea,
 select {
@@ -3101,9 +3165,10 @@ select:focus {
   }
 }
 
-/* ---------- portal (the relay root page) ---------- */
-/* Full-screen on its own: the console frame (sidebar | content) never
-   renders here. Reuses the settings pages' column rhythm. */
+/* ---------- portal (the relay sign-in shell) ---------- */
+/* Only the sign-in card survives here: the device-list portal was replaced
+   by the multi-device console, and its rules went with it. Full-screen on
+   its own — the console frame (sidebar | content) never renders here. */
 .portal {
   height: 100%;
   overflow: auto;
@@ -3125,20 +3190,6 @@ select:focus {
 .portal-header h1 {
   margin: 0;
   font-size: 20px;
-}
-.portal-header-right {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.portal-avatar {
-  width: 24px;
-  height: 24px;
-  border-radius: 50%;
-}
-.portal-login {
-  font-size: 13px;
-  color: var(--ink-2);
 }
 .portal-card {
   border: 1px solid var(--line);
@@ -3179,188 +3230,6 @@ select:focus {
 }
 .portal-button-link:hover {
   filter: brightness(0.94);
-}
-.portal-section h2 {
-  margin: 0 0 10px;
-  font-size: 13px;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--ink-2);
-}
-/* One card per device, stacked. */
-.portal-groups {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-.portal-groups > p {
-  margin: 0;
-  padding: 12px 14px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--surface);
-}
-.portal-device-group {
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--surface);
-  overflow: hidden;
-}
-.portal-device-group > * + * {
-  border-top: 1px solid var(--line-2);
-}
-.portal-device-group > p {
-  margin: 0;
-  padding: 10px 14px;
-}
-.portal-dim {
-  color: var(--ink-2);
-  font-size: 13px;
-}
-.portal-notice {
-  color: var(--del);
-  font-size: 13px;
-}
-a.portal-workspace {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  padding: 12px 14px;
-  text-decoration: none;
-  color: var(--ink);
-}
-a.portal-workspace:hover {
-  background: var(--surface-2);
-}
-.portal-workspace-name {
-  font-weight: 600;
-  font-size: 14px;
-}
-.portal-workspace-path {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--ink-2);
-  font-size: 12.5px;
-}
-/* The group's header row: dot, identity, console link, "⋯". */
-.portal-device-head {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 14px;
-  background: var(--surface-2);
-  font-size: 13px;
-}
-.portal-device-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--line);
-  flex: none;
-}
-.portal-device-dot.online {
-  background: var(--add);
-}
-.portal-device-title {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  flex: 1;
-  min-width: 0;
-  flex-wrap: wrap;
-}
-.portal-device-name {
-  font-weight: 600;
-}
-.portal-device-host {
-  color: var(--ink-3);
-  font-size: 12px;
-  overflow-wrap: anywhere;
-}
-.portal-device-offline {
-  color: var(--ink-3);
-  font-size: 11px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  padding: 0 7px;
-  white-space: nowrap;
-}
-.portal-device-head .portal-open-link {
-  margin-left: auto;
-  color: var(--accent-ink);
-  text-decoration: none;
-  font-size: 12.5px;
-  white-space: nowrap;
-}
-.portal-device-head .portal-open-link:hover {
-  text-decoration: underline;
-}
-.portal-menu-button {
-  display: grid;
-  place-items: center;
-  width: 32px;
-  height: 28px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
-  color: var(--ink-2);
-  font-size: 14px;
-  line-height: 1;
-}
-.portal-menu-button:not(:disabled):hover {
-  background: var(--surface-2);
-  color: var(--ink);
-}
-/* The "⋯" menu unfolds as an action bar under the header. */
-.portal-device-menu {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  padding: 10px 14px;
-  background: var(--surface-2);
-}
-.portal-menu-item {
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
-  color: var(--ink);
-  padding: 6px 12px;
-  font-size: 12px;
-}
-.portal-menu-item:not(:disabled):hover {
-  background: var(--surface-2);
-}
-.portal-menu-item.danger {
-  border-color: var(--del-line);
-  color: var(--del);
-}
-.portal-menu-item.danger:not(:disabled):hover {
-  background: var(--del);
-  border-color: var(--del);
-  color: #fff;
-}
-.portal-rename {
-  flex: 1;
-  min-width: 0;
-  padding: 5px 8px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  background: var(--paper);
-  color: var(--ink);
-  font-size: 13px;
-}
-button.danger {
-  border-color: var(--del);
-  color: var(--del);
-  padding: 6px 12px;
-  font-size: 12px;
-}
-button.danger:not(:disabled):hover {
-  background: var(--del);
-  color: #fff;
 }
 
 /* ---------- narrow (phone) layout ---------- */
@@ -3459,8 +3328,7 @@ button.danger:not(:disabled):hover {
   select,
   .setting-control input,
   .setting-control select,
-  .composer textarea,
-  .portal-rename {
+  .composer textarea {
     font-size: 16px;
   }
   .topbar,
@@ -3475,15 +3343,13 @@ button.danger:not(:disabled):hover {
   }
   .topbar-toggle,
   .panel-toggle,
-  .launcher-button,
-  .portal-menu-button {
+  .launcher-button {
     min-width: 44px;
     min-height: 44px;
   }
   button.secondary,
   button.primary:not(.sidebar-button),
   a.setting-link,
-  .portal-menu-item,
   .portal-button-link,
   .modal-actions button {
     min-height: 44px;
@@ -3495,27 +3361,9 @@ button.danger:not(:disabled):hover {
     min-height: 44px;
   }
 
-  /* Portal: the header wraps instead of overflowing, and a workspace
-     row stacks its name over the full path. */
+  /* Portal: the header wraps instead of overflowing. */
   .portal-header {
     flex-wrap: wrap;
     gap: 10px;
-  }
-  .portal-header-right {
-    flex-wrap: wrap;
-    row-gap: 8px;
-  }
-  a.portal-workspace {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 2px;
-    padding: 14px;
-  }
-  .portal-workspace-path {
-    white-space: normal;
-    overflow-wrap: anywhere;
-  }
-  .portal-device-head .portal-open-link {
-    padding: 10px 4px;
   }
 }

@@ -109,10 +109,19 @@ pub async fn add_workspace(
   }
   let dir = expanded_workspace_path(path)
   guard @fsx.is_dir(dir) else { raise EngineError("\{dir} is not a directory") }
+  // A worktree is not a workspace: registering a linked checkout would root
+  // stores and language ops at a directory that can vanish with the
+  // worktree. Non-git directories and repository subdirectories stay
+  // attachable.
+  if linked_git_worktree(dir) {
+    raise EngineError(
+      "\{dir} is a linked git worktree; attach the main checkout instead",
+    )
+  }
   let canonical = canonical_workspace_path(dir)
   // Best-effort ancillary work is deliberately before the durable commit:
   // cancellation here changes no registry state and needs no invalidation.
-  exclude_store_from_git(dir)
+  exclude_from_git(dir, ".openseek")
   workspace_registry_lock.acquire()
   defer workspace_registry_lock.release()
   let paths = read_registry_unlocked()
@@ -227,12 +236,12 @@ async fn session_store_root(session : String) -> @path.Path? {
 }
 
 ///|
-/// Keep the in-project session store out of `git status`: append `.openseek/`
-/// to `.git/info/exclude` (repo-local, unlike the user's own `.gitignore`).
-/// Only a directory `.git` qualifies — a worktree or submodule keeps its real
-/// git dir elsewhere and is left alone. Best-effort: a failure never blocks
-/// registration.
-async fn exclude_store_from_git(dir : @path.Path) -> Unit {
+/// Keep a desktop-owned directory (`.openseek`, `.worktrees`) out of
+/// `git status`: append `<entry>/` to `.git/info/exclude` (repo-local,
+/// unlike the user's own `.gitignore`). Only a directory `.git` qualifies —
+/// a worktree or submodule keeps its real git dir elsewhere and is left
+/// alone. Best-effort: a failure never blocks the caller.
+async fn exclude_from_git(dir : @path.Path, entry : String) -> Unit {
   let git_dir = dir.join(".git")
   let is_repo = @fsx.is_dir(git_dir) catch {
     error if @async.is_being_cancelled() => raise error
@@ -246,14 +255,14 @@ async fn exclude_store_from_git(dir : @path.Path) -> Unit {
   }).unwrap_or("")
   for line in existing.split("\n") {
     let line = line.trim().to_owned()
-    if line == ".openseek" || line == ".openseek/" {
+    if line == entry || line == "\{entry}/" {
       return
     }
   }
   let updated = if existing.is_empty() || existing.has_suffix("\n") {
-    "\{existing}.openseek/\n"
+    "\{existing}\{entry}/\n"
   } else {
-    "\{existing}\n.openseek/\n"
+    "\{existing}\n\{entry}/\n"
   }
   @fsx.ensure_dir(git_dir.join("info")) catch {
     error if @async.is_being_cancelled() => raise error

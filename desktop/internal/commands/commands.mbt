@@ -121,6 +121,24 @@ pub let workspace_remove : Command[
 ] = Command("workspace.remove")
 
 ///|
+pub let worktree_list : Command[
+  @protocol.WorktreeListPayload,
+  @protocol.WorktreesReply,
+] = Command("worktree.list")
+
+///|
+pub let worktree_create : Command[
+  @protocol.WorktreeCreatePayload,
+  @protocol.WorktreeCreateReply,
+] = Command("worktree.create")
+
+///|
+pub let worktree_remove : Command[
+  @protocol.WorktreeRemovePayload,
+  @protocol.WorktreesReply,
+] = Command("worktree.remove")
+
+///|
 pub let auth_status : Command[
   @protocol.EmptyPayload,
   @protocol.AuthStatusPayload,

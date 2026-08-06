@@ -170,7 +170,13 @@ async fn serve_config(
     max_steps: configured_max_steps(max_steps),
     engine,
     cwd: if workspace is Some(dir) {
-      Some(dir)
+      // The workspace hint names the project; a session already bound to one
+      // of its worktrees keeps working in that checkout (clients send the
+      // hint on every turn, not only the binding one).
+      match session {
+        Some(session) => Some(session_tree_dir(dir, session))
+        None => Some(dir)
+      }
     } else {
       resolved_run_cwd(session)
     },
@@ -246,6 +252,12 @@ test "a different endpoint cannot reuse a live engine process" {
   }
   assert_true(engine_fingerprint(base) != engine_fingerprint(custom))
   assert_eq(engine_fingerprint(base), engine_fingerprint({ ..base, task: "u" }))
+  // cwd is part of the fingerprint: a session bound to a worktree can never
+  // reuse a serve process rooted elsewhere (and vice versa).
+  assert_true(
+    engine_fingerprint(base) !=
+    engine_fingerprint({ ..base, cwd: Some(Path("/w/.worktrees/x")) }),
+  )
 }
 
 ///|

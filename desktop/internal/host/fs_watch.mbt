@@ -89,8 +89,11 @@ fn WatchInterest::remember(self : WatchInterest, path : String) -> Unit {
 
 ///|
 /// Subtrees omitted by recursive snapshots and legacy full-tree watchers.
-/// Explicit watcher selections do not use this policy: an opened file must
-/// remain watchable even under one of these conventional directory names.
+/// `.worktrees` keeps worktree agents' churn out of the main workspace's
+/// panel and fuzzy finder; a worktree session's own watcher roots inside
+/// the checkout, where relative paths never carry that segment. Explicit
+/// watcher selections do not use this policy: an opened file must remain
+/// watchable even under one of these conventional directory names.
 fn ignored_watch_path(path : String) -> Bool {
   match [..path.split("/")] {
     [
@@ -100,7 +103,8 @@ fn ignored_watch_path(path : String) -> Bool {
       | "_build"
       | "node_modules"
       | ".mooncakes"
-      | ".repos",
+      | ".repos"
+      | ".worktrees",
     ] => true
     _ => false
   }
@@ -319,6 +323,8 @@ test "legacy watch payloads retain the recursive blacklist" {
   let interest = WatchInterest(payload)
   assert_true(interest.legacy_full_tree)
   assert_true(interest.ignores("deps/node_modules"))
+  assert_true(interest.ignores(".worktrees"))
+  assert_true(interest.ignores("sub/.worktrees"))
   assert_false(interest.ignores("src/main.mbt"))
 }
 

@@ -47,12 +47,15 @@ fn archive_session(
   connection_generation : Int,
   sessions_request_generation : Int,
   archived_request_generation : Int,
+  force? : Bool = false,
 ) -> @cmd.Cmd {
   archive_action(
     dispatch,
     channel,
     @commands.session_archive,
-    { session, },
+    // Archiving takes the conversation's worktree with it; the retry after
+    // the discard-confirmation dialog carries force on the wire.
+    { session, force: if force { Some(true) } else { None } },
     connection_generation,
     sessions_request_generation,
     archived_request_generation,
@@ -72,7 +75,7 @@ fn unarchive_session(
     dispatch,
     channel,
     @commands.session_unarchive,
-    { session, },
+    { session, force: None },
     connection_generation,
     sessions_request_generation,
     archived_request_generation,
@@ -90,12 +93,24 @@ fn archive_action(
   archived_request_generation : Int,
 ) -> @cmd.Cmd {
   let dispatch = dispatch.map((msg : DeviceMsg) => FromDevice(channel, msg))
+  let session = payload.session
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
       let reply = @interop.bridge_request(channel, command, payload) catch {
         error => {
+          let message = @interop.bridge_error_text(error)
+          // Archiving takes the conversation's worktree with it; the host's
+          // dirty refusal becomes the discard-confirmation dialog, whose
+          // confirm retries with force. Message-matching is the only signal
+          // the error response carries.
           scheduler.add(
-            dispatch(ArchiveFailed(@interop.bridge_error_text(error))),
+            dispatch(
+              if message.contains("uncommitted changes") {
+                ArchiveNeedsForce(session~, message~)
+              } else {
+                ArchiveFailed(message)
+              },
+            ),
           )
           return
         }

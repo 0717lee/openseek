@@ -332,6 +332,7 @@ pub(all) enum Notification {
   SessionEvent(SessionCommitPayload)
   SessionChanged(SessionChangedPayload)
   WorkspaceChanged(WorkspacesChangedPayload)
+  WorktreeChanged(WorktreeChangedPayload)
   SettingsChanged(SettingsStatusPayload)
   SkillsChanged
   UpdateDownloadProgress(UpdateDownloadProgressPayload)
@@ -359,6 +360,7 @@ pub(all) enum NotificationKind {
   SessionEvent
   SessionChanged
   WorkspaceChanged
+  WorktreeChanged
   SettingsChanged
   SkillsChanged
   UpdateDownloadProgress
@@ -490,6 +492,7 @@ pub fn SessionListEntry::array_from_wire(Json) -> Array[Self]
 
 pub(all) struct SessionPayload {
   session : String
+  force : Bool?
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 
 pub(all) struct SessionRuntimeNotice {
@@ -714,6 +717,44 @@ pub(all) struct WorkspacesChangedPayload {
 
 pub(all) struct WorkspacesReply {
   workspaces : Array[String]
+} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
+
+pub(all) struct WorktreeChangedPayload {
+  workspace : String
+  worktrees : Array[WorktreeInfo]
+} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
+
+pub(all) struct WorktreeCreatePayload {
+  workspace : String
+  session : String
+} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
+
+pub(all) struct WorktreeCreateReply {
+  name : String
+  worktrees : Array[WorktreeInfo]
+} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
+
+pub(all) struct WorktreeInfo {
+  name : String
+  branch : String
+  base : String
+  session : String?
+  path : String
+  present : Bool
+} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
+
+pub(all) struct WorktreeListPayload {
+  workspace : String
+} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
+
+pub(all) struct WorktreeRemovePayload {
+  workspace : String
+  name : String
+  force : Bool?
+} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
+
+pub(all) struct WorktreesReply {
+  worktrees : Array[WorktreeInfo]
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 
 // Type aliases
