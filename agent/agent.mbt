@@ -3,7 +3,7 @@
 /// by the context window instead — a response at the ceiling yields the
 /// turn with a checkpoint summary — so a step count only binds when a
 /// caller passes one explicitly.
-pub let unbounded_max_steps : Int = 2147483647
+pub let unbounded_max_steps : Int = @int.MAX_VALUE
 
 ///|
 /// The staleness reminder injected when the `plan` tool has gone unused for
