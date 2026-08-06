@@ -2051,8 +2051,12 @@ async test "timed out command-lock waiter is removed" {
 async test "native engine env has one authoritative bundled moon path" {
   let ambient_path = @sys.get_env_var("PATH")
   let root = @path.Path(@fs.tmpdir(prefix="openseek-engine-env-"))
-  let engine = root.join("Contents/MacOS/openseek")
-  let seed = root.join("Contents/Resources/toolchains/moonbit/macos-arm64")
+  // The macOS bundle's real shape (`package/macos/main.mbt`): the engine is
+  // staged in the Proton package input's `bin/`, with the toolchain seed
+  // beside that directory rather than inside it.
+  let input = root.join("Contents/Resources/target/proton-package-input")
+  let engine = input.join("bin/openseek")
+  let seed = input.join("toolchains/moonbit/macos-arm64")
   let runtime = root.join("runtime")
   let moon_home = runtime.join("toolchains/moonbit/macos-arm64")
   prepare_fake_moonbit_seed(seed, version="0.10.0-test") catch {

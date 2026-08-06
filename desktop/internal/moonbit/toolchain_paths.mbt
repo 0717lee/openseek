@@ -10,29 +10,17 @@ fn moonbit_toolchain_dir(base : @path.Path, name : String) -> @path.Path {
 }
 
 ///|
-fn macos_resources_toolchain_dir(command_dir : @path.Path) -> @path.Path {
-  command_dir
-  .join("..")
-  .join("Resources")
-  .join("toolchains")
-  .join("moonbit")
-  .join("macos-arm64")
-  .normalize()
-}
-
-///|
-fn @path.Path::proton_package_macos_toolchain_dir(
-  self : @path.Path,
+/// The seed of a package that keeps its executables in a `bin/` directory of
+/// their own, so the toolchain is the binary's uncle rather than its sibling
+/// — the macOS bundle, whose Proton package input stages `bin/openseek`
+/// beside `toolchains/` (`package/macos/main.mbt`). The Linux AppImage and
+/// the Windows bundle drop the engine straight into the directory that holds
+/// `toolchains/`, which `moonbit_toolchain_dir` already covers.
+fn bin_sibling_toolchain_dir(
+  command_dir : @path.Path,
+  name : String,
 ) -> @path.Path {
-  self
-  .join("..")
-  .join("Resources")
-  .join("target")
-  .join("proton-package-input")
-  .join("toolchains")
-  .join("moonbit")
-  .join("macos-arm64")
-  .normalize()
+  moonbit_toolchain_dir(command_dir.join("..").normalize(), name)
 }
 
 ///|
@@ -55,8 +43,9 @@ async fn bundled_moonbit_seed_dir(engine_command : String) -> @path.Path? {
     moonbit_toolchain_dir(command_dir, "windows-x64"),
     moonbit_toolchain_dir(command_dir, "linux-x64"),
     moonbit_toolchain_dir(command_dir, "macos-arm64"),
-    command_dir.proton_package_macos_toolchain_dir(),
-    macos_resources_toolchain_dir(command_dir),
+    bin_sibling_toolchain_dir(command_dir, "windows-x64"),
+    bin_sibling_toolchain_dir(command_dir, "linux-x64"),
+    bin_sibling_toolchain_dir(command_dir, "macos-arm64"),
   ]
   for candidate in candidates {
     let complete = moonbit_seed_looks_complete(candidate)
@@ -163,4 +152,58 @@ fn moonbit_native_bundle_probe_path(moon_home : @path.Path) -> @path.Path {
 ///|
 fn moonbit_wasm_gc_bundle_probe_path(moon_home : @path.Path) -> @path.Path {
   moon_home.join("lib/core/_build/wasm-gc/release/bundle/prelude/prelude.mi")
+}
+
+///|
+/// Lay a fake seed under `root`: the two executables and the core manifest
+/// `moonbit_seed_looks_complete` probes for.
+async fn write_fake_seed(root : @path.Path) -> Unit {
+  @fs.mkdir(root.join("bin").to_string(), recursive=true)
+  @fs.mkdir(root.join("lib/core").to_string(), recursive=true)
+  @fs.write_file(
+    root.join("bin/moon").to_string(),
+    "",
+    create_mode=CreateOrTruncate,
+  )
+  @fs.write_file(
+    root.join("bin/moonc").to_string(),
+    "",
+    create_mode=CreateOrTruncate,
+  )
+  @fs.write_file(
+    root.join("lib/core/moon.mod").to_string(),
+    "{}",
+    create_mode=CreateOrTruncate,
+  )
+}
+
+///|
+/// The macOS bundle stages the engine one level below the toolchain
+/// (`<input>/bin/openseek` beside `<input>/toolchains/`), unlike the Linux
+/// AppImage and the Windows bundle, which put the engine straight into the
+/// directory holding `toolchains/`. Both shapes must resolve, or the engine
+/// never spawns — `prepare_bundled_home` raises before it.
+async test "the seed is found beside the engine and one level above it" {
+  let tmp = @path.Path(@fs.tmpdir(prefix="openseek-moonbit-seed-layout-"))
+  // macOS: `<input>/bin/openseek` with `<input>/toolchains/…`.
+  let bundle = tmp.join("proton-package-input")
+  let bundle_seed = bundle.join("toolchains/moonbit/macos-arm64")
+  write_fake_seed(bundle_seed)
+  @fs.mkdir(bundle.join("bin").to_string(), recursive=true)
+  let bundle_found = bundled_moonbit_seed_dir(
+    bundle.join("bin/openseek").to_string(),
+  ).map(dir => dir.to_string())
+  // Linux/Windows: the engine sits in the directory that holds `toolchains/`.
+  let flat = tmp.join("usr/bin")
+  let flat_seed = flat.join("toolchains/moonbit/linux-x64")
+  write_fake_seed(flat_seed)
+  let flat_found = bundled_moonbit_seed_dir(flat.join("openseek").to_string()).map(dir => {
+      dir.to_string()
+    },
+  )
+  @fs.rmdir(tmp.to_string(), recursive=true) catch {
+    _ => ()
+  }
+  assert_eq(bundle_found, Some(bundle_seed.normalize().to_string()))
+  assert_eq(flat_found, Some(flat_seed.normalize().to_string()))
 }
