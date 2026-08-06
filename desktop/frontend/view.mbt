@@ -1709,6 +1709,12 @@ fn composer_view(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
       )
     NotCompacting => ()
   }
+  // The conversation's execution environment vanished under it. The host
+  // refuses to run it rather than silently falling back to the main
+  // checkout, so the composer explains that and offers both ways out.
+  if missing_worktree_for(model, conv) is Some(name) {
+    children.push(missing_worktree_notice(dispatch, name))
+  }
   let inner : Array[@html.Html] = [
     // First child, always present, so the textarea's index never shifts (which
     // would rebuild the node and drop focus) as chips come and go.

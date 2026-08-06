@@ -150,9 +150,11 @@ async fn serve_config(
     cwd: if workspace is Some(dir) {
       // The workspace hint names the project; a session already bound to one
       // of its worktrees keeps working in that checkout (clients send the
-      // hint on every turn, not only the binding one).
+      // hint on every turn, not only the binding one). A binding whose
+      // checkout vanished refuses here rather than moving the agent into the
+      // main tree behind the user's back.
       match session {
-        Some(session) => Some(session_tree_dir(dir, session))
+        Some(session) => Some(session_run_dir(dir, session))
         None => Some(dir)
       }
     } else {
