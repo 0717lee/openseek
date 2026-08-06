@@ -3358,7 +3358,8 @@ fn Conversation::freeze_durable_tail_notices_from_snapshot(
 ///|
 /// Apply one durable commit's item to the transcript. Local notices have no
 /// durable twin and are therefore never retired by item class. Returns
-/// whether the durable transcript visibly grew.
+/// whether the durable transcript visibly changed: a tool result can now fill
+/// an existing call row without increasing the array length.
 fn Conversation::apply_commit(
   self : Conversation,
   sequence : Int,
@@ -3367,8 +3368,7 @@ fn Conversation::apply_commit(
   // A canonical User is transcript data, never local-submission ownership.
   // It is not a run boundary: the same kind also stores in-run steering.
   let messages = self.messages.copy()
-  let before = messages.length()
-  @transcript.apply_session_item(messages, item)
+  let changed = @transcript.apply_session_item(messages, item)
   // Unknown terminal payloads render nothing but still close the durable run.
   let terminal = item.is_terminal()
   let conv = {
@@ -3398,7 +3398,7 @@ fn Conversation::apply_commit(
     sequence,
     messages.length(),
   )
-  (messages.length() > before, conv)
+  (changed, conv)
 }
 
 ///|

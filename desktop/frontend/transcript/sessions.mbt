@@ -72,7 +72,7 @@ pub fn session_from_reply(
     if event.sequence > derived_watermark {
       derived_watermark = event.sequence
     }
-    apply_session_item(items, event.item)
+    ignore(apply_session_item(items, event.item))
     event_boundaries.push(
       (event.sequence, event.item.is_terminal(), items.length()),
     )
@@ -94,15 +94,18 @@ pub fn transcript_from_session(
 
 ///|
 /// Project one durable session item — a `session.event` commit's
-/// `{kind, payload}` — onto the transcript, appending the 0..N items it
-/// renders as. Unknown items deliberately append nothing: their event sequence
-/// still advances the durable watermark, while their raw JSON stays available
-/// to newer code. The same projector replays snapshots and live commits, so
-/// both paths agree by construction.
+/// `{kind, payload}` — onto the transcript. Most events append 0..N rows; a
+/// tool result instead fills its earlier call row when the ids match. Returns
+/// whether the visible transcript changed. Unknown items deliberately change
+/// nothing: their event sequence still advances the durable watermark, while
+/// their raw JSON stays available to newer code. The same projector replays
+/// snapshots and live commits, so both paths agree by construction.
 pub fn apply_session_item(
   items : Array[TranscriptItem],
   item : @desktop_protocol.SessionItem,
-) -> Unit {
+) -> Bool {
+  let before = items.length()
+  let mut updated_existing = false
   match item {
     @desktop_protocol.User(payload) => {
       let content = payload.content.trim().to_owned()
@@ -124,20 +127,72 @@ pub fn apply_session_item(
       if !content.is_empty() {
         items.push({ kind: Assistant(is_danger=false), content })
       }
+      // Tool calls belong after this assistant event's reasoning and visible
+      // prose, in the exact order the model emitted them. Their results arrive
+      // as later durable events and fill these rows by id without reordering.
+      for call in payload.tool_calls.unwrap_or([]) {
+        items.push({
+          kind: Tool(
+            call_id=call.id,
+            name=if call.name.trim().is_empty() { "tool" } else { call.name },
+            arguments=Some(call.arguments),
+            is_error=false,
+            brief=None,
+          ),
+          content: "",
+        })
+      }
     }
-    @desktop_protocol.ToolResult(payload) =>
-      items.push({
-        kind: Tool(
-          name=if payload.tool_name.trim().is_empty() {
-            "tool"
-          } else {
-            payload.tool_name
-          },
-          is_error=payload.is_error,
-          brief=payload.brief,
-        ),
-        content: payload.content,
-      })
+    @desktop_protocol.ToolResult(payload) => {
+      // A valid result updates the matching recorded call in place. Searching
+      // from start to finish and retaining the last match makes malformed logs
+      // with duplicate ids settle the most recent call while preserving every
+      // row's original display position.
+      let mut matched : Int? = None
+      if !payload.tool_call_id.is_empty() {
+        for index, existing in items {
+          if existing.kind is Tool(call_id~, arguments=Some(_), ..) &&
+            call_id == payload.tool_call_id {
+            matched = Some(index)
+          }
+        }
+      }
+      if matched is Some(index) &&
+        items[index].kind is Tool(call_id~, name=call_name, arguments~, ..) {
+        items[index] = {
+          kind: Tool(
+            call_id~,
+            name=if payload.tool_name.trim().is_empty() {
+              call_name
+            } else {
+              payload.tool_name
+            },
+            arguments~,
+            is_error=payload.is_error,
+            brief=payload.brief,
+          ),
+          content: payload.content,
+        }
+        updated_existing = true
+      } else {
+        // Older or malformed logs can contain an unmatched result. Keep the
+        // existing Desktop behavior for those records instead of hiding them.
+        items.push({
+          kind: Tool(
+            call_id=payload.tool_call_id,
+            name=if payload.tool_name.trim().is_empty() {
+              "tool"
+            } else {
+              payload.tool_name
+            },
+            arguments=None,
+            is_error=payload.is_error,
+            brief=payload.brief,
+          ),
+          content: payload.content,
+        })
+      }
+    }
     @desktop_protocol.RuntimeNotice(payload) =>
       // Goal-family notices are transport (set/clear/block markers, the
       // baseline pairing record) or model-directed text — never display
@@ -149,7 +204,9 @@ pub fn apply_session_item(
         if !update.status.is_empty() || update.diagnostics.length() > 0 {
           items.push({
             kind: Tool(
+              call_id="",
               name=runtime_update_title(update),
+              arguments=None,
               is_error=false,
               brief=None,
             ),
@@ -168,6 +225,7 @@ pub fn apply_session_item(
     @desktop_protocol.UnknownTerminal(_) => ()
     @desktop_protocol.Unknown(_) => ()
   }
+  items.length() > before || updated_existing
 }
 
 ///|
@@ -351,7 +409,8 @@ test "transcript mapping replays a finished conversation" {
   inspect(items.length(), content="4")
   guard items[0].kind is User else { fail("expected user item") }
   inspect(items[0].content, content="question")
-  guard items[1].kind is Tool(name="shell", is_error=true, brief=Some(brief)) else {
+  guard items[1].kind
+    is Tool(name="shell", is_error=true, brief=Some(brief), ..) else {
     fail("expected tool card")
   }
   inspect(brief, content="ran ls → exit 1")
@@ -362,6 +421,46 @@ test "transcript mapping replays a finished conversation" {
     fail("expected assistant")
   }
   inspect(items[3].content, content="answer")
+}
+
+///|
+test "tool results fill calls by id without changing call order" {
+  let events =
+    #|{"sequence":1,"item":{"kind":"assistant","payload":{"content":"","tool_calls":[{"id":"c1","name":"read","arguments":"{\"path\":\"moon.mod\"}"},{"id":"c2","name":"shell","arguments":"{\"cmd\":\"moon test\"}"}]}}},
+    #|{"sequence":2,"item":{"kind":"tool_result","payload":{"tool_call_id":"c2","tool_name":"shell","content":"tests passed","is_error":false,"brief":"ran moon test"}}},
+    #|{"sequence":3,"item":{"kind":"tool_result","payload":{"tool_call_id":"c1","tool_name":"","content":"module contents","is_error":false,"brief":"read moon.mod"}}}
+  let view = session_from_reply(session_reply(events))
+  let items = view.items
+  inspect(items.length(), content="2")
+  // Result events update the existing calls, so every durable boundary after
+  // the assistant event stays after the same two display rows.
+  inspect(view.event_boundaries[0].2, content="2")
+  inspect(view.event_boundaries[1].2, content="2")
+  inspect(view.event_boundaries[2].2, content="2")
+  guard items[0].kind
+    is Tool(
+      call_id="c1",
+      name="read",
+      arguments=Some(read_args),
+      is_error=false,
+      brief=Some("read moon.mod")
+    ) else {
+    fail("expected the first call to remain first")
+  }
+  inspect(read_args, content="{\"path\":\"moon.mod\"}")
+  inspect(items[0].content, content="module contents")
+  guard items[1].kind
+    is Tool(
+      call_id="c2",
+      name="shell",
+      arguments=Some(shell_args),
+      is_error=false,
+      brief=Some("ran moon test")
+    ) else {
+    fail("expected the second call to remain second")
+  }
+  inspect(shell_args, content="{\"cmd\":\"moon test\"}")
+  inspect(items[1].content, content="tests passed")
 }
 
 ///|
