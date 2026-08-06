@@ -1,8 +1,12 @@
 name: Desktop release
 
-run-name: Desktop ${{ inputs.channel }} v${{ inputs.version }} by @${{ github.actor }}
+run-name: Desktop ${{ github.event_name == 'schedule' && 'staging' || inputs.channel }} v${{ github.event_name == 'schedule' && 'daily' || inputs.version }} by @${{ github.actor }}
 
 on:
+  # GitHub cron is UTC; these run at 12:00 and 18:30 in Asia/Shanghai.
+  schedule:
+    - cron: "0 4 * * *"
+    - cron: "30 10 * * *"
   workflow_dispatch:
     inputs:
       channel:
@@ -21,7 +25,7 @@ on:
 # A release must finish as one upload/publish transaction. A second dispatch
 # waits instead of cancelling a run that may already have uploaded its archive.
 concurrency:
-  group: desktop-${{ inputs.channel }}-release
+  group: desktop-${{ github.event_name == 'schedule' && 'staging' || inputs.channel }}-release
   cancel-in-progress: false
 
 permissions:
@@ -36,10 +40,9 @@ jobs:
     env:
       APPLE_TEAM_ID: NYZ3LQ5QWC
       MACOS_SIGNING_IDENTITY: "Developer ID Application: Haoxiang Fei (NYZ3LQ5QWC)"
-      NOTARY_PROFILE: openseek-${{ inputs.channel }}
-      OPENSEEK_API_ORIGIN: ${{ inputs.channel == 'staging' && 'https://openseek-api-staging.moonbitlang.cn' || 'https://openseek-api.moonbitlang.cn' }}
-      RELEASE_CHANNEL: ${{ inputs.channel }}
-      RELEASE_VERSION: ${{ inputs.version }}
+      NOTARY_PROFILE: openseek-${{ github.event_name == 'schedule' && 'staging' || inputs.channel }}
+      OPENSEEK_API_ORIGIN: ${{ (github.event_name == 'schedule' || inputs.channel == 'staging') && 'https://openseek-api-staging.moonbitlang.cn' || 'https://openseek-api.moonbitlang.cn' }}
+      RELEASE_CHANNEL: ${{ github.event_name == 'schedule' && 'staging' || inputs.channel }}
 
     steps:
       - name: Checkout main
@@ -54,6 +57,48 @@ jobs:
         with:
           path: ~/.proton/cache/cef
           key: cef-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('desktop/lepus/cli/cef/cef_platform.mbt') }}
+
+      - name: Resolve release version
+        id: release
+        shell: bash
+        env:
+          MANUAL_RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_EVENT_NAME" == "schedule" ]]; then
+            current_version="$(
+              curl -fsSL "$OPENSEEK_API_ORIGIN/desktop/releases/latest.json" |
+                jq -er '.version | strings'
+            )"
+            if [[ ! "$current_version" =~ ^([0-9]{1,4})\.([0-9]{1,2})\.([0-9]{1,2})$ ]]; then
+              echo "::error::Published staging version '$current_version' is not an Apple-compatible three-part version"
+              exit 1
+            fi
+
+            # The macOS packager uses this version for both the visible release
+            # version and CFBundleVersion, whose third component is at most two digits.
+            major_version=$((10#${BASH_REMATCH[1]}))
+            minor_version=$((10#${BASH_REMATCH[2]}))
+            patch_version=$((10#${BASH_REMATCH[3]}))
+            if (( patch_version < 99 )); then
+              patch_version=$((patch_version + 1))
+            elif (( minor_version < 99 )); then
+              minor_version=$((minor_version + 1))
+              patch_version=0
+            elif (( major_version < 9999 )); then
+              major_version=$((major_version + 1))
+              minor_version=0
+              patch_version=0
+            else
+              echo "::error::Cannot auto-increment maximum staging version '$current_version'"
+              exit 1
+            fi
+            release_version="$major_version.$minor_version.$patch_version"
+          else
+            release_version="$MANUAL_RELEASE_VERSION"
+          fi
+          echo "RELEASE_VERSION=$release_version" >> "$GITHUB_ENV"
+          echo "version=$release_version" >> "$GITHUB_OUTPUT"
 
       # Stamp only this runner's checkout; the source branch is not modified.
       - name: Stamp release version
@@ -137,7 +182,7 @@ jobs:
       - name: Upload signed artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: SeekMoon-macos-arm64-v${{ inputs.version }}
+          name: SeekMoon-macos-arm64-v${{ steps.release.outputs.version }}
           path: |
             desktop/dist/SeekMoon-macos-arm64.zip
             desktop/dist/SeekMoon-macos-arm64.dmg
@@ -146,7 +191,7 @@ jobs:
 
       # Upload verifies the server-computed digest before publish atomically
       # switches the selected channel's latest.json to this version.
-      - name: Publish to ${{ inputs.channel }}
+      - name: Publish release
         shell: bash
         env:
           OPENSEEK_DEPLOY_TOKEN: ${{ secrets.OPENSEEK_DEPLOY_TOKEN }}
@@ -156,7 +201,7 @@ jobs:
             desktop/dist/SeekMoon-macos-arm64.dmg
           desktop/scripts/publish-release.sh publish "v$RELEASE_VERSION"
 
-      - name: Verify ${{ inputs.channel }} manifest
+      - name: Verify release manifest
         shell: bash
         run: |
           set -euo pipefail
