@@ -51,9 +51,9 @@ fn read_directory(
 }
 
 ///|
-/// Ask the host for the workspace's full file list (the fuzzy filter's
-/// index) and fold it back as `FilesIndexed`. Failures fold as
-/// `FileIndexFailed`, dropping the index so a later keystroke retries.
+/// Ask the host for the workspace's full file list (Quick Open's file index)
+/// and fold it back as `FilesIndexed`. Failures fold as `FileIndexFailed` so a
+/// later Quick Open can retry an initial failure.
 fn list_files(
   dispatch : @cmd.Emit[Msg],
   owner : @interop.ConversationKey,

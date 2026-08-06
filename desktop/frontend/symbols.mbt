@@ -1,5 +1,5 @@
 // Workspace-symbol transport shared by the composer's `#` completion and the
-// desktop Cmd/Ctrl+T quick pick. The host op is served by
+// desktop unified Quick Open. The host op is served by
 // `moon ide workspace-symbols`; this package projects its typed reply once,
 // retaining kind and exact location until each UI maps it to its own row.
 
@@ -18,7 +18,7 @@ priv struct WorkspaceSymbol {
 ///|
 /// Search `query` against the conversation's workspace symbols. Without a
 /// generation the reply belongs to the composer's `#` menu; a generation
-/// routes it to the desktop quick pick. Both retain owner/query identity so
+/// routes it to desktop Quick Open. Both retain owner/query identity so
 /// update can discard an overtaken reply.
 fn read_workspace_symbols(
   dispatch : @cmd.Emit[Msg],
@@ -41,7 +41,7 @@ fn read_workspace_symbols(
         _ => {
           let message = match generation {
             Some(generation) =>
-              SymbolSearchRequestFailed(owner~, query~, generation~)
+              QuickOpenSymbolsRequestFailed(owner~, query~, generation~)
             None => SymbolsFailed(owner~, query~)
           }
           scheduler.add(dispatch(message))
@@ -51,7 +51,7 @@ fn read_workspace_symbols(
       let items = SymbolsProjection(reply).symbols()
       let message = match generation {
         Some(generation) =>
-          SymbolSearchLoaded(owner~, query~, generation~, items~)
+          QuickOpenSymbolsLoaded(owner~, query~, generation~, items~)
         None => SymbolsLoaded(owner~, query~, items~)
       }
       scheduler.add(dispatch(message))

@@ -84,6 +84,7 @@ pub(all) struct FileEntry {
 pub(all) enum FileIndex {
   IndexEmpty
   IndexLoading
+  IndexFailed
   IndexReady(files~ : Array[@pathx.Relative], truncated~ : Bool)
 } derive(Eq)
 
@@ -100,10 +101,7 @@ pub(all) enum Msg {
   HighlightCleared(@pathx.Relative)
   ToggleTree
   DirToggle(@pathx.Relative)
-  FileFilterChanged(String)
-  TreeKeyMove(delta~ : Int)
-  TreeKeyAccept
-  TreeKeyDismiss
+  EnsureFileIndex
   DirLoaded(owner~ : @interop.ConversationKey, path~ : @pathx.Relative, entries~ : Array[FileEntry])
   DirFailed(owner~ : @interop.ConversationKey, path~ : @pathx.Relative, message~ : String)
   FilesIndexed(owner~ : @interop.ConversationKey, files~ : Array[@pathx.Relative], truncated~ : Bool)
@@ -130,9 +128,7 @@ pub(all) struct State {
   children : Map[@pathx.Relative, Array[FileEntry]]
   docs : Map[@pathx.Relative, Doc]
   highlighted : @pathx.Relative?
-  filter : String
   index : FileIndex
-  cursor : @pathx.Relative?
   error : String?
 } derive(Eq)
 pub fn State::empty() -> Self

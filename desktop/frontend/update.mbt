@@ -935,7 +935,7 @@ fn sync_file_panel(
 fn covering_overlay(model : Model) -> Bool {
   model.workspace_picker is Some(_) ||
   model.archive_confirm is Some(_) ||
-  model.symbol_search is Some(_) ||
+  model.quick_open is Some(_) ||
   model.update_ux is ConfirmingRestart(_) ||
   // Best effort: with the bridge gone the hide op may not deliver.
   model.bridge_state() is BridgeLost(_)
@@ -1104,7 +1104,7 @@ fn update(
   // The quick pick belongs to the focused conversation captured when it
   // opened. Device/session switches can arrive through many messages (and
   // background pushes), so fence it once here rather than in every branch.
-  let model = close_stale_symbol_search(model)
+  let model = close_stale_quick_open(model)
   let (model, panel_cmd) = sync_file_panel(dispatch, model)
   let (model, terminal_cmd) = sync_terminal_panel(dispatch, model)
   let (model, browser_cmd) = sync_browser_view(dispatch, model)
@@ -1361,20 +1361,20 @@ fn update_msg(
     // A failed search reads as "no symbols": cache an empty result for the
     // query so the menu settles on "No symbols" rather than spinning.
     SymbolsFailed(owner~, query~) => apply_symbol_reply(model, owner, query, [])
-    SymbolSearchOpen => open_symbol_search(dispatch, model)
-    SymbolSearchQueryChanged(query) =>
-      change_symbol_search_query(dispatch, model, query)
-    SymbolSearchDue(owner~, query~, generation~) =>
-      begin_symbol_search_request(dispatch, model, owner, query, generation)
-    SymbolSearchLoaded(owner~, query~, generation~, items~) =>
-      apply_symbol_search_result(model, owner, query, generation, items)
-    SymbolSearchRequestFailed(owner~, query~, generation~) =>
-      fail_symbol_search_request(model, owner, query, generation)
-    SymbolSearchMove(delta) => move_symbol_search_selection(model, delta)
-    SymbolSearchSelect(index) => select_symbol_search_row(model, index)
-    SymbolSearchAccept => accept_symbol_search(dispatch, model)
-    SymbolSearchPick(index) => pick_symbol_search_row(dispatch, model, index)
-    SymbolSearchDismiss => (@cmd.none, { ..model, symbol_search: None })
+    QuickOpenOpen(mode) => open_quick_open(dispatch, model, mode)
+    QuickOpenValueChanged(value) =>
+      change_quick_open_value(dispatch, model, value)
+    QuickOpenDue(owner~, query~, generation~) =>
+      begin_quick_open_symbol_request(dispatch, model, owner, query, generation)
+    QuickOpenSymbolsLoaded(owner~, query~, generation~, items~) =>
+      apply_quick_open_symbol_result(model, owner, query, generation, items)
+    QuickOpenSymbolsRequestFailed(owner~, query~, generation~) =>
+      fail_quick_open_symbol_request(model, owner, query, generation)
+    QuickOpenMove(delta) => move_quick_open_selection(model, delta)
+    QuickOpenSelect(index) => select_quick_open_row(model, index)
+    QuickOpenAccept => accept_quick_open(dispatch, model)
+    QuickOpenPick(index) => pick_quick_open_row(dispatch, model, index)
+    QuickOpenDismiss => (@cmd.none, { ..model, quick_open: None })
     ModelChanged(value) => (@cmd.none, { ..model, selected_model: value })
     MaxStepsChanged(value) => (@cmd.none, { ..model, max_steps: value })
     SetupApiKeyChanged(value) => {
@@ -2332,7 +2332,13 @@ fn update_msg(
         model.file_panel,
         file_ctx(model),
       )
-      (cmd, { ..model, file_panel: panel })
+      let next = { ..model, file_panel: panel }
+      let next = match msg {
+        @fileeditor.FilesIndexed(..) => refresh_file_quick_open(next)
+        @fileeditor.FileIndexFailed(..) => fail_file_quick_open(next)
+        _ => next
+      }
+      (cmd, next)
     }
     Dock(msg) => {
       // The strip machine is pure; the cross-package effects of the
@@ -13320,7 +13326,7 @@ test "full-screen modals hide the native view and closing restores it" {
   let (_, launched) = update(dispatch, ToggleLauncher, restored)
   assert_true(launched.browser_pane.shown is None)
   // So do the other two surfaces `view.mbt` appends beside the picker: the
-  // archive-discard confirmation and the workspace-symbol palette.
+  // archive-discard confirmation and Quick Open.
   let (_, archiving) = update_dev(
     dispatch,
     ArchiveNeedsForce(session="desktop-test", message="dirty"),
@@ -13328,7 +13334,11 @@ test "full-screen modals hide the native view and closing restores it" {
   )
   assert_true(archiving.archive_confirm is Some(_))
   assert_true(archiving.browser_pane.shown is None)
-  let (_, searching) = update(dispatch, SymbolSearchOpen, restored)
-  assert_true(searching.symbol_search is Some(_))
+  let (_, searching) = update(
+    dispatch,
+    QuickOpenOpen(QuickOpenSymbols),
+    restored,
+  )
+  assert_true(searching.quick_open is Some(_))
   assert_true(searching.browser_pane.shown is None)
 }

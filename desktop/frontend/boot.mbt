@@ -41,10 +41,10 @@ pub fn boot() -> Unit {
           ),
           external_link_subscription(emit.map(url => ExternalLinkClicked(url))),
         ]
-        // Cmd+T/Ctrl+T is an application shortcut only inside the native
-        // webview. A browser console must retain the browser's new-tab chord.
+        // Cmd/Ctrl+P and Cmd/Ctrl+T are application shortcuts only inside the
+        // native webview. A browser console retains its own chords.
         if model.is_desktop {
-          subscriptions.push(symbol_search_shortcut_subscription(emit))
+          subscriptions.push(quick_open_shortcut_subscription(emit))
         }
         @sub.batch(subscriptions)
       },

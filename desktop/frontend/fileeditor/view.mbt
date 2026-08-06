@@ -59,8 +59,8 @@ pub fn resize_handle_view() -> @html.Html {
 
 ///|
 /// The viewer-plus-tree body under the strip and breadcrumb: the embedded
-/// viewer with its notice overlay, and the workspace tree (filterable,
-/// expandable, always rooted at the workspace root) as a toggleable pane on
+/// viewer with its notice overlay, and the workspace tree (expandable and
+/// always rooted at the workspace root) as a toggleable pane on
 /// the viewer's right. Always rendered so the viewer's host element
 /// (`viewer-host`) stays put across renders and screen switches; CSS hides
 /// the tree pane when toggled off and collapses the whole panel to zero
@@ -118,11 +118,9 @@ fn viewer_notice(state : State, ctx : Ctx) -> @html.Html {
 }
 
 ///|
-/// The toggleable file-tree panel, docked flat under the viewer like an
-/// Emacs bottom window: the tree rows, the last fs failure (blank and
-/// collapsed while there is none — rendered unconditionally so the rows
-/// never shift index), and the minibuffer-style filter line at the bottom
-/// edge.
+/// The toggleable file-tree panel, docked flat under the viewer like an Emacs
+/// bottom window: the hierarchical tree rows and the last fs failure (blank
+/// and collapsed while there is none).
 fn tree_pane(dispatch : @cmd.Emit[Msg], state : State, ctx : Ctx) -> @html.Html {
   let entries = visible_entries(state)
   // Losing the watcher is more important than a request-local failure: live
@@ -131,42 +129,16 @@ fn tree_pane(dispatch : @cmd.Emit[Msg], state : State, ctx : Ctx) -> @html.Html 
     Some(message) => Some(message)
     None => state.error
   }
-  // The filter's query, rebuilt here only to split each row's path into
-  // matched/unmatched sections for highlighting — the rows themselves were
-  // already ranked by `visible_entries`.
-  let fuzzy = if state.filter.trim().is_empty() {
-    None
-  } else {
-    Some(@fuzzy_match.Query::new(state.filter.trim().to_owned()))
-  }
   let tree_children = if ctx.owner.session.is_empty() {
     [@html.div(class="file-panel-empty", "No conversation selected.")]
   } else if !state.children.contains("") {
     [@html.div(class="file-panel-empty", "Loading…")]
   } else if entries.is_empty() {
-    if fuzzy is None {
-      // The workspace exists once the conversation runs; until then (or if the
-      // agent has written nothing) it is simply empty.
-      [@html.div(class="file-panel-empty", "This workspace is empty.")]
-    } else if state.index is IndexLoading {
-      [@html.div(class="file-panel-empty", "Indexing files…")]
-    } else {
-      [@html.div(class="file-panel-empty", "No file matches the filter.")]
-    }
+    // The workspace exists once the conversation runs; until then (or if the
+    // agent has written nothing) it is simply empty.
+    [@html.div(class="file-panel-empty", "This workspace is empty.")]
   } else {
-    let rows = entries.map(pair => {
-      tree_row(dispatch, state, ctx, pair.0, pair.1, fuzzy~)
-    })
-    // Own up to a capped index: matches may simply be missing.
-    if fuzzy is Some(_) && state.index is IndexReady(truncated=true, ..) {
-      rows.push(
-        @html.div(
-          class="file-panel-empty",
-          "File index truncated; some matches may be missing.",
-        ),
-      )
-    }
-    rows
+    entries.map(pair => tree_row(dispatch, state, ctx, pair.0, pair.1))
   }
   @html.div(class="file-tree-pane", [
     // The grab strip on the panel's top seam for drag-to-resize; wired
@@ -190,44 +162,6 @@ fn tree_pane(dispatch : @cmd.Emit[Msg], state : State, ctx : Ctx) -> @html.Html 
         None => ""
       },
     ),
-    // The filter line rides the bottom edge, minibuffer-style, and is the
-    // keyboard's seat: ↑/↓ walk the rows, Enter acts on the cursor's row,
-    // Escape clears the filter and then closes the panel.
-    @html.div(class="file-tree-header", [
-      @html.input(
-        input_type=@html.InputType::Search,
-        value=state.filter,
-        placeholder="Filter files…",
-        on_input=dispatch.map(value => FileFilterChanged(value)),
-        attrs=@html.Attrs::build()
-          .class("file-filter")
-          .id(FilterInputId)
-          .on_keydown(event => {
-            match event.key() {
-              "ArrowDown" => {
-                event.prevent_default()
-                dispatch(TreeKeyMove(delta=1))
-              }
-              "ArrowUp" => {
-                event.prevent_default()
-                dispatch(TreeKeyMove(delta=-1))
-              }
-              "Enter" =>
-                if !event.is_composing() {
-                  event.prevent_default()
-                  dispatch(TreeKeyAccept)
-                } else {
-                  @cmd.none
-                }
-              "Escape" => {
-                event.prevent_default()
-                dispatch(TreeKeyDismiss)
-              }
-              _ => @cmd.none
-            }
-          }),
-      ),
-    ]),
   ])
 }
 
@@ -340,37 +274,28 @@ pub fn breadcrumb_view(
 }
 
 ///|
-/// One visible tree row. The rows themselves come from `visible_entries`
-/// (shared with the keyboard cursor, so the two can never disagree);
-/// `depth` drives indentation. The keyboard cursor's row wears `cursor` on
-/// top of whatever else applies. `fuzzy` present means filter mode: the row
-/// is a ranked match, labeled with its whole relative path and the matched
-/// characters highlighted.
+/// One visible hierarchical tree row. `depth` drives indentation.
 fn tree_row(
   dispatch : @cmd.Emit[Msg],
   state : State,
   ctx : Ctx,
   entry : FileEntry,
   depth : Int,
-  fuzzy~ : @fuzzy_match.Query?,
 ) -> @html.Html {
   let pad = "padding-left: \{8 + depth * 14}px"
-  let cursor = if state.cursor == Some(entry.path) { " cursor" } else { "" }
   if entry.is_dir {
     let chevron = if state.expanded.contains(entry.path) {
       "▾"
     } else {
       "▸"
     }
-    // `data-path` is the hook `reveal_tree_row` / the keyboard cursor's
-    // scroll-into-view use to find the row in the DOM.
+    // `data-path` is the hook `reveal_tree_row` uses to find the row in the DOM.
     @html.div(
-      class=(if state.highlighted == Some(entry.path) {
-          "tree-row tree-dir highlighted"
-        } else {
-          "tree-row tree-dir"
-        }) +
-        cursor,
+      class=if state.highlighted == Some(entry.path) {
+        "tree-row tree-dir highlighted"
+      } else {
+        "tree-row tree-dir"
+      },
       style=[pad],
       on_click=dispatch(DirToggle(entry.path)),
       attrs=@html.Attrs::build().data_set("path", entry.path.0),
@@ -380,37 +305,16 @@ fn tree_row(
       ],
     )
   } else {
-    let label = match fuzzy {
-      Some(query) =>
-        match query.split_by_matching_sections(item=entry.path.0) {
-          Some(sections) =>
-            @html.span(
-              class="tree-name tree-path",
-              sections.map(section => {
-                let (matched, text) = section
-                @html.span(
-                  class=if matched { "tree-hit" } else { "" },
-                  text.to_owned(),
-                )
-              }),
-            )
-          // Should not happen — the row is here because it matched — but a
-          // plain path label beats dropping the row.
-          None => @html.span(class="tree-name tree-path", entry.path.0)
-        }
-      None => @html.span(class="tree-name", entry.name)
-    }
     @html.div(
-      class=(if ctx.active_file == Some(entry.path) {
-          "tree-row tree-file selected"
-        } else {
-          "tree-row tree-file"
-        }) +
-        cursor,
+      class=if ctx.active_file == Some(entry.path) {
+        "tree-row tree-file selected"
+      } else {
+        "tree-row tree-file"
+      },
       style=[pad],
       on_click=dispatch(FileSelected(path=entry.path, name=entry.name)),
       attrs=@html.Attrs::build().data_set("path", entry.path.0),
-      [label],
+      [@html.span(class="tree-name", entry.name)],
     )
   }
 }

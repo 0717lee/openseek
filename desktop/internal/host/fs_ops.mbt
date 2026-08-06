@@ -57,8 +57,8 @@ async fn read_directory_op(payload : ReadDirPayload) -> ReadDirReply {
 const MaxIndexedFiles = 20000
 
 ///|
-/// Enumerate every file under the conversation's workspace for the panel's
-/// fuzzy finder: depth-first, each directory's entries in lexicographic
+/// Enumerate every file under the conversation's workspace for desktop Quick
+/// Open: depth-first, each directory's entries in lexicographic
 /// order, pruning the same churn directories the watcher skips.
 async fn list_files_op(payload : ListFilesPayload) -> ListFilesReply {
   guard @engine.resolve_in_workspace(

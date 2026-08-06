@@ -1,5 +1,4 @@
 import {
-  "moonbit-community/fuzzy_match",
   "moonbit-community/rabbita/cmd",
   "moonbit-community/rabbita/dom",
   "moonbit-community/rabbita/html",

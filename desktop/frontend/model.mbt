@@ -562,29 +562,47 @@ fn empty_symbol_cache() -> SymbolCache {
 }
 
 ///|
-/// The desktop's transient workspace-symbol quick pick. Its owner fences the
-/// results to the conversation whose workspace was queried; `generation`
-/// separates successive queries (and reopenings) even when their text is the
-/// same. The page-level counter lives on `Model`, so closing the palette cannot
-/// make an old in-flight reply current again.
-priv struct SymbolSearch {
-  owner : @interop.ConversationKey
-  query : String
-  items : Array[WorkspaceSymbol]
-  selected : Int
-  phase : SymbolSearchPhase
-  generation : Int
+/// Which provider owns the unified desktop Quick Open. Files are the default
+/// provider; a leading `#` in the visible input selects workspace symbols.
+priv enum QuickOpenMode {
+  QuickOpenFiles
+  QuickOpenSymbols
+}
+
+///|
+/// One selectable row in the unified Quick Open. File rows open without a
+/// range; symbol rows retain the precise range returned by MoonIDE.
+priv enum QuickOpenItem {
+  QuickOpenFile(@pathx.Relative)
+  QuickOpenSymbol(WorkspaceSymbol)
 } derive(Eq)
 
 ///|
-/// A query waits briefly while the user types, then becomes a host request.
-/// Ready deliberately includes the empty-result state; Failed is reserved for
-/// bridge/request failure so the view can distinguish the two.
-priv enum SymbolSearchPhase {
-  SymbolSearchDebouncing
-  SymbolSearchLoading
-  SymbolSearchReady
-  SymbolSearchFailed
+/// The desktop's transient unified Quick Open. `value` is the exact text shown
+/// in the input, including the `#` provider prefix when symbols are active.
+/// Its owner fences results to one conversation; `generation` separates
+/// successive symbol queries even when their text is identical. The page-level
+/// counter lives on `Model`, so closing the palette cannot make an old reply
+/// current again.
+priv struct QuickOpen {
+  owner : @interop.ConversationKey
+  value : String
+  items : Array[QuickOpenItem]
+  selected : Int
+  phase : QuickOpenPhase
+  generation : Int
+  truncated : Bool
+} derive(Eq)
+
+///|
+/// Symbol queries wait briefly while the user types; file filtering is local
+/// once the workspace index is ready. Ready deliberately includes an empty
+/// result; Failed is reserved for bridge/request failure.
+priv enum QuickOpenPhase {
+  QuickOpenDebouncing
+  QuickOpenLoading
+  QuickOpenReady
+  QuickOpenFailed
 } derive(Eq)
 
 ///|
@@ -827,12 +845,12 @@ priv struct Model {
   // while the query is unchanged. Recomputed on every keystroke and refetched
   // when the query or conversation changes.
   symbol_cache : SymbolCache
-  // The native desktop's Cmd/Ctrl+T workspace-symbol palette. It is global UI
-  // for the focused conversation, not durable conversation state; browser
-  // pages never open it. The monotonic counter fences replies across close and
-  // reopen, while the optional state carries the current query and selection.
-  symbol_search : SymbolSearch?
-  symbol_search_generation : Int
+  // The native desktop's Cmd/Ctrl+P/T unified Quick Open. It is global UI for
+  // the focused conversation, not durable conversation state; browser pages
+  // never open it. The monotonic counter fences symbol replies across close
+  // and reopen, while the optional state carries input, rows, and selection.
+  quick_open : QuickOpen?
+  quick_open_generation : Int
   // The desktop topbar's app launcher. Installed apps belong to the native
   // host, not a conversation or workspace, so this catalog is probed once
   // and kept while the frontend runs.
@@ -1051,34 +1069,34 @@ priv enum Msg {
   // A failed search reads as "no symbols", so it carries no message to show —
   // only the `owner`/`query` needed to settle the right menu.
   SymbolsFailed(owner~ : @interop.ConversationKey, query~ : String)
-  // Open or reset the native workspace-symbol quick pick. The shortcut
-  // subscription is desktop-only, but update still guards this message so a
-  // browser cannot open it through another path.
-  SymbolSearchOpen
-  SymbolSearchQueryChanged(String)
-  // A delayed query starts only if this owner/query/generation is still the
-  // palette's current state.
-  SymbolSearchDue(
+  // Open the unified desktop Quick Open in the requested provider. The
+  // shortcut subscription is desktop-only, but update still guards this
+  // message so a browser cannot open it through another path.
+  QuickOpenOpen(QuickOpenMode)
+  QuickOpenValueChanged(String)
+  // A delayed symbol query starts only if this owner/query/generation is still
+  // the palette's current state.
+  QuickOpenDue(
     owner~ : @interop.ConversationKey,
     query~ : String,
     generation~ : Int
   )
-  SymbolSearchLoaded(
+  QuickOpenSymbolsLoaded(
     owner~ : @interop.ConversationKey,
     query~ : String,
     generation~ : Int,
     items~ : Array[WorkspaceSymbol]
   )
-  SymbolSearchRequestFailed(
+  QuickOpenSymbolsRequestFailed(
     owner~ : @interop.ConversationKey,
     query~ : String,
     generation~ : Int
   )
-  SymbolSearchMove(Int)
-  SymbolSearchSelect(Int)
-  SymbolSearchAccept
-  SymbolSearchPick(Int)
-  SymbolSearchDismiss
+  QuickOpenMove(Int)
+  QuickOpenSelect(Int)
+  QuickOpenAccept
+  QuickOpenPick(Int)
+  QuickOpenDismiss
   ModelChanged(String)
   MaxStepsChanged(String)
   SetupApiKeyChanged(String)
@@ -1647,8 +1665,8 @@ fn initial_model() -> Model {
     skills_notice: "",
     completion: None,
     symbol_cache: empty_symbol_cache(),
-    symbol_search: None,
-    symbol_search_generation: 0,
+    quick_open: None,
+    quick_open_generation: 0,
     launcher: { open: false, apps: AppsNotFetched },
     dock: @dock.State::empty(),
     file_panel: @fileeditor.State::empty(),

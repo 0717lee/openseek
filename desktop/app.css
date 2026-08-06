@@ -626,8 +626,8 @@ button.panel-toggle:not(:disabled):hover {
 /* The viewer and the toggleable file-tree panel split the column below
    the breadcrumb, Emacs-style: the tree docks flat along the bottom
    and takes real layout height, the viewer keeps the rest. Both stay
-   mounted (see panel_view) so the viewer host is never re-keyed and
-   the filter's state survives toggling; CSS alone hides the panel. */
+   mounted (see panel_view) so the viewer host is never re-keyed; CSS
+   alone hides the panel. */
 .editor-body {
   display: flex;
   flex-direction: column;
@@ -963,32 +963,6 @@ html.is-resizing * {
   min-height: 0;
   background: var(--surface-2);
 }
-
-/* The filter line rides the panel's bottom edge like an Emacs
-   minibuffer: one flat row, a hairline above it, a borderless input. */
-.file-tree-header {
-  display: flex;
-  align-items: center;
-  flex: 0 0 auto;
-  height: 32px;
-  padding: 0 4px;
-  border-top: 1px solid var(--line);
-}
-
-.file-filter {
-  flex: 1 1 auto;
-  width: auto;
-  min-width: 0;
-  padding: 4px 8px;
-  font-size: 12px;
-  border: 0;
-  background: transparent;
-  color: var(--ink);
-}
-.file-filter:focus {
-  outline: none;
-}
-
 .file-panel-error {
   flex: 0 0 auto;
   padding: 8px 12px;
@@ -1035,17 +1009,6 @@ html.is-resizing * {
   color: var(--accent-ink);
 }
 
-/* The keyboard cursor's row (↑/↓ from the filter input) — the hover
-   tint, held. */
-.tree-row.cursor {
-  background: var(--surface-2);
-}
-.tree-row.selected.cursor {
-  background: var(--accent-soft);
-  outline: 1px solid var(--accent-ink);
-  outline-offset: -1px;
-}
-
 /* A breadcrumb's `RevealDirectory` target, flashed until
    `HighlightCleared` removes the class; the transition above eases it
    back out. */
@@ -1067,18 +1030,6 @@ html.is-resizing * {
 .tree-name {
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-/* A fuzzy-filter match row: the whole relative path, dimmed so the
-   highlighted query characters carry the row. */
-.tree-path {
-  color: var(--ink-2);
-}
-
-/* The query characters inside a match. */
-.tree-hit {
-  color: var(--accent-ink);
-  font-weight: 600;
 }
 
 /* The slimmer second row under the tab bar: the active file's path,
@@ -3497,10 +3448,10 @@ select:focus {
   filter: brightness(0.94);
 }
 
-/* ---------- workspace-symbol quick pick ---------- */
+/* ---------- unified file / workspace-symbol Quick Open ---------- */
 /* Codex-style command palette geometry with OpenSeek's own surface tokens.
    It sits above toasts and ordinary modals but below the disconnected screen. */
-.symbol-search-backdrop {
+.quick-open-backdrop {
   position: fixed;
   inset: 0;
   z-index: 70;
@@ -3511,7 +3462,7 @@ select:focus {
   background: color-mix(in srgb, #000 13%, transparent);
 }
 
-.symbol-search-dialog {
+.quick-open-dialog {
   width: min(520px, 100%);
   overflow: hidden;
   border: 1px solid var(--line);
@@ -3521,7 +3472,7 @@ select:focus {
   box-shadow: var(--shadow-pop);
 }
 
-.symbol-search-input-wrap {
+.quick-open-input-wrap {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -3530,14 +3481,14 @@ select:focus {
   border-bottom: 1px solid var(--line-2);
 }
 
-.symbol-search-input-wrap > .icon {
+.quick-open-input-wrap > .icon {
   flex: 0 0 auto;
   width: 17px;
   height: 17px;
   color: var(--ink-3);
 }
 
-.symbol-search-input-wrap input {
+.quick-open-input-wrap input {
   min-width: 0;
   flex: 1 1 auto;
   padding: 13px 0;
@@ -3548,11 +3499,11 @@ select:focus {
   font: 14px/1.45 var(--mono);
 }
 
-.symbol-search-input-wrap input::placeholder {
+.quick-open-input-wrap input::placeholder {
   color: var(--ink-3);
 }
 
-.symbol-search-group-label {
+.quick-open-group-label {
   padding: 11px 14px 6px;
   color: var(--ink-3);
   font-size: 11px;
@@ -3560,14 +3511,14 @@ select:focus {
   letter-spacing: 0.02em;
 }
 
-.symbol-search-list {
+.quick-open-list {
   max-height: min(440px, calc(100vh - 190px));
   overflow-y: auto;
   padding: 0 6px 7px;
   overscroll-behavior: contain;
 }
 
-.symbol-search-row {
+.quick-open-row {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -3578,25 +3529,25 @@ select:focus {
   cursor: default;
 }
 
-.symbol-search-row:hover,
-.symbol-search-row.selected {
+.quick-open-row:hover,
+.quick-open-row.selected {
   background: var(--surface-2);
   color: var(--ink);
 }
 
-.symbol-search-kind {
+.quick-open-kind {
   flex: 0 0 18px;
   width: 18px;
   color: var(--ink-3);
   font-size: 16px;
 }
 
-.symbol-search-row.selected .symbol-search-kind,
-.symbol-search-row:hover .symbol-search-kind {
+.quick-open-row.selected .quick-open-kind,
+.quick-open-row:hover .quick-open-kind {
   color: var(--accent-ink);
 }
 
-.symbol-search-row-text {
+.quick-open-row-text {
   min-width: 0;
   flex: 1 1 auto;
   display: flex;
@@ -3604,7 +3555,7 @@ select:focus {
   gap: 10px;
 }
 
-.symbol-search-name {
+.quick-open-name {
   min-width: 0;
   max-width: 52%;
   flex: 0 1 auto;
@@ -3616,7 +3567,7 @@ select:focus {
   white-space: nowrap;
 }
 
-.symbol-search-detail {
+.quick-open-detail {
   min-width: 0;
   flex: 1 1 auto;
   overflow: hidden;
@@ -3626,7 +3577,7 @@ select:focus {
   white-space: nowrap;
 }
 
-.symbol-search-empty {
+.quick-open-empty {
   min-height: 76px;
   display: grid;
   place-items: center;
@@ -3636,55 +3587,62 @@ select:focus {
   text-align: center;
 }
 
-.symbol-search-empty.error {
+.quick-open-empty.error {
   color: var(--del);
+}
+
+.quick-open-truncated {
+  padding: 7px 14px 9px;
+  border-top: 1px solid var(--line-2);
+  color: var(--ink-3);
+  font-size: 11px;
 }
 
 /* The codicon font/base class ships in viewer.css. These are the symbol
    codepoints registered by VS Code's codiconsLibrary.ts. */
-.symbol-search-kind.codicon-symbol-file::before {
+.quick-open-kind.codicon-symbol-file::before {
   content: "\eb60";
 }
-.symbol-search-kind.codicon-symbol-namespace::before {
+.quick-open-kind.codicon-symbol-namespace::before {
   content: "\ea8b";
 }
-.symbol-search-kind.codicon-symbol-class::before {
+.quick-open-kind.codicon-symbol-class::before {
   content: "\eb5b";
 }
-.symbol-search-kind.codicon-symbol-method::before {
+.quick-open-kind.codicon-symbol-method::before {
   content: "\ea8c";
 }
-.symbol-search-kind.codicon-symbol-property::before {
+.quick-open-kind.codicon-symbol-property::before {
   content: "\eb65";
 }
-.symbol-search-kind.codicon-symbol-field::before {
+.quick-open-kind.codicon-symbol-field::before {
   content: "\eb5f";
 }
-.symbol-search-kind.codicon-symbol-enum::before {
+.quick-open-kind.codicon-symbol-enum::before {
   content: "\ea95";
 }
-.symbol-search-kind.codicon-symbol-interface::before {
+.quick-open-kind.codicon-symbol-interface::before {
   content: "\eb61";
 }
-.symbol-search-kind.codicon-symbol-variable::before {
+.quick-open-kind.codicon-symbol-variable::before {
   content: "\ea88";
 }
-.symbol-search-kind.codicon-symbol-constant::before {
+.quick-open-kind.codicon-symbol-constant::before {
   content: "\eb5d";
 }
-.symbol-search-kind.codicon-symbol-enum-member::before {
+.quick-open-kind.codicon-symbol-enum-member::before {
   content: "\eb5e";
 }
-.symbol-search-kind.codicon-symbol-struct::before {
+.quick-open-kind.codicon-symbol-struct::before {
   content: "\ea91";
 }
-.symbol-search-kind.codicon-symbol-operator::before {
+.quick-open-kind.codicon-symbol-operator::before {
   content: "\eb64";
 }
-.symbol-search-kind.codicon-symbol-type-parameter::before {
+.quick-open-kind.codicon-symbol-type-parameter::before {
   content: "\ea92";
 }
-.symbol-search-kind.codicon-symbol-misc::before {
+.quick-open-kind.codicon-symbol-misc::before {
   content: "\eb63";
 }
 
@@ -3703,18 +3661,18 @@ select:focus {
 }
 
 @media (max-width: 760px) {
-  .symbol-search-backdrop {
+  .quick-open-backdrop {
     padding: 16px;
   }
-  .symbol-search-list {
+  .quick-open-list {
     max-height: calc(100vh - 116px);
   }
-  .symbol-search-row-text {
+  .quick-open-row-text {
     align-items: stretch;
     flex-direction: column;
     gap: 2px;
   }
-  .symbol-search-name {
+  .quick-open-name {
     max-width: 100%;
   }
 
