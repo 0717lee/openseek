@@ -43,6 +43,10 @@ const LowWatermark = 65536
 ///|
 priv struct TerminalSession {
   pty : @pty.Pty
+  /// The child id captured immediately after spawn. `Pty::close` clears the
+  /// id stored in the native PTY handle, so shutdown must never read it again
+  /// while another task may be closing that handle.
+  pid : Int
   /// Bytes emitted to the webview but not yet acknowledged.
   mut unacked : Int
   /// Each sequence remains here until its acknowledgement is applied. Removing

@@ -35,8 +35,20 @@ async fn TerminalSession::close_when_requested(
   _output_task : @async.Task[Unit],
 ) -> Unit {
   self.close_requested.get()
+  // POSIX gives negative process ids group-wide meanings. In particular,
+  // kill(-1, SIGKILL) targets nearly every process the user may signal, so a
+  // cleared or otherwise invalid PTY id must never reach hard_cancel.
+  guard self.pid > 0 else {
+    @xlog.error() <?
+      {
+        "event": "terminal_cancel_rejected",
+        "pid": self.pid,
+        "reason": "non-positive child process id",
+      }
+    return
+  }
   let cancel = @process.hard_cancel()
-  cancel(self.pty.pid())
+  cancel(self.pid)
 }
 
 ///|
@@ -88,6 +100,17 @@ async fn run_session(
         return
       }
     }
+    // Capture the id before publishing the session. The PTY handle mutates its
+    // own copy during close, but this value remains the identity of the child
+    // created for this session.
+    let pid = pty.pid()
+    if pid <= 0 {
+      request.reply.put(
+        Err("terminal spawn returned a non-positive process id"),
+      )
+      pty.close()
+      return
+    }
     // Spawning suspends, so a reconnect can invalidate the request while the
     // child is being created. Close it before publishing a stale session.
     if request.connection_generation != state.connection_generation {
@@ -102,6 +125,7 @@ async fn run_session(
     }
     let session : TerminalSession = {
       pty,
+      pid,
       unacked: 0,
       unacked_chunks: Map([]),
       next_output_sequence: 1,
@@ -119,7 +143,7 @@ async fn run_session(
       {
         "event": "terminal_spawn",
         "id": request.id,
-        "pid": pty.pid(),
+        "pid": pid,
         "argv0": request.argv.get(0).unwrap_or(""),
         // The directory passed directly to the platform process spawn.
         "cwd": request.cwd,
