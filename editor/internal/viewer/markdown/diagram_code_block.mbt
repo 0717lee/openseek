@@ -1,14 +1,15 @@
 ///|
-/// Renders package-owned exact lowercase `d2` and `diago` fences before any
-/// caller override. Unknown, unlabelled, and failed diagram blocks keep the
-/// existing fallback.
+/// Renders package-owned exact lowercase diagram fences before any caller
+/// override. `d2`/`diago` use Diago, while `uml`/`plantuml` use the UML
+/// renderer. Unknown, unlabelled, and failed diagram blocks keep the existing
+/// fallback.
 ///
 /// ```d2
 /// direction: right
 ///
 /// fence: fenced block
-/// language: exact d2 or diago?
-/// compile: Diago compile to SVG
+/// language: supported diagram fence?
+/// compile: matching compiler to SVG
 /// wrapper: diagram wrapper
 /// fallback: ordinary code HTML
 ///
@@ -24,6 +25,8 @@ fn render_diagram_code_block(code_block : MarkdownCodeBlock) -> String? {
       render_diago_svg(code_block.code).map(svg => {
         wrap_diagram_svg("diago", svg)
       })
+    Some("uml") | Some("plantuml") =>
+      render_uml_svg(code_block.code).map(svg => wrap_diagram_svg("uml", svg))
     _ => None
   }
 }
@@ -37,6 +40,36 @@ fn render_diago_svg(source : String) -> String? {
     _ => return None
   }
   Some(svg)
+}
+
+///|
+/// Uses CSS-backed paint values so one synchronous UML SVG follows the host's
+/// current foreground and surface colors without a theme-time rerender.
+fn render_uml_svg(source : String) -> String? {
+  let foreground = "var(--vscode-editor-foreground, #1f2328)"
+  let muted = "var(--vscode-descriptionForeground, #6e7781)"
+  let surface = "var(--vscode-editorWidget-background, var(--vscode-editor-background, #ffffff))"
+  let note_surface = "var(--vscode-editorHoverWidget-background, var(--vscode-editorWidget-background, #fff8c5))"
+  let color_scheme = @uml_style.ColorScheme::ColorScheme(
+    foreground,
+    foreground,
+    canvas="none",
+    node=surface,
+    note=note_surface,
+    partition="none",
+    participant=surface,
+    activation=surface,
+    lifeline=muted,
+    divider=muted,
+    divider_title=surface,
+    delay=muted,
+    reference_tab=surface,
+    page_break=muted,
+    transparent="none",
+  )
+  Some(@uml.render_svg(source, color_scheme~)) catch {
+    _ => None
+  }
 }
 
 ///|

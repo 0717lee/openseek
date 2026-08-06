@@ -658,7 +658,7 @@ test('presents Markdown blockquotes as subtle callouts', async ({ page }) => {
   expect(nestedGeometry.nestedContentWidth).toBeGreaterThan(150);
 });
 
-test('mounts zoom and drag controls for D2 and Mermaid in Markdown documents', async ({
+test('mounts zoom and drag controls for D2, UML, and Mermaid in Markdown documents', async ({
   page,
 }, testInfo) => {
   await page.route(`**${mermaidModulePath}`, (route) =>
@@ -688,7 +688,7 @@ test('mounts zoom and drag controls for D2 and Mermaid in Markdown documents', a
     );
 
     const viewports = page.locator(`${article} ${diagramViewport}`);
-    await expect(viewports).toHaveCount(2);
+    await expect(viewports).toHaveCount(3);
     const diagramWidths = await page.locator(article).evaluate((articleNode) => {
       const articleRect = articleNode.getBoundingClientRect();
       const articleStyle = getComputedStyle(articleNode);
@@ -712,9 +712,14 @@ test('mounts zoom and drag controls for D2 and Mermaid in Markdown documents', a
     const mermaid = page.locator(
       `${article} [data-diagram-language="mermaid"]${diagramViewport}`,
     );
+    const uml = page.locator(
+      `${article} [data-diagram-language="uml"]${diagramViewport}`,
+    );
     await expect(d2).toHaveCount(1);
+    await expect(uml).toHaveCount(1);
     await expect(mermaid).toHaveCount(1);
     await expect(d2).toHaveCSS('margin-bottom', '16px');
+    await expect(uml).toHaveCSS('margin-bottom', '16px');
     await expect(mermaid).toHaveCSS('margin-bottom', '0px');
     expect(
       await mermaid.evaluate((node) => ({
@@ -756,13 +761,21 @@ test('mounts zoom and drag controls for D2 and Mermaid in Markdown documents', a
       'aria-label',
       'Interactive Mermaid diagram',
     );
+    await expect(uml).toHaveAttribute(
+      'aria-label',
+      'Interactive UML diagram',
+    );
     await expect(d2.getByRole('button')).toHaveCount(4);
+    await expect(uml.getByRole('button')).toHaveCount(4);
     await expect(mermaid.getByRole('button')).toHaveCount(4);
     await expect(
       d2.getByRole('toolbar', { name: 'D2 diagram controls' }),
     ).toBeVisible();
     await expect(
       mermaid.getByRole('toolbar', { name: 'Mermaid diagram controls' }),
+    ).toBeVisible();
+    await expect(
+      uml.getByRole('toolbar', { name: 'UML diagram controls' }),
     ).toBeVisible();
     await expect(d2).toHaveCSS('z-index', '0');
     await expect(d2.locator(diagramControls)).toHaveCSS(
@@ -818,6 +831,7 @@ test('mounts zoom and drag controls for D2 and Mermaid in Markdown documents', a
         })),
       ),
     ).toEqual([
+      { connected: false, enhanced: false },
       { connected: false, enhanced: false },
       { connected: false, enhanced: false },
     ]);

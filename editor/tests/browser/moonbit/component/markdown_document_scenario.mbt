@@ -158,6 +158,14 @@ fn markdown_document_diagram_source() -> String {
     #|shared -> viewport: controls
     #|```
     #|
+    #|```uml
+    #|@startuml
+    #|participant Source
+    #|participant SharedViewport
+    #|Source -> SharedViewport : UML
+    #|@enduml
+    #|```
+    #|
     #|```mermaid
     #|flowchart LR
     #|  Source --> SharedViewport --> Controls

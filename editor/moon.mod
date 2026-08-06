@@ -25,6 +25,7 @@ import {
   "moonbit-community/piediff@0.0.10",
   "Milky2018/diago@0.3.0",
   "moonbitlang/x@0.4.46",
+  "kokic/uml@0.1.1",
 }
 
 options(
