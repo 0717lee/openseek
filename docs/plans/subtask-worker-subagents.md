@@ -5,12 +5,17 @@ NO-GO with 3 blockers + majors — all adopted below). v2: subtask-plan-v2.md.
 Threat model unchanged from v2: cooperative (accident prevention + parallel
 correctness), same trust tier as the parent; kernel layer macOS-only.
 
+Follow-up (2026-08-06): the selected integration worktree may now be the main
+worktree or a linked worktree. The shared registry remains repository-wide;
+each entry is bound to its provisioning worktree by its canonical worker path,
+and lifecycle actions from sibling worktrees are refused.
+
 ## Delta summary vs v2 (round-2 findings → resolutions)
 
 - R2-B1 (profile wrong for linked-origin/external siblings; allow-default
-  overclaim) → provision REQUIRES the origin to be the MAIN worktree; profile
-  built from canonical `git rev-parse` outputs + full `git worktree list`
-  enumeration; honest scope language.
+  overclaim) → profile built from canonical `git rev-parse` outputs + the
+  common Git directory + full `git worktree list` enumeration; lifecycle
+  actions are bound to the selected integration worktree.
 - R2-B2 (in-worktree marker poisons cleanliness) → controller-owned registry
   under the canonical common git dir; no marker in the worktree.
 - R2-B3 (merge overwrites ignored files) → `--no-overwrite-ignore` + the
@@ -42,11 +47,10 @@ reaches the profile). Ship first, alone.
 
 ## Provision preconditions (controller, engine-side)
 
-1. Canonical geometry via `git rev-parse --absolute-git-dir
-   --git-common-dir --show-toplevel` (all realpath'd):
-   - workspace_root must equal the toplevel, AND absolute-git-dir must equal
-     common-dir (i.e. the origin is the MAIN worktree, not a linked one).
-     Otherwise: tool error naming the v1 limitation.
+1. Canonical geometry via `git rev-parse --git-common-dir --show-toplevel`
+   (all realpath'd):
+   - workspace_root must equal the selected worktree's toplevel. Main and
+     linked worktrees are both supported integration targets.
 2. Enumerate `git worktree list --porcelain` → every worktree root.
 3. Reserve FIRST: worker slot (semaphore 4) + SubrunBudget slot; every later
    failure path rolls back provisioned state explicitly (postcondition
@@ -207,7 +211,7 @@ scope-violation error; final verdict from the checker).
 - PR1 WriteScope + file-tool wiring (independently landable).
 - PR2 worker sandbox mode: profile builder + force-sandbox propagation +
   static guard + run_moonbit rooting + denial subjects. Test matrix per
-  subal: linked-origin rejection helper, suffixed admin dirs, external
+  subal: linked-origin lifecycle, suffixed admin dirs, external
   siblings denied, moon check ok, status/diff ok under GIT_OPTIONAL_LOCKS=0,
   commit/ref/config/worktree mutations fail, common state unchanged
   (before/after snapshot), fg/bg/trusted/untrusted/run_moonbit paths,

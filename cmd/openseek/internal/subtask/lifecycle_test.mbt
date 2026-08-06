@@ -286,10 +286,10 @@ async test "integrate refuses a dirty tracked origin; abort restores state" {
 }
 
 ///|
-async test "provision refuses linked-worktree origins and submodule slices" {
+async test "linked worktree provisions and integrates into itself" {
   @vfs.with_tmpdir(prefix="openseek-subtask-precond-", dir => {
     let repo = seed_repo(dir)
-    // A linked worktree cannot be the origin.
+    let linked = "\{dir}/linked"
     match
       @subtask.git_require(
         ["worktree", "add", "-q", "../linked", "-b", "linked"],
@@ -298,16 +298,46 @@ async test "provision refuses linked-worktree origins and submodule slices" {
       Ok(_) => ()
       Err(reason) => fail(reason)
     }
-    guard @subtask.provision(
-        "\{dir}/linked",
-        name="x",
-        allowed_paths=["lib"],
-        nonce="n1",
-      )
-      is Err(linked) else {
-      fail("expected the linked-worktree refusal")
+    let provisioned = must_provision(
+      linked,
+      name="x",
+      allowed_paths=["lib"],
+      nonce="n1",
+    )
+    guard @subtask.resolve_geometry(repo) is Ok(main_geometry) else {
+      fail("expected main worktree geometry")
     }
-    assert_true(linked.contains("MAIN worktree"))
+    let linked_root = provisioned.geometry.origin_root
+    assert_eq(provisioned.entry.worker_root, "\{linked_root}/.worktrees/x")
+    let deny_roots = provisioned.geometry.worker_deny_roots()
+    assert_true(deny_roots.contains(provisioned.geometry.common_git_dir))
+    assert_true(deny_roots.contains(main_geometry.origin_root))
+    assert_true(deny_roots.contains(linked_root))
+    @vfs.write_text("\{provisioned.entry.worker_root}/lib", "a.txt", "LINKED\n")
+    let captured = @subtask.capture(provisioned.geometry, provisioned.entry)
+    assert_true(captured.entry.state is Committed)
+
+    // The repository-wide registry is visible from the main worktree, but a
+    // lifecycle action there must not redirect this slice's merge target.
+    guard @subtask.resume_running(main_geometry, "x") is Err(wrong_continue) else {
+      fail("expected sibling-worktree continue to be refused")
+    }
+    assert_true(wrong_continue.contains("different worktree"))
+    guard @subtask.discard(main_geometry, captured.entry) is Err(wrong_discard) else {
+      fail("expected sibling-worktree discard to be refused")
+    }
+    assert_true(wrong_discard.contains("different worktree"))
+    let wrong_target = @subtask.integrate(main_geometry, captured.entry)
+    assert_eq(wrong_target.result, "refused")
+    assert_true(wrong_target.detail[0].contains("different worktree"))
+    assert_eq(@fs.read_file("\{repo}/lib/a.txt").text(), "alpha\n")
+    assert_true(@fs.exists(provisioned.entry.worker_root))
+
+    let integrated = @subtask.integrate(provisioned.geometry, captured.entry)
+    assert_eq(integrated.result, "integrated")
+    assert_eq(@fs.read_file("\{linked_root}/lib/a.txt").text(), "LINKED\n")
+    assert_eq(@fs.read_file("\{repo}/lib/a.txt").text(), "alpha\n")
+    assert_false(@fs.exists(provisioned.entry.worker_root))
   })
 }
 

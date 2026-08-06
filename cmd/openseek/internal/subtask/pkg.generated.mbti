@@ -64,6 +64,7 @@ pub struct Geometry {
   common_git_dir : String
   worktree_roots : Array[String]
 }
+pub fn Geometry::worker_deny_roots(Self) -> Array[String]
 
 pub struct GitOutcome {
   exit_code : Int
