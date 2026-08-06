@@ -1,5 +1,6 @@
 import {
   "bobzhang/openseek/agent_session",
+  "moonbitlang/core/int",
   "bobzhang/openseek/agent_session/compact",
   "bobzhang/openseek/agent_runtime",
   "bobzhang/openseek/agent_tool",
