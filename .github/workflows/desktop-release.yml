@@ -76,14 +76,23 @@ jobs:
 
             # The macOS packager uses this version for both the visible release
             # version and CFBundleVersion, whose third component is at most two digits.
-            major_version="${BASH_REMATCH[1]}"
-            minor_version="${BASH_REMATCH[2]}"
-            patch_version="${BASH_REMATCH[3]}"
-            if (( 10#$patch_version >= 99 )); then
-              echo "::error::Cannot auto-increment staging version '$current_version': patch component is already 99"
+            major_version=$((10#${BASH_REMATCH[1]}))
+            minor_version=$((10#${BASH_REMATCH[2]}))
+            patch_version=$((10#${BASH_REMATCH[3]}))
+            if (( patch_version < 99 )); then
+              patch_version=$((patch_version + 1))
+            elif (( minor_version < 99 )); then
+              minor_version=$((minor_version + 1))
+              patch_version=0
+            elif (( major_version < 9999 )); then
+              major_version=$((major_version + 1))
+              minor_version=0
+              patch_version=0
+            else
+              echo "::error::Cannot auto-increment maximum staging version '$current_version'"
               exit 1
             fi
-            release_version="$((10#$major_version)).$((10#$minor_version)).$((10#$patch_version + 1))"
+            release_version="$major_version.$minor_version.$patch_version"
           else
             release_version="$MANUAL_RELEASE_VERSION"
           fi
