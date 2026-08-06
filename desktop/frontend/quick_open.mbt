@@ -1,7 +1,7 @@
-// Native desktop unified Quick Open. This is Workbench chrome: it owns the
-// global file/symbol shortcuts, provider-prefix state, result navigation, and
-// the handoff to the existing cross-file open/reveal path. The single-document
-// Viewer and the browser console remain unaware of it.
+// Native desktop unified Quick Open. This is Workbench chrome: it owns
+// provider-prefix state, result navigation, and the handoff to the existing
+// cross-file open/reveal path. `boot.mbt` owns global shortcut bindings; the
+// single-document Viewer and the browser console remain unaware of them.
 
 ///|
 const QuickOpenSymbolDebounceMs : Int = 150
@@ -11,116 +11,6 @@ const QuickOpenInputId : String = "quick-open-input"
 
 ///|
 const QuickOpenListId : String = "quick-open-list"
-
-///|
-priv suberror QuickOpenShortcutSubscription {
-  QuickOpenShortcutSubscription(@cmd.Emit[Msg])
-}
-
-///|
-fn quick_open_shortcut_sub_loader(
-  payload : Error,
-  scheduler : &Scheduler,
-) -> @sub.RunningSub? {
-  match payload {
-    QuickOpenShortcutSubscription(emit) => {
-      let mut emit = emit
-      let target = @dom.document().as_event_target()
-      let is_apple = quick_open_platform_is_apple()
-      let listener : @dom.Listener = event => {
-        guard event.to_keyboard_event() is Some(keyboard) &&
-          quick_open_shortcut_mode(keyboard, is_apple) is Some(mode) else {
-          return
-        }
-        event.prevent_default()
-        event.stop_propagation()
-        scheduler.add(emit(QuickOpenOpen(mode)))
-      }
-      target.add_event_listener_with_options("keydown", listener, capture=true)
-      Some({
-        unload: _ => {
-          target.remove_event_listener_with_options(
-            "keydown",
-            listener,
-            capture=true,
-          )
-        },
-        update_tagger: payload => {
-          guard payload is QuickOpenShortcutSubscription(next) else { return }
-          emit = next
-        },
-      })
-    }
-    _ => None
-  }
-}
-
-///|
-/// Subscribe to Cmd+P/T on Apple platforms and Ctrl+P/T elsewhere. `boot` adds
-/// this only for the injected desktop bridge, so a browser tab keeps its
-/// native print/new-tab shortcuts.
-fn quick_open_shortcut_subscription(emit : @cmd.Emit[Msg]) -> @sub.Sub {
-  @sub.custom_sub(
-    "quick-open-shortcut-capture",
-    Global,
-    QuickOpenShortcutSubscription(emit),
-    quick_open_shortcut_sub_loader,
-  )
-}
-
-///|
-/// Browser platform label used to keep Ctrl+T available to terminal programs
-/// on Apple systems while using the conventional Ctrl shortcut elsewhere.
-fn quick_open_browser_platform() -> String {
-  let navigator = @js.Value::cast_from(@dom.window().navigator())
-  if @interop.js_prop(navigator, "userAgentData") is Some(user_agent_data) &&
-    @interop.js_prop(user_agent_data, "platform") is Some(value) &&
-    (@js.Cast::into(value) : String?) is Some(platform) &&
-    !platform.is_empty() {
-    return platform
-  }
-  if @interop.js_prop(navigator, "platform") is Some(value) &&
-    (@js.Cast::into(value) : String?) is Some(platform) {
-    platform
-  } else {
-    ""
-  }
-}
-
-///|
-fn quick_open_platform_is_apple() -> Bool {
-  let platform = quick_open_browser_platform().to_lower()
-  platform.contains("mac") ||
-  platform.contains("iphone") ||
-  platform.contains("ipad") ||
-  platform.contains("ipod")
-}
-
-///|
-/// Map only the platform's exact, non-repeating command chords. The capture
-/// listener calls this before Monaco/xterm or the focused input can consume it.
-fn quick_open_shortcut_mode(
-  keyboard : @dom.KeyboardEvent,
-  is_apple : Bool,
-) -> QuickOpenMode? {
-  let command = if is_apple {
-    keyboard.meta_key() && !keyboard.ctrl_key()
-  } else {
-    keyboard.ctrl_key() && !keyboard.meta_key()
-  }
-  guard command &&
-    !keyboard.shift_key() &&
-    !keyboard.alt_key() &&
-    !keyboard.is_composing() &&
-    !keyboard.repeat() else {
-    return None
-  }
-  match keyboard.code() {
-    "KeyP" => Some(QuickOpenFiles)
-    "KeyT" => Some(QuickOpenSymbols)
-    _ => None
-  }
-}
 
 ///|
 fn active_quick_open_owner(model : Model) -> @interop.ConversationKey {
