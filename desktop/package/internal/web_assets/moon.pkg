@@ -3,6 +3,7 @@ import {
   "moonbitlang/async",
   "moonbitlang/async/fs" @asyncfs,
   "moonbitlang/async/http",
+  "moonbitlang/core/json",
   "moonbitlang/core/string",
   "moonbitlang/x/crypto",
 }

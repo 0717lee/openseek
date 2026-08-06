@@ -1,0 +1,33 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "openseek_desktop/package/internal/web_assets"
+
+import {
+  "openseek_desktop/package/internal/packaging",
+}
+
+// Values
+
+// Errors
+
+// Types and methods
+type Distribution
+pub async fn Distribution::copy_to(Self, String) -> Unit
+
+type EsbuildTarget
+pub fn EsbuildTarget::linux_x64() -> Self
+pub fn EsbuildTarget::macos_arm64() -> Self
+pub fn EsbuildTarget::windows_x64() -> Self
+
+type Metadata
+pub fn Metadata::manifest(Self) -> String
+pub fn Metadata::parse(String, String) -> Self raise @packaging.PackageError
+pub fn Metadata::render_index(Self, String, String) -> String raise @packaging.PackageError
+
+type Profile
+pub fn Profile::browser() -> Self
+pub async fn Profile::build(Self, @packaging.Workspace, EsbuildTarget, release~ : Bool, asset_base? : String) -> Distribution
+pub fn Profile::desktop() -> Self
+
+// Type aliases
+
+// Traits

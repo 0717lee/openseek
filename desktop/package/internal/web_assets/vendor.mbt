@@ -17,27 +17,8 @@ const XtermSha256 : String = "bd954fa721872170188cc5d7e83e88db3c83c9a18a4e8d24c2
 const FitSha256 : String = "917ac44972453d5eed52edc1e50260c76398ce48cf2290c2e60671102bba0b33"
 
 ///|
-const EntrySource : String =
-  #|import { Terminal } from "./xterm/lib/xterm.js";
-  #|import { FitAddon } from "./fit/lib/addon-fit.js";
-  #|
-  #|// Decode one base64 chunk of raw PTY bytes into the terminal; report the
-  #|// byte count through `done` once xterm has rendered it (the flow-control
-  #|// acknowledgement the OpenSeek frontend sends back).
-  #|const writeBase64 = (term, b64, done) => {
-  #|  const bin = atob(b64);
-  #|  const out = new Uint8Array(bin.length);
-  #|  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-  #|  term.write(out, () => done(out.length));
-  #|};
-  #|
-  #|globalThis.__openseek_xterm = { Terminal, FitAddon, writeBase64 };
-  #|
-
-///|
 /// The platform-specific npm package containing esbuild's native executable.
-/// The type is opaque so callers can only select one of the supported desktop
-/// packaging targets below.
+/// The type is opaque so packagers can only select a verified target below.
 struct EsbuildTarget {
   package_name : String
   binary_path : String
@@ -45,8 +26,8 @@ struct EsbuildTarget {
 }
 
 ///|
-/// Select esbuild's macOS arm64 executable package.
-pub fn macos_arm64_target() -> EsbuildTarget {
+/// Select the verified macOS arm64 esbuild executable.
+pub fn EsbuildTarget::macos_arm64() -> EsbuildTarget {
   {
     package_name: "darwin-arm64",
     binary_path: "bin/esbuild",
@@ -55,8 +36,8 @@ pub fn macos_arm64_target() -> EsbuildTarget {
 }
 
 ///|
-/// Select esbuild's Linux x64 executable package.
-pub fn linux_x64_target() -> EsbuildTarget {
+/// Select the verified Linux x64 esbuild executable.
+pub fn EsbuildTarget::linux_x64() -> EsbuildTarget {
   {
     package_name: "linux-x64",
     binary_path: "bin/esbuild",
@@ -65,22 +46,13 @@ pub fn linux_x64_target() -> EsbuildTarget {
 }
 
 ///|
-/// Select esbuild's Windows x64 executable package.
-pub fn windows_x64_target() -> EsbuildTarget {
+/// Select the verified Windows x64 esbuild executable.
+pub fn EsbuildTarget::windows_x64() -> EsbuildTarget {
   {
     package_name: "win32-x64",
     binary_path: "esbuild.exe",
     sha256: "5c5d62da7572b57ddc1fa3caedc36c1218b5d8d02ce9c7ee70e3339fce4453c4",
   }
-}
-
-///|
-/// The generated files a platform packager must copy beside `index.html`.
-pub struct Assets {
-  /// The self-contained xterm.js and addon-fit browser bundle.
-  javascript : String
-  /// The upstream xterm.js stylesheet.
-  stylesheet : String
 }
 
 ///|
@@ -129,7 +101,12 @@ fn AssetBuilder::at(self : AssetBuilder, relative : String) -> String {
 }
 
 ///|
-async fn archive_digest(path : String) -> String {
+async fn Archive::digest(self : Archive, path : String) -> String {
+  guard path.has_suffix(self.filename) else {
+    raise @packaging.PackageError(
+      "archive path does not match \{self.filename}: \{path}",
+    )
+  }
   let bytes = @asyncfs.read_file(path).binary()
   @crypto.bytes_to_hex_string(@crypto.sha256(bytes)).to_lower()
 }
@@ -141,7 +118,7 @@ async fn AssetBuilder::ensure_cached_archive(
 ) -> String {
   let path = self.at("cache/\{archive.filename}")
   if @asyncfs.exists(path) {
-    let actual = archive_digest(path)
+    let actual = archive.digest(path)
     if actual == archive.sha256 {
       return path
     }
@@ -164,7 +141,7 @@ async fn AssetBuilder::ensure_cached_archive(
     )
   }
   @asyncfs.write_file(path, body, create_mode=CreateOrTruncate)
-  let actual = archive_digest(path)
+  let actual = archive.digest(path)
   if actual != archive.sha256 {
     @packaging.remove_path_if_exists(path)
     raise @packaging.PackageError(
@@ -195,15 +172,12 @@ fn AssetBuilder::esbuild_binary(self : AssetBuilder) -> String {
 }
 
 ///|
-/// Download verified, pinned xterm.js, addon-fit, and native esbuild archives,
-/// then generate the browser bundle and stylesheet under `target/vendor-xterm`.
-///
-/// Only downloaded archives are reused. Each packaging run recreates the
-/// extracted sources and final files so a stale partial build cannot ship.
-pub async fn build(
+/// Download and verify xterm.js, addon-fit, and the selected native esbuild,
+/// then recreate their inspectable work directory for this packaging run.
+async fn AssetBuilder::prepare(
   workspace : @packaging.Workspace,
   esbuild_target : EsbuildTarget,
-) -> Assets {
+) -> AssetBuilder {
   let builder : AssetBuilder = { workspace, esbuild_target }
   @packaging.ensure_dir(builder.at("cache"))
   let xterm_archive = builder.ensure_cached_archive(Archive::xterm())
@@ -215,23 +189,5 @@ pub async fn build(
   builder.extract_archive(xterm_archive, builder.at("work/xterm"))
   builder.extract_archive(fit_archive, builder.at("work/fit"))
   builder.extract_archive(esbuild_archive, builder.at("work/esbuild"))
-  @packaging.write_text(builder.at("work/entry.js"), EntrySource)
-  @packaging.remove_path_if_exists(builder.at("dist"))
-  @packaging.ensure_dir(builder.at("dist"))
-  let javascript = builder.at("dist/xterm.js")
-  let stylesheet = builder.at("dist/xterm.css")
-  @packaging.run_checked(
-    builder.esbuild_binary(),
-    [
-      builder.at("work/entry.js"),
-      "--bundle",
-      "--format=iife",
-      "--platform=browser",
-      "--minify",
-      "--outfile=\{javascript}",
-    ],
-    dir=workspace.dir(),
-  )
-  @packaging.copy_file(builder.at("work/xterm/css/xterm.css"), stylesheet)
-  { javascript, stylesheet }
+  builder
 }

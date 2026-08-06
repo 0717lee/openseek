@@ -1,7 +1,7 @@
-// The browser shell: the console bundle openseek-api serves at `/`
-// (its Dockerfile builds this package and ships `browser.js` with the
-// sibling `index.html`). It shares everything with the desktop shell
-// today; console-only features will migrate here as the core splits.
+// The browser shell: the console bundle openseek-api serves at `/`.
+// The shared Web asset packager combines this entry with the same CSS, fonts,
+// and terminal runtime used by Desktop. Console-only features can migrate here
+// later without creating a second asset pipeline.
 
 ///|
 fn main {

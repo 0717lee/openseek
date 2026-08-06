@@ -153,7 +153,7 @@ fn CefHelperVariant::executable_path(self : CefHelperVariant) -> String {
 async fn build_outputs(
   ws : @packaging.Workspace,
   release~ : Bool,
-) -> @xterm_assets.Assets {
+) -> @web_assets.Distribution {
   let env = { "MACOSX_DEPLOYMENT_TARGET": MinMacOSVersion }
   let host_env = {
     "MACOSX_DEPLOYMENT_TARGET": MinMacOSVersion,
@@ -181,10 +181,10 @@ async fn build_outputs(
     ],
     extra_env=env,
   )
-  @packaging.build_frontend_bundle(ws, release~)
-  let terminal_assets = @xterm_assets.build(
+  let web_distribution = @web_assets.Profile::desktop().build(
     ws,
-    @xterm_assets.macos_arm64_target(),
+    @web_assets.EsbuildTarget::macos_arm64(),
+    release~,
   )
   // Build the host without mimalloc: its static malloc/free override crashes
   // against CEF's PartitionAlloc default zone on the first `@fs.realpath`.
@@ -195,7 +195,7 @@ async fn build_outputs(
     disable_mimalloc=true,
   )
   @packaging.build_engine(ws, release~, extra_env=env)
-  terminal_assets
+  web_distribution
 }
 
 ///|
@@ -215,7 +215,7 @@ async fn reset_bundle_dirs(ws : @packaging.Workspace) -> Unit {
 /// engine is resolved by absolute path, so nothing needs a `cd` or PATH entry.
 async fn copy_bundle_files(
   ws : @packaging.Workspace,
-  terminal_assets : @xterm_assets.Assets,
+  web_distribution : @web_assets.Distribution,
   release~ : Bool,
 ) -> Unit {
   let native_binary = ws.native_binary(release~)
@@ -230,23 +230,7 @@ async fn copy_bundle_files(
   }
   @packaging.copy_file(native_binary, ws.at(MacOSPath + "/openseek-desktop"))
   @packaging.copy_file(engine_binary, ws.at(MacOSPath + "/openseek"))
-  @packaging.copy_file(ws.at("index.html"), ws.at(AppAssetDir + "/index.html"))
-  @packaging.copy_file(ws.at("app.css"), ws.at(AppAssetDir + "/app.css"))
-  @packaging.copy_file(
-    ws.at("frontend.js"),
-    ws.at(AppAssetDir + "/frontend.js"),
-  )
-  @packaging.copy_file(ws.at("viewer.css"), ws.at(AppAssetDir + "/viewer.css"))
-  // The verified terminal emulator assets generated during this packaging run
-  // are loaded by index.html before frontend.js.
-  @packaging.copy_file(
-    terminal_assets.javascript,
-    ws.at(AppAssetDir + "/xterm.js"),
-  )
-  @packaging.copy_file(
-    terminal_assets.stylesheet,
-    ws.at(AppAssetDir + "/xterm.css"),
-  )
+  web_distribution.copy_to(ws.at(AppAssetDir))
   // Checked-in icns built from appicon.svg (the design-system mark on the
   // accent squircle). Regenerate with rsvg-convert at the iconset sizes and
   // `iconutil -c icns` when the mark changes.
@@ -254,14 +238,6 @@ async fn copy_bundle_files(
     ws.at("package/macos/AppIcon.icns"),
     ws.at(ResourcesPath + "/AppIcon.icns"),
   )
-  // The codicon font is served at the site root (`/codicon.ttf`), so it sits
-  // next to `viewer.css` rather than under `fonts/`.
-  @packaging.copy_file(
-    ws.at("codicon.ttf"),
-    ws.at(AppAssetDir + "/codicon.ttf"),
-  )
-  @packaging.copy_tree(ws.mermaid_assets(), ws.at(AppAssetDir + "/mermaid"))
-  @packaging.copy_tree(ws.at("fonts"), ws.at(AppAssetDir + "/fonts"))
   bundle_proton_runtime(ws)
   let target = @moonbit.moonbit_macos_arm64_toolchain()
   @moonbit.stage_moonbit_toolchain_seed(ws, target, MoonbitSeedDir)
@@ -918,10 +894,10 @@ async fn main {
   let options = parse_package_options()
   let ws = @packaging.locate_workspace()
   @packaging.ensure_cmake(ws)
-  let terminal_assets = build_outputs(ws, release=options.release)
+  let web_distribution = build_outputs(ws, release=options.release)
   println("built openseek engine: \{ws.engine_binary(release=options.release)}")
   reset_bundle_dirs(ws)
-  copy_bundle_files(ws, terminal_assets, release=options.release)
+  copy_bundle_files(ws, web_distribution, release=options.release)
   write_bundle_metadata(ws)
   sign_and_package(ws, options.sign, options.artifacts)
   println("generated \{ws.at(AppPath)}")

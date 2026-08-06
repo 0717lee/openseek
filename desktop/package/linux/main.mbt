@@ -22,7 +22,7 @@ const AppImageToolUrl : String = "https://github.com/AppImage/appimagetool/relea
 async fn build_outputs(
   ws : @packaging.Workspace,
   release~ : Bool,
-) -> @xterm_assets.Assets {
+) -> @web_assets.Distribution {
   // Assemble the CEF runtime first so the native host links against it.
   @packaging.assemble_cef_runtime(ws, @packaging.posix_proton_cli())
   // Then replace the assembled dist's libproton with one built from the
@@ -32,14 +32,14 @@ async fn build_outputs(
     ("lib/libproton.so", "lib/libproton.so"),
     ("bin/cef_process", "bin/cef_process"),
   ])
-  @packaging.build_frontend_bundle(ws, release~)
-  let terminal_assets = @xterm_assets.build(
+  let web_distribution = @web_assets.Profile::desktop().build(
     ws,
-    @xterm_assets.linux_x64_target(),
+    @web_assets.EsbuildTarget::linux_x64(),
+    release~,
   )
   @packaging.build_native_host(ws, release~)
   @packaging.build_engine(ws, release~)
-  terminal_assets
+  web_distribution
 }
 
 ///|
@@ -54,7 +54,7 @@ async fn reset_bundle_dirs(ws : @packaging.Workspace) -> Unit {
 ///|
 async fn copy_bundle_files(
   ws : @packaging.Workspace,
-  terminal_assets : @xterm_assets.Assets,
+  web_distribution : @web_assets.Distribution,
   release~ : Bool,
 ) -> Unit {
   let native_binary = ws.native_binary(release~)
@@ -72,31 +72,7 @@ async fn copy_bundle_files(
     ws.at(UsrBinPath + "/openseek-desktop-bin"),
   )
   @packaging.copy_file(engine_binary, ws.at(UsrBinPath + "/openseek"))
-  @packaging.copy_file(ws.at("index.html"), ws.at(AppAssetDir + "/index.html"))
-  @packaging.copy_file(ws.at("app.css"), ws.at(AppAssetDir + "/app.css"))
-  @packaging.copy_file(
-    ws.at("frontend.js"),
-    ws.at(AppAssetDir + "/frontend.js"),
-  )
-  @packaging.copy_file(ws.at("viewer.css"), ws.at(AppAssetDir + "/viewer.css"))
-  // The verified terminal emulator assets generated during this packaging run
-  // are loaded by index.html before frontend.js.
-  @packaging.copy_file(
-    terminal_assets.javascript,
-    ws.at(AppAssetDir + "/xterm.js"),
-  )
-  @packaging.copy_file(
-    terminal_assets.stylesheet,
-    ws.at(AppAssetDir + "/xterm.css"),
-  )
-  // The codicon font is served at the site root (`/codicon.ttf`), so it sits
-  // next to `viewer.css` rather than under `fonts/`.
-  @packaging.copy_file(
-    ws.at("codicon.ttf"),
-    ws.at(AppAssetDir + "/codicon.ttf"),
-  )
-  @packaging.copy_tree(ws.mermaid_assets(), ws.at(AppAssetDir + "/mermaid"))
-  @packaging.copy_tree(ws.at("fonts"), ws.at(AppAssetDir + "/fonts"))
+  web_distribution.copy_to(ws.at(AppAssetDir))
   let target = @moonbit.moonbit_linux_x64_toolchain()
   @moonbit.stage_moonbit_toolchain_seed(
     ws,
@@ -234,10 +210,10 @@ async fn main {
   let release = matches.flags.get("release").unwrap_or(false)
   let ws = @packaging.locate_workspace()
   @packaging.ensure_cmake(ws)
-  let terminal_assets = build_outputs(ws, release~)
+  let web_distribution = build_outputs(ws, release~)
   println("built openseek engine: \{ws.engine_binary(release~)}")
   reset_bundle_dirs(ws)
-  copy_bundle_files(ws, terminal_assets, release~)
+  copy_bundle_files(ws, web_distribution, release~)
   write_bundle_metadata(ws)
   let tool = ensure_appimagetool(ws)
   build_appimage(ws, tool)

@@ -1,19 +1,6 @@
 ///|
-/// The desktop shell entry. Its `frontend/browser` sibling is the console
-/// bundle served by openseek-api and is not shipped inside the desktop app.
-const FrontendPackage : String = "frontend/desktop"
-
-///|
-/// The JS bundle's path below MoonBit's target/profile build directory.
-const FrontendBundleArtifact : String = "build/openseek_desktop/frontend/desktop/desktop.js"
-
-///|
-/// The stable path the host and packagers read the frontend bundle from.
-const FrontendBundleOutput : String = "frontend.js"
-
-///|
 /// The stylesheet the embedded code viewer needs, assembled from the editor
-/// dependency's CSS. `index.html` links it by this name next to `frontend.js`.
+/// dependency's CSS. The Web asset package imports it into the shared bundle.
 const ViewerStyleOutput : String = "viewer.css"
 
 ///|
@@ -425,25 +412,6 @@ pub async fn run_checked(
   if code != 0 {
     raise PackageError("command failed with exit code \{code}: \{command}")
   }
-}
-
-///|
-/// Build the frontend package in the selected mode and copy the generated
-/// JS bundle to the stable `frontend.js` path the host and packagers consume.
-pub async fn build_frontend_bundle(ws : Workspace, release~ : Bool) -> Unit {
-  let release_args = if release { ["--release"] } else { [] }
-  run_checked(
-    "moon",
-    ["build", FrontendPackage, "--target", "js", ..release_args],
-    dir=ws.dir(),
-  )
-  let mode = if release { "release" } else { "debug" }
-  copy_file(
-    ws.repo_at("_build/js/\{mode}/\{FrontendBundleArtifact}"),
-    ws.at(FrontendBundleOutput),
-  )
-  build_viewer_stylesheet(ws)
-  build_mermaid_assets(ws)
 }
 
 ///|

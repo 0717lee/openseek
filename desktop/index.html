@@ -11,19 +11,12 @@
       content="width=device-width, initial-scale=1.0, interactive-widget=resizes-content"
     />
     <title>SeekMoon</title>
-    <!-- The embedded code viewer's styles, assembled from the editor dependency
-         by the packager (see build_viewer_stylesheet). -->
-    <link rel="stylesheet" href="viewer.css" />
-    <!-- The app's own stylesheet, shared with the browser console page
-         (frontend/browser/index.html). -->
-    <link rel="stylesheet" href="app.css" />
-    <link rel="stylesheet" href="xterm.css" />
+    <!-- The Web asset packager replaces these tokens with its content-hashed
+         esbuild outputs. -->
+    <link rel="stylesheet" href="__OPENSEEK_STYLESHEET__" />
   </head>
   <body>
     <div id="app"></div>
-    <!-- The packager generates the xterm.js bundle and exposes its terminal
-         constructor plus fit addon through the __openseek_xterm global. -->
-    <script src="./xterm.js"></script>
-    <script src="./frontend.js"></script>
+    <script src="__OPENSEEK_JAVASCRIPT__"></script>
   </body>
 </html>

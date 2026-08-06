@@ -3,7 +3,7 @@ import {
   "openseek_desktop/package/internal/moonbit",
   "openseek_desktop/package/internal/packaging",
   "openseek_desktop/package/internal/pe",
-  "openseek_desktop/package/internal/xterm_assets",
+  "openseek_desktop/package/internal/web_assets",
   "moonbitlang/async",
   "moonbitlang/async/fs" @asyncfs,
   "moonbitlang/async/process",

@@ -11,7 +11,7 @@ A [Lepus](https://github.com/moonbit-community/lepus) + [Rabbita](https://moonca
 - `internal/userdirs/` — the user's Documents folder, answered by each platform's authority: the Windows known folder, the XDG user-dirs override, or `~/Documents`.
 - `internal/event/` — engine event decoding.
 - `internal/menu/` — the macOS main menu (App/Edit/Window): macOS dispatches ⌘ key equivalents through the main menu and the webview library never creates one, so without it the editing shortcuts (⌘A/⌘C/⌘V, undo, quit) are silently dropped. No-op on other platforms.
-- `frontend/` — the JS (Rabbita) UI core: the Elm-style model/update/view plus the command files talking to the host bridge. Two thin shells bundle it: `frontend/desktop/` (the app's `frontend.js`) and `frontend/browser/` (the `browser.js` console bundle openseek-api serves).
+- `frontend/` — the JS (Rabbita) UI core: the Elm-style model/update/view plus the command files talking to the host bridge. Two thin entry packages select the Desktop and Browser personalities before the shared esbuild asset packager emits their distributions.
 - `frontend/transcript/` — pure decoders from the engine's wire data to display items: engine events, session-list and session-replay replies, runtime updates.
 - `frontend/markdown/` — markdown rendering for transcript content (cmark to Rabbita nodes, panic-guarded).
 - `frontend/interop/` — the typed `@js` helpers shared by the frontend; no frontend package embeds raw JavaScript.
@@ -184,9 +184,9 @@ Why the bootstrap is a little involved:
 - Windows native builds include WebView2 COM headers. The headers are not kept
   in the repository, so they must be installed from the Microsoft WebView2 NuGet
   package once per checkout.
-- The desktop host expects `assets/index.html`, `assets/app.css`,
-  `assets/frontend.js`, the generated `assets/mermaid/` tree, and an
-  `openseek` engine executable beside it when packaged.
+- The desktop host expects `assets/index.html`, every content-hashed asset it
+  references, the generated `assets/mermaid/` tree, and an `openseek` engine
+  executable beside it when packaged.
 
 ## Build
 
@@ -206,11 +206,11 @@ symptom of either staleness is `extensions/*/extension.g.mbt` showing up as
 modified inside the submodule after a build; never commit that drift —
 restage, clean, and rebuild until the submodule tree stays clean.
 
-Then build the frontend bundle and the native binary:
+To compile the frontend entry and native binary without assembling a runnable
+application package:
 
 ```sh
 moon build frontend/desktop --target js
-cp ../_build/js/debug/build/openseek_desktop/frontend/desktop/desktop.js frontend.js
 moon build . --target native         # build the native binary
 ```
 
@@ -218,6 +218,32 @@ The native binary is written to
 `_build/native/debug/build/openseek_desktop/openseek_desktop.exe`. Add
 `--release` to each build command for optimized output; those artifacts use the
 corresponding `_build/*/release/` directories.
+
+### Build the browser distribution
+
+The browser packager builds the MoonBit frontend and runs the same complete
+runtime asset graph used by native Desktop packages through the locked,
+SHA-256-verified standalone esbuild binary:
+
+```sh
+moon run --target native package/browser
+```
+
+The result is written to `dist/browser`. `index.html` references content-hashed
+JS and CSS under `assets/`, CSS references content-hashed fonts there as well,
+and `asset-manifest.json` records the emitted names for deployment tooling.
+Relative URLs are used by default, so the directory can still be served as one
+self-contained tree. The default build remains readable for development; pass
+`-- --release` to optimize the MoonBit frontend and minify the final esbuild
+bundle for deployment.
+
+To keep `index.html` on the application origin while serving its runtime assets
+from a CDN, set an absolute base URL with a trailing slash:
+
+```sh
+OPENSEEK_ASSET_BASE=https://cdn.example.com/openseek/ \
+  moon run --target native package/browser -- --release
+```
 
 ## Run during development
 
@@ -236,8 +262,9 @@ packaged layout, so running the bare `openseek_desktop` binary unbundled — or
 pointing it at an `openseek` on `PATH` — is not supported. To iterate on the UI,
 rebuild the frontend bundle and re-run the package command; the engine and seed
 are rebuilt and re-staged from the same checkout, so the app never drifts out of
-version with them. Package commands build debug MoonBit artifacts by default;
-pass `--release` after `--` when you need optimized artifacts.
+version with them. Package commands build debug MoonBit artifacts and readable
+Web assets by default; pass `--release` after `--` when you need optimized,
+minified artifacts.
 
 ## Bootstrap desktop submodules on Windows
 
@@ -310,11 +337,10 @@ powershell -ExecutionPolicy Bypass -File scripts\install_webview2_headers.ps1
 cd ..
 ```
 
-Build the frontend bundle, copy it to `frontend.js`, and build the native host:
+Compile the frontend entry and native host:
 
 ```powershell
 moon build frontend/desktop --target js --release
-Copy-Item ..\_build\js\release\build\openseek_desktop\frontend\desktop\desktop.js frontend.js
 moon build . --target native --release
 ```
 
@@ -337,25 +363,24 @@ moon build cmd/openseek --target native --release
 cd desktop
 ```
 
-For a runnable development bundle, place these files together:
+For a runnable development bundle with generated HTML and content-hashed Web
+assets, use the Windows packager:
+
+```powershell
+moon run --target native package/windows -- --target app
+```
+
+Its Web tree has this shape; exact asset names depend on their contents:
 
 ```text
 dist/windows-x64/SeekMoon/
   openseek-desktop.exe
   openseek.exe
   assets/index.html
-  assets/app.css
-  assets/frontend.js
-```
-
-The files come from:
-
-```text
-openseek-desktop.exe <- desktop/_build/native/release/build/openseek_desktop/openseek_desktop.exe
-openseek.exe         <- _build/native/release/build/cmd/openseek/openseek.exe
-assets/index.html    <- desktop/index.html
-assets/app.css       <- desktop/app.css
-assets/frontend.js   <- desktop/frontend.js
+  assets/asset-manifest.json
+  assets/assets/entry-<hash>.js
+  assets/assets/entry-<hash>.css
+  assets/assets/<font>-<hash>.<ext>
 ```
 
 The target machine also needs Microsoft WebView2 Runtime installed.
