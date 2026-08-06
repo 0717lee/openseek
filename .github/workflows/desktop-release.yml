@@ -65,7 +65,25 @@ jobs:
         run: |
           set -euo pipefail
           if [[ "$GITHUB_EVENT_NAME" == "schedule" ]]; then
-            release_version="0.1.$(TZ=Asia/Shanghai date +%Y%m%d)"
+            current_version="$(
+              curl -fsSL "$OPENSEEK_API_ORIGIN/desktop/releases/latest.json" |
+                jq -er '.version | strings'
+            )"
+            if [[ ! "$current_version" =~ ^([0-9]{1,4})\.([0-9]{1,2})\.([0-9]{1,2})$ ]]; then
+              echo "::error::Published staging version '$current_version' is not an Apple-compatible three-part version"
+              exit 1
+            fi
+
+            # The macOS packager uses this version for both the visible release
+            # version and CFBundleVersion, whose third component is at most two digits.
+            major_version="${BASH_REMATCH[1]}"
+            minor_version="${BASH_REMATCH[2]}"
+            patch_version="${BASH_REMATCH[3]}"
+            if (( 10#$patch_version >= 99 )); then
+              echo "::error::Cannot auto-increment staging version '$current_version': patch component is already 99"
+              exit 1
+            fi
+            release_version="$((10#$major_version)).$((10#$minor_version)).$((10#$patch_version + 1))"
           else
             release_version="$MANUAL_RELEASE_VERSION"
           fi
