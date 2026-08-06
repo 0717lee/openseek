@@ -12,10 +12,18 @@ pub(all) enum ItemKind {
   // text, never markdown: an error's own `*` and `#` are not formatting.
   Assistant(is_danger~ : Bool)
   Reasoning
-  // A tool call's result: the tool name, whether it failed, and the tool's
-  // optional one-line human-readable summary of what the call did (`None`
-  // when the tool supplied none — display falls back to the name).
-  Tool(name~ : String, is_error~ : Bool, brief~ : String?)
+  // One tool call in its original assistant-message order. `call_id` pairs the
+  // later durable result into this same item instead of adding a second row;
+  // `arguments` is `Some` for a recorded call and `None` for an unmatched
+  // legacy result or a synthetic runtime update. Before its result arrives the
+  // item has empty content, `is_error=false`, and no brief.
+  Tool(
+    call_id~ : String,
+    name~ : String,
+    arguments~ : String?,
+    is_error~ : Bool,
+    brief~ : String?
+  )
   // A compaction checkpoint: the turns before it were summarized into the
   // item's content and dropped from the context. Its own kind so the view
   // renders it as a standalone card — folded into a turn's activity it

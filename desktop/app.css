@@ -2392,7 +2392,8 @@ main {
   padding: 6px 0 2px 16px;
 }
 
-/* One call inside a burst: its brief, expandable to the output. */
+/* One call inside a burst: its brief, expandable to recorded arguments and
+   the result output. */
 .tool-call-label,
 .tool-call-summary {
   color: var(--ink-3);
@@ -2406,9 +2407,20 @@ main {
   color: var(--del);
 }
 
-/* Output grows the page instead of scrolling in place: the transcript
-   stays the only scroll area, so the wheel is never trapped by a
-   nested scrollbar. Long dumps are clamped in the renderer. */
+/* Arguments and output grow the page instead of scrolling in place: the
+   transcript stays the only scroll area, so the wheel is never trapped by a
+   nested scrollbar. Long result dumps are clamped in the renderer. */
+.tool-call-section + .tool-call-section {
+  margin-top: 8px;
+}
+.tool-call-section-label {
+  margin-top: 6px;
+  color: var(--ink-3);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
 .tool-call pre {
   margin: 6px 0 8px;
   padding: 10px 12px;
@@ -2420,7 +2432,7 @@ main {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
-.tool-call.error pre {
+.tool-call.error .tool-call-output {
   background: var(--del-bg);
 }
 

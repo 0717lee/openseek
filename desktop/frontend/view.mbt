@@ -866,13 +866,22 @@ fn sidebar_footer_buttons(
 ///|
 /// The summary line for a run of consecutive tool cards, counting calls by
 /// what the engine's tools do — "Read 3 files, edited 2 files, ran 1
-/// command". Only the name's first token matters, so a runtime-update title
-/// like "moon_check compiling" counts as a check update.
+/// command". Every built-in `cmd/openseek` tool has a category; unknown and
+/// dynamically registered tools remain generic tool calls. Only the name's
+/// first token matters, so a runtime-update title like "moon_check compiling"
+/// counts as a check update. The retired `moon_cmd` spelling remains readable
+/// when replaying an older session.
 fn tool_group_summary(items : Array[@transcript.TranscriptItem]) -> String {
   let mut reads = 0
   let mut writes = 0
   let mut edits = 0
+  let mut removes = 0
   let mut runs = 0
+  let mut background_reads = 0
+  let mut background_stops = 0
+  let mut plans = 0
+  let mut goals = 0
+  let mut finishes = 0
   let mut checks = 0
   let mut others = 0
   for item in items {
@@ -885,37 +894,45 @@ fn tool_group_summary(items : Array[@transcript.TranscriptItem]) -> String {
       "read" => reads = reads + 1
       "write" => writes = writes + 1
       "edit" | "multi_edit" => edits = edits + 1
-      "shell" | "moon_cmd" => runs = runs + 1
+      "remove" => removes = removes + 1
+      "shell" | "moon_cmd" | "run_moonbit" => runs = runs + 1
+      "shell_output" => background_reads = background_reads + 1
+      "shell_stop" => background_stops = background_stops + 1
+      "plan" => plans = plans + 1
+      "goal" => goals = goals + 1
+      "finish" => finishes = finishes + 1
       "moon_check" => checks = checks + 1
       _ => others = others + 1
     }
   }
-  fn count(value : Int, one : String, many : String) -> String {
-    if value == 1 {
-      one
-    } else {
-      many.replace(old="#", new=value.to_string())
-    }
-  }
-
   let parts : Array[String] = []
-  if reads > 0 {
-    parts.push(count(reads, "read 1 file", "read # files"))
-  }
-  if writes > 0 {
-    parts.push(count(writes, "wrote 1 file", "wrote # files"))
-  }
-  if edits > 0 {
-    parts.push(count(edits, "edited 1 file", "edited # files"))
-  }
-  if runs > 0 {
-    parts.push(count(runs, "ran 1 command", "ran # commands"))
-  }
-  if checks > 0 {
-    parts.push(count(checks, "1 check update", "# check updates"))
-  }
-  if others > 0 {
-    parts.push(count(others, "1 tool call", "# tool calls"))
+  // Each tuple is one display category in summary order. Keeping singular and
+  // plural text beside its counter makes additions visible in one place.
+  let categories = [
+    (reads, "read 1 file", "read # files"),
+    (writes, "wrote 1 file", "wrote # files"),
+    (edits, "edited 1 file", "edited # files"),
+    (removes, "removed 1 file", "removed # files"),
+    (runs, "ran 1 command", "ran # commands"),
+    (background_reads, "checked 1 background job", "checked # background jobs"),
+    (background_stops, "stopped 1 background job", "stopped # background jobs"),
+    (plans, "1 plan update", "# plan updates"),
+    (goals, "1 goal update", "# goal updates"),
+    (finishes, "finished", "# finish calls"),
+    (checks, "1 check update", "# check updates"),
+    (others, "1 tool call", "# tool calls"),
+  ]
+  for category in categories {
+    let (value, singular, plural) = category
+    if value > 0 {
+      parts.push(
+        if value == 1 {
+          singular
+        } else {
+          plural.replace(old="#", new=value.to_string())
+        },
+      )
+    }
   }
   capitalize(parts.join(", "))
 }
@@ -1020,8 +1037,8 @@ fn activity_view(
 
 ///|
 /// A burst of consecutive tool calls: one gray line ("Read 2 files, ran 1
-/// command") that expands to the per-call briefs. A burst with a failure
-/// starts open — the failure is what the reader came for.
+/// command") that expands to the per-call briefs, arguments, and outputs. A
+/// burst with a failure starts open — the failure is what the reader came for.
 fn tool_line_view(tools : Array[@transcript.TranscriptItem]) -> @html.Html {
   let failed = count_failed(tools)
   let summary : Array[@html.Html] = [
@@ -1038,10 +1055,12 @@ fn tool_line_view(tools : Array[@transcript.TranscriptItem]) -> @html.Html {
 
 ///|
 /// One tool call inside an expanded burst: its brief ("Read moon.mod", the
-/// tool name when the engine sent none), expandable to the call's output.
-/// Failed calls start open and read red.
+/// tool name when the engine sent none), expandable to the original arguments
+/// and the later result. Failed calls start open and read red. Calls from older
+/// sessions may have no recorded arguments; unmatched results keep their old
+/// output-only presentation.
 fn tool_call_view(item : @transcript.TranscriptItem) -> @html.Html {
-  guard item.kind is Tool(name~, is_error~, brief~) else {
+  guard item.kind is Tool(name~, arguments~, is_error~, brief~, ..) else {
     return @html.text("")
   }
   let label = capitalize(
@@ -1052,13 +1071,37 @@ fn tool_call_view(item : @transcript.TranscriptItem) -> @html.Html {
     },
   )
   let error_class = if is_error { " error" } else { "" }
-  if item.content.trim().is_empty() {
+  let body : Array[@html.Html] = []
+  if arguments is Some(arguments) {
+    let trimmed = arguments.trim()
+    if !trimmed.is_empty() && trimmed != "{}" {
+      let rendered = @json.parse(arguments).stringify(indent=2) catch {
+        _ => arguments
+      }
+      body.push(
+        @html.div(class="tool-call-section", [
+          @html.div(class="tool-call-section-label", "Arguments"),
+          @html.pre(class="tool-call-arguments", rendered),
+        ]),
+      )
+    }
+  }
+  if !item.content.trim().is_empty() {
+    body.push(
+      @html.div(class="tool-call-section", [
+        @html.div(class="tool-call-section-label", "Output"),
+        @html.pre(class="tool-call-output", truncate_output(item.content)),
+      ]),
+    )
+  }
+  if body.is_empty() {
     @html.div(class="tool-call-label" + error_class, label)
   } else {
-    @html.details(class="tool-call" + error_class, open=is_error, [
-      @html.summary(class="tool-call-summary", label),
-      @html.pre(truncate_output(item.content)),
-    ])
+    @html.details(
+      class="tool-call" + error_class,
+      open=is_error,
+      [@html.summary(class="tool-call-summary", label), ..body],
+    )
   }
 }
 
@@ -3157,7 +3200,10 @@ fn tool_item(
   name : String,
   is_error? : Bool = false,
 ) -> @transcript.TranscriptItem {
-  { kind: Tool(name~, is_error~, brief=None), content: "output" }
+  {
+    kind: Tool(call_id="", name~, arguments=None, is_error~, brief=None),
+    content: "output",
+  }
 }
 
 ///|
@@ -3170,7 +3216,7 @@ test "capitalize is Unicode-safe on a non-BMP first char" {
 }
 
 ///|
-test "a tool group's summary counts calls by what the tools do" {
+test "a tool group's summary recognizes every cmd/openseek built-in" {
   inspect(tool_group_summary([tool_item("read")]), content="Read 1 file")
   inspect(
     tool_group_summary([
@@ -3179,17 +3225,65 @@ test "a tool group's summary counts calls by what the tools do" {
       tool_item("edit"),
       tool_item("multi_edit"),
       tool_item("write"),
+      tool_item("remove"),
       tool_item("shell"),
       tool_item("moon_cmd"),
+      tool_item("run_moonbit"),
+      tool_item("shell_output"),
+      tool_item("shell_stop"),
+      tool_item("plan"),
+      tool_item("goal"),
+      tool_item("finish"),
       tool_item("moon_check compiling"),
       tool_item("mystery"),
     ]),
-    content="Read 2 files, wrote 1 file, edited 2 files, ran 2 commands, 1 check update, 1 tool call",
+    content="Read 2 files, wrote 1 file, edited 2 files, removed 1 file, ran 3 commands, checked 1 background job, stopped 1 background job, 1 plan update, 1 goal update, finished, 1 check update, 1 tool call",
+  )
+  inspect(
+    tool_group_summary([
+      tool_item("remove"),
+      tool_item("remove"),
+      tool_item("shell_output"),
+      tool_item("shell_output"),
+      tool_item("shell_stop"),
+      tool_item("shell_stop"),
+      tool_item("plan"),
+      tool_item("plan"),
+      tool_item("goal"),
+      tool_item("goal"),
+      tool_item("finish"),
+      tool_item("finish"),
+    ]),
+    content="Removed 2 files, checked 2 background jobs, stopped 2 background jobs, 2 plan updates, 2 goal updates, 2 finish calls",
   )
   inspect(
     tool_group_summary([tool_item("shell", is_error=true)]),
     content="Ran 1 command",
   )
+}
+
+///|
+#warnings("-alert_unstable")
+test "a tool row renders recorded arguments before its result" {
+  let rendered = tool_call_view({
+    kind: Tool(
+      call_id="c1",
+      name="shell",
+      arguments=Some("{\"cmd\":\"moon test\"}"),
+      is_error=true,
+      brief=Some("ran moon test → exit 1"),
+    ),
+    content: "test failed",
+  })
+  let markup = @rabbita.render_to_string(() => @rabbita.Val::constant(rendered))
+  guard markup.split_once("Arguments") is Some((_, after_arguments)) else {
+    fail("expected an arguments section")
+  }
+  assert_true(after_arguments.contains("cmd"))
+  assert_true(after_arguments.contains("moon test"))
+  assert_true(after_arguments.contains("Output"))
+  assert_true(markup.contains("test failed"))
+  assert_true(markup.contains("<details class=\"tool-call error\" open>"))
 }
 
 ///|

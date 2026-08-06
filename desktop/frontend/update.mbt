@@ -3623,9 +3623,9 @@ fn update_device_msg(
               // carried it. Re-broadcasts are safe by construction.
               (@cmd.none, model)
             } else if sequence == conv.watermark + 1 {
-              let (grew, next) = conv.apply_commit(sequence, item)
+              let (changed, next) = conv.apply_commit(sequence, item)
               (
-                if grew {
+                if changed {
                   scroll_if_active(model, channel, session)
                 } else {
                   @cmd.none
@@ -12952,6 +12952,34 @@ test "assistant semantic events wait for their durable commit" {
   inspect(committed.active().messages.length(), content="2")
   inspect(committed.active().overlay.length(), content="0")
   inspect(committed.active().watermark, content="1")
+}
+
+///|
+test "a committed tool result visibly changes its existing call row" {
+  let (_, called) = running_conversation().apply_commit(
+    1,
+    @protocol.Assistant({
+      content: "",
+      tool_calls: Some([
+        { id: "c1", name: "read", arguments: "{\"path\":\"moon.mod\"}" },
+      ]),
+      reasoning_content: None,
+    }),
+  )
+  inspect(called.messages.length(), content="1")
+  let (changed, completed) = called.apply_commit(
+    2,
+    @protocol.ToolResult({
+      tool_call_id: "c1",
+      tool_name: "read",
+      content: "module contents",
+      is_error: false,
+      brief: Some("read moon.mod"),
+    }),
+  )
+  assert_true(changed)
+  inspect(completed.messages.length(), content="1")
+  inspect(completed.messages[0].content, content="module contents")
 }
 
 ///|
