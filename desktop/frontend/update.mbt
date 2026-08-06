@@ -628,7 +628,7 @@ fn apply_symbol_reply(
   model : Model,
   owner : @interop.ConversationKey,
   query : String,
-  items : Array[CompletionItem],
+  symbols : Array[WorkspaceSymbol],
 ) -> (@cmd.Cmd, Model) {
   let draft = model.active().task
   guard owner.channel == model.focused &&
@@ -637,6 +637,10 @@ fn apply_symbol_reply(
     trigger.kind is Symbols &&
     trigger.query == query else {
     return (@cmd.none, model)
+  }
+  let items : Array[CompletionItem] = []
+  for symbol in symbols {
+    items.push(symbol.completion_item())
   }
   let cache : SymbolCache = { owner: Some(owner), query, items }
   (
@@ -960,6 +964,10 @@ fn update(
   } else {
     model
   }
+  // The quick pick belongs to the focused conversation captured when it
+  // opened. Device/session switches can arrive through many messages (and
+  // background pushes), so fence it once here rather than in every branch.
+  let model = close_stale_symbol_search(model)
   let (model, panel_cmd) = sync_file_panel(dispatch, model)
   let (model, terminal_cmd) = sync_terminal_panel(dispatch, model)
   (@cmd.batch([cmd, panel_cmd, terminal_cmd]), model)
@@ -1168,6 +1176,20 @@ fn update_msg(
     // A failed search reads as "no symbols": cache an empty result for the
     // query so the menu settles on "No symbols" rather than spinning.
     SymbolsFailed(owner~, query~) => apply_symbol_reply(model, owner, query, [])
+    SymbolSearchOpen => open_symbol_search(dispatch, model)
+    SymbolSearchQueryChanged(query) =>
+      change_symbol_search_query(dispatch, model, query)
+    SymbolSearchDue(owner~, query~, generation~) =>
+      begin_symbol_search_request(dispatch, model, owner, query, generation)
+    SymbolSearchLoaded(owner~, query~, generation~, items~) =>
+      apply_symbol_search_result(model, owner, query, generation, items)
+    SymbolSearchRequestFailed(owner~, query~, generation~) =>
+      fail_symbol_search_request(model, owner, query, generation)
+    SymbolSearchMove(delta) => move_symbol_search_selection(model, delta)
+    SymbolSearchSelect(index) => select_symbol_search_row(model, index)
+    SymbolSearchAccept => accept_symbol_search(dispatch, model)
+    SymbolSearchPick(index) => pick_symbol_search_row(dispatch, model, index)
+    SymbolSearchDismiss => (@cmd.none, { ..model, symbol_search: None })
     ModelChanged(value) => (@cmd.none, { ..model, selected_model: value })
     MaxStepsChanged(value) => (@cmd.none, { ..model, max_steps: value })
     SetupApiKeyChanged(value) => {
@@ -4869,7 +4891,15 @@ test "a symbol reply with the same session id but another channel is stale" {
     session: "desktop-test",
   }
   let (_, querying) = update(dispatch, TaskChanged("#parse"), test_model())
-  let items = symbol_cache(local_owner, "parse", ["parse_file"]).items
+  let items : Array[WorkspaceSymbol] = [
+    {
+      name: "parse_file",
+      kind: Some(12),
+      container: None,
+      path: "src/main.mbt",
+      range: @common.Range::Range(1, 1, 1, 1),
+    },
+  ]
   let (_, stale) = update(
     dispatch,
     SymbolsLoaded(owner=remote_owner, query="parse", items~),
@@ -7727,12 +7757,13 @@ test "an inline symbol reply rebuilds the live completion menu" {
   assert_true(pending.kind is Symbols)
   assert_true(pending.loading)
   assert_eq(pending.task_without_token, "Inspect ")
-  let item = symbol_item(
-    "parse_hover",
-    container=None,
-    path="src/main.mbt",
-    range=@common.Range::Range(4, 2, 4, 13),
-  )
+  let item : WorkspaceSymbol = {
+    name: "parse_hover",
+    kind: Some(12),
+    container: None,
+    path: "src/main.mbt",
+    range: @common.Range::Range(4, 2, 4, 13),
+  }
   let (_, loaded) = update(
     dispatch,
     SymbolsLoaded(

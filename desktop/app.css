@@ -3303,6 +3303,197 @@ select:focus {
   filter: brightness(0.94);
 }
 
+/* ---------- workspace-symbol quick pick ---------- */
+/* Codex-style command palette geometry with OpenSeek's own surface tokens.
+   It sits above toasts and ordinary modals but below the disconnected screen. */
+.symbol-search-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: clamp(64px, calc(50vh - 220px), 160px) 16px 16px;
+  background: color-mix(in srgb, #000 13%, transparent);
+}
+
+.symbol-search-dialog {
+  width: min(520px, 100%);
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: var(--shadow-pop);
+}
+
+.symbol-search-input-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 52px;
+  padding: 0 15px;
+  border-bottom: 1px solid var(--line-2);
+}
+
+.symbol-search-input-wrap > .icon {
+  flex: 0 0 auto;
+  width: 17px;
+  height: 17px;
+  color: var(--ink-3);
+}
+
+.symbol-search-input-wrap input {
+  min-width: 0;
+  flex: 1 1 auto;
+  padding: 13px 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--ink);
+  font: 14px/1.45 var(--mono);
+}
+
+.symbol-search-input-wrap input::placeholder {
+  color: var(--ink-3);
+}
+
+.symbol-search-group-label {
+  padding: 11px 14px 6px;
+  color: var(--ink-3);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+}
+
+.symbol-search-list {
+  max-height: min(440px, calc(100vh - 190px));
+  overflow-y: auto;
+  padding: 0 6px 7px;
+  overscroll-behavior: contain;
+}
+
+.symbol-search-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 42px;
+  padding: 7px 9px;
+  border-radius: 8px;
+  color: color-mix(in srgb, var(--ink) 76%, transparent);
+  cursor: default;
+}
+
+.symbol-search-row:hover,
+.symbol-search-row.selected {
+  background: var(--surface-2);
+  color: var(--ink);
+}
+
+.symbol-search-kind {
+  flex: 0 0 18px;
+  width: 18px;
+  color: var(--ink-3);
+  font-size: 16px;
+}
+
+.symbol-search-row.selected .symbol-search-kind,
+.symbol-search-row:hover .symbol-search-kind {
+  color: var(--accent-ink);
+}
+
+.symbol-search-row-text {
+  min-width: 0;
+  flex: 1 1 auto;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.symbol-search-name {
+  min-width: 0;
+  max-width: 52%;
+  flex: 0 1 auto;
+  overflow: hidden;
+  color: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.symbol-search-detail {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  color: var(--ink-2);
+  font-size: 11.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.symbol-search-empty {
+  min-height: 76px;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  color: var(--ink-3);
+  font-size: 12px;
+  text-align: center;
+}
+
+.symbol-search-empty.error {
+  color: var(--del);
+}
+
+/* The codicon font/base class ships in viewer.css. These are the symbol
+   codepoints registered by VS Code's codiconsLibrary.ts. */
+.symbol-search-kind.codicon-symbol-file::before {
+  content: "\eb60";
+}
+.symbol-search-kind.codicon-symbol-namespace::before {
+  content: "\ea8b";
+}
+.symbol-search-kind.codicon-symbol-class::before {
+  content: "\eb5b";
+}
+.symbol-search-kind.codicon-symbol-method::before {
+  content: "\ea8c";
+}
+.symbol-search-kind.codicon-symbol-property::before {
+  content: "\eb65";
+}
+.symbol-search-kind.codicon-symbol-field::before {
+  content: "\eb5f";
+}
+.symbol-search-kind.codicon-symbol-enum::before {
+  content: "\ea95";
+}
+.symbol-search-kind.codicon-symbol-interface::before {
+  content: "\eb61";
+}
+.symbol-search-kind.codicon-symbol-variable::before {
+  content: "\ea88";
+}
+.symbol-search-kind.codicon-symbol-constant::before {
+  content: "\eb5d";
+}
+.symbol-search-kind.codicon-symbol-enum-member::before {
+  content: "\eb5e";
+}
+.symbol-search-kind.codicon-symbol-struct::before {
+  content: "\ea91";
+}
+.symbol-search-kind.codicon-symbol-operator::before {
+  content: "\eb64";
+}
+.symbol-search-kind.codicon-symbol-type-parameter::before {
+  content: "\ea92";
+}
+.symbol-search-kind.codicon-symbol-misc::before {
+  content: "\eb63";
+}
+
 /* ---------- narrow (phone) layout ---------- */
 /* One breakpoint for the whole app; it must match NarrowBreakpoint in
    frontend/model.mbt, whose flag drives the behavior half of these
@@ -3318,6 +3509,21 @@ select:focus {
 }
 
 @media (max-width: 760px) {
+  .symbol-search-backdrop {
+    padding: 16px;
+  }
+  .symbol-search-list {
+    max-height: calc(100vh - 116px);
+  }
+  .symbol-search-row-text {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .symbol-search-name {
+    max-width: 100%;
+  }
+
   /* The sidebar leaves the grid and overlays it as a drawer; the
      content column always has the full width. */
   .app {

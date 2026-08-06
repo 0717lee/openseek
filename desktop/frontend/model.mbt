@@ -562,6 +562,32 @@ fn empty_symbol_cache() -> SymbolCache {
 }
 
 ///|
+/// The desktop's transient workspace-symbol quick pick. Its owner fences the
+/// results to the conversation whose workspace was queried; `generation`
+/// separates successive queries (and reopenings) even when their text is the
+/// same. The page-level counter lives on `Model`, so closing the palette cannot
+/// make an old in-flight reply current again.
+priv struct SymbolSearch {
+  owner : @interop.ConversationKey
+  query : String
+  items : Array[WorkspaceSymbol]
+  selected : Int
+  phase : SymbolSearchPhase
+  generation : Int
+} derive(Eq)
+
+///|
+/// A query waits briefly while the user types, then becomes a host request.
+/// Ready deliberately includes the empty-result state; Failed is reserved for
+/// bridge/request failure so the view can distinguish the two.
+priv enum SymbolSearchPhase {
+  SymbolSearchDebouncing
+  SymbolSearchLoading
+  SymbolSearchReady
+  SymbolSearchFailed
+} derive(Eq)
+
+///|
 /// The mooncakes.io skill catalog as the Skills page sees it. One enum, so
 /// "loading", "loaded empty" and "failed" cannot be conflated.
 priv enum SkillsCatalog {
@@ -796,6 +822,12 @@ priv struct Model {
   // while the query is unchanged. Recomputed on every keystroke and refetched
   // when the query or conversation changes.
   symbol_cache : SymbolCache
+  // The native desktop's Cmd/Ctrl+T workspace-symbol palette. It is global UI
+  // for the focused conversation, not durable conversation state; browser
+  // pages never open it. The monotonic counter fences replies across close and
+  // reopen, while the optional state carries the current query and selection.
+  symbol_search : SymbolSearch?
+  symbol_search_generation : Int
   // The desktop topbar's app launcher. Installed apps belong to the native
   // host, not a conversation or workspace, so this catalog is probed once
   // and kept while the frontend runs.
@@ -969,11 +1001,39 @@ priv enum Msg {
   SymbolsLoaded(
     owner~ : @interop.ConversationKey,
     query~ : String,
-    items~ : Array[CompletionItem]
+    items~ : Array[WorkspaceSymbol]
   )
   // A failed search reads as "no symbols", so it carries no message to show —
   // only the `owner`/`query` needed to settle the right menu.
   SymbolsFailed(owner~ : @interop.ConversationKey, query~ : String)
+  // Open or reset the native workspace-symbol quick pick. The shortcut
+  // subscription is desktop-only, but update still guards this message so a
+  // browser cannot open it through another path.
+  SymbolSearchOpen
+  SymbolSearchQueryChanged(String)
+  // A delayed query starts only if this owner/query/generation is still the
+  // palette's current state.
+  SymbolSearchDue(
+    owner~ : @interop.ConversationKey,
+    query~ : String,
+    generation~ : Int
+  )
+  SymbolSearchLoaded(
+    owner~ : @interop.ConversationKey,
+    query~ : String,
+    generation~ : Int,
+    items~ : Array[WorkspaceSymbol]
+  )
+  SymbolSearchRequestFailed(
+    owner~ : @interop.ConversationKey,
+    query~ : String,
+    generation~ : Int
+  )
+  SymbolSearchMove(Int)
+  SymbolSearchSelect(Int)
+  SymbolSearchAccept
+  SymbolSearchPick(Int)
+  SymbolSearchDismiss
   ModelChanged(String)
   MaxStepsChanged(String)
   SetupApiKeyChanged(String)
@@ -1515,6 +1575,8 @@ fn initial_model() -> Model {
     skills_notice: "",
     completion: None,
     symbol_cache: empty_symbol_cache(),
+    symbol_search: None,
+    symbol_search_generation: 0,
     launcher: { open: false, apps: AppsNotFetched },
     file_panel: @fileeditor.State::empty(),
     terminal_panel: @terminal.State::empty(),

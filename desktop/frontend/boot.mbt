@@ -19,8 +19,8 @@ pub fn boot() -> Unit {
       // resizing a desktop window across the breakpoint re-lays the app out.
       // Ctrl+` follows the terminal buttons' existing toggle path, so the
       // shortcut works from the composer, editor, and terminal itself.
-      subscriptions=(emit, _) => {
-        @sub.batch([
+      subscriptions=(emit, model) => {
+        let subscriptions = [
           @sub.on_resize(
             emit.map(viewport => ViewportResized(width=viewport.width)),
           ),
@@ -40,7 +40,13 @@ pub fn boot() -> Unit {
             }),
           ),
           external_link_subscription(emit.map(url => ExternalLinkClicked(url))),
-        ])
+        ]
+        // Cmd+T/Ctrl+T is an application shortcut only inside the native
+        // webview. A browser console must retain the browser's new-tab chord.
+        if model.is_desktop {
+          subscriptions.push(symbol_search_shortcut_subscription(emit))
+        }
+        @sub.batch(subscriptions)
       },
     )
     state.view(model => view(emit, model))

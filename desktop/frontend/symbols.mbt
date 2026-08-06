@@ -1,18 +1,31 @@
-// The composer's `#` symbol completion: search the active conversation's
-// workspace symbols through the host's `workspace_symbols` op (served by
-// `moon ide workspace-symbols`) and fold the matches into completion rows.
-// Each reply carries the conversation owner and query it answers, so a reply
-// that lost a device/session switch or was overtaken by a later keystroke is
-// discarded.
+// Workspace-symbol transport shared by the composer's `#` completion and the
+// desktop Cmd/Ctrl+T quick pick. The host op is served by
+// `moon ide workspace-symbols`; this package projects its typed reply once,
+// retaining kind and exact location until each UI maps it to its own row.
 
 ///|
-/// Search `query` against the conversation's workspace symbols and fold the
-/// matches back as `SymbolsLoaded`.
+/// One usable workspace symbol in viewer coordinates. `path` stays in the
+/// host's workspace-relative form; `range` is one-based because the editor
+/// open/reveal path consumes viewer coordinates rather than LSP wire values.
+priv struct WorkspaceSymbol {
+  name : String
+  kind : Int?
+  container : String?
+  path : String
+  range : @common.Range
+} derive(Eq)
+
+///|
+/// Search `query` against the conversation's workspace symbols. Without a
+/// generation the reply belongs to the composer's `#` menu; a generation
+/// routes it to the desktop quick pick. Both retain owner/query identity so
+/// update can discard an overtaken reply.
 fn read_workspace_symbols(
   dispatch : @cmd.Emit[Msg],
   owner : @interop.ConversationKey,
   query : String,
   workspace~ : @pathx.Absolute?,
+  generation? : Int,
 ) -> @cmd.Cmd {
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
@@ -26,26 +39,35 @@ fn read_workspace_symbols(
         },
       ) catch {
         _ => {
-          scheduler.add(dispatch(SymbolsFailed(owner~, query~)))
+          let message = match generation {
+            Some(generation) =>
+              SymbolSearchRequestFailed(owner~, query~, generation~)
+            None => SymbolsFailed(owner~, query~)
+          }
+          scheduler.add(dispatch(message))
           return
         }
       }
-      scheduler.add(
-        dispatch(
-          SymbolsLoaded(owner~, query~, items=SymbolsProjection(reply).rows()),
-        ),
-      )
+      let items = SymbolsProjection(reply).symbols()
+      let message = match generation {
+        Some(generation) =>
+          SymbolSearchLoaded(owner~, query~, generation~, items~)
+        None => SymbolsLoaded(owner~, query~, items~)
+      }
+      scheduler.add(dispatch(message))
     })
   })
 }
 
 ///|
-/// Project a typed `workspace_symbols` reply into completion rows.
+/// Project a typed `workspace_symbols` reply into the shared UI form.
 priv struct SymbolsProjection(@protocol.WorkspaceSymbolsReply)
 
 ///|
-fn SymbolsProjection::rows(self : SymbolsProjection) -> Array[CompletionItem] {
-  let rows : Array[CompletionItem] = []
+fn SymbolsProjection::symbols(
+  self : SymbolsProjection,
+) -> Array[WorkspaceSymbol] {
+  let symbols : Array[WorkspaceSymbol] = []
   for item in self.0.symbols {
     guard !item.name.is_empty() else { continue }
     let range = @common.Range::Range(
@@ -54,11 +76,45 @@ fn SymbolsProjection::rows(self : SymbolsProjection) -> Array[CompletionItem] {
       item.range.end.line + 1,
       item.range.end.col + 1,
     )
-    rows.push(
-      symbol_item(item.name, container=item.container, path=item.path, range~),
-    )
+    symbols.push({
+      name: item.name,
+      kind: item.kind,
+      container: item.container,
+      path: item.path,
+      range,
+    })
   }
-  rows
+  symbols
+}
+
+///|
+/// A compact secondary label shared by completion and quick-pick rows.
+fn WorkspaceSymbol::detail(self : WorkspaceSymbol) -> String {
+  let location = if self.path.is_empty() {
+    ""
+  } else {
+    "\{self.path}:\{self.range.start_line_number}"
+  }
+  if self.container is Some(container) && !container.is_empty() {
+    if location.is_empty() {
+      container
+    } else {
+      "\{container} · \{location}"
+    }
+  } else {
+    location
+  }
+}
+
+///|
+/// Map the shared symbol into the composer's row and insertion payload.
+fn WorkspaceSymbol::completion_item(self : WorkspaceSymbol) -> CompletionItem {
+  symbol_item(
+    self.name,
+    container=self.container,
+    path=self.path,
+    range=self.range,
+  )
 }
 
 ///|
