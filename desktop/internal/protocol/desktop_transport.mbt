@@ -15,6 +15,7 @@ pub(all) enum NotificationKind {
   SessionEvent
   SessionChanged
   WorkspaceChanged
+  WorktreeChanged
   SettingsChanged
   SkillsChanged
   UpdateDownloadProgress
@@ -41,6 +42,7 @@ pub fn NotificationKind::wire_name(self : NotificationKind) -> String {
     SessionEvent => "session.event"
     SessionChanged => "session.changed"
     WorkspaceChanged => "workspace.changed"
+    WorktreeChanged => "worktree.changed"
     SettingsChanged => "settings.changed"
     SkillsChanged => "skills.changed"
     UpdateDownloadProgress => "update.download_progress"
@@ -68,6 +70,7 @@ pub fn NotificationKind::all() -> Array[NotificationKind] {
     SessionEvent,
     SessionChanged,
     WorkspaceChanged,
+    WorktreeChanged,
     SettingsChanged,
     SkillsChanged,
     UpdateDownloadProgress,
@@ -96,6 +99,7 @@ pub(all) enum Notification {
   SessionEvent(SessionCommitPayload)
   SessionChanged(SessionChangedPayload)
   WorkspaceChanged(WorkspacesChangedPayload)
+  WorktreeChanged(WorktreeChangedPayload)
   SettingsChanged(SettingsStatusPayload)
   SkillsChanged
   UpdateDownloadProgress(UpdateDownloadProgressPayload)
@@ -134,6 +138,8 @@ pub fn Notification::from_wire(name : String, params : Json) -> Notification? {
       Some(SessionChanged(@json.from_json(params) catch { _ => return None }))
     "workspace.changed" =>
       Some(WorkspaceChanged(@json.from_json(params) catch { _ => return None }))
+    "worktree.changed" =>
+      Some(WorktreeChanged(@json.from_json(params) catch { _ => return None }))
     "settings.changed" =>
       Some(SettingsChanged(@json.from_json(params) catch { _ => return None }))
     "skills.changed" => Some(SkillsChanged)
@@ -180,6 +186,7 @@ pub fn Notification::kind(self : Notification) -> NotificationKind {
     SessionEvent(_) => SessionEvent
     SessionChanged(_) => SessionChanged
     WorkspaceChanged(_) => WorkspaceChanged
+    WorktreeChanged(_) => WorktreeChanged
     SettingsChanged(_) => SettingsChanged
     SkillsChanged => SkillsChanged
     UpdateDownloadProgress(_) => UpdateDownloadProgress
@@ -213,6 +220,7 @@ pub fn Notification::params(self : Notification) -> Json {
     SessionEvent(payload) => payload.to_json()
     SessionChanged(payload) => payload.to_json()
     WorkspaceChanged(payload) => payload.to_json()
+    WorktreeChanged(payload) => payload.to_json()
     SettingsChanged(payload) => payload.to_json()
     SkillsChanged => Json::empty_object()
     UpdateDownloadProgress(payload) => payload.to_json()

@@ -16,7 +16,10 @@ const WorkspaceDirName = "OpenSeek"
 /// directory is known; the caller falls back to the home directory.
 async fn session_workspace_dir(session : String) -> @path.Path? {
   if workspace_of_session(session) is Some(workspace) {
-    return Some(workspace)
+    // A session bound to one of the workspace's worktrees works in that
+    // checkout while it exists; afterwards it degrades to the workspace
+    // root.
+    return Some(session_tree_dir(workspace, session))
   }
   guard safe_workspace_id(session) else { return None }
   guard workspace_root() is Some(root) else { return None }
@@ -51,7 +54,11 @@ pub async fn resolve_in_workspace(
 ) -> @path.Path? {
   let root = if workspace is Some(hint) &&
     registered_workspace(hint) is Some(dir) {
-    Some(dir)
+    // The hint names the workspace; a session bound to one of its worktrees
+    // still roots in that checkout — the FS bridge sends the hint on every
+    // op, and honoring it verbatim would pin worktree conversations to the
+    // main tree.
+    Some(session_tree_dir(dir, session))
   } else {
     session_workspace_dir(session)
   }
@@ -104,7 +111,11 @@ pub async fn attached_workspace_dir(path : String) -> @path.Path? {
     best = Some(workspace)
   }
   let dir : @path.Path = if best is Some(workspace) {
-    Path(workspace)
+    // A path under a registered worktree belongs to that checkout, not the
+    // workspace root: language ops routed by path alone must answer from the
+    // worktree's own tree. An unregistered `.worktrees` path (a subtask
+    // slice) keeps resolving to the workspace root.
+    worktree_owner_dir(Path(workspace), resolved)
   } else {
     guard workspace_root() is Some(root) else { return None }
     guard @pathx.relative_to(resolved, root=root.to_string()) is Some(rest) &&

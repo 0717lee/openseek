@@ -235,7 +235,7 @@ echoes.
 
 | method | params | result |
 |---|---|---|
-| `agent.start` | `{task, submission_id?, model?, max_steps?, session?, workspace?}` — no credentials or store path: the host resolves settings and durable placement; `workspace` is honored only when registered | `{run_id, status, …}` — `accepted` after the complete prompt command is written; a post-`started` write failure returns `failed`, while pre-`started` failures use the error response |
+| `agent.start` | `{task, submission_id?, model?, max_steps?, session?, workspace?}` — no credentials or store path: the host resolves settings and durable placement; `workspace` is honored only when registered. A session bound to one of the workspace's worktrees (`worktree.create` binds at creation) runs in that checkout — the start never names or mutates worktrees | `{run_id, status, …}` — `accepted` after the complete prompt command is written; a post-`started` write failure returns `failed`, while pre-`started` failures use the error response |
 | `agent.cancel` | `{run_id?}` (absent = the latest run) | cancel outcome |
 | `agent.steer` | `{text, run_id?, submission_id?}` | steer outcome |
 | `agent.compact` | `{session, model?, max_steps?, workspace?}` — `agent.start` minus `task`: a conversation resumed after a restart has no live process, and compacting spawns one with these settings | compaction outcome |
@@ -258,8 +258,8 @@ Notifications:
 | `session.list` | `{}` | the session index |
 | `session.load` | `{session, workspace?}` — a non-blank workspace must still be registered; omitted/blank locates the session across registered stores, then the global store | `{session: <the durable session JSON>, watermark?}` — current hosts include `watermark`, the highest event `sequence` the snapshot contains (0 for an empty record); older hosts omit it, and clients derive the same value from the stored events' own sequences |
 | `session.list_archived` | `{}` | the archived index |
-| `session.archive` | `{session}` | outcome |
-| `session.unarchive` | `{session}` | outcome |
+| `session.archive` | `{session, force?}` | outcome — the conversation's worktree, if it holds one, goes with it (its branch survives; a `worktree.changed` broadcast follows). A dirty checkout refuses naming the worktree unless `force`, which clients send after a discard-confirmation dialog. "Dirty" means tracked modifications or non-ignored untracked files; ignored files count as disposable, matching `git worktree remove`'s own semantics |
+| `session.unarchive` | `{session}` | outcome — a conversation whose worktree was removed at archive time returns as a plain workspace conversation |
 
 Notifications:
 
@@ -396,6 +396,27 @@ its `workspace` too: once the workspace is no longer registered, an omitted
 hint leaves a missing id indistinguishable from a brand-new scratch session.
 The current wire has no persistent detached-session tombstone; the bundled
 client retains the hint and therefore gets the intended rejection.
+
+### worktree.*
+
+Worktrees of a registered workspace: isolated checkouts at
+`<workspace>/.worktrees/<name>` on a fresh branch
+`openseek/<name>` — a conversation's execution environment, bound 1:1: one
+worktree belongs to exactly one conversation (and a conversation runs in at
+most one worktree), while its durable history stays in the workspace's own
+store.
+
+| method | params | result |
+|---|---|---|
+| `worktree.list` | `{workspace}` | `{worktrees: [{name, branch, base, session?, path, present}]}` — read-only; `session` is the bound conversation, recorded at creation; a checkout deleted outside the app reports `present: false` |
+| `worktree.create` | `{workspace, session}` | `{name, worktrees: […]}` — creation IS the binding: the worktree belongs to `session` from birth, and the session doubles as the idempotency key, so retrying a lost reply returns the existing binding instead of a second checkout. The session must be genuinely NEW — durable history in any store, a binding in any workspace's registry, or an in-flight first turn all refuse. The workspace must be the repository's toplevel — a repository-subdirectory workspace refuses worktrees. The host generates the name (`wt-N`, the smallest free across the registry, the `.worktrees` directory, and `openseek/*` branches); clients never name worktrees. Serialized with workspace detachment |
+| `worktree.remove` | `{workspace, name, force?}` | the updated list — refused while the bound conversation's operation or run is active, and on uncommitted changes unless `force`; the branch always survives. A registry entry whose checkout is already gone is pruned. The bundled UI never calls this — archiving the conversation is how a worktree ends — but the op remains for protocol clients and orphan cleanup |
+
+Notifications:
+
+| method | params |
+|---|---|
+| `worktree.changed` | `{workspace, worktrees: […]}` — the post-commit list for that workspace, broadcast to every client on every registry commit: create (which carries the binding) and remove |
 
 ### git.*
 

@@ -149,10 +149,18 @@ pub fn endpoints(
       let session = payload.canonical_session()
       // The callback runs inside the rename's cancellation shield. Every
       // other client learns the canonical id before any cancellable list
-      // reply, so a cancelled requester cannot suppress invalidation.
-      @engine.archive_session(state.manager, session, () => {
-        publish_session_changed(state, "archived", session)
-      })
+      // reply, so a cancelled requester cannot suppress invalidation. The
+      // worktree callback is the same post-commit broadcast create and
+      // remove publish — archiving is the third registry commit.
+      @engine.archive_session(
+        state.manager,
+        session,
+        () => publish_session_changed(state, "archived", session),
+        force=payload.force == Some(true),
+        on_worktree_removed=(workspace, worktrees) => {
+          publish_worktree_changed(state, workspace, worktrees)
+        },
+      )
     }),
     @endpoint.Endpoint::remote(@commands.session_unarchive, async fn(payload) {
       let session = payload.canonical_session()
@@ -198,6 +206,30 @@ pub fn endpoints(
         state.hub.publish(WorkspaceChanged({ workspaces, }))
       })
     }),
+    @endpoint.Endpoint::remote(@commands.worktree_list, async fn(payload) {
+      @engine.list_worktrees(payload.workspace)
+    }),
+    @endpoint.Endpoint::remote(@commands.worktree_create, async fn(payload) {
+      @engine.create_worktree(
+        state.manager,
+        payload.workspace,
+        payload.session,
+        worktrees => {
+          publish_worktree_changed(state, payload.workspace, worktrees)
+        },
+      )
+    }),
+    @endpoint.Endpoint::remote(@commands.worktree_remove, async fn(payload) {
+      @engine.remove_worktree(
+        state.manager,
+        payload.workspace,
+        payload.name,
+        payload.force == Some(true),
+        worktrees => {
+          publish_worktree_changed(state, payload.workspace, worktrees)
+        },
+      )
+    }),
     @endpoint.Endpoint::remote(@commands.auth_status, async fn(_) {
       auth_status(state)
     }),
@@ -232,7 +264,7 @@ test "remote endpoint catalog has one entry per command name" {
     }
     names.push(name)
   }
-  assert_eq(names.length(), 47)
+  assert_eq(names.length(), 50)
   assert_true(names.contains("agent.start"))
   assert_true(names.contains("terminal.close"))
   assert_true(names.contains("moonide.references"))
@@ -250,4 +282,18 @@ fn publish_session_changed(
   session : String,
 ) -> Unit {
   state.hub.publish(SessionChanged({ change, session }))
+}
+
+///|
+/// Tell every client a workspace's worktree list changed, so sidebars
+/// re-join their name chips and pickers refresh — the `workspace.changed`
+/// pattern, keyed by the workspace the list belongs to.
+fn publish_worktree_changed(
+  state : ApiState,
+  workspace : String,
+  worktrees : Array[@protocol.WorktreeInfo],
+) -> Unit {
+  state.hub.publish(
+    WorktreeChanged({ workspace: workspace.trim().to_owned(), worktrees }),
+  )
 }

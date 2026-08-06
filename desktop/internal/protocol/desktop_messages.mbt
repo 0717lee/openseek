@@ -10,7 +10,10 @@ pub(all) struct StartPayload {
   model : String?
   max_steps : Int?
   session : String?
-  // A registered workspace directory; absent means a scratch workspace.
+  // A registered workspace directory; absent means a scratch workspace. A
+  // session bound to one of the workspace's worktrees (`worktree.create`
+  // binds at creation) runs in that checkout — the start itself never names
+  // or mutates worktrees.
   workspace : String?
 } derive(Debug, Eq, FromJson, ToJson)
 
@@ -57,8 +60,13 @@ pub(all) struct LoadSessionPayload {
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|
+/// `session.archive` / `session.unarchive` address a conversation by its
+/// durable session id. Archiving takes the conversation's worktree with
+/// it; `force` (archive only) discards that checkout's uncommitted
+/// changes — the client sends it after its confirmation dialog.
 pub(all) struct SessionPayload {
   session : String
+  force : Bool?
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|
@@ -73,6 +81,31 @@ pub(all) struct SettingsSetPayload {
 ///|
 pub(all) struct WorkspacePayload {
   path : String
+} derive(Debug, Eq, FromJson, ToJson)
+
+///|
+/// `worktree.list` names the workspace whose registry to read.
+pub(all) struct WorktreeListPayload {
+  workspace : String
+} derive(Debug, Eq, FromJson, ToJson)
+
+///|
+/// `worktree.create` names the workspace and the NEW conversation the
+/// worktree will be the execution environment of — creation is the binding,
+/// and the session doubles as the idempotency key for retries. The host
+/// generates the worktree's name and returns it in the reply.
+pub(all) struct WorktreeCreatePayload {
+  workspace : String
+  session : String
+} derive(Debug, Eq, FromJson, ToJson)
+
+///|
+/// `worktree.remove` — `force` discards uncommitted changes in the checkout;
+/// the branch survives either way.
+pub(all) struct WorktreeRemovePayload {
+  workspace : String
+  name : String
+  force : Bool?
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|
@@ -311,6 +344,15 @@ pub(all) struct SessionChangedPayload {
 ///|
 pub(all) struct WorkspacesChangedPayload {
   workspaces : Array[String]
+} derive(Debug, Eq, FromJson, ToJson)
+
+///|
+/// One workspace's worktree list changed; sidebars re-join their name chips
+/// and pickers refresh — the `workspace.changed` pattern, keyed by the
+/// workspace the list belongs to.
+pub(all) struct WorktreeChangedPayload {
+  workspace : String
+  worktrees : Array[WorktreeInfo]
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|

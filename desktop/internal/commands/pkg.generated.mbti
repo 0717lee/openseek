@@ -109,6 +109,12 @@ pub let workspace_list : Command[@protocol.EmptyPayload, @protocol.WorkspacesRep
 
 pub let workspace_remove : Command[@protocol.WorkspacePayload, @protocol.WorkspacesReply]
 
+pub let worktree_create : Command[@protocol.WorktreeCreatePayload, @protocol.WorktreeCreateReply]
+
+pub let worktree_list : Command[@protocol.WorktreeListPayload, @protocol.WorktreesReply]
+
+pub let worktree_remove : Command[@protocol.WorktreeRemovePayload, @protocol.WorktreesReply]
+
 // Errors
 
 // Types and methods

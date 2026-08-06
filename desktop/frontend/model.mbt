@@ -238,6 +238,18 @@ priv struct Conversation {
   // one of the two roots (`cwd` first) a legacy absolute chip path is
   // relativized against before a jump.
   workspace : @pathx.Absolute?
+  // The worktree this conversation runs in — its execution environment,
+  // bound 1:1 at the first start. Sent with a start only until the
+  // conversation has begun — the host's registry
+  // mapping is durable from the first accepted start, and resume needs no
+  // hint. Cleared when the worktree disappears from the registry (removal
+  // unbinds host-side too).
+  worktree : String?
+  // The composer's launch mode for a conversation that has not begun: run
+  // the first prompt in a fresh host-named worktree instead of the
+  // workspace root. Consumed by the create-then-start chain, which sets
+  // `worktree` and clears this.
+  worktree_mode : Bool
   // Composer draft, kept per conversation so switching away (and back)
   // neither loses the text nor sends it to the wrong session.
   task : String
@@ -565,6 +577,7 @@ priv struct DeviceState {
   sessions_request_generation : Int
   archived_request_generation : Int
   workspaces_request_generation : Int
+  worktrees_request_generation : Int
   // Durable sessions known to the engine's store, newest first, refreshed
   // when the bridge connects and when a run reaches the store. A new
   // conversation appears here once its first turn has been persisted.
@@ -581,6 +594,10 @@ priv struct DeviceState {
   // Project directories attached as workspaces: the host registry's absolute
   // paths in registration order. The sidebar shows one section per entry.
   workspaces : Array[String]
+  // Each workspace's worktree registry rows, refreshed with the workspace
+  // list and replaced wholesale by `worktree.changed`. The sidebar's name
+  // chips read them.
+  worktrees : Array[WorkspaceWorktrees]
   // Where "New chat" lands: a registered workspace path, or "" for the
   // default scratch store. Follows the conversation last opened or created.
   active_workspace : String
@@ -597,10 +614,12 @@ fn empty_device_state(channel : @interop.ChannelId) -> DeviceState {
     sessions_request_generation: 0,
     archived_request_generation: 0,
     workspaces_request_generation: 0,
+    worktrees_request_generation: 0,
     sessions: [],
     archived: [],
     archive_overrides: [],
     workspaces: [],
+    worktrees: [],
     active_workspace: "",
   }
 }
@@ -682,6 +701,10 @@ priv struct Model {
   // nested conversations) is folded down to its heading; clicking the heading
   // flips it.
   workspaces_collapsed : Bool
+  // The archive-discard confirmation, staged when the host refused an
+  // archive because the conversation's worktree holds uncommitted changes;
+  // confirming retries the archive with force.
+  archive_confirm : ArchiveConfirm?
   // The conversation on screen; always present in `conversations` once the
   // startup session rotation lands.
   active_session : String
@@ -1032,6 +1055,14 @@ priv enum Msg {
   // Start a fresh conversation in a device's workspace ("" = the default
   // store); on the console this also focuses that device.
   NewChatIn(@interop.ChannelId, String)
+  // Flip the composer's launch mode for a conversation that has not begun:
+  // workspace root, or a fresh host-named worktree (its execution
+  // environment, bound 1:1 at creation).
+  ToggleWorktreeMode
+  // The archive-discard dialog's two exits: retry the archive with force
+  // (discarding the worktree's uncommitted changes), or stand down.
+  ConfirmArchiveDiscard
+  CancelArchiveDiscard
   // Archive a conversation on its device: the host moves its durable
   // record into the store's `archived` twin and the sidebar moves the row
   // under the Archived group.
@@ -1188,6 +1219,23 @@ priv enum DeviceMsg {
   // the same list in durable write order and invalidates older list replies.
   WorkspacesChanged(Array[String])
   WorkspaceFailed(String)
+  // One workspace's worktree registry — the reply to `worktree.list`, with
+  // the same two-generation staleness fence as `WorkspacesLoaded`.
+  WorktreesLoaded(
+    Array[WorktreeRow],
+    workspace~ : String,
+    connection_generation~ : Int,
+    request_generation~ : Int
+  )
+  // The post-commit `worktree.changed` broadcast for one workspace.
+  WorktreesChanged(Array[WorktreeRow], workspace~ : String)
+  // A `worktree.create` this client asked for succeeded mid-chain: bind
+  // the composing conversation to the new environment (the start request
+  // follows inside the same command).
+  WorktreeCreated(workspace~ : String, name~ : String, session~ : String)
+  // An archive was refused because the conversation's worktree holds
+  // uncommitted changes; the client stages the discard-confirmation dialog.
+  ArchiveNeedsForce(session~ : String, message~ : String)
   // The archived conversations — the reply to `archived_sessions` and to a
   // successful `archive_session`/`unarchive_session` alike.
   ArchivedLoaded(
@@ -1320,6 +1368,8 @@ fn empty_conversation(
     device: channel,
     session_id,
     workspace: workspace_root(workspace),
+    worktree: None,
+    worktree_mode: false,
     task: "",
     mentions: [],
     run: NoRun(ended=None),
@@ -1407,6 +1457,7 @@ fn initial_model() -> Model {
     submission_sequence: 0,
     conversations: [],
     workspace_picker: None,
+    archive_confirm: None,
     transcript_pinned: true,
     screen: Chat,
     skills_catalog: CatalogIdle,

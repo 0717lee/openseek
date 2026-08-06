@@ -825,6 +825,58 @@ async fn EngineManager::close_engines_for_workspace(
 }
 
 ///|
+/// `close_engines_for_workspace` narrowed to the given session ids: the
+/// drain a worktree removal runs over the entry's mapped conversations,
+/// whose idle serve processes still have their cwd inside the directory
+/// being deleted. Callers hold `workspace_lifecycle_lock`, so no new
+/// start/compact claim can appear between this scan and the registry
+/// commit. A pending operation or a busy engine is refused; idle writers
+/// receive EOF and join their follower's final durable scan.
+async fn EngineManager::close_engines_for_sessions(
+  self : EngineManager,
+  ids : Array[String],
+) -> Unit {
+  guard self.pump is Serving(sessions~) else { return }
+  let idle : Array[ServeEngine] = []
+  for id in ids {
+    guard sessions.get(id) is Some(slot) else { continue }
+    if slot.pending is Some(_) {
+      raise EngineError(
+        "another conversation operation is still being prepared; wait for it to finish",
+      )
+    }
+    if slot.engine is Some(engine) {
+      match engine.phase {
+        Running(..) =>
+          raise EngineError(
+            "a conversation in this worktree is still running; stop it first",
+          )
+        Compacting =>
+          raise EngineError(
+            "a conversation in this worktree is compacting; wait for it to finish",
+          )
+        Idle => idle.push(engine)
+      }
+    }
+  }
+  for engine in idle {
+    engine.close_and_wait()
+    if engine.follower is Some(follower) {
+      stop_follower_instance(self, follower, writer_exited=true)
+    }
+  }
+  // As in the workspace drain: an abrupt EOF can retire the ServeEngine
+  // while a retryable follower stays rooted in the store, with no slot owner
+  // for the idle-engine pass above to discover. Followers are keyed by
+  // session id, so the mapped ids find them directly.
+  for id in ids {
+    if self.followers.get(id) is Some(follower) {
+      stop_follower_instance(self, follower, writer_exited=true)
+    }
+  }
+}
+
+///|
 priv enum StreamMessage {
   StreamEvent(DecodedStreamEvent)
   StreamReaderFailed(String)

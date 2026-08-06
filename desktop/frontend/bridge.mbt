@@ -151,6 +151,7 @@ fn device_msg(notification : @protocol.Notification) -> DeviceMsg? {
       }
       Some(WorkspacesChanged(paths))
     }
+    WorktreeChanged(payload) => worktree_changed_msg(payload)
     SettingsChanged(payload) =>
       Some(
         HostSettingsLoaded(
@@ -870,7 +871,6 @@ fn start_openseek(
   session : String,
   workspace~ : @pathx.Absolute?,
 ) -> @cmd.Cmd {
-  let dispatch = dispatch.map((msg : DeviceMsg) => FromDevice(channel, msg))
   let payload = start_payload(
     task,
     selected_model,
@@ -881,36 +881,52 @@ fn start_openseek(
   )
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
-      let reply = @interop.bridge_request(
-        channel, @commands.agent_start, payload,
-      ) catch {
-        error => {
-          let message = @interop.bridge_error_text(error)
-          scheduler.add(
-            dispatch(
-              if @interop.bridge_error_is_definite(error) {
-                StartRejected(session~, submission_id~, message~)
-              } else {
-                StartUndelivered(session~, submission_id~, message~)
-              },
-            ),
-          )
-          return
-        }
-      }
-      scheduler.add(
-        dispatch(
-          StartResponded(
-            session~,
-            submission_id~,
-            run_id=reply.run_id,
-            status=reply.status,
-            exit_code=reply.exit_code,
-          ),
-        ),
+      request_agent_start(
+        scheduler, dispatch, channel, payload, session, submission_id,
       )
     })
   })
+}
+
+///|
+/// Fire one `agent.start` and settle its reply (or failure) through the
+/// session's Start* messages — shared by the plain submit and the
+/// create-then-start worktree chain.
+async fn request_agent_start(
+  scheduler : &@cmd.Scheduler,
+  dispatch : @cmd.Emit[Msg],
+  channel : @interop.ChannelId,
+  payload : @protocol.StartPayload,
+  session : String,
+  submission_id : String,
+) -> Unit noraise {
+  let dispatch = dispatch.map((msg : DeviceMsg) => FromDevice(channel, msg))
+  let reply = @interop.bridge_request(channel, @commands.agent_start, payload) catch {
+    error => {
+      let message = @interop.bridge_error_text(error)
+      scheduler.add(
+        dispatch(
+          if @interop.bridge_error_is_definite(error) {
+            StartRejected(session~, submission_id~, message~)
+          } else {
+            StartUndelivered(session~, submission_id~, message~)
+          },
+        ),
+      )
+      return
+    }
+  }
+  scheduler.add(
+    dispatch(
+      StartResponded(
+        session~,
+        submission_id~,
+        run_id=reply.run_id,
+        status=reply.status,
+        exit_code=reply.exit_code,
+      ),
+    ),
+  )
 }
 
 ///|

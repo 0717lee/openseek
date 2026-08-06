@@ -95,17 +95,29 @@ async fn list_archived_sessions(manager : EngineManager) -> SessionsReply {
 /// while the conversation has an open turn — the engine would keep writing
 /// into a store that just moved. An idle serve process for the session is
 /// forgotten so a later unarchive-and-prompt respawns against the restored
-/// record.
+/// record. The conversation's worktree, if it holds one, goes with it —
+/// archived conversations have no surface left to reach the environment
+/// from, and committed work survives on the branch. A dirty checkout
+/// refuses unless `force`, which is how the client's discard-confirmation
+/// dialog answers; `on_worktree_removed` broadcasts that registry commit.
 pub async fn archive_session(
   manager : EngineManager,
   session : String,
   on_committed : () -> Unit,
+  force? : Bool = false,
+  on_worktree_removed? : (String, Array[WorktreeInfo]) -> Unit,
 ) -> SessionsReply {
   let session = session.trim().to_owned()
   guard !session.is_empty() && safe_workspace_id(session) else {
     raise EngineError("invalid session id")
   }
-  archive_session_commit(manager, session, on_committed)
+  archive_session_commit(
+    manager,
+    session,
+    on_committed,
+    force~,
+    on_worktree_removed?,
+  )
   // Listing is intentionally outside the record-move lease. Once the
   // irreversible rename is durably published, a slow/cancelled list reply
   // must not hold the conversation unavailable or suppress session.changed.
@@ -117,6 +129,8 @@ async fn archive_session_commit(
   manager : EngineManager,
   session : String,
   on_committed : () -> Unit,
+  force? : Bool = false,
+  on_worktree_removed? : (String, Array[WorktreeInfo]) -> Unit,
 ) -> Unit {
   manager.workspace_lifecycle_lock.acquire()
   let mut placement_locked = true
@@ -167,6 +181,13 @@ async fn archive_session_commit(
     stop_follower_instance(manager, follower, writer_exited=true)
   }
   claim.require_current(manager)
+  // The execution environment goes with the conversation. A dirty refusal
+  // lands here — after the idle engine already closed, which is harmless
+  // (the next prompt respawns) — so nothing irreversible has happened yet;
+  // a removal that succeeds while the record move below then fails leaves a
+  // live conversation that self-heals to the workspace root, the same
+  // degradation every other lost checkout gets.
+  remove_bound_worktree(session, force, on_committed?=on_worktree_removed)
   guard session_store_root(session) is Some(root) else {
     raise EngineError(
       "cannot determine a session root; set OPENSEEK_SESSION_ROOT",
