@@ -5,6 +5,7 @@ test "Windows workspace paths use their final component as the tab label" {
     channel: @interop.ChannelId::Local,
     session: "windows-workspace",
     workspace: Some(@pathx.Absolute("C:\\Users\\alice\\project")),
+    worktree: None,
     dark_mode: false,
     connected: true,
   }
@@ -27,6 +28,7 @@ test "an exit before the open reply cannot revive a dead terminal" {
     channel: @interop.ChannelId::Local,
     session: "exit-race",
     workspace: Some(@pathx.Absolute("/work/project")),
+    worktree: None,
     dark_mode: false,
     connected: true,
   }
@@ -65,6 +67,7 @@ test "sync records color-scheme changes even when the shown tab is unchanged" {
     channel: @interop.ChannelId::Local,
     session: "theme",
     workspace: None,
+    worktree: None,
     dark_mode: false,
     connected: true,
   }
@@ -83,6 +86,7 @@ test "output acknowledgement messages leave terminal state unchanged" {
     channel: @interop.ChannelId::Local,
     session: "ack-purity",
     workspace: None,
+    worktree: None,
     dark_mode: false,
     connected: true,
   }
@@ -118,6 +122,7 @@ test "same-numbered terminal ids on different devices stay isolated" {
     channel: @interop.ChannelId::Local,
     session: "shared-session",
     workspace: Some(@pathx.Absolute("/work/project")),
+    worktree: None,
     dark_mode: false,
     connected: true,
   }
@@ -160,9 +165,73 @@ test "same-numbered terminal ids on different devices stay isolated" {
   }
   assert_true(
     tab.workspace
-    is @terminal.Project(@interop.ChannelId::Local, "/work/project"),
+    is @terminal.Project(
+      channel=@interop.ChannelId::Local,
+      workspace="/work/project",
+      worktree=None
+    ),
   )
   assert_true(tab.id is Some(1))
+}
+
+///|
+test "conversations in different checkouts of one project do not share shells" {
+  let emit : @cmd.Emit[@terminal.Msg] = @cmd.Emit(_ => @cmd.none)
+  // Two conversations, one project. The bound one's terminal is rooted in
+  // its worktree by the host, so handing that shell to the Local one would
+  // run its commands in a checkout the user is not looking at.
+  let local_ctx : @terminal.Ctx = {
+    channel: @interop.ChannelId::Local,
+    session: "s-local",
+    workspace: Some(@pathx.Absolute("/work/project")),
+    worktree: None,
+    dark_mode: false,
+    connected: true,
+  }
+  let worktree_ctx : @terminal.Ctx = {
+    ..local_ctx,
+    session: "s-wt",
+    worktree: Some("wt-1"),
+  }
+  let (_, in_worktree) = @terminal.update(
+    emit,
+    @terminal.ToggleTerminal,
+    @terminal.State::empty(),
+    worktree_ctx,
+  )
+  guard in_worktree.tabs.get(0) is Some(opened) else {
+    fail("worktree terminal was not opened")
+  }
+  // The worktree's own group, labelled so the tab strip tells the two apart.
+  assert_true(
+    opened.workspace
+    is @terminal.Project(
+      channel=@interop.ChannelId::Local,
+      workspace="/work/project",
+      worktree=Some("wt-1")
+    ),
+  )
+  assert_eq(opened.workspace_label, "project/wt-1")
+  // Switching to the Local conversation finds no shell of its own, so sync
+  // opens one. Sharing the worktree's group would have reused that shell
+  // instead — the whole defect — and left the count at one.
+  let (in_main, _) = @terminal.sync(emit, in_worktree, local_ctx)
+  inspect(in_main.tabs.length(), content="2")
+  guard in_main.tabs.get(1) is Some(main_tab) else {
+    fail("the local conversation got no shell of its own")
+  }
+  assert_eq(main_tab.workspace_label, "project")
+  assert_true(main_tab.workspace != opened.workspace)
+  // A second conversation in the SAME checkout still shares, which is what
+  // grouping is for: sync finds its group's tab and opens nothing.
+  let (sibling, _) = @terminal.sync(emit, in_main, {
+    ..local_ctx,
+    session: "s-local-2",
+  })
+  inspect(sibling.tabs.length(), content="2")
+  // And returning to the worktree conversation still finds its own.
+  let (back, _) = @terminal.sync(emit, sibling, worktree_ctx)
+  inspect(back.tabs.length(), content="2")
 }
 
 ///|
@@ -176,7 +245,11 @@ test "a disconnected channel retires only its terminal tabs" {
       {
         key: 1,
         id: Some(1),
-        workspace: @terminal.Project(local_channel, "/local"),
+        workspace: @terminal.Project(
+          channel=local_channel,
+          workspace="/local",
+          worktree=None,
+        ),
         workspace_label: "local",
         session: "local",
         workspace_path: Some(@pathx.Absolute("/local")),
@@ -185,7 +258,11 @@ test "a disconnected channel retires only its terminal tabs" {
       {
         key: 2,
         id: Some(1),
-        workspace: @terminal.Project(remote, "/remote"),
+        workspace: @terminal.Project(
+          channel=remote,
+          workspace="/remote",
+          worktree=None,
+        ),
         workspace_label: "remote",
         session: "remote",
         workspace_path: Some(@pathx.Absolute("/remote")),
@@ -193,8 +270,15 @@ test "a disconnected channel retires only its terminal tabs" {
       },
     ],
     active: [
-      (@terminal.Project(local_channel, "/local"), 1),
-      (@terminal.Project(remote, "/remote"), 2),
+      (
+        @terminal.Project(
+          channel=local_channel,
+          workspace="/local",
+          worktree=None,
+        ),
+        1,
+      ),
+      (@terminal.Project(channel=remote, workspace="/remote", worktree=None), 2),
     ],
     shown: Some(2),
     exited_before_open: [(remote, 9), (local_channel, 9)],
@@ -204,7 +288,11 @@ test "a disconnected channel retires only its terminal tabs" {
   inspect(disconnected.tabs.length(), content="1")
   assert_true(
     disconnected.tabs[0].workspace
-    is @terminal.Project(@interop.ChannelId::Local, "/local"),
+    is @terminal.Project(
+      channel=@interop.ChannelId::Local,
+      workspace="/local",
+      worktree=None
+    ),
   )
   assert_true(disconnected.shown is None)
   assert_true(disconnected.exited_before_open == [(local_channel, 9)])
@@ -217,6 +305,7 @@ test "an open panel waits for a reconnected channel before replacing its PTY" {
     channel: @interop.ChannelId::Remote("device-1"),
     session: "reconnect",
     workspace: None,
+    worktree: None,
     dark_mode: false,
     connected: false,
   }
@@ -237,6 +326,9 @@ test "an open panel waits for a reconnected channel before replacing its PTY" {
   inspect(reconnected.tabs.length(), content="1")
   assert_true(
     reconnected.tabs[0].workspace
-    is @terminal.Scratch(@interop.ChannelId::Remote("device-1"), "reconnect"),
+    is @terminal.Scratch(
+      channel=@interop.ChannelId::Remote("device-1"),
+      session="reconnect"
+    ),
   )
 }

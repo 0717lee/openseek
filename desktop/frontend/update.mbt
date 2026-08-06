@@ -879,6 +879,22 @@ fn terminal_ctx(model : Model) -> @terminal.Ctx {
     channel: conv.device,
     session: conv.session_id,
     workspace: conv.workspace,
+    // The same resolution the sidebar chip uses: the local binding while the
+    // create-then-start chain owns it, the registry join afterwards (which
+    // is also what survives a reload).
+    worktree: match conv.worktree {
+      Some(name) => Some(name)
+      None =>
+        match model.device_state(conv.device) {
+          Some(dev) =>
+            worktree_name_for(
+              dev,
+              workspace_token(conv.workspace),
+              conv.session_id,
+            )
+          None => None
+        }
+    },
     dark_mode: model.theme.is_dark(model.system_dark),
     connected,
   }
@@ -5756,7 +5772,11 @@ test "socket losses mark the bridge lost at the third consecutive drop" {
         {
           key: 1,
           id: Some(1),
-          workspace: @terminal.Project(channel, "/remote"),
+          workspace: @terminal.Project(
+            channel~,
+            workspace="/remote",
+            worktree=None,
+          ),
           workspace_label: "remote",
           session: "remote-session",
           workspace_path: Some(@pathx.Absolute("/remote")),

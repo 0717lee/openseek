@@ -5,20 +5,31 @@
 // stay alive while the user looks elsewhere.
 
 ///|
-/// Which device/workspace a tab belongs to. Host-assigned terminal ids are
+/// Which device/checkout a tab belongs to. Host-assigned terminal ids are
 /// scoped to one bridge connection, so the channel is part of the identity:
 /// two devices can both name their first terminal `1` without sharing tabs.
-/// Conversations in the same registered project directory on one device
-/// share a group; a scratch group is keyed by its conversation.
+/// Conversations sharing one project directory on one device share a group;
+/// a scratch group is keyed by its conversation.
+///
+/// The group is the EXECUTION TREE, not merely the project: the host roots a
+/// terminal in the conversation's worktree when it has one, so a group keyed
+/// by the project alone would hand a Local conversation the shell of a
+/// worktree conversation — and its commands would land in a checkout the
+/// user is not looking at. Conversations that genuinely share a checkout
+/// still share their shells, which is the point of grouping at all.
 pub(all) enum WorkspaceKey {
-  Project(@interop.ChannelId, String)
-  Scratch(@interop.ChannelId, String)
+  Project(
+    channel~ : @interop.ChannelId,
+    workspace~ : String,
+    worktree~ : String?
+  )
+  Scratch(channel~ : @interop.ChannelId, session~ : String)
 } derive(Eq)
 
 ///|
 fn WorkspaceKey::channel(self : WorkspaceKey) -> @interop.ChannelId {
   match self {
-    Project(channel, _) | Scratch(channel, _) => channel
+    Project(channel~, ..) | Scratch(channel~, ..) => channel
   }
 }
 
@@ -92,6 +103,10 @@ pub(all) struct Ctx {
   channel : @interop.ChannelId
   session : String
   workspace : @pathx.Absolute?
+  /// The worktree this conversation runs in, when the workspace binds one.
+  /// The host derives a terminal's cwd from the same binding, so this is
+  /// what keeps a group's shells and their real checkout in step.
+  worktree : String?
   dark_mode : Bool
   /// False from the first WebSocket loss until that channel reports ready
   /// again. The old connection's PTYs are already gone, so `sync` must not
@@ -103,8 +118,9 @@ pub(all) struct Ctx {
 /// The workspace group the active conversation belongs to.
 fn workspace_key(ctx : Ctx) -> WorkspaceKey {
   match ctx.workspace {
-    Some(workspace) => Project(ctx.channel, workspace.0)
-    None => Scratch(ctx.channel, ctx.session)
+    Some(workspace) =>
+      Project(channel=ctx.channel, workspace=workspace.0, worktree=ctx.worktree)
+    None => Scratch(channel=ctx.channel, session=ctx.session)
   }
 }
 

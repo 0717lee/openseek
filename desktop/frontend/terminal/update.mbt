@@ -13,19 +13,22 @@
 // tears that connection's task group down).
 
 ///|
-/// The display label for the active conversation's workspace: the project
-/// directory's name, or "scratch" for a conversation without one.
+/// The display label for the active conversation's checkout: the project
+/// directory's name, or "scratch" for a conversation without one. A worktree
+/// group carries its name too — its shells sit in a different checkout from
+/// the main tree's, and a label that named only the project would leave the
+/// two indistinguishable in the tab strip.
 fn workspace_label(ctx : Ctx) -> String {
   guard ctx.workspace is Some(workspace) else { return "scratch" }
   let text = workspace.0
   // A workspace hint may have been produced on another platform. The win32
   // flavor intentionally accepts both `\` and `/`, without the top-level
   // `path` package's Node-only runtime platform probe in this browser bundle.
-  let label = @winpath.Path(text).basename()
-  if label.is_empty() {
-    text
-  } else {
-    label.to_owned()
+  let basename = @winpath.Path(text).basename()
+  let project = if basename.is_empty() { text } else { basename.to_owned() }
+  match ctx.worktree {
+    Some(name) => "\{project}/\{name}"
+    None => project
   }
 }
 
