@@ -248,6 +248,32 @@ pub(all) struct MoonIdeNavigationPayload {
 pub(all) struct ExternalLinkPayload {
   url : String
 } derive(Debug, Eq, FromJson, ToJson)
+
+///|
+pub(all) struct BrowserOpenPayload {
+  id : Int
+  url : String
+} derive(Debug, Eq, FromJson, ToJson)
+
+///|
+pub(all) struct BrowserIdPayload {
+  id : Int
+} derive(Debug, Eq, FromJson, ToJson)
+
+///|
+pub(all) struct BrowserBoundsPayload {
+  id : Int
+  x : Int
+  y : Int
+  width : Int
+  height : Int
+} derive(Debug, Eq, FromJson, ToJson)
+
+///|
+pub(all) struct BrowserVisiblePayload {
+  id : Int
+  visible : Bool
+} derive(Debug, Eq, FromJson, ToJson)
 // Notification payloads.
 
 ///|

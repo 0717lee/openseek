@@ -557,27 +557,48 @@ fn open_editor_at(
     session: conv.session_id,
   }
   let femit = dispatch.map(msg => FileEditor(msg))
-  // Re-root only when the panel's cached tree belongs to another
-  // conversation; otherwise `sync_file_panel`'s post-dispatch pass would
-  // see a session mismatch and wipe the tab/`open` set below.
+  // Park/restore the strip for a conversation switch up front, and re-root
+  // the file subsystem when its cached tree belongs to another conversation;
+  // otherwise `sync_file_panel`'s post-dispatch pass would see a session
+  // mismatch and wipe the freshly opened tab below. A re-rooted document
+  // table is seeded from the restored strip (identities only), exactly like
+  // `@fileeditor.sync`'s own re-root.
+  let dock = @dock.sync(model.dock, owner)
   let panel = if model.file_panel.owner == Some(owner) {
     model.file_panel
   } else {
-    { ..@fileeditor.State::empty(), owner: Some(owner) }
+    let docs : Map[@pathx.Relative, @fileeditor.Doc] = Map([])
+    for open_path in @dock.file_paths(dock) {
+      docs[open_path] = {
+        name: @fileeditor.basename(open_path),
+        state: TabLoading,
+        stale: false,
+      }
+    }
+    { ..@fileeditor.State::empty(), owner: Some(owner), docs }
   }
   guard conversation_relative(conv, path) is Some(relative) else {
     return (
       @fileeditor.mount_cmds(femit),
       {
         ..model,
+        dock: { ..dock, open: true },
         file_panel: {
           ..panel,
-          open: true,
           error: Some("\{path} is outside the conversation workspace"),
         },
       },
     )
   }
+  let had_active = @dock.active_file(dock) is Some(_)
+  // An explicit open while the picker is the active tab fulfills it, the
+  // same as a pick from its tree.
+  let dock = if dock.active is Some(FilePicker) {
+    { ..@dock.resolve_pick(dock, relative), open: true }
+  } else {
+    { ..@dock.open_file(dock, relative), open: true }
+  }
+  let model = { ..model, dock, file_panel: panel }
   let (cmd, panel) = @fileeditor.open_file(
     femit,
     panel,
@@ -585,6 +606,7 @@ fn open_editor_at(
     relative,
     range~,
     annotation?,
+    had_active~,
   )
   (cmd, { ..model, file_panel: panel })
 }
@@ -834,6 +856,11 @@ fn file_ctx(model : Model) -> @fileeditor.Ctx {
     dark_mode: model.theme.is_dark(model.system_dark),
     tree_layout: model.tree_layout,
     narrow: model.narrow,
+    // The dock's projection: strip membership and the active tab are the
+    // dock's truth, handed to the file subsystem read-only.
+    panel_open: model.dock.open,
+    open_files: @dock.file_paths(model.dock),
+    active_file: @dock.active_file(model.dock),
   }
 }
 
@@ -875,19 +902,129 @@ fn sync_terminal_panel(
 }
 
 ///|
-/// Reconcile the file panel with the active conversation after every message
-/// (see `@fileeditor.sync`). Centralizing it here keeps every
+/// Reconcile the dock strip, then the file subsystem, with the active
+/// conversation after every message (see `@dock.sync` /
+/// `@fileeditor.sync`). Order matters: the dock parks/restores the strip
+/// first, so the file sync sees the fresh projection and re-roots its
+/// document table from it. Centralizing it here keeps every
 /// conversation-switching handler from having to re-root the panel itself.
 fn sync_file_panel(
   dispatch : @cmd.Emit[Msg],
   model : Model,
 ) -> (Model, @cmd.Cmd) {
+  let conv = model.active()
+  let dock = @dock.sync(model.dock, {
+    channel: model.focused,
+    session: conv.session_id,
+  })
+  let model = { ..model, dock, }
   let (panel, cmd) = @fileeditor.sync(
     dispatch.map(msg => FileEditor(msg)),
     model.file_panel,
     file_ctx(model),
   )
   ({ ..model, file_panel: panel }, cmd)
+}
+
+///|
+/// Whether a full-screen surface is drawn over the window. Every overlay
+/// `view.mbt` appends after the shell (see its trailing `children.push`
+/// block) belongs here: native views z-order above all HTML, so an overlay
+/// this predicate forgets renders with the browser pane punched through it,
+/// swallowing the clicks that land there.
+fn covering_overlay(model : Model) -> Bool {
+  model.workspace_picker is Some(_) ||
+  model.archive_confirm is Some(_) ||
+  model.symbol_search is Some(_) ||
+  model.update_ux is ConfirmingRestart(_) ||
+  // Best effort: with the bridge gone the hide op may not deliver.
+  model.bridge_state() is BridgeLost(_)
+}
+
+///|
+/// Which browser page's native view belongs on screen: the active Browser
+/// tab's, once it has a URL (a blank tab has no view yet) — and only while
+/// the pane is actually visible and uncovered. Native views z-order above
+/// all HTML, so anything the frontend draws over the pane area — the `+`
+/// launcher popup, the narrow layout's sidebar drawer, the topbar app
+/// launcher's backdrop, and every `covering_overlay` — must hide the view
+/// rather than fight it.
+fn desired_browser_view(model : Model) -> Int? {
+  guard model.is_desktop &&
+    model.screen is Chat &&
+    model.dock.open &&
+    !model.dock.menu_open &&
+    !model.launcher.open &&
+    !(model.narrow && model.sidebar_open) &&
+    !covering_overlay(model) else {
+    return None
+  }
+  guard @dock.active_browser(model.dock) is Some(id) &&
+    @preview.page(model.preview, id) is Some(page) &&
+    page.url is Some(_) else {
+    return None
+  }
+  Some(id)
+}
+
+///|
+fn browser_geometry(model : Model) -> BrowserGeometry {
+  {
+    desired: desired_browser_view(model),
+    sidebar_open: model.sidebar_open,
+    narrow: model.narrow,
+    terminal_open: model.terminal_panel.open,
+    tree_layout: model.tree_layout,
+  }
+}
+
+///|
+/// Reconcile the native view with the pane after every message. Hiding is
+/// immediate; showing waits for a fresh pane measurement (the measured
+/// rectangle comes back as `BrowserPaneMeasured`, which sends the bounds
+/// and then the visibility flip). The geometry signature keeps this pass
+/// from re-measuring when nothing placement-relevant changed — including
+/// after the measurement message itself, which never alters the signature.
+fn sync_browser_view(
+  dispatch : @cmd.Emit[Msg],
+  model : Model,
+) -> (Model, @cmd.Cmd) {
+  let pane = model.browser_pane
+  match desired_browser_view(model) {
+    None =>
+      match pane.shown {
+        Some(old) =>
+          (
+            { ..model, browser_pane: { shown: None, rect: None, geo: None } },
+            browser_set_visible(dispatch, old, false),
+          )
+        None =>
+          if pane.geo is Some(_) {
+            // A measurement was requested but the view left the screen
+            // before it landed; forget it so a later show re-measures.
+            (
+              { ..model, browser_pane: { shown: None, rect: None, geo: None } },
+              @cmd.none,
+            )
+          } else {
+            (model, @cmd.none)
+          }
+      }
+    Some(_) => {
+      let geo = browser_geometry(model)
+      if pane.geo == Some(geo) {
+        (model, @cmd.none)
+      } else {
+        (
+          { ..model, browser_pane: { ..pane, geo: Some(geo) } },
+          @cmd.batch([
+            watch_browser_pane(dispatch),
+            measure_browser_pane(dispatch),
+          ]),
+        )
+      }
+    }
+  }
 }
 
 ///|
@@ -970,7 +1107,8 @@ fn update(
   let model = close_stale_symbol_search(model)
   let (model, panel_cmd) = sync_file_panel(dispatch, model)
   let (model, terminal_cmd) = sync_terminal_panel(dispatch, model)
-  (@cmd.batch([cmd, panel_cmd, terminal_cmd]), model)
+  let (model, browser_cmd) = sync_browser_view(dispatch, model)
+  (@cmd.batch([cmd, panel_cmd, terminal_cmd, browser_cmd]), model)
 }
 
 ///|
@@ -1158,6 +1296,53 @@ fn update_msg(
         @fileeditor.remove_editor_feedback(resource, feedback_id),
         model.replace_conversation({ ..conv, mentions, }),
       )
+    }
+    // Intercepted like the comment above: which dock tab a tree click opens
+    // is the strip's business. The dock opens (or re-activates) the tab,
+    // then the file subsystem loads and shows the document against the
+    // fresh projection.
+    FileEditor(FileSelected(path~, name~)) => {
+      let had_active = @dock.active_file(model.dock) is Some(_)
+      // A pick made from the active FilePicker tab fulfills it: the picker
+      // is replaced in place (or the already-open tab activates and the
+      // picker closes). Any other tree click opens tabs as before.
+      let dock = if model.dock.active is Some(FilePicker) {
+        @dock.resolve_pick(model.dock, path)
+      } else {
+        @dock.open_file(model.dock, path)
+      }
+      let model = { ..model, dock, }
+      let (cmd, panel) = @fileeditor.open_document(
+        dispatch.map(msg => FileEditor(msg)),
+        model.file_panel,
+        file_ctx(model),
+        path,
+        name~,
+        range=None,
+        had_active~,
+      )
+      (cmd, { ..model, file_panel: panel })
+    }
+    // Intercepted for the same reason: a navigation jump (go-to-definition,
+    // a reference pick) opens a dock tab before the document loads. The
+    // owner stamp rejects a reply that outlived a conversation switch.
+    FileEditor(OpenNavigationLocation(owner~, path~, range~)) => {
+      guard model.file_panel.owner == Some(owner) &&
+        file_ctx(model).owner == owner else {
+        return (@cmd.none, model)
+      }
+      let had_active = @dock.active_file(model.dock) is Some(_)
+      let dock = @dock.open_file(model.dock, path)
+      let model = { ..model, dock, }
+      let (cmd, panel) = @fileeditor.open_file(
+        dispatch.map(msg => FileEditor(msg)),
+        model.file_panel,
+        file_ctx(model),
+        path,
+        range=Some(range),
+        had_active~,
+      )
+      (cmd, { ..model, file_panel: panel })
     }
     CompletionAccept =>
       if model.completion is Some(menu) && menu.current() is Some(item) {
@@ -1495,11 +1680,19 @@ fn update_msg(
       // so any resize while a document is up remeasures it — same-side
       // resizes included (a rotation changes the host without crossing the
       // breakpoint).
-      let cmd = if model.file_panel.open && model.file_panel.active is Some(_) {
-        @fileeditor.request_viewer_remeasure()
+      let cmds = if model.dock.open && @dock.active_file(model.dock) is Some(_) {
+        [@fileeditor.request_viewer_remeasure()]
       } else {
-        @cmd.none
+        []
       }
+      // A horizontal resize can move the right-anchored browser pane
+      // without resizing it (`--editor-width` is fixed pixels after a
+      // drag): its ResizeObserver stays silent and the geometry signature
+      // never changes, so the resize itself must trigger the re-measure.
+      if desired_browser_view(model) is Some(_) {
+        cmds.push(measure_browser_pane(dispatch))
+      }
+      let cmd = @cmd.batch(cmds)
       if narrow == model.narrow {
         (cmd, model)
       } else {
@@ -2141,6 +2334,218 @@ fn update_msg(
       )
       (cmd, { ..model, file_panel: panel })
     }
+    Dock(msg) => {
+      // The strip machine is pure; the cross-package effects of the
+      // transition — showing or dropping documents, mounting hosts — are
+      // commanded here off the before/after difference.
+      let before = model.dock
+      let dock = @dock.update(msg, before)
+      let model = { ..model, dock, }
+      let femit = dispatch.map(msg => FileEditor(msg))
+      match msg {
+        TogglePanel =>
+          (
+            @fileeditor.panel_toggle_cmds(
+              femit,
+              model.file_panel,
+              file_ctx(model),
+              opening=dock.open,
+            ),
+            model,
+          )
+        MenuToggled =>
+          // Pure UI state; the browser sync pass hides the native view
+          // while the popup would overlap it.
+          (@cmd.none, model)
+        TabActivated(_) =>
+          if dock.active != before.active &&
+            @dock.active_file(dock) is Some(path) {
+            let cmds : Array[@cmd.Cmd] = []
+            if @dock.active_file(before) is None {
+              // The file body was CSS-hidden behind the browser pane or
+              // the picker overlay; the viewer must re-measure its host on
+              // return.
+              cmds.push(@fileeditor.request_viewer_remeasure())
+            }
+            let (cmd, panel) = @fileeditor.activate(
+              femit,
+              model.file_panel,
+              file_ctx(model),
+              path,
+            )
+            cmds.push(cmd)
+            (@cmd.batch(cmds), { ..model, file_panel: panel })
+          } else {
+            (@cmd.none, model)
+          }
+        TabClosed(tab) =>
+          // A stale close (racing another close) leaves the strip — and so
+          // the document table — untouched.
+          if before.tabs.search_by(entry => entry == tab) is Some(_) {
+            // When the closed tab was on screen and a file tab inherits it,
+            // its document must be shown; a file close routes through
+            // close_document (which also drops the document), the other
+            // kinds activate directly.
+            let next_file = @dock.active_file(dock)
+            let was_active = before.active == Some(tab)
+            match tab {
+              File(path~) => {
+                let (cmd, panel) = @fileeditor.close_document(
+                  femit,
+                  model.file_panel,
+                  file_ctx(model),
+                  path,
+                  next=next_file,
+                  was_active~,
+                )
+                (cmd, { ..model, file_panel: panel })
+              }
+              Browser(id~) => {
+                let cmds : Array[@cmd.Cmd] = [browser_close_view(dispatch, id)]
+                let model = {
+                  ..model,
+                  preview: @preview.close_page(model.preview, id),
+                }
+                if was_active && next_file is Some(path) {
+                  cmds.push(@fileeditor.request_viewer_remeasure())
+                  let (cmd, panel) = @fileeditor.activate(
+                    femit,
+                    model.file_panel,
+                    file_ctx(model),
+                    path,
+                  )
+                  cmds.push(cmd)
+                  (@cmd.batch(cmds), { ..model, file_panel: panel })
+                } else {
+                  (@cmd.batch(cmds), model)
+                }
+              }
+              FilePicker =>
+                if was_active && next_file is Some(path) {
+                  let (cmd, panel) = @fileeditor.activate(
+                    femit,
+                    model.file_panel,
+                    file_ctx(model),
+                    path,
+                  )
+                  (cmd, { ..model, file_panel: panel })
+                } else {
+                  (@cmd.none, model)
+                }
+            }
+          } else {
+            (@cmd.none, model)
+          }
+      }
+    }
+    Preview(msg) =>
+      (@cmd.none, { ..model, preview: @preview.update(msg, model.preview) })
+    BrowserTabRequested => {
+      let (preview, id) = @preview.open_page(model.preview)
+      let dock = @dock.close_menu(@dock.open_browser(model.dock, id))
+      (focus_browser_address(), { ..model, preview, dock })
+    }
+    FilePickerRequested => {
+      let dock = @dock.close_menu(@dock.open_picker(model.dock))
+      (@cmd.none, { ..model, dock, })
+    }
+    BrowserAddressEdited(value) =>
+      match @dock.active_browser(model.dock) {
+        Some(id) =>
+          (
+            @cmd.none,
+            {
+              ..model,
+              preview: @preview.update(
+                @preview.Msg::InputChanged(id~, value~),
+                model.preview,
+              ),
+            },
+          )
+        None => (@cmd.none, model)
+      }
+    BrowserNavigateSubmitted => {
+      guard @dock.active_browser(model.dock) is Some(id) &&
+        @preview.page(model.preview, id) is Some(page) &&
+        @preview.normalize_url(page.input) is Some(url) else {
+        return (@cmd.none, model)
+      }
+      // A blank tab's first navigation creates the native view; later ones
+      // navigate the existing view.
+      let (cmd, pane) = if page.url is Some(_) {
+        // `browser.navigate` builds the view back when it is gone — a create
+        // the host refused, or one a reload's `close_all` swept — and a
+        // rebuilt view arrives hidden at a placeholder size. No view op is
+        // acknowledged, so the cached placement may describe a view that
+        // never existed; forgetting it has the next sync measure and place
+        // whatever the host actually has now.
+        (
+          browser_navigate(dispatch, id, url),
+          { shown: None, rect: None, geo: None },
+        )
+      } else {
+        // The blank tab's own placement is already absent (a page without a
+        // URL is never the desired view), so the create needs no reset.
+        (browser_open(dispatch, id, url), model.browser_pane)
+      }
+      (
+        cmd,
+        {
+          ..model,
+          preview: @preview.navigate(model.preview, id, url),
+          browser_pane: pane,
+        },
+      )
+    }
+    BrowserBack =>
+      (
+        browser_history_for_active(dispatch, model, @commands.browser_back),
+        model,
+      )
+    BrowserForward =>
+      (
+        browser_history_for_active(dispatch, model, @commands.browser_forward),
+        model,
+      )
+    BrowserReload =>
+      (
+        browser_history_for_active(dispatch, model, @commands.browser_reload),
+        model,
+      )
+    BrowserOpenExternal => {
+      guard @dock.active_browser(model.dock) is Some(id) &&
+        @preview.page(model.preview, id) is Some(page) &&
+        page.url is Some(url) else {
+        return (@cmd.none, model)
+      }
+      (open_external_link(dispatch, url), model)
+    }
+    BrowserPaneMeasured(rect~) => {
+      // A rectangle for a view that already left the screen (or a zero
+      // rectangle from the observer watching a hidden pane) is stale.
+      guard desired_browser_view(model) is Some(id) &&
+        rect.width > 0 &&
+        rect.height > 0 else {
+        return (@cmd.none, model)
+      }
+      let pane = model.browser_pane
+      let cmds : Array[@cmd.Cmd] = []
+      if pane.rect != Some(rect) || pane.shown != Some(id) {
+        cmds.push(browser_set_bounds(dispatch, id, rect))
+      }
+      if pane.shown != Some(id) {
+        // Bounds land before visibility so the view never flashes at its
+        // previous place.
+        if pane.shown is Some(old) {
+          cmds.push(browser_set_visible(dispatch, old, false))
+        }
+        cmds.push(browser_set_visible(dispatch, id, true))
+      }
+      (
+        @cmd.batch(cmds),
+        { ..model, browser_pane: { ..pane, shown: Some(id), rect: Some(rect) } },
+      )
+    }
     Terminal(msg) => {
       // Host-originated replies and notifications can already be queued when
       // a WebSocket closes. Their terminal ids belong to the dead connection,
@@ -2177,7 +2582,47 @@ fn update_msg(
       }
     }
     HostActionFailed(message) => model.notify_error(dispatch, message)
-    ExternalLinkClicked(url) => (open_external_link(dispatch, url), model)
+    ExternalLinkClicked(url) =>
+      // Web links open in the dock's Browser tabs by default — the
+      // toolbar's open-external button hands the page to the system
+      // browser when its chrome or logins are needed. Non-web schemes
+      // (mailto:, vscode:, …) and remote consoles (no native views) keep
+      // the external path. A same-URL tab already in this strip
+      // re-activates instead of duplicating.
+      //
+      // Only from Chat: the capture listener behind this message is a
+      // document-wide one, so it also reports anchors on the other screens,
+      // where the dock is not rendered at all — routing there would open a
+      // tab nobody can see. Settings' device-page link is the clearest
+      // case: it names a URL to open in a browser the user is signed in to,
+      // which a native view (with its own cookie jar) is not.
+      if model.is_desktop && model.screen is Chat && @preview.is_web_url(url) {
+        // The scan is over this strip's tabs, not the global page map: a
+        // parked conversation may hold the same URL, and matching its page
+        // first would shadow this strip's own tab forever.
+        let reuse = for tab in model.dock.tabs {
+          if tab is Browser(id~) &&
+            @preview.page(model.preview, id) is Some(page) &&
+            page.url == Some(url) {
+            break Some(id)
+          }
+        } nobreak {
+          None
+        }
+        match reuse {
+          Some(id) => {
+            let dock = { ..@dock.open_browser(model.dock, id), open: true }
+            (@cmd.none, { ..model, dock, })
+          }
+          None => {
+            let (preview, id) = @preview.open_page(model.preview, url~)
+            let dock = { ..@dock.open_browser(model.dock, id), open: true }
+            (browser_open(dispatch, id, url), { ..model, preview, dock })
+          }
+        }
+      } else {
+        (open_external_link(dispatch, url), model)
+      }
     FromDevice(channel, msg) => update_device_msg(dispatch, channel, msg, model)
   }
 }
@@ -11066,8 +11511,10 @@ test "JumpToMention opens the editor panel and selects the mention's file" {
     mentions: [mention],
   })
   let (_, next) = update(dispatch, JumpToMention(0), model)
-  assert_true(next.file_panel.open)
-  assert_true(next.file_panel.active is Some(Relative("src/main.mbt")))
+  assert_true(next.dock.open)
+  assert_true(@dock.active_file(next.dock) is Some(Relative("src/main.mbt")))
+  // The document table follows the strip: the jumped-to file has an entry.
+  assert_true(next.file_panel.docs.contains(Relative("src/main.mbt")))
 }
 
 ///|
@@ -11079,8 +11526,8 @@ test "JumpToMention is a no-op for a chip without a resolved location" {
     mentions: [mention],
   })
   let (_, next) = update(dispatch, JumpToMention(0), model)
-  assert_false(next.file_panel.open)
-  assert_true(next.file_panel.active is None)
+  assert_false(next.dock.open)
+  assert_true(next.dock.active is None)
 }
 
 ///|
@@ -11131,7 +11578,7 @@ test "chip jumps relativize legacy absolute paths against the roots" {
     ),
     model,
   )
-  assert_true(next.file_panel.active is Some(Relative("src/main.mbt")))
+  assert_true(@dock.active_file(next.dock) is Some(Relative("src/main.mbt")))
   // Before the first run reports cwd, the attached workspace serves as root.
   let model = test_model().replace_conversation({
     ..test_conversation(),
@@ -11146,7 +11593,7 @@ test "chip jumps relativize legacy absolute paths against the roots" {
     ),
     model,
   )
-  assert_true(next.file_panel.active is Some(Relative("src/main.mbt")))
+  assert_true(@dock.active_file(next.dock) is Some(Relative("src/main.mbt")))
   // An absolute path outside every root cannot be opened; the panel says so
   // instead of sending the host a bogus read.
   let (_, outside) = update(
@@ -11158,7 +11605,7 @@ test "chip jumps relativize legacy absolute paths against the roots" {
     ),
     model,
   )
-  assert_true(outside.file_panel.active is None)
+  assert_true(outside.dock.active is None)
   assert_true(outside.file_panel.error is Some(_))
 }
 
@@ -11166,21 +11613,28 @@ test "chip jumps relativize legacy absolute paths against the roots" {
 test "RevealDirectory(\"\") opens the tree pane without a highlight" {
   let dispatch = test_dispatch()
   let model = test_model()
+  let owner : @interop.ConversationKey = {
+    channel: Local,
+    session: "desktop-test",
+  }
+  let dock = {
+    ..@dock.open_file(model.dock, Relative("README.md")),
+    open: true,
+    owner: Some(owner),
+  }
   let panel = {
     ..model.file_panel,
-    open: true,
-    owner: Some({ channel: Local, session: "desktop-test" }),
+    owner: Some(owner),
     tree_open: false,
-    active: Some(Relative("README.md")),
     highlighted: Some(Relative("src")),
   }
   let (_, next) = update(
     dispatch,
     FileEditor(RevealDirectory(@pathx.Relative::root())),
-    { ..model, file_panel: panel },
+    { ..model, dock, file_panel: panel },
   )
   // The active tab stays put — revealing the tree must not close the file.
-  assert_true(next.file_panel.active is Some(Relative("README.md")))
+  assert_true(@dock.active_file(next.dock) is Some(Relative("README.md")))
   assert_true(next.file_panel.tree_open)
   assert_true(next.file_panel.highlighted is None)
 }
@@ -11191,7 +11645,6 @@ test "RevealDirectory expands an uncached ancestor and highlights the target" {
   let model = test_model()
   let panel = {
     ..model.file_panel,
-    open: true,
     owner: Some({ channel: Local, session: "desktop-test" }),
   }
   let (_, next) = update(
@@ -11213,7 +11666,6 @@ test "RevealDirectory on an already-cached ancestor needs no reload" {
   ])
   let panel = {
     ..model.file_panel,
-    open: true,
     owner: Some({ channel: Local, session: "desktop-test" }),
     children,
   }
@@ -12599,4 +13051,284 @@ test "auth status payloads decode by shape" {
     device: None,
   })
   assert_true(signed_out.user_login is None)
+}
+
+///|
+/// Test-only: a desktop-shaped model (browser tabs exist only where the
+/// native views do), after one settling dispatch so the per-conversation
+/// sync passes have claimed their owners — as any real first message has
+/// long done before a tab can open.
+fn desktop_model() -> Model {
+  let model = { ..test_model(), is_desktop: true }
+  let (_, model) = update(test_dispatch(), TranscriptPinned(true), model)
+  model
+}
+
+///|
+test "launcher rows open a blank browser tab and the picker, closing the menu" {
+  let dispatch = test_dispatch()
+  let model = desktop_model()
+  let (_, model) = update(dispatch, Dock(TogglePanel), model)
+  let (_, model) = update(dispatch, Dock(MenuToggled), model)
+  assert_true(model.dock.menu_open)
+  let (_, model) = update(dispatch, BrowserTabRequested, model)
+  assert_false(model.dock.menu_open)
+  assert_true(@dock.active_browser(model.dock) == Some(1))
+  let page = @preview.page(model.preview, 1).unwrap()
+  assert_true(page.url is None)
+  assert_false(page.loading)
+  let (_, model) = update(dispatch, FilePickerRequested, model)
+  assert_true(model.dock.active == Some(@dock.DockTab::FilePicker))
+  assert_true(
+    model.dock.tabs == [@dock.DockTab::Browser(id=1), @dock.DockTab::FilePicker],
+  )
+}
+
+///|
+test "a tree pick fulfills the active picker in place" {
+  let dispatch = test_dispatch()
+  let model = desktop_model()
+  let (_, model) = update(dispatch, Dock(TogglePanel), model)
+  let (_, model) = update(dispatch, FilePickerRequested, model)
+  let (_, model) = update(
+    dispatch,
+    FileEditor(FileSelected(path=Relative("src/main.mbt"), name="main.mbt")),
+    model,
+  )
+  assert_true(
+    model.dock.tabs == [@dock.DockTab::File(path=Relative("src/main.mbt"))],
+  )
+  assert_true(@dock.active_file(model.dock) == Some(Relative("src/main.mbt")))
+}
+
+///|
+test "web links open (and reuse) a dock browser tab; other schemes do not" {
+  let dispatch = test_dispatch()
+  let model = desktop_model()
+  let (_, model) = update(
+    dispatch,
+    ExternalLinkClicked("http://127.0.0.1:5173/"),
+    model,
+  )
+  assert_true(model.dock.open)
+  assert_true(@dock.active_browser(model.dock) == Some(1))
+  assert_true(
+    @preview.page(model.preview, 1).unwrap().url ==
+    Some("http://127.0.0.1:5173/"),
+  )
+  // The same URL re-activates the existing tab instead of duplicating.
+  let (_, model) = update(
+    dispatch,
+    ExternalLinkClicked("http://127.0.0.1:5173/"),
+    model,
+  )
+  assert_eq(model.dock.tabs.length(), 1)
+  assert_eq(model.preview.pages.length(), 1)
+  // External sites are web pages too: they get their own tab.
+  let (_, model) = update(
+    dispatch,
+    ExternalLinkClicked("https://github.com/moonbit"),
+    model,
+  )
+  assert_eq(model.dock.tabs.length(), 2)
+  assert_true(@dock.active_browser(model.dock) == Some(2))
+  // A non-web scheme keeps the system handler: no tab appears.
+  let (_, model) = update(
+    dispatch,
+    ExternalLinkClicked("mailto:someone@example.com"),
+    model,
+  )
+  assert_eq(model.dock.tabs.length(), 2)
+  // So does a link clicked on another screen, where the dock is not on
+  // screen to show a tab — Settings' device-page link wants the browser the
+  // user is signed in to anyway.
+  let (_, settings) = update(
+    dispatch,
+    ExternalLinkClicked("https://openseek.test/d/abc"),
+    { ..model, screen: Settings },
+  )
+  assert_eq(settings.dock.tabs.length(), 2)
+  assert_eq(settings.preview.pages.length(), 2)
+}
+
+///|
+test "same-URL reuse scans this strip, not the global page map" {
+  let dispatch = test_dispatch()
+  let url = "http://127.0.0.1:5173/"
+  // Another conversation's parked strip already holds this URL: its page
+  // sits in the global map with no tab in this strip. It must not shadow
+  // this strip's own tab.
+  let (foreign, _) = @preview.open_page(@preview.State::empty(), url~)
+  let model = { ..desktop_model(), preview: foreign }
+  let (_, model) = update(dispatch, ExternalLinkClicked(url), model)
+  assert_eq(model.dock.tabs.length(), 1)
+  assert_eq(model.preview.pages.length(), 2)
+  // A repeat click re-activates this strip's tab instead of stacking a
+  // duplicate per click.
+  let (_, model) = update(dispatch, ExternalLinkClicked(url), model)
+  assert_eq(model.dock.tabs.length(), 1)
+  assert_eq(model.preview.pages.length(), 2)
+}
+
+///|
+test "a remote console routes loopback links to the system browser too" {
+  let dispatch = test_dispatch()
+  // test_model is desktop-shaped except for the flag; without native views
+  // the dock must not grow browser tabs.
+  let model = test_model()
+  let (_, model) = update(
+    dispatch,
+    ExternalLinkClicked("http://127.0.0.1:5173/"),
+    model,
+  )
+  assert_true(model.dock.tabs.is_empty())
+  assert_true(model.preview.pages.is_empty())
+}
+
+///|
+test "submitting the address bar normalizes the draft and commits it" {
+  let dispatch = test_dispatch()
+  let model = desktop_model()
+  let (_, model) = update(dispatch, Dock(TogglePanel), model)
+  let (_, model) = update(dispatch, BrowserTabRequested, model)
+  let (_, model) = update(
+    dispatch,
+    BrowserAddressEdited("localhost:5173"),
+    model,
+  )
+  let (_, model) = update(dispatch, BrowserNavigateSubmitted, model)
+  let page = @preview.page(model.preview, 1).unwrap()
+  assert_true(page.url == Some("http://localhost:5173"))
+  assert_eq(page.input, "http://localhost:5173")
+  assert_true(page.loading)
+  // A non-navigable draft changes nothing — including a bare scheme, which
+  // the host would reject after the URL had already been committed.
+  let (_, edited) = update(dispatch, BrowserAddressEdited("two words"), model)
+  let (_, unchanged) = update(dispatch, BrowserNavigateSubmitted, edited)
+  assert_true(
+    @preview.page(unchanged.preview, 1).unwrap().url ==
+    Some("http://localhost:5173"),
+  )
+  let (_, edited) = update(dispatch, BrowserAddressEdited("http://"), unchanged)
+  let (_, still) = update(dispatch, BrowserNavigateSubmitted, edited)
+  assert_true(
+    @preview.page(still.preview, 1).unwrap().url ==
+    Some("http://localhost:5173"),
+  )
+}
+
+///|
+test "navigating an already-placed tab re-places its view" {
+  let dispatch = test_dispatch()
+  let model = desktop_model()
+  let (_, model) = update(
+    dispatch,
+    ExternalLinkClicked("http://127.0.0.1:5173/"),
+    model,
+  )
+  let rect : @preview.Rect = { x: 480, y: 46, width: 640, height: 700 }
+  let (_, model) = update(dispatch, BrowserPaneMeasured(rect~), model)
+  assert_true(model.browser_pane.shown == Some(1))
+  // The host may have rebuilt the view under `browser.navigate` (nothing
+  // acknowledges the ops that placed the old one), and a rebuilt view is
+  // hidden at a placeholder size. Keeping the placement would leave the tab
+  // blank until an unrelated resize, so the submission drops it…
+  let (_, edited) = update(
+    dispatch,
+    BrowserAddressEdited("https://github.com/moonbit"),
+    model,
+  )
+  let (_, navigated) = update(dispatch, BrowserNavigateSubmitted, edited)
+  assert_true(navigated.browser_pane.shown is None)
+  assert_true(navigated.browser_pane.rect is None)
+  // …and the re-measure it provokes places the view again.
+  let (_, replaced) = update(dispatch, BrowserPaneMeasured(rect~), navigated)
+  assert_true(replaced.browser_pane.shown == Some(1))
+  assert_true(replaced.browser_pane.rect == Some(rect))
+}
+
+///|
+test "pane measurements place the active view and idempotently settle" {
+  let dispatch = test_dispatch()
+  let model = desktop_model()
+  let (_, model) = update(
+    dispatch,
+    ExternalLinkClicked("http://127.0.0.1:5173/"),
+    model,
+  )
+  let rect : @preview.Rect = { x: 480, y: 46, width: 640, height: 700 }
+  let (_, model) = update(dispatch, BrowserPaneMeasured(rect~), model)
+  assert_true(model.browser_pane.shown == Some(1))
+  assert_true(model.browser_pane.rect == Some(rect))
+  let (_, again) = update(dispatch, BrowserPaneMeasured(rect~), model)
+  assert_true(again == model)
+  // A zero-size measurement (the observer firing against a hidden pane)
+  // never places the view.
+  let zero : @preview.Rect = { x: 0, y: 0, width: 0, height: 0 }
+  let (_, still) = update(dispatch, BrowserPaneMeasured(rect=zero), model)
+  assert_true(still.browser_pane.rect == Some(rect))
+}
+
+///|
+test "the launcher popup and tab close both retire the shown view" {
+  let dispatch = test_dispatch()
+  let model = desktop_model()
+  let (_, model) = update(
+    dispatch,
+    ExternalLinkClicked("http://127.0.0.1:5173/"),
+    model,
+  )
+  let rect : @preview.Rect = { x: 480, y: 46, width: 640, height: 700 }
+  let (_, model) = update(dispatch, BrowserPaneMeasured(rect~), model)
+  assert_true(model.browser_pane.shown == Some(1))
+  // The popup overlaps the pane, so the native view must hide under it.
+  let (_, covered) = update(dispatch, Dock(MenuToggled), model)
+  assert_true(covered.browser_pane.shown is None)
+  // Closing the tab drops the page and the placement.
+  let (_, closed) = update(
+    dispatch,
+    Dock(TabClosed(@dock.DockTab::Browser(id=1))),
+    model,
+  )
+  assert_true(closed.browser_pane.shown is None)
+  assert_true(@preview.page(closed.preview, 1) is None)
+  assert_true(closed.dock.tabs.is_empty())
+}
+
+///|
+test "full-screen modals hide the native view and closing restores it" {
+  let dispatch = test_dispatch()
+  let model = desktop_model()
+  let (_, model) = update(
+    dispatch,
+    ExternalLinkClicked("http://127.0.0.1:5173/"),
+    model,
+  )
+  let rect : @preview.Rect = { x: 480, y: 46, width: 640, height: 700 }
+  let (_, model) = update(dispatch, BrowserPaneMeasured(rect~), model)
+  assert_true(model.browser_pane.shown == Some(1))
+  // The workspace picker's modal covers the pane; native views z-order
+  // above HTML, so the view must hide first.
+  let (_, covered) = update(dispatch, PickWorkspace(Local), model)
+  assert_true(covered.workspace_picker is Some(_))
+  assert_true(covered.browser_pane.shown is None)
+  // Closing the modal re-measures; the next measurement re-places the view.
+  let (_, closed) = update(dispatch, WorkspacePickerClose, covered)
+  let (_, restored) = update(dispatch, BrowserPaneMeasured(rect~), closed)
+  assert_true(restored.browser_pane.shown == Some(1))
+  // The topbar app launcher's click-away backdrop covers the pane too.
+  let (_, launched) = update(dispatch, ToggleLauncher, restored)
+  assert_true(launched.browser_pane.shown is None)
+  // So do the other two surfaces `view.mbt` appends beside the picker: the
+  // archive-discard confirmation and the workspace-symbol palette.
+  let (_, archiving) = update_dev(
+    dispatch,
+    ArchiveNeedsForce(session="desktop-test", message="dirty"),
+    restored,
+  )
+  assert_true(archiving.archive_confirm is Some(_))
+  assert_true(archiving.browser_pane.shown is None)
+  let (_, searching) = update(dispatch, SymbolSearchOpen, restored)
+  assert_true(searching.symbol_search is Some(_))
+  assert_true(searching.browser_pane.shown is None)
 }

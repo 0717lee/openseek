@@ -342,3 +342,54 @@ pub let shell_open_external : Command[
   @protocol.ExternalLinkPayload,
   @protocol.OpenExternalReply,
 ] = Command("shell.open_external")
+// The dock's browser-tab commands. Like `host.connect` and
+// `shell.open_external`, they are bound window-only: the native web
+// contents views live in the desktop window, so a relay browser has
+// nothing to command.
+
+///|
+pub let browser_open : Command[
+  @protocol.BrowserOpenPayload,
+  @protocol.EmptyReply,
+] = Command("browser.open")
+
+///|
+pub let browser_navigate : Command[
+  @protocol.BrowserOpenPayload,
+  @protocol.EmptyReply,
+] = Command("browser.navigate")
+
+///|
+pub let browser_back : Command[@protocol.BrowserIdPayload, @protocol.EmptyReply] = Command(
+  "browser.back",
+)
+
+///|
+pub let browser_forward : Command[
+  @protocol.BrowserIdPayload,
+  @protocol.EmptyReply,
+] = Command("browser.forward")
+
+///|
+pub let browser_reload : Command[
+  @protocol.BrowserIdPayload,
+  @protocol.EmptyReply,
+] = Command("browser.reload")
+
+///|
+pub let browser_set_bounds : Command[
+  @protocol.BrowserBoundsPayload,
+  @protocol.EmptyReply,
+] = Command("browser.set_bounds")
+
+///|
+pub let browser_set_visible : Command[
+  @protocol.BrowserVisiblePayload,
+  @protocol.EmptyReply,
+] = Command("browser.set_visible")
+
+///|
+pub let browser_close : Command[
+  @protocol.BrowserIdPayload,
+  @protocol.EmptyReply,
+] = Command("browser.close")

@@ -79,11 +79,12 @@ extern "js" fn js_ordered_method_promise(
   #| })()
 
 ///|
-/// Call one host method in the page's issue order. The file-panel watcher is
-/// the only current user: `watch(A)` followed by `unwatch` is desired state,
-/// not two independent queries, so Proton must not reorder their entry into
-/// the connection's actor. Remote requests use the same call site; their
-/// socket reader additionally preserves these two methods' wire order.
+/// Call one host method in the page's issue order, for callers whose
+/// requests are desired state rather than independent queries: the
+/// file-panel watcher (`watch(A)` then `unwatch`) and the browser view ops
+/// (create-then-place, bounds-before-visibility). Proton must not reorder
+/// their entry into the connection's actor. Remote requests use the same
+/// call site; their socket reader additionally preserves wire order.
 pub async fn[Payload : ToJson, Reply : @json.FromJson] bridge_request_in_order(
   channel : ChannelId,
   command : @commands.Command[Payload, Reply],

@@ -50,6 +50,9 @@ fn main {
       app_version~,
     )
     let bridge = @extension.DesktopBridgeActor::new(state)
+    // The dock's browser tabs: native web contents views, owned by the
+    // window and commanded over bridge-local `browser.*` ops.
+    let views = @extension.BrowserViews::new()
     let relay = @remote.RelayActor::new(state, announce=device => {
       log.info() <? { "message": "relay registered", "device": device }
     })
@@ -63,17 +66,37 @@ fn main {
       .debug_level(1)
       // Both command extensions are deliberately exposed to the configured
       // entry page; registration alone does not grant renderer access.
-      .expose(@extension.openseek_extension(state, bridge))
+      .expose(@extension.openseek_extension(state, bridge, views))
       // System notifications are an ordinary generated extension now: the
       // frontend posts them and receives `notification.click` with the run id.
       .expose(@notification.extension())
       // The connect request proves the page can issue commands; this paired
       // lifecycle supplies the window-owned event destination that remains
-      // valid after that request returns.
+      // valid after that request returns — and the window handle the browser
+      // views hang off.
       .window_lifecycle(
-        on_ready=async fn(context) { bridge.window_ready(context.events()) },
-        on_close=async fn(_) { bridge.window_closed() },
+        on_ready=async fn(context) {
+          views.window_ready(context.handle())
+          bridge.window_ready(context.events())
+        },
+        on_close=async fn(_) {
+          views.window_closed()
+          bridge.window_closed()
+        },
       )
+      // Browser view events reach the page as `browser.event` notifications;
+      // views that are not browser tabs are not the frontend's business.
+      .on_view_event(async fn(view, event) noraise {
+        match @extension.browser_view_id(view.id()) {
+          Some(id) =>
+            bridge.notify_browser_event(@extension.view_event_json(id, event)) catch {
+              // Only cancellation can interrupt the queue put — the app is
+              // shutting down, so the event has nowhere to go anyway.
+              _ => ()
+            }
+          None => ()
+        }
+      })
     @async.with_task_group(group => {
       // The bridge actor, engine actor, and host actors run for the app's
       // lifetime — they feed every page/client rather than borrowing a

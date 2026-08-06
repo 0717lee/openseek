@@ -837,11 +837,25 @@ priv struct Model {
   // host, not a conversation or workspace, so this catalog is probed once
   // and kept while the frontend runs.
   launcher : Launcher
-  // The editor side-panel: the active conversation's file tree and the file
-  // shown in the embedded viewer. Rooted at `active().cwd`; rebuilt when the
-  // active conversation changes. Owned by the `fileeditor` package; this
-  // model only carries its state and routes `FileEditor` messages to it.
+  // The right panel's dock: the mixed tab strip's membership, order, active
+  // tab, and per-conversation parked strips. Owned by the `dock` package;
+  // the projection (open files, active file, panel visibility) feeds
+  // `file_ctx` every dispatch.
+  dock : @dock.State
+  // The file subsystem behind the dock's file tabs: the active
+  // conversation's file tree and the document table the embedded viewer
+  // shows from. Rooted at `active().cwd`; rebuilt when the active
+  // conversation changes. Owned by the `fileeditor` package; this model only
+  // carries its state and routes `FileEditor` messages to it.
   file_panel : @fileeditor.State
+  // The browser subsystem behind the dock's Browser tabs: per-page address
+  // state, keyed by page-global ids that only grow. The pages themselves
+  // are native web contents views the desktop host owns.
+  preview : @preview.State
+  // What the host has been told about the active page's native view: which
+  // view is visible, at which bounds, and the geometry signature the last
+  // measurement was requested for (see `sync_browser_view`).
+  browser_pane : BrowserPane
   // The integrated terminal. Each tab retains the device channel that owns
   // its PTY, so the desktop uses Local while a browser uses its relay-backed
   // Remote channel without session-id collisions between devices.
@@ -889,6 +903,32 @@ priv struct RemoteAccess {
 priv struct Launcher {
   open : Bool
   apps : LauncherApps
+} derive(Eq)
+
+///|
+/// The host-side presentation of the active Browser tab's native view, as
+/// last commanded: `shown`/`rect` echo the `browser.set_visible`/
+/// `browser.set_bounds` already sent, and `geo` is the model-geometry
+/// signature the last pane measurement was requested under — the damping
+/// that keeps the per-dispatch sync pass from measuring forever.
+priv struct BrowserPane {
+  shown : Int?
+  rect : @preview.Rect?
+  geo : BrowserGeometry?
+} derive(Eq)
+
+///|
+/// Every model-driven input of the browser pane's placement. When any of
+/// these change while a view should be on screen, the pane is re-measured;
+/// sizes that change without the model (window resize, the width drag) are
+/// caught by the pane element's ResizeObserver instead.
+priv struct BrowserGeometry {
+  // Which view should be visible (`desired_browser_view`), or none.
+  desired : Int?
+  sidebar_open : Bool
+  narrow : Bool
+  terminal_open : Bool
+  tree_layout : @fileeditor.TreeLayout
 } derive(Eq)
 
 ///|
@@ -1204,11 +1244,34 @@ priv enum Msg {
   LauncherFailed(String)
   // Launch one detected app (by its id) on the active conversation's workspace.
   LaunchApp(String)
-  // The editor side-panel's own messages (tree, viewer, diagnostics,
-  // comments), routed to the `fileeditor` package's update. The one
-  // exception is `EditorCommentAdded`, which this update intercepts: the
-  // comment becomes a chip on the composer draft, which only the app model
-  // knows about.
+  // The right panel's strip messages (panel toggle, tab activate/close),
+  // routed to the `dock` package's pure strip machine; this update then
+  // drives the content subsystems from the transition (see the `Dock` arm).
+  Dock(@dock.Msg)
+  // The browser subsystem's pure messages: address drafts and the host's
+  // `browser.event` view events, routed to the `preview` package.
+  Preview(@preview.Msg)
+  // The dock launcher's rows: open a blank Browser tab (with the address
+  // bar focused) or the transient FilePicker tab. Both close the `+` menu.
+  BrowserTabRequested
+  FilePickerRequested
+  // The browser toolbar, acting on whatever Browser tab is active — the
+  // messages carry no id so a stale click cannot outlive a tab switch.
+  BrowserAddressEdited(String)
+  BrowserNavigateSubmitted
+  BrowserBack
+  BrowserForward
+  BrowserReload
+  BrowserOpenExternal
+  // The browser pane's on-screen rectangle, reported after a render by the
+  // measurer or the pane's ResizeObserver; drives view bounds/visibility.
+  BrowserPaneMeasured(rect~ : @preview.Rect)
+  // The file subsystem's own messages (tree, viewer, diagnostics,
+  // comments), routed to the `fileeditor` package's update. Two exceptions
+  // this update intercepts: `EditorCommentAdded` (the comment becomes a chip
+  // on the composer draft, which only the app model knows about) and
+  // `FileSelected` (which dock tab a tree click opens is the strip's
+  // business).
   FileEditor(@fileeditor.Msg)
   // The integrated terminal panel's own messages, routed to the `terminal`
   // package's update.
@@ -1587,7 +1650,10 @@ fn initial_model() -> Model {
     symbol_search: None,
     symbol_search_generation: 0,
     launcher: { open: false, apps: AppsNotFetched },
+    dock: @dock.State::empty(),
     file_panel: @fileeditor.State::empty(),
+    preview: @preview.State::empty(),
+    browser_pane: { shown: None, rect: None, geo: None },
     terminal_panel: @terminal.State::empty(),
     notifications: [],
     notification_seq: 0,

@@ -484,6 +484,11 @@ fn wire_proton_events(
       bridge_msg(Local, notification)
     })
   }
+  // Native view events describe this window's own browser tabs. Like
+  // `notification.click` below, the event is window-local: it has no
+  // `NotificationKind` because the shared wire catalog must never carry it
+  // to a relay client, which has no native views.
+  on("openseek.browser.event", browser_event_msg)
   // Emitted by the notification extension when the user clicks a system
   // notification; the payload is the run id this frontend stamped on it.
   // Desktop-only by nature.
