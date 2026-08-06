@@ -342,6 +342,8 @@ extern "js" fn diagram_viewport_test_target(
   #|     add('diago', true, 400, 200, 200, 100);
   #|   } else if (mode === 'mermaid') {
   #|     add('mermaid', true, 400, 200, 200, 100);
+  #|   } else if (mode === 'uml') {
+  #|     add('uml', true, 400, 200, 200, 100);
   #|   } else if (mode === 'mermaid-pending') {
   #|     add('mermaid', false, 400, 200, 200, 100);
   #|   } else if (mode === 'wide') {
@@ -894,6 +896,35 @@ test "refresh mounts asynchronous Mermaid SVGs and replaces stale controllers" {
   )
   viewports.dispose()
   assert_eq(diagram_viewport_test_disconnect_count(harness, 1), 1)
+}
+
+///|
+test "mounts synchronous UML SVGs with UML accessibility labels" {
+  let harness = install_diagram_viewport_test_dom()
+  defer harness.dispose()
+  let target = diagram_viewport_test_target(harness, "uml")
+  let viewports = MarkdownDiagramViewports(target, () => ())
+  defer viewports.dispose()
+  assert_eq(diagram_viewport_test_controller_count(viewports.lifetime), 1)
+  assert_eq(
+    diagram_viewport_test_attribute(
+      viewports.lifetime,
+      0,
+      "wrapper",
+      "aria-label",
+    ),
+    "Interactive UML diagram",
+  )
+  assert_eq(
+    diagram_viewport_test_attribute(
+      viewports.lifetime,
+      0,
+      "controls",
+      "aria-label",
+    ),
+    "UML diagram controls",
+  )
+  diagram_viewport_test_flush_frame(harness)
 }
 
 ///|

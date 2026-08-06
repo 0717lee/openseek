@@ -49,10 +49,10 @@ consume the current delta. When neither axis can consume it, the event is
 allowed to reach the owning hover, widget, or editor scroller.
 
 `MarkdownDiagramViewports` owns the optional interactive presentation for every
-successful direct Diago or Mermaid SVG in one rendered target. It mounts pan,
-zoom, fit, and resize controls in an always-visible floating toolbar. The full
-Markdown document uses the roomier card treatment while Markdown comments use
-the same controller with a compact CSS density. The controller owns its
+successful direct Diago, UML, or Mermaid SVG in one rendered target. It mounts
+pan, zoom, fit, and resize controls in an always-visible floating toolbar. The
+full Markdown document uses the roomier card treatment while Markdown comments
+use the same controller with a compact CSS density. The controller owns its
 listener/observer/frame lifetime and restores borrowed DOM state on disposal.
 Both consumers dispose it before replacing their renderer target. Its
 stylesheet is
@@ -91,8 +91,8 @@ last successful SVG.
 The full-document and whole-line Markdown-comment consumers also use that size
 callback to refresh their diagram-viewport owner. Successful Mermaid SVGs
 therefore receive the same pan, zoom, fit, and resize controls as synchronous
-Diago SVGs; a theme rerender disposes the controller for the replaced SVG and
-mounts a fresh one.
+Diago and UML SVGs; a theme rerender disposes the controller for the replaced
+SVG and mounts a fresh one.
 
 Hosts using Mermaid must ship the generated `mermaid/` tree at the document
 resource base, allow same-origin module scripts in the applicable CSP

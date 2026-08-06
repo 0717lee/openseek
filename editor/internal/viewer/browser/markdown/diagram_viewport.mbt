@@ -265,7 +265,7 @@ fn collect_diagram_viewport_candidates(
   for child in root.get_children() {
     let language = element_attribute_or_empty(child, "data-diagram-language")
     if element_has_class(child, "moonbit-viewer-markdown-diagram") &&
-      (language == "diago" || language == "mermaid") &&
+      (language == "diago" || language == "uml" || language == "mermaid") &&
       !element_has_class(child, diagram_viewport_class) &&
       direct_svg_child(child) is Some(_) {
       candidates.push(child)
@@ -324,7 +324,11 @@ fn mount_diagram_viewport_in_environment(
   controls.set_attribute("class", diagram_controls_class)
   controls.set_attribute("role", "toolbar")
   let language = element_attribute_or_empty(wrapper, "data-diagram-language")
-  let diagram_name = if language == "mermaid" { "Mermaid" } else { "D2" }
+  let diagram_name = match language {
+    "mermaid" => "Mermaid"
+    "uml" => "UML"
+    _ => "D2"
+  }
   controls.set_attribute("aria-label", "\{diagram_name} diagram controls")
   let pan_button = create_diagram_button(
     owner_document,
@@ -402,10 +406,10 @@ fn mount_diagram_viewport_in_environment(
   wrapper.set_attribute("tabindex", "0")
   wrapper.set_attribute(
     "aria-label",
-    if element_attribute_or_empty(wrapper, "data-diagram-language") == "mermaid" {
-      "Interactive Mermaid diagram"
-    } else {
-      "Interactive Diago diagram"
+    match language {
+      "mermaid" => "Interactive Mermaid diagram"
+      "uml" => "Interactive UML diagram"
+      _ => "Interactive Diago diagram"
     },
   )
   @base_browser.set_style_property(wrapper, "overflow", "hidden")

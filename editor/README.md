@@ -76,18 +76,19 @@ boundary.
 
 ## Browser Runtime
 
-Whole-line Markdown comments render exact lowercase `d2` and `diago` fences
-synchronously with the bundled Diago compiler. Exact lowercase `mermaid`
-fences use Mermaid's official browser implementation. The web build downloads
+Whole-line Markdown comments render exact lowercase `d2`/`diago` and
+`uml`/`plantuml` fences synchronously with the bundled Diago and
+`kokic/uml` compilers. Exact lowercase `mermaid` fences use Mermaid's official
+browser implementation. The web build downloads
 the pinned `mermaid@11.16.0` npm archive, verifies its SHA-256 digest, and
 stages the minified ESM entry, relative chunks, and license under
 `web/dist/mermaid/`. Mermaid remains a lazy runtime import, but it is loaded
 from that same-origin directory rather than a public CDN.
 
-Diago's generated inline SVG can contain active HTML and is not a sanitization
-boundary. Embedders must trust every viewer Markdown source that can contain
-`d2` or `diago` fences, including workspace comments, hover-provider results,
-and agent-feedback bodies. Embedders that enable Mermaid rendering must stage
+Generated inline diagram SVG is not a sanitization boundary. Embedders must
+trust every viewer Markdown source that can contain `d2`, `diago`, `uml`, or
+`plantuml` fences, including workspace comments, hover-provider results, and
+agent-feedback bodies. Embedders that enable Mermaid rendering must stage
 the generated `mermaid/` tree at the document resource base, allow same-origin
 module scripts in their CSP, and permit the inline styles used inside Mermaid
 SVG output. A clean build needs registry access once; the verified archive is

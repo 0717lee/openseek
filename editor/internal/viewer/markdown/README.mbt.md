@@ -171,19 +171,21 @@ Failure is contained: a conversion error falls back to one escaped plaintext
 paragraph, reports no code block, and returns an empty projection.
 
 
-The exact lowercase `d2` and `diago` fences are built-in synchronous aliases
-for the same diagram adapter. They compile source directly to wrapped SVG
-before a caller-supplied code-block renderer runs. Parse or render failures
-fall through to that caller override, or to cmark's ordinary `<pre><code>`
-output when no override exists. Unknown, differently cased, unlabelled, and
-indented code blocks are never diagrams.
+The exact lowercase `d2`/`diago` and `uml`/`plantuml` fences are built-in
+synchronous aliases for the Diago and UML adapters respectively. They compile
+source directly to wrapped SVG before a caller-supplied code-block renderer
+runs. UML output uses host CSS variables for its foreground and neutral
+surfaces, so the retained SVG follows theme changes without rerendering. Parse
+or render failures fall through to that caller override, or to cmark's ordinary
+`<pre><code>` output when no override exists. Unknown, differently cased,
+unlabelled, and indented code blocks are never diagrams.
 
 ```d2
 direction: right
 
 fence: fenced code block
-lang: exact d2 or diago?
-compile: Diago compile
+lang: supported diagram fence?
+compile: Diago or UML compile
 svg: wrapped inline SVG
 override: caller override?
 tokens: tokenized editor HTML
