@@ -2,8 +2,9 @@
 
 `inspect` (module `bobzhang/inspect`) is the HTTP server for browsing recorded
 OpenSeek sessions. It serves `web/index.html`, the compiled `cmd/viz_app`
-JavaScript bundle, and read-only session JSONL APIs. It builds for the native
-backend (the default) and for wasm.
+JavaScript bundle, and read-only session JSONL APIs. It builds for the wasm
+backend (the default — it compiles noticeably faster, since native also pays
+C-stub compilation and linking) and for native.
 
 ## Build
 
@@ -28,11 +29,15 @@ Start the server from the repository root:
 moon run inspect
 ```
 
-To run the wasm build instead of the native one:
+This runs the wasm build under `moonrun`. To run the native build instead:
 
 ```sh
-moon run --target wasm inspect
+moon run --target native inspect
 ```
+
+Note that `moon test inspect` follows the same default: under wasm only the
+pure white-box tests run; the full suite (async server tests) needs
+`moon test --target native inspect`, which is what CI runs.
 
 By default it listens on `0.0.0.0:8080` (all interfaces), serves
 `web/index.html`, and scans the current directory recursively for `.openseek`

@@ -7,6 +7,6 @@ import {
   "moonbitlang/async@0.20.3",
 }
 
-preferred_target = "native"
+preferred_target = "wasm"
 
 warnings = "+missing_doc+unnecessary_view_op+test_unqualified_package+unused_default_value"
