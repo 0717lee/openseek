@@ -2671,6 +2671,25 @@ main {
   display: inline-flex;
   align-items: center;
 }
+/* The notice's own text/action split, used by the vanished-worktree banner:
+   the sentence takes the slack so the actions stay right-aligned. Metrics
+   live here rather than on `.secondary` — see the generic-buttons note. */
+.composer-notice-text {
+  flex: 1;
+  min-width: 0;
+}
+.composer-notice-btn {
+  flex: none;
+  border-color: var(--line);
+  background: var(--surface);
+  color: var(--ink);
+  padding: 4px 10px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.composer-notice-btn:not(:disabled):hover {
+  background: var(--surface-2);
+}
 
 /* steering input not yet folded into the running turn: a panel docked
    above the composer until the engine settles it */

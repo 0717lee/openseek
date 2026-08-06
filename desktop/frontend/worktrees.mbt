@@ -155,6 +155,66 @@ fn start_in_new_worktree(
 }
 
 ///|
+/// Rebuild a checkout that was deleted outside the app. The host repairs the
+/// existing registry entry on its surviving branch, so this restores the
+/// conversation's real environment; the canonical rows arrive as
+/// `worktree.changed` from the commit seam.
+fn repair_worktree_cmd(
+  dispatch : @cmd.Emit[Msg],
+  channel : @interop.ChannelId,
+  workspace : String,
+  session : String,
+) -> @cmd.Cmd {
+  let dispatch = dispatch.map((msg : DeviceMsg) => FromDevice(channel, msg))
+  @cmd.custom_cmd(scheduler => {
+    @js.async_run(() => {
+      let _ : @protocol.WorktreeCreateReply = @interop.bridge_request(
+        channel,
+        @commands.worktree_create,
+        { workspace, session },
+      ) catch {
+        error => {
+          scheduler.add(
+            dispatch(WorktreeFailed(@interop.bridge_error_text(error))),
+          )
+          return
+        }
+      }
+    })
+  })
+}
+
+///|
+/// Release a conversation from a worktree whose checkout is gone: dropping
+/// the registry row unbinds it, and the host then runs it in the workspace
+/// itself. Never forced — the checkout it would have discarded no longer
+/// exists.
+fn release_worktree_cmd(
+  dispatch : @cmd.Emit[Msg],
+  channel : @interop.ChannelId,
+  workspace : String,
+  name : String,
+) -> @cmd.Cmd {
+  let dispatch = dispatch.map((msg : DeviceMsg) => FromDevice(channel, msg))
+  @cmd.custom_cmd(scheduler => {
+    @js.async_run(() => {
+      let _ : @protocol.WorktreesReply = @interop.bridge_request(
+        channel,
+        @commands.worktree_remove,
+        { workspace, name, force: None },
+      ) catch {
+        error => {
+          scheduler.add(
+            dispatch(WorktreeFailed(@interop.bridge_error_text(error))),
+          )
+          return
+        }
+      }
+    })
+  })
+}
+
+///|
 /// Reduce the typed registry rows shared by list replies and the host's
 /// post-commit broadcast to what the sidebar reads, dropping blank names
 /// and blank session ids a hand-edited registry file could carry.
@@ -191,23 +251,50 @@ fn worktree_changed_msg(
 }
 
 ///|
-/// The worktree a durable session runs in, joined from the registry — the
-/// sidebar chip's data source.
-fn worktree_name_for(
+/// The registry row for a durable session's worktree, if one binds it.
+fn worktree_row_for(
   dev : DeviceState,
   workspace : String,
   session : String,
-) -> String? {
+) -> WorktreeRow? {
   guard !workspace.is_empty() else { return None }
   for group in dev.worktrees {
     guard group.workspace == workspace else { continue }
     for row in group.rows {
       if row.session is Some(bound) && bound == session {
-        return Some(row.name)
+        return Some(row)
       }
     }
   }
   None
+}
+
+///|
+/// The worktree a durable session runs in — the sidebar chip's data source.
+fn worktree_name_for(
+  dev : DeviceState,
+  workspace : String,
+  session : String,
+) -> String? {
+  worktree_row_for(dev, workspace, session).map(row => row.name)
+}
+
+///|
+/// The worktree a conversation is bound to whose checkout no longer exists,
+/// deleted outside the app. The host refuses to run such a conversation
+/// rather than silently moving it into the main checkout, so the composer
+/// says so and offers the way out.
+fn missing_worktree_for(model : Model, conv : Conversation) -> String? {
+  guard model.device_state(conv.device) is Some(dev) else { return None }
+  guard worktree_row_for(dev, workspace_token(conv.workspace), conv.session_id)
+    is Some(row) else {
+    return None
+  }
+  if row.present {
+    None
+  } else {
+    Some(row.name)
+  }
 }
 
 ///|
@@ -289,6 +376,38 @@ fn worktree_mode_chip(
       [icon(icon_worktree), @html.span(label)],
     ),
   )
+}
+
+///|
+/// The banner above the composer when this conversation's worktree checkout
+/// was deleted outside the app. The host refuses to run the conversation in
+/// that state, so the banner names the reason and carries both ways out
+/// rather than leaving the user at a dead end. Committed work is safe either
+/// way — it lives on the branch, which the deletion did not touch.
+fn missing_worktree_notice(
+  dispatch : @cmd.Emit[Msg],
+  name : String,
+) -> @html.Html {
+  @html.div(class="composer-notice", [
+    @html.span(
+      class="composer-notice-text",
+      "Worktree \{name} is gone — its checkout was deleted outside OpenSeek. Commits on its branch are safe.",
+    ),
+    @html.button(
+      class="composer-notice-btn",
+      type_="button",
+      title="Check the branch out again at .worktrees/\{name}",
+      on_click=dispatch(RepairWorktree),
+      "Rebuild it",
+    ),
+    @html.button(
+      class="composer-notice-btn",
+      type_="button",
+      title="Forget the worktree and continue in the workspace itself",
+      on_click=dispatch(ReleaseWorktree),
+      "Use the workspace",
+    ),
+  ])
 }
 
 ///|
@@ -411,6 +530,65 @@ test "worktree created binds the composing conversation" {
     bound,
   )
   assert_true(unknown.active().worktree is Some("wt-1"))
+}
+
+///|
+test "a vanished checkout is surfaced and both recoveries stay reachable" {
+  let dispatch = test_dispatch()
+  let bound = test_model()
+    .replace_conversation({
+      ..test_conversation(),
+      workspace: Some(Absolute("/proj")),
+      worktree: Some("wt"),
+    })
+    .with_dev(dev => {
+      ..dev,
+      workspaces: ["/proj"],
+      worktrees: [
+        {
+          workspace: "/proj",
+          rows: [{ name: "wt", session: Some("desktop-test"), present: true }],
+          generation: 1,
+        },
+      ],
+    })
+  // A live checkout says nothing.
+  assert_true(missing_worktree_for(bound, bound.active()) is None)
+  // The row survives the external deletion carrying `present: false` — that
+  // is what distinguishes it from our own removal, which drops the row.
+  let (_, gone) = update_dev(
+    dispatch,
+    WorktreesChanged(
+      [{ name: "wt", session: Some("desktop-test"), present: false }],
+      workspace="/proj",
+    ),
+    bound,
+  )
+  assert_eq(missing_worktree_for(gone, gone.active()), Some("wt"))
+  // The binding is NOT dropped: releasing it is the user's choice, and the
+  // conversation must not silently read as a plain workspace chat.
+  assert_true(gone.active().worktree is Some("wt"))
+  // Neither exit mutates optimistically: the registry is the authority, and
+  // both recoveries land as a `worktree.changed` broadcast.
+  let (_, repairing) = update(dispatch, RepairWorktree, gone)
+  assert_eq(missing_worktree_for(repairing, repairing.active()), Some("wt"))
+  assert_true(repairing.active().worktree is Some("wt"))
+  let (_, releasing) = update(dispatch, ReleaseWorktree, gone)
+  assert_eq(missing_worktree_for(releasing, releasing.active()), Some("wt"))
+  // Both are inert for a healthy conversation, so a stale click cannot
+  // rebuild or release a worktree that is fine.
+  let (_, noop) = update(dispatch, ReleaseWorktree, bound)
+  assert_true(noop.active().worktree is Some("wt"))
+  assert_true(missing_worktree_for(noop, noop.active()) is None)
+  // Once the host prunes the row, the conversation is an ordinary workspace
+  // chat again and the banner goes away.
+  let (_, released) = update_dev(
+    dispatch,
+    WorktreesChanged([], workspace="/proj"),
+    gone,
+  )
+  assert_true(missing_worktree_for(released, released.active()) is None)
+  assert_true(released.active().worktree is None)
 }
 
 ///|

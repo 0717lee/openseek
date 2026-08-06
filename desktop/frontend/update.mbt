@@ -2011,6 +2011,36 @@ fn update_msg(
         (@cmd.none, model)
       }
     }
+    RepairWorktree => {
+      let conv = model.active()
+      guard missing_worktree_for(model, conv) is Some(_) else {
+        return (@cmd.none, model)
+      }
+      (
+        repair_worktree_cmd(
+          dispatch,
+          conv.device,
+          workspace_token(conv.workspace),
+          conv.session_id,
+        ),
+        model,
+      )
+    }
+    ReleaseWorktree => {
+      let conv = model.active()
+      guard missing_worktree_for(model, conv) is Some(name) else {
+        return (@cmd.none, model)
+      }
+      (
+        release_worktree_cmd(
+          dispatch,
+          conv.device,
+          workspace_token(conv.workspace),
+          name,
+        ),
+        model,
+      )
+    }
     ConfirmArchiveDiscard =>
       match model.archive_confirm {
         Some(confirm) => {
@@ -3298,6 +3328,8 @@ fn update_device_msg(
     }
     ArchiveFailed(message) =>
       model.notify_error(dispatch, "Archive failed: \{message}")
+    WorktreeFailed(message) =>
+      model.notify_error(dispatch, "Worktree error: \{message}")
     SessionsFailed(message) =>
       model.notify_error(dispatch, "Session list unavailable: \{message}")
     // Another client archived or unarchived a conversation. Both sidebar
