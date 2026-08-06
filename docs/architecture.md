@@ -21,7 +21,7 @@ flowchart LR
   subgraph frontends [Frontends]
     TUI["cmd/tui — terminal UI<br/>(built on the tui framework)"]
     DESKTOP["openseek_desktop — desktop app<br/>(CEF shell + JS frontend)"]
-    VIZ["cmd/viz_server + viz —<br/>session visualizer (browser)"]
+    VIZ["inspect + viz —<br/>session visualizer (browser)"]
   end
 
   subgraph engine ["openseek engine (cmd/openseek)"]
@@ -212,7 +212,7 @@ Two pressure valves shape long turns:
 ~/.openseek/skills/              # global skill library (--global-skills-dir)
 ```
 
-The visualizer (`openseek` sessions in a browser: `cmd/viz_server`) and
+The visualizer (`openseek` sessions in a browser: `inspect`) and
 `sessions list` both read these files directly. The engine's durable state is
 exactly these per-session directories; the desktop app additionally keeps its
 own metadata under the session root (`workspaces.json`, `archived/sessions`)

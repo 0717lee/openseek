@@ -237,12 +237,12 @@ shows where steps and tokens went to waste):
 
 ## Visualizer (viz)
 
-Follow-ups for the `events.jsonl` web viewer (`viz`, `cmd/viz_server`,
+Follow-ups for the `events.jsonl` web viewer (`viz`, `inspect`,
 `cmd/viz_app`, `web/`).
 
 - [ ] **Smarter `--session-root` default discovery.** The default is the
   relative `.openseek`, resolved against the server's cwd; `moon run
-  cmd/viz_server` uses the module root as cwd (no `.openseek` there), so the
+  inspect` uses the module root as cwd (no `.openseek` there), so the
   no-arg case shows nothing. Walk up from cwd to the nearest `.openseek`
   (like git finds `.git`) so the default "just works" from a subdirectory.
 - [ ] **Optional self-contained binary for distribution.** Today the server

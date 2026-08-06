@@ -641,7 +641,7 @@ fn fetch_text(
 }
 
 ///|
-/// Whether a self-contained export (see `cmd/viz_server --export`) baked a
+/// Whether a self-contained export (see `inspect --export`) baked a
 /// response for `url` into `window.__OPENSEEK_DATA__`. False in a normal server
 /// build, where the global is absent and every lookup misses.
 extern "js" fn embedded_has(url : String) -> Bool = "(url) => (typeof window !== 'undefined') && !!window.__OPENSEEK_DATA__ && Object.prototype.hasOwnProperty.call(window.__OPENSEEK_DATA__, url)"

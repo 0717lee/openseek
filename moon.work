@@ -2,6 +2,7 @@ members = [
   ".",
   "./protocol",
   "./cmd/viz_app",
+  "./inspect",
   "./editor",
   "./editor/server",
   "./desktop",

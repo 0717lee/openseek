@@ -23,7 +23,7 @@ System follows the OS via `prefers-color-scheme`).
 |------------------|--------|---------------------------------------------------------------------|
 | `viz`            | js     | Pure parse + render: session-file text → typed events → `@html.Html`. Reuses `agent_session` decoders and projection, so it stays correct as the format evolves. |
 | `cmd/viz_app`    | js     | The rabbita (TEA) frontend: session browser, fetch, mode toggle.    |
-| `cmd/viz_server` | native | Read-only web server (`moonbitlang/async/http`) exposing a JSON/raw-file API over discovered `openseek_session-*.jsonl` files. It never writes, so pointing it at a live session root is safe. |
+| `inspect`        | native+wasm | Read-only web server (`moonbitlang/async/http`, standalone module `bobzhang/inspect`) exposing a JSON/raw-file API over discovered `openseek_session-*.jsonl` files. It never writes, so pointing it at a live session root is safe. |
 
 The `viz` library is headless-testable: `render_session` returns `@html.Html`,
 which `@rabbita.render_to_string` turns into a string for snapshot assertions —
@@ -52,7 +52,7 @@ the sidebar returns to the served view.
 moon build cmd/viz_app --target js
 
 # 2. Serve sessions discovered under the current tree
-moon run cmd/viz_server --target native -- --search-dir . --port 8080
+moon run inspect -- --search-dir . --port 8080
 
 # 3. Open http://127.0.0.1:8080
 ```
