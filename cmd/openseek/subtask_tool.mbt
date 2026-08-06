@@ -440,7 +440,7 @@ async fn subtask_launch_one(
     context,
     // Resolved BEFORE the worktree existed, so the worker's own root is
     // naturally absent from this deny list.
-    provisioned.geometry.worktree_roots,
+    provisioned.geometry.worker_deny_roots(),
     granted_steps,
   )
 }
@@ -627,9 +627,9 @@ async fn subtask_continue(
   }
   // The fresh geometry lists the slice's own worktree; the worker must not
   // be denied its own root.
-  let deny_roots = geometry.worktree_roots.filter(root => {
-    root != entry.worker_root
-  })
+  let deny_roots = geometry
+    .worker_deny_roots()
+    .filter(root => root != entry.worker_root)
   let preamble = "RESUMED SLICE: a previous worker already worked this slice; its validated progress is already present in your worktree files. Verify the current state first, then do only what the task still requires."
   let context = Some(
     match parent_context {

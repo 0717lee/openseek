@@ -230,6 +230,11 @@ pub async fn resume_running(
     is Some(entry) else {
     return Err("no active subtask named \{name}")
   }
+  guard geometry.is_integration_target_for(entry) else {
+    return Err(
+      "subtask \{name} belongs to a different worktree; continue it from the worktree that launched it",
+    )
+  }
   guard entry.state is (Committed | Captured) else {
     return Err(
       "subtask \{name} is \{Repr(entry.state)} — only a captured or committed slice with a kept worktree can be continued",

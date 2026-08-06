@@ -72,6 +72,15 @@ async fn integrate_locked(
   entry : SubtaskEntry,
 ) -> IntegrateOutcome {
   let entry = reload_entry(geometry.common_git_dir, entry)
+  guard geometry.is_integration_target_for(entry) else {
+    return {
+      entry,
+      result: "refused",
+      detail: [
+        "subtask \{entry.name} belongs to a different worktree; integrate it from the worktree that launched it",
+      ],
+    }
+  }
   guard entry.state is Committed && entry.commit_oid is Some(commit_oid) else {
     return {
       entry,
@@ -235,6 +244,15 @@ async fn integrate_continue_locked(
   entry : SubtaskEntry,
 ) -> IntegrateOutcome {
   let entry = reload_entry(geometry.common_git_dir, entry)
+  guard geometry.is_integration_target_for(entry) else {
+    return {
+      entry,
+      result: "refused",
+      detail: [
+        "subtask \{entry.name} belongs to a different worktree; continue the integration from the worktree that launched it",
+      ],
+    }
+  }
   guard entry.state is Conflicted && entry.commit_oid is Some(commit_oid) else {
     return {
       entry,
@@ -341,6 +359,15 @@ pub async fn integrate_abort(
   mutex.acquire()
   defer mutex.release()
   let entry = reload_entry(geometry.common_git_dir, entry)
+  guard geometry.is_integration_target_for(entry) else {
+    return {
+      entry,
+      result: "refused",
+      detail: [
+        "subtask \{entry.name} belongs to a different worktree; abort the integration from the worktree that launched it",
+      ],
+    }
+  }
   guard entry.state is Conflicted && entry.commit_oid is Some(commit_oid) else {
     return {
       entry,
@@ -389,6 +416,11 @@ pub async fn discard(
   mutex.acquire()
   defer mutex.release()
   let entry = reload_entry(geometry.common_git_dir, entry)
+  guard geometry.is_integration_target_for(entry) else {
+    return Err(
+      "subtask \{entry.name} belongs to a different worktree; discard it from the worktree that launched it",
+    )
+  }
   if entry.commit_oid is Some(commit_oid) {
     let merge_head = git_run(
       ["rev-parse", "-q", "--verify", "MERGE_HEAD"],

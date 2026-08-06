@@ -4,7 +4,8 @@
 /// output — never constructed from names (private admin dirs can carry
 /// numeric suffixes; worktrees can live anywhere).
 pub struct Geometry {
-  /// Canonical origin toplevel — must be the MAIN worktree (v1 precondition).
+  /// Canonical toplevel of the worktree that launched the subtask. Captured
+  /// changes integrate back into this exact worktree.
   origin_root : String
   /// Canonical common git dir (shared objects/refs/config).
   common_git_dir : String
@@ -13,15 +14,14 @@ pub struct Geometry {
 }
 
 ///|
-/// Resolve and validate the geometry for `workspace_root`. `Err` names the
-/// violated precondition: the workspace must be a git repository's MAIN
-/// worktree toplevel — a linked worktree's private/common split breaks the
-/// deny-root reasoning, so v1 rejects it outright.
+/// Resolve and validate the geometry for `workspace_root`. Both the main
+/// worktree and linked worktrees are valid integration targets, but the
+/// workspace must be the selected worktree's repository toplevel.
 pub async fn resolve_geometry(
   workspace_root : String,
 ) -> Result[Geometry, String] {
   let probe = git_run(
-    ["rev-parse", "--show-toplevel", "--absolute-git-dir", "--git-common-dir"],
+    ["rev-parse", "--show-toplevel", "--git-common-dir"],
     cwd=workspace_root,
   )
   guard probe.exit_code == 0 else {
@@ -33,21 +33,15 @@ pub async fn resolve_geometry(
     .split("\n")
     .map(l => l.to_owned())
     .collect()
-  guard lines.length() == 3 else {
+  guard lines.length() == 2 else {
     return Err("unexpected rev-parse output: \{probe.output}")
   }
   let toplevel = canonical(lines[0])
-  let git_dir = canonical(lines[1])
-  let common = canonical(absolutize_against(lines[2], toplevel))
+  let common = canonical(absolutize_against(lines[1], toplevel))
   let workspace = canonical(workspace_root)
   guard workspace == toplevel else {
     return Err(
       "subtask needs the repository toplevel as its workspace (got \{workspace}, toplevel \{toplevel})",
-    )
-  }
-  guard git_dir == common else {
-    return Err(
-      "subtask needs the MAIN worktree — this workspace is a linked worktree (git dir \{git_dir}, common \{common})",
     )
   }
   let listing = git_run(["worktree", "list", "--porcelain", "-z"], cwd=toplevel)
@@ -67,6 +61,31 @@ pub async fn resolve_geometry(
     return Err("git worktree list reported no worktrees")
   }
   Ok({ origin_root: toplevel, common_git_dir: common, worktree_roots })
+}
+
+///|
+/// Every repository-owned location a worker must not mutate. The common Git
+/// directory is listed explicitly because it is not necessarily nested under
+/// a worktree root (for example, repositories using `--separate-git-dir`).
+pub fn Geometry::worker_deny_roots(self : Geometry) -> Array[String] {
+  let roots = Set([self.common_git_dir])
+  for root in self.worktree_roots {
+    roots.add(root)
+  }
+  roots.to_array()
+}
+
+///|
+/// A registry is shared by every worktree of a repository. Bind lifecycle
+/// actions to the worktree that provisioned the worker so an action invoked
+/// from a sibling worktree cannot merge or discard another worktree's slice.
+/// The exact path is safe for schema-v1 entries because provision has always
+/// created workers at `<integration-root>/.worktrees/<name>`.
+fn Geometry::is_integration_target_for(
+  self : Geometry,
+  entry : SubtaskEntry,
+) -> Bool {
+  entry.worker_root == "\{self.origin_root}/.worktrees/\{entry.name}"
 }
 
 ///|
