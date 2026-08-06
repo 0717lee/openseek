@@ -95,7 +95,7 @@ pub(all) struct WatchedPaths {
 } derive(Eq)
 
 ///|
-/// The workspace file index behind the desktop's unified Quick Open: every
+/// The workspace file index behind unified Quick Open: every
 /// file under the workspace (the host walks it recursively, pruning churn
 /// directories and capping the count). Requested lazily when file Quick Open
 /// is first used, refreshed on `FsChanged`, and reset by a conversation switch
@@ -148,7 +148,7 @@ pub(all) struct State {
   // The directory a breadcrumb click most recently revealed, flashed in the
   // tree until `HighlightCleared` fires.
   highlighted : @pathx.Relative?
-  // The workspace file list consumed by the desktop's unified Quick Open.
+  // The workspace file list consumed by unified Quick Open.
   index : FileIndex
   // The last directory/file failure, surfaced in the panel header;
   // `None` while nothing has failed.

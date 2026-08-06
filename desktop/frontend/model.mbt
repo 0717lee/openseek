@@ -562,8 +562,8 @@ fn empty_symbol_cache() -> SymbolCache {
 }
 
 ///|
-/// Which provider owns the unified desktop Quick Open. Files are the default
-/// provider; a leading `#` in the visible input selects workspace symbols.
+/// Which provider owns unified Quick Open. Files are the default provider; a
+/// leading `#` in the visible input selects workspace symbols.
 priv enum QuickOpenMode {
   QuickOpenFiles
   QuickOpenSymbols
@@ -578,8 +578,8 @@ priv enum QuickOpenItem {
 } derive(Eq)
 
 ///|
-/// The desktop's transient unified Quick Open. `value` is the exact text shown
-/// in the input, including the `#` provider prefix when symbols are active.
+/// The shell's transient unified Quick Open. `value` is the exact text shown in
+/// the input, including the `#` provider prefix when symbols are active.
 /// Its owner fences results to one conversation; `generation` separates
 /// successive symbol queries even when their text is identical. The page-level
 /// counter lives on `Model`, so closing the palette cannot make an old reply
@@ -845,10 +845,10 @@ priv struct Model {
   // while the query is unchanged. Recomputed on every keystroke and refetched
   // when the query or conversation changes.
   symbol_cache : SymbolCache
-  // The native desktop's Cmd/Ctrl+P/T unified Quick Open. It is global UI for
-  // the focused conversation, not durable conversation state; browser pages
-  // never open it. The monotonic counter fences symbol replies across close
-  // and reopen, while the optional state carries input, rows, and selection.
+  // Cmd/Ctrl+P/T unified Quick Open in the native window and browser console.
+  // It is global UI for the focused conversation, not durable conversation
+  // state. The monotonic counter fences symbol replies across close and reopen,
+  // while the optional state carries input, rows, and selection.
   quick_open : QuickOpen?
   quick_open_generation : Int
   // The desktop topbar's app launcher. Installed apps belong to the native
@@ -1069,9 +1069,7 @@ priv enum Msg {
   // A failed search reads as "no symbols", so it carries no message to show —
   // only the `owner`/`query` needed to settle the right menu.
   SymbolsFailed(owner~ : @interop.ConversationKey, query~ : String)
-  // Open the unified desktop Quick Open in the requested provider. The
-  // shortcut subscription is desktop-only, but update still guards this
-  // message so a browser cannot open it through another path.
+  // Open unified Quick Open in the requested provider in either shell.
   QuickOpenOpen(QuickOpenMode)
   QuickOpenValueChanged(String)
   // A delayed symbol query starts only if this owner/query/generation is still

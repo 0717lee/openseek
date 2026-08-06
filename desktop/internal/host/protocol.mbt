@@ -86,7 +86,7 @@ type ReadDirReply = @protocol.ReadDirReply
 ///|
 /// `list_files` enumerates every file under the conversation's workspace
 /// (recursively, pruning the same churn directories the watcher skips) for
-/// desktop Quick Open. One flat snapshot, not a live view — the frontend
+/// Quick Open. One flat snapshot, not a live view — the frontend
 /// re-requests it on `fs_changed`.
 type ListFilesPayload = @protocol.ListFilesPayload
 

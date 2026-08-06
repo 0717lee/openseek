@@ -1,5 +1,5 @@
 // Workspace-symbol transport shared by the composer's `#` completion and the
-// desktop unified Quick Open. The host op is served by
+// unified Quick Open in either shell. The host op is served by
 // `moon ide workspace-symbols`; this package projects its typed reply once,
 // retaining kind and exact location until each UI maps it to its own row.
 
@@ -18,7 +18,7 @@ priv struct WorkspaceSymbol {
 ///|
 /// Search `query` against the conversation's workspace symbols. Without a
 /// generation the reply belongs to the composer's `#` menu; a generation
-/// routes it to desktop Quick Open. Both retain owner/query identity so
+/// routes it to Quick Open. Both retain owner/query identity so
 /// update can discard an overtaken reply.
 fn read_workspace_symbols(
   dispatch : @cmd.Emit[Msg],

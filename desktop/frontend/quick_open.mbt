@@ -1,7 +1,7 @@
-// Native desktop unified Quick Open. This is Workbench chrome: it owns
-// provider-prefix state, result navigation, and the handoff to the existing
-// cross-file open/reveal path. `boot.mbt` owns global shortcut bindings; the
-// single-document Viewer and the browser console remain unaware of them.
+// Unified Quick Open for the native desktop and browser console. This is
+// Workbench chrome: it owns provider-prefix state, result navigation, and the
+// handoff to the existing cross-file open/reveal path. `boot.mbt` owns global
+// shortcut bindings; the embedded single-document Viewer remains unaware.
 
 ///|
 const QuickOpenSymbolDebounceMs : Int = 150
@@ -171,8 +171,7 @@ fn open_quick_open(
   model : Model,
   mode : QuickOpenMode,
 ) -> (@cmd.Cmd, Model) {
-  guard model.is_desktop &&
-    model.workspace_picker is None &&
+  guard model.workspace_picker is None &&
     model.archive_confirm is None &&
     !(model.update_ux is ConfirmingRestart(..)) &&
     !(model.bridge_state() is BridgeLost(_)) else {
@@ -740,12 +739,12 @@ fn test_workspace_symbol(name : String, path : String) -> WorkspaceSymbol {
 }
 
 ///|
-test "native Quick Open prefixes providers and preserves the query suffix" {
+test "Quick Open prefixes providers and works in both shells" {
   let dispatch = test_dispatch()
   let desktop = { ..test_model(), is_desktop: true }
   let (_, opened) = update(dispatch, QuickOpenOpen(QuickOpenFiles), desktop)
   guard opened.quick_open is Some(first) else {
-    fail("the native shortcut should open the palette")
+    fail("the shortcut should open the palette")
   }
   assert_eq(first.value, "")
   assert_true(first.mode() is QuickOpenFiles)
@@ -798,7 +797,11 @@ test "native Quick Open prefixes providers and preserves the query suffix" {
     ..desktop,
     is_desktop: false,
   })
-  assert_true(browser.quick_open is None)
+  guard browser.quick_open is Some(browser_open) else {
+    fail("the browser shortcut should open the palette")
+  }
+  assert_true(browser_open.mode() is QuickOpenFiles)
+  assert_eq(browser_open.value, "")
 }
 
 ///|
