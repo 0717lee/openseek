@@ -1037,7 +1037,7 @@ fn join_path(parent : String, child : String) -> String {
 /// user serving another project's sessions (`moon run ../openseek/cmd/...`)
 /// ends up with CWD-relative asset defaults pointing at the wrong tree. But
 /// the binary itself always sits at
-/// `<root>/_build/<target>/<profile>/build/cmd/viz_server/...`, so everything
+/// `<root>/_build/<target>/<profile>/build/bobzhang/inspect/...`, so everything
 /// before the `_build` component locates the checkout and its assets,
 /// wherever the server was started from.
 fn module_root_from_exe(exe : String) -> String? {
@@ -1070,10 +1070,10 @@ fn shell_candidates(web_dir : String, module_root : String?) -> Array[String] {
 /// explicit `--bundle` path (blank when unset) — the one position that
 /// matters, since `locate_bundle` resolves the rest by mtime, not list
 /// order: `<web-dir>/viz_app.js`, moon's release and debug outputs for the
-/// standalone frontend module, legacy in-module frontend build outputs,
-/// and the same paths under the executable-derived checkout root. This
-/// lets `moon build` followed by `moon run --target native cmd/viz_server`
-/// work with no copy step — from any directory.
+/// standalone frontend module, and the same paths under the
+/// executable-derived checkout root. This lets `moon build cmd/viz_app
+/// --target js` followed by `moon run inspect` work with no copy step —
+/// from any directory.
 fn bundle_candidates(
   bundle : String,
   web_dir : String,
@@ -1081,7 +1081,6 @@ fn bundle_candidates(
 ) -> Array[String] {
   let build_outputs = [
     "_build/js/release/build/bobzhang/openseek-viz-app/openseek-viz-app.js", "_build/js/debug/build/bobzhang/openseek-viz-app/openseek-viz-app.js",
-    "_build/js/release/build/cmd/viz_app/viz_app.js", "_build/js/debug/build/cmd/viz_app/viz_app.js",
   ]
   let candidates = [bundle, "\{web_dir}/viz_app.js", ..build_outputs]
   if module_root is Some(root) {

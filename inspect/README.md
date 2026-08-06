@@ -1,8 +1,9 @@
-# OpenSeek Visualizer Server
+# OpenSeek Inspect
 
-`cmd/viz_server` is the native HTTP server for browsing recorded OpenSeek
-sessions. It serves `web/index.html`, the compiled `cmd/viz_app` JavaScript
-bundle, and read-only session JSONL APIs.
+`inspect` (module `bobzhang/inspect`) is the HTTP server for browsing recorded
+OpenSeek sessions. It serves `web/index.html`, the compiled `cmd/viz_app`
+JavaScript bundle, and read-only session JSONL APIs. It builds for the native
+backend (the default) and for wasm.
 
 ## Build
 
@@ -12,7 +13,7 @@ From the repository root, build before starting the server:
 moon build
 ```
 
-This builds both the native server and the JavaScript visualizer app. The server
+This builds both the server and the JavaScript visualizer app. The server
 auto-locates the frontend bundle from Moon's build output (freshest artifact by mtime wins, so a stale release build never shadows a fresh debug one; an explicit --bundle overrides), normally:
 
 ```text
@@ -24,7 +25,13 @@ _build/js/debug/build/bobzhang/openseek-viz-app/openseek-viz-app.js
 Start the server from the repository root:
 
 ```sh
-moon run --target native cmd/viz_server
+moon run inspect
+```
+
+To run the wasm build instead of the native one:
+
+```sh
+moon run --target wasm inspect
 ```
 
 By default it listens on `0.0.0.0:8080` (all interfaces), serves
@@ -44,11 +51,11 @@ bind to loopback with `--host 127.0.0.1` (or set `OPENSEEK_VIZ_HOST`).
 Useful options:
 
 ```sh
-moon run --target native cmd/viz_server -- --port 8081
-moon run --target native cmd/viz_server -- --host 127.0.0.1   # local only
-moon run --target native cmd/viz_server -- --search-dir path/to/project
-moon run --target native cmd/viz_server -- --session-root path/to/copied-jsonl-dir
-moon run --target native cmd/viz_server -- --session-root-name .openroot
+moon run inspect -- --port 8081
+moon run inspect -- --host 127.0.0.1   # local only
+moon run inspect -- --search-dir path/to/project
+moon run inspect -- --session-root path/to/copied-jsonl-dir
+moon run inspect -- --session-root-name .openroot
 ```
 
 Session rows come from files named `openseek_session-*.jsonl`. The server
@@ -62,7 +69,7 @@ matching JSONL file.
 session baked in, then exits without serving:
 
 ```sh
-moon run --target native cmd/viz_server -- \
+moon run inspect -- \
   --session-root path/to/archive --export sessions.html
 ```
 
@@ -78,5 +85,5 @@ live view.
 If the server cannot find the generated JavaScript bundle, pass it explicitly:
 
 ```sh
-moon run --target native cmd/viz_server -- --bundle _build/js/debug/build/bobzhang/openseek-viz-app/openseek-viz-app.js
+moon run inspect -- --bundle _build/js/debug/build/bobzhang/openseek-viz-app/openseek-viz-app.js
 ```

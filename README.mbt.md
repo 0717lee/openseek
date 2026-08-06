@@ -75,7 +75,7 @@ git submodule update --init editor/vscode     # opt-in performance suite
 | `bobzhang/openseek/cmd/tui` | Native-only terminal UI library, the default mode of `openseek` (and `openseek tui`). | `cmd/tui/README.md` |
 | `bobzhang/openseek/tui` | Reusable terminal-UI framework (transcript, composer, rendering) the OpenSeek TUI builds on. | `tui/README.md` |
 | `bobzhang/openseek/viz` | Browser viewer for durable session logs (JS). | `viz/README.md` |
-| `bobzhang/openseek/cmd/viz_server` | Native HTTP server that serves the visualizer over recorded sessions. | `cmd/viz_server/README.md` |
+| `bobzhang/inspect` (in `inspect/`, own module) | HTTP server (native or wasm) that serves the visualizer over recorded sessions. | `inspect/README.md` |
 | `bobzhang/openseek-viz-app` (in `cmd/viz_app/`, own module) | JS entry point compiled into the visualizer bundle. | `viz/README.md` |
 | `moonbitlang/editor` (in `editor/`, own module) | Reusable readonly editor plus its reference browser shell and server. | `editor/README.md` |
 | `bobzhang/openseek/internal/{cli,workspace_path}` | Shared CLI accessors and workspace-path resolution for the command mains. | — |
