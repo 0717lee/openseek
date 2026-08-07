@@ -30,9 +30,9 @@ priv struct RunConfig {
 
 ///|
 fn configured_api_key(
-  stored_key : String?,
-  api_url : String?,
-  deepseek_env : String?,
+  stored_key? : String,
+  api_url? : String,
+  deepseek_env? : String,
 ) -> String raise EngineError {
   if stored_key is Some(value) {
     return value
@@ -242,17 +242,16 @@ test "a different endpoint cannot reuse a live engine process" {
 test "configured endpoint uses its stored key or the placeholder" {
   assert_eq(
     configured_api_key(
-      None,
-      Some("https://proxy.example/chat/completions"),
-      Some("official-key"),
+      api_url="https://proxy.example/chat/completions",
+      deepseek_env="official-key",
     ),
     PlaceholderApiKey,
   )
   assert_eq(
     configured_api_key(
-      Some("custom-key"),
-      Some("https://proxy.example/chat/completions"),
-      Some("official-key"),
+      stored_key="custom-key",
+      api_url="https://proxy.example/chat/completions",
+      deepseek_env="official-key",
     ),
     "custom-key",
   )
@@ -260,11 +259,8 @@ test "configured endpoint uses its stored key or the placeholder" {
 
 ///|
 test "DeepSeek endpoint still uses DEEPSEEK env fallback" {
-  assert_eq(
-    configured_api_key(None, None, Some("official-key")),
-    "official-key",
-  )
-  let _ = configured_api_key(None, None, None) catch {
+  assert_eq(configured_api_key(deepseek_env="official-key"), "official-key")
+  let _ = configured_api_key() catch {
     EngineError(message) => {
       assert_true(message.contains("DeepSeek API key is required"))
       return

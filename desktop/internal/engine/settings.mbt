@@ -324,19 +324,18 @@ fn resolved_endpoint(
   match settings.provider {
     Openseek => {
       let url = OpenseekProxyUrl
-      let key = configured_api_key(None, Some(url), None)
+      let key = configured_api_key(api_url=url)
       { api_key: key, api_url: Some(url) }
     }
     OpenseekStaging => {
       let url = OpenseekStagingProxyUrl
-      let key = configured_api_key(None, Some(url), None)
+      let key = configured_api_key(api_url=url)
       { api_key: key, api_url: Some(url) }
     }
     Deepseek => {
       let key = configured_api_key(
-        settings.deepseek_api_key,
-        None,
-        @env.get("DEEPSEEK"),
+        stored_key?=settings.deepseek_api_key,
+        deepseek_env?=@env.get("DEEPSEEK"),
       )
       { api_key: key, api_url: None }
     }
@@ -344,7 +343,10 @@ fn resolved_endpoint(
       guard settings.custom_api_url is Some(url) else {
         raise EngineError("custom endpoint URL is required; set it in Settings")
       }
-      let key = configured_api_key(settings.custom_api_key, Some(url), None)
+      let key = configured_api_key(
+        stored_key?=settings.custom_api_key,
+        api_url=url,
+      )
       { api_key: key, api_url: Some(url) }
     }
   }
