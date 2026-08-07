@@ -3225,7 +3225,14 @@ fn tool_item(
   is_error? : Bool = false,
 ) -> @transcript.TranscriptItem {
   {
-    kind: Tool(call_id="", name~, arguments=None, is_error~, brief=None),
+    kind: Tool(
+      call_id="",
+      name~,
+      arguments=None,
+      has_result=true,
+      is_error~,
+      brief=None,
+    ),
     content: "output",
   }
 }
@@ -3294,6 +3301,7 @@ test "a tool row renders recorded arguments before its result" {
       call_id="c1",
       name="shell",
       arguments=Some("{\"cmd\":\"moon test\"}"),
+      has_result=true,
       is_error=true,
       brief=Some("ran moon test → exit 1"),
     ),
@@ -3318,6 +3326,7 @@ test "a tool row clamps large arguments before rendering" {
       call_id="c1",
       name="write",
       arguments=Some("{\"content\":\"\{"x".repeat(30_000)}\"}"),
+      has_result=true,
       is_error=false,
       brief=Some("wrote a large file"),
     ),

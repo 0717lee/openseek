@@ -15,12 +15,14 @@ pub(all) enum ItemKind {
   // One tool call in its original assistant-message order. `call_id` pairs the
   // later durable result into this same item instead of adding a second row;
   // `arguments` is `Some` for a recorded call and `None` for an unmatched
-  // legacy result or a synthetic runtime update. Before its result arrives the
-  // item has empty content, `is_error=false`, and no brief.
+  // legacy result or a synthetic runtime update. `has_result` distinguishes a
+  // pending call from a completed call even when the legitimate result has
+  // empty content, `is_error=false`, and no brief.
   Tool(
     call_id~ : String,
     name~ : String,
     arguments~ : String?,
+    has_result~ : Bool,
     is_error~ : Bool,
     brief~ : String?
   )

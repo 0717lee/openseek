@@ -136,6 +136,7 @@ pub fn apply_session_item(
             call_id=call.id,
             name=if call.name.trim().is_empty() { "tool" } else { call.name },
             arguments=Some(call.arguments),
+            has_result=false,
             is_error=false,
             brief=None,
           ),
@@ -144,14 +145,15 @@ pub fn apply_session_item(
       }
     }
     @desktop_protocol.ToolResult(payload) => {
-      // A valid result updates the matching recorded call in place. Searching
-      // from start to finish and retaining the last match makes malformed logs
-      // with duplicate ids settle the most recent call while preserving every
-      // row's original display position.
+      // A valid result updates one still-pending recorded call in place.
+      // Completed calls must not match again: duplicate result events belong to
+      // the append-only log and remain visible as unmatched rows instead of
+      // silently overwriting the first result.
       let mut matched : Int? = None
       if !payload.tool_call_id.is_empty() {
         for index, existing in items {
-          if existing.kind is Tool(call_id~, arguments=Some(_), ..) &&
+          if existing.kind
+            is Tool(call_id~, arguments=Some(_), has_result=false, ..) &&
             call_id == payload.tool_call_id {
             matched = Some(index)
           }
@@ -168,6 +170,7 @@ pub fn apply_session_item(
               payload.tool_name
             },
             arguments~,
+            has_result=true,
             is_error=payload.is_error,
             brief=payload.brief,
           ),
@@ -186,6 +189,7 @@ pub fn apply_session_item(
               payload.tool_name
             },
             arguments=None,
+            has_result=true,
             is_error=payload.is_error,
             brief=payload.brief,
           ),
@@ -207,6 +211,7 @@ pub fn apply_session_item(
               call_id="",
               name=runtime_update_title(update),
               arguments=None,
+              has_result=true,
               is_error=false,
               brief=None,
             ),
@@ -442,6 +447,7 @@ test "tool results fill calls by id without changing call order" {
       call_id="c1",
       name="read",
       arguments=Some(read_args),
+      has_result=true,
       is_error=false,
       brief=Some("read moon.mod")
     ) else {
@@ -454,6 +460,7 @@ test "tool results fill calls by id without changing call order" {
       call_id="c2",
       name="shell",
       arguments=Some(shell_args),
+      has_result=true,
       is_error=false,
       brief=Some("ran moon test")
     ) else {
@@ -461,6 +468,36 @@ test "tool results fill calls by id without changing call order" {
   }
   inspect(shell_args, content="{\"cmd\":\"moon test\"}")
   inspect(items[1].content, content="tests passed")
+}
+
+///|
+test "duplicate tool results preserve every durable event" {
+  let events =
+    #|{"sequence":1,"item":{"kind":"assistant","payload":{"content":"","tool_calls":[{"id":"d","name":"read","arguments":"{\"path\":\"x\"}"}]}}},
+    #|{"sequence":2,"item":{"kind":"tool_result","payload":{"tool_call_id":"d","tool_name":"read","content":"one","is_error":false}}},
+    #|{"sequence":3,"item":{"kind":"tool_result","payload":{"tool_call_id":"d","tool_name":"read","content":"two","is_error":false}}}
+  let view = session_from_reply(session_reply(events))
+  let items = view.items
+  inspect(items.length(), content="2")
+  // The first result fills the call in place; the duplicate result appends at
+  // its own durable boundary instead of replacing the completed call.
+  inspect(view.event_boundaries[0].2, content="1")
+  inspect(view.event_boundaries[1].2, content="1")
+  inspect(view.event_boundaries[2].2, content="2")
+  guard items[0].kind
+    is Tool(
+      call_id="d",
+      arguments=Some("{\"path\":\"x\"}"),
+      has_result=true,
+      ..
+    ) else {
+    fail("expected the recorded call with its first result")
+  }
+  inspect(items[0].content, content="one")
+  guard items[1].kind is Tool(call_id="d", arguments=None, has_result=true, ..) else {
+    fail("expected the duplicate result as an unmatched row")
+  }
+  inspect(items[1].content, content="two")
 }
 
 ///|
