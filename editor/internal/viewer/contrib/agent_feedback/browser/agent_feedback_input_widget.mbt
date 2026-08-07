@@ -7,11 +7,11 @@
 // keydown/keyup since the widget owns the focus while typing). The widget is
 // a null-position overlay widget: the glue positions it by writing
 // `top`/`left` (`setPosition` → `layoutOverlayWidget` upstream). Keyboard is
-// handled on the textarea directly (Enter adds, Alt+Enter adds and submits,
-// Escape cancels) — the editor-keydown steal/`Ctrl+I` focus routing of the
-// upstream contribution goes through the viewer's keybinding registry
-// instead. Dropped: the ActionBar/keybinding-label chrome (a plain button)
-// and the readonly-editor typing capture.
+// handled on the textarea directly (Shift+Enter inserts a newline, Enter adds,
+// Alt+Enter adds and submits, Escape cancels). The editor-keydown steal and
+// `Ctrl+I` focus routing of the upstream contribution go through the viewer's
+// keybinding registry instead. Dropped: the ActionBar/keybinding-label chrome
+// (a plain button) and the readonly-editor typing capture.
 
 ///|
 /// `_MIN_WIDTH` / `_MAX_WIDTH` / `_MAX_WIDTH_EDITOR_FRACTION`.
@@ -196,6 +196,9 @@ fn AgentFeedbackInputWidget::handle_keydown(
       (self.host.on_cancel)()
     }
     "Enter" => {
+      if keyboard.shift_key() {
+        return
+      }
       event.prevent_default()
       if !self.has_text() {
         return

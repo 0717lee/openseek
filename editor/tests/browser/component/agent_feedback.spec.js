@@ -101,8 +101,9 @@ test('agent feedback: bubbles, glyph add flow, reply, remove, scroll', async ({ 
     page.locator('.agent-feedback-widget-reply-text').first(),
   ).toContainText('Reply from the spec');
 
-  // Hover "+" glyph on a quiet line opens the inline input; Enter adds a
-  // new feedback item, which mounts a third bubble (line 15 sits outside
+  // Hover "+" glyph on a quiet line opens the inline input; Shift+Enter adds
+  // a newline while keeping the draft open, then Enter adds the multiline
+  // feedback item. The new item mounts a third bubble (line 15 sits outside
   // the near group's threshold).
   const quietLine = page
     .locator('.view-line', { hasText: 'filler line 3' })
@@ -120,11 +121,19 @@ test('agent feedback: bubbles, glyph add flow, reply, remove, scroll', async ({ 
   await expect(input).toBeVisible();
   await expect(input).toBeFocused();
   await input.fill('Needs a guard clause');
+  const singleLineHeight = (await boxOf(input)).height;
+  await input.press('Shift+Enter');
+  await expect(input).toHaveValue('Needs a guard clause\n');
+  await expect(input).toBeFocused();
+  await expect.poll(async () => (await boxOf(input)).height)
+    .toBeGreaterThan(singleLineHeight);
+  await expect.poll(async () => (await eventCounts(page)).added).toBe(0);
+  await input.type('Keep the early return focused');
   await input.press('Enter');
   await expect.poll(async () => (await eventCounts(page)).added).toBe(1);
   await expect
     .poll(async () => (await eventCounts(page)).lastText)
-    .toBe('Needs a guard clause');
+    .toBe('Needs a guard clause\nKeep the early return focused');
   await expect(page.locator('.agent-feedback-input-widget')).not.toBeVisible();
   await expect(widgets).toHaveCount(3);
 
