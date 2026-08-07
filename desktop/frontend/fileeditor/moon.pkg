@@ -21,6 +21,7 @@ import {
   "openseek_desktop/internal/commands",
   "openseek_desktop/frontend/fileeditor/feedback",
   "openseek_desktop/frontend/interop",
+  "openseek_desktop/frontend/resource",
 }
 
 supported_targets = "js"

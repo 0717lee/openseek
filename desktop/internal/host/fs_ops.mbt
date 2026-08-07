@@ -87,7 +87,7 @@ async fn list_files_op(payload : ListFilesPayload) -> ListFilesReply {
 /// stopped the walk. An unreadable directory skips itself — the rest of the
 /// workspace still gets indexed.
 async fn collect_files(
-  dir : @pathx.Path,
+  dir : @pathx.Absolute,
   prefix : String,
   into : Array[String],
 ) -> Bool {
@@ -141,8 +141,8 @@ async fn read_file_op(payload : ReadFilePayload) -> ReadFileReply {
     is Some(file) else {
     raise HostError("path is outside the conversation workspace")
   }
-  let absolute = file.to_string()
-  let source = @fs.open(absolute, mode=ReadOnly) catch {
+  let native = file.to_string()
+  let source = @fs.open(native, mode=ReadOnly) catch {
     error if @async.is_being_cancelled() => raise error
     error => raise HostError("failed to read file: \{error}")
   }
@@ -165,6 +165,7 @@ async fn read_file_op(payload : ReadFilePayload) -> ReadFileReply {
   // `text()` raises on invalid UTF-8 — treat that as a binary file the
   // read-only viewer cannot render.
   let content = data.text() catch { _ => return Binary }
+  let absolute = file.resource_path()
   Content(content~, absolute~, sig="\{seconds}:\{nanos}")
 }
 

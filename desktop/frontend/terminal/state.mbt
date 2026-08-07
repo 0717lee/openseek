@@ -14,8 +14,8 @@
 /// its conversation. This prevents a worktree chat from ever displaying or
 /// driving a shell whose cwd belongs to the main checkout.
 pub(all) enum WorkspaceKey {
-  Project(@interop.ChannelId, String)
-  Worktree(@interop.ChannelId, String, String)
+  Project(@interop.ChannelId, @common.Uri)
+  Worktree(@interop.ChannelId, @common.Uri, String)
   Scratch(@interop.ChannelId, String)
 } derive(Eq)
 
@@ -48,7 +48,7 @@ pub(all) struct Tab {
   workspace : WorkspaceKey
   workspace_label : String
   session : String
-  workspace_path : @pathx.Absolute?
+  workspace_path : @common.Uri?
   status : TabStatus
 } derive(Eq)
 
@@ -96,7 +96,7 @@ pub(all) struct Ctx {
   /// The host connection that owns every terminal opened from this context.
   channel : @interop.ChannelId
   session : String
-  workspace : @pathx.Absolute?
+  workspace : @common.Uri?
   /// `None` until the host has identified this conversation's placement on
   /// the current connection. A resolved value distinguishes the project root,
   /// a live worktree, and a retained binding whose checkout is missing.
@@ -118,9 +118,9 @@ fn workspace_key(ctx : Ctx) -> WorkspaceKey? {
     return Some(Scratch(ctx.channel, ctx.session))
   }
   match checkout {
-    @interop.WorkspaceRoot => Some(Project(ctx.channel, workspace.0))
+    @interop.WorkspaceRoot => Some(Project(ctx.channel, workspace))
     @interop.Worktree(name~) | @interop.MissingWorktree(name~) =>
-      Some(Worktree(ctx.channel, workspace.0, name))
+      Some(Worktree(ctx.channel, workspace, name))
   }
 }
 

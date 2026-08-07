@@ -21,7 +21,7 @@ priv struct ServeEngine {
   // Canonical durable store selected from host-owned workspace state when
   // this process was spawned. Workspace detach uses this placement to close
   // idle writers before hiding their store, and to refuse while one is busy.
-  session_root : @pathx.Path?
+  session_root : @pathx.Absolute?
   // Fingerprint of the config this process was spawned with; a prompt whose
   // config differs cannot reuse it.
   spec_key : String
@@ -769,7 +769,7 @@ fn EngineManager::prune_slot(self : EngineManager, key : String) -> Unit {
 /// receive EOF and join their follower's final durable scan first.
 async fn EngineManager::close_engines_for_workspace(
   self : EngineManager,
-  workspace : @pathx.Path,
+  workspace : @pathx.Absolute,
 ) -> Unit {
   guard self.pump is Serving(sessions~) else { return }
   let root = workspace_session_root(workspace).to_string()
@@ -2175,7 +2175,7 @@ async test "engine startup rolls back follower on pre-spawn failure" {
     engine: dir + "/missing/openseek",
     cwd: None,
     session: Some("s-startup-failure"),
-    session_root: Some(Path(dir + "/root")),
+    session_root: Some(@pathx.Path(dir + "/root").resolve()),
   }
   @async.with_task_group(group => {
     let failed = try {
@@ -2290,7 +2290,7 @@ fn pump_test_config(session : String) -> RunConfig {
     engine: "unused",
     cwd: None,
     session: Some(session),
-    session_root: Some(Path("/tmp/openseek-pump-test")),
+    session_root: Some(@pathx.Path("/tmp/openseek-pump-test").resolve()),
   }
 }
 

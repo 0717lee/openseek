@@ -1,5 +1,12 @@
 // Typed payloads for the desktop API. Transport adapters alone turn these
 // values into JSON; request and notification code carries closed types.
+//
+// Every field described as an absolute filesystem path carries only the
+// slash-rooted path component of an OpenSeek resource URI: `/home/u/work` on
+// POSIX and `/C:/work` for a Windows drive. The owning device is already the
+// request channel, so scheme and authority never appear in these strings.
+// UNC paths are outside this contract. Workspace-relative fields remain
+// slash-separated relative strings.
 
 ///|
 pub(all) struct StartPayload {

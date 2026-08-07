@@ -62,7 +62,7 @@ async fn terminal_open_op(
   }
   // Scratch workspaces are created lazily by the first engine run. Opening a
   // terminal is also a valid first action, so create that directory here.
-  @fsx.ensure_dir(root) catch {
+  @fsx.ensure_dir(root.to_path()) catch {
     error if @async.is_being_cancelled() => raise error
     error => raise HostError("could not open the workspace directory: \{error}")
   }

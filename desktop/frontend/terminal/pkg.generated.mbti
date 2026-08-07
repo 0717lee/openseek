@@ -4,8 +4,8 @@ package "openseek_desktop/frontend/terminal"
 import {
   "moonbit-community/rabbita/cmd",
   "moonbit-community/rabbita/html",
+  "moonbitlang/editor/base/common",
   "openseek_desktop/frontend/interop",
-  "openseek_desktop/internal/pathx",
 }
 
 // Values
@@ -23,7 +23,7 @@ pub fn update(@cmd.Emit[Msg], Msg, State, Ctx) -> (@cmd.Cmd, State)
 pub(all) struct Ctx {
   channel : @interop.ChannelId
   session : String
-  workspace : @pathx.Absolute?
+  workspace : @common.Uri?
   checkout : @interop.CheckoutPlacement?
   dark_mode : Bool
   connected : Bool
@@ -63,7 +63,7 @@ pub(all) struct Tab {
   workspace : WorkspaceKey
   workspace_label : String
   session : String
-  workspace_path : @pathx.Absolute?
+  workspace_path : @common.Uri?
   status : TabStatus
 } derive(Eq)
 
@@ -74,8 +74,8 @@ pub(all) enum TabStatus {
 } derive(Eq)
 
 pub(all) enum WorkspaceKey {
-  Project(@interop.ChannelId, String)
-  Worktree(@interop.ChannelId, String, String)
+  Project(@interop.ChannelId, @common.Uri)
+  Worktree(@interop.ChannelId, @common.Uri, String)
   Scratch(@interop.ChannelId, String)
 } derive(Eq)
 

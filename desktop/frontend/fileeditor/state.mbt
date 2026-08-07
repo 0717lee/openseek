@@ -26,7 +26,7 @@ pub(all) enum FileContent {
   Oversized
   // `sig` is the file's mtime signature, stat'ed by the host from the same
   // handle it read — the baseline `stat_files` results are compared against.
-  Content(content~ : String, absolute~ : @pathx.Absolute, sig~ : String)
+  Content(content~ : String, absolute~ : @common.Uri, sig~ : String)
 }
 
 ///|
@@ -42,7 +42,7 @@ pub(all) enum TabState {
   // (their replies have none), so they only refresh on an explicit re-open —
   // but deletion still shows, since that compares against `""`, not a
   // baseline.
-  TabLoaded(content~ : String, absolute~ : @pathx.Absolute, sig~ : String)
+  TabLoaded(content~ : String, absolute~ : @common.Uri, sig~ : String)
   TabBinary
   TabOversized
   // The file vanished from disk while open. The tab stays — its name is the
@@ -89,7 +89,7 @@ pub(all) enum FileChange {
 /// the file tree needs to keep current.
 pub(all) struct WatchedPaths {
   owner : @interop.ConversationKey
-  workspace : @pathx.Absolute?
+  workspace : @common.Uri?
   files : Array[@pathx.Relative]
   directories : Array[@pathx.Relative]
 } derive(Eq)
@@ -210,7 +210,7 @@ pub fn TreeLayout::wire(self : TreeLayout) -> String {
 /// file tree docks.
 pub(all) struct Ctx {
   owner : @interop.ConversationKey
-  workspace : @pathx.Absolute?
+  workspace : @common.Uri?
   // `None` while this connection has not loaded the conversation's placement.
   // Unknown and missing placements both block filesystem requests so neither
   // can be resolved against the registered project's main checkout.
@@ -319,7 +319,7 @@ pub(all) enum Msg {
   // fences a reply that lost a device/session switch while the request ran.
   DiagnosticsLoaded(
     owner~ : @interop.ConversationKey,
-    absolute~ : @pathx.Absolute,
+    absolute~ : @common.Uri,
     diagnostics~ : Array[@protocol.LspDiagnostic]
   )
   // A later diagnostics push from the host. The wire event is channel-scoped
@@ -327,7 +327,7 @@ pub(all) enum Msg {
   // channels and this handler then verifies the panel still serves it.
   DiagnosticsPublished(
     channel~ : @interop.ChannelId,
-    absolute~ : @pathx.Absolute,
+    absolute~ : @common.Uri,
     diagnostics~ : Array[@protocol.LspDiagnostic]
   )
   // The user commented on a selection in the editor viewer (the

@@ -94,6 +94,15 @@ pub async fn start_run(
     live.phase = Running(cancel_requested=false, compact_queued=false)
     live.steer_runs.begin_run()
     started_emitted = true
+    let cwd = match config.cwd {
+      Some(cwd) => {
+        guard cwd.to_absolute() is Some(cwd) else {
+          raise EngineError("run working directory is not absolute")
+        }
+        Some(cwd.resource_path())
+      }
+      None => None
+    }
     emit(
       sink,
       Started({
@@ -103,9 +112,9 @@ pub async fn start_run(
         engine: Some(config.engine),
         model: Some(config.model),
         max_steps: Some(config.max_steps),
-        cwd: config.cwd.map(cwd => cwd.to_string()),
+        cwd,
         session: config.session,
-        session_root: config.session_root.map(root => root.to_string()),
+        session_root: config.session_root.map(root => root.resource_path()),
       }),
     )
     live.writer.write(command.to_jsonl())
@@ -462,7 +471,7 @@ const SessionShowTimeoutMs = 10000
 async fn session_show_output(
   manager : EngineManager,
   session : String,
-  root : @pathx.Path,
+  root : @pathx.Absolute,
 ) -> (Int, String, String) {
   let engine = manager.engine
   let child_stdin = prepare_engine_stdin(manager.runtime_dir, engine)
@@ -497,7 +506,7 @@ async fn session_show_output(
 async fn session_show_stdout(
   manager : EngineManager,
   session : String,
-  root : @pathx.Path,
+  root : @pathx.Absolute,
   timeout_ms? : Int = SessionShowTimeoutMs,
 ) -> String {
   let (code, stdout, stderr) = @async.with_timeout(timeout_ms, () => {
@@ -532,11 +541,10 @@ pub async fn list_sessions(manager : EngineManager) -> SessionsReply {
       "cannot determine a session root; set OPENSEEK_SESSION_ROOT",
     )
   }
-  let groups : Array[SessionGroup] = [session_group(manager, "", root)]
+  let groups : Array[SessionGroup] = [session_group(manager, None, root)]
   for path in registered_workspaces() {
-    let workspace = path.to_path()
     groups.push(
-      session_group(manager, path.0, workspace_session_root(workspace)),
+      session_group(manager, Some(path), workspace_session_root(path)),
     )
   }
   { groups, }
@@ -545,21 +553,22 @@ pub async fn list_sessions(manager : EngineManager) -> SessionsReply {
 ///|
 async fn session_group(
   manager : EngineManager,
-  workspace : String,
-  root : @pathx.Path,
+  workspace : @pathx.Absolute?,
+  root : @pathx.Absolute,
 ) -> SessionGroup {
-  let name = if workspace.is_empty() {
-    ""
-  } else {
-    (workspace : @pathx.Path).basename().to_owned()
+  let (workspace, name) = match workspace {
+    Some(workspace) =>
+      (workspace.resource_path(), workspace.to_path().basename().to_owned())
+    None => ("", "")
   }
-  let root = root.to_string()
+  let native_root = root.to_string()
+  let root = root.resource_path()
   fn failed(error : String) -> SessionGroup {
     { workspace, name, session_root: root, sessions: [], error }
   }
 
   let output = engine_stdout(manager, [
-    "sessions", "list", "--session-root", root, "--format", "json",
+    "sessions", "list", "--session-root", native_root, "--format", "json",
   ]) catch {
     error if @async.is_being_cancelled() => raise error
     EngineError(detail) => return failed("session list failed: \{detail}")
@@ -593,7 +602,8 @@ pub async fn load_session(
   // detached workspace is rejected instead of silently probing the global
   // store, which could return a different history for the same session id.
   let root = if payload.workspace is Some(hint) && !hint.trim().is_empty() {
-    guard registered_workspace(hint) is Some(workspace) else {
+    guard @pathx.Absolute::from_uri_path(hint) is Some(absolute) &&
+      registered_workspace(absolute) is Some(workspace) else {
       raise EngineError("\{hint} is not a registered workspace")
     }
     Some(workspace_session_root(workspace))
@@ -635,7 +645,7 @@ pub async fn load_session(
 async fn follower_snapshot(
   manager : EngineManager,
   session : String,
-  root : @pathx.Path,
+  root : @pathx.Absolute,
 ) -> @protocol.SessionDocument? {
   for ;; {
     guard manager.followers.get(session) is Some(follower) else { return None }
@@ -660,8 +670,21 @@ async fn follower_snapshot(
 }
 
 ///|
+/// A host-native absolute path at the protocol boundary. Resource URIs use
+/// their authority for the device, so UNC paths have no reversible encoding
+/// and are rejected explicitly instead of being published under a new host.
+fn @pathx.Absolute::resource_path(
+  self : @pathx.Absolute,
+) -> String raise EngineError {
+  guard self.to_uri_path() is Some(path) else {
+    raise EngineError("UNC paths are not supported by frontend resources")
+  }
+  path
+}
+
+///|
 pub async fn list_workspaces() -> WorkspacesReply {
-  { workspaces: registered_workspaces().map(path => path.0) }
+  { workspaces: registered_workspaces().map(path => path.resource_path()) }
 }
 
 ///|
@@ -669,10 +692,13 @@ pub async fn attach_workspace(
   path : String,
   on_committed : (Array[String]) -> Unit,
 ) -> WorkspacesReply {
-  let paths = add_workspace(path, paths => {
-    on_committed(paths.map(path => path.0))
+  guard @pathx.Absolute::from_uri_path(path) is Some(absolute) else {
+    raise EngineError("workspace is not a supported absolute resource path")
+  }
+  let paths = add_workspace(absolute.0, paths => {
+    on_committed(paths.map(path => path.resource_path()))
   })
-  { workspaces: paths.map(path => path.0) }
+  { workspaces: paths.map(path => path.resource_path()) }
 }
 
 ///|
@@ -681,14 +707,17 @@ pub async fn detach_workspace(
   path : String,
   on_committed : (Array[String]) -> Unit,
 ) -> WorkspacesReply {
+  guard @pathx.Absolute::from_uri_path(path) is Some(absolute) else {
+    raise EngineError("workspace is not a supported absolute resource path")
+  }
   manager.workspace_lifecycle_lock.acquire()
   defer manager.workspace_lifecycle_lock.release()
-  let workspace = expanded_workspace_path(path)
-  manager.close_engines_for_workspace(workspace.to_path())
-  let paths = remove_workspace(path, paths => {
-    on_committed(paths.map(path => path.0))
+  let workspace = expanded_workspace_path(absolute.0)
+  manager.close_engines_for_workspace(workspace)
+  let paths = remove_workspace(absolute.0, paths => {
+    on_committed(paths.map(path => path.resource_path()))
   })
-  { workspaces: paths.map(path => path.0) }
+  { workspaces: paths.map(path => path.resource_path()) }
 }
 
 ///|
@@ -1067,7 +1096,9 @@ async test "named session retries after its first prompt creates no record" {
       is Some(_),
     )
     assert_true(@fsx.is_dir(store.join("sessions").join(session)))
-    assert_false(@fsx.exists(Path(session_store_file(store, session))))
+    assert_false(
+      @fsx.exists(Path(session_store_file(store.resolve(), session))),
+    )
     first_request.cancel()
     let cancelled = try {
       first_request.wait()
@@ -1124,7 +1155,7 @@ async test "timed out sessions show is killed and the next read can run" {
   )
   assert_eq(@process.run("chmod", ["+x", engine]), 0)
   let manager = new_engine_manager(engine)
-  let root : @pathx.Path = Path(dir + "/root")
+  let root : @pathx.Absolute = @pathx.Path(dir + "/root").resolve()
   let detail = try {
     ignore(session_show_stdout(manager, "s-timeout", root, timeout_ms=50))
     "no error"

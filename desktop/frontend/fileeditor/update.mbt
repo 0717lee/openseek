@@ -969,8 +969,9 @@ fn owned_state() -> State {
 
 ///|
 fn loaded_doc(path : String) -> Doc raise {
-  guard @pathx.Path("/work/" + path).to_absolute() is Some(absolute) else {
-    fail("test document path was not absolute")
+  guard @resource.of_path(@interop.ChannelId::Local, "/work/" + path)
+    is Some(absolute) else {
+    fail("test document resource was not absolute")
   }
   {
     name: basename(Relative(path)),
@@ -1119,8 +1120,9 @@ test "close_document drops the entry and forces the tree open on the last one" {
 ///|
 test "FileLoaded settles content into its document, active or not" {
   let emit = test_emit()
-  guard @pathx.Path("/work/a.mbt").to_absolute() is Some(absolute) else {
-    fail("test file path was not absolute")
+  guard @resource.of_path(@interop.ChannelId::Local, "/work/a.mbt")
+    is Some(absolute) else {
+    fail("test file resource was not absolute")
   }
   let docs : Map[@pathx.Relative, Doc] = Map([])
   docs[Relative("a.mbt")] = { name: "a.mbt", state: TabLoading, stale: false }
@@ -1149,8 +1151,9 @@ test "FileLoaded settles content into its document, active or not" {
     is Some({ state: TabLoaded(content="fn main {}", ..), .. }),
   )
   // A reply for a closed document (or another conversation) is dropped.
-  guard @pathx.Path("/work/gone.mbt").to_absolute() is Some(gone_absolute) else {
-    fail("test closed file path was not absolute")
+  guard @resource.of_path(@interop.ChannelId::Local, "/work/gone.mbt")
+    is Some(gone_absolute) else {
+    fail("test closed file resource was not absolute")
   }
   let (_, stray) = update(
     emit,

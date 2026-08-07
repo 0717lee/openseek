@@ -174,7 +174,7 @@ async fn MoonCliState::run_moon(
 /// The module root answering for `file` under workspace `dir`: the deepest
 /// discovered root containing it, or `None` when no module holds the file.
 async fn moon_module_root(
-  dir : @pathx.Path,
+  dir : @pathx.Absolute,
   file : @pathx.Absolute,
 ) -> @pathx.Absolute? {
   let mut best : @pathx.Absolute? = None
@@ -197,11 +197,10 @@ async fn moon_module_root(
 /// children. When more modules than `MaxModuleRoots` sit side by side, the
 /// most recently modified win the slots.
 async fn workspace_module_roots(
-  workspace_dir : @pathx.Path,
+  workspace_dir : @pathx.Absolute,
 ) -> Array[@pathx.Absolute] {
-  guard workspace_dir.to_absolute() is Some(workspace) else { return [] }
   if manifest_mtime(workspace_dir) is Some(_) {
-    return [workspace]
+    return [workspace_dir]
   }
   let names = @fs.readdir(workspace_dir.to_string(), sort=true) catch {
     error if @async.is_being_cancelled() => raise error
@@ -219,7 +218,6 @@ async fn workspace_module_roots(
       is Directory
     guard is_dir else { continue }
     guard manifest_mtime(child) is Some(mtime) else { continue }
-    guard child.to_absolute() is Some(child) else { continue }
     modules.push((child, mtime))
   }
   // Drop the oldest until within the cap (rare; usually a handful at most).
@@ -238,7 +236,7 @@ async fn workspace_module_roots(
 ///|
 /// The newest mtime (in whole seconds) among the module manifests directly in
 /// `dir`, or `None` when `dir` holds none — i.e. it is not a module root.
-async fn manifest_mtime(dir : @pathx.Path) -> Int64? {
+async fn manifest_mtime(dir : @pathx.Absolute) -> Int64? {
   let mut newest : Int64? = None
   for name in ["moon.mod", "moon.mod.json", "moon.work"] {
     let path = dir.join((name : @pathx.Relative)).to_string()
@@ -264,7 +262,7 @@ async fn lsp_hover_op(
   state : MoonCliState,
   payload : LspHoverPayload,
 ) -> LspHoverReply {
-  guard @pathx.Path(payload.path).to_absolute() is Some(file) else {
+  guard @pathx.Absolute::from_uri_path(payload.path) is Some(file) else {
     raise HostError("path is not absolute")
   }
   guard @engine.attached_workspace_dir(file) is Some(dir) else {
@@ -294,7 +292,7 @@ async fn lsp_open_op(
   state : MoonCliState,
   payload : LspOpenPayload,
 ) -> LspDiagnosticsReply {
-  guard @pathx.Path(payload.path).to_absolute() is Some(file) else {
+  guard @pathx.Absolute::from_uri_path(payload.path) is Some(file) else {
     raise HostError("path is not absolute")
   }
   guard @engine.attached_workspace_dir(file) is Some(dir) else {
@@ -339,14 +337,14 @@ async fn lsp_open_op(
 fn diagnostics_pushes(
   previous : Array[@pathx.Absolute],
   current : Map[@pathx.Absolute, Array[@protocol.LspDiagnostic]],
-) -> Array[DiagnosticsPush] {
+) -> Array[DiagnosticsPush] raise HostError {
   let pushes : Array[DiagnosticsPush] = []
   for path, items in current {
-    pushes.push({ path: path.0, diagnostics: items })
+    pushes.push({ path: path.resource_path(), diagnostics: items })
   }
   for path in previous {
     if !current.contains(path) {
-      pushes.push({ path: path.0, diagnostics: [] })
+      pushes.push({ path: path.resource_path(), diagnostics: [] })
     }
   }
   pushes
@@ -682,7 +680,7 @@ async fn workspace_symbols_op(
     is Some(dir) else {
     return { symbols: [] }
   }
-  guard dir.to_absolute() is Some(workspace) else { return { symbols: [] } }
+  let workspace = dir
   let symbols : Array[SymbolItem] = []
   for root in workspace_module_roots(dir) {
     if symbols.length() >= MaxSymbolResults {

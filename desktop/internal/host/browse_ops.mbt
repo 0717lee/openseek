@@ -17,16 +17,29 @@ async fn browse_directory_op(
   payload : BrowseDirectoryPayload,
 ) -> BrowseDirectoryReply {
   let requested = payload.path.unwrap_or("").trim().to_owned()
-  let target : @pathx.Path = if requested.is_empty() {
+  let target : @pathx.Absolute = if requested.is_empty() {
     guard @home.dir() is Some(home) else {
       raise HostError("cannot determine the home directory")
     }
-    home
+    home.resolve()
+  } else if @pathx.Absolute::from_uri_path(requested) is Some(absolute) {
+    // Breadcrumb and directory-row clicks return the URI path from the
+    // preceding reply, including `/C:/...` on Windows.
+    absolute
   } else {
-    let expanded = @pathx.Path(requested).expand_home()
-    expanded
+    @pathx.Path(
+      // The editable field is an operating-system boundary: accept the host's
+      // ordinary spelling (`C:\...` on Windows), `~`, and the same relative
+      // spellings the picker accepted before frontend resources were typed.
+      requested,
+    )
+    .expand_home()
+    .resolve()
   }
-  let dir = target.resolve().normalize()
+  let dir = target.normalize()
+  // Fail before reading a directory we cannot name back to the frontend.
+  // In particular, UNC cannot share the resource URI's device authority.
+  let encoded_dir = dir.resource_path()
   let kind = @fs.kind(dir.to_string()) catch {
     error if @async.is_being_cancelled() => raise error
     _ => raise HostError("no such directory: \{dir}")
@@ -59,7 +72,24 @@ async fn browse_directory_op(
   let parent = if parent_path.to_string() == dir.to_string() {
     None
   } else {
-    Some(parent_path.to_string())
+    guard parent_path.to_absolute() is Some(parent) else {
+      raise HostError("directory parent is not absolute")
+    }
+    Some(parent.resource_path())
   }
-  { path: dir.to_string(), parent, entries }
+  { path: encoded_dir, parent, entries }
+}
+
+///|
+async test "directory browsing accepts native input and returns URI paths" {
+  let dir = @fs.tmpdir(prefix="openseek-browse-path-")
+  @fsx.ensure_dir(Path(dir + "/child"))
+  let absolute = @pathx.Path(dir).resolve().normalize()
+  let native = browse_directory_op({ path: Some(dir) })
+  assert_eq(native.path, absolute.resource_path())
+  assert_true(native.entries.contains("child"))
+  // Navigation sends the path from the preceding reply back unchanged.
+  let resource = browse_directory_op({ path: Some(native.path) })
+  assert_eq(resource.path, native.path)
+  @fs.rmdir(dir, recursive=true)
 }

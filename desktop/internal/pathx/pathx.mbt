@@ -83,6 +83,58 @@ pub fn Absolute::to_path(self : Absolute) -> Path {
 }
 
 ///|
+/// Encode this host-native absolute path as the slash-rooted path component
+/// carried by frontend resource URIs. POSIX paths already have that form;
+/// Windows drive paths gain the URI root slash (`C:\\work` -> `/C:/work`).
+///
+/// UNC and Windows root-relative paths return `None`: a frontend resource URI
+/// uses its authority for the owning device, so it has no second authority in
+/// which to preserve a UNC server name. Rejecting those spellings keeps this
+/// boundary reversible instead of silently changing their destination.
+pub fn Absolute::to_uri_path(self : Absolute) -> String? {
+  // A double-rooted spelling may carry implementation-defined network
+  // semantics even on POSIX. Resource URIs have no authority available for
+  // that second identity, so never collapse it into an ordinary local path.
+  if @path.sep != '\\' && self.0 is ['/', '/', ..] {
+    return None
+  }
+  let normalized = @path.Path(self.0).normalize().to_string()
+  if @path.sep == '\\' {
+    let normalized = normalized.replace_all(old="\\", new="/")
+    guard normalized is [drive, ':', '/', ..] && drive.is_ascii_path_drive() else {
+      return None
+    }
+    Some("/" + normalized)
+  } else {
+    Some(normalized)
+  }
+}
+
+///|
+/// Decode a frontend resource URI's slash-rooted path component into an
+/// absolute path for this host. Windows accepts only the reversible drive
+/// form produced by `Absolute::to_uri_path`; POSIX accepts its ordinary
+/// slash-rooted absolute paths. UNC is deliberately outside the transport
+/// contract because the URI authority belongs to the device channel.
+pub fn Absolute::from_uri_path(path : String) -> Absolute? {
+  guard path is ['/', ..] && !(path is ['/', '/', ..]) else { return None }
+  if @path.sep == '\\' {
+    guard path is ['/', drive, ':', '/', ..] && drive.is_ascii_path_drive() else {
+      return None
+    }
+    Path(path[1:].to_owned()).normalize().to_absolute()
+  } else {
+    Path(path).normalize().to_absolute()
+  }
+}
+
+///|
+/// Whether this character can name a Windows drive in an absolute path.
+fn Char::is_ascii_path_drive(self : Char) -> Bool {
+  self is ('a'..='z' | 'A'..='Z')
+}
+
+///|
 /// Append a relative path and normalize the absolute result using the current
 /// host's path rules.
 pub fn Absolute::join(self : Absolute, child : Relative) -> Absolute {

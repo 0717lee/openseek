@@ -34,23 +34,21 @@ fn fetch_apps(dispatch : @cmd.Emit[Msg]) -> @cmd.Cmd {
 fn launch_app(
   dispatch : @cmd.Emit[Msg],
   session : String,
-  cwd~ : @pathx.Absolute?,
+  cwd~ : @common.Uri?,
   app : String,
 ) -> @cmd.Cmd {
+  match cwd {
+    Some(resource) if !@resource.belongs_to(resource, @interop.ChannelId::Local) =>
+      return @cmd.none
+    _ => ()
+  }
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
       ignore(
         @interop.bridge_request(
           @interop.ChannelId::Local,
           @commands.app_launch,
-          {
-            session,
-            cwd: match workspace_token(cwd).trim() {
-              "" => None
-              value => Some(value.to_owned())
-            },
-            app,
-          },
+          { session, cwd: cwd.map(resource => resource.path), app },
         ) catch {
           error => {
             scheduler.add(

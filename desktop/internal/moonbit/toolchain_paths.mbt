@@ -44,9 +44,7 @@ async fn bundled_moonbit_seed_dir(engine_command : String) -> @pathx.Absolute? {
     bin_sibling_toolchain_dir(command_dir, "macos-arm64"),
   ]
   for candidate in candidates {
-    // Reading the packaging stamp is a filesystem boundary; candidate
-    // selection retains the stronger absolute-path guarantee from `resolve`.
-    let version = bundled_moonbit_seed_version(candidate.to_path())
+    let version = bundled_moonbit_seed_version(candidate)
     @xlog.debug() <?
       {
         "event": "desktop_moonbit_seed_candidate",
@@ -75,7 +73,7 @@ async fn bundled_moonbit_seed_dir(engine_command : String) -> @pathx.Absolute? {
 
 ///|
 async fn prepared_moonbit_payload_dir(
-  seed_dir~ : @pathx.Path,
+  seed_dir~ : @pathx.Absolute,
   runtime_dir? : @pathx.Path,
 ) -> @pathx.Path? {
   guard runtime_dir is Some(runtime_dir) else {
@@ -86,7 +84,7 @@ async fn prepared_moonbit_payload_dir(
       }
     return None
   }
-  let seed_name = seed_dir.basename().to_owned()
+  let seed_name = seed_dir.to_path().basename().to_owned()
   if seed_name.is_empty() {
     @xlog.debug() <?
       {
@@ -138,7 +136,7 @@ fn moonbit_bundle_stamp_path(moon_home : @pathx.Path) -> @pathx.Path {
 }
 
 ///|
-fn moonbit_seed_version_path(seed_dir : @pathx.Path) -> @pathx.Path {
+fn moonbit_seed_version_path(seed_dir : @pathx.Absolute) -> @pathx.Absolute {
   seed_dir.join(MoonbitSeedVersionFile)
 }
 
@@ -155,7 +153,7 @@ fn moonbit_wasm_gc_bundle_probe_path(moon_home : @pathx.Path) -> @pathx.Path {
 ///|
 /// Lay a fake completed seed under `root`, including the version stamp that
 /// packaging writes only after it has verified the extracted toolchain.
-async fn write_fake_seed(root : @pathx.Path) -> Unit {
+async fn write_fake_seed(root : @pathx.Absolute) -> Unit {
   @fs.mkdir(root.join("bin").to_string(), recursive=true)
   @fs.mkdir(root.join("lib/core").to_string(), recursive=true)
   @fs.write_file(
@@ -187,7 +185,7 @@ async fn write_fake_seed(root : @pathx.Path) -> Unit {
 /// directory holding `toolchains/`. Both shapes must resolve, or the engine
 /// never spawns — `resolve_toolchain` raises before it.
 async test "the seed is found beside the engine and one level above it" {
-  let tmp = @pathx.Path(@fs.tmpdir(prefix="openseek-moonbit-seed-layout-"))
+  let tmp = @pathx.Path(@fs.tmpdir(prefix="openseek-moonbit-seed-layout-")).resolve()
   // macOS: `<input>/bin/openseek` with `<input>/toolchains/…`.
   let bundle = tmp.join("proton-package-input")
   let bundle_seed = bundle.join("toolchains/moonbit/macos-arm64")

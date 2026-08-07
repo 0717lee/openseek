@@ -13,8 +13,13 @@ fn read_directory(
   dispatch : @cmd.Emit[Msg],
   owner : @interop.ConversationKey,
   path : @pathx.Relative,
-  workspace~ : @pathx.Absolute?,
+  workspace~ : @common.Uri?,
 ) -> @cmd.Cmd {
+  match workspace {
+    Some(resource) if !@resource.belongs_to(resource, owner.channel) =>
+      return @cmd.none
+    _ => ()
+  }
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
       let reply = @interop.bridge_request(
@@ -23,7 +28,7 @@ fn read_directory(
         {
           session: owner.session,
           path: path.0,
-          workspace: workspace.map(value => value.0),
+          workspace: workspace.map(value => value.path),
         },
       ) catch {
         error => {
@@ -57,14 +62,22 @@ fn read_directory(
 fn list_files(
   dispatch : @cmd.Emit[Msg],
   owner : @interop.ConversationKey,
-  workspace~ : @pathx.Absolute?,
+  workspace~ : @common.Uri?,
 ) -> @cmd.Cmd {
+  match workspace {
+    Some(resource) if !@resource.belongs_to(resource, owner.channel) =>
+      return @cmd.none
+    _ => ()
+  }
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
       let reply = @interop.bridge_request(
         owner.channel,
         @commands.fs_list_files,
-        { session: owner.session, workspace: workspace.map(value => value.0) },
+        {
+          session: owner.session,
+          workspace: workspace.map(value => value.path),
+        },
       ) catch {
         _ => {
           scheduler.add(dispatch(FileIndexFailed(owner~)))
@@ -99,8 +112,13 @@ pub fn read_file(
   name : String,
   range~ : @common.Range?,
   annotation? : String,
-  workspace~ : @pathx.Absolute?,
+  workspace~ : @common.Uri?,
 ) -> @cmd.Cmd {
+  match workspace {
+    Some(resource) if !@resource.belongs_to(resource, owner.channel) =>
+      return @cmd.none
+    _ => ()
+  }
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
       let reply = @interop.bridge_request(
@@ -109,7 +127,7 @@ pub fn read_file(
         {
           session: owner.session,
           path: path.0,
-          workspace: workspace.map(value => value.0),
+          workspace: workspace.map(value => value.path),
         },
       ) catch {
         error => {
@@ -121,7 +139,7 @@ pub fn read_file(
           return
         }
       }
-      match FileContent::from_reply(reply) {
+      match FileContent::from_reply(reply, owner.channel) {
         Some(file) =>
           scheduler.add(
             dispatch(
@@ -173,13 +191,16 @@ fn FileEntry::from_reply(
 }
 
 ///|
-fn FileContent::from_reply(reply : @protocol.ReadFileReply) -> FileContent? {
+fn FileContent::from_reply(
+  reply : @protocol.ReadFileReply,
+  channel : @interop.ChannelId,
+) -> FileContent? {
   match reply {
     @protocol.Binary => Some(Binary)
     @protocol.Oversized => Some(Oversized)
     @protocol.Content(content~, absolute~, sig~) => {
-      // A malformed host reply cannot enter editor state as an Absolute.
-      guard @pathx.Path(absolute).to_absolute() is Some(absolute) else {
+      // Bind the backend resource path to the device that produced the reply.
+      guard @resource.of_path(channel, absolute) is Some(absolute) else {
         return None
       }
       Some(Content(content~, absolute~, sig~))
@@ -196,16 +217,21 @@ fn FileContent::from_reply(reply : @protocol.ReadFileReply) -> FileContent? {
 async fn read_file_snapshot(
   owner : @interop.ConversationKey,
   path : @pathx.Relative,
-  workspace~ : @pathx.Absolute?,
+  workspace~ : @common.Uri?,
 ) -> FileContent? {
+  match workspace {
+    Some(resource) if !@resource.belongs_to(resource, owner.channel) =>
+      return None
+    _ => ()
+  }
   let reply = @interop.bridge_request(owner.channel, @commands.fs_read_file, {
     session: owner.session,
     path: path.0,
-    workspace: workspace.map(value => value.0),
+    workspace: workspace.map(value => value.path),
   }) catch {
     _ => return None
   }
-  FileContent::from_reply(reply)
+  FileContent::from_reply(reply, owner.channel)
 }
 
 ///|
@@ -215,8 +241,13 @@ fn stat_files(
   dispatch : @cmd.Emit[Msg],
   owner : @interop.ConversationKey,
   paths : Array[@pathx.Relative],
-  workspace~ : @pathx.Absolute?,
+  workspace~ : @common.Uri?,
 ) -> @cmd.Cmd {
+  match workspace {
+    Some(resource) if !@resource.belongs_to(resource, owner.channel) =>
+      return @cmd.none
+    _ => ()
+  }
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
       let reply = @interop.bridge_request(
@@ -225,7 +256,7 @@ fn stat_files(
         {
           session: owner.session,
           paths: paths.map(path => path.0),
-          workspace: workspace.map(value => value.0),
+          workspace: workspace.map(value => value.path),
         },
       ) catch {
         _ => return
@@ -257,6 +288,12 @@ fn watch_workspace(
   channel~ : @interop.ChannelId,
   watched : WatchedPaths?,
 ) -> @cmd.Cmd {
+  match watched {
+    Some({ workspace: Some(resource), .. }) if !@resource.belongs_to(
+        resource, channel,
+      ) => return @cmd.none
+    _ => ()
+  }
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
       if watched is None {
@@ -273,7 +310,7 @@ fn watch_workspace(
         ignore(
           @interop.bridge_request_in_order(channel, @commands.fs_watch, {
             session: watched.owner.session,
-            workspace: watched.workspace.map(value => value.0),
+            workspace: watched.workspace.map(value => value.path),
             files: Some(watched.files.map(path => path.0)),
             directories: Some(watched.directories.map(path => path.0)),
           }) catch {
@@ -337,24 +374,34 @@ test "typed directory rows build full relative paths" {
 test "typed file replies map to viewer content" {
   guard FileContent::from_reply(
       @protocol.Content(content="hello", absolute="/ws/a.mbt", sig="12:34"),
+      @interop.ChannelId::Local,
     )
     is Some(Content(content~, absolute~, sig~)) else {
     fail("valid text reply was rejected")
   }
   assert_eq(content, "hello")
-  assert_true(absolute is Absolute("/ws/a.mbt"))
+  assert_eq(absolute.path, "/ws/a.mbt")
+  assert_eq(@resource.channel(absolute), Some(@interop.ChannelId::Local))
   assert_eq(sig, "12:34")
-  assert_true(FileContent::from_reply(@protocol.Binary) is Some(Binary))
-  assert_true(FileContent::from_reply(@protocol.Oversized) is Some(Oversized))
+  assert_true(
+    FileContent::from_reply(@protocol.Binary, @interop.ChannelId::Local)
+    is Some(Binary),
+  )
+  assert_true(
+    FileContent::from_reply(@protocol.Oversized, @interop.ChannelId::Local)
+    is Some(Oversized),
+  )
   assert_true(
     FileContent::from_reply(
       @protocol.Content(content="x", absolute="", sig="1:2"),
+      @interop.ChannelId::Local,
     )
     is None,
   )
   assert_true(
     FileContent::from_reply(
       @protocol.Content(content="x", absolute="relative.mbt", sig="1:2"),
+      @interop.ChannelId::Local,
     )
     is None,
   )

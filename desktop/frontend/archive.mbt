@@ -28,7 +28,7 @@ fn fetch_archived(
       scheduler.add(
         dispatch(
           ArchivedLoaded(
-            @transcript.sessions_from_reply(reply),
+            @transcript.sessions_from_reply(reply, channel),
             connection_generation~,
             request_generation~,
             fresh_session=generated_session_id(),
@@ -119,7 +119,7 @@ fn archive_action(
       scheduler.add(
         dispatch(
           ArchivedLoaded(
-            @transcript.sessions_from_reply(reply),
+            @transcript.sessions_from_reply(reply, channel),
             connection_generation~,
             request_generation=archived_request_generation,
             fresh_session=generated_session_id(),
@@ -143,7 +143,7 @@ fn archive_action(
       scheduler.add(
         dispatch(
           SessionsLoaded(
-            @transcript.sessions_from_reply(sessions),
+            @transcript.sessions_from_reply(sessions, channel),
             connection_generation~,
             request_generation=sessions_request_generation,
           ),

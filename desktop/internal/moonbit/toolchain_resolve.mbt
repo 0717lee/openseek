@@ -54,10 +54,7 @@ pub async fn resolve_toolchain(
   runtime_dir? : @pathx.Path,
 ) -> ResolvedToolchain {
   if bundled_moonbit_seed_dir(engine_command) is Some(seed_dir) {
-    guard prepared_bundled_moonbit_payload(
-        seed_dir=seed_dir.to_path(),
-        runtime_dir?,
-      )
+    guard prepared_bundled_moonbit_payload(seed_dir~, runtime_dir?)
       is Some(payload) else {
       fail("failed to prepare bundled MoonBit toolchain")
     }

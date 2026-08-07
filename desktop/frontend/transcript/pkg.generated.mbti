@@ -1,20 +1,20 @@
 // Generated using `moon info`, DON'T EDIT IT
 package "openseek_desktop/frontend/transcript"
 
+import {
+  "moonbitlang/editor/base/common",
+  "openseek_desktop/frontend/interop",
+  "openseek_desktop/internal/protocol",
+}
+
 // Values
-pub fn apply_session_item(Array[TranscriptItem], String, Map[String, Json]) -> Unit
+pub fn apply_session_item(Array[TranscriptItem], @protocol.SessionItem) -> Unit
 
-pub fn decode_apps_reply(String) -> Array[LauncherAppItem]?
+pub fn apps_from_reply(@protocol.ListAppsReply) -> Array[LauncherAppItem]
 
-pub fn decode_engine_event(Map[String, Json]) -> EngineEvent?
+pub fn decode_engine_event(@protocol.AgentStreamEvent) -> EngineEvent?
 
-pub fn decode_installed_skills_reply(String) -> Array[InstalledSkillItem]?
-
-pub fn decode_session_load_reply(String) -> SessionLoadView?
-
-pub fn decode_sessions_reply(String) -> Array[SessionListItem]?
-
-pub fn decode_skills_catalog_reply(String) -> Array[MarketSkillItem]?
+pub fn installed_skills_from_reply(@protocol.InstalledSkillsReply) -> Array[InstalledSkillItem]
 
 pub fn market_source_label(MarketSkillItem) -> String
 
@@ -22,7 +22,13 @@ pub fn parse_runtime_update(String) -> RuntimeUpdateView
 
 pub fn runtime_update_title(RuntimeUpdateView) -> String
 
-pub fn transcript_from_session_json(String) -> Array[TranscriptItem]?
+pub fn session_from_reply(@protocol.LoadSessionReply) -> SessionLoadView
+
+pub fn sessions_from_reply(@protocol.SessionsReply, @interop.ChannelId) -> Array[SessionListItem]
+
+pub fn skills_catalog_from_reply(@protocol.SkillsCatalogReply) -> Array[MarketSkillItem]
+
+pub fn transcript_from_session(@protocol.LoadSessionReply) -> Array[TranscriptItem]
 
 // Errors
 
@@ -88,7 +94,7 @@ pub struct RuntimeUpdateView {
 pub(all) struct SessionListItem {
   id : String
   title : String?
-  workspace : String
+  workspace : @common.Uri?
   workspace_name : String
 } derive(Eq)
 
@@ -106,4 +112,3 @@ pub(all) struct TranscriptItem {
 // Type aliases
 
 // Traits
-

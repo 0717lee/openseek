@@ -25,7 +25,7 @@ priv struct RunConfig {
   engine : String
   cwd : @pathx.Path?
   session : String?
-  session_root : @pathx.Path?
+  session_root : @pathx.Absolute?
 }
 
 ///|
@@ -126,8 +126,11 @@ async fn serve_config(
   // session's durable record in the in-project store. Only registered
   // workspaces qualify — the registry, not the payload, decides which
   // directories a run may work in.
-  let workspace : @pathx.Path? = if workspace is Some(path) {
-    match registered_workspace(path) {
+  let workspace : @pathx.Absolute? = if workspace is Some(path) {
+    guard @pathx.Absolute::from_uri_path(path) is Some(absolute) else {
+      raise EngineError("workspace is not a supported absolute resource path")
+    }
+    match registered_workspace(absolute) {
       Some(dir) => Some(dir)
       None => raise EngineError("\{path} is not a registered workspace")
     }
@@ -154,8 +157,8 @@ async fn serve_config(
       // checkout vanished refuses here rather than moving the agent into the
       // main tree behind the user's back.
       match session {
-        Some(session) => Some(session_run_dir(dir, session))
-        None => Some(dir)
+        Some(session) => Some(session_run_dir(dir, session).to_path())
+        None => Some(dir.to_path())
       }
     } else {
       resolved_run_cwd(session)
@@ -188,7 +191,7 @@ async fn serve_config(
 async fn resolved_run_cwd(session : String?) -> @pathx.Path? {
   if session is Some(session) {
     if workspace_of_session(session) is Some(workspace) {
-      return Some(session_run_dir(workspace, session))
+      return Some(session_run_dir(workspace, session).to_path())
     }
     if session_workspace_dir(session) is Some(dir) {
       return Some(dir)
@@ -315,6 +318,7 @@ async test "host chooses durable placement from workspace state" {
   let dir = @fs.realpath(@fs.tmpdir(prefix="openseek-config-workspace-"))
   let global_root = dir + "/global"
   let workspace = dir + "/workspace"
+  let workspace_resource = @pathx.Path(workspace).resolve().resource_path()
   @sys.set_env_var("OPENSEEK_SESSION_ROOT", global_root)
   defer (if previous is Some(value) {
     @sys.set_env_var("OPENSEEK_SESSION_ROOT", value)
@@ -357,7 +361,7 @@ async test "host chooses durable placement from workspace state" {
     model: None,
     max_steps: None,
     session: Some("s-attached"),
-    workspace: Some(workspace),
+    workspace: Some(workspace_resource),
   })
   assert_eq(
     attached.session_root.map(root => root.to_string()),

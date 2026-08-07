@@ -31,7 +31,7 @@ pub fn open_file(@cmd.Emit[Msg], State, Ctx, @pathx.Relative, range~ : @common.R
 
 pub fn panel_toggle_cmds(@cmd.Emit[Msg], State, Ctx, opening~ : Bool) -> @cmd.Cmd
 
-pub fn read_file(@cmd.Emit[Msg], @interop.ConversationKey, @pathx.Relative, String, range~ : @common.Range?, annotation? : String, workspace~ : @pathx.Absolute?) -> @cmd.Cmd
+pub fn read_file(@cmd.Emit[Msg], @interop.ConversationKey, @pathx.Relative, String, range~ : @common.Range?, annotation? : String, workspace~ : @common.Uri?) -> @cmd.Cmd
 
 pub fn remove_editor_feedback(ModelUri, String) -> @cmd.Cmd
 
@@ -48,7 +48,7 @@ pub fn update(@cmd.Emit[Msg], Msg, State, Ctx) -> (@cmd.Cmd, State)
 // Types and methods
 pub(all) struct Ctx {
   owner : @interop.ConversationKey
-  workspace : @pathx.Absolute?
+  workspace : @common.Uri?
   checkout : @interop.CheckoutPlacement?
   dark_mode : Bool
   tree_layout : TreeLayout
@@ -74,7 +74,7 @@ pub(all) enum FileChange {
 pub(all) enum FileContent {
   Binary
   Oversized
-  Content(content~ : String, absolute~ : @pathx.Absolute, sig~ : String)
+  Content(content~ : String, absolute~ : @common.Uri, sig~ : String)
 }
 
 pub(all) struct FileEntry {
@@ -96,7 +96,7 @@ pub(all) struct FileStat {
 }
 
 pub struct ModelUri(String)
-pub fn ModelUri::of(@interop.ChannelId, @pathx.Absolute) -> Self
+pub fn ModelUri::of(@common.Uri) -> Self
 
 pub(all) enum Msg {
   RevealDirectory(@pathx.Relative)
@@ -116,8 +116,8 @@ pub(all) enum Msg {
   FsChanged(session~ : String?, changes~ : Array[FileChange]?)
   RunSettled(owner~ : @interop.ConversationKey)
   StatsLoaded(owner~ : @interop.ConversationKey, stats~ : Array[FileStat])
-  DiagnosticsLoaded(owner~ : @interop.ConversationKey, absolute~ : @pathx.Absolute, diagnostics~ : Array[@protocol.LspDiagnostic])
-  DiagnosticsPublished(channel~ : @interop.ChannelId, absolute~ : @pathx.Absolute, diagnostics~ : Array[@protocol.LspDiagnostic])
+  DiagnosticsLoaded(owner~ : @interop.ConversationKey, absolute~ : @common.Uri, diagnostics~ : Array[@protocol.LspDiagnostic])
+  DiagnosticsPublished(channel~ : @interop.ChannelId, absolute~ : @common.Uri, diagnostics~ : Array[@protocol.LspDiagnostic])
   EditorCommentAdded(resource~ : ModelUri, file~ : @pathx.Relative, range~ : @common.Range, quote~ : String, comment~ : String, feedback_id~ : String)
 }
 
@@ -138,7 +138,7 @@ pub fn State::empty() -> Self
 
 pub(all) enum TabState {
   TabLoading
-  TabLoaded(content~ : String, absolute~ : @pathx.Absolute, sig~ : String)
+  TabLoaded(content~ : String, absolute~ : @common.Uri, sig~ : String)
   TabBinary
   TabOversized
   TabDeleted
@@ -153,7 +153,7 @@ pub fn TreeLayout::wire(Self) -> String
 
 pub(all) struct WatchedPaths {
   owner : @interop.ConversationKey
-  workspace : @pathx.Absolute?
+  workspace : @common.Uri?
   files : Array[@pathx.Relative]
   directories : Array[@pathx.Relative]
 } derive(Eq)

@@ -1,6 +1,12 @@
 // Typed replies and nested wire documents for the desktop API. JSON exists
 // only while a transport or an external process encodes/decodes these values;
 // request handlers and frontend code exchange the closed types below.
+//
+// Every field described as an absolute filesystem path carries only the
+// slash-rooted path component of an OpenSeek resource URI: `/home/u/work` on
+// POSIX and `/C:/work` for a Windows drive. The frontend binds that path to
+// the channel that produced the reply. UNC paths are outside this contract;
+// workspace-relative fields remain slash-separated relative strings.
 
 ///|
 /// Object-shaped input for methods with no arguments.

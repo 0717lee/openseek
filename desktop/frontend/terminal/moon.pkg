@@ -3,12 +3,12 @@ import {
   "moonbit-community/rabbita/dom",
   "moonbit-community/rabbita/html",
   "moonbit-community/rabbita/js",
-  "moonbitlang/x/path/win32" @winpath,
+  "moonbitlang/editor/base/common",
   "openseek_desktop/frontend/internal/terminal_input",
-  "openseek_desktop/internal/pathx",
   "openseek_desktop/internal/protocol",
   "openseek_desktop/internal/commands",
   "openseek_desktop/frontend/interop",
+  "openseek_desktop/frontend/resource",
 }
 
 supported_targets = "js"

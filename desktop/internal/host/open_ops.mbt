@@ -10,7 +10,7 @@ async fn open_path_op(payload : OpenPathPayload) -> OpenPathReply {
   // to the directory the session's engine runs in.
   let base = match payload.cwd {
     Some(cwd) => {
-      guard @pathx.Path(cwd).to_absolute() is Some(cwd) else {
+      guard @pathx.Absolute::from_uri_path(cwd) is Some(cwd) else {
         raise HostError("Invalid working directory")
       }
       Some(cwd)

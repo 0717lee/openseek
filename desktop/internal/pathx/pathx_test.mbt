@@ -226,3 +226,52 @@ test "other host path operations keep Windows spellings" {
   assert_eq(@pathx.Path("a\\b.txt").basename().to_owned(), "b.txt")
   assert_eq(@pathx.Path("a\\b.txt").extname().to_owned(), ".txt")
 }
+
+///|
+#cfg(not(platform="windows"))
+test "POSIX absolute paths round-trip through URI paths" {
+  guard @pathx.Path("/work/a b/#file.mbt").to_absolute() is Some(absolute) else {
+    fail("expected an absolute POSIX fixture")
+  }
+  assert_eq(absolute.to_uri_path(), Some("/work/a b/#file.mbt"))
+  assert_eq(
+    @pathx.Absolute::from_uri_path("/work/a b/#file.mbt"),
+    Some(absolute),
+  )
+}
+
+///|
+#cfg(not(platform="windows"))
+test "resource URI conversion rejects double-rooted POSIX paths" {
+  guard @pathx.Path("//server/share/a.mbt").to_absolute() is Some(absolute) else {
+    fail("expected an absolute POSIX fixture")
+  }
+  assert_true(absolute.to_uri_path() is None)
+  assert_true(@pathx.Absolute::from_uri_path("//server/share/a.mbt") is None)
+}
+
+///|
+#cfg(platform="windows")
+test "Windows drive paths round-trip through URI paths" {
+  guard @pathx.Path("C:\\work\\a b\\#file.mbt").to_absolute() is Some(absolute) else {
+    fail("expected an absolute Windows fixture")
+  }
+  assert_eq(absolute.to_uri_path(), Some("/C:/work/a b/#file.mbt"))
+  assert_true(
+    @pathx.Absolute::from_uri_path("/C:/work/a b/#file.mbt") is Some(decoded) &&
+    decoded.normalize() == absolute.normalize(),
+  )
+}
+
+///|
+#cfg(platform="windows")
+test "resource URI conversion rejects UNC and root-relative Windows paths" {
+  for path in ["\\\\server\\share\\a.mbt", "\\rooted\\a.mbt"] {
+    guard @pathx.Path(path).to_absolute() is Some(absolute) else {
+      fail("expected an absolute Windows fixture")
+    }
+    assert_true(absolute.to_uri_path() is None)
+  }
+  assert_true(@pathx.Absolute::from_uri_path("//server/share/a.mbt") is None)
+  assert_true(@pathx.Absolute::from_uri_path("/rooted/a.mbt") is None)
+}

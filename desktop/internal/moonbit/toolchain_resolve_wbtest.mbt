@@ -149,10 +149,11 @@ async test "no toolchain anywhere raises ToolchainUnavailable" {
 /// sessions lose the user's registry credentials.
 async test "toolchain env policy leaves MOON_HOME alone" {
   let env : Map[String, String] = { "MOON_HOME": "/custom", "PATH": "/usr/bin" }
-  {
-    bin_dir: @pathx.Path("found/bin").resolve(),
-    moon: @pathx.Path("found/bin/moon").resolve(),
-  }.apply_to_env(env)
+  let bin_dir = @pathx.Path("found/bin").resolve()
+  { bin_dir, moon: bin_dir.join("moon") }.apply_to_env(env)
   assert_eq(env.get("MOON_HOME"), Some("/custom"))
-  assert_true(env.get("PATH").unwrap_or("").has_prefix("/found/bin"))
+  assert_true(
+    env.get("PATH").map(path => path.has_prefix(bin_dir.to_string())) ==
+    Some(true),
+  )
 }

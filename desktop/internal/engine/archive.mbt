@@ -16,7 +16,7 @@ const ArchivedDirName = "archived"
 const LegacyArchivedListFile = "archived_sessions.txt"
 
 ///|
-fn archived_session_root(root : @pathx.Path) -> @pathx.Path {
+fn archived_session_root(root : @pathx.Absolute) -> @pathx.Absolute {
   root.join(ArchivedDirName).normalize()
 }
 
@@ -24,22 +24,24 @@ fn archived_session_root(root : @pathx.Path) -> @pathx.Path {
 /// Every store that can own a session id. Correlation and stale-client
 /// defenses must search all of them: request hints are optional and cannot be
 /// trusted to identify where an existing record lives.
-async fn known_session_roots() -> Array[@pathx.Path] {
-  let roots : Array[@pathx.Path] = []
+async fn known_session_roots() -> Array[@pathx.Absolute] {
+  let roots : Array[@pathx.Absolute] = []
   if resolved_session_root() is Some(root) {
     roots.push(root)
   }
   for path in registered_workspaces() {
-    roots.push(workspace_session_root(path.to_path()))
+    roots.push(workspace_session_root(path))
   }
   roots
 }
 
 ///|
-async fn archived_record_root(session : String) -> @pathx.Path? {
+async fn archived_record_root(session : String) -> @pathx.Absolute? {
   guard !session.is_empty() else { return None }
   for root in known_session_roots() {
-    if @fsx.is_dir(archived_session_root(root).join("sessions").join(session)) {
+    if @fsx.is_dir(
+        archived_session_root(root).join("sessions").join(session).to_path(),
+      ) {
       return Some(root)
     }
   }
@@ -75,15 +77,14 @@ async fn list_archived_sessions(manager : EngineManager) -> SessionsReply {
     )
   }
   let groups : Array[SessionGroup] = [
-    session_group(manager, "", archived_session_root(root)),
+    session_group(manager, None, archived_session_root(root)),
   ]
   for path in registered_workspaces() {
-    let workspace = path.to_path()
     groups.push(
       session_group(
         manager,
-        path.0,
-        archived_session_root(workspace_session_root(workspace)),
+        Some(path),
+        archived_session_root(workspace_session_root(path)),
       ),
     )
   }
@@ -248,7 +249,7 @@ async fn unarchive_session_commit(
   record_guard.wait_until_idle()
   for root in known_session_roots() {
     let record = archived_session_root(root).join("sessions").join(session)
-    if @fsx.is_dir(record) {
+    if @fsx.is_dir(record.to_path()) {
       @async.protect_from_cancel(() => {
         claim.require_current(manager)
         move_session_record(record, root.join("sessions"), session)
@@ -265,18 +266,18 @@ async fn unarchive_session_commit(
 /// creating the destination store level on demand. Same-store moves are a
 /// single rename, so a conversation is never half-archived.
 async fn move_session_record(
-  record : @pathx.Path,
-  destination_dir : @pathx.Path,
+  record : @pathx.Absolute,
+  destination_dir : @pathx.Absolute,
   session : String,
 ) -> Unit {
-  guard @fsx.is_dir(record) else {
+  guard @fsx.is_dir(record.to_path()) else {
     raise EngineError("no durable record for this conversation")
   }
   let destination = destination_dir.join(session)
-  guard !@fsx.exists(destination) else {
+  guard !@fsx.exists(destination.to_path()) else {
     raise EngineError("a record for this conversation already exists there")
   }
-  @fsx.ensure_dir(destination_dir) catch {
+  @fsx.ensure_dir(destination_dir.to_path()) catch {
     error if @async.is_being_cancelled() => raise error
     error => raise EngineError("could not create \{destination_dir}: \{error}")
   }
@@ -336,12 +337,12 @@ async fn migrate_legacy_archive(
 /// in the legacy file for a later retry.
 async fn migrate_legacy_session(
   manager : EngineManager,
-  root : @pathx.Path,
+  root : @pathx.Absolute,
   session : String,
   on_migrated : (String) -> Unit,
 ) -> Bool {
   let record = root.join("sessions").join(session)
-  let is_live = @fsx.is_dir(record) catch {
+  let is_live = @fsx.is_dir(record.to_path()) catch {
     error if @async.is_being_cancelled() => raise error
     _ => false
   }

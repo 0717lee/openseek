@@ -12,10 +12,12 @@ import {
 // Types and methods
 pub struct Absolute(String) derive(Eq, Hash, @debug.Debug)
 pub fn Absolute::contains(Self, Self) -> Bool
+pub fn Absolute::from_uri_path(String) -> Self?
 pub fn Absolute::join(Self, Relative) -> Self
 pub fn Absolute::normalize(Self) -> Self
 pub fn Absolute::relative_to(Self, root~ : Self) -> Relative?
 pub fn Absolute::to_path(Self) -> Path
+pub fn Absolute::to_uri_path(Self) -> String?
 pub impl Show for Absolute
 
 pub(all) struct Path(String) derive(Eq, @debug.Debug)

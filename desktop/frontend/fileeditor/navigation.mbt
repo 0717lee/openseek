@@ -11,26 +11,26 @@
 /// `fs.read_file`.
 priv struct NavigationContext {
   owner : @interop.ConversationKey
-  root : @pathx.Absolute
+  root : @common.Uri
 } derive(Eq)
 
 ///|
-/// Reconstruct the workspace root from one file's host-resolved absolute path
-/// and its workspace-relative name. Separators are normalized so a Windows
-/// host and URI-derived path compare in the same form. This is lexical only;
+/// Reconstruct the workspace root from one file's resource URI and its
+/// workspace-relative name. URI paths already use slash separators. This is
+/// lexical only;
 /// both values came from the same successful, workspace-contained read.
 fn navigation_root_from_file(
-  absolute : @pathx.Absolute,
+  absolute : @common.Uri,
   relative : @pathx.Relative,
-) -> @pathx.Absolute? {
-  let path = absolute.normalize().0
+) -> @common.Uri? {
+  let path = absolute.path
   let name = relative.normalize().0
   guard !name.is_empty() else { return None }
   let suffix = "/" + name
   guard path.strip_suffix(suffix) is Some(root) else { return None }
   let root = if root.is_empty() { "/" } else { root.to_owned() }
-  // The reconstructed prefix must itself be a complete absolute path.
-  @pathx.Path(root).to_absolute()
+  let root = absolute.with_(path=root) catch { _ => return None }
+  Some(root)
 }
 
 ///|
@@ -40,12 +40,13 @@ fn navigation_root_from_file(
 /// paths behind symlinked workspace hints).
 fn navigation_context_for_file(
   owner : @interop.ConversationKey,
-  workspace : @pathx.Absolute?,
-  absolute : @pathx.Absolute,
+  workspace : @common.Uri?,
+  absolute : @common.Uri,
   relative : @pathx.Relative,
 ) -> NavigationContext? {
   let root = match workspace {
-    Some(root) if absolute.relative_to(root~) == Some(relative) => Some(root)
+    Some(root) if @resource.relative_to(absolute, root) == Some(relative) =>
+      Some(root)
     _ => navigation_root_from_file(absolute, relative)
   }
   root.map(root => { owner, root })
@@ -73,7 +74,7 @@ impl @language.DefinitionProvider for MoonIdeNavigationProvider with fn provide_
   let locations = request_moon_ide_locations(
     channel,
     @commands.moonide_definition,
-    { path: path.0, line: position.line_number, column: position.column },
+    { path: path.path, line: position.line_number, column: position.column },
   ) catch {
     _ => return []
   }
@@ -101,7 +102,7 @@ impl @language.ReferencesProvider for MoonIdeNavigationProvider with fn provide_
   let locations = request_moon_ide_locations(
     channel,
     @commands.moonide_references,
-    { path: path.0, line: position.line_number, column: position.column },
+    { path: path.path, line: position.line_number, column: position.column },
   ) catch {
     _ => return []
   }
@@ -175,11 +176,11 @@ fn MoonIdeProjection::to_viewer(
     }
     // Host navigation locations are external input. Ignore malformed paths
     // instead of letting them acquire Absolute's invariant.
-    guard @pathx.Path(location.path).to_absolute() is Some(absolute) else {
+    guard @resource.of_path(self.channel, location.path) is Some(absolute) else {
       continue
     }
     result.push(@language.Location::{
-      uri: model_uri_of(self.channel, absolute),
+      uri: model_uri_of(absolute),
       range: @common.Range::Range(
         location.start_line,
         location.start_column,
@@ -203,7 +204,7 @@ fn navigation_location_opener(
     guard viewer_state.navigation is Some(context) else { return false }
     guard model_uri_channel(request.location.uri) == Some(context.owner.channel) &&
       model_uri_path(request.location.uri) is Some(absolute) &&
-      absolute.relative_to(root=context.root) is Some(relative) &&
+      @resource.relative_to(absolute, context.root) is Some(relative) &&
       !relative.is_root() else {
       return false
     }
@@ -234,7 +235,7 @@ async fn resolve_navigation_preview(
   guard viewer_state.navigation is Some(context) else { return None }
   guard model_uri_channel(resource) == Some(context.owner.channel) &&
     model_uri_path(resource) is Some(absolute) &&
-    absolute.relative_to(root=context.root) is Some(relative) &&
+    @resource.relative_to(absolute, context.root) is Some(relative) &&
     !relative.is_root() else {
     return None
   }
@@ -272,37 +273,18 @@ async fn resolve_navigation_preview(
 }
 
 ///|
-#cfg(not(platform="windows"))
-test "navigation root follows POSIX absolute and workspace-relative paths" {
-  guard @pathx.Path("/ws/project/src/main.mbt").to_absolute()
-    is Some(posix_file) else {
-    fail("test POSIX file was not absolute")
-  }
-  assert_true(
-    navigation_root_from_file(posix_file, Relative("src/main.mbt"))
-    is Some(Absolute("/ws/project")),
-  )
-  guard @pathx.Path("/other/src/main.mbt").to_absolute() is Some(outside_file) else {
-    fail("test outside file was not absolute")
-  }
-  assert_true(
-    navigation_root_from_file(outside_file, Relative("lib/main.mbt")) is None,
-  )
-}
-
-///|
-#cfg(platform="windows")
-test "navigation root follows Windows absolute and workspace-relative paths" {
-  guard @pathx.Path("C:\\ws\\project\\src\\main.mbt").to_absolute()
+test "navigation root follows resource and workspace-relative paths" {
+  guard @resource.of_path(@interop.ChannelId::Local, "/ws/project/src/main.mbt")
     is Some(file) else {
-    fail("test Windows file was not absolute")
+    fail("test resource path was not absolute")
   }
-  assert_true(
-    navigation_root_from_file(file, Relative("src/main.mbt"))
-    is Some(Absolute("C:/ws/project")),
-  )
-  guard @pathx.Path("C:\\other\\src\\main.mbt").to_absolute() is Some(outside) else {
-    fail("test outside file was not absolute")
+  guard navigation_root_from_file(file, Relative("src/main.mbt")) is Some(root) else {
+    fail("resource root was not reconstructed")
+  }
+  assert_eq(root.path, "/ws/project")
+  guard @resource.of_path(@interop.ChannelId::Local, "/other/src/main.mbt")
+    is Some(outside) else {
+    fail("test outside resource was not absolute")
   }
   assert_true(
     navigation_root_from_file(outside, Relative("lib/main.mbt")) is None,
@@ -342,7 +324,8 @@ test "moon ide locations stay one based and channel routed" {
   assert_eq(locations.length(), 1)
   assert_true(
     model_uri_channel(locations[0].uri) == Some(Remote("device")) &&
-    model_uri_path(locations[0].uri) is Some(Absolute("/ws/lib.mbt")) &&
+    model_uri_path(locations[0].uri) is Some(resource) &&
+    resource.path == "/ws/lib.mbt" &&
     locations[0].range == @common.Range::Range(2, 3, 2, 9),
   )
 }

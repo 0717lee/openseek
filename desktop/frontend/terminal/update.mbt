@@ -17,16 +17,7 @@
 /// directory's name, or "scratch" for a conversation without one.
 fn workspace_label(ctx : Ctx) -> String {
   guard ctx.workspace is Some(workspace) else { return "scratch" }
-  let text = workspace.0
-  // A workspace hint may have been produced on another platform. The win32
-  // flavor intentionally accepts both `\` and `/`, without the top-level
-  // `path` package's Node-only runtime platform probe in this browser bundle.
-  let label = @winpath.Path(text).basename()
-  if label.is_empty() {
-    text
-  } else {
-    label.to_owned()
-  }
+  @resource.label(workspace)
 }
 
 ///|

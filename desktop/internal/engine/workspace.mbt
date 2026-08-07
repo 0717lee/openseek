@@ -20,7 +20,7 @@ async fn session_workspace_dir(session : String) -> @pathx.Path? {
     // A session bound to one of the workspace's worktrees works in that
     // checkout while it exists. A retained binding whose checkout is missing
     // refuses every workspace operation until the user rebuilds it.
-    return session_tree_dir(workspace, session)
+    return session_tree_dir(workspace, session).map(dir => dir.to_path())
   }
   guard safe_workspace_id(session) else { return None }
   guard workspace_root() is Some(root) else { return None }
@@ -54,14 +54,15 @@ pub async fn resolve_in_workspace(
   session : String,
   relative : String,
   workspace? : String,
-) -> @pathx.Path? {
+) -> @pathx.Absolute? {
   let root = if workspace is Some(hint) &&
+    @pathx.Absolute::from_uri_path(hint) is Some(hint) &&
     registered_workspace(hint) is Some(dir) {
     // The hint names the workspace; a session bound to one of its worktrees
     // still roots in that checkout — the FS bridge sends the hint on every
     // op, and honoring it verbatim would pin worktree conversations to the
     // main tree.
-    session_tree_dir(dir, session)
+    session_tree_dir(dir, session).map(root => root.to_path())
   } else {
     session_workspace_dir(session)
   }
@@ -75,7 +76,7 @@ pub async fn resolve_in_workspace(
   // The lexical containment above stops `..` traversal but not a symlink inside
   // the workspace pointing outside it; reject one whose real target escapes.
   guard real_contains(root, resolved) else { return None }
-  Some(resolved.to_path())
+  Some(resolved)
 }
 
 ///|
@@ -113,14 +114,13 @@ async fn real_contains(
 /// or — under the scratch-workspace root — the per-session directory that
 /// owns it. `None` for a relative path or anything outside, which ops routed
 /// by path alone must refuse.
-pub async fn attached_workspace_dir(path : @pathx.Absolute) -> @pathx.Path? {
+pub async fn attached_workspace_dir(path : @pathx.Absolute) -> @pathx.Absolute? {
   // LSP/navigation paths may contain `.` or `..`. Clean them with the host's
   // filesystem rules before selecting the deepest workspace or worktree, so
   // equivalent spellings are classified by their actual lexical location.
   guard path.to_path().normalize().to_absolute() is Some(resolved_absolute) else {
     return None
   }
-  let resolved = resolved_absolute.0
   let mut best : @pathx.Absolute? = None
   for workspace in registered_workspaces() {
     guard workspace.contains(resolved_absolute) else { continue }
@@ -129,12 +129,12 @@ pub async fn attached_workspace_dir(path : @pathx.Absolute) -> @pathx.Path? {
     }
     best = Some(workspace)
   }
-  let dir : @pathx.Path = if best is Some(workspace) {
+  let dir : @pathx.Absolute = if best is Some(workspace) {
     // A path under a registered worktree belongs to that checkout, not the
     // workspace root: language ops routed by path alone must answer from the
     // worktree's own tree. An unregistered `.worktrees` path (a subtask
     // slice) keeps resolving to the workspace root.
-    worktree_owner_dir(workspace.to_path(), resolved)
+    worktree_owner_dir(workspace, resolved_absolute)
   } else {
     guard workspace_root() is Some(root) else { return None }
     guard root.to_absolute() is Some(root_absolute) else { return None }
@@ -148,12 +148,11 @@ pub async fn attached_workspace_dir(path : @pathx.Absolute) -> @pathx.Path? {
       Some(index) => rest.0.view(end_offset=index).to_owned()
       None => rest.0
     }
-    root.join(Relative(session)).normalize()
+    root_absolute.join(Relative(session)).normalize()
   }
   // Reject an absolute path whose real target — following symlinks — escapes
   // the owning directory; the lexical containment above does not follow links.
-  guard dir.to_absolute() is Some(dir_absolute) else { return None }
-  guard real_contains(dir_absolute, resolved_absolute) else { return None }
+  guard real_contains(dir, resolved_absolute) else { return None }
   Some(dir)
 }
 
@@ -167,11 +166,8 @@ fn contained_path(
   relative : @pathx.Relative,
 ) -> @pathx.Absolute? {
   guard relative.to_path().to_absolute() is None else { return None }
-  let root_path = root.to_path()
-  let resolved = root_path.join(relative).normalize()
-  guard resolved.to_absolute() is Some(resolved) && root.contains(resolved) else {
-    return None
-  }
+  let resolved = root.join(relative).normalize()
+  guard root.contains(resolved) else { return None }
   Some(resolved)
 }
 

@@ -33,7 +33,7 @@ priv struct FsWatchActor {
 /// be shown in the next conversation.
 priv struct FsWatchTarget {
   session : String
-  root : @pathx.Path
+  root : @pathx.Absolute
   interest : WatchInterest
 }
 
@@ -218,7 +218,7 @@ async fn FsWatchTarget::watch(
   defer watcher.close()
   emit({
     session: self.session,
-    root: self.root.to_string(),
+    root: self.root.resource_path(),
     baseline: true,
     events: [],
   })
@@ -226,7 +226,7 @@ async fn FsWatchTarget::watch(
     let events = watcher.wait()
     emit({
       session: self.session,
-      root: self.root.to_string(),
+      root: self.root.resource_path(),
       baseline: false,
       events: events.map(FsEventPayload::from_event),
     })
@@ -279,7 +279,7 @@ async fn FsWatchActor::run(
               }
             emit_failed({
               session: target.session,
-              root: target.root.to_string(),
+              root: target.root.resource_path(),
               message,
             })
           }

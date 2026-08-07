@@ -14,8 +14,8 @@ fn moonbit_process_env(moon_home : @pathx.Path) -> Map[String, String] {
 }
 
 ///|
-async fn bundled_moonbit_seed_version(seed_dir : @pathx.Path) -> String? {
-  guard @fsx.read_text_if_exists(moonbit_seed_version_path(seed_dir))
+async fn bundled_moonbit_seed_version(seed_dir : @pathx.Absolute) -> String? {
+  guard @fsx.read_text_if_exists(moonbit_seed_version_path(seed_dir).to_path())
     is Some(version) else {
     return None
   }
@@ -83,7 +83,7 @@ async fn bundle_moonbit(
 
 ///|
 async fn copy_dir_recursive(
-  source : @pathx.Path,
+  source : @pathx.Absolute,
   destination : @pathx.Path,
 ) -> Unit {
   @fsx.ensure_dir(destination)
@@ -95,14 +95,14 @@ async fn copy_dir_recursive(
     if entry.is_dir {
       copy_dir_recursive(source_entry, destination_entry)
     } else {
-      @fsx.copy_file(source_entry, destination_entry)
+      @fsx.copy_file(source_entry.to_path(), destination_entry)
     }
   }
 }
 
 ///|
 async fn copy_moonbit_seed_dir(
-  source : @pathx.Path,
+  source : @pathx.Absolute,
   destination : @pathx.Path,
 ) -> Unit {
   copy_dir_recursive(source, destination)
@@ -170,7 +170,7 @@ let prepare_payload_lock : @semaphore.Semaphore = Semaphore(1, initial_value=1)
 
 ///|
 async fn prepared_bundled_moonbit_payload(
-  seed_dir~ : @pathx.Path,
+  seed_dir~ : @pathx.Absolute,
   runtime_dir? : @pathx.Path,
 ) -> @pathx.Path? {
   guard prepared_moonbit_payload_dir(seed_dir~, runtime_dir?) is Some(moon_home) else {
@@ -226,7 +226,7 @@ async test "prepared payload dir accepts existing toolchain root" {
   @fs.mkdir(root.to_string(), recursive=true)
   let expected = root.join("macos-arm64").to_string()
   let result = prepared_moonbit_payload_dir(
-    seed_dir=runtime.join("seed").join("macos-arm64"),
+    seed_dir=runtime.join("seed").join("macos-arm64").resolve(),
     runtime_dir=runtime,
   ) catch {
     error => {

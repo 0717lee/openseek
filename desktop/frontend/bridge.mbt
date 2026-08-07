@@ -123,7 +123,7 @@ fn bridge_msg(
       } else {
         None
       }
-    _ => device_msg(notification).map(msg => FromDevice(channel, msg))
+    _ => device_msg(channel, notification).map(msg => FromDevice(channel, msg))
   }
 }
 
@@ -132,10 +132,13 @@ fn bridge_msg(
 /// readiness/resync signal on both transports: it re-fires on every
 /// reconnect (and engine-pump restart), and the refetches BridgeReady
 /// triggers — including `agent.runs` — rebuild whatever was missed.
-fn device_msg(notification : @protocol.Notification) -> DeviceMsg? {
+fn device_msg(
+  channel : @interop.ChannelId,
+  notification : @protocol.Notification,
+) -> DeviceMsg? {
   match notification {
     AgentConnected(_) => Some(BridgeReady)
-    AgentStarted(payload) => started_msg(payload)
+    AgentStarted(payload) => started_msg(channel, payload)
     AgentEvent(payload) => engine_msg(payload)
     AgentError(payload) => error_msg(payload)
     AgentFinished(payload) => finished_msg(payload)
@@ -143,15 +146,16 @@ fn device_msg(notification : @protocol.Notification) -> DeviceMsg? {
     SessionEvent(payload) => session_event_msg(payload)
     SessionChanged(payload) => session_changed_msg(payload)
     WorkspaceChanged(payload) => {
-      let paths : Array[@pathx.Absolute] = []
+      let paths : Array[@common.Uri] = []
       for path in payload.workspaces {
-        if @pathx.Path(path).to_absolute() is Some(path) {
-          paths.push(path)
+        guard @resource.of_path(channel, path) is Some(resource) else {
+          return None
         }
+        paths.push(resource)
       }
       Some(WorkspacesChanged(paths))
     }
-    WorktreeChanged(payload) => worktree_changed_msg(payload)
+    WorktreeChanged(payload) => worktree_changed_msg(channel, payload)
     SettingsChanged(payload) =>
       Some(
         HostSettingsLoaded(
@@ -596,7 +600,7 @@ fn fetch_runs(
       let recovered : Array[RecoveredRun] = []
       for item in reply.runs {
         live.push(item.run_id)
-        if RecoveredRun::from_started(item) is Some(run) {
+        if RecoveredRun::from_started(channel, item) is Some(run) {
           recovered.push(run)
         }
       }
@@ -662,7 +666,10 @@ fn runs_payload(frontier : Array[RunSnapshotFrontier]) -> @protocol.RunsPayload 
 }
 
 ///|
-fn started_msg(payload : @protocol.StartedPayload) -> DeviceMsg? {
+fn started_msg(
+  channel : @interop.ChannelId,
+  payload : @protocol.StartedPayload,
+) -> DeviceMsg? {
   // `run_id`/`session`/`model`/`max_steps` are unconditional on this event
   // (the app's own start op always names a session); a payload missing one
   // is malformed and dropped. `cwd` and the durable `session_root` are
@@ -678,7 +685,7 @@ fn started_msg(payload : @protocol.StartedPayload) -> DeviceMsg? {
   // complete absolute path, reject the malformed event as a whole.
   let cwd = match payload.cwd {
     Some(path) => {
-      guard @pathx.Path(path).to_absolute() is Some(absolute) else {
+      guard @resource.of_path(channel, path) is Some(absolute) else {
         return None
       }
       Some(absolute)
@@ -687,7 +694,7 @@ fn started_msg(payload : @protocol.StartedPayload) -> DeviceMsg? {
   }
   let session_root = match payload.session_root {
     Some(path) => {
-      guard @pathx.Path(path).to_absolute() is Some(absolute) else {
+      guard @resource.of_path(channel, path) is Some(absolute) else {
         return None
       }
       Some(absolute)
@@ -713,6 +720,7 @@ fn started_msg(payload : @protocol.StartedPayload) -> DeviceMsg? {
 /// dispatching it. Snapshot rows remain plain data until `update` accepts the
 /// reply's connection generation.
 fn RecoveredRun::from_started(
+  channel : @interop.ChannelId,
   payload : @protocol.StartedPayload,
 ) -> RecoveredRun? {
   guard payload.session is Some(session) &&
@@ -722,7 +730,7 @@ fn RecoveredRun::from_started(
   }
   let cwd = match payload.cwd {
     Some(path) => {
-      guard @pathx.Path(path).to_absolute() is Some(absolute) else {
+      guard @resource.of_path(channel, path) is Some(absolute) else {
         return None
       }
       Some(absolute)
@@ -731,7 +739,7 @@ fn RecoveredRun::from_started(
   }
   let session_root = match payload.session_root {
     Some(path) => {
-      guard @pathx.Path(path).to_absolute() is Some(absolute) else {
+      guard @resource.of_path(channel, path) is Some(absolute) else {
         return None
       }
       Some(absolute)
@@ -856,7 +864,7 @@ fn diagnostics_msg(
   channel : @interop.ChannelId,
   payload : @protocol.DiagnosticsPayload,
 ) -> @fileeditor.Msg? {
-  guard @pathx.Path(payload.path).to_absolute() is Some(absolute) else {
+  guard @resource.of_path(channel, payload.path) is Some(absolute) else {
     return None
   }
   Some(
@@ -910,8 +918,13 @@ fn start_openseek(
   selected_model : String,
   max_steps : String,
   session : String,
-  workspace~ : @pathx.Absolute?,
+  workspace~ : @common.Uri?,
 ) -> @cmd.Cmd {
+  match workspace {
+    Some(resource) if !@resource.belongs_to(resource, channel) =>
+      return @cmd.none
+    _ => ()
+  }
   let payload = start_payload(
     task,
     selected_model,
@@ -983,7 +996,7 @@ fn start_payload(
   max_steps : String,
   session : String,
   submission_id : String,
-  workspace~ : @pathx.Absolute?,
+  workspace~ : @common.Uri?,
 ) -> @protocol.StartPayload {
   let selected_model = selected_model.trim().to_owned()
   let session = session.trim().to_owned()
@@ -1001,7 +1014,7 @@ fn start_payload(
     } else {
       Some(session)
     },
-    workspace: workspace.map(value => value.0),
+    workspace: workspace.map(value => value.path),
   }
 }
 
@@ -1060,7 +1073,7 @@ async fn refresh_sessions_into(
   scheduler.add(
     dispatch(
       SessionsLoaded(
-        @transcript.sessions_from_reply(reply),
+        @transcript.sessions_from_reply(reply, channel),
         connection_generation~,
         request_generation~,
       ),
@@ -1076,7 +1089,7 @@ fn open_session(
   dispatch : @cmd.Emit[Msg],
   channel : @interop.ChannelId,
   session_id : String,
-  workspace~ : @pathx.Absolute?,
+  workspace~ : @common.Uri?,
   generation~ : Int,
 ) -> @cmd.Cmd {
   let dispatch = dispatch.map((msg : DeviceMsg) => FromDevice(channel, msg))
@@ -1115,7 +1128,7 @@ fn refresh_session(
   dispatch : @cmd.Emit[Msg],
   channel : @interop.ChannelId,
   session_id : String,
-  workspace~ : @pathx.Absolute?,
+  workspace~ : @common.Uri?,
   generation~ : Int,
 ) -> @cmd.Cmd {
   let dispatch = dispatch.map((msg : DeviceMsg) => FromDevice(channel, msg))
@@ -1144,15 +1157,20 @@ fn refresh_session(
 fn load_session_cmd(
   channel : @interop.ChannelId,
   session_id : String,
-  workspace~ : @pathx.Absolute?,
+  workspace~ : @common.Uri?,
   on_loaded~ : (@transcript.SessionLoadView) -> @cmd.Cmd,
   on_failed~ : (String) -> @cmd.Cmd,
 ) -> @cmd.Cmd {
+  match workspace {
+    Some(resource) if !@resource.belongs_to(resource, channel) =>
+      return @cmd.none
+    _ => ()
+  }
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
       let reply = @interop.bridge_request(channel, @commands.session_load, {
         session: session_id,
-        workspace: workspace.map(path => path.0),
+        workspace: workspace.map(path => path.path),
       }) catch {
         error => {
           scheduler.add(on_failed(@interop.bridge_error_text(error)))
@@ -1232,8 +1250,13 @@ fn compact_openseek(
   session~ : String,
   model~ : String,
   max_steps~ : String,
-  workspace? : @pathx.Absolute,
+  workspace? : @common.Uri,
 ) -> @cmd.Cmd {
+  match workspace {
+    Some(resource) if !@resource.belongs_to(resource, channel) =>
+      return @cmd.none
+    _ => ()
+  }
   let dispatch = dispatch.map((msg : DeviceMsg) => FromDevice(channel, msg))
   let model = model.trim().to_owned()
   @cmd.custom_cmd(scheduler => {
@@ -1247,7 +1270,7 @@ fn compact_openseek(
             Some(model)
           },
           max_steps: parsed_max_steps(max_steps),
-          workspace: workspace.map(value => value.0),
+          workspace: workspace.map(value => value.path),
         }) catch {
           error => {
             // Routed by session, not as a generic Error: the rejection must
@@ -1349,18 +1372,20 @@ fn open_file(
   dispatch : @cmd.Emit[Msg],
   channel : @interop.ChannelId,
   session : String,
-  cwd~ : @pathx.Absolute?,
+  cwd~ : @common.Uri?,
   path : String,
 ) -> @cmd.Cmd {
+  match cwd {
+    Some(resource) if !@resource.belongs_to(resource, channel) =>
+      return @cmd.none
+    _ => ()
+  }
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
       ignore(
         @interop.bridge_request(channel, @commands.host_open_path, {
           session,
-          cwd: match workspace_token(cwd).trim() {
-            "" => None
-            value => Some(value.to_owned())
-          },
+          cwd: cwd.map(resource => resource.path),
           path,
         }) catch {
           error => {
