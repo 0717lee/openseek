@@ -573,6 +573,10 @@ async test "sandbox preblocks common source-writing commands" {
         "git restore -s HEAD~1 main.mbt", "git rebase -i main", "git rebase --exec ls main",
         "git rebase -s ours main", "git rebase --edit-todo", "git -c sequence.editor=x rebase --continue",
         "GIT_DIR=/tmp/x git rebase main",
+        // submodule: foreach runs arbitrary commands; forced update/deinit lose data.
+         "git submodule foreach echo hi", "git submodule --quiet foreach echo hi",
+        "git submodule update --force", "git submodule deinit --force path", "git -c filter.f.smudge=cmd submodule update --init",
+        "GIT_DIR=/tmp/x git submodule update --init",
       ] {
       assert_true(
         is_some_path(
@@ -615,6 +619,11 @@ async test "sandbox preblocks common source-writing commands" {
         "git clean -fdn", "git status", "git apply --check patch.diff", "git apply --stat patch.diff",
         "git worktree add ../wt", "git worktree remove ../wt", "git rebase main",
         "git rebase --continue", "git rebase --onto main feature~3 feature", "git rebase --rebase-merges main",
+        // submodule: unforced update/deinit and non-writer verbs are not pre-blocked.
+         "git submodule update --init", "git submodule --quiet update --init", "git submodule update --recursive",
+        "git submodule deinit path", "git submodule add https://example.com/repo path",
+        "git submodule set-url path url", "git submodule init", "git submodule sync",
+        "git submodule status",
       ] {
       assert_true(
         tree_target(recoverable_git, real_root, Some(real_root)) is None,

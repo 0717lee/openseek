@@ -22,9 +22,13 @@ test "object-store-write classification excludes mv and plumbing" {
   }
   // rebase is deliberately absent: its recoverable forms are gated by args
   // (`rebase_args_are_recoverable`), never trusted by name alone.
+  // submodule is absent too: its verbs split between recoverable writes
+  // (`update`/`deinit` without force), `.gitmodules` writers
+  // (`set-url`/`set-branch`/`add`), and command runners (`foreach`), so it is
+  // classified per-verb via `submodule_write_is_recoverable`.
   for
     sub in [
-      "mv", "clean", "apply", "am", "status", "checkout-index", "co", "rebase",
+      "mv", "clean", "apply", "am", "status", "checkout-index", "co", "rebase", "submodule",
     ] {
     assert_false(@git_policy.subcommand_writes_from_object_store(sub))
   }
@@ -173,10 +177,75 @@ test "should_preblock: feeders, mv, non-dry-run clean, reconfigured writers" {
       ["git", "-c", "core.pager=less", "status"],
       ["git", "checkout", "--help"],
       ["git", "clean", "--help"],
+      // submodule: unforced update/deinit and read-only verbs are not
+      // preblocked (update/deinit without force are recoverable writes; the
+      // others fall to the sandbox, which is fine for them).
+      ["git", "submodule", "update", "--init"],
+      ["git", "submodule", "update", "--remote"],
+      ["git", "submodule", "update", "--recursive"],
+      ["git", "submodule", "--quiet", "update", "--init"],
+      ["git", "submodule", "update", "--", "path"],
+      ["git", "submodule", "deinit", "path"],
+      ["git", "submodule", "add", "https://example.com/repo", "path"],
+      ["git", "submodule", "set-url", "path", "https://example.com"],
+      ["git", "submodule", "set-branch", "-b", "main", "path"],
+      ["git", "submodule", "init"],
+      ["git", "submodule", "status"],
+      ["git", "submodule", "sync"],
+      ["git", "submodule", "absorbgitdirs", "path"],
+      ["git", "submodule", "--help"],
+      ["git", "submodule", "foreach", "--help"],
     ] {
     assert_false(@git_policy.should_preblock(cmd, 1))
   }
+  // Blocked: submodule foreach runs arbitrary shell commands (including after
+  // a leading `--quiet`, which git accepts), forced update/deinit permanently
+  // lose dirty or untracked content, and a reconfigured submodule is blocked.
+  for
+    cmd in [
+      ["git", "submodule", "foreach", "echo", "hello"],
+      ["git", "submodule", "foreach", "rm -rf /"],
+      ["git", "submodule", "--quiet", "foreach", "echo", "hello"],
+      ["git", "submodule", "update", "--force"],
+      ["git", "submodule", "update", "-f"],
+      ["git", "submodule", "deinit", "--force", "path"],
+      ["git", "submodule", "deinit", "-f", "path"],
+      ["git", "-c", "filter.f.smudge=cmd", "submodule", "update", "--init"],
+    ] {
+    assert_true(@git_policy.should_preblock(cmd, 1))
+  }
 }
+
+///|
+/// The verb-level submodule classification is exercised through the public
+/// preblock surface (the sandbox layer keeps its own private mirror):
+/// `update`/`deinit` without force are recoverable, `foreach` and forced
+/// forms are preblocked, and a `--quiet` prefix is honored.
+test "submodule verbs: recoverable update/deinit, blocked foreach/force" {
+  for
+    cmd in [
+      ["git", "submodule", "update", "--init"],
+      ["git", "submodule", "--quiet", "update", "--init"],
+      ["git", "submodule", "update", "--recursive"],
+      ["git", "submodule", "update", "--", "path"],
+      ["git", "submodule", "deinit", "path"],
+    ] {
+    assert_false(@git_policy.should_preblock(cmd, 1))
+  }
+  for
+    cmd in [
+      ["git", "submodule", "foreach", "echo", "hi"],
+      ["git", "submodule", "--quiet", "foreach", "echo", "hi"],
+      ["git", "submodule", "update", "--force"],
+      ["git", "submodule", "update", "-f"],
+      ["git", "submodule", "deinit", "--force", "path"],
+      ["git", "submodule", "deinit", "-f", "path"],
+    ] {
+    assert_true(@git_policy.should_preblock(cmd, 1))
+  }
+}
+
+///|
 
 ///|
 test "reconfiguring global options" {
@@ -205,6 +274,17 @@ test "text_should_preblock mirrors should_preblock on a flat word list" {
   // A help flag on the subcommand disables the block.
   let help = ["git", "apply", "--help"]
   assert_false(@git_policy.text_should_preblock(help, 1, help.length()))
+  // submodule: update is not preblocked, foreach is.
+  let update = ["git", "submodule", "update", "--init"]
+  assert_false(@git_policy.text_should_preblock(update, 1, update.length()))
+  let foreach = ["git", "submodule", "foreach", "echo", "x"]
+  assert_true(@git_policy.text_should_preblock(foreach, 1, foreach.length()))
+  let quiet_foreach = ["git", "submodule", "--quiet", "foreach", "echo", "x"]
+  assert_true(
+    @git_policy.text_should_preblock(quiet_foreach, 1, quiet_foreach.length()),
+  )
+  let forced = ["git", "submodule", "update", "--force"]
+  assert_true(@git_policy.text_should_preblock(forced, 1, forced.length()))
 }
 
 ///|

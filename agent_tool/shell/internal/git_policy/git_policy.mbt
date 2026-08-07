@@ -69,6 +69,10 @@ pub fn global_option_reconfigures(arg : String) -> Bool {
 /// copy — permanent). `rm` stays: it only deletes tracked files. `rebase` also
 /// writes from the object store but is trusted only in the argument forms
 /// admitted by `rebase_args_are_recoverable`, so it is not listed here.
+/// `submodule` is not listed either: its verbs split between recoverable writes
+/// (`update`/`deinit` without force, classified per-verb by the sandbox layer),
+/// `.gitmodules` writers (`set-url`/`set-branch`/`add`), and command runners
+/// (`foreach`), so it is classified per-verb, not by name.
 pub fn subcommand_writes_from_object_store(subcommand : String) -> Bool {
   match subcommand {
     "checkout" | "switch" | "restore" | "reset" | "stash" | "rm" => true
@@ -238,7 +242,11 @@ pub fn text_invocation_writes_from_object_store(
 ) -> Bool {
   match text_subcommand_index(words, start, end) {
     Some(subcommand_index) =>
-      subcommand_is_object_store_writer(words[subcommand_index])
+      subcommand_is_object_store_writer(words[subcommand_index]) ||
+      (
+        words[subcommand_index] == "submodule" &&
+        submodule_writes_worktree(words, subcommand_index + 1, end)
+      )
     None => false
   }
 }
@@ -275,6 +283,14 @@ fn preblock_for_subcommand(
     "rebase" =>
       region_reconfigures(words, global_start, subcommand_index) ||
       rebase_args_run_external_commands(words, args_start, end)
+    // `submodule update` checks out commits from the object store (like
+    // checkout), but its command-running and data-losing forms are pre-blocked:
+    // `foreach` executes arbitrary shell commands in each submodule, and forced
+    // `update`/`deinit` permanently lose dirty or untracked content. An
+    // unrecognized leading option fails closed too.
+    "submodule" =>
+      region_reconfigures(words, global_start, subcommand_index) ||
+      submodule_verb_is_unsafe(words, args_start, end)
     // The other recoverable writers are only unsafe when reconfigured.
     subcommand =>
       subcommand_writes_from_object_store(subcommand) &&
@@ -544,4 +560,102 @@ fn attached_work_tree_option(arg : String) -> StringView? {
   } else {
     None
   }
+}
+
+///|
+/// Find the `git submodule` verb in `words[start..end)`, skipping the
+/// recognized leading submodule options (`--quiet`/`-q` — the only global
+/// submodule options per `git submodule -h`). Returns the verb's index, or
+/// `None` for a missing verb or an unrecognized leading option (fail closed).
+/// A `--help`/`-h` request also returns `None`; callers decide separately
+/// whether the invocation is a help request.
+fn submodule_verb_index(words : Array[String], start : Int, end : Int) -> Int? {
+  let mut index = start
+  while index < end {
+    let arg = words[index]
+    if arg == "--quiet" || arg == "-q" {
+      index += 1
+      continue
+    }
+    if arg.has_prefix("-") && arg != "-" {
+      return None
+    }
+    return Some(index)
+  }
+  None
+}
+
+///|
+/// True when `words[start..end)` contains a `--help`/`-h` request — used to let
+/// help invocations through the submodule verb scan's fail-closed branches.
+fn submodule_args_request_help(
+  words : Array[String],
+  start : Int,
+  end : Int,
+) -> Bool {
+  for index in start..<end {
+    if words[index] == "--help" || words[index] == "-h" {
+      return true
+    }
+  }
+  false
+}
+
+///|
+/// True when a `git submodule update`/`deinit` invocation carries
+/// `-f`/`--force` (also inside a short cluster). A forced update replaces
+/// untracked files in a dirty submodule with the target commit's contents, and
+/// a forced deinit removes a submodule worktree even with local changes — both
+/// permanently lose data that has no object-store copy. The scan stops at `--`,
+/// past which every word is a path.
+fn submodule_forced(words : Array[String], start : Int, end : Int) -> Bool {
+  for index in start..<end {
+    let arg = words[index]
+    if arg == "--" {
+      break
+    }
+    if arg == "--force" || short_cluster_has(arg, "f") {
+      return true
+    }
+  }
+  false
+}
+
+///|
+/// Whether a `git submodule` invocation must be pre-blocked: `foreach` (runs an
+/// arbitrary shell command in each submodule — the only exception is a bare
+/// `--help` request), `update`/`deinit` with `-f`/`--force` (permanently lose
+/// dirty or untracked content), and any form whose leading options the verb
+/// scan cannot parse (fail closed; a help request is let through).
+fn submodule_verb_is_unsafe(
+  words : Array[String],
+  start : Int,
+  end : Int,
+) -> Bool {
+  match submodule_verb_index(words, start, end) {
+    None => !submodule_args_request_help(words, start, end)
+    Some(verb_index) =>
+      match words[verb_index] {
+        "foreach" => !submodule_args_request_help(words, verb_index + 1, end)
+        "update" | "deinit" => submodule_forced(words, verb_index + 1, end)
+        _ => false
+      }
+  }
+}
+
+///|
+/// Whether a `git submodule` invocation writes the worktree from its own
+/// repository state (`update`/`deinit`), for the custom-environment pre-block:
+/// repointed via `GIT_DIR`/`GIT_CONFIG_*` it could write source from a
+/// different repository. The sandbox layer mirrors this classification in its
+/// own private helpers so the public interface of this package stays stable.
+fn submodule_writes_worktree(
+  words : Array[String],
+  start : Int,
+  end : Int,
+) -> Bool {
+  guard submodule_verb_index(words, start, end) is Some(verb_index) else {
+    return false
+  }
+  words[verb_index] == "update" || words[verb_index] == "deinit"
 }
