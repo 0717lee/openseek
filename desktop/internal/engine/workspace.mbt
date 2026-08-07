@@ -12,14 +12,15 @@ const WorkspaceDirName = "OpenSeek"
 /// chronological without a grouping level. Either way the directory follows
 /// from the session id and what's on disk, so resuming a conversation — even
 /// from a fresh app launch — lands in the same directory without recording it
-/// anywhere. `None` when the id is unsafe as a path component or no home
-/// directory is known; the caller falls back to the home directory.
+/// anywhere. `None` when the id is unsafe as a path component, no home
+/// directory is known, or a bound checkout is missing. The run-config caller
+/// distinguishes that last state and rejects it before considering HOME.
 async fn session_workspace_dir(session : String) -> @path.Path? {
   if workspace_of_session(session) is Some(workspace) {
     // A session bound to one of the workspace's worktrees works in that
-    // checkout while it exists; afterwards it degrades to the workspace
-    // root.
-    return Some(session_tree_dir(workspace, session))
+    // checkout while it exists. A retained binding whose checkout is missing
+    // refuses every workspace operation until the user rebuilds it.
+    return session_tree_dir(workspace, session)
   }
   guard safe_workspace_id(session) else { return None }
   guard workspace_root() is Some(root) else { return None }
@@ -27,15 +28,13 @@ async fn session_workspace_dir(session : String) -> @path.Path? {
 }
 
 ///|
-/// The directory a conversation's engine runs in, as a string — the base for
-/// resolving a relative transcript path to open. `""` when the id is unsafe or
-/// no home directory is known. A pure function of the session id, so it answers
-/// even for a resumed conversation the frontend loaded without a live `cwd`.
-pub async fn session_cwd(session : String) -> String {
-  match session_workspace_dir(session) {
-    Some(dir) => dir.to_string()
-    None => ""
-  }
+/// The directory a conversation's engine runs in — the base for resolving a
+/// relative transcript path to open. `None` when the id is unsafe, no home
+/// directory is known, or a bound checkout is missing. A pure function of the
+/// session id, so it answers even for a resumed conversation the frontend
+/// loaded without a live `cwd`.
+pub async fn session_cwd(session : String) -> String? {
+  session_workspace_dir(session).map(dir => dir.to_string())
 }
 
 ///|
@@ -58,7 +57,7 @@ pub async fn resolve_in_workspace(
     // still roots in that checkout — the FS bridge sends the hint on every
     // op, and honoring it verbatim would pin worktree conversations to the
     // main tree.
-    Some(session_tree_dir(dir, session))
+    session_tree_dir(dir, session)
   } else {
     session_workspace_dir(session)
   }

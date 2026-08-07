@@ -850,9 +850,22 @@ fn apply_engine_event(
 /// theme. Recomputed per dispatch — it is only a projection of the model.
 fn file_ctx(model : Model) -> @fileeditor.Ctx {
   let conv = model.active()
+  let checkout = model.checkout_placement(conv)
   {
-    owner: { channel: model.focused, session: conv.session_id },
+    // Parking under an empty session makes `@fileeditor.sync` clear the
+    // imperative viewer and retire its watcher. `sync_file_panel` parks the
+    // real conversation's dock strip separately until Repair restores it.
+    owner: {
+      channel: model.focused,
+      session: if checkout is None ||
+        checkout is Some(@interop.MissingWorktree(_)) {
+        ""
+      } else {
+        conv.session_id
+      },
+    },
     workspace: conv.workspace,
+    checkout,
     dark_mode: model.theme.is_dark(model.system_dark),
     tree_layout: model.tree_layout,
     narrow: model.narrow,
@@ -879,6 +892,7 @@ fn terminal_ctx(model : Model) -> @terminal.Ctx {
     channel: conv.device,
     session: conv.session_id,
     workspace: conv.workspace,
+    checkout: model.checkout_placement(conv),
     dark_mode: model.theme.is_dark(model.system_dark),
     connected,
   }
@@ -912,11 +926,11 @@ fn sync_file_panel(
   dispatch : @cmd.Emit[Msg],
   model : Model,
 ) -> (Model, @cmd.Cmd) {
-  let conv = model.active()
-  let dock = @dock.sync(model.dock, {
-    channel: model.focused,
-    session: conv.session_id,
-  })
+  let ctx = file_ctx(model)
+  // An empty-session owner is deliberately transient: `@dock.sync` parks
+  // the real strip under the conversation key, but never persists this
+  // placeholder strip. Repair selects the real key again and restores it.
+  let dock = @dock.sync(model.dock, ctx.owner)
   let model = { ..model, dock, }
   let (panel, cmd) = @fileeditor.sync(
     dispatch.map(msg => FileEditor(msg)),
@@ -1818,13 +1832,16 @@ fn update_msg(
     }
     Send => {
       let conv = model.active()
+      let checkout = model.checkout_placement(conv)
       // The outgoing prompt is the typed text with the chips folded in as the
       // `<user_mentions>` envelope. Typed text is required — chips alone are
       // context without an instruction and stay in the composer.
       let task = compose_prompt(conv.mentions, conv.task).trim().to_owned()
       if !conv.draft_sendable() ||
         !(model.bridge_state() is Connected) ||
-        !model.api_ready() {
+        !model.api_ready() ||
+        checkout is None ||
+        checkout is Some(@interop.MissingWorktree(_)) {
         (@cmd.none, model)
       } else if !(conv.sync is Synced) {
         // A prompt or steer submitted while the durable frontier is unknown
@@ -2010,6 +2027,43 @@ fn update_msg(
       } else {
         (@cmd.none, model)
       }
+    }
+    RetryWorktreePlacement => {
+      let conv = model.active()
+      guard model.checkout_placement(conv) is None &&
+        conv.workspace is Some(workspace) &&
+        model.device_state(conv.device) is Some(dev) else {
+        return (@cmd.none, model)
+      }
+      let request_generation = dev.worktrees_request_generation + 1
+      (
+        fetch_worktrees(
+          dispatch,
+          conv.device,
+          workspace.0,
+          dev.connection_generation,
+          request_generation,
+        ),
+        model.replace_device({
+          ..dev,
+          worktrees_request_generation: request_generation,
+        }),
+      )
+    }
+    RepairWorktree => {
+      let conv = model.active()
+      guard model.checkout_placement(conv) is Some(@interop.MissingWorktree(_)) else {
+        return (@cmd.none, model)
+      }
+      (
+        repair_worktree_cmd(
+          dispatch,
+          conv.device,
+          workspace_token(conv.workspace),
+          conv.session_id,
+        ),
+        model,
+      )
     }
     ConfirmArchiveDiscard =>
       match model.archive_confirm {
@@ -2755,6 +2809,11 @@ fn update_device_msg(
         archived_request_generation,
         workspaces_request_generation,
         archive_overrides: [],
+        // Worktree notifications are not replayed across a connection gap.
+        // Keep every workspace blocked until this connection returns a fresh
+        // list (or a newer `worktree.changed` broadcast) instead of trusting
+        // placement cached before the disconnect.
+        worktrees: [],
       })
       // Replies from writes issued on the dead bridge carry their captured
       // generation and are ignored below. The new host may have restarted
@@ -3166,6 +3225,24 @@ fn update_device_msg(
         ),
       )
     }
+    WorktreesFailed(
+      workspace~,
+      connection_generation~,
+      request_generation~,
+      message~
+    ) => {
+      // A later snapshot or broadcast for this workspace makes an older
+      // failure irrelevant, just as a dead connection's rejection must not
+      // pop over the newly connected UI.
+      guard connection_generation == dev.connection_generation &&
+        request_generation > dev.worktree_generation(workspace) else {
+        return (@cmd.none, model)
+      }
+      model.notify_error(
+        dispatch,
+        "Worktree list unavailable for \{workspace}: \{message}",
+      )
+    }
     WorktreesChanged(rows, workspace~) => {
       // The post-commit broadcast is newer than every list request issued so
       // far; advance the mint and stamp this workspace's rows with the new
@@ -3179,9 +3256,10 @@ fn update_device_msg(
         ),
         worktrees_request_generation,
       })
-      // A removed worktree unbinds its conversations — the host prunes the
-      // registry mapping the same way — and stands down any staged confirm
-      // for it.
+      // Only an actual registry-row removal unbinds its conversations. Archive
+      // keeps the row with `present: false`, so it passes through unchanged and
+      // later Unarchive still surfaces Repair. Stand down any staged confirm
+      // only when the placement itself disappeared.
       let conversations = next.conversations.map(conv => {
         if conv.device == channel &&
           conv.worktree is Some(name) &&
@@ -3196,8 +3274,8 @@ fn update_device_msg(
           conv
         }
       })
-      // An open discard dialog whose mapping just disappeared (another
-      // client removed or force-archived the worktree) must close too:
+      // An open discard dialog whose mapping just disappeared (a protocol
+      // client explicitly removed the worktree) must close too:
       // confirming it later would fire a stale forced archive.
       let archive_confirm = match next.archive_confirm {
         Some(confirm) if confirm.channel == channel &&
@@ -3304,6 +3382,8 @@ fn update_device_msg(
     }
     ArchiveFailed(message) =>
       model.notify_error(dispatch, "Archive failed: \{message}")
+    WorktreeFailed(message) =>
+      model.notify_error(dispatch, "Worktree error: \{message}")
     SessionsFailed(message) =>
       model.notify_error(dispatch, "Session list unavailable: \{message}")
     // Another client archived or unarchived a conversation. Both sidebar
@@ -4274,10 +4354,33 @@ fn update_device_msg(
           } else {
             rejected
           }
-          (
-            scroll_if_active(model, channel, session),
-            model.replace_conversation(next),
-          )
+          let updated = model.replace_conversation(next)
+          if conv.workspace is Some(workspace) &&
+            updated.device_state(channel) is Some(dev) {
+            // A checkout deleted outside the app cannot publish a registry
+            // notification. Any rejected workspace start is a cheap, reliable
+            // point to refresh placement; a newly `present: false` row then
+            // replaces the generic refusal with Repair/Archive immediately.
+            let request_generation = dev.worktrees_request_generation + 1
+            (
+              @cmd.batch([
+                scroll_if_active(model, channel, session),
+                fetch_worktrees(
+                  dispatch,
+                  channel,
+                  workspace.0,
+                  dev.connection_generation,
+                  request_generation,
+                ),
+              ]),
+              updated.replace_device({
+                ..dev,
+                worktrees_request_generation: request_generation,
+              }),
+            )
+          } else {
+            (scroll_if_active(model, channel, session), updated)
+          }
         }
       } else {
         (@cmd.none, model)
@@ -10785,6 +10888,7 @@ test "archive broadcast invalidates the active send target before list replies" 
           workspace_name: "archived",
         },
       ],
+      worktrees: [{ workspace: "/work/archived", rows: [], generation: 1 }],
     })
   let (_, invalidated) = update_dev(
     dispatch,
@@ -11586,10 +11690,15 @@ test "chip jumps relativize legacy absolute paths against the roots" {
   )
   assert_true(@dock.active_file(next.dock) is Some(Relative("src/main.mbt")))
   // Before the first run reports cwd, the attached workspace serves as root.
-  let model = test_model().replace_conversation({
-    ..test_conversation(),
-    workspace: Some(Absolute("/work/project")),
-  })
+  let model = test_model()
+    .replace_conversation({
+      ..test_conversation(),
+      workspace: Some(Absolute("/work/project")),
+    })
+    .with_dev(dev => {
+      ..dev,
+      worktrees: [{ workspace: "/work/project", rows: [], generation: 1 }],
+    })
   let (_, next) = update(
     dispatch,
     JumpToLocation(

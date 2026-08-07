@@ -61,14 +61,17 @@ pub fn panel_view(
       tab_view(dispatch, tab, active is Some(current) && current.key == tab.key),
     )
   }
-  items.push(
-    @html.button(
-      class="terminal-new",
-      title="New terminal in this workspace",
-      on_click=dispatch(NewTerminal),
-      "+",
-    ),
-  )
+  if ctx.checkout is Some(@interop.WorkspaceRoot) ||
+    ctx.checkout is Some(@interop.Worktree(_)) {
+    items.push(
+      @html.button(
+        class="terminal-new",
+        title="New terminal in this workspace",
+        on_click=dispatch(NewTerminal),
+        "+",
+      ),
+    )
+  }
   // The visible tab's failure detail at the right edge; a failed tab is
   // closed with its ✕ and a fresh one opened with "+".
   if active is Some(tab) {
@@ -79,6 +82,17 @@ pub fn panel_view(
         items.push(@html.span(class="terminal-status terminal-error", message))
       TabRunning => ()
     }
+  } else if ctx.checkout is None {
+    items.push(
+      @html.span(class="terminal-status", "Waiting for workspace placement…"),
+    )
+  } else if ctx.checkout is Some(@interop.MissingWorktree(_)) {
+    items.push(
+      @html.span(
+        class="terminal-status terminal-error",
+        "Worktree checkout is missing",
+      ),
+    )
   } else if !ctx.connected {
     items.push(@html.span(class="terminal-status", "reconnecting…"))
   }

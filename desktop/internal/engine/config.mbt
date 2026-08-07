@@ -150,9 +150,11 @@ async fn serve_config(
     cwd: if workspace is Some(dir) {
       // The workspace hint names the project; a session already bound to one
       // of its worktrees keeps working in that checkout (clients send the
-      // hint on every turn, not only the binding one).
+      // hint on every turn, not only the binding one). A binding whose
+      // checkout vanished refuses here rather than moving the agent into the
+      // main tree behind the user's back.
       match session {
-        Some(session) => Some(session_tree_dir(dir, session))
+        Some(session) => Some(session_run_dir(dir, session))
         None => Some(dir)
       }
     } else {
@@ -176,13 +178,21 @@ async fn serve_config(
 /// Engine working directory for a run. A named conversation gets its own
 /// workspace directory derived from its durable session id (created on demand
 /// by `start_run`), so the agent's files land somewhere the user can find and
-/// resuming the session returns to them. With no session, fall back to the
-/// user's home directory: inheriting the host's own cwd would hand the agent
-/// whatever directory the app happened to be launched from (`/` under Finder),
-/// which is never a sensible place to work in.
+/// resuming the session returns to them. A hint-less workspace resume first
+/// recovers that workspace from the durable record, which also lets a retained
+/// missing-worktree binding refuse the run instead of falling through to HOME.
+/// Only a genuinely scratch/session-less run falls back to the user's home
+/// directory: inheriting the host's own cwd would hand the agent whatever
+/// directory the app happened to be launched from (`/` under Finder), which is
+/// never a sensible place to work in.
 async fn resolved_run_cwd(session : String?) -> @path.Path? {
-  if session is Some(session) && session_workspace_dir(session) is Some(dir) {
-    return Some(dir)
+  if session is Some(session) {
+    if workspace_of_session(session) is Some(workspace) {
+      return Some(session_run_dir(workspace, session))
+    }
+    if session_workspace_dir(session) is Some(dir) {
+      return Some(dir)
+    }
   }
   @home.dir().map(home => home.to_string())
 }

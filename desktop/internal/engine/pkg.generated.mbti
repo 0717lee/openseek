@@ -9,7 +9,7 @@ import {
 // Values
 pub async fn add_workspace(String, (Array[String]) -> Unit) -> Array[String]
 
-pub async fn archive_session(EngineManager, String, () -> Unit, force? : Bool, on_worktree_removed? : (String, Array[@protocol.WorktreeInfo]) -> Unit) -> @protocol.SessionsReply
+pub async fn archive_session(EngineManager, String, () -> Unit, force? : Bool, on_worktree_changed? : (String, Array[@protocol.WorktreeInfo]) -> Unit) -> @protocol.SessionsReply
 
 pub async fn archived_sessions(EngineManager, (String) -> Unit) -> @protocol.SessionsReply
 
@@ -49,7 +49,7 @@ pub async fn remove_worktree(EngineManager, String, String, Bool, (Array[@protoc
 
 pub async fn resolve_in_workspace(String, String, workspace? : String) -> @path.Path?
 
-pub async fn session_cwd(String) -> String
+pub async fn session_cwd(String) -> String?
 
 pub async fn settings_status(EngineManager) -> @protocol.SettingsStatusPayload
 

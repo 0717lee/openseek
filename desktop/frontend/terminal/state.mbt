@@ -8,17 +8,22 @@
 /// Which device/workspace a tab belongs to. Host-assigned terminal ids are
 /// scoped to one bridge connection, so the channel is part of the identity:
 /// two devices can both name their first terminal `1` without sharing tabs.
-/// Conversations in the same registered project directory on one device
-/// share a group; a scratch group is keyed by its conversation.
+/// Main-checkout conversations in the same registered project directory on
+/// one device share a group. A worktree is a separate group keyed by its
+/// registered project and worktree name, while a scratch group is keyed by
+/// its conversation. This prevents a worktree chat from ever displaying or
+/// driving a shell whose cwd belongs to the main checkout.
 pub(all) enum WorkspaceKey {
   Project(@interop.ChannelId, String)
+  Worktree(@interop.ChannelId, String, String)
   Scratch(@interop.ChannelId, String)
 } derive(Eq)
 
 ///|
 fn WorkspaceKey::channel(self : WorkspaceKey) -> @interop.ChannelId {
   match self {
-    Project(channel, _) | Scratch(channel, _) => channel
+    Project(channel, _) | Worktree(channel, _, _) | Scratch(channel, _) =>
+      channel
   }
 }
 
@@ -92,6 +97,10 @@ pub(all) struct Ctx {
   channel : @interop.ChannelId
   session : String
   workspace : @pathx.Absolute?
+  /// `None` until the host has identified this conversation's placement on
+  /// the current connection. A resolved value distinguishes the project root,
+  /// a live worktree, and a retained binding whose checkout is missing.
+  checkout : @interop.CheckoutPlacement?
   dark_mode : Bool
   /// False from the first WebSocket loss until that channel reports ready
   /// again. The old connection's PTYs are already gone, so `sync` must not
@@ -100,18 +109,29 @@ pub(all) struct Ctx {
 }
 
 ///|
-/// The workspace group the active conversation belongs to.
-fn workspace_key(ctx : Ctx) -> WorkspaceKey {
-  match ctx.workspace {
-    Some(workspace) => Project(ctx.channel, workspace.0)
-    None => Scratch(ctx.channel, ctx.session)
+/// The workspace group the active conversation belongs to, once its placement
+/// has loaded. Returning `None` keeps an unresolved worktree conversation out
+/// of the project-root group.
+fn workspace_key(ctx : Ctx) -> WorkspaceKey? {
+  guard ctx.checkout is Some(checkout) else { return None }
+  guard ctx.workspace is Some(workspace) else {
+    return Some(Scratch(ctx.channel, ctx.session))
+  }
+  match checkout {
+    @interop.WorkspaceRoot => Some(Project(ctx.channel, workspace.0))
+    @interop.Worktree(name~) | @interop.MissingWorktree(name~) =>
+      Some(Worktree(ctx.channel, workspace.0, name))
   }
 }
 
 ///|
 /// The tabs of the active conversation's workspace group, in creation order.
 fn State::visible_tabs(self : State, ctx : Ctx) -> Array[Tab] {
-  let key = workspace_key(ctx)
+  guard ctx.checkout is Some(checkout) &&
+    !(checkout is @interop.MissingWorktree(_)) &&
+    workspace_key(ctx) is Some(key) else {
+    return []
+  }
   self.tabs.filter(tab => tab.workspace == key)
 }
 
@@ -121,7 +141,7 @@ fn State::visible_tabs(self : State, ctx : Ctx) -> Array[Tab] {
 fn State::active_tab(self : State, ctx : Ctx) -> Tab? {
   let visible = self.visible_tabs(ctx)
   guard !visible.is_empty() else { return None }
-  let group = workspace_key(ctx)
+  guard workspace_key(ctx) is Some(group) else { return None }
   for entry in self.active {
     if entry.0 == group {
       for tab in visible {

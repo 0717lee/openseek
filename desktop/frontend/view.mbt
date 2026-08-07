@@ -185,7 +185,7 @@ fn session_row(
     children.push(
       @html.span(
         class="worktree-chip",
-        title="This chat runs in worktree \{chip}; archiving the chat removes the worktree (its branch survives)",
+        title="This chat runs in worktree \{chip}; archiving removes its checkout but keeps the branch for Repair",
         chip,
       ),
     )
@@ -1605,11 +1605,15 @@ fn connection_banner(model : Model) -> @html.Html {
 ///|
 fn composer_view(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
   let conv = model.active()
+  let checkout = model.checkout_placement(conv)
   let transcript_ready = conv.sync is Synced &&
     !conv.has_unresolved_run_tail_notice()
+  let checkout_ready = checkout is Some(@interop.WorkspaceRoot) ||
+    checkout is Some(@interop.Worktree(_))
   let has_input = model.bridge_state() is Connected &&
     model.api_ready() &&
     transcript_ready &&
+    checkout_ready &&
     conv.draft_sendable()
   // A compacting conversation cannot accept a prompt either: the serve
   // engine would queue it behind the compaction, where Stop cannot reach it.
@@ -1708,6 +1712,32 @@ fn composer_view(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
         ]),
       )
     NotCompacting => ()
+  }
+  // The conversation's execution environment vanished under it. The host
+  // refuses to run it rather than silently falling back to the main
+  // checkout, so the composer explains that and offers both ways out.
+  match checkout {
+    None =>
+      children.push(
+        @html.div(class="composer-notice", [
+          @html.span(
+            class="composer-notice-text",
+            "Waiting for workspace placement…",
+          ),
+          @html.button(
+            class="composer-notice-btn",
+            type_="button",
+            title="Request this workspace's worktree list again",
+            on_click=dispatch(RetryWorktreePlacement),
+            "Retry",
+          ),
+        ]),
+      )
+    Some(@interop.MissingWorktree(name~)) =>
+      children.push(
+        missing_worktree_notice(dispatch, conv.device, conv.session_id, name),
+      )
+    Some(_) => ()
   }
   let inner : Array[@html.Html] = [
     // First child, always present, so the textarea's index never shifts (which

@@ -1230,6 +1230,14 @@ priv enum Msg {
   // workspace root, or a fresh host-named worktree (its execution
   // environment, bound 1:1 at creation).
   ToggleWorktreeMode
+  // Retry the active workspace's placement list after its first request
+  // failed or remained unanswered. The conversation stays blocked until a
+  // real list reply or worktree commit broadcast identifies its placement.
+  RetryWorktreePlacement
+  // Rebuild the active conversation's missing worktree checkout on its
+  // surviving branch. The other safe exit is the ordinary ArchiveSession:
+  // a bound conversation never migrates into the workspace root.
+  RepairWorktree
   // The archive-discard dialog's two exits: retry the archive with force
   // (discarding the worktree's uncommitted changes), or stand down.
   ConfirmArchiveDiscard
@@ -1421,6 +1429,15 @@ priv enum DeviceMsg {
     connection_generation~ : Int,
     request_generation~ : Int
   )
+  // A failed list leaves that workspace's placement unresolved. Carry both
+  // generations so a dead connection or an older request cannot surface a
+  // stale error after a newer snapshot or broadcast has already arrived.
+  WorktreesFailed(
+    workspace~ : String,
+    connection_generation~ : Int,
+    request_generation~ : Int,
+    message~ : String
+  )
   // The post-commit `worktree.changed` broadcast for one workspace.
   WorktreesChanged(Array[WorktreeRow], workspace~ : String)
   // A `worktree.create` this client asked for succeeded mid-chain: bind
@@ -1439,6 +1456,9 @@ priv enum DeviceMsg {
     fresh_session~ : String
   )
   ArchiveFailed(String)
+  // A rebuild of a missing worktree failed. The canonical rows still arrive
+  // as `worktree.changed`, so this only reports the refusal.
+  WorktreeFailed(String)
   // A `workspace_branch` reply: the git branch of `session`'s workspace —
   // `Some("")` when it is not a repository, `None` when the probe failed or
   // answered unintelligibly.

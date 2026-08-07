@@ -9,8 +9,11 @@ async fn open_path_op(payload : OpenPathPayload) -> OpenPathReply {
   // A live run hands us its cwd; a resumed conversation has none, so fall back
   // to the directory the session's engine runs in.
   let base = match payload.cwd {
-    Some(cwd) => cwd
+    Some(cwd) => Some(cwd)
     None => @engine.session_cwd(payload.session)
+  }
+  guard base is Some(base) && !base.is_empty() else {
+    raise HostError("This conversation has no working directory")
   }
   let target = @engine.open_target(base, expand_home(payload.path))
   guard !target.is_empty() else { raise HostError("Empty path") }
