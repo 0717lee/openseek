@@ -195,17 +195,22 @@ test "should_preblock: feeders, mv, non-dry-run clean, reconfigured writers" {
       ["git", "submodule", "absorbgitdirs", "path"],
       ["git", "submodule", "--help"],
       ["git", "submodule", "foreach", "--help"],
+      ["git", "submodule", "foreach", "--recursive", "--help"],
+      ["git", "submodule"],
+      ["git", "submodule", "--quiet"],
     ] {
     assert_false(@git_policy.should_preblock(cmd, 1))
   }
   // Blocked: submodule foreach runs arbitrary shell commands (including after
-  // a leading `--quiet`, which git accepts), forced update/deinit permanently
+  // a leading `--quiet`, which git accepts), --help trailing a command argument
+  // is part of the command, not a git help flag, forced update/deinit permanently
   // lose dirty or untracked content, and a reconfigured submodule is blocked.
   for
     cmd in [
       ["git", "submodule", "foreach", "echo", "hello"],
       ["git", "submodule", "foreach", "rm -rf /"],
       ["git", "submodule", "--quiet", "foreach", "echo", "hello"],
+      ["git", "submodule", "foreach", "echo", "hi", "--help"],
       ["git", "submodule", "update", "--force"],
       ["git", "submodule", "update", "-f"],
       ["git", "submodule", "deinit", "--force", "path"],
@@ -222,20 +227,27 @@ test "should_preblock: feeders, mv, non-dry-run clean, reconfigured writers" {
 /// `update`/`deinit` without force are recoverable, `foreach` and forced
 /// forms are preblocked, and a `--quiet` prefix is honored.
 test "submodule verbs: recoverable update/deinit, blocked foreach/force" {
+  // Not preblocked: bare submodule, update/deinit without force, foreach --help.
   for
     cmd in [
+      ["git", "submodule"],
+      ["git", "submodule", "--quiet"],
       ["git", "submodule", "update", "--init"],
       ["git", "submodule", "--quiet", "update", "--init"],
       ["git", "submodule", "update", "--recursive"],
       ["git", "submodule", "update", "--", "path"],
       ["git", "submodule", "deinit", "path"],
+      ["git", "submodule", "foreach", "--help"],
+      ["git", "submodule", "foreach", "--recursive", "--help"],
     ] {
     assert_false(@git_policy.should_preblock(cmd, 1))
   }
+  // Preblocked.
   for
     cmd in [
       ["git", "submodule", "foreach", "echo", "hi"],
       ["git", "submodule", "--quiet", "foreach", "echo", "hi"],
+      ["git", "submodule", "foreach", "echo", "hi", "--help"],
       ["git", "submodule", "update", "--force"],
       ["git", "submodule", "update", "-f"],
       ["git", "submodule", "deinit", "--force", "path"],

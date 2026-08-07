@@ -624,6 +624,8 @@ async test "sandbox preblocks common source-writing commands" {
         "git submodule deinit path", "git submodule add https://example.com/repo path",
         "git submodule set-url path url", "git submodule init", "git submodule sync",
         "git submodule status",
+        // bare submodule is implicit status; foreach --help bypasses preblock.
+         "git submodule", "git submodule --quiet", "git submodule foreach --help",
       ] {
       assert_true(
         tree_target(recoverable_git, real_root, Some(real_root)) is None,

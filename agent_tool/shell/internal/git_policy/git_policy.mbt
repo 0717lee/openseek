@@ -586,22 +586,6 @@ fn submodule_verb_index(words : Array[String], start : Int, end : Int) -> Int? {
 }
 
 ///|
-/// True when `words[start..end)` contains a `--help`/`-h` request — used to let
-/// help invocations through the submodule verb scan's fail-closed branches.
-fn submodule_args_request_help(
-  words : Array[String],
-  start : Int,
-  end : Int,
-) -> Bool {
-  for index in start..<end {
-    if words[index] == "--help" || words[index] == "-h" {
-      return true
-    }
-  }
-  false
-}
-
-///|
 /// True when a `git submodule update`/`deinit` invocation carries
 /// `-f`/`--force` (also inside a short cluster). A forced update replaces
 /// untracked files in a dirty submodule with the target commit's contents, and
@@ -624,23 +608,51 @@ fn submodule_forced(words : Array[String], start : Int, end : Int) -> Bool {
 ///|
 /// Whether a `git submodule` invocation must be pre-blocked: `foreach` (runs an
 /// arbitrary shell command in each submodule — the only exception is a bare
-/// `--help` request), `update`/`deinit` with `-f`/`--force` (permanently lose
-/// dirty or untracked content), and any form whose leading options the verb
-/// scan cannot parse (fail closed; a help request is let through).
+/// `--help` immediately after the verb, not trailing a command argument), and
+/// `update`/`deinit` with `-f`/`--force` (permanently lose dirty or untracked
+/// content). An absent verb (bare `git submodule`) is the implicit `status`
+/// form — not preblocked. Unrecognized leading options still fail closed.
 fn submodule_verb_is_unsafe(
   words : Array[String],
   start : Int,
   end : Int,
 ) -> Bool {
   match submodule_verb_index(words, start, end) {
-    None => !submodule_args_request_help(words, start, end)
+    None => false
     Some(verb_index) =>
       match words[verb_index] {
-        "foreach" => !submodule_args_request_help(words, verb_index + 1, end)
+        "foreach" =>
+          !submodule_foreach_is_help_request(words, verb_index + 1, end)
         "update" | "deinit" => submodule_forced(words, verb_index + 1, end)
         _ => false
       }
   }
+}
+
+///|
+/// True when a `git submodule foreach` invocation is a bare help request:
+/// `foreach --help` or `foreach --recursive --help`. Once a positional command
+/// argument appears, `--help` at the end is part of the shell command being
+/// executed, not a git help flag — so it does NOT bypass the preblock.
+fn submodule_foreach_is_help_request(
+  words : Array[String],
+  start : Int,
+  end : Int,
+) -> Bool {
+  let mut index = start
+  while index < end {
+    let arg = words[index]
+    if arg == "--help" || arg == "-h" {
+      return true
+    }
+    if arg == "--recursive" {
+      index += 1
+      continue
+    }
+    // Anything else (including other flags) starts the positional command.
+    return false
+  }
+  false
 }
 
 ///|
