@@ -329,9 +329,9 @@ const ProtonNativeBuildDir : String = "target/proton-native/build"
 ///|
 /// Rebuild `libproton` (and its `cef_process` helper) from the lepus
 /// submodule's C sources and overwrite them inside the assembled runtime
-/// dist. The submodule checks in prebuilt binaries, but only the darwin one
-/// is routinely rebuilt alongside C-source changes; a stale prebuilt
-/// otherwise surfaces as undefined `proton_*` symbols when the host links.
+/// dist. The submodule's checked-in prebuilts are not guaranteed to move with
+/// every C-source change; a stale prebuilt otherwise surfaces as undefined
+/// `proton_*` symbols when the host links.
 /// Building from source makes the bundle independent of prebuilt freshness.
 ///
 /// Requires `cef setup` to have run first: the engine build compiles and
@@ -346,11 +346,10 @@ pub async fn rebuild_libproton(
   artifacts : Array[(String, String)],
   extra_env? : Map[String, String] = Map([]),
 ) -> Unit {
-  let platform = proton_runtime_field(ws, "platform")
-  let cef_version = proton_runtime_field(ws, "cef_version")
-  let cef_root = ws.proton_project_at(
-    ".proton/cache/cef/\{platform}/\{cef_version}",
-  )
+  // The CLI may keep CEF in a shared user cache rather than below `.proton`.
+  // Its manifest records the resolved directory, so packaging must not
+  // reconstruct an obsolete project-local cache path.
+  let cef_root = proton_runtime_field(ws, "cef")
   if !@asyncfs.exists(cef_root) {
     raise PackageError(
       "CEF distribution cache not found: \{cef_root} (run cef setup)",

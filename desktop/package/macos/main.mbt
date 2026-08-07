@@ -116,6 +116,17 @@ async fn @packaging.Workspace::build_package_inputs(
   @packaging.assemble_cef_runtime(self, @packaging.posix_proton_cli(), extra_env={
     "MACOSX_DEPLOYMENT_TARGET": MinMacOSVersion,
   })
+  // Keep the native runtime in lockstep with the checked-out Proton sources.
+  // Feature branches can add C ABI entrypoints before refreshing prebuilts;
+  // rebuilding here prevents those branches from producing undefined symbols.
+  @packaging.rebuild_libproton(
+    self,
+    [
+      ("lib/libproton.dylib", "lib/libproton.dylib"),
+      ("bin/cef_process", "bin/cef_process"),
+    ],
+    extra_env={ "MACOSX_DEPLOYMENT_TARGET": MinMacOSVersion },
+  )
   @packaging.build_frontend_bundle(self, release=true)
   let terminal_assets = @xterm_assets.build(
     self,

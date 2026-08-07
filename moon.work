@@ -11,4 +11,13 @@ members = [
   "./desktop/lepus/rsa",
   "./desktop/lepus/updater",
   "./desktop/lepus/proton",
+  "./desktop/async",
+  "./desktop/lepus/sys/auto_launch",
+  "./desktop/lepus/sys/clipboard",
+  "./desktop/lepus/sys/ffi",
+  "./desktop/lepus/sys/global_hotkey",
+  "./desktop/lepus/sys/keepawake",
+  "./desktop/lepus/sys/microphone",
+  "./desktop/lepus/sys/tray",
+  "./desktop/lepus/contract",
 ]

@@ -879,7 +879,7 @@ async fn EngineManager::close_engines_for_sessions(
 ///|
 priv enum StreamMessage {
   StreamEvent(DecodedStreamEvent)
-  StreamReaderFailed(String)
+  StreamReaderFailed(message~ : String, diagnostics~ : String?)
   StreamExited(Int)
 }
 
@@ -1010,22 +1010,34 @@ async fn read_engine_stdout(
   process : @process.Process,
   messages : @async.Queue[StreamMessage],
 ) -> Unit {
+  // Keep ownership of the line currently being decoded. Engine stdout is a
+  // protocol stream, so a parse failure otherwise destroys the only copy of
+  // diagnostics such as the async runtime's deadlock report.
+  let mut decoding_line : String? = None
   try {
     for ;; {
       guard reader.read_until("\n") is Some(line) else { break }
+      decoding_line = Some(line)
       for json in @jsonl.parse(line) {
         messages.put(StreamEvent(DecodedStreamEvent::from_wire(json)))
       }
+      decoding_line = None
     }
   } catch {
     error if @async.is_being_cancelled() => raise error
     _ => {
-      messages.put(StreamReaderFailed("engine wrote malformed JSONL"))
+      messages.put(
+        StreamReaderFailed(
+          message="engine wrote malformed JSONL",
+          diagnostics=decoding_line,
+        ),
+      )
       @xlog.warn() <?
         {
           "event": "desktop_engine_cancel",
           "reason": "malformed stdout JSONL",
           "pid": process.pid,
+          "raw_line": decoding_line.unwrap_or(""),
         }
       process.cancel()
     }
@@ -1603,9 +1615,9 @@ async fn ServeEngine::run(
           None => ()
         }
       }
-      StreamReaderFailed(message) => {
+      StreamReaderFailed(message~, diagnostics~) => {
         engine.accepts_commands = false
-        emit_error(sink, message, run_id?=engine.latest_run)
+        emit_error(sink, message, run_id?=engine.latest_run, diagnostics?)
         // A broken stream can no longer deliver compaction_finished/failed;
         // report the compaction as failed now so the frontend does not stay
         // stuck with Send disabled (the exit branch below then has nothing
@@ -1788,6 +1800,33 @@ async fn emit_compaction_failed(
       },
     }),
   )
+}
+
+///|
+#cfg(not(platform="windows"))
+async test "malformed engine stdout preserves the offending line" {
+  let raw_line = "Dead lock detected. Tasks spawned at shell execution are still alive"
+  @async.with_task_group(group => {
+    let (reader, child_stdout) = @process.read_from_process()
+    let process = @process.spawn(
+      group,
+      "/bin/sh",
+      ["-c", "printf '%s\\n' '\{raw_line}'; exec sleep 30"],
+      stdout=child_stdout,
+      cancel_handler=@process.hard_cancel(),
+      no_wait=true,
+    )
+    let messages : @async.Queue[StreamMessage] = Queue(kind=Unbounded)
+    read_engine_stdout(reader, process, messages)
+    guard messages.get() is StreamReaderFailed(message~, diagnostics~) else {
+      fail("expected the malformed stdout failure")
+    }
+    assert_eq(message, "engine wrote malformed JSONL")
+    assert_eq(diagnostics, Some(raw_line))
+    guard messages.get() is StreamExited(_) else {
+      fail("expected the cancelled engine exit")
+    }
+  })
 }
 
 ///|
