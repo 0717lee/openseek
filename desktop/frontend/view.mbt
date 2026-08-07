@@ -1075,9 +1075,16 @@ fn tool_call_view(item : @transcript.TranscriptItem) -> @html.Html {
   if arguments is Some(arguments) {
     let trimmed = arguments.trim()
     if !trimmed.is_empty() && trimmed != "{}" {
-      let rendered = @json.parse(arguments).stringify(indent=2) catch {
-        _ => arguments
-      }
+      // Bound the raw payload before parsing: even a collapsed details node is
+      // built on every render, and write/edit arguments can contain whole
+      // files. Clamp again after pretty-printing because indentation can make a
+      // compact JSON payload substantially larger.
+      let bounded = truncate_output(arguments)
+      let rendered = truncate_output(
+        @json.parse(bounded).stringify(indent=2) catch {
+          _ => bounded
+        },
+      )
       body.push(
         @html.div(class="tool-call-section", [
           @html.div(class="tool-call-section-label", "Arguments"),
@@ -1106,16 +1113,33 @@ fn tool_call_view(item : @transcript.TranscriptItem) -> @html.Html {
 }
 
 ///|
-/// Clamp a tool output to its first and last lines around a skip marker, so
-/// one huge read or log dump cannot swallow the transcript. The transcript
-/// is the only scroll area — outputs grow the page instead of nesting a
-/// second scrollbar that traps the wheel.
+/// Clamp tool arguments or output around skip markers before constructing the
+/// transcript DOM. The code-unit bound handles huge single-line JSON payloads;
+/// the line bound keeps logs readable. `clamped_view` keeps cuts out of UTF-16
+/// surrogate pairs. The transcript remains the only scroll area, so bounded
+/// payloads grow the page instead of adding a nested scrollbar.
 fn truncate_output(content : String) -> String {
+  let code_unit_head_limit = 12_000
+  let code_unit_tail_limit = 8_000
+  let bounded = if content.length() <=
+    code_unit_head_limit + code_unit_tail_limit {
+    content
+  } else {
+    let head = content.clamped_view(end=code_unit_head_limit)
+    let tail = content.clamped_view(
+      start=content.length() - code_unit_tail_limit,
+    )
+    [
+      head.to_owned(),
+      "⋯ \{content.length() - head.length() - tail.length()} UTF-16 code units skipped ⋯",
+      tail.to_owned(),
+    ].join("\n")
+  }
   let head_limit = 60
   let tail_limit = 40
-  let lines = [..content.split("\n")]
+  let lines = [..bounded.split("\n")]
   if lines.length() <= head_limit + tail_limit + 1 {
-    return content
+    return bounded
   }
   [
     ..lines[0:head_limit],
@@ -3287,6 +3311,26 @@ test "a tool row renders recorded arguments before its result" {
 }
 
 ///|
+#warnings("-alert_unstable")
+test "a tool row clamps large arguments before rendering" {
+  let rendered = tool_call_view({
+    kind: Tool(
+      call_id="c1",
+      name="write",
+      arguments=Some("{\"content\":\"\{"x".repeat(30_000)}\"}"),
+      is_error=false,
+      brief=Some("wrote a large file"),
+    ),
+    content: "",
+  })
+  let markup = @rabbita.render_to_string(() => @rabbita.Val::constant(rendered))
+  assert_true(markup.contains("UTF-16 code units skipped"))
+  // The source payload is 30k code units; bounding before parse keeps the
+  // collapsed row well below that size even after HTML escaping.
+  assert_true(markup.length() < 25_000)
+}
+
+///|
 test "tool output truncation keeps the head and tail around a skip marker" {
   let short = "a\nb\nc"
   inspect(truncate_output(short), content="a\nb\nc")
@@ -3298,6 +3342,11 @@ test "tool output truncation keeps the head and tail around a skip marker" {
   inspect(clamped[60], content="⋯ 100 lines skipped ⋯")
   inspect(clamped[61], content="line 160")
   inspect(clamped[100], content="line 199")
+  let one_line = "x".repeat(30_000)
+  let bounded = truncate_output(one_line)
+  assert_true(bounded.has_prefix("x".repeat(12_000)))
+  assert_true(bounded.has_suffix("x".repeat(8_000)))
+  assert_true(bounded.contains("10000 UTF-16 code units skipped"))
 }
 
 ///|
