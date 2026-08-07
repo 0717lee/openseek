@@ -115,18 +115,9 @@ whether one is needed is the endpoint's business. The choice, the custom
 URL, and the key persist in the webview's localStorage; the key entered for
 the official endpoint is never sent to any other endpoint. The host passes
 the endpoint to the engine as `OPENSEEK_API_URL`, substituting a placeholder
-key when a custom endpoint is configured without one (the engine insists on
-a non-empty key). Changing the endpoint mid-conversation retires that
-conversation's engine process on the next prompt.
-
-Requests to the OpenSeek proxy authenticate with a client token instead of a
-user key: release packaging stamps it into the host from the packaging
-machine's `OPENSEEK_CLIENT_TOKEN` (in CI, the secret of the same name), and
-the host sends it as the bearer key for that endpoint only. Unstamped
-development builds fall back to the placeholder key, which the proxy accepts
-only while its `OPENSEEK_CLIENT_TOKENS` enforcement is off; set
-`OPENSEEK_CLIENT_TOKEN` in the app's environment to test against an
-enforcing proxy.
+key for OpenSeek and for a custom endpoint configured without one (the engine
+insists on a non-empty key). Changing the endpoint mid-conversation retires
+that conversation's engine process on the next prompt.
 
 ## Updates
 

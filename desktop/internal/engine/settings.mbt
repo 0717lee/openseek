@@ -32,13 +32,12 @@ const LegacyMigrationFence = "legacy_client_settings_migrated"
 
 ///|
 /// The official OpenSeek proxy endpoint runs use when the server is
-/// `Openseek` — the zero-config default. Must stay under
-/// `OpenseekProxyPrefix`, which is what routes the client token to it.
+/// `Openseek` — the zero-config default.
 const OpenseekProxyUrl : String = "https://openseek-api.moonbitlang.cn/chat/completions"
 
 ///|
 /// The staging twin of `OpenseekProxyUrl`, for testing against the next
-/// server build. Must stay under `OpenseekStagingProxyPrefix`.
+/// server build.
 const OpenseekStagingProxyUrl : String = "https://openseek-api-staging.moonbitlang.cn/chat/completions"
 
 ///|
@@ -325,22 +324,12 @@ fn resolved_endpoint(
   match settings.provider {
     Openseek => {
       let url = OpenseekProxyUrl
-      let key = configured_api_key(
-        None,
-        Some(url),
-        None,
-        client_token?=openseek_client_token(),
-      )
+      let key = configured_api_key(None, Some(url), None)
       { api_key: key, api_url: Some(url) }
     }
     OpenseekStaging => {
       let url = OpenseekStagingProxyUrl
-      let key = configured_api_key(
-        None,
-        Some(url),
-        None,
-        client_token?=openseek_client_token(),
-      )
+      let key = configured_api_key(None, Some(url), None)
       { api_key: key, api_url: Some(url) }
     }
     Deepseek => {
@@ -348,7 +337,6 @@ fn resolved_endpoint(
         settings.deepseek_api_key,
         None,
         @env.get("DEEPSEEK"),
-        client_token?=openseek_client_token(),
       )
       { api_key: key, api_url: None }
     }
@@ -356,12 +344,7 @@ fn resolved_endpoint(
       guard settings.custom_api_url is Some(url) else {
         raise EngineError("custom endpoint URL is required; set it in Settings")
       }
-      let key = configured_api_key(
-        settings.custom_api_key,
-        Some(url),
-        None,
-        client_token?=openseek_client_token(),
-      )
+      let key = configured_api_key(settings.custom_api_key, Some(url), None)
       { api_key: key, api_url: Some(url) }
     }
   }

@@ -170,8 +170,6 @@ jobs:
 
       - name: Build, sign, and notarize macOS artifacts
         shell: bash
-        env:
-          OPENSEEK_CLIENT_TOKEN: ${{ secrets.OPENSEEK_CLIENT_TOKEN }}
         run: |
           moon -C desktop run --target native package/macos -- \
             --target dmg \

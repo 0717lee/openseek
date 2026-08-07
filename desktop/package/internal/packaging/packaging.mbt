@@ -527,79 +527,15 @@ async fn assembled_viewer_stylesheet(ws : Workspace) -> String {
 }
 
 ///|
-/// Where the host's OpenSeek client token constant lives, relative to the
-/// workspace. `build_native_host` stamps the packaging machine's token into
-/// this file for the duration of the host build.
-const ClientTokenSource : String = "internal/engine/client_token.mbt"
-
-///|
-const ClientTokenEnv : String = "OPENSEEK_CLIENT_TOKEN"
-
-///|
-/// The exact source line the stamp replaces. A full line, so drift in
-/// `client_token.mbt` fails packaging loudly instead of silently shipping an
-/// unstamped host.
-const ClientTokenNeedle : String = "const StampedOpenseekClientToken : String = \"\""
-
-///|
-fn stamped_client_token_line(token : String) -> String {
-  "const StampedOpenseekClientToken : String = \"" + token + "\""
-}
-
-///|
-/// Rewrite the host's client-token constant from the OPENSEEK_CLIENT_TOKEN
-/// environment, returning the original source text so the caller can restore
-/// it after the build; None when no token is set (development packaging).
-async fn stamp_client_token(ws : Workspace) -> String? {
-  guard @env.get(ClientTokenEnv) is Some(token) else { return None }
-  guard token.iter().all(c => c.is_ascii_graphic() && c != '"' && c != '\\') else {
-    raise PackageError(
-      "\{ClientTokenEnv} must be printable ASCII without quotes or backslashes",
-    )
-  }
-  let path = ws.at(ClientTokenSource)
-  let original = @asyncfs.read_file(path).text()
-  if !original.contains(ClientTokenNeedle) {
-    raise PackageError(
-      "client token stamp line not found in \{ClientTokenSource}",
-    )
-  }
-  write_text(
-    path,
-    original.replace(
-      old=ClientTokenNeedle,
-      new=stamped_client_token_line(token),
-    ),
-  )
-  Some(original)
-}
-
-///|
-/// Restore the committed client-token source after the host build. Runs on
-/// failed builds too, and inside `protect_from_cancel` so a Ctrl-C during
-/// the build cannot leave the token in the working tree.
-async fn restore_client_token(ws : Workspace, original : String?) -> Unit {
-  guard original is Some(text) else { return }
-  @async.protect_from_cancel(() => write_text(ws.at(ClientTokenSource), text))
-}
-
-///|
-/// Build the native desktop host in the selected mode. When the packaging
-/// machine sets OPENSEEK_CLIENT_TOKEN, the token is stamped into the host source
-/// for the build and the committed source is restored afterwards — even when
-/// the build fails — so the token reaches the binary but never the repository.
+/// Build the native desktop host in the selected mode.
 pub async fn build_native_host(
   ws : Workspace,
   release~ : Bool,
   extra_args? : Array[String] = [],
   extra_env? : Map[String, String] = Map([]),
 ) -> Unit {
-  // Resolve the read-only runtime prerequisite before stamping the token. A
-  // missing or malformed manifest then leaves no build state to restore.
+  // Resolve the read-only runtime prerequisite before starting the build.
   let runtime_dist = proton_runtime_dist(ws)
-  // A malformed token or a drifted stamp needle raises before the source is
-  // changed. Every later failure restores the original source.
-  let original = stamp_client_token(ws)
   // The assembled runtime lives under the checked-out Proton project, not
   // necessarily above Moon's process cwd. Pass it explicitly so the prebuild
   // linker config cannot fall back to a stale checked-in runtime.
@@ -614,13 +550,7 @@ pub async fn build_native_host(
     ["build", NativePackage, "--target", "native", ..release_args, ..extra_args],
     dir=ws.dir(),
     extra_env=build_env,
-  ) catch {
-    error => {
-      restore_client_token(ws, original)
-      raise error
-    }
-  }
-  restore_client_token(ws, original)
+  )
 }
 
 ///|
@@ -741,16 +671,6 @@ async test "viewer stylesheet assembles from the editor workspace member" {
   guard @asyncfs.exists(font) else {
     fail("missing workspace viewer font: \{font}")
   }
-}
-
-///|
-/// The token stamp replaces an exact source line; if `client_token.mbt`
-/// drifts away from the needle, packaging must fail instead of silently
-/// shipping an unstamped host. This pins the needle to the committed file.
-async test "client token needle matches the committed host source" {
-  let ws = locate_workspace()
-  let source = @asyncfs.read_file(ws.at(ClientTokenSource)).text()
-  assert_true(source.contains(ClientTokenNeedle))
 }
 
 ///|
