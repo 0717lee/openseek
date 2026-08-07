@@ -3248,15 +3248,16 @@ fn submodule_verb_is_update(
 
 ///|
 /// Whether a `git submodule update` invocation would run a custom update
-/// procedure: `submodule.<name>.update` set to `!command` in the repo's git
-/// config makes `git submodule update` execute that arbitrary shell command
-/// with the target commit ID. The submodule verb scan cannot see the config, so
-/// an otherwise-recoverable `update` is pre-blocked when the workspace config
-/// declares a custom procedure. `--rebase`/`--merge`/`--checkout` on the
-/// command line override the configured strategy and are not custom, so they
-/// bypass the scan (`--remote` does NOT override it — it only picks the
-/// remote-tracking commit, so a configured `!command` still runs). A missing
-/// config or unreadable workspace is safe.
+/// procedure: `submodule.<name>.update` set to `!command` makes `git submodule
+/// update` execute that arbitrary shell command with the target commit ID. The
+/// submodule verb scan cannot see the config, so an otherwise-recoverable
+/// `update` is pre-blocked when `git config --get-regexp` (which resolves
+/// includes, global/system/worktree scopes, case-insensitivity, and
+/// .git/modules/*/config exactly as `git submodule update` itself would) finds
+/// an `update` value starting with `!`. `--rebase`/`--merge`/`--checkout` on
+/// the command line override the configured strategy and bypass the scan
+/// (`--remote` does NOT override it — it only picks the remote-tracking
+/// commit). An unreadable config or git-not-found is safe.
 async fn submodule_update_has_custom_procedure(
   argv : Array[String],
   arg_start : Int,
@@ -3284,75 +3285,27 @@ async fn submodule_update_has_custom_procedure(
       return false
     }
   }
-  let config_path = @path.Path(real_workspace_root)
-    .join(Path(".git"))
-    .join(Path("config"))
-    .to_string()
-  if submodule_config_has_custom_update(config_path) {
-    return true
+  // Use git itself to query the effective configuration for any
+  // submodule.<name>.update key set to a command — `git config` resolves
+  // includes, global/system/worktree scopes, case-insensitivity, and
+  // .git/modules/*/config exactly as `git submodule update` itself would.
+  // `--get-regexp` returns "key value" lines for every matching key; a value
+  // starting with "!" is git's prefix for a shell command.
+  let (exit, output) = @process.collect_output_merged(
+    "git",
+    [
+      "-C", real_workspace_root, "config", "--get-regexp", "^submodule\\..*\\.update$",
+    ],
+    inherit_env=false,
+    cwd=real_workspace_root,
+  ) catch {
+    _ => return false
   }
-  // A linked worktree or submodule stores `.git` as a file pointing at the
-  // real git dir (`gitdir: <path>`); resolve it so the config scan works there.
-  let resolved_git_dir = resolve_git_dir_file(real_workspace_root)
-  if resolved_git_dir is Some(git_dir) {
-    let worktree_config = @path.Path(git_dir).join(Path("config")).to_string()
-    if submodule_config_has_custom_update(worktree_config) {
-      return true
-    }
-    // A submodule's own config lives at `<gitdir>/modules/<name>/config`; a
-    // nested `git submodule update` run inside the submodule honors a custom
-    // procedure declared there, so scan those too.
-    let modules_dir = @path.Path(git_dir).join(Path("modules")).to_string()
-    let entries = @fs.readdir(modules_dir, include_hidden=true) catch {
-      _ => return false
-    }
-    for entry in entries {
-      let sub_config = @path.Path(modules_dir)
-        .join(Path(entry))
-        .join(Path("config"))
-        .to_string()
-      if submodule_config_has_custom_update(sub_config) {
-        return true
-      }
-    }
+  if exit != 0 {
+    return false
   }
-  false
-}
-
-///|
-/// When `workspace_root/.git` is a file (a linked worktree or submodule), read
-/// the `gitdir: <path>` pointer it contains and resolve it against the
-/// workspace root. Returns `None` when `.git` is a directory or unreadable.
-async fn resolve_git_dir_file(workspace_root : String) -> String? {
-  let git_path = @path.Path(workspace_root).join(Path(".git")).to_string()
-  let text = @fs.read_file(git_path).text() catch { _ => return None }
-  for line in text.split("\n") {
-    let line = line.trim()
-    if line.has_prefix("gitdir:") {
-      let dir = line[7:].trim().to_owned()
-      let path = @path.Path(dir)
-      if path.is_absolute() {
-        return Some(path.normalize().to_string())
-      } else {
-        return Some(
-          @path.Path(workspace_root).join(path).normalize().to_string(),
-        )
-      }
-    }
-  }
-  None
-}
-
-///|
-/// Whether a git config file text declares a custom submodule update procedure:
-/// any `update = !command` line under a `[submodule "..."]` section. Line-based
-/// scan: a bare `update` key with a `!` value is treated as custom (git's own
-/// prefix for shell commands).
-async fn submodule_config_has_custom_update(config_path : String) -> Bool {
-  let text = @fs.read_file(config_path).text() catch { _ => return false }
-  for line in text.split("\n") {
-    let line = line.trim()
-    if line.has_prefix("update") && line.contains("!") {
+  for line in output.text().split("\n") {
+    if line.contains(" !") {
       return true
     }
   }
