@@ -244,14 +244,31 @@ test "a scratch rotation leaves the conversation in the default store" {
 }
 
 ///|
-test "workspaces loaded retains a detached conversation's durable placement" {
+test "detaching the active workspace opens the newest remaining conversation" {
   let dispatch = test_dispatch()
   let model = test_model()
     .replace_conversation({
       ..test_conversation(),
       workspace: Some(Absolute("/gone")),
     })
-    .with_dev(dev => { ..dev, active_workspace: "/gone" })
+    .with_dev(dev => {
+      ..dev,
+      active_workspace: "/gone",
+      sessions: [
+        {
+          id: "desktop-kept",
+          title: Some("kept"),
+          workspace: "/kept",
+          workspace_name: "kept",
+        },
+        {
+          id: "desktop-test",
+          title: Some("gone"),
+          workspace: "/gone",
+          workspace_name: "gone",
+        },
+      ],
+    })
   let (_, next) = update_dev(
     dispatch,
     WorkspacesLoaded(["/kept"], connection_generation=0, request_generation=0),
@@ -259,8 +276,21 @@ test "workspaces loaded retains a detached conversation's durable placement" {
   )
   inspect(next.dev().workspaces.length(), content="1")
   inspect(next.dev().sessions_request_generation, content="1")
-  assert_true(next.active().workspace is Some(Absolute("/gone")))
-  inspect(next.dev().active_workspace, content="")
+  inspect(next.dev().sessions.length(), content="1")
+  inspect(next.active_session, content="desktop-kept")
+  assert_true(next.active().workspace is Some(Absolute("/kept")))
+  assert_true(next.active().sync is Reloading(..))
+  assert_true(next.find_conversation(Local, "desktop-test") is None)
+  inspect(next.dev().active_workspace, content="/kept")
+  // The handler is pure: replaying the same message from the same model makes
+  // the same selection and starts the same generation.
+  let (_, replayed) = update_dev(
+    dispatch,
+    WorkspacesLoaded(["/kept"], connection_generation=0, request_generation=0),
+    model,
+  )
+  inspect(replayed.active_session, content="desktop-kept")
+  inspect(replayed.transcript_request_generation, content="1")
   // A still-registered placement survives the same reply.
   let attached = test_model()
     .replace_conversation({
@@ -276,6 +306,57 @@ test "workspaces loaded retains a detached conversation's durable placement" {
   inspect(kept.dev().sessions_request_generation, content="1")
   assert_true(kept.active().workspace is Some(Absolute("/kept")))
   inspect(kept.dev().active_workspace, content="/kept")
+}
+
+///|
+test "detaching the last workspace rotates into a scratch conversation" {
+  let dispatch = test_dispatch()
+  let model = test_model()
+    .replace_conversation({
+      ..test_conversation(),
+      workspace: Some(Absolute("/gone")),
+    })
+    .with_dev(dev => {
+      ..dev,
+      workspaces: ["/gone"],
+      active_workspace: "/gone",
+      sessions: [
+        {
+          id: "desktop-test",
+          title: Some("gone"),
+          workspace: "/gone",
+          workspace_name: "gone",
+        },
+      ],
+    })
+  let (_, detached) = update_dev(dispatch, WorkspacesChanged([]), model)
+  inspect(detached.active_session, content="")
+  inspect(detached.dev().sessions.length(), content="0")
+  inspect(detached.dev().active_workspace, content="")
+  assert_true(detached.conversations.is_empty())
+  let (_, stale) = update(
+    dispatch,
+    sessions_loaded([
+      {
+        id: "desktop-test",
+        title: Some("gone"),
+        workspace: "/gone",
+        workspace_name: "gone",
+      },
+    ]),
+    detached,
+  )
+  // The detach refresh advanced the session request generation, so a list
+  // issued before the registry commit cannot resurrect the removed chat.
+  inspect(stale.dev().sessions.length(), content="0")
+  assert_true(stale.conversations.is_empty())
+  let (_, rotated) = update(
+    dispatch,
+    SessionRotated({ channel: Local, session: "desktop-scratch" }),
+    stale,
+  )
+  inspect(rotated.active_session, content="desktop-scratch")
+  assert_true(rotated.active().workspace is None)
 }
 
 ///|

@@ -215,9 +215,11 @@ fn request_archived_refresh(
 }
 
 ///|
-/// Adopt one canonical workspace registry snapshot, preserving each
-/// conversation's durable placement hint while clearing a detached active
-/// picker root. Session groups are then rebuilt against the same registry.
+/// Adopt one canonical workspace registry snapshot. Conversations from a
+/// detached workspace leave this page with its sidebar section: their durable
+/// records stay on disk and return when the directory is attached again. If
+/// the active conversation leaves, select the newest remaining durable chat,
+/// or rotate into a fresh scratch chat when none remains.
 fn adopt_workspaces(
   dispatch : @cmd.Emit[Msg],
   channel : @interop.ChannelId,
@@ -227,6 +229,10 @@ fn adopt_workspaces(
   guard model.device_state(channel) is Some(dev) else {
     return (@cmd.none, model)
   }
+  let active_detached = channel == model.focused &&
+    model.find_conversation(channel, model.active_session) is Some(active) &&
+    active.workspace is Some(workspace) &&
+    !paths.contains(workspace.0)
   let active_workspace = if dev.active_workspace.is_empty() ||
     paths.contains(dev.active_workspace) {
     dev.active_workspace
@@ -250,18 +256,79 @@ fn adopt_workspaces(
     )
   }
   let worktrees = dev.worktrees.filter(group => paths.contains(group.workspace))
-  let (refresh_cmd, next) = request_sessions_refresh(
-    dispatch,
-    channel,
-    model.replace_device({
+  // The old whole-session snapshot can outlive the workspace commit
+  // broadcast. Prune it immediately so neither the sidebar nor fallback
+  // selection can retain a conversation whose store is no longer attached.
+  let sessions = dev.sessions.filter(item => {
+    item.workspace.is_empty() || paths.contains(item.workspace)
+  })
+  let conversations = model.conversations.filter(conv => {
+    conv.device != channel ||
+    conv.workspace is None ||
+    paths.contains(workspace_token(conv.workspace))
+  })
+  let loading_conversation = if model.loading_conversation is Some(owner) &&
+    owner.channel == channel &&
+    !conversations
+    .iter()
+    .any(conv => {
+      conv.device == owner.channel && conv.session_id == owner.session
+    }) {
+    None
+  } else {
+    model.loading_conversation
+  }
+  let (refresh_cmd, next) = request_sessions_refresh(dispatch, channel, {
+    ..model.replace_device({
       ..dev,
+      sessions,
       workspaces: paths,
       active_workspace,
       worktrees,
       worktrees_request_generation,
     }),
-  )
+    conversations,
+    loading_conversation,
+  })
   commands.push(refresh_cmd)
+  if active_detached {
+    if sessions.get(0) is Some(fallback) {
+      // The retained list is newest-first. Activate its first entry before
+      // starting the reload so no render can address the detached session id
+      // as an empty scratch conversation while the snapshot is in flight.
+      let activated = {
+        ..next.activate(channel, fallback.id),
+        transcript_pinned: true,
+      }.with_active_workspace(fallback.workspace)
+      let activated = activated.replace_conversation({
+        ..activated.active(),
+        workspace: workspace_root(fallback.workspace),
+      })
+      let (fallback_cmd, next) = open_session_on(
+        dispatch,
+        channel,
+        activated,
+        fallback.id,
+      )
+      commands.push(fallback_cmd)
+      return (@cmd.batch(commands), next)
+    }
+    // Session ids are generated inside a Cmd so update remains pure. Clear
+    // the dead identity now; SessionRotated installs the fresh scratch chat
+    // on the next update-loop turn, exactly as it does at app startup.
+    commands.push(rotate_session(dispatch, channel))
+    return (
+      @cmd.batch(commands),
+      {
+        ..next,
+        active_session: "",
+        loading_conversation: None,
+        screen: Chat,
+        transcript_pinned: true,
+        completion: None,
+      },
+    )
+  }
   (@cmd.batch(commands), next)
 }
 
@@ -3187,10 +3254,10 @@ fn update_device_msg(
         request_generation == dev.workspaces_request_generation else {
         return (@cmd.none, model)
       }
-      // Detaching only hides the registry entry; a conversation's durable
-      // placement remains part of its identity. Keep that hint so a later
-      // start is rejected as detached instead of silently creating the same
-      // session id in the default store.
+      // The registry snapshot is also the authority for what this page may
+      // keep open. `adopt_workspaces` drops conversations from detached
+      // stores; their durable records remain on disk and return through the
+      // next session list after the workspace is attached again.
       adopt_workspaces(dispatch, channel, model, paths)
     }
     WorkspacesChanged(paths) => {
