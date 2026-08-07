@@ -16,27 +16,27 @@ const ArchivedDirName = "archived"
 const LegacyArchivedListFile = "archived_sessions.txt"
 
 ///|
-fn archived_session_root(root : @path.Path) -> @path.Path {
-  root.join(ArchivedDirName).normalize()
+fn archived_session_root(root : @pathx.Path) -> @pathx.Path {
+  root.join(ArchivedDirName).clean()
 }
 
 ///|
 /// Every store that can own a session id. Correlation and stale-client
 /// defenses must search all of them: request hints are optional and cannot be
 /// trusted to identify where an existing record lives.
-async fn known_session_roots() -> Array[@path.Path] {
-  let roots : Array[@path.Path] = []
+async fn known_session_roots() -> Array[@pathx.Path] {
+  let roots : Array[@pathx.Path] = []
   if resolved_session_root() is Some(root) {
     roots.push(root)
   }
   for path in registered_workspaces() {
-    roots.push(workspace_session_root(Path(path)))
+    roots.push(workspace_session_root(path.to_path()))
   }
   roots
 }
 
 ///|
-async fn archived_record_root(session : String) -> @path.Path? {
+async fn archived_record_root(session : String) -> @pathx.Path? {
   guard !session.is_empty() else { return None }
   for root in known_session_roots() {
     if @fsx.is_dir(archived_session_root(root).join("sessions").join(session)) {
@@ -78,11 +78,11 @@ async fn list_archived_sessions(manager : EngineManager) -> SessionsReply {
     session_group(manager, "", archived_session_root(root)),
   ]
   for path in registered_workspaces() {
-    let workspace : @path.Path = Path(path)
+    let workspace = path.to_path()
     groups.push(
       session_group(
         manager,
-        path,
+        path.0,
         archived_session_root(workspace_session_root(workspace)),
       ),
     )
@@ -265,8 +265,8 @@ async fn unarchive_session_commit(
 /// creating the destination store level on demand. Same-store moves are a
 /// single rename, so a conversation is never half-archived.
 async fn move_session_record(
-  record : @path.Path,
-  destination_dir : @path.Path,
+  record : @pathx.Path,
+  destination_dir : @pathx.Path,
   session : String,
 ) -> Unit {
   guard @fsx.is_dir(record) else {
@@ -336,7 +336,7 @@ async fn migrate_legacy_archive(
 /// in the legacy file for a later retry.
 async fn migrate_legacy_session(
   manager : EngineManager,
-  root : @path.Path,
+  root : @pathx.Path,
   session : String,
   on_migrated : (String) -> Unit,
 ) -> Bool {

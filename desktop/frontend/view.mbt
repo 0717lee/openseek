@@ -480,7 +480,7 @@ fn device_section_rows(
         dispatch,
         model,
         dev,
-        path,
+        Some(path),
         listed~,
         archived~,
         nested=true,
@@ -498,14 +498,14 @@ fn device_section_rows(
     section_heading(
       dispatch,
       "Chats",
-      NewChatIn(dev.channel, ""),
+      NewChatIn(dev.channel, None),
       action_title="New chat outside any workspace",
       toggle=ToggleChatsSection,
       collapsed=model.chats_collapsed,
     ),
   )
   if !model.chats_collapsed {
-    push_group_rows(rows, dispatch, model, dev, "", listed~, archived~)
+    push_group_rows(rows, dispatch, model, dev, None, listed~, archived~)
   }
   // Archived conversations fold behind a collapsed group at the end of the
   // list. Their records live in the store's `archived` twin, so they come
@@ -538,7 +538,7 @@ fn push_group_rows(
   dispatch : @cmd.Emit[Msg],
   model : Model,
   dev : DeviceState,
-  workspace : String,
+  workspace : @pathx.Absolute?,
   listed~ : (String) -> Bool,
   archived~ : (String) -> Bool,
   nested? : Bool = false,
@@ -551,7 +551,7 @@ fn push_group_rows(
   let composing = model.composing_new_chat()
   for conv in model.conversations.rev_iter() {
     if conv.device != dev.channel ||
-      workspace_token(conv.workspace) != workspace ||
+      conv.workspace != workspace ||
       listed(conv.session_id) ||
       archived(conv.session_id) {
       continue
@@ -591,7 +591,7 @@ fn push_group_rows(
     }
   }
   for item in dev.sessions {
-    if item.workspace != workspace || archived(item.id) {
+    if workspace_root(item.workspace) != workspace || archived(item.id) {
       continue
     }
     let label = if model.find_conversation(dev.channel, item.id) is Some(conv) &&
@@ -665,15 +665,15 @@ fn workspace_row(
   dispatch : @cmd.Emit[Msg],
   model : Model,
   dev : DeviceState,
-  path : String,
+  path : @pathx.Absolute,
 ) -> @html.Html {
   let mut class = "workspace-row"
-  if dev.channel == model.focused && path == dev.active_workspace {
+  if dev.channel == model.focused && dev.active_workspace == Some(path) {
     class = class + " active"
   }
-  @html.div(class~, title=path, [
+  @html.div(class~, title=path.0, [
     @html.span(class="sidebar-icon", icon(icon_folder)),
-    @html.span(class="sidebar-label", workspace_label(path)),
+    @html.span(class="sidebar-label", @pathx.Path(path.0).workspace_label()),
     @html.button(
       class="row-archive",
       type_="button",
@@ -690,7 +690,7 @@ fn workspace_row(
       title="New chat in this workspace",
       attrs=@html.Attrs::build().on_click(event => {
         event.stop_propagation()
-        dispatch(NewChatIn(dev.channel, path))
+        dispatch(NewChatIn(dev.channel, Some(path)))
       }),
       icon(icon_add),
     ),
@@ -2606,7 +2606,7 @@ fn topbar_view(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
     items.push(
       @html.span(class="topbar-workspace", title=workspace.0, [
         icon(icon_folder),
-        @html.text(workspace_label(workspace.0)),
+        @html.text(@pathx.Path(workspace.0).workspace_label()),
       ]),
     )
   }
@@ -3048,7 +3048,7 @@ fn workspace_picker_modal(
         if picker.path.is_empty() {
           "Add this folder"
         } else {
-          "Add \u{201c}\{workspace_label(picker.path)}\u{201d}"
+          "Add \u{201c}\{@pathx.Path(picker.path).workspace_label()}\u{201d}"
         },
       ),
     ]),

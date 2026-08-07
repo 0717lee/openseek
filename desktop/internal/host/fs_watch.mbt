@@ -33,7 +33,7 @@ priv struct FsWatchActor {
 /// be shown in the next conversation.
 priv struct FsWatchTarget {
   session : String
-  root : String
+  root : @pathx.Path
   interest : WatchInterest
 }
 
@@ -44,8 +44,8 @@ priv struct FsWatchTarget {
 /// remove, and rename events can be discovered without descending further.
 priv struct WatchInterest {
   legacy_full_tree : Bool
-  paths : Set[String]
-  directories : Set[String]
+  paths : Set[@pathx.Relative]
+  directories : Set[@pathx.Relative]
 }
 
 ///|
@@ -59,11 +59,12 @@ fn WatchInterest::WatchInterest(
   }
   if payload.files is Some(files) {
     for path in files {
-      interest.remember(path)
+      interest.remember(@pathx.Relative(path).normalize())
     }
   }
   if payload.directories is Some(directories) {
     for path in directories {
+      let path = @pathx.Relative(path).normalize()
       interest.directories.add(path)
       interest.remember(path)
     }
@@ -73,16 +74,19 @@ fn WatchInterest::WatchInterest(
 
 ///|
 /// Retain `path` and each directory needed to reach it from the watch root.
-fn WatchInterest::remember(self : WatchInterest, path : String) -> Unit {
+fn WatchInterest::remember(
+  self : WatchInterest,
+  path : @pathx.Relative,
+) -> Unit {
   let mut prefix = ""
-  for segment in path.split("/") {
+  for segment in path.0.split("/") {
     if !segment.is_empty() {
       prefix = if prefix.is_empty() {
         segment.to_owned()
       } else {
         "\{prefix}/\{segment}"
       }
-      self.paths.add(prefix)
+      self.paths.add(Relative(prefix))
     }
   }
 }
@@ -94,8 +98,8 @@ fn WatchInterest::remember(self : WatchInterest, path : String) -> Unit {
 /// the checkout, where relative paths never carry that segment. Explicit
 /// watcher selections do not use this policy: an opened file must remain
 /// watchable even under one of these conventional directory names.
-fn ignored_watch_path(path : String) -> Bool {
-  match [..path.split("/")] {
+fn @pathx.Relative::is_ignored_watch_path(self : @pathx.Relative) -> Bool {
+  match [..self.0.split("/")] {
     [
       ..,
       ".git"
@@ -115,19 +119,19 @@ fn ignored_watch_path(path : String) -> Bool {
 /// directory. A child directory is opened so its own create/remove can be
 /// observed, but its descendants are ignored unless that directory is also
 /// selected or leads to an opened file.
-fn WatchInterest::ignores(self : WatchInterest, path : String) -> Bool {
+fn WatchInterest::ignores(self : WatchInterest, path : @pathx.Relative) -> Bool {
   if self.legacy_full_tree {
-    return ignored_watch_path(path)
+    return path.is_ignored_watch_path()
   }
   if self.paths.contains(path) {
     return false
   }
   for directory in self.directories {
-    if directory.is_empty() {
-      if !path.contains("/") {
+    if directory.is_root() {
+      if !path.0.contains("/") {
         return false
       }
-    } else if path.strip_prefix("\{directory}/") is Some(rest) &&
+    } else if path.0.strip_prefix("\{directory.0}/") is Some(rest) &&
       !rest.contains("/") {
       return false
     }
@@ -188,7 +192,7 @@ async fn FsWatchRequest::apply(
           reply.put(None)
           Some({
             session: payload.session,
-            root: root.to_string(),
+            root,
             interest: WatchInterest(payload),
           })
         }
@@ -204,25 +208,25 @@ async fn FsWatchRequest::apply(
 /// Watch one target until cancelled. Construction scans only the selected
 /// paths; once attached, the baseline closes the replacement race and later
 /// notifications preserve `Watcher::wait`'s concrete debounced events.
-async fn watch_root(
-  target : FsWatchTarget,
+async fn FsWatchTarget::watch(
+  self : FsWatchTarget,
   emit : async (FsChangedPayload) -> Unit,
 ) -> Unit {
-  let watcher = @fs.Watcher::Watcher(target.root, ignored_paths=path => {
-    target.interest.ignores(path)
+  let watcher = @fs.Watcher::Watcher(self.root.to_string(), ignored_paths=path => {
+    self.interest.ignores(@pathx.Relative(path).normalize())
   })
   defer watcher.close()
   emit({
-    session: target.session,
-    root: target.root,
+    session: self.session,
+    root: self.root.to_string(),
     baseline: true,
     events: [],
   })
   for ;; {
     let events = watcher.wait()
     emit({
-      session: target.session,
-      root: target.root,
+      session: self.session,
+      root: self.root.to_string(),
       baseline: false,
       events: events.map(FsEventPayload::from_event),
     })
@@ -253,15 +257,15 @@ async fn FsWatchActor::run(
     let request = @async.with_task_group(group => {
       group.spawn_bg(() => {
         try {
-          if !@fs.exists(target.root) {
+          if !@fs.exists(target.root.to_string()) {
             for ;; {
               @async.sleep(2000)
-              if @fs.exists(target.root) {
+              if @fs.exists(target.root.to_string()) {
                 break
               }
             }
           }
-          watch_root(target, emit_changed)
+          target.watch(emit_changed)
         } catch {
           error if @async.is_being_cancelled() => raise error
           error => {
@@ -270,10 +274,14 @@ async fn FsWatchActor::run(
               {
                 "event": "watch_failed",
                 "session": target.session,
-                "root": target.root,
+                "root": target.root.to_string(),
                 "error": "\{error}",
               }
-            emit_failed({ session: target.session, root: target.root, message })
+            emit_failed({
+              session: target.session,
+              root: target.root.to_string(),
+              message,
+            })
           }
         }
       })
@@ -297,19 +305,19 @@ test "watch interest retains selected files, listed children, and ancestors" {
   }
   let interest = WatchInterest(payload)
   // Root rows and one level under an expanded directory stay observable.
-  assert_false(interest.ignores("README.md"))
-  assert_false(interest.ignores("src"))
-  assert_false(interest.ignores("docs/guide.md"))
-  assert_false(interest.ignores("docs/reference"))
-  assert_true(interest.ignores("docs/reference/deep.md"))
+  assert_false(interest.ignores(Relative("README.md")))
+  assert_false(interest.ignores(Relative("src")))
+  assert_false(interest.ignores(Relative("docs/guide.md")))
+  assert_false(interest.ignores(Relative("docs/reference")))
+  assert_true(interest.ignores(Relative("docs/reference/deep.md")))
   // An opened file and all of its ancestors override conventional churn
   // directory names without admitting their unrelated siblings.
-  assert_false(interest.ignores("src/main.mbt"))
-  assert_true(interest.ignores("src/other.mbt"))
-  assert_false(interest.ignores("node_modules"))
-  assert_false(interest.ignores("node_modules/pkg"))
-  assert_false(interest.ignores("node_modules/pkg/index.js"))
-  assert_true(interest.ignores("node_modules/other/index.js"))
+  assert_false(interest.ignores(Relative("src/main.mbt")))
+  assert_true(interest.ignores(Relative("src/other.mbt")))
+  assert_false(interest.ignores(Relative("node_modules")))
+  assert_false(interest.ignores(Relative("node_modules/pkg")))
+  assert_false(interest.ignores(Relative("node_modules/pkg/index.js")))
+  assert_true(interest.ignores(Relative("node_modules/other/index.js")))
 }
 
 ///|
@@ -322,10 +330,10 @@ test "legacy watch payloads retain the recursive blacklist" {
   }
   let interest = WatchInterest(payload)
   assert_true(interest.legacy_full_tree)
-  assert_true(interest.ignores("deps/node_modules"))
-  assert_true(interest.ignores(".worktrees"))
-  assert_true(interest.ignores("sub/.worktrees"))
-  assert_false(interest.ignores("src/main.mbt"))
+  assert_true(interest.ignores(Relative("deps/node_modules")))
+  assert_true(interest.ignores(Relative(".worktrees")))
+  assert_true(interest.ignores(Relative("sub/.worktrees")))
+  assert_false(interest.ignores(Relative("src/main.mbt")))
 }
 
 ///|

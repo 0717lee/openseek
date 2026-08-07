@@ -21,7 +21,7 @@ priv struct ServeEngine {
   // Canonical durable store selected from host-owned workspace state when
   // this process was spawned. Workspace detach uses this placement to close
   // idle writers before hiding their store, and to refuse while one is busy.
-  session_root : @path.Path?
+  session_root : @pathx.Path?
   // Fingerprint of the config this process was spawned with; a prompt whose
   // config differs cannot reuse it.
   spec_key : String
@@ -560,7 +560,7 @@ priv enum PumpState {
 /// keeping them avoids a respawn-and-replay on every conversation switch.
 struct EngineManager {
   engine : String
-  runtime_dir : @path.Path?
+  runtime_dir : @pathx.Path?
   // Serializes the short placement/slot-claim phase of every operation that
   // can create or move a workspace-backed record with workspace detach.
   // Once a claim is visible, detach refuses it; once a run/compaction is
@@ -769,7 +769,7 @@ fn EngineManager::prune_slot(self : EngineManager, key : String) -> Unit {
 /// receive EOF and join their follower's final durable scan first.
 async fn EngineManager::close_engines_for_workspace(
   self : EngineManager,
-  workspace : @path.Path,
+  workspace : @pathx.Path,
 ) -> Unit {
   guard self.pump is Serving(sessions~) else { return }
   let root = workspace_session_root(workspace).to_string()
@@ -924,7 +924,7 @@ fn DecodedStreamEvent::from_wire(raw : Json) -> DecodedStreamEvent {
 ///|
 fn new_engine_manager(
   engine : String,
-  runtime_dir? : @path.Path,
+  runtime_dir? : @pathx.Path,
 ) -> EngineManager {
   {
     engine,
@@ -942,7 +942,7 @@ fn new_engine_manager(
 ///|
 pub fn new_engine_actor(
   engine : String,
-  runtime_dir? : @path.Path,
+  runtime_dir? : @pathx.Path,
 ) -> EngineActor {
   { manager: new_engine_manager(engine, runtime_dir?) }
 }
@@ -992,8 +992,8 @@ fn open_run_engine(manager : EngineManager, run_id? : String) -> ServeEngine? {
 /// it), so writing next to the executable would fail every
 /// `sessions list` / `sessions show` in a packaged app.
 async fn prepare_engine_stdin(
-  runtime_dir : @path.Path?,
-  engine : @path.Path,
+  runtime_dir : @pathx.Path?,
+  engine : @pathx.Path,
 ) -> &@process.ProcessInput {
   let path = if runtime_dir is Some(dir) {
     dir.join("engine.stdin")
@@ -1257,7 +1257,7 @@ async fn[G] handle_spawn_command(
 /// The desktop host owns the Skills panel's library writes, so every serve
 /// engine gets the same resolved global library instead of falling back to
 /// whatever HOME means inside that engine host.
-fn resolved_global_skills_dir() -> @path.Path? {
+fn resolved_global_skills_dir() -> @pathx.Path? {
   if @env.get("OPENSEEK_GLOBAL_SKILLS_DIR") is Some(dir) {
     return Some(Path(dir))
   }
@@ -1292,7 +1292,7 @@ fn path_env_value(env : Map[String, String]) -> String? {
 async fn add_moonbit_path_for_native_engine(
   env : Map[String, String],
   config : RunConfig,
-  runtime_dir : @path.Path?,
+  runtime_dir : @pathx.Path?,
 ) -> Unit {
   // The agent tools spawn `moon` by name, so prepend the resolved toolchain's
   // bin to the path variable (updating `Path` in place on Windows — see
@@ -1316,7 +1316,7 @@ async fn add_moonbit_path_for_native_engine(
 ///|
 async fn engine_process_env(
   config : RunConfig,
-  runtime_dir : @path.Path?,
+  runtime_dir : @pathx.Path?,
 ) -> Map[String, String] {
   // Build a complete environment and pass it with `inherit_env=false`.
   // `moonbitlang/async/process` prepends `extra_env` before inherited env on
@@ -2045,7 +2045,7 @@ async test "timed out command-lock waiter is removed" {
 ///|
 async test "native engine env has one authoritative bundled moon path" {
   let ambient_path = @sys.get_env_var("PATH")
-  let root = @path.Path(@fs.tmpdir(prefix="openseek-engine-env-"))
+  let root = @pathx.Path(@fs.tmpdir(prefix="openseek-engine-env-"))
   // The macOS bundle's real shape (`package/macos/main.mbt`): the engine is
   // staged in the Proton package input's `bin/`, with the toolchain seed
   // beside that directory rather than inside it.
@@ -2101,7 +2101,7 @@ async test "native engine env has one authoritative bundled moon path" {
 
 ///|
 async fn prepare_fake_moonbit_seed(
-  seed : @path.Path,
+  seed : @pathx.Path,
   version~ : String,
 ) -> Unit {
   write_fake_executable(seed.join("bin/moon"))
@@ -2116,7 +2116,7 @@ async fn prepare_fake_moonbit_seed(
 
 ///|
 async fn prepare_fake_bundled_moonbit_home(
-  moon_home : @path.Path,
+  moon_home : @pathx.Path,
   version~ : String,
 ) -> Unit {
   prepare_fake_moonbit_seed(moon_home, version~)
@@ -2134,7 +2134,7 @@ async fn prepare_fake_bundled_moonbit_home(
 }
 
 ///|
-async fn write_fake_file(path : @path.Path) -> Unit {
+async fn write_fake_file(path : @pathx.Path) -> Unit {
   @fsx.ensure_dir(path.dirname())
   @fs.write_file(path.to_string(), "", create_mode=CreateOrTruncate)
 }
@@ -2142,7 +2142,7 @@ async fn write_fake_file(path : @path.Path) -> Unit {
 ///|
 /// The resolver only assembles a toolchain around a regular executable `moon`,
 /// and initialization executes `moonc`, so both fakes must carry the bit.
-async fn write_fake_executable(path : @path.Path) -> Unit {
+async fn write_fake_executable(path : @pathx.Path) -> Unit {
   @fsx.ensure_dir(path.dirname())
   @fs.write_file(
     path.to_string(),

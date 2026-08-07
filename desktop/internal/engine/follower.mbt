@@ -88,7 +88,7 @@ priv struct PendingDurableFinish {
 ///|
 priv struct SessionFollower {
   session : String
-  root : @path.Path
+  root : @pathx.Path
   inbox : @async.Queue[FollowerMsg]
   // Bounded load requests. One Load control message drains and answers a
   // whole batch from this queue with one snapshot.
@@ -162,7 +162,7 @@ async fn SessionFollower::publish_durable_finishes(
 /// uses it skips redundant `sessions show` spawns. If the layout ever moves
 /// upstream, the signature reads `None`, every kick scans, and behavior
 /// stays correct (just slower).
-fn session_store_file(root : @path.Path, session : String) -> String {
+fn session_store_file(root : @pathx.Path, session : String) -> String {
   root
   .join("sessions")
   .join(session)
@@ -738,7 +738,7 @@ test "session_store_file follows the store layout" {
 fn follower_test_config(
   engine : String,
   session : String,
-  root : @path.Path,
+  root : @pathx.Path,
 ) -> RunConfig {
   {
     task: "test",
@@ -758,8 +758,8 @@ fn follower_test_config(
 async test "failed final scan keeps the follower active and propagates" {
   let dir = @fs.tmpdir(prefix="openseek-follower-stop-")
   let engine = dir + "/engine.sh"
-  let root : @path.Path = Path(dir + "/root")
-  let record : @path.Path = Path(session_store_file(root, "s-fail"))
+  let root : @pathx.Path = Path(dir + "/root")
+  let record : @pathx.Path = Path(session_store_file(root, "s-fail"))
   @fsx.ensure_dir(record.dirname())
   @fs.write_file(record.to_string(), "record", create_mode=CreateOrTruncate)
   @fs.write_file(
@@ -808,8 +808,8 @@ async test "zero-watermark durable boundary survives a failed final scan" {
   let engine = dir + "/engine.sh"
   let calls = dir + "/calls"
   let session = "s-durable-zero"
-  let root : @path.Path = Path(dir + "/root")
-  let record : @path.Path = Path(session_store_file(root, session))
+  let root : @pathx.Path = Path(dir + "/root")
+  let record : @pathx.Path = Path(session_store_file(root, session))
   @fsx.ensure_dir(record.dirname())
   @fs.write_file(record.to_string(), "record", create_mode=CreateOrTruncate)
   let script =
@@ -887,7 +887,7 @@ async test "absent first record publishes one exact-zero durable boundary" {
   let dir = @fs.tmpdir(prefix="openseek-follower-durable-absent-")
   let engine = dir + "/engine.sh"
   let session = "s-durable-absent"
-  let root : @path.Path = Path(dir + "/root")
+  let root : @pathx.Path = Path(dir + "/root")
   @fs.write_file(
     engine,
     "#!/bin/sh\nprintf '%s' 'show failed' >&2\nexit 7\n",
@@ -935,8 +935,8 @@ async test "nonzero durable boundary survives a failed final scan" {
   let engine = dir + "/engine.sh"
   let calls = dir + "/calls"
   let session = "s-durable-tail"
-  let root : @path.Path = Path(dir + "/root")
-  let record : @path.Path = Path(session_store_file(root, session))
+  let root : @pathx.Path = Path(dir + "/root")
+  let record : @pathx.Path = Path(session_store_file(root, session))
   @fsx.ensure_dir(record.dirname())
   @fs.write_file(record.to_string(), "record", create_mode=CreateOrTruncate)
   let script =
@@ -1007,8 +1007,8 @@ async test "abrupt EOF retains a failed final drain for later boundary retry" {
   let engine_path = dir + "/engine.sh"
   let calls = dir + "/calls"
   let session = "s-abrupt-eof"
-  let root : @path.Path = Path(dir + "/root")
-  let record : @path.Path = Path(session_store_file(root, session))
+  let root : @pathx.Path = Path(dir + "/root")
+  let record : @pathx.Path = Path(session_store_file(root, session))
   @fsx.ensure_dir(record.dirname())
   @fs.write_file(record.to_string(), "record", create_mode=CreateOrTruncate)
   let script =
@@ -1121,8 +1121,8 @@ async test "workspace detach drains an orphaned pending follower before commit" 
   defer archive_env_test_lock.release()
   let previous = @sys.get_env_var("OPENSEEK_SESSION_ROOT")
   let dir = @fs.tmpdir(prefix="openseek-detach-orphan-follower-")
-  let global_root : @path.Path = Path(dir + "/global")
-  let workspace : @path.Path = Path(dir + "/workspace")
+  let global_root : @pathx.Path = Path(dir + "/global")
+  let workspace : @pathx.Path = Path(dir + "/workspace")
   let root = workspace_session_root(workspace)
   let engine_path = dir + "/engine.sh"
   let calls = dir + "/calls"
@@ -1131,7 +1131,7 @@ async test "workspace detach drains an orphaned pending follower before commit" 
   defer restore_session_root_env(previous)
   @fsx.ensure_dir(workspace)
   ignore(attach_workspace(workspace.to_string(), fn(_) { () }))
-  let record : @path.Path = Path(session_store_file(root, session))
+  let record : @pathx.Path = Path(session_store_file(root, session))
   @fsx.ensure_dir(record.dirname())
   @fs.write_file(record.to_string(), "record", create_mode=CreateOrTruncate)
   let script =
@@ -1205,11 +1205,11 @@ async test "workspace detach drains an orphaned pending follower before commit" 
 #cfg(not(platform="windows"))
 async test "workspace detach refuses an idle engine whose follower cannot drain" {
   let dir = @fs.tmpdir(prefix="openseek-detach-follower-stop-")
-  let workspace : @path.Path = Path(dir + "/workspace")
+  let workspace : @pathx.Path = Path(dir + "/workspace")
   let root = workspace_session_root(workspace)
   let engine_path = dir + "/engine.sh"
   let session = "s-detach-fail"
-  let record : @path.Path = Path(session_store_file(root, session))
+  let record : @pathx.Path = Path(session_store_file(root, session))
   @fsx.ensure_dir(record.dirname())
   @fs.write_file(record.to_string(), "record", create_mode=CreateOrTruncate)
   @fs.write_file(
@@ -1287,7 +1287,7 @@ async test "workspace detach refuses an idle engine whose follower cannot drain"
 async test "record stat failure is not mistaken for an empty final drain" {
   let dir = @fs.tmpdir(prefix="openseek-follower-stat-")
   let engine = dir + "/engine.sh"
-  let root : @path.Path = Path(dir + "/not-a-directory")
+  let root : @pathx.Path = Path(dir + "/not-a-directory")
   // Looking up the pinned record beneath a regular file deterministically
   // raises ENOTDIR. That verification failure must complete Stop as failed
   // and leave the actor installed, never masquerade as ENOENT.
@@ -1346,8 +1346,8 @@ async test "root change retires the old follower before installing another" {
   assert_eq(@process.run("chmod", ["+x", engine]), 0)
   let manager = new_engine_manager(engine)
   let sink = EventSink(fn(_) { () })
-  let root_a : @path.Path = Path(dir + "/a")
-  let root_b : @path.Path = Path(dir + "/b")
+  let root_a : @pathx.Path = Path(dir + "/a")
+  let root_b : @pathx.Path = Path(dir + "/b")
   @async.with_task_group(group => {
     ignore(
       ensure_follower(

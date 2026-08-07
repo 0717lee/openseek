@@ -23,16 +23,14 @@ fn navigation_root_from_file(
   absolute : @pathx.Absolute,
   relative : @pathx.Relative,
 ) -> @pathx.Absolute? {
-  let path = @pathx.normalize(absolute.0)
-  let name = @pathx.normalize(relative.0)
+  let path = absolute.normalize().0
+  let name = relative.normalize().0
   guard !name.is_empty() else { return None }
   let suffix = "/" + name
   guard path.strip_suffix(suffix) is Some(root) else { return None }
-  if root.is_empty() {
-    Some(Absolute("/"))
-  } else {
-    Some(Absolute(root.to_owned()))
-  }
+  let root = if root.is_empty() { "/" } else { root.to_owned() }
+  // The reconstructed prefix must itself be a complete absolute path.
+  @pathx.Path(root).to_absolute()
 }
 
 ///|
@@ -175,8 +173,13 @@ fn MoonIdeProjection::to_viewer(
       ) else {
       continue
     }
+    // Host navigation locations are external input. Ignore malformed paths
+    // instead of letting them acquire Absolute's invariant.
+    guard @pathx.Path(location.path).to_absolute() is Some(absolute) else {
+      continue
+    }
     result.push(@language.Location::{
-      uri: model_uri_of(self.channel, Absolute(location.path)),
+      uri: model_uri_of(self.channel, absolute),
       range: @common.Range::Range(
         location.start_line,
         location.start_column,
@@ -270,26 +273,27 @@ async fn resolve_navigation_preview(
 
 ///|
 test "navigation root follows host absolute and workspace-relative paths" {
+  guard @pathx.Path("/ws/project/src/main.mbt").to_absolute()
+    is Some(posix_file) else {
+    fail("test POSIX file was not absolute")
+  }
   assert_true(
-    navigation_root_from_file(
-      Absolute("/ws/project/src/main.mbt"),
-      Relative("src/main.mbt"),
-    ) ==
-    Some(Absolute("/ws/project")),
+    navigation_root_from_file(posix_file, Relative("src/main.mbt"))
+    is Some(Absolute("/ws/project")),
   )
+  guard @pathx.Path("C:\\ws\\project\\src\\main.mbt").to_absolute()
+    is Some(windows_file) else {
+    fail("test Windows file was not absolute")
+  }
   assert_true(
-    navigation_root_from_file(
-      Absolute("C:\\ws\\project\\src\\main.mbt"),
-      Relative("src/main.mbt"),
-    ) ==
-    Some(Absolute("C:/ws/project")),
+    navigation_root_from_file(windows_file, Relative("src/main.mbt"))
+    is Some(Absolute("C:/ws/project")),
   )
+  guard @pathx.Path("/other/src/main.mbt").to_absolute() is Some(outside_file) else {
+    fail("test outside file was not absolute")
+  }
   assert_true(
-    navigation_root_from_file(
-      Absolute("/other/src/main.mbt"),
-      Relative("lib/main.mbt"),
-    )
-    is None,
+    navigation_root_from_file(outside_file, Relative("lib/main.mbt")) is None,
   )
 }
 
@@ -312,6 +316,13 @@ test "moon ide locations stay one based and channel routed" {
           end_line: 1,
           end_column: 1,
         },
+        {
+          path: "relative.mbt",
+          start_line: 1,
+          start_column: 1,
+          end_line: 1,
+          end_column: 2,
+        },
       ],
     },
     channel: @interop.ChannelId::Remote("device"),
@@ -319,7 +330,7 @@ test "moon ide locations stay one based and channel routed" {
   assert_eq(locations.length(), 1)
   assert_true(
     model_uri_channel(locations[0].uri) == Some(Remote("device")) &&
-    model_uri_path(locations[0].uri) == Some(Absolute("/ws/lib.mbt")) &&
+    model_uri_path(locations[0].uri) is Some(Absolute("/ws/lib.mbt")) &&
     locations[0].range == @common.Range::Range(2, 3, 2, 9),
   )
 }

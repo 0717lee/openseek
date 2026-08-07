@@ -59,7 +59,7 @@ priv enum ToolSpawnResolution {
 /// carries diagnostic pushes to the transports.
 priv struct MoonCliState {
   engine : String
-  runtime_dir : @path.Path?
+  runtime_dir : @pathx.Path?
   // Resolved on first use; concurrent first requests may both resolve, which
   // is benign — bundled preparation serializes itself and the results agree.
   mut command : ToolSpawnResolution
@@ -67,14 +67,14 @@ priv struct MoonCliState {
   // The next run pushes an empty array for any file that dropped out, the
   // wire's "squiggles fixed" signal. Bounded by the module roots touched in
   // one app run — a handful of small path arrays.
-  published : Map[String, Array[String]]
+  published : Map[@pathx.Absolute, Array[@pathx.Absolute]]
   diagnostics : @async.Queue[DiagnosticsPush]
 }
 
 ///|
 fn MoonCliState::new(
   engine : String,
-  runtime_dir? : @path.Path,
+  runtime_dir? : @pathx.Path,
 ) -> MoonCliState {
   {
     engine,
@@ -140,7 +140,7 @@ async fn MoonCliState::resolve_command(self : MoonCliState) -> ToolSpawnConfig? 
 async fn MoonCliState::run_moon(
   self : MoonCliState,
   args : Array[String],
-  cwd : String,
+  cwd : @pathx.Absolute,
 ) -> (Int, String, String)? {
   guard self.resolve_command() is Some(config) else { return None }
   @async.with_timeout_opt(MoonCliTimeoutMs, () => {
@@ -161,7 +161,7 @@ async fn MoonCliState::run_moon(
       extra_env?=config.env,
       inherit_env=config.env is None,
       stdin?,
-      cwd~,
+      cwd=cwd.0,
     )
     (code, stdout.text(), stderr.text())
   }) catch {
@@ -173,12 +173,14 @@ async fn MoonCliState::run_moon(
 ///|
 /// The module root answering for `file` under workspace `dir`: the deepest
 /// discovered root containing it, or `None` when no module holds the file.
-async fn moon_module_root(dir : @path.Path, file : String) -> String? {
-  let mut best : String? = None
+async fn moon_module_root(
+  dir : @pathx.Path,
+  file : @pathx.Absolute,
+) -> @pathx.Absolute? {
+  let mut best : @pathx.Absolute? = None
   for root in workspace_module_roots(dir) {
-    let root = root.to_string()
-    guard @pathx.contains(root, file) else { continue }
-    if best is Some(current) && current.length() >= root.length() {
+    guard root.contains(file) else { continue }
+    if best is Some(current) && current.0.length() >= root.0.length() {
       continue
     }
     best = Some(root)
@@ -195,10 +197,11 @@ async fn moon_module_root(dir : @path.Path, file : String) -> String? {
 /// children. When more modules than `MaxModuleRoots` sit side by side, the
 /// most recently modified win the slots.
 async fn workspace_module_roots(
-  workspace_dir : @path.Path,
-) -> Array[@path.Path] {
+  workspace_dir : @pathx.Path,
+) -> Array[@pathx.Absolute] {
+  guard workspace_dir.to_absolute() is Some(workspace) else { return [] }
   if manifest_mtime(workspace_dir) is Some(_) {
-    return [workspace_dir]
+    return [workspace]
   }
   let names = @fs.readdir(workspace_dir.to_string(), sort=true) catch {
     error if @async.is_being_cancelled() => raise error
@@ -206,9 +209,9 @@ async fn workspace_module_roots(
   }
   // Child directories that are modules, paired with their manifest mtime for
   // the recency cut when there are too many.
-  let modules : Array[(@path.Path, Int64)] = []
+  let modules : Array[(@pathx.Absolute, Int64)] = []
   for name in names {
-    let child = workspace_dir.join((name : @path.Path))
+    let child = workspace_dir.join((name : @pathx.Path))
     let is_dir = (@fs.kind(child.to_string()) catch {
         error if @async.is_being_cancelled() => raise error
         _ => Unknown
@@ -216,6 +219,7 @@ async fn workspace_module_roots(
       is Directory
     guard is_dir else { continue }
     guard manifest_mtime(child) is Some(mtime) else { continue }
+    guard child.to_absolute() is Some(child) else { continue }
     modules.push((child, mtime))
   }
   // Drop the oldest until within the cap (rare; usually a handful at most).
@@ -234,10 +238,10 @@ async fn workspace_module_roots(
 ///|
 /// The newest mtime (in whole seconds) among the module manifests directly in
 /// `dir`, or `None` when `dir` holds none — i.e. it is not a module root.
-async fn manifest_mtime(dir : @path.Path) -> Int64? {
+async fn manifest_mtime(dir : @pathx.Path) -> Int64? {
   let mut newest : Int64? = None
   for name in ["moon.mod", "moon.mod.json", "moon.work"] {
-    let path = dir.join((name : @path.Path)).to_string()
+    let path = dir.join((name : @pathx.Path)).to_string()
     guard @fs.exists(path) else { continue }
     let (seconds, _) = @fs.mtime(path) catch {
       error if @async.is_being_cancelled() => raise error
@@ -260,14 +264,16 @@ async fn lsp_hover_op(
   state : MoonCliState,
   payload : LspHoverPayload,
 ) -> LspHoverReply {
-  guard @engine.attached_workspace_dir(payload.path) is Some(dir) else {
+  guard @pathx.Path(payload.path).to_absolute() is Some(file) else {
+    raise HostError("path is not absolute")
+  }
+  guard @engine.attached_workspace_dir(file) is Some(dir) else {
     raise HostError("path is outside every attached workspace")
   }
-  let file : @path.Path = Path(payload.path)
-  let file = file.normalize().to_string()
+  let file = file.normalize()
   guard moon_module_root(dir, file) is Some(root) else { return no_hover() }
   // The op speaks 0-based LSP positions; `--loc` is 1-based.
-  let loc = "\{file}:\{payload.line + 1}:\{payload.character + 1}"
+  let loc = "\{file.0}:\{payload.line + 1}:\{payload.character + 1}"
   guard state.run_moon(["ide", "hover", "--loc", loc, "--output-json"], root)
     is Some((0, output, _)) else {
     // A non-zero exit is `moon ide hover`'s "nothing at this position".
@@ -288,11 +294,13 @@ async fn lsp_open_op(
   state : MoonCliState,
   payload : LspOpenPayload,
 ) -> LspDiagnosticsReply {
-  guard @engine.attached_workspace_dir(payload.path) is Some(dir) else {
+  guard @pathx.Path(payload.path).to_absolute() is Some(file) else {
+    raise HostError("path is not absolute")
+  }
+  guard @engine.attached_workspace_dir(file) is Some(dir) else {
     raise HostError("path is outside every attached workspace")
   }
-  let file : @path.Path = Path(payload.path)
-  let file = file.normalize().to_string()
+  let file = file.normalize()
   guard moon_module_root(dir, file) is Some(root) else {
     return { diagnostics: Some([]) }
   }
@@ -316,7 +324,7 @@ async fn lsp_open_op(
   for push in diagnostics_pushes(previous, current) {
     ignore(state.diagnostics.try_put(push) catch { _ => false })
   }
-  let paths : Array[String] = []
+  let paths : Array[@pathx.Absolute] = []
   for path, _ in current {
     paths.push(path)
   }
@@ -329,16 +337,16 @@ async fn lsp_open_op(
 /// diagnostics, plus an empty array for each file that had some last run and
 /// has none now.
 fn diagnostics_pushes(
-  previous : Array[String],
-  current : Map[String, Array[@protocol.LspDiagnostic]],
+  previous : Array[@pathx.Absolute],
+  current : Map[@pathx.Absolute, Array[@protocol.LspDiagnostic]],
 ) -> Array[DiagnosticsPush] {
   let pushes : Array[DiagnosticsPush] = []
   for path, items in current {
-    pushes.push({ path, diagnostics: items })
+    pushes.push({ path: path.0, diagnostics: items })
   }
   for path in previous {
     if !current.contains(path) {
-      pushes.push({ path, diagnostics: [] })
+      pushes.push({ path: path.0, diagnostics: [] })
     }
   }
   pushes
@@ -353,9 +361,9 @@ fn diagnostics_pushes(
 /// writes) are skipped.
 fn parse_check_output(
   output : String,
-  root : String,
-) -> Map[String, Array[@protocol.LspDiagnostic]] {
-  let by_file : Map[String, Array[@protocol.LspDiagnostic]] = Map([])
+  root : @pathx.Absolute,
+) -> Map[@pathx.Absolute, Array[@protocol.LspDiagnostic]] {
+  let by_file : Map[@pathx.Absolute, Array[@protocol.LspDiagnostic]] = Map([])
   for line in output.split("\n") {
     let line = line.trim()
     guard !line.is_empty() else { continue }
@@ -381,7 +389,7 @@ fn parse_check_output(
     let (start_line, start_col, end_line, end_col) = span.unwrap_or(
       (0, 0, 0, 0),
     )
-    let path = absolute_diagnostic_path(path, root)
+    guard absolute_diagnostic_path(path, root) is Some(path) else { continue }
     by_file
     .get_or_init(path, () => [])
     .push({
@@ -401,13 +409,16 @@ fn parse_check_output(
 /// A diagnostic's path in the absolute form the wire speaks. Older moons
 /// report paths relative to the checked module; resolve those against the
 /// module root.
-fn absolute_diagnostic_path(path : String, root : String) -> String {
-  let reported : @path.Path = Path(path)
-  if reported.is_absolute() {
-    path
+fn absolute_diagnostic_path(
+  path : String,
+  root : @pathx.Absolute,
+) -> @pathx.Absolute? {
+  if @pathx.Path(path).to_absolute() is Some(path) {
+    Some(path.normalize())
   } else {
-    let root : @path.Path = Path(root)
-    root.join(reported).normalize().to_string()
+    let root = root.to_path()
+    let reported : @pathx.Path = Path(path)
+    root.join(reported).clean().to_absolute()
   }
 }
 
@@ -560,6 +571,9 @@ test "parse_ide_hover collapses malformed or empty output" {
 
 ///|
 test "parse_check_output groups diagnostics per file in LSP shape" {
+  guard @pathx.Path("/w").to_absolute() is Some(root) else {
+    fail("expected an absolute fixture root")
+  }
   let warning =
     #|{"$message_type":"diagnostic","level":"warning","error_code":2,"path":"/w/src/lib.mbt","loc":"9:7-9:19","message":"Warning (unused_value): Unused variable 'x'","context":"..."}
   let error_ =
@@ -575,10 +589,16 @@ test "parse_check_output groups diagnostics per file in LSP shape" {
   let noise = "Finished. moon: ran 2 tasks"
   let grouped = parse_check_output(
     [warning, error_, other, relative, file_level, noise, ""].join("\n"),
-    "/w",
+    root,
   )
-  assert_true(grouped.get("/w/src/rel.mbt") is Some([_]))
-  guard grouped.get("/w/moon.pkg") is Some([anchored]) else {
+  guard @pathx.Path("/w/src/rel.mbt").to_absolute() is Some(relative_path) &&
+    @pathx.Path("/w/moon.pkg").to_absolute() is Some(package_path) &&
+    @pathx.Path("/w/src/lib.mbt").to_absolute() is Some(lib_path) &&
+    @pathx.Path("/w/src/other.mbt").to_absolute() is Some(other_path) else {
+    fail("expected absolute diagnostic fixture paths")
+  }
+  assert_true(grouped.get(relative_path) is Some([_]))
+  guard grouped.get(package_path) is Some([anchored]) else {
     fail("expected the loc-less diagnostic to survive")
   }
   assert_eq(anchored, {
@@ -587,7 +607,7 @@ test "parse_check_output groups diagnostics per file in LSP shape" {
     message: "module-level boom",
     tags: None,
   })
-  guard grouped.get("/w/src/lib.mbt") is Some([first, second]) else {
+  guard grouped.get(lib_path) is Some([first, second]) else {
     fail("expected two diagnostics for lib.mbt")
   }
   assert_eq(first, {
@@ -605,7 +625,7 @@ test "parse_check_output groups diagnostics per file in LSP shape" {
     message: "Expr Type Mismatch",
     tags: None,
   })
-  guard grouped.get("/w/src/other.mbt") is Some([deprecated]) else {
+  guard grouped.get(other_path) is Some([deprecated]) else {
     fail("expected one diagnostic for other.mbt")
   }
   assert_eq(deprecated, {
@@ -618,16 +638,20 @@ test "parse_check_output groups diagnostics per file in LSP shape" {
 
 ///|
 test "diagnostics_pushes clears files that dropped out of the check" {
+  guard @pathx.Path("/w/a.mbt").to_absolute() is Some(a) &&
+    @pathx.Path("/w/b.mbt").to_absolute() is Some(b) else {
+    fail("expected absolute diagnostic fixture paths")
+  }
   let boom : @protocol.LspDiagnostic = {
     range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } },
     severity: Some(1),
     message: "boom",
     tags: None,
   }
-  let current : Map[String, Array[@protocol.LspDiagnostic]] = Map([
-    ("/w/a.mbt", [boom]),
+  let current : Map[@pathx.Absolute, Array[@protocol.LspDiagnostic]] = Map([
+    (a, [boom]),
   ])
-  let pushes = diagnostics_pushes(["/w/a.mbt", "/w/b.mbt"], current)
+  let pushes = diagnostics_pushes([a, b], current)
   assert_eq(pushes.length(), 2)
   assert_eq(pushes[0].path, "/w/a.mbt")
   assert_eq(pushes[0].diagnostics, [boom])
@@ -657,7 +681,7 @@ async fn workspace_symbols_op(
     is Some(dir) else {
     return { symbols: [] }
   }
-  let workspace_dir = dir.to_string()
+  guard dir.to_absolute() is Some(workspace) else { return { symbols: [] } }
   let symbols : Array[SymbolItem] = []
   for root in workspace_module_roots(dir) {
     if symbols.length() >= MaxSymbolResults {
@@ -665,12 +689,12 @@ async fn workspace_symbols_op(
     }
     guard state.run_moon(
         ["ide", "workspace-symbols", payload.query, "--json"],
-        root.to_string(),
+        root,
       )
       is Some((0, output, _)) else {
       continue
     }
-    for symbol in parse_symbol_rows(output, workspace_dir) {
+    for symbol in parse_symbol_rows(output, workspace) {
       if symbols.length() >= MaxSymbolResults {
         break
       }
@@ -689,7 +713,7 @@ async fn workspace_symbols_op(
 /// missing a name or path is skipped; unparseable output yields no symbols.
 fn parse_symbol_rows(
   output : String,
-  workspace_dir : String,
+  workspace : @pathx.Absolute,
 ) -> Array[SymbolItem] {
   let json = @json.parse(output.trim()) catch { _ => return [] }
   guard json is Array(items) else { return [] }
@@ -710,13 +734,19 @@ fn parse_symbol_rows(
     } else {
       None
     }
+    let display_path = if @pathx.Path(path).to_absolute() is Some(absolute) &&
+      absolute.relative_to(root=workspace) is Some(relative) {
+      relative.0
+    } else {
+      path
+    }
     symbols.push({
       name,
       kind,
       // The declaration head already carries any `Type::` qualifier in the
       // name; moon reports no separate container.
       container: None,
-      path: @pathx.relative_to(path, root=workspace_dir).unwrap_or(path),
+      path: display_path,
       range: symbol_row_range(location),
     })
   }
@@ -785,13 +815,16 @@ fn lsp_symbol_kind(kind : String) -> Int? {
 
 ///|
 test "parse_symbol_rows strips declaration heads and relativizes paths" {
+  guard @pathx.Path("/w").to_absolute() is Some(workspace) else {
+    fail("expected an absolute fixture workspace")
+  }
   let output =
     #|[{"name":"pub fn Point::flip","kind":"Function","location":{"path":"/w/src/kinds.mbt","range":"19:1-21:2"}},
     #| {"name":"pub struct Point","kind":"Object","location":{"path":"/w/src/kinds.mbt","range":"2:1-5:2"}},
     #| {"name":"const MaxSize","kind":"Variable","location":{"path":"/elsewhere/x.mbt"}},
     #| {"name":"","kind":"Function","location":{"path":"/w/a.mbt","range":"1:1-1:2"}},
     #| {"name":"pub fn orphan","kind":"Mystery","location":{"path":"/w/a.mbt","range":"bad"}}]
-  let rows = parse_symbol_rows(output, "/w")
+  let rows = parse_symbol_rows(output, workspace)
   guard rows is [flip, point, max_size, orphan] else {
     fail("expected four rows, got \{rows.length()}")
   }
@@ -823,7 +856,10 @@ test "parse_symbol_rows strips declaration heads and relativizes paths" {
 
 ///|
 test "parse_symbol_rows tolerates unparseable output" {
-  assert_eq(parse_symbol_rows("", "/w").length(), 0)
-  assert_eq(parse_symbol_rows("No symbols found", "/w").length(), 0)
-  assert_eq(parse_symbol_rows("{\"not\":\"an array\"}", "/w").length(), 0)
+  guard @pathx.Path("/w").to_absolute() is Some(workspace) else {
+    fail("expected an absolute fixture workspace")
+  }
+  assert_eq(parse_symbol_rows("", workspace).length(), 0)
+  assert_eq(parse_symbol_rows("No symbols found", workspace).length(), 0)
+  assert_eq(parse_symbol_rows("{\"not\":\"an array\"}", workspace).length(), 0)
 }

@@ -1,5 +1,5 @@
 ///|
-pub async fn exists(path : @path.Path) -> Bool {
+pub async fn exists(path : @pathx.Path) -> Bool {
   @fs.exists(path.to_string())
 }
 
@@ -12,7 +12,7 @@ pub async fn exists(path : @path.Path) -> Bool {
 /// errors (an ENOTDIR from a file-shaped ancestor, a race with deletion)
 /// mean "not a usable executable" — a probe answers a question, it does not
 /// propagate the filesystem's mood.
-pub async fn is_executable_file(path : @path.Path) -> Bool {
+pub async fn is_executable_file(path : @pathx.Path) -> Bool {
   try {
     if !@fs.can_execute(path.to_string()) {
       return false
@@ -25,7 +25,7 @@ pub async fn is_executable_file(path : @path.Path) -> Bool {
 }
 
 ///|
-pub async fn try_read_text(path : @path.Path) -> String? {
+pub async fn try_read_text(path : @pathx.Path) -> String? {
   Some(@fs.read_file(path.to_string()).text()) catch {
     error if @async.is_being_cancelled() => raise error
     _ => None
@@ -33,12 +33,12 @@ pub async fn try_read_text(path : @path.Path) -> String? {
 }
 
 ///|
-pub async fn read_text(path : @path.Path) -> String {
+pub async fn read_text(path : @pathx.Path) -> String {
   @fs.read_file(path.to_string()).text()
 }
 
 ///|
-pub async fn read_text_if_exists(path : @path.Path) -> String? {
+pub async fn read_text_if_exists(path : @pathx.Path) -> String? {
   Some(@fs.read_file(path.to_string()).text()) catch {
     @os_error.OSError(_) as os_error if os_error.is_ENOENT() => None
     error => raise error
@@ -46,17 +46,17 @@ pub async fn read_text_if_exists(path : @path.Path) -> String? {
 }
 
 ///|
-pub async fn write_text(path : @path.Path, content : String) -> Unit {
+pub async fn write_text(path : @pathx.Path, content : String) -> Unit {
   @fs.write_file(path.to_string(), content, create_mode=CreateOrTruncate)
 }
 
 ///|
-pub async fn write_bytes(path : @path.Path, content : Bytes) -> Unit {
+pub async fn write_bytes(path : @pathx.Path, content : Bytes) -> Unit {
   @fs.write_file(path.to_string(), content, create_mode=CreateOrTruncate)
 }
 
 ///|
-pub async fn is_dir(path : @path.Path) -> Bool {
+pub async fn is_dir(path : @pathx.Path) -> Bool {
   try @fs.kind(path.to_string()) catch {
     error if @async.is_being_cancelled() => raise error
     _ => false
@@ -67,7 +67,7 @@ pub async fn is_dir(path : @path.Path) -> Bool {
 
 ///|
 /// Copy a file, replacing the destination if it already exists.
-pub async fn copy_file(source : @path.Path, destination : @path.Path) -> Unit {
+pub async fn copy_file(source : @pathx.Path, destination : @pathx.Path) -> Unit {
   let source = source.to_string()
   let destination = destination.to_string()
   let permission = if @fs.can_execute(source) { 0o755 } else { 0o644 }
@@ -92,7 +92,7 @@ async fn chmod(path : StringView, permission : Int) -> Unit {
 }
 
 ///|
-pub async fn ensure_dir(path : @path.Path) -> Unit {
+pub async fn ensure_dir(path : @pathx.Path) -> Unit {
   @fs.mkdir(path.to_string(), recursive=true) catch {
     @os_error.OSError(_) as os_error if os_error.is_EEXIST() => ()
     error => raise error
@@ -100,7 +100,7 @@ pub async fn ensure_dir(path : @path.Path) -> Unit {
 }
 
 ///|
-pub async fn remove_if_exists(path : @path.Path) -> Unit {
+pub async fn remove_if_exists(path : @pathx.Path) -> Unit {
   let path = path.to_string()
   try @fs.kind(path) catch {
     @os_error.OSError(_) as os_error if os_error.is_ENOENT() => ()

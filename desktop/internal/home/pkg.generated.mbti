@@ -2,11 +2,11 @@
 package "openseek_desktop/internal/home"
 
 import {
-  "moonbitlang/x/path",
+  "openseek_desktop/internal/pathx",
 }
 
 // Values
-pub fn dir() -> @path.Path?
+pub fn dir() -> @pathx.Path?
 
 // Errors
 
@@ -15,4 +15,3 @@ pub fn dir() -> @path.Path?
 // Type aliases
 
 // Traits
-

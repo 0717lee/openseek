@@ -3,8 +3,8 @@ package "openseek_desktop/internal/host"
 
 import {
   "moonbitlang/async",
-  "moonbitlang/x/path",
   "openseek_desktop/internal/endpoint",
+  "openseek_desktop/internal/pathx",
   "openseek_desktop/internal/protocol",
 }
 
@@ -19,11 +19,11 @@ pub async fn frontend_document(String) -> String
 
 pub async fn frontend_entry_path(String) -> String
 
-pub fn new_host_state(String, runtime_dir? : @path.Path, executable? : String, app_version? : String) -> HostState
+pub fn new_host_state(String, runtime_dir? : @pathx.Path, executable? : String, app_version? : String) -> HostState
 
 pub async fn package_version(String) -> String
 
-pub async fn prepared_runtime_dir() -> @path.Path?
+pub async fn prepared_runtime_dir() -> @pathx.Path?
 
 pub fn[G] spawn_host_pumps(@async.TaskGroup[G], HostState, async (@protocol.Notification) -> Unit) -> Unit
 

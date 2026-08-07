@@ -14,7 +14,7 @@ extern "C" fn known_folder_documents() -> Bytes = "openseek_desktop_documents_di
 /// On Windows, we use `SHGetKnownFolderPath(FOLDERID_Documents)`, the
 /// authority on Windows. `None` when the lookup fails — and always off
 /// Windows, where the native stub returns empty bytes.
-pub async fn documents_dir() -> @path.Path? {
+pub async fn documents_dir() -> @pathx.Path? {
   if @platform.win32 || @platform.win64 {
     let path = known_folder_documents()
     guard path.length() > 0 else { return None }
@@ -24,7 +24,7 @@ pub async fn documents_dir() -> @path.Path? {
     if xdg_documents_override(home) is Some(dir) {
       return Some(dir)
     }
-    Some(home.join("Documents").normalize().to_string())
+    Some(home.join("Documents").clean())
   }
 }
 
@@ -35,9 +35,9 @@ pub async fn documents_dir() -> @path.Path? {
 /// `None` when there is no override. `xdg-user-dirs-update` may reset a removed
 /// user dir to `$HOME`; that value resolves to the home directory like any
 /// other supported value.
-async fn xdg_documents_override(home : @path.Path) -> @path.Path? {
+async fn xdg_documents_override(home : @pathx.Path) -> @pathx.Path? {
   let config_dir = if @env.get("XDG_CONFIG_HOME") is Some(dir) {
-    @path.Path(dir)
+    @pathx.Path(dir)
   } else {
     home.join(".config")
   }
@@ -45,7 +45,7 @@ async fn xdg_documents_override(home : @path.Path) -> @path.Path? {
   if @fsx.try_read_text(file) is Some(content) {
     for line in content.split("\n") {
       if parse_xdg_documents_dir_line(home, line) is Some(dir) {
-        return Some(dir.normalize())
+        return Some(dir.clean())
       }
     }
   }
@@ -54,9 +54,9 @@ async fn xdg_documents_override(home : @path.Path) -> @path.Path? {
 
 ///|
 fn parse_xdg_documents_dir_line(
-  home : @path.Path,
+  home : @pathx.Path,
   line : StringView,
-) -> @path.Path? {
+) -> @pathx.Path? {
   guard line.trim().strip_prefix("XDG_DOCUMENTS_DIR=") is Some(value) else {
     return None
   }
@@ -64,17 +64,20 @@ fn parse_xdg_documents_dir_line(
 }
 
 ///|
-fn parse_xdg_user_dir_value(home : @path.Path, raw : StringView) -> @path.Path? {
+fn parse_xdg_user_dir_value(
+  home : @pathx.Path,
+  raw : StringView,
+) -> @pathx.Path? {
   guard unquote_xdg_value(raw.trim()) is Some(value) else { return None }
   if value == "$HOME" {
     return Some(home)
   }
   if value.strip_prefix("$HOME/") is Some(relative) {
-    return Some(home.join(relative.to_owned()).normalize())
+    return Some(home.join(relative.to_owned()).clean())
   }
-  let path = @path.Path(value.to_owned())
-  if path.is_absolute() {
-    Some(path.normalize())
+  let path = @pathx.Path(value.to_owned())
+  if path.is_host_absolute() {
+    Some(path.clean())
   } else {
     None
   }

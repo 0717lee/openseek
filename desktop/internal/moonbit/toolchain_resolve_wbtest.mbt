@@ -1,5 +1,5 @@
 ///|
-async fn remove_toolchain_test_tree(root : @path.Path) -> Unit {
+async fn remove_toolchain_test_tree(root : @pathx.Path) -> Unit {
   @fs.rmdir(root.to_string(), recursive=true) catch {
     error if @async.is_being_cancelled() => raise error
     _ => ()
@@ -10,8 +10,8 @@ async fn remove_toolchain_test_tree(root : @path.Path) -> Unit {
 /// Runs `body` against a fresh temporary root and removes the tree on both
 /// exit paths — `defer` cannot run the async removal, so the try/catch
 /// split lives here once instead of in every test.
-async fn with_toolchain_test_tree(body : async (@path.Path) -> Unit) -> Unit {
-  let root = @path.Path(@fs.tmpdir(prefix="openseek-moonbit-external-"))
+async fn with_toolchain_test_tree(body : async (@pathx.Path) -> Unit) -> Unit {
+  let root = @pathx.Path(@fs.tmpdir(prefix="openseek-moonbit-external-"))
   body(root) catch {
     error => {
       remove_toolchain_test_tree(root)
@@ -24,7 +24,7 @@ async fn with_toolchain_test_tree(body : async (@path.Path) -> Unit) -> Unit {
 ///|
 /// A complete fake toolchain: the resolver only assembles one around the
 /// executable the desktop spawns — `moon`.
-async fn touch_fake_toolchain(bin_dir : @path.Path) -> Unit {
+async fn touch_fake_toolchain(bin_dir : @pathx.Path) -> Unit {
   @fs.write_file(
     bin_dir.join("moon" + ExecutableSuffix).to_string(),
     "",

@@ -127,7 +127,7 @@ fn open_session_on(
         None
       },
       completion: None,
-    }.with_active_workspace(workspace_token(conv.workspace))
+    }.with_active_workspace(conv.workspace)
     let commands = [scroll_transcript_after_render()]
     if generation is Some(generation) {
       commands.push(
@@ -142,7 +142,7 @@ fn open_session_on(
     // also makes its workspace the active one, so "New chat" follows.
     let workspace = model.session_workspace(channel, session_id)
     let (model, generation) = model.begin_transcript_reload(
-      empty_conversation(channel, session_id, workspace~),
+      empty_conversation(channel, session_id, workspace?),
     )
     let next = { ..model, screen: Chat, loading_conversation: Some(owner) }.with_active_workspace(
       workspace,
@@ -224,7 +224,7 @@ fn adopt_workspaces(
   dispatch : @cmd.Emit[Msg],
   channel : @interop.ChannelId,
   model : Model,
-  paths : Array[String],
+  paths : Array[@pathx.Absolute],
 ) -> (@cmd.Cmd, Model) {
   guard model.device_state(channel) is Some(dev) else {
     return (@cmd.none, model)
@@ -232,12 +232,12 @@ fn adopt_workspaces(
   let active_detached = channel == model.focused &&
     model.find_conversation(channel, model.active_session) is Some(active) &&
     active.workspace is Some(workspace) &&
-    !paths.contains(workspace.0)
-  let active_workspace = if dev.active_workspace.is_empty() ||
-    paths.contains(dev.active_workspace) {
+    !paths.contains(workspace)
+  let active_workspace = if dev.active_workspace is None ||
+    (dev.active_workspace is Some(active) && paths.contains(active)) {
     dev.active_workspace
   } else {
-    ""
+    None
   }
   // Each workspace's worktree list refreshes with the adopted registry; a
   // detached workspace's cached rows drop with its section. One request
@@ -582,8 +582,11 @@ fn conversation_relative(
   conv : Conversation,
   path : String,
 ) -> @pathx.Relative? {
-  guard is_absolute_path(path) else { return Some(Relative(path)) }
-  let absolute : @pathx.Absolute = Absolute(path)
+  guard @pathx.Path(path).to_absolute() is Some(absolute) else {
+    // A string that is not a complete absolute path keeps its existing
+    // workspace-relative interpretation.
+    return Some(Relative(path))
+  }
   for root in [conv.cwd, conv.workspace] {
     if root is Some(root) &&
       absolute.relative_to(root~) is Some(rest) &&
@@ -592,17 +595,6 @@ fn conversation_relative(
     }
   }
   None
-}
-
-///|
-/// Whether a chip path is lexically absolute (POSIX root or a Windows drive)
-/// rather than workspace-relative.
-fn is_absolute_path(path : String) -> Bool {
-  match path[:] {
-    ['/', ..] | ['\\', ..] => true
-    [drive, ':', ..] => drive.is_ascii_alphabetic()
-    _ => false
-  }
 }
 
 ///|
@@ -702,9 +694,7 @@ fn symbol_fetch_cmd(
     dispatch,
     owner,
     query,
-    workspace=workspace_root(
-      model.session_workspace(owner.channel, owner.session),
-    ),
+    workspace=model.session_workspace(owner.channel, owner.session),
   )
 }
 
@@ -1117,7 +1107,7 @@ fn replace_archived_active(
   channel : @interop.ChannelId,
   session : String,
   fresh_session : String,
-  workspace : String,
+  workspace : @pathx.Absolute?,
 ) -> Model {
   guard channel == model.focused &&
     model.active_session == session &&
@@ -1141,7 +1131,7 @@ fn replace_archived_active(
   for mention in fresh.mentions {
     mentions.push(mention)
   }
-  let fresh = { ..fresh, task, mentions, workspace: workspace_root(workspace) }
+  let fresh = { ..fresh, task, mentions, workspace }
   let fresh = if pending_initial {
     fresh.append_local_notice(
       Assistant(is_danger=true),
@@ -2068,9 +2058,8 @@ fn update_msg(
         {
           ..model.with_active_workspace(workspace),
           loading_conversation: None,
-          chats_collapsed: model.chats_collapsed && !workspace.is_empty(),
-          workspaces_collapsed: model.workspaces_collapsed &&
-          workspace.is_empty(),
+          chats_collapsed: model.chats_collapsed && workspace is Some(_),
+          workspaces_collapsed: model.workspaces_collapsed && workspace is None,
         },
       )
     }
@@ -2182,7 +2171,7 @@ fn update_msg(
           conv.session_id == owner.session &&
           conv.messages.length() == 0 &&
           !conv.is_running() {
-          { ..conv, workspace: workspace_root(dev.active_workspace) }
+          { ..conv, workspace: dev.active_workspace }
         } else {
           conv
         }
@@ -2291,7 +2280,7 @@ fn update_msg(
       }
     WorkspacePickerClose => (@cmd.none, { ..model, workspace_picker: None })
     RemoveWorkspace(channel, path) =>
-      (remove_workspace(dispatch, channel, path), model)
+      (remove_workspace(dispatch, channel, path.0), model)
     ArchiveSession(channel, session_id) => {
       // Archiving acts on the row's own device and never moves focus.
       guard model.device_state(channel) is Some(dev) else {
@@ -3213,7 +3202,7 @@ fn update_device_msg(
       if channel == model.focused {
         for item in items {
           if item.id == model.active_session {
-            active_workspace = item.workspace
+            active_workspace = workspace_root(item.workspace)
           }
         }
       }
@@ -3330,7 +3319,7 @@ fn update_device_msg(
       let conversations = next.conversations.map(conv => {
         if conv.device == channel &&
           conv.worktree is Some(name) &&
-          workspace_token(conv.workspace) == workspace &&
+          conv.workspace == Some(workspace) &&
           !rows.iter().any(row => row.name == name) {
           // The checkout is gone, so every placement derived from it goes
           // too: a kept cwd would aim OpenFile/LaunchApp at a deleted
@@ -3347,7 +3336,7 @@ fn update_device_msg(
       let archive_confirm = match next.archive_confirm {
         Some(confirm) if confirm.channel == channel &&
           next.find_conversation(channel, confirm.session) is Some(conv) &&
-          workspace_token(conv.workspace) == workspace &&
+          conv.workspace == Some(workspace) &&
           !rows.iter().any(row => row.session == Some(confirm.session)) => None
         other => other
       }
@@ -3357,7 +3346,7 @@ fn update_device_msg(
       // The chain's checkout exists: bind the composing conversation, so
       // the chip shows and a retried submit reuses the same environment.
       guard model.find_conversation(channel, session) is Some(conv) &&
-        workspace_token(conv.workspace) == workspace else {
+        conv.workspace == Some(workspace) else {
         return (@cmd.none, model)
       }
       (
@@ -3421,7 +3410,7 @@ fn update_device_msg(
         let mut workspace = next.session_workspace(channel, next.active_session)
         for item in items {
           if item.id == next.active_session {
-            workspace = item.workspace
+            workspace = workspace_root(item.workspace)
           }
         }
         next = replace_archived_active(
@@ -3499,7 +3488,7 @@ fn update_device_msg(
         let mut item : @transcript.SessionListItem = {
           id: session,
           title: None,
-          workspace,
+          workspace: workspace_token(workspace),
           workspace_name: "",
         }
         for live in dev.sessions {
@@ -3592,7 +3581,7 @@ fn update_device_msg(
           empty_conversation(
             channel,
             session,
-            workspace=model.session_workspace(channel, session),
+            workspace?=model.session_workspace(channel, session),
           ),
         )
       } else {
@@ -3706,11 +3695,11 @@ fn update_device_msg(
           empty_conversation(
             channel,
             session,
-            workspace=model.session_workspace(channel, session),
+            workspace?=model.session_workspace(channel, session),
           )
       }
       let existing = match dev.workspace_for_session_root(session_root) {
-        Some(workspace) => { ..existing, workspace: workspace_root(workspace) }
+        Some(workspace) => { ..existing, workspace: Some(workspace) }
         None => existing
       }
       let owned = submission_id is Some(id) &&
@@ -5604,7 +5593,7 @@ test "session list assigns a commit-first conversation to its durable workspace"
     fail("listed conversation disappeared")
   }
   inspect(workspace_token(reconciled.workspace), content="/work/foreign")
-  inspect(listed.dev().active_workspace, content="/work/foreign")
+  assert_true(listed.dev().active_workspace is Some(Absolute("/work/foreign")))
   assert_true(encoded_start_workspace(reconciled) is Some("/work/foreign"))
 }
 
@@ -5614,11 +5603,11 @@ test "a background session list updates only its channel's same-id workspace" {
   let remote : @interop.ChannelId = Remote("d-remote")
   let local_conv = {
     ..empty_conversation(@interop.ChannelId::Local, "shared"),
-    workspace: Some(Absolute("/local")),
+    workspace: @pathx.Path("/local").to_absolute(),
   }
   let remote_conv = {
     ..empty_conversation(remote, "shared"),
-    workspace: Some(Absolute("/remote-old")),
+    workspace: @pathx.Path("/remote-old").to_absolute(),
   }
   let model = {
     ..test_model(),
@@ -5710,10 +5699,10 @@ test "session list assigns a Started-first conversation to its durable workspace
 ///|
 test "Started places a foreign conversation from its host session root" {
   let dispatch = test_dispatch()
-  let model = test_model().with_dev(dev => {
-    ..dev,
-    workspaces: ["C:\\work\\core"],
-  })
+  guard @pathx.Path("C:\\work\\core").to_absolute() is Some(workspace) else {
+    fail("expected an absolute Windows workspace fixture")
+  }
+  let model = test_model().with_dev(dev => { ..dev, workspaces: [workspace] })
   let (_, started) = update_dev(
     dispatch,
     Started(
@@ -5721,8 +5710,8 @@ test "Started places a foreign conversation from its host session root" {
       session="desktop-workspace-run",
       model="deepseek-v4-pro",
       max_steps=1000,
-      cwd=Some(Absolute("C:/work/core")),
-      session_root=Some(Absolute("C:/work/core/.openseek")),
+      cwd=@pathx.Path("C:/work/core").to_absolute(),
+      session_root=@pathx.Path("C:/work/core/.openseek").to_absolute(),
       task=Some("arrived before the list"),
       submission_id=None,
     ),
@@ -5929,7 +5918,7 @@ test "socket losses mark the bridge lost at the third consecutive drop" {
           workspace: @terminal.Project(channel, "/remote"),
           workspace_label: "remote",
           session: "remote-session",
-          workspace_path: Some(@pathx.Absolute("/remote")),
+          workspace_path: @pathx.Path("/remote").to_absolute(),
           status: @terminal.TabRunning,
         },
       ],
@@ -6840,7 +6829,7 @@ test "started routes by session and records the host's workspace" {
       session="desktop-test",
       model="deepseek-v4-pro",
       max_steps=1000,
-      cwd=Some(Absolute("/home/u/Documents/OpenSeek/desktop-test")),
+      cwd=@pathx.Path("/home/u/Documents/OpenSeek/desktop-test").to_absolute(),
       session_root=None,
       task=None,
       submission_id=None,
@@ -6875,15 +6864,35 @@ test "started decoder preserves optional placement and submission id" {
       session: Some("desktop-test"),
       session_root: Some("/work/core/.openseek"),
     })
-    is Some(
-      Started(
-        session_root=Some(Absolute("/work/core/.openseek")),
-        submission_id=Some("submission-7"),
-        ..
-      )
-    ) else {
+    is Some(Started(session_root~, submission_id~, ..)) else {
     fail("placement or submission id was lost while decoding Started")
   }
+  assert_true(session_root is Some(Absolute("/work/core/.openseek")))
+  assert_eq(submission_id, Some("submission-7"))
+}
+
+///|
+test "host path decoders reject relative placement and diagnostic paths" {
+  let payload : @protocol.StartedPayload = {
+    run_id: "r7",
+    task: None,
+    submission_id: None,
+    engine: None,
+    model: Some("deepseek-v4-pro"),
+    max_steps: Some(1000),
+    cwd: Some("relative/workspace"),
+    session: Some("desktop-test"),
+    session_root: None,
+  }
+  assert_true(started_msg(payload) is None)
+  assert_true(RecoveredRun::from_started(payload) is None)
+  assert_true(
+    diagnostics_msg(@interop.ChannelId::Local, {
+      path: "relative/file.mbt",
+      diagnostics: [],
+    })
+    is None,
+  )
 }
 
 ///|
@@ -8087,7 +8096,7 @@ test "a failed start response keeps its prompt through an empty snapshot" {
       session="desktop-test",
       model="deepseek-v4-pro",
       max_steps=1000,
-      cwd=Some(Absolute("/workspace")),
+      cwd=@pathx.Path("/workspace").to_absolute(),
       session_root=None,
       task=Some("prompt"),
       submission_id=Some("failed-start"),
@@ -10972,7 +10981,9 @@ test "archive broadcast invalidates the active send target before list replies" 
     is None,
   )
   inspect(invalidated.active().session_id, content="desktop-fresh")
-  inspect(invalidated.dev().active_workspace, content="/work/archived")
+  assert_true(
+    invalidated.dev().active_workspace is Some(Absolute("/work/archived")),
+  )
   inspect(
     workspace_token(invalidated.active().workspace),
     content="/work/archived",
@@ -11711,14 +11722,15 @@ test "JumpToMention is a no-op for a chip without a resolved location" {
 test "EditorCommentAdded attaches a deduplicated annotation chip" {
   let dispatch = test_dispatch()
   let model = test_model()
+  guard @pathx.Path("/work/project/src/main.mbt").to_absolute()
+    is Some(absolute) else {
+    fail("test annotation path was not absolute")
+  }
   // The chip path arrives workspace-relative from the panel (recorded when
   // the file was shown); the resource URI only routes the bubble removal.
   let msg : Msg = FileEditor(
     EditorCommentAdded(
-      resource=@fileeditor.ModelUri::of(
-        @interop.ChannelId::Local,
-        Absolute("/work/project/src/main.mbt"),
-      ),
+      resource=@fileeditor.ModelUri::of(@interop.ChannelId::Local, absolute),
       file=Relative("src/main.mbt"),
       range=@common.Range::Range(5, 1, 6, 3),
       quote="fn parse_hover() {",
@@ -11744,7 +11756,7 @@ test "chip jumps relativize legacy absolute paths against the roots" {
   // Preferred root: the run-reported cwd.
   let model = test_model().replace_conversation({
     ..test_conversation(),
-    cwd: Some(Absolute("/work/project")),
+    cwd: @pathx.Path("/work/project").to_absolute(),
   })
   let (_, next) = update(
     dispatch,
@@ -11757,14 +11769,14 @@ test "chip jumps relativize legacy absolute paths against the roots" {
   )
   assert_true(@dock.active_file(next.dock) is Some(Relative("src/main.mbt")))
   // Before the first run reports cwd, the attached workspace serves as root.
+  guard @pathx.Path("/work/project").to_absolute() is Some(workspace) else {
+    fail("expected an absolute workspace fixture")
+  }
   let model = test_model()
-    .replace_conversation({
-      ..test_conversation(),
-      workspace: Some(Absolute("/work/project")),
-    })
+    .replace_conversation({ ..test_conversation(), workspace: Some(workspace) })
     .with_dev(dev => {
       ..dev,
-      worktrees: [{ workspace: "/work/project", rows: [], generation: 1 }],
+      worktrees: [{ workspace, rows: [], generation: 1 }],
     })
   let (_, next) = update(
     dispatch,

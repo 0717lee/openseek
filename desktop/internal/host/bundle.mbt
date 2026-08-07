@@ -13,7 +13,7 @@ const ProtonPackageFrontendEntryPath = "target/proton-package-input/assets/index
 /// resolves when an `assets/` tree sits in the working directory; the supported
 /// development flow runs a packaged bundle, not the bare host binary.
 pub async fn frontend_entry_path(framework_command : String) -> String {
-  let command_dir = @path.Path(framework_command).dirname().resolve()
+  let command_dir = @pathx.Path(framework_command).dirname().resolve()
   let candidates = [
     command_dir
     .join("..")
@@ -23,7 +23,7 @@ pub async fn frontend_entry_path(framework_command : String) -> String {
     command_dir.join(FrontendEntryPath),
   ]
   for candidate in candidates {
-    let path = candidate.normalize().to_string()
+    let path = candidate.clean().to_string()
     if @fs.exists(path) {
       return path
     }
@@ -36,7 +36,7 @@ pub async fn frontend_entry_path(framework_command : String) -> String {
 /// binaries have no package manifest and identify themselves explicitly
 /// instead of consulting a second source version constant.
 pub async fn package_version(executable : String) -> String {
-  let command_dir = @path.Path(executable).dirname().resolve()
+  let command_dir = @pathx.Path(executable).dirname().resolve()
   let manifest = command_dir
     .join("..")
     .join("Resources")
@@ -59,7 +59,7 @@ pub async fn package_version(executable : String) -> String {
 /// Return the directory that contains the bundled frontend entry and sibling
 /// assets such as `viewer.css`.
 pub fn frontend_asset_dir(entry_path : String) -> String {
-  @path.Path(entry_path).dirname().to_string()
+  @pathx.Path(entry_path).dirname().to_string()
 }
 
 ///|
@@ -67,7 +67,7 @@ pub fn frontend_asset_dir(entry_path : String) -> String {
 /// layout (`…/Name.app/Contents/MacOS/exe`); None anywhere else — dev
 /// binaries and other platforms — which disables self-update.
 pub fn app_bundle_path(executable : String) -> String? {
-  let macos_dir = @path.Path(executable).dirname()
+  let macos_dir = @pathx.Path(executable).dirname()
   let contents_dir = macos_dir.dirname()
   guard macos_dir.basename() == "MacOS" && contents_dir.basename() == "Contents" else {
     return None

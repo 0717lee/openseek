@@ -40,7 +40,7 @@ impl Show for PayloadError with fn output(self, logger) {
 /// because two clients may watch different workspaces at the same time.
 struct HostState {
   engine : String
-  runtime_dir : @path.Path?
+  runtime_dir : @pathx.Path?
   moon : MoonCliState
   updates : SelfUpdate
 }
@@ -66,7 +66,7 @@ pub fn HostConnection::new() -> HostConnection {
 /// layouts only lose the in-app install, never the announcement).
 pub fn new_host_state(
   engine : String,
-  runtime_dir? : @path.Path,
+  runtime_dir? : @pathx.Path,
   executable? : String,
   app_version? : String = "development",
 ) -> HostState {

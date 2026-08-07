@@ -29,7 +29,7 @@ pub struct InstalledSkill {
 /// home directory (`HOME`, or `USERPROFILE` on Windows) plus
 /// `/.openseek/skills`. Deliberately resolved like the engine resolves it:
 /// installing somewhere the engine never reads would be a silent no-op.
-fn library_dir_from_env() -> @path.Path raise SkillMarketError {
+fn library_dir_from_env() -> @pathx.Path raise SkillMarketError {
   if @env.get("OPENSEEK_GLOBAL_SKILLS_DIR") is Some(dir) {
     return dir
   }
@@ -164,7 +164,7 @@ pub async fn install_skill(
   version~ : String,
   package_path~ : String,
   registry? : String = DefaultRegistry,
-  library_dir? : @path.Path = library_dir_from_env(),
+  library_dir? : @pathx.Path = library_dir_from_env(),
   on_committed? : () -> Unit,
 ) -> InstalledSkill {
   let entry = entry_path(module_name, version, package_path)
@@ -180,7 +180,7 @@ pub async fn install_skill(
   }
   let target = library_dir.join(slug)
   let sidecar = target.join(SidecarFile)
-  let flat_target = @path.Path("\{target}.md")
+  let flat_target = @pathx.Path("\{target}.md")
   if @fsx.exists(flat_target) || (@fsx.exists(target) && !@fsx.exists(sidecar)) {
     raise SkillMarketError(
       "a skill named \{slug} already exists in your library; not overwriting it",
@@ -230,7 +230,7 @@ pub async fn install_skill(
 /// library is an empty one. Entries we installed carry their registry
 /// source; everything else is the user's own.
 pub async fn installed_skills(
-  library_dir? : @path.Path = library_dir_from_env(),
+  library_dir? : @pathx.Path = library_dir_from_env(),
 ) -> Array[InstalledSkill] {
   library_lock.acquire()
   defer library_lock.release()
@@ -277,7 +277,7 @@ pub async fn installed_skills(
 /// before any best-effort physical deletion.
 pub async fn uninstall_skill(
   id : String,
-  library_dir? : @path.Path = library_dir_from_env(),
+  library_dir? : @pathx.Path = library_dir_from_env(),
   on_committed? : () -> Unit,
 ) -> Unit {
   library_lock.acquire()

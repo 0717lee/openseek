@@ -35,7 +35,7 @@ async fn read_directory_op(payload : ReadDirPayload) -> ReadDirReply {
   names.sort_by((a, b) => a.lexical_compare(b))
   let entries : Array[DirEntry] = []
   for name in names {
-    let child = dir.join((name : @path.Path)).to_string()
+    let child = dir.join((name : @pathx.Path)).to_string()
     let is_dir = (@fs.kind(child) catch {
         error if @async.is_being_cancelled() => raise error
         _ => Unknown
@@ -87,7 +87,7 @@ async fn list_files_op(payload : ListFilesPayload) -> ListFilesReply {
 /// stopped the walk. An unreadable directory skips itself — the rest of the
 /// workspace still gets indexed.
 async fn collect_files(
-  dir : @path.Path,
+  dir : @pathx.Path,
   prefix : String,
   into : Array[String],
 ) -> Bool {
@@ -115,10 +115,10 @@ async fn collect_files(
       "\{prefix}/\{entry.name}"
     }
     if entry.is_dir {
-      if ignored_watch_path(relative) {
+      if @pathx.Relative(relative).is_ignored_watch_path() {
         continue
       }
-      if collect_files(dir.join((entry.name : @path.Path)), relative, into) {
+      if collect_files(dir.join((entry.name : @pathx.Path)), relative, into) {
         return true
       }
     } else {

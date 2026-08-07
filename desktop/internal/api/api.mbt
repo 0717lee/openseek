@@ -30,7 +30,7 @@ struct ApiState {
 /// announcement).
 pub fn ApiState::new(
   engine~ : String,
-  runtime_dir? : @path.Path,
+  runtime_dir? : @pathx.Path,
   executable? : String,
   auth? : @auth.AuthStore,
   app_version? : String = "development",

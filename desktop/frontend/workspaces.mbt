@@ -22,7 +22,12 @@ fn fetch_workspaces(
       ) catch {
         _ => return
       }
-      let workspaces = reply.workspaces.filter(path => !path.is_empty())
+      let workspaces : Array[@pathx.Absolute] = []
+      for path in reply.workspaces {
+        if @pathx.Path(path).to_absolute() is Some(path) {
+          workspaces.push(path)
+        }
+      }
       scheduler.add(
         dispatch(
           WorkspacesLoaded(
@@ -173,14 +178,15 @@ async fn workspace_action_into(
 /// A workspace's display label: the directory's basename. The host already
 /// labels session groups, but the registry itself is bare paths and a
 /// workspace with no sessions yet still needs a heading.
-fn workspace_label(path : String) -> String {
+fn @pathx.Path::workspace_label(self : @pathx.Path) -> String {
+  let path = self.0
   // Strip trailing separators, then take everything after the last one.
   let mut end = path.length()
-  while end > 0 && is_path_separator(path.code_unit_at(end - 1)) {
+  while end > 0 && path.code_unit_at(end - 1).is_path_separator() {
     end = end - 1
   }
   let mut start = end
-  while start > 0 && !is_path_separator(path.code_unit_at(start - 1)) {
+  while start > 0 && !path.code_unit_at(start - 1).is_path_separator() {
     start = start - 1
   }
   if end > start {
@@ -191,8 +197,8 @@ fn workspace_label(path : String) -> String {
 }
 
 ///|
-fn is_path_separator(unit : UInt16) -> Bool {
-  unit == 47 || unit == 92 // '/' or '\'
+fn UInt16::is_path_separator(self : UInt16) -> Bool {
+  self == 47 || self == 92 // '/' or '\'
 }
 
 // Tests for the workspace flow's pure pieces: display labels and the
@@ -200,26 +206,26 @@ fn is_path_separator(unit : UInt16) -> Bool {
 
 ///|
 test "workspace labels are the folder's basename" {
-  inspect(workspace_label("/home/u/proj"), content="proj")
-  inspect(workspace_label("/home/u/proj/"), content="proj")
-  inspect(workspace_label("C:\\code\\app"), content="app")
-  inspect(workspace_label("/"), content="/")
-  inspect(workspace_label("plain"), content="plain")
+  inspect(@pathx.Path("/home/u/proj").workspace_label(), content="proj")
+  inspect(@pathx.Path("/home/u/proj/").workspace_label(), content="proj")
+  inspect(@pathx.Path("C:\\code\\app").workspace_label(), content="app")
+  inspect(@pathx.Path("/").workspace_label(), content="/")
+  inspect(@pathx.Path("plain").workspace_label(), content="plain")
 }
 
 ///|
 test "a workspace new chat rotates into that workspace" {
   let dispatch = test_dispatch()
-  let model = test_model().with_dev(dev => {
-    ..dev,
-    workspaces: ["/home/u/proj"],
-  })
+  guard @pathx.Path("/home/u/proj").to_absolute() is Some(workspace) else {
+    fail("expected an absolute workspace fixture")
+  }
+  let model = test_model().with_dev(dev => { ..dev, workspaces: [workspace] })
   let (_, chosen) = update(
     dispatch,
-    NewChatIn(@interop.ChannelId::Local, "/home/u/proj"),
+    NewChatIn(@interop.ChannelId::Local, Some(workspace)),
     model,
   )
-  inspect(chosen.dev().active_workspace, content="/home/u/proj")
+  assert_eq(chosen.dev().active_workspace, Some(workspace))
   // The rotation lands like any other; the fresh conversation carries the
   // active workspace, and the next plain "New chat" stays there.
   let (_, rotated) = update(
@@ -229,7 +235,7 @@ test "a workspace new chat rotates into that workspace" {
   )
   assert_true(rotated.active().workspace is Some(Absolute("/home/u/proj")))
   inspect(rotated.active_session, content="desktop-ws")
-  inspect(rotated.dev().active_workspace, content="/home/u/proj")
+  assert_eq(rotated.dev().active_workspace, Some(workspace))
 }
 
 ///|
@@ -246,14 +252,15 @@ test "a scratch rotation leaves the conversation in the default store" {
 ///|
 test "detaching the active workspace opens the newest remaining conversation" {
   let dispatch = test_dispatch()
+  guard @pathx.Path("/gone").to_absolute() is Some(gone) &&
+    @pathx.Path("/kept").to_absolute() is Some(kept_workspace) else {
+    fail("expected absolute workspace fixtures")
+  }
   let model = test_model()
-    .replace_conversation({
-      ..test_conversation(),
-      workspace: Some(Absolute("/gone")),
-    })
+    .replace_conversation({ ..test_conversation(), workspace: Some(gone) })
     .with_dev(dev => {
       ..dev,
-      active_workspace: "/gone",
+      active_workspace: Some(gone),
       sessions: [
         {
           id: "desktop-kept",
@@ -271,22 +278,30 @@ test "detaching the active workspace opens the newest remaining conversation" {
     })
   let (_, next) = update_dev(
     dispatch,
-    WorkspacesLoaded(["/kept"], connection_generation=0, request_generation=0),
+    WorkspacesLoaded(
+      [kept_workspace],
+      connection_generation=0,
+      request_generation=0,
+    ),
     model,
   )
   inspect(next.dev().workspaces.length(), content="1")
   inspect(next.dev().sessions_request_generation, content="1")
   inspect(next.dev().sessions.length(), content="1")
   inspect(next.active_session, content="desktop-kept")
-  assert_true(next.active().workspace is Some(Absolute("/kept")))
+  assert_eq(next.active().workspace, Some(kept_workspace))
   assert_true(next.active().sync is Reloading(..))
   assert_true(next.find_conversation(Local, "desktop-test") is None)
-  inspect(next.dev().active_workspace, content="/kept")
+  assert_eq(next.dev().active_workspace, Some(kept_workspace))
   // The handler is pure: replaying the same message from the same model makes
   // the same selection and starts the same generation.
   let (_, replayed) = update_dev(
     dispatch,
-    WorkspacesLoaded(["/kept"], connection_generation=0, request_generation=0),
+    WorkspacesLoaded(
+      [kept_workspace],
+      connection_generation=0,
+      request_generation=0,
+    ),
     model,
   )
   inspect(replayed.active_session, content="desktop-kept")
@@ -295,31 +310,35 @@ test "detaching the active workspace opens the newest remaining conversation" {
   let attached = test_model()
     .replace_conversation({
       ..test_conversation(),
-      workspace: Some(Absolute("/kept")),
+      workspace: Some(kept_workspace),
     })
-    .with_dev(dev => { ..dev, active_workspace: "/kept" })
+    .with_dev(dev => { ..dev, active_workspace: Some(kept_workspace) })
   let (_, kept) = update_dev(
     dispatch,
-    WorkspacesLoaded(["/kept"], connection_generation=0, request_generation=0),
+    WorkspacesLoaded(
+      [kept_workspace],
+      connection_generation=0,
+      request_generation=0,
+    ),
     attached,
   )
   inspect(kept.dev().sessions_request_generation, content="1")
   assert_true(kept.active().workspace is Some(Absolute("/kept")))
-  inspect(kept.dev().active_workspace, content="/kept")
+  assert_eq(kept.dev().active_workspace, Some(kept_workspace))
 }
 
 ///|
 test "detaching the last workspace rotates into a scratch conversation" {
   let dispatch = test_dispatch()
+  guard @pathx.Path("/gone").to_absolute() is Some(gone) else {
+    fail("expected an absolute workspace fixture")
+  }
   let model = test_model()
-    .replace_conversation({
-      ..test_conversation(),
-      workspace: Some(Absolute("/gone")),
-    })
+    .replace_conversation({ ..test_conversation(), workspace: Some(gone) })
     .with_dev(dev => {
       ..dev,
-      workspaces: ["/gone"],
-      active_workspace: "/gone",
+      workspaces: [gone],
+      active_workspace: Some(gone),
       sessions: [
         {
           id: "desktop-test",
@@ -332,7 +351,7 @@ test "detaching the last workspace rotates into a scratch conversation" {
   let (_, detached) = update_dev(dispatch, WorkspacesChanged([]), model)
   inspect(detached.active_session, content="")
   inspect(detached.dev().sessions.length(), content="0")
-  inspect(detached.dev().active_workspace, content="")
+  assert_true(detached.dev().active_workspace is None)
   assert_true(detached.conversations.is_empty())
   let (_, stale) = update(
     dispatch,
@@ -362,55 +381,55 @@ test "detaching the last workspace rotates into a scratch conversation" {
 ///|
 test "an older workspace reply cannot replace a newer same-connection reply" {
   let dispatch = test_dispatch()
+  guard @pathx.Path("/current").to_absolute() is Some(current) &&
+    @pathx.Path("/old").to_absolute() is Some(old) else {
+    fail("expected absolute workspace fixtures")
+  }
   let model = test_model().with_dev(dev => {
     ..dev,
     workspaces_request_generation: 2,
   })
   let (_, newest) = update_dev(
     dispatch,
-    WorkspacesLoaded(
-      ["/current"],
-      connection_generation=0,
-      request_generation=2,
-    ),
+    WorkspacesLoaded([current], connection_generation=0, request_generation=2),
     model,
   )
   inspect(newest.dev().workspaces.length(), content="1")
-  inspect(newest.dev().workspaces[0], content="/current")
+  assert_eq(newest.dev().workspaces[0], current)
   inspect(newest.dev().sessions_request_generation, content="1")
   let (_, stale) = update_dev(
     dispatch,
-    WorkspacesLoaded(["/old"], connection_generation=0, request_generation=1),
+    WorkspacesLoaded([old], connection_generation=0, request_generation=1),
     newest,
   )
   inspect(stale.dev().workspaces.length(), content="1")
-  inspect(stale.dev().workspaces[0], content="/current")
+  assert_eq(stale.dev().workspaces[0], current)
   inspect(stale.dev().sessions_request_generation, content="1")
 }
 
 ///|
 test "a workspace commit broadcast supersedes list replies and refreshes sessions" {
   let dispatch = test_dispatch()
+  guard @pathx.Path("/current").to_absolute() is Some(current) &&
+    @pathx.Path("/new").to_absolute() is Some(new_) else {
+    fail("expected absolute workspace fixtures")
+  }
   let model = test_model().with_dev(dev => {
     ..dev,
-    workspaces: ["/current"],
+    workspaces: [current],
     workspaces_request_generation: 2,
   })
-  let (_, changed) = update_dev(dispatch, WorkspacesChanged(["/new"]), model)
+  let (_, changed) = update_dev(dispatch, WorkspacesChanged([new_]), model)
   inspect(changed.dev().workspaces_request_generation, content="3")
   inspect(changed.dev().workspaces.length(), content="1")
-  inspect(changed.dev().workspaces[0], content="/new")
+  assert_eq(changed.dev().workspaces[0], new_)
   inspect(changed.dev().sessions_request_generation, content="1")
   let (_, stale) = update_dev(
     dispatch,
-    WorkspacesLoaded(
-      ["/current"],
-      connection_generation=0,
-      request_generation=2,
-    ),
+    WorkspacesLoaded([current], connection_generation=0, request_generation=2),
     changed,
   )
-  inspect(stale.dev().workspaces[0], content="/new")
+  assert_eq(stale.dev().workspaces[0], new_)
 }
 
 ///|
@@ -423,7 +442,7 @@ test "workspace commit decoder carries the canonical registry list" {
     fail("expected a workspace change")
   }
   inspect(paths.length(), content="2")
-  inspect(paths[1], content="/two")
+  assert_eq(paths[1].0, "/two")
 }
 
 ///|
@@ -436,6 +455,9 @@ test "proton subscribes to canonical durable and workspace notifications" {
 ///|
 test "opening a stored session adopts its workspace" {
   let dispatch = test_dispatch()
+  guard @pathx.Path("/proj").to_absolute() is Some(workspace) else {
+    fail("expected an absolute workspace fixture")
+  }
   let model = test_model().with_dev(dev => {
     ..dev,
     sessions: [
@@ -452,7 +474,7 @@ test "opening a stored session adopts its workspace" {
     OpenSession(@interop.ChannelId::Local, "desktop-w"),
     model,
   )
-  inspect(opening.dev().active_workspace, content="/proj")
+  assert_eq(opening.dev().active_workspace, Some(workspace))
   assert_true(
     opening.loading_conversation
     is Some({ channel: Local, session: "desktop-w" }),

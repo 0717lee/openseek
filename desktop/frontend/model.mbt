@@ -681,14 +681,14 @@ priv struct DeviceState {
   archive_overrides : Array[ArchiveOverride]
   // Project directories attached as workspaces: the host registry's absolute
   // paths in registration order. The sidebar shows one section per entry.
-  workspaces : Array[String]
+  workspaces : Array[@pathx.Absolute]
   // Each workspace's worktree registry rows, refreshed with the workspace
   // list and replaced wholesale by `worktree.changed`. The sidebar's name
   // chips read them.
   worktrees : Array[WorkspaceWorktrees]
-  // Where "New chat" lands: a registered workspace path, or "" for the
-  // default scratch store. Follows the conversation last opened or created.
-  active_workspace : String
+  // Where "New chat" lands. `None` is the default scratch store; a project
+  // placement always retains its validated absolute-path provenance.
+  active_workspace : @pathx.Absolute?
 } derive(Eq)
 
 ///|
@@ -708,7 +708,7 @@ fn empty_device_state(channel : @interop.ChannelId) -> DeviceState {
     archive_overrides: [],
     workspaces: [],
     worktrees: [],
-    active_workspace: "",
+    active_workspace: None,
   }
 }
 
@@ -1222,10 +1222,10 @@ priv enum Msg {
   // Detach a workspace from one device: only the registry entry goes
   // away — the directory and the sessions inside it stay, so re-adding
   // restores them.
-  RemoveWorkspace(@interop.ChannelId, String)
-  // Start a fresh conversation in a device's workspace ("" = the default
+  RemoveWorkspace(@interop.ChannelId, @pathx.Absolute)
+  // Start a fresh conversation in a device's workspace (`None` = the default
   // store); on the console this also focuses that device.
-  NewChatIn(@interop.ChannelId, String)
+  NewChatIn(@interop.ChannelId, @pathx.Absolute?)
   // Flip the composer's launch mode for a conversation that has not begun:
   // workspace root, or a fresh host-named worktree (its execution
   // environment, bound 1:1 at creation).
@@ -1413,19 +1413,19 @@ priv enum DeviceMsg {
   // generations are required: reconnect rejects a dead socket, while request
   // generation rejects an older reply from the current connection.
   WorkspacesLoaded(
-    Array[String],
+    Array[@pathx.Absolute],
     connection_generation~ : Int,
     request_generation~ : Int
   )
   // The host's canonical post-commit registry broadcast. Every client adopts
   // the same list in durable write order and invalidates older list replies.
-  WorkspacesChanged(Array[String])
+  WorkspacesChanged(Array[@pathx.Absolute])
   WorkspaceFailed(String)
   // One workspace's worktree registry — the reply to `worktree.list`, with
   // the same two-generation staleness fence as `WorkspacesLoaded`.
   WorktreesLoaded(
     Array[WorktreeRow],
-    workspace~ : String,
+    workspace~ : @pathx.Absolute,
     connection_generation~ : Int,
     request_generation~ : Int
   )
@@ -1439,11 +1439,15 @@ priv enum DeviceMsg {
     message~ : String
   )
   // The post-commit `worktree.changed` broadcast for one workspace.
-  WorktreesChanged(Array[WorktreeRow], workspace~ : String)
+  WorktreesChanged(Array[WorktreeRow], workspace~ : @pathx.Absolute)
   // A `worktree.create` this client asked for succeeded mid-chain: bind
   // the composing conversation to the new environment (the start request
   // follows inside the same command).
-  WorktreeCreated(workspace~ : String, name~ : String, session~ : String)
+  WorktreeCreated(
+    workspace~ : @pathx.Absolute,
+    name~ : String,
+    session~ : String
+  )
   // An archive was refused because the conversation's worktree holds
   // uncommitted changes; the client stages the discard-confirmation dialog.
   ArchiveNeedsForce(session~ : String, message~ : String)
@@ -1549,15 +1553,17 @@ priv enum DeviceMsg {
 }
 
 ///|
-/// A workspace registry token ("" = the default store) as a typed root. The
-/// tokens come from the host's registry and store replies, so a non-empty one
-/// is known-absolute — this is the one place that provenance is collapsed
-/// into the type.
+/// A workspace registry token ("" = the default store) as a typed root.
+/// Registry and session JSON are input boundaries, so malformed non-empty
+/// spellings are rejected here before they enter frontend state.
 fn workspace_root(token : String) -> @pathx.Absolute? {
   if token.is_empty() {
     None
   } else {
-    Some(Absolute(token))
+    @pathx.Path(
+      // A malformed registry token cannot become a typed workspace root.
+      token,
+    ).to_absolute()
   }
 }
 
@@ -1576,12 +1582,12 @@ fn workspace_token(root : @pathx.Absolute?) -> String {
 fn empty_conversation(
   channel : @interop.ChannelId,
   session_id : String,
-  workspace? : String = "",
+  workspace? : @pathx.Absolute,
 ) -> Conversation {
   {
     device: channel,
     session_id,
-    workspace: workspace_root(workspace),
+    workspace,
     worktree: None,
     worktree_mode: false,
     task: "",
@@ -1618,7 +1624,12 @@ fn initial_model() -> Model {
   // A deep link may preselect the project (`?workspace=`) and, on the
   // browser console, the device (`?device=`, minted by the relay's redirect
   // off the retired `/d/<id>/` routes); the first conversation lands there.
-  let preselect_workspace = @interop.page_query_param("workspace")
+  let preselect_workspace = if @interop.page_query_param("workspace")
+    is Some(workspace) {
+    @pathx.Path(workspace).to_absolute()
+  } else {
+    None
+  }
   let is_desktop = @interop.openseek_api() is Some(_)
   {
     // The desktop window's one channel; a browser page starts empty and
@@ -1628,7 +1639,7 @@ fn initial_model() -> Model {
         [
           {
             ..empty_device_state(channel),
-            active_workspace: preselect_workspace.unwrap_or(""),
+            active_workspace: preselect_workspace,
           },
         ]
       None => []
@@ -1754,7 +1765,10 @@ fn Model::focused_connection_generation(self : Model) -> Int {
 
 ///|
 /// Move the focused channel's "New chat" placement.
-fn Model::with_active_workspace(self : Model, workspace : String) -> Model {
+fn Model::with_active_workspace(
+  self : Model,
+  workspace : @pathx.Absolute?,
+) -> Model {
   guard self.focused_device() is Some(dev) else { return self }
   self.replace_device({ ..dev, active_workspace: workspace })
 }
@@ -2057,24 +2071,24 @@ fn Model::matched_settlement_frontier(
 /// The workspace a session belongs to on `channel`: the sidebar list's
 /// grouping when the store knows the session, the live conversation's own
 /// placement otherwise (a fresh chat that has not reached the store yet).
-/// "" = the default store.
+/// `None` = the default store.
 fn Model::session_workspace(
   self : Model,
   channel : @interop.ChannelId,
   session_id : String,
-) -> String {
+) -> @pathx.Absolute? {
   let sessions = match self.device_state(channel) {
     Some(dev) => dev.sessions
     None => []
   }
   for item in sessions {
     if item.id == session_id {
-      return item.workspace
+      return workspace_root(item.workspace)
     }
   }
   match self.find_conversation(channel, session_id) {
-    Some(conv) => workspace_token(conv.workspace)
-    None => ""
+    Some(conv) => conv.workspace
+    None => None
   }
 }
 
@@ -2086,10 +2100,11 @@ fn Model::session_workspace(
 fn DeviceState::workspace_for_session_root(
   self : DeviceState,
   session_root : @pathx.Absolute?,
-) -> String? {
+) -> @pathx.Absolute? {
   guard session_root is Some(session_root) else { return None }
   for workspace in self.workspaces {
-    if @pathx.relative_to(session_root.0, root=workspace) is Some(".openseek") {
+    if session_root.relative_to(root=workspace) ==
+      Some(@pathx.Relative(".openseek")) {
       return Some(workspace)
     }
   }

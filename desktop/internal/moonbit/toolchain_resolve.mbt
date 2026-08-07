@@ -8,8 +8,8 @@
 /// identity (`credentials.json`) and caches, not the toolchain, and plays
 /// no part in which moon binary runs.
 pub struct ResolvedToolchain {
-  bin_dir : @path.Path
-  moon : @path.Path
+  bin_dir : @pathx.Path
+  moon : @pathx.Path
 }
 
 ///|
@@ -20,7 +20,7 @@ pub struct ResolvedToolchain {
 /// `moon.exe` (a Windows install leaking into a foreign-platform search),
 /// where command lookup for `moon` would never resolve and accepting the
 /// directory would shadow a valid `~/.moon/bin` later in the chain.
-async fn toolchain_at(bin_dir : @path.Path) -> ResolvedToolchain? {
+async fn toolchain_at(bin_dir : @pathx.Path) -> ResolvedToolchain? {
   let moon = bin_dir.join("moon" + ExecutableSuffix)
   guard @fsx.is_executable_file(moon) else { return None }
   Some({ bin_dir, moon })
@@ -51,7 +51,7 @@ pub impl Show for ToolchainUnavailable with fn output(_self, logger) {
 /// breaking, not machine configuration.
 pub async fn resolve_toolchain(
   engine_command : String,
-  runtime_dir? : @path.Path,
+  runtime_dir? : @pathx.Path,
 ) -> ResolvedToolchain {
   if bundled_moonbit_seed_dir(engine_command) is Some(seed_dir) {
     guard prepared_bundled_moonbit_payload(seed_dir~, runtime_dir?)
@@ -77,18 +77,18 @@ pub async fn resolve_toolchain(
 /// that hides the terminal's configuration.
 async fn external_toolchain(
   path_env? : String,
-  home_dir? : @path.Path,
+  home_dir? : @pathx.Path,
 ) -> ResolvedToolchain {
   if path_env is Some(path_value) {
     for entry in path_value.split(@env.path_sep) {
       if entry.is_empty() {
         continue
       }
-      let bin_dir = @path.Path(entry.to_owned())
+      let bin_dir = @pathx.Path(entry.to_owned())
       // A relative entry only means something from the resolver's own
       // working directory; children spawn elsewhere, so it must not be
       // selected or re-exported.
-      if !bin_dir.is_absolute() {
+      if !bin_dir.is_host_absolute() {
         @xlog.debug() <?
           {
             "event": "desktop_moonbit_path_entry_relative",

@@ -23,9 +23,9 @@ priv struct RunConfig {
   model : String
   max_steps : Int
   engine : String
-  cwd : @path.Path?
+  cwd : @pathx.Path?
   session : String?
-  session_root : @path.Path?
+  session_root : @pathx.Path?
 }
 
 ///|
@@ -126,7 +126,7 @@ async fn serve_config(
   // session's durable record in the in-project store. Only registered
   // workspaces qualify — the registry, not the payload, decides which
   // directories a run may work in.
-  let workspace : @path.Path? = if workspace is Some(path) {
+  let workspace : @pathx.Path? = if workspace is Some(path) {
     match registered_workspace(path) {
       Some(dir) => Some(dir)
       None => raise EngineError("\{path} is not a registered workspace")
@@ -185,7 +185,7 @@ async fn serve_config(
 /// directory: inheriting the host's own cwd would hand the agent whatever
 /// directory the app happened to be launched from (`/` under Finder), which is
 /// never a sensible place to work in.
-async fn resolved_run_cwd(session : String?) -> @path.Path? {
+async fn resolved_run_cwd(session : String?) -> @pathx.Path? {
   if session is Some(session) {
     if workspace_of_session(session) is Some(workspace) {
       return Some(session_run_dir(workspace, session))
@@ -194,7 +194,7 @@ async fn resolved_run_cwd(session : String?) -> @path.Path? {
       return Some(dir)
     }
   }
-  @home.dir().map(home => home.to_string())
+  @home.dir()
 }
 
 ///|

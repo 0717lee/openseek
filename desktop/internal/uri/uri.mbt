@@ -54,8 +54,8 @@ pub fn decode(text : StringView) -> String {
 /// normalize to `/`, a Windows drive path gains the authority-ending slash
 /// (`C:\a` → `file:///C:/a`), and reserved or non-ASCII bytes
 /// percent-encode.
-pub fn file_uri(absolute_path : String) -> String {
-  let path = @pathx.normalize(absolute_path)
+pub fn file_uri(absolute_path : @pathx.Absolute) -> String {
+  let path = absolute_path.normalize().0
   let uri = StringBuilder::new()
   uri.write_string("file://")
   if !path.has_prefix("/") {
@@ -66,17 +66,18 @@ pub fn file_uri(absolute_path : String) -> String {
 }
 
 ///|
-/// The filesystem path a `file:` URI names: scheme and empty authority
-/// stripped, percent-escapes decoded as UTF-8, and the spurious leading
+/// The unclassified filesystem path a `file:` URI names: scheme and empty
+/// authority stripped, percent-escapes decoded as UTF-8, and the spurious leading
 /// slash of a Windows drive path dropped (`/C:/a` → `C:/a`). A non-`file:`
-/// string passes through untouched.
-pub fn file_uri_path(uri : String) -> String {
-  guard uri.strip_prefix("file://") is Some(rest) else { return uri }
+/// string passes through untouched as a `Path`; callers that require an
+/// absolute filesystem location must explicitly convert it.
+pub fn file_uri_path(uri : String) -> @pathx.Path {
+  guard uri.strip_prefix("file://") is Some(rest) else { return Path(uri) }
   let path = decode(rest)
   if path.view() is ['/', drive, ':', ..] && drive is ('A'..='Z' | 'a'..='z') {
-    path.view(start_offset=1).to_owned()
+    Path(path.view(start_offset=1).to_owned())
   } else {
-    path
+    Path(path)
   }
 }
 

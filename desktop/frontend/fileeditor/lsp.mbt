@@ -78,8 +78,8 @@ fn model_uri_path(uri : @common.Uri) -> @pathx.Absolute? {
   // `file`-scheme conversion or it would be rebuilt into the path.
   let file = uri.with_(scheme="file", authority="") catch { _ => uri }
   let path = @common.uri_to_fs_path(file, true)
-  guard !path.is_empty() else { return None }
-  Some(Absolute(path))
+  // URI decoding is an input boundary; reject incomplete path spellings.
+  @pathx.Path(path).to_absolute()
 }
 
 ///|
@@ -292,14 +292,17 @@ test "model uris round-trip the absolute path and the channel" {
   let channels : Array[@interop.ChannelId] = [Local, Remote("d_abc")]
   for channel in channels {
     for path in ["/ws/my proj/src/a b.mbt", "/tmp/中文/x.mbt", "C:/ws/a.mbt"] {
-      let minted = model_uri_of(channel, Absolute(path))
-      assert_true(model_uri_path(minted) == Some(Absolute(path)))
+      guard @pathx.Path(path).to_absolute() is Some(absolute) else {
+        fail("test model path was not absolute")
+      }
+      let minted = model_uri_of(channel, absolute)
+      assert_true(model_uri_path(minted) == Some(absolute))
       assert_true(model_uri_channel(minted) == Some(channel))
       // The ModelUri string form re-parses to the same document key — the
       // `remove_editor_feedback` path. Monaco's string form normalizes the
       // Windows drive letter's case, so the key, not the path bytes, is what
       // must survive this leg.
-      let reparsed = @common.Uri::parse(ModelUri::of(channel, Absolute(path)).0)
+      let reparsed = @common.Uri::parse(ModelUri::of(channel, absolute).0)
       assert_eq(reparsed.to_string(), minted.to_string())
       assert_true(model_uri_path(reparsed) is Some(_))
     }

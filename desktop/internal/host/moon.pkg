@@ -20,7 +20,6 @@ import {
   "moonbitlang/core/encoding/utf8",
   "moonbitlang/core/json",
   "moonbitlang/core/string",
-  "moonbitlang/x/path",
   "tonyfettes/xlog",
 }
 

@@ -17,15 +17,16 @@ async fn browse_directory_op(
   payload : BrowseDirectoryPayload,
 ) -> BrowseDirectoryReply {
   let requested = payload.path.unwrap_or("").trim().to_owned()
-  let target : @path.Path = if requested.is_empty() {
+  let target : @pathx.Path = if requested.is_empty() {
     guard @home.dir() is Some(home) else {
       raise HostError("cannot determine the home directory")
     }
     home
   } else {
-    Path(expand_home(requested))
+    let expanded = @pathx.Path(requested).expand_home()
+    expanded
   }
-  let dir = target.resolve().normalize()
+  let dir = target.resolve().clean()
   let kind = @fs.kind(dir.to_string()) catch {
     error if @async.is_being_cancelled() => raise error
     _ => raise HostError("no such directory: \{dir}")
@@ -42,7 +43,7 @@ async fn browse_directory_op(
     if name.has_prefix(".") {
       continue
     }
-    let child = dir.join((name : @path.Path)).to_string()
+    let child = dir.join((name : @pathx.Path)).to_string()
     let is_dir = (@fs.kind(child) catch {
         error if @async.is_being_cancelled() => raise error
         _ => Unknown

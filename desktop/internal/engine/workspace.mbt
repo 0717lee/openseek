@@ -15,7 +15,7 @@ const WorkspaceDirName = "OpenSeek"
 /// anywhere. `None` when the id is unsafe as a path component, no home
 /// directory is known, or a bound checkout is missing. The run-config caller
 /// distinguishes that last state and rejects it before considering HOME.
-async fn session_workspace_dir(session : String) -> @path.Path? {
+async fn session_workspace_dir(session : String) -> @pathx.Path? {
   if workspace_of_session(session) is Some(workspace) {
     // A session bound to one of the workspace's worktrees works in that
     // checkout while it exists. A retained binding whose checkout is missing
@@ -24,7 +24,7 @@ async fn session_workspace_dir(session : String) -> @path.Path? {
   }
   guard safe_workspace_id(session) else { return None }
   guard workspace_root() is Some(root) else { return None }
-  Some(root.join(session).normalize())
+  Some(root.join(session).clean())
 }
 
 ///|
@@ -33,8 +33,12 @@ async fn session_workspace_dir(session : String) -> @path.Path? {
 /// directory is known, or a bound checkout is missing. A pure function of the
 /// session id, so it answers even for a resumed conversation the frontend
 /// loaded without a live `cwd`.
-pub async fn session_cwd(session : String) -> String? {
-  session_workspace_dir(session).map(dir => dir.to_string())
+pub async fn session_cwd(session : String) -> @pathx.Absolute? {
+  guard session_workspace_dir(session) is Some(dir) else { return None }
+  // `session_workspace_dir` is assembled from the absolute home directory.
+  // Keep the validation here so that callers never regain the old `""`
+  // sentinel or an unclassified string.
+  dir.to_absolute()
 }
 
 ///|
@@ -50,7 +54,7 @@ pub async fn resolve_in_workspace(
   session : String,
   relative : String,
   workspace? : String,
-) -> @path.Path? {
+) -> @pathx.Path? {
   let root = if workspace is Some(hint) &&
     registered_workspace(hint) is Some(dir) {
     // The hint names the workspace; a session bound to one of its worktrees
@@ -62,32 +66,44 @@ pub async fn resolve_in_workspace(
     session_workspace_dir(session)
   }
   guard root is Some(root) else { return None }
+  guard root.to_absolute() is Some(root) else { return None }
+  // The protocol supplies text. Reject a complete absolute spelling before
+  // classifying the remainder as workspace-relative host state.
+  guard @pathx.Path(relative).to_absolute() is None else { return None }
+  let relative = @pathx.Relative(relative).normalize()
   guard contained_path(root, relative) is Some(resolved) else { return None }
   // The lexical containment above stops `..` traversal but not a symlink inside
   // the workspace pointing outside it; reject one whose real target escapes.
-  guard real_contains(root.to_string(), resolved.to_string()) else {
-    return None
-  }
-  Some(resolved)
+  guard real_contains(root, resolved) else { return None }
+  Some(resolved.to_path())
 }
 
 ///|
 /// Whether `path`'s real location — following symlinks — is `boundary` or lives
-/// under it. The lexical `contained_path` / `@pathx.contains` checks resolve
+/// under it. The lexical `contained_path` / `Absolute::contains` checks resolve
 /// `..` but not symlinks, so a link inside the boundary can still point out;
 /// this canonicalizes both ends and re-checks. When either cannot be resolved —
 /// most often the target does not exist, so there is no symlink to follow and
 /// no file to leak — it trusts the lexical result already established.
-async fn real_contains(boundary : String, path : String) -> Bool {
-  let real_boundary = @fs.realpath(boundary) catch {
+async fn real_contains(
+  boundary : @pathx.Absolute,
+  path : @pathx.Absolute,
+) -> Bool {
+  let real_boundary = @fs.realpath(boundary.0) catch {
     error if @async.is_being_cancelled() => raise error
     _ => return true
   }
-  let real_path = @fs.realpath(path) catch {
+  let real_path = @fs.realpath(path.0) catch {
     error if @async.is_being_cancelled() => raise error
     _ => return true
   }
-  @pathx.contains(real_boundary, real_path)
+  guard @pathx.Path(real_boundary).to_absolute() is Some(real_boundary) else {
+    return true
+  }
+  guard @pathx.Path(real_path).to_absolute() is Some(real_path) else {
+    return true
+  }
+  real_boundary.contains(real_path)
 }
 
 ///|
@@ -97,41 +113,42 @@ async fn real_contains(boundary : String, path : String) -> Bool {
 /// or — under the scratch-workspace root — the per-session directory that
 /// owns it. `None` for a relative path or anything outside, which ops routed
 /// by path alone must refuse.
-pub async fn attached_workspace_dir(path : String) -> @path.Path? {
-  let candidate : @path.Path = Path(path)
-  guard candidate.is_absolute() else { return None }
-  let resolved = candidate.normalize().to_string()
-  let mut best : String? = None
+pub async fn attached_workspace_dir(path : @pathx.Absolute) -> @pathx.Path? {
+  let resolved_absolute = path.normalize()
+  let resolved = resolved_absolute.0
+  let mut best : @pathx.Absolute? = None
   for workspace in registered_workspaces() {
-    guard @pathx.contains(workspace, resolved) else { continue }
-    if best is Some(current) && current.length() >= workspace.length() {
+    guard workspace.contains(resolved_absolute) else { continue }
+    if best is Some(current) && current.0.length() >= workspace.0.length() {
       continue
     }
     best = Some(workspace)
   }
-  let dir : @path.Path = if best is Some(workspace) {
+  let dir : @pathx.Path = if best is Some(workspace) {
     // A path under a registered worktree belongs to that checkout, not the
     // workspace root: language ops routed by path alone must answer from the
     // worktree's own tree. An unregistered `.worktrees` path (a subtask
     // slice) keeps resolving to the workspace root.
-    worktree_owner_dir(Path(workspace), resolved)
+    worktree_owner_dir(workspace.to_path(), resolved)
   } else {
     guard workspace_root() is Some(root) else { return None }
-    guard @pathx.relative_to(resolved, root=root.to_string()) is Some(rest) &&
-      !rest.is_empty() else {
+    guard root.to_absolute() is Some(root_absolute) else { return None }
+    guard resolved_absolute.relative_to(root=root_absolute) is Some(rest) &&
+      !rest.is_root() else {
       return None
     }
     // The first segment under the scratch root names the owning session's
     // directory; the root itself belongs to no conversation.
-    let session = match rest.find("/") {
-      Some(index) => rest.view(end_offset=index).to_owned()
-      None => rest
+    let session = match rest.0.find("/") {
+      Some(index) => rest.0.view(end_offset=index).to_owned()
+      None => rest.0
     }
-    root.join(Path(session)).normalize()
+    root.join(Path(session)).clean()
   }
   // Reject an absolute path whose real target — following symlinks — escapes
   // the owning directory; the lexical containment above does not follow links.
-  guard real_contains(dir.to_string(), resolved) else { return None }
+  guard dir.to_absolute() is Some(dir_absolute) else { return None }
+  guard real_contains(dir_absolute, resolved_absolute) else { return None }
   Some(dir)
 }
 
@@ -140,13 +157,14 @@ pub async fn attached_workspace_dir(path : String) -> @path.Path? {
 /// stays within `root`. An absolute or `..`-laden `relative` that climbs out
 /// of `root` yields `None`. Pure and root-relative, so the containment rule is
 /// unit-testable without a real workspace.
-fn contained_path(root : @path.Path, relative : String) -> @path.Path? {
-  guard !(relative : @path.Path).is_absolute() else { return None }
-  let resolved = root.join((relative : @path.Path)).normalize()
-  // `relative()` of an escaping path is `..`-prefixed (or absolute); anything
-  // else lands inside `root`.
-  let rel = resolved.relative(base=root).to_string()
-  guard rel != ".." && !rel.has_prefix("../") && !rel.has_prefix("..\\") else {
+fn contained_path(
+  root : @pathx.Absolute,
+  relative : @pathx.Relative,
+) -> @pathx.Absolute? {
+  guard relative.to_path().to_absolute() is None else { return None }
+  let root_path = root.to_path()
+  let resolved = root_path.join(relative.to_path()).clean()
+  guard resolved.to_absolute() is Some(resolved) && root.contains(resolved) else {
     return None
   }
   Some(resolved)
@@ -171,15 +189,15 @@ fn safe_workspace_id(session : String) -> Bool {
 /// Documents is comes from the platform (`@userdirs.documents_dir`); when
 /// that folder does not exist (headless machines, say), the folder lives
 /// directly under the home directory.
-async fn workspace_root() -> @path.Path? {
+async fn workspace_root() -> @pathx.Path? {
   guard @home.dir() is Some(home) else { return None }
-  let parent : @path.Path = if @userdirs.documents_dir() is Some(documents) &&
+  let parent : @pathx.Path = if @userdirs.documents_dir() is Some(documents) &&
     @fsx.is_dir(documents) {
     documents
   } else {
     home
   }
-  Some(parent.join(WorkspaceDirName).normalize())
+  Some(parent.join(WorkspaceDirName).clean())
 }
 
 // Tests for the pure workspace-path helper. The full
@@ -206,24 +224,35 @@ test "ids that could escape the workspace root are rejected" {
 
 ///|
 test "absolute paths open as themselves" {
-  assert_eq(open_target("/home/u/repo", "/etc/hosts"), "/etc/hosts")
+  guard @pathx.Path("/home/u/repo").to_absolute() is Some(cwd) else {
+    fail("expected an absolute working-directory fixture")
+  }
+  assert_true(open_target(Some(cwd), Path("/etc/hosts")) == Path("/etc/hosts"))
   // Normalized, but never re-rooted into the working directory.
-  assert_eq(open_target("/home/u/repo", "/a/b/../c.mbt"), "/a/c.mbt")
+  assert_true(open_target(Some(cwd), Path("/a/b/../c.mbt")) == Path("/a/c.mbt"))
 }
 
 ///|
 test "relative paths are taken against the working directory" {
-  assert_eq(
-    open_target("/home/u/repo", "core/builtin/array.mbt"),
-    "/home/u/repo/core/builtin/array.mbt",
+  guard @pathx.Path("/home/u/repo").to_absolute() is Some(cwd) else {
+    fail("expected an absolute working-directory fixture")
+  }
+  assert_true(
+    open_target(Some(cwd), Path("core/builtin/array.mbt")) ==
+    Path("/home/u/repo/core/builtin/array.mbt"),
   )
-  assert_eq(open_target("/home/u/repo", "./main.mbt"), "/home/u/repo/main.mbt")
+  assert_true(
+    open_target(Some(cwd), Path("./main.mbt")) == Path("/home/u/repo/main.mbt"),
+  )
 }
 
 ///|
 test "a relative path with no working directory is left untouched" {
-  assert_eq(open_target("", "core/builtin/array.mbt"), "core/builtin/array.mbt")
-  assert_eq(open_target("", ""), "")
+  assert_true(
+    open_target(None, Path("core/builtin/array.mbt")) ==
+    Path("core/builtin/array.mbt"),
+  )
+  assert_true(open_target(None, Path("")) == Path(""))
 }
 
 ///|
@@ -232,24 +261,22 @@ test "a relative path with no working directory is left untouched" {
 /// absolute path — is rejected. This is the security boundary for browsing a
 /// conversation's workspace from the webview, so pin it directly.
 test "contained_path keeps in-tree relatives and rejects escapes" {
-  let root = @path.Path("/home/u/OpenSeek/sess")
-  assert_eq(
-    contained_path(root, "").unwrap().to_string(),
-    "/home/u/OpenSeek/sess",
-  )
-  assert_eq(
-    contained_path(root, "src/main.mbt").unwrap().to_string(),
-    "/home/u/OpenSeek/sess/src/main.mbt",
-  )
-  assert_eq(
-    contained_path(root, "./a/../b").unwrap().to_string(),
-    "/home/u/OpenSeek/sess/b",
-  )
-  assert_true(contained_path(root, "..") is None)
-  assert_true(contained_path(root, "../sibling") is None)
-  assert_true(contained_path(root, "../../etc/passwd") is None)
-  assert_true(contained_path(root, "/etc/passwd") is None)
-  assert_true(contained_path(root, "src/../../escape") is None)
+  guard @pathx.Path("/home/u/OpenSeek/sess").to_absolute() is Some(root) else {
+    fail("expected an absolute workspace fixture")
+  }
+  guard contained_path(root, @pathx.Relative::root()) is Some(root_path) &&
+    contained_path(root, Relative("src/main.mbt")) is Some(file_path) &&
+    contained_path(root, Relative("./a/../b")) is Some(normalized) else {
+    fail("expected contained fixture paths")
+  }
+  assert_eq(root_path.0, "/home/u/OpenSeek/sess")
+  assert_eq(file_path.0, "/home/u/OpenSeek/sess/src/main.mbt")
+  assert_eq(normalized.0, "/home/u/OpenSeek/sess/b")
+  assert_true(contained_path(root, Relative("..")) is None)
+  assert_true(contained_path(root, Relative("../sibling")) is None)
+  assert_true(contained_path(root, Relative("../../etc/passwd")) is None)
+  assert_true(contained_path(root, Relative("/etc/passwd")) is None)
+  assert_true(contained_path(root, Relative("src/../../escape")) is None)
 }
 
 ///|
@@ -268,13 +295,19 @@ async test "real_contains rejects a symlink escaping the boundary" {
   @fs.write_file(secret, b"s", create_mode=CreateOrTruncate)
   let link = "\{root}/link.txt"
   @fs.symlink(target=secret, link)
+  guard @pathx.Path(root).to_absolute() is Some(root_path) &&
+    @pathx.Path(inside).to_absolute() is Some(inside_path) &&
+    @pathx.Path("\{root}/missing.txt").to_absolute() is Some(missing_path) &&
+    @pathx.Path(link).to_absolute() is Some(link_path) else {
+    fail("expected absolute temporary paths")
+  }
   // Capture the verdicts, then clean up before asserting — `@fs.rmdir` is
   // async so it cannot run in a `defer`, and a failed assertion must not leak
   // the temp trees.
-  let inside_ok = real_contains(root, inside)
+  let inside_ok = real_contains(root_path, inside_path)
   // A path that does not exist is trusted: no link to follow, no file to leak.
-  let missing_ok = real_contains(root, "\{root}/missing.txt")
-  let link_escapes = real_contains(root, link)
+  let missing_ok = real_contains(root_path, missing_path)
+  let link_escapes = real_contains(root_path, link_path)
   @fs.rmdir(root, recursive=true) catch {
     _ => ()
   }

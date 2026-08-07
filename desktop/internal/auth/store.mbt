@@ -45,7 +45,7 @@ priv struct AuthSession {
 /// relay actor. Opaque: the token and the state flags never
 /// appear outside this package.
 struct AuthStore {
-  runtime_dir : @path.Path?
+  runtime_dir : @pathx.Path?
   env_override : ConnectorConfig?
   // The relay actor's coalescing poke channel: `DiscardOldest(1)` never
   // blocks a producer and buffers at most one pending wakeup.
@@ -69,7 +69,7 @@ struct AuthStore {
 /// The environment override always wins over a persisted session; it is
 /// never persisted itself.
 pub async fn AuthStore::load(
-  runtime_dir? : @path.Path,
+  runtime_dir? : @pathx.Path,
   env_override? : ConnectorConfig,
 ) -> AuthStore {
   let session = match runtime_dir {

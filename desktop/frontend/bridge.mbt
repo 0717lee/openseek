@@ -143,9 +143,9 @@ fn device_msg(notification : @protocol.Notification) -> DeviceMsg? {
     SessionEvent(payload) => session_event_msg(payload)
     SessionChanged(payload) => session_changed_msg(payload)
     WorkspaceChanged(payload) => {
-      let paths : Array[String] = []
+      let paths : Array[@pathx.Absolute] = []
       for path in payload.workspaces {
-        if !path.is_empty() {
+        if @pathx.Path(path).to_absolute() is Some(path) {
           paths.push(path)
         }
       }
@@ -674,14 +674,34 @@ fn started_msg(payload : @protocol.StartedPayload) -> DeviceMsg? {
     payload.max_steps is Some(max_steps) else {
     return None
   }
+  // Optional placement fields are still protocol input: if either is not a
+  // complete absolute path, reject the malformed event as a whole.
+  let cwd = match payload.cwd {
+    Some(path) => {
+      guard @pathx.Path(path).to_absolute() is Some(absolute) else {
+        return None
+      }
+      Some(absolute)
+    }
+    None => None
+  }
+  let session_root = match payload.session_root {
+    Some(path) => {
+      guard @pathx.Path(path).to_absolute() is Some(absolute) else {
+        return None
+      }
+      Some(absolute)
+    }
+    None => None
+  }
   Some(
     Started(
       run_id=payload.run_id,
       session~,
       model~,
       max_steps~,
-      cwd=payload.cwd.map(path => Absolute(path)),
-      session_root=payload.session_root.map(path => Absolute(path)),
+      cwd~,
+      session_root~,
       task=payload.task,
       submission_id=payload.submission_id,
     ),
@@ -700,13 +720,31 @@ fn RecoveredRun::from_started(
     payload.max_steps is Some(max_steps) else {
     return None
   }
+  let cwd = match payload.cwd {
+    Some(path) => {
+      guard @pathx.Path(path).to_absolute() is Some(absolute) else {
+        return None
+      }
+      Some(absolute)
+    }
+    None => None
+  }
+  let session_root = match payload.session_root {
+    Some(path) => {
+      guard @pathx.Path(path).to_absolute() is Some(absolute) else {
+        return None
+      }
+      Some(absolute)
+    }
+    None => None
+  }
   Some({
     run_id: payload.run_id,
     session,
     model,
     max_steps,
-    cwd: payload.cwd.map(path => Absolute(path)),
-    session_root: payload.session_root.map(path => Absolute(path)),
+    cwd,
+    session_root,
     task: payload.task,
     submission_id: payload.submission_id,
   })
@@ -818,13 +856,11 @@ fn diagnostics_msg(
   channel : @interop.ChannelId,
   payload : @protocol.DiagnosticsPayload,
 ) -> @fileeditor.Msg? {
-  guard !payload.path.is_empty() else { return None }
+  guard @pathx.Path(payload.path).to_absolute() is Some(absolute) else {
+    return None
+  }
   Some(
-    DiagnosticsPublished(
-      channel~,
-      absolute=Absolute(payload.path),
-      diagnostics=payload.diagnostics,
-    ),
+    DiagnosticsPublished(channel~, absolute~, diagnostics=payload.diagnostics),
   )
 }
 
@@ -1034,13 +1070,13 @@ async fn refresh_sessions_into(
 
 ///|
 /// Load a durable session's transcript so the conversation can be resumed.
-/// `workspace` says which store holds it ("" = the default store; the host
-/// can also locate it by probing, so a stale value only costs the probe).
+/// `workspace` says which registered store holds it; `None` selects the
+/// default store. The protocol conversion happens only in `load_session_cmd`.
 fn open_session(
   dispatch : @cmd.Emit[Msg],
   channel : @interop.ChannelId,
   session_id : String,
-  workspace~ : String,
+  workspace~ : @pathx.Absolute?,
   generation~ : Int,
 ) -> @cmd.Cmd {
   let dispatch = dispatch.map((msg : DeviceMsg) => FromDevice(channel, msg))
@@ -1079,7 +1115,7 @@ fn refresh_session(
   dispatch : @cmd.Emit[Msg],
   channel : @interop.ChannelId,
   session_id : String,
-  workspace~ : String,
+  workspace~ : @pathx.Absolute?,
   generation~ : Int,
 ) -> @cmd.Cmd {
   let dispatch = dispatch.map((msg : DeviceMsg) => FromDevice(channel, msg))
@@ -1108,20 +1144,15 @@ fn refresh_session(
 fn load_session_cmd(
   channel : @interop.ChannelId,
   session_id : String,
-  workspace~ : String,
+  workspace~ : @pathx.Absolute?,
   on_loaded~ : (@transcript.SessionLoadView) -> @cmd.Cmd,
   on_failed~ : (String) -> @cmd.Cmd,
 ) -> @cmd.Cmd {
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
-      let workspace = workspace.trim().to_owned()
       let reply = @interop.bridge_request(channel, @commands.session_load, {
         session: session_id,
-        workspace: if workspace.is_empty() {
-          None
-        } else {
-          Some(workspace)
-        },
+        workspace: workspace.map(path => path.0),
       }) catch {
         error => {
           scheduler.add(on_failed(@interop.bridge_error_text(error)))

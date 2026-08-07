@@ -4,7 +4,7 @@ test "Windows workspace paths use their final component as the tab label" {
   let ctx : @terminal.Ctx = {
     channel: @interop.ChannelId::Local,
     session: "windows-workspace",
-    workspace: Some(@pathx.Absolute("C:\\Users\\alice\\project")),
+    workspace: @pathx.Path("C:\\Users\\alice\\project").to_absolute(),
     checkout: Some(@interop.WorkspaceRoot),
     dark_mode: false,
     connected: true,
@@ -27,7 +27,7 @@ test "an exit before the open reply cannot revive a dead terminal" {
   let ctx : @terminal.Ctx = {
     channel: @interop.ChannelId::Local,
     session: "exit-race",
-    workspace: Some(@pathx.Absolute("/work/project")),
+    workspace: @pathx.Path("/work/project").to_absolute(),
     checkout: Some(@interop.WorkspaceRoot),
     dark_mode: false,
     connected: true,
@@ -121,7 +121,7 @@ test "same-numbered terminal ids on different devices stay isolated" {
   let local_ctx : @terminal.Ctx = {
     channel: @interop.ChannelId::Local,
     session: "shared-session",
-    workspace: Some(@pathx.Absolute("/work/project")),
+    workspace: @pathx.Path("/work/project").to_absolute(),
     checkout: Some(@interop.WorkspaceRoot),
     dark_mode: false,
     connected: true,
@@ -184,7 +184,7 @@ test "a disconnected channel retires only its terminal tabs" {
         workspace: @terminal.Project(local_channel, "/local"),
         workspace_label: "local",
         session: "local",
-        workspace_path: Some(@pathx.Absolute("/local")),
+        workspace_path: @pathx.Path("/local").to_absolute(),
         status: @terminal.TabRunning,
       },
       {
@@ -193,7 +193,7 @@ test "a disconnected channel retires only its terminal tabs" {
         workspace: @terminal.Project(remote, "/remote"),
         workspace_label: "remote",
         session: "remote",
-        workspace_path: Some(@pathx.Absolute("/remote")),
+        workspace_path: @pathx.Path("/remote").to_absolute(),
         status: @terminal.TabRunning,
       },
     ],

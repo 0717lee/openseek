@@ -462,7 +462,7 @@ const SessionShowTimeoutMs = 10000
 async fn session_show_output(
   manager : EngineManager,
   session : String,
-  root : @path.Path,
+  root : @pathx.Path,
 ) -> (Int, String, String) {
   let engine = manager.engine
   let child_stdin = prepare_engine_stdin(manager.runtime_dir, engine)
@@ -497,7 +497,7 @@ async fn session_show_output(
 async fn session_show_stdout(
   manager : EngineManager,
   session : String,
-  root : @path.Path,
+  root : @pathx.Path,
   timeout_ms? : Int = SessionShowTimeoutMs,
 ) -> String {
   let (code, stdout, stderr) = @async.with_timeout(timeout_ms, () => {
@@ -534,8 +534,10 @@ pub async fn list_sessions(manager : EngineManager) -> SessionsReply {
   }
   let groups : Array[SessionGroup] = [session_group(manager, "", root)]
   for path in registered_workspaces() {
-    let workspace : @path.Path = Path(path)
-    groups.push(session_group(manager, path, workspace_session_root(workspace)))
+    let workspace = path.to_path()
+    groups.push(
+      session_group(manager, path.0, workspace_session_root(workspace)),
+    )
   }
   { groups, }
 }
@@ -544,12 +546,12 @@ pub async fn list_sessions(manager : EngineManager) -> SessionsReply {
 async fn session_group(
   manager : EngineManager,
   workspace : String,
-  root : @path.Path,
+  root : @pathx.Path,
 ) -> SessionGroup {
   let name = if workspace.is_empty() {
     ""
   } else {
-    (workspace : @path.Path).basename().to_owned()
+    (workspace : @pathx.Path).basename().to_owned()
   }
   let root = root.to_string()
   fn failed(error : String) -> SessionGroup {
@@ -633,7 +635,7 @@ pub async fn load_session(
 async fn follower_snapshot(
   manager : EngineManager,
   session : String,
-  root : @path.Path,
+  root : @pathx.Path,
 ) -> @protocol.SessionDocument? {
   for ;; {
     guard manager.followers.get(session) is Some(follower) else { return None }
@@ -659,7 +661,7 @@ async fn follower_snapshot(
 
 ///|
 pub async fn list_workspaces() -> WorkspacesReply {
-  { workspaces: registered_workspaces() }
+  { workspaces: registered_workspaces().map(path => path.0) }
 }
 
 ///|
@@ -667,7 +669,10 @@ pub async fn attach_workspace(
   path : String,
   on_committed : (Array[String]) -> Unit,
 ) -> WorkspacesReply {
-  { workspaces: add_workspace(path, on_committed) }
+  let paths = add_workspace(path, paths => {
+    on_committed(paths.map(path => path.0))
+  })
+  { workspaces: paths.map(path => path.0) }
 }
 
 ///|
@@ -679,8 +684,11 @@ pub async fn detach_workspace(
   manager.workspace_lifecycle_lock.acquire()
   defer manager.workspace_lifecycle_lock.release()
   let workspace = expanded_workspace_path(path)
-  manager.close_engines_for_workspace(workspace)
-  { workspaces: remove_workspace(path, on_committed) }
+  manager.close_engines_for_workspace(workspace.to_path())
+  let paths = remove_workspace(path, paths => {
+    on_committed(paths.map(path => path.0))
+  })
+  { workspaces: paths.map(path => path.0) }
 }
 
 ///|
@@ -737,7 +745,7 @@ fn has_finished_run(events : Array[EngineEvent], run_id : String) -> Bool {
 #cfg(not(platform="windows"))
 async test "start echoes the client submission id in Started" {
   let dir = @fs.tmpdir(prefix="openseek-start-submission-")
-  let root : @path.Path = Path(dir)
+  let root : @pathx.Path = Path(dir)
   let engine = root.join("bin/engine.sh")
   let seed = root.join("bin/toolchains/moonbit/macos-arm64")
   let runtime = root.join("runtime")
@@ -797,7 +805,7 @@ async test "start echoes the client submission id in Started" {
 #cfg(not(platform="windows"))
 async test "setup failure retires the writer before an immediate next start" {
   let dir = @fs.tmpdir(prefix="openseek-setup-failed-seam-")
-  let root : @path.Path = Path(dir)
+  let root : @pathx.Path = Path(dir)
   let engine = root.join("bin/engine.sh")
   let seed = root.join("bin/toolchains/moonbit/macos-arm64")
   let runtime = root.join("runtime")
@@ -888,7 +896,7 @@ async test "setup failure retires the writer before an immediate next start" {
 #cfg(not(platform="windows"))
 async test "cancelling a backpressured prompt retires its partial writer" {
   let dir = @fs.tmpdir(prefix="openseek-backpressured-command-")
-  let root : @path.Path = Path(dir)
+  let root : @pathx.Path = Path(dir)
   let engine = root.join("bin/engine.sh")
   let seed = root.join("bin/toolchains/moonbit/macos-arm64")
   let runtime = root.join("runtime")
@@ -979,7 +987,7 @@ async test "named session retries after its first prompt creates no record" {
   archive_env_test_lock.acquire()
   defer archive_env_test_lock.release()
   let dir = @fs.tmpdir(prefix="openseek-first-prompt-retry-")
-  let root : @path.Path = Path(dir)
+  let root : @pathx.Path = Path(dir)
   let previous_home = @sys.get_env_var("HOME")
   @sys.set_env_var("HOME", root.join("home").to_string())
   defer (if previous_home is Some(home) {
@@ -1116,7 +1124,7 @@ async test "timed out sessions show is killed and the next read can run" {
   )
   assert_eq(@process.run("chmod", ["+x", engine]), 0)
   let manager = new_engine_manager(engine)
-  let root : @path.Path = Path(dir + "/root")
+  let root : @pathx.Path = Path(dir + "/root")
   let detail = try {
     ignore(session_show_stdout(manager, "s-timeout", root, timeout_ms=50))
     "no error"
@@ -1209,7 +1217,7 @@ async test "workspace detach refuses a running conversation without hiding it" {
   let previous = @sys.get_env_var("OPENSEEK_SESSION_ROOT")
   // The registry canonicalizes workspace paths, so build the fixture from
   // the tmpdir's physical spelling (`/tmp` is a symlink on macOS).
-  let root : @path.Path = Path(
+  let root : @pathx.Path = Path(
     @fs.realpath(@fs.tmpdir(prefix="openseek-detach-running-")),
   )
   let global_store = root.join("global")
@@ -1276,7 +1284,10 @@ async test "workspace detach refuses a running conversation without hiding it" {
     }
     assert_true(detail.contains("still running"))
     assert_false(committed.val)
-    assert_true(registered_workspaces().contains(workspace.to_string()))
+    guard workspace.to_absolute() is Some(workspace_path) else {
+      fail("expected an absolute workspace fixture")
+    }
+    assert_true(registered_workspaces().contains(workspace_path))
     group.return_immediately(())
   })
   @fs.rmdir(root.to_string(), recursive=true)
@@ -1290,7 +1301,7 @@ async test "workspace detach drains an idle writer and its follower first" {
   let previous = @sys.get_env_var("OPENSEEK_SESSION_ROOT")
   // The registry canonicalizes workspace paths, so build the fixture from
   // the tmpdir's physical spelling (`/tmp` is a symlink on macOS).
-  let root : @path.Path = Path(
+  let root : @pathx.Path = Path(
     @fs.realpath(@fs.tmpdir(prefix="openseek-detach-idle-")),
   )
   let global_store = root.join("global")

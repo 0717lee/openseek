@@ -178,8 +178,11 @@ fn FileContent::from_reply(reply : @protocol.ReadFileReply) -> FileContent? {
     @protocol.Binary => Some(Binary)
     @protocol.Oversized => Some(Oversized)
     @protocol.Content(content~, absolute~, sig~) => {
-      guard !absolute.is_empty() else { return None }
-      Some(Content(content~, absolute=Absolute(absolute), sig~))
+      // A malformed host reply cannot enter editor state as an Absolute.
+      guard @pathx.Path(absolute).to_absolute() is Some(absolute) else {
+        return None
+      }
+      Some(Content(content~, absolute~, sig~))
     }
   }
 }
@@ -332,19 +335,26 @@ test "typed directory rows build full relative paths" {
 
 ///|
 test "typed file replies map to viewer content" {
-  assert_true(
-    FileContent::from_reply(
+  guard FileContent::from_reply(
       @protocol.Content(content="hello", absolute="/ws/a.mbt", sig="12:34"),
     )
-    is Some(
-      Content(content="hello", absolute=Absolute("/ws/a.mbt"), sig="12:34")
-    ),
-  )
+    is Some(Content(content~, absolute~, sig~)) else {
+    fail("valid text reply was rejected")
+  }
+  assert_eq(content, "hello")
+  assert_true(absolute is Absolute("/ws/a.mbt"))
+  assert_eq(sig, "12:34")
   assert_true(FileContent::from_reply(@protocol.Binary) is Some(Binary))
   assert_true(FileContent::from_reply(@protocol.Oversized) is Some(Oversized))
   assert_true(
     FileContent::from_reply(
       @protocol.Content(content="x", absolute="", sig="1:2"),
+    )
+    is None,
+  )
+  assert_true(
+    FileContent::from_reply(
+      @protocol.Content(content="x", absolute="relative.mbt", sig="1:2"),
     )
     is None,
   )

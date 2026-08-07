@@ -93,7 +93,7 @@ priv struct EngineSettings {
 }
 
 ///|
-fn settings_file(runtime_dir : @path.Path) -> @path.Path {
+fn settings_file(runtime_dir : @pathx.Path) -> @pathx.Path {
   runtime_dir.join(EngineSettingsFileName)
 }
 
@@ -101,7 +101,7 @@ fn settings_file(runtime_dir : @path.Path) -> @path.Path {
 /// Read the settings, tolerating absence and corruption as defaults — a
 /// broken file only costs the stored values, never the app; it is not
 /// overwritten until the next explicit save.
-async fn load_engine_settings(runtime_dir : @path.Path?) -> EngineSettings {
+async fn load_engine_settings(runtime_dir : @pathx.Path?) -> EngineSettings {
   let fields : Map[String, Json] = Map([])
   if runtime_dir is Some(dir) &&
     (@fsx.try_read_text(settings_file(dir)) catch {
@@ -279,7 +279,7 @@ fn apply_text_patch(
 /// truncated store — the temp file keeps the full content until the rename
 /// lands. Windows may refuse to rename over an existing file; removing the
 /// target first narrows atomicity to that one platform's small window.
-async fn write_settings_file(runtime_dir : @path.Path, text : String) -> Unit {
+async fn write_settings_file(runtime_dir : @pathx.Path, text : String) -> Unit {
   let target = settings_file(runtime_dir)
   let temp = runtime_dir.join(EngineSettingsFileName + ".tmp")
   @fs.write_file(
@@ -376,9 +376,9 @@ pub async fn remote_server_base(manager : EngineManager) -> String? {
 
 ///|
 async fn with_settings_dir(
-  body : async (@path.Path, EngineManager) -> Unit,
+  body : async (@pathx.Path, EngineManager) -> Unit,
 ) -> Unit {
-  let dir : @path.Path = Path(@fs.tmpdir(prefix="openseek-settings-"))
+  let dir : @pathx.Path = Path(@fs.tmpdir(prefix="openseek-settings-"))
   body(dir, new_engine_manager("openseek", runtime_dir=dir)) catch {
     error => {
       @fs.rmdir(dir.to_string(), recursive=true) catch {

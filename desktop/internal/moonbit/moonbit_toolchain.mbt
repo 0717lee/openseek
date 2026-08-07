@@ -4,7 +4,7 @@
 /// relative to their own executables, so a path prepend is all they need;
 /// `MOON_HOME` stays whatever the user has (it holds registry credentials
 /// and caches, not the toolchain).
-fn moonbit_process_env(moon_home : @path.Path) -> Map[String, String] {
+fn moonbit_process_env(moon_home : @pathx.Path) -> Map[String, String] {
   {
     "PATH": @env.prepend_to_path_env(
       moonbit_bin_dir(moon_home).to_string(),
@@ -14,7 +14,7 @@ fn moonbit_process_env(moon_home : @path.Path) -> Map[String, String] {
 }
 
 ///|
-async fn bundled_moonbit_seed_version(seed_dir : @path.Path) -> String? {
+async fn bundled_moonbit_seed_version(seed_dir : @pathx.Path) -> String? {
   guard @fsx.read_text_if_exists(moonbit_seed_version_path(seed_dir))
     is Some(version) else {
     return None
@@ -29,8 +29,8 @@ async fn bundled_moonbit_seed_version(seed_dir : @path.Path) -> String? {
 
 ///|
 async fn prepare_tool_stdin(
-  runtime_dir : @path.Path?,
-  command : @path.Path,
+  runtime_dir : @pathx.Path?,
+  command : @pathx.Path,
 ) -> &@process.ProcessInput {
   let path = if runtime_dir is Some(dir) {
     dir.join("moonbit-tool.stdin")
@@ -42,7 +42,7 @@ async fn prepare_tool_stdin(
 }
 
 ///|
-async fn is_moonbit_bundled(moon_home : @path.Path, version : String) -> Bool {
+async fn is_moonbit_bundled(moon_home : @pathx.Path, version : String) -> Bool {
   guard @fsx.read_text_if_exists(moonbit_bundle_stamp_path(moon_home))
     is Some(stamp) else {
     return false
@@ -58,9 +58,9 @@ async fn is_moonbit_bundled(moon_home : @path.Path, version : String) -> Bool {
 
 ///|
 async fn bundle_moonbit(
-  moon_home : @path.Path,
+  moon_home : @pathx.Path,
   args : Array[String],
-  runtime_dir : @path.Path?,
+  runtime_dir : @pathx.Path?,
 ) -> Unit {
   let moon = moonbit_command(moon_home)
   let core_dir = moon_home.join("lib/core")
@@ -83,8 +83,8 @@ async fn bundle_moonbit(
 
 ///|
 async fn copy_dir_recursive(
-  source : @path.Path,
-  destination : @path.Path,
+  source : @pathx.Path,
+  destination : @pathx.Path,
 ) -> Unit {
   @fsx.ensure_dir(destination)
   let dir = @fs.opendir(source.to_string())
@@ -102,8 +102,8 @@ async fn copy_dir_recursive(
 
 ///|
 async fn copy_moonbit_seed_dir(
-  source : @path.Path,
-  destination : @path.Path,
+  source : @pathx.Path,
+  destination : @pathx.Path,
 ) -> Unit {
   copy_dir_recursive(source, destination)
 }
@@ -114,9 +114,9 @@ async fn copy_moonbit_seed_dir(
 /// is written only after extraction, executable-bit normalization, and the
 /// compiler-version check have all succeeded.
 async fn initialize_moonbit(
-  moon_home : @path.Path,
+  moon_home : @pathx.Path,
   version : String,
-  runtime_dir : @path.Path?,
+  runtime_dir : @pathx.Path?,
 ) -> Unit {
   @xlog.debug() <?
     {
@@ -170,9 +170,9 @@ let prepare_payload_lock : @semaphore.Semaphore = Semaphore(1, initial_value=1)
 
 ///|
 async fn prepared_bundled_moonbit_payload(
-  seed_dir~ : @path.Path,
-  runtime_dir? : @path.Path,
-) -> @path.Path? {
+  seed_dir~ : @pathx.Path,
+  runtime_dir? : @pathx.Path,
+) -> @pathx.Path? {
   guard prepared_moonbit_payload_dir(seed_dir~, runtime_dir?) is Some(moon_home) else {
     return None
   }
@@ -221,7 +221,7 @@ async fn prepared_bundled_moonbit_payload(
 
 ///|
 async test "prepared payload dir accepts existing toolchain root" {
-  let runtime = @path.Path(@fs.tmpdir(prefix="openseek-moonbit-runtime-"))
+  let runtime = @pathx.Path(@fs.tmpdir(prefix="openseek-moonbit-runtime-"))
   let root = runtime.join("toolchains/moonbit")
   @fs.mkdir(root.to_string(), recursive=true)
   let expected = root.join("macos-arm64").to_string()
