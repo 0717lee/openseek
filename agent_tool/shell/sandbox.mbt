@@ -263,6 +263,13 @@ fn trusted_git_command_class(
       command.argv.length(),
     ) {
     TrustedCommandWrite
+  } else if invocation.subcommand == "submodule" &&
+    submodule_verb_recoverable_write(
+      command.argv,
+      invocation.subcommand_index + 1,
+      command.argv.length(),
+    ) {
+    TrustedCommandWrite
   } else if invocation.subcommand == "worktree" &&
     @git_policy.worktree_args_are_recoverable(
       command.argv,
@@ -3048,7 +3055,7 @@ fn source_writing_awk_target(
 /// determined plumbing sequence (`replace`, `filter-branch`, `commit-tree`) can
 /// still seed the object store while `.git` is writable — a residual channel, not
 /// a hard boundary.
-fn git_preblock_target(
+async fn git_preblock_target(
   argv : Array[String],
   arg_start : Int,
   real_workspace_root : String,
@@ -3056,20 +3063,28 @@ fn git_preblock_target(
   has_custom_env : Bool,
 ) -> String? {
   if git_must_preblock(argv, arg_start, has_custom_env) {
-    // Block unconditionally; do not condition on the resolved cwd (that would let
-    // `git -C <workspace> ...` run from an outside cwd slip through). Prefer the
-    // workspace-scoped target for the message; fall back to the workspace root.
-    match git_workspace_scope_target(real_workspace_root, cwd) {
-      Some(target) => Some(target)
-      None =>
-        Some(
-          strip_trailing_slash(
-            @path.Path(real_workspace_root).normalize().to_string(),
-          ),
-        )
-    }
-  } else {
-    None
+    return block_target(real_workspace_root, cwd)
+  }
+  if submodule_update_has_custom_procedure(argv, arg_start, real_workspace_root) {
+    return block_target(real_workspace_root, cwd)
+  }
+  None
+}
+
+///|
+/// The unconditional pre-block target: prefer the workspace-scoped cwd for the
+/// message, fall back to the workspace root. Not conditioned on the resolved
+/// cwd — that would let `git -C <workspace> ...` run from an outside cwd slip
+/// through.
+fn block_target(real_workspace_root : String, cwd : String) -> String? {
+  match git_workspace_scope_target(real_workspace_root, cwd) {
+    Some(target) => Some(target)
+    None =>
+      Some(
+        strip_trailing_slash(
+          @path.Path(real_workspace_root).normalize().to_string(),
+        ),
+      )
   }
 }
 
@@ -3091,7 +3106,15 @@ fn git_must_preblock(
   has_custom_env &&
   (match @git_policy.parse(argv, arg_start) {
     Some(invocation) =>
-      @git_policy.subcommand_is_object_store_writer(invocation.subcommand)
+      @git_policy.subcommand_is_object_store_writer(invocation.subcommand) ||
+      (
+        invocation.subcommand == "submodule" &&
+        submodule_verb_writes_worktree(
+          argv,
+          invocation.subcommand_index + 1,
+          argv.length(),
+        )
+      )
     None => false
   })
 }
@@ -3110,6 +3133,230 @@ fn git_workspace_scope_target(
   } else {
     None
   }
+}
+
+///|
+/// The `git submodule` verb in `words[start..end)`, after leading `--quiet`/`-q`
+/// (the only global submodule options per `git submodule -h`). `None` for a
+/// missing verb or an unrecognized leading option (fail closed). Mirrors the
+/// verb scan in `git_policy.submodule_verb_index`; kept private here so the
+/// `git_policy` public interface stays stable.
+fn submodule_verb_name(
+  words : Array[String],
+  start : Int,
+  end : Int,
+) -> String? {
+  let mut index = start
+  while index < end {
+    let arg = words[index]
+    if arg == "--quiet" || arg == "-q" {
+      index += 1
+      continue
+    }
+    if arg.has_prefix("-") && arg != "-" {
+      return None
+    }
+    return Some(arg)
+  }
+  None
+}
+
+///|
+/// True when a `git submodule update`/`deinit` invocation carries
+/// `-f`/`--force` (also inside a short cluster). A forced update replaces
+/// untracked files in a dirty submodule with the target commit's contents, and
+/// a forced deinit removes a submodule worktree even with local changes — both
+/// permanently lose data that has no object-store copy. The scan stops at `--`,
+/// past which every word is a path.
+
+///|
+/// True when `arg` is a short option cluster (`-…`, not `--…`) containing
+/// `flag` — the sandbox-side mirror of `git_policy.short_cluster_has`.
+fn sandbox_short_cluster_has(arg : String, flag : String) -> Bool {
+  arg.has_prefix("-") &&
+  !arg.has_prefix("--") &&
+  arg != "-" &&
+  arg.contains(flag)
+}
+
+///|
+/// True when a `git submodule update`/`deinit` invocation carries
+/// `-f`/`--force` (also inside a short cluster). A forced update replaces
+/// untracked files in a dirty submodule with the target commit's contents, and
+/// a forced deinit removes a submodule worktree even with local changes — both
+/// permanently lose data that has no object-store copy. The scan stops at `--`,
+/// past which every word is a path.
+fn submodule_has_force(words : Array[String], start : Int, end : Int) -> Bool {
+  for index in start..<end {
+    let arg = words[index]
+    if arg == "--" {
+      break
+    }
+    if arg == "--force" || sandbox_short_cluster_has(arg, "f") {
+      return true
+    }
+  }
+  false
+}
+
+///|
+/// Whether a `git submodule` invocation (verb at `words[start..)`, after
+/// leading `--quiet`/`-q`) is a recoverable write eligible for trusted
+/// execution: `update` without force (materializes commits from the object
+/// store; the custom `!command` update procedure is pre-blocked separately by
+/// `submodule_update_has_custom_procedure`) and `deinit` without force (removes
+/// only clean, tracked content, like trusted `rm`). Everything else — the
+/// `.gitmodules` writers `set-url`/`set-branch`/`add`, `init`, `sync`, and
+/// unrecognized forms — fails closed to the sandbox.
+fn submodule_verb_recoverable_write(
+  words : Array[String],
+  start : Int,
+  end : Int,
+) -> Bool {
+  match submodule_verb_name(words, start, end) {
+    Some("update" | "deinit") => !submodule_has_force(words, start, end)
+    _ => false
+  }
+}
+
+///|
+/// Whether a `git submodule` invocation writes the worktree from its own
+/// repository state (`update`/`deinit`), for the custom-environment pre-block:
+/// repointed via `GIT_DIR`/`GIT_CONFIG_*` it could write source from a
+/// different repository.
+fn submodule_verb_writes_worktree(
+  words : Array[String],
+  start : Int,
+  end : Int,
+) -> Bool {
+  match submodule_verb_name(words, start, end) {
+    Some("update" | "deinit") => true
+    _ => false
+  }
+}
+
+///|
+/// Whether the `git submodule` verb is `update` — the cue for the sandbox layer
+/// to scan the git config for a custom `!command` update procedure.
+fn submodule_verb_is_update(
+  words : Array[String],
+  start : Int,
+  end : Int,
+) -> Bool {
+  submodule_verb_name(words, start, end) is Some("update")
+}
+
+///|
+/// Whether a `git submodule update` invocation would run a custom update
+/// procedure: `submodule.<name>.update` set to `!command` in the repo's git
+/// config makes `git submodule update` execute that arbitrary shell command
+/// with the target commit ID. The submodule verb scan cannot see the config, so
+/// an otherwise-recoverable `update` is pre-blocked when the workspace config
+/// declares a custom procedure. `--rebase`/`--merge`/`--checkout` on the
+/// command line override the configured strategy and are not custom, so they
+/// bypass the scan (`--remote` does NOT override it — it only picks the
+/// remote-tracking commit, so a configured `!command` still runs). A missing
+/// config or unreadable workspace is safe.
+async fn submodule_update_has_custom_procedure(
+  argv : Array[String],
+  arg_start : Int,
+  real_workspace_root : String,
+) -> Bool {
+  guard @git_policy.parse(argv, arg_start) is Some(invocation) else {
+    return false
+  }
+  if invocation.subcommand != "submodule" {
+    return false
+  }
+  if !submodule_verb_is_update(
+      argv,
+      invocation.subcommand_index + 1,
+      argv.length(),
+    ) {
+    return false
+  }
+  for index in (invocation.subcommand_index + 1)..<argv.length() {
+    let arg = argv[index]
+    if arg == "--" {
+      break
+    }
+    if arg == "--rebase" || arg == "--merge" || arg == "--checkout" {
+      return false
+    }
+  }
+  let config_path = @path.Path(real_workspace_root)
+    .join(Path(".git"))
+    .join(Path("config"))
+    .to_string()
+  if submodule_config_has_custom_update(config_path) {
+    return true
+  }
+  // A linked worktree or submodule stores `.git` as a file pointing at the
+  // real git dir (`gitdir: <path>`); resolve it so the config scan works there.
+  let resolved_git_dir = resolve_git_dir_file(real_workspace_root)
+  if resolved_git_dir is Some(git_dir) {
+    let worktree_config = @path.Path(git_dir).join(Path("config")).to_string()
+    if submodule_config_has_custom_update(worktree_config) {
+      return true
+    }
+    // A submodule's own config lives at `<gitdir>/modules/<name>/config`; a
+    // nested `git submodule update` run inside the submodule honors a custom
+    // procedure declared there, so scan those too.
+    let modules_dir = @path.Path(git_dir).join(Path("modules")).to_string()
+    let entries = @fs.readdir(modules_dir, include_hidden=true) catch {
+      _ => return false
+    }
+    for entry in entries {
+      let sub_config = @path.Path(modules_dir)
+        .join(Path(entry))
+        .join(Path("config"))
+        .to_string()
+      if submodule_config_has_custom_update(sub_config) {
+        return true
+      }
+    }
+  }
+  false
+}
+
+///|
+/// When `workspace_root/.git` is a file (a linked worktree or submodule), read
+/// the `gitdir: <path>` pointer it contains and resolve it against the
+/// workspace root. Returns `None` when `.git` is a directory or unreadable.
+async fn resolve_git_dir_file(workspace_root : String) -> String? {
+  let git_path = @path.Path(workspace_root).join(Path(".git")).to_string()
+  let text = @fs.read_file(git_path).text() catch { _ => return None }
+  for line in text.split("\n") {
+    let line = line.trim()
+    if line.has_prefix("gitdir:") {
+      let dir = line[7:].trim().to_owned()
+      let path = @path.Path(dir)
+      if path.is_absolute() {
+        return Some(path.normalize().to_string())
+      } else {
+        return Some(
+          @path.Path(workspace_root).join(path).normalize().to_string(),
+        )
+      }
+    }
+  }
+  None
+}
+
+///|
+/// Whether a git config file text declares a custom submodule update procedure:
+/// any `update = !command` line under a `[submodule "..."]` section. Line-based
+/// scan: a bare `update` key with a `!` value is treated as custom (git's own
+/// prefix for shell commands).
+async fn submodule_config_has_custom_update(config_path : String) -> Bool {
+  let text = @fs.read_file(config_path).text() catch { _ => return false }
+  for line in text.split("\n") {
+    let line = line.trim()
+    if line.has_prefix("update") && line.contains("!") {
+      return true
+    }
+  }
+  false
 }
 
 ///|
