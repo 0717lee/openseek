@@ -88,6 +88,25 @@ status, steer receipts, and all other run/compaction lifecycle and error events
 are unchanged. The desktop's in-process bridge continues to receive the hub's
 complete stream; this trimming is specific to remote WebSocket delivery.
 
+### Filesystem path encoding
+
+Every field below described as an **absolute path** carries the slash-rooted
+path component of an OpenSeek resource URI, not a host-native spelling and not
+the complete URI. A POSIX path is unchanged (`/home/u/work`); a Windows drive
+path gains the URI root slash and uses forward slashes (`C:\work` becomes
+`/C:/work`). The WebSocket or in-process channel already identifies the owning
+device, so these fields carry no URI scheme, authority, query, or fragment.
+The frontend combines the channel identity and path as an `openseek:` URI.
+
+UNC paths are unsupported: the resource URI authority belongs to the owning
+device and cannot also encode a UNC server. The host rejects them at the
+protocol boundary. Fields described as **relative paths** remain
+slash-separated workspace-relative strings. `fs.browse` request input is the
+one user-entry exception: its editable value may use the target host's native
+syntax, start with `~`, or repeat a URI path from the preceding browse reply;
+an absent value selects the host home directory. Its absolute reply fields
+always use the encoding above.
+
 ## Authentication
 
 Auth terminates **at the relay**; the JSON-RPC wire above carries no

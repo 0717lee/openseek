@@ -23,7 +23,7 @@ priv struct WorktreeRow {
 /// broadcast for one workspace can never discard another's still-current
 /// list reply.
 priv struct WorkspaceWorktrees {
-  workspace : String
+  workspace : @common.Uri
   rows : Array[WorktreeRow]
   generation : Int
 } derive(Eq)
@@ -43,17 +43,18 @@ priv struct ArchiveConfirm {
 fn fetch_worktrees(
   dispatch : @cmd.Emit[Msg],
   channel : @interop.ChannelId,
-  workspace : String,
+  workspace : @common.Uri,
   connection_generation : Int,
   request_generation : Int,
 ) -> @cmd.Cmd {
+  guard @resource.belongs_to(workspace, channel) else { return @cmd.none }
   let dispatch = dispatch.map((msg : DeviceMsg) => FromDevice(channel, msg))
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
       let reply : @protocol.WorktreesReply = @interop.bridge_request(
         channel,
         @commands.worktree_list,
-        { workspace, },
+        { workspace: workspace.path },
       ) catch {
         error => {
           // A failed list is not an empty registry: until a real reply arrives
@@ -100,8 +101,9 @@ fn start_in_new_worktree(
   selected_model : String,
   max_steps : String,
   session : String,
-  workspace : @pathx.Absolute,
+  workspace : @common.Uri,
 ) -> @cmd.Cmd {
+  guard @resource.belongs_to(workspace, channel) else { return @cmd.none }
   let device_dispatch = dispatch.map((msg : DeviceMsg) => {
     FromDevice(channel, msg)
   })
@@ -112,7 +114,7 @@ fn start_in_new_worktree(
       let reply : @protocol.WorktreeCreateReply = @interop.bridge_request(
         channel,
         @commands.worktree_create,
-        { workspace: workspace.0, session },
+        { workspace: workspace.path, session },
       ) catch {
         error => {
           // Nothing started: reject the submission so the draft restores.
@@ -149,9 +151,7 @@ fn start_in_new_worktree(
       // the commit seam, and the start itself carries no worktree — the
       // host routes the bound session's cwd through the registry.
       scheduler.add(
-        device_dispatch(
-          WorktreeCreated(workspace=workspace.0, name=reply.name, session~),
-        ),
+        device_dispatch(WorktreeCreated(workspace~, name=reply.name, session~)),
       )
       let start = start_payload(
         task,
@@ -223,25 +223,23 @@ fn worktree_rows(infos : Array[@protocol.WorktreeInfo]) -> Array[WorktreeRow] {
 /// The `worktree.changed` notification: the workspace it belongs to plus its
 /// canonical post-commit rows.
 fn worktree_changed_msg(
+  channel : @interop.ChannelId,
   payload : @protocol.WorktreeChangedPayload,
 ) -> DeviceMsg? {
-  guard !payload.workspace.is_empty() else { return None }
-  Some(
-    WorktreesChanged(
-      worktree_rows(payload.worktrees),
-      workspace=payload.workspace,
-    ),
-  )
+  guard @resource.of_path(channel, payload.workspace) is Some(workspace) else {
+    return None
+  }
+  Some(WorktreesChanged(worktree_rows(payload.worktrees), workspace~))
 }
 
 ///|
 /// The registry row for a durable session's worktree, if one binds it.
 fn worktree_row_for(
   dev : DeviceState,
-  workspace : String,
+  workspace : @common.Uri?,
   session : String,
 ) -> WorktreeRow? {
-  guard !workspace.is_empty() else { return None }
+  guard workspace is Some(workspace) else { return None }
   for group in dev.worktrees {
     guard group.workspace == workspace else { continue }
     for row in group.rows {
@@ -257,7 +255,7 @@ fn worktree_row_for(
 /// The worktree a durable session runs in — the sidebar chip's data source.
 fn worktree_name_for(
   dev : DeviceState,
-  workspace : String,
+  workspace : @common.Uri?,
   session : String,
 ) -> String? {
   worktree_row_for(dev, workspace, session).map(row => row.name)
@@ -278,8 +276,9 @@ fn Model::checkout_placement(
   guard conv.workspace is Some(_) else { return Some(@interop.WorkspaceRoot) }
   let provisional = conv.worktree.map(name => @interop.Worktree(name~))
   guard self.device_state(conv.device) is Some(dev) else { return provisional }
-  let workspace = workspace_token(conv.workspace)
-  guard dev.worktrees.iter().any(group => group.workspace == workspace) else {
+  let workspace = conv.workspace
+  guard workspace is Some(root) &&
+    dev.worktrees.iter().any(group => group.workspace == root) else {
     return provisional
   }
   guard worktree_row_for(dev, workspace, conv.session_id) is Some(row) else {
@@ -295,7 +294,7 @@ fn Model::checkout_placement(
 ///|
 fn DeviceState::with_worktrees(
   self : DeviceState,
-  workspace : String,
+  workspace : @common.Uri,
   rows : Array[WorktreeRow],
   generation~ : Int,
 ) -> DeviceState {
@@ -309,7 +308,7 @@ fn DeviceState::with_worktrees(
 /// an older token is stale for that workspace alone.
 fn DeviceState::worktree_generation(
   self : DeviceState,
-  workspace : String,
+  workspace : @common.Uri,
 ) -> Int {
   for group in self.worktrees {
     if group.workspace == workspace {
@@ -463,7 +462,7 @@ test "worktree commit decoder carries the workspace and its rows" {
     is Some(FromDevice(_, WorktreesChanged(rows, workspace~))) else {
     fail("expected a worktree change")
   }
-  inspect(workspace, content="/proj")
+  assert_eq(workspace.path, "/proj")
   inspect(rows.length(), content="1")
   inspect(rows[0].name, content="wt")
   assert_eq(rows[0].session, Some("s1"))
@@ -483,9 +482,10 @@ test "proton subscribes to the worktree commit notification" {
 ///|
 test "the launch mode toggles only before the conversation begins" {
   let dispatch = test_dispatch()
+  let workspace = @interop.ChannelId::Local.test_resource("/proj")
   let model = test_model().replace_conversation({
     ..test_conversation(),
-    workspace: Some(Absolute("/proj")),
+    workspace: Some(workspace),
   })
   let (_, on) = update(dispatch, ToggleWorktreeMode, model)
   assert_true(on.active().worktree_mode)
@@ -494,7 +494,7 @@ test "the launch mode toggles only before the conversation begins" {
   // A begun conversation keeps its environment; the toggle is inert.
   let begun = test_model().replace_conversation({
     ..test_conversation(),
-    workspace: Some(Absolute("/proj")),
+    workspace: Some(workspace),
     messages: [{ kind: User, content: "hi" }],
   })
   let (_, still) = update(dispatch, ToggleWorktreeMode, begun)
@@ -507,14 +507,15 @@ test "the launch mode toggles only before the conversation begins" {
 ///|
 test "worktree created binds the composing conversation" {
   let dispatch = test_dispatch()
+  let workspace = @interop.ChannelId::Local.test_resource("/proj")
   let model = test_model().replace_conversation({
     ..test_conversation(),
-    workspace: Some(Absolute("/proj")),
+    workspace: Some(workspace),
     worktree_mode: true,
   })
   let (_, bound) = update_dev(
     dispatch,
-    WorktreeCreated(workspace="/proj", name="wt-1", session="desktop-test"),
+    WorktreeCreated(workspace~, name="wt-1", session="desktop-test"),
     model,
   )
   assert_true(bound.active().worktree is Some("wt-1"))
@@ -522,7 +523,7 @@ test "worktree created binds the composing conversation" {
   // A created notice for an unknown session changes nothing.
   let (_, unknown) = update_dev(
     dispatch,
-    WorktreeCreated(workspace="/proj", name="wt-2", session="desktop-else"),
+    WorktreeCreated(workspace~, name="wt-2", session="desktop-else"),
     bound,
   )
   assert_true(unknown.active().worktree is Some("wt-1"))
@@ -531,18 +532,19 @@ test "worktree created binds the composing conversation" {
 ///|
 test "a missing checkout stays bound while rebuild and archive remain reachable" {
   let dispatch = test_dispatch()
+  let workspace = @interop.ChannelId::Local.test_resource("/proj")
   let bound = test_model()
     .replace_conversation({
       ..test_conversation(),
-      workspace: Some(Absolute("/proj")),
+      workspace: Some(workspace),
       worktree: Some("wt"),
     })
     .with_dev(dev => {
       ..dev,
-      workspaces: ["/proj"],
+      workspaces: [workspace],
       worktrees: [
         {
-          workspace: "/proj",
+          workspace,
           rows: [{ name: "wt", session: Some("desktop-test"), present: true }],
           generation: 1,
         },
@@ -558,7 +560,7 @@ test "a missing checkout stays bound while rebuild and archive remain reachable"
     dispatch,
     WorktreesChanged(
       [{ name: "wt", session: Some("desktop-test"), present: false }],
-      workspace="/proj",
+      workspace~,
     ),
     bound,
   )
@@ -623,9 +625,10 @@ test "a missing checkout stays bound while rebuild and archive remain reachable"
 ///|
 test "a restored workspace conversation waits for placement before using root" {
   let dispatch = test_dispatch()
+  let workspace = @interop.ChannelId::Local.test_resource("/proj")
   let unresolved = test_model().replace_conversation({
     ..test_conversation(),
-    workspace: Some(Absolute("/proj")),
+    workspace: Some(workspace),
     // `session.list` reconstructs durable conversations without a worktree
     // hint. Absence is not proof that this one belongs to the project root.
     worktree: None,
@@ -641,7 +644,7 @@ test "a restored workspace conversation waits for placement before using root" {
     dispatch,
     WorktreesLoaded(
       [],
-      workspace="/proj",
+      workspace~,
       connection_generation=0,
       request_generation=1,
     ),
@@ -656,16 +659,17 @@ test "a restored workspace conversation waits for placement before using root" {
 ///|
 test "a worktree mode submit opens the run like any other" {
   let dispatch = test_dispatch()
+  let workspace = @interop.ChannelId::Local.test_resource("/proj")
   let model = test_model()
     .replace_conversation({
       ..test_conversation(),
-      workspace: Some(Absolute("/proj")),
+      workspace: Some(workspace),
       worktree_mode: true,
       task: "go",
     })
     .with_dev(dev => {
       ..dev,
-      worktrees: [{ workspace: "/proj", rows: [], generation: 1 }],
+      worktrees: [{ workspace, rows: [], generation: 1 }],
     })
   let (_, sent) = update(dispatch, Send, model)
   assert_true(sent.active().run is Starting(..))
@@ -678,6 +682,7 @@ test "a worktree mode submit opens the run like any other" {
 ///|
 test "worktrees loaded respects the request generation fence" {
   let dispatch = test_dispatch()
+  let workspace = @interop.ChannelId::Local.test_resource("/proj")
   let model = test_model().with_dev(dev => {
     ..dev,
     worktrees_request_generation: 2,
@@ -686,41 +691,43 @@ test "worktrees loaded respects the request generation fence" {
     dispatch,
     WorktreesLoaded(
       test_worktree_rows(),
-      workspace="/proj",
+      workspace~,
       connection_generation=0,
       request_generation=2,
     ),
     model,
   )
   assert_true(
-    worktree_name_for(applied.dev(), "/proj", "desktop-wt") is Some("wt"),
+    worktree_name_for(applied.dev(), Some(workspace), "desktop-wt")
+    is Some("wt"),
   )
   let (_, stale) = update_dev(
     dispatch,
     WorktreesLoaded(
       [],
-      workspace="/proj",
+      workspace~,
       connection_generation=0,
       request_generation=1,
     ),
     applied,
   )
   assert_true(
-    worktree_name_for(stale.dev(), "/proj", "desktop-wt") is Some("wt"),
+    worktree_name_for(stale.dev(), Some(workspace), "desktop-wt") is Some("wt"),
   )
 }
 
 ///|
 test "a worktree list failure stays unresolved and ignores stale errors" {
   let dispatch = test_dispatch()
+  let workspace = @interop.ChannelId::Local.test_resource("/proj")
   let unresolved = test_model().replace_conversation({
     ..test_conversation(),
-    workspace: Some(Absolute("/proj")),
+    workspace: Some(workspace),
   })
   let (_, failed) = update_dev(
     dispatch,
     WorktreesFailed(
-      workspace="/proj",
+      workspace~,
       connection_generation=0,
       request_generation=1,
       message="offline",
@@ -734,7 +741,7 @@ test "a worktree list failure stays unresolved and ignores stale errors" {
     dispatch,
     WorktreesLoaded(
       [],
-      workspace="/proj",
+      workspace~,
       connection_generation=0,
       request_generation=2,
     ),
@@ -743,7 +750,7 @@ test "a worktree list failure stays unresolved and ignores stale errors" {
   let (_, stale_failure) = update_dev(
     dispatch,
     WorktreesFailed(
-      workspace="/proj",
+      workspace~,
       connection_generation=0,
       request_generation=1,
       message="late",
@@ -760,18 +767,20 @@ test "a worktree list failure stays unresolved and ignores stale errors" {
 ///|
 test "a broadcast for one workspace never fences a sibling's reply" {
   let dispatch = test_dispatch()
+  let a = @interop.ChannelId::Local.test_resource("/a")
+  let b = @interop.ChannelId::Local.test_resource("/b")
   // One fan-out round (token 1) has replies for /a and /b in flight; /a's
   // broadcast lands between them. /b's still-current reply must apply.
   let model = test_model().with_dev(dev => {
     ..dev,
-    workspaces: ["/a", "/b"],
+    workspaces: [a, b],
     worktrees_request_generation: 1,
   })
   let (_, changed) = update_dev(
     dispatch,
     WorktreesChanged(
       [{ name: "wt-a", session: Some("s-a"), present: true }],
-      workspace="/a",
+      workspace=a,
     ),
     model,
   )
@@ -779,54 +788,56 @@ test "a broadcast for one workspace never fences a sibling's reply" {
     dispatch,
     WorktreesLoaded(
       [{ name: "wt-b", session: Some("s-b"), present: true }],
-      workspace="/b",
+      workspace=b,
       connection_generation=0,
       request_generation=1,
     ),
     changed,
   )
-  assert_true(worktree_name_for(both.dev(), "/a", "s-a") is Some("wt-a"))
-  assert_true(worktree_name_for(both.dev(), "/b", "s-b") is Some("wt-b"))
+  assert_true(worktree_name_for(both.dev(), Some(a), "s-a") is Some("wt-a"))
+  assert_true(worktree_name_for(both.dev(), Some(b), "s-b") is Some("wt-b"))
   // /a's own in-flight round-1 reply IS fenced by its broadcast.
   let (_, fenced) = update_dev(
     dispatch,
     WorktreesLoaded(
       [],
-      workspace="/a",
+      workspace=a,
       connection_generation=0,
       request_generation=1,
     ),
     both,
   )
-  assert_true(worktree_name_for(fenced.dev(), "/a", "s-a") is Some("wt-a"))
+  assert_true(worktree_name_for(fenced.dev(), Some(a), "s-a") is Some("wt-a"))
 }
 
 ///|
 test "a worktree commit broadcast supersedes lists and unbinds removed names" {
   let dispatch = test_dispatch()
+  let workspace = @interop.ChannelId::Local.test_resource("/proj")
+  let cwd = @interop.ChannelId::Local.test_resource("/proj/.worktrees/wt")
   let model = test_model()
     .replace_conversation({
       ..test_conversation(),
-      workspace: Some(Absolute("/proj")),
+      workspace: Some(workspace),
       worktree: Some("wt"),
-      cwd: Some(Absolute("/proj/.worktrees/wt")),
+      cwd: Some(cwd),
       branch: Some("openseek/wt"),
     })
     .with_dev(dev => {
       ..dev,
-      workspaces: ["/proj"],
-      worktrees: [
-        { workspace: "/proj", rows: test_worktree_rows(), generation: 1 },
-      ],
+      workspaces: [workspace],
+      worktrees: [{ workspace, rows: test_worktree_rows(), generation: 1 }],
       worktrees_request_generation: 1,
     })
   let (_, changed) = update_dev(
     dispatch,
-    WorktreesChanged([], workspace="/proj"),
+    WorktreesChanged([], workspace~),
     model,
   )
   inspect(changed.dev().worktrees_request_generation, content="2")
-  assert_true(worktree_name_for(changed.dev(), "/proj", "desktop-wt") is None)
+  assert_true(
+    worktree_name_for(changed.dev(), Some(workspace), "desktop-wt") is None,
+  )
   // The removed worktree's conversation is a plain workspace conversation
   // now — exactly what the host's registry prune did to the mapping — and
   // every placement derived from the dead checkout (cwd for open/launch,
@@ -838,28 +849,31 @@ test "a worktree commit broadcast supersedes lists and unbinds removed names" {
     dispatch,
     WorktreesLoaded(
       test_worktree_rows(),
-      workspace="/proj",
+      workspace~,
       connection_generation=0,
       request_generation=1,
     ),
     changed,
   )
-  assert_true(worktree_name_for(stale.dev(), "/proj", "desktop-wt") is None)
+  assert_true(
+    worktree_name_for(stale.dev(), Some(workspace), "desktop-wt") is None,
+  )
 }
 
 ///|
 test "a failed worktree setup keeps the retry eligible" {
   let dispatch = test_dispatch()
+  let workspace = @interop.ChannelId::Local.test_resource("/proj")
   let model = test_model()
     .replace_conversation({
       ..test_conversation(),
-      workspace: Some(Absolute("/proj")),
+      workspace: Some(workspace),
       worktree_mode: true,
       task: "go",
     })
     .with_dev(dev => {
       ..dev,
-      worktrees: [{ workspace: "/proj", rows: [], generation: 1 }],
+      worktrees: [{ workspace, rows: [], generation: 1 }],
     })
   let worktrees_generation = model.dev().worktrees_request_generation
   let (_, sent) = update(dispatch, Send, model)
@@ -897,18 +911,17 @@ test "a failed worktree setup keeps the retry eligible" {
 ///|
 test "a remote removal closes this client's discard dialog" {
   let dispatch = test_dispatch()
+  let workspace = @interop.ChannelId::Local.test_resource("/proj")
   let model = test_model()
     .replace_conversation({
       ..test_conversation(),
-      workspace: Some(Absolute("/proj")),
+      workspace: Some(workspace),
       worktree: Some("wt"),
     })
     .with_dev(dev => {
       ..dev,
-      workspaces: ["/proj"],
-      worktrees: [
-        { workspace: "/proj", rows: test_worktree_rows(), generation: 1 },
-      ],
+      workspaces: [workspace],
+      worktrees: [{ workspace, rows: test_worktree_rows(), generation: 1 }],
     })
   let (_, staged) = update_dev(
     dispatch,
@@ -917,9 +930,10 @@ test "a remote removal closes this client's discard dialog" {
   )
   assert_true(staged.archive_confirm is Some(_))
   // A broadcast for an unrelated workspace leaves the dialog alone…
+  let other = @interop.ChannelId::Local.test_resource("/other")
   let (_, unrelated) = update_dev(
     dispatch,
-    WorktreesChanged([], workspace="/other"),
+    WorktreesChanged([], workspace=other),
     staged,
   )
   assert_true(unrelated.archive_confirm is Some(_))
@@ -927,7 +941,7 @@ test "a remote removal closes this client's discard dialog" {
   // removed it) closes the dialog: its confirm would be stale.
   let (_, swept) = update_dev(
     dispatch,
-    WorktreesChanged([], workspace="/proj"),
+    WorktreesChanged([], workspace~),
     unrelated,
   )
   assert_true(swept.archive_confirm is None)
@@ -974,13 +988,14 @@ test "a dirty archive stages the discard dialog and confirm retries forced" {
 test "a start payload never names a worktree" {
   // Creation is the binding; the host routes a bound session's cwd through
   // its registry, so the start wire shape has no worktree field to leak.
+  let workspace = @interop.ChannelId::Local.test_resource("/proj")
   let payload = start_payload(
     "go",
     "deepseek-v4-pro",
     "1000",
     "desktop-wt",
     "sub-1",
-    workspace=Some(Absolute("/proj")),
+    workspace=Some(workspace),
   )
   // The typed wire shape has no worktree field at all; the workspace hint
   // is the only placement the start carries.

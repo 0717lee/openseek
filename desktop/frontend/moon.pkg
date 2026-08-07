@@ -12,7 +12,7 @@ import {
   "moonbit-community/rabbita/sub",
   "moonbitlang/editor/base/common",
   "openseek_desktop/internal/jsonx",
-  "openseek_desktop/internal/pathx",
+  "openseek_desktop/frontend/pathx",
   "openseek_desktop/internal/protocol",
   "openseek_desktop/internal/commands",
   "openseek_desktop/frontend/dock",
@@ -22,6 +22,7 @@ import {
   "openseek_desktop/frontend/markdown",
   "openseek_desktop/frontend/mention_context",
   "openseek_desktop/frontend/preview",
+  "openseek_desktop/frontend/resource",
   "openseek_desktop/frontend/transcript",
 }
 

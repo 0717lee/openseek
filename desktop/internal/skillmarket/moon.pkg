@@ -5,10 +5,10 @@ import {
   "moonbitlang/async/io",
   "moonbitlang/core/json",
   "moonbitlang/x/crypto",
-  "moonbitlang/x/path",
   "openseek_desktop/internal/env",
-  "openseek_desktop/internal/home",
   "openseek_desktop/internal/fsx",
+  "openseek_desktop/internal/home",
+  "openseek_desktop/internal/pathx",
 }
 
 import {

@@ -1,5 +1,4 @@
 import {
-  "openseek_desktop/internal/pathx",
   "moonbitlang/core/buffer",
   "moonbitlang/core/encoding/utf8",
 }

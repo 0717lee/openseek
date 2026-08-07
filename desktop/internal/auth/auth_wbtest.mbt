@@ -102,7 +102,7 @@ test "auth.json codec round-trips and reads corruption as signed out" {
 
 ///|
 async test "auth.json persists 0600 and deletes cleanly" {
-  let dir : @path.Path = Path(@fs.tmpdir(prefix="openseek-auth-"))
+  let dir : @pathx.Path = Path(@fs.tmpdir(prefix="openseek-auth-"))
   let body = async fn() {
     let session : AuthSession = {
       server_url: "https://relay.example",
@@ -153,7 +153,7 @@ async test "session commit persists before memory and wakes each local transitio
   assert_true(store.session_server() is None)
   assert_true(store.wakeups().try_get() is Some(_))
 
-  let root : @path.Path = Path(@fs.tmpdir(prefix="openseek-auth-fail-"))
+  let root : @pathx.Path = Path(@fs.tmpdir(prefix="openseek-auth-fail-"))
   let unavailable = root.join("missing")
   let failing = AuthStore::load(runtime_dir=unavailable)
   failing.session = Some({

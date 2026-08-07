@@ -29,9 +29,7 @@ fn quick_open_symbol_request(
     dispatch,
     owner,
     query,
-    workspace=workspace_root(
-      model.session_workspace(owner.channel, owner.session),
-    ),
+    workspace=model.session_workspace(owner.channel, owner.session),
     generation~,
   )
 }

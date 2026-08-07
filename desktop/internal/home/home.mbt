@@ -3,7 +3,7 @@
 ///|
 /// The user's home directory: `USERPROFILE` on Windows, otherwise `HOME`.
 #cfg(platform="windows")
-pub fn dir() -> @path.Path? {
+pub fn dir() -> @pathx.Path? {
   if @env.get("USERPROFILE") is Some(userprofile) {
     return Some(userprofile)
   }
@@ -15,7 +15,7 @@ pub fn dir() -> @path.Path? {
 
 ///|
 #cfg(not(platform="windows"))
-pub fn dir() -> @path.Path? {
+pub fn dir() -> @pathx.Path? {
   if @env.get("HOME") is Some(home) {
     Some(Path(home))
   } else {

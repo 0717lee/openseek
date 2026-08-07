@@ -2,12 +2,12 @@
 package "openseek_desktop/internal/engine"
 
 import {
-  "moonbitlang/x/path",
+  "openseek_desktop/internal/pathx",
   "openseek_desktop/internal/protocol",
 }
 
 // Values
-pub async fn add_workspace(String, (Array[String]) -> Unit) -> Array[String]
+pub async fn add_workspace(String, (Array[@pathx.Absolute]) -> Unit raise EngineError) -> Array[@pathx.Absolute]
 
 pub async fn archive_session(EngineManager, String, () -> Unit, force? : Bool, on_worktree_changed? : (String, Array[@protocol.WorktreeInfo]) -> Unit) -> @protocol.SessionsReply
 
@@ -15,7 +15,7 @@ pub async fn archived_sessions(EngineManager, (String) -> Unit) -> @protocol.Ses
 
 pub async fn attach_workspace(String, (Array[String]) -> Unit) -> @protocol.WorkspacesReply
 
-pub async fn attached_workspace_dir(String) -> @path.Path?
+pub async fn attached_workspace_dir(@pathx.Absolute) -> @pathx.Absolute?
 
 pub async fn cancel_run(EngineManager, @protocol.CancelPayload) -> @protocol.CancelReply
 
@@ -35,21 +35,21 @@ pub async fn list_worktrees(String) -> @protocol.WorktreesReply
 
 pub async fn load_session(EngineManager, @protocol.LoadSessionPayload) -> @protocol.LoadSessionReply
 
-pub fn new_engine_actor(String, runtime_dir? : @path.Path) -> EngineActor
+pub fn new_engine_actor(String, runtime_dir? : @pathx.Path) -> EngineActor
 
-pub fn open_target(String, String) -> String
+pub fn open_target(@pathx.Absolute?, @pathx.Path) -> @pathx.Path
 
-pub async fn registered_workspaces() -> Array[String]
+pub async fn registered_workspaces() -> Array[@pathx.Absolute]
 
 pub async fn remote_server_base(EngineManager) -> String?
 
-pub async fn remove_workspace(String, (Array[String]) -> Unit) -> Array[String]
+pub async fn remove_workspace(String, (Array[@pathx.Absolute]) -> Unit raise EngineError) -> Array[@pathx.Absolute]
 
 pub async fn remove_worktree(EngineManager, String, String, Bool, (Array[@protocol.WorktreeInfo]) -> Unit) -> @protocol.WorktreesReply
 
-pub async fn resolve_in_workspace(String, String, workspace? : String) -> @path.Path?
+pub async fn resolve_in_workspace(String, String, workspace? : String) -> @pathx.Absolute?
 
-pub async fn session_cwd(String) -> String?
+pub async fn session_cwd(String) -> @pathx.Absolute?
 
 pub async fn settings_status(EngineManager) -> @protocol.SettingsStatusPayload
 
@@ -61,7 +61,7 @@ pub async fn unarchive_session(EngineManager, String, () -> Unit) -> @protocol.S
 
 pub async fn update_settings(EngineManager, SettingsPatch, legacy_migration? : Bool, on_committed? : (@protocol.SettingsStatusPayload) -> Unit) -> @protocol.SettingsStatusPayload
 
-pub fn workspace_session_root(@path.Path) -> @path.Path
+pub fn workspace_session_root(@pathx.Absolute) -> @pathx.Absolute
 
 // Errors
 pub(all) suberror EngineError {

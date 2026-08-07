@@ -4,13 +4,6 @@
 // front-end only marshals the position and decodes the reply.
 
 ///|
-/// The scheme of viewer model URIs this app mints. The hover provider only
-/// ever receives the `TextModel`, never the app `Model`, so the URI carries
-/// the file's host-resolved absolute path as its path component — the whole
-/// address the path-routed `hover` op needs.
-const ModelUriScheme : String = "openseek"
-
-///|
 /// A viewer model URI this app minted (the `to_string()` of an `openseek`-
 /// scheme `Uri` naming the file's absolute path) — the document key the
 /// viewer's services (feedback, markers) index by. The newtype keeps
@@ -22,64 +15,33 @@ const ModelUriScheme : String = "openseek"
 pub struct ModelUri(String)
 
 ///|
-pub fn ModelUri::of(
-  channel : @interop.ChannelId,
-  absolute_path : @pathx.Absolute,
-) -> ModelUri {
-  ModelUri(model_uri_of(channel, absolute_path).to_string())
+pub fn ModelUri::of(resource : @common.Uri) -> ModelUri {
+  ModelUri(resource.to_string())
 }
 
 ///|
-/// An app-scheme viewer `Uri` for `path`. `Uri::file` owns the platform
-/// path normalization (backslashes, UNC authorities, drive letters) and
-/// cannot fail; re-scheming its slash-rooted output cannot fail validation
-/// either, so the catch is unreachable and keeps the `file` scheme.
-fn app_uri(scheme : String, path : String) -> @common.Uri {
-  let file = @common.Uri::file(path)
-  file.with_(scheme~) catch {
-    _ => file
-  }
-}
-
-///|
-/// The viewer `Uri` for the file at `absolute_path` on `channel`. The
-/// authority carries the channel identity (`local`, `remote.<id>`), so a
-/// registry-global service handed only the document — the hover provider —
-/// still knows which host to ask; the URI type owns the percent-encoding,
-/// so the path rides raw.
-fn model_uri_of(
-  channel : @interop.ChannelId,
-  absolute_path : @pathx.Absolute,
-) -> @common.Uri {
-  let uri = app_uri(ModelUriScheme, absolute_path.0)
-  uri.with_(authority=channel.uri_authority()) catch {
-    _ => uri
-  }
+/// The Viewer uses the frontend resource URI itself as its document URI. Its
+/// authority already carries the channel identity, so no platform-sensitive
+/// `file:` conversion is needed in the browser.
+fn model_uri_of(resource : @common.Uri) -> @common.Uri {
+  resource
 }
 
 ///|
 /// The channel a viewer model URI belongs to; `None` for a URI this app did
 /// not mint. A foreign or authority-less URI never falls back to a host.
 fn model_uri_channel(uri : @common.Uri) -> @interop.ChannelId? {
-  guard uri.scheme == ModelUriScheme else { return None }
-  @interop.ChannelId::from_uri_authority(uri.authority)
+  @resource.channel(uri)
 }
 
 ///|
 /// Decode a viewer model URI into the absolute path it names; `None` for a
 /// URI this app did not mint, which has no host op to route to anyway.
-/// Undoes `app_uri` exactly: the conversion runs against a `file`-scheme
-/// twin (`uri_to_fs_path`'s UNC reconstruction is gated on that scheme) and
-/// keeps the Windows drive letter's casing, so the path the host op gets is
-/// byte-for-byte the one the model was minted with.
-fn model_uri_path(uri : @common.Uri) -> @pathx.Absolute? {
-  guard uri.scheme == ModelUriScheme else { return None }
-  // The authority is the channel, not a UNC host — strip it before the
-  // `file`-scheme conversion or it would be rebuilt into the path.
-  let file = uri.with_(scheme="file", authority="") catch { _ => uri }
-  let path = @common.uri_to_fs_path(file, true)
-  guard !path.is_empty() else { return None }
-  Some(Absolute(path))
+/// The returned URI is the same typed resource: no browser-host filesystem
+/// conversion is involved.
+fn model_uri_path(uri : @common.Uri) -> @common.Uri? {
+  guard @resource.channel(uri) is Some(_) else { return None }
+  Some(uri)
 }
 
 ///|
@@ -126,12 +88,12 @@ fn register_hover_provider() -> Unit {
 /// `line`/`character`.
 async fn request_hover(
   channel~ : @interop.ChannelId,
-  path~ : @pathx.Absolute,
+  path~ : @common.Uri,
   line~ : Int,
   character~ : Int,
 ) -> @protocol.LspHoverReply {
   @interop.bridge_request(channel, @commands.lsp_hover, {
-    path: path.0,
+    path: path.path,
     line,
     character,
   })
@@ -189,7 +151,7 @@ fn HoverProjection::range(self : HoverProjection) -> @common.Range {
 fn request_diagnostics(
   dispatch : @cmd.Emit[Msg],
   owner : @interop.ConversationKey,
-  absolute : @pathx.Absolute,
+  absolute : @common.Uri,
 ) -> @cmd.Cmd {
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
@@ -211,9 +173,9 @@ fn request_diagnostics(
 /// Call the host `lsp_open` op for the absolute `path`.
 async fn request_lsp_open(
   channel~ : @interop.ChannelId,
-  path~ : @pathx.Absolute,
+  path~ : @common.Uri,
 ) -> @protocol.LspDiagnosticsReply {
-  @interop.bridge_request(channel, @commands.lsp_open, { path: path.0 })
+  @interop.bridge_request(channel, @commands.lsp_open, { path: path.path })
 }
 
 ///|
@@ -288,20 +250,22 @@ fn DiagnosticProjection::tags(
 }
 
 ///|
-test "model uris round-trip the absolute path and the channel" {
+test "model uris retain resource paths and channels" {
   let channels : Array[@interop.ChannelId] = [Local, Remote("d_abc")]
   for channel in channels {
-    for path in ["/ws/my proj/src/a b.mbt", "/tmp/中文/x.mbt", "C:/ws/a.mbt"] {
-      let minted = model_uri_of(channel, Absolute(path))
-      assert_true(model_uri_path(minted) == Some(Absolute(path)))
+    for path in ["/ws/my proj/src/a b.mbt", "/tmp/中文/x.mbt", "/C:/ws/a.mbt"] {
+      guard @resource.of_path(channel, path) is Some(resource) else {
+        fail("test resource path was not absolute")
+      }
+      let minted = model_uri_of(resource)
+      assert_true(model_uri_path(minted) == Some(resource))
       assert_true(model_uri_channel(minted) == Some(channel))
       // The ModelUri string form re-parses to the same document key — the
-      // `remove_editor_feedback` path. Monaco's string form normalizes the
-      // Windows drive letter's case, so the key, not the path bytes, is what
-      // must survive this leg.
-      let reparsed = @common.Uri::parse(ModelUri::of(channel, Absolute(path)).0)
+      // `remove_editor_feedback` path. URI serialization owns escaping while
+      // the parsed path and channel remain stable.
+      let reparsed = @common.Uri::parse(ModelUri::of(resource).0)
       assert_eq(reparsed.to_string(), minted.to_string())
-      assert_true(model_uri_path(reparsed) is Some(_))
+      assert_true(model_uri_path(reparsed) == Some(resource))
     }
   }
 }
@@ -310,7 +274,11 @@ test "model uris round-trip the absolute path and the channel" {
 test "foreign uris do not parse as model paths or channels" {
   assert_true(model_uri_path(@common.Uri::parse("untitled:one")) is None)
   assert_true(model_uri_path(@common.Uri::file("/a.bin")) is None)
-  assert_true(model_uri_path(app_uri("openseek-notice", "/a.bin")) is None)
+  assert_true(
+    model_uri_path(@common.Uri::parse("openseek-notice:/a.bin")) is None,
+  )
   assert_true(model_uri_channel(@common.Uri::file("/a.bin")) is None)
-  assert_true(model_uri_channel(app_uri(ModelUriScheme, "/a.bin")) is None)
+  assert_true(
+    model_uri_channel(@common.Uri::parse("openseek://unknown/a.bin")) is None,
+  )
 }

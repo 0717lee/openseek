@@ -2,7 +2,7 @@
 struct Directory(@fs.Directory)
 
 ///|
-pub async fn Directory::try_open(path : @path.Path) -> Directory? {
+pub async fn Directory::try_open(path : @pathx.Path) -> Directory? {
   Some(Directory(@fs.opendir(path.to_string()))) catch {
     error if @async.is_being_cancelled() => raise error
     _ => return None
@@ -45,6 +45,6 @@ pub fn DirectoryEntry::is_dir(self : DirectoryEntry) -> Bool {
 }
 
 ///|
-pub async fn rmdir(path : @path.Path, recursive? : Bool = false) -> Unit {
+pub async fn rmdir(path : @pathx.Path, recursive? : Bool = false) -> Unit {
   @fs.rmdir(path.to_string(), recursive~)
 }

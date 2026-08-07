@@ -1,7 +1,7 @@
 import {
   "moonbit-community/rabbita/cmd",
   "moonbit-community/rabbita/html",
-  "openseek_desktop/internal/pathx",
+  "openseek_desktop/frontend/pathx",
   "openseek_desktop/frontend/interop",
 }
 

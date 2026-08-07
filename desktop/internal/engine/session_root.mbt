@@ -7,20 +7,22 @@
 /// absolute default under the user's home directory. The absolute fallback
 /// matters because a packaged app can run with `/` as its working directory,
 /// where the engine's relative `.openseek` default could never be created.
-fn resolved_session_root(payload_root? : @path.Path) -> @path.Path? {
+fn resolved_session_root(payload_root? : @pathx.Path) -> @pathx.Absolute? {
   if payload_root is Some(root) {
     return Some(root.resolve())
   }
   if @env.get("OPENSEEK_SESSION_ROOT") is Some(root) {
-    return Some(@path.Path(root).resolve())
+    return Some(@pathx.Path(root).resolve())
   }
   home_session_root()
 }
 
 ///|
-fn home_session_root() -> @path.Path? {
+fn home_session_root() -> @pathx.Absolute? {
   guard @home.dir() is Some(home) else { return None }
-  Some(home.join(".openseek").normalize())
+  // HOME remains unclassified input, but resolving the derived store here
+  // establishes the guarantee consumed by the session subsystem.
+  Some(home.join(".openseek").resolve())
 }
 
 // Tests for resolving explicit durable-session roots before the host shares
@@ -28,7 +30,7 @@ fn home_session_root() -> @path.Path? {
 
 ///|
 test "explicit relative session roots resolve against the host cwd" {
-  let root = @path.Path(".openseek-test-root")
+  let root = @pathx.Path(".openseek-test-root")
   let expected = root.resolve()
   guard resolved_session_root(payload_root=root) is Some(actual) else {
     fail("expected session root")
@@ -38,9 +40,9 @@ test "explicit relative session roots resolve against the host cwd" {
 
 ///|
 test "explicit absolute session roots are normalized" {
-  let root = @path.Path(".openseek-test-root").resolve().join("..")
+  let root = @pathx.Path(".openseek-test-root").resolve().join("..")
   let expected = root.normalize()
-  guard resolved_session_root(payload_root=root) is Some(actual) else {
+  guard resolved_session_root(payload_root=root.to_path()) is Some(actual) else {
     fail("expected session root")
   }
   assert_eq(actual, expected)

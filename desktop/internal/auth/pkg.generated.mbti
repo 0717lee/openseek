@@ -3,7 +3,7 @@ package "openseek_desktop/internal/auth"
 
 import {
   "moonbitlang/async/aqueue",
-  "moonbitlang/x/path",
+  "openseek_desktop/internal/pathx",
   "openseek_desktop/internal/protocol",
 }
 
@@ -26,7 +26,7 @@ pub fn AuthStore::cancel_sign_in(Self) -> Bool
 pub fn AuthStore::desired_connector(Self) -> ConnectorConfig?
 pub fn AuthStore::empty() -> Self
 pub async fn AuthStore::handle_refusal(Self) -> Unit
-pub async fn AuthStore::load(runtime_dir? : @path.Path, env_override? : ConnectorConfig) -> Self
+pub async fn AuthStore::load(runtime_dir? : @pathx.Path, env_override? : ConnectorConfig) -> Self
 pub fn AuthStore::managed_by_env(Self) -> Bool
 pub fn AuthStore::mark_dropped(Self) -> Bool
 pub fn AuthStore::mark_registered(Self, String) -> Bool

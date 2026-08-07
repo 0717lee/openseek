@@ -127,7 +127,7 @@ fn open_session_on(
         None
       },
       completion: None,
-    }.with_active_workspace(workspace_token(conv.workspace))
+    }.with_active_workspace(conv.workspace)
     let commands = [scroll_transcript_after_render()]
     if generation is Some(generation) {
       commands.push(
@@ -142,7 +142,7 @@ fn open_session_on(
     // also makes its workspace the active one, so "New chat" follows.
     let workspace = model.session_workspace(channel, session_id)
     let (model, generation) = model.begin_transcript_reload(
-      empty_conversation(channel, session_id, workspace~),
+      empty_conversation(channel, session_id, workspace?),
     )
     let next = { ..model, screen: Chat, loading_conversation: Some(owner) }.with_active_workspace(
       workspace,
@@ -224,7 +224,7 @@ fn adopt_workspaces(
   dispatch : @cmd.Emit[Msg],
   channel : @interop.ChannelId,
   model : Model,
-  paths : Array[String],
+  paths : Array[@common.Uri],
 ) -> (@cmd.Cmd, Model) {
   guard model.device_state(channel) is Some(dev) else {
     return (@cmd.none, model)
@@ -232,12 +232,12 @@ fn adopt_workspaces(
   let active_detached = channel == model.focused &&
     model.find_conversation(channel, model.active_session) is Some(active) &&
     active.workspace is Some(workspace) &&
-    !paths.contains(workspace.0)
-  let active_workspace = if dev.active_workspace.is_empty() ||
-    paths.contains(dev.active_workspace) {
+    !paths.contains(workspace)
+  let active_workspace = if dev.active_workspace is None ||
+    (dev.active_workspace is Some(active) && paths.contains(active)) {
     dev.active_workspace
   } else {
-    ""
+    None
   }
   // Each workspace's worktree list refreshes with the adopted registry; a
   // detached workspace's cached rows drop with its section. One request
@@ -260,12 +260,13 @@ fn adopt_workspaces(
   // broadcast. Prune it immediately so neither the sidebar nor fallback
   // selection can retain a conversation whose store is no longer attached.
   let sessions = dev.sessions.filter(item => {
-    item.workspace.is_empty() || paths.contains(item.workspace)
+    item.workspace is None ||
+    (item.workspace is Some(workspace) && paths.contains(workspace))
   })
   let conversations = model.conversations.filter(conv => {
     conv.device != channel ||
     conv.workspace is None ||
-    paths.contains(workspace_token(conv.workspace))
+    (conv.workspace is Some(workspace) && paths.contains(workspace))
   })
   let loading_conversation = if model.loading_conversation is Some(owner) &&
     owner.channel == channel &&
@@ -302,7 +303,7 @@ fn adopt_workspaces(
       }.with_active_workspace(fallback.workspace)
       let activated = activated.replace_conversation({
         ..activated.active(),
-        workspace: workspace_root(fallback.workspace),
+        workspace: fallback.workspace,
       })
       let (fallback_cmd, next) = open_session_on(
         dispatch,
@@ -582,27 +583,19 @@ fn conversation_relative(
   conv : Conversation,
   path : String,
 ) -> @pathx.Relative? {
-  guard is_absolute_path(path) else { return Some(Relative(path)) }
-  let absolute : @pathx.Absolute = Absolute(path)
+  guard @resource.of_path(conv.device, path) is Some(absolute) else {
+    // A string that is not a complete absolute path keeps its existing
+    // workspace-relative interpretation.
+    return Some(Relative(path))
+  }
   for root in [conv.cwd, conv.workspace] {
     if root is Some(root) &&
-      absolute.relative_to(root~) is Some(rest) &&
+      @resource.relative_to(absolute, root) is Some(rest) &&
       !rest.is_root() {
       return Some(rest)
     }
   }
   None
-}
-
-///|
-/// Whether a chip path is lexically absolute (POSIX root or a Windows drive)
-/// rather than workspace-relative.
-fn is_absolute_path(path : String) -> Bool {
-  match path[:] {
-    ['/', ..] | ['\\', ..] => true
-    [drive, ':', ..] => drive.is_ascii_alphabetic()
-    _ => false
-  }
 }
 
 ///|
@@ -702,9 +695,7 @@ fn symbol_fetch_cmd(
     dispatch,
     owner,
     query,
-    workspace=workspace_root(
-      model.session_workspace(owner.channel, owner.session),
-    ),
+    workspace=model.session_workspace(owner.channel, owner.session),
   )
 }
 
@@ -1117,7 +1108,7 @@ fn replace_archived_active(
   channel : @interop.ChannelId,
   session : String,
   fresh_session : String,
-  workspace : String,
+  workspace : @common.Uri?,
 ) -> Model {
   guard channel == model.focused &&
     model.active_session == session &&
@@ -1141,7 +1132,7 @@ fn replace_archived_active(
   for mention in fresh.mentions {
     mentions.push(mention)
   }
-  let fresh = { ..fresh, task, mentions, workspace: workspace_root(workspace) }
+  let fresh = { ..fresh, task, mentions, workspace }
   let fresh = if pending_initial {
     fresh.append_local_notice(
       Assistant(is_danger=true),
@@ -2068,9 +2059,8 @@ fn update_msg(
         {
           ..model.with_active_workspace(workspace),
           loading_conversation: None,
-          chats_collapsed: model.chats_collapsed && !workspace.is_empty(),
-          workspaces_collapsed: model.workspaces_collapsed &&
-          workspace.is_empty(),
+          chats_collapsed: model.chats_collapsed && workspace is Some(_),
+          workspaces_collapsed: model.workspaces_collapsed && workspace is None,
         },
       )
     }
@@ -2107,7 +2097,7 @@ fn update_msg(
         fetch_worktrees(
           dispatch,
           conv.device,
-          workspace.0,
+          workspace,
           dev.connection_generation,
           request_generation,
         ),
@@ -2119,14 +2109,15 @@ fn update_msg(
     }
     RepairWorktree => {
       let conv = model.active()
-      guard model.checkout_placement(conv) is Some(@interop.MissingWorktree(_)) else {
+      guard model.checkout_placement(conv) is Some(@interop.MissingWorktree(_)) &&
+        conv.workspace is Some(workspace) else {
         return (@cmd.none, model)
       }
       (
         repair_worktree_cmd(
           dispatch,
           conv.device,
-          workspace_token(conv.workspace),
+          workspace.path,
           conv.session_id,
         ),
         model,
@@ -2182,7 +2173,7 @@ fn update_msg(
           conv.session_id == owner.session &&
           conv.messages.length() == 0 &&
           !conv.is_running() {
-          { ..conv, workspace: workspace_root(dev.active_workspace) }
+          { ..conv, workspace: dev.active_workspace }
         } else {
           conv
         }
@@ -2240,7 +2231,7 @@ fn update_msg(
               ..model,
               workspace_picker: Some({
                 channel,
-                path,
+                path: Some(path),
                 entries,
                 input: "",
                 loading: false,
@@ -2282,16 +2273,20 @@ fn update_msg(
         // Confirm registers the directory the host last listed — always
         // something it confirmed exists — never raw field text; Enter in
         // the field navigates (and validates) first.
-        Some(picker) if !picker.path.is_empty() =>
+        Some(picker) if picker.path is Some(path) =>
           (
-            add_workspace(dispatch, picker.channel, picker.path),
+            add_workspace(dispatch, picker.channel, path.path),
             { ..model, workspace_picker: None },
           )
         _ => (@cmd.none, model)
       }
     WorkspacePickerClose => (@cmd.none, { ..model, workspace_picker: None })
     RemoveWorkspace(channel, path) =>
-      (remove_workspace(dispatch, channel, path), model)
+      if @resource.belongs_to(path, channel) {
+        (remove_workspace(dispatch, channel, path.path), model)
+      } else {
+        (@cmd.none, model)
+      }
     ArchiveSession(channel, session_id) => {
       // Archiving acts on the row's own device and never moves focus.
       guard model.device_state(channel) is Some(dev) else {
@@ -3201,7 +3196,7 @@ fn update_device_msg(
           let mut workspace = conv.workspace
           for item in items {
             if item.id == conv.session_id {
-              workspace = workspace_root(item.workspace)
+              workspace = item.workspace
             }
           }
           { ..conv, workspace, }
@@ -3307,7 +3302,7 @@ fn update_device_msg(
       }
       model.notify_error(
         dispatch,
-        "Worktree list unavailable for \{workspace}: \{message}",
+        "Worktree list unavailable for \{workspace.path}: \{message}",
       )
     }
     WorktreesChanged(rows, workspace~) => {
@@ -3330,7 +3325,7 @@ fn update_device_msg(
       let conversations = next.conversations.map(conv => {
         if conv.device == channel &&
           conv.worktree is Some(name) &&
-          workspace_token(conv.workspace) == workspace &&
+          conv.workspace == Some(workspace) &&
           !rows.iter().any(row => row.name == name) {
           // The checkout is gone, so every placement derived from it goes
           // too: a kept cwd would aim OpenFile/LaunchApp at a deleted
@@ -3347,7 +3342,7 @@ fn update_device_msg(
       let archive_confirm = match next.archive_confirm {
         Some(confirm) if confirm.channel == channel &&
           next.find_conversation(channel, confirm.session) is Some(conv) &&
-          workspace_token(conv.workspace) == workspace &&
+          conv.workspace == Some(workspace) &&
           !rows.iter().any(row => row.session == Some(confirm.session)) => None
         other => other
       }
@@ -3357,7 +3352,7 @@ fn update_device_msg(
       // The chain's checkout exists: bind the composing conversation, so
       // the chip shows and a retried submit reuses the same environment.
       guard model.find_conversation(channel, session) is Some(conv) &&
-        workspace_token(conv.workspace) == workspace else {
+        conv.workspace == Some(workspace) else {
         return (@cmd.none, model)
       }
       (
@@ -3592,7 +3587,7 @@ fn update_device_msg(
           empty_conversation(
             channel,
             session,
-            workspace=model.session_workspace(channel, session),
+            workspace?=model.session_workspace(channel, session),
           ),
         )
       } else {
@@ -3706,11 +3701,11 @@ fn update_device_msg(
           empty_conversation(
             channel,
             session,
-            workspace=model.session_workspace(channel, session),
+            workspace?=model.session_workspace(channel, session),
           )
       }
       let existing = match dev.workspace_for_session_root(session_root) {
-        Some(workspace) => { ..existing, workspace: workspace_root(workspace) }
+        Some(workspace) => { ..existing, workspace: Some(workspace) }
         None => existing
       }
       let owned = submission_id is Some(id) &&
@@ -4435,7 +4430,7 @@ fn update_device_msg(
                 fetch_worktrees(
                   dispatch,
                   channel,
-                  workspace.0,
+                  workspace,
                   dev.connection_generation,
                   request_generation,
                 ),
@@ -4767,6 +4762,19 @@ fn update_dev(
   model : Model,
 ) -> (@cmd.Cmd, Model) {
   update(dispatch, on_home(msg), model)
+}
+
+///|
+/// A frontend resource fixture with the same validation as protocol input.
+/// Keeping it as a channel method makes the owning device explicit in tests.
+fn @interop.ChannelId::test_resource(
+  self : @interop.ChannelId,
+  path : String,
+) -> @common.Uri raise {
+  guard @resource.of_path(self, path) is Some(resource) else {
+    fail("test resource path was invalid: \{path}")
+  }
+  resource
 }
 
 ///|
@@ -5553,7 +5561,7 @@ test "sessions loaded replaces the sidebar list" {
     {
       id: "desktop-a",
       title: Some("first question"),
-      workspace: "",
+      workspace: None,
       workspace_name: "",
     },
   ]
@@ -5567,6 +5575,7 @@ test "sessions loaded replaces the sidebar list" {
 ///|
 test "session list assigns a commit-first conversation to its durable workspace" {
   let dispatch = test_dispatch()
+  let workspace = @interop.ChannelId::Local.test_resource("/work/foreign")
   let (_, committed) = update_dev(
     dispatch,
     SessionCommitted(
@@ -5591,7 +5600,7 @@ test "session list assigns a commit-first conversation to its durable workspace"
         {
           id: "desktop-foreign",
           title: Some("arrived before the list"),
-          workspace: "/work/foreign",
+          workspace: Some(workspace),
           workspace_name: "foreign",
         },
       ],
@@ -5603,8 +5612,8 @@ test "session list assigns a commit-first conversation to its durable workspace"
     is Some(reconciled) else {
     fail("listed conversation disappeared")
   }
-  inspect(workspace_token(reconciled.workspace), content="/work/foreign")
-  inspect(listed.dev().active_workspace, content="/work/foreign")
+  assert_eq(reconciled.workspace, Some(workspace))
+  assert_eq(listed.dev().active_workspace, Some(workspace))
   assert_true(encoded_start_workspace(reconciled) is Some("/work/foreign"))
 }
 
@@ -5614,11 +5623,11 @@ test "a background session list updates only its channel's same-id workspace" {
   let remote : @interop.ChannelId = Remote("d-remote")
   let local_conv = {
     ..empty_conversation(@interop.ChannelId::Local, "shared"),
-    workspace: Some(Absolute("/local")),
+    workspace: Some(@interop.ChannelId::Local.test_resource("/local")),
   }
   let remote_conv = {
     ..empty_conversation(remote, "shared"),
-    workspace: Some(Absolute("/remote-old")),
+    workspace: Some(remote.test_resource("/remote-old")),
   }
   let model = {
     ..test_model(),
@@ -5638,7 +5647,7 @@ test "a background session list updates only its channel's same-id workspace" {
           {
             id: "shared",
             title: Some("remote"),
-            workspace: "/remote-new",
+            workspace: Some(remote.test_resource("/remote-new")),
             workspace_name: "remote-new",
           },
         ],
@@ -5653,13 +5662,18 @@ test "a background session list updates only its channel's same-id workspace" {
     next.find_conversation(remote, "shared") is Some(remote_conv) else {
     fail("same-id conversations disappeared")
   }
-  inspect(workspace_token(local_conv.workspace), content="/local")
-  inspect(workspace_token(remote_conv.workspace), content="/remote-new")
+  assert_true(
+    local_conv.workspace is Some(workspace) && workspace.path == "/local",
+  )
+  assert_true(
+    remote_conv.workspace is Some(workspace) && workspace.path == "/remote-new",
+  )
 }
 
 ///|
 test "session list assigns a Started-first conversation to its durable workspace" {
   let dispatch = test_dispatch()
+  let workspace = @interop.ChannelId::Local.test_resource("/work/started-first")
   let (_, started) = update_dev(
     dispatch,
     Started(
@@ -5688,7 +5702,7 @@ test "session list assigns a Started-first conversation to its durable workspace
       {
         id: "desktop-started-first",
         title: Some("arrived before the list"),
-        workspace: "/work/started-first",
+        workspace: Some(workspace),
         workspace_name: "started-first",
       },
     ]),
@@ -5701,7 +5715,7 @@ test "session list assigns a Started-first conversation to its durable workspace
     is Some(reconciled) else {
     fail("listed conversation disappeared")
   }
-  inspect(workspace_token(reconciled.workspace), content="/work/started-first")
+  assert_eq(reconciled.workspace, Some(workspace))
   assert_true(
     encoded_start_workspace(reconciled) is Some("/work/started-first"),
   )
@@ -5710,10 +5724,8 @@ test "session list assigns a Started-first conversation to its durable workspace
 ///|
 test "Started places a foreign conversation from its host session root" {
   let dispatch = test_dispatch()
-  let model = test_model().with_dev(dev => {
-    ..dev,
-    workspaces: ["C:\\work\\core"],
-  })
+  let workspace = @interop.ChannelId::Local.test_resource("/C:/work/core")
+  let model = test_model().with_dev(dev => { ..dev, workspaces: [workspace] })
   let (_, started) = update_dev(
     dispatch,
     Started(
@@ -5721,8 +5733,10 @@ test "Started places a foreign conversation from its host session root" {
       session="desktop-workspace-run",
       model="deepseek-v4-pro",
       max_steps=1000,
-      cwd=Some(Absolute("C:/work/core")),
-      session_root=Some(Absolute("C:/work/core/.openseek")),
+      cwd=Some(workspace),
+      session_root=Some(
+        @interop.ChannelId::Local.test_resource("/C:/work/core/.openseek"),
+      ),
       task=Some("arrived before the list"),
       submission_id=None,
     ),
@@ -5735,7 +5749,7 @@ test "Started places a foreign conversation from its host session root" {
     is Some(foreign) else {
     fail("Started did not materialize its conversation")
   }
-  assert_eq(workspace_token(foreign.workspace), "C:\\work\\core")
+  assert_eq(foreign.workspace, Some(workspace))
   inspect(started.active_session, content="desktop-test")
 }
 
@@ -5926,10 +5940,13 @@ test "socket losses mark the bridge lost at the third consecutive drop" {
         {
           key: 1,
           id: Some(1),
-          workspace: @terminal.Project(channel, "/remote"),
+          workspace: @terminal.Project(
+            channel,
+            channel.test_resource("/remote"),
+          ),
           workspace_label: "remote",
           session: "remote-session",
-          workspace_path: Some(@pathx.Absolute("/remote")),
+          workspace_path: Some(channel.test_resource("/remote")),
           status: @terminal.TabRunning,
         },
       ],
@@ -6209,7 +6226,7 @@ test "SessionsLoaded retries an unconfirmed start after an empty recovery" {
       {
         id: "desktop-test",
         title: Some("persisted"),
-        workspace: "",
+        workspace: None,
         workspace_name: "",
       },
     ]),
@@ -6347,7 +6364,12 @@ test "reselecting a synced active session reloads idle external writes" {
   let model = test_model().with_dev(dev => {
     ..dev,
     sessions: [
-      { id: "desktop-test", title: Some(""), workspace: "", workspace_name: "" },
+      {
+        id: "desktop-test",
+        title: Some(""),
+        workspace: None,
+        workspace_name: "",
+      },
     ],
   })
   let (_, reloading) = update(
@@ -6833,6 +6855,9 @@ test "session loaded adopts the store transcript and keeps live run state" {
 ///|
 test "started routes by session and records the host's workspace" {
   let dispatch = test_dispatch()
+  let cwd = @interop.ChannelId::Local.test_resource(
+    "/home/u/Documents/OpenSeek/desktop-test",
+  )
   let (_, next) = update_dev(
     dispatch,
     Started(
@@ -6840,17 +6865,14 @@ test "started routes by session and records the host's workspace" {
       session="desktop-test",
       model="deepseek-v4-pro",
       max_steps=1000,
-      cwd=Some(Absolute("/home/u/Documents/OpenSeek/desktop-test")),
+      cwd=Some(cwd),
       session_root=None,
       task=None,
       submission_id=None,
     ),
     test_model(),
   )
-  assert_true(
-    next.active().cwd
-    is Some(Absolute("/home/u/Documents/OpenSeek/desktop-test")),
-  )
+  assert_eq(next.active().cwd, Some(cwd))
   inspect(next.active().is_running(), content="true")
   guard next.active().run is Open(run_id="r7", ..) else {
     fail("expected the run id to be recorded")
@@ -6864,7 +6886,7 @@ test "started routes by session and records the host's workspace" {
 
 ///|
 test "started decoder preserves optional placement and submission id" {
-  guard started_msg({
+  guard started_msg(@interop.ChannelId::Local, {
       run_id: "r7",
       task: None,
       submission_id: Some("submission-7"),
@@ -6875,15 +6897,39 @@ test "started decoder preserves optional placement and submission id" {
       session: Some("desktop-test"),
       session_root: Some("/work/core/.openseek"),
     })
-    is Some(
-      Started(
-        session_root=Some(Absolute("/work/core/.openseek")),
-        submission_id=Some("submission-7"),
-        ..
-      )
-    ) else {
+    is Some(Started(session_root~, submission_id~, ..)) else {
     fail("placement or submission id was lost while decoding Started")
   }
+  assert_true(
+    session_root is Some(resource) && resource.path == "/work/core/.openseek",
+  )
+  assert_eq(submission_id, Some("submission-7"))
+}
+
+///|
+test "host path decoders reject relative placement and diagnostic paths" {
+  let payload : @protocol.StartedPayload = {
+    run_id: "r7",
+    task: None,
+    submission_id: None,
+    engine: None,
+    model: Some("deepseek-v4-pro"),
+    max_steps: Some(1000),
+    cwd: Some("relative/workspace"),
+    session: Some("desktop-test"),
+    session_root: None,
+  }
+  assert_true(started_msg(@interop.ChannelId::Local, payload) is None)
+  assert_true(
+    RecoveredRun::from_started(@interop.ChannelId::Local, payload) is None,
+  )
+  assert_true(
+    diagnostics_msg(@interop.ChannelId::Local, {
+      path: "relative/file.mbt",
+      diagnostics: [],
+    })
+    is None,
+  )
 }
 
 ///|
@@ -8087,7 +8133,7 @@ test "a failed start response keeps its prompt through an empty snapshot" {
       session="desktop-test",
       model="deepseek-v4-pro",
       max_steps=1000,
-      cwd=Some(Absolute("/workspace")),
+      cwd=Some(@interop.ChannelId::Local.test_resource("/workspace")),
       session_root=None,
       task=Some("prompt"),
       submission_id=Some("failed-start"),
@@ -8095,7 +8141,9 @@ test "a failed start response keeps its prompt through an empty snapshot" {
     empty,
   )
   assert_true(late_started.active().run is NoRun(ended=Some(RunFailed)))
-  assert_true(late_started.active().cwd is Some(Absolute("/workspace")))
+  assert_true(
+    late_started.active().cwd is Some(resource) && resource.path == "/workspace",
+  )
 }
 
 ///|
@@ -10919,7 +10967,7 @@ test "a branch reply lands on its conversation and an empty one hides it" {
 
 ///|
 fn archived_item(id : String) -> @transcript.SessionListItem {
-  { id, title: Some(""), workspace: "", workspace_name: "" }
+  { id, title: Some(""), workspace: None, workspace_name: "" }
 }
 
 ///|
@@ -10939,6 +10987,7 @@ test "session.changed decoder preserves archive invalidation identity" {
 ///|
 test "archive broadcast invalidates the active send target before list replies" {
   let dispatch = test_dispatch()
+  let workspace = @interop.ChannelId::Local.test_resource("/work/archived")
   let mention : Mention = { ref_: Skill(name="draft-skill"), range: None }
   let model = test_model()
     .replace_conversation({
@@ -10951,11 +11000,11 @@ test "archive broadcast invalidates the active send target before list replies" 
       sessions: [
         {
           ..archived_item("desktop-test"),
-          workspace: "/work/archived",
+          workspace: Some(workspace),
           workspace_name: "archived",
         },
       ],
-      worktrees: [{ workspace: "/work/archived", rows: [], generation: 1 }],
+      worktrees: [{ workspace, rows: [], generation: 1 }],
     })
   let (_, invalidated) = update_dev(
     dispatch,
@@ -10972,11 +11021,8 @@ test "archive broadcast invalidates the active send target before list replies" 
     is None,
   )
   inspect(invalidated.active().session_id, content="desktop-fresh")
-  inspect(invalidated.dev().active_workspace, content="/work/archived")
-  inspect(
-    workspace_token(invalidated.active().workspace),
-    content="/work/archived",
-  )
+  assert_eq(invalidated.dev().active_workspace, Some(workspace))
+  assert_eq(invalidated.active().workspace, Some(workspace))
   inspect(invalidated.active().task, content="must not target archived session")
   inspect(invalidated.active().mentions.length(), content="1")
   assert_true(
@@ -11216,7 +11262,7 @@ test "an older same-connection live list cannot replace a newer reply" {
   let old : @transcript.SessionListItem = {
     id: "desktop-listed",
     title: Some("old title"),
-    workspace: "",
+    workspace: None,
     workspace_name: "",
   }
   let current = { ..old, title: Some("current title") }
@@ -11244,7 +11290,7 @@ test "an older same-connection archived list cannot replace a newer reply" {
   let old : @transcript.SessionListItem = {
     id: "desktop-archived",
     title: Some("old title"),
-    workspace: "",
+    workspace: None,
     workspace_name: "",
   }
   let current = { ..old, title: Some("current title") }
@@ -11711,14 +11757,14 @@ test "JumpToMention is a no-op for a chip without a resolved location" {
 test "EditorCommentAdded attaches a deduplicated annotation chip" {
   let dispatch = test_dispatch()
   let model = test_model()
+  let absolute = @interop.ChannelId::Local.test_resource(
+    "/work/project/src/main.mbt",
+  )
   // The chip path arrives workspace-relative from the panel (recorded when
   // the file was shown); the resource URI only routes the bubble removal.
   let msg : Msg = FileEditor(
     EditorCommentAdded(
-      resource=@fileeditor.ModelUri::of(
-        @interop.ChannelId::Local,
-        Absolute("/work/project/src/main.mbt"),
-      ),
+      resource=@fileeditor.ModelUri::of(absolute),
       file=Relative("src/main.mbt"),
       range=@common.Range::Range(5, 1, 6, 3),
       quote="fn parse_hover() {",
@@ -11741,10 +11787,11 @@ test "EditorCommentAdded attaches a deduplicated annotation chip" {
 ///|
 test "chip jumps relativize legacy absolute paths against the roots" {
   let dispatch = test_dispatch()
+  let workspace = @interop.ChannelId::Local.test_resource("/work/project")
   // Preferred root: the run-reported cwd.
   let model = test_model().replace_conversation({
     ..test_conversation(),
-    cwd: Some(Absolute("/work/project")),
+    cwd: Some(workspace),
   })
   let (_, next) = update(
     dispatch,
@@ -11758,13 +11805,10 @@ test "chip jumps relativize legacy absolute paths against the roots" {
   assert_true(@dock.active_file(next.dock) is Some(Relative("src/main.mbt")))
   // Before the first run reports cwd, the attached workspace serves as root.
   let model = test_model()
-    .replace_conversation({
-      ..test_conversation(),
-      workspace: Some(Absolute("/work/project")),
-    })
+    .replace_conversation({ ..test_conversation(), workspace: Some(workspace) })
     .with_dev(dev => {
       ..dev,
-      worktrees: [{ workspace: "/work/project", rows: [], generation: 1 }],
+      worktrees: [{ workspace, rows: [], generation: 1 }],
     })
   let (_, next) = update(
     dispatch,
@@ -13118,7 +13162,7 @@ test "a late commit cannot resurrect a locally known archived session" {
       {
         id: "desktop-archived",
         title: Some("archived"),
-        workspace: "",
+        workspace: None,
         workspace_name: "",
       },
     ],

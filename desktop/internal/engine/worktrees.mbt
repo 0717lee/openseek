@@ -51,12 +51,12 @@ type WorktreesReply = @protocol.WorktreesReply
 type WorktreeCreateReply = @protocol.WorktreeCreateReply
 
 ///|
-fn worktrees_file(workspace : @path.Path) -> @path.Path {
+fn worktrees_file(workspace : @pathx.Absolute) -> @pathx.Absolute {
   workspace_session_root(workspace).join(WorktreesFile)
 }
 
 ///|
-fn worktree_dir(workspace : @path.Path, name : String) -> @path.Path {
+fn worktree_dir(workspace : @pathx.Absolute, name : String) -> @pathx.Absolute {
   workspace.join(WorktreesDirName).join(name).normalize()
 }
 
@@ -84,9 +84,9 @@ fn valid_worktree_name(name : String) -> Bool {
 /// rather than poisoning every later operation. A missing or unreadable
 /// registry reads as "no worktrees".
 async fn read_worktrees_unlocked(
-  workspace : @path.Path,
+  workspace : @pathx.Absolute,
 ) -> Array[WorktreeEntry] {
-  let text = @fsx.try_read_text(worktrees_file(workspace)) catch {
+  let text = @fsx.try_read_text(worktrees_file(workspace).to_path()) catch {
     error if @async.is_being_cancelled() => raise error
     _ => return []
   }
@@ -121,16 +121,19 @@ async fn read_worktrees_unlocked(
 
 ///|
 async fn write_worktrees(
-  workspace : @path.Path,
+  workspace : @pathx.Absolute,
   entries : Array[WorktreeEntry],
 ) -> Unit {
   let store = workspace_session_root(workspace)
-  @fsx.ensure_dir(store) catch {
+  @fsx.ensure_dir(store.to_path()) catch {
     error if @async.is_being_cancelled() => raise error
     error => raise EngineError("could not create \{store}: \{error}")
   }
   let registry : Json = { "worktrees": entries.to_json() }
-  @fsx.write_text(worktrees_file(workspace), registry.stringify(indent=2)) catch {
+  @fsx.write_text(
+    worktrees_file(workspace).to_path(),
+    registry.stringify(indent=2),
+  ) catch {
     error if @async.is_being_cancelled() => raise error
     error => raise EngineError("could not save the worktree list: \{error}")
   }
@@ -138,13 +141,13 @@ async fn write_worktrees(
 
 ///|
 async fn worktree_infos(
-  workspace : @path.Path,
+  workspace : @pathx.Absolute,
   entries : Array[WorktreeEntry],
 ) -> Array[WorktreeInfo] {
   let infos : Array[WorktreeInfo] = []
   for entry in entries {
     let path = worktree_dir(workspace, entry.name)
-    let present = @fsx.is_dir(path) catch {
+    let present = @fsx.is_dir(path.to_path()) catch {
       error if @async.is_being_cancelled() => raise error
       _ => false
     }
@@ -153,7 +156,7 @@ async fn worktree_infos(
       branch: entry.branch,
       base: entry.base,
       session: entry.session,
-      path: path.to_string(),
+      path: path.resource_path(),
       present,
     })
   }
@@ -170,19 +173,22 @@ priv enum SessionTree {
   /// No binding: the conversation runs in the workspace root.
   WorkspaceRoot
   /// Bound, and the checkout is there.
-  BoundTree(@path.Path)
+  BoundTree(@pathx.Absolute)
   /// Bound, but the checkout is gone.
   MissingTree(String)
 }
 
 ///|
-async fn session_tree(workspace : @path.Path, session : String) -> SessionTree {
+async fn session_tree(
+  workspace : @pathx.Absolute,
+  session : String,
+) -> SessionTree {
   worktree_registry_lock.acquire()
   defer worktree_registry_lock.release()
   for entry in read_worktrees_unlocked(workspace) {
     guard entry.session is Some(bound) && bound == session else { continue }
     let dir = worktree_dir(workspace, entry.name)
-    let present = @fsx.is_dir(dir) catch {
+    let present = @fsx.is_dir(dir.to_path()) catch {
       error if @async.is_being_cancelled() => raise error
       _ => false
     }
@@ -197,9 +203,9 @@ async fn session_tree(workspace : @path.Path, session : String) -> SessionTree {
 /// let one surface silently operate in the workspace root while the agent is
 /// blocked.
 async fn session_tree_dir(
-  workspace : @path.Path,
+  workspace : @pathx.Absolute,
   session : String,
-) -> @path.Path? {
+) -> @pathx.Absolute? {
   match session_tree(workspace, session) {
     BoundTree(dir) => Some(dir)
     WorkspaceRoot => Some(workspace)
@@ -214,9 +220,9 @@ async fn session_tree_dir(
 /// the composer's recovery choices: rebuild the checkout or archive the
 /// conversation.
 async fn session_run_dir(
-  workspace : @path.Path,
+  workspace : @pathx.Absolute,
   session : String,
-) -> @path.Path {
+) -> @pathx.Absolute {
   match session_tree(workspace, session) {
     BoundTree(dir) => dir
     WorkspaceRoot => workspace
@@ -255,7 +261,7 @@ async fn archive_bound_worktree_checkout(
   }
   guard found is Some(entry) else { return }
   let target = worktree_dir(workspace, entry.name)
-  let present = @fsx.is_dir(target) catch {
+  let present = @fsx.is_dir(target.to_path()) catch {
     error if @async.is_being_cancelled() => raise error
     _ => false
   }
@@ -283,7 +289,10 @@ async fn archive_bound_worktree_checkout(
   // the same row lets unarchive surface the existing Repair flow later.
   @async.protect_from_cancel(() => {
     if on_committed is Some(on_committed) {
-      on_committed(workspace.to_string(), worktree_infos(workspace, entries))
+      on_committed(
+        workspace.resource_path(),
+        worktree_infos(workspace, entries),
+      )
     }
   })
 }
@@ -294,14 +303,14 @@ async fn archive_bound_worktree_checkout(
 /// `.worktrees` path with no registry entry (a subtask slice, say) keeps
 /// resolving to the workspace root.
 async fn worktree_owner_dir(
-  workspace : @path.Path,
-  path : String,
-) -> @path.Path {
+  workspace : @pathx.Absolute,
+  path : @pathx.Absolute,
+) -> @pathx.Absolute {
   worktree_registry_lock.acquire()
   defer worktree_registry_lock.release()
   for entry in read_worktrees_unlocked(workspace) {
     let dir = worktree_dir(workspace, entry.name)
-    if @pathx.contains(dir.to_string(), path) {
+    if dir.contains(path) {
       return dir
     }
   }
@@ -312,7 +321,7 @@ async fn worktree_owner_dir(
 /// Run git in `dir` and return its trimmed stdout; a failure raises with
 /// git's own message so refusals ("branch already exists", a checkout
 /// conflict) reach the user verbatim.
-async fn git_in(dir : @path.Path, args : Array[String]) -> String {
+async fn git_in(dir : @pathx.Absolute, args : Array[String]) -> String {
   let (code, stdout, stderr) = @process.collect_output(
     "git",
     args,
@@ -342,7 +351,7 @@ async fn git_in(dir : @path.Path, args : Array[String]) -> String {
 /// Probe variant of `git_in`: `None` when git is unavailable or the command
 /// fails, for questions where failure itself is the answer (is this a
 /// repository? does this branch exist?).
-async fn git_probe(dir : @path.Path, args : Array[String]) -> String? {
+async fn git_probe(dir : @pathx.Absolute, args : Array[String]) -> String? {
   let (code, stdout, _) = @process.collect_output(
     "git",
     args,
@@ -361,7 +370,7 @@ async fn git_probe(dir : @path.Path, args : Array[String]) -> String? {
 /// swallowed, which is only safe because callers run it inside
 /// `@async.protect_from_cancel` — no cancellation error can surface there —
 /// and are already propagating the failure that triggered the rollback.
-async fn git_rollback(dir : @path.Path, args : Array[String]) -> Unit {
+async fn git_rollback(dir : @pathx.Absolute, args : Array[String]) -> Unit {
   let _ = @process.collect_output("git", args, cwd=dir.to_string()) catch {
     _ => return
   }
@@ -372,7 +381,7 @@ async fn git_rollback(dir : @path.Path, args : Array[String]) -> Unit {
 /// `dir` is not inside a git repository or git is unavailable. The two
 /// differ exactly for linked worktrees — a submodule checkout keeps them
 /// equal, which is why detection is never "`.git` is a file".
-async fn git_dir_pair(dir : @path.Path) -> (String, String)? {
+async fn git_dir_pair(dir : @pathx.Absolute) -> (String, String)? {
   guard git_probe(dir, [
       "rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir",
     ])
@@ -393,7 +402,7 @@ async fn git_dir_pair(dir : @path.Path) -> (String, String)? {
 ///|
 /// Whether `dir` is a linked git worktree. A main checkout, a submodule
 /// checkout, a plain directory, and a machine without git all answer false.
-async fn linked_git_worktree(dir : @path.Path) -> Bool {
+async fn linked_git_worktree(dir : @pathx.Absolute) -> Bool {
   guard git_dir_pair(dir) is Some((git_dir, common_dir)) else { return false }
   git_dir != common_dir
 }
@@ -404,7 +413,7 @@ async fn linked_git_worktree(dir : @path.Path) -> Bool {
 /// that can itself vanish. A workspace attached before the attach-time
 /// linked-worktree guard existed may still be one, so the create path
 /// re-checks.
-async fn require_main_worktree(dir : @path.Path) -> Unit {
+async fn require_main_worktree(dir : @pathx.Absolute) -> Unit {
   guard git_dir_pair(dir) is Some((git_dir, common_dir)) else {
     raise EngineError("\{dir} is not a git repository (or git is unavailable)")
   }
@@ -437,7 +446,8 @@ async fn require_main_worktree(dir : @path.Path) -> Unit {
 /// directory was deleted outside the app reports `present: false` here and
 /// is cleaned up by `remove_worktree`, never by listing.
 pub async fn list_worktrees(workspace : String) -> WorktreesReply {
-  guard registered_workspace(workspace) is Some(dir) else {
+  guard @pathx.Absolute::from_uri_path(workspace) is Some(absolute) &&
+    registered_workspace(absolute) is Some(dir) else {
     raise EngineError("\{workspace} is not a registered workspace")
   }
   worktree_registry_lock.acquire()
@@ -450,7 +460,7 @@ pub async fn list_worktrees(workspace : String) -> WorktreesReply {
 /// a branch. Branches survive removal, so the counter naturally skips past
 /// history instead of resurrecting an old branch.
 async fn fresh_worktree_name(
-  dir : @path.Path,
+  dir : @pathx.Absolute,
   entries : Array[WorktreeEntry],
 ) -> String {
   for n in 1..<=1000 {
@@ -458,7 +468,7 @@ async fn fresh_worktree_name(
     if entries.iter().any(entry => entry.name == name) {
       continue
     }
-    let occupied = @fsx.exists(worktree_dir(dir, name)) catch {
+    let occupied = @fsx.exists(worktree_dir(dir, name).to_path()) catch {
       error if @async.is_being_cancelled() => raise error
       _ => false
     }
@@ -521,7 +531,8 @@ pub async fn create_worktree(
   // Registration is checked under the lifecycle lock, which detachment also
   // holds: a workspace can no longer slip out of the registry between this
   // check and the registry commit below.
-  guard registered_workspace(workspace) is Some(dir) else {
+  guard @pathx.Absolute::from_uri_path(workspace) is Some(absolute) &&
+    registered_workspace(absolute) is Some(dir) else {
     raise EngineError("\{workspace} is not a registered workspace")
   }
   require_main_worktree(dir)
@@ -536,7 +547,7 @@ pub async fn create_worktree(
   // environment rather than an empty lookalike.
   for entry in entries {
     guard entry.session is Some(bound) && bound == session else { continue }
-    let present = @fsx.is_dir(worktree_dir(dir, entry.name)) catch {
+    let present = @fsx.is_dir(worktree_dir(dir, entry.name).to_path()) catch {
       error if @async.is_being_cancelled() => raise error
       _ => false
     }
@@ -566,13 +577,13 @@ pub async fn create_worktree(
       "this conversation is already starting; a worktree binds before its first prompt",
     )
   }
-  let global_record : @path.Path? = resolved_session_root().map(root => {
+  let global_record : @pathx.Absolute? = resolved_session_root().map(root => {
     root.join("sessions").join(session)
   })
   let has_history = if workspace_of_session(session) is Some(_) {
     true
   } else if global_record is Some(record) {
-    @fsx.is_dir(record) catch {
+    @fsx.is_dir(record.to_path()) catch {
       error if @async.is_being_cancelled() => raise error
       _ => false
     }
@@ -585,11 +596,11 @@ pub async fn create_worktree(
     )
   }
   for path in registered_workspaces() {
-    guard path != dir.to_string() else { continue }
-    for entry in read_worktrees_unlocked(Path(path)) {
+    guard path.0 != dir.to_string() else { continue }
+    for entry in read_worktrees_unlocked(path) {
       if entry.session is Some(bound) && bound == session {
         raise EngineError(
-          "this conversation already runs in worktree \{entry.name} of \{path}",
+          "this conversation already runs in worktree \{entry.name} of \{path.0}",
         )
       }
     }
@@ -605,7 +616,7 @@ pub async fn create_worktree(
     raise EngineError("worktree \{name} already exists in this workspace")
   }
   let target = worktree_dir(dir, name)
-  let occupied = @fsx.exists(target) catch {
+  let occupied = @fsx.exists(target.to_path()) catch {
     error if @async.is_being_cancelled() => raise error
     _ => false
   }
@@ -653,13 +664,6 @@ pub async fn create_worktree(
 }
 
 ///|
-/// Best-effort removal of a half-created worktree, deleting only what this
-/// invocation provably created: the branch was made first on its own, so
-/// `branch -D` is always ours to run, while the checkout is force-removed
-/// only when git's own bookkeeping shows the target path checked out on
-/// that branch — a path another process claimed in the race window is left
-/// alone. Only ever runs inside a cancellation shield while the original
-/// failure propagates.
 /// Rebuild a registered worktree's checkout on the branch it already owns,
 /// after the directory was deleted outside the app. The stale bookkeeping
 /// that deletion left behind would make `worktree add` refuse the path, so
@@ -668,7 +672,7 @@ pub async fn create_worktree(
 /// never re-created: it survived the deletion and carries the conversation's
 /// commits, which is what makes this a repair rather than a fresh start.
 async fn restore_worktree_checkout(
-  dir : @path.Path,
+  dir : @pathx.Absolute,
   entry : WorktreeEntry,
 ) -> Unit {
   guard git_probe(dir, [
@@ -695,8 +699,15 @@ async fn restore_worktree_checkout(
 }
 
 ///|
+/// Best-effort removal of a half-created worktree, deleting only what this
+/// invocation provably created: the branch was made first on its own, so
+/// `branch -D` is always ours to run, while the checkout is force-removed
+/// only when git's own bookkeeping shows the target path checked out on
+/// that branch — a path another process claimed in the race window is left
+/// alone. Only ever runs inside a cancellation shield while the original
+/// failure propagates.
 async fn rollback_worktree(
-  dir : @path.Path,
+  dir : @pathx.Absolute,
   name : String,
   branch : String,
 ) -> Unit {
@@ -718,7 +729,7 @@ async fn rollback_worktree(
 /// paths (`/private/var` for a `/var` workspace, say), so a literal
 /// comparison against our derived path would misfire.
 async fn worktree_checked_out_on(
-  dir : @path.Path,
+  dir : @pathx.Absolute,
   name : String,
   branch : String,
 ) -> Bool {
@@ -761,7 +772,8 @@ pub async fn remove_worktree(
   // a checkout from an already-detached workspace.
   manager.workspace_lifecycle_lock.acquire()
   defer manager.workspace_lifecycle_lock.release()
-  guard registered_workspace(workspace) is Some(dir) else {
+  guard @pathx.Absolute::from_uri_path(workspace) is Some(absolute) &&
+    registered_workspace(absolute) is Some(dir) else {
     raise EngineError("\{workspace} is not a registered workspace")
   }
   let entry = {
@@ -784,7 +796,7 @@ pub async fn remove_worktree(
     manager.close_engines_for_sessions([bound])
   }
   let target = worktree_dir(dir, name)
-  let present = @fsx.is_dir(target) catch {
+  let present = @fsx.is_dir(target.to_path()) catch {
     error if @async.is_being_cancelled() => raise error
     _ => false
   }
@@ -832,8 +844,8 @@ pub async fn remove_worktree(
 /// canonicalizes what it stores, so a fixture built from the symlinked
 /// spelling (`/tmp` on macOS) would compare unequal to every path the
 /// registry hands back.
-async fn worktree_test_root(prefix : String) -> @path.Path {
-  Path(@fs.realpath(@fs.tmpdir(prefix~)))
+async fn worktree_test_root(prefix : String) -> @pathx.Absolute {
+  @pathx.Path(@fs.realpath(@fs.tmpdir(prefix~))).resolve()
 }
 
 ///|
@@ -857,8 +869,8 @@ test "worktree names are one branch-safe path component" {
 ///|
 async test "worktree registry decode drops malformed entries" {
   let root = worktree_test_root("openseek-worktree-decode-")
-  @fsx.ensure_dir(workspace_session_root(root))
-  @fsx.write_text(worktrees_file(root), "{ not json")
+  @fsx.ensure_dir(workspace_session_root(root).to_path())
+  @fsx.write_text(worktrees_file(root).to_path(), "{ not json")
   assert_eq(read_worktrees_unlocked(root).length(), 0)
   let registry : Json = {
     "worktrees": [
@@ -875,7 +887,7 @@ async test "worktree registry decode drops malformed entries" {
       "not-an-object",
     ],
   }
-  @fsx.write_text(worktrees_file(root), registry.stringify())
+  @fsx.write_text(worktrees_file(root).to_path(), registry.stringify())
   let entries = read_worktrees_unlocked(root)
   assert_eq(entries.length(), 2)
   assert_eq(entries[0].name, "ok")
@@ -898,13 +910,13 @@ async test "session workspace dir follows the worktree mapping while it exists" 
   @sys.set_env_var("OPENSEEK_SESSION_ROOT", root.join("global").to_string())
   defer restore_session_root_env(previous)
   let ws = root.join("ws")
-  @fsx.ensure_dir(ws.join(".openseek/sessions/s-wt"))
-  @fsx.ensure_dir(ws.join(".openseek/sessions/s-plain"))
+  @fsx.ensure_dir(ws.join(".openseek/sessions/s-wt").to_path())
+  @fsx.ensure_dir(ws.join(".openseek/sessions/s-plain").to_path())
   ignore(add_workspace(ws.to_string(), fn(_) {  }))
   write_worktrees(ws, [
     { name: "wt", branch: "openseek/wt", base: "abc", session: Some("s-wt") },
   ])
-  @fsx.ensure_dir(ws.join(".worktrees/wt"))
+  @fsx.ensure_dir(ws.join(".worktrees/wt").to_path())
   assert_eq(
     session_workspace_dir("s-wt").map(dir => dir.to_string()),
     Some(ws.join(".worktrees/wt").to_string()),
@@ -941,33 +953,46 @@ async test "attached workspace dir resolves registered worktree paths" {
   @sys.set_env_var("OPENSEEK_SESSION_ROOT", root.join("global").to_string())
   defer restore_session_root_env(previous)
   let ws = root.join("ws")
-  @fsx.ensure_dir(ws)
+  @fsx.ensure_dir(ws.to_path())
   ignore(add_workspace(ws.to_string(), fn(_) {  }))
   write_worktrees(ws, [
     { name: "wt", branch: "openseek/wt", base: "abc", session: None },
   ])
-  @fsx.ensure_dir(ws.join(".worktrees/wt/src"))
-  @fsx.ensure_dir(ws.join(".worktrees/stray"))
+  @fsx.ensure_dir(ws.join(".worktrees/wt/src").to_path())
+  @fsx.ensure_dir(ws.join(".worktrees/stray").to_path())
+  @fsx.ensure_dir(ws.join("src").to_path())
+  @fs.write_file(
+    ws.join("src/main.mbt").to_string(),
+    b"main",
+    create_mode=CreateOrTruncate,
+  )
+  let worktree_file = ws.join(".worktrees/wt/src/main.mbt")
+  let stray_file = ws.join(".worktrees/stray/x.mbt")
+  let workspace_file = ws.join("src/lib.mbt")
+  guard @pathx.Path("\{ws}/.worktrees/wt/../../src/main.mbt").to_absolute()
+    is Some(dot_segment_file) else {
+    fail("expected absolute worktree fixtures")
+  }
   // A registered worktree path answers from the worktree root.
   assert_eq(
-    attached_workspace_dir(ws.join(".worktrees/wt/src/main.mbt").to_string()).map(dir => {
-        dir.to_string()
-      },
-    ),
+    attached_workspace_dir(worktree_file).map(dir => dir.to_string()),
     Some(ws.join(".worktrees/wt").to_string()),
   )
   // An unregistered `.worktrees` path (a subtask slice) and a main-tree path
   // keep resolving to the workspace root.
   assert_eq(
-    attached_workspace_dir(ws.join(".worktrees/stray/x.mbt").to_string()).map(dir => {
-      dir.to_string()
-    }),
+    attached_workspace_dir(stray_file).map(dir => dir.to_string()),
     Some(ws.to_string()),
   )
   assert_eq(
-    attached_workspace_dir(ws.join("src/lib.mbt").to_string()).map(dir => {
-      dir.to_string()
-    }),
+    attached_workspace_dir(workspace_file).map(dir => dir.to_string()),
+    Some(ws.to_string()),
+  )
+  // Dot segments are cleaned before choosing the deepest owning tree. Although
+  // its spelling enters a registered worktree, this file physically belongs to
+  // the main workspace after `../..` is resolved.
+  assert_eq(
+    attached_workspace_dir(dot_segment_file).map(dir => dir.to_string()),
     Some(ws.to_string()),
   )
   @fs.rmdir(root.to_string(), recursive=true)
@@ -983,7 +1008,7 @@ async test "a bound session routes every start through its checkout" {
   @sys.set_env_var("OPENSEEK_SESSION_ROOT", root.join("global").to_string())
   defer restore_session_root_env(previous)
   let ws = root.join("ws")
-  @fsx.ensure_dir(ws.join(".worktrees/wt"))
+  @fsx.ensure_dir(ws.join(".worktrees/wt").to_path())
   ignore(add_workspace(ws.to_string(), fn(_) {  }))
   // Creation is the binding; the start path only READS the registry.
   write_worktrees(ws, [
@@ -1008,7 +1033,7 @@ async test "a bound session routes every start through its checkout" {
     Some(ws.join(".openseek").to_string()),
   )
   // A hint-less resume goes through the durable record and the mapping.
-  @fsx.ensure_dir(ws.join(".openseek/sessions/s-bind"))
+  @fsx.ensure_dir(ws.join(".openseek/sessions/s-bind").to_path())
   let resumed = run_config(manager, {
     task: "resume",
     submission_id: None,
@@ -1040,13 +1065,13 @@ async test "worktree remove refuses a running conversation without unmapping it"
   @sys.set_env_var("OPENSEEK_SESSION_ROOT", root.join("global").to_string())
   defer restore_session_root_env(previous)
   let ws = root.join("ws")
-  @fsx.ensure_dir(ws.join(".worktrees/wt"))
+  @fsx.ensure_dir(ws.join(".worktrees/wt").to_path())
   prepare_fake_moonbit_seed(
-    root.join("bin/toolchains/moonbit/macos-arm64"),
+    root.join("bin/toolchains/moonbit/macos-arm64").to_path(),
     version="0.10.0-test",
   )
   prepare_fake_bundled_moonbit_home(
-    runtime.join("toolchains/moonbit/macos-arm64"),
+    runtime.join("toolchains/moonbit/macos-arm64").to_path(),
     version="0.10.0-test",
   )
   @fs.write_file(
@@ -1055,7 +1080,10 @@ async test "worktree remove refuses a running conversation without unmapping it"
     create_mode=CreateOrTruncate,
   )
   assert_eq(@process.run("chmod", ["+x", engine.to_string()]), 0)
-  let actor = new_engine_actor(engine.to_string(), runtime_dir=runtime)
+  let actor = new_engine_actor(
+    engine.to_string(),
+    runtime_dir=runtime.to_path(),
+  )
   let manager = actor.manager()
   ignore(
     update_settings(manager, {
@@ -1106,7 +1134,7 @@ async test "worktree remove refuses a running conversation without unmapping it"
     }
     assert_true(detail.contains("still running"))
     assert_false(committed.val)
-    assert_true(@fsx.is_dir(ws.join(".worktrees/wt")))
+    assert_true(@fsx.is_dir(ws.join(".worktrees/wt").to_path()))
     guard list_worktrees(ws.to_string()).worktrees is [info] else {
       fail("expected the worktree to stay registered")
     }
@@ -1118,8 +1146,8 @@ async test "worktree remove refuses a running conversation without unmapping it"
 
 ///|
 #cfg(not(platform="windows"))
-async fn prepare_git_repo(dir : @path.Path) -> Unit {
-  @fsx.ensure_dir(dir)
+async fn prepare_git_repo(dir : @pathx.Absolute) -> Unit {
+  @fsx.ensure_dir(dir.to_path())
   ignore(git_in(dir, ["init", "-q"]))
   ignore(
     git_in(dir, [
@@ -1155,19 +1183,13 @@ async test "attach refuses a linked worktree, keeps main and non-git attachable"
   // The main checkout, one of its subdirectories, and a plain directory all
   // stay attachable — in particular the guard must not misfire on paths whose
   // `.git` is elsewhere for other reasons.
-  assert_true(
-    add_workspace(repo.to_string(), fn(_) {  }).contains(repo.to_string()),
-  )
+  assert_true(add_workspace(repo.to_string(), fn(_) {  }).contains(repo))
   let sub = repo.join("sub")
-  @fsx.ensure_dir(sub)
-  assert_true(
-    add_workspace(sub.to_string(), fn(_) {  }).contains(sub.to_string()),
-  )
+  @fsx.ensure_dir(sub.to_path())
+  assert_true(add_workspace(sub.to_string(), fn(_) {  }).contains(sub))
   let plain = root.join("plain")
-  @fsx.ensure_dir(plain)
-  assert_true(
-    add_workspace(plain.to_string(), fn(_) {  }).contains(plain.to_string()),
-  )
+  @fsx.ensure_dir(plain.to_path())
+  assert_true(add_workspace(plain.to_string(), fn(_) {  }).contains(plain))
   @fs.rmdir(root.to_string(), recursive=true)
 }
 
@@ -1202,7 +1224,7 @@ async test "worktree create provisions checkout, branch, registry, exclusion" {
   assert_eq(info.session, Some("s-fix-auth"))
   assert_eq(info.path, repo.join(".worktrees/fix-auth").to_string())
   assert_true(info.present)
-  assert_true(@fsx.is_dir(repo.join(".worktrees/fix-auth")))
+  assert_true(@fsx.is_dir(repo.join(".worktrees/fix-auth").to_path()))
   assert_true(
     git_probe(repo, [
       "show-ref", "--verify", "--quiet", "refs/heads/openseek/fix-auth",
@@ -1216,7 +1238,7 @@ async test "worktree create provisions checkout, branch, registry, exclusion" {
     ]),
     "openseek/fix-auth",
   )
-  let exclude = @fsx.read_text(repo.join(".git/info/exclude"))
+  let exclude = @fsx.read_text(repo.join(".git/info/exclude").to_path())
   assert_true(exclude.contains(".worktrees/"))
   assert_true(exclude.contains(".openseek/"))
   guard list_worktrees(repo.to_string()).worktrees is [listed] else {
@@ -1250,7 +1272,7 @@ async test "a checkout deleted outside the app refuses runs and is repairable" {
   let checkout = repo.join(".worktrees/wt")
   // A commit on the worktree's branch stands in for the conversation's
   // work: the repair must bring it back, not just an empty directory.
-  @fsx.write_text(checkout.join("kept.txt"), "committed work")
+  @fsx.write_text(checkout.join("kept.txt").to_path(), "committed work")
   ignore(git_in(checkout, ["add", "kept.txt"]))
   ignore(
     git_in(checkout, [
@@ -1264,7 +1286,7 @@ async test "a checkout deleted outside the app refuses runs and is repairable" {
   // The durable record is how a hint-less resume recovers its registered
   // workspace after an app restart.
   @fsx.ensure_dir(
-    workspace_session_root(repo).join("sessions").join("s-vanish"),
+    workspace_session_root(repo).join("sessions").join("s-vanish").to_path(),
   )
   guard list_worktrees(repo.to_string()).worktrees is [gone] else {
     fail("the registry row must survive an external deletion")
@@ -1333,8 +1355,11 @@ async test "a checkout deleted outside the app refuses runs and is repairable" {
 
   })
   assert_eq(repaired.name, created.name)
-  assert_true(@fsx.is_dir(checkout))
-  assert_eq(@fsx.read_text(checkout.join("kept.txt")), "committed work")
+  assert_true(@fsx.is_dir(checkout.to_path()))
+  assert_eq(
+    @fsx.read_text(checkout.join("kept.txt").to_path()),
+    "committed work",
+  )
   assert_eq(
     git_in(checkout, ["rev-parse", "--abbrev-ref", "HEAD"]),
     "openseek/wt",
@@ -1475,7 +1500,9 @@ async test "worktree create names the holder in every refusal" {
   )
   // Binding is for new conversations: one with durable history keeps the
   // tree it grew up in.
-  @fsx.ensure_dir(workspace_session_root(repo).join("sessions").join("s-old"))
+  @fsx.ensure_dir(
+    workspace_session_root(repo).join("sessions").join("s-old").to_path(),
+  )
   assert_true(
     create_refusal(manager, repo.to_string(), "s-old", "x").contains(
       "already has history",
@@ -1484,14 +1511,14 @@ async test "worktree create names the holder in every refusal" {
   // The session must be new EVERYWHERE: history in the global store, a
   // binding in another workspace's registry, and an in-flight first turn
   // all refuse — any of them would fork the conversation's routing.
-  @fsx.ensure_dir(root.join("global/sessions/s-global"))
+  @fsx.ensure_dir(root.join("global/sessions/s-global").to_path())
   assert_true(
     create_refusal(manager, repo.to_string(), "s-global", "x").contains(
       "already has history",
     ),
   )
   let elsewhere = root.join("elsewhere")
-  @fsx.ensure_dir(elsewhere)
+  @fsx.ensure_dir(elsewhere.to_path())
   ignore(add_workspace(elsewhere.to_string(), fn(_) {  }))
   write_worktrees(elsewhere, [
     {
@@ -1522,7 +1549,7 @@ async test "worktree create names the holder in every refusal" {
       "already exists",
     ),
   )
-  @fsx.ensure_dir(repo.join(".worktrees/held"))
+  @fsx.ensure_dir(repo.join(".worktrees/held").to_path())
   assert_true(
     create_refusal(manager, repo.to_string(), "s-3", "held").contains(
       "already exists on disk",
@@ -1537,7 +1564,7 @@ async test "worktree create names the holder in every refusal" {
   // A workspace that is not a git repository cannot host worktrees; a linked
   // worktree registered before the attach guard existed is refused too.
   let plain = root.join("plain")
-  @fsx.ensure_dir(plain)
+  @fsx.ensure_dir(plain.to_path())
   ignore(add_workspace(plain.to_string(), fn(_) {  }))
   assert_true(
     create_refusal(manager, plain.to_string(), "s", "x").contains(
@@ -1547,7 +1574,7 @@ async test "worktree create names the holder in every refusal" {
   // A repository SUBDIRECTORY stays attachable but cannot host worktrees:
   // the checkout would land inside it as untracked noise at the wrong depth.
   let sub = repo.join("sub")
-  @fsx.ensure_dir(sub)
+  @fsx.ensure_dir(sub.to_path())
   ignore(add_workspace(sub.to_string(), fn(_) {  }))
   assert_true(
     create_refusal(manager, sub.to_string(), "s-sub", "x").contains(
@@ -1566,7 +1593,7 @@ async test "archive keeps worktree placement for explicit repair after unarchive
   let root = worktree_test_root("openseek-worktree-archive-")
   @sys.set_env_var("OPENSEEK_SESSION_ROOT", root.join("global").to_string())
   defer restore_session_root_env(previous)
-  @fsx.ensure_dir(root.join("global"))
+  @fsx.ensure_dir(root.join("global").to_path())
   let repo = root.join("repo")
   prepare_git_repo(repo)
   ignore(add_workspace(repo.to_string(), fn(_) {  }))
@@ -1576,7 +1603,9 @@ async test "archive keeps worktree placement for explicit repair after unarchive
   // The first turn has landed: the durable record now exists in the
   // workspace store (create's has-history refusal applies only before the
   // binding, so this is the normal begun-conversation shape).
-  @fsx.ensure_dir(workspace_session_root(repo).join("sessions").join("s-arc"))
+  @fsx.ensure_dir(
+    workspace_session_root(repo).join("sessions").join("s-arc").to_path(),
+  )
   @fs.write_file(
     repo.join(".worktrees/wt-1/junk.txt").to_string(),
     b"x",
@@ -1594,9 +1623,11 @@ async test "archive keeps worktree placement for explicit repair after unarchive
   }
   assert_true(refusal.contains("uncommitted changes"))
   assert_true(
-    @fsx.is_dir(workspace_session_root(repo).join("sessions").join("s-arc")),
+    @fsx.is_dir(
+      workspace_session_root(repo).join("sessions").join("s-arc").to_path(),
+    ),
   )
-  assert_true(@fsx.is_dir(repo.join(".worktrees/wt-1")))
+  assert_true(@fsx.is_dir(repo.join(".worktrees/wt-1").to_path()))
   // The confirmed dialog retries with force: the checkout goes away, while
   // the branch, archived history, and placement row all survive. The retained
   // row broadcasts as missing before the conversation is archived.
@@ -1615,7 +1646,7 @@ async test "archive keeps worktree placement for explicit repair after unarchive
   }
   assert_eq(archived_worktree.session, Some("s-arc"))
   assert_false(archived_worktree.present)
-  assert_false(@fsx.exists(repo.join(".worktrees/wt-1")))
+  assert_false(@fsx.exists(repo.join(".worktrees/wt-1").to_path()))
   assert_true(
     git_probe(repo, [
       "show-ref", "--verify", "--quiet", "refs/heads/openseek/wt-1",
@@ -1626,7 +1657,8 @@ async test "archive keeps worktree placement for explicit repair after unarchive
     @fsx.is_dir(
       archived_session_root(workspace_session_root(repo))
       .join("sessions")
-      .join("s-arc"),
+      .join("s-arc")
+      .to_path(),
     ),
   )
   guard list_worktrees(repo.to_string()).worktrees is [retained] else {
@@ -1638,7 +1670,9 @@ async test "archive keeps worktree placement for explicit repair after unarchive
   // keeps every workspace surface blocked until the user explicitly repairs.
   ignore(unarchive_session(manager, "s-arc", fn() {  }))
   assert_true(
-    @fsx.is_dir(workspace_session_root(repo).join("sessions").join("s-arc")),
+    @fsx.is_dir(
+      workspace_session_root(repo).join("sessions").join("s-arc").to_path(),
+    ),
   )
   assert_true(session_tree_dir(repo, "s-arc") is None)
   assert_true(
@@ -1646,12 +1680,14 @@ async test "archive keeps worktree placement for explicit repair after unarchive
   )
   let repaired = create_worktree(manager, repo.to_string(), "s-arc", fn(_) {  })
   assert_eq(repaired.name, "wt-1")
-  assert_true(@fsx.is_dir(repo.join(".worktrees/wt-1")))
+  assert_true(@fsx.is_dir(repo.join(".worktrees/wt-1").to_path()))
   // A clean bound worktree archives in one go, no force needed.
   ignore(create_worktree(manager, repo.to_string(), "s-arc2", fn(_) {  }))
-  @fsx.ensure_dir(workspace_session_root(repo).join("sessions").join("s-arc2"))
+  @fsx.ensure_dir(
+    workspace_session_root(repo).join("sessions").join("s-arc2").to_path(),
+  )
   ignore(archive_session(manager, "s-arc2", fn() {  }))
-  assert_false(@fsx.exists(repo.join(".worktrees/wt-2")))
+  assert_false(@fsx.exists(repo.join(".worktrees/wt-2").to_path()))
   guard list_worktrees(repo.to_string()).worktrees is [first, second] else {
     fail("both worktree placements must survive archive")
   }
@@ -1717,7 +1753,7 @@ async test "worktree remove enforces the dirty check and keeps the branch" {
   })
   assert_eq(committed.val, 0)
   assert_eq(forced.worktrees.length(), 0)
-  assert_false(@fsx.exists(repo.join(".worktrees/w1")))
+  assert_false(@fsx.exists(repo.join(".worktrees/w1").to_path()))
   // Committed work is never lost: the branch survives every removal.
   assert_true(
     git_probe(repo, [

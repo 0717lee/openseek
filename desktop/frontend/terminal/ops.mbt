@@ -15,15 +15,20 @@ fn open_session(
   channel : @interop.ChannelId,
   key : Int,
   session : String,
-  workspace : @pathx.Absolute?,
+  workspace : @common.Uri?,
   cols : Int,
   rows : Int,
 ) -> @cmd.Cmd {
+  match workspace {
+    Some(resource) if !@resource.belongs_to(resource, channel) =>
+      return @cmd.none
+    _ => ()
+  }
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
       let reply = @interop.bridge_request(channel, @commands.terminal_open, {
         session,
-        workspace: workspace.map(value => value.0),
+        workspace: workspace.map(value => value.path),
         cols,
         rows,
       }) catch {

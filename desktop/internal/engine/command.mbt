@@ -3,7 +3,7 @@ const DefaultEngine = "openseek"
 
 ///|
 async fn bundled_engine_path(framework_command : String) -> String? {
-  let command_path : @path.Path = framework_command
+  let command_path : @pathx.Path = framework_command
   let command_dir = command_path.dirname().resolve()
   let candidates = match @env.get("OS") {
     Some("Windows_NT") => ["openseek.exe", "openseek"]

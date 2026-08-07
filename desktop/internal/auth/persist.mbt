@@ -11,7 +11,7 @@ const AuthFileVersion = 1
 const AuthFileName = "auth.json"
 
 ///|
-fn auth_file(runtime_dir : @path.Path) -> @path.Path {
+fn auth_file(runtime_dir : @pathx.Path) -> @pathx.Path {
   runtime_dir.join(AuthFileName)
 }
 
@@ -63,7 +63,7 @@ fn session_from_json(json : Json) -> AuthSession? {
 ///|
 /// Read the persisted session; absence and corruption both read as signed
 /// out.
-async fn load_session_file(runtime_dir : @path.Path) -> AuthSession? {
+async fn load_session_file(runtime_dir : @pathx.Path) -> AuthSession? {
   guard (@fsx.try_read_text(auth_file(runtime_dir)) catch {
       error if @async.is_being_cancelled() => raise error
       _ => None
@@ -79,7 +79,7 @@ async fn load_session_file(runtime_dir : @path.Path) -> AuthSession? {
 /// Atomic 0600 save, mirroring the engine settings store: temp + rename,
 /// with the Windows remove-then-rename fallback.
 async fn save_session_file(
-  runtime_dir : @path.Path,
+  runtime_dir : @pathx.Path,
   session : AuthSession,
 ) -> Unit {
   let target = auth_file(runtime_dir)
@@ -114,7 +114,7 @@ async fn save_session_file(
 /// credential to `{}` first means a crash or an unlink failure can leave a
 /// file behind, but `load_session_file` will read that marker as signed out
 /// instead of restoring the old device token.
-async fn delete_session_file(runtime_dir : @path.Path) -> Unit {
+async fn delete_session_file(runtime_dir : @pathx.Path) -> Unit {
   let target = auth_file(runtime_dir)
   @fs.write_file(
     target.to_string(),

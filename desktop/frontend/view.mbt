@@ -480,7 +480,7 @@ fn device_section_rows(
         dispatch,
         model,
         dev,
-        path,
+        Some(path),
         listed~,
         archived~,
         nested=true,
@@ -498,14 +498,14 @@ fn device_section_rows(
     section_heading(
       dispatch,
       "Chats",
-      NewChatIn(dev.channel, ""),
+      NewChatIn(dev.channel, None),
       action_title="New chat outside any workspace",
       toggle=ToggleChatsSection,
       collapsed=model.chats_collapsed,
     ),
   )
   if !model.chats_collapsed {
-    push_group_rows(rows, dispatch, model, dev, "", listed~, archived~)
+    push_group_rows(rows, dispatch, model, dev, None, listed~, archived~)
   }
   // Archived conversations fold behind a collapsed group at the end of the
   // list. Their records live in the store's `archived` twin, so they come
@@ -538,7 +538,7 @@ fn push_group_rows(
   dispatch : @cmd.Emit[Msg],
   model : Model,
   dev : DeviceState,
-  workspace : String,
+  workspace : @common.Uri?,
   listed~ : (String) -> Bool,
   archived~ : (String) -> Bool,
   nested? : Bool = false,
@@ -551,7 +551,7 @@ fn push_group_rows(
   let composing = model.composing_new_chat()
   for conv in model.conversations.rev_iter() {
     if conv.device != dev.channel ||
-      workspace_token(conv.workspace) != workspace ||
+      conv.workspace != workspace ||
       listed(conv.session_id) ||
       archived(conv.session_id) {
       continue
@@ -665,15 +665,15 @@ fn workspace_row(
   dispatch : @cmd.Emit[Msg],
   model : Model,
   dev : DeviceState,
-  path : String,
+  path : @common.Uri,
 ) -> @html.Html {
   let mut class = "workspace-row"
-  if dev.channel == model.focused && path == dev.active_workspace {
+  if dev.channel == model.focused && dev.active_workspace == Some(path) {
     class = class + " active"
   }
-  @html.div(class~, title=path, [
+  @html.div(class~, title=path.path, [
     @html.span(class="sidebar-icon", icon(icon_folder)),
-    @html.span(class="sidebar-label", workspace_label(path)),
+    @html.span(class="sidebar-label", @resource.label(path)),
     @html.button(
       class="row-archive",
       type_="button",
@@ -690,7 +690,7 @@ fn workspace_row(
       title="New chat in this workspace",
       attrs=@html.Attrs::build().on_click(event => {
         event.stop_propagation()
-        dispatch(NewChatIn(dev.channel, path))
+        dispatch(NewChatIn(dev.channel, Some(path)))
       }),
       icon(icon_add),
     ),
@@ -2472,7 +2472,7 @@ fn run_indicator(model : Model) -> @html.Html {
 /// before the conversation's first run only the session id is known.
 fn session_tooltip(conv : Conversation) -> String {
   if conv.cwd is Some(cwd) {
-    "session \{conv.session_id}\nworkspace \{cwd.0}"
+    "session \{conv.session_id}\nworkspace \{cwd.path}"
   } else {
     "session \{conv.session_id}"
   }
@@ -2604,9 +2604,9 @@ fn topbar_view(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
   // The git branch is not shown here — it lives in the composer's status row.
   if conv.workspace is Some(workspace) {
     items.push(
-      @html.span(class="topbar-workspace", title=workspace.0, [
+      @html.span(class="topbar-workspace", title=workspace.path, [
         icon(icon_folder),
-        @html.text(workspace_label(workspace.0)),
+        @html.text(@resource.label(workspace)),
       ]),
     )
   }
@@ -2989,12 +2989,14 @@ fn workspace_picker_modal(
 ) -> @html.Html {
   let rows : Array[@html.Html] = []
   for name in picker.entries {
+    let target = match picker.path {
+      Some(path) => path.picker_child_path(name)
+      None => name
+    }
     rows.push(
       @html.div(
         class="picker-row",
-        on_click=dispatch(
-          WorkspacePickerNavigate(joined_path(picker.path, name)),
-        ),
+        on_click=dispatch(WorkspacePickerNavigate(target)),
         [
           @html.span(class="picker-row-icon", icon(icon_folder)),
           @html.span(class="picker-row-name", name),
@@ -3045,10 +3047,9 @@ fn workspace_picker_modal(
       @html.button(
         class="primary",
         on_click=dispatch(WorkspacePickerConfirm),
-        if picker.path.is_empty() {
-          "Add this folder"
-        } else {
-          "Add \u{201c}\{workspace_label(picker.path)}\u{201d}"
+        match picker.path {
+          None => "Add this folder"
+          Some(path) => "Add \u{201c}\{@resource.label(path)}\u{201d}"
         },
       ),
     ]),
@@ -3068,56 +3069,64 @@ fn workspace_picker_modal(
 ///|
 /// The current directory as a clickable trail: every ancestor is a button
 /// that navigates back up to it, the way a system chooser's path bar works.
-/// Windows paths keep their drive segment as the trail's root; POSIX paths
-/// root at "/".
+/// Windows resource paths keep `/C:/` as their drive root; POSIX paths root
+/// at `/`. UNC never reaches this UI because the backend rejects it.
 fn picker_breadcrumbs(
   dispatch : @cmd.Emit[Msg],
   picker : WorkspacePicker,
 ) -> @html.Html {
   let crumbs : Array[@html.Html] = []
-  let windows = picker.path.contains("\\")
-  let sep = if windows { "\\" } else { "/" }
-  fn push_crumb(label : String, target : String, current : Bool) -> Unit {
+  guard picker.path is Some(resource) else {
+    return @html.div(class="picker-crumbs", crumbs)
+  }
+  let path = resource.path
+
+  let segments : Array[String] = []
+  for part in path.split("/") {
+    if !part.is_empty() {
+      segments.push("\{part}")
+    }
+  }
+  let drive_root = match segments {
+    [drive, ..] if drive.length() == 2 && drive.has_suffix(":") => Some(drive)
+    _ => None
+  }
+  if drive_root is None {
+    crumbs.push(
+      @html.button(
+        class=if segments.length() == 0 {
+          "picker-crumb current"
+        } else {
+          "picker-crumb"
+        },
+        on_click=dispatch(WorkspacePickerNavigate("/")),
+        "/",
+      ),
+    )
+  }
+  let mut prefix = ""
+  for index, segment in segments {
+    prefix = if drive_root is Some(_) && index == 0 {
+      "/" + segment + "/"
+    } else if prefix.has_suffix("/") {
+      prefix + segment
+    } else {
+      prefix + "/" + segment
+    }
     if crumbs.length() > 0 {
       crumbs.push(@html.span(class="picker-crumb-sep", "›"))
     }
     crumbs.push(
       @html.button(
-        class=if current { "picker-crumb current" } else { "picker-crumb" },
-        on_click=dispatch(WorkspacePickerNavigate(target)),
-        label,
+        class=if index == segments.length() - 1 {
+          "picker-crumb current"
+        } else {
+          "picker-crumb"
+        },
+        on_click=dispatch(WorkspacePickerNavigate(prefix)),
+        segment,
       ),
     )
-  }
-
-  let segments : Array[String] = []
-  for part in picker.path.split(sep) {
-    if !part.is_empty() {
-      segments.push("\{part}")
-    }
-  }
-  if !windows {
-    push_crumb("/", "/", segments.length() == 0)
-  }
-  // A Windows root must survive into every ancestor target: a bare `C:` is
-  // drive-relative (it resolves against that drive's current directory),
-  // so the drive crumb targets `C:\`; a UNC path keeps its `\\server`
-  // prefix so ancestors stay absolute.
-  let unc = windows && picker.path.has_prefix("\\\\")
-  let mut prefix = ""
-  for index, segment in segments {
-    prefix = if windows && index == 0 {
-      if unc {
-        "\\\\" + segment
-      } else {
-        segment + "\\"
-      }
-    } else if prefix.has_suffix(sep) {
-      prefix + segment
-    } else {
-      prefix + sep + segment
-    }
-    push_crumb(segment, prefix, index == segments.length() - 1)
   }
   @html.div(class="picker-crumbs", crumbs)
 }

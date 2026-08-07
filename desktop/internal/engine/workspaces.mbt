@@ -19,7 +19,7 @@ let workspace_registry_lock : @async.Mutex = Mutex()
 ///|
 /// The registry file: `<global session root>/workspaces.json`, beside the
 /// scratch conversations' session store.
-fn workspaces_file() -> @path.Path? {
+fn workspaces_file() -> @pathx.Absolute? {
   resolved_session_root().map(root => root.join(WorkspacesFile))
 }
 
@@ -31,11 +31,12 @@ fn workspaces_file() -> @path.Path? {
 /// canonical paths tools like moonc report. Falls back to the lexical
 /// spelling when resolution fails (the directory vanished), keeping a dead
 /// entry addressable for removal.
-async fn canonical_workspace_path(dir : @path.Path) -> String {
-  @fs.realpath(dir.to_string()) catch {
+async fn canonical_workspace_path(dir : @pathx.Absolute) -> @pathx.Absolute {
+  let resolved = @fs.realpath(dir.0) catch {
     error if @async.is_being_cancelled() => raise error
-    _ => dir.to_string()
+    _ => return dir
   }
+  @pathx.Path(resolved).to_absolute().unwrap_or(dir)
 }
 
 ///|
@@ -43,9 +44,9 @@ async fn canonical_workspace_path(dir : @path.Path) -> String {
 /// malformed registry reads as "no workspaces". Entries canonicalize on
 /// read, so a registry written before symlink resolution (or edited by hand)
 /// collapses aliases of one physical directory into its first spelling.
-async fn read_registry_unlocked() -> Array[String] {
+async fn read_registry_unlocked() -> Array[@pathx.Absolute] {
   guard workspaces_file() is Some(file) else { return [] }
-  let text = @fsx.try_read_text(file) catch {
+  let text = @fsx.try_read_text(file.to_path()) catch {
     error if @async.is_being_cancelled() => raise error
     _ => return []
   }
@@ -54,10 +55,13 @@ async fn read_registry_unlocked() -> Array[String] {
   guard json is Object(fields) && fields.get("workspaces") is Some(Array(items)) else {
     return []
   }
-  let paths : Array[String] = []
+  let paths : Array[@pathx.Absolute] = []
   for item in items {
     guard item is String(path) && !path.is_empty() else { continue }
-    let canonical = canonical_workspace_path(Path(path))
+    // Registry JSON is an input boundary. Ignore an edited relative or
+    // incomplete spelling rather than letting it enter host state.
+    guard @pathx.Path(path).to_absolute() is Some(path) else { continue }
+    let canonical = canonical_workspace_path(path)
     if !paths.contains(canonical) {
       paths.push(canonical)
     }
@@ -66,25 +70,28 @@ async fn read_registry_unlocked() -> Array[String] {
 }
 
 ///|
-pub async fn registered_workspaces() -> Array[String] {
+pub async fn registered_workspaces() -> Array[@pathx.Absolute] {
   workspace_registry_lock.acquire()
   defer workspace_registry_lock.release()
   read_registry_unlocked()
 }
 
 ///|
-async fn write_registry(paths : Array[String]) -> Unit {
+async fn write_registry(paths : Array[@pathx.Absolute]) -> Unit {
   guard resolved_session_root() is Some(root) else {
     raise EngineError(
       "cannot determine a session root; set OPENSEEK_SESSION_ROOT",
     )
   }
-  @fsx.ensure_dir(root) catch {
+  @fsx.ensure_dir(root.to_path()) catch {
     error if @async.is_being_cancelled() => raise error
     error => raise EngineError("could not create \{root}: \{error}")
   }
-  let registry : Json = { "workspaces": paths.to_json() }
-  @fsx.write_text(root.join(WorkspacesFile), registry.stringify(indent=2)) catch {
+  let registry : Json = { "workspaces": paths.map(path => path.0).to_json() }
+  @fsx.write_text(
+    root.join(WorkspacesFile).to_path(),
+    registry.stringify(indent=2),
+  ) catch {
     error if @async.is_being_cancelled() => raise error
     error => raise EngineError("could not save the workspace list: \{error}")
   }
@@ -98,8 +105,8 @@ async fn write_registry(paths : Array[String]) -> Unit {
 /// project never dirties its status.
 pub async fn add_workspace(
   path : String,
-  on_committed : (Array[String]) -> Unit,
-) -> Array[String] {
+  on_committed : (Array[@pathx.Absolute]) -> Unit raise EngineError,
+) -> Array[@pathx.Absolute] {
   // A real directory pick never contains control characters. A NUL-padded
   // dialog buffer once slipped through the is_dir check below — C-level
   // filesystem calls truncate at the first NUL while the MoonBit string
@@ -108,14 +115,16 @@ pub async fn add_workspace(
     raise EngineError("workspace path contains control characters")
   }
   let dir = expanded_workspace_path(path)
-  guard @fsx.is_dir(dir) else { raise EngineError("\{dir} is not a directory") }
+  guard @fsx.is_dir(dir.to_path()) else {
+    raise EngineError("\{dir.0} is not a directory")
+  }
   // A worktree is not a workspace: registering a linked checkout would root
   // stores and language ops at a directory that can vanish with the
   // worktree. Non-git directories and repository subdirectories stay
   // attachable.
   if linked_git_worktree(dir) {
     raise EngineError(
-      "\{dir} is a linked git worktree; attach the main checkout instead",
+      "\{dir.0} is a linked git worktree; attach the main checkout instead",
     )
   }
   let canonical = canonical_workspace_path(dir)
@@ -145,8 +154,8 @@ pub async fn add_workspace(
 /// untouched, so re-adding the workspace brings its conversations back.
 pub async fn remove_workspace(
   path : String,
-  on_committed : (Array[String]) -> Unit,
-) -> Array[String] {
+  on_committed : (Array[@pathx.Absolute]) -> Unit raise EngineError,
+) -> Array[@pathx.Absolute] {
   let target = canonical_workspace_path(expanded_workspace_path(path))
   workspace_registry_lock.acquire()
   defer workspace_registry_lock.release()
@@ -161,12 +170,12 @@ pub async fn remove_workspace(
 ///|
 /// Expand and absolutize a user-supplied workspace path: `~` becomes the home
 /// directory, a relative path resolves against the process cwd.
-fn expanded_workspace_path(path : String) -> @path.Path raise EngineError {
+fn expanded_workspace_path(path : String) -> @pathx.Absolute raise EngineError {
   let trimmed = path.trim().to_owned()
   guard !trimmed.is_empty() else {
     raise EngineError("workspace path must not be empty")
   }
-  let expanded : @path.Path = if trimmed == "~" {
+  let expanded : @pathx.Path = if trimmed == "~" {
     guard @home.dir() is Some(home) else {
       raise EngineError("no home directory to expand ~ against")
     }
@@ -179,6 +188,8 @@ fn expanded_workspace_path(path : String) -> @path.Path raise EngineError {
   } else {
     Path(trimmed)
   }
+  // `resolve` establishes the absolute-path guarantee; normalization keeps
+  // that classification while cleaning the final workspace spelling.
   expanded.resolve().normalize()
 }
 
@@ -188,12 +199,10 @@ fn expanded_workspace_path(path : String) -> @path.Path raise EngineError {
 /// which directories the webview may reach. The hint canonicalizes before
 /// the comparison, so a client still holding an attach-time symlink spelling
 /// keeps matching the registry's physical one.
-async fn registered_workspace(path : String) -> @path.Path? {
-  let trimmed = path.trim().to_owned()
-  guard !trimmed.is_empty() else { return None }
-  let canonical = canonical_workspace_path(Path(trimmed))
+async fn registered_workspace(path : @pathx.Absolute) -> @pathx.Absolute? {
+  let canonical = canonical_workspace_path(path)
   if registered_workspaces().contains(canonical) {
-    Some(Path(canonical))
+    Some(canonical)
   } else {
     None
   }
@@ -202,7 +211,7 @@ async fn registered_workspace(path : String) -> @path.Path? {
 ///|
 /// A workspace's durable session store: the engine CLI's relative default
 /// (`.openseek`) inside the project.
-pub fn workspace_session_root(workspace : @path.Path) -> @path.Path {
+pub fn workspace_session_root(workspace : @pathx.Absolute) -> @pathx.Absolute {
   workspace.join(".openseek").normalize()
 }
 
@@ -211,14 +220,13 @@ pub fn workspace_session_root(workspace : @path.Path) -> @path.Path {
 /// durable record lives (`<workspace>/.openseek/sessions/<id>`). The record's
 /// location is the mapping — there is no separate index to fall out of date.
 /// `None` for scratch conversations, whose records live in the global store.
-async fn workspace_of_session(session : String) -> @path.Path? {
+async fn workspace_of_session(session : String) -> @pathx.Absolute? {
   guard safe_workspace_id(session) else { return None }
-  for path in registered_workspaces() {
-    let workspace : @path.Path = Path(path)
+  for workspace in registered_workspaces() {
     let record = workspace_session_root(workspace)
       .join("sessions")
       .join(session)
-    if @fsx.is_dir(record) {
+    if @fsx.is_dir(record.to_path()) {
       return Some(workspace)
     }
   }
@@ -228,7 +236,7 @@ async fn workspace_of_session(session : String) -> @path.Path? {
 ///|
 /// The session store root holding `session`'s durable record: its workspace's
 /// in-project store when one claims it, otherwise the global root.
-async fn session_store_root(session : String) -> @path.Path? {
+async fn session_store_root(session : String) -> @pathx.Absolute? {
   if workspace_of_session(session) is Some(workspace) {
     return Some(workspace_session_root(workspace))
   }
@@ -241,15 +249,15 @@ async fn session_store_root(session : String) -> @path.Path? {
 /// unlike the user's own `.gitignore`). Only a directory `.git` qualifies —
 /// a worktree or submodule keeps its real git dir elsewhere and is left
 /// alone. Best-effort: a failure never blocks the caller.
-async fn exclude_from_git(dir : @path.Path, entry : String) -> Unit {
+async fn exclude_from_git(dir : @pathx.Absolute, entry : String) -> Unit {
   let git_dir = dir.join(".git")
-  let is_repo = @fsx.is_dir(git_dir) catch {
+  let is_repo = @fsx.is_dir(git_dir.to_path()) catch {
     error if @async.is_being_cancelled() => raise error
     _ => false
   }
   guard is_repo else { return }
   let exclude = git_dir.join("info").join("exclude")
-  let existing = (@fsx.try_read_text(exclude) catch {
+  let existing = (@fsx.try_read_text(exclude.to_path()) catch {
     error if @async.is_being_cancelled() => raise error
     _ => None
   }).unwrap_or("")
@@ -264,11 +272,11 @@ async fn exclude_from_git(dir : @path.Path, entry : String) -> Unit {
   } else {
     "\{existing}\n\{entry}/\n"
   }
-  @fsx.ensure_dir(git_dir.join("info")) catch {
+  @fsx.ensure_dir(git_dir.join("info").to_path()) catch {
     error if @async.is_being_cancelled() => raise error
     _ => return
   }
-  @fsx.write_text(exclude, updated) catch {
+  @fsx.write_text(exclude.to_path(), updated) catch {
     error if @async.is_being_cancelled() => raise error
     _ => ()
   }
@@ -282,7 +290,7 @@ async fn exclude_from_git(dir : @path.Path, entry : String) -> Unit {
 ///|
 test "a workspace's session store is the engine's in-project default" {
   assert_eq(
-    workspace_session_root(Path("/home/u/proj")).to_string(),
+    workspace_session_root(@pathx.Path("/home/u/proj").resolve()).to_string(),
     "/home/u/proj/.openseek",
   )
 }
@@ -293,16 +301,13 @@ test "workspace paths expand ~ against the home directory" {
     // No home in this environment; nothing to expand against.
     return
   }
-  assert_eq(expanded_workspace_path("~").to_string(), home.to_string())
+  assert_eq(expanded_workspace_path("~").0, home.to_string())
   assert_eq(
-    expanded_workspace_path("~/proj").to_string(),
+    expanded_workspace_path("~/proj").0,
     home.join("proj").normalize().to_string(),
   )
   // Absolute paths pass through (normalized), and surrounding blanks drop.
-  assert_eq(
-    expanded_workspace_path("  /srv/code//app  ").to_string(),
-    "/srv/code/app",
-  )
+  assert_eq(expanded_workspace_path("  /srv/code//app  ").0, "/srv/code/app")
 }
 
 ///|
@@ -322,17 +327,22 @@ test "blank workspace paths are refused" {
 /// registry entry stays removable.
 async test "workspace identity follows symlinks and survives deletion" {
   let dir = @fs.tmpdir(prefix="openseek-workspace-canon-")
-  let real = @path.Path(dir).join("real")
+  let real = @pathx.Path(dir).join("real")
   @fs.mkdir(real.to_string())
-  let link = @path.Path(dir).join("link")
+  let link = @pathx.Path(dir).join("link")
   @fs.symlink(link.to_string(), target=real.to_string())
-  let canonical = canonical_workspace_path(real)
-  let linked = canonical_workspace_path(link)
-  let missing = @path.Path(dir).join("missing")
-  let vanished = canonical_workspace_path(missing)
+  let missing = @pathx.Path(dir).join("missing")
+  guard real.to_absolute() is Some(real_path) &&
+    link.to_absolute() is Some(link_path) &&
+    missing.to_absolute() is Some(missing_path) else {
+    fail("expected absolute temporary workspace paths")
+  }
+  let canonical = canonical_workspace_path(real_path)
+  let linked = canonical_workspace_path(link_path)
+  let vanished = canonical_workspace_path(missing_path)
   @fs.rmdir(dir, recursive=true) catch {
     _ => ()
   }
   assert_eq(linked, canonical)
-  assert_eq(vanished, missing.to_string())
+  assert_eq(vanished.0, missing.to_string())
 }

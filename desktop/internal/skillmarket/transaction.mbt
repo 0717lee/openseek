@@ -24,26 +24,26 @@ let library_lock : @async.Mutex = Mutex()
 /// Paths and recovery rules for one skills library. The hidden directories
 /// themselves encode state; no separate transaction record is needed.
 priv struct SkillLibrary {
-  root : @path.Path
+  root : @pathx.Path
 }
 
 ///|
-fn SkillLibrary::target(self : SkillLibrary, id : String) -> @path.Path {
+fn SkillLibrary::target(self : SkillLibrary, id : String) -> @pathx.Path {
   self.root.join(id)
 }
 
 ///|
-fn SkillLibrary::staging(self : SkillLibrary, id : String) -> @path.Path {
+fn SkillLibrary::staging(self : SkillLibrary, id : String) -> @pathx.Path {
   self.root.join(StagingDirectory).join(id)
 }
 
 ///|
-fn SkillLibrary::backup(self : SkillLibrary, id : String) -> @path.Path {
+fn SkillLibrary::backup(self : SkillLibrary, id : String) -> @pathx.Path {
   self.root.join(BackupDirectory).join(id)
 }
 
 ///|
-fn SkillLibrary::trash(self : SkillLibrary, id : String) -> @path.Path {
+fn SkillLibrary::trash(self : SkillLibrary, id : String) -> @pathx.Path {
   self.root.join(TrashDirectory).join(id)
 }
 

@@ -1,0 +1,22 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "openseek_desktop/frontend/pathx"
+
+import {
+  "moonbitlang/core/debug",
+}
+
+// Values
+
+// Errors
+
+// Types and methods
+pub(all) struct Relative(String) derive(Eq, Hash, @debug.Debug)
+pub fn Relative::contains(Self, Self) -> Bool
+pub fn Relative::is_root(Self) -> Bool
+pub fn Relative::normalize(Self) -> Self
+pub fn Relative::root() -> Self
+pub impl Show for Relative
+
+// Type aliases
+
+// Traits

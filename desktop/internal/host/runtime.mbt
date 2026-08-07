@@ -6,9 +6,9 @@
 /// repackage replaces the bundle under a running instance. Uses
 /// `~/Library/Application Support/SeekMoon` where that layout exists
 /// (macOS) and `~/.openseek-desktop` elsewhere.
-async fn app_runtime_dir() -> String? {
+async fn app_runtime_dir() -> @pathx.Path? {
   guard @home.dir() is Some(home) else { return None }
-  let home_path : @path.Path = home
+  let home_path : @pathx.Path = home
   let app_support = home_path.join("Library").join("Application Support")
   let app_support_exists = (@fs.kind(app_support.to_string()) is Directory) catch {
     _ => false
@@ -18,20 +18,20 @@ async fn app_runtime_dir() -> String? {
   } else {
     home_path.join(".openseek-desktop")
   }
-  Some(dir.normalize().to_string())
+  Some(dir.normalize())
 }
 
 ///|
 /// The runtime directory, created on demand. `None` when it cannot be
 /// determined or created; callers then fall back to runtime defaults.
-pub async fn prepared_runtime_dir() -> @path.Path? {
+pub async fn prepared_runtime_dir() -> @pathx.Path? {
   guard app_runtime_dir() is Some(dir) else { return None }
-  let exists = (@fs.kind(dir) is Directory) catch {
+  let exists = (@fs.kind(dir.to_string()) is Directory) catch {
     @os_error.OSError(_) as os_error if os_error.is_ENOENT() => false
     error => raise error
   }
   if !exists {
-    @fs.mkdir(dir) catch {
+    @fs.mkdir(dir.to_string()) catch {
       error if @async.is_being_cancelled() => raise error
       _ => return None
     }

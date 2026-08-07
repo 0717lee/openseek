@@ -2,8 +2,8 @@ import {
   "openseek_desktop/internal/env",
   "openseek_desktop/internal/home",
   "openseek_desktop/internal/fsx",
+  "openseek_desktop/internal/pathx",
   "moonbitlang/core/encoding/utf8",
-  "moonbitlang/x/path",
   "tonyfettes/platform",
 }
 

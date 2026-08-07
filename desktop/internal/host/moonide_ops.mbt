@@ -12,8 +12,8 @@ priv enum MoonIdeQuery {
 
 ///|
 priv struct MoonIdeRequest {
-  lexical_workspace : @path.Path
-  physical_workspace : @path.Path
+  lexical_workspace : @pathx.Absolute
+  physical_workspace : @pathx.Absolute
   relative_path : String
   line : Int
   column : Int
@@ -51,16 +51,19 @@ fn MoonIdeQuery::args(
 /// normalized relative form. Normalizing before the containment check closes
 /// lexical `..` escapes; the async owner additionally canonicalizes both paths
 /// with `realpath` before calling this helper.
-fn moonide_relative_path(workspace : @path.Path, absolute : String) -> String? {
-  let candidate = @path.Path(absolute)
-  guard candidate.is_absolute() else { return None }
-  let root = workspace.normalize().to_string()
-  let candidate = candidate.normalize().to_string()
-  guard @pathx.relative_to(candidate, root~) is Some(relative) &&
-    !relative.is_empty() else {
+fn moonide_relative_path(
+  workspace : @pathx.Absolute,
+  absolute : String,
+) -> String? {
+  let candidate = @pathx.Path(absolute)
+  guard candidate.is_host_absolute() else { return None }
+  let root = workspace.normalize()
+  let candidate = candidate.normalize()
+  guard candidate.to_absolute() is Some(candidate) else { return None }
+  guard candidate.relative_to(root~) is Some(relative) && !relative.is_root() else {
     return None
   }
-  Some(relative)
+  Some(relative.0)
 }
 
 ///|
@@ -74,7 +77,10 @@ async fn resolve_moonide_request(
   guard payload.line > 0 && payload.column > 0 else {
     raise PayloadError("line and column must be positive one-based integers")
   }
-  guard @engine.attached_workspace_dir(payload.path) is Some(attached) else {
+  guard @pathx.Absolute::from_uri_path(payload.path) is Some(path) else {
+    raise PayloadError("path must be absolute")
+  }
+  guard @engine.attached_workspace_dir(path) is Some(attached) else {
     raise HostError("path is outside every attached workspace")
   }
   let lexical_workspace = attached.normalize()
@@ -82,11 +88,13 @@ async fn resolve_moonide_request(
     error if @async.is_being_cancelled() => raise error
     _ => raise HostError("attached workspace is unavailable")
   }
-  let path_text = @fs.realpath(payload.path) catch {
+  let path_text = @fs.realpath(path.0) catch {
     error if @async.is_being_cancelled() => raise error
     _ => raise HostError("navigation path is unavailable")
   }
-  let physical_workspace = @path.Path(workspace_text).normalize()
+  guard @pathx.Path(workspace_text).to_absolute() is Some(physical_workspace) else {
+    raise HostError("attached workspace path is not absolute")
+  }
   guard moonide_relative_path(physical_workspace, path_text)
     is Some(relative_path) else {
     raise HostError("path is outside its attached workspace")
@@ -154,14 +162,16 @@ fn parse_moonide_range(text : String) -> (Int, Int, Int, Int)? {
 /// absolute paths, but accepting relative output against the physical cwd is
 /// harmless. This helper deliberately makes no security decision: the owner
 /// follows `realpath` and checks the physical workspace afterwards.
-fn moonide_result_path(physical_workspace : @path.Path, raw : String) -> String {
-  let raw_path = @path.Path(raw)
-  let candidate = if raw_path.is_absolute() {
-    raw_path.normalize()
+fn moonide_result_path(
+  physical_workspace : @pathx.Absolute,
+  raw : String,
+) -> String {
+  let raw_path = @pathx.Path(raw)
+  if raw_path.to_relative() is Some(relative) {
+    physical_workspace.join(relative).normalize().to_string()
   } else {
-    physical_workspace.join(raw_path).normalize()
+    raw_path.normalize().to_string()
   }
-  candidate.to_string()
 }
 
 ///|
@@ -170,7 +180,7 @@ fn moonide_result_path(physical_workspace : @path.Path, raw : String) -> String 
 /// stale compiler location cannot poison the other valid navigation targets.
 fn parse_moonide_output(
   output : String,
-  physical_workspace : @path.Path,
+  physical_workspace : @pathx.Absolute,
 ) -> MoonIdeLocationsReply raise HostError {
   let json = @json.parse(output) catch {
     _ => raise HostError("moon ide returned malformed JSON")
@@ -202,15 +212,15 @@ fn parse_moonide_output(
 /// to the attached workspace's lexical spelling. This keeps model URIs aligned
 /// with `fs.read_file` even when the attached root itself is a symlink.
 fn moonide_client_path(
-  lexical_workspace : @path.Path,
-  physical_workspace : @path.Path,
+  lexical_workspace : @pathx.Absolute,
+  physical_workspace : @pathx.Absolute,
   physical_result : String,
-) -> String? {
+) -> String? raise HostError {
   guard moonide_relative_path(physical_workspace, physical_result)
     is Some(relative) else {
     return None
   }
-  Some(lexical_workspace.join(Path(relative)).normalize().to_string())
+  Some(lexical_workspace.join(Relative(relative)).normalize().resource_path())
 }
 
 ///|
@@ -220,8 +230,8 @@ fn moonide_client_path(
 /// paths are dropped, while line and column numbers pass through unchanged.
 async fn canonical_moonide_locations(
   reply : MoonIdeLocationsReply,
-  lexical_workspace : @path.Path,
-  physical_workspace : @path.Path,
+  lexical_workspace : @pathx.Absolute,
+  physical_workspace : @pathx.Absolute,
 ) -> MoonIdeLocationsReply {
   let locations : Array[MoonIdeLocation] = []
   for location in reply.locations {
@@ -313,7 +323,7 @@ test "Moon IDE commands use relative one-based locations without a shell" {
 
 ///|
 test "Moon IDE relative paths normalize in-root paths and reject escapes" {
-  let workspace = @path.Path("/workspace")
+  let workspace = @pathx.Path("/workspace").resolve()
   assert_eq(
     moonide_relative_path(workspace, "/workspace/src/../main.mbt"),
     Some("main.mbt"),
@@ -328,7 +338,7 @@ test "Moon IDE relative paths normalize in-root paths and reject escapes" {
 
 ///|
 test "Moon IDE parser expands ranges before physical security filtering" {
-  let workspace = @path.Path("/workspace")
+  let workspace = @pathx.Path("/workspace").resolve()
   let reply = parse_moonide_output(
     (
       #|[
@@ -380,8 +390,8 @@ test "Moon IDE parser expands ranges before physical security filtering" {
 
 ///|
 test "physical Moon IDE results keep the lexical attached workspace identity" {
-  let lexical = @path.Path("/attached/project-link")
-  let physical = @path.Path("/private/projects/project")
+  let lexical = @pathx.Path("/attached/project-link").resolve()
+  let physical = @pathx.Path("/private/projects/project").resolve()
   assert_eq(
     moonide_client_path(
       lexical, physical, "/private/projects/project/src/main.mbt",

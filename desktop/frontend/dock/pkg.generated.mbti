@@ -5,7 +5,7 @@ import {
   "moonbit-community/rabbita/cmd",
   "moonbit-community/rabbita/html",
   "openseek_desktop/frontend/interop",
-  "openseek_desktop/internal/pathx",
+  "openseek_desktop/frontend/pathx",
 }
 
 // Values

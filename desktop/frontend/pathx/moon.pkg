@@ -1,0 +1,7 @@
+import {
+  "moonbitlang/x/path/posix",
+}
+
+supported_targets = "js"
+
+warnings = "+missing_doc+test_unqualified_package+unnecessary_annotation+unnecessary_view_op+ambiguous_range_direction+unqualified_local_using"

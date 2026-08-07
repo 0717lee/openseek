@@ -278,9 +278,8 @@ pub fn panel_toggle_cmds(
 fn FileChange::touches(self : FileChange, path : @pathx.Relative) -> Bool {
   match self {
     Modified(changed) => changed == path
-    Created(changed) | Removed(changed) => @pathx.contains(changed.0, path.0)
-    Renamed(old~, new~) =>
-      @pathx.contains(old.0, path.0) || @pathx.contains(new.0, path.0)
+    Created(changed) | Removed(changed) => changed.contains(path)
+    Renamed(old~, new~) => old.contains(path) || new.contains(path)
   }
 }
 
@@ -969,10 +968,14 @@ fn owned_state() -> State {
 }
 
 ///|
-fn loaded_doc(path : String) -> Doc {
+fn loaded_doc(path : String) -> Doc raise {
+  guard @resource.of_path(@interop.ChannelId::Local, "/work/" + path)
+    is Some(absolute) else {
+    fail("test document resource was not absolute")
+  }
   {
     name: basename(Relative(path)),
-    state: TabLoaded(content="", absolute=Absolute("/work/" + path), sig="1:0"),
+    state: TabLoaded(content="", absolute~, sig="1:0"),
     stale: false,
   }
 }
@@ -1117,6 +1120,10 @@ test "close_document drops the entry and forces the tree open on the last one" {
 ///|
 test "FileLoaded settles content into its document, active or not" {
   let emit = test_emit()
+  guard @resource.of_path(@interop.ChannelId::Local, "/work/a.mbt")
+    is Some(absolute) else {
+    fail("test file resource was not absolute")
+  }
   let docs : Map[@pathx.Relative, Doc] = Map([])
   docs[Relative("a.mbt")] = { name: "a.mbt", state: TabLoading, stale: false }
   docs[Relative("b.mbt")] = loaded_doc("b.mbt")
@@ -1132,11 +1139,7 @@ test "FileLoaded settles content into its document, active or not" {
       owner=test_ctx().owner,
       path=Relative("a.mbt"),
       name="a.mbt",
-      file=Content(
-        content="fn main {}",
-        absolute=Absolute("/work/a.mbt"),
-        sig="2:0",
-      ),
+      file=Content(content="fn main {}", absolute~, sig="2:0"),
       range=None,
       annotation=None,
     ),
@@ -1148,13 +1151,17 @@ test "FileLoaded settles content into its document, active or not" {
     is Some({ state: TabLoaded(content="fn main {}", ..), .. }),
   )
   // A reply for a closed document (or another conversation) is dropped.
+  guard @resource.of_path(@interop.ChannelId::Local, "/work/gone.mbt")
+    is Some(gone_absolute) else {
+    fail("test closed file resource was not absolute")
+  }
   let (_, stray) = update(
     emit,
     FileLoaded(
       owner=test_ctx().owner,
       path=Relative("gone.mbt"),
       name="gone.mbt",
-      file=Content(content="", absolute=Absolute("/work/gone.mbt"), sig="2:0"),
+      file=Content(content="", absolute=gone_absolute, sig="2:0"),
       range=None,
       annotation=None,
     ),

@@ -49,7 +49,7 @@ priv struct ConsoleState {
   // them redirecting the retired `/d/<id>/` deep links): where focus and
   // the first conversation land. Consumed by the first roster application.
   preselect_device : String?
-  preselect_workspace : String?
+  preselect_workspace : @common.Uri?
   // Whether the first roster application has run the console's deferred
   // boot half (session rotation, the transcript scroll watcher) — it waits
   // for a device to focus, since no transcript DOM exists before sign-in.
@@ -75,7 +75,7 @@ priv struct ConsoleRename {
 ///|
 fn empty_console_state(
   preselect_device : String?,
-  preselect_workspace : String?,
+  preselect_workspace : @common.Uri?,
 ) -> ConsoleState {
   {
     auth: AuthChecking,
@@ -385,10 +385,12 @@ fn apply_roster(
   let focus_held = devices.iter().any(dev => dev.channel == focused)
   // The deep link's `?workspace=` lands on the newly focused device, so its
   // first conversation opens in that project.
-  if refocused && console.preselect_workspace is Some(workspace) {
+  if refocused &&
+    console.preselect_workspace is Some(workspace) &&
+    @resource.belongs_to(workspace, focused) {
     for index in 0..<devices.length() {
       if devices[index].channel == focused {
-        devices[index] = { ..devices[index], active_workspace: workspace }
+        devices[index] = { ..devices[index], active_workspace: Some(workspace) }
         break
       }
     }
@@ -513,9 +515,12 @@ test "a 401 anywhere signs the console out and drops every channel" {
 ///|
 test "the deep link's device and workspace preselect the first focus" {
   let dispatch = test_dispatch()
+  let workspace = @interop.ChannelId::Remote("d_two").test_resource(
+    "/home/u/proj",
+  )
   let model = {
     ..console_test_model(),
-    console: Some(empty_console_state(Some("d_two"), Some("/home/u/proj"))),
+    console: Some(empty_console_state(Some("d_two"), Some(workspace))),
   }
   let (_, signed) = update(
     dispatch,
@@ -535,10 +540,40 @@ test "the deep link's device and workspace preselect the first focus" {
   guard listed.device_state(Remote("d_two")) is Some(dev) else {
     fail("preselected device not held")
   }
-  inspect(dev.active_workspace, content="/home/u/proj")
+  assert_eq(dev.active_workspace, Some(workspace))
   guard listed.console is Some(console) else { fail("console lost") }
   assert_true(console.preselect_device is None)
   assert_true(console.preselect_workspace is None)
+}
+
+///|
+test "a workspace deep link never moves to a fallback device" {
+  let dispatch = test_dispatch()
+  let workspace = @interop.ChannelId::Remote("offline").test_resource(
+    "/home/u/proj",
+  )
+  let model = {
+    ..console_test_model(),
+    console: Some(empty_console_state(Some("offline"), Some(workspace))),
+  }
+  let (_, signed) = update(
+    dispatch,
+    Console(MeLoaded(login="o", avatar="")),
+    model,
+  )
+  let metas : Array[DeviceMeta] = [
+    { id: "online", name: "Online", hostname: None, online: true },
+  ]
+  let (_, listed) = update(
+    dispatch,
+    Console(RosterLoaded(metas, generation=1)),
+    signed,
+  )
+  assert_true(listed.focused == Remote("online"))
+  guard listed.device_state(Remote("online")) is Some(dev) else {
+    fail("fallback device not held")
+  }
+  assert_true(dev.active_workspace is None)
 }
 
 ///|

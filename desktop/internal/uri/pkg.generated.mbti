@@ -6,12 +6,6 @@ pub fn decode(StringView) -> String
 
 pub fn encode_component(StringView) -> String
 
-pub fn encode_path(StringView) -> String
-
-pub fn file_uri(String) -> String
-
-pub fn file_uri_path(String) -> String
-
 // Errors
 
 // Types and methods
@@ -19,4 +13,3 @@ pub fn file_uri_path(String) -> String
 // Type aliases
 
 // Traits
-

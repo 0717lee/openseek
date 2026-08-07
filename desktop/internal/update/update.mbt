@@ -126,7 +126,7 @@ const BundleReplacementFailureMessage : String = "OpenSeek cannot replace the ap
 /// error rather than `false`, so every non-cancellation failure has the same
 /// concise, actionable user-facing answer.
 async fn bundle_replacement_failure(bundle_path : String) -> String? {
-  let parent = @path.Path(bundle_path).dirname().to_string()
+  let parent = @pathx.Path(bundle_path).dirname().to_string()
   let replaceable = (@fs.can_write(parent) && @fs.can_execute(parent)) catch {
     error if @async.is_being_cancelled() => raise error
     _ => false

@@ -36,7 +36,7 @@ priv struct ViewerHost {
   // diagnostics push that arrives for a different file (or after the panel
   // cleared its document) is dropped rather than drawn over the wrong
   // document. `None` when the viewer shows a notice or nothing.
-  mut absolute : @pathx.Absolute?
+  mut absolute : @common.Uri?
   // The same file as the conversation names it — the workspace-relative path
   // the panel read it by. A comment filed on the shown document takes this
   // as its chip path, so the chip never has to reverse-engineer a relative
@@ -213,10 +213,10 @@ pub fn request_viewer_remeasure() -> @cmd.Cmd {
 /// top — the Monaco save/restore-view-state contract around `set_model`.
 fn show_file_in_viewer(
   owner : @interop.ConversationKey,
-  workspace : @pathx.Absolute?,
+  workspace : @common.Uri?,
   name : String,
   content : String,
-  absolute? : @pathx.Absolute,
+  absolute? : @common.Uri,
   relative? : @pathx.Relative,
   range? : @common.Range? = None,
   annotation? : String,
@@ -232,8 +232,11 @@ fn show_file_in_viewer(
     // (withheld binary/oversized file) has no file behind it, so its inert
     // scheme never parses as a model path and hover stays off.
     let uri = match absolute {
-      Some(absolute) => model_uri_of(owner.channel, absolute)
-      None => app_uri("openseek-notice", "/" + name)
+      Some(absolute) => model_uri_of(absolute)
+      None =>
+        @common.Uri::from(scheme="openseek-notice", path="/" + name) catch {
+          _ => return
+        }
     }
     // Whether anything needs redrawing is decided here, against the document
     // the viewer really shows — the update loop only says "show this", it
@@ -394,14 +397,15 @@ fn forget_view_state(path : @pathx.Relative) -> @cmd.Cmd {
 /// squiggles on the document on screen.
 fn apply_diagnostics(
   channel : @interop.ChannelId,
-  absolute : @pathx.Absolute,
+  absolute : @common.Uri,
   diagnostics : Array[@protocol.LspDiagnostic],
 ) -> @cmd.Cmd {
   @cmd.custom_cmd(_scheduler => {
-    if viewer_state.absolute is Some(current) &&
+    if @resource.belongs_to(absolute, channel) &&
+      viewer_state.absolute is Some(current) &&
       current == absolute &&
       viewer_state.services is Some(services) {
-      let uri = model_uri_of(channel, absolute)
+      let uri = model_uri_of(absolute)
       services.markers.set_diagnostics(
         DiagnosticsOwner,
         uri,

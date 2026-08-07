@@ -22,7 +22,11 @@ fn fetch_workspaces(
       ) catch {
         _ => return
       }
-      let workspaces = reply.workspaces.filter(path => !path.is_empty())
+      let workspaces : Array[@common.Uri] = []
+      for path in reply.workspaces {
+        guard @resource.of_path(channel, path) is Some(resource) else { return }
+        workspaces.push(resource)
+      }
       scheduler.add(
         dispatch(
           WorkspacesLoaded(
@@ -86,16 +90,11 @@ fn browse_directory(
           return
         }
       }
-      if !reply.path.is_empty() {
+      if @resource.of_path(channel, reply.path) is Some(path) {
         let entries = reply.entries.filter(name => !name.is_empty())
         scheduler.add(
           dispatch(
-            WorkspacePickerLoaded(
-              channel~,
-              path=reply.path,
-              entries~,
-              generation~,
-            ),
+            WorkspacePickerLoaded(channel~, path~, entries~, generation~),
           ),
         )
       } else {
@@ -114,16 +113,14 @@ fn browse_directory(
 }
 
 ///|
-/// Join a picker entry onto its directory with the separator the host's
-/// paths already use, so navigation composes correctly against a Windows
-/// host too.
-fn joined_path(dir : String, name : String) -> String {
-  if dir.has_suffix("/") || dir.has_suffix("\\") {
-    dir + name
-  } else if dir.contains("\\") {
-    dir + "\\" + name
+/// The protocol path for one child of a directory the picker already loaded.
+/// Resource URI paths always use `/`, including Windows drive resources such
+/// as `/C:/code`.
+fn @common.Uri::picker_child_path(self : @common.Uri, name : String) -> String {
+  if self.path.has_suffix("/") {
+    self.path + name
   } else {
-    dir + "/" + name
+    self.path + "/" + name
   }
 }
 
@@ -169,57 +166,20 @@ async fn workspace_action_into(
   // ordering information and must not start a second, fallible list read.
 }
 
-///|
-/// A workspace's display label: the directory's basename. The host already
-/// labels session groups, but the registry itself is bare paths and a
-/// workspace with no sessions yet still needs a heading.
-fn workspace_label(path : String) -> String {
-  // Strip trailing separators, then take everything after the last one.
-  let mut end = path.length()
-  while end > 0 && is_path_separator(path.code_unit_at(end - 1)) {
-    end = end - 1
-  }
-  let mut start = end
-  while start > 0 && !is_path_separator(path.code_unit_at(start - 1)) {
-    start = start - 1
-  }
-  if end > start {
-    path.view(start_offset=start, end_offset=end).to_owned()
-  } else {
-    path
-  }
-}
-
-///|
-fn is_path_separator(unit : UInt16) -> Bool {
-  unit == 47 || unit == 92 // '/' or '\'
-}
-
-// Tests for the workspace flow's pure pieces: display labels and the
-// update handlers that place conversations into workspaces.
-
-///|
-test "workspace labels are the folder's basename" {
-  inspect(workspace_label("/home/u/proj"), content="proj")
-  inspect(workspace_label("/home/u/proj/"), content="proj")
-  inspect(workspace_label("C:\\code\\app"), content="app")
-  inspect(workspace_label("/"), content="/")
-  inspect(workspace_label("plain"), content="plain")
-}
+// Tests below cover the update handlers that place conversations into
+// workspaces. Display labels are derived from resource URIs in `@resource`.
 
 ///|
 test "a workspace new chat rotates into that workspace" {
   let dispatch = test_dispatch()
-  let model = test_model().with_dev(dev => {
-    ..dev,
-    workspaces: ["/home/u/proj"],
-  })
+  let workspace = @interop.ChannelId::Local.test_resource("/home/u/proj")
+  let model = test_model().with_dev(dev => { ..dev, workspaces: [workspace] })
   let (_, chosen) = update(
     dispatch,
-    NewChatIn(@interop.ChannelId::Local, "/home/u/proj"),
+    NewChatIn(@interop.ChannelId::Local, Some(workspace)),
     model,
   )
-  inspect(chosen.dev().active_workspace, content="/home/u/proj")
+  assert_eq(chosen.dev().active_workspace, Some(workspace))
   // The rotation lands like any other; the fresh conversation carries the
   // active workspace, and the next plain "New chat" stays there.
   let (_, rotated) = update(
@@ -227,9 +187,9 @@ test "a workspace new chat rotates into that workspace" {
     SessionRotated({ channel: @interop.ChannelId::Local, session: "desktop-ws" }),
     chosen,
   )
-  assert_true(rotated.active().workspace is Some(Absolute("/home/u/proj")))
+  assert_eq(rotated.active().workspace, Some(workspace))
   inspect(rotated.active_session, content="desktop-ws")
-  inspect(rotated.dev().active_workspace, content="/home/u/proj")
+  assert_eq(rotated.dev().active_workspace, Some(workspace))
 }
 
 ///|
@@ -246,47 +206,54 @@ test "a scratch rotation leaves the conversation in the default store" {
 ///|
 test "detaching the active workspace opens the newest remaining conversation" {
   let dispatch = test_dispatch()
+  let gone = @interop.ChannelId::Local.test_resource("/gone")
+  let kept_workspace = @interop.ChannelId::Local.test_resource("/kept")
   let model = test_model()
-    .replace_conversation({
-      ..test_conversation(),
-      workspace: Some(Absolute("/gone")),
-    })
+    .replace_conversation({ ..test_conversation(), workspace: Some(gone) })
     .with_dev(dev => {
       ..dev,
-      active_workspace: "/gone",
+      active_workspace: Some(gone),
       sessions: [
         {
           id: "desktop-kept",
           title: Some("kept"),
-          workspace: "/kept",
+          workspace: Some(kept_workspace),
           workspace_name: "kept",
         },
         {
           id: "desktop-test",
           title: Some("gone"),
-          workspace: "/gone",
+          workspace: Some(gone),
           workspace_name: "gone",
         },
       ],
     })
   let (_, next) = update_dev(
     dispatch,
-    WorkspacesLoaded(["/kept"], connection_generation=0, request_generation=0),
+    WorkspacesLoaded(
+      [kept_workspace],
+      connection_generation=0,
+      request_generation=0,
+    ),
     model,
   )
   inspect(next.dev().workspaces.length(), content="1")
   inspect(next.dev().sessions_request_generation, content="1")
   inspect(next.dev().sessions.length(), content="1")
   inspect(next.active_session, content="desktop-kept")
-  assert_true(next.active().workspace is Some(Absolute("/kept")))
+  assert_eq(next.active().workspace, Some(kept_workspace))
   assert_true(next.active().sync is Reloading(..))
   assert_true(next.find_conversation(Local, "desktop-test") is None)
-  inspect(next.dev().active_workspace, content="/kept")
+  assert_eq(next.dev().active_workspace, Some(kept_workspace))
   // The handler is pure: replaying the same message from the same model makes
   // the same selection and starts the same generation.
   let (_, replayed) = update_dev(
     dispatch,
-    WorkspacesLoaded(["/kept"], connection_generation=0, request_generation=0),
+    WorkspacesLoaded(
+      [kept_workspace],
+      connection_generation=0,
+      request_generation=0,
+    ),
     model,
   )
   inspect(replayed.active_session, content="desktop-kept")
@@ -295,36 +262,38 @@ test "detaching the active workspace opens the newest remaining conversation" {
   let attached = test_model()
     .replace_conversation({
       ..test_conversation(),
-      workspace: Some(Absolute("/kept")),
+      workspace: Some(kept_workspace),
     })
-    .with_dev(dev => { ..dev, active_workspace: "/kept" })
+    .with_dev(dev => { ..dev, active_workspace: Some(kept_workspace) })
   let (_, kept) = update_dev(
     dispatch,
-    WorkspacesLoaded(["/kept"], connection_generation=0, request_generation=0),
+    WorkspacesLoaded(
+      [kept_workspace],
+      connection_generation=0,
+      request_generation=0,
+    ),
     attached,
   )
   inspect(kept.dev().sessions_request_generation, content="1")
-  assert_true(kept.active().workspace is Some(Absolute("/kept")))
-  inspect(kept.dev().active_workspace, content="/kept")
+  assert_eq(kept.active().workspace, Some(kept_workspace))
+  assert_eq(kept.dev().active_workspace, Some(kept_workspace))
 }
 
 ///|
 test "detaching the last workspace rotates into a scratch conversation" {
   let dispatch = test_dispatch()
+  let gone = @interop.ChannelId::Local.test_resource("/gone")
   let model = test_model()
-    .replace_conversation({
-      ..test_conversation(),
-      workspace: Some(Absolute("/gone")),
-    })
+    .replace_conversation({ ..test_conversation(), workspace: Some(gone) })
     .with_dev(dev => {
       ..dev,
-      workspaces: ["/gone"],
-      active_workspace: "/gone",
+      workspaces: [gone],
+      active_workspace: Some(gone),
       sessions: [
         {
           id: "desktop-test",
           title: Some("gone"),
-          workspace: "/gone",
+          workspace: Some(gone),
           workspace_name: "gone",
         },
       ],
@@ -332,7 +301,7 @@ test "detaching the last workspace rotates into a scratch conversation" {
   let (_, detached) = update_dev(dispatch, WorkspacesChanged([]), model)
   inspect(detached.active_session, content="")
   inspect(detached.dev().sessions.length(), content="0")
-  inspect(detached.dev().active_workspace, content="")
+  assert_true(detached.dev().active_workspace is None)
   assert_true(detached.conversations.is_empty())
   let (_, stale) = update(
     dispatch,
@@ -340,7 +309,7 @@ test "detaching the last workspace rotates into a scratch conversation" {
       {
         id: "desktop-test",
         title: Some("gone"),
-        workspace: "/gone",
+        workspace: Some(gone),
         workspace_name: "gone",
       },
     ]),
@@ -362,55 +331,51 @@ test "detaching the last workspace rotates into a scratch conversation" {
 ///|
 test "an older workspace reply cannot replace a newer same-connection reply" {
   let dispatch = test_dispatch()
+  let current = @interop.ChannelId::Local.test_resource("/current")
+  let old = @interop.ChannelId::Local.test_resource("/old")
   let model = test_model().with_dev(dev => {
     ..dev,
     workspaces_request_generation: 2,
   })
   let (_, newest) = update_dev(
     dispatch,
-    WorkspacesLoaded(
-      ["/current"],
-      connection_generation=0,
-      request_generation=2,
-    ),
+    WorkspacesLoaded([current], connection_generation=0, request_generation=2),
     model,
   )
   inspect(newest.dev().workspaces.length(), content="1")
-  inspect(newest.dev().workspaces[0], content="/current")
+  assert_eq(newest.dev().workspaces[0], current)
   inspect(newest.dev().sessions_request_generation, content="1")
   let (_, stale) = update_dev(
     dispatch,
-    WorkspacesLoaded(["/old"], connection_generation=0, request_generation=1),
+    WorkspacesLoaded([old], connection_generation=0, request_generation=1),
     newest,
   )
   inspect(stale.dev().workspaces.length(), content="1")
-  inspect(stale.dev().workspaces[0], content="/current")
+  assert_eq(stale.dev().workspaces[0], current)
   inspect(stale.dev().sessions_request_generation, content="1")
 }
 
 ///|
 test "a workspace commit broadcast supersedes list replies and refreshes sessions" {
   let dispatch = test_dispatch()
+  let current = @interop.ChannelId::Local.test_resource("/current")
+  let new_ = @interop.ChannelId::Local.test_resource("/new")
   let model = test_model().with_dev(dev => {
     ..dev,
-    workspaces: ["/current"],
+    workspaces: [current],
     workspaces_request_generation: 2,
   })
-  let (_, changed) = update_dev(dispatch, WorkspacesChanged(["/new"]), model)
+  let (_, changed) = update_dev(dispatch, WorkspacesChanged([new_]), model)
   inspect(changed.dev().workspaces_request_generation, content="3")
   inspect(changed.dev().workspaces.length(), content="1")
-  inspect(changed.dev().workspaces[0], content="/new")
+  assert_eq(changed.dev().workspaces[0], new_)
   inspect(changed.dev().sessions_request_generation, content="1")
   let (_, stale) = update_dev(
     dispatch,
-    WorkspacesLoaded(
-      ["/current"],
-      connection_generation=0,
-      request_generation=2,
-    ),
+    WorkspacesLoaded([current], connection_generation=0, request_generation=2),
     changed,
   )
-  inspect(stale.dev().workspaces[0], content="/new")
+  assert_eq(stale.dev().workspaces[0], new_)
 }
 
 ///|
@@ -423,7 +388,7 @@ test "workspace commit decoder carries the canonical registry list" {
     fail("expected a workspace change")
   }
   inspect(paths.length(), content="2")
-  inspect(paths[1], content="/two")
+  assert_eq(paths[1].path, "/two")
 }
 
 ///|
@@ -436,13 +401,14 @@ test "proton subscribes to canonical durable and workspace notifications" {
 ///|
 test "opening a stored session adopts its workspace" {
   let dispatch = test_dispatch()
+  let workspace = @interop.ChannelId::Local.test_resource("/proj")
   let model = test_model().with_dev(dev => {
     ..dev,
     sessions: [
       {
         id: "desktop-w",
         title: Some("in project"),
-        workspace: "/proj",
+        workspace: Some(workspace),
         workspace_name: "proj",
       },
     ],
@@ -452,7 +418,7 @@ test "opening a stored session adopts its workspace" {
     OpenSession(@interop.ChannelId::Local, "desktop-w"),
     model,
   )
-  inspect(opening.dev().active_workspace, content="/proj")
+  assert_eq(opening.dev().active_workspace, Some(workspace))
   assert_true(
     opening.loading_conversation
     is Some({ channel: Local, session: "desktop-w" }),
@@ -468,7 +434,7 @@ test "opening a stored session adopts its workspace" {
     ),
     opening,
   )
-  assert_true(loaded.active().workspace is Some(Absolute("/proj")))
+  assert_eq(loaded.active().workspace, Some(workspace))
 }
 
 ///|
@@ -487,7 +453,7 @@ test "the picker opens loading and adopts the first listing" {
     dispatch,
     WorkspacePickerLoaded(
       channel=Local,
-      path="/home/u",
+      path=@interop.ChannelId::Local.test_resource("/home/u"),
       entries=["proj"],
       generation=1,
     ),
@@ -496,7 +462,7 @@ test "the picker opens loading and adopts the first listing" {
   guard loaded.workspace_picker is Some(picker) else {
     fail("picker closed by its own listing")
   }
-  inspect(picker.path, content="/home/u")
+  assert_true(picker.path is Some(path) && path.path == "/home/u")
   inspect(picker.input, content="")
   inspect(picker.entries.length(), content="1")
   assert_true(!picker.loading)
@@ -509,7 +475,7 @@ test "a listing for a closed picker is dropped" {
     dispatch,
     WorkspacePickerLoaded(
       channel=Local,
-      path="/home/u",
+      path=@interop.ChannelId::Local.test_resource("/home/u"),
       entries=[],
       generation=1,
     ),
@@ -540,7 +506,7 @@ test "a listing from the previous device cannot replace a reopened picker" {
     dispatch,
     WorkspacePickerLoaded(
       channel=first,
-      path="/from-a",
+      path=first.test_resource("/from-a"),
       entries=["wrong"],
       generation=1,
     ),
@@ -551,12 +517,12 @@ test "a listing from the previous device cannot replace a reopened picker" {
   }
   assert_true(picker.channel == second)
   assert_true(picker.loading)
-  inspect(picker.path, content="")
+  assert_true(picker.path is None)
   let (_, current) = update(
     dispatch,
     WorkspacePickerLoaded(
       channel=second,
-      path="/from-b",
+      path=second.test_resource("/from-b"),
       entries=[],
       generation=1,
     ),
@@ -566,7 +532,7 @@ test "a listing from the previous device cannot replace a reopened picker" {
     fail("current picker closed by its own listing")
   }
   assert_true(picker.channel == second)
-  inspect(picker.path, content="/from-b")
+  assert_true(picker.path is Some(path) && path.path == "/from-b")
 }
 
 ///|
@@ -581,7 +547,7 @@ test "a failed navigation keeps the listing and shows the error" {
     dispatch,
     WorkspacePickerLoaded(
       channel=Local,
-      path="/home/u",
+      path=@interop.ChannelId::Local.test_resource("/home/u"),
       entries=["proj"],
       generation=1,
     ),
@@ -599,7 +565,7 @@ test "a failed navigation keeps the listing and shows the error" {
   guard failed.workspace_picker is Some(picker) else {
     fail("picker closed by a failed navigation")
   }
-  inspect(picker.path, content="/home/u")
+  assert_true(picker.path is Some(path) && path.path == "/home/u")
   inspect(picker.entries.length(), content="1")
   assert_true(picker.error is Some("no such directory"))
 }
@@ -616,7 +582,7 @@ test "confirming registers the browsed directory and closes the picker" {
     dispatch,
     WorkspacePickerLoaded(
       channel=Local,
-      path="/home/u/proj",
+      path=@interop.ChannelId::Local.test_resource("/home/u/proj"),
       entries=[],
       generation=1,
     ),
@@ -632,10 +598,17 @@ test "confirming registers the browsed directory and closes the picker" {
 }
 
 ///|
-test "picker paths join with the host's own separator" {
-  inspect(joined_path("/home/u", "proj"), content="/home/u/proj")
-  inspect(joined_path("/", "etc"), content="/etc")
-  inspect(joined_path("C:\\code", "app"), content="C:\\code\\app")
+test "picker paths join with URI separators" {
+  let channel = @interop.ChannelId::Local
+  inspect(
+    channel.test_resource("/home/u").picker_child_path("proj"),
+    content="/home/u/proj",
+  )
+  inspect(channel.test_resource("/").picker_child_path("etc"), content="/etc")
+  inspect(
+    channel.test_resource("/C:/code").picker_child_path("app"),
+    content="/c:/code/app",
+  )
 }
 
 ///|
@@ -665,7 +638,7 @@ test "typing in the picker's path field only changes the field" {
     dispatch,
     WorkspacePickerLoaded(
       channel=Local,
-      path="/home/u",
+      path=@interop.ChannelId::Local.test_resource("/home/u"),
       entries=[],
       generation=1,
     ),
@@ -676,7 +649,7 @@ test "typing in the picker's path field only changes the field" {
     fail("picker closed by typing")
   }
   inspect(picker.input, content="~/proj")
-  inspect(picker.path, content="/home/u")
+  assert_true(picker.path is Some(path) && path.path == "/home/u")
 }
 
 ///|
@@ -698,7 +671,7 @@ test "a listing for a superseded navigation is dropped" {
     dispatch,
     WorkspacePickerLoaded(
       channel=Local,
-      path="/home/u",
+      path=@interop.ChannelId::Local.test_resource("/home/u"),
       entries=["proj"],
       generation=1,
     ),
@@ -708,12 +681,12 @@ test "a listing for a superseded navigation is dropped" {
     fail("picker closed by a stale listing")
   }
   assert_true(picker.loading)
-  inspect(picker.path, content="")
+  assert_true(picker.path is None)
   let (_, current) = update(
     dispatch,
     WorkspacePickerLoaded(
       channel=Local,
-      path="/home/u/proj",
+      path=@interop.ChannelId::Local.test_resource("/home/u/proj"),
       entries=[],
       generation=2,
     ),
@@ -722,6 +695,6 @@ test "a listing for a superseded navigation is dropped" {
   guard current.workspace_picker is Some(picker) else {
     fail("picker closed by the current listing")
   }
-  inspect(picker.path, content="/home/u/proj")
+  assert_true(picker.path is Some(path) && path.path == "/home/u/proj")
   assert_true(!picker.loading)
 }

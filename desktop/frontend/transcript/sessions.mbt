@@ -9,15 +9,26 @@
 /// rows have already been dropped at the process adapter.
 pub fn sessions_from_reply(
   reply : @desktop_protocol.SessionsReply,
+  channel : @interop.ChannelId,
 ) -> Array[SessionListItem] {
   let items : Array[SessionListItem] = []
   for group in reply.groups {
+    let workspace = if group.workspace.is_empty() {
+      None
+    } else {
+      // A malformed resource path invalidates this host grouping rather than
+      // turning it into the scratch store or another device's workspace.
+      guard @resource.of_path(channel, group.workspace) is Some(workspace) else {
+        continue
+      }
+      Some(workspace)
+    }
     for entry in group.sessions {
       guard !entry.id.is_empty() else { continue }
       items.push({
         id: entry.id,
         title: entry.title,
-        workspace: group.workspace,
+        workspace,
         workspace_name: group.name,
       })
     }
@@ -223,36 +234,41 @@ fn ends_with_assistant(items : Array[TranscriptItem], content : String) -> Bool 
 
 ///|
 test "session list projection preserves grouping and skips empty ids" {
-  let items = sessions_from_reply({
-    groups: [
-      {
-        workspace: "",
-        name: "",
-        session_root: "/home/user/.openseek",
-        error: "",
-        sessions: [
-          { id: "desktop-b", title: Some("newest") },
-          { id: "", title: Some("no id") },
-        ],
-      },
-      {
-        workspace: "/home/user/proj",
-        name: "proj",
-        session_root: "/home/user/proj/.openseek",
-        error: "",
-        sessions: [{ id: "tui-a", title: Some("") }],
-      },
-    ],
-  })
+  let items = sessions_from_reply(
+    {
+      groups: [
+        {
+          workspace: "",
+          name: "",
+          session_root: "/home/user/.openseek",
+          error: "",
+          sessions: [
+            { id: "desktop-b", title: Some("newest") },
+            { id: "", title: Some("no id") },
+          ],
+        },
+        {
+          workspace: "/home/user/proj",
+          name: "proj",
+          session_root: "/home/user/proj/.openseek",
+          error: "",
+          sessions: [{ id: "tui-a", title: Some("") }],
+        },
+      ],
+    },
+    @interop.ChannelId::Local,
+  )
   inspect(items.length(), content="2")
   inspect(items[0].id, content="desktop-b")
   assert_true(items[0].title is Some("newest"))
-  inspect(items[0].workspace, content="")
+  assert_true(items[0].workspace is None)
   inspect(items[1].id, content="tui-a")
   // The engine always writes `title`; "" is its value for a session with no
   // user message yet.
   assert_true(items[1].title is Some(""))
-  inspect(items[1].workspace, content="/home/user/proj")
+  assert_true(
+    items[1].workspace is Some(workspace) && workspace.path == "/home/user/proj",
+  )
   inspect(items[1].workspace_name, content="proj")
 }
 

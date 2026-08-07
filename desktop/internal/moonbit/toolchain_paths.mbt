@@ -5,8 +5,11 @@ const MoonbitBundleStampFile : String = ".openseek-moonbit-bundle-version"
 const MoonbitSeedVersionFile : String = ".openseek-moonbit-seed-version"
 
 ///|
-fn moonbit_toolchain_dir(base : @path.Path, name : String) -> @path.Path {
-  base.join("toolchains").join("moonbit").join(name).normalize().to_string()
+fn moonbit_toolchain_dir(
+  base : @pathx.Absolute,
+  name : String,
+) -> @pathx.Absolute {
+  base.join("toolchains").join("moonbit").join(name).normalize()
 }
 
 ///|
@@ -17,9 +20,9 @@ fn moonbit_toolchain_dir(base : @path.Path, name : String) -> @path.Path {
 /// the Windows bundle drop the engine straight into the directory that holds
 /// `toolchains/`, which `moonbit_toolchain_dir` already covers.
 fn bin_sibling_toolchain_dir(
-  command_dir : @path.Path,
+  command_dir : @pathx.Absolute,
   name : String,
-) -> @path.Path {
+) -> @pathx.Absolute {
   moonbit_toolchain_dir(command_dir.join("..").normalize(), name)
 }
 
@@ -30,8 +33,8 @@ fn bin_sibling_toolchain_dir(
 /// presence therefore already asserts a complete seed; re-probing individual
 /// files here would re-litigate what packaging proved, and the sealed app
 /// bundle guards integrity from there.
-async fn bundled_moonbit_seed_dir(engine_command : String) -> @path.Path? {
-  let command_dir = @path.Path(engine_command).dirname().resolve()
+async fn bundled_moonbit_seed_dir(engine_command : String) -> @pathx.Absolute? {
+  let command_dir = @pathx.Path(engine_command).dirname().resolve()
   let candidates = [
     moonbit_toolchain_dir(command_dir, "windows-x64"),
     moonbit_toolchain_dir(command_dir, "linux-x64"),
@@ -70,9 +73,9 @@ async fn bundled_moonbit_seed_dir(engine_command : String) -> @path.Path? {
 
 ///|
 async fn prepared_moonbit_payload_dir(
-  seed_dir~ : @path.Path,
-  runtime_dir? : @path.Path,
-) -> @path.Path? {
+  seed_dir~ : @pathx.Absolute,
+  runtime_dir? : @pathx.Path,
+) -> @pathx.Path? {
   guard runtime_dir is Some(runtime_dir) else {
     @xlog.debug() <?
       {
@@ -81,7 +84,7 @@ async fn prepared_moonbit_payload_dir(
       }
     return None
   }
-  let seed_name = seed_dir.basename().to_owned()
+  let seed_name = seed_dir.to_path().basename().to_owned()
   if seed_name.is_empty() {
     @xlog.debug() <?
       {
@@ -105,7 +108,7 @@ async fn prepared_moonbit_payload_dir(
 }
 
 ///|
-fn moonbit_bin_dir(moon_home : @path.Path) -> @path.Path {
+fn moonbit_bin_dir(moon_home : @pathx.Path) -> @pathx.Path {
   moon_home.join("bin")
 }
 
@@ -118,39 +121,39 @@ const ExecutableSuffix : String = ".exe"
 const ExecutableSuffix : String = ""
 
 ///|
-fn moonbit_command(moon_home : @path.Path) -> @path.Path {
+fn moonbit_command(moon_home : @pathx.Path) -> @pathx.Path {
   moon_home.join("bin/moon\{ExecutableSuffix}")
 }
 
 ///|
-fn moonbit_compiler_command(moon_home : @path.Path) -> @path.Path {
+fn moonbit_compiler_command(moon_home : @pathx.Path) -> @pathx.Path {
   moon_home.join("bin/moonc\{ExecutableSuffix}")
 }
 
 ///|
-fn moonbit_bundle_stamp_path(moon_home : @path.Path) -> @path.Path {
+fn moonbit_bundle_stamp_path(moon_home : @pathx.Path) -> @pathx.Path {
   moon_home.join(MoonbitBundleStampFile)
 }
 
 ///|
-fn moonbit_seed_version_path(seed_dir : @path.Path) -> @path.Path {
+fn moonbit_seed_version_path(seed_dir : @pathx.Absolute) -> @pathx.Absolute {
   seed_dir.join(MoonbitSeedVersionFile)
 }
 
 ///|
-fn moonbit_native_bundle_probe_path(moon_home : @path.Path) -> @path.Path {
+fn moonbit_native_bundle_probe_path(moon_home : @pathx.Path) -> @pathx.Path {
   moon_home.join("lib/core/_build/native/release/bundle/prelude/prelude.mi")
 }
 
 ///|
-fn moonbit_wasm_gc_bundle_probe_path(moon_home : @path.Path) -> @path.Path {
+fn moonbit_wasm_gc_bundle_probe_path(moon_home : @pathx.Path) -> @pathx.Path {
   moon_home.join("lib/core/_build/wasm-gc/release/bundle/prelude/prelude.mi")
 }
 
 ///|
 /// Lay a fake completed seed under `root`, including the version stamp that
 /// packaging writes only after it has verified the extracted toolchain.
-async fn write_fake_seed(root : @path.Path) -> Unit {
+async fn write_fake_seed(root : @pathx.Absolute) -> Unit {
   @fs.mkdir(root.join("bin").to_string(), recursive=true)
   @fs.mkdir(root.join("lib/core").to_string(), recursive=true)
   @fs.write_file(
@@ -182,7 +185,7 @@ async fn write_fake_seed(root : @path.Path) -> Unit {
 /// directory holding `toolchains/`. Both shapes must resolve, or the engine
 /// never spawns — `resolve_toolchain` raises before it.
 async test "the seed is found beside the engine and one level above it" {
-  let tmp = @path.Path(@fs.tmpdir(prefix="openseek-moonbit-seed-layout-"))
+  let tmp = @pathx.Path(@fs.tmpdir(prefix="openseek-moonbit-seed-layout-")).resolve()
   // macOS: `<input>/bin/openseek` with `<input>/toolchains/…`.
   let bundle = tmp.join("proton-package-input")
   let bundle_seed = bundle.join("toolchains/moonbit/macos-arm64")

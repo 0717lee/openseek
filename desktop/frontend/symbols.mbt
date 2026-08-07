@@ -24,9 +24,14 @@ fn read_workspace_symbols(
   dispatch : @cmd.Emit[Msg],
   owner : @interop.ConversationKey,
   query : String,
-  workspace~ : @pathx.Absolute?,
+  workspace~ : @common.Uri?,
   generation? : Int,
 ) -> @cmd.Cmd {
+  match workspace {
+    Some(resource) if !@resource.belongs_to(resource, owner.channel) =>
+      return @cmd.none
+    _ => ()
+  }
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
       let reply = @interop.bridge_request(
@@ -35,7 +40,7 @@ fn read_workspace_symbols(
         {
           session: owner.session,
           query,
-          workspace: workspace.map(value => value.0),
+          workspace: workspace.map(value => value.path),
         },
       ) catch {
         _ => {
