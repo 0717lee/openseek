@@ -114,7 +114,12 @@ async fn real_contains(
 /// owns it. `None` for a relative path or anything outside, which ops routed
 /// by path alone must refuse.
 pub async fn attached_workspace_dir(path : @pathx.Absolute) -> @pathx.Path? {
-  let resolved_absolute = path.normalize()
+  // LSP/navigation paths may contain `.` or `..`. Clean them with the host's
+  // filesystem rules before selecting the deepest workspace or worktree, so
+  // equivalent spellings are classified by their actual lexical location.
+  guard path.to_path().clean().to_absolute() is Some(resolved_absolute) else {
+    return None
+  }
   let resolved = resolved_absolute.0
   let mut best : @pathx.Absolute? = None
   for workspace in registered_workspaces() {

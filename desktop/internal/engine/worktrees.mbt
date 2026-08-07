@@ -952,10 +952,18 @@ async test "attached workspace dir resolves registered worktree paths" {
   ])
   @fsx.ensure_dir(ws.join(".worktrees/wt/src"))
   @fsx.ensure_dir(ws.join(".worktrees/stray"))
+  @fsx.ensure_dir(ws.join("src"))
+  @fs.write_file(
+    ws.join("src/main.mbt").to_string(),
+    b"main",
+    create_mode=CreateOrTruncate,
+  )
   guard ws.join(".worktrees/wt/src/main.mbt").to_absolute()
     is Some(worktree_file) &&
     ws.join(".worktrees/stray/x.mbt").to_absolute() is Some(stray_file) &&
-    ws.join("src/lib.mbt").to_absolute() is Some(workspace_file) else {
+    ws.join("src/lib.mbt").to_absolute() is Some(workspace_file) &&
+    @pathx.Path("\{ws}/.worktrees/wt/../../src/main.mbt").to_absolute()
+    is Some(dot_segment_file) else {
     fail("expected absolute worktree fixtures")
   }
   // A registered worktree path answers from the worktree root.
@@ -971,6 +979,13 @@ async test "attached workspace dir resolves registered worktree paths" {
   )
   assert_eq(
     attached_workspace_dir(workspace_file).map(dir => dir.to_string()),
+    Some(ws.to_string()),
+  )
+  // Dot segments are cleaned before choosing the deepest owning tree. Although
+  // its spelling enters a registered worktree, this file physically belongs to
+  // the main workspace after `../..` is resolved.
+  assert_eq(
+    attached_workspace_dir(dot_segment_file).map(dir => dir.to_string()),
     Some(ws.to_string()),
   )
   @fs.rmdir(root.to_string(), recursive=true)
