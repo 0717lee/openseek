@@ -593,36 +593,13 @@ pub async fn build_native_host(
   release~ : Bool,
   extra_args? : Array[String] = [],
   extra_env? : Map[String, String] = Map([]),
-  disable_mimalloc? : Bool = false,
 ) -> Unit {
-  // Resolve the read-only runtime prerequisite before stamping the token or
-  // replacing the global MoonBit runtime object. A missing/malformed manifest
-  // or a cancelled read then leaves no build state to restore.
+  // Resolve the read-only runtime prerequisite before stamping the token. A
+  // missing or malformed manifest then leaves no build state to restore.
   let runtime_dist = proton_runtime_dist(ws)
-  // Stamp before any global state is swapped: a malformed token (or a
-  // drifted stamp needle) raises here, while there is nothing to restore
-  // yet. Every later raise restores whatever has been swapped so far — the
-  // token alone if the mimalloc swap itself fails, both after it succeeds —
-  // so no exit can leave the user's global `libmoonbitrun.o` replaced.
+  // A malformed token or a drifted stamp needle raises before the source is
+  // changed. Every later failure restores the original source.
   let original = stamp_client_token(ws)
-  // The host embeds CEF, whose allocator shim takes over the macOS default
-  // malloc zone with PartitionAlloc. That collides with the MoonBit runtime's
-  // statically linked mimalloc: `@fs.realpath`'s libc-allocated result gets
-  // freed by mimalloc, which reads a PA guard page and crashes on startup
-  // (see the async realpath cross-allocator bug). Building the host without
-  // mimalloc sidesteps it — malloc/free fall back to libc's zone-aware
-  // allocator, which frees each pointer through its owning zone. Temporary,
-  // until the async fix lands.
-  let mimalloc = if disable_mimalloc {
-    install_empty_mimalloc(ws) catch {
-      error => {
-        restore_client_token(ws, original)
-        raise error
-      }
-    }
-  } else {
-    None
-  }
   // The assembled runtime lives under the checked-out Proton project, not
   // necessarily above Moon's process cwd. Pass it explicitly so the prebuild
   // linker config cannot fall back to a stale checked-in runtime.
@@ -640,97 +617,10 @@ pub async fn build_native_host(
   ) catch {
     error => {
       restore_client_token(ws, original)
-      restore_mimalloc(mimalloc)
       raise error
     }
   }
   restore_client_token(ws, original)
-  restore_mimalloc(mimalloc)
-}
-
-///|
-/// A swapped-out `libmoonbitrun.o`, so `restore_mimalloc` can put the real one
-/// back after the build.
-priv struct MimallocSwap {
-  // The runtime object the build links: overwritten with an empty object.
-  object : String
-  // A copy of the original, restored verbatim afterward.
-  backup : String
-  // The scratch directory holding the backup and the empty source, removed on
-  // restore.
-  scratch : String
-}
-
-///|
-/// Overwrite the MoonBit home's `lib/libmoonbitrun.o` — the object that
-/// statically overrides malloc/free with mimalloc and registers mimalloc's
-/// macOS zone — with an empty object, so the next `moon build` links the
-/// host without mimalloc. The MoonBit runtime proper lives in a separate
-/// `runtime.o`, so only the allocator override is dropped; malloc/free
-/// resolve to libc. This mutates a file under the MoonBit home for the
-/// duration of one build; `restore_mimalloc` puts the original back. A home
-/// or object that cannot be found is a hard error: a host built with
-/// mimalloc crashes deterministically under CEF's allocator, so failing the
-/// package run beats shipping it.
-async fn install_empty_mimalloc(ws : Workspace) -> MimallocSwap? {
-  // moon's own resolution: `MOON_HOME` when exported, else `~/.moon`. A
-  // normal install never exports `MOON_HOME` (only `~/.moon/bin` lands on
-  // PATH), so the default is what makes the swap happen on a typical
-  // packaging machine.
-  let moon_home = match @env.get("MOON_HOME") {
-    Some(home) => home
-    None =>
-      match @env.get("HOME") {
-        Some(home) => join_path(home, ".moon")
-        None =>
-          raise PackageError(
-            "cannot locate the MoonBit home (MOON_HOME and HOME are both unset); the host must be built without mimalloc",
-          )
-      }
-  }
-  let object = join_path(moon_home, "lib/libmoonbitrun.o")
-  if !@asyncfs.exists(object) {
-    raise PackageError(
-      "\{object} not found; cannot disable mimalloc for the host build (a mimalloc host crashes under CEF's allocator)",
-    )
-  }
-  let scratch = @asyncfs.tmpdir(prefix="openseek-disable-mimalloc-")
-  let backup = join_path(scratch, "libmoonbitrun.o")
-  // `cp -p` (this path only runs on macOS) carries the object's mtime into
-  // the backup so restoration can put it back byte- and time-identical. A
-  // fresh mtime on this file invalidates the link step of every native
-  // executable moon builds on the machine — one packaging run would tax the
-  // next `proton_cli` install (and every other moon link) with a pointless
-  // relink.
-  run_checked("cp", ["-p", object, backup], dir=ws.dir())
-  let empty_source = join_path(scratch, "empty.c")
-  write_text(empty_source, "int openseek_mimalloc_disabled;\n")
-  run_checked("cc", ["-c", empty_source, "-o", object], dir=ws.dir())
-  println("Disabled mimalloc for the host build: \{object}")
-  Some({ object, backup, scratch })
-}
-
-///|
-/// Restore the real `libmoonbitrun.o` swapped out by `install_empty_mimalloc`
-/// and remove its scratch directory (`build_native_host` calls it on every
-/// exit path). A no-op when nothing was swapped.
-/// Restoration failures are reported rather than raised — leaving a stale
-/// empty object would quietly disable mimalloc in every later native build,
-/// which matters more to surface than the current command's exit path.
-async fn restore_mimalloc(swap : MimallocSwap?) -> Unit {
-  guard swap is Some(swap) else { return }
-  // `-p` restores the original mtime along with the bytes, so the swap
-  // leaves no trace in the runtime object's metadata and later moon links
-  // stay cached.
-  run_checked("cp", ["-p", swap.backup, swap.object], dir=swap.scratch) catch {
-    error =>
-      println(
-        "warning: failed to restore \{swap.object} (\{error}); rerun to fix mimalloc",
-      )
-  }
-  remove_path_if_exists(swap.scratch) catch {
-    _ => ()
-  }
 }
 
 ///|
