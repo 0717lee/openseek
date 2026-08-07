@@ -133,6 +133,16 @@ let terminal_exit_event : @proton_contract.Event[@protocol.TerminalExitPayload] 
 )
 
 ///|
+/// The one window-local event: native browser view events (navigation,
+/// title, load state), pumped in by `App::on_view_event` through
+/// `DesktopBridgeActor::notify_browser_event`. It deliberately has no
+/// `NotificationKind` — the shared wire catalog must never carry it to a
+/// relay client, which has no native views.
+let browser_event : @proton_contract.Event[Json] = @commands.extension_contract.event(
+  "browser.event",
+)
+
+///|
 /// The page connection and Proton's window lifecycle hook start independently.
 /// Bound the short startup backlog rather than letting either side grow an
 /// unbounded in-memory queue while it waits for the other.
@@ -146,6 +156,15 @@ priv enum BridgeControl {
 }
 
 ///|
+/// What the actor delivers to the attached page: a hub notification from
+/// the shared catalog, or this window's own browser view event — which has
+/// a Proton descriptor but deliberately no place in the wire catalog.
+priv enum PageNotification {
+  Hub(@protocol.Notification)
+  BrowserEvent(Json)
+}
+
+///|
 priv struct PageEventTarget {
   events : @proton.WindowEventEmitter
 }
@@ -153,38 +172,42 @@ priv struct PageEventTarget {
 ///|
 async fn PageEventTarget::emit(
   self : PageEventTarget,
-  notification : @protocol.Notification,
+  notification : PageNotification,
 ) -> Unit {
   // Matching the closed enum keeps each Proton descriptor paired with the
   // payload type that belongs to that event.
   match notification {
-    AgentConnected(payload) => self.events.emit(connected_event, payload)
-    AgentStarted(payload) => self.events.emit(started_event, payload)
-    AgentEvent(payload) => self.events.emit(agent_event, payload)
-    AgentError(payload) => self.events.emit(agent_error_event, payload)
-    AgentFinished(payload) => self.events.emit(finished_event, payload)
-    AgentDurable(payload) => self.events.emit(durable_event, payload)
-    SessionEvent(payload) => self.events.emit(session_event, payload)
-    SessionChanged(payload) => self.events.emit(session_changed_event, payload)
-    WorkspaceChanged(payload) =>
+    Hub(AgentConnected(payload)) => self.events.emit(connected_event, payload)
+    Hub(AgentStarted(payload)) => self.events.emit(started_event, payload)
+    Hub(AgentEvent(payload)) => self.events.emit(agent_event, payload)
+    Hub(AgentError(payload)) => self.events.emit(agent_error_event, payload)
+    Hub(AgentFinished(payload)) => self.events.emit(finished_event, payload)
+    Hub(AgentDurable(payload)) => self.events.emit(durable_event, payload)
+    Hub(SessionEvent(payload)) => self.events.emit(session_event, payload)
+    Hub(SessionChanged(payload)) =>
+      self.events.emit(session_changed_event, payload)
+    Hub(WorkspaceChanged(payload)) =>
       self.events.emit(workspace_changed_event, payload)
-    WorktreeChanged(payload) =>
+    Hub(WorktreeChanged(payload)) =>
       self.events.emit(worktree_changed_event, payload)
-    SettingsChanged(payload) =>
+    Hub(SettingsChanged(payload)) =>
       self.events.emit(settings_changed_event, payload)
-    SkillsChanged => self.events.emit(skills_changed_event, NoPayload)
-    UpdateDownloadProgress(payload) =>
+    Hub(SkillsChanged) => self.events.emit(skills_changed_event, NoPayload)
+    Hub(UpdateDownloadProgress(payload)) =>
       self.events.emit(update_progress_event, payload)
-    UpdateDownloaded(payload) =>
+    Hub(UpdateDownloaded(payload)) =>
       self.events.emit(update_downloaded_event, payload)
-    UpdateDownloadFailed(payload) =>
+    Hub(UpdateDownloadFailed(payload)) =>
       self.events.emit(update_failed_event, payload)
-    AuthChanged(payload) => self.events.emit(auth_changed_event, payload)
-    LspDiagnostics(payload) => self.events.emit(diagnostics_event, payload)
-    FsChanged(payload) => self.events.emit(fs_changed_event, payload)
-    FsWatchFailed(payload) => self.events.emit(fs_watch_failed_event, payload)
-    TerminalOutput(payload) => self.events.emit(terminal_output_event, payload)
-    TerminalExit(payload) => self.events.emit(terminal_exit_event, payload)
+    Hub(AuthChanged(payload)) => self.events.emit(auth_changed_event, payload)
+    Hub(LspDiagnostics(payload)) => self.events.emit(diagnostics_event, payload)
+    Hub(FsChanged(payload)) => self.events.emit(fs_changed_event, payload)
+    Hub(FsWatchFailed(payload)) =>
+      self.events.emit(fs_watch_failed_event, payload)
+    Hub(TerminalOutput(payload)) =>
+      self.events.emit(terminal_output_event, payload)
+    Hub(TerminalExit(payload)) => self.events.emit(terminal_exit_event, payload)
+    BrowserEvent(payload) => self.events.emit(browser_event, payload)
   }
 }
 
@@ -194,7 +217,7 @@ async fn PageEventTarget::emit(
 /// retains request-scoped state after the command returns.
 priv enum BridgeInput {
   Control(BridgeControl)
-  Deliver(@protocol.Notification)
+  Deliver(PageNotification)
 }
 
 ///|
@@ -207,6 +230,10 @@ struct DesktopBridgeActor {
   // remote WebSocket connection.
   host_connection : @host.HostConnection
   controls : @async.Queue[BridgeControl]
+  // Window-local browser view events that must reach this page without
+  // touching the process-wide hub — a relay client has no native views, so
+  // it must never see them.
+  browser_events : @async.Queue[Json]
 }
 
 ///|
@@ -218,17 +245,34 @@ pub fn DesktopBridgeActor::new(state : @api.ApiState) -> DesktopBridgeActor {
     // reload to overlap the old page without allowing abandoned requests to
     // accumulate forever.
     controls: Queue(kind=Blocking(8)),
+    browser_events: Queue(kind=Blocking(64)),
   }
+}
+
+///|
+/// Queue a window-local browser view event for the attached page. The
+/// delivery rules (declared descriptor, connect-then-window-ready ordering,
+/// the bounded startup backlog) are the actor loop's, same as hub
+/// notifications.
+pub async fn DesktopBridgeActor::notify_browser_event(
+  self : DesktopBridgeActor,
+  params : Json,
+) -> Unit {
+  self.browser_events.put(params)
 }
 
 ///|
 pub fn openseek_extension(
   state : @api.ApiState,
   bridge : DesktopBridgeActor,
+  views : BrowserViews,
 ) -> @proton_extension.Extension {
   let endpoints = @api.endpoints(state, bridge.host_connection)
   endpoints.push(
     @endpoint.Endpoint::window(@commands.host_connect, async fn(context, _) {
+      // A reloaded page allocates browser ids from scratch; the previous
+      // page's native views must not survive its attachment.
+      views.close_all()
       bridge.connect(context)
     }),
   )
@@ -240,6 +284,9 @@ pub fn openseek_extension(
       open_external(payload)
     }),
   )
+  for endpoint in browser_endpoints(views) {
+    endpoints.push(endpoint)
+  }
   @proton_extension.typed(
     @commands.extension_contract,
     endpoints.map(endpoint => endpoint.route()),
@@ -296,8 +343,9 @@ async fn DesktopBridgeActor::next_input(
   }
   @async.any([
     () => Control(self.controls.get()),
-    () => Deliver(notifications.get()),
-    () => Deliver(host_notifications.get()),
+    () => Deliver(Hub(notifications.get())),
+    () => Deliver(Hub(host_notifications.get())),
+    () => Deliver(BrowserEvent(self.browser_events.get())),
   ])
 }
 
@@ -323,7 +371,7 @@ pub async fn DesktopBridgeActor::run(self : DesktopBridgeActor) -> Unit {
     })
     let mut connected = false
     let mut target : PageEventTarget? = None
-    let pending : Array[@protocol.Notification] = []
+    let pending : Array[PageNotification] = []
     for ;; {
       match self.next_input(notifications, host_notifications) {
         Control(control) =>

@@ -2615,12 +2615,12 @@ fn topbar_view(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
   // panel is closed; an open panel carries the toggle at the right edge of
   // its breadcrumb instead, keeping this bar uncrowded. Both spots hug the
   // window's right edge, so the toggle stays put as the panel opens/closes.
-  if !model.file_panel.open {
+  if !model.dock.open {
     items.push(
       @html.button(
         class="panel-toggle",
         title="Show panel",
-        on_click=dispatch(FileEditor(ToggleFilePanel)),
+        on_click=dispatch(Dock(TogglePanel)),
         icon(icon_layout_sidebar_right),
       ),
     )
@@ -2706,6 +2706,107 @@ fn console_gate_view(
 }
 
 ///|
+/// The right panel: the dock's strip over the file subsystem's breadcrumb
+/// and viewer/tree body, in the exact child order the old fileeditor panel
+/// rendered — the order is structural (rabbita diffs by index) and the
+/// viewer host must never be re-keyed. The strip renders identities only;
+/// labels and the deleted styling come from the document table.
+fn dock_panel_view(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
+  let femit = dispatch.map(msg => FileEditor(msg))
+  let ctx = file_ctx(model)
+  let chips : Array[@dock.TabChip] = model.dock.tabs.map(tab => {
+    match tab {
+      File(path~) => {
+        let (label, missing) = match model.file_panel.docs.get(path) {
+          Some(doc) => (doc.name, doc.state is TabDeleted)
+          None => (@fileeditor.basename(path), false)
+        }
+        { tab, label, title: path.0, missing }
+      }
+      Browser(id~) => {
+        let (label, title) = match @preview.page(model.preview, id) {
+          Some(page) => {
+            let label = @preview.page_label(page)
+            (label, page.url.unwrap_or(label))
+          }
+          None => ("New Tab", "New Tab")
+        }
+        { tab, label, title, missing: false }
+      }
+      FilePicker =>
+        {
+          tab,
+          label: "Open File",
+          title: "Open a workspace file",
+          missing: false,
+        }
+    }
+  })
+  let actions : @dock.LauncherActions = {
+    // Browser tabs need this window's native views; a remote console has
+    // none, so its launcher offers files only.
+    browser: if model.is_desktop {
+      Some(dispatch(BrowserTabRequested))
+    } else {
+      None
+    },
+    files: dispatch(FilePickerRequested),
+  }
+  // The active tab's kind as a class: every body part below is rendered
+  // permanently and CSS shows exactly one, so no host is ever re-keyed.
+  let mode = match model.dock.active {
+    None => "mode-launcher"
+    Some(Browser(_)) => "mode-browser"
+    Some(FilePicker) => "mode-picker"
+    Some(File(_)) => "mode-file"
+  }
+  // The toolbar always renders (structural child order); it shows the
+  // active Browser page's state, or a blank placeholder while CSS hides it.
+  let active_page : @preview.PageState = match
+    @dock.active_browser(model.dock) {
+    Some(id) =>
+      match @preview.page(model.preview, id) {
+        Some(page) => page
+        None => blank_browser_page()
+      }
+    None => blank_browser_page()
+  }
+  let toolbar_actions : @preview.ToolbarActions = {
+    input: dispatch.map(value => BrowserAddressEdited(value)),
+    submit: dispatch(BrowserNavigateSubmitted),
+    back: dispatch(BrowserBack),
+    forward: dispatch(BrowserForward),
+    reload: dispatch(BrowserReload),
+    open_external: dispatch(BrowserOpenExternal),
+  }
+  @html.div(
+    class=@fileeditor.editor_classes(model.file_panel, ctx) + " " + mode,
+    [
+      @fileeditor.resize_handle_view(),
+      @dock.tabs_bar(dispatch.map(msg => Dock(msg)), model.dock, chips, actions),
+      @fileeditor.breadcrumb_view(femit, model.file_panel, ctx),
+      @fileeditor.body_view(femit, model.file_panel, ctx),
+      @html.div(class="browser-chrome", [
+        @preview.toolbar_view(active_page, toolbar_actions),
+        @preview.failure_view(active_page),
+        // The placeholder the active page's native view overlays; it only
+        // donates its rectangle (measured after render / by ResizeObserver).
+        @html.div(
+          attrs=@html.Attrs::build().id("browser-pane").class("browser-pane"),
+          ([] : Array[@html.Html]),
+        ),
+      ]),
+      @dock.launcher_pane(actions),
+    ],
+  )
+}
+
+///|
+fn blank_browser_page() -> @preview.PageState {
+  { url: None, input: "", title: "", loading: false, failure: None }
+}
+
+///|
 fn view(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
   // A browser page is gated on the relay session: until `/v1/auth/me`
   // answers signed-in, the console frame — sidebar, composer, overlays —
@@ -2735,7 +2836,7 @@ fn view(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
   // chat; on the Skills page it stays collapsed, but the editor column (and the
   // viewer host inside it) is still rendered so the attached viewer is never
   // torn down.
-  let panel_open = model.file_panel.open && model.screen is Chat
+  let panel_open = model.dock.open && model.screen is Chat
   let mut content_class = if panel_open {
     "content panel-open"
   } else {
@@ -2748,11 +2849,7 @@ fn view(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
     sidebar_view(dispatch, model),
     @html.div(class=content_class, [
       @html.main_(content),
-      @fileeditor.panel_view(
-        dispatch.map(msg => FileEditor(msg)),
-        model.file_panel,
-        file_ctx(model),
-      ),
+      dock_panel_view(dispatch, model),
       // Keep the stable emulator host mounted while the panel is hidden; its
       // imperative xterm instances retain their screens and scrollback.
       @terminal.panel_view(

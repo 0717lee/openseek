@@ -33,6 +33,22 @@ pub let auth_disconnect : Command[@protocol.EmptyPayload, @protocol.AuthStatusPa
 
 pub let auth_status : Command[@protocol.EmptyPayload, @protocol.AuthStatusPayload]
 
+pub let browser_back : Command[@protocol.BrowserIdPayload, @protocol.EmptyReply]
+
+pub let browser_close : Command[@protocol.BrowserIdPayload, @protocol.EmptyReply]
+
+pub let browser_forward : Command[@protocol.BrowserIdPayload, @protocol.EmptyReply]
+
+pub let browser_navigate : Command[@protocol.BrowserOpenPayload, @protocol.EmptyReply]
+
+pub let browser_open : Command[@protocol.BrowserOpenPayload, @protocol.EmptyReply]
+
+pub let browser_reload : Command[@protocol.BrowserIdPayload, @protocol.EmptyReply]
+
+pub let browser_set_bounds : Command[@protocol.BrowserBoundsPayload, @protocol.EmptyReply]
+
+pub let browser_set_visible : Command[@protocol.BrowserVisiblePayload, @protocol.EmptyReply]
+
 pub let extension_contract : @proton_contract.ExtensionContract
 
 pub let fs_browse : Command[@protocol.BrowseDirectoryPayload, @protocol.BrowseDirectoryReply]

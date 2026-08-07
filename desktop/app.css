@@ -769,6 +769,201 @@ html.is-resizing * {
   user-select: none !important;
 }
 
+/* ---------- dock: browser tabs, launcher, file picker ---------- */
+/* The active tab's kind is a class on .editor (mode-file / mode-browser /
+   mode-picker / mode-launcher); every body part below the strip is always
+   rendered and CSS shows exactly one, so no imperative host is re-keyed. */
+.editor.mode-browser .viewer-breadcrumb,
+.editor.mode-browser .editor-body,
+.editor.mode-launcher .viewer-breadcrumb,
+.editor.mode-launcher .editor-body {
+  display: none;
+}
+/* The picker reuses the file chrome (tree + viewer area); the overlay
+   covers whatever document the viewer last showed. */
+.editor.mode-picker .viewer-stack::after {
+  content: "Select a file to open";
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: var(--surface);
+  color: var(--ink-2);
+  font-size: 13px;
+}
+/* The strip's new-tab button and its launcher popup. The tabsbar anchors
+   the popup; the full-screen transparent backdrop catches the click away
+   (reusing the topbar launcher's backdrop). */
+.editor-tabsbar {
+  position: relative;
+}
+.tab-add {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+.tab-add:hover {
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+.tab-add.hidden {
+  display: none;
+}
+.dock-menu {
+  position: absolute;
+  top: calc(100% - 6px);
+  left: 12px;
+  min-width: 260px;
+  padding: 5px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-pop);
+  z-index: 31;
+}
+/* The empty strip's centered launcher pane, same rows as the popup. */
+.dock-launcher {
+  display: none;
+}
+.editor.mode-launcher .dock-launcher {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  align-items: center;
+  justify-content: center;
+}
+.dock-launcher-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 280px;
+}
+.dock-launcher-row {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  padding: 9px 11px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--ink);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.dock-launcher-row:hover {
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+.dock-launcher-row .icon {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+}
+.dock-launcher-name {
+  font-weight: 550;
+}
+.dock-launcher-hint {
+  margin-left: auto;
+  color: var(--ink-3);
+  font-size: 12px;
+}
+/* The browser chrome: toolbar + failure line + the pane the native web
+   contents view overlays. The pane element renders nothing itself — the
+   host places the view over its measured rectangle. */
+.browser-chrome {
+  display: none;
+}
+.editor.mode-browser .browser-chrome {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+}
+.browser-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--line);
+}
+.browser-nav-button {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+.browser-nav-button:hover {
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+.browser-nav-button.loading .icon svg {
+  animation: browser-reload-spin 1s linear infinite;
+}
+@keyframes browser-reload-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.icon.rotate-left svg {
+  transform: rotate(-90deg);
+}
+.icon.rotate-right svg {
+  transform: rotate(90deg);
+}
+.browser-address {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 5px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--ink);
+  font-size: 13px;
+}
+.browser-address:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.browser-failure {
+  flex: 0 0 auto;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--line);
+  color: var(--del);
+  font-size: 12px;
+}
+.browser-failure.hidden {
+  display: none;
+}
+.browser-pane {
+  flex: 1 1 auto;
+  min-height: 0;
+  background: var(--surface-2);
+}
+
 /* The filter line rides the panel's bottom edge like an Emacs
    minibuffer: one flat row, a hairline above it, a borderless input. */
 .file-tree-header {

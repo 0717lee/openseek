@@ -84,6 +84,28 @@ pub(all) struct BrowseDirectoryReply {
   entries : Array[String]
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 
+pub(all) struct BrowserBoundsPayload {
+  id : Int
+  x : Int
+  y : Int
+  width : Int
+  height : Int
+} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
+
+pub(all) struct BrowserIdPayload {
+  id : Int
+} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
+
+pub(all) struct BrowserOpenPayload {
+  id : Int
+  url : String
+} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
+
+pub(all) struct BrowserVisiblePayload {
+  id : Int
+  visible : Bool
+} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
+
 pub(all) struct CancelPayload {
   run_id : String?
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)

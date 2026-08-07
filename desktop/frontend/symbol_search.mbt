@@ -803,8 +803,10 @@ test "accepting a symbol opens the editor at its file and returns to chat" {
   let (_, accepted) = update(dispatch, SymbolSearchAccept, ready)
   assert_true(accepted.symbol_search is None)
   assert_true(accepted.screen is Chat)
-  assert_true(accepted.file_panel.open)
-  assert_true(accepted.file_panel.active is Some(Relative("src/main.mbt")))
+  assert_true(accepted.dock.open)
+  assert_true(
+    @dock.active_file(accepted.dock) is Some(Relative("src/main.mbt")),
+  )
   // Reopening over an already-open panel reuses the same open/reveal path.
   let (_, reopened) = update(dispatch, SymbolSearchOpen, accepted)
   guard reopened.symbol_search is Some(next_search) else {
@@ -821,8 +823,10 @@ test "accepting a symbol opens the editor at its file and returns to chat" {
     reopened,
   )
   let (_, picked) = update(dispatch, SymbolSearchPick(0), next_ready)
-  assert_true(picked.file_panel.open)
-  assert_true(picked.file_panel.active is Some(Relative("src/render.mbt")))
+  assert_true(picked.dock.open)
+  assert_true(
+    @dock.active_file(picked.dock) is Some(Relative("src/render.mbt")),
+  )
 }
 
 ///|
