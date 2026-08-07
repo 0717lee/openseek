@@ -39,3 +39,4 @@ eval/swe_agi/**/.openseek/
 
 # Local session state from dogfooding the CLI in-repo.
 .openseek/
+.claude/
