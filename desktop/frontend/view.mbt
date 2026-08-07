@@ -185,7 +185,7 @@ fn session_row(
     children.push(
       @html.span(
         class="worktree-chip",
-        title="This chat runs in worktree \{chip}; archiving the chat removes the worktree (its branch survives)",
+        title="This chat runs in worktree \{chip}; archiving removes its checkout but keeps the branch for Repair",
         chip,
       ),
     )
@@ -1712,8 +1712,10 @@ fn composer_view(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
   // The conversation's execution environment vanished under it. The host
   // refuses to run it rather than silently falling back to the main
   // checkout, so the composer explains that and offers both ways out.
-  if missing_worktree_for(model, conv) is Some(name) {
-    children.push(missing_worktree_notice(dispatch, name))
+  if model.checkout_placement(conv) is @interop.MissingWorktree(name~) {
+    children.push(
+      missing_worktree_notice(dispatch, conv.device, conv.session_id, name),
+    )
   }
   let inner : Array[@html.Html] = [
     // First child, always present, so the textarea's index never shifts (which

@@ -366,7 +366,8 @@ fn moonbit_check_input(path : @pathx.Relative) -> Bool {
 /// bookkeeping cannot be missed.
 fn State::watched_paths(self : State, ctx : Ctx) -> WatchedPaths? {
   let index_live = self.index is IndexLoading || self.index is IndexReady(..)
-  if (!ctx.panel_open && ctx.open_files.is_empty() && !index_live) ||
+  if ctx.checkout is @interop.MissingWorktree(_) ||
+    (!ctx.panel_open && ctx.open_files.is_empty() && !index_live) ||
     ctx.owner.session.is_empty() {
     return None
   }
@@ -524,6 +525,13 @@ pub fn update(
   state : State,
   ctx : Ctx,
 ) -> (@cmd.Cmd, State) {
+  // `sync` parks the old owner as soon as the checkout disappears. Refuse
+  // every file-editor action in the meantime: even controls that happen to
+  // be visible must not send an empty session through the host, where it
+  // could otherwise mean the registered project's main checkout.
+  if ctx.checkout is @interop.MissingWorktree(_) {
+    return (@cmd.none, state)
+  }
   match msg {
     ToggleTree => {
       // The docked panel takes its height from the viewer, and the viewer
@@ -944,6 +952,7 @@ fn test_ctx() -> Ctx {
   {
     owner: { channel: @interop.ChannelId::Local, session: "desktop-test" },
     workspace: None,
+    checkout: @interop.WorkspaceRoot,
     dark_mode: false,
     tree_layout: BottomPanel,
     narrow: false,
@@ -1259,6 +1268,51 @@ test "a closed panel still re-roots when the conversation switches" {
         directories: [],
       }
     ),
+  )
+}
+
+///|
+test "a missing checkout parks files and refuses editor actions until repair" {
+  let emit = test_emit()
+  let present = test_ctx()
+  let docs : Map[@pathx.Relative, Doc] = Map([])
+  docs[Relative("a.mbt")] = loaded_doc("a.mbt")
+  let state = {
+    ..owned_state(),
+    docs,
+    watching: Some({
+      owner: present.owner,
+      workspace: None,
+      files: [Relative("a.mbt")],
+      directories: [@pathx.Relative::root()],
+    }),
+  }
+  let missing : Ctx = {
+    ..present,
+    owner: { ..present.owner, session: "" },
+    checkout: @interop.MissingWorktree(name="wt"),
+    open_files: [],
+    active_file: None,
+  }
+  let (parked, _) = sync(emit, state, missing)
+  assert_true(parked.owner is Some({ session: "", .. }))
+  assert_true(parked.docs.is_empty())
+  assert_true(parked.watching is None)
+  // A stale control event cannot start a file index request while missing.
+  let (_, refused) = update(emit, EnsureFileIndex, parked, missing)
+  assert_true(refused == parked)
+  // Repeated reconciliation is pure. The dock owns the remembered tab
+  // identity; after Repair its projection re-seeds that document here.
+  let (still_parked, _) = sync(emit, parked, missing)
+  assert_true(still_parked == parked)
+  let restored_ctx = {
+    ..present,
+    open_files: [Relative("a.mbt")],
+    active_file: Some(Relative("a.mbt")),
+  }
+  let (restored, _) = sync(emit, parked, restored_ctx)
+  assert_true(
+    restored.docs.get(Relative("a.mbt")) is Some({ state: TabLoading, .. }),
   )
 }
 

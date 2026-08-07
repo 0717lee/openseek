@@ -7,6 +7,7 @@ import {
   "moonbitlang/editor/base/common",
   "openseek_desktop/frontend/interop",
   "openseek_desktop/internal/pathx",
+  "openseek_desktop/internal/protocol",
 }
 
 // Values
@@ -48,6 +49,7 @@ pub fn update(@cmd.Emit[Msg], Msg, State, Ctx) -> (@cmd.Cmd, State)
 pub(all) struct Ctx {
   owner : @interop.ConversationKey
   workspace : @pathx.Absolute?
+  checkout : @interop.CheckoutPlacement
   dark_mode : Bool
   tree_layout : TreeLayout
   narrow : Bool
@@ -112,9 +114,10 @@ pub(all) enum Msg {
   FileFailed(owner~ : @interop.ConversationKey, message~ : String)
   FileWatchFailed(owner~ : @interop.ConversationKey, message~ : String)
   FsChanged(session~ : String?, changes~ : Array[FileChange]?)
+  RunSettled(owner~ : @interop.ConversationKey)
   StatsLoaded(owner~ : @interop.ConversationKey, stats~ : Array[FileStat])
-  DiagnosticsLoaded(owner~ : @interop.ConversationKey, absolute~ : @pathx.Absolute, diagnostics~ : Json)
-  DiagnosticsPublished(channel~ : @interop.ChannelId, absolute~ : @pathx.Absolute, diagnostics~ : Json)
+  DiagnosticsLoaded(owner~ : @interop.ConversationKey, absolute~ : @pathx.Absolute, diagnostics~ : Array[@protocol.LspDiagnostic])
+  DiagnosticsPublished(channel~ : @interop.ChannelId, absolute~ : @pathx.Absolute, diagnostics~ : Array[@protocol.LspDiagnostic])
   EditorCommentAdded(resource~ : ModelUri, file~ : @pathx.Relative, range~ : @common.Range, quote~ : String, comment~ : String, feedback_id~ : String)
 }
 

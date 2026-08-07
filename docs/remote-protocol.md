@@ -258,8 +258,8 @@ Notifications:
 | `session.list` | `{}` | the session index |
 | `session.load` | `{session, workspace?}` — a non-blank workspace must still be registered; omitted/blank locates the session across registered stores, then the global store | `{session: <the durable session JSON>, watermark?}` — current hosts include `watermark`, the highest event `sequence` the snapshot contains (0 for an empty record); older hosts omit it, and clients derive the same value from the stored events' own sequences |
 | `session.list_archived` | `{}` | the archived index |
-| `session.archive` | `{session, force?}` | outcome — the conversation's worktree, if it holds one, goes with it (its branch survives; a `worktree.changed` broadcast follows). A dirty checkout refuses naming the worktree unless `force`, which clients send after a discard-confirmation dialog. "Dirty" means tracked modifications or non-ignored untracked files; ignored files count as disposable, matching `git worktree remove`'s own semantics |
-| `session.unarchive` | `{session}` | outcome — a conversation whose worktree was removed at archive time returns as a plain workspace conversation |
+| `session.archive` | `{session, force?}` | outcome — the conversation's worktree checkout, if it holds one, goes with it, but its name/branch/session placement remains registered (the branch survives; a `worktree.changed` broadcast reports `present: false`). A dirty checkout refuses naming the worktree unless `force`, which clients send after a discard-confirmation dialog. "Dirty" means tracked modifications or non-ignored untracked files; ignored files count as disposable, matching `git worktree remove`'s own semantics |
+| `session.unarchive` | `{session}` | outcome — restores only the conversation record. A retained worktree placement whose checkout was removed returns as missing, so clients offer Repair before any agent, terminal, or file operation can continue |
 
 Notifications:
 
@@ -416,7 +416,7 @@ Notifications:
 
 | method | params |
 |---|---|
-| `worktree.changed` | `{workspace, worktrees: […]}` — the post-commit list for that workspace, broadcast to every client on every registry commit: create (which carries the binding) and remove |
+| `worktree.changed` | `{workspace, worktrees: […]}` — the authoritative list for that workspace, broadcast to every client after create/remove registry commits and after Archive removes a retained placement's checkout |
 
 ### git.*
 

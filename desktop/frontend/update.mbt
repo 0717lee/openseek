@@ -850,9 +850,21 @@ fn apply_engine_event(
 /// theme. Recomputed per dispatch — it is only a projection of the model.
 fn file_ctx(model : Model) -> @fileeditor.Ctx {
   let conv = model.active()
+  let checkout = model.checkout_placement(conv)
   {
-    owner: { channel: model.focused, session: conv.session_id },
+    // Parking under an empty session makes `@fileeditor.sync` clear the
+    // imperative viewer and retire its watcher. `sync_file_panel` parks the
+    // real conversation's dock strip separately until Repair restores it.
+    owner: {
+      channel: model.focused,
+      session: if checkout is @interop.MissingWorktree(_) {
+        ""
+      } else {
+        conv.session_id
+      },
+    },
     workspace: conv.workspace,
+    checkout,
     dark_mode: model.theme.is_dark(model.system_dark),
     tree_layout: model.tree_layout,
     narrow: model.narrow,
@@ -879,6 +891,7 @@ fn terminal_ctx(model : Model) -> @terminal.Ctx {
     channel: conv.device,
     session: conv.session_id,
     workspace: conv.workspace,
+    checkout: model.checkout_placement(conv),
     dark_mode: model.theme.is_dark(model.system_dark),
     connected,
   }
@@ -912,11 +925,11 @@ fn sync_file_panel(
   dispatch : @cmd.Emit[Msg],
   model : Model,
 ) -> (Model, @cmd.Cmd) {
-  let conv = model.active()
-  let dock = @dock.sync(model.dock, {
-    channel: model.focused,
-    session: conv.session_id,
-  })
+  let ctx = file_ctx(model)
+  // An empty-session owner is deliberately transient: `@dock.sync` parks
+  // the real strip under the conversation key, but never persists this
+  // placeholder strip. Repair selects the real key again and restores it.
+  let dock = @dock.sync(model.dock, ctx.owner)
   let model = { ..model, dock, }
   let (panel, cmd) = @fileeditor.sync(
     dispatch.map(msg => FileEditor(msg)),
@@ -2013,7 +2026,7 @@ fn update_msg(
     }
     RepairWorktree => {
       let conv = model.active()
-      guard missing_worktree_for(model, conv) is Some(_) else {
+      guard model.checkout_placement(conv) is @interop.MissingWorktree(_) else {
         return (@cmd.none, model)
       }
       (
@@ -2022,21 +2035,6 @@ fn update_msg(
           conv.device,
           workspace_token(conv.workspace),
           conv.session_id,
-        ),
-        model,
-      )
-    }
-    ReleaseWorktree => {
-      let conv = model.active()
-      guard missing_worktree_for(model, conv) is Some(name) else {
-        return (@cmd.none, model)
-      }
-      (
-        release_worktree_cmd(
-          dispatch,
-          conv.device,
-          workspace_token(conv.workspace),
-          name,
         ),
         model,
       )
@@ -3209,9 +3207,10 @@ fn update_device_msg(
         ),
         worktrees_request_generation,
       })
-      // A removed worktree unbinds its conversations — the host prunes the
-      // registry mapping the same way — and stands down any staged confirm
-      // for it.
+      // Only an actual registry-row removal unbinds its conversations. Archive
+      // keeps the row with `present: false`, so it passes through unchanged and
+      // later Unarchive still surfaces Repair. Stand down any staged confirm
+      // only when the placement itself disappeared.
       let conversations = next.conversations.map(conv => {
         if conv.device == channel &&
           conv.worktree is Some(name) &&
@@ -3226,8 +3225,8 @@ fn update_device_msg(
           conv
         }
       })
-      // An open discard dialog whose mapping just disappeared (another
-      // client removed or force-archived the worktree) must close too:
+      // An open discard dialog whose mapping just disappeared (a protocol
+      // client explicitly removed the worktree) must close too:
       // confirming it later would fire a stale forced archive.
       let archive_confirm = match next.archive_confirm {
         Some(confirm) if confirm.channel == channel &&
@@ -4306,10 +4305,33 @@ fn update_device_msg(
           } else {
             rejected
           }
-          (
-            scroll_if_active(model, channel, session),
-            model.replace_conversation(next),
-          )
+          let updated = model.replace_conversation(next)
+          if conv.workspace is Some(workspace) &&
+            updated.device_state(channel) is Some(dev) {
+            // A checkout deleted outside the app cannot publish a registry
+            // notification. Any rejected workspace start is a cheap, reliable
+            // point to refresh placement; a newly `present: false` row then
+            // replaces the generic refusal with Repair/Archive immediately.
+            let request_generation = dev.worktrees_request_generation + 1
+            (
+              @cmd.batch([
+                scroll_if_active(model, channel, session),
+                fetch_worktrees(
+                  dispatch,
+                  channel,
+                  workspace.0,
+                  dev.connection_generation,
+                  request_generation,
+                ),
+              ]),
+              updated.replace_device({
+                ..dev,
+                worktrees_request_generation: request_generation,
+              }),
+            )
+          } else {
+            (scroll_if_active(model, channel, session), updated)
+          }
         }
       } else {
         (@cmd.none, model)

@@ -204,12 +204,16 @@ pub fn TreeLayout::wire(self : TreeLayout) -> String {
 ///|
 /// The active conversation's identity, passed in by the main package on every
 /// `update`/`sync`/`panel_view` call: which conversation the panel serves, its
-/// attached workspace (the hint fs ops carry), whether the
-/// app is in dark mode (drives the embedded viewer's theme attribute), and
-/// the Settings choice of where the file tree docks.
+/// attached workspace (the hint fs ops carry), where that conversation is
+/// placed, whether the app is in dark mode (drives the
+/// embedded viewer's theme attribute), and the Settings choice of where the
+/// file tree docks.
 pub(all) struct Ctx {
   owner : @interop.ConversationKey
   workspace : @pathx.Absolute?
+  // A missing bound checkout blocks every filesystem request so none can be
+  // resolved against the registered project's main checkout.
+  checkout : @interop.CheckoutPlacement
   dark_mode : Bool
   tree_layout : TreeLayout
   // The app's phone-narrow layout flag. Narrow, the tree and the viewer

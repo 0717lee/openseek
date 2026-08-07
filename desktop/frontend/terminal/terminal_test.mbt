@@ -5,6 +5,7 @@ test "Windows workspace paths use their final component as the tab label" {
     channel: @interop.ChannelId::Local,
     session: "windows-workspace",
     workspace: Some(@pathx.Absolute("C:\\Users\\alice\\project")),
+    checkout: @interop.WorkspaceRoot,
     dark_mode: false,
     connected: true,
   }
@@ -27,6 +28,7 @@ test "an exit before the open reply cannot revive a dead terminal" {
     channel: @interop.ChannelId::Local,
     session: "exit-race",
     workspace: Some(@pathx.Absolute("/work/project")),
+    checkout: @interop.WorkspaceRoot,
     dark_mode: false,
     connected: true,
   }
@@ -65,6 +67,7 @@ test "sync records color-scheme changes even when the shown tab is unchanged" {
     channel: @interop.ChannelId::Local,
     session: "theme",
     workspace: None,
+    checkout: @interop.WorkspaceRoot,
     dark_mode: false,
     connected: true,
   }
@@ -83,6 +86,7 @@ test "output acknowledgement messages leave terminal state unchanged" {
     channel: @interop.ChannelId::Local,
     session: "ack-purity",
     workspace: None,
+    checkout: @interop.WorkspaceRoot,
     dark_mode: false,
     connected: true,
   }
@@ -118,6 +122,7 @@ test "same-numbered terminal ids on different devices stay isolated" {
     channel: @interop.ChannelId::Local,
     session: "shared-session",
     workspace: Some(@pathx.Absolute("/work/project")),
+    checkout: @interop.WorkspaceRoot,
     dark_mode: false,
     connected: true,
   }
@@ -217,6 +222,7 @@ test "an open panel waits for a reconnected channel before replacing its PTY" {
     channel: @interop.ChannelId::Remote("device-1"),
     session: "reconnect",
     workspace: None,
+    checkout: @interop.WorkspaceRoot,
     dark_mode: false,
     connected: false,
   }
@@ -238,5 +244,100 @@ test "an open panel waits for a reconnected channel before replacing its PTY" {
   assert_true(
     reconnected.tabs[0].workspace
     is @terminal.Scratch(@interop.ChannelId::Remote("device-1"), "reconnect"),
+  )
+}
+
+///|
+test "a missing checkout refuses new PTYs and retires only its conversation" {
+  let emit : @cmd.Emit[@terminal.Msg] = @cmd.Emit(_ => @cmd.none)
+  let ctx : @terminal.Ctx = {
+    channel: @interop.ChannelId::Local,
+    session: "missing",
+    workspace: Some(@pathx.Absolute("/work/project")),
+    checkout: @interop.Worktree(name="wt"),
+    dark_mode: false,
+    connected: true,
+  }
+  let (_, opening) = @terminal.update(
+    emit,
+    @terminal.ToggleTerminal,
+    @terminal.State::empty(),
+    ctx,
+  )
+  let (_, running) = @terminal.update(
+    emit,
+    @terminal.Opened(channel=@interop.ChannelId::Local, key=1, id=7),
+    opening,
+    ctx,
+  )
+  let other_ctx = { ..ctx, session: "other", checkout: @interop.WorkspaceRoot }
+  let (_, other_opening) = @terminal.update(
+    emit,
+    @terminal.NewTerminal,
+    running,
+    other_ctx,
+  )
+  let (_, both_running) = @terminal.update(
+    emit,
+    @terminal.Opened(channel=@interop.ChannelId::Local, key=2, id=8),
+    other_opening,
+    other_ctx,
+  )
+  let missing_ctx = { ..ctx, checkout: @interop.MissingWorktree(name="wt") }
+  let (retired, _) = @terminal.sync(emit, both_running, missing_ctx)
+  assert_eq(retired.tabs.length(), 1)
+  assert_eq(retired.tabs[0].session, "other")
+  assert_true(retired.shown is None)
+  let (still_retired, _) = @terminal.sync(emit, retired, missing_ctx)
+  assert_true(still_retired == retired)
+  let (_, toggle_refused) = @terminal.update(
+    emit,
+    @terminal.ToggleTerminal,
+    @terminal.State::empty(),
+    missing_ctx,
+  )
+  let (_, new_refused) = @terminal.update(
+    emit,
+    @terminal.NewTerminal,
+    @terminal.State::empty(),
+    missing_ctx,
+  )
+  assert_true(toggle_refused == @terminal.State::empty())
+  assert_true(new_refused == @terminal.State::empty())
+}
+
+///|
+test "a worktree conversation never reuses the main checkout terminal group" {
+  let emit : @cmd.Emit[@terminal.Msg] = @cmd.Emit(_ => @cmd.none)
+  let main : @terminal.Ctx = {
+    channel: @interop.ChannelId::Local,
+    session: "main-chat",
+    workspace: Some(@pathx.Absolute("/work/project")),
+    checkout: @interop.WorkspaceRoot,
+    dark_mode: false,
+    connected: true,
+  }
+  let (_, main_opening) = @terminal.update(
+    emit,
+    @terminal.ToggleTerminal,
+    @terminal.State::empty(),
+    main,
+  )
+  let worktree = {
+    ..main,
+    session: "worktree-chat",
+    checkout: @interop.Worktree(name="wt-1"),
+  }
+  // The panel is already open, but the worktree group is empty, so sync must
+  // create a second tab rather than reveal the main checkout's tab.
+  let (separated, _) = @terminal.sync(emit, main_opening, worktree)
+  assert_eq(separated.tabs.length(), 2)
+  assert_true(
+    separated.tabs[0].workspace
+    is @terminal.Project(@interop.ChannelId::Local, "/work/project"),
+  )
+  assert_true(
+    separated.tabs[1].workspace
+    is @terminal.Worktree(@interop.ChannelId::Local, "/work/project", "wt-1"),
   )
 }

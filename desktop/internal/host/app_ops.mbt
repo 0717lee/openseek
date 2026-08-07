@@ -13,10 +13,10 @@ async fn launch_app_op(payload : LaunchAppPayload) -> LaunchAppReply {
   // A live run hands us its cwd; a resumed conversation has none, so fall back
   // to the directory the session's engine runs in (same as `host.open_path`).
   let dir = match payload.cwd {
-    Some(cwd) => cwd
+    Some(cwd) => Some(cwd)
     None => @engine.session_cwd(payload.session)
   }
-  guard !dir.is_empty() else {
+  guard dir is Some(dir) && !dir.is_empty() else {
     raise HostError("This conversation has no working directory yet")
   }
   // The engine creates a conversation's workspace on its first run, so a chat

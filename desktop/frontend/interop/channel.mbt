@@ -26,6 +26,17 @@ pub(all) struct ConversationKey {
 } derive(Debug, Eq, Hash)
 
 ///|
+/// Where a conversation is meant to run inside its registered project.
+/// `MissingWorktree` retains the durable worktree name after its checkout
+/// directory disappears, so downstream panels can refuse project-root
+/// fallback without pairing a nullable name with a separate boolean flag.
+pub(all) enum CheckoutPlacement {
+  WorkspaceRoot
+  Worktree(name~ : String)
+  MissingWorktree(name~ : String)
+} derive(Debug, Eq)
+
+///|
 /// The authority used by app-owned resource URIs for this channel. The
 /// authority is an identity, not a network endpoint: `remote.<id>` stays
 /// stable if the target's transport changes.

@@ -154,14 +154,14 @@ pub fn endpoints(
       // The callback runs inside the rename's cancellation shield. Every
       // other client learns the canonical id before any cancellable list
       // reply, so a cancelled requester cannot suppress invalidation. The
-      // worktree callback is the same post-commit broadcast create and
-      // remove publish — archiving is the third registry commit.
+      // worktree callback publishes the retained placement with
+      // `present: false` before the archived identity becomes visible.
       @engine.archive_session(
         state.manager,
         session,
         () => publish_session_changed(state, "archived", session),
         force=payload.force == Some(true),
-        on_worktree_removed=(workspace, worktrees) => {
+        on_worktree_changed=(workspace, worktrees) => {
           publish_worktree_changed(state, workspace, worktrees)
         },
       )

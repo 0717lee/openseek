@@ -1230,11 +1230,10 @@ priv enum Msg {
   // workspace root, or a fresh host-named worktree (its execution
   // environment, bound 1:1 at creation).
   ToggleWorktreeMode
-  // The two exits offered when the active conversation's worktree checkout
-  // was deleted outside the app: rebuild it on its surviving branch, or
-  // release the conversation to run in the workspace itself.
+  // Rebuild the active conversation's missing worktree checkout on its
+  // surviving branch. The other safe exit is the ordinary ArchiveSession:
+  // a bound conversation never migrates into the workspace root.
   RepairWorktree
-  ReleaseWorktree
   // The archive-discard dialog's two exits: retry the archive with force
   // (discarding the worktree's uncommitted changes), or stand down.
   ConfirmArchiveDiscard
@@ -1444,8 +1443,8 @@ priv enum DeviceMsg {
     fresh_session~ : String
   )
   ArchiveFailed(String)
-  // A rebuild or release of a vanished worktree failed. The canonical rows
-  // still arrive as `worktree.changed`, so this only reports the refusal.
+  // A rebuild of a missing worktree failed. The canonical rows still arrive
+  // as `worktree.changed`, so this only reports the refusal.
   WorktreeFailed(String)
   // A `workspace_branch` reply: the git branch of `session`'s workspace —
   // `Some("")` when it is not a repository, `None` when the probe failed or

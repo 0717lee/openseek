@@ -8,10 +8,10 @@ async fn git_branch_op(payload : GitBranchPayload) -> GitBranchReply {
   // back to the directory the session's engine runs in (mirrors
   // `host.open_path`).
   let base = match payload.cwd {
-    Some(cwd) => cwd
+    Some(cwd) => Some(cwd)
     None => @engine.session_cwd(payload.session)
   }
-  guard !base.is_empty() else { return { branch: None } }
+  guard base is Some(base) && !base.is_empty() else { return { branch: None } }
   { branch: git_branch(base) }
 }
 

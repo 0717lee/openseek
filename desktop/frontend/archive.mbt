@@ -53,8 +53,9 @@ fn archive_session(
     dispatch,
     channel,
     @commands.session_archive,
-    // Archiving takes the conversation's worktree with it; the retry after
-    // the discard-confirmation dialog carries force on the wire.
+    // Archiving removes the conversation's checkout but retains its placement;
+    // the retry after the discard-confirmation dialog carries force on the
+    // wire.
     { session, force: if force { Some(true) } else { None } },
     connection_generation,
     sessions_request_generation,
@@ -99,10 +100,10 @@ fn archive_action(
       let reply = @interop.bridge_request(channel, command, payload) catch {
         error => {
           let message = @interop.bridge_error_text(error)
-          // Archiving takes the conversation's worktree with it; the host's
-          // dirty refusal becomes the discard-confirmation dialog, whose
-          // confirm retries with force. Message-matching is the only signal
-          // the error response carries.
+          // Archiving removes the conversation's checkout; the host's dirty
+          // refusal becomes the discard-confirmation dialog, whose confirm
+          // retries with force. Message-matching is the only signal the error
+          // response carries.
           scheduler.add(
             dispatch(
               if message.contains("uncommitted changes") {
