@@ -1,6 +1,5 @@
 import {
   "moonbitlang/editor/scripts/mermaid_assets",
-  "openseek_desktop/internal/env",
   "moonbitlang/async",
   "moonbitlang/async/fs" @asyncfs,
   "moonbitlang/async/process",

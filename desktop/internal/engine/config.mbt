@@ -8,9 +8,9 @@ const DefaultModel = "deepseek-v4-pro"
 const DefaultMaxSteps = 1000
 
 ///|
-/// Sent as the API key when a custom endpoint is configured without one: the
-/// engine refuses to start with an empty key, but an endpoint like the
-/// default OpenSeek proxy does not validate it.
+/// Sent as the API key when an OpenSeek or custom endpoint has no stored key:
+/// the engine refuses to start with an empty key, so this preserves the request
+/// shape when no user credential is available.
 const PlaceholderApiKey = "unused"
 
 ///|
@@ -29,37 +29,15 @@ priv struct RunConfig {
 }
 
 ///|
-/// The official OpenSeek proxy; must stay a prefix of `OpenseekProxyUrl`.
-/// Endpoints under it authenticate with the packaged client token instead
-/// of a user API key.
-const OpenseekProxyPrefix : String = "https://openseek-api.moonbitlang.cn/"
-
-///|
-/// The staging deployment's twin of `OpenseekProxyPrefix`; must stay a
-/// prefix of `OpenseekStagingProxyUrl`.
-const OpenseekStagingProxyPrefix : String = "https://openseek-api-staging.moonbitlang.cn/"
-
-///|
 fn configured_api_key(
-  stored_key : String?,
-  api_url : String?,
-  deepseek_env : String?,
-  client_token? : String,
+  stored_key? : String,
+  api_url? : String,
+  deepseek_env? : String,
 ) -> String raise EngineError {
   if stored_key is Some(value) {
     return value
   }
-  if api_url is Some(url) {
-    // Only the official proxy (and its staging twin) gets the client token;
-    // any other endpoint would be handing the credential to a third-party
-    // server.
-    if (
-        url.has_prefix(OpenseekProxyPrefix) ||
-        url.has_prefix(OpenseekStagingProxyPrefix)
-      ) &&
-      client_token is Some(token) {
-      return token
-    }
+  if api_url is Some(_) {
     return PlaceholderApiKey
   }
   if deepseek_env is Some(value) {
@@ -261,87 +239,28 @@ test "a different endpoint cannot reuse a live engine process" {
 }
 
 ///|
-test "custom endpoint does not reuse DEEPSEEK env fallback" {
+test "configured endpoint uses its stored key or the placeholder" {
   assert_eq(
     configured_api_key(
-      None,
-      Some("https://proxy.example/chat/completions"),
-      Some("official-key"),
+      api_url="https://proxy.example/chat/completions",
+      deepseek_env="official-key",
     ),
     PlaceholderApiKey,
   )
   assert_eq(
     configured_api_key(
-      Some("custom-key"),
-      Some("https://proxy.example/chat/completions"),
-      Some("official-key"),
+      stored_key="custom-key",
+      api_url="https://proxy.example/chat/completions",
+      deepseek_env="official-key",
     ),
     "custom-key",
   )
 }
 
 ///|
-test "official OpenSeek proxy authenticates with the client token" {
-  assert_eq(
-    configured_api_key(
-      None,
-      Some("https://openseek-api.moonbitlang.cn/chat/completions"),
-      Some("official-key"),
-      client_token="stamped-token",
-    ),
-    "stamped-token",
-  )
-  // A user-provided key always wins over the stamped token.
-  assert_eq(
-    configured_api_key(
-      Some("user-key"),
-      Some("https://openseek-api.moonbitlang.cn/chat/completions"),
-      None,
-      client_token="stamped-token",
-    ),
-    "user-key",
-  )
-  // An unstamped build behaves as before.
-  assert_eq(
-    configured_api_key(
-      None,
-      Some("https://openseek-api.moonbitlang.cn/chat/completions"),
-      None,
-    ),
-    PlaceholderApiKey,
-  )
-}
-
-///|
-test "other endpoints never see the client token" {
-  assert_eq(
-    configured_api_key(
-      None,
-      Some("https://proxy.example/chat/completions"),
-      None,
-      client_token="stamped-token",
-    ),
-    PlaceholderApiKey,
-  )
-  // A lookalike host on another domain does not match the prefix.
-  assert_eq(
-    configured_api_key(
-      None,
-      Some("https://openseek-api.moonbitlang.cn.evil.example/chat/completions"),
-      None,
-      client_token="stamped-token",
-    ),
-    PlaceholderApiKey,
-  )
-}
-
-///|
-test "official endpoint still uses DEEPSEEK env fallback" {
-  assert_eq(
-    configured_api_key(None, None, Some("official-key")),
-    "official-key",
-  )
-  let _ = configured_api_key(None, None, None) catch {
+test "DeepSeek endpoint still uses DEEPSEEK env fallback" {
+  assert_eq(configured_api_key(deepseek_env="official-key"), "official-key")
+  let _ = configured_api_key() catch {
     EngineError(message) => {
       assert_true(message.contains("DeepSeek API key is required"))
       return
@@ -373,6 +292,7 @@ async test "run config ignores OPENSEEK_API_URL in favor of the settings" {
     workspace: None,
   })
   assert_true(config.api_url is Some(OpenseekProxyUrl))
+  assert_eq(config.api_key, PlaceholderApiKey)
 }
 
 ///|

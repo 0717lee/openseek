@@ -72,12 +72,6 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev libx11-dev
 
-      # CI always builds an unstamped bundle: OPENSEEK_CLIENT_TOKEN (the
-      # bearer credential the packaged host presents to the hosted OpenSeek
-      # proxy) is deliberately never provided here, so PR-modifiable
-      # packaging code cannot read it and uploaded artifacts carry no
-      # extractable credential. A stamped bundle requires a manual build
-      # with the secret in the environment.
       - name: Build the AppImage
         run: moon -C desktop run --target native package/linux -- --release
 
@@ -142,7 +136,6 @@ jobs:
       # No --sign or --notarize argument, so the app is only ad-hoc signed,
       # the DMG container is unsigned, and neither artifact is intended for
       # end-user distribution.
-      # Unstamped — no OPENSEEK_CLIENT_TOKEN in CI; see the Linux job's note.
       - name: Build the macOS artifacts
         run: moon -C desktop run --target native package/macos -- --target dmg --target zip
 
@@ -248,7 +241,6 @@ jobs:
 
       # Pull requests upload only the portable ZIP, so they do not spend time
       # installing NSIS or recompressing the same bundle as an installer.
-      # Unstamped — no OPENSEEK_CLIENT_TOKEN in CI; see the Linux job's note.
       - name: Build the Windows ZIP
         if: github.event_name == 'pull_request'
         shell: pwsh
