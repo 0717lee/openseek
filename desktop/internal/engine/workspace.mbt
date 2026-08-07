@@ -24,7 +24,7 @@ async fn session_workspace_dir(session : String) -> @pathx.Path? {
   }
   guard safe_workspace_id(session) else { return None }
   guard workspace_root() is Some(root) else { return None }
-  Some(root.join(session).clean())
+  Some(root.join(session).normalize())
 }
 
 ///|
@@ -117,7 +117,7 @@ pub async fn attached_workspace_dir(path : @pathx.Absolute) -> @pathx.Path? {
   // LSP/navigation paths may contain `.` or `..`. Clean them with the host's
   // filesystem rules before selecting the deepest workspace or worktree, so
   // equivalent spellings are classified by their actual lexical location.
-  guard path.to_path().clean().to_absolute() is Some(resolved_absolute) else {
+  guard path.to_path().normalize().to_absolute() is Some(resolved_absolute) else {
     return None
   }
   let resolved = resolved_absolute.0
@@ -148,7 +148,7 @@ pub async fn attached_workspace_dir(path : @pathx.Absolute) -> @pathx.Path? {
       Some(index) => rest.0.view(end_offset=index).to_owned()
       None => rest.0
     }
-    root.join(Path(session)).clean()
+    root.join(Path(session)).normalize()
   }
   // Reject an absolute path whose real target — following symlinks — escapes
   // the owning directory; the lexical containment above does not follow links.
@@ -168,7 +168,7 @@ fn contained_path(
 ) -> @pathx.Absolute? {
   guard relative.to_path().to_absolute() is None else { return None }
   let root_path = root.to_path()
-  let resolved = root_path.join(relative.to_path()).clean()
+  let resolved = root_path.join(relative.to_path()).normalize()
   guard resolved.to_absolute() is Some(resolved) && root.contains(resolved) else {
     return None
   }
@@ -202,7 +202,7 @@ async fn workspace_root() -> @pathx.Path? {
   } else {
     home
   }
-  Some(parent.join(WorkspaceDirName).clean())
+  Some(parent.join(WorkspaceDirName).normalize())
 }
 
 // Tests for the pure workspace-path helper. The full

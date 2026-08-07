@@ -1,8 +1,8 @@
-// Cross-platform path-string comparison. `@path.Path` renders with the
-// host separator (backslashes on Windows) while URIs, manifests, and the
-// frontend speak forward slashes, so any prefix test between the two worlds
-// must normalize first. These path types own that dance; callers never
-// hand-roll `replace_all` + `has_prefix` again.
+// Filesystem paths are interpreted with the current host's rules. `@path.Path`
+// performs that interpretation and may render with backslashes on Windows,
+// while URIs, manifests, and the frontend speak forward slashes. `Absolute`
+// and `Relative` therefore expose a forward-slash normalized form for those
+// boundaries after applying the host's path normalization.
 
 ///|
 /// A path spelling that has not been classified as absolute or relative.
@@ -17,7 +17,10 @@ pub impl Show for Path with fn output(self, logger) {
 }
 
 ///|
-/// Join two unclassified paths using the current host's path rules.
+/// Concatenate two unclassified paths and normalize the result using the
+/// current host's path rules. An absolute `child` does not replace `self`;
+/// this follows `@path.Path::join`. The result remains unclassified because a
+/// relative `self` still produces a relative path.
 pub fn Path::join(self : Path, child : Path) -> Path {
   Path(@path.Path(self.0).join(Path(child.0)).to_string())
 }
@@ -27,14 +30,6 @@ pub fn Path::join(self : Path, child : Path) -> Path {
 /// current host's path rules.
 pub fn Path::resolve(self : Path) -> Path {
   Path(@path.Path(self.0).resolve().to_string())
-}
-
-///|
-/// Resolve dot segments and redundant separators using the current host's
-/// path rules. This is deliberately separate from `normalize`, whose
-/// cross-platform contract only canonicalizes slash direction.
-pub fn Path::clean(self : Path) -> Path {
-  Path(@path.Path(self.0).normalize().to_string())
 }
 
 ///|
@@ -57,8 +52,7 @@ pub fn Path::extname(self : Path) -> StringView {
 }
 
 ///|
-/// Whether the spelling is absolute according to the current host. Prefer
-/// `to_absolute` when a protocol path may use another platform's syntax.
+/// Whether the spelling is absolute according to the current host.
 pub fn Path::is_host_absolute(self : Path) -> Bool {
   @path.Path(self.0).is_absolute()
 }
@@ -70,9 +64,9 @@ pub fn Path::relative(self : Path, base~ : Path) -> Path {
 }
 
 ///|
-/// A lexically complete absolute filesystem path. Other packages may inspect
-/// and pattern-match the original spelling, but only this package can construct
-/// one after validating a `Path`.
+/// A filesystem path that is absolute on the current host. Other packages may
+/// inspect and pattern-match the original spelling, but only this package can
+/// construct one after validating a `Path`.
 pub struct Absolute(String) derive(Debug, Eq, Hash)
 
 ///|
@@ -88,13 +82,11 @@ pub fn Absolute::to_path(self : Absolute) -> Path {
 }
 
 ///|
-/// Convert a path after checking its lexical form. POSIX paths
-/// must begin with `/`; Windows paths must be drive-rooted (`C:/` or `C:\\`)
-/// or begin with a UNC/device prefix (`\\\\`). Drive-relative (`C:foo`) and
-/// current-drive-rooted (`\\foo`) paths are rejected because they still need
-/// process context to identify one absolute location.
+/// Convert a path when it is absolute according to the current host. A foreign
+/// platform's absolute-path syntax is not accepted because the host filesystem
+/// cannot interpret it as that absolute location.
 pub fn Path::to_absolute(self : Path) -> Absolute? {
-  if self.accepts_absolute() {
+  if self.is_host_absolute() {
     Some(Absolute(self.0))
   } else {
     None
@@ -102,22 +94,10 @@ pub fn Path::to_absolute(self : Path) -> Absolute? {
 }
 
 ///|
-/// The same unclassified spelling with every backslash turned into a forward
-/// slash. Purely lexical: no resolution or separator deduplication occurs.
+/// Normalize dot segments and redundant separators using the current host's
+/// path rules. The returned spelling uses the host's separator.
 pub fn Path::normalize(self : Path) -> Path {
-  Path(self.0.replace_all(old="\\", new="/"))
-}
-
-///|
-/// Whether this spelling has a complete POSIX or Windows absolute-path prefix.
-fn Path::accepts_absolute(self : Path) -> Bool {
-  match self.0[:] {
-    ['/', ..] => true
-    ['\\', '\\', ..] => true
-    [drive, ':', '/', ..] => drive.is_ascii_alphabetic()
-    [drive, ':', '\\', ..] => drive.is_ascii_alphabetic()
-    _ => false
-  }
+  Path(@path.Path(self.0).normalize().to_string())
 }
 
 ///|
@@ -155,29 +135,47 @@ pub fn Relative::is_root(self : Relative) -> Bool {
 }
 
 ///|
-/// The same relative path with forward-slash separators. Purely lexical: no
-/// resolution or separator deduplication occurs.
+/// Normalize the relative path using the current host's rules, then render it
+/// with forward slashes. The zero-segment root remains `Relative("")` rather
+/// than the host path library's `"."` spelling.
 pub fn Relative::normalize(self : Relative) -> Relative {
-  Relative(Path(self.0).normalize().0)
+  let normalized = Path(self.0).normalize().0
+  if normalized == "." {
+    Relative::root()
+  } else if @path.sep == '\\' {
+    // Windows renders its actual separators as backslashes; the frontend and
+    // serialized relative form use forward slashes.
+    Relative(normalized.replace_all(old="\\", new="/"))
+  } else {
+    // A backslash is a valid filename character on POSIX, not a separator.
+    Relative(normalized)
+  }
 }
 
 ///|
 /// Whether `path` is this relative path or one of its descendants, comparing
-/// with normalized separators. Purely lexical — `..` segments are not resolved.
+/// after resolving dot segments and redundant separators with the host's path
+/// rules.
 pub fn Relative::contains(self : Relative, path : Relative) -> Bool {
   Path(self.0).contains(Path(path.0))
 }
 
 ///|
-/// The same absolute path with forward-slash separators. Purely lexical: no
-/// resolution or separator deduplication occurs.
+/// Normalize the absolute path using the current host's rules, then render it
+/// with forward slashes for serialization and comparison.
 pub fn Absolute::normalize(self : Absolute) -> Absolute {
-  Absolute(Path(self.0).normalize().0)
+  let normalized = Path(self.0).normalize().0
+  if @path.sep == '\\' {
+    Absolute(normalized.replace_all(old="\\", new="/"))
+  } else {
+    Absolute(normalized)
+  }
 }
 
 ///|
 /// Whether `path` is this absolute path or one of its descendants, comparing
-/// with normalized separators. Purely lexical — `..` segments are not resolved.
+/// after resolving dot segments and redundant separators with the host's path
+/// rules.
 pub fn Absolute::contains(self : Absolute, path : Absolute) -> Bool {
   Path(self.0).contains(Path(path.0))
 }
@@ -185,10 +183,10 @@ pub fn Absolute::contains(self : Absolute, path : Absolute) -> Bool {
 ///|
 /// This path relative to the absolute directory `root`: `Some(Relative(""))`
 /// when they are the same directory, `Some(Relative("a/b"))` for a
-/// descendant, `None` for anything outside. Purely lexical — `..` segments
-/// are not resolved. The `None` forces callers to decide what a path outside
-/// the workspace means instead of letting an absolute string flow on as if
-/// it were relative.
+/// descendant, `None` for anything outside. Dot segments and redundant
+/// separators are resolved using the host's path rules. The `None` forces
+/// callers to decide what a path outside the workspace means instead of
+/// letting an absolute string flow on as if it were relative.
 pub fn Absolute::relative_to(self : Absolute, root~ : Absolute) -> Relative? {
   let path = self.normalize().0
   let root = root.normalize().0
@@ -208,8 +206,16 @@ pub fn Absolute::relative_to(self : Absolute, root~ : Absolute) -> Relative? {
 /// containment methods. Keeping it private prevents callers from comparing
 /// paths whose classifications do not agree.
 fn Path::contains(self : Path, path : Path) -> Bool {
+  // Prefix comparison uses one separator after host normalization so the same
+  // code works with POSIX and Windows renderings. On POSIX a backslash remains
+  // a filename character and must not be interpreted as a separator.
   let path = path.normalize().0
   let root = self.normalize().0
+  let (path, root) = if @path.sep == '\\' {
+    (path.replace_all(old="\\", new="/"), root.replace_all(old="\\", new="/"))
+  } else {
+    (path, root)
+  }
   if path == root {
     return true
   }

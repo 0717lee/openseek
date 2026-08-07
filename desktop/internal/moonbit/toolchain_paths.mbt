@@ -6,7 +6,7 @@ const MoonbitSeedVersionFile : String = ".openseek-moonbit-seed-version"
 
 ///|
 fn moonbit_toolchain_dir(base : @pathx.Path, name : String) -> @pathx.Path {
-  base.join("toolchains").join("moonbit").join(name).clean()
+  base.join("toolchains").join("moonbit").join(name).normalize()
 }
 
 ///|
@@ -20,7 +20,7 @@ fn bin_sibling_toolchain_dir(
   command_dir : @pathx.Path,
   name : String,
 ) -> @pathx.Path {
-  moonbit_toolchain_dir(command_dir.join("..").clean(), name)
+  moonbit_toolchain_dir(command_dir.join("..").normalize(), name)
 }
 
 ///|
@@ -202,6 +202,6 @@ async test "the seed is found beside the engine and one level above it" {
   @fs.rmdir(tmp.to_string(), recursive=true) catch {
     _ => ()
   }
-  assert_eq(bundle_found, Some(bundle_seed.clean().to_string()))
-  assert_eq(flat_found, Some(flat_seed.clean().to_string()))
+  assert_eq(bundle_found, Some(bundle_seed.normalize().to_string()))
+  assert_eq(flat_found, Some(flat_seed.normalize().to_string()))
 }

@@ -17,7 +17,7 @@ const LegacyArchivedListFile = "archived_sessions.txt"
 
 ///|
 fn archived_session_root(root : @pathx.Path) -> @pathx.Path {
-  root.join(ArchivedDirName).clean()
+  root.join(ArchivedDirName).normalize()
 }
 
 ///|

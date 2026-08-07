@@ -186,7 +186,7 @@ fn expanded_workspace_path(path : String) -> @pathx.Absolute raise EngineError {
   } else {
     Path(trimmed)
   }
-  let resolved = expanded.resolve().clean().to_string()
+  let resolved = expanded.resolve().normalize().to_string()
   guard @pathx.Path(resolved).to_absolute() is Some(absolute) else {
     raise EngineError("workspace path did not resolve to an absolute path")
   }
@@ -215,7 +215,7 @@ async fn registered_workspace(path : String) -> @pathx.Path? {
 /// A workspace's durable session store: the engine CLI's relative default
 /// (`.openseek`) inside the project.
 pub fn workspace_session_root(workspace : @pathx.Path) -> @pathx.Path {
-  workspace.join(".openseek").clean()
+  workspace.join(".openseek").normalize()
 }
 
 ///|
@@ -308,7 +308,7 @@ test "workspace paths expand ~ against the home directory" {
   assert_eq(expanded_workspace_path("~").0, home.to_string())
   assert_eq(
     expanded_workspace_path("~/proj").0,
-    home.join("proj").clean().to_string(),
+    home.join("proj").normalize().to_string(),
   )
   // Absolute paths pass through (normalized), and surrounding blanks drop.
   assert_eq(expanded_workspace_path("  /srv/code//app  ").0, "/srv/code/app")

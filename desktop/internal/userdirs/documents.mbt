@@ -24,7 +24,7 @@ pub async fn documents_dir() -> @pathx.Path? {
     if xdg_documents_override(home) is Some(dir) {
       return Some(dir)
     }
-    Some(home.join("Documents").clean())
+    Some(home.join("Documents").normalize())
   }
 }
 
@@ -45,7 +45,7 @@ async fn xdg_documents_override(home : @pathx.Path) -> @pathx.Path? {
   if @fsx.try_read_text(file) is Some(content) {
     for line in content.split("\n") {
       if parse_xdg_documents_dir_line(home, line) is Some(dir) {
-        return Some(dir.clean())
+        return Some(dir.normalize())
       }
     }
   }
@@ -73,11 +73,11 @@ fn parse_xdg_user_dir_value(
     return Some(home)
   }
   if value.strip_prefix("$HOME/") is Some(relative) {
-    return Some(home.join(relative.to_owned()).clean())
+    return Some(home.join(relative.to_owned()).normalize())
   }
   let path = @pathx.Path(value.to_owned())
   if path.is_host_absolute() {
-    Some(path.clean())
+    Some(path.normalize())
   } else {
     None
   }

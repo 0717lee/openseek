@@ -18,7 +18,7 @@ async fn app_runtime_dir() -> @pathx.Path? {
   } else {
     home_path.join(".openseek-desktop")
   }
-  Some(dir.clean())
+  Some(dir.normalize())
 }
 
 ///|

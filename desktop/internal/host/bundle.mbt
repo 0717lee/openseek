@@ -23,7 +23,7 @@ pub async fn frontend_entry_path(framework_command : String) -> String {
     command_dir.join(FrontendEntryPath),
   ]
   for candidate in candidates {
-    let path = candidate.clean().to_string()
+    let path = candidate.normalize().to_string()
     if @fs.exists(path) {
       return path
     }

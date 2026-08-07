@@ -54,8 +54,8 @@ fn MoonIdeQuery::args(
 fn moonide_relative_path(workspace : @pathx.Path, absolute : String) -> String? {
   let candidate = @pathx.Path(absolute)
   guard candidate.is_host_absolute() else { return None }
-  let root = workspace.clean()
-  let candidate = candidate.clean()
+  let root = workspace.normalize()
+  let candidate = candidate.normalize()
   guard root.to_absolute() is Some(root) else { return None }
   guard candidate.to_absolute() is Some(candidate) else { return None }
   guard candidate.relative_to(root~) is Some(relative) && !relative.is_root() else {
@@ -81,7 +81,7 @@ async fn resolve_moonide_request(
   guard @engine.attached_workspace_dir(path) is Some(attached) else {
     raise HostError("path is outside every attached workspace")
   }
-  let lexical_workspace = attached.clean()
+  let lexical_workspace = attached.normalize()
   let workspace_text = @fs.realpath(lexical_workspace.to_string()) catch {
     error if @async.is_being_cancelled() => raise error
     _ => raise HostError("attached workspace is unavailable")
@@ -90,7 +90,7 @@ async fn resolve_moonide_request(
     error if @async.is_being_cancelled() => raise error
     _ => raise HostError("navigation path is unavailable")
   }
-  let physical_workspace = @pathx.Path(workspace_text).clean()
+  let physical_workspace = @pathx.Path(workspace_text).normalize()
   guard moonide_relative_path(physical_workspace, path_text)
     is Some(relative_path) else {
     raise HostError("path is outside its attached workspace")
@@ -164,9 +164,9 @@ fn moonide_result_path(
 ) -> String {
   let raw_path = @pathx.Path(raw)
   let candidate = if raw_path.is_host_absolute() {
-    raw_path.clean()
+    raw_path.normalize()
   } else {
-    physical_workspace.join(raw_path).clean()
+    physical_workspace.join(raw_path).normalize()
   }
   candidate.to_string()
 }
@@ -217,7 +217,7 @@ fn moonide_client_path(
     is Some(relative) else {
     return None
   }
-  Some(lexical_workspace.join(Path(relative)).clean().to_string())
+  Some(lexical_workspace.join(Path(relative)).normalize().to_string())
 }
 
 ///|

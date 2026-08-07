@@ -57,7 +57,7 @@ fn worktrees_file(workspace : @pathx.Path) -> @pathx.Path {
 
 ///|
 fn worktree_dir(workspace : @pathx.Path, name : String) -> @pathx.Path {
-  workspace.join(WorktreesDirName).join(name).clean()
+  workspace.join(WorktreesDirName).join(name).normalize()
 }
 
 ///|

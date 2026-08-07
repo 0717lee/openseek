@@ -20,7 +20,7 @@ fn resolved_session_root(payload_root? : @pathx.Path) -> @pathx.Path? {
 ///|
 fn home_session_root() -> @pathx.Path? {
   guard @home.dir() is Some(home) else { return None }
-  Some(home.join(".openseek").clean())
+  Some(home.join(".openseek").normalize())
 }
 
 // Tests for resolving explicit durable-session roots before the host shares
@@ -39,7 +39,7 @@ test "explicit relative session roots resolve against the host cwd" {
 ///|
 test "explicit absolute session roots are normalized" {
   let root = @pathx.Path(".openseek-test-root").resolve().join("..")
-  let expected = root.clean()
+  let expected = root.normalize()
   guard resolved_session_root(payload_root=root) is Some(actual) else {
     fail("expected session root")
   }

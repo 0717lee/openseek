@@ -25,7 +25,7 @@ async fn bundled_engine_path(framework_command : String) -> String? {
     }
   }
   for candidate in candidates {
-    let path = command_dir.join(candidate).clean().to_string()
+    let path = command_dir.join(candidate).normalize().to_string()
     if @fs.exists(path) {
       return Some(path)
     }

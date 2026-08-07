@@ -26,7 +26,7 @@ async fn browse_directory_op(
     let expanded = @pathx.Path(requested).expand_home()
     expanded
   }
-  let dir = target.resolve().clean()
+  let dir = target.resolve().normalize()
   let kind = @fs.kind(dir.to_string()) catch {
     error if @async.is_being_cancelled() => raise error
     _ => raise HostError("no such directory: \{dir}")

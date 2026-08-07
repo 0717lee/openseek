@@ -418,7 +418,7 @@ fn absolute_diagnostic_path(
   } else {
     let root = root.to_path()
     let reported : @pathx.Path = Path(path)
-    root.join(reported).clean().to_absolute()
+    root.join(reported).normalize().to_absolute()
   }
 }
 
