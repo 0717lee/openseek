@@ -1,5 +1,5 @@
 ///|
-async fn remove_toolchain_test_tree(root : @pathx.Path) -> Unit {
+async fn remove_toolchain_test_tree(root : @pathx.Absolute) -> Unit {
   @fs.rmdir(root.to_string(), recursive=true) catch {
     error if @async.is_being_cancelled() => raise error
     _ => ()
@@ -10,8 +10,10 @@ async fn remove_toolchain_test_tree(root : @pathx.Path) -> Unit {
 /// Runs `body` against a fresh temporary root and removes the tree on both
 /// exit paths — `defer` cannot run the async removal, so the try/catch
 /// split lives here once instead of in every test.
-async fn with_toolchain_test_tree(body : async (@pathx.Path) -> Unit) -> Unit {
-  let root = @pathx.Path(@fs.tmpdir(prefix="openseek-moonbit-external-"))
+async fn with_toolchain_test_tree(
+  body : async (@pathx.Absolute) -> Unit,
+) -> Unit {
+  let root = @pathx.Path(@fs.tmpdir(prefix="openseek-moonbit-external-")).resolve()
   body(root) catch {
     error => {
       remove_toolchain_test_tree(root)
@@ -24,7 +26,7 @@ async fn with_toolchain_test_tree(body : async (@pathx.Path) -> Unit) -> Unit {
 ///|
 /// A complete fake toolchain: the resolver only assembles one around the
 /// executable the desktop spawns — `moon`.
-async fn touch_fake_toolchain(bin_dir : @pathx.Path) -> Unit {
+async fn touch_fake_toolchain(bin_dir : @pathx.Absolute) -> Unit {
   @fs.write_file(
     bin_dir.join("moon" + ExecutableSuffix).to_string(),
     "",
@@ -49,7 +51,7 @@ async test "a non-executable moon file does not count" {
     touch_fake_toolchain(home_bin)
     let toolchain = external_toolchain(
       path_env=path_bin.to_string(),
-      home_dir=root.join("home"),
+      home_dir=root.join("home").to_path(),
     )
     assert_eq(toolchain.bin_dir.to_string(), home_bin.to_string())
   })
@@ -68,7 +70,7 @@ async test "a directory named moon does not count" {
     touch_fake_toolchain(home_bin)
     let toolchain = external_toolchain(
       path_env=path_bin.to_string(),
-      home_dir=root.join("home"),
+      home_dir=root.join("home").to_path(),
     )
     assert_eq(toolchain.bin_dir.to_string(), home_bin.to_string())
   })
@@ -99,7 +101,7 @@ async test "a file-shaped path entry does not abort the scan" {
     touch_fake_toolchain(home_bin)
     let toolchain = external_toolchain(
       path_env=not_a_dir.to_string(),
-      home_dir=root.join("home"),
+      home_dir=root.join("home").to_path(),
     )
     assert_eq(toolchain.bin_dir.to_string(), home_bin.to_string())
   })
@@ -116,7 +118,7 @@ async test "path scan wins over the default install" {
     touch_fake_toolchain(path_bin)
     let toolchain = external_toolchain(
       path_env=path_bin.to_string(),
-      home_dir=root.join("home"),
+      home_dir=root.join("home").to_path(),
     )
     assert_eq(toolchain.bin_dir.to_string(), path_bin.to_string())
   })
@@ -130,7 +132,7 @@ async test "no toolchain anywhere raises ToolchainUnavailable" {
     try
       external_toolchain(
         path_env=bare_bin.to_string(),
-        home_dir=root.join("home"),
+        home_dir=root.join("home").to_path(),
       )
     catch {
       ToolchainUnavailable => ()
@@ -147,9 +149,10 @@ async test "no toolchain anywhere raises ToolchainUnavailable" {
 /// sessions lose the user's registry credentials.
 async test "toolchain env policy leaves MOON_HOME alone" {
   let env : Map[String, String] = { "MOON_HOME": "/custom", "PATH": "/usr/bin" }
-  { bin_dir: Path("/found/bin"), moon: Path("/found/bin/moon") }.apply_to_env(
-    env,
-  )
+  {
+    bin_dir: @pathx.Path("found/bin").resolve(),
+    moon: @pathx.Path("found/bin/moon").resolve(),
+  }.apply_to_env(env)
   assert_eq(env.get("MOON_HOME"), Some("/custom"))
   assert_true(env.get("PATH").unwrap_or("").has_prefix("/found/bin"))
 }

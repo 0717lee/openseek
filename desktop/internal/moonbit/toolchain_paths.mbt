@@ -5,7 +5,10 @@ const MoonbitBundleStampFile : String = ".openseek-moonbit-bundle-version"
 const MoonbitSeedVersionFile : String = ".openseek-moonbit-seed-version"
 
 ///|
-fn moonbit_toolchain_dir(base : @pathx.Path, name : String) -> @pathx.Path {
+fn moonbit_toolchain_dir(
+  base : @pathx.Absolute,
+  name : String,
+) -> @pathx.Absolute {
   base.join("toolchains").join("moonbit").join(name).normalize()
 }
 
@@ -17,9 +20,9 @@ fn moonbit_toolchain_dir(base : @pathx.Path, name : String) -> @pathx.Path {
 /// the Windows bundle drop the engine straight into the directory that holds
 /// `toolchains/`, which `moonbit_toolchain_dir` already covers.
 fn bin_sibling_toolchain_dir(
-  command_dir : @pathx.Path,
+  command_dir : @pathx.Absolute,
   name : String,
-) -> @pathx.Path {
+) -> @pathx.Absolute {
   moonbit_toolchain_dir(command_dir.join("..").normalize(), name)
 }
 
@@ -30,7 +33,7 @@ fn bin_sibling_toolchain_dir(
 /// presence therefore already asserts a complete seed; re-probing individual
 /// files here would re-litigate what packaging proved, and the sealed app
 /// bundle guards integrity from there.
-async fn bundled_moonbit_seed_dir(engine_command : String) -> @pathx.Path? {
+async fn bundled_moonbit_seed_dir(engine_command : String) -> @pathx.Absolute? {
   let command_dir = @pathx.Path(engine_command).dirname().resolve()
   let candidates = [
     moonbit_toolchain_dir(command_dir, "windows-x64"),
@@ -41,7 +44,9 @@ async fn bundled_moonbit_seed_dir(engine_command : String) -> @pathx.Path? {
     bin_sibling_toolchain_dir(command_dir, "macos-arm64"),
   ]
   for candidate in candidates {
-    let version = bundled_moonbit_seed_version(candidate)
+    // Reading the packaging stamp is a filesystem boundary; candidate
+    // selection retains the stronger absolute-path guarantee from `resolve`.
+    let version = bundled_moonbit_seed_version(candidate.to_path())
     @xlog.debug() <?
       {
         "event": "desktop_moonbit_seed_candidate",

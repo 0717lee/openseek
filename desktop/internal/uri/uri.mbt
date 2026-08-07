@@ -1,23 +1,12 @@
-// Percent-encoding for the URIs the desktop speaks: `file:` URIs (auth
-// callbacks, host side) and the viewer's `openseek:` model URIs (frontend
-// side). Encoding walks a string's UTF-8 bytes so every reserved or
-// non-ASCII byte escapes as `%XX`; decoding reverses it byte-accurately and
-// tolerates malformed input, because half the URIs come back from other
-// programs.
+// Percent-encoding for the desktop authentication query values. Encoding
+// walks a string's UTF-8 bytes so every reserved or non-ASCII byte escapes as
+// `%XX`; decoding reverses it byte-accurately and tolerates malformed input
+// returned by the browser callback.
 
 ///|
-/// Percent-encode `text` as a URI path: RFC 3986 unreserved bytes plus the
-/// separators a path needs (`/`, and `:` — a legal pchar, and how Windows
-/// drive letters survive) stay literal; every other byte (spaces, `#`, `?`,
-/// `%`, non-ASCII) escapes as `%XX` of its UTF-8 encoding.
-pub fn encode_path(text : StringView) -> String {
-  encode_bytes(text, is_path_byte)
-}
-
-///|
-/// Percent-encode `text` as a single URI component (a query value, one
-/// segment): like `encode_path` but `/` and `:` escape too, so the value
-/// cannot introduce URI structure.
+/// Percent-encode `text` as a single URI component. Separators and reserved
+/// characters escape so an authentication query value cannot introduce URI
+/// structure.
 pub fn encode_component(text : StringView) -> String {
   encode_bytes(text, is_component_byte)
 }
@@ -50,38 +39,6 @@ pub fn decode(text : StringView) -> String {
 }
 
 ///|
-/// Build a `file:` URI for an absolute filesystem path: backslashes
-/// normalize to `/`, a Windows drive path gains the authority-ending slash
-/// (`C:\a` → `file:///C:/a`), and reserved or non-ASCII bytes
-/// percent-encode.
-pub fn file_uri(absolute_path : @pathx.Absolute) -> String {
-  let path = absolute_path.normalize().0
-  let uri = StringBuilder::new()
-  uri.write_string("file://")
-  if !path.has_prefix("/") {
-    uri.write_char('/')
-  }
-  uri.write_string(encode_path(path))
-  uri.to_string()
-}
-
-///|
-/// The unclassified filesystem path a `file:` URI names: scheme and empty
-/// authority stripped, percent-escapes decoded as UTF-8, and the spurious leading
-/// slash of a Windows drive path dropped (`/C:/a` → `C:/a`). A non-`file:`
-/// string passes through untouched as a `Path`; callers that require an
-/// absolute filesystem location must explicitly convert it.
-pub fn file_uri_path(uri : String) -> @pathx.Path {
-  guard uri.strip_prefix("file://") is Some(rest) else { return Path(uri) }
-  let path = decode(rest)
-  if path.view() is ['/', drive, ':', ..] && drive is ('A'..='Z' | 'a'..='z') {
-    Path(path.view(start_offset=1).to_owned())
-  } else {
-    Path(path)
-  }
-}
-
-///|
 fn encode_bytes(text : StringView, keep : (Int) -> Bool) -> String {
   let out = StringBuilder::new()
   for byte in @utf8.encode(text) {
@@ -102,12 +59,6 @@ fn is_component_byte(code : Int) -> Bool {
   guard code < 0x80 else { return false }
   code.unsafe_to_char()
   is ('A'..='Z' | 'a'..='z' | '0'..='9' | '-' | '.' | '_' | '~')
-}
-
-///|
-fn is_path_byte(code : Int) -> Bool {
-  is_component_byte(code) ||
-  (code < 0x80 && code.unsafe_to_char() is ('/' | ':'))
 }
 
 ///|

@@ -27,9 +27,10 @@ pub fn Path::join(self : Path, child : Relative) -> Path {
 
 ///|
 /// Resolve this spelling against the current working directory using the
-/// current host's path rules.
-pub fn Path::resolve(self : Path) -> Path {
-  Path(@path.Path(self.0).resolve().to_string())
+/// current host's path rules. The path library guarantees that the result is
+/// absolute, so this conversion does not need an optional result.
+pub fn Path::resolve(self : Path) -> Absolute {
+  Absolute(@path.Path(self.0).resolve().to_string())
 }
 
 ///|
@@ -79,6 +80,13 @@ pub impl Show for Absolute with fn output(self, logger) {
 /// Forget the absolute classification while retaining the spelling.
 pub fn Absolute::to_path(self : Absolute) -> Path {
   Path(self.0)
+}
+
+///|
+/// Append a relative path and normalize the absolute result using the current
+/// host's path rules.
+pub fn Absolute::join(self : Absolute, child : Relative) -> Absolute {
+  Absolute(self.to_path().join(child).0)
 }
 
 ///|

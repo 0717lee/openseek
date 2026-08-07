@@ -5697,6 +5697,7 @@ test "session list assigns a Started-first conversation to its durable workspace
 }
 
 ///|
+#cfg(platform="windows")
 test "Started places a foreign conversation from its host session root" {
   let dispatch = test_dispatch()
   guard @pathx.Path("C:\\work\\core").to_absolute() is Some(workspace) else {

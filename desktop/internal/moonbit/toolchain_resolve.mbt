@@ -8,8 +8,8 @@
 /// identity (`credentials.json`) and caches, not the toolchain, and plays
 /// no part in which moon binary runs.
 pub struct ResolvedToolchain {
-  bin_dir : @pathx.Path
-  moon : @pathx.Path
+  bin_dir : @pathx.Absolute
+  moon : @pathx.Absolute
 }
 
 ///|
@@ -20,9 +20,9 @@ pub struct ResolvedToolchain {
 /// `moon.exe` (a Windows install leaking into a foreign-platform search),
 /// where command lookup for `moon` would never resolve and accepting the
 /// directory would shadow a valid `~/.moon/bin` later in the chain.
-async fn toolchain_at(bin_dir : @pathx.Path) -> ResolvedToolchain? {
+async fn toolchain_at(bin_dir : @pathx.Absolute) -> ResolvedToolchain? {
   let moon = bin_dir.join("moon" + ExecutableSuffix)
-  guard @fsx.is_executable_file(moon) else { return None }
+  guard @fsx.is_executable_file(moon.to_path()) else { return None }
   Some({ bin_dir, moon })
 }
 
@@ -54,11 +54,15 @@ pub async fn resolve_toolchain(
   runtime_dir? : @pathx.Path,
 ) -> ResolvedToolchain {
   if bundled_moonbit_seed_dir(engine_command) is Some(seed_dir) {
-    guard prepared_bundled_moonbit_payload(seed_dir~, runtime_dir?)
+    guard prepared_bundled_moonbit_payload(
+        seed_dir=seed_dir.to_path(),
+        runtime_dir?,
+      )
       is Some(payload) else {
       fail("failed to prepare bundled MoonBit toolchain")
     }
-    guard toolchain_at(moonbit_bin_dir(payload)) is Some(toolchain) else {
+    guard moonbit_bin_dir(payload).to_absolute() is Some(bin_dir) &&
+      toolchain_at(bin_dir) is Some(toolchain) else {
       fail("bundled MoonBit toolchain payload is not a complete toolchain")
     }
     return toolchain
@@ -88,7 +92,7 @@ async fn external_toolchain(
       // A relative entry only means something from the resolver's own
       // working directory; children spawn elsewhere, so it must not be
       // selected or re-exported.
-      if !bin_dir.is_host_absolute() {
+      guard bin_dir.to_absolute() is Some(bin_dir) else {
         @xlog.debug() <?
           {
             "event": "desktop_moonbit_path_entry_relative",
@@ -109,7 +113,8 @@ async fn external_toolchain(
   }
   if home_dir is Some(home) {
     let bin_dir = home.join(".moon").join("bin")
-    if toolchain_at(bin_dir) is Some(toolchain) {
+    if bin_dir.to_absolute() is Some(bin_dir) &&
+      toolchain_at(bin_dir) is Some(toolchain) {
       @xlog.debug() <?
         {
           "event": "desktop_moonbit_external_toolchain",

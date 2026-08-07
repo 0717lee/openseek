@@ -53,7 +53,9 @@ async fn browse_directory_op(
       entries.push(name)
     }
   }
-  let parent_path = dir.dirname()
+  // Parent discovery is only used to serialize the picker reply, so drop the
+  // absolute classification at this output boundary.
+  let parent_path = dir.to_path().dirname()
   let parent = if parent_path.to_string() == dir.to_string() {
     None
   } else {

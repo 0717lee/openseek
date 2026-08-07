@@ -272,7 +272,8 @@ async fn resolve_navigation_preview(
 }
 
 ///|
-test "navigation root follows host absolute and workspace-relative paths" {
+#cfg(not(platform="windows"))
+test "navigation root follows POSIX absolute and workspace-relative paths" {
   guard @pathx.Path("/ws/project/src/main.mbt").to_absolute()
     is Some(posix_file) else {
     fail("test POSIX file was not absolute")
@@ -281,19 +282,30 @@ test "navigation root follows host absolute and workspace-relative paths" {
     navigation_root_from_file(posix_file, Relative("src/main.mbt"))
     is Some(Absolute("/ws/project")),
   )
-  guard @pathx.Path("C:\\ws\\project\\src\\main.mbt").to_absolute()
-    is Some(windows_file) else {
-    fail("test Windows file was not absolute")
-  }
-  assert_true(
-    navigation_root_from_file(windows_file, Relative("src/main.mbt"))
-    is Some(Absolute("C:/ws/project")),
-  )
   guard @pathx.Path("/other/src/main.mbt").to_absolute() is Some(outside_file) else {
     fail("test outside file was not absolute")
   }
   assert_true(
     navigation_root_from_file(outside_file, Relative("lib/main.mbt")) is None,
+  )
+}
+
+///|
+#cfg(platform="windows")
+test "navigation root follows Windows absolute and workspace-relative paths" {
+  guard @pathx.Path("C:\\ws\\project\\src\\main.mbt").to_absolute()
+    is Some(file) else {
+    fail("test Windows file was not absolute")
+  }
+  assert_true(
+    navigation_root_from_file(file, Relative("src/main.mbt"))
+    is Some(Absolute("C:/ws/project")),
+  )
+  guard @pathx.Path("C:\\other\\src\\main.mbt").to_absolute() is Some(outside) else {
+    fail("test outside file was not absolute")
+  }
+  assert_true(
+    navigation_root_from_file(outside, Relative("lib/main.mbt")) is None,
   )
 }
 

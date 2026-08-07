@@ -288,10 +288,11 @@ fn DiagnosticProjection::tags(
 }
 
 ///|
-test "model uris round-trip the absolute path and the channel" {
+#cfg(not(platform="windows"))
+test "POSIX model uris round-trip the absolute path and the channel" {
   let channels : Array[@interop.ChannelId] = [Local, Remote("d_abc")]
   for channel in channels {
-    for path in ["/ws/my proj/src/a b.mbt", "/tmp/中文/x.mbt", "C:/ws/a.mbt"] {
+    for path in ["/ws/my proj/src/a b.mbt", "/tmp/中文/x.mbt"] {
       guard @pathx.Path(path).to_absolute() is Some(absolute) else {
         fail("test model path was not absolute")
       }
@@ -306,6 +307,25 @@ test "model uris round-trip the absolute path and the channel" {
       assert_eq(reparsed.to_string(), minted.to_string())
       assert_true(model_uri_path(reparsed) is Some(_))
     }
+  }
+}
+
+///|
+#cfg(platform="windows")
+test "Windows model uris round-trip the absolute path and the channel" {
+  let channels : Array[@interop.ChannelId] = [Local, Remote("d_abc")]
+  for channel in channels {
+    guard @pathx.Path("C:/ws/a.mbt").to_absolute() is Some(absolute) else {
+      fail("test model path was not absolute")
+    }
+    let minted = model_uri_of(channel, absolute)
+    assert_true(model_uri_path(minted) == Some(absolute))
+    assert_true(model_uri_channel(minted) == Some(channel))
+    // Monaco may normalize the drive letter's case while re-parsing; the
+    // document key and channel must still survive that leg.
+    let reparsed = @common.Uri::parse(ModelUri::of(channel, absolute).0)
+    assert_eq(reparsed.to_string(), minted.to_string())
+    assert_true(model_uri_path(reparsed) is Some(_))
   }
 }
 

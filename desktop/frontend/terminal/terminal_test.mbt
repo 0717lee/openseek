@@ -1,4 +1,5 @@
 ///|
+#cfg(platform="windows")
 test "Windows workspace paths use their final component as the tab label" {
   let emit : @cmd.Emit[@terminal.Msg] = @cmd.Emit(_ => @cmd.none)
   let ctx : @terminal.Ctx = {

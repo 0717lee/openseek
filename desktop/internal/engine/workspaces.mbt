@@ -186,11 +186,9 @@ fn expanded_workspace_path(path : String) -> @pathx.Absolute raise EngineError {
   } else {
     Path(trimmed)
   }
-  let resolved = expanded.resolve().normalize().to_string()
-  guard @pathx.Path(resolved).to_absolute() is Some(absolute) else {
-    raise EngineError("workspace path did not resolve to an absolute path")
-  }
-  absolute
+  // `resolve` establishes the absolute-path guarantee; normalization keeps
+  // that classification while cleaning the final workspace spelling.
+  expanded.resolve().normalize()
 }
 
 ///|
