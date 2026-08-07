@@ -8,7 +8,7 @@ import {
 }
 
 // Values
-pub fn apply_session_item(Array[TranscriptItem], @protocol.SessionItem) -> Unit
+pub fn apply_session_item(Array[TranscriptItem], @protocol.SessionItem) -> Bool
 
 pub fn apps_from_reply(@protocol.ListAppsReply) -> Array[LauncherAppItem]
 
@@ -66,7 +66,7 @@ pub(all) enum ItemKind {
   User
   Assistant(is_danger~ : Bool)
   Reasoning
-  Tool(name~ : String, is_error~ : Bool, brief~ : String?)
+  Tool(call_id~ : String, name~ : String, arguments~ : String?, is_error~ : Bool, brief~ : String?)
   Summary
 } derive(Eq)
 
