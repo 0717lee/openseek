@@ -11,10 +11,9 @@
 pub fn open_target(cwd : @pathx.Absolute?, path : @pathx.Path) -> @pathx.Path {
   if path.to_absolute() is Some(_) {
     path.normalize()
-  } else if cwd is None {
-    path
+  } else if cwd is Some(cwd) && path.to_relative() is Some(relative) {
+    cwd.to_path().join(relative).normalize()
   } else {
-    guard cwd is Some(cwd) else { return path }
-    cwd.to_path().join(path).normalize()
+    path
   }
 }

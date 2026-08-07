@@ -43,7 +43,7 @@ async fn browse_directory_op(
     if name.has_prefix(".") {
       continue
     }
-    let child = dir.join((name : @pathx.Path)).to_string()
+    let child = dir.join((name : @pathx.Relative)).to_string()
     let is_dir = (@fs.kind(child) catch {
         error if @async.is_being_cancelled() => raise error
         _ => Unknown

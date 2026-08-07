@@ -148,7 +148,7 @@ pub async fn attached_workspace_dir(path : @pathx.Absolute) -> @pathx.Path? {
       Some(index) => rest.0.view(end_offset=index).to_owned()
       None => rest.0
     }
-    root.join(Path(session)).normalize()
+    root.join(Relative(session)).normalize()
   }
   // Reject an absolute path whose real target — following symlinks — escapes
   // the owning directory; the lexical containment above does not follow links.
@@ -168,7 +168,7 @@ fn contained_path(
 ) -> @pathx.Absolute? {
   guard relative.to_path().to_absolute() is None else { return None }
   let root_path = root.to_path()
-  let resolved = root_path.join(relative.to_path()).normalize()
+  let resolved = root_path.join(relative).normalize()
   guard resolved.to_absolute() is Some(resolved) && root.contains(resolved) else {
     return None
   }

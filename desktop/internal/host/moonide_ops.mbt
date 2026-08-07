@@ -163,10 +163,10 @@ fn moonide_result_path(
   raw : String,
 ) -> String {
   let raw_path = @pathx.Path(raw)
-  let candidate = if raw_path.is_host_absolute() {
-    raw_path.normalize()
+  let candidate = if raw_path.to_relative() is Some(relative) {
+    physical_workspace.join(relative).normalize()
   } else {
-    physical_workspace.join(raw_path).normalize()
+    raw_path.normalize()
   }
   candidate.to_string()
 }
@@ -217,7 +217,7 @@ fn moonide_client_path(
     is Some(relative) else {
     return None
   }
-  Some(lexical_workspace.join(Path(relative)).normalize().to_string())
+  Some(lexical_workspace.join(Relative(relative)).normalize().to_string())
 }
 
 ///|

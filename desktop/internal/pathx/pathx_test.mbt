@@ -89,6 +89,15 @@ test "Path rejects relative conversion" {
 }
 
 ///|
+test "Path classifies non-absolute paths as Relative" {
+  assert_true(
+    @pathx.Path("src/../main.mbt").to_relative() ==
+    Some(Relative("src/../main.mbt")),
+  )
+  assert_true(@pathx.Path("/workspace").to_relative() is None)
+}
+
+///|
 #cfg(not(platform="windows"))
 test "Absolute::relative_to normalizes POSIX paths" {
   guard @pathx.Path("/ws").to_absolute() is Some(root) else {
@@ -189,7 +198,7 @@ test "normalize uses Windows host rules and typed paths use forward slashes" {
 ///|
 #cfg(not(platform="windows"))
 test "other host path operations keep POSIX spellings" {
-  assert_eq(@pathx.Path("a").join(Path("b")).0, "a/b")
+  assert_eq(@pathx.Path("a").join(Relative("b")).0, "a/b")
   assert_eq(@pathx.Path("a/b.txt").dirname().0, "a")
   assert_eq(@pathx.Path("a/b.txt").basename().to_owned(), "b.txt")
   assert_eq(@pathx.Path("a/b.txt").extname().to_owned(), ".txt")
@@ -198,7 +207,7 @@ test "other host path operations keep POSIX spellings" {
 ///|
 #cfg(platform="windows")
 test "other host path operations keep Windows spellings" {
-  assert_eq(@pathx.Path("a").join(Path("b")).0, "a\\b")
+  assert_eq(@pathx.Path("a").join(Relative("b")).0, "a\\b")
   assert_eq(@pathx.Path("a\\b.txt").dirname().0, "a")
   assert_eq(@pathx.Path("a\\b.txt").basename().to_owned(), "b.txt")
   assert_eq(@pathx.Path("a\\b.txt").extname().to_owned(), ".txt")

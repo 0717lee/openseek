@@ -35,7 +35,7 @@ async fn read_directory_op(payload : ReadDirPayload) -> ReadDirReply {
   names.sort_by((a, b) => a.lexical_compare(b))
   let entries : Array[DirEntry] = []
   for name in names {
-    let child = dir.join((name : @pathx.Path)).to_string()
+    let child = dir.join((name : @pathx.Relative)).to_string()
     let is_dir = (@fs.kind(child) catch {
         error if @async.is_being_cancelled() => raise error
         _ => Unknown
@@ -118,7 +118,7 @@ async fn collect_files(
       if @pathx.Relative(relative).is_ignored_watch_path() {
         continue
       }
-      if collect_files(dir.join((entry.name : @pathx.Path)), relative, into) {
+      if collect_files(dir.join((entry.name : @pathx.Relative)), relative, into) {
         return true
       }
     } else {

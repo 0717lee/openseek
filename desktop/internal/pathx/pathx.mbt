@@ -17,11 +17,11 @@ pub impl Show for Path with fn output(self, logger) {
 }
 
 ///|
-/// Concatenate two unclassified paths and normalize the result using the
-/// current host's path rules. An absolute `child` does not replace `self`;
-/// this follows `@path.Path::join`. The result remains unclassified because a
-/// relative `self` still produces a relative path.
-pub fn Path::join(self : Path, child : Path) -> Path {
+/// Append a relative path and normalize the result using the current host's
+/// path rules. The result remains unclassified because a relative `self` still
+/// produces a relative path. Requiring `Relative` makes the caller classify
+/// the child instead of silently appending an unclassified path.
+pub fn Path::join(self : Path, child : Relative) -> Path {
   Path(@path.Path(self.0).join(Path(child.0)).to_string())
 }
 
@@ -90,6 +90,17 @@ pub fn Path::to_absolute(self : Path) -> Absolute? {
     Some(Absolute(self.0))
   } else {
     None
+  }
+}
+
+///|
+/// Convert a path when it is not absolute according to the current host. This
+/// classifies input-boundary text before it is appended with `Path::join`.
+pub fn Path::to_relative(self : Path) -> Relative? {
+  if self.is_host_absolute() {
+    None
+  } else {
+    Some(Relative(self.0))
   }
 }
 

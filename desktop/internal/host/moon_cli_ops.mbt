@@ -211,7 +211,7 @@ async fn workspace_module_roots(
   // the recency cut when there are too many.
   let modules : Array[(@pathx.Absolute, Int64)] = []
   for name in names {
-    let child = workspace_dir.join((name : @pathx.Path))
+    let child = workspace_dir.join((name : @pathx.Relative))
     let is_dir = (@fs.kind(child.to_string()) catch {
         error if @async.is_being_cancelled() => raise error
         _ => Unknown
@@ -241,7 +241,7 @@ async fn workspace_module_roots(
 async fn manifest_mtime(dir : @pathx.Path) -> Int64? {
   let mut newest : Int64? = None
   for name in ["moon.mod", "moon.mod.json", "moon.work"] {
-    let path = dir.join((name : @pathx.Path)).to_string()
+    let path = dir.join((name : @pathx.Relative)).to_string()
     guard @fs.exists(path) else { continue }
     let (seconds, _) = @fs.mtime(path) catch {
       error if @async.is_being_cancelled() => raise error
@@ -413,12 +413,13 @@ fn absolute_diagnostic_path(
   path : String,
   root : @pathx.Absolute,
 ) -> @pathx.Absolute? {
-  if @pathx.Path(path).to_absolute() is Some(path) {
-    Some(path.normalize())
+  let path = @pathx.Path(path)
+  if path.to_absolute() is Some(absolute) {
+    Some(absolute.normalize())
+  } else if path.to_relative() is Some(relative) {
+    root.to_path().join(relative).normalize().to_absolute()
   } else {
-    let root = root.to_path()
-    let reported : @pathx.Path = Path(path)
-    root.join(reported).normalize().to_absolute()
+    None
   }
 }
 

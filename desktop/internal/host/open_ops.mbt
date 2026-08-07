@@ -39,7 +39,7 @@ fn @pathx.Path::expand_home(self : @pathx.Path) -> @pathx.Path {
   if self.0 == "~" && @home.dir() is Some(home) {
     home
   } else if self.0.strip_prefix("~/") is Some(rest) && @home.dir() is Some(home) {
-    home.join(Path(rest.to_owned()))
+    home.join(Relative(rest.to_owned()))
   } else {
     self
   }
