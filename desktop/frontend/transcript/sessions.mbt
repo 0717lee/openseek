@@ -145,21 +145,24 @@ pub fn apply_session_item(
       }
     }
     @desktop_protocol.ToolResult(payload) => {
-      // A valid result updates one still-pending recorded call in place.
-      // Completed calls must not match again: duplicate result events belong to
-      // the append-only log and remain visible as unmatched rows instead of
-      // silently overwriting the first result.
+      // A valid result updates one unambiguous, still-pending recorded call in
+      // place. Completed calls must not match again, and duplicate pending ids
+      // are ambiguous: in either case the append-only result remains visible as
+      // an unmatched row instead of overwriting or guessing a call.
       let mut matched : Int? = None
+      let mut pending_matches = 0
       if !payload.tool_call_id.is_empty() {
         for index, existing in items {
           if existing.kind
             is Tool(call_id~, arguments=Some(_), has_result=false, ..) &&
             call_id == payload.tool_call_id {
             matched = Some(index)
+            pending_matches += 1
           }
         }
       }
-      if matched is Some(index) &&
+      if pending_matches == 1 &&
+        matched is Some(index) &&
         items[index].kind is Tool(call_id~, name=call_name, arguments~, ..) {
         items[index] = {
           kind: Tool(
@@ -498,6 +501,45 @@ test "duplicate tool results preserve every durable event" {
     fail("expected the duplicate result as an unmatched row")
   }
   inspect(items[1].content, content="two")
+}
+
+///|
+test "duplicate tool call ids keep their result unpaired" {
+  let events =
+    #|{"sequence":1,"item":{"kind":"assistant","payload":{"content":"","tool_calls":[{"id":"dup","name":"read","arguments":"{\"path\":\"x\"}"},{"id":"dup","name":"shell","arguments":"{\"cmd\":\"pwd\"}"}]}}},
+    #|{"sequence":2,"item":{"kind":"tool_result","payload":{"tool_call_id":"dup","tool_name":"read","content":"result","is_error":false}}}
+  let view = session_from_reply(session_reply(events))
+  let items = view.items
+  inspect(items.length(), content="3")
+  // Both calls stay pending because their shared id cannot identify which one
+  // produced the result; the result is preserved at its own durable boundary.
+  inspect(view.event_boundaries[0].2, content="2")
+  inspect(view.event_boundaries[1].2, content="3")
+  guard items[0].kind
+    is Tool(
+      call_id="dup",
+      name="read",
+      arguments=Some("{\"path\":\"x\"}"),
+      has_result=false,
+      ..
+    ) else {
+    fail("expected the first duplicate call to remain pending")
+  }
+  guard items[1].kind
+    is Tool(
+      call_id="dup",
+      name="shell",
+      arguments=Some("{\"cmd\":\"pwd\"}"),
+      has_result=false,
+      ..
+    ) else {
+    fail("expected the second duplicate call to remain pending")
+  }
+  guard items[2].kind
+    is Tool(call_id="dup", name="read", arguments=None, has_result=true, ..) else {
+    fail("expected the ambiguous result as an unmatched row")
+  }
+  inspect(items[2].content, content="result")
 }
 
 ///|
