@@ -49,7 +49,7 @@ pub fn update(@cmd.Emit[Msg], Msg, State, Ctx) -> (@cmd.Cmd, State)
 pub(all) struct Ctx {
   owner : @interop.ConversationKey
   workspace : @pathx.Absolute?
-  checkout : @interop.CheckoutPlacement
+  checkout : @interop.CheckoutPlacement?
   dark_mode : Bool
   tree_layout : TreeLayout
   narrow : Bool

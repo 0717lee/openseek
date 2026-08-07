@@ -366,7 +366,8 @@ fn moonbit_check_input(path : @pathx.Relative) -> Bool {
 /// bookkeeping cannot be missed.
 fn State::watched_paths(self : State, ctx : Ctx) -> WatchedPaths? {
   let index_live = self.index is IndexLoading || self.index is IndexReady(..)
-  if ctx.checkout is @interop.MissingWorktree(_) ||
+  if ctx.checkout is None ||
+    ctx.checkout is Some(@interop.MissingWorktree(_)) ||
     (!ctx.panel_open && ctx.open_files.is_empty() && !index_live) ||
     ctx.owner.session.is_empty() {
     return None
@@ -525,11 +526,11 @@ pub fn update(
   state : State,
   ctx : Ctx,
 ) -> (@cmd.Cmd, State) {
-  // `sync` parks the old owner as soon as the checkout disappears. Refuse
-  // every file-editor action in the meantime: even controls that happen to
-  // be visible must not send an empty session through the host, where it
-  // could otherwise mean the registered project's main checkout.
-  if ctx.checkout is @interop.MissingWorktree(_) {
+  // `sync` parks the old owner while placement is unresolved or its checkout
+  // is missing. Refuse every file-editor action in the meantime: even stale
+  // controls must not send an empty session through the host, where it could
+  // otherwise mean the registered project's main checkout.
+  if ctx.checkout is None || ctx.checkout is Some(@interop.MissingWorktree(_)) {
     return (@cmd.none, state)
   }
   match msg {
@@ -952,7 +953,7 @@ fn test_ctx() -> Ctx {
   {
     owner: { channel: @interop.ChannelId::Local, session: "desktop-test" },
     workspace: None,
-    checkout: @interop.WorkspaceRoot,
+    checkout: Some(@interop.WorkspaceRoot),
     dark_mode: false,
     tree_layout: BottomPanel,
     narrow: false,
@@ -1290,7 +1291,7 @@ test "a missing checkout parks files and refuses editor actions until repair" {
   let missing : Ctx = {
     ..present,
     owner: { ..present.owner, session: "" },
-    checkout: @interop.MissingWorktree(name="wt"),
+    checkout: Some(@interop.MissingWorktree(name="wt")),
     open_files: [],
     active_file: None,
   }
@@ -1314,6 +1315,37 @@ test "a missing checkout parks files and refuses editor actions until repair" {
   assert_true(
     restored.docs.get(Relative("a.mbt")) is Some({ state: TabLoading, .. }),
   )
+}
+
+///|
+test "an unresolved placement parks files and refuses editor actions" {
+  let emit = test_emit()
+  let present = test_ctx()
+  let docs : Map[@pathx.Relative, Doc] = Map([])
+  docs[Relative("a.mbt")] = loaded_doc("a.mbt")
+  let state = {
+    ..owned_state(),
+    docs,
+    watching: Some({
+      owner: present.owner,
+      workspace: None,
+      files: [Relative("a.mbt")],
+      directories: [@pathx.Relative::root()],
+    }),
+  }
+  let unresolved : Ctx = {
+    ..present,
+    owner: { ..present.owner, session: "" },
+    checkout: None,
+    open_files: [],
+    active_file: None,
+  }
+  let (parked, _) = sync(emit, state, unresolved)
+  assert_true(parked.owner is Some({ session: "", .. }))
+  assert_true(parked.docs.is_empty())
+  assert_true(parked.watching is None)
+  let (_, refused) = update(emit, EnsureFileIndex, parked, unresolved)
+  assert_true(refused == parked)
 }
 
 ///|

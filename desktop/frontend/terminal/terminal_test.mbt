@@ -5,7 +5,7 @@ test "Windows workspace paths use their final component as the tab label" {
     channel: @interop.ChannelId::Local,
     session: "windows-workspace",
     workspace: Some(@pathx.Absolute("C:\\Users\\alice\\project")),
-    checkout: @interop.WorkspaceRoot,
+    checkout: Some(@interop.WorkspaceRoot),
     dark_mode: false,
     connected: true,
   }
@@ -28,7 +28,7 @@ test "an exit before the open reply cannot revive a dead terminal" {
     channel: @interop.ChannelId::Local,
     session: "exit-race",
     workspace: Some(@pathx.Absolute("/work/project")),
-    checkout: @interop.WorkspaceRoot,
+    checkout: Some(@interop.WorkspaceRoot),
     dark_mode: false,
     connected: true,
   }
@@ -67,7 +67,7 @@ test "sync records color-scheme changes even when the shown tab is unchanged" {
     channel: @interop.ChannelId::Local,
     session: "theme",
     workspace: None,
-    checkout: @interop.WorkspaceRoot,
+    checkout: Some(@interop.WorkspaceRoot),
     dark_mode: false,
     connected: true,
   }
@@ -86,7 +86,7 @@ test "output acknowledgement messages leave terminal state unchanged" {
     channel: @interop.ChannelId::Local,
     session: "ack-purity",
     workspace: None,
-    checkout: @interop.WorkspaceRoot,
+    checkout: Some(@interop.WorkspaceRoot),
     dark_mode: false,
     connected: true,
   }
@@ -122,7 +122,7 @@ test "same-numbered terminal ids on different devices stay isolated" {
     channel: @interop.ChannelId::Local,
     session: "shared-session",
     workspace: Some(@pathx.Absolute("/work/project")),
-    checkout: @interop.WorkspaceRoot,
+    checkout: Some(@interop.WorkspaceRoot),
     dark_mode: false,
     connected: true,
   }
@@ -222,7 +222,7 @@ test "an open panel waits for a reconnected channel before replacing its PTY" {
     channel: @interop.ChannelId::Remote("device-1"),
     session: "reconnect",
     workspace: None,
-    checkout: @interop.WorkspaceRoot,
+    checkout: Some(@interop.WorkspaceRoot),
     dark_mode: false,
     connected: false,
   }
@@ -254,7 +254,7 @@ test "a missing checkout refuses new PTYs and retires only its conversation" {
     channel: @interop.ChannelId::Local,
     session: "missing",
     workspace: Some(@pathx.Absolute("/work/project")),
-    checkout: @interop.Worktree(name="wt"),
+    checkout: Some(@interop.Worktree(name="wt")),
     dark_mode: false,
     connected: true,
   }
@@ -270,7 +270,11 @@ test "a missing checkout refuses new PTYs and retires only its conversation" {
     opening,
     ctx,
   )
-  let other_ctx = { ..ctx, session: "other", checkout: @interop.WorkspaceRoot }
+  let other_ctx = {
+    ..ctx,
+    session: "other",
+    checkout: Some(@interop.WorkspaceRoot),
+  }
   let (_, other_opening) = @terminal.update(
     emit,
     @terminal.NewTerminal,
@@ -283,7 +287,10 @@ test "a missing checkout refuses new PTYs and retires only its conversation" {
     other_opening,
     other_ctx,
   )
-  let missing_ctx = { ..ctx, checkout: @interop.MissingWorktree(name="wt") }
+  let missing_ctx = {
+    ..ctx,
+    checkout: Some(@interop.MissingWorktree(name="wt")),
+  }
   let (retired, _) = @terminal.sync(emit, both_running, missing_ctx)
   assert_eq(retired.tabs.length(), 1)
   assert_eq(retired.tabs[0].session, "other")
@@ -313,7 +320,7 @@ test "a worktree conversation never reuses the main checkout terminal group" {
     channel: @interop.ChannelId::Local,
     session: "main-chat",
     workspace: Some(@pathx.Absolute("/work/project")),
-    checkout: @interop.WorkspaceRoot,
+    checkout: Some(@interop.WorkspaceRoot),
     dark_mode: false,
     connected: true,
   }
@@ -326,7 +333,7 @@ test "a worktree conversation never reuses the main checkout terminal group" {
   let worktree = {
     ..main,
     session: "worktree-chat",
-    checkout: @interop.Worktree(name="wt-1"),
+    checkout: Some(@interop.Worktree(name="wt-1")),
   }
   // The panel is already open, but the worktree group is empty, so sync must
   // create a second tab rather than reveal the main checkout's tab.
@@ -336,6 +343,61 @@ test "a worktree conversation never reuses the main checkout terminal group" {
     separated.tabs[0].workspace
     is @terminal.Project(@interop.ChannelId::Local, "/work/project"),
   )
+  assert_true(
+    separated.tabs[1].workspace
+    is @terminal.Worktree(@interop.ChannelId::Local, "/work/project", "wt-1"),
+  )
+}
+
+///|
+test "an unresolved placement cannot reveal or create a project terminal" {
+  let emit : @cmd.Emit[@terminal.Msg] = @cmd.Emit(_ => @cmd.none)
+  let main : @terminal.Ctx = {
+    channel: @interop.ChannelId::Local,
+    session: "main-chat",
+    workspace: Some(@pathx.Absolute("/work/project")),
+    checkout: Some(@interop.WorkspaceRoot),
+    dark_mode: false,
+    connected: true,
+  }
+  let (_, project_opening) = @terminal.update(
+    emit,
+    @terminal.ToggleTerminal,
+    @terminal.State::empty(),
+    main,
+  )
+  let unresolved : @terminal.Ctx = {
+    ..main,
+    session: "restored-chat",
+    checkout: None,
+  }
+  // The existing project tab stays alive for its owner, but the restored
+  // conversation cannot see it or create another tab under the same key.
+  let (waiting, _) = @terminal.sync(emit, project_opening, unresolved)
+  assert_eq(waiting.tabs.length(), 1)
+  assert_true(waiting.shown is None)
+  let (_, toggle_refused) = @terminal.update(
+    emit,
+    @terminal.ToggleTerminal,
+    @terminal.State::empty(),
+    unresolved,
+  )
+  let (_, new_refused) = @terminal.update(
+    emit,
+    @terminal.NewTerminal,
+    waiting,
+    unresolved,
+  )
+  assert_true(toggle_refused == @terminal.State::empty())
+  assert_true(new_refused == waiting)
+  // Once the list identifies the worktree, the already-open panel creates a
+  // correctly isolated worktree tab instead of migrating the project tab.
+  let resolved = {
+    ..unresolved,
+    checkout: Some(@interop.Worktree(name="wt-1")),
+  }
+  let (separated, _) = @terminal.sync(emit, waiting, resolved)
+  assert_eq(separated.tabs.length(), 2)
   assert_true(
     separated.tabs[1].workspace
     is @terminal.Worktree(@interop.ChannelId::Local, "/work/project", "wt-1"),

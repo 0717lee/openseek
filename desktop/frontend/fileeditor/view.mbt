@@ -129,7 +129,9 @@ fn tree_pane(dispatch : @cmd.Emit[Msg], state : State, ctx : Ctx) -> @html.Html 
     Some(message) => Some(message)
     None => state.error
   }
-  let tree_children = if ctx.checkout is @interop.MissingWorktree(_) {
+  let tree_children = if ctx.checkout is None {
+    [@html.div(class="file-panel-empty", "Waiting for workspace placement…")]
+  } else if ctx.checkout is Some(@interop.MissingWorktree(_)) {
     [@html.div(class="file-panel-empty", "Worktree checkout is missing.")]
   } else if ctx.owner.session.is_empty() {
     [@html.div(class="file-panel-empty", "No conversation selected.")]

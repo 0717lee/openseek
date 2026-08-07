@@ -97,10 +97,10 @@ pub(all) struct Ctx {
   channel : @interop.ChannelId
   session : String
   workspace : @pathx.Absolute?
-  /// Project-root, live-worktree, or missing-worktree placement. The enum
-  /// retains the worktree name in both bound cases and makes an impossible
-  /// `worktree: None, available: false` combination unrepresentable.
-  checkout : @interop.CheckoutPlacement
+  /// `None` until the host has identified this conversation's placement on
+  /// the current connection. A resolved value distinguishes the project root,
+  /// a live worktree, and a retained binding whose checkout is missing.
+  checkout : @interop.CheckoutPlacement?
   dark_mode : Bool
   /// False from the first WebSocket loss until that channel reports ready
   /// again. The old connection's PTYs are already gone, so `sync` must not
@@ -109,25 +109,29 @@ pub(all) struct Ctx {
 }
 
 ///|
-/// The workspace group the active conversation belongs to.
-fn workspace_key(ctx : Ctx) -> WorkspaceKey {
+/// The workspace group the active conversation belongs to, once its placement
+/// has loaded. Returning `None` keeps an unresolved worktree conversation out
+/// of the project-root group.
+fn workspace_key(ctx : Ctx) -> WorkspaceKey? {
+  guard ctx.checkout is Some(checkout) else { return None }
   guard ctx.workspace is Some(workspace) else {
-    return Scratch(ctx.channel, ctx.session)
+    return Some(Scratch(ctx.channel, ctx.session))
   }
-  match ctx.checkout {
-    @interop.WorkspaceRoot => Project(ctx.channel, workspace.0)
+  match checkout {
+    @interop.WorkspaceRoot => Some(Project(ctx.channel, workspace.0))
     @interop.Worktree(name~) | @interop.MissingWorktree(name~) =>
-      Worktree(ctx.channel, workspace.0, name)
+      Some(Worktree(ctx.channel, workspace.0, name))
   }
 }
 
 ///|
 /// The tabs of the active conversation's workspace group, in creation order.
 fn State::visible_tabs(self : State, ctx : Ctx) -> Array[Tab] {
-  if ctx.checkout is @interop.MissingWorktree(_) {
+  guard ctx.checkout is Some(checkout) &&
+    !(checkout is @interop.MissingWorktree(_)) &&
+    workspace_key(ctx) is Some(key) else {
     return []
   }
-  let key = workspace_key(ctx)
   self.tabs.filter(tab => tab.workspace == key)
 }
 
@@ -137,7 +141,7 @@ fn State::visible_tabs(self : State, ctx : Ctx) -> Array[Tab] {
 fn State::active_tab(self : State, ctx : Ctx) -> Tab? {
   let visible = self.visible_tabs(ctx)
   guard !visible.is_empty() else { return None }
-  let group = workspace_key(ctx)
+  guard workspace_key(ctx) is Some(group) else { return None }
   for entry in self.active {
     if entry.0 == group {
       for tab in visible {

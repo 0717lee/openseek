@@ -50,13 +50,27 @@ fn fetch_worktrees(
   let dispatch = dispatch.map((msg : DeviceMsg) => FromDevice(channel, msg))
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
-      // A host without the op just reads as "no worktrees".
       let reply : @protocol.WorktreesReply = @interop.bridge_request(
         channel,
         @commands.worktree_list,
         { workspace, },
       ) catch {
-        _ => return
+        error => {
+          // A failed list is not an empty registry: until a real reply arrives
+          // the client cannot safely decide whether a durable conversation is
+          // rooted in the project or one of its worktrees.
+          scheduler.add(
+            dispatch(
+              WorktreesFailed(
+                workspace~,
+                connection_generation~,
+                request_generation~,
+                message=@interop.bridge_error_text(error),
+              ),
+            ),
+          )
+          return
+        }
       }
       scheduler.add(
         dispatch(
@@ -251,32 +265,30 @@ fn worktree_name_for(
 
 ///|
 /// The active placement of a conversation inside its registered project.
-/// Once that workspace's registry has loaded it is authoritative; before the
-/// first reply, a locally-created conversation's provisional worktree name
-/// keeps its panels in the intended group. A retained row whose checkout is
-/// gone stays `MissingWorktree` until the user explicitly rebuilds it.
+/// `None` means that workspace's registry has not loaded on this connection,
+/// so callers must refuse workspace-scoped actions rather than guessing the
+/// project root. A locally-created conversation's provisional worktree name
+/// is already enough to identify its group. Once loaded, an absent row means
+/// `WorkspaceRoot`; a retained row whose checkout is gone stays
+/// `MissingWorktree` until the user explicitly rebuilds it.
 fn Model::checkout_placement(
   self : Model,
   conv : Conversation,
-) -> @interop.CheckoutPlacement {
-  guard conv.workspace is Some(_) else { return @interop.WorkspaceRoot }
-  let provisional = if conv.worktree is Some(name) {
-    @interop.Worktree(name~)
-  } else {
-    @interop.WorkspaceRoot
-  }
+) -> @interop.CheckoutPlacement? {
+  guard conv.workspace is Some(_) else { return Some(@interop.WorkspaceRoot) }
+  let provisional = conv.worktree.map(name => @interop.Worktree(name~))
   guard self.device_state(conv.device) is Some(dev) else { return provisional }
   let workspace = workspace_token(conv.workspace)
   guard dev.worktrees.iter().any(group => group.workspace == workspace) else {
     return provisional
   }
   guard worktree_row_for(dev, workspace, conv.session_id) is Some(row) else {
-    return @interop.WorkspaceRoot
+    return Some(@interop.WorkspaceRoot)
   }
   if row.present {
-    @interop.Worktree(name=row.name)
+    Some(@interop.Worktree(name=row.name))
   } else {
-    @interop.MissingWorktree(name=row.name)
+    Some(@interop.MissingWorktree(name=row.name))
   }
 }
 
@@ -537,7 +549,8 @@ test "a missing checkout stays bound while rebuild and archive remain reachable"
       ],
     })
   assert_true(
-    bound.checkout_placement(bound.active()) is @interop.Worktree(name="wt"),
+    bound.checkout_placement(bound.active())
+    is Some(@interop.Worktree(name="wt")),
   )
   // The retained row carries `present: false`, whether an external deletion
   // or archive removed the checkout.
@@ -551,16 +564,16 @@ test "a missing checkout stays bound while rebuild and archive remain reachable"
   )
   assert_true(
     gone.checkout_placement(gone.active())
-    is @interop.MissingWorktree(name="wt"),
+    is Some(@interop.MissingWorktree(name="wt")),
   )
   assert_true(
-    terminal_ctx(gone).checkout is @interop.MissingWorktree(name="wt"),
+    terminal_ctx(gone).checkout is Some(@interop.MissingWorktree(name="wt")),
   )
   // Session-list reconstruction does not itself carry the worktree name; the
   // retained registry row still keeps its terminal group away from main.
   let resumed = gone.replace_conversation({ ..gone.active(), worktree: None })
   assert_true(
-    terminal_ctx(resumed).checkout is @interop.MissingWorktree(name="wt"),
+    terminal_ctx(resumed).checkout is Some(@interop.MissingWorktree(name="wt")),
   )
   // The binding is NOT dropped: the conversation must never silently read as
   // a plain workspace chat.
@@ -570,7 +583,7 @@ test "a missing checkout stays bound while rebuild and archive remain reachable"
   let (_, repairing) = update(dispatch, RepairWorktree, gone)
   assert_true(
     repairing.checkout_placement(repairing.active())
-    is @interop.MissingWorktree(name="wt"),
+    is Some(@interop.MissingWorktree(name="wt")),
   )
   assert_true(repairing.active().worktree is Some("wt"))
   // Archive is the other exit. Like every update handler, applying the same
@@ -588,7 +601,7 @@ test "a missing checkout stays bound while rebuild and archive remain reachable"
   )
   assert_true(
     archiving.checkout_placement(archiving.active())
-    is @interop.MissingWorktree(name="wt"),
+    is Some(@interop.MissingWorktree(name="wt")),
   )
   assert_eq(
     archiving.dev().sessions_request_generation,
@@ -603,19 +616,57 @@ test "a missing checkout stays bound while rebuild and archive remain reachable"
   let (_, noop) = update(dispatch, RepairWorktree, bound)
   assert_true(noop.active().worktree is Some("wt"))
   assert_true(
-    noop.checkout_placement(noop.active()) is @interop.Worktree(name="wt"),
+    noop.checkout_placement(noop.active()) is Some(@interop.Worktree(name="wt")),
   )
+}
+
+///|
+test "a restored workspace conversation waits for placement before using root" {
+  let dispatch = test_dispatch()
+  let unresolved = test_model().replace_conversation({
+    ..test_conversation(),
+    workspace: Some(Absolute("/proj")),
+    // `session.list` reconstructs durable conversations without a worktree
+    // hint. Absence is not proof that this one belongs to the project root.
+    worktree: None,
+  })
+  assert_true(unresolved.checkout_placement(unresolved.active()) is None)
+  assert_true(terminal_ctx(unresolved).checkout is None)
+  assert_eq(file_ctx(unresolved).owner.session, "")
+  let generation = unresolved.dev().worktrees_request_generation
+  let (_, retrying) = update(dispatch, RetryWorktreePlacement, unresolved)
+  assert_eq(retrying.dev().worktrees_request_generation, generation + 1)
+  assert_true(retrying.checkout_placement(retrying.active()) is None)
+  let (_, loaded) = update_dev(
+    dispatch,
+    WorktreesLoaded(
+      [],
+      workspace="/proj",
+      connection_generation=0,
+      request_generation=1,
+    ),
+    unresolved,
+  )
+  assert_true(
+    loaded.checkout_placement(loaded.active()) is Some(@interop.WorkspaceRoot),
+  )
+  assert_eq(file_ctx(loaded).owner.session, "desktop-test")
 }
 
 ///|
 test "a worktree mode submit opens the run like any other" {
   let dispatch = test_dispatch()
-  let model = test_model().replace_conversation({
-    ..test_conversation(),
-    workspace: Some(Absolute("/proj")),
-    worktree_mode: true,
-    task: "go",
-  })
+  let model = test_model()
+    .replace_conversation({
+      ..test_conversation(),
+      workspace: Some(Absolute("/proj")),
+      worktree_mode: true,
+      task: "go",
+    })
+    .with_dev(dev => {
+      ..dev,
+      worktrees: [{ workspace: "/proj", rows: [], generation: 1 }],
+    })
   let (_, sent) = update(dispatch, Send, model)
   assert_true(sent.active().run is Starting(..))
   inspect(sent.active().task, content="")
@@ -656,6 +707,53 @@ test "worktrees loaded respects the request generation fence" {
   )
   assert_true(
     worktree_name_for(stale.dev(), "/proj", "desktop-wt") is Some("wt"),
+  )
+}
+
+///|
+test "a worktree list failure stays unresolved and ignores stale errors" {
+  let dispatch = test_dispatch()
+  let unresolved = test_model().replace_conversation({
+    ..test_conversation(),
+    workspace: Some(Absolute("/proj")),
+  })
+  let (_, failed) = update_dev(
+    dispatch,
+    WorktreesFailed(
+      workspace="/proj",
+      connection_generation=0,
+      request_generation=1,
+      message="offline",
+    ),
+    unresolved,
+  )
+  assert_true(failed.checkout_placement(failed.active()) is None)
+  assert_eq(failed.notifications.length(), 1)
+  assert_true(failed.notifications[0].message.contains("offline"))
+  let (_, loaded) = update_dev(
+    dispatch,
+    WorktreesLoaded(
+      [],
+      workspace="/proj",
+      connection_generation=0,
+      request_generation=2,
+    ),
+    failed,
+  )
+  let (_, stale_failure) = update_dev(
+    dispatch,
+    WorktreesFailed(
+      workspace="/proj",
+      connection_generation=0,
+      request_generation=1,
+      message="late",
+    ),
+    loaded,
+  )
+  assert_eq(stale_failure.notifications.length(), 1)
+  assert_true(
+    stale_failure.checkout_placement(stale_failure.active())
+    is Some(@interop.WorkspaceRoot),
   )
 }
 
@@ -752,12 +850,17 @@ test "a worktree commit broadcast supersedes lists and unbinds removed names" {
 ///|
 test "a failed worktree setup keeps the retry eligible" {
   let dispatch = test_dispatch()
-  let model = test_model().replace_conversation({
-    ..test_conversation(),
-    workspace: Some(Absolute("/proj")),
-    worktree_mode: true,
-    task: "go",
-  })
+  let model = test_model()
+    .replace_conversation({
+      ..test_conversation(),
+      workspace: Some(Absolute("/proj")),
+      worktree_mode: true,
+      task: "go",
+    })
+    .with_dev(dev => {
+      ..dev,
+      worktrees: [{ workspace: "/proj", rows: [], generation: 1 }],
+    })
   let worktrees_generation = model.dev().worktrees_request_generation
   let (_, sent) = update(dispatch, Send, model)
   guard sent.active().input_ledger is [entry] else {

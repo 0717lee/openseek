@@ -37,8 +37,8 @@ fn open_new_tab(
   state : State,
   ctx : Ctx,
 ) -> (@cmd.Cmd, State) {
+  guard workspace_key(ctx) is Some(group) else { return (@cmd.none, state) }
   let key = state.next_key
-  let group = workspace_key(ctx)
   let tab : Tab = {
     key,
     id: None,
@@ -121,14 +121,16 @@ pub fn update(
   state : State,
   ctx : Ctx,
 ) -> (@cmd.Cmd, State) {
+  let checkout_ready = ctx.checkout is Some(@interop.WorkspaceRoot) ||
+    ctx.checkout is Some(@interop.Worktree(_))
   match msg {
     ToggleTerminal =>
       if state.open {
         // Hide only — every shell keeps running for the panel's return.
         (@cmd.none, { ..state, open: false })
-      } else if ctx.checkout is @interop.MissingWorktree(_) {
-        // The composer carries the Repair/Archive choices. Do not open a
-        // panel that cannot safely own a PTY.
+      } else if !checkout_ready {
+        // An unresolved placement cannot safely choose a terminal group; a
+        // missing checkout likewise has no directory in which to start one.
         (@cmd.none, state)
       } else {
         match state.active_tab(ctx) {
@@ -147,7 +149,7 @@ pub fn update(
         }
       }
     NewTerminal =>
-      if !(ctx.checkout is @interop.MissingWorktree(_)) && ctx.connected {
+      if checkout_ready && ctx.connected {
         open_new_tab(dispatch, state, ctx)
       } else {
         (@cmd.none, state)
@@ -176,9 +178,7 @@ pub fn update(
       guard state.tab_by_key(key) is Some(tab) else {
         return (@cmd.none, state)
       }
-      if !(ctx.checkout is @interop.MissingWorktree(_)) &&
-        tab.status is TabOpening &&
-        tab.id is None {
+      if checkout_ready && tab.status is TabOpening && tab.id is None {
         (
           open_session(
             dispatch,
@@ -243,7 +243,7 @@ pub fn update(
         (@cmd.none, state)
       }
     UserInput(key~, data~) =>
-      if !(ctx.checkout is @interop.MissingWorktree(_)) &&
+      if checkout_ready &&
         state.tab_by_key(key) is Some(tab) &&
         tab.status is TabRunning &&
         tab.id is Some(id) {
@@ -256,7 +256,7 @@ pub fn update(
         (@cmd.none, state)
       }
     BinaryInput(key~, data~) =>
-      if !(ctx.checkout is @interop.MissingWorktree(_)) &&
+      if checkout_ready &&
         state.tab_by_key(key) is Some(tab) &&
         tab.status is TabRunning &&
         tab.id is Some(id) {
@@ -272,7 +272,7 @@ pub fn update(
     // record for a lost keystroke.
     InputFailed(key=_, message=_) => (@cmd.none, state)
     ViewportResized(key~, cols~, rows~) =>
-      if !(ctx.checkout is @interop.MissingWorktree(_)) &&
+      if checkout_ready &&
         state.tab_by_key(key) is Some(tab) &&
         tab.status is TabRunning &&
         tab.id is Some(id) {
@@ -382,7 +382,25 @@ pub fn sync(
   state : State,
   ctx : Ctx,
 ) -> (State, @cmd.Cmd) {
-  if ctx.checkout is @interop.MissingWorktree(_) {
+  if ctx.checkout is None {
+    // Preserve existing groups, but reveal none of them while this
+    // conversation's group is unknown. A later placement reply can then
+    // select or create the correct group without migrating any tab.
+    let shown_changed = state.shown is Some(_)
+    let theme_changed = state.synced_dark_mode != Some(ctx.dark_mode)
+    let commands : Array[@cmd.Cmd] = []
+    if shown_changed {
+      commands.push(apply_shown(None))
+    }
+    if theme_changed {
+      commands.push(apply_theme(ctx.dark_mode))
+    }
+    return (
+      { ..state, shown: None, synced_dark_mode: Some(ctx.dark_mode) },
+      @cmd.batch(commands),
+    )
+  }
+  if ctx.checkout is Some(@interop.MissingWorktree(_)) {
     let shown_changed = state.shown is Some(_)
     let theme_changed = state.synced_dark_mode != Some(ctx.dark_mode)
     let (commands, state) = state.retire_missing_session(ctx)

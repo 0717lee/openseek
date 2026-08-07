@@ -211,9 +211,10 @@ pub fn TreeLayout::wire(self : TreeLayout) -> String {
 pub(all) struct Ctx {
   owner : @interop.ConversationKey
   workspace : @pathx.Absolute?
-  // A missing bound checkout blocks every filesystem request so none can be
-  // resolved against the registered project's main checkout.
-  checkout : @interop.CheckoutPlacement
+  // `None` while this connection has not loaded the conversation's placement.
+  // Unknown and missing placements both block filesystem requests so neither
+  // can be resolved against the registered project's main checkout.
+  checkout : @interop.CheckoutPlacement?
   dark_mode : Bool
   tree_layout : TreeLayout
   // The app's phone-narrow layout flag. Narrow, the tree and the viewer

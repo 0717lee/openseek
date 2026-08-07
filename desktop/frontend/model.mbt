@@ -1230,6 +1230,10 @@ priv enum Msg {
   // workspace root, or a fresh host-named worktree (its execution
   // environment, bound 1:1 at creation).
   ToggleWorktreeMode
+  // Retry the active workspace's placement list after its first request
+  // failed or remained unanswered. The conversation stays blocked until a
+  // real list reply or worktree commit broadcast identifies its placement.
+  RetryWorktreePlacement
   // Rebuild the active conversation's missing worktree checkout on its
   // surviving branch. The other safe exit is the ordinary ArchiveSession:
   // a bound conversation never migrates into the workspace root.
@@ -1424,6 +1428,15 @@ priv enum DeviceMsg {
     workspace~ : String,
     connection_generation~ : Int,
     request_generation~ : Int
+  )
+  // A failed list leaves that workspace's placement unresolved. Carry both
+  // generations so a dead connection or an older request cannot surface a
+  // stale error after a newer snapshot or broadcast has already arrived.
+  WorktreesFailed(
+    workspace~ : String,
+    connection_generation~ : Int,
+    request_generation~ : Int,
+    message~ : String
   )
   // The post-commit `worktree.changed` broadcast for one workspace.
   WorktreesChanged(Array[WorktreeRow], workspace~ : String)

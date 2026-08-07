@@ -857,7 +857,8 @@ fn file_ctx(model : Model) -> @fileeditor.Ctx {
     // real conversation's dock strip separately until Repair restores it.
     owner: {
       channel: model.focused,
-      session: if checkout is @interop.MissingWorktree(_) {
+      session: if checkout is None ||
+        checkout is Some(@interop.MissingWorktree(_)) {
         ""
       } else {
         conv.session_id
@@ -1831,13 +1832,16 @@ fn update_msg(
     }
     Send => {
       let conv = model.active()
+      let checkout = model.checkout_placement(conv)
       // The outgoing prompt is the typed text with the chips folded in as the
       // `<user_mentions>` envelope. Typed text is required — chips alone are
       // context without an instruction and stay in the composer.
       let task = compose_prompt(conv.mentions, conv.task).trim().to_owned()
       if !conv.draft_sendable() ||
         !(model.bridge_state() is Connected) ||
-        !model.api_ready() {
+        !model.api_ready() ||
+        checkout is None ||
+        checkout is Some(@interop.MissingWorktree(_)) {
         (@cmd.none, model)
       } else if !(conv.sync is Synced) {
         // A prompt or steer submitted while the durable frontier is unknown
@@ -2024,9 +2028,31 @@ fn update_msg(
         (@cmd.none, model)
       }
     }
+    RetryWorktreePlacement => {
+      let conv = model.active()
+      guard model.checkout_placement(conv) is None &&
+        conv.workspace is Some(workspace) &&
+        model.device_state(conv.device) is Some(dev) else {
+        return (@cmd.none, model)
+      }
+      let request_generation = dev.worktrees_request_generation + 1
+      (
+        fetch_worktrees(
+          dispatch,
+          conv.device,
+          workspace.0,
+          dev.connection_generation,
+          request_generation,
+        ),
+        model.replace_device({
+          ..dev,
+          worktrees_request_generation: request_generation,
+        }),
+      )
+    }
     RepairWorktree => {
       let conv = model.active()
-      guard model.checkout_placement(conv) is @interop.MissingWorktree(_) else {
+      guard model.checkout_placement(conv) is Some(@interop.MissingWorktree(_)) else {
         return (@cmd.none, model)
       }
       (
@@ -2783,6 +2809,11 @@ fn update_device_msg(
         archived_request_generation,
         workspaces_request_generation,
         archive_overrides: [],
+        // Worktree notifications are not replayed across a connection gap.
+        // Keep every workspace blocked until this connection returns a fresh
+        // list (or a newer `worktree.changed` broadcast) instead of trusting
+        // placement cached before the disconnect.
+        worktrees: [],
       })
       // Replies from writes issued on the dead bridge carry their captured
       // generation and are ignored below. The new host may have restarted
@@ -3192,6 +3223,24 @@ fn update_device_msg(
         model.replace_device(
           dev.with_worktrees(workspace, rows, generation=request_generation),
         ),
+      )
+    }
+    WorktreesFailed(
+      workspace~,
+      connection_generation~,
+      request_generation~,
+      message~
+    ) => {
+      // A later snapshot or broadcast for this workspace makes an older
+      // failure irrelevant, just as a dead connection's rejection must not
+      // pop over the newly connected UI.
+      guard connection_generation == dev.connection_generation &&
+        request_generation > dev.worktree_generation(workspace) else {
+        return (@cmd.none, model)
+      }
+      model.notify_error(
+        dispatch,
+        "Worktree list unavailable for \{workspace}: \{message}",
       )
     }
     WorktreesChanged(rows, workspace~) => {
@@ -10839,6 +10888,7 @@ test "archive broadcast invalidates the active send target before list replies" 
           workspace_name: "archived",
         },
       ],
+      worktrees: [{ workspace: "/work/archived", rows: [], generation: 1 }],
     })
   let (_, invalidated) = update_dev(
     dispatch,
@@ -11640,10 +11690,15 @@ test "chip jumps relativize legacy absolute paths against the roots" {
   )
   assert_true(@dock.active_file(next.dock) is Some(Relative("src/main.mbt")))
   // Before the first run reports cwd, the attached workspace serves as root.
-  let model = test_model().replace_conversation({
-    ..test_conversation(),
-    workspace: Some(Absolute("/work/project")),
-  })
+  let model = test_model()
+    .replace_conversation({
+      ..test_conversation(),
+      workspace: Some(Absolute("/work/project")),
+    })
+    .with_dev(dev => {
+      ..dev,
+      worktrees: [{ workspace: "/work/project", rows: [], generation: 1 }],
+    })
   let (_, next) = update(
     dispatch,
     JumpToLocation(
