@@ -4,7 +4,7 @@ package "openseek_desktop/frontend/resource"
 import {
   "moonbitlang/editor/base/common",
   "openseek_desktop/frontend/interop",
-  "openseek_desktop/internal/pathx",
+  "openseek_desktop/frontend/pathx",
 }
 
 // Values
