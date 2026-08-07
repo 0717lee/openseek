@@ -360,20 +360,20 @@ fn moonbit_check_input(path : @pathx.Relative) -> Bool {
 }
 
 ///|
-/// The exact selection the host should watch: the open files (the dock
-/// strip's projection — their staleness must keep being tracked even while
-/// the panel is closed, for the reopen) plus the root and expanded
-/// directories the tree keeps on screen while the panel is open. `None`
-/// parks the watcher.
+/// Reconcile the host's workspace watcher with what the panel and Quick Open
+/// need: follow the active session while the panel is open, tabs remain open,
+/// or a workspace file index is live. Wraps every `sync` exit so the
+/// bookkeeping cannot be missed.
 fn State::watched_paths(self : State, ctx : Ctx) -> WatchedPaths? {
-  if (!ctx.panel_open && ctx.open_files.is_empty()) ||
+  let index_live = self.index is IndexLoading || self.index is IndexReady(..)
+  if (!ctx.panel_open && ctx.open_files.is_empty() && !index_live) ||
     ctx.owner.session.is_empty() {
     return None
   }
   let files = ctx.open_files.copy()
   files.sort_by((left, right) => left.0.lexical_compare(right.0))
   let directories : Array[@pathx.Relative] = []
-  if ctx.panel_open {
+  if ctx.panel_open || index_live {
     directories.push(@pathx.Relative::root())
     for directory in self.expanded {
       if !directories.contains(directory) {
@@ -527,14 +527,9 @@ pub fn update(
   match msg {
     ToggleTree => {
       // The docked panel takes its height from the viewer, and the viewer
-      // cannot see a CSS change on its own. Opening also puts the keyboard
-      // in the filter input, so the panel is drivable without the mouse.
+      // cannot see a CSS change on its own.
       let opening = !state.tree_open
-      let cmds = [request_viewer_remeasure()]
-      if opening {
-        cmds.push(focus_filter_after_render())
-      }
-      (@cmd.batch(cmds), { ..state, tree_open: opening })
+      (request_viewer_remeasure(), { ..state, tree_open: opening })
     }
     RevealDirectory(path) =>
       if path.is_root() {
@@ -599,67 +594,14 @@ pub fn update(
           )
         }
       }
-    FileFilterChanged(query) => {
-      // A new query re-flattens the rows, so the old cursor position is
-      // meaningless; the next ↑/↓ re-enters at an edge.
-      let state = { ..state, filter: query, cursor: None }
-      // The first non-blank query is what makes the workspace index worth
-      // building. Setting `IndexLoading` right away keeps the keystrokes
-      // that follow from stacking duplicate requests.
-      if !query.trim().is_empty() && state.index is IndexEmpty {
+    EnsureFileIndex =>
+      if state.owner != Some(ctx.owner) {
+        (@cmd.none, state)
+      } else if state.index is IndexEmpty || state.index is IndexFailed {
         (
           list_files(dispatch, ctx.owner, workspace=ctx.workspace),
           { ..state, index: IndexLoading },
         )
-      } else {
-        (@cmd.none, state)
-      }
-    }
-    TreeKeyMove(delta~) => {
-      let entries = visible_entries(state)
-      guard entries.length() > 0 else { return (@cmd.none, state) }
-      let index = match cursor_index(state, entries) {
-        Some(index) => (index + delta).clamp(min=0, max=entries.length() - 1)
-        // First move (or the cursor's row vanished): enter the list at the
-        // edge the key points away from.
-        None => if delta > 0 { 0 } else { entries.length() - 1 }
-      }
-      let path = entries[index].0.path
-      (scroll_cursor_after_render(path), { ..state, cursor: Some(path) })
-    }
-    TreeKeyAccept => {
-      let entries = visible_entries(state)
-      // The cursor's row; without one, a non-blank filter acts on its top
-      // match, so "type then Enter" needs no arrow keys.
-      let target = match cursor_index(state, entries) {
-        Some(index) => Some(entries[index].0)
-        None =>
-          if !state.filter.trim().is_empty() && entries is [(entry, _), ..] {
-            Some(entry)
-          } else {
-            None
-          }
-      }
-      match target {
-        Some(entry) =>
-          if entry.is_dir {
-            update(dispatch, DirToggle(entry.path), state, ctx)
-          } else {
-            // Opening a file is the dock strip's business: re-dispatch the
-            // same message a tree click produces, which the root update
-            // intercepts (see `FileSelected`).
-            (dispatch(FileSelected(path=entry.path, name=entry.name)), state)
-          }
-        None => (@cmd.none, state)
-      }
-    }
-    TreeKeyDismiss =>
-      if !state.filter.trim().is_empty() {
-        (@cmd.none, { ..state, filter: "", cursor: None })
-      } else if ctx.active_file is Some(_) {
-        // Close the panel like ToggleTree; with no file open the tree is
-        // unconditional (see panel_view), so there is nothing to close into.
-        (request_viewer_remeasure(), { ..state, tree_open: false })
       } else {
         (@cmd.none, state)
       }
@@ -709,12 +651,12 @@ pub fn update(
         (@cmd.none, { ..state, index: IndexReady(files~, truncated~) })
       }
     FileIndexFailed(owner~) =>
-      // Only a failed first fetch drops back to retry-on-keystroke; a failed
-      // refresh keeps serving the index it already has.
+      // Only a failed first fetch records a retryable failure; a failed refresh
+      // keeps serving the index it already has.
       if state.owner != Some(owner) || !(state.index is IndexLoading) {
         (@cmd.none, state)
       } else {
-        (@cmd.none, { ..state, index: IndexEmpty })
+        (@cmd.none, { ..state, index: IndexFailed })
       }
     // Owned by the main package's update: which dock tab a tree click opens
     // is the strip's business, so the root intercepts this (the
@@ -871,8 +813,10 @@ pub fn update(
             read_directory(dispatch, owner, directory, workspace=ctx.workspace),
           )
         }
-        // Only structural events can change the fuzzy index's path list.
-        if refresh_index && !(state.index is IndexEmpty) {
+        // Only structural events can change Quick Open's file index.
+        // Do not duplicate the initial request when attaching its watcher emits
+        // a baseline; only an already-usable snapshot refreshes in background.
+        if refresh_index && state.index is IndexReady(..) {
           cmds.push(list_files(dispatch, owner, workspace=ctx.workspace))
         }
         (@cmd.batch(cmds), { ..state, loading, })

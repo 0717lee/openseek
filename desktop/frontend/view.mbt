@@ -2887,8 +2887,8 @@ fn view(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
   if model.archive_confirm is Some(confirm) {
     children.push(archive_discard_modal(dispatch, confirm))
   }
-  if model.symbol_search is Some(search) {
-    children.push(symbol_search_view(dispatch, search))
+  if model.quick_open is Some(open) {
+    children.push(quick_open_view(dispatch, open))
   }
   // On the desktop a lost connection covers everything: with no event
   // stream and every API call failing, the app behind it can do nothing,

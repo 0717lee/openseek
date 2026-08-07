@@ -90,7 +90,7 @@ fn WatchInterest::remember(self : WatchInterest, path : String) -> Unit {
 ///|
 /// Subtrees omitted by recursive snapshots and legacy full-tree watchers.
 /// `.worktrees` keeps worktree agents' churn out of the main workspace's
-/// panel and fuzzy finder; a worktree session's own watcher roots inside
+/// panel and Quick Open; a worktree session's own watcher roots inside
 /// the checkout, where relative paths never carry that segment. Explicit
 /// watcher selections do not use this policy: an opened file must remain
 /// watchable even under one of these conventional directory names.
