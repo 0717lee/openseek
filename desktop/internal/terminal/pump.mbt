@@ -149,12 +149,11 @@ async fn run_session(
         "cwd": request.cwd,
       }
     let output_task = group.spawn(allow_failure=true, () => {
-      let reader = pty.reader()
       let buf : FixedArray[Byte] = FixedArray::make(ReadChunkBytes, b'\x00')
       for ;; {
         // A closed master reports the child's exit as EIO on macOS rather
         // than a clean EOF; both end the session the same way.
-        let n = reader.read(buf) catch {
+        let n = pty.read(buf) catch {
           // Cancelling the Windows output task aborts its synchronous pipe
           // read. Treat that requested shutdown as EOF for this session.
           _ if session.closing => 0
