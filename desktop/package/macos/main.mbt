@@ -105,7 +105,7 @@ fn PackageOptions::parse(argv? : ArrayView[String]) -> PackageOptions raise {
 /// Build the application-specific inputs Proton cannot infer from
 /// `moon.proton`. The native host is written directly to Proton's default,
 /// identifier-scoped package target so `package --no-build` consumes exactly
-/// this specialized, no-mimalloc build.
+/// the host built from this checkout.
 async fn @packaging.Workspace::build_package_inputs(
   self : @packaging.Workspace,
 ) -> @xterm_assets.Assets {
@@ -126,7 +126,6 @@ async fn @packaging.Workspace::build_package_inputs(
     release=true,
     extra_args=["--target-dir", self.repo_at(ProtonPackageBuildTargetDir)],
     extra_env=build_env,
-    disable_mimalloc=true,
   )
   @packaging.build_engine(self, release=true, extra_env={
     "MACOSX_DEPLOYMENT_TARGET": MinMacOSVersion,
