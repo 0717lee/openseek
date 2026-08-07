@@ -3065,7 +3065,7 @@ async fn git_preblock_target(
   if git_must_preblock(argv, arg_start, has_custom_env) {
     return block_target(real_workspace_root, cwd)
   }
-  if submodule_update_has_custom_procedure(argv, arg_start, real_workspace_root) {
+  if submodule_update_has_custom_procedure(argv, arg_start, cwd) {
     return block_target(real_workspace_root, cwd)
   }
   None
@@ -3261,7 +3261,7 @@ fn submodule_verb_is_update(
 async fn submodule_update_has_custom_procedure(
   argv : Array[String],
   arg_start : Int,
-  real_workspace_root : String,
+  cwd : String,
 ) -> Bool {
   guard @git_policy.parse(argv, arg_start) is Some(invocation) else {
     return false
@@ -3293,11 +3293,9 @@ async fn submodule_update_has_custom_procedure(
   // starting with "!" is git's prefix for a shell command.
   let (exit, output) = @process.collect_output_merged(
     "git",
-    [
-      "-C", real_workspace_root, "config", "--get-regexp", "^submodule\\..*\\.update$",
-    ],
+    ["-C", cwd, "config", "--get-regexp", "^submodule\\..*\\.update$"],
     inherit_env=false,
-    cwd=real_workspace_root,
+    cwd~,
   ) catch {
     _ => return false
   }
