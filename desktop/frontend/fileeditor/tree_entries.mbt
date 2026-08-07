@@ -111,7 +111,7 @@ test "file index replies are owner fenced and refresh failure keeps ready data" 
 
 ///|
 test "a live file index keeps the workspace root watcher while tree is closed" {
-  let ctx = test_ctx()
+  let ctx = { ..test_ctx(), panel_open: false }
   let idle = { ..State::empty(), owner: Some(ctx.owner) }
   assert_true(idle.watched_paths(ctx) is None)
   let indexed = {
