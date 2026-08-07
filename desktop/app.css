@@ -520,6 +520,7 @@ button.panel-toggle:not(:disabled):hover {
 /* The editor part: a tab strip of open files over the viewer, with the
    file tree as a toggleable pane on the viewer's right. */
 .editor {
+  --editor-resize-handle-width: 6px;
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -749,7 +750,7 @@ html.is-resizing-col * {
   top: 0;
   bottom: 0;
   left: 0;
-  width: 6px;
+  width: var(--editor-resize-handle-width);
   z-index: 3;
   cursor: col-resize;
 }
@@ -961,6 +962,9 @@ html.is-resizing * {
 .browser-pane {
   flex: 1 1 auto;
   min-height: 0;
+  /* Native views always paint above HTML. Keep their measured rectangle to
+     the right of the editor's resize handle so the handle remains clickable. */
+  margin-left: var(--editor-resize-handle-width);
   background: var(--surface-2);
 }
 .file-panel-error {
