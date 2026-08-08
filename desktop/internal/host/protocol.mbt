@@ -71,6 +71,26 @@ type GitBranchPayload = @protocol.GitBranchPayload
 type GitBranchReply = @protocol.GitBranchReply
 
 ///|
+/// `git.changes` addresses the same session/workspace checkout as the file
+/// panel and returns its current `HEAD`-to-working-tree inventory.
+type GitChangesPayload = @protocol.GitChangesPayload
+
+///|
+type GitChangesReply = @protocol.GitChangesReply
+
+///|
+type GitChange = @protocol.GitChange
+
+///|
+/// `git.original_file` lazily reads a workspace-relative path from `HEAD` for
+/// quick diff after the user selects one change. Rename/copy callers pass the
+/// change row's `original_path`; other callers pass its current `path`.
+type GitOriginalFilePayload = @protocol.GitOriginalFilePayload
+
+///|
+type GitOriginalFileReply = @protocol.GitOriginalFileReply
+
+///|
 /// `read_directory` lists `path`, resolved relative to the conversation's
 /// workspace; `""` lists the workspace root. The host derives the root from
 /// `session`, so the client never names an absolute path.

@@ -35,3 +35,19 @@ test "new payload shapes fall back to a raw session item" {
   assert_true(missing_item.is_terminal())
   @debug.assert_eq(preserved, missing_payload)
 }
+
+///|
+test "Git original-file replies round-trip through their manual codec" {
+  let replies : Array[@protocol.GitOriginalFileReply] = [
+    Missing,
+    BinaryOriginal,
+    OversizedOriginal,
+    OriginalContent("fn main { println(\"hi\") }"),
+  ]
+  for reply in replies {
+    let decoded : @protocol.GitOriginalFileReply = @json.from_json(
+      reply.to_json(),
+    )
+    @debug.assert_eq(decoded, reply)
+  }
+}

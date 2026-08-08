@@ -146,6 +146,27 @@ pub(all) struct GitBranchPayload {
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|
+/// Address the Git working tree belonging to one conversation. The optional
+/// workspace hint follows the filesystem operations' trust boundary: the host
+/// accepts it only when it names a registered workspace and still routes a
+/// worktree-bound conversation into its own checkout.
+pub(all) struct GitChangesPayload {
+  session : String
+  workspace : String?
+} derive(Debug, Eq, FromJson, ToJson)
+
+///|
+/// Read one workspace-relative path from `HEAD`. For a rename or copy, callers
+/// pass the change row's `original_path` (the current `path` does not exist in
+/// `HEAD`); all other rows pass `path`. The host validates it again before
+/// passing it to Git.
+pub(all) struct GitOriginalFilePayload {
+  session : String
+  workspace : String?
+  path : String
+} derive(Debug, Eq, FromJson, ToJson)
+
+///|
 pub(all) struct LaunchAppPayload {
   session : String
   cwd : String?
