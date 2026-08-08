@@ -308,8 +308,10 @@ When translating a Monarch or CodeMirror grammar:
 ## Boundaries and checks
 
 `syntax` may depend only on `base/common`; each `syntax/lang_*` package may depend
-only on `syntax`. It owns neither diagnostics nor semantic tokens; semantic-token
-overlay is not implemented. The complete API is `pkg.generated.mbti`.
+only on `syntax`. Packages under `syntax/examples/*` may depend on `syntax` and
+`base/common`, and reusable viewer packages may import them only from test modes.
+`syntax` owns neither diagnostics nor semantic tokens; semantic-token overlay is
+not implemented. The complete API is `pkg.generated.mbti`.
 
 This maps to `ITokenizationSupport`, `IState`, and `TokenizationRegistry` in
 `vs/editor/common/languages.ts` and `common/tokenizationRegistry.ts`.

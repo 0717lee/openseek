@@ -138,7 +138,8 @@ common -> foundations
 - `language`: backend-neutral diagnostic, hover, location, and symbol provider
   contracts.
 - `syntax` and `syntax/lang_*`: stateful line-tokenization contracts and
-  concrete compile-time lexers.
+  concrete compile-time lexers. `syntax/examples/*` contains opt-in reference
+  implementations for examples and test-mode consumers.
 - `platform/log`: host-neutral logging.
 
 ### Viewer common tier
