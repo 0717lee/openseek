@@ -2578,8 +2578,22 @@ fn update_msg(
         model,
       )
     }
-    ToggleGitDetails =>
-      (@cmd.none, { ..model, git_details_open: !model.git_details_open })
+    ToggleGitDetails => {
+      let opening = !model.git_details_open
+      let model = { ..model, git_details_open: opening }
+      guard opening else { return (@cmd.none, model) }
+      // Opening it is a request for current information, and everything it
+      // shows goes stale on its own: CI finishes minutes after the run that
+      // started it, and the working tree keeps moving. Nothing else looks
+      // again until the next run, so without this the chip's tint can sit on
+      // "running" long after the checks settled.
+      //
+      // The branch probe is the refresh — it re-counts the lines and, through
+      // its reply, re-runs the pull-request lookup, which is the same path
+      // every run boundary takes, in-flight fencing and all.
+      let conv = model.active()
+      (fetch_branch(dispatch, conv.device, conv.session_id, conv.cwd), model)
+    }
     CloseGitDetails => (@cmd.none, { ..model, git_details_open: false })
     ToggleLauncher => {
       let opening = !model.launcher.open
@@ -11872,6 +11886,10 @@ test "the composer's git details popover toggles shut again" {
   assert_false(test_model().git_details_open)
   let (_, opened) = update(dispatch, ToggleGitDetails, test_model())
   assert_true(opened.git_details_open)
+  // Opening re-probes (the command is not inspectable here), which must not
+  // disturb what is already on screen: the answer stays until its reply lands.
+  assert_eq(opened.active().pull_request, test_model().active().pull_request)
+  assert_eq(opened.active().diffstat, test_model().active().diffstat)
   let (_, closed) = update(dispatch, ToggleGitDetails, opened)
   assert_false(closed.git_details_open)
   // Switching conversations closes it too. A keyboard switch — Cmd+N, Quick
