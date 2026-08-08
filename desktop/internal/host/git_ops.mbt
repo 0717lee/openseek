@@ -28,6 +28,12 @@ async fn git_branch(dir : String) -> String? {
   let name = git_output(dir, ["rev-parse", "--abbrev-ref", "HEAD"])
   let name = if name == "HEAD" {
     git_output(dir, ["rev-parse", "--short", "HEAD"])
+  } else if name.is_empty() {
+    // An unborn HEAD has no commit for `rev-parse` to resolve — it fails
+    // outright — but the symbolic branch is already there. That is the state a
+    // fresh `git init` leaves, where every line is staged or untracked and so
+    // is exactly what the diffstat's empty-tree baseline exists to count.
+    git_output(dir, ["symbolic-ref", "--short", "HEAD"])
   } else {
     name
   }
@@ -166,6 +172,10 @@ async fn git_diffstat_from(
     if count is Some(count) {
       added += count.added
       files += count.files
+    } else {
+      // A file that could not be counted leaves the total a floor, and the
+      // chip says so rather than presenting it as the whole.
+      partial = true
     }
   }
   Some({ added, removed: tracked.removed, files, base, partial })
@@ -194,7 +204,14 @@ async fn git_untracked_numstat(
     _ => return None
   }
   guard code <= 1 else { return None }
-  Some(parse_numstat(stdout.text() catch { _ => return None }))
+  let stat = parse_numstat(stdout.text() catch { _ => return None })
+  // Status 1 is `--no-index`'s "there were differences", but it is also what a
+  // path Git could not read exits with — a file the agent deleted between
+  // `ls-files` and this command, which is an ordinary race in a live
+  // workspace. The two are told apart by the output: a real difference always
+  // produces a record, so status 1 with none is the failure.
+  guard !(code == 1 && stat.files == 0) else { return None }
+  Some(stat)
 }
 
 ///|

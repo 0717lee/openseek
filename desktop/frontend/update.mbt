@@ -3946,12 +3946,24 @@ fn update_device_msg(
       guard probe.stale && conv.branch is Some(current) && !current.is_empty() else {
         return (@cmd.none, model.replace_conversation(conv))
       }
+      // Carrying the settled answer keeps the chip from blinking — but only
+      // when it describes the branch being re-probed. Relabelling an answer
+      // about some other branch to `current` would be the very mislabelling
+      // the reply's own branch exists to prevent.
+      let retry : PullRequestProbe = if settled.branch == current {
+        { ..settled, probing: true }
+      } else {
+        {
+          branch: current,
+          probing: true,
+          stale: false,
+          pull_request: None,
+          compare_url: None,
+        }
+      }
       (
         fetch_pull_request(dispatch, channel, session, current, conv.cwd),
-        model.replace_conversation({
-          ..conv,
-          pull_request: Some({ ..settled, branch: current, probing: true }),
-        }),
+        model.replace_conversation({ ..conv, pull_request: Some(retry) }),
       )
     }
     Started(
@@ -11802,6 +11814,41 @@ test "a refresh during a lookup is run afterwards, not dropped" {
     probing,
   )
   assert_false(quiet.active().pull_request.unwrap().probing)
+  // A queued retry after an answer about a branch the checkout has left drops
+  // that answer instead of relabelling it: carrying it over would reintroduce
+  // exactly the mismatch the reply's own branch is there to prevent.
+  let answer : PullRequest = {
+    number: 710,
+    title: "Add a changed-files explorer",
+    state: PullRequestOpen,
+    draft: false,
+    url: "https://github.test/acme/app/pull/710",
+    additions: 1,
+    deletions: 0,
+    changed_files: 1,
+    checks: None,
+  }
+  let (_, elsewhere) = update_dev(
+    dispatch,
+    PullRequestLoaded(
+      session="desktop-test",
+      branch="feature/x",
+      queried=Some("feature/y"),
+      pull_request=Some(answer),
+      compare_url=None,
+    ),
+    queued,
+  )
+  assert_eq(
+    elsewhere.active().pull_request,
+    Some({
+      branch: "feature/x",
+      probing: true,
+      stale: false,
+      pull_request: None,
+      compare_url: None,
+    }),
+  )
 }
 
 ///|
