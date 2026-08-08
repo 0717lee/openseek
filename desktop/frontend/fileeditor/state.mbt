@@ -230,6 +230,11 @@ pub(all) struct State {
   // Monotonic token for changed-file HEAD reads. It outlives conversation
   // re-roots for the same A→B→A reason as `changes_generation`.
   review_generation : Int
+  // A missing checkout can discard either half of an in-flight review. Mark
+  // that boundary explicitly so the first authoritative snapshot after
+  // recovery restarts only incomplete requests once; ordinary polling must
+  // never supersede a healthy slow read.
+  review_recovery_pending : Bool
   // Whether the explorer pane was visible on the preceding sync pass. This is
   // stricter than the enclosing dock being open: with a file active the tree
   // toggle (and narrow drill-down) can hide the explorer while the dock stays
@@ -274,6 +279,7 @@ pub fn State::empty() -> State {
     changes_head: None,
     changes_head_known: false,
     review_generation: 0,
+    review_recovery_pending: false,
     explorer_was_visible: false,
     watching: None,
     watch_error: None,

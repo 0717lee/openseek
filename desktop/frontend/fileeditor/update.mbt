@@ -53,11 +53,12 @@ fn Doc::review_generation(self : Doc) -> Int? {
 /// a document whose content is not loaded yet — a fresh read, whose
 /// `FileLoaded` does the showing. A MoonBit file also re-syncs diagnostics,
 /// matching what its first load did.
-fn show_tab(
+fn show_tab_impl(
   dispatch : @cmd.Emit[Msg],
   ctx : Ctx,
   path : @pathx.Relative,
   doc : Doc,
+  reload_stale : Bool,
 ) -> @cmd.Cmd {
   let show = match doc.state {
     // A review-loading document always has the paired read started by
@@ -115,7 +116,7 @@ fn show_tab(
   // A document that went stale in the background (or was deleted and
   // reappeared) shows what it has and reloads in the same breath; the reply
   // lands with the scroll kept in place.
-  if doc.stale && !(doc.state is TabLoading) {
+  if reload_stale && doc.stale && !(doc.state is TabLoading) {
     @cmd.batch([
       show,
       read_file(
@@ -131,6 +132,16 @@ fn show_tab(
   } else {
     show
   }
+}
+
+///|
+fn show_tab(
+  dispatch : @cmd.Emit[Msg],
+  ctx : Ctx,
+  path : @pathx.Relative,
+  doc : Doc,
+) -> @cmd.Cmd {
+  show_tab_impl(dispatch, ctx, path, doc, true)
 }
 
 ///|
@@ -288,7 +299,9 @@ pub fn open_changed_document(
     if doc_state is TabLoaded(..) {
       // Clear a previous review baseline immediately while keeping the cached
       // working document and view state; the new HEAD side fills in later.
-      cmds.push(show_tab(dispatch, ctx, path, review_doc))
+      // The tagged read below is the sole refresh owner, so this command only
+      // displays the cached document instead of scheduling a duplicate reload.
+      cmds.push(show_tab_impl(dispatch, ctx, path, review_doc, false))
     }
     cmds.push(
       read_file(
@@ -325,9 +338,9 @@ pub fn open_changed_document(
 /// Reconcile parked reviews only against a final changed-file snapshot. Rows
 /// that disappeared (or became non-textual) leave review mode. When HEAD, the
 /// rename source, or working-file availability changed, surviving rows receive
-/// a new generation and fresh HEAD read; a still-loading working side is
-/// restarted under the same generation so its old reply cannot strand the
-/// document in `TabLoading`.
+/// a new generation and fresh HEAD read. The first authoritative snapshot
+/// after a missing-checkout recovery also restarts an incomplete side once so
+/// a reply discarded at that boundary cannot strand the document in loading.
 fn reconcile_reviews_after_changes(
   dispatch : @cmd.Emit[Msg],
   state : State,
@@ -336,6 +349,7 @@ fn reconcile_reviews_after_changes(
   files : Array[ChangedFile],
   head~ : String?,
   head_changed~ : Bool,
+  restart_incomplete~ : Bool,
 ) -> (Array[@cmd.Cmd], Map[@pathx.Relative, Doc], Int) {
   let docs = state.docs.copy()
   let cmds : Array[@cmd.Cmd] = []
@@ -372,13 +386,15 @@ fn reconcile_reviews_after_changes(
             break
           }
         }
-        // A missing checkout parks host replies at the update boundary. Once
-        // the checkout returns, its first final Changes snapshot must restart
-        // either half that was still loading even when HEAD and row metadata
-        // are unchanged; otherwise `show_tab` intentionally waits forever for
-        // a request whose reply was discarded while parked.
-        let review_incomplete = doc.state is TabLoading ||
-          doc.review is Some({ baseline: ReviewLoading, .. })
+        // Only an explicit missing-checkout recovery may invalidate a healthy
+        // in-flight read without changing HEAD or row metadata. Ordinary
+        // three-second polls leave slow requests alone instead of repeatedly
+        // superseding their generation.
+        let review_incomplete = restart_incomplete &&
+          (
+            doc.state is TabLoading ||
+            doc.review is Some({ baseline: ReviewLoading, .. })
+          )
         let review_inputs_changed = review_incomplete ||
           head_changed ||
           (match previous_change {
@@ -912,6 +928,7 @@ pub fn sync(
         // here would let a late A reply collide after switching A→B→A.
         changes_generation: state.changes_generation,
         review_generation: state.review_generation,
+        review_recovery_pending: false,
         // Preserve the last host configuration long enough for `with_watch`
         // to retire or replace it on the way out.
         watching: state.watching,
@@ -929,6 +946,7 @@ pub fn sync(
   let state = if checkout_ready {
     state
   } else {
+    let state = { ..state, review_recovery_pending: true }
     match state.changes {
       ChangeListLoading(_) => { ..state, changes: ChangeListIdle }
       ChangeListReady(repository~, files~, refreshing=true, ..) =>
@@ -1258,6 +1276,7 @@ pub fn update(
             files,
             head~,
             head_changed~,
+            restart_incomplete=state.review_recovery_pending,
           )
         }
         let settle = if follow_up {
@@ -1290,6 +1309,11 @@ pub fn update(
             },
             changes_generation: next_generation,
             review_generation,
+            review_recovery_pending: if follow_up {
+              state.review_recovery_pending
+            } else {
+              false
+            },
             changes: ChangeListReady(
               repository~,
               files=if follow_up { previous_files } else { files },
@@ -2718,6 +2742,7 @@ test "checkout recovery restarts a review whose paired replies were parked" {
   assert_true(
     parked.changes is ChangeListReady(refreshing=false, refresh_again=false, ..),
   )
+  assert_true(parked.review_recovery_pending)
   let (restored, _) = sync(emit, parked, {
     ..present,
     open_files: [path],
@@ -2728,6 +2753,7 @@ test "checkout recovery restarts a review whose paired replies were parked" {
     is ChangeListReady(refreshing=true, refresh_again=false, ..),
   )
   assert_true(restored.changes_generation == 2)
+  assert_true(restored.review_recovery_pending)
   let (_, restarted) = update(
     emit,
     ChangesLoaded(
@@ -2741,12 +2767,71 @@ test "checkout recovery restarts a review whose paired replies were parked" {
     { ..present, open_files: [path], active_file: Some(path) },
   )
   assert_true(restarted.review_generation == 4)
+  assert_false(restarted.review_recovery_pending)
   assert_true(
     restarted.docs.get(path)
     is Some(
       {
         state: TabLoading,
         review: Some({ generation: 4, baseline: ReviewLoading }),
+        ..,
+      }
+    ),
+  )
+}
+
+///|
+test "ordinary Changes polls do not supersede healthy in-flight reviews" {
+  let emit = test_emit()
+  let present = test_ctx()
+  let path = @pathx.Relative("slow.mbt")
+  let change : ChangedFile = {
+    path,
+    original_path: None,
+    index_status: " ",
+    worktree_status: "M",
+    kind: ChangeModified,
+  }
+  let docs : Map[@pathx.Relative, Doc] = Map([])
+  docs[path] = {
+    name: "slow.mbt",
+    state: TabLoading,
+    review: Some({ generation: 3, baseline: ReviewLoading }),
+    stale: false,
+  }
+  let state = {
+    ..owned_state(),
+    changes: ChangeListReady(
+      repository=true,
+      files=[change],
+      refreshing=true,
+      refresh_again=false,
+    ),
+    changes_generation: 1,
+    changes_head: Some("same-head"),
+    changes_head_known: true,
+    review_generation: 3,
+    docs,
+  }
+  let (_, polled) = update(
+    emit,
+    ChangesLoaded(
+      owner=present.owner,
+      generation=1,
+      repository=true,
+      head=Some("same-head"),
+      files=[change],
+    ),
+    state,
+    { ..present, open_files: [path], active_file: Some(path) },
+  )
+  assert_true(polled.review_generation == 3)
+  assert_true(
+    polled.docs.get(path)
+    is Some(
+      {
+        state: TabLoading,
+        review: Some({ generation: 3, baseline: ReviewLoading }),
         ..,
       }
     ),

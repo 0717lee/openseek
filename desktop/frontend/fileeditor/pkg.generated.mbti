@@ -188,6 +188,7 @@ pub(all) struct State {
   changes_head : String?
   changes_head_known : Bool
   review_generation : Int
+  review_recovery_pending : Bool
   explorer_was_visible : Bool
   watching : WatchedPaths?
   watch_error : String?
