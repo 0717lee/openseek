@@ -97,8 +97,7 @@ async fn git_diffstat(dir : @pathx.Absolute) -> GitDiffStat? {
 /// whose one remote is called `upstream`, or named after its host, has a
 /// default branch too, and measuring from `HEAD` instead would report a
 /// branch full of commits as having no changes. `origin` still wins when it
-/// has one. Only after no remote records anything do the two conventional
-/// names get guessed at, since a remote added by hand never gets the symref.
+/// has one, at both tiers.
 async fn git_default_branch_ref(dir : String) -> String? {
   if git_output_opt(dir, [
       "for-each-ref", "--format=%(refname:short)%09%(symref:short)", "refs/remotes/*/HEAD",
@@ -122,10 +121,29 @@ async fn git_default_branch_ref(dir : String) -> String? {
       return recorded
     }
   }
-  for candidate in ["origin/main", "origin/master"] {
-    if git_output_opt(dir, ["rev-parse", "--verify", "--quiet", candidate])
-      is Some(_) {
-      return Some(candidate)
+  // No remote recorded one, so fall back to guessing the conventional names —
+  // on every remote, not just `origin`. A remote added by hand rather than
+  // cloned never gets the symref that would have answered above, and its
+  // `main` is still the branch this work is measured from.
+  guard git_output_opt(dir, ["remote"]) is Some(listing) else { return None }
+  let remotes : Array[String] = []
+  for line in listing.split("\n") {
+    let remote = line.trim_end(chars="\r")
+    guard !remote.is_empty() else { continue }
+    // `origin` keeps its precedence over whatever else is configured.
+    if remote == "origin" {
+      remotes.insert(0, remote.to_owned())
+    } else {
+      remotes.push(remote.to_owned())
+    }
+  }
+  for remote in remotes {
+    for name in ["main", "master"] {
+      let candidate = "\{remote}/\{name}"
+      if git_output_opt(dir, ["rev-parse", "--verify", "--quiet", candidate])
+        is Some(_) {
+        return Some(candidate)
+      }
     }
   }
   None

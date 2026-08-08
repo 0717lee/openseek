@@ -4182,6 +4182,20 @@ select:focus {
     max-width: 100%;
   }
 
+  /* The git popover is anchored to its chip, which sits partway across the
+     row — at phone width a 280px menu from there runs off the screen, and the
+     shell's `overflow: hidden` clips it with nothing to scroll. Dropping the
+     chip's containing block hands the menu to `.composer-inner` instead, so it
+     spans the composer and stays on screen wherever the chip is. */
+  .composer-git {
+    position: static;
+  }
+  .composer-git-menu {
+    right: 0;
+    min-width: 0;
+    max-width: none;
+  }
+
   /* The sidebar leaves the grid and overlays it as a drawer; the
      content column always has the full width. */
   .app {
