@@ -840,6 +840,22 @@ fn changes_live(state : State, ctx : Ctx) -> Bool {
 }
 
 ///|
+/// A baseline-bearing review cannot trust repeated `head=None` snapshots.
+/// New hosts only return that shape for an unborn repository, whose rows are
+/// additions/untracked files; an older host also returns it after real commits
+/// because it does not know the optional HEAD field. Keep those version-skewed
+/// reviews correct by conservatively refreshing them on each settled poll.
+fn reviews_need_unknown_head_refresh(state : State) -> Bool {
+  for _, doc in state.docs {
+    if doc.review is Some(review) &&
+      !(review.selected.kind is (ChangeAdded | ChangeUntracked)) {
+      return true
+    }
+  }
+  false
+}
+
+///|
 fn changes_poll_after_settle(
   dispatch : @cmd.Emit[Msg],
   owner : @interop.ConversationKey,
@@ -1319,9 +1335,13 @@ pub fn update(
         // An intermediate coalesced snapshot is not authoritative: a path can
         // disappear briefly and return in the already-scheduled follow-up. On
         // the final reply, clear vanished reviews and refresh every surviving
-        // baseline when the host reports a different HEAD identity.
+        // baseline when HEAD differs, or a legacy host cannot report its
+        // identity and the selected row proves that a baseline can exist.
         let head_changed = state.changes_head_known &&
-          state.changes_head != head
+          (
+            state.changes_head != head ||
+            (head is None && reviews_need_unknown_head_refresh(state))
+          )
         let (review_cmds, docs, review_generation) = if follow_up {
           ([], state.docs, state.review_generation)
         } else {
@@ -3390,6 +3410,95 @@ test "only a final Changes snapshot reconciles reviews and moved HEAD refreshes 
     settled.docs.get(path)
     is Some(
       { review: Some({ generation: 4, baseline: ReviewLoading, .. }), .. }
+    ),
+  )
+}
+
+///|
+test "legacy Changes replies without HEAD refresh baseline-bearing reviews" {
+  let path = @pathx.Relative("src/legacy-host.mbt")
+  let change = test_modified_change(path)
+  let docs : Map[@pathx.Relative, Doc] = Map([])
+  docs[path] = {
+    ..loaded_doc(path.0),
+    review: Some({
+      generation: 3,
+      baseline: ReviewContent("old HEAD"),
+      selected: change,
+    }),
+  }
+  let state = {
+    ..owned_state(),
+    changes: ChangeListLoading(refresh_again=false),
+    changes_generation: 1,
+    // Legacy hosts decode as `None` even though their repository has a HEAD.
+    changes_head: None,
+    changes_head_known: true,
+    review_generation: 3,
+    docs,
+  }
+  let (_, settled) = update(
+    test_emit(),
+    ChangesLoaded(
+      owner=test_ctx().owner,
+      generation=1,
+      repository=true,
+      head=None,
+      files=[change],
+    ),
+    state,
+    { ..test_ctx(), open_files: [path], active_file: Some(path) },
+  )
+  assert_true(settled.review_generation == 4)
+  assert_true(
+    settled.docs.get(path)
+    is Some(
+      { review: Some({ generation: 4, baseline: ReviewLoading, .. }), .. }
+    ),
+  )
+}
+
+///|
+test "unborn repository polls do not churn untracked reviews" {
+  let path = @pathx.Relative("new.mbt")
+  let change : ChangedFile = {
+    path,
+    original_path: None,
+    index_status: "?",
+    worktree_status: "?",
+    kind: ChangeUntracked,
+  }
+  let docs : Map[@pathx.Relative, Doc] = Map([])
+  docs[path] = {
+    ..loaded_doc(path.0),
+    review: Some({ generation: 3, baseline: ReviewMissing, selected: change }),
+  }
+  let state = {
+    ..owned_state(),
+    changes: ChangeListLoading(refresh_again=false),
+    changes_generation: 1,
+    changes_head: None,
+    changes_head_known: true,
+    review_generation: 3,
+    docs,
+  }
+  let (_, settled) = update(
+    test_emit(),
+    ChangesLoaded(
+      owner=test_ctx().owner,
+      generation=1,
+      repository=true,
+      head=None,
+      files=[change],
+    ),
+    state,
+    { ..test_ctx(), open_files: [path], active_file: Some(path) },
+  )
+  assert_true(settled.review_generation == 3)
+  assert_true(
+    settled.docs.get(path)
+    is Some(
+      { review: Some({ generation: 3, baseline: ReviewMissing, .. }), .. }
     ),
   )
 }
