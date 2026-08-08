@@ -111,6 +111,11 @@ fn conversation_title(conv : Conversation) -> String {
 /// so background work stays visible while another conversation is on screen.
 /// A durable, idle row also carries a hover-revealed archive button; the row
 /// itself is a div (not a button) so that control can nest inside it.
+/// `subruns` is how many sub-run transcripts this conversation folded under
+/// it: above zero the row leads with a twisty that shows or hides them
+/// (`expanded` says which way it points). `subrun` marks the row as one of
+/// those children — indented a step, and never archivable on its own, since a
+/// sub-run's record belongs to the turn that produced it.
 fn session_row(
   dispatch : @cmd.Emit[Msg],
   model : Model,
@@ -120,6 +125,9 @@ fn session_row(
   archivable? : Bool = false,
   nested? : Bool = false,
   worktree? : String,
+  subruns? : Int = 0,
+  expanded? : Bool = false,
+  subrun? : Bool = false,
 ) -> @html.Html {
   // Session ids can collide across devices, so the accent pill needs the
   // channel to agree too.
@@ -148,13 +156,37 @@ fn session_row(
   if nested {
     class = class + " nested"
   }
+  if subrun {
+    class = class + " subrun"
+  }
   if active {
     class = class + " active"
   }
   if running {
     class = class + " running"
   }
-  let children = [@html.span(class="sidebar-label", label)]
+  // Every row leads with the twisty cell, occupied or not, so titles line up
+  // whether or not a conversation delegated anything. The button stops the
+  // click from reaching the row: unfolding a conversation is not opening it.
+  let twisty = if subruns > 0 {
+    @html.button(
+      class=if expanded { "row-twisty expanded" } else { "row-twisty" },
+      type_="button",
+      title=if subruns == 1 {
+        "1 subagent run"
+      } else {
+        "\{subruns} subagent runs"
+      },
+      attrs=@html.Attrs::build().on_click(event => {
+        event.stop_propagation()
+        dispatch(ToggleSubruns(channel, session_id))
+      }),
+      icon(icon_chevron_down),
+    )
+  } else {
+    @html.span(class="row-twisty spacer", "")
+  }
+  let children = [twisty, @html.span(class="sidebar-label", label)]
   // The trailing slot holds two right-aligned groups stacked in one cell:
   // what the row *is* (status) and what can be done to it (actions). At
   // rest the status group shows; hovering a row that has actions swaps them
@@ -486,6 +518,7 @@ fn device_section_rows(
       if rows.length() == before {
         rows.push(
           @html.div(class="conversation-row nested placeholder", [
+            @html.span(class="row-twisty spacer", ""),
             @html.span(class="sidebar-label", "No chats yet"),
           ]),
         )
@@ -588,29 +621,78 @@ fn push_group_rows(
       )
     }
   }
+  let durable : Array[@transcript.SessionListItem] = []
   for item in dev.sessions {
     if item.workspace != workspace || archived(item.id) {
       continue
     }
-    let label = if model.find_conversation(dev.channel, item.id) is Some(conv) &&
+    durable.push(item)
+  }
+  // A conversation's label follows the live conversation while it is the one
+  // on screen (its title settles at the first send), and otherwise comes from
+  // the host's listing.
+  fn label_of(item : @transcript.SessionListItem) -> String {
+    if model.find_conversation(dev.channel, item.id) is Some(conv) &&
       dev.channel == model.focused &&
       item.id == model.active_session {
       conversation_title(conv)
     } else {
       session_item_label(item)
     }
+  }
+
+  // Sub-run transcripts fold under the conversation that launched them: they
+  // are that turn's evidence, not conversations of their own, and one worker
+  // sweep persists enough of them to bury the real chats. The parent row's
+  // twisty shows them in place, the way a tree unfolds a directory.
+  for row in @transcript.session_tree(durable) {
+    let expanded = model.subruns_expanded(dev.channel, row.item.id)
     rows.push(
       session_row(
         dispatch,
         model,
         dev.channel,
-        item.id,
-        label,
-        archivable=true,
+        row.item.id,
+        label_of(row.item),
+        // A child-shaped id offers no archive control even when it surfaces
+        // as a root row — its parent archived, or listed in another store.
+        // Archiving a sub-run on its own would strand it in the archived
+        // twin, where restoring its parent would not bring it back.
+        archivable=@transcript.subrun_label(row.item.id) is None,
         nested~,
-        worktree?=worktree_name_for(dev, workspace, item.id),
+        worktree?=worktree_name_for(dev, workspace, row.item.id),
+        subruns=row.children.length(),
+        expanded~,
       ),
     )
+    if expanded {
+      for child in row.children {
+        // The ordinal leads the row: it is what the transcript's sub-run
+        // lines name, and it orders runs whose questions read alike. A child
+        // that never got a question keeps the ordinal alone — its id would
+        // only repeat the parent's.
+        let question = match child.title {
+          Some(title) if !title.trim().is_empty() => Some(title)
+          _ => None
+        }
+        let label = match (@transcript.subrun_label(child.id), question) {
+          (Some(ordinal), Some(title)) => "\{ordinal} · \{title}"
+          (Some(ordinal), None) => ordinal
+          (None, _) => session_item_label(child)
+        }
+        rows.push(
+          session_row(
+            dispatch,
+            model,
+            dev.channel,
+            child.id,
+            label,
+            nested~,
+            subrun=true,
+          ),
+        )
+      }
+    }
   }
 }
 

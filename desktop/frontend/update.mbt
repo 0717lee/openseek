@@ -1846,6 +1846,16 @@ fn update_msg(
         @cmd.none,
         { ..model, workspaces_collapsed: !model.workspaces_collapsed },
       )
+    ToggleSubruns(channel, session_id) => {
+      let expanded = if model.subruns_expanded(channel, session_id) {
+        model.expanded_subruns.filter(entry => {
+          !(entry.0 == channel && entry.1 == session_id)
+        })
+      } else {
+        [..model.expanded_subruns, (channel, session_id)]
+      }
+      (@cmd.none, { ..model, expanded_subruns: expanded })
+    }
     SaveApiKey => {
       guard model.host_settings_loaded() else { return (@cmd.none, model) }
       let api_key = model.setup_api_key.trim().to_owned()
@@ -4941,6 +4951,21 @@ fn sessions_loaded(
   request_generation? : Int = 0,
 ) -> Msg {
   on_home(SessionsLoaded(items, connection_generation=0, request_generation~))
+}
+
+///|
+test "a conversation's sub-run twisty toggles only its own row" {
+  let dispatch = test_dispatch()
+  let model = test_model()
+  assert_false(model.subruns_expanded(Local, "a"))
+  let (_, opened) = update(dispatch, ToggleSubruns(Local, "a"), model)
+  assert_true(opened.subruns_expanded(Local, "a"))
+  // A neighbour, and the same id on another device, stay folded: the state
+  // is keyed by both halves.
+  assert_false(opened.subruns_expanded(Local, "b"))
+  assert_false(opened.subruns_expanded(Remote("dev"), "a"))
+  let (_, closed) = update(dispatch, ToggleSubruns(Local, "a"), opened)
+  assert_false(closed.subruns_expanded(Local, "a"))
 }
 
 ///|
