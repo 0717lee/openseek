@@ -419,6 +419,8 @@ fn selected_review_change(
 /// a new generation and fresh HEAD read. The first authoritative snapshot
 /// after a missing-checkout recovery also restarts an incomplete side once so
 /// a reply discarded at that boundary cannot strand the document in loading.
+/// A vanished deletion row gets one post-review stat so an earlier, ignored
+/// same-path signature cannot leave a clean restoration marked as deleted.
 fn reconcile_reviews_after_changes(
   dispatch : @cmd.Emit[Msg],
   state : State,
@@ -430,6 +432,7 @@ fn reconcile_reviews_after_changes(
 ) -> (Array[@cmd.Cmd], Map[@pathx.Relative, Doc], Int) {
   let docs = state.docs.copy()
   let cmds : Array[@cmd.Cmd] = []
+  let restat_paths : Array[@pathx.Relative] = []
   let mut review_generation = state.review_generation
   for path, doc in state.docs {
     guard doc.review is Some(review) else { continue }
@@ -438,6 +441,14 @@ fn reconcile_reviews_after_changes(
       None => {
         let ordinary = { ..doc, review: None }
         docs[path] = ordinary
+        // A selected deletion deliberately ignores a same-path signature: it
+        // may belong to a separate untracked row. If the deletion row then
+        // disappears because the file was restored cleanly, that earlier stat
+        // cannot reopen the now-ordinary document. Probe once after review is
+        // cleared so reply order cannot leave an existing file marked deleted.
+        if doc.state is TabDeleted {
+          restat_paths.push(path)
+        }
         if ctx.active_file == Some(path) {
           cmds.push(show_tab(dispatch, ctx, path, ordinary))
         }
@@ -559,6 +570,11 @@ fn reconcile_reviews_after_changes(
         }
       }
     }
+  }
+  if !restat_paths.is_empty() {
+    cmds.push(
+      stat_files(dispatch, ctx.owner, restat_paths, workspace=ctx.workspace),
+    )
   }
   (cmds, docs, review_generation)
 }
@@ -4719,7 +4735,7 @@ test "a deleted document whose file reappears reloads on the next stats" {
 }
 
 ///|
-test "a selected deletion ignores a same-path working-tree recreation" {
+test "a selected deletion hands a clean restoration to an ordinary read" {
   let emit = test_emit()
   let path = @pathx.Relative("recreated.mbt")
   let deleted : ChangedFile = {
@@ -4740,17 +4756,18 @@ test "a selected deletion ignores a same-path working-tree recreation" {
     }),
     stale: false,
   }
-  let (_, next) = update(
+  let ctx = { ..test_ctx(), open_files: [path], active_file: Some(path) }
+  let (_, reviewed) = update(
     emit,
     StatsLoaded(owner=test_ctx().owner, stats=[{ path, sig: Some("3:0") }]),
     { ..owned_state(), docs, },
-    { ..test_ctx(), open_files: [path], active_file: Some(path) },
+    ctx,
   )
   // The signature belongs to the separate untracked row. The deletion review
   // remains the HEAD-only preview until Changes reconciliation selects a
   // different row explicitly.
   assert_true(
-    next.docs.get(path)
+    reviewed.docs.get(path)
     is Some(
       {
         state: TabDeleted,
@@ -4762,6 +4779,66 @@ test "a selected deletion ignores a same-path working-tree recreation" {
       }
     ) &&
     selected == deleted,
+  )
+  // If the path was restored exactly to HEAD, Git reports no row. Reconcile
+  // clears review and schedules a fresh stat; this models that reply arriving
+  // after the earlier, deliberately ignored review-side stat.
+  let (_, ordinary) = update(
+    emit,
+    ChangesLoaded(
+      owner=ctx.owner,
+      generation=1,
+      repository=true,
+      head=Some("same-head"),
+      files=[],
+    ),
+    {
+      ..reviewed,
+      changes: ChangeListLoading(refresh_again=false),
+      changes_generation: 1,
+      changes_head: Some("same-head"),
+      changes_head_known: true,
+    },
+    ctx,
+  )
+  assert_true(
+    ordinary.docs.get(path)
+    is Some({ state: TabDeleted, review: None, stale: false, .. }),
+  )
+  let (_, reloading) = update(
+    emit,
+    StatsLoaded(owner=ctx.owner, stats=[{ path, sig: Some("3:0") }]),
+    ordinary,
+    ctx,
+  )
+  guard @resource.of_path(@interop.ChannelId::Local, "/work/recreated.mbt")
+    is Some(absolute) else {
+    fail("test file resource was not absolute")
+  }
+  let (_, restored) = update(
+    emit,
+    FileLoaded(
+      owner=ctx.owner,
+      path~,
+      name="recreated.mbt",
+      file=Content(content="HEAD source", absolute~, sig="3:0"),
+      review_generation=None,
+      range=None,
+      annotation=None,
+    ),
+    reloading,
+    ctx,
+  )
+  assert_true(
+    restored.docs.get(path)
+    is Some(
+      {
+        state: TabLoaded(content="HEAD source", sig="3:0", ..),
+        review: None,
+        stale: false,
+        ..,
+      }
+    ),
   )
 }
 
