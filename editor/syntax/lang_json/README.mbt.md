@@ -1,7 +1,7 @@
 # syntax/lang_json
 
-The JSON (and JSONC) lexer. It implements `@syntax.LineTokenizer` with a
-compile-time `lexmatch` DFA.
+The JSON (and JSONC) lexer. It implements `@syntax.LineTokenizer` with
+compile-time `lexscan` DFAs.
 
 `JsonTokenizer` is the whole public surface. Hosts, examples, and tests select it
 explicitly; reusable viewer core packages must not import it.

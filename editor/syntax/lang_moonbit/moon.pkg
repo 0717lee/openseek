@@ -1,3 +1,4 @@
 import {
   "moonbitlang/editor/syntax",
+  "moonbitlang/editor/syntax/internal/mode_stack",
 }

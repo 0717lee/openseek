@@ -1,14 +1,15 @@
 # syntax/lang_javascript
 
-The JavaScript lexer. It implements `@syntax.LineTokenizer` with a compile-time
-`lexmatch` DFA.
+The JavaScript lexer. It implements `@syntax.LineTokenizer` with compile-time
+`lexscan` DFAs.
 
 `JavascriptTokenizer` is the whole public surface. Hosts, examples, and tests
 select it explicitly; reusable viewer core packages must not import it.
 
-This is the only `lang_*` that round-trips `@syntax.decode_mode_stack` /
-`@syntax.encode_mode_stack`, because JavaScript is the only one of the three
-with genuinely *nested* multi-line constructs.
+This is the only `lang_*` with genuinely *nested* multi-line constructs. It
+carries their encoded mode stack directly, using an internal `lexscan` operation
+to read the current mode and decoding an `Array[Char]` only when a line mutates
+the stack.
 
 ## Reading a token stream
 

@@ -1,7 +1,7 @@
 # syntax
 
 Stateful lexical highlighting for readonly text. It keeps Monaco's line-tokenizer
-architecture but replaces runtime Monarch grammars with MoonBit `lexmatch` code.
+architecture but replaces runtime Monarch grammars with MoonBit `lexscan` code.
 
 ## The line-at-a-time contract
 
@@ -260,11 +260,11 @@ test "panic is_capitalized rejects an empty view" {
 
 `decode_mode_stack` / `encode_mode_stack` convert between a `TokenizerState`
 and a *nesting-mode stack* — one character per open mode, with an empty state
-decoding to the base mode `'n'`. Only `lang_javascript` round-trips the pair,
-carrying its stack from one line into the next. `lang_moonbit` decodes a
-starting stack but always returns `TokenizerState("n")`, so its stack is
-per-line scratch; `lang_json` uses neither, its state being a single
-in-comment flag.
+decoding to the base mode `'n'`. They are useful for diagnostics and tokenizer
+extensions. The built-in stack-based lexers use an internal `lexscan`-backed
+view so unchanged lines reuse the encoded state without allocating an
+`Array[Char]`. `lang_json` uses neither representation helper; its state is a
+single in-comment flag.
 
 ```mbt check
 ///|
@@ -291,7 +291,7 @@ grammar-loading or `setMonarchTokensProvider` equivalent.
 
 When translating a Monarch or CodeMirror grammar:
 
-- Use `lexmatch ... with longest`; equal-length matches choose the earliest arm.
+- Use `lexscan ... with longest`; equal-length matches choose the earliest arm.
   Longest-match arms do not support guards, so classify a bound identifier in the
   arm body and inspect the returned remainder for lookahead (for example
   `lang_json`'s `colon_follows`).

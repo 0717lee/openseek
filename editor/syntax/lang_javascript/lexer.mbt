@@ -37,10 +37,11 @@ pub impl @syntax.LineTokenizer for JavascriptTokenizer with fn tokenize_line(
   line_text,
   state,
 ) {
-  let stack = @syntax.decode_mode_stack(state)
   let tokens : Array[@syntax.LineToken] = []
-  for at = 0, view = line_text[:]; view.length() > 0; {
-    let top = stack[stack.length() - 1]
+  let encoded_stack = @mode_stack.normalize(state)
+  let initial_top = @mode_stack.top(encoded_stack)
+  let end_state = for at = 0, view = line_text[:], stack = (None : Array[Char]?), top = initial_top; view.length() >
+                     0; {
     let (op, rest) = match top {
       'c' => comment_step(view, Comment)
       'd' => comment_step(view, CommentDoc)
@@ -49,22 +50,40 @@ pub impl @syntax.LineTokenizer for JavascriptTokenizer with fn tokenize_line(
     }
     let consumed = view.length() - rest.length()
     match op {
-      Blank => ()
-      Emit(tag) => @syntax.push_token(tokens, at, at + consumed, tag)
+      Blank => continue at + consumed, rest, stack, top
+      Emit(tag) => {
+        @syntax.push_token(tokens, at, at + consumed, tag)
+        continue at + consumed, rest, stack, top
+      }
       Push(tag, mode) => {
         @syntax.push_token(tokens, at, at + consumed, tag)
-        stack.push(mode)
+        let materialized = match stack {
+          Some(stack) => stack
+          None => @syntax.decode_mode_stack(encoded_stack)
+        }
+        materialized.push(mode)
+        continue at + consumed, rest, Some(materialized), mode
       }
       Pop(tag) => {
         @syntax.push_token(tokens, at, at + consumed, tag)
-        if stack.length() > 1 {
-          ignore(stack.pop())
+        let materialized = match stack {
+          Some(stack) => stack
+          None => @syntax.decode_mode_stack(encoded_stack)
         }
+        if materialized.length() > 1 {
+          ignore(materialized.pop())
+        }
+        let next_top = materialized[materialized.length() - 1]
+        continue at + consumed, rest, Some(materialized), next_top
       }
     }
-    continue at + consumed, rest
+  } nobreak {
+    match stack {
+      Some(stack) => @syntax.encode_mode_stack(stack)
+      None => encoded_stack
+    }
   }
-  (tokens, @syntax.encode_mode_stack(stack))
+  (tokens, end_state)
 }
 
 ///|

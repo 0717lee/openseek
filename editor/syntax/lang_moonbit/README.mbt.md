@@ -1,7 +1,7 @@
 # syntax/lang_moonbit
 
-The MoonBit lexer. It implements `@syntax.LineTokenizer` with a compile-time
-`lexmatch` DFA, so there is no grammar file to load and no runtime regex engine.
+The MoonBit lexer. It implements `@syntax.LineTokenizer` with compile-time
+`lexscan` DFAs, so there is no grammar file to load and no runtime regex engine.
 
 `MoonbitTokenizer` is the whole public surface: hosts, examples, and tests select
 it explicitly. Reusable viewer core packages must not import it — the viewer core

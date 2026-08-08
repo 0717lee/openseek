@@ -1,0 +1,19 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "moonbitlang/editor/syntax/internal/mode_stack"
+
+import {
+  "moonbitlang/editor/syntax",
+}
+
+// Values
+pub fn normalize(@syntax.TokenizerState) -> @syntax.TokenizerState
+
+pub fn top(@syntax.TokenizerState) -> Char
+
+// Errors
+
+// Types and methods
+
+// Type aliases
+
+// Traits
