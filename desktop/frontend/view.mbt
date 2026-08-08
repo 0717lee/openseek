@@ -654,7 +654,11 @@ fn push_group_rows(
         dev.channel,
         row.item.id,
         label_of(row.item),
-        archivable=true,
+        // A child-shaped id offers no archive control even when it surfaces
+        // as a root row — its parent archived, or listed in another store.
+        // Archiving a sub-run on its own would strand it in the archived
+        // twin, where restoring its parent would not bring it back.
+        archivable=@transcript.subrun_label(row.item.id) is None,
         nested~,
         worktree?=worktree_name_for(dev, workspace, row.item.id),
         subruns=row.children.length(),
