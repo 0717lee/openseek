@@ -1056,13 +1056,16 @@ pub fn sync(
   // A checkout can disappear while a Git request is in flight. The parked
   // update path correctly refuses its late host reply; clear the in-flight
   // bit here as well so restoring the same owner starts a fresh generation
-  // instead of leaving Changes wedged in Loading/refreshing forever.
+  // instead of leaving Changes wedged in Loading/refreshing forever. A failed
+  // inventory also returns to Idle at this meaningful placement boundary,
+  // granting review recovery one retry without making every sync retry it.
   let state = if checkout_ready {
     state
   } else {
     let state = { ..state, review_recovery_pending: true }
     match state.changes {
-      ChangeListLoading(_) => { ..state, changes: ChangeListIdle }
+      ChangeListLoading(_) | ChangeListFailed(_) =>
+        { ..state, changes: ChangeListIdle }
       ChangeListReady(repository~, files~, refreshing=true, ..) =>
         {
           ..state,
@@ -1098,14 +1101,12 @@ pub fn sync(
   let state = { ..state, explorer_was_visible: explorer_is_visible }
   // The mode selection survives re-rooting, but its inventory does not. Load
   // it when Changes is visible, and refresh a ready snapshot when reopening
-  // after its root watch was parked. Failed requests normally retry only on an
-  // explicit selection or a settled run; checkout recovery gets one automatic
-  // retry so a paired review read dropped by the parked boundary can settle.
+  // after its root watch was parked. Failed requests only retry on an explicit
+  // selection or a settled run, not on every unrelated sync pass.
   let (changes_cmd, state) = if checkout_ready &&
     changes_are_live &&
     (
       state.changes is ChangeListIdle ||
-      (state.review_recovery_pending && state.changes is ChangeListFailed(_)) ||
       (
         changes_may_be_stale &&
         (
@@ -1872,6 +1873,12 @@ pub fn update(
               // `FileLoaded` sees the previous content). The document keeps
               // its loaded state so that restore has its baseline.
               active_reloading = true
+              if doc.review is Some(_) {
+                // A tagged review read can be fenced out if its Git row
+                // disappears first. Preserve a stale marker so leaving review
+                // mode hands the active tab to a replacement ordinary read.
+                docs[stat.path] = { ..doc, stale: true }
+              }
               cmds.push(
                 read_file(
                   dispatch,
@@ -2976,13 +2983,28 @@ test "checkout recovery retries failed Changes before restarting a review" {
     active_file: Some(path),
   }
   let (parked, _) = sync(emit, state, missing)
-  assert_true(parked.changes is ChangeListFailed("transient Git failure"))
+  assert_true(parked.changes is ChangeListIdle)
   assert_true(parked.review_recovery_pending)
   let restored_ctx = { ..present, open_files: [path], active_file: Some(path) }
   let (restored, _) = sync(emit, parked, restored_ctx)
   assert_true(restored.changes is ChangeListLoading(refresh_again=false))
   assert_true(restored.changes_generation == 2)
   assert_true(restored.review_recovery_pending)
+  // The placement transition grants exactly one automatic attempt. If it
+  // fails too, ordinary sync leaves the failure parked at the same generation.
+  let (_, failed_again) = update(
+    emit,
+    ChangesFailed(
+      owner=present.owner,
+      generation=2,
+      message="Git still unavailable",
+    ),
+    restored,
+    restored_ctx,
+  )
+  let (still_failed, _) = sync(emit, failed_again, restored_ctx)
+  assert_true(still_failed.changes is ChangeListFailed("Git still unavailable"))
+  assert_true(still_failed.changes_generation == 2)
   let (_, restarted) = update(
     emit,
     ChangesLoaded(
@@ -3452,6 +3474,95 @@ test "a settled Changes snapshot clears reviews whose rows disappeared" {
     { ..test_ctx(), open_files: [path], active_file: Some(path) },
   )
   assert_true(settled.docs.get(path) is Some({ review: None, .. }))
+}
+
+///|
+test "a disappearing review row hands an active reload to an ordinary read" {
+  let path = @pathx.Relative("src/committed.mbt")
+  let docs : Map[@pathx.Relative, Doc] = Map([])
+  docs[path] = {
+    ..loaded_doc(path.0),
+    review: Some({
+      generation: 3,
+      baseline: ReviewContent("old HEAD"),
+      selected: test_modified_change(path),
+    }),
+  }
+  let ctx = { ..test_ctx(), open_files: [path], active_file: Some(path) }
+  let state = {
+    ..owned_state(),
+    changes: ChangeListFailed("park refresh"),
+    review_generation: 3,
+    docs,
+  }
+  let (_, reloading) = update(
+    test_emit(),
+    StatsLoaded(owner=ctx.owner, stats=[{ path, sig: Some("2:1") }]),
+    state,
+    ctx,
+  )
+  assert_true(
+    reloading.docs.get(path)
+    is Some({ state: TabLoaded(..), review: Some(_), stale: true, .. }),
+  )
+  let (_, settled) = update(
+    test_emit(),
+    ChangesLoaded(owner=ctx.owner, generation=1, repository=true, head=None, files=[]),
+    {
+      ..reloading,
+      changes: ChangeListLoading(refresh_again=false),
+      changes_generation: 1,
+    },
+    ctx,
+  )
+  assert_true(
+    settled.docs.get(path)
+    is Some({ state: TabLoaded(..), review: None, stale: true, .. }),
+  )
+  guard @resource.of_path(@interop.ChannelId::Local, "/work/src/committed.mbt")
+    is Some(absolute) else {
+    fail("test file resource was not absolute")
+  }
+  let (_, fenced) = update(
+    test_emit(),
+    FileLoaded(
+      owner=ctx.owner,
+      path~,
+      name="committed.mbt",
+      file=Content(content="stale review read", absolute~, sig="2:7"),
+      review_generation=Some(3),
+      range=None,
+      annotation=None,
+    ),
+    settled,
+    ctx,
+  )
+  assert_true(fenced == settled)
+  let (_, current) = update(
+    test_emit(),
+    FileLoaded(
+      owner=ctx.owner,
+      path~,
+      name="committed.mbt",
+      file=Content(content="current working", absolute~, sig="2:7"),
+      review_generation=None,
+      range=None,
+      annotation=None,
+    ),
+    fenced,
+    ctx,
+  )
+  assert_true(
+    current.docs.get(path)
+    is Some(
+      {
+        state: TabLoaded(content="current working", sig="2:7", ..),
+        review: None,
+        stale: false,
+        ..,
+      }
+    ),
+  )
 }
 
 ///|
