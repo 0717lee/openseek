@@ -522,14 +522,21 @@ pub(all) struct GitPullRequest {
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|
-/// Reply to `git.pull_request`. Both fields absent means the host could not
-/// answer at all — no repository, no GitHub remote, or no usable `gh` — which
-/// the composer shows as no chip rather than an error. `compare_url` alone is
-/// the ordinary "this branch has no pull request yet" answer, and the composer
-/// offers it as a link to open one.
+/// Reply to `git.pull_request`. `pull_request` and `compare_url` both absent
+/// means the host could not answer at all — no repository, no GitHub remote,
+/// or no usable `gh` — which the composer shows as no chip rather than an
+/// error. `compare_url` alone is the ordinary "this branch has no pull request
+/// yet" answer, and the composer offers it as a link to open one.
+///
+/// `branch` is the branch the host actually looked up, which is not
+/// necessarily the one the client had in mind when it asked: the host reads
+/// `HEAD` itself, and an agent can move the checkout in between. The client
+/// labels the answer with this rather than with its own request, so a pull
+/// request can never be shown against a branch it does not belong to.
 pub(all) struct GitPullRequestReply {
   pull_request : GitPullRequest?
   compare_url : String?
+  branch : String?
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|

@@ -3882,23 +3882,36 @@ fn update_device_msg(
           model.replace_conversation({ ..conv, pull_request: None }),
         )
       }
-      // A lookup already in flight for this same branch is not stacked on.
+      // A lookup already in flight for this same branch is not stacked on —
+      // but it is marked stale, because its answer was gathered before this
+      // refresh asked for one. Dropping the refresh outright would leave the
+      // chip describing the repository as it was when a run started, with
+      // nothing scheduled to correct it.
       let in_flight = conv.pull_request is Some(probe) &&
         probe.probing &&
         probe.branch == branch
       guard !in_flight else {
-        return (@cmd.none, model.replace_conversation(conv))
+        let pull_request = conv.pull_request.map(probe => {
+          ..probe,
+          stale: true,
+        })
+        return (
+          @cmd.none,
+          model.replace_conversation({ ..conv, pull_request, }),
+        )
       }
       // Only an answer about a different branch is discarded; re-probing the
       // branch already on screen keeps its chip until the reply lands.
       let fresh : PullRequestProbe = {
         branch,
         probing: true,
+        stale: false,
         pull_request: None,
         compare_url: None,
       }
       let carried = match conv.pull_request {
-        Some(probe) if probe.branch == branch => { ..probe, probing: true }
+        Some(probe) if probe.branch == branch =>
+          { ..probe, probing: true, stale: false }
         _ => fresh
       }
       (
@@ -3906,26 +3919,38 @@ fn update_device_msg(
         model.replace_conversation({ ..conv, pull_request: Some(carried) }),
       )
     }
-    PullRequestLoaded(session~, branch~, pull_request~, compare_url~) => {
+    PullRequestLoaded(session~, branch~, queried~, pull_request~, compare_url~) => {
       guard model.find_conversation(channel, session) is Some(conv) else {
         return (@cmd.none, model)
       }
-      // A reply for a branch the workspace has since left describes a checkout
-      // that is no longer on screen; dropping it keeps a slow lookup from
-      // overwriting a newer one.
+      // Matched to the probe by the branch the lookup was issued against; a
+      // reply for one the workspace has since left belongs to no probe here
+      // and is dropped, so a slow lookup cannot overwrite a newer one.
       guard conv.pull_request is Some(probe) && probe.branch == branch else {
         return (@cmd.none, model)
       }
+      // Labelled with the branch the host actually read from `HEAD`. When the
+      // checkout moved mid-flight the two differ, and the answer is filed
+      // under what it describes — where `settled_probe` hides it until the
+      // branch chip catches up, instead of showing it against this one.
+      let settled : PullRequestProbe = {
+        branch: queried.unwrap_or(branch),
+        probing: false,
+        stale: false,
+        pull_request,
+        compare_url,
+      }
+      let conv = { ..conv, pull_request: Some(settled) }
+      // A refresh arrived while this lookup was in flight: its answer predates
+      // that refresh, so run one more against the branch now checked out.
+      guard probe.stale && conv.branch is Some(current) && !current.is_empty() else {
+        return (@cmd.none, model.replace_conversation(conv))
+      }
       (
-        @cmd.none,
+        fetch_pull_request(dispatch, channel, session, current, conv.cwd),
         model.replace_conversation({
           ..conv,
-          pull_request: Some({
-            branch,
-            probing: false,
-            pull_request,
-            compare_url,
-          }),
+          pull_request: Some({ ..settled, branch: current, probing: true }),
         }),
       )
     }
@@ -11599,6 +11624,7 @@ test "a branch reply lands on its conversation and an empty one hides it" {
     Some({
       branch: "feature/x",
       probing: true,
+      stale: false,
       pull_request: None,
       compare_url: None,
     }),
@@ -11651,17 +11677,36 @@ test "a pull-request reply only lands on the branch it was asked about" {
     PullRequestLoaded(
       session="desktop-test",
       branch="feature/old",
+      queried=Some("feature/old"),
       pull_request=Some(answer),
       compare_url=None,
     ),
     probing,
   )
   assert_eq(stale.active().pull_request.unwrap().pull_request, None)
+  // The host answers about whatever `HEAD` said when it ran. An answer that
+  // came back describing a different branch is filed under that branch, not
+  // under the one the lookup was issued for — so the chip, which only shows a
+  // probe matching the checked-out branch, does not show it against this one.
+  let (_, moved) = update_dev(
+    dispatch,
+    PullRequestLoaded(
+      session="desktop-test",
+      branch="feature/x",
+      queried=Some("feature/y"),
+      pull_request=Some(answer),
+      compare_url=None,
+    ),
+    probing,
+  )
+  assert_eq(moved.active().pull_request.unwrap().branch, "feature/y")
+  assert_eq(moved.active().settled_probe(), None)
   let (_, settled) = update_dev(
     dispatch,
     PullRequestLoaded(
       session="desktop-test",
       branch="feature/x",
+      queried=Some("feature/x"),
       pull_request=Some(answer),
       compare_url=None,
     ),
@@ -11672,6 +11717,7 @@ test "a pull-request reply only lands on the branch it was asked about" {
     Some({
       branch: "feature/x",
       probing: false,
+      stale: false,
       pull_request: Some(answer),
       compare_url: None,
     }),
@@ -11692,10 +11738,70 @@ test "a pull-request reply only lands on the branch it was asked about" {
     Some({
       branch: "feature/x",
       probing: true,
+      stale: false,
       pull_request: Some(answer),
       compare_url: None,
     }),
   )
+}
+
+///|
+test "a refresh during a lookup is run afterwards, not dropped" {
+  let dispatch = test_dispatch()
+  let branch_reply = BranchLoaded(
+    session="desktop-test",
+    branch=Some("feature/x"),
+    diffstat=None,
+  )
+  let (_, probing) = update_dev(dispatch, branch_reply, test_model())
+  assert_true(probing.active().pull_request.unwrap().probing)
+  // A run finishing while the run-start lookup is still in flight does not
+  // stack a second request — but the answer it is waiting on was gathered
+  // before that run's work, so it must not be the last word either.
+  let (_, queued) = update_dev(dispatch, branch_reply, probing)
+  assert_eq(
+    queued.active().pull_request,
+    Some({
+      branch: "feature/x",
+      probing: true,
+      stale: true,
+      pull_request: None,
+      compare_url: None,
+    }),
+  )
+  // Settling that lookup therefore issues another rather than leaving the
+  // composer describing the repository as it was when the run started.
+  let (_, followed) = update_dev(
+    dispatch,
+    PullRequestLoaded(
+      session="desktop-test",
+      branch="feature/x",
+      queried=Some("feature/x"),
+      pull_request=None,
+      compare_url=Some("https://github.test/acme/app/compare/feature/x"),
+    ),
+    queued,
+  )
+  guard followed.active().pull_request is Some(probe) else {
+    fail("the queued refresh dropped the probe")
+  }
+  assert_true(probe.probing)
+  assert_false(probe.stale)
+  // Its answer stays on screen while the follow-up runs.
+  assert_true(probe.compare_url is Some(_))
+  // With nothing queued, settling is the end of it.
+  let (_, quiet) = update_dev(
+    dispatch,
+    PullRequestLoaded(
+      session="desktop-test",
+      branch="feature/x",
+      queried=Some("feature/x"),
+      pull_request=None,
+      compare_url=None,
+    ),
+    probing,
+  )
+  assert_false(quiet.active().pull_request.unwrap().probing)
 }
 
 ///|

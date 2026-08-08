@@ -23,13 +23,18 @@ priv struct DiffStat {
 
 ///|
 /// Where a conversation's pull-request lookup stands. `branch` is what the
-/// answer describes, so a checkout that moved makes it stale without needing a
-/// separate signal. `probing` stays separate from the answer on purpose: a
-/// refresh for the same branch leaves the last answer on screen instead of
-/// blanking the chip for the second GitHub takes to reply.
+/// answer describes — the branch the host reported looking up, not the one
+/// this client asked about — so a checkout that moved makes it stale without
+/// needing a separate signal. `probing` stays separate from the answer on
+/// purpose: a refresh for the same branch leaves the last answer on screen
+/// instead of blanking the chip for the second GitHub takes to reply.
+/// `stale` records a refresh that arrived while a lookup was in flight, whose
+/// answer therefore predates it; that lookup is followed by another rather
+/// than left standing as the last word.
 priv struct PullRequestProbe {
   branch : String
   probing : Bool
+  stale : Bool
   pull_request : PullRequest?
   compare_url : String?
 } derive(Eq, Debug)
@@ -507,6 +512,7 @@ fn fetch_pull_request(
       let empty = PullRequestLoaded(
         session~,
         branch~,
+        queried=None,
         pull_request=None,
         compare_url=None,
       )
@@ -524,6 +530,7 @@ fn fetch_pull_request(
           PullRequestLoaded(
             session~,
             branch~,
+            queried=reply.branch,
             pull_request=reply.pull_request.bind(PullRequest::from_reply),
             compare_url=reply.compare_url,
           ),

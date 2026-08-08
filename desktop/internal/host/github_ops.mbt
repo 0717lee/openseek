@@ -33,7 +33,11 @@ const GhExecutable : String = "gh"
 async fn git_pull_request_op(
   payload : GitPullRequestPayload,
 ) -> GitPullRequestReply {
-  let nothing : GitPullRequestReply = { pull_request: None, compare_url: None }
+  let nothing : GitPullRequestReply = {
+    pull_request: None,
+    compare_url: None,
+    branch: None,
+  }
   // Addressed exactly like `git.branch`, so the two chips can never end up
   // describing different branches.
   let base = match payload.cwd {
@@ -41,12 +45,17 @@ async fn git_pull_request_op(
     None => @engine.session_cwd(payload.session)
   }
   guard base is Some(base) else { return nothing }
+  // Read from `HEAD` rather than trusting the caller: this is the branch the
+  // answer is about, and it travels back with the reply so the caller labels
+  // it with what was looked up instead of with what it asked for. An agent can
+  // move the checkout between the two.
   guard git_branch(base.0) is Some(branch) else { return nothing }
-  guard resolve_gh() is Some(gh) else { return nothing }
+  let unanswered : GitPullRequestReply = { ..nothing, branch: Some(branch) }
+  guard resolve_gh() is Some(gh) else { return unanswered }
   // One deadline for the whole exchange, however many calls it takes.
   @async.with_timeout_opt(GithubRequestTimeoutMs, () => {
     branch_pull_request(gh, base, branch)
-  }).unwrap_or(nothing)
+  }).unwrap_or(unanswered)
 }
 
 ///|
@@ -68,23 +77,32 @@ async fn branch_pull_request(
     "--json",
     PullRequestFields,
   ])
-  guard listing is Some(Array(candidates)) else {
-    return { pull_request: None, compare_url: None }
+  let nothing : GitPullRequestReply = {
+    pull_request: None,
+    compare_url: None,
+    branch: Some(branch),
   }
+  guard listing is Some(Array(candidates)) else { return nothing }
   if pick_pull_request(candidates) is Some(pull_request) {
-    return { pull_request: Some(pull_request), compare_url: None }
+    return { ..nothing, pull_request: Some(pull_request) }
   }
-  // The branch has no pull request. Offering the page that opens one needs the
-  // repository's web address; asking gh for it keeps enterprise hosts and fork
-  // remotes gh's problem rather than something a remote-URL parser here would
-  // have to guess. Only this branch pays for the second call.
+  // The branch has no pull request *in the repository gh resolved*. Which
+  // repository that is stays gh's decision — its `repo.default`, the parent it
+  // infers for a fork, `GH_REPO` — rather than something a remote-URL parser
+  // here would have to guess for enterprise hosts and fork remotes. The known
+  // gap: a fork checkout whose default resolves to the fork misses a pull
+  // request that targets upstream, and reads as "no pull request yet". The
+  // compare link below survives that, since GitHub's compare page on a fork
+  // already defaults its base to the parent.
+  //
+  // Only this branch pays for the second call.
   guard gh_json(gh, dir, ["repo", "view", "--json", "url"])
     is Some(Object(repo)) &&
     repo.get("url") is Some(String(url)) else {
-    return { pull_request: None, compare_url: None }
+    return nothing
   }
   {
-    pull_request: None,
+    ..nothing,
     compare_url: Some("\{url}/compare/\{encode_url_path(branch)}?expand=1"),
   }
 }

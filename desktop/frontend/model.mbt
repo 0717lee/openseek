@@ -1631,12 +1631,16 @@ priv enum DeviceMsg {
   // `Some("")` when it is not a repository, `None` when the probe failed or
   // answered unintelligibly — and how much uncommitted work sits on it.
   BranchLoaded(session~ : String, branch~ : String?, diffstat~ : DiffStat?)
-  // A `git.pull_request` reply for the branch the lookup was issued against.
-  // A failed lookup arrives here too, with nothing in it, so the conversation
-  // never stays wedged waiting for an answer that will not come.
+  // A `git.pull_request` reply. `branch` is the one the lookup was issued
+  // against, which matches it to the probe in flight; `queried` is the one the
+  // host reported actually reading from `HEAD`, and is what the answer gets
+  // labelled with — the checkout can move between the two. A failed lookup
+  // arrives here too, with nothing in it, so the conversation never stays
+  // wedged waiting for an answer that will not come.
   PullRequestLoaded(
     session~ : String,
     branch~ : String,
+    queried~ : String?,
     pull_request~ : PullRequest?,
     compare_url~ : String?
   )

@@ -300,6 +300,7 @@ pub(all) struct GitPullRequestPayload {
 pub(all) struct GitPullRequestReply {
   pull_request : GitPullRequest?
   compare_url : String?
+  branch : String?
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 
 pub(all) struct InstallSkillPayload {
