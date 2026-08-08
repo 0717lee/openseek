@@ -49,6 +49,10 @@ pub(all) enum TabState {
   // failure reason without guessing whether the cause was removal,
   // permissions, or a transient filesystem error.
   TabReadFailed(String)
+  // Git proved that the path is not an ordinary file the editor may open
+  // (currently a symlink, submodule, or directory). Keep the tab as a bookmark
+  // without retaining source that belonged to an earlier regular file.
+  TabUnavailable(String)
   // The file vanished from disk while open. The tab stays — its name is the
   // user's bookmark — showing a notice until the file reappears or the tab
   // is closed.

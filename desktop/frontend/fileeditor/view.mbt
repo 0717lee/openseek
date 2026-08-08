@@ -117,9 +117,9 @@ pub fn body_view(
 
 ///|
 /// The notice covering the viewer while the active document has nothing to
-/// show — a deleted, binary, or oversized file. Plain panel chrome laid
-/// over the (cleared) viewer, so a notice never renders as a highlighted
-/// source document. Always in the DOM; blank and hidden otherwise.
+/// show — a deleted, unavailable, binary, or oversized file. Plain panel
+/// chrome laid over the (cleared) viewer, so a notice never renders as a
+/// highlighted source document. Always in the DOM; blank and hidden otherwise.
 fn viewer_notice(state : State, ctx : Ctx) -> @html.Html {
   let text = match ctx.active_file {
     Some(path) =>
@@ -149,6 +149,7 @@ fn viewer_notice(state : State, ctx : Ctx) -> @html.Html {
               } else {
                 "Could not read \{doc.name}: \{message}."
               }
+            TabUnavailable(message) => message
             TabLoading | TabLoaded(..) => ""
           }
         None => ""

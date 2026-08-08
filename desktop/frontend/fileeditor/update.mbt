@@ -113,7 +113,7 @@ fn show_tab_impl(
           )
         _ => clear_document()
       }
-    TabBinary | TabOversized => clear_document()
+    TabBinary | TabOversized | TabUnavailable(_) => clear_document()
   }
   // A document that went stale in the background (or was deleted and
   // reappeared) shows what it has and reloads in the same breath; the reply
@@ -259,13 +259,18 @@ pub fn open_document(
   // The plain-activation case must not rely on the read's reply to switch
   // the document: `FileLoaded`'s identical-content dedup assumes the reply's
   // document is the one on screen, so a re-read of an unchanged file would
-  // skip the redraw and leave the previous tab's document showing. Withheld
-  // and deleted documents still fall through to the read — a tree click is
-  // the explicit re-open that refreshes them (see `TabState`).
+  // skip the redraw and leave the previous tab's document showing. Withheld,
+  // unavailable, and deleted documents still fall through to the read — a
+  // tree click is the explicit re-open that refreshes them (see `TabState`).
   if range is None &&
     annotation is None &&
     state.docs.get(path) is Some(doc) &&
-    !(doc.state is (TabBinary | TabOversized | TabReadFailed(_) | TabDeleted)) {
+    !(doc.state
+    is (TabBinary
+    | TabOversized
+    | TabReadFailed(_)
+    | TabUnavailable(_)
+    | TabDeleted)) {
     let show = show_tab(dispatch, ctx, path, doc)
     // Gaining the first active tab reveals the breadcrumb row, and the
     // narrow drill-down closing the tree reveals a viewer that was last
@@ -281,8 +286,14 @@ pub fn open_document(
     )
   }
   let docs = state.docs.copy()
-  if !docs.contains(path) {
-    docs[path] = { name, state: TabLoading, review: None, stale: false }
+  match docs.get(path) {
+    None => docs[path] = { name, state: TabLoading, review: None, stale: false }
+    Some(doc) if doc.state is TabUnavailable(_) =>
+      // An explicit ordinary open is the retry boundary for a path Git had
+      // classified as a non-file entry. Leave that sentinel before starting
+      // the read so its reply is distinguishable from an older in-flight read.
+      docs[path] = { name, state: TabLoading, review: None, stale: false }
+    _ => ()
   }
   let read = read_file(
     dispatch,
@@ -494,9 +505,11 @@ fn selected_review_change(
 /// a new generation and fresh HEAD read. The first authoritative snapshot
 /// after a missing-checkout recovery also restarts an incomplete side once so
 /// a reply discarded at that boundary cannot strand the document in loading.
-/// A vanished unavailable row gets one post-review stat so an earlier, ignored
-/// same-path signature cannot leave a clean restoration marked as deleted, and
-/// a commit that only changed Git metadata cannot strand a transient read error.
+/// Every vanished row gets one post-review stat: without a working watcher, a
+/// commit can otherwise leave cached source visible after the file disappeared
+/// or changed, while an earlier ignored same-path signature can strand a clean
+/// restoration as deleted. A loading side also receives an ordinary read so
+/// its now-superseded tagged review reply cannot strand the tab in loading.
 fn reconcile_reviews_after_changes(
   dispatch : @cmd.Emit[Msg],
   state : State,
@@ -517,20 +530,39 @@ fn reconcile_reviews_after_changes(
       None => {
         let ordinary = { ..doc, review: None }
         docs[path] = ordinary
-        // A selected deletion deliberately ignores a same-path signature: it
-        // may belong to a separate untracked row. A transient working read can
-        // also fail before a later commit removes the row without touching the
-        // file again. Probe either unavailable state once after review is
-        // cleared so an existing ordinary file is not left stranded.
-        if doc.state is (TabDeleted | TabReadFailed(_)) {
-          restat_paths.push(path)
+        // Git polling is also the fallback when the filesystem watcher is not
+        // available. Re-stat every vanished review before trusting its cached
+        // ordinary state. A review-loading document additionally needs an
+        // untagged replacement read: its tagged reply is fenced out as soon as
+        // review mode is cleared.
+        restat_paths.push(path)
+        if doc.state is TabLoading && ctx.active_file != Some(path) {
+          cmds.push(
+            read_file(
+              dispatch,
+              ctx.owner,
+              path,
+              doc.name,
+              range=None,
+              workspace=ctx.workspace,
+            ),
+          )
         }
         if ctx.active_file == Some(path) {
           cmds.push(show_tab(dispatch, ctx, path, ordinary))
         }
       }
       Some(change) if !change.selectable() => {
-        let ordinary = { ..doc, review: None }
+        // The cached text belongs to an earlier regular file. Git now proves
+        // the path is something the file reader deliberately will not follow,
+        // so clear that text and retain an explicit notice until the user
+        // reopens the path after it changes back.
+        let ordinary = {
+          ..doc,
+          state: TabUnavailable(change.unselectable_title()),
+          review: None,
+          stale: false,
+        }
         docs[path] = ordinary
         if ctx.active_file == Some(path) {
           cmds.push(show_tab(dispatch, ctx, path, ordinary))
@@ -1732,6 +1764,12 @@ pub fn update(
       if state.owner != Some(owner) {
         (@cmd.none, state)
       } else if state.docs.get(path) is Some(doc) {
+        // A Git non-file classification invalidates every read started while
+        // this path was still an ordinary file. Only an explicit reopen moves
+        // the document back to `TabLoading`, where a new reply may settle.
+        if doc.state is TabUnavailable(_) {
+          return (@cmd.none, state)
+        }
         // A repeated changed-row click starts a new working-tree read as well
         // as a new HEAD read. Fence the older working reply against the
         // generation still parked on this document. An untagged ordinary read
@@ -1997,7 +2035,7 @@ pub fn update(
             // `TabState`); they refresh on explicit re-open instead. A
             // previous read failure does retry once the watcher proves the
             // path exists.
-            TabBinary | TabOversized => false
+            TabBinary | TabOversized | TabUnavailable(_) => false
             TabReadFailed(_) => true
           }
           if changed {
@@ -3605,7 +3643,7 @@ test "changed-file replies are owner-and-generation-fenced" {
 }
 
 ///|
-test "a settled Changes snapshot clears reviews whose rows disappeared" {
+test "a settled Changes snapshot re-stats loaded reviews whose rows disappeared" {
   let path = @pathx.Relative("src/committed.mbt")
   let docs : Map[@pathx.Relative, Doc] = Map([])
   docs[path] = {
@@ -3625,6 +3663,7 @@ test "a settled Changes snapshot clears reviews whose rows disappeared" {
     review_generation: 3,
     docs,
   }
+  let ctx = { ..test_ctx(), open_files: [path], active_file: Some(path) }
   let (_, settled) = update(
     test_emit(),
     ChangesLoaded(
@@ -3635,9 +3674,111 @@ test "a settled Changes snapshot clears reviews whose rows disappeared" {
       files=[],
     ),
     state,
-    { ..test_ctx(), open_files: [path], active_file: Some(path) },
+    ctx,
   )
-  assert_true(settled.docs.get(path) is Some({ review: None, .. }))
+  assert_true(
+    settled.docs.get(path)
+    is Some({ state: TabLoaded(content="", ..), review: None, .. }),
+  )
+  // Reconciliation schedules this stat even when the watcher is unavailable;
+  // a committed deletion must replace the cached working source.
+  let (_, deleted) = update(
+    test_emit(),
+    StatsLoaded(owner=ctx.owner, stats=[{ path, sig: None }]),
+    settled,
+    ctx,
+  )
+  assert_true(
+    deleted.docs.get(path)
+    is Some({ state: TabDeleted, review: None, stale: false, .. }),
+  )
+}
+
+///|
+test "a review that becomes a symlink clears its cached regular-file source" {
+  let path = @pathx.Relative("src/replaced.mbt")
+  let selected = test_modified_change(path)
+  let symlink = { ..selected, kind: ChangeSymlink }
+  let docs : Map[@pathx.Relative, Doc] = Map([])
+  docs[path] = {
+    ..loaded_doc(path.0),
+    review: Some({
+      generation: 3,
+      working_generation: 3,
+      baseline: ReviewContent("old HEAD"),
+      selected,
+    }),
+  }
+  let ctx = { ..test_ctx(), open_files: [path], active_file: Some(path) }
+  let (_, unavailable) = update(
+    test_emit(),
+    ChangesLoaded(owner=ctx.owner, generation=1, repository=true, head=None, files=[
+      symlink,
+    ]),
+    {
+      ..owned_state(),
+      explorer_mode: ExplorerChanges,
+      changes: ChangeListLoading(refresh_again=false),
+      changes_generation: 1,
+      review_generation: 3,
+      docs,
+    },
+    ctx,
+  )
+  assert_true(
+    unavailable.docs.get(path)
+    is Some({ state: TabUnavailable(message), review: None, stale: false, .. }) &&
+    message == symlink.unselectable_title(),
+  )
+  // A later file stat must not follow the non-file entry and resurrect the
+  // source that preceded it. An explicit ordinary reopen remains the retry.
+  let (_, still_unavailable) = update(
+    test_emit(),
+    StatsLoaded(owner=ctx.owner, stats=[{ path, sig: Some("4:0") }]),
+    unavailable,
+    ctx,
+  )
+  assert_true(still_unavailable == unavailable)
+  guard @resource.of_path(@interop.ChannelId::Local, "/work/src/replaced.mbt")
+    is Some(absolute) else {
+    fail("test file resource was not absolute")
+  }
+  let stale_reply = FileLoaded(
+    owner=ctx.owner,
+    path~,
+    name="replaced.mbt",
+    file=Content(content="stale regular source", absolute~, sig="4:0"),
+    review_generation=None,
+    range=None,
+    annotation=None,
+  )
+  let (_, fenced) = update(test_emit(), stale_reply, still_unavailable, ctx)
+  assert_true(fenced == still_unavailable)
+  let (_, reopening) = open_document(
+    test_emit(),
+    fenced,
+    ctx,
+    path,
+    name="replaced.mbt",
+    range=None,
+    had_active=true,
+  )
+  assert_true(
+    reopening.docs.get(path)
+    is Some({ state: TabLoading, review: None, stale: false, .. }),
+  )
+  let (_, reopened) = update(test_emit(), stale_reply, reopening, ctx)
+  assert_true(
+    reopened.docs.get(path)
+    is Some(
+      {
+        state: TabLoaded(content="stale regular source", sig="4:0", ..),
+        review: None,
+        stale: false,
+        ..,
+      }
+    ),
+  )
 }
 
 ///|
