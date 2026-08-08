@@ -373,10 +373,28 @@ pub async fn goal_run(
   } else {
     None
   }
+  // Arming is not wired end to end. Serve announces the turns autonomous
+  // continuation starts with `GoalContinue`, which this host drops, so its
+  // phase stays Idle through one — and `start_run`, whose only gate is that
+  // phase, would hand the same engine to a prompt the autonomous turn's
+  // terminal event then settles. Refuse the capability here rather than
+  // trusting clients to ask for manual: this endpoint serves the relay, not
+  // only this app's own page.
+  guard !(payload.auto is Some(true)) else {
+    raise EngineError("autonomous goal continuation is not supported yet")
+  }
   manager.workspace_lifecycle_lock.acquire()
   let mut placement_locked = true
   defer (if placement_locked { manager.workspace_lifecycle_lock.release() })
   let session = payload.session.trim().to_owned()
+  // Checked before the slot lookup, not inside the spawn path: an engine
+  // already accepting on this key skips `goal_config` and its guard, and the
+  // blank key is the session-less slot a session-less `agent.start` owns —
+  // so a malformed request would steer that scratch conversation instead of
+  // being refused.
+  guard !session.is_empty() else {
+    raise EngineError("session id must not be empty")
+  }
   let record_guard = manager.begin_record_op(session)
   defer manager.end_record_op(session, record_guard)
   ensure_session_not_archived(session)
@@ -1510,4 +1528,125 @@ async test "workspace detach drains an idle writer and its follower first" {
     group.return_immediately(())
   })
   @fs.rmdir(root.to_string(), recursive=true)
+}
+
+///|
+/// Both refusals land before the op can touch an engine, so no fake one is
+/// needed — reaching a live engine is precisely what they must prevent.
+async test "a goal request is refused before it can reach the wrong engine" {
+  let manager = new_engine_manager("/nonexistent/engine")
+  async fn refusal(payload : @protocol.GoalPayload) -> String {
+    try {
+      ignore(goal_run(manager, payload))
+      "no error"
+    } catch {
+      EngineError(detail) => detail
+      error if @async.is_being_cancelled() => raise error
+      error => "\{error}"
+    }
+  }
+
+  // Arming is not wired end to end, and this endpoint serves the relay: a
+  // remote client must not be able to ask for what the app's own page no
+  // longer offers.
+  assert_true(
+    refusal({
+      session: "s-armed",
+      text: Some("ship it"),
+      auto: Some(true),
+      model: None,
+      max_steps: None,
+      workspace: None,
+    }).contains("autonomous goal continuation is not supported yet"),
+  )
+  // Manual, named: past the refusal and on to the engine, which is where a
+  // nonexistent binary makes itself known.
+  assert_false(
+    refusal({
+      session: "s-named",
+      text: Some("ship it"),
+      auto: None,
+      model: None,
+      max_steps: None,
+      workspace: None,
+    }).contains("not supported yet"),
+  )
+}
+
+///|
+/// The blank session only matters when an engine is already accepting on it:
+/// that is the one path where `goal_run` skips `goal_config`, whose guard
+/// would otherwise have caught it. So this stands up the session-less slot
+/// for real — a session-less start — and then asks it to take a goal.
+#cfg(not(platform="windows"))
+async test "a blank goal session cannot steer the session-less engine" {
+  let dir = @fs.tmpdir(prefix="openseek-goal-blank-session-")
+  let root : @pathx.Path = Path(dir)
+  let engine = root.join("bin/engine.sh")
+  let seed = root.join("bin/toolchains/moonbit/macos-arm64")
+  let runtime = root.join("runtime")
+  prepare_fake_moonbit_seed(seed, version="0.10.0-test")
+  prepare_fake_bundled_moonbit_home(
+    runtime.join("toolchains/moonbit/macos-arm64"),
+    version="0.10.0-test",
+  )
+  @fs.write_file(
+    engine.to_string(),
+    "#!/bin/sh\nwhile IFS= read -r line; do :; done\n",
+    create_mode=CreateOrTruncate,
+  )
+  assert_eq(@process.run("chmod", ["+x", engine.to_string()]), 0)
+  let actor = new_engine_actor(engine.to_string(), runtime_dir=runtime)
+  let manager = actor.manager()
+  ignore(
+    update_settings(manager, {
+      provider: Some("custom"),
+      custom_api_url: Some("https://example.invalid/chat/completions"),
+      deepseek_api_key: None,
+      custom_api_key: None,
+    }),
+  )
+  let sink = EventSink(fn(_) { () })
+  @async.with_task_group(group => {
+    group.spawn_bg(no_wait=true, allow_failure=true, () => {
+      actor.run(sink, fn(_) { () })
+    })
+    while manager.pump is Stopped {
+      @async.sleep(1)
+    }
+    // A start with no session owns the slot keyed by "".
+    ignore(
+      start_run(sink, manager, {
+        task: "hello",
+        submission_id: None,
+        model: None,
+        max_steps: None,
+        session: None,
+        workspace: None,
+      }),
+    )
+    assert_true(manager.serving().get("") is Some(_))
+    for blank in ["", "   "] {
+      let detail = try {
+        ignore(
+          goal_run(manager, {
+            session: blank,
+            text: Some("ship it"),
+            auto: None,
+            model: None,
+            max_steps: None,
+            workspace: None,
+          }),
+        )
+        "no error"
+      } catch {
+        EngineError(detail) => detail
+        error if @async.is_being_cancelled() => raise error
+        error => "\{error}"
+      }
+      assert_true(detail.contains("session id must not be empty"))
+    }
+    group.return_immediately(())
+  })
+  @fs.rmdir(dir, recursive=true)
 }
