@@ -624,8 +624,9 @@ fn open_editor_at(
   // table is seeded from the restored strip (identities only), exactly like
   // `@fileeditor.sync`'s own re-root.
   let dock = @dock.sync(model.dock, owner)
-  let panel = if model.file_panel.owner == Some(owner) {
-    model.file_panel
+  let previous_panel = model.file_panel
+  let panel = if previous_panel.owner == Some(owner) {
+    previous_panel
   } else {
     let docs : Map[@pathx.Relative, @fileeditor.Doc] = Map([])
     for open_path in @dock.file_paths(dock) {
@@ -635,7 +636,20 @@ fn open_editor_at(
         stale: false,
       }
     }
-    { ..@fileeditor.State::empty(), owner: Some(owner), docs }
+    {
+      ..@fileeditor.State::empty(),
+      owner: Some(owner),
+      // Mirror fileeditor.sync's re-root invariants. In particular, the
+      // generation must outlive an A→B→A jump so an older A reply cannot
+      // collide with the next request after this eager re-root.
+      tree_open: previous_panel.tree_open,
+      explorer_mode: previous_panel.explorer_mode,
+      changes_generation: previous_panel.changes_generation,
+      // Preserve the old host configuration until the post-dispatch sync can
+      // explicitly retire or replace it.
+      watching: previous_panel.watching,
+      docs,
+    }
   }
   guard conversation_relative(conv, path) is Some(relative) else {
     return (
@@ -11793,6 +11807,19 @@ test "chip jumps relativize legacy absolute paths against the roots" {
     ..test_conversation(),
     cwd: Some(workspace),
   })
+  let model = {
+    ..model,
+    file_panel: {
+      ..model.file_panel,
+      owner: Some({
+        channel: @interop.ChannelId::Remote("previous"),
+        session: "previous-session",
+      }),
+      tree_open: false,
+      explorer_mode: @fileeditor.ExplorerChanges,
+      changes_generation: 7,
+    },
+  }
   let (_, next) = update(
     dispatch,
     JumpToLocation(
@@ -11803,6 +11830,10 @@ test "chip jumps relativize legacy absolute paths against the roots" {
     model,
   )
   assert_true(@dock.active_file(next.dock) is Some(Relative("src/main.mbt")))
+  assert_false(next.file_panel.tree_open)
+  assert_true(next.file_panel.explorer_mode is @fileeditor.ExplorerChanges)
+  // The eager re-root retains 7; the now-visible Changes inventory starts 8.
+  assert_true(next.file_panel.changes_generation == 8)
   // Before the first run reports cwd, the attached workspace serves as root.
   let model = test_model()
     .replace_conversation({ ..test_conversation(), workspace: Some(workspace) })

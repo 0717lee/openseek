@@ -975,6 +975,53 @@ html.is-resizing * {
   background: var(--surface-2);
 }
 
+.explorer-tabs {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 2px;
+  padding: 7px 8px 4px;
+  border-bottom: 1px solid var(--line);
+}
+
+.explorer-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 7px;
+  border: 0;
+  border-radius: 4px;
+  color: var(--ink-2);
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.explorer-tab:hover {
+  color: var(--ink);
+  background: var(--surface-2);
+}
+
+.explorer-tab.active {
+  color: var(--accent-ink);
+  background: var(--accent-soft);
+}
+
+.explorer-count {
+  min-width: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  color: var(--ink-2);
+  background: color-mix(in srgb, var(--ink) 9%, transparent);
+  font-size: 10px;
+  line-height: 16px;
+  text-align: center;
+}
+
+.explorer-count.hidden {
+  display: none;
+}
+
 .file-tree {
   flex: 1 1 auto;
   min-height: 0;
@@ -1018,6 +1065,72 @@ html.is-resizing * {
    back out. */
 .tree-row.highlighted {
   background: var(--accent-soft);
+}
+
+.change-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  padding: 4px 10px 4px 12px;
+  border: 0;
+  border-radius: 0;
+  color: var(--ink);
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.change-row:hover {
+  background: var(--surface-2);
+}
+
+.change-row.disabled {
+  cursor: default;
+}
+
+.change-row.disabled:hover {
+  background: transparent;
+}
+
+.change-row.selected {
+  color: var(--accent-ink);
+  background: var(--accent-soft);
+}
+
+.change-path {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.change-status {
+  flex: 0 0 auto;
+  width: 16px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.change-status.added {
+  color: var(--success, #268744);
+}
+
+.change-status.deleted,
+.change-status.unmerged {
+  color: var(--danger, #c0392b);
+}
+
+.change-status.renamed {
+  color: var(--accent-ink);
+}
+
+.change-status.modified {
+  color: var(--warning, #a36800);
 }
 
 .tree-chevron {
