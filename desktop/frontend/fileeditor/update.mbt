@@ -95,10 +95,10 @@ fn show_tab_impl(
         show
       }
     }
-    // A deleted change with a textual HEAD side is the one deleted-file case
-    // that has a useful document: show that baseline under explicit review
-    // chrome. Other deleted/withheld cases use the panel notice overlay.
-    TabDeleted =>
+    // A deleted change, or a transiently unreadable working file, can still
+    // have a useful textual HEAD side. Show that baseline under explicit
+    // review chrome; other unavailable cases use the panel notice overlay.
+    TabDeleted | TabReadFailed(_) =>
       match doc.review {
         Some({ baseline: ReviewContent(content), .. }) =>
           show_file_in_viewer(
@@ -111,7 +111,7 @@ fn show_tab_impl(
           )
         _ => clear_document()
       }
-    TabBinary | TabOversized | TabReadFailed(_) => clear_document()
+    TabBinary | TabOversized => clear_document()
   }
   // A document that went stale in the background (or was deleted and
   // reappeared) shows what it has and reloads in the same breath; the reply
@@ -268,7 +268,7 @@ pub fn open_changed_document(
   let review_doc = {
     name,
     state: doc_state,
-    review: Some({ generation, baseline }),
+    review: Some({ generation, baseline, selected: change }),
     // A cached document can already be behind the filesystem when the row is
     // selected. Keep that fact until the tagged working-tree read settles: if
     // an ordinary open cancels this review first, `show_tab` must still issue
@@ -335,6 +335,74 @@ pub fn open_changed_document(
 }
 
 ///|
+/// Find the refreshed form of the exact Changes row that opened a review.
+/// Git may emit multiple rows with the same destination path, so prefer the
+/// original porcelain identity, then progressively weaker *unique* matches.
+/// An ambiguous result exits review mode instead of silently switching sides.
+fn selected_review_change(
+  files : Array[ChangedFile],
+  selected : ChangedFile,
+) -> ChangedFile? {
+  let candidates = files.filter(change => change.path == selected.path)
+  for change in candidates {
+    if change == selected {
+      return Some(change)
+    }
+  }
+  let mut status_match : ChangedFile? = None
+  let mut status_matches = 0
+  for change in candidates {
+    if change.original_path == selected.original_path &&
+      change.index_status == selected.index_status &&
+      change.worktree_status == selected.worktree_status {
+      status_match = Some(change)
+      status_matches += 1
+    }
+  }
+  if status_matches == 1 {
+    return status_match
+  }
+  let selected_source = if selected.kind is (ChangeRenamed | ChangeCopied) {
+    selected.original_path
+  } else {
+    Some(selected.path)
+  }
+  let mut input_match : ChangedFile? = None
+  let mut input_matches = 0
+  for change in candidates {
+    let source = if change.kind is (ChangeRenamed | ChangeCopied) {
+      change.original_path
+    } else {
+      Some(change.path)
+    }
+    if source == selected_source &&
+      change.has_working_tree_file() == selected.has_working_tree_file() {
+      input_match = Some(change)
+      input_matches += 1
+    }
+  }
+  if input_matches == 1 {
+    return input_match
+  }
+  let mut availability_match : ChangedFile? = None
+  let mut availability_matches = 0
+  for change in candidates {
+    if change.has_working_tree_file() == selected.has_working_tree_file() {
+      availability_match = Some(change)
+      availability_matches += 1
+    }
+  }
+  if availability_matches == 1 {
+    return availability_match
+  }
+  if candidates.length() == 1 {
+    Some(candidates[0])
+  } else {
+    None
+  }
+}
+
+///|
 /// Reconcile parked reviews only against a final changed-file snapshot. Rows
 /// that disappeared (or became non-textual) leave review mode. When HEAD, the
 /// rename source, or working-file availability changed, surviving rows receive
@@ -345,7 +413,6 @@ fn reconcile_reviews_after_changes(
   dispatch : @cmd.Emit[Msg],
   state : State,
   ctx : Ctx,
-  previous_files : Array[ChangedFile],
   files : Array[ChangedFile],
   head~ : String?,
   head_changed~ : Bool,
@@ -355,14 +422,8 @@ fn reconcile_reviews_after_changes(
   let cmds : Array[@cmd.Cmd] = []
   let mut review_generation = state.review_generation
   for path, doc in state.docs {
-    guard doc.review is Some(_) else { continue }
-    let mut current_change : ChangedFile? = None
-    for change in files {
-      if change.path == path {
-        current_change = Some(change)
-        break
-      }
-    }
+    guard doc.review is Some(review) else { continue }
+    let current_change = selected_review_change(files, review.selected)
     match current_change {
       None => {
         let ordinary = { ..doc, review: None }
@@ -379,13 +440,6 @@ fn reconcile_reviews_after_changes(
         }
       }
       Some(change) => {
-        let mut previous_change : ChangedFile? = None
-        for previous in previous_files {
-          if previous.path == path {
-            previous_change = Some(previous)
-            break
-          }
-        }
         // Only an explicit missing-checkout recovery may invalidate a healthy
         // in-flight read without changing HEAD or row metadata. Ordinary
         // three-second polls leave slow requests alone instead of repeatedly
@@ -397,25 +451,28 @@ fn reconcile_reviews_after_changes(
           )
         let review_inputs_changed = review_incomplete ||
           head_changed ||
-          (match previous_change {
-            None => true
-            Some(previous) => {
-              let previous_source = if previous.kind
-                is (ChangeRenamed | ChangeCopied) {
-                previous.original_path
-              } else {
-                Some(previous.path)
-              }
-              let source = if change.kind is (ChangeRenamed | ChangeCopied) {
-                change.original_path
-              } else {
-                Some(change.path)
-              }
-              previous_source != source ||
-              previous.has_working_tree_file() != change.has_working_tree_file()
+          ({
+            let previous_source = if review.selected.kind
+              is (ChangeRenamed | ChangeCopied) {
+              review.selected.original_path
+            } else {
+              Some(review.selected.path)
             }
+            let source = if change.kind is (ChangeRenamed | ChangeCopied) {
+              change.original_path
+            } else {
+              Some(change.path)
+            }
+            previous_source != source ||
+            review.selected.has_working_tree_file() !=
+            change.has_working_tree_file()
           })
-        guard review_inputs_changed else { continue }
+        if !review_inputs_changed {
+          if review.selected != change {
+            docs[path] = { ..doc, review: Some({ ..review, selected: change }) }
+          }
+          continue
+        }
         review_generation = review_generation + 1
         let generation = review_generation
         let has_working_file = change.has_working_tree_file()
@@ -443,7 +500,7 @@ fn reconcile_reviews_after_changes(
         let refreshed = {
           ..doc,
           state: refreshed_state,
-          review: Some({ generation, baseline }),
+          review: Some({ generation, baseline, selected: change }),
           stale: if has_working_file {
             doc.stale
           } else {
@@ -1272,7 +1329,6 @@ pub fn update(
             dispatch,
             state,
             ctx,
-            previous_files,
             files,
             head~,
             head_changed~,
@@ -1429,8 +1485,9 @@ pub fn update(
     GitOriginalLoaded(owner~, path~, generation~, original~) => {
       guard state.owner == Some(owner) &&
         state.docs.get(path) is Some(doc) &&
-        doc.review is Some({ generation: current, baseline: ReviewLoading }) &&
-        current == generation else {
+        doc.review is Some(current_review) &&
+        current_review.generation == generation &&
+        current_review.baseline is ReviewLoading else {
         return (@cmd.none, state)
       }
       let review = match original {
@@ -1440,7 +1497,10 @@ pub fn update(
         @protocol.OversizedOriginal => ReviewOversized
       }
       let docs = state.docs.copy()
-      let next_doc = { ..doc, review: Some({ generation, baseline: review }) }
+      let next_doc = {
+        ..doc,
+        review: Some({ ..current_review, baseline: review }),
+      }
       docs[path] = next_doc
       // A working-tree read may still be in flight. It will consume the
       // parked baseline when `FileLoaded` arrives; every settled document can
@@ -1456,14 +1516,15 @@ pub fn update(
     GitOriginalFailed(owner~, path~, generation~, message~) => {
       guard state.owner == Some(owner) &&
         state.docs.get(path) is Some(doc) &&
-        doc.review is Some({ generation: current, baseline: ReviewLoading }) &&
-        current == generation else {
+        doc.review is Some(current_review) &&
+        current_review.generation == generation &&
+        current_review.baseline is ReviewLoading else {
         return (@cmd.none, state)
       }
       let docs = state.docs.copy()
       let next_doc = {
         ..doc,
-        review: Some({ generation, baseline: ReviewFailed(message) }),
+        review: Some({ ..current_review, baseline: ReviewFailed(message) }),
       }
       docs[path] = next_doc
       let cmd = if ctx.active_file == Some(path) &&
@@ -1881,6 +1942,17 @@ fn loaded_doc(path : String) -> Doc raise {
 }
 
 ///|
+fn test_modified_change(path : @pathx.Relative) -> ChangedFile {
+  {
+    path,
+    original_path: None,
+    index_status: " ",
+    worktree_status: "M",
+    kind: ChangeModified,
+  }
+}
+
+///|
 test "open_document seeds a loading entry and re-open keeps cached content" {
   let emit = test_emit()
   let (_, one) = open_document(
@@ -1946,7 +2018,7 @@ test "changed-file review fences paired replies and ordinary opens leave review"
     is Some(
       {
         state: TabLoading,
-        review: Some({ generation: 1, baseline: ReviewLoading }),
+        review: Some({ generation: 1, baseline: ReviewLoading, .. }),
         ..,
       }
     ),
@@ -1985,7 +2057,7 @@ test "changed-file review fences paired replies and ordinary opens leave review"
     is Some(
       {
         state: TabLoading,
-        review: Some({ generation: 2, baseline: ReviewLoading }),
+        review: Some({ generation: 2, baseline: ReviewLoading, .. }),
         ..,
       }
     ),
@@ -2009,7 +2081,7 @@ test "changed-file review fences paired replies and ordinary opens leave review"
     is Some(
       {
         state: TabLoading,
-        review: Some({ generation: 2, baseline: ReviewLoading }),
+        review: Some({ generation: 2, baseline: ReviewLoading, .. }),
         ..,
       }
     ),
@@ -2027,7 +2099,9 @@ test "changed-file review fences paired replies and ordinary opens leave review"
   )
   assert_true(
     ignored.docs.get(path)
-    is Some({ review: Some({ generation: 2, baseline: ReviewLoading }), .. }),
+    is Some(
+      { review: Some({ generation: 2, baseline: ReviewLoading, .. }), .. }
+    ),
   )
   let (_, reviewed) = update(
     emit,
@@ -2044,7 +2118,7 @@ test "changed-file review fences paired replies and ordinary opens leave review"
     reviewed.docs.get(path)
     is Some(
       {
-        review: Some({ generation: 2, baseline: ReviewContent("old two") }),
+        review: Some({ generation: 2, baseline: ReviewContent("old two"), .. }),
         ..,
       }
     ),
@@ -2052,7 +2126,11 @@ test "changed-file review fences paired replies and ordinary opens leave review"
   let docs = reviewed.docs.copy()
   docs[path] = {
     ..loaded_doc("a.mbt"),
-    review: Some({ generation: 2, baseline: ReviewContent("old two") }),
+    review: Some({
+      generation: 2,
+      baseline: ReviewContent("old two"),
+      selected: change,
+    }),
   }
   let (_, ordinary) = open_document(
     emit,
@@ -2152,6 +2230,7 @@ test "review failures settle precisely and missing rename sources stay unavailab
             baseline: ReviewFailed(
               "the original path is outside this workspace"
             ),
+            ..,
           }
         ),
         ..,
@@ -2188,7 +2267,7 @@ test "review failures settle precisely and missing rename sources stay unavailab
     is Some(
       {
         review: Some(
-          { generation: 1, baseline: ReviewFailed("Git baseline failed") }
+          { generation: 1, baseline: ReviewFailed("Git baseline failed"), .. }
         ),
         ..,
       }
@@ -2240,7 +2319,7 @@ test "deleted changes preview HEAD and working-file loads retain early baselines
     is Some(
       {
         state: TabDeleted,
-        review: Some({ generation: 1, baseline: ReviewLoading }),
+        review: Some({ generation: 1, baseline: ReviewLoading, .. }),
         ..,
       }
     ),
@@ -2262,7 +2341,7 @@ test "deleted changes preview HEAD and working-file loads retain early baselines
       {
         state: TabDeleted,
         review: Some(
-          { generation: 1, baseline: ReviewContent("removed source") }
+          { generation: 1, baseline: ReviewContent("removed source"), .. }
         ),
         ..,
       }
@@ -2324,7 +2403,7 @@ test "deleted changes preview HEAD and working-file loads retain early baselines
     is Some(
       {
         state: TabLoaded(content="new", ..),
-        review: Some({ generation: 1, baseline: ReviewMissing }),
+        review: Some({ generation: 1, baseline: ReviewMissing, .. }),
         ..,
       }
     ),
@@ -2709,7 +2788,7 @@ test "checkout recovery restarts a review whose paired replies were parked" {
   docs[path] = {
     name: "reviewed.mbt",
     state: TabLoading,
-    review: Some({ generation: 3, baseline: ReviewLoading }),
+    review: Some({ generation: 3, baseline: ReviewLoading, selected: change }),
     stale: false,
   }
   let state = {
@@ -2773,7 +2852,7 @@ test "checkout recovery restarts a review whose paired replies were parked" {
     is Some(
       {
         state: TabLoading,
-        review: Some({ generation: 4, baseline: ReviewLoading }),
+        review: Some({ generation: 4, baseline: ReviewLoading, .. }),
         ..,
       }
     ),
@@ -2796,7 +2875,7 @@ test "ordinary Changes polls do not supersede healthy in-flight reviews" {
   docs[path] = {
     name: "slow.mbt",
     state: TabLoading,
-    review: Some({ generation: 3, baseline: ReviewLoading }),
+    review: Some({ generation: 3, baseline: ReviewLoading, selected: change }),
     stale: false,
   }
   let state = {
@@ -2831,7 +2910,7 @@ test "ordinary Changes polls do not supersede healthy in-flight reviews" {
     is Some(
       {
         state: TabLoading,
-        review: Some({ generation: 3, baseline: ReviewLoading }),
+        review: Some({ generation: 3, baseline: ReviewLoading, .. }),
         ..,
       }
     ),
@@ -3206,7 +3285,11 @@ test "a settled Changes snapshot clears reviews whose rows disappeared" {
   let docs : Map[@pathx.Relative, Doc] = Map([])
   docs[path] = {
     ..loaded_doc(path.0),
-    review: Some({ generation: 3, baseline: ReviewContent("old HEAD") }),
+    review: Some({
+      generation: 3,
+      baseline: ReviewContent("old HEAD"),
+      selected: test_modified_change(path),
+    }),
   }
   let state = {
     ..owned_state(),
@@ -3237,7 +3320,11 @@ test "only a final Changes snapshot reconciles reviews and moved HEAD refreshes 
   let docs : Map[@pathx.Relative, Doc] = Map([])
   docs[path] = {
     ..loaded_doc(path.0),
-    review: Some({ generation: 3, baseline: ReviewContent("old HEAD") }),
+    review: Some({
+      generation: 3,
+      baseline: ReviewContent("old HEAD"),
+      selected: test_modified_change(path),
+    }),
   }
   let state = {
     ..owned_state(),
@@ -3268,7 +3355,7 @@ test "only a final Changes snapshot reconciles reviews and moved HEAD refreshes 
     following_up.docs.get(path)
     is Some(
       {
-        review: Some({ generation: 3, baseline: ReviewContent("old HEAD") }),
+        review: Some({ generation: 3, baseline: ReviewContent("old HEAD"), .. }),
         ..,
       }
     ),
@@ -3301,7 +3388,69 @@ test "only a final Changes snapshot reconciles reviews and moved HEAD refreshes 
   assert_true(settled.review_generation == 4)
   assert_true(
     settled.docs.get(path)
-    is Some({ review: Some({ generation: 4, baseline: ReviewLoading }), .. }),
+    is Some(
+      { review: Some({ generation: 4, baseline: ReviewLoading, .. }), .. }
+    ),
+  )
+}
+
+///|
+test "Changes reconciliation preserves the selected duplicate-path row" {
+  let path = @pathx.Relative("recreated.mbt")
+  let deleted : ChangedFile = {
+    path,
+    original_path: None,
+    index_status: "D",
+    worktree_status: " ",
+    kind: ChangeDeleted,
+  }
+  let untracked : ChangedFile = {
+    path,
+    original_path: None,
+    index_status: "?",
+    worktree_status: "?",
+    kind: ChangeUntracked,
+  }
+  let ctx = { ..test_ctx(), open_files: [path], active_file: Some(path) }
+  let (_, reviewing) = open_changed_document(
+    test_emit(),
+    owned_state(),
+    ctx,
+    untracked,
+    had_active=false,
+  )
+  let refreshing = {
+    ..reviewing,
+    changes: ChangeListLoading(refresh_again=false),
+    changes_generation: 1,
+    changes_head: Some("old-head"),
+    changes_head_known: true,
+  }
+  // Porcelain sorts both rows by the same path, with the staged deletion
+  // first. A moved HEAD must refresh the selected untracked working side,
+  // never silently turn the document into a deleted-file preview.
+  let (_, settled) = update(
+    test_emit(),
+    ChangesLoaded(
+      owner=ctx.owner,
+      generation=1,
+      repository=true,
+      head=Some("new-head"),
+      files=[deleted, untracked],
+    ),
+    refreshing,
+    ctx,
+  )
+  assert_true(
+    settled.docs.get(path)
+    is Some(
+      {
+        state: TabLoading,
+        review: Some({ generation: 2, baseline: ReviewLoading, selected }),
+        ..,
+      }
+    ) &&
+    selected == untracked,
   )
 }
 
@@ -3320,7 +3469,11 @@ test "moved HEAD normalizes reviewed tabs across the working-file boundary" {
   loading_docs[path] = {
     name: "crossing.mbt",
     state: TabLoading,
-    review: Some({ generation: 3, baseline: ReviewContent("old HEAD") }),
+    review: Some({
+      generation: 3,
+      baseline: ReviewContent("old HEAD"),
+      selected: test_modified_change(path),
+    }),
     stale: true,
   }
   let loading = {
@@ -3350,7 +3503,7 @@ test "moved HEAD normalizes reviewed tabs across the working-file boundary" {
     is Some(
       {
         state: TabDeleted,
-        review: Some({ generation: 4, baseline: ReviewLoading }),
+        review: Some({ generation: 4, baseline: ReviewLoading, .. }),
         stale: false,
         ..,
       }
@@ -3361,7 +3514,11 @@ test "moved HEAD normalizes reviewed tabs across the working-file boundary" {
   deleted_docs[path] = {
     name: "crossing.mbt",
     state: TabDeleted,
-    review: Some({ generation: 3, baseline: ReviewContent("old HEAD") }),
+    review: Some({
+      generation: 3,
+      baseline: ReviewContent("old HEAD"),
+      selected: deleted,
+    }),
     stale: false,
   }
   let deleted_state = { ..loading, docs: deleted_docs }
@@ -3383,7 +3540,7 @@ test "moved HEAD normalizes reviewed tabs across the working-file boundary" {
     is Some(
       {
         state: TabLoading,
-        review: Some({ generation: 4, baseline: ReviewLoading }),
+        review: Some({ generation: 4, baseline: ReviewLoading, .. }),
         ..,
       }
     ),
@@ -3410,7 +3567,11 @@ test "a changed rename source refreshes its review without moving HEAD" {
   let docs : Map[@pathx.Relative, Doc] = Map([])
   docs[path] = {
     ..loaded_doc(path.0),
-    review: Some({ generation: 3, baseline: ReviewContent("old source") }),
+    review: Some({
+      generation: 3,
+      baseline: ReviewContent("old source"),
+      selected: previous,
+    }),
   }
   let state = {
     ..owned_state(),
@@ -3441,7 +3602,9 @@ test "a changed rename source refreshes its review without moving HEAD" {
   assert_true(settled.review_generation == 4)
   assert_true(
     settled.docs.get(path)
-    is Some({ review: Some({ generation: 4, baseline: ReviewLoading }), .. }),
+    is Some(
+      { review: Some({ generation: 4, baseline: ReviewLoading, .. }), .. }
+    ),
   )
 }
 
@@ -3713,7 +3876,11 @@ test "hidden explorer keeps Git refresh live for an open review" {
   let docs : Map[@pathx.Relative, Doc] = Map([])
   docs[path] = {
     ..loaded_doc(path.0),
-    review: Some({ generation: 2, baseline: ReviewContent("old HEAD") }),
+    review: Some({
+      generation: 2,
+      baseline: ReviewContent("old HEAD"),
+      selected: test_modified_change(path),
+    }),
   }
   let state = {
     ..owned_state(),
@@ -3756,7 +3923,11 @@ test "sync refreshes a hidden review after its workspace watch was parked" {
   let docs : Map[@pathx.Relative, Doc] = Map([])
   docs[path] = {
     ..loaded_doc(path.0),
-    review: Some({ generation: 2, baseline: ReviewContent("old HEAD") }),
+    review: Some({
+      generation: 2,
+      baseline: ReviewContent("old HEAD"),
+      selected: test_modified_change(path),
+    }),
   }
   let state = {
     ..owned_state(),
@@ -3872,6 +4043,32 @@ test "StatsLoaded marks deletions, reloads the active change, stales the rest" {
     same.docs.get(Relative("b.mbt"))
     is Some({ state: TabLoaded(sig="1:0", ..), stale: true, .. }),
   )
+  // A watcher proving a previously unreadable review path exists makes a
+  // background tab retryable on activation.
+  let failed_path = @pathx.Relative("failed.mbt")
+  let failed_docs : Map[@pathx.Relative, Doc] = Map([])
+  failed_docs[failed_path] = {
+    name: "failed.mbt",
+    state: TabReadFailed("temporary failure"),
+    review: Some({
+      generation: 4,
+      baseline: ReviewContent("HEAD source"),
+      selected: test_modified_change(failed_path),
+    }),
+    stale: false,
+  }
+  let (_, retryable) = update(
+    emit,
+    StatsLoaded(owner=test_ctx().owner, stats=[
+      { path: failed_path, sig: Some("10:0") },
+    ]),
+    { ..owned_state(), docs: failed_docs },
+    { ..ctx, active_file: None },
+  )
+  assert_true(
+    retryable.docs.get(failed_path)
+    is Some({ state: TabReadFailed(_), review: Some(_), stale: true, .. }),
+  )
   // A reply from another conversation is dropped.
   let (_, other) = update(
     emit,
@@ -3896,7 +4093,11 @@ test "StatsLoaded preserves a settled HEAD preview when its active file disappea
   let path = @pathx.Relative("reviewed.mbt")
   let doc = {
     ..loaded_doc("reviewed.mbt"),
-    review: Some({ generation: 7, baseline: ReviewContent("HEAD source") }),
+    review: Some({
+      generation: 7,
+      baseline: ReviewContent("HEAD source"),
+      selected: test_modified_change(path),
+    }),
   }
   let docs : Map[@pathx.Relative, Doc] = Map([(path, doc)])
   let (_, next) = update(
@@ -3910,7 +4111,9 @@ test "StatsLoaded preserves a settled HEAD preview when its active file disappea
     is Some(
       {
         state: TabDeleted,
-        review: Some({ generation: 7, baseline: ReviewContent("HEAD source") }),
+        review: Some(
+          { generation: 7, baseline: ReviewContent("HEAD source"), .. }
+        ),
         stale: false,
         ..,
       }

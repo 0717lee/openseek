@@ -207,6 +207,36 @@ fn parse_git_mode_paths(
 }
 
 ///|
+/// Keep targeted `ls-tree` argv comfortably below Windows' command-line limit
+/// (and every supported Unix ARG_MAX). An individually over-limit path asks
+/// the caller to use one recursive workspace tree walk instead.
+const MaxGitTreePathBatchBytes = 16_384
+
+///|
+fn git_tree_path_batches(paths : Array[String]) -> Array[Array[String]] {
+  let batches : Array[Array[String]] = []
+  let mut batch : Array[String] = []
+  let mut bytes = 0
+  for path in paths {
+    let path_bytes = path.length() + 1
+    if path_bytes > MaxGitTreePathBatchBytes {
+      return []
+    }
+    if !batch.is_empty() && bytes + path_bytes > MaxGitTreePathBatchBytes {
+      batches.push(batch)
+      batch = []
+      bytes = 0
+    }
+    batch.push(path)
+    bytes += path_bytes
+  }
+  if !batch.is_empty() {
+    batches.push(batch)
+  }
+  batches
+}
+
+///|
 /// Git's ordinary porcelain columns do not distinguish a changed gitlink from
 /// a changed regular file or expose the working tree's symlink kind. Preserve
 /// the raw columns while keeping both non-file kinds out of ordinary readers.
@@ -353,40 +383,50 @@ async fn git_change_snapshot(
     }
   }
   if head is Some(commit) && !deleted_paths.is_empty() {
-    let tree_args = [
-      "--literal-pathspecs", "ls-tree", "--full-name", "-z", commit, "--",
-    ]
-    for path in deleted_paths {
-      tree_args.push(path)
-    }
-    let (tree_code, tree_stdout, tree_stderr) = git_collect(dir, tree_args)
-    guard tree_code == 0 else {
-      let detail = (tree_stderr.text() catch { _ => "" }).trim().to_owned()
-      raise HostError(
-        if detail.is_empty() {
-          "failed to inspect Git HEAD tree"
-        } else {
-          detail
-        },
-      )
-    }
-    let head_metadata = tree_stdout.text() catch {
-      _ => raise HostError("Git returned a non-UTF-8 HEAD tree path")
-    }
-    let head_gitlinks = parse_git_mode_paths(
-      head_metadata, workspace_prefix, "160000",
-    )
-    for path in head_gitlinks {
-      if !known_gitlinks.contains(path) {
-        known_gitlinks.push(path)
+    let path_batches = git_tree_path_batches(deleted_paths)
+    let full_tree = path_batches.is_empty()
+    let batches = if full_tree { [["."]] } else { path_batches }
+    for batch in batches {
+      let tree_args = ["--literal-pathspecs", "ls-tree"]
+      if full_tree {
+        tree_args.push("-r")
       }
-    }
-    let head_symlinks = parse_git_mode_paths(
-      head_metadata, workspace_prefix, "120000",
-    )
-    for path in head_symlinks {
-      if !known_symlinks.contains(path) {
-        known_symlinks.push(path)
+      tree_args.push("--full-name")
+      tree_args.push("-z")
+      tree_args.push(commit)
+      tree_args.push("--")
+      for path in batch {
+        tree_args.push(path)
+      }
+      let (tree_code, tree_stdout, tree_stderr) = git_collect(dir, tree_args)
+      guard tree_code == 0 else {
+        let detail = (tree_stderr.text() catch { _ => "" }).trim().to_owned()
+        raise HostError(
+          if detail.is_empty() {
+            "failed to inspect Git HEAD tree"
+          } else {
+            detail
+          },
+        )
+      }
+      let head_metadata = tree_stdout.text() catch {
+        _ => raise HostError("Git returned a non-UTF-8 HEAD tree path")
+      }
+      let head_gitlinks = parse_git_mode_paths(
+        head_metadata, workspace_prefix, "160000",
+      )
+      for path in head_gitlinks {
+        if !known_gitlinks.contains(path) {
+          known_gitlinks.push(path)
+        }
+      }
+      let head_symlinks = parse_git_mode_paths(
+        head_metadata, workspace_prefix, "120000",
+      )
+      for path in head_symlinks {
+        if !known_symlinks.contains(path) {
+          known_symlinks.push(path)
+        }
       }
     }
   }
@@ -473,26 +513,13 @@ async fn git_changes_op(payload : GitChangesPayload) -> GitChangesReply {
 }
 
 ///|
-async fn git_original_file_op(
-  payload : GitOriginalFilePayload,
+async fn git_original_file_at(
+  dir : String,
+  relative : @pathx.Relative,
+  revision : String,
 ) -> GitOriginalFileReply {
-  guard @engine.resolve_in_workspace(
-      payload.session,
-      "",
-      workspace?=payload.workspace,
-    )
-    is Some(root) &&
-    git_tree_relative(payload.path) is Some(relative) else {
-    raise HostError("path is outside the conversation workspace")
-  }
-  let dir = root.to_string()
-  if git_output(dir, ["rev-parse", "--is-inside-work-tree"]) != "true" {
-    return Missing
-  }
   // Resolve the requested revision to an immutable commit before addressing
-  // its path. New clients pass the exact HEAD identity returned with their
-  // change snapshot; the fallback keeps older clients compatible.
-  let revision = payload.revision.unwrap_or("HEAD")
+  // its path. The caller has already validated the workspace and tree path.
   guard git_revision_commit(dir, revision) is Some(commit) else {
     return Missing
   }
@@ -565,6 +592,28 @@ async fn git_original_file_op(
   }
   let text = content.text() catch { _ => return BinaryOriginal }
   OriginalContent(text)
+}
+
+///|
+async fn git_original_file_op(
+  payload : GitOriginalFilePayload,
+) -> GitOriginalFileReply {
+  guard @engine.resolve_in_workspace(
+      payload.session,
+      "",
+      workspace?=payload.workspace,
+    )
+    is Some(root) &&
+    git_tree_relative(payload.path) is Some(relative) else {
+    raise HostError("path is outside the conversation workspace")
+  }
+  let dir = root.to_string()
+  if git_output(dir, ["rev-parse", "--is-inside-work-tree"]) != "true" {
+    return Missing
+  }
+  // New clients pass the exact HEAD identity returned with their change
+  // snapshot; the fallback keeps older clients compatible.
+  git_original_file_at(dir, relative, payload.revision.unwrap_or("HEAD"))
 }
 
 ///|
@@ -699,6 +748,14 @@ async test "Git snapshots pair status with HEAD and supplied revisions stay pinn
     assert_true(second != first)
     assert_eq(git_revision_commit(dir, first), Some(first))
     assert_eq(git_revision_commit(dir, "missing-review-revision"), None)
+    assert_eq(
+      git_original_file_at(dir, Relative("review.txt"), first),
+      OriginalContent("first\n"),
+    )
+    assert_eq(
+      git_original_file_at(dir, Relative("review.txt"), second),
+      OriginalContent("working\n"),
+    )
     // Populate a gitlink directly so the test stays offline, add a symlink,
     // then stage both deletions from a workspace rooted below the repository.
     // Targeted HEAD discovery must retain the repository-root path spelling
@@ -814,6 +871,26 @@ test "Git full-name metadata finds entry modes in a nested workspace" {
     "vendor/lib", "vendor/tree",
   ])
   assert_eq(parse_git_mode_paths(output, "desktop/", "120000"), ["link"])
+}
+
+///|
+test "Git HEAD path queries stay in bounded argument batches" {
+  let first = "a".repeat(9_000)
+  let second = "b".repeat(9_000)
+  let batches = git_tree_path_batches([first, second, "short"])
+  assert_eq(batches.length(), 2)
+  for batch in batches {
+    let mut bytes = 0
+    for path in batch {
+      bytes += path.length() + 1
+    }
+    assert_true(bytes <= MaxGitTreePathBatchBytes)
+  }
+  // One path that cannot fit the conservative cross-platform command-line
+  // budget selects the recursive workspace-tree fallback.
+  assert_true(
+    git_tree_path_batches(["x".repeat(MaxGitTreePathBatchBytes + 1)]).is_empty(),
+  )
 }
 
 ///|

@@ -143,7 +143,12 @@ fn viewer_notice(state : State, ctx : Ctx) -> @html.Html {
               }
             TabBinary => "\{doc.name} is a binary file and cannot be previewed."
             TabOversized => "\{doc.name} is too large to preview."
-            TabReadFailed(message) => "Could not read \{doc.name}: \{message}."
+            TabReadFailed(message) =>
+              if doc.review is Some({ baseline: ReviewContent(_), .. }) {
+                ""
+              } else {
+                "Could not read \{doc.name}: \{message}."
+              }
             TabLoading | TabLoaded(..) => ""
           }
         None => ""
@@ -555,6 +560,16 @@ fn review_badge(state : State, ctx : Ctx) -> @html.Html {
           (
             "Deleted · HEAD", "Deleted in the working tree; showing the HEAD version",
           )
+        Some(
+          {
+            state: TabReadFailed(_),
+            review: Some({ baseline: ReviewContent(_), .. }),
+            ..,
+          }
+        ) =>
+          (
+            "Working unavailable · HEAD", "The working-tree file could not be read; showing the HEAD version",
+          )
         Some({ state: TabBinary, review: Some(_), .. })
         | Some({ state: TabOversized, review: Some(_), .. })
         | Some({ state: TabReadFailed(_), review: Some(_), .. }) =>
@@ -563,6 +578,13 @@ fn review_badge(state : State, ctx : Ctx) -> @html.Html {
           )
         Some({ review: Some({ baseline: ReviewLoading, .. }), .. }) =>
           ("Loading diff…", "Loading the HEAD version for comparison")
+        Some(
+          {
+            state: TabDeleted,
+            review: Some({ baseline: ReviewMissing, .. }),
+            ..,
+          }
+        ) => ("Deleted · no HEAD", "No HEAD version is available to preview")
         Some({ name, review: Some({ baseline: ReviewContent(_), .. }), .. }) if name.has_suffix(
             ".md",
           ) =>
@@ -577,13 +599,6 @@ fn review_badge(state : State, ctx : Ctx) -> @html.Html {
           )
         Some({ review: Some({ baseline: ReviewContent(_), .. }), .. }) =>
           ("Diff vs HEAD", "Quick diff against the HEAD version")
-        Some(
-          {
-            state: TabDeleted,
-            review: Some({ baseline: ReviewMissing, .. }),
-            ..,
-          }
-        ) => ("Deleted · no HEAD", "No HEAD version is available to preview")
         Some({ review: Some({ baseline: ReviewMissing, .. }), .. }) =>
           ("New · no HEAD", "New file compared with an empty HEAD baseline")
         Some({ review: Some({ baseline: ReviewBinary, .. }), .. }) =>

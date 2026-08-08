@@ -177,6 +177,7 @@ pub(all) enum ReviewBaseline {
 pub(all) struct ReviewState {
   generation : Int
   baseline : ReviewBaseline
+  selected : ChangedFile
 } derive(Eq)
 
 pub(all) struct State {

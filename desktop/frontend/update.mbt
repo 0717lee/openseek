@@ -13916,7 +13916,7 @@ test "a changed row opens the file tab in review mode" {
     is Some(
       {
         state: TabLoading,
-        review: Some({ generation: 1, baseline: ReviewLoading }),
+        review: Some({ generation: 1, baseline: ReviewLoading, .. }),
         ..,
       }
     ),

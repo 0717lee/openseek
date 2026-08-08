@@ -78,6 +78,11 @@ pub(all) enum ReviewBaseline {
 pub(all) struct ReviewState {
   generation : Int
   baseline : ReviewBaseline
+  // Preserve the exact Changes row that the user selected. Porcelain can
+  // legitimately report two rows for one path (for example, a staged
+  // deletion plus a recreated untracked file), so the document path alone
+  // cannot identify which working/HEAD pair is under review.
+  selected : ChangedFile
 } derive(Eq)
 
 ///|

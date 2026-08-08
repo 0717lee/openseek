@@ -33,6 +33,12 @@ fn DesktopQuickDiffService::set_original_content(
   content : String?,
 ) -> Unit {
   let key = resource.to_string()
+  // Showing an already-mounted document also notifies the Viewer through its
+  // model event. Avoid a second synchronous full diff when the HEAD side did
+  // not change.
+  if self.originals.get(key) == content {
+    return
+  }
   match content {
     Some(text) => self.originals[key] = text
     None => self.originals.remove(key)
@@ -54,8 +60,11 @@ test "desktop quick-diff adapter stores empty baselines and clears resources" {
   assert_eq(handle.get_original_content(resource), Some(""))
   service.set_original_content(resource, Some("old"))
   assert_eq(handle.get_original_content(resource), Some("old"))
+  service.set_original_content(resource, Some("old"))
+  assert_eq(fired.length(), 2)
   service.set_original_content(resource, None)
   assert_true(handle.get_original_content(resource) is None)
+  service.set_original_content(resource, None)
   assert_eq(fired.length(), 3)
   listener.dispose()
 }
