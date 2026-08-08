@@ -52,13 +52,15 @@ fn Doc::review_generation(self : Doc) -> Int? {
 /// restored to where the tab was left), a withheld/deleted notice, or — for
 /// a document whose content is not loaded yet — a fresh read, whose
 /// `FileLoaded` does the showing. A MoonBit file also re-syncs diagnostics,
-/// matching what its first load did.
+/// matching what its first load did, unless the caller is only settling the
+/// review baseline for the document that is already on screen.
 fn show_tab_impl(
   dispatch : @cmd.Emit[Msg],
   ctx : Ctx,
   path : @pathx.Relative,
   doc : Doc,
   reload_stale : Bool,
+  sync_diagnostics : Bool,
 ) -> @cmd.Cmd {
   let show = match doc.state {
     // A review-loading document always has the paired read started by
@@ -89,7 +91,7 @@ fn show_tab_impl(
         restore_scroll=true,
         review_original?=doc.quick_diff_original(),
       )
-      if language_id(doc.name) == "moonbit" {
+      if sync_diagnostics && language_id(doc.name) == "moonbit" {
         @cmd.batch([show, request_diagnostics(dispatch, ctx.owner, absolute)])
       } else {
         show
@@ -144,7 +146,34 @@ fn show_tab(
   path : @pathx.Relative,
   doc : Doc,
 ) -> @cmd.Cmd {
-  show_tab_impl(dispatch, ctx, path, doc, true)
+  show_tab_impl(dispatch, ctx, path, doc, true, true)
+}
+
+///|
+/// Publish a newly settled HEAD side without treating it as another document
+/// activation. The working file was already shown (and its diagnostics were
+/// already requested) when its read settled; this pass only updates the
+/// quick-diff baseline or the deleted/unavailable preview.
+fn show_settled_review(
+  dispatch : @cmd.Emit[Msg],
+  ctx : Ctx,
+  path : @pathx.Relative,
+  doc : Doc,
+) -> @cmd.Cmd {
+  show_tab_impl(dispatch, ctx, path, doc, true, false)
+}
+
+///|
+/// Keep cached working text visible while a paired review reload owns the next
+/// content and diagnostics refresh. This pass only clears the previous gutter;
+/// it must neither start a duplicate file read nor another full `moon check`.
+fn show_pending_review(
+  dispatch : @cmd.Emit[Msg],
+  ctx : Ctx,
+  path : @pathx.Relative,
+  doc : Doc,
+) -> @cmd.Cmd {
+  show_tab_impl(dispatch, ctx, path, doc, false, false)
 }
 
 ///|
@@ -169,7 +198,7 @@ fn show_activated_tab(
   let next_doc = { ..doc, review: Some({ ..review, working_generation, }) }
   (
     @cmd.batch([
-      show_tab_impl(dispatch, ctx, path, next_doc, false),
+      show_pending_review(dispatch, ctx, path, next_doc),
       read_file(
         dispatch,
         ctx.owner,
@@ -208,24 +237,24 @@ pub fn open_document(
   // Opening the path from Files, Quick Open, navigation, or a mention leaves
   // review mode. If the same Viewer model stays attached, the show below
   // clears its resource-keyed quick-diff baseline without replacing content.
-  let (state, clear_review) = match state.docs.get(path) {
+  let state = match state.docs.get(path) {
     Some({ review: Some(_), .. }) => {
       let docs = state.docs.copy()
       let doc = docs[path]
       docs[path] = { ..doc, review: None }
-      (
-        { ..state, docs, },
-        if ctx.active_file == Some(path) {
-          // Do not wait for the ordinary read below to clear the resource-keyed
-          // HEAD baseline: a ranged/annotated read can fail, and its failure
-          // intentionally leaves the cached document on screen.
-          clear_quick_diff_baseline()
-        } else {
-          @cmd.none
-        },
-      )
+      { ..state, docs, }
     }
-    _ => (state, @cmd.none)
+    _ => state
+  }
+  let clear_review = if ctx.active_file == Some(path) {
+    // Always clear the displayed resource, even when this path has no cached
+    // `Doc`: a reviewed tab can be closed while another dock kind is active,
+    // leaving its hidden Viewer model alive until the next file opens. Do not
+    // wait for the ordinary read below, which can fail and deliberately leave
+    // that model on screen.
+    clear_quick_diff_baseline()
+  } else {
+    @cmd.none
   }
   // The plain-activation case must not rely on the read's reply to switch
   // the document: `FileLoaded`'s identical-content dedup assumes the reply's
@@ -357,7 +386,7 @@ pub fn open_changed_document(
       // working document and view state; the new HEAD side fills in later.
       // The tagged read below is the sole refresh owner, so this command only
       // displays the cached document instead of scheduling a duplicate reload.
-      cmds.push(show_tab_impl(dispatch, ctx, path, review_doc, false))
+      cmds.push(show_pending_review(dispatch, ctx, path, review_doc))
     }
     cmds.push(
       read_file(
@@ -595,13 +624,10 @@ fn reconcile_reviews_after_changes(
             // Keep the previous working text visible while its replacement is
             // in flight, but clear the old gutter until both new sides settle.
             cmds.push(
-              show_tab_impl(
-                dispatch,
-                ctx,
-                path,
-                { ..refreshed, state: doc.state },
-                false,
-              ),
+              show_pending_review(dispatch, ctx, path, {
+                ..refreshed,
+                state: doc.state,
+              }),
             )
           }
           cmds.push(
@@ -1664,7 +1690,7 @@ pub fn update(
       // update immediately (including a deleted-file HEAD preview).
       let cmd = if ctx.active_file == Some(path) &&
         !(next_doc.state is TabLoading) {
-        show_tab(dispatch, ctx, path, next_doc)
+        show_settled_review(dispatch, ctx, path, next_doc)
       } else {
         @cmd.none
       }
@@ -1686,7 +1712,7 @@ pub fn update(
       docs[path] = next_doc
       let cmd = if ctx.active_file == Some(path) &&
         !(next_doc.state is TabLoading) {
-        show_tab(dispatch, ctx, path, next_doc)
+        show_settled_review(dispatch, ctx, path, next_doc)
       } else {
         @cmd.none
       }
