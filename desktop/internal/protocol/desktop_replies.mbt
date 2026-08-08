@@ -411,6 +411,74 @@ pub(all) struct GitBranchReply {
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|
+/// One current-path row from `git status --porcelain=v1 -z`. Status columns
+/// retain Git's single-character spellings (`" "`, `M`, `A`, `D`, `R`, …),
+/// while `kind` is one of `modified`, `added`, `deleted`, `renamed`, `copied`,
+/// `unmerged`, `type-changed`, `untracked`, `submodule`, or `symlink` (with
+/// unknown future status pairs falling back to `modified`).
+/// Renames and copies carry their source path separately.
+pub(all) struct GitChange {
+  path : String
+  original_path : String?
+  index_status : String
+  worktree_status : String
+  kind : String
+} derive(Debug, Eq, FromJson, ToJson)
+
+///|
+/// The active checkout's `HEAD`-to-working-tree change inventory. A missing
+/// Git executable and a non-repository workspace both report
+/// `repository=false`; once a repository is recognized, operational failures
+/// are request errors rather than an ambiguous empty list.
+pub(all) struct GitChangesReply {
+  repository : Bool
+  changes : Array[GitChange]
+} derive(Debug, Eq, FromJson, ToJson)
+
+///|
+/// One path's `HEAD` blob for quick diff. `Missing` is the legitimate baseline
+/// for an added/untracked file or an unborn `HEAD`; withheld blobs mirror the
+/// ordinary file reader's binary and one-megabyte policies.
+pub(all) enum GitOriginalFileReply {
+  Missing
+  BinaryOriginal
+  OversizedOriginal
+  OriginalContent(String)
+} derive(Debug, Eq)
+
+///|
+pub impl ToJson for GitOriginalFileReply with fn to_json(self) {
+  match self {
+    Missing => { "kind": "missing" }
+    BinaryOriginal => { "kind": "binary" }
+    OversizedOriginal => { "kind": "oversized" }
+    OriginalContent(content) => { "kind": "content", "content": content }
+  }
+}
+
+///|
+pub impl FromJson for GitOriginalFileReply with fn from_json(json, path) {
+  guard json is Object(fields) && fields.get("kind") is Some(String(kind_)) else {
+    raise JsonDecodeError((path, "expected Git original-file reply"))
+  }
+  match kind_ {
+    "missing" => Missing
+    "binary" => BinaryOriginal
+    "oversized" => OversizedOriginal
+    "content" => {
+      guard fields.get("content") is Some(String(content)) else {
+        raise JsonDecodeError((path, "malformed Git original-file reply"))
+      }
+      OriginalContent(content)
+    }
+    _ =>
+      raise JsonDecodeError(
+        (path.add_key("kind"), "unknown Git original-file reply kind"),
+      )
+  }
+}
+
+///|
 pub(all) struct DirEntry {
   name : String
   is_dir : Bool

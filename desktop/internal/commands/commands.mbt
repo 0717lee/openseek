@@ -327,6 +327,18 @@ pub let git_branch : Command[
 ] = Command("git.branch")
 
 ///|
+pub let git_changes : Command[
+  @protocol.GitChangesPayload,
+  @protocol.GitChangesReply,
+] = Command("git.changes")
+
+///|
+pub let git_original_file : Command[
+  @protocol.GitOriginalFilePayload,
+  @protocol.GitOriginalFileReply,
+] = Command("git.original_file")
+
+///|
 pub let host_open_path : Command[
   @protocol.OpenPathPayload,
   @protocol.OpenPathReply,

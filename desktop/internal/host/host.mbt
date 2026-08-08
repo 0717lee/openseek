@@ -273,6 +273,12 @@ pub fn endpoints(
     @endpoint.Endpoint::remote(@commands.git_branch, async fn(payload) {
       git_branch_op(payload)
     }),
+    @endpoint.Endpoint::remote(@commands.git_changes, async fn(payload) {
+      git_changes_op(payload)
+    }),
+    @endpoint.Endpoint::remote(@commands.git_original_file, async fn(payload) {
+      git_original_file_op(payload)
+    }),
     @endpoint.Endpoint::remote(@commands.host_open_path, async fn(payload) {
       open_path_op(payload)
     }),

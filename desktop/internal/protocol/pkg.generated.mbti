@@ -217,6 +217,39 @@ pub(all) struct GitBranchReply {
   branch : String?
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 
+pub(all) struct GitChange {
+  path : String
+  original_path : String?
+  index_status : String
+  worktree_status : String
+  kind : String
+} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
+
+pub(all) struct GitChangesPayload {
+  session : String
+  workspace : String?
+} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
+
+pub(all) struct GitChangesReply {
+  repository : Bool
+  changes : Array[GitChange]
+} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
+
+pub(all) struct GitOriginalFilePayload {
+  session : String
+  workspace : String?
+  path : String
+} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
+
+pub(all) enum GitOriginalFileReply {
+  Missing
+  BinaryOriginal
+  OversizedOriginal
+  OriginalContent(String)
+} derive(Eq, @debug.Debug)
+pub impl ToJson for GitOriginalFileReply
+pub impl @json.FromJson for GitOriginalFileReply
+
 pub(all) struct InstallSkillPayload {
   module_name : String
   version : String
