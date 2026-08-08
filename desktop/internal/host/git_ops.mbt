@@ -133,6 +133,16 @@ const EmptyTreeObject : String = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 const MaxUntrackedDiffFiles : Int = 100
 
 ///|
+/// How large an untracked file may be and still be counted. `git diff
+/// --no-index` reads the whole file to count its lines — measured at roughly
+/// twice the file's size resident — and this runs thirty-two at a time, at
+/// every run boundary and every time the popover opens. An unignored dataset
+/// or log would turn a decorative chip into gigabytes of repeated reading, so
+/// anything this large is left out of the count and marked `partial` instead.
+/// The reader's own one-megabyte ceiling is the precedent.
+const MaxUntrackedDiffBytes : Int64 = 1048576L
+
+///|
 /// This branch's whole delta, measured locally. Nothing here consults GitHub:
 /// the count runs from where the branch left the remote's default branch
 /// straight to the working tree, so a commit and an unsaved edit weigh the
@@ -298,7 +308,12 @@ async fn git_diffstat_from(
   }
   let counts = @async.all(
     [
-      for path in paths => () => git_untracked_numstat(dir, path)
+      for path in paths => {
+        () => {
+          guard untracked_is_countable(dir, path) else { return None }
+          git_untracked_numstat(dir, path)
+        }
+      }
     ],
     max_concurrent=32,
   )
@@ -315,6 +330,41 @@ async fn git_diffstat_from(
     }
   }
   Some({ added, removed: tracked.removed, files, base, partial })
+}
+
+///|
+/// Whether counting this untracked file is worth handing to Git, decided
+/// before any subprocess exists.
+///
+/// Two things are refused. Anything that is not a regular file: a named pipe
+/// in the workspace would leave `git diff --no-index` waiting on a writer that
+/// may never come, and the probe has no business blocking on one. And anything
+/// past `MaxUntrackedDiffBytes`, since Git reads the whole file to count its
+/// lines. The kind is checked first because opening a pipe to size it would
+/// block just as surely.
+///
+/// A refusal is reported as a failure, which the caller already turns into a
+/// `partial` total — the file did not vanish, it simply was not counted.
+async fn untracked_is_countable(
+  dir : @pathx.Absolute,
+  path : @pathx.Relative,
+) -> Bool {
+  let native = dir.join(path).to_string()
+  let kind = @fs.kind(native, follow_symlink=false) catch {
+    error if @async.is_being_cancelled() => raise error
+    _ => return false
+  }
+  guard kind is Regular else { return false }
+  let file = @fs.open(native, mode=ReadOnly) catch {
+    error if @async.is_being_cancelled() => raise error
+    _ => return false
+  }
+  defer file.close()
+  let size = file.size() catch {
+    error if @async.is_being_cancelled() => raise error
+    _ => return false
+  }
+  size <= MaxUntrackedDiffBytes
 }
 
 ///|
