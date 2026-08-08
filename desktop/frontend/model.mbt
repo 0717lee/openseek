@@ -524,13 +524,27 @@ priv struct Conversation {
   // model-wide slot would let opening goal mode anywhere destroy the draft
   // waiting somewhere else.
   goal_edit : GoalEdit?
-  // Goal text sent but not yet durably confirmed. `agent.goal` returns once
-  // the command reaches the engine's stdin, which is not persistence: the
-  // engine's own append can still fail, or the process can die with the
-  // command queued, and then no `[goal]` marker ever commits. Holding the
-  // text until a marker lands keeps the user's writing recoverable across
-  // that window; `apply_commit` clears it, and a rejection hands it back.
-  goal_pending : String?
+  // A goal command sent but not yet durably confirmed. `agent.goal` returns
+  // once the command reaches the engine's stdin, which is not persistence:
+  // the engine's own append can still fail, or the process can die with the
+  // command queued, and then no `[goal]` marker ever commits.
+  //
+  // Holding the request until its marker lands does two things. A set keeps
+  // the user's writing recoverable across that window, and either kind takes
+  // the row's Edit and ✕ away while it is in flight — a second command sent
+  // over the first only earns the host's `GoalPending` refusal.
+  // `apply_commit` settles it; a rejection retires it and hands a set's text
+  // back.
+  goal_pending : GoalRequest?
+} derive(Eq)
+
+///|
+/// A goal command in flight, and what its marker will be.
+priv enum GoalRequest {
+  // The text this set carries, which is also its identity: only the set
+  // marker spelling the same text can settle it.
+  Setting(String)
+  Clearing
 } derive(Eq)
 
 ///|
@@ -3748,16 +3762,20 @@ fn Conversation::apply_commit(
     } else {
       self.goal
     },
-    // Only the set that carries this exact text settles it. A marker proves
-    // the engine is committing, not that *this* command landed: a block on
-    // the goal that still stands, or an earlier set from a second submit,
-    // would otherwise retire the recovery copy while the append it belongs
-    // to can still fail. The submitted text is the identity — two sets of
-    // the same text are interchangeable anyway.
+    // Only the request's own marker settles it. A marker proves the engine is
+    // committing, not that *this* command landed: a block on the goal that
+    // still stands, or an earlier set from a second submit, would otherwise
+    // retire the request while the append it belongs to can still fail. A
+    // set's text is its identity — two sets of one text are interchangeable
+    // anyway — and a clear's is the tombstone.
     goal_pending: if item is @protocol.RuntimeNotice(notice) &&
-      @transcript.goal_marker(notice.content) is Some(GoalSet(text)) &&
+      @transcript.goal_marker(notice.content) is Some(marker) &&
       self.goal_pending is Some(pending) &&
-      text == pending {
+      (match (marker, pending) {
+        (GoalSet(text), Setting(sent)) => text == sent
+        (GoalCleared, Clearing) => true
+        _ => false
+      }) {
       None
     } else {
       self.goal_pending

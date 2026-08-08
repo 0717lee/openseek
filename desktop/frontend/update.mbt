@@ -2760,7 +2760,7 @@ fn update_msg(
         model.replace_conversation({
           ..conv,
           goal_edit: None,
-          goal_pending: Some(text),
+          goal_pending: Some(Setting(text)),
         }),
       )
     }
@@ -2778,8 +2778,10 @@ fn update_msg(
         model.replace_conversation({
           ..conv,
           goal_edit: None,
-          // A set still awaiting its marker is superseded by this clear.
-          goal_pending: None,
+          // Supersedes a set still awaiting its marker, and takes the row's
+          // Edit and ✕ away until the tombstone lands: a second clear sent
+          // over this one only earns the host's `GoalPending` refusal.
+          goal_pending: Some(Clearing),
         }),
       )
     }
@@ -5046,14 +5048,7 @@ fn update_device_msg(
         // it for good. Only when this conversation has not claimed goal mode
         // since — a newer edit is the user's, not this dead request's.
         let restored = if draft is Some(draft) && reported.goal_edit is None {
-          {
-            ..reported
-            // The arming decision died with the request; re-arming is the
-            // user's to make again.
-            ,
-            goal_edit: Some({ draft, }),
-            goal_pending: None,
-          }
+          { ..reported, goal_edit: Some({ draft, }), goal_pending: None }
         } else {
           { ..reported, goal_pending: None }
         }
