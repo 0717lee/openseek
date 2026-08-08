@@ -456,11 +456,17 @@ priv struct Conversation {
   // a start request.
   cwd : @common.Uri?
   // The git branch checked out in the workspace, reported by the host's
-  // `workspace_branch` op — display only (topbar chip). `None` until a probe
+  // `workspace_branch` op — display only (composer chip). `None` until a probe
   // answers (or when it fails); `Some("")` when the workspace is not a
   // repository. Either way the chip hides. Refreshed when a run starts, a
   // stored session opens, and a run finishes.
   branch : String?
+  // How much uncommitted work sits on that branch, answered by the same probe
+  // and shown beside it. `None` whenever `branch` is.
+  diffstat : DiffStat?
+  // What GitHub says about that branch; see `PullRequestProbe`. `None` until
+  // the first lookup is issued.
+  pull_request : PullRequestProbe?
   watcher_status : String
   // Live text of the in-flight assistant turn, accumulated from
   // `assistant_delta` events and cleared by ordered full semantic, step,
@@ -989,6 +995,11 @@ priv struct Model {
   // host, not a conversation or workspace, so this catalog is probed once
   // and kept while the frontend runs.
   launcher : Launcher
+  // Whether the composer's git chip has its details popover open. Global UI
+  // for the focused conversation like `quick_open`, not conversation state:
+  // only one composer is on screen, and a popover left open across a switch
+  // would describe the wrong checkout.
+  git_details_open : Bool
   // The right panel's dock: the mixed tab strip's membership, order, active
   // tab, and per-conversation parked strips. Owned by the `dock` package;
   // the projection (open files, active file, panel visibility) feeds
@@ -1408,6 +1419,11 @@ priv enum Msg {
   // Open or close the topbar app launcher; opening it fetches the installed-app
   // list the first time.
   ToggleLauncher
+  // Open or close the composer git chip's details popover.
+  ToggleGitDetails
+  // Dismiss that popover, from a click elsewhere on the page. Separate from
+  // the toggle on purpose: a dismissal must never reopen it.
+  CloseGitDetails
   LauncherLoaded(Array[@transcript.LauncherAppItem])
   LauncherFailed(String)
   // Launch one detected app (by its id) on the active conversation's workspace.
@@ -1613,8 +1629,17 @@ priv enum DeviceMsg {
   WorktreeFailed(String)
   // A `workspace_branch` reply: the git branch of `session`'s workspace —
   // `Some("")` when it is not a repository, `None` when the probe failed or
-  // answered unintelligibly.
-  BranchLoaded(session~ : String, branch~ : String?)
+  // answered unintelligibly — and how much uncommitted work sits on it.
+  BranchLoaded(session~ : String, branch~ : String?, diffstat~ : DiffStat?)
+  // A `git.pull_request` reply for the branch the lookup was issued against.
+  // A failed lookup arrives here too, with nothing in it, so the conversation
+  // never stays wedged waiting for an answer that will not come.
+  PullRequestLoaded(
+    session~ : String,
+    branch~ : String,
+    pull_request~ : PullRequest?,
+    compare_url~ : String?
+  )
   // The host accepted a prompt: `session` routes the event to its
   // conversation, and everything after a `started` routes by `run_id`.
   // `task` is the prompt text — a client that did not send it (another
@@ -1729,6 +1754,8 @@ fn empty_conversation(
     usage_tokens: 0,
     cwd: None,
     branch: None,
+    diffstat: None,
+    pull_request: None,
     watcher_status: "",
     streaming_response: "",
     input_ledger: [],
@@ -1826,6 +1853,7 @@ fn initial_model() -> Model {
     quick_open: None,
     quick_open_generation: 0,
     launcher: { open: false, apps: AppsNotFetched },
+    git_details_open: false,
     dock: @dock.State::empty(),
     file_panel: @fileeditor.State::empty(),
     preview: @preview.State::empty(),

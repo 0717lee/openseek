@@ -146,6 +146,15 @@ pub(all) struct GitBranchPayload {
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|
+/// Address the same working directory as `git.branch` — the pull request is
+/// looked up for whatever branch that directory has checked out, so the two
+/// chips can never describe different branches.
+pub(all) struct GitPullRequestPayload {
+  session : String
+  cwd : String?
+} derive(Debug, Eq, FromJson, ToJson)
+
+///|
 /// Address the Git working tree belonging to one conversation. The optional
 /// workspace hint follows the filesystem operations' trust boundary: the host
 /// accepts it only when it names a registered workspace and still routes a

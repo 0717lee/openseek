@@ -467,8 +467,69 @@ pub(all) struct UninstallSkillReply {
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|
+/// This branch's whole line delta, measured locally: from where it left the
+/// remote's default branch all the way to the working tree, so committed and
+/// uncommitted work count the same and untracked files are included. `base`
+/// names the ref it was measured from, and is absent when the repository
+/// offered none — then the count covers uncommitted work alone. `partial`
+/// marks a count that stopped short of every untracked file, so the composer
+/// can say the number is a floor rather than quietly under-reporting.
+pub(all) struct GitDiffStat {
+  added : Int
+  removed : Int
+  files : Int
+  base : String?
+  partial : Bool
+} derive(Debug, Eq, FromJson, ToJson)
+
+///|
+/// `diffstat` is absent for the same reasons `branch` is (no repository, no
+/// git), and additionally when the diff itself failed — the branch chip is
+/// worth showing on its own. Older peers omit the field entirely, which
+/// decodes to the same absence.
 pub(all) struct GitBranchReply {
   branch : String?
+  diffstat : GitDiffStat?
+} derive(Debug, Eq, FromJson, ToJson)
+
+///|
+/// The CI rollup for a pull request's head commit, bucketed into the three
+/// states a chip can show. Skipped, neutral, and cancelled checks count as
+/// passed: they are finished and not something to act on.
+pub(all) struct GitChecks {
+  passed : Int
+  failed : Int
+  pending : Int
+} derive(Debug, Eq, FromJson, ToJson)
+
+///|
+/// One pull request as GitHub reports it. `state` is `open`, `merged`, or
+/// `closed`; a draft is `open` with `draft` set, since drafts are open pull
+/// requests that merely refuse to merge. `additions`/`deletions` are GitHub's
+/// own totals against the pull request's base, which is why they can disagree
+/// with anything measurable from a local checkout that has not fetched.
+/// `checks` is absent when the head commit reports no checks at all.
+pub(all) struct GitPullRequest {
+  number : Int
+  title : String
+  state : String
+  draft : Bool
+  url : String
+  additions : Int
+  deletions : Int
+  changed_files : Int
+  checks : GitChecks?
+} derive(Debug, Eq, FromJson, ToJson)
+
+///|
+/// Reply to `git.pull_request`. Both fields absent means the host could not
+/// answer at all — no repository, no GitHub remote, or no usable `gh` — which
+/// the composer shows as no chip rather than an error. `compare_url` alone is
+/// the ordinary "this branch has no pull request yet" answer, and the composer
+/// offers it as a link to open one.
+pub(all) struct GitPullRequestReply {
+  pull_request : GitPullRequest?
+  compare_url : String?
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|

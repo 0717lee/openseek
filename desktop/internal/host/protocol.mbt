@@ -67,8 +67,30 @@ type GitBranchPayload = @protocol.GitBranchPayload
 ///|
 /// Reply to `git.branch`. `branch` is the checked-out branch (a detached
 /// HEAD reads as its short hash); absent when the directory is not a git
-/// repository or git is unavailable.
+/// repository or git is unavailable. `diffstat` summarizes the same working
+/// tree the file panel lists.
 type GitBranchReply = @protocol.GitBranchReply
+
+///|
+type GitDiffStat = @protocol.GitDiffStat
+
+///|
+/// `git.pull_request` reports the GitHub pull request for the branch checked
+/// out in the conversation's working directory. It addresses that directory
+/// exactly like `git.branch`, and answers over the `gh` CLI, so it inherits
+/// the user's own GitHub authentication instead of storing a token.
+type GitPullRequestPayload = @protocol.GitPullRequestPayload
+
+///|
+/// Reply to `git.pull_request`: the branch's pull request, or just the URL
+/// that would open one.
+type GitPullRequestReply = @protocol.GitPullRequestReply
+
+///|
+type GitPullRequest = @protocol.GitPullRequest
+
+///|
+type GitChecks = @protocol.GitChecks
 
 ///|
 /// `git.changes` addresses the same session/workspace checkout as the file

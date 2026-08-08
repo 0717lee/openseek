@@ -1,6 +1,7 @@
-// The topbar's branch chip: report the git branch of a conversation's
-// working directory. Display only — a missing repository (or a machine
-// without git) simply reads as "no branch", never an error.
+// The composer's branch chip: report the git branch of a conversation's
+// working directory, and how much uncommitted work sits on it. Display only —
+// a missing repository (or a machine without git) simply reads as "no
+// branch", never an error.
 
 ///|
 async fn git_branch_op(payload : GitBranchPayload) -> GitBranchReply {
@@ -11,8 +12,12 @@ async fn git_branch_op(payload : GitBranchPayload) -> GitBranchReply {
     Some(cwd) => @pathx.Absolute::from_uri_path(cwd)
     None => @engine.session_cwd(payload.session)
   }
-  guard base is Some(base) else { return { branch: None } }
-  { branch: git_branch(base.0) }
+  guard base is Some(base) else { return { branch: None, diffstat: None } }
+  guard git_branch(base.0) is Some(branch) else {
+    // Not a repository, or no git: there is nothing to count either.
+    return { branch: None, diffstat: None }
+  }
+  { branch: Some(branch), diffstat: git_diffstat(base) }
 }
 
 ///|
@@ -31,6 +36,206 @@ async fn git_branch(dir : String) -> String? {
   } else {
     Some(name)
   }
+}
+
+///|
+/// Git's empty tree. A repository whose `HEAD` has no commit yet still has an
+/// index worth diffing, and every Git version spells this baseline object the
+/// same way, so it is a constant rather than something to ask the repository
+/// for.
+const EmptyTreeObject : String = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+
+///|
+/// How many untracked files the diffstat counts before it settles for
+/// `partial`. Each one costs a `git diff` of its own, and a workspace holding
+/// hundreds of them has an unignored build directory rather than that much
+/// work in progress.
+const MaxUntrackedDiffFiles : Int = 100
+
+///|
+/// This branch's whole delta, measured locally. Nothing here consults GitHub:
+/// the count runs from where the branch left the remote's default branch
+/// straight to the working tree, so a commit and an unsaved edit weigh the
+/// same and the number keeps moving as the agent works.
+async fn git_diffstat(dir : @pathx.Absolute) -> GitDiffStat? {
+  let native = dir.0
+  // An unborn HEAD has no commit to diff against, but its index can already
+  // hold staged additions, so the empty tree stands in for the missing commit.
+  guard git_output_opt(native, ["rev-parse", "--verify", "--quiet", "HEAD"])
+    is Some(_) else {
+    return git_diffstat_from(dir, EmptyTreeObject, None)
+  }
+  let (baseline, base) = git_branch_base(native)
+  git_diffstat_from(dir, baseline, base)
+}
+
+///|
+/// The ref this branch's work is measured against: the remote's default
+/// branch, which is what a pull request would target. `origin/HEAD` names it
+/// when the clone recorded one; the two conventional names are tried after
+/// that, since a remote added by hand never gets that symbolic ref.
+async fn git_default_branch_ref(dir : String) -> String? {
+  if git_output_opt(dir, [
+      "rev-parse", "--abbrev-ref", "--verify", "--quiet", "origin/HEAD",
+    ])
+    is Some(output) {
+    let name = git_single_line(output)
+    // A repository can hold a dangling `origin/HEAD` that abbreviates to
+    // itself; that names no branch to compare against.
+    if !name.is_empty() && name != "origin/HEAD" {
+      return Some(name)
+    }
+  }
+  for candidate in ["origin/main", "origin/master"] {
+    if git_output_opt(dir, ["rev-parse", "--verify", "--quiet", candidate])
+      is Some(_) {
+      return Some(candidate)
+    }
+  }
+  None
+}
+
+///|
+/// Where this branch's work starts, and the ref that decided it. Falling back
+/// to `HEAD` — no remote, no default branch, unrelated histories — leaves the
+/// count covering uncommitted work alone, which the absent ref name tells the
+/// composer to say out loud instead of implying a comparison never made.
+async fn git_branch_base(dir : String) -> (String, String?) {
+  guard git_default_branch_ref(dir) is Some(base_ref) else {
+    return ("HEAD", None)
+  }
+  guard git_output_opt(dir, ["merge-base", "HEAD", base_ref]) is Some(output) else {
+    return ("HEAD", None)
+  }
+  let commit = git_single_line(output)
+  if commit.is_empty() {
+    ("HEAD", None)
+  } else {
+    (commit, Some(base_ref))
+  }
+}
+
+///|
+/// Sum everything between `baseline` and the working tree: one `git diff
+/// --numstat` for what Git tracks, plus the untracked files counted one at a
+/// time. None when Git could not answer at all — the branch chip stands on its
+/// own.
+async fn git_diffstat_from(
+  dir : @pathx.Absolute,
+  baseline : String,
+  base : String?,
+) -> GitDiffStat? {
+  let native = dir.0
+  // `-- .` scopes the diff to the conversation workspace, which may be a
+  // subdirectory of the repository, exactly as `git.changes` does. With no
+  // second revision the comparison runs to the working tree, so uncommitted
+  // edits land in the same total as the commits before them.
+  guard git_output_opt(native, ["diff", "--numstat", baseline, "--", "."])
+    is Some(tracked) else {
+    return None
+  }
+  let tracked = { ..parse_numstat(tracked), base, }
+  guard git_output_opt(native, [
+      "ls-files", "--others", "--exclude-standard", "-z", "--", ".",
+    ])
+    is Some(listing) else {
+    return Some(tracked)
+  }
+  // `--others` spells its paths from Git's current directory, which is this
+  // workspace. Validating each one lexically keeps a path that cannot address
+  // a file under the workspace from reaching the command line at all.
+  let paths : Array[@pathx.Relative] = []
+  let mut partial = false
+  for path in listing.split("\u{0}") {
+    guard git_tree_relative(path.to_owned()) is Some(relative) else { continue }
+    if paths.length() >= MaxUntrackedDiffFiles {
+      partial = true
+      break
+    }
+    paths.push(relative)
+  }
+  let counts = @async.all(
+    [
+      for path in paths => () => git_untracked_numstat(dir, path)
+    ],
+    max_concurrent=32,
+  )
+  let mut added = tracked.added
+  let mut files = tracked.files
+  for count in counts {
+    if count is Some(count) {
+      added += count.added
+      files += count.files
+    }
+  }
+  Some({ added, removed: tracked.removed, files, base, partial })
+}
+
+///|
+/// One untracked file's line count, which `git diff --numstat` cannot report:
+/// numstat only sees what Git tracks, and `git add --intent-to-add` would
+/// write to the user's index to answer a display question. Diffing against
+/// `/dev/null` — a magic path name in Git's no-index mode on every platform,
+/// not a device file — buys Git's own counting, binary detection included.
+/// `--no-index` reports "there are differences" as exit status 1, the way
+/// `diff` does, so only a higher status is a failure.
+async fn git_untracked_numstat(
+  dir : @pathx.Absolute,
+  path : @pathx.Relative,
+) -> GitDiffStat? {
+  let (code, stdout, _) = @process.collect_output(
+    "git",
+    ["diff", "--numstat", "--no-index", "--", "/dev/null", path.0],
+    cwd=dir.0,
+    extra_env=git_environment(),
+    inherit_env=false,
+  ) catch {
+    error if @async.is_being_cancelled() => raise error
+    _ => return None
+  }
+  guard code <= 1 else { return None }
+  Some(parse_numstat(stdout.text() catch { _ => return None }))
+}
+
+///|
+/// Sum `git diff --numstat` output. Only the two leading counts are read: the
+/// path field is quoted, escaped, and respelled for renames, and nothing here
+/// needs it. A binary file reports `-` for both counts, contributing a changed
+/// file with no lines rather than a parse failure. The caller supplies the
+/// baseline this was measured from; the numbers alone do not know it.
+fn parse_numstat(output : String) -> GitDiffStat {
+  let mut added = 0
+  let mut removed = 0
+  let mut files = 0
+  for line in output.split("\n") {
+    let line = line.trim_end(chars="\r")
+    guard line.find("\t") is Some(first) else { continue }
+    let rest = line.view(start_offset=first + 1)
+    guard rest.find("\t") is Some(second) else { continue }
+    files += 1
+    added += @string.parse_int(line.view(end_offset=first)) catch { _ => 0 }
+    removed += @string.parse_int(rest.view(end_offset=second)) catch { _ => 0 }
+  }
+  { added, removed, files, base: None, partial: false }
+}
+
+///|
+/// Run Git for a result that may legitimately be empty. Unlike `git_output`, a
+/// command that failed reads as None rather than an empty string, so a caller
+/// whose empty output means "nothing changed" can tell the two apart.
+async fn git_output_opt(dir : String, args : Array[String]) -> String? {
+  let (code, stdout, _) = @process.collect_output(
+    "git",
+    args,
+    cwd=dir,
+    extra_env=git_environment(),
+    inherit_env=false,
+  ) catch {
+    error if @async.is_being_cancelled() => raise error
+    _ => return None
+  }
+  guard code == 0 else { return None }
+  Some(stdout.text() catch { _ => return None })
 }
 
 ///|
@@ -1055,6 +1260,42 @@ test "Git changes are relative to an attached repository subdirectory" {
     ),
     Some({ ..renamed, path: "src/new.mbt", original_path: None }),
   )
+}
+
+///|
+test "Numstat sums lines and counts a binary file without any" {
+  assert_eq(parse_numstat(""), {
+    added: 0,
+    removed: 0,
+    files: 0,
+    base: None,
+    partial: false,
+  })
+  assert_eq(
+    parse_numstat("12\t3\tsrc/a.mbt\n-\t-\tassets/logo.png\n0\t7\tsrc/b.mbt\n"),
+    { added: 12, removed: 10, files: 3, base: None, partial: false },
+  )
+}
+
+///|
+test "Numstat reads a respelled path field without parsing it" {
+  // Rename detection and `--no-index` both rewrite the path field into a
+  // `{old => new}` form; only the two counts are ever read.
+  assert_eq(parse_numstat("3\t0\t/{dev/null => src/new.mbt}\r\n"), {
+    added: 3,
+    removed: 0,
+    files: 1,
+    base: None,
+    partial: false,
+  })
+  // A line Git never emits still must not be counted as a changed file.
+  assert_eq(parse_numstat("garbage\n"), {
+    added: 0,
+    removed: 0,
+    files: 0,
+    base: None,
+    partial: false,
+  })
 }
 
 ///|

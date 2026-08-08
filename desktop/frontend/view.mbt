@@ -1828,11 +1828,13 @@ fn composer_view(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
   let can_send = !conv.is_running() &&
     conv.compaction is NotCompacting &&
     has_input
-  // The left status group: the model, plus the workspace's git branch (moved
-  // out of the topbar; a workspace that is not a repository has no chip).
+  // The left status group: the conversation's model, then one git chip — the
+  // branch's pull request, or the branch itself, tinted by CI — which opens
+  // the rest (changes, base, links out) in a popover rather than spending the
+  // row's remaining width on it.
   let status : Array[@html.Html] = [model_chip(dispatch, conv)]
-  if conv.branch is Some(branch) && !branch.is_empty() {
-    status.push(@html.span(class="composer-branch", branch))
+  if git_chip(dispatch, model, conv) is Some(chip) {
+    status.push(chip)
   }
   // The launch mode: a fresh workspace conversation chooses between the
   // workspace itself and a fresh host-named worktree (its 1:1 execution

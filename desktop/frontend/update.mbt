@@ -2562,6 +2562,9 @@ fn update_msg(
         model,
       )
     }
+    ToggleGitDetails =>
+      (@cmd.none, { ..model, git_details_open: !model.git_details_open })
+    CloseGitDetails => (@cmd.none, { ..model, git_details_open: false })
     ToggleLauncher => {
       let opening = !model.launcher.open
       // The launcher exists only in the desktop window, whose one native
@@ -3509,9 +3512,17 @@ fn update_device_msg(
           !rows.iter().any(row => row.name == name) {
           // The checkout is gone, so every placement derived from it goes
           // too: a kept cwd would aim OpenFile/LaunchApp at a deleted
-          // directory and the composer would keep showing the dead branch.
-          // Both re-derive from the host on the next run or open.
-          { ..conv, worktree: None, cwd: None, branch: None }
+          // directory and the composer would keep showing the dead branch,
+          // its uncommitted lines, and its pull request. All re-derive from
+          // the host on the next run or open.
+          {
+            ..conv,
+            worktree: None,
+            cwd: None,
+            branch: None,
+            diffstat: None,
+            pull_request: None,
+          }
         } else {
           conv
         }
@@ -3853,12 +3864,70 @@ fn update_device_msg(
         (commit_cmd, next)
       }
     }
-    BranchLoaded(session~, branch~) =>
-      if model.find_conversation(channel, session) is Some(conv) {
-        (@cmd.none, model.replace_conversation({ ..conv, branch, }))
-      } else {
-        (@cmd.none, model)
+    BranchLoaded(session~, branch~, diffstat~) => {
+      guard model.find_conversation(channel, session) is Some(conv) else {
+        return (@cmd.none, model)
       }
+      let conv = { ..conv, branch, diffstat }
+      // The pull-request lookup rides on the branch answer rather than on the
+      // four places that ask for it: whatever refreshes the branch — a run
+      // starting, a session opening, a run finishing — is exactly when the
+      // branch's pull request can have changed too.
+      guard branch is Some(branch) && !branch.is_empty() else {
+        // Not a repository any more: an answer about the branch it used to
+        // have would only mislead.
+        return (
+          @cmd.none,
+          model.replace_conversation({ ..conv, pull_request: None }),
+        )
+      }
+      // A lookup already in flight for this same branch is not stacked on.
+      let in_flight = conv.pull_request is Some(probe) &&
+        probe.probing &&
+        probe.branch == branch
+      guard !in_flight else {
+        return (@cmd.none, model.replace_conversation(conv))
+      }
+      // Only an answer about a different branch is discarded; re-probing the
+      // branch already on screen keeps its chip until the reply lands.
+      let fresh : PullRequestProbe = {
+        branch,
+        probing: true,
+        pull_request: None,
+        compare_url: None,
+      }
+      let carried = match conv.pull_request {
+        Some(probe) if probe.branch == branch => { ..probe, probing: true }
+        _ => fresh
+      }
+      (
+        fetch_pull_request(dispatch, channel, session, branch, conv.cwd),
+        model.replace_conversation({ ..conv, pull_request: Some(carried) }),
+      )
+    }
+    PullRequestLoaded(session~, branch~, pull_request~, compare_url~) => {
+      guard model.find_conversation(channel, session) is Some(conv) else {
+        return (@cmd.none, model)
+      }
+      // A reply for a branch the workspace has since left describes a checkout
+      // that is no longer on screen; dropping it keeps a slow lookup from
+      // overwriting a newer one.
+      guard conv.pull_request is Some(probe) && probe.branch == branch else {
+        return (@cmd.none, model)
+      }
+      (
+        @cmd.none,
+        model.replace_conversation({
+          ..conv,
+          pull_request: Some({
+            branch,
+            probing: false,
+            pull_request,
+            compare_url,
+          }),
+        }),
+      )
+    }
     Started(
       run_id~,
       session~,
@@ -11504,25 +11573,145 @@ test "the scroll watcher's report lands on the model" {
 ///|
 test "a branch reply lands on its conversation and an empty one hides it" {
   let dispatch = test_dispatch()
+  let stat : DiffStat = {
+    added: 12,
+    removed: 3,
+    files: 2,
+    base: Some("origin/main"),
+    partial: false,
+  }
   let (_, named) = update_dev(
     dispatch,
-    BranchLoaded(session="desktop-test", branch=Some("feature/x")),
+    BranchLoaded(
+      session="desktop-test",
+      branch=Some("feature/x"),
+      diffstat=Some(stat),
+    ),
     test_model(),
   )
   assert_true(named.active().branch is Some("feature/x"))
+  assert_eq(named.active().diffstat, Some(stat))
+  // A named branch is also what the pull-request lookup keys on, and the
+  // lookup it issued is on record so a second reply cannot stack another.
+  assert_eq(
+    named.active().pull_request,
+    Some({
+      branch: "feature/x",
+      probing: true,
+      pull_request: None,
+      compare_url: None,
+    }),
+  )
   let (_, cleared) = update_dev(
     dispatch,
-    BranchLoaded(session="desktop-test", branch=Some("")),
+    BranchLoaded(session="desktop-test", branch=Some(""), diffstat=None),
     named,
   )
   assert_true(cleared.active().branch is Some(""))
+  // A workspace that stopped being a repository keeps no pull request from
+  // the branch it used to have.
+  assert_eq(cleared.active().pull_request, None)
   // A reply for an unknown session is dropped.
   let (_, ignored) = update_dev(
     dispatch,
-    BranchLoaded(session="desktop-gone", branch=Some("main")),
+    BranchLoaded(session="desktop-gone", branch=Some("main"), diffstat=None),
     test_model(),
   )
   assert_true(ignored.active().branch is None)
+}
+
+///|
+test "a pull-request reply only lands on the branch it was asked about" {
+  let dispatch = test_dispatch()
+  let (_, probing) = update_dev(
+    dispatch,
+    BranchLoaded(
+      session="desktop-test",
+      branch=Some("feature/x"),
+      diffstat=None,
+    ),
+    test_model(),
+  )
+  let answer : PullRequest = {
+    number: 710,
+    title: "Add a changed-files explorer",
+    state: PullRequestOpen,
+    draft: true,
+    url: "https://github.test/acme/app/pull/710",
+    additions: 2972,
+    deletions: 287,
+    changed_files: 18,
+    checks: Some({ passed: 1, failed: 0, pending: 3 }),
+  }
+  // An answer about a branch the workspace has since left is dropped rather
+  // than shown against the branch now checked out.
+  let (_, stale) = update_dev(
+    dispatch,
+    PullRequestLoaded(
+      session="desktop-test",
+      branch="feature/old",
+      pull_request=Some(answer),
+      compare_url=None,
+    ),
+    probing,
+  )
+  assert_eq(stale.active().pull_request.unwrap().pull_request, None)
+  let (_, settled) = update_dev(
+    dispatch,
+    PullRequestLoaded(
+      session="desktop-test",
+      branch="feature/x",
+      pull_request=Some(answer),
+      compare_url=None,
+    ),
+    probing,
+  )
+  assert_eq(
+    settled.active().pull_request,
+    Some({
+      branch: "feature/x",
+      probing: false,
+      pull_request: Some(answer),
+      compare_url: None,
+    }),
+  )
+  // Refreshing the same branch keeps that answer on screen while it re-probes,
+  // so the chip does not blink on every run boundary.
+  let (_, refreshing) = update_dev(
+    dispatch,
+    BranchLoaded(
+      session="desktop-test",
+      branch=Some("feature/x"),
+      diffstat=None,
+    ),
+    settled,
+  )
+  assert_eq(
+    refreshing.active().pull_request,
+    Some({
+      branch: "feature/x",
+      probing: true,
+      pull_request: Some(answer),
+      compare_url: None,
+    }),
+  )
+}
+
+///|
+test "the composer's git details popover toggles shut again" {
+  let dispatch = test_dispatch()
+  assert_false(test_model().git_details_open)
+  let (_, opened) = update(dispatch, ToggleGitDetails, test_model())
+  assert_true(opened.git_details_open)
+  let (_, closed) = update(dispatch, ToggleGitDetails, opened)
+  assert_false(closed.git_details_open)
+  // Dismissal is idempotent where the toggle is not: the click that closes the
+  // popover also reaches whatever it landed on, and a second dismissal — from
+  // a page that dispatched one on its own — must not bring it back.
+  let (_, dismissed) = update(dispatch, CloseGitDetails, opened)
+  assert_false(dismissed.git_details_open)
+  let (_, still_closed) = update(dispatch, CloseGitDetails, dismissed)
+  assert_false(still_closed.git_details_open)
 }
 
 ///|

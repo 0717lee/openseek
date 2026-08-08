@@ -134,8 +134,8 @@ pub fn boot() -> Unit {
       // Ctrl+` follows the terminal buttons' existing toggle path. Application
       // command chords use a separate capture subscription because they must
       // beat embedded editors and browser defaults.
-      subscriptions=(emit, _) => {
-        @sub.batch([
+      subscriptions=(emit, model) => {
+        let subs : Array[@sub.Sub] = [
           @sub.on_resize(
             emit.map(viewport => ViewportResized(width=viewport.width)),
           ),
@@ -156,7 +156,16 @@ pub fn boot() -> Unit {
             }),
           ),
           external_link_subscription(emit.map(url => ExternalLinkClicked(url))),
-        ])
+        ]
+        // Only while the composer's git popover is open — there is nothing to
+        // dismiss otherwise, and a document-wide listener should not outlive
+        // what it serves.
+        if model.git_details_open {
+          subs.push(
+            git_dismiss_subscription(emit.map((_ : Unit) => CloseGitDetails)),
+          )
+        }
+        @sub.batch(subs)
       },
     )
     state.view(model => view(emit, model))
