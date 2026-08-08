@@ -1613,12 +1613,12 @@ pub fn update(
           // usable snapshot.
           ChangeListReady(..) => (@cmd.none, state)
           ChangeListLoading(refresh_again=false) =>
-            if explorer_visible(state, ctx) {
+            if explorer_visible(state, ctx) || changes_live(state, ctx) {
               (@cmd.none, { ..state, changes: ChangeListFailed(message) })
             } else {
-              // The error is off-screen and reopening has a stronger fresh
-              // signal than this failed snapshot; return to Idle so sync
-              // starts that request instead of surfacing a stale failure.
+              // No explorer or review consumes this inventory. Reopening has a
+              // stronger fresh signal than this failed snapshot, so return to
+              // Idle and let that transition start the next request.
               (@cmd.none, { ..state, changes: ChangeListIdle })
             }
           // An Idle/Failed state has no active request. This can be a late
@@ -3074,7 +3074,7 @@ test "checkout recovery restarts a review whose paired replies were parked" {
 }
 
 ///|
-test "checkout recovery retries failed Changes before restarting a review" {
+test "hidden checkout recovery retries failed Changes once before parking" {
   let emit = test_emit()
   let present = test_ctx()
   let path = @pathx.Relative("reviewed.mbt")
@@ -3099,6 +3099,7 @@ test "checkout recovery retries failed Changes before restarting a review" {
   }
   let state = {
     ..owned_state(),
+    tree_open: false,
     changes: ChangeListFailed("transient Git failure"),
     changes_generation: 1,
     changes_head: Some("same-head"),
@@ -3120,6 +3121,7 @@ test "checkout recovery retries failed Changes before restarting a review" {
   assert_true(restored.changes is ChangeListLoading(refresh_again=false))
   assert_true(restored.changes_generation == 2)
   assert_true(restored.review_recovery_pending)
+  assert_false(explorer_visible(restored, restored_ctx))
   // The placement transition grants exactly one automatic attempt. If it
   // fails too, ordinary sync leaves the failure parked at the same generation.
   let (_, failed_again) = update(
