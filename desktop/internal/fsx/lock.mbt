@@ -97,8 +97,18 @@ pub async fn write_text_atomic(
   )
   @fs.rename(temp.to_string(), target) catch {
     error if @async.is_being_cancelled() => raise error
-    _ => {
-      remove_if_exists(path)
+    rename_failure => {
+      // The retry exists only for the Windows refusal above, which is a
+      // regular file standing in the way. Anything else at the target is a
+      // different failure and must surface as one: a directory there means
+      // the path is wrong, and removing it would recursively destroy whatever
+      // it holds rather than report that.
+      let replaceable = (@fs.kind(target) is Regular) catch {
+        error if @async.is_being_cancelled() => raise error
+        _ => false
+      }
+      guard replaceable else { raise rename_failure }
+      @fs.remove(target)
       @fs.rename(temp.to_string(), target)
     }
   }
@@ -163,6 +173,24 @@ async test "shared locks admit each other" {
     first.release()
   })
   assert_eq(log, ["second acquired", "first releasing"])
+  @fs.rmdir(root.to_string(), recursive=true)
+}
+
+///|
+/// The Windows retry must not turn "something else already occupies this
+/// path" into a recursive delete of whatever that something holds.
+async test "an atomic save refuses a target that is not a regular file" {
+  let root : @pathx.Path = @fs.tmpdir(prefix="openseek-fsx-kind-")
+  let occupied = root.join("registry.json")
+  ensure_dir(occupied)
+  let kept = occupied.join("keep.txt")
+  write_text_atomic(kept, "precious")
+  let mut refused = false
+  write_text_atomic(occupied, "clobber") catch {
+    _ => refused = true
+  }
+  assert_true(refused)
+  assert_eq(read_text(kept), "precious")
   @fs.rmdir(root.to_string(), recursive=true)
 }
 
