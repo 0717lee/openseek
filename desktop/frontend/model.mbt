@@ -464,6 +464,10 @@ priv struct Conversation {
   // How much uncommitted work sits on that branch, answered by the same probe
   // and shown beside it. `None` whenever `branch` is.
   diffstat : DiffStat?
+  // The newest branch probe. Replies carry it, so one that is still counting
+  // untracked files cannot land on top of a later probe's answer — a run's
+  // start and its finish each issue one, and so does opening the popover.
+  branch_generation : Int
   // What GitHub says about that branch; see `PullRequestProbe`. `None` until
   // the first lookup is issued.
   pull_request : PullRequestProbe?
@@ -1631,7 +1635,13 @@ priv enum DeviceMsg {
   // A `workspace_branch` reply: the git branch of `session`'s workspace —
   // `Some("")` when it is not a repository, `None` when the probe failed or
   // answered unintelligibly — and how much uncommitted work sits on it.
-  BranchLoaded(session~ : String, branch~ : String?, diffstat~ : DiffStat?)
+  // `generation` is the probe that asked; an older one's answer is discarded.
+  BranchLoaded(
+    session~ : String,
+    branch~ : String?,
+    diffstat~ : DiffStat?,
+    generation~ : Int
+  )
   // A `git.pull_request` reply. `branch` is the one the lookup was issued
   // against, which matches it to the probe in flight; `queried` is the one the
   // host reported actually reading from `HEAD`, and is what the answer gets
@@ -1760,6 +1770,7 @@ fn empty_conversation(
     cwd: None,
     branch: None,
     diffstat: None,
+    branch_generation: 0,
     pull_request: None,
     watcher_status: "",
     streaming_response: "",

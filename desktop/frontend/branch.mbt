@@ -317,13 +317,18 @@ fn git_details(
     ),
   ]
   if conv.diffstat is Some(stat) {
-    let value = if stat.files == 0 {
-      @html.span(class="composer-git-clean", "No changes")
-    } else {
+    // "No changes" is a definite claim, so only a count that reached the end
+    // may make it. A partial count of zero knows nothing about the files it
+    // could not read, and saying "clean" there would contradict its own note.
+    let value = if stat.files > 0 {
       @html.span(class="composer-git-diff", [
         @html.span(class="composer-diff-added", "+\{stat.added}"),
         @html.span(class="composer-diff-removed", "−\{stat.removed}"),
       ])
+    } else if stat.partial {
+      @html.span(class="composer-git-clean", "Not counted")
+    } else {
+      @html.span(class="composer-git-clean", "No changes")
     }
     let counted = if stat.files == 0 {
       None
@@ -418,6 +423,7 @@ fn fetch_branch(
   channel : @interop.ChannelId,
   session : String,
   cwd : @common.Uri?,
+  generation~ : Int,
 ) -> @cmd.Cmd {
   match cwd {
     Some(resource) if !@resource.belongs_to(resource, channel) =>
@@ -433,7 +439,9 @@ fn fetch_branch(
       }) catch {
         _ => {
           scheduler.add(
-            dispatch(BranchLoaded(session~, branch=None, diffstat=None)),
+            dispatch(
+              BranchLoaded(session~, branch=None, diffstat=None, generation~),
+            ),
           )
           return
         }
@@ -444,11 +452,35 @@ fn fetch_branch(
             session~,
             branch=reply.branch,
             diffstat=reply.diffstat.map(DiffStat::from_reply),
+            generation~,
           ),
         ),
       )
     })
   })
+}
+
+///|
+/// Issue a branch probe, stamped with a fresh generation so an earlier one
+/// still counting untracked files cannot land on top of this answer. Two are
+/// ordinarily in flight — a run's start and its finish, or either of those and
+/// the popover being opened — and the untracked pass is what makes the older
+/// one slow.
+fn probe_branch(
+  dispatch : @cmd.Emit[Msg],
+  model : Model,
+  channel : @interop.ChannelId,
+  session : String,
+  cwd : @common.Uri?,
+) -> (@cmd.Cmd, Model) {
+  guard model.find_conversation(channel, session) is Some(conv) else {
+    return (@cmd.none, model)
+  }
+  let generation = conv.branch_generation + 1
+  (
+    fetch_branch(dispatch, channel, session, cwd, generation~),
+    model.replace_conversation({ ..conv, branch_generation: generation }),
+  )
 }
 
 ///|

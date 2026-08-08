@@ -89,84 +89,106 @@ async fn git_diffstat(dir : @pathx.Absolute) -> GitDiffStat? {
 }
 
 ///|
-/// The ref this branch's work is measured against: the remote's default
-/// branch, which is what a pull request would target.
-///
-/// A recorded `<remote>/HEAD` is the repository's own statement of where that
-/// is, so every remote's is read rather than only `origin`'s — a checkout
-/// whose one remote is called `upstream`, or named after its host, has a
-/// default branch too, and measuring from `HEAD` instead would report a
-/// branch full of commits as having no changes. `origin` still wins when it
-/// has one, at both tiers.
-async fn git_default_branch_ref(dir : String) -> String? {
+/// Every ref that could be the branch's base: each remote's recorded default
+/// (`<remote>/HEAD`, the repository's own statement of where its default
+/// branch is) and each remote's conventionally named one. Both tiers cover
+/// every remote rather than only `origin` — a checkout whose one remote is
+/// called `upstream`, or named after its host, has a default branch too — and
+/// the conventional names are listed as well as the symrefs, since a remote
+/// added by hand rather than cloned never gets a symref.
+async fn git_base_candidates(dir : String) -> Array[String] {
+  let candidates : Array[String] = []
+  fn offer(ref_ : String) -> Unit {
+    if !ref_.is_empty() && !candidates.contains(ref_) {
+      candidates.push(ref_)
+    }
+  }
+
   if git_output_opt(dir, [
-      "for-each-ref", "--format=%(refname:short)%09%(symref:short)", "refs/remotes/*/HEAD",
+      "for-each-ref", "--format=%(symref:short)", "refs/remotes/*/HEAD",
     ])
     is Some(listing) {
-    let mut recorded : String? = None
     for line in listing.split("\n") {
-      guard line.find("\t") is Some(tab) else { continue }
-      let remote = line.view(end_offset=tab)
       // A dangling `<remote>/HEAD` resolves to nothing and names no branch.
-      let target = line.view(start_offset=tab + 1).trim_end(chars="\r")
-      guard !target.is_empty() else { continue }
-      if remote == "origin" {
-        return Some(target.to_owned())
-      }
-      if recorded is None {
-        recorded = Some(target.to_owned())
-      }
-    }
-    if recorded is Some(_) {
-      return recorded
+      offer(line.trim_end(chars="\r").to_owned())
     }
   }
-  // No remote recorded one, so fall back to guessing the conventional names —
-  // on every remote, not just `origin`. A remote added by hand rather than
-  // cloned never gets the symref that would have answered above, and its
-  // `main` is still the branch this work is measured from.
-  guard git_output_opt(dir, ["remote"]) is Some(listing) else { return None }
-  let remotes : Array[String] = []
-  for line in listing.split("\n") {
-    let remote = line.trim_end(chars="\r")
-    guard !remote.is_empty() else { continue }
-    // `origin` keeps its precedence over whatever else is configured.
-    if remote == "origin" {
-      remotes.insert(0, remote.to_owned())
-    } else {
-      remotes.push(remote.to_owned())
-    }
-  }
-  for remote in remotes {
-    for name in ["main", "master"] {
-      let candidate = "\{remote}/\{name}"
-      if git_output_opt(dir, ["rev-parse", "--verify", "--quiet", candidate])
-        is Some(_) {
-        return Some(candidate)
+  if git_output_opt(dir, ["remote"]) is Some(listing) {
+    for line in listing.split("\n") {
+      let remote = line.trim_end(chars="\r")
+      guard !remote.is_empty() else { continue }
+      for name in ["main", "master"] {
+        let candidate = "\{remote}/\{name}"
+        if git_output_opt(dir, ["rev-parse", "--verify", "--quiet", candidate])
+          is Some(_) {
+          offer(candidate)
+        }
       }
     }
   }
-  None
+  candidates
 }
 
 ///|
-/// Where this branch's work starts, and the ref that decided it. Falling back
-/// to `HEAD` — no remote, no default branch, unrelated histories — leaves the
-/// count covering uncommitted work alone, which the absent ref name tells the
-/// composer to say out loud instead of implying a comparison never made.
+/// Where this branch's work starts, and the ref that decided it.
+///
+/// Among the candidates the winner is the one whose merge-base is *nearest* —
+/// the last point this branch was still on a mainline — rather than whichever
+/// remote is named `origin`. A fork checkout has both its own default and the
+/// upstream one, and preferring `origin` there measures a branch cut from a
+/// freshly fetched `upstream/main` against a fork default that may be months
+/// behind, sweeping every intervening upstream commit into the count as though
+/// the branch had written them. Nearest is also what "where this branch left
+/// the mainline" means, so no remote needs a policy at all.
+///
+/// Falling back to `HEAD` — no remote, no default branch, unrelated histories
+/// — leaves the count covering uncommitted work alone, which the absent ref
+/// name tells the composer to say out loud instead of implying a comparison
+/// never made.
 async fn git_branch_base(dir : String) -> (String, String?) {
-  guard git_default_branch_ref(dir) is Some(base_ref) else {
-    return ("HEAD", None)
+  let mut best : (String, String)? = None
+  for candidate in git_base_candidates(dir) {
+    guard git_output_opt(dir, ["merge-base", "HEAD", candidate]) is Some(output) else {
+      continue
+    }
+    let commit = git_single_line(output)
+    guard !commit.is_empty() else { continue }
+    guard best is Some((incumbent, _)) else {
+      best = Some((commit, candidate))
+      continue
+    }
+    // Strictly nearer only: an equal merge-base leaves the incumbent, so the
+    // candidate order decides ties rather than the comparison flipping on
+    // remotes that agree.
+    if commit != incumbent &&
+      git_is_ancestor(dir, ancestor=incumbent, of=commit) {
+      best = Some((commit, candidate))
+    }
   }
-  guard git_output_opt(dir, ["merge-base", "HEAD", base_ref]) is Some(output) else {
-    return ("HEAD", None)
+  guard best is Some((commit, candidate)) else { return ("HEAD", None) }
+  (commit, Some(candidate))
+}
+
+///|
+/// Whether `ancestor` is reachable from `of`. `merge-base --is-ancestor`
+/// answers in the exit status: 0 yes, 1 no, anything else a failure, which
+/// reads as "no" so a broken check cannot promote a candidate.
+async fn git_is_ancestor(
+  dir : String,
+  ancestor~ : String,
+  of~ : String,
+) -> Bool {
+  let (code, _, _) = @process.collect_output(
+    "git",
+    ["merge-base", "--is-ancestor", ancestor, of],
+    cwd=dir,
+    extra_env=git_environment(),
+    inherit_env=false,
+  ) catch {
+    error if @async.is_being_cancelled() => raise error
+    _ => return false
   }
-  let commit = git_single_line(output)
-  if commit.is_empty() {
-    ("HEAD", None)
-  } else {
-    (commit, Some(base_ref))
-  }
+  code == 0
 }
 
 ///|

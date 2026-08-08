@@ -460,7 +460,15 @@ fn apply_session_snapshot(
     commands.push(scroll_transcript_after_render())
     // The host derives the resumed workspace from the session id, so the
     // branch probe sends no cwd.
-    commands.push(fetch_branch(dispatch, channel, session, None))
+    let (branch_cmd, probed) = probe_branch(
+      dispatch,
+      next,
+      channel,
+      session,
+      None,
+    )
+    next = probed
+    commands.push(branch_cmd)
   } else {
     commands.push(scroll_if_active(next, channel, session))
   }
@@ -2592,7 +2600,7 @@ fn update_msg(
       // its reply, re-runs the pull-request lookup, which is the same path
       // every run boundary takes, in-flight fencing and all.
       let conv = model.active()
-      (fetch_branch(dispatch, conv.device, conv.session_id, conv.cwd), model)
+      probe_branch(dispatch, model, conv.device, conv.session_id, conv.cwd)
     }
     CloseGitDetails => (@cmd.none, { ..model, git_details_open: false })
     ToggleLauncher => {
@@ -3894,8 +3902,14 @@ fn update_device_msg(
         (commit_cmd, next)
       }
     }
-    BranchLoaded(session~, branch~, diffstat~) => {
+    BranchLoaded(session~, branch~, diffstat~, generation~) => {
       guard model.find_conversation(channel, session) is Some(conv) else {
+        return (@cmd.none, model)
+      }
+      // A probe that is still counting untracked files while a later one has
+      // already answered would otherwise put its older branch and totals back
+      // on screen, where nothing would correct them until the next refresh.
+      guard generation == conv.branch_generation else {
         return (@cmd.none, model)
       }
       let conv = { ..conv, branch, diffstat }
@@ -4183,7 +4197,10 @@ fn update_device_msg(
       }
       // The run's workspace directory now exists, so the branch chip can be
       // probed (and refreshed — a rerun may follow a checkout).
-      let commands = [fetch_branch(dispatch, channel, session, cwd)]
+      let (branch_cmd, updated) = probe_branch(
+        dispatch, updated, channel, session, cwd,
+      )
+      let commands = [branch_cmd]
       if generation is Some(generation) {
         commands.push(
           session_snapshot_command(
@@ -4616,7 +4633,14 @@ fn update_device_msg(
         } else {
           (model.replace_conversation(next), None)
         }
-        let commands = [fetch_branch(dispatch, channel, session, settled.cwd)]
+        let (branch_cmd, updated) = probe_branch(
+          dispatch,
+          updated,
+          channel,
+          session,
+          settled.cwd,
+        )
+        let commands = [branch_cmd]
         if generation is Some(generation) {
           commands.push(
             session_snapshot_command(
@@ -4953,10 +4977,15 @@ fn update_device_msg(
           dispatch, channel, next,
         )
         next = requested
-        let commands = [
-          sessions,
-          fetch_branch(dispatch, channel, conv.session_id, conv.cwd),
-        ]
+        let (branch_cmd, probed) = probe_branch(
+          dispatch,
+          next,
+          channel,
+          conv.session_id,
+          conv.cwd,
+        )
+        next = probed
+        let commands = [sessions, branch_cmd]
         // Only the embedded desktop page owns system notifications. Remote
         // browser pages never have the notification extension, and replaying
         // the same Finished boundary must not post a second notification.
@@ -11653,6 +11682,7 @@ test "a branch reply lands on its conversation and an empty one hides it" {
       session="desktop-test",
       branch=Some("feature/x"),
       diffstat=Some(stat),
+      generation=0,
     ),
     test_model(),
   )
@@ -11672,7 +11702,12 @@ test "a branch reply lands on its conversation and an empty one hides it" {
   )
   let (_, cleared) = update_dev(
     dispatch,
-    BranchLoaded(session="desktop-test", branch=Some(""), diffstat=None),
+    BranchLoaded(
+      session="desktop-test",
+      branch=Some(""),
+      diffstat=None,
+      generation=0,
+    ),
     named,
   )
   assert_true(cleared.active().branch is Some(""))
@@ -11682,10 +11717,69 @@ test "a branch reply lands on its conversation and an empty one hides it" {
   // A reply for an unknown session is dropped.
   let (_, ignored) = update_dev(
     dispatch,
-    BranchLoaded(session="desktop-gone", branch=Some("main"), diffstat=None),
+    BranchLoaded(
+      session="desktop-gone",
+      branch=Some("main"),
+      diffstat=None,
+      generation=0,
+    ),
     test_model(),
   )
   assert_true(ignored.active().branch is None)
+}
+
+///|
+test "a superseded branch probe cannot put its older answer back" {
+  let dispatch = test_dispatch()
+  // Two probes in flight: a run's start and its finish, or either of those and
+  // the popover being opened. The first is still counting untracked files.
+  let (_, first) = probe_branch(
+    dispatch,
+    test_model(),
+    @interop.ChannelId::Local,
+    "desktop-test",
+    None,
+  )
+  let (_, second) = probe_branch(
+    dispatch,
+    first,
+    @interop.ChannelId::Local,
+    "desktop-test",
+    None,
+  )
+  assert_eq(second.active().branch_generation, 2)
+  let newer : DiffStat = {
+    added: 9,
+    removed: 0,
+    files: 1,
+    base: Some("origin/main"),
+    partial: false,
+  }
+  let (_, settled) = update_dev(
+    dispatch,
+    BranchLoaded(
+      session="desktop-test",
+      branch=Some("feature/new"),
+      diffstat=Some(newer),
+      generation=2,
+    ),
+    second,
+  )
+  assert_eq(settled.active().diffstat, Some(newer))
+  // The slower first probe answers last, and is discarded: nothing would have
+  // corrected its stale totals until the next refresh.
+  let (_, overtaken) = update_dev(
+    dispatch,
+    BranchLoaded(
+      session="desktop-test",
+      branch=Some("feature/old"),
+      diffstat=None,
+      generation=1,
+    ),
+    settled,
+  )
+  assert_true(overtaken.active().branch is Some("feature/new"))
+  assert_eq(overtaken.active().diffstat, Some(newer))
 }
 
 ///|
@@ -11697,6 +11791,7 @@ test "a pull-request reply only lands on the branch it was asked about" {
       session="desktop-test",
       branch=Some("feature/x"),
       diffstat=None,
+      generation=0,
     ),
     test_model(),
   )
@@ -11771,6 +11866,7 @@ test "a pull-request reply only lands on the branch it was asked about" {
       session="desktop-test",
       branch=Some("feature/x"),
       diffstat=None,
+      generation=0,
     ),
     settled,
   )
@@ -11793,6 +11889,7 @@ test "a refresh during a lookup is run afterwards, not dropped" {
     session="desktop-test",
     branch=Some("feature/x"),
     diffstat=None,
+    generation=0,
   )
   let (_, probing) = update_dev(dispatch, branch_reply, test_model())
   assert_true(probing.active().pull_request.unwrap().probing)
