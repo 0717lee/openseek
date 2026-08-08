@@ -92,12 +92,21 @@ pub async fn write_text_atomic(
     fail("could not name a private temporary file beside \{path}")
   }
   let temp = path.dirname().join(path.basename().to_owned() + ".tmp-" + token)
-  @fs.write_file(temp.to_string(), content, create_mode=CreateNew, permission~)
-  commit_temp_file(temp, target) catch {
+  // Nothing reuses this name, so every failure from here on has to take the
+  // file away itself — including a write that raised partway (a cancelled
+  // task, a full disk), which would otherwise leave one abandoned file per
+  // attempt, holding whatever the caller was saving. Cancellation is among
+  // those failures, hence the shield around the removal.
+  try {
+    @fs.write_file(
+      temp.to_string(),
+      content,
+      create_mode=CreateNew,
+      permission~,
+    )
+    commit_temp_file(temp, target)
+  } catch {
     error => {
-      // Nothing reuses this name, so a failed commit has to take the file
-      // away itself. Cancellation is one of the paths through here, hence the
-      // shield around the removal.
       @async.protect_from_cancel(() => discard_temp_file(temp))
       raise error
     }
@@ -122,8 +131,14 @@ async fn commit_temp_file(temp : @pathx.Path, target : String) -> Unit {
         _ => false
       }
       guard replaceable else { raise rename_failure }
-      @fs.remove(target)
-      @fs.rename(temp.to_string(), target)
+      // Between the remove and the rename neither name holds the content.
+      // Cancellation there would leave the target absent and let the caller's
+      // cleanup take the temp file too, destroying the file this call was
+      // supposed to update — so the pair commits as one.
+      @async.protect_from_cancel(() => {
+        @fs.remove(target)
+        @fs.rename(temp.to_string(), target)
+      })
     }
   }
 }
