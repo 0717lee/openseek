@@ -1855,8 +1855,14 @@ pub fn update(
           let changed = match doc.state {
             // The loaded baseline says whether the disk moved on.
             TabLoaded(sig~, ..) => sig != current_sig
-            // A deleted file whose signature came back: it reappeared.
-            TabDeleted => true
+            // A deleted file whose signature came back ordinarily reappeared.
+            // A selected deletion row is different: porcelain can also carry
+            // a same-path untracked row, so the current filesystem object is
+            // not the working side of this review and must not replace HEAD.
+            TabDeleted =>
+              doc.review
+              .map(review => review.selected.has_working_tree_file())
+              .unwrap_or(true)
             // A read is already in flight; its reply carries a fresh
             // signature anyway.
             TabLoading => false
@@ -4709,6 +4715,53 @@ test "a deleted document whose file reappears reloads on the next stats" {
   assert_true(
     next.docs.get(Relative("a.mbt"))
     is Some({ state: TabDeleted, stale: true, .. }),
+  )
+}
+
+///|
+test "a selected deletion ignores a same-path working-tree recreation" {
+  let emit = test_emit()
+  let path = @pathx.Relative("recreated.mbt")
+  let deleted : ChangedFile = {
+    path,
+    original_path: None,
+    index_status: "D",
+    worktree_status: " ",
+    kind: ChangeDeleted,
+  }
+  let docs : Map[@pathx.Relative, Doc] = Map([])
+  docs[path] = {
+    name: "recreated.mbt",
+    state: TabDeleted,
+    review: Some({
+      generation: 7,
+      baseline: ReviewContent("HEAD source"),
+      selected: deleted,
+    }),
+    stale: false,
+  }
+  let (_, next) = update(
+    emit,
+    StatsLoaded(owner=test_ctx().owner, stats=[{ path, sig: Some("3:0") }]),
+    { ..owned_state(), docs, },
+    { ..test_ctx(), open_files: [path], active_file: Some(path) },
+  )
+  // The signature belongs to the separate untracked row. The deletion review
+  // remains the HEAD-only preview until Changes reconciliation selects a
+  // different row explicitly.
+  assert_true(
+    next.docs.get(path)
+    is Some(
+      {
+        state: TabDeleted,
+        review: Some(
+          { generation: 7, baseline: ReviewContent("HEAD source"), selected }
+        ),
+        stale: false,
+        ..,
+      }
+    ) &&
+    selected == deleted,
   )
 }
 

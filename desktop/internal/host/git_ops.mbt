@@ -887,6 +887,41 @@ test "Git non-file changes are classified without following symlinks" {
 }
 
 ///|
+test "duplicate deletion and recreation rows keep their own path kinds" {
+  let deleted : GitChange = {
+    path: "same",
+    original_path: None,
+    index_status: "D",
+    worktree_status: " ",
+    kind: "deleted",
+  }
+  let untracked : GitChange = {
+    path: "same",
+    original_path: None,
+    index_status: "?",
+    worktree_status: "?",
+    kind: "untracked",
+  }
+  // Production classifies deletion rows with Unknown plus the pinned HEAD
+  // modes, and classifies every untracked row from the working filesystem.
+  // An old symlink recreated as a regular file therefore keeps both sides.
+  assert_eq(git_change_with_path_kind(deleted, Unknown, false, true), {
+    ..deleted,
+    kind: "symlink",
+  })
+  assert_eq(
+    git_change_with_path_kind(untracked, Regular, false, true),
+    untracked,
+  )
+  // The inverse transition is likewise side-specific.
+  assert_eq(git_change_with_path_kind(deleted, Unknown, false, false), deleted)
+  assert_eq(git_change_with_path_kind(untracked, SymLink, false, false), {
+    ..untracked,
+    kind: "symlink",
+  })
+}
+
+///|
 test "Git full-name metadata finds entry modes in a nested workspace" {
   let output = "100644 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa 0\tdesktop/src/main.mbt\u{0}120000 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa 0\tdesktop/link\u{0}160000 bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb 0\tdesktop/vendor/lib\u{0}160000 cccccccccccccccccccccccccccccccccccccccc 2\tdesktop/vendor/lib\u{0}160000 commit dddddddddddddddddddddddddddddddddddddddd\tdesktop/vendor/tree\u{0}160000 eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee 0\toutside/lib\u{0}"
   assert_eq(parse_git_mode_paths(output, "desktop/", "160000"), [
