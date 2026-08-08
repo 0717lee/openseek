@@ -63,7 +63,10 @@ test "mouse column derives from the halfwidth character width" {
 
 ///|
 fn zone_test_view_model() -> @view_model.ViewModel {
-  @syntax.tokenization_registry.register("moonbit", @syntax.PlainTokenizer())
+  @syntax.tokenization_registry.register(
+    "moonbit",
+    @plain_tokenizer.PlainTokenizer(),
+  )
   |> ignore
   let model : @model.TextModel = TextModel(
     try! @base_common.Uri::from(

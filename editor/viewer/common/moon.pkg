@@ -6,6 +6,7 @@ import {
 }
 
 import {
+  "moonbitlang/editor/syntax/examples/plain_tokenizer",
   "moonbitlang/editor/viewer/common/model",
   "moonbitlang/editor/syntax",
 } for "test"

@@ -45,6 +45,7 @@ import {
 import {
   "moonbitlang/async",
   "moonbitlang/editor/syntax",
+  "moonbitlang/editor/syntax/examples/plain_tokenizer",
 } for "wbtest"
 
 supported_targets = "js"

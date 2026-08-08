@@ -25,38 +25,12 @@ flowchart LR
   returns `LineToken[]` plus the state for the next line. Token offsets are UTF-16
   code units; gaps are rendered as plain text.
 
-`PlainTokenizer` is an explicit stateless tokenizer, not an automatic fallback.
 A registry miss is encoded by the model tokenization part as one default token
-per line — reaching `PlainTokenizer` requires selecting it.
-
-Despite the name it is not a "no highlighting" tokenizer: it applies a small
-generic MoonBit-ish classification (a fixed keyword list, identifiers, decimal
-numbers, double-quoted strings with backslash escapes, `//` line comments, and
-punctuation). It is stateless, so every entry state compares equal and the
-returned state is whatever it was handed.
-
-```mbt check
-///|
-test "the plain tokenizer applies generic classes and never changes state" {
-  let tokenizer : &@syntax.LineTokenizer = @syntax.PlainTokenizer()
-  let initial = tokenizer.initial_state()
-  let (tokens, next) = tokenizer.tokenize_line("let x = 1", initial)
-  debug_inspect(
-    (tokens, next == initial),
-    content=(
-      #|(
-      #|  [
-      #|    { start: 0, end: 3, tag: Keyword },
-      #|    { start: 4, end: 5, tag: Identifier },
-      #|    { start: 6, end: 7, tag: Punctuation },
-      #|    { start: 8, end: 9, tag: Number },
-      #|  ],
-      #|  true,
-      #|)
-    ),
-  )
-}
-```
+per line; `syntax` does not install a fallback tokenizer. A small stateless
+implementation is available separately as the
+[`examples/plain_tokenizer`](./examples/plain_tokenizer/README.mbt.md) package.
+It is reference code for implementing `LineTokenizer`, not part of this
+package's interface.
 
 Gaps between tokens are legal and are rendered as plain text, so a tokenizer
 only has to emit the spans it actually recognizes.
@@ -124,7 +98,7 @@ test "registration and removal emit exact language-id arrays" {
     events.push((event.changed_languages, event.changed_color_map))
   })
   |> ignore
-  let registration = registry.register("json", @syntax.PlainTokenizer())
+  let registration = registry.register("json", KeywordOnly::{  })
   let found = registry.get("json") is Some(_)
   let missing = registry.get("moonbit") is Some(_)
   registration.dispose()
@@ -147,7 +121,7 @@ is no lazy factory that could still be pending.
 ///|
 test "is_resolved is unconditionally true" {
   let registry = @syntax.TokenizationRegistry()
-  registry.register("json", @syntax.PlainTokenizer()) |> ignore
+  registry.register("json", KeywordOnly::{  }) |> ignore
   debug_inspect(
     (registry.is_resolved("json"), registry.is_resolved("never-registered")),
     content=(
@@ -169,7 +143,7 @@ is greater than 2. No `Color` object behavior or identity is exposed.
 test "the color map is retained verbatim and index 2 is the default background" {
   let registry = @syntax.TokenizationRegistry()
   let before = (registry.get_color_map(), registry.get_default_background())
-  registry.register("json", @syntax.PlainTokenizer()) |> ignore
+  registry.register("json", KeywordOnly::{  }) |> ignore
   let events = []
   registry.on_did_change(event => {
     events.push((event.changed_languages, event.changed_color_map))

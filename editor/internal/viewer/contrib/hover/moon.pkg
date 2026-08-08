@@ -11,6 +11,7 @@ import {
 import {
   "moonbitlang/editor/platform/log",
   "moonbitlang/editor/syntax",
+  "moonbitlang/editor/syntax/examples/plain_tokenizer",
   "moonbitlang/async",
 } for "wbtest"
 

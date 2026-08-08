@@ -53,11 +53,11 @@ test "token providers dispose only the active registration" {
   let languages = Languages()
   let first = languages.set_tokens_provider(
     "toy-dispose",
-    @syntax.PlainTokenizer(),
+    @plain_tokenizer.PlainTokenizer(),
   )
   let second = languages.set_tokens_provider(
     "toy-dispose",
-    @syntax.PlainTokenizer(),
+    @plain_tokenizer.PlainTokenizer(),
   )
   first.dispose()
   assert_true(@syntax.tokenization_registry.get("toy-dispose") is Some(_))
