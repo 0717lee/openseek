@@ -213,6 +213,12 @@ fn parse_git_mode_paths(
 const MaxGitTreePathBatchBytes = 16_384
 
 ///|
+/// Targeted HEAD mode discovery is cheaper than walking the full workspace
+/// tree only while it needs a small, bounded number of Git subprocesses.
+/// Beyond this cap one recursive `ls-tree` has lower fixed overhead.
+const MaxTargetedGitTreeQueries = 8
+
+///|
 fn git_tree_path_batches(paths : Array[String]) -> Array[Array[String]] {
   let batches : Array[Array[String]] = []
   let mut batch : Array[String] = []
@@ -223,6 +229,9 @@ fn git_tree_path_batches(paths : Array[String]) -> Array[Array[String]] {
       return []
     }
     if !batch.is_empty() && bytes + path_bytes > MaxGitTreePathBatchBytes {
+      if batches.length() >= MaxTargetedGitTreeQueries {
+        return []
+      }
       batches.push(batch)
       batch = []
       bytes = 0
@@ -231,9 +240,27 @@ fn git_tree_path_batches(paths : Array[String]) -> Array[Array[String]] {
     bytes += path_bytes
   }
   if !batch.is_empty() {
+    if batches.length() >= MaxTargetedGitTreeQueries {
+      return []
+    }
     batches.push(batch)
   }
   batches
+}
+
+///|
+/// Collect each deleted status path once without repeatedly scanning the
+/// growing result during a bulk deletion.
+fn deleted_change_paths(changes : Array[GitChange]) -> Array[String] {
+  let paths : Array[String] = []
+  let seen : Set[String] = Set([])
+  for change in changes {
+    if change.kind == "deleted" && !seen.contains(change.path) {
+      seen.add(change.path)
+      paths.push(change.path)
+    }
+  }
+  paths
 }
 
 ///|
@@ -376,12 +403,7 @@ async fn git_change_snapshot(
   // paths in the pinned HEAD tree instead of walking every tracked file on
   // each three-second review poll; the old mode keeps deleted gitlinks and
   // symlinks inert without repository-size-proportional work.
-  let deleted_paths : Array[String] = []
-  for change in changes {
-    if change.kind == "deleted" && !deleted_paths.contains(change.path) {
-      deleted_paths.push(change.path)
-    }
-  }
+  let deleted_paths = deleted_change_paths(changes)
   if head is Some(commit) && !deleted_paths.is_empty() {
     let path_batches = git_tree_path_batches(deleted_paths)
     let full_tree = path_batches.is_empty()
@@ -890,6 +912,35 @@ test "Git HEAD path queries stay in bounded argument batches" {
   // budget selects the recursive workspace-tree fallback.
   assert_true(
     git_tree_path_batches(["x".repeat(MaxGitTreePathBatchBytes + 1)]).is_empty(),
+  )
+  // Enough individually valid batches to exceed the subprocess budget also
+  // select one recursive tree walk.
+  let many : Array[String] = []
+  for index in 0..<(MaxTargetedGitTreeQueries + 1) {
+    many.push(
+      index.to_string() + "-" + "x".repeat(MaxGitTreePathBatchBytes / 2),
+    )
+  }
+  assert_true(git_tree_path_batches(many).is_empty())
+}
+
+///|
+test "bulk deleted-path collection deduplicates in first-seen order" {
+  let deleted : GitChange = {
+    path: "first.mbt",
+    original_path: None,
+    index_status: "D",
+    worktree_status: " ",
+    kind: "deleted",
+  }
+  assert_eq(
+    deleted_change_paths([
+      deleted,
+      { ..deleted, path: "kept.mbt", kind: "modified" },
+      { ..deleted, path: "second.mbt" },
+      deleted,
+    ]),
+    ["first.mbt", "second.mbt"],
   )
 }
 

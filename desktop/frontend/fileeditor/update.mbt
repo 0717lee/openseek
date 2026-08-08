@@ -1098,12 +1098,14 @@ pub fn sync(
   let state = { ..state, explorer_was_visible: explorer_is_visible }
   // The mode selection survives re-rooting, but its inventory does not. Load
   // it when Changes is visible, and refresh a ready snapshot when reopening
-  // after its root watch was parked. Failed requests only retry on an explicit
-  // selection or a settled run, not on every unrelated sync pass.
+  // after its root watch was parked. Failed requests normally retry only on an
+  // explicit selection or a settled run; checkout recovery gets one automatic
+  // retry so a paired review read dropped by the parked boundary can settle.
   let (changes_cmd, state) = if checkout_ready &&
     changes_are_live &&
     (
       state.changes is ChangeListIdle ||
+      (state.review_recovery_pending && state.changes is ChangeListFailed(_)) ||
       (
         changes_may_be_stale &&
         (
@@ -2937,6 +2939,64 @@ test "checkout recovery restarts a review whose paired replies were parked" {
       }
     ),
   )
+}
+
+///|
+test "checkout recovery retries failed Changes before restarting a review" {
+  let emit = test_emit()
+  let present = test_ctx()
+  let path = @pathx.Relative("reviewed.mbt")
+  let change : ChangedFile = {
+    path,
+    original_path: None,
+    index_status: " ",
+    worktree_status: "M",
+    kind: ChangeModified,
+  }
+  let docs : Map[@pathx.Relative, Doc] = Map([])
+  docs[path] = {
+    name: "reviewed.mbt",
+    state: TabLoading,
+    review: Some({ generation: 3, baseline: ReviewLoading, selected: change }),
+    stale: false,
+  }
+  let state = {
+    ..owned_state(),
+    changes: ChangeListFailed("transient Git failure"),
+    changes_generation: 1,
+    changes_head: Some("same-head"),
+    changes_head_known: true,
+    review_generation: 3,
+    docs,
+  }
+  let missing : Ctx = {
+    ..present,
+    checkout: Some(@interop.MissingWorktree(name="wt")),
+    open_files: [path],
+    active_file: Some(path),
+  }
+  let (parked, _) = sync(emit, state, missing)
+  assert_true(parked.changes is ChangeListFailed("transient Git failure"))
+  assert_true(parked.review_recovery_pending)
+  let restored_ctx = { ..present, open_files: [path], active_file: Some(path) }
+  let (restored, _) = sync(emit, parked, restored_ctx)
+  assert_true(restored.changes is ChangeListLoading(refresh_again=false))
+  assert_true(restored.changes_generation == 2)
+  assert_true(restored.review_recovery_pending)
+  let (_, restarted) = update(
+    emit,
+    ChangesLoaded(
+      owner=present.owner,
+      generation=2,
+      repository=true,
+      head=Some("same-head"),
+      files=[change],
+    ),
+    restored,
+    restored_ctx,
+  )
+  assert_true(restarted.review_generation == 4)
+  assert_false(restarted.review_recovery_pending)
 }
 
 ///|
