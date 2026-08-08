@@ -37,12 +37,12 @@ fn Doc::quick_diff_original(self : Doc) -> String? {
 }
 
 ///|
-/// The review request that owns any auxiliary working-tree reload. Ordinary
-/// documents carry no token; review reloads must keep the token so a later
-/// changed-row click can fence their replies too.
+/// The newest working-tree request that owns an auxiliary review reload.
+/// Ordinary documents carry no token; each review reload advances this token
+/// independently of its HEAD request so out-of-order file replies are fenced.
 fn Doc::review_generation(self : Doc) -> Int? {
   match self.review {
-    Some(review) => Some(review.generation)
+    Some(review) => Some(review.working_generation)
     None => None
   }
 }
@@ -116,7 +116,10 @@ fn show_tab_impl(
   // A document that went stale in the background (or was deleted and
   // reappeared) shows what it has and reloads in the same breath; the reply
   // lands with the scroll kept in place.
-  if reload_stale && doc.stale && !(doc.state is TabLoading) {
+  if reload_stale &&
+    doc.stale &&
+    !(doc.state is TabLoading) &&
+    doc.review is None {
     @cmd.batch([
       show,
       read_file(
@@ -142,6 +145,44 @@ fn show_tab(
   doc : Doc,
 ) -> @cmd.Cmd {
   show_tab_impl(dispatch, ctx, path, doc, true)
+}
+
+///|
+/// Show an activated document and, for a stale review, start a uniquely
+/// fenced working-tree reload. `show_tab` intentionally reloads stale ordinary
+/// documents only: review callers must also persist the advanced token that
+/// makes an older in-flight reply harmless.
+fn show_activated_tab(
+  dispatch : @cmd.Emit[Msg],
+  ctx : Ctx,
+  path : @pathx.Relative,
+  doc : Doc,
+  generation : Int,
+) -> (@cmd.Cmd, Doc, Int) {
+  guard doc.stale &&
+    !(doc.state is TabLoading) &&
+    doc.review is Some(review) &&
+    review.selected.has_working_tree_file() else {
+    return (show_tab(dispatch, ctx, path, doc), doc, generation)
+  }
+  let working_generation = generation + 1
+  let next_doc = { ..doc, review: Some({ ..review, working_generation, }) }
+  (
+    @cmd.batch([
+      show_tab_impl(dispatch, ctx, path, next_doc, false),
+      read_file(
+        dispatch,
+        ctx.owner,
+        path,
+        doc.name,
+        review_generation=working_generation,
+        range=None,
+        workspace=ctx.workspace,
+      ),
+    ]),
+    next_doc,
+    working_generation,
+  )
 }
 
 ///|
@@ -278,7 +319,12 @@ pub fn open_changed_document(
   let review_doc = {
     name,
     state: doc_state,
-    review: Some({ generation, baseline, selected: change }),
+    review: Some({
+      generation,
+      working_generation: generation,
+      baseline,
+      selected: change,
+    }),
     // A cached document can already be behind the filesystem when the row is
     // selected. Keep that fact until the tagged working-tree read settles: if
     // an ordinary open cancels this review first, `show_tab` must still issue
@@ -517,7 +563,12 @@ fn reconcile_reviews_after_changes(
         let refreshed = {
           ..doc,
           state: refreshed_state,
-          review: Some({ generation, baseline, selected: change }),
+          review: Some({
+            generation,
+            working_generation: generation,
+            baseline,
+            selected: change,
+          }),
           stale: if has_working_file {
             doc.stale
           } else {
@@ -618,7 +669,15 @@ pub fn activate(
   path : @pathx.Relative,
 ) -> (@cmd.Cmd, State) {
   guard state.docs.get(path) is Some(doc) else { return (@cmd.none, state) }
-  let show = show_tab(dispatch, ctx, path, doc)
+  let (show, doc, review_generation) = show_activated_tab(
+    dispatch,
+    ctx,
+    path,
+    doc,
+    state.review_generation,
+  )
+  let docs = state.docs.copy()
+  docs[path] = doc
   // The narrow drill-down closing the tree reveals a viewer that was last
   // measured while hidden; it must remeasure with the show.
   let cmd = if state.tree_open && ctx.narrow {
@@ -626,7 +685,16 @@ pub fn activate(
   } else {
     show
   }
-  (cmd, { ..state, error: None, tree_open: state.tree_open && !ctx.narrow })
+  (
+    cmd,
+    {
+      ..state,
+      docs,
+      review_generation,
+      error: None,
+      tree_open: state.tree_open && !ctx.narrow,
+    },
+  )
 }
 
 ///|
@@ -650,12 +718,17 @@ pub fn close_document(
   match next {
     Some(next_path) =>
       if docs.get(next_path) is Some(doc) {
+        let (show, doc, review_generation) = show_activated_tab(
+          dispatch,
+          ctx,
+          next_path,
+          doc,
+          state.review_generation,
+        )
+        docs[next_path] = doc
         (
-          @cmd.batch([
-            show_tab(dispatch, ctx, next_path, doc),
-            forget_view_state(path),
-          ]),
-          { ..state, docs, },
+          @cmd.batch([show, forget_view_state(path)]),
+          { ..state, docs, review_generation },
         )
       } else {
         (forget_view_state(path), { ..state, docs, })
@@ -1638,7 +1711,7 @@ pub fn update(
         // generation still parked on this document. An untagged ordinary read
         // is accepted only when no review has since claimed the document.
         if review_generation is Some(generation) &&
-          !(doc.review is Some({ generation: current, .. }) &&
+          !(doc.review is Some({ working_generation: current, .. }) &&
           current == generation) {
           return (@cmd.none, state)
         }
@@ -1850,6 +1923,7 @@ pub fn update(
       } else {
         let docs = state.docs.copy()
         let cmds = []
+        let mut review_generation = state.review_generation
         // Whether the loop below already reloads the active tab — that path
         // re-requests diagnostics on its own.
         let mut active_reloading = false
@@ -1861,7 +1935,17 @@ pub fn update(
             // already reviewing a textual HEAD side instead switches to that
             // deleted-file preview.
             if !(doc.state is TabDeleted) {
-              let deleted = { ..doc, state: TabDeleted, stale: false }
+              let review = match doc.review {
+                Some(review) if review.selected.has_working_tree_file() => {
+                  // The missing signature is newer than any tagged read that
+                  // was already in flight. Advance its token so an older
+                  // successful read cannot resurrect deleted working text.
+                  review_generation = review_generation + 1
+                  Some({ ..review, working_generation: review_generation })
+                }
+                _ => doc.review
+              }
+              let deleted = { ..doc, state: TabDeleted, review, stale: false }
               docs[stat.path] = deleted
               if ctx.active_file == Some(stat.path) {
                 cmds.push(show_tab(dispatch, ctx, stat.path, deleted))
@@ -1896,11 +1980,23 @@ pub fn update(
               // `FileLoaded` sees the previous content). The document keeps
               // its loaded state so that restore has its baseline.
               active_reloading = true
-              if doc.review is Some(_) {
-                // A tagged review read can be fenced out if its Git row
-                // disappears first. Preserve a stale marker so leaving review
-                // mode hands the active tab to a replacement ordinary read.
-                docs[stat.path] = { ..doc, stale: true }
+              let working_generation = match doc.review {
+                Some(review) => {
+                  review_generation = review_generation + 1
+                  // A tagged review read can be fenced out if its Git row
+                  // disappears first. Preserve a stale marker so leaving review
+                  // mode hands the active tab to a replacement ordinary read.
+                  docs[stat.path] = {
+                    ..doc,
+                    review: Some({
+                      ..review,
+                      working_generation: review_generation,
+                    }),
+                    stale: true,
+                  }
+                  Some(review_generation)
+                }
+                None => None
               }
               cmds.push(
                 read_file(
@@ -1908,7 +2004,7 @@ pub fn update(
                   owner,
                   stat.path,
                   doc.name,
-                  review_generation?=doc.review_generation(),
+                  review_generation?=working_generation,
                   range=None,
                   workspace=ctx.workspace,
                 ),
@@ -1933,7 +2029,7 @@ pub fn update(
           is Some(recheck) {
           cmds.push(recheck)
         }
-        (@cmd.batch(cmds), { ..state, docs, })
+        (@cmd.batch(cmds), { ..state, docs, review_generation })
       }
     DiagnosticsLoaded(owner~, absolute~, diagnostics~) =>
       if state.owner == Some(owner) {
@@ -1955,7 +2051,7 @@ pub fn update(
         // Preserve a current working-side failure without guessing that every
         // host error means deletion; a superseded read remains invisible.
         guard state.docs.get(path) is Some(doc) &&
-          doc.review is Some({ generation: current, .. }) &&
+          doc.review is Some({ working_generation: current, .. }) &&
           current == generation else {
           return (@cmd.none, state)
         }
@@ -2224,6 +2320,7 @@ test "changed-file review fences paired replies and ordinary opens leave review"
     ..loaded_doc("a.mbt"),
     review: Some({
       generation: 2,
+      working_generation: 2,
       baseline: ReviewContent("old two"),
       selected: change,
     }),
@@ -2900,7 +2997,12 @@ test "checkout recovery restarts a review whose paired replies were parked" {
   docs[path] = {
     name: "reviewed.mbt",
     state: TabLoading,
-    review: Some({ generation: 3, baseline: ReviewLoading, selected: change }),
+    review: Some({
+      generation: 3,
+      working_generation: 3,
+      baseline: ReviewLoading,
+      selected: change,
+    }),
     stale: false,
   }
   let state = {
@@ -2987,7 +3089,12 @@ test "checkout recovery retries failed Changes before restarting a review" {
   docs[path] = {
     name: "reviewed.mbt",
     state: TabLoading,
-    review: Some({ generation: 3, baseline: ReviewLoading, selected: change }),
+    review: Some({
+      generation: 3,
+      working_generation: 3,
+      baseline: ReviewLoading,
+      selected: change,
+    }),
     stale: false,
   }
   let state = {
@@ -3060,7 +3167,12 @@ test "ordinary Changes polls do not supersede healthy in-flight reviews" {
   docs[path] = {
     name: "slow.mbt",
     state: TabLoading,
-    review: Some({ generation: 3, baseline: ReviewLoading, selected: change }),
+    review: Some({
+      generation: 3,
+      working_generation: 3,
+      baseline: ReviewLoading,
+      selected: change,
+    }),
     stale: false,
   }
   let state = {
@@ -3472,6 +3584,7 @@ test "a settled Changes snapshot clears reviews whose rows disappeared" {
     ..loaded_doc(path.0),
     review: Some({
       generation: 3,
+      working_generation: 3,
       baseline: ReviewContent("old HEAD"),
       selected: test_modified_change(path),
     }),
@@ -3507,6 +3620,7 @@ test "a disappearing review row hands an active reload to an ordinary read" {
     ..loaded_doc(path.0),
     review: Some({
       generation: 3,
+      working_generation: 3,
       baseline: ReviewContent("old HEAD"),
       selected: test_modified_change(path),
     }),
@@ -3589,6 +3703,120 @@ test "a disappearing review row hands an active reload to an ordinary read" {
 }
 
 ///|
+test "a newer review reload fences an older working-tree reply" {
+  let path = @pathx.Relative("src/racing.mbt")
+  let docs : Map[@pathx.Relative, Doc] = Map([])
+  docs[path] = {
+    ..loaded_doc(path.0),
+    review: Some({
+      generation: 3,
+      working_generation: 3,
+      baseline: ReviewContent("HEAD source"),
+      selected: test_modified_change(path),
+    }),
+  }
+  let ctx = { ..test_ctx(), open_files: [path], active_file: Some(path) }
+  let state = { ..owned_state(), review_generation: 3, docs }
+  // A watcher reload starts while the original changed-row read is still in
+  // flight. It receives its own token without invalidating the HEAD request.
+  let (_, reloading) = update(
+    test_emit(),
+    StatsLoaded(owner=ctx.owner, stats=[{ path, sig: Some("2:0") }]),
+    state,
+    ctx,
+  )
+  assert_true(reloading.review_generation == 4)
+  assert_true(
+    reloading.docs.get(path)
+    is Some(
+      {
+        review: Some({ generation: 3, working_generation: 4, .. }),
+        stale: true,
+        ..,
+      }
+    ),
+  )
+  guard @resource.of_path(@interop.ChannelId::Local, "/work/src/racing.mbt")
+    is Some(absolute) else {
+    fail("test file resource was not absolute")
+  }
+  let (_, newest) = update(
+    test_emit(),
+    FileLoaded(
+      owner=ctx.owner,
+      path~,
+      name="racing.mbt",
+      file=Content(content="newest working", absolute~, sig="2:0"),
+      review_generation=Some(4),
+      range=None,
+      annotation=None,
+    ),
+    reloading,
+    ctx,
+  )
+  assert_true(
+    newest.docs.get(path)
+    is Some(
+      {
+        state: TabLoaded(content="newest working", sig="2:0", ..),
+        review: Some({ generation: 3, working_generation: 4, .. }),
+        stale: false,
+        ..,
+      }
+    ),
+  )
+  let (_, stale) = update(
+    test_emit(),
+    FileLoaded(
+      owner=ctx.owner,
+      path~,
+      name="racing.mbt",
+      file=Content(content="older working", absolute~, sig="1:0"),
+      review_generation=Some(3),
+      range=None,
+      annotation=None,
+    ),
+    newest,
+    ctx,
+  )
+  assert_true(stale == newest)
+  // A later deletion likewise invalidates the accepted generation. A reply
+  // that captured the file just before it disappeared cannot resurrect it.
+  let (_, deleted) = update(
+    test_emit(),
+    StatsLoaded(owner=ctx.owner, stats=[{ path, sig: None }]),
+    newest,
+    ctx,
+  )
+  assert_true(deleted.review_generation == 5)
+  assert_true(
+    deleted.docs.get(path)
+    is Some(
+      {
+        state: TabDeleted,
+        review: Some({ generation: 3, working_generation: 5, .. }),
+        ..,
+      }
+    ),
+  )
+  let (_, resurrected) = update(
+    test_emit(),
+    FileLoaded(
+      owner=ctx.owner,
+      path~,
+      name="racing.mbt",
+      file=Content(content="pre-deletion working", absolute~, sig="2:0"),
+      review_generation=Some(4),
+      range=None,
+      annotation=None,
+    ),
+    deleted,
+    ctx,
+  )
+  assert_true(resurrected == deleted)
+}
+
+///|
 test "only a final Changes snapshot reconciles reviews and moved HEAD refreshes survivors" {
   let path = @pathx.Relative("src/partial.mbt")
   let docs : Map[@pathx.Relative, Doc] = Map([])
@@ -3596,6 +3824,7 @@ test "only a final Changes snapshot reconciles reviews and moved HEAD refreshes 
     ..loaded_doc(path.0),
     review: Some({
       generation: 3,
+      working_generation: 3,
       baseline: ReviewContent("old HEAD"),
       selected: test_modified_change(path),
     }),
@@ -3677,6 +3906,7 @@ test "HEAD refresh restarts the generation-fenced working-tree read" {
     ..loaded_doc(path.0),
     review: Some({
       generation: 3,
+      working_generation: 3,
       baseline: ReviewContent("old HEAD"),
       selected: change,
     }),
@@ -3788,6 +4018,7 @@ test "legacy Changes replies without HEAD refresh baseline-bearing reviews" {
     ..loaded_doc(path.0),
     review: Some({
       generation: 3,
+      working_generation: 3,
       baseline: ReviewContent("old HEAD"),
       selected: change,
     }),
@@ -3836,7 +4067,12 @@ test "unborn repository polls do not churn untracked reviews" {
   let docs : Map[@pathx.Relative, Doc] = Map([])
   docs[path] = {
     ..loaded_doc(path.0),
-    review: Some({ generation: 3, baseline: ReviewMissing, selected: change }),
+    review: Some({
+      generation: 3,
+      working_generation: 3,
+      baseline: ReviewMissing,
+      selected: change,
+    }),
   }
   let state = {
     ..owned_state(),
@@ -3888,7 +4124,12 @@ test "legacy HEAD omission refreshes a missing baseline once tracking is proven"
   let docs : Map[@pathx.Relative, Doc] = Map([])
   docs[path] = {
     ..loaded_doc(path.0),
-    review: Some({ generation: 3, baseline: ReviewMissing, selected: untracked }),
+    review: Some({
+      generation: 3,
+      working_generation: 3,
+      baseline: ReviewMissing,
+      selected: untracked,
+    }),
   }
   let state = {
     ..owned_state(),
@@ -3916,7 +4157,7 @@ test "legacy HEAD omission refreshes a missing baseline once tracking is proven"
     is Some(
       {
         state: TabLoading,
-        review: Some({ generation: 4, baseline: ReviewLoading, selected }),
+        review: Some({ generation: 4, baseline: ReviewLoading, selected, .. }),
         ..,
       }
     ) &&
@@ -3976,7 +4217,7 @@ test "Changes reconciliation preserves the selected duplicate-path row" {
     is Some(
       {
         state: TabLoading,
-        review: Some({ generation: 2, baseline: ReviewLoading, selected }),
+        review: Some({ generation: 2, baseline: ReviewLoading, selected, .. }),
         ..,
       }
     ) &&
@@ -4003,6 +4244,7 @@ test "moved HEAD normalizes reviewed tabs across the working-file boundary" {
     state: TabLoading,
     review: Some({
       generation: 3,
+      working_generation: 3,
       baseline: ReviewContent("old HEAD"),
       selected: test_modified_change(path),
     }),
@@ -4048,6 +4290,7 @@ test "moved HEAD normalizes reviewed tabs across the working-file boundary" {
     state: TabDeleted,
     review: Some({
       generation: 3,
+      working_generation: 3,
       baseline: ReviewContent("old HEAD"),
       selected: deleted,
     }),
@@ -4101,6 +4344,7 @@ test "a changed rename source refreshes its review without moving HEAD" {
     ..loaded_doc(path.0),
     review: Some({
       generation: 3,
+      working_generation: 3,
       baseline: ReviewContent("old source"),
       selected: previous,
     }),
@@ -4410,6 +4654,7 @@ test "hidden explorer keeps Git refresh live for an open review" {
     ..loaded_doc(path.0),
     review: Some({
       generation: 2,
+      working_generation: 2,
       baseline: ReviewContent("old HEAD"),
       selected: test_modified_change(path),
     }),
@@ -4457,6 +4702,7 @@ test "sync refreshes a hidden review after its workspace watch was parked" {
     ..loaded_doc(path.0),
     review: Some({
       generation: 2,
+      working_generation: 2,
       baseline: ReviewContent("old HEAD"),
       selected: test_modified_change(path),
     }),
@@ -4493,6 +4739,7 @@ test "a hidden review accepts its file-only watch without a refresh loop" {
     ..loaded_doc(path.0),
     review: Some({
       generation: 2,
+      working_generation: 2,
       baseline: ReviewContent("old HEAD"),
       selected: test_modified_change(path),
     }),
@@ -4642,6 +4889,7 @@ test "StatsLoaded marks deletions, reloads the active change, stales the rest" {
     state: TabReadFailed("temporary failure"),
     review: Some({
       generation: 4,
+      working_generation: 4,
       baseline: ReviewContent("HEAD source"),
       selected: test_modified_change(failed_path),
     }),
@@ -4685,6 +4933,7 @@ test "StatsLoaded preserves a settled HEAD preview when its active file disappea
     ..loaded_doc("reviewed.mbt"),
     review: Some({
       generation: 7,
+      working_generation: 7,
       baseline: ReviewContent("HEAD source"),
       selected: test_modified_change(path),
     }),
@@ -4754,6 +5003,7 @@ test "a selected deletion hands a clean restoration to an ordinary read" {
     state: TabDeleted,
     review: Some({
       generation: 7,
+      working_generation: 7,
       baseline: ReviewContent("HEAD source"),
       selected: deleted,
     }),
@@ -4775,7 +5025,12 @@ test "a selected deletion hands a clean restoration to an ordinary read" {
       {
         state: TabDeleted,
         review: Some(
-          { generation: 7, baseline: ReviewContent("HEAD source"), selected }
+          {
+            generation: 7,
+            baseline: ReviewContent("HEAD source"),
+            selected,
+            ..,
+          }
         ),
         stale: false,
         ..,
@@ -4855,6 +5110,7 @@ test "a vanished review retries a failed ordinary read" {
     state: TabReadFailed("temporary failure"),
     review: Some({
       generation: 7,
+      working_generation: 7,
       baseline: ReviewContent("old HEAD"),
       selected: test_modified_change(path),
     }),

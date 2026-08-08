@@ -190,17 +190,16 @@ fn parse_git_mode_paths(
   output : String,
   workspace_prefix : String,
   mode : String,
-) -> Array[String] {
-  let paths : Array[String] = []
+) -> Set[String] {
+  let paths : Set[String] = Set([])
   let prefix = mode + " "
   for record in output.split("\u{0}") {
     guard record.has_prefix(prefix) && record.find("\t") is Some(tab) else {
       continue
     }
     let path = record.view(start_offset=tab + 1).to_owned()
-    if git_path_relative_to_workspace(path, workspace_prefix) is Some(relative) &&
-      !paths.contains(relative) {
-      paths.push(relative)
+    if git_path_relative_to_workspace(path, workspace_prefix) is Some(relative) {
+      paths.add(relative)
     }
   }
   paths
@@ -356,7 +355,7 @@ async fn git_change_snapshot(
   dir : String,
   workspace_prefix : String,
   retries_left : Int,
-) -> (String?, Array[String], Array[String], Array[GitChange]) {
+) -> (String?, Set[String], Set[String], Array[GitChange]) {
   let head = git_revision_commit(dir, "HEAD")
   let (index_code, index_stdout, index_stderr) = git_collect(dir, [
     "ls-files", "--full-name", "--stage", "-z", "--", ".",
@@ -438,17 +437,13 @@ async fn git_change_snapshot(
         head_metadata, workspace_prefix, "160000",
       )
       for path in head_gitlinks {
-        if !known_gitlinks.contains(path) {
-          known_gitlinks.push(path)
-        }
+        known_gitlinks.add(path)
       }
       let head_symlinks = parse_git_mode_paths(
         head_metadata, workspace_prefix, "120000",
       )
       for path in head_symlinks {
-        if !known_symlinks.contains(path) {
-          known_symlinks.push(path)
-        }
+        known_symlinks.add(path)
       }
     }
   }
@@ -805,8 +800,10 @@ async test "Git snapshots pair status with HEAD and supplied revisions stay pinn
       2,
     )
     assert_eq(nested_head, Some(gitlink_head))
-    assert_eq(known_gitlinks, ["vendor/lib"])
-    assert_eq(known_symlinks, ["link"])
+    assert_eq(known_gitlinks.length(), 1)
+    assert_true(known_gitlinks.contains("vendor/lib"))
+    assert_eq(known_symlinks.length(), 1)
+    assert_true(known_symlinks.contains("link"))
     assert_true(
       nested_changes
       is [
@@ -924,10 +921,13 @@ test "duplicate deletion and recreation rows keep their own path kinds" {
 ///|
 test "Git full-name metadata finds entry modes in a nested workspace" {
   let output = "100644 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa 0\tdesktop/src/main.mbt\u{0}120000 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa 0\tdesktop/link\u{0}160000 bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb 0\tdesktop/vendor/lib\u{0}160000 cccccccccccccccccccccccccccccccccccccccc 2\tdesktop/vendor/lib\u{0}160000 commit dddddddddddddddddddddddddddddddddddddddd\tdesktop/vendor/tree\u{0}160000 eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee 0\toutside/lib\u{0}"
-  assert_eq(parse_git_mode_paths(output, "desktop/", "160000"), [
-    "vendor/lib", "vendor/tree",
-  ])
-  assert_eq(parse_git_mode_paths(output, "desktop/", "120000"), ["link"])
+  let gitlinks = parse_git_mode_paths(output, "desktop/", "160000")
+  assert_eq(gitlinks.length(), 2)
+  assert_true(gitlinks.contains("vendor/lib"))
+  assert_true(gitlinks.contains("vendor/tree"))
+  let symlinks = parse_git_mode_paths(output, "desktop/", "120000")
+  assert_eq(symlinks.length(), 1)
+  assert_true(symlinks.contains("link"))
 }
 
 ///|

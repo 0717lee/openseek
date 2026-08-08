@@ -71,12 +71,18 @@ pub(all) enum ReviewBaseline {
 } derive(Eq)
 
 ///|
-/// One changed-file review request parked on its document. The per-document
-/// generation fences both the HEAD reply and the paired working-tree read;
-/// keeping it outside `ReviewBaseline` avoids repeating the token in every
-/// settled variant.
+/// One changed-file review request parked on its document. Separate request
+/// generations fence its HEAD reply and newest working-tree read; keeping the
+/// tokens outside `ReviewBaseline` avoids repeating them in every settled
+/// variant.
 pub(all) struct ReviewState {
+  // The HEAD-side request token. It remains stable while newer working-tree
+  // reads are started for the same review.
   generation : Int
+  // The newest working-tree read token. Keeping this separate from the HEAD
+  // token lets watcher-driven reloads reject replies that complete out of
+  // order without invalidating an in-flight baseline.
+  working_generation : Int
   baseline : ReviewBaseline
   // Preserve the exact Changes row that the user selected. Porcelain can
   // legitimately report two rows for one path (for example, a staged
@@ -232,7 +238,8 @@ pub(all) struct State {
   // transition can refresh every surviving review baseline precisely.
   changes_head : String?
   changes_head_known : Bool
-  // Monotonic token for changed-file HEAD reads. It outlives conversation
+  // Monotonic token shared by changed-file HEAD and working-tree reads. Each
+  // side records its current token in `ReviewState`; it outlives conversation
   // re-roots for the same A→B→A reason as `changes_generation`.
   review_generation : Int
   // A missing checkout can discard either half of an in-flight review. Mark
