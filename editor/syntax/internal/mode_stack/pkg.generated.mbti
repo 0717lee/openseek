@@ -8,6 +8,10 @@ import {
 // Values
 pub fn normalize(@syntax.TokenizerState) -> @syntax.TokenizerState
 
+pub fn pop(@syntax.TokenizerState) -> @syntax.TokenizerState
+
+pub fn push(@syntax.TokenizerState, Char) -> @syntax.TokenizerState
+
 pub fn top(@syntax.TokenizerState) -> Char
 
 // Errors

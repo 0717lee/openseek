@@ -40,7 +40,7 @@ pub impl @syntax.LineTokenizer for JavascriptTokenizer with fn tokenize_line(
   let tokens : Array[@syntax.LineToken] = []
   let encoded_stack = @mode_stack.normalize(state)
   let initial_top = @mode_stack.top(encoded_stack)
-  let end_state = for at = 0, view = line_text[:], stack = (None : Array[Char]?), top = initial_top; view.length() >
+  let end_state = for at = 0, view = line_text[:], stack = encoded_stack, top = initial_top; view.length() >
                      0; {
     let (op, rest) = match top {
       'c' => comment_step(view, Comment)
@@ -57,31 +57,17 @@ pub impl @syntax.LineTokenizer for JavascriptTokenizer with fn tokenize_line(
       }
       Push(tag, mode) => {
         @syntax.push_token(tokens, at, at + consumed, tag)
-        let materialized = match stack {
-          Some(stack) => stack
-          None => @syntax.decode_mode_stack(encoded_stack)
-        }
-        materialized.push(mode)
-        continue at + consumed, rest, Some(materialized), mode
+        let next_stack = @mode_stack.push(stack, mode)
+        continue at + consumed, rest, next_stack, mode
       }
       Pop(tag) => {
         @syntax.push_token(tokens, at, at + consumed, tag)
-        let materialized = match stack {
-          Some(stack) => stack
-          None => @syntax.decode_mode_stack(encoded_stack)
-        }
-        if materialized.length() > 1 {
-          ignore(materialized.pop())
-        }
-        let next_top = materialized[materialized.length() - 1]
-        continue at + consumed, rest, Some(materialized), next_top
+        let next_stack = @mode_stack.pop(stack)
+        continue at + consumed, rest, next_stack, @mode_stack.top(next_stack)
       }
     }
   } nobreak {
-    match stack {
-      Some(stack) => @syntax.encode_mode_stack(stack)
-      None => encoded_stack
-    }
+    stack
   }
   (tokens, end_state)
 }

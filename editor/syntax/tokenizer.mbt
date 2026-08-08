@@ -261,8 +261,8 @@ pub fn push_token(
 /// its `TokenizerState`. Each character is one open mode; an empty state
 /// decodes to the base mode `'n'`, so a fresh line always has a mode to read.
 /// Useful for diagnostics and tokenizer extensions; built-in stack-based lexers
-/// read the encoded form directly and decode it only on mutation. Inverse of
-/// `encode_mode_stack`.
+/// operate on the encoded form directly and do not call this function. Inverse
+/// of `encode_mode_stack`.
 pub fn decode_mode_stack(state : TokenizerState) -> Array[Char] {
   if state.0 is "" {
     return ['n']

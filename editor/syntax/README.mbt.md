@@ -262,7 +262,7 @@ test "panic is_capitalized rejects an empty view" {
 and a *nesting-mode stack* — one character per open mode, with an empty state
 decoding to the base mode `'n'`. They are useful for diagnostics and tokenizer
 extensions. The built-in stack-based lexers use an internal `lexscan`-backed
-view so unchanged lines reuse the encoded state without allocating an
+view to read and update the encoded state directly, without allocating an
 `Array[Char]`. `lang_json` uses neither representation helper; its state is a
 single in-comment flag.
 

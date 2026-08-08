@@ -17,3 +17,30 @@ pub fn top(state : @syntax.TokenizerState) -> Char {
     _ => 'n'
   }
 }
+
+///|
+/// Appends a mode to the encoded tokenizer state without materializing an
+/// `Array[Char]`.
+pub fn push(
+  state : @syntax.TokenizerState,
+  mode : Char,
+) -> @syntax.TokenizerState {
+  let state = normalize(state)
+  TokenizerState("\{state.0}\{mode}")
+}
+
+///|
+/// Removes the current mode directly from the encoded tokenizer state. The
+/// base mode is retained so the stack is never empty.
+pub fn pop(state : @syntax.TokenizerState) -> @syntax.TokenizerState {
+  let state = normalize(state)
+  lexscan state.0 {
+    (re".$", before=remaining) =>
+      if remaining.length() == 0 {
+        state
+      } else {
+        TokenizerState(remaining.to_owned())
+      }
+    _ => TokenizerState("n")
+  }
+}

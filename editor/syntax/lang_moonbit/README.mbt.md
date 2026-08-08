@@ -172,10 +172,10 @@ test "package references and attributes keep their structure" {
 
 ## State
 
-`lang_moonbit` decodes a starting mode stack but always returns
-`TokenizerState("n")`, so its stack is per-line scratch: nothing this lexer
-recognizes spans a line boundary. Re-lexing any single line is therefore always
-safe, regardless of what precedes it.
+`lang_moonbit` reads and updates its encoded mode stack directly but always
+returns `TokenizerState("n")`, so its stack is per-line scratch: nothing this
+lexer recognizes spans a line boundary. Re-lexing any single line is therefore
+always safe, regardless of what precedes it.
 
 ```mbt check
 ///|

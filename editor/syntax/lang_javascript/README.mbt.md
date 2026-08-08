@@ -7,9 +7,9 @@ The JavaScript lexer. It implements `@syntax.LineTokenizer` with compile-time
 select it explicitly; reusable viewer core packages must not import it.
 
 This is the only `lang_*` with genuinely *nested* multi-line constructs. It
-carries their encoded mode stack directly, using an internal `lexscan` operation
-to read the current mode and decoding an `Array[Char]` only when a line mutates
-the stack.
+carries their encoded mode stack directly, using internal `lexscan` operations
+to read and pop modes and appending pushed modes without converting the state to
+an `Array[Char]`.
 
 ## Reading a token stream
 
