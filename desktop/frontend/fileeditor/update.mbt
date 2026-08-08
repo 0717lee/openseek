@@ -398,6 +398,11 @@ pub fn open_changed_document(
       // The tagged read below is the sole refresh owner, so this command only
       // displays the cached document instead of scheduling a duplicate reload.
       cmds.push(show_pending_review(dispatch, ctx, path, review_doc))
+    } else {
+      // The Viewer can still contain the previously active reviewed document.
+      // The dock has already switched to this uncached path, so clear the
+      // outgoing gutter while its tagged working-tree read is pending.
+      cmds.push(clear_quick_diff_baseline())
     }
     cmds.push(
       read_file(
@@ -2269,6 +2274,8 @@ test "changed-file review fences paired replies and ordinary opens leave review"
     had_active=false,
   )
   assert_eq(first.review_generation, 1)
+  // With no cached document, this loading transition also clears any outgoing
+  // quick-diff baseline while the paired working-tree read owns the next show.
   assert_true(
     first.docs.get(path)
     is Some(
