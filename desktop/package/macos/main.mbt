@@ -271,7 +271,19 @@ async fn @packaging.Workspace::package_with_proton(
     args,
     dir=self.dir(),
     extra_env=package_env,
-  )
+  ) catch {
+    error if @async.is_being_cancelled() => raise error
+    error => {
+      // Keep Proton's original failure as the authority. This extra hint is
+      // deliberately conditional because proton_cli also handles non-signing
+      // stages, while a running moon-lsp is only one possible cause of a
+      // damaged macOS app seal.
+      println(
+        "hint: if codesign verification failed, a running moon-lsp may have modified a sealed app file; stop moon-lsp and retry",
+      )
+      raise error
+    }
+  }
 }
 
 ///|
