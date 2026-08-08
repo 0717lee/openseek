@@ -11,6 +11,30 @@ let icon_folder : String =
   #|<svg width="16" height="16" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg" fill="currentColor"><path d="M2 4.5V6H5.58579C5.71839 6 5.84557 5.94732 5.93934 5.85355L7.29289 4.5L5.93934 3.14645C5.84557 3.05268 5.71839 3 5.58579 3H3.5C2.67157 3 2 3.67157 2 4.5ZM1 4.5C1 3.11929 2.11929 2 3.5 2H5.58579C5.98361 2 6.36514 2.15804 6.64645 2.43934L8.20711 4H12.5C13.8807 4 15 5.11929 15 6.5V11.5C15 12.8807 13.8807 14 12.5 14H3.5C2.11929 14 1 12.8807 1 11.5V4.5ZM2 7V11.5C2 12.3284 2.67157 13 3.5 13H12.5C13.3284 13 14 12.3284 14 11.5V6.5C14 5.67157 13.3284 5 12.5 5H8.20711L6.64645 6.56066C6.36514 6.84197 5.98361 7 5.58579 7H2Z"/></svg>
 
 ///|
+const ExplorerFilesTabId = "explorer-files-tab"
+
+///|
+const ExplorerChangesTabId = "explorer-changes-tab"
+
+///|
+const ExplorerPanelId = "explorer-inventory"
+
+///|
+fn focus_explorer_tab_after_render(id : String) -> @cmd.Cmd {
+  @cmd.custom_cmd(
+    _ => {
+      if @dom.document().get_element_by_id(id).to_option() is Some(tab) {
+        let _ : @js.Value = @js.Value::cast_from(tab).apply_with_string(
+          "focus",
+          ([] : Array[@js.Value]),
+        )
+      }
+    },
+    kind=@cmd.after_render,
+  )
+}
+
+///|
 /// An icon's SVG markup injected into a fixed-size span. The markup is a
 /// trusted compile-time constant, never user input, so the XSS alert on
 /// `inner_html` does not apply.
@@ -122,27 +146,23 @@ fn viewer_notice(state : State, ctx : Ctx) -> @html.Html {
 /// bottom window: the hierarchical tree rows and the last fs failure (blank
 /// and collapsed while there is none).
 fn tree_pane(dispatch : @cmd.Emit[Msg], state : State, ctx : Ctx) -> @html.Html {
-  let entries = visible_entries(state)
   // Losing the watcher is more important than a request-local failure: live
   // updates remain disabled even if a later directory request succeeds.
   let visible_error = match state.watch_error {
     Some(message) => Some(message)
     None => state.error
   }
-  let tree_children = if ctx.checkout is None {
+  let inventory = if ctx.checkout is None {
     [@html.div(class="file-panel-empty", "Waiting for workspace placement…")]
   } else if ctx.checkout is Some(@interop.MissingWorktree(_)) {
     [@html.div(class="file-panel-empty", "Worktree checkout is missing.")]
   } else if ctx.owner.session.is_empty() {
     [@html.div(class="file-panel-empty", "No conversation selected.")]
-  } else if !state.children.contains("") {
-    [@html.div(class="file-panel-empty", "Loading…")]
-  } else if entries.is_empty() {
-    // The workspace exists once the conversation runs; until then (or if the
-    // agent has written nothing) it is simply empty.
-    [@html.div(class="file-panel-empty", "This workspace is empty.")]
   } else {
-    entries.map(pair => tree_row(dispatch, state, ctx, pair.0, pair.1))
+    match state.explorer_mode {
+      ExplorerFiles => file_inventory(dispatch, state, ctx)
+      ExplorerChanges => change_inventory(dispatch, state, ctx)
+    }
   }
   @html.div(class="file-tree-pane", [
     // The grab strip on the panel's top seam for drag-to-resize; wired
@@ -153,7 +173,95 @@ fn tree_pane(dispatch : @cmd.Emit[Msg], state : State, ctx : Ctx) -> @html.Html 
         .class("tree-resize-handle"),
       ([] : Array[@html.Html]),
     ),
-    @html.div(class="file-tree", tree_children),
+    @html.div(
+      class="explorer-tabs",
+      attrs=@html.Attrs::build().role("tablist").aria_label("Explorer views"),
+      [
+        @html.button(
+          class=if state.explorer_mode is ExplorerFiles {
+            "explorer-tab active"
+          } else {
+            "explorer-tab"
+          },
+          on_click=dispatch(ExplorerModeSelected(ExplorerFiles)),
+          attrs=@html.Attrs::build()
+            .id(ExplorerFilesTabId)
+            .role("tab")
+            .tabindex(if state.explorer_mode is ExplorerFiles { 0 } else { -1 })
+            .aria_controls(ExplorerPanelId)
+            .aria_selected((state.explorer_mode is ExplorerFiles).to_string())
+            .on_keydown(event => {
+              match event.key() {
+                "Home" => {
+                  event.prevent_default()
+                  focus_explorer_tab_after_render(ExplorerFilesTabId)
+                }
+                "ArrowLeft" | "ArrowRight" | "ArrowUp" | "ArrowDown" | "End" => {
+                  event.prevent_default()
+                  @cmd.batch([
+                    dispatch(ExplorerModeSelected(ExplorerChanges)),
+                    focus_explorer_tab_after_render(ExplorerChangesTabId),
+                  ])
+                }
+                _ => @cmd.none
+              }
+            }),
+          "Files",
+        ),
+        @html.button(
+          class=if state.explorer_mode is ExplorerChanges {
+            "explorer-tab active"
+          } else {
+            "explorer-tab"
+          },
+          title="Changed files (click again to refresh)",
+          on_click=dispatch(ExplorerModeSelected(ExplorerChanges)),
+          attrs=@html.Attrs::build()
+            .id(ExplorerChangesTabId)
+            .role("tab")
+            .tabindex(
+              if state.explorer_mode is ExplorerChanges {
+                0
+              } else {
+                -1
+              },
+            )
+            .aria_controls(ExplorerPanelId)
+            .aria_selected((state.explorer_mode is ExplorerChanges).to_string())
+            .on_keydown(event => {
+              match event.key() {
+                "End" => {
+                  event.prevent_default()
+                  focus_explorer_tab_after_render(ExplorerChangesTabId)
+                }
+                "ArrowLeft" | "ArrowRight" | "ArrowUp" | "ArrowDown" | "Home" => {
+                  event.prevent_default()
+                  @cmd.batch([
+                    dispatch(ExplorerModeSelected(ExplorerFiles)),
+                    focus_explorer_tab_after_render(ExplorerFilesTabId),
+                  ])
+                }
+                _ => @cmd.none
+              }
+            }),
+          [@html.span("Changes"), change_count(state.changes)],
+        ),
+      ],
+    ),
+    @html.div(
+      class="file-tree",
+      attrs=@html.Attrs::build()
+        .id(ExplorerPanelId)
+        .role("tabpanel")
+        .aria_labelledby(
+          if state.explorer_mode is ExplorerFiles {
+            ExplorerFilesTabId
+          } else {
+            ExplorerChangesTabId
+          },
+        ),
+      inventory,
+    ),
     // Rendered even while empty so the row's slot in the pane is stable.
     @html.div(
       class=if visible_error is Some(_) {
@@ -167,6 +275,131 @@ fn tree_pane(dispatch : @cmd.Emit[Msg], state : State, ctx : Ctx) -> @html.Html 
       },
     ),
   ])
+}
+
+///|
+fn change_count(changes : ChangeList) -> @html.Html {
+  match changes {
+    ChangeListReady(repository=true, files~, ..) =>
+      @html.span(class="explorer-count", files.length().to_string())
+    _ => @html.span(class="explorer-count hidden", "")
+  }
+}
+
+///|
+fn file_inventory(
+  dispatch : @cmd.Emit[Msg],
+  state : State,
+  ctx : Ctx,
+) -> Array[@html.Html] {
+  let entries = visible_entries(state)
+  if !state.children.contains("") {
+    [@html.div(class="file-panel-empty", "Loading…")]
+  } else if entries.is_empty() {
+    // The workspace exists once the conversation runs; until then (or if the
+    // agent has written nothing) it is simply empty.
+    [@html.div(class="file-panel-empty", "This workspace is empty.")]
+  } else {
+    entries.map(pair => tree_row(dispatch, state, ctx, pair.0, pair.1))
+  }
+}
+
+///|
+fn change_inventory(
+  dispatch : @cmd.Emit[Msg],
+  state : State,
+  ctx : Ctx,
+) -> Array[@html.Html] {
+  match state.changes {
+    ChangeListIdle | ChangeListLoading(_) =>
+      [@html.div(class="file-panel-empty", "Loading changes…")]
+    ChangeListFailed(message) =>
+      [
+        @html.div(
+          class="file-panel-empty",
+          "Could not load changed files: \{message}. Click Changes to retry.",
+        ),
+      ]
+    ChangeListReady(repository=false, ..) =>
+      [
+        @html.div(
+          class="file-panel-empty",
+          "Git is unavailable or this workspace is not a Git repository.",
+        ),
+      ]
+    ChangeListReady(files~, ..) =>
+      if files.is_empty() {
+        [@html.div(class="file-panel-empty", "No changed files.")]
+      } else {
+        files.map(change => changed_file_row(dispatch, ctx, change))
+      }
+  }
+}
+
+///|
+fn ChangedFile::kind_class(self : ChangedFile) -> String {
+  if self.kind is ChangeSubmodule && self.has_unmerged_status() {
+    return "unmerged"
+  }
+  match self.kind {
+    ChangeAdded | ChangeUntracked => "added"
+    ChangeDeleted => "deleted"
+    ChangeRenamed | ChangeCopied => "renamed"
+    ChangeUnmerged => "unmerged"
+    ChangeModified
+    | ChangeTypeChanged
+    | ChangeSubmodule
+    | ChangeSymlink
+    | ChangeUnknown => "modified"
+  }
+}
+
+///|
+fn changed_file_row(
+  dispatch : @cmd.Emit[Msg],
+  ctx : Ctx,
+  change : ChangedFile,
+) -> @html.Html {
+  let selected = ctx.active_file == Some(change.path)
+  let mut class = if selected { "change-row selected" } else { "change-row" }
+  if !change.selectable() {
+    class = class + " disabled"
+  }
+  let children = [
+    @html.span(class="change-path", change.path.0),
+    @html.span(
+      class="change-status " + change.kind_class(),
+      change.status_label(),
+    ),
+  ]
+  if change.selectable() {
+    // A native button supplies keyboard activation (Enter/Space) and focus
+    // semantics without duplicating the tab strip's custom key handling.
+    @html.button(
+      class~,
+      title=change.status_title(),
+      on_click=dispatch(
+        FileSelected(path=change.path, name=basename(change.path)),
+      ),
+      attrs=@html.Attrs::build()
+        .data_set("path", change.path.0)
+        .aria_current(if selected { "page" } else { "false" }),
+      children,
+    )
+  } else {
+    @html.div(
+      class~,
+      title=change.unselectable_title(),
+      attrs=@html.Attrs::build()
+        .data_set("path", change.path.0)
+        .role("button")
+        .aria_disabled("true")
+        .tabindex(0)
+        .aria_label(change.unselectable_title())
+        .aria_current(if selected { "page" } else { "false" }),
+      children,
+    )
+  }
 }
 
 ///|

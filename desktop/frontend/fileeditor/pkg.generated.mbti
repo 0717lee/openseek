@@ -46,6 +46,35 @@ pub fn update(@cmd.Emit[Msg], Msg, State, Ctx) -> (@cmd.Cmd, State)
 // Errors
 
 // Types and methods
+pub(all) enum ChangeKind {
+  ChangeModified
+  ChangeAdded
+  ChangeDeleted
+  ChangeRenamed
+  ChangeCopied
+  ChangeUnmerged
+  ChangeTypeChanged
+  ChangeUntracked
+  ChangeSubmodule
+  ChangeSymlink
+  ChangeUnknown
+} derive(Eq)
+
+pub(all) enum ChangeList {
+  ChangeListIdle
+  ChangeListLoading(refresh_again~ : Bool)
+  ChangeListFailed(String)
+  ChangeListReady(repository~ : Bool, files~ : Array[ChangedFile], refreshing~ : Bool, refresh_again~ : Bool)
+} derive(Eq)
+
+pub(all) struct ChangedFile {
+  path : @pathx.Relative
+  original_path : @pathx.Relative?
+  index_status : String
+  worktree_status : String
+  kind : ChangeKind
+} derive(Eq)
+
 pub(all) struct Ctx {
   owner : @interop.ConversationKey
   workspace : @common.Uri?
@@ -62,6 +91,11 @@ pub(all) struct Doc {
   name : String
   state : TabState
   stale : Bool
+} derive(Eq)
+
+pub(all) enum ExplorerMode {
+  ExplorerFiles
+  ExplorerChanges
 } derive(Eq)
 
 pub(all) enum FileChange {
@@ -102,12 +136,16 @@ pub(all) enum Msg {
   RevealDirectory(@pathx.Relative)
   HighlightCleared(@pathx.Relative)
   ToggleTree
+  ExplorerModeSelected(ExplorerMode)
   DirToggle(@pathx.Relative)
   EnsureFileIndex
   DirLoaded(owner~ : @interop.ConversationKey, path~ : @pathx.Relative, entries~ : Array[FileEntry])
   DirFailed(owner~ : @interop.ConversationKey, path~ : @pathx.Relative, message~ : String)
   FilesIndexed(owner~ : @interop.ConversationKey, files~ : Array[@pathx.Relative], truncated~ : Bool)
   FileIndexFailed(owner~ : @interop.ConversationKey)
+  ChangesLoaded(owner~ : @interop.ConversationKey, generation~ : Int, repository~ : Bool, files~ : Array[ChangedFile])
+  ChangesFailed(owner~ : @interop.ConversationKey, generation~ : Int, message~ : String)
+  ChangesPollDue(owner~ : @interop.ConversationKey, generation~ : Int)
   FileSelected(path~ : @pathx.Relative, name~ : String)
   OpenNavigationLocation(owner~ : @interop.ConversationKey, path~ : @pathx.Relative, range~ : @common.Range)
   FileLoaded(owner~ : @interop.ConversationKey, path~ : @pathx.Relative, name~ : String, file~ : FileContent, range~ : @common.Range?, annotation~ : String?)
@@ -124,6 +162,10 @@ pub(all) enum Msg {
 pub(all) struct State {
   owner : @interop.ConversationKey?
   tree_open : Bool
+  explorer_mode : ExplorerMode
+  changes : ChangeList
+  changes_generation : Int
+  explorer_was_visible : Bool
   watching : WatchedPaths?
   watch_error : String?
   expanded : Array[@pathx.Relative]

@@ -113,6 +113,60 @@ pub(all) enum FileIndex {
 } derive(Eq)
 
 ///|
+/// Which inventory the explorer pane shows. This is a panel preference, so it
+/// follows the user across conversation switches while each inventory's data
+/// remains scoped to its owning conversation.
+pub(all) enum ExplorerMode {
+  ExplorerFiles
+  ExplorerChanges
+} derive(Eq)
+
+///|
+/// A changed path's stable presentation category. The host keeps Git's raw
+/// index/worktree columns as well; this category is only for labels and color.
+pub(all) enum ChangeKind {
+  ChangeModified
+  ChangeAdded
+  ChangeDeleted
+  ChangeRenamed
+  ChangeCopied
+  ChangeUnmerged
+  ChangeTypeChanged
+  ChangeUntracked
+  ChangeSubmodule
+  ChangeSymlink
+  ChangeUnknown
+} derive(Eq)
+
+///|
+/// One current path from the checkout's combined staged and unstaged changes.
+/// Renames and copies retain their original path for explanatory UI.
+pub(all) struct ChangedFile {
+  path : @pathx.Relative
+  original_path : @pathx.Relative?
+  index_status : String
+  worktree_status : String
+  kind : ChangeKind
+} derive(Eq)
+
+///|
+/// The lazily requested changed-file inventory. A ready snapshot remains
+/// visible during a background refresh. `refreshing` limits the host to one
+/// outstanding request; `refresh_again` coalesces later watcher/run signals
+/// into at most one follow-up.
+pub(all) enum ChangeList {
+  ChangeListIdle
+  ChangeListLoading(refresh_again~ : Bool)
+  ChangeListFailed(String)
+  ChangeListReady(
+    repository~ : Bool,
+    files~ : Array[ChangedFile],
+    refreshing~ : Bool,
+    refresh_again~ : Bool
+  )
+} derive(Eq)
+
+///|
 /// The file subsystem's state: a lazily-loaded file tree of the active
 /// conversation's workspace and the document table behind the dock's open
 /// file tabs. Keyed entirely by workspace-relative paths; `owner` records
@@ -127,6 +181,19 @@ pub(all) struct State {
   // is shown. A panel preference, not per-conversation state, so it
   // survives conversation switches.
   tree_open : Bool
+  // The explorer's Files/Changes selection and the Git snapshot behind the
+  // latter. The selection survives a conversation switch; the snapshot does
+  // not (see `sync`).
+  explorer_mode : ExplorerMode
+  changes : ChangeList
+  // Monotonic request token retained across conversation re-roots. Owner plus
+  // this generation rejects an old A→B→A reply for the same conversation.
+  changes_generation : Int
+  // Whether the explorer pane was visible on the preceding sync pass. This is
+  // stricter than the enclosing dock being open: with a file active the tree
+  // toggle (and narrow drill-down) can hide the explorer while the dock stays
+  // open. Quick Open may retain a shallow root watch in either hidden state.
+  explorer_was_visible : Bool
   // The paths the host's watcher currently follows (`None` = parked). Keeping
   // the full configuration makes opening/closing a tab or expanding/collapsing
   // a directory replace the watch even when the conversation did not change.
@@ -160,6 +227,10 @@ pub fn State::empty() -> State {
   {
     owner: None,
     tree_open: true,
+    explorer_mode: ExplorerFiles,
+    changes: ChangeListIdle,
+    changes_generation: 0,
+    explorer_was_visible: false,
     watching: None,
     watch_error: None,
     expanded: [],
@@ -222,9 +293,10 @@ pub(all) struct Ctx {
   // closes the tree — a drill-down — instead of showing both side by side.
   narrow : Bool
   // The dock's projection, recomputed by the root each dispatch: whether the
-  // right panel is expanded, which files the strip holds (in strip order —
-  // the stat/watch/reload sweeps run over this list), and which file tab is
-  // active (`None` while no file tab is on screen).
+  // file body is actually on-screen (open on Chat with a file or picker active),
+  // which files the strip holds (in strip order — the stat/watch/reload sweeps
+  // run over this list), and which file tab is active (`None` while no file tab
+  // is on screen).
   panel_open : Bool
   open_files : Array[@pathx.Relative]
   active_file : @pathx.Relative?
@@ -242,6 +314,9 @@ pub(all) enum Msg {
   HighlightCleared(@pathx.Relative)
   // Show or hide the file-tree pane (the column right of the viewer).
   ToggleTree
+  // Select the ordinary workspace tree or the checkout's changed-file list.
+  // Selecting Changes also requests (or explicitly refreshes) its snapshot.
+  ExplorerModeSelected(ExplorerMode)
   // Expand or collapse a directory row in the file tree; the first expansion
   // lazily lists the directory through the host.
   DirToggle(@pathx.Relative)
@@ -270,6 +345,23 @@ pub(all) enum Msg {
   // A `list_files` request failed or returned garbage. An initial failure
   // becomes `IndexFailed`; a failed background refresh retains a ready index.
   FileIndexFailed(owner~ : @interop.ConversationKey)
+  // A `git.changes` reply. The owner fence prevents a late response from one
+  // conversation replacing another conversation's inventory.
+  ChangesLoaded(
+    owner~ : @interop.ConversationKey,
+    generation~ : Int,
+    repository~ : Bool,
+    files~ : Array[ChangedFile]
+  )
+  ChangesFailed(
+    owner~ : @interop.ConversationKey,
+    generation~ : Int,
+    message~ : String
+  )
+  // A low-frequency fallback while Changes is visible. The selective file
+  // watcher intentionally follows only open/listed paths, so polling also
+  // catches nested external edits and index-only staging operations.
+  ChangesPollDue(owner~ : @interop.ConversationKey, generation~ : Int)
   // A file row was clicked: read it and show it in the viewer. `name` is the
   // entry's display name, kept for the viewer's title and language guess.
   FileSelected(path~ : @pathx.Relative, name~ : String)
