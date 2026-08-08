@@ -117,7 +117,18 @@ pub fn read_file(
 ) -> @cmd.Cmd {
   match workspace {
     Some(resource) if !@resource.belongs_to(resource, owner.channel) =>
-      return @cmd.none
+      // Settle the request through the same typed failure path as an async
+      // bridge rejection. Review-loading tabs deliberately do not start an
+      // untagged duplicate read on activation, so a silent no-op here would
+      // otherwise strand the paired working side during a host migration.
+      return dispatch(
+        FileFailed(
+          owner~,
+          path~,
+          review_generation~,
+          message="workspace moved to another host before file read",
+        ),
+      )
     _ => ()
   }
   @cmd.custom_cmd(scheduler => {
@@ -351,6 +362,40 @@ fn watch_workspace(
       }
     })
   })
+}
+
+///|
+test "a cross-host file read settles through its generation-fenced failure" {
+  let seen : Ref[Msg?] = Ref(None)
+  let dispatch = @cmd.Emit(message => {
+    seen.val = Some(message)
+    @cmd.none
+  })
+  guard @resource.of_path(@interop.ChannelId::Local, "/work") is Some(workspace) else {
+    fail("test workspace resource was not absolute")
+  }
+  ignore(
+    read_file(
+      dispatch,
+      { channel: @interop.ChannelId::Remote("other"), session: "remote-test" },
+      @pathx.Relative("src/main.mbt"),
+      "main.mbt",
+      review_generation=7,
+      range=None,
+      workspace=Some(workspace),
+    ),
+  )
+  assert_true(
+    seen.val
+    is Some(
+      FileFailed(
+        owner={ channel: @interop.ChannelId::Remote("other"), .. },
+        path=@pathx.Relative("src/main.mbt"),
+        review_generation=Some(7),
+        message="workspace moved to another host before file read"
+      )
+    ),
+  )
 }
 
 ///|

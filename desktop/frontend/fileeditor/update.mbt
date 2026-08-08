@@ -167,14 +167,24 @@ pub fn open_document(
   // Opening the path from Files, Quick Open, navigation, or a mention leaves
   // review mode. If the same Viewer model stays attached, the show below
   // clears its resource-keyed quick-diff baseline without replacing content.
-  let state = match state.docs.get(path) {
+  let (state, clear_review) = match state.docs.get(path) {
     Some({ review: Some(_), .. }) => {
       let docs = state.docs.copy()
       let doc = docs[path]
       docs[path] = { ..doc, review: None }
-      { ..state, docs, }
+      (
+        { ..state, docs, },
+        if ctx.active_file == Some(path) {
+          // Do not wait for the ordinary read below to clear the resource-keyed
+          // HEAD baseline: a ranged/annotated read can fail, and its failure
+          // intentionally leaves the cached document on screen.
+          clear_quick_diff_baseline()
+        } else {
+          @cmd.none
+        },
+      )
     }
-    _ => state
+    _ => (state, @cmd.none)
   }
   // The plain-activation case must not rely on the read's reply to switch
   // the document: `FileLoaded`'s identical-content dedup assumes the reply's
@@ -191,9 +201,9 @@ pub fn open_document(
     // narrow drill-down closing the tree reveals a viewer that was last
     // measured while hidden — both need a remeasure alongside the show.
     let cmd = if !had_active || (state.tree_open && ctx.narrow) {
-      @cmd.batch([show, request_viewer_remeasure()])
+      @cmd.batch([clear_review, show, request_viewer_remeasure()])
     } else {
-      show
+      @cmd.batch([clear_review, show])
     }
     return (
       cmd,
@@ -217,9 +227,9 @@ pub fn open_document(
   // drill-down closing the tree reveals a hidden-measured viewer — either
   // way the viewer must remeasure before the reply's document lands.
   let cmd = if !had_active || (state.tree_open && ctx.narrow) {
-    @cmd.batch([read, request_viewer_remeasure()])
+    @cmd.batch([clear_review, read, request_viewer_remeasure()])
   } else {
-    read
+    @cmd.batch([clear_review, read])
   }
   (
     cmd,
@@ -853,7 +863,10 @@ fn changes_live(state : State, ctx : Ctx) -> Bool {
 /// additions/untracked files; an older host also returns it after real commits
 /// because it does not know the optional HEAD field. Keep those version-skewed
 /// reviews correct by conservatively refreshing them on each settled poll.
-fn reviews_need_unknown_head_refresh(state : State) -> Bool {
+fn reviews_need_unknown_head_refresh(
+  state : State,
+  files : Array[ChangedFile],
+) -> Bool {
   for _, doc in state.docs {
     if doc.review is Some(review) {
       match review.baseline {
@@ -863,8 +876,19 @@ fn reviews_need_unknown_head_refresh(state : State) -> Bool {
         // A genuinely unborn repository gives additions/untracked rows an
         // empty baseline. Old hosts can give the same row real HEAD content,
         // which must be refreshed after a commit removes that baseline.
-        ReviewMissing if review.selected.kind is (ChangeAdded | ChangeUntracked) =>
+        ReviewMissing if review.selected.kind is (ChangeAdded | ChangeUntracked) => {
+          // A genuinely unborn repository can only expose added/untracked rows.
+          // On a legacy host, a transition can retain the exact untracked row
+          // while a same-path tracked/deleted row proves that HEAD now owns a
+          // baseline. Refresh that case without polling unborn files forever.
+          for change in files {
+            if change.path == review.selected.path &&
+              !(change.kind is (ChangeAdded | ChangeUntracked)) {
+              return true
+            }
+          }
           continue
+        }
         _ => return true
       }
     }
@@ -1360,7 +1384,7 @@ pub fn update(
         let head_changed = state.changes_head_known &&
           (
             state.changes_head != head ||
-            (head is None && reviews_need_unknown_head_refresh(state))
+            (head is None && reviews_need_unknown_head_refresh(state, files))
           )
         let (review_cmds, docs, review_generation) = if follow_up {
           ([], state.docs, state.review_generation)
@@ -2172,6 +2196,22 @@ test "changed-file review fences paired replies and ordinary opens leave review"
       selected: change,
     }),
   }
+  // A symbol/annotation jump starts a fresh ordinary read instead of taking
+  // the cached fast path. It still leaves review synchronously; the paired
+  // command clears the displayed baseline before that read can fail.
+  let (_, ranged_ordinary) = open_document(
+    emit,
+    { ..reviewed, docs, },
+    ctx,
+    path,
+    name="a.mbt",
+    range=Some(@common.Range::Range(2, 1, 2, 4)),
+    had_active=true,
+  )
+  assert_true(
+    ranged_ordinary.docs.get(path)
+    is Some({ state: TabLoaded(..), review: None, .. }),
+  )
   let (_, ordinary) = open_document(
     emit,
     { ..reviewed, docs, },
@@ -3635,7 +3675,7 @@ test "unborn repository polls do not churn untracked reviews" {
 }
 
 ///|
-test "legacy HEAD omission refreshes an untracked row with old content" {
+test "legacy HEAD omission refreshes a missing baseline once tracking is proven" {
   let path = @pathx.Relative("recreated.mbt")
   let untracked : ChangedFile = {
     path,
@@ -3654,11 +3694,7 @@ test "legacy HEAD omission refreshes an untracked row with old content" {
   let docs : Map[@pathx.Relative, Doc] = Map([])
   docs[path] = {
     ..loaded_doc(path.0),
-    review: Some({
-      generation: 3,
-      baseline: ReviewContent("old tracked content"),
-      selected: untracked,
-    }),
+    review: Some({ generation: 3, baseline: ReviewMissing, selected: untracked }),
   }
   let state = {
     ..owned_state(),

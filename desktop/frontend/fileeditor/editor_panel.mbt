@@ -259,6 +259,9 @@ fn show_file_in_viewer(
       model.uri.to_string() == uri.to_string() &&
       model.get_value() == content
     let previous_uri = viewer.get_model().map(model => model.uri)
+    let restore_view_state = should_restore_view_state(
+      restore_scroll, previous_uri, uri,
+    )
     if !same_document {
       // Park the outgoing document's scroll position for its tab's return.
       if viewer_state.relative is Some(prev) &&
@@ -280,7 +283,7 @@ fn show_file_in_viewer(
       // fresh document always opens at the top; a tab switch or reload then
       // restores the saved position over that reset.
       viewer.set_model(Some(text_model))
-      if restore_scroll &&
+      if restore_view_state &&
         relative is Some(rel) &&
         viewer_state.view_states.get(rel.0) is Some(saved) {
         viewer.restore_view_state(Some(saved))
@@ -355,6 +358,34 @@ fn show_file_in_viewer(
         )
       }
       viewer.reveal_range_in_center(range)
+    }
+  })
+}
+
+///|
+/// Preserve reading position for an explicit tab/reload request and whenever
+/// the Viewer replaces the model for the resource already on screen. The latter
+/// covers generation-fenced review refreshes whose cached `Doc` is deliberately
+/// parked as `TabLoading` while its old working text remains visible.
+fn should_restore_view_state(
+  explicit : Bool,
+  previous : @common.Uri?,
+  current : @common.Uri,
+) -> Bool {
+  explicit ||
+  (previous is Some(previous) && previous.to_string() == current.to_string())
+}
+
+///|
+/// Remove only the displayed model's quick-diff baseline. Ordinary navigation
+/// out of review mode uses this before starting a ranged read, so a failed read
+/// cannot leave the former HEAD gutter attached to an ordinary document.
+fn clear_quick_diff_baseline() -> @cmd.Cmd {
+  @cmd.custom_cmd(_scheduler => {
+    if viewer_state.viewer is Some(viewer) &&
+      viewer_state.services is Some(services) &&
+      viewer.get_model() is Some(model) {
+      services.quick_diff.set_original_content(model.uri, None)
     }
   })
 }
