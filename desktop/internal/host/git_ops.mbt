@@ -90,19 +90,36 @@ async fn git_diffstat(dir : @pathx.Absolute) -> GitDiffStat? {
 
 ///|
 /// The ref this branch's work is measured against: the remote's default
-/// branch, which is what a pull request would target. `origin/HEAD` names it
-/// when the clone recorded one; the two conventional names are tried after
-/// that, since a remote added by hand never gets that symbolic ref.
+/// branch, which is what a pull request would target.
+///
+/// A recorded `<remote>/HEAD` is the repository's own statement of where that
+/// is, so every remote's is read rather than only `origin`'s — a checkout
+/// whose one remote is called `upstream`, or named after its host, has a
+/// default branch too, and measuring from `HEAD` instead would report a
+/// branch full of commits as having no changes. `origin` still wins when it
+/// has one. Only after no remote records anything do the two conventional
+/// names get guessed at, since a remote added by hand never gets the symref.
 async fn git_default_branch_ref(dir : String) -> String? {
   if git_output_opt(dir, [
-      "rev-parse", "--abbrev-ref", "--verify", "--quiet", "origin/HEAD",
+      "for-each-ref", "--format=%(refname:short)%09%(symref:short)", "refs/remotes/*/HEAD",
     ])
-    is Some(output) {
-    let name = git_single_line(output)
-    // A repository can hold a dangling `origin/HEAD` that abbreviates to
-    // itself; that names no branch to compare against.
-    if !name.is_empty() && name != "origin/HEAD" {
-      return Some(name)
+    is Some(listing) {
+    let mut recorded : String? = None
+    for line in listing.split("\n") {
+      guard line.find("\t") is Some(tab) else { continue }
+      let remote = line.view(end_offset=tab)
+      // A dangling `<remote>/HEAD` resolves to nothing and names no branch.
+      let target = line.view(start_offset=tab + 1).trim_end(chars="\r")
+      guard !target.is_empty() else { continue }
+      if remote == "origin" {
+        return Some(target.to_owned())
+      }
+      if recorded is None {
+        recorded = Some(target.to_owned())
+      }
+    }
+    if recorded is Some(_) {
+      return recorded
     }
   }
   for candidate in ["origin/main", "origin/master"] {

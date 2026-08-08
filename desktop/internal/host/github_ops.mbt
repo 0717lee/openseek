@@ -19,7 +19,9 @@ const PullRequestCandidates : Int = 5
 
 ///|
 /// The gh fields one `gh pr list` has to return to fill the chip.
-const PullRequestFields : String = "number,title,state,url,isDraft,additions,deletions,changedFiles,statusCheckRollup"
+/// `isCrossRepository` is not rendered; it separates this checkout's pull
+/// request from a fork's that happens to share the branch name.
+const PullRequestFields : String = "number,title,state,url,isDraft,additions,deletions,changedFiles,statusCheckRollup,isCrossRepository"
 
 ///|
 #cfg(platform="windows")
@@ -111,7 +113,19 @@ async fn branch_pull_request(
 /// The pull request the chip should show: an open one when the branch has one,
 /// otherwise the most recent. A branch whose pull request already merged still
 /// deserves to say so rather than show nothing.
+///
+/// `--head` filters by branch name alone — gh does not accept `owner:branch` —
+/// so a busy repository can answer with several forks' pull requests that
+/// happen to share the name. One whose head lives in another repository is
+/// someone else's work; those are dropped unless dropping them leaves nothing,
+/// which is exactly what a fork checkout looks like, every pull request in it
+/// being cross-repository.
 fn pick_pull_request(candidates : Array[Json]) -> GitPullRequest? {
+  let own = candidates.filter(candidate => {
+    candidate is Object(fields) &&
+    fields.get("isCrossRepository") is Some(False)
+  })
+  let candidates = if own.is_empty() { candidates } else { own }
   let parsed = candidates.filter_map(parse_pull_request)
   for candidate in parsed {
     if candidate.state == "open" {
@@ -320,6 +334,7 @@ fn pull_request_json(
   state~ : String,
   draft~ : Bool,
   checks? : Json = Json::null(),
+  cross? : Bool = false,
 ) -> Json {
   {
     "number": Json::number(number.to_double()),
@@ -331,6 +346,7 @@ fn pull_request_json(
     "deletions": 287,
     "changedFiles": 18,
     "statusCheckRollup": checks,
+    "isCrossRepository": Json::boolean(cross),
   }
 }
 
@@ -357,6 +373,30 @@ test "An open pull request outranks the branch's older merged one" {
     fail("expected the merged pull request")
   }
   assert_eq(merged.state, "merged")
+}
+
+///|
+test "A fork's pull request does not answer for this checkout's branch" {
+  // `--head` matches the branch name in every repository that forked this one,
+  // so an open pull request from someone else's fork can arrive first.
+  let outsider = pull_request_json(
+    number=900,
+    state="OPEN",
+    draft=false,
+    cross=true,
+  )
+  let mine = pull_request_json(number=712, state="MERGED", draft=false)
+  guard pick_pull_request([outsider, mine]) is Some(picked) else {
+    fail("expected a pull request")
+  }
+  // Merged and second in the list, but the only one whose head is here.
+  assert_eq(picked.number, 712)
+  // A fork checkout has nothing but cross-repository pull requests; dropping
+  // them all would leave the chip blank, so there the filter stands down.
+  guard pick_pull_request([outsider]) is Some(only) else {
+    fail("a fork checkout still has its own pull request")
+  }
+  assert_eq(only.number, 900)
 }
 
 ///|
