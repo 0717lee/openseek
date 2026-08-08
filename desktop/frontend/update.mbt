@@ -642,6 +642,7 @@ fn open_editor_at(
       docs[open_path] = {
         name: @fileeditor.basename(open_path),
         state: TabLoading,
+        review: None,
         stale: false,
       }
     }
@@ -654,6 +655,7 @@ fn open_editor_at(
       tree_open: previous_panel.tree_open,
       explorer_mode: previous_panel.explorer_mode,
       changes_generation: previous_panel.changes_generation,
+      review_generation: previous_panel.review_generation,
       // Preserve the old host configuration until the post-dispatch sync can
       // explicitly retire or replace it.
       watching: previous_panel.watching,
@@ -1436,6 +1438,27 @@ fn update_msg(
         path,
         name~,
         range=None,
+        had_active~,
+      )
+      (cmd, { ..model, file_panel: panel })
+    }
+    // A Changes row is the review action: open/activate the same ordinary file
+    // tab, then let the file subsystem pair its working-tree document with the
+    // row's HEAD path. Deleted rows have no working file but still use the
+    // current path as their tab identity.
+    FileEditor(ChangedFileSelected(change)) => {
+      let had_active = @dock.active_file(model.dock) is Some(_)
+      let dock = if model.dock.active is Some(FilePicker) {
+        @dock.resolve_pick(model.dock, change.path)
+      } else {
+        @dock.open_file(model.dock, change.path)
+      }
+      let model = { ..model, dock, }
+      let (cmd, panel) = @fileeditor.open_changed_document(
+        dispatch.map(msg => FileEditor(msg)),
+        model.file_panel,
+        file_ctx(model),
+        change,
         had_active~,
       )
       (cmd, { ..model, file_panel: panel })
@@ -13864,6 +13887,40 @@ test "a tree pick fulfills the active picker in place" {
     model.dock.tabs == [@dock.DockTab::File(path=Relative("src/main.mbt"))],
   )
   assert_true(@dock.active_file(model.dock) == Some(Relative("src/main.mbt")))
+}
+
+///|
+test "a changed row opens the file tab in review mode" {
+  let dispatch = test_dispatch()
+  let model = desktop_model()
+  let (_, model) = update(dispatch, Dock(TogglePanel), model)
+  let (_, model) = update(dispatch, FilePickerRequested, model)
+  let path = @pathx.Relative("src/main.mbt")
+  let (_, model) = update(
+    dispatch,
+    FileEditor(
+      ChangedFileSelected({
+        path,
+        original_path: None,
+        index_status: " ",
+        worktree_status: "M",
+        kind: ChangeModified,
+      }),
+    ),
+    model,
+  )
+  assert_true(model.dock.tabs == [@dock.DockTab::File(path~)])
+  assert_true(@dock.active_file(model.dock) == Some(path))
+  assert_true(
+    model.file_panel.docs.get(path)
+    is Some(
+      {
+        state: TabLoading,
+        review: Some({ generation: 1, baseline: ReviewLoading }),
+        ..,
+      }
+    ),
+  )
 }
 
 ///|

@@ -811,16 +811,19 @@ test "file Quick Open shows live tabs first and adopts the indexed snapshot" {
   docs[Relative("src/open.mbt")] = {
     name: "open.mbt",
     state: @fileeditor.TabLoading,
+    review: None,
     stale: false,
   }
   docs[Relative("src/deleted.mbt")] = {
     name: "deleted.mbt",
     state: @fileeditor.TabDeleted,
+    review: None,
     stale: false,
   }
   docs[Relative("src/active.mbt")] = {
     name: "active.mbt",
     state: @fileeditor.TabLoading,
+    review: None,
     stale: false,
   }
   let dock = base.dock

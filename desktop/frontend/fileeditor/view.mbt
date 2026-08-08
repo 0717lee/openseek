@@ -126,7 +126,21 @@ fn viewer_notice(state : State, ctx : Ctx) -> @html.Html {
       match state.docs.get(path) {
         Some(doc) =>
           match doc.state {
-            TabDeleted => "\{doc.name} was deleted on disk."
+            TabDeleted =>
+              match doc.review {
+                Some({ baseline: ReviewLoading, .. }) =>
+                  "Loading the HEAD version of \{doc.name}…"
+                Some({ baseline: ReviewContent(_), .. }) => ""
+                Some({ baseline: ReviewMissing, .. }) =>
+                  "\{doc.name} was deleted and has no HEAD version to preview."
+                Some({ baseline: ReviewBinary, .. }) =>
+                  "The HEAD version of \{doc.name} is binary and cannot be previewed."
+                Some({ baseline: ReviewOversized, .. }) =>
+                  "The HEAD version of \{doc.name} is too large to preview."
+                Some({ baseline: ReviewFailed(message), .. }) =>
+                  "Could not load the HEAD version of \{doc.name}: \{message}."
+                None => "\{doc.name} was deleted on disk."
+              }
             TabBinary => "\{doc.name} is a binary file and cannot be previewed."
             TabOversized => "\{doc.name} is too large to preview."
             TabLoading | TabLoaded(..) => ""
@@ -377,10 +391,8 @@ fn changed_file_row(
     // semantics without duplicating the tab strip's custom key handling.
     @html.button(
       class~,
-      title=change.status_title(),
-      on_click=dispatch(
-        FileSelected(path=change.path, name=basename(change.path)),
-      ),
+      title="Open diff — " + change.status_title(),
+      on_click=dispatch(ChangedFileSelected(change)),
       attrs=@html.Attrs::build()
         .data_set("path", change.path.0)
         .aria_current(if selected { "page" } else { "false" }),
@@ -500,6 +512,7 @@ pub fn breadcrumb_view(
     },
     [
       @html.div(class="crumb-path", crumbs),
+      review_badge(state, ctx),
       @html.button(
         class="panel-toggle",
         title=if state.tree_open { "Hide file tree" } else { "Show file tree" },
@@ -507,6 +520,54 @@ pub fn breadcrumb_view(
         icon(icon_folder),
       ),
     ],
+  )
+}
+
+///|
+/// Compact, non-interactive review status beside the active path. The gutter
+/// is the diff itself; this badge makes the comparison source and exceptional
+/// cases explicit without adding another toolbar or changing Viewer layout.
+fn review_badge(state : State, ctx : Ctx) -> @html.Html {
+  let (text, title) = match ctx.active_file {
+    Some(path) =>
+      match state.docs.get(path) {
+        Some(
+          {
+            state: TabDeleted,
+            review: Some({ baseline: ReviewContent(_), .. }),
+            ..,
+          }
+        ) =>
+          (
+            "Deleted · HEAD", "Deleted in the working tree; showing the HEAD version",
+          )
+        Some({ review: Some({ baseline: ReviewLoading, .. }), .. }) =>
+          ("Loading diff…", "Loading the HEAD version for comparison")
+        Some({ review: Some({ baseline: ReviewContent(_), .. }), .. }) =>
+          ("Diff vs HEAD", "Quick diff against the HEAD version")
+        Some(
+          {
+            state: TabDeleted,
+            review: Some({ baseline: ReviewMissing, .. }),
+            ..,
+          }
+        ) => ("Deleted · no HEAD", "No HEAD version is available to preview")
+        Some({ review: Some({ baseline: ReviewMissing, .. }), .. }) =>
+          ("New · no HEAD", "New file compared with an empty HEAD baseline")
+        Some({ review: Some({ baseline: ReviewBinary, .. }), .. }) =>
+          ("Diff unavailable", "The HEAD version is binary")
+        Some({ review: Some({ baseline: ReviewOversized, .. }), .. }) =>
+          ("Diff unavailable", "The HEAD version is too large")
+        Some({ review: Some({ baseline: ReviewFailed(message), .. }), .. }) =>
+          ("Diff unavailable", "Could not load HEAD: " + message)
+        _ => ("", "")
+      }
+    None => ("", "")
+  }
+  @html.span(
+    class=if text.is_empty() { "review-badge hidden" } else { "review-badge" },
+    title~,
+    text,
   )
 }
 

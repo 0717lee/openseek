@@ -13,6 +13,7 @@ import {
   "moonbitlang/editor/viewer/common/markers",
   "moonbitlang/editor/viewer/common/model",
   "moonbitlang/editor/viewer/common/navigation_api",
+  "moonbitlang/editor/viewer/common/quick_diff_api",
   "moonbitlang/editor/syntax/lang_moonbit",
   "moonbitlang/editor/syntax/lang_javascript",
   "moonbitlang/editor/syntax/lang_json",

@@ -52,6 +52,31 @@ pub(all) enum TabState {
 } derive(Eq)
 
 ///|
+/// The Git baseline attached to a document opened from Changes. Ordinary file
+/// opens carry `None`; review opens start at `ReviewLoading` and settle to one
+/// of the typed `git.original_file` outcomes. Keeping this on the document
+/// makes a tab switch restore the same review without another host round-trip.
+pub(all) enum ReviewBaseline {
+  ReviewLoading
+  ReviewContent(String)
+  // A legitimate empty baseline: added/untracked files and unborn HEAD.
+  ReviewMissing
+  ReviewBinary
+  ReviewOversized
+  ReviewFailed(String)
+} derive(Eq)
+
+///|
+/// One changed-file review request parked on its document. The per-document
+/// generation fences both the HEAD reply and the paired working-tree read;
+/// keeping it outside `ReviewBaseline` avoids repeating the token in every
+/// settled variant.
+pub(all) struct ReviewState {
+  generation : Int
+  baseline : ReviewBaseline
+} derive(Eq)
+
+///|
 /// One open file's document record, keyed by its workspace-relative path in
 /// `State.docs`. Which files are open — and in what order — is the dock
 /// strip's business; this table only holds what each open file's document
@@ -59,6 +84,10 @@ pub(all) enum TabState {
 pub(all) struct Doc {
   name : String
   state : TabState
+  // `Some` means this tab was explicitly opened from Changes. Content and a
+  // missing HEAD become Viewer quick-diff baselines; the other cases remain
+  // visible as precise review-status chrome.
+  review : ReviewState?
   // The file changed on disk while its tab was in the background; reloaded
   // on activation rather than eagerly, so a build storm costs one read.
   stale : Bool
@@ -189,6 +218,9 @@ pub(all) struct State {
   // Monotonic request token retained across conversation re-roots. Owner plus
   // this generation rejects an old A→B→A reply for the same conversation.
   changes_generation : Int
+  // Monotonic token for changed-file HEAD reads. It outlives conversation
+  // re-roots for the same A→B→A reason as `changes_generation`.
+  review_generation : Int
   // Whether the explorer pane was visible on the preceding sync pass. This is
   // stricter than the enclosing dock being open: with a file active the tree
   // toggle (and narrow drill-down) can hide the explorer while the dock stays
@@ -230,6 +262,7 @@ pub fn State::empty() -> State {
     explorer_mode: ExplorerFiles,
     changes: ChangeListIdle,
     changes_generation: 0,
+    review_generation: 0,
     explorer_was_visible: false,
     watching: None,
     watch_error: None,
@@ -365,6 +398,24 @@ pub(all) enum Msg {
   // A file row was clicked: read it and show it in the viewer. `name` is the
   // entry's display name, kept for the viewer's title and language guess.
   FileSelected(path~ : @pathx.Relative, name~ : String)
+  // A Changes row was clicked. The full decoded row carries the original path
+  // needed by renames/copies and whether a working-tree read is possible.
+  ChangedFileSelected(ChangedFile)
+  // One `git.original_file` request settled. `path` is always the current
+  // changed path (the dock/document key), even when the host read its rename
+  // source from `original_path`.
+  GitOriginalLoaded(
+    owner~ : @interop.ConversationKey,
+    path~ : @pathx.Relative,
+    generation~ : Int,
+    original~ : @protocol.GitOriginalFileReply
+  )
+  GitOriginalFailed(
+    owner~ : @interop.ConversationKey,
+    path~ : @pathx.Relative,
+    generation~ : Int,
+    message~ : String
+  )
   // A Definition/References result accepted by the Viewer's location opener.
   // Carry the captured owner so a conversation switch that races the async
   // request cannot open the target in the next workspace.
@@ -379,12 +430,14 @@ pub(all) enum Msg {
   // selected so the code it names reads highlighted. `annotation`, when
   // present (an annotation chip's jump), is the user's comment text,
   // re-shown as an editor bubble over `range`. A plain tree click leaves
-  // both `None`.
+  // both `None`. `review_generation` is present only for the working-tree
+  // half of a changed-row open and fences repeated review clicks.
   FileLoaded(
     owner~ : @interop.ConversationKey,
     path~ : @pathx.Relative,
     name~ : String,
     file~ : FileContent,
+    review_generation~ : Int?,
     range~ : @common.Range?,
     annotation~ : String?
   )

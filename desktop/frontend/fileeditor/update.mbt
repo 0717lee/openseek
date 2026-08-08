@@ -17,6 +17,26 @@ pub fn mount_cmds(dispatch : @cmd.Emit[Msg]) -> @cmd.Cmd {
 }
 
 ///|
+/// The baseline the Viewer quick-diff service consumes. `ReviewMissing` is an
+/// intentional empty original so every working-tree line renders as added;
+/// unavailable/error cases clear the gutter rather than drawing a false diff.
+fn ReviewBaseline::quick_diff_original(self : ReviewBaseline) -> String? {
+  match self {
+    ReviewContent(content) => Some(content)
+    ReviewMissing => Some("")
+    ReviewLoading | ReviewBinary | ReviewOversized | ReviewFailed(_) => None
+  }
+}
+
+///|
+fn Doc::quick_diff_original(self : Doc) -> String? {
+  match self.review {
+    Some(review) => review.baseline.quick_diff_original()
+    None => None
+  }
+}
+
+///|
 /// The command that puts `path`'s document on screen: its content (scroll
 /// restored to where the tab was left), a withheld/deleted notice, or — for
 /// a document whose content is not loaded yet — a fresh read, whose
@@ -51,6 +71,7 @@ fn show_tab(
         absolute~,
         relative=path,
         restore_scroll=true,
+        review_original?=doc.quick_diff_original(),
       )
       if language_id(doc.name) == "moonbit" {
         @cmd.batch([show, request_diagnostics(dispatch, ctx.owner, absolute)])
@@ -58,10 +79,23 @@ fn show_tab(
         show
       }
     }
-    // Withheld and deleted tabs show the panel's own notice overlay (see
-    // `viewer_notice`), never a synthesized source document; the viewer just
-    // drops back to no document underneath it.
-    TabBinary | TabOversized | TabDeleted => clear_document()
+    // A deleted change with a textual HEAD side is the one deleted-file case
+    // that has a useful document: show that baseline under explicit review
+    // chrome. Other deleted/withheld cases use the panel notice overlay.
+    TabDeleted =>
+      match doc.review {
+        Some({ baseline: ReviewContent(content), .. }) =>
+          show_file_in_viewer(
+            ctx.owner,
+            ctx.workspace,
+            path.0,
+            content,
+            relative=path,
+            restore_scroll=true,
+          )
+        _ => clear_document()
+      }
+    TabBinary | TabOversized => clear_document()
   }
   // A document that went stale in the background (or was deleted and
   // reappeared) shows what it has and reloads in the same breath; the reply
@@ -103,6 +137,18 @@ pub fn open_document(
   annotation? : String,
   had_active~ : Bool,
 ) -> (@cmd.Cmd, State) {
+  // Opening the path from Files, Quick Open, navigation, or a mention leaves
+  // review mode. If the same Viewer model stays attached, the show below
+  // clears its resource-keyed quick-diff baseline without replacing content.
+  let state = match state.docs.get(path) {
+    Some({ review: Some(_), .. }) => {
+      let docs = state.docs.copy()
+      let doc = docs[path]
+      docs[path] = { ..doc, review: None }
+      { ..state, docs, }
+    }
+    _ => state
+  }
   // The plain-activation case must not rely on the read's reply to switch
   // the document: `FileLoaded`'s identical-content dedup assumes the reply's
   // document is the one on screen, so a re-read of an unchanged file would
@@ -129,7 +175,7 @@ pub fn open_document(
   }
   let docs = state.docs.copy()
   if !docs.contains(path) {
-    docs[path] = { name, state: TabLoading, stale: false }
+    docs[path] = { name, state: TabLoading, review: None, stale: false }
   }
   let read = read_file(
     dispatch,
@@ -151,6 +197,92 @@ pub fn open_document(
   (
     cmd,
     { ..state, docs, error: None, tree_open: state.tree_open && !ctx.narrow },
+  )
+}
+
+///|
+/// Open one row from Changes as a review. Existing working-tree files load
+/// through the ordinary reader while HEAD loads independently; whichever
+/// reply wins is parked on the same document and the late side completes the
+/// Viewer in place. Deleted paths skip the guaranteed-failing filesystem read
+/// and show their textual HEAD blob when it arrives.
+pub fn open_changed_document(
+  dispatch : @cmd.Emit[Msg],
+  state : State,
+  ctx : Ctx,
+  change : ChangedFile,
+  had_active~ : Bool,
+) -> (@cmd.Cmd, State) {
+  guard change.selectable() else { return (@cmd.none, state) }
+  let path = change.path
+  let name = basename(path)
+  let generation = state.review_generation + 1
+  let docs = state.docs.copy()
+  let doc_state = if change.has_working_tree_file() {
+    // Keep a real document on screen while both refreshes run. Besides
+    // avoiding a blank/loading flash, `FileLoaded` then recognizes a reload
+    // and restores the tab's scroll position. Other states need the fresh
+    // read before they can become a working document.
+    match docs.get(path) {
+      Some({ state: TabLoaded(content~, absolute~, sig~), .. }) =>
+        TabLoaded(content~, absolute~, sig~)
+      _ => TabLoading
+    }
+  } else {
+    TabDeleted
+  }
+  let review_doc = {
+    name,
+    state: doc_state,
+    review: Some({ generation, baseline: ReviewLoading }),
+    stale: false,
+  }
+  docs[path] = review_doc
+  let source = change.original_path.unwrap_or(path)
+  let cmds = [
+    read_git_original(
+      dispatch,
+      ctx.owner,
+      path,
+      source,
+      generation,
+      workspace=ctx.workspace,
+    ),
+  ]
+  if change.has_working_tree_file() {
+    if doc_state is TabLoaded(..) {
+      // Clear a previous review baseline immediately while keeping the cached
+      // working document and view state; the new HEAD side fills in later.
+      cmds.push(show_tab(dispatch, ctx, path, review_doc))
+    }
+    cmds.push(
+      read_file(
+        dispatch,
+        ctx.owner,
+        path,
+        name,
+        review_generation=generation,
+        range=None,
+        workspace=ctx.workspace,
+      ),
+    )
+  } else {
+    // Remove an earlier working document immediately; the notice covers the
+    // Viewer until the HEAD side settles.
+    cmds.push(clear_document())
+  }
+  if !had_active || (state.tree_open && ctx.narrow) {
+    cmds.push(request_viewer_remeasure())
+  }
+  (
+    @cmd.batch(cmds),
+    {
+      ..state,
+      docs,
+      review_generation: generation,
+      error: None,
+      tree_open: state.tree_open && !ctx.narrow,
+    },
   )
 }
 
@@ -548,6 +680,7 @@ pub fn sync(
       docs[path] = {
         name: basename(path),
         state: TabState::TabLoading,
+        review: None,
         stale: false,
       }
     }
@@ -575,6 +708,7 @@ pub fn sync(
         // Request tokens must outlive the per-conversation cache. Resetting
         // here would let a late A reply collide after switching A→B→A.
         changes_generation: state.changes_generation,
+        review_generation: state.review_generation,
         // Preserve the last host configuration long enough for `with_watch`
         // to retire or replace it on the way out.
         watching: state.watching,
@@ -1019,15 +1153,83 @@ pub fn update(
     // `open_document`. Reaching this arm means the root didn't intercept it;
     // changing nothing is the safe answer.
     FileSelected(..) => (@cmd.none, state)
+    // Intercepted by the root so the dock can open/activate the file tab
+    // before this package starts the paired working-tree + HEAD reads.
+    ChangedFileSelected(_) => (@cmd.none, state)
     // Intercepted by the root for the same reason: a navigation jump opens
     // a dock tab before the document loads.
     OpenNavigationLocation(..) => (@cmd.none, state)
-    FileLoaded(owner~, path~, name~, file~, range~, annotation~) =>
+    GitOriginalLoaded(owner~, path~, generation~, original~) => {
+      guard state.owner == Some(owner) &&
+        state.docs.get(path) is Some(doc) &&
+        doc.review is Some({ generation: current, baseline: ReviewLoading }) &&
+        current == generation else {
+        return (@cmd.none, state)
+      }
+      let review = match original {
+        @protocol.OriginalContent(content) => ReviewContent(content)
+        @protocol.Missing => ReviewMissing
+        @protocol.BinaryOriginal => ReviewBinary
+        @protocol.OversizedOriginal => ReviewOversized
+      }
+      let docs = state.docs.copy()
+      let next_doc = { ..doc, review: Some({ generation, baseline: review }) }
+      docs[path] = next_doc
+      // A working-tree read may still be in flight. It will consume the
+      // parked baseline when `FileLoaded` arrives; every settled document can
+      // update immediately (including a deleted-file HEAD preview).
+      let cmd = if ctx.active_file == Some(path) &&
+        !(next_doc.state is TabLoading) {
+        show_tab(dispatch, ctx, path, next_doc)
+      } else {
+        @cmd.none
+      }
+      (cmd, { ..state, docs, })
+    }
+    GitOriginalFailed(owner~, path~, generation~, message~) => {
+      guard state.owner == Some(owner) &&
+        state.docs.get(path) is Some(doc) &&
+        doc.review is Some({ generation: current, baseline: ReviewLoading }) &&
+        current == generation else {
+        return (@cmd.none, state)
+      }
+      let docs = state.docs.copy()
+      let next_doc = {
+        ..doc,
+        review: Some({ generation, baseline: ReviewFailed(message) }),
+      }
+      docs[path] = next_doc
+      let cmd = if ctx.active_file == Some(path) &&
+        !(next_doc.state is TabLoading) {
+        show_tab(dispatch, ctx, path, next_doc)
+      } else {
+        @cmd.none
+      }
+      (cmd, { ..state, docs, })
+    }
+    FileLoaded(
+      owner~,
+      path~,
+      name~,
+      file~,
+      review_generation~,
+      range~,
+      annotation~
+    ) =>
       // A stale read — the conversation switched, or the tab was closed
       // while the read was in flight — must not resurrect state.
       if state.owner != Some(owner) {
         (@cmd.none, state)
       } else if state.docs.get(path) is Some(doc) {
+        // A repeated changed-row click starts a new working-tree read as well
+        // as a new HEAD read. Fence the older working reply against the
+        // generation still parked on this document; ordinary reads carry
+        // `None` and retain their existing behavior.
+        if review_generation is Some(generation) &&
+          !(doc.review is Some({ generation: current, .. }) &&
+          current == generation) {
+          return (@cmd.none, state)
+        }
         let previous = doc.state
         let doc_state = match file {
           Content(content~, absolute~, sig~) =>
@@ -1036,7 +1238,12 @@ pub fn update(
           Oversized => TabOversized
         }
         let docs = state.docs.copy()
-        docs[path] = { name, state: doc_state, stale: false }
+        docs[path] = {
+          name,
+          state: doc_state,
+          review: doc.review,
+          stale: false,
+        }
         // Only the tab on screen touches the viewer; a background load just
         // settles into its tab for the next activation. No content
         // comparison happens here: whether anything actually needs redrawing
@@ -1064,6 +1271,7 @@ pub fn update(
                 // A reload of a document already on screen keeps the reading
                 // position; only a genuinely fresh document opens at the top.
                 restore_scroll=previous is TabLoaded(..),
+                review_original?=doc.quick_diff_original(),
               )
               if language_id(name) == "moonbit" {
                 @cmd.batch([
@@ -1227,13 +1435,14 @@ pub fn update(
           guard docs.get(stat.path) is Some(doc) else { continue }
           guard stat.sig is Some(current_sig) else {
             // The file is gone. The tab stays as the user's bookmark; the
-            // notice replaces the document if it is the one on screen.
+            // notice replaces the document if it is the one on screen. A tab
+            // already reviewing a textual HEAD side instead switches to that
+            // deleted-file preview.
             if !(doc.state is TabDeleted) {
-              docs[stat.path] = { ..doc, state: TabDeleted, stale: false }
-              // The notice overlay renders from the document's new state;
-              // the viewer only needs its stale document dropped.
+              let deleted = { ..doc, state: TabDeleted, stale: false }
+              docs[stat.path] = deleted
               if ctx.active_file == Some(stat.path) {
-                cmds.push(clear_document())
+                cmds.push(show_tab(dispatch, ctx, stat.path, deleted))
               }
             }
             continue
@@ -1363,6 +1572,7 @@ fn loaded_doc(path : String) -> Doc raise {
   {
     name: basename(Relative(path)),
     state: TabLoaded(content="", absolute~, sig="1:0"),
+    review: None,
     stale: false,
   }
 }
@@ -1405,6 +1615,244 @@ test "open_document seeds a loading entry and re-open keeps cached content" {
   )
   assert_true(
     again.docs.get(Relative("a.mbt")) is Some({ state: TabLoaded(..), .. }),
+  )
+}
+
+///|
+test "changed-file review fences paired replies and ordinary opens leave review" {
+  let emit = test_emit()
+  let path = @pathx.Relative("a.mbt")
+  let ctx = { ..test_ctx(), open_files: [path], active_file: Some(path) }
+  let change : ChangedFile = {
+    path,
+    original_path: None,
+    index_status: " ",
+    worktree_status: "M",
+    kind: ChangeModified,
+  }
+  let (_, first) = open_changed_document(
+    emit,
+    owned_state(),
+    ctx,
+    change,
+    had_active=false,
+  )
+  assert_eq(first.review_generation, 1)
+  assert_true(
+    first.docs.get(path)
+    is Some(
+      {
+        state: TabLoading,
+        review: Some({ generation: 1, baseline: ReviewLoading }),
+        ..,
+      }
+    ),
+  )
+  // A repeated row click owns a newer generation; its predecessor cannot
+  // replace the baseline even though owner and path still match.
+  let (_, second) = open_changed_document(
+    emit,
+    first,
+    ctx,
+    change,
+    had_active=true,
+  )
+  guard @resource.of_path(@interop.ChannelId::Local, "/work/a.mbt")
+    is Some(absolute) else {
+    fail("test file resource was not absolute")
+  }
+  let (_, old_working) = update(
+    emit,
+    FileLoaded(
+      owner=ctx.owner,
+      path~,
+      name="a.mbt",
+      file=Content(content="stale working", absolute~, sig="1:13"),
+      review_generation=Some(1),
+      range=None,
+      annotation=None,
+    ),
+    second,
+    ctx,
+  )
+  assert_true(
+    old_working.docs.get(path)
+    is Some(
+      {
+        state: TabLoading,
+        review: Some({ generation: 2, baseline: ReviewLoading }),
+        ..,
+      }
+    ),
+  )
+  let (_, ignored) = update(
+    emit,
+    GitOriginalLoaded(
+      owner=ctx.owner,
+      path~,
+      generation=1,
+      original=@protocol.OriginalContent("old one"),
+    ),
+    old_working,
+    ctx,
+  )
+  assert_true(
+    ignored.docs.get(path)
+    is Some({ review: Some({ generation: 2, baseline: ReviewLoading }), .. }),
+  )
+  let (_, reviewed) = update(
+    emit,
+    GitOriginalLoaded(
+      owner=ctx.owner,
+      path~,
+      generation=2,
+      original=@protocol.OriginalContent("old two"),
+    ),
+    ignored,
+    ctx,
+  )
+  assert_true(
+    reviewed.docs.get(path)
+    is Some(
+      {
+        review: Some({ generation: 2, baseline: ReviewContent("old two") }),
+        ..,
+      }
+    ),
+  )
+  let docs = reviewed.docs.copy()
+  docs[path] = {
+    ..loaded_doc("a.mbt"),
+    review: Some({ generation: 2, baseline: ReviewContent("old two") }),
+  }
+  let (_, ordinary) = open_document(
+    emit,
+    { ..reviewed, docs, },
+    ctx,
+    path,
+    name="a.mbt",
+    range=None,
+    had_active=true,
+  )
+  assert_true(ordinary.docs.get(path) is Some({ review: None, .. }))
+}
+
+///|
+test "deleted changes preview HEAD and working-file loads retain early baselines" {
+  let emit = test_emit()
+  let deleted_path = @pathx.Relative("gone.mbt")
+  let ctx = {
+    ..test_ctx(),
+    open_files: [deleted_path],
+    active_file: Some(deleted_path),
+  }
+  let deleted : ChangedFile = {
+    path: deleted_path,
+    original_path: None,
+    index_status: " ",
+    worktree_status: "D",
+    kind: ChangeDeleted,
+  }
+  let (_, loading) = open_changed_document(
+    emit,
+    owned_state(),
+    ctx,
+    deleted,
+    had_active=false,
+  )
+  assert_true(
+    loading.docs.get(deleted_path)
+    is Some(
+      {
+        state: TabDeleted,
+        review: Some({ generation: 1, baseline: ReviewLoading }),
+        ..,
+      }
+    ),
+  )
+  let (_, preview) = update(
+    emit,
+    GitOriginalLoaded(
+      owner=ctx.owner,
+      path=deleted_path,
+      generation=1,
+      original=@protocol.OriginalContent("removed source"),
+    ),
+    loading,
+    ctx,
+  )
+  assert_true(
+    preview.docs.get(deleted_path)
+    is Some(
+      {
+        state: TabDeleted,
+        review: Some(
+          { generation: 1, baseline: ReviewContent("removed source") }
+        ),
+        ..,
+      }
+    ),
+  )
+
+  // The HEAD request may beat the ordinary filesystem read. Its result stays
+  // on the loading document and is preserved when `FileLoaded` settles it.
+  let live_path = @pathx.Relative("live.mbt")
+  let live_ctx = {
+    ..ctx,
+    open_files: [live_path],
+    active_file: Some(live_path),
+  }
+  let live = {
+    ..deleted,
+    path: live_path,
+    worktree_status: "M",
+    kind: ChangeModified,
+  }
+  let (_, live_loading) = open_changed_document(
+    emit,
+    owned_state(),
+    live_ctx,
+    live,
+    had_active=false,
+  )
+  let (_, baseline_first) = update(
+    emit,
+    GitOriginalLoaded(
+      owner=live_ctx.owner,
+      path=live_path,
+      generation=1,
+      original=@protocol.Missing,
+    ),
+    live_loading,
+    live_ctx,
+  )
+  guard @resource.of_path(@interop.ChannelId::Local, "/work/live.mbt")
+    is Some(absolute) else {
+    fail("test file resource was not absolute")
+  }
+  let (_, loaded) = update(
+    emit,
+    FileLoaded(
+      owner=live_ctx.owner,
+      path=live_path,
+      name="live.mbt",
+      file=Content(content="new", absolute~, sig="2:3"),
+      review_generation=Some(1),
+      range=None,
+      annotation=None,
+    ),
+    baseline_first,
+    live_ctx,
+  )
+  assert_true(
+    loaded.docs.get(live_path)
+    is Some(
+      {
+        state: TabLoaded(content="new", ..),
+        review: Some({ generation: 1, baseline: ReviewMissing }),
+        ..,
+      }
+    ),
   )
 }
 
@@ -1512,7 +1960,12 @@ test "FileLoaded settles content into its document, active or not" {
     fail("test file resource was not absolute")
   }
   let docs : Map[@pathx.Relative, Doc] = Map([])
-  docs[Relative("a.mbt")] = { name: "a.mbt", state: TabLoading, stale: false }
+  docs[Relative("a.mbt")] = {
+    name: "a.mbt",
+    state: TabLoading,
+    review: None,
+    stale: false,
+  }
   docs[Relative("b.mbt")] = loaded_doc("b.mbt")
   let state = { ..owned_state(), docs, }
   let ctx = {
@@ -1527,6 +1980,7 @@ test "FileLoaded settles content into its document, active or not" {
       path=Relative("a.mbt"),
       name="a.mbt",
       file=Content(content="fn main {}", absolute~, sig="2:0"),
+      review_generation=None,
       range=None,
       annotation=None,
     ),
@@ -1549,6 +2003,7 @@ test "FileLoaded settles content into its document, active or not" {
       path=Relative("gone.mbt"),
       name="gone.mbt",
       file=Content(content="", absolute=gone_absolute, sig="2:0"),
+      review_generation=None,
       range=None,
       annotation=None,
     ),
@@ -1566,6 +2021,7 @@ test "FileLoaded settles content into its document, active or not" {
       path=Relative("a.mbt"),
       name="a.mbt",
       file=Binary,
+      review_generation=None,
       range=None,
       annotation=None,
     ),
@@ -2455,7 +2911,12 @@ test "StatsLoaded marks deletions, reloads the active change, stales the rest" {
 test "a deleted document whose file reappears reloads on the next stats" {
   let emit = test_emit()
   let docs : Map[@pathx.Relative, Doc] = Map([])
-  docs[Relative("a.mbt")] = { name: "a.mbt", state: TabDeleted, stale: false }
+  docs[Relative("a.mbt")] = {
+    name: "a.mbt",
+    state: TabDeleted,
+    review: None,
+    stale: false,
+  }
   let state = { ..owned_state(), docs, }
   let (_, next) = update(
     emit,

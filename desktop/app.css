@@ -1207,6 +1207,26 @@ html.is-resizing * {
   color: var(--ink-3);
 }
 
+/* The changed-file row is the review action; this badge names the active
+   comparison source and the typed cases where a textual HEAD diff is not
+   available. It stays compact so the path retains the breadcrumb's width. */
+.review-badge {
+  flex: 0 0 auto;
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 2px 7px;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--line));
+  border-radius: 999px;
+  color: var(--accent-ink);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  font-size: 10px;
+  line-height: 16px;
+}
+.review-badge.hidden {
+  display: none;
+}
+
 .viewer-host {
   /* The embedded viewer positions its layers absolutely; without a
      positioning context here they escape and paint over the chat. It

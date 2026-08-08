@@ -211,6 +211,9 @@ pub fn request_viewer_remeasure() -> @cmd.Cmd {
 /// relative path; `restore_scroll` (a tab switch or an in-place reload)
 /// brings the incoming document back to its saved position instead of the
 /// top — the Monaco save/restore-view-state contract around `set_model`.
+/// `review_original`, when present, is the Git HEAD baseline used by the
+/// Viewer's quick-diff contribution. An empty string is meaningful for a new
+/// file; omission clears any earlier baseline for this resource.
 fn show_file_in_viewer(
   owner : @interop.ConversationKey,
   workspace : @common.Uri?,
@@ -221,6 +224,7 @@ fn show_file_in_viewer(
   range? : @common.Range? = None,
   annotation? : String,
   restore_scroll? : Bool = false,
+  review_original? : String,
 ) -> @cmd.Cmd {
   @cmd.custom_cmd(_scheduler => {
     // Reads are always batched behind a mount request whose after-render tick
@@ -296,6 +300,10 @@ fn show_file_in_viewer(
     // Commenting (select → inline input → composer chip) is for real files;
     // a notice document has nothing behind it to comment on.
     if viewer_state.services is Some(services) {
+      // The service is resource-keyed, so setting this after `set_model` also
+      // handles a late HEAD reply for the document already on screen. The
+      // service event makes the gutter recompute without replacing the model.
+      services.quick_diff.set_original_content(uri, review_original)
       services.feedback.set_feedback_enabled(uri, absolute is Some(_))
       if absolute is Some(_) {
         // A fresh document view starts with no bubbles (comments become

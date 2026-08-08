@@ -94,6 +94,63 @@ fn list_changes(
 }
 
 ///|
+/// Load the HEAD side of one selected change. `path` is the current document
+/// key; `source` is the rename/copy source when Git reported one. The owner
+/// and current path ride the reply so a close, ordinary reopen, or
+/// conversation switch can discard it without touching the Viewer.
+fn read_git_original(
+  dispatch : @cmd.Emit[Msg],
+  owner : @interop.ConversationKey,
+  path : @pathx.Relative,
+  source : @pathx.Relative,
+  generation : Int,
+  workspace~ : @common.Uri?,
+) -> @cmd.Cmd {
+  match workspace {
+    Some(resource) if !@resource.belongs_to(resource, owner.channel) =>
+      return dispatch(
+        GitOriginalFailed(
+          owner~,
+          path~,
+          generation~,
+          message="workspace moved to another host before Git review",
+        ),
+      )
+    _ => ()
+  }
+  @cmd.custom_cmd(scheduler => {
+    @js.async_run(() => {
+      let original = @interop.bridge_request(
+        owner.channel,
+        @commands.git_original_file,
+        {
+          session: owner.session,
+          workspace: workspace.map(value => value.path),
+          path: source.0,
+        },
+      ) catch {
+        error => {
+          scheduler.add(
+            dispatch(
+              GitOriginalFailed(
+                owner~,
+                path~,
+                generation~,
+                message=@interop.bridge_error_text(error),
+              ),
+            ),
+          )
+          return
+        }
+      }
+      scheduler.add(
+        dispatch(GitOriginalLoaded(owner~, path~, generation~, original~)),
+      )
+    })
+  })
+}
+
+///|
 /// Compact label used by each changed-file row. Raw index/worktree columns
 /// remain available in the title for precise staged/unstaged detail.
 fn ChangedFile::status_label(self : ChangedFile) -> String {
@@ -132,18 +189,12 @@ fn ChangedFile::status_title(self : ChangedFile) -> String {
 }
 
 ///|
-/// A path absent from the working tree has nothing for the ordinary file
-/// reader to open. Besides a plain deletion, that includes a renamed path
-/// deleted again (`RD`) and a both-deleted conflict (`DD`). The
-/// follow-up diff PR provides a Git-baseline preview; until then these rows
-/// remain informative but inert instead of surfacing a failed read over the
-/// previously visible document.
-fn ChangedFile::selectable(self : ChangedFile) -> Bool {
-  if self.kind is ChangeSubmodule ||
-    self.kind is ChangeSymlink ||
-    self.path.0.has_suffix("/") {
-    false
-  } else if self.kind is ChangeUnmerged {
+/// Whether the change has a regular working-tree file for `fs.read_file`.
+/// Deleted rows remain reviewable through their HEAD content, but must skip
+/// that ordinary read. Besides a plain deletion this covers a renamed/copied
+/// path deleted again (`RD` / `CD`) and a both-deleted conflict (`DD`).
+fn ChangedFile::has_working_tree_file(self : ChangedFile) -> Bool {
+  if self.kind is ChangeUnmerged {
     // Conflict codes are exceptional: the retained side remains readable for
     // `DU` and `UD`; only `DD` has no working-tree file.
     !(self.index_status == "D" && self.worktree_status == "D")
@@ -151,6 +202,20 @@ fn ChangedFile::selectable(self : ChangedFile) -> Bool {
     // Rename/copy classification takes precedence over worktree deletion in
     // the host, so the raw second column is still required for `RD` / `CD`.
     !(self.kind is ChangeDeleted) && self.worktree_status != "D"
+  }
+}
+
+///|
+/// Whether the row can open a textual review. Missing working-tree files are
+/// allowed because `git.original_file` supplies their deleted-file preview;
+/// non-file entries stay inert and explain why.
+fn ChangedFile::selectable(self : ChangedFile) -> Bool {
+  if self.kind is ChangeSubmodule ||
+    self.kind is ChangeSymlink ||
+    self.path.0.has_suffix("/") {
+    false
+  } else {
+    true
   }
 }
 
@@ -164,7 +229,7 @@ fn ChangedFile::unselectable_title(self : ChangedFile) -> String {
   } else if self.path.0.has_suffix("/") {
     "untracked directory; open its nested checkout separately"
   } else {
-    "deleted from the working tree"
+    "change cannot be previewed"
   }
   self.status_title() + " — " + reason
 }
@@ -209,7 +274,7 @@ test "empty changed-file paths are ignored defensively" {
 }
 
 ///|
-test "change rows without a working-tree file are not selectable" {
+test "deleted rows use HEAD previews while non-file rows stay inert" {
   let deleted : ChangedFile = {
     path: @pathx.Relative("removed.mbt"),
     original_path: None,
@@ -217,13 +282,24 @@ test "change rows without a working-tree file are not selectable" {
     worktree_status: "D",
     kind: ChangeDeleted,
   }
-  assert_false(deleted.selectable())
-  assert_false(
-    { ..deleted, index_status: "R", worktree_status: "D", kind: ChangeRenamed }.selectable(),
-  )
-  assert_false(
-    { ..deleted, index_status: "D", worktree_status: "D", kind: ChangeUnmerged }.selectable(),
-  )
+  assert_true(deleted.selectable())
+  assert_false(deleted.has_working_tree_file())
+  let renamed_deleted = {
+    ..deleted,
+    index_status: "R",
+    worktree_status: "D",
+    kind: ChangeRenamed,
+  }
+  assert_true(renamed_deleted.selectable())
+  assert_false(renamed_deleted.has_working_tree_file())
+  let both_deleted = {
+    ..deleted,
+    index_status: "D",
+    worktree_status: "D",
+    kind: ChangeUnmerged,
+  }
+  assert_true(both_deleted.selectable())
+  assert_false(both_deleted.has_working_tree_file())
   assert_false(
     { ..deleted, worktree_status: "M", kind: ChangeSubmodule }.selectable(),
   )
@@ -241,6 +317,9 @@ test "change rows without a working-tree file are not selectable" {
   )
   assert_true(
     { ..deleted, index_status: "D", worktree_status: "U", kind: ChangeUnmerged }.selectable(),
+  )
+  assert_true(
+    { ..deleted, index_status: "D", worktree_status: "U", kind: ChangeUnmerged }.has_working_tree_file(),
   )
   assert_true(
     { ..deleted, index_status: "U", worktree_status: "D", kind: ChangeUnmerged }.selectable(),

@@ -110,6 +110,7 @@ pub fn read_file(
   owner : @interop.ConversationKey,
   path : @pathx.Relative,
   name : String,
+  review_generation? : Int,
   range~ : @common.Range?,
   annotation? : String,
   workspace~ : @common.Uri?,
@@ -143,7 +144,15 @@ pub fn read_file(
         Some(file) =>
           scheduler.add(
             dispatch(
-              FileLoaded(owner~, path~, name~, file~, range~, annotation~),
+              FileLoaded(
+                owner~,
+                path~,
+                name~,
+                file~,
+                review_generation~,
+                range~,
+                annotation~,
+              ),
             ),
           )
         None =>

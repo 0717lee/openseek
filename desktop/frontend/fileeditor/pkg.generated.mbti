@@ -25,13 +25,15 @@ pub fn editor_classes(State, Ctx) -> String
 
 pub fn mount_cmds(@cmd.Emit[Msg]) -> @cmd.Cmd
 
+pub fn open_changed_document(@cmd.Emit[Msg], State, Ctx, ChangedFile, had_active~ : Bool) -> (@cmd.Cmd, State)
+
 pub fn open_document(@cmd.Emit[Msg], State, Ctx, @pathx.Relative, name~ : String, range~ : @common.Range?, annotation? : String, had_active~ : Bool) -> (@cmd.Cmd, State)
 
 pub fn open_file(@cmd.Emit[Msg], State, Ctx, @pathx.Relative, range~ : @common.Range?, annotation? : String, had_active~ : Bool) -> (@cmd.Cmd, State)
 
 pub fn panel_toggle_cmds(@cmd.Emit[Msg], State, Ctx, opening~ : Bool) -> @cmd.Cmd
 
-pub fn read_file(@cmd.Emit[Msg], @interop.ConversationKey, @pathx.Relative, String, range~ : @common.Range?, annotation? : String, workspace~ : @common.Uri?) -> @cmd.Cmd
+pub fn read_file(@cmd.Emit[Msg], @interop.ConversationKey, @pathx.Relative, String, review_generation? : Int, range~ : @common.Range?, annotation? : String, workspace~ : @common.Uri?) -> @cmd.Cmd
 
 pub fn remove_editor_feedback(ModelUri, String) -> @cmd.Cmd
 
@@ -90,6 +92,7 @@ pub(all) struct Ctx {
 pub(all) struct Doc {
   name : String
   state : TabState
+  review : ReviewState?
   stale : Bool
 } derive(Eq)
 
@@ -147,8 +150,11 @@ pub(all) enum Msg {
   ChangesFailed(owner~ : @interop.ConversationKey, generation~ : Int, message~ : String)
   ChangesPollDue(owner~ : @interop.ConversationKey, generation~ : Int)
   FileSelected(path~ : @pathx.Relative, name~ : String)
+  ChangedFileSelected(ChangedFile)
+  GitOriginalLoaded(owner~ : @interop.ConversationKey, path~ : @pathx.Relative, generation~ : Int, original~ : @protocol.GitOriginalFileReply)
+  GitOriginalFailed(owner~ : @interop.ConversationKey, path~ : @pathx.Relative, generation~ : Int, message~ : String)
   OpenNavigationLocation(owner~ : @interop.ConversationKey, path~ : @pathx.Relative, range~ : @common.Range)
-  FileLoaded(owner~ : @interop.ConversationKey, path~ : @pathx.Relative, name~ : String, file~ : FileContent, range~ : @common.Range?, annotation~ : String?)
+  FileLoaded(owner~ : @interop.ConversationKey, path~ : @pathx.Relative, name~ : String, file~ : FileContent, review_generation~ : Int?, range~ : @common.Range?, annotation~ : String?)
   FileFailed(owner~ : @interop.ConversationKey, message~ : String)
   FileWatchFailed(owner~ : @interop.ConversationKey, message~ : String)
   FsChanged(session~ : String?, changes~ : Array[FileChange]?)
@@ -159,12 +165,27 @@ pub(all) enum Msg {
   EditorCommentAdded(resource~ : ModelUri, file~ : @pathx.Relative, range~ : @common.Range, quote~ : String, comment~ : String, feedback_id~ : String)
 }
 
+pub(all) enum ReviewBaseline {
+  ReviewLoading
+  ReviewContent(String)
+  ReviewMissing
+  ReviewBinary
+  ReviewOversized
+  ReviewFailed(String)
+} derive(Eq)
+
+pub(all) struct ReviewState {
+  generation : Int
+  baseline : ReviewBaseline
+} derive(Eq)
+
 pub(all) struct State {
   owner : @interop.ConversationKey?
   tree_open : Bool
   explorer_mode : ExplorerMode
   changes : ChangeList
   changes_generation : Int
+  review_generation : Int
   explorer_was_visible : Bool
   watching : WatchedPaths?
   watch_error : String?
