@@ -351,7 +351,7 @@ fn change_inventory(
       if files.is_empty() {
         [@html.div(class="file-panel-empty", "No changed files.")]
       } else {
-        files.map(change => changed_file_row(dispatch, ctx, change))
+        files.map(change => changed_file_row(dispatch, state, ctx, change))
       }
   }
 }
@@ -377,10 +377,11 @@ fn ChangedFile::kind_class(self : ChangedFile) -> String {
 ///|
 fn changed_file_row(
   dispatch : @cmd.Emit[Msg],
+  state : State,
   ctx : Ctx,
   change : ChangedFile,
 ) -> @html.Html {
-  let selected = ctx.active_file == Some(change.path)
+  let selected = change.is_selected(state, ctx)
   let mut class = if selected { "change-row selected" } else { "change-row" }
   if !change.selectable() {
     class = class + " disabled"
@@ -430,6 +431,23 @@ fn changed_file_row(
         .aria_current(if selected { "page" } else { "false" }),
       children,
     )
+  }
+}
+
+///|
+/// A normal file open selects its matching path in Changes. A review open is
+/// more precise: porcelain can report two rows for one path (for example a
+/// staged deletion plus a recreated untracked file), so only the exact row
+/// parked in the document's review state is current.
+fn ChangedFile::is_selected(
+  self : ChangedFile,
+  state : State,
+  ctx : Ctx,
+) -> Bool {
+  guard ctx.active_file == Some(self.path) else { return false }
+  match state.docs.get(self.path) {
+    Some({ review: Some(review), .. }) => review.selected == self
+    _ => true
   }
 }
 

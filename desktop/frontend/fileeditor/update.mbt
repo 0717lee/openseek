@@ -3982,6 +3982,8 @@ test "Changes reconciliation preserves the selected duplicate-path row" {
     ) &&
     selected == untracked,
   )
+  assert_false(deleted.is_selected(settled, ctx))
+  assert_true(untracked.is_selected(settled, ctx))
 }
 
 ///|
