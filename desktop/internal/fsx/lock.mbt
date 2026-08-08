@@ -70,39 +70,53 @@ pub fn FileLock::release(self : FileLock) -> Unit {
 }
 
 ///|
-/// Replace `path`'s contents in one step: write a temp file beside it, then
-/// rename over the target. A reader therefore sees either the old contents or
-/// the new ones and never a truncated prefix, whether or not it takes the
+/// Replace `path`'s contents in one step: write a private file beside it, then
+/// rename it over the target. A reader therefore sees either the old contents
+/// or the new ones and never a truncated prefix, whether or not it takes the
 /// lock, and a crash mid-write leaves the previous file intact.
-///
-/// The temp file's name is derived from the target's, so concurrent writers
-/// would collide on it: call this under an exclusive `FileLock`, which every
-/// caller does.
-///
-/// Windows may refuse to rename over an existing file; removing the target
-/// first narrows the window where neither name holds the new content to that
-/// one platform.
 pub async fn write_text_atomic(
   path : @pathx.Path,
   content : String,
   permission? : Int = 0o644,
 ) -> Unit {
   let target = path.to_string()
-  let temp = path.dirname().join(path.basename().to_owned() + ".tmp")
-  @fs.write_file(
-    temp.to_string(),
-    content,
-    create_mode=CreateOrTruncate,
-    permission~,
-  )
+  // The directory is not always ours. A workspace is whatever repository the
+  // user attached, and a repository can carry a symlink at a guessable
+  // `<file>.tmp` — committed before the attach that adds the git exclusion.
+  // Writing through it would truncate whatever it points at and then rename
+  // the link itself into place as the registry. So: an unguessable name, and
+  // `CreateNew` (O_CREAT|O_EXCL), which refuses any existing name including a
+  // symlink. The random suffix also keeps a leftover from a crashed run from
+  // blocking every later save, which a fixed name plus O_EXCL would.
+  guard @entropy.random_hex(8) is Some(token) else {
+    fail("could not name a private temporary file beside \{path}")
+  }
+  let temp = path.dirname().join(path.basename().to_owned() + ".tmp-" + token)
+  @fs.write_file(temp.to_string(), content, create_mode=CreateNew, permission~)
+  commit_temp_file(temp, target) catch {
+    error => {
+      // Nothing reuses this name, so a failed commit has to take the file
+      // away itself. Cancellation is one of the paths through here, hence the
+      // shield around the removal.
+      @async.protect_from_cancel(() => discard_temp_file(temp))
+      raise error
+    }
+  }
+}
+
+///|
+/// Move a finished temp file onto `target`. Windows may refuse to rename over
+/// an existing file; removing the target first narrows the window where
+/// neither name holds the new content to that one platform.
+async fn commit_temp_file(temp : @pathx.Path, target : String) -> Unit {
   @fs.rename(temp.to_string(), target) catch {
     error if @async.is_being_cancelled() => raise error
     rename_failure => {
-      // The retry exists only for the Windows refusal above, which is a
-      // regular file standing in the way. Anything else at the target is a
-      // different failure and must surface as one: a directory there means
-      // the path is wrong, and removing it would recursively destroy whatever
-      // it holds rather than report that.
+      // The retry exists only for that Windows refusal, which is a regular
+      // file standing in the way. Anything else at the target is a different
+      // failure and must surface as one: a directory there means the path is
+      // wrong, and removing it would recursively destroy whatever it holds
+      // rather than report that.
       let replaceable = (@fs.kind(target) is Regular) catch {
         error if @async.is_being_cancelled() => raise error
         _ => false
@@ -114,10 +128,29 @@ pub async fn write_text_atomic(
   }
 }
 
+///|
+/// Best-effort removal of an abandoned temp file: the caller is already
+/// raising the failure that matters, and a cleanup error must not replace it.
+async fn discard_temp_file(temp : @pathx.Path) -> Unit {
+  @fs.remove(temp.to_string()) catch {
+    _ => ()
+  }
+}
+
 // Tests. The lock is flock-based — it belongs to the open file description,
 // not the process — so two acquires of one path contend inside a single
 // process through exactly the mechanism a second instance would hit. That is
 // what makes these tests meaningful without spawning a helper process.
+
+///|
+/// Every leftover matters now that the temp name is random: a save that
+/// forgot to clean up would litter the directory instead of overwriting one
+/// reused name.
+async fn temp_leftovers(root : @pathx.Path, base : String) -> Array[String] {
+  @fs.readdir(root.to_string()).filter(name => {
+    name != base && name.has_prefix(base)
+  })
+}
 
 ///|
 async test "an atomic save replaces the target and leaves no temp behind" {
@@ -127,7 +160,27 @@ async test "an atomic save replaces the target and leaves no temp behind" {
   assert_eq(read_text(file), "first")
   write_text_atomic(file, "second")
   assert_eq(read_text(file), "second")
-  assert_false(exists(root.join("registry.json.tmp")))
+  assert_eq(temp_leftovers(root, "registry.json"), [])
+  @fs.rmdir(root.to_string(), recursive=true)
+}
+
+///|
+/// The save must not be redirectable out of its directory. A repository can
+/// carry a symlink at the guessable `<file>.tmp` before it is ever attached
+/// as a workspace; writing through it would truncate the link's target and
+/// then rename the link itself into place as the registry.
+async test "an atomic save never writes through a guessable temp name" {
+  let root : @pathx.Path = @fs.tmpdir(prefix="openseek-fsx-symlink-")
+  let victim = root.join("victim.txt")
+  write_text_atomic(victim, "precious")
+  let planted = root.join("registry.json.tmp")
+  @fs.symlink(planted.to_string(), target=victim.to_string())
+  let file = root.join("registry.json")
+  write_text_atomic(file, "saved")
+  assert_eq(read_text(file), "saved")
+  // The planted link is untouched, and so is what it points at.
+  assert_eq(read_text(victim), "precious")
+  assert_true(@fs.kind(planted.to_string(), follow_symlink=false) is SymLink)
   @fs.rmdir(root.to_string(), recursive=true)
 }
 
@@ -191,6 +244,8 @@ async test "an atomic save refuses a target that is not a regular file" {
   }
   assert_true(refused)
   assert_eq(read_text(kept), "precious")
+  // The refusal must also not leave its half-finished temp file behind.
+  assert_eq(temp_leftovers(root, "registry.json"), [])
   @fs.rmdir(root.to_string(), recursive=true)
 }
 
