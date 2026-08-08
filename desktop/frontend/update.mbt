@@ -939,18 +939,11 @@ fn file_ctx(model : Model) -> @fileeditor.Ctx {
     None | Some(Browser(_)) => false
   }
   {
-    // Parking under an empty session makes `@fileeditor.sync` clear the
-    // imperative viewer and retire its watcher. `sync_file_panel` parks the
-    // real conversation's dock strip separately until Repair restores it.
-    owner: {
-      channel: model.focused,
-      session: if checkout is None ||
-        checkout is Some(@interop.MissingWorktree(_)) {
-        ""
-      } else {
-        conv.session_id
-      },
-    },
+    // Keep the real identity even while placement is unresolved or missing.
+    // Both panel packages use the typed checkout state to park host work; the
+    // stable owner lets an interrupted changed-file review resume after Repair
+    // without ever treating the project root as a fallback checkout.
+    owner: { channel: model.focused, session: conv.session_id },
     workspace: conv.workspace,
     checkout,
     dark_mode: model.theme.is_dark(model.system_dark),
@@ -1018,9 +1011,9 @@ fn sync_file_panel(
   model : Model,
 ) -> (Model, @cmd.Cmd) {
   let ctx = file_ctx(model)
-  // An empty-session owner is deliberately transient: `@dock.sync` parks
-  // the real strip under the conversation key, but never persists this
-  // placeholder strip. Repair selects the real key again and restores it.
+  // Placement health is carried separately from identity, so a missing
+  // checkout keeps this conversation's strip while both content subsystems
+  // refuse host-backed work until Repair settles.
   let dock = @dock.sync(model.dock, ctx.owner)
   let model = { ..model, dock, }
   let (panel, cmd) = @fileeditor.sync(

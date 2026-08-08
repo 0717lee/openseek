@@ -272,6 +272,7 @@ async fn read_file_snapshot(
 fn stat_files(
   dispatch : @cmd.Emit[Msg],
   owner : @interop.ConversationKey,
+  epoch : Int,
   paths : Array[@pathx.Relative],
   workspace~ : @common.Uri?,
 ) -> @cmd.Cmd {
@@ -282,7 +283,10 @@ fn stat_files(
   }
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
-      let reply = @interop.bridge_request(
+      // Stat snapshots mutate cached document/review state. Keep their host
+      // observations in issue order, while `epoch` fences a placement or
+      // conversation boundary that an already-issued request outlives.
+      let reply = @interop.bridge_request_in_order(
         owner.channel,
         @commands.fs_stat_files,
         {
@@ -306,7 +310,7 @@ fn stat_files(
           })
         }
       }
-      scheduler.add(dispatch(StatsLoaded(owner~, stats~)))
+      scheduler.add(dispatch(StatsLoaded(owner~, epoch~, stats~)))
     })
   })
 }

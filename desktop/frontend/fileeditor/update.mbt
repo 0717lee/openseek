@@ -688,7 +688,13 @@ fn reconcile_reviews_after_changes(
   }
   if !restat_paths.is_empty() {
     cmds.push(
-      stat_files(dispatch, ctx.owner, restat_paths, workspace=ctx.workspace),
+      stat_files(
+        dispatch,
+        ctx.owner,
+        state.stat_epoch,
+        restat_paths,
+        workspace=ctx.workspace,
+      ),
     )
   }
   (cmds, docs, review_generation)
@@ -1147,6 +1153,11 @@ pub fn sync(
   state : State,
   ctx : Ctx,
 ) -> (State, @cmd.Cmd) {
+  let checkout_ready = !(ctx.checkout is None ||
+    ctx.checkout is Some(@interop.MissingWorktree(_)))
+  let parking_existing_owner = !checkout_ready &&
+    state.owner == Some(ctx.owner) &&
+    !state.placement_parked
   // When the active conversation changes, drop the cached tree *and* the
   // viewer's open document — the viewer is imperative state outside the
   // model, so it would otherwise keep showing the previous conversation's
@@ -1159,7 +1170,11 @@ pub fn sync(
   // against the new conversation's workspace — marking hidden documents
   // deleted/stale for files that never moved.
   let (state, reroot_cmd) = if state.owner == Some(ctx.owner) {
-    (state, @cmd.none)
+    // The real owner remains stable across an unresolved/missing checkout so
+    // its review selection survives. Clear the imperative Viewer exactly once
+    // at that boundary; the update guard and watcher reconciliation below keep
+    // every host-backed action parked until placement is healthy again.
+    (state, if parking_existing_owner { clear_viewer() } else { @cmd.none })
   } else {
     let docs : Map[@pathx.Relative, Doc] = Map([])
     for path in ctx.open_files {
@@ -1173,7 +1188,10 @@ pub fn sync(
     let cmds = [clear_viewer()]
     // A hidden panel's restored active document is not worth a read yet; it
     // stays TabLoading and the panel-open toggle reads it on reopen.
-    if ctx.panel_open && ctx.active_file is Some(path) && docs.contains(path) {
+    if checkout_ready &&
+      ctx.panel_open &&
+      ctx.active_file is Some(path) &&
+      docs.contains(path) {
       cmds.push(
         read_file(
           dispatch,
@@ -1194,8 +1212,10 @@ pub fn sync(
         // Request tokens must outlive the per-conversation cache. Resetting
         // here would let a late A reply collide after switching A→B→A.
         changes_generation: state.changes_generation,
+        stat_epoch: state.stat_epoch + 1,
         review_generation: state.review_generation,
         review_recovery_pending: false,
+        placement_parked: !checkout_ready,
         // Preserve the last host configuration long enough for `with_watch`
         // to retire or replace it on the way out.
         watching: state.watching,
@@ -1204,8 +1224,6 @@ pub fn sync(
       @cmd.batch(cmds),
     )
   }
-  let checkout_ready = !(ctx.checkout is None ||
-    ctx.checkout is Some(@interop.MissingWorktree(_)))
   // A checkout can disappear while a Git request is in flight. The parked
   // update path correctly refuses its late host reply; clear the in-flight
   // bit here as well so restoring the same owner starts a fresh generation
@@ -1213,9 +1231,20 @@ pub fn sync(
   // inventory also returns to Idle at this meaningful placement boundary,
   // granting review recovery one retry without making every sync retry it.
   let state = if checkout_ready {
-    state
+    { ..state, placement_parked: false }
   } else {
-    let state = { ..state, review_recovery_pending: true }
+    let state = {
+      ..state,
+      review_recovery_pending: true,
+      placement_parked: true,
+      // Invalidate any stat already issued against the checkout that just
+      // disappeared. Repeated syncs while parked retain the same epoch.
+      stat_epoch: if parking_existing_owner {
+        state.stat_epoch + 1
+      } else {
+        state.stat_epoch
+      },
+    }
     match state.changes {
       ChangeListLoading(_) | ChangeListFailed(_) =>
         { ..state, changes: ChangeListIdle }
@@ -1273,9 +1302,10 @@ pub fn sync(
     (@cmd.none, state)
   }
   let pending_cmd = @cmd.batch([reroot_cmd, changes_cmd])
-  // A closed panel re-roots (above) and keeps the watcher placed, but the
-  // tree itself can wait for the reopen.
-  guard ctx.panel_open else {
+  // A closed panel re-roots (above) and keeps the watcher placed, but the tree
+  // itself can wait for the reopen. Unresolved placement takes the same early
+  // exit even if the dock is visible: no host path may fall back to root.
+  guard checkout_ready && ctx.panel_open else {
     return with_watch(dispatch, state, ctx, pending_cmd)
   }
   // Load as soon as there is a conversation: the workspace directory is a pure
@@ -1314,8 +1344,8 @@ pub fn update(
 ) -> (@cmd.Cmd, State) {
   // `sync` parks the old owner while placement is unresolved or its checkout
   // is missing. Refuse every file-editor action in the meantime: even stale
-  // controls must not send an empty session through the host, where it could
-  // otherwise mean the registered project's main checkout.
+  // controls must not send the preserved conversation session without a
+  // healthy placement, where the host could otherwise resolve the wrong root.
   if ctx.checkout is None || ctx.checkout is Some(@interop.MissingWorktree(_)) {
     // The explorer selection is a local panel preference and remains useful
     // while placement is broken; only the host-backed refresh must wait.
@@ -1935,7 +1965,13 @@ pub fn update(
         }
         if !stat_paths.is_empty() {
           cmds.push(
-            stat_files(dispatch, owner, stat_paths, workspace=ctx.workspace),
+            stat_files(
+              dispatch,
+              owner,
+              state.stat_epoch,
+              stat_paths,
+              workspace=ctx.workspace,
+            ),
           )
         } else if moonbit_changed &&
           active_moonbit_diagnostics(
@@ -1986,8 +2022,8 @@ pub fn update(
       } else {
         (@cmd.none, state)
       }
-    StatsLoaded(owner~, stats~) =>
-      if state.owner != Some(owner) {
+    StatsLoaded(owner~, epoch~, stats~) =>
+      if state.owner != Some(owner) || state.stat_epoch != epoch {
         (@cmd.none, state)
       } else {
         let docs = state.docs.copy()
@@ -2865,6 +2901,18 @@ test "FileLoaded settles content into its document, active or not" {
   assert_true(
     other.docs.get(Relative("a.mbt")) is Some({ state: TabLoaded(..), .. }),
   )
+  // A stat issued before a placement/reroot boundary is stale even when the
+  // same conversation is active again. It cannot invalidate a newer live doc.
+  let epoch_state = { ..state, stat_epoch: 2 }
+  let (_, old_epoch) = update(
+    emit,
+    StatsLoaded(owner=test_ctx().owner, epoch=1, stats=[
+      { path: Relative("a.mbt"), sig: None },
+    ]),
+    epoch_state,
+    ctx,
+  )
+  assert_true(old_epoch == epoch_state)
 }
 
 ///|
@@ -3107,6 +3155,8 @@ test "checkout recovery restarts a review whose paired replies were parked" {
     parked.changes is ChangeListReady(refreshing=false, refresh_again=false, ..),
   )
   assert_true(parked.review_recovery_pending)
+  assert_true(parked.placement_parked)
+  assert_eq(parked.stat_epoch, state.stat_epoch + 1)
   let (restored, _) = sync(emit, parked, {
     ..present,
     open_files: [path],
@@ -3118,6 +3168,13 @@ test "checkout recovery restarts a review whose paired replies were parked" {
   )
   assert_true(restored.changes_generation == 2)
   assert_true(restored.review_recovery_pending)
+  assert_false(restored.placement_parked)
+  assert_eq(restored.stat_epoch, parked.stat_epoch)
+  // A second disappearance before the recovery snapshot settles is still a
+  // fresh placement boundary: pending review recovery is not the parked flag.
+  let (parked_again, _) = sync(emit, restored, missing)
+  assert_true(parked_again.placement_parked)
+  assert_eq(parked_again.stat_epoch, restored.stat_epoch + 1)
   let (_, restarted) = update(
     emit,
     ChangesLoaded(
@@ -3691,7 +3748,7 @@ test "a settled Changes snapshot re-stats loaded reviews whose rows disappeared"
   // a committed deletion must replace the cached working source.
   let (_, deleted) = update(
     test_emit(),
-    StatsLoaded(owner=ctx.owner, stats=[{ path, sig: None }]),
+    StatsLoaded(owner=ctx.owner, epoch=0, stats=[{ path, sig: None }]),
     settled,
     ctx,
   )
@@ -3741,7 +3798,7 @@ test "a review that becomes a symlink clears its cached regular-file source" {
   // source that preceded it. An explicit ordinary reopen remains the retry.
   let (_, still_unavailable) = update(
     test_emit(),
-    StatsLoaded(owner=ctx.owner, stats=[{ path, sig: Some("4:0") }]),
+    StatsLoaded(owner=ctx.owner, epoch=0, stats=[{ path, sig: Some("4:0") }]),
     unavailable,
     ctx,
   )
@@ -3810,7 +3867,7 @@ test "a disappearing review row hands an active reload to an ordinary read" {
   }
   let (_, reloading) = update(
     test_emit(),
-    StatsLoaded(owner=ctx.owner, stats=[{ path, sig: Some("2:1") }]),
+    StatsLoaded(owner=ctx.owner, epoch=0, stats=[{ path, sig: Some("2:1") }]),
     state,
     ctx,
   )
@@ -3897,7 +3954,7 @@ test "a newer review reload fences an older working-tree reply" {
   // flight. It receives its own token without invalidating the HEAD request.
   let (_, reloading) = update(
     test_emit(),
-    StatsLoaded(owner=ctx.owner, stats=[{ path, sig: Some("2:0") }]),
+    StatsLoaded(owner=ctx.owner, epoch=0, stats=[{ path, sig: Some("2:0") }]),
     state,
     ctx,
   )
@@ -3960,7 +4017,7 @@ test "a newer review reload fences an older working-tree reply" {
   // that captured the file just before it disappeared cannot resurrect it.
   let (_, deleted) = update(
     test_emit(),
-    StatsLoaded(owner=ctx.owner, stats=[{ path, sig: None }]),
+    StatsLoaded(owner=ctx.owner, epoch=0, stats=[{ path, sig: None }]),
     newest,
     ctx,
   )
@@ -5020,7 +5077,7 @@ test "StatsLoaded marks deletions, reloads the active change, stales the rest" {
   }
   let (_, next) = update(
     emit,
-    StatsLoaded(owner=test_ctx().owner, stats=[
+    StatsLoaded(owner=test_ctx().owner, epoch=0, stats=[
       // The active file changed: reloaded eagerly, so its document stays
       // loaded (the baseline the scroll-keeping reload compares against).
       { path: Relative("a.mbt"), sig: Some("9:0") },
@@ -5046,7 +5103,7 @@ test "StatsLoaded marks deletions, reloads the active change, stales the rest" {
   solo[Relative("b.mbt")] = loaded_doc("b.mbt")
   let (_, same) = update(
     emit,
-    StatsLoaded(owner=test_ctx().owner, stats=[
+    StatsLoaded(owner=test_ctx().owner, epoch=0, stats=[
       { path: Relative("b.mbt"), sig: Some("9:0") },
     ]),
     { ..next, docs: solo },
@@ -5073,7 +5130,7 @@ test "StatsLoaded marks deletions, reloads the active change, stales the rest" {
   }
   let (_, retryable) = update(
     emit,
-    StatsLoaded(owner=test_ctx().owner, stats=[
+    StatsLoaded(owner=test_ctx().owner, epoch=0, stats=[
       { path: failed_path, sig: Some("10:0") },
     ]),
     { ..owned_state(), docs: failed_docs },
@@ -5091,6 +5148,7 @@ test "StatsLoaded marks deletions, reloads the active change, stales the rest" {
         channel: @interop.ChannelId::Remote("other"),
         session: "desktop-test",
       },
+      epoch=0,
       stats=[{ path: Relative("a.mbt"), sig: None }],
     ),
     state,
@@ -5117,7 +5175,7 @@ test "StatsLoaded preserves a settled HEAD preview when its active file disappea
   let docs : Map[@pathx.Relative, Doc] = Map([(path, doc)])
   let (_, next) = update(
     emit,
-    StatsLoaded(owner=test_ctx().owner, stats=[{ path, sig: None }]),
+    StatsLoaded(owner=test_ctx().owner, epoch=0, stats=[{ path, sig: None }]),
     { ..owned_state(), docs, },
     { ..test_ctx(), open_files: [path], active_file: Some(path) },
   )
@@ -5149,7 +5207,7 @@ test "a deleted document whose file reappears reloads on the next stats" {
   let state = { ..owned_state(), docs, }
   let (_, next) = update(
     emit,
-    StatsLoaded(owner=test_ctx().owner, stats=[
+    StatsLoaded(owner=test_ctx().owner, epoch=0, stats=[
       { path: Relative("a.mbt"), sig: Some("3:0") },
     ]),
     state,
@@ -5188,7 +5246,9 @@ test "a selected deletion hands a clean restoration to an ordinary read" {
   let ctx = { ..test_ctx(), open_files: [path], active_file: Some(path) }
   let (_, reviewed) = update(
     emit,
-    StatsLoaded(owner=test_ctx().owner, stats=[{ path, sig: Some("3:0") }]),
+    StatsLoaded(owner=test_ctx().owner, epoch=0, stats=[
+      { path, sig: Some("3:0") },
+    ]),
     { ..owned_state(), docs, },
     ctx,
   )
@@ -5241,7 +5301,7 @@ test "a selected deletion hands a clean restoration to an ordinary read" {
   )
   let (_, reloading) = update(
     emit,
-    StatsLoaded(owner=ctx.owner, stats=[{ path, sig: Some("3:0") }]),
+    StatsLoaded(owner=ctx.owner, epoch=0, stats=[{ path, sig: Some("3:0") }]),
     ordinary,
     ctx,
   )
@@ -5321,7 +5381,7 @@ test "a vanished review retries a failed ordinary read" {
   )
   let (_, reloading) = update(
     emit,
-    StatsLoaded(owner=ctx.owner, stats=[{ path, sig: Some("4:0") }]),
+    StatsLoaded(owner=ctx.owner, epoch=0, stats=[{ path, sig: Some("4:0") }]),
     ordinary,
     ctx,
   )

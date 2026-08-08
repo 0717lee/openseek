@@ -159,7 +159,7 @@ pub(all) enum Msg {
   FileWatchFailed(owner~ : @interop.ConversationKey, message~ : String)
   FsChanged(session~ : String?, changes~ : Array[FileChange]?)
   RunSettled(owner~ : @interop.ConversationKey)
-  StatsLoaded(owner~ : @interop.ConversationKey, stats~ : Array[FileStat])
+  StatsLoaded(owner~ : @interop.ConversationKey, epoch~ : Int, stats~ : Array[FileStat])
   DiagnosticsLoaded(owner~ : @interop.ConversationKey, absolute~ : @common.Uri, diagnostics~ : Array[@protocol.LspDiagnostic])
   DiagnosticsPublished(channel~ : @interop.ChannelId, absolute~ : @common.Uri, diagnostics~ : Array[@protocol.LspDiagnostic])
   EditorCommentAdded(resource~ : ModelUri, file~ : @pathx.Relative, range~ : @common.Range, quote~ : String, comment~ : String, feedback_id~ : String)
@@ -187,10 +187,12 @@ pub(all) struct State {
   explorer_mode : ExplorerMode
   changes : ChangeList
   changes_generation : Int
+  stat_epoch : Int
   changes_head : String?
   changes_head_known : Bool
   review_generation : Int
   review_recovery_pending : Bool
+  placement_parked : Bool
   explorer_was_visible : Bool
   watching : WatchedPaths?
   watch_error : String?

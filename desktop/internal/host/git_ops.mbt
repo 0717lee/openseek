@@ -223,7 +223,10 @@ fn git_tree_path_batches(paths : Array[String]) -> Array[Array[String]] {
   let mut batch : Array[String] = []
   let mut bytes = 0
   for path in paths {
-    let path_bytes = path.length() + 1
+    // Git argv is UTF-8 on Unix and the byte bound is deliberately also
+    // conservative for Windows' UTF-16 command line. Character count would
+    // under-budget non-ASCII repository paths by up to four times.
+    let path_bytes = @utf8.encode(path).length() + 1
     if path_bytes > MaxGitTreePathBatchBytes {
       return []
     }
@@ -939,7 +942,7 @@ test "Git HEAD path queries stay in bounded argument batches" {
   for batch in batches {
     let mut bytes = 0
     for path in batch {
-      bytes += path.length() + 1
+      bytes += @utf8.encode(path).length() + 1
     }
     assert_true(bytes <= MaxGitTreePathBatchBytes)
   }
@@ -947,6 +950,10 @@ test "Git HEAD path queries stay in bounded argument batches" {
   // budget selects the recursive workspace-tree fallback.
   assert_true(
     git_tree_path_batches(["x".repeat(MaxGitTreePathBatchBytes + 1)]).is_empty(),
+  )
+  // The limit is a byte limit, not a Unicode scalar-value limit.
+  assert_true(
+    git_tree_path_batches(["界".repeat(MaxGitTreePathBatchBytes / 3 + 1)]).is_empty(),
   )
   // Enough individually valid batches to exceed the subprocess budget also
   // select one recursive tree walk.

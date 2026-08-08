@@ -1,6 +1,7 @@
 import {
   "moonbit-community/rabbita/dom",
   "moonbit-community/rabbita/js",
+  "moonbitlang/async",
   "moonbitlang/core/json",
   "openseek_desktop/internal/commands",
   "openseek_desktop/internal/protocol",

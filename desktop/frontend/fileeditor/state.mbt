@@ -237,6 +237,10 @@ pub(all) struct State {
   // Monotonic request token retained across conversation re-roots. Owner plus
   // this generation rejects an old A→B→A reply for the same conversation.
   changes_generation : Int
+  // Placement/conversation epoch carried by file-stat replies. Stats within
+  // one epoch are issued through the ordered bridge; advancing this value on
+  // either boundary rejects a reply that outlived its checkout.
+  stat_epoch : Int
   // Last settled Git HEAD identity. `changes_head_known` distinguishes a
   // first/unborn snapshot (`head=None`) from no snapshot yet, so a later HEAD
   // transition can refresh every surviving review baseline precisely.
@@ -251,6 +255,10 @@ pub(all) struct State {
   // recovery restarts only incomplete requests once; ordinary polling must
   // never supersede a healthy slow read.
   review_recovery_pending : Bool
+  // Whether checkout placement is currently unresolved/missing. Kept separate
+  // from review recovery because a repaired review may still be awaiting its
+  // authoritative Changes snapshot when placement disappears a second time.
+  placement_parked : Bool
   // Whether the explorer pane was visible on the preceding sync pass. This is
   // stricter than the enclosing dock being open: with a file active the tree
   // toggle (and narrow drill-down) can hide the explorer while the dock stays
@@ -292,10 +300,12 @@ pub fn State::empty() -> State {
     explorer_mode: ExplorerFiles,
     changes: ChangeListIdle,
     changes_generation: 0,
+    stat_epoch: 0,
     changes_head: None,
     changes_head_known: false,
     review_generation: 0,
     review_recovery_pending: false,
+    placement_parked: false,
     explorer_was_visible: false,
     watching: None,
     watch_error: None,
@@ -499,9 +509,13 @@ pub(all) enum Msg {
   // conversation's finish.
   RunSettled(owner~ : @interop.ConversationKey)
   // A `stat_files` reply: each open tab's current mtime signature (`""` =
-  // the file is gone). `owner` says which conversation it answers, like
-  // every other reply.
-  StatsLoaded(owner~ : @interop.ConversationKey, stats~ : Array[FileStat])
+  // the file is gone). Owner plus placement epoch fence a request that
+  // outlived either its conversation or checkout.
+  StatsLoaded(
+    owner~ : @interop.ConversationKey,
+    epoch~ : Int,
+    stats~ : Array[FileStat]
+  )
   // The language server's diagnostics returned by `lsp_open`. The full owner
   // fences a reply that lost a device/session switch while the request ran.
   DiagnosticsLoaded(
