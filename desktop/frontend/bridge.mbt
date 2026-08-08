@@ -1105,6 +1105,7 @@ fn open_session(
           items=view.items,
           watermark=view.watermark,
           event_boundaries=view.event_boundaries,
+          goal=view.goal,
           generation~,
         ),
       )
@@ -1144,6 +1145,7 @@ fn refresh_session(
           items=view.items,
           watermark=view.watermark,
           event_boundaries=view.event_boundaries,
+          goal=view.goal,
           generation~,
         ),
       )
@@ -1286,6 +1288,92 @@ fn compact_openseek(
       )
     })
   })
+}
+
+///|
+/// Set or clear a conversation's standing goal, carrying the same engine
+/// settings as a start: a conversation with no live serve process (resumed
+/// after a restart) gets one spawned on the durable session first. The
+/// durable `[goal]` marker commit is the confirmation that moves the UI;
+/// this command only surfaces the immediate failure — the spawn failing, or
+/// the bridge call rejecting — as an error in the conversation on screen.
+fn goal_openseek(
+  dispatch : @cmd.Emit[Msg],
+  channel : @interop.ChannelId,
+  session~ : String,
+  model~ : EngineModel,
+  max_steps~ : String,
+  workspace? : @common.Uri,
+  text : String?,
+) -> @cmd.Cmd {
+  match workspace {
+    Some(resource) if !@resource.belongs_to(resource, channel) =>
+      return @cmd.none
+    _ => ()
+  }
+  let payload = goal_payload(session, model, max_steps, workspace, text)
+  @cmd.custom_cmd(scheduler => {
+    @js.async_run(() => {
+      request_agent_goal(scheduler, dispatch, channel, payload, session, text)
+    })
+  })
+}
+
+///|
+/// The `agent.goal` payload. `auto` is sent only when arming: an absent field
+/// is the manual default every host understands, including one that predates
+/// the toggle.
+fn goal_payload(
+  session : String,
+  model : EngineModel,
+  max_steps : String,
+  workspace : @common.Uri?,
+  text : String?,
+) -> @protocol.GoalPayload {
+  {
+    session,
+    text,
+    // Always manual. `auto` arms the engine's autonomous continuation, and
+    // the desktop cannot yet see the turns that continuation starts: serve
+    // announces them with `GoalContinue`, which this client drops, so the
+    // composer would offer Send during an autonomous turn and a prompt sent
+    // then would be settled by that turn's terminal event. Arming waits for
+    // the lifecycle work.
+    auto: None,
+    model: Some(model.wire()),
+    max_steps: parsed_max_steps(max_steps),
+    workspace: workspace.map(value => value.path),
+  }
+}
+
+///|
+/// Send one `agent.goal`, reporting a rejection as `GoalRejected` carrying
+/// the text that never landed, so the composer can hand it back.
+async fn request_agent_goal(
+  scheduler : &@cmd.Scheduler,
+  dispatch : @cmd.Emit[Msg],
+  channel : @interop.ChannelId,
+  payload : @protocol.GoalPayload,
+  session : String,
+  text : String?,
+) -> Unit noraise {
+  let dispatch = dispatch.map((msg : DeviceMsg) => FromDevice(channel, msg))
+  ignore(
+    @interop.bridge_request(channel, @commands.agent_goal, payload) catch {
+      error => {
+        scheduler.add(
+          dispatch(
+            GoalRejected(
+              session~,
+              draft=text,
+              message=@interop.bridge_error_text(error),
+            ),
+          ),
+        )
+        return
+      }
+    },
+  )
 }
 
 ///|

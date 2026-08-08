@@ -1829,6 +1829,11 @@ fn connection_banner(model : Model) -> @html.Html {
 fn composer_view(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
   let conv = model.active()
   let checkout = model.checkout_placement(conv)
+  // Goal mode: `/goal` (or the banner's Edit) rebinds the composer's one
+  // textarea to the goal draft for this conversation — the prompt draft
+  // survives untouched underneath, and the same DOM node keeps focus.
+  let goal_editor = conv.goal_edit
+  let goal_mode = goal_editor is Some(_)
   let transcript_ready = conv.sync is Synced &&
     !conv.has_unresolved_run_tail_notice()
   let checkout_ready = checkout is Some(@interop.WorkspaceRoot) ||
@@ -1861,7 +1866,22 @@ fn composer_view(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
   let controls : Array[@html.Html] = [
     @html.div(class="composer-status", status),
   ]
-  if conv.is_running() {
+  if goal_editor is Some(editor) {
+    // Goal mode replaces the send/steer cluster: the input edits the
+    // standing goal, so the only action left here is Set — cancelling rides
+    // the status group's lit chip, clearing rides the banner's ✕. No
+    // run/compaction gate: a goal is welcome in every engine phase.
+    controls.push(
+      @html.button(
+        id="goal-set",
+        class="icon-button send-button",
+        title="Set the standing goal (Enter)",
+        disabled=editor.draft.trim().is_empty(),
+        on_click=dispatch(SubmitGoal),
+        icon(icon_arrow_up),
+      ),
+    )
+  } else if conv.is_running() {
     // One morphing button while this conversation's turn runs. It becomes a
     // steer submit only when the durable boundary is ready too; a draft must
     // never hide Stop behind a disabled Send during reload/reconciliation.
@@ -1963,20 +1983,43 @@ fn composer_view(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
       )
     Some(_) => ()
   }
+  // The goal row rides the same slot as the compaction notice: what the
+  // composer is editing, or what stands. Pushed unconditionally — see
+  // `goal_banner` for why it collapses instead of leaving.
+  children.push(
+    goal_banner(
+      dispatch,
+      conv.goal,
+      editing=goal_editor,
+      pending=conv.goal_pending,
+    ),
+  )
   let inner : Array[@html.Html] = [
     // First child, always present, so the textarea's index never shifts (which
     // would rebuild the node and drop focus) as chips come and go.
     mention_tray(dispatch, conv),
     @html.textarea(
       id="task",
-      value=conv.task,
-      placeholder=if conv.is_running() {
+      value=if goal_editor is Some(editor) { editor.draft } else { conv.task },
+      placeholder=if goal_mode {
+        "Describe the standing goal for this conversation — Enter sets it, Esc cancels."
+      } else if conv.is_running() {
         "Steer the running task — your message joins it at the next step."
       } else {
         "Ask OpenSeek to inspect, edit, or explain this workspace."
       },
-      on_input=dispatch.map(value => TaskChanged(value)),
-      attrs=task_attrs(dispatch, model.completion is Some(_)),
+      on_input=dispatch.map(value => {
+        if goal_mode {
+          GoalDraftEdited(value)
+        } else {
+          TaskChanged(value)
+        }
+      }),
+      attrs=if goal_mode {
+        goal_attrs(dispatch)
+      } else {
+        task_attrs(dispatch, model.completion is Some(_))
+      },
       "",
     ),
     @html.div(class="composer-toolbar", [

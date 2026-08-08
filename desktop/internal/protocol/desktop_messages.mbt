@@ -60,6 +60,24 @@ pub(all) struct CompactPayload {
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|
+pub(all) struct GoalPayload {
+  // Like compaction, a standing goal addresses a durable conversation rather
+  // than a live run: the serve engine accepts one in any phase (idle append,
+  // mid-turn steer, queued behind a compaction).
+  session : String
+  // The new standing goal; absent clears it.
+  text : String?
+  // Arms the engine's autonomous continuation for this goal. Optional, and
+  // absent means manual, so a client that predates the toggle still decodes.
+  // Meaningless without `text`: a clear disarms whatever was armed.
+  auto : Bool?
+  // A resumed conversation may need a new engine process with these settings.
+  model : String?
+  max_steps : Int?
+  workspace : String?
+} derive(Debug, Eq, FromJson, ToJson)
+
+///|
 pub(all) struct LoadSessionPayload {
   session : String
   // The workspace holding the session, when the client already knows it.

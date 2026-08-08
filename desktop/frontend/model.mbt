@@ -512,6 +512,25 @@ priv struct Conversation {
   // arrives; some delivery failures are provisional and a later exact-id
   // receipt can retract them. Copy-on-write.
   overlay : Array[LocalNotice]
+  // The standing goal mirrored from the durable record's `[goal]` markers:
+  // seeded by each snapshot's reduction and folded forward by marker
+  // commits in `apply_commit`. Nothing local writes it — goal mode only
+  // sends `agent.goal`, and the engine's durable append is what lands here,
+  // so the row never claims a goal that was not persisted.
+  goal : @transcript.GoalStanding?
+  // The goal this conversation is composing, while `/goal` (or the row's
+  // Edit) holds its composer. Per-conversation because goal mode survives a
+  // switch — the composer hides it rather than discarding it — so a single
+  // model-wide slot would let opening goal mode anywhere destroy the draft
+  // waiting somewhere else.
+  goal_edit : GoalEdit?
+  // Goal text sent but not yet durably confirmed. `agent.goal` returns once
+  // the command reaches the engine's stdin, which is not persistence: the
+  // engine's own append can still fail, or the process can die with the
+  // command queued, and then no `[goal]` marker ever commits. Holding the
+  // text until a marker lands keeps the user's writing recoverable across
+  // that window; `apply_commit` clears it, and a rejection hands it back.
+  goal_pending : String?
 } derive(Eq)
 
 ///|
@@ -1117,6 +1136,15 @@ priv struct BrowserGeometry {
 } derive(Eq)
 
 ///|
+/// A conversation's open goal edit. It carries no identity of its own: the
+/// conversation holding it is the conversation being edited, which is what
+/// keeps two open edits from overwriting each other. The draft starts as the
+/// mirrored standing goal (editing in place) or empty.
+priv struct GoalEdit {
+  draft : String
+} derive(Eq)
+
+///|
 /// The in-app folder picker's state: the host directory currently shown,
 /// its parent (None at the filesystem root), its subdirectories, and the
 /// editable path field. `loading` marks a browse in flight; `error` keeps a
@@ -1452,6 +1480,17 @@ priv enum Msg {
   LauncherFailed(String)
   // Launch one detected app (by its id) on the active conversation's workspace.
   LaunchApp(String)
+  // The composer's goal-editing mode over the active conversation: open
+  // (prefilled with the mirrored standing goal), edit its draft, send a
+  // set/clear to the engine, or dismiss. Each acts on the conversation on
+  // screen, which is the one that owns the edit. Set and Clear both leave
+  // goal mode optimistically; the row only shows a new goal once the durable
+  // `[goal]` marker commits.
+  OpenGoalEditor
+  GoalDraftEdited(String)
+  SubmitGoal
+  ClearGoal
+  CloseGoalEditor
   // The right panel's strip messages (panel toggle, tab activate/close),
   // routed to the `dock` package's pure strip machine; this update then
   // drives the content subsystems from the transition (see the `Dock` arm).
@@ -1569,6 +1608,7 @@ priv enum DeviceMsg {
     items~ : Array[@transcript.TranscriptItem],
     watermark~ : Int,
     event_boundaries~ : Array[(Int, Bool, Int)],
+    goal~ : @transcript.GoalStanding?,
     generation~ : Int
   )
   // A foreground stored-session read failed. Generation guards stale replies;
@@ -1582,6 +1622,7 @@ priv enum DeviceMsg {
     items~ : Array[@transcript.TranscriptItem],
     watermark~ : Int,
     event_boundaries~ : Array[(Int, Bool, Int)],
+    goal~ : @transcript.GoalStanding?,
     generation~ : Int
   )
   // A background re-read failed. The generation identifies the exact read,
@@ -1751,6 +1792,12 @@ priv enum DeviceMsg {
   // nothing will report compaction events, so the conversation's queued /
   // in-flight compaction notice must be cleared here, not by the stream.
   CompactRejected(session~ : String, message~ : String)
+  // The `agent.goal` bridge request was rejected (no engine, host error):
+  // no `[goal]` marker will commit, so the failure is reported here. `draft`
+  // is the text that never landed — carried back so the composer can return
+  // it to the user, the way a rejected prompt restores its own draft. `None`
+  // was a clear, which has nothing to restore.
+  GoalRejected(session~ : String, draft~ : String?, message~ : String)
   // `answer` accompanies normal success and context yield (where it is
   // continuation guidance); other terminal statuses carry none.
   Finished(
@@ -1805,6 +1852,9 @@ fn empty_conversation(
     watermark: 0,
     sync: Synced,
     overlay: [],
+    goal: None,
+    goal_edit: None,
+    goal_pending: None,
   }
 }
 
@@ -2586,12 +2636,19 @@ fn Model::activate(
 }
 
 ///|
-/// Whether the composer draft holds nothing at all — no typed text and no
-/// mention chips. This is the retention test (`Model::activate` keeps a
-/// conversation whose draft still holds anything), not the send gate: that is
-/// `draft_sendable`.
+/// Whether the composer draft holds nothing at all — no typed text, no
+/// mention chips, and no goal being written or awaiting its marker. This is
+/// the retention test (`Model::activate` keeps a conversation whose draft
+/// still holds anything), not the send gate: that is `draft_sendable`.
+///
+/// The goal halves count because `/goal` moves the user's text out of `task`:
+/// without them a fresh conversation looks abandoned while holding the only
+/// copy of a goal, and activating a neighbour would prune it away.
 fn Conversation::draft_empty(self : Conversation) -> Bool {
-  self.task.trim().is_empty() && self.mentions.is_empty()
+  self.task.trim().is_empty() &&
+  self.mentions.is_empty() &&
+  !(self.goal_edit is Some(edit) && !edit.draft.trim().is_empty()) &&
+  self.goal_pending is None
 }
 
 ///|
@@ -3683,6 +3740,28 @@ fn Conversation::apply_commit(
   let conv = {
     ..self,
     messages,
+    // A `[goal]` marker commit is the durable confirmation of a goal
+    // set/clear/block — the only writer of the mirror the banner renders.
+    goal: if item is @protocol.RuntimeNotice(notice) &&
+      @transcript.goal_marker(notice.content) is Some(marker) {
+      @transcript.apply_goal_marker(self.goal, marker)
+    } else {
+      self.goal
+    },
+    // Only the set that carries this exact text settles it. A marker proves
+    // the engine is committing, not that *this* command landed: a block on
+    // the goal that still stands, or an earlier set from a second submit,
+    // would otherwise retire the recovery copy while the append it belongs
+    // to can still fail. The submitted text is the identity — two sets of
+    // the same text are interchangeable anyway.
+    goal_pending: if item is @protocol.RuntimeNotice(notice) &&
+      @transcript.goal_marker(notice.content) is Some(GoalSet(text)) &&
+      self.goal_pending is Some(pending) &&
+      text == pending {
+      None
+    } else {
+      self.goal_pending
+    },
     run_durable_floor: if !(self.run is NoRun(..)) &&
       self.run_durable_floor is None &&
       self.run_floor_generation is None &&
@@ -3847,6 +3926,7 @@ fn Conversation::adopt_snapshot(
   items : Array[@transcript.TranscriptItem],
   watermark : Int,
   event_boundaries : Array[(Int, Bool, Int)],
+  goal~ : @transcript.GoalStanding?,
 ) -> (Conversation, Bool) {
   let (generation, pending) = match self.sync {
     Reloading(generation~, buffered~, ..) => (generation, buffered.copy())
@@ -3878,6 +3958,10 @@ fn Conversation::adopt_snapshot(
   let reconciled = {
       ..self,
       last_terminal_sequence,
+      // The snapshot's reduced standing goal replaces the mirror wholesale;
+      // buffered commits newer than the snapshot fold on top below through
+      // `apply_commit`.
+      goal,
       // A foreign/mid-run Started intentionally leaves the floor unknown. It
       // becomes steerable only when the snapshot visibly has current-run data
       // after its last terminal; a snapshot ending at a terminal may instead

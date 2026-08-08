@@ -427,6 +427,7 @@ fn apply_session_snapshot(
   items : Array[@transcript.TranscriptItem],
   watermark : Int,
   event_boundaries : Array[(Int, Bool, Int)],
+  goal : @transcript.GoalStanding?,
   generation : Int,
   activate_on_success : Bool,
 ) -> (@cmd.Cmd, Model) {
@@ -446,7 +447,12 @@ fn apply_session_snapshot(
       "failed to load session \{session}: snapshot watermark moved backwards",
     )
   }
-  let (conv, gapped) = conv.adopt_snapshot(items, watermark, event_boundaries)
+  let (conv, gapped) = conv.adopt_snapshot(
+    items,
+    watermark,
+    event_boundaries,
+    goal~,
+  )
   let mut next = model.replace_conversation(conv)
   let commands : Array[@cmd.Cmd] = []
   let owner : @interop.ConversationKey = { channel, session }
@@ -835,8 +841,61 @@ fn run_slash_command(
         )
       }
     }
+    "goal" => {
+      let conv = model.active()
+      (
+        @cmd.none,
+        {
+          ..model.replace_conversation({
+            ..conv,
+            task: "",
+            goal_edit: Some({
+              draft: if conv.goal is Some(goal) {
+                goal.text
+              } else {
+                ""
+              },
+            }),
+          }),
+          completion: None,
+        },
+      )
+    }
     _ => (@cmd.none, { ..model, completion: None })
   }
+}
+
+///|
+/// Send one conversation's goal set (`Some`) or clear (`None`) to its engine.
+/// Everything the command needs — session, workspace, launch mode — comes
+/// from that conversation, so it cannot land on whichever one happens to be
+/// active by the time the request goes out.
+fn send_goal(
+  dispatch : @cmd.Emit[Msg],
+  model : Model,
+  conv : Conversation,
+  text : String?,
+) -> @cmd.Cmd {
+  if conv.goal_creates_worktree() is Some(workspace) {
+    return set_goal_in_new_worktree(
+      dispatch,
+      conv.device,
+      conv.session_id,
+      workspace,
+      conv.engine_model,
+      model.max_steps,
+      text,
+    )
+  }
+  goal_openseek(
+    dispatch,
+    conv.device,
+    session=conv.session_id,
+    model=conv.engine_model,
+    max_steps=model.max_steps,
+    workspace?=conv.workspace,
+    text,
+  )
 }
 
 ///|
@@ -2655,6 +2714,79 @@ fn update_msg(
         { ..model, launcher: { ..model.launcher, open: false } },
       )
     }
+    OpenGoalEditor => {
+      let conv = model.active()
+      // Opening goal mode touches only this conversation, so an unsaved edit
+      // waiting on another one is untouched — the reason the draft lives here
+      // rather than in a single model-wide slot.
+      (
+        @cmd.none,
+        model.replace_conversation({
+          ..conv,
+          goal_edit: Some({
+            draft: if conv.goal is Some(goal) {
+              goal.text
+            } else {
+              ""
+            },
+          }),
+        }),
+      )
+    }
+    GoalDraftEdited(draft) => {
+      let conv = model.active()
+      if conv.goal_edit is Some(_) {
+        (
+          @cmd.none,
+          model.replace_conversation({ ..conv, goal_edit: Some({ draft, }) }),
+        )
+      } else {
+        (@cmd.none, model)
+      }
+    }
+    SubmitGoal => {
+      let conv = model.active()
+      guard conv.goal_edit is Some(edit) else { return (@cmd.none, model) }
+      let text = edit.draft.trim().to_owned()
+      // A blank draft has nothing to set (the button is disabled; this also
+      // catches Enter); goal mode stays open for the user to finish.
+      guard !text.is_empty() else { return (@cmd.none, model) }
+      // Goal mode closes, but the text stays as `goal_pending` until the
+      // durable marker lands. `agent.goal` returning only means the command
+      // reached the engine's stdin — the append behind it can still fail, and
+      // then nothing would carry the user's writing.
+      (
+        send_goal(dispatch, model, conv, Some(text)),
+        model.replace_conversation({
+          ..conv,
+          goal_edit: None,
+          goal_pending: Some(text),
+        }),
+      )
+    }
+    ClearGoal => {
+      // Always send it, mirrored or not: the row lags the engine by one
+      // durable commit, so a clear racing an in-flight set must not be
+      // dropped on the mirror's say-so. A tombstone on a goalless session is
+      // a harmless no-op the engine still confirms.
+      //
+      // The ✕ belongs to the conversation on screen, and so does the edit it
+      // closes — neither can reach a neighbour's.
+      let conv = model.active()
+      (
+        send_goal(dispatch, model, conv, None),
+        model.replace_conversation({
+          ..conv,
+          goal_edit: None,
+          // A set still awaiting its marker is superseded by this clear.
+          goal_pending: None,
+        }),
+      )
+    }
+    CloseGoalEditor => {
+      let conv = model.active()
+      (@cmd.none, model.replace_conversation({ ..conv, goal_edit: None }))
+    }
     FileEditor(msg) => {
       let (cmd, panel) = @fileeditor.update(
         dispatch.map(msg => FileEditor(msg)),
@@ -3793,21 +3925,29 @@ fn update_device_msg(
         (commands, { ..next, conversations, })
       }
     }
-    SessionLoaded(session~, items~, watermark~, event_boundaries~, generation~) =>
+    SessionLoaded(
+      session~,
+      items~,
+      watermark~,
+      event_boundaries~,
+      goal~,
+      generation~
+    ) =>
       apply_session_snapshot(
-        dispatch, channel, model, session, items, watermark, event_boundaries, generation,
-        true,
+        dispatch, channel, model, session, items, watermark, event_boundaries, goal,
+        generation, true,
       )
     SessionRefreshed(
       session~,
       items~,
       watermark~,
       event_boundaries~,
+      goal~,
       generation~
     ) =>
       apply_session_snapshot(
-        dispatch, channel, model, session, items, watermark, event_boundaries, generation,
-        false,
+        dispatch, channel, model, session, items, watermark, event_boundaries, goal,
+        generation, false,
       )
     SessionLoadFailed(session~, message~, generation~) =>
       retry_session_snapshot(
@@ -4895,6 +5035,35 @@ fn update_device_msg(
       } else {
         (@cmd.none, model)
       }
+    GoalRejected(session~, draft~, message~) =>
+      if model.find_conversation(channel, session) is Some(conv) {
+        let reported = conv.append_local_notice(
+          Assistant(is_danger=true),
+          message,
+        )
+        // Hand the goal text back, the way a rejected prompt restores its
+        // draft: nothing durable will ever carry it, so losing it here loses
+        // it for good. Only when this conversation has not claimed goal mode
+        // since — a newer edit is the user's, not this dead request's.
+        let restored = if draft is Some(draft) && reported.goal_edit is None {
+          {
+            ..reported
+            // The arming decision died with the request; re-arming is the
+            // user's to make again.
+            ,
+            goal_edit: Some({ draft, }),
+            goal_pending: None,
+          }
+        } else {
+          { ..reported, goal_pending: None }
+        }
+        (
+          scroll_if_active(model, channel, conv.session_id),
+          model.replace_conversation(restored),
+        )
+      } else {
+        (@cmd.none, model)
+      }
     Finished(run_id~, status~, answer~, durable_sequence~) =>
       if (if model.conversation_by_run(channel, run_id) is Some(conv) {
           Some(conv)
@@ -5458,6 +5627,7 @@ fn second_run_started_before_first_response() -> (Model, String)? {
   let (_, reconciled) = update_dev(
     dispatch,
     SessionRefreshed(
+      goal=None,
       session="desktop-test",
       items=[],
       watermark=1,
@@ -5469,6 +5639,7 @@ fn second_run_started_before_first_response() -> (Model, String)? {
   let (_, post_finish) = update_dev(
     dispatch,
     SessionRefreshed(
+      goal=None,
       session="desktop-test",
       items=[],
       watermark=1,
@@ -5514,6 +5685,7 @@ fn second_run_started_before_first_steer_receipt() -> Model? {
   let (_, reconciled) = update_dev(
     dispatch,
     SessionRefreshed(
+      goal=None,
       session="desktop-test",
       items=[],
       watermark=1,
@@ -5698,6 +5870,7 @@ test "finished run reloads the named durable session for an old host" {
   let (_, loaded) = update_dev(
     dispatch,
     SessionRefreshed(
+      goal=None,
       session="desktop-test",
       items=[
         { kind: User, content: "question", ts: None },
@@ -5746,6 +5919,7 @@ test "Finished queues one follow-up behind an older in-flight snapshot" {
   let (_, followed) = update_dev(
     dispatch,
     SessionRefreshed(
+      goal=None,
       session="desktop-test",
       items=[],
       watermark=0,
@@ -6491,6 +6665,7 @@ test "BridgeReady fences an awaiting initial after disconnected canonical items"
   let (_, reconciled) = update_dev(
     dispatch,
     SessionRefreshed(
+      goal=None,
       session="desktop-test",
       items=[
         { kind: User, content: "before disconnect", ts: None },
@@ -6538,6 +6713,7 @@ test "BridgeReady fences an awaiting steer after disconnected canonical items" {
   let (_, reconciled) = update_dev(
     dispatch,
     SessionRefreshed(
+      goal=None,
       session="desktop-test",
       items=[
         { kind: User, content: "before disconnect", ts: None },
@@ -6625,6 +6801,7 @@ test "SessionsLoaded retries an unconfirmed start after an empty recovery" {
   let (_, empty) = update_dev(
     dispatch,
     SessionRefreshed(
+      goal=None,
       session="desktop-test",
       items=[],
       watermark=0,
@@ -6680,6 +6857,7 @@ test "open session tracks the latest load and ignores stale replies" {
   let (_, after_a) = update_dev(
     dispatch,
     SessionLoaded(
+      goal=None,
       session="desktop-a",
       items=a_items,
       watermark=0,
@@ -6699,6 +6877,7 @@ test "open session tracks the latest load and ignores stale replies" {
   let (_, after_b) = update_dev(
     dispatch,
     SessionLoaded(
+      goal=None,
       session="desktop-b",
       items=b_items,
       watermark=0,
@@ -6752,6 +6931,7 @@ test "same-id session loads are fenced by channel owner" {
     FromDevice(
       remote,
       SessionLoaded(
+        goal=None,
         session="shared",
         items=[
           {
@@ -6818,6 +6998,7 @@ test "reselecting a synced active session reloads idle external writes" {
   let (_, loaded) = update_dev(
     dispatch,
     SessionLoaded(
+      goal=None,
       session="desktop-test",
       items=[
         {
@@ -6891,6 +7072,7 @@ test "pruning and reopening cannot reuse a transcript request token" {
   let (_, stale) = update_dev(
     dispatch,
     SessionLoaded(
+      goal=None,
       session="desktop-pruned",
       items=[{ kind: User, content: "late old snapshot", ts: None }],
       watermark=9,
@@ -6913,6 +7095,7 @@ test "pruning and reopening cannot reuse a transcript request token" {
   let (_, fresh) = update_dev(
     dispatch,
     SessionLoaded(
+      goal=None,
       session="desktop-pruned",
       items=[{ kind: User, content: "fresh snapshot", ts: None }],
       watermark=1,
@@ -6959,6 +7142,7 @@ test "archive removal and reopening cannot reuse a transcript request token" {
   let (_, stale) = update_dev(
     dispatch,
     SessionLoaded(
+      goal=None,
       session="desktop-archived",
       items=[{ kind: User, content: "late archived snapshot", ts: None }],
       watermark=4,
@@ -7189,6 +7373,7 @@ test "session loaded swaps the active conversation onto the stored session" {
   let (_, once) = update_dev(
     dispatch,
     SessionLoaded(
+      goal=None,
       session="desktop-stored",
       items~,
       watermark=0,
@@ -7200,6 +7385,7 @@ test "session loaded swaps the active conversation onto the stored session" {
   let (_, twice) = update_dev(
     dispatch,
     SessionLoaded(
+      goal=None,
       session="desktop-stored",
       items~,
       watermark=0,
@@ -7235,6 +7421,7 @@ test "session loaded adopts the store transcript and keeps live run state" {
   let (_, other) = update_dev(
     dispatch,
     SessionLoaded(
+      goal=None,
       session="desktop-stored",
       items~,
       watermark=0,
@@ -7266,6 +7453,7 @@ test "session loaded adopts the store transcript and keeps live run state" {
   let (_, same) = update_dev(
     dispatch,
     SessionLoaded(
+      goal=None,
       session="desktop-test",
       items~,
       watermark=0,
@@ -7684,6 +7872,7 @@ test "an accepted start response opens the run without Started" {
   let (_, loaded) = update_dev(
     dispatch,
     SessionRefreshed(
+      goal=None,
       session="desktop-test",
       items=[
         { kind: User, content: "external prompt", ts: None },
@@ -7746,6 +7935,7 @@ test "accepted start remains recoverable when the engine fails before User appen
   let (_, external_snapshot) = update_dev(
     dispatch,
     SessionRefreshed(
+      goal=None,
       session="desktop-test",
       items=[{ kind: User, content: "external writer only", ts: None }],
       watermark=1,
@@ -8547,6 +8737,7 @@ test "a failed start response keeps its prompt through an empty snapshot" {
   let (_, empty) = update_dev(
     dispatch,
     SessionRefreshed(
+      goal=None,
       session="desktop-test",
       items=[],
       watermark=0,
@@ -8632,6 +8823,7 @@ test "a failed response after durable Finished cannot resurrect its prompt" {
   let (_, empty) = update_dev(
     dispatch,
     SessionRefreshed(
+      goal=None,
       session="desktop-test",
       items=[],
       watermark=0,
@@ -8961,6 +9153,7 @@ test "a live commit dates its row on arrival, buffered or applied straight" {
       watermark=0,
       event_boundaries=[],
       generation=1,
+      goal=None,
     ),
     buffered,
   )
@@ -9004,6 +9197,7 @@ test "a snapshot never settles a local steer by text" {
   let (_, loaded) = update_dev(
     dispatch,
     SessionRefreshed(
+      goal=None,
       session="desktop-test",
       items=[{ kind: User, content: "same", ts: None }],
       watermark=1,
@@ -9236,6 +9430,7 @@ test "run-end unconfirmed notice follows assistant and terminal before freezing"
   let (_, answered) = update_dev(
     dispatch,
     SessionRefreshed(
+      goal=None,
       session="desktop-test",
       items=[
         { kind: User, content: "question", ts: None },
@@ -9287,6 +9482,7 @@ test "a snapshot freezes a prior run-tail notice before its next turn" {
   let (_, loaded) = update_dev(
     dispatch,
     SessionRefreshed(
+      goal=None,
       session="desktop-test",
       items=[
         { kind: User, content: "question", ts: None },
@@ -9364,6 +9560,7 @@ test "a snapshot does not mistake a same-run steer User for the terminal boundar
   let (_, loaded) = update_dev(
     dispatch,
     SessionRefreshed(
+      goal=None,
       session="desktop-test",
       items=[
         { kind: User, content: "question", ts: None },
@@ -9419,6 +9616,7 @@ test "an unknown terminal before Finished still owns the run-tail notice" {
   let (_, loaded) = update_dev(
     dispatch,
     SessionRefreshed(
+      goal=None,
       session="desktop-test",
       items=[
         { kind: User, content: "question", ts: None },
@@ -9520,6 +9718,7 @@ test "a successor resolves an old terminal tail only from its causal snapshot" {
   let (_, old_cut) = update_dev(
     dispatch,
     SessionRefreshed(
+      goal=None,
       session="desktop-test",
       items=[
         { kind: User, content: "first question", ts: None },
@@ -9536,6 +9735,7 @@ test "a successor resolves an old terminal tail only from its causal snapshot" {
   let (_, causal) = update_dev(
     dispatch,
     SessionRefreshed(
+      goal=None,
       session="desktop-test",
       items=[
         { kind: User, content: "first question", ts: None },
@@ -9613,6 +9813,7 @@ test "a successor terminal cannot claim a setup-failed run's snapshot cut" {
   let (_, old_cut) = update_dev(
     dispatch,
     SessionRefreshed(
+      goal=None,
       session="desktop-test",
       items=[],
       watermark=1,
@@ -9628,6 +9829,7 @@ test "a successor terminal cannot claim a setup-failed run's snapshot cut" {
   let (_, causal) = update_dev(
     dispatch,
     SessionRefreshed(
+      goal=None,
       session="desktop-test",
       items=[
         { kind: User, content: "next question", ts: None },
@@ -9670,6 +9872,7 @@ test "an offline successor snapshot fences without claiming its terminal" {
   let (_, loaded) = update_dev(
     dispatch,
     SessionRefreshed(
+      goal=None,
       session="desktop-test",
       items=[
         { kind: User, content: "offline successor", ts: None },
@@ -9736,6 +9939,7 @@ test "a foreign run gains a floor only after snapshot data follows the prior ter
   let (_, loaded) = update_dev(
     dispatch,
     SessionRefreshed(
+      goal=None,
       session="desktop-test",
       items=[
         { kind: Assistant(is_danger=false), content: "previous", ts: None },
@@ -9832,6 +10036,7 @@ test "a foreign background run waits for a snapshot cut after Started" {
       items=[],
       watermark=1,
       event_boundaries=[(1, true, 0)],
+      goal=None,
       generation=1,
     ),
     buffered_user,
@@ -9863,6 +10068,7 @@ test "a foreign background run waits for a snapshot cut after Started" {
         (3, true, 1),
         (4, false, 2),
       ],
+      goal=None,
       generation=2,
     ),
     after_old_cut,
@@ -9925,6 +10131,7 @@ test "buffered future terminal cannot become its own run floor" {
   let (_, loaded) = update_dev(
     dispatch,
     SessionRefreshed(
+      goal=None,
       session="desktop-test",
       items=[],
       watermark=1,
@@ -9994,6 +10201,7 @@ test "a late durable EOF finalizes an unconfirmed steer without a terminal" {
   let (_, loaded) = update_dev(
     dispatch,
     SessionRefreshed(
+      goal=None,
       session="desktop-test",
       items=[
         {
@@ -10287,6 +10495,7 @@ test "runs settlement releases after a causal cut and keeps exact receipt" {
   let (_, snapshot_first) = update_dev(
     dispatch,
     SessionRefreshed(
+      goal=None,
       session="desktop-test",
       items=[],
       watermark=3,
@@ -10306,6 +10515,7 @@ test "runs settlement releases after a causal cut and keeps exact receipt" {
   let (_, reconciled) = update_dev(
     dispatch,
     SessionRefreshed(
+      goal=None,
       session="desktop-test",
       items=[],
       watermark=3,
@@ -10376,6 +10586,7 @@ test "a late normal Finished upgrades a runs-settled uncertain steer" {
   let (_, old_cut) = update_dev(
     dispatch,
     SessionRefreshed(
+      goal=None,
       session="desktop-test",
       items=[],
       watermark=1,
@@ -10389,6 +10600,7 @@ test "a late normal Finished upgrades a runs-settled uncertain steer" {
   let (_, causal) = update_dev(
     dispatch,
     SessionRefreshed(
+      goal=None,
       session="desktop-test",
       items=[{ kind: Assistant(is_danger=false), content: "answer", ts: None }],
       watermark=2,
@@ -10461,6 +10673,7 @@ test "runs settlement follows an older in-flight transcript cut" {
   let (_, first_cut) = update_dev(
     dispatch,
     SessionRefreshed(
+      goal=None,
       session="desktop-test",
       items=[],
       watermark=1,
@@ -10505,6 +10718,7 @@ test "duplicate abnormal Finished keeps an initial prompt on one causal cut" {
   let (_, reconciled) = update_dev(
     dispatch,
     SessionRefreshed(
+      goal=None,
       session="desktop-test",
       items=[],
       watermark=0,
@@ -10547,6 +10761,7 @@ test "runs settlement causally freezes bound initial prompts from open and idle 
   let (_, open_frozen) = update_dev(
     dispatch,
     SessionRefreshed(
+      goal=None,
       session="desktop-test",
       items=[{ kind: User, content: "open-run durable tail", ts: None }],
       watermark=1,
@@ -10586,6 +10801,7 @@ test "runs settlement causally freezes bound initial prompts from open and idle 
   let (_, idle_frozen) = update_dev(
     dispatch,
     SessionRefreshed(
+      goal=None,
       session="desktop-test",
       items=[
         {
@@ -10635,6 +10851,7 @@ test "an initial warning freezes between a snapshot and its buffered successor" 
   let (_, reconciled) = update_dev(
     dispatch,
     SessionRefreshed(
+      goal=None,
       session="desktop-test",
       items=[{ kind: User, content: "snapshot W", ts: None }],
       watermark=1,
@@ -10698,6 +10915,7 @@ test "foreign Started reanchors a reconnected initial before retiring its owners
   let (_, old_cut) = update_dev(
     dispatch,
     SessionRefreshed(
+      goal=None,
       session="desktop-test",
       items=[{ kind: User, content: "old durable prompt", ts: None }],
       watermark=1,
@@ -10713,6 +10931,7 @@ test "foreign Started reanchors a reconnected initial before retiring its owners
   let (_, causal) = update_dev(
     dispatch,
     SessionRefreshed(
+      goal=None,
       session="desktop-test",
       items=[{ kind: User, content: "old durable prompt", ts: None }],
       watermark=1,
@@ -12694,6 +12913,7 @@ test "explicit user actions re-pin the transcript" {
   let (_, loaded) = update_dev(
     dispatch,
     SessionLoaded(
+      goal=None,
       session="desktop-old",
       items=[],
       watermark=0,
@@ -13973,6 +14193,7 @@ test "a snapshot drains buffered commits in sequence order" {
   let (_, next) = update_dev(
     dispatch,
     SessionRefreshed(
+      goal=None,
       session="desktop-test",
       items=[
         { kind: User, content: "one", ts: None },
@@ -14003,6 +14224,7 @@ test "a snapshot already containing the buffered commits drops them" {
   let (_, next) = update_dev(
     dispatch,
     SessionRefreshed(
+      goal=None,
       session="desktop-test",
       items=[
         { kind: User, content: "one", ts: None },
@@ -14031,6 +14253,7 @@ test "a snapshot with a still-gapped buffer keeps reloading" {
   let (_, next) = update_dev(
     dispatch,
     SessionRefreshed(
+      goal=None,
       session="desktop-test",
       items=[{ kind: User, content: "one", ts: None }],
       watermark=2,
@@ -14095,6 +14318,7 @@ test "background retries preserve buffered commits until a later success" {
   let (_, healed) = update_dev(
     dispatch,
     SessionRefreshed(
+      goal=None,
       session="desktop-test",
       items=[{ kind: User, content: "kept", ts: None }],
       watermark=1,
@@ -14154,6 +14378,7 @@ test "reopening an active failed reload retries and preserves other local notice
   let (_, loaded) = update_dev(
     dispatch,
     SessionLoaded(
+      goal=None,
       session="desktop-test",
       items=[{ kind: User, content: "kept", ts: None }],
       watermark=1,
@@ -14189,6 +14414,7 @@ test "stale and lower-watermark snapshots cannot overwrite current state" {
   let (_, stale) = update_dev(
     dispatch,
     SessionRefreshed(
+      goal=None,
       session="desktop-test",
       items=[{ kind: User, content: "stale generation", ts: None }],
       watermark=9,
@@ -14205,6 +14431,7 @@ test "stale and lower-watermark snapshots cannot overwrite current state" {
   let (_, lower) = update_dev(
     dispatch,
     SessionRefreshed(
+      goal=None,
       session="desktop-test",
       items=[{ kind: User, content: "older snapshot", ts: None }],
       watermark=4,

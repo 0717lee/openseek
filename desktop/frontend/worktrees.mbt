@@ -169,6 +169,100 @@ fn start_in_new_worktree(
 }
 
 ///|
+/// The workspace a goal command must create a worktree in before it may be
+/// sent, or `None` when it can go straight out.
+///
+/// A goal is the first thing that pins an unstarted conversation's placement:
+/// the host spawns its engine to receive the command, and the goal's own
+/// durable card then makes `wants_fresh_worktree` false. Sent straight
+/// through, that leaves the engine in the workspace root and silently retires
+/// the launch mode before the first prompt ever runs — so the mode has to act
+/// here exactly as it does on that first prompt.
+fn Conversation::goal_creates_worktree(self : Conversation) -> @common.Uri? {
+  guard self.wants_fresh_worktree() else { return None }
+  self.workspace
+}
+
+///|
+/// Set (or clear) the standing goal of a conversation whose worktree launch
+/// mode has not bound an environment yet: create and bind it first, exactly
+/// as the first prompt would, then send the goal into it.
+///
+/// Sending the goal straight through would spawn this session's engine in the
+/// workspace root, and the durable goal card it commits would then make
+/// `wants_fresh_worktree` false — so the user's first real prompt would
+/// silently run in the main checkout with the launch mode they chose quietly
+/// discarded. A goal is not a turn, but it is the first thing that pins the
+/// session's placement, so it has to establish the environment too.
+fn set_goal_in_new_worktree(
+  dispatch : @cmd.Emit[Msg],
+  channel : @interop.ChannelId,
+  session : String,
+  workspace : @common.Uri,
+  engine_model : EngineModel,
+  max_steps : String,
+  text : String?,
+) -> @cmd.Cmd {
+  guard @resource.belongs_to(workspace, channel) else { return @cmd.none }
+  let device_dispatch = dispatch.map((msg : DeviceMsg) => {
+    FromDevice(channel, msg)
+  })
+  @cmd.custom_cmd(scheduler => {
+    @js.async_run(() => {
+      // The session is the create's idempotency key, exactly as on the start
+      // path: a retry after a lost reply gets the same worktree back.
+      let reply : @protocol.WorktreeCreateReply = @interop.bridge_request(
+        channel,
+        @commands.worktree_create,
+        { workspace: workspace.path, session },
+      ) catch {
+        error => {
+          // Nothing was sent, so the draft has to come back with the notice.
+          scheduler.add(
+            device_dispatch(
+              GoalRejected(
+                session~,
+                draft=text,
+                message="worktree setup failed: " +
+                  @interop.bridge_error_text(error),
+              ),
+            ),
+          )
+          return
+        }
+      }
+      guard !reply.name.is_empty() else {
+        scheduler.add(
+          device_dispatch(
+            GoalRejected(
+              session~,
+              draft=text,
+              message="malformed worktree.create reply",
+            ),
+          ),
+        )
+        return
+      }
+      // Bind before the goal settles, so the chip and a retried submit both
+      // know the environment. The canonical registry list still arrives as
+      // `worktree.changed`; the goal carries no worktree, because the host
+      // routes a bound session's cwd through its registry.
+      scheduler.add(
+        device_dispatch(WorktreeCreated(workspace~, name=reply.name, session~)),
+      )
+      let payload = goal_payload(
+        session,
+        engine_model,
+        max_steps,
+        Some(workspace),
+        text,
+      )
+      request_agent_goal(scheduler, dispatch, channel, payload, session, text)
+    })
+  })
+}
+
+///|
 /// Rebuild a checkout that was deleted outside the app. The host repairs the
 /// existing registry entry on its surviving branch, so this restores the
 /// conversation's real environment; the canonical rows arrive as

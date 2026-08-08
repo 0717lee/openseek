@@ -72,6 +72,13 @@ pub(all) struct CompactReply {
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|
+pub(all) struct GoalReply {
+  // Whether the goal command reached a live engine for this conversation;
+  // the durable `[goal]` marker commit is the real confirmation.
+  delivered : Bool
+} derive(Debug, Eq, FromJson, ToJson)
+
+///|
 /// One reconnect-safe completion returned by `agent.runs`.
 pub(all) struct RunSettlementPayload {
   run_id : String

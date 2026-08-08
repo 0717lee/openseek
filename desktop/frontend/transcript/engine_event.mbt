@@ -96,10 +96,13 @@ pub fn decode_engine_event(
     SubrunFinished(status~, steps~, ..) =>
       Some(RuntimeUpdate("subrun finished: \{status} (\{steps} step(s))"))
     // Not shown, and now each one a recorded decision rather than a line the
-    // view drops unnoticed. `plan_reminder`, the goal reminders/checks and the
-    // block/unblock markers are model-directed text, not news for the user (the
-    // TUI drops them too); `goal_updated` and the auto-continue budget are
-    // headless-run concerns the desktop does not drive; `session_error`,
+    // view drops unnoticed. `plan_reminder` and the goal reminders/checks are
+    // model-directed text, not news for the user (the TUI drops them too);
+    // `goal_updated` and the block/unblock events duplicate the durable
+    // `[goal]` marker commits this client already renders and reduces off the
+    // `session.event` stream (see `goal.mbt`), so the stream copies stay
+    // wire-transport; the auto-continue budget is a headless-run concern the
+    // desktop does not drive yet; `session_error`,
     // `turn_failed` and `command_error` reach the view as the host's normalized
     // error, not as stream events; `auto_compaction_started/failed` are internal
     // to an open turn, unlike the finish this view previews;

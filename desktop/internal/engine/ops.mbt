@@ -351,6 +351,96 @@ pub async fn compact_run(
 }
 
 ///|
+/// Set or clear a conversation's standing goal: durable session state on the
+/// serve engine, addressed by session id like compaction. A conversation with
+/// no live engine (resumed after a restart, or whose process died between
+/// turns) gets one spawned on the durable session first. Unlike compaction
+/// the command is welcome in every phase — the serve engine appends it while
+/// idle, steers it into an open turn at a batch-safe boundary, and holds its
+/// wire-order position behind a queued compaction — so this op never gates on
+/// phase. The engine confirms through the durable `[goal]` marker commit;
+/// this op only confirms the command reached a live engine.
+pub async fn goal_run(
+  manager : EngineManager,
+  payload : @protocol.GoalPayload,
+) -> GoalReply {
+  let goal = if payload.text is Some(text) {
+    let text = text.trim().to_owned()
+    guard !text.is_empty() else {
+      raise EngineError("goal text must not be empty")
+    }
+    Some(text)
+  } else {
+    None
+  }
+  manager.workspace_lifecycle_lock.acquire()
+  let mut placement_locked = true
+  defer (if placement_locked { manager.workspace_lifecycle_lock.release() })
+  let session = payload.session.trim().to_owned()
+  let record_guard = manager.begin_record_op(session)
+  defer manager.end_record_op(session, record_guard)
+  ensure_session_not_archived(session)
+  let sessions = manager.serving()
+  let slot = slot_for(sessions, session)
+  // Claim before looking at the engine, exactly as compact_run does: a start
+  // accepted between this op's validation and its locked write could replace
+  // the live process and lose the command in the dying engine's stdin.
+  let claim = slot.claim(sessions, session, GoalPending)
+  defer claim.release(manager)
+  placement_locked = false
+  manager.workspace_lifecycle_lock.release()
+  let live = if slot.engine is Some(live) && live.accepts_commands {
+    live
+  } else {
+    let config = goal_config(manager, payload)
+    ensure_run_cwd(config)
+    request_spawn(manager, claim, config)
+    claim.require_current(manager)
+    guard slot.engine is Some(live) else {
+      raise EngineError("engine failed to start")
+    }
+    live
+  }
+  let command = if goal is Some(text) {
+    @protocol.goal_set(text, auto=payload.auto is Some(true))
+  } else {
+    @protocol.goal_clear()
+  }
+  let mut command_started = false
+  live.with_command_lock(() => {
+    claim.require_current(manager)
+    guard live.accepts_commands &&
+      slot.engine is Some(current) &&
+      physical_equal(current, live) else {
+      raise EngineError("engine changed before the goal was submitted")
+    }
+    command_started = true
+    live.writer.write(command.to_jsonl())
+  }) catch {
+    error if @async.is_being_cancelled() => {
+      if command_started {
+        live.accepts_commands = false
+        retire_failed_command(
+          manager, live, "request cancelled while writing the goal command",
+        )
+      }
+      raise error
+    }
+    error if !command_started => raise error
+    error => {
+      live.accepts_commands = false
+      retire_failed_command(
+        manager,
+        live,
+        "failed to write the goal command: \{error}",
+      )
+      raise EngineError("failed to update the goal: \{error}")
+    }
+  }
+  { delivered: true }
+}
+
+///|
 /// Inject steering input into an open turn, addressed by run id: the text
 /// rides that serve engine's lossless steering queue and is folded into the
 /// conversation at the turn's next step boundary, where the engine echoes it

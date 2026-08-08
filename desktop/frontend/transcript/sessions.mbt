@@ -166,6 +166,9 @@ pub struct SessionLoadView {
   // the event)`. An event may add no bubble, so an exact lifecycle/EOF
   // boundary cannot be reconstructed from `items` alone.
   event_boundaries : Array[(Int, Bool, Int)]
+  // The standing goal the snapshot's `[goal]` markers reduce to — the seed
+  // the client's live marker commits then fold on top of.
+  goal : GoalStanding?
 }
 
 ///|
@@ -179,6 +182,7 @@ pub fn session_from_reply(
   let items : Array[TranscriptItem] = []
   let event_boundaries : Array[(Int, Bool, Int)] = []
   let mut derived_watermark = 0
+  let mut goal : GoalStanding? = None
   for event in reply.session.events.unwrap_or([]) {
     // Old desktop hosts return the store JSON verbatim without a top-level
     // watermark, but every stored event already carries its sequence. Derive
@@ -188,6 +192,13 @@ pub fn session_from_reply(
       derived_watermark = event.sequence
     }
     ignore(apply_session_item(items, event.item, ts?=event.ts))
+    // The standing goal replays from the same durable markers the cards
+    // above come from, so a resumed conversation shows exactly the goal the
+    // engine holds — see `goal.mbt`.
+    if event.item is @desktop_protocol.RuntimeNotice(notice) &&
+      goal_marker(notice.content) is Some(marker) {
+      goal = apply_goal_marker(goal, marker)
+    }
     event_boundaries.push(
       (event.sequence, event.item.is_terminal(), items.length()),
     )
@@ -196,6 +207,7 @@ pub fn session_from_reply(
     items,
     watermark: reply.watermark.unwrap_or(derived_watermark),
     event_boundaries,
+    goal,
   }
 }
 
@@ -325,26 +337,86 @@ pub fn apply_session_item(
       }
     }
     @desktop_protocol.RuntimeNotice(payload) =>
-      // Goal-family notices are transport (set/clear/block markers, the
-      // baseline pairing record) or model-directed text — never display
-      // cards. Local prefix check: this js-only package cannot depend on
-      // agent_session's parsers.
-      if !payload.content.trim().is_empty() &&
-        !payload.content.has_prefix("[goal") {
-        let update = parse_runtime_update(payload.content)
-        if !update.status.is_empty() || update.diagnostics.length() > 0 {
-          items.push({
-            kind: Tool(
-              call_id="",
-              name=runtime_update_title(update),
-              arguments=None,
-              has_result=true,
-              is_error=false,
-              brief=None,
-            ),
-            content: update.diagnostics.join("\n"),
-            ts,
-          })
+      if !payload.content.trim().is_empty() {
+        match goal_marker(payload.content) {
+          // The set/clear/block/unblock markers are the durable goal
+          // confirmations this view shows (the TUI renders the same news off
+          // `goal_updated` instead). Single-line cards fold to a plain
+          // label; a multi-line goal expands to its full text.
+          Some(GoalSet(text)) =>
+            items.push({
+              kind: Tool(
+                call_id="",
+                name="goal",
+                arguments=None,
+                has_result=true,
+                is_error=false,
+                brief=Some(goal_brief("Goal set", text)),
+              ),
+              content: goal_body(text),
+              ts,
+            })
+          Some(GoalCleared) =>
+            items.push({
+              kind: Tool(
+                call_id="",
+                name="goal",
+                arguments=None,
+                has_result=true,
+                is_error=false,
+                brief=Some("Goal cleared"),
+              ),
+              content: "",
+              ts,
+            })
+          Some(GoalBlocked(reason)) =>
+            items.push({
+              kind: Tool(
+                call_id="",
+                name="goal",
+                arguments=None,
+                has_result=true,
+                is_error=true,
+                brief=Some(goal_brief("Goal blocked", reason)),
+              ),
+              content: goal_body(reason),
+              ts,
+            })
+          Some(GoalUnblocked) =>
+            items.push({
+              kind: Tool(
+                call_id="",
+                name="goal",
+                arguments=None,
+                has_result=true,
+                is_error=false,
+                brief=Some("Goal resumed"),
+              ),
+              content: "",
+              ts,
+            })
+          // The remaining goal-family notices are transport (the baseline
+          // pairing record) or model-directed text (reminders, checks) —
+          // never display cards. Local prefix check: this js-only package
+          // cannot depend on agent_session's parsers.
+          None =>
+            if !payload.content.has_prefix("[goal") {
+              let update = parse_runtime_update(payload.content)
+              if !update.status.is_empty() || update.diagnostics.length() > 0 {
+                items.push({
+                  kind: Tool(
+                    call_id="",
+                    name=runtime_update_title(update),
+                    arguments=None,
+                    has_result=true,
+                    is_error=false,
+                    brief=None,
+                  ),
+                  content: update.diagnostics.join("\n"),
+                  ts,
+                })
+              }
+            }
         }
       }
     @desktop_protocol.Summary(payload) => {
@@ -422,6 +494,28 @@ fn SessionTerminalProjection::append_to(
 ///|
 fn ends_with_assistant(items : Array[TranscriptItem], content : String) -> Bool {
   items is [.., item] && item.kind is Assistant(_) && item.content == content
+}
+
+///|
+/// The one-line summary a goal card folds to: the marker's first line,
+/// marked when more follow.
+fn goal_brief(label : String, text : String) -> String {
+  if text.split_once("\n") is Some((first, _)) {
+    "\{label}: \{first.to_owned()} …"
+  } else {
+    "\{label}: \{text}"
+  }
+}
+
+///|
+/// A single-line goal is fully carried by its brief — an empty body keeps
+/// the card a plain label instead of an expandable fold around a duplicate.
+fn goal_body(text : String) -> String {
+  if text.contains("\n") {
+    text
+  } else {
+    ""
+  }
 }
 
 // Tests for decoding the host's session replies: the sidebar list and the
@@ -807,6 +901,59 @@ test "transcript mapping keeps summaries and meaningful runtime notices" {
     fail("expected runtime notice card")
   }
   inspect(items[1].content, content="main.mbt:1 error")
+}
+
+///|
+test "transcript mapping renders goal markers as cards and reduces the standing goal" {
+  let events =
+    #|{"sequence":1,"item":{"kind":"runtime_notice","payload":{"content":"[goal baseline] sha=abc dirty=false"}}},
+    #|{"sequence":2,"item":{"kind":"runtime_notice","payload":{"content":"[goal]\nship the feature"}}},
+    #|{"sequence":3,"item":{"kind":"runtime_notice","payload":{"content":"[goal reminder]\nThe standing goal for this session:"}}},
+    #|{"sequence":4,"item":{"kind":"runtime_notice","payload":{"content":"[goal blocked]\nneeds a decision"}}}
+  let view = session_from_reply(session_reply(events))
+  inspect(view.items.length(), content="2")
+  guard view.items[0].kind
+    is Tool(name="goal", is_error=false, brief=Some(set_brief), ..) else {
+    fail("expected the set card")
+  }
+  inspect(set_brief, content="Goal set: ship the feature")
+  // A single-line goal is fully carried by its brief; no expandable body.
+  inspect(view.items[0].content, content="")
+  guard view.items[1].kind
+    is Tool(name="goal", is_error=true, brief=Some(blocked_brief), ..) else {
+    fail("expected the blocked card")
+  }
+  inspect(blocked_brief, content="Goal blocked: needs a decision")
+  assert_true(
+    view.goal
+    is Some({ text: "ship the feature", blocked: Some("needs a decision") }),
+  )
+}
+
+///|
+test "a cleared goal leaves cards but no standing goal" {
+  let events =
+    #|{"sequence":1,"item":{"kind":"runtime_notice","payload":{"content":"[goal]\nline one\nline two"}}},
+    #|{"sequence":2,"item":{"kind":"runtime_notice","payload":{"content":"[goal cleared]"}}}
+  let view = session_from_reply(session_reply(events))
+  inspect(view.items.length(), content="2")
+  guard view.items[0].kind is Tool(name="goal", brief=Some(set_brief), ..) else {
+    fail("expected the set card")
+  }
+  // A multi-line goal folds to its first line and expands to the full text.
+  inspect(set_brief, content="Goal set: line one …")
+  inspect(
+    view.items[0].content,
+    content=(
+      #|line one
+      #|line two
+    ),
+  )
+  guard view.items[1].kind is Tool(name="goal", brief=Some(cleared), ..) else {
+    fail("expected the cleared card")
+  }
+  inspect(cleared, content="Goal cleared")
+  assert_true(view.goal is None)
 }
 
 ///|

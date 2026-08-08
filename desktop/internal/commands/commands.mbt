@@ -57,6 +57,11 @@ pub let agent_compact : Command[
 ] = Command("agent.compact")
 
 ///|
+pub let agent_goal : Command[@protocol.GoalPayload, @protocol.GoalReply] = Command(
+  "agent.goal",
+)
+
+///|
 pub let agent_runs : Command[@protocol.RunsPayload, @protocol.RunsReply] = Command(
   "agent.runs",
 )
