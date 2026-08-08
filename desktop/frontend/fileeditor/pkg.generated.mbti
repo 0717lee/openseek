@@ -155,7 +155,7 @@ pub(all) enum Msg {
   GitOriginalFailed(owner~ : @interop.ConversationKey, path~ : @pathx.Relative, generation~ : Int, message~ : String)
   OpenNavigationLocation(owner~ : @interop.ConversationKey, path~ : @pathx.Relative, range~ : @common.Range)
   FileLoaded(owner~ : @interop.ConversationKey, path~ : @pathx.Relative, name~ : String, file~ : FileContent, review_generation~ : Int?, range~ : @common.Range?, annotation~ : String?)
-  FileFailed(owner~ : @interop.ConversationKey, message~ : String)
+  FileFailed(owner~ : @interop.ConversationKey, path~ : @pathx.Relative, review_generation~ : Int?, message~ : String)
   FileWatchFailed(owner~ : @interop.ConversationKey, message~ : String)
   FsChanged(session~ : String?, changes~ : Array[FileChange]?)
   RunSettled(owner~ : @interop.ConversationKey)
@@ -204,6 +204,7 @@ pub(all) enum TabState {
   TabLoaded(content~ : String, absolute~ : @common.Uri, sig~ : String)
   TabBinary
   TabOversized
+  TabReadFailed(String)
   TabDeleted
 } derive(Eq)
 

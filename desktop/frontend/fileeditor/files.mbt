@@ -134,7 +134,12 @@ pub fn read_file(
         error => {
           scheduler.add(
             dispatch(
-              FileFailed(owner~, message=@interop.bridge_error_text(error)),
+              FileFailed(
+                owner~,
+                path~,
+                review_generation~,
+                message=@interop.bridge_error_text(error),
+              ),
             ),
           )
           return
@@ -157,7 +162,14 @@ pub fn read_file(
           )
         None =>
           scheduler.add(
-            dispatch(FileFailed(owner~, message="could not read file")),
+            dispatch(
+              FileFailed(
+                owner~,
+                path~,
+                review_generation~,
+                message="could not read file",
+              ),
+            ),
           )
       }
     })

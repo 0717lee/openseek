@@ -45,6 +45,10 @@ pub(all) enum TabState {
   TabLoaded(content~ : String, absolute~ : @common.Uri, sig~ : String)
   TabBinary
   TabOversized
+  // The host could not read this file. Unlike `TabDeleted`, this keeps the
+  // failure reason without guessing whether the cause was removal,
+  // permissions, or a transient filesystem error.
+  TabReadFailed(String)
   // The file vanished from disk while open. The tab stays — its name is the
   // user's bookmark — showing a notice until the file reappears or the tab
   // is closed.
@@ -441,7 +445,15 @@ pub(all) enum Msg {
     range~ : @common.Range?,
     annotation~ : String?
   )
-  FileFailed(owner~ : @interop.ConversationKey, message~ : String)
+  // A read failure carries the same path/generation identity as success so a
+  // stale review read cannot surface an error over a newer review or ordinary
+  // open. Ordinary reads leave `review_generation=None`.
+  FileFailed(
+    owner~ : @interop.ConversationKey,
+    path~ : @pathx.Relative,
+    review_generation~ : Int?,
+    message~ : String
+  )
   // An `fs.watch` request rejection or an asynchronous watcher failure. The
   // owner fences both paths against a conversation switch.
   FileWatchFailed(owner~ : @interop.ConversationKey, message~ : String)

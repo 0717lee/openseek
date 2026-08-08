@@ -1133,6 +1133,29 @@ html.is-resizing * {
   color: var(--warning, #a36800);
 }
 
+.change-action {
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--line));
+  border-radius: 999px;
+  color: var(--accent-ink);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  font-size: 10px;
+  line-height: 16px;
+}
+
+.change-row:hover .change-action,
+.change-row:focus-visible .change-action {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+}
+
+.change-action.unavailable {
+  border-color: var(--line);
+  color: var(--ink-3);
+  background: transparent;
+}
+
 .tree-chevron {
   flex: 0 0 auto;
   width: 12px;

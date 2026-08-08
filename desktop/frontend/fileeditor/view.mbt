@@ -143,6 +143,7 @@ fn viewer_notice(state : State, ctx : Ctx) -> @html.Html {
               }
             TabBinary => "\{doc.name} is a binary file and cannot be previewed."
             TabOversized => "\{doc.name} is too large to preview."
+            TabReadFailed(message) => "Could not read \{doc.name}: \{message}."
             TabLoading | TabLoaded(..) => ""
           }
         None => ""
@@ -385,6 +386,18 @@ fn changed_file_row(
       class="change-status " + change.kind_class(),
       change.status_label(),
     ),
+    @html.span(
+      class=if change.selectable() {
+        "change-action"
+      } else {
+        "change-action unavailable"
+      },
+      if change.selectable() {
+        "View diff"
+      } else {
+        "Unavailable"
+      },
+    ),
   ]
   if change.selectable() {
     // A native button supplies keyboard activation (Enter/Space) and focus
@@ -395,6 +408,7 @@ fn changed_file_row(
       on_click=dispatch(ChangedFileSelected(change)),
       attrs=@html.Attrs::build()
         .data_set("path", change.path.0)
+        .aria_label("View diff: " + change.status_title())
         .aria_current(if selected { "page" } else { "false" }),
       children,
     )
@@ -541,8 +555,20 @@ fn review_badge(state : State, ctx : Ctx) -> @html.Html {
           (
             "Deleted · HEAD", "Deleted in the working tree; showing the HEAD version",
           )
+        Some({ state: TabBinary, review: Some(_), .. })
+        | Some({ state: TabOversized, review: Some(_), .. })
+        | Some({ state: TabReadFailed(_), review: Some(_), .. }) =>
+          (
+            "Diff unavailable", "The working-tree file cannot be previewed as text",
+          )
         Some({ review: Some({ baseline: ReviewLoading, .. }), .. }) =>
           ("Loading diff…", "Loading the HEAD version for comparison")
+        Some({ name, review: Some({ baseline: ReviewContent(_), .. }), .. }) if name
+          .to_lower()
+          .has_suffix(".md") =>
+          (
+            "Rendered · no gutter", "Rendered Markdown does not expose source diff decorations",
+          )
         Some({ review: Some({ baseline: ReviewContent(_), .. }), .. }) =>
           ("Diff vs HEAD", "Quick diff against the HEAD version")
         Some(
@@ -567,6 +593,7 @@ fn review_badge(state : State, ctx : Ctx) -> @html.Html {
   @html.span(
     class=if text.is_empty() { "review-badge hidden" } else { "review-badge" },
     title~,
+    attrs=@html.Attrs::build().role("status").aria_live("polite"),
     text,
   )
 }

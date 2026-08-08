@@ -37,6 +37,17 @@ fn Doc::quick_diff_original(self : Doc) -> String? {
 }
 
 ///|
+/// The review request that owns any auxiliary working-tree reload. Ordinary
+/// documents carry no token; review reloads must keep the token so a later
+/// changed-row click can fence their replies too.
+fn Doc::review_generation(self : Doc) -> Int? {
+  match self.review {
+    Some(review) => Some(review.generation)
+    None => None
+  }
+}
+
+///|
 /// The command that puts `path`'s document on screen: its content (scroll
 /// restored to where the tab was left), a withheld/deleted notice, or — for
 /// a document whose content is not loaded yet — a fresh read, whose
@@ -49,6 +60,10 @@ fn show_tab(
   doc : Doc,
 ) -> @cmd.Cmd {
   let show = match doc.state {
+    // A review-loading document always has the paired read started by
+    // `open_changed_document`; activation must not create an untagged
+    // duplicate that could outlive a later review generation.
+    TabLoading if doc.review is Some(_) => @cmd.none
     TabLoading =>
       // Covers both "a read is already in flight" (a duplicate reply is
       // folded idempotently) and "parked since a conversation restore, never
@@ -88,14 +103,14 @@ fn show_tab(
           show_file_in_viewer(
             ctx.owner,
             ctx.workspace,
-            path.0,
+            doc.name,
             content,
             relative=path,
             restore_scroll=true,
           )
         _ => clear_document()
       }
-    TabBinary | TabOversized => clear_document()
+    TabBinary | TabOversized | TabReadFailed(_) => clear_document()
   }
   // A document that went stale in the background (or was deleted and
   // reappeared) shows what it has and reloads in the same breath; the reply
@@ -108,6 +123,7 @@ fn show_tab(
         ctx.owner,
         path,
         doc.name,
+        review_generation?=doc.review_generation(),
         range=None,
         workspace=ctx.workspace,
       ),
@@ -158,7 +174,7 @@ pub fn open_document(
   if range is None &&
     annotation is None &&
     state.docs.get(path) is Some(doc) &&
-    !(doc.state is (TabBinary | TabOversized | TabDeleted)) {
+    !(doc.state is (TabBinary | TabOversized | TabReadFailed(_) | TabDeleted)) {
     let show = show_tab(dispatch, ctx, path, doc)
     // Gaining the first active tab reveals the breadcrumb row, and the
     // narrow drill-down closing the tree reveals a viewer that was last
@@ -231,24 +247,34 @@ pub fn open_changed_document(
   } else {
     TabDeleted
   }
+  let missing_rename_source = change.kind is (ChangeRenamed | ChangeCopied) &&
+    change.original_path is None
+  let baseline = if missing_rename_source {
+    ReviewFailed("the original path is outside this workspace")
+  } else {
+    ReviewLoading
+  }
   let review_doc = {
     name,
     state: doc_state,
-    review: Some({ generation, baseline: ReviewLoading }),
+    review: Some({ generation, baseline }),
     stale: false,
   }
   docs[path] = review_doc
-  let source = change.original_path.unwrap_or(path)
-  let cmds = [
-    read_git_original(
-      dispatch,
-      ctx.owner,
-      path,
-      source,
-      generation,
-      workspace=ctx.workspace,
-    ),
-  ]
+  let cmds = []
+  if !missing_rename_source {
+    let source = change.original_path.unwrap_or(path)
+    cmds.push(
+      read_git_original(
+        dispatch,
+        ctx.owner,
+        path,
+        source,
+        generation,
+        workspace=ctx.workspace,
+      ),
+    )
+  }
   if change.has_working_tree_file() {
     if doc_state is TabLoaded(..) {
       // Clear a previous review baseline immediately while keeping the cached
@@ -1032,21 +1058,39 @@ pub fn update(
         } else {
           generation
         }
+        // A completed commit/checkout can remove the reviewed path from the
+        // changed inventory. Do not keep presenting its old snapshot as the
+        // current HEAD comparison after the row itself has disappeared.
+        let docs = state.docs.copy()
+        let review_cmds = []
+        for path, doc in state.docs {
+          if doc.review is Some(_) &&
+            !files.iter().any(change => change.path == path) {
+            let ordinary = { ..doc, review: None }
+            docs[path] = ordinary
+            if ctx.active_file == Some(path) {
+              review_cmds.push(show_tab(dispatch, ctx, path, ordinary))
+            }
+          }
+        }
+        let settle = if follow_up {
+          list_changes(
+            dispatch,
+            owner,
+            next_generation,
+            workspace=ctx.workspace,
+          )
+        } else if repository && changes_visible(state, ctx) {
+          changes_poll_after_settle(dispatch, owner, generation)
+        } else {
+          @cmd.none
+        }
+        review_cmds.push(settle)
         (
-          if follow_up {
-            list_changes(
-              dispatch,
-              owner,
-              next_generation,
-              workspace=ctx.workspace,
-            )
-          } else if repository && changes_visible(state, ctx) {
-            changes_poll_after_settle(dispatch, owner, generation)
-          } else {
-            @cmd.none
-          },
+          @cmd.batch(review_cmds),
           {
             ..state,
+            docs,
             changes_generation: next_generation,
             changes: ChangeListReady(
               repository~,
@@ -1223,11 +1267,17 @@ pub fn update(
       } else if state.docs.get(path) is Some(doc) {
         // A repeated changed-row click starts a new working-tree read as well
         // as a new HEAD read. Fence the older working reply against the
-        // generation still parked on this document; ordinary reads carry
-        // `None` and retain their existing behavior.
+        // generation still parked on this document. An untagged ordinary read
+        // is accepted only when no review has since claimed the document.
         if review_generation is Some(generation) &&
           !(doc.review is Some({ generation: current, .. }) &&
           current == generation) {
+          return (@cmd.none, state)
+        }
+        // An ordinary read may already have been in flight when the user
+        // clicked Changes. It has no review token and must not overwrite the
+        // paired working snapshot or inherit the newly-fetched HEAD baseline.
+        if review_generation is None && doc.review is Some(_) {
           return (@cmd.none, state)
         }
         let previous = doc.state
@@ -1456,8 +1506,11 @@ pub fn update(
             // signature anyway.
             TabLoading => false
             // Withheld documents carry no baseline to compare against (see
-            // `TabState`); they refresh on explicit re-open instead.
+            // `TabState`); they refresh on explicit re-open instead. A
+            // previous read failure does retry once the watcher proves the
+            // path exists.
             TabBinary | TabOversized => false
+            TabReadFailed(_) => true
           }
           if changed {
             if ctx.active_file == Some(stat.path) {
@@ -1471,6 +1524,7 @@ pub fn update(
                   owner,
                   stat.path,
                   doc.name,
+                  review_generation?=doc.review_generation(),
                   range=None,
                   workspace=ctx.workspace,
                 ),
@@ -1509,8 +1563,30 @@ pub fn update(
       } else {
         (@cmd.none, state)
       }
-    FileFailed(owner~, message~) =>
+    FileFailed(owner~, path~, review_generation~, message~) =>
       if state.owner != Some(owner) {
+        (@cmd.none, state)
+      } else if review_generation is Some(generation) {
+        // Review reads are generation-fenced just like successful replies.
+        // Preserve a current working-side failure without guessing that every
+        // host error means deletion; a superseded read remains invisible.
+        guard state.docs.get(path) is Some(doc) &&
+          doc.review is Some({ generation: current, .. }) &&
+          current == generation else {
+          return (@cmd.none, state)
+        }
+        let docs = state.docs.copy()
+        let failed = { ..doc, state: TabReadFailed(message), stale: false }
+        docs[path] = failed
+        let cmd = if ctx.active_file == Some(path) {
+          show_tab(dispatch, ctx, path, failed)
+        } else {
+          @cmd.none
+        }
+        (cmd, { ..state, docs, error: None })
+      } else if state.docs.get(path) is Some({ review: Some(_), .. }) {
+        // Like an untagged success, this failure belongs to an ordinary read
+        // that predates the review click and is no longer user-visible.
         (@cmd.none, state)
       } else {
         (@cmd.none, { ..state, error: Some(message) })
@@ -1661,6 +1737,32 @@ test "changed-file review fences paired replies and ordinary opens leave review"
     is Some(absolute) else {
     fail("test file resource was not absolute")
   }
+  // An ordinary read that began before the first review click carries no
+  // token. It must not inherit the newer baseline if it settles afterward.
+  let (_, pre_review_working) = update(
+    emit,
+    FileLoaded(
+      owner=ctx.owner,
+      path~,
+      name="a.mbt",
+      file=Content(content="pre-review working", absolute~, sig="0:18"),
+      review_generation=None,
+      range=None,
+      annotation=None,
+    ),
+    second,
+    ctx,
+  )
+  assert_true(
+    pre_review_working.docs.get(path)
+    is Some(
+      {
+        state: TabLoading,
+        review: Some({ generation: 2, baseline: ReviewLoading }),
+        ..,
+      }
+    ),
+  )
   let (_, old_working) = update(
     emit,
     FileLoaded(
@@ -1672,7 +1774,7 @@ test "changed-file review fences paired replies and ordinary opens leave review"
       range=None,
       annotation=None,
     ),
-    second,
+    pre_review_working,
     ctx,
   )
   assert_true(
@@ -1735,6 +1837,110 @@ test "changed-file review fences paired replies and ordinary opens leave review"
     had_active=true,
   )
   assert_true(ordinary.docs.get(path) is Some({ review: None, .. }))
+  let (_, review_after_ordinary) = update(
+    emit,
+    FileLoaded(
+      owner=ctx.owner,
+      path~,
+      name="a.mbt",
+      file=Content(content="late review", absolute~, sig="3:11"),
+      review_generation=Some(2),
+      range=None,
+      annotation=None,
+    ),
+    ordinary,
+    ctx,
+  )
+  assert_true(review_after_ordinary == ordinary)
+}
+
+///|
+test "review failures settle precisely and missing rename sources stay unavailable" {
+  let emit = test_emit()
+  let path = @pathx.Relative("new.mbt")
+  let ctx = { ..test_ctx(), open_files: [path], active_file: Some(path) }
+  let rename : ChangedFile = {
+    path,
+    original_path: None,
+    index_status: "R",
+    worktree_status: " ",
+    kind: ChangeRenamed,
+  }
+  let (_, unavailable) = open_changed_document(
+    emit,
+    owned_state(),
+    ctx,
+    rename,
+    had_active=false,
+  )
+  assert_true(
+    unavailable.docs.get(path)
+    is Some(
+      {
+        review: Some(
+          {
+            generation: 1,
+            baseline: ReviewFailed(
+              "the original path is outside this workspace"
+            ),
+          }
+        ),
+        ..,
+      }
+    ),
+  )
+
+  let modified = {
+    ..rename,
+    index_status: " ",
+    worktree_status: "M",
+    kind: ChangeModified,
+  }
+  let (_, loading) = open_changed_document(
+    emit,
+    owned_state(),
+    ctx,
+    modified,
+    had_active=false,
+  )
+  let (_, failed) = update(
+    emit,
+    GitOriginalFailed(
+      owner=ctx.owner,
+      path~,
+      generation=1,
+      message="Git baseline failed",
+    ),
+    loading,
+    ctx,
+  )
+  assert_true(
+    failed.docs.get(path)
+    is Some(
+      {
+        review: Some(
+          { generation: 1, baseline: ReviewFailed("Git baseline failed") }
+        ),
+        ..,
+      }
+    ),
+  )
+  let (_, read_failed) = update(
+    emit,
+    FileFailed(
+      owner=ctx.owner,
+      path~,
+      review_generation=Some(1),
+      message="file disappeared",
+    ),
+    failed,
+    ctx,
+  )
+  assert_true(
+    read_failed.docs.get(path)
+    is Some({ state: TabReadFailed("file disappeared"), .. }),
+  )
+  assert_true(read_failed.error is None)
 }
 
 ///|
@@ -2553,6 +2759,31 @@ test "changed-file replies are owner-and-generation-fenced" {
     test_ctx(),
   )
   assert_true(stale_idle_failure == idle)
+}
+
+///|
+test "a settled Changes snapshot clears reviews whose rows disappeared" {
+  let path = @pathx.Relative("src/committed.mbt")
+  let docs : Map[@pathx.Relative, Doc] = Map([])
+  docs[path] = {
+    ..loaded_doc(path.0),
+    review: Some({ generation: 3, baseline: ReviewContent("old HEAD") }),
+  }
+  let state = {
+    ..owned_state(),
+    explorer_mode: ExplorerChanges,
+    changes: ChangeListLoading(refresh_again=false),
+    changes_generation: 1,
+    review_generation: 3,
+    docs,
+  }
+  let (_, settled) = update(
+    test_emit(),
+    ChangesLoaded(owner=test_ctx().owner, generation=1, repository=true, files=[]),
+    state,
+    { ..test_ctx(), open_files: [path], active_file: Some(path) },
+  )
+  assert_true(settled.docs.get(path) is Some({ review: None, .. }))
 }
 
 ///|

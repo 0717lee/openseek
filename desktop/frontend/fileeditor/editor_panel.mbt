@@ -252,6 +252,7 @@ fn show_file_in_viewer(
     let same_document = viewer.get_model() is Some(model) &&
       model.uri.to_string() == uri.to_string() &&
       model.get_value() == content
+    let previous_uri = viewer.get_model().map(model => model.uri)
     if !same_document {
       // Park the outgoing document's scroll position for its tab's return.
       if viewer_state.relative is Some(prev) &&
@@ -300,6 +301,13 @@ fn show_file_in_viewer(
     // Commenting (select → inline input → composer chip) is for real files;
     // a notice document has nothing behind it to comment on.
     if viewer_state.services is Some(services) {
+      // Only the displayed resource needs a stored baseline. Retire the
+      // outgoing URI before publishing the incoming one so tab switches and
+      // conversation changes cannot accumulate up-to-1-MiB HEAD blobs.
+      if previous_uri is Some(previous) &&
+        previous.to_string() != uri.to_string() {
+        services.quick_diff.set_original_content(previous, None)
+      }
       // The service is resource-keyed, so setting this after `set_model` also
       // handles a late HEAD reply for the document already on screen. The
       // service event makes the gutter recompute without replacing the model.
@@ -366,6 +374,10 @@ fn clear_viewer() -> @cmd.Cmd {
   @cmd.custom_cmd(_scheduler => {
     viewer_state.view_states.clear()
     if viewer_state.viewer is Some(viewer) {
+      if viewer_state.services is Some(services) &&
+        viewer.get_model() is Some(model) {
+        services.quick_diff.set_original_content(model.uri, None)
+      }
       viewer_state.absolute = None
       viewer_state.relative = None
       viewer_state.navigation = None
@@ -381,6 +393,10 @@ fn clear_viewer() -> @cmd.Cmd {
 fn clear_document() -> @cmd.Cmd {
   @cmd.custom_cmd(_scheduler => {
     if viewer_state.viewer is Some(viewer) {
+      if viewer_state.services is Some(services) &&
+        viewer.get_model() is Some(model) {
+        services.quick_diff.set_original_content(model.uri, None)
+      }
       viewer_state.absolute = None
       viewer_state.relative = None
       viewer_state.navigation = None
