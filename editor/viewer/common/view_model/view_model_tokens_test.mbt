@@ -1,15 +1,18 @@
 ///|
-/// Registers the generic fallback lexer for the `moonbit` language id the test
+/// Registers the generic example tokenizer for the `moonbit` language id the test
 /// models carry (the real lexers are registered by the shell, not the common
 /// tier). Idempotent; the registration lives for the test binary. Shared by
 /// the view-model test files in this package.
 fn register_plain_moonbit() -> Unit {
-  @syntax.tokenization_registry.register("moonbit", @syntax.PlainTokenizer())
+  @syntax.tokenization_registry.register(
+    "moonbit",
+    @plain_tokenizer.PlainTokenizer(),
+  )
   |> ignore
 }
 
 ///|
-/// A readonly model over `text` tokenizing with the fallback lexer.
+/// A readonly model over `text` tokenizing with the example tokenizer.
 fn plain_text_model(text : String) -> @model.TextModel {
   register_plain_moonbit()
   TextModel(

@@ -13,4 +13,8 @@ import {
   "moonbitlang/editor/viewer/common/services",
 }
 
+import {
+  "moonbitlang/editor/syntax/examples/plain_tokenizer",
+} for "wbtest"
+
 supported_targets = "js+native"

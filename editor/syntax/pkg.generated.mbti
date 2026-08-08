@@ -49,10 +49,6 @@ pub(all) struct LineToken {
   tag : HighlightTag
 } derive(Eq, @debug.Debug)
 
-type PlainTokenizer
-pub fn PlainTokenizer::PlainTokenizer() -> Self
-pub impl LineTokenizer for PlainTokenizer
-
 pub struct TokenizationChangedEvent {
   changed_languages : Array[String]
   changed_color_map : Bool
@@ -78,4 +74,3 @@ pub(open) trait LineTokenizer {
   fn initial_state(Self) -> TokenizerState
   fn tokenize_line(Self, String, TokenizerState) -> (Array[LineToken], TokenizerState)
 }
-

@@ -1,6 +1,9 @@
 ///|
 fn register_shared_markdown_test_tokenizer() -> Unit {
-  @syntax.tokenization_registry.register("moonbit", @syntax.PlainTokenizer())
+  @syntax.tokenization_registry.register(
+    "moonbit",
+    @plain_tokenizer.PlainTokenizer(),
+  )
   |> ignore
 }
 

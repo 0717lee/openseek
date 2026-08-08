@@ -1,0 +1,19 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "moonbitlang/editor/syntax/examples/plain_tokenizer"
+
+import {
+  "moonbitlang/editor/syntax",
+}
+
+// Values
+
+// Errors
+
+// Types and methods
+type PlainTokenizer
+pub fn PlainTokenizer::PlainTokenizer() -> Self
+pub impl @syntax.LineTokenizer for PlainTokenizer
+
+// Type aliases
+
+// Traits

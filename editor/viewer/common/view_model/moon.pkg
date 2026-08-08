@@ -12,8 +12,10 @@ import {
 
 import {
   "moonbitlang/editor/syntax",
+  "moonbitlang/editor/syntax/examples/plain_tokenizer",
 } for "test"
 
 import {
   "moonbitlang/editor/syntax",
+  "moonbitlang/editor/syntax/examples/plain_tokenizer",
 } for "wbtest"

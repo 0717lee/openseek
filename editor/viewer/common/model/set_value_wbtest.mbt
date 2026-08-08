@@ -78,7 +78,7 @@ test "set_value emits one full-range public change with isFlush" {
 test "set_value re-seeds visible token state without a full reset event" {
   let registration = @syntax.tokenization_registry.register(
     "moonbit",
-    @syntax.PlainTokenizer(),
+    @plain_tokenizer.PlainTokenizer(),
   )
   let model = wb_model("alpha\nbravo")
   let view = model.on_before_attached()

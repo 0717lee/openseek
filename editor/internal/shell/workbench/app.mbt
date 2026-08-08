@@ -253,7 +253,7 @@ pub fn start_app() -> Unit {
 
 ///|
 /// Languages are compile-time packages composed here by import; the
-/// viewer library itself ships only the plain fallback.
+/// viewer library itself renders unregistered languages as plain text.
 fn install_language_tokenizers(services : WorkbenchServices) -> Unit {
   services.languages.set_tokens_provider(
     "moonbit",

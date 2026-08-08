@@ -5,6 +5,10 @@ import {
   "moonbitlang/editor/viewer/common/tokens" @common_tokens,
 }
 
+import {
+  "moonbitlang/editor/syntax/examples/plain_tokenizer",
+} for "wbtest"
+
 options(
   targets: {
     "text_model_browser_diagnostic_js.mbt": [ "js" ],

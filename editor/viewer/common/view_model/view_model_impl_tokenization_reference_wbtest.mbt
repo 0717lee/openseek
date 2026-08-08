@@ -147,7 +147,7 @@ test "model-token callback converts wrapped and hidden ranges before outgoing de
   })
   let registration = @syntax.tokenization_registry.register(
     "view-model-impl-reference",
-    @syntax.PlainTokenizer(),
+    @plain_tokenizer.PlainTokenizer(),
   )
   assert_true(delivery_order == ["view", "outgoing"])
   assert_eq(converted.length(), 1)
@@ -176,7 +176,7 @@ test "headless token callback defaults to no-op and disposal removes delivery" {
   // no-op, then the typed outgoing listener still observes the source event.
   let registration = @syntax.tokenization_registry.register(
     "view-model-impl-reference",
-    @syntax.PlainTokenizer(),
+    @plain_tokenizer.PlainTokenizer(),
   )
   assert_eq(delivered.val, 1)
   view_model.dispose()
