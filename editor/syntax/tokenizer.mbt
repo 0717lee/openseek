@@ -260,15 +260,15 @@ pub fn push_token(
 /// The nesting-mode stack a stateful lexer carries between lines, decoded from
 /// its `TokenizerState`. Each character is one open mode; an empty state
 /// decodes to the base mode `'n'`, so a fresh line always has a mode to read.
-/// Useful for diagnostics and tokenizer extensions; built-in stack-based lexers
-/// operate on the encoded form directly and do not call this function. Inverse
-/// of `encode_mode_stack`.
+/// Shared by the language lexers (`lang_*`), which otherwise carry identical
+/// copies. Inverse of `encode_mode_stack`.
 pub fn decode_mode_stack(state : TokenizerState) -> Array[Char] {
   if state.0 is "" {
     return ['n']
   }
-  // The direct char loop lowers to a plain string scan, where
-  // `String::to_array` would allocate an iterator chain on the JS target.
+  // Decoded once per tokenized line: the direct char loop lowers to a plain
+  // string scan, where `String::to_array` would allocate an iterator chain
+  // on the JS target.
   let stack : Array[Char] = []
   for mode in state.0 {
     stack.push(mode)

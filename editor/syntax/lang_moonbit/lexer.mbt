@@ -1,6 +1,6 @@
 ///|
 /// Hand-written MoonBit lexer behind the `syntax.LineTokenizer` contract.
-/// Monarch's state-machine structure, but every rule set is a `lexscan`
+/// Monarch's state-machine structure, but every rule set is a `lexmatch`
 /// compiled to a tagged DFA at build time — no runtime regexes, no
 /// grammar data.
 ///
@@ -37,10 +37,13 @@ pub impl @syntax.LineTokenizer for MoonBitTokenizer with fn tokenize_line(
   state,
 ) {
   let tokens : Array[@syntax.LineToken] = []
-  let encoded_stack = @mode_stack.normalize(state)
-  let initial_top = @mode_stack.top(encoded_stack)
-  for at = 0, view = line_text[:], stack = encoded_stack, top = initial_top; view.length() >
-     0; {
+  let mut stack : @syntax.TokenizerState = if state.0 is "" {
+    TokenizerState("n")
+  } else {
+    state
+  }
+  let mut top = mode_stack_top(stack)
+  for at = 0, view = line_text[:]; view.length() > 0; {
     let (op, rest) = match top {
       's' => string_step(view)
       'm' => dollar_step(view)
@@ -48,24 +51,51 @@ pub impl @syntax.LineTokenizer for MoonBitTokenizer with fn tokenize_line(
     }
     let consumed = view.length() - rest.length()
     match op {
-      Blank => continue at + consumed, rest, stack, top
-      Emit(tag) => {
-        @syntax.push_token(tokens, at, at + consumed, tag)
-        continue at + consumed, rest, stack, top
-      }
+      Blank => ()
+      Emit(tag) => @syntax.push_token(tokens, at, at + consumed, tag)
       Push(tag, mode) => {
         @syntax.push_token(tokens, at, at + consumed, tag)
-        let next_stack = @mode_stack.push(stack, mode)
-        continue at + consumed, rest, next_stack, mode
+        stack = mode_stack_push(stack, mode)
+        top = mode
       }
       Pop(tag) => {
         @syntax.push_token(tokens, at, at + consumed, tag)
-        let next_stack = @mode_stack.pop(stack)
-        continue at + consumed, rest, next_stack, @mode_stack.top(next_stack)
+        stack = mode_stack_pop(stack)
+        top = mode_stack_top(stack)
       }
     }
+    continue at + consumed, rest
   }
   (tokens, TokenizerState("n"))
+}
+
+///|
+fn mode_stack_top(state : @syntax.TokenizerState) -> Char {
+  lexscan state.0 {
+    (re".$" as mode, before=_) => mode
+    _ => 'n'
+  }
+}
+
+///|
+fn mode_stack_push(
+  state : @syntax.TokenizerState,
+  mode : Char,
+) -> @syntax.TokenizerState {
+  TokenizerState("\{state.0}\{mode}")
+}
+
+///|
+fn mode_stack_pop(state : @syntax.TokenizerState) -> @syntax.TokenizerState {
+  lexscan state.0 {
+    (re".$", before=remaining) =>
+      if remaining.length() == 0 {
+        state
+      } else {
+        TokenizerState(remaining.to_owned())
+      }
+    _ => TokenizerState("n")
+  }
 }
 
 ///|

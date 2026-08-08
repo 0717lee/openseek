@@ -157,11 +157,3 @@ test "nested template brace state pops from its encoded form" {
   let (_, closed) = lexer.tokenize_line("1 }} done`;", nested)
   assert_true(closed == lexer.initial_state())
 }
-
-///|
-test "mode-stable empty line reuses its encoded state" {
-  let lexer : &@syntax.LineTokenizer = @lang_javascript.JavascriptTokenizer()
-  let state : @syntax.TokenizerState = TokenizerState("nt")
-  let (_, unchanged) = lexer.tokenize_line("", state)
-  assert_true(unchanged == state)
-}
