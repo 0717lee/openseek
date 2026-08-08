@@ -3058,9 +3058,11 @@ main {
   min-width: 0;
 }
 
-/* The git chip and the popover it anchors. */
+/* The git chip. It deliberately does *not* establish a containing block: the
+   popover anchors to `.composer-inner` instead, so its width is the
+   composer's business rather than the chip's position along the row. See
+   `.composer-git-menu`. */
 .composer-git {
-  position: relative;
   min-width: 0;
   flex: 0 1 auto;
 }
@@ -3127,13 +3129,19 @@ main {
   color: var(--ink-3);
 }
 
-/* Opens upward: the composer sits at the bottom of the window. */
+/* Opens upward, from the composer's left edge: the composer sits at the bottom
+   of the window, and `main` clips anything wider than it.
+
+   Sized against the composer rather than the viewport, because the two come
+   apart — dragging the editor panel wide squeezes the chat column to its 240px
+   floor on a screen of any width, and a menu measured in `vw` would spill out
+   of it and be cut off with no way to scroll to the rest. `100%` here is the
+   composer, which by construction fits. */
 .composer-git-menu {
   position: absolute;
   bottom: calc(100% + 6px);
   left: 0;
-  min-width: 280px;
-  max-width: min(420px, 80vw);
+  width: min(420px, 100%);
   padding: 5px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
@@ -4180,20 +4188,6 @@ select:focus {
   }
   .quick-open-name {
     max-width: 100%;
-  }
-
-  /* The git popover is anchored to its chip, which sits partway across the
-     row — at phone width a 280px menu from there runs off the screen, and the
-     shell's `overflow: hidden` clips it with nothing to scroll. Dropping the
-     chip's containing block hands the menu to `.composer-inner` instead, so it
-     spans the composer and stays on screen wherever the chip is. */
-  .composer-git {
-    position: static;
-  }
-  .composer-git-menu {
-    right: 0;
-    min-width: 0;
-    max-width: none;
   }
 
   /* The sidebar leaves the grid and overlays it as a drawer; the
