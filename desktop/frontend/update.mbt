@@ -3943,10 +3943,17 @@ fn update_device_msg(
           model.replace_conversation({ ..conv, pull_request, }),
         )
       }
+      // Counted across branch changes, not per branch: a checkout that moves
+      // X → Y → X must not reuse a number an in-flight lookup already holds.
+      let generation = conv.pull_request
+        .map(probe => probe.generation)
+        .unwrap_or(0) +
+        1
       // Only an answer about a different branch is discarded; re-probing the
       // branch already on screen keeps its chip until the reply lands.
       let fresh : PullRequestProbe = {
         branch,
+        generation,
         probing: true,
         stale: false,
         pull_request: None,
@@ -3954,22 +3961,36 @@ fn update_device_msg(
       }
       let carried = match conv.pull_request {
         Some(probe) if probe.branch == branch =>
-          { ..probe, probing: true, stale: false }
+          { ..probe, generation, probing: true, stale: false }
         _ => fresh
       }
       (
-        fetch_pull_request(dispatch, channel, session, branch, conv.cwd),
+        fetch_pull_request(
+          dispatch,
+          channel,
+          session,
+          branch,
+          conv.cwd,
+          generation~,
+        ),
         model.replace_conversation({ ..conv, pull_request: Some(carried) }),
       )
     }
-    PullRequestLoaded(session~, branch~, queried~, pull_request~, compare_url~) => {
+    PullRequestLoaded(
+      session~,
+      branch~,
+      generation~,
+      queried~,
+      pull_request~,
+      compare_url~
+    ) => {
       guard model.find_conversation(channel, session) is Some(conv) else {
         return (@cmd.none, model)
       }
-      // Matched to the probe by the branch the lookup was issued against; a
-      // reply for one the workspace has since left belongs to no probe here
-      // and is dropped, so a slow lookup cannot overwrite a newer one.
-      guard conv.pull_request is Some(probe) && probe.branch == branch else {
+      // Matched by which request this answers, not by branch: a checkout that
+      // moves X → Y → X leaves two lookups for X in flight, and if the newer
+      // settles first, matching by name would let the older overwrite it.
+      guard conv.pull_request is Some(probe) && probe.generation == generation else {
         return (@cmd.none, model)
       }
       // Labelled with the branch the host actually read from `HEAD`. When the
@@ -3978,6 +3999,7 @@ fn update_device_msg(
       // branch chip catches up, instead of showing it against this one.
       let settled : PullRequestProbe = {
         branch: queried.unwrap_or(branch),
+        generation,
         probing: false,
         stale: false,
         pull_request,
@@ -3989,15 +4011,17 @@ fn update_device_msg(
       guard probe.stale && conv.branch is Some(current) && !current.is_empty() else {
         return (@cmd.none, model.replace_conversation(conv))
       }
+      let generation = generation + 1
       // Carrying the settled answer keeps the chip from blinking — but only
       // when it describes the branch being re-probed. Relabelling an answer
       // about some other branch to `current` would be the very mislabelling
       // the reply's own branch exists to prevent.
       let retry : PullRequestProbe = if settled.branch == current {
-        { ..settled, probing: true }
+        { ..settled, generation, probing: true }
       } else {
         {
           branch: current,
+          generation,
           probing: true,
           stale: false,
           pull_request: None,
@@ -4005,7 +4029,14 @@ fn update_device_msg(
         }
       }
       (
-        fetch_pull_request(dispatch, channel, session, current, conv.cwd),
+        fetch_pull_request(
+          dispatch,
+          channel,
+          session,
+          current,
+          conv.cwd,
+          generation~,
+        ),
         model.replace_conversation({ ..conv, pull_request: Some(retry) }),
       )
     }
@@ -11694,6 +11725,7 @@ test "a branch reply lands on its conversation and an empty one hides it" {
     named.active().pull_request,
     Some({
       branch: "feature/x",
+      generation: 1,
       probing: true,
       stale: false,
       pull_request: None,
@@ -11806,20 +11838,23 @@ test "a pull-request reply only lands on the branch it was asked about" {
     changed_files: 18,
     checks: Some({ passed: 1, failed: 0, pending: 3 }),
   }
-  // An answer about a branch the workspace has since left is dropped rather
-  // than shown against the branch now checked out.
+  // A reply from a lookup that has since been superseded is dropped. The
+  // branch name cannot decide this: a checkout that moves X → Y → X leaves two
+  // lookups for X in flight at once, so which request answered is the question.
   let (_, stale) = update_dev(
     dispatch,
     PullRequestLoaded(
       session="desktop-test",
-      branch="feature/old",
-      queried=Some("feature/old"),
+      branch="feature/x",
+      generation=0,
+      queried=Some("feature/x"),
       pull_request=Some(answer),
       compare_url=None,
     ),
     probing,
   )
   assert_eq(stale.active().pull_request.unwrap().pull_request, None)
+  assert_true(stale.active().pull_request.unwrap().probing)
   // The host answers about whatever `HEAD` said when it ran. An answer that
   // came back describing a different branch is filed under that branch, not
   // under the one the lookup was issued for — so the chip, which only shows a
@@ -11829,6 +11864,7 @@ test "a pull-request reply only lands on the branch it was asked about" {
     PullRequestLoaded(
       session="desktop-test",
       branch="feature/x",
+      generation=1,
       queried=Some("feature/y"),
       pull_request=Some(answer),
       compare_url=None,
@@ -11842,6 +11878,7 @@ test "a pull-request reply only lands on the branch it was asked about" {
     PullRequestLoaded(
       session="desktop-test",
       branch="feature/x",
+      generation=1,
       queried=Some("feature/x"),
       pull_request=Some(answer),
       compare_url=None,
@@ -11852,6 +11889,7 @@ test "a pull-request reply only lands on the branch it was asked about" {
     settled.active().pull_request,
     Some({
       branch: "feature/x",
+      generation: 1,
       probing: false,
       stale: false,
       pull_request: Some(answer),
@@ -11874,11 +11912,70 @@ test "a pull-request reply only lands on the branch it was asked about" {
     refreshing.active().pull_request,
     Some({
       branch: "feature/x",
+      // A new request, so a new number — the answer it carries is the old
+      // one's, kept on screen only until this lookup replaces it.
+      generation: 2,
       probing: true,
       stale: false,
       pull_request: Some(answer),
       compare_url: None,
     }),
+  )
+}
+
+///|
+test "a checkout that returns to a branch does not accept the older lookup" {
+  let dispatch = test_dispatch()
+  fn branch_reply(name : String) {
+    BranchLoaded(
+      session="desktop-test",
+      branch=Some(name),
+      diffstat=None,
+      generation=0,
+    )
+  }
+
+  // X, then away to Y, then back to X: the first X lookup is still running,
+  // and a second one for the same branch is now in flight beside it.
+  let (_, first) = update_dev(dispatch, branch_reply("feature/x"), test_model())
+  assert_eq(first.active().pull_request.unwrap().generation, 1)
+  let (_, away) = update_dev(dispatch, branch_reply("feature/y"), first)
+  let (_, back) = update_dev(dispatch, branch_reply("feature/x"), away)
+  assert_eq(back.active().pull_request.unwrap().generation, 3)
+  let answer : PullRequest = {
+    number: 710,
+    title: "Add a changed-files explorer",
+    state: PullRequestOpen,
+    draft: false,
+    url: "https://github.test/acme/app/pull/710",
+    additions: 1,
+    deletions: 0,
+    changed_files: 1,
+    checks: None,
+  }
+  fn pull_request_reply(generation : Int, number : Int) {
+    PullRequestLoaded(
+      session="desktop-test",
+      branch="feature/x",
+      generation~,
+      queried=Some("feature/x"),
+      pull_request=Some({ ..answer, number, }),
+      compare_url=None,
+    )
+  }
+
+  // The newer one settles first.
+  let (_, settled) = update_dev(dispatch, pull_request_reply(3, 710), back)
+  assert_eq(
+    settled.active().pull_request.unwrap().pull_request.unwrap().number,
+    710,
+  )
+  // The older one for the same branch arrives afterwards. Matching by name
+  // would take it; matching by request does not.
+  let (_, overtaken) = update_dev(dispatch, pull_request_reply(1, 404), settled)
+  assert_eq(
+    overtaken.active().pull_request.unwrap().pull_request.unwrap().number,
+    710,
   )
 }
 
@@ -11901,6 +11998,7 @@ test "a refresh during a lookup is run afterwards, not dropped" {
     queued.active().pull_request,
     Some({
       branch: "feature/x",
+      generation: 1,
       probing: true,
       stale: true,
       pull_request: None,
@@ -11914,6 +12012,7 @@ test "a refresh during a lookup is run afterwards, not dropped" {
     PullRequestLoaded(
       session="desktop-test",
       branch="feature/x",
+      generation=1,
       queried=Some("feature/x"),
       pull_request=None,
       compare_url=Some("https://github.test/acme/app/compare/feature/x"),
@@ -11933,6 +12032,7 @@ test "a refresh during a lookup is run afterwards, not dropped" {
     PullRequestLoaded(
       session="desktop-test",
       branch="feature/x",
+      generation=1,
       queried=Some("feature/x"),
       pull_request=None,
       compare_url=None,
@@ -11959,6 +12059,7 @@ test "a refresh during a lookup is run afterwards, not dropped" {
     PullRequestLoaded(
       session="desktop-test",
       branch="feature/x",
+      generation=1,
       queried=Some("feature/y"),
       pull_request=Some(answer),
       compare_url=None,
@@ -11969,6 +12070,8 @@ test "a refresh during a lookup is run afterwards, not dropped" {
     elsewhere.active().pull_request,
     Some({
       branch: "feature/x",
+      // The retry is a new request, so it carries the next number.
+      generation: 2,
       probing: true,
       stale: false,
       pull_request: None,

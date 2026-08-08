@@ -31,8 +31,14 @@ priv struct DiffStat {
 /// `stale` records a refresh that arrived while a lookup was in flight, whose
 /// answer therefore predates it; that lookup is followed by another rather
 /// than left standing as the last word.
+///
+/// `generation` is which request this describes, and is what a reply is
+/// matched against. The branch alone cannot do it: a checkout that moves
+/// X → Y → X leaves two lookups for X in flight at once, and if the newer
+/// settles first, matching by name would let the older one overwrite it.
 priv struct PullRequestProbe {
   branch : String
+  generation : Int
   probing : Bool
   stale : Bool
   pull_request : PullRequest?
@@ -532,6 +538,7 @@ fn fetch_pull_request(
   session : String,
   branch : String,
   cwd : @common.Uri?,
+  generation~ : Int,
 ) -> @cmd.Cmd {
   match cwd {
     Some(resource) if !@resource.belongs_to(resource, channel) =>
@@ -544,6 +551,7 @@ fn fetch_pull_request(
       let empty = PullRequestLoaded(
         session~,
         branch~,
+        generation~,
         queried=None,
         pull_request=None,
         compare_url=None,
@@ -562,6 +570,7 @@ fn fetch_pull_request(
           PullRequestLoaded(
             session~,
             branch~,
+            generation~,
             queried=reply.branch,
             pull_request=reply.pull_request.bind(PullRequest::from_reply),
             compare_url=reply.compare_url,
