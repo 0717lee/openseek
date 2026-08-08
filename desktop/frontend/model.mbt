@@ -921,6 +921,11 @@ priv struct Model {
   // nested conversations) is folded down to its heading; clicking the heading
   // flips it.
   workspaces_collapsed : Bool
+  // The conversations whose sub-run transcripts are unfolded in the sidebar,
+  // as (device, session id) — session ids are only unique within a channel.
+  // Sidebar-only view state, held for the window's lifetime and never
+  // persisted; a conversation that launched no sub-run never appears here.
+  expanded_subruns : Array[(@interop.ChannelId, String)]
   // The archive-discard confirmation, staged when the host refused an
   // archive because the conversation's worktree holds uncommitted changes;
   // confirming retries the archive with force.
@@ -1292,6 +1297,10 @@ priv enum Msg {
   ToggleChatsSection
   // The sidebar's "Workspaces" heading was clicked — fold or unfold the section.
   ToggleWorkspacesSection
+  // A conversation row's disclosure was clicked — show or hide the sub-run
+  // transcripts folded under it. The row's own click still opens the session,
+  // so the two controls never fight over one gesture.
+  ToggleSubruns(@interop.ChannelId, String)
   SaveApiKey
   OpenSkills
   SkillsQueryChanged(String)
@@ -1791,6 +1800,7 @@ fn initial_model() -> Model {
     sidebar_open: !narrow,
     chats_collapsed: false,
     workspaces_collapsed: false,
+    expanded_subruns: [],
     active_session: "",
     loading_conversation: None,
     transcript_request_generation: 0,
@@ -2179,6 +2189,18 @@ fn Model::matched_settlement_frontier(
     }
   }
   None
+}
+
+///|
+/// Whether this conversation's folded sub-run transcripts are showing.
+fn Model::subruns_expanded(
+  self : Model,
+  channel : @interop.ChannelId,
+  session_id : String,
+) -> Bool {
+  self.expanded_subruns
+  .iter()
+  .any(entry => entry.0 == channel && entry.1 == session_id)
 }
 
 ///|

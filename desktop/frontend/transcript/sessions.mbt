@@ -37,6 +37,121 @@ pub fn sessions_from_reply(
 }
 
 ///|
+/// One sidebar row of a session group: a conversation and the sub-run
+/// transcripts it spawned, in sub-run order.
+pub struct SessionTreeRow {
+  item : SessionListItem
+  children : Array[SessionListItem]
+} derive(Eq)
+
+///|
+/// Fold a group's sessions into rows, moving every sub-run child transcript
+/// (`<parent>-sr-N`, see `@protocol.split_child_session_id`) under the
+/// conversation that launched it.
+///
+/// The engine persists a sub-run's transcript as a sibling session, so a
+/// single worker sweep can leave more child records in a store than there
+/// are conversations — flat, they crowd every real chat off screen. Parents
+/// keep the listing's order; children sort by sub-run ordinal, which a
+/// lexicographic id sort would get wrong past `sr-9`.
+///
+/// Nothing is ever hidden: a child whose parent is NOT in this group (an
+/// archived parent, a differently-scoped store) keeps a row of its own, in
+/// its listed position. A grandchild folds under the outermost listed
+/// ancestor rather than opening a second level of nesting — today the child
+/// toolsets carry no sub-run tools, so it stands for a shape the sidebar
+/// should survive, not one it should design around.
+pub fn session_tree(items : Array[SessionListItem]) -> Array[SessionTreeRow] {
+  let listed : Map[String, Bool] = Map([])
+  for item in items {
+    listed[item.id] = true
+  }
+  // The outermost listed session an id folds under, and the sub-run ordinals
+  // leading down to it — `None` when the id owns a row.
+  fn fold_target(id : String) -> (String, Array[Int])? {
+    let path : Array[Int] = []
+    let mut current = id
+    for ;; {
+      guard @protocol.split_child_session_id(current) is Some((parent, ordinal)) else {
+        break
+      }
+      guard listed.get(parent) is Some(_) else { break }
+      path.push(ordinal)
+      current = parent
+    }
+    guard !path.is_empty() else { return None }
+    Some((current, path.rev()))
+  }
+
+  let rows : Array[SessionTreeRow] = []
+  let row_at : Map[String, Int] = Map([])
+  let folded : Array[(Array[Int], String, SessionListItem)] = []
+  for item in items {
+    match fold_target(item.id) {
+      None => {
+        row_at[item.id] = rows.length()
+        rows.push({ item, children: [] })
+      }
+      Some((root, path)) => folded.push((path, root, item))
+    }
+  }
+  // `sort_by` is unstable, so the root joins the key: children of different
+  // parents never share a row, but the order must not depend on the sort.
+  folded.sort_by((left, right) => {
+    let ordering = compare_subrun_path(left.0, right.0)
+    if ordering != 0 {
+      ordering
+    } else {
+      left.1.compare(right.1)
+    }
+  })
+  for entry in folded {
+    let (_, root, item) = entry
+    match row_at.get(root) {
+      Some(index) => rows[index].children.push(item)
+      // `fold_target` only walks through listed parents, so the root it
+      // stops at owns a row. Unreachable, and a row rather than a drop if it
+      // ever is reached: a session the store holds stays visible.
+      None => rows.push({ item, children: [] })
+    }
+  }
+  rows
+}
+
+///|
+/// The `sr-N` a folded child row is labelled with, or `None` for a session
+/// that is not a sub-run child. It names the sub-run the way the engine's
+/// `subrun_started`/`subrun_finished` events do, so a row in the sidebar and
+/// a line in the transcript are recognizably the same run.
+pub fn subrun_label(id : String) -> String? {
+  match @protocol.split_child_session_id(id) {
+    Some((_, ordinal)) => Some("sr-\{ordinal}")
+    None => None
+  }
+}
+
+///|
+/// Order two sub-run ordinal paths: by ordinal at the first position they
+/// differ, then by depth, so `sr-2` precedes `sr-10` and a child precedes
+/// its own grandchildren.
+fn compare_subrun_path(left : Array[Int], right : Array[Int]) -> Int {
+  let shared = if left.length() < right.length() {
+    left.length()
+  } else {
+    right.length()
+  }
+  for index in 0..<shared {
+    if left[index] < right[index] {
+      return -1
+    }
+    if left[index] > right[index] {
+      return 1
+    }
+  }
+  left.length().compare(right.length())
+}
+
+///|
 /// A decoded `session.load` reply: the transcript the snapshot renders as,
 /// and the highest event sequence it contains — the client's starting
 /// watermark, deciding which later `session.event` commits are already in
@@ -350,6 +465,80 @@ test "session list projection preserves grouping and skips empty ids" {
     items[1].workspace is Some(workspace) && workspace.path == "/home/user/proj",
   )
   inspect(items[1].workspace_name, content="proj")
+}
+
+///|
+/// Sidebar entries for `session_tree` tests: only the id distinguishes them.
+fn listed(ids : Array[String]) -> Array[SessionListItem] {
+  ids.map(id => { id, title: None, workspace: None, workspace_name: "" })
+}
+
+///|
+/// A tree as `parent[child, …]` rows, so a case reads as the sidebar renders.
+fn tree_shape(rows : Array[SessionTreeRow]) -> String {
+  rows
+  .map(row => {
+    if row.children.is_empty() {
+      row.item.id
+    } else {
+      "\{row.item.id}[\{row.children.map(child => child.id).join(", ")}]"
+    }
+  })
+  .join(" ")
+}
+
+///|
+test "sub-run transcripts fold under the conversation that launched them" {
+  inspect(
+    tree_shape(
+      session_tree(
+        listed(["desktop-a", "desktop-a-sr-1", "desktop-a-sr-2", "desktop-b"]),
+      ),
+    ),
+    content="desktop-a[desktop-a-sr-1, desktop-a-sr-2] desktop-b",
+  )
+}
+
+///|
+test "children sort by sub-run ordinal, not by id text" {
+  // Listed out of order and past `sr-9`, where a lexicographic sort would
+  // put `sr-10` between `sr-1` and `sr-2`.
+  inspect(
+    tree_shape(session_tree(listed(["a-sr-10", "a-sr-2", "a", "a-sr-1"]))),
+    content="a[a-sr-1, a-sr-2, a-sr-10]",
+  )
+}
+
+///|
+test "a child whose parent is not listed keeps its own row" {
+  // The parent is archived (the archived twin is a separate reply), so its
+  // children are all this group holds — they stay visible, in place.
+  inspect(
+    tree_shape(session_tree(listed(["a-sr-1", "b", "a-sr-2"]))),
+    content="a-sr-1 b a-sr-2",
+  )
+}
+
+///|
+test "a grandchild folds under the outermost listed ancestor" {
+  inspect(
+    tree_shape(session_tree(listed(["a", "a-sr-1", "a-sr-1-sr-2"]))),
+    content="a[a-sr-1, a-sr-1-sr-2]",
+  )
+  // The walk is link by link: with the middle generation missing from the
+  // group, the grandchild keeps a row rather than jumping a gap.
+  inspect(
+    tree_shape(session_tree(listed(["a", "a-sr-1-sr-2"]))),
+    content="a a-sr-1-sr-2",
+  )
+}
+
+///|
+test "an id that merely looks like a child keeps its row" {
+  inspect(
+    tree_shape(session_tree(listed(["a", "a-sr-x", "a-sr-"]))),
+    content="a a-sr-x a-sr-",
+  )
 }
 
 ///|

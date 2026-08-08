@@ -24,9 +24,13 @@ pub fn runtime_update_title(RuntimeUpdateView) -> String
 
 pub fn session_from_reply(@protocol.LoadSessionReply) -> SessionLoadView
 
+pub fn session_tree(Array[SessionListItem]) -> Array[SessionTreeRow]
+
 pub fn sessions_from_reply(@protocol.SessionsReply, @interop.ChannelId) -> Array[SessionListItem]
 
 pub fn skills_catalog_from_reply(@protocol.SkillsCatalogReply) -> Array[MarketSkillItem]
+
+pub fn subrun_label(String) -> String?
 
 pub fn transcript_from_session(@protocol.LoadSessionReply) -> Array[TranscriptItem]
 
@@ -103,6 +107,11 @@ pub struct SessionLoadView {
   watermark : Int
   event_boundaries : Array[(Int, Bool, Int)]
 }
+
+pub struct SessionTreeRow {
+  item : SessionListItem
+  children : Array[SessionListItem]
+} derive(Eq)
 
 pub(all) struct TranscriptItem {
   kind : ItemKind
