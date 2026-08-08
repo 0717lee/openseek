@@ -3936,51 +3936,17 @@ fn update_device_msg(
       // refresh asked for one. Dropping the refresh outright would leave the
       // chip describing the repository as it was when a run started, with
       // nothing scheduled to correct it.
-      let in_flight = conv.pull_request is Some(probe) &&
+      if conv.pull_request is Some(probe) &&
         probe.probing &&
-        probe.branch == branch
-      guard !in_flight else {
-        let pull_request = conv.pull_request.map(probe => {
-          ..probe,
-          stale: true,
-        })
+        probe.branch == branch {
+        let pull_request = Some({ ..probe, stale: true })
         return (
           @cmd.none,
           model.replace_conversation({ ..conv, pull_request, }),
         )
       }
-      // Counted across branch changes, not per branch: a checkout that moves
-      // X → Y → X must not reuse a number an in-flight lookup already holds.
-      let generation = conv.pull_request
-        .map(probe => probe.generation)
-        .unwrap_or(0) +
-        1
-      // Only an answer about a different branch is discarded; re-probing the
-      // branch already on screen keeps its chip until the reply lands.
-      let fresh : PullRequestProbe = {
-        branch,
-        generation,
-        probing: true,
-        stale: false,
-        pull_request: None,
-        compare_url: None,
-      }
-      let carried = match conv.pull_request {
-        Some(probe) if probe.branch == branch =>
-          { ..probe, generation, probing: true, stale: false }
-        _ => fresh
-      }
-      (
-        fetch_pull_request(
-          dispatch,
-          channel,
-          session,
-          branch,
-          conv.cwd,
-          generation~,
-        ),
-        model.replace_conversation({ ..conv, pull_request: Some(carried) }),
-      )
+      let (cmd, conv) = probe_pull_request(dispatch, channel, conv, branch)
+      (cmd, model.replace_conversation(conv))
     }
     PullRequestLoaded(
       session~,
@@ -4017,34 +3983,8 @@ fn update_device_msg(
       guard probe.stale && conv.branch is Some(current) && !current.is_empty() else {
         return (@cmd.none, model.replace_conversation(conv))
       }
-      let generation = generation + 1
-      // Carrying the settled answer keeps the chip from blinking — but only
-      // when it describes the branch being re-probed. Relabelling an answer
-      // about some other branch to `current` would be the very mislabelling
-      // the reply's own branch exists to prevent.
-      let retry : PullRequestProbe = if settled.branch == current {
-        { ..settled, generation, probing: true }
-      } else {
-        {
-          branch: current,
-          generation,
-          probing: true,
-          stale: false,
-          pull_request: None,
-          compare_url: None,
-        }
-      }
-      (
-        fetch_pull_request(
-          dispatch,
-          channel,
-          session,
-          current,
-          conv.cwd,
-          generation~,
-        ),
-        model.replace_conversation({ ..conv, pull_request: Some(retry) }),
-      )
+      let (cmd, conv) = probe_pull_request(dispatch, channel, conv, current)
+      (cmd, model.replace_conversation(conv))
     }
     Started(
       run_id~,
@@ -11704,6 +11644,65 @@ test "the scroll watcher's report lands on the model" {
 }
 
 ///|
+/// A `git.branch` reply for the test conversation.
+fn branch_reply(
+  branch : String,
+  generation? : Int = 0,
+  session? : String = "desktop-test",
+  diffstat? : DiffStat,
+) -> DeviceMsg {
+  BranchLoaded(session~, branch=Some(branch), diffstat~, generation~)
+}
+
+///|
+/// A `git.pull_request` reply for the test conversation. `queried` defaults to
+/// the branch asked about, which is the ordinary case: only a checkout that
+/// moved mid-request makes them differ.
+fn pull_request_reply(
+  branch : String,
+  generation~ : Int,
+  queried? : String,
+  pull_request? : PullRequest,
+  compare_url? : String,
+) -> DeviceMsg {
+  PullRequestLoaded(
+    session="desktop-test",
+    branch~,
+    generation~,
+    queried=Some(queried.unwrap_or(branch)),
+    pull_request~,
+    compare_url~,
+  )
+}
+
+///|
+/// The probe a lookup for `branch` leaves behind while it runs.
+fn probing_for(
+  branch : String,
+  generation~ : Int,
+  pull_request? : PullRequest,
+  compare_url? : String,
+) -> PullRequestProbe {
+  { branch, generation, probing: true, stale: false, pull_request, compare_url }
+}
+
+///|
+/// One pull request, varied per test by field update.
+fn test_pull_request() -> PullRequest {
+  {
+    number: 710,
+    title: "Add a changed-files explorer",
+    state: PullRequestOpen,
+    draft: true,
+    url: "https://github.test/acme/app/pull/710",
+    additions: 2972,
+    deletions: 287,
+    changed_files: 18,
+    checks: Some({ passed: 1, failed: 0, pending: 3 }),
+  }
+}
+
+///|
 test "a branch reply lands on its conversation and an empty one hides it" {
   let dispatch = test_dispatch()
   let stat : DiffStat = {
@@ -11715,12 +11714,7 @@ test "a branch reply lands on its conversation and an empty one hides it" {
   }
   let (_, named) = update_dev(
     dispatch,
-    BranchLoaded(
-      session="desktop-test",
-      branch=Some("feature/x"),
-      diffstat=Some(stat),
-      generation=0,
-    ),
+    branch_reply("feature/x", diffstat=stat),
     test_model(),
   )
   assert_true(named.active().branch is Some("feature/x"))
@@ -11729,25 +11723,9 @@ test "a branch reply lands on its conversation and an empty one hides it" {
   // lookup it issued is on record so a second reply cannot stack another.
   assert_eq(
     named.active().pull_request,
-    Some({
-      branch: "feature/x",
-      generation: 1,
-      probing: true,
-      stale: false,
-      pull_request: None,
-      compare_url: None,
-    }),
+    Some(probing_for("feature/x", generation=1)),
   )
-  let (_, cleared) = update_dev(
-    dispatch,
-    BranchLoaded(
-      session="desktop-test",
-      branch=Some(""),
-      diffstat=None,
-      generation=0,
-    ),
-    named,
-  )
+  let (_, cleared) = update_dev(dispatch, branch_reply(""), named)
   assert_true(cleared.active().branch is Some(""))
   // A workspace that stopped being a repository keeps no pull request from
   // the branch it used to have.
@@ -11755,12 +11733,7 @@ test "a branch reply lands on its conversation and an empty one hides it" {
   // A reply for an unknown session is dropped.
   let (_, ignored) = update_dev(
     dispatch,
-    BranchLoaded(
-      session="desktop-gone",
-      branch=Some("main"),
-      diffstat=None,
-      generation=0,
-    ),
+    branch_reply("main", session="desktop-gone"),
     test_model(),
   )
   assert_true(ignored.active().branch is None)
@@ -11795,12 +11768,7 @@ test "a superseded branch probe cannot put its older answer back" {
   }
   let (_, settled) = update_dev(
     dispatch,
-    BranchLoaded(
-      session="desktop-test",
-      branch=Some("feature/new"),
-      diffstat=Some(newer),
-      generation=2,
-    ),
+    branch_reply("feature/new", generation=2, diffstat=newer),
     second,
   )
   assert_eq(settled.active().diffstat, Some(newer))
@@ -11808,12 +11776,7 @@ test "a superseded branch probe cannot put its older answer back" {
   // corrected its stale totals until the next refresh.
   let (_, overtaken) = update_dev(
     dispatch,
-    BranchLoaded(
-      session="desktop-test",
-      branch=Some("feature/old"),
-      diffstat=None,
-      generation=1,
-    ),
+    branch_reply("feature/old", generation=1),
     settled,
   )
   assert_true(overtaken.active().branch is Some("feature/new"))
@@ -11825,38 +11788,16 @@ test "a pull-request reply only lands on the branch it was asked about" {
   let dispatch = test_dispatch()
   let (_, probing) = update_dev(
     dispatch,
-    BranchLoaded(
-      session="desktop-test",
-      branch=Some("feature/x"),
-      diffstat=None,
-      generation=0,
-    ),
+    branch_reply("feature/x"),
     test_model(),
   )
-  let answer : PullRequest = {
-    number: 710,
-    title: "Add a changed-files explorer",
-    state: PullRequestOpen,
-    draft: true,
-    url: "https://github.test/acme/app/pull/710",
-    additions: 2972,
-    deletions: 287,
-    changed_files: 18,
-    checks: Some({ passed: 1, failed: 0, pending: 3 }),
-  }
+  let answer = test_pull_request()
   // A reply from a lookup that has since been superseded is dropped. The
   // branch name cannot decide this: a checkout that moves X → Y → X leaves two
   // lookups for X in flight at once, so which request answered is the question.
   let (_, stale) = update_dev(
     dispatch,
-    PullRequestLoaded(
-      session="desktop-test",
-      branch="feature/x",
-      generation=0,
-      queried=Some("feature/x"),
-      pull_request=Some(answer),
-      compare_url=None,
-    ),
+    pull_request_reply("feature/x", generation=0, pull_request=answer),
     probing,
   )
   assert_eq(stale.active().pull_request.unwrap().pull_request, None)
@@ -11867,13 +11808,11 @@ test "a pull-request reply only lands on the branch it was asked about" {
   // probe matching the checked-out branch, does not show it against this one.
   let (_, moved) = update_dev(
     dispatch,
-    PullRequestLoaded(
-      session="desktop-test",
-      branch="feature/x",
+    pull_request_reply(
+      "feature/x",
       generation=1,
-      queried=Some("feature/y"),
-      pull_request=Some(answer),
-      compare_url=None,
+      queried="feature/y",
+      pull_request=answer,
     ),
     probing,
   )
@@ -11894,53 +11833,24 @@ test "a pull-request reply only lands on the branch it was asked about" {
   assert_eq(
     settled.active().pull_request,
     Some({
-      branch: "feature/x",
-      generation: 1,
+      ..probing_for("feature/x", generation=1, pull_request=answer),
       probing: false,
-      stale: false,
-      pull_request: Some(answer),
-      compare_url: None,
     }),
   )
   // Refreshing the same branch keeps that answer on screen while it re-probes,
-  // so the chip does not blink on every run boundary.
-  let (_, refreshing) = update_dev(
-    dispatch,
-    BranchLoaded(
-      session="desktop-test",
-      branch=Some("feature/x"),
-      diffstat=None,
-      generation=0,
-    ),
-    settled,
-  )
+  // so the chip does not blink on every run boundary. A new request means a new
+  // number; the answer it carries is the old one's, kept only until this lookup
+  // replaces it.
+  let (_, refreshing) = update_dev(dispatch, branch_reply("feature/x"), settled)
   assert_eq(
     refreshing.active().pull_request,
-    Some({
-      branch: "feature/x",
-      // A new request, so a new number — the answer it carries is the old
-      // one's, kept on screen only until this lookup replaces it.
-      generation: 2,
-      probing: true,
-      stale: false,
-      pull_request: Some(answer),
-      compare_url: None,
-    }),
+    Some(probing_for("feature/x", generation=2, pull_request=answer)),
   )
 }
 
 ///|
 test "a checkout that returns to a branch does not accept the older lookup" {
   let dispatch = test_dispatch()
-  fn branch_reply(name : String) {
-    BranchLoaded(
-      session="desktop-test",
-      branch=Some(name),
-      diffstat=None,
-      generation=0,
-    )
-  }
-
   // X, then away to Y, then back to X: the first X lookup is still running,
   // and a second one for the same branch is now in flight beside it.
   let (_, first) = update_dev(dispatch, branch_reply("feature/x"), test_model())
@@ -11948,81 +11858,46 @@ test "a checkout that returns to a branch does not accept the older lookup" {
   let (_, away) = update_dev(dispatch, branch_reply("feature/y"), first)
   let (_, back) = update_dev(dispatch, branch_reply("feature/x"), away)
   assert_eq(back.active().pull_request.unwrap().generation, 3)
-  let answer : PullRequest = {
-    number: 710,
-    title: "Add a changed-files explorer",
-    state: PullRequestOpen,
-    draft: false,
-    url: "https://github.test/acme/app/pull/710",
-    additions: 1,
-    deletions: 0,
-    changed_files: 1,
-    checks: None,
+  fn answered(generation : Int, number : Int) {
+    pull_request_reply("feature/x", generation~, pull_request={
+      ..test_pull_request(),
+      number,
+    })
   }
-  fn pull_request_reply(generation : Int, number : Int) {
-    PullRequestLoaded(
-      session="desktop-test",
-      branch="feature/x",
-      generation~,
-      queried=Some("feature/x"),
-      pull_request=Some({ ..answer, number, }),
-      compare_url=None,
-    )
+
+  fn picked(model : Model) {
+    model.active().pull_request.unwrap().pull_request.unwrap().number
   }
 
   // The newer one settles first.
-  let (_, settled) = update_dev(dispatch, pull_request_reply(3, 710), back)
-  assert_eq(
-    settled.active().pull_request.unwrap().pull_request.unwrap().number,
-    710,
-  )
+  let (_, settled) = update_dev(dispatch, answered(3, 710), back)
+  assert_eq(picked(settled), 710)
   // The older one for the same branch arrives afterwards. Matching by name
   // would take it; matching by request does not.
-  let (_, overtaken) = update_dev(dispatch, pull_request_reply(1, 404), settled)
-  assert_eq(
-    overtaken.active().pull_request.unwrap().pull_request.unwrap().number,
-    710,
-  )
+  let (_, overtaken) = update_dev(dispatch, answered(1, 404), settled)
+  assert_eq(picked(overtaken), 710)
 }
 
 ///|
 test "a refresh during a lookup is run afterwards, not dropped" {
   let dispatch = test_dispatch()
-  let branch_reply = BranchLoaded(
-    session="desktop-test",
-    branch=Some("feature/x"),
-    diffstat=None,
-    generation=0,
-  )
-  let (_, probing) = update_dev(dispatch, branch_reply, test_model())
+  let refresh = branch_reply("feature/x")
+  let (_, probing) = update_dev(dispatch, refresh, test_model())
   assert_true(probing.active().pull_request.unwrap().probing)
   // A run finishing while the run-start lookup is still in flight does not
   // stack a second request — but the answer it is waiting on was gathered
   // before that run's work, so it must not be the last word either.
-  let (_, queued) = update_dev(dispatch, branch_reply, probing)
+  let (_, queued) = update_dev(dispatch, refresh, probing)
   assert_eq(
     queued.active().pull_request,
-    Some({
-      branch: "feature/x",
-      generation: 1,
-      probing: true,
-      stale: true,
-      pull_request: None,
-      compare_url: None,
-    }),
+    Some({ ..probing_for("feature/x", generation=1), stale: true }),
   )
   // Settling that lookup therefore issues another rather than leaving the
   // composer describing the repository as it was when the run started.
+  let compare = "https://github.test/acme/app/compare/feature/x"
   let (_, followed) = update_dev(
     dispatch,
-    PullRequestLoaded(
-      session="desktop-test",
-      branch="feature/x",
-      generation=1,
-      queried=Some("feature/x"),
-      pull_request=None,
-      compare_url=Some("https://github.test/acme/app/compare/feature/x"),
-    ),
+    pull_request_reply("feature/x", generation=1, compare_url=compare),
     queued,
   )
   guard followed.active().pull_request is Some(probe) else {
@@ -12035,54 +11910,27 @@ test "a refresh during a lookup is run afterwards, not dropped" {
   // With nothing queued, settling is the end of it.
   let (_, quiet) = update_dev(
     dispatch,
-    PullRequestLoaded(
-      session="desktop-test",
-      branch="feature/x",
-      generation=1,
-      queried=Some("feature/x"),
-      pull_request=None,
-      compare_url=None,
-    ),
+    pull_request_reply("feature/x", generation=1),
     probing,
   )
   assert_false(quiet.active().pull_request.unwrap().probing)
   // A queued retry after an answer about a branch the checkout has left drops
   // that answer instead of relabelling it: carrying it over would reintroduce
-  // exactly the mismatch the reply's own branch is there to prevent.
-  let answer : PullRequest = {
-    number: 710,
-    title: "Add a changed-files explorer",
-    state: PullRequestOpen,
-    draft: false,
-    url: "https://github.test/acme/app/pull/710",
-    additions: 1,
-    deletions: 0,
-    changed_files: 1,
-    checks: None,
-  }
+  // exactly the mismatch the reply's own branch is there to prevent. The retry
+  // is a new request, so it carries the next number.
   let (_, elsewhere) = update_dev(
     dispatch,
-    PullRequestLoaded(
-      session="desktop-test",
-      branch="feature/x",
+    pull_request_reply(
+      "feature/x",
       generation=1,
-      queried=Some("feature/y"),
-      pull_request=Some(answer),
-      compare_url=None,
+      queried="feature/y",
+      pull_request=test_pull_request(),
     ),
     queued,
   )
   assert_eq(
     elsewhere.active().pull_request,
-    Some({
-      branch: "feature/x",
-      // The retry is a new request, so it carries the next number.
-      generation: 2,
-      probing: true,
-      stale: false,
-      pull_request: None,
-      compare_url: None,
-    }),
+    Some(probing_for("feature/x", generation=2)),
   )
 }
 
@@ -12093,12 +11941,7 @@ test "the composer's git details popover toggles shut again" {
   // one is where this starts — the flag cannot be raised otherwise.
   let (_, on_branch) = update_dev(
     dispatch,
-    BranchLoaded(
-      session="desktop-test",
-      branch=Some("feature/x"),
-      diffstat=None,
-      generation=0,
-    ),
+    branch_reply("feature/x"),
     test_model(),
   )
   assert_false(on_branch.git_details_open)
@@ -12110,12 +11953,11 @@ test "the composer's git details popover toggles shut again" {
   assert_eq(opened.active().diffstat, on_branch.active().diffstat)
   let (_, closed) = update(dispatch, ToggleGitDetails, opened)
   assert_false(closed.git_details_open)
-  // Switching conversations closes it too, and so does the branch going away
-  // under the conversation on screen — a checkout deleted, or one that stopped
-  // being a repository. Neither produces a click for the dismissal listener to
-  // see. Left standing, the flag would pop the popover open on the new
-  // conversation once its branch answered, and meanwhile suppress the native
-  // browser view with no chip rendered to click.
+  // Switching conversations closes it, and so does the branch going away under
+  // the conversation on screen. Neither produces a click for the dismissal
+  // listener to see, and with no chip rendered nothing is left to click the
+  // popover shut — the flag would go on hiding the native browser with no
+  // visible cause.
   let (_, switched) = update(
     dispatch,
     SessionRotated({ channel: Local, session: "desktop-other" }),
@@ -12123,19 +11965,7 @@ test "the composer's git details popover toggles shut again" {
   )
   assert_eq(switched.active_session, "desktop-other")
   assert_false(switched.git_details_open)
-  // So does the branch going away under the conversation on screen: no chip
-  // is rendered then, so nothing is left to click the popover shut, and the
-  // flag would go on hiding the native browser with no visible cause.
-  let (_, lost) = update_dev(
-    dispatch,
-    BranchLoaded(
-      session="desktop-test",
-      branch=Some(""),
-      diffstat=None,
-      generation=1,
-    ),
-    opened,
-  )
+  let (_, lost) = update_dev(dispatch, branch_reply("", generation=1), opened)
   assert_false(lost.active().shows_git_chip())
   assert_false(lost.git_details_open)
   // Dismissal is idempotent where the toggle is not: the click that closes the
@@ -15030,16 +14860,7 @@ test "full-screen modals hide the native view and closing restores it" {
   assert_true(launched.browser_pane.shown is None)
   // The popover needs a branch to have a trigger at all, so give the
   // conversation one before opening it.
-  let (_, on_branch) = update_dev(
-    dispatch,
-    BranchLoaded(
-      session="desktop-test",
-      branch=Some("feature/x"),
-      diffstat=None,
-      generation=0,
-    ),
-    restored,
-  )
+  let (_, on_branch) = update_dev(dispatch, branch_reply("feature/x"), restored)
   let (_, detailing) = update(dispatch, ToggleGitDetails, on_branch)
   assert_true(detailing.browser_pane.shown is None)
   // So do the other two surfaces `view.mbt` appends beside the picker: the

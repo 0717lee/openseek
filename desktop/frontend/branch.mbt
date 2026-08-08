@@ -540,6 +540,51 @@ test "the chip's tint follows CI, and its label follows the pull request" {
 }
 
 ///|
+/// Start a pull-request lookup for `branch`, stamped with the next generation.
+/// The answer already on screen is carried when it describes that branch, so
+/// the chip does not blank while the lookup runs; one about any other branch
+/// is dropped rather than relabelled, which is the mislabelling the reply's
+/// own branch exists to prevent.
+///
+/// Both callers — a branch answer, and the retry a stale probe queues — go
+/// through here. They drifted apart once, and the drift was that bug.
+fn probe_pull_request(
+  dispatch : @cmd.Emit[Msg],
+  channel : @interop.ChannelId,
+  conv : Conversation,
+  branch : String,
+) -> (@cmd.Cmd, Conversation) {
+  // Counted across branch changes, not per branch: a checkout that moves
+  // X → Y → X must not reuse a number an in-flight lookup already holds.
+  let generation = conv.pull_request.map(probe => probe.generation).unwrap_or(0) +
+    1
+  let fresh : PullRequestProbe = {
+    branch,
+    generation,
+    probing: true,
+    stale: false,
+    pull_request: None,
+    compare_url: None,
+  }
+  let probe = match conv.pull_request {
+    Some(previous) if previous.branch == branch =>
+      { ..previous, generation, probing: true, stale: false }
+    _ => fresh
+  }
+  (
+    fetch_pull_request(
+      dispatch,
+      channel,
+      conv.session_id,
+      branch,
+      conv.cwd,
+      generation~,
+    ),
+    { ..conv, pull_request: Some(probe) },
+  )
+}
+
+///|
 /// Look up `branch`'s pull request. The branch travels with the request so the
 /// reply can be matched against the checkout it described: a run that switches
 /// branches mid-flight must not have an old answer land on the new branch.
