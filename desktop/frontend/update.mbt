@@ -3545,6 +3545,9 @@ fn update_device_msg(
         ),
         worktrees_request_generation,
       })
+      // Every conversation this broadcast unbinds is unbound at the same
+      // instant, so one spent request number fences all of their probes.
+      let (fence, next) = next.mint_git_request()
       // Only an actual registry-row removal unbinds its conversations. Archive
       // keeps the row with `present: false`, so it passes through unchanged and
       // later Unarchive still surfaces Repair. Stand down any staged confirm
@@ -3561,7 +3564,7 @@ fn update_device_msg(
           // the host on the next run or open — and `forget_git` retires the
           // probes already in flight, which would otherwise answer for the
           // deleted directory and put every one of those fields back.
-          { ..conv.forget_git(), worktree: None, cwd: None }
+          { ..conv.forget_git(fence~), worktree: None, cwd: None }
         } else {
           conv
         }
@@ -3903,7 +3906,7 @@ fn update_device_msg(
         (commit_cmd, next)
       }
     }
-    BranchLoaded(session~, branch~, diffstat~, generation~) => {
+    BranchLoaded(session~, branch~, diffstat~, generation~, base_hint~) => {
       guard model.find_conversation(channel, session) is Some(conv) else {
         return (@cmd.none, model)
       }
@@ -3913,7 +3916,7 @@ fn update_device_msg(
       guard generation == conv.branch_generation else {
         return (@cmd.none, model)
       }
-      let conv = { ..conv, branch, diffstat }
+      let conv = { ..conv, branch, diffstat, diffstat_hint: base_hint }
       // The pull-request lookup rides on the branch answer rather than on the
       // four places that ask for it: whatever refreshes the branch — a run
       // starting, a session opening, a run finishing — is exactly when the
@@ -3921,9 +3924,10 @@ fn update_device_msg(
       guard branch is Some(branch) && !branch.is_empty() else {
         // Not a repository any more: an answer about the branch it used to
         // have would only mislead, including one still on its way.
+        let (fence, model) = model.mint_git_request()
         return (
           @cmd.none,
-          model.replace_conversation(conv.forget_pull_request()),
+          model.replace_conversation(conv.forget_pull_request(fence~)),
         )
       }
       // A lookup already in flight for this same branch is not stacked on —
@@ -3940,8 +3944,7 @@ fn update_device_msg(
           model.replace_conversation({ ..conv, pull_request, }),
         )
       }
-      let (cmd, conv) = probe_pull_request(dispatch, channel, conv, branch)
-      (cmd, model.replace_conversation(conv))
+      probe_pull_request(dispatch, model, channel, conv, branch)
     }
     PullRequestLoaded(
       session~,
@@ -3977,11 +3980,22 @@ fn update_device_msg(
       let conv = { ..conv, pull_request: Some(settled) }
       // A refresh arrived while this lookup was in flight: its answer predates
       // that refresh, so run one more against the branch now checked out.
-      guard stale && conv.branch is Some(current) && !current.is_empty() else {
-        return (@cmd.none, model.replace_conversation(conv))
+      if stale && conv.branch is Some(current) && !current.is_empty() {
+        return probe_pull_request(dispatch, model, channel, conv, current)
       }
-      let (cmd, conv) = probe_pull_request(dispatch, channel, conv, current)
-      (cmd, model.replace_conversation(conv))
+      let model = model.replace_conversation(conv)
+      // This answer may have named a base nobody knew when the diffstat beside
+      // it was measured — the first pull request a session sees, or one that
+      // has been retargeted since. Until it is measured again the popover
+      // reports a span from the wrong place, which on a stacked pull request
+      // is not a rounding error but the whole branch below this one. Measuring
+      // again settles the hint, so this asks at most once per base.
+      guard conv.settled_probe() is Some(probe) &&
+        probe.pull_request is Some(answer) &&
+        conv.diffstat_hint != Some(answer.base) else {
+        return (@cmd.none, model)
+      }
+      probe_branch(dispatch, model, channel, session, conv.cwd)
     }
     Started(
       run_id~,
@@ -11647,8 +11661,15 @@ fn branch_reply(
   generation? : Int = 0,
   session? : String = "desktop-test",
   diffstat? : DiffStat,
+  base_hint? : String,
 ) -> DeviceMsg {
-  BranchLoaded(session~, branch=Some(branch), diffstat~, generation~)
+  BranchLoaded(
+    session~,
+    branch=Some(branch),
+    diffstat~,
+    generation~,
+    base_hint~,
+  )
 }
 
 ///|
@@ -11793,9 +11814,11 @@ test "a superseded branch probe cannot put its older answer back" {
 ///|
 test "a pull-request reply only lands on the branch it was asked about" {
   let dispatch = test_dispatch()
+  // Measured from the base the answers below report, so settling one asks for
+  // nothing further and this stays about which reply lands where.
   let (_, probing) = update_dev(
     dispatch,
-    branch_reply("feature/x"),
+    branch_reply("feature/x", base_hint="main"),
     test_model(),
   )
   let answer = test_pull_request()
@@ -11845,12 +11868,79 @@ test "a pull-request reply only lands on the branch it was asked about" {
   // so the chip does not blink on every run boundary. A new request means a new
   // number; the answer it carries is the old one's, kept only until this lookup
   // replaces it.
-  let (_, refreshing) = update_dev(dispatch, branch_reply("feature/x"), settled)
+  let (_, refreshing) = update_dev(
+    dispatch,
+    branch_reply("feature/x", base_hint="main"),
+    settled,
+  )
   assert_eq(
     refreshing.active().pull_request,
     Some(probing_for("feature/x", pull_request=answer)),
   )
   assert_eq(refreshing.active().pull_request_generation, 2)
+}
+
+///|
+test "a pull request's base is measured from as soon as it is known" {
+  let dispatch = test_dispatch()
+  // The first probe of a session has no pull request to ask about, so the host
+  // measured from its own guess and said so.
+  let guessed : DiffStat = {
+    added: 2467,
+    removed: 51,
+    files: 24,
+    base: Some("origin/main"),
+    partial: false,
+  }
+  let (_, probing) = update_dev(
+    dispatch,
+    branch_reply("feature/y", diffstat=guessed),
+    test_model(),
+  )
+  assert_eq(probing.active().diffstat_hint, None)
+  let branch_generation = probing.active().branch_generation
+  // The lookup comes back naming a base no local rule would have guessed: this
+  // branch sits on another one, so the totals on screen are the stack's, not
+  // this branch's. Settling therefore asks for another measurement.
+  let stacked = { ..test_pull_request(), base: "feature/x" }
+  let (_, settled) = update_dev(
+    dispatch,
+    pull_request_reply("feature/y", generation=1, pull_request=stacked),
+    probing,
+  )
+  assert_true(settled.active().branch_generation > branch_generation)
+  // That measurement answers with the base it was given, which is what stops
+  // the next settled answer from asking again.
+  let measured : DiffStat = {
+    ..guessed,
+    added: 41,
+    base: Some("origin/feature/x"),
+  }
+  let (_, remeasured) = update_dev(
+    dispatch,
+    branch_reply(
+      "feature/y",
+      generation=settled.active().branch_generation,
+      diffstat=measured,
+      base_hint="feature/x",
+    ),
+    settled,
+  )
+  assert_eq(remeasured.active().diffstat, Some(measured))
+  assert_eq(remeasured.active().diffstat_hint, Some("feature/x"))
+  let (_, quiet) = update_dev(
+    dispatch,
+    pull_request_reply(
+      "feature/y",
+      generation=remeasured.active().pull_request_generation,
+      pull_request=stacked,
+    ),
+    remeasured,
+  )
+  assert_eq(
+    quiet.active().branch_generation,
+    remeasured.active().branch_generation,
+  )
 }
 
 ///|
@@ -11881,6 +11971,35 @@ test "a checkout that returns to a branch does not accept the older lookup" {
   // would take it; matching by request does not.
   let (_, overtaken) = update_dev(dispatch, answered(1, 404), settled)
   assert_eq(picked(overtaken), 710)
+}
+
+///|
+test "a reopened conversation does not accept the old record's replies" {
+  let dispatch = test_dispatch()
+  let (_, probing) = update_dev(
+    dispatch,
+    branch_reply("feature/x"),
+    test_model(),
+  )
+  let generation = probing.active().pull_request_generation
+  // Archiving and reopening the same session does not clear the record, it
+  // builds a new one — counters included, which is why they cannot live there.
+  let reopened = probing.replace_conversation(test_conversation())
+  assert_eq(reopened.active().pull_request_generation, 0)
+  let (_, again) = update_dev(dispatch, branch_reply("feature/x"), reopened)
+  assert_true(again.active().pull_request_generation > generation)
+  // The lookup the first record left running answers now, for a checkout the
+  // reopened conversation has not confirmed anything about yet.
+  let (_, late) = update_dev(
+    dispatch,
+    pull_request_reply(
+      "feature/x",
+      generation~,
+      pull_request=test_pull_request(),
+    ),
+    again,
+  )
+  assert_eq(late.active().pull_request.unwrap().pull_request, None)
 }
 
 ///|
@@ -11968,7 +12087,11 @@ test "the composer's git details popover toggles shut again" {
   )
   assert_eq(switched.active_session, "desktop-other")
   assert_false(switched.git_details_open)
-  let (_, lost) = update_dev(dispatch, branch_reply("", generation=1), opened)
+  let (_, lost) = update_dev(
+    dispatch,
+    branch_reply("", generation=opened.active().branch_generation),
+    opened,
+  )
   assert_false(lost.active().shows_git_chip())
   assert_false(lost.git_details_open)
   // Dismissal is idempotent where the toggle is not: the click that closes the

@@ -465,7 +465,13 @@ fn fetch_branch(
         _ => {
           scheduler.add(
             dispatch(
-              BranchLoaded(session~, branch=None, diffstat=None, generation~),
+              BranchLoaded(
+                session~,
+                branch=None,
+                diffstat=None,
+                generation~,
+                base_hint~,
+              ),
             ),
           )
           return
@@ -478,6 +484,7 @@ fn fetch_branch(
             branch=reply.branch,
             diffstat=reply.diffstat.map(DiffStat::from_reply),
             generation~,
+            base_hint~,
           ),
         ),
       )
@@ -501,7 +508,7 @@ fn probe_branch(
   guard model.find_conversation(channel, session) is Some(conv) else {
     return (@cmd.none, model)
   }
-  let generation = conv.branch_generation + 1
+  let (generation, model) = model.mint_git_request()
   // The branch's pull request, once one has answered, is the only exact word
   // on what this work is measured from. The first probe has none and the host
   // guesses; every one after it does not have to.
@@ -513,6 +520,16 @@ fn probe_branch(
     fetch_branch(dispatch, channel, session, cwd, generation~, base_hint?),
     model.replace_conversation({ ..conv, branch_generation: generation }),
   )
+}
+
+///|
+/// Take the next git request number. Nothing else holds it, which is what
+/// makes it good for both jobs: stamping a probe whose reply will be matched
+/// against it, and — spent without a probe — fencing off the replies of
+/// probes whose answers are no longer wanted.
+fn Model::mint_git_request(self : Model) -> (Int, Model) {
+  let generation = self.git_request_generation + 1
+  (generation, { ..self, git_request_generation: generation })
 }
 
 ///|
@@ -608,13 +625,14 @@ test "the chip's tint follows CI, and its label follows the pull request" {
 /// through here. They drifted apart once, and the drift was that bug.
 fn probe_pull_request(
   dispatch : @cmd.Emit[Msg],
+  model : Model,
   channel : @interop.ChannelId,
   conv : Conversation,
   branch : String,
-) -> (@cmd.Cmd, Conversation) {
+) -> (@cmd.Cmd, Model) {
   // Counted across branch changes, not per branch: a checkout that moves
   // X → Y → X must not reuse a number an in-flight lookup already holds.
-  let generation = conv.pull_request_generation + 1
+  let (generation, model) = model.mint_git_request()
   let fresh : PullRequestProbe = {
     branch,
     probing: true,
@@ -636,7 +654,11 @@ fn probe_pull_request(
       conv.cwd,
       generation~,
     ),
-    { ..conv, pull_request: Some(probe), pull_request_generation: generation },
+    model.replace_conversation({
+      ..conv,
+      pull_request: Some(probe),
+      pull_request_generation: generation,
+    }),
   )
 }
 
@@ -645,26 +667,28 @@ fn probe_pull_request(
 /// number the lookup that is still in flight carries. Without that second
 /// half, clearing is only a repaint: the outstanding reply still matches, and
 /// puts the pull request of a branch this conversation no longer has back on
-/// the chip.
-fn Conversation::forget_pull_request(self : Conversation) -> Conversation {
-  {
-    ..self,
-    pull_request: None,
-    pull_request_generation: self.pull_request_generation + 1,
-  }
+/// the chip. `fence` is a minted request number spent on nothing, so no reply
+/// in flight or yet to be issued can carry it.
+fn Conversation::forget_pull_request(
+  self : Conversation,
+  fence~ : Int,
+) -> Conversation {
+  { ..self, pull_request: None, pull_request_generation: fence }
 }
 
 ///|
 /// Forget the whole git side of a conversation — the branch, its diffstat, and
 /// its pull request — fencing off every probe still in flight for it. For a
 /// checkout that has gone away, where anything still arriving describes a
-/// directory that no longer exists.
-fn Conversation::forget_git(self : Conversation) -> Conversation {
+/// directory that no longer exists. One `fence` retires both probes: it is
+/// spent on neither.
+fn Conversation::forget_git(self : Conversation, fence~ : Int) -> Conversation {
   {
-    ..self.forget_pull_request(),
+    ..self.forget_pull_request(fence~),
     branch: None,
     diffstat: None,
-    branch_generation: self.branch_generation + 1,
+    diffstat_hint: None,
+    branch_generation: fence,
   }
 }
 

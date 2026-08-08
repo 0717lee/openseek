@@ -464,6 +464,13 @@ priv struct Conversation {
   // How much uncommitted work sits on that branch, answered by the same probe
   // and shown beside it. `None` whenever `branch` is.
   diffstat : DiffStat?
+  // Which base the probe that produced that diffstat was told to measure from,
+  // echoed back by the reply. Compared against the base a pull request later
+  // reports, it is how a diffstat measured from the host's guess — or from a
+  // base the pull request has since been retargeted away from — is noticed and
+  // measured again. Not `DiffStat::base`: that is the ref the host resolved the
+  // hint to, so comparing the two would never agree and would probe forever.
+  diffstat_hint : String?
   // The newest branch probe. Replies carry it, so one that is still counting
   // untracked files cannot land on top of a later probe's answer — a run's
   // start and its finish each issue one, and so does opening the popover.
@@ -999,6 +1006,12 @@ priv struct Model {
   // while the optional state carries input, rows, and selection.
   quick_open : QuickOpen?
   quick_open_generation : Int
+  // Every git probe's request number, minted here rather than per conversation
+  // for the same reason as `quick_open_generation`: a conversation archived and
+  // reopened is a *new* record, so a counter living on it restarts at zero and
+  // hands the old checkout's outstanding replies a number the new one accepts.
+  // Kept whole while the frontend runs, it can only ever be spent.
+  git_request_generation : Int
   // The desktop topbar's app launcher. Installed apps belong to the native
   // host, not a conversation or workspace, so this catalog is probed once
   // and kept while the frontend runs.
@@ -1640,11 +1653,14 @@ priv enum DeviceMsg {
   // `Some("")` when it is not a repository, `None` when the probe failed or
   // answered unintelligibly — and how much uncommitted work sits on it.
   // `generation` is the probe that asked; an older one's answer is discarded.
+  // `base_hint` is the baseline that probe was given, carried back rather than
+  // remembered: it says what the diffstat in the same message measures from.
   BranchLoaded(
     session~ : String,
     branch~ : String?,
     diffstat~ : DiffStat?,
-    generation~ : Int
+    generation~ : Int,
+    base_hint~ : String?
   )
   // A `git.pull_request` reply. `generation` is which request this answers,
   // and is what matches it to the probe waiting for it; `branch` is the one
@@ -1776,6 +1792,7 @@ fn empty_conversation(
     cwd: None,
     branch: None,
     diffstat: None,
+    diffstat_hint: None,
     branch_generation: 0,
     pull_request: None,
     pull_request_generation: 0,
@@ -1875,6 +1892,7 @@ fn initial_model() -> Model {
     symbol_cache: empty_symbol_cache(),
     quick_open: None,
     quick_open_generation: 0,
+    git_request_generation: 0,
     launcher: { open: false, apps: AppsNotFetched },
     git_details_open: false,
     dock: @dock.State::empty(),
