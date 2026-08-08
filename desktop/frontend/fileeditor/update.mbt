@@ -484,18 +484,13 @@ fn reconcile_reviews_after_changes(
         } else {
           ReviewLoading
         }
-        // The same path can cross the working-file boundary when HEAD moves:
-        // a partial commit can turn a modified row into a deletion, while a
-        // checkout can make a formerly deleted path readable again. Keep the
-        // tab state aligned with the final Git snapshot before either paired
-        // reply lands.
-        let refreshed_state = if !has_working_file {
-          TabDeleted
+        // Every new baseline generation owns a new working-tree read too.
+        // Keeping a loaded state here would let the older tagged read be
+        // rejected while the refreshed HEAD side settles against stale text.
+        let refreshed_state = if has_working_file {
+          TabLoading
         } else {
-          match doc.state {
-            TabDeleted => TabLoading
-            state => state
-          }
+          TabDeleted
         }
         let refreshed = {
           ..doc,
@@ -522,7 +517,20 @@ fn reconcile_reviews_after_changes(
             ),
           )
         }
-        if has_working_file && refreshed_state is TabLoading {
+        if has_working_file {
+          if ctx.active_file == Some(path) && !(doc.state is TabLoading) {
+            // Keep the previous working text visible while its replacement is
+            // in flight, but clear the old gutter until both new sides settle.
+            cmds.push(
+              show_tab_impl(
+                dispatch,
+                ctx,
+                path,
+                { ..refreshed, state: doc.state },
+                false,
+              ),
+            )
+          }
           cmds.push(
             read_file(
               dispatch,
@@ -847,9 +855,18 @@ fn changes_live(state : State, ctx : Ctx) -> Bool {
 /// reviews correct by conservatively refreshing them on each settled poll.
 fn reviews_need_unknown_head_refresh(state : State) -> Bool {
   for _, doc in state.docs {
-    if doc.review is Some(review) &&
-      !(review.selected.kind is (ChangeAdded | ChangeUntracked)) {
-      return true
+    if doc.review is Some(review) {
+      match review.baseline {
+        // Do not supersede a healthy in-flight baseline solely because an old
+        // host cannot identify HEAD; its settled result drives the next poll.
+        ReviewLoading => continue
+        // A genuinely unborn repository gives additions/untracked rows an
+        // empty baseline. Old hosts can give the same row real HEAD content,
+        // which must be refreshed after a commit removes that baseline.
+        ReviewMissing if review.selected.kind is (ChangeAdded | ChangeUntracked) =>
+          continue
+        _ => return true
+      }
     }
   }
   false
@@ -1042,13 +1059,16 @@ pub fn sync(
   let explorer_is_visible = explorer_visible(state, ctx)
   let explorer_reopened = explorer_is_visible && !state.explorer_was_visible
   let changes_are_live = changes_live(state, ctx)
-  let changes_may_be_stale = (explorer_is_visible || changes_are_live) &&
+  let changes_may_be_stale = changes_are_live &&
     (match state.watching {
       Some(watching) =>
         explorer_reopened ||
         watching.owner != ctx.owner ||
         watching.workspace != ctx.workspace ||
-        !watching.directories.contains(@pathx.Relative::root())
+        (
+          explorer_is_visible &&
+          !watching.directories.contains(@pathx.Relative::root())
+        )
       None => true
     })
   let state = { ..state, explorer_was_visible: explorer_is_visible }
@@ -3415,6 +3435,117 @@ test "only a final Changes snapshot reconciles reviews and moved HEAD refreshes 
 }
 
 ///|
+test "HEAD refresh restarts the generation-fenced working-tree read" {
+  let path = @pathx.Relative("src/paired.mbt")
+  let change = test_modified_change(path)
+  let docs : Map[@pathx.Relative, Doc] = Map([])
+  docs[path] = {
+    ..loaded_doc(path.0),
+    review: Some({
+      generation: 3,
+      baseline: ReviewContent("old HEAD"),
+      selected: change,
+    }),
+  }
+  let state = {
+    ..owned_state(),
+    changes: ChangeListLoading(refresh_again=false),
+    changes_generation: 1,
+    changes_head: Some("old-head"),
+    changes_head_known: true,
+    review_generation: 3,
+    docs,
+  }
+  let ctx = { ..test_ctx(), open_files: [path], active_file: Some(path) }
+  let (_, refreshed) = update(
+    test_emit(),
+    ChangesLoaded(
+      owner=ctx.owner,
+      generation=1,
+      repository=true,
+      head=Some("new-head"),
+      files=[change],
+    ),
+    state,
+    ctx,
+  )
+  assert_true(
+    refreshed.docs.get(path)
+    is Some(
+      {
+        state: TabLoading,
+        review: Some({ generation: 4, baseline: ReviewLoading, .. }),
+        ..,
+      }
+    ),
+  )
+  guard @resource.of_path(@interop.ChannelId::Local, "/work/src/paired.mbt")
+    is Some(absolute) else {
+    fail("test file resource was not absolute")
+  }
+  let (_, ignored_old_working) = update(
+    test_emit(),
+    FileLoaded(
+      owner=ctx.owner,
+      path~,
+      name="paired.mbt",
+      file=Content(content="stale working", absolute~, sig="2:13"),
+      review_generation=Some(3),
+      range=None,
+      annotation=None,
+    ),
+    refreshed,
+    ctx,
+  )
+  assert_true(ignored_old_working == refreshed)
+  let (_, baseline_ready) = update(
+    test_emit(),
+    GitOriginalLoaded(
+      owner=ctx.owner,
+      path~,
+      generation=4,
+      original=@protocol.OriginalContent("new HEAD"),
+    ),
+    ignored_old_working,
+    ctx,
+  )
+  assert_true(
+    baseline_ready.docs.get(path)
+    is Some(
+      {
+        state: TabLoading,
+        review: Some({ generation: 4, baseline: ReviewContent("new HEAD"), .. }),
+        ..,
+      }
+    ),
+  )
+  let (_, paired) = update(
+    test_emit(),
+    FileLoaded(
+      owner=ctx.owner,
+      path~,
+      name="paired.mbt",
+      file=Content(content="current working", absolute~, sig="3:15"),
+      review_generation=Some(4),
+      range=None,
+      annotation=None,
+    ),
+    baseline_ready,
+    ctx,
+  )
+  assert_true(
+    paired.docs.get(path)
+    is Some(
+      {
+        state: TabLoaded(content="current working", ..),
+        review: Some({ generation: 4, baseline: ReviewContent("new HEAD"), .. }),
+        ..,
+      }
+    ),
+  )
+}
+
+///|
 test "legacy Changes replies without HEAD refresh baseline-bearing reviews" {
   let path = @pathx.Relative("src/legacy-host.mbt")
   let change = test_modified_change(path)
@@ -3500,6 +3631,66 @@ test "unborn repository polls do not churn untracked reviews" {
     is Some(
       { review: Some({ generation: 3, baseline: ReviewMissing, .. }), .. }
     ),
+  )
+}
+
+///|
+test "legacy HEAD omission refreshes an untracked row with old content" {
+  let path = @pathx.Relative("recreated.mbt")
+  let untracked : ChangedFile = {
+    path,
+    original_path: None,
+    index_status: "?",
+    worktree_status: "?",
+    kind: ChangeUntracked,
+  }
+  let deleted : ChangedFile = {
+    path,
+    original_path: None,
+    index_status: "D",
+    worktree_status: " ",
+    kind: ChangeDeleted,
+  }
+  let docs : Map[@pathx.Relative, Doc] = Map([])
+  docs[path] = {
+    ..loaded_doc(path.0),
+    review: Some({
+      generation: 3,
+      baseline: ReviewContent("old tracked content"),
+      selected: untracked,
+    }),
+  }
+  let state = {
+    ..owned_state(),
+    changes: ChangeListLoading(refresh_again=false),
+    changes_generation: 1,
+    changes_head: None,
+    changes_head_known: true,
+    review_generation: 3,
+    docs,
+  }
+  let (_, refreshed) = update(
+    test_emit(),
+    ChangesLoaded(
+      owner=test_ctx().owner,
+      generation=1,
+      repository=true,
+      head=None,
+      files=[deleted, untracked],
+    ),
+    state,
+    { ..test_ctx(), open_files: [path], active_file: Some(path) },
+  )
+  assert_true(
+    refreshed.docs.get(path)
+    is Some(
+      {
+        state: TabLoading,
+        review: Some({ generation: 4, baseline: ReviewLoading, selected }),
+        ..,
+      }
+    ) &&
+    selected == untracked,
   )
 }
 
@@ -4060,6 +4251,64 @@ test "sync refreshes a hidden review after its workspace watch was parked" {
   let (refreshed, _) = sync(test_emit(), state, hidden)
   assert_true(refreshed.changes_generation == 5)
   assert_true(refreshed.changes is ChangeListReady(refreshing=true, ..))
+}
+
+///|
+test "a hidden review accepts its file-only watch without a refresh loop" {
+  let path = @pathx.Relative("src/reviewed.mbt")
+  let docs : Map[@pathx.Relative, Doc] = Map([])
+  docs[path] = {
+    ..loaded_doc(path.0),
+    review: Some({
+      generation: 2,
+      baseline: ReviewContent("old HEAD"),
+      selected: test_modified_change(path),
+    }),
+  }
+  let state = {
+    ..owned_state(),
+    explorer_was_visible: false,
+    watching: Some({
+      owner: test_ctx().owner,
+      workspace: None,
+      files: [path],
+      directories: [],
+    }),
+    changes: ChangeListReady(
+      repository=true,
+      files=[test_modified_change(path)],
+      refreshing=false,
+      refresh_again=false,
+    ),
+    changes_generation: 4,
+    docs,
+  }
+  let hidden = {
+    ..test_ctx(),
+    panel_open: false,
+    open_files: [path],
+    active_file: Some(path),
+  }
+  let (settled, _) = sync(test_emit(), state, hidden)
+  assert_true(settled.changes_generation == 4)
+  assert_true(
+    settled.changes
+    is ChangeListReady(refreshing=false, refresh_again=false, ..),
+  )
+  let in_flight = {
+    ..state,
+    changes: ChangeListReady(
+      repository=true,
+      files=[test_modified_change(path)],
+      refreshing=true,
+      refresh_again=false,
+    ),
+  }
+  let (still_in_flight, _) = sync(test_emit(), in_flight, hidden)
+  assert_true(
+    still_in_flight.changes
+    is ChangeListReady(refreshing=true, refresh_again=false, ..),
+  )
 }
 
 ///|
