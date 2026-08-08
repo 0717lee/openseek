@@ -3083,10 +3083,12 @@ main {
   font-variant-numeric: tabular-nums;
   cursor: pointer;
 }
+/* Same hover as the model chip beside it: two adjacent buttons that light up
+   differently read as an accident. */
 .composer-git-button:hover,
 .composer-git-button.open {
-  border-color: var(--ink-3);
-  color: var(--ink);
+  border-color: var(--accent);
+  color: var(--ink-1);
 }
 .composer-git-label {
   min-width: 0;

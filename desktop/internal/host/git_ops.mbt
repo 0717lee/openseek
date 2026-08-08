@@ -17,7 +17,20 @@ async fn git_branch_op(payload : GitBranchPayload) -> GitBranchReply {
     // Not a repository, or no git: there is nothing to count either.
     return { branch: None, diffstat: None }
   }
-  { branch: Some(branch), diffstat: git_diffstat(base) }
+  let diffstat = git_diffstat(base)
+  // The count takes long enough — a diff, plus one subprocess per untracked
+  // file — for an agent to check out something else while it runs. The two
+  // fields are applied together by the client, so a name from before the move
+  // paired with totals from after it would read as one coherent answer while
+  // being neither. Report the branch as it stands now, and let the next probe
+  // supply totals to match it.
+  guard git_branch(base.0) is Some(after) else {
+    return { branch: None, diffstat: None }
+  }
+  if after != branch {
+    return { branch: Some(after), diffstat: None }
+  }
+  { branch: Some(branch), diffstat }
 }
 
 ///|
@@ -145,7 +158,10 @@ async fn git_diffstat_from(
       "ls-files", "--others", "--exclude-standard", "-z", "--", ".",
     ])
     is Some(listing) else {
-    return Some(tracked)
+    // The listing itself was unreadable — a filename that is not valid UTF-8
+    // defeats the text conversion even though Git succeeded. Every untracked
+    // file is then missing from the total, which is a floor, not the whole.
+    return Some({ ..tracked, partial: true })
   }
   // `--others` spells its paths from Git's current directory, which is this
   // workspace. Validating each one lexically keeps a path that cannot address
@@ -153,7 +169,13 @@ async fn git_diffstat_from(
   let paths : Array[@pathx.Relative] = []
   let mut partial = false
   for path in listing.split("\u{0}") {
-    guard git_tree_relative(path.to_owned()) is Some(relative) else { continue }
+    // The listing is NUL-terminated, so its last field is empty by
+    // construction — that is the record separator, not a file left out.
+    guard !path.is_empty() else { continue }
+    guard git_tree_relative(path.to_owned()) is Some(relative) else {
+      partial = true
+      continue
+    }
     if paths.length() >= MaxUntrackedDiffFiles {
       partial = true
       break
