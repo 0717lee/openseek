@@ -47,11 +47,7 @@ pub async fn FileLock::acquire(path : @pathx.Path, kind : @fs.Lock) -> FileLock 
   // The lock precedes the data file: a first-run registry write creates the
   // directory itself, and there is nothing to open a lock in until it exists.
   ensure_dir(path.dirname())
-  let file = @fs.open(
-    lock_file(path).to_string(),
-    mode=ReadWrite,
-    create_mode=OpenOrCreate,
-  )
+  let file = open_lock_file(lock_file(path).to_string())
   // A wait interrupted by cancellation leaves the descriptor ours to close;
   // leaking it would also leak the lock for as long as the process lives.
   file.lock(kind) catch {
@@ -61,6 +57,46 @@ pub async fn FileLock::acquire(path : @pathx.Path, kind : @fs.Lock) -> FileLock 
     }
   }
   { file, }
+}
+
+///|
+/// Open the sidecar without being redirected by a link at its name. The
+/// sidecar has to live beside the data file — every writer, this app or a
+/// TUI, must agree on where it is — and beside the data file can mean inside
+/// an attached repository, which is free to ship its own
+/// `.openseek/worktrees.json.lock`.
+///
+/// A plain `OpenOrCreate` follows such a link twice over: it creates a file
+/// wherever the link points, and it locks that inode instead, so two
+/// instances following a link that moved would each hold a lock on a
+/// different file and both proceed into the registry write this exists to
+/// serialize.
+///
+/// `CreateNew` (O_CREAT|O_EXCL) never follows a link, so the create path is
+/// closed outright. The already-exists path — the ordinary one — rejects
+/// anything that is not a regular file by its own `lstat`. That leaves a
+/// window for a link swapped in between the check and the open: closing it
+/// needs `O_NOFOLLOW`, which this filesystem API does not expose. What it
+/// does close is the case that gets here without an attacker present at the
+/// keyboard, which is a link committed to a repository.
+async fn open_lock_file(sidecar : String) -> @fs.File {
+  let created = Some(
+    @fs.open(sidecar, mode=ReadWrite, create_mode=CreateNew, permission=0o600),
+  ) catch {
+    error if @async.is_being_cancelled() => raise error
+    _ => None
+  }
+  if created is Some(file) {
+    return file
+  }
+  let regular = (@fs.kind(sidecar, follow_symlink=false) is Regular) catch {
+    error if @async.is_being_cancelled() => raise error
+    _ => false
+  }
+  guard regular else {
+    fail("\{sidecar} is not a regular file; refusing to lock through it")
+  }
+  @fs.open(sidecar, mode=ReadWrite, create_mode=OpenExisting)
 }
 
 ///|
@@ -176,6 +212,34 @@ async test "an atomic save replaces the target and leaves no temp behind" {
   write_text_atomic(file, "second")
   assert_eq(read_text(file), "second")
   assert_eq(temp_leftovers(root, "registry.json"), [])
+  @fs.rmdir(root.to_string(), recursive=true)
+}
+
+///|
+/// The lock must not be redirectable either: an attached repository can ship
+/// `.openseek/worktrees.json.lock` as a link, and following it would both
+/// create a file wherever it points and lock the wrong inode.
+async test "a lock refuses a sidecar that is not a regular file" {
+  let root : @pathx.Path = @fs.tmpdir(prefix="openseek-fsx-locklink-")
+  let victim = root.join("victim.txt")
+  let file = root.join("registry.json")
+  @fs.symlink(
+    root.join("registry.json.lock").to_string(),
+    target=victim.to_string(),
+  )
+  let mut refused = false
+  let taken = Some(FileLock::acquire(file, Exclusive)) catch {
+    _ => {
+      refused = true
+      None
+    }
+  }
+  if taken is Some(lock) {
+    lock.release()
+  }
+  assert_true(refused)
+  // Following the link would have created the file it points at.
+  assert_false(exists(victim))
   @fs.rmdir(root.to_string(), recursive=true)
 }
 
