@@ -419,8 +419,9 @@ fn selected_review_change(
 /// a new generation and fresh HEAD read. The first authoritative snapshot
 /// after a missing-checkout recovery also restarts an incomplete side once so
 /// a reply discarded at that boundary cannot strand the document in loading.
-/// A vanished deletion row gets one post-review stat so an earlier, ignored
-/// same-path signature cannot leave a clean restoration marked as deleted.
+/// A vanished unavailable row gets one post-review stat so an earlier, ignored
+/// same-path signature cannot leave a clean restoration marked as deleted, and
+/// a commit that only changed Git metadata cannot strand a transient read error.
 fn reconcile_reviews_after_changes(
   dispatch : @cmd.Emit[Msg],
   state : State,
@@ -442,11 +443,11 @@ fn reconcile_reviews_after_changes(
         let ordinary = { ..doc, review: None }
         docs[path] = ordinary
         // A selected deletion deliberately ignores a same-path signature: it
-        // may belong to a separate untracked row. If the deletion row then
-        // disappears because the file was restored cleanly, that earlier stat
-        // cannot reopen the now-ordinary document. Probe once after review is
-        // cleared so reply order cannot leave an existing file marked deleted.
-        if doc.state is TabDeleted {
+        // may belong to a separate untracked row. A transient working read can
+        // also fail before a later commit removes the row without touching the
+        // file again. Probe either unavailable state once after review is
+        // cleared so an existing ordinary file is not left stranded.
+        if doc.state is (TabDeleted | TabReadFailed(_)) {
           restat_paths.push(path)
         }
         if ctx.active_file == Some(path) {
@@ -4834,6 +4835,85 @@ test "a selected deletion hands a clean restoration to an ordinary read" {
     is Some(
       {
         state: TabLoaded(content="HEAD source", sig="3:0", ..),
+        review: None,
+        stale: false,
+        ..,
+      }
+    ),
+  )
+}
+
+///|
+test "a vanished review retries a failed ordinary read" {
+  let emit = test_emit()
+  let path = @pathx.Relative("committed.mbt")
+  let docs : Map[@pathx.Relative, Doc] = Map([])
+  docs[path] = {
+    name: "committed.mbt",
+    state: TabReadFailed("temporary failure"),
+    review: Some({
+      generation: 7,
+      baseline: ReviewContent("old HEAD"),
+      selected: test_modified_change(path),
+    }),
+    stale: false,
+  }
+  let ctx = { ..test_ctx(), open_files: [path], active_file: Some(path) }
+  // A commit can remove the Git row without changing the working-tree file.
+  // Reconciliation must leave review mode and arrange a fresh stat instead of
+  // stranding the ordinary tab in the review read's transient failure.
+  let (_, ordinary) = update(
+    emit,
+    ChangesLoaded(
+      owner=ctx.owner,
+      generation=1,
+      repository=true,
+      head=Some("new-head"),
+      files=[],
+    ),
+    {
+      ..owned_state(),
+      docs,
+      changes: ChangeListLoading(refresh_again=false),
+      changes_generation: 1,
+      changes_head: Some("old-head"),
+      changes_head_known: true,
+    },
+    ctx,
+  )
+  assert_true(
+    ordinary.docs.get(path)
+    is Some({ state: TabReadFailed(_), review: None, stale: false, .. }),
+  )
+  let (_, reloading) = update(
+    emit,
+    StatsLoaded(owner=ctx.owner, stats=[{ path, sig: Some("4:0") }]),
+    ordinary,
+    ctx,
+  )
+  guard @resource.of_path(@interop.ChannelId::Local, "/work/committed.mbt")
+    is Some(absolute) else {
+    fail("test file resource was not absolute")
+  }
+  let (_, restored) = update(
+    emit,
+    FileLoaded(
+      owner=ctx.owner,
+      path~,
+      name="committed.mbt",
+      file=Content(content="committed source", absolute~, sig="4:0"),
+      review_generation=None,
+      range=None,
+      annotation=None,
+    ),
+    reloading,
+    ctx,
+  )
+  assert_true(
+    restored.docs.get(path)
+    is Some(
+      {
+        state: TabLoaded(content="committed source", sig="4:0", ..),
         review: None,
         stale: false,
         ..,
