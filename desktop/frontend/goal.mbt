@@ -153,6 +153,33 @@ test "the goal slash command opens the editor prefilled from the mirror" {
 }
 
 ///|
+test "the row's Edit takes the prompt's menu down with it" {
+  let dispatch = test_dispatch()
+  let conv : Conversation = {
+    ..test_conversation(),
+    goal: Some({ text: "ship the feature", blocked: None }),
+    task: "/",
+  }
+  // The `/` menu belongs to the prompt draft. A goal draft has no slash
+  // commands to offer, so leaving it up would let a stale row replace the
+  // goal being written — or run something else entirely.
+  guard compute_completion(conv.task, [], empty_symbol_cache(), {
+      channel: conv.device,
+      session: conv.session_id,
+    })
+    is Some(menu) else {
+    fail("the slash menu should be open")
+  }
+  let model = {
+    ..test_model().replace_conversation(conv),
+    completion: Some(menu),
+  }
+  let (_, editing) = update(dispatch, OpenGoalEditor, model)
+  assert_true(editing.active().goal_edit is Some(_))
+  assert_true(editing.completion is None)
+}
+
+///|
 test "submit holds the text until its marker lands" {
   let dispatch = test_dispatch()
   let model = test_model().replace_conversation({

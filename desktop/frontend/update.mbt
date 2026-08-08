@@ -2719,18 +2719,26 @@ fn update_msg(
       // Opening goal mode touches only this conversation, so an unsaved edit
       // waiting on another one is untouched — the reason the draft lives here
       // rather than in a single model-wide slot.
+      //
+      // A menu left open over the prompt does not survive the switch: it was
+      // computed from the prompt draft, and a goal draft has no slash
+      // commands to offer. Accepting one of its stale rows would replace the
+      // goal being written, or run something else entirely.
       (
         @cmd.none,
-        model.replace_conversation({
-          ..conv,
-          goal_edit: Some({
-            draft: if conv.goal is Some(goal) {
-              goal.text
-            } else {
-              ""
-            },
+        {
+          ..model.replace_conversation({
+            ..conv,
+            goal_edit: Some({
+              draft: if conv.goal is Some(goal) {
+                goal.text
+              } else {
+                ""
+              },
+            }),
           }),
-        }),
+          completion: None,
+        },
       )
     }
     GoalDraftEdited(draft) => {
