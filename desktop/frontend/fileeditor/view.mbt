@@ -280,7 +280,7 @@ fn tree_pane(dispatch : @cmd.Emit[Msg], state : State, ctx : Ctx) -> @html.Html 
 ///|
 fn change_count(changes : ChangeList) -> @html.Html {
   match changes {
-    ChangeListReady(files~, ..) =>
+    ChangeListReady(repository=true, files~, ..) =>
       @html.span(class="explorer-count", files.length().to_string())
     _ => @html.span(class="explorer-count hidden", "")
   }
@@ -394,6 +394,7 @@ fn changed_file_row(
         .data_set("path", change.path.0)
         .role("button")
         .aria_disabled("true")
+        .tabindex(0)
         .aria_label(change.unselectable_title())
         .aria_current(if selected { "page" } else { "false" }),
       children,

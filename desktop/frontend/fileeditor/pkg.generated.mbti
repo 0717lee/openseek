@@ -165,7 +165,7 @@ pub(all) struct State {
   explorer_mode : ExplorerMode
   changes : ChangeList
   changes_generation : Int
-  panel_was_open : Bool
+  explorer_was_visible : Bool
   watching : WatchedPaths?
   watch_error : String?
   expanded : Array[@pathx.Relative]

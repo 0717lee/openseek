@@ -360,8 +360,8 @@ fn moonbit_check_input(path : @pathx.Relative) -> Bool {
 
 ///|
 /// Reconcile the host's workspace watcher with what the panel and Quick Open
-/// need: follow the active session while the panel is open, tabs remain open,
-/// or a workspace file index is live. Wraps every `sync` exit so the
+/// need: follow the active session while the file body is visible, tabs remain
+/// open, or a workspace file index is live. Wraps every `sync` exit so the
 /// bookkeeping cannot be missed.
 fn State::watched_paths(self : State, ctx : Ctx) -> WatchedPaths? {
   let index_live = self.index is IndexLoading || self.index is IndexReady(..)
@@ -420,6 +420,16 @@ fn with_watch(
 
 ///|
 const ChangesPollDelayMilliseconds = 3000
+
+///|
+fn explorer_visible(state : State, ctx : Ctx) -> Bool {
+  ctx.panel_open && (state.tree_open || ctx.active_file is None)
+}
+
+///|
+fn changes_visible(state : State, ctx : Ctx) -> Bool {
+  explorer_visible(state, ctx) && state.explorer_mode is ExplorerChanges
+}
 
 ///|
 fn changes_poll_after_settle(
@@ -597,28 +607,28 @@ pub fn sync(
       _ => state
     }
   }
-  // A hidden panel can miss nested edits even when Quick Open keeps its
-  // shallow root-directory watch alive. The actual close/reopen transition
+  // A hidden explorer can miss nested edits even when Quick Open keeps its
+  // shallow root-directory watch alive. The actual hide/show transition
   // therefore invalidates a ready Changes snapshot; watcher ownership and
   // workspace gaps cover the remaining reroot cases.
-  let panel_reopened = ctx.panel_open && !state.panel_was_open
-  let changes_may_be_stale = ctx.panel_open &&
+  let explorer_is_visible = explorer_visible(state, ctx)
+  let explorer_reopened = explorer_is_visible && !state.explorer_was_visible
+  let changes_may_be_stale = explorer_is_visible &&
     (match state.watching {
       Some(watching) =>
-        panel_reopened ||
+        explorer_reopened ||
         watching.owner != ctx.owner ||
         watching.workspace != ctx.workspace ||
         !watching.directories.contains(@pathx.Relative::root())
       None => true
     })
-  let state = { ..state, panel_was_open: ctx.panel_open }
+  let state = { ..state, explorer_was_visible: explorer_is_visible }
   // The mode selection survives re-rooting, but its inventory does not. Load
   // it when Changes is visible, and refresh a ready snapshot when reopening
   // after its root watch was parked. Failed requests only retry on an explicit
   // selection or a settled run, not on every unrelated sync pass.
   let (changes_cmd, state) = if checkout_ready &&
-    ctx.panel_open &&
-    state.explorer_mode is ExplorerChanges &&
+    changes_visible(state, ctx) &&
     (
       state.changes is ChangeListIdle ||
       (
@@ -694,11 +704,33 @@ pub fn update(
       (request_viewer_remeasure(), { ..state, tree_open: opening })
     }
     ExplorerModeSelected(mode) => {
+      let already_selected = state.explorer_mode == mode
       let selected = { ..state, explorer_mode: mode }
       match mode {
         ExplorerFiles => (@cmd.none, selected)
-        // Clicking the already-selected Changes tab is also a manual refresh.
-        ExplorerChanges => refresh_changes(dispatch, selected, ctx)
+        ExplorerChanges =>
+          if already_selected ||
+            selected.changes is ChangeListIdle ||
+            selected.changes is ChangeListFailed(_) {
+            // Clicking the already-selected Changes tab is a manual refresh.
+            // The first visit also has to obtain an inventory. Moving focus
+            // back to a ready Changes tab keeps its watcher-fed snapshot and
+            // lets the normal fallback poll catch index-only changes.
+            refresh_changes(dispatch, selected, ctx)
+          } else {
+            match selected.changes {
+              ChangeListReady(repository=true, refreshing=false, ..) =>
+                (
+                  changes_poll_after_settle(
+                    dispatch,
+                    ctx.owner,
+                    selected.changes_generation,
+                  ),
+                  selected,
+                )
+              _ => (@cmd.none, selected)
+            }
+          }
       }
     }
     RevealDirectory(path) =>
@@ -840,8 +872,7 @@ pub fn update(
     ChangesPollDue(owner~, generation~) =>
       if state.owner == Some(owner) &&
         state.changes_generation == generation &&
-        ctx.panel_open &&
-        state.explorer_mode is ExplorerChanges &&
+        changes_visible(state, ctx) &&
         state.changes is ChangeListReady(repository=true, refreshing=false, ..) {
         refresh_changes(dispatch, state, ctx)
       } else {
@@ -858,22 +889,24 @@ pub fn update(
           // callback instead of replacing the current inventory.
           _ => return (@cmd.none, state)
         }
-        let next_generation = if refresh_again {
+        // A watcher/run signal may have latched while this request was in
+        // flight, then the user hid the explorer before its reply. Reopening
+        // performs a fresh full refresh, so do not spend the latch off-screen.
+        let follow_up = refresh_again && explorer_visible(state, ctx)
+        let next_generation = if follow_up {
           generation + 1
         } else {
           generation
         }
         (
-          if refresh_again {
+          if follow_up {
             list_changes(
               dispatch,
               owner,
               next_generation,
               workspace=ctx.workspace,
             )
-          } else if repository &&
-            ctx.panel_open &&
-            state.explorer_mode is ExplorerChanges {
+          } else if repository && changes_visible(state, ctx) {
             changes_poll_after_settle(dispatch, owner, generation)
           } else {
             @cmd.none
@@ -884,7 +917,7 @@ pub fn update(
             changes: ChangeListReady(
               repository~,
               files~,
-              refreshing=refresh_again,
+              refreshing=follow_up,
               refresh_again=false,
             ),
           },
@@ -896,28 +929,32 @@ pub fn update(
       } else {
         match state.changes {
           // An event arrived while the initial request was in flight. Give it
-          // one final attempt before surfacing the failure.
-          ChangeListLoading(refresh_again=true) => {
-            let next_generation = generation + 1
-            (
-              list_changes(
-                dispatch,
-                owner,
-                next_generation,
-                workspace=ctx.workspace,
-              ),
-              {
-                ..state,
-                changes: ChangeListLoading(refresh_again=false),
-                changes_generation: next_generation,
-              },
-            )
-          }
+          // one final attempt before surfacing the failure, unless the
+          // explorer hid meanwhile (reopening starts a fresh request).
+          ChangeListLoading(refresh_again=true) =>
+            if explorer_visible(state, ctx) {
+              let next_generation = generation + 1
+              (
+                list_changes(
+                  dispatch,
+                  owner,
+                  next_generation,
+                  workspace=ctx.workspace,
+                ),
+                {
+                  ..state,
+                  changes: ChangeListLoading(refresh_again=false),
+                  changes_generation: next_generation,
+                },
+              )
+            } else {
+              (@cmd.none, { ..state, changes: ChangeListIdle })
+            }
           // A background refresh failure leaves the last usable inventory on
           // screen. If an event arrived meanwhile, spend its one coalesced
           // retry before clearing the in-flight bit.
           ChangeListReady(repository~, files~, refreshing=true, refresh_again~) =>
-            if refresh_again {
+            if refresh_again && explorer_visible(state, ctx) {
               let next_generation = generation + 1
               (
                 list_changes(
@@ -939,9 +976,7 @@ pub fn update(
               )
             } else {
               (
-                if repository &&
-                  ctx.panel_open &&
-                  state.explorer_mode is ExplorerChanges {
+                if repository && changes_visible(state, ctx) {
                   // The failed request consumed the previous timer. Keep the
                   // low-frequency fallback alive after a transient bridge/Git
                   // error while retaining the last usable snapshot.
@@ -964,7 +999,14 @@ pub fn update(
           // usable snapshot.
           ChangeListReady(..) => (@cmd.none, state)
           ChangeListLoading(refresh_again=false) =>
-            (@cmd.none, { ..state, changes: ChangeListFailed(message) })
+            if explorer_visible(state, ctx) {
+              (@cmd.none, { ..state, changes: ChangeListFailed(message) })
+            } else {
+              // The error is off-screen and reopening has a stronger fresh
+              // signal than this failed snapshot; return to Idle so sync
+              // starts that request instead of surfacing a stale failure.
+              (@cmd.none, { ..state, changes: ChangeListIdle })
+            }
           // An Idle/Failed state has no active request. This can be a late
           // same-owner reply after an A→B→A re-root whose generation has not
           // yet advanced because Changes is hidden; ignore it.
@@ -1055,11 +1097,15 @@ pub fn update(
           Some(recheck) => recheck
           None => @cmd.none
         }
-        // Once requested, keep the inventory current even while the user is
-        // looking at Files, including retrying a previous failure. An idle
-        // Changes tab also loads at this natural workspace-settled boundary.
-        let (changes_cmd, next) = if !(state.changes is ChangeListIdle) ||
-          state.explorer_mode is ExplorerChanges {
+        // While the explorer is on-screen, keep the inventory current even
+        // when the user is looking at Files, including retrying a previous
+        // failure. A fully hidden explorer refreshes once when it reopens.
+        // An idle Changes tab also loads at this workspace-settled boundary.
+        let (changes_cmd, next) = if explorer_visible(state, ctx) &&
+          (
+            !(state.changes is ChangeListIdle) ||
+            state.explorer_mode is ExplorerChanges
+          ) {
           refresh_changes(dispatch, state, ctx)
         } else {
           (@cmd.none, state)
@@ -1151,10 +1197,14 @@ pub fn update(
         }
         let next = { ..state, loading, }
         // Any content event can change Git status, not just a structural one.
-        // Refresh only after Changes has been requested; the in-flight flag
-        // inside `refresh_changes` coalesces watcher bursts.
-        let (changes_cmd, next) = if state.changes is ChangeListLoading(_) ||
-          state.changes is ChangeListReady(..) {
+        // Refresh only after Changes has been requested and while the explorer
+        // is on-screen; reopening performs its own full refresh. The in-flight
+        // flag inside `refresh_changes` coalesces watcher bursts.
+        let (changes_cmd, next) = if explorer_visible(state, ctx) &&
+          (
+            state.changes is ChangeListLoading(_) ||
+            state.changes is ChangeListReady(..)
+          ) {
           refresh_changes(dispatch, next, ctx)
         } else {
           (@cmd.none, next)
@@ -1300,7 +1350,7 @@ fn owned_state() -> State {
   {
     ..State::empty(),
     owner: Some(test_ctx().owner),
-    panel_was_open: test_ctx().panel_open,
+    explorer_was_visible: true,
   }
 }
 
@@ -1786,14 +1836,47 @@ test "reopening Changes refreshes despite a Quick Open root watch" {
   }
   let closed_ctx = { ..test_ctx(), panel_open: false }
   let (closed, _) = sync(test_emit(), state, closed_ctx)
-  assert_false(closed.panel_was_open)
+  assert_false(closed.explorer_was_visible)
   assert_true(closed.watching is Some({ directories: [Relative("")], .. }))
   let (refreshed, _) = sync(test_emit(), closed, test_ctx())
-  assert_true(refreshed.panel_was_open)
+  assert_true(refreshed.explorer_was_visible)
   assert_true(
     refreshed.changes
     is ChangeListReady(refreshing=true, refresh_again=false, ..),
   )
+}
+
+///|
+test "showing a hidden explorer refreshes Changes before polling resumes" {
+  let hidden_ctx = { ..test_ctx(), active_file: Some(Relative("src/main.mbt")) }
+  let state = {
+    ..owned_state(),
+    tree_open: false,
+    explorer_mode: ExplorerChanges,
+    explorer_was_visible: false,
+    changes: ChangeListReady(
+      repository=true,
+      files=[],
+      refreshing=false,
+      refresh_again=false,
+    ),
+    watching: Some({
+      owner: test_ctx().owner,
+      workspace: None,
+      files: [],
+      directories: [@pathx.Relative::root()],
+    }),
+  }
+  let (hidden, _) = sync(test_emit(), state, hidden_ctx)
+  assert_false(hidden.explorer_was_visible)
+  assert_true(hidden.changes is ChangeListReady(refreshing=false, ..))
+  let (refreshed, _) = sync(
+    test_emit(),
+    { ..hidden, tree_open: true },
+    hidden_ctx,
+  )
+  assert_true(refreshed.explorer_was_visible)
+  assert_true(refreshed.changes is ChangeListReady(refreshing=true, ..))
 }
 
 ///|
@@ -1808,7 +1891,7 @@ test "reopening Changes latches a follow-up for an in-flight refresh" {
       refresh_again=false,
     ),
     changes_generation: 1,
-    panel_was_open: false,
+    explorer_was_visible: false,
     watching: Some({
       owner: test_ctx().owner,
       workspace: None,
@@ -1831,7 +1914,7 @@ test "reopening Changes latches a follow-up for the initial load" {
     explorer_mode: ExplorerChanges,
     changes: ChangeListLoading(refresh_again=false),
     changes_generation: 1,
-    panel_was_open: false,
+    explorer_was_visible: false,
     watching: Some({
       owner: test_ctx().owner,
       workspace: None,
@@ -1876,6 +1959,40 @@ test "selecting Changes loads once and coalesces an in-flight refresh" {
     is ChangeListReady(refreshing=true, refresh_again=false, ..),
   )
   assert_true(following_up.changes_generation == 2)
+}
+
+///|
+test "moving focus to a ready Changes snapshot defers its fallback refresh" {
+  let emit = test_emit()
+  let state = {
+    ..owned_state(),
+    explorer_mode: ExplorerFiles,
+    changes: ChangeListReady(
+      repository=true,
+      files=[],
+      refreshing=false,
+      refresh_again=false,
+    ),
+    changes_generation: 4,
+  }
+  let (_, selected) = update(
+    emit,
+    ExplorerModeSelected(ExplorerChanges),
+    state,
+    test_ctx(),
+  )
+  assert_true(selected.explorer_mode is ExplorerChanges)
+  assert_true(selected.changes_generation == 4)
+  assert_true(selected.changes is ChangeListReady(refreshing=false, ..))
+  // Re-selecting the active tab remains the explicit, immediate refresh.
+  let (_, refreshing) = update(
+    emit,
+    ExplorerModeSelected(ExplorerChanges),
+    selected,
+    test_ctx(),
+  )
+  assert_true(refreshing.changes_generation == 5)
+  assert_true(refreshing.changes is ChangeListReady(refreshing=true, ..))
 }
 
 ///|
@@ -2018,6 +2135,13 @@ test "only a visible settled Changes snapshot accepts its polling fallback" {
     { ..test_ctx(), panel_open: false },
   )
   assert_true(hidden == state)
+  let (_, hidden_tree) = update(
+    emit,
+    ChangesPollDue(owner=test_ctx().owner, generation=4),
+    { ..state, tree_open: false },
+    { ..test_ctx(), active_file: Some(Relative("open.mbt")) },
+  )
+  assert_true(hidden_tree == { ..state, tree_open: false })
   let (_, files_mode) = update(
     emit,
     ChangesPollDue(owner=test_ctx().owner, generation=4),
@@ -2026,6 +2150,64 @@ test "only a visible settled Changes snapshot accepts its polling fallback" {
   )
   assert_true(files_mode.explorer_mode is ExplorerFiles)
   assert_true(files_mode.changes_generation == 4)
+}
+
+///|
+test "hidden explorer drops coalesced follow-ups when requests settle" {
+  let emit = test_emit()
+  let hidden = { ..test_ctx(), panel_open: false }
+  let refreshing = {
+    ..owned_state(),
+    changes: ChangeListReady(
+      repository=true,
+      files=[],
+      refreshing=true,
+      refresh_again=true,
+    ),
+    changes_generation: 4,
+  }
+  let (_, loaded) = update(
+    emit,
+    ChangesLoaded(owner=test_ctx().owner, generation=4, repository=true, files=[]),
+    refreshing,
+    hidden,
+  )
+  assert_true(loaded.changes_generation == 4)
+  assert_true(
+    loaded.changes is ChangeListReady(refreshing=false, refresh_again=false, ..),
+  )
+  let (_, failed_refresh) = update(
+    emit,
+    ChangesFailed(owner=test_ctx().owner, generation=4, message="git failed"),
+    refreshing,
+    hidden,
+  )
+  assert_true(failed_refresh.changes_generation == 4)
+  assert_true(
+    failed_refresh.changes
+    is ChangeListReady(refreshing=false, refresh_again=false, ..),
+  )
+  let loading = {
+    ..owned_state(),
+    changes: ChangeListLoading(refresh_again=true),
+    changes_generation: 4,
+  }
+  let (_, failed_load) = update(
+    emit,
+    ChangesFailed(owner=test_ctx().owner, generation=4, message="git failed"),
+    loading,
+    hidden,
+  )
+  assert_true(failed_load.changes_generation == 4)
+  assert_true(failed_load.changes is ChangeListIdle)
+  let (_, failed_unlatched_load) = update(
+    emit,
+    ChangesFailed(owner=test_ctx().owner, generation=4, message="git failed"),
+    { ..loading, changes: ChangeListLoading(refresh_again=false) },
+    hidden,
+  )
+  assert_true(failed_unlatched_load.changes_generation == 4)
+  assert_true(failed_unlatched_load.changes is ChangeListIdle)
 }
 
 ///|
@@ -2127,6 +2309,38 @@ test "watcher refresh keeps the ready change snapshot visible" {
       refresh_again=false
     ),
   )
+}
+
+///|
+test "hidden explorer parks event-driven change refreshes until reopen" {
+  let emit = test_emit()
+  let state = {
+    ..owned_state(),
+    changes: ChangeListReady(
+      repository=true,
+      files=[],
+      refreshing=false,
+      refresh_again=false,
+    ),
+    changes_generation: 4,
+  }
+  let hidden = { ..test_ctx(), panel_open: false }
+  let (_, after_watch) = update(
+    emit,
+    FsChanged(session=Some("desktop-test"), changes=Some([])),
+    state,
+    hidden,
+  )
+  assert_true(after_watch.changes_generation == 4)
+  assert_true(after_watch.changes is ChangeListReady(refreshing=false, ..))
+  let (_, after_run) = update(
+    emit,
+    RunSettled(owner=test_ctx().owner),
+    after_watch,
+    hidden,
+  )
+  assert_true(after_run.changes_generation == 4)
+  assert_true(after_run.changes is ChangeListReady(refreshing=false, ..))
 }
 
 ///|

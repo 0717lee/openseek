@@ -189,10 +189,11 @@ pub(all) struct State {
   // Monotonic request token retained across conversation re-roots. Owner plus
   // this generation rejects an old A→B→A reply for the same conversation.
   changes_generation : Int
-  // Whether the enclosing dock panel was open on the preceding sync pass.
-  // This is intentionally independent of the watcher: Quick Open can retain
-  // a shallow root watch while the hidden Changes inventory still goes stale.
-  panel_was_open : Bool
+  // Whether the explorer pane was visible on the preceding sync pass. This is
+  // stricter than the enclosing dock being open: with a file active the tree
+  // toggle (and narrow drill-down) can hide the explorer while the dock stays
+  // open. Quick Open may retain a shallow root watch in either hidden state.
+  explorer_was_visible : Bool
   // The paths the host's watcher currently follows (`None` = parked). Keeping
   // the full configuration makes opening/closing a tab or expanding/collapsing
   // a directory replace the watch even when the conversation did not change.
@@ -229,7 +230,7 @@ pub fn State::empty() -> State {
     explorer_mode: ExplorerFiles,
     changes: ChangeListIdle,
     changes_generation: 0,
-    panel_was_open: false,
+    explorer_was_visible: false,
     watching: None,
     watch_error: None,
     expanded: [],
@@ -292,9 +293,10 @@ pub(all) struct Ctx {
   // closes the tree — a drill-down — instead of showing both side by side.
   narrow : Bool
   // The dock's projection, recomputed by the root each dispatch: whether the
-  // right panel is expanded, which files the strip holds (in strip order —
-  // the stat/watch/reload sweeps run over this list), and which file tab is
-  // active (`None` while no file tab is on screen).
+  // file body is actually on-screen (open on Chat with a file or picker active),
+  // which files the strip holds (in strip order — the stat/watch/reload sweeps
+  // run over this list), and which file tab is active (`None` while no file tab
+  // is on screen).
   panel_open : Bool
   open_files : Array[@pathx.Relative]
   active_file : @pathx.Relative?

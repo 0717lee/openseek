@@ -923,6 +923,10 @@ fn apply_engine_event(
 fn file_ctx(model : Model) -> @fileeditor.Ctx {
   let conv = model.active()
   let checkout = model.checkout_placement(conv)
+  let file_body_visible = match model.dock.active {
+    Some(File(_)) | Some(FilePicker) => true
+    None | Some(Browser(_)) => false
+  }
   {
     // Parking under an empty session makes `@fileeditor.sync` clear the
     // imperative viewer and retire its watcher. `sync_file_panel` parks the
@@ -943,7 +947,11 @@ fn file_ctx(model : Model) -> @fileeditor.Ctx {
     narrow: model.narrow,
     // The dock's projection: strip membership and the active tab are the
     // dock's truth, handed to the file subsystem read-only.
-    panel_open: model.dock.open,
+    // The dock preference survives Skills/Settings navigation, and an open
+    // dock can instead show its browser or empty-strip launcher. CSS hides the
+    // file body in all three cases. Report actual visibility so the file
+    // subsystem parks its workspace watches and Changes refreshes off-screen.
+    panel_open: model.dock.open && model.screen is Chat && file_body_visible,
     open_files: @dock.file_paths(model.dock),
     active_file: @dock.active_file(model.dock),
   }
@@ -11737,6 +11745,46 @@ test "installed skills replies are scoped to their source device" {
 }
 
 ///|
+test "file editor context reports the file body actual visibility" {
+  let model = test_model()
+  let path = @pathx.Relative("src/main.mbt")
+  let file_model = {
+    ..model,
+    dock: {
+      ..model.dock,
+      open: true,
+      tabs: [File(path~)],
+      active: Some(File(path~)),
+    },
+  }
+  assert_true(file_ctx(file_model).panel_open)
+  assert_false(
+    file_ctx({ ..file_model, dock: { ..file_model.dock, open: false } }).panel_open,
+  )
+  let picker_model = {
+    ..file_model,
+    dock: { ..file_model.dock, tabs: [FilePicker], active: Some(FilePicker) },
+  }
+  assert_true(file_ctx(picker_model).panel_open)
+  let browser_model = {
+    ..file_model,
+    dock: {
+      ..file_model.dock,
+      tabs: [Browser(id=1)],
+      active: Some(Browser(id=1)),
+    },
+  }
+  assert_false(file_ctx(browser_model).panel_open)
+  let launcher_model = {
+    ..file_model,
+    dock: { ..file_model.dock, tabs: [], active: None },
+  }
+  assert_false(file_ctx(launcher_model).panel_open)
+  assert_false(file_ctx({ ..file_model, screen: Skills }).panel_open)
+  assert_false(file_ctx({ ..file_model, screen: Settings }).panel_open)
+}
+
+///|
 test "JumpToMention opens the editor panel and selects the mention's file" {
   let dispatch = test_dispatch()
   let mention : Mention = {
@@ -11832,8 +11880,9 @@ test "chip jumps relativize legacy absolute paths against the roots" {
   assert_true(@dock.active_file(next.dock) is Some(Relative("src/main.mbt")))
   assert_false(next.file_panel.tree_open)
   assert_true(next.file_panel.explorer_mode is @fileeditor.ExplorerChanges)
-  // The eager re-root retains 7; the now-visible Changes inventory starts 8.
-  assert_true(next.file_panel.changes_generation == 8)
+  // The eager re-root retains 7. The jump keeps the explorer hidden while the
+  // file is active, so Changes waits until the pane is shown before refreshing.
+  assert_true(next.file_panel.changes_generation == 7)
   // Before the first run reports cwd, the attached workspace serves as root.
   let model = test_model()
     .replace_conversation({ ..test_conversation(), workspace: Some(workspace) })
