@@ -68,6 +68,57 @@ async fn git_branch(dir : String) -> String? {
 }
 
 ///|
+/// The branch `HEAD` points at, and nothing else. Unlike `git_branch` this
+/// does not stand in a short hash for a detached checkout: a hash is a fine
+/// thing to show a person and a nonsense thing to hand an API that filters by
+/// branch name.
+async fn git_symbolic_branch(dir : String) -> String? {
+  guard git_output_opt(dir, ["symbolic-ref", "--short", "--quiet", "HEAD"])
+    is Some(output) else {
+    return None
+  }
+  let name = git_single_line(output)
+  if name.is_empty() {
+    None
+  } else {
+    Some(name)
+  }
+}
+
+///|
+/// Whether some remote already has `branch`. Read from the remote-tracking
+/// refs, so it answers for the state this checkout last saw — which is exactly
+/// the state a push from here updates.
+async fn git_branch_on_remote(dir : String, branch : String) -> Bool {
+  for remote in git_remotes(dir) {
+    if git_output_opt(dir, [
+        "rev-parse",
+        "--verify",
+        "--quiet",
+        "refs/remotes/\{remote}/\{branch}",
+      ])
+      is Some(_) {
+      return true
+    }
+  }
+  false
+}
+
+///|
+/// The configured remotes, in Git's order.
+async fn git_remotes(dir : String) -> Array[String] {
+  let remotes : Array[String] = []
+  guard git_output_opt(dir, ["remote"]) is Some(listing) else { return remotes }
+  for line in listing.split("\n") {
+    let remote = line.trim_end(chars="\r")
+    if !remote.is_empty() {
+      remotes.push(remote.to_owned())
+    }
+  }
+  remotes
+}
+
+///|
 /// Git's empty tree. A repository whose `HEAD` has no commit yet still has an
 /// index worth diffing, and every Git version spells this baseline object the
 /// same way, so it is a constant rather than something to ask the repository
@@ -123,16 +174,12 @@ async fn git_base_candidates(dir : String) -> Array[String] {
       offer(line.trim_end(chars="\r").to_owned())
     }
   }
-  if git_output_opt(dir, ["remote"]) is Some(listing) {
-    for line in listing.split("\n") {
-      let remote = line.trim_end(chars="\r")
-      guard !remote.is_empty() else { continue }
-      for name in ["main", "master"] {
-        let candidate = "\{remote}/\{name}"
-        if git_output_opt(dir, ["rev-parse", "--verify", "--quiet", candidate])
-          is Some(_) {
-          offer(candidate)
-        }
+  for remote in git_remotes(dir) {
+    for name in ["main", "master"] {
+      let candidate = "\{remote}/\{name}"
+      if git_output_opt(dir, ["rev-parse", "--verify", "--quiet", candidate])
+        is Some(_) {
+        offer(candidate)
       }
     }
   }

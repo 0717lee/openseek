@@ -53,10 +53,15 @@ async fn git_pull_request_op(
   // move the checkout between the two.
   guard git_branch(base.0) is Some(branch) else { return nothing }
   let unanswered : GitPullRequestReply = { ..nothing, branch: Some(branch) }
+  // A detached checkout has no branch name to ask about. `git_branch` stands
+  // a short hash in for one, which is right for the chip and wrong for
+  // `--head`: gh would filter for a branch by that name, find nothing, and the
+  // caller would offer to open a pull request from a ref that is not one.
+  guard git_symbolic_branch(base.0) is Some(head) else { return unanswered }
   guard resolve_gh() is Some(gh) else { return unanswered }
   // One deadline for the whole exchange, however many calls it takes.
   @async.with_timeout_opt(GithubRequestTimeoutMs, () => {
-    branch_pull_request(gh, base, branch)
+    branch_pull_request(gh, base, head)
   }).unwrap_or(unanswered)
 }
 
@@ -97,6 +102,11 @@ async fn branch_pull_request(
   // compare link below survives that, since GitHub's compare page on a fork
   // already defaults its base to the parent.
   //
+  // A branch no remote has yet gets no link at all: GitHub cannot compare a
+  // ref it has never seen, so the offer would open a page that can do nothing
+  // with the commits. That is the ordinary state of a branch an agent just
+  // made, which is exactly when the offer would be most tempting to click.
+  guard git_branch_on_remote(dir.0, branch) else { return nothing }
   // Only this branch pays for the second call.
   guard gh_json(gh, dir, ["repo", "view", "--json", "url"])
     is Some(Object(repo)) &&
