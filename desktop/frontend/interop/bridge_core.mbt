@@ -65,13 +65,25 @@ extern "js" fn js_ordered_method_promise(
   target : @js.Value,
   name : String,
   payload : @js.Value,
+  timeout_ms : Int,
 ) -> @js.Promise =
   #| (() => {
   #|   let tail = Promise.resolve();
-  #|   return (target, name, payload) => {
+  #|   return (target, name, payload, timeoutMs) => {
   #|     const request = tail
   #|       .catch(() => undefined)
-  #|       .then(() => target[name](payload));
+  #|       .then(() => new Promise((resolve, reject) => {
+  #|         const timer = setTimeout(
+  #|           () => reject(new Error(`OpenSeek request timed out: ${name}`)),
+  #|           timeoutMs,
+  #|         );
+  #|         Promise.resolve()
+  #|           .then(() => target[name](payload))
+  #|           .then(
+  #|             value => { clearTimeout(timer); resolve(value); },
+  #|             error => { clearTimeout(timer); reject(error); },
+  #|           );
+  #|       }));
   #|     tail = request.catch(() => undefined);
   #|     return request;
   #|   };
@@ -82,6 +94,9 @@ extern "js" fn js_ordered_method_promise(
 /// what makes the contract hold for remote hosts, including older servers
 /// that execute ordinary JSON-RPC requests concurrently.
 let ordered_request_locks : Map[ChannelId, @async.Mutex] = Map([])
+
+///|
+const OrderedRequestTimeoutMilliseconds = 30000
 
 ///|
 fn ordered_request_lock(channel : ChannelId) -> @async.Mutex {
@@ -110,14 +125,24 @@ pub async fn[Payload : ToJson, Reply : @json.FromJson] bridge_request_in_order(
   defer lock.release()
   let op = command.name()
   let payload = @js.Value::from_json(payload.to_json())
-  let reply = match channel {
-    Local => {
-      guard openseek_api() is Some(api) && js_prop(api, op) is Some(_) else {
-        raise BridgeError("OpenSeek bridge unavailable")
+  guard @async.with_timeout_opt(OrderedRequestTimeoutMilliseconds, () => {
+      match channel {
+        Local => {
+          guard openseek_api() is Some(api) && js_prop(api, op) is Some(_) else {
+            raise BridgeError("OpenSeek bridge unavailable")
+          }
+          js_ordered_method_promise(
+            api,
+            op,
+            payload,
+            OrderedRequestTimeoutMilliseconds,
+          ).wait()
+        }
+        Remote(_) => ws_request(channel, op, payload)
       }
-      js_ordered_method_promise(api, op, payload).wait()
-    }
-    Remote(_) => ws_request(channel, op, payload)
+    })
+    is Some(reply) else {
+    raise BridgeError("OpenSeek request timed out: {op}")
   }
   let json = if reply.is_undefined() || reply.is_null() {
     Json::empty_object()
@@ -129,6 +154,24 @@ pub async fn[Payload : ToJson, Reply : @json.FromJson] bridge_request_in_order(
   @json.from_json(json) catch {
     _ => raise BridgeError("Malformed reply from {op}")
   }
+}
+
+///|
+async test "an ordered request failure releases its channel lane" {
+  let request = async fn() -> Bool {
+    ignore(
+      bridge_request_in_order(
+        ChannelId::Local,
+        @commands.fs_unwatch,
+        @protocol.EmptyPayload::NoPayload,
+      ),
+    ) catch {
+      _ => return true
+    }
+    false
+  }
+  assert_true(request())
+  assert_true(@async.with_timeout_opt(100, request) is Some(true))
 }
 
 ///|

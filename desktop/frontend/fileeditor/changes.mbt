@@ -105,6 +105,7 @@ fn read_git_original(
   path : @pathx.Relative,
   source : @pathx.Relative,
   generation : Int,
+  background? : Bool = false,
   revision~ : String?,
   workspace~ : @common.Uri?,
 ) -> @cmd.Cmd {
@@ -115,6 +116,7 @@ fn read_git_original(
           owner~,
           path~,
           generation~,
+          background~,
           message="workspace moved to another host before Git review",
         ),
       )
@@ -139,6 +141,7 @@ fn read_git_original(
                 owner~,
                 path~,
                 generation~,
+                background~,
                 message=@interop.bridge_error_text(error),
               ),
             ),
@@ -147,7 +150,9 @@ fn read_git_original(
         }
       }
       scheduler.add(
-        dispatch(GitOriginalLoaded(owner~, path~, generation~, original~)),
+        dispatch(
+          GitOriginalLoaded(owner~, path~, generation~, background~, original~),
+        ),
       )
     })
   })

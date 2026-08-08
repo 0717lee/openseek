@@ -655,6 +655,7 @@ fn open_editor_at(
       tree_open: previous_panel.tree_open,
       explorer_mode: previous_panel.explorer_mode,
       changes_generation: previous_panel.changes_generation,
+      request_epoch: previous_panel.request_epoch + 1,
       review_generation: previous_panel.review_generation,
       // Preserve the old host configuration until the post-dispatch sync can
       // explicitly retire or replace it.
@@ -944,6 +945,7 @@ fn file_ctx(model : Model) -> @fileeditor.Ctx {
     // stable owner lets an interrupted changed-file review resume after Repair
     // without ever treating the project root as a fallback checkout.
     owner: { channel: model.focused, session: conv.session_id },
+    request_epoch: model.file_panel.request_epoch,
     workspace: conv.workspace,
     checkout,
     dark_mode: model.theme.is_dark(model.system_dark),
@@ -1414,6 +1416,11 @@ fn update_msg(
     // then the file subsystem loads and shows the document against the
     // fresh projection.
     FileEditor(FileSelected(path~, name~)) => {
+      let placement = file_ctx(model).checkout
+      guard !(placement is None ||
+        placement is Some(@interop.MissingWorktree(_))) else {
+        return (@cmd.none, model)
+      }
       let had_active = @dock.active_file(model.dock) is Some(_)
       // A pick made from the active FilePicker tab fulfills it: the picker
       // is replaced in place (or the already-open tab activates and the
@@ -1440,6 +1447,11 @@ fn update_msg(
     // row's HEAD path. Deleted rows have no working file but still use the
     // current path as their tab identity.
     FileEditor(ChangedFileSelected(change)) => {
+      let placement = file_ctx(model).checkout
+      guard !(placement is None ||
+        placement is Some(@interop.MissingWorktree(_))) else {
+        return (@cmd.none, model)
+      }
       let had_active = @dock.active_file(model.dock) is Some(_)
       let dock = if model.dock.active is Some(FilePicker) {
         @dock.resolve_pick(model.dock, change.path)
@@ -13914,6 +13926,52 @@ test "a changed row opens the file tab in review mode" {
       }
     ),
   )
+}
+
+///|
+test "file rows cannot open while checkout placement is missing" {
+  let dispatch = test_dispatch()
+  let workspace = @interop.ChannelId::Local.test_resource("/proj")
+  let model = desktop_model()
+    .replace_conversation({
+      ..test_conversation(),
+      workspace: Some(workspace),
+      worktree: Some("wt"),
+    })
+    .with_dev(dev => {
+      ..dev,
+      workspaces: [workspace],
+      worktrees: [
+        {
+          workspace,
+          rows: [{ name: "wt", session: Some("desktop-test"), present: false }],
+          generation: 1,
+        },
+      ],
+    })
+  let path = @pathx.Relative("src/main.mbt")
+  let (_, ordinary) = update(
+    dispatch,
+    FileEditor(FileSelected(path~, name="main.mbt")),
+    model,
+  )
+  assert_false(ordinary.dock.tabs.contains(@dock.DockTab::File(path~)))
+  assert_false(ordinary.file_panel.docs.contains(path))
+  let (_, review) = update(
+    dispatch,
+    FileEditor(
+      ChangedFileSelected({
+        path,
+        original_path: None,
+        index_status: " ",
+        worktree_status: "M",
+        kind: ChangeModified,
+      }),
+    ),
+    model,
+  )
+  assert_false(review.dock.tabs.contains(@dock.DockTab::File(path~)))
+  assert_false(review.file_panel.docs.contains(path))
 }
 
 ///|

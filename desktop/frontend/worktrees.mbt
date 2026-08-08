@@ -622,18 +622,18 @@ test "a missing checkout stays bound while rebuild and archive remain reachable"
     is Some(@interop.MissingWorktree(name="wt")),
   )
   assert_true(file_ctx(gone).owner == owner)
-  assert_true(gone.file_panel.review_recovery_pending)
+  assert_false(gone.file_panel.review_recovery_pending)
   assert_true(gone.file_panel.placement_parked)
   assert_true(
     gone.file_panel.docs.get(review_path)
     is Some(
       {
-        review: Some({ generation: 3, baseline: ReviewContent("HEAD"), .. }),
+        review: Some({ generation: 4, baseline: ReviewContent("HEAD"), .. }),
         ..,
       }
     ),
   )
-  let missing_epoch = gone.file_panel.stat_epoch
+  let missing_epoch = gone.file_panel.request_epoch
   // The authoritative present row repairs placement without rerooting the
   // panel through an empty owner; the review remains ready for its fresh
   // Changes snapshot to restart any interrupted side.
@@ -646,12 +646,12 @@ test "a missing checkout stays bound while rebuild and archive remain reachable"
     gone,
   )
   assert_true(file_ctx(restored).owner == owner)
-  assert_true(restored.file_panel.review_recovery_pending)
+  assert_false(restored.file_panel.review_recovery_pending)
   assert_false(restored.file_panel.placement_parked)
-  assert_eq(restored.file_panel.stat_epoch, missing_epoch)
+  assert_eq(restored.file_panel.request_epoch, missing_epoch)
   assert_true(
     restored.file_panel.docs.get(review_path)
-    is Some({ review: Some({ generation: 3, .. }), .. }),
+    is Some({ review: Some({ generation: 4, .. }), stale: true, .. }),
   )
   assert_true(
     terminal_ctx(gone).checkout is Some(@interop.MissingWorktree(name="wt")),

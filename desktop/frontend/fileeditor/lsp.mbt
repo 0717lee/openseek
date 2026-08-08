@@ -151,6 +151,7 @@ fn HoverProjection::range(self : HoverProjection) -> @common.Range {
 fn request_diagnostics(
   dispatch : @cmd.Emit[Msg],
   owner : @interop.ConversationKey,
+  epoch : Int,
   absolute : @common.Uri,
 ) -> @cmd.Cmd {
   @cmd.custom_cmd(scheduler => {
@@ -163,7 +164,7 @@ fn request_diagnostics(
       // problems".
       guard reply.diagnostics is Some(diagnostics) else { return }
       scheduler.add(
-        dispatch(DiagnosticsLoaded(owner~, absolute~, diagnostics~)),
+        dispatch(DiagnosticsLoaded(owner~, epoch~, absolute~, diagnostics~)),
       )
     })
   })

@@ -12,6 +12,7 @@
 fn read_directory(
   dispatch : @cmd.Emit[Msg],
   owner : @interop.ConversationKey,
+  epoch : Int,
   path : @pathx.Relative,
   workspace~ : @common.Uri?,
 ) -> @cmd.Cmd {
@@ -36,6 +37,7 @@ fn read_directory(
             dispatch(
               DirFailed(
                 owner~,
+                epoch~,
                 path~,
                 message=@interop.bridge_error_text(error),
               ),
@@ -50,7 +52,7 @@ fn read_directory(
           entries.push(entry)
         }
       }
-      scheduler.add(dispatch(DirLoaded(owner~, path~, entries~)))
+      scheduler.add(dispatch(DirLoaded(owner~, epoch~, path~, entries~)))
     })
   })
 }
@@ -62,6 +64,7 @@ fn read_directory(
 fn list_files(
   dispatch : @cmd.Emit[Msg],
   owner : @interop.ConversationKey,
+  epoch : Int,
   workspace~ : @common.Uri?,
 ) -> @cmd.Cmd {
   match workspace {
@@ -80,7 +83,7 @@ fn list_files(
         },
       ) catch {
         _ => {
-          scheduler.add(dispatch(FileIndexFailed(owner~)))
+          scheduler.add(dispatch(FileIndexFailed(owner~, epoch~)))
           return
         }
       }
@@ -92,7 +95,9 @@ fn list_files(
         }
       })
       scheduler.add(
-        dispatch(FilesIndexed(owner~, files~, truncated=reply.truncated)),
+        dispatch(
+          FilesIndexed(owner~, epoch~, files~, truncated=reply.truncated),
+        ),
       )
     })
   })
@@ -108,6 +113,7 @@ fn list_files(
 pub fn read_file(
   dispatch : @cmd.Emit[Msg],
   owner : @interop.ConversationKey,
+  epoch : Int,
   path : @pathx.Relative,
   name : String,
   review_generation? : Int,
@@ -124,6 +130,7 @@ pub fn read_file(
       return dispatch(
         FileFailed(
           owner~,
+          epoch~,
           path~,
           review_generation~,
           message="workspace moved to another host before file read",
@@ -147,6 +154,7 @@ pub fn read_file(
             dispatch(
               FileFailed(
                 owner~,
+                epoch~,
                 path~,
                 review_generation~,
                 message=@interop.bridge_error_text(error),
@@ -162,6 +170,7 @@ pub fn read_file(
             dispatch(
               FileLoaded(
                 owner~,
+                epoch~,
                 path~,
                 name~,
                 file~,
@@ -176,6 +185,7 @@ pub fn read_file(
             dispatch(
               FileFailed(
                 owner~,
+                epoch~,
                 path~,
                 review_generation~,
                 message="could not read file",
@@ -322,6 +332,7 @@ fn stat_files(
 fn watch_workspace(
   dispatch : @cmd.Emit[Msg],
   channel~ : @interop.ChannelId,
+  epoch : Int,
   watched : WatchedPaths?,
 ) -> @cmd.Cmd {
   match watched {
@@ -355,6 +366,7 @@ fn watch_workspace(
                 dispatch(
                   FileWatchFailed(
                     owner=watched.owner,
+                    epoch=Some(epoch),
                     message="File watching failed: \{@interop.bridge_error_text(error)}",
                   ),
                 ),
@@ -382,6 +394,7 @@ test "a cross-host file read settles through its generation-fenced failure" {
     read_file(
       dispatch,
       { channel: @interop.ChannelId::Remote("other"), session: "remote-test" },
+      0,
       @pathx.Relative("src/main.mbt"),
       "main.mbt",
       review_generation=7,
@@ -394,6 +407,7 @@ test "a cross-host file read settles through its generation-fenced failure" {
     is Some(
       FileFailed(
         owner={ channel: @interop.ChannelId::Remote("other"), .. },
+        epoch=0,
         path=@pathx.Relative("src/main.mbt"),
         review_generation=Some(7),
         message="workspace moved to another host before file read"

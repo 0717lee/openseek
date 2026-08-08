@@ -237,10 +237,10 @@ pub(all) struct State {
   // Monotonic request token retained across conversation re-roots. Owner plus
   // this generation rejects an old A→B→A reply for the same conversation.
   changes_generation : Int
-  // Placement/conversation epoch carried by file-stat replies. Stats within
-  // one epoch are issued through the ordered bridge; advancing this value on
-  // either boundary rejects a reply that outlived its checkout.
-  stat_epoch : Int
+  // Placement/conversation epoch carried by filesystem replies. Advancing
+  // this value on either boundary rejects reads, listings, stats, and watcher
+  // failures that outlived the checkout they addressed.
+  request_epoch : Int
   // Last settled Git HEAD identity. `changes_head_known` distinguishes a
   // first/unborn snapshot (`head=None`) from no snapshot yet, so a later HEAD
   // transition can refresh every surviving review baseline precisely.
@@ -300,7 +300,7 @@ pub fn State::empty() -> State {
     explorer_mode: ExplorerFiles,
     changes: ChangeListIdle,
     changes_generation: 0,
-    stat_epoch: 0,
+    request_epoch: 0,
     changes_head: None,
     changes_head_known: false,
     review_generation: 0,
@@ -357,6 +357,8 @@ pub fn TreeLayout::wire(self : TreeLayout) -> String {
 /// file tree docks.
 pub(all) struct Ctx {
   owner : @interop.ConversationKey
+  // The current placement incarnation for filesystem request/reply fencing.
+  request_epoch : Int
   workspace : @common.Uri?
   // `None` while this connection has not loaded the conversation's placement.
   // Unknown and missing placements both block filesystem requests so neither
@@ -403,11 +405,13 @@ pub(all) enum Msg {
   // reply that lost a conversation switch can be dropped.
   DirLoaded(
     owner~ : @interop.ConversationKey,
+    epoch~ : Int,
     path~ : @pathx.Relative,
     entries~ : Array[FileEntry]
   )
   DirFailed(
     owner~ : @interop.ConversationKey,
+    epoch~ : Int,
     path~ : @pathx.Relative,
     message~ : String
   )
@@ -415,12 +419,13 @@ pub(all) enum Msg {
   // `truncated` means the host's walk stopped at its cap.
   FilesIndexed(
     owner~ : @interop.ConversationKey,
+    epoch~ : Int,
     files~ : Array[@pathx.Relative],
     truncated~ : Bool
   )
   // A `list_files` request failed or returned garbage. An initial failure
   // becomes `IndexFailed`; a failed background refresh retains a ready index.
-  FileIndexFailed(owner~ : @interop.ConversationKey)
+  FileIndexFailed(owner~ : @interop.ConversationKey, epoch~ : Int)
   // A `git.changes` reply. The owner fence prevents a late response from one
   // conversation replacing another conversation's inventory.
   ChangesLoaded(
@@ -452,12 +457,14 @@ pub(all) enum Msg {
     owner~ : @interop.ConversationKey,
     path~ : @pathx.Relative,
     generation~ : Int,
+    background~ : Bool,
     original~ : @protocol.GitOriginalFileReply
   )
   GitOriginalFailed(
     owner~ : @interop.ConversationKey,
     path~ : @pathx.Relative,
     generation~ : Int,
+    background~ : Bool,
     message~ : String
   )
   // A Definition/References result accepted by the Viewer's location opener.
@@ -478,6 +485,7 @@ pub(all) enum Msg {
   // half of a changed-row open and fences repeated review clicks.
   FileLoaded(
     owner~ : @interop.ConversationKey,
+    epoch~ : Int,
     path~ : @pathx.Relative,
     name~ : String,
     file~ : FileContent,
@@ -490,13 +498,18 @@ pub(all) enum Msg {
   // open. Ordinary reads leave `review_generation=None`.
   FileFailed(
     owner~ : @interop.ConversationKey,
+    epoch~ : Int,
     path~ : @pathx.Relative,
     review_generation~ : Int?,
     message~ : String
   )
   // An `fs.watch` request rejection or an asynchronous watcher failure. The
   // owner fences both paths against a conversation switch.
-  FileWatchFailed(owner~ : @interop.ConversationKey, message~ : String)
+  FileWatchFailed(
+    owner~ : @interop.ConversationKey,
+    epoch~ : Int?,
+    message~ : String
+  )
   // A new watcher sends `changes=None` once it is attached, requesting a full
   // baseline reconciliation. Later pushes contain the exact debounced events.
   // `session` is absent only for compatibility with an older host.
@@ -509,8 +522,8 @@ pub(all) enum Msg {
   // conversation's finish.
   RunSettled(owner~ : @interop.ConversationKey)
   // A `stat_files` reply: each open tab's current mtime signature (`""` =
-  // the file is gone). Owner plus placement epoch fence a request that
-  // outlived either its conversation or checkout.
+  // the file is gone). Owner plus request epoch fence a request that outlived
+  // either its conversation or checkout.
   StatsLoaded(
     owner~ : @interop.ConversationKey,
     epoch~ : Int,
@@ -520,6 +533,7 @@ pub(all) enum Msg {
   // fences a reply that lost a device/session switch while the request ran.
   DiagnosticsLoaded(
     owner~ : @interop.ConversationKey,
+    epoch~ : Int,
     absolute~ : @common.Uri,
     diagnostics~ : Array[@protocol.LspDiagnostic]
   )

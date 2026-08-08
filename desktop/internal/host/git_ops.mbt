@@ -349,6 +349,38 @@ async fn git_revision_commit(dir : String, revision : String) -> String? {
 }
 
 ///|
+fn valid_commit_identity(revision : String) -> Bool {
+  if revision.length() != 40 && revision.length() != 64 {
+    return false
+  }
+  for character in revision {
+    let code = character.to_int()
+    let digit = code >= '0'.to_int() && code <= '9'.to_int()
+    let lower = code >= 'a'.to_int() && code <= 'f'.to_int()
+    let upper = code >= 'A'.to_int() && code <= 'F'.to_int()
+    if !(digit || lower || upper) {
+      return false
+    }
+  }
+  true
+}
+
+///|
+test "Git review revisions accept only full hexadecimal object identities" {
+  assert_true(valid_commit_identity("0123456789abcdef0123456789abcdef01234567"))
+  assert_true(
+    valid_commit_identity(
+      "0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF",
+    ),
+  )
+  assert_false(valid_commit_identity("HEAD"))
+  assert_false(valid_commit_identity("--all"))
+  assert_false(
+    valid_commit_identity("0123456789abcdef0123456789abcdef0123456g"),
+  )
+}
+
+///|
 /// Read the index and porcelain status while HEAD remains the same. Git has no
 /// single porcelain-v1 command that also reports the full commit identity, so
 /// bracket the snapshot with two revision reads and retry a concurrent
@@ -633,7 +665,16 @@ async fn git_original_file_op(
   }
   // New clients pass the exact HEAD identity returned with their change
   // snapshot; the fallback keeps older clients compatible.
-  git_original_file_at(dir, relative, payload.revision.unwrap_or("HEAD"))
+  let revision = match payload.revision {
+    Some(revision) => {
+      guard valid_commit_identity(revision) else {
+        raise HostError("invalid Git revision identity")
+      }
+      revision
+    }
+    None => "HEAD"
+  }
+  git_original_file_at(dir, relative, revision)
 }
 
 ///|
