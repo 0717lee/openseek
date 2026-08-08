@@ -248,74 +248,12 @@ fn git_chip(
     ),
   ]
   if model.git_details_open {
-    // No backdrop element: dismissal rides on `git_dismiss_subscription`,
-    // which does not consume the click that closes it.
+    // No backdrop element: dismissal rides on `dismiss_subscription`, which
+    // does not consume the click that closes it.
     children.push(git_details(conv, branch, pull_request))
   }
   Some(@html.div(class="composer-git", children))
 }
-
-///|
-/// Close the git popover on the next click that is not its own trigger.
-///
-/// A full-screen backdrop would be the shorter way to write this and the wrong
-/// behavior: it swallows that click, so every interaction while the popover
-/// happens to be open costs two — one to dismiss, one to act — and a link
-/// inside the popover leaves the popover sitting over whatever it just opened.
-/// A capture-phase listener closes on the same click that reaches its target.
-fn git_dismiss_subscription(emit : @cmd.Emit[Unit]) -> @sub.Sub {
-  @sub.custom_sub(
-    "composer-git-dismiss",
-    Global,
-    GitDismissSubscription(emit),
-    git_dismiss_sub_loader,
-  )
-}
-
-///|
-priv suberror GitDismissSubscription {
-  GitDismissSubscription(@cmd.Emit[Unit])
-}
-
-///|
-fn git_dismiss_sub_loader(
-  payload : Error,
-  scheduler : &Scheduler,
-) -> @sub.RunningSub? {
-  match payload {
-    GitDismissSubscription(emit) => {
-      let mut emit = emit
-      let listener = add_git_dismiss_capture(() => scheduler.add(emit(())))
-      Some({
-        unload: _ => remove_git_dismiss_capture(listener),
-        update_tagger: payload => {
-          guard payload is GitDismissSubscription(next) else { return }
-          emit = next
-        },
-      })
-    }
-    _ => None
-  }
-}
-
-///|
-/// The trigger is excluded because its own handler toggles: closing here first
-/// would let that toggle reopen the popover the click was meant to dismiss.
-/// Everything else — including the popover's own links — closes it, and the
-/// event carries on to whatever was clicked.
-extern "js" fn add_git_dismiss_capture(on_dismiss : () -> Unit) -> @js.Value =
-  #| (onDismiss) => {
-  #|   const listener = (event) => {
-  #|     if (event.target?.closest?.(".composer-git-button")) return;
-  #|     onDismiss();
-  #|   };
-  #|   document.addEventListener("click", listener, true);
-  #|   return listener;
-  #| }
-
-///|
-extern "js" fn remove_git_dismiss_capture(listener : @js.Value) -> Unit =
-  #| (listener) => document.removeEventListener("click", listener, true)
 
 ///|
 /// What the chip is a summary of: the branch and where it is measured from,

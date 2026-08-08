@@ -2609,6 +2609,10 @@ fn update_msg(
       probe_branch(dispatch, model, conv.device, conv.session_id, conv.cwd)
     }
     CloseGitDetails => (@cmd.none, { ..model, git_details_open: false })
+    CloseLauncher =>
+      (@cmd.none, { ..model, launcher: { ..model.launcher, open: false } })
+    CloseDockMenu =>
+      (@cmd.none, { ..model, dock: @dock.close_menu(model.dock) })
     ToggleLauncher => {
       let opening = !model.launcher.open
       // The launcher exists only in the desktop window, whose one native
@@ -12108,6 +12112,30 @@ test "the composer's git details popover toggles shut again" {
   assert_false(dismissed.git_details_open)
   let (_, still_closed) = update(dispatch, CloseGitDetails, dismissed)
   assert_false(still_closed.git_details_open)
+}
+
+///|
+test "every click-away menu closes without reopening on a second dismissal" {
+  let dispatch = test_dispatch()
+  // The topbar app launcher.
+  let (_, launched) = update(dispatch, ToggleLauncher, test_model())
+  assert_true(launched.launcher.open)
+  let (_, dropped) = update(dispatch, CloseLauncher, launched)
+  assert_false(dropped.launcher.open)
+  let (_, twice) = update(dispatch, CloseLauncher, dropped)
+  assert_false(twice.launcher.open)
+  // Dismissing does not discard the catalog the launcher already probed, so
+  // reopening it does not go back to the host for a list it has.
+  assert_true(dropped.launcher.apps is AppsLoading)
+  // The dock strip's `+` menu, which needs its panel open first (the same
+  // setup the launcher-row test uses).
+  let (_, docked) = update(dispatch, Dock(TogglePanel), desktop_model())
+  let (_, menued) = update(dispatch, Dock(MenuToggled), docked)
+  assert_true(menued.dock.menu_open)
+  let (_, unmenued) = update(dispatch, CloseDockMenu, menued)
+  assert_false(unmenued.dock.menu_open)
+  let (_, unmenued_twice) = update(dispatch, CloseDockMenu, unmenued)
+  assert_false(unmenued_twice.dock.menu_open)
 }
 
 ///|

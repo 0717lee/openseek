@@ -157,12 +157,42 @@ pub fn boot() -> Unit {
           ),
           external_link_subscription(emit.map(url => ExternalLinkClicked(url))),
         ]
-        // Only while the composer's git popover is open — there is nothing to
-        // dismiss otherwise, and a document-wide listener should not outlive
-        // what it serves.
+        // Click-away dismissal, one listener per menu and only while that menu
+        // is open: a document-wide listener should not outlive what it serves.
         if model.git_details_open {
           subs.push(
-            git_dismiss_subscription(emit.map((_ : Unit) => CloseGitDetails)),
+            dismiss_subscription(
+              "composer-git-dismiss",
+              trigger=".composer-git-button",
+              emit.map((_ : Unit) => CloseGitDetails),
+            ),
+          )
+        }
+        if model.launcher.open {
+          subs.push(
+            dismiss_subscription(
+              "launcher-dismiss",
+              trigger=".launcher-button",
+              emit.map((_ : Unit) => CloseLauncher),
+            ),
+          )
+        }
+        if model.dock.menu_open {
+          subs.push(
+            dismiss_subscription(
+              "dock-menu-dismiss",
+              trigger=".tab-add",
+              emit.map((_ : Unit) => CloseDockMenu),
+            ),
+          )
+        }
+        if model.console is Some({ menu_open: Some(_), .. }) {
+          subs.push(
+            dismiss_subscription(
+              "device-menu-dismiss",
+              trigger=".device-menu-button",
+              emit.map((_ : Unit) => Console(MenuDismissed)),
+            ),
           )
         }
         @sub.batch(subs)

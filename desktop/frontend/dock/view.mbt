@@ -151,8 +151,8 @@ pub fn tabs_bar(
     )
   }
   // With an empty strip the body already is the launcher, so the `+` hides
-  // (by class, keeping the child order structural). The popup and its
-  // backdrop are conditional, appended after every stable child.
+  // (by class, keeping the child order structural). The popup is conditional,
+  // appended after every stable child.
   let children : Array[@html.Html] = [
     @html.div(class="editor-tabs", tabs),
     @html.button(
@@ -169,13 +169,8 @@ pub fn tabs_bar(
     ),
   ]
   if state.menu_open {
-    children.push(
-      @html.div(
-        class="launcher-backdrop",
-        on_click=dispatch(MenuToggled),
-        @html.nothing,
-      ),
-    )
+    // No backdrop element: the frontend package installs a click-away
+    // dismissal that does not consume the click that closes it.
     children.push(@html.div(class="dock-menu", launcher_rows(actions)))
   }
   @html.div(class="editor-tabsbar", children)

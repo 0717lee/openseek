@@ -2751,8 +2751,8 @@ fn launcher_menu(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
 
 ///|
 /// The topbar app launcher: a button that opens a dropdown of installed apps,
-/// each opening the active conversation's workspace. While open a full-screen
-/// backdrop catches a click away to close it.
+/// each opening the active conversation's workspace. A click away closes it
+/// (see `dismiss_subscription`).
 fn launcher_view(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
   // A conversation's workspace exists only once it has run; a fresh chat with
   // no turn yet has nothing to open, so the launcher is disabled until then.
@@ -2780,13 +2780,8 @@ fn launcher_view(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
     ),
   ]
   if ready && model.launcher.open {
-    children.push(
-      @html.div(
-        class="launcher-backdrop",
-        on_click=dispatch(ToggleLauncher),
-        @html.nothing,
-      ),
-    )
+    // No backdrop element: dismissal rides on `dismiss_subscription`, which
+    // does not consume the click that closes it.
     children.push(launcher_menu(dispatch, model))
   }
   @html.div(class="launcher", children)
