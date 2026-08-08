@@ -1215,6 +1215,21 @@ fn update(
   // opened. Device/session switches can arrive through many messages (and
   // background pushes), so fence it once here rather than in every branch.
   let model = close_stale_quick_open(model)
+  // The composer's git popover belongs to the checkout that was on screen,
+  // and is fenced the same way and for the same reason. It cannot rely on its
+  // click-away listener here: a switch by keyboard — Cmd+N, Quick Open — makes
+  // no click at all. Left standing it would spring open on the conversation
+  // arriving, once that one's branch probe answered, and until then would go
+  // on hiding the native browser view with no chip on screen to click.
+  let model = if model.git_details_open &&
+    (
+      model.active_session != previous.active_session ||
+      model.focused != previous.focused
+    ) {
+    { ..model, git_details_open: false }
+  } else {
+    model
+  }
   let (model, panel_cmd) = sync_file_panel(dispatch, model)
   let (model, terminal_cmd) = sync_terminal_panel(dispatch, model)
   let (model, browser_cmd) = sync_browser_view(dispatch, model)
@@ -11859,6 +11874,19 @@ test "the composer's git details popover toggles shut again" {
   assert_true(opened.git_details_open)
   let (_, closed) = update(dispatch, ToggleGitDetails, opened)
   assert_false(closed.git_details_open)
+  // Switching conversations closes it too. A keyboard switch — Cmd+N, Quick
+  // Open — produces no click for the dismissal listener to see, and the
+  // popover describes the checkout that was on screen, not the one arriving.
+  // Left standing it would pop open on the new conversation once its branch
+  // answered, and suppress the native browser view in the meantime with no
+  // chip rendered to click.
+  let (_, switched) = update(
+    dispatch,
+    SessionRotated({ channel: Local, session: "desktop-other" }),
+    opened,
+  )
+  assert_eq(switched.active_session, "desktop-other")
+  assert_false(switched.git_details_open)
   // Dismissal is idempotent where the toggle is not: the click that closes the
   // popover also reaches whatever it landed on, and a second dismissal — from
   // a page that dispatched one on its own — must not bring it back.

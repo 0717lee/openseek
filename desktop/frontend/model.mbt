@@ -998,7 +998,8 @@ priv struct Model {
   // Whether the composer's git chip has its details popover open. Global UI
   // for the focused conversation like `quick_open`, not conversation state:
   // only one composer is on screen, and a popover left open across a switch
-  // would describe the wrong checkout.
+  // would describe the wrong checkout — which `update` fences, since a
+  // keyboard switch produces no click for the dismissal listener to see.
   git_details_open : Bool
   // The right panel's dock: the mixed tab strip's membership, order, active
   // tab, and per-conversation parked strips. Owned by the `dock` package;
