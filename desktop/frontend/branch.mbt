@@ -129,6 +129,15 @@ fn file_count(files : Int) -> String {
 }
 
 ///|
+/// Whether the composer has a git chip for this conversation at all — it needs
+/// a branch, and `Some("")` is how the host says the workspace is not a
+/// repository. `update` fences the popover on this too: an open popover with
+/// no chip to close it is unreachable.
+fn Conversation::shows_git_chip(self : Conversation) -> Bool {
+  self.branch is Some(branch) && !branch.is_empty()
+}
+
+///|
 /// The pull request for the branch this conversation has checked out, if the
 /// last answer still describes that branch. An answer about a branch the
 /// workspace has left is not shown against the branch now checked out, even
@@ -202,7 +211,9 @@ fn git_chip(
   model : Model,
   conv : Conversation,
 ) -> @html.Html? {
-  guard conv.branch is Some(branch) && !branch.is_empty() else { return None }
+  guard conv.shows_git_chip() && conv.branch is Some(branch) else {
+    return None
+  }
   let pull_request = conv.settled_probe().bind(probe => probe.pull_request)
   let (label, tone, summary) = if pull_request is Some(pull_request) {
     let checks = match pull_request.checks {

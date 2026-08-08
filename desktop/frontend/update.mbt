@@ -1226,13 +1226,19 @@ fn update(
   // The composer's git popover belongs to the checkout that was on screen,
   // and is fenced the same way and for the same reason. It cannot rely on its
   // click-away listener here: a switch by keyboard — Cmd+N, Quick Open — makes
-  // no click at all. Left standing it would spring open on the conversation
-  // arriving, once that one's branch probe answered, and until then would go
-  // on hiding the native browser view with no chip on screen to click.
+  // no click at all, and neither does a checkout losing its repository under
+  // it. Left standing the flag would spring the popover open on the
+  // conversation arriving, once its branch probe answered, and meanwhile keep
+  // `desired_browser_view` hiding the native browser with no chip on screen to
+  // click — a blank pane with nothing to explain it.
+  //
+  // The second clause is the invariant rather than a list of paths: no chip,
+  // no popover, however the branch came to be gone.
   let model = if model.git_details_open &&
     (
       model.active_session != previous.active_session ||
-      model.focused != previous.focused
+      model.focused != previous.focused ||
+      !model.active().shows_git_chip()
     ) {
     { ..model, git_details_open: false }
   } else {
@@ -12083,21 +12089,33 @@ test "a refresh during a lookup is run afterwards, not dropped" {
 ///|
 test "the composer's git details popover toggles shut again" {
   let dispatch = test_dispatch()
-  assert_false(test_model().git_details_open)
-  let (_, opened) = update(dispatch, ToggleGitDetails, test_model())
+  // The popover has no trigger without a branch, so a conversation that has
+  // one is where this starts — the flag cannot be raised otherwise.
+  let (_, on_branch) = update_dev(
+    dispatch,
+    BranchLoaded(
+      session="desktop-test",
+      branch=Some("feature/x"),
+      diffstat=None,
+      generation=0,
+    ),
+    test_model(),
+  )
+  assert_false(on_branch.git_details_open)
+  let (_, opened) = update(dispatch, ToggleGitDetails, on_branch)
   assert_true(opened.git_details_open)
   // Opening re-probes (the command is not inspectable here), which must not
   // disturb what is already on screen: the answer stays until its reply lands.
-  assert_eq(opened.active().pull_request, test_model().active().pull_request)
-  assert_eq(opened.active().diffstat, test_model().active().diffstat)
+  assert_eq(opened.active().pull_request, on_branch.active().pull_request)
+  assert_eq(opened.active().diffstat, on_branch.active().diffstat)
   let (_, closed) = update(dispatch, ToggleGitDetails, opened)
   assert_false(closed.git_details_open)
-  // Switching conversations closes it too. A keyboard switch — Cmd+N, Quick
-  // Open — produces no click for the dismissal listener to see, and the
-  // popover describes the checkout that was on screen, not the one arriving.
-  // Left standing it would pop open on the new conversation once its branch
-  // answered, and suppress the native browser view in the meantime with no
-  // chip rendered to click.
+  // Switching conversations closes it too, and so does the branch going away
+  // under the conversation on screen — a checkout deleted, or one that stopped
+  // being a repository. Neither produces a click for the dismissal listener to
+  // see. Left standing, the flag would pop the popover open on the new
+  // conversation once its branch answered, and meanwhile suppress the native
+  // browser view with no chip rendered to click.
   let (_, switched) = update(
     dispatch,
     SessionRotated({ channel: Local, session: "desktop-other" }),
@@ -12105,6 +12123,21 @@ test "the composer's git details popover toggles shut again" {
   )
   assert_eq(switched.active_session, "desktop-other")
   assert_false(switched.git_details_open)
+  // So does the branch going away under the conversation on screen: no chip
+  // is rendered then, so nothing is left to click the popover shut, and the
+  // flag would go on hiding the native browser with no visible cause.
+  let (_, lost) = update_dev(
+    dispatch,
+    BranchLoaded(
+      session="desktop-test",
+      branch=Some(""),
+      diffstat=None,
+      generation=1,
+    ),
+    opened,
+  )
+  assert_false(lost.active().shows_git_chip())
+  assert_false(lost.git_details_open)
   // Dismissal is idempotent where the toggle is not: the click that closes the
   // popover also reaches whatever it landed on, and a second dismissal — from
   // a page that dispatched one on its own — must not bring it back.
@@ -14995,7 +15028,19 @@ test "full-screen modals hide the native view and closing restores it" {
   // native view left showing would paint straight over it.
   let (_, launched) = update(dispatch, ToggleLauncher, restored)
   assert_true(launched.browser_pane.shown is None)
-  let (_, detailing) = update(dispatch, ToggleGitDetails, restored)
+  // The popover needs a branch to have a trigger at all, so give the
+  // conversation one before opening it.
+  let (_, on_branch) = update_dev(
+    dispatch,
+    BranchLoaded(
+      session="desktop-test",
+      branch=Some("feature/x"),
+      diffstat=None,
+      generation=0,
+    ),
+    restored,
+  )
+  let (_, detailing) = update(dispatch, ToggleGitDetails, on_branch)
   assert_true(detailing.browser_pane.shown is None)
   // So do the other two surfaces `view.mbt` appends beside the picker: the
   // archive-discard confirmation and Quick Open.

@@ -24,6 +24,16 @@ async fn git_branch_op(payload : GitBranchPayload) -> GitBranchReply {
   // paired with totals from after it would read as one coherent answer while
   // being neither. Report the branch as it stands now, and let the next probe
   // supply totals to match it.
+  //
+  // What this cannot catch is a checkout that leaves and returns inside the
+  // same count: the name matches at both ends while some files were read on
+  // the other branch. Catching it needs a repository-mutation marker, and Git
+  // offers none that is always there — the reflog can be switched off — so the
+  // detection would be as unreliable as the race is rare, and the only remedy
+  // it enables is measuring again, possibly without end. The totals are a
+  // display figure that every run boundary and every popover opening
+  // recomputes; a two-checkout round trip inside one count corrects itself at
+  // the next one.
   guard git_branch(base.0) is Some(after) else {
     return { branch: None, diffstat: None }
   }
