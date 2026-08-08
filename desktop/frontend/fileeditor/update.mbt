@@ -258,7 +258,15 @@ pub fn open_changed_document(
     name,
     state: doc_state,
     review: Some({ generation, baseline }),
-    stale: false,
+    // A cached document can already be behind the filesystem when the row is
+    // selected. Keep that fact until the tagged working-tree read settles: if
+    // an ordinary open cancels this review first, `show_tab` must still issue
+    // its own untagged refresh instead of blessing the cached text as current.
+    stale: if change.has_working_tree_file() {
+      docs.get(path).map(doc => doc.stale).unwrap_or(false)
+    } else {
+      false
+    },
   }
   docs[path] = review_doc
   let cmds = []
@@ -364,7 +372,15 @@ fn reconcile_reviews_after_changes(
             break
           }
         }
-        let review_inputs_changed = head_changed ||
+        // A missing checkout parks host replies at the update boundary. Once
+        // the checkout returns, its first final Changes snapshot must restart
+        // either half that was still loading even when HEAD and row metadata
+        // are unchanged; otherwise `show_tab` intentionally waits forever for
+        // a request whose reply was discarded while parked.
+        let review_incomplete = doc.state is TabLoading ||
+          doc.review is Some({ baseline: ReviewLoading, .. })
+        let review_inputs_changed = review_incomplete ||
+          head_changed ||
           (match previous_change {
             None => true
             Some(previous) => {
@@ -2042,6 +2058,48 @@ test "changed-file review fences paired replies and ordinary opens leave review"
 }
 
 ///|
+test "changed-file review preserves a stale cached working document until reload" {
+  let emit = test_emit()
+  let path = @pathx.Relative("stale.mbt")
+  let docs : Map[@pathx.Relative, Doc] = Map([])
+  docs[path] = { ..loaded_doc("stale.mbt"), stale: true }
+  let ctx = { ..test_ctx(), open_files: [path], active_file: Some(path) }
+  let change : ChangedFile = {
+    path,
+    original_path: None,
+    index_status: " ",
+    worktree_status: "M",
+    kind: ChangeModified,
+  }
+  let (_, reviewing) = open_changed_document(
+    emit,
+    { ..owned_state(), docs, },
+    ctx,
+    change,
+    had_active=true,
+  )
+  assert_true(
+    reviewing.docs.get(path)
+    is Some({ state: TabLoaded(..), review: Some(_), stale: true, .. }),
+  )
+  // Canceling the tagged review read through an ordinary open retains the
+  // staleness marker, so `show_tab` schedules its own untagged refresh.
+  let (_, ordinary) = open_document(
+    emit,
+    reviewing,
+    ctx,
+    path,
+    name="stale.mbt",
+    range=None,
+    had_active=true,
+  )
+  assert_true(
+    ordinary.docs.get(path)
+    is Some({ state: TabLoaded(..), review: None, stale: true, .. }),
+  )
+}
+
+///|
 test "review failures settle precisely and missing rename sources stay unavailable" {
   let emit = test_emit()
   let path = @pathx.Relative("new.mbt")
@@ -2609,6 +2667,90 @@ test "a missing checkout settles an in-flight Changes request for retry" {
   let (restored, _) = sync(emit, after_reply, present)
   assert_true(restored.changes is ChangeListLoading(refresh_again=false))
   assert_true(restored.changes_generation == 2)
+}
+
+///|
+test "checkout recovery restarts a review whose paired replies were parked" {
+  let emit = test_emit()
+  let present = test_ctx()
+  let path = @pathx.Relative("reviewed.mbt")
+  let change : ChangedFile = {
+    path,
+    original_path: None,
+    index_status: " ",
+    worktree_status: "M",
+    kind: ChangeModified,
+  }
+  let docs : Map[@pathx.Relative, Doc] = Map([])
+  docs[path] = {
+    name: "reviewed.mbt",
+    state: TabLoading,
+    review: Some({ generation: 3, baseline: ReviewLoading }),
+    stale: false,
+  }
+  let state = {
+    ..owned_state(),
+    changes: ChangeListReady(
+      repository=true,
+      files=[change],
+      refreshing=true,
+      refresh_again=false,
+    ),
+    changes_generation: 1,
+    changes_head: Some("same-head"),
+    changes_head_known: true,
+    review_generation: 3,
+    docs,
+    watching: Some({
+      owner: present.owner,
+      workspace: None,
+      files: [path],
+      directories: [@pathx.Relative::root()],
+    }),
+  }
+  let missing : Ctx = {
+    ..present,
+    checkout: Some(@interop.MissingWorktree(name="wt")),
+    open_files: [path],
+    active_file: Some(path),
+  }
+  let (parked, _) = sync(emit, state, missing)
+  assert_true(
+    parked.changes is ChangeListReady(refreshing=false, refresh_again=false, ..),
+  )
+  let (restored, _) = sync(emit, parked, {
+    ..present,
+    open_files: [path],
+    active_file: Some(path),
+  })
+  assert_true(
+    restored.changes
+    is ChangeListReady(refreshing=true, refresh_again=false, ..),
+  )
+  assert_true(restored.changes_generation == 2)
+  let (_, restarted) = update(
+    emit,
+    ChangesLoaded(
+      owner=present.owner,
+      generation=2,
+      repository=true,
+      head=Some("same-head"),
+      files=[change],
+    ),
+    restored,
+    { ..present, open_files: [path], active_file: Some(path) },
+  )
+  assert_true(restarted.review_generation == 4)
+  assert_true(
+    restarted.docs.get(path)
+    is Some(
+      {
+        state: TabLoading,
+        review: Some({ generation: 4, baseline: ReviewLoading }),
+        ..,
+      }
+    ),
+  )
 }
 
 ///|
@@ -3660,6 +3802,34 @@ test "StatsLoaded marks deletions, reloads the active change, stales the rest" {
   )
   assert_true(
     other.docs.get(Relative("a.mbt")) is Some({ state: TabLoaded(..), .. }),
+  )
+}
+
+///|
+test "StatsLoaded preserves a settled HEAD preview when its active file disappears" {
+  let emit = test_emit()
+  let path = @pathx.Relative("reviewed.mbt")
+  let doc = {
+    ..loaded_doc("reviewed.mbt"),
+    review: Some({ generation: 7, baseline: ReviewContent("HEAD source") }),
+  }
+  let docs : Map[@pathx.Relative, Doc] = Map([(path, doc)])
+  let (_, next) = update(
+    emit,
+    StatsLoaded(owner=test_ctx().owner, stats=[{ path, sig: None }]),
+    { ..owned_state(), docs, },
+    { ..test_ctx(), open_files: [path], active_file: Some(path) },
+  )
+  assert_true(
+    next.docs.get(path)
+    is Some(
+      {
+        state: TabDeleted,
+        review: Some({ generation: 7, baseline: ReviewContent("HEAD source") }),
+        stale: false,
+        ..,
+      }
+    ),
   )
 }
 

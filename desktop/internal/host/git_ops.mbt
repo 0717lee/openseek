@@ -182,9 +182,10 @@ fn git_path_relative_to_workspace(
 }
 
 ///|
-/// Extract gitlinks from `git ls-files --stage -z`. Index metadata keeps
-/// submodules identifiable even when a sparse checkout has no directory to
-/// inspect. Paths remain byte-exact after the first tab separator.
+/// Extract gitlinks from `git ls-files --stage -z` or `git ls-tree -r -z`.
+/// Index/HEAD metadata keeps submodules identifiable even when a sparse
+/// checkout or deletion leaves no directory to inspect. Both formats start a
+/// gitlink record with mode `160000` and keep its byte-exact path after a tab.
 fn parse_gitlink_paths(
   output : String,
   workspace_prefix : String,
@@ -210,12 +211,12 @@ fn parse_gitlink_paths(
 fn git_change_with_path_kind(
   change : GitChange,
   path_kind : @fs.FileKind,
-  indexed_gitlink : Bool,
+  known_gitlink : Bool,
 ) -> GitChange {
   match path_kind {
     SymLink => { ..change, kind: "symlink" }
     Directory if change.kind != "untracked" => { ..change, kind: "submodule" }
-    Unknown if indexed_gitlink => { ..change, kind: "submodule" }
+    Unknown if known_gitlink => { ..change, kind: "submodule" }
     _ => change
   }
 }
@@ -260,6 +261,120 @@ async fn git_collect(
 }
 
 ///|
+/// Resolve one revision to an immutable commit identity. A missing revision is
+/// ordinary (an unborn HEAD or an object that disappeared); malformed command
+/// output is a host failure rather than an ambiguous missing baseline.
+async fn git_revision_commit(dir : String, revision : String) -> String? {
+  let (code, stdout, _) = git_collect(dir, [
+    "rev-parse",
+    "--verify",
+    "\{revision}^{commit}",
+  ])
+  if code != 0 {
+    return None
+  }
+  let commit = git_single_line(
+    stdout.text() catch {
+      _ => raise HostError("Git returned a non-UTF-8 revision identity")
+    },
+  )
+  if commit.is_empty() {
+    None
+  } else {
+    Some(commit)
+  }
+}
+
+///|
+/// Read the index and porcelain status while HEAD remains the same. Git has no
+/// single porcelain-v1 command that also reports the full commit identity, so
+/// bracket the snapshot with two revision reads and retry a concurrent
+/// commit/checkout. The returned rows and baseline identity therefore describe
+/// the same HEAD instead of relying on the next frontend poll to self-heal.
+async fn git_change_snapshot(
+  dir : String,
+  workspace_prefix : String,
+  retries_left : Int,
+) -> (String?, Array[String], Array[GitChange]) {
+  let head = git_revision_commit(dir, "HEAD")
+  let (index_code, index_stdout, index_stderr) = git_collect(dir, [
+    "ls-files", "--full-name", "--stage", "-z", "--", ".",
+  ])
+  guard index_code == 0 else {
+    let detail = (index_stderr.text() catch { _ => "" }).trim().to_owned()
+    raise HostError(
+      if detail.is_empty() {
+        "failed to inspect Git index"
+      } else {
+        detail
+      },
+    )
+  }
+  let known_gitlinks = parse_gitlink_paths(
+    index_stdout.text() catch {
+      _ => raise HostError("Git returned a non-UTF-8 index path")
+    },
+    workspace_prefix,
+  )
+  // A staged deletion no longer exists in the index. Keep the pinned HEAD
+  // tree in the same snapshot bracket so deleted submodules remain inert
+  // review rows instead of being misclassified as deleted text files.
+  if head is Some(commit) {
+    let (tree_code, tree_stdout, tree_stderr) = git_collect(dir, [
+      "ls-tree", "-r", "-z", commit, "--", ".",
+    ])
+    guard tree_code == 0 else {
+      let detail = (tree_stderr.text() catch { _ => "" }).trim().to_owned()
+      raise HostError(
+        if detail.is_empty() {
+          "failed to inspect Git HEAD tree"
+        } else {
+          detail
+        },
+      )
+    }
+    let head_gitlinks = parse_gitlink_paths(
+      tree_stdout.text() catch {
+        _ => raise HostError("Git returned a non-UTF-8 HEAD tree path")
+      },
+      workspace_prefix,
+    )
+    for path in head_gitlinks {
+      if !known_gitlinks.contains(path) {
+        known_gitlinks.push(path)
+      }
+    }
+  }
+  let (code, stdout, stderr) = git_collect(dir, [
+    "status", "--porcelain=v1", "-z", "--untracked-files=all", "--", ".",
+  ])
+  guard code == 0 else {
+    let detail = (stderr.text() catch { _ => "" }).trim().to_owned()
+    raise HostError(
+      if detail.is_empty() {
+        "failed to read Git changes"
+      } else {
+        detail
+      },
+    )
+  }
+  let raw = stdout.text() catch {
+    _ => raise HostError("Git returned a non-UTF-8 changed path")
+  }
+  let confirmed_head = git_revision_commit(dir, "HEAD")
+  if confirmed_head != head {
+    if retries_left > 0 {
+      return git_change_snapshot(dir, workspace_prefix, retries_left - 1)
+    }
+    raise HostError("HEAD kept changing while Git changes were read")
+  }
+  let changes = parse_git_status_z(raw).filter_map(change => {
+    git_change_relative_to_workspace(change, workspace_prefix)
+  })
+  (head, known_gitlinks, changes)
+}
+
+///|
 async fn git_changes_op(payload : GitChangesPayload) -> GitChangesReply {
   guard @engine.resolve_in_workspace(
       payload.session,
@@ -272,21 +387,6 @@ async fn git_changes_op(payload : GitChangesPayload) -> GitChangesReply {
   let dir = root.to_string()
   if git_output(dir, ["rev-parse", "--is-inside-work-tree"]) != "true" {
     return { repository: false, head: None, changes: [] }
-  }
-  let (head_code, head_stdout, _) = git_collect(dir, [
-    "rev-parse", "--verify", "HEAD",
-  ])
-  let head = if head_code == 0 {
-    Some(
-      git_single_line(
-        head_stdout.text() catch {
-          _ => raise HostError("Git returned a non-UTF-8 HEAD identity")
-        },
-      ),
-    )
-  } else {
-    // `rev-parse --verify HEAD` fails legitimately in an unborn repository.
-    None
   }
   let (prefix_code, prefix_stdout, prefix_stderr) = git_collect(dir, [
     "rev-parse", "--show-prefix",
@@ -306,44 +406,9 @@ async fn git_changes_op(payload : GitChangesPayload) -> GitChangesReply {
       _ => raise HostError("Git returned a non-UTF-8 workspace prefix")
     },
   )
-  let (index_code, index_stdout, index_stderr) = git_collect(dir, [
-    "ls-files", "--full-name", "--stage", "-z", "--", ".",
-  ])
-  guard index_code == 0 else {
-    let detail = (index_stderr.text() catch { _ => "" }).trim().to_owned()
-    raise HostError(
-      if detail.is_empty() {
-        "failed to inspect Git index"
-      } else {
-        detail
-      },
-    )
-  }
-  let indexed_gitlinks = parse_gitlink_paths(
-    index_stdout.text() catch {
-      _ => raise HostError("Git returned a non-UTF-8 index path")
-    },
-    workspace_prefix,
+  let (head, known_gitlinks, changes) = git_change_snapshot(
+    dir, workspace_prefix, 2,
   )
-  let (code, stdout, stderr) = git_collect(dir, [
-    "status", "--porcelain=v1", "-z", "--untracked-files=all", "--", ".",
-  ])
-  guard code == 0 else {
-    let detail = (stderr.text() catch { _ => "" }).trim().to_owned()
-    raise HostError(
-      if detail.is_empty() {
-        "failed to read Git changes"
-      } else {
-        detail
-      },
-    )
-  }
-  let raw = stdout.text() catch {
-    _ => raise HostError("Git returned a non-UTF-8 changed path")
-  }
-  let changes = parse_git_status_z(raw).filter_map(change => {
-    git_change_relative_to_workspace(change, workspace_prefix)
-  })
   let changes = @async.all(
     [
       for change in changes => {
@@ -351,8 +416,13 @@ async fn git_changes_op(payload : GitChangesPayload) -> GitChangesReply {
           // Deleted rows have no current kind. A trailing-slash untracked row
           // is Git's collapsed nested checkout/directory spelling, not a
           // symlink. Avoid filesystem work for both common inert cases.
-          if change.kind == "deleted" ||
-            (change.kind == "untracked" && change.path.has_suffix("/")) {
+          if change.kind == "deleted" {
+            git_change_with_path_kind(
+              change,
+              Unknown,
+              known_gitlinks.contains(change.path),
+            )
+          } else if change.kind == "untracked" && change.path.has_suffix("/") {
             change
           } else {
             let path = root.join((change.path : @pathx.Relative)).to_string()
@@ -363,7 +433,7 @@ async fn git_changes_op(payload : GitChangesPayload) -> GitChangesReply {
             git_change_with_path_kind(
               change,
               path_kind,
-              indexed_gitlinks.contains(change.path),
+              known_gitlinks.contains(change.path),
             )
           }
         }
@@ -395,20 +465,7 @@ async fn git_original_file_op(
   // its path. New clients pass the exact HEAD identity returned with their
   // change snapshot; the fallback keeps older clients compatible.
   let revision = payload.revision.unwrap_or("HEAD")
-  let (commit_code, commit_stdout, _) = git_collect(dir, [
-    "rev-parse",
-    "--verify",
-    "\{revision}^{commit}",
-  ])
-  if commit_code != 0 {
-    return Missing
-  }
-  let commit = git_single_line(
-    commit_stdout.text() catch {
-      _ => return Missing
-    },
-  )
-  if commit.is_empty() {
+  guard git_revision_commit(dir, revision) is Some(commit) else {
     return Missing
   }
   // `./` makes the tree path relative to Git's current directory, which is
@@ -564,6 +621,61 @@ test "Git single-line output preserves significant path whitespace" {
 }
 
 ///|
+async fn git_test_run(dir : String, args : Array[String]) -> Unit {
+  let (code, _, stderr) = git_collect(dir, args)
+  guard code == 0 else {
+    let detail = (stderr.text() catch { _ => "non-UTF-8 stderr" }).trim()
+    fail("Git fixture command failed: \{detail}")
+  }
+}
+
+///|
+async test "Git snapshots pair status with HEAD and supplied revisions stay pinned" {
+  let dir = @fs.tmpdir(prefix="openseek-git-review-")
+  async fn cleanup() {
+    @fs.rmdir(dir, recursive=true) catch {
+      error if @async.is_being_cancelled() => raise error
+      _ => ()
+    }
+  }
+  try {
+    git_test_run(dir, ["init", "--quiet"])
+    assert_eq(git_revision_commit(dir, "HEAD"), None)
+    @fs.write_file("\{dir}/review.txt", "first\n", create_mode=CreateOrTruncate)
+    git_test_run(dir, ["add", "review.txt"])
+    git_test_run(dir, [
+      "-c", "user.name=OpenSeek Test", "-c", "user.email=openseek@example.invalid",
+      "commit", "--quiet", "-m", "first",
+    ])
+    let first = git_revision_commit(dir, "HEAD").unwrap()
+    @fs.write_file(
+      "\{dir}/review.txt",
+      "working\n",
+      create_mode=CreateOrTruncate,
+    )
+    let (snapshot_head, _, changes) = git_change_snapshot(dir, "", 2)
+    assert_eq(snapshot_head, Some(first))
+    assert_true(changes is [{ path: "review.txt", kind: "modified", .. }])
+    git_test_run(dir, ["add", "review.txt"])
+    git_test_run(dir, [
+      "-c", "user.name=OpenSeek Test", "-c", "user.email=openseek@example.invalid",
+      "commit", "--quiet", "-m", "second",
+    ])
+    let second = git_revision_commit(dir, "HEAD").unwrap()
+    assert_true(second != first)
+    assert_eq(git_revision_commit(dir, first), Some(first))
+    assert_eq(git_revision_commit(dir, "missing-review-revision"), None)
+  } catch {
+    error => {
+      cleanup()
+      raise error
+    }
+  } noraise {
+    _ => cleanup()
+  }
+}
+
+///|
 test "Git non-file changes are classified without following symlinks" {
   let change : GitChange = {
     path: "vendor/library",
@@ -578,6 +690,16 @@ test "Git non-file changes are classified without following symlinks" {
   })
   assert_eq(git_change_with_path_kind(change, Unknown, true), {
     ..change,
+    kind: "submodule",
+  })
+  let deleted = {
+    ..change,
+    index_status: "D",
+    worktree_status: " ",
+    kind: "deleted",
+  }
+  assert_eq(git_change_with_path_kind(deleted, Unknown, true), {
+    ..deleted,
     kind: "submodule",
   })
   assert_eq(git_change_with_path_kind(change, Regular, false), change)
@@ -596,9 +718,11 @@ test "Git non-file changes are classified without following symlinks" {
 }
 
 ///|
-test "Git index parser finds sparse gitlinks relative to a nested workspace" {
-  let output = "100644 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa 0\tdesktop/src/main.mbt\u{0}160000 bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb 0\tdesktop/vendor/lib\u{0}160000 cccccccccccccccccccccccccccccccccccccccc 2\tdesktop/vendor/lib\u{0}160000 dddddddddddddddddddddddddddddddddddddddd 0\toutside/lib\u{0}"
-  assert_eq(parse_gitlink_paths(output, "desktop/"), ["vendor/lib"])
+test "Git metadata parser finds index and HEAD gitlinks in a nested workspace" {
+  let output = "100644 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa 0\tdesktop/src/main.mbt\u{0}160000 bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb 0\tdesktop/vendor/lib\u{0}160000 cccccccccccccccccccccccccccccccccccccccc 2\tdesktop/vendor/lib\u{0}160000 commit dddddddddddddddddddddddddddddddddddddddd\tdesktop/vendor/tree\u{0}160000 eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee 0\toutside/lib\u{0}"
+  assert_eq(parse_gitlink_paths(output, "desktop/"), [
+    "vendor/lib", "vendor/tree",
+  ])
 }
 
 ///|

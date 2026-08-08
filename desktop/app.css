@@ -1144,8 +1144,8 @@ html.is-resizing * {
   line-height: 16px;
 }
 
-.change-row:hover .change-action,
-.change-row:focus-visible .change-action {
+.change-row:hover .change-action:not(.unavailable),
+.change-row:focus-visible .change-action:not(.unavailable) {
   border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
   background: color-mix(in srgb, var(--accent) 15%, transparent);
 }
