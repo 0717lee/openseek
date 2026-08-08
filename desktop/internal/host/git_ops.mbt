@@ -17,7 +17,7 @@ async fn git_branch_op(payload : GitBranchPayload) -> GitBranchReply {
     // Not a repository, or no git: there is nothing to count either.
     return { branch: None, diffstat: None }
   }
-  let diffstat = git_diffstat(base)
+  let diffstat = git_diffstat(base, hint?=payload.base_hint)
   // The count takes long enough — a diff, plus one subprocess per untracked
   // file — for an agent to check out something else while it runs. The two
   // fields are applied together by the client, so a name from before the move
@@ -143,11 +143,12 @@ const MaxUntrackedDiffFiles : Int = 100
 const MaxUntrackedDiffBytes : Int64 = 1048576L
 
 ///|
-/// This branch's whole delta, measured locally. Nothing here consults GitHub:
-/// the count runs from where the branch left the remote's default branch
+/// This branch's whole delta, counted locally: from where it left its base
 /// straight to the working tree, so a commit and an unsaved edit weigh the
-/// same and the number keeps moving as the agent works.
-async fn git_diffstat(dir : @pathx.Absolute) -> GitDiffStat? {
+/// same and the number keeps moving as the agent works. Which base is
+/// `git_branch_base`'s problem — `hint` carries what the branch's pull request
+/// says, when the client has heard from one.
+async fn git_diffstat(dir : @pathx.Absolute, hint? : String) -> GitDiffStat? {
   let native = dir.0
   // An unborn HEAD has no commit to diff against, but its index can already
   // hold staged additions, so the empty tree stands in for the missing commit.
@@ -155,107 +156,70 @@ async fn git_diffstat(dir : @pathx.Absolute) -> GitDiffStat? {
     is Some(_) else {
     return git_diffstat_from(dir, EmptyTreeObject, None)
   }
-  let (baseline, base) = git_branch_base(native)
+  let (baseline, base) = git_branch_base(native, hint?)
   git_diffstat_from(dir, baseline, base)
 }
 
 ///|
-/// Every ref that could be the branch's base: each remote's recorded default
-/// (`<remote>/HEAD`, the repository's own statement of where its default
-/// branch is) and each remote's conventionally named one. Both tiers cover
-/// every remote rather than only `origin` — a checkout whose one remote is
-/// called `upstream`, or named after its host, has a default branch too — and
-/// the conventional names are listed as well as the symrefs, since a remote
-/// added by hand rather than cloned never gets a symref.
-async fn git_base_candidates(dir : String) -> Array[String] {
-  let candidates : Array[String] = []
-  fn offer(ref_ : String) -> Unit {
-    if !ref_.is_empty() && !candidates.contains(ref_) {
-      candidates.push(ref_)
+/// The remote-tracking ref to measure from. A hinted branch is looked for on
+/// `origin`, the repository a pull request's base belongs to for every
+/// checkout that is not a fork; a hint `origin` does not have falls through to
+/// the default rather than measuring from nothing.
+async fn git_base_ref(dir : String, hint? : String) -> String? {
+  if hint is Some(branch) && !branch.is_empty() {
+    let hinted = "origin/\{branch}"
+    if git_output_opt(dir, ["rev-parse", "--verify", "--quiet", hinted])
+      is Some(_) {
+      return Some(hinted)
     }
   }
-
-  if git_output_opt(dir, [
-      "for-each-ref", "--format=%(symref:short)", "refs/remotes/*/HEAD",
+  guard git_output_opt(dir, [
+      "rev-parse", "--abbrev-ref", "--verify", "--quiet", "origin/HEAD",
     ])
-    is Some(listing) {
-    for line in listing.split("\n") {
-      // A dangling `<remote>/HEAD` resolves to nothing and names no branch.
-      offer(line.trim_end(chars="\r").to_owned())
-    }
+    is Some(output) else {
+    return None
   }
-  for remote in git_remotes(dir) {
-    for name in ["main", "master"] {
-      let candidate = "\{remote}/\{name}"
-      if git_output_opt(dir, ["rev-parse", "--verify", "--quiet", candidate])
-        is Some(_) {
-        offer(candidate)
-      }
-    }
+  let name = git_single_line(output)
+  // A dangling `origin/HEAD` abbreviates to itself and names no branch.
+  if name.is_empty() || name == "origin/HEAD" {
+    None
+  } else {
+    Some(name)
   }
-  candidates
 }
 
 ///|
 /// Where this branch's work starts, and the ref that decided it.
 ///
-/// Among the candidates the winner is the one whose merge-base is *nearest* —
-/// the last point this branch was still on a mainline — rather than whichever
-/// remote is named `origin`. A fork checkout has both its own default and the
-/// upstream one, and preferring `origin` there measures a branch cut from a
-/// freshly fetched `upstream/main` against a fork default that may be months
-/// behind, sweeping every intervening upstream commit into the count as though
-/// the branch had written them. Nearest is also what "where this branch left
-/// the mainline" means, so no remote needs a policy at all.
+/// `hint` is the branch the caller already knows this one merges into, taken
+/// from its pull request. That is the only exact answer there is: a branch
+/// records nothing about where it came from, and a base that is itself a
+/// feature branch — a stacked pull request — is not something a local rule
+/// could produce, since a local rule can only ever consider default branches.
 ///
-/// Falling back to `HEAD` — no remote, no default branch, unrelated histories
+/// Without a hint the answer is `origin/HEAD`, the remote's own statement of
+/// its default branch. Being one guess rather than a search it is wrong in the
+/// same place every time: a fork checkout with no pull request yet measures
+/// against the fork's default, which may sit far behind the upstream the
+/// branch was really cut from. Opening the pull request corrects it.
+///
+/// Falling back to `HEAD` — no origin, no default branch, unrelated histories
 /// — leaves the count covering uncommitted work alone, which the absent ref
 /// name tells the composer to say out loud instead of implying a comparison
 /// never made.
-async fn git_branch_base(dir : String) -> (String, String?) {
-  let mut best : (String, String)? = None
-  for candidate in git_base_candidates(dir) {
-    guard git_output_opt(dir, ["merge-base", "HEAD", candidate]) is Some(output) else {
-      continue
-    }
-    let commit = git_single_line(output)
-    guard !commit.is_empty() else { continue }
-    guard best is Some((incumbent, _)) else {
-      best = Some((commit, candidate))
-      continue
-    }
-    // Strictly nearer only: an equal merge-base leaves the incumbent, so the
-    // candidate order decides ties rather than the comparison flipping on
-    // remotes that agree.
-    if commit != incumbent &&
-      git_is_ancestor(dir, ancestor=incumbent, of=commit) {
-      best = Some((commit, candidate))
-    }
+async fn git_branch_base(dir : String, hint? : String) -> (String, String?) {
+  guard git_base_ref(dir, hint?) is Some(base_ref) else {
+    return ("HEAD", None)
   }
-  guard best is Some((commit, candidate)) else { return ("HEAD", None) }
-  (commit, Some(candidate))
-}
-
-///|
-/// Whether `ancestor` is reachable from `of`. `merge-base --is-ancestor`
-/// answers in the exit status: 0 yes, 1 no, anything else a failure, which
-/// reads as "no" so a broken check cannot promote a candidate.
-async fn git_is_ancestor(
-  dir : String,
-  ancestor~ : String,
-  of~ : String,
-) -> Bool {
-  let (code, _, _) = @process.collect_output(
-    "git",
-    ["merge-base", "--is-ancestor", ancestor, of],
-    cwd=dir,
-    extra_env=git_environment(),
-    inherit_env=false,
-  ) catch {
-    error if @async.is_being_cancelled() => raise error
-    _ => return false
+  guard git_output_opt(dir, ["merge-base", "HEAD", base_ref]) is Some(output) else {
+    return ("HEAD", None)
   }
-  code == 0
+  let commit = git_single_line(output)
+  if commit.is_empty() {
+    ("HEAD", None)
+  } else {
+    (commit, Some(base_ref))
+  }
 }
 
 ///|

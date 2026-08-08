@@ -224,6 +224,7 @@ pub(all) struct FsWatchFailedPayload {
 pub(all) struct GitBranchPayload {
   session : String
   cwd : String?
+  base_hint : String?
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 
 pub(all) struct GitBranchReply {
@@ -286,6 +287,7 @@ pub(all) struct GitPullRequest {
   state : String
   draft : Bool
   url : String
+  base : String
   additions : Int
   deletions : Int
   changed_files : Int

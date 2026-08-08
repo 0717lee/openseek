@@ -11695,6 +11695,7 @@ fn test_pull_request() -> PullRequest {
     state: PullRequestOpen,
     draft: true,
     url: "https://github.test/acme/app/pull/710",
+    base: "main",
     additions: 2972,
     deletions: 287,
     changed_files: 18,

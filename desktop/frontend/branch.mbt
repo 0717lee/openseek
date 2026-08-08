@@ -56,6 +56,11 @@ priv struct PullRequest {
   state : PullRequestState
   draft : Bool
   url : String
+  // The branch this merges into. Not rendered: it goes back to the host as the
+  // diffstat's baseline, which is the only exact answer to "how big is this
+  // branch" — and the only one that survives a stacked pull request, whose
+  // base is another feature branch no local rule would ever name.
+  base : String
   additions : Int
   deletions : Int
   changed_files : Int
@@ -107,6 +112,7 @@ fn PullRequest::from_reply(reply : @protocol.GitPullRequest) -> PullRequest? {
     state,
     draft: reply.draft,
     url: reply.url,
+    base: reply.base,
     additions: reply.additions,
     deletions: reply.deletions,
     changed_files: reply.changed_files,
@@ -441,6 +447,7 @@ fn fetch_branch(
   session : String,
   cwd : @common.Uri?,
   generation~ : Int,
+  base_hint? : String,
 ) -> @cmd.Cmd {
   match cwd {
     Some(resource) if !@resource.belongs_to(resource, channel) =>
@@ -453,6 +460,7 @@ fn fetch_branch(
       let reply = @interop.bridge_request(channel, @commands.git_branch, {
         session,
         cwd: cwd.map(resource => resource.path),
+        base_hint,
       }) catch {
         _ => {
           scheduler.add(
@@ -494,10 +502,60 @@ fn probe_branch(
     return (@cmd.none, model)
   }
   let generation = conv.branch_generation + 1
+  // The branch's pull request, once one has answered, is the only exact word
+  // on what this work is measured from. The first probe has none and the host
+  // guesses; every one after it does not have to.
+  let base_hint = conv
+    .settled_probe()
+    .bind(probe => probe.pull_request)
+    .map(pull_request => pull_request.base)
   (
-    fetch_branch(dispatch, channel, session, cwd, generation~),
+    fetch_branch(dispatch, channel, session, cwd, generation~, base_hint?),
     model.replace_conversation({ ..conv, branch_generation: generation }),
   )
+}
+
+///|
+test "a settled pull request supplies the baseline the next probe measures from" {
+  // Where the branch's work starts is not recorded anywhere in Git — and for a
+  // stacked pull request, whose base is another feature branch, no local rule
+  // could name it. The pull request is the only exact answer, so it is what
+  // later probes carry back to the host.
+  let conv = empty_conversation(@interop.ChannelId::Local, "s")
+  fn hint_of(conv : Conversation) {
+    conv.settled_probe().bind(probe => probe.pull_request).map(pr => pr.base)
+  }
+
+  // Nothing answered yet: the host is left to guess at `origin/HEAD`.
+  assert_eq(hint_of(conv), None)
+  let stacked : PullRequest = {
+    number: 717,
+    title: "Dismiss menus with a listener",
+    state: PullRequestOpen,
+    draft: false,
+    url: "https://github.test/acme/app/pull/717",
+    base: "feature/x",
+    additions: 1,
+    deletions: 0,
+    changed_files: 1,
+    checks: None,
+  }
+  let answered = {
+    ..conv,
+    branch: Some("feature/y"),
+    pull_request: Some({
+      branch: "feature/y",
+      generation: 1,
+      probing: false,
+      stale: false,
+      pull_request: Some(stacked),
+      compare_url: None,
+    }),
+  }
+  assert_eq(hint_of(answered), Some("feature/x"))
+  // An answer describing a branch the checkout has left is not one to measure
+  // from either — `settled_probe` withholds it, as it does from the chip.
+  assert_eq(hint_of({ ..answered, branch: Some("feature/z") }), None)
 }
 
 ///|
@@ -520,6 +578,7 @@ test "the chip's tint follows CI, and its label follows the pull request" {
     state: PullRequestOpen,
     draft: false,
     url: "https://github.test/acme/app/pull/697",
+    base: "main",
     additions: 447,
     deletions: 397,
     changed_files: 18,

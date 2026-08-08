@@ -509,12 +509,17 @@ pub(all) struct GitChecks {
 /// own totals against the pull request's base, which is why they can disagree
 /// with anything measurable from a local checkout that has not fetched.
 /// `checks` is absent when the head commit reports no checks at all.
+/// `base` is the branch this pull request merges into — GitHub's own answer,
+/// and the only source for it: a branch records nothing about where it came
+/// from, and a base that is another feature branch (a stacked pull request)
+/// is not something any local rule would guess.
 pub(all) struct GitPullRequest {
   number : Int
   title : String
   state : String
   draft : Bool
   url : String
+  base : String
   additions : Int
   deletions : Int
   changed_files : Int

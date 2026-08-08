@@ -21,7 +21,9 @@ const PullRequestCandidates : Int = 5
 /// The gh fields one `gh pr list` has to return to fill the chip.
 /// `isCrossRepository` is not rendered; it separates this checkout's pull
 /// request from a fork's that happens to share the branch name.
-const PullRequestFields : String = "number,title,state,url,isDraft,additions,deletions,changedFiles,statusCheckRollup,isCrossRepository"
+/// `baseRefName` is not rendered either: it is what the diffstat measures
+/// from, and the only exact answer to that question anywhere.
+const PullRequestFields : String = "number,title,state,url,baseRefName,isDraft,additions,deletions,changedFiles,statusCheckRollup,isCrossRepository"
 
 ///|
 #cfg(platform="windows")
@@ -153,6 +155,7 @@ fn parse_pull_request(json : Json) -> GitPullRequest? {
   guard json is Object(fields) else { return None }
   guard fields.get("title") is Some(String(title)) else { return None }
   guard fields.get("url") is Some(String(url)) else { return None }
+  guard fields.get("baseRefName") is Some(String(base)) else { return None }
   guard json_count(fields, "number") is Some(number) else { return None }
   guard json_count(fields, "additions") is Some(additions) else { return None }
   guard json_count(fields, "deletions") is Some(deletions) else { return None }
@@ -173,6 +176,7 @@ fn parse_pull_request(json : Json) -> GitPullRequest? {
     state,
     draft: fields.get("isDraft") is Some(True),
     url,
+    base,
     additions,
     deletions,
     changed_files,
@@ -352,6 +356,7 @@ fn pull_request_json(
     "state": "\{state}",
     "url": "https://github.test/acme/app/pull/\{number}",
     "isDraft": Json::boolean(draft),
+    "baseRefName": "main",
     "additions": 2972,
     "deletions": 287,
     "changedFiles": 18,
