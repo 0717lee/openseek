@@ -1056,14 +1056,15 @@ fn covering_overlay(model : Model) -> Bool {
 /// the pane is actually visible and uncovered. Native views z-order above
 /// all HTML, so anything the frontend draws over the pane area — the `+`
 /// launcher popup, the narrow layout's sidebar drawer, the topbar app
-/// launcher's backdrop, and every `covering_overlay` — must hide the view
-/// rather than fight it.
+/// launcher, the composer's git popover, and every `covering_overlay` — must
+/// hide the view rather than fight it.
 fn desired_browser_view(model : Model) -> Int? {
   guard model.is_desktop &&
     model.screen is Chat &&
     model.dock.open &&
     !model.dock.menu_open &&
     !model.launcher.open &&
+    !model.git_details_open &&
     !(model.narrow && model.sidebar_open) &&
     !covering_overlay(model) else {
     return None
@@ -14590,9 +14591,13 @@ test "full-screen modals hide the native view and closing restores it" {
   let (_, closed) = update(dispatch, WorkspacePickerClose, covered)
   let (_, restored) = update(dispatch, BrowserPaneMeasured(rect~), closed)
   assert_true(restored.browser_pane.shown == Some(1))
-  // The topbar app launcher's click-away backdrop covers the pane too.
+  // The topbar app launcher covers the pane too, and so does the composer's
+  // git popover: it opens upward over the pane's bottom-left corner, and a
+  // native view left showing would paint straight over it.
   let (_, launched) = update(dispatch, ToggleLauncher, restored)
   assert_true(launched.browser_pane.shown is None)
+  let (_, detailing) = update(dispatch, ToggleGitDetails, restored)
+  assert_true(detailing.browser_pane.shown is None)
   // So do the other two surfaces `view.mbt` appends beside the picker: the
   // archive-discard confirmation and Quick Open.
   let (_, archiving) = update_dev(
