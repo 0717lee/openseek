@@ -222,6 +222,11 @@ pub(all) struct State {
   // Monotonic request token retained across conversation re-roots. Owner plus
   // this generation rejects an old A→B→A reply for the same conversation.
   changes_generation : Int
+  // Last settled Git HEAD identity. `changes_head_known` distinguishes a
+  // first/unborn snapshot (`head=None`) from no snapshot yet, so a later HEAD
+  // transition can refresh every surviving review baseline precisely.
+  changes_head : String?
+  changes_head_known : Bool
   // Monotonic token for changed-file HEAD reads. It outlives conversation
   // re-roots for the same A→B→A reason as `changes_generation`.
   review_generation : Int
@@ -266,6 +271,8 @@ pub fn State::empty() -> State {
     explorer_mode: ExplorerFiles,
     changes: ChangeListIdle,
     changes_generation: 0,
+    changes_head: None,
+    changes_head_known: false,
     review_generation: 0,
     explorer_was_visible: false,
     watching: None,
@@ -388,6 +395,7 @@ pub(all) enum Msg {
     owner~ : @interop.ConversationKey,
     generation~ : Int,
     repository~ : Bool,
+    head~ : String?,
     files~ : Array[ChangedFile]
   )
   ChangesFailed(

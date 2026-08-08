@@ -146,7 +146,7 @@ pub(all) enum Msg {
   DirFailed(owner~ : @interop.ConversationKey, path~ : @pathx.Relative, message~ : String)
   FilesIndexed(owner~ : @interop.ConversationKey, files~ : Array[@pathx.Relative], truncated~ : Bool)
   FileIndexFailed(owner~ : @interop.ConversationKey)
-  ChangesLoaded(owner~ : @interop.ConversationKey, generation~ : Int, repository~ : Bool, files~ : Array[ChangedFile])
+  ChangesLoaded(owner~ : @interop.ConversationKey, generation~ : Int, repository~ : Bool, head~ : String?, files~ : Array[ChangedFile])
   ChangesFailed(owner~ : @interop.ConversationKey, generation~ : Int, message~ : String)
   ChangesPollDue(owner~ : @interop.ConversationKey, generation~ : Int)
   FileSelected(path~ : @pathx.Relative, name~ : String)
@@ -185,6 +185,8 @@ pub(all) struct State {
   explorer_mode : ExplorerMode
   changes : ChangeList
   changes_generation : Int
+  changes_head : String?
+  changes_head_known : Bool
   review_generation : Int
   explorer_was_visible : Bool
   watching : WatchedPaths?

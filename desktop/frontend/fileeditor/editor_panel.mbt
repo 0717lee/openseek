@@ -238,7 +238,13 @@ fn show_file_in_viewer(
     let uri = match absolute {
       Some(absolute) => model_uri_of(absolute)
       None =>
-        @common.Uri::from(scheme="openseek-notice", path="/" + name) catch {
+        // Deleted previews have no absolute file URI. Use the full relative
+        // path when one exists so equal basenames in different directories do
+        // not alias one Viewer model and leak its view state across tabs.
+        @common.Uri::from(
+          scheme="openseek-notice",
+          path="/" + relative.map(path => path.0).unwrap_or(name),
+        ) catch {
           _ => return
         }
     }

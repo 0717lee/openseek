@@ -563,15 +563,15 @@ fn review_badge(state : State, ctx : Ctx) -> @html.Html {
           )
         Some({ review: Some({ baseline: ReviewLoading, .. }), .. }) =>
           ("Loading diff…", "Loading the HEAD version for comparison")
-        Some({ name, review: Some({ baseline: ReviewContent(_), .. }), .. }) if name
-          .to_lower()
-          .has_suffix(".md") =>
+        Some({ name, review: Some({ baseline: ReviewContent(_), .. }), .. }) if name.has_suffix(
+            ".md",
+          ) =>
           (
             "Rendered · no gutter", "Rendered Markdown does not expose source diff decorations",
           )
-        Some({ name, review: Some({ baseline: ReviewMissing, .. }), .. }) if name
-          .to_lower()
-          .has_suffix(".md") =>
+        Some({ name, review: Some({ baseline: ReviewMissing, .. }), .. }) if name.has_suffix(
+            ".md",
+          ) =>
           (
             "Rendered · no gutter", "New Markdown has no HEAD version; its rendered preview does not expose diff decorations",
           )

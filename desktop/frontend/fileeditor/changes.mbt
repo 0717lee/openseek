@@ -85,6 +85,7 @@ fn list_changes(
             owner~,
             generation~,
             repository=reply.repository,
+            head=reply.head,
             files~,
           ),
         ),
@@ -104,6 +105,7 @@ fn read_git_original(
   path : @pathx.Relative,
   source : @pathx.Relative,
   generation : Int,
+  revision~ : String?,
   workspace~ : @common.Uri?,
 ) -> @cmd.Cmd {
   match workspace {
@@ -127,6 +129,7 @@ fn read_git_original(
           session: owner.session,
           workspace: workspace.map(value => value.path),
           path: source.0,
+          revision,
         },
       ) catch {
         error => {

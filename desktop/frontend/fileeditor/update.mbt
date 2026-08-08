@@ -271,6 +271,7 @@ pub fn open_changed_document(
         path,
         source,
         generation,
+        revision=state.changes_head,
         workspace=ctx.workspace,
       ),
     )
@@ -310,6 +311,149 @@ pub fn open_changed_document(
       tree_open: state.tree_open && !ctx.narrow,
     },
   )
+}
+
+///|
+/// Reconcile parked reviews only against a final changed-file snapshot. Rows
+/// that disappeared (or became non-textual) leave review mode. When HEAD, the
+/// rename source, or working-file availability changed, surviving rows receive
+/// a new generation and fresh HEAD read; a still-loading working side is
+/// restarted under the same generation so its old reply cannot strand the
+/// document in `TabLoading`.
+fn reconcile_reviews_after_changes(
+  dispatch : @cmd.Emit[Msg],
+  state : State,
+  ctx : Ctx,
+  previous_files : Array[ChangedFile],
+  files : Array[ChangedFile],
+  head~ : String?,
+  head_changed~ : Bool,
+) -> (Array[@cmd.Cmd], Map[@pathx.Relative, Doc], Int) {
+  let docs = state.docs.copy()
+  let cmds : Array[@cmd.Cmd] = []
+  let mut review_generation = state.review_generation
+  for path, doc in state.docs {
+    guard doc.review is Some(_) else { continue }
+    let mut current_change : ChangedFile? = None
+    for change in files {
+      if change.path == path {
+        current_change = Some(change)
+        break
+      }
+    }
+    match current_change {
+      None => {
+        let ordinary = { ..doc, review: None }
+        docs[path] = ordinary
+        if ctx.active_file == Some(path) {
+          cmds.push(show_tab(dispatch, ctx, path, ordinary))
+        }
+      }
+      Some(change) if !change.selectable() => {
+        let ordinary = { ..doc, review: None }
+        docs[path] = ordinary
+        if ctx.active_file == Some(path) {
+          cmds.push(show_tab(dispatch, ctx, path, ordinary))
+        }
+      }
+      Some(change) => {
+        let mut previous_change : ChangedFile? = None
+        for previous in previous_files {
+          if previous.path == path {
+            previous_change = Some(previous)
+            break
+          }
+        }
+        let review_inputs_changed = head_changed ||
+          (match previous_change {
+            None => true
+            Some(previous) => {
+              let previous_source = if previous.kind
+                is (ChangeRenamed | ChangeCopied) {
+                previous.original_path
+              } else {
+                Some(previous.path)
+              }
+              let source = if change.kind is (ChangeRenamed | ChangeCopied) {
+                change.original_path
+              } else {
+                Some(change.path)
+              }
+              previous_source != source ||
+              previous.has_working_tree_file() != change.has_working_tree_file()
+            }
+          })
+        guard review_inputs_changed else { continue }
+        review_generation = review_generation + 1
+        let generation = review_generation
+        let has_working_file = change.has_working_tree_file()
+        let missing_rename_source = change.kind
+          is (ChangeRenamed | ChangeCopied) &&
+          change.original_path is None
+        let baseline = if missing_rename_source {
+          ReviewFailed("the original path is outside this workspace")
+        } else {
+          ReviewLoading
+        }
+        // The same path can cross the working-file boundary when HEAD moves:
+        // a partial commit can turn a modified row into a deletion, while a
+        // checkout can make a formerly deleted path readable again. Keep the
+        // tab state aligned with the final Git snapshot before either paired
+        // reply lands.
+        let refreshed_state = if !has_working_file {
+          TabDeleted
+        } else {
+          match doc.state {
+            TabDeleted => TabLoading
+            state => state
+          }
+        }
+        let refreshed = {
+          ..doc,
+          state: refreshed_state,
+          review: Some({ generation, baseline }),
+          stale: if has_working_file {
+            doc.stale
+          } else {
+            false
+          },
+        }
+        docs[path] = refreshed
+        if !missing_rename_source {
+          let source = change.original_path.unwrap_or(path)
+          cmds.push(
+            read_git_original(
+              dispatch,
+              ctx.owner,
+              path,
+              source,
+              generation,
+              revision=head,
+              workspace=ctx.workspace,
+            ),
+          )
+        }
+        if has_working_file && refreshed_state is TabLoading {
+          cmds.push(
+            read_file(
+              dispatch,
+              ctx.owner,
+              path,
+              doc.name,
+              review_generation=generation,
+              range=None,
+              workspace=ctx.workspace,
+            ),
+          )
+        } else if ctx.active_file == Some(path) {
+          // Clear the old gutter immediately while the new HEAD side loads;
+          // deleted previews switch back to their precise loading notice.
+          cmds.push(show_tab(dispatch, ctx, path, refreshed))
+        }
+      }
+    }
+  }
+  (cmds, docs, review_generation)
 }
 
 ///|
@@ -590,6 +734,23 @@ fn changes_visible(state : State, ctx : Ctx) -> Bool {
 }
 
 ///|
+/// A hidden explorer normally parks its Git inventory, but an open review is
+/// still rendering against that inventory's HEAD identity. Keep the low-rate
+/// refresh alive until every reviewed document is closed or ordinarily
+/// reopened.
+fn changes_live(state : State, ctx : Ctx) -> Bool {
+  if changes_visible(state, ctx) {
+    return true
+  }
+  for _, doc in state.docs {
+    if doc.review is Some(_) {
+      return true
+    }
+  }
+  false
+}
+
+///|
 fn changes_poll_after_settle(
   dispatch : @cmd.Emit[Msg],
   owner : @interop.ConversationKey,
@@ -773,7 +934,8 @@ pub fn sync(
   // workspace gaps cover the remaining reroot cases.
   let explorer_is_visible = explorer_visible(state, ctx)
   let explorer_reopened = explorer_is_visible && !state.explorer_was_visible
-  let changes_may_be_stale = explorer_is_visible &&
+  let changes_are_live = changes_live(state, ctx)
+  let changes_may_be_stale = (explorer_is_visible || changes_are_live) &&
     (match state.watching {
       Some(watching) =>
         explorer_reopened ||
@@ -788,7 +950,7 @@ pub fn sync(
   // after its root watch was parked. Failed requests only retry on an explicit
   // selection or a settled run, not on every unrelated sync pass.
   let (changes_cmd, state) = if checkout_ready &&
-    changes_visible(state, ctx) &&
+    changes_are_live &&
     (
       state.changes is ChangeListIdle ||
       (
@@ -1032,13 +1194,13 @@ pub fn update(
     ChangesPollDue(owner~, generation~) =>
       if state.owner == Some(owner) &&
         state.changes_generation == generation &&
-        changes_visible(state, ctx) &&
+        changes_live(state, ctx) &&
         state.changes is ChangeListReady(repository=true, refreshing=false, ..) {
         refresh_changes(dispatch, state, ctx)
       } else {
         (@cmd.none, state)
       }
-    ChangesLoaded(owner~, generation~, repository~, files~) =>
+    ChangesLoaded(owner~, generation~, repository~, head~, files~) =>
       if state.owner != Some(owner) || state.changes_generation != generation {
         (@cmd.none, state)
       } else {
@@ -1049,29 +1211,38 @@ pub fn update(
           // callback instead of replacing the current inventory.
           _ => return (@cmd.none, state)
         }
+        let previous_files = match state.changes {
+          ChangeListReady(files~, ..) => files
+          _ => []
+        }
         // A watcher/run signal may have latched while this request was in
         // flight, then the user hid the explorer before its reply. Reopening
         // performs a fresh full refresh, so do not spend the latch off-screen.
-        let follow_up = refresh_again && explorer_visible(state, ctx)
+        let follow_up = refresh_again &&
+          (explorer_visible(state, ctx) || changes_live(state, ctx))
         let next_generation = if follow_up {
           generation + 1
         } else {
           generation
         }
-        // A completed commit/checkout can remove the reviewed path from the
-        // changed inventory. Do not keep presenting its old snapshot as the
-        // current HEAD comparison after the row itself has disappeared.
-        let docs = state.docs.copy()
-        let review_cmds = []
-        for path, doc in state.docs {
-          if doc.review is Some(_) &&
-            !files.iter().any(change => change.path == path) {
-            let ordinary = { ..doc, review: None }
-            docs[path] = ordinary
-            if ctx.active_file == Some(path) {
-              review_cmds.push(show_tab(dispatch, ctx, path, ordinary))
-            }
-          }
+        // An intermediate coalesced snapshot is not authoritative: a path can
+        // disappear briefly and return in the already-scheduled follow-up. On
+        // the final reply, clear vanished reviews and refresh every surviving
+        // baseline when the host reports a different HEAD identity.
+        let head_changed = state.changes_head_known &&
+          state.changes_head != head
+        let (review_cmds, docs, review_generation) = if follow_up {
+          ([], state.docs, state.review_generation)
+        } else {
+          reconcile_reviews_after_changes(
+            dispatch,
+            state,
+            ctx,
+            previous_files,
+            files,
+            head~,
+            head_changed~,
+          )
         }
         let settle = if follow_up {
           list_changes(
@@ -1080,7 +1251,7 @@ pub fn update(
             next_generation,
             workspace=ctx.workspace,
           )
-        } else if repository && changes_visible(state, ctx) {
+        } else if repository && changes_live(state, ctx) {
           changes_poll_after_settle(dispatch, owner, generation)
         } else {
           @cmd.none
@@ -1091,10 +1262,21 @@ pub fn update(
           {
             ..state,
             docs,
+            changes_head: if follow_up {
+              state.changes_head
+            } else {
+              head
+            },
+            changes_head_known: if follow_up {
+              state.changes_head_known
+            } else {
+              true
+            },
             changes_generation: next_generation,
+            review_generation,
             changes: ChangeListReady(
               repository~,
-              files~,
+              files=if follow_up { previous_files } else { files },
               refreshing=follow_up,
               refresh_again=false,
             ),
@@ -1107,10 +1289,10 @@ pub fn update(
       } else {
         match state.changes {
           // An event arrived while the initial request was in flight. Give it
-          // one final attempt before surfacing the failure, unless the
-          // explorer hid meanwhile (reopening starts a fresh request).
+          // one final attempt before surfacing the failure, unless every
+          // consumer hid meanwhile (reopening starts a fresh request).
           ChangeListLoading(refresh_again=true) =>
-            if explorer_visible(state, ctx) {
+            if explorer_visible(state, ctx) || changes_live(state, ctx) {
               let next_generation = generation + 1
               (
                 list_changes(
@@ -1132,7 +1314,8 @@ pub fn update(
           // screen. If an event arrived meanwhile, spend its one coalesced
           // retry before clearing the in-flight bit.
           ChangeListReady(repository~, files~, refreshing=true, refresh_again~) =>
-            if refresh_again && explorer_visible(state, ctx) {
+            if refresh_again &&
+              (explorer_visible(state, ctx) || changes_live(state, ctx)) {
               let next_generation = generation + 1
               (
                 list_changes(
@@ -1154,7 +1337,7 @@ pub fn update(
               )
             } else {
               (
-                if repository && changes_visible(state, ctx) {
+                if repository && changes_live(state, ctx) {
                   // The failed request consumed the previous timer. Keep the
                   // low-frequency fallback alive after a transient bridge/Git
                   // error while retaining the last usable snapshot.
@@ -1355,11 +1538,13 @@ pub fn update(
           Some(recheck) => recheck
           None => @cmd.none
         }
-        // While the explorer is on-screen, keep the inventory current even
-        // when the user is looking at Files, including retrying a previous
-        // failure. A fully hidden explorer refreshes once when it reopens.
-        // An idle Changes tab also loads at this workspace-settled boundary.
-        let (changes_cmd, next) = if explorer_visible(state, ctx) &&
+        // While the explorer is on-screen—or a review still consumes its HEAD
+        // baseline—keep the inventory current even when the user is looking
+        // at Files, including retrying a previous failure. An idle Changes
+        // tab also loads at this workspace-settled boundary.
+        let (changes_cmd, next) = if (
+            explorer_visible(state, ctx) || changes_live(state, ctx)
+          ) &&
           (
             !(state.changes is ChangeListIdle) ||
             state.explorer_mode is ExplorerChanges
@@ -1455,10 +1640,12 @@ pub fn update(
         }
         let next = { ..state, loading, }
         // Any content event can change Git status, not just a structural one.
-        // Refresh only after Changes has been requested and while the explorer
-        // is on-screen; reopening performs its own full refresh. The in-flight
-        // flag inside `refresh_changes` coalesces watcher bursts.
-        let (changes_cmd, next) = if explorer_visible(state, ctx) &&
+        // Refresh only after Changes has been requested and while its explorer
+        // or a review is live; reopening performs its own full refresh. The
+        // in-flight flag inside `refresh_changes` coalesces watcher bursts.
+        let (changes_cmd, next) = if (
+            explorer_visible(state, ctx) || changes_live(state, ctx)
+          ) &&
           (
             state.changes is ChangeListLoading(_) ||
             state.changes is ChangeListReady(..)
@@ -2408,7 +2595,13 @@ test "a missing checkout settles an in-flight Changes request for retry" {
   // it. The sync above has already removed the liveness hazard.
   let (_, after_reply) = update(
     emit,
-    ChangesLoaded(owner=present.owner, generation=1, repository=true, files=[]),
+    ChangesLoaded(
+      owner=present.owner,
+      generation=1,
+      repository=true,
+      head=None,
+      files=[],
+    ),
     parked,
     missing,
   )
@@ -2612,7 +2805,13 @@ test "selecting Changes loads once and coalesces an in-flight refresh" {
   assert_true(latched.changes is ChangeListLoading(refresh_again=true))
   let (_, following_up) = update(
     emit,
-    ChangesLoaded(owner=test_ctx().owner, generation=1, repository=true, files=[]),
+    ChangesLoaded(
+      owner=test_ctx().owner,
+      generation=1,
+      repository=true,
+      head=None,
+      files=[],
+    ),
     latched,
     test_ctx(),
   )
@@ -2698,7 +2897,13 @@ test "changed-file replies are owner-and-generation-fenced" {
   ]
   let (_, ready) = update(
     emit,
-    ChangesLoaded(owner=test_ctx().owner, generation=1, repository=true, files~),
+    ChangesLoaded(
+      owner=test_ctx().owner,
+      generation=1,
+      repository=true,
+      head=None,
+      files~,
+    ),
     state,
     test_ctx(),
   )
@@ -2720,6 +2925,7 @@ test "changed-file replies are owner-and-generation-fenced" {
       },
       generation=1,
       repository=true,
+      head=None,
       files=[],
     ),
     ready,
@@ -2742,7 +2948,13 @@ test "changed-file replies are owner-and-generation-fenced" {
   assert_true(stale_failure == ready)
   let (_, stale_generation) = update(
     emit,
-    ChangesLoaded(owner=test_ctx().owner, generation=0, repository=true, files=[]),
+    ChangesLoaded(
+      owner=test_ctx().owner,
+      generation=0,
+      repository=true,
+      head=None,
+      files=[],
+    ),
     ready,
     test_ctx(),
   )
@@ -2779,11 +2991,231 @@ test "a settled Changes snapshot clears reviews whose rows disappeared" {
   }
   let (_, settled) = update(
     test_emit(),
-    ChangesLoaded(owner=test_ctx().owner, generation=1, repository=true, files=[]),
+    ChangesLoaded(
+      owner=test_ctx().owner,
+      generation=1,
+      repository=true,
+      head=None,
+      files=[],
+    ),
     state,
     { ..test_ctx(), open_files: [path], active_file: Some(path) },
   )
   assert_true(settled.docs.get(path) is Some({ review: None, .. }))
+}
+
+///|
+test "only a final Changes snapshot reconciles reviews and moved HEAD refreshes survivors" {
+  let path = @pathx.Relative("src/partial.mbt")
+  let docs : Map[@pathx.Relative, Doc] = Map([])
+  docs[path] = {
+    ..loaded_doc(path.0),
+    review: Some({ generation: 3, baseline: ReviewContent("old HEAD") }),
+  }
+  let state = {
+    ..owned_state(),
+    explorer_mode: ExplorerChanges,
+    changes: ChangeListLoading(refresh_again=true),
+    changes_generation: 1,
+    changes_head: Some("old-head"),
+    changes_head_known: true,
+    review_generation: 3,
+    docs,
+  }
+  let ctx = { ..test_ctx(), open_files: [path], active_file: Some(path) }
+  // The coalesced first reply is intermediate. Its temporary absence must not
+  // clear the review or consume the new HEAD identity before the follow-up.
+  let (_, following_up) = update(
+    test_emit(),
+    ChangesLoaded(
+      owner=test_ctx().owner,
+      generation=1,
+      repository=true,
+      head=Some("new-head"),
+      files=[],
+    ),
+    state,
+    ctx,
+  )
+  assert_true(
+    following_up.docs.get(path)
+    is Some(
+      {
+        review: Some({ generation: 3, baseline: ReviewContent("old HEAD") }),
+        ..,
+      }
+    ),
+  )
+  assert_true(following_up.changes_head == Some("old-head"))
+  assert_true(following_up.changes_generation == 2)
+  let files = [
+    {
+      path,
+      original_path: None,
+      index_status: " ",
+      worktree_status: "M",
+      kind: ChangeModified,
+    },
+  ]
+  let (_, settled) = update(
+    test_emit(),
+    ChangesLoaded(
+      owner=test_ctx().owner,
+      generation=2,
+      repository=true,
+      head=Some("new-head"),
+      files~,
+    ),
+    following_up,
+    ctx,
+  )
+  assert_true(settled.changes_head == Some("new-head"))
+  assert_true(settled.changes_head_known)
+  assert_true(settled.review_generation == 4)
+  assert_true(
+    settled.docs.get(path)
+    is Some({ review: Some({ generation: 4, baseline: ReviewLoading }), .. }),
+  )
+}
+
+///|
+test "moved HEAD normalizes reviewed tabs across the working-file boundary" {
+  let path = @pathx.Relative("src/crossing.mbt")
+  let ctx = { ..test_ctx(), open_files: [path], active_file: Some(path) }
+  let deleted : ChangedFile = {
+    path,
+    original_path: None,
+    index_status: " ",
+    worktree_status: "D",
+    kind: ChangeDeleted,
+  }
+  let loading_docs : Map[@pathx.Relative, Doc] = Map([])
+  loading_docs[path] = {
+    name: "crossing.mbt",
+    state: TabLoading,
+    review: Some({ generation: 3, baseline: ReviewContent("old HEAD") }),
+    stale: true,
+  }
+  let loading = {
+    ..owned_state(),
+    explorer_mode: ExplorerChanges,
+    changes: ChangeListLoading(refresh_again=false),
+    changes_generation: 1,
+    changes_head: Some("old-head"),
+    changes_head_known: true,
+    review_generation: 3,
+    docs: loading_docs,
+  }
+  let (_, became_deleted) = update(
+    test_emit(),
+    ChangesLoaded(
+      owner=ctx.owner,
+      generation=1,
+      repository=true,
+      head=Some("new-head"),
+      files=[deleted],
+    ),
+    loading,
+    ctx,
+  )
+  assert_true(
+    became_deleted.docs.get(path)
+    is Some(
+      {
+        state: TabDeleted,
+        review: Some({ generation: 4, baseline: ReviewLoading }),
+        stale: false,
+        ..,
+      }
+    ),
+  )
+
+  let deleted_docs : Map[@pathx.Relative, Doc] = Map([])
+  deleted_docs[path] = {
+    name: "crossing.mbt",
+    state: TabDeleted,
+    review: Some({ generation: 3, baseline: ReviewContent("old HEAD") }),
+    stale: false,
+  }
+  let deleted_state = { ..loading, docs: deleted_docs }
+  let restored = { ..deleted, worktree_status: "M", kind: ChangeModified }
+  let (_, became_loading) = update(
+    test_emit(),
+    ChangesLoaded(
+      owner=ctx.owner,
+      generation=1,
+      repository=true,
+      head=Some("new-head"),
+      files=[restored],
+    ),
+    deleted_state,
+    ctx,
+  )
+  assert_true(
+    became_loading.docs.get(path)
+    is Some(
+      {
+        state: TabLoading,
+        review: Some({ generation: 4, baseline: ReviewLoading }),
+        ..,
+      }
+    ),
+  )
+}
+
+///|
+test "a changed rename source refreshes its review without moving HEAD" {
+  let path = @pathx.Relative("src/new.mbt")
+  let previous : ChangedFile = {
+    path,
+    original_path: Some(@pathx.Relative("src/old.mbt")),
+    index_status: "R",
+    worktree_status: " ",
+    kind: ChangeRenamed,
+  }
+  let current = {
+    ..previous,
+    original_path: None,
+    index_status: "?",
+    worktree_status: "?",
+    kind: ChangeUntracked,
+  }
+  let docs : Map[@pathx.Relative, Doc] = Map([])
+  docs[path] = {
+    ..loaded_doc(path.0),
+    review: Some({ generation: 3, baseline: ReviewContent("old source") }),
+  }
+  let state = {
+    ..owned_state(),
+    changes: ChangeListReady(
+      repository=true,
+      files=[previous],
+      refreshing=true,
+      refresh_again=false,
+    ),
+    changes_generation: 1,
+    changes_head: Some("same-head"),
+    changes_head_known: true,
+    review_generation: 3,
+    docs,
+  }
+  let (_, settled) = update(
+    test_emit(),
+    ChangesLoaded(
+      owner=test_ctx().owner,
+      generation=1,
+      repository=true,
+      head=Some("same-head"),
+      files=[current],
+    ),
+    state,
+    { ..test_ctx(), open_files: [path], active_file: Some(path) },
+  )
+  assert_true(settled.review_generation == 4)
+  assert_true(
+    settled.docs.get(path)
+    is Some({ review: Some({ generation: 4, baseline: ReviewLoading }), .. }),
+  )
 }
 
 ///|
@@ -2855,7 +3287,13 @@ test "hidden explorer drops coalesced follow-ups when requests settle" {
   }
   let (_, loaded) = update(
     emit,
-    ChangesLoaded(owner=test_ctx().owner, generation=4, repository=true, files=[]),
+    ChangesLoaded(
+      owner=test_ctx().owner,
+      generation=4,
+      repository=true,
+      head=None,
+      files=[],
+    ),
     refreshing,
     hidden,
   )
@@ -2967,7 +3405,13 @@ test "watcher refresh keeps the ready change snapshot visible" {
   // second reply settles the snapshot.
   let (_, following_up) = update(
     emit,
-    ChangesLoaded(owner=test_ctx().owner, generation=1, repository=true, files=[]),
+    ChangesLoaded(
+      owner=test_ctx().owner,
+      generation=1,
+      repository=true,
+      head=None,
+      files=[],
+    ),
     latched,
     test_ctx(),
   )
@@ -2983,7 +3427,13 @@ test "watcher refresh keeps the ready change snapshot visible" {
   )
   let (_, settled) = update(
     emit,
-    ChangesLoaded(owner=test_ctx().owner, generation=2, repository=true, files=[]),
+    ChangesLoaded(
+      owner=test_ctx().owner,
+      generation=2,
+      repository=true,
+      head=None,
+      files=[],
+    ),
     following_up,
     test_ctx(),
   )
@@ -3028,6 +3478,81 @@ test "hidden explorer parks event-driven change refreshes until reopen" {
   )
   assert_true(after_run.changes_generation == 4)
   assert_true(after_run.changes is ChangeListReady(refreshing=false, ..))
+}
+
+///|
+test "hidden explorer keeps Git refresh live for an open review" {
+  let path = @pathx.Relative("src/reviewed.mbt")
+  let docs : Map[@pathx.Relative, Doc] = Map([])
+  docs[path] = {
+    ..loaded_doc(path.0),
+    review: Some({ generation: 2, baseline: ReviewContent("old HEAD") }),
+  }
+  let state = {
+    ..owned_state(),
+    changes: ChangeListReady(
+      repository=true,
+      files=[],
+      refreshing=false,
+      refresh_again=false,
+    ),
+    changes_generation: 4,
+    docs,
+  }
+  let hidden = {
+    ..test_ctx(),
+    panel_open: false,
+    open_files: [path],
+    active_file: Some(path),
+  }
+  let (_, after_run) = update(
+    test_emit(),
+    RunSettled(owner=test_ctx().owner),
+    state,
+    hidden,
+  )
+  assert_true(after_run.changes_generation == 5)
+  assert_true(after_run.changes is ChangeListReady(refreshing=true, ..))
+  let (_, after_poll) = update(
+    test_emit(),
+    ChangesPollDue(owner=test_ctx().owner, generation=4),
+    state,
+    hidden,
+  )
+  assert_true(after_poll.changes_generation == 5)
+  assert_true(after_poll.changes is ChangeListReady(refreshing=true, ..))
+}
+
+///|
+test "sync refreshes a hidden review after its workspace watch was parked" {
+  let path = @pathx.Relative("src/reviewed.mbt")
+  let docs : Map[@pathx.Relative, Doc] = Map([])
+  docs[path] = {
+    ..loaded_doc(path.0),
+    review: Some({ generation: 2, baseline: ReviewContent("old HEAD") }),
+  }
+  let state = {
+    ..owned_state(),
+    explorer_was_visible: false,
+    watching: None,
+    changes: ChangeListReady(
+      repository=true,
+      files=[],
+      refreshing=false,
+      refresh_again=false,
+    ),
+    changes_generation: 4,
+    docs,
+  }
+  let hidden = {
+    ..test_ctx(),
+    panel_open: false,
+    open_files: [path],
+    active_file: Some(path),
+  }
+  let (refreshed, _) = sync(test_emit(), state, hidden)
+  assert_true(refreshed.changes_generation == 5)
+  assert_true(refreshed.changes is ChangeListReady(refreshing=true, ..))
 }
 
 ///|

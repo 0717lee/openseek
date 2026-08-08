@@ -51,3 +51,39 @@ test "Git original-file replies round-trip through their manual codec" {
     @debug.assert_eq(decoded, reply)
   }
 }
+
+///|
+test "Git changes replies preserve HEAD identity and accept legacy omission" {
+  let reply : @protocol.GitChangesReply = {
+    repository: true,
+    head: Some("0123456789abcdef"),
+    changes: [],
+  }
+  let decoded : @protocol.GitChangesReply = @json.from_json(reply.to_json())
+  @debug.assert_eq(decoded, reply)
+  let legacy : @protocol.GitChangesReply = @json.from_json({
+    "repository": true,
+    "changes": [],
+  })
+  @debug.assert_eq(legacy.head, None)
+}
+
+///|
+test "Git original-file payloads pin a revision and accept legacy omission" {
+  let payload : @protocol.GitOriginalFilePayload = {
+    session: "session",
+    workspace: Some("/worktree"),
+    path: "src/main.mbt",
+    revision: Some("0123456789abcdef"),
+  }
+  let decoded : @protocol.GitOriginalFilePayload = @json.from_json(
+    payload.to_json(),
+  )
+  @debug.assert_eq(decoded, payload)
+  let legacy : @protocol.GitOriginalFilePayload = @json.from_json({
+    "session": "session",
+    "workspace": "/worktree",
+    "path": "src/main.mbt",
+  })
+  @debug.assert_eq(legacy.revision, None)
+}

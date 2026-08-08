@@ -271,7 +271,22 @@ async fn git_changes_op(payload : GitChangesPayload) -> GitChangesReply {
   }
   let dir = root.to_string()
   if git_output(dir, ["rev-parse", "--is-inside-work-tree"]) != "true" {
-    return { repository: false, changes: [] }
+    return { repository: false, head: None, changes: [] }
+  }
+  let (head_code, head_stdout, _) = git_collect(dir, [
+    "rev-parse", "--verify", "HEAD",
+  ])
+  let head = if head_code == 0 {
+    Some(
+      git_single_line(
+        head_stdout.text() catch {
+          _ => raise HostError("Git returned a non-UTF-8 HEAD identity")
+        },
+      ),
+    )
+  } else {
+    // `rev-parse --verify HEAD` fails legitimately in an unborn repository.
+    None
   }
   let (prefix_code, prefix_stdout, prefix_stderr) = git_collect(dir, [
     "rev-parse", "--show-prefix",
@@ -356,7 +371,7 @@ async fn git_changes_op(payload : GitChangesPayload) -> GitChangesReply {
     ],
     max_concurrent=32,
   )
-  { repository: true, changes }
+  { repository: true, head, changes }
 }
 
 ///|
@@ -376,13 +391,31 @@ async fn git_original_file_op(
   if git_output(dir, ["rev-parse", "--is-inside-work-tree"]) != "true" {
     return Missing
   }
+  // Resolve the requested revision to an immutable commit before addressing
+  // its path. New clients pass the exact HEAD identity returned with their
+  // change snapshot; the fallback keeps older clients compatible.
+  let revision = payload.revision.unwrap_or("HEAD")
+  let (commit_code, commit_stdout, _) = git_collect(dir, [
+    "rev-parse",
+    "--verify",
+    "\{revision}^{commit}",
+  ])
+  if commit_code != 0 {
+    return Missing
+  }
+  let commit = git_single_line(
+    commit_stdout.text() catch {
+      _ => return Missing
+    },
+  )
+  if commit.is_empty() {
+    return Missing
+  }
   // `./` makes the tree path relative to Git's current directory, which is
   // the conversation workspace even when that workspace is a repository
-  // subdirectory.
-  let object = "HEAD:./\{relative.0}"
-  // Resolve the symbolic `HEAD:path` name once. All following checks and the
-  // read use the immutable object ID, so a concurrent checkout cannot swap in
-  // different content after it passes the size limit.
+  // subdirectory. Resolve the commit:path name once; all following checks and
+  // the read use the immutable blob ID.
+  let object = "\{commit}:./\{relative.0}"
   let (oid_code, oid_stdout, _) = git_collect(dir, [
     "rev-parse", "--verify", object,
   ])

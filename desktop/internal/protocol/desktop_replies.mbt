@@ -432,6 +432,9 @@ pub(all) struct GitChange {
 /// are request errors rather than an ambiguous empty list.
 pub(all) struct GitChangesReply {
   repository : Bool
+  // The commit object currently named by HEAD. `None` covers an unborn HEAD,
+  // a non-repository workspace, and older hosts that predate this field.
+  head : String?
   changes : Array[GitChange]
 } derive(Debug, Eq, FromJson, ToJson)
 
