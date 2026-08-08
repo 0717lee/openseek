@@ -31,7 +31,7 @@ pub fn open_document(@cmd.Emit[Msg], State, Ctx, @pathx.Relative, name~ : String
 
 pub fn open_file(@cmd.Emit[Msg], State, Ctx, @pathx.Relative, range~ : @common.Range?, annotation? : String, had_active~ : Bool) -> (@cmd.Cmd, State)
 
-pub fn panel_toggle_cmds(@cmd.Emit[Msg], State, Ctx, opening~ : Bool) -> @cmd.Cmd
+pub fn panel_toggle_cmds(@cmd.Emit[Msg], State, Ctx, opening~ : Bool) -> (@cmd.Cmd, State)
 
 pub fn read_file(@cmd.Emit[Msg], @interop.ConversationKey, Int, @pathx.Relative, String, review_generation? : Int, range~ : @common.Range?, annotation? : String, workspace~ : @common.Uri?) -> @cmd.Cmd
 
@@ -193,6 +193,7 @@ pub(all) struct State {
   changes_head_known : Bool
   review_generation : Int
   review_recovery_pending : Bool
+  background_review_requests : Map[@pathx.Relative, Int]
   placement_parked : Bool
   explorer_was_visible : Bool
   watching : WatchedPaths?

@@ -621,6 +621,14 @@ fn open_editor_at(
   annotation? : String,
 ) -> (@cmd.Cmd, Model) {
   let conv = model.active()
+  let placement = model.checkout_placement(conv)
+  // Chip/transcript jumps call the file-editor package directly rather than
+  // passing through its guarded message dispatcher. Keep them parked too: the
+  // dock must not grow a loading tab, nor may a host read start, while checkout
+  // placement is unresolved or missing.
+  guard !(placement is None || placement is Some(@interop.MissingWorktree(_))) else {
+    return (@cmd.none, model)
+  }
   let owner : @interop.ConversationKey = {
     channel: model.focused,
     session: conv.session_id,
@@ -1474,6 +1482,11 @@ fn update_msg(
     FileEditor(OpenNavigationLocation(owner~, path~, range~)) => {
       guard model.file_panel.owner == Some(owner) &&
         file_ctx(model).owner == owner else {
+        return (@cmd.none, model)
+      }
+      let placement = file_ctx(model).checkout
+      guard !(placement is None ||
+        placement is Some(@interop.MissingWorktree(_))) else {
         return (@cmd.none, model)
       }
       let had_active = @dock.active_file(model.dock) is Some(_)
@@ -2559,16 +2572,15 @@ fn update_msg(
       let model = { ..model, dock, }
       let femit = dispatch.map(msg => FileEditor(msg))
       match msg {
-        TogglePanel =>
-          (
-            @fileeditor.panel_toggle_cmds(
-              femit,
-              model.file_panel,
-              file_ctx(model),
-              opening=dock.open,
-            ),
-            model,
+        TogglePanel => {
+          let (cmd, panel) = @fileeditor.panel_toggle_cmds(
+            femit,
+            model.file_panel,
+            file_ctx(model),
+            opening=dock.open,
           )
+          (cmd, { ..model, file_panel: panel })
+        }
         MenuToggled =>
           // Pure UI state; the browser sync pass hides the native view
           // while the popup would overlap it.
@@ -13929,7 +13941,7 @@ test "a changed row opens the file tab in review mode" {
 }
 
 ///|
-test "file rows cannot open while checkout placement is missing" {
+test "file rows and location jumps cannot open while checkout placement is missing" {
   let dispatch = test_dispatch()
   let workspace = @interop.ChannelId::Local.test_resource("/proj")
   let model = desktop_model()
@@ -13972,6 +13984,30 @@ test "file rows cannot open while checkout placement is missing" {
   )
   assert_false(review.dock.tabs.contains(@dock.DockTab::File(path~)))
   assert_false(review.file_panel.docs.contains(path))
+  let (_, jumped) = update(
+    dispatch,
+    JumpToLocation(
+      path="/proj/src/main.mbt",
+      range=Some(@common.Range::Range(1, 1, 1, 1)),
+      annotation=None,
+    ),
+    model,
+  )
+  assert_false(jumped.dock.tabs.contains(@dock.DockTab::File(path~)))
+  assert_false(jumped.file_panel.docs.contains(path))
+  let (_, navigation) = update(
+    dispatch,
+    FileEditor(
+      OpenNavigationLocation(
+        owner=file_ctx(model).owner,
+        path~,
+        range=@common.Range::Range(1, 1, 1, 1),
+      ),
+    ),
+    model,
+  )
+  assert_false(navigation.dock.tabs.contains(@dock.DockTab::File(path~)))
+  assert_false(navigation.file_panel.docs.contains(path))
 }
 
 ///|

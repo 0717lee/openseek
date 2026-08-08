@@ -17,6 +17,15 @@ pub fn mount_cmds(dispatch : @cmd.Emit[Msg]) -> @cmd.Cmd {
 }
 
 ///|
+/// Whether host-backed editor work may address this conversation's checkout.
+/// Public entry points are called directly by the dock/root package as well as
+/// through `update`, so each one must enforce the same placement boundary as
+/// the message dispatcher.
+fn Ctx::placement_ready(self : Ctx) -> Bool {
+  !(self.checkout is None || self.checkout is Some(@interop.MissingWorktree(_)))
+}
+
+///|
 /// The baseline the Viewer quick-diff service consumes. `ReviewMissing` is an
 /// intentional empty original so every working-tree line renders as added;
 /// unavailable/error cases clear the gutter rather than drawing a false diff.
@@ -245,6 +254,7 @@ pub fn open_document(
   annotation? : String,
   had_active~ : Bool,
 ) -> (@cmd.Cmd, State) {
+  guard ctx.placement_ready() else { return (@cmd.none, state) }
   // Opening the path from Files, Quick Open, navigation, or a mention leaves
   // review mode. If the same Viewer model stays attached, the show below
   // clears its resource-keyed quick-diff baseline without replacing content.
@@ -343,7 +353,9 @@ pub fn open_changed_document(
   change : ChangedFile,
   had_active~ : Bool,
 ) -> (@cmd.Cmd, State) {
-  guard change.selectable() else { return (@cmd.none, state) }
+  guard ctx.placement_ready() && change.selectable() else {
+    return (@cmd.none, state)
+  }
   let path = change.path
   let name = basename(path)
   let generation = state.review_generation + 1
@@ -752,7 +764,9 @@ pub fn activate(
   ctx : Ctx,
   path : @pathx.Relative,
 ) -> (@cmd.Cmd, State) {
-  guard state.docs.get(path) is Some(doc) else { return (@cmd.none, state) }
+  guard ctx.placement_ready() && state.docs.get(path) is Some(doc) else {
+    return (@cmd.none, state)
+  }
   let (show, doc, review_generation) = show_activated_tab(
     dispatch,
     ctx,
@@ -798,6 +812,30 @@ pub fn close_document(
 ) -> (@cmd.Cmd, State) {
   let docs = state.docs.copy()
   docs.remove(path)
+  // Closing a tab is useful local state even while placement is parked, but
+  // promoting its neighbor must not address the missing checkout. Recovery's
+  // sync pass restores whichever surviving tab the dock made active.
+  if !ctx.placement_ready() {
+    let state = {
+      ..state,
+      docs,
+      tree_open: if was_active && next is None {
+        true
+      } else {
+        state.tree_open
+      },
+    }
+    let cmd = if was_active && next is None {
+      @cmd.batch([
+        clear_document(),
+        forget_view_state(path),
+        request_viewer_remeasure(),
+      ])
+    } else {
+      forget_view_state(path)
+    }
+    return (cmd, state)
+  }
   guard was_active else { return (forget_view_state(path), { ..state, docs, }) }
   match next {
     Some(next_path) =>
@@ -833,25 +871,26 @@ pub fn close_document(
 }
 
 ///|
-/// The commands a panel-visibility toggle needs: the mount set always, plus
-/// — when opening — a read for an active document that was restored while
-/// the panel was closed and never read (it sits at `TabLoading`; opening is
-/// what makes it worth showing, and a duplicate of an in-flight read folds
-/// idempotently).
+/// Reattach and show the active document when the panel opens. The Viewer can
+/// have been cleared while the dock was hidden (notably when a missing checkout
+/// was repaired), so every open activation restores it rather than assuming a
+/// loaded cached document is still attached. `activate` also advances a stale
+/// review's working-side token before starting its replacement read.
 pub fn panel_toggle_cmds(
   dispatch : @cmd.Emit[Msg],
   state : State,
   ctx : Ctx,
   opening~ : Bool,
-) -> @cmd.Cmd {
+) -> (@cmd.Cmd, State) {
   let cmds = [mount_cmds(dispatch)]
-  if opening &&
-    ctx.active_file is Some(path) &&
-    state.docs.get(path) is Some(doc) &&
-    doc.state is TabLoading {
-    cmds.push(show_tab(dispatch, ctx, path, doc))
+  let state = if opening && ctx.active_file is Some(path) {
+    let (show, state) = activate(dispatch, state, ctx, path)
+    cmds.push(show)
+    state
+  } else {
+    state
   }
-  @cmd.batch(cmds)
+  (@cmd.batch(cmds), state)
 }
 
 ///|
@@ -1086,15 +1125,23 @@ fn refresh_unknown_head_reviews(
   dispatch : @cmd.Emit[Msg],
   docs : Map[@pathx.Relative, Doc],
   review_generation : Int,
+  background_review_requests : Map[@pathx.Relative, Int],
   ctx : Ctx,
   files : Array[ChangedFile],
-) -> (Array[@cmd.Cmd], Map[@pathx.Relative, Doc], Int) {
+) -> (
+  Array[@cmd.Cmd],
+  Map[@pathx.Relative, Doc],
+  Int,
+  Map[@pathx.Relative, Int],
+) {
   let docs = docs.copy()
+  let background_review_requests = background_review_requests.copy()
   let cmds = []
   let mut review_generation = review_generation
   for path, doc in docs {
     guard doc.review is Some(review) &&
-      review_needs_unknown_head_refresh(review, files) else {
+      review_needs_unknown_head_refresh(review, files) &&
+      background_review_requests.get(path) != Some(review.generation) else {
       continue
     }
     let source = if review.selected.kind is (ChangeRenamed | ChangeCopied) {
@@ -1108,6 +1155,7 @@ fn refresh_unknown_head_reviews(
     review_generation = review_generation + 1
     let generation = review_generation
     docs[path] = { ..doc, review: Some({ ..review, generation, }) }
+    background_review_requests[path] = generation
     cmds.push(
       read_git_original(
         dispatch,
@@ -1121,7 +1169,7 @@ fn refresh_unknown_head_reviews(
       ),
     )
   }
-  (cmds, docs, review_generation)
+  (cmds, docs, review_generation, background_review_requests)
 }
 
 ///|
@@ -1298,6 +1346,7 @@ pub fn sync(
         request_epoch,
         review_generation: state.review_generation,
         review_recovery_pending: false,
+        background_review_requests: Map([]),
         placement_parked: !checkout_ready,
         // Preserve the last host configuration long enough for `with_watch`
         // to retire or replace it on the way out.
@@ -1346,6 +1395,7 @@ pub fn sync(
       changes_generation: state.changes_generation + 1,
       review_generation,
       review_recovery_pending,
+      background_review_requests: Map([]),
       placement_parked: true,
       request_epoch,
     }
@@ -1738,14 +1788,19 @@ pub fn update(
             restart_incomplete=state.review_recovery_pending,
           )
         }
-        let (legacy_cmds, docs, review_generation) = if !follow_up &&
+        let (legacy_cmds, docs, review_generation, background_review_requests) = if !follow_up &&
           state.changes_head_known &&
           head is None {
           refresh_unknown_head_reviews(
-            dispatch, docs, review_generation, ctx, files,
+            dispatch,
+            docs,
+            review_generation,
+            state.background_review_requests,
+            ctx,
+            files,
           )
         } else {
-          ([], docs, review_generation)
+          ([], docs, review_generation, state.background_review_requests)
         }
         for cmd in legacy_cmds {
           review_cmds.push(cmd)
@@ -1780,6 +1835,7 @@ pub fn update(
             },
             changes_generation: next_generation,
             review_generation,
+            background_review_requests,
             review_recovery_pending: if follow_up {
               state.review_recovery_pending
             } else {
@@ -1898,12 +1954,20 @@ pub fn update(
     // a dock tab before the document loads.
     OpenNavigationLocation(..) => (@cmd.none, state)
     GitOriginalLoaded(owner~, path~, generation~, background~, original~) => {
+      let background_review_requests = if background &&
+        state.background_review_requests.get(path) == Some(generation) {
+        let requests = state.background_review_requests.copy()
+        requests.remove(path)
+        requests
+      } else {
+        state.background_review_requests
+      }
       guard state.owner == Some(owner) &&
         state.docs.get(path) is Some(doc) &&
         doc.review is Some(current_review) &&
         current_review.generation == generation &&
         (background || current_review.baseline is ReviewLoading) else {
-        return (@cmd.none, state)
+        return (@cmd.none, { ..state, background_review_requests, })
       }
       let review = match original {
         @protocol.OriginalContent(content) => ReviewContent(content)
@@ -1926,19 +1990,27 @@ pub fn update(
       } else {
         @cmd.none
       }
-      (cmd, { ..state, docs, })
+      (cmd, { ..state, docs, background_review_requests })
     }
     GitOriginalFailed(owner~, path~, generation~, background~, message~) => {
+      let background_review_requests = if background &&
+        state.background_review_requests.get(path) == Some(generation) {
+        let requests = state.background_review_requests.copy()
+        requests.remove(path)
+        requests
+      } else {
+        state.background_review_requests
+      }
       guard state.owner == Some(owner) &&
         state.docs.get(path) is Some(doc) &&
         doc.review is Some(current_review) &&
         current_review.generation == generation else {
-        return (@cmd.none, state)
+        return (@cmd.none, { ..state, background_review_requests, })
       }
       // A compatibility refresh keeps the last usable baseline through a
       // transient failure. Foreground loads still surface their precise error.
       if background {
-        return (@cmd.none, state)
+        return (@cmd.none, { ..state, background_review_requests, })
       }
       guard current_review.baseline is ReviewLoading else {
         return (@cmd.none, state)
@@ -1955,7 +2027,7 @@ pub fn update(
       } else {
         @cmd.none
       }
-      (cmd, { ..state, docs, })
+      (cmd, { ..state, docs, background_review_requests })
     }
     FileLoaded(
       owner~,
@@ -2372,6 +2444,12 @@ pub fn update(
       } else if state.docs.get(path) is Some({ review: Some(_), .. }) {
         // Like an untagged success, this failure belongs to an ordinary read
         // that predates the review click and is no longer user-visible.
+        (@cmd.none, state)
+      } else if state.docs.get(path) is Some({ state: TabUnavailable(_), .. }) {
+        // A stat reply already established that this path is intentionally
+        // unavailable (notably a symlink escaping the workspace). Its older
+        // untagged read failure must not replace that precise tab notice with
+        // a generic panel-wide error banner.
         (@cmd.none, state)
       } else {
         (@cmd.none, { ..state, error: Some(message) })
@@ -3282,9 +3360,20 @@ test "a missing checkout parks files and refuses editor actions until repair" {
   let present = test_ctx()
   let docs : Map[@pathx.Relative, Doc] = Map([])
   docs[Relative("a.mbt")] = loaded_doc("a.mbt")
+  docs[Relative("b.mbt")] = {
+    ..loaded_doc("b.mbt"),
+    review: Some({
+      generation: 4,
+      working_generation: 4,
+      baseline: ReviewContent("before\n"),
+      selected: test_modified_change(Relative("b.mbt")),
+    }),
+    stale: true,
+  }
   let state = {
     ..owned_state(),
     docs,
+    review_generation: 4,
     watching: Some({
       owner: present.owner,
       workspace: None,
@@ -3295,7 +3384,7 @@ test "a missing checkout parks files and refuses editor actions until repair" {
   let missing : Ctx = {
     ..present,
     checkout: Some(@interop.MissingWorktree(name="wt")),
-    open_files: [Relative("a.mbt")],
+    open_files: [Relative("a.mbt"), Relative("b.mbt")],
     active_file: Some(Relative("a.mbt")),
   }
   let (parked, _) = sync(emit, state, missing)
@@ -3311,6 +3400,56 @@ test "a missing checkout parks files and refuses editor actions until repair" {
   // A stale control event cannot start a file index request while missing.
   let (_, refused) = update(emit, EnsureFileIndex, parked, missing)
   assert_true(refused == parked)
+  // Root/dock callers also use these public entry points directly, bypassing
+  // the guarded message dispatcher. They enforce the same placement boundary.
+  let (_, direct_open) = open_document(
+    emit,
+    parked,
+    missing,
+    Relative("new.mbt"),
+    name="new.mbt",
+    range=None,
+    had_active=true,
+  )
+  assert_true(direct_open == parked)
+  let (_, direct_review) = open_changed_document(
+    emit,
+    parked,
+    missing,
+    test_modified_change(Relative("a.mbt")),
+    had_active=true,
+  )
+  assert_true(direct_review == parked)
+  let (_, direct_activation) = activate(
+    emit,
+    parked,
+    missing,
+    Relative("a.mbt"),
+  )
+  assert_true(direct_activation == parked)
+  let (_, direct_toggle) = panel_toggle_cmds(
+    emit,
+    parked,
+    missing,
+    opening=true,
+  )
+  assert_true(direct_toggle == parked)
+  // A close still updates the local strip mirror, but cannot activate and
+  // reload the promoted review until placement is repaired.
+  let (_, direct_close) = close_document(
+    emit,
+    parked,
+    missing,
+    Relative("a.mbt"),
+    next=Some(Relative("b.mbt")),
+    was_active=true,
+  )
+  assert_false(direct_close.docs.contains(Relative("a.mbt")))
+  assert_true(
+    direct_close.docs.get(Relative("b.mbt")) ==
+    parked.docs.get(Relative("b.mbt")),
+  )
+  assert_eq(direct_close.review_generation, parked.review_generation)
   let (_, selected) = update(
     emit,
     ExplorerModeSelected(ExplorerChanges),
@@ -3333,6 +3472,51 @@ test "a missing checkout parks files and refuses editor actions until repair" {
   )
   assert_false(restored.placement_parked)
   assert_eq(restored.request_epoch, parked.request_epoch)
+}
+
+///|
+test "opening after a hidden checkout repair restores a stale reviewed tab" {
+  let emit = test_emit()
+  let path = @pathx.Relative("reviewed.mbt")
+  let change = test_modified_change(path)
+  let docs : Map[@pathx.Relative, Doc] = Map([])
+  docs[path] = {
+    ..loaded_doc("reviewed.mbt"),
+    review: Some({
+      generation: 4,
+      working_generation: 4,
+      baseline: ReviewContent("before\n"),
+      selected: change,
+    }),
+  }
+  let present : Ctx = {
+    ..test_ctx(),
+    panel_open: false,
+    open_files: [path],
+    active_file: Some(path),
+  }
+  let state = { ..owned_state(), docs, review_generation: 4 }
+  let missing : Ctx = {
+    ..present,
+    checkout: Some(@interop.MissingWorktree(name="wt")),
+  }
+  let (parked, _) = sync(emit, state, missing)
+  let (restored, _) = sync(emit, parked, present)
+  assert_true(
+    restored.docs.get(path)
+    is Some({ review: Some({ working_generation: 4, .. }), stale: true, .. }),
+  )
+  let (_, reopened) = panel_toggle_cmds(
+    emit,
+    restored,
+    { ..present, panel_open: true },
+    opening=true,
+  )
+  assert_true(reopened.review_generation == 6)
+  assert_true(
+    reopened.docs.get(path)
+    is Some({ review: Some({ working_generation: 6, .. }), stale: true, .. }),
+  )
 }
 
 ///|
@@ -4106,6 +4290,19 @@ test "a review that becomes a symlink clears its cached regular-file source" {
   )
   let (_, fenced) = update(test_emit(), stale_reply, still_unavailable, ctx)
   assert_true(fenced == still_unavailable)
+  let (_, failed) = update(
+    test_emit(),
+    FileFailed(
+      owner=ctx.owner,
+      epoch=0,
+      path~,
+      review_generation=None,
+      message="late symlink read",
+    ),
+    fenced,
+    ctx,
+  )
+  assert_true(failed == fenced)
   let (_, reopening) = open_document(
     test_emit(),
     fenced,
@@ -4622,6 +4819,36 @@ test "legacy Changes replies without HEAD refresh baseline-bearing reviews" {
       }
     ),
   )
+  assert_true(settled.background_review_requests.get(path) == Some(4))
+  // The next poll can settle before the slow compatibility read. It must keep
+  // that request's generation live rather than launch a replacement that
+  // would fence the first reply forever.
+  let ctx = { ..test_ctx(), open_files: [path], active_file: Some(path) }
+  let (_, polling) = update(
+    test_emit(),
+    ChangesPollDue(owner=test_ctx().owner, generation=1),
+    settled,
+    ctx,
+  )
+  assert_true(polling.changes_generation == 2)
+  let (_, coalesced) = update(
+    test_emit(),
+    ChangesLoaded(
+      owner=test_ctx().owner,
+      generation=2,
+      repository=true,
+      head=None,
+      files=[change],
+    ),
+    polling,
+    ctx,
+  )
+  assert_true(coalesced.review_generation == 4)
+  assert_true(coalesced.background_review_requests.get(path) == Some(4))
+  assert_true(
+    coalesced.docs.get(path)
+    is Some({ review: Some({ generation: 4, .. }), .. }),
+  )
   let (_, refreshed) = update(
     test_emit(),
     GitOriginalLoaded(
@@ -4631,9 +4858,10 @@ test "legacy Changes replies without HEAD refresh baseline-bearing reviews" {
       background=true,
       original=@protocol.OriginalContent("new HEAD"),
     ),
-    settled,
-    { ..test_ctx(), open_files: [path], active_file: Some(path) },
+    coalesced,
+    ctx,
   )
+  assert_true(refreshed.background_review_requests.is_empty())
   assert_true(
     refreshed.docs.get(path)
     is Some(

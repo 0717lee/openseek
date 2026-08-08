@@ -255,6 +255,11 @@ pub(all) struct State {
   // recovery restarts only incomplete requests once; ordinary polling must
   // never supersede a healthy slow read.
   review_recovery_pending : Bool
+  // Legacy hosts cannot identify HEAD in their Changes reply. Their
+  // compatibility refreshes keep a settled baseline visible while one new
+  // HEAD read is in flight; recording that request by path prevents a slow
+  // read from being superseded by every Changes poll.
+  background_review_requests : Map[@pathx.Relative, Int]
   // Whether checkout placement is currently unresolved/missing. Kept separate
   // from review recovery because a repaired review may still be awaiting its
   // authoritative Changes snapshot when placement disappears a second time.
@@ -305,6 +310,7 @@ pub fn State::empty() -> State {
     changes_head_known: false,
     review_generation: 0,
     review_recovery_pending: false,
+    background_review_requests: Map([]),
     placement_parked: false,
     explorer_was_visible: false,
     watching: None,
