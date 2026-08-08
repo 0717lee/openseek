@@ -28,6 +28,8 @@ pub async fn detach_workspace(EngineManager, String, (Array[String]) -> Unit) ->
 
 pub async fn engine_command(String) -> String
 
+pub async fn follow_subrun_progress(root~ : String, parent_session~ : String, id~ : String, publish~ : async (@protocol.SubrunProgressPayload) -> Unit) -> Unit
+
 pub async fn goal_run(EngineManager, @protocol.GoalPayload) -> @protocol.GoalReply
 
 pub async fn list_sessions(EngineManager) -> @protocol.SessionsReply
@@ -85,6 +87,7 @@ pub(all) enum EngineEvent {
   Error(@protocol.AgentErrorPayload)
   Finished(@protocol.FinishedPayload)
   SessionCommit(@protocol.SessionCommitPayload)
+  SubrunProgress(@protocol.SubrunProgressPayload)
   DurableBoundary(@protocol.DurableBoundaryPayload)
 }
 

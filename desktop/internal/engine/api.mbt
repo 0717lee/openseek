@@ -120,6 +120,10 @@ pub(all) enum EngineEvent {
   Error(ErrorPayload)
   Finished(@protocol.FinishedPayload)
   SessionCommit(SessionCommitPayload)
+  /// A running sub-run advanced. Not a lifecycle event and not durable: the
+  /// brackets on the raw stream own the sub-run's start and end, and this
+  /// only refreshes what it is doing in between.
+  SubrunProgress(@protocol.SubrunProgressPayload)
   DurableBoundary(DurableBoundaryPayload)
 }
 

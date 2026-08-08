@@ -50,6 +50,8 @@ pub(all) enum EngineEvent {
   Usage(prompt_tokens~ : Int, completion_tokens~ : Int)
   ToolResult(tool_name~ : String, is_error~ : Bool, content~ : String, brief~ : String?)
   ToolCallDecodeError(tool_name~ : String, reason~ : String)
+  SubrunOpened(id~ : String, kind~ : String, label~ : String)
+  SubrunClosed(id~ : String, status~ : String, steps~ : Int, tokens~ : Int)
   AgentFinished(String)
   ContextYield(String)
   AgentAborted(String)

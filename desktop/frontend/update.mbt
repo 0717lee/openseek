@@ -943,6 +943,38 @@ fn apply_engine_event(
       let update = @transcript.parse_runtime_update(content)
       (false, { ..conv, watcher_status: update.status })
     }
+    // A sub-run opened: the lane replaces the notice this used to be, so the
+    // minutes it blocks for read as activity rather than silence. A repeated
+    // id (a reconnect replaying the bracket) refreshes rather than doubles.
+    SubrunOpened(id~, kind~, label~) => {
+      let subruns = conv.subruns.filter(lane => lane.id != id)
+      subruns.push({ id, kind, label, steps: 0, activity: "" })
+      (false, { ..conv, subruns, })
+    }
+    // Closed: drop the lane and say what it cost, which is the one place
+    // those numbers are ever reported.
+    SubrunClosed(id~, status~, steps~, tokens~) => {
+      let closed = conv.subruns.filter(lane => lane.id == id)
+      let kind = match closed {
+        [lane, ..] => lane.kind
+        [] => "subrun"
+      }
+      let conv = {
+        ..conv,
+        subruns: conv.subruns.filter(lane => lane.id != id),
+        messages: [
+          ..conv.messages,
+          {
+            kind: Assistant(is_danger=status != "captured"),
+            content: "\{kind} \{id}: \{status} · \{steps} step(s) · \{compact_count(tokens)} tok",
+            // A client-local bubble, never a durable event: a sub-run's cost
+            // is reported by its finish bracket and nothing writes it down.
+            ts: None,
+          },
+        ],
+      }
+      (true, conv)
+    }
     Usage(prompt_tokens~, completion_tokens~) =>
       (false, { ..conv, usage_tokens: prompt_tokens + completion_tokens })
     ToolResult(..) => (false, conv)
@@ -3220,6 +3252,25 @@ fn update_device_msg(
       } else {
         (@cmd.none, model)
       }
+    // A running sub-run advanced: refresh its lane in place. An id with no
+    // lane is a push that outraced (or outlived) its brackets — dropped, not
+    // resurrected, since only a bracket knows a sub-run exists.
+    SubrunProgressed(id~, session~, steps~, activity~) => {
+      ignore(session)
+      let conv = model.active()
+      let subruns = conv.subruns.map(lane => {
+        if lane.id == id {
+          { ..lane, steps, activity }
+        } else {
+          lane
+        }
+      })
+      if subruns == conv.subruns {
+        (@cmd.none, model)
+      } else {
+        (@cmd.none, model.replace_conversation({ ..conv, subruns, }))
+      }
+    }
     SkillsChanged =>
       if channel == model.focused {
         (fetch_installed_skills(dispatch, channel), model)

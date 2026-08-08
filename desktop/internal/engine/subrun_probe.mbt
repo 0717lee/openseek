@@ -36,24 +36,6 @@ const SubrunProbeIntervalMs = 1500
 let subrun_probe_max_chunk : Int64 = 128 * 1024
 
 ///|
-/// One running sub-run's progress, as the host reports it to the client.
-pub(all) struct SubrunProgress {
-  /// The sub-run id its brackets carry ("sr-2"), which is what pairs this
-  /// with the `subrun_started` the client already saw.
-  id : String
-  /// The child's durable session id, so a client can open the transcript
-  /// this was read from.
-  session : String
-  /// Turns the child has recorded. Its own `agent_step` events never reach
-  /// the record, so this counts assistant messages — the same thing one step
-  /// later.
-  steps : Int
-  /// The child's last tool call, as that tool's own brief (its name when it
-  /// wrote none). Empty until the child makes one.
-  activity : String
-}
-
-///|
 /// A probe's place in one child's record.
 priv struct SubrunProbeState {
   path : String
@@ -178,7 +160,7 @@ pub async fn follow_subrun_progress(
   root~ : String,
   parent_session~ : String,
   id~ : String,
-  publish~ : (SubrunProgress) -> Unit,
+  publish~ : async (@protocol.SubrunProgressPayload) -> Unit,
 ) -> Unit {
   let session = "\{parent_session}-\{id}"
   let state = {

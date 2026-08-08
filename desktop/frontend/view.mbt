@@ -1669,6 +1669,12 @@ fn transcript_view(
   if !conv.streaming_response.is_empty() {
     items.push(streaming_response_view(conv.streaming_response, on_open))
   }
+  // Sub-runs in flight sit at the tail, where the turn currently is: their
+  // tool call is what the conversation is blocked on, and it can block for
+  // forty-five minutes.
+  for lane in conv.subruns {
+    items.push(subrun_lane_view(lane))
+  }
   let children = [@html.div(id="stream", class="stream", items)]
   // Reading history unpins auto-follow (see `watch_transcript_scroll`); the
   // floating button is the way back to the live tail. Sticky inside the
@@ -1687,6 +1693,37 @@ fn transcript_view(
     )
   }
   @html.section(id="transcript", class="transcript", children)
+}
+
+///|
+/// One sub-run in flight: what it was asked, how far it has gotten, and what
+/// it is doing right now.
+///
+/// The step count and activity come from the host reading the child's own
+/// record, so they appear only once the child has written something — and
+/// never at all for a conversation with no durable session. The lane still
+/// renders: that a sub-run is running is worth showing even when its
+/// progress is not readable.
+fn subrun_lane_view(lane : SubrunLane) -> @html.Html {
+  let detail : Array[@html.Html] = []
+  if lane.steps > 0 {
+    detail.push(@html.span(class="subrun-step", "step \{lane.steps}"))
+  }
+  if !lane.activity.is_empty() {
+    detail.push(@html.span(class="subrun-activity", lane.activity))
+  }
+  if detail.is_empty() {
+    detail.push(@html.span(class="subrun-activity", "starting…"))
+  }
+  @html.div(
+    class="subrun-lane",
+    title="\{lane.kind} \{lane.id}: \{lane.label}",
+    [
+      @html.span(class="subrun-mark", ""),
+      @html.span(class="subrun-name", "\{lane.kind} \{lane.id}"),
+      @html.span(class="subrun-detail", detail),
+    ],
+  )
 }
 
 ///|

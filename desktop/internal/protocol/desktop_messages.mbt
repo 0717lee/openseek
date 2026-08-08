@@ -445,6 +445,20 @@ pub(all) struct SessionCommitPayload {
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|
+/// One running sub-run's progress, as the host reads it from the child's own
+/// durable record. `id` is the `sr-N` the `subrun_started` bracket carried,
+/// which is what pairs this with the sub-run a client already knows about;
+/// `session` names the child transcript it was read from. `steps` counts the
+/// turns the child has recorded and `activity` is its last tool call — both
+/// newest-fact, never a history: a client shows them and forgets them.
+pub(all) struct SubrunProgressPayload {
+  id : String
+  session : String
+  steps : Int
+  activity : String
+} derive(Debug, Eq, FromJson, ToJson)
+
+///|
 pub(all) struct SessionChangedPayload {
   change : String
   session : String

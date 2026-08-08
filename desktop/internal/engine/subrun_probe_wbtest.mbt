@@ -83,11 +83,11 @@ async test "a poll landing mid-line waits for the rest of it" {
   let state = fresh_record("torn")
   let line = tool_line("c1", "read", brief="read agent/turn_loop.mbt")
   let cut = line.length() / 2
-  append_record(state, line[:cut].to_string())
+  append_record(state, line[:cut].to_owned())
   // Half a JSON object is not news, and must not be mistaken for one.
   assert_false(state.poll())
   assert_eq(state.activity, "")
-  append_record(state, line[cut:].to_string())
+  append_record(state, line[cut:].to_owned())
   assert_true(state.poll())
   assert_eq(state.activity, "read agent/turn_loop.mbt")
 }

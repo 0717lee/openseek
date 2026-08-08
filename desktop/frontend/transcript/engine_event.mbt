@@ -20,6 +20,12 @@ pub(all) enum EngineEvent {
     brief~ : String?
   )
   ToolCallDecodeError(tool_name~ : String, reason~ : String)
+  // A sub-run's lifecycle brackets. Between them the conversation shows a
+  // live lane instead of a notice: a sub-run can run for forty-five minutes,
+  // and a line that never changes is indistinguishable from a hang. The
+  // finish reports what it cost — the only place those numbers appear.
+  SubrunOpened(id~ : String, kind~ : String, label~ : String)
+  SubrunClosed(id~ : String, status~ : String, steps~ : Int, tokens~ : Int)
   AgentFinished(String)
   // The current turn stopped at the model's context ceiling after attempting
   // an automatic checkpoint. It is run-terminal, but not task success.
@@ -97,14 +103,19 @@ pub fn decode_engine_event(
     // has no use for it and drops it, so unless the view reads it off the raw
     // stream nobody hears about it at all.
     SessionError(error~) => Some(SessionAppendFailed(error))
-    // A sub-run's lifecycle brackets, rendered as runtime notices so the
-    // child's interleaved tool results read as belonging to the sub-run —
-    // the same treatment the TUI gives them. The id and token counts are
-    // wire-only pairing/accounting data.
-    SubrunStarted(kind~, label~, ..) =>
-      Some(RuntimeUpdate("\{kind} subrun started: \{label}"))
-    SubrunFinished(status~, steps~, ..) =>
-      Some(RuntimeUpdate("subrun finished: \{status} (\{steps} step(s))"))
+    // A sub-run's lifecycle brackets. The id pairs the two, and pairs both
+    // with the host's `subrun.progress` pushes in between; the finish is
+    // where its cost is reported, since nothing durable records it.
+    SubrunStarted(id~, kind~, label~) => Some(SubrunOpened(id~, kind~, label~))
+    SubrunFinished(id~, status~, steps~, prompt_tokens~, completion_tokens~) =>
+      Some(
+        SubrunClosed(
+          id~,
+          status~,
+          steps~,
+          tokens=prompt_tokens + completion_tokens,
+        ),
+      )
     // Not shown, and now each one a recorded decision rather than a line the
     // view drops unnoticed. `plan_reminder` and the goal reminders/checks are
     // model-directed text, not news for the user (the TUI drops them too);
@@ -374,7 +385,7 @@ test "decode surfaces a failed durable append off the raw stream" {
 }
 
 ///|
-test "decode maps subrun brackets onto the runtime-update path" {
+test "decode maps subrun brackets onto the lane's open and close" {
   guard decode_engine_event(
       event_fields({
         "event": "subrun_started",
@@ -383,9 +394,11 @@ test "decode maps subrun brackets onto the runtime-update path" {
         "label": "goal review",
       }),
     )
-    is Some(RuntimeUpdate("review subrun started: goal review")) else {
+    is Some(SubrunOpened(id="sr-1", kind="review", label="goal review")) else {
     fail("subrun_started not decoded")
   }
+  // The finish is where a sub-run's cost is reported, so both token
+  // directions survive decoding as their sum.
   guard decode_engine_event(
       event_fields({
         "event": "subrun_finished",
@@ -396,7 +409,7 @@ test "decode maps subrun brackets onto the runtime-update path" {
         "completion_tokens": 5600,
       }),
     )
-    is Some(RuntimeUpdate("subrun finished: captured (12 step(s))")) else {
+    is Some(SubrunClosed(id="sr-1", status="captured", steps=12, tokens=39600)) else {
     fail("subrun_finished not decoded")
   }
 }

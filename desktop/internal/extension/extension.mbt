@@ -45,6 +45,11 @@ let session_event : @proton_contract.Event[@protocol.SessionCommitPayload] = @co
 )
 
 ///|
+let subrun_progress : @proton_contract.Event[@protocol.SubrunProgressPayload] = @commands.extension_contract.event(
+  @protocol.NotificationKind::SubrunProgress.wire_name(),
+)
+
+///|
 let session_changed_event : @proton_contract.Event[
   @protocol.SessionChangedPayload,
 ] = @commands.extension_contract.event(
@@ -184,6 +189,7 @@ async fn PageEventTarget::emit(
     Hub(AgentFinished(payload)) => self.events.emit(finished_event, payload)
     Hub(AgentDurable(payload)) => self.events.emit(durable_event, payload)
     Hub(SessionEvent(payload)) => self.events.emit(session_event, payload)
+    Hub(SubrunProgress(payload)) => self.events.emit(subrun_progress, payload)
     Hub(SessionChanged(payload)) =>
       self.events.emit(session_changed_event, payload)
     Hub(WorkspaceChanged(payload)) =>

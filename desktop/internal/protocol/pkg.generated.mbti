@@ -461,6 +461,7 @@ pub(all) enum Notification {
   AgentFinished(FinishedPayload)
   AgentDurable(DurableBoundaryPayload)
   SessionEvent(SessionCommitPayload)
+  SubrunProgress(SubrunProgressPayload)
   SessionChanged(SessionChangedPayload)
   WorkspaceChanged(WorkspacesChangedPayload)
   WorktreeChanged(WorktreeChangedPayload)
@@ -489,6 +490,7 @@ pub(all) enum NotificationKind {
   AgentFinished
   AgentDurable
   SessionEvent
+  SubrunProgress
   SessionChanged
   WorkspaceChanged
   WorktreeChanged
@@ -749,6 +751,13 @@ pub(all) struct SteerPayload {
 pub(all) struct SteerReply {
   steered : Bool
   run_id : String?
+} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
+
+pub(all) struct SubrunProgressPayload {
+  id : String
+  session : String
+  steps : Int
+  activity : String
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 
 pub(all) struct SymbolItem {
