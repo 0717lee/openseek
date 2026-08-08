@@ -190,7 +190,14 @@ pub fn boot() -> Unit {
           subs.push(
             dismiss_subscription(
               "device-menu-dismiss",
-              trigger=".device-menu-button",
+              // The menu body is excluded along with the trigger, unlike every
+              // other menu here: Remove is a two-click flow that arms a
+              // confirmation *inside* this menu, and dismissing on the first
+              // click would clear `menu_open` before the confirmation could be
+              // rendered — making a device impossible to remove at all. The
+              // items that finish rather than stage (Rename, the confirming
+              // second click) close the menu from their own handlers.
+              trigger=".device-menu-button, .device-menu",
               emit.map((_ : Unit) => Console(MenuDismissed)),
             ),
           )

@@ -799,6 +799,13 @@ test "the actions menu toggles per device and disarms a pending remove" {
   )
   // A click away disarms it just the same, and — unlike the toggle — says
   // nothing about which menu was open, so repeating it cannot reopen one.
+  //
+  // This is also why the dismissal listener excludes `.device-menu` and not
+  // just its trigger (see `boot.mbt`): Remove arms its confirmation *inside*
+  // the menu, so a dismissal fired by that first click would land here and
+  // throw the confirmation away before it could ever be rendered. The DOM half
+  // of that is not reachable from a unit test; this is the consequence it
+  // guards against.
   let (_, dismissed) = update(dispatch, Console(MenuDismissed), armed)
   assert_true(
     dismissed.console is Some({ confirm_delete: None, menu_open: None, .. }),
