@@ -3558,15 +3558,10 @@ fn update_device_msg(
           // too: a kept cwd would aim OpenFile/LaunchApp at a deleted
           // directory and the composer would keep showing the dead branch,
           // its uncommitted lines, and its pull request. All re-derive from
-          // the host on the next run or open.
-          {
-            ..conv,
-            worktree: None,
-            cwd: None,
-            branch: None,
-            diffstat: None,
-            pull_request: None,
-          }
+          // the host on the next run or open — and `forget_git` retires the
+          // probes already in flight, which would otherwise answer for the
+          // deleted directory and put every one of those fields back.
+          { ..conv.forget_git(), worktree: None, cwd: None }
         } else {
           conv
         }
@@ -3925,10 +3920,10 @@ fn update_device_msg(
       // branch's pull request can have changed too.
       guard branch is Some(branch) && !branch.is_empty() else {
         // Not a repository any more: an answer about the branch it used to
-        // have would only mislead.
+        // have would only mislead, including one still on its way.
         return (
           @cmd.none,
-          model.replace_conversation({ ..conv, pull_request: None }),
+          model.replace_conversation(conv.forget_pull_request()),
         )
       }
       // A lookup already in flight for this same branch is not stacked on —
@@ -3962,16 +3957,18 @@ fn update_device_msg(
       // Matched by which request this answers, not by branch: a checkout that
       // moves X → Y → X leaves two lookups for X in flight, and if the newer
       // settles first, matching by name would let the older overwrite it.
-      guard conv.pull_request is Some(probe) && probe.generation == generation else {
+      guard generation == conv.pull_request_generation else {
         return (@cmd.none, model)
       }
+      // Read before the answer overwrites it: whether a refresh landed while
+      // this lookup was in flight.
+      let stale = conv.pull_request is Some(probe) && probe.stale
       // Labelled with the branch the host actually read from `HEAD`. When the
       // checkout moved mid-flight the two differ, and the answer is filed
       // under what it describes — where `settled_probe` hides it until the
       // branch chip catches up, instead of showing it against this one.
       let settled : PullRequestProbe = {
         branch: queried.unwrap_or(branch),
-        generation,
         probing: false,
         stale: false,
         pull_request,
@@ -3980,7 +3977,7 @@ fn update_device_msg(
       let conv = { ..conv, pull_request: Some(settled) }
       // A refresh arrived while this lookup was in flight: its answer predates
       // that refresh, so run one more against the branch now checked out.
-      guard probe.stale && conv.branch is Some(current) && !current.is_empty() else {
+      guard stale && conv.branch is Some(current) && !current.is_empty() else {
         return (@cmd.none, model.replace_conversation(conv))
       }
       let (cmd, conv) = probe_pull_request(dispatch, channel, conv, current)
@@ -11679,11 +11676,10 @@ fn pull_request_reply(
 /// The probe a lookup for `branch` leaves behind while it runs.
 fn probing_for(
   branch : String,
-  generation~ : Int,
   pull_request? : PullRequest,
   compare_url? : String,
 ) -> PullRequestProbe {
-  { branch, generation, probing: true, stale: false, pull_request, compare_url }
+  { branch, probing: true, stale: false, pull_request, compare_url }
 }
 
 ///|
@@ -11722,15 +11718,25 @@ test "a branch reply lands on its conversation and an empty one hides it" {
   assert_eq(named.active().diffstat, Some(stat))
   // A named branch is also what the pull-request lookup keys on, and the
   // lookup it issued is on record so a second reply cannot stack another.
-  assert_eq(
-    named.active().pull_request,
-    Some(probing_for("feature/x", generation=1)),
-  )
+  assert_eq(named.active().pull_request, Some(probing_for("feature/x")))
+  assert_eq(named.active().pull_request_generation, 1)
   let (_, cleared) = update_dev(dispatch, branch_reply(""), named)
   assert_true(cleared.active().branch is Some(""))
   // A workspace that stopped being a repository keeps no pull request from
-  // the branch it used to have.
+  // the branch it used to have — and the lookup still running for it is
+  // retired rather than left holding a number the next one would reuse.
   assert_eq(cleared.active().pull_request, None)
+  assert_eq(cleared.active().pull_request_generation, 2)
+  let (_, overtaken) = update_dev(
+    dispatch,
+    pull_request_reply(
+      "feature/x",
+      generation=1,
+      pull_request=test_pull_request(),
+    ),
+    cleared,
+  )
+  assert_eq(overtaken.active().pull_request, None)
   // A reply for an unknown session is dropped.
   let (_, ignored) = update_dev(
     dispatch,
@@ -11833,10 +11839,7 @@ test "a pull-request reply only lands on the branch it was asked about" {
   )
   assert_eq(
     settled.active().pull_request,
-    Some({
-      ..probing_for("feature/x", generation=1, pull_request=answer),
-      probing: false,
-    }),
+    Some({ ..probing_for("feature/x", pull_request=answer), probing: false }),
   )
   // Refreshing the same branch keeps that answer on screen while it re-probes,
   // so the chip does not blink on every run boundary. A new request means a new
@@ -11845,8 +11848,9 @@ test "a pull-request reply only lands on the branch it was asked about" {
   let (_, refreshing) = update_dev(dispatch, branch_reply("feature/x"), settled)
   assert_eq(
     refreshing.active().pull_request,
-    Some(probing_for("feature/x", generation=2, pull_request=answer)),
+    Some(probing_for("feature/x", pull_request=answer)),
   )
+  assert_eq(refreshing.active().pull_request_generation, 2)
 }
 
 ///|
@@ -11855,10 +11859,10 @@ test "a checkout that returns to a branch does not accept the older lookup" {
   // X, then away to Y, then back to X: the first X lookup is still running,
   // and a second one for the same branch is now in flight beside it.
   let (_, first) = update_dev(dispatch, branch_reply("feature/x"), test_model())
-  assert_eq(first.active().pull_request.unwrap().generation, 1)
+  assert_eq(first.active().pull_request_generation, 1)
   let (_, away) = update_dev(dispatch, branch_reply("feature/y"), first)
   let (_, back) = update_dev(dispatch, branch_reply("feature/x"), away)
-  assert_eq(back.active().pull_request.unwrap().generation, 3)
+  assert_eq(back.active().pull_request_generation, 3)
   fn answered(generation : Int, number : Int) {
     pull_request_reply("feature/x", generation~, pull_request={
       ..test_pull_request(),
@@ -11891,7 +11895,7 @@ test "a refresh during a lookup is run afterwards, not dropped" {
   let (_, queued) = update_dev(dispatch, refresh, probing)
   assert_eq(
     queued.active().pull_request,
-    Some({ ..probing_for("feature/x", generation=1), stale: true }),
+    Some({ ..probing_for("feature/x"), stale: true }),
   )
   // Settling that lookup therefore issues another rather than leaving the
   // composer describing the repository as it was when the run started.
@@ -11929,10 +11933,8 @@ test "a refresh during a lookup is run afterwards, not dropped" {
     ),
     queued,
   )
-  assert_eq(
-    elsewhere.active().pull_request,
-    Some(probing_for("feature/x", generation=2)),
-  )
+  assert_eq(elsewhere.active().pull_request, Some(probing_for("feature/x")))
+  assert_eq(elsewhere.active().pull_request_generation, 2)
 }
 
 ///|

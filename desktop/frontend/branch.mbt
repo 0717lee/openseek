@@ -32,13 +32,13 @@ priv struct DiffStat {
 /// answer therefore predates it; that lookup is followed by another rather
 /// than left standing as the last word.
 ///
-/// `generation` is which request this describes, and is what a reply is
-/// matched against. The branch alone cannot do it: a checkout that moves
-/// X → Y → X leaves two lookups for X in flight at once, and if the newer
-/// settles first, matching by name would let the older one overwrite it.
+/// Which request a probe describes is *not* here — it is the conversation's
+/// `pull_request_generation`, which outlives this struct on purpose. Kept
+/// here, the counter would restart from zero every time the display state is
+/// cleared (a checkout that stops being a repository, a worktree removed) and
+/// hand a number to a new lookup that an in-flight one still holds.
 priv struct PullRequestProbe {
   branch : String
-  generation : Int
   probing : Bool
   stale : Bool
   pull_request : PullRequest?
@@ -545,7 +545,6 @@ test "a settled pull request supplies the baseline the next probe measures from"
     branch: Some("feature/y"),
     pull_request: Some({
       branch: "feature/y",
-      generation: 1,
       probing: false,
       stale: false,
       pull_request: Some(stacked),
@@ -615,11 +614,9 @@ fn probe_pull_request(
 ) -> (@cmd.Cmd, Conversation) {
   // Counted across branch changes, not per branch: a checkout that moves
   // X → Y → X must not reuse a number an in-flight lookup already holds.
-  let generation = conv.pull_request.map(probe => probe.generation).unwrap_or(0) +
-    1
+  let generation = conv.pull_request_generation + 1
   let fresh : PullRequestProbe = {
     branch,
-    generation,
     probing: true,
     stale: false,
     pull_request: None,
@@ -627,7 +624,7 @@ fn probe_pull_request(
   }
   let probe = match conv.pull_request {
     Some(previous) if previous.branch == branch =>
-      { ..previous, generation, probing: true, stale: false }
+      { ..previous, probing: true, stale: false }
     _ => fresh
   }
   (
@@ -639,8 +636,36 @@ fn probe_pull_request(
       conv.cwd,
       generation~,
     ),
-    { ..conv, pull_request: Some(probe) },
+    { ..conv, pull_request: Some(probe), pull_request_generation: generation },
   )
+}
+
+///|
+/// Drop what GitHub said about this conversation's branch, and retire the
+/// number the lookup that is still in flight carries. Without that second
+/// half, clearing is only a repaint: the outstanding reply still matches, and
+/// puts the pull request of a branch this conversation no longer has back on
+/// the chip.
+fn Conversation::forget_pull_request(self : Conversation) -> Conversation {
+  {
+    ..self,
+    pull_request: None,
+    pull_request_generation: self.pull_request_generation + 1,
+  }
+}
+
+///|
+/// Forget the whole git side of a conversation — the branch, its diffstat, and
+/// its pull request — fencing off every probe still in flight for it. For a
+/// checkout that has gone away, where anything still arriving describes a
+/// directory that no longer exists.
+fn Conversation::forget_git(self : Conversation) -> Conversation {
+  {
+    ..self.forget_pull_request(),
+    branch: None,
+    diffstat: None,
+    branch_generation: self.branch_generation + 1,
+  }
 }
 
 ///|

@@ -471,6 +471,10 @@ priv struct Conversation {
   // What GitHub says about that branch; see `PullRequestProbe`. `None` until
   // the first lookup is issued.
   pull_request : PullRequestProbe?
+  // The newest pull-request lookup, counted the same way and for the same
+  // reason. It sits out here rather than in the probe because clearing the
+  // probe must not rewind it — see `Conversation::forget_pull_request`.
+  pull_request_generation : Int
   watcher_status : String
   // Live text of the in-flight assistant turn, accumulated from
   // `assistant_delta` events and cleared by ordered full semantic, step,
@@ -1774,6 +1778,7 @@ fn empty_conversation(
     diffstat: None,
     branch_generation: 0,
     pull_request: None,
+    pull_request_generation: 0,
     watcher_status: "",
     streaming_response: "",
     input_ledger: [],

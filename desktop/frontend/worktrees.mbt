@@ -1059,6 +1059,52 @@ test "a remote removal closes this client's discard dialog" {
 }
 
 ///|
+test "a removed worktree's probes cannot repopulate the composer" {
+  let dispatch = test_dispatch()
+  let workspace = @interop.ChannelId::Local.test_resource("/proj")
+  let model = test_model()
+    .replace_conversation({
+      ..test_conversation(),
+      workspace: Some(workspace),
+      worktree: Some("wt"),
+      cwd: Some(@interop.ChannelId::Local.test_resource("/proj/wt")),
+    })
+    .with_dev(dev => {
+      ..dev,
+      workspaces: [workspace],
+      worktrees: [{ workspace, rows: test_worktree_rows(), generation: 1 }],
+    })
+  // A branch probe answers, which is also what starts the pull-request lookup:
+  // both are now on record, and the second is still in flight.
+  let (_, described) = update_dev(dispatch, branch_reply("feature/x"), model)
+  assert_true(described.active().branch is Some("feature/x"))
+  assert_true(described.active().pull_request is Some(_))
+  // The checkout is removed while a refresh of each is outstanding.
+  let (_, swept) = update_dev(
+    dispatch,
+    WorktreesChanged([], workspace~),
+    described,
+  )
+  assert_true(swept.active().cwd is None)
+  assert_true(swept.active().branch is None)
+  assert_true(swept.active().pull_request is None)
+  // Their answers arrive afterwards, describing a directory that is gone. A
+  // generation left where it was would take both back.
+  let (_, late_branch) = update_dev(dispatch, branch_reply("feature/x"), swept)
+  assert_true(late_branch.active().branch is None)
+  let (_, late_lookup) = update_dev(
+    dispatch,
+    pull_request_reply(
+      "feature/x",
+      generation=1,
+      pull_request=test_pull_request(),
+    ),
+    late_branch,
+  )
+  assert_true(late_lookup.active().pull_request is None)
+}
+
+///|
 test "a dirty archive stages the discard dialog and confirm retries forced" {
   let dispatch = test_dispatch()
   // The host's refusal stages the dialog with its own message.

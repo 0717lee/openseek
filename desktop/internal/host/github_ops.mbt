@@ -100,16 +100,29 @@ async fn branch_pull_request(
   // infers for a fork, `GH_REPO` — rather than something a remote-URL parser
   // here would have to guess for enterprise hosts and fork remotes. The known
   // gap: a fork checkout whose default resolves to the fork misses a pull
-  // request that targets upstream, and reads as "no pull request yet". The
-  // compare link below survives that, since GitHub's compare page on a fork
-  // already defaults its base to the parent.
+  // request that targets upstream, and reads as "no pull request yet".
   //
   // A branch no remote has yet gets no link at all: GitHub cannot compare a
   // ref it has never seen, so the offer would open a page that can do nothing
   // with the commits. That is the ordinary state of a branch an agent just
-  // made, which is exactly when the offer would be most tempting to click.
+  // made, which is exactly when the offer would be most tempting to click —
+  // and the remote-tracking refs settle it without touching the network.
   guard git_branch_on_remote(dir.0, branch) else { return nothing }
-  // Only this branch pays for the second call.
+  // Some remote having it is not enough. The link names one repository, and
+  // gh's pick is not always the one that was pushed to: gh prefers a remote
+  // called `upstream` over `origin`, so a fork checkout resolves to the parent
+  // while the branch only ever reached the fork, and an unqualified compare
+  // there names a ref the parent has never seen. Asking through gh's own
+  // `{owner}`/`{repo}` placeholders is what keeps this question and the URL
+  // below from disagreeing about which repository they mean.
+  guard gh_json(gh, dir, [
+      "api",
+      "repos/{owner}/{repo}/branches/\{encode_url_path(branch)}",
+    ])
+    is Some(Object(_)) else {
+    return nothing
+  }
+  // Only this branch pays for the two extra calls.
   guard gh_json(gh, dir, ["repo", "view", "--json", "url"])
     is Some(Object(repo)) &&
     repo.get("url") is Some(String(url)) else {
