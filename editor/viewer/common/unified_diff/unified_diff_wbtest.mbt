@@ -4,6 +4,13 @@ test "unchanged input has no hunks" {
 }
 
 ///|
+test "empty document representations are canonicalized" {
+  assert_eq(compute_unified_diff([], [""]), [])
+  assert_eq(compute_unified_diff([""], []), [])
+  assert_eq(compute_unified_diff([""], [""]), [])
+}
+
+///|
 test "the line-matching algorithm is replaceable" {
   let saw_ignore_trim_whitespace = Ref(false)
   let algorithm = UnifiedDiffAlgorithm(compute_changes=(_, _, options) => {
@@ -98,7 +105,7 @@ test "context is bounded before arithmetic can overflow" {
 
 ///|
 test "a new file uses the zero anchor on its empty original side" {
-  assert_eq(compute_unified_diff([], ["one", "two"]), [
+  assert_eq(compute_unified_diff([""], ["one", "two"]), [
     {
       original_start_line_number: 0,
       original_line_count: 0,

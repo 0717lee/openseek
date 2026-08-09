@@ -222,7 +222,19 @@ fn HunkWindow::to_hunk(
 }
 
 ///|
+fn canonical_diff_lines(lines : Array[String]) -> Array[String] {
+  if lines.length() == 1 && lines[0].is_empty() {
+    []
+  } else {
+    lines
+  }
+}
+
+///|
 /// Compute context-bounded unified diff hunks from two arrays of lines.
+///
+/// Both `[]` and the editor's `[""]` representation are treated as an empty
+/// document before invoking the algorithm.
 ///
 /// By default, line mapping comes from the editor's existing diff engine so a
 /// future full-diff view and the current quick-diff gutter agree. Pass an
@@ -236,6 +248,8 @@ pub fn compute_unified_diff(
   algorithm? : UnifiedDiffAlgorithm = default_unified_diff_algorithm(),
 ) -> Array[UnifiedDiffHunk] {
   let context_lines = context_lines.max(0)
+  let original_lines = canonical_diff_lines(original_lines)
+  let modified_lines = canonical_diff_lines(modified_lines)
   let changes = algorithm.compute_changes(original_lines, modified_lines, {
     ignore_trim_whitespace,
     max_computation_time_ms,
