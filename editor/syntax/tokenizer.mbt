@@ -1,34 +1,26 @@
 ///|
 /// Carried lexer state between lines, the `IState` of Monaco's tokenization
-/// contract. The persistent character vector is an immutable snapshot: stack
+/// contract. The persistent byte vector is an immutable snapshot: stack
 /// edits share unchanged storage while cached states remain isolated from later
 /// edits. Derived equality is what callers use to detect re-tokenization
 /// convergence.
 pub struct TokenizerState {
-  priv modes : @vector.Vector[Char]
+  priv modes : @vector.Vector[Byte]
 } derive(Eq)
 
 ///|
 /// Creates a tokenizer state by copying a mode sequence into a persistent
 /// snapshot. Subsequent mutations of the source array cannot change the state.
 pub fn TokenizerState::TokenizerState(
-  modes : ArrayView[Char],
+  modes : ArrayView[Byte],
 ) -> TokenizerState {
   { modes: @vector.from_array(modes) }
 }
 
 ///|
-/// Creates a tokenizer state from characters in `text`. This is useful for
-/// synthetic tokenizers whose test state is derived from arbitrary line text;
-/// production lexers should prefer the mode-sequence constructor.
-pub fn TokenizerState::from_text(text : StringView) -> TokenizerState {
-  { modes: @vector.from_iter(text.iter()) }
-}
-
-///|
 /// Returns a mutable copy of the state's modes. Mutating the result cannot
 /// change this state or any cached line state that shares its snapshot.
-pub fn TokenizerState::to_modes(self : TokenizerState) -> Array[Char] {
+pub fn TokenizerState::to_modes(self : TokenizerState) -> Array[Byte] {
   self.modes.to_array()
 }
 
@@ -40,7 +32,7 @@ pub fn TokenizerState::mode_count(self : TokenizerState) -> Int {
 
 ///|
 /// Top mode, or `None` for an empty state.
-pub fn TokenizerState::last_mode(self : TokenizerState) -> Char? {
+pub fn TokenizerState::last_mode(self : TokenizerState) -> Byte? {
   self.modes.peek()
 }
 
@@ -48,7 +40,7 @@ pub fn TokenizerState::last_mode(self : TokenizerState) -> Char? {
 /// Returns a new state with `mode` pushed. The receiver remains unchanged.
 pub fn TokenizerState::push_mode(
   self : TokenizerState,
-  mode : Char,
+  mode : Byte,
 ) -> TokenizerState {
   { modes: self.modes.push(mode) }
 }
@@ -69,7 +61,7 @@ pub fn TokenizerState::pop_mode(self : TokenizerState) -> TokenizerState {
 pub impl Debug for TokenizerState with fn to_repr(self) {
   let encoded = StringBuilder()
   for mode in self.modes {
-    encoded.write_char(mode)
+    encoded.write_char(mode.to_char())
   }
   Repr::ctor("TokenizerState", [(None, Repr(encoded.to_string()))])
 }
@@ -326,13 +318,13 @@ pub fn push_token(
 
 ///|
 /// The nesting-mode stack a stateful lexer carries between lines, decoded from
-/// its `TokenizerState`. Each character is one open mode; an empty state
-/// decodes to the base mode `'n'`, so a fresh line always has a mode to read.
+/// its `TokenizerState`. Each byte is one open mode; an empty state decodes to
+/// the base mode `b'n'`, so a fresh line always has a mode to read.
 /// Shared by the language lexers (`lang_*`), which otherwise carry identical
 /// copies. Inverse of `encode_mode_stack`.
-pub fn decode_mode_stack(state : TokenizerState) -> Array[Char] {
+pub fn decode_mode_stack(state : TokenizerState) -> Array[Byte] {
   if state.mode_count() == 0 {
-    return ['n']
+    return [b'n']
   }
   state.to_modes()
 }
@@ -340,6 +332,6 @@ pub fn decode_mode_stack(state : TokenizerState) -> Array[Char] {
 ///|
 /// The mode stack packed back into a `TokenizerState` for the next line.
 /// Inverse of `decode_mode_stack`.
-pub fn encode_mode_stack(stack : Array[Char]) -> TokenizerState {
+pub fn encode_mode_stack(stack : Array[Byte]) -> TokenizerState {
   TokenizerState(stack)
 }

@@ -5,7 +5,7 @@ priv struct StatefulMarkdownFenceTokenizer {}
 impl @syntax.LineTokenizer for StatefulMarkdownFenceTokenizer with fn initial_state(
   _self,
 ) {
-  @syntax.TokenizerState::from_text("normal")
+  TokenizerState(b"normal".to_array())
 }
 
 ///|
@@ -15,7 +15,7 @@ impl @syntax.LineTokenizer for StatefulMarkdownFenceTokenizer with fn tokenize_l
   state,
 ) {
   let tokens : Array[@syntax.LineToken] = []
-  if state == @syntax.TokenizerState::from_text("comment") {
+  if state == TokenizerState(b"comment".to_array()) {
     let end = match line_text.find("*/") {
       Some(index) => index + 2
       None => line_text.length()
@@ -24,18 +24,18 @@ impl @syntax.LineTokenizer for StatefulMarkdownFenceTokenizer with fn tokenize_l
     return (
       tokens,
       if end == line_text.length() {
-        @syntax.TokenizerState::from_text("comment")
+        TokenizerState(b"comment".to_array())
       } else {
-        @syntax.TokenizerState::from_text("normal")
+        TokenizerState(b"normal".to_array())
       },
     )
   }
   match line_text.find("/*") {
     Some(start) => {
       tokens.push({ start, end: line_text.length(), tag: Comment })
-      (tokens, @syntax.TokenizerState::from_text("comment"))
+      (tokens, TokenizerState(b"comment".to_array()))
     }
-    None => (tokens, @syntax.TokenizerState::from_text("normal"))
+    None => (tokens, TokenizerState(b"normal".to_array()))
   }
 }
 

@@ -145,7 +145,7 @@ test "the carried state decodes back into a mode stack" {
       @syntax.decode_mode_stack(closed),
     ),
     content=(
-      #|(['n'], ['n', 't'], ['n', 't', 'i'], ['n'])
+      #|([0x6e], [0x6e, 0x74], [0x6e, 0x74, 0x69], [0x6e])
     ),
   )
 }

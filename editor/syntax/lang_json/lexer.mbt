@@ -9,10 +9,10 @@ struct JsonTokenizer {
 
 ///|
 /// JSON's two immutable carried states, allocated once and compared by value.
-let json_normal_state : @syntax.TokenizerState = TokenizerState(['n'])
+let json_normal_state : @syntax.TokenizerState = TokenizerState([b'n'])
 
 ///|
-let json_comment_state : @syntax.TokenizerState = TokenizerState(['c'])
+let json_comment_state : @syntax.TokenizerState = TokenizerState([b'c'])
 
 ///|
 /// Creates the JSON/JSONC tokenizer.

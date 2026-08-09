@@ -5,11 +5,11 @@
 priv struct BlockCommentToy {}
 
 ///|
-let toy_code : @syntax.TokenizerState = TokenizerState(['c', 'o', 'd', 'e'])
+let toy_code : @syntax.TokenizerState = TokenizerState([b'c', b'o', b'd', b'e'])
 
 ///|
 let toy_comment : @syntax.TokenizerState = TokenizerState([
-  'c', 'o', 'm', 'm', 'e', 'n', 't',
+  b'c', b'o', b'm', b'm', b'e', b'n', b't',
 ])
 
 ///|
@@ -90,25 +90,25 @@ test "tokenizer state equality detects convergence" {
 
 ///|
 test "tokenizer state snapshots do not alias mutable mode arrays" {
-  let source = ['n', 't']
+  let source = [b'n', b't']
   let state = @syntax.TokenizerState(source)
-  source[1] = 'c'
+  source[1] = b'c'
   assert_eq(state.mode_count(), 2)
-  assert_true(state.last_mode() == Some('t'))
+  assert_true(state.last_mode() == Some(b't'))
 
   let exposed_copy = state.to_modes()
-  exposed_copy[1] = 'd'
-  assert_true(state.last_mode() == Some('t'))
+  exposed_copy[1] = b'd'
+  assert_true(state.last_mode() == Some(b't'))
 }
 
 ///|
 test "tokenizer state stack edits preserve prior snapshots" {
-  let base = @syntax.TokenizerState(['n'])
-  let nested = base.push_mode('t')
+  let base = @syntax.TokenizerState([b'n'])
+  let nested = base.push_mode(b't')
   assert_eq(base.mode_count(), 1)
-  assert_true(base.last_mode() == Some('n'))
+  assert_true(base.last_mode() == Some(b'n'))
   assert_eq(nested.mode_count(), 2)
-  assert_true(nested.last_mode() == Some('t'))
+  assert_true(nested.last_mode() == Some(b't'))
   assert_true(nested.pop_mode() == base)
   let empty = @syntax.TokenizerState([])
   assert_true(empty.pop_mode() == empty)

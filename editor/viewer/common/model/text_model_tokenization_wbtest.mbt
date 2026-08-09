@@ -9,7 +9,7 @@ priv struct ModelTokenizationCountingTokenizer {
 impl @syntax.LineTokenizer for ModelTokenizationCountingTokenizer with fn initial_state(
   _self,
 ) {
-  @syntax.TokenizerState::from_text("model-tokenization")
+  TokenizerState(b"model-tokenization".to_array())
 }
 
 ///|
@@ -190,13 +190,13 @@ test "TextModel reports a failing tokenizer and remains live for later reset" {
             if attempts.val == 1 {
               raise ModelProductionTokenizationError::InitialStateFailure
             }
-            @syntax.TokenizerState::from_text("healthy")
+            TokenizerState(b"healthy".to_array())
           },
-          tokenize_encoded=(text, _has_eol, _state) => {
+          tokenize_encoded=(_text, _has_eol, _state) => {
             tokenizer_calls.val += 1
             {
               tokens: [0, tag_to_metadata(Plain)],
-              end_state: @syntax.TokenizerState::from_text(text),
+              end_state: TokenizerState([b'l']),
             }
           },
         ),
