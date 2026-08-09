@@ -6,6 +6,23 @@ compile-time `lexmatch` DFA.
 `JsonTokenizer` is the whole public surface. Hosts, examples, and tests select it
 explicitly; reusable viewer core packages must not import it.
 
+## How text becomes color
+
+`lang_json` classifies text; it does not contain a palette. For each line it
+returns UTF-16 ranges tagged as `Attribute`, `String`, `Number`, `Comment`, and
+so on. The viewer fills untagged whitespace as `Plain`, converts every tag to a
+Monaco token color id, and resolves that id through the active theme's CSS
+variables.
+
+```text
+JSON text -> LineToken ranges -> HighlightTag -> color id -> theme CSS color
+```
+
+For example, in `{ "answer": 42 }`, the lexer emits `Delimiter` for the braces,
+`Attribute` for `"answer"`, and `Number` for `42`. The shared theme maps those
+to the punctuation, variable, and number colors respectively. Changing a theme
+therefore changes JSON colors without changing this lexer.
+
 ## Reading a token stream
 
 ```mbt check
@@ -91,8 +108,9 @@ test "JSON literals are Constant and bare words are Invalid" {
 
 This is the one lexer feature that needs state: a JSONC `/* … */` block comment
 runs past the end of a line, so the closing state must survive into the next
-`tokenize_line` call. `lang_json` does not use the shared mode stack; its state
-is a single in-comment flag.
+`tokenize_line` call. The shared `TokenizerState` is empty in normal code and
+contains only `b'c'` inside a block comment, so the lexer treats it as a single
+in-comment flag rather than a general mode stack.
 
 ```mermaid
 stateDiagram-v2

@@ -38,22 +38,15 @@ pub impl @syntax.LineTokenizer for JsonTokenizer with fn tokenize_line(
   let tokens : Array[@syntax.LineToken] = []
   let in_comment = for at = 0, view = line_text[:], in_comment = state ==
                          json_comment_state; view.length() > 0; {
-    let (op, rest) = if in_comment {
+    let (tag, next_in_comment, rest) = if in_comment {
       comment_step(view)
     } else {
       normal_step(view)
     }
     let consumed = view.length() - rest.length()
-    let next_in_comment = match op {
-      EnterComment => true
-      LeaveComment => false
-      _ => in_comment
-    }
-    match op {
-      Blank => ()
-      Emit(tag) => tokens.push({ start: at, end: at + consumed, tag })
-      EnterComment | LeaveComment =>
-        tokens.push({ start: at, end: at + consumed, tag: Comment })
+    match tag {
+      Some(tag) => tokens.push({ start: at, end: at + consumed, tag })
+      None => ()
     }
     continue at + consumed, rest, next_in_comment
   } nobreak {
@@ -63,53 +56,49 @@ pub impl @syntax.LineTokenizer for JsonTokenizer with fn tokenize_line(
 }
 
 ///|
-priv enum StepOp {
-  Blank
-  Emit(@syntax.HighlightTag)
-  EnterComment
-  LeaveComment
-}
-
-///|
-fn normal_step(view : StringView) -> (StepOp, StringView) {
+/// Scans one lexeme in normal code and returns its optional tag, whether the
+/// following lexeme is inside a block comment, and the unread suffix.
+fn normal_step(view : StringView) -> (@syntax.HighlightTag?, Bool, StringView) {
   lexscan view with longest {
-    (re"^[ \t]+", after=rest) => (Blank, rest)
-    (re"^//.*", after=rest) => (Emit(Comment), rest)
-    (re"^/\*", after=rest) => (EnterComment, rest)
+    (re"^[ \t]+", after=rest) => (None, false, rest)
+    (re"^//.*", after=rest) => (Some(Comment), false, rest)
+    (re"^/\*", after=rest) => (Some(Comment), true, rest)
     // A terminated string is a property name when the next significant
     // character is a colon — the Monarch lookahead idiom done by peeking
     // the rest of the line instead.
     (re"^\"(?:\\.|[^\"\\])*\"", after=rest) =>
-      (Emit(if colon_follows(rest) { Attribute } else { String }), rest)
-    (re"^\"(?:\\.|[^\"\\])*", after=rest) => (Emit(String), rest)
+      (Some(if colon_follows(rest) { Attribute } else { String }), false, rest)
+    (re"^\"(?:\\.|[^\"\\])*", after=rest) => (Some(String), false, rest)
     (re"^-?[0-9]+(?:\.[0-9]+)?(?:[eE][+\-]?[0-9]+)?", after=rest) =>
-      (Emit(Number), rest)
+      (Some(Number), false, rest)
     (re"^[a-zA-Z_][a-zA-Z0-9_]*" as word, after=rest) =>
       (
-        Emit(
+        Some(
           match word {
             "true" | "false" | "null" => Constant
             _ => Invalid
           },
         ),
+        false,
         rest,
       )
-    (re"^[{}\[\],:]", after=rest) => (Emit(Delimiter), rest)
-    (re"^.", after=rest) => (Emit(Punctuation), rest)
+    (re"^[{}\[\],:]", after=rest) => (Some(Delimiter), false, rest)
+    (re"^.", after=rest) => (Some(Punctuation), false, rest)
     // Unreachable while `.` covers the full charset (it includes lone
     // surrogates); consumes the rest defensively so the driver loop can
     // never stall on zero progress.
-    _ => (Blank, ""[:])
+    _ => (None, false, ""[:])
   }
 }
 
 ///|
-fn comment_step(view : StringView) -> (StepOp, StringView) {
+/// Scans one lexeme inside a block comment. Only `*/` returns to normal code.
+fn comment_step(view : StringView) -> (@syntax.HighlightTag?, Bool, StringView) {
   lexscan view with longest {
-    (re"^\*/", after=rest) => (LeaveComment, rest)
-    (re"^[^*]+", after=rest) => (Emit(Comment), rest)
-    (re"^\*", after=rest) => (Emit(Comment), rest)
-    _ => (Blank, ""[:])
+    (re"^\*/", after=rest) => (Some(Comment), false, rest)
+    (re"^[^*]+", after=rest) => (Some(Comment), true, rest)
+    (re"^\*", after=rest) => (Some(Comment), true, rest)
+    _ => (None, true, ""[:])
   }
 }
 
