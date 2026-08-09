@@ -2689,13 +2689,13 @@ async fn powershell_rename_target(
   for index in 0..<source_count {
     sources.push(parsed.paths[index])
   }
-  let dest = match sources.get(0) {
-    Some(source) =>
+  let dest = match sources {
+    [source, ..] =>
       match parent_dir(resolve_source_write_redirect_target(cwd, source)) {
         Some(dir) => resolve_source_write_redirect_target(dir, new_name)
         None => resolve_source_write_redirect_target(cwd, new_name)
       }
-    None => resolve_source_write_redirect_target(cwd, new_name)
+    [] => resolve_source_write_redirect_target(cwd, new_name)
   }
   source_tree_move_target(
     { sources, dest: Some(dest) },

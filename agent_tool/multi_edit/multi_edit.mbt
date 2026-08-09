@@ -383,15 +383,15 @@ async fn multi_edit_files(
   // is acceptable for the in-project repair case. `writes` is non-empty here (a
   // non-empty batch with no failures always renders at least one write), but
   // match defensively rather than index blindly.
-  let response = match writes.get(0) {
-    Some(first) =>
+  let response = match writes {
+    [first, ..] =>
       revert_guarded_response(
         first.path,
         writes,
         effective_revert_threshold(revert_when_errors_above),
         write_scope?,
       )
-    None =>
+    [] =>
       @agent_tool.ToolAction::respond(
         success_summary(writes),
         brief=success_brief(writes),

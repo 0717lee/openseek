@@ -1114,7 +1114,7 @@ pub fn MarkdownDocumentView::set_toc_entries(
   // Re-read the first child every pass: the underlying collection is live in
   // a real browser, so removing while iterating a snapshot hands the DOM an
   // undefined mid-loop.
-  while self.toc_list.get_children().get(0) is Some(stale) {
+  while self.toc_list.get_children() is [stale, ..] {
     self.toc_list.as_node().remove_child(stale.as_node())
   }
   for entry in entries {
