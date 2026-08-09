@@ -1107,6 +1107,10 @@ fn activity_view(
   if failed > 0 {
     summary.push(failed_badge(failed))
   }
+  // The plan as this run left it, so a folded turn reads as the checklist
+  // filling up without unfolding anything. A run that touched no plan adds
+  // nothing.
+  summary.push(@plan.fold_progress(items))
   @html.div(class="activity-row", [
     @html.details(class="activity", [
       @html.summary(class="activity-summary", summary),
@@ -1152,7 +1156,15 @@ fn tool_call_view(item : @transcript.TranscriptItem) -> @html.Html {
   )
   let error_class = if is_error { " error" } else { "" }
   let body : Array[@html.Html] = []
-  if arguments is Some(arguments) {
+  // A `plan` call shows the checklist it recorded rather than its JSON, in
+  // every state where that checklist is what the model asked for. A pending
+  // call qualifies: the card is a record of the call, and the missing Output
+  // section already marks it unfinished. A rejected one does not — the
+  // malformed arguments are what the reader needs, and dressing them up as a
+  // checklist would report a plan that never took effect.
+  if @plan.classify(item) is Some(Applied(steps) | Pending(steps)) {
+    body.push(@html.div(class="tool-call-section", [@plan.card(steps)]))
+  } else if arguments is Some(arguments) {
     let trimmed = arguments.trim()
     if !trimmed.is_empty() && trimmed != "{}" {
       // Bound the raw payload before parsing: even a collapsed details node is
@@ -1892,9 +1904,14 @@ fn composer_view(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
       ),
     )
   }
-  // Permanent first child (see `connection_banner`) so the later children's
-  // indices never shift when the connection drops mid-typing.
-  let children : Array[@html.Html] = [connection_banner(model)]
+  // Permanent first children (see `connection_banner`) so the later children's
+  // indices never shift when the connection drops mid-typing. The standing
+  // plan's slot is permanent for the same reason: a plan appearing or clearing
+  // mid-turn must not renumber the composer's children under the textarea.
+  let children : Array[@html.Html] = [
+    connection_banner(model),
+    @plan.panel(conv.visible_items()),
+  ]
   if !conv.pending_steers().is_empty() {
     children.push(pending_steers_panel(conv))
   }
@@ -3541,6 +3558,76 @@ test "a tool row renders recorded arguments before its result" {
   assert_true(after_arguments.contains("Output"))
   assert_true(markup.contains("test failed"))
   assert_true(markup.contains("<details class=\"tool-call error\" open>"))
+}
+
+///|
+#warnings("-alert_unstable")
+test "a plan row renders its checklist instead of the arguments JSON" {
+  let arguments = "{\"steps\":[{\"title\":\"fix the parser\",\"status\":\"in_progress\"},{\"title\":\"run moon test\",\"status\":\"pending\"}]}"
+  let rendered = tool_call_view({
+    kind: Tool(
+      call_id="c1",
+      name="plan",
+      arguments=Some(arguments),
+      has_result=true,
+      is_error=false,
+      brief=Some("plan 0/2 · fix the parser"),
+    ),
+    content: "Plan updated: 0/2 done · in progress: fix the parser.",
+    ts: None,
+  })
+  let markup = @rabbita.render_to_string(() => @rabbita.Val::constant(rendered))
+  assert_true(markup.contains("plan-steps"))
+  assert_true(markup.contains("plan-progress-count\">0/2"))
+  assert_false(markup.contains("Arguments"))
+  // A call the tool rejected keeps the raw payload: what the model actually
+  // sent is the point, and a checklist would report a plan that never applied.
+  let failed = tool_call_view({
+    kind: Tool(
+      call_id="c2",
+      name="plan",
+      arguments=Some("{\"steps\":[{\"title\":\"one\",\"status\":\"doing\"}]}"),
+      has_result=true,
+      is_error=true,
+      brief=None,
+    ),
+    content: "error: plan requires arguments.steps[0].status to be one of pending|in_progress|completed",
+    ts: None,
+  })
+  let failed_markup = @rabbita.render_to_string(() => {
+    @rabbita.Val::constant(failed)
+  })
+  assert_true(failed_markup.contains("Arguments"))
+  assert_false(failed_markup.contains("plan-steps"))
+}
+
+///|
+#warnings("-alert_unstable")
+test "a folded run carries the plan it ended on" {
+  let plan_item : @transcript.TranscriptItem = {
+    kind: Tool(
+      call_id="c1",
+      name="plan",
+      arguments=Some(
+        "{\"steps\":[{\"title\":\"fix the parser\",\"status\":\"completed\"},{\"title\":\"run moon test\",\"status\":\"in_progress\"}]}",
+      ),
+      has_result=true,
+      is_error=false,
+      brief=Some("plan 1/2 · run moon test"),
+    ),
+    content: "",
+    ts: None,
+  }
+  let rendered = activity_view([tool_item("read"), plan_item], _ => @cmd.none)
+  let markup = @rabbita.render_to_string(() => @rabbita.Val::constant(rendered))
+  assert_true(markup.contains("plan-progress mini"))
+  assert_true(markup.contains("plan-progress-count\">1/2"))
+  // A run that touched no plan adds nothing to its summary line.
+  let plainer = activity_view([tool_item("read")], _ => @cmd.none)
+  let plain_markup = @rabbita.render_to_string(() => {
+    @rabbita.Val::constant(plainer)
+  })
+  assert_false(plain_markup.contains("plan-progress"))
 }
 
 ///|
