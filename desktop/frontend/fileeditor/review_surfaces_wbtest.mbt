@@ -24,9 +24,7 @@ test "desktop review keeps sibling hosts stable across source and diff modes" {
   let source_state = { ..owned_state(), docs: source_docs }
   let source = render_review_html(body_view(test_emit(), source_state, ctx))
   assert_true(
-    source.contains(
-      "id=\"viewer-host\" class=\"viewer-host editor-shell\"",
-    ),
+    source.contains("id=\"viewer-host\" class=\"viewer-host editor-shell\""),
   )
   assert_true(
     source.contains(
@@ -57,9 +55,7 @@ test "desktop review keeps sibling hosts stable across source and diff modes" {
     ),
   )
   assert_true(
-    diff.contains(
-      "id=\"unified-diff-host\" class=\"viewer-host editor-shell\"",
-    ),
+    diff.contains("id=\"unified-diff-host\" class=\"viewer-host editor-shell\""),
   )
   let diff_breadcrumb = render_review_html(
     breadcrumb_view(test_emit(), diff_state, ctx),
