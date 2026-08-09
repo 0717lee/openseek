@@ -3046,8 +3046,11 @@ main {
   min-width: 0;
 }
 
-/* The toolbar's left status group: the model chip plus the workspace's
-   git branch (which lives here, not in the topbar). */
+/* The toolbar's left status group: the model chip, then the one git chip
+   (which lives here, not in the topbar). The row shares its width with the
+   send button and a resizable side panel, so both chips shrink and clip their
+   own label. Clipping is theirs and never this group's: `overflow` here would
+   also cut off the popover the git chip anchors. */
 .composer-status {
   display: flex;
   align-items: center;
@@ -3055,20 +3058,170 @@ main {
   min-width: 0;
 }
 
-.composer-branch {
+/* The git chip. It deliberately does *not* establish a containing block: the
+   popover anchors to `.composer-inner` instead, so its width is the
+   composer's business rather than the chip's position along the row. See
+   `.composer-git-menu`. */
+.composer-git {
+  min-width: 0;
+  flex: 0 1 auto;
+}
+.composer-git-button {
   display: inline-flex;
   align-items: center;
   gap: 5px;
+  max-width: 220px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  /* Same box as `.composer-model`, so the two chips sit at one height. */
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  padding: 4px 9px;
+  color: var(--ink-2);
+  font-size: 11.5px;
+  line-height: 1.4;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+/* Same hover as the model chip beside it: two adjacent buttons that light up
+   differently read as an accident. */
+.composer-git-button:hover,
+.composer-git-button.open {
+  border-color: var(--accent);
+  color: var(--ink-1);
+}
+.composer-git-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Size the icon span, not the SVG inside it: `.icon` is a fixed 16px flex box
+   whose SVG fills it, so shrinking only the SVG leaves it parked at the box's
+   top edge instead of on the text's centre line. */
+.composer-git-glyph {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+}
+.composer-git-glyph .icon {
+  width: 12px;
+  height: 12px;
+}
+/* The chip is tinted by CI, which is the part that changes while nobody is
+   looking. Which pull request it is, and whether it is a draft, are in the
+   label — one mark carrying two meanings is what made the old chip unreadable. */
+.composer-git-button.passed .composer-git-glyph,
+.composer-git-glyph.passed {
+  color: var(--add);
+}
+.composer-git-button.failed .composer-git-glyph,
+.composer-git-glyph.failed {
+  color: var(--del);
+}
+.composer-git-button.pending .composer-git-glyph,
+.composer-git-glyph.pending {
+  color: var(--warn);
+}
+.composer-git-button.none .composer-git-glyph,
+.composer-git-glyph.none {
+  color: var(--ink-3);
+}
+
+/* Opens upward, from the composer's left edge: the composer sits at the bottom
+   of the window, and `main` clips anything wider than it.
+
+   Sized against the composer rather than the viewport, because the two come
+   apart — dragging the editor panel wide squeezes the chat column to its 240px
+   floor on a screen of any width, and a menu measured in `vw` would spill out
+   of it and be cut off with no way to scroll to the rest. `100%` here is the
+   composer, which by construction fits. */
+.composer-git-menu {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  width: min(420px, 100%);
+  padding: 5px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-pop);
+  font-size: 11.5px;
+  line-height: 1.4;
+  z-index: 31;
+}
+.composer-git-row,
+.composer-git-link {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  color: var(--ink-2);
+  text-decoration: none;
+}
+.composer-git-link:hover {
+  background: var(--surface-2);
+}
+.composer-git-key {
+  flex: none;
+  width: 62px;
+  color: var(--ink-3);
+}
+.composer-git-value {
+  flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 11.5px;
+  color: var(--ink);
+}
+/* Secondary text is pushed to the right and gives up its width first. */
+.composer-git-note {
+  flex: 0 1 auto;
+  min-width: 0;
+  margin-left: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
   color: var(--ink-3);
 }
-.composer-branch::before {
-  content: "⎇";
-  font-size: 12px;
+.composer-git-out {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  color: var(--ink-3);
+}
+.composer-git-out .icon {
+  width: 11px;
+  height: 11px;
+}
+.composer-git-rule {
+  height: 1px;
+  margin: 4px 8px;
+  background: var(--line-2);
+}
+.composer-git-diff {
+  display: inline-flex;
+  gap: 6px;
+  flex: none;
+}
+.composer-git-clean {
+  color: var(--ink-3);
+}
+.composer-diff-added,
+.composer-diff-removed {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+}
+.composer-diff-added {
+  color: var(--add);
+}
+.composer-diff-removed {
+  color: var(--del);
 }
 
 /* The model chip is the tier control: one click flips the conversation

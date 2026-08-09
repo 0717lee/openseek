@@ -460,7 +460,15 @@ fn apply_session_snapshot(
     commands.push(scroll_transcript_after_render())
     // The host derives the resumed workspace from the session id, so the
     // branch probe sends no cwd.
-    commands.push(fetch_branch(dispatch, channel, session, None))
+    let (branch_cmd, probed) = probe_branch(
+      dispatch,
+      next,
+      channel,
+      session,
+      None,
+    )
+    next = probed
+    commands.push(branch_cmd)
   } else {
     commands.push(scroll_if_active(next, channel, session))
   }
@@ -1056,14 +1064,15 @@ fn covering_overlay(model : Model) -> Bool {
 /// the pane is actually visible and uncovered. Native views z-order above
 /// all HTML, so anything the frontend draws over the pane area — the `+`
 /// launcher popup, the narrow layout's sidebar drawer, the topbar app
-/// launcher's backdrop, and every `covering_overlay` — must hide the view
-/// rather than fight it.
+/// launcher, the composer's git popover, and every `covering_overlay` — must
+/// hide the view rather than fight it.
 fn desired_browser_view(model : Model) -> Int? {
   guard model.is_desktop &&
     model.screen is Chat &&
     model.dock.open &&
     !model.dock.menu_open &&
     !model.launcher.open &&
+    !model.git_details_open &&
     !(model.narrow && model.sidebar_open) &&
     !covering_overlay(model) else {
     return None
@@ -1214,6 +1223,27 @@ fn update(
   // opened. Device/session switches can arrive through many messages (and
   // background pushes), so fence it once here rather than in every branch.
   let model = close_stale_quick_open(model)
+  // The composer's git popover belongs to the checkout that was on screen,
+  // and is fenced the same way and for the same reason. It cannot rely on its
+  // click-away listener here: a switch by keyboard — Cmd+N, Quick Open — makes
+  // no click at all, and neither does a checkout losing its repository under
+  // it. Left standing the flag would spring the popover open on the
+  // conversation arriving, once its branch probe answered, and meanwhile keep
+  // `desired_browser_view` hiding the native browser with no chip on screen to
+  // click — a blank pane with nothing to explain it.
+  //
+  // The second clause is the invariant rather than a list of paths: no chip,
+  // no popover, however the branch came to be gone.
+  let model = if model.git_details_open &&
+    (
+      model.active_session != previous.active_session ||
+      model.focused != previous.focused ||
+      !model.active().shows_git_chip()
+    ) {
+    { ..model, git_details_open: false }
+  } else {
+    model
+  }
   let (model, panel_cmd) = sync_file_panel(dispatch, model)
   let (model, terminal_cmd) = sync_terminal_panel(dispatch, model)
   let (model, browser_cmd) = sync_browser_view(dispatch, model)
@@ -2562,6 +2592,23 @@ fn update_msg(
         model,
       )
     }
+    ToggleGitDetails => {
+      let opening = !model.git_details_open
+      let model = { ..model, git_details_open: opening }
+      guard opening else { return (@cmd.none, model) }
+      // Opening it is a request for current information, and everything it
+      // shows goes stale on its own: CI finishes minutes after the run that
+      // started it, and the working tree keeps moving. Nothing else looks
+      // again until the next run, so without this the chip's tint can sit on
+      // "running" long after the checks settled.
+      //
+      // The branch probe is the refresh — it re-counts the lines and, through
+      // its reply, re-runs the pull-request lookup, which is the same path
+      // every run boundary takes, in-flight fencing and all.
+      let conv = model.active()
+      probe_branch(dispatch, model, conv.device, conv.session_id, conv.cwd)
+    }
+    CloseGitDetails => (@cmd.none, { ..model, git_details_open: false })
     ToggleLauncher => {
       let opening = !model.launcher.open
       // The launcher exists only in the desktop window, whose one native
@@ -3498,6 +3545,9 @@ fn update_device_msg(
         ),
         worktrees_request_generation,
       })
+      // Every conversation this broadcast unbinds is unbound at the same
+      // instant, so one spent request number fences all of their probes.
+      let (fence, next) = next.mint_git_request()
       // Only an actual registry-row removal unbinds its conversations. Archive
       // keeps the row with `present: false`, so it passes through unchanged and
       // later Unarchive still surfaces Repair. Stand down any staged confirm
@@ -3509,9 +3559,12 @@ fn update_device_msg(
           !rows.iter().any(row => row.name == name) {
           // The checkout is gone, so every placement derived from it goes
           // too: a kept cwd would aim OpenFile/LaunchApp at a deleted
-          // directory and the composer would keep showing the dead branch.
-          // Both re-derive from the host on the next run or open.
-          { ..conv, worktree: None, cwd: None, branch: None }
+          // directory and the composer would keep showing the dead branch,
+          // its uncommitted lines, and its pull request. All re-derive from
+          // the host on the next run or open — and `forget_git` retires the
+          // probes already in flight, which would otherwise answer for the
+          // deleted directory and put every one of those fields back.
+          { ..conv.forget_git(fence~), worktree: None, cwd: None }
         } else {
           conv
         }
@@ -3853,12 +3906,97 @@ fn update_device_msg(
         (commit_cmd, next)
       }
     }
-    BranchLoaded(session~, branch~) =>
-      if model.find_conversation(channel, session) is Some(conv) {
-        (@cmd.none, model.replace_conversation({ ..conv, branch, }))
-      } else {
-        (@cmd.none, model)
+    BranchLoaded(session~, branch~, diffstat~, generation~, base_hint~) => {
+      guard model.find_conversation(channel, session) is Some(conv) else {
+        return (@cmd.none, model)
       }
+      // A probe that is still counting untracked files while a later one has
+      // already answered would otherwise put its older branch and totals back
+      // on screen, where nothing would correct them until the next refresh.
+      guard generation == conv.branch_generation else {
+        return (@cmd.none, model)
+      }
+      let conv = { ..conv, branch, diffstat, diffstat_hint: base_hint }
+      // The pull-request lookup rides on the branch answer rather than on the
+      // four places that ask for it: whatever refreshes the branch — a run
+      // starting, a session opening, a run finishing — is exactly when the
+      // branch's pull request can have changed too.
+      guard branch is Some(branch) && !branch.is_empty() else {
+        // Not a repository any more: an answer about the branch it used to
+        // have would only mislead, including one still on its way.
+        let (fence, model) = model.mint_git_request()
+        return (
+          @cmd.none,
+          model.replace_conversation(conv.forget_pull_request(fence~)),
+        )
+      }
+      // A lookup already in flight for this same branch is not stacked on —
+      // but it is marked stale, because its answer was gathered before this
+      // refresh asked for one. Dropping the refresh outright would leave the
+      // chip describing the repository as it was when a run started, with
+      // nothing scheduled to correct it.
+      if conv.pull_request is Some(probe) &&
+        probe.probing &&
+        probe.branch == branch {
+        let pull_request = Some({ ..probe, stale: true })
+        return (
+          @cmd.none,
+          model.replace_conversation({ ..conv, pull_request, }),
+        )
+      }
+      probe_pull_request(dispatch, model, channel, conv, branch)
+    }
+    PullRequestLoaded(
+      session~,
+      branch~,
+      generation~,
+      queried~,
+      pull_request~,
+      compare_url~
+    ) => {
+      guard model.find_conversation(channel, session) is Some(conv) else {
+        return (@cmd.none, model)
+      }
+      // Matched by which request this answers, not by branch: a checkout that
+      // moves X → Y → X leaves two lookups for X in flight, and if the newer
+      // settles first, matching by name would let the older overwrite it.
+      guard generation == conv.pull_request_generation else {
+        return (@cmd.none, model)
+      }
+      // Read before the answer overwrites it: whether a refresh landed while
+      // this lookup was in flight.
+      let stale = conv.pull_request is Some(probe) && probe.stale
+      // Labelled with the branch the host actually read from `HEAD`. When the
+      // checkout moved mid-flight the two differ, and the answer is filed
+      // under what it describes — where `settled_probe` hides it until the
+      // branch chip catches up, instead of showing it against this one.
+      let settled : PullRequestProbe = {
+        branch: queried.unwrap_or(branch),
+        probing: false,
+        stale: false,
+        pull_request,
+        compare_url,
+      }
+      let conv = { ..conv, pull_request: Some(settled) }
+      // A refresh arrived while this lookup was in flight: its answer predates
+      // that refresh, so run one more against the branch now checked out.
+      if stale && conv.branch is Some(current) && !current.is_empty() {
+        return probe_pull_request(dispatch, model, channel, conv, current)
+      }
+      let model = model.replace_conversation(conv)
+      // This answer may have named a base nobody knew when the diffstat beside
+      // it was measured — the first pull request a session sees, or one that
+      // has been retargeted since. Until it is measured again the popover
+      // reports a span from the wrong place, which on a stacked pull request
+      // is not a rounding error but the whole branch below this one. Measuring
+      // again settles the hint, so this asks at most once per base.
+      guard conv.settled_probe() is Some(probe) &&
+        probe.pull_request is Some(answer) &&
+        conv.diffstat_hint != Some(answer.base) else {
+        return (@cmd.none, model)
+      }
+      probe_branch(dispatch, model, channel, session, conv.cwd)
+    }
     Started(
       run_id~,
       session~,
@@ -4047,7 +4185,10 @@ fn update_device_msg(
       }
       // The run's workspace directory now exists, so the branch chip can be
       // probed (and refreshed — a rerun may follow a checkout).
-      let commands = [fetch_branch(dispatch, channel, session, cwd)]
+      let (branch_cmd, updated) = probe_branch(
+        dispatch, updated, channel, session, cwd,
+      )
+      let commands = [branch_cmd]
       if generation is Some(generation) {
         commands.push(
           session_snapshot_command(
@@ -4480,7 +4621,14 @@ fn update_device_msg(
         } else {
           (model.replace_conversation(next), None)
         }
-        let commands = [fetch_branch(dispatch, channel, session, settled.cwd)]
+        let (branch_cmd, updated) = probe_branch(
+          dispatch,
+          updated,
+          channel,
+          session,
+          settled.cwd,
+        )
+        let commands = [branch_cmd]
         if generation is Some(generation) {
           commands.push(
             session_snapshot_command(
@@ -4817,10 +4965,15 @@ fn update_device_msg(
           dispatch, channel, next,
         )
         next = requested
-        let commands = [
-          sessions,
-          fetch_branch(dispatch, channel, conv.session_id, conv.cwd),
-        ]
+        let (branch_cmd, probed) = probe_branch(
+          dispatch,
+          next,
+          channel,
+          conv.session_id,
+          conv.cwd,
+        )
+        next = probed
+        let commands = [sessions, branch_cmd]
         // Only the embedded desktop page owns system notifications. Remote
         // browser pages never have the notification extension, and replaying
         // the same Finished boundary must not post a second notification.
@@ -11502,27 +11655,452 @@ test "the scroll watcher's report lands on the model" {
 }
 
 ///|
+/// A `git.branch` reply for the test conversation.
+fn branch_reply(
+  branch : String,
+  generation? : Int = 0,
+  session? : String = "desktop-test",
+  diffstat? : DiffStat,
+  base_hint? : String,
+) -> DeviceMsg {
+  BranchLoaded(
+    session~,
+    branch=Some(branch),
+    diffstat~,
+    generation~,
+    base_hint~,
+  )
+}
+
+///|
+/// A `git.pull_request` reply for the test conversation. `queried` defaults to
+/// the branch asked about, which is the ordinary case: only a checkout that
+/// moved mid-request makes them differ.
+fn pull_request_reply(
+  branch : String,
+  generation~ : Int,
+  queried? : String,
+  pull_request? : PullRequest,
+  compare_url? : String,
+) -> DeviceMsg {
+  PullRequestLoaded(
+    session="desktop-test",
+    branch~,
+    generation~,
+    queried=Some(queried.unwrap_or(branch)),
+    pull_request~,
+    compare_url~,
+  )
+}
+
+///|
+/// The probe a lookup for `branch` leaves behind while it runs.
+fn probing_for(
+  branch : String,
+  pull_request? : PullRequest,
+  compare_url? : String,
+) -> PullRequestProbe {
+  { branch, probing: true, stale: false, pull_request, compare_url }
+}
+
+///|
+/// One pull request, varied per test by field update.
+fn test_pull_request() -> PullRequest {
+  {
+    number: 710,
+    title: "Add a changed-files explorer",
+    state: PullRequestOpen,
+    draft: true,
+    url: "https://github.test/acme/app/pull/710",
+    base: "main",
+    additions: 2972,
+    deletions: 287,
+    changed_files: 18,
+    checks: Some({ passed: 1, failed: 0, pending: 3 }),
+  }
+}
+
+///|
 test "a branch reply lands on its conversation and an empty one hides it" {
   let dispatch = test_dispatch()
+  let stat : DiffStat = {
+    added: 12,
+    removed: 3,
+    files: 2,
+    base: Some("origin/main"),
+    partial: false,
+  }
   let (_, named) = update_dev(
     dispatch,
-    BranchLoaded(session="desktop-test", branch=Some("feature/x")),
+    branch_reply("feature/x", diffstat=stat),
     test_model(),
   )
   assert_true(named.active().branch is Some("feature/x"))
-  let (_, cleared) = update_dev(
-    dispatch,
-    BranchLoaded(session="desktop-test", branch=Some("")),
-    named,
-  )
+  assert_eq(named.active().diffstat, Some(stat))
+  // A named branch is also what the pull-request lookup keys on, and the
+  // lookup it issued is on record so a second reply cannot stack another.
+  assert_eq(named.active().pull_request, Some(probing_for("feature/x")))
+  assert_eq(named.active().pull_request_generation, 1)
+  let (_, cleared) = update_dev(dispatch, branch_reply(""), named)
   assert_true(cleared.active().branch is Some(""))
+  // A workspace that stopped being a repository keeps no pull request from
+  // the branch it used to have — and the lookup still running for it is
+  // retired rather than left holding a number the next one would reuse.
+  assert_eq(cleared.active().pull_request, None)
+  assert_eq(cleared.active().pull_request_generation, 2)
+  let (_, overtaken) = update_dev(
+    dispatch,
+    pull_request_reply(
+      "feature/x",
+      generation=1,
+      pull_request=test_pull_request(),
+    ),
+    cleared,
+  )
+  assert_eq(overtaken.active().pull_request, None)
   // A reply for an unknown session is dropped.
   let (_, ignored) = update_dev(
     dispatch,
-    BranchLoaded(session="desktop-gone", branch=Some("main")),
+    branch_reply("main", session="desktop-gone"),
     test_model(),
   )
   assert_true(ignored.active().branch is None)
+}
+
+///|
+test "a superseded branch probe cannot put its older answer back" {
+  let dispatch = test_dispatch()
+  // Two probes in flight: a run's start and its finish, or either of those and
+  // the popover being opened. The first is still counting untracked files.
+  let (_, first) = probe_branch(
+    dispatch,
+    test_model(),
+    @interop.ChannelId::Local,
+    "desktop-test",
+    None,
+  )
+  let (_, second) = probe_branch(
+    dispatch,
+    first,
+    @interop.ChannelId::Local,
+    "desktop-test",
+    None,
+  )
+  assert_eq(second.active().branch_generation, 2)
+  let newer : DiffStat = {
+    added: 9,
+    removed: 0,
+    files: 1,
+    base: Some("origin/main"),
+    partial: false,
+  }
+  let (_, settled) = update_dev(
+    dispatch,
+    branch_reply("feature/new", generation=2, diffstat=newer),
+    second,
+  )
+  assert_eq(settled.active().diffstat, Some(newer))
+  // The slower first probe answers last, and is discarded: nothing would have
+  // corrected its stale totals until the next refresh.
+  let (_, overtaken) = update_dev(
+    dispatch,
+    branch_reply("feature/old", generation=1),
+    settled,
+  )
+  assert_true(overtaken.active().branch is Some("feature/new"))
+  assert_eq(overtaken.active().diffstat, Some(newer))
+}
+
+///|
+test "a pull-request reply only lands on the branch it was asked about" {
+  let dispatch = test_dispatch()
+  // Measured from the base the answers below report, so settling one asks for
+  // nothing further and this stays about which reply lands where.
+  let (_, probing) = update_dev(
+    dispatch,
+    branch_reply("feature/x", base_hint="main"),
+    test_model(),
+  )
+  let answer = test_pull_request()
+  // A reply from a lookup that has since been superseded is dropped. The
+  // branch name cannot decide this: a checkout that moves X → Y → X leaves two
+  // lookups for X in flight at once, so which request answered is the question.
+  let (_, stale) = update_dev(
+    dispatch,
+    pull_request_reply("feature/x", generation=0, pull_request=answer),
+    probing,
+  )
+  assert_eq(stale.active().pull_request.unwrap().pull_request, None)
+  assert_true(stale.active().pull_request.unwrap().probing)
+  // The host answers about whatever `HEAD` said when it ran. An answer that
+  // came back describing a different branch is filed under that branch, not
+  // under the one the lookup was issued for — so the chip, which only shows a
+  // probe matching the checked-out branch, does not show it against this one.
+  let (_, moved) = update_dev(
+    dispatch,
+    pull_request_reply(
+      "feature/x",
+      generation=1,
+      queried="feature/y",
+      pull_request=answer,
+    ),
+    probing,
+  )
+  assert_eq(moved.active().pull_request.unwrap().branch, "feature/y")
+  assert_eq(moved.active().settled_probe(), None)
+  let (_, settled) = update_dev(
+    dispatch,
+    PullRequestLoaded(
+      session="desktop-test",
+      branch="feature/x",
+      generation=1,
+      queried=Some("feature/x"),
+      pull_request=Some(answer),
+      compare_url=None,
+    ),
+    probing,
+  )
+  assert_eq(
+    settled.active().pull_request,
+    Some({ ..probing_for("feature/x", pull_request=answer), probing: false }),
+  )
+  // Refreshing the same branch keeps that answer on screen while it re-probes,
+  // so the chip does not blink on every run boundary. A new request means a new
+  // number; the answer it carries is the old one's, kept only until this lookup
+  // replaces it.
+  let (_, refreshing) = update_dev(
+    dispatch,
+    branch_reply("feature/x", base_hint="main"),
+    settled,
+  )
+  assert_eq(
+    refreshing.active().pull_request,
+    Some(probing_for("feature/x", pull_request=answer)),
+  )
+  assert_eq(refreshing.active().pull_request_generation, 2)
+}
+
+///|
+test "a pull request's base is measured from as soon as it is known" {
+  let dispatch = test_dispatch()
+  // The first probe of a session has no pull request to ask about, so the host
+  // measured from its own guess and said so.
+  let guessed : DiffStat = {
+    added: 2467,
+    removed: 51,
+    files: 24,
+    base: Some("origin/main"),
+    partial: false,
+  }
+  let (_, probing) = update_dev(
+    dispatch,
+    branch_reply("feature/y", diffstat=guessed),
+    test_model(),
+  )
+  assert_eq(probing.active().diffstat_hint, None)
+  let branch_generation = probing.active().branch_generation
+  // The lookup comes back naming a base no local rule would have guessed: this
+  // branch sits on another one, so the totals on screen are the stack's, not
+  // this branch's. Settling therefore asks for another measurement.
+  let stacked = { ..test_pull_request(), base: "feature/x" }
+  let (_, settled) = update_dev(
+    dispatch,
+    pull_request_reply("feature/y", generation=1, pull_request=stacked),
+    probing,
+  )
+  assert_true(settled.active().branch_generation > branch_generation)
+  // That measurement answers with the base it was given, which is what stops
+  // the next settled answer from asking again.
+  let measured : DiffStat = {
+    ..guessed,
+    added: 41,
+    base: Some("origin/feature/x"),
+  }
+  let (_, remeasured) = update_dev(
+    dispatch,
+    branch_reply(
+      "feature/y",
+      generation=settled.active().branch_generation,
+      diffstat=measured,
+      base_hint="feature/x",
+    ),
+    settled,
+  )
+  assert_eq(remeasured.active().diffstat, Some(measured))
+  assert_eq(remeasured.active().diffstat_hint, Some("feature/x"))
+  let (_, quiet) = update_dev(
+    dispatch,
+    pull_request_reply(
+      "feature/y",
+      generation=remeasured.active().pull_request_generation,
+      pull_request=stacked,
+    ),
+    remeasured,
+  )
+  assert_eq(
+    quiet.active().branch_generation,
+    remeasured.active().branch_generation,
+  )
+}
+
+///|
+test "a checkout that returns to a branch does not accept the older lookup" {
+  let dispatch = test_dispatch()
+  // X, then away to Y, then back to X: the first X lookup is still running,
+  // and a second one for the same branch is now in flight beside it.
+  let (_, first) = update_dev(dispatch, branch_reply("feature/x"), test_model())
+  assert_eq(first.active().pull_request_generation, 1)
+  let (_, away) = update_dev(dispatch, branch_reply("feature/y"), first)
+  let (_, back) = update_dev(dispatch, branch_reply("feature/x"), away)
+  assert_eq(back.active().pull_request_generation, 3)
+  fn answered(generation : Int, number : Int) {
+    pull_request_reply("feature/x", generation~, pull_request={
+      ..test_pull_request(),
+      number,
+    })
+  }
+
+  fn picked(model : Model) {
+    model.active().pull_request.unwrap().pull_request.unwrap().number
+  }
+
+  // The newer one settles first.
+  let (_, settled) = update_dev(dispatch, answered(3, 710), back)
+  assert_eq(picked(settled), 710)
+  // The older one for the same branch arrives afterwards. Matching by name
+  // would take it; matching by request does not.
+  let (_, overtaken) = update_dev(dispatch, answered(1, 404), settled)
+  assert_eq(picked(overtaken), 710)
+}
+
+///|
+test "a reopened conversation does not accept the old record's replies" {
+  let dispatch = test_dispatch()
+  let (_, probing) = update_dev(
+    dispatch,
+    branch_reply("feature/x"),
+    test_model(),
+  )
+  let generation = probing.active().pull_request_generation
+  // Archiving and reopening the same session does not clear the record, it
+  // builds a new one — counters included, which is why they cannot live there.
+  let reopened = probing.replace_conversation(test_conversation())
+  assert_eq(reopened.active().pull_request_generation, 0)
+  let (_, again) = update_dev(dispatch, branch_reply("feature/x"), reopened)
+  assert_true(again.active().pull_request_generation > generation)
+  // The lookup the first record left running answers now, for a checkout the
+  // reopened conversation has not confirmed anything about yet.
+  let (_, late) = update_dev(
+    dispatch,
+    pull_request_reply(
+      "feature/x",
+      generation~,
+      pull_request=test_pull_request(),
+    ),
+    again,
+  )
+  assert_eq(late.active().pull_request.unwrap().pull_request, None)
+}
+
+///|
+test "a refresh during a lookup is run afterwards, not dropped" {
+  let dispatch = test_dispatch()
+  let refresh = branch_reply("feature/x")
+  let (_, probing) = update_dev(dispatch, refresh, test_model())
+  assert_true(probing.active().pull_request.unwrap().probing)
+  // A run finishing while the run-start lookup is still in flight does not
+  // stack a second request — but the answer it is waiting on was gathered
+  // before that run's work, so it must not be the last word either.
+  let (_, queued) = update_dev(dispatch, refresh, probing)
+  assert_eq(
+    queued.active().pull_request,
+    Some({ ..probing_for("feature/x"), stale: true }),
+  )
+  // Settling that lookup therefore issues another rather than leaving the
+  // composer describing the repository as it was when the run started.
+  let compare = "https://github.test/acme/app/compare/feature/x"
+  let (_, followed) = update_dev(
+    dispatch,
+    pull_request_reply("feature/x", generation=1, compare_url=compare),
+    queued,
+  )
+  guard followed.active().pull_request is Some(probe) else {
+    fail("the queued refresh dropped the probe")
+  }
+  assert_true(probe.probing)
+  assert_false(probe.stale)
+  // Its answer stays on screen while the follow-up runs.
+  assert_true(probe.compare_url is Some(_))
+  // With nothing queued, settling is the end of it.
+  let (_, quiet) = update_dev(
+    dispatch,
+    pull_request_reply("feature/x", generation=1),
+    probing,
+  )
+  assert_false(quiet.active().pull_request.unwrap().probing)
+  // A queued retry after an answer about a branch the checkout has left drops
+  // that answer instead of relabelling it: carrying it over would reintroduce
+  // exactly the mismatch the reply's own branch is there to prevent. The retry
+  // is a new request, so it carries the next number.
+  let (_, elsewhere) = update_dev(
+    dispatch,
+    pull_request_reply(
+      "feature/x",
+      generation=1,
+      queried="feature/y",
+      pull_request=test_pull_request(),
+    ),
+    queued,
+  )
+  assert_eq(elsewhere.active().pull_request, Some(probing_for("feature/x")))
+  assert_eq(elsewhere.active().pull_request_generation, 2)
+}
+
+///|
+test "the composer's git details popover toggles shut again" {
+  let dispatch = test_dispatch()
+  // The popover has no trigger without a branch, so a conversation that has
+  // one is where this starts — the flag cannot be raised otherwise.
+  let (_, on_branch) = update_dev(
+    dispatch,
+    branch_reply("feature/x"),
+    test_model(),
+  )
+  assert_false(on_branch.git_details_open)
+  let (_, opened) = update(dispatch, ToggleGitDetails, on_branch)
+  assert_true(opened.git_details_open)
+  // Opening re-probes (the command is not inspectable here), which must not
+  // disturb what is already on screen: the answer stays until its reply lands.
+  assert_eq(opened.active().pull_request, on_branch.active().pull_request)
+  assert_eq(opened.active().diffstat, on_branch.active().diffstat)
+  let (_, closed) = update(dispatch, ToggleGitDetails, opened)
+  assert_false(closed.git_details_open)
+  // Switching conversations closes it, and so does the branch going away under
+  // the conversation on screen. Neither produces a click for the dismissal
+  // listener to see, and with no chip rendered nothing is left to click the
+  // popover shut — the flag would go on hiding the native browser with no
+  // visible cause.
+  let (_, switched) = update(
+    dispatch,
+    SessionRotated({ channel: Local, session: "desktop-other" }),
+    opened,
+  )
+  assert_eq(switched.active_session, "desktop-other")
+  assert_false(switched.git_details_open)
+  let (_, lost) = update_dev(
+    dispatch,
+    branch_reply("", generation=opened.active().branch_generation),
+    opened,
+  )
+  assert_false(lost.active().shows_git_chip())
+  assert_false(lost.git_details_open)
+  // Dismissal is idempotent where the toggle is not: the click that closes the
+  // popover also reaches whatever it landed on, and a second dismissal — from
+  // a page that dispatched one on its own — must not bring it back.
+  let (_, dismissed) = update(dispatch, CloseGitDetails, opened)
+  assert_false(dismissed.git_details_open)
+  let (_, still_closed) = update(dispatch, CloseGitDetails, dismissed)
+  assert_false(still_closed.git_details_open)
 }
 
 ///|
@@ -14401,9 +14979,16 @@ test "full-screen modals hide the native view and closing restores it" {
   let (_, closed) = update(dispatch, WorkspacePickerClose, covered)
   let (_, restored) = update(dispatch, BrowserPaneMeasured(rect~), closed)
   assert_true(restored.browser_pane.shown == Some(1))
-  // The topbar app launcher's click-away backdrop covers the pane too.
+  // The topbar app launcher covers the pane too, and so does the composer's
+  // git popover: it opens upward over the pane's bottom-left corner, and a
+  // native view left showing would paint straight over it.
   let (_, launched) = update(dispatch, ToggleLauncher, restored)
   assert_true(launched.browser_pane.shown is None)
+  // The popover needs a branch to have a trigger at all, so give the
+  // conversation one before opening it.
+  let (_, on_branch) = update_dev(dispatch, branch_reply("feature/x"), restored)
+  let (_, detailing) = update(dispatch, ToggleGitDetails, on_branch)
+  assert_true(detailing.browser_pane.shown is None)
   // So do the other two surfaces `view.mbt` appends beside the picker: the
   // archive-discard confirmation and Quick Open.
   let (_, archiving) = update_dev(

@@ -327,6 +327,12 @@ pub let git_branch : Command[
 ] = Command("git.branch")
 
 ///|
+pub let git_pull_request : Command[
+  @protocol.GitPullRequestPayload,
+  @protocol.GitPullRequestReply,
+] = Command("git.pull_request")
+
+///|
 pub let git_changes : Command[
   @protocol.GitChangesPayload,
   @protocol.GitChangesReply,

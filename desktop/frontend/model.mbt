@@ -456,11 +456,32 @@ priv struct Conversation {
   // a start request.
   cwd : @common.Uri?
   // The git branch checked out in the workspace, reported by the host's
-  // `workspace_branch` op — display only (topbar chip). `None` until a probe
+  // `workspace_branch` op — display only (composer chip). `None` until a probe
   // answers (or when it fails); `Some("")` when the workspace is not a
   // repository. Either way the chip hides. Refreshed when a run starts, a
   // stored session opens, and a run finishes.
   branch : String?
+  // How much uncommitted work sits on that branch, answered by the same probe
+  // and shown beside it. `None` whenever `branch` is.
+  diffstat : DiffStat?
+  // Which base the probe that produced that diffstat was told to measure from,
+  // echoed back by the reply. Compared against the base a pull request later
+  // reports, it is how a diffstat measured from the host's guess — or from a
+  // base the pull request has since been retargeted away from — is noticed and
+  // measured again. Not `DiffStat::base`: that is the ref the host resolved the
+  // hint to, so comparing the two would never agree and would probe forever.
+  diffstat_hint : String?
+  // The newest branch probe. Replies carry it, so one that is still counting
+  // untracked files cannot land on top of a later probe's answer — a run's
+  // start and its finish each issue one, and so does opening the popover.
+  branch_generation : Int
+  // What GitHub says about that branch; see `PullRequestProbe`. `None` until
+  // the first lookup is issued.
+  pull_request : PullRequestProbe?
+  // The newest pull-request lookup, counted the same way and for the same
+  // reason. It sits out here rather than in the probe because clearing the
+  // probe must not rewind it — see `Conversation::forget_pull_request`.
+  pull_request_generation : Int
   watcher_status : String
   // Live text of the in-flight assistant turn, accumulated from
   // `assistant_delta` events and cleared by ordered full semantic, step,
@@ -985,10 +1006,22 @@ priv struct Model {
   // while the optional state carries input, rows, and selection.
   quick_open : QuickOpen?
   quick_open_generation : Int
+  // Every git probe's request number, minted here rather than per conversation
+  // for the same reason as `quick_open_generation`: a conversation archived and
+  // reopened is a *new* record, so a counter living on it restarts at zero and
+  // hands the old checkout's outstanding replies a number the new one accepts.
+  // Kept whole while the frontend runs, it can only ever be spent.
+  git_request_generation : Int
   // The desktop topbar's app launcher. Installed apps belong to the native
   // host, not a conversation or workspace, so this catalog is probed once
   // and kept while the frontend runs.
   launcher : Launcher
+  // Whether the composer's git chip has its details popover open. Global UI
+  // for the focused conversation like `quick_open`, not conversation state:
+  // only one composer is on screen, and a popover left open across a switch
+  // would describe the wrong checkout — which `update` fences, since a
+  // keyboard switch produces no click for the dismissal listener to see.
+  git_details_open : Bool
   // The right panel's dock: the mixed tab strip's membership, order, active
   // tab, and per-conversation parked strips. Owned by the `dock` package;
   // the projection (open files, active file, panel visibility) feeds
@@ -1408,6 +1441,11 @@ priv enum Msg {
   // Open or close the topbar app launcher; opening it fetches the installed-app
   // list the first time.
   ToggleLauncher
+  // Open or close the composer git chip's details popover.
+  ToggleGitDetails
+  // Dismiss that popover, from a click elsewhere on the page. Separate from
+  // the toggle on purpose: a dismissal must never reopen it.
+  CloseGitDetails
   LauncherLoaded(Array[@transcript.LauncherAppItem])
   LauncherFailed(String)
   // Launch one detected app (by its id) on the active conversation's workspace.
@@ -1613,8 +1651,32 @@ priv enum DeviceMsg {
   WorktreeFailed(String)
   // A `workspace_branch` reply: the git branch of `session`'s workspace —
   // `Some("")` when it is not a repository, `None` when the probe failed or
-  // answered unintelligibly.
-  BranchLoaded(session~ : String, branch~ : String?)
+  // answered unintelligibly — and how much uncommitted work sits on it.
+  // `generation` is the probe that asked; an older one's answer is discarded.
+  // `base_hint` is the baseline that probe was given, carried back rather than
+  // remembered: it says what the diffstat in the same message measures from.
+  BranchLoaded(
+    session~ : String,
+    branch~ : String?,
+    diffstat~ : DiffStat?,
+    generation~ : Int,
+    base_hint~ : String?
+  )
+  // A `git.pull_request` reply. `generation` is which request this answers,
+  // and is what matches it to the probe waiting for it; `branch` is the one
+  // that request was issued against, kept for the label when the host reports
+  // none; `queried` is the branch the host actually read from `HEAD`, and is
+  // what the answer gets labelled with — the checkout can move between the
+  // two. A failed lookup arrives here too, with nothing in it, so the
+  // conversation never stays wedged waiting for an answer that will not come.
+  PullRequestLoaded(
+    session~ : String,
+    branch~ : String,
+    generation~ : Int,
+    queried~ : String?,
+    pull_request~ : PullRequest?,
+    compare_url~ : String?
+  )
   // The host accepted a prompt: `session` routes the event to its
   // conversation, and everything after a `started` routes by `run_id`.
   // `task` is the prompt text — a client that did not send it (another
@@ -1729,6 +1791,11 @@ fn empty_conversation(
     usage_tokens: 0,
     cwd: None,
     branch: None,
+    diffstat: None,
+    diffstat_hint: None,
+    branch_generation: 0,
+    pull_request: None,
+    pull_request_generation: 0,
     watcher_status: "",
     streaming_response: "",
     input_ledger: [],
@@ -1825,7 +1892,9 @@ fn initial_model() -> Model {
     symbol_cache: empty_symbol_cache(),
     quick_open: None,
     quick_open_generation: 0,
+    git_request_generation: 0,
     launcher: { open: false, apps: AppsNotFetched },
+    git_details_open: false,
     dock: @dock.State::empty(),
     file_panel: @fileeditor.State::empty(),
     preview: @preview.State::empty(),

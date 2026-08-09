@@ -140,7 +140,21 @@ pub(all) struct UpdateChannelPayload {
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|
+/// `base_hint` is the branch the diffstat should measure from, when the client
+/// already knows it from the branch's pull request. Absent on the first probe,
+/// and whenever there is no pull request to ask — the host then falls back to
+/// the remote's default branch.
 pub(all) struct GitBranchPayload {
+  session : String
+  cwd : String?
+  base_hint : String?
+} derive(Debug, Eq, FromJson, ToJson)
+
+///|
+/// Address the same working directory as `git.branch` — the pull request is
+/// looked up for whatever branch that directory has checked out, so the two
+/// chips can never describe different branches.
+pub(all) struct GitPullRequestPayload {
   session : String
   cwd : String?
 } derive(Debug, Eq, FromJson, ToJson)

@@ -1,6 +1,7 @@
-// The topbar's branch chip: report the git branch of a conversation's
-// working directory. Display only — a missing repository (or a machine
-// without git) simply reads as "no branch", never an error.
+// The composer's branch chip: report the git branch of a conversation's
+// working directory, and how much uncommitted work sits on it. Display only —
+// a missing repository (or a machine without git) simply reads as "no
+// branch", never an error.
 
 ///|
 async fn git_branch_op(payload : GitBranchPayload) -> GitBranchReply {
@@ -11,8 +12,35 @@ async fn git_branch_op(payload : GitBranchPayload) -> GitBranchReply {
     Some(cwd) => @pathx.Absolute::from_uri_path(cwd)
     None => @engine.session_cwd(payload.session)
   }
-  guard base is Some(base) else { return { branch: None } }
-  { branch: git_branch(base.0) }
+  guard base is Some(base) else { return { branch: None, diffstat: None } }
+  guard git_branch(base.0) is Some(branch) else {
+    // Not a repository, or no git: there is nothing to count either.
+    return { branch: None, diffstat: None }
+  }
+  let diffstat = git_diffstat(base, hint?=payload.base_hint)
+  // The count takes long enough — a diff, plus one subprocess per untracked
+  // file — for an agent to check out something else while it runs. The two
+  // fields are applied together by the client, so a name from before the move
+  // paired with totals from after it would read as one coherent answer while
+  // being neither. Report the branch as it stands now, and let the next probe
+  // supply totals to match it.
+  //
+  // What this cannot catch is a checkout that leaves and returns inside the
+  // same count: the name matches at both ends while some files were read on
+  // the other branch. Catching it needs a repository-mutation marker, and Git
+  // offers none that is always there — the reflog can be switched off — so the
+  // detection would be as unreliable as the race is rare, and the only remedy
+  // it enables is measuring again, possibly without end. The totals are a
+  // display figure that every run boundary and every popover opening
+  // recomputes; a two-checkout round trip inside one count corrects itself at
+  // the next one.
+  guard git_branch(base.0) is Some(after) else {
+    return { branch: None, diffstat: None }
+  }
+  if after != branch {
+    return { branch: Some(after), diffstat: None }
+  }
+  { branch: Some(branch), diffstat }
 }
 
 ///|
@@ -23,6 +51,12 @@ async fn git_branch(dir : String) -> String? {
   let name = git_output(dir, ["rev-parse", "--abbrev-ref", "HEAD"])
   let name = if name == "HEAD" {
     git_output(dir, ["rev-parse", "--short", "HEAD"])
+  } else if name.is_empty() {
+    // An unborn HEAD has no commit for `rev-parse` to resolve — it fails
+    // outright — but the symbolic branch is already there. That is the state a
+    // fresh `git init` leaves, where every line is staged or untracked and so
+    // is exactly what the diffstat's empty-tree baseline exists to count.
+    git_output(dir, ["symbolic-ref", "--short", "HEAD"])
   } else {
     name
   }
@@ -31,6 +65,373 @@ async fn git_branch(dir : String) -> String? {
   } else {
     Some(name)
   }
+}
+
+///|
+/// The branch `HEAD` points at, and nothing else. Unlike `git_branch` this
+/// does not stand in a short hash for a detached checkout: a hash is a fine
+/// thing to show a person and a nonsense thing to hand an API that filters by
+/// branch name.
+async fn git_symbolic_branch(dir : String) -> String? {
+  guard git_output_opt(dir, ["symbolic-ref", "--short", "--quiet", "HEAD"])
+    is Some(output) else {
+    return None
+  }
+  let name = git_single_line(output)
+  if name.is_empty() {
+    None
+  } else {
+    Some(name)
+  }
+}
+
+///|
+/// Whether some remote already has `branch`. Read from the remote-tracking
+/// refs, so it answers for the state this checkout last saw — which is exactly
+/// the state a push from here updates.
+async fn git_branch_on_remote(dir : String, branch : String) -> Bool {
+  for remote in git_remotes(dir) {
+    if git_output_opt(dir, [
+        "rev-parse",
+        "--verify",
+        "--quiet",
+        "refs/remotes/\{remote}/\{branch}",
+      ])
+      is Some(_) {
+      return true
+    }
+  }
+  false
+}
+
+///|
+/// The configured remotes, in Git's order.
+async fn git_remotes(dir : String) -> Array[String] {
+  let remotes : Array[String] = []
+  guard git_output_opt(dir, ["remote"]) is Some(listing) else { return remotes }
+  for line in listing.split("\n") {
+    let remote = line.trim_end(chars="\r")
+    if !remote.is_empty() {
+      remotes.push(remote.to_owned())
+    }
+  }
+  remotes
+}
+
+///|
+/// Git's empty tree. A repository whose `HEAD` has no commit yet still has an
+/// index worth diffing, and every Git version spells this baseline object the
+/// same way, so it is a constant rather than something to ask the repository
+/// for.
+const EmptyTreeObject : String = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+
+///|
+/// How many untracked files the diffstat counts before it settles for
+/// `partial`. Each one costs a `git diff` of its own, and a workspace holding
+/// hundreds of them has an unignored build directory rather than that much
+/// work in progress.
+const MaxUntrackedDiffFiles : Int = 100
+
+///|
+/// How large an untracked file may be and still be counted. `git diff
+/// --no-index` reads the whole file to count its lines — measured at roughly
+/// twice the file's size resident — and this runs thirty-two at a time, at
+/// every run boundary and every time the popover opens. An unignored dataset
+/// or log would turn a decorative chip into gigabytes of repeated reading, so
+/// anything this large is left out of the count and marked `partial` instead.
+/// The reader's own one-megabyte ceiling is the precedent.
+const MaxUntrackedDiffBytes : Int64 = 1048576L
+
+///|
+/// How long either half of the diffstat may take. This is a number beside a
+/// branch name, refreshed at every run boundary and every time the popover
+/// opens, so it answers in about the time a glance takes or it does not
+/// answer: a repository slow enough to reach this will be slow again on the
+/// next probe, and reporting nothing beats holding a bridge request open.
+/// Generous against what the work actually costs — a modified 128 MiB tracked
+/// text file measured 1.5s — so only the genuinely pathological trips it.
+const DiffstatTimeoutMs : Int = 5000
+
+///|
+/// This branch's whole delta, counted locally: from where it left its base
+/// straight to the working tree, so a commit and an unsaved edit weigh the
+/// same and the number keeps moving as the agent works. Which base is
+/// `git_branch_base`'s problem — `hint` carries what the branch's pull request
+/// says, when the client has heard from one.
+async fn git_diffstat(dir : @pathx.Absolute, hint? : String) -> GitDiffStat? {
+  let native = dir.0
+  // An unborn HEAD has no commit to diff against, but its index can already
+  // hold staged additions, so the empty tree stands in for the missing commit.
+  guard git_output_opt(native, ["rev-parse", "--verify", "--quiet", "HEAD"])
+    is Some(_) else {
+    return git_diffstat_from(dir, EmptyTreeObject, None)
+  }
+  let (baseline, base) = git_branch_base(native, hint?)
+  git_diffstat_from(dir, baseline, base)
+}
+
+///|
+/// The remote-tracking ref to measure from. A hinted branch is looked for on
+/// `origin`, the repository a pull request's base belongs to for every
+/// checkout that is not a fork; a hint `origin` does not have falls through to
+/// the default rather than measuring from nothing.
+async fn git_base_ref(dir : String, hint? : String) -> String? {
+  if hint is Some(branch) && !branch.is_empty() {
+    let hinted = "origin/\{branch}"
+    if git_output_opt(dir, ["rev-parse", "--verify", "--quiet", hinted])
+      is Some(_) {
+      return Some(hinted)
+    }
+  }
+  guard git_output_opt(dir, [
+      "rev-parse", "--abbrev-ref", "--verify", "--quiet", "origin/HEAD",
+    ])
+    is Some(output) else {
+    return None
+  }
+  let name = git_single_line(output)
+  // A dangling `origin/HEAD` abbreviates to itself and names no branch.
+  if name.is_empty() || name == "origin/HEAD" {
+    None
+  } else {
+    Some(name)
+  }
+}
+
+///|
+/// Where this branch's work starts, and the ref that decided it.
+///
+/// `hint` is the branch the caller already knows this one merges into, taken
+/// from its pull request. That is the only exact answer there is: a branch
+/// records nothing about where it came from, and a base that is itself a
+/// feature branch — a stacked pull request — is not something a local rule
+/// could produce, since a local rule can only ever consider default branches.
+///
+/// Without a hint the answer is `origin/HEAD`, the remote's own statement of
+/// its default branch. Being one guess rather than a search it is wrong in the
+/// same place every time: a fork checkout with no pull request yet measures
+/// against the fork's default, which may sit far behind the upstream the
+/// branch was really cut from. Opening the pull request corrects it.
+///
+/// Falling back to `HEAD` — no origin, no default branch, unrelated histories
+/// — leaves the count covering uncommitted work alone, which the absent ref
+/// name tells the composer to say out loud instead of implying a comparison
+/// never made.
+async fn git_branch_base(dir : String, hint? : String) -> (String, String?) {
+  guard git_base_ref(dir, hint?) is Some(base_ref) else {
+    return ("HEAD", None)
+  }
+  guard git_output_opt(dir, ["merge-base", "HEAD", base_ref]) is Some(output) else {
+    return ("HEAD", None)
+  }
+  let commit = git_single_line(output)
+  if commit.is_empty() {
+    ("HEAD", None)
+  } else {
+    (commit, Some(base_ref))
+  }
+}
+
+///|
+/// Sum everything between `baseline` and the working tree: one `git diff
+/// --numstat` for what Git tracks, plus the untracked files counted one at a
+/// time. None when Git could not answer at all — the branch chip stands on its
+/// own.
+async fn git_diffstat_from(
+  dir : @pathx.Absolute,
+  baseline : String,
+  base : String?,
+) -> GitDiffStat? {
+  let native = dir.0
+  // `-- .` scopes the diff to the conversation workspace, which may be a
+  // subdirectory of the repository, exactly as `git.changes` does. With no
+  // second revision the comparison runs to the working tree, so uncommitted
+  // edits land in the same total as the commits before them.
+  //
+  // Nothing bounds what this reads: the per-file caps below cover untracked
+  // files, while a tracked one is inside the diff Git computes in one go. A
+  // modified 128 MiB tracked text file measured 1.5s locally, so a repository
+  // that keeps generated artifacts under version control can run far longer
+  // than a glance — hence the deadline rather than a size rule, which would
+  // silently score a large file that Git would have counted fine as zero.
+  guard @async.with_timeout_opt(DiffstatTimeoutMs, () => {
+      git_output_opt(native, ["diff", "--numstat", baseline, "--", "."])
+    })
+    is Some(Some(tracked)) else {
+    // Git failed, or it is still going. Either way nothing is counted, so
+    // there is no floor to report and the chip stands on the branch alone.
+    return None
+  }
+  let tracked = { ..parse_numstat(tracked), base, }
+  guard git_output_opt(native, [
+      "ls-files", "--others", "--exclude-standard", "-z", "--", ".",
+    ])
+    is Some(listing) else {
+    // The listing itself was unreadable — a filename that is not valid UTF-8
+    // defeats the text conversion even though Git succeeded. Every untracked
+    // file is then missing from the total, which is a floor, not the whole.
+    return Some({ ..tracked, partial: true })
+  }
+  // `--others` spells its paths from Git's current directory, which is this
+  // workspace. Validating each one lexically keeps a path that cannot address
+  // a file under the workspace from reaching the command line at all.
+  let paths : Array[@pathx.Relative] = []
+  let mut partial = false
+  for path in listing.split("\u{0}") {
+    // The listing is NUL-terminated, so its last field is empty by
+    // construction — that is the record separator, not a file left out.
+    guard !path.is_empty() else { continue }
+    guard git_tree_relative(path.to_owned()) is Some(relative) else {
+      partial = true
+      continue
+    }
+    if paths.length() >= MaxUntrackedDiffFiles {
+      partial = true
+      break
+    }
+    paths.push(relative)
+  }
+  // Bounded per file, but a hundred of them on a slow filesystem is still a
+  // wait nobody asked for. The tracked side is already counted here, so a
+  // deadline reached leaves a floor rather than nothing.
+  guard @async.with_timeout_opt(DiffstatTimeoutMs, () => {
+      @async.all(
+        [
+          for path in paths => {
+            () => {
+              guard untracked_is_countable(dir, path) else { return None }
+              git_untracked_numstat(dir, path)
+            }
+          }
+        ],
+        max_concurrent=32,
+      )
+    })
+    is Some(counts) else {
+    return Some({ ..tracked, partial: true })
+  }
+  let mut added = tracked.added
+  let mut files = tracked.files
+  for count in counts {
+    if count is Some(count) {
+      added += count.added
+      files += count.files
+    } else {
+      // A file that could not be counted leaves the total a floor, and the
+      // chip says so rather than presenting it as the whole.
+      partial = true
+    }
+  }
+  Some({ added, removed: tracked.removed, files, base, partial })
+}
+
+///|
+/// Whether counting this untracked file is worth handing to Git, decided
+/// before any subprocess exists.
+///
+/// Two things are refused. Anything that is not a regular file: a named pipe
+/// in the workspace would leave `git diff --no-index` waiting on a writer that
+/// may never come, and the probe has no business blocking on one. And anything
+/// past `MaxUntrackedDiffBytes`, since Git reads the whole file to count its
+/// lines. The kind is checked first because opening a pipe to size it would
+/// block just as surely.
+///
+/// A refusal is reported as a failure, which the caller already turns into a
+/// `partial` total — the file did not vanish, it simply was not counted.
+async fn untracked_is_countable(
+  dir : @pathx.Absolute,
+  path : @pathx.Relative,
+) -> Bool {
+  let native = dir.join(path).to_string()
+  let kind = @fs.kind(native, follow_symlink=false) catch {
+    error if @async.is_being_cancelled() => raise error
+    _ => return false
+  }
+  guard kind is Regular else { return false }
+  let file = @fs.open(native, mode=ReadOnly) catch {
+    error if @async.is_being_cancelled() => raise error
+    _ => return false
+  }
+  defer file.close()
+  let size = file.size() catch {
+    error if @async.is_being_cancelled() => raise error
+    _ => return false
+  }
+  size <= MaxUntrackedDiffBytes
+}
+
+///|
+/// One untracked file's line count, which `git diff --numstat` cannot report:
+/// numstat only sees what Git tracks, and `git add --intent-to-add` would
+/// write to the user's index to answer a display question. Diffing against
+/// `/dev/null` — a magic path name in Git's no-index mode on every platform,
+/// not a device file — buys Git's own counting, binary detection included.
+/// `--no-index` reports "there are differences" as exit status 1, the way
+/// `diff` does, so only a higher status is a failure.
+async fn git_untracked_numstat(
+  dir : @pathx.Absolute,
+  path : @pathx.Relative,
+) -> GitDiffStat? {
+  let (code, stdout, _) = @process.collect_output(
+    "git",
+    ["diff", "--numstat", "--no-index", "--", "/dev/null", path.0],
+    cwd=dir.0,
+    extra_env=git_environment(),
+    inherit_env=false,
+  ) catch {
+    error if @async.is_being_cancelled() => raise error
+    _ => return None
+  }
+  guard code <= 1 else { return None }
+  let stat = parse_numstat(stdout.text() catch { _ => return None })
+  // Status 1 is `--no-index`'s "there were differences", but it is also what a
+  // path Git could not read exits with — a file the agent deleted between
+  // `ls-files` and this command, which is an ordinary race in a live
+  // workspace. The two are told apart by the output: a real difference always
+  // produces a record, so status 1 with none is the failure.
+  guard !(code == 1 && stat.files == 0) else { return None }
+  Some(stat)
+}
+
+///|
+/// Sum `git diff --numstat` output. Only the two leading counts are read: the
+/// path field is quoted, escaped, and respelled for renames, and nothing here
+/// needs it. A binary file reports `-` for both counts, contributing a changed
+/// file with no lines rather than a parse failure. The caller supplies the
+/// baseline this was measured from; the numbers alone do not know it.
+fn parse_numstat(output : String) -> GitDiffStat {
+  let mut added = 0
+  let mut removed = 0
+  let mut files = 0
+  for line in output.split("\n") {
+    let line = line.trim_end(chars="\r")
+    guard line.find("\t") is Some(first) else { continue }
+    let rest = line.view(start_offset=first + 1)
+    guard rest.find("\t") is Some(second) else { continue }
+    files += 1
+    added += @string.parse_int(line.view(end_offset=first)) catch { _ => 0 }
+    removed += @string.parse_int(rest.view(end_offset=second)) catch { _ => 0 }
+  }
+  { added, removed, files, base: None, partial: false }
+}
+
+///|
+/// Run Git for a result that may legitimately be empty. Unlike `git_output`, a
+/// command that failed reads as None rather than an empty string, so a caller
+/// whose empty output means "nothing changed" can tell the two apart.
+async fn git_output_opt(dir : String, args : Array[String]) -> String? {
+  let (code, stdout, _) = @process.collect_output(
+    "git",
+    args,
+    cwd=dir,
+    extra_env=git_environment(),
+    inherit_env=false,
+  ) catch {
+    error if @async.is_being_cancelled() => raise error
+    _ => return None
+  }
+  guard code == 0 else { return None }
+  Some(stdout.text() catch { _ => return None })
 }
 
 ///|
@@ -1055,6 +1456,42 @@ test "Git changes are relative to an attached repository subdirectory" {
     ),
     Some({ ..renamed, path: "src/new.mbt", original_path: None }),
   )
+}
+
+///|
+test "Numstat sums lines and counts a binary file without any" {
+  assert_eq(parse_numstat(""), {
+    added: 0,
+    removed: 0,
+    files: 0,
+    base: None,
+    partial: false,
+  })
+  assert_eq(
+    parse_numstat("12\t3\tsrc/a.mbt\n-\t-\tassets/logo.png\n0\t7\tsrc/b.mbt\n"),
+    { added: 12, removed: 10, files: 3, base: None, partial: false },
+  )
+}
+
+///|
+test "Numstat reads a respelled path field without parsing it" {
+  // Rename detection and `--no-index` both rewrite the path field into a
+  // `{old => new}` form; only the two counts are ever read.
+  assert_eq(parse_numstat("3\t0\t/{dev/null => src/new.mbt}\r\n"), {
+    added: 3,
+    removed: 0,
+    files: 1,
+    base: None,
+    partial: false,
+  })
+  // A line Git never emits still must not be counted as a changed file.
+  assert_eq(parse_numstat("garbage\n"), {
+    added: 0,
+    removed: 0,
+    files: 0,
+    base: None,
+    partial: false,
+  })
 }
 
 ///|
