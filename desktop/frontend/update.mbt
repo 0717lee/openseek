@@ -1235,7 +1235,10 @@ fn replace_archived_active(
     model.find_conversation(channel, session) is Some(archived_conv) else {
     return model
   }
-  let (restored_task, restored_mentions, pending_initial) = archived_conv.archive_salvage()
+  let salvaged = archived_conv.archive_salvage()
+  let restored_task = salvaged.task
+  let restored_mentions = salvaged.mentions
+  let pending_initial = salvaged.pending_initial
   let conversations = model.conversations.filter(conv => {
     conv.device != channel || conv.session_id != session
   })
@@ -1252,7 +1255,13 @@ fn replace_archived_active(
   for mention in fresh.mentions {
     mentions.push(mention)
   }
-  let fresh = { ..fresh, task, mentions, workspace }
+  // Goal mode comes across with its text: the replacement conversation is
+  // where the user goes on writing it.
+  let goal_edit = match (salvaged.goal_draft, fresh.goal_edit) {
+    (Some(draft), None) => Some({ draft, })
+    (_, existing) => existing
+  }
+  let fresh = { ..fresh, task, mentions, workspace, goal_edit }
   let fresh = if pending_initial {
     fresh.append_local_notice(
       Assistant(is_danger=true),

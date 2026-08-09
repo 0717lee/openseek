@@ -3490,9 +3490,7 @@ fn Conversation::restore_submission(
 /// archived out from under the composer. Initial prompts still in the local
 /// ownership ledger come first in send order, followed by text typed since;
 /// no run or receipt state crosses into the replacement conversation.
-fn Conversation::archive_salvage(
-  self : Conversation,
-) -> (String, Array[Mention], Bool) {
+fn Conversation::archive_salvage(self : Conversation) -> ArchiveSalvage {
   let drafts : Array[String] = []
   let mentions : Array[Mention] = []
   let mut pending_initial = false
@@ -3513,7 +3511,26 @@ fn Conversation::archive_salvage(
   for mention in self.mentions {
     mentions.push(mention)
   }
-  (drafts.join("\n\n"), mentions, pending_initial)
+  // The goal draft rides beside the prompt rather than inside it: it is not
+  // something to send, and folding it into `task` would turn writing meant
+  // for the goal row into a prompt. A goal already *sent* is not salvaged —
+  // it is the archived record's to carry, not this one's.
+  let goal_draft = if self.goal_edit is Some(edit) &&
+    !edit.draft.trim().is_empty() {
+    Some(edit.draft)
+  } else {
+    None
+  }
+  { task: drafts.join("\n\n"), mentions, goal_draft, pending_initial }
+}
+
+///|
+/// What survives a conversation being archived out from under the composer.
+priv struct ArchiveSalvage {
+  task : String
+  mentions : Array[Mention]
+  goal_draft : String?
+  pending_initial : Bool
 }
 
 ///|

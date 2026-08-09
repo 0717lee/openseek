@@ -790,6 +790,37 @@ test "re-asserting a blocked goal waits for its own marker" {
 }
 
 ///|
+test "archiving carries the goal draft to the replacement" {
+  let dispatch = test_dispatch()
+  // The row's Archive can be clicked while goal mode holds unsent writing,
+  // and that writing exists nowhere else — the salvage that recovers the
+  // prompt draft has to recover this one too.
+  let model = test_model()
+    .replace_conversation({
+      ..test_conversation(),
+      task: "a prompt typed too",
+      goal_edit: Some({ draft: "a goal still being written" }),
+    })
+    .with_dev(dev => { ..dev, sessions: [archived_item("desktop-test")] })
+  let (_, next) = update_dev(
+    dispatch,
+    SessionsChanged(
+      change="archived",
+      session="desktop-test",
+      fresh_session=Some("desktop-restored"),
+    ),
+    model,
+  )
+  inspect(next.active_session, content="desktop-restored")
+  guard next.active().goal_edit is Some(edit) else {
+    fail("the goal draft should come across")
+  }
+  inspect(edit.draft, content="a goal still being written")
+  // And it stays out of the prompt: it is not something to send.
+  inspect(next.active().task, content="a prompt typed too")
+}
+
+///|
 #warnings("-alert_unstable")
 test "a kept goal draft is a conversation you can get back to" {
   let dispatch = test_dispatch()
