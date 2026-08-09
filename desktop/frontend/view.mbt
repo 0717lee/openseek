@@ -574,11 +574,13 @@ fn push_group_rows(
   archived~ : (String) -> Bool,
   nested? : Bool = false,
 ) -> Unit {
-  // Conversations that have gotten under way get a row, plus the one fresh
-  // "New chat" on screen: it owns a row from the moment its ＋ was clicked,
-  // so the rotation has visible feedback in the list; the row takes the real
-  // title at the first send. Stale husks (a fresh chat the user navigated
-  // away from) stay hidden.
+  // Conversations worth keeping get a row, plus the one fresh "New chat" on
+  // screen: it owns a row from the moment its ＋ was clicked, so the rotation
+  // has visible feedback in the list; the row takes the real title at the
+  // first send. Empty husks (a fresh chat the user navigated away from
+  // without writing anything) stay hidden — but one holding an unsent draft
+  // is kept precisely so it can be returned to, and a row is the only way
+  // back to it.
   let composing = model.composing_new_chat()
   for conv in model.conversations.rev_iter() {
     if conv.device != dev.channel ||
@@ -593,7 +595,7 @@ fn push_group_rows(
       Some(name) => Some(name)
       None => worktree_name_for(dev, workspace, conv.session_id)
     }
-    if conv.has_begun() {
+    if conv.worth_keeping() {
       rows.push(
         session_row(
           dispatch,

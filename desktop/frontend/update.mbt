@@ -2778,7 +2778,7 @@ fn update_msg(
           goal_pending: Some({
             id: command,
             request: Setting(text),
-            since: conv.watermark,
+            since: conv.durable_frontier(),
           }),
         }),
       )
@@ -2802,7 +2802,7 @@ fn update_msg(
           goal_pending: Some({
             id: command,
             request: Clearing,
-            since: conv.watermark,
+            since: conv.durable_frontier(),
           }),
         }),
       )

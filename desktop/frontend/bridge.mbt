@@ -1317,9 +1317,11 @@ fn goal_openseek(
   let payload = goal_payload(session, model, max_steps, workspace, text)
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
-      request_agent_goal(
-        scheduler, dispatch, channel, payload, session, command, text,
-      )
+      @interop.in_ordered_lane(@interop.goal_lane(channel, session), () => {
+        request_agent_goal(
+          scheduler, dispatch, channel, payload, session, command, text,
+        )
+      })
     })
   })
 }
@@ -1366,18 +1368,11 @@ async fn request_agent_goal(
   text : String?,
 ) -> Unit noraise {
   let dispatch = dispatch.map((msg : DeviceMsg) => FromDevice(channel, msg))
-  // In this session's own goal lane. A goal is desired state, and the host
-  // claims a per-session slot for one at a time: sent concurrently, the
-  // second is refused and the *first* wins — a Clear over a Set would lose to
-  // the goal it was cancelling. Issue order is the user's order, so keeping
-  // it here is what makes the later action actually supersede the earlier.
+  // The caller holds this session's goal lane across the whole chain, so the
+  // request goes out plainly here — see `set_goal_in_new_worktree`, where the
+  // ordering has to cover the worktree preflight too.
   ignore(
-    @interop.bridge_request_in_order(
-      channel,
-      @commands.agent_goal,
-      payload,
-      lane=@interop.goal_lane(channel, session),
-    ) catch {
+    @interop.bridge_request(channel, @commands.agent_goal, payload) catch {
       error => {
         let message = @interop.bridge_error_text(error)
         scheduler.add(

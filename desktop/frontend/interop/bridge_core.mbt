@@ -131,6 +131,29 @@ pub fn goal_lane(channel : ChannelId, session : String) -> String {
 }
 
 ///|
+/// Hold a lane across a caller's whole sequence, for work whose ordering is
+/// more than one request wide — the goal chain's create-then-bind-then-send,
+/// where a lane around the final request alone still lets two preflights race
+/// and deliver their goals in the order their *replies* arrived.
+///
+/// The lock is not reentrant, so work run here must issue its requests with
+/// plain `bridge_request`: the lane is already held on their behalf.
+pub async fn in_ordered_lane(
+  lane : String,
+  work : async () -> Unit noraise,
+) -> Unit noraise {
+  let lock = ordered_request_lock(lane)
+  // Acquiring fails only when this task is being cancelled, and then the work
+  // must not run at all — its caller is a fire-and-forget command nobody is
+  // waiting on any more. Nothing was issued, so there is nothing to unwind.
+  lock.acquire() catch {
+    _ => return
+  }
+  defer lock.release()
+  work()
+}
+
+///|
 /// Call one host method in the page's issue order, for callers whose requests
 /// are desired state or ordered observations rather than independent queries:
 /// the file-panel watcher (`watch(A)` then `unwatch`), file-stat snapshots,

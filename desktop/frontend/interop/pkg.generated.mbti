@@ -25,6 +25,8 @@ pub async fn[Payload : ToJson, Reply : @json.FromJson] bridge_request_in_order(C
 
 pub fn goal_lane(ChannelId, String) -> String
 
+pub async fn in_ordered_lane(String, async () -> Unit noraise) -> Unit noraise
+
 pub fn js_method_promise(@js.Value, String, @js.Value) -> @js.Promise raise @js.Error_
 
 pub fn js_prop(@js.Value, String) -> @js.Value?

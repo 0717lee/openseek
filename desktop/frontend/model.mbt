@@ -2740,7 +2740,7 @@ fn Model::activate(
       found = true
       // Opening the conversation is what "seen" means.
       conversations.push({ ..conv, unseen_finish: false })
-    } else if conv.has_begun() || !conv.draft_empty() {
+    } else if conv.worth_keeping() {
       conversations.push(conv)
     }
   }
@@ -2769,6 +2769,17 @@ fn Model::activate(
 /// The goal halves count because `/goal` moves the user's text out of `task`:
 /// without them a fresh conversation looks abandoned while holding the only
 /// copy of a goal, and activating a neighbour would prune it away.
+/// Whether this conversation is worth keeping once focus moves elsewhere:
+/// it has begun, or it still holds writing that was never sent.
+///
+/// Retention and the sidebar row ask this same question, and have to. Keeping
+/// one the list cannot reach does not save the draft, it strands it — the
+/// conversation lives on in memory with no way back to it.
+fn Conversation::worth_keeping(self : Conversation) -> Bool {
+  self.has_begun() || !self.draft_empty()
+}
+
+///|
 fn Conversation::draft_empty(self : Conversation) -> Bool {
   self.task.trim().is_empty() &&
   self.mentions.is_empty() &&
@@ -2789,6 +2800,26 @@ fn Conversation::draft_sendable(self : Conversation) -> Bool {
 /// transcript, local notice, or exact submission ownership. A fresh "New
 /// chat" (even with a typed draft) has not; the one on screen still owns a
 /// "New chat" sidebar row, but stale husks stay out of the list.
+/// The highest durable sequence this conversation knows of, including
+/// commits buffered above the watermark while a reload is in flight.
+///
+/// A request's frontier has to be this and not `watermark`: a buffered
+/// commit is already in hand, so a goal marker among them sits *below* what
+/// the user just asked for — and under the watermark alone it would read as
+/// above it, and confirm the new request with an older record's answer.
+fn Conversation::durable_frontier(self : Conversation) -> Int {
+  let mut frontier = self.watermark
+  if self.sync is Reloading(buffered~, ..) {
+    for commit in buffered {
+      if commit.sequence > frontier {
+        frontier = commit.sequence
+      }
+    }
+  }
+  frontier
+}
+
+///|
 fn Conversation::has_begun(self : Conversation) -> Bool {
   self.is_running() ||
   self.messages.length() > 0 ||

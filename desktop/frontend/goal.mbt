@@ -751,6 +751,74 @@ test "re-asserting a blocked goal waits for its own marker" {
 }
 
 ///|
+#warnings("-alert_unstable")
+test "a kept goal draft is a conversation you can get back to" {
+  let dispatch = test_dispatch()
+  // Retention without a row does not save the draft, it strands it: the
+  // conversation lives on with no way to reach it again. Retention and the
+  // sidebar therefore ask one predicate, not two.
+  let fresh = empty_conversation(@interop.ChannelId::Local, "desktop-fresh")
+  assert_false(fresh.worth_keeping())
+  // A blank editor is not writing: an untouched `/goal` still lets the husk go.
+  assert_false({ ..fresh, goal_edit: Some({ draft: "   " }) }.worth_keeping())
+  for
+    holding in [
+      { ..fresh, goal_edit: Some({ draft: "a goal still being written" }) },
+      { ..fresh, goal_pending: Some(test_goal_command(Setting("awaiting"))) },
+    ] {
+    assert_true(holding.worth_keeping())
+    // On screen, with focus somewhere else — the case that decides whether
+    // the draft is reachable at all.
+    let model = {
+      ..test_model(),
+      conversations: [holding, test_conversation()],
+      active_session: "desktop-test",
+    }
+    guard model.focused_device() is Some(dev) else { fail("no device") }
+    let rows : Array[@html.Html] = []
+    push_group_rows(rows, dispatch, model, dev, None, listed=_ => false, archived=_ => {
+      false
+    })
+    let markup = @rabbita.render_to_string(() => {
+      @rabbita.Val::constant(@html.div(rows))
+    })
+    assert_true(markup.contains("desktop-fresh"))
+  }
+}
+
+///|
+test "the frontier a goal is sent from counts what is already buffered" {
+  let dispatch = test_dispatch()
+  // Submitting during a reload: commits above the watermark are already in
+  // hand. A goal marker among them sits *below* what the user just asked for,
+  // and against the watermark alone it would read as above it — confirming
+  // the new request with the older record's answer, and discarding the
+  // recovery copy if the new append then failed.
+  let reloading : Conversation = {
+    ..test_conversation(),
+    watermark: 3,
+    sync: Reloading(generation=1, attempt=1, reload_after_current=false, buffered=[
+      {
+        sequence: 7,
+        ts: None,
+        item: @protocol.RuntimeNotice({ content: "[goal]\nship the feature" }),
+      },
+    ]),
+    goal_edit: Some({ draft: "ship the feature" }),
+  }
+  inspect(reloading.durable_frontier(), content="7")
+  let (_, sent) = update(
+    dispatch,
+    SubmitGoal,
+    test_model().replace_conversation(reloading),
+  )
+  guard sent.active().goal_pending is Some(pending) else {
+    fail("nothing sent")
+  }
+  inspect(pending.since, content="7")
+}
+
+///|
 test "a request in flight is reason enough to re-read the record" {
   // An otherwise-empty conversation has nothing else worth reloading for, so
   // without this the reconnect that follows a lost reply would never ask the
