@@ -159,13 +159,31 @@ async fn ws_request(
       // waiter exists. Remove only our still-current resolver: an exotic
       // synchronous response may already have settled/replaced this id.
       remove_pending_if_same(session, id, deferred)
-      raise error
+      // Nothing was transmitted — `send` throws before it queues anything —
+      // so this is a call that never left, not an unknown outcome.
+      raise BridgeUnsent(bridge_error_text(error))
     }
   }
   let promise : @js.Promise = @js.Value::cast(
     (deferred.get_with_string("promise") : @js.Value),
   )
-  promise.wait()
+  promise.wait() catch {
+    error => raise ws_reply_failure(error)
+  }
+}
+
+///|
+/// How a rejected reply is reported. `handle_message` marks a peer's own
+/// JSON-RPC error; `reject_all` does not, because a socket that dies under an
+/// in-flight request is not an answer to it. Name that difference here rather
+/// than leaving it to be re-derived downstream from ambient state: a proton
+/// page drives remote channels too, so "this page has an embedded host" says
+/// nothing about a request that went out over a socket.
+fn ws_reply_failure(error : Error) -> Error {
+  guard error is @js.Error_(value) && browser_rpc_error_is_definite(value) else {
+    return BridgeError(bridge_error_text(error))
+  }
+  error
 }
 
 ///|
@@ -304,6 +322,49 @@ test "only marked browser RPC errors are definitive refusals" {
   assert_false(browser_rpc_error_is_definite(transport))
   assert_true(browser_rpc_error_is_definite(rejected))
   assert_false(bridge_error_is_definite(BridgeError("bridge unavailable")))
+}
+
+///|
+/// Throw a JS value — test-only. `@js.Error_` is read-only, so the error a
+/// rejected promise raises can only be obtained by producing one for real.
+extern "js" fn js_throw(value : @js.Value) -> @js.Value =
+  #| (value) => { throw value; }
+
+///|
+fn js_raised(value : @js.Value) -> Error {
+  @js.Error_::wrap(() => js_throw(value), map_ok=_ => ()) catch {
+    error => return error
+  }
+  BridgeError("nothing was thrown")
+}
+
+///|
+test "a socket that dies under a sent request is not a refusal" {
+  // `reject_all` rejects with an unmarked error, and the classifier's "this
+  // page has an embedded host" shortcut would otherwise read that as the
+  // host's own answer — a proton page drives remote channels too, and under
+  // that reading a lost socket would hand a goal's draft back while the
+  // remote host still commits its marker.
+  //
+  // The shortcut only fires on a page that *has* an embedded host, so stand
+  // one up: without it this passes whether or not the transport names its own
+  // failures, and proves nothing.
+  let previous : @js.Value = @js.globalThis.get_with_string("__MoonBit__")
+  let root = @js.Object::new()
+  root["openseek"] = @js.Object::new().to_value()
+  @js.globalThis.set_with_string("__MoonBit__", root.to_value())
+  defer @js.globalThis.set_with_string("__MoonBit__", previous)
+  assert_true(openseek_api() is Some(_))
+  let lost = ws_reply_failure(
+    js_raised(js_error("OpenSeek connection lost", rpc_rejection=false)),
+  )
+  assert_true(bridge_failure(lost) is Unknown)
+  // A peer's own JSON-RPC error is the one remote failure that *is* an
+  // answer, and it stays one.
+  let refused = ws_reply_failure(
+    js_raised(js_error("host refused", rpc_rejection=true)),
+  )
+  assert_true(bridge_failure(refused) is Refused)
 }
 
 ///|

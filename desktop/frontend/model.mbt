@@ -536,7 +536,7 @@ priv struct Conversation {
   //
   // Any durable observation that already shows what was asked for settles it
   // — a marker commit through `apply_commit`, a recovery snapshot through
-  // `adopt_snapshot`; see `GoalRequest::satisfied_by`. Only a definite host
+  // `adopt_snapshot`; see `GoalRequest::settled_by`. Only a definite host
   // refusal retires it unsatisfied, handing a set's text back; a transport
   // failure leaves it standing, because the command may have landed anyway.
   goal_pending : GoalRequest?
@@ -551,8 +551,8 @@ priv enum GoalRequest {
 } derive(Eq)
 
 ///|
-/// Whether a durable observation of the standing goal is already the state
-/// this request produces.
+/// Whether one durable observation of the standing goal — moving it from
+/// `before` to `after` — is this request's own result.
 ///
 /// The request is *not* matched against the marker that carried it. The
 /// durable record has no provenance — a `[goal]` commit proves the engine is
@@ -563,13 +563,22 @@ priv enum GoalRequest {
 ///
 /// It also makes every durable observation a settling point for free: a
 /// marker commit, a recovery snapshot after a reconnect, a resumed session's
-/// first read. Whatever a set's text was set by, once it stands the request
-/// has nothing left to wait for.
-fn GoalRequest::satisfied_by(
+/// first read.
+///
+/// The two kinds read that observation differently, and have to. A set names
+/// a state, and its text tells it apart from the state it replaced; it can be
+/// judged on `after` alone, which is what lets a snapshot settle a set whose
+/// marker this client never saw commit. A clear names an *absence*, which is
+/// also what a record carries before any goal is set — so only the transition
+/// out of a standing goal is its result. Judging a clear on `after` alone
+/// would let the goalless state a set is *about to leave* settle a clear
+/// sent over that set.
+fn GoalRequest::settled_by(
   self : GoalRequest,
-  goal : @transcript.GoalStanding?,
+  before : @transcript.GoalStanding?,
+  after : @transcript.GoalStanding?,
 ) -> Bool {
-  match (self, goal) {
+  match (self, after) {
     // The whole post-state, not just the text. A set marker reduces to
     // `{text, blocked: None}` — resubmitting a blocked goal's own text
     // unchanged is exactly how it is re-asserted — so matching on text alone
@@ -578,7 +587,7 @@ fn GoalRequest::satisfied_by(
     // the request with its recovery draft.
     (Setting(text), Some(standing)) =>
       standing.text == text && standing.blocked is None
-    (Clearing, None) => true
+    (Clearing, None) => before is Some(_)
     _ => false
   }
 }
@@ -3838,10 +3847,10 @@ fn Conversation::apply_commit(
     ..self,
     messages,
     goal,
-    // Settled by what now stands, not by which marker moved it — see
-    // `GoalRequest::satisfied_by`.
+    // Settled by the move this commit made to the standing goal, not by
+    // which marker made it — see `GoalRequest::settled_by`.
     goal_pending: if self.goal_pending is Some(pending) &&
-      pending.satisfied_by(goal) {
+      pending.settled_by(self.goal, goal) {
       None
     } else {
       self.goal_pending
@@ -4054,7 +4063,7 @@ fn Conversation::adopt_snapshot(
       // not. A snapshot that does *not* show it settles nothing: the append
       // may still be queued behind this read.
       goal_pending: if self.goal_pending is Some(pending) &&
-        pending.satisfied_by(goal) {
+        pending.settled_by(self.goal, goal) {
         None
       } else {
         self.goal_pending

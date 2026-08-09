@@ -549,6 +549,45 @@ test "the editor opens on the newest text, not on the retired one" {
 }
 
 ///|
+test "a clear over an unconfirmed set waits for a goal to actually go away" {
+  let dispatch = test_dispatch()
+  // The row keeps its ✕ while a set is out, so this is reachable: the set has
+  // no marker yet, and the mirror is still empty. Goallessness is also what a
+  // record carries before anything is set, so reading it as the clear's own
+  // result would retire the request on the next commit — and if the set then
+  // lands durably and the clear's append fails, the goal the user just tried
+  // to remove stands with nothing waiting for it.
+  let model = test_model().replace_conversation({
+    ..test_conversation(),
+    goal_pending: Some(Clearing),
+  })
+  fn commit(model, sequence, content) {
+    let (_, next) = update_dev(
+      dispatch,
+      SessionCommitted(
+        session="desktop-test",
+        sequence~,
+        ts=None,
+        item=@protocol.RuntimeNotice({ content, }),
+      ),
+      model,
+    )
+    next
+  }
+
+  let unrelated = commit(model, 1, "just some runtime notice")
+  assert_true(unrelated.active().goal_pending is Some(Clearing))
+  // The set it was sent over lands first; the clear is still outstanding.
+  let landed = commit(unrelated, 2, "[goal]\nthe goal being removed")
+  assert_true(landed.active().goal_pending is Some(Clearing))
+  assert_true(landed.active().goal is Some(_))
+  // Only a goal actually going away is this clear's result.
+  let settled = commit(landed, 3, "[goal cleared]")
+  assert_true(settled.active().goal_pending is None)
+  assert_true(settled.active().goal is None)
+}
+
+///|
 test "re-asserting a blocked goal waits for its own marker" {
   let dispatch = test_dispatch()
   // Edit on a blocked goal seeds from the mirror, so resubmitting unchanged

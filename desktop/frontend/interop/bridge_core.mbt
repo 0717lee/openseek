@@ -208,11 +208,18 @@ pub(all) enum BridgeFailure {
 /// by the response decoder; socket close / down errors do not. In the
 /// embedded proton bridge, a present method's rejected promise is the direct
 /// host answer.
+///
+/// The `openseek_api()` test is about *this* page having an embedded host,
+/// which on its own says nothing about a request that went out over a socket
+/// — a proton page drives remote channels too. It is sound only because
+/// `ws_request` names its own failures before they get here, so a bare
+/// `@js.Error_` reaching this point came from the local path.
 pub fn bridge_failure(error : Error) -> BridgeFailure {
   match error {
     BridgeUnsent(_) => Unsent
-    // A reply that arrived and could not be decoded: the host acted, and its
-    // answer is what is lost.
+    // A reply that arrived and could not be decoded, or a socket that died
+    // under a request already sent: it went out, and the answer is what is
+    // lost.
     BridgeError(_) => Unknown
     @js.Error_(value) =>
       if openseek_api() is Some(_) || browser_rpc_error_is_definite(value) {
