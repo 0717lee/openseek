@@ -799,8 +799,7 @@ html.is-resizing * {
   content: "Select a changed file to review";
 }
 /* The strip's new-tab button and its launcher popup. The tabsbar anchors
-   the popup; the full-screen transparent backdrop catches the click away
-   (reusing the topbar launcher's backdrop). */
+   the popup; a click away closes it (see `dismiss_subscription`). */
 .editor-tabsbar {
   position: relative;
 }
@@ -2125,11 +2124,6 @@ main {
 }
 .launcher-caret {
   font-size: 9px;
-}
-.launcher-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 30;
 }
 .launcher-menu {
   position: absolute;

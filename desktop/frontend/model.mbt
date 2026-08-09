@@ -1443,9 +1443,11 @@ priv enum Msg {
   ToggleLauncher
   // Open or close the composer git chip's details popover.
   ToggleGitDetails
-  // Dismiss that popover, from a click elsewhere on the page. Separate from
-  // the toggle on purpose: a dismissal must never reopen it.
+  // Clicks away from a transient menu, one per menu. Each is separate from
+  // its toggle on purpose: a dismissal must never reopen what it closed.
   CloseGitDetails
+  CloseLauncher
+  CloseDockMenu
   LauncherLoaded(Array[@transcript.LauncherAppItem])
   LauncherFailed(String)
   // Launch one detected app (by its id) on the active conversation's workspace.

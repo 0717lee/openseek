@@ -157,12 +157,49 @@ pub fn boot() -> Unit {
           ),
           external_link_subscription(emit.map(url => ExternalLinkClicked(url))),
         ]
-        // Only while the composer's git popover is open — there is nothing to
-        // dismiss otherwise, and a document-wide listener should not outlive
-        // what it serves.
+        // Click-away dismissal, one listener per menu and only while that menu
+        // is open: a document-wide listener should not outlive what it serves.
         if model.git_details_open {
           subs.push(
-            git_dismiss_subscription(emit.map((_ : Unit) => CloseGitDetails)),
+            dismiss_subscription(
+              "composer-git-dismiss",
+              trigger=".composer-git-button",
+              emit.map((_ : Unit) => CloseGitDetails),
+            ),
+          )
+        }
+        if model.launcher.open {
+          subs.push(
+            dismiss_subscription(
+              "launcher-dismiss",
+              trigger=".launcher-button",
+              emit.map((_ : Unit) => CloseLauncher),
+            ),
+          )
+        }
+        if model.dock.menu_open {
+          subs.push(
+            dismiss_subscription(
+              "dock-menu-dismiss",
+              trigger=".tab-add",
+              emit.map((_ : Unit) => CloseDockMenu),
+            ),
+          )
+        }
+        if model.console is Some({ menu_open: Some(_), .. }) {
+          subs.push(
+            dismiss_subscription(
+              "device-menu-dismiss",
+              // The menu body is excluded along with the trigger, unlike every
+              // other menu here: Remove is a two-click flow that arms a
+              // confirmation *inside* this menu, and dismissing on the first
+              // click would clear `menu_open` before the confirmation could be
+              // rendered — making a device impossible to remove at all. The
+              // items that finish rather than stage (Rename, the confirming
+              // second click) close the menu from their own handlers.
+              trigger=".device-menu-button, .device-menu",
+              emit.map((_ : Unit) => Console(MenuDismissed)),
+            ),
           )
         }
         @sub.batch(subs)
