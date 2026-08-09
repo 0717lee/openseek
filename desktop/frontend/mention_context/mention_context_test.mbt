@@ -17,6 +17,7 @@ test "encode lays out the task first, then the tagged mention block" {
         end_line=13,
         quote="fn parse_hover() {\n  ...\n}",
         comment="this looks wrong",
+        side=@mention_context.WorkingRevision,
       ),
     ],
     "look at this",
@@ -69,6 +70,7 @@ test "parse round-trips what encode wrote" {
       end_line=13,
       quote="fn parse_hover() {\n  ...\n}",
       comment="this looks wrong",
+      side=@mention_context.WorkingRevision,
     ),
   ]
   let task = "look at this\nand this"
@@ -83,10 +85,41 @@ test "parse round-trips what encode wrote" {
 ///|
 test "parse round-trips an annotation with empty bodies" {
   let mentions : Array[@mention_context.MentionRef] = [
-    Annotation(file="a.mbt", start_line=3, end_line=3, quote="", comment=""),
+    Annotation(
+      file="a.mbt",
+      start_line=3,
+      end_line=3,
+      quote="",
+      comment="",
+      side=@mention_context.WorkingRevision,
+    ),
   ]
   guard @mention_context.parse(@mention_context.encode(mentions, ""))
     is Some(parsed) else {
+    fail("round trip failed")
+  }
+  @debug.assert_eq(parsed.mentions, mentions)
+}
+
+///|
+test "original-revision annotation side survives the prompt round trip" {
+  let mentions : Array[@mention_context.MentionRef] = [
+    Annotation(
+      file="src/removed.mbt",
+      start_line=4,
+      end_line=4,
+      quote="obsolete()",
+      comment="good removal",
+      side=@mention_context.OriginalRevision,
+    ),
+  ]
+  let encoded = @mention_context.encode(mentions, "review this")
+  assert_true(
+    encoded.contains(
+      "<annotation file=\"src/removed.mbt\" lines=\"4-4\" side=\"original\">",
+    ),
+  )
+  guard @mention_context.parse(encoded) is Some(parsed) else {
     fail("round trip failed")
   }
   @debug.assert_eq(parsed.mentions, mentions)

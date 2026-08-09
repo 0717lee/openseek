@@ -41,7 +41,13 @@
 ///|
 /// One mention chip in envelope form. `Symbol`'s `file` is `""` (and `line`
 /// 0) when the language server could not place it; `Annotation` is an editor
-/// comment — the selected source and what the user said about it.
+/// comment — the selected source, its revision side, and what the user said.
+pub(all) enum AnnotationSide {
+  WorkingRevision
+  OriginalRevision
+} derive(Eq, Debug)
+
+///|
 pub(all) enum MentionRef {
   Skill(name~ : String)
   Symbol(name~ : String, file~ : String, line~ : Int)
@@ -50,7 +56,8 @@ pub(all) enum MentionRef {
     start_line~ : Int,
     end_line~ : Int,
     quote~ : String,
-    comment~ : String
+    comment~ : String,
+    side~ : AnnotationSide
   )
 } derive(Eq, Debug)
 
@@ -94,9 +101,13 @@ fn write_mention(parts : StringBuilder, mention : MentionRef) -> Unit {
         parts <+
           "<symbol name=\"\{name}\" file=\"\{file}\" line=\"\{line}\"/>\n"
       }
-    Annotation(file~, start_line~, end_line~, quote~, comment~) => {
+    Annotation(file~, start_line~, end_line~, quote~, comment~, side~) => {
+      let side_attribute = match side {
+        WorkingRevision => ""
+        OriginalRevision => " side=\"original\""
+      }
       parts <+
-        "<annotation file=\"\{file}\" lines=\"\{start_line}-\{end_line}\">\n"
+        "<annotation file=\"\{file}\" lines=\"\{start_line}-\{end_line}\"\{side_attribute}>\n"
       parts <+ "<quote>\n"
       write_body(parts, quote)
       parts <+ "</quote>\n"
@@ -156,8 +167,10 @@ let skill_pattern : Regex = re"^<skill name=\"(?<name>[^\"]+)\"/>$"
 let symbol_pattern : Regex = re"^<symbol name=\"(?<name>[^\"]+)\"( file=\"(?<file>[^\"]+)\" line=\"(?<line>[0-9]+)\")?(?<tail>/>|>)$"
 
 ///|
-/// `<annotation file="..." lines="start-end">`, opening the quote/comment body.
-let annotation_pattern : Regex = re"^<annotation file=\"(?<file>[^\"]+)\" lines=\"(?<start>[0-9]+)-(?<end>[0-9]+)\">$"
+/// `<annotation file="..." lines="start-end">`, optionally marked as an
+/// original-revision line, opening the quote/comment body. The omitted side is
+/// the working revision for compatibility with existing stored transcripts.
+let annotation_pattern : Regex = re"^<annotation file=\"(?<file>[^\"]+)\" lines=\"(?<start>[0-9]+)-(?<end>[0-9]+)\"( side=\"(?<side>original)\")?>$"
 
 ///|
 /// The lines between `<user_mentions>` and `</user_mentions>` as chips, or
@@ -207,6 +220,11 @@ fn parse_mention_block(lines : ArrayView[String]) -> Array[MentionRef]? {
       }
       let start_line = @string.parse_int(start_text) catch { _ => return None }
       let end_line = @string.parse_int(end_text) catch { _ => return None }
+      let side = if matched.named_group("side") is Some(_) {
+        OriginalRevision
+      } else {
+        WorkingRevision
+      }
       guard lines[index + 1:].search("</annotation>") is Some(length) else {
         return None
       }
@@ -221,6 +239,7 @@ fn parse_mention_block(lines : ArrayView[String]) -> Array[MentionRef]? {
           end_line~,
           quote~,
           comment~,
+          side~,
         ),
       )
       index += length + 2
