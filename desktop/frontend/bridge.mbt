@@ -941,9 +941,21 @@ fn start_openseek(
   )
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
-      request_agent_start(
-        scheduler, dispatch, channel, payload, session, submission_id,
-      )
+      // Behind anything already out for this session: the host serves one
+      // command per session, so a prompt issued after a goal must not reach
+      // the engine first and start its turn without it.
+      @interop.in_ordered_lane(
+        @interop.session_command_lane(channel, session),
+        () => {
+          request_agent_start(
+            scheduler, dispatch, channel, payload, session, submission_id,
+          )
+        },
+      ) catch {
+        // Unreachable: the lane only ever wakes its waiters, never fails
+        // them, and the work it runs is `noraise`. The type cannot say so.
+        _ => ()
+      }
     })
   })
 }
@@ -1265,13 +1277,20 @@ fn compact_openseek(
   let dispatch = dispatch.map((msg : DeviceMsg) => FromDevice(channel, msg))
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
+      // Compaction claims the same per-session slot as start and goal, so it
+      // waits behind them rather than colliding.
       ignore(
-        @interop.bridge_request(channel, @commands.agent_compact, {
-          session,
-          model: Some(model.wire()),
-          max_steps: parsed_max_steps(max_steps),
-          workspace: workspace.map(value => value.path),
-        }) catch {
+        @interop.bridge_request_in_order(
+          channel,
+          @commands.agent_compact,
+          {
+            session,
+            model: Some(model.wire()),
+            max_steps: parsed_max_steps(max_steps),
+            workspace: workspace.map(value => value.path),
+          },
+          lane=@interop.session_command_lane(channel, session),
+        ) catch {
           error => {
             // Routed by session, not as a generic Error: the rejection must
             // also clear the conversation's queued/compacting notice, which
@@ -1317,11 +1336,14 @@ fn goal_openseek(
   let payload = goal_payload(session, model, max_steps, workspace, text)
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
-      @interop.in_ordered_lane(@interop.goal_lane(channel, session), () => {
-        request_agent_goal(
-          scheduler, dispatch, channel, payload, session, command, text,
-        )
-      }) catch {
+      @interop.in_ordered_lane(
+        @interop.session_command_lane(channel, session),
+        () => {
+          request_agent_goal(
+            scheduler, dispatch, channel, payload, session, command, text,
+          )
+        },
+      ) catch {
         // Unreachable: the lane only ever wakes its waiters, never fails
         // them, and the work it runs is `noraise`. The type cannot say so.
         _ => ()

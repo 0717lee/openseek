@@ -109,61 +109,75 @@ fn start_in_new_worktree(
   })
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
-      // The session is the create's idempotency key: a retry after a lost
-      // reply gets the same worktree back instead of minting a second one.
-      let reply : @protocol.WorktreeCreateReply = @interop.bridge_request(
-        channel,
-        @commands.worktree_create,
-        { workspace: workspace.path, session },
-      ) catch {
-        error => {
-          // Nothing started: reject the submission so the draft restores.
+      // The whole chain holds this session's command lane, not just the
+      // start: two of these started together would run independent creates,
+      // and whichever reply came back first would start its run first.
+      @interop.in_ordered_lane(
+        @interop.session_command_lane(channel, session),
+        () => {
+          // The session is the create's idempotency key: a retry after a lost
+          // reply gets the same worktree back instead of minting a second one.
+          let reply : @protocol.WorktreeCreateReply = @interop.bridge_request(
+            channel,
+            @commands.worktree_create,
+            { workspace: workspace.path, session },
+          ) catch {
+            error => {
+              // Nothing started: reject the submission so the draft restores.
+              scheduler.add(
+                device_dispatch(
+                  StartRejected(
+                    session~,
+                    submission_id~,
+                    message="worktree setup failed: " +
+                      @interop.bridge_error_text(error),
+                  ),
+                ),
+              )
+              return
+            }
+          }
+          // The host generates the name; the reply carries it so the chain
+          // knows what to bind.
+          guard !reply.name.is_empty() else {
+            scheduler.add(
+              device_dispatch(
+                StartRejected(
+                  session~,
+                  submission_id~,
+                  message="malformed worktree.create reply",
+                ),
+              ),
+            )
+            return
+          }
+          // Bind the conversation's local state before the start settles, so
+          // the chip and a retried submit both know the environment. The
+          // canonical registry list still arrives as `worktree.changed` from
+          // the commit seam, and the start itself carries no worktree — the
+          // host routes the bound session's cwd through the registry.
           scheduler.add(
             device_dispatch(
-              StartRejected(
-                session~,
-                submission_id~,
-                message="worktree setup failed: " +
-                  @interop.bridge_error_text(error),
-              ),
+              WorktreeCreated(workspace~, name=reply.name, session~),
             ),
           )
-          return
-        }
+          let start = start_payload(
+            task,
+            selected_model,
+            max_steps,
+            session,
+            submission_id,
+            workspace=Some(workspace),
+          )
+          request_agent_start(
+            scheduler, dispatch, channel, start, session, submission_id,
+          )
+        },
+      ) catch {
+        // Unreachable: the lane only ever wakes its waiters, never fails
+        // them, and the work it runs is `noraise`. The type cannot say so.
+        _ => ()
       }
-      // The host generates the name; the reply carries it so the chain
-      // knows what to bind.
-      guard !reply.name.is_empty() else {
-        scheduler.add(
-          device_dispatch(
-            StartRejected(
-              session~,
-              submission_id~,
-              message="malformed worktree.create reply",
-            ),
-          ),
-        )
-        return
-      }
-      // Bind the conversation's local state before the start settles, so
-      // the chip and a retried submit both know the environment. The
-      // canonical registry list still arrives as `worktree.changed` from
-      // the commit seam, and the start itself carries no worktree — the
-      // host routes the bound session's cwd through the registry.
-      scheduler.add(
-        device_dispatch(WorktreeCreated(workspace~, name=reply.name, session~)),
-      )
-      let start = start_payload(
-        task,
-        selected_model,
-        max_steps,
-        session,
-        submission_id,
-        workspace=Some(workspace),
-      )
-      request_agent_start(
-        scheduler, dispatch, channel, start, session, submission_id,
-      )
     })
   })
 }
@@ -215,71 +229,74 @@ fn set_goal_in_new_worktree(
       // creates, and whichever reply came back first would send its goal
       // first — so a Clear issued after a Set could be overtaken by it, which
       // is the very inversion the lane exists to prevent.
-      @interop.in_ordered_lane(@interop.goal_lane(channel, session), () => {
-        // The session is the create's idempotency key, exactly as on the start
-        // path: a retry after a lost reply gets the same worktree back.
-        let reply : @protocol.WorktreeCreateReply = @interop.bridge_request(
-          channel,
-          @commands.worktree_create,
-          { workspace: workspace.path, session },
-        ) catch {
-          error => {
-            // The goal itself definitely never went out, so its draft comes
-            // back either way. What differs is the *worktree*: a create whose
-            // reply was lost may well have bound this session host-side, and
-            // saying "setup failed" would let the composer offer Local again
-            // over a durable binding — after which an ordinary start still
-            // runs in that worktree. Say which happened, and let the registry
-            // settle the placement (see `Model::checkout_placement`).
-            let detail = @interop.bridge_error_text(error)
-            let message = match @interop.bridge_failure(error) {
-              Refused | Unsent => "worktree setup failed: " + detail
-              Unknown =>
-                "worktree setup could not be confirmed (" +
-                detail +
-                ") — this chat may already be bound to a new worktree; the goal was not sent"
+      @interop.in_ordered_lane(
+        @interop.session_command_lane(channel, session),
+        () => {
+          // The session is the create's idempotency key, exactly as on the start
+          // path: a retry after a lost reply gets the same worktree back.
+          let reply : @protocol.WorktreeCreateReply = @interop.bridge_request(
+            channel,
+            @commands.worktree_create,
+            { workspace: workspace.path, session },
+          ) catch {
+            error => {
+              // The goal itself definitely never went out, so its draft comes
+              // back either way. What differs is the *worktree*: a create whose
+              // reply was lost may well have bound this session host-side, and
+              // saying "setup failed" would let the composer offer Local again
+              // over a durable binding — after which an ordinary start still
+              // runs in that worktree. Say which happened, and let the registry
+              // settle the placement (see `Model::checkout_placement`).
+              let detail = @interop.bridge_error_text(error)
+              let message = match @interop.bridge_failure(error) {
+                Refused | Unsent => "worktree setup failed: " + detail
+                Unknown =>
+                  "worktree setup could not be confirmed (" +
+                  detail +
+                  ") — this chat may already be bound to a new worktree; the goal was not sent"
+              }
+              scheduler.add(
+                device_dispatch(
+                  GoalRejected(session~, command~, draft=text, message~),
+                ),
+              )
+              return
             }
+          }
+          guard !reply.name.is_empty() else {
             scheduler.add(
               device_dispatch(
-                GoalRejected(session~, command~, draft=text, message~),
+                GoalRejected(
+                  session~,
+                  command~,
+                  draft=text,
+                  message="malformed worktree.create reply",
+                ),
               ),
             )
             return
           }
-        }
-        guard !reply.name.is_empty() else {
+          // Bind before the goal settles, so the chip and a retried submit both
+          // know the environment. The canonical registry list still arrives as
+          // `worktree.changed`; the goal carries no worktree, because the host
+          // routes a bound session's cwd through its registry.
           scheduler.add(
             device_dispatch(
-              GoalRejected(
-                session~,
-                command~,
-                draft=text,
-                message="malformed worktree.create reply",
-              ),
+              WorktreeCreated(workspace~, name=reply.name, session~),
             ),
           )
-          return
-        }
-        // Bind before the goal settles, so the chip and a retried submit both
-        // know the environment. The canonical registry list still arrives as
-        // `worktree.changed`; the goal carries no worktree, because the host
-        // routes a bound session's cwd through its registry.
-        scheduler.add(
-          device_dispatch(
-            WorktreeCreated(workspace~, name=reply.name, session~),
-          ),
-        )
-        let payload = goal_payload(
-          session,
-          engine_model,
-          max_steps,
-          Some(workspace),
-          text,
-        )
-        request_agent_goal(
-          scheduler, dispatch, channel, payload, session, command, text,
-        )
-      }) catch {
+          let payload = goal_payload(
+            session,
+            engine_model,
+            max_steps,
+            Some(workspace),
+            text,
+          )
+          request_agent_goal(
+            scheduler, dispatch, channel, payload, session, command, text,
+          )
+        },
+      ) catch {
         // Unreachable: the lane only ever wakes its waiters, never fails
         // them, and the work it runs is `noraise`. The type cannot say so.
         _ => ()

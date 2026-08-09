@@ -23,8 +23,6 @@ pub async fn[Payload : ToJson, Reply : @json.FromJson] bridge_request(ChannelId,
 
 pub async fn[Payload : ToJson, Reply : @json.FromJson] bridge_request_in_order(ChannelId, @commands.Command[Payload, Reply], Payload, lane? : String) -> Reply
 
-pub fn goal_lane(ChannelId, String) -> String
-
 pub async fn[T] in_ordered_lane(String, async () -> T) -> T
 
 pub fn js_method_promise(@js.Value, String, @js.Value) -> @js.Promise raise @js.Error_
@@ -40,6 +38,8 @@ pub fn page_channel() -> ChannelId?
 pub fn page_query_param(String) -> String?
 
 pub fn page_ws_origin() -> String?
+
+pub fn session_command_lane(ChannelId, String) -> String
 
 pub fn viewport_width() -> Int?
 

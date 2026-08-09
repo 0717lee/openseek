@@ -115,19 +115,22 @@ fn host_lane(channel : ChannelId) -> String {
 }
 
 ///|
-/// A lane of its own for one session's goal commands.
+/// A lane of its own for one session's engine commands — start, compact and
+/// goal.
 ///
-/// Goals are desired state, and the host claims a per-session slot for them:
-/// two in flight at once means the second is refused and the *first* wins,
-/// so a Clear sent over a Set loses to the very goal it was cancelling. The
-/// composer deliberately leaves those actions live, which is exactly what
-/// makes the second command reachable, so the ordering has to be kept here.
+/// This mirrors the host, which claims a single per-session slot for exactly
+/// those three. Sent concurrently they collide there: one is refused outright,
+/// and even when both are accepted the order is whichever reply raced ahead —
+/// so a prompt sent right after a goal can begin its turn before the goal is
+/// injected, and a Clear sent over a Set can lose to the goal it was
+/// cancelling. Issue order is the user's order, and the host cannot recover
+/// it, so it has to be kept here.
 ///
-/// Not the shared host lane: a goal command can spawn an engine, and the
-/// file-panel watcher and browser view ops would then queue behind a process
-/// start for an ordering they never asked for.
-pub fn goal_lane(channel : ChannelId, session : String) -> String {
-  "\{channel.uri_authority()}\u{0}goal\u{0}\{session}"
+/// Not the shared host lane: these can spawn an engine, and the file-panel
+/// watcher and browser view ops would then queue behind a process start for
+/// an ordering they never asked for.
+pub fn session_command_lane(channel : ChannelId, session : String) -> String {
+  "\{channel.uri_authority()}\u{0}session\u{0}\{session}"
 }
 
 ///|
@@ -183,18 +186,26 @@ pub async fn[Payload : ToJson, Reply : @json.FromJson] bridge_request_in_order(
 
 ///|
 test "a lane key separates what must not share a lane" {
-  // Goal commands are ordered per session because the host serves one at a
-  // time there. Sharing the host lane would order them against file and view
-  // ops too — which a goal command, able to spawn an engine, would then hold
-  // up for an ordering nobody asked for.
+  // Start, compact and goal are ordered per session because the host serves
+  // one at a time there — all three claim its single slot. Sharing the host
+  // lane would order them against file and view ops too, which a command able
+  // to spawn an engine would then hold up for an ordering nobody asked for.
   let here = ChannelId::Local
-  assert_true(goal_lane(here, "s-1") == goal_lane(here, "s-1"))
-  assert_false(goal_lane(here, "s-1") == goal_lane(here, "s-2"))
-  assert_false(goal_lane(here, "s-1") == host_lane(here))
-  assert_false(goal_lane(here, "s-1") == goal_lane(Remote("d"), "s-1"))
+  assert_true(
+    session_command_lane(here, "s-1") == session_command_lane(here, "s-1"),
+  )
+  assert_false(
+    session_command_lane(here, "s-1") == session_command_lane(here, "s-2"),
+  )
+  assert_false(session_command_lane(here, "s-1") == host_lane(here))
+  assert_false(
+    session_command_lane(here, "s-1") ==
+    session_command_lane(Remote("d"), "s-1"),
+  )
   // A session id cannot be spelled to collide with another lane.
   assert_false(
-    goal_lane(here, "s-1") == goal_lane(here, "s-1\u{0}goal\u{0}s-1"),
+    session_command_lane(here, "s-1") ==
+    session_command_lane(here, "s-1\u{0}goal\u{0}s-1"),
   )
 }
 
