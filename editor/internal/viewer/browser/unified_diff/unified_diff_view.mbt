@@ -146,6 +146,8 @@ fn render_line(
     "moonbit-unified-diff-line moonbit-unified-diff-line-\{kind}",
   )
   row.set_attribute("data-line-kind", kind)
+  row.set_attribute("role", "group")
+  row.set_attribute("aria-label", accessible_line_label(line))
   match line.original_line_number {
     Some(number) => row.set_attribute("data-original-line", number.to_string())
     None => ()
@@ -178,6 +180,25 @@ fn render_line(
     text_element(document, "code", "moonbit-unified-diff-line-text", line.text).as_node(),
   )
   row
+}
+
+///|
+/// The visual number columns stay hidden from assistive technology so they are
+/// not announced as detached digits. One row label exposes the semantic change
+/// kind, its applicable line numbers, and the source text in reading order.
+fn accessible_line_label(line : @unified_diff_model.UnifiedDiffLine) -> String {
+  let kind = match line.kind {
+    Context => "Unchanged"
+    Deletion => "Deletion"
+    Addition => "Addition"
+  }
+  let original = line.original_line_number
+    .map(number => ", original line \{number}")
+    .unwrap_or("")
+  let modified = line.modified_line_number
+    .map(number => ", modified line \{number}")
+    .unwrap_or("")
+  "\{kind}\{original}\{modified}: \{line.text}"
 }
 
 ///|

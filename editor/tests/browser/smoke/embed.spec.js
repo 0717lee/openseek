@@ -41,12 +41,22 @@ test('runs the viewer and tree from in-memory providers without a server', async
   await expect
     .poll(() => diff.evaluate((element) => getComputedStyle(element).outlineStyle))
     .toBe('solid');
-  await expect(
-    diff.locator('[data-line-kind=\"deletion\"]', { hasText: 'println(\"hello\")' }),
-  ).toHaveAttribute('data-original-line', '3');
-  await expect(
-    diff.locator('[data-line-kind=\"addition\"]', { hasText: 'println(greeting())' }),
-  ).toHaveAttribute('data-modified-line', '3');
+  const deletion = diff.locator('[data-line-kind=\"deletion\"]', {
+    hasText: 'println(\"hello\")',
+  });
+  await expect(deletion).toHaveAttribute('data-original-line', '3');
+  await expect(deletion).toHaveAttribute(
+    'aria-label',
+    'Deletion, original line 3:   println(\"hello\")',
+  );
+  const addition = diff.locator('[data-line-kind=\"addition\"]', {
+    hasText: 'println(greeting())',
+  });
+  await expect(addition).toHaveAttribute('data-modified-line', '3');
+  await expect(addition).toHaveAttribute(
+    'aria-label',
+    'Addition, modified line 3:   println(greeting())',
+  );
   await expect(page.locator('.monaco-editor.readonly-editor')).not.toBeVisible();
 
   await diffToggle.click();
