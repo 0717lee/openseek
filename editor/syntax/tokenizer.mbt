@@ -1,23 +1,23 @@
 ///|
 /// Carried lexer state between lines, the `IState` of Monaco's tokenization
-/// contract. An empty state is the canonical normal state; the persistent byte
-/// vector contains only open lexer modes. Stack edits share unchanged storage
+/// contract. An empty state is the canonical normal state; the persistent list
+/// contains only open lexer modes. Stack edits share unchanged tails
 /// while cached states remain isolated from later edits. Derived equality is
 /// what callers use to detect re-tokenization convergence.
 pub struct TokenizerState {
-  priv modes : @vector.Vector[Byte]
+  priv modes : @list.List[Byte]
 } derive(Eq)
 
 ///|
 /// Creates the canonical normal tokenizer state.
 pub fn TokenizerState::TokenizerState() -> TokenizerState {
-  { modes: @vector.new() }
+  { modes: @list.new() }
 }
 
 ///|
 /// Top mode, or `None` for an empty state.
 pub fn TokenizerState::last_mode(self : TokenizerState) -> Byte? {
-  self.modes.peek()
+  self.modes.head()
 }
 
 ///|
@@ -26,25 +26,25 @@ pub fn TokenizerState::push_mode(
   self : TokenizerState,
   mode : Byte,
 ) -> TokenizerState {
-  { modes: self.modes.push(mode) }
+  { modes: self.modes.prepend(mode) }
 }
 
 ///|
 /// Returns a new state without its top mode. An empty state is returned as-is.
 /// The receiver remains unchanged.
 pub fn TokenizerState::pop_mode(self : TokenizerState) -> TokenizerState {
-  match self.modes.pop() {
-    Some(modes) => { modes, }
-    None => self
+  match self.modes {
+    More(_, tail~) => { modes: tail }
+    Empty => self
   }
 }
 
 ///|
-/// Uses a compact debug form, converting the vector to text only when
-/// diagnostics or snapshots request it.
+/// Uses a compact bottom-first debug form, reversing the top-first list only
+/// when diagnostics or snapshots request it.
 pub impl Debug for TokenizerState with fn to_repr(self) {
   let encoded = StringBuilder()
-  for mode in self.modes {
+  for mode in self.modes.rev() {
     encoded.write_char(mode.to_char())
   }
   Repr::ctor("TokenizerState", [(None, Repr(encoded.to_string()))])
