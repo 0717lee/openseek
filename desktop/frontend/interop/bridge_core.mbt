@@ -58,7 +58,7 @@ pub async fn[Payload : ToJson, Reply : @json.FromJson] bridge_request(
 
 ///|
 /// Keep local Proton method entry ordered even though its bridge dispatches
-/// requests in separate native tasks. The per-channel lock below already
+/// requests in separate native tasks. The per-channel lane below already
 /// serializes callers; this promise tail also keeps ordering at the JS/native
 /// handoff if that implementation detail changes.
 extern "js" fn js_ordered_method_promise(
@@ -79,18 +79,20 @@ extern "js" fn js_ordered_method_promise(
 
 ///|
 /// One ordered-request lane per host. This transport-independent boundary is
-/// what makes the contract hold for remote hosts, including older servers
-/// that execute ordinary JSON-RPC requests concurrently.
-let ordered_request_locks : Map[ChannelId, @async.Mutex] = Map([])
+/// what makes the contract hold for remote hosts: the wire protocol states
+/// that "responses may arrive out of order relative to other requests — the
+/// `id` is the correlation", and the server runs each request in its own task
+/// accordingly, so ordering can only be established on the issuing side.
+let ordered_request_lanes : Map[ChannelId, Lane] = Map([])
 
 ///|
-fn ordered_request_lock(channel : ChannelId) -> @async.Mutex {
-  match ordered_request_locks.get(channel) {
-    Some(lock) => lock
+fn ordered_request_lane(channel : ChannelId) -> Lane {
+  match ordered_request_lanes.get(channel) {
+    Some(lane) => lane
     None => {
-      let lock : @async.Mutex = Mutex()
-      ordered_request_locks[channel] = lock
-      lock
+      let lane = Lane::Lane()
+      ordered_request_lanes[channel] = lane
+      lane
     }
   }
 }
@@ -108,48 +110,55 @@ pub async fn[Payload : ToJson, Reply : @json.FromJson] bridge_request_in_order(
   command : @commands.Command[Payload, Reply],
   payload : Payload,
 ) -> Reply {
-  let lock = ordered_request_lock(channel)
-  lock.acquire()
-  defer lock.release()
-  let op = command.name()
-  let payload = @js.Value::from_json(payload.to_json())
-  let reply = match channel {
-    Local => {
-      guard openseek_api() is Some(api) && js_prop(api, op) is Some(_) else {
-        raise BridgeError("OpenSeek bridge unavailable")
+  ordered_request_lane(channel).run(() => {
+    let op = command.name()
+    let payload = @js.Value::from_json(payload.to_json())
+    let reply = match channel {
+      Local => {
+        guard openseek_api() is Some(api) && js_prop(api, op) is Some(_) else {
+          raise BridgeError("OpenSeek bridge unavailable")
+        }
+        js_ordered_method_promise(api, op, payload).wait()
       }
-      js_ordered_method_promise(api, op, payload).wait()
+      Remote(_) => ws_request(channel, op, payload)
     }
-    Remote(_) => ws_request(channel, op, payload)
-  }
-  let json = if reply.is_undefined() || reply.is_null() {
-    Json::empty_object()
-  } else {
-    reply.to_json() catch {
+    let json = if reply.is_undefined() || reply.is_null() {
+      Json::empty_object()
+    } else {
+      reply.to_json() catch {
+        _ => raise BridgeError("Malformed reply from {op}")
+      }
+    }
+    @json.from_json(json) catch {
       _ => raise BridgeError("Malformed reply from {op}")
     }
-  }
-  @json.from_json(json) catch {
-    _ => raise BridgeError("Malformed reply from {op}")
-  }
+  })
 }
 
 ///|
-async test "an ordered request failure releases its channel lane" {
-  let request = async fn() -> Bool {
-    ignore(
-      bridge_request_in_order(
-        ChannelId::Local,
-        @commands.fs_unwatch,
-        @protocol.EmptyPayload::NoPayload,
-      ),
-    ) catch {
-      _ => return true
-    }
-    false
+test "an ordered request failure releases its channel lane" {
+  // No bridge is injected under test, so both calls fail at the same point.
+  // The second one only reaches it if the first released the lane on its way
+  // out; before, a lane still held would have parked it forever.
+  let failures = []
+  for _ in 0..<2 {
+    @js.async_run(() => {
+      ignore(
+        bridge_request_in_order(
+          ChannelId::Local,
+          @commands.fs_unwatch,
+          @protocol.EmptyPayload::NoPayload,
+        ),
+      ) catch {
+        _ => {
+          failures.push(true)
+          return
+        }
+      }
+      failures.push(false)
+    })
   }
-  assert_true(request())
-  assert_true(@async.with_timeout_opt(100, request) is Some(true))
+  assert_eq(failures, [true, true])
 }
 
 ///|
