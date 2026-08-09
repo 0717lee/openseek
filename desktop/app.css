@@ -2502,7 +2502,7 @@ main {
   border: none;
   border-top: 1px solid var(--line);
 }
-.msg-content.markdown a {
+.msg-content a {
   color: var(--accent);
 }
 .msg-content.markdown img {

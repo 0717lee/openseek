@@ -1242,7 +1242,9 @@ fn inline_code_nodes(content : String) -> Array[@html.Html] {
           if in_code {
             nodes.push(@html.code(class="inline-code", segment))
           } else {
-            nodes.push(@html.text(segment))
+            for child in @markdown.linkified_text_nodes(segment) {
+              nodes.push(child)
+            }
           }
         }
         rest = after.to_owned()
@@ -1252,7 +1254,9 @@ fn inline_code_nodes(content : String) -> Array[@html.Html] {
         if in_code {
           nodes.push(@html.text("`\{rest}"))
         } else if !rest.is_empty() {
-          nodes.push(@html.text(rest))
+          for child in @markdown.linkified_text_nodes(rest) {
+            nodes.push(child)
+          }
         }
         done = true
       }
@@ -3492,6 +3496,25 @@ test "every message names its speaker to assistive technology" {
   assert_true(
     streaming.contains("<span class=\"visually-hidden\">OpenSeek</span>"),
   )
+}
+
+///|
+#warnings("-alert_unstable")
+test "user message URLs are clickable but inline code stays inert" {
+  let rendered = transcript_item_view(
+    {
+      kind: User,
+      content: "open https://example.com/docs, not `https://code.example`",
+      ts: None,
+    },
+    _ => @cmd.none,
+  )
+  let markup = @rabbita.render_to_string(() => @rabbita.Val::constant(rendered))
+  assert_true(markup.contains("href=\"https://example.com/docs\""))
+  assert_true(
+    markup.contains("<code class=\"inline-code\">https://code.example</code>"),
+  )
+  assert_false(markup.contains("href=\"https://code.example\""))
 }
 
 ///|

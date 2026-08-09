@@ -7,6 +7,8 @@ import {
 }
 
 // Values
+pub fn linkified_text_nodes(String) -> Array[@html.Html]
+
 pub fn markdown_nodes(String, open_file? : (String) -> @cmd.Cmd) -> Array[@html.Html]
 
 // Errors
@@ -16,4 +18,3 @@ pub fn markdown_nodes(String, open_file? : (String) -> @cmd.Cmd) -> Array[@html.
 // Type aliases
 
 // Traits
-

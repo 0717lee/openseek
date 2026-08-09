@@ -195,9 +195,10 @@ fn MarkdownRender::table(
 fn MarkdownRender::inline_nodes(
   self : MarkdownRender,
   inline : @cmark.Inline,
+  linkify_urls? : Bool = true,
 ) -> Array[@html.Html] {
   let out : Array[@html.Html] = []
-  self.push_inline(out, inline)
+  self.push_inline(out, inline, linkify_urls~)
   out
 }
 
@@ -206,12 +207,20 @@ fn MarkdownRender::push_inline(
   self : MarkdownRender,
   out : Array[@html.Html],
   inline : @cmark.Inline,
+  linkify_urls~ : Bool,
 ) -> Unit {
   match inline {
-    Text(node) => out.push(@html.text(node.v))
+    Text(node) =>
+      if linkify_urls {
+        for child in linkified_text_nodes(node.v) {
+          out.push(child)
+        }
+      } else {
+        out.push(@html.text(node.v))
+      }
     Inlines(node) =>
       for child in node.v.iter() {
-        self.push_inline(out, child)
+        self.push_inline(out, child, linkify_urls~)
       }
     Break(node) =>
       match node.v.ty {
@@ -223,10 +232,12 @@ fn MarkdownRender::push_inline(
     // to light up too, but the guesswork misfired often enough on prose-like
     // tokens that the feature read as noise.
     CodeSpan(node) => out.push(@html.code(class="inline-code", node.v.code()))
-    Emphasis(node) => out.push(@html.em(self.inline_nodes(node.v.inline)))
+    Emphasis(node) =>
+      out.push(@html.em(self.inline_nodes(node.v.inline, linkify_urls~)))
     StrongEmphasis(node) =>
-      out.push(@html.strong(self.inline_nodes(node.v.inline)))
-    ExtStrikethrough(node) => out.push(@html.del(self.inline_nodes(node.v.0)))
+      out.push(@html.strong(self.inline_nodes(node.v.inline, linkify_urls~)))
+    ExtStrikethrough(node) =>
+      out.push(@html.del(self.inline_nodes(node.v.0, linkify_urls~)))
     ExtMathSpan(node) => out.push(@html.code(class="inline-code", node.v.tex()))
     Autolink(node) => {
       let url = node.v.link.v
@@ -242,7 +253,9 @@ fn MarkdownRender::push_inline(
       }
     }
     Link(node) => {
-      let children = self.inline_nodes(node.v.text)
+      // The label is already inside an anchor. Leaving bare-URL detection on
+      // here would turn `[https://label](https://target)` into nested anchors.
+      let children = self.inline_nodes(node.v.text, linkify_urls=false)
       match self.link_destination(node.v) {
         // A link whose destination is a local file path opens that file;
         // external links (`scheme://…`) keep their normal anchor.
@@ -267,6 +280,106 @@ fn MarkdownRender::push_inline(
     // Raw HTML is shown as text, not injected; see the module comment.
     RawHtml(node) => out.push(@html.text(tights_text(node.v.0)))
   }
+}
+
+///|
+/// Bare HTTP(S) URLs in conversation prose. CommonMark only autolinks URLs
+/// written inside angle brackets, while conversational text commonly emits
+/// them directly. The match stops at whitespace/markup delimiters; prose
+/// punctuation is separated below before the anchor is built.
+let bare_web_url_pattern : Regex = re"(?i:https?)://[^[:space:]<>]+"
+
+///|
+/// Remove prose punctuation from the end of a URL-shaped token. Balanced
+/// closing delimiters remain part of the URL (`.../wiki/Foo_(bar)`), while an
+/// unmatched delimiter supplied by the surrounding sentence does not.
+fn trim_bare_url(candidate : String) -> (String, String) {
+  let mut url = candidate
+  for ;; {
+    let old_length = url.length()
+    url = url.trim_end(chars=".,;:!?\"'").to_owned()
+    url = trim_unmatched_closer(url, '(', ')', ")")
+    url = trim_unmatched_closer(url, '[', ']', "]")
+    url = trim_unmatched_closer(url, '{', '}', "}")
+    if url.length() == old_length {
+      break
+    }
+  }
+  let suffix = candidate.view(start_offset=url.length()).to_owned()
+  (url, suffix)
+}
+
+///|
+/// Drop one trailing closer when the URL contains more of it than its opener.
+fn trim_unmatched_closer(
+  url : String,
+  opener : Char,
+  closer : Char,
+  suffix : String,
+) -> String {
+  guard url.has_suffix(suffix) else { return url }
+  let mut opens = 0
+  let mut closes = 0
+  for ch in url {
+    if ch == opener {
+      opens += 1
+    } else if ch == closer {
+      closes += 1
+    }
+  }
+  if closes > opens {
+    url.view(end_offset=url.length() - 1).to_owned()
+  } else {
+    url
+  }
+}
+
+///|
+/// Whether a matched token has a non-empty web authority. This excludes a
+/// bare `https://`, which is useful text while streaming but not a destination
+/// the browser can navigate to.
+fn has_web_authority(url : String) -> Bool {
+  let scheme_length = if url.length() >= 8 &&
+    url.view(end_offset=8).equal_ignore_ascii_case("https://") {
+    8
+  } else {
+    7
+  }
+  let rest = url.view(start_offset=scheme_length)
+  for index, ch in rest {
+    if ch == '/' || ch == '?' || ch == '#' {
+      return index > 0
+    }
+  }
+  !rest.is_empty()
+}
+
+///|
+/// Render plain conversation prose with bare HTTP(S) URLs as safe external
+/// anchors. Callers decide which spans are prose: Markdown code spans and the
+/// user's backtick-delimited snippets deliberately bypass this helper.
+pub fn linkified_text_nodes(source : String) -> Array[@html.Html] {
+  let out : Array[@html.Html] = []
+  let mut rest = source.view()
+  while bare_web_url_pattern.execute(rest) is Some(matched) {
+    if !matched.before().is_empty() {
+      out.push(@html.text(matched.before().to_owned()))
+    }
+    let (url, suffix) = trim_bare_url(matched.content().to_owned())
+    if has_web_authority(url) {
+      out.push(link_node(url, [@html.text(url)]))
+    } else {
+      out.push(@html.text(url))
+    }
+    if !suffix.is_empty() {
+      out.push(@html.text(suffix))
+    }
+    rest = matched.after()
+  }
+  if !rest.is_empty() {
+    out.push(@html.text(rest.to_owned()))
+  }
+  out
 }
 
 ///|
