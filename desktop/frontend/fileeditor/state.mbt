@@ -196,8 +196,8 @@ pub(all) enum ChangeKind {
 } derive(Eq)
 
 ///|
-/// One current path from the checkout's combined staged and unstaged changes.
-/// Renames and copies retain their original path for explanatory UI.
+/// One current path from the checkout's active review comparison. Renames and
+/// copies retain their original path for explanatory UI.
 pub(all) struct ChangedFile {
   path : @pathx.Relative
   original_path : @pathx.Relative?
@@ -267,14 +267,15 @@ pub(all) struct State {
   // this value on either boundary rejects reads, listings, stats, and watcher
   // failures that outlived the checkout they addressed.
   request_epoch : Int
-  // Last settled Git HEAD identity. `changes_head_known` distinguishes a
-  // first/unborn snapshot (`head=None`) from no snapshot yet, so a later HEAD
-  // transition can refresh every surviving review baseline precisely.
+  // Last settled Git comparison identity (the task base, or HEAD fallback).
+  // The legacy field name stays internal; `changes_head_known` distinguishes
+  // a first/unborn snapshot from no snapshot yet so a comparison transition
+  // can refresh every surviving review baseline precisely.
   changes_head : String?
   changes_head_known : Bool
-  // Monotonic token shared by changed-file HEAD and working-tree reads. Each
-  // side records its current token in `ReviewState`; it outlives conversation
-  // re-roots for the same A→B→A reason as `changes_generation`.
+  // Monotonic token shared by changed-file baseline and working-tree reads.
+  // Each side records its current token in `ReviewState`; it outlives
+  // conversation re-roots for the same A→B→A reason as `changes_generation`.
   review_generation : Int
   // A missing checkout can discard either half of an in-flight review. Mark
   // that boundary explicitly so the first authoritative snapshot after
@@ -463,8 +464,10 @@ pub(all) enum Msg {
   // A `list_files` request failed or returned garbage. An initial failure
   // becomes `IndexFailed`; a failed background refresh retains a ready index.
   FileIndexFailed(owner~ : @interop.ConversationKey, epoch~ : Int)
-  // A `git.changes` reply. The owner fence prevents a late response from one
-  // conversation replacing another conversation's inventory.
+  // A `git.changes` reply. `head` carries the immutable comparison when the
+  // host can identify one: the task baseline when present, otherwise resolved
+  // HEAD for a modern root conversation. `None` means no commit exists or a
+  // legacy host omitted the identity. The owner fence rejects late responses.
   ChangesLoaded(
     owner~ : @interop.ConversationKey,
     generation~ : Int,

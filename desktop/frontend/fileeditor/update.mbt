@@ -1131,8 +1131,8 @@ fn changes_visible(state : State, ctx : Ctx) -> Bool {
 
 ///|
 /// A hidden explorer normally parks its Git inventory, but an open review is
-/// still rendering against that inventory's HEAD identity. Keep the low-rate
-/// refresh alive until every reviewed document is closed or ordinarily
+/// still rendering against that inventory's comparison identity. Keep the
+/// low-rate refresh alive until every reviewed document is closed or ordinarily
 /// reopened.
 fn changes_live(state : State, ctx : Ctx) -> Bool {
   if changes_visible(state, ctx) {
@@ -1976,8 +1976,13 @@ pub fn update(
         // An intermediate coalesced snapshot is not authoritative: a path can
         // disappear briefly and return in the already-scheduled follow-up. On
         // the final reply, clear vanished reviews and refresh every surviving
-        // baseline when HEAD differs, or a legacy host cannot report its
-        // identity and the selected row proves that a baseline can exist.
+        // baseline when the comparison revision differs, or a legacy host
+        // cannot report its identity and the selected row proves that a
+        // baseline can exist.
+        // `head` is the message's legacy field name. New clients place the task
+        // baseline there when present; modern root conversations use resolved
+        // HEAD. An unborn root or legacy host can leave `None`; rows that make
+        // the latter ambiguous trigger live-HEAD revalidation below.
         let head_changed = state.changes_head_known &&
           state.changes_head != head
         let (review_cmds, docs, review_generation) = if follow_up {
