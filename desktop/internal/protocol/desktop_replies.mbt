@@ -545,11 +545,14 @@ pub(all) struct GitPullRequestReply {
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|
-/// One current-path row from `git status --porcelain=v1 -z`. Status columns
-/// retain Git's single-character spellings (`" "`, `M`, `A`, `D`, `R`, …),
-/// while `kind` is one of `modified`, `added`, `deleted`, `renamed`, `copied`,
-/// `unmerged`, `type-changed`, `untracked`, `submodule`, or `symlink` (with
-/// unknown future status pairs falling back to `modified`).
+/// One current-path row from the active review comparison. HEAD-based
+/// inventories retain `git status --porcelain=v1 -z`'s index/worktree columns;
+/// task-base inventories put their single comparison status in the worktree
+/// column and never imply that committed work is staged. Codes keep Git's
+/// spellings (`" "`, `M`, `A`, `D`, `R`, …), while `kind` is one of
+/// `modified`, `added`, `deleted`, `renamed`, `copied`, `unmerged`,
+/// `type-changed`, `untracked`, `submodule`, or `symlink` (with unknown future
+/// statuses falling back to `modified`).
 /// Renames and copies carry their source path separately.
 pub(all) struct GitChange {
   path : String
@@ -560,8 +563,10 @@ pub(all) struct GitChange {
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|
-/// The active checkout's `HEAD`-to-working-tree change inventory plus the
-/// immutable task baseline available to worktree-aware review clients. A
+/// The active checkout's change inventory plus the immutable task baseline
+/// available to worktree-aware review clients. When `baseline` exists the
+/// inventory compares it to the working tree, including committed work; the
+/// HEAD fallback remains ordinary staged + unstaged status. A
 /// missing Git executable and a non-repository workspace both report
 /// `repository=false`; once a repository is recognized, operational failures
 /// are request errors rather than an ambiguous empty list.
