@@ -2337,7 +2337,7 @@ fn update_msg(
       // the toggle stayed live through a placement chain the chip had
       // already committed to.
       let conv = model.active()
-      if conv.can_choose_launch_mode() {
+      if model.can_choose_launch_mode(conv) {
         (
           @cmd.none,
           model.replace_conversation({

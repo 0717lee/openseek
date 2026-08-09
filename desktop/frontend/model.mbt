@@ -2801,11 +2801,16 @@ fn Conversation::draft_sendable(self : Conversation) -> Bool {
 /// above it, and confirm the new request with an older record's answer.
 fn Conversation::durable_frontier(self : Conversation) -> Int {
   let mut frontier = self.watermark
-  if self.sync is Reloading(buffered~, ..) {
-    for commit in buffered {
-      if commit.sequence > frontier {
-        frontier = commit.sequence
-      }
+  // Both buffering states, not just the live one: `begin_transcript_reload`
+  // carries a failed read's buffer forward, so a marker held there is just as
+  // much already-in-hand as one held by a reload still running.
+  let buffered = match self.sync {
+    Reloading(buffered~, ..) | ReloadFailed(buffered~, ..) => buffered
+    Synced => []
+  }
+  for commit in buffered {
+    if commit.sequence > frontier {
+      frontier = commit.sequence
     }
   }
   frontier

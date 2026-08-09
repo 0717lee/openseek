@@ -224,16 +224,24 @@ fn set_goal_in_new_worktree(
           { workspace: workspace.path, session },
         ) catch {
           error => {
-            // Nothing was sent, so the draft has to come back with the notice.
+            // The goal itself definitely never went out, so its draft comes
+            // back either way. What differs is the *worktree*: a create whose
+            // reply was lost may well have bound this session host-side, and
+            // saying "setup failed" would let the composer offer Local again
+            // over a durable binding — after which an ordinary start still
+            // runs in that worktree. Say which happened, and let the registry
+            // settle the placement (see `Model::checkout_placement`).
+            let detail = @interop.bridge_error_text(error)
+            let message = match @interop.bridge_failure(error) {
+              Refused | Unsent => "worktree setup failed: " + detail
+              Unknown =>
+                "worktree setup could not be confirmed (" +
+                detail +
+                ") — this chat may already be bound to a new worktree; the goal was not sent"
+            }
             scheduler.add(
               device_dispatch(
-                GoalRejected(
-                  session~,
-                  command~,
-                  draft=text,
-                  message="worktree setup failed: " +
-                    @interop.bridge_error_text(error),
-                ),
+                GoalRejected(session~, command~, draft=text, message~),
               ),
             )
             return
@@ -454,12 +462,25 @@ fn Conversation::wants_fresh_worktree(self : Conversation) -> Bool {
 /// lands, so flipping the chip during that window would not move what is in
 /// flight. It would only leave the chip disagreeing with where the
 /// conversation is being pinned.
-fn Conversation::can_choose_launch_mode(self : Conversation) -> Bool {
-  self.workspace is Some(_) &&
-  self.messages.length() == 0 &&
-  self.worktree is None &&
-  self.run is NoRun(..) &&
-  self.goal_pending is None
+fn Model::can_choose_launch_mode(self : Model, conv : Conversation) -> Bool {
+  guard conv.workspace is Some(_) &&
+    conv.messages.length() == 0 &&
+    conv.worktree is None &&
+    conv.run is NoRun(..) &&
+    conv.goal_pending is None else {
+    return false
+  }
+  // The registry, not the local binding, is what actually decides where this
+  // session runs. A create whose reply was lost leaves `conv.worktree` empty
+  // while the host is already bound, and offering Local over that would put
+  // the chip at odds with where the next start really goes.
+  //
+  // Only a positive binding closes the choice. An unloaded registry answers
+  // `None`, and absence of evidence is not evidence of binding — the mode is
+  // a local preference the create path re-reads when it sends, so refusing it
+  // before the list arrives would take the choice away for a reason that is
+  // only ever "not known yet".
+  !(self.checkout_placement(conv) is Some(Worktree(..) | MissingWorktree(..)))
 }
 
 ///|
@@ -468,6 +489,7 @@ fn Conversation::can_choose_launch_mode(self : Conversation) -> Bool {
 /// the worktree's name once the chain has bound one.
 fn worktree_mode_chip(
   dispatch : @cmd.Emit[Msg],
+  model : Model,
   conv : Conversation,
 ) -> @html.Html? {
   guard conv.workspace is Some(_) && conv.messages.length() == 0 else {
@@ -495,7 +517,7 @@ fn worktree_mode_chip(
   // this conversation's placement, and it read the mode when it was sent.
   // Still say which mode that was — it is about to become the answer — but
   // as a statement rather than a control, since clicking could not change it.
-  guard conv.can_choose_launch_mode() else {
+  guard model.can_choose_launch_mode(conv) else {
     return Some(
       @html.span(
         class~,
@@ -702,7 +724,7 @@ test "the launch mode stops being a choice once a placement is in flight" {
     // a control that cannot do anything.
     let markup = @rabbita.render_to_string(() => {
       @rabbita.Val::constant(
-        match worktree_mode_chip(dispatch, pinned) {
+        match worktree_mode_chip(dispatch, test_model(), pinned) {
           Some(chip) => chip
           None => @html.div("")
         },
@@ -720,13 +742,54 @@ test "the launch mode stops being a choice once a placement is in flight" {
   assert_false(free.active().worktree_mode)
   let offered = @rabbita.render_to_string(() => {
     @rabbita.Val::constant(
-      match worktree_mode_chip(dispatch, composing) {
+      match worktree_mode_chip(dispatch, test_model(), composing) {
         Some(chip) => chip
         None => @html.div("")
       },
     )
   })
   assert_true(offered.contains("<button"))
+}
+
+///|
+test "a worktree the registry says is bound closes the choice" {
+  let dispatch = test_dispatch()
+  let workspace = @interop.ChannelId::Local.test_resource("/proj")
+  let composing : Conversation = {
+    ..test_conversation(),
+    workspace: Some(workspace),
+    worktree_mode: true,
+  }
+  // A create whose reply was lost leaves the local binding empty while the
+  // host is already bound. Offering Local over that would put the chip at
+  // odds with where the next start actually runs.
+  let bound = {
+    ..test_model().replace_conversation(composing),
+    devices: [
+      {
+        ..test_model().focused_device().unwrap(),
+        worktrees: [
+          {
+            workspace,
+            generation: 1,
+            rows: [
+              { name: "wt-1", session: Some("desktop-test"), present: true },
+            ],
+          },
+        ],
+      },
+    ],
+  }
+  assert_false(bound.can_choose_launch_mode(composing))
+  let (_, kept) = update(dispatch, ToggleWorktreeMode, bound)
+  assert_true(kept.active().worktree_mode)
+  // An unloaded registry is not evidence of binding: the mode is a local
+  // preference the create path re-reads when it sends.
+  assert_true(
+    test_model()
+    .replace_conversation(composing)
+    .can_choose_launch_mode(composing),
+  )
 }
 
 ///|

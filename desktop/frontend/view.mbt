@@ -1862,7 +1862,7 @@ fn composer_view(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
   // The launch mode: a fresh workspace conversation chooses between the
   // workspace itself and a fresh host-named worktree (its 1:1 execution
   // environment) here, Codex-style, before its first prompt.
-  if worktree_mode_chip(dispatch, conv) is Some(chip) {
+  if worktree_mode_chip(dispatch, model, conv) is Some(chip) {
     status.push(chip)
   }
   let controls : Array[@html.Html] = [

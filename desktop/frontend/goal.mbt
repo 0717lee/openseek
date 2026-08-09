@@ -846,6 +846,21 @@ test "the frontier a goal is sent from counts what is already buffered" {
     goal_edit: Some({ draft: "ship the feature" }),
   }
   inspect(reloading.durable_frontier(), content="7")
+  // A read that failed keeps its buffer, and `begin_transcript_reload` carries
+  // it forward — so a marker held there is just as much already-in-hand.
+  inspect(
+    {
+      ..reloading,
+      sync: ReloadFailed(generation=1, buffered=[
+        {
+          sequence: 7,
+          ts: None,
+          item: @protocol.RuntimeNotice({ content: "[goal]\nship the feature" }),
+        },
+      ]),
+    }.durable_frontier(),
+    content="7",
+  )
   let (_, sent) = update(
     dispatch,
     SubmitGoal,
