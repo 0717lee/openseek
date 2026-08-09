@@ -551,8 +551,8 @@ priv enum GoalRequest {
 } derive(Eq)
 
 ///|
-/// Whether a durable observation of the standing goal already says what this
-/// request asked for.
+/// Whether a durable observation of the standing goal is already the state
+/// this request produces.
 ///
 /// The request is *not* matched against the marker that carried it. The
 /// durable record has no provenance — a `[goal]` commit proves the engine is
@@ -570,9 +570,14 @@ fn GoalRequest::satisfied_by(
   goal : @transcript.GoalStanding?,
 ) -> Bool {
   match (self, goal) {
-    // A goal that stands blocked still stands: the text is what was asked
-    // for, and the block is the agent's report on it, not a failure to set.
-    (Setting(text), Some(standing)) => standing.text == text
+    // The whole post-state, not just the text. A set marker reduces to
+    // `{text, blocked: None}` — resubmitting a blocked goal's own text
+    // unchanged is exactly how it is re-asserted — so matching on text alone
+    // would let the blocked goal being replaced stand in for its own
+    // replacement, and the first unrelated commit after that would retire
+    // the request with its recovery draft.
+    (Setting(text), Some(standing)) =>
+      standing.text == text && standing.blocked is None
     (Clearing, None) => true
     _ => false
   }
@@ -2475,13 +2480,11 @@ fn Model::can_reload_transcript(self : Model, conv : Conversation) -> Bool {
   if conv.watermark > 0 ||
     !conv.messages.is_empty() ||
     conv.sync is ReloadFailed(..) ||
-    conv.has_recovering_initial() ||
-    // A goal command whose reply never came back is the same kind of
-    // evidence as an unconfirmed prompt: it may already have been appended,
-    // and re-reading is the only way to find out. Without this a `/goal` on
-    // an otherwise-empty conversation has nothing else to reload for, so the
-    // request would wait for a snapshot that is never asked for.
-    conv.goal_pending is Some(_) ||
+    // An outstanding command may already have been appended, and re-reading
+    // is the only way to find out. Without this a `/goal` on an otherwise
+    // empty conversation has nothing else to reload for, so the request
+    // would wait for a snapshot that is never asked for.
+    conv.awaits_durable_proof() ||
     conv.overlay.iter().any(notice => notice.anchor is SnapshotCut(..)) {
     return true
   }
@@ -2894,6 +2897,17 @@ fn Conversation::goal_draft_seed(self : Conversation) -> String {
     (None, Some(goal)) => goal.text
     (None, None) => ""
   }
+}
+
+///|
+/// Whether this conversation holds an outstanding intent that only the
+/// durable record can settle: a prompt whose receipt never came back, or a
+/// goal command whose reply did not. Both are answered the same way — by
+/// re-reading — so every recovery path gates on this one predicate instead
+/// of naming the kinds itself, which is how the goal request came to be
+/// eligible for the reconnect's reload and not for the session list's.
+fn Conversation::awaits_durable_proof(self : Conversation) -> Bool {
+  self.has_recovering_initial() || self.goal_pending is Some(_)
 }
 
 ///|

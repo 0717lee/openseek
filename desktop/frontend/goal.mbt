@@ -549,6 +549,46 @@ test "the editor opens on the newest text, not on the retired one" {
 }
 
 ///|
+test "re-asserting a blocked goal waits for its own marker" {
+  let dispatch = test_dispatch()
+  // Edit on a blocked goal seeds from the mirror, so resubmitting unchanged
+  // is the ordinary way to re-assert one. The record already spells that
+  // text, and a set clears the block — so matching on text alone would let
+  // the goal being replaced stand in for its replacement, and the next
+  // durable item of any kind would retire the request and its recovery copy.
+  let model = test_model().replace_conversation({
+    ..test_conversation(),
+    goal: Some({ text: "ship the feature", blocked: Some("needs a decision") }),
+    goal_pending: Some(Setting("ship the feature")),
+  })
+  fn commit(model, sequence, content) {
+    let (_, next) = update_dev(
+      dispatch,
+      SessionCommitted(
+        session="desktop-test",
+        sequence~,
+        ts=None,
+        item=@protocol.RuntimeNotice({ content, }),
+      ),
+      model,
+    )
+    next
+  }
+
+  let unrelated = commit(model, 1, "just some runtime notice")
+  assert_true(
+    unrelated.active().goal_pending is Some(Setting("ship the feature")),
+  )
+  // Its own marker is what unblocks it, and that is the state it was waiting
+  // for.
+  let settled = commit(unrelated, 2, "[goal]\nship the feature")
+  assert_true(settled.active().goal_pending is None)
+  assert_true(
+    settled.active().goal is Some({ text: "ship the feature", blocked: None }),
+  )
+}
+
+///|
 test "a request in flight is reason enough to re-read the record" {
   // An otherwise-empty conversation has nothing else worth reloading for, so
   // without this the reconnect that follows a lost reply would never ask the
@@ -565,6 +605,46 @@ test "a request in flight is reason enough to re-read the record" {
   assert_true(
     model.can_reload_transcript({ ..fresh, goal_pending: Some(Clearing) }),
   )
+  // The reconnect's own load can race persistence and come back empty. The
+  // session list arriving is later proof the record exists, and that retry
+  // gates on the same predicate — so a pending goal earns it too.
+  let dispatch = test_dispatch()
+  let (_, empty) = update_dev(
+    dispatch,
+    SessionRefreshed(
+      goal=None,
+      session="desktop-test",
+      items=[],
+      watermark=0,
+      event_boundaries=[],
+      generation=1,
+    ),
+    {
+      ..test_model().replace_conversation({
+        ..test_conversation(),
+        goal_pending: Some(Setting("ship the feature")),
+        sync: test_reloading([]),
+      }),
+      transcript_request_generation: 1,
+    },
+  )
+  assert_true(empty.active().sync is Synced)
+  assert_true(empty.active().goal_pending is Some(_))
+  let (_, proved) = update(
+    dispatch,
+    sessions_loaded([
+      {
+        id: "desktop-test",
+        title: Some("persisted"),
+        workspace: None,
+        workspace_name: "",
+      },
+    ]),
+    empty,
+  )
+  guard proved.active().sync is Reloading(generation=2, ..) else {
+    fail("durable session-list proof did not retry the pending goal")
+  }
 }
 
 ///|

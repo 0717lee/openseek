@@ -3585,13 +3585,13 @@ fn update_device_msg(
         conversations,
       }
       let commands : Array[@cmd.Cmd] = []
-      // A start may have been accepted just before the connection vanished,
-      // while the first BridgeReady load raced persistence and returned empty.
-      // The session list is later durable proof that a record now exists: use
-      // that edge to retry exactly unresolved start recoveries.
+      // A start or a goal may have been accepted just before the connection
+      // vanished, while the first BridgeReady load raced persistence and
+      // returned empty. The session list is later durable proof that a record
+      // now exists: use that edge to retry exactly the unresolved recoveries.
       for conv in next.conversations {
         if conv.device == channel &&
-          conv.has_recovering_initial() &&
+          conv.awaits_durable_proof() &&
           !(conv.sync is Reloading(..)) &&
           items.iter().any(item => item.id == conv.session_id) {
           let (updated, generation) = next.begin_transcript_reload(conv)
