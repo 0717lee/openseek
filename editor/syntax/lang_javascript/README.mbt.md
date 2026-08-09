@@ -127,7 +127,7 @@ test "template literals span lines and keep interpolations separate" {
 ```
 
 The state at each line boundary supports only the stack operations the lexer
-needs. Its backing vector stays opaque.
+needs. Its backing list stays opaque.
 
 ```mbt check
 ///|

@@ -97,6 +97,12 @@ test "tokenizer state stack edits preserve prior snapshots" {
   assert_true(interpolation.pop_mode() == template)
   assert_true(template.pop_mode() == normal)
   assert_true(normal.pop_mode() == normal)
+  debug_inspect(
+    interpolation,
+    content=(
+      #|TokenizerState("ti")
+    ),
+  )
 }
 
 ///|

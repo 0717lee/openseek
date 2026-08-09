@@ -259,7 +259,7 @@ test "panic is_capitalized rejects an empty view" {
 ```
 
 `TokenizerState()` is the canonical normal state. It owns an opaque persistent
-byte vector containing only genuinely open lexer modes. `push_mode` / `pop_mode`
+list containing only genuinely open lexer modes. `push_mode` / `pop_mode`
 create immutable snapshots with structural sharing, so cached line states
 cannot be changed by later tokenization; `last_mode` inspects the open mode at
 the top. No array representation crosses the public boundary.
