@@ -202,8 +202,10 @@ js-only. Concrete browser runtime packages live below the module-private
   implementations.
 - `viewer` also exposes the independent opaque `UnifiedDiffView` facade.
   `UnifiedDiffView::create` borrows one stable caller-owned host and owns only
-  its installed subtree; `clear` retains that binding and idempotent `dispose`
-  removes the subtree without removing the host. `set_diff` accepts
+  its installed subtree. Hosts may supply an optional typed line-comment
+  callback; omitting it keeps the surface read-only. `clear` retains the host
+  binding and idempotent `dispose` removes the subtree without removing the
+  host. `set_diff` accepts
   caller-owned strings, bounds their combined UTF-16 size before snapshot
   allocation and their logical line count before diff computation, then routes
   through the replaceable `viewer/common/unified_diff` seam. Its concrete DOM

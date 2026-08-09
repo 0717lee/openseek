@@ -22,6 +22,16 @@ pub(all) struct UnifiedDiffLine {
 } derive(Eq, Debug)
 
 ///|
+/// One review comment submitted from a rendered unified-diff line. The line
+/// retains both number domains so a host can attach additions/context to the
+/// working document and deletions to the original revision without depending
+/// on renderer DOM attributes.
+pub(all) struct UnifiedDiffLineComment {
+  line : UnifiedDiffLine
+  comment : String
+} derive(Eq, Debug)
+
+///|
 /// One context-bounded unified diff hunk. Start numbers follow unified-diff
 /// notation: an empty side is anchored at the preceding line (zero at the
 /// beginning of a file).

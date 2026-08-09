@@ -43,6 +43,11 @@ pub(all) struct UnifiedDiffLine {
   text : String
 } derive(Eq, @debug.Debug)
 
+pub(all) struct UnifiedDiffLineComment {
+  line : UnifiedDiffLine
+  comment : String
+} derive(Eq, @debug.Debug)
+
 pub(all) enum UnifiedDiffLineKind {
   Context
   Deletion

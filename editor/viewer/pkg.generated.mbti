@@ -17,6 +17,7 @@ import {
   "moonbitlang/editor/viewer/common/model",
   "moonbitlang/editor/viewer/common/navigation_api",
   "moonbitlang/editor/viewer/common/quick_diff_api",
+  "moonbitlang/editor/viewer/common/unified_diff",
 }
 
 // Values
@@ -37,7 +38,7 @@ pub fn EditorDecorationsCollection::set(Self, Array[@model.ModelDeltaDecoration]
 
 type UnifiedDiffView
 pub fn UnifiedDiffView::clear(Self) -> Unit
-pub fn UnifiedDiffView::create(@dom.Element) -> Self
+pub fn UnifiedDiffView::create(@dom.Element, on_comment? : (@unified_diff.UnifiedDiffLineComment) -> Unit) -> Self
 pub fn UnifiedDiffView::dispose(Self) -> Unit
 pub fn UnifiedDiffView::set_diff(Self, String, String, context_lines? : Int) -> Unit
 
