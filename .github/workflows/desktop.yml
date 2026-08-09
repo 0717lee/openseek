@@ -205,24 +205,6 @@ jobs:
       - name: Setup MSVC
         uses: ilammy/msvc-dev-cmd@v1
 
-      - name: Install NSIS
-        if: github.event_name != 'pull_request'
-        shell: pwsh
-        run: |
-          # Retry up to 3 times: the Chocolatey community feed occasionally
-          # returns 503, causing a silent zero-exit install that leaves
-          # makensis.exe absent. Verify the binary exists before moving on.
-          for ($attempt = 1; $attempt -le 3; $attempt++) {
-            choco install nsis -y --no-progress
-            if (Test-Path "C:\Program Files (x86)\NSIS\makensis.exe") {
-              "C:\Program Files (x86)\NSIS" | Out-File -FilePath $env:GITHUB_PATH -Append
-              exit 0
-            }
-            Write-Warning "NSIS not installed after attempt $attempt."
-            if ($attempt -lt 3) { Start-Sleep -Seconds ($attempt * 15) }
-          }
-          exit 1
-
       - name: Show MoonBit version
         shell: pwsh
         run: |
@@ -240,17 +222,13 @@ jobs:
         timeout-minutes: 5
         run: moon -C desktop test internal/terminal --target native
 
-      # Pull requests upload only the portable ZIP, so they do not spend time
-      # installing NSIS or recompressing the same bundle as an installer.
+      # CI ships only the portable ZIP: it is the artifact this job uploads, so
+      # installing NSIS and recompressing the same bundle as an installer would
+      # be work no one downloads. `package/windows --target installer` still
+      # builds the NSIS installer on a developer machine.
       - name: Build the Windows ZIP
-        if: github.event_name == 'pull_request'
         shell: pwsh
         run: moon -C desktop run --target native package/windows -- --release --target zip
-
-      - name: Build the Windows app bundle and installer
-        if: github.event_name != 'pull_request'
-        shell: pwsh
-        run: moon -C desktop run --target native package/windows -- --release
 
       # Only a trusted push to main publishes the cache shared by later PRs.
       - name: Save CEF distribution
