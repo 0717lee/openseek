@@ -22,6 +22,27 @@ test('runs the viewer and tree from in-memory providers without a server', async
     'true',
   );
 
+  // The same public facade exposes a standalone unified-diff surface. The
+  // host toggles sibling surfaces, preserving the ordinary Viewer's model and
+  // scroll while the renderer receives only original/modified source text.
+  const diffToggle = page.locator('[data-action=\"toggle-diff\"]');
+  await diffToggle.click();
+  await expect(diffToggle).toHaveAttribute('aria-pressed', 'true');
+  const diff = page.locator('.moonbit-unified-diff');
+  await expect(diff).toBeVisible();
+  await expect(
+    diff.locator('[data-line-kind=\"deletion\"]', { hasText: 'println(\"hello\")' }),
+  ).toHaveAttribute('data-original-line', '3');
+  await expect(
+    diff.locator('[data-line-kind=\"addition\"]', { hasText: 'println(greeting())' }),
+  ).toHaveAttribute('data-modified-line', '3');
+  await expect(page.locator('.monaco-editor.readonly-editor')).not.toBeVisible();
+
+  await diffToggle.click();
+  await expect(diffToggle).toHaveAttribute('aria-pressed', 'false');
+  await expect(page.locator('.moonbit-unified-diff')).toHaveCount(0);
+  await expect(page.locator('.monaco-editor.readonly-editor')).toContainText('fn main');
+
   // Nested folders resolve lazily on expand.
   await expect(page.locator(workspaceItem('src/lib/util.mbt'))).toHaveCount(0);
   await page.locator(workspaceItem('src/lib')).click();
