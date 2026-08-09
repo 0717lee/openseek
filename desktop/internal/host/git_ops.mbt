@@ -483,6 +483,10 @@ fn git_change_kind(index_status : String, worktree_status : String) -> String {
   let pair = index_status + worktree_status
   if ["DD", "AU", "UD", "UA", "DU", "AA", "UU"].contains(pair) {
     "unmerged"
+  } else if index_status == "U" || worktree_status == "U" {
+    // `git diff --name-status` uses one column rather than porcelain's
+    // two-column conflict pairs.
+    "unmerged"
   } else if pair == "??" {
     "untracked"
   } else if index_status == "R" || worktree_status == "R" {
@@ -498,6 +502,19 @@ fn git_change_kind(index_status : String, worktree_status : String) -> String {
   } else {
     "modified"
   }
+}
+
+///|
+/// Stable display order for duplicate current paths. A baseline deletion must
+/// precede its untracked recreation even though `Array::sort_by` is unstable.
+fn compare_git_change_path(left : GitChange, right : GitChange) -> Int {
+  let path_order = left.path.lexical_compare(right.path)
+  if path_order != 0 {
+    return path_order
+  }
+  let left_untracked = if left.kind == "untracked" { 1 } else { 0 }
+  let right_untracked = if right.kind == "untracked" { 1 } else { 0 }
+  left_untracked - right_untracked
 }
 
 ///|
@@ -538,7 +555,102 @@ fn parse_git_status_z(output : String) -> Array[GitChange] {
     })
     index += 1
   }
-  changes.sort_by((left, right) => left.path.lexical_compare(right.path))
+  changes.sort_by(compare_git_change_path)
+  changes
+}
+
+///|
+/// Parse `git diff --name-status -z`. NUL mode emits the status as its own
+/// field, followed by one path for ordinary changes or source + destination
+/// for renames and copies. Task comparisons are one logical working-tree
+/// column; unlike porcelain status, they intentionally do not claim anything
+/// about what is currently staged.
+fn parse_git_diff_name_status_z(output : String) -> Array[GitChange] {
+  if !output.is_empty() && !output.has_suffix("\u{0}") {
+    return []
+  }
+  let fields = output.split("\u{0}").map(field => field.to_owned()).collect()
+  let changes : Array[GitChange] = []
+  let mut index = 0
+  while index < fields.length() {
+    let status = fields[index]
+    index += 1
+    if status.is_empty() {
+      continue
+    }
+    let code = status.view(end_offset=1).to_owned()
+    let has_source = code == "R" || code == "C"
+    let field_count = if has_source { 2 } else { 1 }
+    if index + field_count > fields.length() {
+      break
+    }
+    let original_path = if has_source { Some(fields[index]) } else { None }
+    let path_offset = if has_source { 1 } else { 0 }
+    let path = fields[index + path_offset]
+    index += field_count
+    if path.is_empty() || original_path is Some("") {
+      break
+    }
+    changes.push({
+      path,
+      original_path,
+      index_status: " ",
+      worktree_status: code,
+      kind: git_change_kind(" ", code),
+    })
+  }
+  changes.sort_by(compare_git_change_path)
+  changes
+}
+
+///|
+/// `git ls-files --others -z` emits bare NUL-delimited paths. Task review uses
+/// this cheaper index query instead of running full porcelain status only to
+/// discard every tracked row.
+fn parse_git_untracked_z(output : String) -> Array[GitChange] {
+  if !output.is_empty() && !output.has_suffix("\u{0}") {
+    return []
+  }
+  let changes : Array[GitChange] = []
+  for path in output.split("\u{0}") {
+    if !path.is_empty() {
+      changes.push({
+        path: path.to_owned(),
+        original_path: None,
+        index_status: "?",
+        worktree_status: "?",
+        kind: "untracked",
+      })
+    }
+  }
+  changes.sort_by(compare_git_change_path)
+  changes
+}
+
+///|
+/// `git diff <base>` includes committed, staged, and unstaged tracked paths
+/// but omits untracked files. Add those porcelain rows without duplicating an
+/// ordinary task row. A deleted baseline path recreated as untracked keeps
+/// both rows, matching porcelain's existing delete + recreate representation.
+fn git_task_changes_with_untracked(
+  changes : Array[GitChange],
+  status_changes : Array[GitChange],
+) -> Array[GitChange] {
+  let seen : Set[String] = Set([])
+  let deleted : Set[String] = Set([])
+  for change in changes {
+    seen.add(change.path)
+    if change.kind == "deleted" {
+      deleted.add(change.path)
+    }
+  }
+  for change in status_changes {
+    if change.kind == "untracked" &&
+      (!seen.contains(change.path) || deleted.contains(change.path)) {
+      changes.push(change)
+    }
+  }
+  changes.sort_by(compare_git_change_path)
   changes
 }
 
@@ -1121,6 +1233,58 @@ test "Git porcelain parser keeps status columns and rename source" {
       kind: "untracked",
     },
   ])
+}
+
+///|
+test "Git task-diff parser keeps scored rename sources and untracked rows" {
+  let changes = parse_git_diff_name_status_z(
+    "M\u{0}src/modified.mbt\u{0}A\u{0}src/added.mbt\u{0}R100\u{0}src/old.mbt\u{0}src/new.mbt\u{0}C075\u{0}src/source.mbt\u{0}src/copy.mbt\u{0}",
+  )
+  assert_true(
+    changes
+    is [
+      { path: "src/added.mbt", worktree_status: "A", kind: "added", .. },
+      {
+        path: "src/copy.mbt",
+        original_path: Some("src/source.mbt"),
+        kind: "copied",
+        ..,
+      },
+      { path: "src/modified.mbt", worktree_status: "M", .. },
+      {
+        path: "src/new.mbt",
+        original_path: Some("src/old.mbt"),
+        kind: "renamed",
+        ..,
+      },
+    ],
+  )
+  let untracked = parse_git_untracked_z("new.mbt\u{0}recreated.mbt\u{0}")
+  let merged = git_task_changes_with_untracked(
+    [
+      {
+        ..untracked[0],
+        path: "recreated.mbt",
+        worktree_status: "D",
+        kind: "deleted",
+      },
+    ],
+    untracked,
+  )
+  assert_true(
+    merged
+    is [
+      { path: "new.mbt", kind: "untracked", .. },
+      { path: "recreated.mbt", kind: "deleted", .. },
+      { path: "recreated.mbt", kind: "untracked", .. },
+    ],
+  )
+  assert_true(parse_git_diff_name_status_z("M\u{0}").is_empty())
+  assert_true(parse_git_diff_name_status_z("R100\u{0}old.mbt\u{0}").is_empty())
+  assert_true(
+    parse_git_diff_name_status_z("C100\u{0}\u{0}copy.mbt\u{0}").is_empty(),
+  )
+  assert_true(parse_git_untracked_z("unterminated.mbt").is_empty())
 }
 
 ///|
