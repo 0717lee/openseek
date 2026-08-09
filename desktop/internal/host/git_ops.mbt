@@ -143,6 +143,16 @@ const MaxUntrackedDiffFiles : Int = 100
 const MaxUntrackedDiffBytes : Int64 = 1048576L
 
 ///|
+/// How long either half of the diffstat may take. This is a number beside a
+/// branch name, refreshed at every run boundary and every time the popover
+/// opens, so it answers in about the time a glance takes or it does not
+/// answer: a repository slow enough to reach this will be slow again on the
+/// next probe, and reporting nothing beats holding a bridge request open.
+/// Generous against what the work actually costs — a modified 128 MiB tracked
+/// text file measured 1.5s — so only the genuinely pathological trips it.
+const DiffstatTimeoutMs : Int = 5000
+
+///|
 /// This branch's whole delta, counted locally: from where it left its base
 /// straight to the working tree, so a commit and an unsaved edit weigh the
 /// same and the number keeps moving as the agent works. Which base is
@@ -237,8 +247,19 @@ async fn git_diffstat_from(
   // subdirectory of the repository, exactly as `git.changes` does. With no
   // second revision the comparison runs to the working tree, so uncommitted
   // edits land in the same total as the commits before them.
-  guard git_output_opt(native, ["diff", "--numstat", baseline, "--", "."])
-    is Some(tracked) else {
+  //
+  // Nothing bounds what this reads: the per-file caps below cover untracked
+  // files, while a tracked one is inside the diff Git computes in one go. A
+  // modified 128 MiB tracked text file measured 1.5s locally, so a repository
+  // that keeps generated artifacts under version control can run far longer
+  // than a glance — hence the deadline rather than a size rule, which would
+  // silently score a large file that Git would have counted fine as zero.
+  guard @async.with_timeout_opt(DiffstatTimeoutMs, () => {
+      git_output_opt(native, ["diff", "--numstat", baseline, "--", "."])
+    })
+    is Some(Some(tracked)) else {
+    // Git failed, or it is still going. Either way nothing is counted, so
+    // there is no floor to report and the chip stands on the branch alone.
     return None
   }
   let tracked = { ..parse_numstat(tracked), base, }
@@ -270,17 +291,25 @@ async fn git_diffstat_from(
     }
     paths.push(relative)
   }
-  let counts = @async.all(
-    [
-      for path in paths => {
-        () => {
-          guard untracked_is_countable(dir, path) else { return None }
-          git_untracked_numstat(dir, path)
-        }
-      }
-    ],
-    max_concurrent=32,
-  )
+  // Bounded per file, but a hundred of them on a slow filesystem is still a
+  // wait nobody asked for. The tracked side is already counted here, so a
+  // deadline reached leaves a floor rather than nothing.
+  guard @async.with_timeout_opt(DiffstatTimeoutMs, () => {
+      @async.all(
+        [
+          for path in paths => {
+            () => {
+              guard untracked_is_countable(dir, path) else { return None }
+              git_untracked_numstat(dir, path)
+            }
+          }
+        ],
+        max_concurrent=32,
+      )
+    })
+    is Some(counts) else {
+    return Some({ ..tracked, partial: true })
+  }
   let mut added = tracked.added
   let mut files = tracked.files
   for count in counts {
