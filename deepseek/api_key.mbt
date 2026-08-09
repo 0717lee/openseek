@@ -24,9 +24,12 @@
 /// option. Returning an option is what keeps it that short — an unset, empty,
 /// or blank option just fails to match and falls through, so no arm has to
 /// default it to `""` and re-test that afterwards.
-pub fn Model::api_key(self : Model, matches : @argparse.Matches) -> String? {
+pub fn Model::api_key(
+  self : Model,
+  opts : Map[String, Array[String]],
+) -> String? {
   // `trim` yields a borrowed view; the caller owns the key, so copy out.
-  match (self, matches.values) {
+  match (self, opts) {
     (_, { "api-key": [k, ..], .. }) if k.trim() != "" =>
       Some(k.trim().to_owned())
     (Deepseek(_), { "deepseek-api-key": [k, ..], .. }) if k.trim() != "" =>

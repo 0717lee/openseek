@@ -141,7 +141,7 @@ async fn run_task_command(matches : @argparse.Matches) -> Unit {
     }
     let workspace_root = prepare_workspace_root(matches, log_created=true)
     let (model, thinking, api_url) = agent_settings(matches)
-    guard model.api_key(matches) is Some(api_key) else {
+    guard model.api_key(matches.values) is Some(api_key) else {
       fail("an API key is required for \{model}: pass --api-key")
     }
     let max_steps = max_steps(matches)
@@ -1338,7 +1338,7 @@ test "cli parses env backed options and task" {
   })
   let (model, _, api_url) = agent_settings(parsed)
   assert_true(model is Deepseek(V4Pro))
-  assert_eq(model.api_key(parsed), Some("test-key"))
+  assert_eq(model.api_key(parsed.values), Some("test-key"))
   guard api_url is Some(url) else { fail("expected api url") }
   assert_eq(url, "https://proxy.example/v1/chat/completions")
   assert_eq(@cli.value(parsed, "dir"), "/tmp/openseek-workspace")
@@ -1360,7 +1360,7 @@ test "cli defaults model and max steps" {
   })
   let (model, _, api_url) = agent_settings(parsed)
   assert_true(model is Deepseek(V4Pro))
-  assert_eq(model.api_key(parsed), Some("test-key"))
+  assert_eq(model.api_key(parsed.values), Some("test-key"))
   assert_true(api_url is None)
   assert_eq(@cli.value(parsed, "dir"), ".")
   assert_true(max_steps(parsed) is None)
@@ -1375,14 +1375,14 @@ test "cli uses KIMI only for Kimi models" {
     "OPENSEEK_MODEL": "kimi-k2.7-code-highspeed",
   })
   let kimi_model : @deepseek.Model = Kimi(K27CodeHighSpeed)
-  assert_eq(kimi_model.api_key(kimi), Some("kimi-key"))
+  assert_eq(kimi_model.api_key(kimi.values), Some("kimi-key"))
   let deepseek = run_matches(argv=["write", "MoonBit"], env={
     "KIMI": "kimi-key",
   })
   // KIMI is not a fallback for a DeepSeek model: no arm matches, so the
   // caller sees `None` and reports it.
   let deepseek_model : @deepseek.Model = Deepseek(V4Pro)
-  assert_true(deepseek_model.api_key(deepseek) is None)
+  assert_true(deepseek_model.api_key(deepseek.values) is None)
 }
 
 ///|
@@ -1543,7 +1543,7 @@ async test "session commands reject empty session root" {
 test "agent runs require api key" {
   let parsed = run_matches(argv=["write", "MoonBit"], env=Map([]))
   let model : @deepseek.Model = Deepseek(V4Pro)
-  assert_true(model.api_key(parsed) is None)
+  assert_true(model.api_key(parsed.values) is None)
 }
 
 ///|
