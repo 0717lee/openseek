@@ -166,6 +166,7 @@ pub(all) enum Msg {
   DiagnosticsLoaded(owner~ : @interop.ConversationKey, epoch~ : Int, absolute~ : @common.Uri, diagnostics~ : Array[@protocol.LspDiagnostic])
   DiagnosticsPublished(channel~ : @interop.ChannelId, absolute~ : @common.Uri, diagnostics~ : Array[@protocol.LspDiagnostic])
   EditorCommentAdded(resource~ : ModelUri, file~ : @pathx.Relative, range~ : @common.Range, quote~ : String, comment~ : String, feedback_id~ : String)
+  UnifiedDiffCommentAdded(file~ : @pathx.Relative, original_line_number~ : Int?, modified_line_number~ : Int?, quote~ : String, comment~ : String)
 }
 
 pub(all) enum ReviewBaseline {
@@ -197,6 +198,7 @@ pub(all) struct State {
   placement_checkout : @interop.CheckoutPlacement?
   tree_open : Bool
   explorer_mode : ExplorerMode
+  review_view_mode : ReviewViewMode
   changes : ChangeList
   reviewed_changes : Array[ChangedFile]
   changes_generation : Int
