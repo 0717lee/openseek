@@ -36,6 +36,11 @@ test('runs the viewer and tree from in-memory providers without a server', async
   await expect
     .poll(async () => (await diff.boundingBox())?.width ?? 0)
     .toBeGreaterThan(400);
+  await diff.focus();
+  await expect(diff).toBeFocused();
+  await expect
+    .poll(() => diff.evaluate((element) => getComputedStyle(element).outlineStyle))
+    .toBe('solid');
   await expect(
     diff.locator('[data-line-kind=\"deletion\"]', { hasText: 'println(\"hello\")' }),
   ).toHaveAttribute('data-original-line', '3');

@@ -17,7 +17,8 @@
 }
 
 .moonbit-unified-diff:focus {
-  outline: none;
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: -1px;
 }
 
 .moonbit-unified-diff-hunk + .moonbit-unified-diff-hunk {
