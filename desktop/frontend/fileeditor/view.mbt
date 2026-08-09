@@ -86,31 +86,61 @@ pub fn resize_handle_view() -> @html.Html {
 /// viewer with its notice overlay, and the workspace tree (expandable and
 /// always rooted at the workspace root) as a toggleable pane on
 /// the viewer's right. Always rendered so the viewer's host element
-/// (`viewer-host`) stays put across renders and screen switches; CSS hides
-/// the tree pane when toggled off and collapses the whole panel to zero
-/// width when it is closed. The children's order is structural — rabbita
-/// diffs by index, so every part renders unconditionally.
+/// (`viewer-host` and `unified-diff-host`) stay put across renders and screen
+/// switches; CSS hides the inactive surface and the tree pane when toggled off,
+/// and collapses the whole panel to zero width when it is closed. The children's
+/// order is structural — rabbita diffs by index, so every part renders
+/// unconditionally.
 pub fn body_view(
   dispatch : @cmd.Emit[Msg],
   state : State,
   ctx : Ctx,
 ) -> @html.Html {
-  // The stable element the viewer attaches its imperative DOM into; it must
-  // stay empty and never be re-keyed (see editor_panel.mbt).
+  // The stable elements the source viewer and full-diff renderer attach their
+  // imperative DOM into; they must stay empty and never be re-keyed (see
+  // editor_panel.mbt).
   // `editor-shell` brings in the viewer's `--vscode-*` / `--editor-*` theme
   // variables (defined on that class in the bundled viewer.css); `data-theme`
   // picks the palette matching the app's own light/dark scheme (the shell's
   // default is dark, `light` overrides). The viewer's colors cascade from
   // this host.
+  let show_unified_diff = match ctx.active_file {
+    Some(path) =>
+      state.docs.get(path).map(doc => doc.shows_unified_diff()).unwrap_or(false)
+    None => false
+  }
   let viewer_host = @html.div(
     attrs=@html.Attrs::build()
       .id(ViewerHostId)
-      .class("viewer-host editor-shell")
+      .class(
+        if show_unified_diff {
+          "viewer-host editor-shell moonbit-unified-diff-surface-hidden"
+        } else {
+          "viewer-host editor-shell"
+        },
+      )
+      .data_set("theme", if ctx.dark_mode { "dark" } else { "light" }),
+    ([] : Array[@html.Html]),
+  )
+  let unified_diff_host = @html.div(
+    attrs=@html.Attrs::build()
+      .id(UnifiedDiffHostId)
+      .class(
+        if show_unified_diff {
+          "viewer-host editor-shell"
+        } else {
+          "viewer-host editor-shell moonbit-unified-diff-surface-hidden"
+        },
+      )
       .data_set("theme", if ctx.dark_mode { "dark" } else { "light" }),
     ([] : Array[@html.Html]),
   )
   @html.div(class="editor-body", [
-    @html.div(class="viewer-stack", [viewer_host, viewer_notice(state, ctx)]),
+    @html.div(class="viewer-stack", [
+      viewer_host,
+      unified_diff_host,
+      viewer_notice(state, ctx),
+    ]),
     tree_pane(dispatch, state, ctx),
   ])
 }
@@ -550,7 +580,7 @@ pub fn breadcrumb_view(
     },
     [
       @html.div(class="crumb-path", crumbs),
-      review_badge(state, ctx),
+      review_badge(dispatch, state, ctx),
       @html.button(
         class="panel-toggle",
         title=if state.tree_open { "Hide file tree" } else { "Show file tree" },
@@ -562,13 +592,30 @@ pub fn breadcrumb_view(
 }
 
 ///|
-/// Compact, non-interactive review status beside the active path. The gutter
-/// is the diff itself; this badge makes the comparison source and exceptional
-/// cases explicit without adding another toolbar or changing Viewer layout.
-fn review_badge(state : State, ctx : Ctx) -> @html.Html {
-  let (text, title) = match ctx.active_file {
+/// Compact review control beside the active path. Textual reviews toggle the
+/// full diff; loading and unavailable reviews retain a non-interactive status.
+fn review_badge(
+  dispatch : @cmd.Emit[Msg],
+  state : State,
+  ctx : Ctx,
+) -> @html.Html {
+  let (text, title, action, pressed) = match ctx.active_file {
     Some(path) =>
       match state.docs.get(path) {
+        Some(doc) if doc.unified_diff_content() is Some(_) =>
+          match doc.review {
+            Some({ view_mode: ReviewUnifiedDiff, .. }) =>
+              (
+                "View file", "Return to the source preview and quick-diff gutter",
+                true, true,
+              )
+            Some({ view_mode: ReviewSource, .. }) =>
+              (
+                "View full diff", "Open the full unified diff against HEAD", true,
+                false,
+              )
+            None => ("", "", false, false)
+          }
         Some(
           {
             state: TabDeleted,
@@ -578,6 +625,7 @@ fn review_badge(state : State, ctx : Ctx) -> @html.Html {
         ) =>
           (
             "Deleted · HEAD", "Deleted in the working tree; showing the HEAD version",
+            false, false,
           )
         Some(
           {
@@ -588,54 +636,81 @@ fn review_badge(state : State, ctx : Ctx) -> @html.Html {
         ) =>
           (
             "Working unavailable · HEAD", "The working-tree file could not be read; showing the HEAD version",
+            false, false,
           )
         Some({ state: TabBinary, review: Some(_), .. })
         | Some({ state: TabOversized, review: Some(_), .. })
         | Some({ state: TabReadFailed(_), review: Some(_), .. }) =>
           (
             "Diff unavailable", "The working-tree file cannot be previewed as text",
+            false, false,
           )
         Some({ review: Some({ baseline: ReviewLoading, .. }), .. }) =>
-          ("Loading diff…", "Loading the HEAD version for comparison")
+          (
+            "Loading diff…", "Loading the HEAD version for comparison", false,
+            false,
+          )
         Some(
           {
             state: TabDeleted,
             review: Some({ baseline: ReviewMissing, .. }),
             ..,
           }
-        ) => ("Deleted · no HEAD", "No HEAD version is available to preview")
+        ) =>
+          (
+            "Deleted · no HEAD", "No HEAD version is available to preview", false,
+            false,
+          )
         Some({ name, review: Some({ baseline: ReviewContent(_), .. }), .. }) if name.has_suffix(
             ".md",
           ) =>
           (
             "Rendered · no gutter", "Rendered Markdown does not expose source diff decorations",
+            false, false,
           )
         Some({ name, review: Some({ baseline: ReviewMissing, .. }), .. }) if name.has_suffix(
             ".md",
           ) =>
           (
             "Rendered · no gutter", "New Markdown has no HEAD version; its rendered preview does not expose diff decorations",
+            false, false,
           )
         Some({ review: Some({ baseline: ReviewContent(_), .. }), .. }) =>
-          ("Diff vs HEAD", "Quick diff against the HEAD version")
+          ("Diff vs HEAD", "Quick diff against the HEAD version", false, false)
         Some({ review: Some({ baseline: ReviewMissing, .. }), .. }) =>
-          ("New · no HEAD", "New file compared with an empty HEAD baseline")
+          (
+            "New · no HEAD", "New file compared with an empty HEAD baseline", false,
+            false,
+          )
         Some({ review: Some({ baseline: ReviewBinary, .. }), .. }) =>
-          ("Diff unavailable", "The HEAD version is binary")
+          ("Diff unavailable", "The HEAD version is binary", false, false)
         Some({ review: Some({ baseline: ReviewOversized, .. }), .. }) =>
-          ("Diff unavailable", "The HEAD version is too large")
+          ("Diff unavailable", "The HEAD version is too large", false, false)
         Some({ review: Some({ baseline: ReviewFailed(message), .. }), .. }) =>
-          ("Diff unavailable", "Could not load HEAD: " + message)
-        _ => ("", "")
+          ("Diff unavailable", "Could not load HEAD: " + message, false, false)
+        _ => ("", "", false, false)
       }
-    None => ("", "")
+    None => ("", "", false, false)
   }
-  @html.span(
-    class=if text.is_empty() { "review-badge hidden" } else { "review-badge" },
-    title~,
-    attrs=@html.Attrs::build().role("status").aria_live("polite"),
-    text,
-  )
+  if action {
+    @html.button(
+      type_="button",
+      class="review-badge review-badge-action",
+      title~,
+      on_click=dispatch(ToggleReviewDiff),
+      attrs=@html.Attrs::build()
+        .aria_label("Full diff")
+        .aria_pressed(pressed.to_string()),
+      text,
+    )
+  } else {
+    @html.span(
+      class=if text.is_empty() { "review-badge hidden" } else { "review-badge" },
+      title~,
+      attrs=@html.Attrs::build().role("status").aria_live("polite"),
+      text,
+    )
+  }
 }
 
 ///|

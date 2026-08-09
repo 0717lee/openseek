@@ -1,0 +1,6 @@
+import {
+  "moonbit-community/rabbita/dom" @rdom,
+  "moonbitlang/editor/viewer/common/unified_diff" @unified_diff_model,
+}
+
+supported_targets = "js"

@@ -31,6 +31,7 @@ priv struct MemoryWorkspace {
   root_uri : @base_common.Uri
   directories : Map[String, Array[@workspace.WorkspaceStat]]
   documents : Map[String, String]
+  original_documents : Map[String, String]
 }
 
 ///|
@@ -63,6 +64,8 @@ fn memory_workspace() -> MemoryWorkspace {
   let directories : Map[String, Array[@workspace.WorkspaceStat]] = Map([])
   directories[memory_root] = [
     memory_dir("src", "src"),
+    memory_file("large.mbt", "large.mbt"),
+    memory_file("oversized-line.mbt", "oversized-line.mbt"),
     memory_file("README.md", "README.md"),
     memory_file("moon.mod", "moon.mod"),
   ]
@@ -74,6 +77,8 @@ fn memory_workspace() -> MemoryWorkspace {
     memory_file("src/lib/util.mbt", "util.mbt"),
   ]
   let documents : Map[String, String] = Map([])
+  documents["\{memory_root}/large.mbt"] = large_diff_document("modified")
+  documents["\{memory_root}/oversized-line.mbt"] = oversized_diff_line("m")
   documents["\{memory_root}/README.md"] = (
     #|# Embedded Markdown document
     #|
@@ -98,7 +103,58 @@ fn memory_workspace() -> MemoryWorkspace {
     #|}
     #|
   )
-  { root_uri: memory_uri(memory_root), directories, documents }
+  let original_documents : Map[String, String] = Map([])
+  original_documents["\{memory_root}/large.mbt"] = large_diff_document(
+    "original",
+  )
+  original_documents["\{memory_root}/oversized-line.mbt"] = oversized_diff_line(
+    "o",
+  )
+  original_documents["\{memory_root}/README.md"] = (
+    #|# Embedded document
+    #|
+    #|This in-memory model is rendered by the public Viewer.
+    #|
+  )
+  original_documents["\{memory_root}/moon.mod"] = ""
+  original_documents["\{memory_root}/src/main.mbt"] = (
+    #|///|
+    #|fn main {
+    #|  println("hello")
+    #|}
+    #|
+  )
+  original_documents["\{memory_root}/src/lib/util.mbt"] = (
+    #|///|
+    #|pub fn util_answer() -> Int {
+    #|  41
+    #|}
+    #|
+  )
+  {
+    root_uri: memory_uri(memory_root),
+    directories,
+    documents,
+    original_documents,
+  }
+}
+
+///|
+/// A valid sub-1-MiB source pair with enough short changed lines to exercise
+/// the standalone renderer's eager-DOM safety budget.
+fn large_diff_document(prefix : String) -> String {
+  let content = StringBuilder()
+  for index in 0..<2600 {
+    content.write_string("let \{prefix}_\{index} = \{index}\n")
+  }
+  content.to_string()
+}
+
+///|
+/// Each side is a single valid source line below the desktop's 1 MiB read
+/// limit, while their combined UTF-16 size exceeds the standalone diff budget.
+fn oversized_diff_line(fill : String) -> String {
+  fill.repeat(524289)
 }
 
 ///|
@@ -164,6 +220,7 @@ fn MemoryWorkspace::model(
 ///|
 priv struct EmbedModel {
   status : String
+  diff_visible : Bool
 } derive(Eq)
 
 ///|
@@ -172,6 +229,7 @@ priv enum EmbedMsg {
   OpenFile(@base_common.Uri)
   ViewerReady(@base_common.Uri)
   ViewerFailed
+  ToggleDiff
 }
 
 ///|
@@ -187,6 +245,9 @@ fn dispatch_embed_msg(msg : EmbedMsg) -> Unit {
 
 ///|
 let embed_viewer_cell : Ref[@viewer.Viewer?] = Ref(None)
+
+///|
+let embed_diff_view_cell : Ref[@viewer.UnifiedDiffView?] = Ref(None)
 
 ///|
 /// Resolves the embedded viewer, creating it into the shell-rendered
@@ -225,6 +286,47 @@ fn embed_viewer() -> @viewer.Viewer {
       viewer
     }
   }
+}
+
+///|
+/// Resolves the standalone public diff surface in its own stable host. Source
+/// and diff views are siblings so toggling never replaces the source Viewer's
+/// model, selection, or scroll state.
+fn embed_diff_view() -> @viewer.UnifiedDiffView {
+  match embed_diff_view_cell.val {
+    Some(view) => view
+    None => {
+      let host = @rdom.document()
+        .query_selector(".unified-diff-host")
+        .to_option()
+        .unwrap()
+      let view = @viewer.UnifiedDiffView::create(host)
+      embed_diff_view_cell.val = Some(view)
+      view
+    }
+  }
+}
+
+///|
+fn set_embed_diff_visible(visible : Bool) -> @rabbita.Cmd {
+  @cmd.custom_cmd(
+    _ => {
+      if !visible {
+        match embed_diff_view_cell.val {
+          Some(view) => view.clear()
+          None => ()
+        }
+        return
+      }
+      guard embed_viewer().get_model() is Some(model) &&
+        workspace_backend.original_documents.get(model.uri.to_string())
+        is Some(original) else {
+        return
+      }
+      embed_diff_view().set_diff(original, model.get_value())
+    },
+    kind=@cmd.after_render,
+  )
 }
 
 ///|
@@ -275,9 +377,25 @@ fn update_embed(
         model,
       )
     }
-    OpenFile(uri) => (open_embed_document_cmd(uri), { status: "loading" })
-    ViewerReady(uri) => (embed_tree().set_active(uri), { status: "ready" })
-    ViewerFailed => (@rabbita.none, { status: "error" })
+    OpenFile(uri) =>
+      (
+        @rabbita.batch([
+          set_embed_diff_visible(false),
+          open_embed_document_cmd(uri),
+        ]),
+        { status: "loading", diff_visible: false },
+      )
+    ViewerReady(uri) =>
+      (embed_tree().set_active(uri), { ..model, status: "ready" })
+    ViewerFailed =>
+      (set_embed_diff_visible(false), { status: "error", diff_visible: false })
+    ToggleDiff =>
+      if model.status != "ready" {
+        (@rabbita.none, model)
+      } else {
+        let visible = !model.diff_visible
+        (set_embed_diff_visible(visible), { ..model, diff_visible: visible })
+      }
   }
 }
 
@@ -297,7 +415,7 @@ fn open_embed_document_cmd(uri : @base_common.Uri) -> @rabbita.Cmd {
 
 ///|
 fn view_embed(
-  _emit : @rabbita.Emit[EmbedMsg],
+  emit : @rabbita.Emit[EmbedMsg],
   model : EmbedModel,
   tree_html : @html.Html,
 ) -> @html.Html {
@@ -314,14 +432,49 @@ fn view_embed(
           [
             @html.div(class="workspace-title", [
               @html.span(class="workspace-title-label", "Explorer"),
+              @html.button(
+                type_="button",
+                class="sidebar-action embed-diff-toggle",
+                title=if model.diff_visible {
+                  "Show source"
+                } else {
+                  "Show full diff"
+                },
+                on_click=emit(ToggleDiff),
+                attrs=@html.Attrs::build()
+                  .data_set("action", "toggle-diff")
+                  .aria_label("Full diff")
+                  .aria_pressed(model.diff_visible.to_string()),
+                if model.diff_visible {
+                  "Source"
+                } else {
+                  "Diff"
+                },
+              ),
             ]),
             tree_html,
           ],
         ),
-        // The stable view host: the viewer attaches its imperative DOM
-        // into this element after the first paint; the shell must never
-        // render vdom children into it.
-        @html.div(class="viewer-host", ([] : Array[@html.Html])),
+        @html.div(class="embedded-viewer-stack", [
+          // Stable imperative-DOM hosts share the grid's content cell; the
+          // shell never renders vdom children into either host.
+          @html.div(
+            class=if model.diff_visible {
+              "viewer-host moonbit-unified-diff-surface-hidden"
+            } else {
+              "viewer-host"
+            },
+            ([] : Array[@html.Html]),
+          ),
+          @html.div(
+            class=if model.diff_visible {
+              "viewer-host unified-diff-host"
+            } else {
+              "viewer-host unified-diff-host moonbit-unified-diff-surface-hidden"
+            },
+            ([] : Array[@html.Html]),
+          ),
+        ]),
       ]),
     ],
   )
@@ -343,7 +496,7 @@ fn main {
   let app = @rabbita.new(() => {
     let tree_view = embed_tree().view()
     let (model, emit) = @rabbita.create_state(
-      { status: "loading" },
+      { status: "loading", diff_visible: false },
       update=(emit, msg, model) => {
         let (cmd, model) = update_embed(emit, msg, model)
         (model, cmd)

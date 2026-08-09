@@ -75,6 +75,14 @@ pub(all) enum ReviewBaseline {
 } derive(Eq)
 
 ///|
+/// The per-tab review presentation. Source mode keeps the existing Viewer and
+/// quick-diff gutter; unified mode shows the context-bounded full comparison.
+pub(all) enum ReviewViewMode {
+  ReviewSource
+  ReviewUnifiedDiff
+} derive(Eq)
+
+///|
 /// One changed-file review request parked on its document. Separate request
 /// generations fence its HEAD reply and newest working-tree read; keeping the
 /// tokens outside `ReviewBaseline` avoids repeating them in every settled
@@ -88,6 +96,7 @@ pub(all) struct ReviewState {
   // order without invalidating an in-flight baseline.
   working_generation : Int
   baseline : ReviewBaseline
+  view_mode : ReviewViewMode
   // Preserve the exact Changes row that the user selected. Porcelain can
   // legitimately report two rows for one path (for example, a staged
   // deletion plus a recreated untracked file), so the document path alone
@@ -468,6 +477,9 @@ pub(all) enum Msg {
   // A Changes row was clicked. The full decoded row carries the original path
   // needed by renames/copies and whether a working-tree read is possible.
   ChangedFileSelected(ChangedFile)
+  // Switch the active changed-file review between the ordinary source Viewer
+  // and its full unified diff. Unavailable/loading reviews ignore the action.
+  ToggleReviewDiff
   // One `git.original_file` request settled. `path` is always the current
   // changed path (the dock/document key), even when the host read its rename
   // source from `original_path`.

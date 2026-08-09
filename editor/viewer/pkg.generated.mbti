@@ -35,6 +35,12 @@ pub fn EditorDecorationsCollection::get_ranges(Self) -> Array[@common.Range]
 pub fn EditorDecorationsCollection::length(Self) -> Int
 pub fn EditorDecorationsCollection::set(Self, Array[@model.ModelDeltaDecoration]) -> Array[String]
 
+type UnifiedDiffView
+pub fn UnifiedDiffView::clear(Self) -> Unit
+pub fn UnifiedDiffView::create(@dom.Element) -> Self
+pub fn UnifiedDiffView::dispose(Self) -> Unit
+pub fn UnifiedDiffView::set_diff(Self, String, String, context_lines? : Int) -> Unit
+
 type Viewer
 pub fn Viewer::add_overlay_widget(Self, @browser.OverlayWidget) -> Unit
 pub fn Viewer::change_view_zones(Self, (@browser.ViewZoneChangeAccessor) -> Unit raise) -> Unit
@@ -151,4 +157,3 @@ type ViewerViewState derive(@debug.Debug)
 // Type aliases
 
 // Traits
-

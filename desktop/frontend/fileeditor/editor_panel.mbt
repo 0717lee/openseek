@@ -1,14 +1,18 @@
 // The embedded read-only code viewer (moonbitlang/editor). Rabbita has
-// no escape hatch for a foreign DOM widget, so the viewer owns one stable,
-// never-diffed host element: the view renders `<div id="viewer-host">` empty,
-// and after the first paint the viewer attaches its imperative DOM into it.
-// The host element is always rendered (merely hidden by CSS when the panel is
-// closed), so the viewer attaches exactly once and survives screen switches.
+// no escape hatch for a foreign DOM widget, so the source viewer and full-diff
+// renderer each own a stable, never-diffed host element. The view renders both
+// hosts empty, and after the first paint each widget attaches its imperative DOM.
+// The host elements are always rendered (merely hidden by CSS when inactive or
+// the panel is closed), so each widget attaches once and survives screen switches.
 
 ///|
 /// The id of the stable element the viewer attaches into; the panel view must
 /// render exactly one empty element with this id.
 const ViewerHostId = "viewer-host"
+
+///|
+/// The stable sibling host reserved for the standalone full-diff renderer.
+const UnifiedDiffHostId = "unified-diff-host"
 
 ///|
 /// The `MarkerService` owner for the language server's diagnostics — Monaco
@@ -28,6 +32,9 @@ priv struct ViewerHost {
   // batched behind a mount request whose after-render tick precedes the async
   // reply, so by the time a document arrives the viewer exists.
   mut viewer : @viewer.Viewer?
+  // Kept separate from the source Viewer so a Diff/Source toggle preserves
+  // the source model, selection, folding, and scroll state.
+  mut unified_diff : @viewer.UnifiedDiffView?
   // Desktop owns the concrete marker and feedback stores passed through the
   // Viewer's public handle API. They receive language-server diagnostics and
   // turn inline reviews into composer chips without requiring editor internals.
@@ -61,6 +68,7 @@ priv struct ViewerHost {
 ///|
 let viewer_state : ViewerHost = {
   viewer: None,
+  unified_diff: None,
   services: None,
   absolute: None,
   relative: None,
@@ -164,6 +172,13 @@ fn request_viewer_mount(dispatch : @cmd.Emit[Msg]) -> @cmd.Cmd {
         })
         |> ignore
       }
+      if viewer_state.unified_diff is None &&
+        @dom.document().get_element_by_id(UnifiedDiffHostId).to_option()
+        is Some(diff_host) {
+        viewer_state.unified_diff = Some(
+          @viewer.UnifiedDiffView::create(diff_host),
+        )
+      }
     },
     kind=@cmd.after_render,
   )
@@ -213,7 +228,9 @@ pub fn request_viewer_remeasure() -> @cmd.Cmd {
 /// top — the Monaco save/restore-view-state contract around `set_model`.
 /// `review_original`, when present, is the Git HEAD baseline used by the
 /// Viewer's quick-diff contribution. An empty string is meaningful for a new
-/// file; omission clears any earlier baseline for this resource.
+/// file; omission clears any earlier baseline for this resource. A unified
+/// pair, when present, is rendered in the sibling full-diff surface while the
+/// source Viewer remains mounted.
 fn show_file_in_viewer(
   owner : @interop.ConversationKey,
   workspace : @common.Uri?,
@@ -225,6 +242,7 @@ fn show_file_in_viewer(
   annotation? : String,
   restore_scroll? : Bool = false,
   review_original? : String,
+  unified_diff? : (String, String),
 ) -> @cmd.Cmd {
   @cmd.custom_cmd(_scheduler => {
     // Reads are always batched behind a mount request whose after-render tick
@@ -346,6 +364,12 @@ fn show_file_in_viewer(
         }
       }
     }
+    match (viewer_state.unified_diff, unified_diff) {
+      (Some(diff_view), Some((original, modified))) =>
+        diff_view.set_diff(original, modified)
+      (Some(diff_view), None) => diff_view.clear()
+      (None, _) => ()
+    }
     if range is Some(range) {
       if !range.is_empty() {
         // `set_selection` never scrolls on its own (the Monaco contract), so
@@ -420,6 +444,9 @@ fn clear_viewer() -> @cmd.Cmd {
       viewer_state.navigation = None
       viewer.set_model(None)
     }
+    if viewer_state.unified_diff is Some(diff_view) {
+      diff_view.clear()
+    }
   })
 }
 
@@ -438,6 +465,9 @@ fn clear_document() -> @cmd.Cmd {
       viewer_state.relative = None
       viewer_state.navigation = None
       viewer.set_model(None)
+    }
+    if viewer_state.unified_diff is Some(diff_view) {
+      diff_view.clear()
     }
   })
 }
