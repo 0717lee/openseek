@@ -15,7 +15,7 @@ pub fn PlainTokenizer::PlainTokenizer() -> PlainTokenizer {
 ///|
 /// Entry state for the stateless example tokenizer.
 pub impl @syntax.LineTokenizer for PlainTokenizer with fn initial_state(_self) {
-  TokenizerState("")
+  TokenizerState([])
 }
 
 ///|

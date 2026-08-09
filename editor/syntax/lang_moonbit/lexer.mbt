@@ -20,7 +20,7 @@ struct MoonBitTokenizer {
 ///|
 /// Shared immutable base stack; MoonBit's lexer always returns to it at the
 /// end of a line.
-let moonbit_normal_state : @syntax.TokenizerState = TokenizerState("n")
+let moonbit_normal_state : @syntax.TokenizerState = TokenizerState(['n'])
 
 ///|
 /// Creates the MoonBit tokenizer.

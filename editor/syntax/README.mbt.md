@@ -41,7 +41,7 @@ priv struct KeywordOnly {}
 
 ///|
 impl @syntax.LineTokenizer for KeywordOnly with fn initial_state(_self) {
-  TokenizerState("")
+  TokenizerState([])
 }
 
 ///|
@@ -258,20 +258,21 @@ test "panic is_capitalized rejects an empty view" {
 }
 ```
 
-`TokenizerState` owns an opaque character array. `push_mode` / `pop_mode`
-copy before mutation, so a cached line state remains an immutable snapshot;
-`from_modes` and `to_modes` also copy across the public boundary.
-`lang_javascript` carries this stack directly and therefore allocates only
-when a lexical mode changes. `decode_mode_stack` / `encode_mode_stack` remain
+`TokenizerState` owns an opaque persistent character vector. `push_mode` /
+`pop_mode` create immutable snapshots with structural sharing, so a cached line
+state cannot be changed by later tokenization; the constructor and `to_modes`
+copy across the public boundary. `lang_javascript` carries this stack
+directly and therefore allocates only when a lexical mode changes.
+`decode_mode_stack` / `encode_mode_stack` remain
 the mutable-array adapter; `lang_moonbit` uses the decoder for its per-line
-scratch stack and always returns `TokenizerState("n")`. `lang_json` uses
+scratch stack and always returns `TokenizerState(['n'])`. `lang_json` uses
 neither, its state being a single in-comment flag.
 
 ```mbt check
 ///|
 test "the mode stack round-trips and an empty state is the base mode" {
-  let empty = @syntax.decode_mode_stack(TokenizerState(""))
-  let nested = @syntax.decode_mode_stack(TokenizerState("nts"))
+  let empty = @syntax.decode_mode_stack(TokenizerState([]))
+  let nested = @syntax.decode_mode_stack(TokenizerState(['n', 't', 's']))
   let encoded = @syntax.encode_mode_stack(['n', 't', 's'])
   debug_inspect(
     (empty, nested, encoded),

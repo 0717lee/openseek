@@ -8,10 +8,14 @@
 priv struct BlockCommentToy {}
 
 ///|
-let toy_code : @syntax.TokenizerState = TokenizerState("code")
+let toy_code : @syntax.TokenizerState = @syntax.TokenizerState::from_text(
+  "code",
+)
 
 ///|
-let toy_comment : @syntax.TokenizerState = TokenizerState("comment")
+let toy_comment : @syntax.TokenizerState = @syntax.TokenizerState::from_text(
+  "comment",
+)
 
 ///|
 impl @syntax.LineTokenizer for BlockCommentToy with fn initial_state(_self) {

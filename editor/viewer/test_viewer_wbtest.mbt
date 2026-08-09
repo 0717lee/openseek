@@ -766,7 +766,9 @@ priv struct FirstCharKeywordToy {
 }
 
 ///|
-let first_char_toy_state : @syntax.TokenizerState = TokenizerState("s")
+let first_char_toy_state : @syntax.TokenizerState = @syntax.TokenizerState::from_text(
+  "s",
+)
 
 ///|
 impl @syntax.LineTokenizer for FirstCharKeywordToy with fn initial_state(_self) {

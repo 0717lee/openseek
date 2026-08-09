@@ -68,8 +68,8 @@ pub fn TokenizationRegistry::set_color_map(Self, Array[String]) -> Unit
 pub struct TokenizerState {
   // private fields
 } derive(Eq)
-pub fn TokenizerState::TokenizerState(StringView) -> Self
-pub fn TokenizerState::from_modes(ArrayView[Char]) -> Self
+pub fn TokenizerState::TokenizerState(ArrayView[Char]) -> Self
+pub fn TokenizerState::from_text(StringView) -> Self
 pub fn TokenizerState::last_mode(Self) -> Char?
 pub fn TokenizerState::mode_count(Self) -> Int
 pub fn TokenizerState::pop_mode(Self) -> Self

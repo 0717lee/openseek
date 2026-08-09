@@ -19,7 +19,7 @@ struct JavascriptTokenizer {
 ///|
 /// Shared immutable base stack. Returning it avoids rebuilding the normal
 /// state for every initial-state request.
-let javascript_normal_state : @syntax.TokenizerState = TokenizerState("n")
+let javascript_normal_state : @syntax.TokenizerState = TokenizerState(['n'])
 
 ///|
 /// Creates the JavaScript tokenizer.
