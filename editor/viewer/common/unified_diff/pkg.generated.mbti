@@ -1,0 +1,54 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "moonbitlang/editor/viewer/common/unified_diff"
+
+import {
+  "moonbitlang/core/debug",
+}
+
+// Values
+pub fn compute_unified_diff(Array[String], Array[String], context_lines? : Int, ignore_trim_whitespace? : Bool, max_computation_time_ms? : Int, algorithm? : UnifiedDiffAlgorithm) -> Array[UnifiedDiffHunk]
+
+pub fn default_unified_diff_algorithm() -> UnifiedDiffAlgorithm
+
+// Errors
+
+// Types and methods
+type UnifiedDiffAlgorithm
+pub fn UnifiedDiffAlgorithm::UnifiedDiffAlgorithm(compute_changes~ : (Array[String], Array[String], UnifiedDiffAlgorithmOptions) -> Array[UnifiedDiffChange]) -> Self
+
+pub(all) struct UnifiedDiffAlgorithmOptions {
+  ignore_trim_whitespace : Bool
+  max_computation_time_ms : Int
+} derive(Eq, @debug.Debug)
+
+pub(all) struct UnifiedDiffChange {
+  original_start_line_number : Int
+  original_end_line_number_exclusive : Int
+  modified_start_line_number : Int
+  modified_end_line_number_exclusive : Int
+} derive(Eq, @debug.Debug)
+
+pub(all) struct UnifiedDiffHunk {
+  original_start_line_number : Int
+  original_line_count : Int
+  modified_start_line_number : Int
+  modified_line_count : Int
+  lines : Array[UnifiedDiffLine]
+} derive(Eq, @debug.Debug)
+
+pub(all) struct UnifiedDiffLine {
+  kind : UnifiedDiffLineKind
+  original_line_number : Int?
+  modified_line_number : Int?
+  text : String
+} derive(Eq, @debug.Debug)
+
+pub(all) enum UnifiedDiffLineKind {
+  Context
+  Deletion
+  Addition
+} derive(Eq, @debug.Debug)
+
+// Type aliases
+
+// Traits
