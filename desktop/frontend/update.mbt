@@ -849,13 +849,7 @@ fn run_slash_command(
           ..model.replace_conversation({
             ..conv,
             task: "",
-            goal_edit: Some({
-              draft: if conv.goal is Some(goal) {
-                goal.text
-              } else {
-                ""
-              },
-            }),
+            goal_edit: Some({ draft: conv.goal_draft_seed() }),
           }),
           completion: None,
         },
@@ -2729,13 +2723,7 @@ fn update_msg(
         {
           ..model.replace_conversation({
             ..conv,
-            goal_edit: Some({
-              draft: if conv.goal is Some(goal) {
-                goal.text
-              } else {
-                ""
-              },
-            }),
+            goal_edit: Some({ draft: conv.goal_draft_seed() }),
           }),
           completion: None,
         },

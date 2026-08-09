@@ -54,52 +54,78 @@ fn goal_banner(
   }
   // Sent, not yet confirmed. `agent.goal` returns once the command reaches
   // the engine's stdin, so this waits for the durable marker — and says so,
-  // rather than showing a goal the record may never carry. It also carries
-  // no Edit or ✕: the standing goal is still mirrored underneath a clear,
-  // and a second command sent over this one only earns a refusal.
-  if pending is Some(request) {
-    let (label, title) = match request {
-      Setting(text) => ("Setting goal: \{goal_first_line(text)}", text)
-      Clearing => ("Clearing goal…", "Waiting for the engine to record it")
+  // rather than showing a goal the record may never carry.
+  //
+  // It keeps Edit and ✕. Withholding them reads as the safer choice — a
+  // second command over the first only earns the host's `GoalPending`
+  // refusal — but it makes this row a state the user cannot leave except by
+  // an event that, for a command whose reply was lost and which the engine
+  // never appended, does not exist. A row that can only be exited from
+  // outside is a wedge waiting for the one delivery that goes wrong; the
+  // duplicate it guards against is a notice, which is the smaller harm and
+  // the one the host is already positioned to report.
+  let (row_class, text, title, editable) = if pending is Some(request) {
+    match request {
+      Setting(text) =>
+        (
+          "composer-goal pending",
+          "Setting goal: \{goal_first_line(text)}",
+          text,
+          true,
+        )
+      Clearing =>
+        (
+          "composer-goal pending", "Clearing goal…", "Waiting for the engine to record it",
+          false,
+        )
     }
-    return @html.div(class="composer-goal pending", [
-      @html.span(class="composer-notice-icon", icon(icon_target)),
-      @html.span(class="composer-goal-text", title~, label),
-    ])
-  }
-  guard goal is Some(goal) else {
-    return @html.div(class="composer-goal hidden", "")
-  }
-  // The goal at a glance, warning-styled while the agent has durably
-  // declared it blocked. The full text (and the blocked reason) ride the
-  // tooltip; Edit opens goal mode, ✕ clears the goal outright.
-  let (row_class, text, title) = if goal.blocked is Some(reason) {
-    (
-      "composer-goal blocked",
-      "Goal blocked: \{goal_first_line(reason)}",
-      "Goal: \{goal.text}\n\nBlocked: \{reason}",
-    )
   } else {
-    ("composer-goal", "Goal: \{goal_first_line(goal.text)}", goal.text)
+    guard goal is Some(goal) else {
+      return @html.div(class="composer-goal hidden", "")
+    }
+    // The goal at a glance, warning-styled while the agent has durably
+    // declared it blocked. The full text (and the blocked reason) ride the
+    // tooltip; Edit opens goal mode, ✕ clears the goal outright.
+    if goal.blocked is Some(reason) {
+      (
+        "composer-goal blocked",
+        "Goal blocked: \{goal_first_line(reason)}",
+        "Goal: \{goal.text}\n\nBlocked: \{reason}",
+        true,
+      )
+    } else {
+      ("composer-goal", "Goal: \{goal_first_line(goal.text)}", goal.text, true)
+    }
   }
-  @html.div(class=row_class, [
-    @html.span(class="composer-notice-icon", icon(icon_target)),
-    @html.span(class="composer-goal-text", title~, text),
-    @html.button(
-      class="composer-goal-action",
-      type_="button",
-      title="Edit the standing goal",
-      on_click=dispatch(OpenGoalEditor),
-      "Edit",
-    ),
-    @html.button(
-      class="composer-goal-action",
-      type_="button",
-      title="Clear the standing goal",
-      on_click=dispatch(ClearGoal),
-      icon(icon_close),
-    ),
-  ])
+  // A clear in flight has no text to edit into; every other row does.
+  let edit : Array[@html.Html] = if editable {
+    [
+      @html.button(
+        class="composer-goal-action",
+        type_="button",
+        title="Edit the standing goal",
+        on_click=dispatch(OpenGoalEditor),
+        "Edit",
+      ),
+    ]
+  } else {
+    []
+  }
+  @html.div(
+    class=row_class,
+    [
+      @html.span(class="composer-notice-icon", icon(icon_target)),
+      @html.span(class="composer-goal-text", title~, text),
+      ..edit,
+      @html.button(
+        class="composer-goal-action",
+        type_="button",
+        title="Clear the standing goal",
+        on_click=dispatch(ClearGoal),
+        icon(icon_close),
+      ),
+    ],
+  )
 }
 
 ///|
@@ -459,6 +485,86 @@ test "a rejected clear has nothing to restore, and never steals goal mode" {
   )
   guard kept.active().goal_edit is Some(edit) else { fail("editor lost") }
   inspect(edit.draft, content="something newer")
+}
+
+///|
+#warnings("-alert_unstable")
+test "a request in flight never strands the row" {
+  let dispatch = test_dispatch()
+  // A set whose reply was lost and which the engine never appended has no
+  // event coming that could retire it. If the row withheld its actions while
+  // waiting, that would be a state with no exit; both are here, so the user
+  // can always overwrite or clear their way out.
+  let setting = @rabbita.render_to_string(() => {
+    @rabbita.Val::constant(
+      goal_banner(
+        dispatch,
+        None,
+        editing=None,
+        pending=Some(Setting("ship the feature")),
+      ),
+    )
+  })
+  assert_true(setting.contains("Setting goal: ship the feature"))
+  assert_true(setting.contains(">Edit</button>"))
+  inspect(setting.split("composer-goal-action").count(), content="3")
+  // A clear has no text to edit into, so it offers the one action that can
+  // still end it — sending the clear again.
+  let clearing = @rabbita.render_to_string(() => {
+    @rabbita.Val::constant(
+      goal_banner(dispatch, None, editing=None, pending=Some(Clearing)),
+    )
+  })
+  assert_true(clearing.contains("Clearing goal…"))
+  assert_false(clearing.contains(">Edit</button>"))
+  inspect(clearing.split("composer-goal-action").count(), content="2")
+}
+
+///|
+test "the editor opens on the newest text, not on the retired one" {
+  // Mid-flight, the mirror still holds what the set is replacing. Seeding
+  // from it would silently revert the user's own sent text.
+  let conv : Conversation = {
+    ..test_conversation(),
+    goal: Some({ text: "the old goal", blocked: None }),
+    goal_pending: Some(Setting("the goal just sent")),
+  }
+  inspect(conv.goal_draft_seed(), content="the goal just sent")
+  inspect(
+    { ..conv, goal_pending: Some(Clearing) }.goal_draft_seed(),
+    content="",
+  )
+  inspect(
+    { ..conv, goal_pending: None }.goal_draft_seed(),
+    content="the old goal",
+  )
+  let dispatch = test_dispatch()
+  let (_, opened) = update(
+    dispatch,
+    OpenGoalEditor,
+    test_model().replace_conversation(conv),
+  )
+  guard opened.active().goal_edit is Some(edit) else { fail("editor lost") }
+  inspect(edit.draft, content="the goal just sent")
+}
+
+///|
+test "a request in flight is reason enough to re-read the record" {
+  // An otherwise-empty conversation has nothing else worth reloading for, so
+  // without this the reconnect that follows a lost reply would never ask the
+  // record the one question the transport could not answer.
+  let fresh = empty_conversation(@interop.ChannelId::Local, "desktop-fresh")
+  let model = test_model()
+  assert_false(model.can_reload_transcript(fresh))
+  assert_true(
+    model.can_reload_transcript({
+      ..fresh,
+      goal_pending: Some(Setting("ship the feature")),
+    }),
+  )
+  assert_true(
+    model.can_reload_transcript({ ..fresh, goal_pending: Some(Clearing) }),
+  )
 }
 
 ///|

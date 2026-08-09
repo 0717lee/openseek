@@ -134,7 +134,7 @@ async fn ws_request(
   payload : @js.Value,
 ) -> @js.Value {
   guard channels.get(channel) is Some(session) && session.open_ else {
-    raise BridgeError("OpenSeek connection is down")
+    raise BridgeUnsent("OpenSeek connection is down")
   }
   let id = session.next_id
   session.next_id += 1
@@ -304,4 +304,32 @@ test "only marked browser RPC errors are definitive refusals" {
   assert_false(browser_rpc_error_is_definite(transport))
   assert_true(browser_rpc_error_is_definite(rejected))
   assert_false(bridge_error_is_definite(BridgeError("bridge unavailable")))
+}
+
+///|
+test "a call that never left is not the same as one that went unanswered" {
+  // The distinction callers actually need. Both are "not a refusal", so the
+  // two-state view says the same thing about them — and a caller holding
+  // optimistic state then has to keep waiting on a command that provably
+  // never reached anything.
+  assert_true(
+    bridge_failure(BridgeUnsent("OpenSeek bridge unavailable")) is Unsent,
+  )
+  assert_true(
+    bridge_failure(BridgeUnsent("OpenSeek connection is down")) is Unsent,
+  )
+  // A reply that arrived and could not be decoded went out: the host acted,
+  // and it is its answer that was lost.
+  assert_true(
+    bridge_failure(BridgeError("Malformed reply from agent.goal")) is Unknown,
+  )
+  // Neither is a refusal, which is what keeps the start and steer paths
+  // behaving exactly as before.
+  for
+    error in [
+      BridgeUnsent("OpenSeek bridge unavailable"),
+      BridgeError("Malformed reply from agent.goal"),
+    ] {
+    assert_false(bridge_error_is_definite(error))
+  }
 }

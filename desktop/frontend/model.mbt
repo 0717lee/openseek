@@ -2476,6 +2476,12 @@ fn Model::can_reload_transcript(self : Model, conv : Conversation) -> Bool {
     !conv.messages.is_empty() ||
     conv.sync is ReloadFailed(..) ||
     conv.has_recovering_initial() ||
+    // A goal command whose reply never came back is the same kind of
+    // evidence as an unconfirmed prompt: it may already have been appended,
+    // and re-reading is the only way to find out. Without this a `/goal` on
+    // an otherwise-empty conversation has nothing else to reload for, so the
+    // request would wait for a snapshot that is never asked for.
+    conv.goal_pending is Some(_) ||
     conv.overlay.iter().any(notice => notice.anchor is SnapshotCut(..)) {
     return true
   }
@@ -2872,6 +2878,22 @@ fn Conversation::pending_steers(self : Conversation) -> Array[String] {
     }
   }
   pending
+}
+
+///|
+/// What the goal editor opens on: the newest goal text this conversation
+/// knows of. A set still waiting for its marker is newer than the mirror —
+/// the mirror is what the record carried *before* it — so editing during
+/// that window continues what was sent rather than reverting to what it was
+/// about to replace.
+fn Conversation::goal_draft_seed(self : Conversation) -> String {
+  match (self.goal_pending, self.goal) {
+    (Some(Setting(text)), _) => text
+    // A clear in flight is asking for nothing to stand, so it seeds nothing.
+    (Some(Clearing), _) => ""
+    (None, Some(goal)) => goal.text
+    (None, None) => ""
+  }
 }
 
 ///|

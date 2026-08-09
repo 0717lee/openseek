@@ -7,13 +7,19 @@
 
 ///|
 priv suberror BridgeError {
+  // The call left this client and something went wrong after that: a reply
+  // arrived that could not be read.
   BridgeError(String)
+  // The call never left: no bridge, no such method, no open socket. Raised
+  // strictly before anything is written to the transport, which is what lets
+  // callers treat it as "nothing landed" rather than "unknown".
+  BridgeUnsent(String)
 }
 
 ///|
 impl Show for BridgeError with fn output(self, logger) {
   match self {
-    BridgeError(message) => logger.write_string(message)
+    BridgeError(message) | BridgeUnsent(message) => logger.write_string(message)
   }
 }
 
@@ -38,7 +44,7 @@ pub async fn[Payload : ToJson, Reply : @json.FromJson] bridge_request(
   let reply = match channel {
     Local => {
       guard openseek_api() is Some(api) && js_prop(api, op) is Some(_) else {
-        raise BridgeError("OpenSeek bridge unavailable")
+        raise BridgeUnsent("OpenSeek bridge unavailable")
       }
       js_method_promise(api, op, payload).wait()
     }
@@ -116,7 +122,7 @@ pub async fn[Payload : ToJson, Reply : @json.FromJson] bridge_request_in_order(
     let reply = match channel {
       Local => {
         guard openseek_api() is Some(api) && js_prop(api, op) is Some(_) else {
-          raise BridgeError("OpenSeek bridge unavailable")
+          raise BridgeUnsent("OpenSeek bridge unavailable")
         }
         js_ordered_method_promise(api, op, payload).wait()
       }
@@ -166,7 +172,7 @@ test "an ordered request failure releases its channel lane" {
 /// error's `message` over its stringified form.
 pub fn bridge_error_text(error : Error) -> String {
   match error {
-    BridgeError(message) => message
+    BridgeError(message) | BridgeUnsent(message) => message
     @js.Error_(value) =>
       if js_prop(value, "message") is Some(message) &&
         (@js.Cast::into(message) : String?) is Some(text) &&
@@ -180,18 +186,50 @@ pub fn bridge_error_text(error : Error) -> String {
 }
 
 ///|
-/// Whether a failed bridge call is a definitive host refusal. Browser
-/// JSON-RPC errors carry a marker set by the response decoder; socket close /
-/// down errors do not. In the embedded proton bridge, a present method's
-/// rejected promise is the direct host answer, while a missing bridge is the
-/// separate ambiguous `BridgeError` case.
-pub fn bridge_error_is_definite(error : Error) -> Bool {
+/// What a failed bridge call says about the command it carried. The question
+/// a caller actually has is not "did this error" but "could the host have
+/// acted on it", and that has three answers, not two — collapsing `Unsent`
+/// into `Unknown` makes callers hedge over an outcome that is not in doubt,
+/// and hedging is what leaves an optimistic local state with nothing left to
+/// resolve it.
+pub(all) enum BridgeFailure {
+  // The host answered, and the answer was no. Nothing landed.
+  Refused
+  // The call never reached a transport: no injected bridge, no such method,
+  // no open socket. Nothing landed, and nothing is on its way.
+  Unsent
+  // It went out and the answer did not come back. The host may have acted;
+  // only the durable record can say.
+  Unknown
+}
+
+///|
+/// Classify a failed bridge call. Browser JSON-RPC errors carry a marker set
+/// by the response decoder; socket close / down errors do not. In the
+/// embedded proton bridge, a present method's rejected promise is the direct
+/// host answer.
+pub fn bridge_failure(error : Error) -> BridgeFailure {
   match error {
-    BridgeError(_) => false
+    BridgeUnsent(_) => Unsent
+    // A reply that arrived and could not be decoded: the host acted, and its
+    // answer is what is lost.
+    BridgeError(_) => Unknown
     @js.Error_(value) =>
-      openseek_api() is Some(_) || browser_rpc_error_is_definite(value)
-    _ => false
+      if openseek_api() is Some(_) || browser_rpc_error_is_definite(value) {
+        Refused
+      } else {
+        Unknown
+      }
+    _ => Unknown
   }
+}
+
+///|
+/// Whether a failed bridge call is a definitive host refusal — the two-state
+/// view of `bridge_failure`, kept for the start and steer paths, whose
+/// unconfirmed handling already does the conservative thing with `Unsent`.
+pub fn bridge_error_is_definite(error : Error) -> Bool {
+  bridge_failure(error) is Refused
 }
 
 ///|
