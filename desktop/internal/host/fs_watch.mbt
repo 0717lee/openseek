@@ -93,16 +93,23 @@ fn WatchInterest::remember(
 
 ///|
 /// Subtrees omitted by recursive snapshots and legacy full-tree watchers.
-/// `.worktrees` keeps worktree agents' churn out of the main workspace's
-/// panel and Quick Open; a worktree session's own watcher roots inside
-/// the checkout, where relative paths never carry that segment. Explicit
-/// watcher selections do not use this policy: an opened file must remain
-/// watchable even under one of these conventional directory names.
+/// Besides build and dependency output, agent/tool state directories are
+/// omitted: they can contain large caches or nested worktrees and are not
+/// useful Quick Open results. `.worktrees` keeps worktree agents' churn out
+/// of the main workspace; a worktree session's own watcher roots inside the
+/// checkout, where relative paths never carry that segment. Explicit watcher
+/// selections do not use this policy: an opened file must remain watchable
+/// even under one of these conventional directory names.
 fn @pathx.Relative::is_ignored_watch_path(self : @pathx.Relative) -> Bool {
   match [..self.0.split("/")] {
     [
       ..,
       ".git"
+      | ".claude"
+      | ".codex"
+      | ".cursor"
+      | ".moonagent"
+      | ".openseek"
       | "target"
       | "_build"
       | "node_modules"
@@ -331,8 +338,15 @@ test "legacy watch payloads retain the recursive blacklist" {
   let interest = WatchInterest(payload)
   assert_true(interest.legacy_full_tree)
   assert_true(interest.ignores(Relative("deps/node_modules")))
+  assert_true(interest.ignores(Relative(".claude")))
+  assert_true(interest.ignores(Relative("packages/app/.codex")))
+  assert_true(interest.ignores(Relative("packages/app/.cursor")))
+  assert_true(interest.ignores(Relative("packages/app/.moonagent")))
+  assert_true(interest.ignores(Relative("packages/app/.openseek")))
   assert_true(interest.ignores(Relative(".worktrees")))
   assert_true(interest.ignores(Relative("sub/.worktrees")))
+  // Project-owned dot-directories remain searchable/watchable by default.
+  assert_false(interest.ignores(Relative(".github/workflows/check.yml")))
   assert_false(interest.ignores(Relative("src/main.mbt")))
 }
 
