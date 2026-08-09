@@ -35,6 +35,29 @@ fn focus_explorer_tab_after_render(id : String) -> @cmd.Cmd {
 }
 
 ///|
+fn changed_file_row_id(index : Int) -> String {
+  "changed-file-row-\{index}"
+}
+
+///|
+fn focus_changed_file_after_render(index : Int) -> @cmd.Cmd {
+  @cmd.custom_cmd(
+    _ => {
+      if @dom.document()
+        .get_element_by_id(changed_file_row_id(index))
+        .to_option()
+        is Some(row) {
+        let _ : @js.Value = @js.Value::cast_from(row).apply_with_string(
+          "focus",
+          ([] : Array[@js.Value]),
+        )
+      }
+    },
+    kind=@cmd.after_render,
+  )
+}
+
+///|
 /// An icon's SVG markup injected into a fixed-size span. The markup is a
 /// trusted compile-time constant, never user input, so the XSS alert on
 /// `inner_html` does not apply.
@@ -396,8 +419,8 @@ fn change_inventory(
             },
           ),
         ]
-        for change in files {
-          rows.push(changed_file_row(dispatch, state, ctx, change))
+        for index, change in files {
+          rows.push(changed_file_row(dispatch, state, ctx, change, index))
         }
         rows
       }
@@ -428,6 +451,7 @@ fn changed_file_row(
   state : State,
   ctx : Ctx,
   change : ChangedFile,
+  index : Int,
 ) -> @html.Html {
   let selected = change.is_selected(state, ctx)
   let reviewed = state.reviewed_changes.contains(change)
@@ -469,9 +493,32 @@ fn changed_file_row(
       title="Open diff — " + change.status_title(),
       on_click=dispatch(ChangedFileSelected(change)),
       attrs=@html.Attrs::build()
+        .id(changed_file_row_id(index))
         .data_set("path", change.path.0)
         .aria_label("View diff: " + change.status_title())
-        .aria_current(if selected { "page" } else { "false" }),
+        .aria_current(if selected { "page" } else { "false" })
+        .on_keydown(event => {
+          let destination = match event.key() {
+            "ArrowUp" => review_neighbor(state, change, -1)
+            "ArrowDown" => review_neighbor(state, change, 1)
+            "Home" => review_edge(state, change, first=true)
+            "End" => review_edge(state, change, first=false)
+            _ => None
+          }
+          match destination {
+            Some(destination) => {
+              event.prevent_default()
+              @cmd.batch([
+                dispatch(ChangedFileSelected(destination)),
+                match change_row_index(state, destination) {
+                  Some(index) => focus_changed_file_after_render(index)
+                  None => @cmd.none
+                },
+              ])
+            }
+            None => @cmd.none
+          }
+        }),
       children,
     )
   } else {
@@ -479,6 +526,7 @@ fn changed_file_row(
       class~,
       title=change.unselectable_title(),
       attrs=@html.Attrs::build()
+        .id(changed_file_row_id(index))
         .data_set("path", change.path.0)
         .role("button")
         .aria_disabled("true")
@@ -488,6 +536,77 @@ fn changed_file_row(
       children,
     )
   }
+}
+
+///|
+fn reviewable_changes(state : State) -> Array[ChangedFile] {
+  match state.changes {
+    ChangeListReady(files~, ..) => files.filter(change => change.selectable())
+    _ => []
+  }
+}
+
+///|
+fn change_row_index(state : State, selected : ChangedFile) -> Int? {
+  guard state.changes is ChangeListReady(files~, ..) else { return None }
+  for index in 0..<files.length() {
+    if files[index] == selected {
+      return Some(index)
+    }
+  }
+  None
+}
+
+///|
+/// Adjacent reviewable row for list-keyboard navigation. Exact row equality
+/// keeps staged-delete plus same-path untracked pairs independently ordered.
+fn review_neighbor(
+  state : State,
+  selected : ChangedFile,
+  delta : Int,
+) -> ChangedFile? {
+  let changes = reviewable_changes(state)
+  for index in 0..<changes.length() {
+    if changes[index] == selected {
+      let destination = index + delta
+      if destination >= 0 && destination < changes.length() {
+        return Some(changes[destination])
+      }
+      return None
+    }
+  }
+  None
+}
+
+///|
+fn review_edge(
+  state : State,
+  selected : ChangedFile,
+  first~ : Bool,
+) -> ChangedFile? {
+  let changes = reviewable_changes(state)
+  guard !changes.is_empty() else { return None }
+  let edge = changes[if first { 0 } else { changes.length() - 1 }]
+  if edge == selected {
+    None
+  } else {
+    Some(edge)
+  }
+}
+
+///|
+fn active_review_position(state : State, ctx : Ctx) -> (ChangedFile, Int, Int)? {
+  guard ctx.active_file is Some(path) &&
+    state.docs.get(path) is Some({ review: Some(review), .. }) else {
+    return None
+  }
+  let changes = reviewable_changes(state)
+  for index in 0..<changes.length() {
+    if changes[index] == review.selected {
+      return Some((review.selected, index, changes.length()))
+    }
+  }
+  None
 }
 
 ///|
@@ -605,6 +724,7 @@ pub fn breadcrumb_view(
     },
     [
       @html.div(class="crumb-path", crumbs),
+      review_navigation(dispatch, state, ctx),
       review_badge(dispatch, state, ctx),
       review_progress(dispatch, state, ctx),
       @html.button(
@@ -612,6 +732,59 @@ pub fn breadcrumb_view(
         title=if state.tree_open { "Hide file tree" } else { "Show file tree" },
         on_click=dispatch(ToggleTree),
         icon(icon_folder),
+      ),
+    ],
+  )
+}
+
+///|
+/// Previous/next controls for walking the reviewable Changes queue without
+/// returning to the tree between files. Native buttons remain keyboard
+/// reachable; changed rows additionally support ArrowUp/Down and Home/End.
+fn review_navigation(
+  dispatch : @cmd.Emit[Msg],
+  state : State,
+  ctx : Ctx,
+) -> @html.Html {
+  guard active_review_position(state, ctx) is Some((selected, index, total)) else {
+    return @html.span(class="review-navigation hidden", "")
+  }
+  let previous = review_neighbor(state, selected, -1)
+  let next = review_neighbor(state, selected, 1)
+  @html.div(
+    class="review-navigation",
+    attrs=@html.Attrs::build()
+      .role("group")
+      .aria_label("Changed file navigation"),
+    [
+      @html.button(
+        type_="button",
+        class="review-nav-button",
+        title="Previous changed file",
+        disabled=previous is None,
+        on_click=match previous {
+          Some(previous) => dispatch(ChangedFileSelected(previous))
+          None => @cmd.none
+        },
+        attrs=@html.Attrs::build().aria_label("Previous changed file"),
+        "‹",
+      ),
+      @html.span(
+        class="review-nav-position",
+        attrs=@html.Attrs::build().aria_live("polite"),
+        "\{index + 1} of \{total}",
+      ),
+      @html.button(
+        type_="button",
+        class="review-nav-button",
+        title="Next changed file",
+        disabled=next is None,
+        on_click=match next {
+          Some(next) => dispatch(ChangedFileSelected(next))
+          None => @cmd.none
+        },
+        attrs=@html.Attrs::build().aria_label("Next changed file"),
+        "›",
       ),
     ],
   )

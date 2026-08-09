@@ -1268,6 +1268,46 @@ html.is-resizing * {
 .review-badge.hidden {
   display: none;
 }
+.review-navigation {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 2px;
+}
+.review-navigation.hidden {
+  display: none;
+}
+.review-nav-button {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: var(--ink-2);
+  background: transparent;
+  font: inherit;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+.review-nav-button:hover:not(:disabled) {
+  border-color: var(--line);
+  color: var(--ink);
+  background: var(--surface-2);
+}
+.review-nav-button:disabled {
+  color: var(--ink-3);
+  cursor: default;
+  opacity: 0.45;
+}
+.review-nav-position {
+  min-width: 38px;
+  color: var(--ink-3);
+  font-size: 10px;
+  text-align: center;
+}
 .review-badge-action {
   appearance: none;
   font: inherit;

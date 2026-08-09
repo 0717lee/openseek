@@ -48,6 +48,10 @@ test "desktop review keeps sibling hosts stable across source and diff modes" {
   assert_true(source_breadcrumb.contains("aria-pressed=\"false\""))
   assert_true(source_breadcrumb.contains(">View full diff</button>"))
   assert_true(source_breadcrumb.contains(">Mark reviewed</button>"))
+  assert_true(
+    source_breadcrumb.contains("aria-label=\"Changed file navigation\""),
+  )
+  assert_true(source_breadcrumb.contains(">1 of 1</span>"))
 
   let diff_doc = {
     ..source_doc,
@@ -85,4 +89,5 @@ test "desktop review keeps sibling hosts stable across source and diff modes" {
   )
   assert_true(reviewed_tree.contains("1 of 1 reviewable files reviewed"))
   assert_true(reviewed_tree.contains("change-row selected reviewed"))
+  assert_true(reviewed_tree.contains("id=\"changed-file-row-0\""))
 }
