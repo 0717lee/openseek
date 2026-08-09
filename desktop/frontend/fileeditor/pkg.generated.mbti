@@ -152,6 +152,7 @@ pub(all) enum Msg {
   ChangesPollDue(owner~ : @interop.ConversationKey, generation~ : Int)
   FileSelected(path~ : @pathx.Relative, name~ : String)
   ChangedFileSelected(ChangedFile)
+  ToggleReviewDiff
   GitOriginalLoaded(owner~ : @interop.ConversationKey, path~ : @pathx.Relative, generation~ : Int, background~ : Bool, original~ : @protocol.GitOriginalFileReply)
   GitOriginalFailed(owner~ : @interop.ConversationKey, path~ : @pathx.Relative, generation~ : Int, background~ : Bool, message~ : String)
   OpenNavigationLocation(owner~ : @interop.ConversationKey, path~ : @pathx.Relative, range~ : @common.Range)
@@ -179,7 +180,13 @@ pub(all) struct ReviewState {
   generation : Int
   working_generation : Int
   baseline : ReviewBaseline
+  view_mode : ReviewViewMode
   selected : ChangedFile
+} derive(Eq)
+
+pub(all) enum ReviewViewMode {
+  ReviewSource
+  ReviewUnifiedDiff
 } derive(Eq)
 
 pub(all) struct State {

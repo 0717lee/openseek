@@ -1249,6 +1249,15 @@ html.is-resizing * {
 .review-badge.hidden {
   display: none;
 }
+.review-badge-action {
+  appearance: none;
+  font: inherit;
+  cursor: pointer;
+}
+.review-badge-action:hover {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+}
 
 .viewer-host {
   /* The embedded viewer positions its layers absolutely; without a
