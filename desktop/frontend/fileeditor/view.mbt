@@ -182,16 +182,16 @@ fn viewer_notice(state : State, ctx : Ctx) -> @html.Html {
             TabDeleted =>
               match doc.review {
                 Some({ baseline: ReviewLoading, .. }) =>
-                  "Loading the HEAD version of \{doc.name}…"
+                  "Loading the review baseline for \{doc.name}…"
                 Some({ baseline: ReviewContent(_), .. }) => ""
                 Some({ baseline: ReviewMissing, .. }) =>
-                  "\{doc.name} was deleted and has no HEAD version to preview."
+                  "\{doc.name} was deleted and has no review baseline to preview."
                 Some({ baseline: ReviewBinary, .. }) =>
-                  "The HEAD version of \{doc.name} is binary and cannot be previewed."
+                  "The review baseline for \{doc.name} is binary and cannot be previewed."
                 Some({ baseline: ReviewOversized, .. }) =>
-                  "The HEAD version of \{doc.name} is too large to preview."
+                  "The review baseline for \{doc.name} is too large to preview."
                 Some({ baseline: ReviewFailed(message), .. }) =>
-                  "Could not load the HEAD version of \{doc.name}: \{message}."
+                  "Could not load the review baseline for \{doc.name}: \{message}."
                 None => "\{doc.name} was deleted on disk."
               }
             TabBinary => "\{doc.name} is a binary file and cannot be previewed."
@@ -850,8 +850,8 @@ fn review_badge(
               )
             Some({ view_mode: ReviewSource, .. }) =>
               (
-                "View full diff", "Open the full unified diff against HEAD", true,
-                false,
+                "View full diff", "Open the full unified diff against the review baseline",
+                true, false,
               )
             None => ("", "", false, false)
           }
@@ -863,7 +863,7 @@ fn review_badge(
           }
         ) =>
           (
-            "Deleted · HEAD", "Deleted in the working tree; showing the HEAD version",
+            "Deleted · baseline", "Deleted in the working tree; showing the review baseline",
             false, false,
           )
         Some(
@@ -874,7 +874,7 @@ fn review_badge(
           }
         ) =>
           (
-            "Working unavailable · HEAD", "The working-tree file could not be read; showing the HEAD version",
+            "Working unavailable · baseline", "The working-tree file could not be read; showing the review baseline",
             false, false,
           )
         Some({ state: TabBinary, review: Some(_), .. })
@@ -886,7 +886,7 @@ fn review_badge(
           )
         Some({ review: Some({ baseline: ReviewLoading, .. }), .. }) =>
           (
-            "Loading diff…", "Loading the HEAD version for comparison", false,
+            "Loading diff…", "Loading the review baseline for comparison", false,
             false,
           )
         Some(
@@ -897,8 +897,8 @@ fn review_badge(
           }
         ) =>
           (
-            "Deleted · no HEAD", "No HEAD version is available to preview", false,
-            false,
+            "Deleted · no baseline", "No review baseline is available to preview",
+            false, false,
           )
         Some({ name, review: Some({ baseline: ReviewContent(_), .. }), .. }) if name.has_suffix(
             ".md",
@@ -911,22 +911,30 @@ fn review_badge(
             ".md",
           ) =>
           (
-            "Rendered · no gutter", "New Markdown has no HEAD version; its rendered preview does not expose diff decorations",
+            "Rendered · no gutter", "New Markdown has no review baseline; its rendered preview does not expose diff decorations",
             false, false,
           )
         Some({ review: Some({ baseline: ReviewContent(_), .. }), .. }) =>
-          ("Diff vs HEAD", "Quick diff against the HEAD version", false, false)
-        Some({ review: Some({ baseline: ReviewMissing, .. }), .. }) =>
           (
-            "New · no HEAD", "New file compared with an empty HEAD baseline", false,
+            "Diff vs baseline", "Quick diff against the review baseline", false,
             false,
           )
+        Some({ review: Some({ baseline: ReviewMissing, .. }), .. }) =>
+          (
+            "New · no baseline", "New file compared with an empty review baseline",
+            false, false,
+          )
         Some({ review: Some({ baseline: ReviewBinary, .. }), .. }) =>
-          ("Diff unavailable", "The HEAD version is binary", false, false)
+          ("Diff unavailable", "The review baseline is binary", false, false)
         Some({ review: Some({ baseline: ReviewOversized, .. }), .. }) =>
-          ("Diff unavailable", "The HEAD version is too large", false, false)
+          ("Diff unavailable", "The review baseline is too large", false, false)
         Some({ review: Some({ baseline: ReviewFailed(message), .. }), .. }) =>
-          ("Diff unavailable", "Could not load HEAD: " + message, false, false)
+          (
+            "Diff unavailable",
+            "Could not load review baseline: " + message,
+            false,
+            false,
+          )
         _ => ("", "", false, false)
       }
     None => ("", "", false, false)
