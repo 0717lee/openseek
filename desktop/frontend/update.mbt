@@ -5089,14 +5089,22 @@ fn update_device_msg(
       } else {
         (@cmd.none, model)
       }
-    GoalUndelivered(session~, draft~, message~) =>
-      if model.find_conversation(channel, session) is Some(conv) {
-        // The request stays in flight: a marker, or the reload that follows
-        // the reconnect, is what settles it. So the text cannot come back to
-        // the editor — it would claim the goal is unset, and a resend over a
-        // command the host may already hold only earns a refusal. It rides
-        // the notice instead, which is where the start path leaves a prompt
-        // it could not confirm either.
+    GoalUndelivered(session~, command~, draft~, message~) =>
+      if model.find_conversation(channel, session) is Some(conv) &&
+        conv.goal_pending is Some(pending) &&
+        pending.id == command {
+        // Only while this send is still the one in flight. It retires
+        // nothing, but "the fate of this text is unknown" is still a claim
+        // about the world, and it stops being true the moment the record
+        // settles the send — the socket can die after the commit arrives and
+        // before the reply does — or a newer send replaces it.
+        //
+        // While it is true, the request stays in flight: a marker, or the
+        // reload that follows the reconnect, is what settles it. So the text
+        // cannot come back to the editor — it would claim the goal is unset,
+        // and a resend over a command the host may already hold only earns a
+        // refusal. It rides the notice instead, which is where the start path
+        // leaves a prompt it could not confirm either.
         let detail = if draft is Some(draft) {
           " — check the transcript before setting it again: " + draft
         } else {

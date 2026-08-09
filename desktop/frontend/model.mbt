@@ -568,53 +568,58 @@ priv enum GoalRequest {
 
 ///|
 /// Whether one durable observation of the standing goal — moving it from
-/// `before` to `after` — is this request's own result.
+/// `before` to `after` — recorded this request's own outcome.
 ///
-/// The request is *not* matched against the marker that carried it. The
-/// durable record has no provenance — a `[goal]` commit proves the engine is
-/// appending, never that *this* command is the one it appended, and two
-/// clients (or a retry) can write markers this session never sent. Asking
-/// "is what I asked for true now" is answerable from any durable read;
+/// The request is *not* matched against whose command produced the marker.
+/// The durable record has no provenance — a `[goal]` commit proves the engine
+/// is appending, never that *this* client is the one it appended for, and a
+/// retry or a second client can write markers this session never sent. Asking
+/// "did the record just do what I asked" is answerable from any durable read;
 /// asking "was that echo mine" is not.
 ///
-/// It also makes every durable observation a settling point for free: a
-/// marker commit, a recovery snapshot after a reconnect, a resumed session's
-/// first read.
+/// It has to be *did*, not *agrees with*. Re-sending an unchanged goal is a
+/// real command, not a no-op: serve records a fresh baseline beside every set
+/// marker and restarts the goal cadence from it, and it explicitly keeps two
+/// same-text goals apart while they queue. So a mirror that already reads
+/// what was asked for is no evidence at all — under it, any later commit
+/// would retire the request along with its recovery copy while its own append
+/// could still fail. The same trap in sharper form is a clear, which names an
+/// *absence*: an absence is also what a record carries before any goal
+/// exists, so the goalless state a set in flight is about to leave looks
+/// exactly like the one a clear produces.
 ///
-/// The two kinds read that observation differently, and have to.
-///
-/// A set names a state, and its text tells that state apart from the one it
-/// replaced, so `after` alone carries the proof — which is what lets a
-/// snapshot settle a set whose marker this client never saw commit.
-///
-/// A clear names an *absence*, and an absence is also what a record carries
-/// before any goal is set, so `after` alone proves nothing: the goalless
-/// state a set in flight is about to leave looks exactly like the one a
-/// clear produces. What distinguishes them is the record positively saying
-/// so — a tombstone in the commit that carried it, or, on a snapshot, which
-/// has only the reduced state, a goal that was standing and now is not.
-/// `marker` is therefore present on the commit path and absent on the
-/// snapshot path, and the two are alternative evidence for the same fact,
-/// not a fallback.
+/// So the observation must have *moved* the record, and the two paths carry
+/// that differently. A commit carries the marker, which says outright what
+/// was just recorded. A snapshot carries only the reduced state, where the
+/// move itself is the evidence — which is what lets a reload settle a send
+/// whose reply was lost. Two spellings of one fact, not a fallback; a
+/// snapshot that finds the record unchanged settles nothing, because there
+/// it genuinely cannot tell.
 fn GoalRequest::settled_by(
   self : GoalRequest,
   before : @transcript.GoalStanding?,
   after : @transcript.GoalStanding?,
   marker? : @transcript.GoalMarker,
 ) -> Bool {
+  // Did this observation record what was asked for?
+  let recorded = match marker {
+    Some(marker) =>
+      match (self, marker) {
+        (Setting(text), GoalSet(recorded)) => recorded == text
+        (Clearing, GoalCleared) => true
+        _ => false
+      }
+    // A snapshot has no marker; the move it shows is the evidence.
+    None => before != after
+  }
+  guard recorded else { return false }
+  // And is what it recorded the state this request asked for? A set marker
+  // reduces to `{text, blocked: None}`, so re-asserting a blocked goal's own
+  // text is how it gets unblocked; a clear's is nothing standing.
   match (self, after) {
-    // The whole post-state, not just the text. A set marker reduces to
-    // `{text, blocked: None}` — resubmitting a blocked goal's own text
-    // unchanged is exactly how it is re-asserted — so matching on text alone
-    // would let the blocked goal being replaced stand in for its own
-    // replacement, and the first unrelated commit after that would retire
-    // the request with its recovery draft.
     (Setting(text), Some(standing)) =>
       standing.text == text && standing.blocked is None
-    // A tombstone is the record itself saying nothing stands — including
-    // over a mirror that was already empty, which is exactly the escape a
-    // clear sent over a set that never appended has to be able to complete.
-    (Clearing, None) => marker is Some(GoalCleared) || before is Some(_)
+    (Clearing, None) => true
     _ => false
   }
 }
@@ -1898,10 +1903,16 @@ priv enum DeviceMsg {
   // may already carry it, and inviting a resend races the marker. `draft` is
   // reported in the notice so the writing survives even if nothing landed.
   //
-  // Unlike `GoalRejected` this names no send: it retires nothing, so it has
-  // nothing to identify. Whatever is pending stays pending, and the record
-  // settles it.
-  GoalUndelivered(session~ : String, draft~ : String?, message~ : String)
+  // It names its send like `GoalRejected` does. It retires nothing, but it
+  // still makes a claim — that this text's fate is unknown — and that claim
+  // goes stale the moment the record settles the send or a newer one
+  // replaces it.
+  GoalUndelivered(
+    session~ : String,
+    command~ : String,
+    draft~ : String?,
+    message~ : String
+  )
   // `answer` accompanies normal success and context yield (where it is
   // continuation guidance); other terminal statuses carry none.
   Finished(

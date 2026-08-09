@@ -636,6 +636,64 @@ test "a tombstone over an empty mirror still ends the clear" {
 }
 
 ///|
+test "re-asserting an unchanged goal waits for its own marker too" {
+  let dispatch = test_dispatch()
+  // Re-sending the same text is a real command, not a no-op: serve records a
+  // fresh baseline beside every set marker and restarts the goal cadence from
+  // it. The mirror already reading that text is therefore no evidence at all,
+  // and treating it as evidence would let the next commit of any kind retire
+  // the request with its recovery copy while its own append could still fail.
+  let model = test_model().replace_conversation({
+    ..test_conversation(),
+    goal: Some({ text: "ship the feature", blocked: None }),
+    goal_pending: Some(test_goal_command(Setting("ship the feature"))),
+  })
+  fn commit(model, sequence, content) {
+    let (_, next) = update_dev(
+      dispatch,
+      SessionCommitted(
+        session="desktop-test",
+        sequence~,
+        ts=None,
+        item=@protocol.RuntimeNotice({ content, }),
+      ),
+      model,
+    )
+    next
+  }
+
+  let unrelated = commit(model, 1, "just some runtime notice")
+  assert_true(
+    unrelated.active().goal_pending
+    is Some({ request: Setting("ship the feature"), .. }),
+  )
+  // A snapshot cannot tell either — the record it reads back is the same one
+  // that was already there — so it settles nothing rather than guessing.
+  let (_, reloaded) = update_dev(
+    dispatch,
+    SessionRefreshed(
+      goal=Some({ text: "ship the feature", blocked: None }),
+      session="desktop-test",
+      items=[],
+      watermark=1,
+      event_boundaries=[],
+      generation=1,
+    ),
+    {
+      ..unrelated,
+      conversations: [{ ..unrelated.active(), sync: test_reloading([]) }],
+    },
+  )
+  assert_true(
+    reloaded.active().goal_pending
+    is Some({ request: Setting("ship the feature"), .. }),
+  )
+  // Its own marker does say so outright.
+  let settled = commit(unrelated, 2, "[goal]\nship the feature")
+  assert_true(settled.active().goal_pending is None)
+}
+
+///|
 test "re-asserting a blocked goal waits for its own marker" {
   let dispatch = test_dispatch()
   // Edit on a blocked goal seeds from the mirror, so resubmitting unchanged
@@ -815,6 +873,55 @@ test "a failed durable append is reported, not inferred from" {
 }
 
 ///|
+test "an undelivered reply goes quiet once its send has been settled" {
+  let dispatch = test_dispatch()
+  // The socket can die after the commit arrives and before the reply does.
+  // "Delivery could not be confirmed" retires nothing, but it is still a
+  // claim about the world, and by now the record has answered it.
+  let model = test_model().replace_conversation({
+    ..test_conversation(),
+    goal_pending: Some({ id: "goal-1", request: Setting("ship the feature") }),
+  })
+  let (_, settled) = update_dev(
+    dispatch,
+    SessionCommitted(
+      session="desktop-test",
+      sequence=1,
+      ts=None,
+      item=@protocol.RuntimeNotice({ content: "[goal]\nship the feature" }),
+    ),
+    model,
+  )
+  assert_true(settled.active().goal_pending is None)
+  fn undelivered(model, command) {
+    let (_, next) = update_dev(
+      dispatch,
+      GoalUndelivered(
+        session="desktop-test",
+        command~,
+        draft=Some("ship the feature"),
+        message="bridge unavailable",
+      ),
+      model,
+    )
+    next
+  }
+
+  inspect(undelivered(settled, "goal-1").active().overlay.length(), content="0")
+  // Nor for a send a newer one has replaced.
+  let superseded = model.replace_conversation({
+    ..model.active(),
+    goal_pending: Some({ id: "goal-2", request: Setting("something newer") }),
+  })
+  inspect(
+    undelivered(superseded, "goal-1").active().overlay.length(),
+    content="0",
+  )
+  // Still in flight: still true, and still reported.
+  inspect(undelivered(model, "goal-1").active().overlay.length(), content="1")
+}
+
+///|
 test "a rejection that arrives after the record has spoken only reports" {
   let dispatch = test_dispatch()
   // The successor's marker settles the slot, and then the superseded send's
@@ -901,6 +1008,7 @@ test "an unconfirmed delivery keeps waiting instead of handing the text back" {
     dispatch,
     GoalUndelivered(
       session="desktop-test",
+      command="goal-1",
       draft=Some("ship the feature"),
       message="bridge unavailable",
     ),

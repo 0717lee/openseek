@@ -1373,7 +1373,8 @@ async fn request_agent_goal(
             match @interop.bridge_failure(error) {
               Refused | Unsent =>
                 GoalRejected(session~, command~, draft=text, message~)
-              Unknown => GoalUndelivered(session~, draft=text, message~)
+              Unknown =>
+                GoalUndelivered(session~, command~, draft=text, message~)
             },
           ),
         )
