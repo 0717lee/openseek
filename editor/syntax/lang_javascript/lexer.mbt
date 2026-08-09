@@ -17,6 +17,11 @@ struct JavascriptTokenizer {
 }
 
 ///|
+/// Shared immutable base stack. Returning it avoids rebuilding the normal
+/// state for every initial-state request.
+let javascript_normal_state : @syntax.TokenizerState = TokenizerState("n")
+
+///|
 /// Creates the JavaScript tokenizer.
 pub fn JavascriptTokenizer::JavascriptTokenizer() -> JavascriptTokenizer {
   { _unit: () }
@@ -27,7 +32,7 @@ pub fn JavascriptTokenizer::JavascriptTokenizer() -> JavascriptTokenizer {
 pub impl @syntax.LineTokenizer for JavascriptTokenizer with fn initial_state(
   _self,
 ) {
-  TokenizerState("n")
+  javascript_normal_state
 }
 
 ///|
@@ -37,10 +42,18 @@ pub impl @syntax.LineTokenizer for JavascriptTokenizer with fn tokenize_line(
   line_text,
   state,
 ) {
-  let stack = @syntax.decode_mode_stack(state)
+  let start_state = if state.mode_count() == 0 {
+    javascript_normal_state
+  } else {
+    state
+  }
   let tokens : Array[@syntax.LineToken] = []
-  for at = 0, view = line_text[:]; view.length() > 0; {
-    let top = stack[stack.length() - 1]
+  let end_state = for at = 0, view = line_text[:], lexer_state = start_state; view.length() >
+                     0; {
+    let top = match lexer_state.last_mode() {
+      Some(mode) => mode
+      None => 'n'
+    }
     let (op, rest) = match top {
       'c' => comment_step(view, Comment)
       'd' => comment_step(view, CommentDoc)
@@ -48,23 +61,30 @@ pub impl @syntax.LineTokenizer for JavascriptTokenizer with fn tokenize_line(
       _ => normal_step(view, top)
     }
     let consumed = view.length() - rest.length()
-    match op {
-      Blank => ()
-      Emit(tag) => @syntax.push_token(tokens, at, at + consumed, tag)
+    let next_state = match op {
+      Blank => lexer_state
+      Emit(tag) => {
+        @syntax.push_token(tokens, at, at + consumed, tag)
+        lexer_state
+      }
       Push(tag, mode) => {
         @syntax.push_token(tokens, at, at + consumed, tag)
-        stack.push(mode)
+        lexer_state.push_mode(mode)
       }
       Pop(tag) => {
         @syntax.push_token(tokens, at, at + consumed, tag)
-        if stack.length() > 1 {
-          ignore(stack.pop())
+        if lexer_state.mode_count() > 1 {
+          lexer_state.pop_mode()
+        } else {
+          lexer_state
         }
       }
     }
-    continue at + consumed, rest
+    continue at + consumed, rest, next_state
+  } nobreak {
+    lexer_state
   }
-  (tokens, @syntax.encode_mode_stack(stack))
+  (tokens, end_state)
 }
 
 ///|

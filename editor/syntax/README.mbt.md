@@ -258,13 +258,14 @@ test "panic is_capitalized rejects an empty view" {
 }
 ```
 
-`decode_mode_stack` / `encode_mode_stack` convert between a `TokenizerState`
-and a *nesting-mode stack* — one character per open mode, with an empty state
-decoding to the base mode `'n'`. Only `lang_javascript` round-trips the pair,
-carrying its stack from one line into the next. `lang_moonbit` decodes a
-starting stack but always returns `TokenizerState("n")`, so its stack is
-per-line scratch; `lang_json` uses neither, its state being a single
-in-comment flag.
+`TokenizerState` owns an opaque character array. `push_mode` / `pop_mode`
+copy before mutation, so a cached line state remains an immutable snapshot;
+`from_modes` and `to_modes` also copy across the public boundary.
+`lang_javascript` carries this stack directly and therefore allocates only
+when a lexical mode changes. `decode_mode_stack` / `encode_mode_stack` remain
+the mutable-array adapter; `lang_moonbit` uses the decoder for its per-line
+scratch stack and always returns `TokenizerState("n")`. `lang_json` uses
+neither, its state being a single in-comment flag.
 
 ```mbt check
 ///|
