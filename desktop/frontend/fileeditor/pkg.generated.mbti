@@ -184,6 +184,9 @@ pub(all) struct ReviewState {
 
 pub(all) struct State {
   owner : @interop.ConversationKey?
+  placement_known : Bool
+  placement_workspace : @common.Uri?
+  placement_checkout : @interop.CheckoutPlacement?
   tree_open : Bool
   explorer_mode : ExplorerMode
   changes : ChangeList

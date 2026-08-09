@@ -425,8 +425,10 @@ pub fn open_changed_document(
     } else {
       // The Viewer can still contain the previously active reviewed document.
       // The dock has already switched to this uncached path, so clear the
-      // outgoing gutter while its tagged working-tree read is pending.
-      cmds.push(clear_quick_diff_baseline())
+      // outgoing document while its tagged working-tree read is pending. Use
+      // the same review-loading presentation path as later activations so the
+      // old source, navigation context, and gutter all disappear together.
+      cmds.push(show_pending_review(dispatch, ctx, path, review_doc))
     }
     cmds.push(
       read_file(
@@ -1273,16 +1275,31 @@ pub fn sync(
   let checkout_ready = !(ctx.checkout is None ||
     ctx.checkout is Some(@interop.MissingWorktree(_)))
   let owner_changed = state.owner != Some(ctx.owner)
+  let same_owner = state.owner == Some(ctx.owner)
+  let workspace_changed = same_owner &&
+    state.placement_known &&
+    state.placement_workspace != ctx.workspace
+  let resolved_checkout_changed = checkout_ready &&
+    same_owner &&
+    state.placement_known &&
+    !state.placement_parked &&
+    state.placement_checkout != ctx.checkout
+  let placement_identity_changed = workspace_changed ||
+    resolved_checkout_changed
   let parking_existing_owner = !checkout_ready &&
-    state.owner == Some(ctx.owner) &&
+    same_owner &&
+    !placement_identity_changed &&
     !state.placement_parked
   let restoring_existing_owner = checkout_ready &&
-    state.owner == Some(ctx.owner) &&
-    state.placement_parked
+    same_owner &&
+    state.placement_parked &&
+    !placement_identity_changed
   // Every filesystem request in this reconciliation carries the incarnation
   // it addresses. Compute a boundary's next epoch before scheduling any work;
   // the root projection catches up from the returned state on the next pass.
-  let request_epoch = if owner_changed || parking_existing_owner {
+  let request_epoch = if owner_changed ||
+    parking_existing_owner ||
+    placement_identity_changed {
     state.request_epoch + 1
   } else {
     state.request_epoch
@@ -1299,7 +1316,7 @@ pub fn sync(
   // previous conversation would have the next fs_changed stat their paths
   // against the new conversation's workspace — marking hidden documents
   // deleted/stale for files that never moved.
-  let (state, reroot_cmd) = if state.owner == Some(ctx.owner) {
+  let (state, reroot_cmd) = if same_owner && !placement_identity_changed {
     // The real owner remains stable across an unresolved/missing checkout so
     // its review selection survives. Clear the imperative Viewer exactly once
     // at that boundary; the update guard and watcher reconciliation below keep
@@ -1316,6 +1333,19 @@ pub fn sync(
       }
     }
     let cmds = [clear_viewer()]
+    // A workspace or resolved root/worktree transition can leave an otherwise
+    // identical watch configuration attached to the old checkout. Explicitly
+    // retire it; `with_watch` installs the desired watcher after this reroot.
+    if placement_identity_changed && state.watching is Some(current) {
+      cmds.push(
+        watch_workspace(
+          dispatch,
+          channel=current.owner.channel,
+          request_epoch,
+          None,
+        ),
+      )
+    }
     // A hidden panel's restored active document is not worth a read yet; it
     // stays TabLoading and the panel-open toggle reads it on reopen.
     if checkout_ready &&
@@ -1338,11 +1368,18 @@ pub fn sync(
       {
         ..State::empty(),
         owner: Some(ctx.owner),
+        placement_known: true,
+        placement_workspace: ctx.workspace,
+        placement_checkout: ctx.checkout,
         tree_open: state.tree_open,
         explorer_mode: state.explorer_mode,
         // Request tokens must outlive the per-conversation cache. Resetting
         // here would let a late A reply collide after switching A→B→A.
-        changes_generation: state.changes_generation,
+        changes_generation: if placement_identity_changed {
+          state.changes_generation + 1
+        } else {
+          state.changes_generation
+        },
         request_epoch,
         review_generation: state.review_generation,
         review_recovery_pending: false,
@@ -1350,7 +1387,11 @@ pub fn sync(
         placement_parked: !checkout_ready,
         // Preserve the last host configuration long enough for `with_watch`
         // to retire or replace it on the way out.
-        watching: state.watching,
+        watching: if placement_identity_changed {
+          None
+        } else {
+          state.watching
+        },
         docs,
       },
       @cmd.batch(cmds),
@@ -1397,6 +1438,9 @@ pub fn sync(
       review_recovery_pending,
       background_review_requests: Map([]),
       placement_parked: true,
+      placement_known: true,
+      placement_workspace: ctx.workspace,
+      placement_checkout: ctx.checkout,
       request_epoch,
     }
     match state.changes {
@@ -1415,7 +1459,13 @@ pub fn sync(
       _ => state
     }
   } else {
-    { ..state, placement_parked: true }
+    {
+      ..state,
+      placement_parked: true,
+      placement_known: true,
+      placement_workspace: ctx.workspace,
+      placement_checkout: ctx.checkout,
+    }
   }
   // `clear_viewer` ran when the checkout disappeared. Once the same owner is
   // repaired, put its active tab back on screen and revalidate every cached
@@ -1446,9 +1496,29 @@ pub fn sync(
     } else {
       @cmd.none
     }
-    ({ ..state, docs, review_generation, placement_parked: false }, restore_cmd)
+    (
+      {
+        ..state,
+        docs,
+        review_generation,
+        placement_parked: false,
+        placement_known: true,
+        placement_workspace: ctx.workspace,
+        placement_checkout: ctx.checkout,
+      },
+      restore_cmd,
+    )
   } else if checkout_ready {
-    ({ ..state, placement_parked: false }, @cmd.none)
+    (
+      {
+        ..state,
+        placement_parked: false,
+        placement_known: true,
+        placement_workspace: ctx.workspace,
+        placement_checkout: ctx.checkout,
+      },
+      @cmd.none,
+    )
   } else {
     (state, @cmd.none)
   }
@@ -2500,6 +2570,9 @@ fn owned_state() -> State {
   {
     ..State::empty(),
     owner: Some(test_ctx().owner),
+    placement_known: true,
+    placement_workspace: test_ctx().workspace,
+    placement_checkout: test_ctx().checkout,
     explorer_was_visible: true,
   }
 }
@@ -3351,6 +3424,135 @@ test "a closed panel still re-roots when the conversation switches" {
         directories: [],
       }
     ),
+  )
+}
+
+///|
+test "a resolved placement change reroots documents and fences old replies" {
+  let emit = test_emit()
+  let path = @pathx.Relative("reviewed.mbt")
+  guard @resource.of_path(@interop.ChannelId::Local, "/project-a")
+    is Some(old_workspace) else {
+    fail("test workspace resource was not absolute")
+  }
+  let docs : Map[@pathx.Relative, Doc] = Map([])
+  docs[path] = {
+    ..loaded_doc("reviewed.mbt"),
+    review: Some({
+      generation: 4,
+      working_generation: 4,
+      baseline: ReviewContent("root version\n"),
+      selected: test_modified_change(path),
+    }),
+  }
+  let state = {
+    ..owned_state(),
+    placement_workspace: Some(old_workspace),
+    placement_checkout: Some(@interop.WorkspaceRoot),
+    changes: ChangeListReady(
+      repository=true,
+      files=[test_modified_change(path)],
+      refreshing=false,
+      refresh_again=false,
+    ),
+    changes_head: Some("root-head"),
+    changes_head_known: true,
+    changes_generation: 2,
+    review_generation: 4,
+    docs,
+    children: Map([
+      (@pathx.Relative::root(), [{ name: "reviewed.mbt", path, is_dir: false }]),
+    ]),
+    index: IndexReady(files=[path], truncated=false),
+    watching: Some({
+      owner: test_ctx().owner,
+      workspace: Some(old_workspace),
+      files: [path],
+      directories: [@pathx.Relative::root()],
+    }),
+  }
+  let worktree_ctx : Ctx = {
+    ..test_ctx(),
+    workspace: Some(old_workspace),
+    checkout: Some(@interop.Worktree(name="wt-1")),
+    open_files: [path],
+    active_file: Some(path),
+  }
+  let (moved, _) = sync(emit, state, worktree_ctx)
+  assert_eq(moved.request_epoch, state.request_epoch + 1)
+  assert_eq(moved.changes_generation, state.changes_generation + 1)
+  assert_eq(moved.placement_workspace, Some(old_workspace))
+  assert_true(moved.placement_checkout is Some(@interop.Worktree(name="wt-1")))
+  assert_true(
+    moved.docs.get(path)
+    is Some({ state: TabLoading, review: None, stale: false, .. }),
+  )
+  assert_true(moved.children.is_empty())
+  assert_true(moved.index is IndexEmpty)
+  assert_true(moved.changes is ChangeListIdle)
+  assert_false(moved.changes_head_known)
+  assert_true(
+    moved.watching
+    is Some(
+      {
+        owner: { channel: Local, session: "desktop-test" },
+        workspace: Some(_),
+        files: [@pathx.Relative("reviewed.mbt")],
+        directories: [@pathx.Relative("")],
+      }
+    ),
+  )
+  guard @resource.of_path(@interop.ChannelId::Local, "/project-a/reviewed.mbt")
+    is Some(old_absolute) else {
+    fail("test file resource was not absolute")
+  }
+  let (_, after_old_reply) = update(
+    emit,
+    FileLoaded(
+      owner=worktree_ctx.owner,
+      epoch=state.request_epoch,
+      path~,
+      name="reviewed.mbt",
+      file=Content(content="old root reply", absolute=old_absolute, sig="1:1"),
+      review_generation=Some(4),
+      range=None,
+      annotation=None,
+    ),
+    moved,
+    { ..worktree_ctx, request_epoch: moved.request_epoch },
+  )
+  assert_true(after_old_reply == moved)
+  let (_, after_old_changes) = update(
+    emit,
+    ChangesLoaded(
+      owner=worktree_ctx.owner,
+      generation=state.changes_generation,
+      repository=true,
+      head=Some("root-head"),
+      files=[test_modified_change(path)],
+    ),
+    moved,
+    { ..worktree_ctx, request_epoch: moved.request_epoch },
+  )
+  assert_true(after_old_changes == moved)
+
+  // A workspace reassignment for the same conversation is the same hard
+  // boundary even when both sides resolve to the ordinary project root.
+  guard @resource.of_path(@interop.ChannelId::Local, "/project-b")
+    is Some(new_workspace) else {
+    fail("test workspace resource was not absolute")
+  }
+  let (reassigned, _) = sync(emit, state, {
+    ..worktree_ctx,
+    workspace: Some(new_workspace),
+    checkout: Some(@interop.WorkspaceRoot),
+  })
+  assert_eq(reassigned.request_epoch, state.request_epoch + 1)
+  assert_eq(reassigned.placement_workspace, Some(new_workspace))
+  assert_true(reassigned.placement_checkout is Some(@interop.WorkspaceRoot))
+  assert_true(
+    reassigned.docs.get(path)
+    is Some({ state: TabLoading, review: None, stale: false, .. }),
   )
 }
 

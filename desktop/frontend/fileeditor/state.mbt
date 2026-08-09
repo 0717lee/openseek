@@ -225,6 +225,14 @@ pub(all) enum ChangeList {
 /// file list arrives through `Ctx`.
 pub(all) struct State {
   owner : @interop.ConversationKey?
+  // The workspace and resolved checkout incarnation last reconciled for
+  // `owner`. A conversation can move from its project root into a newly
+  // created worktree without changing owner or passing through a missing
+  // placement; retaining both identities makes that transition a hard cache
+  // and request boundary instead of letting root-checkout data survive it.
+  placement_known : Bool
+  placement_workspace : @common.Uri?
+  placement_checkout : @interop.CheckoutPlacement?
   // Whether the file-tree pane (the toggleable column right of the viewer)
   // is shown. A panel preference, not per-conversation state, so it
   // survives conversation switches.
@@ -234,8 +242,9 @@ pub(all) struct State {
   // not (see `sync`).
   explorer_mode : ExplorerMode
   changes : ChangeList
-  // Monotonic request token retained across conversation re-roots. Owner plus
-  // this generation rejects an old A→B→A reply for the same conversation.
+  // Monotonic request token retained across conversation re-roots and advanced
+  // across same-owner placement changes. Owner plus this generation rejects an
+  // old A→B→A reply or one from an earlier checkout incarnation.
   changes_generation : Int
   // Placement/conversation epoch carried by filesystem replies. Advancing
   // this value on either boundary rejects reads, listings, stats, and watcher
@@ -301,6 +310,9 @@ pub(all) struct State {
 pub fn State::empty() -> State {
   {
     owner: None,
+    placement_known: false,
+    placement_workspace: None,
+    placement_checkout: None,
     tree_open: true,
     explorer_mode: ExplorerFiles,
     changes: ChangeListIdle,
