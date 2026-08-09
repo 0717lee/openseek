@@ -1701,7 +1701,15 @@ pub fn update(
       let next_doc = { ..doc, review: Some({ ..review, view_mode, }) }
       let docs = state.docs.copy()
       docs[path] = next_doc
-      (show_pending_review(dispatch, ctx, path, next_doc), { ..state, docs, })
+      let show = show_pending_review(dispatch, ctx, path, next_doc)
+      let command = match view_mode {
+        // A window/tree resize can measure the display:none source host at the
+        // Viewer's 5px minimum while the diff is visible. Measure again only
+        // after source mode has restored the host's real box.
+        ReviewSource => @cmd.batch([show, request_viewer_remeasure()])
+        ReviewUnifiedDiff => show
+      }
+      (command, { ..state, docs, })
     }
     ExplorerModeSelected(mode) => {
       let already_selected = state.explorer_mode == mode
