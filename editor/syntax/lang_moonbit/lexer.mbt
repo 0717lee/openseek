@@ -4,8 +4,9 @@
 /// compiled to a tagged DFA at build time — no runtime regexes, no
 /// grammar data.
 ///
-/// The carried `TokenizerState` encodes the lexer mode stack as one
-/// byte per mode, bottom first:
+/// The carried `TokenizerState` is empty because no MoonBit string construct
+/// survives a line end. A mutable per-line scratch stack uses one byte per
+/// mode, bottom first:
 ///   b'n' normal expression code (always the bottom)
 ///   b's' inside a `"` string
 ///   b'm' inside a `$|` multiline-string line
@@ -20,7 +21,7 @@ struct MoonBitTokenizer {
 ///|
 /// Shared immutable base stack; MoonBit's lexer always returns to it at the
 /// end of a line.
-let moonbit_normal_state : @syntax.TokenizerState = TokenizerState([b'n'])
+let moonbit_normal_state : @syntax.TokenizerState = TokenizerState()
 
 ///|
 /// Creates the MoonBit tokenizer.
@@ -39,9 +40,9 @@ pub impl @syntax.LineTokenizer for MoonBitTokenizer with fn initial_state(_) {
 pub impl @syntax.LineTokenizer for MoonBitTokenizer with fn tokenize_line(
   _,
   line_text,
-  state,
+  _state,
 ) {
-  let stack = @syntax.decode_mode_stack(state)
+  let stack : Array[Byte] = [b'n']
   let tokens : Array[@syntax.LineToken] = []
   for at = 0, view = line_text[:]; view.length() > 0; {
     let top = stack[stack.length() - 1]

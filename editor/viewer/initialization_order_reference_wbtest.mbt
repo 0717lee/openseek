@@ -14,7 +14,7 @@ priv struct InitializationCountingTokenizer {
 impl @syntax.LineTokenizer for InitializationCountingTokenizer with fn initial_state(
   _self,
 ) {
-  TokenizerState(b"initialization-order".to_array())
+  TokenizerState()
 }
 
 ///|

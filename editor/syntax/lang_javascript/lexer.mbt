@@ -1,9 +1,8 @@
 ///|
 /// JavaScript behind the `syntax.LineTokenizer` contract, ported by hand
 /// from the Monarch typescript grammar's structure. The carried
-/// `TokenizerState` encodes the mode stack one byte per mode,
-/// bottom first:
-///   b'n' normal code (always the bottom)
+/// `TokenizerState` stores one byte per open mode, bottom first. The empty
+/// state means normal code:
 ///   b'c' inside a `/* ... */` block comment (spans lines)
 ///   b'd' inside a `/** ... */` doc comment (spans lines)
 ///   b't' inside a template literal (spans lines)
@@ -17,9 +16,9 @@ struct JavascriptTokenizer {
 }
 
 ///|
-/// Shared immutable base stack. Returning it avoids rebuilding the normal
+/// Shared immutable normal state. Returning it avoids rebuilding the empty
 /// state for every initial-state request.
-let javascript_normal_state : @syntax.TokenizerState = TokenizerState([b'n'])
+let javascript_normal_state : @syntax.TokenizerState = TokenizerState()
 
 ///|
 /// Creates the JavaScript tokenizer.
@@ -42,13 +41,8 @@ pub impl @syntax.LineTokenizer for JavascriptTokenizer with fn tokenize_line(
   line_text,
   state,
 ) {
-  let start_state = if state.mode_count() == 0 {
-    javascript_normal_state
-  } else {
-    state
-  }
   let tokens : Array[@syntax.LineToken] = []
-  let end_state = for at = 0, view = line_text[:], lexer_state = start_state; view.length() >
+  let end_state = for at = 0, view = line_text[:], lexer_state = state; view.length() >
                      0; {
     let top = match lexer_state.last_mode() {
       Some(mode) => mode
@@ -73,11 +67,7 @@ pub impl @syntax.LineTokenizer for JavascriptTokenizer with fn tokenize_line(
       }
       Pop(tag) => {
         @syntax.push_token(tokens, at, at + consumed, tag)
-        if lexer_state.mode_count() > 1 {
-          lexer_state.pop_mode()
-        } else {
-          lexer_state
-        }
+        lexer_state.pop_mode()
       }
     }
     continue at + consumed, rest, next_state
