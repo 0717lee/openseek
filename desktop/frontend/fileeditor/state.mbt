@@ -250,6 +250,10 @@ pub(all) struct State {
   // latter. The selection survives a conversation switch; the snapshot does
   // not (see `sync`).
   explorer_mode : ExplorerMode
+  // Source/full-diff is a reviewer preference, not a per-file decision. New
+  // changed-file reviews inherit it so next/previous and tree navigation do
+  // not force the reviewer to request the full diff again.
+  review_view_mode : ReviewViewMode
   changes : ChangeList
   // Exact changed rows the user has marked reviewed in the current checkout.
   // Watcher events and run boundaries invalidate affected progress; a final
@@ -328,6 +332,7 @@ pub fn State::empty() -> State {
     placement_checkout: None,
     tree_open: true,
     explorer_mode: ExplorerFiles,
+    review_view_mode: ReviewSource,
     changes: ChangeListIdle,
     reviewed_changes: [],
     changes_generation: 0,

@@ -662,6 +662,7 @@ fn open_editor_at(
       // collide with the next request after this eager re-root.
       tree_open: previous_panel.tree_open,
       explorer_mode: previous_panel.explorer_mode,
+      review_view_mode: previous_panel.review_view_mode,
       changes_generation: previous_panel.changes_generation,
       request_epoch: previous_panel.request_epoch + 1,
       review_generation: previous_panel.review_generation,
@@ -12479,6 +12480,7 @@ test "chip jumps relativize legacy absolute paths against the roots" {
       }),
       tree_open: false,
       explorer_mode: @fileeditor.ExplorerChanges,
+      review_view_mode: @fileeditor.ReviewUnifiedDiff,
       changes_generation: 7,
     },
   }
@@ -12494,6 +12496,7 @@ test "chip jumps relativize legacy absolute paths against the roots" {
   assert_true(@dock.active_file(next.dock) is Some(Relative("src/main.mbt")))
   assert_false(next.file_panel.tree_open)
   assert_true(next.file_panel.explorer_mode is @fileeditor.ExplorerChanges)
+  assert_true(next.file_panel.review_view_mode is @fileeditor.ReviewUnifiedDiff)
   // The eager re-root retains 7. The jump keeps the explorer hidden while the
   // file is active, so Changes waits until the pane is shown before refreshing.
   assert_true(next.file_panel.changes_generation == 7)

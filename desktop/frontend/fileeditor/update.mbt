@@ -70,9 +70,9 @@ fn Doc::unified_diff_content(self : Doc) -> (String, String)? {
 }
 
 ///|
-/// Diff inputs only enter the renderer while this tab explicitly owns unified
-/// mode. Keeping the mode on its review state preserves it across tab switches
-/// and generation-fenced source/baseline refreshes.
+/// Diff inputs only enter the renderer while this tab's cached copy of the
+/// panel preference is unified mode. Keeping the copy on its review state also
+/// preserves it through generation-fenced source/baseline refreshes.
 fn Doc::visible_unified_diff(self : Doc) -> (String, String)? {
   guard self.review is Some({ view_mode: ReviewUnifiedDiff, .. }) else {
     return None
@@ -429,7 +429,7 @@ pub fn open_changed_document(
       generation,
       working_generation: generation,
       baseline,
-      view_mode: ReviewSource,
+      view_mode: state.review_view_mode,
       selected: change,
     }),
     // A cached document can already be behind the filesystem when the row is
@@ -1455,6 +1455,7 @@ pub fn sync(
         placement_checkout: ctx.checkout,
         tree_open: state.tree_open,
         explorer_mode: state.explorer_mode,
+        review_view_mode: state.review_view_mode,
         // Request tokens must outlive the per-conversation cache. Resetting
         // here would let a late A reply collide after switching A→B→A.
         changes_generation: if placement_identity_changed {
@@ -1709,17 +1710,29 @@ pub fn update(
     ToggleReviewDiff => {
       guard ctx.active_file is Some(path) &&
         state.docs.get(path) is Some(doc) &&
-        doc.review is Some(review) &&
+        doc.review is Some(_) &&
         doc.unified_diff_content() is Some(_) else {
         return (@cmd.none, state)
       }
-      let view_mode = match review.view_mode {
+      let view_mode = match state.review_view_mode {
         ReviewSource => ReviewUnifiedDiff
         ReviewUnifiedDiff => ReviewSource
       }
-      let next_doc = { ..doc, review: Some({ ..review, view_mode, }) }
       let docs = state.docs.copy()
-      docs[path] = next_doc
+      // Keep every parked review aligned with the panel preference. Otherwise
+      // revisiting an older tab could resurrect its stale per-document mode
+      // and make the next file forget what the reviewer currently sees.
+      for review_path, review_doc in state.docs {
+        match review_doc.review {
+          Some(parked) =>
+            docs[review_path] = {
+              ..review_doc,
+              review: Some({ ..parked, view_mode, }),
+            }
+          None => ()
+        }
+      }
+      let next_doc = docs.get(path).unwrap()
       let show = show_pending_review(dispatch, ctx, path, next_doc)
       let command = match view_mode {
         // A window/tree resize can measure the display:none source host at the
@@ -1728,7 +1741,7 @@ pub fn update(
         ReviewSource => @cmd.batch([show, request_viewer_remeasure()])
         ReviewUnifiedDiff => show
       }
-      (command, { ..state, docs, })
+      (command, { ..state, docs, review_view_mode: view_mode })
     }
     ToggleReviewProgress => {
       guard ctx.active_file is Some(path) &&
