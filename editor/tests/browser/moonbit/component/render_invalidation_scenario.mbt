@@ -12,7 +12,7 @@ priv struct RenderInvalidationTokenizer {}
 impl @syntax.LineTokenizer for RenderInvalidationTokenizer with fn initial_state(
   _self,
 ) {
-  TokenizerState(b"render-invalidation".to_array())
+  TokenizerState()
 }
 
 ///|

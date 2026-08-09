@@ -6,9 +6,9 @@ The JavaScript lexer. It implements `@syntax.LineTokenizer` with a compile-time
 `JavascriptTokenizer` is the whole public surface. Hosts, examples, and tests
 select it explicitly; reusable viewer core packages must not import it.
 
-This is the only `lang_*` that round-trips `@syntax.decode_mode_stack` /
-`@syntax.encode_mode_stack`, because JavaScript is the only one of the three
-with genuinely *nested* multi-line constructs.
+This is the only `lang_*` that carries a persistent stack because JavaScript is
+the only one of the three with genuinely *nested* multi-line constructs. The
+empty state is normal code; each open construct pushes one byte.
 
 ## Reading a token stream
 
@@ -126,28 +126,22 @@ test "template literals span lines and keep interpolations separate" {
 }
 ```
 
-The state at each line boundary is an encoded mode stack, so it can be decoded
-back into the open modes rather than treated as an opaque token.
+The state at each line boundary supports only the stack operations the lexer
+needs. Its backing vector stays opaque.
 
 ```mbt check
 ///|
-test "the carried state decodes back into a mode stack" {
+test "the carried state exposes stack transitions" {
   let tokenizer : &@syntax.LineTokenizer = @lang_javascript.JavascriptTokenizer()
   let initial = tokenizer.initial_state()
   let (_, in_template) = tokenizer.tokenize_line("const t = `open", initial)
   let (_, in_interp) = tokenizer.tokenize_line("still ${", in_template)
   let (_, closed) = tokenizer.tokenize_line("} done`;", in_interp)
-  debug_inspect(
-    (
-      @syntax.decode_mode_stack(initial),
-      @syntax.decode_mode_stack(in_template),
-      @syntax.decode_mode_stack(in_interp),
-      @syntax.decode_mode_stack(closed),
-    ),
-    content=(
-      #|([0x6e], [0x6e, 0x74], [0x6e, 0x74, 0x69], [0x6e])
-    ),
-  )
+  assert_true(initial.last_mode() is None)
+  assert_true(in_template.last_mode() == Some(b't'))
+  assert_true(in_interp.last_mode() == Some(b'i'))
+  assert_true(in_interp.pop_mode() == in_template)
+  assert_true(closed == initial)
 }
 ```
 

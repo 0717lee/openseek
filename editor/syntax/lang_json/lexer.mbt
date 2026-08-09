@@ -1,18 +1,20 @@
 ///|
 /// JSON (and JSONC comments) behind the `syntax.LineTokenizer` contract:
-/// the trivial two-state machine. State "n" is normal; state "c" is
-/// inside a `/* ... */` block comment, the one construct that carries
-/// across lines.
+/// the trivial two-state machine. The empty state is normal; mode `b'c'` means
+/// inside a `/* ... */` block comment, the one construct that carries across
+/// lines.
 struct JsonTokenizer {
   _unit : Unit
 }
 
 ///|
 /// JSON's two immutable carried states, allocated once and compared by value.
-let json_normal_state : @syntax.TokenizerState = TokenizerState([b'n'])
+let json_normal_state : @syntax.TokenizerState = TokenizerState()
 
 ///|
-let json_comment_state : @syntax.TokenizerState = TokenizerState([b'c'])
+let json_comment_state : @syntax.TokenizerState = json_normal_state.push_mode(
+  b'c',
+)
 
 ///|
 /// Creates the JSON/JSONC tokenizer.

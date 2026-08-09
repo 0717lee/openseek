@@ -8,10 +8,10 @@
 priv struct BlockCommentToy {}
 
 ///|
-let toy_code : @syntax.TokenizerState = TokenizerState(b"code".to_array())
+let toy_code : @syntax.TokenizerState = TokenizerState()
 
 ///|
-let toy_comment : @syntax.TokenizerState = TokenizerState(b"comment".to_array())
+let toy_comment : @syntax.TokenizerState = toy_code.push_mode(b'c')
 
 ///|
 impl @syntax.LineTokenizer for BlockCommentToy with fn initial_state(_self) {

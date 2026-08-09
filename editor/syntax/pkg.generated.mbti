@@ -7,10 +7,6 @@ import {
 }
 
 // Values
-pub fn decode_mode_stack(TokenizerState) -> Array[Byte]
-
-pub fn encode_mode_stack(Array[Byte]) -> TokenizerState
-
 pub fn is_capitalized(StringView) -> Bool
 
 pub fn push_token(Array[LineToken], Int, Int, HighlightTag) -> Unit
@@ -68,12 +64,10 @@ pub fn TokenizationRegistry::set_color_map(Self, Array[String]) -> Unit
 pub struct TokenizerState {
   // private fields
 } derive(Eq)
-pub fn TokenizerState::TokenizerState(ArrayView[Byte]) -> Self
+pub fn TokenizerState::TokenizerState() -> Self
 pub fn TokenizerState::last_mode(Self) -> Byte?
-pub fn TokenizerState::mode_count(Self) -> Int
 pub fn TokenizerState::pop_mode(Self) -> Self
 pub fn TokenizerState::push_mode(Self, Byte) -> Self
-pub fn TokenizerState::to_modes(Self) -> Array[Byte]
 pub impl @debug.Debug for TokenizerState
 
 // Type aliases
