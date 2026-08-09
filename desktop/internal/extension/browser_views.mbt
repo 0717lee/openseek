@@ -85,13 +85,17 @@ pub fn view_event_json(id : Int, event : @proton.ViewEvent) -> Json {
 
 ///|
 priv suberror BrowserViewError {
-  BrowserViewError(String)
-}
+  WindowNotReady
+  UnknownView(Int)
+  BlockedURL(String)
+} derive(Debug)
 
 ///|
 impl Show for BrowserViewError with fn output(self, logger) {
   match self {
-    BrowserViewError(message) => logger.write_string(message)
+    WindowNotReady => logger.write_string("The desktop window is not ready")
+    UnknownView(id) => logger.write_string("Unknown browser view \{id}")
+    BlockedURL(url) => logger.write_string("Blocked non-web page URL: \{url}")
   }
 }
 
@@ -119,7 +123,7 @@ fn BrowserViews::attached_window(
   self : BrowserViews,
 ) -> @proton.WindowHandle raise BrowserViewError {
   guard self.window is Some(window) else {
-    raise BrowserViewError("The desktop window is not ready")
+    raise WindowNotReady
   }
   window
 }
@@ -130,7 +134,7 @@ fn BrowserViews::view(
   id : Int,
 ) -> @proton.ViewHandle raise BrowserViewError {
   guard self.attached_window().view(view_name(id)) is Some(view) else {
-    raise BrowserViewError("Unknown browser view \{id}")
+    raise UnknownView(id)
   }
   view
 }
@@ -149,7 +153,7 @@ fn BrowserViews::open(
   payload : @protocol.BrowserOpenPayload,
 ) -> @protocol.EmptyReply raise {
   guard allowed_page_url(payload.url) else {
-    raise BrowserViewError("Blocked non-web page URL")
+    raise BlockedURL(payload.url)
   }
   let window = self.attached_window()
   match window.view(view_name(payload.id)) {
