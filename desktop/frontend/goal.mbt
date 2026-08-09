@@ -165,7 +165,7 @@ fn goal_attrs(dispatch : @cmd.Emit[Msg]) -> @html.Attrs {
 /// this client's own sends from each other, so tests that never send twice
 /// can share one.
 fn test_goal_command(request : GoalRequest) -> GoalCommand {
-  { id: "goal-1", request }
+  { id: "goal-1", request, since: 0 }
 }
 
 ///|
@@ -667,28 +667,44 @@ test "re-asserting an unchanged goal waits for its own marker too" {
     unrelated.active().goal_pending
     is Some({ request: Setting("ship the feature"), .. }),
   )
-  // A snapshot cannot tell either — the record it reads back is the same one
-  // that was already there — so it settles nothing rather than guessing.
-  let (_, reloaded) = update_dev(
-    dispatch,
-    SessionRefreshed(
-      goal=Some({ text: "ship the feature", blocked: None }),
-      session="desktop-test",
-      items=[],
-      watermark=1,
-      event_boundaries=[],
-      generation=1,
-    ),
-    {
-      ..unrelated,
-      conversations: [{ ..unrelated.active(), sync: test_reloading([]) }],
-    },
-  )
+  // A reload after a missed notification is the case that has to work: the
+  // reduced state reads exactly as it did before the request, so the snapshot
+  // has to carry the marker itself. Above the request's frontier it answers;
+  // at or below it, it is the record agreeing rather than answering.
+  fn reload(model : Model, goal_marker) {
+    let (_, next) = update_dev(
+      dispatch,
+      SessionRefreshed(
+        goal=Some({ text: "ship the feature", blocked: None }),
+        goal_marker~,
+        session="desktop-test",
+        items=[],
+        watermark=9,
+        event_boundaries=[],
+        generation=1,
+      ),
+      {
+        ..model,
+        conversations: [{ ..model.active(), sync: test_reloading([]) }],
+      },
+    )
+    next
+  }
+
   assert_true(
-    reloaded.active().goal_pending
+    reload(unrelated, None).active().goal_pending
     is Some({ request: Setting("ship the feature"), .. }),
   )
-  // Its own marker does say so outright.
+  assert_true(
+    reload(unrelated, Some((0, GoalSet("ship the feature")))).active().goal_pending
+    is Some({ request: Setting("ship the feature"), .. }),
+  )
+  // Missed live, found by the reload — and no longer stuck forever.
+  assert_true(
+    reload(unrelated, Some((1, GoalSet("ship the feature")))).active().goal_pending
+    is None,
+  )
+  // Its own marker arriving live says so outright too.
   let settled = commit(unrelated, 2, "[goal]\nship the feature")
   assert_true(settled.active().goal_pending is None)
 }
@@ -762,6 +778,7 @@ test "a request in flight is reason enough to re-read the record" {
     dispatch,
     SessionRefreshed(
       goal=None,
+      goal_marker=None,
       session="desktop-test",
       items=[],
       watermark=0,
@@ -806,7 +823,11 @@ test "a dead request cannot retire the one that replaced it" {
   // whose marker would then arrive with nothing waiting for it.
   let model = test_model().replace_conversation({
     ..test_conversation(),
-    goal_pending: Some({ id: "goal-2", request: Setting("ship the feature") }),
+    goal_pending: Some({
+      id: "goal-2",
+      request: Setting("ship the feature"),
+      since: 0,
+    }),
   })
   fn reject(model, command) {
     let (_, next) = update_dev(
@@ -826,7 +847,7 @@ test "a dead request cannot retire the one that replaced it" {
   inspect(stale.active().overlay.length(), content="1")
   assert_true(
     stale.active().goal_pending
-    is Some({ id: "goal-2", request: Setting("ship the feature") }),
+    is Some({ id: "goal-2", request: Setting("ship the feature"), since: 0 }),
   )
   // Nor does the superseded send's text come back: the user resent it, so
   // restoring it would read as the send still in flight having failed.
@@ -880,7 +901,11 @@ test "an undelivered reply goes quiet once its send has been settled" {
   // claim about the world, and by now the record has answered it.
   let model = test_model().replace_conversation({
     ..test_conversation(),
-    goal_pending: Some({ id: "goal-1", request: Setting("ship the feature") }),
+    goal_pending: Some({
+      id: "goal-1",
+      request: Setting("ship the feature"),
+      since: 0,
+    }),
   })
   let (_, settled) = update_dev(
     dispatch,
@@ -911,7 +936,11 @@ test "an undelivered reply goes quiet once its send has been settled" {
   // Nor for a send a newer one has replaced.
   let superseded = model.replace_conversation({
     ..model.active(),
-    goal_pending: Some({ id: "goal-2", request: Setting("something newer") }),
+    goal_pending: Some({
+      id: "goal-2",
+      request: Setting("something newer"),
+      since: 0,
+    }),
   })
   inspect(
     undelivered(superseded, "goal-1").active().overlay.length(),
@@ -931,7 +960,11 @@ test "a rejection that arrives after the record has spoken only reports" {
   // confirmed.
   let model = test_model().replace_conversation({
     ..test_conversation(),
-    goal_pending: Some({ id: "goal-2", request: Setting("the goal that won") }),
+    goal_pending: Some({
+      id: "goal-2",
+      request: Setting("the goal that won"),
+      since: 0,
+    }),
   })
   let (_, settled) = update_dev(
     dispatch,
@@ -1032,20 +1065,28 @@ test "an unconfirmed delivery keeps waiting instead of handing the text back" {
 test "a reload settles a request the transport never answered" {
   let dispatch = test_dispatch()
   // Sent, unanswered, and then the connection came back. The snapshot is a
-  // complete durable read: it can say what the reply could not.
+  // complete durable read: it can say what the reply could not — but only by
+  // showing the marker that recorded it, above the frontier the request was
+  // sent from. The reduced state alone would agree with a record that had
+  // said the same thing all along.
   let model = test_model().replace_conversation({
     ..test_conversation(),
-    goal_pending: Some(test_goal_command(Setting("ship the feature"))),
+    goal_pending: Some({
+      id: "goal-1",
+      request: Setting("ship the feature"),
+      since: 4,
+    }),
     sync: test_reloading([]),
   })
-  fn refresh(model, goal) {
+  fn refresh(model, goal, goal_marker) {
     let (_, next) = update_dev(
       dispatch,
       SessionRefreshed(
         goal~,
+        goal_marker~,
         session="desktop-test",
         items=[],
-        watermark=1,
+        watermark=9,
         event_boundaries=[],
         generation=1,
       ),
@@ -1054,19 +1095,32 @@ test "a reload settles a request the transport never answered" {
     next
   }
 
+  fn reloading(model : Model) {
+    { ..model, conversations: [{ ..model.active(), sync: test_reloading([]) }] }
+  }
+
   // A record that does not carry it settles nothing: the append may still be
   // queued behind this read.
-  let absent = refresh(model, None)
+  let absent = refresh(model, None, None)
   assert_true(
     absent.active().goal_pending
     is Some({ request: Setting("ship the feature"), .. }),
   )
-  let landed = refresh(
-    {
-      ..absent,
-      conversations: [{ ..absent.active(), sync: test_reloading([]) }],
-    },
+  // Nor does the goal merely standing, when the marker that put it there is
+  // older than the request — that is the record agreeing, not answering.
+  let older = refresh(
+    reloading(absent),
     Some({ text: "ship the feature", blocked: None }),
+    Some((4, GoalSet("ship the feature"))),
+  )
+  assert_true(
+    older.active().goal_pending
+    is Some({ request: Setting("ship the feature"), .. }),
+  )
+  let landed = refresh(
+    reloading(older),
+    Some({ text: "ship the feature", blocked: None }),
+    Some((5, GoalSet("ship the feature"))),
   )
   assert_true(landed.active().goal_pending is None)
   assert_true(landed.active().goal is Some(_))

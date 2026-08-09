@@ -169,6 +169,12 @@ pub struct SessionLoadView {
   // The standing goal the snapshot's `[goal]` markers reduce to — the seed
   // the client's live marker commits then fold on top of.
   goal : GoalStanding?
+  // The newest goal marker this snapshot contains, with the sequence it
+  // committed at. The reduced state alone cannot say whether a set or clear
+  // was *recorded* here — re-asserting an unchanged goal, or clearing an
+  // already-goalless session, reduces to exactly what was there before — so
+  // a request in flight needs the marker itself to recognize its own result.
+  goal_marker : (Int, GoalMarker)?
 }
 
 ///|
@@ -183,6 +189,7 @@ pub fn session_from_reply(
   let event_boundaries : Array[(Int, Bool, Int)] = []
   let mut derived_watermark = 0
   let mut goal : GoalStanding? = None
+  let mut last_marker : (Int, GoalMarker)? = None
   for event in reply.session.events.unwrap_or([]) {
     // Old desktop hosts return the store JSON verbatim without a top-level
     // watermark, but every stored event already carries its sequence. Derive
@@ -198,6 +205,7 @@ pub fn session_from_reply(
     if event.item is @desktop_protocol.RuntimeNotice(notice) &&
       goal_marker(notice.content) is Some(marker) {
       goal = apply_goal_marker(goal, marker)
+      last_marker = Some((event.sequence, marker))
     }
     event_boundaries.push(
       (event.sequence, event.item.is_terminal(), items.length()),
@@ -208,6 +216,7 @@ pub fn session_from_reply(
     watermark: reply.watermark.unwrap_or(derived_watermark),
     event_boundaries,
     goal,
+    goal_marker: last_marker,
   }
 }
 

@@ -556,6 +556,12 @@ priv struct Conversation {
 priv struct GoalCommand {
   id : String
   request : GoalRequest
+  // The durable frontier when this was sent. Its marker can only commit
+  // above it, which is what separates "the record just did this" from "the
+  // record already said this before I asked" — the two are indistinguishable
+  // by state when a set re-asserts an unchanged goal, or a clear lands on an
+  // already-goalless session.
+  since : Int
 } derive(Eq)
 
 ///|
@@ -567,8 +573,8 @@ priv enum GoalRequest {
 } derive(Eq)
 
 ///|
-/// Whether one durable observation of the standing goal — moving it from
-/// `before` to `after` — recorded this request's own outcome.
+/// Whether one durable observation of the standing goal recorded this
+/// request's own outcome.
 ///
 /// The request is *not* matched against whose command produced the marker.
 /// The durable record has no provenance — a `[goal]` commit proves the engine
@@ -580,43 +586,41 @@ priv enum GoalRequest {
 /// It has to be *did*, not *agrees with*. Re-sending an unchanged goal is a
 /// real command, not a no-op: serve records a fresh baseline beside every set
 /// marker and restarts the goal cadence from it, and it explicitly keeps two
-/// same-text goals apart while they queue. So a mirror that already reads
-/// what was asked for is no evidence at all — under it, any later commit
-/// would retire the request along with its recovery copy while its own append
-/// could still fail. The same trap in sharper form is a clear, which names an
-/// *absence*: an absence is also what a record carries before any goal
-/// exists, so the goalless state a set in flight is about to leave looks
-/// exactly like the one a clear produces.
+/// same-text goals apart while they queue. A clear is the same trap in
+/// sharper form, since an absence is also what a record carries before any
+/// goal exists. In both, a mirror that already reads what was asked for is no
+/// evidence at all — under it, any later observation would retire the request
+/// along with its recovery copy while its own append could still fail.
 ///
-/// So the observation must have *moved* the record, and the two paths carry
-/// that differently. A commit carries the marker, which says outright what
-/// was just recorded. A snapshot carries only the reduced state, where the
-/// move itself is the evidence — which is what lets a reload settle a send
-/// whose reply was lost. Two spellings of one fact, not a fallback; a
-/// snapshot that finds the record unchanged settles nothing, because there
-/// it genuinely cannot tell.
+/// So the evidence is the marker plus where it sits: a marker of this
+/// request's own shape, committed above the frontier the request was sent
+/// from. A commit carries its marker inline; a snapshot carries the newest
+/// one it contains. Same question either way, which is why a reload can
+/// settle a send whose reply was lost — and why a reload that finds only
+/// older markers settles nothing, because there the record genuinely has not
+/// answered yet.
 fn GoalRequest::settled_by(
   self : GoalRequest,
-  before : @transcript.GoalStanding?,
-  after : @transcript.GoalStanding?,
-  marker? : @transcript.GoalMarker,
+  since : Int,
+  goal : @transcript.GoalStanding?,
+  marker : (Int, @transcript.GoalMarker)?,
 ) -> Bool {
-  // Did this observation record what was asked for?
-  let recorded = match marker {
-    Some(marker) =>
-      match (self, marker) {
-        (Setting(text), GoalSet(recorded)) => recorded == text
-        (Clearing, GoalCleared) => true
-        _ => false
-      }
-    // A snapshot has no marker; the move it shows is the evidence.
-    None => before != after
+  guard marker is Some((sequence, marker)) && sequence > since else {
+    return false
   }
-  guard recorded else { return false }
-  // And is what it recorded the state this request asked for? A set marker
-  // reduces to `{text, blocked: None}`, so re-asserting a blocked goal's own
-  // text is how it gets unblocked; a clear's is nothing standing.
-  match (self, after) {
+  // Recorded by a marker of this request's shape...
+  guard (match (self, marker) {
+    (Setting(text), GoalSet(recorded)) => recorded == text
+    (Clearing, GoalCleared) => true
+    _ => false
+  }) else {
+    return false
+  }
+  // ...and the state it left behind is the one that was asked for. A set
+  // marker reduces to `{text, blocked: None}`, so re-asserting a blocked
+  // goal's own text is how it gets unblocked; a clear's is nothing standing.
+  // A newer marker of another shape can have moved it on since.
+  match (self, goal) {
     (Setting(text), Some(standing)) =>
       standing.text == text && standing.blocked is None
     (Clearing, None) => true
@@ -1700,6 +1704,7 @@ priv enum DeviceMsg {
     watermark~ : Int,
     event_boundaries~ : Array[(Int, Bool, Int)],
     goal~ : @transcript.GoalStanding?,
+    goal_marker~ : (Int, @transcript.GoalMarker)?,
     generation~ : Int
   )
   // A foreground stored-session read failed. Generation guards stale replies;
@@ -1714,6 +1719,7 @@ priv enum DeviceMsg {
     watermark~ : Int,
     event_boundaries~ : Array[(Int, Bool, Int)],
     goal~ : @transcript.GoalStanding?,
+    goal_marker~ : (Int, @transcript.GoalMarker)?,
     generation~ : Int
   )
   // A background re-read failed. The generation identifies the exact read,
@@ -3902,7 +3908,11 @@ fn Conversation::apply_commit(
     // Settled by what this commit made the record say, not by whose command
     // it was — see `GoalRequest::settled_by`.
     goal_pending: if self.goal_pending is Some(pending) &&
-      pending.request.settled_by(self.goal, goal, marker?=goal_marker) {
+      pending.request.settled_by(
+        pending.since,
+        goal,
+        goal_marker.map(marker => (sequence, marker)),
+      ) {
       None
     } else {
       self.goal_pending
@@ -4072,6 +4082,7 @@ fn Conversation::adopt_snapshot(
   watermark : Int,
   event_boundaries : Array[(Int, Bool, Int)],
   goal~ : @transcript.GoalStanding?,
+  goal_marker~ : (Int, @transcript.GoalMarker)?,
 ) -> (Conversation, Bool) {
   let (generation, pending) = match self.sync {
     Reloading(generation~, buffered~, ..) => (generation, buffered.copy())
@@ -4115,7 +4126,7 @@ fn Conversation::adopt_snapshot(
       // not. A snapshot that does *not* show it settles nothing: the append
       // may still be queued behind this read.
       goal_pending: if self.goal_pending is Some(pending) &&
-        pending.request.settled_by(self.goal, goal) {
+        pending.request.settled_by(pending.since, goal, goal_marker) {
         None
       } else {
         self.goal_pending

@@ -1106,6 +1106,7 @@ fn open_session(
           watermark=view.watermark,
           event_boundaries=view.event_boundaries,
           goal=view.goal,
+          goal_marker=view.goal_marker,
           generation~,
         ),
       )
@@ -1146,6 +1147,7 @@ fn refresh_session(
           watermark=view.watermark,
           event_boundaries=view.event_boundaries,
           goal=view.goal,
+          goal_marker=view.goal_marker,
           generation~,
         ),
       )
@@ -1364,8 +1366,18 @@ async fn request_agent_goal(
   text : String?,
 ) -> Unit noraise {
   let dispatch = dispatch.map((msg : DeviceMsg) => FromDevice(channel, msg))
+  // In this session's own goal lane. A goal is desired state, and the host
+  // claims a per-session slot for one at a time: sent concurrently, the
+  // second is refused and the *first* wins — a Clear over a Set would lose to
+  // the goal it was cancelling. Issue order is the user's order, so keeping
+  // it here is what makes the later action actually supersede the earlier.
   ignore(
-    @interop.bridge_request(channel, @commands.agent_goal, payload) catch {
+    @interop.bridge_request_in_order(
+      channel,
+      @commands.agent_goal,
+      payload,
+      lane=@interop.goal_lane(channel, session),
+    ) catch {
       error => {
         let message = @interop.bridge_error_text(error)
         scheduler.add(

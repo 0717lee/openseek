@@ -673,7 +673,10 @@ test "the launch mode stops being a choice once a placement is in flight" {
   // not enough to close the window.
   for
     pinned in [
-      { ..composing, goal_pending: Some({ id: "goal-1", request: Clearing }) },
+      {
+        ..composing,
+        goal_pending: Some({ id: "goal-1", request: Clearing, since: 0 }),
+      },
       { ..composing, run: Starting(submission_id="s-1") },
     ] {
     let (_, kept) = update(

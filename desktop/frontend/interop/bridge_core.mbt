@@ -84,23 +84,50 @@ extern "js" fn js_ordered_method_promise(
   #| })()
 
 ///|
-/// One ordered-request lane per host. This transport-independent boundary is
-/// what makes the contract hold for remote hosts: the wire protocol states
-/// that "responses may arrive out of order relative to other requests — the
-/// `id` is the correlation", and the server runs each request in its own task
-/// accordingly, so ordering can only be established on the issuing side.
-let ordered_request_lanes : Map[ChannelId, Lane] = Map([])
+/// The ordered-request lanes, keyed by the scope the ordering is about. This
+/// transport-independent boundary is what makes the contract hold for remote
+/// hosts: the wire protocol states that "responses may arrive out of order
+/// relative to other requests — the `id` is the correlation", and the server
+/// runs each request in its own task accordingly, so ordering can only be
+/// established on the issuing side.
+///
+/// Most callers share one lane per host. A caller may name a narrower one
+/// when its ordering is per-something-else and it would otherwise both wait
+/// on and block work it has nothing to do with.
+let ordered_request_lanes : Map[String, Lane] = Map([])
 
 ///|
-fn ordered_request_lane(channel : ChannelId) -> Lane {
-  match ordered_request_lanes.get(channel) {
-    Some(lane) => lane
+fn ordered_request_lane(lane : String) -> Lane {
+  match ordered_request_lanes.get(lane) {
+    Some(found) => found
     None => {
-      let lane = Lane::Lane()
-      ordered_request_lanes[channel] = lane
-      lane
+      let created = Lane::Lane()
+      ordered_request_lanes[lane] = created
+      created
     }
   }
+}
+
+///|
+/// The lane a host's ordinary ordered requests share.
+fn host_lane(channel : ChannelId) -> String {
+  channel.uri_authority()
+}
+
+///|
+/// A lane of its own for one session's goal commands.
+///
+/// Goals are desired state, and the host claims a per-session slot for them:
+/// two in flight at once means the second is refused and the *first* wins,
+/// so a Clear sent over a Set loses to the very goal it was cancelling. The
+/// composer deliberately leaves those actions live, which is exactly what
+/// makes the second command reachable, so the ordering has to be kept here.
+///
+/// Not the shared host lane: a goal command can spawn an engine, and the
+/// file-panel watcher and browser view ops would then queue behind a process
+/// start for an ordering they never asked for.
+pub fn goal_lane(channel : ChannelId, session : String) -> String {
+  "\{channel.uri_authority()}\u{0}goal\u{0}\{session}"
 }
 
 ///|
@@ -115,8 +142,9 @@ pub async fn[Payload : ToJson, Reply : @json.FromJson] bridge_request_in_order(
   channel : ChannelId,
   command : @commands.Command[Payload, Reply],
   payload : Payload,
+  lane? : String,
 ) -> Reply {
-  ordered_request_lane(channel).run(() => {
+  ordered_request_lane(lane.unwrap_or(host_lane(channel))).run(() => {
     let op = command.name()
     let payload = @js.Value::from_json(payload.to_json())
     let reply = match channel {
@@ -139,6 +167,23 @@ pub async fn[Payload : ToJson, Reply : @json.FromJson] bridge_request_in_order(
       _ => raise BridgeError("Malformed reply from {op}")
     }
   })
+}
+
+///|
+test "a lane key separates what must not share a lane" {
+  // Goal commands are ordered per session because the host serves one at a
+  // time there. Sharing the host lane would order them against file and view
+  // ops too — which a goal command, able to spawn an engine, would then hold
+  // up for an ordering nobody asked for.
+  let here = ChannelId::Local
+  assert_true(goal_lane(here, "s-1") == goal_lane(here, "s-1"))
+  assert_false(goal_lane(here, "s-1") == goal_lane(here, "s-2"))
+  assert_false(goal_lane(here, "s-1") == host_lane(here))
+  assert_false(goal_lane(here, "s-1") == goal_lane(Remote("d"), "s-1"))
+  // A session id cannot be spelled to collide with another lane.
+  assert_false(
+    goal_lane(here, "s-1") == goal_lane(here, "s-1\u{0}goal\u{0}s-1"),
+  )
 }
 
 ///|

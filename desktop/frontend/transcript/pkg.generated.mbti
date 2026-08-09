@@ -124,6 +124,7 @@ pub struct SessionLoadView {
   watermark : Int
   event_boundaries : Array[(Int, Bool, Int)]
   goal : GoalStanding?
+  goal_marker : (Int, GoalMarker)?
 }
 
 pub struct SessionTreeRow {
