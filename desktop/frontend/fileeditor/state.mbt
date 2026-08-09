@@ -600,4 +600,17 @@ pub(all) enum Msg {
     comment~ : String,
     feedback_id~ : String
   )
+  // The user submitted a comment from the standalone full-diff surface.
+  // Both line domains cross the package boundary: additions/context use the
+  // modified number, while an original-only deletion remains identifiable to
+  // the composer without pretending it exists in the working document.
+  // Like `EditorCommentAdded`, the main update intercepts this message and
+  // turns it into a deduplicated annotation chip.
+  UnifiedDiffCommentAdded(
+    file~ : @pathx.Relative,
+    original_line_number~ : Int?,
+    modified_line_number~ : Int?,
+    quote~ : String,
+    comment~ : String
+  )
 }

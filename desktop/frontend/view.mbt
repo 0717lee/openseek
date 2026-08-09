@@ -1279,8 +1279,14 @@ fn mention_label(mention : @mention_context.MentionRef) -> String {
   match mention {
     Skill(name~) => name
     Symbol(name~, ..) => name
-    Annotation(file~, start_line~, end_line~, ..) =>
-      "\{file}:\{start_line}-\{end_line}"
+    Annotation(file~, start_line~, end_line~, side~, ..) => {
+      let suffix = if side is @mention_context.OriginalRevision {
+        " (original)"
+      } else {
+        ""
+      }
+      "\{file}:\{start_line}-\{end_line}\{suffix}"
+    }
   }
 }
 
@@ -1289,7 +1295,8 @@ fn mention_label(mention : @mention_context.MentionRef) -> String {
 /// envelope can rebuild (it stores no columns; `None` for a symbol placed
 /// without a line), and — for an annotation — the comment to re-show as an
 /// editor bubble over that range. `None` for a chip with nothing to jump to
-/// (a skill, or an unresolved symbol).
+/// (a skill, an unresolved symbol, or an original-revision diff comment that
+/// does not exist in the working file).
 priv struct MentionTarget {
   file : String
   range : @common.Range?
@@ -1314,7 +1321,15 @@ fn mention_target(mention : @mention_context.MentionRef) -> MentionTarget? {
           annotation: None,
         })
       }
-    Annotation(file~, start_line~, end_line~, comment~, ..) =>
+    Annotation(side=@mention_context.OriginalRevision, ..) => None
+    Annotation(
+      file~,
+      start_line~,
+      end_line~,
+      comment~,
+      side=@mention_context.WorkingRevision,
+      ..
+    ) =>
       Some({
         file,
         range: Some(

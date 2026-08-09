@@ -1408,6 +1408,7 @@ fn update_msg(
           end_line=range.end_line_number,
           quote~,
           comment~,
+          side=@mention_context.WorkingRevision,
         ),
         range: Some(range),
       })
@@ -1418,6 +1419,50 @@ fn update_msg(
         @fileeditor.remove_editor_feedback(resource, feedback_id),
         model.replace_conversation({ ..conv, mentions, }),
       )
+    }
+    // Full-diff comments carry both line domains because a deletion has no
+    // working-document position. Prefer the modified line for additions and
+    // context; retain the original line for an original-only deletion. Only a
+    // modified-side comment receives a concrete editor range, so reopening a
+    // deleted-line chip cannot claim stale source columns.
+    FileEditor(
+      UnifiedDiffCommentAdded(
+        file~,
+        original_line_number~,
+        modified_line_number~,
+        quote~,
+        comment~
+      )
+    ) => {
+      let (line_number, range, side) = match modified_line_number {
+        Some(line_number) if line_number >= 1 => {
+          let end_column = if quote.is_empty() { 1 } else { quote.length() + 1 }
+          (
+            line_number,
+            Some(@common.Range::Range(line_number, 1, line_number, end_column)),
+            @mention_context.WorkingRevision,
+          )
+        }
+        _ =>
+          match original_line_number {
+            Some(line_number) if line_number >= 1 =>
+              (line_number, None, @mention_context.OriginalRevision)
+            _ => return (@cmd.none, model)
+          }
+      }
+      let conv = model.active()
+      let mentions = push_mention(conv.mentions, {
+        ref_: Annotation(
+          file=file.0,
+          start_line=line_number,
+          end_line=line_number,
+          quote~,
+          comment~,
+          side~,
+        ),
+        range,
+      })
+      (@cmd.none, model.replace_conversation({ ..conv, mentions, }))
     }
     // Intercepted like the comment above: which dock tab a tree click opens
     // is the strip's business. The dock opens (or re-activates) the tab,
@@ -12336,6 +12381,83 @@ test "EditorCommentAdded attaches a deduplicated annotation chip" {
   // Submitting the identical comment again is a no-op, not a second chip.
   let (_, again) = update(dispatch, msg, next)
   assert_eq(again.active().mentions.length(), 1)
+}
+
+///|
+test "UnifiedDiffCommentAdded preserves modified and original-only line identity" {
+  let dispatch = test_dispatch()
+  let file = @pathx.Relative("src/main.mbt")
+  let added : Msg = FileEditor(
+    UnifiedDiffCommentAdded(
+      file~,
+      original_line_number=None,
+      modified_line_number=Some(7),
+      quote="let answer = 42",
+      comment="name this constant",
+    ),
+  )
+  let (_, with_added) = update(dispatch, added, test_model())
+  let added_mentions = with_added.active().mentions
+  assert_eq(added_mentions.length(), 1)
+  assert_true(
+    added_mentions[0].ref_
+    is Annotation(
+      file="src/main.mbt",
+      start_line=7,
+      end_line=7,
+      quote="let answer = 42",
+      comment="name this constant",
+      side=@mention_context.WorkingRevision
+    ),
+  )
+  assert_eq(added_mentions[0].range, Some(@common.Range::Range(7, 1, 7, 16)))
+  let deleted : Msg = FileEditor(
+    UnifiedDiffCommentAdded(
+      file~,
+      original_line_number=Some(3),
+      modified_line_number=None,
+      quote="obsolete()",
+      comment="good removal",
+    ),
+  )
+  let (_, with_deleted) = update(dispatch, deleted, with_added)
+  let deleted_mentions = with_deleted.active().mentions
+  assert_eq(deleted_mentions.length(), 2)
+  assert_true(
+    deleted_mentions[1].ref_
+    is Annotation(
+      file="src/main.mbt",
+      start_line=3,
+      end_line=3,
+      quote="obsolete()",
+      comment="good removal",
+      side=@mention_context.OriginalRevision
+    ),
+  )
+  assert_eq(deleted_mentions[1].range, None)
+}
+
+///|
+test "original-revision diff comment chip does not navigate into the working file" {
+  let dispatch = test_dispatch()
+  let original_comment : Mention = {
+    ref_: Annotation(
+      file="src/main.mbt",
+      start_line=3,
+      end_line=3,
+      quote="obsolete()",
+      comment="good removal",
+      side=@mention_context.OriginalRevision,
+    ),
+    range: None,
+  }
+  let model = test_model().replace_conversation({
+    ..test_conversation(),
+    mentions: [original_comment],
+  })
+  let (_, next) = update(dispatch, JumpToMention(0), model)
+  assert_false(next.dock.open)
+  assert_true(next.dock.active is None)
 }
 
 ///|

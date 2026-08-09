@@ -453,6 +453,7 @@ test "push_mention appends new chips and drops exact duplicates" {
       end_line=6,
       quote="fn parse_hover() {",
       comment="rename this",
+      side=@mention_context.WorkingRevision,
     ),
     range: Some(@common.Range::Range(5, 1, 6, 1)),
   }

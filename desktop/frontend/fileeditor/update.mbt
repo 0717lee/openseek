@@ -2677,7 +2677,7 @@ pub fn update(
     // chip there, which then clears the editor bubble through
     // `remove_editor_feedback`. Reaching this arm means the main update
     // didn't intercept it; changing nothing is the safe answer.
-    EditorCommentAdded(..) => (@cmd.none, state)
+    EditorCommentAdded(..) | UnifiedDiffCommentAdded(..) => (@cmd.none, state)
   }
 }
 

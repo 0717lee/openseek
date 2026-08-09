@@ -107,10 +107,10 @@ fn register_tokenizers() -> Unit {
 /// tokenizers and hover provider register with it). A no-op if already
 /// mounted or the host element is not in the DOM yet.
 ///
-/// Mounting also wires the comment flow: a comment the user submits through
-/// the viewer's agent-feedback input is handed to the update loop as
-/// `EditorCommentAdded` — with the selected source quoted out of the current
-/// model — so it becomes a chip on the composer draft.
+/// Mounting also wires both comment flows into the update loop: the source
+/// Viewer's selection feedback becomes `EditorCommentAdded`, while the
+/// standalone comparison emits `UnifiedDiffCommentAdded` with both line-number
+/// domains. The main package turns either event into a composer chip.
 fn request_viewer_mount(dispatch : @cmd.Emit[Msg]) -> @cmd.Cmd {
   @cmd.custom_cmd(
     scheduler => {
@@ -176,11 +176,37 @@ fn request_viewer_mount(dispatch : @cmd.Emit[Msg]) -> @cmd.Cmd {
         @dom.document().get_element_by_id(UnifiedDiffHostId).to_option()
         is Some(diff_host) {
         viewer_state.unified_diff = Some(
-          @viewer.UnifiedDiffView::create(diff_host),
+          @viewer.UnifiedDiffView::create(diff_host, on_comment=submission => {
+            // The renderer supplies algorithm-neutral line identity; Desktop
+            // contributes only the workspace-relative file currently shown.
+            // Schedule through the update loop so a host callback can never
+            // mutate the panel while the renderer is dismissing its editor.
+            guard viewer_state.relative is Some(file) else { return }
+            scheduler.add(
+              dispatch(unified_diff_comment_message(file, submission)),
+            )
+          }),
         )
       }
     },
     kind=@cmd.after_render,
+  )
+}
+
+///|
+/// Keep the renderer-to-application mapping explicit and independently
+/// testable. No DOM details cross this boundary; both line-number domains are
+/// retained for the main update loop to interpret.
+fn unified_diff_comment_message(
+  file : @pathx.Relative,
+  submission : @unified_diff.UnifiedDiffLineComment,
+) -> Msg {
+  UnifiedDiffCommentAdded(
+    file~,
+    original_line_number=submission.line.original_line_number,
+    modified_line_number=submission.line.modified_line_number,
+    quote=submission.line.text,
+    comment=submission.comment,
   )
 }
 
