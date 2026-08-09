@@ -698,7 +698,9 @@ fn review_badge(
       class="review-badge review-badge-action",
       title~,
       on_click=dispatch(ToggleReviewDiff),
-      attrs=@html.Attrs::build().aria_pressed(pressed.to_string()),
+      attrs=@html.Attrs::build()
+        .aria_label("Full diff")
+        .aria_pressed(pressed.to_string()),
       text,
     )
   } else {

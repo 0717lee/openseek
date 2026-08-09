@@ -443,6 +443,7 @@ fn view_embed(
                 on_click=emit(ToggleDiff),
                 attrs=@html.Attrs::build()
                   .data_set("action", "toggle-diff")
+                  .aria_label("Full diff")
                   .aria_pressed(model.diff_visible.to_string()),
                 if model.diff_visible {
                   "Source"

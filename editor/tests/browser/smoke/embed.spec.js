@@ -29,8 +29,10 @@ test('runs the viewer and tree from in-memory providers without a server', async
   // host toggles sibling surfaces, preserving the ordinary Viewer's model and
   // scroll while the renderer receives only original/modified source text.
   const diffToggle = page.locator('[data-action=\"toggle-diff\"]');
+  await expect(diffToggle).toHaveAccessibleName('Full diff');
   await diffToggle.click();
   await expect(diffToggle).toHaveAttribute('aria-pressed', 'true');
+  await expect(diffToggle).toHaveAccessibleName('Full diff');
   const diff = page.locator('.moonbit-unified-diff');
   await expect(diff).toBeVisible();
   await expect
@@ -61,6 +63,7 @@ test('runs the viewer and tree from in-memory providers without a server', async
 
   await diffToggle.click();
   await expect(diffToggle).toHaveAttribute('aria-pressed', 'false');
+  await expect(diffToggle).toHaveAccessibleName('Full diff');
   await expect(page.locator('.moonbit-unified-diff')).toHaveCount(0);
   await expect(page.locator('.monaco-editor.readonly-editor')).toContainText('fn main');
 
