@@ -258,26 +258,26 @@ test "panic is_capitalized rejects an empty view" {
 }
 ```
 
-`TokenizerState` owns an opaque persistent character vector. `push_mode` /
+`TokenizerState` owns an opaque persistent byte vector. `push_mode` /
 `pop_mode` create immutable snapshots with structural sharing, so a cached line
 state cannot be changed by later tokenization; the constructor and `to_modes`
 copy across the public boundary. `lang_javascript` carries this stack
 directly and therefore allocates only when a lexical mode changes.
 `decode_mode_stack` / `encode_mode_stack` remain
 the mutable-array adapter; `lang_moonbit` uses the decoder for its per-line
-scratch stack and always returns `TokenizerState(['n'])`. `lang_json` uses
+scratch stack and always returns `TokenizerState([b'n'])`. `lang_json` uses
 neither, its state being a single in-comment flag.
 
 ```mbt check
 ///|
 test "the mode stack round-trips and an empty state is the base mode" {
   let empty = @syntax.decode_mode_stack(TokenizerState([]))
-  let nested = @syntax.decode_mode_stack(TokenizerState(['n', 't', 's']))
-  let encoded = @syntax.encode_mode_stack(['n', 't', 's'])
+  let nested = @syntax.decode_mode_stack(TokenizerState([b'n', b't', b's']))
+  let encoded = @syntax.encode_mode_stack([b'n', b't', b's'])
   debug_inspect(
     (empty, nested, encoded),
     content=(
-      #|(['n'], ['n', 't', 's'], TokenizerState("nts"))
+      #|([0x6e], [0x6e, 0x74, 0x73], TokenizerState("nts"))
     ),
   )
 }

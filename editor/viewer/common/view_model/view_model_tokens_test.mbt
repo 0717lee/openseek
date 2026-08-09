@@ -52,13 +52,11 @@ priv struct FrameToy {
 }
 
 ///|
-let frame_toy_code : @syntax.TokenizerState = @syntax.TokenizerState::from_text(
-  "code",
-)
+let frame_toy_code : @syntax.TokenizerState = TokenizerState(b"code".to_array())
 
 ///|
-let frame_toy_comment : @syntax.TokenizerState = @syntax.TokenizerState::from_text(
-  "comment",
+let frame_toy_comment : @syntax.TokenizerState = TokenizerState(
+  b"comment".to_array(),
 )
 
 ///|

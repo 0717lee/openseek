@@ -5,14 +5,14 @@
 /// grammar data.
 ///
 /// The carried `TokenizerState` encodes the lexer mode stack as one
-/// character per mode, bottom first:
-///   'n' normal expression code (always the bottom)
-///   's' inside a `"` string
-///   'm' inside a `$|` multiline-string line
-///   'i' inside a `\{ ... }` string interpolation
-///   'b' inside a plain `{ ... }` brace pair nested in an interpolation
+/// byte per mode, bottom first:
+///   b'n' normal expression code (always the bottom)
+///   b's' inside a `"` string
+///   b'm' inside a `$|` multiline-string line
+///   b'i' inside a `\{ ... }` string interpolation
+///   b'b' inside a plain `{ ... }` brace pair nested in an interpolation
 /// No MoonBit string construct survives a line end, so every line both
-/// enters and leaves at "n"; the stack only drives the within-line modes.
+/// enters and leaves at b'n'; the stack only drives the within-line modes.
 struct MoonBitTokenizer {
   _unit : Unit
 }
@@ -20,7 +20,7 @@ struct MoonBitTokenizer {
 ///|
 /// Shared immutable base stack; MoonBit's lexer always returns to it at the
 /// end of a line.
-let moonbit_normal_state : @syntax.TokenizerState = TokenizerState(['n'])
+let moonbit_normal_state : @syntax.TokenizerState = TokenizerState([b'n'])
 
 ///|
 /// Creates the MoonBit tokenizer.
@@ -46,8 +46,8 @@ pub impl @syntax.LineTokenizer for MoonBitTokenizer with fn tokenize_line(
   for at = 0, view = line_text[:]; view.length() > 0; {
     let top = stack[stack.length() - 1]
     let (op, rest) = match top {
-      's' => string_step(view)
-      'm' => dollar_step(view)
+      b's' => string_step(view)
+      b'm' => dollar_step(view)
       _ => normal_step(view, top)
     }
     let consumed = view.length() - rest.length()
@@ -75,23 +75,23 @@ pub impl @syntax.LineTokenizer for MoonBitTokenizer with fn tokenize_line(
 priv enum StepOp {
   Blank
   Emit(@syntax.HighlightTag)
-  Push(@syntax.HighlightTag, Char)
+  Push(@syntax.HighlightTag, Byte)
   Pop(@syntax.HighlightTag)
 }
 
 ///|
-/// Expression code: the rules for modes 'n', 'i', and 'b'. The brace
-/// arms need the current mode because `}` closes an interpolation in 'i'
+/// Expression code: the rules for modes b'n', b'i', and b'b'. The brace
+/// arms need the current mode because `}` closes an interpolation in b'i'
 /// but is a plain delimiter elsewhere.
-fn normal_step(view : StringView, top : Char) -> (StepOp, StringView) {
+fn normal_step(view : StringView, top : Byte) -> (StepOp, StringView) {
   lexscan view with longest {
     (re"^[ \t]+", after=rest) => (Blank, rest)
     (re"^///.*", after=rest) => (Emit(CommentDoc), rest)
     (re"^//.*", after=rest) => (Emit(Comment), rest)
     (re"^#\|.*", after=rest) => (Emit(String), rest)
-    (re"^\$\|", after=rest) => (Push(String, 'm'), rest)
+    (re"^\$\|", after=rest) => (Push(String, b'm'), rest)
     (re"^#[a-zA-Z_][a-zA-Z0-9_.]*", after=rest) => (Emit(Attribute), rest)
-    (re"^b?\"", after=rest) => (Push(String, 's'), rest)
+    (re"^b?\"", after=rest) => (Push(String, b's'), rest)
     (re"^b?'(?:\\.|[^'\\])+'", after=rest) => (Emit(String), rest)
     (re"^0[xX][0-9a-fA-F_]+[UL]*", after=rest) => (Emit(Number), rest)
     (re"^0[oO][0-7_]+[UL]*", after=rest) => (Emit(Number), rest)
@@ -104,15 +104,15 @@ fn normal_step(view : StringView, top : Char) -> (StepOp, StringView) {
     (re"^[+\-*/%=<>!&^~?\|]+", after=rest) => (Emit(Operator), rest)
     (re"^[()\[\],;:.]", after=rest) => (Emit(Delimiter), rest)
     (re"^[{]", after=rest) =>
-      if top == 'i' || top == 'b' {
-        (Push(Delimiter, 'b'), rest)
+      if top == b'i' || top == b'b' {
+        (Push(Delimiter, b'b'), rest)
       } else {
         (Emit(Delimiter), rest)
       }
     (re"^[}]", after=rest) =>
       match top {
-        'i' => (Pop(StringEscape), rest)
-        'b' => (Pop(Delimiter), rest)
+        b'i' => (Pop(StringEscape), rest)
+        b'b' => (Pop(Delimiter), rest)
         _ => (Emit(Delimiter), rest)
       }
     (re"^.", after=rest) => (Emit(Punctuation), rest)
@@ -130,7 +130,7 @@ fn normal_step(view : StringView, top : Char) -> (StepOp, StringView) {
 fn string_step(view : StringView) -> (StepOp, StringView) {
   lexscan view with longest {
     (re"^\\u[{][0-9a-fA-F]+[}]", after=rest) => (Emit(StringEscape), rest)
-    (re"^\\[{]", after=rest) => (Push(StringEscape, 'i'), rest)
+    (re"^\\[{]", after=rest) => (Push(StringEscape, b'i'), rest)
     (re"^\\.", after=rest) => (Emit(StringEscape), rest)
     (re"^\"", after=rest) => (Pop(String), rest)
     (re"^[^\"\\]+", after=rest) => (Emit(String), rest)
@@ -145,7 +145,7 @@ fn string_step(view : StringView) -> (StepOp, StringView) {
 /// line end.
 fn dollar_step(view : StringView) -> (StepOp, StringView) {
   lexscan view with longest {
-    (re"^\\[{]", after=rest) => (Push(StringEscape, 'i'), rest)
+    (re"^\\[{]", after=rest) => (Push(StringEscape, b'i'), rest)
     (re"^\\.", after=rest) => (Emit(StringEscape), rest)
     (re"^[^\\]+", after=rest) => (Emit(String), rest)
     (re"^.", after=rest) => (Emit(String), rest)

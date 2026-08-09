@@ -141,7 +141,7 @@ test "template state carries across lines through TokenizerState" {
     "const t = `open",
     lexer.initial_state(),
   )
-  assert_true(in_template == TokenizerState(['n', 't']))
+  assert_true(in_template == TokenizerState([b'n', b't']))
   let (_, closed) = lexer.tokenize_line("close`;", in_template)
   assert_true(closed == lexer.initial_state())
 }

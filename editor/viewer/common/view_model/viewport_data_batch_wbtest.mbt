@@ -8,8 +8,8 @@ priv struct ViewportCountingTokenizer {
 }
 
 ///|
-let viewport_counting_state : @syntax.TokenizerState = @syntax.TokenizerState::from_text(
-  "viewport-counting",
+let viewport_counting_state : @syntax.TokenizerState = TokenizerState(
+  b"viewport-counting".to_array(),
 )
 
 ///|

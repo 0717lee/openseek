@@ -13,7 +13,7 @@ priv struct CursorTokenizationCountingTokenizer {
 impl @syntax.LineTokenizer for CursorTokenizationCountingTokenizer with fn initial_state(
   _self,
 ) {
-  @syntax.TokenizerState::from_text("cursor-tokenization-reference")
+  TokenizerState(b"cursor-tokenization-reference".to_array())
 }
 
 ///|
