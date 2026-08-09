@@ -781,6 +781,46 @@ test "a dead request cannot retire the one that replaced it" {
 }
 
 ///|
+test "a rejection that arrives after the record has spoken only reports" {
+  let dispatch = test_dispatch()
+  // The successor's marker settles the slot, and then the superseded send's
+  // refusal turns up. There is no pending request left to compare against,
+  // so a guard that only asks "is the pending one mine" reads this as its
+  // own — and reopens an obsolete draft over a goal the record has already
+  // confirmed.
+  let model = test_model().replace_conversation({
+    ..test_conversation(),
+    goal_pending: Some({ id: "goal-2", request: Setting("the goal that won") }),
+  })
+  let (_, settled) = update_dev(
+    dispatch,
+    SessionCommitted(
+      session="desktop-test",
+      sequence=1,
+      ts=None,
+      item=@protocol.RuntimeNotice({ content: "[goal]\nthe goal that won" }),
+    ),
+    model,
+  )
+  assert_true(settled.active().goal_pending is None)
+  let (_, late) = update_dev(
+    dispatch,
+    GoalRejected(
+      session="desktop-test",
+      command="goal-1",
+      draft=Some("the goal that lost"),
+      message="a goal command is already in flight",
+    ),
+    settled,
+  )
+  inspect(late.active().overlay.length(), content="1")
+  assert_true(late.active().goal_edit is None)
+  assert_true(
+    late.active().goal is Some({ text: "the goal that won", blocked: None }),
+  )
+}
+
+///|
 test "each goal send gets an identity of its own" {
   let dispatch = test_dispatch()
   // Two sends of the same text, back to back. They are equal requests, so an

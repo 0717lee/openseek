@@ -5042,18 +5042,22 @@ fn update_device_msg(
           Assistant(is_danger=true),
           message,
         )
-        // A rejection retires the send it answers, never simply "the one in
-        // flight". The row keeps its actions while a command is out, so the
-        // user can send a second one over the first — and the second may be
-        // the same text, or Clear again, so only the id tells them apart.
-        // Clearing whatever happens to be pending would let a dead request
-        // retire its live successor, leaving that one's marker with nothing
-        // waiting for it and its text held nowhere.
-        let restored = if reported.goal_pending is Some(pending) &&
-          pending.id != command {
-          // Superseded: the user replaced this send themselves, so its text
-          // is not lost work and the request that replaced it is still
-          // waiting.
+        // A rejection acts only on the send it answers, and only while that
+        // send is still the one in flight. The row keeps its actions while a
+        // command is out, so the user can send a second over the first — and
+        // the second may be the same text, or Clear again, so only the id
+        // separates them.
+        //
+        // Anything else is a reply that arrived too late to mean what it
+        // says. Either a newer send replaced this one, or the record already
+        // settled whatever was outstanding — including by carrying this very
+        // text, set from somewhere else. In every such case the durable goal
+        // has already been decided, so retiring the slot would drop a live
+        // successor and reopening the editor would claim a failure that is
+        // not what this conversation now stands at. The notice still reports
+        // it; nothing here is silent.
+        let restored = if !(reported.goal_pending is Some(pending) &&
+          pending.id == command) {
           reported
         } else if draft is Some(draft) && reported.goal_edit is None {
           // Hand the goal text back, the way a rejected prompt restores its
