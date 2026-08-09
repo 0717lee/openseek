@@ -38,6 +38,7 @@ pub(all) enum Msg {
   Opened(channel~ : @interop.ChannelId, key~ : Int, id~ : Int)
   OpenFailed(key~ : Int, message~ : String)
   UserInput(key~ : Int, data~ : String)
+  LinkActivated(url~ : String)
   BinaryInput(key~ : Int, data~ : String)
   InputFailed(key~ : Int, message~ : String)
   ViewportResized(key~ : Int, cols~ : Int, rows~ : Int)

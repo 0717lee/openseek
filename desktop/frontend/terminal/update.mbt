@@ -246,6 +246,9 @@ pub fn update(
         // Typing into an exited/unopened terminal has nowhere to go.
         (@cmd.none, state)
       }
+    // The main frontend consumes this message before it reaches the panel
+    // state machine. Keep direct package callers pure and exhaustive.
+    LinkActivated(url=_) => (@cmd.none, state)
     BinaryInput(key~, data~) =>
       if checkout_ready &&
         state.tab_by_key(key) is Some(tab) &&
