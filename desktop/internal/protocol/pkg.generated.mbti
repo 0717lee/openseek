@@ -232,6 +232,7 @@ pub(all) struct GitChangesPayload {
 
 pub(all) struct GitChangesReply {
   repository : Bool
+  head : String?
   changes : Array[GitChange]
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 
@@ -239,6 +240,7 @@ pub(all) struct GitOriginalFilePayload {
   session : String
   workspace : String?
   path : String
+  revision : String?
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 
 pub(all) enum GitOriginalFileReply {

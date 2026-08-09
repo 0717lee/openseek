@@ -57,11 +57,10 @@ pub async fn[Payload : ToJson, Reply : @json.FromJson] bridge_request(
 }
 
 ///|
-/// Invoke Proton methods through one promise tail. Proton dispatches bridge
-/// requests in separate native tasks, so two fire-and-forget calls may enter
-/// the host in the opposite order unless the page waits for the first before
-/// issuing the second. The rejected request still releases the tail; its own
-/// promise remains rejected for the MoonBit caller.
+/// Keep local Proton method entry ordered even though its bridge dispatches
+/// requests in separate native tasks. The per-channel lock below already
+/// serializes callers; this promise tail also keeps ordering at the JS/native
+/// handoff if that implementation detail changes.
 extern "js" fn js_ordered_method_promise(
   target : @js.Value,
   name : String,
@@ -79,17 +78,39 @@ extern "js" fn js_ordered_method_promise(
   #| })()
 
 ///|
-/// Call one host method in the page's issue order, for callers whose
-/// requests are desired state rather than independent queries: the
-/// file-panel watcher (`watch(A)` then `unwatch`) and the browser view ops
-/// (create-then-place, bounds-before-visibility). Proton must not reorder
-/// their entry into the connection's actor. Remote requests use the same
-/// call site; their socket reader additionally preserves wire order.
+/// One ordered-request lane per host. This transport-independent boundary is
+/// what makes the contract hold for remote hosts, including older servers
+/// that execute ordinary JSON-RPC requests concurrently.
+let ordered_request_locks : Map[ChannelId, @async.Mutex] = Map([])
+
+///|
+fn ordered_request_lock(channel : ChannelId) -> @async.Mutex {
+  match ordered_request_locks.get(channel) {
+    Some(lock) => lock
+    None => {
+      let lock : @async.Mutex = Mutex()
+      ordered_request_locks[channel] = lock
+      lock
+    }
+  }
+}
+
+///|
+/// Call one host method in the page's issue order, for callers whose requests
+/// are desired state or ordered observations rather than independent queries:
+/// the file-panel watcher (`watch(A)` then `unwatch`), file-stat snapshots,
+/// and browser view ops (create-then-place, bounds-before-visibility).
+/// Deliberately do not put a caller-side timeout around this lane: neither the
+/// Proton promise nor an older remote RPC is cancelable, so releasing the lane
+/// early would allow its successor to overtake an operation still applying.
 pub async fn[Payload : ToJson, Reply : @json.FromJson] bridge_request_in_order(
   channel : ChannelId,
   command : @commands.Command[Payload, Reply],
   payload : Payload,
 ) -> Reply {
+  let lock = ordered_request_lock(channel)
+  lock.acquire()
+  defer lock.release()
   let op = command.name()
   let payload = @js.Value::from_json(payload.to_json())
   let reply = match channel {
@@ -111,6 +132,24 @@ pub async fn[Payload : ToJson, Reply : @json.FromJson] bridge_request_in_order(
   @json.from_json(json) catch {
     _ => raise BridgeError("Malformed reply from {op}")
   }
+}
+
+///|
+async test "an ordered request failure releases its channel lane" {
+  let request = async fn() -> Bool {
+    ignore(
+      bridge_request_in_order(
+        ChannelId::Local,
+        @commands.fs_unwatch,
+        @protocol.EmptyPayload::NoPayload,
+      ),
+    ) catch {
+      _ => return true
+    }
+    false
+  }
+  assert_true(request())
+  assert_true(@async.with_timeout_opt(100, request) is Some(true))
 }
 
 ///|

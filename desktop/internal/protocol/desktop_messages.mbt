@@ -156,14 +156,16 @@ pub(all) struct GitChangesPayload {
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|
-/// Read one workspace-relative path from `HEAD`. For a rename or copy, callers
+/// Read one workspace-relative path from the supplied commit, falling back to
+/// `HEAD` for older clients that omit `revision`. For a rename or copy, callers
 /// pass the change row's `original_path` (the current `path` does not exist in
-/// `HEAD`); all other rows pass `path`. The host validates it again before
-/// passing it to Git.
+/// that commit); all other rows pass `path`. The host validates the path again
+/// before passing it to Git.
 pub(all) struct GitOriginalFilePayload {
   session : String
   workspace : String?
   path : String
+  revision : String?
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|

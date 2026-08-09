@@ -117,18 +117,39 @@ pub fn body_view(
 
 ///|
 /// The notice covering the viewer while the active document has nothing to
-/// show — a deleted, binary, or oversized file. Plain panel chrome laid
-/// over the (cleared) viewer, so a notice never renders as a highlighted
-/// source document. Always in the DOM; blank and hidden otherwise.
+/// show — a deleted, unavailable, binary, or oversized file. Plain panel
+/// chrome laid over the (cleared) viewer, so a notice never renders as a
+/// highlighted source document. Always in the DOM; blank and hidden otherwise.
 fn viewer_notice(state : State, ctx : Ctx) -> @html.Html {
   let text = match ctx.active_file {
     Some(path) =>
       match state.docs.get(path) {
         Some(doc) =>
           match doc.state {
-            TabDeleted => "\{doc.name} was deleted on disk."
+            TabDeleted =>
+              match doc.review {
+                Some({ baseline: ReviewLoading, .. }) =>
+                  "Loading the HEAD version of \{doc.name}…"
+                Some({ baseline: ReviewContent(_), .. }) => ""
+                Some({ baseline: ReviewMissing, .. }) =>
+                  "\{doc.name} was deleted and has no HEAD version to preview."
+                Some({ baseline: ReviewBinary, .. }) =>
+                  "The HEAD version of \{doc.name} is binary and cannot be previewed."
+                Some({ baseline: ReviewOversized, .. }) =>
+                  "The HEAD version of \{doc.name} is too large to preview."
+                Some({ baseline: ReviewFailed(message), .. }) =>
+                  "Could not load the HEAD version of \{doc.name}: \{message}."
+                None => "\{doc.name} was deleted on disk."
+              }
             TabBinary => "\{doc.name} is a binary file and cannot be previewed."
             TabOversized => "\{doc.name} is too large to preview."
+            TabReadFailed(message) =>
+              if doc.review is Some({ baseline: ReviewContent(_), .. }) {
+                ""
+              } else {
+                "Could not read \{doc.name}: \{message}."
+              }
+            TabUnavailable(message) => message
             TabLoading | TabLoaded(..) => ""
           }
         None => ""
@@ -331,7 +352,7 @@ fn change_inventory(
       if files.is_empty() {
         [@html.div(class="file-panel-empty", "No changed files.")]
       } else {
-        files.map(change => changed_file_row(dispatch, ctx, change))
+        files.map(change => changed_file_row(dispatch, state, ctx, change))
       }
   }
 }
@@ -357,10 +378,11 @@ fn ChangedFile::kind_class(self : ChangedFile) -> String {
 ///|
 fn changed_file_row(
   dispatch : @cmd.Emit[Msg],
+  state : State,
   ctx : Ctx,
   change : ChangedFile,
 ) -> @html.Html {
-  let selected = ctx.active_file == Some(change.path)
+  let selected = change.is_selected(state, ctx)
   let mut class = if selected { "change-row selected" } else { "change-row" }
   if !change.selectable() {
     class = class + " disabled"
@@ -371,18 +393,29 @@ fn changed_file_row(
       class="change-status " + change.kind_class(),
       change.status_label(),
     ),
+    @html.span(
+      class=if change.selectable() {
+        "change-action"
+      } else {
+        "change-action unavailable"
+      },
+      if change.selectable() {
+        "View diff"
+      } else {
+        "Unavailable"
+      },
+    ),
   ]
   if change.selectable() {
     // A native button supplies keyboard activation (Enter/Space) and focus
     // semantics without duplicating the tab strip's custom key handling.
     @html.button(
       class~,
-      title=change.status_title(),
-      on_click=dispatch(
-        FileSelected(path=change.path, name=basename(change.path)),
-      ),
+      title="Open diff — " + change.status_title(),
+      on_click=dispatch(ChangedFileSelected(change)),
       attrs=@html.Attrs::build()
         .data_set("path", change.path.0)
+        .aria_label("View diff: " + change.status_title())
         .aria_current(if selected { "page" } else { "false" }),
       children,
     )
@@ -399,6 +432,23 @@ fn changed_file_row(
         .aria_current(if selected { "page" } else { "false" }),
       children,
     )
+  }
+}
+
+///|
+/// A normal file open selects its matching path in Changes. A review open is
+/// more precise: porcelain can report two rows for one path (for example a
+/// staged deletion plus a recreated untracked file), so only the exact row
+/// parked in the document's review state is current.
+fn ChangedFile::is_selected(
+  self : ChangedFile,
+  state : State,
+  ctx : Ctx,
+) -> Bool {
+  guard ctx.active_file == Some(self.path) else { return false }
+  match state.docs.get(self.path) {
+    Some({ review: Some(review), .. }) => review.selected == self
+    _ => true
   }
 }
 
@@ -500,6 +550,7 @@ pub fn breadcrumb_view(
     },
     [
       @html.div(class="crumb-path", crumbs),
+      review_badge(state, ctx),
       @html.button(
         class="panel-toggle",
         title=if state.tree_open { "Hide file tree" } else { "Show file tree" },
@@ -507,6 +558,83 @@ pub fn breadcrumb_view(
         icon(icon_folder),
       ),
     ],
+  )
+}
+
+///|
+/// Compact, non-interactive review status beside the active path. The gutter
+/// is the diff itself; this badge makes the comparison source and exceptional
+/// cases explicit without adding another toolbar or changing Viewer layout.
+fn review_badge(state : State, ctx : Ctx) -> @html.Html {
+  let (text, title) = match ctx.active_file {
+    Some(path) =>
+      match state.docs.get(path) {
+        Some(
+          {
+            state: TabDeleted,
+            review: Some({ baseline: ReviewContent(_), .. }),
+            ..,
+          }
+        ) =>
+          (
+            "Deleted · HEAD", "Deleted in the working tree; showing the HEAD version",
+          )
+        Some(
+          {
+            state: TabReadFailed(_),
+            review: Some({ baseline: ReviewContent(_), .. }),
+            ..,
+          }
+        ) =>
+          (
+            "Working unavailable · HEAD", "The working-tree file could not be read; showing the HEAD version",
+          )
+        Some({ state: TabBinary, review: Some(_), .. })
+        | Some({ state: TabOversized, review: Some(_), .. })
+        | Some({ state: TabReadFailed(_), review: Some(_), .. }) =>
+          (
+            "Diff unavailable", "The working-tree file cannot be previewed as text",
+          )
+        Some({ review: Some({ baseline: ReviewLoading, .. }), .. }) =>
+          ("Loading diff…", "Loading the HEAD version for comparison")
+        Some(
+          {
+            state: TabDeleted,
+            review: Some({ baseline: ReviewMissing, .. }),
+            ..,
+          }
+        ) => ("Deleted · no HEAD", "No HEAD version is available to preview")
+        Some({ name, review: Some({ baseline: ReviewContent(_), .. }), .. }) if name.has_suffix(
+            ".md",
+          ) =>
+          (
+            "Rendered · no gutter", "Rendered Markdown does not expose source diff decorations",
+          )
+        Some({ name, review: Some({ baseline: ReviewMissing, .. }), .. }) if name.has_suffix(
+            ".md",
+          ) =>
+          (
+            "Rendered · no gutter", "New Markdown has no HEAD version; its rendered preview does not expose diff decorations",
+          )
+        Some({ review: Some({ baseline: ReviewContent(_), .. }), .. }) =>
+          ("Diff vs HEAD", "Quick diff against the HEAD version")
+        Some({ review: Some({ baseline: ReviewMissing, .. }), .. }) =>
+          ("New · no HEAD", "New file compared with an empty HEAD baseline")
+        Some({ review: Some({ baseline: ReviewBinary, .. }), .. }) =>
+          ("Diff unavailable", "The HEAD version is binary")
+        Some({ review: Some({ baseline: ReviewOversized, .. }), .. }) =>
+          ("Diff unavailable", "The HEAD version is too large")
+        Some({ review: Some({ baseline: ReviewFailed(message), .. }), .. }) =>
+          ("Diff unavailable", "Could not load HEAD: " + message)
+        _ => ("", "")
+      }
+    None => ("", "")
+  }
+  @html.span(
+    class=if text.is_empty() { "review-badge hidden" } else { "review-badge" },
+    title~,
+    attrs=@html.Attrs::build().role("status").aria_live("polite"),
+    text,
   )
 }
 

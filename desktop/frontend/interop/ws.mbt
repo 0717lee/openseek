@@ -146,6 +146,10 @@ async fn ws_request(
   let text = json_text(frame.to_value())
   let deferred = new_deferred()
   session.pending[id] = deferred
+  // A caller-side timeout cancels the waiter while the socket can remain
+  // healthy. Retire that resolver on every exit so a peer's eventual late
+  // reply cannot leak the pending table or settle an abandoned task.
+  defer remove_pending_if_same(session, id, deferred)
   @js.Error_::wrap(
     () => session.socket.apply_with_string("send", [@js.Value::cast_from(text)]),
     map_ok=_ => (),

@@ -554,6 +554,59 @@ test "a missing checkout stays bound while rebuild and archive remain reachable"
     bound.checkout_placement(bound.active())
     is Some(@interop.Worktree(name="wt")),
   )
+  // Model the production path with an active changed-file review. Placement
+  // health must park host work without replacing this real owner or document.
+  let owner : @interop.ConversationKey = {
+    channel: @interop.ChannelId::Local,
+    session: "desktop-test",
+  }
+  let review_path = @pathx.Relative("src/reviewed.mbt")
+  let review_change : @fileeditor.ChangedFile = {
+    path: review_path,
+    original_path: None,
+    index_status: " ",
+    worktree_status: "M",
+    kind: ChangeModified,
+  }
+  let review_docs : Map[@pathx.Relative, @fileeditor.Doc] = Map([])
+  review_docs[review_path] = {
+    name: "reviewed.mbt",
+    state: TabLoaded(
+      content="working",
+      absolute=@interop.ChannelId::Local.test_resource("/proj/src/reviewed.mbt"),
+      sig="7:1",
+    ),
+    review: Some({
+      generation: 3,
+      working_generation: 3,
+      baseline: ReviewContent("HEAD"),
+      selected: review_change,
+    }),
+    stale: false,
+  }
+  let review_dock = @dock.open_file(
+    { ..bound.dock, owner: Some(owner), open: true },
+    review_path,
+  )
+  let bound = {
+    ..bound,
+    dock: review_dock,
+    file_panel: {
+      ..bound.file_panel,
+      owner: Some(owner),
+      docs: review_docs,
+      changes: ChangeListReady(
+        repository=true,
+        files=[review_change],
+        refreshing=false,
+        refresh_again=false,
+      ),
+      changes_generation: 2,
+      changes_head: Some("head"),
+      changes_head_known: true,
+      review_generation: 3,
+    },
+  }
   // The retained row carries `present: false`, whether an external deletion
   // or archive removed the checkout.
   let (_, gone) = update_dev(
@@ -567,6 +620,38 @@ test "a missing checkout stays bound while rebuild and archive remain reachable"
   assert_true(
     gone.checkout_placement(gone.active())
     is Some(@interop.MissingWorktree(name="wt")),
+  )
+  assert_true(file_ctx(gone).owner == owner)
+  assert_false(gone.file_panel.review_recovery_pending)
+  assert_true(gone.file_panel.placement_parked)
+  assert_true(
+    gone.file_panel.docs.get(review_path)
+    is Some(
+      {
+        review: Some({ generation: 4, baseline: ReviewContent("HEAD"), .. }),
+        ..,
+      }
+    ),
+  )
+  let missing_epoch = gone.file_panel.request_epoch
+  // The authoritative present row repairs placement without rerooting the
+  // panel through an empty owner; the review remains ready for its fresh
+  // Changes snapshot to restart any interrupted side.
+  let (_, restored) = update_dev(
+    dispatch,
+    WorktreesChanged(
+      [{ name: "wt", session: Some("desktop-test"), present: true }],
+      workspace~,
+    ),
+    gone,
+  )
+  assert_true(file_ctx(restored).owner == owner)
+  assert_false(restored.file_panel.review_recovery_pending)
+  assert_false(restored.file_panel.placement_parked)
+  assert_eq(restored.file_panel.request_epoch, missing_epoch)
+  assert_true(
+    restored.file_panel.docs.get(review_path)
+    is Some({ review: Some({ generation: 4, .. }), stale: true, .. }),
   )
   assert_true(
     terminal_ctx(gone).checkout is Some(@interop.MissingWorktree(name="wt")),
@@ -635,7 +720,9 @@ test "a restored workspace conversation waits for placement before using root" {
   })
   assert_true(unresolved.checkout_placement(unresolved.active()) is None)
   assert_true(terminal_ctx(unresolved).checkout is None)
-  assert_eq(file_ctx(unresolved).owner.session, "")
+  // Placement is a separate typed fence; preserving the real identity lets
+  // open review state survive while every host-backed action remains parked.
+  assert_eq(file_ctx(unresolved).owner.session, "desktop-test")
   let generation = unresolved.dev().worktrees_request_generation
   let (_, retrying) = update(dispatch, RetryWorktreePlacement, unresolved)
   assert_eq(retrying.dev().worktrees_request_generation, generation + 1)

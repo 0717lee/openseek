@@ -87,6 +87,7 @@ fn bridge_msg(
           FilePanel(
             FileWatchFailed(
               owner={ channel, session: payload.session },
+              epoch=None,
               message=payload.message,
             ),
           ),
@@ -419,6 +420,7 @@ test "file-panel pushes carry their channel; auth.changed is Local-only" {
         FilePanel(
           FileWatchFailed(
             owner={ channel: Remote("d1"), session: "s-1" },
+            epoch=None,
             message="File watching stopped"
           )
         )

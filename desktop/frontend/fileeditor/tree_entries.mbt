@@ -61,7 +61,7 @@ test "Quick Open file index starts once and retries an initial failure" {
   assert_true(still_loading.index is IndexLoading)
   let (_, failed) = update(
     emit,
-    FileIndexFailed(owner=ctx.owner),
+    FileIndexFailed(owner=ctx.owner, epoch=ctx.request_epoch),
     still_loading,
     ctx,
   )
@@ -87,6 +87,7 @@ test "file index replies are owner fenced and refresh failure keeps ready data" 
     emit,
     FilesIndexed(
       owner=stale_owner,
+      epoch=ctx.request_epoch,
       files=[Relative("stale.mbt")],
       truncated=false,
     ),
@@ -98,6 +99,7 @@ test "file index replies are owner fenced and refresh failure keeps ready data" 
     emit,
     FilesIndexed(
       owner=ctx.owner,
+      epoch=ctx.request_epoch,
       files=[Relative("src/main.mbt")],
       truncated=true,
     ),
@@ -105,7 +107,12 @@ test "file index replies are owner fenced and refresh failure keeps ready data" 
     ctx,
   )
   assert_true(ready.index is IndexReady(truncated=true, ..))
-  let (_, kept) = update(emit, FileIndexFailed(owner=ctx.owner), ready, ctx)
+  let (_, kept) = update(
+    emit,
+    FileIndexFailed(owner=ctx.owner, epoch=ctx.request_epoch),
+    ready,
+    ctx,
+  )
   assert_true(kept.index is IndexReady(files=[Relative("src/main.mbt")], ..))
 }
 

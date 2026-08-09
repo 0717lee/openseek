@@ -621,6 +621,14 @@ fn open_editor_at(
   annotation? : String,
 ) -> (@cmd.Cmd, Model) {
   let conv = model.active()
+  let placement = model.checkout_placement(conv)
+  // Chip/transcript jumps call the file-editor package directly rather than
+  // passing through its guarded message dispatcher. Keep them parked too: the
+  // dock must not grow a loading tab, nor may a host read start, while checkout
+  // placement is unresolved or missing.
+  guard !(placement is None || placement is Some(@interop.MissingWorktree(_))) else {
+    return (@cmd.none, model)
+  }
   let owner : @interop.ConversationKey = {
     channel: model.focused,
     session: conv.session_id,
@@ -642,6 +650,7 @@ fn open_editor_at(
       docs[open_path] = {
         name: @fileeditor.basename(open_path),
         state: TabLoading,
+        review: None,
         stale: false,
       }
     }
@@ -654,6 +663,8 @@ fn open_editor_at(
       tree_open: previous_panel.tree_open,
       explorer_mode: previous_panel.explorer_mode,
       changes_generation: previous_panel.changes_generation,
+      request_epoch: previous_panel.request_epoch + 1,
+      review_generation: previous_panel.review_generation,
       // Preserve the old host configuration until the post-dispatch sync can
       // explicitly retire or replace it.
       watching: previous_panel.watching,
@@ -937,18 +948,12 @@ fn file_ctx(model : Model) -> @fileeditor.Ctx {
     None | Some(Browser(_)) => false
   }
   {
-    // Parking under an empty session makes `@fileeditor.sync` clear the
-    // imperative viewer and retire its watcher. `sync_file_panel` parks the
-    // real conversation's dock strip separately until Repair restores it.
-    owner: {
-      channel: model.focused,
-      session: if checkout is None ||
-        checkout is Some(@interop.MissingWorktree(_)) {
-        ""
-      } else {
-        conv.session_id
-      },
-    },
+    // Keep the real identity even while placement is unresolved or missing.
+    // Both panel packages use the typed checkout state to park host work; the
+    // stable owner lets an interrupted changed-file review resume after Repair
+    // without ever treating the project root as a fallback checkout.
+    owner: { channel: model.focused, session: conv.session_id },
+    request_epoch: model.file_panel.request_epoch,
     workspace: conv.workspace,
     checkout,
     dark_mode: model.theme.is_dark(model.system_dark),
@@ -1016,9 +1021,9 @@ fn sync_file_panel(
   model : Model,
 ) -> (Model, @cmd.Cmd) {
   let ctx = file_ctx(model)
-  // An empty-session owner is deliberately transient: `@dock.sync` parks
-  // the real strip under the conversation key, but never persists this
-  // placeholder strip. Repair selects the real key again and restores it.
+  // Placement health is carried separately from identity, so a missing
+  // checkout keeps this conversation's strip while both content subsystems
+  // refuse host-backed work until Repair settles.
   let dock = @dock.sync(model.dock, ctx.owner)
   let model = { ..model, dock, }
   let (panel, cmd) = @fileeditor.sync(
@@ -1419,6 +1424,11 @@ fn update_msg(
     // then the file subsystem loads and shows the document against the
     // fresh projection.
     FileEditor(FileSelected(path~, name~)) => {
+      let placement = file_ctx(model).checkout
+      guard !(placement is None ||
+        placement is Some(@interop.MissingWorktree(_))) else {
+        return (@cmd.none, model)
+      }
       let had_active = @dock.active_file(model.dock) is Some(_)
       // A pick made from the active FilePicker tab fulfills it: the picker
       // is replaced in place (or the already-open tab activates and the
@@ -1440,12 +1450,43 @@ fn update_msg(
       )
       (cmd, { ..model, file_panel: panel })
     }
+    // A Changes row is the review action: open/activate the same ordinary file
+    // tab, then let the file subsystem pair its working-tree document with the
+    // row's HEAD path. Deleted rows have no working file but still use the
+    // current path as their tab identity.
+    FileEditor(ChangedFileSelected(change)) => {
+      let placement = file_ctx(model).checkout
+      guard !(placement is None ||
+        placement is Some(@interop.MissingWorktree(_))) else {
+        return (@cmd.none, model)
+      }
+      let had_active = @dock.active_file(model.dock) is Some(_)
+      let dock = if model.dock.active is Some(FilePicker) {
+        @dock.resolve_pick(model.dock, change.path)
+      } else {
+        @dock.open_file(model.dock, change.path)
+      }
+      let model = { ..model, dock, }
+      let (cmd, panel) = @fileeditor.open_changed_document(
+        dispatch.map(msg => FileEditor(msg)),
+        model.file_panel,
+        file_ctx(model),
+        change,
+        had_active~,
+      )
+      (cmd, { ..model, file_panel: panel })
+    }
     // Intercepted for the same reason: a navigation jump (go-to-definition,
     // a reference pick) opens a dock tab before the document loads. The
     // owner stamp rejects a reply that outlived a conversation switch.
     FileEditor(OpenNavigationLocation(owner~, path~, range~)) => {
       guard model.file_panel.owner == Some(owner) &&
         file_ctx(model).owner == owner else {
+        return (@cmd.none, model)
+      }
+      let placement = file_ctx(model).checkout
+      guard !(placement is None ||
+        placement is Some(@interop.MissingWorktree(_))) else {
         return (@cmd.none, model)
       }
       let had_active = @dock.active_file(model.dock) is Some(_)
@@ -2541,16 +2582,15 @@ fn update_msg(
       let model = { ..model, dock, }
       let femit = dispatch.map(msg => FileEditor(msg))
       match msg {
-        TogglePanel =>
-          (
-            @fileeditor.panel_toggle_cmds(
-              femit,
-              model.file_panel,
-              file_ctx(model),
-              opening=dock.open,
-            ),
-            model,
+        TogglePanel => {
+          let (cmd, panel) = @fileeditor.panel_toggle_cmds(
+            femit,
+            model.file_panel,
+            file_ctx(model),
+            opening=dock.open,
           )
+          (cmd, { ..model, file_panel: panel })
+        }
         MenuToggled =>
           // Pure UI state; the browser sync pass hides the native view
           // while the popup would overlap it.
@@ -13889,6 +13929,110 @@ test "a tree pick fulfills the active picker in place" {
     model.dock.tabs == [@dock.DockTab::File(path=Relative("src/main.mbt"))],
   )
   assert_true(@dock.active_file(model.dock) == Some(Relative("src/main.mbt")))
+}
+
+///|
+test "a changed row opens the file tab in review mode" {
+  let dispatch = test_dispatch()
+  let model = desktop_model()
+  let (_, model) = update(dispatch, Dock(TogglePanel), model)
+  let (_, model) = update(dispatch, FilePickerRequested, model)
+  let path = @pathx.Relative("src/main.mbt")
+  let (_, model) = update(
+    dispatch,
+    FileEditor(
+      ChangedFileSelected({
+        path,
+        original_path: None,
+        index_status: " ",
+        worktree_status: "M",
+        kind: ChangeModified,
+      }),
+    ),
+    model,
+  )
+  assert_true(model.dock.tabs == [@dock.DockTab::File(path~)])
+  assert_true(@dock.active_file(model.dock) == Some(path))
+  assert_true(
+    model.file_panel.docs.get(path)
+    is Some(
+      {
+        state: TabLoading,
+        review: Some({ generation: 1, baseline: ReviewLoading, .. }),
+        ..,
+      }
+    ),
+  )
+}
+
+///|
+test "file rows and location jumps cannot open while checkout placement is missing" {
+  let dispatch = test_dispatch()
+  let workspace = @interop.ChannelId::Local.test_resource("/proj")
+  let model = desktop_model()
+    .replace_conversation({
+      ..test_conversation(),
+      workspace: Some(workspace),
+      worktree: Some("wt"),
+    })
+    .with_dev(dev => {
+      ..dev,
+      workspaces: [workspace],
+      worktrees: [
+        {
+          workspace,
+          rows: [{ name: "wt", session: Some("desktop-test"), present: false }],
+          generation: 1,
+        },
+      ],
+    })
+  let path = @pathx.Relative("src/main.mbt")
+  let (_, ordinary) = update(
+    dispatch,
+    FileEditor(FileSelected(path~, name="main.mbt")),
+    model,
+  )
+  assert_false(ordinary.dock.tabs.contains(@dock.DockTab::File(path~)))
+  assert_false(ordinary.file_panel.docs.contains(path))
+  let (_, review) = update(
+    dispatch,
+    FileEditor(
+      ChangedFileSelected({
+        path,
+        original_path: None,
+        index_status: " ",
+        worktree_status: "M",
+        kind: ChangeModified,
+      }),
+    ),
+    model,
+  )
+  assert_false(review.dock.tabs.contains(@dock.DockTab::File(path~)))
+  assert_false(review.file_panel.docs.contains(path))
+  let (_, jumped) = update(
+    dispatch,
+    JumpToLocation(
+      path="/proj/src/main.mbt",
+      range=Some(@common.Range::Range(1, 1, 1, 1)),
+      annotation=None,
+    ),
+    model,
+  )
+  assert_false(jumped.dock.tabs.contains(@dock.DockTab::File(path~)))
+  assert_false(jumped.file_panel.docs.contains(path))
+  let (_, navigation) = update(
+    dispatch,
+    FileEditor(
+      OpenNavigationLocation(
+        owner=file_ctx(model).owner,
+        path~,
+        range=@common.Range::Range(1, 1, 1, 1),
+      ),
+    ),
+    model,
+  )
+  assert_false(navigation.dock.tabs.contains(@dock.DockTab::File(path~)))
+  assert_false(navigation.file_panel.docs.contains(path))
 }
 
 ///|

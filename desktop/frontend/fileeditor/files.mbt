@@ -12,6 +12,7 @@
 fn read_directory(
   dispatch : @cmd.Emit[Msg],
   owner : @interop.ConversationKey,
+  epoch : Int,
   path : @pathx.Relative,
   workspace~ : @common.Uri?,
 ) -> @cmd.Cmd {
@@ -36,6 +37,7 @@ fn read_directory(
             dispatch(
               DirFailed(
                 owner~,
+                epoch~,
                 path~,
                 message=@interop.bridge_error_text(error),
               ),
@@ -50,7 +52,7 @@ fn read_directory(
           entries.push(entry)
         }
       }
-      scheduler.add(dispatch(DirLoaded(owner~, path~, entries~)))
+      scheduler.add(dispatch(DirLoaded(owner~, epoch~, path~, entries~)))
     })
   })
 }
@@ -62,6 +64,7 @@ fn read_directory(
 fn list_files(
   dispatch : @cmd.Emit[Msg],
   owner : @interop.ConversationKey,
+  epoch : Int,
   workspace~ : @common.Uri?,
 ) -> @cmd.Cmd {
   match workspace {
@@ -80,7 +83,7 @@ fn list_files(
         },
       ) catch {
         _ => {
-          scheduler.add(dispatch(FileIndexFailed(owner~)))
+          scheduler.add(dispatch(FileIndexFailed(owner~, epoch~)))
           return
         }
       }
@@ -92,7 +95,9 @@ fn list_files(
         }
       })
       scheduler.add(
-        dispatch(FilesIndexed(owner~, files~, truncated=reply.truncated)),
+        dispatch(
+          FilesIndexed(owner~, epoch~, files~, truncated=reply.truncated),
+        ),
       )
     })
   })
@@ -108,15 +113,29 @@ fn list_files(
 pub fn read_file(
   dispatch : @cmd.Emit[Msg],
   owner : @interop.ConversationKey,
+  epoch : Int,
   path : @pathx.Relative,
   name : String,
+  review_generation? : Int,
   range~ : @common.Range?,
   annotation? : String,
   workspace~ : @common.Uri?,
 ) -> @cmd.Cmd {
   match workspace {
     Some(resource) if !@resource.belongs_to(resource, owner.channel) =>
-      return @cmd.none
+      // Settle the request through the same typed failure path as an async
+      // bridge rejection. Review-loading tabs deliberately do not start an
+      // untagged duplicate read on activation, so a silent no-op here would
+      // otherwise strand the paired working side during a host migration.
+      return dispatch(
+        FileFailed(
+          owner~,
+          epoch~,
+          path~,
+          review_generation~,
+          message="workspace moved to another host before file read",
+        ),
+      )
     _ => ()
   }
   @cmd.custom_cmd(scheduler => {
@@ -133,7 +152,13 @@ pub fn read_file(
         error => {
           scheduler.add(
             dispatch(
-              FileFailed(owner~, message=@interop.bridge_error_text(error)),
+              FileFailed(
+                owner~,
+                epoch~,
+                path~,
+                review_generation~,
+                message=@interop.bridge_error_text(error),
+              ),
             ),
           )
           return
@@ -143,12 +168,29 @@ pub fn read_file(
         Some(file) =>
           scheduler.add(
             dispatch(
-              FileLoaded(owner~, path~, name~, file~, range~, annotation~),
+              FileLoaded(
+                owner~,
+                epoch~,
+                path~,
+                name~,
+                file~,
+                review_generation~,
+                range~,
+                annotation~,
+              ),
             ),
           )
         None =>
           scheduler.add(
-            dispatch(FileFailed(owner~, message="could not read file")),
+            dispatch(
+              FileFailed(
+                owner~,
+                epoch~,
+                path~,
+                review_generation~,
+                message="could not read file",
+              ),
+            ),
           )
       }
     })
@@ -240,6 +282,7 @@ async fn read_file_snapshot(
 fn stat_files(
   dispatch : @cmd.Emit[Msg],
   owner : @interop.ConversationKey,
+  epoch : Int,
   paths : Array[@pathx.Relative],
   workspace~ : @common.Uri?,
 ) -> @cmd.Cmd {
@@ -250,7 +293,10 @@ fn stat_files(
   }
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
-      let reply = @interop.bridge_request(
+      // Stat snapshots mutate cached document/review state. Keep their host
+      // observations in issue order, while `epoch` fences a placement or
+      // conversation boundary that an already-issued request outlives.
+      let reply = @interop.bridge_request_in_order(
         owner.channel,
         @commands.fs_stat_files,
         {
@@ -274,7 +320,7 @@ fn stat_files(
           })
         }
       }
-      scheduler.add(dispatch(StatsLoaded(owner~, stats~)))
+      scheduler.add(dispatch(StatsLoaded(owner~, epoch~, stats~)))
     })
   })
 }
@@ -286,6 +332,7 @@ fn stat_files(
 fn watch_workspace(
   dispatch : @cmd.Emit[Msg],
   channel~ : @interop.ChannelId,
+  epoch : Int,
   watched : WatchedPaths?,
 ) -> @cmd.Cmd {
   match watched {
@@ -319,6 +366,7 @@ fn watch_workspace(
                 dispatch(
                   FileWatchFailed(
                     owner=watched.owner,
+                    epoch=Some(epoch),
                     message="File watching failed: \{@interop.bridge_error_text(error)}",
                   ),
                 ),
@@ -330,6 +378,42 @@ fn watch_workspace(
       }
     })
   })
+}
+
+///|
+test "a cross-host file read settles through its generation-fenced failure" {
+  let seen : Ref[Msg?] = Ref(None)
+  let dispatch = @cmd.Emit(message => {
+    seen.val = Some(message)
+    @cmd.none
+  })
+  guard @resource.of_path(@interop.ChannelId::Local, "/work") is Some(workspace) else {
+    fail("test workspace resource was not absolute")
+  }
+  ignore(
+    read_file(
+      dispatch,
+      { channel: @interop.ChannelId::Remote("other"), session: "remote-test" },
+      0,
+      @pathx.Relative("src/main.mbt"),
+      "main.mbt",
+      review_generation=7,
+      range=None,
+      workspace=Some(workspace),
+    ),
+  )
+  assert_true(
+    seen.val
+    is Some(
+      FileFailed(
+        owner={ channel: @interop.ChannelId::Remote("other"), .. },
+        epoch=0,
+        path=@pathx.Relative("src/main.mbt"),
+        review_generation=Some(7),
+        message="workspace moved to another host before file read"
+      )
+    ),
+  )
 }
 
 ///|

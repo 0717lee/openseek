@@ -45,10 +45,54 @@ pub(all) enum TabState {
   TabLoaded(content~ : String, absolute~ : @common.Uri, sig~ : String)
   TabBinary
   TabOversized
+  // The host could not read this file. Unlike `TabDeleted`, this keeps the
+  // failure reason without guessing whether the cause was removal,
+  // permissions, or a transient filesystem error.
+  TabReadFailed(String)
+  // Git proved that the path is not an ordinary file the editor may open
+  // (currently a symlink, submodule, or directory). Keep the tab as a bookmark
+  // without retaining source that belonged to an earlier regular file.
+  TabUnavailable(String)
   // The file vanished from disk while open. The tab stays — its name is the
   // user's bookmark — showing a notice until the file reappears or the tab
   // is closed.
   TabDeleted
+} derive(Eq)
+
+///|
+/// The Git baseline attached to a document opened from Changes. Ordinary file
+/// opens carry `None`; review opens start at `ReviewLoading` and settle to one
+/// of the typed `git.original_file` outcomes. Keeping this on the document
+/// makes a tab switch restore the same review without another host round-trip.
+pub(all) enum ReviewBaseline {
+  ReviewLoading
+  ReviewContent(String)
+  // A legitimate empty baseline: added/untracked files and unborn HEAD.
+  ReviewMissing
+  ReviewBinary
+  ReviewOversized
+  ReviewFailed(String)
+} derive(Eq)
+
+///|
+/// One changed-file review request parked on its document. Separate request
+/// generations fence its HEAD reply and newest working-tree read; keeping the
+/// tokens outside `ReviewBaseline` avoids repeating them in every settled
+/// variant.
+pub(all) struct ReviewState {
+  // The HEAD-side request token. It remains stable while newer working-tree
+  // reads are started for the same review.
+  generation : Int
+  // The newest working-tree read token. Keeping this separate from the HEAD
+  // token lets watcher-driven reloads reject replies that complete out of
+  // order without invalidating an in-flight baseline.
+  working_generation : Int
+  baseline : ReviewBaseline
+  // Preserve the exact Changes row that the user selected. Porcelain can
+  // legitimately report two rows for one path (for example, a staged
+  // deletion plus a recreated untracked file), so the document path alone
+  // cannot identify which working/HEAD pair is under review.
+  selected : ChangedFile
 } derive(Eq)
 
 ///|
@@ -59,6 +103,10 @@ pub(all) enum TabState {
 pub(all) struct Doc {
   name : String
   state : TabState
+  // `Some` means this tab was explicitly opened from Changes. Content and a
+  // missing HEAD become Viewer quick-diff baselines; the other cases remain
+  // visible as precise review-status chrome.
+  review : ReviewState?
   // The file changed on disk while its tab was in the background; reloaded
   // on activation rather than eagerly, so a build storm costs one read.
   stale : Bool
@@ -177,6 +225,14 @@ pub(all) enum ChangeList {
 /// file list arrives through `Ctx`.
 pub(all) struct State {
   owner : @interop.ConversationKey?
+  // The workspace and resolved checkout incarnation last reconciled for
+  // `owner`. A conversation can move from its project root into a newly
+  // created worktree without changing owner or passing through a missing
+  // placement; retaining both identities makes that transition a hard cache
+  // and request boundary instead of letting root-checkout data survive it.
+  placement_known : Bool
+  placement_workspace : @common.Uri?
+  placement_checkout : @interop.CheckoutPlacement?
   // Whether the file-tree pane (the toggleable column right of the viewer)
   // is shown. A panel preference, not per-conversation state, so it
   // survives conversation switches.
@@ -186,9 +242,37 @@ pub(all) struct State {
   // not (see `sync`).
   explorer_mode : ExplorerMode
   changes : ChangeList
-  // Monotonic request token retained across conversation re-roots. Owner plus
-  // this generation rejects an old A→B→A reply for the same conversation.
+  // Monotonic request token retained across conversation re-roots and advanced
+  // across same-owner placement changes. Owner plus this generation rejects an
+  // old A→B→A reply or one from an earlier checkout incarnation.
   changes_generation : Int
+  // Placement/conversation epoch carried by filesystem replies. Advancing
+  // this value on either boundary rejects reads, listings, stats, and watcher
+  // failures that outlived the checkout they addressed.
+  request_epoch : Int
+  // Last settled Git HEAD identity. `changes_head_known` distinguishes a
+  // first/unborn snapshot (`head=None`) from no snapshot yet, so a later HEAD
+  // transition can refresh every surviving review baseline precisely.
+  changes_head : String?
+  changes_head_known : Bool
+  // Monotonic token shared by changed-file HEAD and working-tree reads. Each
+  // side records its current token in `ReviewState`; it outlives conversation
+  // re-roots for the same A→B→A reason as `changes_generation`.
+  review_generation : Int
+  // A missing checkout can discard either half of an in-flight review. Mark
+  // that boundary explicitly so the first authoritative snapshot after
+  // recovery restarts only incomplete requests once; ordinary polling must
+  // never supersede a healthy slow read.
+  review_recovery_pending : Bool
+  // Legacy hosts cannot identify HEAD in their Changes reply. Their
+  // compatibility refreshes keep a settled baseline visible while one new
+  // HEAD read is in flight; recording that request by path prevents a slow
+  // read from being superseded by every Changes poll.
+  background_review_requests : Map[@pathx.Relative, Int]
+  // Whether checkout placement is currently unresolved/missing. Kept separate
+  // from review recovery because a repaired review may still be awaiting its
+  // authoritative Changes snapshot when placement disappears a second time.
+  placement_parked : Bool
   // Whether the explorer pane was visible on the preceding sync pass. This is
   // stricter than the enclosing dock being open: with a file active the tree
   // toggle (and narrow drill-down) can hide the explorer while the dock stays
@@ -226,10 +310,20 @@ pub(all) struct State {
 pub fn State::empty() -> State {
   {
     owner: None,
+    placement_known: false,
+    placement_workspace: None,
+    placement_checkout: None,
     tree_open: true,
     explorer_mode: ExplorerFiles,
     changes: ChangeListIdle,
     changes_generation: 0,
+    request_epoch: 0,
+    changes_head: None,
+    changes_head_known: false,
+    review_generation: 0,
+    review_recovery_pending: false,
+    background_review_requests: Map([]),
+    placement_parked: false,
     explorer_was_visible: false,
     watching: None,
     watch_error: None,
@@ -281,6 +375,8 @@ pub fn TreeLayout::wire(self : TreeLayout) -> String {
 /// file tree docks.
 pub(all) struct Ctx {
   owner : @interop.ConversationKey
+  // The current placement incarnation for filesystem request/reply fencing.
+  request_epoch : Int
   workspace : @common.Uri?
   // `None` while this connection has not loaded the conversation's placement.
   // Unknown and missing placements both block filesystem requests so neither
@@ -327,11 +423,13 @@ pub(all) enum Msg {
   // reply that lost a conversation switch can be dropped.
   DirLoaded(
     owner~ : @interop.ConversationKey,
+    epoch~ : Int,
     path~ : @pathx.Relative,
     entries~ : Array[FileEntry]
   )
   DirFailed(
     owner~ : @interop.ConversationKey,
+    epoch~ : Int,
     path~ : @pathx.Relative,
     message~ : String
   )
@@ -339,18 +437,20 @@ pub(all) enum Msg {
   // `truncated` means the host's walk stopped at its cap.
   FilesIndexed(
     owner~ : @interop.ConversationKey,
+    epoch~ : Int,
     files~ : Array[@pathx.Relative],
     truncated~ : Bool
   )
   // A `list_files` request failed or returned garbage. An initial failure
   // becomes `IndexFailed`; a failed background refresh retains a ready index.
-  FileIndexFailed(owner~ : @interop.ConversationKey)
+  FileIndexFailed(owner~ : @interop.ConversationKey, epoch~ : Int)
   // A `git.changes` reply. The owner fence prevents a late response from one
   // conversation replacing another conversation's inventory.
   ChangesLoaded(
     owner~ : @interop.ConversationKey,
     generation~ : Int,
     repository~ : Bool,
+    head~ : String?,
     files~ : Array[ChangedFile]
   )
   ChangesFailed(
@@ -365,6 +465,26 @@ pub(all) enum Msg {
   // A file row was clicked: read it and show it in the viewer. `name` is the
   // entry's display name, kept for the viewer's title and language guess.
   FileSelected(path~ : @pathx.Relative, name~ : String)
+  // A Changes row was clicked. The full decoded row carries the original path
+  // needed by renames/copies and whether a working-tree read is possible.
+  ChangedFileSelected(ChangedFile)
+  // One `git.original_file` request settled. `path` is always the current
+  // changed path (the dock/document key), even when the host read its rename
+  // source from `original_path`.
+  GitOriginalLoaded(
+    owner~ : @interop.ConversationKey,
+    path~ : @pathx.Relative,
+    generation~ : Int,
+    background~ : Bool,
+    original~ : @protocol.GitOriginalFileReply
+  )
+  GitOriginalFailed(
+    owner~ : @interop.ConversationKey,
+    path~ : @pathx.Relative,
+    generation~ : Int,
+    background~ : Bool,
+    message~ : String
+  )
   // A Definition/References result accepted by the Viewer's location opener.
   // Carry the captured owner so a conversation switch that races the async
   // request cannot open the target in the next workspace.
@@ -379,19 +499,35 @@ pub(all) enum Msg {
   // selected so the code it names reads highlighted. `annotation`, when
   // present (an annotation chip's jump), is the user's comment text,
   // re-shown as an editor bubble over `range`. A plain tree click leaves
-  // both `None`.
+  // both `None`. `review_generation` is present only for the working-tree
+  // half of a changed-row open and fences repeated review clicks.
   FileLoaded(
     owner~ : @interop.ConversationKey,
+    epoch~ : Int,
     path~ : @pathx.Relative,
     name~ : String,
     file~ : FileContent,
+    review_generation~ : Int?,
     range~ : @common.Range?,
     annotation~ : String?
   )
-  FileFailed(owner~ : @interop.ConversationKey, message~ : String)
+  // A read failure carries the same path/generation identity as success so a
+  // stale review read cannot surface an error over a newer review or ordinary
+  // open. Ordinary reads leave `review_generation=None`.
+  FileFailed(
+    owner~ : @interop.ConversationKey,
+    epoch~ : Int,
+    path~ : @pathx.Relative,
+    review_generation~ : Int?,
+    message~ : String
+  )
   // An `fs.watch` request rejection or an asynchronous watcher failure. The
   // owner fences both paths against a conversation switch.
-  FileWatchFailed(owner~ : @interop.ConversationKey, message~ : String)
+  FileWatchFailed(
+    owner~ : @interop.ConversationKey,
+    epoch~ : Int?,
+    message~ : String
+  )
   // A new watcher sends `changes=None` once it is attached, requesting a full
   // baseline reconciliation. Later pushes contain the exact debounced events.
   // `session` is absent only for compatibility with an older host.
@@ -404,13 +540,18 @@ pub(all) enum Msg {
   // conversation's finish.
   RunSettled(owner~ : @interop.ConversationKey)
   // A `stat_files` reply: each open tab's current mtime signature (`""` =
-  // the file is gone). `owner` says which conversation it answers, like
-  // every other reply.
-  StatsLoaded(owner~ : @interop.ConversationKey, stats~ : Array[FileStat])
+  // the file is gone). Owner plus request epoch fence a request that outlived
+  // either its conversation or checkout.
+  StatsLoaded(
+    owner~ : @interop.ConversationKey,
+    epoch~ : Int,
+    stats~ : Array[FileStat]
+  )
   // The language server's diagnostics returned by `lsp_open`. The full owner
   // fences a reply that lost a device/session switch while the request ran.
   DiagnosticsLoaded(
     owner~ : @interop.ConversationKey,
+    epoch~ : Int,
     absolute~ : @common.Uri,
     diagnostics~ : Array[@protocol.LspDiagnostic]
   )

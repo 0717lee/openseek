@@ -811,16 +811,19 @@ test "file Quick Open shows live tabs first and adopts the indexed snapshot" {
   docs[Relative("src/open.mbt")] = {
     name: "open.mbt",
     state: @fileeditor.TabLoading,
+    review: None,
     stale: false,
   }
   docs[Relative("src/deleted.mbt")] = {
     name: "deleted.mbt",
     state: @fileeditor.TabDeleted,
+    review: None,
     stale: false,
   }
   docs[Relative("src/active.mbt")] = {
     name: "active.mbt",
     state: @fileeditor.TabLoading,
+    review: None,
     stale: false,
   }
   let dock = base.dock
@@ -848,6 +851,7 @@ test "file Quick Open shows live tabs first and adopts the indexed snapshot" {
     FileEditor(
       @fileeditor.FilesIndexed(
         owner~,
+        epoch=0,
         files=[
           Relative("src/open.mbt"),
           Relative("src/other.mbt"),
@@ -885,7 +889,7 @@ test "an initial file-index failure is visible and retryable" {
   let (_, opened) = update(dispatch, QuickOpenOpen(QuickOpenFiles), seeded)
   let (_, failed) = update(
     dispatch,
-    FileEditor(@fileeditor.FileIndexFailed(owner~)),
+    FileEditor(@fileeditor.FileIndexFailed(owner~, epoch=0)),
     opened,
   )
   guard failed.quick_open is Some(failure) else { fail("palette expected") }

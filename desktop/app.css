@@ -1133,6 +1133,29 @@ html.is-resizing * {
   color: var(--warning, #a36800);
 }
 
+.change-action {
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--line));
+  border-radius: 999px;
+  color: var(--accent-ink);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  font-size: 10px;
+  line-height: 16px;
+}
+
+.change-row:hover .change-action:not(.unavailable),
+.change-row:focus-visible .change-action:not(.unavailable) {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+}
+
+.change-action.unavailable {
+  border-color: var(--line);
+  color: var(--ink-3);
+  background: transparent;
+}
+
 .tree-chevron {
   flex: 0 0 auto;
   width: 12px;
@@ -1205,6 +1228,26 @@ html.is-resizing * {
 .crumb-sep {
   flex: 0 0 auto;
   color: var(--ink-3);
+}
+
+/* The changed-file row is the review action; this badge names the active
+   comparison source and the typed cases where a textual HEAD diff is not
+   available. It stays compact so the path retains the breadcrumb's width. */
+.review-badge {
+  flex: 0 0 auto;
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 2px 7px;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--line));
+  border-radius: 999px;
+  color: var(--accent-ink);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  font-size: 10px;
+  line-height: 16px;
+}
+.review-badge.hidden {
+  display: none;
 }
 
 .viewer-host {
