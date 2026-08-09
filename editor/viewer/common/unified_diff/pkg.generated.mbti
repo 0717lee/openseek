@@ -13,9 +13,7 @@ pub fn default_unified_diff_algorithm() -> UnifiedDiffAlgorithm
 // Errors
 
 // Types and methods
-pub struct UnifiedDiffAlgorithm {
-  compute_changes_callback : (Array[String], Array[String], UnifiedDiffAlgorithmOptions) -> Array[UnifiedDiffChange]
-}
+type UnifiedDiffAlgorithm
 pub fn UnifiedDiffAlgorithm::UnifiedDiffAlgorithm(compute_changes~ : (Array[String], Array[String], UnifiedDiffAlgorithmOptions) -> Array[UnifiedDiffChange]) -> Self
 
 pub(all) struct UnifiedDiffAlgorithmOptions {
