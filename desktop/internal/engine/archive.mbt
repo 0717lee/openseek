@@ -21,16 +21,18 @@ fn archived_session_root(root : @pathx.Absolute) -> @pathx.Absolute {
 }
 
 ///|
-/// Every store that can own a session id. Correlation and stale-client
-/// defenses must search all of them: request hints are optional and cannot be
-/// trusted to identify where an existing record lives.
+/// Every store that can own a session id, ordered so a workspace-based record
+/// is found before a global fallback — matching the old `session_store_root`
+/// priority. Correlation and stale-client defenses must search all of them:
+/// request hints are optional and cannot be trusted to identify where an
+/// existing record lives.
 async fn known_session_roots() -> Array[@pathx.Absolute] {
   let roots : Array[@pathx.Absolute] = []
-  if resolved_session_root() is Some(root) {
-    roots.push(root)
-  }
   for path in registered_workspaces() {
     roots.push(workspace_session_root(path))
+  }
+  if resolved_session_root() is Some(root) {
+    roots.push(root)
   }
   roots
 }
