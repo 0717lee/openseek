@@ -837,6 +837,29 @@ async fn git_collect(
 }
 
 ///|
+/// Capture the exact index entries used by one review snapshot. Task mode
+/// reads this again after its diff/untracked queries, so an index-only change
+/// retries just like a concurrent commit instead of publishing mixed rows.
+async fn git_index_metadata(dir : String) -> String {
+  let (code, stdout, stderr) = git_collect(dir, [
+    "ls-files", "--full-name", "--stage", "-z", "--", ".",
+  ])
+  guard code == 0 else {
+    let detail = (stderr.text() catch { _ => "" }).trim().to_owned()
+    raise HostError(
+      if detail.is_empty() {
+        "failed to inspect Git index"
+      } else {
+        detail
+      },
+    )
+  }
+  stdout.text() catch {
+    _ => raise HostError("Git returned a non-UTF-8 index path")
+  }
+}
+
+///|
 /// Resolve one revision to an immutable commit identity. A missing revision is
 /// ordinary (an unborn HEAD or an object that disappeared); malformed command
 /// output is a host failure rather than an ambiguous missing baseline.
@@ -894,64 +917,117 @@ test "Git review revisions accept only full hexadecimal object identities" {
 }
 
 ///|
-/// Read the index and porcelain status while HEAD remains the same. Git has no
-/// single porcelain-v1 command that also reports the full commit identity, so
-/// bracket the snapshot with two revision reads and retry a concurrent
-/// commit/checkout. The returned rows and baseline identity therefore describe
-/// the same HEAD instead of relying on the next frontend poll to self-heal.
+/// Read the review inventory while HEAD remains the same. Workspace-root
+/// reviews retain porcelain's HEAD status; a worktree task compares its
+/// immutable creation commit with the current working tree, so committed work
+/// remains visible. Bracket the snapshot with revision reads and retry a
+/// concurrent commit/checkout instead of relying on the next poll to self-heal.
 async fn git_change_snapshot(
   dir : String,
   workspace_prefix : String,
+  review_base : String?,
   retries_left : Int,
-) -> (String?, Set[String], Set[String], Array[GitChange]) {
+) -> (
+  String?,
+  Set[String],
+  Set[String],
+  Set[String],
+  Set[String],
+  Array[GitChange],
+) {
   let head = git_revision_commit(dir, "HEAD")
-  let (index_code, index_stdout, index_stderr) = git_collect(dir, [
-    "ls-files", "--full-name", "--stage", "-z", "--", ".",
-  ])
-  guard index_code == 0 else {
-    let detail = (index_stderr.text() catch { _ => "" }).trim().to_owned()
-    raise HostError(
-      if detail.is_empty() {
-        "failed to inspect Git index"
-      } else {
-        detail
-      },
-    )
-  }
-  let index_metadata = index_stdout.text() catch {
-    _ => raise HostError("Git returned a non-UTF-8 index path")
-  }
+  let index_metadata = git_index_metadata(dir)
   let known_gitlinks = parse_git_mode_paths(
     index_metadata, workspace_prefix, "160000",
   )
   let known_symlinks = parse_git_mode_paths(
     index_metadata, workspace_prefix, "120000",
   )
-  let (code, stdout, stderr) = git_collect(dir, [
-    "status", "--porcelain=v1", "-z", "--untracked-files=all", "--", ".",
-  ])
-  guard code == 0 else {
-    let detail = (stderr.text() catch { _ => "" }).trim().to_owned()
-    raise HostError(
-      if detail.is_empty() {
-        "failed to read Git changes"
-      } else {
-        detail
-      },
-    )
+  let status_changes = match review_base {
+    Some(_) => {
+      let (code, stdout, stderr) = git_collect(dir, [
+        "ls-files", "--full-name", "--others", "--exclude-standard", "-z", "--",
+        ".",
+      ])
+      guard code == 0 else {
+        let detail = (stderr.text() catch { _ => "" }).trim().to_owned()
+        raise HostError(
+          if detail.is_empty() {
+            "failed to read untracked Git paths"
+          } else {
+            detail
+          },
+        )
+      }
+      let raw = stdout.text() catch {
+        _ => raise HostError("Git returned a non-UTF-8 untracked path")
+      }
+      parse_git_untracked_z(raw).filter_map(change => {
+        git_change_relative_to_workspace(change, workspace_prefix)
+      })
+    }
+    None => {
+      let (code, stdout, stderr) = git_collect(dir, [
+        "status", "--porcelain=v1", "-z", "--untracked-files=all", "--", ".",
+      ])
+      guard code == 0 else {
+        let detail = (stderr.text() catch { _ => "" }).trim().to_owned()
+        raise HostError(
+          if detail.is_empty() {
+            "failed to read Git changes"
+          } else {
+            detail
+          },
+        )
+      }
+      let raw = stdout.text() catch {
+        _ => raise HostError("Git returned a non-UTF-8 changed path")
+      }
+      parse_git_status_z(raw).filter_map(change => {
+        git_change_relative_to_workspace(change, workspace_prefix)
+      })
+    }
   }
-  let raw = stdout.text() catch {
-    _ => raise HostError("Git returned a non-UTF-8 changed path")
+  let changes = match review_base {
+    Some(base) => {
+      // Exhaustive copy discovery scans unchanged sources and is too costly
+      // for a three-second poll. Copies without cheap Git evidence remain
+      // correct additions with an empty baseline.
+      let (diff_code, diff_stdout, diff_stderr) = git_collect(dir, [
+        "diff", "--name-status", "-z", "--no-ext-diff", "--find-renames", base, "--",
+        ".",
+      ])
+      guard diff_code == 0 else {
+        let detail = (diff_stderr.text() catch { _ => "" }).trim().to_owned()
+        raise HostError(
+          if detail.is_empty() {
+            "failed to read Git task changes"
+          } else {
+            detail
+          },
+        )
+      }
+      let diff_raw = diff_stdout.text() catch {
+        _ => raise HostError("Git returned a non-UTF-8 task path")
+      }
+      let task_changes = parse_git_diff_name_status_z(diff_raw).filter_map(change => {
+        git_change_relative_to_workspace(change, workspace_prefix)
+      })
+      git_task_changes_with_untracked(task_changes, status_changes)
+    }
+    None => status_changes
   }
-  let changes = parse_git_status_z(raw).filter_map(change => {
-    git_change_relative_to_workspace(change, workspace_prefix)
-  })
-  // Staged deletions no longer exist in the index. Query only those changed
-  // paths in the pinned HEAD tree instead of walking every tracked file on
-  // each three-second review poll; the old mode keeps deleted gitlinks and
-  // symlinks inert without repository-size-proportional work.
+  // Deleted paths no longer exist in the index. Query only those paths in the
+  // pinned comparison tree instead of walking the full workspace on each
+  // three-second poll; this keeps gitlinks and symlinks inert cheaply.
   let deleted_paths = deleted_change_paths(changes)
-  if head is Some(commit) && !deleted_paths.is_empty() {
+  let comparison = match review_base {
+    Some(base) => Some(base)
+    None => head
+  }
+  let deleted_gitlinks : Set[String] = Set([])
+  let deleted_symlinks : Set[String] = Set([])
+  if comparison is Some(commit) && !deleted_paths.is_empty() {
     let path_batches = git_tree_path_batches(deleted_paths)
     let full_tree = path_batches.is_empty()
     let batches = if full_tree { [["."]] } else { path_batches }
@@ -972,37 +1048,55 @@ async fn git_change_snapshot(
         let detail = (tree_stderr.text() catch { _ => "" }).trim().to_owned()
         raise HostError(
           if detail.is_empty() {
-            "failed to inspect Git HEAD tree"
+            "failed to inspect Git review tree"
           } else {
             detail
           },
         )
       }
-      let head_metadata = tree_stdout.text() catch {
-        _ => raise HostError("Git returned a non-UTF-8 HEAD tree path")
+      let comparison_metadata = tree_stdout.text() catch {
+        _ => raise HostError("Git returned a non-UTF-8 review tree path")
       }
-      let head_gitlinks = parse_git_mode_paths(
-        head_metadata, workspace_prefix, "160000",
+      let comparison_gitlinks = parse_git_mode_paths(
+        comparison_metadata, workspace_prefix, "160000",
       )
-      for path in head_gitlinks {
-        known_gitlinks.add(path)
+      for path in comparison_gitlinks {
+        deleted_gitlinks.add(path)
       }
-      let head_symlinks = parse_git_mode_paths(
-        head_metadata, workspace_prefix, "120000",
+      let comparison_symlinks = parse_git_mode_paths(
+        comparison_metadata, workspace_prefix, "120000",
       )
-      for path in head_symlinks {
-        known_symlinks.add(path)
+      for path in comparison_symlinks {
+        deleted_symlinks.add(path)
       }
     }
+  }
+  if review_base is Some(_) && git_index_metadata(dir) != index_metadata {
+    if retries_left > 0 {
+      return git_change_snapshot(
+        dir,
+        workspace_prefix,
+        review_base,
+        retries_left - 1,
+      )
+    }
+    raise HostError("Git index kept changing while task changes were read")
   }
   let confirmed_head = git_revision_commit(dir, "HEAD")
   if confirmed_head != head {
     if retries_left > 0 {
-      return git_change_snapshot(dir, workspace_prefix, retries_left - 1)
+      return git_change_snapshot(
+        dir,
+        workspace_prefix,
+        review_base,
+        retries_left - 1,
+      )
     }
     raise HostError("HEAD kept changing while Git changes were read")
   }
-  (head, known_gitlinks, known_symlinks, changes)
+  (
+    head, known_gitlinks, known_symlinks, deleted_gitlinks, deleted_symlinks, changes,
+  )
 }
 
 ///|
@@ -1042,12 +1136,25 @@ async fn git_changes_op(payload : GitChangesPayload) -> GitChangesReply {
     workspace?=payload.workspace,
   )
   let baseline = match recorded_base {
-    Some(base) if valid_commit_identity(base) => git_revision_commit(dir, base)
-    _ => None
+    Some(base) => {
+      guard valid_commit_identity(base) else {
+        raise HostError("recorded Git task baseline is invalid")
+      }
+      guard git_revision_commit(dir, base) is Some(commit) else {
+        raise HostError("recorded Git task baseline is unavailable")
+      }
+      Some(commit)
+    }
+    None => None
   }
-  let (head, known_gitlinks, known_symlinks, changes) = git_change_snapshot(
-    dir, workspace_prefix, 2,
-  )
+  let (
+    head,
+    known_gitlinks,
+    known_symlinks,
+    deleted_gitlinks,
+    deleted_symlinks,
+    changes,
+  ) = git_change_snapshot(dir, workspace_prefix, baseline, 2)
   let changes = @async.all(
     [
       for change in changes => {
@@ -1059,8 +1166,8 @@ async fn git_changes_op(payload : GitChangesPayload) -> GitChangesReply {
             git_change_with_path_kind(
               change,
               Unknown,
-              known_gitlinks.contains(change.path),
-              known_symlinks.contains(change.path),
+              deleted_gitlinks.contains(change.path),
+              deleted_symlinks.contains(change.path),
             )
           } else if change.kind == "untracked" && change.path.has_suffix("/") {
             change
@@ -1365,14 +1472,53 @@ async test "Git snapshots pair status with HEAD and supplied revisions stay pinn
       "commit", "--quiet", "-m", "first",
     ])
     let first = git_revision_commit(dir, "HEAD").unwrap()
+    // A task deletion must use the comparison tree's mode, not a staged type
+    // change that no longer exists in the working tree.
+    @fs.remove("\{dir}/desktop/keep.txt")
+    @fs.symlink(target="../review.txt", "\{dir}/desktop/keep.txt")
+    git_test_run(dir, ["add", "desktop/keep.txt"])
+    @fs.remove("\{dir}/desktop/keep.txt")
+    let (_, _, current_symlinks, _, deleted_symlinks, type_changes) = git_change_snapshot(
+      dir,
+      "",
+      Some(first),
+      2,
+    )
+    assert_true(current_symlinks.contains("desktop/keep.txt"))
+    assert_false(deleted_symlinks.contains("desktop/keep.txt"))
+    guard type_changes is [deleted] else {
+      fail("expected the staged type-change deletion")
+    }
+    assert_eq(
+      git_change_with_path_kind(
+        deleted,
+        Unknown,
+        false,
+        deleted_symlinks.contains(deleted.path),
+      ).kind,
+      "deleted",
+    )
+    git_test_run(dir, ["restore", "--staged", "desktop/keep.txt"])
+    git_test_run(dir, ["restore", "desktop/keep.txt"])
     @fs.write_file(
       "\{dir}/review.txt",
       "working\n",
       create_mode=CreateOrTruncate,
     )
-    let (snapshot_head, _, _, changes) = git_change_snapshot(dir, "", 2)
+    let (snapshot_head, _, _, _, _, changes) = git_change_snapshot(
+      dir,
+      "",
+      None,
+      2,
+    )
     assert_eq(snapshot_head, Some(first))
     assert_true(changes is [{ path: "review.txt", kind: "modified", .. }])
+    let (_, _, _, _, _, task_before_commit) = git_change_snapshot(
+      dir,
+      "",
+      Some(first),
+      2,
+    )
     git_test_run(dir, ["add", "review.txt"])
     git_test_run(dir, [
       "-c", "user.name=OpenSeek Test", "-c", "user.email=openseek@example.invalid",
@@ -1380,6 +1526,15 @@ async test "Git snapshots pair status with HEAD and supplied revisions stay pinn
     ])
     let second = git_revision_commit(dir, "HEAD").unwrap()
     assert_true(second != first)
+    let (_, _, _, _, _, head_changes) = git_change_snapshot(dir, "", None, 2)
+    assert_true(head_changes.is_empty())
+    let (_, _, _, _, _, task_changes) = git_change_snapshot(
+      dir,
+      "",
+      Some(first),
+      2,
+    )
+    assert_eq(task_changes, task_before_commit)
     assert_eq(git_revision_commit(dir, first), Some(first))
     assert_eq(git_revision_commit(dir, "missing-review-revision"), None)
     assert_eq(
@@ -1411,16 +1566,17 @@ async test "Git snapshots pair status with HEAD and supplied revisions stay pinn
     git_test_run(dir, [
       "update-index", "--force-remove", "desktop/link", "desktop/vendor/lib",
     ])
-    let (nested_head, known_gitlinks, known_symlinks, nested_changes) = git_change_snapshot(
+    let (nested_head, _, _, deleted_gitlinks, deleted_symlinks, nested_changes) = git_change_snapshot(
       "\{dir}/desktop",
       "desktop/",
+      None,
       2,
     )
     assert_eq(nested_head, Some(gitlink_head))
-    assert_eq(known_gitlinks.length(), 1)
-    assert_true(known_gitlinks.contains("vendor/lib"))
-    assert_eq(known_symlinks.length(), 1)
-    assert_true(known_symlinks.contains("link"))
+    assert_eq(deleted_gitlinks.length(), 1)
+    assert_true(deleted_gitlinks.contains("vendor/lib"))
+    assert_eq(deleted_symlinks.length(), 1)
+    assert_true(deleted_symlinks.contains("link"))
     assert_true(
       nested_changes
       is [
@@ -1432,8 +1588,8 @@ async test "Git snapshots pair status with HEAD and supplied revisions stay pinn
       git_change_with_path_kind(
         change,
         Unknown,
-        known_gitlinks.contains(change.path),
-        known_symlinks.contains(change.path),
+        deleted_gitlinks.contains(change.path),
+        deleted_symlinks.contains(change.path),
       )
     })
     assert_true(
