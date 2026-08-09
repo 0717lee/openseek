@@ -529,23 +529,54 @@ priv struct Conversation {
   // the engine's own append can still fail, or the process can die with the
   // command queued, and then no `[goal]` marker ever commits.
   //
-  // Holding the request until its marker lands does two things. A set keeps
-  // the user's writing recoverable across that window, and either kind takes
-  // the row's Edit and ✕ away while it is in flight — a second command sent
-  // over the first only earns the host's `GoalPending` refusal.
-  // `apply_commit` settles it; a rejection retires it and hands a set's text
-  // back.
+  // Holding the request until the record says so does two things. A set
+  // keeps the user's writing recoverable across that window, and either kind
+  // takes the row's Edit and ✕ away while it is in flight — a second command
+  // sent over the first only earns the host's `GoalPending` refusal.
+  //
+  // Any durable observation that already shows what was asked for settles it
+  // — a marker commit through `apply_commit`, a recovery snapshot through
+  // `adopt_snapshot`; see `GoalRequest::satisfied_by`. Only a definite host
+  // refusal retires it unsatisfied, handing a set's text back; a transport
+  // failure leaves it standing, because the command may have landed anyway.
   goal_pending : GoalRequest?
 } derive(Eq)
 
 ///|
-/// A goal command in flight, and what its marker will be.
+/// A goal command in flight, named by the durable state it asks for.
 priv enum GoalRequest {
-  // The text this set carries, which is also its identity: only the set
-  // marker spelling the same text can settle it.
+  // The text this set asks to be standing.
   Setting(String)
   Clearing
 } derive(Eq)
+
+///|
+/// Whether a durable observation of the standing goal already says what this
+/// request asked for.
+///
+/// The request is *not* matched against the marker that carried it. The
+/// durable record has no provenance — a `[goal]` commit proves the engine is
+/// appending, never that *this* command is the one it appended, and two
+/// clients (or a retry) can write markers this session never sent. Asking
+/// "is what I asked for true now" is answerable from any durable read;
+/// asking "was that echo mine" is not.
+///
+/// It also makes every durable observation a settling point for free: a
+/// marker commit, a recovery snapshot after a reconnect, a resumed session's
+/// first read. Whatever a set's text was set by, once it stands the request
+/// has nothing left to wait for.
+fn GoalRequest::satisfied_by(
+  self : GoalRequest,
+  goal : @transcript.GoalStanding?,
+) -> Bool {
+  match (self, goal) {
+    // A goal that stands blocked still stands: the text is what was asked
+    // for, and the block is the agent's report on it, not a failure to set.
+    (Setting(text), Some(standing)) => standing.text == text
+    (Clearing, None) => true
+    _ => false
+  }
+}
 
 ///|
 /// How a local notice may be reconciled by a later canonical User. Start RPC
@@ -1812,6 +1843,14 @@ priv enum DeviceMsg {
   // it to the user, the way a rejected prompt restores its own draft. `None`
   // was a clear, which has nothing to restore.
   GoalRejected(session~ : String, draft~ : String?, message~ : String)
+  // The `agent.goal` call failed on the transport rather than being refused,
+  // so whether the host took it is unknown: the socket can drop after the
+  // command reached the engine and before the reply came back, and the
+  // `[goal]` marker still commits. The request therefore stays in flight —
+  // handing the draft back here would say the goal is unset while the record
+  // may already carry it, and inviting a resend races the marker. `draft` is
+  // reported in the notice so the writing survives even if nothing landed.
+  GoalUndelivered(session~ : String, draft~ : String?, message~ : String)
   // `answer` accompanies normal success and context yield (where it is
   // continuation guidance); other terminal statuses carry none.
   Finished(
@@ -3751,31 +3790,22 @@ fn Conversation::apply_commit(
   let changed = @transcript.apply_session_item(messages, item, ts?)
   // Unknown terminal payloads render nothing but still close the durable run.
   let terminal = item.is_terminal()
+  // A `[goal]` marker commit is the durable confirmation of a goal
+  // set/clear/block — the only writer of the mirror the banner renders.
+  let goal = if item is @protocol.RuntimeNotice(notice) &&
+    @transcript.goal_marker(notice.content) is Some(marker) {
+    @transcript.apply_goal_marker(self.goal, marker)
+  } else {
+    self.goal
+  }
   let conv = {
     ..self,
     messages,
-    // A `[goal]` marker commit is the durable confirmation of a goal
-    // set/clear/block — the only writer of the mirror the banner renders.
-    goal: if item is @protocol.RuntimeNotice(notice) &&
-      @transcript.goal_marker(notice.content) is Some(marker) {
-      @transcript.apply_goal_marker(self.goal, marker)
-    } else {
-      self.goal
-    },
-    // Only the request's own marker settles it. A marker proves the engine is
-    // committing, not that *this* command landed: a block on the goal that
-    // still stands, or an earlier set from a second submit, would otherwise
-    // retire the request while the append it belongs to can still fail. A
-    // set's text is its identity — two sets of one text are interchangeable
-    // anyway — and a clear's is the tombstone.
-    goal_pending: if item is @protocol.RuntimeNotice(notice) &&
-      @transcript.goal_marker(notice.content) is Some(marker) &&
-      self.goal_pending is Some(pending) &&
-      (match (marker, pending) {
-        (GoalSet(text), Setting(sent)) => text == sent
-        (GoalCleared, Clearing) => true
-        _ => false
-      }) {
+    goal,
+    // Settled by what now stands, not by which marker moved it — see
+    // `GoalRequest::satisfied_by`.
+    goal_pending: if self.goal_pending is Some(pending) &&
+      pending.satisfied_by(goal) {
       None
     } else {
       self.goal_pending
@@ -3980,6 +4010,19 @@ fn Conversation::adopt_snapshot(
       // buffered commits newer than the snapshot fold on top below through
       // `apply_commit`.
       goal,
+      // A complete durable read is as good a settling point as a marker: if
+      // the goal it reduces to is already what a request in flight asked
+      // for, that request has nothing left to wait for. This is what ends
+      // the wait after a delivery whose reply never came back — the reload
+      // that follows a reconnect answers the question the transport could
+      // not. A snapshot that does *not* show it settles nothing: the append
+      // may still be queued behind this read.
+      goal_pending: if self.goal_pending is Some(pending) &&
+        pending.satisfied_by(goal) {
+        None
+      } else {
+        self.goal_pending
+      },
       // A foreign/mid-run Started intentionally leaves the floor unknown. It
       // becomes steerable only when the snapshot visibly has current-run data
       // after its last terminal; a snapshot ending at a terminal may instead

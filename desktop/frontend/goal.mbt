@@ -462,6 +462,77 @@ test "a rejected clear has nothing to restore, and never steals goal mode" {
 }
 
 ///|
+test "an unconfirmed delivery keeps waiting instead of handing the text back" {
+  let dispatch = test_dispatch()
+  let model = test_model().replace_conversation({
+    ..test_conversation(),
+    goal_pending: Some(Setting("ship the feature")),
+  })
+  // The socket dropped; the host may have taken the command already. Saying
+  // "rejected" here would reopen the editor over a goal the record can still
+  // be about to carry, and the resend that invites races its own marker.
+  let (_, next) = update_dev(
+    dispatch,
+    GoalUndelivered(
+      session="desktop-test",
+      draft=Some("ship the feature"),
+      message="bridge unavailable",
+    ),
+    model,
+  )
+  inspect(next.active().overlay.length(), content="1")
+  assert_true(next.active().goal_edit is None)
+  assert_true(next.active().goal_pending is Some(Setting("ship the feature")))
+  // The writing is not lost either way — it rides the notice, the way an
+  // unconfirmed prompt's does.
+  guard next.active().overlay.last() is Some(notice) else {
+    fail("the failure should be reported")
+  }
+  assert_true(notice.content.has_suffix("ship the feature"))
+}
+
+///|
+test "a reload settles a request the transport never answered" {
+  let dispatch = test_dispatch()
+  // Sent, unanswered, and then the connection came back. The snapshot is a
+  // complete durable read: it can say what the reply could not.
+  let model = test_model().replace_conversation({
+    ..test_conversation(),
+    goal_pending: Some(Setting("ship the feature")),
+    sync: test_reloading([]),
+  })
+  fn refresh(model, goal) {
+    let (_, next) = update_dev(
+      dispatch,
+      SessionRefreshed(
+        goal~,
+        session="desktop-test",
+        items=[],
+        watermark=1,
+        event_boundaries=[],
+        generation=1,
+      ),
+      model,
+    )
+    next
+  }
+
+  // A record that does not carry it settles nothing: the append may still be
+  // queued behind this read.
+  let absent = refresh(model, None)
+  assert_true(absent.active().goal_pending is Some(Setting("ship the feature")))
+  let landed = refresh(
+    {
+      ..absent,
+      conversations: [{ ..absent.active(), sync: test_reloading([]) }],
+    },
+    Some({ text: "ship the feature", blocked: None }),
+  )
+  assert_true(landed.active().goal_pending is None)
+  assert_true(landed.active().goal is Some(_))
+}
+
+///|
 test "a goal on an unbound worktree conversation creates the worktree first" {
   let workspace = @interop.ChannelId::Local.test_resource("/proj")
   // Worktree mode chosen, nothing started: the goal has to establish the

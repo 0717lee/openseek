@@ -5067,6 +5067,30 @@ fn update_device_msg(
       } else {
         (@cmd.none, model)
       }
+    GoalUndelivered(session~, draft~, message~) =>
+      if model.find_conversation(channel, session) is Some(conv) {
+        // The request stays in flight: a marker, or the reload that follows
+        // the reconnect, is what settles it. So the text cannot come back to
+        // the editor — it would claim the goal is unset, and a resend over a
+        // command the host may already hold only earns a refusal. It rides
+        // the notice instead, which is where the start path leaves a prompt
+        // it could not confirm either.
+        let detail = if draft is Some(draft) {
+          " — check the transcript before setting it again: " + draft
+        } else {
+          " — check the transcript before clearing it again"
+        }
+        let reported = conv.append_local_notice(
+          Assistant(is_danger=true),
+          "Goal delivery could not be confirmed (" + message + ")" + detail,
+        )
+        (
+          scroll_if_active(model, channel, conv.session_id),
+          model.replace_conversation(reported),
+        )
+      } else {
+        (@cmd.none, model)
+      }
     Finished(run_id~, status~, answer~, durable_sequence~) =>
       if (if model.conversation_by_run(channel, run_id) is Some(conv) {
           Some(conv)

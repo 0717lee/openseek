@@ -1347,8 +1347,10 @@ fn goal_payload(
 }
 
 ///|
-/// Send one `agent.goal`, reporting a rejection as `GoalRejected` carrying
-/// the text that never landed, so the composer can hand it back.
+/// Send one `agent.goal`. A definite host refusal comes back as
+/// `GoalRejected` carrying the text that never landed, so the composer can
+/// hand it back; a transport failure is `GoalUndelivered`, which cannot say
+/// that — the same distinction the start and steer paths draw.
 async fn request_agent_goal(
   scheduler : &@cmd.Scheduler,
   dispatch : @cmd.Emit[Msg],
@@ -1361,13 +1363,14 @@ async fn request_agent_goal(
   ignore(
     @interop.bridge_request(channel, @commands.agent_goal, payload) catch {
       error => {
+        let message = @interop.bridge_error_text(error)
         scheduler.add(
           dispatch(
-            GoalRejected(
-              session~,
-              draft=text,
-              message=@interop.bridge_error_text(error),
-            ),
+            if @interop.bridge_error_is_definite(error) {
+              GoalRejected(session~, draft=text, message~)
+            } else {
+              GoalUndelivered(session~, draft=text, message~)
+            },
           ),
         )
         return
