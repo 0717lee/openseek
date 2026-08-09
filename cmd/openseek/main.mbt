@@ -769,14 +769,8 @@ fn root_command() -> @argparse.Command {
 /// copied `<dir>_run_1` workspace" — the flag always protects `--dir` from
 /// writes, at every N. Only the flagless default runs in place.
 fn fleet_mode(matches : @argparse.Matches, concurrency : Int) -> Bool {
-  concurrency >= 2 || explicitly_provided(matches, "concurrency")
-}
-
-///|
-/// Whether the user supplied `name` on the command line or via its
-/// environment variable, rather than the built-in default filling it in.
-fn explicitly_provided(matches : @argparse.Matches, name : String) -> Bool {
-  matches.sources.get(name) is (Some(Argv) | Some(Env))
+  concurrency >= 2 ||
+  matches.sources.get("concurrency") is (Some(Argv) | Some(Env))
 }
 
 ///|
