@@ -781,6 +781,40 @@ test "a dead request cannot retire the one that replaced it" {
 }
 
 ///|
+test "a failed durable append is reported, not inferred from" {
+  let dispatch = test_dispatch()
+  // The engine says the append did not happen. Nothing else ever will: an
+  // idle-time append has no terminal event behind it, and the host drops this
+  // one, so without reading it off the stream the goal waits on a commit that
+  // is not coming and the user is told nothing.
+  let model = test_model().replace_conversation({
+    ..test_conversation(),
+    goal_pending: Some(test_goal_command(Setting("ship the feature"))),
+  })
+  let (_, reported) = update_dev(
+    dispatch,
+    Engine(
+      None,
+      SessionAppendFailed("failed to append goal update: disk full"),
+      session=Some("desktop-test"),
+    ),
+    model,
+  )
+  guard reported.active().overlay.last() is Some(notice) else {
+    fail("the failure should be reported")
+  }
+  assert_true(notice.content.has_suffix("disk full"))
+  // It names what failed, not which command asked for it, and the idle
+  // appender is shared — so this may have been some other item and the goal's
+  // own append may still land. The request keeps waiting; the row's text and
+  // actions are what the user recovers with.
+  assert_true(
+    reported.active().goal_pending
+    is Some({ request: Setting("ship the feature"), .. }),
+  )
+}
+
+///|
 test "a rejection that arrives after the record has spoken only reports" {
   let dispatch = test_dispatch()
   // The successor's marker settles the slot, and then the superseded send's

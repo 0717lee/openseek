@@ -516,14 +516,16 @@ fn scroll_if_active(
 
 ///|
 /// Whether an event the engine emits while idle (between turns) — the
-/// compaction lifecycle and background-job notices — so the routing must
-/// match by last run id: the run that owned the id has already cleared
-/// `active_run_id` by the time these arrive.
+/// compaction lifecycle, background-job notices, and the failure of an
+/// idle-time durable append — so the routing must match by last run id: the
+/// run that owned the id has already cleared `active_run_id` by the time
+/// these arrive.
 fn is_idle_event(event : @transcript.EngineEvent) -> Bool {
   match event {
     CompactionStarted
     | CompactionFinished(_)
     | CompactionFailed(_)
+    | SessionAppendFailed(_)
     | RuntimeUpdate(_) => true
     _ => false
   }
@@ -984,6 +986,20 @@ fn apply_engine_event(
     AutoCompactionFinished(_) => (false, conv)
     CompactionStarted => (false, { ..conv, compaction: Compacting })
     CompactionFinished(_) => (false, { ..conv, compaction: NotCompacting })
+    // An idle-time append the engine could not persist. It names what failed
+    // but not which command asked for it, so nothing is settled on it — a
+    // pending goal keeps waiting, since this may have been some other item's
+    // append and its own may still land. What it does buy is the word: the
+    // failure stops being silent, and the row's own text and actions are
+    // what the user recovers with.
+    SessionAppendFailed(error) => {
+      let content = if error.trim().is_empty() {
+        "the engine could not save an item to this session"
+      } else {
+        "the engine could not save an item to this session: \{error}"
+      }
+      (true, conv.append_local_notice(Assistant(is_danger=true), content))
+    }
     CompactionFailed(reason) => {
       let content = if reason.trim().is_empty() {
         "compaction failed"

@@ -44,6 +44,12 @@ pub(all) enum EngineEvent {
   CompactionStarted
   CompactionFinished(String)
   CompactionFailed(String)
+  // The engine could not append an item to the durable session. Idle-time
+  // appends have no other failure channel: unlike a turn, nothing terminal
+  // follows them, and the host does not normalize this event. Whatever was
+  // waiting on that append — a goal command most of all — would otherwise
+  // wait on a commit that is never coming, with no word of why.
+  SessionAppendFailed(String)
 }
 
 ///|
@@ -87,6 +93,10 @@ pub fn decode_engine_event(
     CompactionStarted(..) => Some(CompactionStarted)
     CompactionFinished(summary~, ..) => Some(CompactionFinished(summary))
     CompactionFailed(error~) => Some(CompactionFailed(error))
+    // The engine's own report that a durable append did not happen. The host
+    // has no use for it and drops it, so unless the view reads it off the raw
+    // stream nobody hears about it at all.
+    SessionError(error~) => Some(SessionAppendFailed(error))
     // A sub-run's lifecycle brackets, rendered as runtime notices so the
     // child's interleaved tool results read as belonging to the sub-run —
     // the same treatment the TUI gives them. The id and token counts are
@@ -102,7 +112,7 @@ pub fn decode_engine_event(
     // `[goal]` marker commits this client already renders and reduces off the
     // `session.event` stream (see `goal.mbt`), so the stream copies stay
     // wire-transport; the auto-continue budget is a headless-run concern the
-    // desktop does not drive yet; `session_error`,
+    // desktop does not drive yet;
     // `turn_failed` and `command_error` reach the view as the host's normalized
     // error, not as stream events; `auto_compaction_started/failed` are internal
     // to an open turn, unlike the finish this view previews;
@@ -116,7 +126,6 @@ pub fn decode_engine_event(
     | GoalContinue(..)
     | GoalBudgetExhausted(..)
     | PlanReminder(..)
-    | SessionError(..)
     | TurnFailed(..)
     | CommandError(..)
     | AutoCompactionStarted(..)
@@ -344,6 +353,23 @@ test "decode recognizes the compaction lifecycle events" {
     )
     is Some(CompactionFailed("empty summary")) else {
     fail("compaction_failed not decoded")
+  }
+}
+
+///|
+test "decode surfaces a failed durable append off the raw stream" {
+  // The engine's only report that an idle-time append did not happen. The
+  // host has no use for it and drops it, so if this arm went missing the
+  // failure would reach nobody — and whatever was waiting on that append
+  // would wait on a commit that is never coming.
+  guard decode_engine_event(
+      event_fields({
+        "event": "session_error",
+        "error": "failed to append goal update: disk full",
+      }),
+    )
+    is Some(SessionAppendFailed("failed to append goal update: disk full")) else {
+    fail("session_error not decoded")
   }
 }
 

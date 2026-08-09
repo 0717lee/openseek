@@ -61,6 +61,7 @@ pub(all) enum EngineEvent {
   CompactionStarted
   CompactionFinished(String)
   CompactionFailed(String)
+  SessionAppendFailed(String)
 }
 
 pub(all) enum GoalMarker {
