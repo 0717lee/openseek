@@ -42,6 +42,27 @@ pub async fn session_cwd(session : String) -> @pathx.Absolute? {
 }
 
 ///|
+/// The recorded task base for a conversation-bound worktree. The optional
+/// workspace hint follows `resolve_in_workspace`'s trust boundary: only an
+/// attached workspace is considered, while a resumed conversation can recover
+/// its owner from the durable session record. `None` deliberately distinguishes
+/// workspace-root and scratch conversations, whose Review remains HEAD-based.
+pub async fn session_review_base(
+  session : String,
+  workspace? : String,
+) -> String? {
+  let workspace = if workspace is Some(hint) &&
+    @pathx.Absolute::from_uri_path(hint) is Some(hint) &&
+    registered_workspace(hint) is Some(workspace) {
+    Some(workspace)
+  } else {
+    workspace_of_session(session)
+  }
+  guard workspace is Some(workspace) else { return None }
+  session_tree_base(workspace, session)
+}
+
+///|
 /// Resolve a workspace-relative `relative` against the session's workspace
 /// directory, returning the absolute path or `None` when the session id is
 /// unsafe or `relative` would escape the workspace. The client supplies only

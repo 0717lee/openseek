@@ -246,6 +246,7 @@ pub(all) struct GitChangesPayload {
 pub(all) struct GitChangesReply {
   repository : Bool
   head : String?
+  baseline : String?
   changes : Array[GitChange]
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 

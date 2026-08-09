@@ -198,6 +198,26 @@ async fn session_tree(
 }
 
 ///|
+/// The immutable commit a conversation's worktree branch was created from.
+/// Workspace-root conversations have no desktop-owned task boundary and
+/// therefore return `None`; their review surface retains the ordinary HEAD
+/// fallback. The registry owns this fact, so callers never infer a base from
+/// mutable branch or remote configuration.
+async fn session_tree_base(
+  workspace : @pathx.Absolute,
+  session : String,
+) -> String? {
+  worktree_registry_lock.acquire()
+  defer worktree_registry_lock.release()
+  for entry in read_worktrees_unlocked(workspace) {
+    if entry.session is Some(bound) && bound == session {
+      return Some(entry.base)
+    }
+  }
+  None
+}
+
+///|
 /// The directory session-scoped file, terminal, and language operations use.
 /// `None` for a missing bound checkout: every tool must refuse that state, not
 /// let one surface silently operate in the workspace root while the agent is
@@ -1275,6 +1295,14 @@ async test "worktree create provisions checkout, branch, registry, exclusion" {
   assert_eq(info.base, git_in(repo, ["rev-parse", "HEAD"]))
   // Creation IS the binding: the entry carries its conversation from birth.
   assert_eq(info.session, Some("s-fix-auth"))
+  assert_eq(
+    session_review_base("s-fix-auth", workspace=repo.to_string()),
+    Some(info.base),
+  )
+  assert_eq(
+    session_review_base("workspace-root", workspace=repo.to_string()),
+    None,
+  )
   assert_eq(info.path, repo.join(".worktrees/fix-auth").to_string())
   assert_true(info.present)
   assert_true(@fsx.is_dir(repo.join(".worktrees/fix-auth").to_path()))
