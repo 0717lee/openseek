@@ -192,7 +192,7 @@ js-only. Concrete browser runtime packages live below the module-private
 `internal/viewer/**` boundary:
 
 - `viewer` is the opaque public facade, the Monaco `CodeEditorWidget` and
-  `editor.api.ts` role. Public browser construction is only `Viewer::create`;
+  `editor.api.ts` role. Public `Viewer` construction is only `Viewer::create`;
   precomputed reference locations enter only through
   `Viewer::show_references`, while the provider-backed References contribution
   consumes only the opaque `LanguageHandle`; `ViewerOptions`,
@@ -200,6 +200,17 @@ js-only. Concrete browser runtime packages live below the module-private
   generated interfaces may reference language/common values, browser
   contracts, and common capability handles, never private view or contribution
   implementations.
+- `viewer` also exposes the independent opaque `UnifiedDiffView` facade.
+  `UnifiedDiffView::create` borrows one stable caller-owned host and owns only
+  its installed subtree; `clear` retains that binding and idempotent `dispose`
+  removes the subtree without removing the host. `set_diff` accepts
+  caller-owned strings, bounds their combined UTF-16 size before snapshot
+  allocation and their logical line count before diff computation, then routes
+  through the replaceable `viewer/common/unified_diff` seam. Its concrete DOM
+  renderer remains under `internal/viewer/browser/unified_diff`, while the
+  public stylesheet source is
+  `viewer/browser/unified_diff/unified_diff.css` and is assembled into
+  `viewer.css` for hosts to ship and size.
 - `viewer/browser` owns canonical editor mouse events, target kinds, DOM
   coordinates, the mutable live ViewZone descriptor/opaque accessor contract, and
   the opaque unmanaged overlay-widget handle.

@@ -35,6 +35,29 @@ fn focus_explorer_tab_after_render(id : String) -> @cmd.Cmd {
 }
 
 ///|
+fn changed_file_row_id(index : Int) -> String {
+  "changed-file-row-\{index}"
+}
+
+///|
+fn focus_changed_file_after_render(index : Int) -> @cmd.Cmd {
+  @cmd.custom_cmd(
+    _ => {
+      if @dom.document()
+        .get_element_by_id(changed_file_row_id(index))
+        .to_option()
+        is Some(row) {
+        let _ : @js.Value = @js.Value::cast_from(row).apply_with_string(
+          "focus",
+          ([] : Array[@js.Value]),
+        )
+      }
+    },
+    kind=@cmd.after_render,
+  )
+}
+
+///|
 /// An icon's SVG markup injected into a fixed-size span. The markup is a
 /// trusted compile-time constant, never user input, so the XSS alert on
 /// `inner_html` does not apply.
@@ -86,31 +109,61 @@ pub fn resize_handle_view() -> @html.Html {
 /// viewer with its notice overlay, and the workspace tree (expandable and
 /// always rooted at the workspace root) as a toggleable pane on
 /// the viewer's right. Always rendered so the viewer's host element
-/// (`viewer-host`) stays put across renders and screen switches; CSS hides
-/// the tree pane when toggled off and collapses the whole panel to zero
-/// width when it is closed. The children's order is structural — rabbita
-/// diffs by index, so every part renders unconditionally.
+/// (`viewer-host` and `unified-diff-host`) stay put across renders and screen
+/// switches; CSS hides the inactive surface and the tree pane when toggled off,
+/// and collapses the whole panel to zero width when it is closed. The children's
+/// order is structural — rabbita diffs by index, so every part renders
+/// unconditionally.
 pub fn body_view(
   dispatch : @cmd.Emit[Msg],
   state : State,
   ctx : Ctx,
 ) -> @html.Html {
-  // The stable element the viewer attaches its imperative DOM into; it must
-  // stay empty and never be re-keyed (see editor_panel.mbt).
+  // The stable elements the source viewer and full-diff renderer attach their
+  // imperative DOM into; they must stay empty and never be re-keyed (see
+  // editor_panel.mbt).
   // `editor-shell` brings in the viewer's `--vscode-*` / `--editor-*` theme
   // variables (defined on that class in the bundled viewer.css); `data-theme`
   // picks the palette matching the app's own light/dark scheme (the shell's
   // default is dark, `light` overrides). The viewer's colors cascade from
   // this host.
+  let show_unified_diff = match ctx.active_file {
+    Some(path) =>
+      state.docs.get(path).map(doc => doc.shows_unified_diff()).unwrap_or(false)
+    None => false
+  }
   let viewer_host = @html.div(
     attrs=@html.Attrs::build()
       .id(ViewerHostId)
-      .class("viewer-host editor-shell")
+      .class(
+        if show_unified_diff {
+          "viewer-host editor-shell moonbit-unified-diff-surface-hidden"
+        } else {
+          "viewer-host editor-shell"
+        },
+      )
+      .data_set("theme", if ctx.dark_mode { "dark" } else { "light" }),
+    ([] : Array[@html.Html]),
+  )
+  let unified_diff_host = @html.div(
+    attrs=@html.Attrs::build()
+      .id(UnifiedDiffHostId)
+      .class(
+        if show_unified_diff {
+          "viewer-host editor-shell"
+        } else {
+          "viewer-host editor-shell moonbit-unified-diff-surface-hidden"
+        },
+      )
       .data_set("theme", if ctx.dark_mode { "dark" } else { "light" }),
     ([] : Array[@html.Html]),
   )
   @html.div(class="editor-body", [
-    @html.div(class="viewer-stack", [viewer_host, viewer_notice(state, ctx)]),
+    @html.div(class="viewer-stack", [
+      viewer_host,
+      unified_diff_host,
+      viewer_notice(state, ctx),
+    ]),
     tree_pane(dispatch, state, ctx),
   ])
 }
@@ -352,7 +405,24 @@ fn change_inventory(
       if files.is_empty() {
         [@html.div(class="file-panel-empty", "No changed files.")]
       } else {
-        files.map(change => changed_file_row(dispatch, state, ctx, change))
+        let reviewable = files.filter(change => change.selectable())
+        let reviewed = reviewable
+          .filter(change => state.reviewed_changes.contains(change))
+          .length()
+        let rows = [
+          @html.div(
+            class="review-progress-summary",
+            if reviewable.is_empty() {
+              "No reviewable text files"
+            } else {
+              "\{reviewed} of \{reviewable.length()} reviewable files reviewed"
+            },
+          ),
+        ]
+        for index, change in files {
+          rows.push(changed_file_row(dispatch, state, ctx, change, index))
+        }
+        rows
       }
   }
 }
@@ -381,9 +451,14 @@ fn changed_file_row(
   state : State,
   ctx : Ctx,
   change : ChangedFile,
+  index : Int,
 ) -> @html.Html {
   let selected = change.is_selected(state, ctx)
+  let reviewed = state.reviewed_changes.contains(change)
   let mut class = if selected { "change-row selected" } else { "change-row" }
+  if reviewed {
+    class = class + " reviewed"
+  }
   if !change.selectable() {
     class = class + " disabled"
   }
@@ -400,7 +475,11 @@ fn changed_file_row(
         "change-action unavailable"
       },
       if change.selectable() {
-        "View diff"
+        if reviewed {
+          "✓ Reviewed"
+        } else {
+          "View diff"
+        }
       } else {
         "Unavailable"
       },
@@ -414,9 +493,32 @@ fn changed_file_row(
       title="Open diff — " + change.status_title(),
       on_click=dispatch(ChangedFileSelected(change)),
       attrs=@html.Attrs::build()
+        .id(changed_file_row_id(index))
         .data_set("path", change.path.0)
         .aria_label("View diff: " + change.status_title())
-        .aria_current(if selected { "page" } else { "false" }),
+        .aria_current(if selected { "page" } else { "false" })
+        .on_keydown(event => {
+          let destination = match event.key() {
+            "ArrowUp" => review_neighbor(state, change, -1)
+            "ArrowDown" => review_neighbor(state, change, 1)
+            "Home" => review_edge(state, change, first=true)
+            "End" => review_edge(state, change, first=false)
+            _ => None
+          }
+          match destination {
+            Some(destination) => {
+              event.prevent_default()
+              @cmd.batch([
+                dispatch(ChangedFileSelected(destination)),
+                match change_row_index(state, destination) {
+                  Some(index) => focus_changed_file_after_render(index)
+                  None => @cmd.none
+                },
+              ])
+            }
+            None => @cmd.none
+          }
+        }),
       children,
     )
   } else {
@@ -424,6 +526,7 @@ fn changed_file_row(
       class~,
       title=change.unselectable_title(),
       attrs=@html.Attrs::build()
+        .id(changed_file_row_id(index))
         .data_set("path", change.path.0)
         .role("button")
         .aria_disabled("true")
@@ -433,6 +536,77 @@ fn changed_file_row(
       children,
     )
   }
+}
+
+///|
+fn reviewable_changes(state : State) -> Array[ChangedFile] {
+  match state.changes {
+    ChangeListReady(files~, ..) => files.filter(change => change.selectable())
+    _ => []
+  }
+}
+
+///|
+fn change_row_index(state : State, selected : ChangedFile) -> Int? {
+  guard state.changes is ChangeListReady(files~, ..) else { return None }
+  for index in 0..<files.length() {
+    if files[index] == selected {
+      return Some(index)
+    }
+  }
+  None
+}
+
+///|
+/// Adjacent reviewable row for list-keyboard navigation. Exact row equality
+/// keeps staged-delete plus same-path untracked pairs independently ordered.
+fn review_neighbor(
+  state : State,
+  selected : ChangedFile,
+  delta : Int,
+) -> ChangedFile? {
+  let changes = reviewable_changes(state)
+  for index in 0..<changes.length() {
+    if changes[index] == selected {
+      let destination = index + delta
+      if destination >= 0 && destination < changes.length() {
+        return Some(changes[destination])
+      }
+      return None
+    }
+  }
+  None
+}
+
+///|
+fn review_edge(
+  state : State,
+  selected : ChangedFile,
+  first~ : Bool,
+) -> ChangedFile? {
+  let changes = reviewable_changes(state)
+  guard !changes.is_empty() else { return None }
+  let edge = changes[if first { 0 } else { changes.length() - 1 }]
+  if edge == selected {
+    None
+  } else {
+    Some(edge)
+  }
+}
+
+///|
+fn active_review_position(state : State, ctx : Ctx) -> (ChangedFile, Int, Int)? {
+  guard ctx.active_file is Some(path) &&
+    state.docs.get(path) is Some({ review: Some(review), .. }) else {
+    return None
+  }
+  let changes = reviewable_changes(state)
+  for index in 0..<changes.length() {
+    if changes[index] == review.selected {
+      return Some((review.selected, index, changes.length()))
+    }
+  }
+  None
 }
 
 ///|
@@ -550,7 +724,9 @@ pub fn breadcrumb_view(
     },
     [
       @html.div(class="crumb-path", crumbs),
-      review_badge(state, ctx),
+      review_navigation(dispatch, state, ctx),
+      review_badge(dispatch, state, ctx),
+      review_progress(dispatch, state, ctx),
       @html.button(
         class="panel-toggle",
         title=if state.tree_open { "Hide file tree" } else { "Show file tree" },
@@ -562,13 +738,123 @@ pub fn breadcrumb_view(
 }
 
 ///|
-/// Compact, non-interactive review status beside the active path. The gutter
-/// is the diff itself; this badge makes the comparison source and exceptional
-/// cases explicit without adding another toolbar or changing Viewer layout.
-fn review_badge(state : State, ctx : Ctx) -> @html.Html {
-  let (text, title) = match ctx.active_file {
+/// Previous/next controls for walking the reviewable Changes queue without
+/// returning to the tree between files. Native buttons remain keyboard
+/// reachable; changed rows additionally support ArrowUp/Down and Home/End.
+fn review_navigation(
+  dispatch : @cmd.Emit[Msg],
+  state : State,
+  ctx : Ctx,
+) -> @html.Html {
+  guard active_review_position(state, ctx) is Some((selected, index, total)) else {
+    return @html.span(class="review-navigation hidden", "")
+  }
+  let previous = review_neighbor(state, selected, -1)
+  let next = review_neighbor(state, selected, 1)
+  @html.div(
+    class="review-navigation",
+    attrs=@html.Attrs::build()
+      .role("group")
+      .aria_label("Changed file navigation"),
+    [
+      @html.button(
+        type_="button",
+        class="review-nav-button",
+        title="Previous changed file",
+        disabled=previous is None,
+        on_click=match previous {
+          Some(previous) => dispatch(ChangedFileSelected(previous))
+          None => @cmd.none
+        },
+        attrs=@html.Attrs::build().aria_label("Previous changed file"),
+        "‹",
+      ),
+      @html.span(
+        class="review-nav-position",
+        attrs=@html.Attrs::build().aria_live("polite"),
+        "\{index + 1} of \{total}",
+      ),
+      @html.button(
+        type_="button",
+        class="review-nav-button",
+        title="Next changed file",
+        disabled=next is None,
+        on_click=match next {
+          Some(next) => dispatch(ChangedFileSelected(next))
+          None => @cmd.none
+        },
+        attrs=@html.Attrs::build().aria_label("Next changed file"),
+        "›",
+      ),
+    ],
+  )
+}
+
+///|
+/// Progress control for the exact Changes row attached to the active review.
+/// Keeping it beside the diff-mode badge makes completion explicit without
+/// turning an ordinary file open into review state.
+fn review_progress(
+  dispatch : @cmd.Emit[Msg],
+  state : State,
+  ctx : Ctx,
+) -> @html.Html {
+  guard ctx.active_file is Some(path) &&
+    state.docs.get(path) is Some({ review: Some(review), .. }) &&
+    state.changes is ChangeListReady(files~, ..) &&
+    files.contains(review.selected) else {
+    return @html.span(class="review-badge hidden", "")
+  }
+  let reviewed = state.reviewed_changes.contains(review.selected)
+  @html.button(
+    type_="button",
+    class=if reviewed {
+      "review-badge review-progress reviewed"
+    } else {
+      "review-badge review-progress"
+    },
+    title=if reviewed {
+      "Return this changed file to the review queue"
+    } else {
+      "Mark this changed file as reviewed"
+    },
+    on_click=dispatch(ToggleReviewProgress),
+    attrs=@html.Attrs::build()
+      .aria_label("Mark file reviewed")
+      .aria_pressed(reviewed.to_string()),
+    if reviewed {
+      "✓ Reviewed"
+    } else {
+      "Mark reviewed"
+    },
+  )
+}
+
+///|
+/// Compact review control beside the active path. Textual reviews toggle the
+/// full diff; loading and unavailable reviews retain a non-interactive status.
+fn review_badge(
+  dispatch : @cmd.Emit[Msg],
+  state : State,
+  ctx : Ctx,
+) -> @html.Html {
+  let (text, title, action, pressed) = match ctx.active_file {
     Some(path) =>
       match state.docs.get(path) {
+        Some(doc) if doc.unified_diff_content() is Some(_) =>
+          match doc.review {
+            Some({ view_mode: ReviewUnifiedDiff, .. }) =>
+              (
+                "View file", "Return to the source preview and quick-diff gutter",
+                true, true,
+              )
+            Some({ view_mode: ReviewSource, .. }) =>
+              (
+                "View full diff", "Open the full unified diff against HEAD", true,
+                false,
+              )
+            None => ("", "", false, false)
+          }
         Some(
           {
             state: TabDeleted,
@@ -578,6 +864,7 @@ fn review_badge(state : State, ctx : Ctx) -> @html.Html {
         ) =>
           (
             "Deleted · HEAD", "Deleted in the working tree; showing the HEAD version",
+            false, false,
           )
         Some(
           {
@@ -588,54 +875,81 @@ fn review_badge(state : State, ctx : Ctx) -> @html.Html {
         ) =>
           (
             "Working unavailable · HEAD", "The working-tree file could not be read; showing the HEAD version",
+            false, false,
           )
         Some({ state: TabBinary, review: Some(_), .. })
         | Some({ state: TabOversized, review: Some(_), .. })
         | Some({ state: TabReadFailed(_), review: Some(_), .. }) =>
           (
             "Diff unavailable", "The working-tree file cannot be previewed as text",
+            false, false,
           )
         Some({ review: Some({ baseline: ReviewLoading, .. }), .. }) =>
-          ("Loading diff…", "Loading the HEAD version for comparison")
+          (
+            "Loading diff…", "Loading the HEAD version for comparison", false,
+            false,
+          )
         Some(
           {
             state: TabDeleted,
             review: Some({ baseline: ReviewMissing, .. }),
             ..,
           }
-        ) => ("Deleted · no HEAD", "No HEAD version is available to preview")
+        ) =>
+          (
+            "Deleted · no HEAD", "No HEAD version is available to preview", false,
+            false,
+          )
         Some({ name, review: Some({ baseline: ReviewContent(_), .. }), .. }) if name.has_suffix(
             ".md",
           ) =>
           (
             "Rendered · no gutter", "Rendered Markdown does not expose source diff decorations",
+            false, false,
           )
         Some({ name, review: Some({ baseline: ReviewMissing, .. }), .. }) if name.has_suffix(
             ".md",
           ) =>
           (
             "Rendered · no gutter", "New Markdown has no HEAD version; its rendered preview does not expose diff decorations",
+            false, false,
           )
         Some({ review: Some({ baseline: ReviewContent(_), .. }), .. }) =>
-          ("Diff vs HEAD", "Quick diff against the HEAD version")
+          ("Diff vs HEAD", "Quick diff against the HEAD version", false, false)
         Some({ review: Some({ baseline: ReviewMissing, .. }), .. }) =>
-          ("New · no HEAD", "New file compared with an empty HEAD baseline")
+          (
+            "New · no HEAD", "New file compared with an empty HEAD baseline", false,
+            false,
+          )
         Some({ review: Some({ baseline: ReviewBinary, .. }), .. }) =>
-          ("Diff unavailable", "The HEAD version is binary")
+          ("Diff unavailable", "The HEAD version is binary", false, false)
         Some({ review: Some({ baseline: ReviewOversized, .. }), .. }) =>
-          ("Diff unavailable", "The HEAD version is too large")
+          ("Diff unavailable", "The HEAD version is too large", false, false)
         Some({ review: Some({ baseline: ReviewFailed(message), .. }), .. }) =>
-          ("Diff unavailable", "Could not load HEAD: " + message)
-        _ => ("", "")
+          ("Diff unavailable", "Could not load HEAD: " + message, false, false)
+        _ => ("", "", false, false)
       }
-    None => ("", "")
+    None => ("", "", false, false)
   }
-  @html.span(
-    class=if text.is_empty() { "review-badge hidden" } else { "review-badge" },
-    title~,
-    attrs=@html.Attrs::build().role("status").aria_live("polite"),
-    text,
-  )
+  if action {
+    @html.button(
+      type_="button",
+      class="review-badge review-badge-action",
+      title~,
+      on_click=dispatch(ToggleReviewDiff),
+      attrs=@html.Attrs::build()
+        .aria_label("Full diff")
+        .aria_pressed(pressed.to_string()),
+      text,
+    )
+  } else {
+    @html.span(
+      class=if text.is_empty() { "review-badge hidden" } else { "review-badge" },
+      title~,
+      attrs=@html.Attrs::build().role("status").aria_live("polite"),
+      text,
+    )
+  }
 }
 
 ///|

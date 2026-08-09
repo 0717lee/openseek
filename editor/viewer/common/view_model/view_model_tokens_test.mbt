@@ -52,12 +52,10 @@ priv struct FrameToy {
 }
 
 ///|
-let frame_toy_code : @syntax.TokenizerState = TokenizerState(b"code".to_array())
+let frame_toy_code : @syntax.TokenizerState = TokenizerState()
 
 ///|
-let frame_toy_comment : @syntax.TokenizerState = TokenizerState(
-  b"comment".to_array(),
-)
+let frame_toy_comment : @syntax.TokenizerState = frame_toy_code.push_mode(b'c')
 
 ///|
 impl @syntax.LineTokenizer for FrameToy with fn initial_state(_self) {

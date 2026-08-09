@@ -795,6 +795,9 @@ html.is-resizing * {
   color: var(--ink-2);
   font-size: 13px;
 }
+.editor.mode-picker.mode-review .viewer-stack::after {
+  content: "Select a changed file to review";
+}
 /* The strip's new-tab button and its launcher popup. The tabsbar anchors
    the popup; the full-screen transparent backdrop catches the click away
    (reusing the topbar launcher's backdrop). */
@@ -1101,6 +1104,22 @@ html.is-resizing * {
   background: var(--accent-soft);
 }
 
+.change-row.reviewed .change-path {
+  color: var(--ink-2);
+}
+
+.change-row.reviewed .change-action {
+  border-color: color-mix(in srgb, var(--success, #268744) 35%, var(--line));
+  color: var(--success, #268744);
+  background: color-mix(in srgb, var(--success, #268744) 8%, transparent);
+}
+
+.review-progress-summary {
+  padding: 4px 12px 6px;
+  color: var(--ink-3);
+  font-size: 11px;
+}
+
 .change-path {
   flex: 1 1 auto;
   min-width: 0;
@@ -1248,6 +1267,66 @@ html.is-resizing * {
 }
 .review-badge.hidden {
   display: none;
+}
+.review-navigation {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 2px;
+}
+.review-navigation.hidden {
+  display: none;
+}
+.review-nav-button {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: var(--ink-2);
+  background: transparent;
+  font: inherit;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+.review-nav-button:hover:not(:disabled) {
+  border-color: var(--line);
+  color: var(--ink);
+  background: var(--surface-2);
+}
+.review-nav-button:disabled {
+  color: var(--ink-3);
+  cursor: default;
+  opacity: 0.45;
+}
+.review-nav-position {
+  min-width: 38px;
+  color: var(--ink-3);
+  font-size: 10px;
+  text-align: center;
+}
+.review-badge-action {
+  appearance: none;
+  font: inherit;
+  cursor: pointer;
+}
+.review-badge-action:hover {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.review-progress {
+  appearance: none;
+  font: inherit;
+  cursor: pointer;
+}
+.review-progress.reviewed {
+  border-color: color-mix(in srgb, var(--success, #268744) 45%, var(--line));
+  color: var(--success, #268744);
+  background: color-mix(in srgb, var(--success, #268744) 10%, transparent);
 }
 
 .viewer-host {

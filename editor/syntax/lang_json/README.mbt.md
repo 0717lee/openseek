@@ -141,7 +141,7 @@ test "the in-comment flag is the whole state" {
   debug_inspect(
     (initial, opened, closed),
     content=(
-      #|(TokenizerState("n"), TokenizerState("c"), TokenizerState("n"))
+      #|(TokenizerState(""), TokenizerState("c"), TokenizerState(""))
     ),
   )
 }

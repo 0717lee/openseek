@@ -120,11 +120,14 @@ fn default_worker_harness(
     _message => (),
   )
   let support = InternalTokenizationSupportAdapter(
-    initial_state=() => TokenizerState(b"initial".to_array()),
+    initial_state=() => TokenizerState(),
     tokenize_encoded=(text, _has_eol, _state) => {
       lexer_calls.push(text)
       scheduling.trace.push("lex")
-      { tokens: [0, tag_to_metadata(Plain)], end_state: TokenizerState([b'l']) }
+      {
+        tokens: [0, tag_to_metadata(Plain)],
+        end_state: @syntax.TokenizerState().push_mode(b'l'),
+      }
     },
   )
   let tokenizer = TokenizerWithStateStoreAndTextModel(
@@ -149,7 +152,7 @@ fn mark_worker_valid(worker : DefaultBackgroundTokenizer) -> Unit {
   for line_number in 1..<=line_count {
     worker.tokenizer_with_state_store.base.store.set_end_state(
       line_number,
-      TokenizerState(b"valid".to_array()),
+      @syntax.TokenizerState().push_mode(b'v'),
     )
     |> ignore
   }

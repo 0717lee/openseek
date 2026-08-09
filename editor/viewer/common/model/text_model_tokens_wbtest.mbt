@@ -36,18 +36,21 @@ fn logging_support(
   InternalTokenizationSupportAdapter(
     initial_state=() => {
       initial_calls.val += 1
-      TokenizerState(b"initial".to_array())
+      TokenizerState()
     },
     tokenize_encoded=(text, has_eol, state) => {
       calls.push("\{text}:\{has_eol}:\{Repr(state)}")
-      { tokens: [0, tag_to_metadata(Plain)], end_state: TokenizerState([b'l']) }
+      {
+        tokens: [0, tag_to_metadata(Plain)],
+        end_state: @syntax.TokenizerState().push_mode(b'l'),
+      }
     },
   )
 }
 
 ///|
 test "TrackingTokenizationStateStore advances, converges, and preserves final completion" {
-  let initial = @syntax.TokenizerState(b"initial".to_array())
+  let initial = @syntax.TokenizerState()
   let store = TrackingTokenizationStateStore(3)
   assert_true(store.get_first_invalid_end_state_line_number() == Some(1))
   guard store.get_first_invalid_line(initial) is Some(first) else {
@@ -55,7 +58,7 @@ test "TrackingTokenizationStateStore advances, converges, and preserves final co
   }
   assert_eq(first.line_number, 1)
   assert_true(first.start_state == initial)
-  let a = @syntax.TokenizerState([b'a'])
+  let a = @syntax.TokenizerState().push_mode(b'a')
   assert_true(store.set_end_state(1, a))
   assert_true(store.get_first_invalid_end_state_line_number() == Some(2))
   guard store.get_first_invalid_line(initial) is Some(second) else {
@@ -71,7 +74,7 @@ test "TrackingTokenizationStateStore advances, converges, and preserves final co
   assert_false(store.set_end_state(3, a))
   assert_true(store.all_states_valid())
   // Changed middle state invalidates exactly its successor.
-  assert_true(store.set_end_state(2, TokenizerState([b'b'])))
+  assert_true(store.set_end_state(2, @syntax.TokenizerState().push_mode(b'b')))
   assert_true(store.get_first_invalid_end_state_line_number() == Some(3))
 }
 
@@ -112,7 +115,7 @@ test "findLikelyRelevantLines ignores whitespace and replays ancestors without E
     @services.language_id_codec,
   )
   let state = tokenizer.guess_start_state(5)
-  assert_true(state == TokenizerState([b'l']))
+  assert_true(state == @syntax.TokenizerState().push_mode(b'l'))
   assert_eq(calls.length(), 3)
   for call in calls {
     assert_true(call.contains(":false:"))
@@ -122,7 +125,7 @@ test "findLikelyRelevantLines ignores whitespace and replays ancestors without E
 ///|
 test "safe_tokenize missing and failing support reports then returns language fallback" {
   let harness = token_test_harness(["abc"])
-  let state = @syntax.TokenizerState(b"state".to_array())
+  let state = @syntax.TokenizerState().push_mode(b's')
   let missing = safe_tokenize(
     @services.language_id_codec,
     "token-test",

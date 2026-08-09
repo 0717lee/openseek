@@ -46,6 +46,46 @@ fn Doc::quick_diff_original(self : Doc) -> String? {
 }
 
 ///|
+/// The two textual sides available to the standalone full-diff renderer.
+/// Added files use an empty HEAD side and deleted files use an empty working
+/// side. Loading, binary, oversized, and failed reads do not invent text.
+fn Doc::unified_diff_content(self : Doc) -> (String, String)? {
+  guard self.review is Some(review) else { return None }
+  let original = match review.baseline {
+    ReviewContent(content) => content
+    ReviewMissing => ""
+    ReviewLoading | ReviewBinary | ReviewOversized | ReviewFailed(_) =>
+      return None
+  }
+  let modified = match self.state {
+    TabLoaded(content~, ..) => content
+    TabDeleted => ""
+    TabLoading
+    | TabBinary
+    | TabOversized
+    | TabReadFailed(_)
+    | TabUnavailable(_) => return None
+  }
+  Some((original, modified))
+}
+
+///|
+/// Diff inputs only enter the renderer while this tab explicitly owns unified
+/// mode. Keeping the mode on its review state preserves it across tab switches
+/// and generation-fenced source/baseline refreshes.
+fn Doc::visible_unified_diff(self : Doc) -> (String, String)? {
+  guard self.review is Some({ view_mode: ReviewUnifiedDiff, .. }) else {
+    return None
+  }
+  self.unified_diff_content()
+}
+
+///|
+fn Doc::shows_unified_diff(self : Doc) -> Bool {
+  self.visible_unified_diff() is Some(_)
+}
+
+///|
 /// The newest working-tree request that owns an auxiliary review reload.
 /// Ordinary documents carry no token; each review reload advances this token
 /// independently of its HEAD request so out-of-order file replies are fenced.
@@ -105,6 +145,7 @@ fn show_tab_impl(
         relative=path,
         restore_scroll=true,
         review_original?=doc.quick_diff_original(),
+        unified_diff?=doc.visible_unified_diff(),
       )
       if sync_diagnostics && language_id(doc.name) == "moonbit" {
         @cmd.batch([
@@ -128,6 +169,7 @@ fn show_tab_impl(
             content,
             relative=path,
             restore_scroll=true,
+            unified_diff?=doc.visible_unified_diff(),
           )
         _ => clear_document()
       }
@@ -387,6 +429,7 @@ pub fn open_changed_document(
       generation,
       working_generation: generation,
       baseline,
+      view_mode: ReviewSource,
       selected: change,
     }),
     // A cached document can already be behind the filesystem when the row is
@@ -680,6 +723,7 @@ fn reconcile_reviews_after_changes(
             generation,
             working_generation: generation,
             baseline,
+            view_mode: review.view_mode,
             selected: change,
           }),
           stale: if has_working_file {
@@ -1096,6 +1140,25 @@ fn changes_live(state : State, ctx : Ctx) -> Bool {
   }
   for _, doc in state.docs {
     if doc.review is Some(_) {
+      return true
+    }
+  }
+  false
+}
+
+///|
+/// Whether one concrete watcher batch may have changed either side of this
+/// changed-file identity. Rename/copy reviews retain their original path, so
+/// edits on that side invalidate progress too.
+fn ChangedFile::touched_by(
+  self : ChangedFile,
+  changes : Array[FileChange],
+) -> Bool {
+  for change in changes {
+    if change.touches(self.path) {
+      return true
+    }
+    if self.original_path is Some(original) && change.touches(original) {
       return true
     }
   }
@@ -1643,6 +1706,46 @@ pub fn update(
       let opening = !state.tree_open
       (request_viewer_remeasure(), { ..state, tree_open: opening })
     }
+    ToggleReviewDiff => {
+      guard ctx.active_file is Some(path) &&
+        state.docs.get(path) is Some(doc) &&
+        doc.review is Some(review) &&
+        doc.unified_diff_content() is Some(_) else {
+        return (@cmd.none, state)
+      }
+      let view_mode = match review.view_mode {
+        ReviewSource => ReviewUnifiedDiff
+        ReviewUnifiedDiff => ReviewSource
+      }
+      let next_doc = { ..doc, review: Some({ ..review, view_mode, }) }
+      let docs = state.docs.copy()
+      docs[path] = next_doc
+      let show = show_pending_review(dispatch, ctx, path, next_doc)
+      let command = match view_mode {
+        // A window/tree resize can measure the display:none source host at the
+        // Viewer's 5px minimum while the diff is visible. Measure again only
+        // after source mode has restored the host's real box.
+        ReviewSource => @cmd.batch([show, request_viewer_remeasure()])
+        ReviewUnifiedDiff => show
+      }
+      (command, { ..state, docs, })
+    }
+    ToggleReviewProgress => {
+      guard ctx.active_file is Some(path) &&
+        state.docs.get(path) is Some({ review: Some(review), .. }) &&
+        state.changes is ChangeListReady(files~, ..) &&
+        files.contains(review.selected) else {
+        return (@cmd.none, state)
+      }
+      let reviewed_changes = if state.reviewed_changes.contains(review.selected) {
+        state.reviewed_changes.filter(change => change != review.selected)
+      } else {
+        let reviewed_changes = state.reviewed_changes.copy()
+        reviewed_changes.push(review.selected)
+        reviewed_changes
+      }
+      (@cmd.none, { ..state, reviewed_changes, })
+    }
     ExplorerModeSelected(mode) => {
       let already_selected = state.explorer_mode == mode
       let selected = { ..state, explorer_mode: mode }
@@ -1908,6 +2011,13 @@ pub fn update(
           @cmd.none
         }
         review_cmds.push(settle)
+        let reviewed_changes = if follow_up {
+          state.reviewed_changes
+        } else if head_changed {
+          []
+        } else {
+          state.reviewed_changes.filter(change => files.contains(change))
+        }
         (
           @cmd.batch(review_cmds),
           {
@@ -1925,6 +2035,7 @@ pub fn update(
             },
             changes_generation: next_generation,
             review_generation,
+            reviewed_changes,
             background_review_requests,
             review_recovery_pending: if follow_up {
               state.review_recovery_pending
@@ -2163,12 +2274,13 @@ pub fn update(
           Oversized => TabOversized
         }
         let docs = state.docs.copy()
-        docs[path] = {
+        let next_doc = {
           name,
           state: doc_state,
           review: doc.review,
           stale: false,
         }
+        docs[path] = next_doc
         // Only the tab on screen touches the viewer; a background load just
         // settles into its tab for the next activation. No content
         // comparison happens here: whether anything actually needs redrawing
@@ -2197,6 +2309,7 @@ pub fn update(
                 // position; only a genuinely fresh document opens at the top.
                 restore_scroll=previous is TabLoaded(..),
                 review_original?=doc.quick_diff_original(),
+                unified_diff?=next_doc.visible_unified_diff(),
               )
               if language_id(name) == "moonbit" {
                 @cmd.batch([
@@ -2225,6 +2338,10 @@ pub fn update(
       }
     RunSettled(owner~) =>
       if state.owner == Some(owner) {
+        // A completed agent run can write files outside the pruned watcher.
+        // Git status alone cannot prove their content is unchanged, so review
+        // progress is conservatively reset at this authoritative boundary.
+        let state = { ..state, reviewed_changes: [] }
         let diagnostics = match
           active_moonbit_diagnostics(
             dispatch,
@@ -2258,6 +2375,11 @@ pub fn update(
     FsChanged(session~, changes~) =>
       if state.owner is Some(owner) &&
         (session is None || session == Some(owner.session)) {
+        let reviewed_changes = match changes {
+          Some(changes) =>
+            state.reviewed_changes.filter(change => !change.touched_by(changes))
+          None => state.reviewed_changes
+        }
         // A baseline checks the whole selection after watcher replacement.
         // Concrete batches stat only affected open files (the dock strip's
         // projection) and re-list only directories whose immediate children
@@ -2356,7 +2478,7 @@ pub fn update(
             ),
           )
         }
-        let next = { ..state, loading, }
+        let next = { ..state, loading, reviewed_changes }
         // Any content event can change Git status, not just a structural one.
         // Refresh only after Changes has been requested and while its explorer
         // or a review is live; reopening performs its own full refresh. The
@@ -2806,6 +2928,7 @@ test "changed-file review fences paired replies and ordinary opens leave review"
       generation: 2,
       working_generation: 2,
       baseline: ReviewContent("old two"),
+      view_mode: ReviewSource,
       selected: change,
     }),
   }
@@ -3070,6 +3193,24 @@ test "deleted changes preview HEAD and working-file loads retain early baselines
       }
     ),
   )
+  guard preview.docs.get(deleted_path) is Some(deleted_preview) else {
+    fail("deleted review was missing")
+  }
+  assert_eq(
+    deleted_preview.unified_diff_content(),
+    Some(("removed source", "")),
+  )
+  assert_true(deleted_preview.review is Some({ view_mode: ReviewSource, .. }))
+  let (_, full_diff) = update(emit, ToggleReviewDiff, preview, ctx)
+  assert_true(
+    full_diff.docs.get(deleted_path)
+    is Some({ review: Some({ view_mode: ReviewUnifiedDiff, .. }), .. }),
+  )
+  let (_, source_again) = update(emit, ToggleReviewDiff, full_diff, ctx)
+  assert_true(
+    source_again.docs.get(deleted_path)
+    is Some({ review: Some({ view_mode: ReviewSource, .. }), .. }),
+  )
 
   // The HEAD request may beat the ordinary filesystem read. Its result stays
   // on the loading document and is preserved when `FileLoaded` settles it.
@@ -3133,6 +3274,10 @@ test "deleted changes preview HEAD and working-file loads retain early baselines
       }
     ),
   )
+  guard loaded.docs.get(live_path) is Some(added_preview) else {
+    fail("added review was missing")
+  }
+  assert_eq(added_preview.unified_diff_content(), Some(("", "new")))
 }
 
 ///|
@@ -3488,6 +3633,7 @@ test "a resolved placement change reroots documents and fences old replies" {
       generation: 4,
       working_generation: 4,
       baseline: ReviewContent("root version\n"),
+      view_mode: ReviewSource,
       selected: test_modified_change(path),
     }),
   }
@@ -3614,6 +3760,7 @@ test "a missing checkout parks files and refuses editor actions until repair" {
       generation: 4,
       working_generation: 4,
       baseline: ReviewContent("before\n"),
+      view_mode: ReviewSource,
       selected: test_modified_change(Relative("b.mbt")),
     }),
     stale: true,
@@ -3734,6 +3881,7 @@ test "opening after a hidden checkout repair restores a stale reviewed tab" {
       generation: 4,
       working_generation: 4,
       baseline: ReviewContent("before\n"),
+      view_mode: ReviewSource,
       selected: change,
     }),
   }
@@ -3831,6 +3979,7 @@ test "checkout recovery restarts a review whose paired replies were parked" {
       generation: 3,
       working_generation: 3,
       baseline: ReviewLoading,
+      view_mode: ReviewSource,
       selected: change,
     }),
     stale: false,
@@ -3933,6 +4082,7 @@ test "hidden checkout recovery retries failed Changes once before parking" {
       generation: 3,
       working_generation: 3,
       baseline: ReviewLoading,
+      view_mode: ReviewSource,
       selected: change,
     }),
     stale: false,
@@ -4013,6 +4163,7 @@ test "ordinary Changes polls do not supersede healthy in-flight reviews" {
       generation: 3,
       working_generation: 3,
       baseline: ReviewLoading,
+      view_mode: ReviewSource,
       selected: change,
     }),
     stale: false,
@@ -4428,6 +4579,7 @@ test "a settled Changes snapshot re-stats loaded reviews whose rows disappeared"
       generation: 3,
       working_generation: 3,
       baseline: ReviewContent("old HEAD"),
+      view_mode: ReviewSource,
       selected: test_modified_change(path),
     }),
   }
@@ -4482,6 +4634,7 @@ test "a review that becomes a symlink clears its cached regular-file source" {
       generation: 3,
       working_generation: 3,
       baseline: ReviewContent("old HEAD"),
+      view_mode: ReviewSource,
       selected,
     }),
   }
@@ -4588,6 +4741,7 @@ test "a disappearing review row hands an active reload to an ordinary read" {
       generation: 3,
       working_generation: 3,
       baseline: ReviewContent("old HEAD"),
+      view_mode: ReviewSource,
       selected: test_modified_change(path),
     }),
   }
@@ -4680,6 +4834,7 @@ test "a newer review reload fences an older working-tree reply" {
       generation: 3,
       working_generation: 3,
       baseline: ReviewContent("HEAD source"),
+      view_mode: ReviewSource,
       selected: test_modified_change(path),
     }),
   }
@@ -4797,6 +4952,7 @@ test "only a final Changes snapshot reconciles reviews and moved HEAD refreshes 
       generation: 3,
       working_generation: 3,
       baseline: ReviewContent("old HEAD"),
+      view_mode: ReviewSource,
       selected: test_modified_change(path),
     }),
   }
@@ -4909,6 +5065,7 @@ test "HEAD refresh restarts the generation-fenced working-tree read" {
       generation: 3,
       working_generation: 3,
       baseline: ReviewContent("old HEAD"),
+      view_mode: ReviewSource,
       selected: change,
     }),
   }
@@ -5024,6 +5181,7 @@ test "legacy Changes replies without HEAD refresh baseline-bearing reviews" {
       generation: 3,
       working_generation: 3,
       baseline: ReviewContent("old HEAD"),
+      view_mode: ReviewSource,
       selected: change,
     }),
   }
@@ -5141,6 +5299,7 @@ test "unborn repository polls do not churn untracked reviews" {
       generation: 3,
       working_generation: 3,
       baseline: ReviewMissing,
+      view_mode: ReviewSource,
       selected: change,
     }),
   }
@@ -5198,6 +5357,7 @@ test "legacy HEAD omission refreshes a missing baseline once tracking is proven"
       generation: 3,
       working_generation: 3,
       baseline: ReviewMissing,
+      view_mode: ReviewSource,
       selected: untracked,
     }),
   }
@@ -5321,6 +5481,7 @@ test "moved HEAD normalizes reviewed tabs across the working-file boundary" {
       generation: 3,
       working_generation: 3,
       baseline: ReviewContent("old HEAD"),
+      view_mode: ReviewSource,
       selected: test_modified_change(path),
     }),
     stale: true,
@@ -5367,6 +5528,7 @@ test "moved HEAD normalizes reviewed tabs across the working-file boundary" {
       generation: 3,
       working_generation: 3,
       baseline: ReviewContent("old HEAD"),
+      view_mode: ReviewSource,
       selected: deleted,
     }),
     stale: false,
@@ -5421,6 +5583,7 @@ test "a changed rename source refreshes its review without moving HEAD" {
       generation: 3,
       working_generation: 3,
       baseline: ReviewContent("old source"),
+      view_mode: ReviewSource,
       selected: previous,
     }),
   }
@@ -5731,6 +5894,7 @@ test "hidden explorer keeps Git refresh live for an open review" {
       generation: 2,
       working_generation: 2,
       baseline: ReviewContent("old HEAD"),
+      view_mode: ReviewSource,
       selected: test_modified_change(path),
     }),
   }
@@ -5779,6 +5943,7 @@ test "sync refreshes a hidden review after its workspace watch was parked" {
       generation: 2,
       working_generation: 2,
       baseline: ReviewContent("old HEAD"),
+      view_mode: ReviewSource,
       selected: test_modified_change(path),
     }),
   }
@@ -5816,6 +5981,7 @@ test "a hidden review accepts its file-only watch without a refresh loop" {
       generation: 2,
       working_generation: 2,
       baseline: ReviewContent("old HEAD"),
+      view_mode: ReviewSource,
       selected: test_modified_change(path),
     }),
   }
@@ -5966,6 +6132,7 @@ test "StatsLoaded marks deletions, reloads the active change, stales the rest" {
       generation: 4,
       working_generation: 4,
       baseline: ReviewContent("HEAD source"),
+      view_mode: ReviewSource,
       selected: test_modified_change(failed_path),
     }),
     stale: false,
@@ -6011,6 +6178,7 @@ test "StatsLoaded preserves a settled HEAD preview when its active file disappea
       generation: 7,
       working_generation: 7,
       baseline: ReviewContent("HEAD source"),
+      view_mode: ReviewSource,
       selected: test_modified_change(path),
     }),
   }
@@ -6081,6 +6249,7 @@ test "a selected deletion hands a clean restoration to an ordinary read" {
       generation: 7,
       working_generation: 7,
       baseline: ReviewContent("HEAD source"),
+      view_mode: ReviewSource,
       selected: deleted,
     }),
     stale: false,
@@ -6191,6 +6360,7 @@ test "a vanished review retries a failed ordinary read" {
       generation: 7,
       working_generation: 7,
       baseline: ReviewContent("old HEAD"),
+      view_mode: ReviewSource,
       selected: test_modified_change(path),
     }),
     stale: false,

@@ -159,6 +159,21 @@ body {
   background: var(--vscode-editor-background);
 }
 
+/* The public embed example omits the workbench's resize-handle grid item. Its
+   two alternative viewer hosts therefore share one explicitly placed content
+   cell instead of auto-flowing through the reserved 4px handle column. */
+.embedded-viewer-stack {
+  grid-column: 3;
+  position: relative;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+}
+
+.embedded-viewer-stack > .viewer-host {
+  flex: 1 1 auto;
+}
+
 .diagnostics {
   min-height: 22px;
   /* A diagnostic flood must not squeeze the editor out of the viewport. */
@@ -334,6 +349,10 @@ body {
 @media (max-width: 680px) {
   .editor-main {
     grid-template-columns: 148px minmax(0, 1fr);
+  }
+
+  .embedded-viewer-stack {
+    grid-column: 2;
   }
 
   .workspace-resize-handle {

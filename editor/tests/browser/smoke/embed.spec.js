@@ -12,6 +12,9 @@ test('runs the viewer and tree from in-memory providers without a server', async
   // The embedding host auto-opens src/main.mbt; auto-reveal expands src.
   await expect(page.locator('.editor-shell')).toHaveAttribute('data-status', 'ready');
   await expect(page.locator('.monaco-editor.readonly-editor')).toContainText('fn main');
+  await expect
+    .poll(async () => (await page.locator('.embedded-viewer-stack').boundingBox())?.width ?? 0)
+    .toBeGreaterThan(400);
 
   // Real language highlighting with no server: the MoonBit lexer is
   // registered by the embedding host, not fetched from anywhere.
@@ -21,6 +24,48 @@ test('runs the viewer and tree from in-memory providers without a server', async
     'aria-selected',
     'true',
   );
+
+  // The same public facade exposes a standalone unified-diff surface. The
+  // host toggles sibling surfaces, preserving the ordinary Viewer's model and
+  // scroll while the renderer receives only original/modified source text.
+  const diffToggle = page.locator('[data-action=\"toggle-diff\"]');
+  await expect(diffToggle).toHaveAccessibleName('Full diff');
+  await diffToggle.click();
+  await expect(diffToggle).toHaveAttribute('aria-pressed', 'true');
+  await expect(diffToggle).toHaveAccessibleName('Full diff');
+  const diff = page.locator('.moonbit-unified-diff');
+  await expect(diff).toBeVisible();
+  await expect
+    .poll(async () => (await diff.boundingBox())?.width ?? 0)
+    .toBeGreaterThan(400);
+  await diff.focus();
+  await expect(diff).toBeFocused();
+  await expect
+    .poll(() => diff.evaluate((element) => getComputedStyle(element).outlineStyle))
+    .toBe('solid');
+  const deletion = diff.locator('[data-line-kind=\"deletion\"]', {
+    hasText: 'println(\"hello\")',
+  });
+  await expect(deletion).toHaveAttribute('data-original-line', '3');
+  await expect(deletion).toHaveAttribute(
+    'aria-label',
+    'Deletion, original line 3:   println(\"hello\")',
+  );
+  const addition = diff.locator('[data-line-kind=\"addition\"]', {
+    hasText: 'println(greeting())',
+  });
+  await expect(addition).toHaveAttribute('data-modified-line', '3');
+  await expect(addition).toHaveAttribute(
+    'aria-label',
+    'Addition, modified line 3:   println(greeting())',
+  );
+  await expect(page.locator('.monaco-editor.readonly-editor')).not.toBeVisible();
+
+  await diffToggle.click();
+  await expect(diffToggle).toHaveAttribute('aria-pressed', 'false');
+  await expect(diffToggle).toHaveAccessibleName('Full diff');
+  await expect(page.locator('.moonbit-unified-diff')).toHaveCount(0);
+  await expect(page.locator('.monaco-editor.readonly-editor')).toContainText('fn main');
 
   // Nested folders resolve lazily on expand.
   await expect(page.locator(workspaceItem('src/lib/util.mbt'))).toHaveCount(0);
@@ -57,6 +102,35 @@ test('runs the viewer and tree from in-memory providers without a server', async
   await expect(page.locator('.viewer-host > .monaco-editor')).toHaveCount(0);
 
   expect(websockets).toEqual([]);
+});
+
+test('bounds eager DOM rendering for a legal-size large diff', async ({ page }) => {
+  await page.goto('/embed.html');
+  await expect(page.locator('.editor-shell')).toHaveAttribute('data-status', 'ready');
+
+  // Both sides are well below the desktop's 1 MiB source limit, but their
+  // many short changed lines would otherwise create tens of thousands of DOM
+  // elements synchronously.
+  await page.locator(workspaceItem('large.mbt')).click();
+  await expect(page.locator('.editor-shell')).toHaveAttribute('data-status', 'ready');
+  await page.locator('[data-action="toggle-diff"]').click();
+  await expect(page.locator('.moonbit-unified-diff')).toContainText(
+    'This diff is too large to render safely.',
+  );
+  await expect(page.locator('.moonbit-unified-diff-line')).toHaveCount(0);
+});
+
+test('rejects an oversized single-line comparison before diffing', async ({ page }) => {
+  await page.goto('/embed.html');
+  await expect(page.locator('.editor-shell')).toHaveAttribute('data-status', 'ready');
+
+  await page.locator(workspaceItem('oversized-line.mbt')).click();
+  await expect(page.locator('.editor-shell')).toHaveAttribute('data-status', 'ready');
+  await page.locator('[data-action="toggle-diff"]').click();
+  await expect(page.locator('.moonbit-unified-diff')).toContainText(
+    'This diff is too large to render safely.',
+  );
+  await expect(page.locator('.moonbit-unified-diff-line')).toHaveCount(0);
 });
 
 test('drops a stale host-ready rAF after a rapid model swap', async ({ page }) => {

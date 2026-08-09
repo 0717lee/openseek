@@ -580,6 +580,7 @@ test "a missing checkout stays bound while rebuild and archive remain reachable"
       generation: 3,
       working_generation: 3,
       baseline: ReviewContent("HEAD"),
+      view_mode: ReviewSource,
       selected: review_change,
     }),
     stale: false,

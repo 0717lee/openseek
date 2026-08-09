@@ -83,9 +83,9 @@ viewer.slot.data -> model: borrows readonly
 
 - Browser embedders call `Viewer::create(host, services~, options~)`. The host
   element must stay mounted and must not receive host-rendered children.
-  This is the only public construction path. The package keeps a private
-  headless constructor for white-box tests; there is no public two-step mounting
-  API. Construction synchronously reads the host's `clientWidth`/
+  This is the only public `Viewer` construction path. The package keeps a
+  private headless constructor for white-box tests; there is no public two-step
+  mounting API. Construction synchronously reads the host's `clientWidth`/
   `clientHeight` (clamped to Monaco's 5px minimum), so options, model attachment,
   and model-line projection use the measured viewport. The internal ViewLayout
   is seeded synchronously before it becomes observable or publishes stable
@@ -95,6 +95,19 @@ viewer.slot.data -> model: borrows readonly
   measurement, or root animation frame, although a model and `ViewModel` may
   still be installed with `ModelData.browser=None`; a model installed through
   the public mounted path always has `Some(BrowserPresentation)`.
+- Browser embedders that need a standalone comparison call
+  `UnifiedDiffView::create(host)`. This opaque surface is independent of
+  `Viewer`: the caller owns and keeps the dedicated host mounted, while the
+  diff view owns only the DOM subtree it installs there. `set_diff` eagerly
+  replaces that subtree from caller-owned original and modified strings through
+  the replaceable `viewer/common/unified_diff` algorithm seam. It rejects more
+  than 1,048,576 combined UTF-16 code units before snapshot construction and
+  more than 5,000 combined logical lines before diff computation. `clear`
+  keeps the host binding reusable; idempotent `dispose` removes renderer-owned
+  DOM without removing the host. Embedders must ship the assembled
+  `viewer.css`, which includes
+  `viewer/browser/unified_diff/unified_diff.css`, and size the host through
+  their own layout.
 - Mounting is a one-way private transition. A mounted Viewer with no model owns
   one atomic placeholder root/text pair; attaching a model installs the active
   presentation root through `ViewerMount`, and ordinary detach restores the

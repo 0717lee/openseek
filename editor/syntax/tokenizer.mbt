@@ -1,33 +1,17 @@
 ///|
 /// Carried lexer state between lines, the `IState` of Monaco's tokenization
-/// contract. The persistent byte vector is an immutable snapshot: stack
-/// edits share unchanged storage while cached states remain isolated from later
-/// edits. Derived equality is what callers use to detect re-tokenization
-/// convergence.
+/// contract. An empty state is the canonical normal state; the persistent byte
+/// vector contains only open lexer modes. Stack edits share unchanged storage
+/// while cached states remain isolated from later edits. Derived equality is
+/// what callers use to detect re-tokenization convergence.
 pub struct TokenizerState {
   priv modes : @vector.Vector[Byte]
 } derive(Eq)
 
 ///|
-/// Creates a tokenizer state by copying a mode sequence into a persistent
-/// snapshot. Subsequent mutations of the source array cannot change the state.
-pub fn TokenizerState::TokenizerState(
-  modes : ArrayView[Byte],
-) -> TokenizerState {
-  { modes: @vector.from_array(modes) }
-}
-
-///|
-/// Returns a mutable copy of the state's modes. Mutating the result cannot
-/// change this state or any cached line state that shares its snapshot.
-pub fn TokenizerState::to_modes(self : TokenizerState) -> Array[Byte] {
-  self.modes.to_array()
-}
-
-///|
-/// Number of modes in this state.
-pub fn TokenizerState::mode_count(self : TokenizerState) -> Int {
-  self.modes.length()
+/// Creates the canonical normal tokenizer state.
+pub fn TokenizerState::TokenizerState() -> TokenizerState {
+  { modes: @vector.new() }
 }
 
 ///|
@@ -317,21 +301,3 @@ pub fn push_token(
 }
 
 ///|
-/// The nesting-mode stack a stateful lexer carries between lines, decoded from
-/// its `TokenizerState`. Each byte is one open mode; an empty state decodes to
-/// the base mode `b'n'`, so a fresh line always has a mode to read.
-/// Shared by the language lexers (`lang_*`), which otherwise carry identical
-/// copies. Inverse of `encode_mode_stack`.
-pub fn decode_mode_stack(state : TokenizerState) -> Array[Byte] {
-  if state.mode_count() == 0 {
-    return [b'n']
-  }
-  state.to_modes()
-}
-
-///|
-/// The mode stack packed back into a `TokenizerState` for the next line.
-/// Inverse of `decode_mode_stack`.
-pub fn encode_mode_stack(stack : Array[Byte]) -> TokenizerState {
-  TokenizerState(stack)
-}
