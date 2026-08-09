@@ -48,6 +48,47 @@ test "markdown links do not navigate the app frame" {
 }
 
 ///|
+#warnings("-alert_unstable")
+test "bare web URLs in prose become external anchors" {
+  let node = @html.p(
+    linkified_text_nodes(
+      "See https://example.com/docs, then http://localhost:8080/a_(b).",
+    ),
+  )
+  let expected =
+    #|<p>See <a href="https://example.com/docs" target="_blank" rel="noopener noreferrer">https://example.com/docs</a>, then <a href="http://localhost:8080/a_(b)" target="_blank" rel="noopener noreferrer">http://localhost:8080/a_(b)</a>.</p>
+  inspect(
+    @rabbita.render_to_string(() => @rabbita.Val::constant(node)),
+    content=expected,
+  )
+}
+
+///|
+#warnings("-alert_unstable")
+test "URL detection stays out of code and existing links" {
+  let rendered = @html.div(
+    markdown_nodes(
+      "`https://code.example` [https://label.example](https://target.example) https://plain.example",
+    ),
+  )
+  let markup = @rabbita.render_to_string(() => @rabbita.Val::constant(rendered))
+  assert_true(
+    markup.contains("<code class=\"inline-code\">https://code.example</code>"),
+  )
+  assert_false(markup.contains("href=\"https://code.example\""))
+  assert_true(markup.contains("href=\"https://target.example\""))
+  assert_true(markup.contains("href=\"https://plain.example\""))
+  // One explicit link and one bare URL; the URL-shaped label must not produce
+  // an anchor nested inside the explicit one.
+  inspect(markup.split("<a ").collect().length(), content="3")
+}
+
+///|
+test "a scheme without an authority remains text" {
+  inspect(linkified_text_nodes("streaming https://").length(), content="1")
+}
+
+///|
 fn first_paragraph(block : @cmark.Block) -> @cmark.BlockParagraph? {
   match block {
     Paragraph(node) => Some(node.v)
