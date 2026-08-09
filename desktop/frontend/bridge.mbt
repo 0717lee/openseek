@@ -1321,7 +1321,11 @@ fn goal_openseek(
         request_agent_goal(
           scheduler, dispatch, channel, payload, session, command, text,
         )
-      })
+      }) catch {
+        // Unreachable: the lane only ever wakes its waiters, never fails
+        // them, and the work it runs is `noraise`. The type cannot say so.
+        _ => ()
+      }
     })
   })
 }

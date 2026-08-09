@@ -136,21 +136,10 @@ pub fn goal_lane(channel : ChannelId, session : String) -> String {
 /// where a lane around the final request alone still lets two preflights race
 /// and deliver their goals in the order their *replies* arrived.
 ///
-/// The lock is not reentrant, so work run here must issue its requests with
+/// The lane is not reentrant, so work run here must issue its requests with
 /// plain `bridge_request`: the lane is already held on their behalf.
-pub async fn in_ordered_lane(
-  lane : String,
-  work : async () -> Unit noraise,
-) -> Unit noraise {
-  let lock = ordered_request_lock(lane)
-  // Acquiring fails only when this task is being cancelled, and then the work
-  // must not run at all — its caller is a fire-and-forget command nobody is
-  // waiting on any more. Nothing was issued, so there is nothing to unwind.
-  lock.acquire() catch {
-    _ => return
-  }
-  defer lock.release()
-  work()
+pub async fn[T] in_ordered_lane(lane : String, work : async () -> T) -> T {
+  ordered_request_lane(lane).run(work)
 }
 
 ///|
