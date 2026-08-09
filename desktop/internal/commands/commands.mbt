@@ -81,7 +81,7 @@ pub let session_list_archived : Command[
 ///|
 pub let session_archive : Command[
   @protocol.SessionPayload,
-  @protocol.SessionsReply,
+  @protocol.ArchiveReply,
 ] = Command("session.archive")
 
 ///|

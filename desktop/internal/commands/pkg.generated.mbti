@@ -85,7 +85,7 @@ pub let moonide_definition : Command[@protocol.MoonIdeNavigationPayload, @protoc
 
 pub let moonide_references : Command[@protocol.MoonIdeNavigationPayload, @protocol.MoonIdeLocationsReply]
 
-pub let session_archive : Command[@protocol.SessionPayload, @protocol.SessionsReply]
+pub let session_archive : Command[@protocol.SessionPayload, @protocol.ArchiveReply]
 
 pub let session_list : Command[@protocol.EmptyPayload, @protocol.SessionsReply]
 

@@ -129,6 +129,67 @@ pub(all) struct SessionsReply {
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|
+/// The expected, recoverable refusal from `session.archive`: the bound
+/// checkout is dirty, so the caller must explicitly retry with `force` before
+/// any local-only work may be discarded. `dirty_paths` is a bounded preview;
+/// `dirty_path_count` is the complete number of porcelain status rows.
+pub(all) struct ArchiveNeedsForceReply {
+  worktree : String
+  dirty_paths : Array[String]
+  dirty_path_count : Int
+} derive(Debug, Eq, FromJson, ToJson)
+
+///|
+/// `session.archive` keeps the legacy `SessionsReply` JSON shape on success so
+/// older clients can consume replies from a newer host. A dirty checkout is a
+/// normal confirmation state rather than a rejected bridge operation.
+pub(all) enum ArchiveReply {
+  Archived(SessionsReply)
+  NeedsForce(ArchiveNeedsForceReply)
+} derive(Debug, Eq)
+
+///|
+pub impl ToJson for ArchiveReply with fn to_json(self) {
+  match self {
+    Archived(reply) => reply.to_json()
+    NeedsForce(refusal) =>
+      {
+        "kind": "needs_force",
+        "worktree": refusal.worktree,
+        "dirty_paths": refusal.dirty_paths,
+        "dirty_path_count": refusal.dirty_path_count,
+      }
+  }
+}
+
+///|
+pub impl FromJson for ArchiveReply with fn from_json(json, path) {
+  guard json is Object(fields) else {
+    raise JsonDecodeError((path, "expected archive reply"))
+  }
+  match fields.get("kind") {
+    Some(String("needs_force")) => {
+      let refusal : ArchiveNeedsForceReply = @json.from_json(json)
+      NeedsForce(refusal)
+    }
+    Some(String(_)) =>
+      raise JsonDecodeError(
+        (path.add_key("kind"), "unknown archive reply kind"),
+      )
+    Some(_) =>
+      raise JsonDecodeError(
+        (path.add_key("kind"), "archive reply kind must be a string"),
+      )
+    None => {
+      // Success deliberately remains `{groups:[...]}`, the pre-structured-
+      // refusal response shape.
+      let reply : SessionsReply = @json.from_json(json)
+      Archived(reply)
+    }
+  }
+}
+
+///|
 pub(all) struct SessionToolCall {
   id : String
   name : String

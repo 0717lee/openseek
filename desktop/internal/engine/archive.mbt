@@ -108,22 +108,25 @@ pub async fn archive_session(
   on_committed : () -> Unit,
   force? : Bool = false,
   on_worktree_changed? : (String, Array[WorktreeInfo]) -> Unit,
-) -> SessionsReply {
+) -> ArchiveReply {
   let session = session.trim().to_owned()
   guard !session.is_empty() && safe_workspace_id(session) else {
     raise EngineError("invalid session id")
   }
-  archive_session_commit(
+  let refusal = archive_session_commit(
     manager,
     session,
     on_committed,
     force~,
     on_worktree_changed?,
   )
+  if refusal is Some(refusal) {
+    return NeedsForce(refusal)
+  }
   // Listing is intentionally outside the record-move lease. Once the
   // irreversible rename is durably published, a slow/cancelled list reply
   // must not hold the conversation unavailable or suppress session.changed.
-  list_archived_sessions(manager)
+  Archived(list_archived_sessions(manager))
 }
 
 ///|
@@ -133,7 +136,7 @@ async fn archive_session_commit(
   on_committed : () -> Unit,
   force? : Bool = false,
   on_worktree_changed? : (String, Array[WorktreeInfo]) -> Unit,
-) -> Unit {
+) -> ArchiveNeedsForceReply? {
   manager.workspace_lifecycle_lock.acquire()
   let mut placement_locked = true
   defer (if placement_locked { manager.workspace_lifecycle_lock.release() })
@@ -188,11 +191,14 @@ async fn archive_session_commit(
   // (the next prompt respawns) — so nothing irreversible has happened yet;
   // a removal that succeeds while the record move below then fails leaves a
   // live conversation safely blocked on its retained missing placement.
-  archive_bound_worktree_checkout(
+  let refusal = archive_bound_worktree_checkout(
     session,
     force,
     on_committed?=on_worktree_changed,
   )
+  if refusal is Some(refusal) {
+    return Some(refusal)
+  }
   guard session_store_root(session) is Some(root) else {
     raise EngineError(
       "cannot determine a session root; set OPENSEEK_SESSION_ROOT",
@@ -210,6 +216,7 @@ async fn archive_session_commit(
     )
     on_committed()
   })
+  None
 }
 
 ///|
@@ -417,7 +424,9 @@ async test "archive refuses a durable record while the pump is stopped" {
   let manager = new_engine_manager("unused")
   let committed = Ref(false)
   let detail = try {
-    archive_session_commit(manager, "s-stopped", () => committed.val = true)
+    ignore(
+      archive_session_commit(manager, "s-stopped", () => committed.val = true),
+    )
     "no error"
   } catch {
     EngineError(detail) => detail

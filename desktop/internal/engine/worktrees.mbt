@@ -247,8 +247,8 @@ async fn archive_bound_worktree_checkout(
   session : String,
   force : Bool,
   on_committed? : (String, Array[WorktreeInfo]) -> Unit,
-) -> Unit {
-  guard workspace_of_session(session) is Some(workspace) else { return }
+) -> ArchiveNeedsForceReply? {
+  guard workspace_of_session(session) is Some(workspace) else { return None }
   worktree_registry_lock.acquire()
   defer worktree_registry_lock.release()
   let entries = read_worktrees_unlocked(workspace)
@@ -259,7 +259,7 @@ async fn archive_bound_worktree_checkout(
       break
     }
   }
-  guard found is Some(entry) else { return }
+  guard found is Some(entry) else { return None }
   let target = worktree_dir(workspace, entry.name)
   let present = @fsx.is_dir(target.to_path()) catch {
     error if @async.is_being_cancelled() => raise error
@@ -267,11 +267,12 @@ async fn archive_bound_worktree_checkout(
   }
   if present {
     if !force {
-      let status = git_in(target, ["status", "--porcelain"])
-      guard status.is_empty() else {
-        raise EngineError(
-          "worktree \{entry.name} has uncommitted changes; archiving discards them",
-        )
+      let status = git_output_text(target, [
+        "status", "--porcelain=v1", "-z", "--untracked-files=all",
+      ])
+      if !status.is_empty() {
+        let (dirty_paths, dirty_path_count) = archive_dirty_path_preview(status)
+        return Some({ worktree: entry.name, dirty_paths, dirty_path_count })
       }
     }
     let args = ["worktree", "remove"]
@@ -295,6 +296,7 @@ async fn archive_bound_worktree_checkout(
       )
     }
   })
+  None
 }
 
 ///|
@@ -318,10 +320,10 @@ async fn worktree_owner_dir(
 }
 
 ///|
-/// Run git in `dir` and return its trimmed stdout; a failure raises with
-/// git's own message so refusals ("branch already exists", a checkout
-/// conflict) reach the user verbatim.
-async fn git_in(dir : @pathx.Absolute, args : Array[String]) -> String {
+/// Run git in `dir` and return its stdout exactly. Porcelain `-z` callers need
+/// the leading status-space and NUL separators intact; ordinary callers trim
+/// this value in `git_in` below.
+async fn git_output_text(dir : @pathx.Absolute, args : Array[String]) -> String {
   let (code, stdout, stderr) = @process.collect_output(
     "git",
     args,
@@ -340,11 +342,62 @@ async fn git_in(dir : @pathx.Absolute, args : Array[String]) -> String {
       },
     )
   }
-  (stdout.text() catch {
+  stdout.text() catch {
     _ => raise EngineError("git produced non-text output")
-  })
-  .trim()
-  .to_owned()
+  }
+}
+
+///|
+/// Run git in `dir` and return its trimmed stdout; a failure raises with
+/// git's own message so refusals ("branch already exists", a checkout
+/// conflict) reach the user verbatim.
+async fn git_in(dir : @pathx.Absolute, args : Array[String]) -> String {
+  git_output_text(dir, args).trim().to_owned()
+}
+
+///|
+const ArchiveDirtyPathPreviewLimit = 8
+
+///|
+/// Extract a bounded path preview from `git status --porcelain=v1 -z` while
+/// retaining the full row count. In `-z` mode a rename/copy consumes the next
+/// NUL field as its source; only the current path is useful in the archive
+/// warning.
+fn archive_dirty_path_preview(status : String) -> (Array[String], Int) {
+  let fields = status.split("\u{0}").map(field => field.to_owned()).collect()
+  let paths : Array[String] = []
+  let mut count = 0
+  let mut index = 0
+  while index < fields.length() {
+    let record = fields[index]
+    if record.length() < 4 {
+      index += 1
+      continue
+    }
+    let index_status = record.view(end_offset=1).to_owned()
+    let worktree_status = record.view(start_offset=1, end_offset=2).to_owned()
+    let path = record.view(start_offset=3).to_owned()
+    count += 1
+    if paths.length() < ArchiveDirtyPathPreviewLimit {
+      paths.push(path)
+    }
+    if index_status == "R" ||
+      worktree_status == "R" ||
+      index_status == "C" ||
+      worktree_status == "C" {
+      index += 1
+    }
+    index += 1
+  }
+  (paths, count)
+}
+
+///|
+test "archive dirty preview includes submodules and counts renames once" {
+  let status = " m desktop/lepus\u{0}R  renamed.mbt\u{0}old.mbt\u{0}?? loose.txt\u{0}"
+  let (paths, count) = archive_dirty_path_preview(status)
+  assert_eq(paths, ["desktop/lepus", "renamed.mbt", "loose.txt"])
+  assert_eq(count, 3)
 }
 
 ///|
@@ -1611,17 +1664,14 @@ async test "archive keeps worktree placement for explicit repair after unarchive
     b"x",
     create_mode=CreateOrTruncate,
   )
-  // A dirty checkout refuses the archive before anything irreversible: the
-  // record stays live and the checkout stays on disk.
-  let refusal = try {
-    ignore(archive_session(manager, "s-arc", fn() {  }))
-    "no error"
-  } catch {
-    EngineError(detail) => detail
-    error if @async.is_being_cancelled() => raise error
-    error => "\{error}"
+  // A dirty checkout returns a structured confirmation state before anything
+  // irreversible: the record stays live and the checkout stays on disk.
+  guard archive_session(manager, "s-arc", fn() {  }) is NeedsForce(refusal) else {
+    fail("dirty archive returned no force confirmation")
   }
-  assert_true(refusal.contains("uncommitted changes"))
+  assert_eq(refusal.worktree, "wt-1")
+  assert_eq(refusal.dirty_paths, ["junk.txt"])
+  assert_eq(refusal.dirty_path_count, 1)
   assert_true(
     @fsx.is_dir(
       workspace_session_root(repo).join("sessions").join("s-arc").to_path(),
@@ -1632,12 +1682,13 @@ async test "archive keeps worktree placement for explicit repair after unarchive
   // the branch, archived history, and placement row all survive. The retained
   // row broadcasts as missing before the conversation is archived.
   let changes : Array[(String, Array[WorktreeInfo])] = []
-  ignore(
-    archive_session(manager, "s-arc", fn() {  }, force=true, on_worktree_changed=(
+  guard archive_session(manager, "s-arc", fn() {  }, force=true, on_worktree_changed=(
       workspace,
       rows,
-    ) => changes.push((workspace, rows))),
-  )
+    ) => changes.push((workspace, rows)))
+    is Archived(_) else {
+    fail("forced archive did not commit")
+  }
   assert_eq(changes.length(), 1)
   let (workspace, rows) = changes[0]
   assert_eq(workspace, repo.to_string())
@@ -1686,7 +1737,7 @@ async test "archive keeps worktree placement for explicit repair after unarchive
   @fsx.ensure_dir(
     workspace_session_root(repo).join("sessions").join("s-arc2").to_path(),
   )
-  ignore(archive_session(manager, "s-arc2", fn() {  }))
+  assert_true(archive_session(manager, "s-arc2", fn() {  }) is Archived(_))
   assert_false(@fsx.exists(repo.join(".worktrees/wt-2").to_path()))
   guard list_worktrees(repo.to_string()).worktrees is [first, second] else {
     fail("both worktree placements must survive archive")

@@ -53,6 +53,26 @@ test "Git original-file replies round-trip through their manual codec" {
 }
 
 ///|
+test "archive replies keep success compatible and encode dirty confirmation" {
+  let sessions : @protocol.SessionsReply = { groups: [] }
+  let success = @protocol.ArchiveReply::Archived(sessions)
+  @debug.assert_eq(success.to_json(), sessions.to_json())
+  let decoded_success : @protocol.ArchiveReply = @json.from_json(
+    sessions.to_json(),
+  )
+  @debug.assert_eq(decoded_success, success)
+  let refusal : @protocol.ArchiveReply = NeedsForce({
+    worktree: "wt-1",
+    dirty_paths: ["desktop/lepus", "editor/tokenizer.mbt"],
+    dirty_path_count: 5,
+  })
+  let decoded_refusal : @protocol.ArchiveReply = @json.from_json(
+    refusal.to_json(),
+  )
+  @debug.assert_eq(decoded_refusal, refusal)
+}
+
+///|
 test "Git changes replies preserve HEAD identity and accept legacy omission" {
   let reply : @protocol.GitChangesReply = {
     repository: true,
