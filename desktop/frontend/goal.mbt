@@ -568,6 +568,46 @@ test "a request in flight is reason enough to re-read the record" {
 }
 
 ///|
+test "a dead request cannot retire the one that replaced it" {
+  let dispatch = test_dispatch()
+  // The row keeps its actions while a command is out, so a second set can go
+  // over the first. When the first is then refused, retiring "whatever is
+  // pending" would drop the second — its marker would arrive with nothing
+  // waiting for it, and its text would be held nowhere.
+  let model = test_model().replace_conversation({
+    ..test_conversation(),
+    goal_pending: Some(Setting("the second goal")),
+  })
+  let (_, next) = update_dev(
+    dispatch,
+    GoalRejected(
+      session="desktop-test",
+      draft=Some("the first goal"),
+      message="a goal command is already in flight",
+    ),
+    model,
+  )
+  inspect(next.active().overlay.length(), content="1")
+  assert_true(next.active().goal_pending is Some(Setting("the second goal")))
+  // Nor does the superseded text come back: the user replaced it themselves,
+  // so restoring it would read as the goal they are actually setting failing.
+  assert_true(next.active().goal_edit is None)
+  // Its own rejection does retire it, and hands its text back.
+  let (_, own) = update_dev(
+    dispatch,
+    GoalRejected(
+      session="desktop-test",
+      draft=Some("the second goal"),
+      message="no engine",
+    ),
+    model,
+  )
+  assert_true(own.active().goal_pending is None)
+  guard own.active().goal_edit is Some(edit) else { fail("the text is lost") }
+  inspect(edit.draft, content="the second goal")
+}
+
+///|
 test "an unconfirmed delivery keeps waiting instead of handing the text back" {
   let dispatch = test_dispatch()
   let model = test_model().replace_conversation({

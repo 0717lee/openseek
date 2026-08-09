@@ -5039,11 +5039,27 @@ fn update_device_msg(
           Assistant(is_danger=true),
           message,
         )
-        // Hand the goal text back, the way a rejected prompt restores its
-        // draft: nothing durable will ever carry it, so losing it here loses
-        // it for good. Only when this conversation has not claimed goal mode
-        // since — a newer edit is the user's, not this dead request's.
-        let restored = if draft is Some(draft) && reported.goal_edit is None {
+        // A rejection retires the request it is about, never simply "the one
+        // in flight". The row keeps its actions while a command is out, so
+        // the user can send a second one over the first, and clearing
+        // whatever happens to be pending would then let a dead request retire
+        // its live successor — leaving that one's marker with nothing waiting
+        // for it and its text held nowhere.
+        let rejected : GoalRequest = match draft {
+          Some(text) => Setting(text)
+          None => Clearing
+        }
+        let restored = if reported.goal_pending is Some(pending) &&
+          pending != rejected {
+          // Superseded: the user replaced this text themselves, so it is not
+          // lost work and the request that replaced it is still waiting.
+          reported
+        } else if draft is Some(draft) && reported.goal_edit is None {
+          // Hand the goal text back, the way a rejected prompt restores its
+          // draft: nothing durable will ever carry it, so losing it here
+          // loses it for good. Only when this conversation has not claimed
+          // goal mode since — a newer edit is the user's, not this dead
+          // request's.
           { ..reported, goal_edit: Some({ draft, }), goal_pending: None }
         } else {
           { ..reported, goal_pending: None }
