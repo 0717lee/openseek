@@ -1595,7 +1595,10 @@ priv enum DeviceMsg {
   WorktreeCreated(workspace~ : @common.Uri, name~ : String, session~ : String)
   // An archive was refused because the conversation's worktree holds
   // uncommitted changes; the client stages the discard-confirmation dialog.
-  ArchiveNeedsForce(session~ : String, message~ : String)
+  ArchiveNeedsForce(
+    session~ : String,
+    refusal~ : @protocol.ArchiveNeedsForceReply
+  )
   // The archived conversations — the reply to `archived_sessions` and to a
   // successful `archive_session`/`unarchive_session` alike.
   ArchivedLoaded(

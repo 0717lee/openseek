@@ -55,6 +55,19 @@ pub(all) struct ApplyUpdateReply {
   applied : Bool
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 
+pub(all) struct ArchiveNeedsForceReply {
+  worktree : String
+  dirty_paths : Array[String]
+  dirty_path_count : Int
+} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
+
+pub(all) enum ArchiveReply {
+  Archived(SessionsReply)
+  NeedsForce(ArchiveNeedsForceReply)
+} derive(Eq, @debug.Debug)
+pub impl ToJson for ArchiveReply
+pub impl @json.FromJson for ArchiveReply
+
 pub(all) struct AuthDevicePayload {
   id : String
   name : String

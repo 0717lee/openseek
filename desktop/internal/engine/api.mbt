@@ -66,6 +66,12 @@ type SessionGroup = @protocol.SessionGroup
 type SessionsReply = @protocol.SessionsReply
 
 ///|
+type ArchiveReply = @protocol.ArchiveReply
+
+///|
+type ArchiveNeedsForceReply = @protocol.ArchiveNeedsForceReply
+
+///|
 type WorkspacesReply = @protocol.WorkspacesReply
 
 ///|

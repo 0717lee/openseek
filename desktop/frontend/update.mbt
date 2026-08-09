@@ -3543,13 +3543,13 @@ fn update_device_msg(
         }),
       )
     }
-    ArchiveNeedsForce(session~, message~) =>
+    ArchiveNeedsForce(session~, refusal~) =>
       // The host refused to archive over the worktree's uncommitted
       // changes; stage the discard-confirmation dialog, whose confirm
       // retries with force.
       (
         @cmd.none,
-        { ..model, archive_confirm: Some({ channel, session, message }) },
+        { ..model, archive_confirm: Some({ channel, session, refusal }) },
       )
     ArchivedLoaded(
       items,
@@ -14405,7 +14405,11 @@ test "full-screen modals hide the native view and closing restores it" {
   // archive-discard confirmation and Quick Open.
   let (_, archiving) = update_dev(
     dispatch,
-    ArchiveNeedsForce(session="desktop-test", message="dirty"),
+    ArchiveNeedsForce(session="desktop-test", refusal={
+      worktree: "wt-1",
+      dirty_paths: ["desktop/lepus"],
+      dirty_path_count: 1,
+    }),
     restored,
   )
   assert_true(archiving.archive_confirm is Some(_))

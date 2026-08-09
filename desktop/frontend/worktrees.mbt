@@ -31,12 +31,12 @@ priv struct WorkspaceWorktrees {
 ///|
 /// The archive-discard confirmation: the host refused to archive because
 /// the conversation's worktree holds uncommitted changes; confirming
-/// retries the archive with force. `message` is the host's own refusal
-/// text, which names the worktree.
+/// retries the archive with force. The structured refusal names the worktree
+/// and carries a bounded path preview without exposing arbitrary host errors.
 priv struct ArchiveConfirm {
   channel : @interop.ChannelId
   session : String
-  message : String
+  refusal : @protocol.ArchiveNeedsForceReply
 } derive(Eq)
 
 ///|
@@ -413,23 +413,36 @@ fn archive_discard_modal(
   dispatch : @cmd.Emit[Msg],
   confirm : ArchiveConfirm,
 ) -> @html.Html {
+  let refusal = confirm.refusal
+  let message = archive_discard_message(refusal)
   @html.div(class="modal-backdrop", on_click=dispatch(CancelArchiveDiscard), [
     @html.div(class="modal", [
       @html.div(class="modal-title", "Archive this chat?"),
-      @html.div(
-        class="modal-body",
-        "\{confirm.message}. Committed work stays on the worktree's branch; only uncommitted changes are discarded.",
-      ),
+      @html.div(class="modal-body", message),
       @html.div(class="modal-actions", [
         @html.button(on_click=dispatch(CancelArchiveDiscard), "Keep working"),
         @html.button(
           class="primary",
           on_click=dispatch(ConfirmArchiveDiscard),
-          "Discard and archive",
+          "Discard local changes and archive",
         ),
       ]),
     ]),
   ])
+}
+
+///|
+fn archive_discard_message(
+  refusal : @protocol.ArchiveNeedsForceReply,
+) -> String {
+  let preview = if refusal.dirty_paths.is_empty() {
+    ""
+  } else {
+    let remaining = refusal.dirty_path_count - refusal.dirty_paths.length()
+    let suffix = if remaining > 0 { ", and \{remaining} more" } else { "" }
+    " Changed paths: \{refusal.dirty_paths.join(", ")}\{suffix}."
+  }
+  "Worktree \{refusal.worktree} has uncommitted changes.\{preview} Archiving deletes this checkout and permanently discards its uncommitted, untracked, and ignored files. Committed work and the branch remain."
 }
 
 // Tests for the worktree flow's pure pieces: the notification decoder and
@@ -439,6 +452,15 @@ fn archive_discard_modal(
 ///|
 fn test_worktree_rows() -> Array[WorktreeRow] {
   [{ name: "wt", session: Some("desktop-wt"), present: true }]
+}
+
+///|
+fn test_archive_refusal(
+  worktree? : String = "wt-1",
+  dirty_paths? : Array[String] = ["desktop/lepus"],
+  dirty_path_count? : Int = 1,
+) -> @protocol.ArchiveNeedsForceReply {
+  { worktree, dirty_paths, dirty_path_count }
 }
 
 ///|
@@ -1013,7 +1035,7 @@ test "a remote removal closes this client's discard dialog" {
     })
   let (_, staged) = update_dev(
     dispatch,
-    ArchiveNeedsForce(session="desktop-test", message="dirty"),
+    ArchiveNeedsForce(session="desktop-test", refusal=test_archive_refusal()),
     model,
   )
   assert_true(staged.archive_confirm is Some(_))
@@ -1044,7 +1066,10 @@ test "a dirty archive stages the discard dialog and confirm retries forced" {
     dispatch,
     ArchiveNeedsForce(
       session="desktop-test",
-      message="worktree wt-1 has uncommitted changes; archiving discards them",
+      refusal=test_archive_refusal(
+        dirty_paths=["desktop/lepus", "editor/tokenizer.mbt"],
+        dirty_path_count=4,
+      ),
     ),
     test_model(),
   )
@@ -1052,7 +1077,11 @@ test "a dirty archive stages the discard dialog and confirm retries forced" {
     fail("refusal staged no dialog")
   }
   inspect(confirm.session, content="desktop-test")
-  assert_true(confirm.message.contains("wt-1"))
+  assert_eq(confirm.refusal.worktree, "wt-1")
+  assert_eq(confirm.refusal.dirty_paths[0], "desktop/lepus")
+  let warning = archive_discard_message(confirm.refusal)
+  assert_true(warning.contains("desktop/lepus"))
+  assert_true(warning.contains("and 2 more"))
   // Cancel stands down without any request.
   let (_, cancelled) = update(dispatch, CancelArchiveDiscard, staged)
   assert_true(cancelled.archive_confirm is None)
@@ -1060,7 +1089,7 @@ test "a dirty archive stages the discard dialog and confirm retries forced" {
   // a plain archive click) and closes the dialog.
   let (_, restaged) = update_dev(
     dispatch,
-    ArchiveNeedsForce(session="desktop-test", message="dirty"),
+    ArchiveNeedsForce(session="desktop-test", refusal=test_archive_refusal()),
     cancelled,
   )
   let before = restaged.dev().archived_request_generation
