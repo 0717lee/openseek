@@ -1106,7 +1106,7 @@ fn open_session(
           watermark=view.watermark,
           event_boundaries=view.event_boundaries,
           goal=view.goal,
-          goal_marker=view.goal_marker,
+          goal_markers=view.goal_markers,
           generation~,
         ),
       )
@@ -1147,7 +1147,7 @@ fn refresh_session(
           watermark=view.watermark,
           event_boundaries=view.event_boundaries,
           goal=view.goal,
-          goal_marker=view.goal_marker,
+          goal_markers=view.goal_markers,
           generation~,
         ),
       )

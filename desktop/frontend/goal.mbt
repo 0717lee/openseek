@@ -671,12 +671,12 @@ test "re-asserting an unchanged goal waits for its own marker too" {
   // reduced state reads exactly as it did before the request, so the snapshot
   // has to carry the marker itself. Above the request's frontier it answers;
   // at or below it, it is the record agreeing rather than answering.
-  fn reload(model : Model, goal_marker) {
+  fn reload(model : Model, goal_markers) {
     let (_, next) = update_dev(
       dispatch,
       SessionRefreshed(
         goal=Some({ text: "ship the feature", blocked: None }),
-        goal_marker~,
+        goal_markers~,
         session="desktop-test",
         items=[],
         watermark=9,
@@ -692,21 +692,60 @@ test "re-asserting an unchanged goal waits for its own marker too" {
   }
 
   assert_true(
-    reload(unrelated, None).active().goal_pending
+    reload(unrelated, []).active().goal_pending
     is Some({ request: Setting("ship the feature"), .. }),
   )
   assert_true(
-    reload(unrelated, Some((0, GoalSet("ship the feature")))).active().goal_pending
+    reload(unrelated, [(0, GoalSet("ship the feature"))]).active().goal_pending
     is Some({ request: Setting("ship the feature"), .. }),
   )
   // Missed live, found by the reload — and no longer stuck forever.
   assert_true(
-    reload(unrelated, Some((1, GoalSet("ship the feature")))).active().goal_pending
+    reload(unrelated, [(1, GoalSet("ship the feature"))]).active().goal_pending
     is None,
   )
   // Its own marker arriving live says so outright too.
   let settled = commit(unrelated, 2, "[goal]\nship the feature")
   assert_true(settled.active().goal_pending is None)
+}
+
+///|
+test "a set is recorded even when the record has moved on since" {
+  let dispatch = test_dispatch()
+  // Set, then blocked — a goal set into a live turn can be blocked by the
+  // agent before the reload ever happens. Keeping only the newest goal-family
+  // marker would hand the snapshot a `GoalBlocked` and nothing else, and the
+  // set could never recognize its own result. What moved the goal on
+  // afterwards is a different question from whether this one landed.
+  let model = test_model().replace_conversation({
+    ..test_conversation(),
+    goal_pending: Some({
+      id: "goal-1",
+      request: Setting("ship the feature"),
+      since: 1,
+    }),
+    sync: test_reloading([]),
+  })
+  let (_, settled) = update_dev(
+    dispatch,
+    SessionRefreshed(
+      goal=Some({ text: "ship the feature", blocked: Some("needs a decision") }),
+      goal_markers=[
+        (2, GoalSet("ship the feature")),
+        (3, GoalBlocked("needs a decision")),
+      ],
+      session="desktop-test",
+      items=[],
+      watermark=9,
+      event_boundaries=[],
+      generation=1,
+    ),
+    model,
+  )
+  assert_true(settled.active().goal_pending is None)
+  // The row goes on showing the goal as blocked; that is the mirror's job,
+  // not the request's.
+  assert_true(settled.active().goal is Some({ blocked: Some(_), .. }))
 }
 
 ///|
@@ -846,7 +885,7 @@ test "a request in flight is reason enough to re-read the record" {
     dispatch,
     SessionRefreshed(
       goal=None,
-      goal_marker=None,
+      goal_markers=[],
       session="desktop-test",
       items=[],
       watermark=0,
@@ -1146,12 +1185,12 @@ test "a reload settles a request the transport never answered" {
     }),
     sync: test_reloading([]),
   })
-  fn refresh(model, goal, goal_marker) {
+  fn refresh(model, goal, goal_markers) {
     let (_, next) = update_dev(
       dispatch,
       SessionRefreshed(
         goal~,
-        goal_marker~,
+        goal_markers~,
         session="desktop-test",
         items=[],
         watermark=9,
@@ -1169,7 +1208,7 @@ test "a reload settles a request the transport never answered" {
 
   // A record that does not carry it settles nothing: the append may still be
   // queued behind this read.
-  let absent = refresh(model, None, None)
+  let absent = refresh(model, None, [])
   assert_true(
     absent.active().goal_pending
     is Some({ request: Setting("ship the feature"), .. }),
@@ -1179,7 +1218,7 @@ test "a reload settles a request the transport never answered" {
   let older = refresh(
     reloading(absent),
     Some({ text: "ship the feature", blocked: None }),
-    Some((4, GoalSet("ship the feature"))),
+    [(4, GoalSet("ship the feature"))],
   )
   assert_true(
     older.active().goal_pending
@@ -1188,7 +1227,7 @@ test "a reload settles a request the transport never answered" {
   let landed = refresh(
     reloading(older),
     Some({ text: "ship the feature", blocked: None }),
-    Some((5, GoalSet("ship the feature"))),
+    [(5, GoalSet("ship the feature"))],
   )
   assert_true(landed.active().goal_pending is None)
   assert_true(landed.active().goal is Some(_))

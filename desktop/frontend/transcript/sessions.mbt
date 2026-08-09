@@ -169,12 +169,17 @@ pub struct SessionLoadView {
   // The standing goal the snapshot's `[goal]` markers reduce to — the seed
   // the client's live marker commits then fold on top of.
   goal : GoalStanding?
-  // The newest goal marker this snapshot contains, with the sequence it
-  // committed at. The reduced state alone cannot say whether a set or clear
-  // was *recorded* here — re-asserting an unchanged goal, or clearing an
+  // Every goal marker this snapshot contains, with the sequence it committed
+  // at. The reduced state alone cannot say whether a set or clear was
+  // *recorded* here — re-asserting an unchanged goal, or clearing an
   // already-goalless session, reduces to exactly what was there before — so
-  // a request in flight needs the marker itself to recognize its own result.
-  goal_marker : (Int, GoalMarker)?
+  // a request in flight needs the markers themselves to find its own result.
+  //
+  // All of them, not the newest: a set can be followed by a block, or by
+  // another set, before the reload ever happens, and the request still
+  // completed. What moved the goal on afterwards is a different question
+  // from whether this one was recorded.
+  goal_markers : Array[(Int, GoalMarker)]
 }
 
 ///|
@@ -189,7 +194,7 @@ pub fn session_from_reply(
   let event_boundaries : Array[(Int, Bool, Int)] = []
   let mut derived_watermark = 0
   let mut goal : GoalStanding? = None
-  let mut last_marker : (Int, GoalMarker)? = None
+  let goal_markers : Array[(Int, GoalMarker)] = []
   for event in reply.session.events.unwrap_or([]) {
     // Old desktop hosts return the store JSON verbatim without a top-level
     // watermark, but every stored event already carries its sequence. Derive
@@ -205,7 +210,7 @@ pub fn session_from_reply(
     if event.item is @desktop_protocol.RuntimeNotice(notice) &&
       goal_marker(notice.content) is Some(marker) {
       goal = apply_goal_marker(goal, marker)
-      last_marker = Some((event.sequence, marker))
+      goal_markers.push((event.sequence, marker))
     }
     event_boundaries.push(
       (event.sequence, event.item.is_terminal(), items.length()),
@@ -216,7 +221,7 @@ pub fn session_from_reply(
     watermark: reply.watermark.unwrap_or(derived_watermark),
     event_boundaries,
     goal,
-    goal_marker: last_marker,
+    goal_markers,
   }
 }
 
@@ -936,6 +941,17 @@ test "transcript mapping renders goal markers as cards and reduces the standing 
   assert_true(
     view.goal
     is Some({ text: "ship the feature", blocked: Some("needs a decision") }),
+  )
+  // Every goal marker, with its sequence — not just the newest. A client
+  // waiting on that set has to be able to find it here even though a block
+  // has moved the standing goal on since; keeping only the last one would
+  // hand it the block and nothing else.
+  inspect(view.goal_markers.length(), content="2")
+  assert_true(view.goal_markers[0] == (2, GoalSet("ship the feature")))
+  assert_true(view.goal_markers[1] == (4, GoalBlocked("needs a decision")))
+  // The goal-family notices that are not markers stay out of it.
+  assert_true(
+    view.goal_markers.iter().all(entry => entry.0 != 1 && entry.0 != 3),
   )
 }
 

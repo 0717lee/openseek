@@ -573,8 +573,7 @@ priv enum GoalRequest {
 } derive(Eq)
 
 ///|
-/// Whether one durable observation of the standing goal recorded this
-/// request's own outcome.
+/// Whether these durable markers contain this request's own result.
 ///
 /// The request is *not* matched against whose command produced the marker.
 /// The durable record has no provenance — a `[goal]` commit proves the engine
@@ -588,44 +587,37 @@ priv enum GoalRequest {
 /// marker and restarts the goal cadence from it, and it explicitly keeps two
 /// same-text goals apart while they queue. A clear is the same trap in
 /// sharper form, since an absence is also what a record carries before any
-/// goal exists. In both, a mirror that already reads what was asked for is no
-/// evidence at all — under it, any later observation would retire the request
-/// along with its recovery copy while its own append could still fail.
+/// goal exists. So the reduced state is no evidence at all, and the marker is
+/// the whole of it: one of this request's own shape, committed above the
+/// frontier the request was sent from.
 ///
-/// So the evidence is the marker plus where it sits: a marker of this
-/// request's own shape, committed above the frontier the request was sent
-/// from. A commit carries its marker inline; a snapshot carries the newest
-/// one it contains. Same question either way, which is why a reload can
-/// settle a send whose reply was lost — and why a reload that finds only
-/// older markers settles nothing, because there the record genuinely has not
-/// answered yet.
+/// Nothing is asked of what stands *now*. A set can be blocked, or replaced,
+/// before this is ever read — by the agent, or by another client — and none
+/// of that unmakes the fact that the set was recorded. "Did my command land"
+/// and "what is the goal today" are two questions; the row answers the second
+/// from the mirror.
+///
+/// A commit carries its one marker; a snapshot carries every marker it read.
+/// Same question either way, which is why a reload can settle a send whose
+/// reply was lost — and why a reload that finds only older markers settles
+/// nothing, because there the record genuinely has not answered yet.
 fn GoalRequest::settled_by(
   self : GoalRequest,
   since : Int,
-  goal : @transcript.GoalStanding?,
-  marker : (Int, @transcript.GoalMarker)?,
+  markers : Array[(Int, @transcript.GoalMarker)],
 ) -> Bool {
-  guard marker is Some((sequence, marker)) && sequence > since else {
-    return false
+  for entry in markers {
+    let (sequence, marker) = entry
+    if sequence > since &&
+      (match (self, marker) {
+        (Setting(text), GoalSet(recorded)) => recorded == text
+        (Clearing, GoalCleared) => true
+        _ => false
+      }) {
+      return true
+    }
   }
-  // Recorded by a marker of this request's shape...
-  guard (match (self, marker) {
-    (Setting(text), GoalSet(recorded)) => recorded == text
-    (Clearing, GoalCleared) => true
-    _ => false
-  }) else {
-    return false
-  }
-  // ...and the state it left behind is the one that was asked for. A set
-  // marker reduces to `{text, blocked: None}`, so re-asserting a blocked
-  // goal's own text is how it gets unblocked; a clear's is nothing standing.
-  // A newer marker of another shape can have moved it on since.
-  match (self, goal) {
-    (Setting(text), Some(standing)) =>
-      standing.text == text && standing.blocked is None
-    (Clearing, None) => true
-    _ => false
-  }
+  false
 }
 
 ///|
@@ -1704,7 +1696,7 @@ priv enum DeviceMsg {
     watermark~ : Int,
     event_boundaries~ : Array[(Int, Bool, Int)],
     goal~ : @transcript.GoalStanding?,
-    goal_marker~ : (Int, @transcript.GoalMarker)?,
+    goal_markers~ : Array[(Int, @transcript.GoalMarker)],
     generation~ : Int
   )
   // A foreground stored-session read failed. Generation guards stale replies;
@@ -1719,7 +1711,7 @@ priv enum DeviceMsg {
     watermark~ : Int,
     event_boundaries~ : Array[(Int, Bool, Int)],
     goal~ : @transcript.GoalStanding?,
-    goal_marker~ : (Int, @transcript.GoalMarker)?,
+    goal_markers~ : Array[(Int, @transcript.GoalMarker)],
     generation~ : Int
   )
   // A background re-read failed. The generation identifies the exact read,
@@ -3939,11 +3931,8 @@ fn Conversation::apply_commit(
     // Settled by what this commit made the record say, not by whose command
     // it was — see `GoalRequest::settled_by`.
     goal_pending: if self.goal_pending is Some(pending) &&
-      pending.request.settled_by(
-        pending.since,
-        goal,
-        goal_marker.map(marker => (sequence, marker)),
-      ) {
+      goal_marker is Some(marker) &&
+      pending.request.settled_by(pending.since, [(sequence, marker)]) {
       None
     } else {
       self.goal_pending
@@ -4113,7 +4102,7 @@ fn Conversation::adopt_snapshot(
   watermark : Int,
   event_boundaries : Array[(Int, Bool, Int)],
   goal~ : @transcript.GoalStanding?,
-  goal_marker~ : (Int, @transcript.GoalMarker)?,
+  goal_markers~ : Array[(Int, @transcript.GoalMarker)],
 ) -> (Conversation, Bool) {
   let (generation, pending) = match self.sync {
     Reloading(generation~, buffered~, ..) => (generation, buffered.copy())
@@ -4157,7 +4146,7 @@ fn Conversation::adopt_snapshot(
       // not. A snapshot that does *not* show it settles nothing: the append
       // may still be queued behind this read.
       goal_pending: if self.goal_pending is Some(pending) &&
-        pending.request.settled_by(pending.since, goal, goal_marker) {
+        pending.request.settled_by(pending.since, goal_markers) {
         None
       } else {
         self.goal_pending
