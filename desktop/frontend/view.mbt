@@ -1991,7 +1991,7 @@ fn composer_view(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
       dispatch,
       conv.goal,
       editing=goal_editor,
-      pending=conv.goal_pending,
+      pending=conv.goal_pending.map(pending => pending.request),
     ),
   )
   let inner : Array[@html.Html] = [

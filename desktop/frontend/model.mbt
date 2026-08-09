@@ -539,7 +539,23 @@ priv struct Conversation {
   // `adopt_snapshot`; see `GoalRequest::settled_by`. Only a definite host
   // refusal retires it unsatisfied, handing a set's text back; a transport
   // failure leaves it standing, because the command may have landed anyway.
-  goal_pending : GoalRequest?
+  goal_pending : GoalCommand?
+} derive(Eq)
+
+///|
+/// One goal command in flight: what it asks the record to say, and which
+/// send it was.
+///
+/// The id exists because `GoalRequest` alone is not an identity. The row
+/// keeps its actions while a command is out, so the same text — or Clear —
+/// can be sent twice, and two such sends are equal values. A late reply to
+/// the first would then retire the second, leaving its marker with nothing
+/// waiting for it. The id never goes on the wire: it identifies this
+/// client's own send to this client's own reply handler, which is the only
+/// place the question arises.
+priv struct GoalCommand {
+  id : String
+  request : GoalRequest
 } derive(Eq)
 
 ///|
@@ -565,18 +581,26 @@ priv enum GoalRequest {
 /// marker commit, a recovery snapshot after a reconnect, a resumed session's
 /// first read.
 ///
-/// The two kinds read that observation differently, and have to. A set names
-/// a state, and its text tells it apart from the state it replaced; it can be
-/// judged on `after` alone, which is what lets a snapshot settle a set whose
-/// marker this client never saw commit. A clear names an *absence*, which is
-/// also what a record carries before any goal is set — so only the transition
-/// out of a standing goal is its result. Judging a clear on `after` alone
-/// would let the goalless state a set is *about to leave* settle a clear
-/// sent over that set.
+/// The two kinds read that observation differently, and have to.
+///
+/// A set names a state, and its text tells that state apart from the one it
+/// replaced, so `after` alone carries the proof — which is what lets a
+/// snapshot settle a set whose marker this client never saw commit.
+///
+/// A clear names an *absence*, and an absence is also what a record carries
+/// before any goal is set, so `after` alone proves nothing: the goalless
+/// state a set in flight is about to leave looks exactly like the one a
+/// clear produces. What distinguishes them is the record positively saying
+/// so — a tombstone in the commit that carried it, or, on a snapshot, which
+/// has only the reduced state, a goal that was standing and now is not.
+/// `marker` is therefore present on the commit path and absent on the
+/// snapshot path, and the two are alternative evidence for the same fact,
+/// not a fallback.
 fn GoalRequest::settled_by(
   self : GoalRequest,
   before : @transcript.GoalStanding?,
   after : @transcript.GoalStanding?,
+  marker? : @transcript.GoalMarker,
 ) -> Bool {
   match (self, after) {
     // The whole post-state, not just the text. A set marker reduces to
@@ -587,7 +611,10 @@ fn GoalRequest::settled_by(
     // the request with its recovery draft.
     (Setting(text), Some(standing)) =>
       standing.text == text && standing.blocked is None
-    (Clearing, None) => before is Some(_)
+    // A tombstone is the record itself saying nothing stands — including
+    // over a mirror that was already empty, which is exactly the escape a
+    // clear sent over a set that never appended has to be able to complete.
+    (Clearing, None) => marker is Some(GoalCleared) || before is Some(_)
     _ => false
   }
 }
@@ -1855,8 +1882,14 @@ priv enum DeviceMsg {
   // no `[goal]` marker will commit, so the failure is reported here. `draft`
   // is the text that never landed — carried back so the composer can return
   // it to the user, the way a rejected prompt restores its own draft. `None`
-  // was a clear, which has nothing to restore.
-  GoalRejected(session~ : String, draft~ : String?, message~ : String)
+  // was a clear, which has nothing to restore. `command` names which send
+  // this answers, so a late reply cannot retire the one that replaced it.
+  GoalRejected(
+    session~ : String,
+    command~ : String,
+    draft~ : String?,
+    message~ : String
+  )
   // The `agent.goal` call failed on the transport rather than being refused,
   // so whether the host took it is unknown: the socket can drop after the
   // command reached the engine and before the reply came back, and the
@@ -1864,6 +1897,10 @@ priv enum DeviceMsg {
   // handing the draft back here would say the goal is unset while the record
   // may already carry it, and inviting a resend races the marker. `draft` is
   // reported in the notice so the writing survives even if nothing landed.
+  //
+  // Unlike `GoalRejected` this names no send: it retires nothing, so it has
+  // nothing to identify. Whatever is pending stays pending, and the record
+  // settles it.
   GoalUndelivered(session~ : String, draft~ : String?, message~ : String)
   // `answer` accompanies normal success and context yield (where it is
   // continuation guidance); other terminal statuses carry none.
@@ -2899,7 +2936,7 @@ fn Conversation::pending_steers(self : Conversation) -> Array[String] {
 /// that window continues what was sent rather than reverting to what it was
 /// about to replace.
 fn Conversation::goal_draft_seed(self : Conversation) -> String {
-  match (self.goal_pending, self.goal) {
+  match (self.goal_pending.map(pending => pending.request), self.goal) {
     (Some(Setting(text)), _) => text
     // A clear in flight is asking for nothing to stand, so it seeds nothing.
     (Some(Clearing), _) => ""
@@ -3837,8 +3874,12 @@ fn Conversation::apply_commit(
   let terminal = item.is_terminal()
   // A `[goal]` marker commit is the durable confirmation of a goal
   // set/clear/block — the only writer of the mirror the banner renders.
-  let goal = if item is @protocol.RuntimeNotice(notice) &&
-    @transcript.goal_marker(notice.content) is Some(marker) {
+  let goal_marker = if item is @protocol.RuntimeNotice(notice) {
+    @transcript.goal_marker(notice.content)
+  } else {
+    None
+  }
+  let goal = if goal_marker is Some(marker) {
     @transcript.apply_goal_marker(self.goal, marker)
   } else {
     self.goal
@@ -3847,10 +3888,10 @@ fn Conversation::apply_commit(
     ..self,
     messages,
     goal,
-    // Settled by the move this commit made to the standing goal, not by
-    // which marker made it — see `GoalRequest::settled_by`.
+    // Settled by what this commit made the record say, not by whose command
+    // it was — see `GoalRequest::settled_by`.
     goal_pending: if self.goal_pending is Some(pending) &&
-      pending.settled_by(self.goal, goal) {
+      pending.request.settled_by(self.goal, goal, marker?=goal_marker) {
       None
     } else {
       self.goal_pending
@@ -4063,7 +4104,7 @@ fn Conversation::adopt_snapshot(
       // not. A snapshot that does *not* show it settles nothing: the append
       // may still be queued behind this read.
       goal_pending: if self.goal_pending is Some(pending) &&
-        pending.settled_by(self.goal, goal) {
+        pending.request.settled_by(self.goal, goal) {
         None
       } else {
         self.goal_pending

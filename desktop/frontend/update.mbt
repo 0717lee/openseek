@@ -868,6 +868,7 @@ fn send_goal(
   dispatch : @cmd.Emit[Msg],
   model : Model,
   conv : Conversation,
+  command : String,
   text : String?,
 ) -> @cmd.Cmd {
   if conv.goal_creates_worktree() is Some(workspace) {
@@ -878,6 +879,7 @@ fn send_goal(
       workspace,
       conv.engine_model,
       model.max_steps,
+      command,
       text,
     )
   }
@@ -888,6 +890,7 @@ fn send_goal(
     model=conv.engine_model,
     max_steps=model.max_steps,
     workspace?=conv.workspace,
+    command,
     text,
   )
 }
@@ -2751,12 +2754,13 @@ fn update_msg(
       // durable marker lands. `agent.goal` returning only means the command
       // reached the engine's stdin — the append behind it can still fail, and
       // then nothing would carry the user's writing.
+      let (model, command) = model.allocate_submission_id()
       (
-        send_goal(dispatch, model, conv, Some(text)),
+        send_goal(dispatch, model, conv, command, Some(text)),
         model.replace_conversation({
           ..conv,
           goal_edit: None,
-          goal_pending: Some(Setting(text)),
+          goal_pending: Some({ id: command, request: Setting(text) }),
         }),
       )
     }
@@ -2769,15 +2773,14 @@ fn update_msg(
       // The ✕ belongs to the conversation on screen, and so does the edit it
       // closes — neither can reach a neighbour's.
       let conv = model.active()
+      let (model, command) = model.allocate_submission_id()
       (
-        send_goal(dispatch, model, conv, None),
+        send_goal(dispatch, model, conv, command, None),
         model.replace_conversation({
           ..conv,
           goal_edit: None,
-          // Supersedes a set still awaiting its marker, and takes the row's
-          // Edit and ✕ away until the tombstone lands: a second clear sent
-          // over this one only earns the host's `GoalPending` refusal.
-          goal_pending: Some(Clearing),
+          // Supersedes a set still awaiting its marker.
+          goal_pending: Some({ id: command, request: Clearing }),
         }),
       )
     }
@@ -5033,26 +5036,24 @@ fn update_device_msg(
       } else {
         (@cmd.none, model)
       }
-    GoalRejected(session~, draft~, message~) =>
+    GoalRejected(session~, command~, draft~, message~) =>
       if model.find_conversation(channel, session) is Some(conv) {
         let reported = conv.append_local_notice(
           Assistant(is_danger=true),
           message,
         )
-        // A rejection retires the request it is about, never simply "the one
-        // in flight". The row keeps its actions while a command is out, so
-        // the user can send a second one over the first, and clearing
-        // whatever happens to be pending would then let a dead request retire
-        // its live successor — leaving that one's marker with nothing waiting
-        // for it and its text held nowhere.
-        let rejected : GoalRequest = match draft {
-          Some(text) => Setting(text)
-          None => Clearing
-        }
+        // A rejection retires the send it answers, never simply "the one in
+        // flight". The row keeps its actions while a command is out, so the
+        // user can send a second one over the first — and the second may be
+        // the same text, or Clear again, so only the id tells them apart.
+        // Clearing whatever happens to be pending would let a dead request
+        // retire its live successor, leaving that one's marker with nothing
+        // waiting for it and its text held nowhere.
         let restored = if reported.goal_pending is Some(pending) &&
-          pending != rejected {
-          // Superseded: the user replaced this text themselves, so it is not
-          // lost work and the request that replaced it is still waiting.
+          pending.id != command {
+          // Superseded: the user replaced this send themselves, so its text
+          // is not lost work and the request that replaced it is still
+          // waiting.
           reported
         } else if draft is Some(draft) && reported.goal_edit is None {
           // Hand the goal text back, the way a rejected prompt restores its

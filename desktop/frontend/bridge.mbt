@@ -1304,6 +1304,7 @@ fn goal_openseek(
   model~ : EngineModel,
   max_steps~ : String,
   workspace? : @common.Uri,
+  command : String,
   text : String?,
 ) -> @cmd.Cmd {
   match workspace {
@@ -1314,7 +1315,9 @@ fn goal_openseek(
   let payload = goal_payload(session, model, max_steps, workspace, text)
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
-      request_agent_goal(scheduler, dispatch, channel, payload, session, text)
+      request_agent_goal(
+        scheduler, dispatch, channel, payload, session, command, text,
+      )
     })
   })
 }
@@ -1357,6 +1360,7 @@ async fn request_agent_goal(
   channel : @interop.ChannelId,
   payload : @protocol.GoalPayload,
   session : String,
+  command : String,
   text : String?,
 ) -> Unit noraise {
   let dispatch = dispatch.map((msg : DeviceMsg) => FromDevice(channel, msg))
@@ -1367,7 +1371,8 @@ async fn request_agent_goal(
         scheduler.add(
           dispatch(
             match @interop.bridge_failure(error) {
-              Refused | Unsent => GoalRejected(session~, draft=text, message~)
+              Refused | Unsent =>
+                GoalRejected(session~, command~, draft=text, message~)
               Unknown => GoalUndelivered(session~, draft=text, message~)
             },
           ),

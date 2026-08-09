@@ -161,6 +161,14 @@ fn goal_attrs(dispatch : @cmd.Emit[Msg]) -> @html.Attrs {
 }
 
 ///|
+/// A goal command in flight, under a fixed id. The id only ever separates
+/// this client's own sends from each other, so tests that never send twice
+/// can share one.
+fn test_goal_command(request : GoalRequest) -> GoalCommand {
+  { id: "goal-1", request }
+}
+
+///|
 test "the goal slash command opens the editor prefilled from the mirror" {
   let dispatch = test_dispatch()
   let model = test_model().replace_conversation({
@@ -223,7 +231,9 @@ test "submit holds the text until its marker lands" {
   assert_true(submitted.active().goal_edit is None)
   // `agent.goal` returning is not persistence, so the text waits for the
   // durable marker rather than being dropped on the send.
-  assert_true(submitted.active().goal_pending is Some(Setting("ship it")))
+  assert_true(
+    submitted.active().goal_pending is Some({ request: Setting("ship it"), .. }),
+  )
   // The mirror is untouched: only the durable `[goal]` commit moves it.
   assert_true(submitted.active().goal is None)
 }
@@ -233,7 +243,7 @@ test "only the matching set marker settles the pending text" {
   let dispatch = test_dispatch()
   let model = test_model().replace_conversation({
     ..test_conversation(),
-    goal_pending: Some(Setting("ship the feature")),
+    goal_pending: Some(test_goal_command(Setting("ship the feature"))),
   })
   fn commit(model, sequence, content) {
     let (_, next) = update_dev(
@@ -255,15 +265,18 @@ test "only the matching set marker settles the pending text" {
   // can still fail.
   let other_set = commit(model, 1, "[goal]\nan earlier goal")
   assert_true(
-    other_set.active().goal_pending is Some(Setting("ship the feature")),
+    other_set.active().goal_pending
+    is Some({ request: Setting("ship the feature"), .. }),
   )
   let blocked = commit(other_set, 2, "[goal blocked]\nneeds a decision")
   assert_true(
-    blocked.active().goal_pending is Some(Setting("ship the feature")),
+    blocked.active().goal_pending
+    is Some({ request: Setting("ship the feature"), .. }),
   )
   let cleared = commit(blocked, 3, "[goal cleared]")
   assert_true(
-    cleared.active().goal_pending is Some(Setting("ship the feature")),
+    cleared.active().goal_pending
+    is Some({ request: Setting("ship the feature"), .. }),
   )
   // Its own set does settle it, and moves the mirror.
   let settled = commit(cleared, 4, "[goal]\nship the feature")
@@ -310,7 +323,7 @@ test "clear sends from goal mode and from the standing row alike" {
   // The clear is in flight, so the row stops offering Edit and ✕ — the goal
   // is still mirrored underneath it, and a second command sent over this one
   // only earns the host's `GoalPending` refusal.
-  assert_true(from_row.active().goal_pending is Some(Clearing))
+  assert_true(from_row.active().goal_pending is Some({ request: Clearing, .. }))
 }
 
 ///|
@@ -319,7 +332,7 @@ test "a clear waits for its tombstone, not for any goal marker" {
   let model = test_model().replace_conversation({
     ..test_conversation(),
     goal: Some({ text: "ship the feature", blocked: None }),
-    goal_pending: Some(Clearing),
+    goal_pending: Some(test_goal_command(Clearing)),
   })
   fn commit(model, sequence, content) {
     let (_, next) = update_dev(
@@ -338,9 +351,9 @@ test "a clear waits for its tombstone, not for any goal marker" {
   // Someone else's set, and a block on the goal this clear is removing,
   // both leave it in flight: neither is the tombstone it asked for.
   let other = commit(model, 1, "[goal]\nsomething else")
-  assert_true(other.active().goal_pending is Some(Clearing))
+  assert_true(other.active().goal_pending is Some({ request: Clearing, .. }))
   let blocked = commit(other, 2, "[goal blocked]\nneeds a decision")
-  assert_true(blocked.active().goal_pending is Some(Clearing))
+  assert_true(blocked.active().goal_pending is Some({ request: Clearing, .. }))
   // The tombstone settles it, and the mirror empties with it.
   let settled = commit(blocked, 3, "[goal cleared]")
   assert_true(settled.active().goal_pending is None)
@@ -436,12 +449,13 @@ test "a rejected goal request reports it and hands the text back" {
   let dispatch = test_dispatch()
   let model = test_model().replace_conversation({
     ..test_conversation(),
-    goal_pending: Some(Setting("ship the feature")),
+    goal_pending: Some(test_goal_command(Setting("ship the feature"))),
   })
   let (_, next) = update_dev(
     dispatch,
     GoalRejected(
       session="desktop-test",
+      command="goal-1",
       draft=Some("ship the feature"),
       message="no engine",
     ),
@@ -464,7 +478,12 @@ test "a rejected clear has nothing to restore, and never steals goal mode" {
   // A clear carries no draft.
   let (_, cleared) = update_dev(
     dispatch,
-    GoalRejected(session="desktop-test", draft=None, message="no engine"),
+    GoalRejected(
+      session="desktop-test",
+      command="goal-1",
+      draft=None,
+      message="no engine",
+    ),
     test_model(),
   )
   inspect(cleared.active().overlay.length(), content="1")
@@ -478,6 +497,7 @@ test "a rejected clear has nothing to restore, and never steals goal mode" {
     dispatch,
     GoalRejected(
       session="desktop-test",
+      command="goal-1",
       draft=Some("the request that died"),
       message="no engine",
     ),
@@ -527,11 +547,11 @@ test "the editor opens on the newest text, not on the retired one" {
   let conv : Conversation = {
     ..test_conversation(),
     goal: Some({ text: "the old goal", blocked: None }),
-    goal_pending: Some(Setting("the goal just sent")),
+    goal_pending: Some(test_goal_command(Setting("the goal just sent"))),
   }
   inspect(conv.goal_draft_seed(), content="the goal just sent")
   inspect(
-    { ..conv, goal_pending: Some(Clearing) }.goal_draft_seed(),
+    { ..conv, goal_pending: Some(test_goal_command(Clearing)) }.goal_draft_seed(),
     content="",
   )
   inspect(
@@ -559,46 +579,7 @@ test "a clear over an unconfirmed set waits for a goal to actually go away" {
   // to remove stands with nothing waiting for it.
   let model = test_model().replace_conversation({
     ..test_conversation(),
-    goal_pending: Some(Clearing),
-  })
-  fn commit(model, sequence, content) {
-    let (_, next) = update_dev(
-      dispatch,
-      SessionCommitted(
-        session="desktop-test",
-        sequence~,
-        ts=None,
-        item=@protocol.RuntimeNotice({ content, }),
-      ),
-      model,
-    )
-    next
-  }
-
-  let unrelated = commit(model, 1, "just some runtime notice")
-  assert_true(unrelated.active().goal_pending is Some(Clearing))
-  // The set it was sent over lands first; the clear is still outstanding.
-  let landed = commit(unrelated, 2, "[goal]\nthe goal being removed")
-  assert_true(landed.active().goal_pending is Some(Clearing))
-  assert_true(landed.active().goal is Some(_))
-  // Only a goal actually going away is this clear's result.
-  let settled = commit(landed, 3, "[goal cleared]")
-  assert_true(settled.active().goal_pending is None)
-  assert_true(settled.active().goal is None)
-}
-
-///|
-test "re-asserting a blocked goal waits for its own marker" {
-  let dispatch = test_dispatch()
-  // Edit on a blocked goal seeds from the mirror, so resubmitting unchanged
-  // is the ordinary way to re-assert one. The record already spells that
-  // text, and a set clears the block — so matching on text alone would let
-  // the goal being replaced stand in for its replacement, and the next
-  // durable item of any kind would retire the request and its recovery copy.
-  let model = test_model().replace_conversation({
-    ..test_conversation(),
-    goal: Some({ text: "ship the feature", blocked: Some("needs a decision") }),
-    goal_pending: Some(Setting("ship the feature")),
+    goal_pending: Some(test_goal_command(Clearing)),
   })
   fn commit(model, sequence, content) {
     let (_, next) = update_dev(
@@ -616,7 +597,75 @@ test "re-asserting a blocked goal waits for its own marker" {
 
   let unrelated = commit(model, 1, "just some runtime notice")
   assert_true(
-    unrelated.active().goal_pending is Some(Setting("ship the feature")),
+    unrelated.active().goal_pending is Some({ request: Clearing, .. }),
+  )
+  // The set it was sent over lands first; the clear is still outstanding.
+  let landed = commit(unrelated, 2, "[goal]\nthe goal being removed")
+  assert_true(landed.active().goal_pending is Some({ request: Clearing, .. }))
+  assert_true(landed.active().goal is Some(_))
+  // Only a goal actually going away is this clear's result.
+  let settled = commit(landed, 3, "[goal cleared]")
+  assert_true(settled.active().goal_pending is None)
+  assert_true(settled.active().goal is None)
+}
+
+///|
+test "a tombstone over an empty mirror still ends the clear" {
+  let dispatch = test_dispatch()
+  // The other side of that coin: the set never appended, the user hit ✕ to
+  // escape, and the engine records the clear as the no-op it is. Nothing
+  // stands before this commit and nothing stands after, so the transition
+  // cannot vouch for it — but the record positively says so, and requiring a
+  // transition here would leave the escape hatch itself waiting forever.
+  let model = test_model().replace_conversation({
+    ..test_conversation(),
+    goal_pending: Some(test_goal_command(Clearing)),
+  })
+  let (_, settled) = update_dev(
+    dispatch,
+    SessionCommitted(
+      session="desktop-test",
+      sequence=1,
+      ts=None,
+      item=@protocol.RuntimeNotice({ content: "[goal cleared]" }),
+    ),
+    model,
+  )
+  assert_true(settled.active().goal is None)
+  assert_true(settled.active().goal_pending is None)
+}
+
+///|
+test "re-asserting a blocked goal waits for its own marker" {
+  let dispatch = test_dispatch()
+  // Edit on a blocked goal seeds from the mirror, so resubmitting unchanged
+  // is the ordinary way to re-assert one. The record already spells that
+  // text, and a set clears the block — so matching on text alone would let
+  // the goal being replaced stand in for its replacement, and the next
+  // durable item of any kind would retire the request and its recovery copy.
+  let model = test_model().replace_conversation({
+    ..test_conversation(),
+    goal: Some({ text: "ship the feature", blocked: Some("needs a decision") }),
+    goal_pending: Some(test_goal_command(Setting("ship the feature"))),
+  })
+  fn commit(model, sequence, content) {
+    let (_, next) = update_dev(
+      dispatch,
+      SessionCommitted(
+        session="desktop-test",
+        sequence~,
+        ts=None,
+        item=@protocol.RuntimeNotice({ content, }),
+      ),
+      model,
+    )
+    next
+  }
+
+  let unrelated = commit(model, 1, "just some runtime notice")
+  assert_true(
+    unrelated.active().goal_pending
+    is Some({ request: Setting("ship the feature"), .. }),
   )
   // Its own marker is what unblocks it, and that is the state it was waiting
   // for.
@@ -638,11 +687,14 @@ test "a request in flight is reason enough to re-read the record" {
   assert_true(
     model.can_reload_transcript({
       ..fresh,
-      goal_pending: Some(Setting("ship the feature")),
+      goal_pending: Some(test_goal_command(Setting("ship the feature"))),
     }),
   )
   assert_true(
-    model.can_reload_transcript({ ..fresh, goal_pending: Some(Clearing) }),
+    model.can_reload_transcript({
+      ..fresh,
+      goal_pending: Some(test_goal_command(Clearing)),
+    }),
   )
   // The reconnect's own load can race persistence and come back empty. The
   // session list arriving is later proof the record exists, and that retry
@@ -661,7 +713,7 @@ test "a request in flight is reason enough to re-read the record" {
     {
       ..test_model().replace_conversation({
         ..test_conversation(),
-        goal_pending: Some(Setting("ship the feature")),
+        goal_pending: Some(test_goal_command(Setting("ship the feature"))),
         sync: test_reloading([]),
       }),
       transcript_request_generation: 1,
@@ -689,41 +741,76 @@ test "a request in flight is reason enough to re-read the record" {
 ///|
 test "a dead request cannot retire the one that replaced it" {
   let dispatch = test_dispatch()
-  // The row keeps its actions while a command is out, so a second set can go
-  // over the first. When the first is then refused, retiring "whatever is
-  // pending" would drop the second — its marker would arrive with nothing
-  // waiting for it, and its text would be held nowhere.
+  // The row keeps its actions while a command is out, so a second send can go
+  // over the first — and the obvious second send is a *retry*, the same text
+  // again. Two retries are equal `GoalRequest` values, so only the id tells
+  // them apart; without it the first one's refusal would drop the second,
+  // whose marker would then arrive with nothing waiting for it.
   let model = test_model().replace_conversation({
     ..test_conversation(),
-    goal_pending: Some(Setting("the second goal")),
+    goal_pending: Some({ id: "goal-2", request: Setting("ship the feature") }),
   })
-  let (_, next) = update_dev(
-    dispatch,
-    GoalRejected(
-      session="desktop-test",
-      draft=Some("the first goal"),
-      message="a goal command is already in flight",
-    ),
-    model,
+  fn reject(model, command) {
+    let (_, next) = update_dev(
+      dispatch,
+      GoalRejected(
+        session="desktop-test",
+        command~,
+        draft=Some("ship the feature"),
+        message="a goal command is already in flight",
+      ),
+      model,
+    )
+    next
+  }
+
+  let stale = reject(model, "goal-1")
+  inspect(stale.active().overlay.length(), content="1")
+  assert_true(
+    stale.active().goal_pending
+    is Some({ id: "goal-2", request: Setting("ship the feature") }),
   )
-  inspect(next.active().overlay.length(), content="1")
-  assert_true(next.active().goal_pending is Some(Setting("the second goal")))
-  // Nor does the superseded text come back: the user replaced it themselves,
-  // so restoring it would read as the goal they are actually setting failing.
-  assert_true(next.active().goal_edit is None)
+  // Nor does the superseded send's text come back: the user resent it, so
+  // restoring it would read as the send still in flight having failed.
+  assert_true(stale.active().goal_edit is None)
   // Its own rejection does retire it, and hands its text back.
-  let (_, own) = update_dev(
-    dispatch,
-    GoalRejected(
-      session="desktop-test",
-      draft=Some("the second goal"),
-      message="no engine",
-    ),
-    model,
-  )
+  let own = reject(model, "goal-2")
   assert_true(own.active().goal_pending is None)
   guard own.active().goal_edit is Some(edit) else { fail("the text is lost") }
-  inspect(edit.draft, content="the second goal")
+  inspect(edit.draft, content="ship the feature")
+}
+
+///|
+test "each goal send gets an identity of its own" {
+  let dispatch = test_dispatch()
+  // Two sends of the same text, back to back. They are equal requests, so an
+  // id derived from the request would leave nothing to tell the second reply
+  // from the first.
+  let model = test_model().replace_conversation({
+    ..test_conversation(),
+    goal_edit: Some({ draft: "ship the feature" }),
+  })
+  let (_, first) = update(dispatch, SubmitGoal, model)
+  guard first.active().goal_pending is Some(one) else { fail("nothing sent") }
+  let (_, again) = update(
+    dispatch,
+    SubmitGoal,
+    first.replace_conversation({
+      ..first.active(),
+      goal_edit: Some({ draft: "ship the feature" }),
+    }),
+  )
+  guard again.active().goal_pending is Some(two) else { fail("nothing sent") }
+  assert_true(one.request == two.request)
+  assert_false(one.id == two.id)
+  // A clear is more anonymous still — it carries nothing at all — so it needs
+  // the id just as much.
+  let (_, cleared) = update(dispatch, ClearGoal, again)
+  guard cleared.active().goal_pending is Some(clear) else {
+    fail("nothing sent")
+  }
+  assert_true(clear.request is Clearing)
+  assert_false(clear.id == two.id)
 }
 
 ///|
@@ -731,7 +818,7 @@ test "an unconfirmed delivery keeps waiting instead of handing the text back" {
   let dispatch = test_dispatch()
   let model = test_model().replace_conversation({
     ..test_conversation(),
-    goal_pending: Some(Setting("ship the feature")),
+    goal_pending: Some(test_goal_command(Setting("ship the feature"))),
   })
   // The socket dropped; the host may have taken the command already. Saying
   // "rejected" here would reopen the editor over a goal the record can still
@@ -747,7 +834,10 @@ test "an unconfirmed delivery keeps waiting instead of handing the text back" {
   )
   inspect(next.active().overlay.length(), content="1")
   assert_true(next.active().goal_edit is None)
-  assert_true(next.active().goal_pending is Some(Setting("ship the feature")))
+  assert_true(
+    next.active().goal_pending
+    is Some({ request: Setting("ship the feature"), .. }),
+  )
   // The writing is not lost either way — it rides the notice, the way an
   // unconfirmed prompt's does.
   guard next.active().overlay.last() is Some(notice) else {
@@ -763,7 +853,7 @@ test "a reload settles a request the transport never answered" {
   // complete durable read: it can say what the reply could not.
   let model = test_model().replace_conversation({
     ..test_conversation(),
-    goal_pending: Some(Setting("ship the feature")),
+    goal_pending: Some(test_goal_command(Setting("ship the feature"))),
     sync: test_reloading([]),
   })
   fn refresh(model, goal) {
@@ -785,7 +875,10 @@ test "a reload settles a request the transport never answered" {
   // A record that does not carry it settles nothing: the append may still be
   // queued behind this read.
   let absent = refresh(model, None)
-  assert_true(absent.active().goal_pending is Some(Setting("ship the feature")))
+  assert_true(
+    absent.active().goal_pending
+    is Some({ request: Setting("ship the feature"), .. }),
+  )
   let landed = refresh(
     {
       ..absent,
@@ -838,7 +931,10 @@ test "a fresh conversation survives on its goal draft alone" {
     { ..fresh, goal_edit: Some({ draft: "still writing" }) }.draft_empty(),
   )
   assert_false(
-    { ..fresh, goal_pending: Some(Setting("awaiting its marker")) }.draft_empty(),
+    {
+      ..fresh,
+      goal_pending: Some(test_goal_command(Setting("awaiting its marker"))),
+    }.draft_empty(),
   )
   // A blank editor is not a draft: an untouched `/goal` still lets the husk go.
   assert_true({ ..fresh, goal_edit: Some({ draft: "   " }) }.draft_empty())

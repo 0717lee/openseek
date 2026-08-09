@@ -201,6 +201,7 @@ fn set_goal_in_new_worktree(
   workspace : @common.Uri,
   engine_model : EngineModel,
   max_steps : String,
+  command : String,
   text : String?,
 ) -> @cmd.Cmd {
   guard @resource.belongs_to(workspace, channel) else { return @cmd.none }
@@ -222,6 +223,7 @@ fn set_goal_in_new_worktree(
             device_dispatch(
               GoalRejected(
                 session~,
+                command~,
                 draft=text,
                 message="worktree setup failed: " +
                   @interop.bridge_error_text(error),
@@ -236,6 +238,7 @@ fn set_goal_in_new_worktree(
           device_dispatch(
             GoalRejected(
               session~,
+              command~,
               draft=text,
               message="malformed worktree.create reply",
             ),
@@ -257,7 +260,9 @@ fn set_goal_in_new_worktree(
         Some(workspace),
         text,
       )
-      request_agent_goal(scheduler, dispatch, channel, payload, session, text)
+      request_agent_goal(
+        scheduler, dispatch, channel, payload, session, command, text,
+      )
     })
   })
 }
