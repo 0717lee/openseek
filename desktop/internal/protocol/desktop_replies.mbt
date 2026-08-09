@@ -560,8 +560,9 @@ pub(all) struct GitChange {
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|
-/// The active checkout's `HEAD`-to-working-tree change inventory. A missing
-/// Git executable and a non-repository workspace both report
+/// The active checkout's `HEAD`-to-working-tree change inventory plus the
+/// immutable task baseline available to worktree-aware review clients. A
+/// missing Git executable and a non-repository workspace both report
 /// `repository=false`; once a repository is recognized, operational failures
 /// are request errors rather than an ambiguous empty list.
 pub(all) struct GitChangesReply {
@@ -569,6 +570,10 @@ pub(all) struct GitChangesReply {
   // The commit object currently named by HEAD. `None` covers an unborn HEAD,
   // a non-repository workspace, and older hosts that predate this field.
   head : String?
+  // The immutable commit used as the review's left side. New hosts return it
+  // whenever one exists; clients fall back to `head` when talking to an older
+  // host that omitted the field.
+  baseline : String?
   changes : Array[GitChange]
 } derive(Debug, Eq, FromJson, ToJson)
 

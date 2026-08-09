@@ -51,6 +51,8 @@ pub async fn resolve_in_workspace(String, String, workspace? : String) -> @pathx
 
 pub async fn session_cwd(String) -> @pathx.Absolute?
 
+pub async fn session_review_base(String, workspace? : String) -> String?
+
 pub async fn settings_status(EngineManager) -> @protocol.SettingsStatusPayload
 
 pub async fn start_run(EventSink, EngineManager, @protocol.StartPayload) -> @protocol.StartReply

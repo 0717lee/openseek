@@ -73,10 +73,11 @@ test "archive replies keep success compatible and encode dirty confirmation" {
 }
 
 ///|
-test "Git changes replies preserve HEAD identity and accept legacy omission" {
+test "Git changes replies preserve review identities and accept legacy omission" {
   let reply : @protocol.GitChangesReply = {
     repository: true,
     head: Some("0123456789abcdef"),
+    baseline: Some("fedcba9876543210"),
     changes: [],
   }
   let decoded : @protocol.GitChangesReply = @json.from_json(reply.to_json())
@@ -86,6 +87,7 @@ test "Git changes replies preserve HEAD identity and accept legacy omission" {
     "changes": [],
   })
   @debug.assert_eq(legacy.head, None)
+  @debug.assert_eq(legacy.baseline, None)
 }
 
 ///|

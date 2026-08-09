@@ -905,7 +905,7 @@ async fn git_changes_op(payload : GitChangesPayload) -> GitChangesReply {
   }
   let dir = root.to_string()
   if git_output(dir, ["rev-parse", "--is-inside-work-tree"]) != "true" {
-    return { repository: false, head: None, changes: [] }
+    return { repository: false, head: None, baseline: None, changes: [] }
   }
   let (prefix_code, prefix_stdout, prefix_stderr) = git_collect(dir, [
     "rev-parse", "--show-prefix",
@@ -925,6 +925,14 @@ async fn git_changes_op(payload : GitChangesPayload) -> GitChangesReply {
       _ => raise HostError("Git returned a non-UTF-8 workspace prefix")
     },
   )
+  let recorded_base = @engine.session_review_base(
+    payload.session,
+    workspace?=payload.workspace,
+  )
+  let baseline = match recorded_base {
+    Some(base) if valid_commit_identity(base) => git_revision_commit(dir, base)
+    _ => None
+  }
   let (head, known_gitlinks, known_symlinks, changes) = git_change_snapshot(
     dir, workspace_prefix, 2,
   )
@@ -962,7 +970,7 @@ async fn git_changes_op(payload : GitChangesPayload) -> GitChangesReply {
     ],
     max_concurrent=32,
   )
-  { repository: true, head, changes }
+  { repository: true, head, baseline, changes }
 }
 
 ///|
