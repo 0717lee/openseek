@@ -5,10 +5,10 @@
 priv struct BlockCommentToy {}
 
 ///|
-let toy_code : @syntax.TokenizerState = TokenizerState("code")
+let toy_code : @syntax.TokenizerState = TokenizerState()
 
 ///|
-let toy_comment : @syntax.TokenizerState = TokenizerState("comment")
+let toy_comment : @syntax.TokenizerState = toy_code.push_mode(b'c')
 
 ///|
 impl @syntax.LineTokenizer for BlockCommentToy with fn initial_state(_self) {
@@ -84,6 +84,19 @@ test "tokenizer state equality detects convergence" {
   assert_true(after_close == toy.initial_state())
   let (_, untouched) = toy.tokenize_line("plain line", toy.initial_state())
   assert_true(untouched == toy.initial_state())
+}
+
+///|
+test "tokenizer state stack edits preserve prior snapshots" {
+  let normal = @syntax.TokenizerState()
+  let template = normal.push_mode(b't')
+  let interpolation = template.push_mode(b'i')
+  assert_true(normal.last_mode() is None)
+  assert_true(template.last_mode() == Some(b't'))
+  assert_true(interpolation.last_mode() == Some(b'i'))
+  assert_true(interpolation.pop_mode() == template)
+  assert_true(template.pop_mode() == normal)
+  assert_true(normal.pop_mode() == normal)
 }
 
 ///|

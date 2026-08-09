@@ -751,9 +751,9 @@ fn Viewer::sync_hover_decorations(self : Viewer) -> Unit {
   guard self.content_hover_controller() is Some(hc) else { return }
   guard self.get_model() is Some(model) else { return }
   let decorations = hc.hover.highlight_decorations()
-  let range = match decorations.get(0) {
-    Some(decoration) => Some(decoration.range)
-    None => None
+  let range = match decorations {
+    [decoration, ..] => Some(decoration.range)
+    [] => None
   }
   if range == hc.hover_decoration_range {
     return

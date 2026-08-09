@@ -8,9 +8,7 @@ priv struct ViewportCountingTokenizer {
 }
 
 ///|
-let viewport_counting_state : @syntax.TokenizerState = TokenizerState(
-  "viewport-counting",
-)
+let viewport_counting_state : @syntax.TokenizerState = TokenizerState()
 
 ///|
 impl @syntax.LineTokenizer for ViewportCountingTokenizer with fn initial_state(

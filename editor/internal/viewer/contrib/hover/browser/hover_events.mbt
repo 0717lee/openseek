@@ -71,15 +71,15 @@ pub fn hover_on_event(
             initial_mouse_pos_x?=ctx.mouse_posx,
             initial_mouse_pos_y?=ctx.mouse_posy,
           )
-          match candidates.get(0) {
-            Some(anchor) =>
+          match candidates {
+            [anchor, ..] =>
               controller.start_showing_or_update_hover(
                 anchor,
                 sticky_mouse_getting_closer,
                 show_at_position?=ctx.show_at_position,
                 live_widget_visible=ctx.content_hover_visible,
               )
-            None =>
+            [] =>
               // No anchor under the pointer (Monaco
               // `_startShowingOrUpdateHover(null)`): a visible hover the
               // pointer is approaching is kept; otherwise hide.

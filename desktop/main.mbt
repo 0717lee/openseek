@@ -14,9 +14,9 @@ fn main {
     // Proton runs everything in one process. Packaged builds resolve copied
     // assets and the engine beside the executable; an unbundled Moon host
     // derives the frontend, engine, and state paths from its `_build` layout.
-    let executable = match @env.args().get(0) {
-      Some(command) => command
-      None => abort("current executable command is unavailable")
+    let executable = match @env.args() {
+      [command, ..] => command
+      [] => abort("current executable command is unavailable")
     }
     let log = launch_logger(executable)
     log.info() <?

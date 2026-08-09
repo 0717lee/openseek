@@ -33,7 +33,7 @@ test "JSON tokens flow from lexer spans to rendered HTML" {
       #|    ("42", 12, 14, Number),
       #|    ("}", 15, 16, Delimiter),
       #|  ],
-      #|  TokenizerState("n"),
+      #|  TokenizerState(""),
       #|)
     ),
   )

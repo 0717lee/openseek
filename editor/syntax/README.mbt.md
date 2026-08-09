@@ -41,7 +41,7 @@ priv struct KeywordOnly {}
 
 ///|
 impl @syntax.LineTokenizer for KeywordOnly with fn initial_state(_self) {
-  TokenizerState("")
+  TokenizerState()
 }
 
 ///|
@@ -258,26 +258,28 @@ test "panic is_capitalized rejects an empty view" {
 }
 ```
 
-`decode_mode_stack` / `encode_mode_stack` convert between a `TokenizerState`
-and a *nesting-mode stack* — one character per open mode, with an empty state
-decoding to the base mode `'n'`. Only `lang_javascript` round-trips the pair,
-carrying its stack from one line into the next. `lang_moonbit` decodes a
-starting stack but always returns `TokenizerState("n")`, so its stack is
-per-line scratch; `lang_json` uses neither, its state being a single
-in-comment flag.
+`TokenizerState()` is the canonical normal state. It owns an opaque persistent
+byte vector containing only genuinely open lexer modes. `push_mode` / `pop_mode`
+create immutable snapshots with structural sharing, so cached line states
+cannot be changed by later tokenization; `last_mode` inspects the open mode at
+the top. No array representation crosses the public boundary.
+
+`lang_javascript` carries this stack directly and therefore allocates only when
+a lexical mode changes. `lang_moonbit` uses a private mutable scratch stack
+within each line and always returns the empty normal state. `lang_json` carries
+only an optional in-comment mode.
 
 ```mbt check
 ///|
-test "the mode stack round-trips and an empty state is the base mode" {
-  let empty = @syntax.decode_mode_stack(TokenizerState(""))
-  let nested = @syntax.decode_mode_stack(TokenizerState("nts"))
-  let encoded = @syntax.encode_mode_stack(['n', 't', 's'])
-  debug_inspect(
-    (empty, nested, encoded),
-    content=(
-      #|(['n'], ['n', 't', 's'], TokenizerState("nts"))
-    ),
-  )
+test "the empty state is normal and stack edits preserve snapshots" {
+  let normal = @syntax.TokenizerState()
+  let template = normal.push_mode(b't')
+  let interpolation = template.push_mode(b'i')
+  assert_true(normal.last_mode() is None)
+  assert_true(template.last_mode() == Some(b't'))
+  assert_true(interpolation.last_mode() == Some(b'i'))
+  assert_true(interpolation.pop_mode() == template)
+  assert_true(template.pop_mode() == normal)
 }
 ```
 

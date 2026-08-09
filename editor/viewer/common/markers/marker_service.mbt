@@ -370,12 +370,12 @@ pub fn MarkerService::change_all(
   // remove old marker
   let existing = self.data.values_by_owner(owner)
   for markers in existing {
-    match markers.get(0) {
-      Some(first) => {
+    match markers {
+      [first, ..] => {
         changes.push(first.resource)
         self.data.delete(first.resource, owner) |> ignore
       }
-      None => ()
+      [] => ()
     }
   }
 

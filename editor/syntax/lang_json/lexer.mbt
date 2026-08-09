@@ -1,11 +1,20 @@
 ///|
 /// JSON (and JSONC comments) behind the `syntax.LineTokenizer` contract:
-/// the trivial two-state machine. State "n" is normal; state "c" is
-/// inside a `/* ... */` block comment, the one construct that carries
-/// across lines.
+/// the trivial two-state machine. The empty state is normal; mode `b'c'` means
+/// inside a `/* ... */` block comment, the one construct that carries across
+/// lines.
 struct JsonTokenizer {
   _unit : Unit
 }
+
+///|
+/// JSON's two immutable carried states, allocated once and compared by value.
+let json_normal_state : @syntax.TokenizerState = TokenizerState()
+
+///|
+let json_comment_state : @syntax.TokenizerState = json_normal_state.push_mode(
+  b'c',
+)
 
 ///|
 /// Creates the JSON/JSONC tokenizer.
@@ -16,7 +25,7 @@ pub fn JsonTokenizer::JsonTokenizer() -> JsonTokenizer {
 ///|
 /// Initial JSON lexer state outside block comments.
 pub impl @syntax.LineTokenizer for JsonTokenizer with fn initial_state(_self) {
-  TokenizerState("n")
+  json_normal_state
 }
 
 ///|
@@ -28,7 +37,7 @@ pub impl @syntax.LineTokenizer for JsonTokenizer with fn tokenize_line(
 ) {
   let tokens : Array[@syntax.LineToken] = []
   let in_comment = for at = 0, view = line_text[:], in_comment = state ==
-                         TokenizerState("c"); view.length() > 0; {
+                         json_comment_state; view.length() > 0; {
     let (op, rest) = if in_comment {
       comment_step(view)
     } else {
@@ -50,7 +59,7 @@ pub impl @syntax.LineTokenizer for JsonTokenizer with fn tokenize_line(
   } nobreak {
     in_comment
   }
-  (tokens, TokenizerState(if in_comment { "c" } else { "n" }))
+  (tokens, if in_comment { json_comment_state } else { json_normal_state })
 }
 
 ///|

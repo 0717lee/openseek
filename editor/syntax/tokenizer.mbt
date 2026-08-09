@@ -1,10 +1,54 @@
 ///|
-/// Carried lexer state between lines, the `IState` of Monaco's
-/// tokenization contract. The representation is a single string (like
-/// Monaco's interned Monarch stacks): languages encode their own state
-/// stack or payload into it, and derived equality is what callers use to
-/// detect re-tokenization convergence.
-pub(all) struct TokenizerState(String) derive(Eq, Debug)
+/// Carried lexer state between lines, the `IState` of Monaco's tokenization
+/// contract. An empty state is the canonical normal state; the persistent byte
+/// vector contains only open lexer modes. Stack edits share unchanged storage
+/// while cached states remain isolated from later edits. Derived equality is
+/// what callers use to detect re-tokenization convergence.
+pub struct TokenizerState {
+  priv modes : @vector.Vector[Byte]
+} derive(Eq)
+
+///|
+/// Creates the canonical normal tokenizer state.
+pub fn TokenizerState::TokenizerState() -> TokenizerState {
+  { modes: @vector.new() }
+}
+
+///|
+/// Top mode, or `None` for an empty state.
+pub fn TokenizerState::last_mode(self : TokenizerState) -> Byte? {
+  self.modes.peek()
+}
+
+///|
+/// Returns a new state with `mode` pushed. The receiver remains unchanged.
+pub fn TokenizerState::push_mode(
+  self : TokenizerState,
+  mode : Byte,
+) -> TokenizerState {
+  { modes: self.modes.push(mode) }
+}
+
+///|
+/// Returns a new state without its top mode. An empty state is returned as-is.
+/// The receiver remains unchanged.
+pub fn TokenizerState::pop_mode(self : TokenizerState) -> TokenizerState {
+  match self.modes.pop() {
+    Some(modes) => { modes, }
+    None => self
+  }
+}
+
+///|
+/// Uses a compact debug form, converting the vector to text only when
+/// diagnostics or snapshots request it.
+pub impl Debug for TokenizerState with fn to_repr(self) {
+  let encoded = StringBuilder()
+  for mode in self.modes {
+    encoded.write_char(mode.to_char())
+  }
+  Repr::ctor("TokenizerState", [(None, Repr(encoded.to_string()))])
+}
 
 ///|
 /// Highlight classification, widened toward Monaco's standard token
@@ -257,32 +301,3 @@ pub fn push_token(
 }
 
 ///|
-/// The nesting-mode stack a stateful lexer carries between lines, decoded from
-/// its `TokenizerState`. Each character is one open mode; an empty state
-/// decodes to the base mode `'n'`, so a fresh line always has a mode to read.
-/// Shared by the language lexers (`lang_*`), which otherwise carry identical
-/// copies. Inverse of `encode_mode_stack`.
-pub fn decode_mode_stack(state : TokenizerState) -> Array[Char] {
-  if state.0 is "" {
-    return ['n']
-  }
-  // Decoded once per tokenized line: the direct char loop lowers to a plain
-  // string scan, where `String::to_array` would allocate an iterator chain
-  // on the JS target.
-  let stack : Array[Char] = []
-  for mode in state.0 {
-    stack.push(mode)
-  }
-  stack
-}
-
-///|
-/// The mode stack packed back into a `TokenizerState` for the next line.
-/// Inverse of `decode_mode_stack`.
-pub fn encode_mode_stack(stack : Array[Char]) -> TokenizerState {
-  let encoded = StringBuilder()
-  for mode in stack {
-    encoded.write_char(mode)
-  }
-  TokenizerState(encoded.to_string())
-}

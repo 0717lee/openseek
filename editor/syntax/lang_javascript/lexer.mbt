@@ -1,20 +1,24 @@
 ///|
 /// JavaScript behind the `syntax.LineTokenizer` contract, ported by hand
 /// from the Monarch typescript grammar's structure. The carried
-/// `TokenizerState` encodes the mode stack one character per mode,
-/// bottom first:
-///   'n' normal code (always the bottom)
-///   'c' inside a `/* ... */` block comment (spans lines)
-///   'd' inside a `/** ... */` doc comment (spans lines)
-///   't' inside a template literal (spans lines)
-///   'i' inside a `${ ... }` template interpolation (spans lines)
-///   'b' inside a plain `{ ... }` brace pair nested in an interpolation
+/// `TokenizerState` stores one byte per open mode, bottom first. The empty
+/// state means normal code:
+///   b'c' inside a `/* ... */` block comment (spans lines)
+///   b'd' inside a `/** ... */` doc comment (spans lines)
+///   b't' inside a template literal (spans lines)
+///   b'i' inside a `${ ... }` template interpolation (spans lines)
+///   b'b' inside a plain `{ ... }` brace pair nested in an interpolation
 /// Quoted strings never span lines; regex literals are not detected
 /// (the `/` ambiguity needs token-history heuristics) and lex as
 /// operators.
 struct JavascriptTokenizer {
   _unit : Unit
 }
+
+///|
+/// Shared immutable normal state. Returning it avoids rebuilding the empty
+/// state for every initial-state request.
+let javascript_normal_state : @syntax.TokenizerState = TokenizerState()
 
 ///|
 /// Creates the JavaScript tokenizer.
@@ -27,7 +31,7 @@ pub fn JavascriptTokenizer::JavascriptTokenizer() -> JavascriptTokenizer {
 pub impl @syntax.LineTokenizer for JavascriptTokenizer with fn initial_state(
   _self,
 ) {
-  TokenizerState("n")
+  javascript_normal_state
 }
 
 ///|
@@ -37,59 +41,65 @@ pub impl @syntax.LineTokenizer for JavascriptTokenizer with fn tokenize_line(
   line_text,
   state,
 ) {
-  let stack = @syntax.decode_mode_stack(state)
   let tokens : Array[@syntax.LineToken] = []
-  for at = 0, view = line_text[:]; view.length() > 0; {
-    let top = stack[stack.length() - 1]
+  let end_state = for at = 0, view = line_text[:], lexer_state = state; view.length() >
+                     0; {
+    let top = match lexer_state.last_mode() {
+      Some(mode) => mode
+      None => b'n'
+    }
     let (op, rest) = match top {
-      'c' => comment_step(view, Comment)
-      'd' => comment_step(view, CommentDoc)
-      't' => template_step(view)
+      b'c' => comment_step(view, Comment)
+      b'd' => comment_step(view, CommentDoc)
+      b't' => template_step(view)
       _ => normal_step(view, top)
     }
     let consumed = view.length() - rest.length()
-    match op {
-      Blank => ()
-      Emit(tag) => @syntax.push_token(tokens, at, at + consumed, tag)
+    let next_state = match op {
+      Blank => lexer_state
+      Emit(tag) => {
+        @syntax.push_token(tokens, at, at + consumed, tag)
+        lexer_state
+      }
       Push(tag, mode) => {
         @syntax.push_token(tokens, at, at + consumed, tag)
-        stack.push(mode)
+        lexer_state.push_mode(mode)
       }
       Pop(tag) => {
         @syntax.push_token(tokens, at, at + consumed, tag)
-        if stack.length() > 1 {
-          ignore(stack.pop())
-        }
+        lexer_state.pop_mode()
       }
     }
-    continue at + consumed, rest
+    continue at + consumed, rest, next_state
+  } nobreak {
+    lexer_state
   }
-  (tokens, @syntax.encode_mode_stack(stack))
+  (tokens, end_state)
 }
 
 ///|
 priv enum StepOp {
   Blank
   Emit(@syntax.HighlightTag)
-  Push(@syntax.HighlightTag, Char)
+  Push(@syntax.HighlightTag, Byte)
   Pop(@syntax.HighlightTag)
 }
 
 ///|
-fn normal_step(view : StringView, top : Char) -> (StepOp, StringView) {
+fn normal_step(view : StringView, top : Byte) -> (StepOp, StringView) {
   lexscan view with longest {
     (re"^[ \t]+", after=rest) => (Blank, rest)
     (re"^//.*", after=rest) => (Emit(Comment), rest)
     // The empty block comment first: longest-match would otherwise read
     // `/**/` as a doc-comment opener.
     (re"^/\*\*/", after=rest) => (Emit(Comment), rest)
-    (re"^/\*\*", after=rest) => (Push(CommentDoc, 'd'), rest)
-    (re"^/\*", after=rest) => (Push(Comment, 'c'), rest)
+    (re"^/\*\*", after=rest) => (Push(CommentDoc, b'd'), rest)
+    (re"^/\*", after=rest) => (Push(Comment, b'c'), rest)
     (re"^'(?:\\.|[^'\\])*'", after=rest) => (Emit(String), rest)
     (re"^'(?:\\.|[^'\\])*", after=rest) => (Emit(String), rest)
     (re"^\"(?:\\.|[^\"\\])*\"", after=rest) => (Emit(String), rest)
     (re"^\"(?:\\.|[^\"\\])*", after=rest) => (Emit(String), rest)
-    (re"^`", after=rest) => (Push(String, 't'), rest)
+    (re"^`", after=rest) => (Push(String, b't'), rest)
     (re"^0[xX][0-9a-fA-F_]+n?", after=rest) => (Emit(Number), rest)
     (re"^0[oO][0-7_]+n?", after=rest) => (Emit(Number), rest)
     (re"^0[bB][01_]+n?", after=rest) => (Emit(Number), rest)
@@ -102,15 +112,15 @@ fn normal_step(view : StringView, top : Char) -> (StepOp, StringView) {
     (re"^[+\-*/%=<>!&^~?\|]+", after=rest) => (Emit(Operator), rest)
     (re"^[()\[\],;:.]", after=rest) => (Emit(Delimiter), rest)
     (re"^[{]", after=rest) =>
-      if top == 'i' || top == 'b' {
-        (Push(Delimiter, 'b'), rest)
+      if top == b'i' || top == b'b' {
+        (Push(Delimiter, b'b'), rest)
       } else {
         (Emit(Delimiter), rest)
       }
     (re"^[}]", after=rest) =>
       match top {
-        'i' => (Pop(StringEscape), rest)
-        'b' => (Pop(Delimiter), rest)
+        b'i' => (Pop(StringEscape), rest)
+        b'b' => (Pop(Delimiter), rest)
         _ => (Emit(Delimiter), rest)
       }
     (re"^.", after=rest) => (Emit(Punctuation), rest)
@@ -137,7 +147,7 @@ fn comment_step(
 ///|
 fn template_step(view : StringView) -> (StepOp, StringView) {
   lexscan view with longest {
-    (re"^\$[{]", after=rest) => (Push(StringEscape, 'i'), rest)
+    (re"^\$[{]", after=rest) => (Push(StringEscape, b'i'), rest)
     (re"^\\.", after=rest) => (Emit(StringEscape), rest)
     (re"^`", after=rest) => (Pop(String), rest)
     (re"^[^`\\\$]+", after=rest) => (Emit(String), rest)
