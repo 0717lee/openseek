@@ -1,9 +1,10 @@
-// The upstream xterm and addon-fit distributions are already browser-ready
-// UMD files. Development loads them separately and installs only the adapter
-// shape the MoonBit frontend consumes; production may still bundle this shape.
+// The upstream xterm and addon distributions are already browser-ready UMD
+// files. Development loads them separately and installs only the adapter shape
+// the MoonBit frontend consumes; production may still bundle this shape.
 globalThis.__openseek_xterm = {
   Terminal: globalThis.Terminal,
   FitAddon: globalThis.FitAddon.FitAddon,
+  WebLinksAddon: globalThis.WebLinksAddon.WebLinksAddon,
   writeBase64(term, b64, done) {
     const binary = atob(b64);
     const output = new Uint8Array(binary.length);
