@@ -132,6 +132,66 @@ async fn collect_files(
 }
 
 ///|
+async test "Quick Open file collection prunes agent state subtrees" {
+  let dir = @fs.tmpdir(prefix="openseek-list-files-")
+  async fn cleanup() {
+    @fs.rmdir(dir, recursive=true) catch {
+      error if @async.is_being_cancelled() => raise error
+      _ => ()
+    }
+  }
+  try {
+    @fs.mkdir(
+      "\{dir}/.claude/worktrees/deepseek-model-api-key/.github/workflows",
+      recursive=true,
+    )
+    @fs.mkdir("\{dir}/src/.codex/cache", recursive=true)
+    @fs.mkdir("\{dir}/.github/workflows", recursive=true)
+    @fs.write_file(
+      "\{dir}/.claude/settings.local.json",
+      "{}",
+      create_mode=CreateOrTruncate,
+    )
+    @fs.write_file(
+      "\{dir}/.claude/worktrees/deepseek-model-api-key/.git",
+      "gitdir: elsewhere",
+      create_mode=CreateOrTruncate,
+    )
+    @fs.write_file(
+      "\{dir}/.claude/worktrees/deepseek-model-api-key/.github/workflows/ci.yml",
+      "name: hidden",
+      create_mode=CreateOrTruncate,
+    )
+    @fs.write_file(
+      "\{dir}/src/.codex/cache/state.json",
+      "{}",
+      create_mode=CreateOrTruncate,
+    )
+    @fs.write_file(
+      "\{dir}/.github/workflows/check.yml",
+      "name: visible",
+      create_mode=CreateOrTruncate,
+    )
+    @fs.write_file(
+      "\{dir}/src/main.mbt",
+      "fn main {}",
+      create_mode=CreateOrTruncate,
+    )
+    let files : Array[String] = []
+    let truncated = collect_files(@pathx.Path(dir).resolve(), "", files)
+    assert_false(truncated)
+    assert_eq(files, [".github/workflows/check.yml", "src/main.mbt"])
+  } catch {
+    error => {
+      cleanup()
+      raise error
+    }
+  } noraise {
+    _ => cleanup()
+  }
+}
+
+///|
 async fn read_file_op(payload : ReadFilePayload) -> ReadFileReply {
   guard @engine.resolve_in_workspace(
       payload.session,
