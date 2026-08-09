@@ -32,9 +32,21 @@ fn ChangedFile::from_reply(change : @protocol.GitChange) -> ChangedFile? {
 }
 
 ///|
-/// Ask the owning host for the checkout's current staged + unstaged inventory.
-/// As with the filesystem calls, a resource hint belonging to another host is
-/// rejected before any bridge request is made.
+/// Worktree-aware hosts return the task boundary; older/root hosts retain the
+/// immutable HEAD identity. Keeping this choice in one place prevents a later
+/// commit from silently rebasing an in-progress task review.
+fn git_review_revision(reply : @protocol.GitChangesReply) -> String? {
+  match reply.baseline {
+    Some(baseline) => Some(baseline)
+    None => reply.head
+  }
+}
+
+///|
+/// Ask the owning host for the checkout's review inventory. Worktree tasks
+/// compare their immutable creation commit with the current working tree;
+/// legacy/root conversations retain HEAD status. As with filesystem calls, a
+/// resource hint belonging to another host is rejected before bridge access.
 fn list_changes(
   dispatch : @cmd.Emit[Msg],
   owner : @interop.ConversationKey,
@@ -79,13 +91,16 @@ fn list_changes(
         }
       }
       let files = reply.changes.filter_map(ChangedFile::from_reply)
+      // New worktree-aware hosts pin Review to the task's creation commit.
+      // Older hosts omit `baseline`, so keep their exact HEAD identity.
+      let revision = git_review_revision(reply)
       scheduler.add(
         dispatch(
           ChangesLoaded(
             owner~,
             generation~,
             repository=reply.repository,
-            head=reply.head,
+            head=revision,
             files~,
           ),
         ),
@@ -95,9 +110,9 @@ fn list_changes(
 }
 
 ///|
-/// Load the HEAD side of one selected change. `path` is the current document
-/// key; `source` is the rename/copy source when Git reported one. The owner
-/// and current path ride the reply so a close, ordinary reopen, or
+/// Load the comparison side of one selected change. `path` is the current
+/// document key; `source` is the rename/copy source when Git reported one.
+/// The owner and current path ride the reply so a close, ordinary reopen, or
 /// conversation switch can discard it without touching the Viewer.
 fn read_git_original(
   dispatch : @cmd.Emit[Msg],
@@ -198,7 +213,7 @@ fn ChangedFile::status_title(self : ChangedFile) -> String {
 
 ///|
 /// Whether the change has a regular working-tree file for `fs.read_file`.
-/// Deleted rows remain reviewable through their HEAD content, but must skip
+/// Deleted rows remain reviewable through their baseline content, but must skip
 /// that ordinary read. Besides a plain deletion this covers a renamed/copied
 /// path deleted again (`RD` / `CD`) and a both-deleted conflict (`DD`).
 fn ChangedFile::has_working_tree_file(self : ChangedFile) -> Bool {
@@ -282,7 +297,19 @@ test "empty changed-file paths are ignored defensively" {
 }
 
 ///|
-test "deleted rows use HEAD previews while non-file rows stay inert" {
+test "task baselines win over moving HEAD with a legacy fallback" {
+  let task : @protocol.GitChangesReply = {
+    repository: true,
+    head: Some("new-head"),
+    baseline: Some("task-base"),
+    changes: [],
+  }
+  assert_eq(git_review_revision(task), Some("task-base"))
+  assert_eq(git_review_revision({ ..task, baseline: None }), Some("new-head"))
+}
+
+///|
+test "deleted rows use baseline previews while non-file rows stay inert" {
   let deleted : ChangedFile = {
     path: @pathx.Relative("removed.mbt"),
     original_path: None,
