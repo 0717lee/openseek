@@ -23,8 +23,11 @@ const MaxRenderedInputCodeUnits = 1048576
 
 ///|
 /// Creates an empty unified-diff view in a caller-owned stable host element.
-pub fn UnifiedDiffView::create(host : @rdom.Element) -> UnifiedDiffView {
-  { browser: UnifiedDiffBrowserView(host), disposed: false }
+pub fn UnifiedDiffView::create(
+  host : @rdom.Element,
+  on_comment? : (@unified_diff.UnifiedDiffLineComment) -> Unit,
+) -> UnifiedDiffView {
+  { browser: UnifiedDiffBrowserView(host, on_comment?), disposed: false }
 }
 
 ///|

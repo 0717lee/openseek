@@ -31,6 +31,10 @@
   min-width: max-content;
 }
 
+.moonbit-unified-diff-line-commentable {
+  grid-template-columns: 3ch 6ch 6ch 2ch minmax(max-content, 1fr);
+}
+
 .moonbit-unified-diff-hunk-header {
   padding: 2px 12px;
   border-block: 1px solid var(--vscode-editorWidget-border);
@@ -93,6 +97,103 @@
 .moonbit-unified-diff-line-text {
   min-width: 0;
   font: inherit;
+}
+
+.moonbit-unified-diff-comment-action {
+  box-sizing: border-box;
+  width: 20px;
+  height: 20px;
+  margin: 0 auto;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  color: var(--vscode-editorLineNumber-foreground);
+  background: transparent;
+  font: inherit;
+  font-weight: 700;
+  line-height: 20px;
+  cursor: pointer;
+  opacity: 0;
+}
+
+.moonbit-unified-diff-line-commentable:hover
+  .moonbit-unified-diff-comment-action,
+.moonbit-unified-diff-comment-action:focus {
+  color: var(--vscode-button-foreground);
+  background: var(--vscode-button-background);
+  opacity: 1;
+}
+
+.moonbit-unified-diff-comment-action:focus {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: -1px;
+}
+
+.moonbit-unified-diff-comment-form {
+  display: flex;
+  min-width: 360px;
+  gap: 8px;
+  align-items: flex-end;
+  margin: 4px 12px 8px 3ch;
+  padding: 8px;
+  border: 1px solid var(--vscode-editorWidget-border);
+  border-radius: 4px;
+  background: var(--vscode-editorWidget-background);
+  white-space: normal;
+}
+
+.moonbit-unified-diff-comment-form textarea {
+  box-sizing: border-box;
+  min-width: 240px;
+  flex: 1 1 auto;
+  resize: vertical;
+  padding: 5px 7px;
+  border: 1px solid var(--vscode-input-border, transparent);
+  color: var(--vscode-input-foreground);
+  background: var(--vscode-input-background);
+  font: inherit;
+  line-height: 18px;
+}
+
+.moonbit-unified-diff-comment-form textarea:focus {
+  border-color: var(--vscode-focusBorder);
+  outline: none;
+}
+
+.moonbit-unified-diff-comment-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 6px;
+}
+
+.moonbit-unified-diff-comment-cancel,
+.moonbit-unified-diff-comment-submit {
+  padding: 4px 8px;
+  border: 1px solid var(--vscode-button-border, transparent);
+  border-radius: 3px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.moonbit-unified-diff-comment-cancel {
+  color: var(--vscode-button-secondaryForeground);
+  background: var(--vscode-button-secondaryBackground);
+}
+
+.moonbit-unified-diff-comment-submit {
+  color: var(--vscode-button-foreground);
+  background: var(--vscode-button-background);
+}
+
+.moonbit-unified-diff-comment-submit:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+@media (hover: none) {
+  .moonbit-unified-diff-comment-action {
+    opacity: 0.7;
+  }
 }
 
 .moonbit-unified-diff-empty {

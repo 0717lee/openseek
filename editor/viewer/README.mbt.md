@@ -96,9 +96,12 @@ viewer.slot.data -> model: borrows readonly
   still be installed with `ModelData.browser=None`; a model installed through
   the public mounted path always has `Some(BrowserPresentation)`.
 - Browser embedders that need a standalone comparison call
-  `UnifiedDiffView::create(host)`. This opaque surface is independent of
-  `Viewer`: the caller owns and keeps the dedicated host mounted, while the
-  diff view owns only the DOM subtree it installs there. `set_diff` eagerly
+  `UnifiedDiffView::create(host, on_comment?)`. This opaque surface is
+  independent of `Viewer`: the caller owns and keeps the dedicated host
+  mounted, while the diff view owns only the DOM subtree it installs there.
+  Supplying `on_comment` adds a lazy inline editor to each line and emits its
+  exact original/modified identity plus the trimmed comment; omitting it keeps
+  the comparison read-only. `set_diff` eagerly
   replaces that subtree from caller-owned original and modified strings through
   the replaceable `viewer/common/unified_diff` algorithm seam. It rejects more
   than 1,048,576 combined UTF-16 code units before snapshot construction and

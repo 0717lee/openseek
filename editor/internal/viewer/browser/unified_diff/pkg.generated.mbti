@@ -11,7 +11,7 @@ import {
 
 // Types and methods
 type UnifiedDiffBrowserView
-pub fn UnifiedDiffBrowserView::UnifiedDiffBrowserView(@dom.Element) -> Self
+pub fn UnifiedDiffBrowserView::UnifiedDiffBrowserView(@dom.Element, on_comment? : (@moonbitlang/editor/viewer/common/unified_diff.UnifiedDiffLineComment) -> Unit) -> Self
 pub fn UnifiedDiffBrowserView::clear(Self) -> Unit
 pub fn UnifiedDiffBrowserView::dispose(Self) -> Unit
 pub fn UnifiedDiffBrowserView::set_hunks(Self, Array[@moonbitlang/editor/viewer/common/unified_diff.UnifiedDiffHunk]) -> Unit

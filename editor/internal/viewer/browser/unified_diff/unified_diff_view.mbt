@@ -4,6 +4,7 @@
 /// host element.
 struct UnifiedDiffBrowserView {
   host : @rdom.Element
+  on_comment : ((@unified_diff_model.UnifiedDiffLineComment) -> Unit)?
   mut root : @rdom.Element?
   mut disposed : Bool
 }
@@ -13,8 +14,9 @@ struct UnifiedDiffBrowserView {
 /// must not render its own children into it.
 pub fn UnifiedDiffBrowserView::UnifiedDiffBrowserView(
   host : @rdom.Element,
+  on_comment? : (@unified_diff_model.UnifiedDiffLineComment) -> Unit,
 ) -> UnifiedDiffBrowserView {
-  { host, root: None, disposed: false }
+  { host, on_comment, root: None, disposed: false }
 }
 
 ///|
@@ -27,7 +29,7 @@ pub fn UnifiedDiffBrowserView::set_hunks(
   if self.disposed {
     return
   }
-  let next = render_unified_diff(hunks)
+  let next = render_unified_diff(hunks, self.on_comment)
   match self.root {
     Some(previous) => self.host.remove_child(previous.as_node())
     None => ()
@@ -83,6 +85,7 @@ pub fn UnifiedDiffBrowserView::dispose(self : UnifiedDiffBrowserView) -> Unit {
 ///|
 fn render_unified_diff(
   hunks : Array[@unified_diff_model.UnifiedDiffHunk],
+  on_comment : ((@unified_diff_model.UnifiedDiffLineComment) -> Unit)?,
 ) -> @rdom.Element {
   if hunks.is_empty() {
     return render_message("No textual changes.")
@@ -103,7 +106,7 @@ fn render_unified_diff(
     header.set_attribute("aria-level", "2")
     section.append_child(header.as_node())
     for line in hunk.lines {
-      section.append_child(render_line(document, line).as_node())
+      section.append_child(render_line(document, line, on_comment).as_node())
     }
     root.append_child(section.as_node())
   }
@@ -134,6 +137,7 @@ fn diff_root(document : @rdom.Document) -> @rdom.Element {
 fn render_line(
   document : @rdom.Document,
   line : @unified_diff_model.UnifiedDiffLine,
+  on_comment : ((@unified_diff_model.UnifiedDiffLineComment) -> Unit)?,
 ) -> @rdom.Element {
   let (kind, marker) = match line.kind {
     Context => ("context", " ")
@@ -173,13 +177,140 @@ fn render_line(
   let marker_element = text_element(
     document, "span", "moonbit-unified-diff-line-marker", marker,
   )
+  let group = match on_comment {
+    Some(on_comment) => {
+      row.set_attribute(
+        "class",
+        "moonbit-unified-diff-line moonbit-unified-diff-line-\{kind} moonbit-unified-diff-line-commentable",
+      )
+      let group = document.create_element("div")
+      group.set_attribute("class", "moonbit-unified-diff-line-group")
+      let action = document.create_element("button")
+      action.set_attribute("type", "button")
+      action.set_attribute("class", "moonbit-unified-diff-comment-action")
+      action.set_attribute("title", comment_action_label(line))
+      action.set_attribute("aria-label", comment_action_label(line))
+      action.append_child(document.create_text_node("+").as_node())
+      action.add_event_listener("click", event => {
+        event.prevent_default()
+        event.stop_propagation()
+        show_line_comment_editor(document, group, action, line, on_comment)
+      })
+      row.append_child(action.as_node())
+      Some(group)
+    }
+    None => None
+  }
   row.append_child(original_number.as_node())
   row.append_child(modified_number.as_node())
   row.append_child(marker_element.as_node())
   row.append_child(
     text_element(document, "code", "moonbit-unified-diff-line-text", line.text).as_node(),
   )
-  row
+  match group {
+    Some(group) => {
+      group.append_child(row.as_node())
+      group
+    }
+    None => row
+  }
+}
+
+///|
+/// Lazily installs one inline editor per line. Large diffs pay for only the
+/// compact comment button until the reviewer explicitly opens a draft.
+fn show_line_comment_editor(
+  document : @rdom.Document,
+  group : @rdom.Element,
+  action : @rdom.Element,
+  line : @unified_diff_model.UnifiedDiffLine,
+  on_comment : (@unified_diff_model.UnifiedDiffLineComment) -> Unit,
+) -> Unit {
+  if group.query_selector(".moonbit-unified-diff-comment-form") is Some(form) {
+    if form.query_selector("textarea") is Some(textarea) {
+      unified_diff_focus(textarea)
+    }
+    return
+  }
+  let form = document.create_element("div")
+  form.set_attribute("class", "moonbit-unified-diff-comment-form")
+  form.set_attribute("role", "group")
+  form.set_attribute("aria-label", comment_action_label(line))
+  let textarea = document.create_element("textarea")
+  textarea.set_attribute("rows", "2")
+  textarea.set_attribute("placeholder", "Add review comment")
+  textarea.set_attribute("aria-label", "Review comment")
+  let actions = document.create_element("div")
+  actions.set_attribute("class", "moonbit-unified-diff-comment-actions")
+  let cancel = document.create_element("button")
+  cancel.set_attribute("type", "button")
+  cancel.set_attribute("class", "moonbit-unified-diff-comment-cancel")
+  cancel.append_child(document.create_text_node("Cancel").as_node())
+  let submit = document.create_element("button")
+  submit.set_attribute("type", "button")
+  submit.set_attribute("class", "moonbit-unified-diff-comment-submit")
+  submit.set_attribute("disabled", "true")
+  submit.append_child(document.create_text_node("Add comment").as_node())
+  let dismiss = () => {
+    if group.query_selector(".moonbit-unified-diff-comment-form")
+      is Some(active) {
+      group.remove_child(active.as_node())
+    }
+    unified_diff_focus(action)
+  }
+  let commit = () => {
+    let comment = unified_diff_textarea_value(textarea).trim().to_owned()
+    if comment.is_empty() {
+      return
+    }
+    dismiss()
+    on_comment({ line, comment })
+  }
+  cancel.add_event_listener("click", event => {
+    event.prevent_default()
+    dismiss()
+  })
+  submit.add_event_listener("click", event => {
+    event.prevent_default()
+    commit()
+  })
+  textarea.add_event_listener("input", _ => {
+    if unified_diff_textarea_value(textarea).trim().is_empty() {
+      submit.set_attribute("disabled", "true")
+    } else {
+      submit.remove_attribute("disabled")
+    }
+  })
+  textarea.add_event_listener("keydown", event => {
+    guard event.to_keyboard_event() is Some(keyboard) else { return }
+    match keyboard.key() {
+      "Escape" => {
+        event.prevent_default()
+        dismiss()
+      }
+      "Enter" if keyboard.ctrl_key() || keyboard.meta_key() => {
+        event.prevent_default()
+        commit()
+      }
+      _ => ()
+    }
+  })
+  actions.append_child(cancel.as_node())
+  actions.append_child(submit.as_node())
+  form.append_child(textarea.as_node())
+  form.append_child(actions.as_node())
+  group.append_child(form.as_node())
+  unified_diff_focus(textarea)
+}
+
+///|
+fn comment_action_label(line : @unified_diff_model.UnifiedDiffLine) -> String {
+  match (line.kind, line.original_line_number, line.modified_line_number) {
+    (Deletion, Some(number), _) => "Comment on original line \{number}"
+    (Addition, _, Some(number)) => "Comment on modified line \{number}"
+    (Context, _, Some(number)) => "Comment on modified line \{number}"
+    _ => "Comment on diff line"
+  }
 }
 
 ///|
@@ -218,3 +349,9 @@ fn text_element(
 fn hunk_header(hunk : @unified_diff_model.UnifiedDiffHunk) -> String {
   "@@ -\{hunk.original_start_line_number},\{hunk.original_line_count} +\{hunk.modified_start_line_number},\{hunk.modified_line_count} @@"
 }
+
+///|
+extern "js" fn unified_diff_textarea_value(element : @rdom.Element) -> String = "(element) => element.value ?? ''"
+
+///|
+extern "js" fn unified_diff_focus(element : @rdom.Element) -> Unit = "(element) => element.focus({ preventScroll: true })"
