@@ -15,7 +15,7 @@ priv struct RestoreStateCountingTokenizer {
 impl @syntax.LineTokenizer for RestoreStateCountingTokenizer with fn initial_state(
   _self,
 ) {
-  TokenizerState("restore-view-state")
+  @syntax.TokenizerState::from_text("restore-view-state")
 }
 
 ///|

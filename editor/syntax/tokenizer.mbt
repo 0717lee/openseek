@@ -1,37 +1,35 @@
 ///|
 /// Carried lexer state between lines, the `IState` of Monaco's tokenization
-/// contract. The character array is an immutable-by-API snapshot: its storage
-/// stays private, while stack edits copy before mutation so cached states never
-/// alias a tokenization run's working state. Derived equality is what callers
-/// use to detect re-tokenization convergence.
+/// contract. The persistent character vector is an immutable snapshot: stack
+/// edits share unchanged storage while cached states remain isolated from later
+/// edits. Derived equality is what callers use to detect re-tokenization
+/// convergence.
 pub struct TokenizerState {
-  priv modes : Array[Char]
+  priv modes : @vector.Vector[Char]
 } derive(Eq)
 
 ///|
-/// Creates a tokenizer state from its compact textual form. Keeping this as the
-/// type's named constructor preserves the existing `TokenizerState("...")`
-/// call syntax while the stored representation remains opaque.
-pub fn TokenizerState::TokenizerState(encoded : StringView) -> TokenizerState {
-  let modes : Array[Char] = []
-  for mode in encoded {
-    modes.push(mode)
-  }
-  { modes, }
+/// Creates a tokenizer state by copying a mode sequence into a persistent
+/// snapshot. Subsequent mutations of the source array cannot change the state.
+pub fn TokenizerState::TokenizerState(
+  modes : ArrayView[Char],
+) -> TokenizerState {
+  { modes: @vector.from_array(modes) }
 }
 
 ///|
-/// Creates a tokenizer state by copying a mode sequence into a private
-/// snapshot. Subsequent mutations of the source array cannot change the state.
-pub fn TokenizerState::from_modes(modes : ArrayView[Char]) -> TokenizerState {
-  { modes: modes.to_owned() }
+/// Creates a tokenizer state from characters in `text`. This is useful for
+/// synthetic tokenizers whose test state is derived from arbitrary line text;
+/// production lexers should prefer the mode-sequence constructor.
+pub fn TokenizerState::from_text(text : StringView) -> TokenizerState {
+  { modes: @vector.from_iter(text.iter()) }
 }
 
 ///|
 /// Returns a mutable copy of the state's modes. Mutating the result cannot
 /// change this state or any cached line state that shares its snapshot.
 pub fn TokenizerState::to_modes(self : TokenizerState) -> Array[Char] {
-  self.modes.copy()
+  self.modes.to_array()
 }
 
 ///|
@@ -43,7 +41,7 @@ pub fn TokenizerState::mode_count(self : TokenizerState) -> Int {
 ///|
 /// Top mode, or `None` for an empty state.
 pub fn TokenizerState::last_mode(self : TokenizerState) -> Char? {
-  self.modes.last()
+  self.modes.peek()
 }
 
 ///|
@@ -52,26 +50,22 @@ pub fn TokenizerState::push_mode(
   self : TokenizerState,
   mode : Char,
 ) -> TokenizerState {
-  let modes = self.modes.copy()
-  modes.push(mode)
-  { modes, }
+  { modes: self.modes.push(mode) }
 }
 
 ///|
 /// Returns a new state without its top mode. An empty state is returned as-is.
 /// The receiver remains unchanged.
 pub fn TokenizerState::pop_mode(self : TokenizerState) -> TokenizerState {
-  if self.modes.length() == 0 {
-    return self
+  match self.modes.pop() {
+    Some(modes) => { modes, }
+    None => self
   }
-  let modes = self.modes.copy()
-  ignore(modes.pop())
-  { modes, }
 }
 
 ///|
-/// Retains the historical compact debug form while converting the array back
-/// to text only when diagnostics or snapshots request it.
+/// Uses a compact debug form, converting the vector to text only when
+/// diagnostics or snapshots request it.
 pub impl Debug for TokenizerState with fn to_repr(self) {
   let encoded = StringBuilder()
   for mode in self.modes {
@@ -347,5 +341,5 @@ pub fn decode_mode_stack(state : TokenizerState) -> Array[Char] {
 /// The mode stack packed back into a `TokenizerState` for the next line.
 /// Inverse of `decode_mode_stack`.
 pub fn encode_mode_stack(stack : Array[Char]) -> TokenizerState {
-  TokenizerState::from_modes(stack)
+  TokenizerState(stack)
 }

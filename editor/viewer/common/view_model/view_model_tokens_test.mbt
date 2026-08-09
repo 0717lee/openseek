@@ -52,10 +52,14 @@ priv struct FrameToy {
 }
 
 ///|
-let frame_toy_code : @syntax.TokenizerState = TokenizerState("code")
+let frame_toy_code : @syntax.TokenizerState = @syntax.TokenizerState::from_text(
+  "code",
+)
 
 ///|
-let frame_toy_comment : @syntax.TokenizerState = TokenizerState("comment")
+let frame_toy_comment : @syntax.TokenizerState = @syntax.TokenizerState::from_text(
+  "comment",
+)
 
 ///|
 impl @syntax.LineTokenizer for FrameToy with fn initial_state(_self) {

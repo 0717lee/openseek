@@ -13,7 +13,7 @@ priv struct InitialSizeCountingTokenizer {
 impl @syntax.LineTokenizer for InitialSizeCountingTokenizer with fn initial_state(
   _self,
 ) {
-  TokenizerState("initial-size")
+  @syntax.TokenizerState::from_text("initial-size")
 }
 
 ///|
