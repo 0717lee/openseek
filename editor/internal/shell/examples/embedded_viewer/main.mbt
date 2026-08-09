@@ -64,6 +64,7 @@ fn memory_workspace() -> MemoryWorkspace {
   let directories : Map[String, Array[@workspace.WorkspaceStat]] = Map([])
   directories[memory_root] = [
     memory_dir("src", "src"),
+    memory_file("large.mbt", "large.mbt"),
     memory_file("README.md", "README.md"),
     memory_file("moon.mod", "moon.mod"),
   ]
@@ -75,6 +76,7 @@ fn memory_workspace() -> MemoryWorkspace {
     memory_file("src/lib/util.mbt", "util.mbt"),
   ]
   let documents : Map[String, String] = Map([])
+  documents["\{memory_root}/large.mbt"] = large_diff_document("modified")
   documents["\{memory_root}/README.md"] = (
     #|# Embedded Markdown document
     #|
@@ -100,6 +102,9 @@ fn memory_workspace() -> MemoryWorkspace {
     #|
   )
   let original_documents : Map[String, String] = Map([])
+  original_documents["\{memory_root}/large.mbt"] = large_diff_document(
+    "original",
+  )
   original_documents["\{memory_root}/README.md"] = (
     #|# Embedded document
     #|
@@ -127,6 +132,17 @@ fn memory_workspace() -> MemoryWorkspace {
     documents,
     original_documents,
   }
+}
+
+///|
+/// A valid sub-1-MiB source pair with enough short changed lines to exercise
+/// the standalone renderer's eager-DOM safety budget.
+fn large_diff_document(prefix : String) -> String {
+  let content = StringBuilder()
+  for index in 0..<2600 {
+    content.write_string("let \{prefix}_\{index} = \{index}\n")
+  }
+  content.to_string()
 }
 
 ///|

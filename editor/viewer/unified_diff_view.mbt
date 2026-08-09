@@ -9,6 +9,12 @@ struct UnifiedDiffView {
 }
 
 ///|
+/// An eager DOM row contains line numbers, a marker, and source text. Keep the
+/// standalone renderer below the point where a legal-size short-line document
+/// can create enough elements to stall or exhaust the host webview.
+const MaxRenderedInputLines = 5000
+
+///|
 /// Creates an empty unified-diff view in a caller-owned stable host element.
 pub fn UnifiedDiffView::create(host : @rdom.Element) -> UnifiedDiffView {
   { browser: UnifiedDiffBrowserView(host), disposed: false }
@@ -27,10 +33,18 @@ pub fn UnifiedDiffView::set_diff(
   if self.disposed {
     return
   }
+  let original = @model.TextSnapshot(original_content)
+  let modified = @model.TextSnapshot(modified_content)
+  if original.line_count() + modified.line_count() > MaxRenderedInputLines {
+    self.browser.set_message(
+      "This diff is too large to render safely. Open the source preview instead.",
+    )
+    return
+  }
   self.browser.set_hunks(
     @unified_diff.compute_unified_diff(
-      content_lines(original_content),
-      content_lines(modified_content),
+      snapshot_lines(original),
+      snapshot_lines(modified),
       context_lines~,
     ),
   )
@@ -56,8 +70,7 @@ pub fn UnifiedDiffView::dispose(self : UnifiedDiffView) -> Unit {
 }
 
 ///|
-fn content_lines(content : String) -> Array[String] {
-  let snapshot = @model.TextSnapshot(content)
+fn snapshot_lines(snapshot : @model.TextSnapshot) -> Array[String] {
   [
     for index in 0..<snapshot.line_count() => snapshot.line_text(index)
   ]

@@ -80,6 +80,22 @@ test('runs the viewer and tree from in-memory providers without a server', async
   expect(websockets).toEqual([]);
 });
 
+test('bounds eager DOM rendering for a legal-size large diff', async ({ page }) => {
+  await page.goto('/embed.html');
+  await expect(page.locator('.editor-shell')).toHaveAttribute('data-status', 'ready');
+
+  // Both sides are well below the desktop's 1 MiB source limit, but their
+  // many short changed lines would otherwise create tens of thousands of DOM
+  // elements synchronously.
+  await page.locator(workspaceItem('large.mbt')).click();
+  await expect(page.locator('.editor-shell')).toHaveAttribute('data-status', 'ready');
+  await page.locator('[data-action="toggle-diff"]').click();
+  await expect(page.locator('.moonbit-unified-diff')).toContainText(
+    'This diff is too large to render safely.',
+  );
+  await expect(page.locator('.moonbit-unified-diff-line')).toHaveCount(0);
+});
+
 test('drops a stale host-ready rAF after a rapid model swap', async ({ page }) => {
   await page.addInitScript(() => {
     const queue = [];

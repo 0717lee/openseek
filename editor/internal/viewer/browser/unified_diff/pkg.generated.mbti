@@ -15,6 +15,7 @@ pub fn UnifiedDiffBrowserView::UnifiedDiffBrowserView(@dom.Element) -> Self
 pub fn UnifiedDiffBrowserView::clear(Self) -> Unit
 pub fn UnifiedDiffBrowserView::dispose(Self) -> Unit
 pub fn UnifiedDiffBrowserView::set_hunks(Self, Array[@moonbitlang/editor/viewer/common/unified_diff.UnifiedDiffHunk]) -> Unit
+pub fn UnifiedDiffBrowserView::set_message(Self, String) -> Unit
 
 // Type aliases
 

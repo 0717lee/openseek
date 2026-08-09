@@ -37,6 +37,24 @@ pub fn UnifiedDiffBrowserView::set_hunks(
 }
 
 ///|
+/// Replaces the current comparison with a renderer-owned status message.
+pub fn UnifiedDiffBrowserView::set_message(
+  self : UnifiedDiffBrowserView,
+  message : String,
+) -> Unit {
+  if self.disposed {
+    return
+  }
+  let next = render_message(message)
+  match self.root {
+    Some(previous) => self.host.remove_child(previous.as_node())
+    None => ()
+  }
+  self.host.append_child(next.as_node())
+  self.root = Some(next)
+}
+
+///|
 /// Removes rendered rows while retaining the reusable host binding.
 pub fn UnifiedDiffBrowserView::clear(self : UnifiedDiffBrowserView) -> Unit {
   if self.disposed {
@@ -66,20 +84,11 @@ pub fn UnifiedDiffBrowserView::dispose(self : UnifiedDiffBrowserView) -> Unit {
 fn render_unified_diff(
   hunks : Array[@unified_diff_model.UnifiedDiffHunk],
 ) -> @rdom.Element {
-  let document = @rdom.document()
-  let root = document.create_element("section")
-  root.set_attribute("class", "moonbit-unified-diff")
-  root.set_attribute("role", "region")
-  root.set_attribute("aria-label", "Unified diff")
-  root.set_attribute("tabindex", "0")
   if hunks.is_empty() {
-    root.append_child(
-      text_element(
-        document, "div", "moonbit-unified-diff-empty", "No textual changes.",
-      ).as_node(),
-    )
-    return root
+    return render_message("No textual changes.")
   }
+  let document = @rdom.document()
+  let root = diff_root(document)
   for hunk_index, hunk in hunks {
     let section = document.create_element("section")
     section.set_attribute("class", "moonbit-unified-diff-hunk")
@@ -98,6 +107,26 @@ fn render_unified_diff(
     }
     root.append_child(section.as_node())
   }
+  root
+}
+
+///|
+fn render_message(message : String) -> @rdom.Element {
+  let document = @rdom.document()
+  let root = diff_root(document)
+  root.append_child(
+    text_element(document, "div", "moonbit-unified-diff-empty", message).as_node(),
+  )
+  root
+}
+
+///|
+fn diff_root(document : @rdom.Document) -> @rdom.Element {
+  let root = document.create_element("section")
+  root.set_attribute("class", "moonbit-unified-diff")
+  root.set_attribute("role", "region")
+  root.set_attribute("aria-label", "Unified diff")
+  root.set_attribute("tabindex", "0")
   root
 }
 
