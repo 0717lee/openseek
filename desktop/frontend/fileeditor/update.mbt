@@ -469,6 +469,7 @@ pub fn open_changed_document(
 /// An ambiguous result exits review mode instead of silently switching sides.
 fn selected_review_change(
   files : Array[ChangedFile],
+  previous_files : Array[ChangedFile],
   selected : ChangedFile,
 ) -> ChangedFile? {
   let candidates = files.filter(change => change.path == selected.path)
@@ -523,11 +524,24 @@ fn selected_review_change(
   if availability_matches == 1 {
     return availability_match
   }
-  if candidates.length() == 1 {
+  if candidates.length() == 1 &&
+    previous_files.filter(change => change.path == selected.path).length() <= 1 {
+    // A sole row can legitimately cross the working-file boundary (modified
+    // to deleted, or deleted back to modified). It is only safe to infer that
+    // transition when the previous authoritative inventory did not contain a
+    // competing same-path row whose disappearance made the identity ambiguous.
     Some(candidates[0])
   } else {
     None
   }
+}
+
+///|
+/// A baseline may be cached before its paired working-tree read settles. Do
+/// not publish it against a document already known to be stale: the tagged
+/// `FileLoaded` reply clears that marker and performs the first safe render.
+fn working_side_ready_for_review(doc : Doc) -> Bool {
+  !(doc.state is TabLoading) && !doc.stale
 }
 
 ///|
@@ -546,6 +560,7 @@ fn reconcile_reviews_after_changes(
   dispatch : @cmd.Emit[Msg],
   state : State,
   ctx : Ctx,
+  previous_files : Array[ChangedFile],
   files : Array[ChangedFile],
   head~ : String?,
   head_changed~ : Bool,
@@ -557,7 +572,11 @@ fn reconcile_reviews_after_changes(
   let mut review_generation = state.review_generation
   for path, doc in state.docs {
     guard doc.review is Some(review) else { continue }
-    let current_change = selected_review_change(files, review.selected)
+    let current_change = selected_review_change(
+      files,
+      previous_files,
+      review.selected,
+    )
     match current_change {
       None => {
         let ordinary = { ..doc, review: None }
@@ -1852,6 +1871,7 @@ pub fn update(
             dispatch,
             state,
             ctx,
+            previous_files,
             files,
             head~,
             head_changed~,
@@ -2055,7 +2075,7 @@ pub fn update(
       // parked baseline when `FileLoaded` arrives; every settled document can
       // update immediately (including a deleted-file HEAD preview).
       let cmd = if ctx.active_file == Some(path) &&
-        !(next_doc.state is TabLoading) {
+        working_side_ready_for_review(next_doc) {
         show_settled_review(dispatch, ctx, path, next_doc)
       } else {
         @cmd.none
@@ -2858,11 +2878,37 @@ test "changed-file review preserves a stale cached working document until reload
     reviewing.docs.get(path)
     is Some({ state: TabLoaded(..), review: Some(_), stale: true, .. }),
   )
+  guard reviewing.docs.get(path) is Some(reviewing_doc) else {
+    fail("reviewing document was not retained")
+  }
+  assert_false(working_side_ready_for_review(reviewing_doc))
+  // The HEAD side can win the race, but it remains parked while the cached
+  // working text is explicitly stale.
+  let (_, baseline_first) = update(
+    emit,
+    GitOriginalLoaded(
+      owner=ctx.owner,
+      background=false,
+      path~,
+      generation=1,
+      original=@protocol.OriginalContent("HEAD source"),
+    ),
+    reviewing,
+    ctx,
+  )
+  guard baseline_first.docs.get(path) is Some(baseline_doc) else {
+    fail("baseline document was not retained")
+  }
+  assert_true(
+    baseline_doc.review
+    is Some({ generation: 1, baseline: ReviewContent("HEAD source"), .. }),
+  )
+  assert_false(working_side_ready_for_review(baseline_doc))
   // Canceling the tagged review read through an ordinary open retains the
   // staleness marker, so `show_tab` schedules its own untagged refresh.
   let (_, ordinary) = open_document(
     emit,
-    reviewing,
+    baseline_first,
     ctx,
     path,
     name="stale.mbt",
@@ -5249,6 +5295,11 @@ test "Changes reconciliation preserves the selected duplicate-path row" {
   )
   assert_false(deleted.is_selected(settled, ctx))
   assert_true(untracked.is_selected(settled, ctx))
+  // If the selected untracked side disappears, the incompatible staged
+  // deletion must not become the review merely because it is the sole row.
+  assert_true(
+    selected_review_change([deleted], [deleted, untracked], untracked) is None,
+  )
 }
 
 ///|

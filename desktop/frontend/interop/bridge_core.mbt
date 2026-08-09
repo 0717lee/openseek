@@ -65,25 +65,13 @@ extern "js" fn js_ordered_method_promise(
   target : @js.Value,
   name : String,
   payload : @js.Value,
-  timeout_ms : Int,
 ) -> @js.Promise =
   #| (() => {
   #|   let tail = Promise.resolve();
-  #|   return (target, name, payload, timeoutMs) => {
+  #|   return (target, name, payload) => {
   #|     const request = tail
   #|       .catch(() => undefined)
-  #|       .then(() => new Promise((resolve, reject) => {
-  #|         const timer = setTimeout(
-  #|           () => reject(new Error(`OpenSeek request timed out: ${name}`)),
-  #|           timeoutMs,
-  #|         );
-  #|         Promise.resolve()
-  #|           .then(() => target[name](payload))
-  #|           .then(
-  #|             value => { clearTimeout(timer); resolve(value); },
-  #|             error => { clearTimeout(timer); reject(error); },
-  #|           );
-  #|       }));
+  #|       .then(() => target[name](payload));
   #|     tail = request.catch(() => undefined);
   #|     return request;
   #|   };
@@ -94,9 +82,6 @@ extern "js" fn js_ordered_method_promise(
 /// what makes the contract hold for remote hosts, including older servers
 /// that execute ordinary JSON-RPC requests concurrently.
 let ordered_request_locks : Map[ChannelId, @async.Mutex] = Map([])
-
-///|
-const OrderedRequestTimeoutMilliseconds = 30000
 
 ///|
 fn ordered_request_lock(channel : ChannelId) -> @async.Mutex {
@@ -115,6 +100,9 @@ fn ordered_request_lock(channel : ChannelId) -> @async.Mutex {
 /// are desired state or ordered observations rather than independent queries:
 /// the file-panel watcher (`watch(A)` then `unwatch`), file-stat snapshots,
 /// and browser view ops (create-then-place, bounds-before-visibility).
+/// Deliberately do not put a caller-side timeout around this lane: neither the
+/// Proton promise nor an older remote RPC is cancelable, so releasing the lane
+/// early would allow its successor to overtake an operation still applying.
 pub async fn[Payload : ToJson, Reply : @json.FromJson] bridge_request_in_order(
   channel : ChannelId,
   command : @commands.Command[Payload, Reply],
@@ -125,24 +113,14 @@ pub async fn[Payload : ToJson, Reply : @json.FromJson] bridge_request_in_order(
   defer lock.release()
   let op = command.name()
   let payload = @js.Value::from_json(payload.to_json())
-  guard @async.with_timeout_opt(OrderedRequestTimeoutMilliseconds, () => {
-      match channel {
-        Local => {
-          guard openseek_api() is Some(api) && js_prop(api, op) is Some(_) else {
-            raise BridgeError("OpenSeek bridge unavailable")
-          }
-          js_ordered_method_promise(
-            api,
-            op,
-            payload,
-            OrderedRequestTimeoutMilliseconds,
-          ).wait()
-        }
-        Remote(_) => ws_request(channel, op, payload)
+  let reply = match channel {
+    Local => {
+      guard openseek_api() is Some(api) && js_prop(api, op) is Some(_) else {
+        raise BridgeError("OpenSeek bridge unavailable")
       }
-    })
-    is Some(reply) else {
-    raise BridgeError("OpenSeek request timed out: {op}")
+      js_ordered_method_promise(api, op, payload).wait()
+    }
+    Remote(_) => ws_request(channel, op, payload)
   }
   let json = if reply.is_undefined() || reply.is_null() {
     Json::empty_object()
