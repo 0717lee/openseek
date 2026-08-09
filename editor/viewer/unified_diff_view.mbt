@@ -15,6 +15,13 @@ struct UnifiedDiffView {
 const MaxRenderedInputLines = 5000
 
 ///|
+/// Reject oversized text before `TextSnapshot` normalizes and indexes it. The
+/// budget is expressed in UTF-16 code units because `String::length` is an
+/// allocation-free O(1) query on the JS target. Checking each side before the
+/// subtraction keeps the combined comparison overflow-safe.
+const MaxRenderedInputCodeUnits = 1048576
+
+///|
 /// Creates an empty unified-diff view in a caller-owned stable host element.
 pub fn UnifiedDiffView::create(host : @rdom.Element) -> UnifiedDiffView {
   { browser: UnifiedDiffBrowserView(host), disposed: false }
@@ -31,6 +38,16 @@ pub fn UnifiedDiffView::set_diff(
   context_lines? : Int = 3,
 ) -> Unit {
   if self.disposed {
+    return
+  }
+  let original_length = original_content.length()
+  let modified_length = modified_content.length()
+  if original_length > MaxRenderedInputCodeUnits ||
+    modified_length > MaxRenderedInputCodeUnits ||
+    original_length > MaxRenderedInputCodeUnits - modified_length {
+    self.browser.set_message(
+      "This diff is too large to render safely. Open the source preview instead.",
+    )
     return
   }
   let original = @model.TextSnapshot(original_content)

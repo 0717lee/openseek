@@ -65,6 +65,7 @@ fn memory_workspace() -> MemoryWorkspace {
   directories[memory_root] = [
     memory_dir("src", "src"),
     memory_file("large.mbt", "large.mbt"),
+    memory_file("oversized-line.mbt", "oversized-line.mbt"),
     memory_file("README.md", "README.md"),
     memory_file("moon.mod", "moon.mod"),
   ]
@@ -77,6 +78,7 @@ fn memory_workspace() -> MemoryWorkspace {
   ]
   let documents : Map[String, String] = Map([])
   documents["\{memory_root}/large.mbt"] = large_diff_document("modified")
+  documents["\{memory_root}/oversized-line.mbt"] = oversized_diff_line("m")
   documents["\{memory_root}/README.md"] = (
     #|# Embedded Markdown document
     #|
@@ -104,6 +106,9 @@ fn memory_workspace() -> MemoryWorkspace {
   let original_documents : Map[String, String] = Map([])
   original_documents["\{memory_root}/large.mbt"] = large_diff_document(
     "original",
+  )
+  original_documents["\{memory_root}/oversized-line.mbt"] = oversized_diff_line(
+    "o",
   )
   original_documents["\{memory_root}/README.md"] = (
     #|# Embedded document
@@ -143,6 +148,13 @@ fn large_diff_document(prefix : String) -> String {
     content.write_string("let \{prefix}_\{index} = \{index}\n")
   }
   content.to_string()
+}
+
+///|
+/// Each side is a single valid source line below the desktop's 1 MiB read
+/// limit, while their combined UTF-16 size exceeds the standalone diff budget.
+fn oversized_diff_line(fill : String) -> String {
+  fill.repeat(524289)
 }
 
 ///|
