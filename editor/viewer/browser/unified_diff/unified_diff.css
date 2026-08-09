@@ -130,8 +130,11 @@
 }
 
 .moonbit-unified-diff-comment-form {
+  box-sizing: border-box;
   display: flex;
-  min-width: 360px;
+  width: calc(100% - 3ch - 12px);
+  min-width: 0;
+  flex-wrap: wrap;
   gap: 8px;
   align-items: flex-end;
   margin: 4px 12px 8px 3ch;
@@ -144,8 +147,8 @@
 
 .moonbit-unified-diff-comment-form textarea {
   box-sizing: border-box;
-  min-width: 240px;
-  flex: 1 1 auto;
+  min-width: 0;
+  flex: 1 1 240px;
   resize: vertical;
   padding: 5px 7px;
   border: 1px solid var(--vscode-input-border, transparent);
@@ -164,6 +167,7 @@
   display: flex;
   flex: 0 0 auto;
   gap: 6px;
+  margin-left: auto;
 }
 
 .moonbit-unified-diff-comment-cancel,

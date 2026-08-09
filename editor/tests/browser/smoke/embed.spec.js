@@ -59,6 +59,42 @@ test('runs the viewer and tree from in-memory providers without a server', async
     'aria-label',
     'Addition, modified line 3:   println(greeting())',
   );
+
+  // A narrow host must keep both comment actions inside the visible diff
+  // pane. Desktop review can place the changed-file tree beside this surface,
+  // leaving substantially less width than the overall window.
+  const viewerStack = page.locator('.embedded-viewer-stack');
+  await viewerStack.evaluate((element) => {
+    element.style.width = '300px';
+    element.style.flex = '0 0 300px';
+  });
+  await deletion.hover();
+  await deletion.locator('.moonbit-unified-diff-comment-action').click();
+  const commentForm = page.locator('.moonbit-unified-diff-comment-form');
+  const commentActions = commentForm.locator(
+    '.moonbit-unified-diff-comment-actions',
+  );
+  await expect(commentForm).toBeVisible();
+  const [narrowDiffBox, commentFormBox, commentActionsBox] = await Promise.all([
+    diff.boundingBox(),
+    commentForm.boundingBox(),
+    commentActions.boundingBox(),
+  ]);
+  expect(narrowDiffBox).not.toBeNull();
+  expect(commentFormBox).not.toBeNull();
+  expect(commentActionsBox).not.toBeNull();
+  expect(commentFormBox.x).toBeGreaterThanOrEqual(narrowDiffBox.x);
+  expect(commentFormBox.x + commentFormBox.width).toBeLessThanOrEqual(
+    narrowDiffBox.x + narrowDiffBox.width + 1,
+  );
+  expect(commentActionsBox.x + commentActionsBox.width).toBeLessThanOrEqual(
+    commentFormBox.x + commentFormBox.width + 1,
+  );
+  await commentForm.getByRole('button', { name: 'Cancel' }).click();
+  await viewerStack.evaluate((element) => {
+    element.style.width = '';
+    element.style.flex = '';
+  });
   await expect(page.locator('.monaco-editor.readonly-editor')).not.toBeVisible();
 
   await diffToggle.click();

@@ -300,7 +300,9 @@ fn embed_diff_view() -> @viewer.UnifiedDiffView {
         .query_selector(".unified-diff-host")
         .to_option()
         .unwrap()
-      let view = @viewer.UnifiedDiffView::create(host)
+      // Keep the embed's public diff fixture interactive so browser tests
+      // cover the optional review-comment surface as an integrator sees it.
+      let view = @viewer.UnifiedDiffView::create(host, on_comment=_ => ())
       embed_diff_view_cell.val = Some(view)
       view
     }
