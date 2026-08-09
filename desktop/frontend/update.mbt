@@ -2896,6 +2896,13 @@ fn update_msg(
       )
     }
     Terminal(msg) => {
+      // xterm is an imperative widget rather than document anchor markup, so
+      // its web-links addon reports activation as a terminal message. Feed it
+      // back through the exact conversation-link route: desktop Chat opens or
+      // reuses a dock browser tab, while other hosts/screens open externally.
+      if msg is LinkActivated(url~) {
+        return update(dispatch, ExternalLinkClicked(url), model)
+      }
       // Host-originated replies and notifications can already be queued when
       // a WebSocket closes. Their terminal ids belong to the dead connection,
       // not to a later connection for the same relay device, so ignore them
@@ -14779,29 +14786,42 @@ test "web links open (and reuse) a dock browser tab; other schemes do not" {
     @preview.page(model.preview, 1).unwrap().url ==
     Some("http://127.0.0.1:5173/"),
   )
+  // xterm's link addon enters through a terminal message but follows the same
+  // navigation path as a transcript anchor.
+  let (_, model) = update(
+    dispatch,
+    Terminal(@terminal.LinkActivated(url="https://terminal.example/docs")),
+    model,
+  )
+  assert_eq(model.dock.tabs.length(), 2)
+  assert_true(@dock.active_browser(model.dock) == Some(2))
+  assert_true(
+    @preview.page(model.preview, 2).unwrap().url ==
+    Some("https://terminal.example/docs"),
+  )
   // The same URL re-activates the existing tab instead of duplicating.
   let (_, model) = update(
     dispatch,
     ExternalLinkClicked("http://127.0.0.1:5173/"),
     model,
   )
-  assert_eq(model.dock.tabs.length(), 1)
-  assert_eq(model.preview.pages.length(), 1)
+  assert_eq(model.dock.tabs.length(), 2)
+  assert_eq(model.preview.pages.length(), 2)
   // External sites are web pages too: they get their own tab.
   let (_, model) = update(
     dispatch,
     ExternalLinkClicked("https://github.com/moonbit"),
     model,
   )
-  assert_eq(model.dock.tabs.length(), 2)
-  assert_true(@dock.active_browser(model.dock) == Some(2))
+  assert_eq(model.dock.tabs.length(), 3)
+  assert_true(@dock.active_browser(model.dock) == Some(3))
   // A non-web scheme keeps the system handler: no tab appears.
   let (_, model) = update(
     dispatch,
     ExternalLinkClicked("mailto:someone@example.com"),
     model,
   )
-  assert_eq(model.dock.tabs.length(), 2)
+  assert_eq(model.dock.tabs.length(), 3)
   // So does a link clicked on another screen, where the dock is not on
   // screen to show a tab — Settings' device-page link wants the browser the
   // user is signed in to anyway.
@@ -14810,8 +14830,8 @@ test "web links open (and reuse) a dock browser tab; other schemes do not" {
     ExternalLinkClicked("https://openseek.test/d/abc"),
     { ..model, screen: Settings },
   )
-  assert_eq(settings.dock.tabs.length(), 2)
-  assert_eq(settings.preview.pages.length(), 2)
+  assert_eq(settings.dock.tabs.length(), 3)
+  assert_eq(settings.preview.pages.length(), 3)
 }
 
 ///|

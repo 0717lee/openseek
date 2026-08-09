@@ -224,6 +224,9 @@ pub(all) enum Msg {
   OpenFailed(key~ : Int, message~ : String)
   /// Keystrokes from one tab's emulator.
   UserInput(key~ : Int, data~ : String)
+  /// A web URL activated through xterm's link addon. The main frontend routes
+  /// it through the same dock/system-browser policy as conversation anchors.
+  LinkActivated(url~ : String)
   /// xterm's `onBinary` payload, encoded as base64 so each JS character code
   /// reaches the PTY as exactly one byte instead of being UTF-8 re-encoded.
   BinaryInput(key~ : Int, data~ : String)

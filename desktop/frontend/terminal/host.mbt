@@ -40,7 +40,8 @@ let term_host : TermHost = {
 }
 
 ///|
-/// The packaged bundle's export object (`{ Terminal, FitAddon, writeBase64 }`).
+/// The packaged bundle's export object
+/// (`{ Terminal, FitAddon, WebLinksAddon, writeBase64 }`).
 fn xterm_module() -> @js.Value? {
   @interop.js_prop(@js.globalThis, "__openseek_xterm")
 }
@@ -143,6 +144,20 @@ fn mount_tab(
         let fit_ctor : @js.Value = module_.get_with_string("FitAddon")
         let fit : @js.Value = fit_ctor.new(no_args())
         let _ : @js.Value = term.apply_with_string("loadAddon", [fit])
+        // Let xterm's official addon handle URL parsing, wrapped lines, hover,
+        // and ranges. Activation re-enters the app update loop so terminal and
+        // transcript links share one navigation policy.
+        let on_link = (_event : @js.Value, url : @js.Value) => {
+          let url : String = url.cast()
+          scheduler.add(dispatch(LinkActivated(url~)))
+        }
+        let web_links_ctor : @js.Value = module_.get_with_string(
+          "WebLinksAddon",
+        )
+        let web_links : @js.Value = web_links_ctor.new([
+          @js.Value::cast_from(on_link),
+        ])
+        let _ : @js.Value = term.apply_with_string("loadAddon", [web_links])
         let _ : @js.Value = term.apply_with_string("open", [element])
         // Text input from xterm goes to the update loop tagged with this tab;
         // the host encodes this path as UTF-8 for the PTY.

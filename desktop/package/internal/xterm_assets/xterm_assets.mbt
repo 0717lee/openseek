@@ -5,6 +5,9 @@ const XtermVersion : String = "5.5.0"
 const FitVersion : String = "0.10.0"
 
 ///|
+const WebLinksVersion : String = "0.11.0"
+
+///|
 const EsbuildVersion : String = "0.28.1"
 
 ///|
@@ -14,7 +17,7 @@ const VendorDir : String = "target/vendor-xterm"
 /// Records which raw upstream browser files are present in the development
 /// cache. A version change invalidates the extracted tree without requiring a
 /// separate clean command.
-const DevelopmentStamp : String = "xterm=\{XtermVersion}\naddon-fit=\{FitVersion}\n"
+const DevelopmentStamp : String = "xterm=\{XtermVersion}\naddon-fit=\{FitVersion}\naddon-web-links=\{WebLinksVersion}\n"
 
 ///|
 const XtermSha256 : String = "bd954fa721872170188cc5d7e83e88db3c83c9a18a4e8d24c2783d26491f59d2"
@@ -23,9 +26,13 @@ const XtermSha256 : String = "bd954fa721872170188cc5d7e83e88db3c83c9a18a4e8d24c2
 const FitSha256 : String = "917ac44972453d5eed52edc1e50260c76398ce48cf2290c2e60671102bba0b33"
 
 ///|
+const WebLinksSha256 : String = "cad54687a1447f87cd8dd9ce454d4d657d18cc7179e9179908f391b4512f74a0"
+
+///|
 const EntrySource : String =
   #|import { Terminal } from "./xterm/lib/xterm.js";
   #|import { FitAddon } from "./fit/lib/addon-fit.js";
+  #|import { WebLinksAddon } from "./web-links/lib/addon-web-links.js";
   #|
   #|// Decode one base64 chunk of raw PTY bytes into the terminal; report the
   #|// byte count through `done` once xterm has rendered it (the flow-control
@@ -37,7 +44,7 @@ const EntrySource : String =
   #|  term.write(out, () => done(out.length));
   #|};
   #|
-  #|globalThis.__openseek_xterm = { Terminal, FitAddon, writeBase64 };
+  #|globalThis.__openseek_xterm = { Terminal, FitAddon, WebLinksAddon, writeBase64 };
   #|
 
 ///|
@@ -111,6 +118,15 @@ fn Archive::fit() -> Archive {
     filename: "addon-fit-\{FitVersion}.tgz",
     url: "https://registry.npmjs.org/@xterm/addon-fit/-/addon-fit-\{FitVersion}.tgz",
     sha256: FitSha256,
+  }
+}
+
+///|
+fn Archive::web_links() -> Archive {
+  {
+    filename: "addon-web-links-\{WebLinksVersion}.tgz",
+    url: "https://registry.npmjs.org/@xterm/addon-web-links/-/addon-web-links-\{WebLinksVersion}.tgz",
+    sha256: WebLinksSha256,
   }
 }
 
@@ -205,17 +221,20 @@ fn AssetBuilder::esbuild_binary(
 ///|
 /// Prepare xterm's already browser-ready upstream UMD files for development.
 /// No JavaScript is bundled or minified: the dev HTML loads xterm and
-/// addon-fit separately, then installs OpenSeek's small global adapter.
+/// addon-fit/addon-web-links separately, then installs OpenSeek's small global
+/// adapter.
 pub async fn stage_development(workspace : @packaging.Workspace) -> Unit {
   let builder : AssetBuilder = { workspace, }
   let stamp = builder.at("work/development-versions")
   let xterm_javascript = builder.at("work/xterm/lib/xterm.js")
   let xterm_stylesheet = builder.at("work/xterm/css/xterm.css")
   let fit_javascript = builder.at("work/fit/lib/addon-fit.js")
+  let web_links_javascript = builder.at("work/web-links/lib/addon-web-links.js")
   let mut reusable = @asyncfs.exists(stamp) &&
     @asyncfs.exists(xterm_javascript) &&
     @asyncfs.exists(xterm_stylesheet) &&
-    @asyncfs.exists(fit_javascript)
+    @asyncfs.exists(fit_javascript) &&
+    @asyncfs.exists(web_links_javascript)
   if reusable {
     reusable = @asyncfs.read_file(stamp).text() == DevelopmentStamp
   }
@@ -225,13 +244,15 @@ pub async fn stage_development(workspace : @packaging.Workspace) -> Unit {
   @packaging.ensure_dir(builder.at("cache"))
   let xterm_archive = builder.ensure_cached_archive(Archive::xterm())
   let fit_archive = builder.ensure_cached_archive(Archive::fit())
+  let web_links_archive = builder.ensure_cached_archive(Archive::web_links())
   builder.extract_archive(xterm_archive, builder.at("work/xterm"))
   builder.extract_archive(fit_archive, builder.at("work/fit"))
+  builder.extract_archive(web_links_archive, builder.at("work/web-links"))
   @packaging.write_text(stamp, DevelopmentStamp)
 }
 
 ///|
-/// Download verified, pinned xterm.js, addon-fit, and native esbuild archives,
+/// Download verified, pinned xterm.js, addons, and native esbuild archives,
 /// then generate the browser bundle and stylesheet under `target/vendor-xterm`.
 ///
 /// Only downloaded archives are reused. Each packaging run recreates the
@@ -244,12 +265,14 @@ pub async fn build(
   @packaging.ensure_dir(builder.at("cache"))
   let xterm_archive = builder.ensure_cached_archive(Archive::xterm())
   let fit_archive = builder.ensure_cached_archive(Archive::fit())
+  let web_links_archive = builder.ensure_cached_archive(Archive::web_links())
   let esbuild_archive = builder.ensure_cached_archive(
     Archive::esbuild(esbuild_target),
   )
   @packaging.remove_path_if_exists(builder.at("work"))
   builder.extract_archive(xterm_archive, builder.at("work/xterm"))
   builder.extract_archive(fit_archive, builder.at("work/fit"))
+  builder.extract_archive(web_links_archive, builder.at("work/web-links"))
   builder.extract_archive(esbuild_archive, builder.at("work/esbuild"))
   @packaging.write_text(builder.at("work/entry.js"), EntrySource)
   @packaging.remove_path_if_exists(builder.at("dist"))
