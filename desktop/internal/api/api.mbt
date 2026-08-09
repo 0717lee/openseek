@@ -274,7 +274,7 @@ test "remote endpoint catalog has one entry per command name" {
     }
     names.push(name)
   }
-  assert_eq(names.length(), 54)
+  assert_eq(names.length(), 55)
   assert_true(names.contains("agent.start"))
   assert_true(names.contains("agent.goal"))
   assert_true(names.contains("app.info"))
