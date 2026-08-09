@@ -2330,15 +2330,12 @@ fn update_msg(
       )
     }
     ToggleWorktreeMode => {
-      // Only a workspace conversation with no durable history (and no
-      // bound environment yet) can still choose where its first prompt
-      // runs. Durable emptiness, not `has_begun` — the toggle must stay
-      // available after a rejected setup attempt's overlay notice, or the
-      // user is locked into the failing mode.
+      // One predicate with the chip that offers this — see
+      // `can_choose_launch_mode`. Two spellings of "may still choose" is how
+      // the toggle stayed live through a placement chain the chip had
+      // already committed to.
       let conv = model.active()
-      if conv.workspace is Some(_) &&
-        conv.messages.length() == 0 &&
-        conv.worktree is None {
+      if conv.can_choose_launch_mode() {
         (
           @cmd.none,
           model.replace_conversation({

@@ -429,6 +429,27 @@ fn Conversation::wants_fresh_worktree(self : Conversation) -> Bool {
 }
 
 ///|
+/// Whether the composer may still choose where this conversation runs.
+///
+/// Durable emptiness, not `has_begun`: a rejected setup attempt leaves a
+/// local overlay notice, and hiding the toggle then would lock the user into
+/// retrying the failing create with no way back to Local.
+///
+/// A command already sent settles it, though — that command *is* the choice
+/// being exercised. Both the start and the goal chains create the worktree
+/// and bind it asynchronously, and neither re-reads the mode when the reply
+/// lands, so flipping the chip during that window would not move what is in
+/// flight. It would only leave the chip disagreeing with where the
+/// conversation is being pinned.
+fn Conversation::can_choose_launch_mode(self : Conversation) -> Bool {
+  self.workspace is Some(_) &&
+  self.messages.length() == 0 &&
+  self.worktree is None &&
+  self.run is NoRun(..) &&
+  self.goal_pending is None
+}
+
+///|
 /// The composer's launch-mode chip: visible while the conversation can
 /// still choose (a workspace conversation that has not begun), fixed to
 /// the worktree's name once the chain has bound one.
@@ -436,9 +457,6 @@ fn worktree_mode_chip(
   dispatch : @cmd.Emit[Msg],
   conv : Conversation,
 ) -> @html.Html? {
-  // Durable emptiness, not `has_begun`: a rejected setup attempt leaves a
-  // local overlay notice, and hiding the toggle then would lock the user
-  // into retrying the failing create with no way back to Local.
   guard conv.workspace is Some(_) && conv.messages.length() == 0 else {
     return None
   }
@@ -458,6 +476,19 @@ fn worktree_mode_chip(
   } else {
     (
       "composer-worktree", "Local", "Runs in the workspace itself — click to run in a fresh git worktree",
+    )
+  }
+  // The choice is being exercised right now: something is out that will pin
+  // this conversation's placement, and it read the mode when it was sent.
+  // Still say which mode that was — it is about to become the answer — but
+  // as a statement rather than a control, since clicking could not change it.
+  guard conv.can_choose_launch_mode() else {
+    return Some(
+      @html.span(
+        class~,
+        title="Setting this chat up to run \{if conv.worktree_mode { "in a fresh git worktree" } else { "in the workspace itself" }}",
+        [icon(icon_worktree), @html.span(label)],
+      ),
     )
   }
   Some(
@@ -623,6 +654,63 @@ test "the launch mode toggles only before the conversation begins" {
   // A scratch conversation has no workspace to fork from.
   let (_, scratch) = update(dispatch, ToggleWorktreeMode, test_model())
   assert_false(scratch.active().worktree_mode)
+}
+
+///|
+#warnings("-alert_unstable")
+test "the launch mode stops being a choice once a placement is in flight" {
+  let dispatch = test_dispatch()
+  let workspace = @interop.ChannelId::Local.test_resource("/proj")
+  let composing : Conversation = {
+    ..test_conversation(),
+    workspace: Some(workspace),
+    worktree_mode: true,
+  }
+  // `worktree.create` is out. The chain read the mode when it was sent and
+  // will bind whatever comes back, so a flip now could not move it — it would
+  // only leave the chip disagreeing with where the session is being pinned.
+  // Neither of these adds a message, which is why durable emptiness alone was
+  // not enough to close the window.
+  for
+    pinned in [
+      { ..composing, goal_pending: Some({ id: "goal-1", request: Clearing }) },
+      { ..composing, run: Starting(submission_id="s-1") },
+    ] {
+    let (_, kept) = update(
+      dispatch,
+      ToggleWorktreeMode,
+      test_model().replace_conversation(pinned),
+    )
+    assert_true(kept.active().worktree_mode)
+    // And the chip says which mode is being established rather than offering
+    // a control that cannot do anything.
+    let markup = @rabbita.render_to_string(() => {
+      @rabbita.Val::constant(
+        match worktree_mode_chip(dispatch, pinned) {
+          Some(chip) => chip
+          None => @html.div("")
+        },
+      )
+    })
+    assert_true(markup.contains("Worktree"))
+    assert_false(markup.contains("<button"))
+  }
+  // Still a choice while nothing is out.
+  let (_, free) = update(
+    dispatch,
+    ToggleWorktreeMode,
+    test_model().replace_conversation(composing),
+  )
+  assert_false(free.active().worktree_mode)
+  let offered = @rabbita.render_to_string(() => {
+    @rabbita.Val::constant(
+      match worktree_mode_chip(dispatch, composing) {
+        Some(chip) => chip
+        None => @html.div("")
+      },
+    )
+  })
+  assert_true(offered.contains("<button"))
 }
 
 ///|
