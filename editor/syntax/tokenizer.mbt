@@ -1,10 +1,84 @@
 ///|
-/// Carried lexer state between lines, the `IState` of Monaco's
-/// tokenization contract. The representation is a single string (like
-/// Monaco's interned Monarch stacks): languages encode their own state
-/// stack or payload into it, and derived equality is what callers use to
-/// detect re-tokenization convergence.
-pub(all) struct TokenizerState(String) derive(Eq, Debug)
+/// Carried lexer state between lines, the `IState` of Monaco's tokenization
+/// contract. The character array is an immutable-by-API snapshot: its storage
+/// stays private, while stack edits copy before mutation so cached states never
+/// alias a tokenization run's working state. Derived equality is what callers
+/// use to detect re-tokenization convergence.
+pub struct TokenizerState {
+  priv modes : Array[Char]
+} derive(Eq)
+
+///|
+/// Creates a tokenizer state from its compact textual form. Keeping this as the
+/// type's named constructor preserves the existing `TokenizerState("...")`
+/// call syntax while the stored representation remains opaque.
+pub fn TokenizerState::TokenizerState(encoded : StringView) -> TokenizerState {
+  let modes : Array[Char] = []
+  for mode in encoded {
+    modes.push(mode)
+  }
+  { modes, }
+}
+
+///|
+/// Creates a tokenizer state by copying a mode sequence into a private
+/// snapshot. Subsequent mutations of the source array cannot change the state.
+pub fn TokenizerState::from_modes(modes : ArrayView[Char]) -> TokenizerState {
+  { modes: modes.to_owned() }
+}
+
+///|
+/// Returns a mutable copy of the state's modes. Mutating the result cannot
+/// change this state or any cached line state that shares its snapshot.
+pub fn TokenizerState::to_modes(self : TokenizerState) -> Array[Char] {
+  self.modes.copy()
+}
+
+///|
+/// Number of modes in this state.
+pub fn TokenizerState::mode_count(self : TokenizerState) -> Int {
+  self.modes.length()
+}
+
+///|
+/// Top mode, or `None` for an empty state.
+pub fn TokenizerState::last_mode(self : TokenizerState) -> Char? {
+  self.modes.last()
+}
+
+///|
+/// Returns a new state with `mode` pushed. The receiver remains unchanged.
+pub fn TokenizerState::push_mode(
+  self : TokenizerState,
+  mode : Char,
+) -> TokenizerState {
+  let modes = self.modes.copy()
+  modes.push(mode)
+  { modes, }
+}
+
+///|
+/// Returns a new state without its top mode. An empty state is returned as-is.
+/// The receiver remains unchanged.
+pub fn TokenizerState::pop_mode(self : TokenizerState) -> TokenizerState {
+  if self.modes.length() == 0 {
+    return self
+  }
+  let modes = self.modes.copy()
+  ignore(modes.pop())
+  { modes, }
+}
+
+///|
+/// Retains the historical compact debug form while converting the array back
+/// to text only when diagnostics or snapshots request it.
+pub impl Debug for TokenizerState with fn to_repr(self) {
+  let encoded = StringBuilder()
+  for mode in self.modes {
+    encoded.write_char(mode)
+  }
+  Repr::ctor("TokenizerState", [(None, Repr(encoded.to_string()))])
+}
 
 ///|
 /// Highlight classification, widened toward Monaco's standard token
@@ -263,26 +337,15 @@ pub fn push_token(
 /// Shared by the language lexers (`lang_*`), which otherwise carry identical
 /// copies. Inverse of `encode_mode_stack`.
 pub fn decode_mode_stack(state : TokenizerState) -> Array[Char] {
-  if state.0 is "" {
+  if state.mode_count() == 0 {
     return ['n']
   }
-  // Decoded once per tokenized line: the direct char loop lowers to a plain
-  // string scan, where `String::to_array` would allocate an iterator chain
-  // on the JS target.
-  let stack : Array[Char] = []
-  for mode in state.0 {
-    stack.push(mode)
-  }
-  stack
+  state.to_modes()
 }
 
 ///|
 /// The mode stack packed back into a `TokenizerState` for the next line.
 /// Inverse of `decode_mode_stack`.
 pub fn encode_mode_stack(stack : Array[Char]) -> TokenizerState {
-  let encoded = StringBuilder()
-  for mode in stack {
-    encoded.write_char(mode)
-  }
-  TokenizerState(encoded.to_string())
+  TokenizerState::from_modes(stack)
 }

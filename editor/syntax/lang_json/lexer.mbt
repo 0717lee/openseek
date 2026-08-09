@@ -8,6 +8,13 @@ struct JsonTokenizer {
 }
 
 ///|
+/// JSON's two immutable carried states, allocated once and compared by value.
+let json_normal_state : @syntax.TokenizerState = TokenizerState("n")
+
+///|
+let json_comment_state : @syntax.TokenizerState = TokenizerState("c")
+
+///|
 /// Creates the JSON/JSONC tokenizer.
 pub fn JsonTokenizer::JsonTokenizer() -> JsonTokenizer {
   { _unit: () }
@@ -16,7 +23,7 @@ pub fn JsonTokenizer::JsonTokenizer() -> JsonTokenizer {
 ///|
 /// Initial JSON lexer state outside block comments.
 pub impl @syntax.LineTokenizer for JsonTokenizer with fn initial_state(_self) {
-  TokenizerState("n")
+  json_normal_state
 }
 
 ///|
@@ -28,7 +35,7 @@ pub impl @syntax.LineTokenizer for JsonTokenizer with fn tokenize_line(
 ) {
   let tokens : Array[@syntax.LineToken] = []
   let in_comment = for at = 0, view = line_text[:], in_comment = state ==
-                         TokenizerState("c"); view.length() > 0; {
+                         json_comment_state; view.length() > 0; {
     let (op, rest) = if in_comment {
       comment_step(view)
     } else {
@@ -50,7 +57,7 @@ pub impl @syntax.LineTokenizer for JsonTokenizer with fn tokenize_line(
   } nobreak {
     in_comment
   }
-  (tokens, TokenizerState(if in_comment { "c" } else { "n" }))
+  (tokens, if in_comment { json_comment_state } else { json_normal_state })
 }
 
 ///|

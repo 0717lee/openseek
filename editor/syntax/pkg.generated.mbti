@@ -65,7 +65,17 @@ pub fn TokenizationRegistry::on_did_change(Self, (TokenizationChangedEvent) -> U
 pub fn TokenizationRegistry::register(Self, String, &LineTokenizer) -> @common.Disposable
 pub fn TokenizationRegistry::set_color_map(Self, Array[String]) -> Unit
 
-pub(all) struct TokenizerState(String) derive(Eq, @debug.Debug)
+pub struct TokenizerState {
+  // private fields
+} derive(Eq)
+pub fn TokenizerState::TokenizerState(StringView) -> Self
+pub fn TokenizerState::from_modes(ArrayView[Char]) -> Self
+pub fn TokenizerState::last_mode(Self) -> Char?
+pub fn TokenizerState::mode_count(Self) -> Int
+pub fn TokenizerState::pop_mode(Self) -> Self
+pub fn TokenizerState::push_mode(Self, Char) -> Self
+pub fn TokenizerState::to_modes(Self) -> Array[Char]
+pub impl @debug.Debug for TokenizerState
 
 // Type aliases
 

@@ -18,6 +18,11 @@ struct MoonBitTokenizer {
 }
 
 ///|
+/// Shared immutable base stack; MoonBit's lexer always returns to it at the
+/// end of a line.
+let moonbit_normal_state : @syntax.TokenizerState = TokenizerState("n")
+
+///|
 /// Creates the MoonBit tokenizer.
 pub fn MoonBitTokenizer::MoonBitTokenizer() -> MoonBitTokenizer {
   { _unit: () }
@@ -26,7 +31,7 @@ pub fn MoonBitTokenizer::MoonBitTokenizer() -> MoonBitTokenizer {
 ///|
 /// Initial MoonBit lexer mode stack.
 pub impl @syntax.LineTokenizer for MoonBitTokenizer with fn initial_state(_) {
-  TokenizerState("n")
+  moonbit_normal_state
 }
 
 ///|
@@ -62,7 +67,7 @@ pub impl @syntax.LineTokenizer for MoonBitTokenizer with fn tokenize_line(
     }
     continue at + consumed, rest
   }
-  (tokens, TokenizerState("n"))
+  (tokens, moonbit_normal_state)
 }
 
 ///|
