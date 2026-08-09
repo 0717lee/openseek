@@ -12,6 +12,9 @@ test('runs the viewer and tree from in-memory providers without a server', async
   // The embedding host auto-opens src/main.mbt; auto-reveal expands src.
   await expect(page.locator('.editor-shell')).toHaveAttribute('data-status', 'ready');
   await expect(page.locator('.monaco-editor.readonly-editor')).toContainText('fn main');
+  await expect
+    .poll(async () => (await page.locator('.embedded-viewer-stack').boundingBox())?.width ?? 0)
+    .toBeGreaterThan(400);
 
   // Real language highlighting with no server: the MoonBit lexer is
   // registered by the embedding host, not fetched from anywhere.
@@ -30,6 +33,9 @@ test('runs the viewer and tree from in-memory providers without a server', async
   await expect(diffToggle).toHaveAttribute('aria-pressed', 'true');
   const diff = page.locator('.moonbit-unified-diff');
   await expect(diff).toBeVisible();
+  await expect
+    .poll(async () => (await diff.boundingBox())?.width ?? 0)
+    .toBeGreaterThan(400);
   await expect(
     diff.locator('[data-line-kind=\"deletion\"]', { hasText: 'println(\"hello\")' }),
   ).toHaveAttribute('data-original-line', '3');

@@ -442,25 +442,26 @@ fn view_embed(
             tree_html,
           ],
         ),
-        // The stable view host: the viewer attaches its imperative DOM
-        // into this element after the first paint; the shell must never
-        // render vdom children into it.
-        @html.div(
-          class=if model.diff_visible {
-            "viewer-host moonbit-unified-diff-surface-hidden"
-          } else {
-            "viewer-host"
-          },
-          ([] : Array[@html.Html]),
-        ),
-        @html.div(
-          class=if model.diff_visible {
-            "viewer-host unified-diff-host"
-          } else {
-            "viewer-host unified-diff-host moonbit-unified-diff-surface-hidden"
-          },
-          ([] : Array[@html.Html]),
-        ),
+        @html.div(class="embedded-viewer-stack", [
+          // Stable imperative-DOM hosts share the grid's content cell; the
+          // shell never renders vdom children into either host.
+          @html.div(
+            class=if model.diff_visible {
+              "viewer-host moonbit-unified-diff-surface-hidden"
+            } else {
+              "viewer-host"
+            },
+            ([] : Array[@html.Html]),
+          ),
+          @html.div(
+            class=if model.diff_visible {
+              "viewer-host unified-diff-host"
+            } else {
+              "viewer-host unified-diff-host moonbit-unified-diff-surface-hidden"
+            },
+            ([] : Array[@html.Html]),
+          ),
+        ]),
       ]),
     ],
   )
