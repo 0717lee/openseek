@@ -203,7 +203,7 @@ async fn dispatch_kind(
   // 3-step experiment, a scout greps compiler binaries for 60 steps).
   match kind {
     "explore" => {
-      guard model.api_key(matches) is Some(api_key) else {
+      guard model.api_key(matches.values) is Some(api_key) else {
         fail("an API key is required for \{model}: pass --api-key")
       }
       let scratch_dir = new_scratch_lab("openseek-explore-lab-")
@@ -238,7 +238,7 @@ async fn dispatch_kind(
           Some({ sha, dirty: dirty is True })
         _ => None
       }
-      guard model.api_key(matches) is Some(api_key) else {
+      guard model.api_key(matches.values) is Some(api_key) else {
         fail("an API key is required for \{model}: pass --api-key")
       }
       let scratch_dir = new_scratch_lab("openseek-review-lab-")
@@ -267,7 +267,7 @@ async fn dispatch_kind(
         @emit.emit(CommandError(error="subrun worker: \{reason}"))
         return None
       }
-      guard model.api_key(matches) is Some(api_key) else {
+      guard model.api_key(matches.values) is Some(api_key) else {
         fail("an API key is required for \{model}: pass --api-key")
       }
       // No scratch lab: the worker's whole worktree is writable, and its
