@@ -499,11 +499,11 @@ fn main {
     let tree_view = embed_tree().view()
     let (model, emit) = @rabbita.create_state(
       { status: "loading", diff_visible: false },
-      update=(emit, msg, model) => {
+      update=(model, msg, emit) => {
         let (cmd, model) = update_embed(emit, msg, model)
         (model, cmd)
       },
-      subscriptions=(emit, _model) => {
+      subscriptions=(_model, emit) => {
         startup_sub(
           @cmd.custom_cmd(scheduler => {
             embed_dispatch.val = Some(msg => scheduler.add(emit(msg)))

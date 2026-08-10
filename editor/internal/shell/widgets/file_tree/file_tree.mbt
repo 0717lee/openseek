@@ -32,7 +32,7 @@ pub fn FileTree::FileTree(
     selected: None,
     pending_reveal: None,
   }
-  let (state, emit) = @rabbita.create_state(model, update=(emit, msg, model) => {
+  let (state, emit) = @rabbita.create_state(model, update=(model, msg, emit) => {
     let (cmd, model) = model.update(provider, on_open, emit, msg)
     (model, cmd)
   })

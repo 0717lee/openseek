@@ -277,11 +277,11 @@ fn mount_app() -> Unit {
     let tree_view = workspace_file_tree().view()
     let (state, emit) = @rabbita.create_state(
       initial_workbench_model(),
-      update=(emit, msg, state) => {
+      update=(state, msg, emit) => {
         let (cmd, model) = update_workbench(emit, msg, state)
         (model, cmd)
       },
-      subscriptions=(emit, _state) => {
+      subscriptions=(_state, emit) => {
         @sub.batch([
           startup_sub(
             @cmd.custom_cmd(scheduler => {
