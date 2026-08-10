@@ -1672,7 +1672,7 @@ fn transcript_view(
   // Sub-runs in flight sit at the tail, where the turn currently is: their
   // tool call is what the conversation is blocked on, and it can block for
   // forty-five minutes.
-  for lane in conv.subruns {
+  for lane in conv.visible_subruns() {
     items.push(subrun_lane_view(lane))
   }
   let children = [@html.div(id="stream", class="stream", items)]

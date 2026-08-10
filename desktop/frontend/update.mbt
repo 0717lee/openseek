@@ -948,31 +948,34 @@ fn apply_engine_event(
     // id (a reconnect replaying the bracket) refreshes rather than doubles.
     SubrunOpened(id~, kind~, label~) => {
       let subruns = conv.subruns.filter(lane => lane.id != id)
-      subruns.push({ id, kind, label, steps: 0, activity: "" })
+      subruns.push({
+        id,
+        kind,
+        label,
+        steps: 0,
+        activity: "",
+        run: event_run_id,
+      })
       (false, { ..conv, subruns, })
     }
     // Closed: drop the lane and say what it cost, which is the one place
     // those numbers are ever reported.
+    //
+    // The cost goes in the retained OVERLAY, not in `messages`. Nothing
+    // durable records a sub-run, and the finish of the enclosing run starts
+    // a snapshot whose `adopt_snapshot` replaces `messages` wholesale with
+    // durable items — a bubble there would be erased seconds after it
+    // appeared, which is the whole report gone.
     SubrunClosed(id~, status~, steps~, tokens~) => {
       let closed = conv.subruns.filter(lane => lane.id == id)
       let kind = match closed {
         [lane, ..] => lane.kind
         [] => "subrun"
       }
-      let conv = {
-        ..conv,
-        subruns: conv.subruns.filter(lane => lane.id != id),
-        messages: [
-          ..conv.messages,
-          {
-            kind: Assistant(is_danger=status != "captured"),
-            content: "\{kind} \{id}: \{status} · \{steps} step(s) · \{compact_count(tokens)} tok",
-            // A client-local bubble, never a durable event: a sub-run's cost
-            // is reported by its finish bracket and nothing writes it down.
-            ts: None,
-          },
-        ],
-      }
+      let conv = { ..conv, subruns: conv.subruns.filter(lane => lane.id != id) }.append_local_notice(
+        Assistant(is_danger=status != "captured"),
+        "\{kind} \{id}: \{status} · \{steps} step(s) · \{compact_count(tokens)} tok",
+      )
       (true, conv)
     }
     Usage(prompt_tokens~, completion_tokens~) =>
@@ -5585,6 +5588,52 @@ fn sessions_loaded(
   request_generation? : Int = 0,
 ) -> Msg {
   on_home(SessionsLoaded(items, connection_generation=0, request_generation~))
+}
+
+///|
+/// A lane belongs to its turn. The finish bracket that retires it is not
+/// replayed, so a dropped connection or an engine that dies mid-sub-run must
+/// not leave a pulsing lane behind.
+test "a lane outlives neither its run nor a missing finish bracket" {
+  let conv = { ..test_conversation(), run: Open(run_id="r1", stage=Opened) }
+  let (_, opened) = apply_engine_event(
+    conv,
+    SubrunOpened(id="sr-1", kind="explore", label="where is X"),
+    Some("r1"),
+  )
+  inspect(opened.visible_subruns().length(), content="1")
+  // The run settles without a finish bracket ever arriving.
+  let settled = { ..opened, run: NoRun(ended=Some(RunFailed)) }
+  inspect(settled.visible_subruns().length(), content="0")
+  // And the stranded lane does not reappear inside the NEXT turn.
+  let next_turn = { ..settled, run: Open(run_id="r2", stage=Opened) }
+  inspect(next_turn.visible_subruns().length(), content="0")
+}
+
+///|
+/// The cost report is the only place a sub-run's steps and tokens are ever
+/// shown, and nothing durable records them — so it has to survive the
+/// snapshot the enclosing run's finish kicks off, which replaces `messages`.
+test "a sub-run's cost is reported in the retained overlay" {
+  let conv = { ..test_conversation(), run: Open(run_id="r1", stage=Opened) }
+  let (_, opened) = apply_engine_event(
+    conv,
+    SubrunOpened(id="sr-1", kind="explore", label="where is X"),
+    Some("r1"),
+  )
+  let (grew, closed) = apply_engine_event(
+    opened,
+    SubrunClosed(id="sr-1", status="captured", steps=37, tokens=12_449),
+    Some("r1"),
+  )
+  assert_true(grew)
+  inspect(closed.visible_subruns().length(), content="0")
+  // In the overlay, not in `messages`.
+  inspect(closed.messages.length(), content="0")
+  inspect(
+    closed.overlay.map(notice => notice.content).join("; "),
+    content="explore sr-1: captured · 37 step(s) · 12.4k tok",
+  )
 }
 
 ///|

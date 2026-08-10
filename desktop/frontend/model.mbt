@@ -389,6 +389,12 @@ pub(all) struct SubrunLane {
   label : String
   steps : Int
   activity : String
+  // The run that launched it. A lane is only ever meaningful inside its own
+  // turn, and the finish bracket that would retire it is not replayed: a
+  // connection that drops across it, or an engine that dies before emitting
+  // it, would otherwise leave a pulsing lane behind forever. Ownership makes
+  // that unrepresentable instead of relying on catching every settle path.
+  run : String?
 } derive(Eq)
 
 ///|
@@ -2915,6 +2921,16 @@ fn Conversation::has_begun(self : Conversation) -> Bool {
 /// composer, sidebar pulse, and self-update busy check all gate on this.
 fn Conversation::is_running(self : Conversation) -> Bool {
   !(self.run is NoRun(..))
+}
+
+///|
+/// The sub-run lanes worth drawing: those belonging to the run that is open
+/// right now. An idle conversation shows none, and a lane stranded by a
+/// missing finish bracket cannot outlive its turn — the next run's lanes
+/// carry the next run's id.
+fn Conversation::visible_subruns(self : Conversation) -> Array[SubrunLane] {
+  guard self.run is Open(run_id~, ..) else { return [] }
+  self.subruns.filter(lane => lane.run is Some(owner) && owner == run_id)
 }
 
 ///|
