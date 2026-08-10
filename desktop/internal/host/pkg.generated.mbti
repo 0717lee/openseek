@@ -3,6 +3,7 @@ package "openseek_desktop/internal/host"
 
 import {
   "moonbitlang/async",
+  "moonbitlang/core/debug",
   "openseek_desktop/internal/endpoint",
   "openseek_desktop/internal/pathx",
   "openseek_desktop/internal/protocol",
@@ -30,11 +31,11 @@ pub fn[G] spawn_host_pumps(@async.TaskGroup[G], HostState, async (@protocol.Noti
 // Errors
 pub(all) suberror HostError {
   HostError(String)
-}
+} derive(@debug.Debug)
 
 pub(all) suberror PayloadError {
   PayloadError(String)
-}
+} derive(@debug.Debug)
 
 // Types and methods
 type HostConnection
