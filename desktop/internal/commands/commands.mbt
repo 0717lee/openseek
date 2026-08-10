@@ -186,6 +186,10 @@ pub let codex_server_request_respond : Command[Json, Json] = Command(
 pub let codex_file_search : Command[Json, Json] = Command("codex.file.search")
 
 ///|
+/// List the Codex app-server skills available to one authorized thread cwd.
+pub let codex_skills_list : Command[Json, Json] = Command("codex.skills.list")
+
+///|
 pub let codex_account_read : Command[Json, Json] = Command("codex.account.read")
 
 ///|

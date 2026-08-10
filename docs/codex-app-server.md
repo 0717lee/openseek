@@ -87,6 +87,19 @@ cwd. OpenSeek does not guess a filesystem directory from a Codex thread id.
 The terminal can still open a scratch shell for an active thread whose cwd is
 absent.
 
+After a file read succeeds, the editor reconstructs the exact root from the
+host-returned absolute file and the requested relative path. Diagnostics,
+hover, definition, and references send that root plus a relative path to the
+language host, so a Codex cwd or linked worktree does not have to appear in
+OpenSeek's attached-workspace list.
+
+The Codex composer uses the same workspace-symbol service as the OpenSeek
+composer: `#query` calls the Desktop host's `lsp.workspace_symbols` method and
+keeps the returned file and range when the symbol is selected. `@query` is
+reserved for Codex app-server's `fuzzyFileSearch`; selected files remain native
+app-server mention inputs. Both searches are scoped to the selected thread's
+exact cwd.
+
 A successful app-server `thread/start`, `thread/resume`, or `thread/read`
 reply authorizes only its exact `(thread id, cwd)` pair for the lifetime of the
 Desktop process. Files and Terminal must present that same pair; a browser

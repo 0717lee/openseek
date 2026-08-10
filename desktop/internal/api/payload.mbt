@@ -53,6 +53,15 @@ priv struct CodexFileSearchPayload {
 } derive(FromJson)
 
 ///|
+/// A skill catalog request is scoped to the cwd previously authorized by this
+/// exact app-server thread. The page cannot scan an arbitrary directory.
+priv struct CodexSkillsListPayload {
+  thread_id : String
+  cwd : String
+  force_reload : Bool
+} derive(FromJson)
+
+///|
 test "start and steer payloads preserve submission ids" {
   let start : @protocol.StartPayload = @json.from_json({
     "task": "hello",

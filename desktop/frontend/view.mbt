@@ -151,7 +151,9 @@ fn session_row(
 ) -> @html.Html {
   // Session ids can collide across devices, so the accent pill needs the
   // channel to agree too.
-  let active = channel == model.focused && session_id == model.active_session
+  let active = model.screen is Chat &&
+    channel == model.focused &&
+    session_id == model.active_session
   let conv = model.find_conversation(channel, session_id)
   let running = conv is Some(conv) && conv.is_running()
   // The row's status dot: pulsing while a run is in flight, then — when the
@@ -330,11 +332,9 @@ fn device_section_rows(
     }
     false
   }
-  // Two sections, matching the projects-then-chats shape chat apps settled
-  // on: "Projects" lists each attached project as a folder row with its
-  // conversations nested beneath, "Chats" holds the default store's loose
-  // conversations. The section headings share one style; the ＋ on each adds
-  // to that section (a project, or a Scratch chat).
+  // Four peer sections share one disclosure treatment and one scroll lane.
+  // Gate OpenSeek highlights on Chat so only the visible source is selected.
+  let chat_selected = model.screen is Chat && dev.channel == model.focused
   rows.push(
     @sidebar.Section::{
       label: "Projects",
@@ -345,7 +345,7 @@ fn device_section_rows(
         command: dispatch(PickProject(dev.channel)),
         disabled: false,
       }),
-      selected: false,
+      selected: chat_selected && dev.active_project is Some(_),
     }.render(),
   )
   if !model.projects_collapsed {
@@ -387,6 +387,76 @@ fn device_section_rows(
       }
     }
   }
+  if dev.channel == model.focused {
+    rows.push(
+      @sidebar.Section::{
+        label: "Codex",
+        toggle: dispatch(ToggleCodexSection),
+        collapsed: model.codex_collapsed,
+        action: Some({
+          title: "New Codex conversation",
+          command: dispatch(CodexNewThread),
+          disabled: !model.codex.can_start_thread(),
+        }),
+        selected: model.screen is Codex,
+      }.render(),
+    )
+    if !model.codex_collapsed {
+      for
+        row in model.codex.sidebar_rows(@codex.SidebarActions::{
+          selected: model.screen is Codex,
+          open: dispatch(OpenCodex),
+          start_thread: cwd => dispatch(CodexNewThreadIn(cwd)),
+          open_thread: thread_id => dispatch(CodexOpenThread(thread_id)),
+          archive_thread: thread_id => dispatch(CodexArchiveThread(thread_id)),
+          project_label: path => {
+            match @resource.of_path(model.focused, path) {
+              Some(workspace) => @resource.label(workspace)
+              None => path
+            }
+          },
+          workspace_row: (title, label, active, new_thread) => {
+            let actions : Array[@sidebar.WorkspaceAction] = []
+            if new_thread is Some(command) {
+              actions.push({
+                title: "New Codex conversation in this workspace",
+                command,
+                image: icon_add,
+              })
+            }
+            @sidebar.WorkspaceRow::{ title, label, active, actions }.render()
+          },
+          conversation_row: (title, label, active, running, open, archive) => {
+            let status : Array[@html.Html] = []
+            if running {
+              status.push(@html.span(class="run-dot accent pulse", ""))
+            }
+            let row_archive = if archive is Some(command) {
+              Some(@sidebar.ConversationArchive::{
+                title: "Archive Codex conversation",
+                command,
+              })
+            } else {
+              None
+            }
+            @sidebar.ConversationRow::{
+              title,
+              label,
+              open,
+              nested: true,
+              subrun: false,
+              active,
+              running,
+              subruns: @sidebar.NoSubruns,
+              status,
+              archive: row_archive,
+            }.render()
+          },
+        }) {
+        rows.push(row)
+      }
+    }
+  }
   rows.push(
     @sidebar.Section::{
       label: "Chats",
@@ -397,7 +467,7 @@ fn device_section_rows(
         command: dispatch(NewChatIn(dev.channel, None)),
         disabled: false,
       }),
-      selected: false,
+      selected: chat_selected && dev.active_project is None,
     }.render(),
   )
   if !model.chats_collapsed {
@@ -411,10 +481,7 @@ fn device_section_rows(
       archived~,
     )
   }
-  // Archived conversations fold behind a collapsed group at the end of the
-  // list. Their records live in the store's `archived` twin, so they come
-  // from the host's archived reply, not the live list; each row carries a
-  // restore control instead of the archive one.
+  // Archived records are a peer section backed by the store's archived twin.
   let archived_rows : Array[@html.Html] = []
   for row in @transcript.session_tree(dev.archived) {
     // A parent and its archived sub-run records are one conversation. Restore
@@ -426,16 +493,23 @@ fn device_section_rows(
       conv.is_archived_read_only()
     archived_rows.push(archived_row(dispatch, dev.channel, row.item, active))
   }
-  if archived_rows.length() > 0 {
-    rows.push(
-      @html.details(class="sidebar-archived", [
-        @html.summary(
-          class="sidebar-heading archived-heading",
-          "Archived (\{archived_rows.length()})",
-        ),
-        @html.div(class="archived-rows", archived_rows),
-      ]),
-    )
+  rows.push(
+    @sidebar.Section::{
+      label: if archived_rows.is_empty() {
+        "Archived chats"
+      } else {
+        "Archived chats (\{archived_rows.length()})"
+      },
+      toggle: dispatch(ToggleArchivedChatsSection),
+      collapsed: model.archived_chats_collapsed,
+      action: None,
+      selected: false,
+    }.render(),
+  )
+  if !model.archived_chats_collapsed {
+    for row in archived_rows {
+      rows.push(row)
+    }
   }
   rows
 }
@@ -705,10 +779,7 @@ fn archived_row(
 
 ///|
 fn sidebar_view(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
-  let sessions_section : Array[@html.Html] = []
-  for row in session_rows(dispatch, model) {
-    sessions_section.push(row)
-  }
+  let rows = session_rows(dispatch, model)
   // A 46px header matching the content column's topbar, so the sidebar
   // toggle rides the window's left edge here while the sidebar is open and
   // at the same screen position while it's closed — the topbar's left on
@@ -734,8 +805,10 @@ fn sidebar_view(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
   )
   @html.aside([
     @html.div(class="sidebar-header", header_children),
+    // All sources share one scroll lane and appear as parallel foldable
+    // sections rather than nested scrollers.
     @html.div(class="sidebar-main", [
-      @html.div(class="sidebar-section sessions", sessions_section),
+      @html.div(class="sidebar-section sessions", rows),
     ]),
     @html.div(class="sidebar-footer", sidebar_footer_buttons(dispatch, model)),
   ])
@@ -1182,6 +1255,7 @@ fn composer_view(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
     },
     status,
     action,
+    // The shared chrome appends this floating menu after the stable controls.
     overlay: if goal_mode {
       None
     } else {
@@ -2564,10 +2638,11 @@ fn view(
         file_panel_visible,
         @codex.PageActions::{
           toggle_sidebar: dispatch(ToggleSidebar),
-          toggle_terminal: dispatch(Terminal(ToggleTerminal)),
-          toggle_files: dispatch(Dock(TogglePanel)),
-          open_file: (path, range, annotation) =>
-            dispatch(JumpToLocation(path~, range~, annotation~)),
+          toggle_terminal,
+          toggle_files: toggle_right_panel,
+          open_file: (path, range, annotation) => {
+            dispatch(JumpToLocation(path~, range~, annotation~))
+          },
           open_external: url => dispatch(ExternalLinkClicked(url)),
           workspace_label: workspace => @resource.label(workspace),
           transcript: transcript_html,

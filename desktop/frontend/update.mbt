@@ -2304,6 +2304,21 @@ fn update_msg(
       )
       (cmd, { ..model, file_panel: panel })
     }
+    // Definition/References providers live inside the imperative Viewer, but
+    // their host failures belong on the app's ordinary toast rail. Fence the
+    // callback by its original conversation and coalesce identical live
+    // toasts: one user gesture can cause Viewer to ask more than once.
+    FileEditor(@fileeditor.LanguageRequestFailed(owner~, message~)) => {
+      guard model.file_panel.owner == Some(owner) &&
+        file_ctx(model).owner == owner else {
+        return (@cmd.none, model)
+      }
+      if model.notifications.iter().any(toast => toast.message == message) {
+        (@cmd.none, model)
+      } else {
+        model.notify_error(dispatch, message)
+      }
+    }
     CompletionAccept =>
       if model.completion is Some(menu) && menu.menu.current() is Some(item) {
         accept_completion(dispatch, model, menu, item)
@@ -16102,6 +16117,7 @@ test "update is pure: a resolved transcript position opens its owning file" {
             {
               name: "wt-4",
               session: Some("desktop-test"),
+              codex_thread: None,
               path: Some(worktree),
               present: true,
             },
@@ -18388,6 +18404,41 @@ test "file rows and location jumps cannot open while checkout placement is missi
   )
   assert_false(navigation.dock.tabs.contains(@dock.DockTab::File(path~)))
   assert_false(navigation.file_panel.docs.contains(path))
+}
+
+///|
+test "language request failures toast once and remain conversation fenced" {
+  let dispatch = test_dispatch()
+  let model = desktop_model()
+  let owner = file_ctx(model).owner
+  let msg = FileEditor(
+    @fileeditor.LanguageRequestFailed(
+      owner~,
+      message="Go to definition failed: workspace index is unavailable",
+    ),
+  )
+  let (_, first) = update(dispatch, msg, model)
+  let (_, same_input) = update(dispatch, msg, model)
+  assert_true(first.notifications == same_input.notifications)
+  assert_eq(first.notification_seq, same_input.notification_seq)
+  assert_eq(first.notifications.length(), 1)
+  assert_eq(
+    first.notifications[0].message,
+    "Go to definition failed: workspace index is unavailable",
+  )
+  let (_, repeated) = update(dispatch, msg, first)
+  assert_eq(repeated.notifications.length(), 1)
+  let (_, stale) = update(
+    dispatch,
+    FileEditor(
+      @fileeditor.LanguageRequestFailed(
+        owner={ channel: Local, session: "another-conversation" },
+        message="late failure",
+      ),
+    ),
+    repeated,
+  )
+  assert_true(stale.notifications == repeated.notifications)
 }
 
 ///|

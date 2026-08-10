@@ -965,21 +965,28 @@ priv enum QuickOpenItem {
 /// The shell's transient unified Quick Open. `value` is the exact text shown in
 /// the input, including the `#` provider prefix when symbols are active.
 /// Its owner fences results to one conversation; `generation` separates
-/// successive file and symbol queries even when their text is identical. The
-/// page-level counter lives on `Model`, so closing the palette cannot make an
-/// old reply current again.
+/// successive symbol queries even when their text is identical. The page-level
+/// counter lives on `Model`, so closing the palette cannot make an old reply
+/// current again; the shared composer debounce value applies the same delayed
+/// request rule as the two conversation composers.
 priv struct QuickOpen {
   owner : @interop.ConversationKey
   value : String
   items : Array[QuickOpenItem]
   selected : Int
   phase : QuickOpenPhase
+  // The page-lifetime identity used by file-search cache requests. Kept next
+  // to the shared debounce so file and symbol replies fence the same picker
+  // edit even though only symbols need the composer's 150 ms delay.
   generation : Int
+  debounce : @composer.Debounce
+  truncated : Bool
 } derive(Eq)
 
 ///|
-/// File and symbol queries wait briefly while the user types. Ready deliberately
-/// includes an empty result; Failed is reserved for bridge/request failure.
+/// Symbol queries wait briefly while the user types; file filtering is local
+/// once the workspace index is ready. Ready deliberately includes an empty
+/// result; Failed is reserved for bridge/request failure.
 priv enum QuickOpenPhase {
   QuickOpenDebouncing
   QuickOpenLoading
@@ -1297,7 +1304,7 @@ priv struct Model {
   skills_busy : Array[String]
   skills_notice : String
   // The composer completion menu, open only while the active conversation's
-  // draft begins with a `/` or `$` trigger. Lives on the model rather than the
+  // draft has a `/`, `$`, `#`, or `@` trigger. Lives on the model rather than the
   // conversation: it is transient UI for the on-screen composer, recomputed on
   // every keystroke and dismissed on blur, send, or conversation switch.
   completion : Completion?
@@ -1322,8 +1329,8 @@ priv struct Model {
   // Kept whole while the frontend runs, it can only ever be spent.
   git_request_generation : Int
   // Search-provider cache state survives closing the picker. Reopening starts
-  // a fresh cache in the background and continues using the previous key until
-  // the replacement succeeds, matching VS Code's AnythingQuickAccess state.
+  // a replacement in the background and keeps the previous key until the new
+  // scan succeeds.
   file_query_cache : FileQueryCacheState
   // The desktop topbar's app launcher. Installed apps belong to the native
   // host, not a conversation or workspace, so this catalog is probed once
@@ -1955,11 +1962,10 @@ priv enum Msg {
   // measurer or the pane's ResizeObserver; drives view bounds/visibility.
   BrowserPaneMeasured(rect~ : @preview.Rect)
   // The file subsystem's own messages (tree, viewer, diagnostics,
-  // comments), routed to the `fileeditor` package's update. Two exceptions
-  // this update intercepts: `EditorCommentAdded` (the comment becomes a chip
-  // on the composer draft, which only the app model knows about) and
-  // `FileSelected` (which dock tab a tree click opens is the strip's
-  // business).
+  // comments), normally routed to the `fileeditor` package's update. The root
+  // intercepts messages that cross package ownership: comments become
+  // composer chips, file/navigation selections update the dock strip, and a
+  // `LanguageRequestFailed` uses the app-owned toast rail.
   FileEditor(@fileeditor.Msg)
   // Terminal UI, host notifications, and xterm callbacks share one root-owned
   // state machine.

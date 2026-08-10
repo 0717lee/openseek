@@ -4,9 +4,6 @@
 // shortcut bindings; the embedded single-document Viewer remains unaware.
 
 ///|
-const QuickOpenSymbolDebounceMs : Int = 150
-
-///|
 const QuickOpenFileDebounceMs : Int = 100
 
 ///|
@@ -379,6 +376,7 @@ fn Model::restart_quick_open_after_root_change(
     selected: 0,
     phase: QuickOpenLoading,
     generation,
+    debounce: @composer.Debounce(generation~),
   }
   let next = {
     ..self,
@@ -452,6 +450,8 @@ fn open_quick_open(
     selected: 0,
     phase: QuickOpenLoading,
     generation,
+    debounce: @composer.Debounce(generation~),
+    truncated: false,
   }
   let next_base = {
     ..model,
@@ -486,9 +486,9 @@ fn open_quick_open(
 }
 
 ///|
-/// Replace the visible input. File queries filter the latest bounded rows
-/// immediately; both providers then arm a delayed request. Changing providers
-/// also increments the generation so an old reply cannot land in another mode.
+/// Replace the visible input. File queries filter the cached index immediately;
+/// symbol queries clear rows and arm a delayed request. Changing providers also
+/// increments the symbol generation so an old reply cannot land in file mode.
 fn change_quick_open_value(
   dispatch : @cmd.Emit[Msg],
   model : Model,
@@ -498,8 +498,8 @@ fn change_quick_open_value(
   if value == open.value {
     return (@cmd.none, model)
   }
-  let cancel = cancel_quick_open_file_request(dispatch, model, open)
   let generation = model.quick_open_generation + 1
+  let cancel = cancel_quick_open_file_request(dispatch, model, open)
   let keeps_file_rows = open.mode() is QuickOpenFiles && !value.has_prefix("#")
   let next_open : QuickOpen = {
     ..open,
@@ -511,6 +511,8 @@ fn change_quick_open_value(
     },
     selected: 0,
     generation,
+    debounce: @composer.Debounce(generation~),
+    truncated: false,
   }
   let next_base = {
     ..model,
@@ -556,10 +558,15 @@ fn change_quick_open_value(
       (
         @cmd.batch([
           cancel,
-          @cmd.delay(
-            dispatch(QuickOpenDue(owner=open.owner, query~, generation~)),
-            QuickOpenSymbolDebounceMs,
-          ),
+          next_open.debounce.delayed(current_generation => {
+            dispatch(
+              QuickOpenDue(
+                owner=open.owner,
+                query~,
+                generation=current_generation,
+              ),
+            )
+          }),
         ]),
         next,
       )
@@ -610,9 +617,6 @@ fn apply_quick_open_file_cache_loaded(
   }
   let next_cache = { ..cache, active_key: Some(cache_key), loading_key: None }
   let mut next = { ..model, file_query_cache: next_cache }
-  // The first picker run has no old cache to query. Once population settles,
-  // issue the current query. During a debounce, let the already-scheduled due
-  // message retain VS Code's typing delay.
   if next.quick_open is Some(open) &&
     open.owner == owner &&
     open.mode() is QuickOpenFiles &&
@@ -655,7 +659,7 @@ fn apply_quick_open_file_result(
   generation : Int,
   files : Array[@pathx.Relative],
   _from_cache : Bool,
-  _limit_hit : Bool,
+  limit_hit : Bool,
 ) -> (@cmd.Cmd, Model) {
   guard model.quick_open is Some(open) &&
     open.owner == owner &&
@@ -665,12 +669,10 @@ fn apply_quick_open_file_result(
     open.generation == generation else {
     return (@cmd.none, model)
   }
-  let ready = quick_open_with_file_candidates(
-    model,
-    open,
-    files,
-    QuickOpenReady,
-  )
+  let ready = {
+    ..quick_open_with_file_candidates(model, open, files, QuickOpenReady),
+    truncated: limit_hit,
+  }
   (@cmd.none, { ..model, quick_open: Some(ready) })
 }
 
@@ -707,7 +709,7 @@ fn begin_quick_open_symbol_request(
     open.owner == owner &&
     open.mode() is QuickOpenSymbols &&
     open.query() == query &&
-    open.generation == generation &&
+    open.debounce.accepts(generation) &&
     open.phase is QuickOpenDebouncing else {
     return (@cmd.none, model)
   }
@@ -730,7 +732,7 @@ fn apply_quick_open_symbol_result(
     open.owner == owner &&
     open.mode() is QuickOpenSymbols &&
     open.query() == query &&
-    open.generation == generation &&
+    open.debounce.accepts(generation) &&
     open.phase is QuickOpenLoading else {
     return (@cmd.none, model)
   }
@@ -751,6 +753,7 @@ fn apply_quick_open_symbol_result(
         }),
         selected: 0,
         phase: QuickOpenReady,
+        truncated: false,
       }),
     },
   )
@@ -767,7 +770,7 @@ fn fail_quick_open_symbol_request(
     open.owner == owner &&
     open.mode() is QuickOpenSymbols &&
     open.query() == query &&
-    open.generation == generation &&
+    open.debounce.accepts(generation) &&
     open.phase is QuickOpenLoading else {
     return (@cmd.none, model)
   }
@@ -780,6 +783,7 @@ fn fail_quick_open_symbol_request(
         items: [],
         selected: 0,
         phase: QuickOpenFailed,
+        truncated: false,
       }),
     },
   )
@@ -1116,6 +1120,15 @@ fn quick_open_view(dispatch : @cmd.Emit[Msg], open : QuickOpen) -> @html.Html {
     QuickOpenDebouncing | QuickOpenLoading => "true"
     _ => "false"
   }
+  let footer = if mode is QuickOpenFiles && open.truncated {
+    @html.div(
+      class="quick-open-truncated",
+      attrs=@html.Attrs::build().role("status"),
+      "File index truncated; some matches may be missing.",
+    )
+  } else {
+    @html.nothing
+  }
   @html.div(class="quick-open-backdrop", on_click=dispatch(QuickOpenDismiss), [
     @html.div(
       class="quick-open-dialog",
@@ -1152,6 +1165,7 @@ fn quick_open_view(dispatch : @cmd.Emit[Msg], open : QuickOpen) -> @html.Html {
             .aria_busy(list_busy),
           list_children,
         ),
+        footer,
       ],
     ),
   ])
@@ -1201,7 +1215,7 @@ test "Quick Open prefixes providers and works in both shells" {
   assert_eq(symbols.value, "#parse")
   assert_eq(symbols.query(), "parse")
   assert_true(symbols.phase is QuickOpenDebouncing)
-  let generation = symbols.generation
+  let generation = symbols.debounce.generation()
   let (_, refocused) = update(
     dispatch,
     QuickOpenOpen(QuickOpenSymbols),
@@ -1209,7 +1223,7 @@ test "Quick Open prefixes providers and works in both shells" {
   )
   guard refocused.quick_open is Some(same) else { fail("palette expected") }
   assert_eq(same.value, "#parse")
-  assert_eq(same.generation, generation)
+  assert_eq(same.debounce.generation(), generation)
   let (_, back_model) = update(
     dispatch,
     QuickOpenOpen(QuickOpenFiles),
@@ -1342,42 +1356,38 @@ test "file Quick Open populates a cache session before adopting ranked rows" {
     dock: { ..dock, owner: Some(owner) },
     file_panel: { ..base.file_panel, owner: Some(owner), docs },
   }
-  let (_, opened) = update(dispatch, QuickOpenOpen(QuickOpenFiles), seeded)
+  // Drive the public update path instead of constructing FileIndex, whose
+  // lifecycle is deliberately owned by the fileeditor package.
+  let (_, indexing) = update(
+    dispatch,
+    FileEditor(@fileeditor.EnsureFileIndex),
+    seeded,
+  )
+  let (_, opened) = update(dispatch, QuickOpenOpen(QuickOpenFiles), indexing)
   guard opened.quick_open is Some(loading) else { fail("palette expected") }
-  guard opened.file_query_cache.loading_key is Some(cache_key) else {
-    fail("opening should populate a cache")
-  }
-  assert_true(opened.file_query_cache.active_key is None)
   assert_true(loading.phase is QuickOpenLoading)
   assert_eq(loading.items.map(item => item.detail()), [
     "src/active.mbt", "src/open.mbt",
   ])
-  let (_, populated) = update(
-    dispatch,
-    QuickOpenFileCacheLoaded(owner~, cache_key~, generation=loading.generation),
-    opened,
-  )
-  assert_eq(populated.file_query_cache.active_key, Some(cache_key))
-  assert_true(populated.file_query_cache.loading_key is None)
   let (_, indexed) = update(
     dispatch,
-    QuickOpenFilesLoaded(
-      owner~,
-      cache_key~,
-      query="",
-      generation=loading.generation,
-      files=[
-        Relative("src/open.mbt"),
-        Relative("src/other.mbt"),
-        Relative("src/active.mbt"),
-      ],
-      from_cache=true,
-      limit_hit=false,
+    FileEditor(
+      @fileeditor.FilesIndexed(
+        owner~,
+        epoch=0,
+        files=[
+          Relative("src/open.mbt"),
+          Relative("src/other.mbt"),
+          Relative("src/active.mbt"),
+        ],
+        truncated=true,
+      ),
     ),
-    populated,
+    opened,
   )
   guard indexed.quick_open is Some(ready) else { fail("palette expected") }
   assert_true(ready.phase is QuickOpenReady)
+  assert_true(ready.truncated)
   assert_eq(ready.items.map(item => item.detail()), [
     "src/active.mbt", "src/open.mbt", "src/other.mbt",
   ])
@@ -1387,28 +1397,25 @@ test "file Quick Open populates a cache session before adopting ranked rows" {
 }
 
 ///|
-test "an initial file cache failure is visible and retryable" {
+test "an initial file-index failure is visible and retryable" {
   let dispatch = test_dispatch()
   let base = { ..test_model(), is_desktop: true }
   let owner = active_quick_open_owner(base)
-  let (_, opened) = update(dispatch, QuickOpenOpen(QuickOpenFiles), base)
-  guard opened.quick_open is Some(initial) else { fail("palette expected") }
-  guard opened.file_query_cache.loading_key is Some(cache_key) else {
-    fail("cache load expected")
-  }
+  let seeded = { ..base, file_panel: { ..base.file_panel, owner: Some(owner) } }
+  let (_, indexing) = update(
+    dispatch,
+    FileEditor(@fileeditor.EnsureFileIndex),
+    seeded,
+  )
+  let (_, opened) = update(dispatch, QuickOpenOpen(QuickOpenFiles), indexing)
   let (_, failed) = update(
     dispatch,
-    QuickOpenFileCacheRequestFailed(
-      owner~,
-      cache_key~,
-      generation=initial.generation,
-    ),
+    FileEditor(@fileeditor.FileIndexFailed(owner~, epoch=0)),
     opened,
   )
   guard failed.quick_open is Some(failure) else { fail("palette expected") }
   assert_true(failure.phase is QuickOpenFailed)
-  assert_true(failed.file_query_cache.active_key is None)
-  assert_true(failed.file_query_cache.loading_key is None)
+  assert_true(failed.file_panel.index is @fileeditor.IndexFailed)
   let (_, retrying) = update(dispatch, QuickOpenValueChanged("src"), failed)
   guard retrying.quick_open is Some(pending) else { fail("palette expected") }
   assert_true(pending.phase is QuickOpenDebouncing)
@@ -1558,7 +1565,7 @@ test "leading hash switches providers and fences stale symbol replies" {
     QuickOpenSymbolsLoaded(
       owner=initial.owner,
       query="",
-      generation=initial.generation,
+      generation=initial.debounce.generation(),
       items=[item],
     ),
     changed,
@@ -1576,7 +1583,7 @@ test "leading hash switches providers and fences stale symbol replies" {
     QuickOpenSymbolsLoaded(
       owner=pending.owner,
       query=pending.query(),
-      generation=pending.generation,
+      generation=pending.debounce.generation(),
       items=[item],
     ),
     files,
@@ -1603,7 +1610,7 @@ test "symbol Quick Open distinguishes failure from an empty result" {
     QuickOpenDue(
       owner=pending.owner,
       query=pending.query(),
-      generation=pending.generation,
+      generation=pending.debounce.generation(),
     ),
     changed,
   )
@@ -1614,7 +1621,7 @@ test "symbol Quick Open distinguishes failure from an empty result" {
     QuickOpenSymbolsRequestFailed(
       owner=pending.owner,
       query=pending.query(),
-      generation=pending.generation,
+      generation=pending.debounce.generation(),
     ),
     loading,
   )
@@ -1626,7 +1633,7 @@ test "symbol Quick Open distinguishes failure from an empty result" {
     QuickOpenSymbolsLoaded(
       owner=pending.owner,
       query=pending.query(),
-      generation=pending.generation,
+      generation=pending.debounce.generation(),
       items=[],
     ),
     loading,
@@ -1649,7 +1656,7 @@ test "Quick Open selection wraps and empty acceptance is a no-op" {
     QuickOpenSymbolsLoaded(
       owner=search.owner,
       query=search.query(),
-      generation=search.generation,
+      generation=search.debounce.generation(),
       items=[
         test_workspace_symbol("alpha", "a.mbt"),
         test_workspace_symbol("beta", "b.mbt"),
@@ -1737,7 +1744,7 @@ test "accepting files and symbols uses the shared editor open path" {
     QuickOpenSymbolsLoaded(
       owner=search.owner,
       query=search.query(),
-      generation=search.generation,
+      generation=search.debounce.generation(),
       items=[test_workspace_symbol("parse_hover", "src/main.mbt")],
     ),
     symbol_opened,

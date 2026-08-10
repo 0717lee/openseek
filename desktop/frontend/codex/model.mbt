@@ -139,11 +139,21 @@ enum Msg {
   CompletionPick(Int)
   CompletionDismiss
   RemoveMention(Int)
-  FilesLoaded(
-    owner~ : CodexFileSearchOwner,
-    items~ : Array[CodexCompletionItem]
+  SymbolSearchDue(owner~ : CodexSearchOwner, generation~ : Int)
+  FilesIndexed(
+    owner~ : CodexFileOwner,
+    files~ : Array[@pathx.Relative],
+    truncated~ : Bool
   )
-  FilesFailed(owner~ : CodexFileSearchOwner)
+  FilesFailed(owner~ : CodexFileOwner)
+  SkillsLoaded(cwd~ : String, skills~ : Array[CodexSkill])
+  SkillsFailed(cwd~ : String)
+  SymbolsLoaded(
+    owner~ : CodexSearchOwner,
+    generation~ : Int,
+    items~ : Array[@symbols.Symbol]
+  )
+  SymbolsFailed(owner~ : CodexSearchOwner, generation~ : Int)
   ModelChanged(String)
   GitLoaded(thread_id~ : String, reply~ : @protocol.GitPullRequestReply)
   ToggleGitDetails
@@ -233,12 +243,19 @@ struct State {
   git_details_open : Bool
   write_access : CodexWriteAccess
   draft : String
-  // File chips remain native app-server `UserInput::Mention` items. Editor
-  // annotations use the shared mention envelope inside a text input because
-  // app-server has no structured annotation input of its own.
+  // File chips remain native app-server `UserInput::Mention` items. Symbols
+  // and editor annotations use the shared mention envelope inside text inputs
+  // because app-server has no structured symbol/annotation input of its own.
   mentions : Array[CodexMention]
   completion : CodexCompletion?
-  file_search : CodexFileSearchCache
+  // Shared composer debounce state for asynchronous `#` symbol lookup.
+  completion_debounce : @composer.Debounce
+  // `@` and `$` are cwd-scoped catalogs loaded when a thread becomes active.
+  // Files use the same host index and fuzzy ranking implementation as Ctrl+P;
+  // skills remain the Codex app-server catalog, not OpenSeek's registry.
+  file_index : CodexFileIndex
+  skills : CodexSkillCatalog
+  symbol_search : CodexSymbolSearchCache
   pending_requests : Array[CodexPendingRequest]
   loading : Bool
   notice : String
@@ -261,7 +278,10 @@ pub fn State::State(loading? : Bool = false) -> State {
     draft: "",
     mentions: [],
     completion: None,
-    file_search: CodexFileSearchCache::empty(),
+    completion_debounce: @composer.Debounce(),
+    file_index: CodexFilesEmpty,
+    skills: CodexSkillsEmpty,
+    symbol_search: CodexSymbolSearchCache::empty(),
     pending_requests: [],
     loading,
     notice: "",

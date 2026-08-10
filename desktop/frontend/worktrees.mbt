@@ -1384,6 +1384,8 @@ test "a worktree commit broadcast supersedes lists and unbinds removed names" {
       selected: 0,
       phase: QuickOpenReady,
       generation,
+      debounce: @composer.Debounce(generation~),
+      truncated: false,
     }),
     quick_open_generation: generation,
     file_query_cache: {

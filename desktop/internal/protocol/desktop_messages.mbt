@@ -330,6 +330,7 @@ pub(all) struct WorkspaceSymbolsPayload {
 
 ///|
 pub(all) struct MoonIdeNavigationPayload {
+  root : String
   path : String
   line : Int
   column : Int

@@ -203,6 +203,12 @@ pub fn endpoints(
       }
       state.codex_file_search(payload)
     }),
+    @endpoint.Endpoint::remote(@commands.codex_skills_list, async fn(params) {
+      let payload : CodexSkillsListPayload = @json.from_json(params) catch {
+        _ => raise @host.PayloadError("malformed Codex skills list payload")
+      }
+      state.codex_skills_list(payload)
+    }),
     state.codex_endpoint(@commands.codex_account_read),
     state.codex_endpoint(@commands.codex_account_login_start),
     state.codex_endpoint(@commands.codex_account_login_cancel),
@@ -437,6 +443,7 @@ test "remote endpoint catalog has one entry per command name" {
   }
   assert_eq(names.length(), 78)
   assert_true(names.contains("codex.file.search"))
+  assert_true(names.contains("codex.skills.list"))
   assert_true(names.contains("codex.review.start"))
   assert_true(names.contains("codex.thread.history.read"))
   assert_true(names.contains("codex.thread.list"))
@@ -594,6 +601,28 @@ async fn ApiState::codex_file_search(
   self.codex.call(method_="fuzzyFileSearch", params={
     "query": payload.query,
     "roots": [Json::string(root.to_string())],
+  })
+}
+
+///|
+/// Ask app-server for the skill catalog belonging to one authorized Codex
+/// cwd. Unlike the generic Codex endpoints, the browser supplies no raw `cwds`
+/// array that could escape the selected thread's filesystem authority.
+async fn ApiState::codex_skills_list(
+  self : ApiState,
+  payload : CodexSkillsListPayload,
+) -> Json {
+  guard @engine.resolve_in_workspace(
+      payload.thread_id,
+      "",
+      workspace=payload.cwd,
+    )
+    is Some(root) else {
+    raise @host.HostError("Codex workspace is not authorized")
+  }
+  self.codex.call(method_="skills/list", params={
+    "cwds": [Json::string(root.to_string())],
+    "forceReload": payload.force_reload,
   })
 }
 

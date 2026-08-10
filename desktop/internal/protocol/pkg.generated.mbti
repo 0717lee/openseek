@@ -454,6 +454,7 @@ pub(all) struct MoonIdeLocationsReply {
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 
 pub(all) struct MoonIdeNavigationPayload {
+  root : String
   path : String
   line : Int
   column : Int

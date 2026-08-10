@@ -390,20 +390,29 @@ fn CodexMention::chip(
 ) -> @html.Html {
   let (glyph, label, title, jump) = match self {
     CodexFileMention(name~, path~) =>
-      ("#", name, "Open \{path}", open_file(path, None, None))
+      ("@", name, "Open \{path}", Some(open_file(path, None, None)))
+    CodexSkillMention(name~, ..) =>
+      ("$", name, "Use Codex skill $\{name}", None)
+    CodexSymbolMention(name~, path~, range~) =>
+      (
+        "#",
+        name,
+        "Open \{path}:\{range.start_line_number}",
+        Some(open_file(path, Some(range), None)),
+      )
     CodexEditorAnnotation(file~, range~, comment~, ..) =>
       (
         "✎",
         "\{file}:\{range.start_line_number}-\{range.end_line_number}",
         comment,
-        open_file(file, Some(range), Some(comment)),
+        Some(open_file(file, Some(range), Some(comment))),
       )
   }
   @composer.MentionChip::{
     glyph,
     label,
     title,
-    jump: Some(jump),
+    jump,
     remove: Some((dispatch(RemoveMention(index)), icon(icon_close))),
   }.render()
 }
@@ -413,20 +422,28 @@ fn CodexCompletion::view(
   self : CodexCompletion,
   dispatch : @cmd.Emit[Msg],
 ) -> @html.Html {
+  let rows : Array[@composer.CompletionRow] = []
+  for _, item in self.menu {
+    rows.push({ label: item.label, detail: item.detail })
+  }
   @composer.CompletionView::{
-    rows: self.items.map(item => @composer.CompletionRow::{
-      label: item.label,
-      detail: item.detail,
-    }),
-    selected: self.selected,
+    rows,
+    selected: self.menu.selected(),
     hint: match self.kind {
       CodexCommands => "Commands"
+      CodexSkills => "Skills"
+      CodexSymbols => "Symbols"
       CodexFiles => "Files"
     },
-    empty: if self.loading {
+    empty: if self.menu.loading() {
       "Searching…"
     } else {
-      "No files"
+      match self.kind {
+        CodexCommands => "No commands"
+        CodexSkills => "No skills"
+        CodexSymbols => "No symbols"
+        CodexFiles => "No files"
+      }
     },
   }.render(index => dispatch(CompletionPick(index)))
 }

@@ -17,28 +17,52 @@ pub fn update(
     DraftChanged(value) => state.change_draft(dispatch, channel, value)
     CompletionMove(delta) =>
       if state.completion is Some(completion) {
-        (@cmd.none, { ..state, completion: Some(completion.shifted(delta)) })
+        (
+          @cmd.none,
+          {
+            ..state,
+            completion: Some({
+              ..completion,
+              menu: completion.menu.shifted(delta),
+            }),
+          },
+        )
       } else {
         (@cmd.none, state)
       }
     CompletionAccept =>
       if state.completion is Some(completion) &&
-        completion.current() is Some(item) {
+        completion.menu.current() is Some(item) {
         state.accept_completion(dispatch, channel, item)
       } else {
         (@cmd.none, { ..state, completion: None })
       }
     CompletionPick(index) =>
       if state.completion is Some(completion) &&
-        completion.items.get(index) is Some(item) {
+        completion.menu.get(index) is Some(item) {
         state.accept_completion(dispatch, channel, item)
       } else {
         (@cmd.none, { ..state, completion: None })
       }
     CompletionDismiss => (@cmd.none, { ..state, completion: None })
     RemoveMention(index) => (@cmd.none, state.without_mention(index))
-    FilesLoaded(owner~, items~) => (@cmd.none, state.with_files(owner, items))
-    FilesFailed(owner~) => (@cmd.none, state.with_files(owner, []))
+    SymbolSearchDue(owner~, generation~) =>
+      state.begin_completion_search(
+        dispatch,
+        channel,
+        CodexSymbols,
+        owner,
+        generation,
+      )
+    FilesIndexed(owner~, files~, truncated~) =>
+      (@cmd.none, state.with_files(owner, files, truncated))
+    FilesFailed(owner~) => (@cmd.none, state.with_file_failure(owner))
+    SkillsLoaded(cwd~, skills~) => (@cmd.none, state.with_skills(cwd, skills))
+    SkillsFailed(cwd~) => (@cmd.none, state.with_skill_failure(cwd))
+    SymbolsLoaded(owner~, generation~, items~) =>
+      (@cmd.none, state.with_symbols(owner, generation, items))
+    SymbolsFailed(owner~, generation~) =>
+      (@cmd.none, state.with_symbols(owner, generation, []))
     ModelChanged(value) => (@cmd.none, { ..state, selected_model: value })
     GitLoaded(thread_id~, reply~) =>
       (@cmd.none, state.with_git_reply(thread_id, reply))
@@ -141,7 +165,12 @@ pub fn update(
         CodexThreadReply => {
           next = next.with_thread_reply(value)
           next = { ..next, write_access: CodexNeedsResume }
-          cmd = next.refresh_git(dispatch, channel)
+          next = next.loading_context(false)
+          cmd = @cmd.batch([
+            next.refresh_git(dispatch, channel),
+            next.load_files(dispatch, channel),
+            next.load_skills(dispatch, channel, force_reload=false),
+          ])
         }
         CodexActivityReply => {
           let was_running_elsewhere = next.is_running_elsewhere()
@@ -157,6 +186,7 @@ pub fn update(
         CodexNewThreadReply => {
           next = next.with_thread_reply(value)
           next = { ..next, write_access: CodexWritable }
+          next = next.loading_context(false)
           cmd = @cmd.batch([
             CodexThreadsReply.request(
               dispatch,
@@ -165,6 +195,8 @@ pub fn update(
               { "limit": 100, "archived": false },
             ),
             next.refresh_git(dispatch, channel),
+            next.load_files(dispatch, channel),
+            next.load_skills(dispatch, channel, force_reload=false),
           ])
         }
         CodexTurnReply => {
@@ -252,6 +284,13 @@ pub fn update(
     }
     Notification(method_~, params~) => {
       let next = state.with_notification(method_, params)
+      if method_ == "skills/changed" {
+        let invalidated = next.loading_context(true)
+        return (
+          invalidated.load_skills(dispatch, channel, force_reload=false),
+          invalidated,
+        )
+      }
       let cmd = if method_ == "account/updated" ||
         method_ == "account/login/completed" {
         CodexAccountReply.request(

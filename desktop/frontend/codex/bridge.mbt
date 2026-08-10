@@ -195,7 +195,7 @@ fn State::send(
   channel : @interop.ChannelId,
 ) -> @cmd.Cmd {
   guard self.active is Some(active) else { return @cmd.none }
-  let text = self.draft.trim().to_owned()
+  let text = self.prompt_text()
   guard !self.input_empty() else { return @cmd.none }
   let inputs : Array[Json] = []
   if !text.is_empty() {
@@ -231,10 +231,48 @@ fn State::send(
 }
 
 ///|
+/// Keep the human-readable `$name` invocation in the text while also sending
+/// app-server's native skill input below. The native item injects the exact
+/// selected SKILL.md path; the marker preserves ordinary Codex prompt
+/// semantics and makes stored user input understandable on its own.
+fn State::prompt_text(self : State) -> String {
+  let markers : Array[String] = []
+  for mention in self.mentions {
+    if mention is CodexSkillMention(name~, ..) {
+      markers.push("$" + name)
+    }
+  }
+  let task = self.draft.trim().to_owned()
+  if markers.is_empty() {
+    task
+  } else if task.is_empty() {
+    markers.join(" ")
+  } else {
+    markers.join(" ") + " " + task
+  }
+}
+
+///|
 fn CodexMention::to_input(self : CodexMention) -> Json {
   match self {
     CodexFileMention(name~, path~) =>
       { "type": "mention", "name": name, "path": path }
+    CodexSkillMention(name~, path~) =>
+      { "type": "skill", "name": name, "path": path }
+    CodexSymbolMention(name~, path~, range~) =>
+      {
+        "type": "text",
+        "text": @mention_context.encode(
+          [
+            @mention_context.Symbol(
+              name~,
+              file=path,
+              line=range.start_line_number,
+            ),
+          ],
+          "",
+        ),
+      }
     CodexEditorAnnotation(file~, range~, quote~, comment~) =>
       {
         "type": "text",
@@ -256,38 +294,76 @@ fn CodexMention::to_input(self : CodexMention) -> Json {
 }
 
 ///|
-fn State::search_files(
-  _self : State,
+fn State::load_files(
+  self : State,
   dispatch : @cmd.Emit[Msg],
   channel : @interop.ChannelId,
-  owner : CodexFileSearchOwner,
 ) -> @cmd.Cmd {
+  guard self.file_owner() is Some(owner) else { return @cmd.none }
+  @files.Request(
+    channel,
+    owner.thread_id,
+    @resource.of_path(channel, owner.cwd),
+  ).run(
+    (files, truncated) => dispatch(FilesIndexed(owner~, files~, truncated~)),
+    () => dispatch(FilesFailed(owner~)),
+  )
+}
+
+///|
+/// Load Codex's own installed skills for the selected cwd. The Desktop host
+/// revalidates the thread/cwd pair before forwarding `skills/list`, so a
+/// browser page cannot use this request to scan another directory.
+fn State::load_skills(
+  self : State,
+  dispatch : @cmd.Emit[Msg],
+  channel : @interop.ChannelId,
+  force_reload~ : Bool,
+) -> @cmd.Cmd {
+  guard self.active is Some(active) && active.cwd is Some(cwd) else {
+    return @cmd.none
+  }
+  let thread_id = active.id
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
       let value : Json = @interop.bridge_request(
         channel,
-        @commands.codex_file_search,
-        { "thread_id": owner.thread_id, "cwd": owner.cwd, "query": owner.query },
+        @commands.codex_skills_list,
+        { "thread_id": thread_id, "cwd": cwd, "force_reload": force_reload },
       ) catch {
         _ => {
-          scheduler.add(dispatch(FilesFailed(owner~)))
+          scheduler.add(dispatch(SkillsFailed(cwd~)))
           return
         }
       }
-      guard value is Object(fields) &&
-        fields.get("files") is Some(Array(values)) else {
-        scheduler.add(dispatch(FilesFailed(owner~)))
-        return
+      match CodexSkill::decode_list(value, cwd) {
+        Some(skills) => scheduler.add(dispatch(SkillsLoaded(cwd~, skills~)))
+        None => scheduler.add(dispatch(SkillsFailed(cwd~)))
       }
-      let items : Array[CodexCompletionItem] = []
-      for value in values {
-        if CodexCompletionItem::decode_file(value) is Some(item) {
-          items.push(item)
-        }
-      }
-      scheduler.add(dispatch(FilesLoaded(owner~, items~)))
     })
   })
+}
+
+///|
+fn State::search_symbols(
+  _self : State,
+  dispatch : @cmd.Emit[Msg],
+  channel : @interop.ChannelId,
+  owner : CodexSearchOwner,
+  generation : Int,
+) -> @cmd.Cmd {
+  guard @resource.of_path(channel, owner.cwd) is Some(root) else {
+    return @cmd.none
+  }
+  @symbols.search(
+    channel,
+    owner.query,
+    root~,
+    loaded=symbols => {
+      dispatch(SymbolsLoaded(owner~, generation~, items=symbols))
+    },
+    failed=dispatch(SymbolsFailed(owner~, generation~)),
+  )
 }
 
 ///|
