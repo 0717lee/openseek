@@ -1689,6 +1689,7 @@ test "accepting files and symbols uses the shared editor open path" {
   assert_true(
     @dock.active_file(file_accepted.dock) is Some(Relative("src/file.mbt")),
   )
+  assert_eq(file_accepted.file_panel.file_link_generation, 1)
   let (_, symbol_opened) = update(dispatch, QuickOpenOpen(QuickOpenSymbols), {
     ..file_accepted,
     screen: Settings,
@@ -1713,6 +1714,7 @@ test "accepting files and symbols uses the shared editor open path" {
   assert_true(
     @dock.active_file(accepted.dock) is Some(Relative("src/main.mbt")),
   )
+  assert_eq(accepted.file_panel.file_link_generation, 2)
 }
 
 ///|

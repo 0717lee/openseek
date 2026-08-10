@@ -122,6 +122,11 @@ test "Absolute::relative_to normalizes POSIX paths" {
     @pathx.Path("/other/a.mbt").to_absolute() is Some(path) &&
     path.relative_to(root~) is None,
   )
+  // POSIX path identity remains case-sensitive.
+  assert_true(
+    @pathx.Path("/WS/src/a.mbt").to_absolute() is Some(path) &&
+    path.relative_to(root~) is None,
+  )
   // A trailing slash on the root reads the same as none.
   guard @pathx.Path("/ws/").to_absolute() is Some(root_with_slash) else {
     fail("test root with slash was not absolute")
@@ -149,6 +154,16 @@ test "Absolute::relative_to normalizes Windows paths" {
   )
   assert_true(
     @pathx.Path("C:\\other\\a.mbt").to_absolute() is Some(path) &&
+    path.relative_to(root~) is None,
+  )
+  // Windows resolves the same drive and workspace components regardless of
+  // spelling case, while preserving the target's relative component spelling.
+  assert_true(
+    @pathx.Path("c:\\WS\\src\\A.mbt").to_absolute() is Some(path) &&
+    path.relative_to(root~) == Some(Relative("src/A.mbt")),
+  )
+  assert_true(
+    @pathx.Path("C:\\workspace\\a.mbt").to_absolute() is Some(path) &&
     path.relative_to(root~) is None,
   )
 }

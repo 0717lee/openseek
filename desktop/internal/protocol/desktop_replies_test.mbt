@@ -69,6 +69,18 @@ test "Git original-file replies round-trip through their manual codec" {
 }
 
 ///|
+test "open-path replies accept legacy opener results and editor targets" {
+  let legacy : @protocol.OpenPathReply = @json.from_json({ "opened": true })
+  @debug.assert_eq(legacy, { opened: true, editor_target: None })
+  let target : @protocol.OpenPathReply = {
+    opened: false,
+    editor_target: Some({ path: "src/main.mbt", line: 2738, column: Some(17) }),
+  }
+  let decoded : @protocol.OpenPathReply = @json.from_json(target.to_json())
+  @debug.assert_eq(decoded, target)
+}
+
+///|
 test "archive replies keep success compatible and encode dirty confirmation" {
   let sessions : @protocol.SessionsReply = { groups: [] }
   let success = @protocol.ArchiveReply::Archived(sessions)

@@ -1,0 +1,23 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "openseek_desktop/internal/openpath"
+
+import {
+  "moonbitlang/core/debug",
+}
+
+// Values
+
+// Errors
+
+// Types and methods
+pub(all) struct Reference(String) derive(Eq, @debug.Debug)
+pub async fn Reference::resolve(Self) -> Resolution
+
+pub(all) enum Resolution {
+  SystemPath(String)
+  EditorPath(path~ : String, line~ : Int, column~ : Int?)
+} derive(Eq, @debug.Debug)
+
+// Type aliases
+
+// Traits

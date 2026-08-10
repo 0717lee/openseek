@@ -20,7 +20,8 @@ type UninstallSkillPayload = @protocol.UninstallSkillPayload
 type OpenPathPayload = @protocol.OpenPathPayload
 
 ///|
-/// Reply to `open_path`: whether the file was handed to the system opener.
+/// Reply to `open_path`: either the file was handed to the system opener, or a
+/// suffix-free workspace file and position should open in the built-in editor.
 type OpenPathReply = @protocol.OpenPathReply
 
 ///|
