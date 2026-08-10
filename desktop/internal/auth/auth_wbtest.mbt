@@ -67,8 +67,12 @@ test "url derivations" {
     content="ws://127.0.0.1:3000/v1/tunnel",
   )
   inspect(
-    device_url("https://relay.example", "d_abc"),
-    content="https://relay.example/?device=d_abc",
+    device_url("https://relay.example", "d_abc", app_version="0.1.16"),
+    content="https://relay.example/console/releases/v0.1.16/index.html?device=d_abc",
+  )
+  inspect(
+    device_url("https://relay.example/", "d_abc", app_version="development"),
+    content="https://relay.example/console/?device=d_abc",
   )
   inspect(
     origin_from_relay_url("wss://relay.example/v1/tunnel"),
@@ -225,6 +229,7 @@ async test "a terminal refusal clears a session but only parks an override" {
       device_token: "dev",
       device_name: "desktop",
     }),
+    app_version: "development",
     wakeups: Queue(kind=DiscardOldest(1)),
     session: None,
     connected: false,
@@ -241,7 +246,7 @@ async test "a terminal refusal clears a session but only parks an override" {
 
 ///|
 test "status shapes" {
-  let store = AuthStore::empty()
+  let store = AuthStore::empty(app_version="0.1.16")
   let empty = store.status()
   assert_false(empty.connected)
   assert_eq(empty.server_url, None)
@@ -271,7 +276,7 @@ test "status shapes" {
     Some({
       id: "d_abc",
       name: "My Mac",
-      url: "https://relay.example/?device=d_abc",
+      url: "https://relay.example/console/releases/v0.1.16/index.html?device=d_abc",
     }),
   )
   // The transport encoding must not accidentally disclose the stored token.

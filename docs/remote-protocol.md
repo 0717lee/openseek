@@ -38,13 +38,14 @@ socket, subprocess, or watcher.
 
 ## Transport
 
-All HTTP lives at the relay. Pages and assets are unversioned; JSON/WS
-APIs live under `/v1`:
+All HTTP lives at the relay. Browser releases are versioned alongside Desktop
+releases; JSON/WS APIs live under `/v1`:
 
 | Route | What |
 |---|---|
-| `GET /` | The frontend bundle: sign-in, then the multi-device console — one sidebar group per device, one WebSocket per online device. `?device=<id>` preselects the focused device, `?workspace=<path>` the workspace its first conversation lands in |
-| `GET /d/<device>/…` | Retired: `302` to `/?device=<device>` with the original query appended, so old deep links keep their preselection |
+| `GET /console/` | The server-selected Browser release |
+| `GET /console/releases/v<version>/index.html` | One published Browser bundle. Packaged Desktop links here with its installed version; `?device=<id>` preselects the focused device and `?workspace=<path>` the workspace its first conversation lands in |
+| `GET /d/<device>/…` | Retired: `302` to `/console/?device=<device>` with the original query appended, so old deep links keep their preselection |
 | `GET /healthz` | Relay liveness probe, `200 ok` |
 | `/v1/auth/*`, `/v1/devices…` | The relay's own auth and device APIs (see Authentication) |
 
@@ -580,7 +581,7 @@ The status shape, also the params of every `auth.changed` notification:
   "connected": false,            // control WS currently registered
   "managed_by_env": true,        // present only under the OPENSEEK_RELAY_URL override
   "user":   {"login": "…", "avatar_url": "…"},   // absent when signed out
-  "device": {"id": "d_…", "name": "…", "url": "…/?device=d_…"}  // absent when signed out
+  "device": {"id": "d_…", "name": "…", "url": "…/console/releases/v0.1.16/index.html?device=d_…"}  // absent when signed out
 }
 ```
 

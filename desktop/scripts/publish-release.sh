@@ -7,7 +7,8 @@
 #   scripts/publish-release.sh upload [file] [platform]  upload this platform's artifact
 #   scripts/publish-release.sh publish [vX.Y.Z]          make a version the live release
 #   scripts/publish-release.sh status                     list uploaded versions + current
-# Current Proton filenames have defaults; legacy SeekMoon-<platform> names are inferred.
+# Current Proton and browser filenames have defaults; legacy
+# SeekMoon-<platform> names are inferred.
 #
 # Requires OPENSEEK_DEPLOY_TOKEN (one of the server's OPENSEEK_DEPLOY_TOKENS).
 # Targets production by default; for staging:
@@ -29,8 +30,8 @@ if [[ -z "$version" ]]; then
 fi
 
 # The default remains the ZIP consumed by the in-app updater. An explicit
-# artifact, such as the DMG offered for manual installation, uploads under
-# its own basename so both files can coexist under the same version.
+# artifact, such as the DMG or browser bundle, uploads under its own basename
+# so every file can coexist under the same version.
 default_artifact="$desktop_dir/dist/SeekMoon.app.zip"
 
 case "${1:-}" in
@@ -47,6 +48,7 @@ case "${1:-}" in
       case "$release_name" in
         SeekMoon.app.zip) platform="macos-arm64" ;;
         SeekMoon.dmg) platform="macos-arm64-dmg" ;;
+        SeekMoon.browser.tar.gz) platform="browser" ;;
       esac
     fi
     url="$origin/desktop/releases/v$version/$release_name"

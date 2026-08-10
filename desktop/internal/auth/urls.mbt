@@ -22,15 +22,24 @@ pub fn tunnel_url(server_url : String) -> String {
 }
 
 ///|
-/// The browser console URL for a device registered at `server_url`. The
-/// console lives at the root; `?device=` preselects this device there
-/// (the old `/d/<device>/` deep links redirect to the same place).
-pub fn device_url(server_url : String, device : String) -> String {
+/// The browser console URL for a device registered at `server_url`. A packaged
+/// Desktop opens the Browser bundle published from the same release, so its UI
+/// and host messages come from one build. Development has no published bundle
+/// and therefore uses the server-selected console instead.
+pub fn device_url(
+  server_url : String,
+  device : String,
+  app_version~ : String,
+) -> String {
   let origin = match server_url.strip_suffix("/") {
     Some(origin) => origin.to_owned()
     None => server_url
   }
-  "\{origin}/?device=\{device}"
+  if app_version == "development" {
+    "\{origin}/console/?device=\{device}"
+  } else {
+    "\{origin}/console/releases/v\{app_version}/index.html?device=\{device}"
+  }
 }
 
 ///|
