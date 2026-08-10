@@ -1020,6 +1020,48 @@ fn tool_group_summary(items : Array[@transcript.TranscriptItem]) -> String {
 }
 
 ///|
+/// The user-facing reading of a tool burst. Completed tools already carry the
+/// concise outcome their executor recorded for `viz_app`; promote those briefs
+/// instead of reducing an exact action such as `moon test` to "ran 1 command".
+/// Show at most two so a large parallel burst remains a single scannable line;
+/// the remainder count includes both unshown briefs and calls still waiting for
+/// a result. Old/briefless sessions keep the category summary above.
+fn tool_activity_summary(items : Array[@transcript.TranscriptItem]) -> String {
+  let briefs : Array[String] = []
+  let mut tools = 0
+  for item in items {
+    guard item.kind is Tool(brief~, ..) else { continue }
+    tools = tools + 1
+    if brief is Some(brief) {
+      let brief = brief.trim()
+      if !brief.is_empty() {
+        briefs.push(brief.to_owned())
+      }
+    }
+  }
+  if briefs.is_empty() {
+    return tool_group_summary(items)
+  }
+  let shown = briefs[:briefs.length().min(2)].to_owned()
+  let remaining = tools - shown.length()
+  if remaining > 0 {
+    shown.push("+\{remaining} more")
+  }
+  capitalize(shown.join(" · "))
+}
+
+///|
+/// Ordinary tool-only activity needs one disclosure level, not the generic
+/// activity fold wrapped around another tool-burst fold. Keep the outer fold
+/// for failures (its explicit failure badge is accessible without relying on
+/// red alone) and for plan calls (it carries the compact progress meter).
+fn flatten_tool_activity(items : Array[@transcript.TranscriptItem]) -> Bool {
+  !items.is_empty() &&
+  count_failed(items) == 0 &&
+  items.all(item => item.kind is Tool(name~, ..) && name != "plan")
+}
+
+///|
 fn capitalize(text : String) -> String {
   // `[first, .. rest]` binds the first Unicode scalar and the true remainder.
   // The old `iter().next()` + `text[1:]` mixed a scalar with a code-unit slice:
@@ -1056,7 +1098,7 @@ fn failed_badge(failed : Int) -> @html.Html {
 
 ///|
 /// A stretch of a turn's work — reasoning and tool results — folded behind a
-/// single summary line ("Read 3 files, ran 1 command"), the way Codex folds a
+/// single summary line ("Read moon.mod · moon test"), the way Codex folds a
 /// turn behind "Worked for 46s". Expanding shows the work log in order:
 /// reasoning as muted prose — never a labelled "Thinking" row of its own —
 /// each burst of tool calls as a one-line sublist. A stretch that only
@@ -1072,6 +1114,9 @@ fn activity_view(
   items : Array[@transcript.TranscriptItem],
   on_open : (String) -> @cmd.Cmd,
 ) -> @html.Html {
+  if flatten_tool_activity(items) {
+    return @html.div(class="activity-row", [tool_line_view(items)])
+  }
   let log : Array[@html.Html] = []
   let mut index = 0
   while index < items.length() {
@@ -1095,7 +1140,7 @@ fn activity_view(
     }
   }
   let failed = count_failed(items)
-  let summary_label = tool_group_summary(items)
+  let summary_label = tool_activity_summary(items)
   let summary : Array[@html.Html] = [
     @html.span(
       class="activity-text",
@@ -1122,13 +1167,18 @@ fn activity_view(
 }
 
 ///|
-/// A burst of consecutive tool calls: one gray line ("Read 2 files, ran 1
-/// command") that expands to the per-call briefs, arguments, and outputs. A
-/// burst with a failure starts open — the failure is what the reader came for.
+/// A burst of consecutive tool calls: one gray line built from the recorded
+/// briefs (falling back to category counts for old or pending results) that
+/// expands to the per-call arguments and outputs. A singleton is already one
+/// call disclosure, so it does not get a redundant burst disclosure around it.
+/// A burst with a failure starts open — the failure is what the reader came for.
 fn tool_line_view(tools : Array[@transcript.TranscriptItem]) -> @html.Html {
+  if tools.length() == 1 {
+    return tool_call_view(tools[0])
+  }
   let failed = count_failed(tools)
   let summary : Array[@html.Html] = [
-    @html.span(class="tool-line-text", tool_group_summary(tools)),
+    @html.span(class="tool-line-text", tool_activity_summary(tools)),
   ]
   if failed > 0 {
     summary.push(failed_badge(failed))
@@ -3429,6 +3479,7 @@ fn notifications_view(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
 fn tool_item(
   name : String,
   is_error? : Bool = false,
+  brief? : String,
 ) -> @transcript.TranscriptItem {
   {
     kind: Tool(
@@ -3437,7 +3488,7 @@ fn tool_item(
       arguments=None,
       has_result=true,
       is_error~,
-      brief=None,
+      brief~,
     ),
     content: "output",
     ts: None,
@@ -3498,6 +3549,40 @@ test "a tool group's summary recognizes every cmd/openseek built-in" {
     tool_group_summary([tool_item("shell", is_error=true)]),
     content="Ran 1 command",
   )
+}
+
+///|
+test "tool activity summaries promote recorded briefs" {
+  inspect(
+    tool_activity_summary([tool_item("shell", brief="moon test → exit 1")]),
+    content="Moon test → exit 1",
+  )
+  inspect(
+    tool_activity_summary([
+      tool_item("read", brief="read moon.mod"),
+      tool_item("edit", brief="edited view.mbt:42"),
+      tool_item("shell", brief="moon test"),
+      tool_item("shell"),
+    ]),
+    content="Read moon.mod · edited view.mbt:42 · +2 more",
+  )
+  // Older logs and pending calls have no result brief yet.
+  inspect(tool_activity_summary([tool_item("shell")]), content="Ran 1 command")
+}
+
+///|
+#warnings("-alert_unstable")
+test "a completed singleton tool uses one brief disclosure" {
+  let rendered = activity_view([tool_item("shell", brief="moon test")], _ => {
+    @cmd.none
+  })
+  let markup = @rabbita.render_to_string(() => @rabbita.Val::constant(rendered))
+  assert_true(
+    markup.contains("<summary class=\"tool-call-summary\">Moon test</summary>"),
+  )
+  assert_false(markup.contains("Ran 1 command"))
+  assert_false(markup.contains("tool-line-summary"))
+  assert_false(markup.contains("activity-summary"))
 }
 
 ///|
