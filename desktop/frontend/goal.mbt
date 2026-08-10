@@ -821,6 +821,59 @@ test "archiving carries the goal draft to the replacement" {
 }
 
 ///|
+test "archiving carries a goal that was sent but never confirmed" {
+  let dispatch = test_dispatch()
+  // A Set whose marker never came back is not the archived record's yet —
+  // nothing proves the record received it, so this is still the only copy,
+  // exactly like the initial prompts the same salvage recovers.
+  let model = test_model()
+    .replace_conversation({
+      ..test_conversation(),
+      goal_pending: Some(test_goal_command(Setting("a goal still in flight"))),
+    })
+    .with_dev(dev => { ..dev, sessions: [archived_item("desktop-test")] })
+  let (_, next) = update_dev(
+    dispatch,
+    SessionsChanged(
+      change="archived",
+      session="desktop-test",
+      fresh_session=Some("desktop-restored"),
+    ),
+    model,
+  )
+  guard next.active().goal_edit is Some(edit) else {
+    fail("an unconfirmed goal should come across")
+  }
+  inspect(edit.draft, content="a goal still in flight")
+  // The command itself does not: it was issued against the archived session.
+  inspect(next.active().goal_pending is None, content="true")
+}
+
+///|
+test "archiving carries no goal the record already confirmed" {
+  let dispatch = test_dispatch()
+  // A standing goal belongs to the record that carries it. The replacement is
+  // a different session with no goal, and re-seeding it as a draft would
+  // invite setting it again on a conversation that never asked.
+  let model = test_model()
+    .replace_conversation({
+      ..test_conversation(),
+      goal: Some({ text: "the goal on record", blocked: None }),
+    })
+    .with_dev(dev => { ..dev, sessions: [archived_item("desktop-test")] })
+  let (_, next) = update_dev(
+    dispatch,
+    SessionsChanged(
+      change="archived",
+      session="desktop-test",
+      fresh_session=Some("desktop-restored"),
+    ),
+    model,
+  )
+  inspect(next.active().goal_edit is None, content="true")
+}
+
+///|
 #warnings("-alert_unstable")
 test "a kept goal draft is a conversation you can get back to" {
   let dispatch = test_dispatch()

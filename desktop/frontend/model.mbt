@@ -3513,11 +3513,20 @@ fn Conversation::archive_salvage(self : Conversation) -> ArchiveSalvage {
   }
   // The goal draft rides beside the prompt rather than inside it: it is not
   // something to send, and folding it into `task` would turn writing meant
-  // for the goal row into a prompt. A goal already *sent* is not salvaged —
-  // it is the archived record's to carry, not this one's.
+  // for the goal row into a prompt.
+  //
+  // Unsent writing comes first, and behind it a Set still waiting on its
+  // marker: sent, but with no proof it landed, which puts its text in exactly
+  // the position of the unconfirmed initial prompts above — the record may
+  // never have received it, and this is the only other copy. A Clearing asks
+  // for nothing to stand, so it carries nothing. Neither does a goal the
+  // record has already confirmed: that one is the archived record's.
   let goal_draft = if self.goal_edit is Some(edit) &&
     !edit.draft.trim().is_empty() {
     Some(edit.draft)
+  } else if self.goal_pending is Some({ request: Setting(text), .. }) &&
+    !text.trim().is_empty() {
+    Some(text)
   } else {
     None
   }
