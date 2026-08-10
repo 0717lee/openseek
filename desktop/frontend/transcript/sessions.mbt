@@ -131,6 +131,18 @@ pub fn subrun_label(id : String) -> String? {
 }
 
 ///|
+/// The parent conversation a sub-run's child session belongs to, or `None`
+/// for an ordinary session id. A sub-run id (`sr-N`) is only unique within
+/// its parent engine, so anything routing a sub-run to a conversation needs
+/// this and not the bare id.
+pub fn subrun_parent(id : String) -> String? {
+  match @protocol.split_child_session_id(id) {
+    Some((parent, _)) => Some(parent)
+    None => None
+  }
+}
+
+///|
 /// Order two sub-run ordinal paths: by ordinal at the first position they
 /// differ, then by depth, so `sr-2` precedes `sr-10` and a child precedes
 /// its own grandchildren.
@@ -639,6 +651,16 @@ test "a grandchild folds under the outermost listed ancestor" {
     tree_shape(session_tree(listed(["a", "a-sr-1-sr-2"]))),
     content="a a-sr-1-sr-2",
   )
+}
+
+///|
+test "a sub-run's progress routes by its child session, not its bare id" {
+  // `sr-1` is only unique inside its parent engine, so the child session id
+  // is what names the conversation a progress push belongs to.
+  assert_eq(subrun_parent("desktop-a-sr-1"), Some("desktop-a"))
+  assert_eq(subrun_parent("desktop-b-sr-1"), Some("desktop-b"))
+  // An ordinary session is nobody's child, so nothing routes to it.
+  assert_eq(subrun_parent("desktop-a"), None)
 }
 
 ///|

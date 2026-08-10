@@ -284,6 +284,10 @@ fn Hub::sink(
       // settles transient stream and lifecycle state in commit-aware clients
       // (docs/remote-protocol.md).
       SessionCommit(payload) => self.publish(SessionEvent(payload))
+      // Liveness for a sub-run in flight. Nothing downstream persists it:
+      // a client that arrives late simply learns nothing about a child's
+      // progress until its next advance.
+      SubrunProgress(payload) => self.publish(SubrunProgress(payload))
       // A failed command may have settled lifecycle before its process was
       // reapable. This later durable boundary is not a second finish: it must
       // not post another system notification or mutate the live-runs table.

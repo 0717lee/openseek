@@ -16,6 +16,7 @@ import {
   "moonbitlang/async/process",
   "moonbitlang/core/env" @sys,
   "moonbitlang/core/json",
+  "moonbitlang/core/encoding/utf8",
   "moonbitlang/core/string",
   "tonyfettes/xlog",
 }

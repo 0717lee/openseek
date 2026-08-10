@@ -943,6 +943,44 @@ fn apply_engine_event(
       let update = @transcript.parse_runtime_update(content)
       (false, { ..conv, watcher_status: update.status })
     }
+    // A sub-run opened: the lane replaces the notice this used to be, so the
+    // minutes it blocks for read as activity rather than silence. A repeated
+    // id (a reconnect replaying the bracket) refreshes rather than doubles.
+    SubrunOpened(id~, kind~, label~) => {
+      let subruns = conv.subruns.filter(lane => lane.id != id)
+      subruns.push({
+        id,
+        kind,
+        label,
+        steps: 0,
+        activity: "",
+        run: event_run_id,
+      })
+      // A lane is a row at the tail, so opening one grows the transcript: a
+      // conversation pinned to the bottom has to follow it down, or several
+      // concurrent sub-runs open entirely below the fold.
+      (true, { ..conv, subruns, })
+    }
+    // Closed: drop the lane and say what it cost, which is the one place
+    // those numbers are ever reported.
+    //
+    // The cost goes in the retained OVERLAY, not in `messages`. Nothing
+    // durable records a sub-run, and the finish of the enclosing run starts
+    // a snapshot whose `adopt_snapshot` replaces `messages` wholesale with
+    // durable items — a bubble there would be erased seconds after it
+    // appeared, which is the whole report gone.
+    SubrunClosed(id~, status~, steps~, tokens~) => {
+      let closed = conv.subruns.filter(lane => lane.id == id)
+      let kind = match closed {
+        [lane, ..] => lane.kind
+        [] => "subrun"
+      }
+      let conv = { ..conv, subruns: conv.subruns.filter(lane => lane.id != id) }.append_local_notice(
+        Assistant(is_danger=status != "captured"),
+        "\{kind} \{id}: \{status} · \{steps} step(s) · \{compact_count(tokens)} tok",
+      )
+      (true, conv)
+    }
     Usage(prompt_tokens~, completion_tokens~) =>
       (false, { ..conv, usage_tokens: prompt_tokens + completion_tokens })
     ToolResult(..) => (false, conv)
@@ -3220,6 +3258,32 @@ fn update_device_msg(
       } else {
         (@cmd.none, model)
       }
+    // A running sub-run advanced: refresh its lane in place. An id with no
+    // lane is a push that outraced (or outlived) its brackets — dropped, not
+    // resurrected, since only a bracket knows a sub-run exists.
+    SubrunProgressed(id~, session~, steps~, activity~) => {
+      // Route by the CHILD session id, not by the sub-run id: `sr-N` is only
+      // unique within its parent engine, so two conversations can both have
+      // an `sr-1` in flight. The conversation on screen is not necessarily
+      // the one that launched this child either — a background turn keeps
+      // running while the user reads something else.
+      guard @transcript.subrun_parent(session) is Some(parent) &&
+        model.find_conversation(channel, parent) is Some(conv) else {
+        return (@cmd.none, model)
+      }
+      let subruns = conv.subruns.map(lane => {
+        if lane.id == id {
+          { ..lane, steps, activity }
+        } else {
+          lane
+        }
+      })
+      if subruns == conv.subruns {
+        (@cmd.none, model)
+      } else {
+        (@cmd.none, model.replace_conversation({ ..conv, subruns, }))
+      }
+    }
     SkillsChanged =>
       if channel == model.focused {
         (fetch_installed_skills(dispatch, channel), model)
@@ -5527,6 +5591,54 @@ fn sessions_loaded(
   request_generation? : Int = 0,
 ) -> Msg {
   on_home(SessionsLoaded(items, connection_generation=0, request_generation~))
+}
+
+///|
+/// A lane belongs to its turn. The finish bracket that retires it is not
+/// replayed, so a dropped connection or an engine that dies mid-sub-run must
+/// not leave a pulsing lane behind.
+test "a lane outlives neither its run nor a missing finish bracket" {
+  let conv = { ..test_conversation(), run: Open(run_id="r1", stage=Opened) }
+  let (grew, opened) = apply_engine_event(
+    conv,
+    SubrunOpened(id="sr-1", kind="explore", label="where is X"),
+    Some("r1"),
+  )
+  // The lane is a row at the tail: a pinned transcript must follow it down.
+  assert_true(grew)
+  inspect(opened.visible_subruns().length(), content="1")
+  // The run settles without a finish bracket ever arriving.
+  let settled = { ..opened, run: NoRun(ended=Some(RunFailed)) }
+  inspect(settled.visible_subruns().length(), content="0")
+  // And the stranded lane does not reappear inside the NEXT turn.
+  let next_turn = { ..settled, run: Open(run_id="r2", stage=Opened) }
+  inspect(next_turn.visible_subruns().length(), content="0")
+}
+
+///|
+/// The cost report is the only place a sub-run's steps and tokens are ever
+/// shown, and nothing durable records them — so it has to survive the
+/// snapshot the enclosing run's finish kicks off, which replaces `messages`.
+test "a sub-run's cost is reported in the retained overlay" {
+  let conv = { ..test_conversation(), run: Open(run_id="r1", stage=Opened) }
+  let (_, opened) = apply_engine_event(
+    conv,
+    SubrunOpened(id="sr-1", kind="explore", label="where is X"),
+    Some("r1"),
+  )
+  let (grew, closed) = apply_engine_event(
+    opened,
+    SubrunClosed(id="sr-1", status="captured", steps=37, tokens=12_449),
+    Some("r1"),
+  )
+  assert_true(grew)
+  inspect(closed.visible_subruns().length(), content="0")
+  // In the overlay, not in `messages`.
+  inspect(closed.messages.length(), content="0")
+  inspect(
+    closed.overlay.map(notice => notice.content).join("; "),
+    content="explore sr-1: captured · 37 step(s) · 12.4k tok",
+  )
 }
 
 ///|

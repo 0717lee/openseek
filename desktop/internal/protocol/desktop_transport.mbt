@@ -13,6 +13,7 @@ pub(all) enum NotificationKind {
   AgentFinished
   AgentDurable
   SessionEvent
+  SubrunProgress
   SessionChanged
   WorkspaceChanged
   WorktreeChanged
@@ -40,6 +41,7 @@ pub fn NotificationKind::wire_name(self : NotificationKind) -> String {
     AgentFinished => "agent.finished"
     AgentDurable => "agent.durable"
     SessionEvent => "session.event"
+    SubrunProgress => "subrun.progress"
     SessionChanged => "session.changed"
     WorkspaceChanged => "workspace.changed"
     WorktreeChanged => "worktree.changed"
@@ -68,6 +70,7 @@ pub fn NotificationKind::all() -> Array[NotificationKind] {
     AgentFinished,
     AgentDurable,
     SessionEvent,
+    SubrunProgress,
     SessionChanged,
     WorkspaceChanged,
     WorktreeChanged,
@@ -97,6 +100,7 @@ pub(all) enum Notification {
   AgentFinished(FinishedPayload)
   AgentDurable(DurableBoundaryPayload)
   SessionEvent(SessionCommitPayload)
+  SubrunProgress(SubrunProgressPayload)
   SessionChanged(SessionChangedPayload)
   WorkspaceChanged(WorkspacesChangedPayload)
   WorktreeChanged(WorktreeChangedPayload)
@@ -134,6 +138,8 @@ pub fn Notification::from_wire(name : String, params : Json) -> Notification? {
       Some(AgentDurable(@json.from_json(params) catch { _ => return None }))
     "session.event" =>
       Some(SessionEvent(@json.from_json(params) catch { _ => return None }))
+    "subrun.progress" =>
+      Some(SubrunProgress(@json.from_json(params) catch { _ => return None }))
     "session.changed" =>
       Some(SessionChanged(@json.from_json(params) catch { _ => return None }))
     "workspace.changed" =>
@@ -184,6 +190,7 @@ pub fn Notification::kind(self : Notification) -> NotificationKind {
     AgentFinished(_) => AgentFinished
     AgentDurable(_) => AgentDurable
     SessionEvent(_) => SessionEvent
+    SubrunProgress(_) => SubrunProgress
     SessionChanged(_) => SessionChanged
     WorkspaceChanged(_) => WorkspaceChanged
     WorktreeChanged(_) => WorktreeChanged
@@ -218,6 +225,7 @@ pub fn Notification::params(self : Notification) -> Json {
     AgentFinished(payload) => payload.to_json()
     AgentDurable(payload) => payload.to_json()
     SessionEvent(payload) => payload.to_json()
+    SubrunProgress(payload) => payload.to_json()
     SessionChanged(payload) => payload.to_json()
     WorkspaceChanged(payload) => payload.to_json()
     WorktreeChanged(payload) => payload.to_json()

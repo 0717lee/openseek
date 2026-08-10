@@ -1753,6 +1753,52 @@ button.composer-worktree:hover {
   background: transparent;
 }
 
+/* A sub-run in flight, at the transcript's tail: what is running, how far it
+   has gotten, and what it is doing right now. Quiet by default — it is
+   status, not content — with a pulsing dot so a stalled child still reads as
+   attached rather than as a frozen line. */
+.subrun-lane {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  padding: 4px 2px;
+  color: var(--ink-3);
+  font-size: 12px;
+}
+.subrun-mark {
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: subrun-pulse 1.6s ease-in-out infinite;
+}
+@keyframes subrun-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+.subrun-name {
+  flex: 0 0 auto;
+  color: var(--ink-2);
+  font-weight: 600;
+}
+.subrun-detail {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+.subrun-step {
+  flex: 0 0 auto;
+}
+.subrun-activity {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* Every conversation row leads with the twisty cell — a button when the
    conversation folded sub-run transcripts under it, an empty box otherwise,
    so titles line up either way. The chevron points down when open and right

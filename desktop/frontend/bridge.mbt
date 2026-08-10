@@ -145,6 +145,15 @@ fn device_msg(
     AgentFinished(payload) => finished_msg(payload)
     AgentDurable(payload) => durable_boundary_msg(payload)
     SessionEvent(payload) => session_event_msg(payload)
+    SubrunProgress(payload) =>
+      Some(
+        SubrunProgressed(
+          id=payload.id,
+          session=payload.session,
+          steps=payload.steps,
+          activity=payload.activity,
+        ),
+      )
     SessionChanged(payload) => session_changed_msg(payload)
     WorkspaceChanged(payload) => {
       let paths : Array[@common.Uri] = []

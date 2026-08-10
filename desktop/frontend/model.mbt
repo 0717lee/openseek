@@ -374,6 +374,30 @@ priv enum SettlementFrontierMatch {
 }
 
 ///|
+/// One sub-run in flight, as the conversation shows it while its tool call
+/// blocks. Born at the `subrun_started` bracket, refreshed by the host's
+/// `subrun.progress` pushes, and gone at the finish — which is also the only
+/// place its cost is reported, since nothing durable records a sub-run.
+///
+/// `steps` and `activity` stay at 0/"" until the child gets far enough to
+/// have any: the host reads them from the child's own record, which exists
+/// only under a durable parent, so a scratch conversation shows the lane
+/// without them rather than not at all.
+pub(all) struct SubrunLane {
+  id : String
+  kind : String
+  label : String
+  steps : Int
+  activity : String
+  // The run that launched it. A lane is only ever meaningful inside its own
+  // turn, and the finish bracket that would retire it is not replayed: a
+  // connection that drops across it, or an engine that dies before emitting
+  // it, would otherwise leave a pulsing lane behind forever. Ownership makes
+  // that unrepresentable instead of relying on catching every settle path.
+  run : String?
+} derive(Eq)
+
+///|
 /// One conversation's full client-side state. Each conversation maps to a
 /// durable engine session and, while running, to its own `--serve` engine
 /// process in the host — several conversations can run turns concurrently,
@@ -448,6 +472,10 @@ priv struct Conversation {
   // (accent for success, warn otherwise) until the conversation is opened.
   unseen_finish : Bool
   usage_tokens : Int
+  // Sub-runs this conversation's open turn has in flight, in the order they
+  // started. Live-only: nothing persists a sub-run's progress, so a reload
+  // mid-turn shows the tool call pending with no lane under it.
+  subruns : Array[SubrunLane]
   // The conversation's workspace directory as reported by the host's
   // `started` event — `None` until the first run reports it. Display
   // (topbar tooltip), the working directory for `open_path`/`launch_app`,
@@ -1781,6 +1809,15 @@ priv enum DeviceMsg {
     ts~ : Double?,
     item~ : @protocol.SessionItem
   )
+  // The host's `subrun.progress` broadcast: a running sub-run advanced. Not
+  // durable and not lifecycle — the raw stream's brackets own the sub-run's
+  // start and end, and this only refreshes what it is doing in between.
+  SubrunProgressed(
+    id~ : String,
+    session~ : String,
+    steps~ : Int,
+    activity~ : String
+  )
   // The registered workspaces — the reply to `workspace.list`. Both
   // generations are required: reconnect rejects a dead socket, while request
   // generation rejects an older reply from the current connection.
@@ -2004,6 +2041,7 @@ fn empty_conversation(
     compaction: NotCompacting,
     unseen_finish: false,
     usage_tokens: 0,
+    subruns: [],
     cwd: None,
     branch: None,
     diffstat: None,
@@ -2883,6 +2921,16 @@ fn Conversation::has_begun(self : Conversation) -> Bool {
 /// composer, sidebar pulse, and self-update busy check all gate on this.
 fn Conversation::is_running(self : Conversation) -> Bool {
   !(self.run is NoRun(..))
+}
+
+///|
+/// The sub-run lanes worth drawing: those belonging to the run that is open
+/// right now. An idle conversation shows none, and a lane stranded by a
+/// missing finish bracket cannot outlive its turn — the next run's lanes
+/// carry the next run's id.
+fn Conversation::visible_subruns(self : Conversation) -> Array[SubrunLane] {
+  guard self.run is Open(run_id~, ..) else { return [] }
+  self.subruns.filter(lane => lane.run is Some(owner) && owner == run_id)
 }
 
 ///|

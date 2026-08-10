@@ -1499,61 +1499,125 @@ async fn ServeEngine::run(
 ) -> Unit {
   let engine = self
   let sink = self.sink
-  for ;; {
-    match messages.get() {
-      StreamEvent(stream) => {
-        // Every stdout event is a hint that the engine may just have
-        // appended to the durable record — the follower's low-latency
-        // wakeup (its poll only backstops this).
-        manager.kick_follower(engine.session_key)
-        let decoded = stream.legacy
-        let wire_event = stream.wire
-        let needs_durable_scan = stream.needs_durable_scan
-        // These events do not prove their matching Terminal append succeeded.
-        // Synchronously close admission and stdin before the first sink
-        // suspension; the current turn can finish its append/TurnDone, while
-        // the next start is forced through the old child's close/reap barrier
-        // and cancel cannot hit stale active_work.
-        // Deliberately do not wait for command_lock: an in-flight cancel/steer
-        // is exactly what must be cut off. WriteToProcess::close is an
-        // infallible synchronous handle close; a racing write observes its
-        // failure in the command's shielded retirement path.
-        if needs_durable_scan {
-          engine.accepts_commands = false
-          engine.writer.close()
-        }
-        let (run_id, submission_id) = engine.steer_runs.route_event(
-          decoded,
-          stream.prompt_steer_applied,
-          engine.latest_run,
-        )
-        // These normalized Finished events cannot carry an exact sequence
-        // yet. The EOF final scan publishes the existing `agent.durable`
-        // boundary before a successor is admitted.
-        if needs_durable_scan &&
-          run_id is Some(id) &&
-          engine.follower is Some(follower) {
-          follower.expect_durable_finish(id)
-        }
-        match decoded {
-          // The abort the user asked for: report it as a cancellation, the
-          // same wire status the pre-serve host used. A Running phase is
-          // only entered after a run id is recorded, so the id is present.
-          Some(AgentAborted(_)) if engine.phase
-            is Running(cancel_requested=true, ..) &&
-            run_id is Some(id) => {
-            emit_error(sink, "cancelled", run_id=id)
-            emit_finished(sink, id, Cancelled)
-            engine.phase = engine.phase.after_run_close()
-            engine.steer_runs.record_terminal(id)
+  // Sub-run probes are children of this consumer: one per running child,
+  // spawned at its `subrun_started` bracket and cancelled at the finish.
+  // `no_wait` makes the engine's own EOF their backstop — a child whose
+  // finish bracket never arrives cannot outlive the engine that launched it.
+  @async.with_task_group() <| group => {
+    let probes : Map[String, @async.Task[Unit]] = Map([])
+    for ;; {
+      match messages.get() {
+        StreamEvent(stream) => {
+          // Every stdout event is a hint that the engine may just have
+          // appended to the durable record — the follower's low-latency
+          // wakeup (its poll only backstops this).
+          manager.kick_follower(engine.session_key)
+          let decoded = stream.legacy
+          let wire_event = stream.wire
+          // The brackets are the only thing that knows a sub-run's lifetime;
+          // the probe in between reads the child's own record, which is the
+          // only place its progress is visible to this process.
+          match wire_event {
+            Some(SubrunStarted(id~, ..)) =>
+              if engine.session_root is Some(root) && probes.get(id) is None {
+                probes[id] = group.spawn(no_wait=true, allow_failure=true, () => {
+                  follow_subrun_progress(
+                    root=root.to_string(),
+                    parent_session=engine.session_key,
+                    id~,
+                    publish=payload => emit(sink, SubrunProgress(payload)),
+                  )
+                })
+              }
+            Some(SubrunFinished(id~, ..)) =>
+              if probes.get(id) is Some(probe) {
+                probes.remove(id)
+                probe.cancel()
+              }
+            _ => ()
           }
-          Some(decoded) => {
-            // Terminal failures are immediately normalized below; forwarding
-            // their raw event as well would make the frontend render the same
-            // failure twice. With no run to close (no id recorded yet) the
-            // normalization cannot happen, so the raw event is the report.
-            if (!host_reports_terminal_error(decoded) || run_id is None) &&
-              wire_event is Some(event) {
+          let needs_durable_scan = stream.needs_durable_scan
+          // These events do not prove their matching Terminal append succeeded.
+          // Synchronously close admission and stdin before the first sink
+          // suspension; the current turn can finish its append/TurnDone, while
+          // the next start is forced through the old child's close/reap barrier
+          // and cancel cannot hit stale active_work.
+          // Deliberately do not wait for command_lock: an in-flight cancel/steer
+          // is exactly what must be cut off. WriteToProcess::close is an
+          // infallible synchronous handle close; a racing write observes its
+          // failure in the command's shielded retirement path.
+          if needs_durable_scan {
+            engine.accepts_commands = false
+            engine.writer.close()
+          }
+          let (run_id, submission_id) = engine.steer_runs.route_event(
+            decoded,
+            stream.prompt_steer_applied,
+            engine.latest_run,
+          )
+          // These normalized Finished events cannot carry an exact sequence
+          // yet. The EOF final scan publishes the existing `agent.durable`
+          // boundary before a successor is admitted.
+          if needs_durable_scan &&
+            run_id is Some(id) &&
+            engine.follower is Some(follower) {
+            follower.expect_durable_finish(id)
+          }
+          match decoded {
+            // The abort the user asked for: report it as a cancellation, the
+            // same wire status the pre-serve host used. A Running phase is
+            // only entered after a run id is recorded, so the id is present.
+            Some(AgentAborted(_)) if engine.phase
+              is Running(cancel_requested=true, ..) &&
+              run_id is Some(id) => {
+              emit_error(sink, "cancelled", run_id=id)
+              emit_finished(sink, id, Cancelled)
+              engine.phase = engine.phase.after_run_close()
+              engine.steer_runs.record_terminal(id)
+            }
+            Some(decoded) => {
+              // Terminal failures are immediately normalized below; forwarding
+              // their raw event as well would make the frontend render the same
+              // failure twice. With no run to close (no id recorded yet) the
+              // normalization cannot happen, so the raw event is the report.
+              if (!host_reports_terminal_error(decoded) || run_id is None) &&
+                wire_event is Some(event) {
+                emit(
+                  sink,
+                  StreamEvent({
+                    run_id,
+                    session: Some(engine.session_key),
+                    event: { event, submission_id },
+                  }),
+                )
+              }
+              match decoded {
+                // A compaction queued behind an open turn begins only now, so
+                // the engine's own event is what flips the phase; entering
+                // from anything but Idle would clobber a run's state.
+                CompactionStarted =>
+                  if engine.phase is Idle {
+                    engine.phase = Compacting
+                  }
+                // Either way the engine is done writing the record's summary,
+                // so operations gated on compaction (starts, archiving) may
+                // proceed.
+                CompactionFinished | CompactionFailed => engine.phase = Idle
+                _ => ()
+              }
+              // Terminal normalization is a state transition, not merely a raw
+              // event shape. In particular agent_setup_failed may be followed by
+              // turn_failed when its delayed Terminal append itself fails; once
+              // the first event idled the run, the second is diagnostic only and
+              // must not emit a duplicate Finished for the old run id.
+              if engine.phase is Running(..) &&
+                run_id is Some(id) &&
+                handle_decoded_event(sink, id, decoded) {
+                engine.phase = engine.phase.after_run_close()
+                engine.steer_runs.record_terminal(id)
+              }
+            }
+            None if wire_event is Some(event) =>
               emit(
                 sink,
                 StreamEvent({
@@ -1562,195 +1626,160 @@ async fn ServeEngine::run(
                   event: { event, submission_id },
                 }),
               )
+            None => ()
+          }
+        }
+        StreamReaderFailed(message) => {
+          engine.accepts_commands = false
+          emit_error(sink, message, run_id?=engine.latest_run)
+          // A broken stream can no longer deliver compaction_finished/failed;
+          // report the compaction as failed now so the frontend does not stay
+          // stuck with Send disabled (the exit branch below then has nothing
+          // left to report for it).
+          if engine.phase is Compacting {
+            engine.phase = Idle
+            emit_compaction_failed(sink, engine, message)
+          }
+        }
+        StreamExited(code) => {
+          @xlog.info() <?
+            {
+              "event": "desktop_engine_exited",
+              "session": engine.session_key,
+              "pid": engine.process.pid,
+              "exit_code": code,
+              "run_id": engine.latest_run.unwrap_or(""),
             }
-            match decoded {
-              // A compaction queued behind an open turn begins only now, so
-              // the engine's own event is what flips the phase; entering
-              // from anything but Idle would clobber a run's state.
-              CompactionStarted =>
-                if engine.phase is Idle {
-                  engine.phase = Compacting
+          engine.accepts_commands = false
+          // Capture ownership only if the slot still contains THIS engine by
+          // identity. Correct replacement waits on this handle through final
+          // drain, but pump teardown and defensive cleanup can still detach it;
+          // a by-value comparison would confuse a same-config successor.
+          let mut owns_slot = false
+          let mut owned_follower : SessionFollower? = None
+          if manager.pump is Serving(sessions~) &&
+            sessions.get(engine.session_key) is Some(slot) &&
+            slot.engine is Some(current) &&
+            physical_equal(current, engine) {
+            owns_slot = true
+            owned_follower = manager.followers.get(engine.session_key)
+          }
+          // Publish raw process exit before the potentially O(history) follower
+          // scan. Close deadlines cover only child termination; successor and
+          // archive callers still wait on `done` below for the full event and
+          // durable-drain barrier.
+          engine.exit.process_done = true
+          // EOF cleanup always owns an independent retirement attempt. Pending
+          // replacement/archive operations join this same generation when they
+          // need the drain as a barrier; if one of those callers is cancelled,
+          // this consumer still closes the writer/follower lifecycle. Use the
+          // identity captured before clearing the slot, so a delayed cleanup
+          // cannot stop a successor.
+          let mut durable_sequence : Int? = None
+          if owns_slot && owned_follower is Some(follower) {
+            try {
+              stop_follower_instance(manager, follower, writer_exited=true)
+              durable_sequence = Some(follower.watermark)
+            } catch {
+              error if @async.is_being_cancelled() => raise error
+              error => {
+                // This abrupt EOF will emit a Failed without an exact sequence.
+                // Move its durable obligation onto the follower before the
+                // lifecycle event; a later archive/detach Stop can then finish
+                // the failed drain after this dead serve handle leaves its slot.
+                if engine.phase is Running(..) && engine.latest_run is Some(run) {
+                  follower.expect_durable_finish(run)
                 }
-              // Either way the engine is done writing the record's summary,
-              // so operations gated on compaction (starts, archiving) may
-              // proceed.
-              CompactionFinished | CompactionFailed => engine.phase = Idle
-              _ => ()
-            }
-            // Terminal normalization is a state transition, not merely a raw
-            // event shape. In particular agent_setup_failed may be followed by
-            // turn_failed when its delayed Terminal append itself fails; once
-            // the first event idled the run, the second is diagnostic only and
-            // must not emit a duplicate Finished for the old run id.
-            if engine.phase is Running(..) &&
-              run_id is Some(id) &&
-              handle_decoded_event(sink, id, decoded) {
-              engine.phase = engine.phase.after_run_close()
-              engine.steer_runs.record_terminal(id)
-            }
-          }
-          None if wire_event is Some(event) =>
-            emit(
-              sink,
-              StreamEvent({
-                run_id,
-                session: Some(engine.session_key),
-                event: { event, submission_id },
-              }),
-            )
-          None => ()
-        }
-      }
-      StreamReaderFailed(message) => {
-        engine.accepts_commands = false
-        emit_error(sink, message, run_id?=engine.latest_run)
-        // A broken stream can no longer deliver compaction_finished/failed;
-        // report the compaction as failed now so the frontend does not stay
-        // stuck with Send disabled (the exit branch below then has nothing
-        // left to report for it).
-        if engine.phase is Compacting {
-          engine.phase = Idle
-          emit_compaction_failed(sink, engine, message)
-        }
-      }
-      StreamExited(code) => {
-        @xlog.info() <?
-          {
-            "event": "desktop_engine_exited",
-            "session": engine.session_key,
-            "pid": engine.process.pid,
-            "exit_code": code,
-            "run_id": engine.latest_run.unwrap_or(""),
-          }
-        engine.accepts_commands = false
-        // Capture ownership only if the slot still contains THIS engine by
-        // identity. Correct replacement waits on this handle through final
-        // drain, but pump teardown and defensive cleanup can still detach it;
-        // a by-value comparison would confuse a same-config successor.
-        let mut owns_slot = false
-        let mut owned_follower : SessionFollower? = None
-        if manager.pump is Serving(sessions~) &&
-          sessions.get(engine.session_key) is Some(slot) &&
-          slot.engine is Some(current) &&
-          physical_equal(current, engine) {
-          owns_slot = true
-          owned_follower = manager.followers.get(engine.session_key)
-        }
-        // Publish raw process exit before the potentially O(history) follower
-        // scan. Close deadlines cover only child termination; successor and
-        // archive callers still wait on `done` below for the full event and
-        // durable-drain barrier.
-        engine.exit.process_done = true
-        // EOF cleanup always owns an independent retirement attempt. Pending
-        // replacement/archive operations join this same generation when they
-        // need the drain as a barrier; if one of those callers is cancelled,
-        // this consumer still closes the writer/follower lifecycle. Use the
-        // identity captured before clearing the slot, so a delayed cleanup
-        // cannot stop a successor.
-        let mut durable_sequence : Int? = None
-        if owns_slot && owned_follower is Some(follower) {
-          try {
-            stop_follower_instance(manager, follower, writer_exited=true)
-            durable_sequence = Some(follower.watermark)
-          } catch {
-            error if @async.is_being_cancelled() => raise error
-            error => {
-              // This abrupt EOF will emit a Failed without an exact sequence.
-              // Move its durable obligation onto the follower before the
-              // lifecycle event; a later archive/detach Stop can then finish
-              // the failed drain after this dead serve handle leaves its slot.
-              if engine.phase is Running(..) && engine.latest_run is Some(run) {
-                follower.expect_durable_finish(run)
+                @xlog.debug() <?
+                  {
+                    "event": "desktop_follower_final_scan_failed",
+                    "session": engine.session_key,
+                    "error": "\{error}",
+                  }
               }
-              @xlog.debug() <?
-                {
-                  "event": "desktop_follower_final_scan_failed",
-                  "session": engine.session_key,
-                  "error": "\{error}",
-                }
             }
           }
-        }
-        match engine.phase {
-          // EOF with a run still open means the engine died mid-turn: close
-          // that run with its only available diagnostics.
-          Running(compact_queued~, ..) => {
-            engine.phase = Idle
-            let diagnostics = stderr_task.wait().trim().to_owned()
-            if diagnostics.is_empty() {
-              emit_error(
-                sink,
-                "engine exited without a result",
-                run_id?=engine.latest_run,
-                exit_code=code,
-              )
-            } else {
-              emit_error(
-                sink,
-                "engine exited without a result:\n\{diagnostics}",
-                run_id?=engine.latest_run,
-                exit_code=code,
-                diagnostics~,
-              )
+          match engine.phase {
+            // EOF with a run still open means the engine died mid-turn: close
+            // that run with its only available diagnostics.
+            Running(compact_queued~, ..) => {
+              engine.phase = Idle
+              let diagnostics = stderr_task.wait().trim().to_owned()
+              if diagnostics.is_empty() {
+                emit_error(
+                  sink,
+                  "engine exited without a result",
+                  run_id?=engine.latest_run,
+                  exit_code=code,
+                )
+              } else {
+                emit_error(
+                  sink,
+                  "engine exited without a result:\n\{diagnostics}",
+                  run_id?=engine.latest_run,
+                  exit_code=code,
+                  diagnostics~,
+                )
+              }
+              // A Running phase is only entered after a run id is recorded,
+              // so the id is present here.
+              if engine.latest_run is Some(run) {
+                emit_finished(
+                  sink,
+                  run,
+                  Failed,
+                  exit_code=code,
+                  durable_sequence?,
+                )
+              }
+              // A compaction queued behind the dead turn died with the engine;
+              // only a terminal compaction event clears the frontend's queued
+              // notice, so synthesize the failure it can no longer send.
+              if compact_queued {
+                emit_compaction_failed(
+                  sink, engine, "engine exited before the queued compaction started",
+                )
+              }
             }
-            // A Running phase is only entered after a run id is recorded,
-            // so the id is present here.
-            if engine.latest_run is Some(run) {
-              emit_finished(
-                sink,
-                run,
-                Failed,
-                exit_code=code,
-                durable_sequence?,
-              )
+            // EOF mid-compaction: no run is open, but the frontend set its
+            // compacting notice on compaction_started and only a terminal
+            // compaction event clears it — synthesize the failure the engine
+            // can no longer send.
+            Compacting => {
+              engine.phase = Idle
+              let diagnostics = stderr_task.wait().trim().to_owned()
+              let reason = if diagnostics.is_empty() {
+                "engine exited during compaction"
+              } else {
+                "engine exited during compaction:\n\{diagnostics}"
+              }
+              emit_compaction_failed(sink, engine, reason)
             }
-            // A compaction queued behind the dead turn died with the engine;
-            // only a terminal compaction event clears the frontend's queued
-            // notice, so synthesize the failure it can no longer send.
-            if compact_queued {
-              emit_compaction_failed(
-                sink, engine, "engine exited before the queued compaction started",
-              )
-            }
+            // A clean exit after a terminal event (session switch, app
+            // shutdown) reports nothing here. A pending exact boundary is
+            // published below for every closed phase, including a setup failure
+            // that had a compaction queued behind it.
+            Idle => ()
           }
-          // EOF mid-compaction: no run is open, but the frontend set its
-          // compacting notice on compaction_started and only a terminal
-          // compaction event clears it — synthesize the failure the engine
-          // can no longer send.
-          Compacting => {
-            engine.phase = Idle
-            let diagnostics = stderr_task.wait().trim().to_owned()
-            let reason = if diagnostics.is_empty() {
-              "engine exited during compaction"
-            } else {
-              "engine exited during compaction:\n\{diagnostics}"
-            }
-            emit_compaction_failed(sink, engine, reason)
+          // Keep this exact dead handle in its slot through the final scan and
+          // lifecycle publish. A concurrent start then joins `close_and_wait`
+          // instead of racing the follower stop and announcing its successor
+          // before this run's Finished/boundary. Clear by identity in case an
+          // older host generation already replaced it defensively.
+          if owns_slot &&
+            manager.pump is Serving(sessions~) &&
+            sessions.get(engine.session_key) is Some(slot) &&
+            slot.engine is Some(current) &&
+            physical_equal(current, engine) {
+            slot.engine = None
+            manager.prune_slot(engine.session_key)
           }
-          // A clean exit after a terminal event (session switch, app
-          // shutdown) reports nothing here. A pending exact boundary is
-          // published below for every closed phase, including a setup failure
-          // that had a compaction queued behind it.
-          Idle => ()
+          // This is the successor-admission barrier, not merely a process-exit
+          // flag. Publish it only after the owned slot is clear, the final
+          // follower scan, and every lifecycle event from this engine.
+          engine.exit.done = true
+          break
         }
-        // Keep this exact dead handle in its slot through the final scan and
-        // lifecycle publish. A concurrent start then joins `close_and_wait`
-        // instead of racing the follower stop and announcing its successor
-        // before this run's Finished/boundary. Clear by identity in case an
-        // older host generation already replaced it defensively.
-        if owns_slot &&
-          manager.pump is Serving(sessions~) &&
-          sessions.get(engine.session_key) is Some(slot) &&
-          slot.engine is Some(current) &&
-          physical_equal(current, engine) {
-          slot.engine = None
-          manager.prune_slot(engine.session_key)
-        }
-        // This is the successor-admission barrier, not merely a process-exit
-        // flag. Publish it only after the owned slot is clear, the final
-        // follower scan, and every lifecycle event from this engine.
-        engine.exit.done = true
-        break
       }
     }
   }
