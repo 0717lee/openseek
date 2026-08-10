@@ -60,7 +60,7 @@ fn cap_name(name : String, limit? : Int = MaxFunctionNameChars) -> String {
   if name.length() <= limit {
     name
   } else {
-    name[:limit].to_owned()
+    name.clamped_view(end=limit).to_owned()
   }
 }
 

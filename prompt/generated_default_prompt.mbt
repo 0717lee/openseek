@@ -510,6 +510,9 @@ fn default_prompt() -> String {
     #|  callee stores or requires an owned `String`.
     #|- Slice syntax panics for out-of-range indices or invalid UTF-16 boundaries; use
     #|  `s.get_view(start=..., end=...)` when indices come from untrusted input.
+    #|- For best-effort truncation such as summaries, use
+    #|  `s.clamped_view(start=..., end=...)`. It clamps out-of-range offsets and snaps
+    #|  a boundary inward rather than splitting a UTF-16 surrogate pair.
     #|
     #|```mbt check
     #|///|

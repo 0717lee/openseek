@@ -558,15 +558,7 @@ fn preview_display_line(text : String) -> String {
   if text.length() <= PreviewLineDisplayCap {
     return text
   }
-  // Never split a surrogate pair: when the cut lands right after a high
-  // surrogate, back up one unit so the ellipsis replaces the whole character
-  // instead of leaving a corrupt half.
-  let mut end = PreviewLineDisplayCap
-  let unit = text[end - 1].to_int()
-  if unit >= 0xD800 && unit <= 0xDBFF {
-    end -= 1
-  }
-  "\{text.unsafe_substring(start=0, end~)}…"
+  "\{text.clamped_view(end=PreviewLineDisplayCap)}…"
 }
 
 ///|
