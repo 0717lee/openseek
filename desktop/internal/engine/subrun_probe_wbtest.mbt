@@ -15,7 +15,7 @@ async fn fresh_record(name : String) -> SubrunProbeState {
     "\n",
     create_mode=CreateOrTruncate,
   )
-  { path, offset: 0, carry: b"", steps: 0, activity: "" }
+  { path, offset: 0, carry: b"", anchor: b"", steps: 0, activity: "" }
 }
 
 ///|
@@ -118,12 +118,80 @@ async test "a rewritten record is re-read from its head" {
 }
 
 ///|
+/// The child records the assistant item that REQUESTS a call before running
+/// it, which is the only account of a slow tool while it is slow.
+async test "the current tool call is activity, not just the finished one" {
+  let state = fresh_record("current")
+  append_record(
+    state,
+    item_line("assistant", {
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "c1",
+          "name": "shell",
+          "arguments": "{\"command\":\"moon check\"}",
+        },
+      ],
+    }),
+  )
+  assert_true(state.poll())
+  assert_eq(state.steps, 1)
+  // Without this the lane would read "" for the whole of a long `moon check`.
+  assert_eq(state.activity, "shell")
+  // The result that eventually lands carries the better text, and wins.
+  append_record(
+    state,
+    tool_line("c1", "shell", brief="shell moon check → ok"),
+  )
+  assert_true(state.poll())
+  assert_eq(state.activity, "shell moon check → ok")
+  // An assistant item with no calls leaves the activity alone.
+  append_record(state, item_line("assistant", { "content": "done" }))
+  assert_true(state.poll())
+  assert_eq(state.activity, "shell moon check → ok")
+}
+
+///|
+/// The store repairs a torn tail by renaming a temp file over the record, and
+/// the replacement also carries the newly appended event — so it is usually
+/// LONGER than what was read. A length check alone cannot see that.
+async test "a same-or-larger rewrite is caught by the anchor" {
+  let state = fresh_record("rewritten-longer")
+  append_record(state, item_line("assistant", { "content": "one" }))
+  append_record(state, tool_line("c1", "read", brief="read moon.mod"))
+  assert_true(state.poll())
+  assert_eq(state.steps, 1)
+  assert_eq(state.activity, "read moon.mod")
+  let grown = state.offset
+  // A repair rewrites the whole record from the child's own state: same
+  // header, different framing, and one more event than the probe had read.
+  @fs.write_file(
+    state.path,
+    ({ "version": 1, "id": "parent-sr-1", "system_prompt": "s" } : Json).stringify() +
+    "\n" +
+    item_line("assistant", { "content": "one (repaired)" }) +
+    item_line("assistant", { "content": "two" }) +
+    tool_line("c2", "grep", brief="grep is_being_cancelled"),
+    create_mode=CreateOrTruncate,
+  )
+  // Longer than before, so nothing about the size says "rewritten".
+  assert_true(@fs.read_file(state.path).text().length().to_int64() > grown)
+  assert_true(state.poll())
+  // Re-read from the head: two assistant items in the new record, and its
+  // own last tool call — not a splice of the old bytes with the new.
+  assert_eq(state.steps, 2)
+  assert_eq(state.activity, "grep is_being_cancelled")
+}
+
+///|
 async test "a record that does not exist yet is not an error" {
   let root = @fs.realpath(@fs.tmpdir(prefix="openseek-subrun-probe-missing-"))
   let state = {
     path: subrun_record_path(root, "parent-sr-9"),
     offset: 0,
     carry: b"",
+    anchor: b"",
     steps: 0,
     activity: "",
   }

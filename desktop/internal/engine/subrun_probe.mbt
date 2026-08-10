@@ -40,6 +40,15 @@ let subrun_probe_max_chunk : Int64 = 128 * 1024
 priv struct SubrunProbeState {
   path : String
   mut offset : Int64
+  /// The last bytes consumed, re-checked at their own position before the
+  /// offset is trusted again. The store repairs a torn tail by writing a
+  /// temp file and renaming it over the record
+  /// (`agent_session/store/store.mbt::write_text_atomic`), and the
+  /// replacement carries the newly appended event too — so it is usually
+  /// LONGER than what was read, and a length check alone cannot see it. An
+  /// offset carried onto a different inode would skip part of the record and
+  /// splice a stale carry onto unrelated bytes.
+  mut anchor : Bytes
   /// Bytes after the last newline: a poll can land mid-line, and half a JSON
   /// object is not news. Held as bytes, not text, so a chunk boundary inside
   /// a multi-byte character cannot corrupt the line it belongs to.
@@ -68,12 +77,13 @@ async fn SubrunProbeState::poll(self : SubrunProbeState) -> Bool {
   let file = @fs.open(self.path, mode=ReadOnly) catch { _ => return false }
   defer file.close()
   let size = file.size() catch { _ => return false }
-  // A record that shrank was rewritten under us (the store's torn-write
-  // repair): restart from its head rather than reading from a stale offset
-  // into the middle of a line.
-  if size < self.offset {
+  // A record that shrank, or whose bytes at the offset are no longer the
+  // ones that were read there, was rewritten under us. Restart from its head
+  // rather than reading from a stale offset into the middle of a line.
+  if size < self.offset || !anchored_at(file, self.offset, self.anchor) {
     self.offset = 0
     self.carry = b""
+    self.anchor = b""
     // The counters describe what was read from THIS file; recounting from
     // its head means starting them over, or every surviving item would be
     // counted twice.
@@ -93,6 +103,7 @@ async fn SubrunProbeState::poll(self : SubrunProbeState) -> Bool {
     _ => return false
   }
   self.offset = self.offset + take
+  self.anchor = anchor_of(chunk)
   let pending = self.carry + chunk
   let mut changed = false
   let mut line_start = 0
@@ -128,6 +139,17 @@ fn SubrunProbeState::consume(self : SubrunProbeState, line : BytesView) -> Bool 
   match kind {
     "assistant" => {
       self.steps = self.steps + 1
+      // The child records its assistant item BEFORE running the calls in it,
+      // so this is the only account of what a slow tool is doing while it
+      // runs — waiting for the `tool_result` would leave the lane showing
+      // the previous action for exactly the calls worth explaining.
+      match item.get("payload") {
+        Some(Object(payload)) =>
+          if last_tool_call_name(payload) is Some(name) {
+            self.activity = name
+          }
+        _ => ()
+      }
       true
     }
     "tool_result" => {
@@ -149,6 +171,54 @@ fn SubrunProbeState::consume(self : SubrunProbeState, line : BytesView) -> Bool 
 }
 
 ///|
+/// The tail of a chunk, kept as the next poll's proof that the file at the
+/// offset is still the file that was read. Short: it only has to be long
+/// enough that a different record is unlikely to carry the same bytes at the
+/// same position, and it is re-read in full on every poll.
+const SubrunAnchorBytes = 48
+
+///|
+fn anchor_of(chunk : Bytes) -> Bytes {
+  if chunk.length() <= SubrunAnchorBytes {
+    chunk
+  } else {
+    chunk[chunk.length() - SubrunAnchorBytes:].to_owned()
+  }
+}
+
+///|
+/// Whether the bytes ending at `offset` are still the ones read there. An
+/// empty anchor (nothing consumed yet) is vacuously true; a read that fails
+/// reports false, which costs one re-read from the head.
+async fn anchored_at(file : @fs.File, offset : Int64, anchor : Bytes) -> Bool {
+  if anchor.length() == 0 {
+    return true
+  }
+  let start = offset - anchor.length().to_int64()
+  if start < 0 {
+    return false
+  }
+  let seen = file.read_exactly_at(anchor.length(), position=start) catch {
+    _ => return false
+  }
+  seen == anchor
+}
+
+///|
+/// The name of the last tool call an assistant item requested, or `None` when
+/// it requested none (a plain message, or an item this build cannot read).
+fn last_tool_call_name(payload : Map[String, Json]) -> String? {
+  guard payload.get("tool_calls") is Some(Array(calls)) else { return None }
+  let mut name = None
+  for call in calls {
+    if call is Object(fields) && fields.get("name") is Some(String(value)) {
+      name = Some(value)
+    }
+  }
+  name
+}
+
+///|
 /// Tail one sub-run's record until the task is cancelled, reporting each
 /// advance through `publish`.
 ///
@@ -167,6 +237,7 @@ pub async fn follow_subrun_progress(
     path: subrun_record_path(root, session),
     offset: 0,
     carry: b"",
+    anchor: b"",
     steps: 0,
     activity: "",
   }
