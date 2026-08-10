@@ -3,7 +3,7 @@
 ///|
 fn base_prompt() -> String {
   (
-    #|You are OpenSeek, a MoonBit coding agent. Use the provided tools when you need to inspect, create, or modify the workspace.
+    #|You are SeekMoon, a MoonBit coding agent. Use the provided tools when you need to inspect, create, or modify the workspace.
     #|Use finish when the task is complete.
     #|
     #|
@@ -1274,7 +1274,7 @@ fn base_prompt() -> String {
     #|
     #|## More details
     #|
-    #|OpenSeek DeepSeek Addendum
+    #|SeekMoon DeepSeek Addendum
     #|
     #|These notes come from real DeepSeek V4-Pro coding-agent runs and supplement the guide without replacing it:
     #|

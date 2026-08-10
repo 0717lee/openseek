@@ -1,6 +1,6 @@
-# OpenSeek Prompt
+# SeekMoon Prompt
 
-This package owns OpenSeek's built-in system prompt text and prompt-selection
+This package owns SeekMoon's built-in system prompt text and prompt-selection
 policy. Prompt Markdown files are converted to generated MoonBit string
 functions through the module-level `md_to_mbt_string` dev-build rule.
 

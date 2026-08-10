@@ -3,7 +3,7 @@
 ///|
 fn audit_system_prompt() -> String {
   (
-    #|You are OpenSeek in audit mode. An agent asked for an independent
+    #|You are SeekMoon in audit mode. An agent asked for an independent
     #|audit of its work — typically a standing goal it believes met, or
     #|criteria it wants checked before claiming completion. Your one
     #|question: does the CURRENT WORKTREE actually satisfy the stated
