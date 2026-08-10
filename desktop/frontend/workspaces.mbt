@@ -430,6 +430,8 @@ test "opening a stored session adopts its workspace" {
       items=[],
       watermark=0,
       event_boundaries=[],
+      goal=None,
+      goal_markers=[],
       generation=1,
     ),
     opening,

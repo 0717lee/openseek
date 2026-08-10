@@ -36,9 +36,25 @@ pub fn cancel() -> @wire.Command {
 }
 
 ///|
-/// The host sends no `goal` command: the desktop has no goal UI. That is a
-/// product gap rather than a protocol one — `@wire.Command` carries `GoalSet`
-/// and `GoalClear`, and this package gains a constructor the day the UI does.
+/// Set (or replace) the session's standing goal. `auto` arms the engine's
+/// autonomous continuation: after a cleanly finished turn it starts the next
+/// one itself, until the goal is met, the agent reports it blocked, or the
+/// engine's turn budget runs out. Manual is the default the UI offers.
+///
+/// Arming lives in the serve process, not in the durable record — the
+/// `[goal]` marker stores the text alone — so it does not survive an engine
+/// restart, and any later goal command supersedes it.
+pub fn goal_set(text : String, auto~ : Bool) -> @wire.Command {
+  GoalSet(text~, auto~)
+}
+
+///|
+/// Clear the session's standing goal.
+pub fn goal_clear() -> @wire.Command {
+  GoalClear
+}
+
+///|
 test "the host's commands are the protocol's" {
   assert_true(
     prompt("hello").to_json()
@@ -55,6 +71,31 @@ test "the host's commands are the protocol's" {
   )
   assert_true(compact().to_json() is { "command": String("compact"), .. })
   assert_true(cancel().to_json() is { "command": String("cancel"), .. })
+  // A manual set omits `auto` on the wire entirely; arming spells it out.
+  guard goal_set("ship the feature", auto=false).to_json()
+    is {
+      "command": String("goal"),
+      "action": String("set"),
+      "text": String("ship the feature"),
+      ..
+    } &&
+    !(goal_set("ship the feature", auto=false).to_json() is { "auto": _, .. }) else {
+    fail("goal_set did not encode a manual set")
+  }
+  assert_true(
+    goal_set("grind it out", auto=true).to_json()
+    is {
+      "command": String("goal"),
+      "action": String("set"),
+      "text": String("grind it out"),
+      "auto": True,
+      ..
+    },
+  )
+  assert_true(
+    goal_clear().to_json()
+    is { "command": String("goal"), "action": String("clear"), .. },
+  )
 }
 
 ///|

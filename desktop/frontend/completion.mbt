@@ -18,6 +18,14 @@ fn slash_command_items() -> Array[CompletionItem] {
       path: None,
       range: None,
     },
+    {
+      label: "/goal",
+      detail: "Set or clear this conversation's standing goal",
+      command: "goal",
+      insert: "",
+      path: None,
+      range: None,
+    },
   ]
 }
 
@@ -251,12 +259,16 @@ test "slash trigger lists matching commands and filters by the typed name" {
     fail("a bare slash should open the command menu")
   }
   assert_true(all.kind is SlashCommands)
-  assert_true(all.items.length() >= 1)
+  assert_true(all.items.length() >= 2)
   assert_eq(all.items[0].label, "/compact")
   guard menu_for("/comp", []) is Some(match_) else {
     fail("a command prefix should keep matching rows")
   }
   assert_eq(match_.items[0].command, "compact")
+  guard menu_for("/go", []) is Some(goal_match) else {
+    fail("the goal command should match its prefix")
+  }
+  assert_eq(goal_match.items[0].command, "goal")
   // No command contains this, so the menu closes rather than showing nothing.
   assert_true(menu_for("/zzz", []) is None)
 }

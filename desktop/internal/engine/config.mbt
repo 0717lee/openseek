@@ -92,18 +92,45 @@ async fn compact_config(
   manager : EngineManager,
   payload : @protocol.CompactPayload,
 ) -> RunConfig {
-  let session = payload.session.trim().to_owned()
+  session_command_config(
+    manager,
+    payload.session,
+    model?=payload.model,
+    max_steps?=payload.max_steps,
+    workspace?=payload.workspace,
+  )
+}
+
+///|
+/// The config a goal update spawns an engine with when its conversation has
+/// none live — the same taskless shape as `compact_config`, pinned to the
+/// goal's session.
+async fn goal_config(
+  manager : EngineManager,
+  payload : @protocol.GoalPayload,
+) -> RunConfig {
+  session_command_config(
+    manager,
+    payload.session,
+    model?=payload.model,
+    max_steps?=payload.max_steps,
+    workspace?=payload.workspace,
+  )
+}
+
+///|
+async fn session_command_config(
+  manager : EngineManager,
+  session : String,
+  model? : String,
+  max_steps? : Int,
+  workspace? : String,
+) -> RunConfig {
+  let session = session.trim().to_owned()
   guard !session.is_empty() else {
     raise EngineError("session id must not be empty")
   }
-  serve_config(
-    "",
-    manager,
-    model?=payload.model,
-    max_steps?=payload.max_steps,
-    session~,
-    workspace?=payload.workspace,
-  )
+  serve_config("", manager, model?, max_steps?, session~, workspace?)
 }
 
 ///|

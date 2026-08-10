@@ -75,6 +75,19 @@ test "client-authored session roots are ignored" {
 }
 
 ///|
+test "goal payload distinguishes set from clear by the text field" {
+  let set : @protocol.GoalPayload = @json.from_json({
+    "session": "s-goal",
+    "text": "ship the feature",
+    "model": "deepseek-v4-pro",
+  })
+  assert_eq(set.text, Some("ship the feature"))
+  assert_eq(set.model, Some("deepseek-v4-pro"))
+  let clear : @protocol.GoalPayload = @json.from_json({ "session": "s-goal" })
+  assert_true(clear.text is None)
+}
+
+///|
 test "session move payload has one canonical id" {
   let payload : SessionPayload = @json.from_json({
     "session": "  s-canonical  ",

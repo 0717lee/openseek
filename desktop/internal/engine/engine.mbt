@@ -439,6 +439,7 @@ const EngineActorRestartDelayMs = 1000
 priv enum PendingOp {
   StartPending
   CompactPending
+  GoalPending
   ArchivePending
 }
 
@@ -481,6 +482,8 @@ fn SessionSlot::claim(
           "an OpenSeek run is already starting for this conversation"
         CompactPending =>
           "a compaction is already being requested for this conversation"
+        GoalPending =>
+          "a goal update is already being sent for this conversation"
         ArchivePending =>
           "this conversation is moving between live and archived stores"
       },

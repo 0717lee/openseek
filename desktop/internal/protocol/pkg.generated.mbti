@@ -12,6 +12,10 @@ pub fn cancel() -> @openseek_protocol.Command
 
 pub fn compact() -> @openseek_protocol.Command
 
+pub fn goal_clear() -> @openseek_protocol.Command
+
+pub fn goal_set(String, auto~ : Bool) -> @openseek_protocol.Command
+
 pub fn prompt(String) -> @openseek_protocol.Command
 
 pub fn steer(String) -> @openseek_protocol.Command
@@ -304,6 +308,19 @@ pub(all) struct GitPullRequestReply {
   pull_request : GitPullRequest?
   compare_url : String?
   branch : String?
+} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
+
+pub(all) struct GoalPayload {
+  session : String
+  text : String?
+  auto : Bool?
+  model : String?
+  max_steps : Int?
+  workspace : String?
+} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
+
+pub(all) struct GoalReply {
+  delivered : Bool
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 
 pub(all) struct InstallSkillPayload {

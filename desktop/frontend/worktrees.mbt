@@ -109,61 +109,198 @@ fn start_in_new_worktree(
   })
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
-      // The session is the create's idempotency key: a retry after a lost
-      // reply gets the same worktree back instead of minting a second one.
-      let reply : @protocol.WorktreeCreateReply = @interop.bridge_request(
-        channel,
-        @commands.worktree_create,
-        { workspace: workspace.path, session },
-      ) catch {
-        error => {
-          // Nothing started: reject the submission so the draft restores.
+      // The whole chain holds this session's command lane, not just the
+      // start: two of these started together would run independent creates,
+      // and whichever reply came back first would start its run first.
+      @interop.in_ordered_lane(
+        @interop.session_command_lane(channel, session),
+        () => {
+          // The session is the create's idempotency key: a retry after a lost
+          // reply gets the same worktree back instead of minting a second one.
+          let reply : @protocol.WorktreeCreateReply = @interop.bridge_request(
+            channel,
+            @commands.worktree_create,
+            { workspace: workspace.path, session },
+          ) catch {
+            error => {
+              // Nothing started: reject the submission so the draft restores.
+              scheduler.add(
+                device_dispatch(
+                  StartRejected(
+                    session~,
+                    submission_id~,
+                    message="worktree setup failed: " +
+                      @interop.bridge_error_text(error),
+                  ),
+                ),
+              )
+              return
+            }
+          }
+          // The host generates the name; the reply carries it so the chain
+          // knows what to bind.
+          guard !reply.name.is_empty() else {
+            scheduler.add(
+              device_dispatch(
+                StartRejected(
+                  session~,
+                  submission_id~,
+                  message="malformed worktree.create reply",
+                ),
+              ),
+            )
+            return
+          }
+          // Bind the conversation's local state before the start settles, so
+          // the chip and a retried submit both know the environment. The
+          // canonical registry list still arrives as `worktree.changed` from
+          // the commit seam, and the start itself carries no worktree — the
+          // host routes the bound session's cwd through the registry.
           scheduler.add(
             device_dispatch(
-              StartRejected(
-                session~,
-                submission_id~,
-                message="worktree setup failed: " +
-                  @interop.bridge_error_text(error),
-              ),
+              WorktreeCreated(workspace~, name=reply.name, session~),
             ),
           )
-          return
-        }
+          let start = start_payload(
+            task,
+            selected_model,
+            max_steps,
+            session,
+            submission_id,
+            workspace=Some(workspace),
+          )
+          request_agent_start(
+            scheduler, dispatch, channel, start, session, submission_id,
+          )
+        },
+      ) catch {
+        // Unreachable: the lane only ever wakes its waiters, never fails
+        // them, and the work it runs is `noraise`. The type cannot say so.
+        _ => ()
       }
-      // The host generates the name; the reply carries it so the chain
-      // knows what to bind.
-      guard !reply.name.is_empty() else {
-        scheduler.add(
-          device_dispatch(
-            StartRejected(
-              session~,
-              submission_id~,
-              message="malformed worktree.create reply",
+    })
+  })
+}
+
+///|
+/// The workspace a goal command must create a worktree in before it may be
+/// sent, or `None` when it can go straight out.
+///
+/// A goal is the first thing that pins an unstarted conversation's placement:
+/// the host spawns its engine to receive the command, and the goal's own
+/// durable card then makes `wants_fresh_worktree` false. Sent straight
+/// through, that leaves the engine in the workspace root and silently retires
+/// the launch mode before the first prompt ever runs — so the mode has to act
+/// here exactly as it does on that first prompt.
+fn Conversation::goal_creates_worktree(self : Conversation) -> @common.Uri? {
+  guard self.wants_fresh_worktree() else { return None }
+  self.workspace
+}
+
+///|
+/// Set (or clear) the standing goal of a conversation whose worktree launch
+/// mode has not bound an environment yet: create and bind it first, exactly
+/// as the first prompt would, then send the goal into it.
+///
+/// Sending the goal straight through would spawn this session's engine in the
+/// workspace root, and the durable goal card it commits would then make
+/// `wants_fresh_worktree` false — so the user's first real prompt would
+/// silently run in the main checkout with the launch mode they chose quietly
+/// discarded. A goal is not a turn, but it is the first thing that pins the
+/// session's placement, so it has to establish the environment too.
+fn set_goal_in_new_worktree(
+  dispatch : @cmd.Emit[Msg],
+  channel : @interop.ChannelId,
+  session : String,
+  workspace : @common.Uri,
+  engine_model : EngineModel,
+  max_steps : String,
+  command : String,
+  text : String?,
+) -> @cmd.Cmd {
+  guard @resource.belongs_to(workspace, channel) else { return @cmd.none }
+  let device_dispatch = dispatch.map((msg : DeviceMsg) => {
+    FromDevice(channel, msg)
+  })
+  @cmd.custom_cmd(scheduler => {
+    @js.async_run(() => {
+      // The whole chain holds this session's goal lane, not just the send.
+      // Two of these started together would otherwise run independent
+      // creates, and whichever reply came back first would send its goal
+      // first — so a Clear issued after a Set could be overtaken by it, which
+      // is the very inversion the lane exists to prevent.
+      @interop.in_ordered_lane(
+        @interop.session_command_lane(channel, session),
+        () => {
+          // The session is the create's idempotency key, exactly as on the start
+          // path: a retry after a lost reply gets the same worktree back.
+          let reply : @protocol.WorktreeCreateReply = @interop.bridge_request(
+            channel,
+            @commands.worktree_create,
+            { workspace: workspace.path, session },
+          ) catch {
+            error => {
+              // The goal itself definitely never went out, so its draft comes
+              // back either way. What differs is the *worktree*: a create whose
+              // reply was lost may well have bound this session host-side, and
+              // saying "setup failed" would let the composer offer Local again
+              // over a durable binding — after which an ordinary start still
+              // runs in that worktree. Say which happened, and let the registry
+              // settle the placement (see `Model::checkout_placement`).
+              let detail = @interop.bridge_error_text(error)
+              let message = match @interop.bridge_failure(error) {
+                Refused | Unsent => "worktree setup failed: " + detail
+                Unknown =>
+                  "worktree setup could not be confirmed (" +
+                  detail +
+                  ") — this chat may already be bound to a new worktree; the goal was not sent"
+              }
+              scheduler.add(
+                device_dispatch(
+                  GoalRejected(session~, command~, draft=text, message~),
+                ),
+              )
+              return
+            }
+          }
+          guard !reply.name.is_empty() else {
+            scheduler.add(
+              device_dispatch(
+                GoalRejected(
+                  session~,
+                  command~,
+                  draft=text,
+                  message="malformed worktree.create reply",
+                ),
+              ),
+            )
+            return
+          }
+          // Bind before the goal settles, so the chip and a retried submit both
+          // know the environment. The canonical registry list still arrives as
+          // `worktree.changed`; the goal carries no worktree, because the host
+          // routes a bound session's cwd through its registry.
+          scheduler.add(
+            device_dispatch(
+              WorktreeCreated(workspace~, name=reply.name, session~),
             ),
-          ),
-        )
-        return
+          )
+          let payload = goal_payload(
+            session,
+            engine_model,
+            max_steps,
+            Some(workspace),
+            text,
+          )
+          request_agent_goal(
+            scheduler, dispatch, channel, payload, session, command, text,
+          )
+        },
+      ) catch {
+        // Unreachable: the lane only ever wakes its waiters, never fails
+        // them, and the work it runs is `noraise`. The type cannot say so.
+        _ => ()
       }
-      // Bind the conversation's local state before the start settles, so
-      // the chip and a retried submit both know the environment. The
-      // canonical registry list still arrives as `worktree.changed` from
-      // the commit seam, and the start itself carries no worktree — the
-      // host routes the bound session's cwd through the registry.
-      scheduler.add(
-        device_dispatch(WorktreeCreated(workspace~, name=reply.name, session~)),
-      )
-      let start = start_payload(
-        task,
-        selected_model,
-        max_steps,
-        session,
-        submission_id,
-        workspace=Some(workspace),
-      )
-      request_agent_start(
-        scheduler, dispatch, channel, start, session, submission_id,
-      )
     })
   })
 }
@@ -330,16 +467,48 @@ fn Conversation::wants_fresh_worktree(self : Conversation) -> Bool {
 }
 
 ///|
+/// Whether the composer may still choose where this conversation runs.
+///
+/// Durable emptiness, not `has_begun`: a rejected setup attempt leaves a
+/// local overlay notice, and hiding the toggle then would lock the user into
+/// retrying the failing create with no way back to Local.
+///
+/// A command already sent settles it, though — that command *is* the choice
+/// being exercised. Both the start and the goal chains create the worktree
+/// and bind it asynchronously, and neither re-reads the mode when the reply
+/// lands, so flipping the chip during that window would not move what is in
+/// flight. It would only leave the chip disagreeing with where the
+/// conversation is being pinned.
+fn Model::can_choose_launch_mode(self : Model, conv : Conversation) -> Bool {
+  guard conv.workspace is Some(_) &&
+    conv.messages.length() == 0 &&
+    conv.worktree is None &&
+    conv.run is NoRun(..) &&
+    conv.goal_pending is None else {
+    return false
+  }
+  // The registry, not the local binding, is what actually decides where this
+  // session runs. A create whose reply was lost leaves `conv.worktree` empty
+  // while the host is already bound, and offering Local over that would put
+  // the chip at odds with where the next start really goes.
+  //
+  // Only a positive binding closes the choice. An unloaded registry answers
+  // `None`, and absence of evidence is not evidence of binding — the mode is
+  // a local preference the create path re-reads when it sends, so refusing it
+  // before the list arrives would take the choice away for a reason that is
+  // only ever "not known yet".
+  !(self.checkout_placement(conv) is Some(Worktree(..) | MissingWorktree(..)))
+}
+
+///|
 /// The composer's launch-mode chip: visible while the conversation can
 /// still choose (a workspace conversation that has not begun), fixed to
 /// the worktree's name once the chain has bound one.
 fn worktree_mode_chip(
   dispatch : @cmd.Emit[Msg],
+  model : Model,
   conv : Conversation,
 ) -> @html.Html? {
-  // Durable emptiness, not `has_begun`: a rejected setup attempt leaves a
-  // local overlay notice, and hiding the toggle then would lock the user
-  // into retrying the failing create with no way back to Local.
   guard conv.workspace is Some(_) && conv.messages.length() == 0 else {
     return None
   }
@@ -359,6 +528,19 @@ fn worktree_mode_chip(
   } else {
     (
       "composer-worktree", "Local", "Runs in the workspace itself — click to run in a fresh git worktree",
+    )
+  }
+  // The choice is being exercised right now: something is out that will pin
+  // this conversation's placement, and it read the mode when it was sent.
+  // Still say which mode that was — it is about to become the answer — but
+  // as a statement rather than a control, since clicking could not change it.
+  guard model.can_choose_launch_mode(conv) else {
+    return Some(
+      @html.span(
+        class~,
+        title="Setting this chat up to run \{if conv.worktree_mode { "in a fresh git worktree" } else { "in the workspace itself" }}",
+        [icon(icon_worktree), @html.span(label)],
+      ),
     )
   }
   Some(
@@ -524,6 +706,107 @@ test "the launch mode toggles only before the conversation begins" {
   // A scratch conversation has no workspace to fork from.
   let (_, scratch) = update(dispatch, ToggleWorktreeMode, test_model())
   assert_false(scratch.active().worktree_mode)
+}
+
+///|
+#warnings("-alert_unstable")
+test "the launch mode stops being a choice once a placement is in flight" {
+  let dispatch = test_dispatch()
+  let workspace = @interop.ChannelId::Local.test_resource("/proj")
+  let composing : Conversation = {
+    ..test_conversation(),
+    workspace: Some(workspace),
+    worktree_mode: true,
+  }
+  // `worktree.create` is out. The chain read the mode when it was sent and
+  // will bind whatever comes back, so a flip now could not move it — it would
+  // only leave the chip disagreeing with where the session is being pinned.
+  // Neither of these adds a message, which is why durable emptiness alone was
+  // not enough to close the window.
+  for
+    pinned in [
+      {
+        ..composing,
+        goal_pending: Some({ id: "goal-1", request: Clearing, since: 0 }),
+      },
+      { ..composing, run: Starting(submission_id="s-1") },
+    ] {
+    let (_, kept) = update(
+      dispatch,
+      ToggleWorktreeMode,
+      test_model().replace_conversation(pinned),
+    )
+    assert_true(kept.active().worktree_mode)
+    // And the chip says which mode is being established rather than offering
+    // a control that cannot do anything.
+    let markup = @rabbita.render_to_string(() => {
+      @rabbita.Val::constant(
+        match worktree_mode_chip(dispatch, test_model(), pinned) {
+          Some(chip) => chip
+          None => @html.div("")
+        },
+      )
+    })
+    assert_true(markup.contains("Worktree"))
+    assert_false(markup.contains("<button"))
+  }
+  // Still a choice while nothing is out.
+  let (_, free) = update(
+    dispatch,
+    ToggleWorktreeMode,
+    test_model().replace_conversation(composing),
+  )
+  assert_false(free.active().worktree_mode)
+  let offered = @rabbita.render_to_string(() => {
+    @rabbita.Val::constant(
+      match worktree_mode_chip(dispatch, test_model(), composing) {
+        Some(chip) => chip
+        None => @html.div("")
+      },
+    )
+  })
+  assert_true(offered.contains("<button"))
+}
+
+///|
+test "a worktree the registry says is bound closes the choice" {
+  let dispatch = test_dispatch()
+  let workspace = @interop.ChannelId::Local.test_resource("/proj")
+  let composing : Conversation = {
+    ..test_conversation(),
+    workspace: Some(workspace),
+    worktree_mode: true,
+  }
+  // A create whose reply was lost leaves the local binding empty while the
+  // host is already bound. Offering Local over that would put the chip at
+  // odds with where the next start actually runs.
+  let bound = {
+    ..test_model().replace_conversation(composing),
+    devices: [
+      {
+        ..test_model().focused_device().unwrap(),
+        worktrees: [
+          {
+            workspace,
+            generation: 1,
+            rows: [
+              { name: "wt-1", session: Some("desktop-test"), present: true },
+            ],
+          },
+        ],
+      },
+    ],
+  }
+  assert_false(bound.can_choose_launch_mode(composing))
+  let (_, kept) = update(dispatch, ToggleWorktreeMode, bound)
+  assert_true(kept.active().worktree_mode)
+  // An unloaded registry is not evidence of binding: the mode is a local
+  // preference the create path re-reads when it sends.
+  assert_true(
+    test_model()
+    .replace_conversation(composing)
+    .can_choose_launch_mode(composing),
+  )
 }
 
 ///|

@@ -4026,7 +4026,72 @@ select:focus {
   background: var(--accent-ink);
   border-color: var(--accent-ink);
 }
-
+/* The standing-goal banner above the composer input (the compaction
+   notice's slot) and the composer's goal-editing mode. */
+.composer-goal {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 820px;
+  margin: 0 auto 8px;
+  padding: 6px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  color: var(--ink-2);
+  font-size: 12.5px;
+}
+.composer-goal.blocked {
+  border-color: var(--warn);
+  color: var(--warn);
+}
+/* Goal mode: the row that tells the user what the input under it is for.
+   Accent-tinted so it reads as an active mode, not a passive status. */
+.composer-goal.editing {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+/* Sent but not yet durably confirmed: quieter than a standing goal, since
+   the record may still never carry it. */
+.composer-goal.pending {
+  color: var(--ink-3);
+}
+/* Nothing to say — collapsed rather than removed, so the row keeps its
+   child index and the textarea below it keeps its focus. */
+.composer-goal.hidden {
+  display: none;
+}
+.composer-goal-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.composer-goal-action {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--ink-3);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.composer-goal-action:hover {
+  background: var(--surface);
+  color: var(--ink);
+}
+.composer-goal.editing .composer-goal-action {
+  color: var(--accent-ink);
+}
+.composer-goal.editing .composer-goal-action:hover {
+  background: var(--surface);
+}
 /* Inline outcome text in the Settings updates row. */
 .update-status {
   align-self: center;

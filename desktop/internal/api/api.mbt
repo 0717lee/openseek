@@ -135,6 +135,9 @@ pub fn endpoints(
     @endpoint.Endpoint::remote(@commands.agent_compact, async fn(payload) {
       @engine.compact_run(state.manager, payload)
     }),
+    @endpoint.Endpoint::remote(@commands.agent_goal, async fn(payload) {
+      @engine.goal_run(state.manager, payload)
+    }),
     @endpoint.Endpoint::remote_sync(@commands.agent_runs, payload => {
       state.hub.runs(known?=payload.known)
     }),
@@ -271,8 +274,9 @@ test "remote endpoint catalog has one entry per command name" {
     }
     names.push(name)
   }
-  assert_eq(names.length(), 54)
+  assert_eq(names.length(), 55)
   assert_true(names.contains("agent.start"))
+  assert_true(names.contains("agent.goal"))
   assert_true(names.contains("app.info"))
   assert_true(names.contains("git.changes"))
   assert_true(names.contains("git.pull_request"))

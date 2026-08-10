@@ -574,11 +574,13 @@ fn push_group_rows(
   archived~ : (String) -> Bool,
   nested? : Bool = false,
 ) -> Unit {
-  // Conversations that have gotten under way get a row, plus the one fresh
-  // "New chat" on screen: it owns a row from the moment its ＋ was clicked,
-  // so the rotation has visible feedback in the list; the row takes the real
-  // title at the first send. Stale husks (a fresh chat the user navigated
-  // away from) stay hidden.
+  // Conversations worth keeping get a row, plus the one fresh "New chat" on
+  // screen: it owns a row from the moment its ＋ was clicked, so the rotation
+  // has visible feedback in the list; the row takes the real title at the
+  // first send. Empty husks (a fresh chat the user navigated away from
+  // without writing anything) stay hidden — but one holding an unsent draft
+  // is kept precisely so it can be returned to, and a row is the only way
+  // back to it.
   let composing = model.composing_new_chat()
   for conv in model.conversations.rev_iter() {
     if conv.device != dev.channel ||
@@ -593,7 +595,7 @@ fn push_group_rows(
       Some(name) => Some(name)
       None => worktree_name_for(dev, workspace, conv.session_id)
     }
-    if conv.has_begun() {
+    if conv.worth_keeping() {
       rows.push(
         session_row(
           dispatch,
@@ -1829,6 +1831,11 @@ fn connection_banner(model : Model) -> @html.Html {
 fn composer_view(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
   let conv = model.active()
   let checkout = model.checkout_placement(conv)
+  // Goal mode: `/goal` (or the banner's Edit) rebinds the composer's one
+  // textarea to the goal draft for this conversation — the prompt draft
+  // survives untouched underneath, and the same DOM node keeps focus.
+  let goal_editor = conv.goal_edit
+  let goal_mode = goal_editor is Some(_)
   let transcript_ready = conv.sync is Synced &&
     !conv.has_unresolved_run_tail_notice()
   let checkout_ready = checkout is Some(@interop.WorkspaceRoot) ||
@@ -1855,13 +1862,28 @@ fn composer_view(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
   // The launch mode: a fresh workspace conversation chooses between the
   // workspace itself and a fresh host-named worktree (its 1:1 execution
   // environment) here, Codex-style, before its first prompt.
-  if worktree_mode_chip(dispatch, conv) is Some(chip) {
+  if worktree_mode_chip(dispatch, model, conv) is Some(chip) {
     status.push(chip)
   }
   let controls : Array[@html.Html] = [
     @html.div(class="composer-status", status),
   ]
-  if conv.is_running() {
+  if goal_editor is Some(editor) {
+    // Goal mode replaces the send/steer cluster: the input edits the
+    // standing goal, so the only action left here is Set — cancelling rides
+    // the status group's lit chip, clearing rides the banner's ✕. No
+    // run/compaction gate: a goal is welcome in every engine phase.
+    controls.push(
+      @html.button(
+        id="goal-set",
+        class="icon-button send-button",
+        title="Set the standing goal (Enter)",
+        disabled=editor.draft.trim().is_empty(),
+        on_click=dispatch(SubmitGoal),
+        icon(icon_arrow_up),
+      ),
+    )
+  } else if conv.is_running() {
     // One morphing button while this conversation's turn runs. It becomes a
     // steer submit only when the durable boundary is ready too; a draft must
     // never hide Stop behind a disabled Send during reload/reconciliation.
@@ -1963,20 +1985,43 @@ fn composer_view(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
       )
     Some(_) => ()
   }
+  // The goal row rides the same slot as the compaction notice: what the
+  // composer is editing, or what stands. Pushed unconditionally — see
+  // `goal_banner` for why it collapses instead of leaving.
+  children.push(
+    goal_banner(
+      dispatch,
+      conv.goal,
+      editing=goal_editor,
+      pending=conv.goal_pending.map(pending => pending.request),
+    ),
+  )
   let inner : Array[@html.Html] = [
     // First child, always present, so the textarea's index never shifts (which
     // would rebuild the node and drop focus) as chips come and go.
     mention_tray(dispatch, conv),
     @html.textarea(
       id="task",
-      value=conv.task,
-      placeholder=if conv.is_running() {
+      value=if goal_editor is Some(editor) { editor.draft } else { conv.task },
+      placeholder=if goal_mode {
+        "Describe the standing goal for this conversation — Enter sets it, Esc cancels."
+      } else if conv.is_running() {
         "Steer the running task — your message joins it at the next step."
       } else {
         "Ask OpenSeek to inspect, edit, or explain this workspace."
       },
-      on_input=dispatch.map(value => TaskChanged(value)),
-      attrs=task_attrs(dispatch, model.completion is Some(_)),
+      on_input=dispatch.map(value => {
+        if goal_mode {
+          GoalDraftEdited(value)
+        } else {
+          TaskChanged(value)
+        }
+      }),
+      attrs=if goal_mode {
+        goal_attrs(dispatch)
+      } else {
+        task_attrs(dispatch, model.completion is Some(_))
+      },
       "",
     ),
     @html.div(class="composer-toolbar", [

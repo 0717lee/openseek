@@ -8,11 +8,15 @@ import {
 }
 
 // Values
+pub fn apply_goal_marker(GoalStanding?, GoalMarker) -> GoalStanding?
+
 pub fn apply_session_item(Array[TranscriptItem], @protocol.SessionItem, ts? : Double) -> Bool
 
 pub fn apps_from_reply(@protocol.ListAppsReply) -> Array[LauncherAppItem]
 
 pub fn decode_engine_event(@protocol.AgentStreamEvent) -> EngineEvent?
+
+pub fn goal_marker(String) -> GoalMarker?
 
 pub fn installed_skills_from_reply(@protocol.InstalledSkillsReply) -> Array[InstalledSkillItem]
 
@@ -57,7 +61,20 @@ pub(all) enum EngineEvent {
   CompactionStarted
   CompactionFinished(String)
   CompactionFailed(String)
+  SessionAppendFailed(String)
 }
+
+pub(all) enum GoalMarker {
+  GoalSet(String)
+  GoalCleared
+  GoalBlocked(String)
+  GoalUnblocked
+} derive(Eq)
+
+pub(all) struct GoalStanding {
+  text : String
+  blocked : String?
+} derive(Eq)
 
 pub(all) struct InstalledSkillItem {
   id : String
@@ -106,6 +123,8 @@ pub struct SessionLoadView {
   items : Array[TranscriptItem]
   watermark : Int
   event_boundaries : Array[(Int, Bool, Int)]
+  goal : GoalStanding?
+  goal_markers : Array[(Int, GoalMarker)]
 }
 
 pub struct SessionTreeRow {
