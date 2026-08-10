@@ -75,6 +75,10 @@ test "url derivations" {
     content="https://relay.example/console/?device=d_abc",
   )
   inspect(
+    console_url("https://relay.example/"),
+    content="https://relay.example/console/",
+  )
+  inspect(
     origin_from_relay_url("wss://relay.example/v1/tunnel"),
     content="https://relay.example",
   )
@@ -293,7 +297,7 @@ async test "the loopback listener takes the matching redirect and ignores strays
       wait_for_code(
         server,
         oauth_state="st",
-        console_url="https://relay.example/",
+        console_url=console_url("https://relay.example/"),
       )
     })
     // A stray (forged state) answers 404 and keeps the wait alive.
@@ -306,7 +310,9 @@ async test "the loopback listener takes the matching redirect and ignores strays
     )
     assert_true(granted.code == 200)
     // The done page bounces the browser on to the console.
-    assert_true(granted_data.text().contains("url=https://relay.example/"))
+    assert_true(
+      granted_data.text().contains("url=https://relay.example/console/"),
+    )
     assert_true(waiter.wait() == "one-time")
     group.return_immediately(())
   })

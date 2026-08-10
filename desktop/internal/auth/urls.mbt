@@ -43,14 +43,15 @@ pub fn device_url(
 }
 
 ///|
-/// The console root for `server_url` — where a completed browser sign-in
-/// lands after the loopback done page.
+/// The server-selected console root for `server_url` — where a completed
+/// browser sign-in lands after the loopback done page. Unlike a packaged
+/// Desktop's device URL, this redirect is not tied to an application version.
 fn console_url(server_url : String) -> String {
   let origin = match server_url.strip_suffix("/") {
     Some(origin) => origin.to_owned()
     None => server_url
   }
-  "\{origin}/"
+  "\{origin}/console/"
 }
 
 ///|
