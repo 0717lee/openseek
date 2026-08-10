@@ -619,6 +619,13 @@ fn summarize(text : String) -> String {
   if one_line.length() <= 240 {
     "\{one_line}"
   } else {
-    "\{one_line.sub(start=0, end=240)}..."
+    "\{one_line.clamped_view(end=240)}..."
   }
+}
+
+///|
+test "summarize snaps a UTF-16 cut before a surrogate pair" {
+  let summary = summarize("\{String::make(239, 'x')}😀tail")
+  assert_true(summary.has_suffix("..."))
+  assert_false(summary.contains("😀"))
 }

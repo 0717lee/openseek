@@ -1082,6 +1082,9 @@ test "map literals and common operations" {
 
 - Let the error propagate from a raising caller when boundaries are valid by construction
 - Catch the slice error locally when invalid boundaries need fallback handling
+- For best-effort truncation such as summaries, use
+  `s.clamped_view(start=..., end=...)`; it clamps out-of-range offsets and snaps
+  surrogate-splitting boundaries inward.
 
 **When to use views**:
 

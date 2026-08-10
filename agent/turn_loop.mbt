@@ -961,19 +961,18 @@ fn clamp_tool_result_content(content : String) -> String {
   // the per-call figure soft_batch_fits budgets with.
   let marker = "\n[truncated: result exceeded the \{max_tool_result_chars}-char cap]"
   let body_budget = max_tool_result_chars - marker.length()
-  let kept = StringBuilder()
-  for ch in content; units = 0 {
-    let width : Int = if ch.to_int() > 0xFFFF { 2 } else { 1 }
-    if units + width > body_budget {
-      break
-    }
-    kept.write_char(ch)
-    continue units + width
-  } nobreak {
+  "\{content.clamped_view(end=body_budget)}\{marker}"
+}
 
-  }
-  kept.write_string(marker)
-  kept.to_string()
+///|
+test "tool result clamp snaps a UTF-16 cut before a surrogate pair" {
+  let marker = "\n[truncated: result exceeded the \{max_tool_result_chars}-char cap]"
+  let prefix = String::make(max_tool_result_chars - marker.length() - 1, 'x')
+  let tail = String::make(marker.length() + 1, 'y')
+  let clamped = clamp_tool_result_content("\{prefix}😀\{tail}")
+  assert_true(clamped.has_suffix(marker))
+  assert_false(clamped.contains("😀"))
+  assert_true(clamped.length() <= max_tool_result_chars)
 }
 
 ///|

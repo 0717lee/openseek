@@ -463,7 +463,9 @@ async fn denial_scan_region(
       if reports_denial(carry) {
         return true
       }
-      carry = carry[carry.length() - DenialScanCarryTailChars:].to_owned()
+      carry = carry
+        .clamped_view(start=carry.length() - DenialScanCarryTailChars)
+        .to_owned()
     }
   }
   reports_denial(carry)

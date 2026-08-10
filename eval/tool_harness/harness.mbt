@@ -364,6 +364,13 @@ fn short_text(text : String) -> String {
   if squashed.length() <= 160 {
     squashed
   } else {
-    "\{squashed[:160]}..."
+    "\{squashed.clamped_view(end=160)}..."
   }
+}
+
+///|
+test "short_text snaps a UTF-16 cut before a surrogate pair" {
+  let shortened = short_text("\{String::make(159, 'x')}😀tail")
+  assert_true(shortened.has_suffix("..."))
+  assert_false(shortened.contains("😀"))
 }
