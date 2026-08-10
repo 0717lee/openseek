@@ -1,7 +1,8 @@
-// Codex app-server state for the dedicated Codex page. This deliberately does
-// not reuse OpenSeek's Conversation: Codex owns its own durable thread/turn/item
-// model, and `thread/read(includeTurns=true)` is the authoritative reconnect
-// snapshot for that model.
+// Codex app-server state for the dedicated Codex page. Codex keeps its own
+// durable thread/turn/item model because `thread/read(includeTurns=true)` is
+// the authoritative reconnect snapshot. At the view boundary those items are
+// adapted to `frontend/transcript.TranscriptItem`, so Codex and OpenSeek use
+// one transcript renderer without pretending their persistence models match.
 
 ///|
 priv enum CodexConnection {
@@ -18,6 +19,15 @@ priv enum CodexAccount {
 } derive(Eq)
 
 ///|
+/// Reading persisted history does not require a writer. A selected task only
+/// asks app-server for its writer when the user first tries to send.
+priv enum CodexWriteAccess {
+  CodexNeedsResume
+  CodexWritable
+  CodexActiveElsewhere
+} derive(Eq)
+
+///|
 priv struct CodexModelOption {
   id : String
   label : String
@@ -29,6 +39,7 @@ priv struct CodexThreadRow {
   id : String
   title : String
   cwd : String?
+  project_root : String?
 } derive(Eq)
 
 ///|
@@ -45,6 +56,12 @@ priv struct CodexItem {
 priv struct CodexTurn {
   id : String
   status : String
+  // A second app-server reconstructs another client's live turn as
+  // `interrupted`, because it cannot observe that process's runtime state.
+  // The persisted timestamps preserve the important distinction: a turn
+  // with `startedAt` but no `completedAt` is still running elsewhere.
+  started_at : Int?
+  completed_at : Int?
   items : Array[CodexItem]
   error : String?
 } derive(Eq)
@@ -54,7 +71,22 @@ priv struct CodexThread {
   id : String
   title : String
   cwd : String?
+  project_root : String?
+  // App-server captures this branch when the thread is created. It gives the
+  // composer an immediate label while the host verifies the current checkout
+  // and asks GitHub for its pull request.
+  branch : String?
   turns : Array[CodexTurn]
+} derive(Eq)
+
+///|
+/// The current checkout and pull request shown beside Codex's model selector.
+/// `thread_id` fences a slow GitHub reply after the user selects another task.
+priv struct CodexGitStatus {
+  thread_id : String
+  branch : String?
+  pull_request : @protocol.GitPullRequest?
+  compare_url : String?
 } derive(Eq)
 
 ///|
@@ -83,10 +115,13 @@ priv enum CodexReplyKind {
   CodexModelsReply
   CodexThreadsReply
   CodexThreadReply
+  CodexActivityReply
   CodexNewThreadReply
   CodexTurnReply
   CodexLoginReply
   CodexArchiveReply(String)
+  CodexCompactReply(String)
+  CodexReviewReply(String)
   CodexMutationReply
   CodexApprovalReply
 }
@@ -97,12 +132,28 @@ priv enum CodexReplyKind {
 /// mutates Codex's account, thread, turn, item, or approval state directly.
 enum Msg {
   Refresh
+  PollActivity
   DraftChanged(String)
+  CompletionMove(Int)
+  CompletionAccept
+  CompletionPick(Int)
+  CompletionDismiss
+  RemoveMention(Int)
+  FilesLoaded(
+    owner~ : CodexFileSearchOwner,
+    items~ : Array[CodexCompletionItem]
+  )
+  FilesFailed(owner~ : CodexFileSearchOwner)
   ModelChanged(String)
+  GitLoaded(thread_id~ : String, reply~ : @protocol.GitPullRequestReply)
+  ToggleGitDetails
+  CloseGitDetails
   StartThread(String)
   OpenThread(String)
   ArchiveThread(String)
   Send
+  WriterAcquired(String)
+  WriterConflict(String)
   Stop
   Login
   CancelLogin
@@ -120,6 +171,12 @@ enum Msg {
 /// Shell entrypoint for refreshing the focused Codex catalog.
 pub fn Msg::refresh() -> Msg {
   Refresh
+}
+
+///|
+/// Shell entrypoint for the selected task's lightweight activity poll.
+pub fn Msg::poll_activity() -> Msg {
+  PollActivity
 }
 
 ///|
@@ -172,7 +229,16 @@ struct State {
   selected_model : String
   threads : Array[CodexThreadRow]
   active : CodexThread?
+  git_status : CodexGitStatus?
+  git_details_open : Bool
+  write_access : CodexWriteAccess
   draft : String
+  // File chips remain native app-server `UserInput::Mention` items. Editor
+  // annotations use the shared mention envelope inside a text input because
+  // app-server has no structured annotation input of its own.
+  mentions : Array[CodexMention]
+  completion : CodexCompletion?
+  file_search : CodexFileSearchCache
   pending_requests : Array[CodexPendingRequest]
   loading : Bool
   notice : String
@@ -189,7 +255,13 @@ pub fn State::State(loading? : Bool = false) -> State {
     selected_model: "",
     threads: [],
     active: None,
+    git_status: None,
+    git_details_open: false,
+    write_access: CodexNeedsResume,
     draft: "",
+    mentions: [],
+    completion: None,
+    file_search: CodexFileSearchCache::empty(),
     pending_requests: [],
     loading,
     notice: "",
@@ -205,9 +277,11 @@ pub fn State::from_thread_snapshot(value : Json) -> State {
 }
 
 ///|
-/// Whether the sidebar has any Codex conversations to lay out.
-pub fn State::has_threads(self : State) -> Bool {
-  !self.threads.is_empty()
+/// Whether the shared sidebar's Codex add action may start a task now. The
+/// root shell owns the common section heading, but readiness and in-flight
+/// request state remain Codex-owned policy.
+pub fn State::can_start_thread(self : State) -> Bool {
+  self.connection is CodexReady && !self.loading
 }
 
 ///|
@@ -238,31 +312,44 @@ pub fn State::active_workspace(
 }
 
 ///|
+/// The best workspace for the Codex section's global add button. Prefer the
+/// owning main project so a task opened from a managed worktree does not make
+/// every later task inherit that one checkout; fall back to the exact cwd for
+/// standalone directories.
+pub fn State::new_thread_cwd(self : State) -> String {
+  match self.active {
+    Some(thread) =>
+      match thread.project_root {
+        Some(project) => project
+        None => thread.cwd.unwrap_or("")
+      }
+    None => ""
+  }
+}
+
+///|
 /// Expose the draft as read-only text for shell-level integration tests.
 pub fn State::draft_text(self : State) -> String {
   self.draft
 }
 
 ///|
-/// Append an editor comment to Codex's plain-text draft. Structured OpenSeek
-/// mention chips belong to a different conversation protocol and never cross
-/// this package boundary.
+/// Add an editor comment as the same annotation chip OpenSeek renders. The
+/// textarea remains the user's typed draft; selected source and comment travel
+/// as structured context and are deduplicated like ordinary file mentions.
 pub fn State::with_editor_comment(
   self : State,
   file : String,
-  start_line : Int,
-  end_line : Int,
+  range : @common.Range,
   comment : String,
   quote : String,
 ) -> State {
-  let selected = "File: \{file}:\{start_line}-\{end_line}\n" +
-    "Comment: \{comment}\n\nSelected code:\n\{quote}"
-  let draft = if self.draft.trim().is_empty() {
-    selected
-  } else {
-    self.draft + "\n\n" + selected
+  let mentions = self.mentions.copy()
+  let annotation = CodexEditorAnnotation(file~, range~, quote~, comment~)
+  if !mentions.contains(annotation) {
+    mentions.push(annotation)
   }
-  { ..self, draft, }
+  { ..self, mentions, }
 }
 
 ///|
@@ -295,6 +382,8 @@ fn CodexTurn::decode(value : Json) -> CodexTurn? {
   Some({
     id,
     status: @jsonx.json_text(fields, "status").unwrap_or("completed"),
+    started_at: @jsonx.json_int(fields, "startedAt"),
+    completed_at: @jsonx.json_int(fields, "completedAt"),
     items,
     error,
   })
@@ -317,6 +406,8 @@ fn CodexThread::decode(value : Json) -> CodexThread? {
     id,
     title: CodexThreadRow::title(fields),
     cwd: @jsonx.json_text(fields, "cwd"),
+    project_root: @jsonx.json_text(fields, "projectRoot"),
+    branch: CodexThreadRow::branch(fields),
     turns,
   })
 }
@@ -350,6 +441,25 @@ fn CodexThreadRow::title(fields : Map[String, Json]) -> String {
     "New Codex thread"
   } else {
     preview
+  }
+}
+
+///|
+/// Decode app-server's creation-time Git metadata without treating it as the
+/// final answer. The host's later `git.pull_request` request re-reads HEAD and
+/// replaces this label if the checkout moved since the thread was created.
+fn CodexThreadRow::branch(fields : Map[String, Json]) -> String? {
+  match fields.get("gitInfo") {
+    Some(Object(git)) =>
+      @jsonx.json_text(git, "branch").bind(branch => {
+        let branch = branch.trim().to_owned()
+        if branch.is_empty() {
+          None
+        } else {
+          Some(branch)
+        }
+      })
+    _ => None
   }
 }
 
@@ -439,6 +549,7 @@ fn State::with_threads(self : State, value : Json) -> State {
       id,
       title: CodexThreadRow::title(thread),
       cwd: @jsonx.json_text(thread, "cwd"),
+      project_root: @jsonx.json_text(thread, "projectRoot"),
     })
   }
   // A just-started thread may not be present in the first state-DB page yet,
@@ -448,7 +559,12 @@ fn State::with_threads(self : State, value : Json) -> State {
   let visible = if self.active is Some(active) &&
     !threads.iter().any(thread => thread.id == active.id) {
     let visible : Array[CodexThreadRow] = [
-      { id: active.id, title: active.title, cwd: active.cwd },
+      {
+        id: active.id,
+        title: active.title,
+        cwd: active.cwd,
+        project_root: active.project_root,
+      },
     ]
     for thread in threads {
       visible.push(thread)
@@ -495,18 +611,93 @@ fn State::with_thread_reply(self : State, value : Json) -> State {
     CodexThread::decode(thread) is Some(active) else {
     return { ..self, loading: false, notice: "Malformed Codex thread reply" }
   }
-  // `thread/start` is authoritative even before the catalog refresh returns.
-  // Keep the active thread visible immediately; the following list reply can
-  // replace its provisional title with persisted metadata.
-  let threads : Array[CodexThreadRow] = [
-    { id: active.id, title: active.title, cwd: active.cwd },
-  ]
+  // Selecting a stored thread must not promote it to the top of the sidebar.
+  // Replace its row in place; only `thread/start`, whose id is genuinely new,
+  // is prepended until the authoritative catalog refresh arrives.
+  let row : CodexThreadRow = {
+    id: active.id,
+    title: active.title,
+    cwd: active.cwd,
+    project_root: active.project_root,
+  }
+  let threads : Array[CodexThreadRow] = []
+  let mut replaced = false
   for thread in self.threads {
-    if thread.id != active.id {
+    if thread.id == active.id {
+      threads.push(row)
+      replaced = true
+    } else {
       threads.push(thread)
     }
   }
-  { ..self, threads, active: Some(active), loading: false, notice: "" }
+  let visible = if replaced {
+    threads
+  } else {
+    let visible : Array[CodexThreadRow] = [row]
+    for thread in threads {
+      visible.push(thread)
+    }
+    visible
+  }
+  {
+    ..self,
+    threads: visible,
+    active: Some(active),
+    git_status: Some({
+      thread_id: active.id,
+      branch: active.branch,
+      pull_request: None,
+      compare_url: None,
+    }),
+    git_details_open: false,
+    loading: false,
+    notice: "",
+  }
+}
+
+///|
+/// Apply a GitHub answer only to the task that requested it. The host has
+/// already validated a recovered branch against HEAD; only a completely empty
+/// answer falls back to app-server's creation-time label.
+fn State::with_git_reply(
+  self : State,
+  thread_id : String,
+  reply : @protocol.GitPullRequestReply,
+) -> State {
+  guard self.active is Some(active) && active.id == thread_id else {
+    return self
+  }
+  {
+    ..self,
+    git_status: Some({
+      thread_id,
+      branch: match reply.branch {
+        Some(branch) => Some(branch)
+        None => active.branch
+      },
+      pull_request: reply.pull_request,
+      compare_url: reply.compare_url,
+    }),
+  }
+}
+
+///|
+/// The shell uses this to install the same click-away dismissal as OpenSeek's
+/// Git details popover without reaching into Codex's private fields.
+pub fn State::git_details_open(self : State) -> Bool {
+  self.git_details_open
+}
+
+///|
+/// Close the Codex Git details when the shell leaves the Codex screen.
+pub fn State::with_git_details_closed(self : State) -> State {
+  { ..self, git_details_open: false }
+}
+
+///|
+/// Shell entrypoint for the document-wide click-away subscription.
+pub fn Msg::close_git_details() -> Msg {
+  CloseGitDetails
 }
 
 ///|
@@ -517,6 +708,15 @@ fn State::without_thread(self : State, thread_id : String) -> State {
     active: match self.active {
       Some(active) if active.id == thread_id => None
       other => other
+    },
+    git_status: match self.git_status {
+      Some(status) if status.thread_id == thread_id => None
+      other => other
+    },
+    write_access: if self.active is Some(active) && active.id == thread_id {
+      CodexNeedsResume
+    } else {
+      self.write_access
     },
   }
 }
@@ -534,7 +734,18 @@ fn State::with_login(self : State, value : Json) -> State {
 ///|
 fn State::is_running(self : State) -> Bool {
   guard self.active is Some(active) else { return false }
-  active.turns.iter().any(turn => turn.status == "inProgress")
+  active.turns.iter().any(turn => turn.is_running())
+}
+
+///|
+fn CodexTurn::is_running(self : CodexTurn) -> Bool {
+  self.status == "inProgress" ||
+  (self.started_at is Some(_) && self.completed_at is None)
+}
+
+///|
+fn State::is_running_elsewhere(self : State) -> Bool {
+  self.is_running() && self.active_turn_id() is None
 }
 
 ///|
@@ -609,6 +820,57 @@ fn CodexThread::with_turn(self : CodexThread, turn : CodexTurn) -> CodexThread {
 }
 
 ///|
+/// Reconcile lifecycle fields from a summary poll without replacing complete
+/// transcript items with the summary page's abbreviated first/last items.
+fn CodexThread::with_turn_activity(
+  self : CodexThread,
+  activity : CodexTurn,
+) -> CodexThread {
+  let mut found = false
+  let turns = self.turns.map(turn => {
+    if turn.id == activity.id {
+      found = true
+      {
+        ..turn
+        // Never downgrade a locally streamed in-progress turn merely because
+        // a persisted summary has not caught up with this process's runtime
+        // event. A real completion carries `completedAt` and may settle it.
+        ,
+        status: if turn.status == "inProgress" && activity.completed_at is None {
+          turn.status
+        } else {
+          activity.status
+        },
+        started_at: activity.started_at,
+        completed_at: activity.completed_at,
+        error: activity.error,
+      }
+    } else {
+      turn
+    }
+  })
+  if !found {
+    turns.push({ ..activity, items: [] })
+  }
+  { ..self, turns, }
+}
+
+///|
+/// Apply an activity reply only to the task that requested it. A delayed poll
+/// from the previously selected task cannot alter the current conversation.
+fn State::with_activity_reply(self : State, value : Json) -> State {
+  guard value is Object(fields) &&
+    @jsonx.json_text(fields, "threadId") is Some(thread_id) &&
+    self.active is Some(active) &&
+    active.id == thread_id &&
+    fields.get("turn") is Some(turn) &&
+    CodexTurn::decode(turn) is Some(activity) else {
+    return self
+  }
+  { ..self, active: Some(active.with_turn_activity(activity)) }
+}
+
+///|
 fn CodexThread::with_item(
   self : CodexThread,
   turn_id : String,
@@ -625,7 +887,14 @@ fn CodexThread::with_item(
     }
   })
   if !found {
-    turns.push({ id: turn_id, status: "inProgress", items: [item], error: None })
+    turns.push({
+      id: turn_id,
+      status: "inProgress",
+      started_at: None,
+      completed_at: None,
+      items: [item],
+      error: None,
+    })
   }
   { ..self, turns, }
 }
@@ -867,15 +1136,43 @@ fn CodexItem::text(self : CodexItem) -> String {
   match self.kind {
     "userMessage" => {
       let parts : Array[String] = []
+      let mentions : Array[@mention_context.MentionRef] = []
       if fields.get("content") is Some(Array(values)) {
         for value in values {
           if value is Object(input) &&
             @jsonx.json_text(input, "text") is Some(text) {
-            parts.push(text)
+            // Editor annotations are sent as one shared mention envelope in a
+            // text input. Unwrap each one before combining it with native
+            // app-server file mentions for the shared transcript renderer.
+            match @mention_context.parse(text) {
+              Some(parsed) => {
+                if !parsed.task.is_empty() {
+                  parts.push(parsed.task)
+                }
+                for mention in parsed.mentions {
+                  mentions.push(mention)
+                }
+              }
+              None => parts.push(text)
+            }
+          } else if value is Object(input) &&
+            @jsonx.json_text(input, "type") is Some("mention") &&
+            @jsonx.json_text(input, "path") is Some(path) {
+            // This envelope is presentation-only. Codex still sends and
+            // stores native `UserInput::Mention` values; adapting them here
+            // lets the shared transcript rebuild the same chips its composer
+            // showed without changing the app-server payload.
+            mentions.push(
+              @mention_context.Symbol(
+                name=@jsonx.json_text(input, "name").unwrap_or(path),
+                file=path,
+                line=0,
+              ),
+            )
           }
         }
       }
-      parts.join("\n")
+      @mention_context.encode(mentions, parts.join("\n"))
     }
     "agentMessage" | "plan" => {
       let text = @jsonx.json_text(fields, "text").unwrap_or("")
@@ -919,6 +1216,184 @@ fn CodexItem::text(self : CodexItem) -> String {
 }
 
 ///|
+/// Convert one app-server semantic item into the display model consumed by
+/// OpenSeek's transcript renderer. This is the only place that knows both
+/// vocabularies; the shared view never switches on Codex JSON item names.
+fn CodexItem::transcript_item(self : CodexItem) -> @transcript.TranscriptItem {
+  let kind = match self.kind {
+    "userMessage" => @transcript.User
+    "agentMessage" | "plan" => @transcript.Assistant(is_danger=false)
+    "reasoning" => @transcript.Reasoning
+    "contextCompaction" => @transcript.Summary
+    _ =>
+      @transcript.Tool(
+        call_id=self.id,
+        name=self.tool_name(),
+        arguments=self.tool_arguments(),
+        has_result=self.tool_has_result(),
+        is_error=self.tool_failed(),
+        brief=self.tool_brief(),
+      )
+  }
+  {
+    kind,
+    content: if kind is @transcript.Tool(..) {
+      self.tool_output()
+    } else {
+      self.text()
+    },
+    // The current app-server item snapshot has no durable display timestamp.
+    // Leaving it absent is honest; the shared turn rule simply omits its clock.
+    ts: None,
+    // App-server items have their own ids but no OpenSeek store sequence. The
+    // transcript overview therefore derives a stable fallback turn key.
+    sequence: None,
+  }
+}
+
+///|
+/// Normalize app-server tool-like item names to the categories already used
+/// by OpenSeek's activity summary (read/edit/shell) where the meaning matches.
+fn CodexItem::tool_name(self : CodexItem) -> String {
+  match self.kind {
+    "commandExecution" => "shell"
+    "fileChange" => "edit"
+    other => other
+  }
+}
+
+///|
+/// Keep the operation input separate from its result so the shared expanded
+/// tool row can render Arguments before Output instead of one raw JSON blob.
+fn CodexItem::tool_arguments(self : CodexItem) -> String? {
+  guard self.value is Object(fields) else {
+    return Some(self.value.stringify())
+  }
+  match self.kind {
+    "commandExecution" => {
+      let arguments : Json = {
+        "command": @jsonx.json_text(fields, "command").unwrap_or(""),
+      }
+      Some(arguments.stringify())
+    }
+    "fileChange" =>
+      match fields.get("changes") {
+        Some(changes) => {
+          let arguments : Json = { "changes": changes }
+          Some(arguments.stringify())
+        }
+        None => None
+      }
+    "webSearch" => {
+      let arguments : Json = {
+        "query": @jsonx.json_text(fields, "query").unwrap_or(""),
+      }
+      Some(arguments.stringify())
+    }
+    "imageView" => {
+      let arguments : Json = {
+        "path": @jsonx.json_text(fields, "path").unwrap_or(""),
+      }
+      Some(arguments.stringify())
+    }
+    _ => Some(self.value.stringify())
+  }
+}
+
+///|
+/// The completed app-server object replaces live deltas. While it is still in
+/// progress the shared row remains a pending call with any streamed output it
+/// has already received.
+fn CodexItem::tool_has_result(self : CodexItem) -> Bool {
+  guard self.value is Object(fields) else { return true }
+  match @jsonx.json_text(fields, "status") {
+    Some("inProgress") | Some("pending") => false
+    _ => true
+  }
+}
+
+///|
+/// App-server status and process exit code both contribute to the common red
+/// failure treatment; either signal is sufficient.
+fn CodexItem::tool_failed(self : CodexItem) -> Bool {
+  guard self.value is Object(fields) else { return false }
+  let failed_status = match @jsonx.json_text(fields, "status") {
+    Some("failed") | Some("declined") | Some("cancelled") => true
+    _ => false
+  }
+  failed_status ||
+  @jsonx.json_int(fields, "exitCode").map(code => code != 0).unwrap_or(false)
+}
+
+///|
+/// Only tool result text belongs in Output. Commands keep their command line
+/// in Arguments; file edits keep their change list there as well.
+fn CodexItem::tool_output(self : CodexItem) -> String {
+  guard self.value is Object(fields) else { return self.value.stringify() }
+  match self.kind {
+    "commandExecution" =>
+      @jsonx.json_text(fields, "aggregatedOutput").unwrap_or(self.streamed)
+    "fileChange" => @jsonx.json_text(fields, "status").unwrap_or("")
+    "enteredReviewMode" | "exitedReviewMode" =>
+      @jsonx.json_text(fields, "review").unwrap_or("")
+    _ => ""
+  }
+}
+
+///|
+/// The activity summary owns the count (for example "Ran 2 commands"); this
+/// brief labels the individual expandable row underneath it.
+fn CodexItem::tool_brief(self : CodexItem) -> String? {
+  guard self.value is Object(fields) else { return Some(self.kind) }
+  Some(
+    match self.kind {
+      "commandExecution" =>
+        @jsonx.json_text(fields, "command").unwrap_or("Command")
+      "fileChange" => "Changed files"
+      "webSearch" => "Searched the web"
+      "imageView" => "Viewed image"
+      "enteredReviewMode" => "Entered review mode"
+      "exitedReviewMode" => "Exited review mode"
+      other => other
+    },
+  )
+}
+
+///|
+/// The root shell consumes this display-only snapshot with the same transcript
+/// view used for OpenSeek. Notices and per-turn failures become ordinary
+/// danger messages, so Codex does not need a parallel banner/message layout.
+pub fn State::transcript_items(
+  self : State,
+) -> Array[@transcript.TranscriptItem] {
+  let items : Array[@transcript.TranscriptItem] = []
+  if !self.notice.is_empty() {
+    items.push({
+      kind: @transcript.Assistant(is_danger=true),
+      content: self.notice,
+      ts: None,
+      sequence: None,
+    })
+  }
+  if self.active is Some(active) {
+    for turn in active.turns {
+      for item in turn.items {
+        items.push(item.transcript_item())
+      }
+      if turn.error is Some(message) {
+        items.push({
+          kind: @transcript.Assistant(is_danger=true),
+          content: message,
+          ts: None,
+          sequence: None,
+        })
+      }
+    }
+  }
+  items
+}
+
+///|
 test "Codex completed items replace streamed presentation state" {
   let started = CodexItem::decode({
     "id": "item-1",
@@ -928,6 +1403,8 @@ test "Codex completed items replace streamed presentation state" {
   let turn : CodexTurn = {
     id: "turn-1",
     status: "inProgress",
+    started_at: None,
+    completed_at: None,
     items: [started],
     error: None,
   }
@@ -941,6 +1418,58 @@ test "Codex completed items replace streamed presentation state" {
   let settled = streamed.with_item(completed, completed=true)
   assert_eq(settled.items[0].text(), "final")
   assert_eq(settled.items[0].streamed, "")
+}
+
+///|
+test "Codex recognizes a turn still running in another client" {
+  // A read-only app-server reports the foreign process's thread as
+  // `notLoaded` and reconstructs its unfinished turn as `interrupted`.
+  // Missing `completedAt`, not that process-local status, is authoritative.
+  let running = State::from_thread_snapshot({
+    "thread": {
+      "id": "thread-1",
+      "status": { "type": "notLoaded" },
+      "turns": [
+        {
+          "id": "turn-1",
+          "status": "interrupted",
+          "startedAt": 100,
+          "completedAt": Json::null(),
+          "items": [],
+        },
+      ],
+    },
+  })
+  assert_true(running.is_running())
+  assert_true(running.is_running_elsewhere())
+
+  let completed = State::from_thread_snapshot({
+    "thread": {
+      "id": "thread-1",
+      "turns": [
+        {
+          "id": "turn-1",
+          "status": "interrupted",
+          "startedAt": 100,
+          "completedAt": 120,
+          "items": [],
+        },
+      ],
+    },
+  })
+  assert_false(completed.is_running())
+  assert_false(completed.is_running_elsewhere())
+
+  // Old persisted turns can lack both timestamp fields. Do not classify an
+  // ordinary historical interruption as live merely because completion time
+  // was never recorded by that older schema.
+  let legacy = State::from_thread_snapshot({
+    "thread": {
+      "id": "thread-1",
+      "turns": [{ "id": "turn-1", "status": "interrupted", "items": [] }],
+    },
+  })
+  assert_false(legacy.is_running())
 }
 
 ///|
@@ -1000,6 +1529,7 @@ test "Codex thread replies are visible before catalog refresh" {
     "thread": {
       "id": "thread-1",
       "cwd": "/project",
+      "projectRoot": "/project",
       "preview": "Smoke test",
       "turns": [],
     },
@@ -1007,7 +1537,119 @@ test "Codex thread replies are visible before catalog refresh" {
   assert_eq(state.threads.length(), 1)
   assert_eq(state.threads[0].id, "thread-1")
   assert_eq(state.threads[0].title, "Smoke test")
+  assert_eq(state.threads[0].project_root, Some("/project"))
   let refreshed = state.with_threads({ "data": [] })
   assert_eq(refreshed.threads.length(), 1)
   assert_eq(refreshed.threads[0].id, "thread-1")
+}
+
+///|
+test "opening a Codex conversation preserves its catalog position" {
+  let listed = State().with_threads({
+    "data": [
+      { "id": "thread-new", "preview": "Newest" },
+      { "id": "thread-middle", "preview": "Middle" },
+      { "id": "thread-old", "preview": "Oldest" },
+    ],
+  })
+  let opened = listed.with_thread_reply({
+    "thread": {
+      "id": "thread-middle",
+      "preview": "Middle refreshed",
+      "turns": [],
+    },
+  })
+  assert_eq(opened.threads.map(thread => thread.id), [
+    "thread-new", "thread-middle", "thread-old",
+  ])
+  assert_eq(opened.threads[1].title, "Middle refreshed")
+}
+
+///|
+test "Codex Git status starts from app-server and accepts current checkout" {
+  let state = State().with_thread_reply({
+    "thread": {
+      "id": "thread-1",
+      "cwd": "/worktrees/a/project",
+      "projectRoot": "/workspace/project",
+      "gitInfo": { "branch": "captured-branch" },
+      "turns": [],
+    },
+  })
+  assert_eq(state.new_thread_cwd(), "/workspace/project")
+  assert_eq(state.git_status.unwrap().branch, Some("captured-branch"))
+  let refreshed = state.with_git_reply("thread-1", {
+    pull_request: None,
+    compare_url: None,
+    branch: Some("current-branch"),
+  })
+  assert_eq(refreshed.git_status.unwrap().branch, Some("current-branch"))
+  let empty = state.with_git_reply("thread-1", {
+    pull_request: None,
+    compare_url: None,
+    branch: None,
+  })
+  assert_eq(empty.git_status.unwrap().branch, Some("captured-branch"))
+}
+
+///|
+test "Codex worktree conversations share their main project key" {
+  let state = State().with_threads({
+    "data": [
+      {
+        "id": "thread-47b9",
+        "cwd": "/Users/me/.codex/worktrees/47b9/openseek",
+        "projectRoot": "/Users/me/src/openseek",
+        "name": "Split frontend update",
+      },
+      {
+        "id": "thread-dd8c",
+        "cwd": "/Users/me/.codex/worktrees/dd8c/openseek",
+        "projectRoot": "/Users/me/src/openseek",
+        "name": "Evaluate macOS package",
+      },
+    ],
+  })
+  assert_eq(state.threads.length(), 2)
+  assert_eq(
+    state.threads[0].project_key(),
+    Some(CodexProject("/Users/me/src/openseek")),
+  )
+  assert_eq(state.threads[1].project_key(), state.threads[0].project_key())
+}
+
+///|
+test "Codex editor annotations stay in chips and preserve model context" {
+  let state = State::from_thread_snapshot({
+    "thread": {
+      "id": "codex-thread-annotation",
+      "cwd": "/work/project",
+      "preview": "Review",
+      "turns": [],
+    },
+  })
+  let range = @common.Range::Range(5, 2, 6, 8)
+  let once = state.with_editor_comment(
+    "src/main.mbt", range, "rename this", "fn parse_hover() {",
+  )
+  let twice = once.with_editor_comment(
+    "src/main.mbt", range, "rename this", "fn parse_hover() {",
+  )
+  assert_eq(twice.draft, "")
+  assert_eq(twice.mentions.length(), 1)
+  guard twice.mentions[0].to_input() is Object(input) &&
+    @jsonx.json_text(input, "text") is Some(text) &&
+    @mention_context.parse(text) is Some(parsed) else {
+    fail("expected the annotation chip to use the shared mention envelope")
+  }
+  assert_eq(parsed.mentions, [
+    @mention_context.Annotation(
+      file="src/main.mbt",
+      start_line=5,
+      end_line=6,
+      quote="fn parse_hover() {",
+      comment="rename this",
+      side=@mention_context.WorkingRevision,
+    ),
+  ])
 }

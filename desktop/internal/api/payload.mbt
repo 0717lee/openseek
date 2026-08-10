@@ -43,6 +43,16 @@ priv struct CodexResponsePayload {
 } derive(FromJson)
 
 ///|
+/// A Codex `#` query names the active app-server thread and the cwd learned
+/// from that thread's authoritative reply. The host revalidates the pair
+/// before giving the directory to app-server's fuzzy file search.
+priv struct CodexFileSearchPayload {
+  thread_id : String
+  cwd : String
+  query : String
+} derive(FromJson)
+
+///|
 test "start and steer payloads preserve submission ids" {
   let start : @protocol.StartPayload = @json.from_json({
     "task": "hello",

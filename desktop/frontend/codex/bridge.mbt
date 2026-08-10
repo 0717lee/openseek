@@ -91,9 +91,77 @@ fn State::open_thread(
   channel : @interop.ChannelId,
   thread_id : String,
 ) -> @cmd.Cmd {
+  // The host keeps this read-only across both legacy inline histories and
+  // paginated histories. Selecting a row never resumes the task or claims its
+  // writer merely to render the transcript.
+  CodexThreadReply.request(
+    dispatch,
+    channel,
+    @commands.codex_thread_history_read,
+    { "threadId": thread_id },
+  )
+}
+
+///|
+/// Poll one summary turn instead of the complete history. This is the only
+/// periodic Codex request and runs only while its conversation page is visible.
+fn State::poll_activity(
+  self : State,
+  dispatch : @cmd.Emit[Msg],
+  channel : @interop.ChannelId,
+) -> @cmd.Cmd {
+  guard self.active is Some(active) else { return @cmd.none }
+  CodexActivityReply.request(
+    dispatch,
+    channel,
+    @commands.codex_thread_activity_read,
+    { "threadId": active.id },
+  )
+}
+
+///|
+/// Re-read the selected checkout's current branch and pull request. App-server
+/// `gitInfo` is creation-time metadata; this host operation is the same GitHub
+/// lookup used by OpenSeek's composer and therefore follows branch changes
+/// made during a Codex turn.
+fn State::refresh_git(
+  self : State,
+  dispatch : @cmd.Emit[Msg],
+  channel : @interop.ChannelId,
+) -> @cmd.Cmd {
+  guard self.active is Some(active) && active.cwd is Some(cwd) else {
+    return @cmd.none
+  }
+  let thread_id = active.id
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
-      let _ : Json = @interop.bridge_request(
+      let reply : @protocol.GitPullRequestReply = @interop.bridge_request(
+        channel,
+        @commands.git_pull_request,
+        { session: thread_id, cwd: Some(cwd), branch_hint: active.branch },
+      ) catch {
+        // Git/gh decoration never blocks the conversation. Keep app-server's
+        // captured branch label when the live lookup is unavailable.
+        _ => return
+      }
+      scheduler.add(dispatch(GitLoaded(thread_id~, reply~)))
+    })
+  })
+}
+
+///|
+/// Claim the selected task's writer only when the user intends to append a
+/// turn. A conflicting Codex client leaves the transcript and draft intact.
+fn State::resume_for_send(
+  self : State,
+  dispatch : @cmd.Emit[Msg],
+  channel : @interop.ChannelId,
+) -> @cmd.Cmd {
+  guard self.active is Some(active) else { return @cmd.none }
+  let thread_id = active.id
+  @cmd.custom_cmd(scheduler => {
+    @js.async_run(() => {
+      let value : Json = @interop.bridge_request(
         channel,
         @commands.codex_thread_resume,
         { "threadId": thread_id },
@@ -110,27 +178,12 @@ fn State::open_thread(
           return
         }
       }
-      // Resume subscribes this connection to future item events. A separate
-      // full read is still the authoritative history snapshot and closes the
-      // gap between the stored log and subscription setup.
-      let value : Json = @interop.bridge_request(
-        channel,
-        @commands.codex_thread_read,
-        { "threadId": thread_id, "includeTurns": true },
-      ) catch {
-        error => {
-          scheduler.add(
-            dispatch(
-              Failed(
-                kind=CodexThreadReply,
-                message=@interop.bridge_error_text(error),
-              ),
-            ),
-          )
-          return
-        }
+      if value is Object(fields) &&
+        @jsonx.json_text(fields, "status") is Some("activeWriter") {
+        scheduler.add(dispatch(WriterConflict(thread_id)))
+      } else {
+        scheduler.add(dispatch(WriterAcquired(thread_id)))
       }
-      scheduler.add(dispatch(Reply(kind=CodexThreadReply, value~)))
     })
   })
 }
@@ -143,10 +196,17 @@ fn State::send(
 ) -> @cmd.Cmd {
   guard self.active is Some(active) else { return @cmd.none }
   let text = self.draft.trim().to_owned()
-  guard !text.is_empty() else { return @cmd.none }
+  guard !self.input_empty() else { return @cmd.none }
+  let inputs : Array[Json] = []
+  if !text.is_empty() {
+    inputs.push({ "type": "text", "text": text })
+  }
+  for mention in self.mentions {
+    inputs.push(mention.to_input())
+  }
   let fields : Map[String, Json] = {
-    "threadId": active.id,
-    "input": [{ "type": "text", "text": text }],
+    "threadId": Json::string(active.id),
+    "input": Json::array(inputs),
   }
   if self.active_turn_id() is Some(turn_id) {
     fields["expectedTurnId"] = Json::string(turn_id)
@@ -168,6 +228,98 @@ fn State::send(
       Json::object(fields),
     )
   }
+}
+
+///|
+fn CodexMention::to_input(self : CodexMention) -> Json {
+  match self {
+    CodexFileMention(name~, path~) =>
+      { "type": "mention", "name": name, "path": path }
+    CodexEditorAnnotation(file~, range~, quote~, comment~) =>
+      {
+        "type": "text",
+        "text": @mention_context.encode(
+          [
+            @mention_context.Annotation(
+              file~,
+              start_line=range.start_line_number,
+              end_line=range.end_line_number,
+              quote~,
+              comment~,
+              side=@mention_context.WorkingRevision,
+            ),
+          ],
+          "",
+        ),
+      }
+  }
+}
+
+///|
+fn State::search_files(
+  _self : State,
+  dispatch : @cmd.Emit[Msg],
+  channel : @interop.ChannelId,
+  owner : CodexFileSearchOwner,
+) -> @cmd.Cmd {
+  @cmd.custom_cmd(scheduler => {
+    @js.async_run(() => {
+      let value : Json = @interop.bridge_request(
+        channel,
+        @commands.codex_file_search,
+        { "thread_id": owner.thread_id, "cwd": owner.cwd, "query": owner.query },
+      ) catch {
+        _ => {
+          scheduler.add(dispatch(FilesFailed(owner~)))
+          return
+        }
+      }
+      guard value is Object(fields) &&
+        fields.get("files") is Some(Array(values)) else {
+        scheduler.add(dispatch(FilesFailed(owner~)))
+        return
+      }
+      let items : Array[CodexCompletionItem] = []
+      for value in values {
+        if CodexCompletionItem::decode_file(value) is Some(item) {
+          items.push(item)
+        }
+      }
+      scheduler.add(dispatch(FilesLoaded(owner~, items~)))
+    })
+  })
+}
+
+///|
+fn State::compact(
+  self : State,
+  dispatch : @cmd.Emit[Msg],
+  channel : @interop.ChannelId,
+  original : String,
+) -> @cmd.Cmd {
+  guard self.active is Some(active) else { return @cmd.none }
+  CodexCompactReply(original).request(
+    dispatch,
+    channel,
+    @commands.codex_thread_compact,
+    { "threadId": active.id },
+  )
+}
+
+///|
+fn State::review(
+  self : State,
+  dispatch : @cmd.Emit[Msg],
+  channel : @interop.ChannelId,
+  original : String,
+) -> @cmd.Cmd {
+  guard self.active is Some(active) else { return @cmd.none }
+  CodexReviewReply(original).request(
+    dispatch,
+    channel,
+    @commands.codex_review_start,
+    { "threadId": active.id, "target": { "type": "uncommittedChanges" } },
+  )
 }
 
 ///|

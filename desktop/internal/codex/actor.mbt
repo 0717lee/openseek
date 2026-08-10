@@ -5,13 +5,109 @@
 
 ///|
 pub(all) suberror CodexError {
-  CodexError(String)
+  JsonRpc(method_~ : String, code~ : Int, message~ : String, data~ : Json?)
+  TransportClosed(method_~ : String)
+  RequestFailed(method_~ : String, detail~ : String)
+  Unavailable(String)
+} derive(Debug)
+
+///|
+pub impl Show for CodexError with fn output(self, logger) {
+  match self {
+    JsonRpc(method_~, code~, message~, data~) => {
+      logger.write_string(
+        "Codex app-server request \{method_} failed: JSON-RPC error \{code}: \{message}",
+      )
+      if data is Some(data) {
+        logger.write_string("; data=" + data.stringify())
+      }
+    }
+    TransportClosed(method_~) =>
+      logger.write_string(
+        "Codex app-server request \{method_} failed: transport closed before a reply",
+      )
+    RequestFailed(method_~, detail~) =>
+      logger.write_string(
+        "Codex app-server request \{method_} failed: \{detail}",
+      )
+    Unavailable(message) => logger.write_string(message)
+  }
 }
 
 ///|
-impl Show for CodexError with fn output(self, logger) {
+/// App-server does not currently attach a machine-readable discriminator to
+/// thread-store writer conflicts. Keep the exact compatibility check at the
+/// native boundary so the browser receives only a stable, safe UI state.
+pub fn CodexError::is_active_writer(self : CodexError) -> Bool {
   match self {
-    CodexError(message) => logger.write_string(message)
+    JsonRpc(method_~, code~, message~, data=_) =>
+      method_ == "thread/resume" &&
+      code == -32600 &&
+      message.contains("already has an active writer")
+    _ => false
+  }
+}
+
+///|
+/// A task created by another Codex client can exist in the state database
+/// before its first user message creates a rollout. Summary reads are valid in
+/// that interval, but current app-server builds reject `includeTurns=true`
+/// without a machine-readable error discriminator.
+pub fn CodexError::is_unmaterialized_thread_history(self : CodexError) -> Bool {
+  match self {
+    JsonRpc(method_~, code~, message~, data=_) =>
+      method_ == "thread/read" &&
+      code == -32600 &&
+      message.contains("is not materialized yet") &&
+      message.contains("includeTurns is unavailable before first user message")
+    _ => false
+  }
+}
+
+///|
+/// The same pre-rollout task state also rejects the lightweight activity
+/// endpoint. It is an empty activity snapshot, not a periodic host failure.
+pub fn CodexError::is_unmaterialized_thread_activity(self : CodexError) -> Bool {
+  match self {
+    JsonRpc(method_~, code~, message~, data=_) =>
+      method_ == "thread/turns/list" &&
+      code == -32600 &&
+      message.contains("is not materialized yet") &&
+      message.contains(
+        "thread/turns/list is unavailable before first user message",
+      )
+    _ => false
+  }
+}
+
+///|
+/// Write the structured request failure before Proton applies its production
+/// error-redaction policy. This keeps app-server fields in the Desktop log
+/// without exposing unrelated backend failures to the browser page.
+fn CodexError::log(self : CodexError) -> Unit {
+  match self {
+    JsonRpc(method_~, code~, message~, data~) =>
+      @xlog.error(category="codex") <?
+        {
+          "event": "codex_app_server_jsonrpc_error",
+          "method": method_,
+          "code": code,
+          "error_message": message,
+          "data": data.unwrap_or(Json::null()),
+        }
+    TransportClosed(method_~) =>
+      @xlog.error(category="codex") <?
+        { "event": "codex_app_server_transport_closed", "method": method_ }
+    RequestFailed(method_~, detail~) =>
+      @xlog.error(category="codex") <?
+        {
+          "event": "codex_app_server_request_failed",
+          "method": method_,
+          "error": detail,
+        }
+    Unavailable(message) =>
+      @xlog.warn(category="codex") <?
+        { "event": "codex_app_server_unavailable", "error": message }
   }
 }
 
@@ -24,9 +120,9 @@ priv enum ConnectionState {
 
 ///|
 priv enum ActorInput {
-  Call(String, Json, @async.Queue[Result[Json, String]])
-  Respond(Json, Json, @async.Queue[Result[Json, String]])
-  ListRequests(@async.Queue[Result[Json, String]])
+  Call(String, Json, @async.Queue[Result[Json, CodexError]])
+  Respond(Json, Json, @async.Queue[Result[Json, CodexError]])
+  ListRequests(@async.Queue[Result[Json, CodexError]])
 }
 
 ///|
@@ -98,12 +194,12 @@ pub async fn Actor::call(
   method_~ : String,
   params~ : Json,
 ) -> Json {
-  let reply : @async.Queue[Result[Json, String]] = Queue(kind=Blocking(1))
+  let reply : @async.Queue[Result[Json, CodexError]] = Queue(kind=Blocking(1))
   self.inputs.put(Call(method_, params, reply))
   self.signal()
   match reply.get() {
     Ok(value) => value
-    Err(message) => raise CodexError(message)
+    Err(error) => raise error
   }
 }
 
@@ -116,12 +212,12 @@ pub async fn Actor::respond(
   request_id~ : Json,
   result~ : Json,
 ) -> Json {
-  let reply : @async.Queue[Result[Json, String]] = Queue(kind=Blocking(1))
+  let reply : @async.Queue[Result[Json, CodexError]] = Queue(kind=Blocking(1))
   self.inputs.put(Respond(request_id, result, reply))
   self.signal()
   match reply.get() {
     Ok(value) => value
-    Err(message) => raise CodexError(message)
+    Err(error) => raise error
   }
 }
 
@@ -130,12 +226,12 @@ pub async fn Actor::respond(
 /// this after attaching or reloading so a missed approval event cannot leave a
 /// turn waiting forever with no visible prompt.
 pub async fn Actor::requests(self : Actor) -> Json {
-  let reply : @async.Queue[Result[Json, String]] = Queue(kind=Blocking(1))
+  let reply : @async.Queue[Result[Json, CodexError]] = Queue(kind=Blocking(1))
   self.inputs.put(ListRequests(reply))
   self.signal()
   match reply.get() {
     Ok(value) => value
-    Err(message) => raise CodexError(message)
+    Err(error) => raise error
   }
 }
 
@@ -196,7 +292,7 @@ async fn[G] Actor::run_connection(
     self.state = Unavailable(message)
     emit("codex.status_changed", self.status())
     if pending is Some(input) {
-      input.reject(message)
+      input.reject(Unavailable(message))
     }
     return
   }
@@ -285,10 +381,11 @@ async fn Actor::next_step(
 }
 
 ///|
-fn ActorInput::reject(self : ActorInput, message : String) -> Unit {
+fn ActorInput::reject(self : ActorInput, error : CodexError) -> Unit {
+  error.log()
   match self {
     Call(_, _, reply) | Respond(_, _, reply) | ListRequests(reply) =>
-      (reply.try_put(Err(message)) catch { _ => false }) |> ignore
+      (reply.try_put(Err(error)) catch { _ => false }) |> ignore
   }
 }
 
@@ -317,7 +414,21 @@ fn[G] Connection::dispatch_input(
       group.spawn_bg(allow_failure=true, () => {
         let outcome = try self.request(method_~, params~) catch {
           error if @async.is_being_cancelled() => raise error
-          error => Err("\{error}")
+          @jsonrpc.Failed(code~, message~, data~) => {
+            let error = JsonRpc(method_~, code~, message~, data~)
+            error.log()
+            Err(error)
+          }
+          @jsonrpc.Closed => {
+            let error = TransportClosed(method_~)
+            error.log()
+            Err(error)
+          }
+          error => {
+            let error = RequestFailed(method_~, detail="\{error}")
+            error.log()
+            Err(error)
+          }
         } noraise {
           value => Ok(value)
         }
@@ -326,10 +437,12 @@ fn[G] Connection::dispatch_input(
     Respond(request_id, result, reply) => {
       let key = request_id.stringify()
       guard reverse_requests.get(key) is Some(request) else {
-        (reply.try_put(Err("Unknown or resolved Codex request")) catch {
-          _ => false
-        })
-        |> ignore
+        let error = RequestFailed(
+          method_="serverRequest/respond",
+          detail="Unknown or resolved Codex request",
+        )
+        error.log()
+        (reply.try_put(Err(error)) catch { _ => false }) |> ignore
         return
       }
       reverse_requests.remove(key)
@@ -339,7 +452,14 @@ fn[G] Connection::dispatch_input(
           Ok(Json::empty_object())
         } catch {
           error if @async.is_being_cancelled() => raise error
-          error => Err("\{error}")
+          error => {
+            let error = RequestFailed(
+              method_="serverRequest/respond",
+              detail="\{error}",
+            )
+            error.log()
+            Err(error)
+          }
         }
         (reply.try_put(outcome) catch { _ => false }) |> ignore
       })
@@ -363,7 +483,7 @@ fn[G] Connection::dispatch_input(
 async test "Codex actor consumes a buffered API command before events" {
   let actor = Actor("codex")
   let events : @async.Queue[AppServerEvent] = Queue(kind=Blocking(1))
-  let reply : @async.Queue[Result[Json, String]] = Queue(kind=Blocking(1))
+  let reply : @async.Queue[Result[Json, CodexError]] = Queue(kind=Blocking(1))
   actor.inputs.put(ListRequests(reply))
   let step = actor.next_step(events)
   assert_true(step is Input(ListRequests(_)))
@@ -375,7 +495,7 @@ async test "Codex actor wakes for an API command without racing queue reads" {
     let actor = Actor("codex")
     let events : @async.Queue[AppServerEvent] = Queue(kind=Blocking(1))
     let waiting = group.spawn(() => actor.next_step(events))
-    let reply : @async.Queue[Result[Json, String]] = Queue(kind=Blocking(1))
+    let reply : @async.Queue[Result[Json, CodexError]] = Queue(kind=Blocking(1))
     actor.inputs.put(ListRequests(reply))
     actor.signal()
     assert_true(waiting.wait() is Input(ListRequests(_)))

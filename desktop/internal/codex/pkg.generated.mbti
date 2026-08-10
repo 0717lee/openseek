@@ -4,6 +4,7 @@ package "openseek_desktop/internal/codex"
 import {
   "bobzhang/openseek/jsonrpc",
   "moonbitlang/async",
+  "moonbitlang/core/debug",
 }
 
 // Values
@@ -13,8 +14,15 @@ pub async fn[X] connect(@async.TaskGroup[X], command~ : String, notification_han
 
 // Errors
 pub(all) suberror CodexError {
-  CodexError(String)
-}
+  JsonRpc(method_~ : String, code~ : Int, message~ : String, data~ : Json?)
+  TransportClosed(method_~ : String)
+  RequestFailed(method_~ : String, detail~ : String)
+  Unavailable(String)
+} derive(@debug.Debug)
+pub fn CodexError::is_active_writer(Self) -> Bool
+pub fn CodexError::is_unmaterialized_thread_activity(Self) -> Bool
+pub fn CodexError::is_unmaterialized_thread_history(Self) -> Bool
+pub impl Show for CodexError
 
 // Types and methods
 type Actor
@@ -31,6 +39,10 @@ pub async fn Connection::request(Self, method_~ : String, params~ : Json) -> Jso
 pub async fn Connection::respond(Self, @jsonrpc.PeerRequest, Json) -> Unit
 pub async fn Connection::respond_error(Self, @jsonrpc.PeerRequest, code~ : Int, message~ : String) -> Unit
 pub fn Connection::shutdown(Self) -> Unit
+
+type ProjectCatalog
+pub fn ProjectCatalog::ProjectCatalog() -> Self
+pub async fn ProjectCatalog::annotate(Self, Json) -> Json
 
 type StdioTransport
 pub impl @jsonrpc.Transport for StdioTransport

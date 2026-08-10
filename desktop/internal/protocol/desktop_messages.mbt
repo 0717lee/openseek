@@ -173,10 +173,13 @@ pub(all) struct GitBranchPayload {
 ///|
 /// Address the same working directory as `git.branch` — the pull request is
 /// looked up for whatever branch that directory has checked out, so the two
-/// chips can never describe different branches.
+/// chips can never describe different branches. Codex-managed worktrees are
+/// commonly detached; `branch_hint` is app-server's creation-time branch and
+/// is accepted only when that local branch still points at the current HEAD.
 pub(all) struct GitPullRequestPayload {
   session : String
   cwd : String?
+  branch_hint : String?
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|

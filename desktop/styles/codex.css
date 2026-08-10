@@ -1,65 +1,14 @@
 /* ---------- Codex conversations ---------- */
 /* Codex is another conversation source in the existing navigation, not a
-   second app shell. Its section and rows deliberately reuse the same sidebar
-   geometry as Workspaces / Chats and OpenSeek conversation rows. */
-.codex-sidebar-heading {
-  cursor: pointer;
-  user-select: none;
-}
-
-.codex-sidebar-heading.active {
-  color: var(--accent-ink);
-}
-
-.codex-conversation-row .sidebar-label,
-.codex-placeholder .sidebar-label {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.codex-topbar {
-  min-width: 0;
-}
-
-.codex-topbar-title {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.codex-topbar-source {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  flex: 0 0 auto;
-  color: var(--accent-ink);
-}
-
-.codex-topbar-source .icon {
-  width: 15px;
-  height: 15px;
-}
-
-.codex-topbar-thread {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.codex-status-line {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  min-width: 0;
-  margin-left: auto;
-  color: var(--ink-3);
-  font-size: 11.5px;
-  white-space: nowrap;
-}
+   second app shell. Project and conversation geometry comes from the same
+   root sidebar row renderers as OpenSeek. */
 
 .codex-connection {
   color: var(--accent-ink);
+}
+
+.codex-writer-status {
+  color: var(--del);
 }
 
 .codex-request-actions {
@@ -75,23 +24,6 @@
   font-size: 11.5px;
 }
 
-.codex-notice {
-  padding: 8px 10px;
-  border: 1px solid var(--del);
-  border-radius: var(--radius-sm);
-  background: var(--del-bg);
-  color: var(--ink);
-  font-size: 12px;
-}
-
-.codex-transcript {
-  grid-row: 2;
-}
-
-.codex-activity .activity-summary {
-  cursor: pointer;
-}
-
 .codex-raw {
   max-height: 260px;
   margin: 8px 0 0;
@@ -103,19 +35,6 @@
   font-size: 11px;
   line-height: 1.5;
   white-space: pre-wrap;
-}
-
-.codex-composer {
-  grid-row: 3;
-}
-
-.codex-model-select {
-  width: auto;
-  max-width: 260px;
-  padding: 4px 28px 4px 9px;
-  background-color: transparent;
-  font-size: 11.5px;
-  line-height: 1.4;
 }
 
 .codex-pending {
@@ -194,12 +113,8 @@
     display: none;
   }
 
-  .codex-topbar-title {
-    max-width: 42%;
-  }
-
-  .codex-transcript,
-  .codex-composer {
+  .transcript,
+  .composer {
     padding-left: 12px;
     padding-right: 12px;
   }

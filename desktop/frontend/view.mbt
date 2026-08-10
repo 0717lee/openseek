@@ -607,7 +607,9 @@ fn project_row(
   @sidebar.WorkspaceRow::{
     title: path.path,
     label: @resource.label(path),
-    active: dev.channel == model.focused && dev.active_project == Some(path),
+    active: model.screen is Chat &&
+      dev.channel == model.focused &&
+      dev.active_project == Some(path),
     collapsed,
     toggle: dispatch(ToggleProjectSection(dev.channel, path)),
     menu: Some({
@@ -2553,6 +2555,24 @@ fn view(
           composer_view(dispatch, model)
         },
       ]
+    Codex =>
+      model.codex.page(
+        dispatch.map(msg => Codex(msg)),
+        model.focused,
+        model.sidebar_open,
+        terminal_panel_visible,
+        file_panel_visible,
+        @codex.PageActions::{
+          toggle_sidebar: dispatch(ToggleSidebar),
+          toggle_terminal: dispatch(Terminal(ToggleTerminal)),
+          toggle_files: dispatch(Dock(TogglePanel)),
+          open_file: (path, range, annotation) =>
+            dispatch(JumpToLocation(path~, range~, annotation~)),
+          open_external: url => dispatch(ExternalLinkClicked(url)),
+          workspace_label: workspace => @resource.label(workspace),
+          transcript: transcript_html,
+        },
+      )
     Skills => page_with_toggle(dispatch, model, skills_page(dispatch, model))
     Settings =>
       page_with_toggle(dispatch, model, settings_page(dispatch, model))

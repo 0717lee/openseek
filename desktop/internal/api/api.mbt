@@ -14,6 +14,10 @@ struct ApiState {
   // of the OpenSeek engine actor and owns Codex account/thread state through
   // Codex's own data directory.
   codex : @codex.Actor
+  // App-server returns each thread cwd but not its owning local project. Keep
+  // Git's worktree relationship beside the Codex actor and reuse it across
+  // list/read/start replies instead of making the browser infer path names.
+  codex_projects : @codex.ProjectCatalog
   engine : @engine.EngineActor
   manager : @engine.EngineManager
   host : @host.HostState
@@ -78,6 +82,7 @@ pub fn ApiState::new(
   let engine_actor = @engine.new_engine_actor(engine, runtime_dir?)
   {
     codex: Actor(codex),
+    codex_projects: ProjectCatalog(),
     engine: engine_actor,
     manager: engine_actor.manager(),
     host: @host.new_host_state(engine, runtime_dir?, executable?, app_version~),
@@ -192,6 +197,12 @@ pub fn endpoints(
       }
       state.codex.respond(request_id=payload.request_id, result=payload.result)
     }),
+    @endpoint.Endpoint::remote(@commands.codex_file_search, async fn(params) {
+      let payload : CodexFileSearchPayload = @json.from_json(params) catch {
+        _ => raise @host.PayloadError("malformed Codex file search payload")
+      }
+      state.codex_file_search(payload)
+    }),
     state.codex_endpoint(@commands.codex_account_read),
     state.codex_endpoint(@commands.codex_account_login_start),
     state.codex_endpoint(@commands.codex_account_login_cancel),
@@ -200,10 +211,21 @@ pub fn endpoints(
     state.codex_endpoint(@commands.codex_thread_start),
     state.codex_endpoint(@commands.codex_thread_resume),
     state.codex_endpoint(@commands.codex_thread_read),
+    @endpoint.Endpoint::remote(@commands.codex_thread_history_read, async fn(
+      params,
+    ) {
+      state.codex_thread_history(params)
+    }),
+    @endpoint.Endpoint::remote(@commands.codex_thread_activity_read, async fn(
+      params,
+    ) {
+      state.codex_thread_activity(params)
+    }),
     state.codex_endpoint(@commands.codex_thread_list),
     state.codex_endpoint(@commands.codex_thread_archive),
     state.codex_endpoint(@commands.codex_thread_unarchive),
     state.codex_endpoint(@commands.codex_thread_compact),
+    state.codex_endpoint(@commands.codex_review_start),
     state.codex_endpoint(@commands.codex_turn_start),
     state.codex_endpoint(@commands.codex_turn_steer),
     state.codex_endpoint(@commands.codex_turn_interrupt),
@@ -413,7 +435,10 @@ test "remote endpoint catalog has one entry per command name" {
     }
     names.push(name)
   }
-  assert_eq(names.length(), 72)
+  assert_eq(names.length(), 78)
+  assert_true(names.contains("codex.file.search"))
+  assert_true(names.contains("codex.review.start"))
+  assert_true(names.contains("codex.thread.history.read"))
   assert_true(names.contains("codex.thread.list"))
   assert_true(names.contains("agent.start"))
   assert_true(names.contains("agent.goal"))
@@ -431,6 +456,145 @@ test "remote endpoint catalog has one entry per command name" {
   assert_true(names.contains("moonide.references"))
   assert_false(names.contains("host.connect"))
   assert_false(names.contains("shell.open_external"))
+}
+
+///|
+/// Return one complete read-only thread snapshot across both app-server
+/// history modes. Metadata says which store owns the turns, avoiding an
+/// expected JSON-RPC failure on every paginated task. Legacy threads then take
+/// the stable inline read; a task awaiting its first user message legitimately
+/// has only the summary and is returned as an empty conversation. Paginated
+/// threads load every page in ascending order with full items and rebuild the
+/// same `{ thread }` shape the browser decodes.
+async fn ApiState::codex_thread_history(self : ApiState, params : Json) -> Json {
+  guard params is Object(fields) &&
+    fields.get("threadId") is Some(String(thread_id)) else {
+    raise @host.PayloadError("malformed Codex thread history payload")
+  }
+  let metadata = self.codex_request("codex.thread.read", {
+    "threadId": thread_id,
+    "includeTurns": false,
+  })
+  guard metadata is Object(reply_fields) &&
+    reply_fields.get("thread") is Some(Object(thread_fields)) else {
+    raise @host.PayloadError("malformed Codex thread metadata reply")
+  }
+  let paginated = thread_fields.get("historyMode") is Some(String("paginated"))
+  if !paginated {
+    return try
+      self.codex_request("codex.thread.read", {
+        "threadId": thread_id,
+        "includeTurns": true,
+      })
+    catch {
+      @codex.JsonRpc(..) as error if error.is_unmaterialized_thread_history() =>
+        // The summary already identifies the task and its cwd. The frontend
+        // decodes an omitted `turns` field as an empty transcript, matching
+        // the task's real state before its first prompt is sent.
+        metadata
+      error => raise error
+    } noraise {
+      value => value
+    }
+  }
+  let turns : Array[Json] = []
+  let mut cursor : String? = None
+  for ;; {
+    let page_fields : Map[String, Json] = {
+      "threadId": Json::string(thread_id),
+      "limit": Json::number(100.0),
+      "sortDirection": Json::string("asc"),
+      "itemsView": Json::string("full"),
+    }
+    if cursor is Some(cursor) {
+      page_fields["cursor"] = Json::string(cursor)
+    }
+    let page = self.codex.call(
+      method_="thread/turns/list",
+      params=Json::object(page_fields),
+    )
+    guard page is Object(page_fields) &&
+      page_fields.get("data") is Some(Array(data)) else {
+      raise @host.PayloadError("malformed Codex turn history page")
+    }
+    for turn in data {
+      turns.push(turn)
+    }
+    match page_fields.get("nextCursor") {
+      Some(String(next)) if !next.is_empty() => cursor = Some(next)
+      _ => break
+    }
+  }
+  let thread : Map[String, Json] = Map([])
+  for key, value in thread_fields {
+    thread[key] = value
+  }
+  thread["turns"] = Json::array(turns)
+  let reply : Map[String, Json] = Map([])
+  for key, value in reply_fields {
+    reply[key] = value
+  }
+  reply["thread"] = Json::object(thread)
+  Json::object(reply)
+}
+
+///|
+/// Return only the newest turn for live status reconciliation. Unlike
+/// `thread.status`, which is scoped to one app-server process, persisted turn
+/// timestamps are visible across Codex clients. `itemsView=summary` keeps this
+/// two-second poll bounded even for a multi-day legacy conversation.
+async fn ApiState::codex_thread_activity(
+  self : ApiState,
+  params : Json,
+) -> Json {
+  guard params is Object(fields) &&
+    fields.get("threadId") is Some(String(thread_id)) else {
+    raise @host.PayloadError("malformed Codex thread activity payload")
+  }
+  let page = try
+    self.codex.call(method_="thread/turns/list", params={
+      "threadId": thread_id,
+      "limit": 1,
+      "sortDirection": "desc",
+      "itemsView": "summary",
+    })
+  catch {
+    @codex.JsonRpc(..) as error if error.is_unmaterialized_thread_activity() =>
+      Json::null()
+    error => raise error
+  } noraise {
+    value => value
+  }
+  if page is Null {
+    return { "threadId": thread_id, "turn": Json::null() }
+  }
+  guard page is Object(page_fields) &&
+    page_fields.get("data") is Some(Array(turns)) else {
+    raise @host.PayloadError("malformed Codex thread activity reply")
+  }
+  { "threadId": thread_id, "turn": turns.get(0).unwrap_or(Json::null()) }
+}
+
+///|
+/// Search only the exact cwd authorized by an app-server thread reply. The
+/// public method does not accept app-server `roots` directly, so a remote page
+/// cannot use Codex's file index as an arbitrary filesystem search.
+async fn ApiState::codex_file_search(
+  self : ApiState,
+  payload : CodexFileSearchPayload,
+) -> Json {
+  guard @engine.resolve_in_workspace(
+      payload.thread_id,
+      "",
+      workspace=payload.cwd,
+    )
+    is Some(root) else {
+    raise @host.HostError("Codex workspace is not authorized")
+  }
+  self.codex.call(method_="fuzzyFileSearch", params={
+    "query": payload.query,
+    "roots": [Json::string(root.to_string())],
+  })
 }
 
 ///|
@@ -455,6 +619,7 @@ async fn ApiState::codex_request(
     "codex.thread.archive" => "thread/archive"
     "codex.thread.unarchive" => "thread/unarchive"
     "codex.thread.compact" => "thread/compact/start"
+    "codex.review.start" => "review/start"
     "codex.turn.start" => "turn/start"
     "codex.turn.steer" => "turn/steer"
     "codex.turn.interrupt" => "turn/interrupt"
@@ -490,7 +655,31 @@ async fn ApiState::codex_request(
     ("codex.thread.start", _) => { "serviceName": "openseek_desktop" }
     _ => params
   }
-  let reply = self.codex.call(method_=app_server_method, params=scoped_params)
+  let reply = try
+    self.codex.call(method_=app_server_method, params=scoped_params)
+  catch {
+    @codex.JsonRpc(..) as error if desktop_method == "codex.thread.resume" &&
+      error.is_active_writer() =>
+      // A stored task remains readable while another Codex client owns its
+      // writer. Return a safe state instead of leaking arbitrary RPC details
+      // through Proton's browser boundary.
+      Json::object({ "status": Json::string("activeWriter") })
+    error => raise error
+  } noraise {
+    value => value
+  }
+  if desktop_method == "codex.thread.resume" &&
+    reply is Object(fields) &&
+    fields.get("status") is Some(String("activeWriter")) {
+    return reply
+  }
+  let reply = match desktop_method {
+    "codex.thread.start"
+    | "codex.thread.resume"
+    | "codex.thread.read"
+    | "codex.thread.list" => self.codex_projects.annotate(reply)
+    _ => reply
+  }
   match desktop_method {
     "codex.thread.start" | "codex.thread.resume" | "codex.thread.read" =>
       if CodexWorkspaceBinding::decode_reply(reply) is Some(binding) {

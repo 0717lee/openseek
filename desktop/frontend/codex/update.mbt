@@ -13,17 +13,59 @@ pub fn update(
   match msg {
     Refresh =>
       (state.refresh(dispatch, channel), { ..state, loading: true, notice: "" })
-    DraftChanged(value) => (@cmd.none, { ..state, draft: value })
+    PollActivity => (state.poll_activity(dispatch, channel), state)
+    DraftChanged(value) => state.change_draft(dispatch, channel, value)
+    CompletionMove(delta) =>
+      if state.completion is Some(completion) {
+        (@cmd.none, { ..state, completion: Some(completion.shifted(delta)) })
+      } else {
+        (@cmd.none, state)
+      }
+    CompletionAccept =>
+      if state.completion is Some(completion) &&
+        completion.current() is Some(item) {
+        state.accept_completion(dispatch, channel, item)
+      } else {
+        (@cmd.none, { ..state, completion: None })
+      }
+    CompletionPick(index) =>
+      if state.completion is Some(completion) &&
+        completion.items.get(index) is Some(item) {
+        state.accept_completion(dispatch, channel, item)
+      } else {
+        (@cmd.none, { ..state, completion: None })
+      }
+    CompletionDismiss => (@cmd.none, { ..state, completion: None })
+    RemoveMention(index) => (@cmd.none, state.without_mention(index))
+    FilesLoaded(owner~, items~) => (@cmd.none, state.with_files(owner, items))
+    FilesFailed(owner~) => (@cmd.none, state.with_files(owner, []))
     ModelChanged(value) => (@cmd.none, { ..state, selected_model: value })
+    GitLoaded(thread_id~, reply~) =>
+      (@cmd.none, state.with_git_reply(thread_id, reply))
+    ToggleGitDetails =>
+      (@cmd.none, { ..state, git_details_open: !state.git_details_open })
+    CloseGitDetails => (@cmd.none, state.with_git_details_closed())
     StartThread(cwd) =>
       (
         state.start_thread(dispatch, channel, cwd),
-        { ..state, loading: true, notice: "" },
+        {
+          ..state,
+          git_details_open: false,
+          write_access: CodexNeedsResume,
+          loading: true,
+          notice: "",
+        },
       )
     OpenThread(thread_id) =>
       (
         state.open_thread(dispatch, channel, thread_id),
-        { ..state, loading: true, notice: "" },
+        {
+          ..state,
+          git_details_open: false,
+          write_access: CodexNeedsResume,
+          loading: true,
+          notice: "",
+        },
       )
     ArchiveThread(thread_id) =>
       (
@@ -31,10 +73,41 @@ pub fn update(
         { ..state, loading: true, notice: "" },
       )
     Send =>
-      if state.draft.trim().is_empty() || state.active is None || state.loading {
+      if state.input_empty() || state.active is None || state.loading {
         (@cmd.none, state)
-      } else {
+      } else if state.write_access is CodexWritable {
         (state.send(dispatch, channel), { ..state, loading: true, notice: "" })
+      } else {
+        (
+          state.resume_for_send(dispatch, channel),
+          { ..state, loading: true, notice: "" },
+        )
+      }
+    WriterAcquired(thread_id) =>
+      if state.active is Some(active) && active.id == thread_id {
+        let next = {
+          ..state,
+          write_access: CodexWritable,
+          loading: false,
+          notice: "",
+        }
+        (next.send(dispatch, channel), { ..next, loading: true })
+      } else {
+        (@cmd.none, state)
+      }
+    WriterConflict(thread_id) =>
+      if state.active is Some(active) && active.id == thread_id {
+        (
+          @cmd.none,
+          {
+            ..state,
+            write_access: CodexActiveElsewhere,
+            loading: false,
+            notice: "This Codex task is active in another client. Its history is available here, but sending is read-only until that client releases it.",
+          },
+        )
+      } else {
+        (@cmd.none, state)
       }
     Stop => (state.interrupt(dispatch, channel), state)
     Login =>
@@ -51,7 +124,13 @@ pub fn update(
     Respond(request_key~, decision~) =>
       (state.respond(dispatch, channel, request_key, decision), state)
     Reply(kind~, value~) => {
-      let mut next = { ..state, loading: false }
+      // Activity polling is independent of user commands. Its reply must not
+      // settle a simultaneous send/archive/login request's loading state.
+      let mut next = if kind is CodexActivityReply {
+        state
+      } else {
+        { ..state, loading: false }
+      }
       let mut cmd = @cmd.none
       match kind {
         CodexStatusReply => next = next.with_status(value)
@@ -59,17 +138,36 @@ pub fn update(
         CodexAccountReply => next = next.with_account(value)
         CodexModelsReply => next = next.with_models(value)
         CodexThreadsReply => next = next.with_threads(value)
-        CodexThreadReply => next = next.with_thread_reply(value)
+        CodexThreadReply => {
+          next = next.with_thread_reply(value)
+          next = { ..next, write_access: CodexNeedsResume }
+          cmd = next.refresh_git(dispatch, channel)
+        }
+        CodexActivityReply => {
+          let was_running_elsewhere = next.is_running_elsewhere()
+          next = next.with_activity_reply(value)
+          // Once another client finishes, reload exactly once so its final
+          // messages become visible. Running polls keep only lifecycle fields.
+          if was_running_elsewhere &&
+            !next.is_running() &&
+            next.active is Some(active) {
+            cmd = next.open_thread(dispatch, channel, active.id)
+          }
+        }
         CodexNewThreadReply => {
           next = next.with_thread_reply(value)
-          cmd = CodexThreadsReply.request(
-            dispatch,
-            channel,
-            @commands.codex_thread_list,
-            { "limit": 100, "archived": false },
-          )
+          next = { ..next, write_access: CodexWritable }
+          cmd = @cmd.batch([
+            CodexThreadsReply.request(
+              dispatch,
+              channel,
+              @commands.codex_thread_list,
+              { "limit": 100, "archived": false },
+            ),
+            next.refresh_git(dispatch, channel),
+          ])
         }
-        CodexTurnReply =>
+        CodexTurnReply => {
           // `turn/start` returns a turn while `turn/steer` may return only its
           // id. The notification stream remains the canonical item lifecycle.
           if value is Object(fields) &&
@@ -80,6 +178,8 @@ pub fn update(
           } else {
             next = { ..next, draft: "" }
           }
+          next = { ..next, mentions: [], completion: None }
+        }
         CodexLoginReply => {
           next = next.with_login(value)
           if next.auth_url is Some(url) {
@@ -92,6 +192,12 @@ pub fn update(
           next = next.without_thread(thread_id)
           cmd = next.refresh(dispatch, channel)
         }
+        CodexCompactReply(original) | CodexReviewReply(original) => {
+          if next.draft == original {
+            next = { ..next, draft: "" }
+          }
+          next = { ..next, completion: None }
+        }
         CodexMutationReply => cmd = next.refresh(dispatch, channel)
         CodexApprovalReply =>
           // `serverRequest/resolved` authoritatively removes the request.
@@ -100,6 +206,11 @@ pub fn update(
       (cmd, next)
     }
     Failed(kind~, message~) => {
+      // A status poll is best-effort. Older app-server builds or a transient
+      // read race must not replace a healthy conversation with an error banner.
+      if kind is CodexActivityReply {
+        return (@cmd.none, state)
+      }
       let subject = match kind {
         CodexStatusReply => "Codex status"
         CodexRequestsReply => "Codex requests"
@@ -107,9 +218,12 @@ pub fn update(
         CodexModelsReply => "Codex models"
         CodexThreadsReply => "Codex threads"
         CodexThreadReply | CodexNewThreadReply => "Codex thread"
+        CodexActivityReply => "Codex activity"
         CodexTurnReply => "Codex turn"
         CodexLoginReply => "Codex sign-in"
         CodexArchiveReply(_) => "Codex archive"
+        CodexCompactReply(_) => "Codex compact"
+        CodexReviewReply(_) => "Codex review"
         CodexMutationReply => "Codex action"
         CodexApprovalReply => "Codex response"
       }
@@ -117,6 +231,11 @@ pub fn update(
     }
     StatusChanged(value) => {
       let next = state.with_status(value)
+      let next = if next.connection is CodexReady {
+        next
+      } else {
+        { ..next, write_access: CodexNeedsResume }
+      }
       let cmd = if next.connection is CodexReady {
         match next.active {
           Some(active) =>
@@ -151,6 +270,10 @@ pub fn update(
           @commands.codex_thread_list,
           { "limit": 100, "archived": false },
         )
+      } else if method_ == "turn/completed" {
+        // A turn may check out another branch or create a PR. Refresh the same
+        // compact status chip OpenSeek updates at its run boundary.
+        next.refresh_git(dispatch, channel)
       } else {
         @cmd.none
       }
@@ -186,8 +309,11 @@ test "Codex update handlers are pure and idempotent" {
   }
   let messages : Array[Msg] = [
     Refresh,
+    PollActivity,
     DraftChanged("next draft"),
     ModelChanged("gpt-test"),
+    ToggleGitDetails,
+    CloseGitDetails,
     StartThread("/work/project"),
     OpenThread("thread-1"),
     ArchiveThread("thread-1"),
@@ -216,6 +342,16 @@ test "Codex update handlers are pure and idempotent" {
     Reply(kind=CodexThreadReply, value={
       "thread": { "id": "thread-1", "turns": [] },
     }),
+    Reply(kind=CodexActivityReply, value={
+      "threadId": "thread-1",
+      "turn": {
+        "id": "turn-1",
+        "status": "inProgress",
+        "startedAt": 100,
+        "completedAt": Json::null(),
+        "items": [],
+      },
+    }),
     Reply(kind=CodexNewThreadReply, value={
       "thread": { "id": "thread-2", "turns": [] },
     }),
@@ -230,6 +366,7 @@ test "Codex update handlers are pure and idempotent" {
     Reply(kind=CodexMutationReply, value={}),
     Reply(kind=CodexApprovalReply, value={}),
     Failed(kind=CodexTurnReply, message="test failure"),
+    Failed(kind=CodexActivityReply, message="poll failure"),
     StatusChanged({ "status": "ready" }),
     Notification(method_="thread/name/updated", params={
       "threadId": "thread-1",
@@ -258,4 +395,105 @@ test "Codex update handlers are pure and idempotent" {
     )
     assert_true(once == twice)
   }
+}
+
+///|
+test "Codex activity polling tracks another client's turn" {
+  let dispatch : @cmd.Emit[Msg] = @cmd.Emit(_ => @cmd.none)
+  let state = {
+    ..State::from_thread_snapshot({
+      "thread": {
+        "id": "thread-1",
+        "turns": [
+          {
+            "id": "turn-1",
+            "status": "completed",
+            "startedAt": 80,
+            "completedAt": 90,
+            "items": [],
+          },
+        ],
+      },
+    })
+    // A background poll must not settle an unrelated user operation.
+    ,
+    loading: true,
+  }
+  let (_, running) = update(
+    dispatch,
+    Reply(kind=CodexActivityReply, value={
+      "threadId": "thread-1",
+      "turn": {
+        "id": "turn-2",
+        "status": "interrupted",
+        "startedAt": 100,
+        "completedAt": Json::null(),
+        "items": [],
+      },
+    }),
+    state,
+    @interop.ChannelId::Local,
+    _ => @cmd.none,
+  )
+  assert_true(running.is_running_elsewhere())
+  assert_true(running.loading)
+
+  let (_, completed) = update(
+    dispatch,
+    Reply(kind=CodexActivityReply, value={
+      "threadId": "thread-1",
+      "turn": {
+        "id": "turn-2",
+        "status": "completed",
+        "startedAt": 100,
+        "completedAt": 120,
+        "items": [],
+      },
+    }),
+    running,
+    @interop.ChannelId::Local,
+    _ => @cmd.none,
+  )
+  assert_false(completed.is_running())
+
+  let (_, stale) = update(
+    dispatch,
+    Reply(kind=CodexActivityReply, value={
+      "threadId": "thread-old",
+      "turn": { "id": "turn-stale", "status": "inProgress", "items": [] },
+    }),
+    completed,
+    @interop.ChannelId::Local,
+    _ => @cmd.none,
+  )
+  assert_true(stale == completed)
+}
+
+///|
+test "Codex Git pill opens and closes its details" {
+  let dispatch : @cmd.Emit[Msg] = @cmd.Emit(_ => @cmd.none)
+  let state = State::from_thread_snapshot({
+    "thread": {
+      "id": "thread-1",
+      "cwd": "/work/project",
+      "gitInfo": { "branch": "feature" },
+      "turns": [],
+    },
+  })
+  let (_, opened) = update(
+    dispatch,
+    ToggleGitDetails,
+    state,
+    @interop.ChannelId::Local,
+    _ => @cmd.none,
+  )
+  assert_true(opened.git_details_open())
+  let (_, closed) = update(
+    dispatch,
+    CloseGitDetails,
+    opened,
+    @interop.ChannelId::Local,
+    _ => @cmd.none,
+  )
+  assert_false(closed.git_details_open())
 }

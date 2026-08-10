@@ -314,6 +314,7 @@ pub(all) struct GitPullRequest {
 pub(all) struct GitPullRequestPayload {
   session : String
   cwd : String?
+  branch_hint : String?
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 
 pub(all) struct GitPullRequestReply {

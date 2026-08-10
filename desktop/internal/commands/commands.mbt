@@ -183,6 +183,9 @@ pub let codex_server_request_respond : Command[Json, Json] = Command(
 )
 
 ///|
+pub let codex_file_search : Command[Json, Json] = Command("codex.file.search")
+
+///|
 pub let codex_account_read : Command[Json, Json] = Command("codex.account.read")
 
 ///|
@@ -215,6 +218,21 @@ pub let codex_thread_resume : Command[Json, Json] = Command(
 pub let codex_thread_read : Command[Json, Json] = Command("codex.thread.read")
 
 ///|
+/// Read either legacy inline turns or every page of a paginated Codex history
+/// without resuming the task or acquiring its writer.
+pub let codex_thread_history_read : Command[Json, Json] = Command(
+  "codex.thread.history.read",
+)
+
+///|
+/// Read only the newest turn's lifecycle fields. The Codex page polls this
+/// while visible so another app-server process can start or finish a task
+/// without forcing OpenSeek to reload the complete conversation history.
+pub let codex_thread_activity_read : Command[Json, Json] = Command(
+  "codex.thread.activity.read",
+)
+
+///|
 pub let codex_thread_list : Command[Json, Json] = Command("codex.thread.list")
 
 ///|
@@ -231,6 +249,9 @@ pub let codex_thread_unarchive : Command[Json, Json] = Command(
 pub let codex_thread_compact : Command[Json, Json] = Command(
   "codex.thread.compact",
 )
+
+///|
+pub let codex_review_start : Command[Json, Json] = Command("codex.review.start")
 
 ///|
 pub let codex_turn_start : Command[Json, Json] = Command("codex.turn.start")

@@ -38,25 +38,13 @@ aside {
 
 .sidebar-main {
   display: grid;
-  /* Codex and OpenSeek are peer conversation sources. Independent scroll
-     lanes keep a long catalog from pushing the other source out of view. */
-  grid-template-rows: minmax(96px, 0.42fr) minmax(120px, 0.58fr);
+  /* One scroll lane holds every peer section. Independent folds keep a long
+     source manageable without turning Codex and OpenSeek into nested panes. */
   align-content: start;
-  gap: 14px;
   min-width: 0;
   min-height: 0;
-}
-
-.sidebar-main.codex-empty {
-  grid-template-rows: auto minmax(0, 1fr);
-}
-
-.sidebar-section.sessions,
-.sidebar-section.codex-sessions {
   overflow-y: auto;
   overflow-x: hidden;
-  min-height: 0;
-  align-content: start;
   /* The scroll box spans to the sidebar's edge; the right inset is the
      reserved scrollbar gutter (9px) plus 3px of clearance — 12px in
      total, matching the other sections whether or not the bar shows. */
@@ -140,6 +128,9 @@ aside {
 }
 .conversation-row > .sidebar-label {
   flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .conversation-row:hover {
@@ -228,8 +219,7 @@ aside {
 .section-heading:hover .row-archive {
   visibility: visible;
 }
-/* A foldable section ("Chats"): the heading toggles it, wearing the
-   same textual chevron as the archived group. */
+/* Every peer conversation section uses the same heading disclosure. */
 .section-heading.collapsible {
   cursor: pointer;
   user-select: none;
@@ -239,6 +229,9 @@ aside {
 }
 .section-heading.collapsible.collapsed > .sidebar-label::after {
   content: " ▸";
+}
+.section-heading.active {
+  color: var(--accent-ink);
 }
 
 /* An attached workspace: a folder row whose main disclosure button folds its
@@ -640,6 +633,11 @@ button.row-twisty:hover {
   color: var(--color-accent-strong);
 }
 
+/* Archived rows use the same grid as every other conversation section; only
+   their quieter text and restore action distinguish the store they came from. */
+.conversation-row.archived {
+  color: var(--color-text-muted);
+}
 .sidebar-icon {
   display: grid;
   place-items: center;

@@ -1,6 +1,6 @@
 ///|
-/// Which model a conversation's turns run with. The composer's chip toggles
-/// between the two service tiers; `Other` retains a wire name this build does
+/// Which model a conversation's turns run with. The composer's shared selector
+/// offers the two service tiers; `Other` retains a wire name this build does
 /// not know — a run started with `OPENSEEK_MODEL` set, or a newer engine's
 /// model echoed back by `agent.started` — so the chip reports what the engine
 /// actually ran instead of a tier it never used.
@@ -1234,6 +1234,14 @@ priv struct Model {
   // Projects whose per-window chat preview was expanded through "Show more".
   // The default absence keeps each open project to its five newest chats.
   expanded_project_chats : Array[(@interop.ChannelId, @common.Uri)]
+  // Whether the Codex app-server conversation section is folded. Codex uses
+  // the same page-local disclosure state as the OpenSeek sections; app-server
+  // thread data remains authoritative and is never changed by folding it.
+  codex_collapsed : Bool
+  // Whether archived OpenSeek conversations are folded. Keep this in the
+  // model instead of a DOM-only <details> state so every sidebar section has
+  // the same deterministic Rabbita transition.
+  archived_chats_collapsed : Bool
   // The conversations whose sub-run transcripts are unfolded in the sidebar,
   // as (device, session id) — session ids are only unique within a channel.
   // Sidebar-only view state, held for the window's lifetime and never
@@ -1709,6 +1717,7 @@ priv enum Msg {
   // account, model, and thread catalogs.
   OpenCodex
   CodexNewThread
+  CodexNewThreadIn(String)
   CodexOpenThread(String)
   CodexArchiveThread(String)
   // Codex owns every app-server-local transition; the root only wraps the
@@ -1733,6 +1742,10 @@ priv enum Msg {
   // The project's "Show more" row was clicked — reveal every remaining chat
   // for that project for the rest of this window lifetime.
   ShowMoreProjectChats(@interop.ChannelId, @common.Uri)
+  // The sidebar's "Codex" heading was clicked — fold or unfold the section.
+  ToggleCodexSection
+  // The sidebar's "Archived chats" heading was clicked — fold or unfold it.
+  ToggleArchivedChatsSection
   // A conversation row's disclosure was clicked — show or hide the sub-run
   // transcripts folded under it. The row's own click still opens the session,
   // so the two controls never fight over one gesture.
@@ -2445,6 +2458,8 @@ fn initial_model() -> Model {
     projects_collapsed: false,
     collapsed_projects: [],
     expanded_project_chats: [],
+    codex_collapsed: false,
+    archived_chats_collapsed: true,
     expanded_subruns: [],
     active_session: "",
     loading_conversation: None,

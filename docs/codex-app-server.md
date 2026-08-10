@@ -6,14 +6,21 @@ the main transcript and composer without creating a second nested application
 shell. Codex remains the owner of its account and thread data, separate from
 OpenSeek's existing engine and conversation store.
 
+The sidebar presents Workspaces, Codex, Chats, and Archived chats as peer
+collapsible sections in one scroll lane. Folding a section is page-local view
+state; it never archives, reloads, or otherwise mutates either conversation
+store.
+
 The browser code mirrors that ownership. `desktop/frontend/codex` is a
 standalone MoonBit package containing the Codex state, update function,
-app-server calls, sidebar rows, transcript, approvals, and composer wiring.
-The root `desktop/frontend` package only selects the main screen, combines the
+app-server calls, sidebar rows, approvals, and composer wiring. It converts
+app-server items into the same display-ready transcript items OpenSeek uses;
+the root `desktop/frontend` package renders both through one conversation
+transcript view. The root package also selects the main screen, combines the
 two conversation lists, and supplies shell-owned commands for Sidebar,
 Terminal, Files, and external links. Shared composer layout and SVG icons live
-in `desktop/frontend/composer` and `desktop/frontend/icons`; neither Codex nor
-OpenSeek imports the other frontend package.
+in `desktop/frontend/composer` and `desktop/frontend/icons`; Codex owns no
+second transcript renderer or conversation chrome.
 
 The implementation follows the [official app-server
 protocol](https://learn.chatgpt.com/docs/app-server.md). The native process
@@ -54,6 +61,15 @@ source label; forcing only `appServer` would hide a thread immediately after
 OpenSeek created it. The method sets `useStateDbOnly: true` so a page refresh
 cannot trigger a full JSONL scan-and-repair pass that exceeds the Desktop
 request deadline.
+App-server reports only each thread's exact `cwd`; it does not expose the
+Codex App's project-to-worktree catalog. The native Codex package therefore
+resolves `git worktree list --porcelain` and adds `projectRoot` to thread list,
+start, resume, and read replies. The sidebar groups by that main checkout and
+lists conversations directly beneath it; linked worktrees remain execution
+locations and are not rendered as another navigation level. Existing non-Git
+directories map to themselves, while a missing or deleted cwd is left without
+a project instead of being presented as a project root.
+
 `codex.thread.start` sets `serviceName: "openseek_desktop"` and otherwise
 preserves Codex's configured sandbox and approval defaults.
 

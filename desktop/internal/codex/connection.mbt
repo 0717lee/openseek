@@ -138,16 +138,26 @@ pub async fn[X] connect(
   group.spawn_bg(() => rpc.run_message_pump(), no_wait=true, allow_failure=true)
   group.spawn_bg(() => rpc.run_writer(), no_wait=true, allow_failure=true)
   // Drain stderr independently for the process lifetime. App-server can emit
-  // model-refresh and network diagnostics there; leaving the pipe unread can
-  // fill it and stop protocol progress on stdout.
+  // model-refresh, network, and crash diagnostics there; retain each complete
+  // line in the Desktop JSONL log while keeping the pipe from backpressuring
+  // protocol progress on stdout.
   group.spawn_bg(
     () => {
       for ;; {
-        let chunk = stderr_reader.read_some(max_len=8192) catch {
+        let line = stderr_reader.read_until("\n") catch {
           error if @async.is_being_cancelled() => raise error
-          _ => None
+          error => {
+            @xlog.warn(category="codex") <?
+              {
+                "event": "codex_app_server_stderr_read_failed",
+                "error": "\{error}",
+              }
+            None
+          }
         }
-        guard chunk is Some(_) else { break }
+        guard line is Some(line) else { break }
+        @xlog.debug(category="codex") <?
+          { "event": "codex_app_server_stderr", "line": line }
       }
     },
     no_wait=true,
@@ -168,18 +178,37 @@ pub async fn[X] connect(
         "title": "OpenSeek Desktop",
         "version": version,
       },
+      // Paginated Codex histories are read through `thread/turns/list`. That
+      // method remains experimental in app-server 0.146, so advertise exactly
+      // the capability needed by the Desktop's read-only history fallback.
+      "capabilities": { "experimentalApi": true },
     })
   }) catch {
     error if @async.is_being_cancelled() => {
       teardown()
       raise error
     }
-    _ => {
+    @jsonrpc.Failed(code~, message~, data~) => {
+      JsonRpc(method_="initialize", code~, message~, data~).log()
+      teardown()
+      return None
+    }
+    @jsonrpc.Closed => {
+      TransportClosed(method_="initialize").log()
+      teardown()
+      return None
+    }
+    error => {
+      RequestFailed(method_="initialize", detail="\{error}").log()
       teardown()
       return None
     }
   }
   guard initialized is Some(_) else {
+    RequestFailed(
+      method_="initialize",
+      detail="timed out after \{handshake_timeout_ms} ms",
+    ).log()
     teardown()
     return None
   }

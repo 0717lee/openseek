@@ -5,7 +5,7 @@
 fn State::connection_label(self : State) -> String {
   match self.connection {
     CodexStarting => "Starting Codex…"
-    CodexReady => "Connected"
+    CodexReady => if self.is_running() { "Running" } else { "Connected" }
     CodexUnavailable(message) => message
   }
 }
@@ -25,48 +25,6 @@ fn State::account_label(self : State) -> String {
         Some(plan) => "\{kind} · \{plan}"
         None => kind
       }
-  }
-}
-
-///|
-fn CodexItem::view(self : CodexItem) -> @html.Html {
-  let text = self.text()
-  match self.kind {
-    "userMessage" =>
-      @html.div(class="msg", [
-        @html.div(class="avatar user", "›"),
-        @html.div(class="msg-body", [
-          @html.div(class="msg-role", "you"),
-          @html.div(class="msg-content", text),
-        ]),
-      ])
-    "agentMessage" | "plan" =>
-      @html.div(class="msg", [
-        @html.div(class="avatar agent", [icon(icon_sparkle)]),
-        @html.div(class="msg-body", [
-          @html.div(
-            class="msg-role",
-            if self.kind == "plan" {
-              "Codex plan"
-            } else {
-              "Codex"
-            },
-          ),
-          @html.div(
-            class="msg-content markdown",
-            @markdown.markdown_nodes(text),
-          ),
-        ]),
-      ])
-    _ =>
-      @html.div(class="activity-row", [
-        @html.details(class="activity codex-activity", [
-          @html.summary(class="activity-summary", [
-            @html.span(class="activity-title", self.kind),
-          ]),
-          @html.pre(class="codex-raw", text),
-        ]),
-      ])
   }
 }
 
@@ -249,81 +207,113 @@ fn CodexPendingRequest::view(
 pub(all) struct SidebarActions {
   selected : Bool
   open : @cmd.Cmd
-  new_thread : @cmd.Cmd
+  start_thread : (String) -> @cmd.Cmd
   open_thread : (String) -> @cmd.Cmd
   archive_thread : (String) -> @cmd.Cmd
+  project_label : (String) -> String
+  workspace_row : (String, String, Bool, @cmd.Cmd?) -> @html.Html
+  conversation_row : (String, String, Bool, Bool, @cmd.Cmd, @cmd.Cmd?) -> @html.Html
 }
 
 ///|
-/// Codex conversations live in OpenSeek's one global sidebar. The section
-/// heading opens the Codex main pane, its plus starts a conversation in the
-/// focused workspace, and each row selects or archives one Codex thread.
+/// The native Codex boundary resolves every linked worktree to its main local
+/// checkout. That project root, never the exact thread cwd, is the grouping
+/// identity used by the sidebar.
+priv struct CodexProject(String) derive(Debug, Eq)
+
+///|
+/// Keep the short basename when it is unique. When several project roots share
+/// it, add the parent directory so the sidebar does not show multiple
+/// indistinguishable "openseek" folders; the full path remains the tooltip.
+fn CodexProject::display_label(
+  self : CodexProject,
+  projects : Array[CodexProject],
+  label : (String) -> String,
+) -> String {
+  let short = label(self.0)
+  let duplicate = projects
+    .iter()
+    .any(project => project != self && label(project.0) == short)
+  if !duplicate {
+    return short
+  }
+  let mut end = self.0.length()
+  while end > 0 && self.is_separator(end - 1) {
+    end = end - 1
+  }
+  let mut start = end
+  while start > 0 && !self.is_separator(start - 1) {
+    start = start - 1
+  }
+  let mut parent_end = start
+  while parent_end > 0 && self.is_separator(parent_end - 1) {
+    parent_end = parent_end - 1
+  }
+  if parent_end == 0 {
+    return self.0
+  }
+  let parent = self.0.view(end_offset=parent_end).to_owned()
+  label(parent) + " / " + short
+}
+
+///|
+fn CodexProject::is_separator(self : CodexProject, index : Int) -> Bool {
+  let unit = self.0.code_unit_at(index)
+  unit == 47 || unit == 92 // '/' or '\\'
+}
+
+///|
+/// Codex contributes only its project and conversation rows to OpenSeek's
+/// global sidebar. The root shell owns the shared collapsible section heading,
+/// just as it does for Workspaces, Chats, and Archived chats. Git worktrees are
+/// execution locations, not navigation groups: all conversations belonging to
+/// the same main project appear directly below that one project row.
 pub fn State::sidebar_rows(
   self : State,
-  label : String,
   actions : SidebarActions,
 ) -> Array[@html.Html] {
   let rows : Array[@html.Html] = []
-  rows.push(
-    @html.div(
-      class=if actions.selected {
-        "sidebar-heading section-heading codex-sidebar-heading active"
-      } else {
-        "sidebar-heading section-heading codex-sidebar-heading"
-      },
-      on_click=actions.open,
-      [
-        @html.span(class="sidebar-label", label),
-        @html.button(
-          class="row-archive",
-          type_="button",
-          title="New Codex conversation",
-          disabled=!(self.connection is CodexReady) || self.loading,
-          attrs=@html.Attrs::build().on_click(event => {
-            event.stop_propagation()
-            actions.new_thread
-          }),
-          icon(icon_add),
-        ),
-      ],
-    ),
-  )
+  let projects : Array[CodexProject] = []
   for thread in self.threads {
-    let selected = actions.selected &&
-      self.active.map(item => item.id == thread.id).unwrap_or(false)
-    let running = selected && self.is_running()
-    let trailing : Array[@html.Html] = []
-    if running {
-      trailing.push(@html.span(class="run-dot accent pulse", ""))
-    } else {
-      trailing.push(
-        @html.button(
-          class="row-archive",
-          type_="button",
-          title="Archive Codex conversation",
-          attrs=@html.Attrs::build().on_click(event => {
-            event.stop_propagation()
-            (actions.archive_thread)(thread.id)
-          }),
-          icon(icon_archive),
-        ),
-      )
+    if thread.project_key() is Some(project) && !projects.contains(project) {
+      // Preserve app-server list order: the project containing the newest
+      // visible thread appears first, and threads stay newest-first inside it.
+      projects.push(project)
     }
+  }
+  for project in projects {
+    let active = actions.selected &&
+      self.active
+      .map(thread => {
+        thread.project_root
+        .map(root => CodexProject(root.trim().to_owned()) == project)
+        .unwrap_or(false)
+      })
+      .unwrap_or(false)
     rows.push(
-      @html.div(
-        class=if selected {
-          "conversation-row codex-conversation-row active"
+      (actions.workspace_row)(
+        project.0,
+        project.display_label(projects, actions.project_label),
+        active,
+        if self.can_start_thread() {
+          Some((actions.start_thread)(project.0))
         } else {
-          "conversation-row codex-conversation-row"
+          None
         },
-        title=thread.cwd.unwrap_or(thread.title),
-        on_click=(actions.open_thread)(thread.id),
-        [
-          @html.span(class="sidebar-label", thread.title),
-          @html.span(class="row-trailing", trailing),
-        ],
       ),
     )
+    for thread in self.threads {
+      if thread.project_key() == Some(project) {
+        rows.push(thread.sidebar_row(self, actions))
+      }
+    }
+  }
+  let loose = self.threads.filter(thread => thread.project_key() is None)
+  if !loose.is_empty() {
+    rows.push((actions.workspace_row)("No project", "No project", false, None))
+    for thread in loose {
+      rows.push(thread.sidebar_row(self, actions))
+    }
   }
   if self.threads.is_empty() {
     let empty = match self.connection {
@@ -337,135 +327,330 @@ pub fn State::sidebar_rows(
         }
     }
     rows.push(
-      @html.div(class="conversation-row placeholder codex-placeholder", [
-        @html.span(class="sidebar-label", empty),
-      ]),
+      @html.div(
+        class="conversation-row placeholder codex-placeholder",
+        on_click=actions.open,
+        [@html.span(class="sidebar-label", empty)],
+      ),
     )
   }
   rows
 }
 
 ///|
-fn State::transcript_view(self : State) -> @html.Html {
-  let items : Array[@html.Html] = []
-  if !self.notice.is_empty() {
-    items.push(@html.div(class="codex-notice", self.notice))
-  }
-  match self.active {
-    None =>
-      items.push(
-        @html.div(class="empty", [
-          @html.div(class="empty-badge", [icon(icon_sparkle)]),
-          @html.div(class="empty-title", "Start a Codex thread"),
-          @html.div(
-            class="empty-sub",
-            "Codex uses its own account, conversation history, sandbox, and approvals.",
-          ),
-        ]),
-      )
-    Some(thread) =>
-      for turn in thread.turns {
-        for item in turn.items {
-          items.push(item.view())
-        }
-        if turn.error is Some(message) {
-          items.push(
-            @html.div(class="msg", [
-              @html.div(class="avatar agent", "!"),
-              @html.div(class="msg-body", [
-                @html.div(class="msg-role", "Codex error"),
-                @html.div(class="msg-content danger", message),
-              ]),
-            ]),
-          )
-        }
+/// A missing project root means the thread cwd was absent or its deleted
+/// worktree could no longer be resolved. Keep those records together instead
+/// of promoting an opaque worktree directory into a project row.
+fn CodexThreadRow::project_key(self : CodexThreadRow) -> CodexProject? {
+  match self.project_root {
+    Some(root) => {
+      let project = root.trim().to_owned()
+      if project.is_empty() {
+        None
+      } else {
+        Some(CodexProject(project))
       }
+    }
+    None => None
   }
-  @html.div(class="codex-transcript transcript", [
-    @html.div(class="stream", items),
-  ])
 }
 
 ///|
-fn State::composer_view(self : State, dispatch : @cmd.Emit[Msg]) -> @html.Html {
+/// Supply one Codex task's state and commands to the shell-owned conversation
+/// renderer. Codex does not construct sidebar DOM, so its disclosure slot,
+/// nesting, trailing controls, and active state cannot diverge from OpenSeek.
+fn CodexThreadRow::sidebar_row(
+  self : CodexThreadRow,
+  state : State,
+  actions : SidebarActions,
+) -> @html.Html {
+  let selected = actions.selected &&
+    state.active.map(item => item.id == self.id).unwrap_or(false)
+  let running = selected && state.is_running()
+  (actions.conversation_row)(
+    self.cwd.unwrap_or(self.title),
+    self.title,
+    selected,
+    running,
+    (actions.open_thread)(self.id),
+    if running {
+      None
+    } else {
+      Some((actions.archive_thread)(self.id))
+    },
+  )
+}
+
+///|
+fn CodexMention::chip(
+  self : CodexMention,
+  dispatch : @cmd.Emit[Msg],
+  index : Int,
+  open_file : (String, @common.Range?, String?) -> @cmd.Cmd,
+) -> @html.Html {
+  let (glyph, label, title, jump) = match self {
+    CodexFileMention(name~, path~) =>
+      ("#", name, "Open \{path}", open_file(path, None, None))
+    CodexEditorAnnotation(file~, range~, comment~, ..) =>
+      (
+        "✎",
+        "\{file}:\{range.start_line_number}-\{range.end_line_number}",
+        comment,
+        open_file(file, Some(range), Some(comment)),
+      )
+  }
+  @composer.MentionChip::{
+    glyph,
+    label,
+    title,
+    jump: Some(jump),
+    remove: Some((dispatch(RemoveMention(index)), icon(icon_close))),
+  }.render()
+}
+
+///|
+fn CodexCompletion::view(
+  self : CodexCompletion,
+  dispatch : @cmd.Emit[Msg],
+) -> @html.Html {
+  @composer.CompletionView::{
+    rows: self.items.map(item => @composer.CompletionRow::{
+      label: item.label,
+      detail: item.detail,
+    }),
+    selected: self.selected,
+    hint: match self.kind {
+      CodexCommands => "Commands"
+      CodexFiles => "Files"
+    },
+    empty: if self.loading {
+      "Searching…"
+    } else {
+      "No files"
+    },
+  }.render(index => dispatch(CompletionPick(index)))
+}
+
+///|
+/// Match OpenSeek's CI tint: failed first, then still running, then passed.
+/// A branch without a pull request remains neutral.
+fn CodexGitStatus::tone(self : CodexGitStatus) -> String {
+  guard self.pull_request is Some(pull_request) &&
+    pull_request.checks is Some(checks) else {
+    return "none"
+  }
+  if checks.failed > 0 {
+    "failed"
+  } else if checks.pending > 0 {
+    "pending"
+  } else {
+    "passed"
+  }
+}
+
+///|
+fn CodexGitStatus::label(self : CodexGitStatus) -> String? {
+  if self.pull_request is Some(pull_request) {
+    let suffix = match pull_request.state {
+      "open" => if pull_request.draft { " Draft" } else { "" }
+      "merged" => " Merged"
+      "closed" => " Closed"
+      _ => ""
+    }
+    return Some("#\{pull_request.number}\{suffix}")
+  }
+  self.branch
+}
+
+///|
+fn CodexGitStatus::summary(self : CodexGitStatus) -> String {
+  if self.pull_request is Some(pull_request) {
+    let parts : Array[String] = []
+    if pull_request.checks is Some(checks) {
+      if checks.failed > 0 {
+        parts.push("\{checks.failed} failed")
+      }
+      if checks.pending > 0 {
+        parts.push("\{checks.pending} running")
+      }
+      if checks.passed > 0 {
+        parts.push("\{checks.passed} passed")
+      }
+    }
+    if parts.is_empty() {
+      pull_request.title
+    } else {
+      pull_request.title + " — CI " + parts.join(" · ")
+    }
+  } else {
+    self.branch.map(branch => "On branch " + branch).unwrap_or("")
+  }
+}
+
+///|
+/// Codex and OpenSeek supply different Git state, but the composer draws the
+/// same PR/branch pill and opens the same details surface on every click.
+fn CodexGitStatus::chip(
+  self : CodexGitStatus,
+  dispatch : @cmd.Emit[Msg],
+  open : Bool,
+) -> @html.Html? {
+  guard self.label() is Some(label) && !label.is_empty() else { return None }
+  let opened = if open { " open" } else { "" }
+  let children : Array[@html.Html] = [
+    @composer.GitChip::{
+      tone: self.tone() + opened,
+      title: self.summary(),
+      label,
+      command: dispatch(ToggleGitDetails),
+      content: icon(icon_pull_request),
+    }.render(),
+  ]
+  if open {
+    children.push(self.details())
+  }
+  Some(@html.div(class="composer-git", children))
+}
+
+///|
+/// The Codex Git popover uses the same rows and external-link capture as the
+/// OpenSeek composer. Even a branch without a PR explains that result instead
+/// of accepting a click and doing nothing.
+fn CodexGitStatus::details(self : CodexGitStatus) -> @html.Html {
+  let branch = self.branch.unwrap_or("Unknown")
+  let rows : Array[@html.Html] = [
+    @html.div(class="composer-git-row", [
+      @html.span(class="composer-git-key", "Branch"),
+      @html.span(class="composer-git-value", branch),
+    ]),
+  ]
+  if self.pull_request is Some(pull_request) {
+    let label = self.label().unwrap_or("Pull request")
+    rows.push(@html.div(class="composer-git-rule", @html.nothing))
+    rows.push(
+      @html.a(
+        class="composer-git-link",
+        href=pull_request.url,
+        target=Blank,
+        rel="noopener noreferrer",
+        [
+          @html.span(
+            class="composer-git-glyph \{self.tone()}",
+            icon(icon_pull_request),
+          ),
+          @html.span(class="composer-git-value", label),
+          @html.span(class="composer-git-note", pull_request.title),
+          @html.span(class="composer-git-out", icon(icon_link_external)),
+        ],
+      ),
+    )
+  } else if self.compare_url is Some(url) {
+    rows.push(@html.div(class="composer-git-rule", @html.nothing))
+    rows.push(
+      @html.a(
+        class="composer-git-link",
+        href=url,
+        target=Blank,
+        rel="noopener noreferrer",
+        [
+          @html.span(class="composer-git-glyph none", icon(icon_pull_request)),
+          @html.span(class="composer-git-value", "Create pull request"),
+          @html.span(class="composer-git-out", icon(icon_link_external)),
+        ],
+      ),
+    )
+  } else {
+    rows.push(
+      @html.div(class="composer-git-row", [
+        @html.span(class="composer-git-key", "PR"),
+        @html.span(class="composer-git-value", "No matching pull request"),
+      ]),
+    )
+  }
+  @html.div(class="composer-git-menu", rows)
+}
+
+///|
+fn State::composer_view(
+  self : State,
+  dispatch : @cmd.Emit[Msg],
+  open_file : (String, @common.Range?, String?) -> @cmd.Cmd,
+) -> @html.Html {
   let pending : Array[@html.Html] = []
   for request in self.pending_requests {
     pending.push(request.view(dispatch))
   }
-  let model_options : Array[@html.Html] = []
+  let model_options : Array[@composer.ModelOption] = []
   for model in self.models {
-    model_options.push(
-      @html.option(
-        value=model.id,
-        selected=model.id == self.selected_model,
-        model.label,
-      ),
-    )
+    model_options.push({ value: model.id, label: model.label })
   }
-  let controls : Array[@html.Html] = [
-    @html.div(class="composer-status", [
-      @html.select(
-        class="composer-model codex-model-select",
-        disabled=self.models.is_empty(),
-        on_change=dispatch.map(value => ModelChanged(value)),
-        model_options,
-      ),
-    ]),
+  let status : Array[@html.Html] = [
+    @composer.ModelSelect::{
+      options: model_options,
+      selected: self.selected_model,
+      disabled: self.models.is_empty(),
+      change: dispatch.map(value => ModelChanged(value)),
+      title: "Codex model",
+    }.render(),
   ]
-  if self.is_running() {
-    controls.push(
-      @html.button(
-        id="stop",
-        class="icon-button stop-button",
-        title="Stop Codex",
-        on_click=dispatch(Stop),
-        icon(icon_debug_stop),
-      ),
-    )
-  } else {
-    controls.push(
-      @html.button(
-        id="send",
-        class="icon-button send-button",
-        title="Send to Codex",
-        disabled=self.loading ||
-          self.active is None ||
-          self.draft.trim().is_empty(),
-        on_click=dispatch(Send),
-        icon(icon_arrow_up),
-      ),
-    )
+  if self.git_status is Some(git) &&
+    git.chip(dispatch, self.git_details_open) is Some(chip) {
+    status.push(chip)
   }
-  let empty_mentions : Array[@html.Html] = []
+  let local_turn = self.active_turn_id()
+  let running_elsewhere = self.is_running_elsewhere()
+  let action = if local_turn is Some(_) {
+    @composer.Action::{
+      id: "stop",
+      class_name: "icon-button stop-button",
+      title: "Stop Codex",
+      disabled: false,
+      command: dispatch(Stop),
+      content: icon(icon_debug_stop),
+    }
+  } else {
+    @composer.Action::{
+      id: "send",
+      class_name: "icon-button send-button",
+      title: "Send to Codex",
+      disabled: self.loading ||
+      self.active is None ||
+      self.input_empty() ||
+      running_elsewhere,
+      command: dispatch(Send),
+      content: icon(icon_arrow_up),
+    }
+  }
+  let mention_chips : Array[@html.Html] = []
+  for index, mention in self.mentions {
+    mention_chips.push(mention.chip(dispatch, index, open_file))
+  }
   @composer.View::{
-    class_name: "composer codex-composer",
-    // The request dock is permanent even when empty, so the shared inner card
-    // never changes position when an approval or question arrives.
     before_inner: [@html.div(class="codex-pending", pending)],
-    // Codex has no mention chips yet, but keeps the same stable first child.
-    leading: @html.div(class="mention-tray", empty_mentions),
-    textarea: @html.textarea(
-      id="task",
-      value=self.draft,
-      placeholder=if self.is_running() {
-        "Steer the running task — your message joins it at the next step."
-      } else {
-        "Ask Codex to inspect, edit, or explain this workspace."
-      },
-      disabled=self.active is None || !(self.connection is CodexReady),
-      on_input=dispatch.map(value => DraftChanged(value)),
-      attrs=@html.Attrs::build().on_keydown(fn(event) {
-        if @composer.is_submit_shortcut(event) {
-          event.prevent_default()
-          dispatch(Send)
-        } else {
-          @cmd.none
-        }
-      }),
-      "",
-    ),
-    controls,
-    overlay: None,
+    mentions: mention_chips,
+    value: self.draft,
+    placeholder: if local_turn is Some(_) {
+      "Steer the running task — your message joins it at the next step."
+    } else if running_elsewhere {
+      "This task is running in another Codex client."
+    } else {
+      "Ask Codex to inspect, edit, or explain this workspace."
+    },
+    disabled: self.active is None ||
+    !(self.connection is CodexReady) ||
+    running_elsewhere,
+    input: dispatch.map(value => DraftChanged(value)),
+    keyboard: @composer.KeyboardActions::{
+      menu_open: self.completion is Some(_),
+      navigate: delta => dispatch(CompletionMove(delta)),
+      accept: dispatch(CompletionAccept),
+      dismiss: dispatch(CompletionDismiss),
+      submit: dispatch(Send),
+      cancel: None,
+    },
+    status,
+    action,
+    overlay: self.completion.map(completion => completion.view(dispatch)),
   }.render()
 }
 
@@ -476,8 +661,12 @@ pub(all) struct PageActions {
   toggle_sidebar : @cmd.Cmd
   toggle_terminal : @cmd.Cmd
   toggle_files : @cmd.Cmd
+  open_file : (String, @common.Range?, String?) -> @cmd.Cmd
   open_external : (String) -> @cmd.Cmd
   workspace_label : (@common.Uri) -> String
+  // The root shell supplies the one transcript view shared with OpenSeek.
+  // Codex owns the normalized items, but no parallel message/activity DOM.
+  transcript : @html.Html
 }
 
 ///|
@@ -546,17 +735,10 @@ pub fn State::page(
     .map(thread => thread.cwd.unwrap_or(thread.id))
     .unwrap_or("Codex app-server")
   topbar.push(
-    @html.span(class="topbar-title codex-topbar-title", title=tooltip, [
-      @html.span(class="codex-topbar-source", [
-        icon(icon_sparkle),
-        @html.text("Codex"),
-      ]),
-      if title == "Codex" {
-        @html.nothing
-      } else {
-        @html.span(class="codex-topbar-thread", " · " + title)
-      },
-    ]),
+    // Source selection already lives in the global sidebar. The conversation
+    // title occupies the same topbar slot as an OpenSeek title instead of
+    // growing a second product header inside the shared shell.
+    @html.span(class="topbar-title", title=tooltip, title),
   )
   if workspace is Some(workspace) {
     topbar.push(
@@ -567,15 +749,30 @@ pub fn State::page(
     )
   }
   topbar.push(
-    @html.div(class="codex-status-line", [
-      if self.is_running() {
-        @html.span(class="run-dot accent pulse", "")
-      } else {
-        @html.span(class="run-dot", "")
-      },
-      @html.span(class="codex-connection", self.connection_label()),
-      @html.span(class="codex-account-label", " · " + self.account_label()),
-    ]),
+    @html.div(
+      class=if self.is_running() { "run-status accent" } else { "run-status" },
+      [
+        if self.is_running() {
+          @html.span(class="run-dot accent pulse", "")
+        } else {
+          @html.span(class="run-dot", "")
+        },
+        @html.span(class="run-text", [
+          @html.span(class="codex-connection", self.connection_label()),
+          @html.span(class="codex-account-label", " · " + self.account_label()),
+          if self.write_access is CodexActiveElsewhere ||
+            self.is_running_elsewhere() {
+            @html.span(
+              class="codex-writer-status",
+              title="Another Codex client currently owns this task's writer",
+              " · Read-only: active elsewhere",
+            )
+          } else {
+            @html.nothing
+          },
+        ]),
+      ],
+    ),
   )
   for action in account_actions {
     topbar.push(action)
@@ -612,7 +809,7 @@ pub fn State::page(
   }
   [
     @html.div(class="topbar codex-topbar", topbar),
-    self.transcript_view(),
-    self.composer_view(dispatch),
+    actions.transcript,
+    self.composer_view(dispatch, actions.open_file),
   ]
 }
