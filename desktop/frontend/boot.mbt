@@ -125,7 +125,7 @@ pub fn boot() -> Unit {
       // Init flows through `update` like any other message, as
       // `with_init(dispatch(Init))` did before the 0.13 migration.
       init=emit => (initial_model(), emit(Init)),
-      update=(emit, msg, model) => {
+      update=(model, msg, emit) => {
         let (cmd, next) = update(emit, msg, model)
         (next, cmd)
       },
@@ -134,7 +134,7 @@ pub fn boot() -> Unit {
       // Ctrl+` follows the terminal buttons' existing toggle path. Application
       // command chords use a separate capture subscription because they must
       // beat embedded editors and browser defaults.
-      subscriptions=(emit, model) => {
+      subscriptions=(model, emit) => {
         let subs : Array[@sub.Sub] = [
           @sub.on_resize(
             emit.map(viewport => ViewportResized(width=viewport.width)),

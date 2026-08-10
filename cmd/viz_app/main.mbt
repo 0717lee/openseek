@@ -22,7 +22,7 @@ fn main {
           ]),
         )
       },
-      update=(emit, msg, state) => {
+      update=(state, msg, emit) => {
         let (cmd, model) = update(emit, msg, state)
         (model, cmd)
       },
